@@ -26,17 +26,38 @@ public sealed record KoineModel(IReadOnlyList<ContextNode> Contexts) : KoineNode
 
 /// <summary>
 /// A bounded context — the top-level namespace for a group of types, plus its
-/// behavioral declarations: specifications, domain services, and policies (R10).
+/// behavioral declarations: specifications, domain services, and policies (R10), the
+/// cross-context <see cref="Imports"/> (R13.2), and the names of any modules it declares
+/// (<see cref="ModuleNames"/>, R13.3 — for collision checks; types carry their own
+/// <see cref="TypeDecl.ModulePath"/>).
 /// </summary>
 public sealed record ContextNode(
     string Name,
     IReadOnlyList<TypeDecl> Types,
     IReadOnlyList<SpecDecl> Specs,
     IReadOnlyList<ServiceDecl> Services,
-    IReadOnlyList<PolicyDecl> Policies) : KoineNode;
+    IReadOnlyList<PolicyDecl> Policies,
+    IReadOnlyList<ImportDecl> Imports,
+    IReadOnlyList<string> ModuleNames) : KoineNode;
 
-/// <summary>Base type for the four declarable kinds: value, entity, aggregate, enum.</summary>
-public abstract record TypeDecl(string Name) : KoineNode;
+/// <summary>
+/// An import of cross-context types (R13.2): <c>import Context.{ A, B }</c> (named) or
+/// <c>import Context.*</c> (<see cref="IsWildcard"/>). TARGET-AGNOSTIC.
+/// </summary>
+public sealed record ImportDecl(
+    string Context,
+    IReadOnlyList<string> Names,
+    bool IsWildcard) : KoineNode;
+
+/// <summary>
+/// Base type for the declarable kinds. <see cref="ModulePath"/> is the chain of enclosing
+/// module names (R13.3, empty at context top level); the emitter appends it to the context
+/// namespace.
+/// </summary>
+public abstract record TypeDecl(string Name) : KoineNode
+{
+    public IReadOnlyList<string> ModulePath { get; init; } = Array.Empty<string>();
+}
 
 /// <summary>
 /// A value object: immutable, value-equality, validated by invariants. When
@@ -180,7 +201,8 @@ public sealed record TypeRef(
     string Name,
     TypeRef? Element = null,
     TypeRef? Value = null,
-    bool IsOptional = false) : KoineNode;
+    bool IsOptional = false,
+    string? Qualifier = null) : KoineNode;
 
 /// <summary>
 /// An invariant: a boolean <see cref="Expr"/> that must hold, with an optional

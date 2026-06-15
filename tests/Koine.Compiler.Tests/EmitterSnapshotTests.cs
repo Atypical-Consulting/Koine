@@ -171,4 +171,30 @@ public class EmitterSnapshotTests
         return Verify(TestSupport.Render(result.Files))
             .UseDirectory("Snapshots");
     }
+
+    /// <summary>
+    /// R13: makes the module sub-namespaces/folders, precise cross-module and
+    /// cross-context (import + qualified) usings reviewable in one snapshot.
+    /// </summary>
+    [Fact]
+    public Task R13_fixture_emits_expected_csharp()
+    {
+        const string fixture = """
+            context Billing {
+              enum Currency { EUR, USD }
+              module Pricing  { value Money { amount: Decimal  currency: Currency } }
+              module Invoicing { entity Invoice identified by InvoiceId { total: Money } }
+            }
+            context Sales {
+              import Billing.{ Money }
+              entity Quote identified by QuoteId { price: Money  freight: Billing.Money }
+            }
+            """;
+
+        var result = new KoineCompiler().Compile(fixture, new CSharpEmitter());
+        Assert.True(result.Success, string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        return Verify(TestSupport.Render(result.Files))
+            .UseDirectory("Snapshots");
+    }
 }

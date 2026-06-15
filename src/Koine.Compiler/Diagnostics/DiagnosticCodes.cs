@@ -121,6 +121,13 @@ public static class DiagnosticCodes
     public const string QueryResultNotReadModel = "KOI1206";
     public const string ReservedRecordMember = "KOI1207";
 
+    // ---- Multi-file, imports, modules (KOI1300–1399) ----------------------
+    public const string UnknownContext = "KOI1301";
+    public const string NotExported = "KOI1302";
+    public const string UnimportedReference = "KOI1303";
+    public const string AmbiguousReference = "KOI1304";
+    public const string ModuleNameCollision = "KOI1305";
+
     /// <summary>Every code with a one-line description. Tested for uniqueness/coverage.</summary>
     public static readonly IReadOnlyDictionary<string, string> Catalogue = new Dictionary<string, string>
     {
@@ -207,5 +214,10 @@ public static class DiagnosticCodes
         [DuplicateReadModelField] = "A read model declares the same field name more than once.",
         [QueryResultNotReadModel] = "A query's result type is not a declared read model (or a list of one).",
         [ReservedRecordMember] = "A read-model field, query criterion, or event field collides with a record-synthesized member (Equals/GetHashCode/…).",
+        [UnknownContext] = "An import or qualified reference names a context that is not declared.",
+        [NotExported] = "An import or qualified reference names a type the target context does not declare.",
+        [UnimportedReference] = "A type owned by another context is referenced without importing or qualifying it.",
+        [AmbiguousReference] = "An unqualified name is declared in more than one available context; qualify it.",
+        [ModuleNameCollision] = "A module shares its name with a type in the same context.",
     };
 }

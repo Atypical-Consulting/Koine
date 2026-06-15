@@ -81,10 +81,11 @@ internal sealed class CSharpExpressionTranslator
         IReadOnlyList<Member> members,
         IReadOnlyDictionary<string, string> enumMemberToType,
         IReadOnlyDictionary<string, Expr>? specBodies = null,
-        string? memberReceiver = null)
+        string? memberReceiver = null,
+        string? context = null)
     {
         _index = index;
-        _resolver = new TypeResolver(index);
+        _resolver = new TypeResolver(index, context);
         _scope = TypeScope.FromMembers(members);
         _memberNames = new HashSet<string>(members.Select(m => m.Name), StringComparer.Ordinal);
         _enumMemberToType = enumMemberToType;

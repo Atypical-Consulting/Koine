@@ -45,6 +45,8 @@ USECASE    : 'usecase' ;
 READMODEL  : 'readmodel' ;
 FROM       : 'from' ;
 QUERY      : 'query' ;
+IMPORT     : 'import' ;
+MODULE     : 'module' ;
 WHEN       : 'when' ;
 IF         : 'if' ;
 THEN       : 'then' ;

@@ -57,6 +57,13 @@ internal sealed class CSharpTypeMapper
             case ModelIndex.RangeTypeName:
                 return $"Range<{MapArg(type.Element, ref trailingComment)}>";
             default:
+                // A qualified cross-context reference (R13.2) emits fully-qualified so it
+                // needs no `using` and never collides with a same-named local/imported type.
+                if (type.Qualifier is { } qualifier)
+                {
+                    var ns = _index.NamespaceOfTypeIn(qualifier, type.Name) ?? qualifier;
+                    return ns + "." + type.Name;
+                }
                 // enum / value / entity / aggregate / ID types map to their own C# name.
                 return type.Name;
         }

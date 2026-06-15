@@ -13,15 +13,27 @@ program        : contextDecl* EOF ;
 
 contextDecl    : CONTEXT Identifier LBRACE contextMember* RBRACE ;
 
-// A context holds types plus behavioral declarations (specs, services, policies)
-// and read-side declarations (read models, queries).
-contextMember  : typeDecl
+// A context holds imports, modules, types, behavioral declarations (specs, services,
+// policies), and read-side declarations (read models, queries).
+contextMember  : importDecl
+               | moduleDecl
+               | typeDecl
                | specDecl
                | serviceDecl
                | policyDecl
                | readmodelDecl
                | queryDecl
                ;
+
+// ---- Imports & modules (R13.2 / R13.3) -------------------------------------
+
+// `import Context.{ A, B }` (named) or `import Context.*` (wildcard).
+importDecl     : IMPORT typeName DOT ( LBRACE typeName ( COMMA typeName )* RBRACE | STAR ) ;
+
+// A module groups types into a `<Context>.<Module>` sub-namespace; modules may nest.
+moduleDecl     : MODULE Identifier LBRACE moduleMember* RBRACE ;
+
+moduleMember   : typeDecl | moduleDecl ;
 
 typeDecl       : valueDecl
                | quantityDecl
@@ -155,8 +167,9 @@ eventDecl      : EVENT Identifier LBRACE member* RBRACE ;
 
 member         : softName COLON typeRef ( ASSIGN expression )? ;
 
-// A type reference: `T`, `T?` (optional), `List<T>`, `Set<T>`, `Map<K,V>`.
-typeRef        : typeName ( LT typeRef ( COMMA typeRef )? GT )? QUESTION? ;
+// A type reference: `T`, `T?` (optional), `List<T>`, `Set<T>`, `Map<K,V>`, and a
+// dotted cross-context qualifier `Context.T` (R13.2).
+typeRef        : ( typeName DOT )? typeName ( LT typeRef ( COMMA typeRef )? GT )? QUESTION? ;
 
 // Soft keywords. A MEMBER NAME (declared, accessed via `.`, or a lambda
 // parameter) may be (almost) any keyword — its position is unambiguous. A bare
@@ -167,7 +180,7 @@ typeRef        : typeName ( LT typeRef ( COMMA typeRef )? GT )? QUESTION? ;
 softName       : Identifier | declKeyword | WHEN | IF | THEN | ELSE ;
 exprName       : Identifier | declKeyword | WHEN ;
 typeName       : Identifier | declKeyword ;
-declKeyword    : CONTEXT | VALUE | QUANTITY | ENTITY | AGGREGATE | ENUM | IDENTIFIED | BY | ROOT | COMMAND | REQUIRES | EVENT | EMIT | STATES | CREATE | SPEC | ON | SERVICE | OPERATION | POLICY | AS | NATURAL | SEQUENCE | GUID | VERSIONED | REPOSITORY | OPERATIONS | FIND | USECASE | READMODEL | FROM | QUERY ;
+declKeyword    : CONTEXT | VALUE | QUANTITY | ENTITY | AGGREGATE | ENUM | IDENTIFIED | BY | ROOT | COMMAND | REQUIRES | EVENT | EMIT | STATES | CREATE | SPEC | ON | SERVICE | OPERATION | POLICY | AS | NATURAL | SEQUENCE | GUID | VERSIONED | REPOSITORY | OPERATIONS | FIND | USECASE | READMODEL | FROM | QUERY | IMPORT | MODULE ;
 
 invariant      : INVARIANT expression StringLiteral? ;
 

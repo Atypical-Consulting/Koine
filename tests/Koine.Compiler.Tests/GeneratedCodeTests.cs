@@ -175,12 +175,16 @@ public class GeneratedCodeTests
     [Fact]
     public void Cross_context_reference_compiles()
     {
-        // A value object referencing a type from another context needs that namespace imported.
+        // A value object referencing a type from another context imports it (R13.2); the
+        // emitted C# carries a precise `using Shared;`.
         const string src =
             "context Shared {\n  value Money { amount: Decimal }\n}\n" +
-            "context Sales {\n  value Quote { price: Money }\n}\n";
+            "context Sales {\n  import Shared.{ Money }\n  value Quote { price: Money }\n}\n";
         var result = new KoineCompiler().Compile(src, new CSharpEmitter());
         Assert.True(result.Success, string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var quote = result.Files.Single(f => f.RelativePath == "Sales/Quote.cs").Contents;
+        Assert.Contains("using Shared;", quote);
 
         var (asm, errors) = TestSupport.Compile(result.Files);
         Assert.True(asm is not null, "generated C# failed to compile:\n" + string.Join("\n", errors));

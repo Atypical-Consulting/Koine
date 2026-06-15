@@ -345,7 +345,7 @@ internal sealed class ExpressionChecker
                 Report(DiagnosticCodes.UnknownStringOperation, $"unknown string operation '{op}'", ma);
             else if (IsCollection(target))
                 Report(DiagnosticCodes.UnknownCollectionOperation, $"unknown collection operation '{op}'", ma);
-            else if (_resolver.IsUserType(target) && !_index.TryGetMemberType(target.Name, op, out _))
+            else if (_resolver.IsUserType(target) && !_index.TryGetMemberType(target.Qualifier ?? _resolver.Context, target.Name, op, out _))
                 Report(DiagnosticCodes.UnknownMember,
                     $"unknown member '{op}' on type '{target.Name}'{Suggestions.For(op, _index.MemberNames(target.Name))}", ma);
             else if (_index.Classify(target.Name) == TypeKind.Primitive)
@@ -571,5 +571,5 @@ internal sealed class ExpressionChecker
     }
 
     private void Report(string code, string message, KoineNode node) =>
-        _diagnostics.Add(Diagnostic.Error(code, message, node.Span.Line, node.Span.Column));
+        _diagnostics.Add(Diagnostic.Error(code, message, node.Span));
 }
