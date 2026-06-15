@@ -17,6 +17,9 @@ public sealed class WorkspaceIndex
 
     public WorkspaceIndex(IReadOnlyDictionary<string, string> documents)
     {
+        // Re-parses every document eagerly. A fresh index is built per hover/definition
+        // request today — fine at human (on-demand) speed; TODO: cache per (uri, content)
+        // if this is ever wired to a per-keystroke feature.
         var compiler = new KoineCompiler();
         foreach (var (uri, text) in documents)
         {
