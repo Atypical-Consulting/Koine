@@ -35,9 +35,13 @@ public sealed class CSharpEmitter : IEmitter
     private IReadOnlyDictionary<string, (IdentityStrategy Strategy, string? Backing)> _idStrategies =
         new Dictionary<string, (IdentityStrategy, string?)>();
 
+    // The model index, used by Assemble to compute precise cross-namespace usings (R13.2/R13.3).
+    private ModelIndex _index = null!;
+
     public IReadOnlyList<EmittedFile> Emit(KoineModel model)
     {
         var index = new ModelIndex(model);
+        _index = index;
         var typeMapper = new CSharpTypeMapper(index);
         var enumMemberToType = BuildEnumMemberMap(model);
         _scalarNeeds = BuildScalarOperatorNeeds(model, index);
@@ -69,28 +73,30 @@ public sealed class CSharpEmitter : IEmitter
 
             foreach (var type in ctx.Types)
             {
+                // A type emits into its context namespace, extended by its module path (R13.3).
+                var ns = ModelIndex.NamespaceOf(ctx.Name, type.ModulePath);
                 switch (type)
                 {
                     case ValueObjectDecl vo:
-                        files.Add(EmitValueObject(vo, ctx.Name, index, typeMapper, enumMemberToType));
+                        files.Add(EmitValueObject(vo, ns, index, typeMapper, enumMemberToType));
                         break;
                     case EntityDecl entity:
-                        EmitEntityAndId(files, entity, ctx.Name, isRoot: false, isVersioned: false, index, typeMapper, enumMemberToType);
+                        EmitEntityAndId(files, entity, ns, isRoot: false, isVersioned: false, index, typeMapper, enumMemberToType);
                         break;
                     case EnumDecl @enum:
-                        files.Add(EmitEnum(@enum, ctx.Name, index, typeMapper, enumMemberToType));
+                        files.Add(EmitEnum(@enum, ns, index, typeMapper, enumMemberToType));
                         break;
                     case EventDecl @event:
-                        files.Add(EmitEvent(@event, ctx.Name, index, typeMapper, enumMemberToType));
+                        files.Add(EmitEvent(@event, ns, index, typeMapper, enumMemberToType));
                         break;
                     case AggregateDecl agg:
-                        EmitAggregate(files, agg, ctx.Name, index, typeMapper, enumMemberToType);
+                        EmitAggregate(files, agg, ns, index, typeMapper, enumMemberToType);
                         break;
                     case ReadModelDecl rm:
-                        files.Add(EmitReadModel(rm, ctx.Name, index, typeMapper, enumMemberToType));
+                        files.Add(EmitReadModel(rm, ns, index, typeMapper, enumMemberToType));
                         break;
                     case QueryDecl query:
-                        files.Add(EmitQuery(query, ctx.Name, typeMapper));
+                        files.Add(EmitQuery(query, ns, typeMapper));
                         break;
                 }
             }
@@ -279,8 +285,13 @@ public sealed class CSharpEmitter : IEmitter
         WriteXmlDoc(sb, "Transactional boundary over this context's aggregate repositories.", "");
         sb.Append("public interface IUnitOfWork\n{\n");
         foreach (var agg in aggregates)
-            sb.Append(Indent).Append('I').Append(agg.RootName).Append("Repository ")
-              .Append(Pluralize(agg.RootName)).Append(" { get; }\n");
+        {
+            // The repository lives in the aggregate's namespace; when that is a module
+            // sub-namespace (R13.3), fully-qualify it so the base-namespace UoW resolves it.
+            var aggNs = ModelIndex.NamespaceOf(ContextOf(ns), agg.ModulePath);
+            var repo = aggNs == ns ? $"I{agg.RootName}Repository" : $"{aggNs}.I{agg.RootName}Repository";
+            sb.Append(Indent).Append(repo).Append(' ').Append(Pluralize(agg.RootName)).Append(" { get; }\n");
+        }
         sb.Append('\n');
         sb.Append(Indent).Append("Task<int> SaveChangesAsync(CancellationToken ct = default);\n");
         sb.Append("}\n");
@@ -328,8 +339,11 @@ public sealed class CSharpEmitter : IEmitter
         CSharpTypeMapper typeMapper,
         IReadOnlyDictionary<string, string> enumMemberToType)
     {
-        var sourceMembers = ReadModelSourceMembers(rm.SourceType, index);
-        var translator = new CSharpExpressionTranslator(index, sourceMembers, enumMemberToType, memberReceiver: "src");
+        // A read model emits into the base context namespace, so `ns` is the context used
+        // to resolve its source (R13.2) when a type name is shared across contexts.
+        var context = ContextOf(ns);
+        var sourceMembers = ReadModelSourceMembers(context, rm.SourceType, index);
+        var translator = new CSharpExpressionTranslator(index, sourceMembers, enumMemberToType, memberReceiver: "src", context: context);
 
         var fields = new List<(string CsType, string Prop, string Rhs)>();
         foreach (var f in rm.Fields)
@@ -339,7 +353,7 @@ public sealed class CSharpEmitter : IEmitter
             if (f.Projection is null)
             {
                 // Direct field: type and value come from the like-named source member.
-                csType = index.TryGetMemberType(rm.SourceType, f.Name, out var t) ? typeMapper.Map(t) : "object";
+                csType = index.TryGetMemberType(context, rm.SourceType, f.Name, out var t) ? typeMapper.Map(t) : "object";
                 rhs = $"src.{prop}";
             }
             else
@@ -372,9 +386,9 @@ public sealed class CSharpEmitter : IEmitter
     /// The members a read model projects from (entities add the synthetic <c>id</c>, unless
     /// the entity already declares its own <c>id</c> member).
     /// </summary>
-    private static IReadOnlyList<Member> ReadModelSourceMembers(string sourceType, ModelIndex index)
+    private static IReadOnlyList<Member> ReadModelSourceMembers(string context, string sourceType, ModelIndex index)
     {
-        if (!index.TryGetDecl(sourceType, out var decl))
+        if (!index.TryGetDeclIn(context, sourceType, out var decl) && !index.TryGetDecl(sourceType, out decl))
             return Array.Empty<Member>();
         return decl switch
         {
@@ -448,7 +462,7 @@ public sealed class CSharpEmitter : IEmitter
         IReadOnlyDictionary<string, string> enumMemberToType)
     {
         var memberNames = new HashSet<string>(vo.Members.Select(m => m.Name), StringComparer.Ordinal);
-        var translator = new CSharpExpressionTranslator(index, vo.Members, enumMemberToType, SpecBodiesFor(vo.Name, index));
+        var translator = new CSharpExpressionTranslator(index, vo.Members, enumMemberToType, SpecBodiesFor(vo.Name, index), context: ContextOf(ns));
 
         var ctorParams = vo.Members.Where(m => !MemberAnalysis.IsDerived(m, memberNames)).ToList();
         var derived = vo.Members.Where(m => MemberAnalysis.IsDerived(m, memberNames)).ToList();
@@ -999,9 +1013,10 @@ public sealed class CSharpEmitter : IEmitter
         IReadOnlyDictionary<string, string> enumMemberToType)
     {
         files.Add(EmitEntity(entity, ns, isRoot, isVersioned, index, typeMapper, enumMemberToType));
-        // The entity's own ID value object lives in the same namespace, generated per
-        // its declared identity strategy (R11.1).
-        files.Add(EmitIdValueObject(entity.IdentityName, ns, entity.IdStrategy, entity.IdBackingType));
+        // The entity's ID value object lives in the context BASE namespace (R13.3) — not a
+        // module sub-namespace — so any module's types can reference it via one `using`.
+        // For a non-module entity the base namespace equals its own, so output is unchanged.
+        files.Add(EmitIdValueObject(entity.IdentityName, ContextOf(ns), entity.IdStrategy, entity.IdBackingType));
     }
 
     private EmittedFile EmitEntity(
@@ -1019,7 +1034,7 @@ public sealed class CSharpEmitter : IEmitter
         var scopeMembers = entity.Members
             .Append(new Member("id", new TypeRef(entity.IdentityName), null))
             .ToList();
-        var translator = new CSharpExpressionTranslator(index, scopeMembers, enumMemberToType, SpecBodiesFor(entity.Name, index));
+        var translator = new CSharpExpressionTranslator(index, scopeMembers, enumMemberToType, SpecBodiesFor(entity.Name, index), context: ContextOf(ns));
 
         var sb = new StringBuilder();
 
@@ -1321,7 +1336,7 @@ public sealed class CSharpEmitter : IEmitter
         IReadOnlyDictionary<string, string> enumMemberToType)
     {
         var memberNames = new HashSet<string>(ev.Members.Select(m => m.Name), StringComparer.Ordinal);
-        var translator = new CSharpExpressionTranslator(index, ev.Members, enumMemberToType);
+        var translator = new CSharpExpressionTranslator(index, ev.Members, enumMemberToType, context: ContextOf(ns));
         var ctorMembers = ev.Members.Where(m => !MemberAnalysis.IsDerived(m, memberNames)).ToList();
         var derived = ev.Members.Where(m => MemberAnalysis.IsDerived(m, memberNames)).ToList();
 
@@ -1384,10 +1399,10 @@ public sealed class CSharpEmitter : IEmitter
     private static bool SpecBodiesUseLinq(string typeName, ModelIndex index) =>
         index.SpecsFor(typeName).Values.Any(s => ExprUsesLinq(s.Condition));
 
-    /// <summary>The members in scope for a spec on <paramref name="typeName"/> (entities add a synthetic <c>id</c>).</summary>
-    private static IReadOnlyList<Member> SpecTargetMembers(string typeName, ModelIndex index)
+    /// <summary>The members in scope for a spec on <paramref name="typeName"/> (entities add a synthetic <c>id</c>), resolved in <paramref name="context"/> when shared across contexts.</summary>
+    private static IReadOnlyList<Member> SpecTargetMembers(string typeName, ModelIndex index, string? context = null)
     {
-        if (!index.TryGetDecl(typeName, out var decl))
+        if (!(context is not null && index.TryGetDeclIn(context, typeName, out var decl)) && !index.TryGetDecl(typeName, out decl))
             return Array.Empty<Member>();
         return decl switch
         {
@@ -1417,9 +1432,9 @@ public sealed class CSharpEmitter : IEmitter
         var usesLinq = false;
         foreach (var spec in specs)
         {
-            var members = SpecTargetMembers(spec.TargetType, index);
+            var members = SpecTargetMembers(spec.TargetType, index, ContextOf(ns));
             var translator = new CSharpExpressionTranslator(
-                index, members, enumMemberToType, SpecBodiesFor(spec.TargetType, index), memberReceiver: "x");
+                index, members, enumMemberToType, SpecBodiesFor(spec.TargetType, index), memberReceiver: "x", context: ContextOf(ns));
             var body = translator.TranslateTopLevel(spec.Condition, CSharpExpressionTranslator.NameMode.Property);
 
             if (!first) sb.Append('\n');
@@ -1452,7 +1467,7 @@ public sealed class CSharpEmitter : IEmitter
         WriteXmlDoc(sb, svc.Doc ?? "A stateless domain service.", "");
         sb.Append("public ").Append(isAbstract ? "abstract" : "sealed").Append(" class ").Append(svc.Name).Append("\n{\n");
 
-        var translator = new CSharpExpressionTranslator(index, Array.Empty<Member>(), enumMemberToType);
+        var translator = new CSharpExpressionTranslator(index, Array.Empty<Member>(), enumMemberToType, context: ContextOf(ns));
         var first = true;
         foreach (var op in svc.Operations)
         {
@@ -1506,7 +1521,7 @@ public sealed class CSharpEmitter : IEmitter
         var eventMembers = index.TryGetDecl(policy.EventName, out var ed) && ed is EventDecl ev
             ? ev.Members
             : Array.Empty<Member>();
-        var translator = new CSharpExpressionTranslator(index, eventMembers, enumMemberToType, memberReceiver: "e");
+        var translator = new CSharpExpressionTranslator(index, eventMembers, enumMemberToType, memberReceiver: "e", context: ContextOf(ns));
         var r = policy.Reaction;
         var argText = string.Join(", ", r.Args.Select(a =>
             $"{a.Parameter}: {translator.TranslateTopLevel(a.Value, CSharpExpressionTranslator.NameMode.Property)}"));
@@ -2265,13 +2280,14 @@ public sealed class CSharpEmitter : IEmitter
                  || body.Contains("IDomainEvent") || body.Contains("DomainInvariantViolationException")
                  || body.Contains("Range<")), "Koine.Runtime");
 
-        // Other contexts are separate namespaces. Foreign-context types are emitted
-        // unqualified, so the import must always be present for a cross-context
-        // reference to resolve; an unused one is silenced by the <auto-generated/> header.
-        // The context-agnostic runtime files never reference user contexts.
-        if (ns != "Koine.Runtime")
-            foreach (var other in _contextNames)
-                Need(other != ns, other);
+        // Cross-namespace user-type references (other contexts via imports, and other
+        // modules of the same context) emit unqualified, so a precise `using` is added for
+        // each referenced type's namespace (R13.2/R13.3). Qualified refs emit fully-qualified
+        // and need none. The runtime files never reference user types.
+        var context = ns.Split('.')[0];
+        if (_contextNames.Contains(context))
+            foreach (var (name, typeNs) in _index.VisibleTypeNamespaces(context))
+                Need(typeNs != ns && ContainsWord(body, name), typeNs);
 
         var sb = new StringBuilder();
         sb.Append("// <auto-generated/>\n");
@@ -2286,6 +2302,24 @@ public sealed class CSharpEmitter : IEmitter
         sb.Append(body);
         return sb.ToString();
     }
+
+    /// <summary>True when <paramref name="word"/> appears in <paramref name="text"/> as a whole identifier (not a substring).</summary>
+    private static bool ContainsWord(string text, string word)
+    {
+        var i = 0;
+        while ((i = text.IndexOf(word, i, StringComparison.Ordinal)) >= 0)
+        {
+            var before = i == 0 || !IsIdentChar(text[i - 1]);
+            var afterIdx = i + word.Length;
+            var after = afterIdx >= text.Length || !IsIdentChar(text[afterIdx]);
+            if (before && after)
+                return true;
+            i = afterIdx;
+        }
+        return false;
+    }
+
+    private static bool IsIdentChar(char c) => char.IsLetterOrDigit(c) || c == '_';
 
     // System and System.* sort before everything else, mirroring the default
     // "System directives first" using-ordering.
@@ -2364,6 +2398,13 @@ public sealed class CSharpEmitter : IEmitter
 
     /// <summary>Maps a namespace to its emit folder path.</summary>
     private static string FolderFor(string ns) => ns.Replace('.', '/');
+
+    /// <summary>The bounded context owning a namespace (its first segment); the resolution scope for R13.2.</summary>
+    private static string ContextOf(string ns)
+    {
+        var dot = ns.IndexOf('.');
+        return dot < 0 ? ns : ns[..dot];
+    }
 
     // ----------------------------------------------------------------------
     // ID ownership

@@ -12,12 +12,18 @@ namespace Koine.Compiler.Parsing;
 public sealed class KoineModelBuilderVisitor : KoineParserBaseVisitor<object?>
 {
     private readonly CommonTokenStream? _tokens;
+    private readonly string? _file;
 
     /// <param name="tokens">
     /// The token stream the parse tree came from, used to attach preceding
     /// <c>///</c> doc comments to declarations. May be <c>null</c> (docs ignored).
     /// </param>
-    public KoineModelBuilderVisitor(CommonTokenStream? tokens = null) => _tokens = tokens;
+    /// <param name="file">The originating source file, stamped onto every node's span (R13.1).</param>
+    public KoineModelBuilderVisitor(CommonTokenStream? tokens = null, string? file = null)
+    {
+        _tokens = tokens;
+        _file = file;
+    }
 
     /// <summary>Builds the semantic model from a parsed program.</summary>
     public KoineModel BuildModel(KoineParser.ProgramContext context)
@@ -39,6 +45,8 @@ public sealed class KoineModelBuilderVisitor : KoineParserBaseVisitor<object?>
         var specs = new List<SpecDecl>();
         var services = new List<ServiceDecl>();
         var policies = new List<PolicyDecl>();
+        var imports = new List<ImportDecl>();
+        var moduleNames = new List<string>();
 
         foreach (var member in ctx.contextMember())
         {
@@ -48,14 +56,56 @@ public sealed class KoineModelBuilderVisitor : KoineParserBaseVisitor<object?>
             else if (member.policyDecl() is { } p) policies.Add(BuildPolicy(p));
             else if (member.readmodelDecl() is { } rm) types.Add(BuildReadModel(rm));
             else if (member.queryDecl() is { } q) types.Add(BuildQuery(q));
+            else if (member.importDecl() is { } i) imports.Add(BuildImport(i));
+            else if (member.moduleDecl() is { } m) FlattenModule(m, Array.Empty<string>(), types, moduleNames);
         }
 
-        return new ContextNode(ctx.Identifier().GetText(), types, specs, services, policies)
+        return new ContextNode(ctx.Identifier().GetText(), types, specs, services, policies, imports, moduleNames)
         {
             Span = SpanOf(ctx),
             Doc = DocFor(ctx)
         };
     }
+
+    private ImportDecl BuildImport(KoineParser.ImportDeclContext ctx)
+    {
+        var names = ctx.typeName();
+        var isWildcard = ctx.STAR() is not null;
+        var imported = isWildcard
+            ? new List<string>()
+            : names.Skip(1).Select(t => t.GetText()).ToList();
+        return new ImportDecl(names[0].GetText(), imported, isWildcard) { Span = SpanOf(ctx) };
+    }
+
+    /// <summary>
+    /// Flattens a (possibly nested) module's types into the context's type list, stamping
+    /// each with its module path, and records the module names for collision checks (R13.3).
+    /// </summary>
+    private void FlattenModule(
+        KoineParser.ModuleDeclContext ctx, IReadOnlyList<string> parentPath,
+        List<TypeDecl> types, List<string> moduleNames)
+    {
+        var name = ctx.Identifier().GetText();
+        moduleNames.Add(name);
+        var path = parentPath.Append(name).ToList();
+
+        foreach (var member in ctx.moduleMember())
+        {
+            if (member.typeDecl() is { } t) types.Add(WithModulePath(BuildTypeDecl(t), path));
+            else if (member.moduleDecl() is { } nested) FlattenModule(nested, path, types, moduleNames);
+        }
+    }
+
+    /// <summary>Stamps a module path onto a declaration (and recursively onto an aggregate's nested types).</summary>
+    private static TypeDecl WithModulePath(TypeDecl decl, IReadOnlyList<string> path) => decl switch
+    {
+        AggregateDecl agg => agg with
+        {
+            ModulePath = path,
+            Types = agg.Types.Select(n => WithModulePath(n, path)).ToList()
+        },
+        _ => decl with { ModulePath = path }
+    };
 
     private SpecDecl BuildSpec(KoineParser.SpecDeclContext ctx) =>
         new(ctx.Identifier().GetText(), ctx.typeName().GetText(), BuildExpression(ctx.expression()))
@@ -210,7 +260,7 @@ public sealed class KoineModelBuilderVisitor : KoineParserBaseVisitor<object?>
     }
 
     /// <summary>Reads the optional <c>as guid|sequence|natural(T)</c> identity strategy (R11.1).</summary>
-    private static (IdentityStrategy Strategy, string? Backing) BuildIdentityStrategy(
+    private (IdentityStrategy Strategy, string? Backing) BuildIdentityStrategy(
         KoineParser.IdentityStrategyContext? ctx)
     {
         if (ctx is null || ctx.GUID() is not null)
@@ -221,13 +271,13 @@ public sealed class KoineModelBuilderVisitor : KoineParserBaseVisitor<object?>
         return (IdentityStrategy.Natural, ctx.typeName().GetText());
     }
 
-    private static StatesDecl BuildStates(KoineParser.StatesDeclContext ctx)
+    private StatesDecl BuildStates(KoineParser.StatesDeclContext ctx)
     {
         var rules = ctx.stateRule().Select(BuildStateRule).ToList();
         return new StatesDecl(ctx.softName().GetText(), rules) { Span = SpanOf(ctx) };
     }
 
-    private static StateRule BuildStateRule(KoineParser.StateRuleContext ctx)
+    private StateRule BuildStateRule(KoineParser.StateRuleContext ctx)
     {
         var ids = ctx.Identifier();
         var from = ids[0].GetText();
@@ -250,7 +300,7 @@ public sealed class KoineModelBuilderVisitor : KoineParserBaseVisitor<object?>
         };
     }
 
-    private static Param BuildParam(KoineParser.ParamContext ctx) =>
+    private Param BuildParam(KoineParser.ParamContext ctx) =>
         new(ctx.softName().GetText(), BuildTypeRef(ctx.typeRef())) { Span = SpanOf(ctx) };
 
     private FactoryDecl BuildFactory(KoineParser.FactoryDeclContext ctx)
@@ -267,7 +317,7 @@ public sealed class KoineModelBuilderVisitor : KoineParserBaseVisitor<object?>
         };
     }
 
-    private static CommandStmt BuildFactoryStmt(KoineParser.FactoryStmtContext ctx)
+    private CommandStmt BuildFactoryStmt(KoineParser.FactoryStmtContext ctx)
     {
         if (ctx.requiresClause() is { } req)
         {
@@ -293,7 +343,7 @@ public sealed class KoineModelBuilderVisitor : KoineParserBaseVisitor<object?>
         };
     }
 
-    private static CommandStmt BuildCommandStmt(KoineParser.CommandStmtContext ctx)
+    private CommandStmt BuildCommandStmt(KoineParser.CommandStmtContext ctx)
     {
         if (ctx.requiresClause() is { } req)
         {
@@ -351,7 +401,7 @@ public sealed class KoineModelBuilderVisitor : KoineParserBaseVisitor<object?>
         return new RepositoryDecl(operations, finders) { Span = SpanOf(ctx) };
     }
 
-    private static FinderDecl BuildFinder(KoineParser.FinderDeclContext ctx)
+    private FinderDecl BuildFinder(KoineParser.FinderDeclContext ctx)
     {
         var parameters = ctx.paramList() is { } pl
             ? pl.param().Select(BuildParam).ToList()
@@ -445,19 +495,26 @@ public sealed class KoineModelBuilderVisitor : KoineParserBaseVisitor<object?>
         return -1;
     }
 
-    private static string StripDocPrefix(string text)
+    private string StripDocPrefix(string text)
     {
         var body = text.Length >= 3 ? text[3..] : string.Empty; // drop leading "///"
         return body.StartsWith(' ') ? body[1..].TrimEnd() : body.TrimEnd();
     }
 
-    private static TypeRef BuildTypeRef(KoineParser.TypeRefContext ctx)
+    private TypeRef BuildTypeRef(KoineParser.TypeRefContext ctx)
     {
         var args = ctx.typeRef();
         var element = args.Length > 0 ? BuildTypeRef(args[0]) : null;
         var value = args.Length > 1 ? BuildTypeRef(args[1]) : null;
         var isOptional = ctx.QUESTION() is not null;
-        return new TypeRef(ctx.typeName().GetText(), element, value, isOptional) { Span = SpanOf(ctx) };
+
+        // `(typeName DOT)? typeName`: a leading qualifier names the owning context (R13.2).
+        var names = ctx.typeName();
+        var hasQualifier = names.Length == 2;
+        var qualifier = hasQualifier ? names[0].GetText() : null;
+        var name = names[hasQualifier ? 1 : 0].GetText();
+
+        return new TypeRef(name, element, value, isOptional, qualifier) { Span = SpanOf(ctx) };
     }
 
     private Invariant BuildInvariant(KoineParser.InvariantContext ctx)
@@ -474,10 +531,10 @@ public sealed class KoineModelBuilderVisitor : KoineParserBaseVisitor<object?>
     // Expressions
     // ------------------------------------------------------------------------
 
-    private static Expr BuildExpression(KoineParser.ExpressionContext ctx) =>
+    private Expr BuildExpression(KoineParser.ExpressionContext ctx) =>
         BuildGuard(ctx.guardExpr());
 
-    private static Expr BuildGuard(KoineParser.GuardExprContext ctx)
+    private Expr BuildGuard(KoineParser.GuardExprContext ctx)
     {
         var body = BuildCond(ctx.condExpr(0));
 
@@ -488,7 +545,7 @@ public sealed class KoineModelBuilderVisitor : KoineParserBaseVisitor<object?>
         return new GuardExpr(body, condition) { Span = SpanOf(ctx) };
     }
 
-    private static Expr BuildCond(KoineParser.CondExprContext ctx)
+    private Expr BuildCond(KoineParser.CondExprContext ctx)
     {
         if (ctx.IF() is null)
             return BuildCoalesce(ctx.coalesceExpr());
@@ -499,7 +556,7 @@ public sealed class KoineModelBuilderVisitor : KoineParserBaseVisitor<object?>
         return new ConditionalExpr(condition, then, @else) { Span = SpanOf(ctx) };
     }
 
-    private static Expr BuildCoalesce(KoineParser.CoalesceExprContext ctx)
+    private Expr BuildCoalesce(KoineParser.CoalesceExprContext ctx)
     {
         var operands = ctx.orExpr();
         var result = BuildOr(operands[0]);
@@ -510,7 +567,7 @@ public sealed class KoineModelBuilderVisitor : KoineParserBaseVisitor<object?>
         return result;
     }
 
-    private static Expr BuildOr(KoineParser.OrExprContext ctx)
+    private Expr BuildOr(KoineParser.OrExprContext ctx)
     {
         var operands = ctx.andExpr();
         var result = BuildAnd(operands[0]);
@@ -524,7 +581,7 @@ public sealed class KoineModelBuilderVisitor : KoineParserBaseVisitor<object?>
         return result;
     }
 
-    private static Expr BuildAnd(KoineParser.AndExprContext ctx)
+    private Expr BuildAnd(KoineParser.AndExprContext ctx)
     {
         var operands = ctx.equalityExpr();
         var result = BuildEquality(operands[0]);
@@ -538,7 +595,7 @@ public sealed class KoineModelBuilderVisitor : KoineParserBaseVisitor<object?>
         return result;
     }
 
-    private static Expr BuildEquality(KoineParser.EqualityExprContext ctx)
+    private Expr BuildEquality(KoineParser.EqualityExprContext ctx)
     {
         var operands = ctx.relationalExpr();
         var result = BuildRelational(operands[0]);
@@ -553,7 +610,7 @@ public sealed class KoineModelBuilderVisitor : KoineParserBaseVisitor<object?>
         return result;
     }
 
-    private static Expr BuildRelational(KoineParser.RelationalExprContext ctx)
+    private Expr BuildRelational(KoineParser.RelationalExprContext ctx)
     {
         var operands = ctx.matchExpr();
         var result = BuildMatch(operands[0]);
@@ -568,7 +625,7 @@ public sealed class KoineModelBuilderVisitor : KoineParserBaseVisitor<object?>
         return result;
     }
 
-    private static Expr BuildMatch(KoineParser.MatchExprContext ctx)
+    private Expr BuildMatch(KoineParser.MatchExprContext ctx)
     {
         var target = BuildAdditive(ctx.additiveExpr());
 
@@ -579,7 +636,7 @@ public sealed class KoineModelBuilderVisitor : KoineParserBaseVisitor<object?>
         return new MatchExpr(target, pattern) { Span = SpanOf(ctx) };
     }
 
-    private static Expr BuildAdditive(KoineParser.AdditiveExprContext ctx)
+    private Expr BuildAdditive(KoineParser.AdditiveExprContext ctx)
     {
         var operands = ctx.multiplicativeExpr();
         var result = BuildMultiplicative(operands[0]);
@@ -594,7 +651,7 @@ public sealed class KoineModelBuilderVisitor : KoineParserBaseVisitor<object?>
         return result;
     }
 
-    private static Expr BuildMultiplicative(KoineParser.MultiplicativeExprContext ctx)
+    private Expr BuildMultiplicative(KoineParser.MultiplicativeExprContext ctx)
     {
         var operands = ctx.unaryExpr();
         var result = BuildUnary(operands[0]);
@@ -609,7 +666,7 @@ public sealed class KoineModelBuilderVisitor : KoineParserBaseVisitor<object?>
         return result;
     }
 
-    private static Expr BuildUnary(KoineParser.UnaryExprContext ctx)
+    private Expr BuildUnary(KoineParser.UnaryExprContext ctx)
     {
         if (ctx.NOT() is not null)
             return new UnaryExpr(UnaryOp.Not, BuildUnary(ctx.unaryExpr())) { Span = SpanOf(ctx) };
@@ -620,7 +677,7 @@ public sealed class KoineModelBuilderVisitor : KoineParserBaseVisitor<object?>
         return BuildPostfix(ctx.postfixExpr());
     }
 
-    private static Expr BuildPostfix(KoineParser.PostfixExprContext ctx)
+    private Expr BuildPostfix(KoineParser.PostfixExprContext ctx)
     {
         var result = BuildPrimary(ctx.primary());
 
@@ -656,21 +713,21 @@ public sealed class KoineModelBuilderVisitor : KoineParserBaseVisitor<object?>
         return result;
     }
 
-    private static IReadOnlyList<Expr> BuildArgList(KoineParser.ArgListContext ctx) =>
+    private IReadOnlyList<Expr> BuildArgList(KoineParser.ArgListContext ctx) =>
         ctx.argument().Select(BuildArgument).ToList();
 
-    private static Expr BuildArgument(KoineParser.ArgumentContext ctx) =>
+    private Expr BuildArgument(KoineParser.ArgumentContext ctx) =>
         ctx.lambda() is { } lambda
             ? BuildLambda(lambda)
             : BuildExpression(ctx.expression());
 
-    private static Expr BuildLambda(KoineParser.LambdaContext ctx) =>
+    private Expr BuildLambda(KoineParser.LambdaContext ctx) =>
         new LambdaExpr(ctx.softName().GetText(), BuildExpression(ctx.expression()))
         {
             Span = SpanOf(ctx)
         };
 
-    private static Expr BuildPrimary(KoineParser.PrimaryContext ctx)
+    private Expr BuildPrimary(KoineParser.PrimaryContext ctx)
     {
         if (ctx.literal() is { } literal)
             return BuildLiteral(literal);
@@ -682,7 +739,7 @@ public sealed class KoineModelBuilderVisitor : KoineParserBaseVisitor<object?>
         return BuildExpression(ctx.expression());
     }
 
-    private static Expr BuildLiteral(KoineParser.LiteralContext ctx)
+    private Expr BuildLiteral(KoineParser.LiteralContext ctx)
     {
         if (ctx.IntLiteral() is { } intLit)
             return new LiteralExpr(LiteralKind.Int, intLit.GetText()) { Span = SpanOf(ctx) };
@@ -702,14 +759,14 @@ public sealed class KoineModelBuilderVisitor : KoineParserBaseVisitor<object?>
     // Helpers
     // ------------------------------------------------------------------------
 
-    private static SourceSpan SpanOf(ParserRuleContext ctx) =>
-        new(ctx.Start.Line, ctx.Start.Column + 1);
+    private SourceSpan SpanOf(ParserRuleContext ctx) =>
+        new(ctx.Start.Line, ctx.Start.Column + 1, _file);
 
     /// <summary>
     /// Picks the n-th binary operator (0-based) among a rule's child terminals,
     /// mapping its source text to the corresponding <see cref="BinaryOp"/>.
     /// </summary>
-    private static BinaryOp OperatorAt(ParserRuleContext ctx, int index)
+    private BinaryOp OperatorAt(ParserRuleContext ctx, int index)
     {
         var seen = 0;
         for (var i = 0; i < ctx.ChildCount; i++)
@@ -726,7 +783,7 @@ public sealed class KoineModelBuilderVisitor : KoineParserBaseVisitor<object?>
         throw new InvalidOperationException($"No binary operator at index {index}.");
     }
 
-    private static bool TryMapOperator(string text, out BinaryOp op)
+    private bool TryMapOperator(string text, out BinaryOp op)
     {
         switch (text)
         {
@@ -746,10 +803,10 @@ public sealed class KoineModelBuilderVisitor : KoineParserBaseVisitor<object?>
         }
     }
 
-    private static string StripQuotes(string text) =>
+    private string StripQuotes(string text) =>
         text.Length >= 2 ? text[1..^1] : text;
 
-    private static string StripSlashes(string text) =>
+    private string StripSlashes(string text) =>
         text.Length >= 2 ? text[1..^1] : text;
 
     /// <summary>
@@ -757,7 +814,7 @@ public sealed class KoineModelBuilderVisitor : KoineParserBaseVisitor<object?>
     /// in a single left-to-right pass. Recognizes <c>\" \\ \n \t \r \0 \b \f \v</c>;
     /// any other escape is passed through with its character (e.g. <c>\d</c> -> <c>d</c>).
     /// </summary>
-    private static string UnescapeString(string text)
+    private string UnescapeString(string text)
     {
         if (text.IndexOf('\\') < 0)
             return text;

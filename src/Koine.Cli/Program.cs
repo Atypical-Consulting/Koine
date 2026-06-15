@@ -79,7 +79,7 @@ internal static class Program
         }
 
         if (file is null)
-            return UsageError("build requires a <file.koi> argument");
+            return UsageError("build requires a <file.koi> or directory argument");
 
         IEmitter emitter = target.ToLowerInvariant() switch
         {
@@ -90,10 +90,11 @@ internal static class Program
         if (emitter is null)
             return UsageError($"unsupported target '{target}' (supported: csharp, glossary)");
 
-        string source;
+        // A path may be a single .koi file or a directory of them (compiled as one model).
+        List<SourceFile> sources;
         try
         {
-            source = File.ReadAllText(file);
+            sources = ReadSources(file);
         }
         catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException)
         {
@@ -106,8 +107,14 @@ internal static class Program
             return 1;
         }
 
+        if (sources.Count == 0)
+        {
+            Console.Error.WriteLine($"error: no .koi files found under '{file}'");
+            return 1;
+        }
+
         var compiler = new KoineCompiler();
-        var result = compiler.Compile(source, emitter);
+        var result = compiler.Compile(sources, emitter);
 
         var hasError = false;
         foreach (var diag in result.Diagnostics)
@@ -116,7 +123,7 @@ internal static class Program
                 hasError = true;
             // MSBuild/Roslyn-parseable: file:line:col: severity CODE: message
             var severity = diag.Severity.ToString().ToLowerInvariant();
-            Console.Error.WriteLine($"{file}:{diag.Line}:{diag.Column}: {severity} {diag.Code}: {diag.Message}");
+            Console.Error.WriteLine($"{diag.File ?? file}:{diag.Line}:{diag.Column}: {severity} {diag.Code}: {diag.Message}");
         }
 
         if (hasError)
@@ -168,6 +175,21 @@ internal static class Program
         return 0;
     }
 
+    /// <summary>
+    /// Reads the source unit(s) for a build path: a single <c>.koi</c> file, or every
+    /// <c>.koi</c> under a directory (recursively, in a deterministic order) — R13.1.
+    /// </summary>
+    private static List<SourceFile> ReadSources(string path)
+    {
+        if (Directory.Exists(path))
+            return Directory.EnumerateFiles(path, "*.koi", SearchOption.AllDirectories)
+                .OrderBy(p => p, StringComparer.Ordinal)
+                .Select(p => new SourceFile(p, File.ReadAllText(p)))
+                .ToList();
+
+        return new List<SourceFile> { new(path, File.ReadAllText(path)) };
+    }
+
     private static int UsageError(string message)
     {
         Console.Error.WriteLine($"error: {message}");
@@ -183,7 +205,7 @@ internal static class Program
         writer.WriteLine();
         writer.WriteLine("Usage:");
         writer.WriteLine("  koine --version");
-        writer.WriteLine("  koine build <file.koi> [--target csharp|glossary] [--out <dir>] [--glossary <file.md>]");
+        writer.WriteLine("  koine build <file.koi|dir> [--target csharp|glossary] [--out <dir>] [--glossary <file.md>]");
         writer.WriteLine("  koine lsp                       # Language Server (stdio) for editor diagnostics");
         return 0;
     }

@@ -172,7 +172,7 @@ this lets a regex literal be read as a single token without colliding with the `
 - **Soft keywords.** Most Koine keywords (`context`, `value`, `quantity`, `entity`, `aggregate`, `enum`,
   `by`, `root`, `command`, `create`, `spec`, `on`, `service`, `operation`, `policy`, `as`, `natural`,
   `sequence`, `guid`, `versioned`, `repository`, `operations`, `find`, `usecase`, `readmodel`, `from`,
-  `query`, `when`, `if`, …) may now
+  `query`, `import`, `module`, `when`, `if`, …) may now
   be used as field names, and the declaration keywords additionally as type names and in expressions. The
   mode-switching `matches` and the `invariant` keyword remain reserved; the keywords are *not* usable in the
   few hard-`Identifier` positions (a type/command/state/enum-member name). Like `->`, the factory-initialization
@@ -209,6 +209,12 @@ this lets a regex literal be read as a single token without colliding with the `
   `ToM(this Src src)` projection mapper (direct fields map straight through; `total: Int = lines.count` style
   fields translate via the expression sublanguage). A `query Q(criteria): List<M>` emits a criteria DTO record
   handled through the generic `IQueryHandler<TQuery,TResult>` runtime interface.
+- **Multi-file, imports & modules.** `koine build ./domain` compiles every `.koi` under a directory into one
+  model — contexts of the same name across files are open/additive and merge; each diagnostic names its own
+  source file. A context references another's types deliberately, via `import Billing.{ Money }` /
+  `import Billing.*` or a fully-qualified `Billing.Money`; an un-imported or ambiguous cross-context reference
+  is a coded error, and the emitter adds a precise `using` only for namespaces actually referenced. A
+  `module Pricing { … }` (nestable) groups types into a `<Context>.<Module>` sub-namespace and folder.
 
 ---
 

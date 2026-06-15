@@ -51,7 +51,14 @@ public sealed class TypeResolver
 
     private readonly ModelIndex _index;
 
-    public TypeResolver(ModelIndex index) => _index = index;
+    /// <summary>The context this resolver reasons within (R13.2), so a type name shared across contexts resolves locally; null = global.</summary>
+    public string? Context { get; }
+
+    public TypeResolver(ModelIndex index, string? context = null)
+    {
+        _index = index;
+        Context = context;
+    }
 
     public static bool IsNumeric(TypeRef? t) => t is not null && t.Name is "Int" or "Decimal";
 
@@ -163,9 +170,10 @@ public sealed class TypeResolver
         if (op is "isEmpty" or "isNotEmpty") return Bool;
         if (op is "isPresent" or "isNone") return Bool;
 
-        // Otherwise a field access on a value/entity type.
+        // Otherwise a field access on a value/entity type — resolved in the receiver's
+        // qualifier context, else this resolver's context (R13.2).
         var target = Infer(ma.Target, scope);
-        if (target is not null && _index.TryGetMemberType(target.Name, op, out var mt))
+        if (target is not null && _index.TryGetMemberType(target.Qualifier ?? Context, target.Name, op, out var mt))
             return mt;
         return null;
     }

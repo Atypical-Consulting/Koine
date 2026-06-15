@@ -48,6 +48,18 @@ public sealed class ModelIndex
 
     private readonly Dictionary<string, TypeDecl> _byName = new(StringComparer.Ordinal);
     private readonly HashSet<string> _idTypeNames = new(StringComparer.Ordinal);
+
+    // Per-context resolution (R13.2/R13.3). _declaringContexts: a simple type name -> the
+    // contexts that declare it (>1 means it's cross-context ambiguous unless qualified).
+    // _namespaceByContextType: context -> (type name -> the C# namespace it emits into).
+    private readonly HashSet<string> _contextNames = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, List<string>> _declaringContexts = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, Dictionary<string, string>> _namespaceByContextType = new(StringComparer.Ordinal);
+    // context -> (type name -> its declaration), for context-aware member resolution when
+    // the same simple name is declared in more than one context (R13.2).
+    private readonly Dictionary<string, Dictionary<string, TypeDecl>> _declsByContext = new(StringComparer.Ordinal);
+    // context -> (imported type name -> the context(s) that name was imported from).
+    private readonly Dictionary<string, Dictionary<string, List<string>>> _importsByContext = new(StringComparer.Ordinal);
     private readonly Dictionary<string, string> _enumMemberToType = new(StringComparer.Ordinal);
     private readonly Dictionary<string, List<string>> _enumMembersByName = new(StringComparer.Ordinal);
     // Specs keyed by target type name, then spec name (R10.1). v0 flat resolution.
@@ -82,6 +94,52 @@ public sealed class ModelIndex
             foreach (var t in ctx.Types)
                 IndexType(t);
 
+        // 1b. Per-context indexing for namespace computation and cross-context
+        //     resolution (R13.2/R13.3): which context owns each type, and the full
+        //     namespace (context + module path) it emits into.
+        foreach (var ctx in model.Contexts)
+        {
+            _contextNames.Add(ctx.Name);
+            var nsByType = new Dictionary<string, string>(StringComparer.Ordinal);
+            var declsByType = new Dictionary<string, TypeDecl>(StringComparer.Ordinal);
+            foreach (var t in FlattenTypes(ctx))
+            {
+                var ns = NamespaceOf(ctx.Name, t.ModulePath);
+                nsByType[t.Name] = ns;
+                declsByType[t.Name] = t;
+                if (!_declaringContexts.TryGetValue(t.Name, out var owners))
+                    _declaringContexts[t.Name] = owners = new List<string>();
+                if (!owners.Contains(ctx.Name))
+                    owners.Add(ctx.Name);
+            }
+            _namespaceByContextType[ctx.Name] = nsByType;
+            _declsByContext[ctx.Name] = declsByType;
+        }
+
+        // 1c. Resolve each context's imports to (name -> owning context(s)). A name
+        //     imported from two contexts is ambiguous when used unqualified (R13.2).
+        //     Unknown contexts / non-exported names are skipped here (the validator reports them).
+        foreach (var ctx in model.Contexts)
+        {
+            var imported = new Dictionary<string, List<string>>(StringComparer.Ordinal);
+            foreach (var imp in ctx.Imports)
+            {
+                if (!_namespaceByContextType.TryGetValue(imp.Context, out var theirTypes))
+                    continue;
+                var names = imp.IsWildcard ? theirTypes.Keys : (IEnumerable<string>)imp.Names;
+                foreach (var name in names)
+                {
+                    if (!theirTypes.ContainsKey(name))
+                        continue;
+                    if (!imported.TryGetValue(name, out var owners))
+                        imported[name] = owners = new List<string>();
+                    if (!owners.Contains(imp.Context))
+                        owners.Add(imp.Context);
+                }
+            }
+            _importsByContext[ctx.Name] = imported;
+        }
+
         // 2. Collect ID-value-object names from `identified by` clauses…
         foreach (var decl in AllTypes())
             if (decl is EntityDecl e)
@@ -102,6 +160,24 @@ public sealed class ModelIndex
                     foreach (var spec in agg.Specs) IndexSpec(spec);
         }
 
+        // 3c. Register each context's ID value objects (emitted into its BASE namespace,
+        //     R13.3) so a module-namespaced type that references an ID gets a precise using.
+        foreach (var ctx in model.Contexts)
+        {
+            if (!_namespaceByContextType.TryGetValue(ctx.Name, out var nsByType))
+                continue;
+            void NoteId(string name)
+            {
+                if ((_idTypeNames.Contains(name) || IsIdConvention(name)) && !nsByType.ContainsKey(name))
+                    nsByType[name] = ctx.Name;
+            }
+            foreach (var t in FlattenTypes(ctx))
+                if (t is EntityDecl e)
+                    NoteId(e.IdentityName);
+            foreach (var tr in AllTypeRefsIn(ctx))
+                NoteIdNamesIn(tr, NoteId);
+        }
+
         // 4. Index enum members so bare members (e.g. `Draft`) resolve to a type.
         //    Track ALL owning enums per member so shared names can be disambiguated.
         foreach (var decl in AllTypes())
@@ -117,16 +193,48 @@ public sealed class ModelIndex
     }
 
     /// <summary>
-    /// Resolves the declared type of a member on a named value/entity type.
-    /// Returns <c>false</c> for primitives, collections, unknown types, or unknown
-    /// members. The synthetic entity member <c>id</c> resolves to its ID type.
+    /// Resolves the declared type of a member on a named value/entity type, using the
+    /// GLOBAL view (a simple-name lookup). Returns <c>false</c> for primitives, collections,
+    /// unknown types, or unknown members. Prefer the context-aware overload when the
+    /// reference site's context is known (so a name shared across contexts resolves locally).
     /// </summary>
     public bool TryGetMemberType(string typeName, string memberName, out TypeRef type)
     {
         type = null!;
-        if (!_byName.TryGetValue(typeName, out var decl))
-            return false;
+        return _byName.TryGetValue(typeName, out var decl) && MemberTypeOf(decl, memberName, out type);
+    }
 
+    /// <summary>
+    /// Resolves a member type with <paramref name="context"/>-aware type resolution (R13.2):
+    /// the named type is resolved in that context's scope first (local, then an unambiguous
+    /// import), falling back to the global view — so a <c>Money</c> declared in two contexts
+    /// resolves to the right one at each reference site.
+    /// </summary>
+    public bool TryGetMemberType(string? context, string typeName, string memberName, out TypeRef type)
+    {
+        type = null!;
+        if (context is not null && TryGetDeclIn(context, typeName, out var decl))
+            return MemberTypeOf(decl, memberName, out type);
+        return TryGetMemberType(typeName, memberName, out type);
+    }
+
+    /// <summary>Resolves a type name to its declaration as seen from <paramref name="context"/> (local, then an unambiguous import).</summary>
+    public bool TryGetDeclIn(string context, string typeName, out TypeDecl decl)
+    {
+        if (_declsByContext.TryGetValue(context, out var local) && local.TryGetValue(typeName, out decl!))
+            return true;
+        if (_importsByContext.TryGetValue(context, out var imports)
+            && imports.TryGetValue(typeName, out var owners) && owners.Count == 1
+            && _declsByContext.TryGetValue(owners[0], out var theirs) && theirs.TryGetValue(typeName, out decl!))
+            return true;
+        decl = null!;
+        return false;
+    }
+
+    /// <summary>Finds a member's declared type on a value/entity/event declaration (entity <c>id</c> -&gt; its ID type).</summary>
+    private static bool MemberTypeOf(TypeDecl decl, string memberName, out TypeRef type)
+    {
+        type = null!;
         IReadOnlyList<Member> members;
         switch (decl)
         {
@@ -253,6 +361,14 @@ public sealed class ModelIndex
                 IndexType(nested);
     }
 
+    /// <summary>Invokes <paramref name="note"/> for every type name within a (possibly generic) type reference.</summary>
+    private static void NoteIdNamesIn(TypeRef tr, Action<string> note)
+    {
+        note(tr.Name);
+        if (tr.Element is not null) NoteIdNamesIn(tr.Element, note);
+        if (tr.Value is not null) NoteIdNamesIn(tr.Value, note);
+    }
+
     private void NoteIdReferences(TypeRef type)
     {
         if (type.Element is not null) NoteIdReferences(type.Element);
@@ -291,6 +407,102 @@ public sealed class ModelIndex
             _ => Enumerable.Empty<string>()
         }
         : Enumerable.Empty<string>();
+
+    // ------------------------------------------------------------------------
+    // Cross-context resolution & namespaces (R13.2 / R13.3)
+    // ------------------------------------------------------------------------
+
+    /// <summary>How a type reference resolves from a given context.</summary>
+    public enum RefKind
+    {
+        Resolved,
+        UnimportedCrossContext,
+        Ambiguous,
+        UnknownContext,
+        NotExported,
+        Unknown
+    }
+
+    /// <summary>The outcome of resolving a reference, plus the candidate contexts (for the message).</summary>
+    public readonly record struct RefResolution(RefKind Kind, IReadOnlyList<string> Candidates);
+
+    /// <summary>True when <paramref name="name"/> is a declared bounded context.</summary>
+    public bool IsContext(string name) => _contextNames.Contains(name);
+
+    /// <summary>True when <paramref name="context"/> declares a type named <paramref name="typeName"/>.</summary>
+    public bool DeclaresType(string context, string typeName) =>
+        _namespaceByContextType.TryGetValue(context, out var m) && m.ContainsKey(typeName);
+
+    /// <summary>The contexts that declare a type with this simple name.</summary>
+    public IReadOnlyList<string> DeclaringContextsOf(string typeName) =>
+        _declaringContexts.TryGetValue(typeName, out var l) ? l : Array.Empty<string>();
+
+    /// <summary>The C# namespace a context+module-path emits into (e.g. <c>Billing.Pricing</c>).</summary>
+    public static string NamespaceOf(string context, IReadOnlyList<string> modulePath) =>
+        modulePath.Count == 0 ? context : context + "." + string.Join(".", modulePath);
+
+    /// <summary>The namespace a type emits into, as declared in <paramref name="context"/> (or null).</summary>
+    public string? NamespaceOfTypeIn(string context, string typeName) =>
+        _namespaceByContextType.TryGetValue(context, out var m) && m.TryGetValue(typeName, out var ns) ? ns : null;
+
+    /// <summary>
+    /// For the emitter: every type name visible from <paramref name="context"/> (its own types,
+    /// across all modules, plus unambiguously-imported foreign types) mapped to the namespace it
+    /// lives in. Used to compute the precise <c>using</c> set for a file (R13.2/R13.3).
+    /// </summary>
+    public IReadOnlyDictionary<string, string> VisibleTypeNamespaces(string context)
+    {
+        var result = new Dictionary<string, string>(StringComparer.Ordinal);
+        if (_namespaceByContextType.TryGetValue(context, out var local))
+            foreach (var kv in local)
+                result[kv.Key] = kv.Value;
+        if (_importsByContext.TryGetValue(context, out var imported))
+            foreach (var kv in imported)
+                // A local type shadows an imported one of the same name — never overwrite it.
+                if (!result.ContainsKey(kv.Key) && kv.Value.Count == 1 && NamespaceOfTypeIn(kv.Value[0], kv.Key) is { } ns)
+                    result[kv.Key] = ns;
+        return result;
+    }
+
+    /// <summary>
+    /// Resolves a type reference from <paramref name="fromContext"/> (R13.2): local types and the
+    /// <c>*Id</c> convention need no import; a qualified <c>Context.T</c> resolves directly; an
+    /// imported name resolves (ambiguous if imported from two contexts); an un-imported foreign
+    /// type is an error. Primitives/collections and genuinely-unknown names resolve trivially
+    /// (the latter is reported as KOI0101 elsewhere).
+    /// </summary>
+    public RefResolution ResolveReference(string fromContext, TypeRef tr)
+    {
+        var name = tr.Name;
+
+        if (tr.Qualifier is { } qualifier)
+        {
+            if (!IsContext(qualifier))
+                return new RefResolution(RefKind.UnknownContext, new[] { qualifier });
+            if (!DeclaresType(qualifier, name))
+                return new RefResolution(RefKind.NotExported, new[] { qualifier });
+            return Ok;
+        }
+
+        var kind = Classify(name);
+        if (kind is TypeKind.Primitive or TypeKind.List or TypeKind.Set or TypeKind.Map or TypeKind.Range)
+            return Ok;
+        if (DeclaresType(fromContext, name))
+            return Ok;                              // local to this context
+        if (kind == TypeKind.IdValueObject)
+            return Ok;                              // *Id convention: emitted locally, no import
+
+        if (_importsByContext.TryGetValue(fromContext, out var imports) && imports.TryGetValue(name, out var owners))
+            return owners.Count == 1 ? Ok : new RefResolution(RefKind.Ambiguous, owners);
+
+        var declaring = DeclaringContextsOf(name).Where(c => c != fromContext).ToList();
+        if (declaring.Count > 0)
+            return new RefResolution(RefKind.UnimportedCrossContext, declaring);
+
+        return new RefResolution(RefKind.Unknown, Array.Empty<string>());
+    }
+
+    private static readonly RefResolution Ok = new(RefKind.Resolved, Array.Empty<string>());
 
     /// <summary>Classifies a type by its simple name.</summary>
     public TypeKind Classify(string typeName)
