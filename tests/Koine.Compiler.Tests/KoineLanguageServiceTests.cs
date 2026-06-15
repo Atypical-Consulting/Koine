@@ -46,12 +46,12 @@ public class KoineLanguageServiceTests
     }
 
     [Fact]
-    public void Inside_service_offers_operation_and_usecase_keywords()
+    public void Inside_service_offers_operation_keyword()
     {
         var src = "context C {\n  service S {\n    \n  }\n}\n";
         var items = Complete(src, line: 2, ch: 4);
         Assert.Contains(items, i => i.Label == "operation");
-        Assert.Contains(items, i => i.Label == "usecase");
+        Assert.DoesNotContain(items, i => i.Label == "usecase");
     }
 
     [Fact]

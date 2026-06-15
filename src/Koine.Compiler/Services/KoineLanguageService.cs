@@ -35,7 +35,7 @@ public sealed class KoineLanguageService
         { "value", "quantity", "entity", "aggregate", "enum", "event", "spec", "service", "policy" };
     private static readonly string[] AggregateStarters =
         { "value", "quantity", "entity", "enum", "event", "spec", "repository" };
-    private static readonly string[] ServiceStarters = { "operation", "usecase" };
+    private static readonly string[] ServiceStarters = { "operation" };
     private static readonly string[] RepositoryStarters = { "operations", "find" };
     private static readonly string[] EntityStarters = { "states", "command", "create", "invariant" };
 
@@ -61,6 +61,8 @@ public sealed class KoineLanguageService
 
         // Type position: after ':' (member/param/return type), or '<' inside a
         // generic argument list following a type name.
+        // THEN: precise for policy reactions (then Type.command(...)); may over-offer
+        // types after a conditional 'then' — acceptable, expression-aware completion is out of scope.
         if (trigger == KoineLexer.COLON
             || trigger == KoineLexer.ON
             || trigger == KoineLexer.THEN
@@ -109,7 +111,11 @@ public sealed class KoineLanguageService
         }
 
         return index.CandidateTypeNames
-            .Select(name => new CompletionItem(name, KindOf(index.Classify(name)), index.Classify(name).ToString(), null))
+            .Select(name =>
+            {
+                var kind = index.Classify(name);
+                return new CompletionItem(name, KindOf(kind), kind.ToString(), null);
+            })
             .ToList();
     }
 
