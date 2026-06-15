@@ -1,4 +1,5 @@
 using System.Reflection;
+using Koine.Compiler.Ast;
 using Koine.Compiler.Diagnostics;
 using Koine.Compiler.Emit;
 using Koine.Compiler.Emit.CSharp;
@@ -21,6 +22,7 @@ internal static class Program
         {
             "--version" or "-v" => RunVersion(),
             "build" => RunBuild(args.Skip(1).ToArray()),
+            "check" => RunCheck(args.Skip(1).ToArray()),
             "lsp" => LspServer.Run(),
             "--help" or "-h" or "help" => PrintUsageTo(Console.Out),
             _ => UnknownCommand(args[0]),
@@ -176,6 +178,110 @@ internal static class Program
     }
 
     /// <summary>
+    /// Backward-compatibility check (R15.2): compares the current model against a previously
+    /// published baseline and flags breaking changes to published surfaces. Exits non-zero if
+    /// any breaking change is found (or either model fails to parse), zero otherwise.
+    /// </summary>
+    private static int RunCheck(string[] args)
+    {
+        string? current = null;
+        string? baseline = null;
+
+        for (var i = 0; i < args.Length; i++)
+        {
+            var arg = args[i];
+            switch (arg)
+            {
+                case "--baseline":
+                    if (i + 1 >= args.Length)
+                        return UsageError("--baseline requires a <dir> value");
+                    baseline = args[++i];
+                    break;
+                default:
+                    if (arg.StartsWith('-'))
+                        return UsageError($"unknown option '{arg}'");
+                    if (current is not null)
+                        return UsageError($"unexpected argument '{arg}'");
+                    current = arg;
+                    break;
+            }
+        }
+
+        if (current is null)
+            return UsageError("check requires a <file.koi|dir> argument (the current model)");
+        if (baseline is null)
+            return UsageError("check requires --baseline <dir> (the previously published model)");
+
+        var compiler = new KoineCompiler();
+        if (!TryParseModel(compiler, current, "current", out var currentModel) ||
+            !TryParseModel(compiler, baseline, "baseline", out var baselineModel))
+            return 1;
+
+        var report = new CompatibilityChecker().Check(baselineModel, currentModel);
+
+        foreach (var change in report.Changes)
+        {
+            if (change.Impact == CompatibilityImpact.Breaking)
+                Console.Error.WriteLine($"breaking {change.Code}: {change.Message}");
+            else
+                Console.WriteLine($"non-breaking: {change.Message}");
+        }
+
+        if (report.HasBreakingChanges)
+        {
+            var count = report.Changes.Count(c => c.Impact == CompatibilityImpact.Breaking);
+            Console.Error.WriteLine($"error: {count} breaking change(s) to published surfaces");
+            return 1;
+        }
+
+        Console.WriteLine("OK: no breaking changes to published surfaces");
+        return 0;
+    }
+
+    /// <summary>Reads and parses a model from a path, reporting any syntax errors against <paramref name="label"/>.</summary>
+    private static bool TryParseModel(KoineCompiler compiler, string path, string label, out KoineModel model)
+    {
+        model = null!;
+
+        List<SourceFile> sources;
+        try
+        {
+            sources = ReadSources(path);
+        }
+        catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException)
+        {
+            Console.Error.WriteLine($"error: {label} not found: {path}");
+            return false;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            Console.Error.WriteLine($"error: cannot read {label} '{path}': {ex.Message}");
+            return false;
+        }
+
+        if (sources.Count == 0)
+        {
+            Console.Error.WriteLine($"error: no .koi files found under {label} '{path}'");
+            return false;
+        }
+
+        var (parsed, diagnostics) = compiler.Parse(sources);
+        if (parsed is null)
+        {
+            foreach (var diag in diagnostics)
+            {
+                var severity = diag.Severity.ToString().ToLowerInvariant();
+                Console.Error.WriteLine($"{diag.File ?? path}:{diag.Line}:{diag.Column}: {severity} {diag.Code}: {diag.Message}");
+            }
+            Console.Error.WriteLine($"error: {label} model failed to parse");
+            return false;
+        }
+
+        model = parsed;
+        return true;
+    }
+
+    /// <summary>
     /// Reads the source unit(s) for a build path: a single <c>.koi</c> file, or every
     /// <c>.koi</c> under a directory (recursively, in a deterministic order) — R13.1.
     /// </summary>
@@ -206,6 +312,7 @@ internal static class Program
         writer.WriteLine("Usage:");
         writer.WriteLine("  koine --version");
         writer.WriteLine("  koine build <file.koi|dir> [--target csharp|glossary] [--out <dir>] [--glossary <file.md>]");
+        writer.WriteLine("  koine check <file.koi|dir> --baseline <dir>   # flag breaking changes vs a published baseline");
         writer.WriteLine("  koine lsp                       # Language Server (stdio) for editor diagnostics");
         return 0;
     }

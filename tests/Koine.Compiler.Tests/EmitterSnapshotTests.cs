@@ -240,4 +240,35 @@ public class EmitterSnapshotTests
         return Verify(TestSupport.Render(result.Files))
             .UseDirectory("Snapshots");
     }
+
+    /// <summary>
+    /// R15.1: makes the <c>@deprecated</c> → <c>[Obsolete("…")]</c> rendering — on a value
+    /// object, a property, and an integration-event field — reviewable in one snapshot.
+    /// </summary>
+    [Fact]
+    public Task R15_fixture_emits_expected_csharp()
+    {
+        const string fixture = """
+            context Sales version 3 {
+              @deprecated("use Money") value LegacyMoney { amount: Decimal }
+              value Money {
+                amount: Decimal
+                @deprecated("use amount") legacyAmount: Decimal
+              }
+              publishes OrderPlaced
+              integration event OrderPlaced {
+                orderId:   OrderId
+                total:     Decimal
+                @since(2)  couponCode: String
+                @deprecated("use total") legacyAmount: Decimal
+              }
+            }
+            """;
+
+        var result = new KoineCompiler().Compile(fixture, new CSharpEmitter());
+        Assert.True(result.Success, string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        return Verify(TestSupport.Render(result.Files))
+            .UseDirectory("Snapshots");
+    }
 }

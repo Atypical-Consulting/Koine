@@ -31,6 +31,7 @@ public sealed class SemanticValidator
             var resolver = new TypeResolver(index, ctx.Name);
 
             ValidateContextScoping(ctx, index, diagnostics);
+            ValidateAnnotationVersions(ctx, diagnostics);
 
             foreach (var type in ctx.Types)
                 ValidateType(type, index, resolver, enumMembers, diagnostics);
@@ -43,6 +44,51 @@ public sealed class SemanticValidator
 
         return diagnostics;
     }
+
+    /// <summary>
+    /// R15.1: warns (KOI1501) when a <c>@since(n)</c> annotation on a type or field names a
+    /// generation newer than the context's own declared <c>version</c> — an evolution mistake.
+    /// No-op for an unversioned context (no ceiling to exceed).
+    /// </summary>
+    private static void ValidateAnnotationVersions(ContextNode ctx, List<Diagnostic> diagnostics)
+    {
+        if (ctx.Version is not { } ceiling)
+            return;
+
+        foreach (var type in ctx.Types)
+            ValidateAnnotationVersionsOfType(type, ctx.Name, ceiling, diagnostics);
+    }
+
+    private static void ValidateAnnotationVersionsOfType(
+        TypeDecl type, string contextName, int ceiling, List<Diagnostic> diagnostics)
+    {
+        if (type.Since is { } typeSince && typeSince > ceiling)
+            diagnostics.Add(Diagnostic.Warning(
+                DiagnosticCodes.AnnotationVersionAboveContext,
+                $"'{type.Name}' is annotated @since({typeSince}) but context '{contextName}' is only version {ceiling}.",
+                type.Span));
+
+        foreach (var m in AnnotatableMembers(type))
+            if (m.Since is { } memberSince && memberSince > ceiling)
+                diagnostics.Add(Diagnostic.Warning(
+                    DiagnosticCodes.AnnotationVersionAboveContext,
+                    $"Field '{m.Name}' is annotated @since({memberSince}) but context '{contextName}' is only version {ceiling}.",
+                    m.Span));
+
+        if (type is AggregateDecl agg)
+            foreach (var nested in agg.Types)
+                ValidateAnnotationVersionsOfType(nested, contextName, ceiling, diagnostics);
+    }
+
+    /// <summary>The member-bearing fields of a type (value/entity/event/integration event); empty otherwise.</summary>
+    private static IReadOnlyList<Member> AnnotatableMembers(TypeDecl type) => type switch
+    {
+        ValueObjectDecl v => v.Members,
+        EntityDecl e => e.Members,
+        EventDecl ev => ev.Members,
+        IntegrationEventDecl ie => ie.Members,
+        _ => Array.Empty<Member>()
+    };
 
     /// <summary>
     /// Validates a context's imports, module names, and cross-context references (R13.2/R13.3):

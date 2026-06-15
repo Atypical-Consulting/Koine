@@ -114,7 +114,8 @@ public sealed class KoineCompiler
                     ModuleNames = existing.ModuleNames.Concat(ctx.ModuleNames).ToList(),
                     Publishes = existing.Publishes.Concat(ctx.Publishes).ToList(),
                     Subscribes = existing.Subscribes.Concat(ctx.Subscribes).ToList(),
-                    Doc = existing.Doc ?? ctx.Doc
+                    Doc = existing.Doc ?? ctx.Doc,
+                    Version = existing.Version ?? ctx.Version
                 };
             }
             else
