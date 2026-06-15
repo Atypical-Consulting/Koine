@@ -23,7 +23,10 @@ public sealed class GlossaryEmitter : IEmitter
 
         foreach (var ctx in model.Contexts)
         {
-            sb.Append("\n## ").Append(ctx.Name).Append('\n');
+            sb.Append("\n## ").Append(ctx.Name);
+            if (ctx.Version is { } version)
+                sb.Append(" — version ").Append(version);
+            sb.Append('\n');
             if (!string.IsNullOrEmpty(ctx.Doc))
                 sb.Append('\n').Append(Prose(ctx.Doc)).Append('\n');
 
@@ -83,7 +86,7 @@ public sealed class GlossaryEmitter : IEmitter
         {
             case AggregateDecl agg:
                 sb.Append('\n').Append(heading).Append(' ').Append(agg.Name)
-                  .Append(" — aggregate (root: ").Append(agg.RootName).Append(")\n");
+                  .Append(" — aggregate (root: ").Append(agg.RootName).Append(')').Append(Tag(agg)).Append('\n');
                 if (!string.IsNullOrEmpty(agg.Doc))
                     sb.Append('\n').Append(Prose(agg.Doc)).Append('\n');
                 foreach (var nested in agg.Types)
@@ -91,28 +94,28 @@ public sealed class GlossaryEmitter : IEmitter
                 break;
 
             case EnumDecl en:
-                WriteHeading(sb, heading, en.Name, "enum", en.Doc);
+                WriteHeading(sb, heading, en.Name, "enum", en.Doc, Tag(en));
                 sb.Append("\nValues: ").Append(string.Join(", ", en.MemberNames)).Append('\n');
                 break;
 
             case ValueObjectDecl vo:
-                WriteHeading(sb, heading, vo.Name, vo.IsQuantity ? "quantity" : "value", vo.Doc);
+                WriteHeading(sb, heading, vo.Name, vo.IsQuantity ? "quantity" : "value", vo.Doc, Tag(vo));
                 WriteFields(sb, vo.Members);
                 WriteRules(sb, vo.Invariants);
                 break;
 
             case EventDecl ev:
-                WriteHeading(sb, heading, ev.Name, "event", ev.Doc);
+                WriteHeading(sb, heading, ev.Name, "event", ev.Doc, Tag(ev));
                 WriteFields(sb, ev.Members);
                 break;
 
             case IntegrationEventDecl ie:
-                WriteHeading(sb, heading, ie.Name, "integration event", ie.Doc);
+                WriteHeading(sb, heading, ie.Name, "integration event", ie.Doc, Tag(ie));
                 WriteFields(sb, ie.Members);
                 break;
 
             case EntityDecl e:
-                WriteHeading(sb, heading, e.Name, "entity", e.Doc);
+                WriteHeading(sb, heading, e.Name, "entity", e.Doc, Tag(e));
                 sb.Append("\nIdentified by `").Append(e.IdentityName).Append("`.\n");
                 WriteFields(sb, e.Members);
                 WriteRules(sb, e.Invariants);
@@ -120,9 +123,20 @@ public sealed class GlossaryEmitter : IEmitter
         }
     }
 
-    private static void WriteHeading(StringBuilder sb, string heading, string name, string kind, string? doc)
+    /// <summary>The evolution suffix for a type/field heading: <c> _(since v2; deprecated: reason)_</c> (R15.1).</summary>
+    private static string Tag(TypeDecl t) => Tag(t.Since, t.Deprecated);
+
+    private static string Tag(int? since, string? deprecated)
     {
-        sb.Append('\n').Append(heading).Append(' ').Append(name).Append(" — ").Append(kind).Append('\n');
+        var parts = new List<string>();
+        if (since is { } s) parts.Add("since v" + s);
+        if (!string.IsNullOrEmpty(deprecated)) parts.Add("deprecated: " + deprecated);
+        return parts.Count == 0 ? string.Empty : " _(" + Prose(string.Join("; ", parts)) + ")_";
+    }
+
+    private static void WriteHeading(StringBuilder sb, string heading, string name, string kind, string? doc, string tag = "")
+    {
+        sb.Append('\n').Append(heading).Append(' ').Append(name).Append(" — ").Append(kind).Append(tag).Append('\n');
         if (!string.IsNullOrEmpty(doc))
             sb.Append('\n').Append(Prose(doc)).Append('\n');
     }
@@ -140,6 +154,10 @@ public sealed class GlossaryEmitter : IEmitter
             var description = Cell(m.Doc);
             if (MemberAnalysis.IsDerived(m, names))
                 description = description.Length == 0 ? "_derived_" : "_derived_ — " + description;
+
+            var tag = Tag(m.Since, m.Deprecated);
+            if (tag.Length != 0)
+                description = description.Length == 0 ? tag.Trim() : description + tag;
 
             sb.Append("| ").Append(m.Name)
               .Append(" | `").Append(KoineType(m.Type)).Append('`')

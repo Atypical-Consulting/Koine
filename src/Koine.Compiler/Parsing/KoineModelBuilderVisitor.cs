@@ -76,12 +76,38 @@ public sealed class KoineModelBuilderVisitor : KoineParserBaseVisitor<object?>
             else if (member.subscribeDecl() is { } sub) subscribes.Add(BuildSubscribe(sub));
         }
 
+        var version = ctx.IntLiteral() is { } v ? int.Parse(v.GetText()) : (int?)null;
+
         return new ContextNode(
             ctx.Identifier().GetText(), types, specs, services, policies, imports, moduleNames, publishes, subscribes)
         {
             Span = SpanOf(ctx),
-            Doc = DocFor(ctx)
+            Doc = DocFor(ctx),
+            Version = version
         };
+    }
+
+    /// <summary>
+    /// Reads the <c>@since(n)</c> / <c>@deprecated("reason")</c> evolution annotations preceding
+    /// a type or field declaration (R15.1). Unknown annotation names are ignored.
+    /// </summary>
+    private (int? Since, string? Deprecated) ReadAnnotations(IEnumerable<KoineParser.AnnotationContext> annotations)
+    {
+        int? since = null;
+        string? deprecated = null;
+        foreach (var a in annotations)
+        {
+            switch (a.Identifier().GetText())
+            {
+                case "since" when a.IntLiteral() is { } iv:
+                    since = int.Parse(iv.GetText());
+                    break;
+                case "deprecated" when a.StringLiteral() is { } sv:
+                    deprecated = UnescapeString(StripQuotes(sv.GetText()));
+                    break;
+            }
+        }
+        return (since, deprecated);
     }
 
     // ---- Context map & integration-event wiring (R14) ----------------------
@@ -292,11 +318,14 @@ public sealed class KoineModelBuilderVisitor : KoineParserBaseVisitor<object?>
     {
         var members = ctx.member().Select(BuildMember).ToList();
         var invariants = ctx.invariant().Select(BuildInvariant).ToList();
+        var (since, deprecated) = ReadAnnotations(ctx.annotation());
 
         return new ValueObjectDecl(ctx.Identifier().GetText(), members, invariants)
         {
             Span = SpanOf(ctx),
-            Doc = DocFor(ctx)
+            Doc = DocFor(ctx),
+            Since = since,
+            Deprecated = deprecated
         };
     }
 
@@ -304,11 +333,14 @@ public sealed class KoineModelBuilderVisitor : KoineParserBaseVisitor<object?>
     {
         var members = ctx.member().Select(BuildMember).ToList();
         var invariants = ctx.invariant().Select(BuildInvariant).ToList();
+        var (since, deprecated) = ReadAnnotations(ctx.annotation());
 
         return new ValueObjectDecl(ctx.Identifier().GetText(), members, invariants, IsQuantity: true)
         {
             Span = SpanOf(ctx),
-            Doc = DocFor(ctx)
+            Doc = DocFor(ctx),
+            Since = since,
+            Deprecated = deprecated
         };
     }
 
@@ -323,11 +355,14 @@ public sealed class KoineModelBuilderVisitor : KoineParserBaseVisitor<object?>
         var name = ctx.Identifier(0).GetText();
         var identityName = ctx.Identifier(1).GetText();
         var (strategy, backing) = BuildIdentityStrategy(ctx.identityStrategy());
+        var (since, deprecated) = ReadAnnotations(ctx.annotation());
 
         return new EntityDecl(name, identityName, members, invariants, commands, states, factories, strategy, backing)
         {
             Span = SpanOf(ctx),
-            Doc = DocFor(ctx)
+            Doc = DocFor(ctx),
+            Since = since,
+            Deprecated = deprecated
         };
     }
 
@@ -456,11 +491,14 @@ public sealed class KoineModelBuilderVisitor : KoineParserBaseVisitor<object?>
         var name = ctx.Identifier(0).GetText();
         var rootName = ctx.Identifier(1).GetText();
         var versioned = ctx.VERSIONED() is not null;
+        var (since, deprecated) = ReadAnnotations(ctx.annotation());
 
         return new AggregateDecl(name, rootName, types, specs, versioned, repository)
         {
             Span = SpanOf(ctx),
-            Doc = DocFor(ctx)
+            Doc = DocFor(ctx),
+            Since = since,
+            Deprecated = deprecated
         };
     }
 
@@ -496,30 +534,45 @@ public sealed class KoineModelBuilderVisitor : KoineParserBaseVisitor<object?>
                 m.expression().Select(BuildExpression).ToList()) { Span = SpanOf(m) })
             .ToList();
 
-        return new EnumDecl(ctx.Identifier().GetText(), members, signature) { Span = SpanOf(ctx), Doc = DocFor(ctx) };
+        var (since, deprecated) = ReadAnnotations(ctx.annotation());
+        return new EnumDecl(ctx.Identifier().GetText(), members, signature)
+        {
+            Span = SpanOf(ctx), Doc = DocFor(ctx), Since = since, Deprecated = deprecated
+        };
     }
 
     private EventDecl BuildEvent(KoineParser.EventDeclContext ctx)
     {
         var members = ctx.member().Select(BuildMember).ToList();
-        return new EventDecl(ctx.Identifier().GetText(), members) { Span = SpanOf(ctx), Doc = DocFor(ctx) };
+        var (since, deprecated) = ReadAnnotations(ctx.annotation());
+        return new EventDecl(ctx.Identifier().GetText(), members)
+        {
+            Span = SpanOf(ctx), Doc = DocFor(ctx), Since = since, Deprecated = deprecated
+        };
     }
 
     private IntegrationEventDecl BuildIntegrationEvent(KoineParser.IntegrationEventDeclContext ctx)
     {
         var members = ctx.member().Select(BuildMember).ToList();
-        return new IntegrationEventDecl(ctx.Identifier().GetText(), members) { Span = SpanOf(ctx), Doc = DocFor(ctx) };
+        var (since, deprecated) = ReadAnnotations(ctx.annotation());
+        return new IntegrationEventDecl(ctx.Identifier().GetText(), members)
+        {
+            Span = SpanOf(ctx), Doc = DocFor(ctx), Since = since, Deprecated = deprecated
+        };
     }
 
     private Member BuildMember(KoineParser.MemberContext ctx)
     {
         var type = BuildTypeRef(ctx.typeRef());
         var initializer = ctx.expression() is { } expr ? BuildExpression(expr) : null;
+        var (since, deprecated) = ReadAnnotations(ctx.annotation());
 
         return new Member(ctx.softName().GetText(), type, initializer)
         {
             Span = SpanOf(ctx),
-            Doc = DocFor(ctx)
+            Doc = DocFor(ctx),
+            Since = since,
+            Deprecated = deprecated
         };
     }
 

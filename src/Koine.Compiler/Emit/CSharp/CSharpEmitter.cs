@@ -502,6 +502,7 @@ public sealed class CSharpEmitter : IEmitter
         var sb = new StringBuilder();
 
         WriteXmlDoc(sb, vo.Doc, "");
+        WriteObsolete(sb, vo.Deprecated, "");
         sb.Append("public sealed class ").Append(vo.Name).Append(" : ValueObject\n");
         sb.Append("{\n");
 
@@ -512,6 +513,7 @@ public sealed class CSharpEmitter : IEmitter
                 continue; // derived emitted later as computed property
             var csType = typeMapper.Map(m.Type, out var comment);
             WriteXmlDoc(sb, m.Doc, Indent);
+            WriteObsolete(sb, m.Deprecated, Indent);
             sb.Append(Indent).Append("public ").Append(csType).Append(' ')
               .Append(CSharpNaming.ToPascalCase(m.Name)).Append(" { get; }");
             AppendComment(sb, comment);
@@ -529,6 +531,7 @@ public sealed class CSharpEmitter : IEmitter
             var body = translator.TranslateTopLevel(m.Initializer!, CSharpExpressionTranslator.NameMode.Property, EnumExpected(m, index));
             sb.Append('\n');
             WriteXmlDoc(sb, m.Doc, Indent);
+            WriteObsolete(sb, m.Deprecated, Indent);
             sb.Append(Indent).Append("public ").Append(csType).Append(' ')
               .Append(CSharpNaming.ToPascalCase(m.Name)).Append(" => ").Append(body).Append(";\n");
         }
@@ -1071,6 +1074,7 @@ public sealed class CSharpEmitter : IEmitter
         var sb = new StringBuilder();
 
         WriteXmlDoc(sb, entity.Doc, "");
+        WriteObsolete(sb, entity.Deprecated, "");
         sb.Append("public sealed class ").Append(entity.Name);
         if (isRoot)
             sb.Append(" : IAggregateRoot");
@@ -1099,6 +1103,7 @@ public sealed class CSharpEmitter : IEmitter
         {
             var csType = typeMapper.Map(m.Type, out var comment);
             WriteXmlDoc(sb, m.Doc, Indent);
+            WriteObsolete(sb, m.Deprecated, Indent);
             sb.Append(Indent).Append("public ").Append(csType).Append(' ')
               .Append(CSharpNaming.ToPascalCase(m.Name))
               .Append(mutated.Contains(m.Name) ? " { get; private set; }" : " { get; }");
@@ -1117,6 +1122,7 @@ public sealed class CSharpEmitter : IEmitter
             var body = translator.TranslateTopLevel(m.Initializer!, CSharpExpressionTranslator.NameMode.Property, EnumExpected(m, index));
             sb.Append('\n');
             WriteXmlDoc(sb, m.Doc, Indent);
+            WriteObsolete(sb, m.Deprecated, Indent);
             sb.Append(Indent).Append("public ").Append(csType).Append(' ')
               .Append(CSharpNaming.ToPascalCase(m.Name)).Append(" => ").Append(body).Append(";\n");
         }
@@ -1242,6 +1248,7 @@ public sealed class CSharpEmitter : IEmitter
         var translator = new CSharpExpressionTranslator(index, Array.Empty<Member>(), enumMemberToType);
 
         WriteXmlDoc(sb, @enum.Doc ?? "A type-safe smart enum: static instances with value equality.", "");
+        WriteObsolete(sb, @enum.Deprecated, "");
         sb.Append("public sealed class ").Append(name).Append(" : IEquatable<").Append(name).Append(">\n{\n");
 
         // One static readonly instance per member, in declaration order. When the enum
@@ -1378,12 +1385,14 @@ public sealed class CSharpEmitter : IEmitter
         var sb = new StringBuilder();
 
         WriteXmlDoc(sb, ev.Doc, "");
+        WriteObsolete(sb, ev.Deprecated, "");
         sb.Append("public sealed record ").Append(ev.Name).Append(" : IDomainEvent\n{\n");
 
         foreach (var m in ctorMembers)
         {
             var csType = typeMapper.Map(m.Type, out var comment);
             WriteXmlDoc(sb, m.Doc, Indent);
+            WriteObsolete(sb, m.Deprecated, Indent);
             sb.Append(Indent).Append("public ").Append(csType).Append(' ')
               .Append(CSharpNaming.ToPascalCase(m.Name)).Append(" { get; }");
             AppendComment(sb, comment);
@@ -1402,6 +1411,7 @@ public sealed class CSharpEmitter : IEmitter
             var body = translator.TranslateTopLevel(m.Initializer!, CSharpExpressionTranslator.NameMode.Property, EnumExpected(m, index));
             sb.Append('\n');
             WriteXmlDoc(sb, m.Doc, Indent);
+            WriteObsolete(sb, m.Deprecated, Indent);
             sb.Append(Indent).Append("public ").Append(csType).Append(' ')
               .Append(CSharpNaming.ToPascalCase(m.Name)).Append(" => ").Append(body).Append(";\n");
         }
@@ -1430,12 +1440,14 @@ public sealed class CSharpEmitter : IEmitter
         var sb = new StringBuilder();
 
         WriteXmlDoc(sb, ev.Doc, "");
+        WriteObsolete(sb, ev.Deprecated, "");
         sb.Append("public sealed record ").Append(ev.Name).Append(" : IIntegrationEvent\n{\n");
 
         foreach (var m in ctorMembers)
         {
             var csType = typeMapper.Map(m.Type, out var comment);
             WriteXmlDoc(sb, m.Doc, Indent);
+            WriteObsolete(sb, m.Deprecated, Indent);
             sb.Append(Indent).Append("public ").Append(csType).Append(' ')
               .Append(CSharpNaming.ToPascalCase(m.Name)).Append(" { get; }");
             AppendComment(sb, comment);
@@ -1454,6 +1466,7 @@ public sealed class CSharpEmitter : IEmitter
             var body = translator.TranslateTopLevel(m.Initializer!, CSharpExpressionTranslator.NameMode.Property, EnumExpected(m, index));
             sb.Append('\n');
             WriteXmlDoc(sb, m.Doc, Indent);
+            WriteObsolete(sb, m.Deprecated, Indent);
             sb.Append(Indent).Append("public ").Append(csType).Append(' ')
               .Append(CSharpNaming.ToPascalCase(m.Name)).Append(" => ").Append(body).Append(";\n");
         }
@@ -2416,7 +2429,8 @@ public sealed class CSharpEmitter : IEmitter
              || body.Contains("IEquatable") || body.Contains("new HashCode(") || body.Contains("HashCode.Combine")
              || body.Contains("IComparable")
              || body.Contains(": Exception") || body.Contains("ArgumentOutOfRangeException")
-             || body.Contains("ArgumentNullException") || body.Contains("InvalidOperationException"), "System");
+             || body.Contains("ArgumentNullException") || body.Contains("InvalidOperationException")
+             || body.Contains("[Obsolete("), "System");
         Need(body.Contains("IEnumerable<") || body.Contains("IReadOnlyList<") || body.Contains("List<")
              || body.Contains("IReadOnlySet<") || body.Contains("HashSet<")
              || body.Contains("IReadOnlyDictionary<") || body.Contains("Dictionary<")
@@ -2546,6 +2560,23 @@ public sealed class CSharpEmitter : IEmitter
 
     private static string EscapeXml(string s) =>
         s.Replace("&", "&amp;").Replace("<", "&lt;").Replace(">", "&gt;");
+
+    /// <summary>
+    /// Renders a target-agnostic <c>@deprecated("reason")</c> annotation (R15.1) as a C#
+    /// <c>[Obsolete("reason")]</c> attribute on the following type or property. No-op when
+    /// the declaration is not deprecated.
+    /// </summary>
+    private static void WriteObsolete(StringBuilder sb, string? reason, string indent)
+    {
+        if (string.IsNullOrEmpty(reason))
+            return;
+        sb.Append(indent).Append("[Obsolete(\"").Append(EscapeCSharpString(reason)).Append("\")]\n");
+    }
+
+    /// <summary>Escapes a string for embedding in a C# double-quoted literal.</summary>
+    private static string EscapeCSharpString(string s) =>
+        s.Replace("\\", "\\\\").Replace("\"", "\\\"")
+         .Replace("\n", "\\n").Replace("\r", "\\r").Replace("\t", "\\t");
 
     private static void AppendComment(StringBuilder sb, string? comment)
     {

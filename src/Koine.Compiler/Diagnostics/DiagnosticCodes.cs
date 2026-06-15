@@ -148,6 +148,14 @@ public static class DiagnosticCodes
     public const string SubscribeHandlerNameCollision = "KOI1417";
     public const string SharedKernelNotShareable = "KOI1418";
 
+    // ---- Model versioning & evolution (KOI1500–1599) ----------------------
+    public const string AnnotationVersionAboveContext = "KOI1501";
+    public const string PublishedTypeRemoved = "KOI1510";
+    public const string PublishedFieldRemoved = "KOI1511";
+    public const string PublishedFieldTypeChanged = "KOI1512";
+    public const string PublishedFieldNowRequired = "KOI1513";
+    public const string PublishedRequiredFieldAdded = "KOI1514";
+
     /// <summary>Every code with a one-line description. Tested for uniqueness/coverage.</summary>
     public static readonly IReadOnlyDictionary<string, string> Catalogue = new Dictionary<string, string>
     {
@@ -257,5 +265,11 @@ public static class DiagnosticCodes
         [SharedKernelTypeConflict] = "A type is declared as shared by more than one shared-kernel relation.",
         [SubscribeHandlerNameCollision] = "A context subscribes to two integration events with the same name from different publishers.",
         [SharedKernelNotShareable] = "A shared-kernel type is an entity or aggregate; only value objects and enums may be shared.",
+        [AnnotationVersionAboveContext] = "A @since annotation names a version higher than the context's declared version.",
+        [PublishedTypeRemoved] = "A published type (integration event, shared-kernel, or open-host) present in the baseline was removed.",
+        [PublishedFieldRemoved] = "A field of a published type present in the baseline was removed.",
+        [PublishedFieldTypeChanged] = "A published field's type changed incompatibly from the baseline.",
+        [PublishedFieldNowRequired] = "A published field that was optional in the baseline is now required.",
+        [PublishedRequiredFieldAdded] = "A required field was added to a published type that exists in the baseline.",
     };
 }

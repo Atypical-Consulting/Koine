@@ -14,7 +14,8 @@ program        : programMember* EOF ;
 
 programMember  : contextDecl | contextMapDecl ;
 
-contextDecl    : CONTEXT Identifier LBRACE contextMember* RBRACE ;
+// An optional `version <Int>` clause stamps the context's evolution generation (R15.1).
+contextDecl    : CONTEXT Identifier ( VERSION IntLiteral )? LBRACE contextMember* RBRACE ;
 
 // A context holds imports, modules, types, behavioral declarations (specs, services,
 // policies), read-side declarations (read models, queries), and integration-event
@@ -87,7 +88,12 @@ typeDecl       : valueDecl
 
 // A published-language integration event (R14.3): an immutable, cross-boundary contract.
 // Parsed as a typeDecl so it works at context and module scope (inheriting ModulePath).
-integrationEventDecl : INTEGRATION EVENT Identifier LBRACE member* RBRACE ;
+integrationEventDecl : annotation* INTEGRATION EVENT Identifier LBRACE member* RBRACE ;
+
+// An evolution annotation on a type or field (R15.1): `@since(2)` records the version a
+// member appeared, `@deprecated("reason")` marks one slated for removal. The name is an
+// ordinary identifier (no new keyword), so `since`/`deprecated` stay usable as field names.
+annotation     : AT Identifier ( LPAREN ( IntLiteral | StringLiteral ) RPAREN )? ;
 
 // ---- Specifications, services, policies (R10) ------------------------------
 
@@ -126,13 +132,13 @@ policyArg      : softName COLON expression ;
 
 // ---- Type declarations -----------------------------------------------------
 
-valueDecl      : VALUE Identifier LBRACE member* invariant* RBRACE ;
+valueDecl      : annotation* VALUE Identifier LBRACE member* invariant* RBRACE ;
 
 // A quantity: a value object combining a numeric amount with a unit (an enum),
 // emitted with unit-checked arithmetic. Mirrors valueDecl's body.
-quantityDecl   : QUANTITY Identifier LBRACE member* invariant* RBRACE ;
+quantityDecl   : annotation* QUANTITY Identifier LBRACE member* invariant* RBRACE ;
 
-entityDecl     : ENTITY Identifier IDENTIFIED BY Identifier identityStrategy?
+entityDecl     : annotation* ENTITY Identifier IDENTIFIED BY Identifier identityStrategy?
                  LBRACE member* invariant* statesDecl* commandDecl* factoryDecl* RBRACE ;
 
 // How an identity is generated and typed (R11.1). Absent => the default Guid wrapper.
@@ -181,7 +187,7 @@ factoryStmt    : requiresClause
 initialization : softName LARROW expression ;                  // `total <- lines.sum(...)`
 
 // `versioned` marks the root for optimistic concurrency (R11.4).
-aggregateDecl  : AGGREGATE Identifier ROOT Identifier VERSIONED? LBRACE aggregateMember* RBRACE ;
+aggregateDecl  : annotation* AGGREGATE Identifier ROOT Identifier VERSIONED? LBRACE aggregateMember* RBRACE ;
 
 // An aggregate holds its nested types, aggregate-scoped specifications, and an
 // optional repository declaration (R11.3).
@@ -202,16 +208,16 @@ finderDecl       : FIND Identifier LPAREN paramList? RPAREN COLON typeRef ;
 // An enumeration. Members may carry associated constant data when the enum
 // declares a signature: `enum Currency(symbol: String, decimals: Int) { EUR("€", 2) }`.
 // Members are separated by whitespace or optional commas (both `A, B` and `A B`).
-enumDecl       : ENUM Identifier ( LPAREN paramList? RPAREN )? LBRACE enumMember ( COMMA? enumMember )* COMMA? RBRACE ;
+enumDecl       : annotation* ENUM Identifier ( LPAREN paramList? RPAREN )? LBRACE enumMember ( COMMA? enumMember )* COMMA? RBRACE ;
 
 enumMember     : Identifier ( LPAREN ( expression ( COMMA expression )* )? RPAREN )? ;
 
 // A domain event: an immutable record of something that happened. Fields only.
-eventDecl      : EVENT Identifier LBRACE member* RBRACE ;
+eventDecl      : annotation* EVENT Identifier LBRACE member* RBRACE ;
 
 // ---- Members & invariants --------------------------------------------------
 
-member         : softName COLON typeRef ( ASSIGN expression )? ;
+member         : annotation* softName COLON typeRef ( ASSIGN expression )? ;
 
 // A type reference: `T`, `T?` (optional), `List<T>`, `Set<T>`, `Map<K,V>`, and a
 // dotted cross-context qualifier `Context.T` (R13.2).
@@ -226,7 +232,7 @@ typeRef        : ( typeName DOT )? typeName ( LT typeRef ( COMMA typeRef )? GT )
 softName       : Identifier | declKeyword | WHEN | IF | THEN | ELSE ;
 exprName       : Identifier | declKeyword | WHEN ;
 typeName       : Identifier | declKeyword ;
-declKeyword    : CONTEXT | VALUE | QUANTITY | ENTITY | AGGREGATE | ENUM | IDENTIFIED | BY | ROOT | COMMAND | REQUIRES | EVENT | EMIT | STATES | CREATE | SPEC | ON | SERVICE | OPERATION | POLICY | AS | NATURAL | SEQUENCE | GUID | VERSIONED | REPOSITORY | OPERATIONS | FIND | USECASE | READMODEL | FROM | QUERY | IMPORT | MODULE | ACL | INTEGRATION | PUBLISHES | SUBSCRIBES ;
+declKeyword    : CONTEXT | VALUE | QUANTITY | ENTITY | AGGREGATE | ENUM | IDENTIFIED | BY | ROOT | COMMAND | REQUIRES | EVENT | EMIT | STATES | CREATE | SPEC | ON | SERVICE | OPERATION | POLICY | AS | NATURAL | SEQUENCE | GUID | VERSIONED | REPOSITORY | OPERATIONS | FIND | USECASE | READMODEL | FROM | QUERY | IMPORT | MODULE | ACL | INTEGRATION | PUBLISHES | SUBSCRIBES | VERSION ;
 
 invariant      : INVARIANT expression StringLiteral? ;
 

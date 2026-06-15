@@ -87,7 +87,15 @@ public sealed record ContextNode(
     IReadOnlyList<ImportDecl> Imports,
     IReadOnlyList<string> ModuleNames,
     IReadOnlyList<PublishDecl> Publishes,
-    IReadOnlyList<SubscribeDecl> Subscribes) : KoineNode;
+    IReadOnlyList<SubscribeDecl> Subscribes) : KoineNode
+{
+    /// <summary>
+    /// The context's declared evolution generation from <c>context Name version &lt;n&gt;</c>
+    /// (R15.1); <c>null</c> when unstamped. Bounds the legal range of member <c>@since</c>
+    /// annotations and surfaces in the glossary.
+    /// </summary>
+    public int? Version { get; init; }
+}
 
 /// <summary>A context's declaration that it publishes an integration event (R14.3).</summary>
 public sealed record PublishDecl(string EventName) : KoineNode;
@@ -115,6 +123,18 @@ public sealed record ImportDecl(
 public abstract record TypeDecl(string Name) : KoineNode
 {
     public IReadOnlyList<string> ModulePath { get; init; } = Array.Empty<string>();
+
+    /// <summary>
+    /// The version this type first appeared in (<c>@since(n)</c>, R15.1); <c>null</c> when
+    /// unannotated. Target-agnostic evolution metadata surfaced in the glossary.
+    /// </summary>
+    public int? Since { get; init; }
+
+    /// <summary>
+    /// The deprecation reason (<c>@deprecated("reason")</c>, R15.1); <c>null</c> when not
+    /// deprecated. The C# emitter renders it as <c>[Obsolete("reason")]</c>.
+    /// </summary>
+    public string? Deprecated { get; init; }
 }
 
 /// <summary>
@@ -256,7 +276,14 @@ public sealed record IntegrationEventDecl(
 /// (e.g. <c>subtotal = unitPrice * quantity</c>). Use
 /// <see cref="MemberAnalysis.IsDerived"/> to distinguish the two.
 /// </summary>
-public sealed record Member(string Name, TypeRef Type, Expr? Initializer) : KoineNode;
+public sealed record Member(string Name, TypeRef Type, Expr? Initializer) : KoineNode
+{
+    /// <summary>The version this field first appeared in (<c>@since(n)</c>, R15.1); <c>null</c> when unannotated.</summary>
+    public int? Since { get; init; }
+
+    /// <summary>The deprecation reason (<c>@deprecated("reason")</c>, R15.1); rendered as <c>[Obsolete("reason")]</c>.</summary>
+    public string? Deprecated { get; init; }
+}
 
 /// <summary>
 /// A reference to a type. <see cref="Element"/> is the (first) type argument for a

@@ -47,6 +47,9 @@ FROM       : 'from' ;
 QUERY      : 'query' ;
 IMPORT     : 'import' ;
 MODULE     : 'module' ;
+// R15.1 — model versioning. `version` (the context clause keyword) must lose the
+// maximal-munch tie to `versioned` (longer), which it does by length, not order.
+VERSION    : 'version' ;
 // R14 — context map (hyphenated roles MUST be single literal tokens; '-' is MINUS).
 CONTEXTMAP         : 'contextmap' ;
 PARTNERSHIP        : 'partnership' ;
@@ -82,6 +85,7 @@ DOT    : '.' ;
 ARROW  : '=>' ;
 COALESCE : '??' ;
 QUESTION : '?' ;
+AT     : '@' ;    // R15.1 — annotation prefix: `@since(2)`, `@deprecated("reason")`
 ASSIGN : '=' ;
 
 EQ  : '==' ;
