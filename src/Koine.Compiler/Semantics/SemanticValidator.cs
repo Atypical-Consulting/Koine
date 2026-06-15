@@ -97,6 +97,7 @@ public sealed class SemanticValidator
                 break;
             case EntityDecl e:
                 ValidateIdentityStrategy(e, diagnostics);
+                ValidateEntityReservedMembers(e, diagnostics);
                 var entitySpecs = SpecNames(index, e.Name);
                 ValidateMembersAndInvariants(e.Members, e.Invariants, index, resolver, enumMembers, diagnostics, entitySpecs);
                 ValidateStates(e, index, resolver, enumMembers, diagnostics);
@@ -566,6 +567,26 @@ public sealed class SemanticValidator
     /// <summary>The synthetic <c>id</c> binding (an entity's identity) for factory scope.</summary>
     private static IEnumerable<KeyValuePair<string, TypeRef>> IdScopePair(EntityDecl entity) =>
         new[] { new KeyValuePair<string, TypeRef>("id", new TypeRef(entity.IdentityName)) };
+
+    /// <summary>Properties/methods every generated entity carries; a member mapping to one fails to compile (CS0102).</summary>
+    private static readonly IReadOnlySet<string> EntityGeneratedMembers =
+        new HashSet<string>(StringComparer.Ordinal) { "Id", "Equals", "GetHashCode" };
+
+    /// <summary>
+    /// Rejects an entity member whose emitted property name collides with a member the
+    /// entity always generates (the <c>Id</c> identity and the identity-equality
+    /// <c>Equals</c>/<c>GetHashCode</c>). Without this, e.g. an <c>id</c> field emits a
+    /// second <c>Id</c> property (CS0102). The conditional <c>Version</c> token is covered
+    /// by <see cref="ValidateVersioning"/>.
+    /// </summary>
+    private static void ValidateEntityReservedMembers(EntityDecl entity, List<Diagnostic> diagnostics)
+    {
+        foreach (var m in entity.Members)
+            if (EntityGeneratedMembers.Contains(PropertyKey(m.Name)))
+                diagnostics.Add(Diagnostic.Error(DiagnosticCodes.ReservedEntityMember,
+                    $"entity member '{m.Name}' collides with the generated '{PropertyKey(m.Name)}' member",
+                    m.Span.Line, m.Span.Column));
+    }
 
     /// <summary>
     /// Validates an entity's identity strategy (R11.1): a <c>natural(T)</c> key must

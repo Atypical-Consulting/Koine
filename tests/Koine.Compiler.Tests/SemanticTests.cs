@@ -28,6 +28,25 @@ public class SemanticTests
         Assert.Contains(diags, d => d.Code == DiagnosticCodes.UnknownType);
     }
 
+    [Theory]
+    [InlineData("id")]   // collides with the generated identity property
+    [InlineData("Id")]
+    [InlineData("equals")]
+    [InlineData("getHashCode")]
+    public void Entity_member_colliding_with_a_generated_member_is_reported(string member)
+    {
+        var src = $"context C {{\n  entity E identified by EId {{ {member}: Int }}\n}}\n";
+        Assert.Contains(Validate(src), d => d.Code == DiagnosticCodes.ReservedEntityMember);
+    }
+
+    [Fact]
+    public void Entity_member_named_like_a_generated_member_but_distinct_after_casing_is_allowed()
+    {
+        // `gethashcode` PascalCases to `Gethashcode`, which does NOT collide with GetHashCode.
+        const string src = "context C {\n  entity E identified by EId { gethashcode: Int }\n}\n";
+        Assert.DoesNotContain(Validate(src), d => d.Code == DiagnosticCodes.ReservedEntityMember);
+    }
+
     [Fact]
     public void Duplicate_member_is_reported()
     {

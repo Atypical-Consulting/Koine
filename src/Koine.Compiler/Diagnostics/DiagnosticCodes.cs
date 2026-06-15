@@ -19,6 +19,7 @@ public static class DiagnosticCodes
     public const string UnknownAggregateRoot = "KOI0105";
     public const string UnknownEnumMemberForType = "KOI0106";
     public const string GenericArity = "KOI0107";
+    public const string ReservedEntityMember = "KOI0108";
 
     // ---- Expressions & references (KOI0200–0299) --------------------------
     public const string UnknownField = "KOI0201";
@@ -131,6 +132,7 @@ public static class DiagnosticCodes
         [UnknownAggregateRoot] = "An aggregate's root does not name a type declared inside it.",
         [UnknownEnumMemberForType] = "An enum-typed default names a member not in that enum.",
         [GenericArity] = "A collection type has the wrong number of type arguments.",
+        [ReservedEntityMember] = "An entity member collides with a generated member (Id, Equals, GetHashCode).",
         [UnknownField] = "An identifier resolves to no member, enum member, or built-in.",
         [UnknownMember] = "A member access names something the receiver type does not have.",
         [UnknownStringOperation] = "An unknown operation was applied to a String.",
