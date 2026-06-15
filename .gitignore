@@ -1,0 +1,8 @@
+bin/
+obj/
+generated/
+Generated/
+*.user
+.vs/
+.idea/
+*.received.*

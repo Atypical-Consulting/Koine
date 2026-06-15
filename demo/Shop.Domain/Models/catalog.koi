@@ -1,0 +1,54 @@
+// Catalog bounded context — the products a shop sells.
+context Catalog {
+
+  enum Currency { EUR, USD, GBP }
+
+  enum Availability { InStock, OutOfStock, Discontinued }
+
+  // A stock-keeping unit, validated by shape and normalized via string ops (R1.2).
+  value Sku {
+    code:       String
+    normalized: String = code.trim.upper
+    invariant code.trim.length > 0                  "a SKU cannot be blank"
+    invariant code matches /^[A-Z]{3}-[0-9]{4}$/     "SKU must look like ABC-1234"
+  }
+
+  value Price {
+    amount:   Decimal
+    currency: Currency
+    invariant amount >= 0   "a price cannot be negative"
+  }
+
+  // Soft keywords (R3.4): `value` is a perfectly good field name now.
+  value Weight {
+    value: Decimal
+    unit:  String
+    invariant value >= 0   "a weight cannot be negative"
+  }
+
+  // Instant comparison (R1.4): a sale window must be ordered.
+  value SalePeriod {
+    startsAt: Instant
+    endsAt:   Instant
+    invariant startsAt <= endsAt   "a sale must start before it ends"
+  }
+
+  entity Product identified by ProductId {
+    sku:          Sku
+    name:         String
+    price:        Price
+    weight:       Weight
+    availability: Availability = InStock
+
+    // Optional fields (R2.1) and a uniqueness Set (R2.2).
+    description:  String?
+    tags:         Set<String>
+    sale:         SalePeriod?
+
+    // Derived fields: string op, coalescing, conditional/comparison, presence check.
+    displayName:  String = name.trim
+    summary:      String = description ?? name
+    isAvailable:  Bool   = availability == InStock
+    onSale:       Bool   = sale.isPresent
+  }
+}

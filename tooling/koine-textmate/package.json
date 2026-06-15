@@ -1,0 +1,26 @@
+{
+  "name": "koine",
+  "displayName": "Koine",
+  "description": "Syntax highlighting for the Koine DDD language (.koi).",
+  "version": "0.1.0",
+  "publisher": "koine",
+  "engines": { "vscode": "^1.60.0" },
+  "categories": ["Programming Languages"],
+  "contributes": {
+    "languages": [
+      {
+        "id": "koine",
+        "aliases": ["Koine", "koine"],
+        "extensions": [".koi"],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "koine",
+        "scopeName": "source.koine",
+        "path": "./syntaxes/koine.tmLanguage.json"
+      }
+    ]
+  }
+}

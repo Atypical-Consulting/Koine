@@ -1,0 +1,90 @@
+/// Ordering bounded context — placing and pricing customer orders.
+context Ordering {
+
+  enum Currency { EUR, USD, GBP }
+
+  /// How far along a refund is. Shares the `Cancelled` member with OrderStatus —
+  /// bare members resolve against the field/operand enum type (R3.5).
+  enum RefundStatus { None, Pending, Cancelled }
+
+  /// The lifecycle state of an order.
+  enum OrderStatus { Draft, Submitted, Paid, Shipped, Cancelled }
+
+  /// A monetary amount in a specific currency. Never negative.
+  value Money {
+    amount:   Decimal
+    currency: Currency
+    invariant amount >= 0   "an amount cannot be negative"
+  }
+
+  aggregate Order root Order {
+
+    /// Raised when an order is submitted for processing (R6).
+    event OrderSubmitted {
+      orderId:   OrderId
+      lineCount: Int
+    }
+
+    /// One line of an order: a product, a quantity, and a unit price.
+    value OrderLine {
+      product:   ProductId
+      /// How many units of the product. At least one.
+      quantity:  Int
+      unitPrice: Money
+      // Derived (computed, get-only). lineTotal scales Money by a scalar;
+      // payable applies a conditional bulk discount (R1.1).
+      lineTotal: Money = unitPrice * quantity
+      /// What the customer actually pays for this line (10% off at 10+ units).
+      payable:   Money = if quantity >= 10 then lineTotal * 0.9 else lineTotal
+      invariant quantity >= 1   "an order line needs at least one unit"
+    }
+
+    /// The order a customer places — the consistency boundary of this aggregate.
+    entity Order identified by OrderId {
+      customer:    CustomerId
+      lines:       List<OrderLine>
+      status:      OrderStatus  = Draft
+      refund:      RefundStatus = None
+      submittedAt: Instant?
+
+      // Collection operations over the child lines (R1.3).
+      total:       Money = lines.sum(l => l.payable)
+      lineCount:   Int   = lines.count
+
+      // Presence check on an optional (R2.1) and scoped enum members (R3.5):
+      // bare `Cancelled` resolves to OrderStatus; the qualified form is explicit.
+      isPlaced:    Bool = submittedAt.isPresent
+      isCancelled: Bool = status == Cancelled
+      isRefunded:  Bool = refund == RefundStatus.Cancelled
+
+      invariant lines.all(l => l.quantity >= 1)    "every line needs a positive quantity"
+      invariant lines.distinctBy(l => l.product)   "no duplicate products in an order"
+      invariant status == Draft when lines.isEmpty
+
+      // The order's legal lifecycle (R7): only these transitions are permitted.
+      states status {
+        Draft     -> Submitted, Cancelled
+        Submitted -> Paid, Cancelled
+        Paid      -> Shipped, Cancelled
+        Shipped
+        Cancelled
+      }
+
+      /// Submit a drafted order for processing, stamping the time (R5) and
+      /// recording a domain event (R6).
+      command submit {
+        requires status == Draft   "only a draft order can be submitted"
+        requires !lines.isEmpty    "cannot submit an empty order"
+        status      -> Submitted
+        submittedAt -> now
+        emit OrderSubmitted(orderId: id, lineCount: lines.count)
+      }
+
+      /// Cancel an order that has not yet shipped.
+      command cancel {
+        requires status != Shipped "a shipped order cannot be cancelled"
+        status -> Cancelled
+      }
+    }
+  }
+}
