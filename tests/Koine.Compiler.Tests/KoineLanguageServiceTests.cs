@@ -89,4 +89,33 @@ public class KoineLanguageServiceTests
         var items = Complete(src, 2, 18); // one past the '.' on line 2
         Assert.Empty(items);
     }
+
+    [Fact]
+    public void Hover_over_a_value_type_shows_kind_and_members()
+    {
+        var src =
+            "context C {\n" +
+            "  value Money { amount: Decimal }\n" +
+            "  value Line { price: Money }\n" +
+            "}\n";
+        var hover = Svc.HoverAt(src, line: 2, character: 23); // over "Money" (col 22, Contains uses exclusive start)
+        Assert.NotNull(hover);
+        Assert.Contains("Money", hover!.Markdown);
+        Assert.Contains("Value", hover.Markdown);     // the kind label
+        Assert.Contains("amount", hover.Markdown);     // a member
+    }
+
+    [Fact]
+    public void Hover_returns_null_on_a_broken_document()
+    {
+        var src = "context C {\n  value Money { amount: ";
+        Assert.Null(Svc.HoverAt(src, line: 1, character: 9)); // over "Money", parse fails
+    }
+
+    [Fact]
+    public void Hover_over_whitespace_returns_null()
+    {
+        var src = "context C {\n  value Money { amount: Decimal }\n}\n";
+        Assert.Null(Svc.HoverAt(src, line: 0, character: 0));
+    }
 }

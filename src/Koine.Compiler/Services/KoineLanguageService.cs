@@ -172,4 +172,85 @@ public sealed class KoineLanguageService
         var matched = items.Where(i => i.Label.StartsWith(partial, StringComparison.Ordinal)).ToList();
         return matched; // empty list when nothing matches, by design
     }
+
+    public HoverResult? HoverAt(string source, int line, int character)
+    {
+        var ctx = TokenLocator.Locate(source, line, character);
+        var name = ctx.CurrentToken?.Text;
+        if (string.IsNullOrEmpty(name) || ctx.InsideStringOrRegex)
+            return null;
+
+        var (model, _) = _compiler.Parse(source);
+        if (model is null)
+            return null;
+        var index = new ModelIndex(model);
+
+        var markdown = RenderHover(name, index);
+        if (markdown is null)
+            return null;
+
+        var span = new SourceSpan(ctx.CurrentToken!.Line, ctx.CurrentToken.Column + 1);
+        return new HoverResult(markdown, span);
+    }
+
+    private static string? RenderHover(string name, ModelIndex index)
+    {
+        // 1. A declared type.
+        if (index.TryGetDecl(name, out var decl))
+        {
+            var kind = index.Classify(name);
+            var sb = new System.Text.StringBuilder();
+            sb.Append("**").Append(name).Append("** *(").Append(kind).Append(")*");
+            AppendBody(sb, decl);
+            if (decl.Doc is { Length: > 0 } doc)
+                sb.Append("\n\n").Append(doc);
+            return sb.ToString();
+        }
+
+        // 2. A bare enum member.
+        var owners = index.EnumsDeclaring(name);
+        if (owners.Count == 1)
+            return $"**{name}** *(enum member of {owners[0]})*";
+        if (owners.Count >= 2)
+            return $"**{name}** *(ambiguous enum member — declared in {string.Join(", ", owners)})*";
+
+        // 3. A spec.
+        if (index.IsAnySpec(name))
+        {
+            var spec = index.AllSpecs().FirstOrDefault(s => s.Name == name);
+            return spec is null ? null : $"**{name}** *(spec on {spec.TargetType})*";
+        }
+
+        // 4. Primitives / collection keywords / ID value objects: minimal card.
+        var classified = index.Classify(name);
+        return classified == TypeKind.Unknown ? null : $"**{name}** *({classified})*";
+    }
+
+    private static void AppendBody(System.Text.StringBuilder sb, TypeDecl decl)
+    {
+        switch (decl)
+        {
+            case ValueObjectDecl v:
+                foreach (var m in v.Members)
+                    sb.Append("\n\n`").Append(m.Name).Append(" : ").Append(m.Type.Name).Append('`');
+                break;
+            case EntityDecl e:
+                sb.Append("\n\nidentified by `").Append(e.IdentityName).Append("` (")
+                  .Append(e.IdStrategy).Append(')');
+                foreach (var m in e.Members)
+                    sb.Append("\n\n`").Append(m.Name).Append(" : ").Append(m.Type.Name).Append('`');
+                break;
+            case EnumDecl en:
+                sb.Append("\n\n").Append(string.Join(", ", en.MemberNames));
+                break;
+            case EventDecl ev:
+                foreach (var m in ev.Members)
+                    sb.Append("\n\n`").Append(m.Name).Append(" : ").Append(m.Type.Name).Append('`');
+                break;
+            case AggregateDecl agg:
+                sb.Append("\n\nroot `").Append(agg.RootName).Append('`');
+                if (agg.IsVersioned) sb.Append(" *(versioned)*");
+                break;
+        }
+    }
 }
