@@ -17,10 +17,11 @@ public sealed record HoverResult(string Markdown);
 public sealed record DefinitionResult(string Uri, SourceSpan Target);
 
 /// <summary>
-/// Editor-agnostic language services for <c>.koi</c>: completion, hover, and
-/// go-to-definition over (source, line, character). Completion is lexer-only and
-/// works on broken documents; hover/definition build a model and return null when
-/// parsing fails.
+/// Editor-agnostic language services for <c>.koi</c>. <see cref="CompleteAt"/> is
+/// single-file and lexer-only (works on broken documents). <see cref="HoverAt"/> and
+/// <see cref="DefinitionAt"/> take a workspace document map (uri → source) plus the
+/// active URI and resolve declarations across files via <see cref="WorkspaceIndex"/>,
+/// returning null when nothing resolves.
 /// </summary>
 public sealed class KoineLanguageService
 {
