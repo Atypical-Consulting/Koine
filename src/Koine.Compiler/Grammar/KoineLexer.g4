@@ -26,6 +26,7 @@ REQUIRES   : 'requires' ;
 EVENT      : 'event' ;
 EMIT       : 'emit' ;
 STATES     : 'states' ;
+CREATE     : 'create' ;
 WHEN       : 'when' ;
 IF         : 'if' ;
 THEN       : 'then' ;
@@ -57,6 +58,7 @@ LT  : '<' ;
 GT  : '>' ;
 
 RARROW : '->' ;   // state transition: `status -> Placed` (before MINUS for maximal munch)
+LARROW : '<-' ;   // factory field initialization: `total <- lines.sum(...)`
 PLUS  : '+' ;
 MINUS : '-' ;
 STAR  : '*' ;

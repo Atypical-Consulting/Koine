@@ -43,7 +43,8 @@ public sealed record EntityDecl(
     IReadOnlyList<Member> Members,
     IReadOnlyList<Invariant> Invariants,
     IReadOnlyList<CommandDecl> Commands,
-    IReadOnlyList<StatesDecl> States) : TypeDecl(Name);
+    IReadOnlyList<StatesDecl> States,
+    IReadOnlyList<FactoryDecl> Factories) : TypeDecl(Name);
 
 /// <summary>
 /// A state machine bound to an enum-typed lifecycle field, defining the legal
@@ -118,6 +119,17 @@ public sealed record CommandDecl(
 /// <summary>A typed command parameter.</summary>
 public sealed record Param(string Name, TypeRef Type) : KoineNode;
 
+/// <summary>
+/// A factory: an intention-revealing creation operation on an aggregate root.
+/// Named, with typed parameters, preconditions (<c>requires</c>), field
+/// initializations (<c>field &lt;- expr</c>), and creation events (<c>emit</c>).
+/// Identity is generated automatically. TARGET-AGNOSTIC.
+/// </summary>
+public sealed record FactoryDecl(
+    string Name,
+    IReadOnlyList<Param> Parameters,
+    IReadOnlyList<CommandStmt> Body) : KoineNode;
+
 /// <summary>Base type for the statements that make up a command body.</summary>
 public abstract record CommandStmt : KoineNode;
 
@@ -126,6 +138,12 @@ public sealed record RequiresClause(Expr Condition, string? Message) : CommandSt
 
 /// <summary>A state transition: <c>Field -&gt; Value</c>, assigning a new value to a mutable field.</summary>
 public sealed record Transition(string Field, Expr Value) : CommandStmt;
+
+/// <summary>
+/// A factory field initialization: <c>Field &lt;- Value</c>, supplying a member's
+/// value at construction time (used inside a <see cref="FactoryDecl"/> body).
+/// </summary>
+public sealed record Initialization(string Field, Expr Value) : CommandStmt;
 
 /// <summary>Records a domain event: <c>emit EventName(field: value, ...)</c>.</summary>
 public sealed record EmitClause(string EventName, IReadOnlyList<EmitArg> Args) : CommandStmt;

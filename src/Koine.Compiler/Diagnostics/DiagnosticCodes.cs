@@ -62,6 +62,15 @@ public static class DiagnosticCodes
     public const string UnreachableTransition = "KOI0703";
     public const string DuplicateStatesBlock = "KOI0704";
 
+    // ---- Factories (KOI0800–0899) -----------------------------------------
+    public const string DuplicateFactory = "KOI0801";
+    public const string FactoryNameCollision = "KOI0802";
+    public const string InvalidInitializationTarget = "KOI0803";
+    public const string InitializationTypeMismatch = "KOI0804";
+    public const string DuplicateInitialization = "KOI0805";
+    public const string UninitializedFactoryField = "KOI0806";
+    public const string ReservedFactoryParameter = "KOI0807";
+
     /// <summary>Every code with a one-line description. Tested for uniqueness/coverage.</summary>
     public static readonly IReadOnlyDictionary<string, string> Catalogue = new Dictionary<string, string>
     {
@@ -103,5 +112,12 @@ public static class DiagnosticCodes
         [UnknownState] = "A state is not a member of the bound enum.",
         [UnreachableTransition] = "A command transitions to a state no rule can reach.",
         [DuplicateStatesBlock] = "A field has more than one states block.",
+        [DuplicateFactory] = "An entity declares the same factory name more than once.",
+        [FactoryNameCollision] = "A factory's name collides with a property or command of the entity.",
+        [InvalidInitializationTarget] = "A factory initialization targets something that is not a settable field.",
+        [InitializationTypeMismatch] = "A factory initialization assigns a value of an incompatible type.",
+        [DuplicateInitialization] = "A factory initializes the same field more than once.",
+        [UninitializedFactoryField] = "A factory leaves a required field uninitialized with no default.",
+        [ReservedFactoryParameter] = "A factory parameter uses the reserved name 'id' (the auto-generated identity).",
     };
 }

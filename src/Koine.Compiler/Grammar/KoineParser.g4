@@ -25,7 +25,7 @@ typeDecl       : valueDecl
 valueDecl      : VALUE Identifier LBRACE member* invariant* RBRACE ;
 
 entityDecl     : ENTITY Identifier IDENTIFIED BY Identifier
-                 LBRACE member* invariant* statesDecl* commandDecl* RBRACE ;
+                 LBRACE member* invariant* statesDecl* commandDecl* factoryDecl* RBRACE ;
 
 // ---- State machine (legal transitions of an enum-typed lifecycle field) -----
 
@@ -56,6 +56,17 @@ emitArgList    : emitArg ( COMMA emitArg )* ;
 
 emitArg        : softName COLON expression ;
 
+// ---- Factories (intention-revealing creation of an aggregate root) ----------
+
+factoryDecl    : CREATE Identifier ( LPAREN paramList? RPAREN )? LBRACE factoryStmt* RBRACE ;
+
+factoryStmt    : requiresClause
+               | initialization
+               | emitClause
+               ;
+
+initialization : softName LARROW expression ;                  // `total <- lines.sum(...)`
+
 aggregateDecl  : AGGREGATE Identifier ROOT Identifier LBRACE typeDecl* RBRACE ;
 
 enumDecl       : ENUM Identifier LBRACE Identifier ( COMMA Identifier )* COMMA? RBRACE ;
@@ -79,7 +90,7 @@ typeRef        : typeName ( LT typeRef ( COMMA typeRef )? GT )? QUESTION? ;
 softName       : Identifier | declKeyword | WHEN | IF | THEN | ELSE ;
 exprName       : Identifier | declKeyword | WHEN ;
 typeName       : Identifier | declKeyword ;
-declKeyword    : CONTEXT | VALUE | ENTITY | AGGREGATE | ENUM | IDENTIFIED | BY | ROOT | COMMAND | REQUIRES | EVENT | EMIT | STATES ;
+declKeyword    : CONTEXT | VALUE | ENTITY | AGGREGATE | ENUM | IDENTIFIED | BY | ROOT | COMMAND | REQUIRES | EVENT | EMIT | STATES | CREATE ;
 
 invariant      : INVARIANT expression StringLiteral? ;
 

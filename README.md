@@ -165,8 +165,10 @@ this lets a regex literal be read as a single token without colliding with the `
 ### Known limitations (v0)
 
 - **Soft keywords.** Most Koine keywords (`context`, `value`, `entity`, `aggregate`, `enum`, `by`, `root`,
-  `when`, `if`, …) may now be used as field names, and the declaration keywords additionally as type names
-  and in expressions. The mode-switching `matches` and the `invariant` keyword remain reserved.
+  `command`, `create`, `when`, `if`, …) may now be used as field names, and the declaration keywords
+  additionally as type names and in expressions. The mode-switching `matches` and the `invariant` keyword
+  remain reserved. Like `->`, the factory-initialization operator `<-` is atomic, so a comparison against a
+  negative operand needs a space (`x < -1`, not `x<-1`).
 - **Scoped enum members.** Bare enum members are resolved against the field/operand enum type, so two enums
   may share a member name (e.g. both `Cancelled`); a genuinely ambiguous bare member must be qualified
   (`OrderStatus.Cancelled`).

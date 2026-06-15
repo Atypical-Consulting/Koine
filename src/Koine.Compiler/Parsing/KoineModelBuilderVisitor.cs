@@ -76,11 +76,12 @@ public sealed class KoineModelBuilderVisitor : KoineParserBaseVisitor<object?>
         var invariants = ctx.invariant().Select(BuildInvariant).ToList();
         var states = ctx.statesDecl().Select(BuildStates).ToList();
         var commands = ctx.commandDecl().Select(BuildCommand).ToList();
+        var factories = ctx.factoryDecl().Select(BuildFactory).ToList();
 
         var name = ctx.Identifier(0).GetText();
         var identityName = ctx.Identifier(1).GetText();
 
-        return new EntityDecl(name, identityName, members, invariants, commands, states)
+        return new EntityDecl(name, identityName, members, invariants, commands, states, factories)
         {
             Span = SpanOf(ctx),
             Doc = DocFor(ctx)
@@ -118,6 +119,46 @@ public sealed class KoineModelBuilderVisitor : KoineParserBaseVisitor<object?>
 
     private static Param BuildParam(KoineParser.ParamContext ctx) =>
         new(ctx.softName().GetText(), BuildTypeRef(ctx.typeRef())) { Span = SpanOf(ctx) };
+
+    private FactoryDecl BuildFactory(KoineParser.FactoryDeclContext ctx)
+    {
+        var parameters = ctx.paramList() is { } pl
+            ? pl.param().Select(BuildParam).ToList()
+            : new List<Param>();
+        var body = ctx.factoryStmt().Select(BuildFactoryStmt).ToList();
+
+        return new FactoryDecl(ctx.Identifier().GetText(), parameters, body)
+        {
+            Span = SpanOf(ctx),
+            Doc = DocFor(ctx)
+        };
+    }
+
+    private static CommandStmt BuildFactoryStmt(KoineParser.FactoryStmtContext ctx)
+    {
+        if (ctx.requiresClause() is { } req)
+        {
+            var message = req.StringLiteral() is { } str
+                ? UnescapeString(StripQuotes(str.GetText()))
+                : null;
+            return new RequiresClause(BuildExpression(req.expression()), message) { Span = SpanOf(req) };
+        }
+
+        if (ctx.emitClause() is { } emit)
+        {
+            var args = emit.emitArgList() is { } al
+                ? al.emitArg().Select(a =>
+                    new EmitArg(a.softName().GetText(), BuildExpression(a.expression())) { Span = SpanOf(a) }).ToList()
+                : new List<EmitArg>();
+            return new EmitClause(emit.Identifier().GetText(), args) { Span = SpanOf(emit) };
+        }
+
+        var init = ctx.initialization();
+        return new Initialization(init.softName().GetText(), BuildExpression(init.expression()))
+        {
+            Span = SpanOf(init)
+        };
+    }
 
     private static CommandStmt BuildCommandStmt(KoineParser.CommandStmtContext ctx)
     {
