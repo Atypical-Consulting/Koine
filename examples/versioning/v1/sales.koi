@@ -1,0 +1,12 @@
+// Baseline (v1) of a published Sales contract. `koine check` compares a later
+// model against this to catch breaking changes to the published language.
+context Sales version 1 {
+
+  integration event OrderPlaced {
+    orderId: OrderId
+    total:   Decimal
+    coupon:  String
+  }
+
+  publishes OrderPlaced
+}
