@@ -14,7 +14,7 @@ public sealed record CompletionItem(string Label, CompletionItemKind Kind, strin
 public sealed record HoverResult(string Markdown);
 
 /// <summary>A go-to-definition target: a single 1-based point (SourceSpan has no end).</summary>
-public sealed record DefinitionResult(SourceSpan Target);
+public sealed record DefinitionResult(string Uri, SourceSpan Target);
 
 /// <summary>
 /// Editor-agnostic language services for <c>.koi</c>: completion, hover, and
@@ -173,130 +173,32 @@ public sealed class KoineLanguageService
         return matched; // empty list when nothing matches, by design
     }
 
-    public HoverResult? HoverAt(string source, int line, int character)
+    public HoverResult? HoverAt(IReadOnlyDictionary<string, string> documents, string activeUri, int line, int character)
     {
+        if (!documents.TryGetValue(activeUri, out var source))
+            return null;
+
         var ctx = TokenLocator.Locate(source, line, character);
         var name = ctx.CurrentToken?.Text;
         if (string.IsNullOrEmpty(name) || ctx.InsideStringOrRegex)
             return null;
 
-        var (model, _) = _compiler.Parse(source);
-        if (model is null)
-            return null;
-        var index = new ModelIndex(model);
-
-        var markdown = RenderHover(name, index);
+        var markdown = new WorkspaceIndex(documents).ResolveHover(activeUri, name);
         return markdown is null ? null : new HoverResult(markdown);
     }
 
-    public DefinitionResult? DefinitionAt(string source, int line, int character)
+    public DefinitionResult? DefinitionAt(IReadOnlyDictionary<string, string> documents, string activeUri, int line, int character)
     {
+        if (!documents.TryGetValue(activeUri, out var source))
+            return null;
+
         var ctx = TokenLocator.Locate(source, line, character);
         var name = ctx.CurrentToken?.Text;
         if (string.IsNullOrEmpty(name) || ctx.InsideStringOrRegex)
             return null;
 
-        var (model, _) = _compiler.Parse(source);
-        if (model is null)
-            return null;
-        var index = new ModelIndex(model);
-
-        // 1. A declared type -> its declaration span.
-        if (index.TryGetDecl(name, out var decl) && decl.Span != SourceSpan.None)
-            return new DefinitionResult(decl.Span);
-
-        // 2. An enum member -> the member's own span. Navigate only when the member
-        // name is unambiguous; if two enums declare it, fall through (return null)
-        // rather than jump to an arbitrary one — matches hover's ambiguity handling.
-        var owners = index.EnumsDeclaring(name);
-        if (owners.Count == 1
-            && index.TryGetDecl(owners[0], out var enumDecl) && enumDecl is EnumDecl e)
-        {
-            var member = e.Members.FirstOrDefault(m => m.Name == name);
-            if (member is not null && member.Span != SourceSpan.None)
-                return new DefinitionResult(member.Span);
-        }
-
-        // 3. A spec -> its declaration span.
-        var spec = index.AllSpecs().FirstOrDefault(s => s.Name == name);
-        if (spec is not null && spec.Span != SourceSpan.None)
-            return new DefinitionResult(spec.Span);
-
-        // Primitives, collection keywords, and ID value objects have no node: not navigable.
-        return null;
+        var loc = new WorkspaceIndex(documents).ResolveDefinition(activeUri, name);
+        return loc is null ? null : new DefinitionResult(loc.Uri, loc.Span);
     }
 
-    private static string? RenderHover(string name, ModelIndex index)
-    {
-        // 1. A declared type.
-        if (index.TryGetDecl(name, out var decl))
-        {
-            var kind = index.Classify(name);
-            var sb = new System.Text.StringBuilder();
-            sb.Append("**").Append(name).Append("** *(").Append(KindLabel(kind)).Append(")*");
-            AppendBody(sb, decl);
-            if (decl.Doc is { Length: > 0 } doc)
-                sb.Append("\n\n").Append(doc);
-            return sb.ToString();
-        }
-
-        // 2. A bare enum member.
-        var owners = index.EnumsDeclaring(name);
-        if (owners.Count == 1)
-            return $"**{name}** *(enum member of {owners[0]})*";
-        if (owners.Count >= 2)
-            return $"**{name}** *(ambiguous enum member — declared in {string.Join(", ", owners)})*";
-
-        // 3. A spec.
-        var spec = index.AllSpecs().FirstOrDefault(s => s.Name == name);
-        if (spec is not null)
-            return $"**{name}** *(spec on {spec.TargetType})*";
-
-        // 4. Primitives / collection keywords / ID value objects: minimal card.
-        var classified = index.Classify(name);
-        return classified == TypeKind.Unknown ? null : $"**{name}** *({KindLabel(classified)})*";
-    }
-
-    private static string KindLabel(TypeKind kind) => kind switch
-    {
-        TypeKind.IdValueObject => "ID value object",
-        _ => kind.ToString(),
-    };
-
-    private static string TypeLabel(TypeRef t)
-    {
-        var name = t.Element is null ? t.Name
-            : t.Value is null ? $"{t.Name}<{TypeLabel(t.Element)}>"
-            : $"{t.Name}<{TypeLabel(t.Element)}, {TypeLabel(t.Value)}>";
-        return t.IsOptional ? name + "?" : name;
-    }
-
-    private static void AppendBody(System.Text.StringBuilder sb, TypeDecl decl)
-    {
-        switch (decl)
-        {
-            case ValueObjectDecl v:
-                foreach (var m in v.Members)
-                    sb.Append("\n\n`").Append(m.Name).Append(" : ").Append(TypeLabel(m.Type)).Append('`');
-                break;
-            case EntityDecl e:
-                sb.Append("\n\nidentified by `").Append(e.IdentityName).Append("` (")
-                  .Append(e.IdStrategy).Append(')');
-                foreach (var m in e.Members)
-                    sb.Append("\n\n`").Append(m.Name).Append(" : ").Append(TypeLabel(m.Type)).Append('`');
-                break;
-            case EnumDecl en:
-                sb.Append("\n\n").Append(string.Join(", ", en.MemberNames));
-                break;
-            case EventDecl ev:
-                foreach (var m in ev.Members)
-                    sb.Append("\n\n`").Append(m.Name).Append(" : ").Append(TypeLabel(m.Type)).Append('`');
-                break;
-            case AggregateDecl agg:
-                // Listing the aggregate's owned/nested types is intentionally omitted for now.
-                sb.Append("\n\nroot `").Append(agg.RootName).Append('`');
-                if (agg.IsVersioned) sb.Append(" *(versioned)*");
-                break;
-        }
-    }
 }

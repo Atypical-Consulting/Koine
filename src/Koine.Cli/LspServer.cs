@@ -209,11 +209,10 @@ internal sealed class LspServer
 
     private object? HoverResultJson(JsonElement root)
     {
-        if (!TryGetUri(root, out var uri) || !TryGetPosition(root, out var line, out var ch)
-            || !_docs.TryGetValue(uri, out var text))
+        if (!TryGetUri(root, out var uri) || !TryGetPosition(root, out var line, out var ch))
             return null;
 
-        var hover = _ls.HoverAt(text, line, ch);
+        var hover = _ls.HoverAt(_docs, uri, line, ch);
         if (hover is null)
             return null;
 
@@ -229,11 +228,10 @@ internal sealed class LspServer
 
     private object? DefinitionResultJson(JsonElement root)
     {
-        if (!TryGetUri(root, out var uri) || !TryGetPosition(root, out var line, out var ch)
-            || !_docs.TryGetValue(uri, out var text))
+        if (!TryGetUri(root, out var uri) || !TryGetPosition(root, out var line, out var ch))
             return null;
 
-        var def = _ls.DefinitionAt(text, line, ch);
+        var def = _ls.DefinitionAt(_docs, uri, line, ch);
         if (def is null)
             return null;
 
@@ -244,7 +242,7 @@ internal sealed class LspServer
         return new Dictionary<string, object?>
         {
             // Single-file model: the definition always lives in the requesting document.
-            ["uri"] = uri,
+            ["uri"] = def.Uri,
             ["range"] = new Dictionary<string, object?>
             {
                 ["start"] = new Dictionary<string, object?> { ["line"] = startLine, ["character"] = startChar },
