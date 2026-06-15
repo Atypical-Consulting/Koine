@@ -121,6 +121,9 @@ public sealed class WorkspaceIndex
         var owners = index.EnumsDeclaring(name);
         if (owners.Count == 1)
             return $"**{name}** *(enum member of {owners[0]})*";
+        // Asymmetry vs StrongSpan (which returns null here): there is no single navigation
+        // target for an ambiguous member, but hover can still show a useful informational
+        // card. Keep this — do not "align" it with StrongSpan.
         if (owners.Count >= 2)
             return $"**{name}** *(ambiguous enum member — declared in {string.Join(", ", owners)})*";
 
