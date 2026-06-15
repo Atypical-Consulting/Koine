@@ -91,13 +91,14 @@ public sealed class SemanticValidator
         switch (type)
         {
             case ValueObjectDecl v:
+                ReportGeneratedMemberCollisions(v.Members, ValueObjectGeneratedMembers, "value object", diagnostics);
                 ValidateMembersAndInvariants(v.Members, v.Invariants, index, resolver, enumMembers, diagnostics, SpecNames(index, v.Name));
                 if (v.IsQuantity)
                     ValidateQuantity(v, index, diagnostics);
                 break;
             case EntityDecl e:
                 ValidateIdentityStrategy(e, diagnostics);
-                ValidateEntityReservedMembers(e, diagnostics);
+                ReportGeneratedMemberCollisions(e.Members, EntityGeneratedMembers, "entity", diagnostics);
                 var entitySpecs = SpecNames(index, e.Name);
                 ValidateMembersAndInvariants(e.Members, e.Invariants, index, resolver, enumMembers, diagnostics, entitySpecs);
                 ValidateStates(e, index, resolver, enumMembers, diagnostics);
@@ -134,13 +135,19 @@ public sealed class SemanticValidator
             case EventDecl ev:
                 // Events are validated like value objects but carry no invariants.
                 ValidateMembersAndInvariants(ev.Members, Array.Empty<Invariant>(), index, resolver, enumMembers, diagnostics);
-                // The generated record always carries an `OccurredOn` property; a
-                // field that maps to it would produce a duplicate-member.
+                // An event is a record: the always-present `OccurredOn` metadata and the
+                // record-synthesized members (Equals/GetHashCode/ToString/…) are reserved.
                 foreach (var m in ev.Members)
+                {
                     if (string.Equals(m.Name, "OccurredOn", StringComparison.OrdinalIgnoreCase))
                         diagnostics.Add(Diagnostic.Error(DiagnosticCodes.ReservedEventField,
                             $"event field '{m.Name}' collides with the reserved 'OccurredOn' metadata property",
                             m.Span.Line, m.Span.Column));
+                    else if (IsReservedRecordMember(m.Name))
+                        diagnostics.Add(Diagnostic.Error(DiagnosticCodes.ReservedRecordMember,
+                            $"event field '{m.Name}' collides with a record-synthesized member",
+                            m.Span.Line, m.Span.Column));
+                }
                 break;
             case ReadModelDecl rm:
                 ValidateReadModel(rm, index, resolver, enumMembers, diagnostics);
@@ -568,23 +575,32 @@ public sealed class SemanticValidator
     private static IEnumerable<KeyValuePair<string, TypeRef>> IdScopePair(EntityDecl entity) =>
         new[] { new KeyValuePair<string, TypeRef>("id", new TypeRef(entity.IdentityName)) };
 
-    /// <summary>Properties/methods every generated entity carries; a member mapping to one fails to compile (CS0102).</summary>
+    /// <summary>Members every generated entity carries; a member mapping to one fails to compile (CS0102).</summary>
     private static readonly IReadOnlySet<string> EntityGeneratedMembers =
         new HashSet<string>(StringComparer.Ordinal) { "Id", "Equals", "GetHashCode" };
 
     /// <summary>
-    /// Rejects an entity member whose emitted property name collides with a member the
-    /// entity always generates (the <c>Id</c> identity and the identity-equality
-    /// <c>Equals</c>/<c>GetHashCode</c>). Without this, e.g. an <c>id</c> field emits a
-    /// second <c>Id</c> property (CS0102). The conditional <c>Version</c> token is covered
-    /// by <see cref="ValidateVersioning"/>.
+    /// Members every generated value object carries: the identity-equality
+    /// <c>Equals</c>/<c>GetHashCode</c> (from the <c>ValueObject</c> base) and the
+    /// overridden <c>GetEqualityComponents</c>.
     /// </summary>
-    private static void ValidateEntityReservedMembers(EntityDecl entity, List<Diagnostic> diagnostics)
+    private static readonly IReadOnlySet<string> ValueObjectGeneratedMembers =
+        new HashSet<string>(StringComparer.Ordinal) { "Equals", "GetHashCode", "GetEqualityComponents" };
+
+    /// <summary>
+    /// Rejects a member whose emitted property name collides with a member the emitted
+    /// class always generates (e.g. an entity's <c>id</c> field becoming a second
+    /// <c>Id</c> property, CS0102; a value object's <c>equals</c> field shadowing
+    /// <c>ValueObject.Equals</c>). The conditional <c>Version</c> token is covered by
+    /// <see cref="ValidateVersioning"/>.
+    /// </summary>
+    private static void ReportGeneratedMemberCollisions(
+        IReadOnlyList<Member> members, IReadOnlySet<string> generated, string kind, List<Diagnostic> diagnostics)
     {
-        foreach (var m in entity.Members)
-            if (EntityGeneratedMembers.Contains(PropertyKey(m.Name)))
-                diagnostics.Add(Diagnostic.Error(DiagnosticCodes.ReservedEntityMember,
-                    $"entity member '{m.Name}' collides with the generated '{PropertyKey(m.Name)}' member",
+        foreach (var m in members)
+            if (generated.Contains(PropertyKey(m.Name)))
+                diagnostics.Add(Diagnostic.Error(DiagnosticCodes.ReservedGeneratedMember,
+                    $"{kind} member '{m.Name}' collides with the generated '{PropertyKey(m.Name)}' member",
                     m.Span.Line, m.Span.Column));
     }
 

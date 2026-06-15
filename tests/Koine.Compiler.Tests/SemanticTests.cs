@@ -36,7 +36,7 @@ public class SemanticTests
     public void Entity_member_colliding_with_a_generated_member_is_reported(string member)
     {
         var src = $"context C {{\n  entity E identified by EId {{ {member}: Int }}\n}}\n";
-        Assert.Contains(Validate(src), d => d.Code == DiagnosticCodes.ReservedEntityMember);
+        Assert.Contains(Validate(src), d => d.Code == DiagnosticCodes.ReservedGeneratedMember);
     }
 
     [Fact]
@@ -44,7 +44,27 @@ public class SemanticTests
     {
         // `gethashcode` PascalCases to `Gethashcode`, which does NOT collide with GetHashCode.
         const string src = "context C {\n  entity E identified by EId { gethashcode: Int }\n}\n";
-        Assert.DoesNotContain(Validate(src), d => d.Code == DiagnosticCodes.ReservedEntityMember);
+        Assert.DoesNotContain(Validate(src), d => d.Code == DiagnosticCodes.ReservedGeneratedMember);
+    }
+
+    [Theory]
+    [InlineData("equals")]
+    [InlineData("getHashCode")]
+    [InlineData("getEqualityComponents")] // the overridden method on every value object
+    public void Value_object_member_colliding_with_a_generated_member_is_reported(string member)
+    {
+        var src = $"context C {{\n  value V {{ {member}: Int }}\n}}\n";
+        Assert.Contains(Validate(src), d => d.Code == DiagnosticCodes.ReservedGeneratedMember);
+    }
+
+    [Theory]
+    [InlineData("equals")]
+    [InlineData("toString")]
+    [InlineData("printMembers")]
+    public void Event_field_colliding_with_a_record_member_is_reported(string field)
+    {
+        var src = $"context C {{\n  event E {{ {field}: Int }}\n}}\n";
+        Assert.Contains(Validate(src), d => d.Code == DiagnosticCodes.ReservedRecordMember);
     }
 
     [Fact]
