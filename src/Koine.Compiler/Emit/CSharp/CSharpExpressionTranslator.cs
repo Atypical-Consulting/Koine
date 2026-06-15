@@ -25,15 +25,38 @@ internal sealed class CSharpExpressionTranslator
     private readonly ISet<string> _memberNames;
     private readonly IReadOnlyDictionary<string, string> _enumMemberToType;
 
-    // Local names currently in scope (lambda parameters, command parameters):
+    // Local names currently in scope (lambda parameters, command/factory parameters):
     // rendered verbatim (camelCase, escaped) rather than as members.
     private readonly HashSet<string> _locals = new(StringComparer.Ordinal);
 
-    /// <summary>Registers a local (e.g. a command parameter) for the body about to be translated.</summary>
-    public void PushLocal(string name) => _locals.Add(name);
+    // Declared types of locals (when known), so type-directed emission (e.g. choosing
+    // a value-object `sum` fold over a numeric Sum) can resolve a parameter's element
+    // type — the member-only _scope does not know about command/factory parameters.
+    private readonly Dictionary<string, TypeRef> _localTypes = new(StringComparer.Ordinal);
+
+    /// <summary>Registers a local (e.g. a command/factory parameter) for the body about to be translated.</summary>
+    public void PushLocal(string name, TypeRef? type = null)
+    {
+        _locals.Add(name);
+        if (type is not null)
+            _localTypes[name] = type;
+    }
 
     /// <summary>Removes a previously-registered local.</summary>
-    public void PopLocal(string name) => _locals.Remove(name);
+    public void PopLocal(string name)
+    {
+        _locals.Remove(name);
+        _localTypes.Remove(name);
+    }
+
+    /// <summary>The member scope extended with any known local (parameter) types.</summary>
+    private TypeScope EffectiveScope()
+    {
+        var scope = _scope;
+        foreach (var kv in _localTypes)
+            scope = scope.With(kv.Key, kv.Value);
+        return scope;
+    }
 
     // The enum type the whole expression is expected to produce (a derived/default
     // member of enum type). Used to qualify a bare shared enum member in positions
@@ -361,9 +384,10 @@ internal sealed class CSharpExpressionTranslator
     /// <summary>The inferred type a collection call's lambda selector produces.</summary>
     private TypeRef? InferSelectorType(CallExpr call)
     {
-        var element = TypeResolver.ElementOf(_resolver.Infer(call.Target, _scope));
+        var scope = EffectiveScope();
+        var element = TypeResolver.ElementOf(_resolver.Infer(call.Target, scope));
         if (element is not null && call.Args is [LambdaExpr lambda])
-            return _resolver.Infer(lambda.Body, _scope.With(lambda.Parameter, element));
+            return _resolver.Infer(lambda.Body, scope.With(lambda.Parameter, element));
         return null;
     }
 

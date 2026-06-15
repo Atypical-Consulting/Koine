@@ -27,6 +27,31 @@ public static class MemberAnalysis
         return false;
     }
 
+    /// <summary>
+    /// Structural equality of two type references, ignoring optionality and recursing
+    /// into generic arguments. Used to decide whether a factory parameter auto-binds
+    /// to a same-named member (so the validator and emitter agree).
+    /// </summary>
+    public static bool TypeShapeEquals(TypeRef a, TypeRef b)
+    {
+        if (a.Name != b.Name) return false;
+        if ((a.Element is null) != (b.Element is null)) return false;
+        if (a.Element is not null && !TypeShapeEquals(a.Element, b.Element!)) return false;
+        if ((a.Value is null) != (b.Value is null)) return false;
+        if (a.Value is not null && !TypeShapeEquals(a.Value, b.Value!)) return false;
+        return true;
+    }
+
+    /// <summary>
+    /// True when a factory parameter <paramref name="param"/> implicitly initializes
+    /// a same-named constructor member <paramref name="member"/>: identical names and
+    /// type shapes, and the parameter is not optional where the member is required.
+    /// </summary>
+    public static bool AutoBinds(Param param, Member member) =>
+        param.Name == member.Name
+        && TypeShapeEquals(param.Type, member.Type)
+        && (!param.Type.IsOptional || member.Type.IsOptional);
+
     /// <summary>Enumerates every identifier name referenced inside an expression.</summary>
     public static IEnumerable<string> ReferencedIdentifiers(Expr expr)
     {

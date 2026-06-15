@@ -464,6 +464,28 @@ internal sealed class ExpressionChecker
                 $"cannot assign a value of type '{FullName(type)}' to field '{fieldName}' of type '{FullName(field)}'", value);
     }
 
+    /// <summary>
+    /// Validates a factory initialization value (<c>field &lt;- value</c>) against the
+    /// target member's declared type: identifiers/ops are checked, a bare enum member
+    /// is resolved against the field's enum, and an incompatible or unsafely-optional
+    /// value is reported.
+    /// </summary>
+    public void CheckInitializationValue(Expr value, TypeRef field, string fieldName, TypeScope scope)
+    {
+        Check(value, scope, field);
+
+        var type = ResolveEnumOperand(value, field, scope) ?? _resolver.Infer(value, scope);
+        if (type is null)
+            return;
+
+        if (type is { IsOptional: true } && !field.IsOptional)
+            Report(DiagnosticCodes.OptionalAssignedToNonOptional,
+                $"optional value assigned to non-optional field '{fieldName}'; provide a fallback with '??'", value);
+        else if (!Assignable(type, field))
+            Report(DiagnosticCodes.InitializationTypeMismatch,
+                $"cannot initialize field '{fieldName}' of type '{FullName(field)}' with a value of type '{FullName(type)}'", value);
+    }
+
     /// <summary>Validates an emit payload value against the event field's declared type.</summary>
     public void CheckEmitArg(Expr value, TypeRef field, string eventName, string fieldName, TypeScope scope)
     {

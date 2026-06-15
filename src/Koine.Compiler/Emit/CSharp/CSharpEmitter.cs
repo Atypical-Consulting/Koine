@@ -354,6 +354,17 @@ public sealed class CSharpEmitter : IEmitter
                             foreach (var arg in em.Args) ScanForValueObjectSum(arg.Value, cmdScope, resolver, needs);
                     }
                 }
+                foreach (var factory in entity.Factories)
+                {
+                    var factScope = factory.Parameters.Aggregate(scope, (s, p) => s.With(p.Name, p.Type));
+                    foreach (var stmt in factory.Body)
+                    {
+                        if (stmt is RequiresClause req) ScanForValueObjectSum(req.Condition, factScope, resolver, needs);
+                        else if (stmt is Initialization ini) ScanForValueObjectSum(ini.Value, factScope, resolver, needs);
+                        else if (stmt is EmitClause em)
+                            foreach (var arg in em.Args) ScanForValueObjectSum(arg.Value, factScope, resolver, needs);
+                    }
+                }
                 foreach (var guard in StateGuards(entity))
                     ScanForValueObjectSum(guard, scope, resolver, needs);
             }
@@ -433,6 +444,8 @@ public sealed class CSharpEmitter : IEmitter
             {
                 foreach (var (expr, scope) in CommandExpressions(entity, memberTypes))
                     ScanForScalarMul(expr, scope, index, needs);
+                foreach (var (expr, scope) in FactoryExpressions(entity, memberTypes))
+                    ScanForScalarMul(expr, scope, index, needs);
                 foreach (var guard in StateGuards(entity))
                     ScanForScalarMul(guard, memberTypes, index, needs);
             }
@@ -462,6 +475,29 @@ public sealed class CSharpEmitter : IEmitter
             {
                 if (stmt is RequiresClause req) yield return (req.Condition, scope);
                 else if (stmt is Transition tr) yield return (tr.Value, scope);
+                else if (stmt is EmitClause em)
+                    foreach (var arg in em.Args) yield return (arg.Value, scope);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Every expression in an entity's factories (requires conditions, initialization
+    /// values, and emit payloads), paired with a member-type map extended by that
+    /// factory's parameters — for the operator-need scans.
+    /// </summary>
+    private static IEnumerable<(Expr Expr, IReadOnlyDictionary<string, TypeRef> Scope)> FactoryExpressions(
+        EntityDecl entity, IReadOnlyDictionary<string, TypeRef> memberTypes)
+    {
+        foreach (var factory in entity.Factories)
+        {
+            var scope = new Dictionary<string, TypeRef>(memberTypes, StringComparer.Ordinal);
+            foreach (var p in factory.Parameters) scope[p.Name] = p.Type;
+
+            foreach (var stmt in factory.Body)
+            {
+                if (stmt is RequiresClause req) yield return (req.Condition, scope);
+                else if (stmt is Initialization ini) yield return (ini.Value, scope);
                 else if (stmt is EmitClause em)
                     foreach (var arg in em.Args) yield return (arg.Value, scope);
             }
@@ -609,8 +645,8 @@ public sealed class CSharpEmitter : IEmitter
               .Append(CSharpNaming.ToPascalCase(m.Name)).Append(" => ").Append(body).Append(";\n");
         }
 
-        // Domain-event recording (when any command emits events).
-        var hasEmits = entity.Commands.SelectMany(c => c.Body).OfType<EmitClause>().Any();
+        // Domain-event recording (when any command or factory emits events).
+        var hasEmits = EmitsEvents(entity);
         if (hasEmits)
         {
             sb.Append('\n');
@@ -622,6 +658,10 @@ public sealed class CSharpEmitter : IEmitter
         // Commands: intention-revealing state-changing methods.
         foreach (var cmd in entity.Commands)
             WriteCommand(sb, entity, cmd, translator, typeMapper, index);
+
+        // Factories: intention-revealing creation through validated static methods.
+        foreach (var factory in entity.Factories)
+            WriteFactory(sb, entity, factory, ctorMembers, memberNames, translator, typeMapper, index);
 
         // Identity-based equality.
         sb.Append('\n');
@@ -830,7 +870,11 @@ public sealed class CSharpEmitter : IEmitter
         var allParams = new List<string> { $"{entity.IdentityName} id" };
         allParams.AddRange(OrderCtorParams(ctorMembers).Select(m => FormatParam(m, typeMapper, translator, index)));
 
-        sb.Append(Indent).Append("public ").Append(entity.Name).Append('(')
+        // When the entity declares a factory, construction is funneled through it:
+        // the all-args constructor becomes private (callable only by the static
+        // factory on the same class). Without a factory, it stays public (R8.2).
+        var access = entity.Factories.Count > 0 ? "private" : "public";
+        sb.Append(Indent).Append(access).Append(' ').Append(entity.Name).Append('(')
           .Append(string.Join(", ", allParams)).Append(")\n");
         sb.Append(Indent).Append("{\n");
 
@@ -1032,7 +1076,7 @@ public sealed class CSharpEmitter : IEmitter
         sb.Append(Indent).Append("{\n");
 
         // Command parameters are locals inside the body (members render as properties).
-        foreach (var p in cmd.Parameters) translator.PushLocal(p.Name);
+        foreach (var p in cmd.Parameters) translator.PushLocal(p.Name, p.Type);
 
         var requires = cmd.Body.OfType<RequiresClause>().ToList();
         var transitions = cmd.Body.OfType<Transition>().ToList();
@@ -1135,8 +1179,110 @@ public sealed class CSharpEmitter : IEmitter
           .Append("rule: \"illegal transition of ").Append(tr.Field).Append(" to ").Append(stateRef.Name).Append("\");\n");
     }
 
-    /// <summary>Builds the <c>_domainEvents.Add(new EventName(...));</c> statement for an emit.</summary>
-    private string BuildEmitStatement(EmitClause emit, CSharpExpressionTranslator translator, ModelIndex index)
+    /// <summary>
+    /// Emits a factory as a <c>public static</c> method on the aggregate root:
+    /// preconditions, an auto-generated identity, construction, then creation events.
+    /// Identity is always generated (<c>OrderId.New()</c>); constructor arguments are
+    /// drawn from <c>field &lt;- expr</c> initializations, falling back to the
+    /// constructor's own defaults (or <c>default!</c> for a required, uninitialized
+    /// field — already flagged by KOI0806).
+    /// </summary>
+    private void WriteFactory(
+        StringBuilder sb,
+        EntityDecl entity,
+        FactoryDecl factory,
+        IReadOnlyList<Member> ctorMembers,
+        ISet<string> memberNames,
+        CSharpExpressionTranslator translator,
+        CSharpTypeMapper typeMapper,
+        ModelIndex index)
+    {
+        var paramList = string.Join(", ", factory.Parameters.Select(p =>
+            $"{typeMapper.Map(p.Type)} {CSharpNaming.ToCamelCase(p.Name)}"));
+
+        sb.Append('\n');
+        WriteXmlDoc(sb, factory.Doc, Indent);
+        sb.Append(Indent).Append("public static ").Append(entity.Name).Append(' ')
+          .Append(CSharpNaming.ToPascalCase(factory.Name))
+          .Append('(').Append(paramList).Append(")\n");
+        sb.Append(Indent).Append("{\n");
+
+        // Factory scope: the synthetic `id` and the factory's parameters are locals
+        // (entity members are not in scope — the aggregate does not exist yet).
+        translator.PushLocal("id", new TypeRef(entity.IdentityName));
+        foreach (var p in factory.Parameters) translator.PushLocal(p.Name, p.Type);
+
+        var requires = factory.Body.OfType<RequiresClause>().ToList();
+        var inits = factory.Body.OfType<Initialization>().ToList();
+        var emits = factory.Body.OfType<EmitClause>().ToList();
+
+        // 1. Auto-generated identity. Declared first so it is in scope for the
+        //    preconditions and payloads (New() has no side effects). The aggregate is
+        //    still not constructed until step 3, satisfying "checked before construction".
+        sb.Append(Indent).Append(Indent).Append("var id = ").Append(entity.IdentityName).Append(".New();\n");
+
+        // 2. Preconditions — checked before any state is constructed.
+        if (requires.Count > 0) sb.Append('\n');
+        var firstGuard = true;
+        foreach (var req in requires)
+        {
+            if (!firstGuard) sb.Append('\n');
+            firstGuard = false;
+            WriteGuard(sb, entity.Name, req.Condition, req.Message ?? SynthesizeMessage(req.Condition),
+                translator, CSharpExpressionTranslator.NameMode.Property);
+        }
+        if (requires.Count > 0) sb.Append('\n');
+
+        // 3. Construct. Each ctor member draws its value, in priority order, from: an
+        //    explicit `field <- expr` (named arg); a same-named parameter (auto-bind);
+        //    the constructor's own default; or `default!` when required+unset (KOI0806).
+        // First-wins on a (validation-rejected) duplicate init, so emission never throws.
+        var initByField = new Dictionary<string, Expr>(StringComparer.Ordinal);
+        foreach (var i in inits)
+            initByField.TryAdd(i.Field, i.Value);
+        var args = new List<string> { "id" };
+        foreach (var m in ctorMembers)
+        {
+            var paramName = CSharpNaming.ToCamelCase(m.Name);
+            if (initByField.TryGetValue(m.Name, out var value))
+            {
+                var expectedEnum = index.Classify(m.Type.Name) == TypeKind.Enum ? m.Type.Name : null;
+                var rhs = translator.TranslateTopLevel(value, CSharpExpressionTranslator.NameMode.Property, expectedEnum);
+                args.Add($"{paramName}: {rhs}");
+            }
+            else if (factory.Parameters.Any(p => MemberAnalysis.AutoBinds(p, m)))
+            {
+                args.Add($"{paramName}: {paramName}");
+            }
+            else if (!HasCtorDefault(m))
+            {
+                args.Add($"{paramName}: default!");
+            }
+            // else: omit — the constructor's C# default value supplies it.
+        }
+        sb.Append(Indent).Append(Indent).Append("var instance = new ").Append(entity.Name)
+          .Append('(').Append(string.Join(", ", args)).Append(");\n");
+
+        // 4. Record creation events (payloads may reference `id` and parameters).
+        var emitStatements = emits.Select(e => BuildEmitStatement(e, translator, index, "instance.")).ToList();
+
+        foreach (var p in factory.Parameters) translator.PopLocal(p.Name);
+        translator.PopLocal("id");
+
+        foreach (var stmt in emitStatements)
+            sb.Append(Indent).Append(Indent).Append(stmt).Append('\n');
+
+        sb.Append(Indent).Append(Indent).Append("return instance;\n");
+        sb.Append(Indent).Append("}\n");
+    }
+
+    /// <summary>True when any command or factory of the entity emits a domain event.</summary>
+    private static bool EmitsEvents(EntityDecl entity) =>
+        entity.Commands.SelectMany(c => c.Body).OfType<EmitClause>().Any()
+        || entity.Factories.SelectMany(f => f.Body).OfType<EmitClause>().Any();
+
+    /// <summary>Builds the <c>[prefix]_domainEvents.Add(new EventName(...));</c> statement for an emit.</summary>
+    private string BuildEmitStatement(EmitClause emit, CSharpExpressionTranslator translator, ModelIndex index, string targetPrefix = "")
     {
         if (!index.TryGetDecl(emit.EventName, out var decl) || decl is not EventDecl ev)
             return $"/* unknown event '{emit.EventName}' */";
@@ -1155,7 +1301,7 @@ public sealed class CSharpEmitter : IEmitter
             return translator.TranslateTopLevel(value, CSharpExpressionTranslator.NameMode.Property, expectedEnum);
         });
 
-        return $"_domainEvents.Add(new {ev.Name}({string.Join(", ", args)}));";
+        return $"{targetPrefix}_domainEvents.Add(new {ev.Name}({string.Join(", ", args)}));";
     }
 
     /// <summary>Synthesizes a readable rule message from an unmessaged invariant.</summary>
@@ -1379,6 +1525,13 @@ public sealed class CSharpEmitter : IEmitter
         {
             RequiresClause r => ExprUsesLinq(r.Condition),
             Transition t => ExprUsesLinq(t.Value),
+            EmitClause em => em.Args.Any(a => ExprUsesLinq(a.Value)),
+            _ => false
+        })
+        || e.Factories.SelectMany(f => f.Body).Any(s => s switch
+        {
+            RequiresClause r => ExprUsesLinq(r.Condition),
+            Initialization i => ExprUsesLinq(i.Value),
             EmitClause em => em.Args.Any(a => ExprUsesLinq(a.Value)),
             _ => false
         })

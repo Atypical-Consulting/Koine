@@ -73,6 +73,7 @@ public sealed class SemanticValidator
                 // Events may be emitted only from a standalone entity or the aggregate root.
                 var emitAllowed = aggregateRoot is null || aggregateRoot == e.Name;
                 ValidateCommands(e, index, resolver, enumMembers, diagnostics, emitAllowed);
+                ValidateFactories(e, index, resolver, enumMembers, diagnostics, emitAllowed);
                 break;
             case AggregateDecl agg:
                 // The root must name a type declared inside the aggregate.
@@ -194,7 +195,7 @@ public sealed class SemanticValidator
         var seenCommands = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var propertyNames = new HashSet<string>(entity.Members.Select(m => m.Name), StringComparer.OrdinalIgnoreCase)
         {
-            "Id"
+            "Id", "Equals", "GetHashCode"
         };
 
         foreach (var cmd in entity.Commands)
@@ -255,6 +256,128 @@ public sealed class SemanticValidator
             }
         }
     }
+
+    /// <summary>
+    /// Validates an entity's factories: parameter type refs, <c>requires</c>
+    /// preconditions, <c>field &lt;- value</c> initializations (target must be a
+    /// settable, non-derived member; value must be type-compatible), and creation
+    /// <c>emit</c>s. The expression scope is the factory's parameters plus the
+    /// synthetic <c>id</c> (the auto-generated identity); entity members are NOT in
+    /// scope because the aggregate does not exist until construction. A required
+    /// member left uninitialized with no default is reported (R8.2).
+    /// </summary>
+    private static void ValidateFactories(
+        EntityDecl entity,
+        ModelIndex index,
+        TypeResolver resolver,
+        IReadOnlySet<string> enumMembers,
+        List<Diagnostic> diagnostics,
+        bool emitAllowed)
+    {
+        if (entity.Factories.Count == 0)
+            return;
+
+        var memberNames = new HashSet<string>(entity.Members.Select(m => m.Name), StringComparer.Ordinal);
+        var memberByName = new Dictionary<string, Member>(StringComparer.Ordinal);
+        foreach (var m in entity.Members)
+            memberByName[m.Name] = m;
+
+        var checker = new ExpressionChecker(index, resolver, enumMembers, diagnostics);
+
+        // A factory emits a `public static` method; its name must not collide (case-
+        // insensitively) with a property, a command (instance method), another factory,
+        // or an always-generated member (Id, the domain-event API, the value-equality
+        // members) — any of which would yield uncompilable C# (CS0102/CS0111).
+        var reserved = new HashSet<string>(entity.Members.Select(m => m.Name), StringComparer.OrdinalIgnoreCase)
+        {
+            "Id", "DomainEvents", "ClearDomainEvents", "Equals", "GetHashCode"
+        };
+        foreach (var cmd in entity.Commands)
+            reserved.Add(cmd.Name);
+
+        var seenFactories = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var factory in entity.Factories)
+        {
+            if (!seenFactories.Add(factory.Name))
+                diagnostics.Add(Diagnostic.Error(DiagnosticCodes.DuplicateFactory,
+                    $"factory '{factory.Name}' is declared more than once on '{entity.Name}'", factory.Span.Line, factory.Span.Column));
+            else if (reserved.Contains(factory.Name))
+                diagnostics.Add(Diagnostic.Error(DiagnosticCodes.FactoryNameCollision,
+                    $"factory '{factory.Name}' collides with a property or command of '{entity.Name}'", factory.Span.Line, factory.Span.Column));
+
+            // Scope: the factory's parameters plus the synthetic `id` (its identity).
+            var scopePairs = IdScopePair(entity)
+                .Concat(factory.Parameters.Select(p => new KeyValuePair<string, TypeRef>(p.Name, p.Type)));
+            var scope = new TypeScope(scopePairs);
+
+            var seenParams = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var p in factory.Parameters)
+            {
+                ValidateTypeRef(p.Type, index, diagnostics);
+                if (!seenParams.Add(p.Name))
+                    diagnostics.Add(Diagnostic.Error(DiagnosticCodes.DuplicateParameter,
+                        $"duplicate parameter '{p.Name}' in factory '{factory.Name}'", p.Span.Line, p.Span.Column));
+                // `id` is reserved for the auto-generated identity local; a parameter of
+                // that name would collide with it in the emitted method (CS0136).
+                if (string.Equals(p.Name, "id", StringComparison.OrdinalIgnoreCase))
+                    diagnostics.Add(Diagnostic.Error(DiagnosticCodes.ReservedFactoryParameter,
+                        $"factory parameter '{p.Name}' is reserved; the identity is generated automatically", p.Span.Line, p.Span.Column));
+            }
+
+            var initialized = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var stmt in factory.Body)
+            {
+                switch (stmt)
+                {
+                    case RequiresClause req:
+                        checker.Check(req.Condition, scope);
+                        break;
+
+                    case Initialization init:
+                        if (!memberByName.TryGetValue(init.Field, out var target))
+                            diagnostics.Add(Diagnostic.Error(DiagnosticCodes.InvalidInitializationTarget,
+                                $"cannot initialize '{init.Field}': not a field of '{entity.Name}'", init.Span.Line, init.Span.Column));
+                        else if (MemberAnalysis.IsDerived(target, memberNames))
+                            diagnostics.Add(Diagnostic.Error(DiagnosticCodes.InvalidInitializationTarget,
+                                $"cannot initialize derived field '{init.Field}'", init.Span.Line, init.Span.Column));
+                        else
+                        {
+                            if (!initialized.Add(init.Field))
+                                diagnostics.Add(Diagnostic.Error(DiagnosticCodes.DuplicateInitialization,
+                                    $"field '{init.Field}' is initialized more than once in factory '{factory.Name}'", init.Span.Line, init.Span.Column));
+                            checker.CheckInitializationValue(init.Value, target.Type, init.Field, scope);
+                        }
+                        break;
+
+                    case EmitClause emit:
+                        if (!emitAllowed)
+                            diagnostics.Add(Diagnostic.Error(DiagnosticCodes.EmitOutsideRoot,
+                                $"events may only be emitted from the aggregate root, not from '{entity.Name}'",
+                                emit.Span.Line, emit.Span.Column));
+                        ValidateEmit(emit, index, checker, scope, diagnostics);
+                        break;
+                }
+            }
+
+            // R8.2: a required member (no default, not optional, not derived) that the
+            // factory neither explicitly initializes (`field <- expr`) nor supplies via
+            // a same-named parameter (auto-bind) is constructed as `default!` — a latent
+            // bug, so warn.
+            foreach (var m in entity.Members)
+                if (!MemberAnalysis.IsDerived(m, memberNames)
+                    && m.Initializer is null && !m.Type.IsOptional
+                    && !initialized.Contains(m.Name)
+                    && !factory.Parameters.Any(p => MemberAnalysis.AutoBinds(p, m)))
+                    diagnostics.Add(Diagnostic.Warning(DiagnosticCodes.UninitializedFactoryField,
+                        $"factory '{factory.Name}' leaves required field '{m.Name}' uninitialized and it has no default",
+                        factory.Span.Line, factory.Span.Column));
+        }
+    }
+
+    /// <summary>The synthetic <c>id</c> binding (an entity's identity) for factory scope.</summary>
+    private static IEnumerable<KeyValuePair<string, TypeRef>> IdScopePair(EntityDecl entity) =>
+        new[] { new KeyValuePair<string, TypeRef>("id", new TypeRef(entity.IdentityName)) };
 
     /// <summary>
     /// When the transitioned field has a state machine and the value is a literal
