@@ -18,6 +18,9 @@ internal sealed class ExpressionChecker
     private readonly TypeResolver _resolver;
     private readonly IReadOnlySet<string> _enumMembers;
     private readonly List<Diagnostic> _diagnostics;
+    // Names of specs valid in the current expression's target type (R10.1); a bare
+    // reference to one resolves (as a boolean) rather than being an unknown field.
+    private readonly IReadOnlySet<string> _specNames;
 
     // Optional field names currently known to be non-null via a guard/condition
     // (flow narrowing). Saved/restored around guarded sub-expressions.
@@ -27,22 +30,34 @@ internal sealed class ExpressionChecker
         ModelIndex index,
         TypeResolver resolver,
         IReadOnlySet<string> enumMembers,
-        List<Diagnostic> diagnostics)
+        List<Diagnostic> diagnostics,
+        IReadOnlySet<string>? specNames = null)
     {
         _index = index;
         _resolver = resolver;
         _enumMembers = enumMembers;
         _diagnostics = diagnostics;
+        _specNames = specNames ?? EmptySet;
     }
+
+    private static readonly IReadOnlySet<string> EmptySet = new HashSet<string>();
 
     public void Check(Expr expr, TypeScope scope, TypeRef? expected = null)
     {
         switch (expr)
         {
             case IdentifierExpr id:
-                if (!scope.Contains(id.Name) && !_enumMembers.Contains(id.Name) && id.Name != "now")
-                    Report(DiagnosticCodes.UnknownField,
-                        $"unknown field '{id.Name}'{Suggestions.For(id.Name, scope.Names.Concat(_enumMembers))}", id);
+                if (!scope.Contains(id.Name) && !_enumMembers.Contains(id.Name) && id.Name != "now"
+                    && !_specNames.Contains(id.Name))
+                {
+                    // A name that is a spec — just not one valid here — gets a clearer message.
+                    if (_index.IsAnySpec(id.Name))
+                        Report(DiagnosticCodes.SpecTargetMismatch,
+                            $"spec '{id.Name}' is not defined on the enclosing type", id);
+                    else
+                        Report(DiagnosticCodes.UnknownField,
+                            $"unknown field '{id.Name}'{Suggestions.For(id.Name, scope.Names.Concat(_enumMembers).Concat(_specNames))}", id);
+                }
                 break;
 
             case LiteralExpr:
@@ -484,6 +499,23 @@ internal sealed class ExpressionChecker
         else if (!Assignable(type, field))
             Report(DiagnosticCodes.InitializationTypeMismatch,
                 $"cannot initialize field '{fieldName}' of type '{FullName(field)}' with a value of type '{FullName(type)}'", value);
+    }
+
+    /// <summary>Validates a domain-service operation body against its declared return type.</summary>
+    public void CheckOperationReturn(Expr body, TypeRef returnType, TypeScope scope)
+    {
+        Check(body, scope, returnType);
+
+        var type = ResolveEnumOperand(body, returnType, scope) ?? _resolver.Infer(body, scope);
+        if (type is null)
+            return;
+
+        if (type is { IsOptional: true } && !returnType.IsOptional)
+            Report(DiagnosticCodes.ServiceReturnMismatch,
+                $"operation returns an optional value, but its return type '{returnType.Name}' is not optional", body);
+        else if (!Assignable(type, returnType))
+            Report(DiagnosticCodes.ServiceReturnMismatch,
+                $"operation body of type '{FullName(type)}' is not assignable to return type '{FullName(returnType)}'", body);
     }
 
     /// <summary>Validates an emit payload value against the event field's declared type.</summary>

@@ -165,10 +165,11 @@ this lets a regex literal be read as a single token without colliding with the `
 ### Known limitations (v0)
 
 - **Soft keywords.** Most Koine keywords (`context`, `value`, `quantity`, `entity`, `aggregate`, `enum`,
-  `by`, `root`, `command`, `create`, `when`, `if`, …) may now be used as field names, and the declaration
-  keywords additionally as type names and in expressions. The mode-switching `matches` and the `invariant`
-  keyword remain reserved. Like `->`, the factory-initialization operator `<-` is atomic, so a comparison
-  against a negative operand needs a space (`x < -1`, not `x<-1`).
+  `by`, `root`, `command`, `create`, `spec`, `on`, `service`, `operation`, `policy`, `when`, `if`, …) may now
+  be used as field names, and the declaration keywords additionally as type names and in expressions. The
+  mode-switching `matches` and the `invariant` keyword remain reserved; the keywords are *not* usable in the
+  few hard-`Identifier` positions (a type/command/state/enum-member name). Like `->`, the factory-initialization
+  operator `<-` is atomic, so a comparison against a negative operand needs a space (`x < -1`, not `x<-1`).
 - **Reserved type names.** `List`, `Set`, `Map`, and `Range` are built-in generics; a user type may not take
   one of these names.
 - **Richer value objects.** Enum members may carry associated constant data
@@ -180,6 +181,12 @@ this lets a regex literal be read as a single token without colliding with the `
 - **Scoped enum members.** Bare enum members are resolved against the field/operand enum type, so two enums
   may share a member name (e.g. both `Cancelled`); a genuinely ambiguous bare member must be qualified
   (`OrderStatus.Cancelled`).
+- **Specifications, services, policies.** A `spec Name on T = <bool expr>` is a reusable named predicate over
+  `T`, referenceable by name in `T`'s invariants, command preconditions, derived fields, and other specs
+  (cycle-checked). A `service` holds stateless `operation`s (pure expression bodies, or abstract seams). A
+  `policy Name when Event then Target.command(args)` emits a handler interface plus an abstract seam — Koine
+  records the intended cross-aggregate reaction but never generates the imperative call. A spec referenced
+  from inside a service operation body is not yet supported (v0).
 
 ---
 

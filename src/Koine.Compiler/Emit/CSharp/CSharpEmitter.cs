@@ -85,6 +85,17 @@ public sealed class CSharpEmitter : IEmitter
             {
                 files.Add(EmitIdValueObject(idName, ctx.Name));
             }
+
+            // 3. R10 behavioral declarations: specifications, services, policies.
+            var contextSpecs = ctx.Specs
+                .Concat(ctx.Types.OfType<AggregateDecl>().SelectMany(a => a.Specs))
+                .ToList();
+            if (contextSpecs.Count > 0)
+                files.Add(EmitSpecifications(ctx.Name, contextSpecs, index, typeMapper, enumMemberToType));
+            foreach (var svc in ctx.Services)
+                files.Add(EmitService(svc, ctx.Name, index, typeMapper, enumMemberToType));
+            foreach (var policy in ctx.Policies)
+                files.Add(EmitPolicy(policy, ctx.Name, index, enumMemberToType));
         }
 
         return files;
@@ -140,7 +151,7 @@ public sealed class CSharpEmitter : IEmitter
         IReadOnlyDictionary<string, string> enumMemberToType)
     {
         var memberNames = new HashSet<string>(vo.Members.Select(m => m.Name), StringComparer.Ordinal);
-        var translator = new CSharpExpressionTranslator(index, vo.Members, enumMemberToType);
+        var translator = new CSharpExpressionTranslator(index, vo.Members, enumMemberToType, SpecBodiesFor(vo.Name, index));
 
         var ctorParams = vo.Members.Where(m => !MemberAnalysis.IsDerived(m, memberNames)).ToList();
         var derived = vo.Members.Where(m => MemberAnalysis.IsDerived(m, memberNames)).ToList();
@@ -212,7 +223,7 @@ public sealed class CSharpEmitter : IEmitter
         sb.Append("}\n");
 
         return new EmittedFile($"{FolderFor(ns)}/{vo.Name}.cs",
-            Assemble(ns, sb.ToString(), UsesLinq(vo.Members, vo.Invariants)));
+            Assemble(ns, sb.ToString(), UsesLinq(vo.Members, vo.Invariants) || SpecBodiesUseLinq(vo.Name, index)));
     }
 
     /// <summary>
@@ -436,6 +447,20 @@ public sealed class CSharpEmitter : IEmitter
             }
         }
 
+        // Service operation bodies can also fold value objects with sum.
+        foreach (var ctx in model.Contexts)
+        foreach (var svc in ctx.Services)
+        foreach (var op in svc.Operations)
+            if (op.Body is not null)
+            {
+                var scope = new TypeScope(op.Parameters.Select(p => new KeyValuePair<string, TypeRef>(p.Name, p.Type)));
+                ScanForValueObjectSum(op.Body, scope, resolver, needs);
+            }
+
+        // Spec conditions (rendered over the target type's members) can fold value objects too.
+        foreach (var spec in AllSpecs(model))
+            ScanForValueObjectSum(spec.Condition, TypeScope.FromMembers(SpecTargetMembers(spec.TargetType, index)), resolver, needs);
+
         return needs;
     }
 
@@ -517,7 +542,36 @@ public sealed class CSharpEmitter : IEmitter
             }
         }
 
+        // Service operation bodies can use value-object * scalar arithmetic.
+        foreach (var ctx in model.Contexts)
+        foreach (var svc in ctx.Services)
+        foreach (var op in svc.Operations)
+            if (op.Body is not null)
+            {
+                var scope = op.Parameters.ToDictionary(p => p.Name, p => p.Type, StringComparer.Ordinal);
+                ScanForScalarMul(op.Body, scope, index, needs);
+            }
+
+        // Spec conditions over their target type's members can use value-object arithmetic.
+        foreach (var spec in AllSpecs(model))
+        {
+            var scope = SpecTargetMembers(spec.TargetType, index).ToDictionary(m => m.Name, m => m.Type, StringComparer.Ordinal);
+            ScanForScalarMul(spec.Condition, scope, index, needs);
+        }
+
         return needs.ToDictionary(kv => kv.Key, kv => (IReadOnlySet<string>)kv.Value, StringComparer.Ordinal);
+    }
+
+    /// <summary>Every spec declared in the model (context- and aggregate-scoped).</summary>
+    private static IEnumerable<SpecDecl> AllSpecs(KoineModel model)
+    {
+        foreach (var ctx in model.Contexts)
+        {
+            foreach (var s in ctx.Specs) yield return s;
+            foreach (var t in ctx.Types)
+                if (t is AggregateDecl agg)
+                    foreach (var s in agg.Specs) yield return s;
+        }
     }
 
     /// <summary>
@@ -665,7 +719,7 @@ public sealed class CSharpEmitter : IEmitter
         var scopeMembers = entity.Members
             .Append(new Member("id", new TypeRef(entity.IdentityName), null))
             .ToList();
-        var translator = new CSharpExpressionTranslator(index, scopeMembers, enumMemberToType);
+        var translator = new CSharpExpressionTranslator(index, scopeMembers, enumMemberToType, SpecBodiesFor(entity.Name, index));
 
         var sb = new StringBuilder();
 
@@ -740,7 +794,7 @@ public sealed class CSharpEmitter : IEmitter
         sb.Append("}\n");
 
         return new EmittedFile($"{FolderFor(ns)}/{entity.Name}.cs",
-            Assemble(ns, sb.ToString(), EntityUsesLinq(entity)));
+            Assemble(ns, sb.ToString(), EntityUsesLinq(entity) || SpecBodiesUseLinq(entity.Name, index)));
     }
 
     private EmittedFile EmitIdValueObject(string idName, string ns)
@@ -954,6 +1008,176 @@ public sealed class CSharpEmitter : IEmitter
         sb.Append("}\n");
         return new EmittedFile($"{FolderFor(ns)}/{ev.Name}.cs",
             Assemble(ns, sb.ToString(), UsesLinq(ev.Members, Array.Empty<Invariant>())));
+    }
+
+    // ----------------------------------------------------------------------
+    // R10 — specifications, services, policies
+    // ----------------------------------------------------------------------
+
+    /// <summary>The spec name -&gt; body map for a target type (for inlining references).</summary>
+    private static IReadOnlyDictionary<string, Expr> SpecBodiesFor(string typeName, ModelIndex index)
+    {
+        var specs = index.SpecsFor(typeName);
+        if (specs.Count == 0)
+            return EmptySpecBodies;
+        return specs.ToDictionary(kv => kv.Key, kv => kv.Value.Condition, StringComparer.Ordinal);
+    }
+
+    private static readonly IReadOnlyDictionary<string, Expr> EmptySpecBodies = new Dictionary<string, Expr>();
+
+    /// <summary>
+    /// True when any spec on <paramref name="typeName"/> uses a LINQ-backed op, so a file
+    /// that inlines such a spec into an invariant/requires imports <c>System.Linq</c>.
+    /// Every spec is checked individually, so composition is covered transitively.
+    /// </summary>
+    private static bool SpecBodiesUseLinq(string typeName, ModelIndex index) =>
+        index.SpecsFor(typeName).Values.Any(s => ExprUsesLinq(s.Condition));
+
+    /// <summary>The members in scope for a spec on <paramref name="typeName"/> (entities add a synthetic <c>id</c>).</summary>
+    private static IReadOnlyList<Member> SpecTargetMembers(string typeName, ModelIndex index)
+    {
+        if (!index.TryGetDecl(typeName, out var decl))
+            return Array.Empty<Member>();
+        return decl switch
+        {
+            ValueObjectDecl v => v.Members,
+            EntityDecl e => e.Members.Append(new Member("id", new TypeRef(e.IdentityName), null)).ToList(),
+            _ => Array.Empty<Member>()
+        };
+    }
+
+    /// <summary>
+    /// Emits a context's reusable specifications as static boolean predicates in a
+    /// <c>&lt;Context&gt;Specifications</c> class. Each predicate takes its target type as
+    /// the parameter <c>x</c>; spec-to-spec references inline (R10.1).
+    /// </summary>
+    private EmittedFile EmitSpecifications(
+        string ns,
+        IReadOnlyList<SpecDecl> specs,
+        ModelIndex index,
+        CSharpTypeMapper typeMapper,
+        IReadOnlyDictionary<string, string> enumMemberToType)
+    {
+        var sb = new StringBuilder();
+        WriteXmlDoc(sb, "Reusable domain specifications (predicates) for this context.", "");
+        sb.Append("public static class ").Append(ns).Append("Specifications\n{\n");
+
+        var first = true;
+        var usesLinq = false;
+        foreach (var spec in specs)
+        {
+            var members = SpecTargetMembers(spec.TargetType, index);
+            var translator = new CSharpExpressionTranslator(
+                index, members, enumMemberToType, SpecBodiesFor(spec.TargetType, index), memberReceiver: "x");
+            var body = translator.TranslateTopLevel(spec.Condition, CSharpExpressionTranslator.NameMode.Property);
+
+            if (!first) sb.Append('\n');
+            first = false;
+            WriteXmlDoc(sb, spec.Doc, Indent);
+            sb.Append(Indent).Append("public static bool ").Append(CSharpNaming.ToPascalCase(spec.Name))
+              .Append('(').Append(spec.TargetType).Append(" x) => ").Append(body).Append(";\n");
+            usesLinq |= ExprUsesLinq(spec.Condition);
+        }
+
+        sb.Append("}\n");
+        return new EmittedFile($"{FolderFor(ns)}/{ns}Specifications.cs", Assemble(ns, sb.ToString(), usesLinq));
+    }
+
+    /// <summary>
+    /// Emits a domain service as a stateless class. Pure operations become
+    /// expression-bodied methods; a bodyless operation is an <c>abstract</c> seam
+    /// (which makes the whole class <c>abstract</c>).
+    /// </summary>
+    private EmittedFile EmitService(
+        ServiceDecl svc,
+        string ns,
+        ModelIndex index,
+        CSharpTypeMapper typeMapper,
+        IReadOnlyDictionary<string, string> enumMemberToType)
+    {
+        var isAbstract = svc.Operations.Any(o => o.Body is null);
+        var sb = new StringBuilder();
+
+        WriteXmlDoc(sb, svc.Doc ?? "A stateless domain service.", "");
+        sb.Append("public ").Append(isAbstract ? "abstract" : "sealed").Append(" class ").Append(svc.Name).Append("\n{\n");
+
+        var translator = new CSharpExpressionTranslator(index, Array.Empty<Member>(), enumMemberToType);
+        var first = true;
+        foreach (var op in svc.Operations)
+        {
+            if (!first) sb.Append('\n');
+            first = false;
+            WriteXmlDoc(sb, op.Doc, Indent);
+
+            var ret = typeMapper.Map(op.ReturnType);
+            var paramList = string.Join(", ", op.Parameters.Select(p =>
+                $"{typeMapper.Map(p.Type)} {CSharpNaming.ToCamelCase(p.Name)}"));
+            var method = CSharpNaming.ToPascalCase(op.Name);
+
+            if (op.Body is null)
+            {
+                sb.Append(Indent).Append("public abstract ").Append(ret).Append(' ')
+                  .Append(method).Append('(').Append(paramList).Append(");\n");
+            }
+            else
+            {
+                foreach (var p in op.Parameters) translator.PushLocal(p.Name, p.Type);
+                var expectedEnum = index.Classify(op.ReturnType.Name) == TypeKind.Enum ? op.ReturnType.Name : null;
+                var body = translator.TranslateTopLevel(op.Body, CSharpExpressionTranslator.NameMode.Property, expectedEnum);
+                foreach (var p in op.Parameters) translator.PopLocal(p.Name);
+
+                sb.Append(Indent).Append("public ").Append(ret).Append(' ')
+                  .Append(method).Append('(').Append(paramList).Append(") => ").Append(body).Append(";\n");
+            }
+        }
+
+        sb.Append("}\n");
+        var usesLinq = svc.Operations.Any(o => o.Body is not null && ExprUsesLinq(o.Body));
+        return new EmittedFile($"{FolderFor(ns)}/{svc.Name}.cs", Assemble(ns, sb.ToString(), usesLinq));
+    }
+
+    /// <summary>
+    /// Emits a policy as a handler seam: an <c>I&lt;Name&gt;Policy</c> interface plus an
+    /// <c>abstract partial</c> class whose <c>Handle</c> the consumer implements. The
+    /// intended cross-aggregate reaction is recorded in a doc comment, never generated
+    /// (honoring the no-imperative-logic stance).
+    /// </summary>
+    private EmittedFile EmitPolicy(
+        PolicyDecl policy,
+        string ns,
+        ModelIndex index,
+        IReadOnlyDictionary<string, string> enumMemberToType)
+    {
+        var policyType = CSharpNaming.ToPascalCase(policy.Name) + "Policy";
+        var iface = "I" + policyType;
+
+        // Render the reaction sketch with event fields rooted at the handler param `e`.
+        var eventMembers = index.TryGetDecl(policy.EventName, out var ed) && ed is EventDecl ev
+            ? ev.Members
+            : Array.Empty<Member>();
+        var translator = new CSharpExpressionTranslator(index, eventMembers, enumMemberToType, memberReceiver: "e");
+        var r = policy.Reaction;
+        var argText = string.Join(", ", r.Args.Select(a =>
+            $"{a.Parameter}: {translator.TranslateTopLevel(a.Value, CSharpExpressionTranslator.NameMode.Property)}"));
+        var sketch = $"{r.TargetType}.{r.CommandName}({argText})";
+
+        var sb = new StringBuilder();
+        WriteXmlDoc(sb, policy.Doc ?? $"Reacts to {policy.EventName} via {policy.Name}.", "");
+        sb.Append("public interface ").Append(iface).Append("\n{\n");
+        sb.Append(Indent).Append("void Handle(").Append(policy.EventName).Append(" e);\n");
+        sb.Append("}\n\n");
+
+        sb.Append("/// <summary>\n");
+        sb.Append("/// Policy seam: when ").Append(EscapeXml(policy.EventName)).Append(" occurs, the intended reaction is\n");
+        sb.Append("/// ").Append(EscapeXml(sketch)).Append(". Koine does not generate the cross-aggregate call\n");
+        sb.Append("/// (no imperative logic in the model); implement Handle in a partial to wire it.\n");
+        sb.Append("/// </summary>\n");
+        sb.Append("public abstract partial class ").Append(policyType).Append(" : ").Append(iface).Append("\n{\n");
+        sb.Append(Indent).Append("/// <remarks>Intended reaction: ").Append(EscapeXml(sketch)).Append(".</remarks>\n");
+        sb.Append(Indent).Append("public abstract void Handle(").Append(policy.EventName).Append(" e);\n");
+        sb.Append("}\n");
+
+        return new EmittedFile($"{FolderFor(ns)}/{policyType}.cs", Assemble(ns, sb.ToString(), usesLinq: false));
     }
 
     // ----------------------------------------------------------------------
@@ -1797,23 +2021,8 @@ public sealed class CSharpEmitter : IEmitter
         return seen;
     }
 
-    private static bool IsReferencedInContext(ContextNode ctx, string idName)
-    {
-        foreach (var t in AllTypeDecls(ctx))
-        {
-            IReadOnlyList<Member>? members = t switch
-            {
-                ValueObjectDecl v => v.Members,
-                EntityDecl e => e.Members,
-                _ => null
-            };
-            if (members is null) continue;
-            foreach (var m in members)
-                if (TypeRefMentions(m.Type, idName))
-                    return true;
-        }
-        return false;
-    }
+    private static bool IsReferencedInContext(ContextNode ctx, string idName) =>
+        ModelIndex.AllTypeRefsIn(ctx).Any(tr => TypeRefMentions(tr, idName));
 
     private static bool TypeRefMentions(TypeRef type, string name)
     {

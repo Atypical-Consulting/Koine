@@ -63,19 +63,36 @@ internal sealed class CSharpExpressionTranslator
     // a comparison hint doesn't reach (conditional/coalesce branches, a bare value).
     private string? _expectedEnum;
 
+    // Spec bodies referenceable by name in the current target type (R10.1); a bare
+    // reference to one is inlined (the spec is a named boolean expression).
+    private readonly IReadOnlyDictionary<string, Expr> _specBodies;
+    private readonly HashSet<string> _inliningSpecs = new(StringComparer.Ordinal);
+
+    // When set, member identifiers render as `<receiver>.Member` (used inside the
+    // generated static specification methods, where members hang off a parameter `x`).
+    private readonly string? _memberReceiver;
+
     /// <param name="members">The members of the type being emitted.</param>
     /// <param name="enumMemberToType">Map from an enum member name to its owning enum type name.</param>
+    /// <param name="specBodies">Spec name -&gt; body, for inlining spec references (R10.1).</param>
+    /// <param name="memberReceiver">When set, members render as <c>receiver.Member</c>.</param>
     public CSharpExpressionTranslator(
         ModelIndex index,
         IReadOnlyList<Member> members,
-        IReadOnlyDictionary<string, string> enumMemberToType)
+        IReadOnlyDictionary<string, string> enumMemberToType,
+        IReadOnlyDictionary<string, Expr>? specBodies = null,
+        string? memberReceiver = null)
     {
         _index = index;
         _resolver = new TypeResolver(index);
         _scope = TypeScope.FromMembers(members);
         _memberNames = new HashSet<string>(members.Select(m => m.Name), StringComparer.Ordinal);
         _enumMemberToType = enumMemberToType;
+        _specBodies = specBodies ?? EmptySpecs;
+        _memberReceiver = memberReceiver;
     }
+
+    private static readonly IReadOnlyDictionary<string, Expr> EmptySpecs = new Dictionary<string, Expr>();
 
     public string Translate(Expr expr, NameMode mode, string? expectedEnum = null)
     {
@@ -302,9 +319,24 @@ internal sealed class CSharpExpressionTranslator
 
         if (_memberNames.Contains(name))
         {
-            sb.Append(mode == NameMode.Parameter
-                ? CSharpNaming.ToCamelCase(name)
-                : CSharpNaming.ToPascalCase(name));
+            // A receiver (the static-spec `x`) makes members property accesses on it.
+            if (_memberReceiver is not null)
+                sb.Append(_memberReceiver).Append('.').Append(CSharpNaming.ToPascalCase(name));
+            else
+                sb.Append(mode == NameMode.Parameter
+                    ? CSharpNaming.ToCamelCase(name)
+                    : CSharpNaming.ToPascalCase(name));
+            return;
+        }
+
+        // A spec reference (R10.1): inline its body, recursively, in the current mode.
+        // Cycle detection at validation time guarantees this terminates.
+        if (_specBodies.TryGetValue(name, out var specBody) && _inliningSpecs.Add(name))
+        {
+            sb.Append('(');
+            Write(specBody, mode, sb);
+            sb.Append(')');
+            _inliningSpecs.Remove(name);
             return;
         }
 
