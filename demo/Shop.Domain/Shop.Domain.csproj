@@ -31,13 +31,13 @@
     @(Compile) inside the target so they are picked up by the same build.
   -->
   <Target Name="KoineGenerate" BeforeTargets="BeforeCompile;CoreCompile">
-    <ItemGroup>
-      <KoineModel Include="$(KoineModelsDir)/*.koi" />
-    </ItemGroup>
-
-    <Message Importance="high" Text="Koine: generating C# from $(KoineModelsDir)/*.koi" />
+    <Message Importance="high" Text="Koine: generating C# from $(KoineModelsDir) (directory mode — one model, imports resolve across files)" />
     <RemoveDir Directories="$(KoineGeneratedDir)" />
-    <Exec Command="dotnet &quot;$(KoineCliDll)&quot; build &quot;%(KoineModel.FullPath)&quot; --target csharp --out &quot;$(KoineGeneratedDir)&quot;" />
+    <!--
+      Directory mode: the whole Models/ folder compiles as ONE model so cross-context
+      imports, the context map, and integration events resolve across files (R13/R14).
+    -->
+    <Exec Command="dotnet &quot;$(KoineCliDll)&quot; build &quot;$(KoineModelsDir)&quot; --target csharp --out &quot;$(KoineGeneratedDir)&quot;" />
 
     <ItemGroup>
       <Compile Include="$(KoineGeneratedDir)/**/*.cs" />

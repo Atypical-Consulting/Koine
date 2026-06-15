@@ -1,0 +1,88 @@
+/// Payments bounded context — authorizing and capturing money for orders.
+context Payments version 1 {
+
+  // R14.3 — react to placed orders (authorized by `Ordering -> Payments : open-host`).
+  subscribes Ordering.OrderPlaced
+
+  enum PaymentMethod { Card, Transfer, Voucher }
+  enum PaymentStatus { Authorized, Captured, Refunded, Failed }
+
+  value Money {
+    amount:   Decimal
+    currency: String
+    invariant amount >= 0   "an amount cannot be negative"
+  }
+
+  // R14.2 — the destination type an anti-corruption layer translates the legacy
+  // gateway's result into (see the `acl { ... }` block in context-map.koi).
+  value PaymentReceipt {
+    reference: String
+    amount:    Decimal
+  }
+
+  /// Recorded when a payment is captured. Triggers the ledger-posting policy.
+  event PaymentCaptured {
+    payment:        PaymentId
+    capturedAmount: Decimal
+  }
+
+  /// The payment aggregate.
+  aggregate Payment root Payment {
+
+    /// Raised when a payment is authorized (R6/R8).
+    event PaymentAuthorized {
+      payment: PaymentId
+      order:   OrderId
+    }
+
+    entity Payment identified by PaymentId {
+      order:  OrderId
+      amount: Money
+      method: PaymentMethod
+      status: PaymentStatus = Authorized
+
+      states status {
+        Authorized -> Captured, Failed
+        Captured   -> Refunded
+        Refunded
+        Failed
+      }
+
+      /// Capture an authorized payment.
+      command capture {
+        requires status == Authorized   "only an authorized payment can be captured"
+        status -> Captured
+      }
+
+      /// Refund a captured payment.
+      command refund {
+        requires status == Captured     "only a captured payment can be refunded"
+        status -> Refunded
+      }
+
+      /// R8 — authorize a payment for an order.
+      create authorize(order: OrderId, amount: Money, method: PaymentMethod) {
+        emit PaymentAuthorized(payment: id, order: order)
+      }
+    }
+  }
+
+  /// A second aggregate — the revenue ledger. Two aggregates in one context means
+  /// the generated IUnitOfWork exposes both repositories (R12.1).
+  aggregate Ledger root LedgerEntry {
+    entity LedgerEntry identified by LedgerEntryId {
+      payment: PaymentId
+      balance: Decimal
+
+      /// Post an amount to the ledger entry.
+      command record(amount: Decimal) {
+        balance -> amount
+      }
+    }
+  }
+
+  /// R10.3 — a policy reacting to a domain event across aggregates: when a
+  /// payment is captured, post it to the ledger. Koine emits the handler seam
+  /// (the imperative call is documented, not generated).
+  policy PostToLedger when PaymentCaptured then Ledger.record(amount: capturedAmount)
+}

@@ -1,7 +1,5 @@
 /// Ordering bounded context — placing and pricing customer orders.
-context Ordering {
-
-  enum Currency { EUR, USD, GBP }
+context Ordering version 1 {
 
   /// How far along a refund is. Shares the `Cancelled` member with OrderStatus —
   /// bare members resolve against the field/operand enum type (R3.5).
@@ -10,14 +8,43 @@ context Ordering {
   /// The lifecycle state of an order.
   enum OrderStatus { Draft, Submitted, Paid, Shipped, Cancelled }
 
-  /// A monetary amount in a specific currency. Never negative.
+  /// A monetary amount in a specific currency. Never negative. `Currency` is a
+  /// shared-kernel type owned with Catalog (see context-map.koi).
   value Money {
     amount:   Decimal
     currency: Currency
     invariant amount >= 0   "an amount cannot be negative"
   }
 
-  aggregate Order root Order {
+  /// Announced to the rest of the system when an order is placed (R14.3). An
+  /// integration event is a *published language* — its fields stay primitive
+  /// (ids/scalars), never leaking internal value objects.
+  integration event OrderPlaced {
+    orderId:   OrderId
+    customer:  CustomerId
+    total:     Decimal
+    placedAt:  Instant
+  }
+
+  publishes OrderPlaced
+
+  /// The order aggregate. `versioned` adds an optimistic-concurrency token (R11.4);
+  /// the `repository` block tunes the mutating set and adds intention-revealing
+  /// finders (R11.3); being an aggregate it also joins the context `IUnitOfWork`.
+  aggregate Order root Order versioned {
+
+    repository {
+      operations: getById, add, update
+      find byCustomer(customer: CustomerId): List<Order>
+      find mostRecent(customer: CustomerId): Order
+    }
+
+    /// Raised when an order is opened by the factory (R6/R8).
+    event OrderOpened {
+      orderId:   OrderId
+      customer:  CustomerId
+      lineCount: Int
+    }
 
     /// Raised when an order is submitted for processing (R6).
     event OrderSubmitted {
@@ -85,6 +112,32 @@ context Ordering {
         requires status != Shipped "a shipped order cannot be cancelled"
         status -> Cancelled
       }
+
+      /// R8 — factory-only creation: open a draft order for a customer. The
+      /// presence of any `create` makes the all-args constructor private, so
+      /// callers must go through `Order.Open(...)`.
+      create open(customer: CustomerId, lines: List<OrderLine>) {
+        requires !lines.isEmpty   "cannot open an empty order"
+        emit OrderOpened(orderId: id, customer: customer, lineCount: lines.count)
+      }
     }
   }
+
+  /// R12.2 — the application/use-case service interface (IOrderingService). Each
+  /// use case maps to one async method; a context with aggregates also gets a UoW.
+  service OrderingService {
+    usecase PlaceOrder(customer: CustomerId, lines: List<OrderLine>): OrderId
+    usecase CancelOrder(order: OrderId)
+  }
+
+  /// R12.3 — a flat read model + projection mapper.
+  readmodel OrderSummary from Order {
+    id
+    customer
+    status
+    lineCount: Int = lines.count
+  }
+
+  /// R12.4 — a query DTO over the read model.
+  query OrdersByStatus(status: OrderStatus): List<OrderSummary>
 }
