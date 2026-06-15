@@ -75,7 +75,11 @@ public sealed class KoineLanguageService
         if (trigger == KoineLexer.DOT)
             return Array.Empty<CompletionItem>();
 
-        // Enum value position handled in Task 3.
+        // Enum value position: after '=' (a field/param default). Resolve the
+        // governing enum from the preceding `name : EnumType =` triple when possible;
+        // otherwise fall back to every known enum member (still useful mid-edit).
+        if (trigger == KoineLexer.ASSIGN)
+            return EnumMemberCandidates(ctx, index);
 
         // Declaration start: cursor at the start of a statement (after '{' or '}'),
         // or at file scope.
@@ -116,6 +120,26 @@ public sealed class KoineLanguageService
                 var kind = index.Classify(name);
                 return new CompletionItem(name, KindOf(kind), kind.ToString(), null);
             })
+            .ToList();
+    }
+
+    private IReadOnlyList<CompletionItem> EnumMemberCandidates(TokenContext ctx, ModelIndex? index)
+    {
+        if (index is null)
+            return Array.Empty<CompletionItem>();
+
+        // Resolve the governing enum from the type name just before '=' .
+        var typeName = ctx.TokenBeforePreceding?.Text;
+        if (typeName is not null && index.IsEnumType(typeName)
+            && index.TryGetDecl(typeName, out var decl) && decl is EnumDecl e)
+            return e.Members
+                .Select(m => new CompletionItem(m.Name, CompletionItemKind.EnumMember, typeName, m.Doc))
+                .ToList();
+
+        // Fallback (e.g. the type name is not directly to the left): every enum member
+        // declared anywhere — ambiguous, still useful mid-edit.
+        return index.EnumMemberToType.Keys
+            .Select(name => new CompletionItem(name, CompletionItemKind.EnumMember, index.EnumMemberToType[name], null))
             .ToList();
     }
 

@@ -61,4 +61,28 @@ public class KoineLanguageServiceTests
         var items = Complete(src, line: 1, ch: 36);
         Assert.Empty(items);
     }
+
+    [Fact]
+    public void Enum_value_position_offers_members_filtered_by_partial()
+    {
+        // status: OrderStatus = Dr   -> members of OrderStatus starting with "Dr"
+        var src =
+            "context C {\n" +
+            "  enum OrderStatus { Draft, Placed, Shipped }\n" +
+            "  entity E identified by EId { status: OrderStatus = Dr }\n" +
+            "}\n";
+        var items = Svc.CompleteAt(src, line: 2, character: 54);
+        Assert.Contains(items, i => i.Label == "Draft" && i.Kind == CompletionItemKind.EnumMember);
+        Assert.DoesNotContain(items, i => i.Label == "Placed");
+    }
+
+    [Fact]
+    public void Member_access_emits_no_property_noise()
+    {
+        // Completion after '.' would need expression inference; with no resolvable
+        // receiver we return nothing rather than guessing (the no-noise contract).
+        var src = "context C {\n  value V { a: Int }\n}\n";
+        var items = Svc.CompleteAt(src, line: 1, character: 17);
+        Assert.DoesNotContain(items, i => i.Kind == CompletionItemKind.Property);
+    }
 }
