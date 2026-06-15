@@ -23,6 +23,7 @@ internal sealed class LspServer
 
     // On-disk baseline of every *.koi in the workspace (uri -> text), scanned at initialize.
     private readonly Dictionary<string, string> _workspaceFiles = new(StringComparer.Ordinal);
+    private readonly HashSet<string> _scannedRoots = new(StringComparer.Ordinal);
     private readonly Stream _in;
     private readonly Stream _out;
 
@@ -464,11 +465,14 @@ internal sealed class LspServer
         var root = UriToPath(rootUri);
         if (root is null || !Directory.Exists(root))
             return;
+        if (!_scannedRoots.Add(root))
+            return; // already scanned this root (e.g. rootUri == a workspaceFolder)
         try
         {
             foreach (var path in Directory.EnumerateFiles(root, "*.koi", SearchOption.AllDirectories))
             {
-                if (path.Contains("/bin/") || path.Contains("/obj/") || path.Contains("/.git/"))
+                var rel = path.Replace('\\', '/');
+                if (rel.Contains("/bin/") || rel.Contains("/obj/") || rel.Contains("/.git/"))
                     continue;
                 var uri = PathToUri(path);
                 if (uri is null) continue;
