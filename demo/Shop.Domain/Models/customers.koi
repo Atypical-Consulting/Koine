@@ -1,0 +1,40 @@
+// Customers bounded context — who buys from the shop.
+context Customers {
+
+  enum LoyaltyTier { Bronze, Silver, Gold }
+
+  value Email {
+    raw:        String
+    normalized: String = raw.trim.lower
+    invariant raw.trim.length > 0                    "an email cannot be blank"
+    invariant raw matches /^[^@]+@[^@]+\.[^@]+$/      "invalid email address"
+  }
+
+  value PostalAddress {
+    street:     String
+    city:       String
+    postalCode: String
+    country:    String
+    // Derived string composition.
+    formatted:  String = street + ", " + city + " " + postalCode
+  }
+
+  entity Customer identified by CustomerId {
+    name:            String
+    email:           Email
+    shippingAddress: PostalAddress
+    tier:            LoyaltyTier = Bronze
+
+    // Optional fields (R2.1) with coalescing + presence checks.
+    nickname:        String?
+    phone:           String?
+    displayName:     String = nickname ?? name
+    hasPhone:        Bool   = phone.isPresent
+
+    // A Set of marketing segments (R2.2).
+    segments:        Set<String>
+
+    // Conditional (R1.1): Gold members ship free.
+    freeShipping:    Bool = if tier == Gold then true else false
+  }
+}

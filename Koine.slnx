@@ -1,0 +1,12 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Koine.Cli/Koine.Cli.csproj" />
+    <Project Path="src/Koine.Compiler/Koine.Compiler.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Koine.Compiler.Tests/Koine.Compiler.Tests.csproj" />
+  </Folder>
+  <Folder Name="/demo/">
+    <Project Path="demo/Shop.Domain/Shop.Domain.csproj" />
+  </Folder>
+</Solution>

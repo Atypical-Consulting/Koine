@@ -1,0 +1,52 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <KoineCliProject>$(MSBuildProjectDirectory)/../../src/Koine.Cli/Koine.Cli.csproj</KoineCliProject>
+    <KoineCliDll>$(MSBuildProjectDirectory)/../../src/Koine.Cli/bin/$(Configuration)/net10.0/Koine.Cli.dll</KoineCliDll>
+    <KoineModelsDir>$(MSBuildProjectDirectory)/Models</KoineModelsDir>
+    <KoineGeneratedDir>$(MSBuildProjectDirectory)/Generated</KoineGeneratedDir>
+  </PropertyGroup>
+
+  <!--
+    The generated tree is added to @(Compile) by the KoineGenerate target below;
+    exclude it from the SDK's default glob so files aren't compiled twice (CS2002).
+  -->
+  <ItemGroup>
+    <Compile Remove="Generated/**/*.cs" />
+  </ItemGroup>
+
+  <!--
+    Build the Koine CLI first (for ordering only — we don't reference it as a library),
+    so its built assembly is available to the generation step below.
+  -->
+  <ItemGroup>
+    <ProjectReference Include="$(KoineCliProject)" ReferenceOutputAssembly="false" Private="false" />
+  </ItemGroup>
+
+  <!--
+    Generate C# from every .koi model, then compile it. Files are added to
+    @(Compile) inside the target so they are picked up by the same build.
+  -->
+  <Target Name="KoineGenerate" BeforeTargets="BeforeCompile;CoreCompile">
+    <ItemGroup>
+      <KoineModel Include="$(KoineModelsDir)/*.koi" />
+    </ItemGroup>
+
+    <Message Importance="high" Text="Koine: generating C# from $(KoineModelsDir)/*.koi" />
+    <RemoveDir Directories="$(KoineGeneratedDir)" />
+    <Exec Command="dotnet &quot;$(KoineCliDll)&quot; build &quot;%(KoineModel.FullPath)&quot; --target csharp --out &quot;$(KoineGeneratedDir)&quot;" />
+
+    <ItemGroup>
+      <Compile Include="$(KoineGeneratedDir)/**/*.cs" />
+    </ItemGroup>
+  </Target>
+
+  <!-- Clean the generated tree with the project. -->
+  <Target Name="KoineClean" AfterTargets="Clean">
+    <RemoveDir Directories="$(KoineGeneratedDir)" />
+  </Target>
+
+</Project>

@@ -1,0 +1,33 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>Koine.Compiler</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Antlr4BuildTasks" Version="12.14.0" PrivateAssets="all" />
+    <PackageReference Include="Antlr4.Runtime.Standard" Version="4.13.1" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Antlr4 Include="Grammar\KoineLexer.g4">
+      <Encoding>UTF-8</Encoding>
+      <Error>true</Error>
+      <Listener>false</Listener>
+      <Visitor>false</Visitor>
+      <Package>Koine.Compiler.Grammar</Package>
+    </Antlr4>
+    <Antlr4 Include="Grammar\KoineParser.g4">
+      <Encoding>UTF-8</Encoding>
+      <Error>true</Error>
+      <GAtn>true</GAtn>
+      <Listener>false</Listener>
+      <Visitor>true</Visitor>
+      <Package>Koine.Compiler.Grammar</Package>
+    </Antlr4>
+  </ItemGroup>
+
+</Project>
