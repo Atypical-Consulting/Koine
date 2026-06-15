@@ -49,7 +49,27 @@ public sealed record ValueObjectDecl(
     IReadOnlyList<Invariant> Invariants,
     bool IsQuantity = false) : TypeDecl(Name);
 
-/// <summary>An entity: identity-based equality via a generated <c>IdentityName</c> ID type.</summary>
+/// <summary>
+/// How an entity's identity value object is generated and typed (R11.1).
+/// TARGET-AGNOSTIC: the emitter, not the parser, maps each strategy to a concrete
+/// representation (Guid wrapper, sequence-assigned long, or a natural key).
+/// </summary>
+public enum IdentityStrategy
+{
+    /// <summary>The default: a <c>Guid</c>-wrapping ID with a client-side <c>New()</c>.</summary>
+    Guid,
+    /// <summary>A store-assigned numeric key (no client-side <c>New()</c>).</summary>
+    Sequence,
+    /// <summary>A natural key over a primitive (<c>String</c>/<c>Int</c>), value-validated, no <c>New()</c>.</summary>
+    Natural
+}
+
+/// <summary>
+/// An entity: identity-based equality via a generated <c>IdentityName</c> ID type.
+/// <see cref="IdStrategy"/> selects how that ID is generated (R11.1); for
+/// <see cref="IdentityStrategy.Natural"/>, <see cref="IdBackingType"/> names the
+/// primitive the key wraps (e.g. <c>String</c>).
+/// </summary>
 public sealed record EntityDecl(
     string Name,
     string IdentityName,
@@ -57,7 +77,9 @@ public sealed record EntityDecl(
     IReadOnlyList<Invariant> Invariants,
     IReadOnlyList<CommandDecl> Commands,
     IReadOnlyList<StatesDecl> States,
-    IReadOnlyList<FactoryDecl> Factories) : TypeDecl(Name);
+    IReadOnlyList<FactoryDecl> Factories,
+    IdentityStrategy IdStrategy = IdentityStrategy.Guid,
+    string? IdBackingType = null) : TypeDecl(Name);
 
 /// <summary>
 /// A state machine bound to an enum-typed lifecycle field, defining the legal
@@ -72,12 +94,38 @@ public sealed record StatesDecl(string Field, IReadOnlyList<StateRule> Rules) : 
 /// </summary>
 public sealed record StateRule(string From, IReadOnlyList<string> To, Expr? Guard) : KoineNode;
 
-/// <summary>An aggregate: a boundary owning nested types (one is the root) and specs.</summary>
+/// <summary>
+/// An aggregate: a boundary owning nested types (one is the root) and specs. When
+/// <see cref="IsVersioned"/> is set the root carries an optimistic-concurrency token
+/// (R11.4). <see cref="Repository"/> declares the generated repository contract for
+/// the root (R11.3); <c>null</c> means the default contract is emitted.
+/// </summary>
 public sealed record AggregateDecl(
     string Name,
     string RootName,
     IReadOnlyList<TypeDecl> Types,
-    IReadOnlyList<SpecDecl> Specs) : TypeDecl(Name);
+    IReadOnlyList<SpecDecl> Specs,
+    bool IsVersioned = false,
+    RepositoryDecl? Repository = null) : TypeDecl(Name);
+
+/// <summary>
+/// The repository contract for an aggregate root (R11.3): which mutating
+/// <see cref="Operations"/> it exposes (<c>null</c> => the default set) and its
+/// declarative <see cref="Finders"/>. TARGET-AGNOSTIC.
+/// </summary>
+public sealed record RepositoryDecl(
+    IReadOnlyList<string>? Operations,
+    IReadOnlyList<FinderDecl> Finders) : KoineNode;
+
+/// <summary>
+/// A declarative repository finder: <c>find byCustomer(customer: CustomerId): List&lt;Order&gt;</c>.
+/// <see cref="ResultType"/> is the aggregate root (single result) or a
+/// <c>List&lt;Root&gt;</c> (collection result).
+/// </summary>
+public sealed record FinderDecl(
+    string Name,
+    IReadOnlyList<Param> Parameters,
+    TypeRef ResultType) : KoineNode;
 
 /// <summary>
 /// An enumeration of named members. When <see cref="Signature"/> is non-empty the

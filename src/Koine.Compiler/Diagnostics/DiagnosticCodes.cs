@@ -102,6 +102,15 @@ public static class DiagnosticCodes
     public const string PolicyArgType = "KOI1034";
     public const string DuplicatePolicy = "KOI1035";
 
+    // ---- Identity, repositories, concurrency (KOI1100–1199) ---------------
+    public const string NaturalIdBackingType = "KOI1101";
+    public const string UnknownRepositoryOperation = "KOI1102";
+    public const string FinderResultType = "KOI1103";
+    public const string DuplicateFinder = "KOI1104";
+    public const string ReservedVersionMember = "KOI1105";
+    public const string FinderNameCollision = "KOI1106";
+    public const string ReservedFinderParameter = "KOI1107";
+
     /// <summary>Every code with a one-line description. Tested for uniqueness/coverage.</summary>
     public static readonly IReadOnlyDictionary<string, string> Catalogue = new Dictionary<string, string>
     {
@@ -173,5 +182,12 @@ public static class DiagnosticCodes
         [PolicyArgMismatch] = "Policy reaction arguments do not match the target command's parameters.",
         [PolicyArgType] = "A policy reaction argument's value type is incompatible with the command parameter.",
         [DuplicatePolicy] = "Two policies in the same context share a name.",
+        [NaturalIdBackingType] = "A natural identity's backing type must be String or Int.",
+        [UnknownRepositoryOperation] = "A repository 'operations' clause names an unknown operation keyword.",
+        [FinderResultType] = "A repository finder's result type must be the aggregate root or a list of it.",
+        [DuplicateFinder] = "A repository declares the same finder name more than once.",
+        [ReservedVersionMember] = "A versioned aggregate's root declares a member that collides with the generated 'Version' token.",
+        [FinderNameCollision] = "A repository finder's name collides with a built-in operation method (getById/add/update/remove).",
+        [ReservedFinderParameter] = "A repository finder parameter uses the reserved name 'ct' (the generated CancellationToken).",
     };
 }

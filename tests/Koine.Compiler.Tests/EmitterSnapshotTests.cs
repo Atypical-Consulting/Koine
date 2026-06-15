@@ -94,4 +94,38 @@ public class EmitterSnapshotTests
         return Verifier.Verify(TestSupport.Render(result.Files))
             .UseDirectory("Snapshots");
     }
+
+    /// <summary>
+    /// R11: makes the selectable identity strategies (guid/sequence/natural), the
+    /// versioned root's concurrency token, and the configured repository contract
+    /// (restricted operations + finders) reviewable in one snapshot.
+    /// </summary>
+    [Fact]
+    public Task R11_fixture_emits_expected_csharp()
+    {
+        const string fixture = """
+            context Sales {
+              value OrderLine { product: ProductId  quantity: Int }
+              entity Product identified by Sku       as natural(String) { name: String }
+              entity Invoice identified by InvoiceNo as sequence        { amount: Int }
+              aggregate Order root Order versioned {
+                repository {
+                  operations: add, getById
+                  find byCustomer(customer: CustomerId): List<Order>
+                  find mostRecent(customer: CustomerId): Order
+                }
+                entity Order identified by OrderId {
+                  customer: CustomerId
+                  lines:    List<OrderLine>
+                }
+              }
+            }
+            """;
+
+        var result = new KoineCompiler().Compile(fixture, new CSharpEmitter());
+        Assert.True(result.Success, string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        return Verifier.Verify(TestSupport.Render(result.Files))
+            .UseDirectory("Snapshots");
+    }
 }
