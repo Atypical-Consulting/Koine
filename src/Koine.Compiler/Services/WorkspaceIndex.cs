@@ -70,7 +70,10 @@ public sealed class WorkspaceIndex
         if (spec is not null && spec.Span != SourceSpan.None)
             return spec.Span;
 
-        // ID type -> the entity that declares `identified by <name>`.
+        // ID type (e.g. ProductId) -> the entity that declares `identified by <name>`.
+        // There is no standalone ID node, so navigation deliberately lands on the owning
+        // entity's declaration. O(types) scan — fine for on-demand hover/definition;
+        // TODO: precompute an identity-name -> entity map if this ever runs per keystroke.
         var owner = index.AllTypes().OfType<EntityDecl>().FirstOrDefault(en => en.IdentityName == name);
         if (owner is not null && owner.Span != SourceSpan.None)
             return owner.Span;
