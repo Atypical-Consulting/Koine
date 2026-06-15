@@ -193,6 +193,41 @@ public sealed class KoineLanguageService
         return new HoverResult(markdown, span);
     }
 
+    public DefinitionResult? DefinitionAt(string source, int line, int character)
+    {
+        var ctx = TokenLocator.Locate(source, line, character);
+        var name = ctx.CurrentToken?.Text;
+        if (string.IsNullOrEmpty(name) || ctx.InsideStringOrRegex)
+            return null;
+
+        var (model, _) = _compiler.Parse(source);
+        if (model is null)
+            return null;
+        var index = new ModelIndex(model);
+
+        // 1. A declared type -> its declaration span.
+        if (index.TryGetDecl(name, out var decl) && decl.Span != SourceSpan.None)
+            return new DefinitionResult(decl.Span);
+
+        // 2. An enum member -> the member's own span.
+        if (index.EnumMemberToType.TryGetValue(name, out var enumName)
+            && index.TryGetDecl(enumName, out var enumDecl)
+            && enumDecl is EnumDecl e)
+        {
+            var member = e.Members.FirstOrDefault(m => m.Name == name);
+            if (member is not null && member.Span != SourceSpan.None)
+                return new DefinitionResult(member.Span);
+        }
+
+        // 3. A spec -> its declaration span.
+        var spec = index.AllSpecs().FirstOrDefault(s => s.Name == name);
+        if (spec is not null && spec.Span != SourceSpan.None)
+            return new DefinitionResult(spec.Span);
+
+        // Primitives, collection keywords, and ID value objects have no node: not navigable.
+        return null;
+    }
+
     private static string? RenderHover(string name, ModelIndex index)
     {
         // 1. A declared type.
