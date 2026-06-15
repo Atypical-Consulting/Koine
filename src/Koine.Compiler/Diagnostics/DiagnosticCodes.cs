@@ -19,7 +19,7 @@ public static class DiagnosticCodes
     public const string UnknownAggregateRoot = "KOI0105";
     public const string UnknownEnumMemberForType = "KOI0106";
     public const string GenericArity = "KOI0107";
-    public const string ReservedEntityMember = "KOI0108";
+    public const string ReservedGeneratedMember = "KOI0108";
 
     // ---- Expressions & references (KOI0200–0299) --------------------------
     public const string UnknownField = "KOI0201";
@@ -132,7 +132,7 @@ public static class DiagnosticCodes
         [UnknownAggregateRoot] = "An aggregate's root does not name a type declared inside it.",
         [UnknownEnumMemberForType] = "An enum-typed default names a member not in that enum.",
         [GenericArity] = "A collection type has the wrong number of type arguments.",
-        [ReservedEntityMember] = "An entity member collides with a generated member (Id, Equals, GetHashCode).",
+        [ReservedGeneratedMember] = "A value-object/entity member collides with a generated member (Id, Equals, GetHashCode, GetEqualityComponents).",
         [UnknownField] = "An identifier resolves to no member, enum member, or built-in.",
         [UnknownMember] = "A member access names something the receiver type does not have.",
         [UnknownStringOperation] = "An unknown operation was applied to a String.",
@@ -206,6 +206,6 @@ public static class DiagnosticCodes
         [ReadModelFieldTypeMismatch] = "A read-model projection's value type is incompatible with its declared field type.",
         [DuplicateReadModelField] = "A read model declares the same field name more than once.",
         [QueryResultNotReadModel] = "A query's result type is not a declared read model (or a list of one).",
-        [ReservedRecordMember] = "A read-model field or query criterion collides with a record-synthesized member (Equals/GetHashCode/…).",
+        [ReservedRecordMember] = "A read-model field, query criterion, or event field collides with a record-synthesized member (Equals/GetHashCode/…).",
     };
 }
