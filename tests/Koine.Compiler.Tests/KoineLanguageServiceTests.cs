@@ -71,7 +71,7 @@ public class KoineLanguageServiceTests
             "  enum OrderStatus { Draft, Placed, Shipped }\n" +
             "  entity E identified by EId { status: OrderStatus = Dr }\n" +
             "}\n";
-        var items = Svc.CompleteAt(src, line: 2, character: 54);
+        var items = Complete(src, 2, 55);
         Assert.Contains(items, i => i.Label == "Draft" && i.Kind == CompletionItemKind.EnumMember);
         Assert.DoesNotContain(items, i => i.Label == "Placed");
     }
@@ -79,10 +79,14 @@ public class KoineLanguageServiceTests
     [Fact]
     public void Member_access_emits_no_property_noise()
     {
-        // Completion after '.' would need expression inference; with no resolvable
-        // receiver we return nothing rather than guessing (the no-noise contract).
-        var src = "context C {\n  value V { a: Int }\n}\n";
-        var items = Svc.CompleteAt(src, line: 1, character: 17);
-        Assert.DoesNotContain(items, i => i.Kind == CompletionItemKind.Property);
+        // Cursor immediately after '.', before a member name. The DOT trigger
+        // must return nothing rather than guess members (the no-noise contract).
+        var src =
+            "context C {\n" +
+            "  value V { a: Int }\n" +
+            "  spec S on V = v.\n" +
+            "}\n";
+        var items = Complete(src, 2, 18); // one past the '.' on line 2
+        Assert.Empty(items);
     }
 }
