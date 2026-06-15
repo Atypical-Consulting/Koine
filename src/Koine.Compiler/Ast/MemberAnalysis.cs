@@ -52,6 +52,13 @@ public static class MemberAnalysis
         && TypeShapeEquals(param.Type, member.Type)
         && (!param.Type.IsOptional || member.Type.IsOptional);
 
+    /// <summary>
+    /// Directional assignability (value -&gt; target): same type shape, or an implicit
+    /// numeric widening (<c>Int</c> -&gt; <c>Decimal</c>). Ignores optionality.
+    /// </summary>
+    public static bool IsAssignable(TypeRef value, TypeRef target) =>
+        TypeShapeEquals(value, target) || (value.Name == "Int" && target.Name == "Decimal");
+
     /// <summary>Enumerates every identifier name referenced inside an expression.</summary>
     public static IEnumerable<string> ReferencedIdentifiers(Expr expr)
     {

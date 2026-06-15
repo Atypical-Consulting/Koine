@@ -24,8 +24,16 @@ public abstract record KoineNode
 /// <summary>Root of the model: the set of bounded contexts in a compilation.</summary>
 public sealed record KoineModel(IReadOnlyList<ContextNode> Contexts) : KoineNode;
 
-/// <summary>A bounded context — the top-level namespace for a group of types.</summary>
-public sealed record ContextNode(string Name, IReadOnlyList<TypeDecl> Types) : KoineNode;
+/// <summary>
+/// A bounded context — the top-level namespace for a group of types, plus its
+/// behavioral declarations: specifications, domain services, and policies (R10).
+/// </summary>
+public sealed record ContextNode(
+    string Name,
+    IReadOnlyList<TypeDecl> Types,
+    IReadOnlyList<SpecDecl> Specs,
+    IReadOnlyList<ServiceDecl> Services,
+    IReadOnlyList<PolicyDecl> Policies) : KoineNode;
 
 /// <summary>Base type for the four declarable kinds: value, entity, aggregate, enum.</summary>
 public abstract record TypeDecl(string Name) : KoineNode;
@@ -64,11 +72,12 @@ public sealed record StatesDecl(string Field, IReadOnlyList<StateRule> Rules) : 
 /// </summary>
 public sealed record StateRule(string From, IReadOnlyList<string> To, Expr? Guard) : KoineNode;
 
-/// <summary>An aggregate: a boundary owning nested types, one of which is the root.</summary>
+/// <summary>An aggregate: a boundary owning nested types (one is the root) and specs.</summary>
 public sealed record AggregateDecl(
     string Name,
     string RootName,
-    IReadOnlyList<TypeDecl> Types) : TypeDecl(Name);
+    IReadOnlyList<TypeDecl> Types,
+    IReadOnlyList<SpecDecl> Specs) : TypeDecl(Name);
 
 /// <summary>
 /// An enumeration of named members. When <see cref="Signature"/> is non-empty the
@@ -175,3 +184,41 @@ public sealed record EmitClause(string EventName, IReadOnlyList<EmitArg> Args) :
 
 /// <summary>A named payload argument of an <see cref="EmitClause"/>: <c>field: value</c>.</summary>
 public sealed record EmitArg(string Field, Expr Value) : KoineNode;
+
+// ----------------------------------------------------------------------------
+// R10 — Specifications, domain services, policies. All TARGET-AGNOSTIC.
+// ----------------------------------------------------------------------------
+
+/// <summary>
+/// A named, reusable specification: a boolean <see cref="Condition"/> over the
+/// members of <see cref="TargetType"/>. Referenceable by name inside that type's
+/// invariants, command preconditions, derived members, and other specs.
+/// </summary>
+public sealed record SpecDecl(string Name, string TargetType, Expr Condition) : KoineNode;
+
+/// <summary>A stateless domain service: a named group of pure (or seam) operations.</summary>
+public sealed record ServiceDecl(string Name, IReadOnlyList<OperationDecl> Operations) : KoineNode;
+
+/// <summary>
+/// A domain-service operation. <see cref="Body"/> is the pure result expression when
+/// declared as <c>op(...): R = expr</c>; <c>null</c> marks a seam (an abstract operation
+/// whose implementation is supplied by hand).
+/// </summary>
+public sealed record OperationDecl(
+    string Name,
+    IReadOnlyList<Param> Parameters,
+    TypeRef ReturnType,
+    Expr? Body) : KoineNode;
+
+/// <summary>
+/// A policy: when <see cref="EventName"/> occurs, the intended <see cref="Reaction"/>
+/// (a command on another aggregate) should run. Koine emits a handler seam, not the
+/// imperative call.
+/// </summary>
+public sealed record PolicyDecl(string Name, string EventName, PolicyReaction Reaction) : KoineNode;
+
+/// <summary>The reaction of a <see cref="PolicyDecl"/>: <c>Target.command(args)</c>.</summary>
+public sealed record PolicyReaction(string TargetType, string CommandName, IReadOnlyList<PolicyArg> Args) : KoineNode;
+
+/// <summary>A named argument of a <see cref="PolicyReaction"/>, drawn from the event's fields.</summary>
+public sealed record PolicyArg(string Parameter, Expr Value) : KoineNode;

@@ -82,6 +82,26 @@ public static class DiagnosticCodes
     public const string ReservedTypeName = "KOI0908";
     public const string EnumAssociatedFieldType = "KOI0909";
 
+    // ---- Specifications (KOI1000–1009) ------------------------------------
+    public const string SpecUnknownTarget = "KOI1001";
+    public const string SpecTargetMismatch = "KOI1002";
+    public const string SpecCycle = "KOI1003";
+    public const string SpecNotBoolean = "KOI1004";
+    public const string DuplicateSpec = "KOI1005";
+
+    // ---- Domain services (KOI1020–1029) -----------------------------------
+    public const string ServiceReturnMismatch = "KOI1020";
+    public const string DuplicateOperation = "KOI1021";
+    public const string DuplicateService = "KOI1022";
+
+    // ---- Policies (KOI1030–1039) ------------------------------------------
+    public const string PolicyUnknownEvent = "KOI1030";
+    public const string PolicyUnknownTarget = "KOI1031";
+    public const string PolicyUnknownCommand = "KOI1032";
+    public const string PolicyArgMismatch = "KOI1033";
+    public const string PolicyArgType = "KOI1034";
+    public const string DuplicatePolicy = "KOI1035";
+
     /// <summary>Every code with a one-line description. Tested for uniqueness/coverage.</summary>
     public static readonly IReadOnlyDictionary<string, string> Catalogue = new Dictionary<string, string>
     {
@@ -139,5 +159,19 @@ public static class DiagnosticCodes
         [RangeNotOrderable] = "A Range's element type is not orderable (requires Int, Decimal, or Instant).",
         [ReservedTypeName] = "A type uses a name reserved for a built-in generic (List/Set/Map/Range).",
         [EnumAssociatedFieldType] = "An enum associated-data field must be String, Int, Decimal, or Bool.",
+        [SpecUnknownTarget] = "A spec's target is not a declared value or entity type.",
+        [SpecTargetMismatch] = "A spec is referenced on a type that is not its declared target.",
+        [SpecCycle] = "Specs form a reference cycle (or a spec references itself).",
+        [SpecNotBoolean] = "A spec's condition is not a boolean expression.",
+        [DuplicateSpec] = "A spec name duplicates another spec or a member of its target type.",
+        [ServiceReturnMismatch] = "An operation's body type is not assignable to its declared return type.",
+        [DuplicateOperation] = "A service declares the same operation name more than once.",
+        [DuplicateService] = "A context declares the same service name more than once.",
+        [PolicyUnknownEvent] = "A policy's 'when' clause names a type that is not a declared event.",
+        [PolicyUnknownTarget] = "A policy's 'then' clause targets an aggregate/entity that is not declared.",
+        [PolicyUnknownCommand] = "A policy's 'then' clause names a command the target's root does not declare.",
+        [PolicyArgMismatch] = "Policy reaction arguments do not match the target command's parameters.",
+        [PolicyArgType] = "A policy reaction argument's value type is incompatible with the command parameter.",
+        [DuplicatePolicy] = "Two policies in the same context share a name.",
     };
 }

@@ -11,7 +11,14 @@ options { tokenVocab=KoineLexer; }
 
 program        : contextDecl* EOF ;
 
-contextDecl    : CONTEXT Identifier LBRACE typeDecl* RBRACE ;
+contextDecl    : CONTEXT Identifier LBRACE contextMember* RBRACE ;
+
+// A context holds types plus behavioral declarations (specs, services, policies).
+contextMember  : typeDecl
+               | specDecl
+               | serviceDecl
+               | policyDecl
+               ;
 
 typeDecl       : valueDecl
                | quantityDecl
@@ -20,6 +27,25 @@ typeDecl       : valueDecl
                | enumDecl
                | eventDecl
                ;
+
+// ---- Specifications, services, policies (R10) ------------------------------
+
+// A named, reusable boolean specification over a target type.
+specDecl       : SPEC Identifier ON typeName ASSIGN expression ;
+
+// A stateless domain service with pure (or seam) operations.
+serviceDecl    : SERVICE Identifier LBRACE operationDecl* RBRACE ;
+
+operationDecl  : OPERATION Identifier LPAREN paramList? RPAREN COLON typeRef ( ASSIGN expression )? ;
+
+// A policy: react to a domain event with a command on another aggregate (a seam).
+policyDecl     : POLICY Identifier WHEN Identifier THEN policyReaction ;
+
+policyReaction : typeName DOT softName ( LPAREN policyArgList? RPAREN )? ;
+
+policyArgList  : policyArg ( COMMA policyArg )* ;
+
+policyArg      : softName COLON expression ;
 
 // ---- Type declarations -----------------------------------------------------
 
@@ -72,7 +98,10 @@ factoryStmt    : requiresClause
 
 initialization : softName LARROW expression ;                  // `total <- lines.sum(...)`
 
-aggregateDecl  : AGGREGATE Identifier ROOT Identifier LBRACE typeDecl* RBRACE ;
+aggregateDecl  : AGGREGATE Identifier ROOT Identifier LBRACE aggregateMember* RBRACE ;
+
+// An aggregate holds its nested types and aggregate-scoped specifications.
+aggregateMember : typeDecl | specDecl ;
 
 // An enumeration. Members may carry associated constant data when the enum
 // declares a signature: `enum Currency(symbol: String, decimals: Int) { EUR("€", 2) }`.
@@ -100,7 +129,7 @@ typeRef        : typeName ( LT typeRef ( COMMA typeRef )? GT )? QUESTION? ;
 softName       : Identifier | declKeyword | WHEN | IF | THEN | ELSE ;
 exprName       : Identifier | declKeyword | WHEN ;
 typeName       : Identifier | declKeyword ;
-declKeyword    : CONTEXT | VALUE | QUANTITY | ENTITY | AGGREGATE | ENUM | IDENTIFIED | BY | ROOT | COMMAND | REQUIRES | EVENT | EMIT | STATES | CREATE ;
+declKeyword    : CONTEXT | VALUE | QUANTITY | ENTITY | AGGREGATE | ENUM | IDENTIFIED | BY | ROOT | COMMAND | REQUIRES | EVENT | EMIT | STATES | CREATE | SPEC | ON | SERVICE | OPERATION | POLICY ;
 
 invariant      : INVARIANT expression StringLiteral? ;
 

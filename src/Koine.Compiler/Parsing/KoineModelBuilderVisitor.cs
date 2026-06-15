@@ -35,11 +35,69 @@ public sealed class KoineModelBuilderVisitor : KoineParserBaseVisitor<object?>
 
     private ContextNode BuildContext(KoineParser.ContextDeclContext ctx)
     {
-        var types = ctx.typeDecl()
-            .Select(BuildTypeDecl)
-            .ToList();
+        var types = new List<TypeDecl>();
+        var specs = new List<SpecDecl>();
+        var services = new List<ServiceDecl>();
+        var policies = new List<PolicyDecl>();
 
-        return new ContextNode(ctx.Identifier().GetText(), types) { Span = SpanOf(ctx), Doc = DocFor(ctx) };
+        foreach (var member in ctx.contextMember())
+        {
+            if (member.typeDecl() is { } t) types.Add(BuildTypeDecl(t));
+            else if (member.specDecl() is { } s) specs.Add(BuildSpec(s));
+            else if (member.serviceDecl() is { } sv) services.Add(BuildService(sv));
+            else if (member.policyDecl() is { } p) policies.Add(BuildPolicy(p));
+        }
+
+        return new ContextNode(ctx.Identifier().GetText(), types, specs, services, policies)
+        {
+            Span = SpanOf(ctx),
+            Doc = DocFor(ctx)
+        };
+    }
+
+    private SpecDecl BuildSpec(KoineParser.SpecDeclContext ctx) =>
+        new(ctx.Identifier().GetText(), ctx.typeName().GetText(), BuildExpression(ctx.expression()))
+        {
+            Span = SpanOf(ctx),
+            Doc = DocFor(ctx)
+        };
+
+    private ServiceDecl BuildService(KoineParser.ServiceDeclContext ctx)
+    {
+        var operations = ctx.operationDecl().Select(BuildOperation).ToList();
+        return new ServiceDecl(ctx.Identifier().GetText(), operations) { Span = SpanOf(ctx), Doc = DocFor(ctx) };
+    }
+
+    private OperationDecl BuildOperation(KoineParser.OperationDeclContext ctx)
+    {
+        var parameters = ctx.paramList() is { } pl
+            ? pl.param().Select(BuildParam).ToList()
+            : new List<Param>();
+        var body = ctx.expression() is { } e ? BuildExpression(e) : null;
+        return new OperationDecl(ctx.Identifier().GetText(), parameters, BuildTypeRef(ctx.typeRef()), body)
+        {
+            Span = SpanOf(ctx),
+            Doc = DocFor(ctx)
+        };
+    }
+
+    private PolicyDecl BuildPolicy(KoineParser.PolicyDeclContext ctx)
+    {
+        var reactionCtx = ctx.policyReaction();
+        var args = reactionCtx.policyArgList() is { } al
+            ? al.policyArg().Select(a =>
+                new PolicyArg(a.softName().GetText(), BuildExpression(a.expression())) { Span = SpanOf(a) }).ToList()
+            : new List<PolicyArg>();
+        var reaction = new PolicyReaction(reactionCtx.typeName().GetText(), reactionCtx.softName().GetText(), args)
+        {
+            Span = SpanOf(reactionCtx)
+        };
+        // `when <Identifier>` is the event; the policy's own name is Identifier(0).
+        return new PolicyDecl(ctx.Identifier(0).GetText(), ctx.Identifier(1).GetText(), reaction)
+        {
+            Span = SpanOf(ctx),
+            Doc = DocFor(ctx)
+        };
     }
 
     private TypeDecl BuildTypeDecl(KoineParser.TypeDeclContext ctx)
@@ -202,12 +260,18 @@ public sealed class KoineModelBuilderVisitor : KoineParserBaseVisitor<object?>
 
     private AggregateDecl BuildAggregate(KoineParser.AggregateDeclContext ctx)
     {
-        var types = ctx.typeDecl().Select(BuildTypeDecl).ToList();
+        var types = new List<TypeDecl>();
+        var specs = new List<SpecDecl>();
+        foreach (var member in ctx.aggregateMember())
+        {
+            if (member.typeDecl() is { } t) types.Add(BuildTypeDecl(t));
+            else if (member.specDecl() is { } s) specs.Add(BuildSpec(s));
+        }
 
         var name = ctx.Identifier(0).GetText();
         var rootName = ctx.Identifier(1).GetText();
 
-        return new AggregateDecl(name, rootName, types) { Span = SpanOf(ctx), Doc = DocFor(ctx) };
+        return new AggregateDecl(name, rootName, types, specs) { Span = SpanOf(ctx), Doc = DocFor(ctx) };
     }
 
     private EnumDecl BuildEnum(KoineParser.EnumDeclContext ctx)

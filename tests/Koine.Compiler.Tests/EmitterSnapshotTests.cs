@@ -59,4 +59,39 @@ public class EmitterSnapshotTests
         return Verifier.Verify(TestSupport.Render(result.Files))
             .UseDirectory("Snapshots");
     }
+
+    /// <summary>
+    /// R10: makes the generated specification class, domain-service class, and policy
+    /// handler seam reviewable in one snapshot.
+    /// </summary>
+    [Fact]
+    public Task R10_fixture_emits_expected_csharp()
+    {
+        const string fixture = """
+            context Sales {
+              value Order { lineCount: Int  total: Int }
+              spec IsLarge on Order = lineCount > 10 || total > 1000
+
+              value Money { amount: Decimal }
+              service Pricing {
+                operation discounted(amount: Money, rate: Decimal): Money = amount * rate
+              }
+
+              event OrderPlaced { orderId: OrderId }
+              aggregate Inventory root Inventory {
+                entity Inventory identified by InventoryId {
+                  reserved: Int
+                  command reserve(order: OrderId) { reserved -> 1 }
+                }
+              }
+              policy ReserveStock when OrderPlaced then Inventory.reserve(order: orderId)
+            }
+            """;
+
+        var result = new KoineCompiler().Compile(fixture, new CSharpEmitter());
+        Assert.True(result.Success, string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        return Verifier.Verify(TestSupport.Render(result.Files))
+            .UseDirectory("Snapshots");
+    }
 }

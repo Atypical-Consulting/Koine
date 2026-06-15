@@ -29,9 +29,50 @@ public sealed class GlossaryEmitter : IEmitter
 
             foreach (var type in ctx.Types)
                 WriteType(sb, type, level: 3);
+
+            WriteBehavioral(sb, ctx);
         }
 
         return new[] { new EmittedFile(FileName, sb.ToString()) };
+    }
+
+    /// <summary>Renders the context's R10 behavioral declarations: specs, services, policies.</summary>
+    private static void WriteBehavioral(StringBuilder sb, ContextNode ctx)
+    {
+        var specs = ctx.Specs.Concat(
+            ctx.Types.OfType<AggregateDecl>().SelectMany(a => a.Specs)).ToList();
+
+        if (specs.Count > 0)
+        {
+            sb.Append("\n### Specifications\n");
+            foreach (var spec in specs)
+                sb.Append("\n- `").Append(spec.Name).Append("` on `").Append(spec.TargetType).Append('`')
+                  .Append(string.IsNullOrEmpty(spec.Doc) ? "" : " — " + spec.Doc!.Replace('\n', ' ')).Append('\n');
+        }
+
+        if (ctx.Services.Count > 0)
+        {
+            sb.Append("\n### Services\n");
+            foreach (var svc in ctx.Services)
+            {
+                sb.Append("\n- **").Append(svc.Name).Append("**")
+                  .Append(string.IsNullOrEmpty(svc.Doc) ? "" : " — " + svc.Doc!.Replace('\n', ' ')).Append('\n');
+                foreach (var op in svc.Operations)
+                    sb.Append("  - `").Append(op.Name).Append('(')
+                      .Append(string.Join(", ", op.Parameters.Select(p => $"{p.Name}: {p.Type.Name}")))
+                      .Append("): ").Append(op.ReturnType.Name).Append('`')
+                      .Append(op.Body is null ? " *(seam)*" : "").Append('\n');
+            }
+        }
+
+        if (ctx.Policies.Count > 0)
+        {
+            sb.Append("\n### Policies\n");
+            foreach (var p in ctx.Policies)
+                sb.Append("\n- **").Append(p.Name).Append("** — when `").Append(p.EventName)
+                  .Append("` then `").Append(p.Reaction.TargetType).Append('.').Append(p.Reaction.CommandName)
+                  .Append("`\n");
+        }
     }
 
     private static void WriteType(StringBuilder sb, TypeDecl type, int level)
