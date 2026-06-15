@@ -149,15 +149,18 @@ internal sealed class LspServer
                         break;
 
                     case "textDocument/completion":
-                        Respond(root, CompletionResult(root));
+                        if (root.TryGetProperty("id", out _))
+                            Respond(root, CompletionResult(root));
                         break;
 
                     case "textDocument/hover":
-                        Respond(root, HoverResultJson(root));
+                        if (root.TryGetProperty("id", out _))
+                            Respond(root, HoverResultJson(root));
                         break;
 
                     case "textDocument/definition":
-                        Respond(root, DefinitionResultJson(root));
+                        if (root.TryGetProperty("id", out _))
+                            Respond(root, DefinitionResultJson(root));
                         break;
 
                     case "shutdown":
@@ -240,6 +243,7 @@ internal sealed class LspServer
         var startChar = Math.Max(0, def.Target.Column - 1);
         return new Dictionary<string, object?>
         {
+            // Single-file model: the definition always lives in the requesting document.
             ["uri"] = uri,
             ["range"] = new Dictionary<string, object?>
             {
