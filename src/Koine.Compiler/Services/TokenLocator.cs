@@ -23,7 +23,7 @@ internal static class TokenLocator
     private static readonly HashSet<string> BlockKeywords = new(StringComparer.Ordinal)
     {
         "context", "value", "quantity", "entity", "aggregate", "enum", "event",
-        "spec", "service", "policy", "readmodel", "query", "repository", "states",
+        "spec", "service", "policy", "repository", "states",
     };
 
     /// <summary>
@@ -52,6 +52,10 @@ internal static class TokenLocator
 
             if (t.Channel != TokenConstants.DefaultChannel)
             {
+                // Off-channel tokens are `///` doc comments. They are intentionally
+                // treated as not-code: a cursor inside a doc comment sets
+                // insideStringOrRegex so completion is suppressed there too, per spec.
+                // (Don't "fix" this branch — suppression inside doc comments is desired.)
                 if (Contains(t, targetLine, targetCol))
                     insideStringOrRegex = true;
                 continue;

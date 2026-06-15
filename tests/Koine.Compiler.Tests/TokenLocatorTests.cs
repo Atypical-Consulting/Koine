@@ -62,4 +62,30 @@ public class TokenLocatorTests
         var ctx = TokenLocator.Locate("context C { value {{{ : ", line: 0, character: 24);
         Assert.NotNull(ctx);
     }
+
+    [Fact]
+    public void Cursor_inside_doc_comment_is_flagged()
+    {
+        // /// docs ...   — completion is intentionally suppressed inside doc comments
+        var src = "/// describes the value\nvalue V {\n}\n";
+        var ctx = TokenLocator.Locate(src, line: 0, character: 8);
+        Assert.True(ctx.InsideStringOrRegex);
+    }
+
+    [Fact]
+    public void Token_before_preceding_is_two_tokens_back()
+    {
+        // "  x: String" — cursor inside "String": current=String, preceding=':', beforePreceding='x'
+        var ctx = TokenLocator.Locate("value V {\n  x: String\n}\n", line: 1, character: 8);
+        Assert.NotNull(ctx.TokenBeforePreceding);
+        Assert.Equal("x", ctx.TokenBeforePreceding!.Text);
+    }
+
+    [Fact]
+    public void Partial_is_prefix_up_to_cursor_mid_token()
+    {
+        // "  status: Dr" — cursor between 'D' and 'r' (character 11) yields "D"
+        var ctx = TokenLocator.Locate("value V {\n  status: Dr\n}\n", line: 1, character: 11);
+        Assert.Equal("D", ctx.Partial);
+    }
 }
