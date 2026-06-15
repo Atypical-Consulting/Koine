@@ -55,6 +55,20 @@ public class R15VersioningTests
             """));
     }
 
+    [Fact]
+    public void An_oversized_version_or_since_literal_does_not_crash_the_compiler()
+    {
+        // `[0-9]+` admits literals far beyond int range; parsing must degrade, not throw.
+        Assert.Empty(Diagnose("""
+            context Sales version 99999999999999999999 {
+              value Money {
+                amount: Decimal
+                @since(88888888888888888888) bonus: Decimal
+              }
+            }
+            """));
+    }
+
     // ---- C# emission: [Obsolete] -------------------------------------------
 
     [Fact]
