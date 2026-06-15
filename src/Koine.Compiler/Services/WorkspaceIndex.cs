@@ -1,3 +1,4 @@
+using System.Text;
 using Koine.Compiler.Ast;
 
 namespace Koine.Compiler.Services;
@@ -79,5 +80,118 @@ public sealed class WorkspaceIndex
             return owner.Span;
 
         return null;
+    }
+
+    /// <summary>
+    /// Renders a hover card for <paramref name="name"/>: a strong declaration in the
+    /// active file, else a unique strong declaration across other files, else a weak
+    /// minimal card for primitives/collections/ID-convention names. Null if unknown.
+    /// </summary>
+    public string? ResolveHover(string activeUri, string name)
+    {
+        if (_byUri.TryGetValue(activeUri, out var active) && StrongHover(active, name) is { } local)
+            return local;
+
+        string? found = null;
+        foreach (var (uri, index) in _byUri)
+        {
+            if (string.Equals(uri, activeUri, StringComparison.Ordinal)) continue;
+            if (StrongHover(index, name) is { } card)
+            {
+                if (found is not null) return null; // ambiguous across files
+                found = card;
+            }
+        }
+        return found ?? WeakCard(name);
+    }
+
+    /// <summary>A markdown card for a "strong" declaration in one model, or null.</summary>
+    internal static string? StrongHover(ModelIndex index, string name)
+    {
+        if (index.TryGetDecl(name, out var decl))
+        {
+            var sb = new StringBuilder();
+            sb.Append("**").Append(name).Append("** *(").Append(KindLabel(index.Classify(name))).Append(")*");
+            AppendBody(sb, decl);
+            if (decl.Doc is { Length: > 0 } doc)
+                sb.Append("\n\n").Append(doc);
+            return sb.ToString();
+        }
+
+        var owners = index.EnumsDeclaring(name);
+        if (owners.Count == 1)
+            return $"**{name}** *(enum member of {owners[0]})*";
+        if (owners.Count >= 2)
+            return $"**{name}** *(ambiguous enum member — declared in {string.Join(", ", owners)})*";
+
+        var spec = index.AllSpecs().FirstOrDefault(s => s.Name == name);
+        if (spec is not null)
+            return $"**{name}** *(spec on {spec.TargetType})*";
+
+        var owner = index.AllTypes().OfType<EntityDecl>().FirstOrDefault(en => en.IdentityName == name);
+        if (owner is not null)
+        {
+            var sb = new StringBuilder();
+            sb.Append("**").Append(name).Append("** *(identity of ").Append(owner.Name).Append(")*");
+            AppendBody(sb, owner);
+            return sb.ToString();
+        }
+
+        return null;
+    }
+
+    /// <summary>A minimal card for primitives, collection keywords, or ID-convention names.</summary>
+    internal static string? WeakCard(string name)
+    {
+        if (ModelIndex.Primitives.Contains(name))
+            return $"**{name}** *(Primitive)*";
+        if (name is ModelIndex.ListTypeName or ModelIndex.SetTypeName or ModelIndex.MapTypeName or ModelIndex.RangeTypeName)
+            return $"**{name}** *({name})*";
+        if (ModelIndex.IsIdConvention(name))
+            return $"**{name}** *(ID value object)*";
+        return null;
+    }
+
+    private static string KindLabel(TypeKind kind) => kind switch
+    {
+        TypeKind.IdValueObject => "ID value object",
+        _ => kind.ToString(),
+    };
+
+    private static string TypeLabel(TypeRef t)
+    {
+        var name = t.Element is null ? t.Name
+            : t.Value is null ? $"{t.Name}<{TypeLabel(t.Element)}>"
+            : $"{t.Name}<{TypeLabel(t.Element)}, {TypeLabel(t.Value)}>";
+        return t.IsOptional ? name + "?" : name;
+    }
+
+    private static void AppendBody(StringBuilder sb, TypeDecl decl)
+    {
+        switch (decl)
+        {
+            case ValueObjectDecl v:
+                foreach (var m in v.Members)
+                    sb.Append("\n\n`").Append(m.Name).Append(" : ").Append(TypeLabel(m.Type)).Append('`');
+                break;
+            case EntityDecl e:
+                sb.Append("\n\nidentified by `").Append(e.IdentityName).Append("` (")
+                  .Append(e.IdStrategy).Append(')');
+                foreach (var m in e.Members)
+                    sb.Append("\n\n`").Append(m.Name).Append(" : ").Append(TypeLabel(m.Type)).Append('`');
+                break;
+            case EnumDecl en:
+                sb.Append("\n\n").Append(string.Join(", ", en.MemberNames));
+                break;
+            case EventDecl ev:
+                foreach (var m in ev.Members)
+                    sb.Append("\n\n`").Append(m.Name).Append(" : ").Append(TypeLabel(m.Type)).Append('`');
+                break;
+            case AggregateDecl agg:
+                // Listing the aggregate's owned/nested types is intentionally omitted for now.
+                sb.Append("\n\nroot `").Append(agg.RootName).Append('`');
+                if (agg.IsVersioned) sb.Append(" *(versioned)*");
+                break;
+        }
     }
 }
