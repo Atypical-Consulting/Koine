@@ -123,4 +123,25 @@ public class WorkspaceIndexTests
         var idx = Index(("file:///a.koi", "context A { value V { x: Int } }\n"));
         Assert.Null(idx.ResolveHover("file:///a.koi", "Nonexistent"));
     }
+
+    [Fact]
+    public void Ambiguous_cross_file_hover_is_null()
+    {
+        var b = "context B { value Widget { x: Int } }\n";
+        var c = "context C { value Widget { y: Int } }\n";
+        var active = "context A { value Uses { w: Widget } }\n";
+        var idx = Index(("file:///a.koi", active), ("file:///b.koi", b), ("file:///c.koi", c));
+        Assert.Null(idx.ResolveHover("file:///a.koi", "Widget"));
+    }
+
+    [Fact]
+    public void Cross_file_spec_hover_names_target()
+    {
+        var specFile = "context S {\n  value Money { amount: Decimal }\n  spec Positive on Money = amount > 0\n}\n";
+        var active = "context A { value V { x: Int } }\n";
+        var idx = Index(("file:///a.koi", active), ("file:///s.koi", specFile));
+        var md = idx.ResolveHover("file:///a.koi", "Positive");
+        Assert.NotNull(md);
+        Assert.Contains("spec on Money", md!);
+    }
 }
