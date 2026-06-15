@@ -138,8 +138,8 @@ public sealed class KoineLanguageService
 
         // Fallback (e.g. the type name is not directly to the left): every enum member
         // declared anywhere — ambiguous, still useful mid-edit.
-        return index.EnumMemberToType.Keys
-            .Select(name => new CompletionItem(name, CompletionItemKind.EnumMember, index.EnumMemberToType[name], null))
+        return index.EnumMemberToType
+            .Select(kvp => new CompletionItem(kvp.Key, CompletionItemKind.EnumMember, kvp.Value, null))
             .ToList();
     }
 
