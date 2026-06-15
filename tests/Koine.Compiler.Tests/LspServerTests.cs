@@ -161,7 +161,7 @@ public class LspServerTests
     {
         var doc = "context C {\n  value Money { amount: Decimal }\n  value Line { price: Money }\n}\n";
         var output = RunSession(Initialize(), DidOpen("file:///t.koi", doc), Hover("file:///t.koi", 2, 23));
-        Assert.Contains("\"markdown\"", output);
+        Assert.Contains("\"kind\":\"markdown\"", output);
         Assert.Contains("Money", output);
     }
 
@@ -172,5 +172,12 @@ public class LspServerTests
         var output = RunSession(Initialize(), DidOpen("file:///t.koi", doc), Definition("file:///t.koi", 2, 23));
         Assert.Contains("\"range\"", output);
         Assert.Contains("file:///t.koi", output);
+    }
+
+    [Fact]
+    public void Completion_for_unopened_document_returns_no_items()
+    {
+        var output = RunSession(Initialize(), Completion("file:///never-opened.koi", 0, 0));
+        Assert.DoesNotContain("\"items\"", output);
     }
 }
