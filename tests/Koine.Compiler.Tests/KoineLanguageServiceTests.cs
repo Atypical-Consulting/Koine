@@ -5,6 +5,9 @@ namespace Koine.Compiler.Tests;
 public class KoineLanguageServiceTests
 {
     private static readonly KoineLanguageService Svc = new();
+    private const string U = "file:///t.koi";
+    private static IReadOnlyDictionary<string, string> Doc(string src) =>
+        new Dictionary<string, string> { [U] = src };
 
     private static IReadOnlyList<CompletionItem> Complete(string src, int line, int ch) =>
         Svc.CompleteAt(src, line, ch);
@@ -98,7 +101,7 @@ public class KoineLanguageServiceTests
             "  value Money { amount: Decimal }\n" +
             "  value Line { price: Money }\n" +
             "}\n";
-        var hover = Svc.HoverAt(src, line: 2, character: 23); // over "Money" (col 22; cursor must land strictly after the token's start column)
+        var hover = Svc.HoverAt(Doc(src), U, line: 2, character: 23); // over "Money" (col 22; cursor must land strictly after the token's start column)
         Assert.NotNull(hover);
         Assert.Contains("Money", hover!.Markdown);
         Assert.Contains("Value", hover.Markdown);     // the kind label
@@ -109,14 +112,14 @@ public class KoineLanguageServiceTests
     public void Hover_returns_null_on_a_broken_document()
     {
         var src = "context C {\n  value Money { amount: ";
-        Assert.Null(Svc.HoverAt(src, line: 1, character: 9)); // over "Money", parse fails
+        Assert.Null(Svc.HoverAt(Doc(src), U, line: 1, character: 9)); // over "Money", parse fails
     }
 
     [Fact]
     public void Hover_over_whitespace_returns_null()
     {
         var src = "context C {\n  value Money { amount: Decimal }\n}\n";
-        Assert.Null(Svc.HoverAt(src, line: 0, character: 0));
+        Assert.Null(Svc.HoverAt(Doc(src), U, line: 0, character: 0));
     }
 
     [Fact]
@@ -127,7 +130,7 @@ public class KoineLanguageServiceTests
             "  value OrderLine { qty: Int }\n" +
             "  value Basket { lines: List<OrderLine> }\n" +
             "}\n";
-        var hover = Svc.HoverAt(src, line: 2, character: 9); // over "Basket"
+        var hover = Svc.HoverAt(Doc(src), U, line: 2, character: 9); // over "Basket"
         Assert.NotNull(hover);
         Assert.Contains("List<OrderLine>", hover!.Markdown);
     }
@@ -140,7 +143,7 @@ public class KoineLanguageServiceTests
             "  enum Color { Red, Green }\n" +
             "  value Paint { c: Color = Red }\n" +
             "}\n";
-        var hover = Svc.HoverAt(src, line: 2, character: 28); // over "Red"
+        var hover = Svc.HoverAt(Doc(src), U, line: 2, character: 28); // over "Red"
         Assert.NotNull(hover);
         Assert.Contains("enum member of Color", hover!.Markdown);
     }
@@ -153,7 +156,7 @@ public class KoineLanguageServiceTests
             "  value Money { amount: Decimal }\n" +
             "  spec Positive on Money = amount > 0\n" +
             "}\n";
-        var hover = Svc.HoverAt(src, line: 2, character: 9); // over "Positive"
+        var hover = Svc.HoverAt(Doc(src), U, line: 2, character: 9); // over "Positive"
         Assert.NotNull(hover);
         Assert.Contains("spec on Money", hover!.Markdown);
     }
@@ -166,7 +169,7 @@ public class KoineLanguageServiceTests
             "  value Money { amount: Decimal }\n" +
             "  value Line { price: Money }\n" +
             "}\n";
-        var def = Svc.DefinitionAt(src, line: 2, character: 23); // over "Money"
+        var def = Svc.DefinitionAt(Doc(src), U, line: 2, character: 23); // over "Money"
         Assert.NotNull(def);
         Assert.Equal(2, def!.Target.Line);  // 1-based line of "value Money"
     }
@@ -179,7 +182,7 @@ public class KoineLanguageServiceTests
             "  enum OrderStatus { Draft, Placed }\n" +
             "  entity E identified by EId { status: OrderStatus = Draft }\n" +
             "}\n";
-        var def = Svc.DefinitionAt(src, line: 2, character: 54); // over "Draft" value
+        var def = Svc.DefinitionAt(Doc(src), U, line: 2, character: 54); // over "Draft" value
         Assert.NotNull(def);
         Assert.Equal(2, def!.Target.Line);
     }
@@ -188,7 +191,7 @@ public class KoineLanguageServiceTests
     public void Definition_of_a_primitive_is_null()
     {
         var src = "context C {\n  value V { x: Decimal }\n}\n";
-        Assert.Null(Svc.DefinitionAt(src, line: 1, character: 18)); // over "Decimal"
+        Assert.Null(Svc.DefinitionAt(Doc(src), U, line: 1, character: 18)); // over "Decimal"
     }
 
     [Fact]
@@ -199,7 +202,7 @@ public class KoineLanguageServiceTests
             "  value Money { amount: Decimal }\n" +
             "  spec Positive on Money = amount > 0\n" +
             "}\n";
-        var def = Svc.DefinitionAt(src, line: 2, character: 9); // over "Positive"
+        var def = Svc.DefinitionAt(Doc(src), U, line: 2, character: 9); // over "Positive"
         Assert.NotNull(def);
         Assert.Equal(3, def!.Target.Line); // 1-based line of the spec declaration
     }
@@ -214,7 +217,37 @@ public class KoineLanguageServiceTests
             "  enum B { Shared, Y }\n" +
             "  value V { a: A = Shared }\n" +
             "}\n";
-        var def = Svc.DefinitionAt(src, line: 3, character: 20); // over "Shared"
+        var def = Svc.DefinitionAt(Doc(src), U, line: 3, character: 20); // over "Shared"
         Assert.Null(def);
+    }
+
+    [Fact]
+    public void DefinitionAt_resolves_across_files()
+    {
+        var ordering = "context Ordering {\n  value Line { product: ProductId }\n}\n";
+        var catalog = "context Catalog {\n  entity Product identified by ProductId { sku: String }\n}\n";
+        var docs = new Dictionary<string, string>
+        {
+            ["file:///ordering.koi"] = ordering,
+            ["file:///catalog.koi"] = catalog,
+        };
+        var def = Svc.DefinitionAt(docs, "file:///ordering.koi", line: 1, character: 25); // on "ProductId"
+        Assert.NotNull(def);
+        Assert.Equal("file:///catalog.koi", def!.Uri);
+    }
+
+    [Fact]
+    public void HoverAt_resolves_across_files()
+    {
+        var ordering = "context Ordering {\n  value Line { product: ProductId }\n}\n";
+        var catalog = "context Catalog {\n  entity Product identified by ProductId { sku: String }\n}\n";
+        var docs = new Dictionary<string, string>
+        {
+            ["file:///ordering.koi"] = ordering,
+            ["file:///catalog.koi"] = catalog,
+        };
+        var hover = Svc.HoverAt(docs, "file:///ordering.koi", line: 1, character: 25); // on "ProductId"
+        Assert.NotNull(hover);
+        Assert.Contains("Product", hover!.Markdown); // owning entity
     }
 }

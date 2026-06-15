@@ -138,6 +138,80 @@ public class LspServerTests
             @params = new { textDocument = new { uri }, position = new { line, character } },
         }));
 
+    private static byte[] InitializeWithRoot(string rootUri) =>
+        Frame(JsonSerializer.Serialize(new
+        {
+            jsonrpc = "2.0",
+            id = 1,
+            method = "initialize",
+            @params = new { rootUri },
+        }));
+
+    [Fact]
+    public void Definition_resolves_across_open_files()
+    {
+        var ordering = "context Ordering {\n  value Line { product: ProductId }\n}\n";
+        var catalog = "context Catalog {\n  entity Product identified by ProductId { sku: String }\n}\n";
+        var output = RunSession(
+            Initialize(),
+            DidOpen("file:///ordering.koi", ordering),
+            DidOpen("file:///catalog.koi", catalog),
+            Definition("file:///ordering.koi", 1, 25)); // on "ProductId"
+        Assert.Contains("file:///catalog.koi", output);
+        Assert.Contains("\"range\"", output);
+    }
+
+    [Fact]
+    public void Definition_resolves_into_unopened_workspace_file()
+    {
+        var dir = Directory.CreateTempSubdirectory("koi-ws-");
+        try
+        {
+            File.WriteAllText(Path.Combine(dir.FullName, "catalog.koi"),
+                "context Catalog {\n  entity Product identified by ProductId { sku: String }\n}\n");
+            var rootUri = new Uri(dir.FullName).AbsoluteUri;
+            var orderingUri = new Uri(Path.Combine(dir.FullName, "ordering.koi")).AbsoluteUri;
+            var ordering = "context Ordering {\n  value Line { product: ProductId }\n}\n";
+
+            var output = RunSession(
+                InitializeWithRoot(rootUri),
+                DidOpen(orderingUri, ordering),
+                Definition(orderingUri, 1, 25)); // on "ProductId"; catalog.koi NOT opened
+
+            Assert.Contains("catalog.koi", output); // resolved via the on-disk workspace scan
+        }
+        finally { dir.Delete(recursive: true); }
+    }
+
+    [Fact]
+    public void Open_edit_overrides_on_disk_version()
+    {
+        var dir = Directory.CreateTempSubdirectory("koi-ws-");
+        try
+        {
+            var catalogPath = Path.Combine(dir.FullName, "catalog.koi");
+            // On disk the owning entity is named Product.
+            File.WriteAllText(catalogPath,
+                "context Catalog {\n  entity Product identified by ProductId { sku: String }\n}\n");
+            var rootUri = new Uri(dir.FullName).AbsoluteUri;
+            var catalogUri = new Uri(catalogPath).AbsoluteUri;
+            var orderingUri = new Uri(Path.Combine(dir.FullName, "ordering.koi")).AbsoluteUri;
+            var ordering = "context Ordering {\n  value Line { product: ProductId }\n}\n";
+            // The open buffer renames the entity Product -> Widget (unsaved edit).
+            var editedCatalog = "context Catalog {\n  entity Widget identified by ProductId { sku: String }\n}\n";
+
+            var output = RunSession(
+                InitializeWithRoot(rootUri),
+                DidOpen(catalogUri, editedCatalog),
+                DidOpen(orderingUri, ordering),
+                Hover(orderingUri, 1, 25)); // hover "ProductId" -> owning entity
+
+            Assert.Contains("Widget", output);                 // open (edited) version wins
+            Assert.DoesNotContain("identity of Product", output);
+        }
+        finally { dir.Delete(recursive: true); }
+    }
+
     [Fact]
     public void Initialize_advertises_intellisense_capabilities()
     {

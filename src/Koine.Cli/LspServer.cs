@@ -20,6 +20,10 @@ internal sealed class LspServer
     private readonly KoineCompiler _compiler = new();
     private readonly KoineLanguageService _ls = new();
     private readonly Dictionary<string, string> _docs = new(StringComparer.Ordinal);
+
+    // On-disk baseline of every *.koi in the workspace (uri -> text), scanned at initialize.
+    private readonly Dictionary<string, string> _workspaceFiles = new(StringComparer.Ordinal);
+    private readonly HashSet<string> _scannedRoots = new(StringComparer.Ordinal);
     private readonly Stream _in;
     private readonly Stream _out;
 
@@ -95,6 +99,16 @@ internal sealed class LspServer
                 switch (method)
                 {
                     case "initialize":
+                        if (root.TryGetProperty("params", out var initParams))
+                        {
+                            if (initParams.TryGetProperty("rootUri", out var ru) && ru.ValueKind == JsonValueKind.String)
+                                ScanWorkspace(ru.GetString()!);
+                            if (initParams.TryGetProperty("workspaceFolders", out var folders)
+                                && folders.ValueKind == JsonValueKind.Array)
+                                foreach (var f in folders.EnumerateArray())
+                                    if (f.TryGetProperty("uri", out var fu) && fu.ValueKind == JsonValueKind.String)
+                                        ScanWorkspace(fu.GetString()!);
+                        }
                         Respond(root, new Dictionary<string, object?>
                         {
                             ["capabilities"] = new Dictionary<string, object?>
@@ -209,11 +223,10 @@ internal sealed class LspServer
 
     private object? HoverResultJson(JsonElement root)
     {
-        if (!TryGetUri(root, out var uri) || !TryGetPosition(root, out var line, out var ch)
-            || !_docs.TryGetValue(uri, out var text))
+        if (!TryGetUri(root, out var uri) || !TryGetPosition(root, out var line, out var ch))
             return null;
 
-        var hover = _ls.HoverAt(text, line, ch);
+        var hover = _ls.HoverAt(Workspace(), uri, line, ch);
         if (hover is null)
             return null;
 
@@ -229,11 +242,10 @@ internal sealed class LspServer
 
     private object? DefinitionResultJson(JsonElement root)
     {
-        if (!TryGetUri(root, out var uri) || !TryGetPosition(root, out var line, out var ch)
-            || !_docs.TryGetValue(uri, out var text))
+        if (!TryGetUri(root, out var uri) || !TryGetPosition(root, out var line, out var ch))
             return null;
 
-        var def = _ls.DefinitionAt(text, line, ch);
+        var def = _ls.DefinitionAt(Workspace(), uri, line, ch);
         if (def is null)
             return null;
 
@@ -243,8 +255,8 @@ internal sealed class LspServer
         var startChar = Math.Max(0, def.Target.Column - 1);
         return new Dictionary<string, object?>
         {
-            // Single-file model: the definition always lives in the requesting document.
-            ["uri"] = uri,
+            // The target may live in a different file than the request (cross-file resolution).
+            ["uri"] = def.Uri,
             ["range"] = new Dictionary<string, object?>
             {
                 ["start"] = new Dictionary<string, object?> { ["line"] = startLine, ["character"] = startChar },
@@ -427,6 +439,50 @@ internal sealed class LspServer
     }
 
     // ---- Param extraction --------------------------------------------------
+
+    /// <summary>Merged view: on-disk workspace files overlaid by open/edited docs (open wins).</summary>
+    private Dictionary<string, string> Workspace()
+    {
+        var merged = new Dictionary<string, string>(_workspaceFiles, StringComparer.Ordinal);
+        foreach (var (uri, text) in _docs)
+            merged[uri] = text;
+        return merged;
+    }
+
+    private static string? PathToUri(string path)
+    {
+        try { return new Uri(path).AbsoluteUri; } catch { return null; }
+    }
+
+    private static string? UriToPath(string uri)
+    {
+        try { var u = new Uri(uri); return u.IsFile ? u.LocalPath : null; } catch { return null; }
+    }
+
+    /// <summary>Scans the workspace root for *.koi files into <see cref="_workspaceFiles"/>.</summary>
+    private void ScanWorkspace(string rootUri)
+    {
+        var root = UriToPath(rootUri);
+        if (root is null || !Directory.Exists(root))
+            return;
+        if (!_scannedRoots.Add(root))
+            return; // already scanned this root (e.g. rootUri == a workspaceFolder)
+        try
+        {
+            foreach (var path in Directory.EnumerateFiles(root, "*.koi", SearchOption.AllDirectories))
+            {
+                var rel = path.Replace('\\', '/');
+                if (rel.Contains("/bin/") || rel.Contains("/obj/") || rel.Contains("/.git/"))
+                    continue;
+                var uri = PathToUri(path);
+                if (uri is null) continue;
+                try { _workspaceFiles[uri] = File.ReadAllText(path); }
+                catch (Exception ex) { Log($"skip {path}: {ex.Message}"); }
+            }
+            Log($"workspace scan indexed {_workspaceFiles.Count} .koi file(s)");
+        }
+        catch (Exception ex) { Log("workspace scan failed: " + ex); }
+    }
 
     private static bool TryGetUri(JsonElement root, out string uri)
     {

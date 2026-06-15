@@ -58,11 +58,12 @@ Over stdio (LSP), `koine lsp` provides:
   keywords valid at the current scope (e.g. `value`/`entity`/`enum` in a context, `operation` in a
   service). Completion is lexer-based, so it keeps working while the document is mid-edit and not yet
   parseable.
-- **Hover** — a markdown card showing a type's kind, its members (with full generic types, e.g.
-  `List<OrderLine>`), and its `///` doc comment; enum members and specs are described too.
-- **Go-to-definition** — jump from a type, enum-member, or spec reference to its declaration. (Note:
-  navigation currently lands on the declaration keyword, not the name token; ambiguous enum members —
-  declared in more than one enum — are not navigated.)
+- **Hover** — a markdown card showing a type's kind, members (with full generic types like
+  `List<OrderLine>`), and doc comment; resolves across files, and an `*Id` shows its owning entity.
+- **Go-to-definition** — jump from a type, enum-member, spec, or `*Id` reference to its declaration
+  in any `.koi` file in the workspace. (Navigation lands on the declaration keyword; cross-file
+  *ambiguous* names — declared in two files — are not navigated. Files edited outside the editor
+  re-index on server restart.)
 
 ### JetBrains Rider
 

@@ -244,6 +244,8 @@ For **live error squiggles, code completion, hover docs, and go-to-definition** 
 bundled language server (`koine lsp`) and point Rider at it via the LSP4IJ plugin — setup in
 [`tooling/README.md`](tooling/README.md#live-diagnostics-language-server).
 It reuses the compiler's parser + validator, so editor diagnostics match `koine build`.
+Hover and go-to-definition resolve **across all `.koi` files in the workspace** — e.g. an
+`OrderId`/`ProductId` reference jumps to the `entity … identified by …` that owns it, even in another file.
 
 ## Roadmap
 
