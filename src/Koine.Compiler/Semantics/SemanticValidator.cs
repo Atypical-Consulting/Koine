@@ -36,11 +36,23 @@ public sealed class SemanticValidator
     /// </summary>
     private static void ValidateUniqueTypeNames(KoineModel model, List<Diagnostic> diagnostics)
     {
+        // Names reserved for built-in generics; a user type with one of these would be
+        // shadowed by the built-in at resolution and silently mis-emit.
+        var reserved = new HashSet<string>(StringComparer.Ordinal)
+        {
+            ModelIndex.ListTypeName, ModelIndex.SetTypeName, ModelIndex.MapTypeName, ModelIndex.RangeTypeName
+        };
+
         var seen = new HashSet<string>(StringComparer.Ordinal);
         foreach (var ctx in model.Contexts)
             foreach (var type in Flatten(ctx))
+            {
+                if (reserved.Contains(type.Name))
+                    diagnostics.Add(Diagnostic.Error(DiagnosticCodes.ReservedTypeName,
+                        $"'{type.Name}' is a reserved built-in generic name and cannot name a type", type.Span.Line, type.Span.Column));
                 if (type is not AggregateDecl && !seen.Add(type.Name))
                     diagnostics.Add(Diagnostic.Error(DiagnosticCodes.DuplicateType, $"duplicate type '{type.Name}'", type.Span.Line, type.Span.Column));
+            }
     }
 
     private static IEnumerable<TypeDecl> Flatten(ContextNode ctx)
@@ -66,6 +78,8 @@ public sealed class SemanticValidator
         {
             case ValueObjectDecl v:
                 ValidateMembersAndInvariants(v.Members, v.Invariants, index, resolver, enumMembers, diagnostics);
+                if (v.IsQuantity)
+                    ValidateQuantity(v, index, diagnostics);
                 break;
             case EntityDecl e:
                 ValidateMembersAndInvariants(e.Members, e.Invariants, index, resolver, enumMembers, diagnostics);
@@ -86,10 +100,11 @@ public sealed class SemanticValidator
             case EnumDecl en:
                 // Duplicate enum members produce uncompilable C#.
                 var seenMembers = new HashSet<string>(StringComparer.Ordinal);
-                foreach (var member in en.Members)
+                foreach (var member in en.MemberNames)
                     if (!seenMembers.Add(member))
                         diagnostics.Add(Diagnostic.Error(DiagnosticCodes.DuplicateEnumMember,
                             $"duplicate enum member '{member}'", en.Span.Line, en.Span.Column));
+                ValidateEnumAssociatedData(en, index, diagnostics);
                 break;
             case EventDecl ev:
                 // Events are validated like value objects but carry no invariants.
@@ -137,9 +152,9 @@ public sealed class SemanticValidator
                     && index.TryGetDecl(m.Type.Name, out var decl)
                     && decl is EnumDecl en)
                 {
-                    if (!en.Members.Contains(enumDefault.Name))
+                    if (!en.MemberNames.Contains(enumDefault.Name))
                         diagnostics.Add(Diagnostic.Error(DiagnosticCodes.UnknownEnumMemberForType,
-                            $"unknown enum member '{enumDefault.Name}' for type '{m.Type.Name}'{Suggestions.For(enumDefault.Name, en.Members)}",
+                            $"unknown enum member '{enumDefault.Name}' for type '{m.Type.Name}'{Suggestions.For(enumDefault.Name, en.MemberNames)}",
                             enumDefault.Span.Line, enumDefault.Span.Column));
                 }
                 else
@@ -444,7 +459,7 @@ public sealed class SemanticValidator
 
             var enumName = field.Type.Name;
             var validStates = index.TryGetDecl(enumName, out var decl) && decl is EnumDecl en
-                ? new HashSet<string>(en.Members, StringComparer.Ordinal)
+                ? new HashSet<string>(en.MemberNames, StringComparer.Ordinal)
                 : new HashSet<string>(StringComparer.Ordinal);
 
             foreach (var rule in states.Rules)
@@ -503,6 +518,128 @@ public sealed class SemanticValidator
                     $"emit of '{ev.Name}' is missing field '{field.Name}'", emit.Span.Line, emit.Span.Column));
     }
 
+    /// <summary>
+    /// Validates a quantity (R9.2): it must declare exactly one non-derived numeric
+    /// amount member and exactly one enum-typed unit member, and nothing else, so the
+    /// generated unit-checked arithmetic is well-defined.
+    /// </summary>
+    private static void ValidateQuantity(ValueObjectDecl q, ModelIndex index, List<Diagnostic> diagnostics)
+    {
+        var memberNames = new HashSet<string>(q.Members.Select(m => m.Name), StringComparer.Ordinal);
+
+        // The amount is a non-optional Decimal: this keeps scalar */÷ exact (an Int amount
+        // would silently integer-divide / truncate when scaled by a fraction).
+        bool IsAmount(Member m) => m.Type.Name == "Decimal" && !m.Type.IsOptional
+            && !MemberAnalysis.IsDerived(m, memberNames);
+        bool IsUnit(Member m) => index.Classify(m.Type.Name) == TypeKind.Enum && !m.Type.IsOptional
+            && !MemberAnalysis.IsDerived(m, memberNames);
+
+        var amountCount = q.Members.Count(IsAmount);
+        var unitCount = q.Members.Count(IsUnit);
+
+        if (unitCount != 1)
+            diagnostics.Add(Diagnostic.Error(DiagnosticCodes.QuantityUnitCardinality,
+                $"quantity '{q.Name}' must declare exactly one enum-typed unit member, found {unitCount}", q.Span.Line, q.Span.Column));
+        if (amountCount != 1)
+            diagnostics.Add(Diagnostic.Error(DiagnosticCodes.QuantityAmountCardinality,
+                $"quantity '{q.Name}' must declare exactly one Decimal amount member, found {amountCount}", q.Span.Line, q.Span.Column));
+
+        // Only the amount and unit are restricted; derived/computed projections are fine.
+        foreach (var m in q.Members)
+            if (!MemberAnalysis.IsDerived(m, memberNames) && !IsAmount(m) && !IsUnit(m))
+                diagnostics.Add(Diagnostic.Error(DiagnosticCodes.QuantityMemberNotAllowed,
+                    $"quantity '{q.Name}' may declare only its amount and unit members (plus derived projections); '{m.Name}' is not allowed",
+                    m.Span.Line, m.Span.Column));
+    }
+
+    /// <summary>
+    /// Validates an enum's associated-data signature (R9.1): signature field types
+    /// and uniqueness, reserved-name collisions with generated smart-enum members,
+    /// per-member arity against the signature, and that each member value is a literal
+    /// of a compatible type.
+    /// </summary>
+    private static void ValidateEnumAssociatedData(EnumDecl en, ModelIndex index, List<Diagnostic> diagnostics)
+    {
+        var sig = en.Signature;
+
+        var seenFields = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        // Names generated on every smart enum; an associated field of these would clash.
+        var reserved = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "Name", "Value", "All", "FromName", "FromValue", "ToString", "Equals", "GetHashCode"
+        };
+        foreach (var p in sig)
+        {
+            ValidateTypeRef(p.Type, index, diagnostics);
+            if (!seenFields.Add(p.Name))
+                diagnostics.Add(Diagnostic.Error(DiagnosticCodes.DuplicateParameter,
+                    $"duplicate associated-data field '{p.Name}' in enum '{en.Name}'", p.Span.Line, p.Span.Column));
+            if (reserved.Contains(p.Name))
+                diagnostics.Add(Diagnostic.Error(DiagnosticCodes.EnumReservedAssociatedField,
+                    $"associated-data field '{p.Name}' collides with a generated smart-enum member", p.Span.Line, p.Span.Column));
+            // Associated values are literals, so the field must be a literal-expressible
+            // primitive (v0: String/Int/Decimal/Bool) — not a collection, value, or enum.
+            if (!IsLiteralFieldType(p.Type))
+                diagnostics.Add(Diagnostic.Error(DiagnosticCodes.EnumAssociatedFieldType,
+                    $"enum '{en.Name}' associated-data field '{p.Name}' must be String, Int, Decimal, or Bool", p.Span.Line, p.Span.Column));
+        }
+
+        foreach (var member in en.Members)
+        {
+            if (member.Args.Count != sig.Count)
+            {
+                diagnostics.Add(Diagnostic.Error(DiagnosticCodes.EnumMemberArity,
+                    sig.Count == 0
+                        ? $"enum '{en.Name}' has no associated-data signature but member '{member.Name}' supplies {member.Args.Count} value(s)"
+                        : $"enum member '{member.Name}' supplies {member.Args.Count} value(s) but '{en.Name}' declares {sig.Count} field(s)",
+                    member.Span.Line, member.Span.Column));
+                continue; // arity mismatch: per-arg type checks would be noise
+            }
+
+            // Only check values for fields with a valid literal type (an invalid field
+            // type is already reported above; per-member checks would just be noise).
+            for (var i = 0; i < sig.Count; i++)
+                if (IsLiteralFieldType(sig[i].Type))
+                    CheckEnumArg(member.Args[i], sig[i].Type, en.Name, sig[i].Name, diagnostics);
+        }
+    }
+
+    /// <summary>The primitive types that can carry a literal associated value (R9.1).</summary>
+    private static bool IsLiteralFieldType(TypeRef t) =>
+        !t.IsOptional && t.Element is null && t.Name is "String" or "Bool" or "Int" or "Decimal";
+
+    /// <summary>Checks a single enum associated value is a (possibly negated) literal of a compatible type.</summary>
+    private static void CheckEnumArg(Expr arg, TypeRef expected, string enumName, string field, List<Diagnostic> diagnostics)
+    {
+        // A negative number parses as `-` applied to a numeric literal; accept it.
+        var (lit, negated) = arg switch
+        {
+            LiteralExpr l => (l, false),
+            UnaryExpr { Op: UnaryOp.Negate, Operand: LiteralExpr l } => (l, true),
+            _ => (null, false)
+        };
+
+        if (lit is null || (negated && lit.Kind is not (LiteralKind.Int or LiteralKind.Decimal)))
+        {
+            diagnostics.Add(Diagnostic.Error(DiagnosticCodes.EnumMemberArgType,
+                $"enum '{enumName}' associated value for '{field}' must be a literal", arg.Span.Line, arg.Span.Column));
+            return;
+        }
+
+        var ok = expected.Name switch
+        {
+            "String" => lit.Kind == LiteralKind.String,
+            "Bool" => lit.Kind == LiteralKind.Bool,
+            "Int" => lit.Kind == LiteralKind.Int,
+            "Decimal" => lit.Kind is LiteralKind.Int or LiteralKind.Decimal, // Int widens to Decimal
+            _ => false
+        };
+        if (!ok)
+            diagnostics.Add(Diagnostic.Error(DiagnosticCodes.EnumMemberArgType,
+                $"enum '{enumName}' field '{field}' expects '{expected.Name}', but got a {lit.Kind.ToString().ToLowerInvariant()} literal",
+                arg.Span.Line, arg.Span.Column));
+    }
+
     private static void ValidateTypeRef(TypeRef type, ModelIndex index, List<Diagnostic> diagnostics)
     {
         if (!index.IsKnownType(type.Name))
@@ -510,10 +647,10 @@ public sealed class SemanticValidator
                 $"unknown type '{type.Name}'{Suggestions.For(type.Name, index.CandidateTypeNames)}",
                 type.Span.Line, type.Span.Column));
 
-        // Generic arity: List/Set take one type argument; Map takes two.
+        // Generic arity: List/Set/Range take one type argument; Map takes two.
         switch (index.Classify(type.Name))
         {
-            case TypeKind.List or TypeKind.Set:
+            case TypeKind.List or TypeKind.Set or TypeKind.Range:
                 if (type.Element is null)
                     diagnostics.Add(Diagnostic.Error(DiagnosticCodes.GenericArity, $"'{type.Name}' requires a type argument", type.Span.Line, type.Span.Column));
                 if (type.Value is not null)
@@ -524,6 +661,14 @@ public sealed class SemanticValidator
                     diagnostics.Add(Diagnostic.Error(DiagnosticCodes.GenericArity, "'Map' requires two type arguments <Key, Value>", type.Span.Line, type.Span.Column));
                 break;
         }
+
+        // A Range is ordered, so its element must be an orderable type (Int/Decimal/Instant).
+        // Only flag a KNOWN non-orderable element; an unknown element is already KOI0101.
+        if (index.Classify(type.Name) == TypeKind.Range && type.Element is not null
+            && index.IsKnownType(type.Element.Name) && !BuiltinOps.IsOrderable(type.Element.Name))
+            diagnostics.Add(Diagnostic.Error(DiagnosticCodes.RangeNotOrderable,
+                $"range element type '{type.Element.Name}' is not orderable; ranges require Int, Decimal, or Instant",
+                type.Element.Span.Line, type.Element.Span.Column));
 
         if (type.Element is not null)
             ValidateTypeRef(type.Element, index, diagnostics);
@@ -546,7 +691,7 @@ public sealed class SemanticValidator
         switch (type)
         {
             case EnumDecl e:
-                foreach (var member in e.Members)
+                foreach (var member in e.MemberNames)
                     names.Add(member);
                 break;
             case AggregateDecl agg:

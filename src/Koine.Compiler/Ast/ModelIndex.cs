@@ -7,6 +7,7 @@ public enum TypeKind
     List,
     Set,
     Map,
+    Range,
     Value,
     Entity,
     Aggregate,
@@ -39,6 +40,7 @@ public sealed class ModelIndex
     public const string ListTypeName = "List";
     public const string SetTypeName = "Set";
     public const string MapTypeName = "Map";
+    public const string RangeTypeName = "Range";
 
     private readonly Dictionary<string, TypeDecl> _byName = new(StringComparer.Ordinal);
     private readonly HashSet<string> _idTypeNames = new(StringComparer.Ordinal);
@@ -96,7 +98,7 @@ public sealed class ModelIndex
         //    Track ALL owning enums per member so shared names can be disambiguated.
         foreach (var decl in AllTypes())
             if (decl is EnumDecl e)
-                foreach (var member in e.Members)
+                foreach (var member in e.MemberNames)
                 {
                     _enumMemberToType[member] = e.Name; // first/last owner (unambiguous case)
                     if (!_enumMembersByName.TryGetValue(member, out var owners))
@@ -175,7 +177,7 @@ public sealed class ModelIndex
     public IEnumerable<string> CandidateTypeNames =>
         _byName.Keys
             .Concat(Primitives)
-            .Concat(new[] { ListTypeName, SetTypeName, MapTypeName })
+            .Concat(new[] { ListTypeName, SetTypeName, MapTypeName, RangeTypeName })
             .Concat(_idTypeNames)
             .Distinct(StringComparer.Ordinal);
 
@@ -196,6 +198,7 @@ public sealed class ModelIndex
         if (typeName == ListTypeName) return TypeKind.List;
         if (typeName == SetTypeName) return TypeKind.Set;
         if (typeName == MapTypeName) return TypeKind.Map;
+        if (typeName == RangeTypeName) return TypeKind.Range;
         if (_byName.TryGetValue(typeName, out var decl))
             return decl switch
             {

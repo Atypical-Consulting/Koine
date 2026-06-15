@@ -46,6 +46,8 @@ public sealed class CSharpEmitter : IEmitter
         files.Add(EmitAggregateRootInterface());
         if (NeedsValueObjects(model))
             files.Add(EmitValueObjectBase());
+        if (UsesRange(model))
+            files.Add(EmitRange());
         if (HasEvents(model))
             files.Add(EmitDomainEventInterface());
 
@@ -66,7 +68,7 @@ public sealed class CSharpEmitter : IEmitter
                         EmitEntityAndId(files, entity, ctx.Name, isRoot: false, index, typeMapper, enumMemberToType);
                         break;
                     case EnumDecl @enum:
-                        files.Add(EmitEnum(@enum, ctx.Name));
+                        files.Add(EmitEnum(@enum, ctx.Name, index, typeMapper, enumMemberToType));
                         break;
                     case EventDecl @event:
                         files.Add(EmitEvent(@event, ctx.Name, index, typeMapper, enumMemberToType));
@@ -113,7 +115,7 @@ public sealed class CSharpEmitter : IEmitter
                     EmitEntityAndId(files, entity, ns, isRoot, index, typeMapper, enumMemberToType);
                     break;
                 case EnumDecl @enum:
-                    files.Add(EmitEnum(@enum, ns));
+                    files.Add(EmitEnum(@enum, ns, index, typeMapper, enumMemberToType));
                     break;
                 case EventDecl @event:
                     files.Add(EmitEvent(@event, ns, index, typeMapper, enumMemberToType));
@@ -177,21 +179,31 @@ public sealed class CSharpEmitter : IEmitter
               .Append(CSharpNaming.ToPascalCase(m.Name)).Append(" => ").Append(body).Append(";\n");
         }
 
-        // Scalar arithmetic operators (v0 codegen rule): emitted only when this
-        // value object is actually multiplied by a scalar in a derived expression.
-        if (_scalarNeeds.TryGetValue(vo.Name, out var scalarTypes))
+        // A quantity (R9.2) gets explicit, unit-checked arithmetic instead of the
+        // demand-driven scalar/additive heuristic (which is skipped for quantities to
+        // avoid emitting a duplicate operator).
+        if (vo.IsQuantity)
         {
-            var numericFields = NumericFields(vo);
-            if (numericFields.Count > 0)
-                WriteScalarOperators(sb, vo, numericFields, scalarTypes, typeMapper);
+            WriteQuantityOperators(sb, vo, index);
         }
-
-        // Additive operator for value objects that are summed (e.g. lines.sum(l => l.subtotal)).
-        if (_additiveNeeds.Contains(vo.Name))
+        else
         {
-            var numericFields = NumericFields(vo);
-            if (numericFields.Count > 0)
-                WriteAdditiveOperator(sb, vo, numericFields);
+            // Scalar arithmetic operators (v0 codegen rule): emitted only when this
+            // value object is actually multiplied by a scalar in a derived expression.
+            if (_scalarNeeds.TryGetValue(vo.Name, out var scalarTypes))
+            {
+                var numericFields = NumericFields(vo);
+                if (numericFields.Count > 0)
+                    WriteScalarOperators(sb, vo, numericFields, scalarTypes, typeMapper);
+            }
+
+            // Additive operator for value objects that are summed (e.g. lines.sum(l => l.subtotal)).
+            if (_additiveNeeds.Contains(vo.Name))
+            {
+                var numericFields = NumericFields(vo);
+                if (numericFields.Count > 0)
+                    WriteAdditiveOperator(sb, vo, numericFields);
+            }
         }
 
         // Structural value equality: the components are the non-derived fields.
@@ -275,6 +287,60 @@ public sealed class CSharpEmitter : IEmitter
               .Append(vo.Name).Append(" left, ").Append(scalar).Append(" right) => new ")
               .Append(vo.Name).Append('(').Append(args).Append(");\n");
         }
+    }
+
+    /// <summary>
+    /// Emits a quantity's unit-checked arithmetic (R9.2): <c>+</c>/<c>-</c> require the
+    /// same unit (throwing <c>DomainInvariantViolationException</c> on a mismatch, since
+    /// units are runtime enum values) and scalar <c>*</c>/<c>/</c> by <c>int</c>/<c>decimal</c>
+    /// scale the amount and preserve the unit. Operators are emitted in a fixed order
+    /// for byte-identical determinism.
+    /// </summary>
+    private void WriteQuantityOperators(StringBuilder sb, ValueObjectDecl vo, ModelIndex index)
+    {
+        var memberNames = new HashSet<string>(vo.Members.Select(m => m.Name), StringComparer.Ordinal);
+        var nonDerived = vo.Members.Where(m => !MemberAnalysis.IsDerived(m, memberNames)).ToList();
+        var amount = nonDerived.FirstOrDefault(m => m.Type.Name == "Decimal" && !m.Type.IsOptional);
+        var unit = nonDerived.FirstOrDefault(m => index.Classify(m.Type.Name) == TypeKind.Enum && !m.Type.IsOptional);
+        if (amount is null || unit is null)
+            return; // a malformed quantity is already a validation error; emit no operators
+
+        var name = vo.Name;
+        var amtProp = CSharpNaming.ToPascalCase(amount.Name);
+        var unitProp = CSharpNaming.ToPascalCase(unit.Name);
+        var ctorOrder = OrderCtorParams(nonDerived).ToList();
+
+        // Build `new Name(...)` with the amount/unit values placed in constructor order.
+        string Construct(string amtExpr, string unitExpr) =>
+            $"new {name}(" + string.Join(", ", ctorOrder.Select(m =>
+                ReferenceEquals(m, amount) ? amtExpr
+                : ReferenceEquals(m, unit) ? unitExpr
+                : "default!")) + ")";
+
+        foreach (var (op, verb) in new[] { ("+", "add"), ("-", "subtract") })
+        {
+            sb.Append('\n').Append(Indent)
+              .Append("public static ").Append(name).Append(" operator ").Append(op).Append('(')
+              .Append(name).Append(" left, ").Append(name).Append(" right)\n");
+            sb.Append(Indent).Append("{\n");
+            sb.Append(Indent).Append(Indent).Append("if (left.").Append(unitProp)
+              .Append(" != right.").Append(unitProp).Append(")\n");
+            sb.Append(Indent).Append(Indent).Append(Indent).Append("throw new DomainInvariantViolationException(\n");
+            sb.Append(Indent).Append(Indent).Append(Indent).Append(Indent).Append("type: nameof(").Append(name).Append("),\n");
+            sb.Append(Indent).Append(Indent).Append(Indent).Append(Indent)
+              .Append("rule: \"cannot ").Append(verb).Append(" quantities of different units\");\n");
+            sb.Append(Indent).Append(Indent).Append("return ")
+              .Append(Construct($"left.{amtProp} {op} right.{amtProp}", $"left.{unitProp}")).Append(";\n");
+            sb.Append(Indent).Append("}\n");
+        }
+
+        // The amount is always Decimal, so scalar */÷ by int or decimal stays exact.
+        foreach (var op in new[] { "*", "/" })
+        foreach (var scalar in new[] { "int", "decimal" })
+            sb.Append('\n').Append(Indent)
+              .Append("public static ").Append(name).Append(" operator ").Append(op).Append('(')
+              .Append(name).Append(" left, ").Append(scalar).Append(" right) => ")
+              .Append(Construct($"left.{amtProp} {op} right", $"left.{unitProp}")).Append(";\n");
     }
 
     private static IReadOnlyList<Member> NumericFields(ValueObjectDecl vo)
@@ -707,32 +773,65 @@ public sealed class CSharpEmitter : IEmitter
     /// <c>==</c>/<c>!=</c>. No external dependency; members are referenced exactly
     /// like enum members (<c>OrderStatus.Cancelled</c>).
     /// </summary>
-    private EmittedFile EmitEnum(EnumDecl @enum, string ns)
+    private EmittedFile EmitEnum(
+        EnumDecl @enum,
+        string ns,
+        ModelIndex index,
+        CSharpTypeMapper typeMapper,
+        IReadOnlyDictionary<string, string> enumMemberToType)
     {
         var name = @enum.Name;
+        var sig = @enum.Signature;
+        var hasData = @enum.HasAssociatedData;
         var sb = new StringBuilder();
+
+        // Associated-data args are literal expressions; reuse the translator so string
+        // escaping and the decimal `m` suffix match the rest of the emitted code.
+        var translator = new CSharpExpressionTranslator(index, Array.Empty<Member>(), enumMemberToType);
 
         WriteXmlDoc(sb, @enum.Doc ?? "A type-safe smart enum: static instances with value equality.", "");
         sb.Append("public sealed class ").Append(name).Append(" : IEquatable<").Append(name).Append(">\n{\n");
 
-        // One static readonly instance per member, in declaration order.
+        // One static readonly instance per member, in declaration order. When the enum
+        // has a signature, each member also passes its associated-data values.
         for (var i = 0; i < @enum.Members.Count; i++)
+        {
+            var member = @enum.Members[i];
             sb.Append(Indent).Append("public static readonly ").Append(name).Append(' ')
-              .Append(@enum.Members[i]).Append(" = new(\"").Append(@enum.Members[i]).Append("\", ")
-              .Append(i).Append(");\n");
+              .Append(member.Name).Append(" = new(\"").Append(member.Name).Append("\", ").Append(i);
+            if (hasData)
+                // Associated values are literals of a primitive field type (String/Int/
+                // Decimal/Bool), validated upstream — render them directly.
+                for (var j = 0; j < sig.Count && j < member.Args.Count; j++)
+                    sb.Append(", ").Append(translator.TranslateTopLevel(
+                        member.Args[j], CSharpExpressionTranslator.NameMode.Property));
+            sb.Append(");\n");
+        }
 
         sb.Append('\n');
         sb.Append(Indent).Append("public string Name { get; }\n");
-        sb.Append(Indent).Append("public int Value { get; }\n\n");
+        sb.Append(Indent).Append("public int Value { get; }\n");
+        // Associated-data properties, in signature order.
+        foreach (var p in sig)
+            sb.Append(Indent).Append("public ").Append(typeMapper.Map(p.Type)).Append(' ')
+              .Append(CSharpNaming.ToPascalCase(p.Name)).Append(" { get; }\n");
+        sb.Append('\n');
 
-        sb.Append(Indent).Append("private ").Append(name).Append("(string name, int value)\n");
+        var ctorParams = "string name, int value";
+        if (hasData)
+            ctorParams += ", " + string.Join(", ", sig.Select(p =>
+                $"{typeMapper.Map(p.Type)} {CSharpNaming.ToCamelCase(p.Name)}"));
+        sb.Append(Indent).Append("private ").Append(name).Append('(').Append(ctorParams).Append(")\n");
         sb.Append(Indent).Append("{\n");
         sb.Append(Indent).Append(Indent).Append("Name = name;\n");
         sb.Append(Indent).Append(Indent).Append("Value = value;\n");
+        foreach (var p in sig)
+            sb.Append(Indent).Append(Indent).Append(CSharpNaming.ToPascalCase(p.Name)).Append(" = ")
+              .Append(CSharpNaming.ToCamelCase(p.Name)).Append(";\n");
         sb.Append(Indent).Append("}\n\n");
 
         sb.Append(Indent).Append("public static IReadOnlyList<").Append(name).Append("> All { get; } = new[] { ")
-          .Append(string.Join(", ", @enum.Members)).Append(" };\n\n");
+          .Append(string.Join(", ", @enum.MemberNames)).Append(" };\n\n");
 
         sb.Append(Indent).Append("public static ").Append(name).Append(" FromName(string name) =>\n");
         sb.Append(Indent).Append(Indent).Append("All.FirstOrDefault(e => e.Name == name)\n");
@@ -764,6 +863,37 @@ public sealed class CSharpEmitter : IEmitter
 
     private static bool HasEvents(KoineModel model) =>
         model.Contexts.SelectMany(AllTypeDecls).Any(t => t is EventDecl);
+
+    /// <summary>
+    /// True when any field or command/factory parameter anywhere in the model
+    /// references a <c>Range&lt;T&gt;</c>, gating emission of the runtime range type.
+    /// </summary>
+    private static bool UsesRange(KoineModel model)
+    {
+        foreach (var ctx in model.Contexts)
+        foreach (var t in AllTypeDecls(ctx))
+        {
+            IReadOnlyList<Member>? members = t switch
+            {
+                ValueObjectDecl v => v.Members,
+                EntityDecl e => e.Members,
+                EventDecl ev => ev.Members,
+                _ => null
+            };
+            if (members is not null && members.Any(m => TypeRefMentions(m.Type, ModelIndex.RangeTypeName)))
+                return true;
+
+            if (t is EntityDecl en)
+            {
+                var paramTypes = en.Commands.SelectMany(c => c.Parameters)
+                    .Concat(en.Factories.SelectMany(f => f.Parameters))
+                    .Select(p => p.Type);
+                if (paramTypes.Any(pt => TypeRefMentions(pt, ModelIndex.RangeTypeName)))
+                    return true;
+            }
+        }
+        return false;
+    }
 
     /// <summary>
     /// True when the model emits at least one value object: an explicit
@@ -1384,6 +1514,49 @@ public sealed class CSharpEmitter : IEmitter
     }
 
     /// <summary>
+    /// Emits the generic <c>Range&lt;T&gt;</c> value object once into Koine.Runtime: a
+    /// closed interval over an orderable <c>T</c> with a <c>start &lt;= end</c> construction
+    /// invariant, <c>Contains</c>/<c>Overlaps</c>, and structural equality.
+    /// </summary>
+    private EmittedFile EmitRange()
+    {
+        var sb = new StringBuilder();
+        sb.Append("/// <summary>A closed interval [Start, End] over an orderable type, with containment and overlap.</summary>\n");
+        sb.Append("public sealed class Range<T> : IEquatable<Range<T>> where T : IComparable<T>\n");
+        sb.Append("{\n");
+        sb.Append(Indent).Append("public T Start { get; }\n");
+        sb.Append(Indent).Append("public T End { get; }\n\n");
+        sb.Append(Indent).Append("public Range(T start, T end)\n");
+        sb.Append(Indent).Append("{\n");
+        sb.Append(Indent).Append(Indent).Append("if (!(start.CompareTo(end) <= 0))\n");
+        sb.Append(Indent).Append(Indent).Append(Indent).Append("throw new DomainInvariantViolationException(\n");
+        sb.Append(Indent).Append(Indent).Append(Indent).Append(Indent).Append("type: \"Range\",\n");
+        sb.Append(Indent).Append(Indent).Append(Indent).Append(Indent).Append("rule: \"start must be less than or equal to end\");\n");
+        sb.Append(Indent).Append(Indent).Append("Start = start;\n");
+        sb.Append(Indent).Append(Indent).Append("End = end;\n");
+        sb.Append(Indent).Append("}\n\n");
+        sb.Append(Indent).Append("/// <summary>True when value lies within [Start, End] inclusive.</summary>\n");
+        sb.Append(Indent).Append("public bool Contains(T value) =>\n");
+        sb.Append(Indent).Append(Indent).Append("value.CompareTo(Start) >= 0 && value.CompareTo(End) <= 0;\n\n");
+        sb.Append(Indent).Append("/// <summary>True when this range shares at least one point with other.</summary>\n");
+        sb.Append(Indent).Append("public bool Overlaps(Range<T> other) =>\n");
+        sb.Append(Indent).Append(Indent).Append("Start.CompareTo(other.End) <= 0 && other.Start.CompareTo(End) <= 0;\n\n");
+        sb.Append(Indent).Append("public bool Equals(Range<T>? other) =>\n");
+        sb.Append(Indent).Append(Indent).Append("other is not null\n");
+        sb.Append(Indent).Append(Indent).Append("&& EqualityComparer<T>.Default.Equals(Start, other.Start)\n");
+        sb.Append(Indent).Append(Indent).Append("&& EqualityComparer<T>.Default.Equals(End, other.End);\n");
+        sb.Append(Indent).Append("public override bool Equals(object? obj) => Equals(obj as Range<T>);\n");
+        sb.Append(Indent).Append("public override int GetHashCode() => HashCode.Combine(Start, End);\n");
+        sb.Append(Indent).Append("public static bool operator ==(Range<T>? left, Range<T>? right) =>\n");
+        sb.Append(Indent).Append(Indent).Append("left is null ? right is null : left.Equals(right);\n");
+        sb.Append(Indent).Append("public static bool operator !=(Range<T>? left, Range<T>? right) => !(left == right);\n");
+        sb.Append("}\n");
+
+        return new EmittedFile($"{FolderFor(RuntimeNamespace)}/Range.cs",
+            Assemble(RuntimeNamespace, sb.ToString(), usesLinq: false));
+    }
+
+    /// <summary>
     /// Emits the canonical DDD <c>ValueObject</c> base class: structural equality
     /// driven by each derived type's <c>GetEqualityComponents()</c>. Value objects
     /// are immutable classes (not records) so every instance is funneled through a
@@ -1475,17 +1648,20 @@ public sealed class CSharpEmitter : IEmitter
         void Need(bool condition, string ns2) { if (condition && !usings.Contains(ns2)) usings.Add(ns2); }
 
         Need(body.Contains("Guid") || body.Contains("DateTimeOffset")
-             || body.Contains("IEquatable") || body.Contains("new HashCode(")
+             || body.Contains("IEquatable") || body.Contains("new HashCode(") || body.Contains("HashCode.Combine")
+             || body.Contains("IComparable")
              || body.Contains(": Exception") || body.Contains("ArgumentOutOfRangeException")
              || body.Contains("ArgumentNullException") || body.Contains("InvalidOperationException"), "System");
         Need(body.Contains("IEnumerable<") || body.Contains("IReadOnlyList<") || body.Contains("List<")
              || body.Contains("IReadOnlySet<") || body.Contains("HashSet<")
-             || body.Contains("IReadOnlyDictionary<") || body.Contains("Dictionary<"), "System.Collections.Generic");
+             || body.Contains("IReadOnlyDictionary<") || body.Contains("Dictionary<")
+             || body.Contains("EqualityComparer<"), "System.Collections.Generic");
         Need(usesLinq, "System.Linq");
         Need(body.Contains("Regex"), "System.Text.RegularExpressions");
         Need(ns != "Koine.Runtime"
              && (body.Contains("ValueObject") || body.Contains("IAggregateRoot")
-                 || body.Contains("IDomainEvent") || body.Contains("DomainInvariantViolationException")), "Koine.Runtime");
+                 || body.Contains("IDomainEvent") || body.Contains("DomainInvariantViolationException")
+                 || body.Contains("Range<")), "Koine.Runtime");
 
         // Other contexts are separate namespaces. Foreign-context types are emitted
         // unqualified, so the import must always be present for a cross-context
@@ -1678,7 +1854,7 @@ public sealed class CSharpEmitter : IEmitter
         foreach (var ctx in model.Contexts)
             foreach (var t in AllTypeDecls(ctx))
                 if (t is EnumDecl e)
-                    foreach (var member in e.Members)
+                    foreach (var member in e.MemberNames)
                         map[member] = e.Name; // last writer wins; v0 assumes unique members
         return map;
     }

@@ -14,6 +14,7 @@ channels { DOC }
 
 CONTEXT    : 'context' ;
 VALUE      : 'value' ;
+QUANTITY   : 'quantity' ;
 ENTITY     : 'entity' ;
 AGGREGATE  : 'aggregate' ;
 ENUM       : 'enum' ;

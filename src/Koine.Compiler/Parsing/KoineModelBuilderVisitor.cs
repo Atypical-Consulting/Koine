@@ -46,6 +46,8 @@ public sealed class KoineModelBuilderVisitor : KoineParserBaseVisitor<object?>
     {
         if (ctx.valueDecl() is { } value)
             return BuildValue(value);
+        if (ctx.quantityDecl() is { } quantity)
+            return BuildQuantity(quantity);
         if (ctx.entityDecl() is { } entity)
             return BuildEntity(entity);
         if (ctx.aggregateDecl() is { } aggregate)
@@ -64,6 +66,18 @@ public sealed class KoineModelBuilderVisitor : KoineParserBaseVisitor<object?>
         var invariants = ctx.invariant().Select(BuildInvariant).ToList();
 
         return new ValueObjectDecl(ctx.Identifier().GetText(), members, invariants)
+        {
+            Span = SpanOf(ctx),
+            Doc = DocFor(ctx)
+        };
+    }
+
+    private ValueObjectDecl BuildQuantity(KoineParser.QuantityDeclContext ctx)
+    {
+        var members = ctx.member().Select(BuildMember).ToList();
+        var invariants = ctx.invariant().Select(BuildInvariant).ToList();
+
+        return new ValueObjectDecl(ctx.Identifier().GetText(), members, invariants, IsQuantity: true)
         {
             Span = SpanOf(ctx),
             Doc = DocFor(ctx)
@@ -198,12 +212,17 @@ public sealed class KoineModelBuilderVisitor : KoineParserBaseVisitor<object?>
 
     private EnumDecl BuildEnum(KoineParser.EnumDeclContext ctx)
     {
-        var members = ctx.Identifier()
-            .Skip(1) // first Identifier is the enum name
-            .Select(id => id.GetText())
+        var signature = ctx.paramList() is { } pl
+            ? pl.param().Select(BuildParam).ToList()
+            : new List<Param>();
+
+        var members = ctx.enumMember()
+            .Select(m => new EnumMember(
+                m.Identifier().GetText(),
+                m.expression().Select(BuildExpression).ToList()) { Span = SpanOf(m) })
             .ToList();
 
-        return new EnumDecl(ctx.Identifier(0).GetText(), members) { Span = SpanOf(ctx), Doc = DocFor(ctx) };
+        return new EnumDecl(ctx.Identifier().GetText(), members, signature) { Span = SpanOf(ctx), Doc = DocFor(ctx) };
     }
 
     private EventDecl BuildEvent(KoineParser.EventDeclContext ctx)
