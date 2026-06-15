@@ -54,6 +54,8 @@ internal sealed class CSharpTypeMapper
                 return $"IReadOnlySet<{MapArg(type.Element, ref trailingComment)}>";
             case ModelIndex.MapTypeName:
                 return $"IReadOnlyDictionary<{MapArg(type.Element, ref trailingComment)}, {MapArg(type.Value, ref trailingComment)}>";
+            case ModelIndex.RangeTypeName:
+                return $"Range<{MapArg(type.Element, ref trailingComment)}>";
             default:
                 // enum / value / entity / aggregate / ID types map to their own C# name.
                 return type.Name;

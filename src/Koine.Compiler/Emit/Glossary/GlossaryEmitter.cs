@@ -51,11 +51,11 @@ public sealed class GlossaryEmitter : IEmitter
 
             case EnumDecl en:
                 WriteHeading(sb, heading, en.Name, "enum", en.Doc);
-                sb.Append("\nValues: ").Append(string.Join(", ", en.Members)).Append('\n');
+                sb.Append("\nValues: ").Append(string.Join(", ", en.MemberNames)).Append('\n');
                 break;
 
             case ValueObjectDecl vo:
-                WriteHeading(sb, heading, vo.Name, "value", vo.Doc);
+                WriteHeading(sb, heading, vo.Name, vo.IsQuantity ? "quantity" : "value", vo.Doc);
                 WriteFields(sb, vo.Members);
                 WriteRules(sb, vo.Invariants);
                 break;

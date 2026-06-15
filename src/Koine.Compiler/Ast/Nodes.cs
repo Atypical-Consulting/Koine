@@ -30,11 +30,16 @@ public sealed record ContextNode(string Name, IReadOnlyList<TypeDecl> Types) : K
 /// <summary>Base type for the four declarable kinds: value, entity, aggregate, enum.</summary>
 public abstract record TypeDecl(string Name) : KoineNode;
 
-/// <summary>A value object: immutable, value-equality, validated by invariants.</summary>
+/// <summary>
+/// A value object: immutable, value-equality, validated by invariants. When
+/// <see cref="IsQuantity"/> is set it was declared with the <c>quantity</c> keyword:
+/// a numeric amount plus an enum unit, emitted with unit-checked arithmetic.
+/// </summary>
 public sealed record ValueObjectDecl(
     string Name,
     IReadOnlyList<Member> Members,
-    IReadOnlyList<Invariant> Invariants) : TypeDecl(Name);
+    IReadOnlyList<Invariant> Invariants,
+    bool IsQuantity = false) : TypeDecl(Name);
 
 /// <summary>An entity: identity-based equality via a generated <c>IdentityName</c> ID type.</summary>
 public sealed record EntityDecl(
@@ -65,10 +70,30 @@ public sealed record AggregateDecl(
     string RootName,
     IReadOnlyList<TypeDecl> Types) : TypeDecl(Name);
 
-/// <summary>An enumeration of named members.</summary>
+/// <summary>
+/// An enumeration of named members. When <see cref="Signature"/> is non-empty the
+/// members carry associated constant data (e.g. <c>EUR("€", 2)</c>); otherwise it
+/// is a bare-name enum. <see cref="EnumMember.Args"/> are target-agnostic literal
+/// expressions, not C# values.
+/// </summary>
 public sealed record EnumDecl(
     string Name,
-    IReadOnlyList<string> Members) : TypeDecl(Name);
+    IReadOnlyList<EnumMember> Members,
+    IReadOnlyList<Param> Signature) : TypeDecl(Name)
+{
+    /// <summary>Member names in declaration order (back-compat for name-only call sites).</summary>
+    public IReadOnlyList<string> MemberNames => Members.Select(m => m.Name).ToArray();
+
+    /// <summary>True when members carry associated constant data.</summary>
+    public bool HasAssociatedData => Signature.Count > 0;
+}
+
+/// <summary>
+/// One enum member. <see cref="Args"/> are the associated-data values (literal
+/// expressions, positional, matching the owning enum's signature); empty for a
+/// bare-name member.
+/// </summary>
+public sealed record EnumMember(string Name, IReadOnlyList<Expr> Args) : KoineNode;
 
 /// <summary>
 /// A domain event: an immutable, value-equal record of a significant occurrence,

@@ -58,4 +58,12 @@ public static class BuiltinOps
     /// <summary>A call op whose single argument is a lambda selector/predicate.</summary>
     public static bool TakesLambda(string name) =>
         CollectionPredicateOps.Contains(name) || CollectionAggregateOps.Contains(name);
+
+    /// <summary>
+    /// True when a type supports ordering (relational comparison / range bounds):
+    /// the numeric primitives and <c>Instant</c>. Used for relational-operator checks
+    /// and <c>Range&lt;T&gt;</c> element validation.
+    /// </summary>
+    public static bool IsOrderable(string typeName) =>
+        typeName is "Int" or "Decimal" or "Instant";
 }

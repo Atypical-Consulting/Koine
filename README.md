@@ -164,11 +164,19 @@ this lets a regex literal be read as a single token without colliding with the `
 
 ### Known limitations (v0)
 
-- **Soft keywords.** Most Koine keywords (`context`, `value`, `entity`, `aggregate`, `enum`, `by`, `root`,
-  `command`, `create`, `when`, `if`, …) may now be used as field names, and the declaration keywords
-  additionally as type names and in expressions. The mode-switching `matches` and the `invariant` keyword
-  remain reserved. Like `->`, the factory-initialization operator `<-` is atomic, so a comparison against a
-  negative operand needs a space (`x < -1`, not `x<-1`).
+- **Soft keywords.** Most Koine keywords (`context`, `value`, `quantity`, `entity`, `aggregate`, `enum`,
+  `by`, `root`, `command`, `create`, `when`, `if`, …) may now be used as field names, and the declaration
+  keywords additionally as type names and in expressions. The mode-switching `matches` and the `invariant`
+  keyword remain reserved. Like `->`, the factory-initialization operator `<-` is atomic, so a comparison
+  against a negative operand needs a space (`x < -1`, not `x<-1`).
+- **Reserved type names.** `List`, `Set`, `Map`, and `Range` are built-in generics; a user type may not take
+  one of these names.
+- **Richer value objects.** Enum members may carry associated constant data
+  (`enum Currency(symbol: String, decimals: Int) { EUR("€", 2) … }`; values are literals of a String/Int/
+  Decimal/Bool field). A `quantity` is a value object with a `Decimal` amount and an enum unit, emitting
+  unit-checked `+ - * /` (mixed-unit operations throw at runtime). `Range<T>` over an orderable `T`
+  (Int/Decimal/Instant) generates a value object with `Start`/`End`, a `start <= end` invariant, and
+  `Contains`/`Overlaps`.
 - **Scoped enum members.** Bare enum members are resolved against the field/operand enum type, so two enums
   may share a member name (e.g. both `Cancelled`); a genuinely ambiguous bare member must be qualified
   (`OrderStatus.Cancelled`).

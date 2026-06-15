@@ -71,6 +71,17 @@ public static class DiagnosticCodes
     public const string UninitializedFactoryField = "KOI0806";
     public const string ReservedFactoryParameter = "KOI0807";
 
+    // ---- Richer value objects (KOI0900–0999) ------------------------------
+    public const string EnumMemberArity = "KOI0901";
+    public const string EnumMemberArgType = "KOI0902";
+    public const string EnumReservedAssociatedField = "KOI0903";
+    public const string QuantityUnitCardinality = "KOI0904";
+    public const string QuantityAmountCardinality = "KOI0905";
+    public const string QuantityMemberNotAllowed = "KOI0906";
+    public const string RangeNotOrderable = "KOI0907";
+    public const string ReservedTypeName = "KOI0908";
+    public const string EnumAssociatedFieldType = "KOI0909";
+
     /// <summary>Every code with a one-line description. Tested for uniqueness/coverage.</summary>
     public static readonly IReadOnlyDictionary<string, string> Catalogue = new Dictionary<string, string>
     {
@@ -119,5 +130,14 @@ public static class DiagnosticCodes
         [DuplicateInitialization] = "A factory initializes the same field more than once.",
         [UninitializedFactoryField] = "A factory leaves a required field uninitialized with no default.",
         [ReservedFactoryParameter] = "A factory parameter uses the reserved name 'id' (the auto-generated identity).",
+        [EnumMemberArity] = "An enum member's associated-value count does not match the enum's signature.",
+        [EnumMemberArgType] = "An enum associated value is non-literal or has a type incompatible with its field.",
+        [EnumReservedAssociatedField] = "An associated-data field name collides with a generated smart-enum member.",
+        [QuantityUnitCardinality] = "A quantity must declare exactly one enum-typed unit member.",
+        [QuantityAmountCardinality] = "A quantity must declare exactly one numeric amount member.",
+        [QuantityMemberNotAllowed] = "A quantity may declare only its amount and unit members.",
+        [RangeNotOrderable] = "A Range's element type is not orderable (requires Int, Decimal, or Instant).",
+        [ReservedTypeName] = "A type uses a name reserved for a built-in generic (List/Set/Map/Range).",
+        [EnumAssociatedFieldType] = "An enum associated-data field must be String, Int, Decimal, or Bool.",
     };
 }

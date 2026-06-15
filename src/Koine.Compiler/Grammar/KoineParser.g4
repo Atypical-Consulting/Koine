@@ -14,6 +14,7 @@ program        : contextDecl* EOF ;
 contextDecl    : CONTEXT Identifier LBRACE typeDecl* RBRACE ;
 
 typeDecl       : valueDecl
+               | quantityDecl
                | entityDecl
                | aggregateDecl
                | enumDecl
@@ -23,6 +24,10 @@ typeDecl       : valueDecl
 // ---- Type declarations -----------------------------------------------------
 
 valueDecl      : VALUE Identifier LBRACE member* invariant* RBRACE ;
+
+// A quantity: a value object combining a numeric amount with a unit (an enum),
+// emitted with unit-checked arithmetic. Mirrors valueDecl's body.
+quantityDecl   : QUANTITY Identifier LBRACE member* invariant* RBRACE ;
 
 entityDecl     : ENTITY Identifier IDENTIFIED BY Identifier
                  LBRACE member* invariant* statesDecl* commandDecl* factoryDecl* RBRACE ;
@@ -69,7 +74,12 @@ initialization : softName LARROW expression ;                  // `total <- line
 
 aggregateDecl  : AGGREGATE Identifier ROOT Identifier LBRACE typeDecl* RBRACE ;
 
-enumDecl       : ENUM Identifier LBRACE Identifier ( COMMA Identifier )* COMMA? RBRACE ;
+// An enumeration. Members may carry associated constant data when the enum
+// declares a signature: `enum Currency(symbol: String, decimals: Int) { EUR("€", 2) }`.
+// Members are separated by whitespace or optional commas (both `A, B` and `A B`).
+enumDecl       : ENUM Identifier ( LPAREN paramList? RPAREN )? LBRACE enumMember ( COMMA? enumMember )* COMMA? RBRACE ;
+
+enumMember     : Identifier ( LPAREN ( expression ( COMMA expression )* )? RPAREN )? ;
 
 // A domain event: an immutable record of something that happened. Fields only.
 eventDecl      : EVENT Identifier LBRACE member* RBRACE ;
@@ -90,7 +100,7 @@ typeRef        : typeName ( LT typeRef ( COMMA typeRef )? GT )? QUESTION? ;
 softName       : Identifier | declKeyword | WHEN | IF | THEN | ELSE ;
 exprName       : Identifier | declKeyword | WHEN ;
 typeName       : Identifier | declKeyword ;
-declKeyword    : CONTEXT | VALUE | ENTITY | AGGREGATE | ENUM | IDENTIFIED | BY | ROOT | COMMAND | REQUIRES | EVENT | EMIT | STATES | CREATE ;
+declKeyword    : CONTEXT | VALUE | QUANTITY | ENTITY | AGGREGATE | ENUM | IDENTIFIED | BY | ROOT | COMMAND | REQUIRES | EVENT | EMIT | STATES | CREATE ;
 
 invariant      : INVARIANT expression StringLiteral? ;
 
