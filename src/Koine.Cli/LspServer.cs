@@ -18,6 +18,8 @@ namespace Koine.Cli;
 internal sealed class LspServer
 {
     private readonly KoineCompiler _compiler = new();
+    private readonly KoineLanguageService _ls = new();
+    private readonly Dictionary<string, string> _docs = new(StringComparer.Ordinal);
     private readonly Stream _in;
     private readonly Stream _out;
 
@@ -98,6 +100,13 @@ internal sealed class LspServer
                             ["capabilities"] = new Dictionary<string, object?>
                             {
                                 ["textDocumentSync"] = 1, // Full
+                                ["completionProvider"] = new Dictionary<string, object?>
+                                {
+                                    ["resolveProvider"] = false,
+                                    ["triggerCharacters"] = new[] { ":", "." },
+                                },
+                                ["hoverProvider"] = true,
+                                ["definitionProvider"] = true,
                             },
                             ["serverInfo"] = new Dictionary<string, object?>
                             {
@@ -109,22 +118,49 @@ internal sealed class LspServer
 
                     case "textDocument/didOpen":
                         if (TryGetTextDocument(root, out var openUri, out var openText))
+                        {
+                            _docs[openUri] = openText;
                             PublishDiagnostics(openUri, openText);
+                        }
                         break;
 
                     case "textDocument/didChange":
                         if (TryGetChange(root, out var changeUri, out var changeText))
+                        {
+                            _docs[changeUri] = changeText;
                             PublishDiagnostics(changeUri, changeText);
+                        }
                         break;
 
                     case "textDocument/didSave":
                         if (TryGetSave(root, out var saveUri, out var saveText) && saveText is not null)
+                        {
+                            _docs[saveUri] = saveText;
                             PublishDiagnostics(saveUri, saveText);
+                        }
                         break;
 
                     case "textDocument/didClose":
                         if (TryGetUri(root, out var closeUri))
+                        {
+                            _docs.Remove(closeUri);
                             PublishDiagnostics(closeUri, diagnostics: Array.Empty<object>()); // clear
+                        }
+                        break;
+
+                    case "textDocument/completion":
+                        if (root.TryGetProperty("id", out _))
+                            Respond(root, CompletionResult(root));
+                        break;
+
+                    case "textDocument/hover":
+                        if (root.TryGetProperty("id", out _))
+                            Respond(root, HoverResultJson(root));
+                        break;
+
+                    case "textDocument/definition":
+                        if (root.TryGetProperty("id", out _))
+                            Respond(root, DefinitionResultJson(root));
                         break;
 
                     case "shutdown":
@@ -148,6 +184,99 @@ internal sealed class LspServer
                 }
             }
         }
+    }
+
+    // ---- IntelliSense -----------------------------------------------------
+
+    private object? CompletionResult(JsonElement root)
+    {
+        if (!TryGetUri(root, out var uri) || !TryGetPosition(root, out var line, out var ch)
+            || !_docs.TryGetValue(uri, out var text))
+            return null;
+
+        var items = _ls.CompleteAt(text, line, ch)
+            .Select(i => (object)new Dictionary<string, object?>
+            {
+                ["label"] = i.Label,
+                ["kind"] = LspKind(i.Kind),
+                ["detail"] = i.Detail,
+                ["documentation"] = i.Documentation,
+            })
+            .ToArray();
+
+        return new Dictionary<string, object?> { ["isIncomplete"] = false, ["items"] = items };
+    }
+
+    private object? HoverResultJson(JsonElement root)
+    {
+        if (!TryGetUri(root, out var uri) || !TryGetPosition(root, out var line, out var ch)
+            || !_docs.TryGetValue(uri, out var text))
+            return null;
+
+        var hover = _ls.HoverAt(text, line, ch);
+        if (hover is null)
+            return null;
+
+        return new Dictionary<string, object?>
+        {
+            ["contents"] = new Dictionary<string, object?>
+            {
+                ["kind"] = "markdown",
+                ["value"] = hover.Markdown,
+            },
+        };
+    }
+
+    private object? DefinitionResultJson(JsonElement root)
+    {
+        if (!TryGetUri(root, out var uri) || !TryGetPosition(root, out var line, out var ch)
+            || !_docs.TryGetValue(uri, out var text))
+            return null;
+
+        var def = _ls.DefinitionAt(text, line, ch);
+        if (def is null)
+            return null;
+
+        // SpanOf points at the declaration keyword and Column is 1-based; the LSP
+        // range is 0-based and zero-width (editor recomputes the identifier extent).
+        var startLine = Math.Max(0, def.Target.Line - 1);
+        var startChar = Math.Max(0, def.Target.Column - 1);
+        return new Dictionary<string, object?>
+        {
+            // Single-file model: the definition always lives in the requesting document.
+            ["uri"] = uri,
+            ["range"] = new Dictionary<string, object?>
+            {
+                ["start"] = new Dictionary<string, object?> { ["line"] = startLine, ["character"] = startChar },
+                ["end"] = new Dictionary<string, object?> { ["line"] = startLine, ["character"] = startChar },
+            },
+        };
+    }
+
+    /// <summary>Maps a service completion kind to its LSP CompletionItemKind number.</summary>
+    private static int LspKind(CompletionItemKind kind) => kind switch
+    {
+        CompletionItemKind.Keyword => 14,
+        CompletionItemKind.Class => 7,
+        CompletionItemKind.Enum => 13,
+        CompletionItemKind.EnumMember => 20,
+        CompletionItemKind.Field => 5,
+        CompletionItemKind.Property => 10,
+        CompletionItemKind.Method => 2,
+        _ => 1,
+    };
+
+    private static bool TryGetPosition(JsonElement root, out int line, out int character)
+    {
+        line = 0; character = 0;
+        if (root.TryGetProperty("params", out var p)
+            && p.TryGetProperty("position", out var pos)
+            && pos.TryGetProperty("line", out var l)
+            && pos.TryGetProperty("character", out var c)
+            && l.TryGetInt32(out line)
+            && c.TryGetInt32(out character))
+            return true;
+        return false;
     }
 
     // ---- Diagnostics ------------------------------------------------------

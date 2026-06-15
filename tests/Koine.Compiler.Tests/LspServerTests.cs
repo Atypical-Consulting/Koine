@@ -68,7 +68,7 @@ public class LspServerTests
     [Fact]
     public void Unknown_request_gets_method_not_found()
     {
-        var unknown = Frame("{\"jsonrpc\":\"2.0\",\"id\":7,\"method\":\"textDocument/hover\",\"params\":{}}");
+        var unknown = Frame("{\"jsonrpc\":\"2.0\",\"id\":7,\"method\":\"textDocument/foo\",\"params\":{}}");
         var output = RunSession(Initialize(), unknown);
         Assert.Contains("-32601", output);   // method-not-found, so the client doesn't hang
     }
@@ -110,4 +110,74 @@ public class LspServerTests
             method = "textDocument/didOpen",
             @params = new { textDocument = new { uri, languageId = "koine", version = 1, text } },
         }));
+
+    private static byte[] Completion(string uri, int line, int character) =>
+        Frame(JsonSerializer.Serialize(new
+        {
+            jsonrpc = "2.0",
+            id = 10,
+            method = "textDocument/completion",
+            @params = new { textDocument = new { uri }, position = new { line, character } },
+        }));
+
+    private static byte[] Hover(string uri, int line, int character) =>
+        Frame(JsonSerializer.Serialize(new
+        {
+            jsonrpc = "2.0",
+            id = 11,
+            method = "textDocument/hover",
+            @params = new { textDocument = new { uri }, position = new { line, character } },
+        }));
+
+    private static byte[] Definition(string uri, int line, int character) =>
+        Frame(JsonSerializer.Serialize(new
+        {
+            jsonrpc = "2.0",
+            id = 12,
+            method = "textDocument/definition",
+            @params = new { textDocument = new { uri }, position = new { line, character } },
+        }));
+
+    [Fact]
+    public void Initialize_advertises_intellisense_capabilities()
+    {
+        var output = RunSession(Initialize());
+        Assert.Contains("\"completionProvider\"", output);
+        Assert.Contains("\"hoverProvider\":true", output);
+        Assert.Contains("\"definitionProvider\":true", output);
+    }
+
+    [Fact]
+    public void Completion_request_returns_items()
+    {
+        var doc = "context C {\n  value V { x:  }\n}\n";
+        var output = RunSession(Initialize(), DidOpen("file:///t.koi", doc), Completion("file:///t.koi", 1, 14));
+        Assert.Contains("\"items\"", output);
+        Assert.Contains("Decimal", output);
+    }
+
+    [Fact]
+    public void Hover_request_returns_markdown()
+    {
+        var doc = "context C {\n  value Money { amount: Decimal }\n  value Line { price: Money }\n}\n";
+        var output = RunSession(Initialize(), DidOpen("file:///t.koi", doc), Hover("file:///t.koi", 2, 23));
+        Assert.Contains("\"kind\":\"markdown\"", output);
+        Assert.Contains("Money", output);
+    }
+
+    [Fact]
+    public void Definition_request_returns_a_range()
+    {
+        var doc = "context C {\n  value Money { amount: Decimal }\n  value Line { price: Money }\n}\n";
+        var output = RunSession(Initialize(), DidOpen("file:///t.koi", doc), Definition("file:///t.koi", 2, 23));
+        Assert.Contains("\"range\"", output);
+        Assert.Contains("file:///t.koi", output);
+    }
+
+    [Fact]
+    public void Completion_for_unopened_document_returns_no_items()
+    {
+        var output = RunSession(Initialize(), Completion("file:///never-opened.koi", 0, 0));
+        Assert.DoesNotContain("\"items\"", output);
+    }
 }

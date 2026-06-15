@@ -8,6 +8,10 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <InternalsVisibleTo Include="Koine.Compiler.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <PackageReference Include="Antlr4BuildTasks" Version="12.14.0" PrivateAssets="all" />
     <PackageReference Include="Antlr4.Runtime.Standard" Version="4.13.1" />
   </ItemGroup>
