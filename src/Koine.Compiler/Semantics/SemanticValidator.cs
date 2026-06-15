@@ -20,6 +20,10 @@ public sealed class SemanticValidator
 
         ValidateUniqueTypeNames(model, diagnostics);
 
+        // The context map is model-scoped (R14.1/R14.2): validate it once before the per-context loop.
+        if (model.ContextMap is { } map)
+            ValidateContextMap(map, index, diagnostics);
+
         foreach (var ctx in model.Contexts)
         {
             // A per-context resolver so a type name shared across contexts (R13.2) resolves
@@ -34,6 +38,7 @@ public sealed class SemanticValidator
             ValidateSpecs(ctx, index, resolver, enumMembers, diagnostics);
             ValidateServices(ctx, index, resolver, enumMembers, diagnostics);
             ValidatePolicies(ctx, index, resolver, enumMembers, diagnostics);
+            ValidateIntegrationEvents(ctx, index, model.ContextMap is not null, diagnostics);
         }
 
         return diagnostics;
@@ -105,6 +110,34 @@ public sealed class SemanticValidator
                 break;
         }
 
+        // An anti-corruption-layer downstream should translate upstream types, not reference them
+        // directly. A direct, unqualified reference that actually binds to an ACL upstream type is a
+        // code-smell warning (R14.1). It only fires when the reference truly resolves to the ACL
+        // upstream — not when a same-named type is imported from, or shared with, a different context.
+        if (tr.Qualifier is null
+            && !index.DeclaresType(fromContext, tr.Name)
+            && !index.IsKernelVisibleFrom(fromContext, tr.Name))
+        {
+            var importOwners = index.ImportOwnersOf(fromContext, tr.Name);
+            var owners = index.DeclaringContextsOf(tr.Name).Where(c => c != fromContext).ToList();
+            // If a NON-ACL permit relation (open-host/conformist/…) makes a same-named type visible,
+            // the reference binds there, not to the ACL upstream — no direct-reference warning.
+            var permittedElsewhere = owners.Any(o => !index.HasAclRelation(o, fromContext) && index.MapPermitsReference(fromContext, o));
+            foreach (var up in owners)
+            {
+                // If the name is imported from a single owner that is not this upstream, it binds there.
+                if (importOwners.Count == 1 && importOwners[0] != up) continue;
+                if (permittedElsewhere) continue;
+                if (index.HasAclRelation(up, fromContext))
+                {
+                    diagnostics.Add(Diagnostic.Warning(DiagnosticCodes.AclDirectUpstreamReference,
+                        $"'{tr.Name}' is an upstream type of anti-corruption-layer '{up}' -> '{fromContext}'; translate it via the generated I{up}To{fromContext}Translator instead of referencing it directly",
+                        tr.Span));
+                    break;
+                }
+            }
+        }
+
         if (tr.Element is not null)
             ValidateReference(fromContext, tr.Element, index, diagnostics);
         if (tr.Value is not null)
@@ -121,6 +154,196 @@ public sealed class SemanticValidator
                 foreach (var nested in agg.Types)
                     yield return nested;
         }
+    }
+
+    // ------------------------------------------------------------------------
+    // R14 — context map, shared kernel & ACL
+    // ------------------------------------------------------------------------
+
+    /// <summary>
+    /// Validates the strategic context map (R14.1/R14.2): both endpoints must be declared,
+    /// no self-relation, no duplicate pair; a <c>shared-kernel { }</c> block is only valid on a
+    /// shared-kernel relation (its types must be declared by a partner); an <c>acl { }</c> block
+    /// is only valid on an anti-corruption-layer relation (its mappings must map a real upstream
+    /// type to a real downstream type).
+    /// </summary>
+    private static void ValidateContextMap(ContextMapNode map, ModelIndex index, List<Diagnostic> diagnostics)
+    {
+        var seenPairs = new HashSet<(string, string)>();
+        // Which (normalized) kernel pair first claimed each shared type, to flag conflicting kernels.
+        var kernelOf = new Dictionary<string, (string, string)>(StringComparer.Ordinal);
+
+        foreach (var r in map.Relations)
+        {
+            // 1. Endpoints declared.
+            foreach (var endpoint in new[] { r.Upstream, r.Downstream })
+                if (!index.IsContext(endpoint))
+                    diagnostics.Add(Diagnostic.Error(DiagnosticCodes.ContextMapUnknownContext,
+                        $"context-map relation names unknown context '{endpoint}'", r.Span));
+
+            // 2. No self-relation.
+            if (r.Upstream == r.Downstream)
+                diagnostics.Add(Diagnostic.Error(DiagnosticCodes.SelfRelation,
+                    $"context '{r.Upstream}' cannot be related to itself", r.Span));
+
+            // 3. No duplicate pair (order-normalized, so reversed bidirectional pairs collide too).
+            var pair = string.CompareOrdinal(r.Upstream, r.Downstream) <= 0
+                ? (r.Upstream, r.Downstream) : (r.Downstream, r.Upstream);
+            if (!seenPairs.Add(pair) && r.Upstream != r.Downstream)
+                diagnostics.Add(Diagnostic.Error(DiagnosticCodes.DuplicateContextRelation,
+                    $"duplicate context-map relation between '{r.Upstream}' and '{r.Downstream}'", r.Span));
+
+            // 4. Block-vs-role agreement.
+            if (r.SharedTypes.Count > 0 && r.Kind != ContextRelationKind.SharedKernel)
+                diagnostics.Add(Diagnostic.Error(DiagnosticCodes.SharedTypesOnNonKernel,
+                    $"'shared-kernel {{ }}' block is only valid on a shared-kernel relation ('{r.Upstream}' -> '{r.Downstream}' is {RoleName(r.Kind)})", r.Span));
+            if (r.AclMappings.Count > 0 && r.Kind != ContextRelationKind.AntiCorruptionLayer)
+                diagnostics.Add(Diagnostic.Error(DiagnosticCodes.AclOnNonAclRole,
+                    $"'acl {{ }}' block is only valid on an anti-corruption-layer relation ('{r.Upstream}' -> '{r.Downstream}' is {RoleName(r.Kind)})", r.Span));
+
+            // 5. Shared-kernel membership: each listed type must be declared by a partner, and a
+            //    type may belong to only one kernel (a second, conflicting pair is an error).
+            if (r.Kind == ContextRelationKind.SharedKernel)
+            {
+                var kernelPair = string.CompareOrdinal(r.Upstream, r.Downstream) <= 0
+                    ? (r.Upstream, r.Downstream) : (r.Downstream, r.Upstream);
+                foreach (var t in r.SharedTypes)
+                {
+                    if (!index.DeclaresType(r.Upstream, t) && !index.DeclaresType(r.Downstream, t))
+                        diagnostics.Add(Diagnostic.Error(DiagnosticCodes.UnknownSharedKernelType,
+                            $"shared-kernel type '{t}' is declared by neither '{r.Upstream}' nor '{r.Downstream}'", r.Span));
+                    else if (index.Classify(t) is TypeKind.Entity or TypeKind.Aggregate)
+                        diagnostics.Add(Diagnostic.Error(DiagnosticCodes.SharedKernelNotShareable,
+                            $"shared-kernel type '{t}' is an {(index.Classify(t) == TypeKind.Entity ? "entity" : "aggregate")}; a shared kernel may contain only value objects and enums (identity-bearing types belong to one context)", r.Span));
+                    else if (kernelOf.TryGetValue(t, out var first) && first != kernelPair)
+                        diagnostics.Add(Diagnostic.Error(DiagnosticCodes.SharedKernelTypeConflict,
+                            $"type '{t}' is shared by more than one kernel ('{first.Item1}'/'{first.Item2}' and '{kernelPair.Item1}'/'{kernelPair.Item2}'); a type may belong to only one shared kernel", r.Span));
+                    else
+                        kernelOf[t] = kernelPair;
+                }
+            }
+
+            // 6. ACL mappings: partner agreement, existence, and no duplicate upstream type.
+            if (r.Kind == ContextRelationKind.AntiCorruptionLayer)
+            {
+                var seenUpstream = new HashSet<string>(StringComparer.Ordinal);
+                foreach (var m in r.AclMappings)
+                {
+                    var ok = m.UpstreamContext == r.Upstream && m.LocalContext == r.Downstream
+                             && index.DeclaresType(r.Upstream, m.UpstreamType)
+                             && index.DeclaresType(r.Downstream, m.LocalType)
+                             && seenUpstream.Add(m.UpstreamType);
+                    if (!ok)
+                        diagnostics.Add(Diagnostic.Error(DiagnosticCodes.AclMappingType,
+                            $"ACL mapping '{m.UpstreamContext}.{m.UpstreamType} -> {m.LocalContext}.{m.LocalType}' must map a distinct upstream '{r.Upstream}' type to a downstream '{r.Downstream}' type that both exist", m.Span));
+                }
+            }
+        }
+    }
+
+    /// <summary>The original hyphenated spelling of a relation role (for diagnostic messages).</summary>
+    private static string RoleName(ContextRelationKind kind) => kind switch
+    {
+        ContextRelationKind.Partnership => "partnership",
+        ContextRelationKind.SharedKernel => "shared-kernel",
+        ContextRelationKind.CustomerSupplier => "customer-supplier",
+        ContextRelationKind.Conformist => "conformist",
+        ContextRelationKind.AntiCorruptionLayer => "anti-corruption-layer",
+        ContextRelationKind.OpenHost => "open-host",
+        ContextRelationKind.PublishedLanguage => "published-language",
+        _ => kind.ToString()
+    };
+
+    // ------------------------------------------------------------------------
+    // R14.3 — integration events, publish & subscribe
+    // ------------------------------------------------------------------------
+
+    /// <summary>
+    /// Validates integration events (R14.3): field types may not leak internal types; a context may
+    /// only publish a locally-declared integration event (no duplicates); a subscription must name a
+    /// declared context that actually publishes the event, authorized by the context map.
+    /// </summary>
+    private static void ValidateIntegrationEvents(
+        ContextNode ctx, ModelIndex index, bool hasContextMap, List<Diagnostic> diagnostics)
+    {
+        // 1. Field-type leak check (KOI1409).
+        foreach (var decl in FlattenTypeDecls(ctx))
+            if (decl is IntegrationEventDecl ev)
+                foreach (var m in ev.Members)
+                    CheckIntegrationEventFieldType(ctx.Name, m.Type, index, diagnostics);
+
+        // 2. publishes: must name a local integration event; no duplicates.
+        var published = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var p in ctx.Publishes)
+        {
+            if (!published.Add(p.EventName))
+                diagnostics.Add(Diagnostic.Error(DiagnosticCodes.DuplicatePublish,
+                    $"context '{ctx.Name}' publishes '{p.EventName}' more than once", p.Span));
+            else if (!index.IsIntegrationEventIn(ctx.Name, p.EventName))
+                diagnostics.Add(Diagnostic.Error(DiagnosticCodes.UnknownPublishedEvent,
+                    $"'{p.EventName}' is not an integration event declared in context '{ctx.Name}'", p.Span));
+        }
+
+        // 3. subscribes: declared publisher context, actually published, map-authorized; no duplicates.
+        //    The handler seam is named IHandle<Event> from the simple event name, so two events that
+        //    share a name (from different publishers) would collide — reject that case (KOI1417).
+        var subscribed = new HashSet<(string, string)>();
+        var handlerNames = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var s in ctx.Subscribes)
+        {
+            if (!subscribed.Add((s.Context, s.EventName)))
+            {
+                diagnostics.Add(Diagnostic.Error(DiagnosticCodes.DuplicateSubscribe,
+                    $"context '{ctx.Name}' subscribes to '{s.Context}.{s.EventName}' more than once", s.Span));
+                continue;
+            }
+            if (handlerNames.TryGetValue(s.EventName, out var otherPublisher) && otherPublisher != s.Context)
+                diagnostics.Add(Diagnostic.Error(DiagnosticCodes.SubscribeHandlerNameCollision,
+                    $"context '{ctx.Name}' subscribes to '{s.EventName}' from both '{otherPublisher}' and '{s.Context}'; the generated IHandle{s.EventName} handler would collide", s.Span));
+            else
+                handlerNames[s.EventName] = s.Context;
+            if (!index.IsContext(s.Context))
+            {
+                diagnostics.Add(Diagnostic.Error(DiagnosticCodes.SubscribeUnknownContext,
+                    $"subscribe to unknown context '{s.Context}'", s.Span));
+                continue;
+            }
+            if (!index.PublishesEvent(s.Context, s.EventName))
+            {
+                diagnostics.Add(Diagnostic.Error(DiagnosticCodes.SubscribeNotPublished,
+                    $"context '{s.Context}' does not publish an integration event '{s.EventName}'", s.Span));
+                continue;
+            }
+            // A subscribe requires an authorizing relation — but only once a map is declared at all.
+            if (hasContextMap && !index.MaySubscribe(s.Context, ctx.Name))
+                diagnostics.Add(Diagnostic.Error(DiagnosticCodes.SubscribeNoRelation,
+                    $"context '{ctx.Name}' may not subscribe to '{s.Context}.{s.EventName}': no open-host, published-language, or customer-supplier relation from '{s.Context}' authorizes it", s.Span));
+        }
+    }
+
+    /// <summary>
+    /// Reports an integration-event field whose (possibly nested) type references an internal type.
+    /// Allowed: primitives, enums, ID value objects, other integration events, and collections of those.
+    /// </summary>
+    private static void CheckIntegrationEventFieldType(
+        string context, TypeRef tr, ModelIndex index, List<Diagnostic> diagnostics)
+    {
+        var kind = index.Classify(tr.Name);
+        var allowed = kind switch
+        {
+            TypeKind.Primitive or TypeKind.List or TypeKind.Set or TypeKind.Map or TypeKind.Range => true,
+            TypeKind.Enum or TypeKind.IdValueObject or TypeKind.IntegrationEvent => true,
+            // A qualified foreign integration event is allowed even if the local Classify can't see it.
+            TypeKind.Unknown when tr.Qualifier is { } q && index.IsIntegrationEventIn(q, tr.Name) => true,
+            TypeKind.Unknown => true,   // genuinely-unknown names are reported as KOI0101 elsewhere
+            _ => false                  // Value, Entity, Aggregate, Event (domain), ReadModel, Query
+        };
+        if (!allowed)
+            diagnostics.Add(Diagnostic.Error(DiagnosticCodes.IntegrationEventLeaksInternals,
+                $"integration-event field type '{tr.Name}' references an internal type; only primitives, enums, ID value objects, and other integration events may cross a boundary", tr.Span));
+
+        if (tr.Element is not null) CheckIntegrationEventFieldType(context, tr.Element, index, diagnostics);
+        if (tr.Value is not null) CheckIntegrationEventFieldType(context, tr.Value, index, diagnostics);
     }
 
     /// <summary>

@@ -197,4 +197,47 @@ public class EmitterSnapshotTests
         return Verify(TestSupport.Render(result.Files))
             .UseDirectory("Snapshots");
     }
+
+    /// <summary>
+    /// R14: makes the shared-kernel namespace redirect, the anti-corruption-layer translator
+    /// interface, the integration-event record + IIntegrationEvent marker, and the subscriber
+    /// handler seam (with its precise publisher using) reviewable in one snapshot.
+    /// </summary>
+    [Fact]
+    public Task R14_fixture_emits_expected_csharp()
+    {
+        const string fixture = """
+            context Sales {
+              value Money { amount: Decimal }
+              publishes OrderPlaced
+              integration event OrderPlaced {
+                orderId:  OrderId
+                total:    Decimal
+                placedAt: Instant
+              }
+            }
+            context Billing {
+              value Customer { name: String }
+              value Invoice { amount: Money }
+            }
+            context Shipping {
+              subscribes Sales.OrderPlaced
+            }
+            context Legacy {
+              value Account { reference: String }
+            }
+            contextmap {
+              Sales  <-> Billing  : shared-kernel { Money }
+              Sales  -> Shipping  : open-host
+              Legacy -> Billing   : anti-corruption-layer
+                acl { Legacy.Account -> Billing.Customer }
+            }
+            """;
+
+        var result = new KoineCompiler().Compile(fixture, new CSharpEmitter());
+        Assert.True(result.Success, string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        return Verify(TestSupport.Render(result.Files))
+            .UseDirectory("Snapshots");
+    }
 }

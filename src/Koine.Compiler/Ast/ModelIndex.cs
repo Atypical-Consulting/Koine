@@ -17,6 +17,8 @@ public enum TypeKind
     ReadModel,
     /// <summary>A query object with typed criteria (R12.4).</summary>
     Query,
+    /// <summary>A cross-boundary integration event / published-language contract (R14.3).</summary>
+    IntegrationEvent,
     /// <summary>A generated ID value object (wraps a Guid), e.g. <c>OrderId</c>.</summary>
     IdValueObject,
     Unknown
@@ -65,6 +67,30 @@ public sealed class ModelIndex
     // Specs keyed by target type name, then spec name (R10.1). v0 flat resolution.
     private readonly Dictionary<string, Dictionary<string, SpecDecl>> _specsByTarget = new(StringComparer.Ordinal);
     private static readonly IReadOnlyDictionary<string, SpecDecl> NoSpecs = new Dictionary<string, SpecDecl>();
+
+    // Context map (R14). Relations whose endpoints are unknown contexts are skipped here
+    // (the validator reports them). A bidirectional relation is indexed in both directions.
+    private readonly List<ContextRelation> _relations = new();
+    // Shared-kernel (R14.2): the kernel namespace each shared type is redirected into (owner-only),
+    // and, per context, the set of kernel type names that context may reference without an import.
+    private readonly Dictionary<string, string> _kernelNamespaceByType = new(StringComparer.Ordinal);
+    // The single context responsible for EMITTING each shared type (so a co-declared type
+    // is emitted exactly once); the emitter skips the type in any other context.
+    private readonly Dictionary<string, string> _kernelOwnerByType = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, HashSet<string>> _kernelVisibleByContext = new(StringComparer.Ordinal);
+    // Each kernel namespace -> its (order-normalized) partner contexts, for cross-namespace
+    // using computation in the emitter (the kernel namespace is not a real context).
+    private readonly Dictionary<string, List<string>> _kernelNamespaces = new(StringComparer.Ordinal);
+    // Integration events a context publishes (R14.3), for subscribe validation.
+    private readonly Dictionary<string, HashSet<string>> _publishedByContext = new(StringComparer.Ordinal);
+
+    // Relation roles that PERMIT a downstream to reference an upstream type without an import (R14.1).
+    private static readonly HashSet<ContextRelationKind> PermitKinds = new()
+    {
+        ContextRelationKind.Conformist, ContextRelationKind.SharedKernel,
+        ContextRelationKind.OpenHost, ContextRelationKind.PublishedLanguage,
+        ContextRelationKind.Partnership
+    };
 
     public KoineModel Model { get; }
 
@@ -190,7 +216,56 @@ public sealed class ModelIndex
                     if (!owners.Contains(e.Name))
                         owners.Add(e.Name);
                 }
+
+        // 5. Context map (R14.1): keep only relations whose endpoints are declared contexts.
+        if (model.ContextMap is { } map)
+            foreach (var r in map.Relations)
+                if (_contextNames.Contains(r.Upstream) && _contextNames.Contains(r.Downstream))
+                    _relations.Add(r);
+
+        // 5b. Shared-kernel (R14.2): redirect each shared type to one kernel namespace and
+        //     record per-partner visibility. The emission owner is the order-normalized lower
+        //     context that declares the type (so a co-declared type is emitted exactly once).
+        //     ID value objects are skipped: they are universally available via the `*Id`
+        //     convention and have a dedicated emission path, so they are never redirected.
+        foreach (var r in _relations)
+        {
+            if (r.Kind != ContextRelationKind.SharedKernel) continue;
+            var kernelNs = KernelNamespaceOf(r.Upstream, r.Downstream);
+            var (lo, hi) = string.CompareOrdinal(r.Upstream, r.Downstream) <= 0
+                ? (r.Upstream, r.Downstream) : (r.Downstream, r.Upstream);
+            foreach (var name in r.SharedTypes)
+            {
+                if (_idTypeNames.Contains(name) || IsIdConvention(name)) continue;  // *Id convention handles it
+                var owner = DeclaresType(lo, name) ? lo : DeclaresType(hi, name) ? hi : null;
+                if (owner is null) continue;                 // unknown kernel type (validator reports it)
+                // A type may belong to only one kernel; a second, conflicting pair is reported
+                // (KOI1416) and ignored here so emission stays deterministic.
+                if (_kernelNamespaceByType.TryGetValue(name, out var existing) && existing != kernelNs)
+                    continue;
+                _kernelNamespaceByType[name] = kernelNs;
+                _kernelOwnerByType[name] = owner;
+                if (!_kernelNamespaces.ContainsKey(kernelNs))
+                    _kernelNamespaces[kernelNs] = new List<string> { lo, hi };
+                KernelVisible(r.Upstream).Add(name);
+                KernelVisible(r.Downstream).Add(name);
+            }
+        }
+
+        // 5c. Integration-event publish index (R14.3): a context only publishes events it
+        //     actually declares as integration events (the validator reports mismatches).
+        foreach (var ctx in model.Contexts)
+            foreach (var p in ctx.Publishes)
+                Published(ctx.Name).Add(p.EventName);
     }
+
+    private HashSet<string> KernelVisible(string context) =>
+        _kernelVisibleByContext.TryGetValue(context, out var s)
+            ? s : _kernelVisibleByContext[context] = new HashSet<string>(StringComparer.Ordinal);
+
+    private HashSet<string> Published(string context) =>
+        _publishedByContext.TryGetValue(context, out var s)
+            ? s : _publishedByContext[context] = new HashSet<string>(StringComparer.Ordinal);
 
     /// <summary>
     /// Resolves the declared type of a member on a named value/entity type, using the
@@ -240,6 +315,7 @@ public sealed class ModelIndex
         {
             case ValueObjectDecl v: members = v.Members; break;
             case EventDecl ev: members = ev.Members; break;
+            case IntegrationEventDecl ie: members = ie.Members; break;
             case EntityDecl e:
                 if (memberName is "id" or "Id")
                 {
@@ -284,6 +360,9 @@ public sealed class ModelIndex
                     break;
                 case EventDecl ev:
                     foreach (var m in ev.Members) yield return m.Type;
+                    break;
+                case IntegrationEventDecl ie:
+                    foreach (var m in ie.Members) yield return m.Type;
                     break;
                 case AggregateDecl agg when agg.Repository is { } repo:
                     foreach (var finder in repo.Finders)
@@ -437,13 +516,129 @@ public sealed class ModelIndex
     public IReadOnlyList<string> DeclaringContextsOf(string typeName) =>
         _declaringContexts.TryGetValue(typeName, out var l) ? l : Array.Empty<string>();
 
+    // ---- Context map, shared kernel & integration events (R14) -------------
+
+    /// <summary>Every relation on the context map whose endpoints are declared contexts.</summary>
+    public IReadOnlyList<ContextRelation> Relations => _relations;
+
+    /// <summary>The (deterministic) namespace a shared-kernel type pair emits into.</summary>
+    public static string KernelNamespaceOf(string a, string b)
+    {
+        var (lo, hi) = string.CompareOrdinal(a, b) <= 0 ? (a, b) : (b, a);
+        return $"{lo}__{hi}.Kernel";
+    }
+
+    /// <summary>True when <paramref name="name"/> is a shared-kernel type (emitted into a kernel namespace).</summary>
+    public bool IsSharedKernelType(string name) => _kernelNamespaceByType.ContainsKey(name);
+
+    /// <summary>The kernel namespace a shared type emits into, or <c>null</c> when it is not shared.</summary>
+    public string? KernelNamespaceOfType(string name) =>
+        _kernelNamespaceByType.TryGetValue(name, out var ns) ? ns : null;
+
+    /// <summary>The single context responsible for emitting a shared type (else <c>null</c>).</summary>
+    public string? KernelOwnerOfType(string name) =>
+        _kernelOwnerByType.TryGetValue(name, out var owner) ? owner : null;
+
+    /// <summary>True when <paramref name="context"/> may reference shared type <paramref name="name"/> without an import.</summary>
+    public bool IsKernelVisibleFrom(string context, string name) =>
+        _kernelVisibleByContext.TryGetValue(context, out var s) && s.Contains(name);
+
+    /// <summary>True when <paramref name="ns"/> is a dedicated shared-kernel namespace.</summary>
+    public bool IsKernelNamespace(string ns) => _kernelNamespaces.ContainsKey(ns);
+
+    /// <summary>
+    /// For the emitter: every type name a kernel file may reference (its partner contexts' visible
+    /// types), mapped to the namespace it lives in. Lets a kernel type that depends on an
+    /// owner-local (non-shared) type get a precise <c>using</c> — the kernel namespace is not a
+    /// real context, so <see cref="VisibleTypeNamespaces"/> cannot be used directly.
+    /// </summary>
+    public IReadOnlyDictionary<string, string> KernelVisibleTypeNamespaces(string kernelNs)
+    {
+        var result = new Dictionary<string, string>(StringComparer.Ordinal);
+        if (_kernelNamespaces.TryGetValue(kernelNs, out var partners))
+            foreach (var partner in partners)
+                foreach (var (name, ns) in VisibleTypeNamespaces(partner))
+                    result[name] = ns;
+        return result;
+    }
+
+    /// <summary>
+    /// True when the context map authorizes <paramref name="fromContext"/> to reference a type
+    /// owned by <paramref name="upstream"/> WITHOUT an import (R14.1): a conformist, shared-kernel,
+    /// open-host, published-language, or partnership relation between them.
+    /// </summary>
+    public bool MapPermitsReference(string fromContext, string upstream)
+    {
+        foreach (var r in _relations)
+        {
+            if (!PermitKinds.Contains(r.Kind)) continue;
+            // Directed: downstream (fromContext) may see upstream's types. Bidirectional: either way.
+            var match = (r.Downstream == fromContext && r.Upstream == upstream)
+                        || (r.IsBidirectional && r.Upstream == fromContext && r.Downstream == upstream);
+            if (match) return true;
+        }
+        return false;
+    }
+
+    /// <summary>True when any relation relates the two contexts (either direction).</summary>
+    public bool ArePartners(string a, string b) =>
+        _relations.Any(r => (r.Upstream == a && r.Downstream == b) || (r.Upstream == b && r.Downstream == a));
+
+    /// <summary>True when an anti-corruption-layer relation is declared with this exact direction (upstream -&gt; downstream).</summary>
+    public bool HasAclRelation(string upstream, string downstream) =>
+        _relations.Any(r => r.Kind == ContextRelationKind.AntiCorruptionLayer
+                            && r.Upstream == upstream && r.Downstream == downstream);
+
+    /// <summary>The context(s) a type name is imported from into <paramref name="fromContext"/> (R13.2).</summary>
+    public IReadOnlyList<string> ImportOwnersOf(string fromContext, string name) =>
+        _importsByContext.TryGetValue(fromContext, out var m) && m.TryGetValue(name, out var owners)
+            ? owners : Array.Empty<string>();
+
+    /// <summary>The relation, if any, with <paramref name="downstream"/> as the downstream of <paramref name="upstream"/>.</summary>
+    public ContextRelation? RelationFor(string downstream, string upstream) =>
+        _relations.FirstOrDefault(r =>
+            (r.Downstream == downstream && r.Upstream == upstream)
+            || (r.IsBidirectional && r.Upstream == downstream && r.Downstream == upstream));
+
+    /// <summary>True when <paramref name="context"/> publishes integration event <paramref name="eventName"/>.</summary>
+    public bool PublishesEvent(string context, string eventName) =>
+        _publishedByContext.TryGetValue(context, out var s) && s.Contains(eventName);
+
+    /// <summary>True when <paramref name="context"/> declares <paramref name="typeName"/> as an integration event.</summary>
+    public bool IsIntegrationEventIn(string context, string typeName) =>
+        TryGetDeclIn(context, typeName, out var decl) && decl is IntegrationEventDecl
+        || _declsByContext.TryGetValue(context, out var local) && local.TryGetValue(typeName, out var d) && d is IntegrationEventDecl;
+
+    /// <summary>
+    /// True when the map authorizes <paramref name="subscriber"/> to consume integration events
+    /// published by <paramref name="publisher"/> (R14.3): the publisher is the upstream of an
+    /// open-host, published-language, or customer-supplier relation to the subscriber.
+    /// </summary>
+    public bool MaySubscribe(string publisher, string subscriber)
+    {
+        foreach (var r in _relations)
+        {
+            var kindOk = r.Kind is ContextRelationKind.OpenHost
+                or ContextRelationKind.PublishedLanguage or ContextRelationKind.CustomerSupplier;
+            if (!kindOk) continue;
+            if (r.Upstream == publisher && r.Downstream == subscriber) return true;
+            if (r.IsBidirectional && r.Downstream == publisher && r.Upstream == subscriber) return true;
+        }
+        return false;
+    }
+
     /// <summary>The C# namespace a context+module-path emits into (e.g. <c>Billing.Pricing</c>).</summary>
     public static string NamespaceOf(string context, IReadOnlyList<string> modulePath) =>
         modulePath.Count == 0 ? context : context + "." + string.Join(".", modulePath);
 
-    /// <summary>The namespace a type emits into, as declared in <paramref name="context"/> (or null).</summary>
+    /// <summary>
+    /// The namespace a type emits into, as declared in <paramref name="context"/> (or null). A
+    /// shared-kernel type resolves to its dedicated kernel namespace regardless of context (R14.2).
+    /// </summary>
     public string? NamespaceOfTypeIn(string context, string typeName) =>
-        _namespaceByContextType.TryGetValue(context, out var m) && m.TryGetValue(typeName, out var ns) ? ns : null;
+        _kernelNamespaceByType.TryGetValue(typeName, out var kernelNs) ? kernelNs
+        : _namespaceByContextType.TryGetValue(context, out var m) && m.TryGetValue(typeName, out var ns) ? ns
+        : null;
 
     /// <summary>
     /// For the emitter: every type name visible from <paramref name="context"/> (its own types,
@@ -455,12 +650,28 @@ public sealed class ModelIndex
         var result = new Dictionary<string, string>(StringComparer.Ordinal);
         if (_namespaceByContextType.TryGetValue(context, out var local))
             foreach (var kv in local)
-                result[kv.Key] = kv.Value;
+                // A shared-kernel type lives in its kernel namespace, not this context's (R14.2).
+                result[kv.Key] = _kernelNamespaceByType.TryGetValue(kv.Key, out var kns) ? kns : kv.Value;
         if (_importsByContext.TryGetValue(context, out var imported))
             foreach (var kv in imported)
                 // A local type shadows an imported one of the same name — never overwrite it.
                 if (!result.ContainsKey(kv.Key) && kv.Value.Count == 1 && NamespaceOfTypeIn(kv.Value[0], kv.Key) is { } ns)
                     result[kv.Key] = ns;
+        // Shared-kernel types this context may reference without an import (R14.2): surface them at
+        // the kernel namespace so each partner file gets a precise `using <lo>__<hi>.Kernel;`.
+        if (_kernelVisibleByContext.TryGetValue(context, out var kernel))
+            foreach (var name in kernel)
+                if (_kernelNamespaceByType.TryGetValue(name, out var kns))
+                    result[name] = kns;
+        // Context-map permit relations (R14.1): a conformist/open-host/published-language/partnership
+        // downstream may reference upstream types without an import, so surface them (and their
+        // namespaces) too — otherwise the emitted file would lack the upstream `using`.
+        foreach (var up in _contextNames)
+            if (up != context && MapPermitsReference(context, up)
+                && _namespaceByContextType.TryGetValue(up, out var theirTypes))
+                foreach (var kv in theirTypes)
+                    if (!result.ContainsKey(kv.Key))
+                        result[kv.Key] = _kernelNamespaceByType.TryGetValue(kv.Key, out var kns2) ? kns2 : kv.Value;
         return result;
     }
 
@@ -491,13 +702,21 @@ public sealed class ModelIndex
             return Ok;                              // local to this context
         if (kind == TypeKind.IdValueObject)
             return Ok;                              // *Id convention: emitted locally, no import
+        if (IsKernelVisibleFrom(fromContext, name))
+            return Ok;                              // shared-kernel type visible to this partner (R14.2)
 
         if (_importsByContext.TryGetValue(fromContext, out var imports) && imports.TryGetValue(name, out var owners))
             return owners.Count == 1 ? Ok : new RefResolution(RefKind.Ambiguous, owners);
 
         var declaring = DeclaringContextsOf(name).Where(c => c != fromContext).ToList();
         if (declaring.Count > 0)
+        {
+            // The context map may PERMIT an un-imported upstream reference (conformist, shared-kernel,
+            // open-host, published-language, partnership). ACL & customer-supplier are not permitted (R14.1).
+            if (declaring.Any(up => MapPermitsReference(fromContext, up)))
+                return Ok;
             return new RefResolution(RefKind.UnimportedCrossContext, declaring);
+        }
 
         return new RefResolution(RefKind.Unknown, Array.Empty<string>());
     }
@@ -520,6 +739,7 @@ public sealed class ModelIndex
                 AggregateDecl => TypeKind.Aggregate,
                 EnumDecl => TypeKind.Enum,
                 EventDecl => TypeKind.Event,
+                IntegrationEventDecl => TypeKind.IntegrationEvent,
                 ReadModelDecl => TypeKind.ReadModel,
                 QueryDecl => TypeKind.Query,
                 _ => TypeKind.Unknown

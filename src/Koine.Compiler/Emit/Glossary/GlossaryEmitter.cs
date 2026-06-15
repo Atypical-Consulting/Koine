@@ -106,6 +106,11 @@ public sealed class GlossaryEmitter : IEmitter
                 WriteFields(sb, ev.Members);
                 break;
 
+            case IntegrationEventDecl ie:
+                WriteHeading(sb, heading, ie.Name, "integration event", ie.Doc);
+                WriteFields(sb, ie.Members);
+                break;
+
             case EntityDecl e:
                 WriteHeading(sb, heading, e.Name, "entity", e.Doc);
                 sb.Append("\nIdentified by `").Append(e.IdentityName).Append("`.\n");

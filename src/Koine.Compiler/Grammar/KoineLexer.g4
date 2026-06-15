@@ -47,6 +47,20 @@ FROM       : 'from' ;
 QUERY      : 'query' ;
 IMPORT     : 'import' ;
 MODULE     : 'module' ;
+// R14 — context map (hyphenated roles MUST be single literal tokens; '-' is MINUS).
+CONTEXTMAP         : 'contextmap' ;
+PARTNERSHIP        : 'partnership' ;
+SHARED_KERNEL      : 'shared-kernel' ;
+CUSTOMER_SUPPLIER  : 'customer-supplier' ;
+CONFORMIST         : 'conformist' ;
+ANTI_CORRUPTION    : 'anti-corruption-layer' ;
+OPEN_HOST          : 'open-host' ;
+PUBLISHED_LANGUAGE : 'published-language' ;
+ACL                : 'acl' ;
+// R14.3 — integration events (the 'event' word reuses the existing EVENT token).
+INTEGRATION        : 'integration' ;
+PUBLISHES          : 'publishes' ;
+SUBSCRIBES         : 'subscribes' ;
 WHEN       : 'when' ;
 IF         : 'if' ;
 THEN       : 'then' ;
@@ -78,6 +92,7 @@ LT  : '<' ;
 GT  : '>' ;
 
 RARROW : '->' ;   // state transition: `status -> Placed` (before MINUS for maximal munch)
+BIARROW : '<->' ; // bidirectional context-map relation (before LARROW/LT for maximal munch)
 LARROW : '<-' ;   // factory field initialization: `total <- lines.sum(...)`
 PLUS  : '+' ;
 MINUS : '-' ;

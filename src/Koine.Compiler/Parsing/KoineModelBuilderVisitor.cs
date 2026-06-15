@@ -28,11 +28,23 @@ public sealed class KoineModelBuilderVisitor : KoineParserBaseVisitor<object?>
     /// <summary>Builds the semantic model from a parsed program.</summary>
     public KoineModel BuildModel(KoineParser.ProgramContext context)
     {
-        var contexts = context.contextDecl()
-            .Select(BuildContext)
+        var members = context.programMember();
+        var contexts = members
+            .Select(m => m.contextDecl())
+            .Where(c => c is not null)
+            .Select(BuildContext!)
             .ToList();
 
-        return new KoineModel(contexts) { Span = SpanOf(context) };
+        // Relations from every contextmap block in this unit, concatenated (R14.1).
+        var relations = members
+            .Select(m => m.contextMapDecl())
+            .Where(m => m is not null)
+            .SelectMany(m => m!.relationDecl())
+            .Select(BuildRelation)
+            .ToList();
+        var map = relations.Count == 0 ? null : new ContextMapNode(relations) { Span = SpanOf(context) };
+
+        return new KoineModel(contexts, map) { Span = SpanOf(context) };
     }
 
     // ------------------------------------------------------------------------
@@ -47,6 +59,8 @@ public sealed class KoineModelBuilderVisitor : KoineParserBaseVisitor<object?>
         var policies = new List<PolicyDecl>();
         var imports = new List<ImportDecl>();
         var moduleNames = new List<string>();
+        var publishes = new List<PublishDecl>();
+        var subscribes = new List<SubscribeDecl>();
 
         foreach (var member in ctx.contextMember())
         {
@@ -58,13 +72,69 @@ public sealed class KoineModelBuilderVisitor : KoineParserBaseVisitor<object?>
             else if (member.queryDecl() is { } q) types.Add(BuildQuery(q));
             else if (member.importDecl() is { } i) imports.Add(BuildImport(i));
             else if (member.moduleDecl() is { } m) FlattenModule(m, Array.Empty<string>(), types, moduleNames);
+            else if (member.publishDecl() is { } pub) publishes.Add(BuildPublish(pub));
+            else if (member.subscribeDecl() is { } sub) subscribes.Add(BuildSubscribe(sub));
         }
 
-        return new ContextNode(ctx.Identifier().GetText(), types, specs, services, policies, imports, moduleNames)
+        return new ContextNode(
+            ctx.Identifier().GetText(), types, specs, services, policies, imports, moduleNames, publishes, subscribes)
         {
             Span = SpanOf(ctx),
             Doc = DocFor(ctx)
         };
+    }
+
+    // ---- Context map & integration-event wiring (R14) ----------------------
+
+    private ContextRelation BuildRelation(KoineParser.RelationDeclContext ctx)
+    {
+        var names = ctx.typeName();
+        var kind = BuildRelationKind(ctx.relationRole());
+        var bidirectional = ctx.relationArrow().BIARROW() is not null;
+        var sharedTypes = ctx.sharedKernelBlock() is { } sk
+            ? sk.typeName().Select(t => t.GetText()).ToList()
+            : new List<string>();
+        var aclMappings = ctx.aclBlock() is { } acl
+            ? acl.aclMapping().Select(BuildAclMapping).ToList()
+            : new List<AclMapping>();
+
+        return new ContextRelation(
+            names[0].GetText(), names[1].GetText(), kind, bidirectional, sharedTypes, aclMappings)
+        {
+            Span = SpanOf(ctx)
+        };
+    }
+
+    private static ContextRelationKind BuildRelationKind(KoineParser.RelationRoleContext ctx)
+    {
+        if (ctx.PARTNERSHIP() is not null) return ContextRelationKind.Partnership;
+        if (ctx.SHARED_KERNEL() is not null) return ContextRelationKind.SharedKernel;
+        if (ctx.CUSTOMER_SUPPLIER() is not null) return ContextRelationKind.CustomerSupplier;
+        if (ctx.CONFORMIST() is not null) return ContextRelationKind.Conformist;
+        if (ctx.ANTI_CORRUPTION() is not null) return ContextRelationKind.AntiCorruptionLayer;
+        if (ctx.OPEN_HOST() is not null) return ContextRelationKind.OpenHost;
+        return ContextRelationKind.PublishedLanguage;
+    }
+
+    private AclMapping BuildAclMapping(KoineParser.AclMappingContext ctx)
+    {
+        var from = ctx.qualifiedType(0);
+        var to = ctx.qualifiedType(1);
+        return new AclMapping(
+            from.typeName(0).GetText(), from.typeName(1).GetText(),
+            to.typeName(0).GetText(), to.typeName(1).GetText())
+        {
+            Span = SpanOf(ctx)
+        };
+    }
+
+    private PublishDecl BuildPublish(KoineParser.PublishDeclContext ctx) =>
+        new(ctx.typeName().GetText()) { Span = SpanOf(ctx) };
+
+    private SubscribeDecl BuildSubscribe(KoineParser.SubscribeDeclContext ctx)
+    {
+        var names = ctx.typeName();
+        return new SubscribeDecl(names[0].GetText(), names[1].GetText()) { Span = SpanOf(ctx) };
     }
 
     private ImportDecl BuildImport(KoineParser.ImportDeclContext ctx)
@@ -212,6 +282,8 @@ public sealed class KoineModelBuilderVisitor : KoineParserBaseVisitor<object?>
             return BuildEnum(@enum);
         if (ctx.eventDecl() is { } @event)
             return BuildEvent(@event);
+        if (ctx.integrationEventDecl() is { } integrationEvent)
+            return BuildIntegrationEvent(integrationEvent);
 
         throw new InvalidOperationException("Unknown type declaration.");
     }
@@ -431,6 +503,12 @@ public sealed class KoineModelBuilderVisitor : KoineParserBaseVisitor<object?>
     {
         var members = ctx.member().Select(BuildMember).ToList();
         return new EventDecl(ctx.Identifier().GetText(), members) { Span = SpanOf(ctx), Doc = DocFor(ctx) };
+    }
+
+    private IntegrationEventDecl BuildIntegrationEvent(KoineParser.IntegrationEventDeclContext ctx)
+    {
+        var members = ctx.member().Select(BuildMember).ToList();
+        return new IntegrationEventDecl(ctx.Identifier().GetText(), members) { Span = SpanOf(ctx), Doc = DocFor(ctx) };
     }
 
     private Member BuildMember(KoineParser.MemberContext ctx)

@@ -9,12 +9,16 @@ options { tokenVocab=KoineLexer; }
 
 // ---- Top level -------------------------------------------------------------
 
-program        : contextDecl* EOF ;
+// A program is a set of bounded contexts plus an optional strategic context map (R14.1).
+program        : programMember* EOF ;
+
+programMember  : contextDecl | contextMapDecl ;
 
 contextDecl    : CONTEXT Identifier LBRACE contextMember* RBRACE ;
 
 // A context holds imports, modules, types, behavioral declarations (specs, services,
-// policies), and read-side declarations (read models, queries).
+// policies), read-side declarations (read models, queries), and integration-event
+// publish/subscribe wiring (R14.3).
 contextMember  : importDecl
                | moduleDecl
                | typeDecl
@@ -23,7 +27,44 @@ contextMember  : importDecl
                | policyDecl
                | readmodelDecl
                | queryDecl
+               | publishDecl
+               | subscribeDecl
                ;
+
+// ---- Context map & integration-event wiring (R14) --------------------------
+
+// A top-level strategic map of directed relationships between bounded contexts.
+contextMapDecl : CONTEXTMAP LBRACE relationDecl* RBRACE ;
+
+// `Up -> Down : role` (directed) or `A <-> B : role` (bidirectional). A shared-kernel
+// relation may carry a type list; an anti-corruption-layer relation an acl mapping block.
+relationDecl   : typeName relationArrow typeName COLON relationRole
+                 ( sharedKernelBlock | aclBlock )? ;
+
+relationArrow  : RARROW | BIARROW ;
+
+relationRole   : PARTNERSHIP
+               | SHARED_KERNEL
+               | CUSTOMER_SUPPLIER
+               | CONFORMIST
+               | ANTI_CORRUPTION
+               | OPEN_HOST
+               | PUBLISHED_LANGUAGE ;
+
+// The `shared-kernel` keyword is the relation role; the block is just the brace-delimited
+// type list that follows it (a non-kernel role carrying this block is a validator error).
+sharedKernelBlock : LBRACE typeName ( COMMA typeName )* COMMA? RBRACE ;
+
+aclBlock          : ACL LBRACE aclMapping+ RBRACE ;
+
+aclMapping        : qualifiedType RARROW qualifiedType ;
+
+qualifiedType     : typeName DOT typeName ;
+
+// `publishes OrderPlaced` / `subscribes Sales.OrderPlaced` (R14.3).
+publishDecl    : PUBLISHES typeName ;
+
+subscribeDecl  : SUBSCRIBES typeName DOT typeName ;
 
 // ---- Imports & modules (R13.2 / R13.3) -------------------------------------
 
@@ -41,7 +82,12 @@ typeDecl       : valueDecl
                | aggregateDecl
                | enumDecl
                | eventDecl
+               | integrationEventDecl
                ;
+
+// A published-language integration event (R14.3): an immutable, cross-boundary contract.
+// Parsed as a typeDecl so it works at context and module scope (inheriting ModulePath).
+integrationEventDecl : INTEGRATION EVENT Identifier LBRACE member* RBRACE ;
 
 // ---- Specifications, services, policies (R10) ------------------------------
 
@@ -180,7 +226,7 @@ typeRef        : ( typeName DOT )? typeName ( LT typeRef ( COMMA typeRef )? GT )
 softName       : Identifier | declKeyword | WHEN | IF | THEN | ELSE ;
 exprName       : Identifier | declKeyword | WHEN ;
 typeName       : Identifier | declKeyword ;
-declKeyword    : CONTEXT | VALUE | QUANTITY | ENTITY | AGGREGATE | ENUM | IDENTIFIED | BY | ROOT | COMMAND | REQUIRES | EVENT | EMIT | STATES | CREATE | SPEC | ON | SERVICE | OPERATION | POLICY | AS | NATURAL | SEQUENCE | GUID | VERSIONED | REPOSITORY | OPERATIONS | FIND | USECASE | READMODEL | FROM | QUERY | IMPORT | MODULE ;
+declKeyword    : CONTEXT | VALUE | QUANTITY | ENTITY | AGGREGATE | ENUM | IDENTIFIED | BY | ROOT | COMMAND | REQUIRES | EVENT | EMIT | STATES | CREATE | SPEC | ON | SERVICE | OPERATION | POLICY | AS | NATURAL | SEQUENCE | GUID | VERSIONED | REPOSITORY | OPERATIONS | FIND | USECASE | READMODEL | FROM | QUERY | IMPORT | MODULE | ACL | INTEGRATION | PUBLISHES | SUBSCRIBES ;
 
 invariant      : INVARIANT expression StringLiteral? ;
 

@@ -21,8 +21,55 @@ public abstract record KoineNode
     public string? Doc { get; init; }
 }
 
-/// <summary>Root of the model: the set of bounded contexts in a compilation.</summary>
-public sealed record KoineModel(IReadOnlyList<ContextNode> Contexts) : KoineNode;
+/// <summary>
+/// Root of the model: the set of bounded contexts in a compilation, plus the optional
+/// strategic <see cref="ContextMap"/> declaring directed relationships between them (R14.1).
+/// </summary>
+public sealed record KoineModel(
+    IReadOnlyList<ContextNode> Contexts,
+    ContextMapNode? ContextMap = null) : KoineNode;
+
+// ----------------------------------------------------------------------------
+// R14 — Context maps & integration events. All TARGET-AGNOSTIC.
+// ----------------------------------------------------------------------------
+
+/// <summary>The role of a context-map relationship (a strategic DDD pattern).</summary>
+public enum ContextRelationKind
+{
+    Partnership,
+    SharedKernel,
+    CustomerSupplier,
+    Conformist,
+    AntiCorruptionLayer,
+    OpenHost,
+    PublishedLanguage
+}
+
+/// <summary>
+/// One context-map relation: <c>Upstream -&gt; Downstream : role</c> (or <c>&lt;-&gt;</c>).
+/// The left endpoint is <see cref="Upstream"/>, the right is <see cref="Downstream"/>.
+/// <see cref="SharedTypes"/> is non-empty only for <see cref="ContextRelationKind.SharedKernel"/>;
+/// <see cref="AclMappings"/> only for <see cref="ContextRelationKind.AntiCorruptionLayer"/>
+/// (both validator-enforced).
+/// </summary>
+public sealed record ContextRelation(
+    string Upstream,
+    string Downstream,
+    ContextRelationKind Kind,
+    bool IsBidirectional,
+    IReadOnlyList<string> SharedTypes,
+    IReadOnlyList<AclMapping> AclMappings) : KoineNode;
+
+/// <summary>
+/// One anti-corruption-layer mapping: <c>Upstream.Type -&gt; Local.Type</c>. The qualifiers
+/// are declared context names; mapping each to a concrete namespace is the emitter's job.
+/// </summary>
+public sealed record AclMapping(
+    string UpstreamContext, string UpstreamType,
+    string LocalContext, string LocalType) : KoineNode;
+
+/// <summary>The strategic context map: the directed relationships between bounded contexts (R14.1).</summary>
+public sealed record ContextMapNode(IReadOnlyList<ContextRelation> Relations) : KoineNode;
 
 /// <summary>
 /// A bounded context — the top-level namespace for a group of types, plus its
@@ -38,7 +85,18 @@ public sealed record ContextNode(
     IReadOnlyList<ServiceDecl> Services,
     IReadOnlyList<PolicyDecl> Policies,
     IReadOnlyList<ImportDecl> Imports,
-    IReadOnlyList<string> ModuleNames) : KoineNode;
+    IReadOnlyList<string> ModuleNames,
+    IReadOnlyList<PublishDecl> Publishes,
+    IReadOnlyList<SubscribeDecl> Subscribes) : KoineNode;
+
+/// <summary>A context's declaration that it publishes an integration event (R14.3).</summary>
+public sealed record PublishDecl(string EventName) : KoineNode;
+
+/// <summary>
+/// A context's subscription to another context's integration event (R14.3):
+/// <c>subscribes Context.Event</c> — <see cref="Context"/> is the publisher.
+/// </summary>
+public sealed record SubscribeDecl(string Context, string EventName) : KoineNode;
 
 /// <summary>
 /// An import of cross-context types (R13.2): <c>import Context.{ A, B }</c> (named) or
@@ -178,6 +236,16 @@ public sealed record EnumMember(string Name, IReadOnlyList<Expr> Args) : KoineNo
 /// with typed fields (and generated occurrence metadata). TARGET-AGNOSTIC.
 /// </summary>
 public sealed record EventDecl(
+    string Name,
+    IReadOnlyList<Member> Members) : TypeDecl(Name);
+
+/// <summary>
+/// An integration event (R14.3): an immutable, cross-boundary published-language contract.
+/// Distinct from the intra-aggregate <see cref="EventDecl"/>; emitted as a record marked
+/// <c>IIntegrationEvent</c>. Field types are restricted (primitives, enums, ID value objects,
+/// and other integration events). TARGET-AGNOSTIC.
+/// </summary>
+public sealed record IntegrationEventDecl(
     string Name,
     IReadOnlyList<Member> Members) : TypeDecl(Name);
 
