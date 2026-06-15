@@ -61,6 +61,24 @@ public class WorkspaceIndexTests
     }
 
     [Fact]
+    public void Cross_file_enum_member_resolves_to_member_span()
+    {
+        var active = "context A {\n  enum Local { X }\n}\n"; // does not declare Currency
+        var idx = Index(("file:///a.koi", active), ("file:///catalog.koi", Catalog));
+        var def = idx.ResolveDefinition("file:///a.koi", "EUR"); // a Currency member in Catalog
+        Assert.NotNull(def);
+        Assert.Equal("file:///catalog.koi", def!.Uri);
+        Assert.Equal(2, def.Span.Line); // line of `enum Currency { EUR, USD }`
+    }
+
+    [Fact]
+    public void Empty_workspace_resolves_to_null()
+    {
+        var idx = new WorkspaceIndex(new Dictionary<string, string>());
+        Assert.Null(idx.ResolveDefinition("file:///x.koi", "Anything"));
+    }
+
+    [Fact]
     public void Broken_file_does_not_poison_other_files()
     {
         var broken = "context Broken { value {{{ ";
