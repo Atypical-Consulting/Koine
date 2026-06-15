@@ -152,12 +152,25 @@ public sealed class KoineModelBuilderVisitor : KoineParserBaseVisitor<object?>
 
         var name = ctx.Identifier(0).GetText();
         var identityName = ctx.Identifier(1).GetText();
+        var (strategy, backing) = BuildIdentityStrategy(ctx.identityStrategy());
 
-        return new EntityDecl(name, identityName, members, invariants, commands, states, factories)
+        return new EntityDecl(name, identityName, members, invariants, commands, states, factories, strategy, backing)
         {
             Span = SpanOf(ctx),
             Doc = DocFor(ctx)
         };
+    }
+
+    /// <summary>Reads the optional <c>as guid|sequence|natural(T)</c> identity strategy (R11.1).</summary>
+    private static (IdentityStrategy Strategy, string? Backing) BuildIdentityStrategy(
+        KoineParser.IdentityStrategyContext? ctx)
+    {
+        if (ctx is null || ctx.GUID() is not null)
+            return (IdentityStrategy.Guid, null);
+        if (ctx.SEQUENCE() is not null)
+            return (IdentityStrategy.Sequence, null);
+        // natural(T): the wrapped primitive's name.
+        return (IdentityStrategy.Natural, ctx.typeName().GetText());
     }
 
     private static StatesDecl BuildStates(KoineParser.StatesDeclContext ctx)
@@ -262,16 +275,43 @@ public sealed class KoineModelBuilderVisitor : KoineParserBaseVisitor<object?>
     {
         var types = new List<TypeDecl>();
         var specs = new List<SpecDecl>();
+        RepositoryDecl? repository = null;
         foreach (var member in ctx.aggregateMember())
         {
             if (member.typeDecl() is { } t) types.Add(BuildTypeDecl(t));
             else if (member.specDecl() is { } s) specs.Add(BuildSpec(s));
+            else if (member.repositoryDecl() is { } r) repository = BuildRepository(r);
         }
 
         var name = ctx.Identifier(0).GetText();
         var rootName = ctx.Identifier(1).GetText();
+        var versioned = ctx.VERSIONED() is not null;
 
-        return new AggregateDecl(name, rootName, types, specs) { Span = SpanOf(ctx), Doc = DocFor(ctx) };
+        return new AggregateDecl(name, rootName, types, specs, versioned, repository)
+        {
+            Span = SpanOf(ctx),
+            Doc = DocFor(ctx)
+        };
+    }
+
+    private RepositoryDecl BuildRepository(KoineParser.RepositoryDeclContext ctx)
+    {
+        var operations = ctx.operationsClause() is { } ops
+            ? ops.Identifier().Select(i => i.GetText()).ToList()
+            : null;
+        var finders = ctx.finderDecl().Select(BuildFinder).ToList();
+        return new RepositoryDecl(operations, finders) { Span = SpanOf(ctx) };
+    }
+
+    private static FinderDecl BuildFinder(KoineParser.FinderDeclContext ctx)
+    {
+        var parameters = ctx.paramList() is { } pl
+            ? pl.param().Select(BuildParam).ToList()
+            : new List<Param>();
+        return new FinderDecl(ctx.Identifier().GetText(), parameters, BuildTypeRef(ctx.typeRef()))
+        {
+            Span = SpanOf(ctx)
+        };
     }
 
     private EnumDecl BuildEnum(KoineParser.EnumDeclContext ctx)

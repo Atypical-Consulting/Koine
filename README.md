@@ -84,8 +84,10 @@ context Billing {
 | Construct | Emits |
 |-----------|-------|
 | `value X { … }` | `sealed record` with get-only properties, a validating constructor, value equality |
-| `entity X identified by XId { … }` | `sealed class` with **identity-only** equality + a generated `XId` record wrapping a `Guid` |
-| `aggregate A root R { … }` | nested types in the `<Context>` namespace; the root `R` implements `IAggregateRoot` |
+| `entity X identified by XId { … }` | `sealed class` with **identity-only** equality + a generated `XId` value object (Guid by default; `as natural(String\|Int)` or `as sequence` selects the strategy) |
+| `aggregate A root R { … }` | nested types in the `<Context>` namespace; the root `R` implements `IAggregateRoot`, and an `I<R>Repository` contract is emitted for it |
+| `aggregate A root R versioned { … }` | the root additionally gains a get-only `Version` token; `ConcurrencyConflictException` is emitted into `Koine.Runtime` |
+| `repository { operations: … ; find name(p): List<R>\|R }` | tunes the root's repository — its mutating method set plus intention-revealing async finders |
 | `enum E { … }` | a self-contained **smart enum** (`sealed class`: static instances, `Name`/`Value`, `All`, `FromName`/`FromValue`, value equality, `==`/`!=`) |
 | `name: Type` | a typed property + constructor parameter |
 | `name: Type = const` | a constructor parameter with a default value (an enum default becomes a nullable param coalesced to the smart-enum instance, since it isn't a compile-time constant) |
@@ -165,7 +167,8 @@ this lets a regex literal be read as a single token without colliding with the `
 ### Known limitations (v0)
 
 - **Soft keywords.** Most Koine keywords (`context`, `value`, `quantity`, `entity`, `aggregate`, `enum`,
-  `by`, `root`, `command`, `create`, `spec`, `on`, `service`, `operation`, `policy`, `when`, `if`, …) may now
+  `by`, `root`, `command`, `create`, `spec`, `on`, `service`, `operation`, `policy`, `as`, `natural`,
+  `sequence`, `guid`, `versioned`, `repository`, `operations`, `find`, `when`, `if`, …) may now
   be used as field names, and the declaration keywords additionally as type names and in expressions. The
   mode-switching `matches` and the `invariant` keyword remain reserved; the keywords are *not* usable in the
   few hard-`Identifier` positions (a type/command/state/enum-member name). Like `->`, the factory-initialization
@@ -187,6 +190,14 @@ this lets a regex literal be read as a single token without colliding with the `
   `policy Name when Event then Target.command(args)` emits a handler interface plus an abstract seam — Koine
   records the intended cross-aggregate reaction but never generates the imperative call. A spec referenced
   from inside a service operation body is not yet supported (v0).
+- **Identity strategies, repositories & concurrency.** An entity's identity defaults to a `Guid` wrapper
+  with `New()`; `identified by Sku as natural(String)` emits a value-validated string key (no `New()`),
+  `as natural(Int)` an `int` key, and `as sequence` a store-assigned `long` key. Every aggregate root gets
+  an `I<Root>Repository` (async `GetByIdAsync`/`AddAsync`/`UpdateAsync`/`RemoveAsync`, keyed on its ID); a
+  `repository { operations: add, getById … find byCustomer(c: CustomerId): List<Order> }` block restricts
+  the mutating set and declares typed finders (`List<Root>` → `Task<IReadOnlyList<Root>>`, a single `Root`
+  → `Task<Root?>`). Marking the aggregate `versioned` adds a get-only `Version` token and emits a shared
+  `ConcurrencyConflictException` for optimistic-concurrency enforcement.
 
 ---
 

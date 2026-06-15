@@ -173,6 +173,13 @@ public sealed class ModelIndex
                 case EventDecl ev:
                     foreach (var m in ev.Members) yield return m.Type;
                     break;
+                case AggregateDecl agg when agg.Repository is { } repo:
+                    foreach (var finder in repo.Finders)
+                    {
+                        yield return finder.ResultType;
+                        foreach (var p in finder.Parameters) yield return p.Type;
+                    }
+                    break;
             }
         }
 

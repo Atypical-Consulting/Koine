@@ -96,6 +96,7 @@ public sealed class SemanticValidator
                     ValidateQuantity(v, index, diagnostics);
                 break;
             case EntityDecl e:
+                ValidateIdentityStrategy(e, diagnostics);
                 var entitySpecs = SpecNames(index, e.Name);
                 ValidateMembersAndInvariants(e.Members, e.Invariants, index, resolver, enumMembers, diagnostics, entitySpecs);
                 ValidateStates(e, index, resolver, enumMembers, diagnostics);
@@ -111,6 +112,8 @@ public sealed class SemanticValidator
                         $"unknown aggregate root '{agg.RootName}'", agg.Span.Line, agg.Span.Column));
                 foreach (var nested in agg.Types)
                     ValidateType(nested, index, resolver, enumMembers, diagnostics, agg.RootName);
+                ValidateVersioning(agg, diagnostics);
+                ValidateRepository(agg, index, diagnostics);
                 break;
             case EnumDecl en:
                 // Duplicate enum members produce uncompilable C#.
@@ -420,6 +423,108 @@ public sealed class SemanticValidator
     /// <summary>The synthetic <c>id</c> binding (an entity's identity) for factory scope.</summary>
     private static IEnumerable<KeyValuePair<string, TypeRef>> IdScopePair(EntityDecl entity) =>
         new[] { new KeyValuePair<string, TypeRef>("id", new TypeRef(entity.IdentityName)) };
+
+    /// <summary>
+    /// Validates an entity's identity strategy (R11.1): a <c>natural(T)</c> key must
+    /// wrap a supported primitive (<c>String</c> or <c>Int</c>). Guid and sequence
+    /// strategies carry no backing type and need no check.
+    /// </summary>
+    private static void ValidateIdentityStrategy(EntityDecl entity, List<Diagnostic> diagnostics)
+    {
+        if (entity.IdStrategy != IdentityStrategy.Natural)
+            return;
+        if (entity.IdBackingType is not ("String" or "Int"))
+            diagnostics.Add(Diagnostic.Error(DiagnosticCodes.NaturalIdBackingType,
+                $"natural identity '{entity.IdentityName}' must wrap String or Int, not '{entity.IdBackingType}'",
+                entity.Span.Line, entity.Span.Column));
+    }
+
+    /// <summary>
+    /// Validates a versioned aggregate (R11.4): the generated root carries a synthetic
+    /// <c>Version</c> token, so the root entity must not declare a member that collides
+    /// with it (which would emit a duplicate property, CS0102).
+    /// </summary>
+    private static void ValidateVersioning(AggregateDecl agg, List<Diagnostic> diagnostics)
+    {
+        if (!agg.IsVersioned)
+            return;
+        var root = agg.Types.OfType<EntityDecl>().FirstOrDefault(e => e.Name == agg.RootName);
+        if (root is null)
+            return;
+        foreach (var m in root.Members)
+            if (string.Equals(m.Name, "Version", StringComparison.OrdinalIgnoreCase))
+                diagnostics.Add(Diagnostic.Error(DiagnosticCodes.ReservedVersionMember,
+                    $"member '{m.Name}' collides with the generated 'Version' token of versioned aggregate '{agg.Name}'",
+                    m.Span.Line, m.Span.Column));
+    }
+
+    /// <summary>The operation keywords a <c>repository</c> block may list (R11.3).</summary>
+    private static readonly IReadOnlySet<string> ValidRepositoryOps =
+        new HashSet<string>(StringComparer.Ordinal) { "getById", "add", "update", "remove" };
+
+    /// <summary>
+    /// Validates an aggregate's repository declaration (R11.3): every listed
+    /// operation keyword is known; finder names are unique; finder parameters are
+    /// well-typed with distinct names; and each finder's result type is the
+    /// aggregate root or a <c>List</c> of it.
+    /// </summary>
+    private static void ValidateRepository(AggregateDecl agg, ModelIndex index, List<Diagnostic> diagnostics)
+    {
+        if (agg.Repository is not { } repo)
+            return;
+
+        if (repo.Operations is not null)
+            foreach (var op in repo.Operations)
+                if (!ValidRepositoryOps.Contains(op))
+                    diagnostics.Add(Diagnostic.Error(DiagnosticCodes.UnknownRepositoryOperation,
+                        $"unknown repository operation '{op}' (expected: getById, add, update, remove)",
+                        agg.Span.Line, agg.Span.Column));
+
+        var seenFinders = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var finder in repo.Finders)
+        {
+            if (!seenFinders.Add(finder.Name))
+                diagnostics.Add(Diagnostic.Error(DiagnosticCodes.DuplicateFinder,
+                    $"finder '{finder.Name}' is declared more than once in the repository of '{agg.Name}'",
+                    finder.Span.Line, finder.Span.Column));
+            // A finder emits `<Name>Async`; a name that resolves to a built-in operation
+            // method would declare a duplicate (or confusingly-overloaded) member.
+            else if (ValidRepositoryOps.Any(op => string.Equals(op, finder.Name, StringComparison.OrdinalIgnoreCase)))
+                diagnostics.Add(Diagnostic.Error(DiagnosticCodes.FinderNameCollision,
+                    $"finder '{finder.Name}' collides with the built-in repository operation of the same name",
+                    finder.Span.Line, finder.Span.Column));
+
+            var seenParams = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var p in finder.Parameters)
+            {
+                ValidateTypeRef(p.Type, index, diagnostics);
+                if (!seenParams.Add(p.Name))
+                    diagnostics.Add(Diagnostic.Error(DiagnosticCodes.DuplicateParameter,
+                        $"duplicate parameter '{p.Name}' in finder '{finder.Name}'", p.Span.Line, p.Span.Column));
+                // `ct` is reserved for the generated CancellationToken on every finder method.
+                if (string.Equals(p.Name, "ct", StringComparison.OrdinalIgnoreCase))
+                    diagnostics.Add(Diagnostic.Error(DiagnosticCodes.ReservedFinderParameter,
+                        $"finder parameter '{p.Name}' is reserved; it collides with the generated cancellation token",
+                        p.Span.Line, p.Span.Column));
+            }
+
+            // The result is a single root or a List<root>; anything else can't be a
+            // well-typed lookup over this aggregate.
+            ValidateTypeRef(finder.ResultType, index, diagnostics);
+            var elementName = CSharpListElement(finder.ResultType);
+            if (elementName != agg.RootName)
+                diagnostics.Add(Diagnostic.Error(DiagnosticCodes.FinderResultType,
+                    $"finder '{finder.Name}' must return '{agg.RootName}' or 'List<{agg.RootName}>', not '{finder.ResultType.Name}'",
+                    finder.Span.Line, finder.Span.Column));
+        }
+    }
+
+    /// <summary>
+    /// The root-type name a finder result denotes: the element of a <c>List&lt;T&gt;</c>,
+    /// or the type itself when it is a bare single result.
+    /// </summary>
+    private static string CSharpListElement(TypeRef result) =>
+        result.Name == ModelIndex.ListTypeName ? result.Element?.Name ?? "" : result.Name;
 
     /// <summary>
     /// When the transitioned field has a state machine and the value is a literal

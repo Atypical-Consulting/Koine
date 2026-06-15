@@ -30,6 +30,11 @@ public sealed class CSharpEmitter : IEmitter
     // the single namespace <Context>; aggregates are boundaries, not namespaces.
     private IReadOnlyList<string> _contextNames = Array.Empty<string>();
 
+    // ID type name -> its declared identity strategy (R11.1). An ID referenced but
+    // not owned by any entity (e.g. a foreign-context *Id) defaults to Guid.
+    private IReadOnlyDictionary<string, (IdentityStrategy Strategy, string? Backing)> _idStrategies =
+        new Dictionary<string, (IdentityStrategy, string?)>();
+
     public IReadOnlyList<EmittedFile> Emit(KoineModel model)
     {
         var index = new ModelIndex(model);
@@ -38,6 +43,7 @@ public sealed class CSharpEmitter : IEmitter
         _scalarNeeds = BuildScalarOperatorNeeds(model, index);
         _additiveNeeds = BuildAdditiveOperatorNeeds(model, index);
         _contextNames = model.Contexts.Select(c => c.Name).ToList();
+        _idStrategies = BuildIdentityStrategies(model);
 
         var files = new List<EmittedFile>();
 
@@ -50,6 +56,8 @@ public sealed class CSharpEmitter : IEmitter
             files.Add(EmitRange());
         if (HasEvents(model))
             files.Add(EmitDomainEventInterface());
+        if (HasVersionedAggregate(model))
+            files.Add(EmitConcurrencyConflictException());
 
         // 2. Per-context user types. Aggregate-nested types are flattened into the
         //    context namespace; the aggregate boundary is marked via IAggregateRoot.
@@ -65,7 +73,7 @@ public sealed class CSharpEmitter : IEmitter
                         files.Add(EmitValueObject(vo, ctx.Name, index, typeMapper, enumMemberToType));
                         break;
                     case EntityDecl entity:
-                        EmitEntityAndId(files, entity, ctx.Name, isRoot: false, index, typeMapper, enumMemberToType);
+                        EmitEntityAndId(files, entity, ctx.Name, isRoot: false, isVersioned: false, index, typeMapper, enumMemberToType);
                         break;
                     case EnumDecl @enum:
                         files.Add(EmitEnum(@enum, ctx.Name, index, typeMapper, enumMemberToType));
@@ -80,10 +88,13 @@ public sealed class CSharpEmitter : IEmitter
             }
 
             // Emit any ID value objects that are referenced but NOT owned by an
-            // entity (e.g. ProductId).
+            // entity (e.g. ProductId). Honor the owning entity's strategy when one is
+            // known (a cross-context reference), else default to Guid.
             foreach (var idName in OrderedUnownedIds(ctx, index, idOwnership))
             {
-                files.Add(EmitIdValueObject(idName, ctx.Name));
+                var (strategy, backing) = _idStrategies.TryGetValue(idName, out var s)
+                    ? s : (IdentityStrategy.Guid, null);
+                files.Add(EmitIdValueObject(idName, ctx.Name, strategy, backing));
             }
 
             // 3. R10 behavioral declarations: specifications, services, policies.
@@ -123,7 +134,7 @@ public sealed class CSharpEmitter : IEmitter
                     break;
                 case EntityDecl entity:
                     var isRoot = entity.Name == agg.RootName;
-                    EmitEntityAndId(files, entity, ns, isRoot, index, typeMapper, enumMemberToType);
+                    EmitEntityAndId(files, entity, ns, isRoot, isRoot && agg.IsVersioned, index, typeMapper, enumMemberToType);
                     break;
                 case EnumDecl @enum:
                     files.Add(EmitEnum(@enum, ns, index, typeMapper, enumMemberToType));
@@ -137,7 +148,97 @@ public sealed class CSharpEmitter : IEmitter
                     break;
             }
         }
+
+        // The aggregate root's repository contract (R11.2/R11.3).
+        if (EmitRepository(agg, ns, index, typeMapper) is { } repo)
+            files.Add(repo);
     }
+
+    // ----------------------------------------------------------------------
+    // Repositories (R11.2 / R11.3)
+    // ----------------------------------------------------------------------
+
+    /// <summary>The mutating + query operations a repository exposes when none are listed.</summary>
+    private static readonly IReadOnlyList<string> DefaultRepositoryOps =
+        new[] { "getById", "add", "update", "remove" };
+
+    /// <summary>
+    /// Emits the <c>I&lt;Root&gt;Repository</c> interface for an aggregate: the
+    /// fundamental <c>GetByIdAsync</c> lookup, the configured mutating operations
+    /// (R11.3, default add/update/remove), and any declarative finders. Keyed on the
+    /// root's ID value object. Returns <c>null</c> if the root cannot be resolved
+    /// (already a validation error).
+    /// </summary>
+    private EmittedFile? EmitRepository(AggregateDecl agg, string ns, ModelIndex index, CSharpTypeMapper typeMapper)
+    {
+        var root = agg.Types.OfType<EntityDecl>().FirstOrDefault(e => e.Name == agg.RootName);
+        if (root is null)
+            return null;
+
+        var rootName = root.Name;
+        var idType = root.IdentityName;
+        var ops = agg.Repository?.Operations ?? DefaultRepositoryOps;
+        var finders = agg.Repository?.Finders ?? Array.Empty<FinderDecl>();
+        var iface = $"I{rootName}Repository";
+
+        var sb = new StringBuilder();
+        WriteXmlDoc(sb, $"Persistence-ignorant repository contract for the {rootName} aggregate root.", "");
+        sb.Append("public interface ").Append(iface).Append("\n{\n");
+
+        var first = true;
+        void Gap() { if (!first) sb.Append('\n'); first = false; }
+
+        if (ops.Contains("getById"))
+        {
+            Gap();
+            sb.Append(Indent).Append("Task<").Append(rootName).Append("?> GetByIdAsync(")
+              .Append(idType).Append(" id, CancellationToken ct = default);\n");
+        }
+
+        foreach (var (op, verb) in new[] { ("add", "Add"), ("update", "Update"), ("remove", "Remove") })
+            if (ops.Contains(op))
+            {
+                Gap();
+                // A versioned aggregate enforces the expected Version on a state-changing save.
+                if (agg.IsVersioned && op != "add")
+                    sb.Append(Indent).Append("/// <summary>Enforces the aggregate's expected Version; ")
+                      .Append("throws ConcurrencyConflictException on a stale write.</summary>\n");
+                sb.Append(Indent).Append("Task ").Append(verb).Append("Async(")
+                  .Append(rootName).Append(" aggregate, CancellationToken ct = default);\n");
+            }
+
+        foreach (var finder in finders)
+        {
+            Gap();
+            var isList = finder.ResultType.Name == ModelIndex.ListTypeName;
+            var ret = isList ? $"Task<IReadOnlyList<{rootName}>>" : $"Task<{rootName}?>";
+            var paramList = string.Join(", ", finder.Parameters.Select(p =>
+                $"{typeMapper.Map(p.Type)} {CSharpNaming.ToCamelCase(p.Name)}"));
+            if (paramList.Length > 0)
+                paramList += ", ";
+            sb.Append(Indent).Append(ret).Append(' ')
+              .Append(CSharpNaming.ToPascalCase(finder.Name)).Append("Async(")
+              .Append(paramList).Append("CancellationToken ct = default);\n");
+        }
+
+        sb.Append("}\n");
+        return new EmittedFile($"{FolderFor(ns)}/{iface}.cs", Assemble(ns, sb.ToString(), usesLinq: false));
+    }
+
+    /// <summary>Maps every owned ID type name to its declared identity strategy (R11.1).</summary>
+    private static IReadOnlyDictionary<string, (IdentityStrategy Strategy, string? Backing)> BuildIdentityStrategies(KoineModel model)
+    {
+        var map = new Dictionary<string, (IdentityStrategy, string?)>(StringComparer.Ordinal);
+        foreach (var ctx in model.Contexts)
+            foreach (var t in AllTypeDecls(ctx))
+                if (t is EntityDecl e)
+                    map[e.IdentityName] = (e.IdStrategy, e.IdBackingType);
+        return map;
+    }
+
+    /// <summary>True when any aggregate is declared <c>versioned</c> (gates the concurrency runtime type).</summary>
+    private static bool HasVersionedAggregate(KoineModel model) =>
+        model.Contexts.SelectMany(AllTypeDecls).OfType<AggregateDecl>().Any(a => a.IsVersioned);
 
     // ----------------------------------------------------------------------
     // Value objects
@@ -696,19 +797,22 @@ public sealed class CSharpEmitter : IEmitter
         EntityDecl entity,
         string ns,
         bool isRoot,
+        bool isVersioned,
         ModelIndex index,
         CSharpTypeMapper typeMapper,
         IReadOnlyDictionary<string, string> enumMemberToType)
     {
-        files.Add(EmitEntity(entity, ns, isRoot, index, typeMapper, enumMemberToType));
-        // The entity's own ID value object lives in the same namespace.
-        files.Add(EmitIdValueObject(entity.IdentityName, ns));
+        files.Add(EmitEntity(entity, ns, isRoot, isVersioned, index, typeMapper, enumMemberToType));
+        // The entity's own ID value object lives in the same namespace, generated per
+        // its declared identity strategy (R11.1).
+        files.Add(EmitIdValueObject(entity.IdentityName, ns, entity.IdStrategy, entity.IdBackingType));
     }
 
     private EmittedFile EmitEntity(
         EntityDecl entity,
         string ns,
         bool isRoot,
+        bool isVersioned,
         ModelIndex index,
         CSharpTypeMapper typeMapper,
         IReadOnlyDictionary<string, string> enumMemberToType)
@@ -732,6 +836,15 @@ public sealed class CSharpEmitter : IEmitter
 
         // Identity property first.
         sb.Append(Indent).Append("public ").Append(entity.IdentityName).Append(" Id { get; }\n");
+
+        // Optimistic-concurrency token on a versioned aggregate's root (R11.4). Get-only
+        // but settable at construction by the persistence layer (init); excluded from
+        // identity equality, which is by Id alone.
+        if (isVersioned)
+        {
+            sb.Append(Indent).Append("/// <summary>Optimistic-concurrency token, assigned by the persistence layer.</summary>\n");
+            sb.Append(Indent).Append("public int Version { get; init; }\n");
+        }
 
         // Non-derived member properties. A field mutated by a command gains a
         // private setter; all others stay get-only.
@@ -797,16 +910,58 @@ public sealed class CSharpEmitter : IEmitter
             Assemble(ns, sb.ToString(), EntityUsesLinq(entity) || SpecBodiesUseLinq(entity.Name, index)));
     }
 
-    private EmittedFile EmitIdValueObject(string idName, string ns)
+    /// <summary>
+    /// Emits a strongly-typed identity value object per its strategy (R11.1):
+    /// <list type="bullet">
+    /// <item><b>Guid</b> (default): wraps a <c>Guid</c> with a client-side <c>New()</c>.</item>
+    /// <item><b>Sequence</b>: wraps a store-assigned <c>long</c>; no <c>New()</c>.</item>
+    /// <item><b>Natural(String)</b>: wraps a non-blank <c>string</c>, validated at
+    /// construction; no <c>New()</c>. <b>Natural(Int)</b> wraps an <c>int</c>.</item>
+    /// </list>
+    /// All strategies have value equality on the wrapped <c>Value</c>.
+    /// </summary>
+    private EmittedFile EmitIdValueObject(
+        string idName, string ns,
+        IdentityStrategy strategy = IdentityStrategy.Guid, string? backing = null)
     {
+        var backingType = strategy switch
+        {
+            IdentityStrategy.Sequence => "long",
+            IdentityStrategy.Natural => backing == "Int" ? "int" : "string",
+            _ => "Guid"
+        };
+        var validates = strategy == IdentityStrategy.Natural && backingType == "string";
+
         var sb = new StringBuilder();
 
         sb.Append("/// <summary>A strongly-typed identity value object.</summary>\n");
         sb.Append("public sealed class ").Append(idName).Append(" : ValueObject\n");
         sb.Append("{\n");
-        sb.Append(Indent).Append("public Guid Value { get; }\n\n");
-        sb.Append(Indent).Append("public ").Append(idName).Append("(Guid value) => Value = value;\n\n");
-        sb.Append(Indent).Append("public static ").Append(idName).Append(" New() => new(Guid.NewGuid());\n\n");
+        sb.Append(Indent).Append("public ").Append(backingType).Append(" Value { get; }\n\n");
+
+        if (validates)
+        {
+            // A natural string key cannot be blank — it is the aggregate's real-world identity.
+            sb.Append(Indent).Append("public ").Append(idName).Append("(string value)\n");
+            sb.Append(Indent).Append("{\n");
+            sb.Append(Indent).Append(Indent).Append("if (string.IsNullOrWhiteSpace(value))\n");
+            sb.Append(Indent).Append(Indent).Append(Indent).Append("throw new DomainInvariantViolationException(\n");
+            sb.Append(Indent).Append(Indent).Append(Indent).Append(Indent).Append("type: nameof(").Append(idName).Append("),\n");
+            sb.Append(Indent).Append(Indent).Append(Indent).Append(Indent).Append("rule: \"identity value cannot be blank\");\n");
+            sb.Append(Indent).Append(Indent).Append("Value = value;\n");
+            sb.Append(Indent).Append("}\n\n");
+        }
+        else
+        {
+            sb.Append(Indent).Append("public ").Append(idName).Append('(').Append(backingType)
+              .Append(" value) => Value = value;\n\n");
+        }
+
+        // Only a Guid identity is generated client-side; sequence/natural keys are
+        // supplied by the store or the caller respectively.
+        if (strategy == IdentityStrategy.Guid)
+            sb.Append(Indent).Append("public static ").Append(idName).Append(" New() => new(Guid.NewGuid());\n\n");
+
         sb.Append(Indent).Append("protected override IEnumerable<object?> GetEqualityComponents()\n");
         sb.Append(Indent).Append("{\n");
         sb.Append(Indent).Append(Indent).Append("yield return Value;\n");
@@ -1738,6 +1893,30 @@ public sealed class CSharpEmitter : IEmitter
     }
 
     /// <summary>
+    /// Emits the optimistic-concurrency exception (R11.4) once into Koine.Runtime,
+    /// mirroring <see cref="EmitRuntimeException"/>. A repository's update/remove
+    /// contract throws it when a versioned aggregate is saved against a stale version.
+    /// </summary>
+    private EmittedFile EmitConcurrencyConflictException()
+    {
+        var sb = new StringBuilder();
+        sb.Append("/// <summary>Thrown when a versioned aggregate is saved against a stale expected version.</summary>\n");
+        sb.Append("public sealed class ConcurrencyConflictException : Exception\n");
+        sb.Append("{\n");
+        sb.Append(Indent).Append("public string TypeName { get; }\n");
+        sb.Append(Indent).Append("public int ExpectedVersion { get; }\n");
+        sb.Append(Indent).Append("public int ActualVersion { get; }\n\n");
+        sb.Append(Indent).Append("public ConcurrencyConflictException(string type, int expected, int actual)\n");
+        sb.Append(Indent).Append(Indent)
+          .Append(": base($\"Concurrency conflict on {type}: expected version {expected}, found {actual}.\")\n");
+        sb.Append(Indent).Append("{ TypeName = type; ExpectedVersion = expected; ActualVersion = actual; }\n");
+        sb.Append("}\n");
+
+        return new EmittedFile($"{FolderFor(RuntimeNamespace)}/ConcurrencyConflictException.cs",
+            Assemble(RuntimeNamespace, sb.ToString(), usesLinq: false));
+    }
+
+    /// <summary>
     /// Emits the generic <c>Range&lt;T&gt;</c> value object once into Koine.Runtime: a
     /// closed interval over an orderable <c>T</c> with a <c>start &lt;= end</c> construction
     /// invariant, <c>Contains</c>/<c>Overlaps</c>, and structural equality.
@@ -1881,6 +2060,9 @@ public sealed class CSharpEmitter : IEmitter
              || body.Contains("IReadOnlyDictionary<") || body.Contains("Dictionary<")
              || body.Contains("EqualityComparer<"), "System.Collections.Generic");
         Need(usesLinq, "System.Linq");
+        // Repository contracts (R11.2/3) are async and take a CancellationToken.
+        Need(body.Contains("Task"), "System.Threading.Tasks");
+        Need(body.Contains("CancellationToken"), "System.Threading");
         Need(body.Contains("Regex"), "System.Text.RegularExpressions");
         Need(ns != "Koine.Runtime"
              && (body.Contains("ValueObject") || body.Contains("IAggregateRoot")

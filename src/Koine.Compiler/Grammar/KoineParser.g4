@@ -55,8 +55,13 @@ valueDecl      : VALUE Identifier LBRACE member* invariant* RBRACE ;
 // emitted with unit-checked arithmetic. Mirrors valueDecl's body.
 quantityDecl   : QUANTITY Identifier LBRACE member* invariant* RBRACE ;
 
-entityDecl     : ENTITY Identifier IDENTIFIED BY Identifier
+entityDecl     : ENTITY Identifier IDENTIFIED BY Identifier identityStrategy?
                  LBRACE member* invariant* statesDecl* commandDecl* factoryDecl* RBRACE ;
+
+// How an identity is generated and typed (R11.1). Absent => the default Guid wrapper.
+identityStrategy : AS ( GUID
+                      | SEQUENCE
+                      | NATURAL LPAREN typeName RPAREN ) ;
 
 // ---- State machine (legal transitions of an enum-typed lifecycle field) -----
 
@@ -98,10 +103,24 @@ factoryStmt    : requiresClause
 
 initialization : softName LARROW expression ;                  // `total <- lines.sum(...)`
 
-aggregateDecl  : AGGREGATE Identifier ROOT Identifier LBRACE aggregateMember* RBRACE ;
+// `versioned` marks the root for optimistic concurrency (R11.4).
+aggregateDecl  : AGGREGATE Identifier ROOT Identifier VERSIONED? LBRACE aggregateMember* RBRACE ;
 
-// An aggregate holds its nested types and aggregate-scoped specifications.
-aggregateMember : typeDecl | specDecl ;
+// An aggregate holds its nested types, aggregate-scoped specifications, and an
+// optional repository declaration (R11.3).
+aggregateMember : typeDecl | specDecl | repositoryDecl ;
+
+// ---- Repositories (R11.3) --------------------------------------------------
+
+// At most one `operations:` clause, declared first, then any number of finders.
+// (A second/misplaced clause is a syntax error rather than a silent last-wins.)
+repositoryDecl   : REPOSITORY LBRACE operationsClause? finderDecl* RBRACE ;
+
+// Which mutating operations the repository exposes: `operations: add, getById`.
+operationsClause : OPERATIONS COLON Identifier ( COMMA Identifier )* ;
+
+// A declarative finder: `find byCustomer(customer: CustomerId): List<Order>`.
+finderDecl       : FIND Identifier LPAREN paramList? RPAREN COLON typeRef ;
 
 // An enumeration. Members may carry associated constant data when the enum
 // declares a signature: `enum Currency(symbol: String, decimals: Int) { EUR("€", 2) }`.
@@ -129,7 +148,7 @@ typeRef        : typeName ( LT typeRef ( COMMA typeRef )? GT )? QUESTION? ;
 softName       : Identifier | declKeyword | WHEN | IF | THEN | ELSE ;
 exprName       : Identifier | declKeyword | WHEN ;
 typeName       : Identifier | declKeyword ;
-declKeyword    : CONTEXT | VALUE | QUANTITY | ENTITY | AGGREGATE | ENUM | IDENTIFIED | BY | ROOT | COMMAND | REQUIRES | EVENT | EMIT | STATES | CREATE | SPEC | ON | SERVICE | OPERATION | POLICY ;
+declKeyword    : CONTEXT | VALUE | QUANTITY | ENTITY | AGGREGATE | ENUM | IDENTIFIED | BY | ROOT | COMMAND | REQUIRES | EVENT | EMIT | STATES | CREATE | SPEC | ON | SERVICE | OPERATION | POLICY | AS | NATURAL | SEQUENCE | GUID | VERSIONED | REPOSITORY | OPERATIONS | FIND ;
 
 invariant      : INVARIANT expression StringLiteral? ;
 
