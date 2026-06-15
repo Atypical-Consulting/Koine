@@ -76,7 +76,11 @@ public sealed class KoineModelBuilderVisitor : KoineParserBaseVisitor<object?>
             else if (member.subscribeDecl() is { } sub) subscribes.Add(BuildSubscribe(sub));
         }
 
-        var version = ctx.IntLiteral() is { } v ? int.Parse(v.GetText()) : (int?)null;
+        // `int.TryParse`, not `Parse`: an absurd literal (e.g. `version 99999999999999999999`,
+        // syntactically a valid IntLiteral) must not crash the compiler — treat it as unstamped.
+        var version = ctx.IntLiteral() is { } v && int.TryParse(v.GetText(), out var parsed)
+            ? parsed
+            : (int?)null;
 
         return new ContextNode(
             ctx.Identifier().GetText(), types, specs, services, policies, imports, moduleNames, publishes, subscribes)
@@ -99,8 +103,8 @@ public sealed class KoineModelBuilderVisitor : KoineParserBaseVisitor<object?>
         {
             switch (a.Identifier().GetText())
             {
-                case "since" when a.IntLiteral() is { } iv:
-                    since = int.Parse(iv.GetText());
+                case "since" when a.IntLiteral() is { } iv && int.TryParse(iv.GetText(), out var sv):
+                    since = sv;
                     break;
                 case "deprecated" when a.StringLiteral() is { } sv:
                     deprecated = UnescapeString(StripQuotes(sv.GetText()));
