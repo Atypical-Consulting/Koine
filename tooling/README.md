@@ -49,6 +49,21 @@ koine lsp        # speaks LSP over stdio, pushes textDocument/publishDiagnostics
 It reuses the compiler's `Parse` + semantic validation, so editor diagnostics match `koine build`
 exactly (same messages, same line/column).
 
+### Editor features
+
+Over stdio (LSP), `koine lsp` provides:
+
+- **Diagnostics** — syntax and semantic errors as you type.
+- **Completion** (`Ctrl Space`) — type names after `:`, enum members after `=`, and the declaration
+  keywords valid at the current scope (e.g. `value`/`entity`/`enum` in a context, `operation` in a
+  service). Completion is lexer-based, so it keeps working while the document is mid-edit and not yet
+  parseable.
+- **Hover** — a markdown card showing a type's kind, its members (with full generic types, e.g.
+  `List<OrderLine>`), and its `///` doc comment; enum members and specs are described too.
+- **Go-to-definition** — jump from a type, enum-member, or spec reference to its declaration. (Note:
+  navigation currently lands on the declaration keyword, not the name token; ambiguous enum members —
+  declared in more than one enum — are not navigated.)
+
 ### JetBrains Rider
 
 Rider runs external LSP servers through the **LSP4IJ** plugin.

@@ -223,8 +223,9 @@ generated C# from a real .NET project (`dotnet build demo/Shop.Domain` regenerat
 [`tooling/koine-textmate`](tooling/) is a TextMate grammar for `.koi` that works in **JetBrains Rider**
 and **VS Code** — see [`tooling/README.md`](tooling/README.md) for one-step import.
 
-For **live error squiggles** in the editor, run the bundled language server (`koine lsp`) and point
-Rider at it via the LSP4IJ plugin — setup in [`tooling/README.md`](tooling/README.md#live-diagnostics-language-server).
+For **live error squiggles, code completion, hover docs, and go-to-definition** in the editor, run the
+bundled language server (`koine lsp`) and point Rider at it via the LSP4IJ plugin — setup in
+[`tooling/README.md`](tooling/README.md#live-diagnostics-language-server).
 It reuses the compiler's parser + validator, so editor diagnostics match `koine build`.
 
 ## Roadmap
