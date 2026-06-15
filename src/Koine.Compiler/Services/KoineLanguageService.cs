@@ -11,7 +11,7 @@ public enum CompletionItemKind { Keyword, Class, Enum, EnumMember, Field, Proper
 public sealed record CompletionItem(string Label, CompletionItemKind Kind, string? Detail, string? Documentation);
 
 /// <summary>A hover card: rendered markdown plus the located token's 1-based start.</summary>
-public sealed record HoverResult(string Markdown, SourceSpan Span);
+public sealed record HoverResult(string Markdown);
 
 /// <summary>A go-to-definition target: a single 1-based point (SourceSpan has no end).</summary>
 public sealed record DefinitionResult(SourceSpan Target);
@@ -186,11 +186,7 @@ public sealed class KoineLanguageService
         var index = new ModelIndex(model);
 
         var markdown = RenderHover(name, index);
-        if (markdown is null)
-            return null;
-
-        var span = new SourceSpan(ctx.CurrentToken!.Line, ctx.CurrentToken.Column + 1);
-        return new HoverResult(markdown, span);
+        return markdown is null ? null : new HoverResult(markdown);
     }
 
     public DefinitionResult? DefinitionAt(string source, int line, int character)
