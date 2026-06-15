@@ -98,7 +98,7 @@ public class KoineLanguageServiceTests
             "  value Money { amount: Decimal }\n" +
             "  value Line { price: Money }\n" +
             "}\n";
-        var hover = Svc.HoverAt(src, line: 2, character: 23); // over "Money" (col 22, Contains uses exclusive start)
+        var hover = Svc.HoverAt(src, line: 2, character: 23); // over "Money" (col 22; cursor must land strictly after the token's start column)
         Assert.NotNull(hover);
         Assert.Contains("Money", hover!.Markdown);
         Assert.Contains("Value", hover.Markdown);     // the kind label
@@ -117,5 +117,44 @@ public class KoineLanguageServiceTests
     {
         var src = "context C {\n  value Money { amount: Decimal }\n}\n";
         Assert.Null(Svc.HoverAt(src, line: 0, character: 0));
+    }
+
+    [Fact]
+    public void Hover_renders_generic_member_types_fully()
+    {
+        var src =
+            "context C {\n" +
+            "  value OrderLine { qty: Int }\n" +
+            "  value Basket { lines: List<OrderLine> }\n" +
+            "}\n";
+        var hover = Svc.HoverAt(src, line: 2, character: 9); // over "Basket"
+        Assert.NotNull(hover);
+        Assert.Contains("List<OrderLine>", hover!.Markdown);
+    }
+
+    [Fact]
+    public void Hover_over_enum_member_names_its_enum()
+    {
+        var src =
+            "context C {\n" +
+            "  enum Color { Red, Green }\n" +
+            "  value Paint { c: Color = Red }\n" +
+            "}\n";
+        var hover = Svc.HoverAt(src, line: 2, character: 28); // over "Red"
+        Assert.NotNull(hover);
+        Assert.Contains("enum member of Color", hover!.Markdown);
+    }
+
+    [Fact]
+    public void Hover_over_a_spec_names_its_target()
+    {
+        var src =
+            "context C {\n" +
+            "  value Money { amount: Decimal }\n" +
+            "  spec Positive on Money = amount > 0\n" +
+            "}\n";
+        var hover = Svc.HoverAt(src, line: 2, character: 9); // over "Positive"
+        Assert.NotNull(hover);
+        Assert.Contains("spec on Money", hover!.Markdown);
     }
 }
