@@ -200,7 +200,7 @@ public sealed class KoineLanguageService
         {
             var kind = index.Classify(name);
             var sb = new System.Text.StringBuilder();
-            sb.Append("**").Append(name).Append("** *(").Append(kind).Append(")*");
+            sb.Append("**").Append(name).Append("** *(").Append(KindLabel(kind)).Append(")*");
             AppendBody(sb, decl);
             if (decl.Doc is { Length: > 0 } doc)
                 sb.Append("\n\n").Append(doc);
@@ -215,15 +215,27 @@ public sealed class KoineLanguageService
             return $"**{name}** *(ambiguous enum member — declared in {string.Join(", ", owners)})*";
 
         // 3. A spec.
-        if (index.IsAnySpec(name))
-        {
-            var spec = index.AllSpecs().FirstOrDefault(s => s.Name == name);
-            return spec is null ? null : $"**{name}** *(spec on {spec.TargetType})*";
-        }
+        var spec = index.AllSpecs().FirstOrDefault(s => s.Name == name);
+        if (spec is not null)
+            return $"**{name}** *(spec on {spec.TargetType})*";
 
         // 4. Primitives / collection keywords / ID value objects: minimal card.
         var classified = index.Classify(name);
-        return classified == TypeKind.Unknown ? null : $"**{name}** *({classified})*";
+        return classified == TypeKind.Unknown ? null : $"**{name}** *({KindLabel(classified)})*";
+    }
+
+    private static string KindLabel(TypeKind kind) => kind switch
+    {
+        TypeKind.IdValueObject => "ID value object",
+        _ => kind.ToString(),
+    };
+
+    private static string TypeLabel(TypeRef t)
+    {
+        var name = t.Element is null ? t.Name
+            : t.Value is null ? $"{t.Name}<{TypeLabel(t.Element)}>"
+            : $"{t.Name}<{TypeLabel(t.Element)}, {TypeLabel(t.Value)}>";
+        return t.IsOptional ? name + "?" : name;
     }
 
     private static void AppendBody(System.Text.StringBuilder sb, TypeDecl decl)
@@ -232,22 +244,23 @@ public sealed class KoineLanguageService
         {
             case ValueObjectDecl v:
                 foreach (var m in v.Members)
-                    sb.Append("\n\n`").Append(m.Name).Append(" : ").Append(m.Type.Name).Append('`');
+                    sb.Append("\n\n`").Append(m.Name).Append(" : ").Append(TypeLabel(m.Type)).Append('`');
                 break;
             case EntityDecl e:
                 sb.Append("\n\nidentified by `").Append(e.IdentityName).Append("` (")
                   .Append(e.IdStrategy).Append(')');
                 foreach (var m in e.Members)
-                    sb.Append("\n\n`").Append(m.Name).Append(" : ").Append(m.Type.Name).Append('`');
+                    sb.Append("\n\n`").Append(m.Name).Append(" : ").Append(TypeLabel(m.Type)).Append('`');
                 break;
             case EnumDecl en:
                 sb.Append("\n\n").Append(string.Join(", ", en.MemberNames));
                 break;
             case EventDecl ev:
                 foreach (var m in ev.Members)
-                    sb.Append("\n\n`").Append(m.Name).Append(" : ").Append(m.Type.Name).Append('`');
+                    sb.Append("\n\n`").Append(m.Name).Append(" : ").Append(TypeLabel(m.Type)).Append('`');
                 break;
             case AggregateDecl agg:
+                // Listing the aggregate's owned/nested types is intentionally omitted for now.
                 sb.Append("\n\nroot `").Append(agg.RootName).Append('`');
                 if (agg.IsVersioned) sb.Append(" *(versioned)*");
                 break;
