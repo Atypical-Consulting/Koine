@@ -162,7 +162,7 @@ internal static class TokenLocator
     private static readonly HashSet<string> BlockKeywords = new(StringComparer.Ordinal)
     {
         "context", "value", "quantity", "entity", "aggregate", "enum", "event",
-        "spec", "service", "policy", "readmodel", "query", "repository", "states",
+        "spec", "service", "policy", "repository", "states",
     };
 
     /// <summary>
@@ -389,12 +389,12 @@ public class KoineLanguageServiceTests
     }
 
     [Fact]
-    public void Inside_service_offers_operation_and_usecase_keywords()
+    public void Inside_service_offers_operation_keyword()
     {
         var src = "context C {\n  service S {\n    \n  }\n}\n";
         var items = Complete(src, line: 2, ch: 4);
         Assert.Contains(items, i => i.Label == "operation");
-        Assert.Contains(items, i => i.Label == "usecase");
+        Assert.DoesNotContain(items, i => i.Label == "usecase");
     }
 
     [Fact]
@@ -429,8 +429,8 @@ public enum CompletionItemKind { Keyword, Class, Enum, EnumMember, Field, Proper
 /// <summary>A single completion candidate, free of any LSP/JSON concepts.</summary>
 public sealed record CompletionItem(string Label, CompletionItemKind Kind, string? Detail, string? Documentation);
 
-/// <summary>A hover card: rendered markdown plus the located token's 1-based start.</summary>
-public sealed record HoverResult(string Markdown, SourceSpan Span);
+/// <summary>A hover card: rendered markdown for the symbol under the cursor.</summary>
+public sealed record HoverResult(string Markdown);
 
 /// <summary>A go-to-definition target: a single 1-based point (SourceSpan has no end).</summary>
 public sealed record DefinitionResult(SourceSpan Target);
@@ -451,10 +451,10 @@ public sealed class KoineLanguageService
     // Declaration keywords offered at a statement start, keyed by enclosing scope.
     private static readonly string[] FileStarters = { "context" };
     private static readonly string[] ContextStarters =
-        { "value", "quantity", "entity", "aggregate", "enum", "event", "spec", "service", "policy", "readmodel", "query" };
+        { "value", "quantity", "entity", "aggregate", "enum", "event", "spec", "service", "policy" };
     private static readonly string[] AggregateStarters =
         { "value", "quantity", "entity", "enum", "event", "spec", "repository" };
-    private static readonly string[] ServiceStarters = { "operation", "usecase" };
+    private static readonly string[] ServiceStarters = { "operation" };
     private static readonly string[] RepositoryStarters = { "operations", "find" };
     private static readonly string[] EntityStarters = { "states", "command", "create", "invariant" };
 
@@ -482,7 +482,8 @@ public sealed class KoineLanguageService
         // generic argument list following a type name.
         if (trigger == KoineLexer.COLON
             || trigger == KoineLexer.ON
-            || trigger == KoineLexer.FROM
+            // THEN: precise for policy reactions (then Type.command(...)); may over-offer
+            // types after a conditional 'then' — acceptable, expression-aware completion is out of scope.
             || trigger == KoineLexer.THEN
             || IsGenericArgPosition(ctx, index))
             return TypeCandidates(index);
@@ -529,16 +530,18 @@ public sealed class KoineLanguageService
         }
 
         return index.CandidateTypeNames
-            .Select(name => new CompletionItem(name, KindOf(index.Classify(name)), index.Classify(name).ToString(), null))
+            .Select(name =>
+            {
+                var kind = index.Classify(name);
+                return new CompletionItem(name, KindOf(kind), kind.ToString(), null);
+            })
             .ToList();
     }
 
     private static CompletionItemKind KindOf(TypeKind kind) => kind switch
     {
         TypeKind.Enum => CompletionItemKind.Enum,
-        TypeKind.Value or TypeKind.Entity or TypeKind.Aggregate or TypeKind.Event
-            or TypeKind.ReadModel or TypeKind.Query or TypeKind.IdValueObject => CompletionItemKind.Class,
-        _ => CompletionItemKind.Class,
+        _ => CompletionItemKind.Class, // Value/Entity/Aggregate/Event/IdValueObject/primitives all render as Class
     };
 
     private static string[] StartersFor(string? enclosing) => enclosing switch
@@ -599,7 +602,7 @@ Append these methods to `KoineLanguageServiceTests`:
             "  enum OrderStatus { Draft, Placed, Shipped }\n" +
             "  entity E identified by EId { status: OrderStatus = Dr }\n" +
             "}\n";
-        var items = Svc.CompleteAt(src, line: 2, ch: 54);
+        var items = Complete(src, 2, 55); // partial == "Dr"
         Assert.Contains(items, i => i.Label == "Draft" && i.Kind == CompletionItemKind.EnumMember);
         Assert.DoesNotContain(items, i => i.Label == "Placed");
     }
@@ -607,11 +610,15 @@ Append these methods to `KoineLanguageServiceTests`:
     [Fact]
     public void Member_access_emits_no_property_noise()
     {
-        // Completion after '.' would need expression inference; with no resolvable
-        // receiver we return nothing rather than guessing (the no-noise contract).
-        var src = "context C {\n  value V { a: Int }\n}\n";
-        var items = Svc.CompleteAt(src, line: 1, ch: 17);
-        Assert.DoesNotContain(items, i => i.Kind == CompletionItemKind.Property);
+        // Cursor immediately after '.', before a member name. The DOT trigger
+        // must return nothing rather than guess members (the no-noise contract).
+        var src =
+            "context C {\n" +
+            "  value V { a: Int }\n" +
+            "  spec S on V = v.\n" +
+            "}\n";
+        var items = Complete(src, 2, 18); // one past the '.' on line 2
+        Assert.Empty(items);
     }
 ```
 
@@ -650,8 +657,8 @@ Then add these methods to the class (`TokenContext.TokenBeforePreceding`, define
 
         // Fallback (e.g. the type name is not directly to the left): every enum member
         // declared anywhere — ambiguous, still useful mid-edit.
-        return index.EnumMemberToType.Keys
-            .Select(name => new CompletionItem(name, CompletionItemKind.EnumMember, index.EnumMemberToType[name], null))
+        return index.EnumMemberToType
+            .Select(kvp => new CompletionItem(kvp.Key, CompletionItemKind.EnumMember, kvp.Value, null))
             .ToList();
     }
 ```
@@ -735,11 +742,7 @@ Add to `KoineLanguageService`:
         var index = new ModelIndex(model);
 
         var markdown = RenderHover(name, index);
-        if (markdown is null)
-            return null;
-
-        var span = new SourceSpan(ctx.CurrentToken!.Line, ctx.CurrentToken.Column + 1);
-        return new HoverResult(markdown, span);
+        return markdown is null ? null : new HoverResult(markdown);
     }
 
     private static string? RenderHover(string name, ModelIndex index)
@@ -749,7 +752,7 @@ Add to `KoineLanguageService`:
         {
             var kind = index.Classify(name);
             var sb = new System.Text.StringBuilder();
-            sb.Append("**").Append(name).Append("** *(").Append(kind).Append(")*");
+            sb.Append("**").Append(name).Append("** *(").Append(KindLabel(kind)).Append(")*");
             AppendBody(sb, decl);
             if (decl.Doc is { Length: > 0 } doc)
                 sb.Append("\n\n").Append(doc);
@@ -764,15 +767,28 @@ Add to `KoineLanguageService`:
             return $"**{name}** *(ambiguous enum member — declared in {string.Join(", ", owners)})*";
 
         // 3. A spec.
-        if (index.IsAnySpec(name))
-        {
-            var spec = index.AllSpecs().FirstOrDefault(s => s.Name == name);
-            return spec is null ? null : $"**{name}** *(spec on {spec.TargetType})*";
-        }
+        var spec = index.AllSpecs().FirstOrDefault(s => s.Name == name);
+        if (spec is not null)
+            return $"**{name}** *(spec on {spec.TargetType})*";
 
         // 4. Primitives / collection keywords / ID value objects: minimal card.
         var classified = index.Classify(name);
-        return classified == TypeKind.Unknown ? null : $"**{name}** *({classified})*";
+        return classified == TypeKind.Unknown ? null : $"**{name}** *({KindLabel(classified)})*";
+    }
+
+    private static string KindLabel(TypeKind kind) => kind switch
+    {
+        TypeKind.IdValueObject => "ID value object",
+        _ => kind.ToString(),
+    };
+
+    /// <summary>Renders a type reference with its generic arguments and optionality (e.g. List&lt;OrderLine&gt;, String?).</summary>
+    private static string TypeLabel(TypeRef t)
+    {
+        var name = t.Element is null ? t.Name
+            : t.Value is null ? $"{t.Name}<{TypeLabel(t.Element)}>"
+            : $"{t.Name}<{TypeLabel(t.Element)}, {TypeLabel(t.Value)}>";
+        return t.IsOptional ? name + "?" : name;
     }
 
     private static void AppendBody(System.Text.StringBuilder sb, TypeDecl decl)
@@ -781,34 +797,30 @@ Add to `KoineLanguageService`:
         {
             case ValueObjectDecl v:
                 foreach (var m in v.Members)
-                    sb.Append("\n\n`").Append(m.Name).Append(" : ").Append(m.Type.Name).Append('`');
+                    sb.Append("\n\n`").Append(m.Name).Append(" : ").Append(TypeLabel(m.Type)).Append('`');
                 break;
             case EntityDecl e:
                 sb.Append("\n\nidentified by `").Append(e.IdentityName).Append("` (")
                   .Append(e.IdStrategy).Append(')');
                 foreach (var m in e.Members)
-                    sb.Append("\n\n`").Append(m.Name).Append(" : ").Append(m.Type.Name).Append('`');
+                    sb.Append("\n\n`").Append(m.Name).Append(" : ").Append(TypeLabel(m.Type)).Append('`');
                 break;
             case EnumDecl en:
                 sb.Append("\n\n").Append(string.Join(", ", en.MemberNames));
                 break;
             case EventDecl ev:
                 foreach (var m in ev.Members)
-                    sb.Append("\n\n`").Append(m.Name).Append(" : ").Append(m.Type.Name).Append('`');
+                    sb.Append("\n\n`").Append(m.Name).Append(" : ").Append(TypeLabel(m.Type)).Append('`');
                 break;
             case AggregateDecl agg:
                 sb.Append("\n\nroot `").Append(agg.RootName).Append('`');
                 if (agg.IsVersioned) sb.Append(" *(versioned)*");
                 break;
-            case ReadModelDecl rm:
-                sb.Append("\n\nfrom `").Append(rm.SourceType).Append('`');
-                break;
-            case QueryDecl q:
-                sb.Append("\n\nresult `").Append(q.ResultType.Name).Append('`');
-                break;
         }
     }
 ```
+
+> Note: `readmodel`/`query` are not yet grammar keywords (the AST types `ReadModelDecl`/`QueryDecl` exist but the parser cannot produce them at this base), so they are intentionally omitted from completion starters and hover rendering. Add them when the grammar gains those keywords.
 
 - [ ] **Step 4: Run to verify the hover tests pass**
 
@@ -895,10 +907,12 @@ Add to `KoineLanguageService`:
         if (index.TryGetDecl(name, out var decl) && decl.Span != SourceSpan.None)
             return new DefinitionResult(decl.Span);
 
-        // 2. An enum member -> the member's own span.
-        if (index.EnumMemberToType.TryGetValue(name, out var enumName)
-            && index.TryGetDecl(enumName, out var enumDecl)
-            && enumDecl is EnumDecl e)
+        // 2. An enum member -> the member's own span. Navigate only when the member
+        // name is unambiguous; if two enums declare it, fall through (return null)
+        // rather than jump to an arbitrary one — matches hover's ambiguity handling.
+        var owners = index.EnumsDeclaring(name);
+        if (owners.Count == 1
+            && index.TryGetDecl(owners[0], out var enumDecl) && enumDecl is EnumDecl e)
         {
             var member = e.Members.FirstOrDefault(m => m.Name == name);
             if (member is not null && member.Span != SourceSpan.None)
@@ -906,12 +920,9 @@ Add to `KoineLanguageService`:
         }
 
         // 3. A spec -> its declaration span.
-        if (index.IsAnySpec(name))
-        {
-            var spec = index.AllSpecs().FirstOrDefault(s => s.Name == name);
-            if (spec is not null && spec.Span != SourceSpan.None)
-                return new DefinitionResult(spec.Span);
-        }
+        var spec = index.AllSpecs().FirstOrDefault(s => s.Name == name);
+        if (spec is not null && spec.Span != SourceSpan.None)
+            return new DefinitionResult(spec.Span);
 
         // Primitives, collection keywords, and ID value objects have no node: not navigable.
         return null;
@@ -992,8 +1003,8 @@ In `tests/Koine.Compiler.Tests/LspServerTests.cs`, add these helpers and tests i
     public void Hover_request_returns_markdown()
     {
         var doc = "context C {\n  value Money { amount: Decimal }\n  value Line { price: Money }\n}\n";
-        var output = RunSession(Initialize(), DidOpen("file:///t.koi", doc), Hover("file:///t.koi", 2, 21));
-        Assert.Contains("\"markdown\"", output);
+        var output = RunSession(Initialize(), DidOpen("file:///t.koi", doc), Hover("file:///t.koi", 2, 23));
+        Assert.Contains("\"kind\":\"markdown\"", output);
         Assert.Contains("Money", output);
     }
 
@@ -1001,7 +1012,7 @@ In `tests/Koine.Compiler.Tests/LspServerTests.cs`, add these helpers and tests i
     public void Definition_request_returns_a_range()
     {
         var doc = "context C {\n  value Money { amount: Decimal }\n  value Line { price: Money }\n}\n";
-        var output = RunSession(Initialize(), DidOpen("file:///t.koi", doc), Definition("file:///t.koi", 2, 21));
+        var output = RunSession(Initialize(), DidOpen("file:///t.koi", doc), Definition("file:///t.koi", 2, 23));
         Assert.Contains("\"range\"", output);
         Assert.Contains("file:///t.koi", output);
     }
@@ -1095,15 +1106,18 @@ In the `Loop()` switch, add these cases before the `case "shutdown":` label:
 
 ```csharp
                     case "textDocument/completion":
-                        Respond(root, CompletionResult(root));
+                        if (root.TryGetProperty("id", out _))
+                            Respond(root, CompletionResult(root));
                         break;
 
                     case "textDocument/hover":
-                        Respond(root, HoverResultJson(root));
+                        if (root.TryGetProperty("id", out _))
+                            Respond(root, HoverResultJson(root));
                         break;
 
                     case "textDocument/definition":
-                        Respond(root, DefinitionResultJson(root));
+                        if (root.TryGetProperty("id", out _))
+                            Respond(root, DefinitionResultJson(root));
                         break;
 ```
 
@@ -1167,6 +1181,7 @@ Add these methods to `LspServer` (next to `PublishDiagnostics`):
         var startChar = Math.Max(0, def.Target.Column - 1);
         return new Dictionary<string, object?>
         {
+            // Single-file model: the definition always lives in the requesting document.
             ["uri"] = uri,
             ["range"] = new Dictionary<string, object?>
             {
@@ -1282,5 +1297,5 @@ Run: `dotnet run --project src/Koine.Cli -- lsp` and pipe a framed `initialize` 
 - **Go-to-definition lands on the declaration keyword**, not the name token (`SpanOf` uses `ctx.Start`); the LSP range is zero-width. A precise name-token span is out of scope.
 - **`<`/`,` generic-argument detection is conservative** — mid-expression `<` offers no type completion rather than risking wrong candidates.
 - **Member-access completion needs a successful parse** and a resolvable receiver; it returns nothing on broken documents (no noise) and is intentionally minimal in this iteration.
-- **Ambiguous enum members** (declared in ≥2 enums): completion lists all; hover shows an ambiguous card; definition picks the first deterministically.
+- **Ambiguous enum members** (declared in ≥2 enums): completion lists all; hover shows an ambiguous card; definition returns null (no misleading jump) rather than navigating to an arbitrary owner.
 - Out of scope: signature help, find-references, rename, cross-file/workspace symbols, incremental sync, completion `resolve`.

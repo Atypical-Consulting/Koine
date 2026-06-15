@@ -93,7 +93,7 @@ Driven entirely by `TokenContext`. Rules are evaluated in order; first match win
 3. Else `ModelIndex.IsAnySpec(name)`/`AllSpecs` → spec card with target type + `Doc`.
 4. Else walk `ModelIndex.Model.Contexts[].Services` (and their nested operations/use-cases) and `.Policies` by name — these are not in `ModelIndex._byName`.
 
-**Per-kind body:** Value/Quantity → member list `name : Type` (`MemberAnalysis.IsDerived` tags derived); Entity → identity type + id strategy (+ backing type for `Natural`) + members + command/factory names; Aggregate → root name + versioned flag + nested-type count; Enum → member names (+ signature when it has associated data); Event → members; ReadModel → source type + fields; Query → criteria + result type. Primitives / collection keywords / ID value objects (no `TypeDecl`) render a minimal kind-only card. Returns `null` when the model is null or nothing resolves. `Span` is the located token start.
+**Per-kind body (as shipped):** Value (incl. `quantity`) → member list `name : Type` with full generic types (e.g. `List<OrderLine>`); Entity → identity type + id strategy + members; Enum → member names; Event → members; Aggregate → root name + versioned flag. Primitives / collection keywords / ID value objects (no `TypeDecl`) render a minimal kind-only card (`IdValueObject` shown as "ID value object"). Returns `null` when the model is null or nothing resolves. (`ReadModel`/`Query` bodies and `MemberAnalysis.IsDerived` tagging were dropped — those AST kinds aren't produced by the grammar at this base.)
 
 ## 7. Go-to-definition rules
 
@@ -152,7 +152,7 @@ Returns `null` when the model is null, no decl matches, or the target has no nod
 - **Go-to-definition lands on the declaration keyword**, not the name token (`SpanOf` limitation); range is zero-width. Precise spans deferred.
 - **`LT`/`COMMA` generic-arg vs relational-operator** is not fully lexer-distinguishable; rule 1a is conservative and skips uncertain cases rather than offering wrong candidates.
 - **Member-access completion needs a parsed model** — unavailable on broken docs; returns nothing there rather than guessing.
-- **Ambiguous enum members** (declared in ≥2 enums): completion lists all, hover shows an ambiguous card, definition picks the first deterministically.
+- **Ambiguous enum members** (declared in ≥2 enums): completion lists all, hover shows an ambiguous card, definition returns null (no misleading jump) rather than navigating to an arbitrary owner.
 - **Soft keywords as names**: hover/definition must accept decl-keyword token types as identifiers, not only `Identifier`.
 - **Document cache** must stay consistent with Full-sync text and clear on `didClose` to avoid stale results.
 
