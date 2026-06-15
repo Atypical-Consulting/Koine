@@ -128,6 +128,26 @@ public static class DiagnosticCodes
     public const string AmbiguousReference = "KOI1304";
     public const string ModuleNameCollision = "KOI1305";
 
+    // ---- Context maps, shared kernel, ACL, integration events (KOI1400–1499) ----
+    public const string ContextMapUnknownContext = "KOI1401";
+    public const string DuplicateContextRelation = "KOI1402";
+    public const string SelfRelation = "KOI1403";
+    public const string AclDirectUpstreamReference = "KOI1404";
+    public const string SharedTypesOnNonKernel = "KOI1405";
+    public const string UnknownSharedKernelType = "KOI1406";
+    public const string AclOnNonAclRole = "KOI1407";
+    public const string AclMappingType = "KOI1408";
+    public const string IntegrationEventLeaksInternals = "KOI1409";
+    public const string UnknownPublishedEvent = "KOI1410";
+    public const string DuplicatePublish = "KOI1411";
+    public const string SubscribeUnknownContext = "KOI1412";
+    public const string SubscribeNotPublished = "KOI1413";
+    public const string SubscribeNoRelation = "KOI1414";
+    public const string DuplicateSubscribe = "KOI1415";
+    public const string SharedKernelTypeConflict = "KOI1416";
+    public const string SubscribeHandlerNameCollision = "KOI1417";
+    public const string SharedKernelNotShareable = "KOI1418";
+
     /// <summary>Every code with a one-line description. Tested for uniqueness/coverage.</summary>
     public static readonly IReadOnlyDictionary<string, string> Catalogue = new Dictionary<string, string>
     {
@@ -219,5 +239,23 @@ public static class DiagnosticCodes
         [UnimportedReference] = "A type owned by another context is referenced without importing or qualifying it.",
         [AmbiguousReference] = "An unqualified name is declared in more than one available context; qualify it.",
         [ModuleNameCollision] = "A module shares its name with a type in the same context.",
+        [ContextMapUnknownContext] = "A context-map relation names a context that is not declared.",
+        [DuplicateContextRelation] = "Two relations are declared for the same pair of contexts.",
+        [SelfRelation] = "A context-map relation relates a context to itself.",
+        [AclDirectUpstreamReference] = "An anti-corruption-layer downstream references an upstream type directly instead of via a translated local type.",
+        [SharedTypesOnNonKernel] = "A 'shared-kernel { }' block appears on a relation whose role is not shared-kernel.",
+        [UnknownSharedKernelType] = "A shared-kernel type is declared by neither partner context of the relation.",
+        [AclOnNonAclRole] = "An 'acl { }' block appears on a relation whose role is not anti-corruption-layer.",
+        [AclMappingType] = "An ACL mapping references a context/type that does not match the relation's partners or does not exist.",
+        [IntegrationEventLeaksInternals] = "An integration-event field type references an internal type (entity, value, aggregate, domain event, read model, query).",
+        [UnknownPublishedEvent] = "A 'publishes' declaration names something that is not a locally declared integration event.",
+        [DuplicatePublish] = "A context publishes the same integration event more than once.",
+        [SubscribeUnknownContext] = "A 'subscribes' declaration names a context that is not declared.",
+        [SubscribeNotPublished] = "A 'subscribes' declaration names an event the target context does not publish.",
+        [SubscribeNoRelation] = "A subscribe is not authorized by any open-host, published-language, or customer-supplier relation.",
+        [DuplicateSubscribe] = "A context subscribes to the same event more than once.",
+        [SharedKernelTypeConflict] = "A type is declared as shared by more than one shared-kernel relation.",
+        [SubscribeHandlerNameCollision] = "A context subscribes to two integration events with the same name from different publishers.",
+        [SharedKernelNotShareable] = "A shared-kernel type is an entity or aggregate; only value objects and enums may be shared.",
     };
 }

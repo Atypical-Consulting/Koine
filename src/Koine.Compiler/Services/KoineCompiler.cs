@@ -31,10 +31,10 @@ public sealed class KoineCompiler
     /// <summary>Lexes, parses, and builds the model for a single source. Returns syntax diagnostics only.</summary>
     public (KoineModel? Model, IReadOnlyList<Diagnostic> Diagnostics) Parse(string source, string? file = null)
     {
-        var (contexts, diagnostics) = ParseUnit(source, file);
+        var (contexts, relations, diagnostics) = ParseUnit(source, file);
         if (contexts is null)
             return (null, diagnostics);
-        return (Merge(contexts), diagnostics);
+        return (Merge(contexts, relations), diagnostics);
     }
 
     /// <summary>
@@ -46,23 +46,27 @@ public sealed class KoineCompiler
     {
         var diagnostics = new List<Diagnostic>();
         var contexts = new List<ContextNode>();
+        var relations = new List<ContextRelation>();
         var anyFailed = false;
 
         foreach (var f in files)
         {
-            var (parsed, diags) = ParseUnit(f.Source, f.Path);
+            var (parsed, parsedRelations, diags) = ParseUnit(f.Source, f.Path);
             diagnostics.AddRange(diags);
             if (parsed is null)
                 anyFailed = true;
             else
+            {
                 contexts.AddRange(parsed);
+                relations.AddRange(parsedRelations);
+            }
         }
 
-        return anyFailed ? (null, diagnostics) : (Merge(contexts), diagnostics);
+        return anyFailed ? (null, diagnostics) : (Merge(contexts, relations), diagnostics);
     }
 
-    /// <summary>Parses one source unit into its raw (unmerged) contexts, or null on a syntax error.</summary>
-    private static (IReadOnlyList<ContextNode>? Contexts, IReadOnlyList<Diagnostic> Diagnostics) ParseUnit(string source, string? file)
+    /// <summary>Parses one source unit into its raw (unmerged) contexts and context-map relations, or null on a syntax error.</summary>
+    private static (IReadOnlyList<ContextNode>? Contexts, IReadOnlyList<ContextRelation> Relations, IReadOnlyList<Diagnostic> Diagnostics) ParseUnit(string source, string? file)
     {
         var input = new AntlrInputStream(source);
         var listener = new SyntaxErrorListener(file);
@@ -78,17 +82,20 @@ public sealed class KoineCompiler
 
         var tree = parser.program();
         if (listener.HasErrors)
-            return (null, listener.Errors);
+            return (null, Array.Empty<ContextRelation>(), listener.Errors);
 
         var model = new KoineModelBuilderVisitor(tokens, file).BuildModel(tree);
-        return (model.Contexts, Array.Empty<Diagnostic>());
+        var relations = model.ContextMap?.Relations ?? Array.Empty<ContextRelation>();
+        return (model.Contexts, relations, Array.Empty<Diagnostic>());
     }
 
     /// <summary>
     /// Merges same-named contexts into one (open/additive contexts, R13.1), preserving
-    /// first-seen order. Declarations, imports, specs, services and policies concatenate.
+    /// first-seen order. Declarations, imports, specs, services, policies, and integration-event
+    /// publish/subscribe wiring concatenate; context-map relations from every file combine into one
+    /// model-level map (R14).
     /// </summary>
-    private static KoineModel Merge(IReadOnlyList<ContextNode> contexts)
+    private static KoineModel Merge(IReadOnlyList<ContextNode> contexts, IReadOnlyList<ContextRelation> relations)
     {
         var order = new List<string>();
         var byName = new Dictionary<string, ContextNode>(StringComparer.Ordinal);
@@ -105,6 +112,8 @@ public sealed class KoineCompiler
                     Services = existing.Services.Concat(ctx.Services).ToList(),
                     Policies = existing.Policies.Concat(ctx.Policies).ToList(),
                     ModuleNames = existing.ModuleNames.Concat(ctx.ModuleNames).ToList(),
+                    Publishes = existing.Publishes.Concat(ctx.Publishes).ToList(),
+                    Subscribes = existing.Subscribes.Concat(ctx.Subscribes).ToList(),
                     Doc = existing.Doc ?? ctx.Doc
                 };
             }
@@ -115,7 +124,8 @@ public sealed class KoineCompiler
             }
         }
 
-        return new KoineModel(order.Select(n => byName[n]).ToList());
+        var map = relations.Count == 0 ? null : new ContextMapNode(relations.ToList());
+        return new KoineModel(order.Select(n => byName[n]).ToList(), map);
     }
 
     /// <summary>

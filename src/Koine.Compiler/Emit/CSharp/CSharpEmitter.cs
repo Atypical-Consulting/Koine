@@ -54,12 +54,16 @@ public sealed class CSharpEmitter : IEmitter
         // 1. Runtime support, emitted once.
         files.Add(EmitRuntimeException());
         files.Add(EmitAggregateRootInterface());
-        if (NeedsValueObjects(model))
+        // Value-object base is needed for declared value objects/entities AND for any generated
+        // ID value object (e.g. an *Id referenced only by an integration event, R14.3).
+        if (NeedsValueObjects(model) || index.IdTypeNames.Count > 0)
             files.Add(EmitValueObjectBase());
         if (UsesRange(model))
             files.Add(EmitRange());
         if (HasEvents(model))
             files.Add(EmitDomainEventInterface());
+        if (HasIntegrationEvents(model))
+            files.Add(EmitIntegrationEventInterface());
         if (HasVersionedAggregate(model))
             files.Add(EmitConcurrencyConflictException());
         if (HasQueries(model))
@@ -73,8 +77,18 @@ public sealed class CSharpEmitter : IEmitter
 
             foreach (var type in ctx.Types)
             {
-                // A type emits into its context namespace, extended by its module path (R13.3).
-                var ns = ModelIndex.NamespaceOf(ctx.Name, type.ModulePath);
+                // A shared-kernel type (R14.2) is emitted once, by its owning context, into the
+                // dedicated kernel namespace; any other partner skips it (it lives in the kernel).
+                if (index.IsSharedKernelType(type.Name))
+                {
+                    if (index.KernelOwnerOfType(type.Name) != ctx.Name)
+                        continue;
+                }
+
+                // A type emits into its context namespace, extended by its module path (R13.3),
+                // unless it is a shared-kernel type redirected to the kernel namespace (R14.2).
+                var ns = index.KernelNamespaceOfType(type.Name)
+                         ?? ModelIndex.NamespaceOf(ctx.Name, type.ModulePath);
                 switch (type)
                 {
                     case ValueObjectDecl vo:
@@ -88,6 +102,9 @@ public sealed class CSharpEmitter : IEmitter
                         break;
                     case EventDecl @event:
                         files.Add(EmitEvent(@event, ns, index, typeMapper, enumMemberToType));
+                        break;
+                    case IntegrationEventDecl @event:
+                        files.Add(EmitIntegrationEvent(@event, ns, index, typeMapper, enumMemberToType));
                         break;
                     case AggregateDecl agg:
                         EmitAggregate(files, agg, ns, index, typeMapper, enumMemberToType);
@@ -129,7 +146,12 @@ public sealed class CSharpEmitter : IEmitter
             foreach (var policy in ctx.Policies)
                 files.Add(EmitPolicy(policy, ctx.Name, index, enumMemberToType));
 
-            // 4. The context's Unit of Work (R12.1): a transactional seam over its
+            // 4. Integration-event subscriber handler seams (R14.3): one IHandle<Event> per
+            //    subscription. No handler is generated for events the context only publishes.
+            foreach (var sub in ctx.Subscribes)
+                files.Add(EmitIntegrationEventHandler(sub, ctx.Name, index));
+
+            // 5. The context's Unit of Work (R12.1): a transactional seam over its
             //    aggregate repositories. Emitted only when the context has aggregates whose
             //    root is an entity (only those produce a repository to expose).
             var aggregates = ctx.Types.OfType<AggregateDecl>()
@@ -138,6 +160,13 @@ public sealed class CSharpEmitter : IEmitter
             if (aggregates.Count > 0)
                 files.Add(EmitUnitOfWork(ctx.Name, aggregates));
         }
+
+        // 6. Anti-corruption-layer translator interfaces (R14.2): one per ACL relation that
+        //    carries a mapping block. Emitted once, into the downstream context's namespace.
+        if (model.ContextMap is { } map)
+            foreach (var r in map.Relations)
+                if (r.Kind == ContextRelationKind.AntiCorruptionLayer && r.AclMappings.Count > 0)
+                    files.Add(EmitAclTranslator(r, index));
 
         return files;
     }
@@ -171,6 +200,9 @@ public sealed class CSharpEmitter : IEmitter
                     break;
                 case EventDecl @event:
                     files.Add(EmitEvent(@event, ns, index, typeMapper, enumMemberToType));
+                    break;
+                case IntegrationEventDecl @event:
+                    files.Add(EmitIntegrationEvent(@event, ns, index, typeMapper, enumMemberToType));
                     break;
                 case AggregateDecl nested:
                     // Nested aggregates are not part of v0 fixtures, but recurse safely.
@@ -1284,6 +1316,9 @@ public sealed class CSharpEmitter : IEmitter
     private static bool HasEvents(KoineModel model) =>
         model.Contexts.SelectMany(AllTypeDecls).Any(t => t is EventDecl);
 
+    private static bool HasIntegrationEvents(KoineModel model) =>
+        model.Contexts.SelectMany(AllTypeDecls).Any(t => t is IntegrationEventDecl);
+
     /// <summary>
     /// True when any field or command/factory parameter anywhere in the model
     /// references a <c>Range&lt;T&gt;</c>, gating emission of the runtime range type.
@@ -1374,6 +1409,109 @@ public sealed class CSharpEmitter : IEmitter
         sb.Append("}\n");
         return new EmittedFile($"{FolderFor(ns)}/{ev.Name}.cs",
             Assemble(ns, sb.ToString(), UsesLinq(ev.Members, Array.Empty<Invariant>())));
+    }
+
+    /// <summary>
+    /// Emits an integration event (R14.3): an immutable record marked <c>IIntegrationEvent</c>,
+    /// mirroring <see cref="EmitEvent"/> but with the cross-boundary marker.
+    /// </summary>
+    private EmittedFile EmitIntegrationEvent(
+        IntegrationEventDecl ev,
+        string ns,
+        ModelIndex index,
+        CSharpTypeMapper typeMapper,
+        IReadOnlyDictionary<string, string> enumMemberToType)
+    {
+        var memberNames = new HashSet<string>(ev.Members.Select(m => m.Name), StringComparer.Ordinal);
+        var translator = new CSharpExpressionTranslator(index, ev.Members, enumMemberToType, context: ContextOf(ns));
+        var ctorMembers = ev.Members.Where(m => !MemberAnalysis.IsDerived(m, memberNames)).ToList();
+        var derived = ev.Members.Where(m => MemberAnalysis.IsDerived(m, memberNames)).ToList();
+
+        var sb = new StringBuilder();
+
+        WriteXmlDoc(sb, ev.Doc, "");
+        sb.Append("public sealed record ").Append(ev.Name).Append(" : IIntegrationEvent\n{\n");
+
+        foreach (var m in ctorMembers)
+        {
+            var csType = typeMapper.Map(m.Type, out var comment);
+            WriteXmlDoc(sb, m.Doc, Indent);
+            sb.Append(Indent).Append("public ").Append(csType).Append(' ')
+              .Append(CSharpNaming.ToPascalCase(m.Name)).Append(" { get; }");
+            AppendComment(sb, comment);
+            sb.Append('\n');
+        }
+
+        // Occurrence metadata, defaulted at construction (part of value equality).
+        sb.Append(Indent).Append("public DateTimeOffset OccurredOn { get; init; } = DateTimeOffset.UtcNow;\n");
+
+        sb.Append('\n');
+        WriteConstructor(sb, ev.Name, ctorMembers, Array.Empty<Invariant>(), memberNames, translator, typeMapper, enumMemberToType, index);
+
+        foreach (var m in derived)
+        {
+            var csType = typeMapper.Map(m.Type);
+            var body = translator.TranslateTopLevel(m.Initializer!, CSharpExpressionTranslator.NameMode.Property, EnumExpected(m, index));
+            sb.Append('\n');
+            WriteXmlDoc(sb, m.Doc, Indent);
+            sb.Append(Indent).Append("public ").Append(csType).Append(' ')
+              .Append(CSharpNaming.ToPascalCase(m.Name)).Append(" => ").Append(body).Append(";\n");
+        }
+
+        sb.Append("}\n");
+        return new EmittedFile($"{FolderFor(ns)}/{ev.Name}.cs",
+            Assemble(ns, sb.ToString(), UsesLinq(ev.Members, Array.Empty<Invariant>())));
+    }
+
+    /// <summary>
+    /// Emits the subscriber handler seam for a subscription (R14.3): an <c>IHandle&lt;Event&gt;</c>
+    /// interface in the subscriber's namespace, with a precise <c>using</c> to the publisher.
+    /// </summary>
+    private EmittedFile EmitIntegrationEventHandler(SubscribeDecl sub, string subscriberContext, ModelIndex index)
+    {
+        // Fully-qualify the event type with the publisher's namespace so it can never bind to a
+        // same-named integration event the subscriber happens to declare locally (R14.3).
+        var publisherNs = index.NamespaceOfTypeIn(sub.Context, sub.EventName) ?? sub.Context;
+        var eventType = publisherNs + "." + sub.EventName;
+        var sb = new StringBuilder();
+
+        sb.Append("/// <summary>Handles the ").Append(sub.Context).Append('.').Append(sub.EventName)
+          .Append(" integration event published by context ").Append(sub.Context).Append(".</summary>\n");
+        sb.Append("public interface IHandle").Append(sub.EventName).Append("\n{\n");
+        sb.Append(Indent).Append("Task Handle(").Append(eventType).Append(" theEvent, CancellationToken ct = default);\n");
+        sb.Append("}\n");
+
+        return new EmittedFile($"{FolderFor(subscriberContext)}/IHandle{sub.EventName}.cs",
+            Assemble(subscriberContext, sb.ToString(), usesLinq: false));
+    }
+
+    /// <summary>
+    /// Emits the anti-corruption-layer translator interface (R14.2): <c>I&lt;Up&gt;To&lt;Down&gt;Translator</c>
+    /// in the downstream context, with one fully-qualified <c>Translate</c> per ACL mapping.
+    /// </summary>
+    private EmittedFile EmitAclTranslator(ContextRelation r, ModelIndex index)
+    {
+        var iface = $"I{r.Upstream}To{r.Downstream}Translator";
+        var sb = new StringBuilder();
+
+        // Fully-qualify each mapped type with the namespace it ACTUALLY emits into (which may be a
+        // module sub-namespace or a shared-kernel namespace), not the bare context name (R14.2).
+        string Fqn(string context, string type) =>
+            (index.NamespaceOfTypeIn(context, type) ?? context) + "." + type;
+
+        sb.Append("/// <summary>Anti-corruption translator from upstream context ").Append(r.Upstream)
+          .Append(" into ").Append(r.Downstream).Append(".</summary>\n");
+        sb.Append("public interface ").Append(iface).Append("\n{\n");
+        foreach (var m in r.AclMappings)
+            sb.Append(Indent)
+              .Append(Fqn(m.LocalContext, m.LocalType))
+              .Append(" Translate(")
+              .Append(Fqn(m.UpstreamContext, m.UpstreamType))
+              .Append(" source);\n");
+        sb.Append("}\n");
+
+        return new EmittedFile($"{FolderFor(r.Downstream)}/{iface}.cs",
+            Assemble(r.Downstream, sb.ToString(), usesLinq: false));
     }
 
     // ----------------------------------------------------------------------
@@ -2103,6 +2241,19 @@ public sealed class CSharpEmitter : IEmitter
             Assemble(RuntimeNamespace, sb.ToString(), usesLinq: false));
     }
 
+    /// <summary>Emits the <c>IIntegrationEvent</c> published-language marker once into Koine.Runtime (R14.3).</summary>
+    private EmittedFile EmitIntegrationEventInterface()
+    {
+        var sb = new StringBuilder();
+        sb.Append("/// <summary>A stable, cross-boundary published-language contract between bounded contexts.</summary>\n");
+        sb.Append("public interface IIntegrationEvent\n");
+        sb.Append("{\n");
+        sb.Append(Indent).Append("DateTimeOffset OccurredOn { get; }\n");
+        sb.Append("}\n");
+        return new EmittedFile($"{FolderFor(RuntimeNamespace)}/IIntegrationEvent.cs",
+            Assemble(RuntimeNamespace, sb.ToString(), usesLinq: false));
+    }
+
     /// <summary>
     /// Emits the optimistic-concurrency exception (R11.4) once into Koine.Runtime,
     /// mirroring <see cref="EmitRuntimeException"/>. A repository's update/remove
@@ -2277,7 +2428,8 @@ public sealed class CSharpEmitter : IEmitter
         Need(body.Contains("Regex"), "System.Text.RegularExpressions");
         Need(ns != "Koine.Runtime"
              && (body.Contains("ValueObject") || body.Contains("IAggregateRoot")
-                 || body.Contains("IDomainEvent") || body.Contains("DomainInvariantViolationException")
+                 || body.Contains("IDomainEvent") || body.Contains("IIntegrationEvent")
+                 || body.Contains("DomainInvariantViolationException")
                  || body.Contains("Range<")), "Koine.Runtime");
 
         // Cross-namespace user-type references (other contexts via imports, and other
@@ -2287,6 +2439,11 @@ public sealed class CSharpEmitter : IEmitter
         var context = ns.Split('.')[0];
         if (_contextNames.Contains(context))
             foreach (var (name, typeNs) in _index.VisibleTypeNamespaces(context))
+                Need(typeNs != ns && ContainsWord(body, name), typeNs);
+        // A shared-kernel file lives in a synthetic namespace (not a real context); resolve its
+        // cross-namespace references against its partner contexts' visible types (R14.2).
+        else if (_index.IsKernelNamespace(ns))
+            foreach (var (name, typeNs) in _index.KernelVisibleTypeNamespaces(ns))
                 Need(typeNs != ns && ContainsWord(body, name), typeNs);
 
         var sb = new StringBuilder();
