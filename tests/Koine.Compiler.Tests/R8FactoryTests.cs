@@ -306,7 +306,7 @@ public class R8FactoryTests
         var (asm, errors) = TestSupport.Compile(result.Files);
         Assert.True(asm is not null, "generated C# failed to compile:\n" + string.Join("\n", errors));
 
-        var orderType = asm!.GetType("Sales.Order")!;
+        var orderType = asm.GetType("Sales.Order")!;
         var customerId = asm.GetType("Sales.CustomerId")!;
         var lineT = asm.GetType("Sales.OrderLine")!;
         var productId = asm.GetType("Sales.ProductId")!;

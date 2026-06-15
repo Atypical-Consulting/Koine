@@ -58,6 +58,8 @@ public sealed class CSharpEmitter : IEmitter
             files.Add(EmitDomainEventInterface());
         if (HasVersionedAggregate(model))
             files.Add(EmitConcurrencyConflictException());
+        if (HasQueries(model))
+            files.Add(EmitQueryHandlerInterface());
 
         // 2. Per-context user types. Aggregate-nested types are flattened into the
         //    context namespace; the aggregate boundary is marked via IAggregateRoot.
@@ -84,6 +86,12 @@ public sealed class CSharpEmitter : IEmitter
                     case AggregateDecl agg:
                         EmitAggregate(files, agg, ctx.Name, index, typeMapper, enumMemberToType);
                         break;
+                    case ReadModelDecl rm:
+                        files.Add(EmitReadModel(rm, ctx.Name, index, typeMapper, enumMemberToType));
+                        break;
+                    case QueryDecl query:
+                        files.Add(EmitQuery(query, ctx.Name, typeMapper));
+                        break;
                 }
             }
 
@@ -104,9 +112,25 @@ public sealed class CSharpEmitter : IEmitter
             if (contextSpecs.Count > 0)
                 files.Add(EmitSpecifications(ctx.Name, contextSpecs, index, typeMapper, enumMemberToType));
             foreach (var svc in ctx.Services)
-                files.Add(EmitService(svc, ctx.Name, index, typeMapper, enumMemberToType));
+            {
+                // A service emits a stateless domain class for its pure operations (R10.2)
+                // and/or an application-service interface for its use cases (R12.2).
+                if (svc.Operations.Count > 0)
+                    files.Add(EmitService(svc, ctx.Name, index, typeMapper, enumMemberToType));
+                if (svc.UseCases.Count > 0)
+                    files.Add(EmitApplicationService(svc, ctx.Name, typeMapper));
+            }
             foreach (var policy in ctx.Policies)
                 files.Add(EmitPolicy(policy, ctx.Name, index, enumMemberToType));
+
+            // 4. The context's Unit of Work (R12.1): a transactional seam over its
+            //    aggregate repositories. Emitted only when the context has aggregates whose
+            //    root is an entity (only those produce a repository to expose).
+            var aggregates = ctx.Types.OfType<AggregateDecl>()
+                .Where(a => a.Types.OfType<EntityDecl>().Any(e => e.Name == a.RootName))
+                .ToList();
+            if (aggregates.Count > 0)
+                files.Add(EmitUnitOfWork(ctx.Name, aggregates));
         }
 
         return files;
@@ -239,6 +263,178 @@ public sealed class CSharpEmitter : IEmitter
     /// <summary>True when any aggregate is declared <c>versioned</c> (gates the concurrency runtime type).</summary>
     private static bool HasVersionedAggregate(KoineModel model) =>
         model.Contexts.SelectMany(AllTypeDecls).OfType<AggregateDecl>().Any(a => a.IsVersioned);
+
+    // ----------------------------------------------------------------------
+    // Application services, read models, CQRS (R12)
+    // ----------------------------------------------------------------------
+
+    /// <summary>
+    /// Emits the context's <c>IUnitOfWork</c> (R12.1): a repository property per aggregate
+    /// (in declaration order) plus <c>SaveChangesAsync</c>. A pure abstraction — no
+    /// infrastructure type appears.
+    /// </summary>
+    private EmittedFile EmitUnitOfWork(string ns, IReadOnlyList<AggregateDecl> aggregates)
+    {
+        var sb = new StringBuilder();
+        WriteXmlDoc(sb, "Transactional boundary over this context's aggregate repositories.", "");
+        sb.Append("public interface IUnitOfWork\n{\n");
+        foreach (var agg in aggregates)
+            sb.Append(Indent).Append('I').Append(agg.RootName).Append("Repository ")
+              .Append(Pluralize(agg.RootName)).Append(" { get; }\n");
+        sb.Append('\n');
+        sb.Append(Indent).Append("Task<int> SaveChangesAsync(CancellationToken ct = default);\n");
+        sb.Append("}\n");
+        return new EmittedFile($"{FolderFor(ns)}/IUnitOfWork.cs", Assemble(ns, sb.ToString(), usesLinq: false));
+    }
+
+    /// <summary>
+    /// Emits a service's application boundary (R12.2): an <c>I&lt;Name&gt;</c> interface with one
+    /// async method per use case (<c>Task</c> or <c>Task&lt;Result&gt;</c>), inputs mapped through
+    /// the type mapper.
+    /// </summary>
+    private EmittedFile EmitApplicationService(ServiceDecl svc, string ns, CSharpTypeMapper typeMapper)
+    {
+        var iface = "I" + svc.Name;
+        var sb = new StringBuilder();
+        WriteXmlDoc(sb, svc.Doc ?? $"Application-service boundary for the {svc.Name} use cases.", "");
+        sb.Append("public interface ").Append(iface).Append("\n{\n");
+
+        var first = true;
+        foreach (var uc in svc.UseCases)
+        {
+            if (!first) sb.Append('\n');
+            first = false;
+            WriteXmlDoc(sb, uc.Doc, Indent);
+            var ret = uc.ReturnType is null ? "Task" : $"Task<{typeMapper.Map(uc.ReturnType)}>";
+            var paramList = string.Join(", ", uc.Parameters.Select(p =>
+                $"{typeMapper.Map(p.Type)} {CSharpNaming.ToCamelCase(p.Name)}"));
+            sb.Append(Indent).Append(ret).Append(' ').Append(CSharpNaming.ToPascalCase(uc.Name))
+              .Append('(').Append(paramList).Append(");\n");
+        }
+
+        sb.Append("}\n");
+        return new EmittedFile($"{FolderFor(ns)}/{iface}.cs", Assemble(ns, sb.ToString(), usesLinq: false));
+    }
+
+    /// <summary>
+    /// Emits a read model (R12.3): a value-equal <c>sealed record</c> of the projected
+    /// fields plus a static <c>To&lt;Name&gt;(this Source src)</c> mapper. Direct fields map to
+    /// the source property; derived fields translate their projection (rooted at <c>src</c>).
+    /// </summary>
+    private EmittedFile EmitReadModel(
+        ReadModelDecl rm,
+        string ns,
+        ModelIndex index,
+        CSharpTypeMapper typeMapper,
+        IReadOnlyDictionary<string, string> enumMemberToType)
+    {
+        var sourceMembers = ReadModelSourceMembers(rm.SourceType, index);
+        var translator = new CSharpExpressionTranslator(index, sourceMembers, enumMemberToType, memberReceiver: "src");
+
+        var fields = new List<(string CsType, string Prop, string Rhs)>();
+        foreach (var f in rm.Fields)
+        {
+            var prop = CSharpNaming.ToPascalCase(f.Name);
+            string csType, rhs;
+            if (f.Projection is null)
+            {
+                // Direct field: type and value come from the like-named source member.
+                csType = index.TryGetMemberType(rm.SourceType, f.Name, out var t) ? typeMapper.Map(t) : "object";
+                rhs = $"src.{prop}";
+            }
+            else
+            {
+                csType = typeMapper.Map(f.Type!);
+                var expectedEnum = index.Classify(f.Type!.Name) == TypeKind.Enum ? f.Type!.Name : null;
+                rhs = translator.TranslateTopLevel(f.Projection, CSharpExpressionTranslator.NameMode.Property, expectedEnum);
+            }
+            fields.Add((csType, prop, rhs));
+        }
+
+        var sb = new StringBuilder();
+        WriteXmlDoc(sb, rm.Doc, "");
+        sb.Append("public sealed record ").Append(rm.Name).Append('(')
+          .Append(string.Join(", ", fields.Select(f => $"{f.CsType} {f.Prop}"))).Append(");\n\n");
+
+        WriteXmlDoc(sb, $"Projects {rm.SourceType} to {rm.Name}.", "");
+        sb.Append("public static class ").Append(rm.Name).Append("Projection\n{\n");
+        sb.Append(Indent).Append("public static ").Append(rm.Name).Append(" To").Append(rm.Name)
+          .Append("(this ").Append(rm.SourceType).Append(" src) =>\n");
+        sb.Append(Indent).Append(Indent).Append("new ").Append(rm.Name).Append('(')
+          .Append(string.Join(", ", fields.Select(f => f.Rhs))).Append(");\n");
+        sb.Append("}\n");
+
+        var usesLinq = rm.Fields.Any(f => f.Projection is not null && ExprUsesLinq(f.Projection));
+        return new EmittedFile($"{FolderFor(ns)}/{rm.Name}.cs", Assemble(ns, sb.ToString(), usesLinq));
+    }
+
+    /// <summary>
+    /// The members a read model projects from (entities add the synthetic <c>id</c>, unless
+    /// the entity already declares its own <c>id</c> member).
+    /// </summary>
+    private static IReadOnlyList<Member> ReadModelSourceMembers(string sourceType, ModelIndex index)
+    {
+        if (!index.TryGetDecl(sourceType, out var decl))
+            return Array.Empty<Member>();
+        return decl switch
+        {
+            ValueObjectDecl v => v.Members,
+            EntityDecl e => e.Members.Any(m => string.Equals(m.Name, "id", StringComparison.OrdinalIgnoreCase))
+                ? e.Members
+                : e.Members.Append(new Member("id", new TypeRef(e.IdentityName), null)).ToList(),
+            _ => Array.Empty<Member>()
+        };
+    }
+
+    /// <summary>
+    /// Emits a query object (R12.4): a <c>sealed record</c> carrying the criteria, handled via
+    /// the generic runtime <c>IQueryHandler&lt;TQuery,TResult&gt;</c> (named in its doc).
+    /// </summary>
+    private EmittedFile EmitQuery(QueryDecl q, string ns, CSharpTypeMapper typeMapper)
+    {
+        var isList = q.ResultType.Name == ModelIndex.ListTypeName;
+        var resultName = isList ? q.ResultType.Element!.Name : q.ResultType.Name;
+        var resultType = isList ? $"IReadOnlyList<{resultName}>" : resultName;
+
+        var sb = new StringBuilder();
+        WriteXmlDoc(sb, q.Doc ?? $"Query returning {resultType}; implement IQueryHandler<{q.Name}, {resultType}>.", "");
+        var criteria = string.Join(", ", q.Criteria.Select(p =>
+            $"{typeMapper.Map(p.Type)} {CSharpNaming.ToPascalCase(p.Name)}"));
+        sb.Append("public sealed record ").Append(q.Name).Append('(').Append(criteria).Append(");\n");
+
+        return new EmittedFile($"{FolderFor(ns)}/{q.Name}.cs", Assemble(ns, sb.ToString(), usesLinq: false));
+    }
+
+    /// <summary>True when the model declares any query object (gates the query-handler runtime type).</summary>
+    private static bool HasQueries(KoineModel model) =>
+        model.Contexts.SelectMany(AllTypeDecls).OfType<QueryDecl>().Any();
+
+    /// <summary>Emits the generic <c>IQueryHandler&lt;TQuery,TResult&gt;</c> once into Koine.Runtime (R12.4).</summary>
+    private EmittedFile EmitQueryHandlerInterface()
+    {
+        var sb = new StringBuilder();
+        sb.Append("/// <summary>Handles a query object, returning its typed result.</summary>\n");
+        sb.Append("public interface IQueryHandler<TQuery, TResult>\n{\n");
+        sb.Append(Indent).Append("Task<TResult> HandleAsync(TQuery query, CancellationToken ct = default);\n");
+        sb.Append("}\n");
+        return new EmittedFile($"{FolderFor(RuntimeNamespace)}/IQueryHandler.cs",
+            Assemble(RuntimeNamespace, sb.ToString(), usesLinq: false));
+    }
+
+    /// <summary>A small English pluralizer for repository property names (Order -&gt; Orders, Category -&gt; Categories).</summary>
+    private static string Pluralize(string name)
+    {
+        if (name.Length == 0)
+            return name;
+        if (name.EndsWith("s", StringComparison.Ordinal) || name.EndsWith("x", StringComparison.Ordinal)
+            || name.EndsWith("z", StringComparison.Ordinal) || name.EndsWith("ch", StringComparison.Ordinal)
+            || name.EndsWith("sh", StringComparison.Ordinal))
+            return name + "es";
+        if (name.Length >= 2 && char.ToLowerInvariant(name[^1]) == 'y'
+            && "aeiou".IndexOf(char.ToLowerInvariant(name[^2])) < 0)
+            return name[..^1] + "ies";
+        return name + "s";
+    }
 
     // ----------------------------------------------------------------------
     // Value objects

@@ -244,8 +244,53 @@ public sealed record EmitArg(string Field, Expr Value) : KoineNode;
 /// </summary>
 public sealed record SpecDecl(string Name, string TargetType, Expr Condition) : KoineNode;
 
-/// <summary>A stateless domain service: a named group of pure (or seam) operations.</summary>
-public sealed record ServiceDecl(string Name, IReadOnlyList<OperationDecl> Operations) : KoineNode;
+/// <summary>
+/// A service: a named group of pure domain <see cref="Operations"/> (R10.2, emitted as a
+/// stateless class) and/or application <see cref="UseCases"/> (R12.2, emitted as an
+/// <c>I&lt;Name&gt;</c> interface). Either list may be empty.
+/// </summary>
+public sealed record ServiceDecl(
+    string Name,
+    IReadOnlyList<OperationDecl> Operations,
+    IReadOnlyList<UseCaseDecl> UseCases) : KoineNode;
+
+/// <summary>
+/// An application use case: a named operation with typed inputs and an optional
+/// output (<c>null</c> = a command-style use case returning <c>Task</c>). TARGET-AGNOSTIC.
+/// </summary>
+public sealed record UseCaseDecl(
+    string Name,
+    IReadOnlyList<Param> Parameters,
+    TypeRef? ReturnType) : KoineNode;
+
+/// <summary>
+/// A read model (R12.3): a flat DTO projected from <see cref="SourceType"/>. Emitted as a
+/// value-equal record plus a static projection mapper. TARGET-AGNOSTIC.
+/// </summary>
+public sealed record ReadModelDecl(
+    string Name,
+    string SourceType,
+    IReadOnlyList<ReadModelField> Fields) : TypeDecl(Name);
+
+/// <summary>
+/// One read-model field. A <em>direct</em> field (<see cref="Type"/> and
+/// <see cref="Projection"/> both <c>null</c>) maps to the source member of the same name;
+/// a <em>derived</em> field (both set) projects <see cref="Projection"/> as <see cref="Type"/>.
+/// </summary>
+public sealed record ReadModelField(
+    string Name,
+    TypeRef? Type,
+    Expr? Projection) : KoineNode;
+
+/// <summary>
+/// A query object (R12.4): typed <see cref="Criteria"/> over a read model, with a single
+/// or list <see cref="ResultType"/>. Emitted as a DTO record handled via the generic
+/// <c>IQueryHandler&lt;TQuery,TResult&gt;</c>. TARGET-AGNOSTIC.
+/// </summary>
+public sealed record QueryDecl(
+    string Name,
+    IReadOnlyList<Param> Criteria,
+    TypeRef ResultType) : TypeDecl(Name);
 
 /// <summary>
 /// A domain-service operation. <see cref="Body"/> is the pure result expression when

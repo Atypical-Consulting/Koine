@@ -10,16 +10,16 @@ public class R11IdentityRepositoryTests
 {
     private static IReadOnlyList<Diagnostic> Diagnose(string source) => new KoineCompiler().Diagnose(source);
 
-    private static (Assembly Asm, IReadOnlyList<Koine.Compiler.Emit.EmittedFile> Files) Build(string source)
+    private static (Assembly Asm, IReadOnlyList<Emit.EmittedFile> Files) Build(string source)
     {
         var result = new KoineCompiler().Compile(source, new CSharpEmitter());
         Assert.True(result.Success, string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
         var (asm, errors) = TestSupport.Compile(result.Files);
         Assert.True(asm is not null, "generated C# failed to compile:\n" + string.Join("\n", errors));
-        return (asm!, result.Files);
+        return (asm, result.Files);
     }
 
-    private static string FileContents(IEnumerable<Koine.Compiler.Emit.EmittedFile> files, string path) =>
+    private static string FileContents(IEnumerable<Emit.EmittedFile> files, string path) =>
         files.Single(f => f.RelativePath == path).Contents;
 
     // ---- R11.1 — identity strategies --------------------------------------

@@ -106,10 +106,16 @@ public sealed class SemanticValidator
                 ValidateFactories(e, index, resolver, enumMembers, diagnostics, emitAllowed);
                 break;
             case AggregateDecl agg:
-                // The root must name a type declared inside the aggregate.
-                if (!agg.Types.Any(t => t.Name == agg.RootName))
+                // The root must name an ENTITY declared inside the aggregate: a non-entity
+                // root has no identity/repository, and would leave the Unit of Work
+                // referencing an I<Root>Repository that is never emitted.
+                var rootDecl = agg.Types.FirstOrDefault(t => t.Name == agg.RootName);
+                if (rootDecl is null)
                     diagnostics.Add(Diagnostic.Error(DiagnosticCodes.UnknownAggregateRoot,
                         $"unknown aggregate root '{agg.RootName}'", agg.Span.Line, agg.Span.Column));
+                else if (rootDecl is not EntityDecl)
+                    diagnostics.Add(Diagnostic.Error(DiagnosticCodes.UnknownAggregateRoot,
+                        $"aggregate root '{agg.RootName}' must be an entity", agg.Span.Line, agg.Span.Column));
                 foreach (var nested in agg.Types)
                     ValidateType(nested, index, resolver, enumMembers, diagnostics, agg.RootName);
                 ValidateVersioning(agg, diagnostics);
@@ -135,8 +141,145 @@ public sealed class SemanticValidator
                             $"event field '{m.Name}' collides with the reserved 'OccurredOn' metadata property",
                             m.Span.Line, m.Span.Column));
                 break;
+            case ReadModelDecl rm:
+                ValidateReadModel(rm, index, resolver, enumMembers, diagnostics);
+                break;
+            case QueryDecl q:
+                ValidateQuery(q, index, diagnostics);
+                break;
         }
     }
+
+    /// <summary>
+    /// Validates a read model (R12.3): the source must be a declared value/entity;
+    /// field names are unique; a direct field must name a source member; a derived
+    /// field's projection must resolve over the source and produce a value assignable
+    /// to its declared type.
+    /// </summary>
+    private static void ValidateReadModel(
+        ReadModelDecl rm, ModelIndex index, TypeResolver resolver, IReadOnlySet<string> enumMembers, List<Diagnostic> diagnostics)
+    {
+        var sourceMembers = ReadModelSourceMembers(rm.SourceType, index);
+        if (sourceMembers is null)
+        {
+            diagnostics.Add(Diagnostic.Error(DiagnosticCodes.ReadModelUnknownSource,
+                $"read model '{rm.Name}' projects from '{rm.SourceType}', which is not a declared value or entity type",
+                rm.Span.Line, rm.Span.Column));
+            return;
+        }
+
+        // Build defensively (last-wins): a source value object with duplicate members
+        // (reported elsewhere as KOI0103) must not crash this loop.
+        var memberByName = new Dictionary<string, Member>(StringComparer.Ordinal);
+        foreach (var m in sourceMembers)
+            memberByName[m.Name] = m;
+        var sourceMemberNames = memberByName.Keys.ToArray();
+        var scope = TypeScope.FromMembers(sourceMembers);
+        var checker = new ExpressionChecker(index, resolver, enumMembers, diagnostics);
+        // The record property a field emits to (R12.3): a positional record property is
+        // PascalCased, so two fields differing only by their first-letter case collide.
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+
+        foreach (var field in rm.Fields)
+        {
+            if (!seen.Add(PropertyKey(field.Name)))
+                diagnostics.Add(Diagnostic.Error(DiagnosticCodes.DuplicateReadModelField,
+                    $"duplicate field '{field.Name}' in read model '{rm.Name}'", field.Span.Line, field.Span.Column));
+            if (IsReservedRecordMember(field.Name))
+                diagnostics.Add(Diagnostic.Error(DiagnosticCodes.ReservedRecordMember,
+                    $"read-model field '{field.Name}' collides with a record-synthesized member", field.Span.Line, field.Span.Column));
+
+            if (field.Projection is null)
+            {
+                // A direct field must name a member (or the synthetic `id`) of the source.
+                if (!memberByName.ContainsKey(field.Name))
+                    diagnostics.Add(Diagnostic.Error(DiagnosticCodes.ReadModelUnknownField,
+                        $"read model '{rm.Name}' field '{field.Name}' is not a member of '{rm.SourceType}'{Suggestions.For(field.Name, sourceMemberNames)}",
+                        field.Span.Line, field.Span.Column));
+            }
+            else
+            {
+                // A derived field: the projection resolves over the source; its declared
+                // type must be known and accept the projected value.
+                ValidateTypeRef(field.Type!, index, diagnostics);
+                checker.Check(field.Projection, scope, field.Type);
+                var inferred = resolver.Infer(field.Projection, scope);
+                if (inferred is not null && index.IsKnownType(field.Type!.Name)
+                    && !MemberAnalysis.IsAssignable(inferred, field.Type!))
+                    diagnostics.Add(Diagnostic.Error(DiagnosticCodes.ReadModelFieldTypeMismatch,
+                        $"read model '{rm.Name}' field '{field.Name}' is declared '{field.Type!.Name}' but projects a '{inferred.Name}'",
+                        field.Span.Line, field.Span.Column));
+            }
+        }
+    }
+
+    /// <summary>
+    /// Validates a query (R12.4): criteria parameter types and names, and that the
+    /// result is a declared read model or a <c>List</c> of one.
+    /// </summary>
+    private static void ValidateQuery(QueryDecl q, ModelIndex index, List<Diagnostic> diagnostics)
+    {
+        // Criteria become positional record properties (PascalCased), so dedup on the
+        // emitted property key and reject names that collide with record members.
+        var seenParams = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var p in q.Criteria)
+        {
+            ValidateTypeRef(p.Type, index, diagnostics);
+            if (!seenParams.Add(PropertyKey(p.Name)))
+                diagnostics.Add(Diagnostic.Error(DiagnosticCodes.DuplicateParameter,
+                    $"duplicate criterion '{p.Name}' in query '{q.Name}'", p.Span.Line, p.Span.Column));
+            if (IsReservedRecordMember(p.Name))
+                diagnostics.Add(Diagnostic.Error(DiagnosticCodes.ReservedRecordMember,
+                    $"query criterion '{p.Name}' collides with a record-synthesized member", p.Span.Line, p.Span.Column));
+        }
+
+        ValidateTypeRef(q.ResultType, index, diagnostics);
+        var resultName = q.ResultType.Name == ModelIndex.ListTypeName
+            ? q.ResultType.Element?.Name
+            : q.ResultType.Name;
+        if (resultName is not null && index.Classify(resultName) != TypeKind.ReadModel)
+            diagnostics.Add(Diagnostic.Error(DiagnosticCodes.QueryResultNotReadModel,
+                $"query '{q.Name}' must return a read model or 'List<readmodel>', not '{q.ResultType.Name}'",
+                q.Span.Line, q.Span.Column));
+    }
+
+    /// <summary>
+    /// The members a read model can project from its source (entities add the synthetic
+    /// <c>id</c>); <c>null</c> when the source is not a value/entity type.
+    /// </summary>
+    private static IReadOnlyList<Member>? ReadModelSourceMembers(string sourceType, ModelIndex index)
+    {
+        if (!index.TryGetDecl(sourceType, out var decl))
+            return null;
+        return decl switch
+        {
+            ValueObjectDecl v => v.Members,
+            EntityDecl e => EntityProjectionMembers(e),
+            _ => null
+        };
+    }
+
+    /// <summary>
+    /// An entity's members plus the synthetic <c>id</c> — added only when the entity does
+    /// not already declare its own <c>id</c> member (which would otherwise duplicate it).
+    /// </summary>
+    private static IReadOnlyList<Member> EntityProjectionMembers(EntityDecl e) =>
+        e.Members.Any(m => string.Equals(m.Name, "id", StringComparison.OrdinalIgnoreCase))
+            ? e.Members
+            : e.Members.Append(new Member("id", new TypeRef(e.IdentityName), null)).ToList();
+
+    /// <summary>The C# property identifier a member name maps to (first char upper-cased), for collision checks.</summary>
+    private static string PropertyKey(string name) =>
+        name.Length == 0 ? name : char.ToUpperInvariant(name[0]) + name[1..];
+
+    /// <summary>Members a positional <c>record</c> synthesizes; a field/criterion mapping to one fails to compile.</summary>
+    private static readonly IReadOnlySet<string> RecordReservedMembers =
+        new HashSet<string>(StringComparer.Ordinal)
+        {
+            "Equals", "GetHashCode", "ToString", "GetType", "EqualityContract", "PrintMembers", "Deconstruct"
+        };
+
+    private static bool IsReservedRecordMember(string name) => RecordReservedMembers.Contains(PropertyKey(name));
 
     /// <summary>The spec names declared over <paramref name="typeName"/> (R10.1), or empty.</summary>
     private static IReadOnlySet<string> SpecNames(ModelIndex index, string typeName)
@@ -792,6 +935,28 @@ public sealed class SemanticValidator
                 {
                     var scope = new TypeScope(op.Parameters.Select(p => new KeyValuePair<string, TypeRef>(p.Name, p.Type)));
                     checker.CheckOperationReturn(op.Body, op.ReturnType, scope);
+                }
+            }
+
+            // Application use cases (R12.2): unique names (they emit interface methods),
+            // valid parameter and return type refs.
+            var seenUseCases = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var uc in svc.UseCases)
+            {
+                if (!seenUseCases.Add(uc.Name))
+                    diagnostics.Add(Diagnostic.Error(DiagnosticCodes.DuplicateUseCase,
+                        $"use case '{uc.Name}' is declared more than once in service '{svc.Name}'", uc.Span.Line, uc.Span.Column));
+
+                if (uc.ReturnType is not null)
+                    ValidateTypeRef(uc.ReturnType, index, diagnostics);
+
+                var seenParams = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                foreach (var p in uc.Parameters)
+                {
+                    ValidateTypeRef(p.Type, index, diagnostics);
+                    if (!seenParams.Add(p.Name))
+                        diagnostics.Add(Diagnostic.Error(DiagnosticCodes.DuplicateParameter,
+                            $"duplicate parameter '{p.Name}' in use case '{uc.Name}'", p.Span.Line, p.Span.Column));
                 }
             }
         }
