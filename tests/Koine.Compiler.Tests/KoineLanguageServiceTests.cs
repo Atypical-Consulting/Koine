@@ -157,4 +157,37 @@ public class KoineLanguageServiceTests
         Assert.NotNull(hover);
         Assert.Contains("spec on Money", hover!.Markdown);
     }
+
+    [Fact]
+    public void Definition_of_a_type_reference_points_at_its_declaration()
+    {
+        var src =
+            "context C {\n" +
+            "  value Money { amount: Decimal }\n" +
+            "  value Line { price: Money }\n" +
+            "}\n";
+        var def = Svc.DefinitionAt(src, line: 2, character: 23); // over "Money"
+        Assert.NotNull(def);
+        Assert.Equal(2, def!.Target.Line);  // 1-based line of "value Money"
+    }
+
+    [Fact]
+    public void Definition_of_an_enum_member_points_at_the_member()
+    {
+        var src =
+            "context C {\n" +
+            "  enum OrderStatus { Draft, Placed }\n" +
+            "  entity E identified by EId { status: OrderStatus = Draft }\n" +
+            "}\n";
+        var def = Svc.DefinitionAt(src, line: 2, character: 54); // over "Draft" value
+        Assert.NotNull(def);
+        Assert.Equal(2, def!.Target.Line);
+    }
+
+    [Fact]
+    public void Definition_of_a_primitive_is_null()
+    {
+        var src = "context C {\n  value V { x: Decimal }\n}\n";
+        Assert.Null(Svc.DefinitionAt(src, line: 1, character: 18)); // over "Decimal"
+    }
 }
