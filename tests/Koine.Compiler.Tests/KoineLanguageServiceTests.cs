@@ -235,4 +235,19 @@ public class KoineLanguageServiceTests
         Assert.NotNull(def);
         Assert.Equal("file:///catalog.koi", def!.Uri);
     }
+
+    [Fact]
+    public void HoverAt_resolves_across_files()
+    {
+        var ordering = "context Ordering {\n  value Line { product: ProductId }\n}\n";
+        var catalog = "context Catalog {\n  entity Product identified by ProductId { sku: String }\n}\n";
+        var docs = new Dictionary<string, string>
+        {
+            ["file:///ordering.koi"] = ordering,
+            ["file:///catalog.koi"] = catalog,
+        };
+        var hover = Svc.HoverAt(docs, "file:///ordering.koi", line: 1, character: 25); // on "ProductId"
+        Assert.NotNull(hover);
+        Assert.Contains("Product", hover!.Markdown); // owning entity
+    }
 }
