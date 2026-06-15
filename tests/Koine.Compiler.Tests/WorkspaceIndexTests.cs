@@ -87,4 +87,40 @@ public class WorkspaceIndexTests
         Assert.NotNull(def); // resolves into catalog despite broken active file
         Assert.Equal("file:///catalog.koi", def!.Uri);
     }
+
+    [Fact]
+    public void Cross_file_type_hover_renders_card_from_other_file()
+    {
+        var a = "context A { value Wrap { c: Currency } }\n";
+        var idx = Index(("file:///a.koi", a), ("file:///catalog.koi", Catalog));
+        var md = idx.ResolveHover("file:///a.koi", "Currency");
+        Assert.NotNull(md);
+        Assert.Contains("Currency", md!);
+        Assert.Contains("Enum", md);
+    }
+
+    [Fact]
+    public void Cross_file_id_hover_shows_owning_entity()
+    {
+        var idx = Index(("file:///ordering.koi", Ordering), ("file:///catalog.koi", Catalog));
+        var md = idx.ResolveHover("file:///ordering.koi", "ProductId");
+        Assert.NotNull(md);
+        Assert.Contains("Product", md!); // names the owning entity
+    }
+
+    [Fact]
+    public void Primitive_hover_uses_weak_fallback()
+    {
+        var idx = Index(("file:///a.koi", "context A { value V { x: Int } }\n"));
+        var md = idx.ResolveHover("file:///a.koi", "Decimal");
+        Assert.NotNull(md);
+        Assert.Contains("Primitive", md!);
+    }
+
+    [Fact]
+    public void Unknown_name_hover_is_null()
+    {
+        var idx = Index(("file:///a.koi", "context A { value V { x: Int } }\n"));
+        Assert.Null(idx.ResolveHover("file:///a.koi", "Nonexistent"));
+    }
 }
