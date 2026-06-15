@@ -1,5 +1,4 @@
 using System.Reflection;
-using Koine.Compiler.Emit;
 using Koine.Compiler.Emit.CSharp;
 using Koine.Compiler.Services;
 

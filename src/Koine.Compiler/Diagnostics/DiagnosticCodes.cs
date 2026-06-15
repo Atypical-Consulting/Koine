@@ -111,6 +111,15 @@ public static class DiagnosticCodes
     public const string FinderNameCollision = "KOI1106";
     public const string ReservedFinderParameter = "KOI1107";
 
+    // ---- Application services, read models, CQRS (KOI1200–1299) -----------
+    public const string DuplicateUseCase = "KOI1201";
+    public const string ReadModelUnknownSource = "KOI1202";
+    public const string ReadModelUnknownField = "KOI1203";
+    public const string ReadModelFieldTypeMismatch = "KOI1204";
+    public const string DuplicateReadModelField = "KOI1205";
+    public const string QueryResultNotReadModel = "KOI1206";
+    public const string ReservedRecordMember = "KOI1207";
+
     /// <summary>Every code with a one-line description. Tested for uniqueness/coverage.</summary>
     public static readonly IReadOnlyDictionary<string, string> Catalogue = new Dictionary<string, string>
     {
@@ -189,5 +198,12 @@ public static class DiagnosticCodes
         [ReservedVersionMember] = "A versioned aggregate's root declares a member that collides with the generated 'Version' token.",
         [FinderNameCollision] = "A repository finder's name collides with a built-in operation method (getById/add/update/remove).",
         [ReservedFinderParameter] = "A repository finder parameter uses the reserved name 'ct' (the generated CancellationToken).",
+        [DuplicateUseCase] = "A service declares the same use-case name more than once.",
+        [ReadModelUnknownSource] = "A read model's source is not a declared value or entity type.",
+        [ReadModelUnknownField] = "A read-model field names a member the source type does not have.",
+        [ReadModelFieldTypeMismatch] = "A read-model projection's value type is incompatible with its declared field type.",
+        [DuplicateReadModelField] = "A read model declares the same field name more than once.",
+        [QueryResultNotReadModel] = "A query's result type is not a declared read model (or a list of one).",
+        [ReservedRecordMember] = "A read-model field or query criterion collides with a record-synthesized member (Equals/GetHashCode/…).",
     };
 }

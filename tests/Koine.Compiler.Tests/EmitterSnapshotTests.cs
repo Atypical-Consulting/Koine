@@ -1,6 +1,5 @@
 using Koine.Compiler.Emit.CSharp;
 using Koine.Compiler.Services;
-using VerifyXunit;
 
 namespace Koine.Compiler.Tests;
 
@@ -16,7 +15,7 @@ public class EmitterSnapshotTests
         var result = new KoineCompiler().Compile(TestSupport.BillingFixture, new CSharpEmitter());
         Assert.True(result.Success);
 
-        return Verifier.Verify(TestSupport.Render(result.Files))
+        return Verify(TestSupport.Render(result.Files))
             .UseDirectory("Snapshots");
     }
 
@@ -56,7 +55,7 @@ public class EmitterSnapshotTests
         var result = new KoineCompiler().Compile(fixture, new CSharpEmitter());
         Assert.True(result.Success, string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
 
-        return Verifier.Verify(TestSupport.Render(result.Files))
+        return Verify(TestSupport.Render(result.Files))
             .UseDirectory("Snapshots");
     }
 
@@ -91,7 +90,7 @@ public class EmitterSnapshotTests
         var result = new KoineCompiler().Compile(fixture, new CSharpEmitter());
         Assert.True(result.Success, string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
 
-        return Verifier.Verify(TestSupport.Render(result.Files))
+        return Verify(TestSupport.Render(result.Files))
             .UseDirectory("Snapshots");
     }
 
@@ -125,7 +124,51 @@ public class EmitterSnapshotTests
         var result = new KoineCompiler().Compile(fixture, new CSharpEmitter());
         Assert.True(result.Success, string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
 
-        return Verifier.Verify(TestSupport.Render(result.Files))
+        return Verify(TestSupport.Render(result.Files))
+            .UseDirectory("Snapshots");
+    }
+
+    /// <summary>
+    /// R12: makes the per-context unit of work, the application-service interface
+    /// (use cases), the read-model record + projection mapper, and the query DTOs +
+    /// shared IQueryHandler reviewable in one snapshot.
+    /// </summary>
+    [Fact]
+    public Task R12_fixture_emits_expected_csharp()
+    {
+        const string fixture = """
+            context Sales {
+              enum OrderStatus { Draft, Placed, Shipped }
+              value OrderLine { product: ProductId  quantity: Int }
+              aggregate Order root Order {
+                entity Order identified by OrderId {
+                  customer: CustomerId
+                  lines:    List<OrderLine>
+                  status:   OrderStatus = Draft
+                }
+              }
+
+              service OrderService {
+                usecase PlaceOrder(customer: CustomerId, lines: List<OrderLine>): OrderId
+                usecase CancelOrder(order: OrderId)
+              }
+
+              readmodel OrderSummary from Order {
+                id
+                customer
+                status
+                lineCount: Int = lines.count
+              }
+
+              query OrdersByStatus(status: OrderStatus): List<OrderSummary>
+              query OrderById(id: OrderId): OrderSummary
+            }
+            """;
+
+        var result = new KoineCompiler().Compile(fixture, new CSharpEmitter());
+        Assert.True(result.Success, string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        return Verify(TestSupport.Render(result.Files))
             .UseDirectory("Snapshots");
     }
 }

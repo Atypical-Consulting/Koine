@@ -46,6 +46,8 @@ public sealed class KoineModelBuilderVisitor : KoineParserBaseVisitor<object?>
             else if (member.specDecl() is { } s) specs.Add(BuildSpec(s));
             else if (member.serviceDecl() is { } sv) services.Add(BuildService(sv));
             else if (member.policyDecl() is { } p) policies.Add(BuildPolicy(p));
+            else if (member.readmodelDecl() is { } rm) types.Add(BuildReadModel(rm));
+            else if (member.queryDecl() is { } q) types.Add(BuildQuery(q));
         }
 
         return new ContextNode(ctx.Identifier().GetText(), types, specs, services, policies)
@@ -64,8 +66,54 @@ public sealed class KoineModelBuilderVisitor : KoineParserBaseVisitor<object?>
 
     private ServiceDecl BuildService(KoineParser.ServiceDeclContext ctx)
     {
-        var operations = ctx.operationDecl().Select(BuildOperation).ToList();
-        return new ServiceDecl(ctx.Identifier().GetText(), operations) { Span = SpanOf(ctx), Doc = DocFor(ctx) };
+        var operations = new List<OperationDecl>();
+        var useCases = new List<UseCaseDecl>();
+        foreach (var member in ctx.serviceMember())
+        {
+            if (member.operationDecl() is { } op) operations.Add(BuildOperation(op));
+            else if (member.usecaseDecl() is { } uc) useCases.Add(BuildUseCase(uc));
+        }
+        return new ServiceDecl(ctx.Identifier().GetText(), operations, useCases) { Span = SpanOf(ctx), Doc = DocFor(ctx) };
+    }
+
+    private UseCaseDecl BuildUseCase(KoineParser.UsecaseDeclContext ctx)
+    {
+        var parameters = ctx.paramList() is { } pl
+            ? pl.param().Select(BuildParam).ToList()
+            : new List<Param>();
+        var returnType = ctx.typeRef() is { } tr ? BuildTypeRef(tr) : null;
+        return new UseCaseDecl(ctx.Identifier().GetText(), parameters, returnType)
+        {
+            Span = SpanOf(ctx),
+            Doc = DocFor(ctx)
+        };
+    }
+
+    private ReadModelDecl BuildReadModel(KoineParser.ReadmodelDeclContext ctx)
+    {
+        var fields = ctx.readmodelField().Select(f =>
+        {
+            var type = f.typeRef() is { } tr ? BuildTypeRef(tr) : null;
+            var projection = f.expression() is { } e ? BuildExpression(e) : null;
+            return new ReadModelField(f.softName().GetText(), type, projection) { Span = SpanOf(f) };
+        }).ToList();
+        return new ReadModelDecl(ctx.Identifier().GetText(), ctx.typeName().GetText(), fields)
+        {
+            Span = SpanOf(ctx),
+            Doc = DocFor(ctx)
+        };
+    }
+
+    private QueryDecl BuildQuery(KoineParser.QueryDeclContext ctx)
+    {
+        var criteria = ctx.paramList() is { } pl
+            ? pl.param().Select(BuildParam).ToList()
+            : new List<Param>();
+        return new QueryDecl(ctx.Identifier().GetText(), criteria, BuildTypeRef(ctx.typeRef()))
+        {
+            Span = SpanOf(ctx),
+            Doc = DocFor(ctx)
+        };
     }
 
     private OperationDecl BuildOperation(KoineParser.OperationDeclContext ctx)

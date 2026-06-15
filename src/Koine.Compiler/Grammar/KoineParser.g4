@@ -13,11 +13,14 @@ program        : contextDecl* EOF ;
 
 contextDecl    : CONTEXT Identifier LBRACE contextMember* RBRACE ;
 
-// A context holds types plus behavioral declarations (specs, services, policies).
+// A context holds types plus behavioral declarations (specs, services, policies)
+// and read-side declarations (read models, queries).
 contextMember  : typeDecl
                | specDecl
                | serviceDecl
                | policyDecl
+               | readmodelDecl
+               | queryDecl
                ;
 
 typeDecl       : valueDecl
@@ -33,10 +36,26 @@ typeDecl       : valueDecl
 // A named, reusable boolean specification over a target type.
 specDecl       : SPEC Identifier ON typeName ASSIGN expression ;
 
-// A stateless domain service with pure (or seam) operations.
-serviceDecl    : SERVICE Identifier LBRACE operationDecl* RBRACE ;
+// A service holds pure domain operations (R10) and/or application use cases (R12.2).
+serviceDecl    : SERVICE Identifier LBRACE serviceMember* RBRACE ;
+
+serviceMember  : operationDecl | usecaseDecl ;
 
 operationDecl  : OPERATION Identifier LPAREN paramList? RPAREN COLON typeRef ( ASSIGN expression )? ;
+
+// An application use case: typed inputs and an optional output (R12.2).
+usecaseDecl    : USECASE Identifier LPAREN paramList? RPAREN ( COLON typeRef )? ;
+
+// ---- Read models & queries (R12.3 / R12.4) ---------------------------------
+
+// A flat DTO projected from a source type. A field is either a direct name
+// (resolved from the source) or a typed, derived projection.
+readmodelDecl  : READMODEL Identifier FROM typeName LBRACE readmodelField* RBRACE ;
+
+readmodelField : softName ( COLON typeRef ASSIGN expression )? ;
+
+// A query object: typed criteria over a read model, single or list result.
+queryDecl      : QUERY Identifier LPAREN paramList? RPAREN COLON typeRef ;
 
 // A policy: react to a domain event with a command on another aggregate (a seam).
 policyDecl     : POLICY Identifier WHEN Identifier THEN policyReaction ;
@@ -148,7 +167,7 @@ typeRef        : typeName ( LT typeRef ( COMMA typeRef )? GT )? QUESTION? ;
 softName       : Identifier | declKeyword | WHEN | IF | THEN | ELSE ;
 exprName       : Identifier | declKeyword | WHEN ;
 typeName       : Identifier | declKeyword ;
-declKeyword    : CONTEXT | VALUE | QUANTITY | ENTITY | AGGREGATE | ENUM | IDENTIFIED | BY | ROOT | COMMAND | REQUIRES | EVENT | EMIT | STATES | CREATE | SPEC | ON | SERVICE | OPERATION | POLICY | AS | NATURAL | SEQUENCE | GUID | VERSIONED | REPOSITORY | OPERATIONS | FIND ;
+declKeyword    : CONTEXT | VALUE | QUANTITY | ENTITY | AGGREGATE | ENUM | IDENTIFIED | BY | ROOT | COMMAND | REQUIRES | EVENT | EMIT | STATES | CREATE | SPEC | ON | SERVICE | OPERATION | POLICY | AS | NATURAL | SEQUENCE | GUID | VERSIONED | REPOSITORY | OPERATIONS | FIND | USECASE | READMODEL | FROM | QUERY ;
 
 invariant      : INVARIANT expression StringLiteral? ;
 

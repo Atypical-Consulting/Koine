@@ -62,7 +62,7 @@ public class ParsingTests
         var (model, diagnostics) = new KoineCompiler().Parse(src);
         Assert.Empty(diagnostics);
 
-        var value = (Koine.Compiler.Ast.ValueObjectDecl)model!.Contexts[0].Types[0];
+        var value = (Ast.ValueObjectDecl)model!.Contexts[0].Types[0];
         Assert.Equal("a\nb\tc\\d\"e", value.Invariants[0].Message);
     }
 }

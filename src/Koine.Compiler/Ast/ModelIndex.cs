@@ -13,6 +13,10 @@ public enum TypeKind
     Aggregate,
     Enum,
     Event,
+    /// <summary>A read-model DTO projected from a source type (R12.3).</summary>
+    ReadModel,
+    /// <summary>A query object with typed criteria (R12.4).</summary>
+    Query,
     /// <summary>A generated ID value object (wraps a Guid), e.g. <c>OrderId</c>.</summary>
     IdValueObject,
     Unknown
@@ -180,15 +184,30 @@ public sealed class ModelIndex
                         foreach (var p in finder.Parameters) yield return p.Type;
                     }
                     break;
+                case ReadModelDecl rm:
+                    foreach (var f in rm.Fields)
+                        if (f.Type is not null) yield return f.Type;
+                    break;
+                case QueryDecl q:
+                    yield return q.ResultType;
+                    foreach (var p in q.Criteria) yield return p.Type;
+                    break;
             }
         }
 
         foreach (var svc in ctx.Services)
+        {
             foreach (var op in svc.Operations)
             {
                 yield return op.ReturnType;
                 foreach (var p in op.Parameters) yield return p.Type;
             }
+            foreach (var uc in svc.UseCases)
+            {
+                if (uc.ReturnType is not null) yield return uc.ReturnType;
+                foreach (var p in uc.Parameters) yield return p.Type;
+            }
+        }
     }
 
     private static IEnumerable<TypeDecl> FlattenTypes(ContextNode ctx)
@@ -289,6 +308,8 @@ public sealed class ModelIndex
                 AggregateDecl => TypeKind.Aggregate,
                 EnumDecl => TypeKind.Enum,
                 EventDecl => TypeKind.Event,
+                ReadModelDecl => TypeKind.ReadModel,
+                QueryDecl => TypeKind.Query,
                 _ => TypeKind.Unknown
             };
         if (_idTypeNames.Contains(typeName) || IsIdConvention(typeName)) return TypeKind.IdValueObject;

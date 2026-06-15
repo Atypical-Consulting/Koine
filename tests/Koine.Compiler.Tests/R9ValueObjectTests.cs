@@ -16,7 +16,7 @@ public class R9ValueObjectTests
         Assert.True(result.Success, string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
         var (asm, errors) = TestSupport.Compile(result.Files);
         Assert.True(asm is not null, "generated C# failed to compile:\n" + string.Join("\n", errors));
-        return (asm!, TestSupport.Render(result.Files));
+        return (asm, TestSupport.Render(result.Files));
     }
 
     // ======================================================================
@@ -229,7 +229,7 @@ public class R9ValueObjectTests
         var weight = asm.GetType("C.Weight")!;
         var mul = weight.GetMethod("op_Multiply", new[] { weight, typeof(int) })!;
 
-        var scaled = mul.Invoke(null, new object[] { Weight(asm, 2.0m, "Gram"), 3 });
+        var scaled = mul.Invoke(null, [Weight(asm, 2.0m, "Gram"), 3]);
         Assert.Equal(6.0m, weight.GetProperty("Amount")!.GetValue(scaled));
         Assert.True(TestSupport.EnumValue(asm.GetType("C.MassUnit")!, "Gram")
             .Equals(weight.GetProperty("Unit")!.GetValue(scaled)));

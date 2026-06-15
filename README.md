@@ -88,6 +88,9 @@ context Billing {
 | `aggregate A root R { … }` | nested types in the `<Context>` namespace; the root `R` implements `IAggregateRoot`, and an `I<R>Repository` contract is emitted for it |
 | `aggregate A root R versioned { … }` | the root additionally gains a get-only `Version` token; `ConcurrencyConflictException` is emitted into `Koine.Runtime` |
 | `repository { operations: … ; find name(p): List<R>\|R }` | tunes the root's repository — its mutating method set plus intention-revealing async finders |
+| `service S { usecase U(p: T): R }` | an application-service interface `IS` with one async method per use case (`Task`/`Task<R>`); a context with aggregates also gets an `IUnitOfWork` |
+| `readmodel M from Src { id; total: Int = … }` | a flat, value-equal DTO `record` + a static `ToM(this Src src)` projection mapper |
+| `query Q(criteria): List<M>\|M` | a query DTO `record` handled via the shared generic `IQueryHandler<TQuery,TResult>` |
 | `enum E { … }` | a self-contained **smart enum** (`sealed class`: static instances, `Name`/`Value`, `All`, `FromName`/`FromValue`, value equality, `==`/`!=`) |
 | `name: Type` | a typed property + constructor parameter |
 | `name: Type = const` | a constructor parameter with a default value (an enum default becomes a nullable param coalesced to the smart-enum instance, since it isn't a compile-time constant) |
@@ -168,7 +171,8 @@ this lets a regex literal be read as a single token without colliding with the `
 
 - **Soft keywords.** Most Koine keywords (`context`, `value`, `quantity`, `entity`, `aggregate`, `enum`,
   `by`, `root`, `command`, `create`, `spec`, `on`, `service`, `operation`, `policy`, `as`, `natural`,
-  `sequence`, `guid`, `versioned`, `repository`, `operations`, `find`, `when`, `if`, …) may now
+  `sequence`, `guid`, `versioned`, `repository`, `operations`, `find`, `usecase`, `readmodel`, `from`,
+  `query`, `when`, `if`, …) may now
   be used as field names, and the declaration keywords additionally as type names and in expressions. The
   mode-switching `matches` and the `invariant` keyword remain reserved; the keywords are *not* usable in the
   few hard-`Identifier` positions (a type/command/state/enum-member name). Like `->`, the factory-initialization
@@ -198,6 +202,13 @@ this lets a regex literal be read as a single token without colliding with the `
   the mutating set and declares typed finders (`List<Root>` → `Task<IReadOnlyList<Root>>`, a single `Root`
   → `Task<Root?>`). Marking the aggregate `versioned` adds a get-only `Version` token and emits a shared
   `ConcurrencyConflictException` for optimistic-concurrency enforcement.
+- **Application layer & CQRS.** Each context with an aggregate gets a generated `IUnitOfWork` (a repository
+  property per aggregate plus `SaveChangesAsync`) — a pure abstraction with no infrastructure dependency. A
+  `service` holding `usecase`s emits an `I<Service>` application interface whose async methods map the
+  declared inputs/outputs. A `readmodel M from Src { … }` emits a flat, value-equal DTO record plus a static
+  `ToM(this Src src)` projection mapper (direct fields map straight through; `total: Int = lines.count` style
+  fields translate via the expression sublanguage). A `query Q(criteria): List<M>` emits a criteria DTO record
+  handled through the generic `IQueryHandler<TQuery,TResult>` runtime interface.
 
 ---
 

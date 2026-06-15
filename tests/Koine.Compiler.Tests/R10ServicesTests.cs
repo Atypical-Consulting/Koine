@@ -16,7 +16,7 @@ public class R10ServicesTests
         Assert.True(result.Success, string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
         var (asm, errors) = TestSupport.Compile(result.Files);
         Assert.True(asm is not null, "generated C# failed to compile:\n" + string.Join("\n", errors));
-        return (asm!, TestSupport.Render(result.Files));
+        return (asm, TestSupport.Render(result.Files));
     }
 
     // ======================================================================
@@ -147,7 +147,7 @@ public class R10ServicesTests
         var svcType = asm.GetType("Fx.ExchangeRateService")!;
         var money = asm.GetType("Fx.Money")!;
         var svc = Activator.CreateInstance(svcType);
-        var result = svcType.GetMethod("Convert")!.Invoke(svc, new[] { Activator.CreateInstance(money, 2.0m), (object)3.0m });
+        var result = svcType.GetMethod("Convert")!.Invoke(svc, new[] { Activator.CreateInstance(money, 2.0m), 3.0m });
         Assert.Equal(6.0m, money.GetProperty("Amount")!.GetValue(result));
     }
 

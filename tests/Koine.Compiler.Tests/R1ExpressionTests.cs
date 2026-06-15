@@ -1,7 +1,6 @@
 using System.Reflection;
 using Koine.Compiler.Diagnostics;
 using Koine.Compiler.Emit.CSharp;
-using Koine.Compiler.Semantics;
 using Koine.Compiler.Services;
 
 namespace Koine.Compiler.Tests;
