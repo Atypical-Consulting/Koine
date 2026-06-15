@@ -209,10 +209,12 @@ public sealed class KoineLanguageService
         if (index.TryGetDecl(name, out var decl) && decl.Span != SourceSpan.None)
             return new DefinitionResult(decl.Span);
 
-        // 2. An enum member -> the member's own span.
-        if (index.EnumMemberToType.TryGetValue(name, out var enumName)
-            && index.TryGetDecl(enumName, out var enumDecl)
-            && enumDecl is EnumDecl e)
+        // 2. An enum member -> the member's own span. Navigate only when the member
+        // name is unambiguous; if two enums declare it, fall through (return null)
+        // rather than jump to an arbitrary one — matches hover's ambiguity handling.
+        var owners = index.EnumsDeclaring(name);
+        if (owners.Count == 1
+            && index.TryGetDecl(owners[0], out var enumDecl) && enumDecl is EnumDecl e)
         {
             var member = e.Members.FirstOrDefault(m => m.Name == name);
             if (member is not null && member.Span != SourceSpan.None)

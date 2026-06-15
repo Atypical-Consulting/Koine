@@ -190,4 +190,31 @@ public class KoineLanguageServiceTests
         var src = "context C {\n  value V { x: Decimal }\n}\n";
         Assert.Null(Svc.DefinitionAt(src, line: 1, character: 18)); // over "Decimal"
     }
+
+    [Fact]
+    public void Definition_of_a_spec_points_at_its_declaration()
+    {
+        var src =
+            "context C {\n" +
+            "  value Money { amount: Decimal }\n" +
+            "  spec Positive on Money = amount > 0\n" +
+            "}\n";
+        var def = Svc.DefinitionAt(src, line: 2, character: 9); // over "Positive"
+        Assert.NotNull(def);
+        Assert.Equal(3, def!.Target.Line); // 1-based line of the spec declaration
+    }
+
+    [Fact]
+    public void Definition_of_an_ambiguous_enum_member_is_null()
+    {
+        // "Shared" is declared in two enums -> navigation cannot resolve unambiguously.
+        var src =
+            "context C {\n" +
+            "  enum A { Shared, X }\n" +
+            "  enum B { Shared, Y }\n" +
+            "  value V { a: A = Shared }\n" +
+            "}\n";
+        var def = Svc.DefinitionAt(src, line: 3, character: 20); // over "Shared"
+        Assert.Null(def);
+    }
 }
