@@ -106,6 +106,7 @@ internal sealed class SyntaxGraph
     public KoineNode? FindNode(int offset) => Descend(_root, offset, static n => n.Span);
 
     /// <summary>The innermost node whose <see cref="KoineNode.NameSpan"/> contains <paramref name="offset"/>.</summary>
+    // FindNameNode routes by FullSpan (Span-derived); relies on every node with a real NameSpan having a covering Span (NameSpan ⊆ Span).
     public KoineNode? FindNameNode(int offset) => Descend(_root, offset, static n => n.NameSpan);
 
     /// <summary>

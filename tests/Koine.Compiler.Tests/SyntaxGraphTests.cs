@@ -157,4 +157,23 @@ public class SyntaxGraphTests
         Assert.Null(graph.FindNode(int.MaxValue));
         Assert.Null(graph.FindNode(-1));
     }
+
+    [Fact]
+    public void FindNameNode_lands_on_named_declaration_for_declaration_name_offset()
+    {
+        // Guard for the NameSpan ⊆ Span invariant: FindNameNode routes top-down descent by
+        // each node's FullSpan (Span-derived). If a future node were to set NameSpan while
+        // leaving Span.None, the descent would never enter that subtree and FindNameNode
+        // would silently miss the name. This test pins the happy path to catch that regression.
+        var model = Parse(Src);
+        var graph = new SyntaxGraph(model);
+
+        // "Money" first appears as the ValueObjectDecl name in "value Money { amount: Decimal }".
+        var offset = Src.IndexOf("Money", StringComparison.Ordinal);
+        var node = graph.FindNameNode(offset);
+
+        Assert.NotNull(node);
+        var voDecl = Assert.IsType<ValueObjectDecl>(node);
+        Assert.Equal("Money", voDecl.Name);
+    }
 }
