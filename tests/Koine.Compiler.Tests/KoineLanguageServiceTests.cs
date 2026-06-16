@@ -94,6 +94,65 @@ public class KoineLanguageServiceTests
     }
 
     [Fact]
+    public void Invariant_offers_enclosing_type_field_names()
+    {
+        // `invariant amount >= am` — after the '>=' operator, the in-scope fields of the
+        // enclosing value (Money) are offered, filtered by the "am" prefix.
+        var src =
+            "context C {\n" +
+            "  value Money {\n" +
+            "    amount: Decimal\n" +
+            "    invariant amount >= am\n" +
+            "  }\n" +
+            "}\n";
+        var items = Complete(src, line: 3, ch: 26);
+        var amount = Assert.Single(items, i => i.Label == "amount");
+        Assert.Equal(CompletionItemKind.Field, amount.Kind);
+        Assert.Equal("Decimal", amount.Detail);
+    }
+
+    [Fact]
+    public void Field_completion_renders_generic_member_types()
+    {
+        var src =
+            "context C {\n" +
+            "  value OrderLine { qty: Int }\n" +
+            "  value Basket {\n" +
+            "    lines: List<OrderLine>\n" +
+            "    invariant lines == li\n" +
+            "  }\n" +
+            "}\n";
+        var items = Complete(src, line: 4, ch: 25); // after the "li" prefix
+        var lines = Assert.Single(items, i => i.Label == "lines");
+        Assert.Equal(CompletionItemKind.Field, lines.Kind);
+        Assert.Equal("List<OrderLine>", lines.Detail);
+    }
+
+    [Fact]
+    public void Field_completion_does_not_fire_at_a_type_position()
+    {
+        // After ':' the type list — not field names — must be offered (no Field-kind noise).
+        var src = "context C {\n  value Money {\n    amount: Decimal\n    other:  \n  }\n}\n";
+        var items = Complete(src, line: 3, ch: 11); // after "other: "
+        Assert.DoesNotContain(items, i => i.Kind == CompletionItemKind.Field);
+        Assert.Contains(items, i => i.Label == "Decimal");
+    }
+
+    [Fact]
+    public void Hover_surfaces_a_types_doc_comment()
+    {
+        var src =
+            "context C {\n" +
+            "  /// The amount owed, in the order's currency.\n" +
+            "  value Money { amount: Decimal }\n" +
+            "  value Line { price: Money }\n" +
+            "}\n";
+        var hover = Svc.HoverAt(Doc(src), U, line: 3, character: 23); // over "Money"
+        Assert.NotNull(hover);
+        Assert.Contains("The amount owed", hover!.Markdown);
+    }
+
+    [Fact]
     public void Hover_over_a_value_type_shows_kind_and_members()
     {
         var src =

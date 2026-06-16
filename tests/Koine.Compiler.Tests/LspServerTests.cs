@@ -111,6 +111,14 @@ public class LspServerTests
             @params = new { textDocument = new { uri, languageId = "koine", version = 1, text } },
         }));
 
+    private static byte[] DidChange(string uri, string text) =>
+        Frame(JsonSerializer.Serialize(new
+        {
+            jsonrpc = "2.0",
+            method = "textDocument/didChange",
+            @params = new { textDocument = new { uri, version = 2 }, contentChanges = new[] { new { text } } },
+        }));
+
     private static byte[] Completion(string uri, int line, int character) =>
         Frame(JsonSerializer.Serialize(new
         {
@@ -253,5 +261,33 @@ public class LspServerTests
     {
         var output = RunSession(Initialize(), Completion("file:///never-opened.koi", 0, 0));
         Assert.DoesNotContain("\"items\"", output);
+    }
+
+    [Fact]
+    public void Publishes_diagnostics_on_each_edit()
+    {
+        // The criterion: diagnostics stream on EVERY edit, not just on open.
+        const string valid = "context C {\n  value V { x: String }\n}\n";
+        const string broken = "context C {\n  value V { x: Nope }\n}\n";
+        const string fixedUp = "context C {\n  value V { x: Int }\n}\n";
+
+        var output = RunSession(
+            Initialize(),
+            DidOpen("file:///e.koi", valid),
+            DidChange("file:///e.koi", broken),   // edit introduces an error
+            DidChange("file:///e.koi", fixedUp)); // edit fixes it
+
+        Assert.Contains("unknown type 'Nope'", output); // error streamed after the breaking edit
+        Assert.Contains("\"diagnostics\":[]", output);   // cleared after the fixing edit
+    }
+
+    [Fact]
+    public void Completion_offers_field_names_inside_an_invariant()
+    {
+        var doc = "context C {\n  value Money {\n    amount: Decimal\n    invariant amount >= am\n  }\n}\n";
+        var output = RunSession(Initialize(), DidOpen("file:///t.koi", doc), Completion("file:///t.koi", 3, 26));
+        Assert.Contains("\"items\"", output);
+        Assert.Contains("amount", output);
+        Assert.Contains("\"kind\":5", output); // CompletionItemKind.Field
     }
 }

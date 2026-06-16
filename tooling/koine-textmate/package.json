@@ -6,6 +6,11 @@
   "publisher": "koine",
   "engines": { "vscode": "^1.60.0" },
   "categories": ["Programming Languages"],
+  "license": "MIT",
+  "scripts": {
+    "package": "vsce package",
+    "install-vsce": "npm i -g @vscode/vsce"
+  },
   "contributes": {
     "languages": [
       {

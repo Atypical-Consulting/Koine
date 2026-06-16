@@ -184,6 +184,14 @@ internal sealed class LspServer
                     case "exit":
                         return 0;
 
+                    // Lifecycle/trace notifications we accept but don't act on. Listed
+                    // explicitly so they're documented no-ops rather than "method not found"
+                    // noise in the logs. (They carry no id, so no response is owed.)
+                    case "initialized":
+                    case "$/cancelRequest":
+                    case "$/setTrace":
+                        break;
+
                     default:
                         // Unknown request (has an id): reply method-not-found so the
                         // client doesn't block waiting. Unknown notifications: ignore.
