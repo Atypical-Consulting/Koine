@@ -153,12 +153,13 @@ public sealed class KoineLanguageService
         }
 
         // Expression-operand position inside a fielded type body (e.g. `invariant
-        // amount >= 0`, `requires qty > 0`): offer that type's field names. We only
+        // amount >= 0`, `requires qty > 0`): offer that type's field names AND the specs
+        // declared on it (a spec is referenceable by name as a boolean, R10.1). We only
         // fire after a token that begins/continues an expression, so we never add
         // noise at a declaration or parameter position.
         if (index is not null && ctx.EnclosingTypeName is { } scopeType && IsExpressionOperand(trigger))
         {
-            return FieldCandidates(index, scopeType);
+            return FieldCandidates(index, scopeType).Concat(SpecCandidates(index, scopeType)).ToList();
         }
 
         return Array.Empty<CompletionItem>();
@@ -236,6 +237,12 @@ public sealed class KoineLanguageService
                 var detail = index.TryGetMemberType(typeName, name, out var t) ? RenderType(t) : "field";
                 return new CompletionItem(name, CompletionItemKind.Field, detail, null);
             })
+            .ToList();
+
+    /// <summary>The specs declared on <paramref name="typeName"/> (R10.1), referenceable by name as booleans.</summary>
+    private static IReadOnlyList<CompletionItem> SpecCandidates(ModelIndex index, string typeName) =>
+        index.SpecsFor(typeName).Values
+            .Select(s => new CompletionItem(s.Name, CompletionItemKind.Method, "spec", s.Doc))
             .ToList();
 
     /// <summary>Renders a (possibly generic/optional) type reference for a completion detail, e.g. <c>List&lt;OrderLine&gt;?</c>.</summary>
