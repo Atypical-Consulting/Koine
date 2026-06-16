@@ -17,7 +17,7 @@ public sealed partial class CSharpEmitter
 
     private const string RuntimeNamespace = "Koine.Runtime";
 
-    private EmittedFile EmitRuntimeException()
+    private EmittedFile EmitRuntimeException(EmitContext emit)
     {
         var sb = new StringBuilder();
         sb.Append("/// <summary>Thrown when a domain invariant or illegal state transition is violated.</summary>\n");
@@ -31,19 +31,19 @@ public sealed partial class CSharpEmitter
         sb.Append("}\n");
 
         return new EmittedFile($"{FolderFor(RuntimeNamespace)}/DomainInvariantViolationException.cs",
-            Assemble(RuntimeNamespace, sb.ToString(), usesLinq: false));
+            Assemble(emit, RuntimeNamespace, sb.ToString(), usesLinq: false));
     }
 
-    private EmittedFile EmitAggregateRootInterface()
+    private EmittedFile EmitAggregateRootInterface(EmitContext emit)
     {
         var sb = new StringBuilder();
         sb.Append("/// <summary>Marks an entity as the consistency boundary (root) of an aggregate.</summary>\n");
         sb.Append("public interface IAggregateRoot { }\n");
         return new EmittedFile($"{FolderFor(RuntimeNamespace)}/IAggregateRoot.cs",
-            Assemble(RuntimeNamespace, sb.ToString(), usesLinq: false));
+            Assemble(emit, RuntimeNamespace, sb.ToString(), usesLinq: false));
     }
 
-    private EmittedFile EmitDomainEventInterface()
+    private EmittedFile EmitDomainEventInterface(EmitContext emit)
     {
         var sb = new StringBuilder();
         sb.Append("/// <summary>A fact that happened in the domain, recorded by an aggregate.</summary>\n");
@@ -52,11 +52,11 @@ public sealed partial class CSharpEmitter
         sb.Append(Indent).Append("DateTimeOffset OccurredOn { get; }\n");
         sb.Append("}\n");
         return new EmittedFile($"{FolderFor(RuntimeNamespace)}/IDomainEvent.cs",
-            Assemble(RuntimeNamespace, sb.ToString(), usesLinq: false));
+            Assemble(emit, RuntimeNamespace, sb.ToString(), usesLinq: false));
     }
 
     /// <summary>Emits the <c>IIntegrationEvent</c> published-language marker once into Koine.Runtime (R14.3).</summary>
-    private EmittedFile EmitIntegrationEventInterface()
+    private EmittedFile EmitIntegrationEventInterface(EmitContext emit)
     {
         var sb = new StringBuilder();
         sb.Append("/// <summary>A stable, cross-boundary published-language contract between bounded contexts.</summary>\n");
@@ -65,7 +65,7 @@ public sealed partial class CSharpEmitter
         sb.Append(Indent).Append("DateTimeOffset OccurredOn { get; }\n");
         sb.Append("}\n");
         return new EmittedFile($"{FolderFor(RuntimeNamespace)}/IIntegrationEvent.cs",
-            Assemble(RuntimeNamespace, sb.ToString(), usesLinq: false));
+            Assemble(emit, RuntimeNamespace, sb.ToString(), usesLinq: false));
     }
 
     /// <summary>
@@ -73,7 +73,7 @@ public sealed partial class CSharpEmitter
     /// mirroring <see cref="EmitRuntimeException"/>. A repository's update/remove
     /// contract throws it when a versioned aggregate is saved against a stale version.
     /// </summary>
-    private EmittedFile EmitConcurrencyConflictException()
+    private EmittedFile EmitConcurrencyConflictException(EmitContext emit)
     {
         var sb = new StringBuilder();
         sb.Append("/// <summary>Thrown when a versioned aggregate is saved against a stale expected version.</summary>\n");
@@ -89,7 +89,7 @@ public sealed partial class CSharpEmitter
         sb.Append("}\n");
 
         return new EmittedFile($"{FolderFor(RuntimeNamespace)}/ConcurrencyConflictException.cs",
-            Assemble(RuntimeNamespace, sb.ToString(), usesLinq: false));
+            Assemble(emit, RuntimeNamespace, sb.ToString(), usesLinq: false));
     }
 
     /// <summary>
@@ -97,7 +97,7 @@ public sealed partial class CSharpEmitter
     /// closed interval over an orderable <c>T</c> with a <c>start &lt;= end</c> construction
     /// invariant, <c>Contains</c>/<c>Overlaps</c>, and structural equality.
     /// </summary>
-    private EmittedFile EmitRange()
+    private EmittedFile EmitRange(EmitContext emit)
     {
         var sb = new StringBuilder();
         sb.Append("/// <summary>A closed interval [Start, End] over an orderable type, with containment and overlap.</summary>\n");
@@ -132,7 +132,7 @@ public sealed partial class CSharpEmitter
         sb.Append("}\n");
 
         return new EmittedFile($"{FolderFor(RuntimeNamespace)}/Range.cs",
-            Assemble(RuntimeNamespace, sb.ToString(), usesLinq: false));
+            Assemble(emit, RuntimeNamespace, sb.ToString(), usesLinq: false));
     }
 
     /// <summary>
@@ -141,7 +141,7 @@ public sealed partial class CSharpEmitter
     /// are immutable classes (not records) so every instance is funneled through a
     /// guarded constructor and can never exist in an invalid state.
     /// </summary>
-    private EmittedFile EmitValueObjectBase()
+    private EmittedFile EmitValueObjectBase(EmitContext emit)
     {
         var sb = new StringBuilder();
         sb.Append("/// <summary>Base class for value objects: equality by component value, not reference.</summary>\n");
@@ -206,6 +206,6 @@ public sealed partial class CSharpEmitter
         sb.Append("}\n");
 
         return new EmittedFile($"{FolderFor(RuntimeNamespace)}/ValueObject.cs",
-            Assemble(RuntimeNamespace, sb.ToString(), usesLinq: true));
+            Assemble(emit, RuntimeNamespace, sb.ToString(), usesLinq: true));
     }
 }

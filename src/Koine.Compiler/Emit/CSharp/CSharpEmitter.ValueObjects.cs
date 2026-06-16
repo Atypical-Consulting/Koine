@@ -16,6 +16,7 @@ public sealed partial class CSharpEmitter
     // ----------------------------------------------------------------------
 
     private EmittedFile EmitValueObject(
+        EmitContext emit,
         ValueObjectDecl vo,
         string ns,
         ModelIndex index,
@@ -84,7 +85,7 @@ public sealed partial class CSharpEmitter
 
             // Scalar arithmetic operators: emitted only when this value object is actually
             // multiplied by a scalar in a derived expression.
-            if (_scalarNeeds.TryGetValue(vo.Name, out var scalarTypes))
+            if (emit.ScalarNeeds.TryGetValue(vo.Name, out var scalarTypes))
             {
                 var numericFields = NumericFields(vo);
                 if (numericFields.Count > 0)
@@ -92,7 +93,7 @@ public sealed partial class CSharpEmitter
             }
 
             // Additive operator for value objects that are summed (e.g. lines.sum(l => l.subtotal)).
-            if (_additiveNeeds.Contains(vo.Name))
+            if (emit.AdditiveNeeds.Contains(vo.Name))
             {
                 var numericFields = NumericFields(vo);
                 if (numericFields.Count > 0)
@@ -110,7 +111,7 @@ public sealed partial class CSharpEmitter
         sb.Append("}\n");
 
         return new EmittedFile($"{FolderFor(ns)}/{vo.Name}.cs",
-            Assemble(ns, sb.ToString(), UsesLinq(vo.Members, vo.Invariants) || SpecBodiesUseLinq(vo.Name, index)));
+            Assemble(emit, ns, sb.ToString(), UsesLinq(vo.Members, vo.Invariants) || SpecBodiesUseLinq(vo.Name, index)));
     }
 
     /// <summary>

@@ -20,6 +20,7 @@ internal sealed class LspServer
 {
     private readonly KoineCompiler _compiler = new();
     private readonly KoineLanguageService _ls = new();
+    private readonly SemanticTokenProvider _semanticTokens = new();
     private readonly Dictionary<string, string> _docs = new(StringComparer.Ordinal);
 
     // On-disk baseline of every *.koi in the workspace (uri -> text), scanned at initialize.
@@ -127,6 +128,15 @@ internal sealed class LspServer
                                 ["referencesProvider"] = true,
                                 ["renameProvider"] = true,
                                 ["codeActionProvider"] = true,
+                                ["semanticTokensProvider"] = new Dictionary<string, object?>
+                                {
+                                    ["legend"] = new Dictionary<string, object?>
+                                    {
+                                        ["tokenTypes"] = SemanticTokenProvider.TokenTypeNames,
+                                        ["tokenModifiers"] = SemanticTokenProvider.TokenModifierNames,
+                                    },
+                                    ["full"] = true,
+                                },
                             },
                             ["serverInfo"] = new Dictionary<string, object?>
                             {
@@ -206,6 +216,11 @@ internal sealed class LspServer
                     case "textDocument/codeAction":
                         if (root.TryGetProperty("id", out _))
                             Respond(root, CodeActionResultJson(root));
+                        break;
+
+                    case "textDocument/semanticTokens/full":
+                        if (root.TryGetProperty("id", out _))
+                            Respond(root, SemanticTokensResultJson(root));
                         break;
 
                     case "shutdown":
@@ -496,6 +511,25 @@ internal sealed class LspServer
             });
         }
         return actions;
+    }
+
+    // ---- Semantic tokens --------------------------------------------------
+
+    /// <summary>
+    /// Computes full-document semantic tokens for the requested document and returns them in the
+    /// LSP <c>SemanticTokens</c> shape (<c>{ data: int[] }</c>), where <c>data</c> is the relative
+    /// (deltaLine/deltaStart/length/tokenType/tokenModifiers) integer stream. An unopened or
+    /// non-parsing document yields an empty stream (graceful degradation — the regex grammar
+    /// stays in charge of highlighting).
+    /// </summary>
+    private object? SemanticTokensResultJson(JsonElement root)
+    {
+        if (!TryGetUri(root, out var uri) || !_docs.TryGetValue(uri, out var text))
+            return new Dictionary<string, object?> { ["data"] = Array.Empty<int>() };
+
+        var tokens = _semanticTokens.Tokenize(text);
+        var data = SemanticTokenProvider.Encode(tokens);
+        return new Dictionary<string, object?> { ["data"] = data };
     }
 
     /// <summary>Extracts <c>X</c> from a Suggestions-style message ending in <c>… — did you mean 'X'?</c>.</summary>

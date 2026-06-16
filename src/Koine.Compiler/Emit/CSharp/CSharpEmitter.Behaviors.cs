@@ -53,6 +53,7 @@ public sealed partial class CSharpEmitter
     /// the parameter <c>x</c>; spec-to-spec references inline (R10.1).
     /// </summary>
     private EmittedFile EmitSpecifications(
+        EmitContext emit,
         string ns,
         IReadOnlyList<SpecDecl> specs,
         ModelIndex index,
@@ -81,7 +82,7 @@ public sealed partial class CSharpEmitter
         }
 
         sb.Append("}\n");
-        return new EmittedFile($"{FolderFor(ns)}/{ns}Specifications.cs", Assemble(ns, sb.ToString(), usesLinq));
+        return new EmittedFile($"{FolderFor(ns)}/{ns}Specifications.cs", Assemble(emit, ns, sb.ToString(), usesLinq));
     }
 
     /// <summary>
@@ -90,6 +91,7 @@ public sealed partial class CSharpEmitter
     /// (which makes the whole class <c>abstract</c>).
     /// </summary>
     private EmittedFile EmitService(
+        EmitContext emit,
         ServiceDecl svc,
         string ns,
         ModelIndex index,
@@ -134,7 +136,7 @@ public sealed partial class CSharpEmitter
 
         sb.Append("}\n");
         var usesLinq = svc.Operations.Any(o => o.Body is not null && ExprUsesLinq(o.Body));
-        return new EmittedFile($"{FolderFor(ns)}/{svc.Name}.cs", Assemble(ns, sb.ToString(), usesLinq));
+        return new EmittedFile($"{FolderFor(ns)}/{svc.Name}.cs", Assemble(emit, ns, sb.ToString(), usesLinq));
     }
 
     /// <summary>
@@ -144,6 +146,7 @@ public sealed partial class CSharpEmitter
     /// (honoring the no-imperative-logic stance).
     /// </summary>
     private EmittedFile EmitPolicy(
+        EmitContext emit,
         PolicyDecl policy,
         string ns,
         ModelIndex index,
@@ -178,6 +181,6 @@ public sealed partial class CSharpEmitter
         sb.Append(Indent).Append("public abstract Task Handle(").Append(policy.EventName).Append(" e, CancellationToken ct = default);\n");
         sb.Append("}\n");
 
-        return new EmittedFile($"{FolderFor(ns)}/{policyType}.cs", Assemble(ns, sb.ToString(), usesLinq: false));
+        return new EmittedFile($"{FolderFor(ns)}/{policyType}.cs", Assemble(emit, ns, sb.ToString(), usesLinq: false));
     }
 }

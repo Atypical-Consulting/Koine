@@ -196,6 +196,15 @@ public class LspServerTests
             },
         }));
 
+    private static byte[] SemanticTokensFull(string uri) =>
+        Frame(JsonSerializer.Serialize(new
+        {
+            jsonrpc = "2.0",
+            id = 25,
+            method = "textDocument/semanticTokens/full",
+            @params = new { textDocument = new { uri } },
+        }));
+
     private static byte[] InitializeWithRoot(string rootUri) =>
         Frame(JsonSerializer.Serialize(new
         {
@@ -446,6 +455,43 @@ public class LspServerTests
         // With both files merged, Ordering's reference to the imported Product resolves: no error.
         Assert.Contains("file:///ordering.koi", output);
         Assert.Contains("\"diagnostics\":[]", output);
+    }
+
+    // ---- Semantic tokens --------------------------------------------------
+
+    [Fact]
+    public void Initialize_advertises_semantic_tokens_with_a_legend()
+    {
+        var output = RunSession(Initialize());
+        Assert.Contains("\"semanticTokensProvider\"", output);
+        Assert.Contains("\"legend\"", output);
+        Assert.Contains("\"tokenTypes\":[\"type\",\"enum\",\"enumMember\",\"property\",\"keyword\",\"parameter\"]", output);
+        Assert.Contains("\"tokenModifiers\":[\"declaration\"]", output);
+        Assert.Contains("\"full\":true", output);
+    }
+
+    [Fact]
+    public void SemanticTokens_full_returns_encoded_data_for_a_sample_model()
+    {
+        var doc = "context C {\n  value Money { amount: Decimal }\n}\n";
+        var output = RunSession(Initialize(), DidOpen("file:///t.koi", doc), SemanticTokensFull("file:///t.koi"));
+        Assert.Contains("\"data\":[", output);
+        Assert.DoesNotContain("\"data\":[]", output); // a parsing model produces tokens
+    }
+
+    [Fact]
+    public void SemanticTokens_full_degrades_to_empty_for_a_broken_document()
+    {
+        var doc = "context C {\n  value {\n  }\n}\n"; // unnamed value: does not parse
+        var output = RunSession(Initialize(), DidOpen("file:///t.koi", doc), SemanticTokensFull("file:///t.koi"));
+        Assert.Contains("\"data\":[]", output);
+    }
+
+    [Fact]
+    public void SemanticTokens_full_for_unopened_document_returns_empty_data()
+    {
+        var output = RunSession(Initialize(), SemanticTokensFull("file:///never-opened.koi"));
+        Assert.Contains("\"data\":[]", output);
     }
 
     [Fact]

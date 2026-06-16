@@ -16,6 +16,7 @@ public sealed partial class CSharpEmitter
     // ----------------------------------------------------------------------
 
     private void EmitEntityAndId(
+        EmitContext emit,
         List<EmittedFile> files,
         EntityDecl entity,
         string ns,
@@ -25,14 +26,15 @@ public sealed partial class CSharpEmitter
         CSharpTypeMapper typeMapper,
         IReadOnlyDictionary<string, string> enumMemberToType)
     {
-        files.Add(EmitEntity(entity, ns, isRoot, isVersioned, index, typeMapper, enumMemberToType));
+        files.Add(EmitEntity(emit, entity, ns, isRoot, isVersioned, index, typeMapper, enumMemberToType));
         // The entity's ID value object lives in the context BASE namespace (R13.3) — not a
         // module sub-namespace — so any module's types can reference it via one `using`.
         // For a non-module entity the base namespace equals its own, so output is unchanged.
-        files.Add(EmitIdValueObject(entity.IdentityName, ContextOf(ns), entity.IdStrategy, entity.IdBackingType));
+        files.Add(EmitIdValueObject(emit, entity.IdentityName, ContextOf(ns), entity.IdStrategy, entity.IdBackingType));
     }
 
     private EmittedFile EmitEntity(
+        EmitContext emit,
         EntityDecl entity,
         string ns,
         bool isRoot,
@@ -144,7 +146,7 @@ public sealed partial class CSharpEmitter
         sb.Append("}\n");
 
         return new EmittedFile($"{FolderFor(ns)}/{entity.Name}.cs",
-            Assemble(ns, sb.ToString(), EntityUsesLinq(entity) || SpecBodiesUseLinq(entity.Name, index)));
+            Assemble(emit, ns, sb.ToString(), EntityUsesLinq(entity) || SpecBodiesUseLinq(entity.Name, index)));
     }
 
     /// <summary>
@@ -158,6 +160,7 @@ public sealed partial class CSharpEmitter
     /// All strategies have value equality on the wrapped <c>Value</c>.
     /// </summary>
     private EmittedFile EmitIdValueObject(
+        EmitContext emit,
         string idName, string ns,
         IdentityStrategy strategy = IdentityStrategy.Guid, string? backing = null)
     {
@@ -205,6 +208,6 @@ public sealed partial class CSharpEmitter
         sb.Append(Indent).Append("}\n");
         sb.Append("}\n");
 
-        return new EmittedFile($"{FolderFor(ns)}/{idName}.cs", Assemble(ns, sb.ToString(), usesLinq: false));
+        return new EmittedFile($"{FolderFor(ns)}/{idName}.cs", Assemble(emit, ns, sb.ToString(), usesLinq: false));
     }
 }

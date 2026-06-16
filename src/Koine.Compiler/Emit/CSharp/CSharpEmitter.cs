@@ -17,57 +17,40 @@ public sealed partial class CSharpEmitter : IEmitter
 
     private const string Indent = "    ";
 
-    // Value-object name -> scalar C# types ("int"/"decimal") it is multiplied by
-    // in some derived expression. Drives scalar operator generation (see below).
-    private IReadOnlyDictionary<string, IReadOnlySet<string>> _scalarNeeds =
-        new Dictionary<string, IReadOnlySet<string>>();
-
-    // Value-object names that are folded with `+` somewhere (e.g. `lines.sum(l => l.subtotal)`
-    // over a Money field). Drives generation of an additive operator.
-    private IReadOnlySet<string> _additiveNeeds = new HashSet<string>();
-
-    // All context (namespace) names in the model. Every type in a context shares
-    // the single namespace <Context>; aggregates are boundaries, not namespaces.
-    private IReadOnlyList<string> _contextNames = Array.Empty<string>();
-
-    // ID type name -> its declared identity strategy (R11.1). An ID referenced but
-    // not owned by any entity (e.g. a foreign-context *Id) defaults to Guid.
-    private IReadOnlyDictionary<string, (IdentityStrategy Strategy, string? Backing)> _idStrategies =
-        new Dictionary<string, (IdentityStrategy, string?)>();
-
-    // The model index, used by Assemble to compute precise cross-namespace usings (R13.2/R13.3).
-    private ModelIndex _index = null!;
-
     public IReadOnlyList<EmittedFile> Emit(KoineModel model)
     {
         var index = new ModelIndex(model);
-        _index = index;
         var typeMapper = new CSharpTypeMapper(index);
         var enumMemberToType = BuildEnumMemberMap(model);
-        _scalarNeeds = OperatorNeedsAnalyzer.BuildScalarOperatorNeeds(model, index);
-        _additiveNeeds = OperatorNeedsAnalyzer.BuildAdditiveOperatorNeeds(model, index);
-        _contextNames = model.Contexts.Select(c => c.Name).ToList();
-        _idStrategies = BuildIdentityStrategies(model);
+
+        // All per-run state lives in this immutable record, threaded through the emit
+        // methods so the emitter holds no mutable per-model fields (it stays reentrant).
+        var emit = new EmitContext(
+            Index: index,
+            ScalarNeeds: OperatorNeedsAnalyzer.BuildScalarOperatorNeeds(model, index),
+            AdditiveNeeds: OperatorNeedsAnalyzer.BuildAdditiveOperatorNeeds(model, index),
+            ContextNames: model.Contexts.Select(c => c.Name).ToList(),
+            IdStrategies: BuildIdentityStrategies(model));
 
         var files = new List<EmittedFile>();
 
         // 1. Runtime support, emitted once.
-        files.Add(EmitRuntimeException());
-        files.Add(EmitAggregateRootInterface());
+        files.Add(EmitRuntimeException(emit));
+        files.Add(EmitAggregateRootInterface(emit));
         // Value-object base is needed for declared value objects/entities AND for any generated
         // ID value object (e.g. an *Id referenced only by an integration event, R14.3).
         if (NeedsValueObjects(model) || index.IdTypeNames.Count > 0)
-            files.Add(EmitValueObjectBase());
+            files.Add(EmitValueObjectBase(emit));
         if (UsesRange(model))
-            files.Add(EmitRange());
+            files.Add(EmitRange(emit));
         if (HasEvents(model))
-            files.Add(EmitDomainEventInterface());
+            files.Add(EmitDomainEventInterface(emit));
         if (HasIntegrationEvents(model))
-            files.Add(EmitIntegrationEventInterface());
+            files.Add(EmitIntegrationEventInterface(emit));
         if (HasVersionedAggregate(model))
-            files.Add(EmitConcurrencyConflictException());
+            files.Add(EmitConcurrencyConflictException(emit));
         if (HasQueries(model))
-            files.Add(EmitQueryHandlerInterface());
+            files.Add(EmitQueryHandlerInterface(emit));
 
         // 2. Per-context user types. Aggregate-nested types are flattened into the
         //    context namespace; the aggregate boundary is marked via IAggregateRoot.
@@ -92,28 +75,28 @@ public sealed partial class CSharpEmitter : IEmitter
                 switch (type)
                 {
                     case ValueObjectDecl vo:
-                        files.Add(EmitValueObject(vo, ns, index, typeMapper, enumMemberToType));
+                        files.Add(EmitValueObject(emit, vo, ns, index, typeMapper, enumMemberToType));
                         break;
                     case EntityDecl entity:
-                        EmitEntityAndId(files, entity, ns, isRoot: false, isVersioned: false, index, typeMapper, enumMemberToType);
+                        EmitEntityAndId(emit, files, entity, ns, isRoot: false, isVersioned: false, index, typeMapper, enumMemberToType);
                         break;
                     case EnumDecl @enum:
-                        files.Add(EmitEnum(@enum, ns, index, typeMapper, enumMemberToType));
+                        files.Add(EmitEnum(emit, @enum, ns, index, typeMapper, enumMemberToType));
                         break;
                     case EventDecl @event:
-                        files.Add(EmitEvent(@event, ns, index, typeMapper, enumMemberToType));
+                        files.Add(EmitEvent(emit, @event, ns, index, typeMapper, enumMemberToType));
                         break;
                     case IntegrationEventDecl @event:
-                        files.Add(EmitIntegrationEvent(@event, ns, index, typeMapper, enumMemberToType));
+                        files.Add(EmitIntegrationEvent(emit, @event, ns, index, typeMapper, enumMemberToType));
                         break;
                     case AggregateDecl agg:
-                        EmitAggregate(files, agg, ns, index, typeMapper, enumMemberToType);
+                        EmitAggregate(emit, files, agg, ns, index, typeMapper, enumMemberToType);
                         break;
                     case ReadModelDecl rm:
-                        files.Add(EmitReadModel(rm, ns, index, typeMapper, enumMemberToType));
+                        files.Add(EmitReadModel(emit, rm, ns, index, typeMapper, enumMemberToType));
                         break;
                     case QueryDecl query:
-                        files.Add(EmitQuery(query, ns, typeMapper));
+                        files.Add(EmitQuery(emit, query, ns, typeMapper));
                         break;
                 }
             }
@@ -123,9 +106,9 @@ public sealed partial class CSharpEmitter : IEmitter
             // known (a cross-context reference), else default to Guid.
             foreach (var idName in OrderedUnownedIds(ctx, index, idOwnership))
             {
-                var (strategy, backing) = _idStrategies.TryGetValue(idName, out var s)
+                var (strategy, backing) = emit.IdStrategies.TryGetValue(idName, out var s)
                     ? s : (IdentityStrategy.Guid, null);
-                files.Add(EmitIdValueObject(idName, ctx.Name, strategy, backing));
+                files.Add(EmitIdValueObject(emit, idName, ctx.Name, strategy, backing));
             }
 
             // 3. R10 behavioral declarations: specifications, services, policies.
@@ -133,23 +116,23 @@ public sealed partial class CSharpEmitter : IEmitter
                 .Concat(ctx.Types.OfType<AggregateDecl>().SelectMany(a => a.Specs))
                 .ToList();
             if (contextSpecs.Count > 0)
-                files.Add(EmitSpecifications(ctx.Name, contextSpecs, index, typeMapper, enumMemberToType));
+                files.Add(EmitSpecifications(emit, ctx.Name, contextSpecs, index, typeMapper, enumMemberToType));
             foreach (var svc in ctx.Services)
             {
                 // A service emits a stateless domain class for its pure operations (R10.2)
                 // and/or an application-service interface for its use cases (R12.2).
                 if (svc.Operations.Count > 0)
-                    files.Add(EmitService(svc, ctx.Name, index, typeMapper, enumMemberToType));
+                    files.Add(EmitService(emit, svc, ctx.Name, index, typeMapper, enumMemberToType));
                 if (svc.UseCases.Count > 0)
-                    files.Add(EmitApplicationService(svc, ctx.Name, typeMapper));
+                    files.Add(EmitApplicationService(emit, svc, ctx.Name, typeMapper));
             }
             foreach (var policy in ctx.Policies)
-                files.Add(EmitPolicy(policy, ctx.Name, index, enumMemberToType));
+                files.Add(EmitPolicy(emit, policy, ctx.Name, index, enumMemberToType));
 
             // 4. Integration-event subscriber handler seams (R14.3): one IHandle<Event> per
             //    subscription. No handler is generated for events the context only publishes.
             foreach (var sub in ctx.Subscribes)
-                files.Add(EmitIntegrationEventHandler(sub, ctx.Name, index));
+                files.Add(EmitIntegrationEventHandler(emit, sub, ctx.Name, index));
 
             // 5. The context's Unit of Work (R12.1): a transactional seam over its
             //    aggregate repositories. Emitted only when the context has aggregates whose
@@ -158,7 +141,7 @@ public sealed partial class CSharpEmitter : IEmitter
                 .Where(a => a.RootEntity() is not null)
                 .ToList();
             if (aggregates.Count > 0)
-                files.Add(EmitUnitOfWork(ctx.Name, aggregates));
+                files.Add(EmitUnitOfWork(emit, ctx.Name, aggregates));
         }
 
         // 6. Anti-corruption-layer translator interfaces (R14.2): one per ACL relation that
@@ -166,7 +149,7 @@ public sealed partial class CSharpEmitter : IEmitter
         if (model.ContextMap is { } map)
             foreach (var r in map.Relations)
                 if (r.Kind == ContextRelationKind.AntiCorruptionLayer && r.AclMappings.Count > 0)
-                    files.Add(EmitAclTranslator(r, index));
+                    files.Add(EmitAclTranslator(emit, r, index));
 
         return files;
     }
@@ -183,6 +166,7 @@ public sealed partial class CSharpEmitter : IEmitter
     /// like enum members (<c>OrderStatus.Cancelled</c>).
     /// </summary>
     private EmittedFile EmitEnum(
+        EmitContext emit,
         EnumDecl @enum,
         string ns,
         ModelIndex index,
@@ -264,7 +248,7 @@ public sealed partial class CSharpEmitter : IEmitter
 
         sb.Append("}\n");
 
-        return new EmittedFile($"{FolderFor(ns)}/{name}.cs", Assemble(ns, sb.ToString(), usesLinq: true));
+        return new EmittedFile($"{FolderFor(ns)}/{name}.cs", Assemble(emit, ns, sb.ToString(), usesLinq: true));
     }
 
     // ----------------------------------------------------------------------
@@ -322,6 +306,7 @@ public sealed partial class CSharpEmitter : IEmitter
     /// <c>OccurredOn</c> timestamp defaulted at construction.
     /// </summary>
     private EmittedFile EmitEvent(
+        EmitContext emit,
         EventDecl ev,
         string ns,
         ModelIndex index,
@@ -371,7 +356,7 @@ public sealed partial class CSharpEmitter : IEmitter
 
         sb.Append("}\n");
         return new EmittedFile($"{FolderFor(ns)}/{ev.Name}.cs",
-            Assemble(ns, sb.ToString(), UsesLinq(ev.Members, Array.Empty<Invariant>())));
+            Assemble(emit, ns, sb.ToString(), UsesLinq(ev.Members, Array.Empty<Invariant>())));
     }
 
     /// <summary>
@@ -379,6 +364,7 @@ public sealed partial class CSharpEmitter : IEmitter
     /// mirroring <see cref="EmitEvent"/> but with the cross-boundary marker.
     /// </summary>
     private EmittedFile EmitIntegrationEvent(
+        EmitContext emit,
         IntegrationEventDecl ev,
         string ns,
         ModelIndex index,
@@ -428,14 +414,14 @@ public sealed partial class CSharpEmitter : IEmitter
 
         sb.Append("}\n");
         return new EmittedFile($"{FolderFor(ns)}/{ev.Name}.cs",
-            Assemble(ns, sb.ToString(), UsesLinq(ev.Members, Array.Empty<Invariant>())));
+            Assemble(emit, ns, sb.ToString(), UsesLinq(ev.Members, Array.Empty<Invariant>())));
     }
 
     /// <summary>
     /// Emits the subscriber handler seam for a subscription (R14.3): an <c>IHandle&lt;Event&gt;</c>
     /// interface in the subscriber's namespace, with a precise <c>using</c> to the publisher.
     /// </summary>
-    private EmittedFile EmitIntegrationEventHandler(SubscribeDecl sub, string subscriberContext, ModelIndex index)
+    private EmittedFile EmitIntegrationEventHandler(EmitContext emit, SubscribeDecl sub, string subscriberContext, ModelIndex index)
     {
         // Fully-qualify the event type with the publisher's namespace so it can never bind to a
         // same-named integration event the subscriber happens to declare locally (R14.3).
@@ -450,14 +436,14 @@ public sealed partial class CSharpEmitter : IEmitter
         sb.Append("}\n");
 
         return new EmittedFile($"{FolderFor(subscriberContext)}/IHandle{sub.EventName}.cs",
-            Assemble(subscriberContext, sb.ToString(), usesLinq: false));
+            Assemble(emit, subscriberContext, sb.ToString(), usesLinq: false));
     }
 
     /// <summary>
     /// Emits the anti-corruption-layer translator interface (R14.2): <c>I&lt;Up&gt;To&lt;Down&gt;Translator</c>
     /// in the downstream context, with one fully-qualified <c>Translate</c> per ACL mapping.
     /// </summary>
-    private EmittedFile EmitAclTranslator(ContextRelation r, ModelIndex index)
+    private EmittedFile EmitAclTranslator(EmitContext emit, ContextRelation r, ModelIndex index)
     {
         var iface = $"I{r.Upstream}To{r.Downstream}Translator";
         var sb = new StringBuilder();
@@ -479,7 +465,7 @@ public sealed partial class CSharpEmitter : IEmitter
         sb.Append("}\n");
 
         return new EmittedFile($"{FolderFor(r.Downstream)}/{iface}.cs",
-            Assemble(r.Downstream, sb.ToString(), usesLinq: false));
+            Assemble(emit, r.Downstream, sb.ToString(), usesLinq: false));
     }
 
     // ----------------------------------------------------------------------
@@ -1074,86 +1060,39 @@ public sealed partial class CSharpEmitter : IEmitter
     /// carry no unused imports. LINQ is passed in because <c>.Count</c> (a property)
     /// and <c>.Count()</c> (a LINQ call) are not distinguishable by a token scan.
     /// </summary>
-    private string Assemble(string ns, string body, bool usesLinq)
+    private string Assemble(EmitContext emit, string ns, string body, bool usesLinq)
     {
-        var usings = new List<string>();
-        void Need(bool condition, string ns2) { if (condition && !usings.Contains(ns2)) usings.Add(ns2); }
-
-        Need(body.Contains("Guid") || body.Contains("DateTimeOffset")
-             || body.Contains("IEquatable") || body.Contains("new HashCode(") || body.Contains("HashCode.Combine")
-             || body.Contains("IComparable")
-             || body.Contains(": Exception") || body.Contains("ArgumentOutOfRangeException")
-             || body.Contains("ArgumentNullException") || body.Contains("InvalidOperationException")
-             || body.Contains("[Obsolete("), "System");
-        Need(body.Contains("IEnumerable<") || body.Contains("IReadOnlyList<") || body.Contains("List<")
-             || body.Contains("IReadOnlySet<") || body.Contains("HashSet<")
-             || body.Contains("IReadOnlyDictionary<") || body.Contains("Dictionary<")
-             || body.Contains("EqualityComparer<"), "System.Collections.Generic");
-        // Read-only collection wrappers exposed by entity/VO constructors (ReadOnlySet<T>,
-        // ReadOnlyDictionary<K,V>). Lists use List<T>.AsReadOnly(), which needs no extra using.
-        Need(body.Contains("new ReadOnlySet<") || body.Contains("new ReadOnlyDictionary<"),
-            "System.Collections.ObjectModel");
-        Need(usesLinq, "System.Linq");
-        // Repository contracts (R11.2/3) are async and take a CancellationToken.
-        Need(body.Contains("Task"), "System.Threading.Tasks");
-        Need(body.Contains("CancellationToken"), "System.Threading");
-        Need(body.Contains("Regex"), "System.Text.RegularExpressions");
-        Need(ns != "Koine.Runtime"
-             && (body.Contains("ValueObject") || body.Contains("IAggregateRoot")
-                 || body.Contains("IDomainEvent") || body.Contains("IIntegrationEvent")
-                 || body.Contains("DomainInvariantViolationException")
-                 || body.Contains("Range<")), "Koine.Runtime");
+        // Usings are derived from data — a UsingCollector that maps runtime/BCL markers and
+        // cross-namespace user-type references to their namespaces — rather than a fixed block,
+        // so files carry no unused imports.
+        var collector = new UsingCollector();
+        collector.CollectRuntimeNamespaces(ns, body, usesLinq);
 
         // Cross-namespace user-type references (other contexts via imports, and other
         // modules of the same context) emit unqualified, so a precise `using` is added for
         // each referenced type's namespace (R13.2/R13.3). Qualified refs emit fully-qualified
         // and need none. The runtime files never reference user types.
         var context = ns.Split('.')[0];
-        if (_contextNames.Contains(context))
-            foreach (var (name, typeNs) in _index.VisibleTypeNamespaces(context))
-                Need(typeNs != ns && ContainsWord(body, name), typeNs);
+        if (emit.ContextNames.Contains(context))
+            collector.CollectUserTypeNamespaces(ns, body, emit.Index.VisibleTypeNamespaces(context));
         // A shared-kernel file lives in a synthetic namespace (not a real context); resolve its
         // cross-namespace references against its partner contexts' visible types (R14.2).
-        else if (_index.IsKernelNamespace(ns))
-            foreach (var (name, typeNs) in _index.KernelVisibleTypeNamespaces(ns))
-                Need(typeNs != ns && ContainsWord(body, name), typeNs);
+        else if (emit.Index.IsKernelNamespace(ns))
+            collector.CollectUserTypeNamespaces(ns, body, emit.Index.KernelVisibleTypeNamespaces(ns));
 
         var sb = new StringBuilder();
         sb.Append("// <auto-generated/>\n");
         // Generated files opt out of the project's nullable context, so re-enable it
         // explicitly — our signatures use nullable annotations (e.g. string?, object?).
         sb.Append("#nullable enable\n\n");
-        foreach (var u in usings.OrderBy(UsingSortKey, StringComparer.Ordinal).ThenBy(u => u, StringComparer.Ordinal))
+        foreach (var u in collector.ToSortedUsings())
             sb.Append("using ").Append(u).Append(";\n");
-        if (usings.Count > 0)
+        if (collector.Count > 0)
             sb.Append('\n');
         sb.Append("namespace ").Append(ns).Append(";\n\n");
         sb.Append(body);
         return sb.ToString();
     }
-
-    /// <summary>True when <paramref name="word"/> appears in <paramref name="text"/> as a whole identifier (not a substring).</summary>
-    private static bool ContainsWord(string text, string word)
-    {
-        var i = 0;
-        while ((i = text.IndexOf(word, i, StringComparison.Ordinal)) >= 0)
-        {
-            var before = i == 0 || !IsIdentChar(text[i - 1]);
-            var afterIdx = i + word.Length;
-            var after = afterIdx >= text.Length || !IsIdentChar(text[afterIdx]);
-            if (before && after)
-                return true;
-            i = afterIdx;
-        }
-        return false;
-    }
-
-    private static bool IsIdentChar(char c) => char.IsLetterOrDigit(c) || c == '_';
-
-    // System and System.* sort before everything else, mirroring the default
-    // "System directives first" using-ordering.
-    private static string UsingSortKey(string ns) =>
-        ns == "System" || ns.StartsWith("System.", StringComparison.Ordinal) ? "0" + ns : "1" + ns;
 
     /// <summary>The declared enum type of an enum-typed member (hint for qualifying bare members), else null.</summary>
     private static string? EnumExpected(Member m, ModelIndex index) =>
