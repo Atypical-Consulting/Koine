@@ -1267,20 +1267,7 @@ public sealed partial class CSharpEmitter : IEmitter
     /// <summary>Synthesizes a readable rule message from an unmessaged invariant.</summary>
     private static string SynthesizeMessage(Expr condition) => SourceText(condition);
 
-    private static string SourceText(Expr expr) => expr switch
-    {
-        IdentifierExpr id => id.Name,
-        LiteralExpr lit => lit.Kind == LiteralKind.String ? $"\"{lit.Text}\"" : lit.Text,
-        MemberAccessExpr ma => $"{SourceText(ma.Target)}.{ma.MemberName}",
-        CallExpr c => $"{SourceText(c.Target)}.{c.Method}({string.Join(", ", c.Args.Select(SourceText))})",
-        LambdaExpr l => $"{l.Parameter} => {SourceText(l.Body)}",
-        ConditionalExpr cd => $"if {SourceText(cd.Condition)} then {SourceText(cd.Then)} else {SourceText(cd.Else)}",
-        UnaryExpr u => (u.Op == UnaryOp.Not ? "not " : "-") + SourceText(u.Operand),
-        BinaryExpr b => $"{SourceText(b.Left)} {SourceOp(b.Op)} {SourceText(b.Right)}",
-        MatchExpr m => $"{SourceText(m.Target)} matches /{m.Pattern}/",
-        GuardExpr g => $"{SourceText(g.Body)} when {SourceText(g.Condition)}",
-        _ => "invariant"
-    };
+    private static string SourceText(Expr expr) => SourceTextVisitor.Instance.Visit(expr);
 
     private static string SourceOp(BinaryOp op) => op switch
     {
@@ -1298,6 +1285,47 @@ public sealed partial class CSharpEmitter : IEmitter
         BinaryOp.Div => "/",
         _ => "?"
     };
+
+    /// <summary>
+    /// Renders an expression back to Koine source syntax, for synthesizing a readable rule
+    /// message from an unmessaged invariant. Exhaustive (<see cref="ExprVisitor{T}"/>) so every
+    /// node — including <c>??</c> and <c>let … in …</c> — round-trips rather than collapsing to
+    /// a generic placeholder.
+    /// </summary>
+    private sealed class SourceTextVisitor : ExprVisitor<string>
+    {
+        public static readonly SourceTextVisitor Instance = new();
+
+        private SourceTextVisitor() { }
+
+        protected override string VisitIdentifier(IdentifierExpr n) => n.Name;
+
+        protected override string VisitLiteral(LiteralExpr n) =>
+            n.Kind == LiteralKind.String ? $"\"{n.Text}\"" : n.Text;
+
+        protected override string VisitMemberAccess(MemberAccessExpr n) => $"{Visit(n.Target)}.{n.MemberName}";
+
+        protected override string VisitCall(CallExpr n) =>
+            $"{Visit(n.Target)}.{n.Method}({string.Join(", ", n.Args.Select(Visit))})";
+
+        protected override string VisitLambda(LambdaExpr n) => $"{n.Parameter} => {Visit(n.Body)}";
+
+        protected override string VisitConditional(ConditionalExpr n) =>
+            $"if {Visit(n.Condition)} then {Visit(n.Then)} else {Visit(n.Else)}";
+
+        protected override string VisitCoalesce(CoalesceExpr n) => $"{Visit(n.Left)} ?? {Visit(n.Right)}";
+
+        protected override string VisitUnary(UnaryExpr n) => (n.Op == UnaryOp.Not ? "not " : "-") + Visit(n.Operand);
+
+        protected override string VisitBinary(BinaryExpr n) => $"{Visit(n.Left)} {SourceOp(n.Op)} {Visit(n.Right)}";
+
+        protected override string VisitMatch(MatchExpr n) => $"{Visit(n.Target)} matches /{n.Pattern}/";
+
+        protected override string VisitGuard(GuardExpr n) => $"{Visit(n.Body)} when {Visit(n.Condition)}";
+
+        protected override string VisitLet(LetExpr n) =>
+            $"let {string.Join(", ", n.Bindings.Select(b => $"{b.Name} = {Visit(b.Value)}"))} in {Visit(n.Body)}";
+    }
 
     // ----------------------------------------------------------------------
     // File header (using block + namespace)
@@ -1383,19 +1411,7 @@ public sealed partial class CSharpEmitter : IEmitter
         members.Any(m => m.Initializer is not null && ExprUsesLinq(m.Initializer))
         || invariants.Any(inv => ExprUsesLinq(inv.Condition));
 
-    private static bool ExprUsesLinq(Expr expr) => expr switch
-    {
-        CallExpr c => BuiltinOps.TakesLambda(c.Method) || c.Method == "contains"
-                      || ExprUsesLinq(c.Target) || c.Args.Any(ExprUsesLinq),
-        LambdaExpr l => ExprUsesLinq(l.Body),
-        BinaryExpr b => ExprUsesLinq(b.Left) || ExprUsesLinq(b.Right),
-        UnaryExpr u => ExprUsesLinq(u.Operand),
-        MemberAccessExpr ma => ExprUsesLinq(ma.Target),
-        ConditionalExpr cd => ExprUsesLinq(cd.Condition) || ExprUsesLinq(cd.Then) || ExprUsesLinq(cd.Else),
-        GuardExpr g => ExprUsesLinq(g.Body) || ExprUsesLinq(g.Condition),
-        MatchExpr m => ExprUsesLinq(m.Target),
-        _ => false
-    };
+    private static bool ExprUsesLinq(Expr expr) => LinqUsageVisitor.Instance.Visit(expr);
 
     /// <summary>Renders a target-agnostic doc string as a C# XML <c>&lt;summary&gt;</c>.</summary>
     private static void WriteXmlDoc(StringBuilder sb, string? doc, string indent)

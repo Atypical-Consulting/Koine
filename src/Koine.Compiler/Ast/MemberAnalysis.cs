@@ -83,145 +83,65 @@ public static class MemberAnalysis
     public static bool IsAssignable(TypeRef value, TypeRef target) =>
         TypeShapeEquals(value, target) || (value.Name == "Int" && target.Name == "Decimal");
 
-    /// <summary>Enumerates every identifier name referenced inside an expression.</summary>
+    /// <summary>Enumerates every FREE identifier name referenced inside an expression (in
+    /// depth-first, left-to-right order, with duplicates). Lambda parameters and let-bound names
+    /// are bound variables, so they are excluded from the body that introduces them.</summary>
     public static IEnumerable<string> ReferencedIdentifiers(Expr expr)
     {
-        switch (expr)
+        var walker = new FreeIdentifierWalker();
+        walker.Visit(expr);
+        return walker.Result;
+    }
+
+    /// <summary>
+    /// Collects free identifiers, tracking the names currently bound by an enclosing lambda
+    /// parameter or let binding (with save/restore so shadowing is handled correctly).
+    /// </summary>
+    private sealed class FreeIdentifierWalker : ExprWalker
+    {
+        private readonly HashSet<string> _bound = new(StringComparer.Ordinal);
+
+        public List<string> Result { get; } = new();
+
+        protected override void VisitIdentifier(IdentifierExpr n)
         {
-            case IdentifierExpr id:
-                yield return id.Name;
-                break;
-            case MemberAccessExpr ma:
-                foreach (var n in ReferencedIdentifiers(ma.Target))
+            if (!_bound.Contains(n.Name))
+            {
+                Result.Add(n.Name);
+            }
+        }
+
+        protected override void VisitLambda(LambdaExpr n)
+        {
+            // The parameter is bound within the body; restore on exit so a same-named outer
+            // binding stays visible to siblings.
+            var added = _bound.Add(n.Parameter);
+            Visit(n.Body);
+            if (added)
+            {
+                _bound.Remove(n.Parameter);
+            }
+        }
+
+        protected override void VisitLet(LetExpr n)
+        {
+            // Sequential scoping: a binding value sees only EARLIER bindings (register the name
+            // AFTER visiting its value, so a value cannot see its own name); the body sees all.
+            var added = new List<string>();
+            foreach (LetBinding binding in n.Bindings)
+            {
+                Visit(binding.Value);
+                if (_bound.Add(binding.Name))
                 {
-                    yield return n;
+                    added.Add(binding.Name);
                 }
+            }
 
-                break;
-            case CallExpr call:
-                foreach (var n in ReferencedIdentifiers(call.Target))
-                {
-                    yield return n;
-                }
-
-                foreach (Expr arg in call.Args)
-                {
-                    foreach (var n in ReferencedIdentifiers(arg))
-                    {
-                        yield return n;
-                    }
-                }
-
-                break;
-            case LambdaExpr lambda:
-                // The lambda parameter is a bound variable, not a free reference;
-                // exclude it (and any shadowed use) from the referenced set.
-                foreach (var n in ReferencedIdentifiers(lambda.Body))
-                {
-                    if (n != lambda.Parameter)
-                    {
-                        yield return n;
-                    }
-                }
-
-                break;
-            case ConditionalExpr cond:
-                foreach (var n in ReferencedIdentifiers(cond.Condition))
-                {
-                    yield return n;
-                }
-
-                foreach (var n in ReferencedIdentifiers(cond.Then))
-                {
-                    yield return n;
-                }
-
-                foreach (var n in ReferencedIdentifiers(cond.Else))
-                {
-                    yield return n;
-                }
-
-                break;
-            case CoalesceExpr coalesce:
-                foreach (var n in ReferencedIdentifiers(coalesce.Left))
-                {
-                    yield return n;
-                }
-
-                foreach (var n in ReferencedIdentifiers(coalesce.Right))
-                {
-                    yield return n;
-                }
-
-                break;
-            case BinaryExpr b:
-                foreach (var n in ReferencedIdentifiers(b.Left))
-                {
-                    yield return n;
-                }
-
-                foreach (var n in ReferencedIdentifiers(b.Right))
-                {
-                    yield return n;
-                }
-
-                break;
-            case UnaryExpr u:
-                foreach (var n in ReferencedIdentifiers(u.Operand))
-                {
-                    yield return n;
-                }
-
-                break;
-            case MatchExpr m:
-                foreach (var n in ReferencedIdentifiers(m.Target))
-                {
-                    yield return n;
-                }
-
-                break;
-            case GuardExpr g:
-                foreach (var n in ReferencedIdentifiers(g.Body))
-                {
-                    yield return n;
-                }
-
-                foreach (var n in ReferencedIdentifiers(g.Condition))
-                {
-                    yield return n;
-                }
-
-                break;
-            case LetExpr let:
-                {
-                    // Binding names are bound variables, not free references: a value sees
-                    // earlier bindings, and the body sees them all, so yield only the FREE
-                    // identifiers (those not introduced by an earlier-or-current binding).
-                    var boundNames = new HashSet<string>(StringComparer.Ordinal);
-                    foreach (LetBinding binding in let.Bindings)
-                    {
-                        foreach (var n in ReferencedIdentifiers(binding.Value))
-                        {
-                            if (!boundNames.Contains(n))
-                            {
-                                yield return n;
-                            }
-                        }
-
-                        boundNames.Add(binding.Name);
-                    }
-                    foreach (var n in ReferencedIdentifiers(let.Body))
-                    {
-                        if (!boundNames.Contains(n))
-                        {
-                            yield return n;
-                        }
-                    }
-
-                    break;
-                }
-            case LiteralExpr:
-                break;
+            Visit(n.Body);
+            foreach (var name in added)
+            {
+                _bound.Remove(name);
+            }
         }
     }
 }

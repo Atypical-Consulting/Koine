@@ -211,55 +211,44 @@ internal static class OperatorNeedsAnalyzer
         return needs;
     }
 
-    private static void ScanForValueObjectSum(Expr expr, TypeScope scope, TypeResolver resolver, HashSet<string> needs)
+    private static void ScanForValueObjectSum(Expr expr, TypeScope scope, TypeResolver resolver, HashSet<string> needs) =>
+        new ValueObjectSumWalker(scope, resolver, needs).Visit(expr);
+
+    /// <summary>
+    /// Records the value-object type folded by any <c>sum(selector)</c> in an expression. The
+    /// scope is constant for the whole walk; the element type is bound transiently only to infer
+    /// the selector's type at each <c>sum</c>. Recurses into every node, so a <c>sum</c> nested
+    /// under <c>??</c> or <c>let</c> is still found.
+    /// </summary>
+    private sealed class ValueObjectSumWalker : ExprWalker
     {
-        switch (expr)
+        private readonly TypeScope _scope;
+        private readonly TypeResolver _resolver;
+        private readonly HashSet<string> _needs;
+
+        public ValueObjectSumWalker(TypeScope scope, TypeResolver resolver, HashSet<string> needs)
         {
-            case CallExpr call:
-                if (call.Method == "sum" && call.Args is [LambdaExpr lambda])
+            _scope = scope;
+            _resolver = resolver;
+            _needs = needs;
+        }
+
+        protected override void VisitCall(CallExpr n)
+        {
+            if (n.Method == "sum" && n.Args is [LambdaExpr lambda])
+            {
+                TypeRef? element = TypeResolver.ElementOf(_resolver.Infer(n.Target, _scope));
+                if (element is not null)
                 {
-                    TypeRef? element = TypeResolver.ElementOf(resolver.Infer(call.Target, scope));
-                    if (element is not null)
+                    TypeRef? selector = _resolver.Infer(lambda.Body, _scope.With(lambda.Parameter, element));
+                    if (_resolver.IsValueLike(selector))
                     {
-                        TypeRef? selector = resolver.Infer(lambda.Body, scope.With(lambda.Parameter, element));
-                        if (resolver.IsValueLike(selector))
-                        {
-                            needs.Add(selector!.Name);
-                        }
+                        _needs.Add(selector!.Name);
                     }
                 }
-                ScanForValueObjectSum(call.Target, scope, resolver, needs);
-                foreach (Expr arg in call.Args)
-                {
-                    ScanForValueObjectSum(arg, scope, resolver, needs);
-                }
+            }
 
-                break;
-            case LambdaExpr l:
-                ScanForValueObjectSum(l.Body, scope, resolver, needs);
-                break;
-            case BinaryExpr b:
-                ScanForValueObjectSum(b.Left, scope, resolver, needs);
-                ScanForValueObjectSum(b.Right, scope, resolver, needs);
-                break;
-            case UnaryExpr u:
-                ScanForValueObjectSum(u.Operand, scope, resolver, needs);
-                break;
-            case MemberAccessExpr ma:
-                ScanForValueObjectSum(ma.Target, scope, resolver, needs);
-                break;
-            case ConditionalExpr c:
-                ScanForValueObjectSum(c.Condition, scope, resolver, needs);
-                ScanForValueObjectSum(c.Then, scope, resolver, needs);
-                ScanForValueObjectSum(c.Else, scope, resolver, needs);
-                break;
-            case GuardExpr g:
-                ScanForValueObjectSum(g.Body, scope, resolver, needs);
-                ScanForValueObjectSum(g.Condition, scope, resolver, needs);
-                break;
-            case MatchExpr mt:
-                ScanForValueObjectSum(mt.Target, scope, resolver, needs);
-                break;
+            base.VisitCall(n);
         }
     }
 
@@ -368,57 +357,48 @@ internal static class OperatorNeedsAnalyzer
         Expr expr,
         IReadOnlyDictionary<string, TypeRef> memberTypes,
         ModelIndex index,
-        Dictionary<string, HashSet<string>> needs)
+        Dictionary<string, HashSet<string>> needs) =>
+        new ScalarMulWalker(memberTypes, index, needs).Visit(expr);
+
+    /// <summary>
+    /// Records, per value-object type, the scalar C# types it is multiplied by anywhere in an
+    /// expression. The member-type scope is constant for the whole walk. Recurses into every
+    /// node, so a multiplication nested under <c>??</c> or <c>let</c> is still found.
+    /// </summary>
+    private sealed class ScalarMulWalker : ExprWalker
     {
-        switch (expr)
+        private readonly IReadOnlyDictionary<string, TypeRef> _memberTypes;
+        private readonly ModelIndex _index;
+        private readonly Dictionary<string, HashSet<string>> _needs;
+
+        public ScalarMulWalker(
+            IReadOnlyDictionary<string, TypeRef> memberTypes,
+            ModelIndex index,
+            Dictionary<string, HashSet<string>> needs)
         {
-            case BinaryExpr b:
-                if (b.Op == BinaryOp.Mul)
-                {
-                    var (lValue, lScalar) = InferOperand(b.Left, memberTypes, index);
-                    var (rValue, rScalar) = InferOperand(b.Right, memberTypes, index);
-                    if (lValue is not null && rScalar is not null)
-                    {
-                        Record(needs, lValue, rScalar);
-                    }
+            _memberTypes = memberTypes;
+            _index = index;
+            _needs = needs;
+        }
 
-                    if (rValue is not null && lScalar is not null)
-                    {
-                        Record(needs, rValue, lScalar);
-                    }
-                }
-                ScanForScalarMul(b.Left, memberTypes, index, needs);
-                ScanForScalarMul(b.Right, memberTypes, index, needs);
-                break;
-            case UnaryExpr u:
-                ScanForScalarMul(u.Operand, memberTypes, index, needs);
-                break;
-            case MemberAccessExpr ma:
-                ScanForScalarMul(ma.Target, memberTypes, index, needs);
-                break;
-            case CallExpr call:
-                ScanForScalarMul(call.Target, memberTypes, index, needs);
-                foreach (Expr arg in call.Args)
+        protected override void VisitBinary(BinaryExpr n)
+        {
+            if (n.Op == BinaryOp.Mul)
+            {
+                var (lValue, lScalar) = InferOperand(n.Left, _memberTypes, _index);
+                var (rValue, rScalar) = InferOperand(n.Right, _memberTypes, _index);
+                if (lValue is not null && rScalar is not null)
                 {
-                    ScanForScalarMul(arg, memberTypes, index, needs);
+                    Record(_needs, lValue, rScalar);
                 }
 
-                break;
-            case LambdaExpr lam:
-                ScanForScalarMul(lam.Body, memberTypes, index, needs);
-                break;
-            case ConditionalExpr c:
-                ScanForScalarMul(c.Condition, memberTypes, index, needs);
-                ScanForScalarMul(c.Then, memberTypes, index, needs);
-                ScanForScalarMul(c.Else, memberTypes, index, needs);
-                break;
-            case MatchExpr mt:
-                ScanForScalarMul(mt.Target, memberTypes, index, needs);
-                break;
-            case GuardExpr g:
-                ScanForScalarMul(g.Body, memberTypes, index, needs);
-                ScanForScalarMul(g.Condition, memberTypes, index, needs);
-                break;
+                if (rValue is not null && lScalar is not null)
+                {
+                    Record(_needs, rValue, lScalar);
+                }
+            }
+
+            base.VisitBinary(n);
         }
     }
 
