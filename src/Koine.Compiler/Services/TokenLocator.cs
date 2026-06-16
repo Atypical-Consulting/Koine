@@ -28,10 +28,16 @@ internal static class TokenLocator
     };
 
     // Block keywords whose declared type has fields that are in scope inside its body
-    // (so an expression there can reference them) — used for field-name completion.
+    // (so an expression there can reference them) — used for field-name completion AND as
+    // the field-rename scope (a field declared on one of these resolves its enclosing type).
+    // `event` is included so renaming a field on an `event` (or the two-word
+    // `integration event`, which also opens an `event`-keyword frame here) resolves its owner
+    // — matching SemanticModel.MemberOf, which resolves members for EventDecl and
+    // IntegrationEventDecl. Without it, such a field rename resolves enclosingType=null and is
+    // a silent no-op.
     private static readonly HashSet<string> FieldedTypeKeywords = new(StringComparer.Ordinal)
     {
-        "value", "quantity", "entity", "aggregate",
+        "value", "quantity", "entity", "aggregate", "event",
     };
 
     /// <summary>
@@ -183,8 +189,9 @@ internal static class TokenLocator
     /// <summary>
     /// The innermost <c>{ }</c> block enclosing the cursor: its introducing keyword
     /// (e.g. <c>service</c>, <c>entity</c>), and the name of the nearest enclosing
-    /// fielded type (value/entity/aggregate/quantity) whose fields are in scope — used
-    /// to offer field-name completions inside invariant/command/create bodies. A forward
+    /// fielded type (value/entity/aggregate/quantity/event) whose fields are in scope — used
+    /// to offer field-name completions inside invariant/command/create bodies and as the
+    /// field-rename scope. A forward
     /// scan pushes each block's (keyword, name) on <c>{</c> and pops on <c>}</c>.
     /// </summary>
     private static (string? Keyword, string? FieldedType) EnclosingScope(List<IToken> def, int line, int col)

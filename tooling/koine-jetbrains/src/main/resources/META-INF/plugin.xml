@@ -1,0 +1,36 @@
+<idea-plugin>
+    <id>com.atypical.koine</id>
+    <name>Koine</name>
+    <vendor email="hello@atypical.consulting" url="https://github.com/Atypical-Consulting/Koine">Atypical Consulting</vendor>
+
+    <description><![CDATA[
+        Koine DDD language support for JetBrains Rider.<br/>
+        Binds <code>.koi</code> files to the Koine language server (<code>koine lsp</code>) via LSP4IJ:
+        live diagnostics, go-to-definition, hover, document symbols, semantic highlighting,
+        rename (the inline-rename bubble), and refactoring code actions (Alt+Enter intentions).
+    ]]></description>
+
+    <!-- LSP4IJ provides the LSP client runtime; the platform module is implied. -->
+    <depends>com.intellij.modules.platform</depends>
+    <depends>com.redhat.devtools.lsp4ij</depends>
+
+    <extensions defaultExtensionNs="com.intellij">
+        <!-- `fieldName="INSTANCE"` is how a Kotlin `object` is referenced from plugin.xml. -->
+        <fileType
+            name="Koine"
+            language="Koine"
+            extensions="koi"
+            implementationClass="com.atypical.koine.KoineFileType"
+            fieldName="INSTANCE"/>
+    </extensions>
+
+    <extensions defaultExtensionNs="com.redhat.devtools.lsp4ij">
+        <server
+            id="koine"
+            name="Koine Language Server"
+            factoryClass="com.atypical.koine.lsp.KoineLspServerFactory">
+            <description><![CDATA[Koine DDD language server (koine lsp).]]></description>
+        </server>
+        <languageMapping language="Koine" serverId="koine"/>
+    </extensions>
+</idea-plugin>

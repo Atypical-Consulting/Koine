@@ -1,4 +1,3 @@
-using Antlr4.Runtime;
 using Koine.Compiler.Ast;
 using Koine.Compiler.Grammar;
 
@@ -15,6 +14,21 @@ public sealed record HoverResult(string Markdown);
 
 /// <summary>A go-to-definition target: a single 1-based point (SourceSpan has no end).</summary>
 public sealed record DefinitionResult(string Uri, SourceSpan Target);
+
+/// <summary>
+/// One text edit of a refactor: replace the source covered by <see cref="Range"/> (a 1-based,
+/// end-EXCLUSIVE <see cref="SourceSpan"/>) with <see cref="NewText"/>. A zero-width range
+/// (<c>EndLine == Line &amp;&amp; EndColumn == Column</c>) is a pure insertion. Editor-agnostic.
+/// </summary>
+public sealed record TextEditModel(SourceSpan Range, string NewText);
+
+/// <summary>
+/// A selection-driven refactor offered at a position/selection: a human-readable
+/// <see cref="Title"/>, an LSP code-action <see cref="Kind"/> (e.g. <c>refactor.extract</c>),
+/// and the ordered <see cref="Edits"/> that apply it within the active document. Editor-agnostic:
+/// the LSP shell maps it to a CodeAction with an inline WorkspaceEdit.
+/// </summary>
+public sealed record CodeActionEdit(string Title, string Kind, IReadOnlyList<TextEditModel> Edits);
 
 /// <summary>The kind of a document symbol; the LSP shell maps these to LSP SymbolKind numbers.</summary>
 public enum SymbolKind { Namespace, Class, Enum, EnumMember, Field, Method, Constructor, Interface, Struct }
@@ -49,29 +63,33 @@ public sealed class KoineLanguageService
     // Declaration keywords offered at a statement start, keyed by enclosing scope.
     // These mirror the parser's member productions (programMember / contextMember /
     // serviceMember etc. in KoineParser.g4) so every legal declaration is offered.
-    private static readonly string[] FileStarters = { "context", "contextmap" };
+    private static readonly string[] FileStarters = ["context", "contextmap"];
     private static readonly string[] ContextStarters =
-        { "module", "import", "value", "quantity", "entity", "aggregate", "enum", "event",
-          "spec", "service", "policy", "readmodel", "query" };
+    [
+        "module", "import", "value", "quantity", "entity", "aggregate", "enum", "event",
+          "spec", "service", "policy", "readmodel", "query"
+    ];
     private static readonly string[] AggregateStarters =
-        { "value", "quantity", "entity", "enum", "event", "spec", "repository" };
-    private static readonly string[] ServiceStarters = { "operation", "usecase" };
-    private static readonly string[] RepositoryStarters = { "operations", "find" };
-    private static readonly string[] EntityStarters = { "states", "command", "create", "invariant" };
+        ["value", "quantity", "entity", "enum", "event", "spec", "repository"];
+    private static readonly string[] ServiceStarters = ["operation", "usecase"];
+    private static readonly string[] RepositoryStarters = ["operations", "find"];
+    private static readonly string[] EntityStarters = ["states", "command", "create", "invariant"];
     // A module nests only types and further modules (KoineParser.g4: moduleMember).
     private static readonly string[] ModuleStarters =
-        { "module", "value", "quantity", "entity", "aggregate", "enum", "event",
-          "readmodel", "query" };
+    [
+        "module", "value", "quantity", "entity", "aggregate", "enum", "event",
+          "readmodel", "query"
+    ];
 
     private static readonly string[] CollectionKeywords =
-        { ModelIndex.ListTypeName, ModelIndex.SetTypeName, ModelIndex.MapTypeName, ModelIndex.RangeTypeName };
+        [ModelIndex.ListTypeName, ModelIndex.SetTypeName, ModelIndex.MapTypeName, ModelIndex.RangeTypeName];
 
     public IReadOnlyList<CompletionItem> CompleteAt(string source, int line, int character)
     {
         var ctx = TokenLocator.Locate(source, line, character);
         if (ctx.InsideStringOrRegex)
         {
-            return Array.Empty<CompletionItem>();
+            return [];
         }
 
         var (model, _) = _compiler.Parse(source);
@@ -165,7 +183,7 @@ public sealed class KoineLanguageService
             return FieldCandidates(index, scopeType).Concat(SpecCandidates(index, scopeType)).ToList();
         }
 
-        return Array.Empty<CompletionItem>();
+        return [];
     }
 
     /// <summary>
@@ -179,13 +197,13 @@ public sealed class KoineLanguageService
     {
         if (index is null)
         {
-            return Array.Empty<CompletionItem>();
+            return [];
         }
 
         var receiver = ctx.TokenBeforePreceding?.Text;
         if (string.IsNullOrEmpty(receiver))
         {
-            return Array.Empty<CompletionItem>();
+            return [];
         }
 
         // 1. `EnumType.` -> its members.
@@ -211,7 +229,7 @@ public sealed class KoineLanguageService
             return members;
         }
 
-        return Array.Empty<CompletionItem>();
+        return [];
     }
 
     /// <summary>The member completions (name + type detail) of a value/entity type, or an empty list.</summary>
@@ -301,7 +319,7 @@ public sealed class KoineLanguageService
     {
         if (index is null)
         {
-            return Array.Empty<CompletionItem>();
+            return [];
         }
 
         // Resolve the governing enum from the type name just before '=' .
@@ -338,7 +356,7 @@ public sealed class KoineLanguageService
         "service" => ServiceStarters,
         "repository" => RepositoryStarters,
         "entity" => EntityStarters,
-        _ => Array.Empty<string>(),
+        _ => [],
     };
 
     private static IReadOnlyList<CompletionItem> Keywords(string[] names) =>
@@ -444,7 +462,7 @@ public sealed class KoineLanguageService
         var (model, _) = _compiler.Parse(source);
         if (model is null)
         {
-            return Array.Empty<DocumentSymbol>();
+            return [];
         }
 
         var contexts = new List<DocumentSymbol>();
@@ -465,7 +483,7 @@ public sealed class KoineLanguageService
             {
                 if (spec.Span != SourceSpan.None)
                 {
-                    children.Add(new DocumentSymbol(spec.Name, SymbolKind.Method, spec.Span, spec.NameSpan, Array.Empty<DocumentSymbol>()));
+                    children.Add(new DocumentSymbol(spec.Name, SymbolKind.Method, spec.Span, spec.NameSpan, []));
                 }
             }
 
@@ -488,7 +506,7 @@ public sealed class KoineLanguageService
                 {
                     if (c.Span != SourceSpan.None)
                     {
-                        children.Add(new DocumentSymbol(c.Name, SymbolKind.Method, c.Span, c.NameSpan, Array.Empty<DocumentSymbol>()));
+                        children.Add(new DocumentSymbol(c.Name, SymbolKind.Method, c.Span, c.NameSpan, []));
                     }
                 }
 
@@ -496,7 +514,7 @@ public sealed class KoineLanguageService
                 {
                     if (f.Span != SourceSpan.None)
                     {
-                        children.Add(new DocumentSymbol(f.Name, SymbolKind.Constructor, f.Span, f.NameSpan, Array.Empty<DocumentSymbol>()));
+                        children.Add(new DocumentSymbol(f.Name, SymbolKind.Constructor, f.Span, f.NameSpan, []));
                     }
                 }
 
@@ -512,7 +530,7 @@ public sealed class KoineLanguageService
                 {
                     if (m.Span != SourceSpan.None)
                     {
-                        children.Add(new DocumentSymbol(m.Name, SymbolKind.EnumMember, m.Span, m.NameSpan, Array.Empty<DocumentSymbol>()));
+                        children.Add(new DocumentSymbol(m.Name, SymbolKind.EnumMember, m.Span, m.NameSpan, []));
                     }
                 }
 
@@ -535,7 +553,7 @@ public sealed class KoineLanguageService
         {
             if (op.Span != SourceSpan.None)
             {
-                children.Add(new DocumentSymbol(op.Name, SymbolKind.Method, op.Span, op.NameSpan, Array.Empty<DocumentSymbol>()));
+                children.Add(new DocumentSymbol(op.Name, SymbolKind.Method, op.Span, op.NameSpan, []));
             }
         }
 
@@ -543,7 +561,7 @@ public sealed class KoineLanguageService
         {
             if (uc.Span != SourceSpan.None)
             {
-                children.Add(new DocumentSymbol(uc.Name, SymbolKind.Method, uc.Span, uc.NameSpan, Array.Empty<DocumentSymbol>()));
+                children.Add(new DocumentSymbol(uc.Name, SymbolKind.Method, uc.Span, uc.NameSpan, []));
             }
         }
 
@@ -556,7 +574,7 @@ public sealed class KoineLanguageService
         {
             if (m.Span != SourceSpan.None)
             {
-                children.Add(new DocumentSymbol(m.Name, SymbolKind.Field, m.Span, m.NameSpan, Array.Empty<DocumentSymbol>()));
+                children.Add(new DocumentSymbol(m.Name, SymbolKind.Field, m.Span, m.NameSpan, []));
             }
         }
     }
@@ -578,17 +596,18 @@ public sealed class KoineLanguageService
     {
         if (!documents.TryGetValue(activeUri, out var source))
         {
-            return Array.Empty<Reference>();
+            return [];
         }
 
         var ctx = TokenLocator.Locate(source, line, character);
         var name = ctx.CurrentToken?.Text;
         if (string.IsNullOrEmpty(name) || ctx.InsideStringOrRegex)
         {
-            return Array.Empty<Reference>();
+            return [];
         }
 
-        return new WorkspaceIndex(documents).FindReferences(activeUri, name);
+        var offset = OffsetOf(source, line, character);
+        return new WorkspaceIndex(documents).FindReferences(activeUri, name, offset, ctx.EnclosingTypeName);
     }
 
     /// <summary>
@@ -615,8 +634,70 @@ public sealed class KoineLanguageService
             return null;
         }
 
-        var refs = new WorkspaceIndex(documents).FindReferences(activeUri, name);
+        var offset = OffsetOf(source, line, character);
+        var refs = new WorkspaceIndex(documents).FindReferences(activeUri, name, offset, ctx.EnclosingTypeName);
         return refs.Count == 0 ? null : refs;
     }
 
+    /// <summary>
+    /// The editable identifier range under the cursor — the LSP <c>prepareRename</c> answer.
+    /// Returns the declaration/use occurrence at the cursor (a single-token <see cref="Reference"/>)
+    /// when a rename would be valid there, or null when the cursor is inside a string/regex, not on a
+    /// word token, or not on a renameable name (guarding exactly like <see cref="NameAt"/> /
+    /// <see cref="RenameAt"/>). The returned range covers only the identifier under the cursor, so the
+    /// editor pre-selects the right text.
+    /// </summary>
+    public Reference? PrepareRenameAt(IReadOnlyDictionary<string, string> documents, string activeUri, int line, int character)
+    {
+        if (!documents.TryGetValue(activeUri, out var source))
+        {
+            return null;
+        }
+
+        var ctx = TokenLocator.Locate(source, line, character);
+        var current = ctx.CurrentToken;
+        var name = current?.Text;
+        if (current is null || string.IsNullOrEmpty(name) || ctx.InsideStringOrRegex)
+        {
+            return null;
+        }
+
+        // Only offer a rename range where a rename would actually produce edits: resolve the
+        // symbol under the cursor exactly as RenameAt does (offset + enclosing-type scope).
+        var offset = OffsetOf(source, line, character);
+        var refs = new WorkspaceIndex(documents).FindReferences(activeUri, name, offset, ctx.EnclosingTypeName);
+        if (refs.Count == 0)
+        {
+            return null;
+        }
+
+        // The range is the identifier token under the cursor (current.Line is 1-based; columns 0-based).
+        return new Reference(activeUri, current.Line, current.Column, current.Column + name.Length);
+    }
+
+    /// <summary>
+    /// The refactors offered for the selection in the active document, spanning the 0-based LSP
+    /// range <c>[startLine:startChar, endLine:endChar)</c>. Returns an empty list when the document
+    /// is not open, does not parse, or no refactor applies at the selection. v1 offers
+    /// "Extract value object" when the selection lands on contiguous member fields of a
+    /// value/entity/event type (see <see cref="RefactorService"/>).
+    /// </summary>
+    public IReadOnlyList<CodeActionEdit> RefactorsAt(
+        IReadOnlyDictionary<string, string> documents, string activeUri,
+        int startLine, int startChar, int endLine, int endChar)
+    {
+        if (!documents.TryGetValue(activeUri, out var source))
+        {
+            return [];
+        }
+
+        var startOffset = OffsetOf(source, startLine, startChar);
+        var endOffset = OffsetOf(source, endLine, endChar);
+        if (endOffset < startOffset)
+        {
+            (startOffset, endOffset) = (endOffset, startOffset);
+        }
+
+        return RefactorService.RefactorsFor(_compiler, source, startOffset, endOffset);
+    }
 }

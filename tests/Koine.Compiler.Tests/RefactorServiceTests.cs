@@ -1,0 +1,268 @@
+using Koine.Compiler.Ast;
+using Koine.Compiler.Services;
+
+namespace Koine.Compiler.Tests;
+
+/// <summary>
+/// The selection-driven refactor service (<see cref="KoineLanguageService.RefactorsAt"/>). Tests are
+/// robust: each applies the computed edits back to the source and re-parses, asserting the resulting
+/// model's semantics rather than exact byte strings.
+/// </summary>
+public class RefactorServiceTests
+{
+    private static readonly KoineLanguageService Svc = new();
+    private const string U = "file:///t.koi";
+
+    private static IReadOnlyList<CodeActionEdit> RefactorsAt(string src, int sl, int sc, int el, int ec) =>
+        Svc.RefactorsAt(new Dictionary<string, string> { [U] = src }, U, sl, sc, el, ec);
+
+    /// <summary>Applies a refactor's edits to the original source (offset-based, last-edit-first).</summary>
+    private static string Apply(string src, CodeActionEdit action)
+    {
+        // Apply edits from the highest offset down so earlier offsets stay valid.
+        foreach (var edit in action.Edits.OrderByDescending(e => e.Range.Offset))
+        {
+            var span = edit.Range;
+            src = src[..span.Offset] + edit.NewText + src[(span.Offset + span.Length)..];
+        }
+
+        return src;
+    }
+
+    private static KoineModel Parse(string src)
+    {
+        var (model, diagnostics) = new KoineCompiler().Parse(src);
+        Assert.Empty(diagnostics);
+        Assert.NotNull(model);
+        return model!;
+    }
+
+    [Fact]
+    public void Extracting_a_single_field_produces_a_parseable_value_object_and_rewires_the_origin()
+    {
+        // Line 1 (0-based): "  value Address { street: String }". "street" spans cols 18..24.
+        var src = "context C {\n  value Address { street: String }\n}\n";
+        var actions = RefactorsAt(src, 1, 18, 1, 24);
+
+        var extract = Assert.Single(actions, a => a.Kind == "refactor.extract");
+        Assert.Equal(2, extract.Edits.Count);
+
+        var applied = Apply(src, extract);
+        var model = Parse(applied); // re-parses cleanly
+
+        var types = model.Contexts[0].Types;
+        // A new ExtractedValue value object now exists, carrying the moved field.
+        var extracted = Assert.IsType<ValueObjectDecl>(types.Single(t => t.Name == "ExtractedValue"));
+        Assert.Contains(extracted.Members, m => m.Name == "street");
+
+        // The original Address now references the extracted value via the placeholder field.
+        var address = Assert.IsType<ValueObjectDecl>(types.Single(t => t.Name == "Address"));
+        var field = Assert.Single(address.Members);
+        Assert.Equal("extracted", field.Name);
+        Assert.Equal("ExtractedValue", field.Type.Name);
+        Assert.DoesNotContain(address.Members, m => m.Name == "street");
+    }
+
+    [Fact]
+    public void A_same_line_trailing_comment_moves_with_the_extracted_field()
+    {
+        // The trailing comment parses as the NEXT field's leading trivia; the extract must absorb it
+        // so it travels into the new value object rather than orphaning onto the placeholder field.
+        var src =
+            "context C {\n" +
+            "  value Address { street: String  // the street name\n" +
+            "  city: String }\n" +
+            "}\n";
+        // Select "street" on line 1 (cols 18..24).
+        var extract = Assert.Single(RefactorsAt(src, 1, 18, 1, 24), a => a.Kind == "refactor.extract");
+
+        var applied = Apply(src, extract);
+        Parse(applied); // re-parses cleanly
+
+        var commentIdx = applied.IndexOf("// the street name", StringComparison.Ordinal);
+        var voIdx = applied.IndexOf("ExtractedValue {", StringComparison.Ordinal);
+        var placeholderIdx = applied.IndexOf("extracted: ExtractedValue", StringComparison.Ordinal);
+        Assert.True(commentIdx >= 0, "the comment must survive");
+        // The comment sits inside the extracted value object (after its header, before the placeholder
+        // field that replaced the origin), i.e. it moved WITH the field rather than being left behind.
+        Assert.True(commentIdx > voIdx && commentIdx < placeholderIdx);
+    }
+
+    [Fact]
+    public void Extracting_contiguous_fields_moves_all_of_them()
+    {
+        // Members are newline-separated. Lines 2/3/4 (0-based) carry street/city/zip.
+        var src =
+            "context C {\n" +
+            "  value Address {\n" +
+            "    street: String\n" +
+            "    city: String\n" +
+            "    zip: String\n" +
+            "  }\n" +
+            "}\n";
+        // Select from the start of "street" (line 2, col 4) through the end of "city" (line 3, col 16).
+        var actions = RefactorsAt(src, 2, 4, 3, 16);
+
+        var extract = Assert.Single(actions, a => a.Kind == "refactor.extract");
+        var model = Parse(Apply(src, extract));
+
+        var types = model.Contexts[0].Types;
+        var extracted = Assert.IsType<ValueObjectDecl>(types.Single(t => t.Name == "ExtractedValue"));
+        Assert.Contains(extracted.Members, m => m.Name == "street");
+        Assert.Contains(extracted.Members, m => m.Name == "city");
+        Assert.DoesNotContain(extracted.Members, m => m.Name == "zip");
+
+        var address = Assert.IsType<ValueObjectDecl>(types.Single(t => t.Name == "Address"));
+        Assert.Contains(address.Members, m => m.Name == "extracted");
+        Assert.Contains(address.Members, m => m.Name == "zip");
+        Assert.DoesNotContain(address.Members, m => m.Name == "street");
+    }
+
+    [Fact]
+    public void No_action_when_the_cursor_is_on_the_type_keyword()
+    {
+        var src = "context C {\n  value Address { street: String }\n}\n";
+        // Cursor on the "value" keyword (cols 2..7), not on a field.
+        var actions = RefactorsAt(src, 1, 2, 1, 7);
+        Assert.DoesNotContain(actions, a => a.Kind == "refactor.extract");
+    }
+
+    [Fact]
+    public void No_action_when_the_selection_is_in_a_spec_body()
+    {
+        // A spec sits in the context body, not in a fielded type — no extractable fields there.
+        var src =
+            "context C {\n" +
+            "  value Money { amount: Decimal }\n" +
+            "  spec Positive on Money = amount > 0\n" +
+            "}\n";
+        // Line 2 = the spec line; place the cursor on "amount" inside the spec expression.
+        var col = src.Split('\n')[2].IndexOf("amount", StringComparison.Ordinal);
+        var actions = RefactorsAt(src, 2, col, 2, col + 6);
+        Assert.DoesNotContain(actions, a => a.Kind == "refactor.extract");
+    }
+
+    [Fact]
+    public void Extracting_a_field_from_an_entity_is_offered()
+    {
+        var src =
+            "context C {\n" +
+            "  entity Order identified by OrderId {\n" +
+            "    note: String\n" +
+            "  }\n" +
+            "}\n";
+        // Line 2 = "    note: String"; "note" begins at col 4.
+        var actions = RefactorsAt(src, 2, 4, 2, 8);
+        var extract = Assert.Single(actions, a => a.Kind == "refactor.extract");
+
+        var model = Parse(Apply(src, extract));
+        var types = model.Contexts[0].Types;
+        Assert.Contains(types, t => t is ValueObjectDecl { Name: "ExtractedValue" });
+        var order = Assert.IsType<EntityDecl>(types.Single(t => t.Name == "Order"));
+        Assert.Contains(order.Members, m => m is { Name: "extracted" } && m.Type.Name == "ExtractedValue");
+    }
+
+    [Fact]
+    public void Extracting_a_field_with_a_doc_comment_moves_the_doc_and_keeps_the_origin_types_doc()
+    {
+        var src =
+            "context C {\n" +
+            "  /// An address value.\n" +
+            "  value Address {\n" +
+            "    /// The street name.\n" +
+            "    street: String\n" +
+            "    city: String\n" +
+            "  }\n" +
+            "}\n";
+        // Line 4 (0-based) = "    street: String"; "street" begins at col 4.
+        var actions = RefactorsAt(src, 4, 4, 4, 10);
+        var extract = Assert.Single(actions, a => a.Kind == "refactor.extract");
+
+        var applied = Apply(src, extract);
+        var model = Parse(applied);
+        var types = model.Contexts[0].Types;
+
+        // The field's own doc travels with it into the new value object.
+        var extracted = Assert.IsType<ValueObjectDecl>(types.Single(t => t.Name == "ExtractedValue"));
+        var moved = Assert.Single(extracted.Members, m => m.Name == "street");
+        Assert.Contains("The street name.", moved.Doc);
+
+        // The origin type keeps its own doc (it was NOT consumed by the inserted value object).
+        var address = Assert.IsType<ValueObjectDecl>(types.Single(t => t.Name == "Address"));
+        Assert.Contains("An address value.", address.Doc);
+        Assert.DoesNotContain(address.Members, m => m.Name == "street");
+    }
+
+    [Fact]
+    public void A_comment_between_two_selected_fields_survives_in_the_new_value_object()
+    {
+        var src =
+            "context C {\n" +
+            "  value Address {\n" +
+            "    street: String\n" +
+            "    // the city it sits in\n" +
+            "    city: String\n" +
+            "    zip: String\n" +
+            "  }\n" +
+            "}\n";
+        // Select from the start of "street" (line 2, col 4) through the end of "city" (line 4, col 16).
+        var actions = RefactorsAt(src, 2, 4, 4, 16);
+        var extract = Assert.Single(actions, a => a.Kind == "refactor.extract");
+
+        var applied = Apply(src, extract);
+        var model = Parse(applied);
+
+        // The between-field comment is preserved in the moved range (it landed in the new VO text).
+        Assert.Contains("// the city it sits in", applied);
+
+        var types = model.Contexts[0].Types;
+        var extracted = Assert.IsType<ValueObjectDecl>(types.Single(t => t.Name == "ExtractedValue"));
+        Assert.Contains(extracted.Members, m => m.Name == "street");
+        Assert.Contains(extracted.Members, m => m.Name == "city");
+        // The comment is leading trivia of the `city` member it precedes.
+        var city = extracted.Members.Single(m => m.Name == "city");
+        Assert.Contains(city.LeadingTrivia, t => t.Text.Contains("the city it sits in"));
+    }
+
+    [Fact]
+    public void A_derived_field_yields_no_action()
+    {
+        var src =
+            "context C {\n" +
+            "  value Line {\n" +
+            "    unitPrice: Decimal\n" +
+            "    quantity: Int\n" +
+            "    subtotal: Decimal = unitPrice * quantity\n" +
+            "  }\n" +
+            "}\n";
+        // Select the derived `subtotal` field on line 4; "subtotal" begins at col 4.
+        var actions = RefactorsAt(src, 4, 4, 4, 12);
+        Assert.DoesNotContain(actions, a => a.Kind == "refactor.extract");
+    }
+
+    [Fact]
+    public void Extracting_when_a_type_named_ExtractedValue_already_exists_produces_a_unique_name()
+    {
+        var src =
+            "context C {\n" +
+            "  value ExtractedValue { tag: String }\n" +
+            "  value Address {\n" +
+            "    street: String\n" +
+            "  }\n" +
+            "}\n";
+        // Line 3 (0-based) = "    street: String"; "street" begins at col 4.
+        var actions = RefactorsAt(src, 3, 4, 3, 10);
+        var extract = Assert.Single(actions, a => a.Kind == "refactor.extract");
+
+        var model = Parse(Apply(src, extract));
+        var types = model.Contexts[0].Types;
+
+        // The pre-existing ExtractedValue is untouched; the new VO took a disambiguated name.
+        Assert.Single(types, t => t is ValueObjectDecl { Name: "ExtractedValue" });
+        var generated = Assert.IsType<ValueObjectDecl>(types.Single(t => t.Name == "ExtractedValue2"));
+        Assert.Contains(generated.Members, m => m.Name == "street");
+
+        var address = Assert.IsType<ValueObjectDecl>(types.Single(t => t.Name == "Address"));
+        Assert.Contains(address.Members, m => m.Type.Name == "ExtractedValue2");
+    }
+}
