@@ -44,6 +44,23 @@ public static class BuiltinOps
     public static readonly IReadOnlySet<string> CollectionElementCallOps =
         new HashSet<string>(StringComparer.Ordinal) { "contains" };
 
+    // ---- Nullary value builtins (bare identifiers) ------------------------
+
+    /// <summary>
+    /// Built-in nullary values referenced as a bare identifier (no receiver, no
+    /// parentheses), mapping the surface name to its Koine result type. These are
+    /// non-deterministic (re-evaluated on each use), so they may not be STORED
+    /// defaults. The map is target-agnostic — each emitter owns the C#/etc.
+    /// rendering (see CSharpExpressionTranslator). Today the only entry is
+    /// <c>now</c> (the current instant); this is the seam for future additions
+    /// such as <c>today</c> or <c>newId</c>.
+    /// </summary>
+    public static readonly IReadOnlyDictionary<string, string> NullaryValueOps =
+        new Dictionary<string, string>(StringComparer.Ordinal) { ["now"] = "Instant" };
+
+    /// <summary>True when <paramref name="name"/> is a built-in nullary value (e.g. <c>now</c>).</summary>
+    public static bool IsNullaryValueOp(string name) => NullaryValueOps.ContainsKey(name);
+
     /// <summary>True when <paramref name="name"/> is any known no-parens member op.</summary>
     public static bool IsMemberOp(string name) =>
         StringMemberOps.Contains(name) || CollectionMemberOps.Contains(name) || OptionalMemberOps.Contains(name);

@@ -749,9 +749,13 @@ public sealed partial class CSharpEmitter : IEmitter
         var paramList = string.Join(", ", cmd.Parameters.Select(p =>
             $"{typeMapper.Map(p.Type)} {CSharpNaming.ToCamelCase(p.Name)}"));
 
+        // A declared return type renders the method as `public <T> Name(...)`; with no
+        // declared type the command stays a `public void` (unchanged, backward-compatible).
+        var returnTypeName = cmd.ReturnType is { } rt ? typeMapper.Map(rt) : "void";
+
         sb.Append('\n');
         WriteXmlDoc(sb, cmd.Doc, Indent);
-        sb.Append(Indent).Append("public void ").Append(CSharpNaming.ToPascalCase(cmd.Name))
+        sb.Append(Indent).Append("public ").Append(returnTypeName).Append(' ').Append(CSharpNaming.ToPascalCase(cmd.Name))
           .Append('(').Append(paramList).Append(")\n");
         sb.Append(Indent).Append("{\n");
 
@@ -761,6 +765,7 @@ public sealed partial class CSharpEmitter : IEmitter
         var requires = cmd.Body.OfType<RequiresClause>().ToList();
         var transitions = cmd.Body.OfType<Transition>().ToList();
         var emits = cmd.Body.OfType<EmitClause>().ToList();
+        var result = cmd.Body.OfType<ResultClause>().FirstOrDefault();
 
         // 1. Preconditions — checked before any mutation.
         var firstGuard = true;
@@ -805,6 +810,20 @@ public sealed partial class CSharpEmitter : IEmitter
         // an invalid post-state throws before any event is recorded.
         var emitStatements = emits.Select(e => BuildEmitStatement(e, translator, index)).ToList();
 
+        // Translate the result expression in the same scope as emit payloads (parameters
+        // as locals, members as properties) so it can reference parameters, `id`, and
+        // just-assigned fields. If the same value also appears in an emit payload, hoist
+        // it into a single `var __result` so it is computed once (single source of truth).
+        string? resultExpr = null;
+        bool hoistResult = false;
+        if (result is not null)
+        {
+            resultExpr = translator.TranslateTopLevel(
+                result.Value, CSharpExpressionTranslator.NameMode.Property,
+                cmd.ReturnType?.Name);
+            hoistResult = emitStatements.Any(s => s.Contains(resultExpr, StringComparison.Ordinal));
+        }
+
         // Parameters leave scope BEFORE the re-check: entity invariants reference
         // only entity state, which must render as the just-assigned properties (not
         // a parameter that happens to share a field's name).
@@ -817,12 +836,34 @@ public sealed partial class CSharpEmitter : IEmitter
             sb.Append(Indent).Append(Indent).Append("CheckInvariants();\n");
         }
 
-        // 4. Record domain events (only reached if preconditions + re-check pass).
-        if (emitStatements.Count > 0)
+        // 4. Compute the hoisted result (once) BEFORE the events so an emit payload can
+        // carry the same value without recomputing it.
+        if (hoistResult)
         {
             sb.Append('\n');
+            sb.Append(Indent).Append(Indent).Append("var __result = ").Append(resultExpr).Append(";\n");
+        }
+
+        // 5. Record domain events (only reached if preconditions + re-check pass).
+        if (emitStatements.Count > 0)
+        {
+            if (!hoistResult) sb.Append('\n');
             foreach (var stmt in emitStatements)
-                sb.Append(Indent).Append(Indent).Append(stmt).Append('\n');
+            {
+                var rendered = hoistResult
+                    ? stmt.Replace(resultExpr!, "__result", StringComparison.Ordinal)
+                    : stmt;
+                sb.Append(Indent).Append(Indent).Append(rendered).Append('\n');
+            }
+        }
+
+        // 6. Return the result value — the terminal statement, reached only from a
+        // fully-valid, fully-eventful aggregate.
+        if (result is not null)
+        {
+            sb.Append('\n');
+            sb.Append(Indent).Append(Indent).Append("return ")
+              .Append(hoistResult ? "__result" : resultExpr).Append(";\n");
         }
 
         sb.Append(Indent).Append("}\n");

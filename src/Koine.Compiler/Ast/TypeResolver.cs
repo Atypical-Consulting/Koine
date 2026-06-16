@@ -86,7 +86,7 @@ public sealed class TypeResolver
                 // A name bound to the "?" sentinel (e.g. a lambda parameter whose
                 // element type couldn't be determined) is treated as unknown.
                 if (scope.TryGet(id.Name, out var bound)) return bound.Name == "?" ? null : bound;
-                if (id.Name == "now") return Instant;
+                if (BuiltinOps.NullaryValueOps.TryGetValue(id.Name, out var builtinType)) return new TypeRef(builtinType);
                 return _index.EnumMemberToType.TryGetValue(id.Name, out var en) ? new TypeRef(en) : null;
 
             case UnaryExpr u:
@@ -128,6 +128,16 @@ public sealed class TypeResolver
 
             case CallExpr call:
                 return InferCall(call, scope);
+
+            case LetExpr let:
+            {
+                // Fold bindings into the scope in order (each sees the previous), then
+                // infer the body in the extended scope.
+                var letScope = scope;
+                foreach (var b in let.Bindings)
+                    letScope = letScope.With(b.Name, Infer(b.Value, letScope) ?? new TypeRef("?"));
+                return Infer(let.Body, letScope);
+            }
 
             default:
                 return null; // LambdaExpr only has meaning inside a CallExpr

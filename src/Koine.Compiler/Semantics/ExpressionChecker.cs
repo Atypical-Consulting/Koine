@@ -47,7 +47,7 @@ internal sealed class ExpressionChecker
         switch (expr)
         {
             case IdentifierExpr id:
-                if (!scope.Contains(id.Name) && !_enumMembers.Contains(id.Name) && id.Name != "now"
+                if (!scope.Contains(id.Name) && !_enumMembers.Contains(id.Name) && !BuiltinOps.IsNullaryValueOp(id.Name)
                     && !_specNames.Contains(id.Name))
                 {
                     // A name that is a spec — just not one valid here — gets a clearer message.
@@ -81,7 +81,7 @@ internal sealed class ExpressionChecker
             case BinaryExpr b:
                 Check(b.Left, scope);
                 Check(b.Right, scope);
-                CheckComparison(b, scope);
+                CheckComparison(b, scope, expected);
                 CheckArithmeticNullSafety(b, scope);
                 break;
 
@@ -120,10 +120,36 @@ internal sealed class ExpressionChecker
             case CallExpr call:
                 CheckCall(call, scope);
                 break;
+
+            case LetExpr let:
+                CheckLet(let, scope, expected);
+                break;
         }
     }
 
-    private void CheckComparison(BinaryExpr b, TypeScope scope)
+    /// <summary>
+    /// Checks a <c>let x = e (, y = e)* in body</c>: each binding's value is checked
+    /// in the accumulating scope (so it sees earlier bindings but not itself or later
+    /// ones), then the body is checked in the fully-extended scope. A binding name that
+    /// repeats within the same <c>let</c> is reported as a duplicate.
+    /// </summary>
+    private void CheckLet(LetExpr let, TypeScope scope, TypeRef? expected)
+    {
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        var bound = scope;
+        foreach (var binding in let.Bindings)
+        {
+            Check(binding.Value, bound);
+            if (!seen.Add(binding.Name))
+                Report(DiagnosticCodes.DuplicateLetBinding,
+                    $"duplicate let binding '{binding.Name}'", let);
+            // The binding's value is in scope for the bindings that follow and the body.
+            bound = bound.With(binding.Name, _resolver.Infer(binding.Value, bound) ?? UnknownType);
+        }
+        Check(let.Body, bound, expected);
+    }
+
+    private void CheckComparison(BinaryExpr b, TypeScope scope, TypeRef? expected = null)
     {
         var isRelational = b.Op is BinaryOp.Lt or BinaryOp.Le or BinaryOp.Gt or BinaryOp.Ge;
         if (!isRelational && b.Op is not (BinaryOp.Eq or BinaryOp.Neq))
@@ -138,14 +164,18 @@ internal sealed class ExpressionChecker
         var concreteRight = ConcreteEnumType(b.Right, scope);
 
         // A bare enum member shared by ≥2 enums must be resolvable from the other
-        // operand's type, else it is ambiguous and must be qualified.
-        CheckEnumMemberResolvable(b.Left, concreteRight, scope);
-        CheckEnumMemberResolvable(b.Right, concreteLeft, scope);
+        // operand's concrete type or, failing that, the expected type flowing in
+        // (the enclosing default/return/transition enum). This matches the
+        // conditional/coalesce paths and the emitter; KOI0213 fires only when
+        // neither context selects exactly one declaring enum.
+        CheckEnumMemberResolvable(b.Left, concreteRight ?? expected, scope);
+        CheckEnumMemberResolvable(b.Right, concreteLeft ?? expected, scope);
 
-        // Resolve a bare enum member against the other operand's enum type so a
-        // shared member name (e.g. two enums with `Cancelled`) compares correctly.
-        var left = ResolveEnumOperand(b.Left, concreteRight, scope) ?? rawLeft;
-        var right = ResolveEnumOperand(b.Right, concreteLeft, scope) ?? rawRight;
+        // Resolve a bare enum member against the other operand's enum type (or the
+        // expected type) so a shared member name (e.g. two enums with `Cancelled`)
+        // compares correctly.
+        var left = ResolveEnumOperand(b.Left, concreteRight ?? expected, scope) ?? rawLeft;
+        var right = ResolveEnumOperand(b.Right, concreteLeft ?? expected, scope) ?? rawRight;
 
         // Operands must be comparable to each other: same type, or both numeric.
         // (Subsumes the Instant rule: Instant is only comparable to Instant.)
@@ -516,6 +546,23 @@ internal sealed class ExpressionChecker
         else if (!Assignable(type, returnType))
             Report(DiagnosticCodes.ServiceReturnMismatch,
                 $"operation body of type '{FullName(type)}' is not assignable to return type '{FullName(returnType)}'", body);
+    }
+
+    /// <summary>Validates a command's <c>result</c> expression against its declared return type.</summary>
+    public void CheckCommandResult(Expr value, TypeRef returnType, string commandName, TypeScope scope)
+    {
+        Check(value, scope, returnType);
+
+        var type = ResolveEnumOperand(value, returnType, scope) ?? _resolver.Infer(value, scope);
+        if (type is null)
+            return;
+
+        if (type is { IsOptional: true } && !returnType.IsOptional)
+            Report(DiagnosticCodes.CommandResultMismatch,
+                $"command '{commandName}' returns an optional value, but its return type '{returnType.Name}' is not optional", value);
+        else if (!Assignable(type, returnType))
+            Report(DiagnosticCodes.CommandResultMismatch,
+                $"command '{commandName}' result of type '{FullName(type)}' is not assignable to return type '{FullName(returnType)}'", value);
     }
 
     /// <summary>Validates an emit payload value against the event field's declared type.</summary>

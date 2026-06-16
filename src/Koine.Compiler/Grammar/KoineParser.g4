@@ -44,6 +44,9 @@ relationDecl   : typeName relationArrow typeName COLON relationRole
 
 relationArrow  : RARROW | BIARROW ;
 
+// The single authoritative enumeration of context-map roles. The hyphenated
+// roles (shared-kernel, customer-supplier, anti-corruption-layer, open-host,
+// published-language) are contextual keywords whose hyphen is legal ONLY here.
 relationRole   : PARTNERSHIP
                | SHARED_KERNEL
                | CUSTOMER_SUPPLIER
@@ -154,7 +157,7 @@ stateRule      : Identifier ( RARROW Identifier ( COMMA Identifier )* )? ( WHEN 
 
 // ---- Commands (state-changing operations on an entity) ---------------------
 
-commandDecl    : COMMAND Identifier ( LPAREN paramList? RPAREN )? LBRACE commandStmt* RBRACE ;
+commandDecl    : COMMAND Identifier ( LPAREN paramList? RPAREN )? ( COLON typeRef )? LBRACE commandStmt* RBRACE ;
 
 paramList      : param ( COMMA param )* ;
 
@@ -163,9 +166,12 @@ param          : softName COLON typeRef ;
 commandStmt    : requiresClause
                | transition
                | emitClause
+               | resultClause
                ;
 
 requiresClause : REQUIRES expression StringLiteral? ;
+
+resultClause   : RESULT expression ;                          // `result VoucherId.New()` — hands a value back to the caller
 
 transition     : softName RARROW expression ;                  // `status -> Placed`
 
@@ -184,7 +190,7 @@ factoryStmt    : requiresClause
                | emitClause
                ;
 
-initialization : softName LARROW expression ;                  // `total <- lines.sum(...)`
+initialization : softName RARROW expression ;                  // `total -> lines.sum(...)` (same `->` as transition; distinct AST node + R8.2 checks key off the enclosing `create {}` block)
 
 // `versioned` marks the root for optimistic concurrency (R11.4).
 aggregateDecl  : annotation* AGGREGATE Identifier ROOT Identifier VERSIONED? LBRACE aggregateMember* RBRACE ;
@@ -232,14 +238,26 @@ typeRef        : ( typeName DOT )? typeName ( LT typeRef ( COMMA typeRef )? GT )
 softName       : Identifier | declKeyword | WHEN | IF | THEN | ELSE ;
 exprName       : Identifier | declKeyword | WHEN ;
 typeName       : Identifier | declKeyword ;
-declKeyword    : CONTEXT | VALUE | QUANTITY | ENTITY | AGGREGATE | ENUM | IDENTIFIED | BY | ROOT | COMMAND | REQUIRES | EVENT | EMIT | STATES | CREATE | SPEC | ON | SERVICE | OPERATION | POLICY | AS | NATURAL | SEQUENCE | GUID | VERSIONED | REPOSITORY | OPERATIONS | FIND | USECASE | READMODEL | FROM | QUERY | IMPORT | MODULE | ACL | INTEGRATION | PUBLISHES | SUBSCRIBES | VERSION ;
+declKeyword    : CONTEXT | VALUE | QUANTITY | ENTITY | AGGREGATE | ENUM | IDENTIFIED | BY | ROOT | COMMAND | REQUIRES | RESULT | EVENT | EMIT | STATES | CREATE | SPEC | ON | SERVICE | OPERATION | POLICY | AS | NATURAL | SEQUENCE | GUID | VERSIONED | REPOSITORY | OPERATIONS | FIND | USECASE | READMODEL | FROM | QUERY | IMPORT | MODULE | ACL | INTEGRATION | PUBLISHES | SUBSCRIBES | VERSION | LET | IN ;
 
 invariant      : INVARIANT expression StringLiteral? ;
 
 // ---- Expression sublanguage (small, pure, no statements/IO) ----------------
 // Precedence climbs from lowest (when-guard) to highest (postfix/primary).
 
-expression     : guardExpr ;
+expression     : letExpr ;
+
+// R-let — expression-local bindings, the new lowest-precedence layer. The whole
+// `let ... in body` is itself an expression, so it nests anywhere a value is
+// expected. Every existing expression still reduces through the `guardExpr`
+// fall-through, so no existing input changes shape.
+letExpr        : LET letBinding ( COMMA letBinding )* IN letExpr   // `let x = e, y = e in body`
+               | guardExpr
+               ;
+
+// A binding name uses softName (so it may shadow a keyword-named member, like a
+// lambda param); its value is a full expression so nested lets compose.
+letBinding     : softName ASSIGN expression ;
 
 guardExpr      : condExpr ( WHEN condExpr )? ;                  // `<expr> when <cond>`
 

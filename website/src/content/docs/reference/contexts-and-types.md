@@ -226,10 +226,10 @@ The exceptions:
   synthesized `Version` property).
 
 :::caution
-The operators `<-` (factory initialization), `->` (state transition / context-map arrow), and `<->`
-(bidirectional context-map relation) are **single atomic tokens** — keep their characters adjacent
-(`status -> Submitted`, not `status - > Submitted`). Because `<-` is lexed before `<`, a comparison
-against a negative literal needs a space: write `x < -1`, not `x<-1`.
+The operators `->` (the single state-effect arrow: factory init, state transition, and directed
+context-map relation) and `<->` (bidirectional context-map relation) are **single atomic tokens** — keep
+their characters adjacent (`status -> Submitted`, not `status - > Submitted`). Koine has just two
+assignment-like arrows: `=` (declaration default) and `->` (state effect).
 :::
 
 ## Primitive type mapping

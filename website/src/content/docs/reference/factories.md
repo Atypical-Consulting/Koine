@@ -49,7 +49,7 @@ context Sales {
 ```
 
 The body of a factory is a fixed sequence of clauses: zero or more `requires` guards, zero or more
-field initializations (`field <- expr`), and zero or more `emit` clauses.
+field initializations (`field -> expr`), and zero or more `emit` clauses.
 
 :::note
 The factory above raises a creation event, so its host entity must be a standalone entity or the
@@ -70,7 +70,7 @@ create open(customer: CustomerId, lines: List<OrderLine>) {
 | --- | --- |
 | `create open(...)` | Declares a `public static Order Open(...)` method. The name is PascalCased. |
 | `requires <expr> "msg"` | A precondition. Checked **before** construction; throws `DomainInvariantViolationException` if false. |
-| `field <- expr` | Initializes a constructor field. The `<-` is the init operator (see below). |
+| `field -> expr` | Initializes a constructor field. Init reuses the `->` arrow (see below). |
 | `emit Evt(...)` | Records a creation event after the instance is built. |
 
 The factory parameters and a synthetic `id` are the only names in scope. Entity members are **not** in
@@ -128,9 +128,9 @@ This is the whole point of a factory: **factory-only construction**. Once one na
 exists, you can be sure every `Order` in the system was born through a path that ran your invariants.
 :::
 
-## The `<-` init operator
+## The `->` init arrow
 
-Use `field <- expr` to set a constructor field from an expression. Each initialization becomes a named
+Use `field -> expr` to set a constructor field from an expression. Each initialization becomes a named
 constructor argument (`field: <expr>`).
 
 ```koine
@@ -139,7 +139,7 @@ context C {
     n: Int
     create make(v: Int) {
       requires v > 0 "positive"
-      n <- v
+      n -> v
     }
   }
 }
@@ -163,18 +163,21 @@ A few rules for init targets:
 - The target must be a real, constructor-settable field. Initializing an unknown field is an error.
 - A **derived** field (one with a computed default, e.g. `doubled: Int = n + n`) cannot be initialized —
   it is recomputed from other fields, not stored. See [derived members on value objects](/Koine/reference/value-objects/).
-- The RHS type must match the field's type, or you get a type-mismatch error (e.g. `n <- "x"` for an `Int`).
+- The RHS type must match the field's type, or you get a type-mismatch error (e.g. `n -> "x"` for an `Int`).
 - Initializing the same field twice is a duplicate-initialization error.
 
-:::caution
-`<-` is a single atomic token (`LARROW`). Keep the two characters adjacent: write `n <- v`, never
-`n < - v`. It is distinct from a command's `->` transition operator (see [aggregates](/Koine/reference/aggregates/))
-and the context-map `<->` operator.
+:::note[Two arrows, not three]
+Koine has exactly two assignment-like arrows. `=` is the **declaration default** (`status: OrderStatus = Draft`);
+`->` is the **state effect** — it sets a field's value, whether that is a factory's initial value (`n -> v`
+inside `create`) or a command's transition (`status -> Submitted` inside `command`). The enclosing
+`create {}` vs `command {}` block — not the arrow — tells you whether it is initialization or mutation.
+(`<-` was a third arrow for factory init; it has been merged into `->`.) `->` is a single atomic token:
+keep the two characters adjacent (`n -> v`, never `n - > v`). It is distinct from the context-map `<->` operator.
 :::
 
 ## Same-named parameter auto-binds a field
 
-You do not always need an explicit `<-`. If a factory parameter's **name and type match a field**, it
+You do not always need an explicit `->`. If a factory parameter's **name and type match a field**, it
 auto-binds to that field. In the `Open` example, `customer` and `lines` are passed straight through
 (`customer: customer`, `lines: lines`) without a single line of initialization.
 
@@ -186,13 +189,13 @@ create forCustomer(customer: CustomerId, lines: List<OrderLine>) {
 
 The precedence Koine uses to fill each field, highest to lowest:
 
-1. An explicit `field <- expr`.
+1. An explicit `field -> expr`.
 2. A same-named, same-typed parameter (auto-bind).
 3. A field default (`= value`) or an optional `T?`.
 4. `default!` for a required field the factory never set — which **also raises an
    `UninitializedFactoryField` warning** (non-fatal; it still compiles).
 
-So a required field is satisfied by either an auto-binding parameter or an explicit `field <- expr`.
+So a required field is satisfied by either an auto-binding parameter or an explicit `field -> expr`.
 If you see the warning, you have a required field with no value flowing into it.
 
 ## Creation events
@@ -222,7 +225,7 @@ context Sales {
     entity Cart identified by CartId {
       total: Money
       create forLines(lines: List<Line>) {
-        total <- lines.sum(l => l.price)
+        total -> lines.sum(l => l.price)
       }
     }
   }

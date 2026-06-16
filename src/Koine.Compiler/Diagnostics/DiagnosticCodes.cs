@@ -10,6 +10,7 @@ public static class DiagnosticCodes
 {
     // ---- Syntax (KOI0001–0099) --------------------------------------------
     public const string SyntaxError = "KOI0001";
+    public const string ReservedWordInDeclarationName = "KOI0002";
 
     // ---- Declarations & names (KOI0100–0199) ------------------------------
     public const string UnknownType = "KOI0101";
@@ -35,6 +36,7 @@ public static class DiagnosticCodes
     public const string RelationalOnNonOrderable = "KOI0211";
     public const string AggregateSelector = "KOI0212";
     public const string AmbiguousEnumMember = "KOI0213";
+    public const string DuplicateLetBinding = "KOI0214";
 
     // ---- Determinism / value rules (KOI0300–0399) -------------------------
     public const string NowAsStoredDefault = "KOI0301";
@@ -50,6 +52,9 @@ public static class DiagnosticCodes
     public const string DuplicateCommand = "KOI0503";
     public const string DuplicateParameter = "KOI0504";
     public const string CommandNameCollision = "KOI0505";
+    public const string ResultWithoutReturnType = "KOI0506";
+    public const string MissingCommandResult = "KOI0507";
+    public const string CommandResultMismatch = "KOI0508";
 
     // ---- Domain events (KOI0600–0699) -------------------------------------
     public const string UnknownEvent = "KOI0601";
@@ -160,6 +165,7 @@ public static class DiagnosticCodes
     public static readonly IReadOnlyDictionary<string, string> Catalogue = new Dictionary<string, string>
     {
         [SyntaxError] = "Syntax error.",
+        [ReservedWordInDeclarationName] = "A Koine keyword was used where a plain identifier (a declaration name) is required.",
         [UnknownType] = "Reference to a type that is not declared or built in.",
         [DuplicateType] = "Two emittable types share a name.",
         [DuplicateMember] = "A member name is declared more than once on a type.",
@@ -181,6 +187,7 @@ public static class DiagnosticCodes
         [RelationalOnNonOrderable] = "A relational operator was applied to a non-orderable type.",
         [AggregateSelector] = "A sum/min/max selector has an unsupported result type.",
         [AmbiguousEnumMember] = "A bare enum member belongs to more than one enum; qualify it.",
+        [DuplicateLetBinding] = "A let binding name is declared more than once in the same let.",
         [NowAsStoredDefault] = "'now' cannot be used as a stored (constructor) default.",
         [OptionalAssignedToNonOptional] = "An optional value was assigned to a non-optional field.",
         [OptionalDereference] = "An optional value may be null at the point it is used.",
@@ -190,6 +197,9 @@ public static class DiagnosticCodes
         [DuplicateCommand] = "An entity declares the same command name more than once.",
         [DuplicateParameter] = "A command declares the same parameter name more than once.",
         [CommandNameCollision] = "A command's name collides with a property of the entity.",
+        [ResultWithoutReturnType] = "A command has a 'result' clause but declares no return type.",
+        [MissingCommandResult] = "A command that declares a return type must have exactly one 'result' clause.",
+        [CommandResultMismatch] = "A command's 'result' expression is not assignable to its declared return type.",
         [UnknownEvent] = "An emit references a type that is not a declared event.",
         [EmitPayloadMismatch] = "An emit's payload does not match the event's declared fields.",
         [ReservedEventField] = "An event field collides with the reserved 'OccurredOn' metadata property.",
