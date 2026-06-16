@@ -122,7 +122,7 @@ internal static class OperatorNeedsAnalyzer
                     continue;
                 }
 
-                var scope = TypeScope.FromMembers(members);
+                var scope = TypeScope.FromMembers(members, index);
                 foreach (Member m in members)
                 {
                     if (m.Initializer is not null)
@@ -136,7 +136,7 @@ internal static class OperatorNeedsAnalyzer
                 {
                     foreach (CommandDecl cmd in entity.Commands)
                     {
-                        TypeScope cmdScope = cmd.Parameters.Aggregate(scope, (s, p) => s.With(p.Name, p.Type));
+                        TypeScope cmdScope = cmd.Parameters.Aggregate(scope, (s, p) => s.WithRef(p.Name, p.Type, index));
                         foreach (CommandStmt stmt in cmd.Body)
                         {
                             if (stmt is RequiresClause req)
@@ -158,7 +158,7 @@ internal static class OperatorNeedsAnalyzer
                     }
                     foreach (FactoryDecl factory in entity.Factories)
                     {
-                        TypeScope factScope = factory.Parameters.Aggregate(scope, (s, p) => s.With(p.Name, p.Type));
+                        TypeScope factScope = factory.Parameters.Aggregate(scope, (s, p) => s.WithRef(p.Name, p.Type, index));
                         foreach (CommandStmt stmt in factory.Body)
                         {
                             if (stmt is RequiresClause req)
@@ -195,7 +195,7 @@ internal static class OperatorNeedsAnalyzer
                 {
                     if (op.Body is not null)
                     {
-                        var scope = new TypeScope(op.Parameters.Select(p => new KeyValuePair<string, TypeRef>(p.Name, p.Type)));
+                        var scope = TypeScope.FromParams(op.Parameters, index);
                         ScanForValueObjectSum(op.Body, scope, resolver, needs);
                     }
                 }
@@ -205,7 +205,7 @@ internal static class OperatorNeedsAnalyzer
         // Spec conditions (rendered over the target type's members) can fold value objects too.
         foreach (SpecDecl spec in AllSpecs(model))
         {
-            ScanForValueObjectSum(spec.Condition, TypeScope.FromMembers(SpecTargetMembers(spec.TargetType, index)), resolver, needs);
+            ScanForValueObjectSum(spec.Condition, TypeScope.FromMembers(SpecTargetMembers(spec.TargetType, index), index), resolver, needs);
         }
 
         return needs;
@@ -239,7 +239,7 @@ internal static class OperatorNeedsAnalyzer
             {
                 if (_resolver.TypeOf(n.Target, _scope).SequenceElement is { } element)
                 {
-                    KoineType selector = _resolver.TypeOf(lambda.Body, _scope.With(lambda.Parameter, element.ToTypeRef()!));
+                    KoineType selector = _resolver.TypeOf(lambda.Body, _scope.With(lambda.Parameter, element));
                     if (selector.IsValueLike)
                     {
                         _needs.Add(selector.Name!);

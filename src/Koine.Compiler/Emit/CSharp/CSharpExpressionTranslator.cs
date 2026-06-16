@@ -65,7 +65,7 @@ internal sealed class CSharpExpressionTranslator
         TypeScope scope = _scope;
         foreach (KeyValuePair<string, TypeRef> kv in _localTypes)
         {
-            scope = scope.With(kv.Key, kv.Value);
+            scope = scope.WithRef(kv.Key, kv.Value, _index);
         }
 
         return scope;
@@ -103,7 +103,7 @@ internal sealed class CSharpExpressionTranslator
     {
         _index = index;
         _resolver = new TypeResolver(index, context);
-        _scope = TypeScope.FromMembers(members);
+        _scope = TypeScope.FromMembers(members, index);
         _memberNames = new HashSet<string>(members.Select(m => m.Name), StringComparer.Ordinal);
         _enumMemberToType = enumMemberToType;
         _specBodies = specBodies ?? EmptySpecs;
@@ -446,7 +446,7 @@ internal sealed class CSharpExpressionTranslator
         TypeScope scope = EffectiveScope();
         foreach (LetBinding b in let.Bindings)
         {
-            scope = scope.With(b.Name, _resolver.Infer(b.Value, scope) ?? new TypeRef("?"));
+            scope = scope.With(b.Name, _resolver.TypeOf(b.Value, scope));
         }
 
         TypeRef? bodyType = _resolver.Infer(let.Body, scope);
@@ -699,7 +699,7 @@ internal sealed class CSharpExpressionTranslator
         TypeRef? element = TypeResolver.ElementOf(_resolver.Infer(call.Target, scope));
         if (element is not null && call.Args is [LambdaExpr lambda])
         {
-            return _resolver.Infer(lambda.Body, scope.With(lambda.Parameter, element));
+            return _resolver.Infer(lambda.Body, scope.With(lambda.Parameter, KoineType.From(element, _index)));
         }
 
         return null;
