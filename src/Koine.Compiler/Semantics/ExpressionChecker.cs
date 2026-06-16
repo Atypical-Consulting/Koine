@@ -774,5 +774,5 @@ internal sealed class ExpressionChecker
     }
 
     private void Report(string code, string message, KoineNode node) =>
-        _diagnostics.Add(Diagnostic.Error(code, message, node.Span));
+        _diagnostics.Add(Diagnostic.FromSpan(code, message, node.Span));
 }

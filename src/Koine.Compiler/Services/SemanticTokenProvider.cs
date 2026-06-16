@@ -80,12 +80,11 @@ public sealed class SemanticTokenProvider
         }
 
         var index = new ModelIndex(model);
-        var lines = SplitLines(source);
 
         // Declaration spans, by (1-based line, 0-based column), so a token at a declaration
         // site gets the right type AND the declaration modifier (e.g. the NAME in
         // `value Money { … }` or a member name in its body).
-        IReadOnlyDictionary<(int, int), DeclKind> declarations = CollectDeclarations(index, lines);
+        IReadOnlyDictionary<(int, int), DeclKind> declarations = CollectDeclarations(index);
 
         // Member/property names declared anywhere (so a `field.` selector or an invariant
         // operand highlights as a property even though it is not a declared TYPE name).
@@ -201,73 +200,47 @@ public sealed class SemanticTokenProvider
     private enum DeclKind { Type, Enum, EnumMember, Property, Parameter }
 
     /// <summary>
-    /// Maps every declaration's name position (1-based line, 0-based column) to what it
-    /// declares, so a token at that exact position is classified as a declaration. Spans
-    /// with no known position (<see cref="SourceSpan.None"/>) are skipped.
-    ///
-    /// <para>A member/parameter/enum-member span already points at its NAME, but a type/enum
-    /// declaration's span points at the introducing KEYWORD (<c>value</c>, <c>enum</c>, …) —
-    /// so for those we locate the declared name on the span's line at/after the keyword,
-    /// matching how go-to-definition selects the name rather than the keyword.</para>
+    /// Maps every declaration's NAME position (1-based line, 0-based column) to what it declares,
+    /// so a token at that exact position is classified as a declaration. Every declaration now
+    /// carries a real <see cref="KoineNode.NameSpan"/> (the identifier range), so the position is
+    /// read directly from it — no source-line text search. Declarations with no name span
+    /// (<see cref="SourceSpan.None"/>) are skipped.
     /// </summary>
-    private static IReadOnlyDictionary<(int, int), DeclKind> CollectDeclarations(ModelIndex index, string[] lines)
+    private static IReadOnlyDictionary<(int, int), DeclKind> CollectDeclarations(ModelIndex index)
     {
         var map = new Dictionary<(int, int), DeclKind>();
 
-        void Add(SourceSpan span, DeclKind kind)
+        void Add(SourceSpan nameSpan, DeclKind kind)
         {
-            if (span != SourceSpan.None)
+            if (!nameSpan.IsNone)
             {
-                map[(span.Line, span.Column - 1)] = kind; // SourceSpan.Column is 1-based
-            }
-        }
-
-        // Adds a TYPE/ENUM declaration at its NAME: the span points at the keyword, so find
-        // the declared name on that line at/after the keyword column.
-        void AddNamed(SourceSpan span, string name, DeclKind kind)
-        {
-            if (span == SourceSpan.None)
-            {
-                return;
-            }
-
-            var line = span.Line - 1;      // 0-based
-            var keywordCol = span.Column - 1;
-            if (line < 0 || line >= lines.Length)
-            {
-                return;
-            }
-
-            var idx = lines[line].IndexOf(name, Math.Max(0, keywordCol), StringComparison.Ordinal);
-            if (idx >= 0)
-            {
-                map[(span.Line, idx)] = kind;
+                map[(nameSpan.Line, nameSpan.Column - 1)] = kind; // SourceSpan.Column is 1-based
             }
         }
 
         foreach (TypeDecl t in index.AllTypes())
         {
-            AddNamed(t.Span, t.Name, t is EnumDecl ? DeclKind.Enum : DeclKind.Type);
+            Add(t.NameSpan, t is EnumDecl ? DeclKind.Enum : DeclKind.Type);
             switch (t)
             {
                 case ValueObjectDecl v:
                     foreach (Member m in v.Members)
                     {
-                        Add(m.Span, DeclKind.Property);
+                        Add(m.NameSpan, DeclKind.Property);
                     }
 
                     break;
                 case EntityDecl e:
                     foreach (Member m in e.Members)
                     {
-                        Add(m.Span, DeclKind.Property);
+                        Add(m.NameSpan, DeclKind.Property);
                     }
 
                     foreach (CommandDecl c in e.Commands)
                     {
                         foreach (Param p in c.Parameters)
                         {
-                            Add(p.Span, DeclKind.Parameter);
+                            Add(p.NameSpan, DeclKind.Parameter);
                         }
                     }
 
@@ -275,7 +248,7 @@ public sealed class SemanticTokenProvider
                     {
                         foreach (Param p in f.Parameters)
                         {
-                            Add(p.Span, DeclKind.Parameter);
+                            Add(p.NameSpan, DeclKind.Parameter);
                         }
                     }
 
@@ -283,21 +256,21 @@ public sealed class SemanticTokenProvider
                 case EventDecl ev:
                     foreach (Member m in ev.Members)
                     {
-                        Add(m.Span, DeclKind.Property);
+                        Add(m.NameSpan, DeclKind.Property);
                     }
 
                     break;
                 case IntegrationEventDecl ie:
                     foreach (Member m in ie.Members)
                     {
-                        Add(m.Span, DeclKind.Property);
+                        Add(m.NameSpan, DeclKind.Property);
                     }
 
                     break;
                 case EnumDecl en:
                     foreach (EnumMember m in en.Members)
                     {
-                        Add(m.Span, DeclKind.EnumMember);
+                        Add(m.NameSpan, DeclKind.EnumMember);
                     }
 
                     break;
@@ -312,7 +285,7 @@ public sealed class SemanticTokenProvider
                 {
                     foreach (Param p in op.Parameters)
                     {
-                        Add(p.Span, DeclKind.Parameter);
+                        Add(p.NameSpan, DeclKind.Parameter);
                     }
                 }
 
@@ -320,7 +293,7 @@ public sealed class SemanticTokenProvider
                 {
                     foreach (Param p in uc.Parameters)
                     {
-                        Add(p.Span, DeclKind.Parameter);
+                        Add(p.NameSpan, DeclKind.Parameter);
                     }
                 }
             }
@@ -343,9 +316,6 @@ public sealed class SemanticTokenProvider
 
         return names;
     }
-
-    private static string[] SplitLines(string text) =>
-        text.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n');
 
     /// <summary>The default-channel <see cref="KoineLexer.Identifier"/> tokens of a source (skips strings, regex, comments).</summary>
     private static IEnumerable<IToken> IdentifierTokens(string source)

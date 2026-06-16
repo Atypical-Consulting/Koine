@@ -80,38 +80,134 @@ public sealed class SemanticModel
         };
 
         Member? m = members?.FirstOrDefault(x => x.Name == memberName);
-        return m is not null && m.Span != SourceSpan.None ? new MemberSymbol(memberName, m.Span, typeName, m) : null;
+        return m is not null && !m.NameSpan.IsNone ? new MemberSymbol(memberName, m.NameSpan, typeName, m) : null;
     }
+
+    /// <summary>
+    /// The innermost node whose <see cref="SourceSpan.Span"/> contains the 0-based absolute
+    /// <paramref name="offset"/>, or <c>null</c> when none does. <see cref="SourceSpan.None"/>
+    /// nodes (no width) never match. This is the precise position→node map that powers
+    /// in-expression and spec-body navigation.
+    /// </summary>
+    public KoineNode? NodeAt(int offset)
+    {
+        KoineNode? best = null;
+        var bestLength = int.MaxValue;
+        foreach (KoineNode node in NodeWalker.Descendants(Model))
+        {
+            SourceSpan span = node.Span;
+            if (span.IsNone || span.Length <= 0)
+            {
+                continue;
+            }
+
+            if (offset >= span.Offset && offset < span.Offset + span.Length && span.Length < bestLength)
+            {
+                best = node;
+                bestLength = span.Length;
+            }
+        }
+
+        return best;
+    }
+
+    /// <summary>
+    /// Resolves go-to-definition at a 0-based absolute <paramref name="offset"/>: finds the
+    /// innermost name-bearing node under the cursor (an identifier / member-access / call, a
+    /// type reference, or a declaration's own name) and resolves it via
+    /// <see cref="GetSymbol(string, string?)"/> using the enclosing type as the lexical scope.
+    /// Returns <c>null</c> when nothing name-bearing sits at the offset or it does not resolve.
+    /// </summary>
+    public Symbol? DefinitionAt(int offset)
+    {
+        string? name = null;
+        string? enclosingType = null;
+        var nameLength = int.MaxValue;
+
+        // Track the innermost enclosing type declaration AND the innermost name-bearing node,
+        // in a single pass over the tree.
+        foreach (KoineNode node in NodeWalker.Descendants(Model))
+        {
+            SourceSpan span = node.Span;
+            if (span.IsNone || span.Length <= 0)
+            {
+                continue;
+            }
+
+            var contains = offset >= span.Offset && offset < span.Offset + span.Length;
+            if (!contains)
+            {
+                continue;
+            }
+
+            switch (node)
+            {
+                // A type body: its own fields are in scope.
+                case ValueObjectDecl or EntityDecl or EventDecl or IntegrationEventDecl:
+                    enclosingType = ((TypeDecl)node).Name;
+                    break;
+                // A spec body resolves field references against the spec's target type (R10.1),
+                // which unblocks navigation inside `spec X on T = <expr>`.
+                case SpecDecl spec:
+                    enclosingType = spec.TargetType;
+                    break;
+            }
+
+            if (NameAtNode(node, offset) is { } candidate && candidate.Length < nameLength)
+            {
+                name = candidate.Name;
+                nameLength = candidate.Length;
+            }
+        }
+
+        return name is null ? null : GetSymbol(name, enclosingType);
+    }
+
+    /// <summary>
+    /// The name (and the width of the node it came from, for innermost-wins tie-breaking) that a
+    /// node contributes at <paramref name="offset"/>, or <c>null</c> if the node carries no
+    /// navigable name there. Only a bare <see cref="IdentifierExpr"/> reference and a
+    /// <see cref="TypeRef"/> resolve precisely by offset. A member-access/call selector
+    /// (e.g. the <c>total</c> in <c>order.total</c>) is NOT resolved here — that needs the
+    /// receiver's inferred type, beyond the name-only <see cref="GetSymbol(string, string?)"/> path —
+    /// so the cursor there falls through to the legacy token-based resolution.
+    /// </summary>
+    private static (string Name, int Length)? NameAtNode(KoineNode node, int offset) => node switch
+    {
+        IdentifierExpr id => (id.Name, node.Span.Length),
+        TypeRef tr => (tr.Name, node.Span.Length),
+        _ => null
+    };
 
     public Symbol? GetSymbol(string name)
     {
-        if (Index.TryGetDecl(name, out TypeDecl decl) && decl.Span != SourceSpan.None)
+        if (Index.TryGetDecl(name, out TypeDecl decl) && !decl.NameSpan.IsNone)
         {
-            return new TypeSymbol(name, decl.Span, Index.Classify(name), decl);
+            return new TypeSymbol(name, decl.NameSpan, Index.Classify(name), decl);
         }
 
         IReadOnlyList<string> owners = Index.EnumsDeclaring(name);
         if (owners.Count == 1 && Index.TryGetDecl(owners[0], out TypeDecl ed) && ed is EnumDecl e)
         {
             EnumMember? member = e.Members.FirstOrDefault(m => m.Name == name);
-            if (member is not null && member.Span != SourceSpan.None)
+            if (member is not null && !member.NameSpan.IsNone)
             {
-                return new EnumMemberSymbol(name, member.Span, owners[0], member);
+                return new EnumMemberSymbol(name, member.NameSpan, owners[0], member);
             }
         }
 
         SpecDecl? spec = Index.AllSpecs().FirstOrDefault(s => s.Name == name);
-        if (spec is not null && spec.Span != SourceSpan.None)
+        if (spec is not null && !spec.NameSpan.IsNone)
         {
-            return new SpecSymbol(name, spec.Span, spec);
+            return new SpecSymbol(name, spec.NameSpan, spec);
         }
 
         // ID type (e.g. ProductId) -> the entity that declares `identified by <name>`. There is no
-        // standalone ID node, so navigation deliberately lands on the owning entity's declaration.
+        // standalone ID node, so navigation deliberately lands on the owning entity's name.
         EntityDecl? owner = Index.AllTypes().OfType<EntityDecl>().FirstOrDefault(en => en.IdentityName == name);
-        if (owner is not null && owner.Span != SourceSpan.None)
+        if (owner is not null && !owner.NameSpan.IsNone)
         {
-            return new IdValueObjectSymbol(name, owner.Span, owner);
+            return new IdValueObjectSymbol(name, owner.NameSpan, owner);
         }
 
         return null;

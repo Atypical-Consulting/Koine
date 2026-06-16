@@ -48,11 +48,21 @@ public sealed class WorkspaceIndex
     /// of that type — in-expression navigation); otherwise a unique declaration among the other files;
     /// otherwise null (unknown or ambiguous across ≥2 other files).
     /// </summary>
-    public DeclLocation? ResolveDefinition(string activeUri, string name, string? enclosingType = null)
+    public DeclLocation? ResolveDefinition(string activeUri, string name, string? enclosingType = null, int? offset = null)
     {
-        if (_byUri.TryGetValue(activeUri, out SemanticModel? active) && active.GetSymbol(name, enclosingType)?.DeclSpan is { } localSpan)
+        if (_byUri.TryGetValue(activeUri, out SemanticModel? active))
         {
-            return new DeclLocation(activeUri, localSpan);
+            // Precise position→node resolution first (in-expression / spec-body navigation): the
+            // innermost name-bearing node under the cursor, resolved through the Symbol layer.
+            if (offset is { } off && active.DefinitionAt(off)?.DeclSpan is { } nodeSpan)
+            {
+                return new DeclLocation(activeUri, nodeSpan);
+            }
+
+            if (active.GetSymbol(name, enclosingType)?.DeclSpan is { } localSpan)
+            {
+                return new DeclLocation(activeUri, localSpan);
+            }
         }
 
         DeclLocation? found = null;
