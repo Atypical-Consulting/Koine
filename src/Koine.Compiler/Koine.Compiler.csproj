@@ -9,6 +9,8 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="Koine.Compiler.Tests" />
+    <!-- The CLI maps its parsed targets.csharp.* options to the internal CSharpEmitterOptions (R16.1). -->
+    <InternalsVisibleTo Include="Koine.Cli" />
   </ItemGroup>
 
   <ItemGroup>

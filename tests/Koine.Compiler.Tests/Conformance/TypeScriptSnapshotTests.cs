@@ -1,0 +1,80 @@
+using Koine.Compiler.Emit.TypeScript;
+using Koine.Compiler.Services;
+
+namespace Koine.Compiler.Tests.Conformance;
+
+/// <summary>
+/// R16.2 snapshot coverage for the TypeScript backend, mirroring <c>EmitterSnapshotTests</c>
+/// (Verify). The fixture is representative of the spec's semantics — a value object with an
+/// invariant, an entity with a command + invariant + factory, a smart enum (string-literal union +
+/// const member object + Match/Switch/TryFrom*), and a <c>Range</c> — so the reviewed
+/// <c>.verified.txt</c> locks in the emitted TypeScript exactly as the C# snapshots do.
+/// </summary>
+public class TypeScriptSnapshotTests
+{
+    /// <summary>A representative cross-section of the domain DSL, emitted to TypeScript.</summary>
+    internal const string Fixture = """
+        context Sales {
+          /// A monetary amount in a currency. Never negative.
+          value Money {
+            amount:   Decimal
+            currency: Currency
+            invariant amount >= 0 "an amount cannot be negative"
+          }
+
+          /// Currencies, carrying their symbol and minor-unit count.
+          enum Currency(symbol: String, decimals: Int) {
+            EUR("€", 2)
+            USD("$", 2)
+          }
+
+          /// The lifecycle of an order.
+          enum OrderStatus { Draft, Placed, Cancelled }
+
+          /// A line of an order; its subtotal is derived (Money scaled by quantity).
+          value OrderLine {
+            product:   ProductId
+            quantity:  Int
+            unitPrice: Money
+            subtotal:  Money = unitPrice * quantity
+            invariant quantity >= 1 "a line needs at least one unit"
+          }
+
+          /// A bookable window over time (exercises Range<Instant>).
+          value SalePeriod {
+            window: Range<Instant>
+          }
+
+          aggregate Order root Order {
+            entity Order identified by OrderId {
+              customer: CustomerId
+              lines:    List<OrderLine>
+              status:   OrderStatus = Draft
+              total:    Money = lines.sum(l => l.subtotal)
+
+              invariant !lines.isEmpty "an order must have at least one line"
+
+              command place {
+                requires status == Draft "only a draft order can be placed"
+                status -> Placed
+              }
+
+              create forCustomer(customer: CustomerId, lines: List<OrderLine>) {
+                requires !lines.isEmpty "cannot open an empty order"
+              }
+            }
+          }
+        }
+        """;
+
+    /// <summary>The emitted TypeScript for the fixture must match its reviewed snapshot.</summary>
+    [Fact]
+    public Task TypeScript_fixture_emits_expected_typescript()
+    {
+        var result = new KoineCompiler().Compile(Fixture, new TypeScriptEmitter());
+        Assert.True(result.Success, string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        return Verify(TestSupport.Render(result.Files))
+            .UseDirectory("Snapshots");
+    }
+}

@@ -49,7 +49,7 @@ public sealed partial class CSharpEmitter
         var scopeMembers = entity.Members
             .Append(new Member("id", new TypeRef(entity.IdentityName), null))
             .ToList();
-        var translator = new CSharpExpressionTranslator(index, scopeMembers, enumMemberToType, SpecBodiesFor(entity.Name, index), context: ContextOf(ns));
+        var translator = new CSharpExpressionTranslator(index, scopeMembers, enumMemberToType, SpecBodiesFor(entity.Name, index), context: ContextOf(ns), options: _options);
 
         var sb = new StringBuilder();
 
@@ -162,7 +162,7 @@ public sealed partial class CSharpEmitter
 
         sb.Append("}\n");
 
-        return new EmittedFile(PathFor(ns, isRoot ? KindFolder.Root : KindFolder.Entities, $"{entity.Name}.cs"),
+        return new EmittedFile(PathFor(emit, ns, isRoot ? KindFolder.Root : KindFolder.Entities, $"{entity.Name}.cs"),
             Assemble(emit, ns, sb.ToString(), EntityUsesLinq(entity) || SpecBodiesUseLinq(entity.Name, index)));
     }
 
@@ -231,6 +231,6 @@ public sealed partial class CSharpEmitter
         sb.Append(Indent).Append("}\n");
         sb.Append("}\n");
 
-        return new EmittedFile(PathFor(ns, KindFolder.ValueObjects, $"{idName}.cs"), Assemble(emit, ns, sb.ToString(), usesLinq: false));
+        return new EmittedFile(PathFor(emit, ns, KindFolder.ValueObjects, $"{idName}.cs"), Assemble(emit, ns, sb.ToString(), usesLinq: false));
     }
 }

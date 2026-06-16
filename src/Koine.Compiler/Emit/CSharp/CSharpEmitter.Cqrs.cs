@@ -36,7 +36,7 @@ public sealed partial class CSharpEmitter
         sb.Append('\n');
         sb.Append(Indent).Append("Task<int> SaveChangesAsync(CancellationToken ct = default);\n");
         sb.Append("}\n");
-        return new EmittedFile(PathFor(ns, KindFolder.Abstractions, "IUnitOfWork.cs"), Assemble(emit, ns, sb.ToString(), usesLinq: false));
+        return new EmittedFile(PathFor(emit, ns, KindFolder.Abstractions, "IUnitOfWork.cs"), Assemble(emit, ns, sb.ToString(), usesLinq: false));
     }
 
     /// <summary>
@@ -72,7 +72,7 @@ public sealed partial class CSharpEmitter
         }
 
         sb.Append("}\n");
-        return new EmittedFile(PathFor(ns, KindFolder.Services, $"{iface}.cs"), Assemble(emit, ns, sb.ToString(), usesLinq: false));
+        return new EmittedFile(PathFor(emit, ns, KindFolder.Services, $"{iface}.cs"), Assemble(emit, ns, sb.ToString(), usesLinq: false));
     }
 
     /// <summary>
@@ -92,7 +92,7 @@ public sealed partial class CSharpEmitter
         // to resolve its source (R13.2) when a type name is shared across contexts.
         var context = ContextOf(ns);
         IReadOnlyList<Member> sourceMembers = ReadModelSourceMembers(context, rm.SourceType, index);
-        var translator = new CSharpExpressionTranslator(index, sourceMembers, enumMemberToType, memberReceiver: "src", context: context);
+        var translator = new CSharpExpressionTranslator(index, sourceMembers, enumMemberToType, memberReceiver: "src", context: context, options: _options);
 
         var fields = new List<(string CsType, string Prop, string Rhs)>();
         foreach (ReadModelField f in rm.Fields)
@@ -128,7 +128,7 @@ public sealed partial class CSharpEmitter
         sb.Append("}\n");
 
         var usesLinq = rm.Fields.Any(f => f.Projection is not null && ExprUsesLinq(f.Projection));
-        return new EmittedFile(PathFor(ns, KindFolder.ReadModels, $"{rm.Name}.cs"), Assemble(emit, ns, sb.ToString(), usesLinq));
+        return new EmittedFile(PathFor(emit, ns, KindFolder.ReadModels, $"{rm.Name}.cs"), Assemble(emit, ns, sb.ToString(), usesLinq));
     }
 
     /// <summary>
@@ -168,7 +168,7 @@ public sealed partial class CSharpEmitter
             $"{typeMapper.Map(p.Type)} {CSharpNaming.ToPascalCase(p.Name)}"));
         sb.Append("public sealed record ").Append(q.Name).Append('(').Append(criteria).Append(");\n");
 
-        return new EmittedFile(PathFor(ns, KindFolder.Queries, $"{q.Name}.cs"), Assemble(emit, ns, sb.ToString(), usesLinq: false));
+        return new EmittedFile(PathFor(emit, ns, KindFolder.Queries, $"{q.Name}.cs"), Assemble(emit, ns, sb.ToString(), usesLinq: false));
     }
 
     /// <summary>True when the model declares any query object (gates the query-handler runtime type).</summary>

@@ -9,8 +9,18 @@ namespace Koine.Compiler.Emit.CSharp;
 internal sealed class CSharpTypeMapper
 {
     private readonly ModelIndex _index;
+    private readonly CSharpEmitterOptions _options;
 
-    public CSharpTypeMapper(ModelIndex index) => _index = index;
+    public CSharpTypeMapper(ModelIndex index)
+        : this(index, CSharpEmitterOptions.Empty)
+    {
+    }
+
+    public CSharpTypeMapper(ModelIndex index, CSharpEmitterOptions options)
+    {
+        _index = index;
+        _options = options;
+    }
 
     /// <summary>
     /// Returns the C# type name for a member's declared type. When the mapping
@@ -65,7 +75,7 @@ internal sealed class CSharpTypeMapper
                 // needs no `using` and never collides with a same-named local/imported type.
                 if (type.Qualifier is { } qualifier)
                 {
-                    var ns = _index.NamespaceOfTypeIn(qualifier, type.Name) ?? qualifier;
+                    var ns = _options.RemapNamespace(_index.NamespaceOfTypeIn(qualifier, type.Name) ?? qualifier);
                     return ns + "." + type.Name;
                 }
                 // enum / value / entity / aggregate / ID types map to their own C# name.

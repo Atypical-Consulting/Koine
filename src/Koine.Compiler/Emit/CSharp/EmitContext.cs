@@ -29,9 +29,22 @@ namespace Koine.Compiler.Emit.CSharp;
 /// ID type name -> its declared identity strategy (R11.1). An ID referenced but not owned
 /// by any entity (e.g. a foreign-context *Id) defaults to Guid.
 /// </param>
+/// <param name="Options">
+/// The configured C# emitter options (R16.1): namespace remapping, Instant handling. Empty
+/// (no remapping) by default, so an unconfigured emit is byte-identical to the historical output.
+/// </param>
 internal sealed record EmitContext(
     ModelIndex Index,
     IReadOnlyDictionary<string, IReadOnlySet<string>> ScalarNeeds,
     IReadOnlySet<string> AdditiveNeeds,
     IReadOnlyList<string> ContextNames,
-    IReadOnlyDictionary<string, (IdentityStrategy Strategy, string? Backing)> IdStrategies);
+    IReadOnlyDictionary<string, (IdentityStrategy Strategy, string? Backing)> IdStrategies,
+    CSharpEmitterOptions Options)
+{
+    /// <summary>
+    /// Remaps a logical namespace to its emitted form per the configured
+    /// <see cref="CSharpEmitterOptions.NamespaceMap"/> (R16.1); see
+    /// <see cref="CSharpEmitterOptions.RemapNamespace"/>.
+    /// </summary>
+    public string RemapNamespace(string logicalNamespace) => Options.RemapNamespace(logicalNamespace);
+}
