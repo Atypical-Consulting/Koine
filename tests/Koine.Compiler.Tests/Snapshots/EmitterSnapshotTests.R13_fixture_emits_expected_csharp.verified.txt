@@ -112,6 +112,8 @@ public sealed class Money : ValueObject
         Currency = currency;
     }
 
+    public override string ToString() => $"Money {{ Amount = {Amount}, Currency = {Currency} }}";
+
     protected override IEnumerable<object?> GetEqualityComponents()
     {
         yield return Amount;

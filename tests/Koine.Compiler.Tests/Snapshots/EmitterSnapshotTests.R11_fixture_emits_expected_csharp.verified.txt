@@ -306,6 +306,8 @@ public sealed class OrderLine : ValueObject
         Quantity = quantity;
     }
 
+    public override string ToString() => $"OrderLine {{ Product = {Product}, Quantity = {Quantity} }}";
+
     protected override IEnumerable<object?> GetEqualityComponents()
     {
         yield return Product;

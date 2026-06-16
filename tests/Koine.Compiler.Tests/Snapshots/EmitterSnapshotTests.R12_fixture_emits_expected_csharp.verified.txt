@@ -170,6 +170,7 @@ public interface IOrderRepository
 #nullable enable
 
 using System.Collections.Generic;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace Sales;
@@ -177,9 +178,9 @@ namespace Sales;
 /// <summary>Application-service boundary for the OrderService use cases.</summary>
 public interface IOrderService
 {
-    Task<OrderId> PlaceOrder(CustomerId customer, IReadOnlyList<OrderLine> lines);
+    Task<OrderId> PlaceOrder(CustomerId customer, IReadOnlyList<OrderLine> lines, CancellationToken ct = default);
 
-    Task CancelOrder(OrderId order);
+    Task CancelOrder(OrderId order, CancellationToken ct = default);
 }
 
 // ==== Sales/IUnitOfWork.cs ====
@@ -283,6 +284,8 @@ public sealed class OrderLine : ValueObject
         Product = product;
         Quantity = quantity;
     }
+
+    public override string ToString() => $"OrderLine {{ Product = {Product}, Quantity = {Quantity} }}";
 
     protected override IEnumerable<object?> GetEqualityComponents()
     {
