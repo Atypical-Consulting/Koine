@@ -104,4 +104,57 @@ public class SyntaxGraphTests
             Assert.True(ancestor.Span.Offset + ancestor.Span.Length >= node.Span.Offset + node.Span.Length);
         }
     }
+
+    // Brute-force oracle: the previous behavior — smallest positioned span containing the offset,
+    // first in pre-order on ties. FindNode must match this for every offset.
+    private static KoineNode? BruteInnermost(KoineModel model, int offset, bool useNameSpan)
+    {
+        KoineNode? best = null;
+        var bestLength = int.MaxValue;
+        foreach (var node in NodeWalker.Descendants(model))
+        {
+            var span = useNameSpan ? node.NameSpan : node.Span;
+            if (span.Length > 0
+                && offset >= span.Offset && offset < span.Offset + span.Length
+                && span.Length < bestLength)
+            {
+                best = node;
+                bestLength = span.Length;
+            }
+        }
+
+        return best;
+    }
+
+    [Fact]
+    public void FindNode_matches_the_brute_force_scan_for_every_offset()
+    {
+        var model = Parse(Src);
+        var graph = new SyntaxGraph(model);
+
+        for (var offset = 0; offset <= Src.Length; offset++)
+        {
+            Assert.Same(BruteInnermost(model, offset, useNameSpan: false), graph.FindNode(offset));
+        }
+    }
+
+    [Fact]
+    public void FindNameNode_matches_the_brute_force_scan_for_every_offset()
+    {
+        var model = Parse(Src);
+        var graph = new SyntaxGraph(model);
+
+        for (var offset = 0; offset <= Src.Length; offset++)
+        {
+            Assert.Same(BruteInnermost(model, offset, useNameSpan: true), graph.FindNameNode(offset));
+        }
+    }
+
+    [Fact]
+    public void FindNode_returns_null_outside_any_positioned_node()
+    {
+        var graph = new SyntaxGraph(Parse(Src));
+        Assert.Null(graph.FindNode(int.MaxValue));
+        Assert.Null(graph.FindNode(-1));
+    }
 }

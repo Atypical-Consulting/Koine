@@ -101,4 +101,35 @@ internal sealed class SyntaxGraph
 
         return null;
     }
+
+    /// <summary>The innermost node whose own <see cref="KoineNode.Span"/> contains <paramref name="offset"/>.</summary>
+    public KoineNode? FindNode(int offset) => Descend(_root, offset, static n => n.Span);
+
+    /// <summary>The innermost node whose <see cref="KoineNode.NameSpan"/> contains <paramref name="offset"/>.</summary>
+    public KoineNode? FindNameNode(int offset) => Descend(_root, offset, static n => n.NameSpan);
+
+    /// <summary>
+    /// Top-down descent (Roslyn <c>FindNode</c> model): routes by each child's <c>FullSpan</c> and
+    /// returns the deepest node on the path whose <paramref name="select"/>ed span actually contains
+    /// the offset. O(depth) given the validated nesting invariant (parent FullSpan ⊇ child FullSpan,
+    /// real sibling spans disjoint).
+    /// </summary>
+    private KoineNode? Descend(KoineNode node, int offset, Func<KoineNode, SourceSpan> select)
+    {
+        SourceSpan span = select(node);
+        KoineNode? best = span.Length > 0 && offset >= span.Offset && offset < span.Offset + span.Length
+            ? node
+            : null;
+
+        foreach (KoineNode child in _children[node])
+        {
+            (int start, int end) = _fullSpan[child];
+            if (offset >= start && offset < end && Descend(child, offset, select) is { } deeper)
+            {
+                best = deeper;
+            }
+        }
+
+        return best;
+    }
 }
