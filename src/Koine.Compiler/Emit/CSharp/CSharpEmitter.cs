@@ -369,7 +369,7 @@ public sealed partial class CSharpEmitter : IEmitter
 
         sb.Append("}\n");
 
-        return new EmittedFile($"{FolderFor(ns)}/{name}.cs", Assemble(emit, ns, sb.ToString(), usesLinq: true));
+        return new EmittedFile(PathFor(ns, KindFolder.Enums, $"{name}.cs"), Assemble(emit, ns, sb.ToString(), usesLinq: true));
     }
 
     // ----------------------------------------------------------------------
@@ -484,7 +484,7 @@ public sealed partial class CSharpEmitter : IEmitter
         }
 
         sb.Append("}\n");
-        return new EmittedFile($"{FolderFor(ns)}/{ev.Name}.cs",
+        return new EmittedFile(PathFor(ns, KindFolder.Events, $"{ev.Name}.cs"),
             Assemble(emit, ns, sb.ToString(), UsesLinq(ev.Members, Array.Empty<Invariant>())));
     }
 
@@ -543,7 +543,7 @@ public sealed partial class CSharpEmitter : IEmitter
         }
 
         sb.Append("}\n");
-        return new EmittedFile($"{FolderFor(ns)}/{ev.Name}.cs",
+        return new EmittedFile(PathFor(ns, KindFolder.IntegrationEvents, $"{ev.Name}.cs"),
             Assemble(emit, ns, sb.ToString(), UsesLinq(ev.Members, Array.Empty<Invariant>())));
     }
 
@@ -565,7 +565,7 @@ public sealed partial class CSharpEmitter : IEmitter
         sb.Append(Indent).Append("Task Handle(").Append(eventType).Append(" theEvent, CancellationToken ct = default);\n");
         sb.Append("}\n");
 
-        return new EmittedFile($"{FolderFor(subscriberContext)}/IHandle{sub.EventName}.cs",
+        return new EmittedFile(PathFor(subscriberContext, KindFolder.Abstractions, $"IHandle{sub.EventName}.cs"),
             Assemble(emit, subscriberContext, sb.ToString(), usesLinq: false));
     }
 
@@ -597,7 +597,7 @@ public sealed partial class CSharpEmitter : IEmitter
 
         sb.Append("}\n");
 
-        return new EmittedFile($"{FolderFor(r.Downstream)}/{iface}.cs",
+        return new EmittedFile(PathFor(r.Downstream, KindFolder.Abstractions, $"{iface}.cs"),
             Assemble(emit, r.Downstream, sb.ToString(), usesLinq: false));
     }
 
