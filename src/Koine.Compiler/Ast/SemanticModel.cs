@@ -46,6 +46,43 @@ public sealed class SemanticModel
     /// primitives/collections and unknown or ambiguous names. The single resolution path the editor
     /// services share for go-to-definition, hover, and rename (R17).
     /// </summary>
+    /// <summary>
+    /// Resolves a name referenced from within <paramref name="enclosingType"/>'s expressions
+    /// (an invariant / command / factory body): a field of that type resolves to its
+    /// <see cref="MemberSymbol"/>; otherwise falls back to the model-wide <see cref="GetSymbol(string)"/>
+    /// (types, enum members, specs, ID value objects). This is the in-expression navigation entry point.
+    /// </summary>
+    public Symbol? GetSymbol(string name, string? enclosingType)
+    {
+        if (enclosingType is not null && MemberOf(enclosingType, name) is { } member)
+        {
+            return member;
+        }
+
+        return GetSymbol(name);
+    }
+
+    /// <summary>The <see cref="MemberSymbol"/> for a field of a value/entity/event type, else <c>null</c>.</summary>
+    private MemberSymbol? MemberOf(string typeName, string memberName)
+    {
+        if (!Index.TryGetDecl(typeName, out TypeDecl decl))
+        {
+            return null;
+        }
+
+        IReadOnlyList<Member>? members = decl switch
+        {
+            ValueObjectDecl v => v.Members,
+            EntityDecl e => e.Members,
+            EventDecl ev => ev.Members,
+            IntegrationEventDecl ie => ie.Members,
+            _ => null
+        };
+
+        Member? m = members?.FirstOrDefault(x => x.Name == memberName);
+        return m is not null && m.Span != SourceSpan.None ? new MemberSymbol(memberName, m.Span, typeName, m) : null;
+    }
+
     public Symbol? GetSymbol(string name)
     {
         if (Index.TryGetDecl(name, out TypeDecl decl) && decl.Span != SourceSpan.None)

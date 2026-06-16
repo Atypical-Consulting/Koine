@@ -4,6 +4,7 @@ namespace Koine.Compiler.Ast;
 public enum SymbolKind
 {
     Type,
+    Member,
     EnumMember,
     Spec,
     IdValueObject
@@ -52,6 +53,26 @@ public sealed class TypeSymbol : Symbol
     }
 
     public override SymbolKind Kind => SymbolKind.Type;
+}
+
+/// <summary>
+/// A field of a value object / entity / event, referenced from within that type's expressions
+/// (an invariant, command, or factory body). The navigation target for a member reference.
+/// </summary>
+public sealed class MemberSymbol : Symbol
+{
+    /// <summary>The simple name of the type that declares the member.</summary>
+    public string OwnerType { get; }
+    public Member Member { get; }
+
+    public MemberSymbol(string name, SourceSpan declSpan, string ownerType, Member member)
+        : base(name, declSpan, member.Doc)
+    {
+        OwnerType = ownerType;
+        Member = member;
+    }
+
+    public override SymbolKind Kind => SymbolKind.Member;
 }
 
 /// <summary>An (unambiguous) enum member, owned by <see cref="EnumName"/>.</summary>

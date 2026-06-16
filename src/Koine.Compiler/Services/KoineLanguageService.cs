@@ -371,7 +371,7 @@ public sealed class KoineLanguageService
             return null;
         }
 
-        var markdown = new WorkspaceIndex(documents).ResolveHover(activeUri, name);
+        var markdown = new WorkspaceIndex(documents).ResolveHover(activeUri, name, ctx.EnclosingTypeName);
         return markdown is null ? null : new HoverResult(markdown);
     }
 
@@ -389,7 +389,7 @@ public sealed class KoineLanguageService
             return null;
         }
 
-        var loc = new WorkspaceIndex(documents).ResolveDefinition(activeUri, name);
+        var loc = new WorkspaceIndex(documents).ResolveDefinition(activeUri, name, ctx.EnclosingTypeName);
         return loc is null ? null : new DefinitionResult(loc.Uri, loc.Span);
     }
 
