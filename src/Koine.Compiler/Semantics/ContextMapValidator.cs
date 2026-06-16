@@ -28,29 +28,42 @@ internal static class ContextMapValidator
         {
             // 1. Endpoints declared.
             foreach (var endpoint in new[] { r.Upstream, r.Downstream })
+            {
                 if (!index.IsContext(endpoint))
+                {
                     diagnostics.Add(Diagnostic.Error(DiagnosticCodes.ContextMapUnknownContext,
                         $"context-map relation names unknown context '{endpoint}'", r.Span));
+                }
+            }
 
             // 2. No self-relation.
             if (r.Upstream == r.Downstream)
+            {
                 diagnostics.Add(Diagnostic.Error(DiagnosticCodes.SelfRelation,
                     $"context '{r.Upstream}' cannot be related to itself", r.Span));
+            }
 
             // 3. No duplicate pair (order-normalized, so reversed bidirectional pairs collide too).
             var pair = string.CompareOrdinal(r.Upstream, r.Downstream) <= 0
                 ? (r.Upstream, r.Downstream) : (r.Downstream, r.Upstream);
             if (!seenPairs.Add(pair) && r.Upstream != r.Downstream)
+            {
                 diagnostics.Add(Diagnostic.Error(DiagnosticCodes.DuplicateContextRelation,
                     $"duplicate context-map relation between '{r.Upstream}' and '{r.Downstream}'", r.Span));
+            }
 
             // 4. Block-vs-role agreement.
             if (r.SharedTypes.Count > 0 && r.Kind != ContextRelationKind.SharedKernel)
+            {
                 diagnostics.Add(Diagnostic.Error(DiagnosticCodes.SharedTypesOnNonKernel,
                     $"'shared-kernel {{ }}' block is only valid on a shared-kernel relation ('{r.Upstream}' -> '{r.Downstream}' is {RoleName(r.Kind)})", r.Span));
+            }
+
             if (r.AclMappings.Count > 0 && r.Kind != ContextRelationKind.AntiCorruptionLayer)
+            {
                 diagnostics.Add(Diagnostic.Error(DiagnosticCodes.AclOnNonAclRole,
                     $"'acl {{ }}' block is only valid on an anti-corruption-layer relation ('{r.Upstream}' -> '{r.Downstream}' is {RoleName(r.Kind)})", r.Span));
+            }
 
             // 5. Shared-kernel membership: each listed type must be declared by a partner, and a
             //    type may belong to only one kernel (a second, conflicting pair is an error).
@@ -61,16 +74,24 @@ internal static class ContextMapValidator
                 foreach (var t in r.SharedTypes)
                 {
                     if (!index.DeclaresType(r.Upstream, t) && !index.DeclaresType(r.Downstream, t))
+                    {
                         diagnostics.Add(Diagnostic.Error(DiagnosticCodes.UnknownSharedKernelType,
                             $"shared-kernel type '{t}' is declared by neither '{r.Upstream}' nor '{r.Downstream}'", r.Span));
+                    }
                     else if (index.Classify(t) is TypeKind.Entity or TypeKind.Aggregate)
+                    {
                         diagnostics.Add(Diagnostic.Error(DiagnosticCodes.SharedKernelNotShareable,
                             $"shared-kernel type '{t}' is an {(index.Classify(t) == TypeKind.Entity ? "entity" : "aggregate")}; a shared kernel may contain only value objects and enums (identity-bearing types belong to one context)", r.Span));
+                    }
                     else if (kernelOf.TryGetValue(t, out var first) && first != kernelPair)
+                    {
                         diagnostics.Add(Diagnostic.Error(DiagnosticCodes.SharedKernelTypeConflict,
                             $"type '{t}' is shared by more than one kernel ('{first.Item1}'/'{first.Item2}' and '{kernelPair.Item1}'/'{kernelPair.Item2}'); a type may belong to only one shared kernel", r.Span));
+                    }
                     else
+                    {
                         kernelOf[t] = kernelPair;
+                    }
                 }
             }
 
@@ -85,8 +106,10 @@ internal static class ContextMapValidator
                              && index.DeclaresType(r.Downstream, m.LocalType)
                              && seenUpstream.Add(m.UpstreamType);
                     if (!ok)
+                    {
                         diagnostics.Add(Diagnostic.Error(DiagnosticCodes.AclMappingType,
                             $"ACL mapping '{m.UpstreamContext}.{m.UpstreamType} -> {m.LocalContext}.{m.LocalType}' must map a distinct upstream '{r.Upstream}' type to a downstream '{r.Downstream}' type that both exist", m.Span));
+                    }
                 }
             }
         }

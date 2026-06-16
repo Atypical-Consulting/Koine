@@ -21,7 +21,7 @@ public sealed partial class CSharpEmitter : IEmitter
     {
         var index = new ModelIndex(model);
         var typeMapper = new CSharpTypeMapper(index);
-        var enumMemberToType = BuildEnumMemberMap(model);
+        Dictionary<string, string> enumMemberToType = BuildEnumMemberMap(model);
 
         // All per-run state lives in this immutable record, threaded through the emit
         // methods so the emitter holds no mutable per-model fields (it stays reentrant).
@@ -40,32 +40,51 @@ public sealed partial class CSharpEmitter : IEmitter
         // Value-object base is needed for declared value objects/entities AND for any generated
         // ID value object (e.g. an *Id referenced only by an integration event, R14.3).
         if (NeedsValueObjects(model) || index.IdTypeNames.Count > 0)
+        {
             files.Add(EmitValueObjectBase(emit));
+        }
+
         if (UsesRange(model))
+        {
             files.Add(EmitRange(emit));
+        }
+
         if (HasEvents(model))
+        {
             files.Add(EmitDomainEventInterface(emit));
+        }
+
         if (HasIntegrationEvents(model))
+        {
             files.Add(EmitIntegrationEventInterface(emit));
+        }
+
         if (HasVersionedAggregate(model))
+        {
             files.Add(EmitConcurrencyConflictException(emit));
+        }
+
         if (HasQueries(model))
+        {
             files.Add(EmitQueryHandlerInterface(emit));
+        }
 
         // 2. Per-context user types. Aggregate-nested types are flattened into the
         //    context namespace; the aggregate boundary is marked via IAggregateRoot.
-        foreach (var ctx in model.Contexts)
+        foreach (ContextNode ctx in model.Contexts)
         {
-            var idOwnership = BuildIdOwnership(ctx);
+            Dictionary<string, EntityDecl> idOwnership = BuildIdOwnership(ctx);
 
-            foreach (var type in ctx.Types)
+            foreach (TypeDecl type in ctx.Types)
             {
                 // A shared-kernel type (R14.2) is emitted once, by its owning context, into the
                 // dedicated kernel namespace; any other partner skips it (it lives in the kernel).
                 if (index.IsSharedKernelType(type.Name))
                 {
                     if (index.KernelOwnerOfType(type.Name) != ctx.Name)
+                    {
                         continue;
+                    }
                 }
 
                 // A type emits into its context namespace, extended by its module path (R13.3),
@@ -106,7 +125,7 @@ public sealed partial class CSharpEmitter : IEmitter
             // known (a cross-context reference), else default to Guid.
             foreach (var idName in OrderedUnownedIds(ctx, index, idOwnership))
             {
-                var (strategy, backing) = emit.IdStrategies.TryGetValue(idName, out var s)
+                (IdentityStrategy strategy, var backing) = emit.IdStrategies.TryGetValue(idName, out (IdentityStrategy Strategy, string? Backing) s)
                     ? s : (IdentityStrategy.Guid, null);
                 files.Add(EmitIdValueObject(emit, idName, ctx.Name, strategy, backing));
             }
@@ -116,23 +135,35 @@ public sealed partial class CSharpEmitter : IEmitter
                 .Concat(ctx.Types.OfType<AggregateDecl>().SelectMany(a => a.Specs))
                 .ToList();
             if (contextSpecs.Count > 0)
+            {
                 files.Add(EmitSpecifications(emit, ctx.Name, contextSpecs, index, typeMapper, enumMemberToType));
-            foreach (var svc in ctx.Services)
+            }
+
+            foreach (ServiceDecl svc in ctx.Services)
             {
                 // A service emits a stateless domain class for its pure operations (R10.2)
                 // and/or an application-service interface for its use cases (R12.2).
                 if (svc.Operations.Count > 0)
+                {
                     files.Add(EmitService(emit, svc, ctx.Name, index, typeMapper, enumMemberToType));
+                }
+
                 if (svc.UseCases.Count > 0)
+                {
                     files.Add(EmitApplicationService(emit, svc, ctx.Name, typeMapper));
+                }
             }
-            foreach (var policy in ctx.Policies)
+            foreach (PolicyDecl policy in ctx.Policies)
+            {
                 files.Add(EmitPolicy(emit, policy, ctx.Name, index, enumMemberToType));
+            }
 
             // 4. Integration-event subscriber handler seams (R14.3): one IHandle<Event> per
             //    subscription. No handler is generated for events the context only publishes.
-            foreach (var sub in ctx.Subscribes)
+            foreach (SubscribeDecl sub in ctx.Subscribes)
+            {
                 files.Add(EmitIntegrationEventHandler(emit, sub, ctx.Name, index));
+            }
 
             // 5. The context's Unit of Work (R12.1): a transactional seam over its
             //    aggregate repositories. Emitted only when the context has aggregates whose
@@ -141,15 +172,23 @@ public sealed partial class CSharpEmitter : IEmitter
                 .Where(a => a.RootEntity() is not null)
                 .ToList();
             if (aggregates.Count > 0)
+            {
                 files.Add(EmitUnitOfWork(emit, ctx.Name, aggregates));
+            }
         }
 
         // 6. Anti-corruption-layer translator interfaces (R14.2): one per ACL relation that
         //    carries a mapping block. Emitted once, into the downstream context's namespace.
         if (model.ContextMap is { } map)
-            foreach (var r in map.Relations)
+        {
+            foreach (ContextRelation r in map.Relations)
+            {
                 if (r.Kind == ContextRelationKind.AntiCorruptionLayer && r.AclMappings.Count > 0)
+                {
                     files.Add(EmitAclTranslator(emit, r, index));
+                }
+            }
+        }
 
         return files;
     }
@@ -174,7 +213,7 @@ public sealed partial class CSharpEmitter : IEmitter
         IReadOnlyDictionary<string, string> enumMemberToType)
     {
         var name = @enum.Name;
-        var sig = @enum.Signature;
+        IReadOnlyList<Param> sig = @enum.Signature;
         var hasData = @enum.HasAssociatedData;
         var sb = new StringBuilder();
 
@@ -190,15 +229,20 @@ public sealed partial class CSharpEmitter : IEmitter
         // has a signature, each member also passes its associated-data values.
         for (var i = 0; i < @enum.Members.Count; i++)
         {
-            var member = @enum.Members[i];
+            EnumMember member = @enum.Members[i];
             sb.Append(Indent).Append("public static readonly ").Append(name).Append(' ')
-              .Append(member.Name).Append(" = new(\"").Append(member.Name).Append("\", ").Append(i);
+              .Append(CSharpNaming.EscapeIdentifier(member.Name)).Append(" = new(\"").Append(member.Name).Append("\", ").Append(i);
             if (hasData)
-                // Associated values are literals of a primitive field type (String/Int/
-                // Decimal/Bool), validated upstream — render them directly.
+            // Associated values are literals of a primitive field type (String/Int/
+            // Decimal/Bool), validated upstream — render them directly.
+            {
                 for (var j = 0; j < sig.Count && j < member.Args.Count; j++)
+                {
                     sb.Append(", ").Append(translator.TranslateTopLevel(
                         member.Args[j], CSharpExpressionTranslator.NameMode.Property));
+                }
+            }
+
             sb.Append(");\n");
         }
 
@@ -206,35 +250,44 @@ public sealed partial class CSharpEmitter : IEmitter
         sb.Append(Indent).Append("public string Name { get; }\n");
         sb.Append(Indent).Append("public int Value { get; }\n");
         // Associated-data properties, in signature order.
-        foreach (var p in sig)
+        foreach (Param p in sig)
+        {
             sb.Append(Indent).Append("public ").Append(typeMapper.Map(p.Type)).Append(' ')
               .Append(CSharpNaming.ToPascalCase(p.Name)).Append(" { get; }\n");
+        }
+
         sb.Append('\n');
 
         var ctorParams = "string name, int value";
         if (hasData)
+        {
             ctorParams += ", " + string.Join(", ", sig.Select(p =>
                 $"{typeMapper.Map(p.Type)} {CSharpNaming.ToCamelCase(p.Name)}"));
+        }
+
         sb.Append(Indent).Append("private ").Append(name).Append('(').Append(ctorParams).Append(")\n");
         sb.Append(Indent).Append("{\n");
         sb.Append(Indent).Append(Indent).Append("Name = name;\n");
         sb.Append(Indent).Append(Indent).Append("Value = value;\n");
-        foreach (var p in sig)
+        foreach (Param p in sig)
+        {
             sb.Append(Indent).Append(Indent).Append(CSharpNaming.ToPascalCase(p.Name)).Append(" = ")
               .Append(CSharpNaming.ToCamelCase(p.Name)).Append(";\n");
+        }
+
         sb.Append(Indent).Append("}\n\n");
 
         sb.Append(Indent).Append("public static IReadOnlyList<").Append(name).Append("> All { get; } = new[] { ")
-          .Append(string.Join(", ", @enum.MemberNames)).Append(" };\n\n");
+          .Append(string.Join(", ", @enum.MemberNames.Select(CSharpNaming.EscapeIdentifier))).Append(" };\n\n");
 
-        sb.Append(Indent).Append("public static ").Append(name).Append(" FromName(string name) =>\n");
-        sb.Append(Indent).Append(Indent).Append("All.FirstOrDefault(e => e.Name == name)\n");
-        sb.Append(Indent).Append(Indent).Append("?? throw new ArgumentOutOfRangeException(nameof(name), $\"No ")
+        sb.Append(Indent).Append("public static ").Append(name).Append(" FromName(string name)\n");
+        sb.Append(Indent).Append(Indent).Append("=> All.FirstOrDefault(e => e.Name == name)\n");
+        sb.Append(Indent).Append(Indent).Append(Indent).Append("?? throw new ArgumentOutOfRangeException(nameof(name), $\"No ")
           .Append(name).Append(" with name '{name}'.\");\n\n");
 
-        sb.Append(Indent).Append("public static ").Append(name).Append(" FromValue(int value) =>\n");
-        sb.Append(Indent).Append(Indent).Append("All.FirstOrDefault(e => e.Value == value)\n");
-        sb.Append(Indent).Append(Indent).Append("?? throw new ArgumentOutOfRangeException(nameof(value), $\"No ")
+        sb.Append(Indent).Append("public static ").Append(name).Append(" FromValue(int value)\n");
+        sb.Append(Indent).Append(Indent).Append("=> All.FirstOrDefault(e => e.Value == value)\n");
+        sb.Append(Indent).Append(Indent).Append(Indent).Append("?? throw new ArgumentOutOfRangeException(nameof(value), $\"No ")
           .Append(name).Append(" with value {value}.\");\n\n");
 
         // Non-throwing lookups (the .NET-canonical Try* shape) for parsing at domain
@@ -258,39 +311,57 @@ public sealed partial class CSharpEmitter : IEmitter
 
         sb.Append(Indent).Append("public TResult Match<TResult>(\n");
         for (var i = 0; i < arms.Count; i++)
+        {
             sb.Append(Indent).Append(Indent).Append("Func<TResult> ").Append(arms[i])
-              .Append(i < arms.Count - 1 ? ",\n" : ") =>\n");
-        sb.Append(Indent).Append(Indent).Append("Value switch\n");
+              .Append(i < arms.Count - 1 ? ",\n" : ")\n");
+        }
+
+        sb.Append(Indent).Append(Indent).Append("=> Value switch\n");
         sb.Append(Indent).Append(Indent).Append("{\n");
         for (var i = 0; i < arms.Count; i++)
+        {
             sb.Append(Indent).Append(Indent).Append(Indent).Append(i).Append(" => ").Append(arms[i]).Append("(),\n");
+        }
+
         sb.Append(Indent).Append(Indent).Append(Indent).Append("_ => throw new InvalidOperationException($\"Unhandled ")
           .Append(name).Append(" '{Name}'.\")\n");
         sb.Append(Indent).Append(Indent).Append("};\n\n");
 
         sb.Append(Indent).Append("public void Switch(\n");
         for (var i = 0; i < arms.Count; i++)
+        {
             sb.Append(Indent).Append(Indent).Append("Action ").Append(arms[i])
               .Append(i < arms.Count - 1 ? ",\n" : ")\n");
+        }
+
         sb.Append(Indent).Append("{\n");
         sb.Append(Indent).Append(Indent).Append("switch (Value)\n");
         sb.Append(Indent).Append(Indent).Append("{\n");
         for (var i = 0; i < arms.Count; i++)
+        {
             sb.Append(Indent).Append(Indent).Append(Indent).Append("case ").Append(i).Append(": ")
               .Append(arms[i]).Append("(); break;\n");
+        }
+
         sb.Append(Indent).Append(Indent).Append(Indent).Append("default: throw new InvalidOperationException($\"Unhandled ")
           .Append(name).Append(" '{Name}'.\");\n");
         sb.Append(Indent).Append(Indent).Append("}\n");
         sb.Append(Indent).Append("}\n\n");
 
-        sb.Append(Indent).Append("public override string ToString() => Name;\n");
-        sb.Append(Indent).Append("public bool Equals(").Append(name).Append("? other) => other is not null && Value == other.Value;\n");
-        sb.Append(Indent).Append("public override bool Equals(object? obj) => Equals(obj as ").Append(name).Append(");\n");
-        sb.Append(Indent).Append("public override int GetHashCode() => Value;\n");
+        sb.Append(Indent).Append("public override string ToString()\n");
+        sb.Append(Indent).Append(Indent).Append("=> Name;\n");
+        sb.Append(Indent).Append("public bool Equals(").Append(name).Append("? other)\n");
+        sb.Append(Indent).Append(Indent).Append("=> other is not null && Value == other.Value;\n");
+        sb.Append(Indent).Append("public override bool Equals(object? obj)\n");
+        sb.Append(Indent).Append(Indent).Append("=> Equals(obj as ").Append(name).Append(");\n");
+        sb.Append(Indent).Append("public override int GetHashCode()\n");
+        sb.Append(Indent).Append(Indent).Append("=> Value;\n");
         sb.Append(Indent).Append("public static bool operator ==(").Append(name).Append("? left, ").Append(name)
-          .Append("? right) => left is null ? right is null : left.Equals(right);\n");
+          .Append("? right)\n");
+        sb.Append(Indent).Append(Indent).Append("=> left is null ? right is null : left.Equals(right);\n");
         sb.Append(Indent).Append("public static bool operator !=(").Append(name).Append("? left, ").Append(name)
-          .Append("? right) => !(left == right);\n");
+          .Append("? right)\n");
+        sb.Append(Indent).Append(Indent).Append("=> !(left == right);\n");
 
         sb.Append("}\n");
 
@@ -313,8 +384,9 @@ public sealed partial class CSharpEmitter : IEmitter
     /// </summary>
     private static bool UsesRange(KoineModel model)
     {
-        foreach (var ctx in model.Contexts)
-            foreach (var t in ctx.AllTypeDecls())
+        foreach (ContextNode ctx in model.Contexts)
+        {
+            foreach (TypeDecl t in ctx.AllTypeDecls())
             {
                 IReadOnlyList<Member>? members = t switch
                 {
@@ -324,17 +396,23 @@ public sealed partial class CSharpEmitter : IEmitter
                     _ => null
                 };
                 if (members is not null && members.Any(m => TypeRefMentions(m.Type, ModelIndex.RangeTypeName)))
+                {
                     return true;
+                }
 
                 if (t is EntityDecl en)
                 {
-                    var paramTypes = en.Commands.SelectMany(c => c.Parameters)
+                    IEnumerable<TypeRef> paramTypes = en.Commands.SelectMany(c => c.Parameters)
                         .Concat(en.Factories.SelectMany(f => f.Parameters))
                         .Select(p => p.Type);
                     if (paramTypes.Any(pt => TypeRefMentions(pt, ModelIndex.RangeTypeName)))
+                    {
                         return true;
+                    }
                 }
             }
+        }
+
         return false;
     }
 
@@ -370,7 +448,7 @@ public sealed partial class CSharpEmitter : IEmitter
         WriteObsolete(sb, ev.Deprecated, "");
         sb.Append("public sealed record ").Append(ev.Name).Append(" : IDomainEvent\n{\n");
 
-        foreach (var m in ctorMembers)
+        foreach (Member m in ctorMembers)
         {
             var csType = typeMapper.Map(m.Type, out var comment);
             WriteXmlDoc(sb, m.Doc, Indent);
@@ -389,7 +467,7 @@ public sealed partial class CSharpEmitter : IEmitter
         sb.Append('\n');
         WriteConstructor(sb, ev.Name, ctorMembers, Array.Empty<Invariant>(), memberNames, translator, typeMapper, enumMemberToType, index);
 
-        foreach (var m in derived)
+        foreach (Member m in derived)
         {
             var csType = typeMapper.Map(m.Type);
             var body = translator.TranslateTopLevel(m.Initializer!, CSharpExpressionTranslator.NameMode.Property, EnumExpected(m, index));
@@ -397,7 +475,8 @@ public sealed partial class CSharpEmitter : IEmitter
             WriteXmlDoc(sb, m.Doc, Indent);
             WriteObsolete(sb, m.Deprecated, Indent);
             sb.Append(Indent).Append("public ").Append(csType).Append(' ')
-              .Append(CSharpNaming.ToPascalCase(m.Name)).Append(" => ").Append(body).Append(";\n");
+              .Append(CSharpNaming.ToPascalCase(m.Name)).Append('\n');
+            sb.Append(Indent).Append(Indent).Append("=> ").Append(body).Append(";\n");
         }
 
         sb.Append("}\n");
@@ -428,7 +507,7 @@ public sealed partial class CSharpEmitter : IEmitter
         WriteObsolete(sb, ev.Deprecated, "");
         sb.Append("public sealed record ").Append(ev.Name).Append(" : IIntegrationEvent\n{\n");
 
-        foreach (var m in ctorMembers)
+        foreach (Member m in ctorMembers)
         {
             var csType = typeMapper.Map(m.Type, out var comment);
             WriteXmlDoc(sb, m.Doc, Indent);
@@ -447,7 +526,7 @@ public sealed partial class CSharpEmitter : IEmitter
         sb.Append('\n');
         WriteConstructor(sb, ev.Name, ctorMembers, Array.Empty<Invariant>(), memberNames, translator, typeMapper, enumMemberToType, index);
 
-        foreach (var m in derived)
+        foreach (Member m in derived)
         {
             var csType = typeMapper.Map(m.Type);
             var body = translator.TranslateTopLevel(m.Initializer!, CSharpExpressionTranslator.NameMode.Property, EnumExpected(m, index));
@@ -455,7 +534,8 @@ public sealed partial class CSharpEmitter : IEmitter
             WriteXmlDoc(sb, m.Doc, Indent);
             WriteObsolete(sb, m.Deprecated, Indent);
             sb.Append(Indent).Append("public ").Append(csType).Append(' ')
-              .Append(CSharpNaming.ToPascalCase(m.Name)).Append(" => ").Append(body).Append(";\n");
+              .Append(CSharpNaming.ToPascalCase(m.Name)).Append('\n');
+            sb.Append(Indent).Append(Indent).Append("=> ").Append(body).Append(";\n");
         }
 
         sb.Append("}\n");
@@ -502,12 +582,15 @@ public sealed partial class CSharpEmitter : IEmitter
         sb.Append("/// <summary>Anti-corruption translator from upstream context ").Append(r.Upstream)
           .Append(" into ").Append(r.Downstream).Append(".</summary>\n");
         sb.Append("public interface ").Append(iface).Append("\n{\n");
-        foreach (var m in r.AclMappings)
+        foreach (AclMapping m in r.AclMappings)
+        {
             sb.Append(Indent)
               .Append(Fqn(m.LocalContext, m.LocalType))
               .Append(" Translate(")
               .Append(Fqn(m.UpstreamContext, m.UpstreamType))
               .Append(" source);\n");
+        }
+
         sb.Append("}\n");
 
         return new EmittedFile($"{FolderFor(r.Downstream)}/{iface}.cs",
@@ -537,10 +620,14 @@ public sealed partial class CSharpEmitter : IEmitter
         WriteEnumDefaultCoalesce(sb, ctorMembers, translator, index);
         WriteInvariantGuards(sb, typeName, invariants, translator);
         if (invariants.Count > 0 && ctorMembers.Count > 0)
+        {
             sb.Append('\n');
+        }
 
-        foreach (var m in ctorMembers)
+        foreach (Member m in ctorMembers)
+        {
             WriteAssignment(sb, m, typeMapper);
+        }
 
         sb.Append(Indent).Append("}\n");
     }
@@ -569,8 +656,10 @@ public sealed partial class CSharpEmitter : IEmitter
         WriteEnumDefaultCoalesce(sb, ctorMembers, translator, index);
 
         sb.Append(Indent).Append(Indent).Append("Id = id;\n");
-        foreach (var m in ctorMembers)
+        foreach (Member m in ctorMembers)
+        {
             WriteAssignment(sb, m, typeMapper);
+        }
 
         // Invariants are validated once, through the shared CheckInvariants() method
         // (re-used after every state change), rather than inlined here. Checking after
@@ -646,22 +735,27 @@ public sealed partial class CSharpEmitter : IEmitter
         CSharpExpressionTranslator translator, ModelIndex index)
     {
         var any = false;
-        foreach (var m in ctorMembers)
+        foreach (Member m in ctorMembers)
         {
             if (m.Initializer is null || index.Classify(m.Type.Name) != TypeKind.Enum)
+            {
                 continue;
+            }
+
             sb.Append(Indent).Append(Indent).Append(CSharpNaming.ToCamelCase(m.Name))
               .Append(" ??= ").Append(EnumDefaultValue(m, translator, index)).Append(";\n");
             any = true;
         }
         if (any)
+        {
             sb.Append('\n');
+        }
     }
 
     /// <summary>The qualified C# default value for an enum-typed defaulted member.</summary>
     private static string EnumDefaultValue(Member m, CSharpExpressionTranslator translator, ModelIndex index) =>
         m.Initializer is IdentifierExpr enumDefault
-            ? $"{m.Type.Name}.{enumDefault.Name}"
+            ? $"{m.Type.Name}.{CSharpNaming.EscapeIdentifier(enumDefault.Name)}"
             : translator.Translate(m.Initializer!, CSharpExpressionTranslator.NameMode.Property, m.Type.Name);
 
     /// <summary>
@@ -696,7 +790,9 @@ public sealed partial class CSharpEmitter : IEmitter
         }
 
         if (copy is null)
+        {
             return param; // scalar: direct assignment
+        }
 
         return type.IsOptional ? $"{param} is null ? null : {copy}" : copy;
     }
@@ -721,10 +817,13 @@ public sealed partial class CSharpEmitter : IEmitter
         CSharpExpressionTranslator.NameMode mode = CSharpExpressionTranslator.NameMode.Parameter)
     {
         var first = true;
-        foreach (var inv in invariants)
+        foreach (Invariant inv in invariants)
         {
             if (!first)
+            {
                 sb.Append('\n');
+            }
+
             first = false;
             WriteGuard(sb, typeName, inv.Condition, inv.Message ?? SynthesizeMessage(inv.Condition), translator, mode);
         }
@@ -765,12 +864,14 @@ public sealed partial class CSharpEmitter : IEmitter
             sb.Append(Indent).Append(Indent).Append("if (").Append(cond).Append(")\n");
         }
 
+        sb.Append(Indent).Append(Indent).Append("{\n");
         sb.Append(Indent).Append(Indent).Append(Indent)
           .Append("throw new DomainInvariantViolationException(\n");
         sb.Append(Indent).Append(Indent).Append(Indent).Append(Indent)
           .Append("type: nameof(").Append(typeName).Append("),\n");
         sb.Append(Indent).Append(Indent).Append(Indent).Append(Indent)
           .Append("rule: ").Append(ruleLiteral).Append(");\n");
+        sb.Append(Indent).Append(Indent).Append("}\n");
     }
 
     /// <summary>The member names mutated by at least one command transition (get <c>private set</c>).</summary>
@@ -806,20 +907,25 @@ public sealed partial class CSharpEmitter : IEmitter
         sb.Append(Indent).Append("{\n");
 
         // Command parameters are locals inside the body (members render as properties).
-        foreach (var p in cmd.Parameters)
+        foreach (Param p in cmd.Parameters)
+        {
             translator.PushLocal(p.Name, p.Type);
+        }
 
         var requires = cmd.Body.OfType<RequiresClause>().ToList();
         var transitions = cmd.Body.OfType<Transition>().ToList();
         var emits = cmd.Body.OfType<EmitClause>().ToList();
-        var result = cmd.Body.OfType<ResultClause>().FirstOrDefault();
+        ResultClause? result = cmd.Body.OfType<ResultClause>().FirstOrDefault();
 
         // 1. Preconditions — checked before any mutation.
         var firstGuard = true;
-        foreach (var req in requires)
+        foreach (RequiresClause req in requires)
         {
             if (!firstGuard)
+            {
                 sb.Append('\n');
+            }
+
             firstGuard = false;
             WriteGuard(sb, entity.Name, req.Condition, req.Message ?? SynthesizeMessage(req.Condition),
                 translator, CSharpExpressionTranslator.NameMode.Property);
@@ -833,10 +939,13 @@ public sealed partial class CSharpEmitter : IEmitter
 
         // 2. State transitions.
         if (requires.Count > 0 && transitions.Count > 0)
-            sb.Append('\n');
-        foreach (var tr in transitions)
         {
-            var expectedEnum = memberTypes.TryGetValue(tr.Field, out var ft) && index.Classify(ft.Name) == TypeKind.Enum
+            sb.Append('\n');
+        }
+
+        foreach (Transition tr in transitions)
+        {
+            var expectedEnum = memberTypes.TryGetValue(tr.Field, out TypeRef? ft) && index.Classify(ft.Name) == TypeKind.Enum
                 ? ft.Name : null;
 
             // A state machine on this field guards the (literal) target's reachability —
@@ -876,8 +985,10 @@ public sealed partial class CSharpEmitter : IEmitter
         // Parameters leave scope BEFORE the re-check: entity invariants reference
         // only entity state, which must render as the just-assigned properties (not
         // a parameter that happens to share a field's name).
-        foreach (var p in cmd.Parameters)
+        foreach (Param p in cmd.Parameters)
+        {
             translator.PopLocal(p.Name);
+        }
 
         // 3. Re-check every entity invariant after the state change (one shared method).
         if (transitions.Count > 0 && entity.Invariants.Count > 0)
@@ -898,7 +1009,10 @@ public sealed partial class CSharpEmitter : IEmitter
         if (emitStatements.Count > 0)
         {
             if (!hoistResult)
+            {
                 sb.Append('\n');
+            }
+
             foreach (var stmt in emitStatements)
             {
                 var rendered = hoistResult
@@ -932,36 +1046,49 @@ public sealed partial class CSharpEmitter : IEmitter
         EntityDecl entity, Transition tr, string enumType,
         CSharpExpressionTranslator translator, ModelIndex index, IReadOnlyList<Param> commandParams)
     {
-        var states = entity.States.FirstOrDefault(s => s.Field == tr.Field);
+        StatesDecl? states = entity.States.FirstOrDefault(s => s.Field == tr.Field);
         if (states is null || tr.Value is not IdentifierExpr stateRef
             || !index.EnumsDeclaring(stateRef.Name).Contains(enumType))
+        {
             return null; // no state machine, or a dynamic (non-literal) target
+        }
 
         var sources = states.Rules.Where(r => r.To.Contains(stateRef.Name)).ToList();
         if (sources.Count == 0)
+        {
             return null; // unreachable target — already a semantic error (KOI0703)
+        }
 
         var prop = CSharpNaming.ToPascalCase(tr.Field);
 
         // A state-rule guard is validated against entity members only, so it must
         // render with command parameters out of scope: a parameter sharing a member's
         // name would otherwise shadow it (and be read instead of the persisted state).
-        foreach (var p in commandParams)
+        foreach (Param p in commandParams)
+        {
             translator.PopLocal(p.Name);
+        }
+
         var conditions = sources.Select(r =>
         {
-            var srcEq = $"{prop} == {enumType}.{r.From}";
+            var fromMember = CSharpNaming.EscapeIdentifier(r.From);
+            var srcEq = $"{prop} == {enumType}.{fromMember}";
             if (r.Guard is null)
-                // A bare source: its negation is the simple `!=` (no wrapping needed).
-                return new StateSource(srcEq, $"{prop} != {enumType}.{r.From}");
+            // A bare source: its negation is the simple `!=` (no wrapping needed).
+            {
+                return new StateSource(srcEq, $"{prop} != {enumType}.{fromMember}");
+            }
 
             // A guarded source: keep the binary guard's parentheses (Translate, not
             // TranslateTopLevel) so an OR guard binds below the && joining the source check.
             var positive = $"{srcEq} && {translator.Translate(r.Guard, CSharpExpressionTranslator.NameMode.Property)}";
             return new StateSource(positive, $"!({positive})");
         }).ToList();
-        foreach (var p in commandParams)
+        foreach (Param p in commandParams)
+        {
             translator.PushLocal(p.Name);
+        }
+
         return conditions;
     }
 
@@ -976,10 +1103,12 @@ public sealed partial class CSharpEmitter : IEmitter
     {
         var test = string.Join(" && ", conditions.Select(c => c.Negated));
         sb.Append(Indent).Append(Indent).Append("if (").Append(test).Append(")\n");
+        sb.Append(Indent).Append(Indent).Append("{\n");
         sb.Append(Indent).Append(Indent).Append(Indent).Append("throw new DomainInvariantViolationException(\n");
         sb.Append(Indent).Append(Indent).Append(Indent).Append(Indent).Append("type: nameof(").Append(entity.Name).Append("),\n");
         sb.Append(Indent).Append(Indent).Append(Indent).Append(Indent)
           .Append("rule: \"illegal transition of ").Append(field).Append(" to ").Append(targetState).Append("\");\n");
+        sb.Append(Indent).Append(Indent).Append("}\n");
     }
 
     /// <summary>
@@ -1013,8 +1142,10 @@ public sealed partial class CSharpEmitter : IEmitter
         // Factory scope: the synthetic `id` and the factory's parameters are locals
         // (entity members are not in scope — the aggregate does not exist yet).
         translator.PushLocal("id", new TypeRef(entity.IdentityName));
-        foreach (var p in factory.Parameters)
+        foreach (Param p in factory.Parameters)
+        {
             translator.PushLocal(p.Name, p.Type);
+        }
 
         var requires = factory.Body.OfType<RequiresClause>().ToList();
         var inits = factory.Body.OfType<Initialization>().ToList();
@@ -1027,31 +1158,42 @@ public sealed partial class CSharpEmitter : IEmitter
 
         // 2. Preconditions — checked before any state is constructed.
         if (requires.Count > 0)
+        {
             sb.Append('\n');
+        }
+
         var firstGuard = true;
-        foreach (var req in requires)
+        foreach (RequiresClause req in requires)
         {
             if (!firstGuard)
+            {
                 sb.Append('\n');
+            }
+
             firstGuard = false;
             WriteGuard(sb, entity.Name, req.Condition, req.Message ?? SynthesizeMessage(req.Condition),
                 translator, CSharpExpressionTranslator.NameMode.Property);
         }
         if (requires.Count > 0)
+        {
             sb.Append('\n');
+        }
 
         // 3. Construct. Each ctor member draws its value, in priority order, from: an
         //    explicit `field <- expr` (named arg); a same-named parameter (auto-bind);
         //    the constructor's own default; or `default!` when required+unset (KOI0806).
         // First-wins on a (validation-rejected) duplicate init, so emission never throws.
         var initByField = new Dictionary<string, Expr>(StringComparer.Ordinal);
-        foreach (var i in inits)
+        foreach (Initialization i in inits)
+        {
             initByField.TryAdd(i.Field, i.Value);
+        }
+
         var args = new List<string> { "id" };
-        foreach (var m in ctorMembers)
+        foreach (Member m in ctorMembers)
         {
             var paramName = CSharpNaming.ToCamelCase(m.Name);
-            if (initByField.TryGetValue(m.Name, out var value))
+            if (initByField.TryGetValue(m.Name, out Expr? value))
             {
                 var expectedEnum = index.Classify(m.Type.Name) == TypeKind.Enum ? m.Type.Name : null;
                 var rhs = translator.TranslateTopLevel(value, CSharpExpressionTranslator.NameMode.Property, expectedEnum);
@@ -1073,12 +1215,17 @@ public sealed partial class CSharpEmitter : IEmitter
         // 4. Record creation events (payloads may reference `id` and parameters).
         var emitStatements = emits.Select(e => BuildEmitStatement(e, translator, index, "instance.")).ToList();
 
-        foreach (var p in factory.Parameters)
+        foreach (Param p in factory.Parameters)
+        {
             translator.PopLocal(p.Name);
+        }
+
         translator.PopLocal("id");
 
         foreach (var stmt in emitStatements)
+        {
             sb.Append(Indent).Append(Indent).Append(stmt).Append('\n');
+        }
 
         sb.Append(Indent).Append(Indent).Append("return instance;\n");
         sb.Append(Indent).Append("}\n");
@@ -1092,8 +1239,10 @@ public sealed partial class CSharpEmitter : IEmitter
     /// <summary>Builds the <c>[prefix]_domainEvents.Add(new EventName(...));</c> statement for an emit.</summary>
     private string BuildEmitStatement(EmitClause emit, CSharpExpressionTranslator translator, ModelIndex index, string targetPrefix = "")
     {
-        if (!index.TryGetDecl(emit.EventName, out var decl) || decl is not EventDecl ev)
+        if (!index.TryGetDecl(emit.EventName, out TypeDecl decl) || decl is not EventDecl ev)
+        {
             return $"/* unknown event '{emit.EventName}' */";
+        }
 
         var eventMemberNames = new HashSet<string>(ev.Members.Select(m => m.Name), StringComparer.Ordinal);
         // Match the constructor's parameter order (OrderCtorParams moves defaulted/
@@ -1101,10 +1250,13 @@ public sealed partial class CSharpEmitter : IEmitter
         var ctorFields = OrderCtorParams(ev.Members.Where(m => !MemberAnalysis.IsDerived(m, eventMemberNames))).ToList();
         var argByField = emit.Args.ToDictionary(a => a.Field, a => a.Value, StringComparer.Ordinal);
 
-        var args = ctorFields.Select(f =>
+        IEnumerable<string> args = ctorFields.Select(f =>
         {
-            if (!argByField.TryGetValue(f.Name, out var value))
+            if (!argByField.TryGetValue(f.Name, out Expr? value))
+            {
                 return "default!"; // validator guarantees presence; defensive
+            }
+
             var expectedEnum = index.Classify(f.Type.Name) == TypeKind.Enum ? f.Type.Name : null;
             return translator.TranslateTopLevel(value, CSharpExpressionTranslator.NameMode.Property, expectedEnum);
         });
@@ -1173,11 +1325,15 @@ public sealed partial class CSharpEmitter : IEmitter
         // and need none. The runtime files never reference user types.
         var context = ns.Split('.')[0];
         if (emit.ContextNames.Contains(context))
+        {
             collector.CollectUserTypeNamespaces(ns, body, emit.Index.VisibleTypeNamespaces(context));
+        }
         // A shared-kernel file lives in a synthetic namespace (not a real context); resolve its
         // cross-namespace references against its partner contexts' visible types (R14.2).
         else if (emit.Index.IsKernelNamespace(ns))
+        {
             collector.CollectUserTypeNamespaces(ns, body, emit.Index.KernelVisibleTypeNamespaces(ns));
+        }
 
         var sb = new StringBuilder();
         sb.Append("// <auto-generated/>\n");
@@ -1185,9 +1341,15 @@ public sealed partial class CSharpEmitter : IEmitter
         // explicitly — our signatures use nullable annotations (e.g. string?, object?).
         sb.Append("#nullable enable\n\n");
         foreach (var u in collector.ToSortedUsings())
+        {
             sb.Append("using ").Append(u).Append(";\n");
+        }
+
         if (collector.Count > 0)
+        {
             sb.Append('\n');
+        }
+
         sb.Append("namespace ").Append(ns).Append(";\n\n");
         sb.Append(body);
         return sb.ToString();
@@ -1239,7 +1401,9 @@ public sealed partial class CSharpEmitter : IEmitter
     private static void WriteXmlDoc(StringBuilder sb, string? doc, string indent)
     {
         if (string.IsNullOrEmpty(doc))
+        {
             return;
+        }
 
         var lines = doc.Split('\n');
         if (lines.Length == 1)
@@ -1250,7 +1414,10 @@ public sealed partial class CSharpEmitter : IEmitter
 
         sb.Append(indent).Append("/// <summary>\n");
         foreach (var line in lines)
+        {
             sb.Append(indent).Append("/// ").Append(EscapeXml(line)).Append('\n');
+        }
+
         sb.Append(indent).Append("/// </summary>\n");
     }
 
@@ -1265,7 +1432,10 @@ public sealed partial class CSharpEmitter : IEmitter
     private static void WriteObsolete(StringBuilder sb, string? reason, string indent)
     {
         if (string.IsNullOrEmpty(reason))
+        {
             return;
+        }
+
         sb.Append(indent).Append("[Obsolete(\"").Append(EscapeCSharpString(reason)).Append("\")]\n");
     }
 
@@ -1277,7 +1447,9 @@ public sealed partial class CSharpEmitter : IEmitter
     private static void AppendComment(StringBuilder sb, string? comment)
     {
         if (!string.IsNullOrEmpty(comment))
+        {
             sb.Append("  // ").Append(comment);
+        }
     }
 
     /// <summary>Maps a namespace to its emit folder path.</summary>
@@ -1298,8 +1470,11 @@ public sealed partial class CSharpEmitter : IEmitter
     private static Dictionary<string, EntityDecl> BuildIdOwnership(ContextNode ctx)
     {
         var owned = new Dictionary<string, EntityDecl>(StringComparer.Ordinal);
-        foreach (var e in ctx.AllEntities())
+        foreach (EntityDecl e in ctx.AllEntities())
+        {
             owned[e.IdentityName] = e;
+        }
+
         return owned;
     }
 
@@ -1316,10 +1491,15 @@ public sealed partial class CSharpEmitter : IEmitter
         foreach (var idName in index.IdTypeNames)
         {
             if (owned.ContainsKey(idName))
+            {
                 continue;
+            }
+
             // Only emit it if it is referenced within this context.
             if (IsReferencedInContext(ctx, idName))
+            {
                 seen.Add(idName);
+            }
         }
         return seen;
     }
@@ -1330,9 +1510,12 @@ public sealed partial class CSharpEmitter : IEmitter
     private static bool TypeRefMentions(TypeRef type, string name)
     {
         if (type.Name == name)
+        {
             return true;
+        }
+
         return (type.Element is not null && TypeRefMentions(type.Element, name))
-            || (type.Value is not null && TypeRefMentions(type.Value, name));
+               || (type.Value is not null && TypeRefMentions(type.Value, name));
     }
 
     // ----------------------------------------------------------------------
@@ -1346,11 +1529,20 @@ public sealed partial class CSharpEmitter : IEmitter
     private static Dictionary<string, string> BuildEnumMemberMap(KoineModel model)
     {
         var map = new Dictionary<string, string>(StringComparer.Ordinal);
-        foreach (var ctx in model.Contexts)
-            foreach (var t in ctx.AllTypeDecls())
+        foreach (ContextNode ctx in model.Contexts)
+        {
+            foreach (TypeDecl t in ctx.AllTypeDecls())
+            {
                 if (t is EnumDecl e)
+                {
                     foreach (var member in e.MemberNames)
+                    {
                         map[member] = e.Name; // last writer wins; v0 assumes unique members
+                    }
+                }
+            }
+        }
+
         return map;
     }
 }

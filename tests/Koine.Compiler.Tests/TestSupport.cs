@@ -27,7 +27,10 @@ public static class TestSupport
             sb.Append("// ==== ").Append(f.RelativePath).Append(" ====\n");
             sb.Append(f.Contents);
             if (!f.Contents.EndsWith('\n'))
+            {
                 sb.Append('\n');
+            }
+
             sb.Append('\n');
         }
         return sb.ToString();

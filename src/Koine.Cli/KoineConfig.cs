@@ -26,16 +26,22 @@ internal sealed record KoineConfig(string? Target, string? OutDir, string? Basel
         {
             var line = StripComment(raw).Trim();
             if (line.Length == 0)
+            {
                 continue;
+            }
 
             var eq = line.IndexOf('=');
             if (eq <= 0)
+            {
                 continue;
+            }
 
             var key = line[..eq].Trim();
             var value = line[(eq + 1)..].Trim();
             if (value.Length == 0)
+            {
                 continue;
+            }
 
             switch (key)
             {
@@ -67,7 +73,9 @@ internal sealed record KoineConfig(string? Target, string? OutDir, string? Basel
         {
             var path = Path.Combine(dir, FileName);
             if (File.Exists(path))
+            {
                 return Parse(File.ReadAllText(path));
+            }
         }
         return Empty;
     }
@@ -76,7 +84,10 @@ internal sealed record KoineConfig(string? Target, string? OutDir, string? Basel
     {
         var inputDir = Directory.Exists(inputPath) ? inputPath : Path.GetDirectoryName(inputPath);
         if (!string.IsNullOrEmpty(inputDir))
+        {
             yield return inputDir;
+        }
+
         yield return Directory.GetCurrentDirectory();
     }
 

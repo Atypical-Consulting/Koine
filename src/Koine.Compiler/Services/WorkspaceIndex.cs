@@ -34,9 +34,11 @@ public sealed class WorkspaceIndex
         var compiler = new KoineCompiler();
         foreach (var (uri, text) in documents)
         {
-            var (model, _) = compiler.Parse(text);
+            (KoineModel? model, _) = compiler.Parse(text);
             if (model is not null)
+            {
                 _byUri[uri] = new ModelIndex(model); // a file that fails to parse is simply absent
+            }
         }
     }
 
@@ -47,18 +49,26 @@ public sealed class WorkspaceIndex
     /// </summary>
     public DeclLocation? ResolveDefinition(string activeUri, string name)
     {
-        if (_byUri.TryGetValue(activeUri, out var active) && StrongSpan(active, name) is { } localSpan)
+        if (_byUri.TryGetValue(activeUri, out ModelIndex? active) && StrongSpan(active, name) is { } localSpan)
+        {
             return new DeclLocation(activeUri, localSpan);
+        }
 
         DeclLocation? found = null;
-        foreach (var (uri, index) in _byUri)
+        foreach ((var uri, ModelIndex index) in _byUri)
         {
             if (string.Equals(uri, activeUri, StringComparison.Ordinal))
+            {
                 continue;
+            }
+
             if (StrongSpan(index, name) is { } span)
             {
                 if (found is not null)
+                {
                     return null; // ambiguous across files
+                }
+
                 found = new DeclLocation(uri, span);
             }
         }
@@ -72,28 +82,36 @@ public sealed class WorkspaceIndex
     /// </summary>
     internal static SourceSpan? StrongSpan(ModelIndex index, string name)
     {
-        if (index.TryGetDecl(name, out var decl) && decl.Span != SourceSpan.None)
-            return decl.Span;
-
-        var owners = index.EnumsDeclaring(name);
-        if (owners.Count == 1 && index.TryGetDecl(owners[0], out var ed) && ed is EnumDecl e)
+        if (index.TryGetDecl(name, out TypeDecl decl) && decl.Span != SourceSpan.None)
         {
-            var member = e.Members.FirstOrDefault(m => m.Name == name);
-            if (member is not null && member.Span != SourceSpan.None)
-                return member.Span;
+            return decl.Span;
         }
 
-        var spec = index.AllSpecs().FirstOrDefault(s => s.Name == name);
+        IReadOnlyList<string> owners = index.EnumsDeclaring(name);
+        if (owners.Count == 1 && index.TryGetDecl(owners[0], out TypeDecl ed) && ed is EnumDecl e)
+        {
+            EnumMember? member = e.Members.FirstOrDefault(m => m.Name == name);
+            if (member is not null && member.Span != SourceSpan.None)
+            {
+                return member.Span;
+            }
+        }
+
+        SpecDecl? spec = index.AllSpecs().FirstOrDefault(s => s.Name == name);
         if (spec is not null && spec.Span != SourceSpan.None)
+        {
             return spec.Span;
+        }
 
         // ID type (e.g. ProductId) -> the entity that declares `identified by <name>`.
         // There is no standalone ID node, so navigation deliberately lands on the owning
         // entity's declaration. O(types) scan — fine for on-demand hover/definition;
         // TODO: precompute an identity-name -> entity map if this ever runs per keystroke.
-        var owner = index.AllTypes().OfType<EntityDecl>().FirstOrDefault(en => en.IdentityName == name);
+        EntityDecl? owner = index.AllTypes().OfType<EntityDecl>().FirstOrDefault(en => en.IdentityName == name);
         if (owner is not null && owner.Span != SourceSpan.None)
+        {
             return owner.Span;
+        }
 
         return null;
     }
@@ -111,13 +129,22 @@ public sealed class WorkspaceIndex
     public IReadOnlyList<Reference> FindReferences(string activeUri, string name)
     {
         if (!IsRenameableName(activeUri, name))
+        {
             return Array.Empty<Reference>();
+        }
 
         var refs = new List<Reference>();
         foreach (var (uri, text) in _documents)
-            foreach (var tok in IdentifierTokens(text))
+        {
+            foreach (IToken tok in IdentifierTokens(text))
+            {
                 if (string.Equals(tok.Text, name, StringComparison.Ordinal))
+                {
                     refs.Add(new Reference(uri, tok.Line, tok.Column, tok.Column + (tok.Text?.Length ?? 0)));
+                }
+            }
+        }
+
         return refs;
     }
 
@@ -140,9 +167,13 @@ public sealed class WorkspaceIndex
     {
         var lexer = new KoineLexer(new AntlrInputStream(source));
         lexer.RemoveErrorListeners();
-        foreach (var t in lexer.GetAllTokens())
+        foreach (IToken? t in lexer.GetAllTokens())
+        {
             if (t.Type == KoineLexer.Identifier)
+            {
                 yield return t;
+            }
+        }
     }
 
     /// <summary>
@@ -152,18 +183,26 @@ public sealed class WorkspaceIndex
     /// </summary>
     public string? ResolveHover(string activeUri, string name)
     {
-        if (_byUri.TryGetValue(activeUri, out var active) && StrongHover(active, name) is { } local)
+        if (_byUri.TryGetValue(activeUri, out ModelIndex? active) && StrongHover(active, name) is { } local)
+        {
             return local;
+        }
 
         string? found = null;
-        foreach (var (uri, index) in _byUri)
+        foreach ((var uri, ModelIndex index) in _byUri)
         {
             if (string.Equals(uri, activeUri, StringComparison.Ordinal))
+            {
                 continue;
+            }
+
             if (StrongHover(index, name) is { } card)
             {
                 if (found is not null)
+                {
                     return null; // ambiguous across files
+                }
+
                 found = card;
             }
         }
@@ -173,30 +212,40 @@ public sealed class WorkspaceIndex
     /// <summary>A markdown card for a "strong" declaration in one model, or null.</summary>
     internal static string? StrongHover(ModelIndex index, string name)
     {
-        if (index.TryGetDecl(name, out var decl))
+        if (index.TryGetDecl(name, out TypeDecl decl))
         {
             var sb = new StringBuilder();
             sb.Append("**").Append(name).Append("** *(").Append(KindLabel(index.Classify(name))).Append(")*");
             AppendBody(sb, decl);
             if (decl.Doc is { Length: > 0 } doc)
+            {
                 sb.Append("\n\n").Append(doc);
+            }
+
             return sb.ToString();
         }
 
-        var owners = index.EnumsDeclaring(name);
+        IReadOnlyList<string> owners = index.EnumsDeclaring(name);
         if (owners.Count == 1)
+        {
             return $"**{name}** *(enum member of {owners[0]})*";
+        }
+
         // Asymmetry vs StrongSpan (which returns null here): there is no single navigation
         // target for an ambiguous member, but hover can still show a useful informational
         // card. Keep this — do not "align" it with StrongSpan.
         if (owners.Count >= 2)
+        {
             return $"**{name}** *(ambiguous enum member — declared in {string.Join(", ", owners)})*";
+        }
 
-        var spec = index.AllSpecs().FirstOrDefault(s => s.Name == name);
+        SpecDecl? spec = index.AllSpecs().FirstOrDefault(s => s.Name == name);
         if (spec is not null)
+        {
             return $"**{name}** *(spec on {spec.TargetType})*";
+        }
 
-        var owner = index.AllTypes().OfType<EntityDecl>().FirstOrDefault(en => en.IdentityName == name);
+        EntityDecl? owner = index.AllTypes().OfType<EntityDecl>().FirstOrDefault(en => en.IdentityName == name);
         if (owner is not null)
         {
             var sb = new StringBuilder();
@@ -212,11 +261,20 @@ public sealed class WorkspaceIndex
     internal static string? WeakCard(string name)
     {
         if (ModelIndex.Primitives.Contains(name))
+        {
             return $"**{name}** *(Primitive)*";
+        }
+
         if (name is ModelIndex.ListTypeName or ModelIndex.SetTypeName or ModelIndex.MapTypeName or ModelIndex.RangeTypeName)
+        {
             return $"**{name}** *({name})*";
+        }
+
         if (ModelIndex.IsIdConvention(name))
+        {
             return $"**{name}** *(ID value object)*";
+        }
+
         return null;
     }
 
@@ -239,27 +297,39 @@ public sealed class WorkspaceIndex
         switch (decl)
         {
             case ValueObjectDecl v:
-                foreach (var m in v.Members)
+                foreach (Member m in v.Members)
+                {
                     sb.Append("\n\n`").Append(m.Name).Append(" : ").Append(TypeLabel(m.Type)).Append('`');
+                }
+
                 break;
             case EntityDecl e:
                 sb.Append("\n\nidentified by `").Append(e.IdentityName).Append("` (")
                   .Append(e.IdStrategy).Append(')');
-                foreach (var m in e.Members)
+                foreach (Member m in e.Members)
+                {
                     sb.Append("\n\n`").Append(m.Name).Append(" : ").Append(TypeLabel(m.Type)).Append('`');
+                }
+
                 break;
             case EnumDecl en:
                 sb.Append("\n\n").Append(string.Join(", ", en.MemberNames));
                 break;
             case EventDecl ev:
-                foreach (var m in ev.Members)
+                foreach (Member m in ev.Members)
+                {
                     sb.Append("\n\n`").Append(m.Name).Append(" : ").Append(TypeLabel(m.Type)).Append('`');
+                }
+
                 break;
             case AggregateDecl agg:
                 // Listing the aggregate's owned/nested types is intentionally omitted for now.
                 sb.Append("\n\nroot `").Append(agg.RootName).Append('`');
                 if (agg.IsVersioned)
+                {
                     sb.Append(" *(versioned)*");
+                }
+
                 break;
         }
     }

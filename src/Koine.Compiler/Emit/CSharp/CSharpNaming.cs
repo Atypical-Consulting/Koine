@@ -12,7 +12,10 @@ internal static class CSharpNaming
     public static string ToPascalCase(string name)
     {
         if (string.IsNullOrEmpty(name))
+        {
             return name;
+        }
+
         var pascal = char.IsUpper(name[0]) ? name : char.ToUpperInvariant(name[0]) + name[1..];
         return Escape(pascal);
     }
@@ -21,10 +24,20 @@ internal static class CSharpNaming
     public static string ToCamelCase(string name)
     {
         if (string.IsNullOrEmpty(name))
+        {
             return name;
+        }
+
         var camel = char.IsLower(name[0]) ? name : char.ToLowerInvariant(name[0]) + name[1..];
         return Escape(camel);
     }
+
+    /// <summary>
+    /// Emits a name verbatim (preserving case) as a C# identifier, prefixing it with
+    /// <c>@</c> when it is a reserved keyword. Use for identifiers whose spelling must be
+    /// preserved exactly — e.g. an enum member, referenced as <c>OrderStatus.Member</c>.
+    /// </summary>
+    public static string EscapeIdentifier(string name) => Escape(name);
 
     /// <summary>Prefixes a C# reserved keyword with <c>@</c> so it is a valid identifier.</summary>
     private static string Escape(string identifier) =>

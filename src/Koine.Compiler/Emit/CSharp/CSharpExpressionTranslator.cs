@@ -47,7 +47,9 @@ internal sealed class CSharpExpressionTranslator
     {
         _locals.Add(name);
         if (type is not null)
+        {
             _localTypes[name] = type;
+        }
     }
 
     /// <summary>Removes a previously-registered local.</summary>
@@ -60,9 +62,12 @@ internal sealed class CSharpExpressionTranslator
     /// <summary>The member scope extended with any known local (parameter) types.</summary>
     private TypeScope EffectiveScope()
     {
-        var scope = _scope;
-        foreach (var kv in _localTypes)
+        TypeScope scope = _scope;
+        foreach (KeyValuePair<string, TypeRef> kv in _localTypes)
+        {
             scope = scope.With(kv.Key, kv.Value);
+        }
+
         return scope;
     }
 
@@ -260,7 +265,10 @@ internal sealed class CSharpExpressionTranslator
         var childPrec = Precedence(childOp);
         var parentPrec = Precedence(parentOp);
         if (childPrec < parentPrec)
+        {
             return true;
+        }
+
         // Equal precedence: all C# binary operators here are left-associative, so the
         // right operand keeps parens (a - (b - c) != a - b - c), the left drops them.
         return childPrec == parentPrec && rightOperand;
@@ -296,15 +304,19 @@ internal sealed class CSharpExpressionTranslator
     private void WriteOperand(Expr expr, NameMode mode, StringBuilder sb, string? enumHint)
     {
         if (expr is IdentifierExpr id)
+        {
             WriteIdentifier(id.Name, mode, sb, enumHint);
+        }
         else
+        {
             Write(expr, mode, sb);
+        }
     }
 
     /// <summary>The enum type name an expression resolves to, else <c>null</c>.</summary>
     private string? EnumTypeName(Expr expr)
     {
-        var type = _resolver.Infer(expr, _scope);
+        TypeRef? type = _resolver.Infer(expr, _scope);
         return type is not null && _index.Classify(type.Name) == TypeKind.Enum ? type.Name : null;
     }
 
@@ -431,10 +443,13 @@ internal sealed class CSharpExpressionTranslator
     {
         // Infer the body's type to name the IIFE's delegate, folding bindings into the
         // scope in order (each binding's value sees the previous ones).
-        var scope = EffectiveScope();
-        foreach (var b in let.Bindings)
+        TypeScope scope = EffectiveScope();
+        foreach (LetBinding b in let.Bindings)
+        {
             scope = scope.With(b.Name, _resolver.Infer(b.Value, scope) ?? new TypeRef("?"));
-        var bodyType = _resolver.Infer(let.Body, scope);
+        }
+
+        TypeRef? bodyType = _resolver.Infer(let.Body, scope);
         var ret = bodyType is not null ? new CSharpTypeMapper(_index).Map(bodyType) : "object";
 
         // Fully-qualify Func so the lowering never depends on a `using System;` in the
@@ -445,10 +460,10 @@ internal sealed class CSharpExpressionTranslator
         // body render references to it verbatim. Save/restore guards against shadowing
         // an outer local of the same name.
         var pushed = new List<(string Name, bool WasPresent, TypeRef? Type)>();
-        foreach (var b in let.Bindings)
+        foreach (LetBinding b in let.Bindings)
         {
             var wasPresent = _locals.Contains(b.Name);
-            var prevType = _localTypes.TryGetValue(b.Name, out var pt) ? pt : null;
+            TypeRef? prevType = _localTypes.TryGetValue(b.Name, out TypeRef? pt) ? pt : null;
             sb.Append("var ").Append(CSharpNaming.ToCamelCase(b.Name)).Append(" = ");
             sb.Append(Render(b.Value, mode));
             sb.Append("; ");
@@ -462,14 +477,18 @@ internal sealed class CSharpExpressionTranslator
         // Restore the local stack in reverse so an outer binding of the same name survives.
         for (var i = pushed.Count - 1; i >= 0; i--)
         {
-            var (name, wasPresent, prevType) = pushed[i];
+            (var name, var wasPresent, TypeRef? prevType) = pushed[i];
             if (wasPresent)
             {
                 _locals.Add(name);
                 if (prevType is not null)
+                {
                     _localTypes[name] = prevType;
+                }
                 else
+                {
                     _localTypes.Remove(name);
+                }
             }
             else
             {
@@ -500,7 +519,7 @@ internal sealed class CSharpExpressionTranslator
         // type of the surrounding expression, when available.
         if (!_memberNames.Contains(name))
         {
-            var owners = _index.EnumsDeclaring(name);
+            IReadOnlyList<string> owners = _index.EnumsDeclaring(name);
             if (owners.Count > 0)
             {
                 var hint = enumHint ?? _expectedEnum;
@@ -509,7 +528,7 @@ internal sealed class CSharpExpressionTranslator
                     : owners.Count == 1
                         ? owners[0]
                         : _enumMemberToType.TryGetValue(name, out var fallback) ? fallback : owners[0];
-                sb.Append(enumType).Append('.').Append(name);
+                sb.Append(enumType).Append('.').Append(CSharpNaming.EscapeIdentifier(name));
                 return;
             }
         }
@@ -518,17 +537,22 @@ internal sealed class CSharpExpressionTranslator
         {
             // A receiver (the static-spec `x`) makes members property accesses on it.
             if (_memberReceiver is not null)
+            {
                 sb.Append(_memberReceiver).Append('.').Append(CSharpNaming.ToPascalCase(name));
+            }
             else
+            {
                 sb.Append(mode == NameMode.Parameter
                     ? CSharpNaming.ToCamelCase(name)
                     : CSharpNaming.ToPascalCase(name));
+            }
+
             return;
         }
 
         // A spec reference (R10.1): inline its body, recursively, in the current mode.
         // Cycle detection at validation time guarantees this terminates.
-        if (_specBodies.TryGetValue(name, out var specBody) && _inliningSpecs.Add(name))
+        if (_specBodies.TryGetValue(name, out Expr? specBody) && _inliningSpecs.Add(name))
         {
             sb.Append('(');
             Write(specBody, mode, sb);
@@ -643,7 +667,7 @@ internal sealed class CSharpExpressionTranslator
         // leak LINQ's opaque "Sequence contains no elements" InvalidOperationException,
         // we guard the fold and throw a DomainInvariantViolationException with a clear
         // message. (Until Koine models a zero — roadmap R9 — there is no neutral seed.)
-        var selectorType = InferSelectorType(call);
+        TypeRef? selectorType = InferSelectorType(call);
         if (_resolver.IsValueLike(selectorType))
         {
             // Materialize the projection, then guard emptiness with a list pattern: a
@@ -671,17 +695,22 @@ internal sealed class CSharpExpressionTranslator
     /// <summary>The inferred type a collection call's lambda selector produces.</summary>
     private TypeRef? InferSelectorType(CallExpr call)
     {
-        var scope = EffectiveScope();
-        var element = TypeResolver.ElementOf(_resolver.Infer(call.Target, scope));
+        TypeScope scope = EffectiveScope();
+        TypeRef? element = TypeResolver.ElementOf(_resolver.Infer(call.Target, scope));
         if (element is not null && call.Args is [LambdaExpr lambda])
+        {
             return _resolver.Infer(lambda.Body, scope.With(lambda.Parameter, element));
+        }
+
         return null;
     }
 
     private string RenderLambda(CallExpr call, NameMode mode)
     {
         if (call.Args is not [LambdaExpr lambda])
+        {
             return "/* expected lambda */";
+        }
 
         // Save/restore: a lambda parameter that shadows an outer local (e.g. a
         // command parameter of the same name) must not delete the outer binding.
@@ -689,7 +718,10 @@ internal sealed class CSharpExpressionTranslator
         _locals.Add(lambda.Parameter);
         var body = Render(lambda.Body, mode);
         if (!wasPresent)
+        {
             _locals.Remove(lambda.Parameter);
+        }
+
         return $"{CSharpNaming.ToCamelCase(lambda.Parameter)} => {body}";
     }
 

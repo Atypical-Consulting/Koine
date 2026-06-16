@@ -21,17 +21,24 @@ public sealed class GlossaryEmitter : IEmitter
         var sb = new StringBuilder();
         sb.Append("# Ubiquitous Language Glossary\n");
 
-        foreach (var ctx in model.Contexts)
+        foreach (ContextNode ctx in model.Contexts)
         {
             sb.Append("\n## ").Append(ctx.Name);
             if (ctx.Version is { } version)
+            {
                 sb.Append(" — version ").Append(version);
+            }
+
             sb.Append('\n');
             if (!string.IsNullOrEmpty(ctx.Doc))
+            {
                 sb.Append('\n').Append(Prose(ctx.Doc)).Append('\n');
+            }
 
-            foreach (var type in ctx.Types)
+            foreach (TypeDecl type in ctx.Types)
+            {
                 WriteType(sb, type, level: 3);
+            }
 
             WriteBehavioral(sb, ctx);
         }
@@ -48,33 +55,39 @@ public sealed class GlossaryEmitter : IEmitter
         if (specs.Count > 0)
         {
             sb.Append("\n### Specifications\n");
-            foreach (var spec in specs)
+            foreach (SpecDecl spec in specs)
+            {
                 sb.Append("\n- `").Append(spec.Name).Append("` on `").Append(spec.TargetType).Append('`')
                   .Append(string.IsNullOrEmpty(spec.Doc) ? "" : " — " + spec.Doc!.Replace('\n', ' ')).Append('\n');
+            }
         }
 
         if (ctx.Services.Count > 0)
         {
             sb.Append("\n### Services\n");
-            foreach (var svc in ctx.Services)
+            foreach (ServiceDecl svc in ctx.Services)
             {
                 sb.Append("\n- **").Append(svc.Name).Append("**")
                   .Append(string.IsNullOrEmpty(svc.Doc) ? "" : " — " + svc.Doc!.Replace('\n', ' ')).Append('\n');
-                foreach (var op in svc.Operations)
+                foreach (OperationDecl op in svc.Operations)
+                {
                     sb.Append("  - `").Append(op.Name).Append('(')
                       .Append(string.Join(", ", op.Parameters.Select(p => $"{p.Name}: {p.Type.Name}")))
                       .Append("): ").Append(op.ReturnType.Name).Append('`')
                       .Append(op.Body is null ? " *(seam)*" : "").Append('\n');
+                }
             }
         }
 
         if (ctx.Policies.Count > 0)
         {
             sb.Append("\n### Policies\n");
-            foreach (var p in ctx.Policies)
+            foreach (PolicyDecl p in ctx.Policies)
+            {
                 sb.Append("\n- **").Append(p.Name).Append("** — when `").Append(p.EventName)
                   .Append("` then `").Append(p.Reaction.TargetType).Append('.').Append(p.Reaction.CommandName)
                   .Append("`\n");
+            }
         }
     }
 
@@ -88,9 +101,15 @@ public sealed class GlossaryEmitter : IEmitter
                 sb.Append('\n').Append(heading).Append(' ').Append(agg.Name)
                   .Append(" — aggregate (root: ").Append(agg.RootName).Append(')').Append(Tag(agg)).Append('\n');
                 if (!string.IsNullOrEmpty(agg.Doc))
+                {
                     sb.Append('\n').Append(Prose(agg.Doc)).Append('\n');
-                foreach (var nested in agg.Types)
+                }
+
+                foreach (TypeDecl nested in agg.Types)
+                {
                     WriteType(sb, nested, level + 1);
+                }
+
                 break;
 
             case EnumDecl en:
@@ -130,9 +149,15 @@ public sealed class GlossaryEmitter : IEmitter
     {
         var parts = new List<string>();
         if (since is { } s)
+        {
             parts.Add("since v" + s);
+        }
+
         if (!string.IsNullOrEmpty(deprecated))
+        {
             parts.Add("deprecated: " + deprecated);
+        }
+
         return parts.Count == 0 ? string.Empty : " _(" + Prose(string.Join("; ", parts)) + ")_";
     }
 
@@ -140,26 +165,34 @@ public sealed class GlossaryEmitter : IEmitter
     {
         sb.Append('\n').Append(heading).Append(' ').Append(name).Append(" — ").Append(kind).Append(tag).Append('\n');
         if (!string.IsNullOrEmpty(doc))
+        {
             sb.Append('\n').Append(Prose(doc)).Append('\n');
+        }
     }
 
     private static void WriteFields(StringBuilder sb, IReadOnlyList<Member> members)
     {
         if (members.Count == 0)
+        {
             return;
+        }
 
         var names = new HashSet<string>(members.Select(m => m.Name), StringComparer.Ordinal);
 
         sb.Append("\n| Field | Type | Description |\n| --- | --- | --- |\n");
-        foreach (var m in members)
+        foreach (Member m in members)
         {
             var description = Cell(m.Doc);
             if (MemberAnalysis.IsDerived(m, names))
+            {
                 description = description.Length == 0 ? "_derived_" : "_derived_ — " + description;
+            }
 
             var tag = Tag(m.Since, m.Deprecated);
             if (tag.Length != 0)
+            {
                 description = description.Length == 0 ? tag.Trim() : description + tag;
+            }
 
             sb.Append("| ").Append(m.Name)
               .Append(" | `").Append(KoineType(m.Type)).Append('`')
@@ -170,11 +203,15 @@ public sealed class GlossaryEmitter : IEmitter
     private static void WriteRules(StringBuilder sb, IReadOnlyList<Invariant> invariants)
     {
         if (invariants.Count == 0)
+        {
             return;
+        }
 
         sb.Append("\n**Business rules**\n");
-        foreach (var inv in invariants)
+        foreach (Invariant inv in invariants)
+        {
             sb.Append("- ").Append(Prose(inv.Message ?? Describe(inv.Condition))).Append('\n');
+        }
     }
 
     /// <summary>Renders a Koine type reference in source syntax (target-agnostic).</summary>

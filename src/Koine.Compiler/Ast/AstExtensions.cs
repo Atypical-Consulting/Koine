@@ -13,24 +13,32 @@ public static class AstExtensions
     /// </summary>
     public static IEnumerable<TypeDecl> AllTypeDecls(this ContextNode ctx)
     {
-        foreach (var t in ctx.Types)
+        foreach (TypeDecl t in ctx.Types)
         {
             yield return t;
             if (t is AggregateDecl agg)
-                foreach (var nested in agg.AllTypeDecls())
+            {
+                foreach (TypeDecl nested in agg.AllTypeDecls())
+                {
                     yield return nested;
+                }
+            }
         }
     }
 
     /// <summary>The nested types of an aggregate, flattening any nested aggregates.</summary>
     private static IEnumerable<TypeDecl> AllTypeDecls(this AggregateDecl agg)
     {
-        foreach (var t in agg.Types)
+        foreach (TypeDecl t in agg.Types)
         {
             yield return t;
             if (t is AggregateDecl nested)
-                foreach (var deeper in nested.AllTypeDecls())
+            {
+                foreach (TypeDecl deeper in nested.AllTypeDecls())
+                {
                     yield return deeper;
+                }
+            }
         }
     }
 

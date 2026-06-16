@@ -52,11 +52,15 @@ internal sealed class ExpressionChecker
                 {
                     // A name that is a spec — just not one valid here — gets a clearer message.
                     if (_index.IsAnySpec(id.Name))
+                    {
                         Report(DiagnosticCodes.SpecTargetMismatch,
                             $"spec '{id.Name}' is not defined on the enclosing type", id);
+                    }
                     else
+                    {
                         Report(DiagnosticCodes.UnknownField,
                             $"unknown field '{id.Name}'{Suggestions.For(id.Name, scope.Names.Concat(_enumMembers).Concat(_specNames))}", id);
+                    }
                 }
                 break;
 
@@ -102,15 +106,18 @@ internal sealed class ExpressionChecker
                 // Resolve each branch against the other branch's concrete enum type
                 // (or the expected type) so a shared enum member doesn't depend on
                 // declaration order; flag genuinely unresolvable members (KOI0213).
-                var thenCtx = ConcreteEnumType(c.Else, scope) ?? expected;
-                var elseCtx = ConcreteEnumType(c.Then, scope) ?? expected;
+                TypeRef? thenCtx = ConcreteEnumType(c.Else, scope) ?? expected;
+                TypeRef? elseCtx = ConcreteEnumType(c.Then, scope) ?? expected;
                 CheckEnumMemberResolvable(c.Then, thenCtx, scope);
                 CheckEnumMemberResolvable(c.Else, elseCtx, scope);
-                var thenType = ResolveEnumOperand(c.Then, thenCtx, scope) ?? _resolver.Infer(c.Then, scope);
-                var elseType = ResolveEnumOperand(c.Else, elseCtx, scope) ?? _resolver.Infer(c.Else, scope);
+                TypeRef? thenType = ResolveEnumOperand(c.Then, thenCtx, scope) ?? _resolver.Infer(c.Then, scope);
+                TypeRef? elseType = ResolveEnumOperand(c.Else, elseCtx, scope) ?? _resolver.Infer(c.Else, scope);
                 if (thenType is not null && elseType is not null && !Compatible(thenType, elseType))
+                {
                     Report(DiagnosticCodes.IncompatibleConditionalBranches,
                         $"conditional branches have incompatible types '{thenType.Name}' and '{elseType.Name}'", c);
+                }
+
                 break;
 
             case MemberAccessExpr ma:
@@ -136,13 +143,16 @@ internal sealed class ExpressionChecker
     private void CheckLet(LetExpr let, TypeScope scope, TypeRef? expected)
     {
         var seen = new HashSet<string>(StringComparer.Ordinal);
-        var bound = scope;
-        foreach (var binding in let.Bindings)
+        TypeScope bound = scope;
+        foreach (LetBinding binding in let.Bindings)
         {
             Check(binding.Value, bound);
             if (!seen.Add(binding.Name))
+            {
                 Report(DiagnosticCodes.DuplicateLetBinding,
                     $"duplicate let binding '{binding.Name}'", let);
+            }
+
             // The binding's value is in scope for the bindings that follow and the body.
             bound = bound.With(binding.Name, _resolver.Infer(binding.Value, bound) ?? UnknownType);
         }
@@ -153,15 +163,17 @@ internal sealed class ExpressionChecker
     {
         var isRelational = b.Op is BinaryOp.Lt or BinaryOp.Le or BinaryOp.Gt or BinaryOp.Ge;
         if (!isRelational && b.Op is not (BinaryOp.Eq or BinaryOp.Neq))
+        {
             return;
+        }
 
-        var rawLeft = _resolver.Infer(b.Left, scope);
-        var rawRight = _resolver.Infer(b.Right, scope);
+        TypeRef? rawLeft = _resolver.Infer(b.Left, scope);
+        TypeRef? rawRight = _resolver.Infer(b.Right, scope);
 
         // Disambiguating context must come from a CONCRETE enum source (a field, a
         // qualified ref, or an unambiguous member) — not another ambiguous member.
-        var concreteLeft = ConcreteEnumType(b.Left, scope);
-        var concreteRight = ConcreteEnumType(b.Right, scope);
+        TypeRef? concreteLeft = ConcreteEnumType(b.Left, scope);
+        TypeRef? concreteRight = ConcreteEnumType(b.Right, scope);
 
         // A bare enum member shared by ≥2 enums must be resolvable from the other
         // operand's concrete type or, failing that, the expected type flowing in
@@ -174,8 +186,8 @@ internal sealed class ExpressionChecker
         // Resolve a bare enum member against the other operand's enum type (or the
         // expected type) so a shared member name (e.g. two enums with `Cancelled`)
         // compares correctly.
-        var left = ResolveEnumOperand(b.Left, concreteRight ?? expected, scope) ?? rawLeft;
-        var right = ResolveEnumOperand(b.Right, concreteLeft ?? expected, scope) ?? rawRight;
+        TypeRef? left = ResolveEnumOperand(b.Left, concreteRight ?? expected, scope) ?? rawLeft;
+        TypeRef? right = ResolveEnumOperand(b.Right, concreteLeft ?? expected, scope) ?? rawRight;
 
         // Operands must be comparable to each other: same type, or both numeric.
         // (Subsumes the Instant rule: Instant is only comparable to Instant.)
@@ -197,22 +209,28 @@ internal sealed class ExpressionChecker
                 return;
             }
 
-            var operand = !IsOrderable(left) ? left : !IsOrderable(right) ? right : null;
+            TypeRef? operand = !IsOrderable(left) ? left : !IsOrderable(right) ? right : null;
             if (operand is not null)
+            {
                 Report(DiagnosticCodes.RelationalOnNonOrderable, $"relational operator cannot be applied to '{operand.Name}'", b);
+            }
         }
     }
 
     private void CheckArithmeticNullSafety(BinaryExpr b, TypeScope scope)
     {
         if (b.Op is not (BinaryOp.Add or BinaryOp.Sub or BinaryOp.Mul or BinaryOp.Div))
+        {
             return;
+        }
 
-        var left = _resolver.Infer(b.Left, scope);
-        var right = _resolver.Infer(b.Right, scope);
+        TypeRef? left = _resolver.Infer(b.Left, scope);
+        TypeRef? right = _resolver.Infer(b.Right, scope);
         if (IsUnguardedOptional(b.Left, left) || IsUnguardedOptional(b.Right, right))
+        {
             Report(DiagnosticCodes.OptionalDereference,
                 "optional value may be null; guard with isPresent or use '??' before arithmetic", b);
+        }
     }
 
     /// <summary>
@@ -222,14 +240,20 @@ internal sealed class ExpressionChecker
     private void CheckEnumMemberResolvable(Expr operand, TypeRef? otherType, TypeScope scope)
     {
         if (operand is not IdentifierExpr id || scope.Contains(id.Name))
+        {
             return; // a field reference, not a bare enum member
+        }
 
-        var owners = _index.EnumsDeclaring(id.Name);
+        IReadOnlyList<string> owners = _index.EnumsDeclaring(id.Name);
         if (owners.Count <= 1)
+        {
             return; // unambiguous (or not an enum member)
+        }
 
         if (otherType is not null && owners.Contains(otherType.Name))
+        {
             return; // resolved by the other operand's enum type
+        }
 
         Report(DiagnosticCodes.AmbiguousEnumMember,
             $"ambiguous enum member '{id.Name}' (declared by {string.Join(", ", owners)}); qualify as Enum.{id.Name}", operand);
@@ -243,7 +267,10 @@ internal sealed class ExpressionChecker
     {
         if (operand is IdentifierExpr id && !scope.Contains(id.Name)
             && otherType is not null && _index.EnumsDeclaring(id.Name).Contains(otherType.Name))
+        {
             return otherType;
+        }
+
         return null;
     }
 
@@ -258,17 +285,19 @@ internal sealed class ExpressionChecker
         {
             if (scope.Contains(id.Name))
             {
-                var t = _resolver.Infer(operand, scope);
+                TypeRef? t = _resolver.Infer(operand, scope);
                 return t is not null && _index.IsEnumType(t.Name) ? t : null;
             }
-            var owners = _index.EnumsDeclaring(id.Name);
+            IReadOnlyList<string> owners = _index.EnumsDeclaring(id.Name);
             return owners.Count == 1 ? new TypeRef(owners[0]) : null;
         }
 
         if (operand is MemberAccessExpr { Target: IdentifierExpr typeId } && _index.IsEnumType(typeId.Name))
+        {
             return new TypeRef(typeId.Name);
+        }
 
-        var inferred = _resolver.Infer(operand, scope);
+        TypeRef? inferred = _resolver.Infer(operand, scope);
         return inferred is not null && _index.IsEnumType(inferred.Name) ? inferred : null;
     }
 
@@ -286,10 +315,13 @@ internal sealed class ExpressionChecker
     /// <summary>Checks <paramref name="body"/> with the fields proven present by <paramref name="cond"/> narrowed.</summary>
     private void CheckNarrowed(Expr body, TypeScope scope, Expr cond, bool positive, TypeRef? expected = null)
     {
-        var saved = _present;
+        HashSet<string> saved = _present;
         _present = new HashSet<string>(saved, StringComparer.Ordinal);
         foreach (var name in CollectPresent(cond, positive))
+        {
             _present.Add(name);
+        }
+
         Check(body, scope, expected);
         _present = saved;
     }
@@ -311,19 +343,34 @@ internal sealed class ExpressionChecker
                 break;
             case UnaryExpr { Op: UnaryOp.Not } u:
                 foreach (var n in CollectPresent(u.Operand, !positive))
+                {
                     yield return n;
+                }
+
                 break;
             case BinaryExpr { Op: BinaryOp.And } b when positive:
                 foreach (var n in CollectPresent(b.Left, true))
+                {
                     yield return n;
+                }
+
                 foreach (var n in CollectPresent(b.Right, true))
+                {
                     yield return n;
+                }
+
                 break;
             case BinaryExpr { Op: BinaryOp.Or } b when !positive:
                 foreach (var n in CollectPresent(b.Left, false))
+                {
                     yield return n;
+                }
+
                 foreach (var n in CollectPresent(b.Right, false))
+                {
                     yield return n;
+                }
+
                 break;
         }
     }
@@ -335,22 +382,28 @@ internal sealed class ExpressionChecker
         if (ma.Target is IdentifierExpr typeId && _index.IsEnumType(typeId.Name))
         {
             if (!_index.EnumsDeclaring(ma.MemberName).Contains(typeId.Name))
+            {
                 Report(DiagnosticCodes.UnknownEnumMemberForType,
                     $"unknown enum member '{ma.MemberName}' for type '{typeId.Name}'", ma);
+            }
+
             return;
         }
 
         Check(ma.Target, scope);
         var op = ma.MemberName;
-        var target = _resolver.Infer(ma.Target, scope);
+        TypeRef? target = _resolver.Infer(ma.Target, scope);
 
         // Presence checks require an optional receiver (else they are meaningless,
         // and `is null` on a non-nullable value type does not even compile).
         if (BuiltinOps.OptionalMemberOps.Contains(op))
         {
             if (target is not null && !target.IsOptional)
+            {
                 Report(DiagnosticCodes.PresenceOnNonOptional,
                     $"'{op}' can only be applied to an optional value; '{target.Name}' is not optional", ma);
+            }
+
             return;
         }
 
@@ -365,28 +418,43 @@ internal sealed class ExpressionChecker
         if (BuiltinOps.StringMemberOps.Contains(op))
         {
             if (target is not null && target.Name != "String")
+            {
                 Report(DiagnosticCodes.StringOperationOnNonString, $"string operation '{op}' cannot be applied to '{target.Name}'", ma);
+            }
         }
         else if (BuiltinOps.CollectionMemberOps.Contains(op))
         {
             if (target is not null && !IsCollection(target))
+            {
                 Report(DiagnosticCodes.CollectionOperationOnNonCollection, $"collection operation '{op}' cannot be applied to '{target.Name}'", ma);
+            }
         }
         else
         {
             // A plain field access. If the receiver is known we can be strict.
             if (target is null)
+            {
                 return;
+            }
+
             if (target.Name == "String")
+            {
                 Report(DiagnosticCodes.UnknownStringOperation, $"unknown string operation '{op}'", ma);
+            }
             else if (IsCollection(target))
+            {
                 Report(DiagnosticCodes.UnknownCollectionOperation, $"unknown collection operation '{op}'", ma);
+            }
             else if (_resolver.IsUserType(target) && !_index.TryGetMemberType(target.Qualifier ?? _resolver.Context, target.Name, op, out _))
+            {
                 Report(DiagnosticCodes.UnknownMember,
                     $"unknown member '{op}' on type '{target.Name}'{Suggestions.For(op, _index.MemberNames(target.Name))}", ma);
+            }
             else if (_index.Classify(target.Name) == TypeKind.Primitive)
-                // A primitive (Int/Decimal/Bool/Instant) has no accessible members.
+            // A primitive (Int/Decimal/Bool/Instant) has no accessible members.
+            {
                 Report(DiagnosticCodes.UnknownMember, $"unknown member '{op}' on type '{target.Name}'", ma);
+            }
         }
     }
 
@@ -402,50 +470,67 @@ internal sealed class ExpressionChecker
     {
         Check(call.Target, scope);
         var op = call.Method;
-        var target = _resolver.Infer(call.Target, scope);
+        TypeRef? target = _resolver.Infer(call.Target, scope);
 
         // A call op on an optional receiver (not narrowed to present) risks null.
         if (IsUnguardedOptional(call.Target, target))
+        {
             Report(DiagnosticCodes.OptionalDereference,
                 $"optional value may be null; guard with isPresent or use '??' before '.{op}'", call);
+        }
 
         if (BuiltinOps.TakesLambda(op))
         {
             if (target is not null && !IsIterable(target))
+            {
                 Report(DiagnosticCodes.CollectionOperationOnNonCollection, $"collection operation '{op}' cannot be applied to '{target.Name}'", call);
+            }
 
             if (call.Args is [LambdaExpr lambda])
             {
-                var element = TypeResolver.ElementOf(target);
-                var inner = scope.With(lambda.Parameter, element ?? UnknownType);
+                TypeRef? element = TypeResolver.ElementOf(target);
+                TypeScope inner = scope.With(lambda.Parameter, element ?? UnknownType);
                 Check(lambda.Body, inner);
                 CheckAggregateSelector(op, lambda, inner, call);
             }
             else
             {
                 Report(DiagnosticCodes.OperationArgument, $"operation '{op}' expects a single lambda argument", call);
-                foreach (var arg in call.Args)
+                foreach (Expr arg in call.Args)
+                {
                     Check(arg, scope);
+                }
             }
         }
         else if (BuiltinOps.StringCallOps.Contains(op) || BuiltinOps.CollectionElementCallOps.Contains(op))
         {
-            foreach (var arg in call.Args)
+            foreach (Expr arg in call.Args)
+            {
                 Check(arg, scope);
+            }
+
             var collectionContains = op == "contains" && target is not null && IsIterable(target);
             if (target is not null && target.Name != "String" && !collectionContains)
+            {
                 Report(DiagnosticCodes.StringOperationOnNonString, $"string operation '{op}' cannot be applied to '{target.Name}'", call);
+            }
 
             if (call.Args.Count != 1)
+            {
                 Report(DiagnosticCodes.OperationArgument, $"operation '{op}' expects a single argument", call);
+            }
             else
+            {
                 CheckCallArgumentType(op, target, call.Args[0], collectionContains, scope, call);
+            }
         }
         else
         {
             Report(DiagnosticCodes.UnknownOperation, $"unknown operation '{op}'", call);
-            foreach (var arg in call.Args)
+            foreach (Expr arg in call.Args)
+            {
                 Check(arg, scope);
+            }
         }
     }
 
@@ -457,38 +542,50 @@ internal sealed class ExpressionChecker
     private void CheckAggregateSelector(string op, LambdaExpr lambda, TypeScope inner, CallExpr call)
     {
         if (op is not ("sum" or "min" or "max"))
+        {
             return;
+        }
 
-        var selector = _resolver.Infer(lambda.Body, inner);
+        TypeRef? selector = _resolver.Infer(lambda.Body, inner);
         if (selector is null)
+        {
             return;
+        }
 
         if (op == "sum")
         {
             if (!TypeResolver.IsNumeric(selector) && _index.Classify(selector.Name) != TypeKind.Value)
+            {
                 Report(DiagnosticCodes.AggregateSelector, $"sum requires a numeric or value-object selector, but got '{selector.Name}'", call);
+            }
         }
         else // min / max
         {
-            var kind = _index.Classify(selector.Name);
+            TypeKind kind = _index.Classify(selector.Name);
             if (_resolver.IsValueLike(selector) || kind == TypeKind.Entity)
+            {
                 Report(DiagnosticCodes.AggregateSelector, $"{op} requires a comparable selector; '{selector.Name}' is not orderable", call);
+            }
         }
     }
 
     /// <summary>Type-checks the argument of a string/collection call op.</summary>
     private void CheckCallArgumentType(string op, TypeRef? target, Expr arg, bool collectionContains, TypeScope scope, CallExpr call)
     {
-        var argType = _resolver.Infer(arg, scope);
+        TypeRef? argType = _resolver.Infer(arg, scope);
         if (argType is null)
+        {
             return;
+        }
 
         if (collectionContains)
         {
-            var element = TypeResolver.ElementOf(target);
+            TypeRef? element = TypeResolver.ElementOf(target);
             if (element is not null && !Compatible(argType, element))
+            {
                 Report(DiagnosticCodes.OperationArgument,
                     $"collection 'contains' expects an argument of type '{element.Name}', but got '{argType.Name}'", call);
+            }
         }
         else if (target?.Name == "String" && argType.Name != "String")
         {
@@ -506,16 +603,22 @@ internal sealed class ExpressionChecker
     {
         Check(value, scope, field);
 
-        var type = ResolveEnumOperand(value, field, scope) ?? _resolver.Infer(value, scope);
+        TypeRef? type = ResolveEnumOperand(value, field, scope) ?? _resolver.Infer(value, scope);
         if (type is null)
+        {
             return;
+        }
 
         if (type is { IsOptional: true } && !field.IsOptional)
+        {
             Report(DiagnosticCodes.OptionalAssignedToNonOptional,
                 $"optional value assigned to non-optional field '{fieldName}'; provide a fallback with '??'", value);
+        }
         else if (!Assignable(type, field))
+        {
             Report(DiagnosticCodes.TransitionTypeMismatch,
                 $"cannot assign a value of type '{FullName(type)}' to field '{fieldName}' of type '{FullName(field)}'", value);
+        }
     }
 
     /// <summary>
@@ -528,16 +631,22 @@ internal sealed class ExpressionChecker
     {
         Check(value, scope, field);
 
-        var type = ResolveEnumOperand(value, field, scope) ?? _resolver.Infer(value, scope);
+        TypeRef? type = ResolveEnumOperand(value, field, scope) ?? _resolver.Infer(value, scope);
         if (type is null)
+        {
             return;
+        }
 
         if (type is { IsOptional: true } && !field.IsOptional)
+        {
             Report(DiagnosticCodes.OptionalAssignedToNonOptional,
                 $"optional value assigned to non-optional field '{fieldName}'; provide a fallback with '??'", value);
+        }
         else if (!Assignable(type, field))
+        {
             Report(DiagnosticCodes.InitializationTypeMismatch,
                 $"cannot initialize field '{fieldName}' of type '{FullName(field)}' with a value of type '{FullName(type)}'", value);
+        }
     }
 
     /// <summary>Validates a domain-service operation body against its declared return type.</summary>
@@ -545,16 +654,22 @@ internal sealed class ExpressionChecker
     {
         Check(body, scope, returnType);
 
-        var type = ResolveEnumOperand(body, returnType, scope) ?? _resolver.Infer(body, scope);
+        TypeRef? type = ResolveEnumOperand(body, returnType, scope) ?? _resolver.Infer(body, scope);
         if (type is null)
+        {
             return;
+        }
 
         if (type is { IsOptional: true } && !returnType.IsOptional)
+        {
             Report(DiagnosticCodes.ServiceReturnMismatch,
                 $"operation returns an optional value, but its return type '{returnType.Name}' is not optional", body);
+        }
         else if (!Assignable(type, returnType))
+        {
             Report(DiagnosticCodes.ServiceReturnMismatch,
                 $"operation body of type '{FullName(type)}' is not assignable to return type '{FullName(returnType)}'", body);
+        }
     }
 
     /// <summary>Validates a command's <c>result</c> expression against its declared return type.</summary>
@@ -562,16 +677,22 @@ internal sealed class ExpressionChecker
     {
         Check(value, scope, returnType);
 
-        var type = ResolveEnumOperand(value, returnType, scope) ?? _resolver.Infer(value, scope);
+        TypeRef? type = ResolveEnumOperand(value, returnType, scope) ?? _resolver.Infer(value, scope);
         if (type is null)
+        {
             return;
+        }
 
         if (type is { IsOptional: true } && !returnType.IsOptional)
+        {
             Report(DiagnosticCodes.CommandResultMismatch,
                 $"command '{commandName}' returns an optional value, but its return type '{returnType.Name}' is not optional", value);
+        }
         else if (!Assignable(type, returnType))
+        {
             Report(DiagnosticCodes.CommandResultMismatch,
                 $"command '{commandName}' result of type '{FullName(type)}' is not assignable to return type '{FullName(returnType)}'", value);
+        }
     }
 
     /// <summary>Validates an emit payload value against the event field's declared type.</summary>
@@ -579,16 +700,22 @@ internal sealed class ExpressionChecker
     {
         Check(value, scope, field);
 
-        var type = ResolveEnumOperand(value, field, scope) ?? _resolver.Infer(value, scope);
+        TypeRef? type = ResolveEnumOperand(value, field, scope) ?? _resolver.Infer(value, scope);
         if (type is null)
+        {
             return;
+        }
 
         if (type is { IsOptional: true } && !field.IsOptional)
+        {
             Report(DiagnosticCodes.EmitPayloadMismatch,
                 $"event '{eventName}' field '{fieldName}' is not optional, but the value may be null", value);
+        }
         else if (!Assignable(type, field))
+        {
             Report(DiagnosticCodes.EmitPayloadMismatch,
                 $"event '{eventName}' field '{fieldName}' expects '{FullName(field)}', but got '{FullName(type)}'", value);
+        }
     }
 
     /// <summary>Renders a type reference in Koine source syntax for diagnostics.</summary>
@@ -619,15 +746,30 @@ internal sealed class ExpressionChecker
     private static bool SameShape(TypeRef a, TypeRef b)
     {
         if (a.Name != b.Name)
+        {
             return false;
+        }
+
         if ((a.Element is null) != (b.Element is null))
+        {
             return false;
+        }
+
         if (a.Element is not null && !SameShape(a.Element, b.Element!))
+        {
             return false;
+        }
+
         if ((a.Value is null) != (b.Value is null))
+        {
             return false;
+        }
+
         if (a.Value is not null && !SameShape(a.Value, b.Value!))
+        {
             return false;
+        }
+
         return true;
     }
 

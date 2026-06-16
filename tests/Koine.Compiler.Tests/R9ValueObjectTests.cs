@@ -314,7 +314,7 @@ public class R9ValueObjectTests
         const string src = "context C { enum U { A, B }  quantity Q { amount: Decimal  unit: U  doubled: Decimal = amount * 2 } }";
         Assert.Empty(Diagnose(src));
         var (asm, files) = Compile(src);
-        Assert.Contains("public decimal Doubled =>", files);
+        Assert.Contains("public decimal Doubled\n        => ", files);
         Assert.NotNull(asm.GetType("C.Q"));
     }
 

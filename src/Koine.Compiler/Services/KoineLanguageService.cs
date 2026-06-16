@@ -67,7 +67,9 @@ public sealed class KoineLanguageService
     {
         var ctx = TokenLocator.Locate(source, line, character);
         if (ctx.InsideStringOrRegex)
+        {
             return Array.Empty<CompletionItem>();
+        }
 
         var (model, _) = _compiler.Parse(source);
         var index = model is null ? null : new ModelIndex(model);
@@ -79,7 +81,9 @@ public sealed class KoineLanguageService
         {
             var (repaired, _) = _compiler.Parse(InsertPlaceholder(source, line, character));
             if (repaired is not null)
+            {
                 index = new ModelIndex(repaired);
+            }
         }
 
         var items = CandidatesFor(ctx, index);
@@ -95,7 +99,10 @@ public sealed class KoineLanguageService
     {
         var lines = source.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n');
         if (line < 0 || line >= lines.Length)
+        {
             return source;
+        }
+
         var text = lines[line];
         var col = Math.Clamp(character, 0, text.Length);
         lines[line] = text[..col] + "__koine_completion__" + text[col..];
@@ -114,7 +121,9 @@ public sealed class KoineLanguageService
             || trigger == KoineLexer.ON
             || trigger == KoineLexer.THEN
             || IsGenericArgPosition(ctx, index))
+        {
             return TypeCandidates(index);
+        }
 
         // Member access: resolve the receiver to a type and offer that type's members.
         // Best-effort and only when the document parses (a broken doc has no model, so we
@@ -122,27 +131,35 @@ public sealed class KoineLanguageService
         // the single token before the '.' (a field name in the enclosing type, an enum type
         // name, or a declared type name); a multi-hop chain `a.b.c` resolves left-to-right.
         if (trigger == KoineLexer.DOT)
+        {
             return DotCandidates(ctx, index);
+        }
 
         // Enum value position: after '=' (a field/param default). Resolve the
         // governing enum from the preceding `name : EnumType =` triple when possible;
         // otherwise fall back to every known enum member (still useful mid-edit).
         if (trigger == KoineLexer.ASSIGN)
+        {
             return EnumMemberCandidates(ctx, index);
+        }
 
         // Declaration start: cursor at the start of a statement (after '{' or '}'),
         // or at file scope.
         if (ctx.PrecedingToken is null
             || trigger == KoineLexer.LBRACE
             || trigger == KoineLexer.RBRACE)
+        {
             return Keywords(StartersFor(ctx.EnclosingKeyword));
+        }
 
         // Expression-operand position inside a fielded type body (e.g. `invariant
         // amount >= 0`, `requires qty > 0`): offer that type's field names. We only
         // fire after a token that begins/continues an expression, so we never add
         // noise at a declaration or parameter position.
         if (index is not null && ctx.EnclosingTypeName is { } scopeType && IsExpressionOperand(trigger))
+        {
             return FieldCandidates(index, scopeType);
+        }
 
         return Array.Empty<CompletionItem>();
     }
@@ -157,28 +174,38 @@ public sealed class KoineLanguageService
     private IReadOnlyList<CompletionItem> DotCandidates(TokenContext ctx, ModelIndex? index)
     {
         if (index is null)
+        {
             return Array.Empty<CompletionItem>();
+        }
 
         var receiver = ctx.TokenBeforePreceding?.Text;
         if (string.IsNullOrEmpty(receiver))
+        {
             return Array.Empty<CompletionItem>();
+        }
 
         // 1. `EnumType.` -> its members.
         if (index.IsEnumType(receiver) && index.TryGetDecl(receiver, out var ed) && ed is EnumDecl en)
+        {
             return en.Members
                 .Select(m => new CompletionItem(m.Name, CompletionItemKind.EnumMember, receiver, m.Doc))
                 .ToList();
+        }
 
         // 2. `Type.` where the receiver is itself a declared value/entity type name.
         if (index.IsKnownType(receiver) && MembersOf(index, receiver) is { Count: > 0 } directMembers)
+        {
             return directMembers;
+        }
 
         // 3. `field.` where the receiver is a field of the enclosing fielded type:
         //    resolve the field's declared type and offer ITS members.
         if (ctx.EnclosingTypeName is { } scopeType
             && index.TryGetMemberType(scopeType, receiver, out var fieldType)
             && MembersOf(index, fieldType.Name) is { Count: > 0 } members)
+        {
             return members;
+        }
 
         return Array.Empty<CompletionItem>();
     }
@@ -216,9 +243,12 @@ public sealed class KoineLanguageService
     {
         var name = t.Qualifier is { } q ? $"{q}.{t.Name}" : t.Name;
         if (t.Element is not null)
+        {
             name += t.Value is not null
                 ? $"<{RenderType(t.Element)}, {RenderType(t.Value)}>"
                 : $"<{RenderType(t.Element)}>";
+        }
+
         return t.IsOptional ? name + "?" : name;
     }
 
@@ -229,7 +259,10 @@ public sealed class KoineLanguageService
         // an expression with a generic argument list. Without a model we cannot tell,
         // so we suppress.
         if (ctx.PrecedingToken?.Type != KoineLexer.LT || index is null)
+        {
             return false;
+        }
+
         var before = ctx.TokenBeforePreceding?.Text;
         return before is not null && index.IsKnownType(before);
     }
@@ -257,15 +290,19 @@ public sealed class KoineLanguageService
     private IReadOnlyList<CompletionItem> EnumMemberCandidates(TokenContext ctx, ModelIndex? index)
     {
         if (index is null)
+        {
             return Array.Empty<CompletionItem>();
+        }
 
         // Resolve the governing enum from the type name just before '=' .
         var typeName = ctx.TokenBeforePreceding?.Text;
         if (typeName is not null && index.IsEnumType(typeName)
             && index.TryGetDecl(typeName, out var decl) && decl is EnumDecl e)
+        {
             return e.Members
                 .Select(m => new CompletionItem(m.Name, CompletionItemKind.EnumMember, typeName, m.Doc))
                 .ToList();
+        }
 
         // Fallback (e.g. the type name is not directly to the left): every enum member
         // declared anywhere — ambiguous, still useful mid-edit.
@@ -300,7 +337,10 @@ public sealed class KoineLanguageService
     private static IReadOnlyList<CompletionItem> Filter(IReadOnlyList<CompletionItem> items, string partial)
     {
         if (partial.Length == 0)
+        {
             return items;
+        }
+
         var matched = items.Where(i => i.Label.StartsWith(partial, StringComparison.Ordinal)).ToList();
         return matched; // empty list when nothing matches, by design
     }
@@ -309,7 +349,10 @@ public sealed class KoineLanguageService
     public string? NameAt(IReadOnlyDictionary<string, string> documents, string activeUri, int line, int character)
     {
         if (!documents.TryGetValue(activeUri, out var source))
+        {
             return null;
+        }
+
         var ctx = TokenLocator.Locate(source, line, character);
         return ctx.InsideStringOrRegex ? null : ctx.CurrentToken?.Text;
     }
@@ -317,12 +360,16 @@ public sealed class KoineLanguageService
     public HoverResult? HoverAt(IReadOnlyDictionary<string, string> documents, string activeUri, int line, int character)
     {
         if (!documents.TryGetValue(activeUri, out var source))
+        {
             return null;
+        }
 
         var ctx = TokenLocator.Locate(source, line, character);
         var name = ctx.CurrentToken?.Text;
         if (string.IsNullOrEmpty(name) || ctx.InsideStringOrRegex)
+        {
             return null;
+        }
 
         var markdown = new WorkspaceIndex(documents).ResolveHover(activeUri, name);
         return markdown is null ? null : new HoverResult(markdown);
@@ -331,12 +378,16 @@ public sealed class KoineLanguageService
     public DefinitionResult? DefinitionAt(IReadOnlyDictionary<string, string> documents, string activeUri, int line, int character)
     {
         if (!documents.TryGetValue(activeUri, out var source))
+        {
             return null;
+        }
 
         var ctx = TokenLocator.Locate(source, line, character);
         var name = ctx.CurrentToken?.Text;
         if (string.IsNullOrEmpty(name) || ctx.InsideStringOrRegex)
+        {
             return null;
+        }
 
         var loc = new WorkspaceIndex(documents).ResolveDefinition(activeUri, name);
         return loc is null ? null : new DefinitionResult(loc.Uri, loc.Span);
@@ -350,19 +401,32 @@ public sealed class KoineLanguageService
     {
         var (model, _) = _compiler.Parse(source);
         if (model is null)
+        {
             return Array.Empty<DocumentSymbol>();
+        }
 
         var contexts = new List<DocumentSymbol>();
         foreach (var ctx in model.Contexts)
         {
             var children = new List<DocumentSymbol>();
             foreach (var t in ctx.Types)
+            {
                 children.Add(SymbolForType(t));
+            }
+
             foreach (var svc in ctx.Services)
+            {
                 children.Add(SymbolForService(svc));
+            }
+
             foreach (var spec in ctx.Specs)
+            {
                 if (spec.Span != SourceSpan.None)
+                {
                     children.Add(new DocumentSymbol(spec.Name, SymbolKind.Method, spec.Span, Array.Empty<DocumentSymbol>()));
+                }
+            }
+
             contexts.Add(new DocumentSymbol(ctx.Name, SymbolKind.Namespace, ctx.Span, children));
         }
         return contexts;
@@ -379,11 +443,21 @@ public sealed class KoineLanguageService
             case EntityDecl e:
                 AddMembers(children, e.Members);
                 foreach (var c in e.Commands)
+                {
                     if (c.Span != SourceSpan.None)
+                    {
                         children.Add(new DocumentSymbol(c.Name, SymbolKind.Method, c.Span, Array.Empty<DocumentSymbol>()));
+                    }
+                }
+
                 foreach (var f in e.Factories)
+                {
                     if (f.Span != SourceSpan.None)
+                    {
                         children.Add(new DocumentSymbol(f.Name, SymbolKind.Constructor, f.Span, Array.Empty<DocumentSymbol>()));
+                    }
+                }
+
                 break;
             case EventDecl ev:
                 AddMembers(children, ev.Members);
@@ -393,12 +467,20 @@ public sealed class KoineLanguageService
                 break;
             case EnumDecl en:
                 foreach (var m in en.Members)
+                {
                     if (m.Span != SourceSpan.None)
+                    {
                         children.Add(new DocumentSymbol(m.Name, SymbolKind.EnumMember, m.Span, Array.Empty<DocumentSymbol>()));
+                    }
+                }
+
                 break;
             case AggregateDecl agg:
                 foreach (var nested in agg.Types)
+                {
                     children.Add(SymbolForType(nested));
+                }
+
                 break;
         }
         return new DocumentSymbol(t.Name, SymbolKindOf(t), t.Span, children);
@@ -408,19 +490,33 @@ public sealed class KoineLanguageService
     {
         var children = new List<DocumentSymbol>();
         foreach (var op in svc.Operations)
+        {
             if (op.Span != SourceSpan.None)
+            {
                 children.Add(new DocumentSymbol(op.Name, SymbolKind.Method, op.Span, Array.Empty<DocumentSymbol>()));
+            }
+        }
+
         foreach (var uc in svc.UseCases)
+        {
             if (uc.Span != SourceSpan.None)
+            {
                 children.Add(new DocumentSymbol(uc.Name, SymbolKind.Method, uc.Span, Array.Empty<DocumentSymbol>()));
+            }
+        }
+
         return new DocumentSymbol(svc.Name, SymbolKind.Interface, svc.Span, children);
     }
 
     private static void AddMembers(List<DocumentSymbol> children, IReadOnlyList<Member> members)
     {
         foreach (var m in members)
+        {
             if (m.Span != SourceSpan.None)
+            {
                 children.Add(new DocumentSymbol(m.Name, SymbolKind.Field, m.Span, Array.Empty<DocumentSymbol>()));
+            }
+        }
     }
 
     private static SymbolKind SymbolKindOf(TypeDecl t) => t switch
@@ -439,12 +535,16 @@ public sealed class KoineLanguageService
     public IReadOnlyList<Reference> ReferencesAt(IReadOnlyDictionary<string, string> documents, string activeUri, int line, int character)
     {
         if (!documents.TryGetValue(activeUri, out var source))
+        {
             return Array.Empty<Reference>();
+        }
 
         var ctx = TokenLocator.Locate(source, line, character);
         var name = ctx.CurrentToken?.Text;
         if (string.IsNullOrEmpty(name) || ctx.InsideStringOrRegex)
+        {
             return Array.Empty<Reference>();
+        }
 
         return new WorkspaceIndex(documents).FindReferences(activeUri, name);
     }
@@ -457,15 +557,21 @@ public sealed class KoineLanguageService
     public IReadOnlyList<Reference>? RenameAt(IReadOnlyDictionary<string, string> documents, string activeUri, int line, int character, string newName)
     {
         if (!WorkspaceIndex.IsValidIdentifier(newName))
+        {
             return null;
+        }
 
         if (!documents.TryGetValue(activeUri, out var source))
+        {
             return null;
+        }
 
         var ctx = TokenLocator.Locate(source, line, character);
         var name = ctx.CurrentToken?.Text;
         if (string.IsNullOrEmpty(name) || ctx.InsideStringOrRegex || name == newName)
+        {
             return null;
+        }
 
         var refs = new WorkspaceIndex(documents).FindReferences(activeUri, name);
         return refs.Count == 0 ? null : refs;

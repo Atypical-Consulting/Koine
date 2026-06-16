@@ -305,7 +305,9 @@ public class KoineLanguageServiceTests
         var src = "context C {\n  \n}\n";
         var items = Complete(src, line: 1, ch: 2);
         foreach (var kw in new[] { "module", "import", "readmodel", "query", "value", "service" })
+        {
             Assert.Contains(items, i => i.Label == kw && i.Kind == CompletionItemKind.Keyword);
+        }
     }
 
     [Fact]

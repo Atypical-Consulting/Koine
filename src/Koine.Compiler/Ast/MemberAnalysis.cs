@@ -16,13 +16,17 @@ public static class MemberAnalysis
     public static bool IsDerived(Member member, IEnumerable<string> siblingMemberNames)
     {
         if (member.Initializer is null)
+        {
             return false;
+        }
 
-        var siblings = siblingMemberNames as ISet<string> ?? new HashSet<string>(siblingMemberNames);
+        ISet<string> siblings = siblingMemberNames as ISet<string> ?? new HashSet<string>(siblingMemberNames);
         foreach (var name in ReferencedIdentifiers(member.Initializer))
         {
             if (name != member.Name && siblings.Contains(name))
+            {
                 return true;
+            }
         }
         return false;
     }
@@ -35,15 +39,30 @@ public static class MemberAnalysis
     public static bool TypeShapeEquals(TypeRef a, TypeRef b)
     {
         if (a.Name != b.Name)
+        {
             return false;
+        }
+
         if ((a.Element is null) != (b.Element is null))
+        {
             return false;
+        }
+
         if (a.Element is not null && !TypeShapeEquals(a.Element, b.Element!))
+        {
             return false;
+        }
+
         if ((a.Value is null) != (b.Value is null))
+        {
             return false;
+        }
+
         if (a.Value is not null && !TypeShapeEquals(a.Value, b.Value!))
+        {
             return false;
+        }
+
         return true;
     }
 
@@ -74,55 +93,104 @@ public static class MemberAnalysis
                 break;
             case MemberAccessExpr ma:
                 foreach (var n in ReferencedIdentifiers(ma.Target))
+                {
                     yield return n;
+                }
+
                 break;
             case CallExpr call:
                 foreach (var n in ReferencedIdentifiers(call.Target))
+                {
                     yield return n;
-                foreach (var arg in call.Args)
+                }
+
+                foreach (Expr arg in call.Args)
+                {
                     foreach (var n in ReferencedIdentifiers(arg))
+                    {
                         yield return n;
+                    }
+                }
+
                 break;
             case LambdaExpr lambda:
                 // The lambda parameter is a bound variable, not a free reference;
                 // exclude it (and any shadowed use) from the referenced set.
                 foreach (var n in ReferencedIdentifiers(lambda.Body))
+                {
                     if (n != lambda.Parameter)
+                    {
                         yield return n;
+                    }
+                }
+
                 break;
             case ConditionalExpr cond:
                 foreach (var n in ReferencedIdentifiers(cond.Condition))
+                {
                     yield return n;
+                }
+
                 foreach (var n in ReferencedIdentifiers(cond.Then))
+                {
                     yield return n;
+                }
+
                 foreach (var n in ReferencedIdentifiers(cond.Else))
+                {
                     yield return n;
+                }
+
                 break;
             case CoalesceExpr coalesce:
                 foreach (var n in ReferencedIdentifiers(coalesce.Left))
+                {
                     yield return n;
+                }
+
                 foreach (var n in ReferencedIdentifiers(coalesce.Right))
+                {
                     yield return n;
+                }
+
                 break;
             case BinaryExpr b:
                 foreach (var n in ReferencedIdentifiers(b.Left))
+                {
                     yield return n;
+                }
+
                 foreach (var n in ReferencedIdentifiers(b.Right))
+                {
                     yield return n;
+                }
+
                 break;
             case UnaryExpr u:
                 foreach (var n in ReferencedIdentifiers(u.Operand))
+                {
                     yield return n;
+                }
+
                 break;
             case MatchExpr m:
                 foreach (var n in ReferencedIdentifiers(m.Target))
+                {
                     yield return n;
+                }
+
                 break;
             case GuardExpr g:
                 foreach (var n in ReferencedIdentifiers(g.Body))
+                {
                     yield return n;
+                }
+
                 foreach (var n in ReferencedIdentifiers(g.Condition))
+                {
                     yield return n;
+                }
+
                 break;
             case LetExpr let:
                 {
@@ -130,16 +198,26 @@ public static class MemberAnalysis
                     // earlier bindings, and the body sees them all, so yield only the FREE
                     // identifiers (those not introduced by an earlier-or-current binding).
                     var boundNames = new HashSet<string>(StringComparer.Ordinal);
-                    foreach (var binding in let.Bindings)
+                    foreach (LetBinding binding in let.Bindings)
                     {
                         foreach (var n in ReferencedIdentifiers(binding.Value))
+                        {
                             if (!boundNames.Contains(n))
+                            {
                                 yield return n;
+                            }
+                        }
+
                         boundNames.Add(binding.Name);
                     }
                     foreach (var n in ReferencedIdentifiers(let.Body))
+                    {
                         if (!boundNames.Contains(n))
+                        {
                             yield return n;
+                        }
+                    }
+
                     break;
                 }
             case LiteralExpr:

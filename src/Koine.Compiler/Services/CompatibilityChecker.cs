@@ -53,8 +53,12 @@ public sealed class CompatibilityChecker
 
         // Anything published only in the current model is purely additive.
         foreach (var (id, ct) in currentSurface.OrderBy(kv => kv.Key, StringComparer.Ordinal))
+        {
             if (!baselineSurface.ContainsKey(id))
+            {
                 changes.Add(NonBreaking($"New published {ct.Kind} '{ct.Name}' was added."));
+            }
+        }
 
         return new CompatibilityReport(changes);
     }
@@ -76,25 +80,35 @@ public sealed class CompatibilityChecker
             }
 
             if (bf.Type is not null && cf.Type is not null && Shape(bf.Type) != Shape(cf.Type))
+            {
                 changes.Add(Breaking(DiagnosticCodes.PublishedFieldTypeChanged,
                     $"{Member(baseline, bf.Name)} changed type from '{Shape(bf.Type)}' to '{Shape(cf.Type)}'."));
+            }
             else if (bf.IsOptional && !cf.IsOptional)
+            {
                 changes.Add(Breaking(DiagnosticCodes.PublishedFieldNowRequired,
                     $"{Member(baseline, bf.Name)} was optional but is now required."));
+            }
         }
 
         foreach (var cf in current.Fields)
         {
             if (baselineByName.ContainsKey(cf.Name))
+            {
                 continue;
+            }
 
             // A new enum value or a new optional field is additive; a new required field
             // breaks producers/consumers that build the contract.
             if (current.IsEnum || cf.IsOptional)
+            {
                 changes.Add(NonBreaking($"{Member(current, cf.Name)} was added."));
+            }
             else
+            {
                 changes.Add(Breaking(DiagnosticCodes.PublishedRequiredFieldAdded,
                     $"Required {Member(current, cf.Name)} was added."));
+            }
         }
     }
 
@@ -123,10 +137,15 @@ public sealed class CompatibilityChecker
         foreach (var r in relations)
         {
             if (r.Kind is not (ContextRelationKind.OpenHost or ContextRelationKind.PublishedLanguage))
+            {
                 continue;
+            }
+
             openHostContexts.Add(r.Upstream);
             if (r.IsBidirectional)
+            {
                 openHostContexts.Add(r.Downstream);
+            }
         }
 
         foreach (var ctx in model.Contexts)
@@ -135,11 +154,17 @@ public sealed class CompatibilityChecker
             foreach (var type in FlattenTypes(ctx.Types))
             {
                 if (type is IntegrationEventDecl)
+                {
                     result[$"{ctx.Name}.{type.Name}"] = PublishedType.From("integration event", type);
+                }
                 else if (sharedNames.Contains(type.Name))
+                {
                     result[$"shared-kernel:{type.Name}"] = PublishedType.From("shared-kernel", type);
+                }
                 else if (isOpenHost && type is ValueObjectDecl or EnumDecl)
+                {
                     result[$"{ctx.Name}.{type.Name}"] = PublishedType.From("open-host", type);
+                }
             }
         }
 
@@ -153,8 +178,12 @@ public sealed class CompatibilityChecker
         {
             yield return type;
             if (type is AggregateDecl agg)
+            {
                 foreach (var nested in FlattenTypes(agg.Types))
+                {
                     yield return nested;
+                }
+            }
         }
     }
 

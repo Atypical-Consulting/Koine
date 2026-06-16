@@ -62,9 +62,13 @@ public sealed class SyntaxErrorListener : IAntlrErrorListener<IToken>, IAntlrErr
     {
         var span = new SourceSpan(line, charPositionInLine + 1, _file);
         if (TryReservedWordDiagnostic(offendingSymbol, msg, span, out var reserved))
+        {
             _errors.Add(reserved);
+        }
         else
+        {
             _errors.Add(Diagnostic.Error(DiagnosticCodes.SyntaxError, msg, span));
+        }
     }
 
     public void SyntaxError(TextWriter output, IRecognizer recognizer, int offendingSymbol,
@@ -80,7 +84,9 @@ public sealed class SyntaxErrorListener : IAntlrErrorListener<IToken>, IAntlrErr
     {
         diagnostic = null!;
         if (offendingSymbol is null || !msg.Contains("expecting Identifier", StringComparison.Ordinal))
+        {
             return false;
+        }
 
         var word = offendingSymbol.Text;
         if (FullyReserved.Contains(offendingSymbol.Type))

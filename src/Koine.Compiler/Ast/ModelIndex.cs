@@ -106,7 +106,7 @@ public sealed class ModelIndex
 
     /// <summary>All enum types that declare a given member name (≥2 means ambiguous).</summary>
     public IReadOnlyList<string> EnumsDeclaring(string member) =>
-        _enumMembersByName.TryGetValue(member, out var list) ? list : Array.Empty<string>();
+        _enumMembersByName.TryGetValue(member, out List<string>? list) ? list : Array.Empty<string>();
 
     /// <summary>True when <paramref name="name"/> is the name of a declared enum type.</summary>
     public bool IsEnumType(string name) => Classify(name) == TypeKind.Enum;
@@ -116,27 +116,36 @@ public sealed class ModelIndex
         Model = model;
 
         // 1. Index every declared type (flat, recursing into aggregates).
-        foreach (var ctx in model.Contexts)
-            foreach (var t in ctx.Types)
+        foreach (ContextNode ctx in model.Contexts)
+        {
+            foreach (TypeDecl t in ctx.Types)
+            {
                 IndexType(t);
+            }
+        }
 
         // 1b. Per-context indexing for namespace computation and cross-context
         //     resolution (R13.2/R13.3): which context owns each type, and the full
         //     namespace (context + module path) it emits into.
-        foreach (var ctx in model.Contexts)
+        foreach (ContextNode ctx in model.Contexts)
         {
             _contextNames.Add(ctx.Name);
             var nsByType = new Dictionary<string, string>(StringComparer.Ordinal);
             var declsByType = new Dictionary<string, TypeDecl>(StringComparer.Ordinal);
-            foreach (var t in ctx.AllTypeDecls())
+            foreach (TypeDecl t in ctx.AllTypeDecls())
             {
                 var ns = NamespaceOf(ctx.Name, t.ModulePath);
                 nsByType[t.Name] = ns;
                 declsByType[t.Name] = t;
-                if (!_declaringContexts.TryGetValue(t.Name, out var owners))
+                if (!_declaringContexts.TryGetValue(t.Name, out List<string>? owners))
+                {
                     _declaringContexts[t.Name] = owners = new List<string>();
+                }
+
                 if (!owners.Contains(ctx.Name))
+                {
                     owners.Add(ctx.Name);
+                }
             }
             _namespaceByContextType[ctx.Name] = nsByType;
             _declsByContext[ctx.Name] = declsByType;
@@ -145,113 +154,183 @@ public sealed class ModelIndex
         // 1c. Resolve each context's imports to (name -> owning context(s)). A name
         //     imported from two contexts is ambiguous when used unqualified (R13.2).
         //     Unknown contexts / non-exported names are skipped here (the validator reports them).
-        foreach (var ctx in model.Contexts)
+        foreach (ContextNode ctx in model.Contexts)
         {
             var imported = new Dictionary<string, List<string>>(StringComparer.Ordinal);
-            foreach (var imp in ctx.Imports)
+            foreach (ImportDecl imp in ctx.Imports)
             {
-                if (!_namespaceByContextType.TryGetValue(imp.Context, out var theirTypes))
+                if (!_namespaceByContextType.TryGetValue(imp.Context, out Dictionary<string, string>? theirTypes))
+                {
                     continue;
-                var names = imp.IsWildcard ? theirTypes.Keys : (IEnumerable<string>)imp.Names;
+                }
+
+                IEnumerable<string> names = imp.IsWildcard ? theirTypes.Keys : (IEnumerable<string>)imp.Names;
                 foreach (var name in names)
                 {
                     if (!theirTypes.ContainsKey(name))
+                    {
                         continue;
-                    if (!imported.TryGetValue(name, out var owners))
+                    }
+
+                    if (!imported.TryGetValue(name, out List<string>? owners))
+                    {
                         imported[name] = owners = new List<string>();
+                    }
+
                     if (!owners.Contains(imp.Context))
+                    {
                         owners.Add(imp.Context);
+                    }
                 }
             }
             _importsByContext[ctx.Name] = imported;
         }
 
         // 2. Collect ID-value-object names from `identified by` clauses…
-        foreach (var decl in AllTypes())
+        foreach (TypeDecl decl in AllTypes())
+        {
             if (decl is EntityDecl e)
+            {
                 _idTypeNames.Add(e.IdentityName);
+            }
+        }
 
         // 3. …and from `*Id` references not otherwise declared, anywhere a type can be
         //    named (fields, event payloads, command/factory/operation parameters, returns).
-        foreach (var ctx in model.Contexts)
-            foreach (var typeRef in AllTypeRefsIn(ctx))
+        foreach (ContextNode ctx in model.Contexts)
+        {
+            foreach (TypeRef typeRef in AllTypeRefsIn(ctx))
+            {
                 NoteIdReferences(typeRef);
+            }
+        }
 
         // 3b. Index specs by their target type (from context AND aggregate scope).
-        foreach (var ctx in model.Contexts)
+        foreach (ContextNode ctx in model.Contexts)
         {
-            foreach (var spec in ctx.Specs)
+            foreach (SpecDecl spec in ctx.Specs)
+            {
                 IndexSpec(spec);
-            foreach (var t in ctx.Types)
+            }
+
+            foreach (TypeDecl t in ctx.Types)
+            {
                 if (t is AggregateDecl agg)
-                    foreach (var spec in agg.Specs)
+                {
+                    foreach (SpecDecl spec in agg.Specs)
+                    {
                         IndexSpec(spec);
+                    }
+                }
+            }
         }
 
         // 3c. Register each context's ID value objects (emitted into its BASE namespace,
         //     R13.3) so a module-namespaced type that references an ID gets a precise using.
-        foreach (var ctx in model.Contexts)
+        foreach (ContextNode ctx in model.Contexts)
         {
-            if (!_namespaceByContextType.TryGetValue(ctx.Name, out var nsByType))
+            if (!_namespaceByContextType.TryGetValue(ctx.Name, out Dictionary<string, string>? nsByType))
+            {
                 continue;
+            }
+
             void NoteId(string name)
             {
                 if ((_idTypeNames.Contains(name) || IsIdConvention(name)) && !nsByType.ContainsKey(name))
+                {
                     nsByType[name] = ctx.Name;
+                }
             }
-            foreach (var t in ctx.AllTypeDecls())
+            foreach (TypeDecl t in ctx.AllTypeDecls())
+            {
                 if (t is EntityDecl e)
+                {
                     NoteId(e.IdentityName);
-            foreach (var tr in AllTypeRefsIn(ctx))
+                }
+            }
+
+            foreach (TypeRef tr in AllTypeRefsIn(ctx))
+            {
                 NoteIdNamesIn(tr, NoteId);
+            }
         }
 
         // 4. Index enum members so bare members (e.g. `Draft`) resolve to a type.
         //    Track ALL owning enums per member so shared names can be disambiguated.
-        foreach (var decl in AllTypes())
+        foreach (TypeDecl decl in AllTypes())
+        {
             if (decl is EnumDecl e)
+            {
                 foreach (var member in e.MemberNames)
                 {
                     _enumMemberToType[member] = e.Name; // first/last owner (unambiguous case)
-                    if (!_enumMembersByName.TryGetValue(member, out var owners))
+                    if (!_enumMembersByName.TryGetValue(member, out List<string>? owners))
+                    {
                         _enumMembersByName[member] = owners = new List<string>();
+                    }
+
                     if (!owners.Contains(e.Name))
+                    {
                         owners.Add(e.Name);
+                    }
                 }
+            }
+        }
 
         // 5. Context map (R14.1): keep only relations whose endpoints are declared contexts.
         if (model.ContextMap is { } map)
-            foreach (var r in map.Relations)
+        {
+            foreach (ContextRelation r in map.Relations)
+            {
                 if (_contextNames.Contains(r.Upstream) && _contextNames.Contains(r.Downstream))
+                {
                     _relations.Add(r);
+                }
+            }
+        }
 
         // 5b. Shared-kernel (R14.2): redirect each shared type to one kernel namespace and
         //     record per-partner visibility. The emission owner is the order-normalized lower
         //     context that declares the type (so a co-declared type is emitted exactly once).
         //     ID value objects are skipped: they are universally available via the `*Id`
         //     convention and have a dedicated emission path, so they are never redirected.
-        foreach (var r in _relations)
+        foreach (ContextRelation r in _relations)
         {
             if (r.Kind != ContextRelationKind.SharedKernel)
+            {
                 continue;
+            }
+
             var kernelNs = KernelNamespaceOf(r.Upstream, r.Downstream);
             var (lo, hi) = string.CompareOrdinal(r.Upstream, r.Downstream) <= 0
                 ? (r.Upstream, r.Downstream) : (r.Downstream, r.Upstream);
             foreach (var name in r.SharedTypes)
             {
                 if (_idTypeNames.Contains(name) || IsIdConvention(name))
+                {
                     continue;  // *Id convention handles it
+                }
+
                 var owner = DeclaresType(lo, name) ? lo : DeclaresType(hi, name) ? hi : null;
                 if (owner is null)
+                {
                     continue;                 // unknown kernel type (validator reports it)
+                }
+
                 // A type may belong to only one kernel; a second, conflicting pair is reported
                 // (KOI1416) and ignored here so emission stays deterministic.
                 if (_kernelNamespaceByType.TryGetValue(name, out var existing) && existing != kernelNs)
+                {
                     continue;
+                }
+
                 _kernelNamespaceByType[name] = kernelNs;
                 _kernelOwnerByType[name] = owner;
                 if (!_kernelNamespaces.ContainsKey(kernelNs))
+                {
                     _kernelNamespaces[kernelNs] = new List<string> { lo, hi };
+                }
+
                 KernelVisible(r.Upstream).Add(name);
                 KernelVisible(r.Downstream).Add(name);
             }
@@ -259,17 +338,21 @@ public sealed class ModelIndex
 
         // 5c. Integration-event publish index (R14.3): a context only publishes events it
         //     actually declares as integration events (the validator reports mismatches).
-        foreach (var ctx in model.Contexts)
-            foreach (var p in ctx.Publishes)
+        foreach (ContextNode ctx in model.Contexts)
+        {
+            foreach (PublishDecl p in ctx.Publishes)
+            {
                 Published(ctx.Name).Add(p.EventName);
+            }
+        }
     }
 
     private HashSet<string> KernelVisible(string context) =>
-        _kernelVisibleByContext.TryGetValue(context, out var s)
+        _kernelVisibleByContext.TryGetValue(context, out HashSet<string>? s)
             ? s : _kernelVisibleByContext[context] = new HashSet<string>(StringComparer.Ordinal);
 
     private HashSet<string> Published(string context) =>
-        _publishedByContext.TryGetValue(context, out var s)
+        _publishedByContext.TryGetValue(context, out HashSet<string>? s)
             ? s : _publishedByContext[context] = new HashSet<string>(StringComparer.Ordinal);
 
     /// <summary>
@@ -281,7 +364,7 @@ public sealed class ModelIndex
     public bool TryGetMemberType(string typeName, string memberName, out TypeRef type)
     {
         type = null!;
-        return _byName.TryGetValue(typeName, out var decl) && MemberTypeOf(decl, memberName, out type);
+        return _byName.TryGetValue(typeName, out TypeDecl? decl) && MemberTypeOf(decl, memberName, out type);
     }
 
     /// <summary>
@@ -293,20 +376,29 @@ public sealed class ModelIndex
     public bool TryGetMemberType(string? context, string typeName, string memberName, out TypeRef type)
     {
         type = null!;
-        if (context is not null && TryGetDeclIn(context, typeName, out var decl))
+        if (context is not null && TryGetDeclIn(context, typeName, out TypeDecl decl))
+        {
             return MemberTypeOf(decl, memberName, out type);
+        }
+
         return TryGetMemberType(typeName, memberName, out type);
     }
 
     /// <summary>Resolves a type name to its declaration as seen from <paramref name="context"/> (local, then an unambiguous import).</summary>
     public bool TryGetDeclIn(string context, string typeName, out TypeDecl decl)
     {
-        if (_declsByContext.TryGetValue(context, out var local) && local.TryGetValue(typeName, out decl!))
+        if (_declsByContext.TryGetValue(context, out Dictionary<string, TypeDecl>? local) && local.TryGetValue(typeName, out decl!))
+        {
             return true;
-        if (_importsByContext.TryGetValue(context, out var imports)
-            && imports.TryGetValue(typeName, out var owners) && owners.Count == 1
-            && _declsByContext.TryGetValue(owners[0], out var theirs) && theirs.TryGetValue(typeName, out decl!))
+        }
+
+        if (_importsByContext.TryGetValue(context, out Dictionary<string, List<string>>? imports)
+            && imports.TryGetValue(typeName, out List<string>? owners) && owners.Count == 1
+            && _declsByContext.TryGetValue(owners[0], out Dictionary<string, TypeDecl>? theirs) && theirs.TryGetValue(typeName, out decl!))
+        {
             return true;
+        }
+
         decl = null!;
         return false;
     }
@@ -339,12 +431,15 @@ public sealed class ModelIndex
                 return false;
         }
 
-        foreach (var m in members)
+        foreach (Member m in members)
+        {
             if (string.Equals(m.Name, memberName, StringComparison.Ordinal))
             {
                 type = m.Type;
                 return true;
             }
+        }
+
         return false;
     }
 
@@ -356,87 +451,129 @@ public sealed class ModelIndex
     /// </summary>
     public static IEnumerable<TypeRef> AllTypeRefsIn(ContextNode ctx)
     {
-        foreach (var t in ctx.AllTypeDecls())
+        foreach (TypeDecl t in ctx.AllTypeDecls())
         {
             switch (t)
             {
                 case ValueObjectDecl v:
-                    foreach (var m in v.Members)
+                    foreach (Member m in v.Members)
+                    {
                         yield return m.Type;
+                    }
+
                     break;
                 case EntityDecl e:
-                    foreach (var m in e.Members)
+                    foreach (Member m in e.Members)
+                    {
                         yield return m.Type;
-                    foreach (var c in e.Commands)
-                        foreach (var p in c.Parameters)
+                    }
+
+                    foreach (CommandDecl c in e.Commands)
+                    {
+                        foreach (Param p in c.Parameters)
+                        {
                             yield return p.Type;
-                    foreach (var f in e.Factories)
-                        foreach (var p in f.Parameters)
+                        }
+                    }
+
+                    foreach (FactoryDecl f in e.Factories)
+                    {
+                        foreach (Param p in f.Parameters)
+                        {
                             yield return p.Type;
+                        }
+                    }
+
                     break;
                 case EventDecl ev:
-                    foreach (var m in ev.Members)
+                    foreach (Member m in ev.Members)
+                    {
                         yield return m.Type;
+                    }
+
                     break;
                 case IntegrationEventDecl ie:
-                    foreach (var m in ie.Members)
+                    foreach (Member m in ie.Members)
+                    {
                         yield return m.Type;
+                    }
+
                     break;
                 case AggregateDecl agg when agg.Repository is { } repo:
-                    foreach (var finder in repo.Finders)
+                    foreach (FinderDecl finder in repo.Finders)
                     {
                         yield return finder.ResultType;
-                        foreach (var p in finder.Parameters)
+                        foreach (Param p in finder.Parameters)
+                        {
                             yield return p.Type;
+                        }
                     }
                     break;
                 case ReadModelDecl rm:
-                    foreach (var f in rm.Fields)
+                    foreach (ReadModelField f in rm.Fields)
+                    {
                         if (f.Type is not null)
+                        {
                             yield return f.Type;
+                        }
+                    }
+
                     break;
                 case QueryDecl q:
                     yield return q.ResultType;
-                    foreach (var p in q.Criteria)
+                    foreach (Param p in q.Criteria)
+                    {
                         yield return p.Type;
+                    }
+
                     break;
             }
         }
 
-        foreach (var svc in ctx.Services)
+        foreach (ServiceDecl svc in ctx.Services)
         {
-            foreach (var op in svc.Operations)
+            foreach (OperationDecl op in svc.Operations)
             {
                 yield return op.ReturnType;
-                foreach (var p in op.Parameters)
+                foreach (Param p in op.Parameters)
+                {
                     yield return p.Type;
+                }
             }
-            foreach (var uc in svc.UseCases)
+            foreach (UseCaseDecl uc in svc.UseCases)
             {
                 if (uc.ReturnType is not null)
+                {
                     yield return uc.ReturnType;
-                foreach (var p in uc.Parameters)
+                }
+
+                foreach (Param p in uc.Parameters)
+                {
                     yield return p.Type;
+                }
             }
         }
     }
 
     private void IndexSpec(SpecDecl spec)
     {
-        if (!_specsByTarget.TryGetValue(spec.TargetType, out var map))
+        if (!_specsByTarget.TryGetValue(spec.TargetType, out Dictionary<string, SpecDecl>? map))
+        {
             _specsByTarget[spec.TargetType] = map = new Dictionary<string, SpecDecl>(StringComparer.Ordinal);
+        }
+
         map[spec.Name] = spec; // last wins on a duplicate (the validator reports it)
     }
 
     /// <summary>The specs declared over <paramref name="targetType"/>, by spec name.</summary>
     public IReadOnlyDictionary<string, SpecDecl> SpecsFor(string targetType) =>
-        _specsByTarget.TryGetValue(targetType, out var map) ? map : NoSpecs;
+        _specsByTarget.TryGetValue(targetType, out Dictionary<string, SpecDecl>? map) ? map : NoSpecs;
 
     /// <summary>Looks up the spec named <paramref name="name"/> declared over <paramref name="targetType"/>.</summary>
     public bool TryGetSpec(string targetType, string name, out SpecDecl spec)
     {
         spec = null!;
-        return _specsByTarget.TryGetValue(targetType, out var map) && map.TryGetValue(name, out spec!);
+        return _specsByTarget.TryGetValue(targetType, out Dictionary<string, SpecDecl>? map) && map.TryGetValue(name, out spec!);
     }
 
     /// <summary>Every spec declared in the model.</summary>
@@ -449,8 +586,12 @@ public sealed class ModelIndex
     {
         _byName[t.Name] = t;
         if (t is AggregateDecl agg)
-            foreach (var nested in agg.Types)
+        {
+            foreach (TypeDecl nested in agg.Types)
+            {
                 IndexType(nested);
+            }
+        }
     }
 
     /// <summary>Invokes <paramref name="note"/> for every type name within a (possibly generic) type reference.</summary>
@@ -458,19 +599,32 @@ public sealed class ModelIndex
     {
         note(tr.Name);
         if (tr.Element is not null)
+        {
             NoteIdNamesIn(tr.Element, note);
+        }
+
         if (tr.Value is not null)
+        {
             NoteIdNamesIn(tr.Value, note);
+        }
     }
 
     private void NoteIdReferences(TypeRef type)
     {
         if (type.Element is not null)
+        {
             NoteIdReferences(type.Element);
+        }
+
         if (type.Value is not null)
+        {
             NoteIdReferences(type.Value);
+        }
+
         if (!_byName.ContainsKey(type.Name) && IsIdConvention(type.Name))
+        {
             _idTypeNames.Add(type.Name);
+        }
     }
 
     /// <summary>True when <paramref name="name"/> follows the ID naming convention.</summary>
@@ -480,8 +634,10 @@ public sealed class ModelIndex
     /// <summary>Every declared type across all contexts and aggregates.</summary>
     public IEnumerable<TypeDecl> AllTypes()
     {
-        foreach (var decl in _byName.Values)
+        foreach (TypeDecl decl in _byName.Values)
+        {
             yield return decl;
+        }
     }
 
     public bool TryGetDecl(string typeName, out TypeDecl decl) => _byName.TryGetValue(typeName, out decl!);
@@ -495,7 +651,7 @@ public sealed class ModelIndex
             .Distinct(StringComparer.Ordinal);
 
     /// <summary>The declared member names of a value/entity type (for suggestions).</summary>
-    public IEnumerable<string> MemberNames(string typeName) => _byName.TryGetValue(typeName, out var decl)
+    public IEnumerable<string> MemberNames(string typeName) => _byName.TryGetValue(typeName, out TypeDecl? decl)
         ? decl switch
         {
             ValueObjectDecl v => v.Members.Select(m => m.Name),
@@ -527,11 +683,11 @@ public sealed class ModelIndex
 
     /// <summary>True when <paramref name="context"/> declares a type named <paramref name="typeName"/>.</summary>
     public bool DeclaresType(string context, string typeName) =>
-        _namespaceByContextType.TryGetValue(context, out var m) && m.ContainsKey(typeName);
+        _namespaceByContextType.TryGetValue(context, out Dictionary<string, string>? m) && m.ContainsKey(typeName);
 
     /// <summary>The contexts that declare a type with this simple name.</summary>
     public IReadOnlyList<string> DeclaringContextsOf(string typeName) =>
-        _declaringContexts.TryGetValue(typeName, out var l) ? l : Array.Empty<string>();
+        _declaringContexts.TryGetValue(typeName, out List<string>? l) ? l : Array.Empty<string>();
 
     // ---- Context map, shared kernel & integration events (R14) -------------
 
@@ -558,7 +714,7 @@ public sealed class ModelIndex
 
     /// <summary>True when <paramref name="context"/> may reference shared type <paramref name="name"/> without an import.</summary>
     public bool IsKernelVisibleFrom(string context, string name) =>
-        _kernelVisibleByContext.TryGetValue(context, out var s) && s.Contains(name);
+        _kernelVisibleByContext.TryGetValue(context, out HashSet<string>? s) && s.Contains(name);
 
     /// <summary>True when <paramref name="ns"/> is a dedicated shared-kernel namespace.</summary>
     public bool IsKernelNamespace(string ns) => _kernelNamespaces.ContainsKey(ns);
@@ -572,10 +728,17 @@ public sealed class ModelIndex
     public IReadOnlyDictionary<string, string> KernelVisibleTypeNamespaces(string kernelNs)
     {
         var result = new Dictionary<string, string>(StringComparer.Ordinal);
-        if (_kernelNamespaces.TryGetValue(kernelNs, out var partners))
+        if (_kernelNamespaces.TryGetValue(kernelNs, out List<string>? partners))
+        {
             foreach (var partner in partners)
+            {
                 foreach (var (name, ns) in VisibleTypeNamespaces(partner))
+                {
                     result[name] = ns;
+                }
+            }
+        }
+
         return result;
     }
 
@@ -586,15 +749,20 @@ public sealed class ModelIndex
     /// </summary>
     public bool MapPermitsReference(string fromContext, string upstream)
     {
-        foreach (var r in _relations)
+        foreach (ContextRelation r in _relations)
         {
             if (!PermitKinds.Contains(r.Kind))
+            {
                 continue;
+            }
+
             // Directed: downstream (fromContext) may see upstream's types. Bidirectional: either way.
             var match = (r.Downstream == fromContext && r.Upstream == upstream)
                         || (r.IsBidirectional && r.Upstream == fromContext && r.Downstream == upstream);
             if (match)
+            {
                 return true;
+            }
         }
         return false;
     }
@@ -610,7 +778,7 @@ public sealed class ModelIndex
 
     /// <summary>The context(s) a type name is imported from into <paramref name="fromContext"/> (R13.2).</summary>
     public IReadOnlyList<string> ImportOwnersOf(string fromContext, string name) =>
-        _importsByContext.TryGetValue(fromContext, out var m) && m.TryGetValue(name, out var owners)
+        _importsByContext.TryGetValue(fromContext, out Dictionary<string, List<string>>? m) && m.TryGetValue(name, out List<string>? owners)
             ? owners : Array.Empty<string>();
 
     /// <summary>The relation, if any, with <paramref name="downstream"/> as the downstream of <paramref name="upstream"/>.</summary>
@@ -621,12 +789,12 @@ public sealed class ModelIndex
 
     /// <summary>True when <paramref name="context"/> publishes integration event <paramref name="eventName"/>.</summary>
     public bool PublishesEvent(string context, string eventName) =>
-        _publishedByContext.TryGetValue(context, out var s) && s.Contains(eventName);
+        _publishedByContext.TryGetValue(context, out HashSet<string>? s) && s.Contains(eventName);
 
     /// <summary>True when <paramref name="context"/> declares <paramref name="typeName"/> as an integration event.</summary>
     public bool IsIntegrationEventIn(string context, string typeName) =>
-        TryGetDeclIn(context, typeName, out var decl) && decl is IntegrationEventDecl
-        || _declsByContext.TryGetValue(context, out var local) && local.TryGetValue(typeName, out var d) && d is IntegrationEventDecl;
+        TryGetDeclIn(context, typeName, out TypeDecl decl) && decl is IntegrationEventDecl
+        || _declsByContext.TryGetValue(context, out Dictionary<string, TypeDecl>? local) && local.TryGetValue(typeName, out TypeDecl? d) && d is IntegrationEventDecl;
 
     /// <summary>
     /// True when the map authorizes <paramref name="subscriber"/> to consume integration events
@@ -635,16 +803,24 @@ public sealed class ModelIndex
     /// </summary>
     public bool MaySubscribe(string publisher, string subscriber)
     {
-        foreach (var r in _relations)
+        foreach (ContextRelation r in _relations)
         {
             var kindOk = r.Kind is ContextRelationKind.OpenHost
                 or ContextRelationKind.PublishedLanguage or ContextRelationKind.CustomerSupplier;
             if (!kindOk)
+            {
                 continue;
+            }
+
             if (r.Upstream == publisher && r.Downstream == subscriber)
+            {
                 return true;
+            }
+
             if (r.IsBidirectional && r.Downstream == publisher && r.Upstream == subscriber)
+            {
                 return true;
+            }
         }
         return false;
     }
@@ -659,7 +835,7 @@ public sealed class ModelIndex
     /// </summary>
     public string? NamespaceOfTypeIn(string context, string typeName) =>
         _kernelNamespaceByType.TryGetValue(typeName, out var kernelNs) ? kernelNs
-        : _namespaceByContextType.TryGetValue(context, out var m) && m.TryGetValue(typeName, out var ns) ? ns
+        : _namespaceByContextType.TryGetValue(context, out Dictionary<string, string>? m) && m.TryGetValue(typeName, out var ns) ? ns
         : null;
 
     /// <summary>
@@ -670,30 +846,58 @@ public sealed class ModelIndex
     public IReadOnlyDictionary<string, string> VisibleTypeNamespaces(string context)
     {
         var result = new Dictionary<string, string>(StringComparer.Ordinal);
-        if (_namespaceByContextType.TryGetValue(context, out var local))
-            foreach (var kv in local)
+        if (_namespaceByContextType.TryGetValue(context, out Dictionary<string, string>? local))
+        {
+            foreach (KeyValuePair<string, string> kv in local)
+            {
                 // A shared-kernel type lives in its kernel namespace, not this context's (R14.2).
                 result[kv.Key] = _kernelNamespaceByType.TryGetValue(kv.Key, out var kns) ? kns : kv.Value;
-        if (_importsByContext.TryGetValue(context, out var imported))
-            foreach (var kv in imported)
+            }
+        }
+
+        if (_importsByContext.TryGetValue(context, out Dictionary<string, List<string>>? imported))
+        {
+            foreach (KeyValuePair<string, List<string>> kv in imported)
+            {
                 // A local type shadows an imported one of the same name — never overwrite it.
                 if (!result.ContainsKey(kv.Key) && kv.Value.Count == 1 && NamespaceOfTypeIn(kv.Value[0], kv.Key) is { } ns)
+                {
                     result[kv.Key] = ns;
+                }
+            }
+        }
+
         // Shared-kernel types this context may reference without an import (R14.2): surface them at
         // the kernel namespace so each partner file gets a precise `using <lo>__<hi>.Kernel;`.
-        if (_kernelVisibleByContext.TryGetValue(context, out var kernel))
+        if (_kernelVisibleByContext.TryGetValue(context, out HashSet<string>? kernel))
+        {
             foreach (var name in kernel)
+            {
                 if (_kernelNamespaceByType.TryGetValue(name, out var kns))
+                {
                     result[name] = kns;
+                }
+            }
+        }
+
         // Context-map permit relations (R14.1): a conformist/open-host/published-language/partnership
         // downstream may reference upstream types without an import, so surface them (and their
         // namespaces) too — otherwise the emitted file would lack the upstream `using`.
         foreach (var up in _contextNames)
+        {
             if (up != context && MapPermitsReference(context, up)
-                && _namespaceByContextType.TryGetValue(up, out var theirTypes))
-                foreach (var kv in theirTypes)
+                && _namespaceByContextType.TryGetValue(up, out Dictionary<string, string>? theirTypes))
+            {
+                foreach (KeyValuePair<string, string> kv in theirTypes)
+                {
                     if (!result.ContainsKey(kv.Key))
+                    {
                         result[kv.Key] = _kernelNamespaceByType.TryGetValue(kv.Key, out var kns2) ? kns2 : kv.Value;
+                    }
+                }
+            }
+        }
+
         return result;
     }
 
@@ -711,24 +915,43 @@ public sealed class ModelIndex
         if (tr.Qualifier is { } qualifier)
         {
             if (!IsContext(qualifier))
+            {
                 return new RefResolution(RefKind.UnknownContext, new[] { qualifier });
+            }
+
             if (!DeclaresType(qualifier, name))
+            {
                 return new RefResolution(RefKind.NotExported, new[] { qualifier });
+            }
+
             return Ok;
         }
 
-        var kind = Classify(name);
+        TypeKind kind = Classify(name);
         if (kind is TypeKind.Primitive or TypeKind.List or TypeKind.Set or TypeKind.Map or TypeKind.Range)
+        {
             return Ok;
-        if (DeclaresType(fromContext, name))
-            return Ok;                              // local to this context
-        if (kind == TypeKind.IdValueObject)
-            return Ok;                              // *Id convention: emitted locally, no import
-        if (IsKernelVisibleFrom(fromContext, name))
-            return Ok;                              // shared-kernel type visible to this partner (R14.2)
+        }
 
-        if (_importsByContext.TryGetValue(fromContext, out var imports) && imports.TryGetValue(name, out var owners))
+        if (DeclaresType(fromContext, name))
+        {
+            return Ok;                              // local to this context
+        }
+
+        if (kind == TypeKind.IdValueObject)
+        {
+            return Ok;                              // *Id convention: emitted locally, no import
+        }
+
+        if (IsKernelVisibleFrom(fromContext, name))
+        {
+            return Ok;                              // shared-kernel type visible to this partner (R14.2)
+        }
+
+        if (_importsByContext.TryGetValue(fromContext, out Dictionary<string, List<string>>? imports) && imports.TryGetValue(name, out List<string>? owners))
+        {
             return owners.Count == 1 ? Ok : new RefResolution(RefKind.Ambiguous, owners);
+        }
 
         var declaring = DeclaringContextsOf(name).Where(c => c != fromContext).ToList();
         if (declaring.Count > 0)
@@ -736,7 +959,10 @@ public sealed class ModelIndex
             // The context map may PERMIT an un-imported upstream reference (conformist, shared-kernel,
             // open-host, published-language, partnership). ACL & customer-supplier are not permitted (R14.1).
             if (declaring.Any(up => MapPermitsReference(fromContext, up)))
+            {
                 return Ok;
+            }
+
             return new RefResolution(RefKind.UnimportedCrossContext, declaring);
         }
 
@@ -749,16 +975,32 @@ public sealed class ModelIndex
     public TypeKind Classify(string typeName)
     {
         if (Primitives.Contains(typeName))
+        {
             return TypeKind.Primitive;
+        }
+
         if (typeName == ListTypeName)
+        {
             return TypeKind.List;
+        }
+
         if (typeName == SetTypeName)
+        {
             return TypeKind.Set;
+        }
+
         if (typeName == MapTypeName)
+        {
             return TypeKind.Map;
+        }
+
         if (typeName == RangeTypeName)
+        {
             return TypeKind.Range;
-        if (_byName.TryGetValue(typeName, out var decl))
+        }
+
+        if (_byName.TryGetValue(typeName, out TypeDecl? decl))
+        {
             return decl switch
             {
                 ValueObjectDecl => TypeKind.Value,
@@ -771,8 +1013,13 @@ public sealed class ModelIndex
                 QueryDecl => TypeKind.Query,
                 _ => TypeKind.Unknown
             };
+        }
+
         if (_idTypeNames.Contains(typeName) || IsIdConvention(typeName))
+        {
             return TypeKind.IdValueObject;
+        }
+
         return TypeKind.Unknown;
     }
 

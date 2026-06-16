@@ -34,7 +34,10 @@ internal static class CqrsValidator
         // (reported elsewhere as KOI0103) must not crash this loop.
         var memberByName = new Dictionary<string, Member>(StringComparer.Ordinal);
         foreach (var m in sourceMembers)
+        {
             memberByName[m.Name] = m;
+        }
+
         var sourceMemberNames = memberByName.Keys.ToArray();
         var scope = TypeScope.FromMembers(sourceMembers);
         var checker = new ExpressionChecker(index, resolver, enumMembers, diagnostics);
@@ -45,19 +48,26 @@ internal static class CqrsValidator
         foreach (var field in rm.Fields)
         {
             if (!seen.Add(SemanticValidator.PropertyKey(field.Name)))
+            {
                 diagnostics.Add(Diagnostic.Error(DiagnosticCodes.DuplicateReadModelField,
                     $"duplicate field '{field.Name}' in read model '{rm.Name}'", field.Span));
+            }
+
             if (SemanticValidator.IsReservedRecordMember(field.Name))
+            {
                 diagnostics.Add(Diagnostic.Error(DiagnosticCodes.ReservedRecordMember,
                     $"read-model field '{field.Name}' collides with a record-synthesized member", field.Span));
+            }
 
             if (field.Projection is null)
             {
                 // A direct field must name a member (or the synthetic `id`) of the source.
                 if (!memberByName.ContainsKey(field.Name))
+                {
                     diagnostics.Add(Diagnostic.Error(DiagnosticCodes.ReadModelUnknownField,
                         $"read model '{rm.Name}' field '{field.Name}' is not a member of '{rm.SourceType}'{Suggestions.For(field.Name, sourceMemberNames)}",
                         field.Span));
+                }
             }
             else
             {
@@ -68,9 +78,11 @@ internal static class CqrsValidator
                 var inferred = resolver.Infer(field.Projection, scope);
                 if (inferred is not null && index.IsKnownType(field.Type!.Name)
                     && !MemberAnalysis.IsAssignable(inferred, field.Type!))
+                {
                     diagnostics.Add(Diagnostic.Error(DiagnosticCodes.ReadModelFieldTypeMismatch,
                         $"read model '{rm.Name}' field '{field.Name}' is declared '{field.Type!.Name}' but projects a '{inferred.Name}'",
                         field.Span));
+                }
             }
         }
     }
@@ -88,11 +100,16 @@ internal static class CqrsValidator
         {
             SemanticValidator.ValidateTypeRef(p.Type, index, diagnostics);
             if (!seenParams.Add(SemanticValidator.PropertyKey(p.Name)))
+            {
                 diagnostics.Add(Diagnostic.Error(DiagnosticCodes.DuplicateParameter,
                     $"duplicate criterion '{p.Name}' in query '{q.Name}'", p.Span));
+            }
+
             if (SemanticValidator.IsReservedRecordMember(p.Name))
+            {
                 diagnostics.Add(Diagnostic.Error(DiagnosticCodes.ReservedRecordMember,
                     $"query criterion '{p.Name}' collides with a record-synthesized member", p.Span));
+            }
         }
 
         SemanticValidator.ValidateTypeRef(q.ResultType, index, diagnostics);
@@ -100,9 +117,11 @@ internal static class CqrsValidator
             ? q.ResultType.Element?.Name
             : q.ResultType.Name;
         if (resultName is not null && index.Classify(resultName) != TypeKind.ReadModel)
+        {
             diagnostics.Add(Diagnostic.Error(DiagnosticCodes.QueryResultNotReadModel,
                 $"query '{q.Name}' must return a read model or 'List<readmodel>', not '{q.ResultType.Name}'",
                 q.Span));
+        }
     }
 
     /// <summary>
@@ -115,9 +134,14 @@ internal static class CqrsValidator
         // shared across contexts binds to the right declaration.
         TypeDecl? decl = null;
         if (context is not null && index.TryGetDeclIn(context, sourceType, out var local))
+        {
             decl = local;
+        }
         else if (index.TryGetDecl(sourceType, out var global))
+        {
             decl = global;
+        }
+
         return decl switch
         {
             ValueObjectDecl v => v.Members,

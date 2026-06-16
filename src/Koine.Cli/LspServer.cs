@@ -86,7 +86,9 @@ internal sealed class LspServer
         {
             var message = ReadMessage();
             if (message is null)
+            {
                 return 0; // EOF
+            }
 
             JsonDocument doc;
             try
@@ -98,7 +100,9 @@ internal sealed class LspServer
                 var root = doc.RootElement;
                 var method = root.TryGetProperty("method", out var m) ? m.GetString() : null;
                 if (method is null)
+                {
                     continue;
+                }
 
                 Log("<- " + method);
                 try
@@ -109,12 +113,21 @@ internal sealed class LspServer
                             if (root.TryGetProperty("params", out var initParams))
                             {
                                 if (initParams.TryGetProperty("rootUri", out var ru) && ru.ValueKind == JsonValueKind.String)
+                                {
                                     ScanWorkspace(ru.GetString()!);
+                                }
+
                                 if (initParams.TryGetProperty("workspaceFolders", out var folders)
                                     && folders.ValueKind == JsonValueKind.Array)
+                                {
                                     foreach (var f in folders.EnumerateArray())
+                                    {
                                         if (f.TryGetProperty("uri", out var fu) && fu.ValueKind == JsonValueKind.String)
+                                        {
                                             ScanWorkspace(fu.GetString()!);
+                                        }
+                                    }
+                                }
                             }
                             Respond(root, new Dictionary<string, object?>
                             {
@@ -185,47 +198,74 @@ internal sealed class LspServer
 
                         case "textDocument/completion":
                             if (root.TryGetProperty("id", out _))
+                            {
                                 Respond(root, CompletionResult(root));
+                            }
+
                             break;
 
                         case "textDocument/hover":
                             if (root.TryGetProperty("id", out _))
+                            {
                                 Respond(root, HoverResultJson(root));
+                            }
+
                             break;
 
                         case "textDocument/definition":
                             if (root.TryGetProperty("id", out _))
+                            {
                                 Respond(root, DefinitionResultJson(root));
+                            }
+
                             break;
 
                         case "textDocument/formatting":
                             if (root.TryGetProperty("id", out _))
+                            {
                                 Respond(root, FormattingResultJson(root));
+                            }
+
                             break;
 
                         case "textDocument/documentSymbol":
                             if (root.TryGetProperty("id", out _))
+                            {
                                 Respond(root, DocumentSymbolResultJson(root));
+                            }
+
                             break;
 
                         case "textDocument/references":
                             if (root.TryGetProperty("id", out _))
+                            {
                                 Respond(root, ReferencesResultJson(root));
+                            }
+
                             break;
 
                         case "textDocument/rename":
                             if (root.TryGetProperty("id", out _))
+                            {
                                 Respond(root, RenameResultJson(root));
+                            }
+
                             break;
 
                         case "textDocument/codeAction":
                             if (root.TryGetProperty("id", out _))
+                            {
                                 Respond(root, CodeActionResultJson(root));
+                            }
+
                             break;
 
                         case "textDocument/semanticTokens/full":
                             if (root.TryGetProperty("id", out _))
+                            {
                                 Respond(root, SemanticTokensResultJson(root));
+                            }
+
                             break;
 
                         case "shutdown":
@@ -247,7 +287,10 @@ internal sealed class LspServer
                             // Unknown request (has an id): reply method-not-found so the
                             // client doesn't block waiting. Unknown notifications: ignore.
                             if (root.TryGetProperty("id", out _))
+                            {
                                 RespondError(root, -32601, "method not found: " + method);
+                            }
+
                             break;
                     }
                 }
@@ -265,7 +308,9 @@ internal sealed class LspServer
     {
         if (!TryGetUri(root, out var uri) || !TryGetPosition(root, out var line, out var ch)
             || !_docs.TryGetValue(uri, out var text))
+        {
             return null;
+        }
 
         var items = _ls.CompleteAt(text, line, ch)
             .Select(i => (object)new Dictionary<string, object?>
@@ -283,11 +328,15 @@ internal sealed class LspServer
     private object? HoverResultJson(JsonElement root)
     {
         if (!TryGetUri(root, out var uri) || !TryGetPosition(root, out var line, out var ch))
+        {
             return null;
+        }
 
         var hover = _ls.HoverAt(Workspace(), uri, line, ch);
         if (hover is null)
+        {
             return null;
+        }
 
         return new Dictionary<string, object?>
         {
@@ -302,12 +351,16 @@ internal sealed class LspServer
     private object? DefinitionResultJson(JsonElement root)
     {
         if (!TryGetUri(root, out var uri) || !TryGetPosition(root, out var line, out var ch))
+        {
             return null;
+        }
 
         var workspace = Workspace();
         var def = _ls.DefinitionAt(workspace, uri, line, ch);
         if (def is null)
+        {
             return null;
+        }
 
         // SpanOf points at the declaration KEYWORD (1-based). Select the declared NAME by
         // locating the requested identifier on the target line, so the editor highlights the
@@ -347,11 +400,15 @@ internal sealed class LspServer
     private object? FormattingResultJson(JsonElement root)
     {
         if (!TryGetUri(root, out var uri) || !_docs.TryGetValue(uri, out var text))
+        {
             return null;
+        }
 
         var formatted = new KoineFormatter().Format(text).Text;
         if (string.Equals(formatted, text, StringComparison.Ordinal))
+        {
             return Array.Empty<object>(); // nothing to change
+        }
 
         // One full-document edit: replace [start of doc .. end of doc) with the formatted text.
         var lines = SplitLines(text);
@@ -376,7 +433,9 @@ internal sealed class LspServer
     private object? DocumentSymbolResultJson(JsonElement root)
     {
         if (!TryGetUri(root, out var uri) || !_docs.TryGetValue(uri, out var text))
+        {
             return null;
+        }
 
         return _ls.DocumentSymbols(text).Select(ToLspSymbol).ToArray();
     }
@@ -422,7 +481,9 @@ internal sealed class LspServer
     private object? ReferencesResultJson(JsonElement root)
     {
         if (!TryGetUri(root, out var uri) || !TryGetPosition(root, out var line, out var ch))
+        {
             return null;
+        }
 
         var refs = _ls.ReferencesAt(Workspace(), uri, line, ch);
         return refs.Select(ToLocation).ToArray();
@@ -433,16 +494,21 @@ internal sealed class LspServer
         if (!TryGetUri(root, out var uri) || !TryGetPosition(root, out var line, out var ch)
             || !root.TryGetProperty("params", out var p)
             || !p.TryGetProperty("newName", out var nn) || nn.ValueKind != JsonValueKind.String)
+        {
             return null;
+        }
 
         var newName = nn.GetString()!;
         var edits = _ls.RenameAt(Workspace(), uri, line, ch, newName);
         if (edits is null)
+        {
             return null;
+        }
 
         // Group reference edits by file into a WorkspaceEdit.changes map (uri -> TextEdit[]).
         var changes = new Dictionary<string, object?>(StringComparer.Ordinal);
         foreach (var group in edits.GroupBy(r => r.Uri, StringComparer.Ordinal))
+        {
             changes[group.Key] = group
                 .Select(r => (object)new Dictionary<string, object?>
                 {
@@ -450,6 +516,7 @@ internal sealed class LspServer
                     ["newText"] = newName,
                 })
                 .ToArray();
+        }
 
         return new Dictionary<string, object?> { ["changes"] = changes };
     }
@@ -484,16 +551,23 @@ internal sealed class LspServer
             || !p.TryGetProperty("context", out var context)
             || !context.TryGetProperty("diagnostics", out var diags)
             || diags.ValueKind != JsonValueKind.Array)
+        {
             return Array.Empty<object>();
+        }
 
         var actions = new List<object>();
         foreach (var d in diags.EnumerateArray())
         {
             if (!d.TryGetProperty("message", out var msgEl) || msgEl.ValueKind != JsonValueKind.String)
+            {
                 continue;
+            }
+
             var suggestion = ExtractSuggestion(msgEl.GetString()!);
             if (suggestion is null || !d.TryGetProperty("range", out var range))
+            {
                 continue;
+            }
 
             actions.Add(new Dictionary<string, object?>
             {
@@ -531,7 +605,9 @@ internal sealed class LspServer
     private object? SemanticTokensResultJson(JsonElement root)
     {
         if (!TryGetUri(root, out var uri) || !_docs.TryGetValue(uri, out var text))
+        {
             return new Dictionary<string, object?> { ["data"] = Array.Empty<int>() };
+        }
 
         var tokens = _semanticTokens.Tokenize(text);
         var data = SemanticTokenProvider.Encode(tokens);
@@ -544,7 +620,10 @@ internal sealed class LspServer
         const string marker = "did you mean '";
         var i = message.IndexOf(marker, StringComparison.Ordinal);
         if (i < 0)
+        {
             return null;
+        }
+
         var start = i + marker.Length;
         var end = message.IndexOf('\'', start);
         return end > start ? message[start..end] : null;
@@ -573,7 +652,10 @@ internal sealed class LspServer
             && pos.TryGetProperty("character", out var c)
             && l.TryGetInt32(out line)
             && c.TryGetInt32(out character))
+        {
             return true;
+        }
+
         return false;
     }
 
@@ -604,16 +686,22 @@ internal sealed class LspServer
         // (defensive) is dropped rather than mis-attributed.
         var byUri = new Dictionary<string, List<object>>(StringComparer.Ordinal);
         foreach (var uri in workspace.Keys)
+        {
             byUri[uri] = new List<object>();
+        }
 
         foreach (var d in diags)
         {
             if (d.File is { } file && workspace.TryGetValue(file, out var text))
+            {
                 byUri[file].Add(ToLspDiagnostic(d, SplitLines(text)));
+            }
         }
 
         foreach (var (uri, items) in byUri)
+        {
             PublishDiagnostics(uri, items);
+        }
     }
 
     private void PublishDiagnostics(string uri, IReadOnlyList<object> diagnostics) =>
@@ -655,7 +743,10 @@ internal sealed class LspServer
             var text = lines[line];
             var e = col;
             while (e < text.Length && (char.IsLetterOrDigit(text[e]) || text[e] == '_'))
+            {
                 e++;
+            }
+
             endCol = e > col ? e : Math.Min(col + 1, Math.Max(text.Length, col + 1));
         }
 
@@ -671,7 +762,10 @@ internal sealed class LspServer
     {
         var msg = new Dictionary<string, object?> { ["jsonrpc"] = "2.0", ["result"] = result };
         if (request.TryGetProperty("id", out var id))
+        {
             msg["id"] = id.Clone();
+        }
+
         Send(msg);
     }
 
@@ -686,7 +780,10 @@ internal sealed class LspServer
             ["error"] = new Dictionary<string, object?> { ["code"] = code, ["message"] = message },
         };
         if (request.TryGetProperty("id", out var id))
+        {
             msg["id"] = id.Clone();
+        }
+
         Send(msg);
     }
 
@@ -717,16 +814,23 @@ internal sealed class LspServer
         {
             b = _in.ReadByte();
             if (b == -1)
+            {
                 return null;
+            }
+
             header.Add((byte)b);
             var n = header.Count;
             if (n >= 4 && header[n - 4] == '\r' && header[n - 3] == '\n' && header[n - 2] == '\r' && header[n - 1] == '\n')
+            {
                 break;
+            }
         }
 
         var contentLength = ParseContentLength(Encoding.ASCII.GetString(header.ToArray()));
         if (contentLength <= 0)
+        {
             return null;
+        }
 
         var body = new byte[contentLength];
         var read = 0;
@@ -734,7 +838,10 @@ internal sealed class LspServer
         {
             var r = _in.Read(body, read, contentLength - read);
             if (r <= 0)
+            {
                 return null;
+            }
+
             read += r;
         }
 
@@ -748,7 +855,9 @@ internal sealed class LspServer
             var line = raw.Trim();
             if (line.StartsWith("Content-Length:", StringComparison.OrdinalIgnoreCase)
                 && int.TryParse(line["Content-Length:".Length..].Trim(), out var len))
+            {
                 return len;
+            }
         }
         return -1;
     }
@@ -760,7 +869,10 @@ internal sealed class LspServer
     {
         var merged = new Dictionary<string, string>(_workspaceFiles, StringComparer.Ordinal);
         foreach (var (uri, text) in _docs)
+        {
             merged[uri] = text;
+        }
+
         return merged;
     }
 
@@ -783,19 +895,31 @@ internal sealed class LspServer
     {
         var root = UriToPath(rootUri);
         if (root is null || !Directory.Exists(root))
+        {
             return;
+        }
+
         if (!_scannedRoots.Add(root))
+        {
             return; // already scanned this root (e.g. rootUri == a workspaceFolder)
+        }
+
         try
         {
             foreach (var path in Directory.EnumerateFiles(root, "*.koi", SearchOption.AllDirectories))
             {
                 var rel = path.Replace('\\', '/');
                 if (rel.Contains("/bin/") || rel.Contains("/obj/") || rel.Contains("/.git/"))
+                {
                     continue;
+                }
+
                 var uri = PathToUri(path);
                 if (uri is null)
+                {
                     continue;
+                }
+
                 try
                 { _workspaceFiles[uri] = File.ReadAllText(path); }
                 catch (Exception ex) { Log($"skip {path}: {ex.Message}"); }
@@ -839,7 +963,10 @@ internal sealed class LspServer
         uri = "";
         text = "";
         if (!TryGetUri(root, out uri))
+        {
             return false;
+        }
+
         if (root.TryGetProperty("params", out var p)
             && p.TryGetProperty("contentChanges", out var changes)
             && changes.ValueKind == JsonValueKind.Array
@@ -860,9 +987,15 @@ internal sealed class LspServer
     {
         text = null;
         if (!TryGetUri(root, out uri))
+        {
             return false;
+        }
+
         if (root.TryGetProperty("params", out var p) && p.TryGetProperty("text", out var t))
+        {
             text = t.GetString();
+        }
+
         return true;
     }
 }
