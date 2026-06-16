@@ -1,2 +1,4 @@
 Generated/
 Generated/**
+# Build-time glossary emitted by the KoineGenerate target (regenerated each build).
+glossary.md

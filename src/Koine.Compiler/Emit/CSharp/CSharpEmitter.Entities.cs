@@ -162,7 +162,7 @@ public sealed partial class CSharpEmitter
 
         sb.Append("}\n");
 
-        return new EmittedFile($"{FolderFor(ns)}/{entity.Name}.cs",
+        return new EmittedFile(PathFor(ns, isRoot ? KindFolder.Root : KindFolder.Entities, $"{entity.Name}.cs"),
             Assemble(emit, ns, sb.ToString(), EntityUsesLinq(entity) || SpecBodiesUseLinq(entity.Name, index)));
     }
 
@@ -231,6 +231,6 @@ public sealed partial class CSharpEmitter
         sb.Append(Indent).Append("}\n");
         sb.Append("}\n");
 
-        return new EmittedFile($"{FolderFor(ns)}/{idName}.cs", Assemble(emit, ns, sb.ToString(), usesLinq: false));
+        return new EmittedFile(PathFor(ns, KindFolder.ValueObjects, $"{idName}.cs"), Assemble(emit, ns, sb.ToString(), usesLinq: false));
     }
 }

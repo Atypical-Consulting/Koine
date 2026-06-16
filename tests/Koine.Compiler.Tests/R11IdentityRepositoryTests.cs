@@ -43,7 +43,7 @@ public class R11IdentityRepositoryTests
     public void Guid_identity_is_unchanged_and_keeps_New()
     {
         var (asm, files) = Build(ThreeStrategies);
-        var src = FileContents(files, "Catalog/OrderId.cs");
+        var src = FileContents(files, "Catalog/ValueObjects/OrderId.cs");
         Assert.Contains("public Guid Value { get; }", src);
         Assert.Contains("public static OrderId New()\n        => new(Guid.NewGuid());", src);
 
@@ -55,7 +55,7 @@ public class R11IdentityRepositoryTests
     public void Natural_string_identity_wraps_string_validates_and_has_no_New()
     {
         var (asm, files) = Build(ThreeStrategies);
-        var src = FileContents(files, "Catalog/Sku.cs");
+        var src = FileContents(files, "Catalog/ValueObjects/Sku.cs");
         Assert.Contains("public string Value { get; }", src);
         Assert.DoesNotContain("New()", src);
 
@@ -76,7 +76,7 @@ public class R11IdentityRepositoryTests
     public void Sequence_identity_wraps_long_and_has_no_New()
     {
         var (asm, files) = Build(ThreeStrategies);
-        var src = FileContents(files, "Catalog/InvoiceNo.cs");
+        var src = FileContents(files, "Catalog/ValueObjects/InvoiceNo.cs");
         Assert.Contains("public long Value { get; }", src);
         Assert.DoesNotContain("New()", src);
 
@@ -92,7 +92,7 @@ public class R11IdentityRepositoryTests
         const string src = "context C {\n  entity E identified by EKey as natural(Int) { n: Int }\n}\n";
         Assert.Empty(Diagnose(src));
         var (_, files) = Build(src);
-        Assert.Contains("public int Value { get; }", FileContents(files, "C/EKey.cs"));
+        Assert.Contains("public int Value { get; }", FileContents(files, "C/ValueObjects/EKey.cs"));
     }
 
     [Fact]
@@ -120,7 +120,7 @@ public class R11IdentityRepositoryTests
     public void Aggregate_root_emits_a_repository_interface_keyed_on_its_id()
     {
         var (asm, files) = Build(OrderAggregate);
-        var src = FileContents(files, "Sales/IOrderRepository.cs");
+        var src = FileContents(files, "Sales/Repositories/IOrderRepository.cs");
         Assert.Contains("public interface IOrderRepository", src);
         Assert.Contains("Task<Order?> GetByIdAsync(OrderId id, CancellationToken ct = default);", src);
         Assert.Contains("Task AddAsync(Order aggregate, CancellationToken ct = default);", src);
@@ -131,7 +131,7 @@ public class R11IdentityRepositoryTests
     public void Default_repository_exposes_the_full_mutating_set()
     {
         var (_, files) = Build(OrderAggregate);
-        var src = FileContents(files, "Sales/IOrderRepository.cs");
+        var src = FileContents(files, "Sales/Repositories/IOrderRepository.cs");
         Assert.Contains("UpdateAsync(", src);
         Assert.Contains("RemoveAsync(", src);
     }
@@ -150,8 +150,8 @@ public class R11IdentityRepositoryTests
             """;
         var (_, files) = Build(src);
         Assert.Single(files, f => f.RelativePath.EndsWith("Repository.cs"));
-        Assert.DoesNotContain(files, f => f.RelativePath == "Sales/ICustomerRepository.cs");
-        Assert.DoesNotContain(files, f => f.RelativePath == "Sales/IOrderLineRepository.cs");
+        Assert.DoesNotContain(files, f => f.RelativePath == "Sales/Repositories/ICustomerRepository.cs");
+        Assert.DoesNotContain(files, f => f.RelativePath == "Sales/Repositories/IOrderLineRepository.cs");
     }
 
     [Fact]
@@ -171,7 +171,7 @@ public class R11IdentityRepositoryTests
             """;
         Assert.Empty(Diagnose(src));
         var (_, files) = Build(src);
-        var repo = FileContents(files, "Sales/IOrderRepository.cs");
+        var repo = FileContents(files, "Sales/Repositories/IOrderRepository.cs");
         Assert.Contains("Task<IReadOnlyList<Order>> ByCustomerAsync(CustomerId customer, CancellationToken ct = default);", repo);
         Assert.Contains("Task<Order?> MostRecentAsync(CustomerId customer, CancellationToken ct = default);", repo);
     }
@@ -192,7 +192,7 @@ public class R11IdentityRepositoryTests
             """;
         Assert.Empty(Diagnose(src));
         var (_, files) = Build(src);
-        var repo = FileContents(files, "Audit/IAuditEntryRepository.cs");
+        var repo = FileContents(files, "Audit/Repositories/IAuditEntryRepository.cs");
         Assert.Contains("GetByIdAsync(", repo);
         Assert.Contains("AddAsync(", repo);
         Assert.DoesNotContain("UpdateAsync(", repo);
