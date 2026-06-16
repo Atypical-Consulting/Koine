@@ -205,7 +205,7 @@ public class R5CommandTests
             "  }\n" +
             "}\n";
         var result = new KoineCompiler().Compile(src, new CSharpEmitter());
-        var cart = result.Files.Single(f => f.RelativePath == "C/Cart.cs").Contents;
+        var cart = result.Files.Single(f => f.RelativePath == "C/Entities/Cart.cs").Contents;
         Assert.Contains("N = v;", cart);  // not `N = default`/dropped binding
 
         var (asm, errors) = TestSupport.Compile(result.Files);

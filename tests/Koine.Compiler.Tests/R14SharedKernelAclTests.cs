@@ -45,11 +45,11 @@ public class R14SharedKernelAclTests
     public void A_shared_type_is_emitted_once_into_a_dedicated_kernel_namespace()
     {
         var (asm, files) = Build(SharedKernel);
-        Assert.Contains("namespace Sales__Shipping.Kernel;", FileContents(files, "Sales__Shipping/Kernel/Money.cs"));
+        Assert.Contains("namespace Sales__Shipping.Kernel;", FileContents(files, "Sales__Shipping/Kernel/ValueObjects/Money.cs"));
         Assert.NotNull(asm.GetType("Sales__Shipping.Kernel.Money"));
         // Not duplicated into either partner's own namespace.
-        Assert.DoesNotContain(files, f => f.RelativePath == "Sales/Money.cs");
-        Assert.DoesNotContain(files, f => f.RelativePath == "Shipping/Money.cs");
+        Assert.DoesNotContain(files, f => f.RelativePath == "Sales/ValueObjects/Money.cs");
+        Assert.DoesNotContain(files, f => f.RelativePath == "Shipping/ValueObjects/Money.cs");
         Assert.Single(files, f => f.RelativePath.EndsWith("/Money.cs"));
     }
 
@@ -64,8 +64,8 @@ public class R14SharedKernelAclTests
     public void A_partner_file_gets_a_precise_kernel_using()
     {
         var (_, files) = Build(SharedKernel);
-        Assert.Contains("using Sales__Shipping.Kernel;", FileContents(files, "Shipping/Label.cs"));
-        Assert.Contains("using Sales__Shipping.Kernel;", FileContents(files, "Sales/Quote.cs"));
+        Assert.Contains("using Sales__Shipping.Kernel;", FileContents(files, "Shipping/ValueObjects/Label.cs"));
+        Assert.Contains("using Sales__Shipping.Kernel;", FileContents(files, "Sales/ValueObjects/Quote.cs"));
     }
 
     [Fact]
@@ -90,7 +90,7 @@ public class R14SharedKernelAclTests
             context Shipping { value Label { cost: Money } }
             contextmap { Shipping <-> Sales : shared-kernel { Money } }
             """);
-        Assert.Contains(files, f => f.RelativePath == "Sales__Shipping/Kernel/Money.cs");
+        Assert.Contains(files, f => f.RelativePath == "Sales__Shipping/Kernel/ValueObjects/Money.cs");
     }
 
     [Fact]
@@ -137,7 +137,7 @@ public class R14SharedKernelAclTests
     public void An_acl_relation_emits_a_translator_interface_in_the_downstream_context()
     {
         var (asm, files) = Build(Acl);
-        var translator = FileContents(files, "Billing/ILegacyToBillingTranslator.cs");
+        var translator = FileContents(files, "Billing/Abstractions/ILegacyToBillingTranslator.cs");
         Assert.Contains("namespace Billing;", translator);
         Assert.Contains("public interface ILegacyToBillingTranslator", translator);
         Assert.Contains("Billing.Customer Translate(Legacy.Account source);", translator);
@@ -225,7 +225,7 @@ public class R14SharedKernelAclTests
             context Shipping { value Label { cost: Money } }
             contextmap { Sales <-> Shipping : shared-kernel { Money } }
             """);
-        Assert.Contains("using Sales;", FileContents(files, "Sales__Shipping/Kernel/Money.cs"));
+        Assert.Contains("using Sales;", FileContents(files, "Sales__Shipping/Kernel/ValueObjects/Money.cs"));
         Assert.NotNull(asm.GetType("Sales__Shipping.Kernel.Money"));
     }
 
@@ -270,7 +270,7 @@ public class R14SharedKernelAclTests
             }
             """);
         Assert.Contains("Billing.Crm.Customer Translate(Legacy.Account source);",
-            FileContents(files, "Billing/ILegacyToBillingTranslator.cs"));
+            FileContents(files, "Billing/Abstractions/ILegacyToBillingTranslator.cs"));
         Assert.NotNull(asm.GetType("Billing.ILegacyToBillingTranslator"));
     }
 
@@ -322,7 +322,7 @@ public class R14SharedKernelAclTests
             context Shipping { value Tariff { c: Currency } }
             contextmap { Sales <-> Shipping : shared-kernel { Currency } }
             """);
-        Assert.Contains(files, f => f.RelativePath == "Sales__Shipping/Kernel/Currency.cs");
+        Assert.Contains(files, f => f.RelativePath == "Sales__Shipping/Kernel/Enums/Currency.cs");
         Assert.NotNull(asm.GetType("Sales__Shipping.Kernel.Currency"));
     }
 
@@ -349,6 +349,6 @@ public class R14SharedKernelAclTests
             new SourceFile("map.koi", "contextmap { Sales <-> Shipping : shared-kernel { Money } }\n"),
         }, new CSharpEmitter());
         Assert.True(first.Success, string.Join("\n", first.Diagnostics.Select(d => d.ToString())));
-        Assert.Contains(first.Files, f => f.RelativePath == "Sales__Shipping/Kernel/Money.cs");
+        Assert.Contains(first.Files, f => f.RelativePath == "Sales__Shipping/Kernel/ValueObjects/Money.cs");
     }
 }

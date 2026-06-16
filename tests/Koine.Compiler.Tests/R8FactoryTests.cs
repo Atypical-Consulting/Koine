@@ -147,7 +147,7 @@ public class R8FactoryTests
     {
         const string src = "context C {\n  entity E identified by EId {\n    n: Int\n  }\n}\n";
         var result = new KoineCompiler().Compile(src, new CSharpEmitter());
-        var e = result.Files.Single(f => f.RelativePath == "C/E.cs").Contents;
+        var e = result.Files.Single(f => f.RelativePath == "C/Entities/E.cs").Contents;
         Assert.Contains("public E(", e);
         Assert.DoesNotContain("private E(", e);
     }

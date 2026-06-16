@@ -49,7 +49,7 @@ public class R14IntegrationEventsTests
     public void Integration_event_emits_a_record_with_the_runtime_marker()
     {
         var (asm, files) = Build(PubSub);
-        Assert.Contains("public sealed record OrderPlaced : IIntegrationEvent", FileContents(files, "Sales/OrderPlaced.cs"));
+        Assert.Contains("public sealed record OrderPlaced : IIntegrationEvent", FileContents(files, "Sales/IntegrationEvents/OrderPlaced.cs"));
         Assert.Contains(files, f => f.RelativePath == "Koine/Runtime/IIntegrationEvent.cs");
         Assert.NotNull(asm.GetType("Sales.OrderPlaced"));
         Assert.NotNull(asm.GetType("Koine.Runtime.IIntegrationEvent"));
@@ -66,7 +66,7 @@ public class R14IntegrationEventsTests
     public void Subscriber_gets_a_handler_interface_with_a_precise_publisher_using()
     {
         var (asm, files) = Build(PubSub);
-        var handler = FileContents(files, "Shipping/IHandleOrderPlaced.cs");
+        var handler = FileContents(files, "Shipping/Abstractions/IHandleOrderPlaced.cs");
         Assert.Contains("public interface IHandleOrderPlaced", handler);
         // The event type is fully-qualified with the publisher namespace (so it cannot bind to a
         // same-named local integration event).
@@ -78,14 +78,14 @@ public class R14IntegrationEventsTests
     public void A_publish_only_context_gets_no_handler()
     {
         var (_, files) = Build(PubSub);
-        Assert.DoesNotContain(files, f => f.RelativePath == "Sales/IHandleOrderPlaced.cs");
+        Assert.DoesNotContain(files, f => f.RelativePath == "Sales/Abstractions/IHandleOrderPlaced.cs");
     }
 
     [Fact]
     public void A_subscriber_does_not_re_emit_the_publishers_event_record()
     {
         var (_, files) = Build(PubSub);
-        Assert.DoesNotContain(files, f => f.RelativePath == "Shipping/OrderPlaced.cs");
+        Assert.DoesNotContain(files, f => f.RelativePath == "Shipping/IntegrationEvents/OrderPlaced.cs");
     }
 
     [Fact]
@@ -96,7 +96,7 @@ public class R14IntegrationEventsTests
               module Contracts { integration event OrderPlaced { orderId: OrderId } }
             }
             """);
-        Assert.Contains("namespace Sales.Contracts;", FileContents(files, "Sales/Contracts/OrderPlaced.cs"));
+        Assert.Contains("namespace Sales.Contracts;", FileContents(files, "Sales/Contracts/IntegrationEvents/OrderPlaced.cs"));
         Assert.NotNull(asm.GetType("Sales.Contracts.OrderPlaced"));
     }
 
@@ -257,7 +257,7 @@ public class R14IntegrationEventsTests
             new SourceFile("sales.koi", "context Sales {\n  publishes OrderPlaced\n  integration event OrderPlaced { orderId: OrderId }\n}\n"),
             new SourceFile("shipping.koi", "context Shipping {\n  subscribes Sales.OrderPlaced\n}\n"),
             new SourceFile("map.koi", "contextmap {\n  Sales -> Shipping : open-host\n}\n"));
-        Assert.Contains(files, f => f.RelativePath == "Shipping/IHandleOrderPlaced.cs");
+        Assert.Contains(files, f => f.RelativePath == "Shipping/Abstractions/IHandleOrderPlaced.cs");
     }
 
     [Fact]

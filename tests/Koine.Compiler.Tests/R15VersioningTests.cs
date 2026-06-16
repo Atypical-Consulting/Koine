@@ -41,7 +41,7 @@ public class R15VersioningTests
             }
             """);
         // Nothing about the version leaks into the C# type itself.
-        Assert.Contains("public sealed class Money", FileContents(files, "Sales/Money.cs"));
+        Assert.Contains("public sealed class Money", FileContents(files, "Sales/ValueObjects/Money.cs"));
     }
 
     [Fact]
@@ -82,7 +82,7 @@ public class R15VersioningTests
               }
             }
             """);
-        var money = FileContents(files, "Sales/Money.cs");
+        var money = FileContents(files, "Sales/ValueObjects/Money.cs");
         Assert.Contains("[Obsolete(\"use amount\")]", money);
         Assert.Contains("using System;", money);
     }
@@ -95,7 +95,7 @@ public class R15VersioningTests
               @deprecated("use Money") value OldMoney { amount: Decimal }
             }
             """);
-        Assert.Contains("[Obsolete(\"use Money\")]\npublic sealed class OldMoney", FileContents(files, "Sales/OldMoney.cs"));
+        Assert.Contains("[Obsolete(\"use Money\")]\npublic sealed class OldMoney", FileContents(files, "Sales/ValueObjects/OldMoney.cs"));
     }
 
     [Fact]
@@ -111,7 +111,7 @@ public class R15VersioningTests
               }
             }
             """);
-        Assert.Contains("[Obsolete(\"use total\")]", FileContents(files, "Sales/OrderPlaced.cs"));
+        Assert.Contains("[Obsolete(\"use total\")]", FileContents(files, "Sales/IntegrationEvents/OrderPlaced.cs"));
     }
 
     [Fact]
@@ -125,7 +125,7 @@ public class R15VersioningTests
               }
             }
             """);
-        Assert.Contains("[Obsolete(\"use \\\"amount\\\" instead\")]", FileContents(files, "Sales/Money.cs"));
+        Assert.Contains("[Obsolete(\"use \\\"amount\\\" instead\")]", FileContents(files, "Sales/ValueObjects/Money.cs"));
     }
 
     [Fact]
@@ -136,7 +136,7 @@ public class R15VersioningTests
               value Money { amount: Decimal }
             }
             """);
-        Assert.DoesNotContain("[Obsolete", FileContents(files, "Sales/Money.cs"));
+        Assert.DoesNotContain("[Obsolete", FileContents(files, "Sales/ValueObjects/Money.cs"));
     }
 
     // ---- glossary ----------------------------------------------------------
