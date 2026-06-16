@@ -183,7 +183,7 @@ public class GeneratedCodeTests
         var result = new KoineCompiler().Compile(src, new CSharpEmitter());
         Assert.True(result.Success, string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
 
-        var quote = result.Files.Single(f => f.RelativePath == "Sales/Quote.cs").Contents;
+        var quote = result.Files.Single(f => f.RelativePath == "Sales/ValueObjects/Quote.cs").Contents;
         Assert.Contains("using Shared;", quote);
 
         var (asm, errors) = TestSupport.Compile(result.Files);

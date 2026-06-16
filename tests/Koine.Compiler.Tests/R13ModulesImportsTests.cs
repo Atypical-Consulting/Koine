@@ -80,7 +80,7 @@ public class R13ModulesImportsTests
     public void Named_import_resolves_and_emits_a_precise_using()
     {
         var (_, files) = Build(Shared + "context Sales {\n  import Billing.{ Money }\n  value Quote { price: Money }\n}\n");
-        Assert.Contains("using Billing;", FileContents(files, "Sales/Quote.cs"));
+        Assert.Contains("using Billing;", FileContents(files, "Sales/ValueObjects/Quote.cs"));
     }
 
     [Fact]
@@ -93,7 +93,7 @@ public class R13ModulesImportsTests
     public void Qualified_reference_resolves_without_an_import_and_emits_fully_qualified()
     {
         var (_, files) = Build(Shared + "context Sales {\n  value Quote { price: Billing.Money }\n}\n");
-        var quote = FileContents(files, "Sales/Quote.cs");
+        var quote = FileContents(files, "Sales/ValueObjects/Quote.cs");
         Assert.Contains("Billing.Money Price", quote);
         Assert.DoesNotContain("using Billing;", quote); // fully-qualified needs no using
     }
@@ -141,7 +141,7 @@ public class R13ModulesImportsTests
             """;
         Assert.Empty(Diagnose(src));
         var (_, files) = Build(src);
-        Assert.Contains("M.Amount", FileContents(files, "A/Wallet.cs"));
+        Assert.Contains("M.Amount", FileContents(files, "A/ValueObjects/Wallet.cs"));
     }
 
     [Fact]
@@ -176,11 +176,11 @@ public class R13ModulesImportsTests
               module Pricing { value Money { amount: Decimal  currency: Currency } }
             }
             """);
-        Assert.Contains(files, f => f.RelativePath == "Billing/Pricing/Money.cs");
-        Assert.Contains("namespace Billing.Pricing;", FileContents(files, "Billing/Pricing/Money.cs"));
+        Assert.Contains(files, f => f.RelativePath == "Billing/Pricing/ValueObjects/Money.cs");
+        Assert.Contains("namespace Billing.Pricing;", FileContents(files, "Billing/Pricing/ValueObjects/Money.cs"));
         Assert.NotNull(asm.GetType("Billing.Pricing.Money"));
         // Currency is in the base namespace; the module file imports it precisely.
-        Assert.Contains("using Billing;", FileContents(files, "Billing/Pricing/Money.cs"));
+        Assert.Contains("using Billing;", FileContents(files, "Billing/Pricing/ValueObjects/Money.cs"));
     }
 
     [Fact]
@@ -192,7 +192,7 @@ public class R13ModulesImportsTests
               module Invoicing { entity Invoice identified by InvoiceId { total: Money } }
             }
             """);
-        var invoice = FileContents(files, "Billing/Invoicing/Invoice.cs");
+        var invoice = FileContents(files, "Billing/Invoicing/Entities/Invoice.cs");
         Assert.Contains("namespace Billing.Invoicing;", invoice);
         Assert.Contains("using Billing.Pricing;", invoice);
         Assert.NotNull(asm.GetType("Billing.Invoicing.Invoice"));
@@ -206,7 +206,7 @@ public class R13ModulesImportsTests
               module Outer { module Inner { value V { n: Int } } }
             }
             """);
-        Assert.Contains(files, f => f.RelativePath == "C/Outer/Inner/V.cs");
+        Assert.Contains(files, f => f.RelativePath == "C/Outer/Inner/ValueObjects/V.cs");
         Assert.NotNull(asm.GetType("C.Outer.Inner.V"));
     }
 
@@ -243,9 +243,9 @@ public class R13ModulesImportsTests
               }
             }
             """);
-        Assert.Contains(files, f => f.RelativePath == "Billing/Invoicing/IOrderRepository.cs");
-        Assert.Contains("Billing.Invoicing.IOrderRepository Orders { get; }", FileContents(files, "Billing/IUnitOfWork.cs"));
-        Assert.Contains(files, f => f.RelativePath == "Billing/OrderId.cs"); // ID in BASE namespace
+        Assert.Contains(files, f => f.RelativePath == "Billing/Invoicing/Repositories/IOrderRepository.cs");
+        Assert.Contains("Billing.Invoicing.IOrderRepository Orders { get; }", FileContents(files, "Billing/Abstractions/IUnitOfWork.cs"));
+        Assert.Contains(files, f => f.RelativePath == "Billing/ValueObjects/OrderId.cs"); // ID in BASE namespace
         Assert.NotNull(asm.GetType("Billing.Invoicing.Order"));
         Assert.NotNull(asm.GetType("Billing.IUnitOfWork"));
     }
@@ -263,7 +263,7 @@ public class R13ModulesImportsTests
               value Money { amount: Int }
             }
             """);
-        Assert.Contains("public sealed record MoneyView(decimal Amount);", FileContents(files, "A/MoneyView.cs"));
+        Assert.Contains("public sealed record MoneyView(decimal Amount);", FileContents(files, "A/ReadModels/MoneyView.cs"));
     }
 
     [Fact]
