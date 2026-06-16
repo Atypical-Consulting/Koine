@@ -1,18 +1,38 @@
 # Koine
 
-**Koine** is a domain-specific language for **Domain-Driven Design**. You write the *ubiquitous
-language* of a domain once, in `.koi` files, and the Koine compiler generates the idiomatic,
-boilerplate-heavy tactical code — value objects, entities, aggregates, invariants — in a target
-language.
+> Write the *ubiquitous language* of your domain once, in `.koi` files — Koine compiles it to
+> idiomatic, self-contained C#.
+
+[![Documentation](https://img.shields.io/badge/docs-koine-3245b8)](https://atypical-consulting.github.io/Koine/)
+[![.NET](https://img.shields.io/badge/.NET-10-512BD4)](https://dotnet.microsoft.com/)
+[![Tests](https://img.shields.io/badge/tests-450%20passing-2ea44f)](tests/)
+![Target](https://img.shields.io/badge/emits-C%23-178600)
+
+**Koine** is a domain-specific language for **Domain-Driven Design**. Instead of hand-writing the
+boilerplate-heavy tactical code — value objects, entities, aggregates, invariants, repositories — you
+describe a bounded context in a small, readable DSL and the Koine compiler generates it for you.
 
 The name evokes Koine Greek, the *common* language that became a lingua franca. The long-term goal
 is to compile one domain model to many targets (C#, TypeScript, Rust). **This release targets C#
 only**, but the architecture keeps the parser and semantic model strictly target-agnostic so a second
 emitter can be added without touching them.
 
-📖 **Documentation:** the full guide — getting started, tutorials, a complete language reference,
-the feature catalogue, and the CLI — lives at **<https://atypical-consulting.github.io/Koine/>**
-(source in [`website/`](website/); run it locally with `cd website && npm install && npm run dev`).
+📖 **Read the docs → <https://atypical-consulting.github.io/Koine/>** — getting started, a six-part
+tutorial, a complete language reference, the feature catalogue, and the CLI. (Source in
+[`website/`](website/); run locally with `cd website && npm install && npm run dev`.)
+
+## Why Koine?
+
+- **One source of truth.** The model *is* the ubiquitous language — no drift between the glossary
+  and the code.
+- **Idiomatic, dependency-free output.** Generated C# is plain, readable, and self-contained; the
+  `Koine.Runtime` markers are emitted alongside it, so there's nothing to reference.
+- **The whole tactical *and* strategic toolkit.** Value objects, entities, aggregates, smart enums,
+  invariants, commands, domain events, state machines, factories, specifications, services,
+  policies, repositories, optimistic concurrency, the application layer (UoW, read models, CQRS),
+  multi-file modules, context maps, integration events, and model versioning — all shipped.
+- **A green build proves the domain.** The emitted code is snapshot- and Roslyn-compile-tested; a
+  passing build means a correct, usable domain.
 
 ---
 
@@ -231,13 +251,17 @@ this lets a regex literal be read as a single token without colliding with the `
 
 ## Status
 
-Epics 0–5 of the brief are implemented: scaffold & pipeline, value objects (incl. regex invariants),
-entities & identity, aggregates/enums/derived fields, semantics & diagnostics, and codegen/CLI ergonomics.
+Shipped through **epic R15** of the roadmap — the full tactical *and* strategic DDD toolkit on a C#
+emitter. The [feature catalogue](https://atypical-consulting.github.io/Koine/guides/feature-catalogue/)
+maps every construct (R1–R15) to the C# it emits. Next up is R16 (multi-target emitters: C# config,
+TypeScript, Rust) — see [`USER-STORIES.md`](USER-STORIES.md).
 
 ## Demo
 
-[`demo/`](demo/) models a small Shop domain across three bounded contexts and consumes the
-generated C# from a real .NET project (`dotnet build demo/Shop.Domain` regenerates and compiles it).
+[`demo/`](demo/) models a Shop domain across **six bounded contexts** tied together by a context map,
+and consumes the generated C# from a real .NET project (`dotnet build demo/Shop.Domain` regenerates
+and compiles it). Between the `.koi` models and `Samples.cs` it exercises **every shipped feature
+(R1–R15)** — see [`demo/README.md`](demo/README.md) for the full feature-to-location map.
 
 ## Editor support
 
