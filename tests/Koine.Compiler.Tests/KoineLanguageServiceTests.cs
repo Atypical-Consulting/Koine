@@ -131,6 +131,22 @@ public class KoineLanguageServiceTests
     }
 
     [Fact]
+    public void Expression_position_offers_specs_of_the_enclosing_type()
+    {
+        var src =
+            "context C {\n" +
+            "  value Basket {\n" +
+            "    n: Int\n" +
+            "    invariant n > 0 && I\n" +
+            "  }\n" +
+            "  spec IsBig on Basket = n > 5\n" +
+            "}\n";
+        var items = Complete(src, line: 3, ch: 24); // after "&& I"
+        var spec = Assert.Single(items, i => i.Label == "IsBig");
+        Assert.Equal(CompletionItemKind.Method, spec.Kind);
+    }
+
+    [Fact]
     public void Field_completion_does_not_fire_at_a_type_position()
     {
         // After ':' the type list — not field names — must be offered (no Field-kind noise).
