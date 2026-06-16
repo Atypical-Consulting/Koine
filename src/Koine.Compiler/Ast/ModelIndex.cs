@@ -128,7 +128,7 @@ public sealed class ModelIndex
             _contextNames.Add(ctx.Name);
             var nsByType = new Dictionary<string, string>(StringComparer.Ordinal);
             var declsByType = new Dictionary<string, TypeDecl>(StringComparer.Ordinal);
-            foreach (var t in FlattenTypes(ctx))
+            foreach (var t in ctx.AllTypeDecls())
             {
                 var ns = NamespaceOf(ctx.Name, t.ModulePath);
                 nsByType[t.Name] = ns;
@@ -197,7 +197,7 @@ public sealed class ModelIndex
                 if ((_idTypeNames.Contains(name) || IsIdConvention(name)) && !nsByType.ContainsKey(name))
                     nsByType[name] = ctx.Name;
             }
-            foreach (var t in FlattenTypes(ctx))
+            foreach (var t in ctx.AllTypeDecls())
                 if (t is EntityDecl e)
                     NoteId(e.IdentityName);
             foreach (var tr in AllTypeRefsIn(ctx))
@@ -344,7 +344,7 @@ public sealed class ModelIndex
     /// </summary>
     public static IEnumerable<TypeRef> AllTypeRefsIn(ContextNode ctx)
     {
-        foreach (var t in FlattenTypes(ctx))
+        foreach (var t in ctx.AllTypeDecls())
         {
             switch (t)
             {
@@ -394,17 +394,6 @@ public sealed class ModelIndex
                 if (uc.ReturnType is not null) yield return uc.ReturnType;
                 foreach (var p in uc.Parameters) yield return p.Type;
             }
-        }
-    }
-
-    private static IEnumerable<TypeDecl> FlattenTypes(ContextNode ctx)
-    {
-        foreach (var t in ctx.Types)
-        {
-            yield return t;
-            if (t is AggregateDecl agg)
-                foreach (var nested in agg.Types)
-                    yield return nested;
         }
     }
 

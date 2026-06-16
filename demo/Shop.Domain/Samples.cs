@@ -25,7 +25,7 @@ public static class Samples
 
         var product = new Catalog.Product(
             new Catalog.ProductCode("KEYBOARD-01"),             // natural string key (no New())
-            new Catalog.Sku("  abc-1234  "),                    // normalized => "ABC-1234"
+            new Catalog.Sku("ABC-1234"),                        // raw passes /^[A-Z]{3}-[0-9]{4}$/; Normalized => "ABC-1234"
             "Mechanical Keyboard",
             new Catalog.Price(129.95m, Kernel.Currency.EUR),    // Currency is a shared-kernel enum
             new Catalog.Weight(1.1m, Catalog.MassUnit.Kilogram),
@@ -40,7 +40,7 @@ public static class Samples
         _ = product.Summary;                    // description ?? name
         _ = product.IsAvailable;                // availability == InStock
         _ = product.OnSale;                     // sale.isPresent => true
-        return product;
+        return product;                         // Program.cs asserts these outcomes
     }
 
     /// <summary>

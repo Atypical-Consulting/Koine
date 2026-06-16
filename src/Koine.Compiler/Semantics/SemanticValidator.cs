@@ -117,7 +117,7 @@ public sealed class SemanticValidator
         // 2. A module name must not collide with a type name in the same context.
         if (ctx.ModuleNames.Count > 0)
         {
-            var typeNames = new HashSet<string>(FlattenTypeDecls(ctx).Select(t => t.Name), StringComparer.Ordinal);
+            var typeNames = new HashSet<string>(ctx.AllTypeDecls().Select(t => t.Name), StringComparer.Ordinal);
             foreach (var module in ctx.ModuleNames)
                 if (typeNames.Contains(module))
                     diagnostics.Add(Diagnostic.Error(DiagnosticCodes.ModuleNameCollision,
@@ -188,18 +188,6 @@ public sealed class SemanticValidator
             ValidateReference(fromContext, tr.Element, index, diagnostics);
         if (tr.Value is not null)
             ValidateReference(fromContext, tr.Value, index, diagnostics);
-    }
-
-    /// <summary>Every type a context declares, flattening modules (already in Types) and aggregates' nested types.</summary>
-    private static IEnumerable<TypeDecl> FlattenTypeDecls(ContextNode ctx)
-    {
-        foreach (var t in ctx.Types)
-        {
-            yield return t;
-            if (t is AggregateDecl agg)
-                foreach (var nested in agg.Types)
-                    yield return nested;
-        }
     }
 
     // ------------------------------------------------------------------------
@@ -313,7 +301,7 @@ public sealed class SemanticValidator
         ContextNode ctx, ModelIndex index, bool hasContextMap, List<Diagnostic> diagnostics)
     {
         // 1. Field-type leak check (KOI1409).
-        foreach (var decl in FlattenTypeDecls(ctx))
+        foreach (var decl in ctx.AllTypeDecls())
             if (decl is IntegrationEventDecl ev)
                 foreach (var m in ev.Members)
                     CheckIntegrationEventFieldType(ctx.Name, m.Type, index, diagnostics);
@@ -412,7 +400,7 @@ public sealed class SemanticValidator
         foreach (var ctx in model.Contexts)
         {
             var seen = new HashSet<string>(StringComparer.Ordinal);
-            foreach (var type in Flatten(ctx))
+            foreach (var type in ctx.AllTypeDecls())
             {
                 if (reserved.Contains(type.Name))
                     diagnostics.Add(Diagnostic.Error(DiagnosticCodes.ReservedTypeName,
@@ -427,17 +415,6 @@ public sealed class SemanticValidator
                 if (!seen.Add(svc.Name))
                     diagnostics.Add(Diagnostic.Error(DiagnosticCodes.DuplicateType,
                         $"service '{svc.Name}' collides with a type or service of the same name", svc.Span));
-        }
-    }
-
-    private static IEnumerable<TypeDecl> Flatten(ContextNode ctx)
-    {
-        foreach (var t in ctx.Types)
-        {
-            yield return t;
-            if (t is AggregateDecl agg)
-                foreach (var nested in agg.Types)
-                    yield return nested;
         }
     }
 
@@ -994,7 +971,7 @@ public sealed class SemanticValidator
     {
         if (!agg.IsVersioned)
             return;
-        var root = agg.Types.OfType<EntityDecl>().FirstOrDefault(e => e.Name == agg.RootName);
+        var root = agg.RootEntity();
         if (root is null)
             return;
         foreach (var m in root.Members)
@@ -1447,7 +1424,7 @@ public sealed class SemanticValidator
         return decl switch
         {
             EntityDecl e => e,
-            AggregateDecl agg => agg.Types.OfType<EntityDecl>().FirstOrDefault(en => en.Name == agg.RootName),
+            AggregateDecl agg => agg.RootEntity(),
             _ => null
         };
     }

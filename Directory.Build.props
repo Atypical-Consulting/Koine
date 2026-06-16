@@ -1,0 +1,25 @@
+<Project>
+
+  <!-- Shared properties for every project in the repo. -->
+  <!-- Note: TreatWarningsAsErrors is intentionally NOT set — the generated demo
+       code (demo/Shop.Domain) may emit warnings and must still build. -->
+
+  <PropertyGroup>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <Deterministic>true</Deterministic>
+  </PropertyGroup>
+
+  <!-- Version / packaging metadata, shared so the CLI tool packs consistently. -->
+  <PropertyGroup>
+    <Version>0.17.3</Version>
+    <!-- Carries the real version into the assembly so the CLI version command can read it
+         (the four-part AssemblyVersion otherwise reports 1.0.0.0). -->
+    <InformationalVersion>0.17.3</InformationalVersion>
+    <Authors>Philippe Matray</Authors>
+    <Company>Atypical Consulting</Company>
+    <RepositoryUrl>https://github.com/Atypical-Consulting/Koine</RepositoryUrl>
+  </PropertyGroup>
+
+</Project>

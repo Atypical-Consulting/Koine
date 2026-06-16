@@ -1,10 +1,19 @@
 using System.Text;
+using Antlr4.Runtime;
 using Koine.Compiler.Ast;
+using Koine.Compiler.Grammar;
 
 namespace Koine.Compiler.Services;
 
 /// <summary>The file URI and 1-based span of a resolved declaration.</summary>
 public sealed record DeclLocation(string Uri, SourceSpan Span);
+
+/// <summary>
+/// One reference to a name: its file URI plus the 1-based line and 0-based start/end
+/// columns of the identifier token (a half-open <c>[StartColumn, EndColumn)</c> range,
+/// so editors can highlight or rename the exact identifier).
+/// </summary>
+public sealed record Reference(string Uri, int Line, int StartColumn, int EndColumn);
 
 /// <summary>
 /// A workspace-wide declaration index built from a <c>uri → source</c> map. Each
@@ -14,12 +23,14 @@ public sealed record DeclLocation(string Uri, SourceSpan Span);
 public sealed class WorkspaceIndex
 {
     private readonly Dictionary<string, ModelIndex> _byUri = new(StringComparer.Ordinal);
+    private readonly IReadOnlyDictionary<string, string> _documents;
 
     public WorkspaceIndex(IReadOnlyDictionary<string, string> documents)
     {
         // Re-parses every document eagerly. A fresh index is built per hover/definition
         // request today — fine at human (on-demand) speed; TODO: cache per (uri, content)
         // if this is ever wired to a per-keystroke feature.
+        _documents = documents;
         var compiler = new KoineCompiler();
         foreach (var (uri, text) in documents)
         {
@@ -83,6 +94,53 @@ public sealed class WorkspaceIndex
             return owner.Span;
 
         return null;
+    }
+
+    /// <summary>
+    /// Every reference to <paramref name="name"/> across the workspace: each identifier
+    /// token whose text equals the name, in any file. References are only returned when
+    /// the name resolves to a strong declaration (a declared type, an unambiguous enum
+    /// member, or a spec) somewhere in the workspace — otherwise the result is empty, so a
+    /// random local variable never reports spurious "references". Koine type/enum/spec
+    /// names are flat and globally unique within a model, so a token-text match is a
+    /// faithful reference set; member-access selectors on unrelated receivers are the only
+    /// possible false positive and are rare in practice.
+    /// </summary>
+    public IReadOnlyList<Reference> FindReferences(string activeUri, string name)
+    {
+        if (!IsRenameableName(activeUri, name))
+            return Array.Empty<Reference>();
+
+        var refs = new List<Reference>();
+        foreach (var (uri, text) in _documents)
+            foreach (var tok in IdentifierTokens(text))
+                if (string.Equals(tok.Text, name, StringComparison.Ordinal))
+                    refs.Add(new Reference(uri, tok.Line, tok.Column, tok.Column + (tok.Text?.Length ?? 0)));
+        return refs;
+    }
+
+    /// <summary>
+    /// True when <paramref name="name"/> names a strong, renameable declaration somewhere in
+    /// the workspace (a declared type, an unambiguous enum member, or a spec) — the gate for
+    /// both find-references and rename.
+    /// </summary>
+    public bool IsRenameableName(string activeUri, string name) =>
+        _byUri.Values.Any(index => StrongSpan(index, name) is not null);
+
+    /// <summary>Validates a proposed rename target against the lexer's <c>Identifier</c> rule (<c>[a-zA-Z_]\w*</c>).</summary>
+    public static bool IsValidIdentifier(string name) =>
+        name.Length > 0
+        && (char.IsLetter(name[0]) || name[0] == '_')
+        && name.All(c => char.IsLetterOrDigit(c) || c == '_');
+
+    /// <summary>The default-channel <see cref="KoineLexer.Identifier"/> tokens of a source (skips strings, regex, comments).</summary>
+    private static IEnumerable<IToken> IdentifierTokens(string source)
+    {
+        var lexer = new KoineLexer(new AntlrInputStream(source));
+        lexer.RemoveErrorListeners();
+        foreach (var t in lexer.GetAllTokens())
+            if (t.Type == KoineLexer.Identifier)
+                yield return t;
     }
 
     /// <summary>

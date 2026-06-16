@@ -89,6 +89,8 @@ public sealed class Invoice
     public bool Equals(Invoice? other) => other is not null && Id.Equals(other.Id);
     public override bool Equals(object? obj) => Equals(obj as Invoice);
     public override int GetHashCode() => Id.GetHashCode();
+    public static bool operator ==(Invoice? left, Invoice? right) => left is null ? right is null : left.Equals(right);
+    public static bool operator !=(Invoice? left, Invoice? right) => !(left == right);
 }
 
 // ==== Billing/Pricing/Money.cs ====
@@ -251,6 +253,8 @@ public sealed class Quote
     public bool Equals(Quote? other) => other is not null && Id.Equals(other.Id);
     public override bool Equals(object? obj) => Equals(obj as Quote);
     public override int GetHashCode() => Id.GetHashCode();
+    public static bool operator ==(Quote? left, Quote? right) => left is null ? right is null : left.Equals(right);
+    public static bool operator !=(Quote? left, Quote? right) => !(left == right);
 }
 
 // ==== Sales/QuoteId.cs ====

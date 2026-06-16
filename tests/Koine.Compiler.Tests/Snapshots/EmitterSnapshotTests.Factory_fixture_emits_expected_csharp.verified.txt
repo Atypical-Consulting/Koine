@@ -203,7 +203,7 @@ public sealed class Order : IAggregateRoot
 
         Id = id;
         Customer = customer;
-        Lines = new List<OrderLine>(lines);
+        Lines = new List<OrderLine>(lines).AsReadOnly();
         Status = status;
     }
 
@@ -228,6 +228,8 @@ public sealed class Order : IAggregateRoot
     public bool Equals(Order? other) => other is not null && Id.Equals(other.Id);
     public override bool Equals(object? obj) => Equals(obj as Order);
     public override int GetHashCode() => Id.GetHashCode();
+    public static bool operator ==(Order? left, Order? right) => left is null ? right is null : left.Equals(right);
+    public static bool operator !=(Order? left, Order? right) => !(left == right);
 }
 
 // ==== Sales/OrderId.cs ====

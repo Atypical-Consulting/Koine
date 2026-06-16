@@ -15,9 +15,17 @@ demo/Shop.Domain/
 │   ├── payments.koi        #   Payments : Payment + Ledger aggregates; a policy; an ACL target
 │   ├── legacy.koi          #   Legacy   : an external gateway, fronted by an anti-corruption layer
 │   └── context-map.koi     #   the strategic map: shared kernel, conformist, open-host, ACL, …
-├── Samples.cs              # hand-written code that USES the generated types
+├── Samples.cs              # hand-written builders that USE the generated types
+├── Consumers.cs            # hand-written adapters that IMPLEMENT the emitted seams
+│                           #   (repository, app service, query handler, subscriber, policy, ACL)
+├── Program.cs              # runnable entry point: drives every sample and ASSERTS the outcomes
 ├── Generated/              # produced on build (git-ignored)
 └── Shop.Domain.csproj      # regenerates + compiles the .koi models on every build
+
+demo/reference/             # generated artifacts committed for reference (see its README):
+├── shop.glossary.md        #   the ubiquitous-language glossary
+├── koine-check.txt         #   a literal `koine check` transcript
+└── emitted-cs/*.cs.txt     #   a couple of representative emitted C# files
 ```
 
 ## Run it
@@ -27,6 +35,9 @@ demo/Shop.Domain/
 dotnet build demo/Shop.Domain/Shop.Domain.csproj
 # …or the whole solution (the demo is part of Koine.slnx)
 dotnet build
+# …or RUN it — Program.cs drives every sample and asserts the documented outcomes
+# (a failed assertion exits non-zero), so a clean run is a self-checking proof:
+dotnet run --project demo/Shop.Domain
 ```
 
 The project's `KoineGenerate` MSBuild target runs the `koine` CLI over the **whole `Models/`
@@ -143,6 +154,27 @@ dotnet run --project src/Koine.Cli -- check examples/versioning/v2 --baseline ex
 
 `koine check` only flags changes to **published** surfaces (integration events, shared-kernel
 types, open-host value objects); internal refactors are ignored.
+
+## Editor tooling (R17)
+
+The same CLI that builds the model also formats, scaffolds, and watches it — the
+building blocks the editor integration (grammar + LSP) is built on. Run these from
+`demo/Shop.Domain` (paths are relative to it):
+
+```bash
+# Canonically format the models in place (or --check to verify only, in CI):
+dotnet run --project ../../src/Koine.Cli -- fmt Models
+dotnet run --project ../../src/Koine.Cli -- fmt Models --check
+
+# Scaffold a fresh starter project (drop --force to avoid overwriting):
+dotnet run --project ../../src/Koine.Cli -- init /tmp/my-shop
+
+# Rebuild the whole Models/ directory on every save:
+dotnet run --project ../../src/Koine.Cli -- watch Models --out Generated
+```
+
+> R16 multi-target emitters (TypeScript/SQL/… beyond C#) are **deferred**; today the
+> only `--target` is `csharp` (plus the `glossary` output above).
 
 ## Diagnostics quality
 

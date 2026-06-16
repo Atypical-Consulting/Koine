@@ -1,10 +1,10 @@
 ---
-title: "Feature catalogue (R1–R15)"
+title: "Feature catalogue (R1–R17)"
 description: "Every shipped Koine construct mapped to its .koi syntax, what it emits, and where the demo uses it."
 ---
 
-This is the everything-at-a-glance page: every construct Koine ships through epic **R15**, the short
-`.koi` syntax for it, the C# (or Markdown) it emits, and a pointer into the canonical
+This is the everything-at-a-glance page: every construct Koine ships through epic **R15** — plus the
+**R17 developer tooling** — the short `.koi` syntax for it, the C# (or Markdown) it emits, and a pointer into the canonical
 [Shop demo](https://github.com/Atypical-Consulting/Koine/tree/main/demo). Tables are grouped by epic.
 Each family links to its reference page for the full story.
 
@@ -192,6 +192,27 @@ See [model versioning](/Koine/reference/versioning/) and the
 `koine check` only flags changes to **published** surfaces — integration events, shared-kernel types, and
 open-host value objects. Internal refactors are ignored. Adding an optional field (`note: String?`) is
 non-breaking; removing a published field or making it required is breaking.
+:::
+
+## Developer tooling (R17)
+
+Not language constructs, but the commands and editor support that make `.koi` pleasant to write. See
+the [CLI reference](/Koine/guides/cli/) and [editor tooling](/Koine/guides/editor-tooling/).
+
+| Tool | Invocation | What it does | Reference |
+|---|---|---|---|
+| Formatter | `koine fmt <path> [--check]` | Canonically, idempotently reformats `.koi` in place; `--check` verifies without writing (CI gate) | [CLI](/Koine/guides/cli/#koine-fmt) |
+| Project scaffold | `koine init [dir] [--force]` | Writes a buildable starter `domain.koi`, `koine.config`, and `README.md`; `--force` overwrites | [CLI](/Koine/guides/cli/#koine-init) |
+| Watch mode | `koine watch <path> [--out <dir>]` | Re-emits (or re-validates) on every `.koi` change with debounced fast feedback | [CLI](/Koine/guides/cli/#koine-watch) |
+| Language server | `koine lsp` | LSP over stdio: live diagnostics, hover, completion, and cross-file go-to-definition | [Editor tooling](/Koine/guides/editor-tooling/) |
+| TextMate grammar | (editor extension) | Syntax highlighting for `.koi` in VS Code and Rider | [Editor tooling](/Koine/guides/editor-tooling/) |
+
+:::tip[Optionality is a feature, not a footnote]
+Null-safety is a deliberate strength of the model, not an afterthought. A field is required by default;
+you opt into absence explicitly with `?` (`description: String?`), and the emitted C# carries that
+through as a nullable property with `??` and `.isPresent` support. Because optionality is part of the
+*published* surface, `koine check` treats making a field required (or removing an optional one) as a
+breaking change — so the model and the contract stay honest about what may legitimately be missing.
 :::
 
 ## See also
