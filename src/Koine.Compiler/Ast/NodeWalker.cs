@@ -27,7 +27,7 @@ internal static class NodeWalker
         }
     }
 
-    private static IEnumerable<KoineNode> ChildNodes(KoineNode node)
+    internal static IEnumerable<KoineNode> ChildNodes(KoineNode node)
     {
         foreach (PropertyInfo prop in PropertiesFor(node.GetType()))
         {
