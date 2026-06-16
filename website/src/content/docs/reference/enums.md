@@ -44,6 +44,11 @@ public sealed class OrderStatus : IEquatable<OrderStatus>
 
     public static OrderStatus FromName(string name) => /* ... */;
     public static OrderStatus FromValue(int value) => /* ... */;
+    public static bool TryFromName(string name, out OrderStatus result) => /* ... */;
+    public static bool TryFromValue(int value, out OrderStatus result) => /* ... */;
+
+    public TResult Match<TResult>(Func<TResult> draft, Func<TResult> submitted, /* … */) => /* ... */;
+    public void Switch(Action draft, Action submitted, /* … */) => /* ... */;
 
     public override string ToString() => Name;
     public bool Equals(OrderStatus? other) => other is not null && Value == other.Value;
@@ -64,6 +69,10 @@ public sealed class OrderStatus : IEquatable<OrderStatus>
 | `All` | an `IReadOnlyList<T>` of every member, in declaration order |
 | `FromName(string)` | look up by name; throws `ArgumentOutOfRangeException` if unknown |
 | `FromValue(int)` | look up by ordinal; throws `ArgumentOutOfRangeException` if unknown |
+| `TryFromName(string, out T)` | non-throwing name lookup; returns `false` (and `null`) if unknown |
+| `TryFromValue(int, out T)` | non-throwing ordinal lookup; returns `false` (and `null`) if unknown |
+| `Match<TResult>(…)` | exhaustive: one `Func<TResult>` per member, returns the matched arm's result |
+| `Switch(…)` | exhaustive: one `Action` per member, runs the matched arm |
 | `Equals` / `GetHashCode` | value equality on `Value` |
 | `==` / `!=` | null-safe operators delegating to `Equals` |
 
@@ -71,6 +80,50 @@ public sealed class OrderStatus : IEquatable<OrderStatus>
 The constructor is `private`. Members are created once as static fields, so there is exactly one
 instance per value — reference equality and value equality coincide, and `==` is safe to use.
 :::
+
+## Parsing at a boundary: `TryFromName` / `TryFromValue`
+
+`FromName`/`FromValue` throw when the name or ordinal is unknown — correct for trusted internal
+calls. But an enum is exactly the type you parse at a boundary: rehydrating from a database, mapping
+a string off an HTTP or message-bus payload, validating user input. There, "unknown member" is
+expected control flow, not an exception. The `Try*` pair gives you the .NET-canonical shape (it
+mirrors `int.TryParse` / `Enum.TryParse`) without a `try`/`catch` on a hot path:
+
+```csharp
+if (OrderStatus.TryFromName(dto.Status, out var status))
+    order.SetStatus(status);
+else
+    return Result.Fail($"unknown status '{dto.Status}'");
+```
+
+On a miss they return `false` and set the `out` to `null`; on a hit they return `true` and bind the
+member. They ignore any associated-data signature, exactly like `FromName`/`FromValue`.
+
+## Exhaustive matching: `Match` / `Switch`
+
+Because each member is a `static readonly` instance rather than a compile-time constant, smart-enum
+members cannot appear as C# `case` labels. Instead, every enum emits an exhaustive `Match` (returns a
+value) and `Switch` (runs a side effect) — one delegate per member, in declaration order:
+
+```csharp
+decimal fee = order.Status.Match(
+    draft:     () => 0m,
+    submitted: () => 0m,
+    paid:      () => 1.5m,
+    shipped:   () => 1.5m,
+    cancelled: () => 0m);
+
+order.Status.Switch(
+    draft:     () => log.Info("still editable"),
+    submitted: () => notify.Pending(order),
+    paid:      () => ship.Enqueue(order),
+    shipped:   () => { },
+    cancelled: () => refund.Start(order));
+```
+
+The payoff is closed-set safety a C# `enum` cannot give: **adding a member adds a required delegate
+parameter, so every call site stops compiling until it handles the new case.** Delegate parameters
+are the camelCased member names (`OrderStatus.Draft` → `draft`).
 
 ## Members with associated data
 
@@ -172,6 +225,12 @@ Both `OrderStatus` and `RefundStatus` define `Cancelled`. The bare `Cancelled` o
 Cancelled` binds to `OrderStatus.Cancelled` because the left operand is an `OrderStatus`. When the
 target type is not obvious from context — or you simply prefer to be explicit — use the qualified
 `EnumName.Member` form.
+
+Resolution also flows from the **expected type** of the surrounding expression, not just a sibling
+operand. In a comparison whose other side is itself a bare member, or in a `??`/conditional branch
+feeding an enum-typed slot, the expected enum type disambiguates the bare member the same way. Only
+when no operand and no expected type pins the enum does Koine report the ambiguity (`KOI0213`) and
+ask you to qualify.
 
 :::tip
 Enum defaults read the same way: `status: OrderStatus = Draft` uses the bare member because the

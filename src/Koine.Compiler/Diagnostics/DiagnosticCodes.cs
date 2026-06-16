@@ -87,6 +87,8 @@ public static class DiagnosticCodes
     public const string RangeNotOrderable = "KOI0907";
     public const string ReservedTypeName = "KOI0908";
     public const string EnumAssociatedFieldType = "KOI0909";
+    public const string ReservedEnumMember = "KOI0910";
+    public const string EnumMemberCamelCaseCollision = "KOI0911";
 
     // ---- Specifications (KOI1000–1009) ------------------------------------
     public const string SpecUnknownTarget = "KOI1001";
@@ -224,6 +226,8 @@ public static class DiagnosticCodes
         [RangeNotOrderable] = "A Range's element type is not orderable (requires Int, Decimal, or Instant).",
         [ReservedTypeName] = "A type uses a name reserved for a built-in generic (List/Set/Map/Range).",
         [EnumAssociatedFieldType] = "An enum associated-data field must be String, Int, Decimal, or Bool.",
+        [ReservedEnumMember] = "An enum member name collides with a generated smart-enum member (Name/Value/All/FromName/FromValue/TryFromName/TryFromValue/Match/Switch/ToString/Equals/GetHashCode).",
+        [EnumMemberCamelCaseCollision] = "Two enum members differ only by leading-character case and would collapse to one Match/Switch parameter.",
         [SpecUnknownTarget] = "A spec's target is not a declared value or entity type.",
         [SpecTargetMismatch] = "A spec is referenced on a type that is not its declared target.",
         [SpecCycle] = "Specs form a reference cycle (or a spec references itself).",

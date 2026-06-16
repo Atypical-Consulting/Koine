@@ -120,7 +120,7 @@
       "patterns": [
         {
           "name": "keyword.control.koine",
-          "match": "\\b(identified|by|root|as|guid|sequence|natural|versioned|version|invariant|requires|emit|on|from|operations|import|publishes|subscribes|when|if|then|else|matches)\\b"
+          "match": "\\b(identified|by|root|as|guid|sequence|natural|versioned|version|invariant|requires|emit|on|from|operations|import|publishes|subscribes|when|if|then|else|matches|let|in|result)\\b"
         },
         {
           "name": "storage.type.koine",
@@ -134,7 +134,7 @@
     },
     "constants": {
       "name": "constant.language.koine",
-      "match": "\\b(true|false)\\b"
+      "match": "\\b(true|false|now)\\b"
     },
     "numbers": {
       "name": "constant.numeric.koine",

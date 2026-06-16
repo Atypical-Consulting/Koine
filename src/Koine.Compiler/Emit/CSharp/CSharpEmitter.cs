@@ -237,6 +237,52 @@ public sealed partial class CSharpEmitter : IEmitter
         sb.Append(Indent).Append(Indent).Append("?? throw new ArgumentOutOfRangeException(nameof(value), $\"No ")
           .Append(name).Append(" with value {value}.\");\n\n");
 
+        // Non-throwing lookups (the .NET-canonical Try* shape) for parsing at domain
+        // boundaries, where an unknown name/value is expected control flow, not an error.
+        sb.Append(Indent).Append("public static bool TryFromName(string name, out ").Append(name).Append(" result)\n");
+        sb.Append(Indent).Append("{\n");
+        sb.Append(Indent).Append(Indent).Append("result = All.FirstOrDefault(e => e.Name == name)!;\n");
+        sb.Append(Indent).Append(Indent).Append("return result is not null;\n");
+        sb.Append(Indent).Append("}\n\n");
+
+        sb.Append(Indent).Append("public static bool TryFromValue(int value, out ").Append(name).Append(" result)\n");
+        sb.Append(Indent).Append("{\n");
+        sb.Append(Indent).Append(Indent).Append("result = All.FirstOrDefault(e => e.Value == value)!;\n");
+        sb.Append(Indent).Append(Indent).Append("return result is not null;\n");
+        sb.Append(Indent).Append("}\n\n");
+
+        // Exhaustive Match/Switch: one delegate per member, dispatched on the ordinal.
+        // Adding a member becomes a compile error at every call site — the closed-set
+        // safety a C# `enum` cannot give.
+        var arms = @enum.Members.Select(m => CSharpNaming.ToCamelCase(m.Name)).ToList();
+
+        sb.Append(Indent).Append("public TResult Match<TResult>(\n");
+        for (var i = 0; i < arms.Count; i++)
+            sb.Append(Indent).Append(Indent).Append("Func<TResult> ").Append(arms[i])
+              .Append(i < arms.Count - 1 ? ",\n" : ") =>\n");
+        sb.Append(Indent).Append(Indent).Append("Value switch\n");
+        sb.Append(Indent).Append(Indent).Append("{\n");
+        for (var i = 0; i < arms.Count; i++)
+            sb.Append(Indent).Append(Indent).Append(Indent).Append(i).Append(" => ").Append(arms[i]).Append("(),\n");
+        sb.Append(Indent).Append(Indent).Append(Indent).Append("_ => throw new InvalidOperationException($\"Unhandled ")
+          .Append(name).Append(" '{Name}'.\")\n");
+        sb.Append(Indent).Append(Indent).Append("};\n\n");
+
+        sb.Append(Indent).Append("public void Switch(\n");
+        for (var i = 0; i < arms.Count; i++)
+            sb.Append(Indent).Append(Indent).Append("Action ").Append(arms[i])
+              .Append(i < arms.Count - 1 ? ",\n" : ")\n");
+        sb.Append(Indent).Append("{\n");
+        sb.Append(Indent).Append(Indent).Append("switch (Value)\n");
+        sb.Append(Indent).Append(Indent).Append("{\n");
+        for (var i = 0; i < arms.Count; i++)
+            sb.Append(Indent).Append(Indent).Append(Indent).Append("case ").Append(i).Append(": ")
+              .Append(arms[i]).Append("(); break;\n");
+        sb.Append(Indent).Append(Indent).Append(Indent).Append("default: throw new InvalidOperationException($\"Unhandled ")
+          .Append(name).Append(" '{Name}'.\");\n");
+        sb.Append(Indent).Append(Indent).Append("}\n");
+        sb.Append(Indent).Append("}\n\n");
+
         sb.Append(Indent).Append("public override string ToString() => Name;\n");
         sb.Append(Indent).Append("public bool Equals(").Append(name).Append("? other) => other is not null && Value == other.Value;\n");
         sb.Append(Indent).Append("public override bool Equals(object? obj) => Equals(obj as ").Append(name).Append(");\n");
