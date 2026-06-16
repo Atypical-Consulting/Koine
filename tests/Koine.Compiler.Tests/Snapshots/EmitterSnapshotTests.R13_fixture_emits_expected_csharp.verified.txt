@@ -25,13 +25,13 @@ public sealed class Currency : IEquatable<Currency>
 
     public static IReadOnlyList<Currency> All { get; } = new[] { EUR, USD };
 
-    public static Currency FromName(string name) =>
-        All.FirstOrDefault(e => e.Name == name)
-        ?? throw new ArgumentOutOfRangeException(nameof(name), $"No Currency with name '{name}'.");
+    public static Currency FromName(string name)
+        => All.FirstOrDefault(e => e.Name == name)
+            ?? throw new ArgumentOutOfRangeException(nameof(name), $"No Currency with name '{name}'.");
 
-    public static Currency FromValue(int value) =>
-        All.FirstOrDefault(e => e.Value == value)
-        ?? throw new ArgumentOutOfRangeException(nameof(value), $"No Currency with value {value}.");
+    public static Currency FromValue(int value)
+        => All.FirstOrDefault(e => e.Value == value)
+            ?? throw new ArgumentOutOfRangeException(nameof(value), $"No Currency with value {value}.");
 
     public static bool TryFromName(string name, out Currency result)
     {
@@ -47,8 +47,8 @@ public sealed class Currency : IEquatable<Currency>
 
     public TResult Match<TResult>(
         Func<TResult> eUR,
-        Func<TResult> uSD) =>
-        Value switch
+        Func<TResult> uSD)
+        => Value switch
         {
             0 => eUR(),
             1 => uSD(),
@@ -67,12 +67,18 @@ public sealed class Currency : IEquatable<Currency>
         }
     }
 
-    public override string ToString() => Name;
-    public bool Equals(Currency? other) => other is not null && Value == other.Value;
-    public override bool Equals(object? obj) => Equals(obj as Currency);
-    public override int GetHashCode() => Value;
-    public static bool operator ==(Currency? left, Currency? right) => left is null ? right is null : left.Equals(right);
-    public static bool operator !=(Currency? left, Currency? right) => !(left == right);
+    public override string ToString()
+        => Name;
+    public bool Equals(Currency? other)
+        => other is not null && Value == other.Value;
+    public override bool Equals(object? obj)
+        => Equals(obj as Currency);
+    public override int GetHashCode()
+        => Value;
+    public static bool operator ==(Currency? left, Currency? right)
+        => left is null ? right is null : left.Equals(right);
+    public static bool operator !=(Currency? left, Currency? right)
+        => !(left == right);
 }
 
 // ==== Billing/InvoiceId.cs ====
@@ -90,9 +96,11 @@ public sealed class InvoiceId : ValueObject
 {
     public Guid Value { get; }
 
-    public InvoiceId(Guid value) => Value = value;
+    public InvoiceId(Guid value)
+        => Value = value;
 
-    public static InvoiceId New() => new(Guid.NewGuid());
+    public static InvoiceId New()
+        => new(Guid.NewGuid());
 
     protected override IEnumerable<object?> GetEqualityComponents()
     {
@@ -120,11 +128,16 @@ public sealed class Invoice
         Total = total;
     }
 
-    public bool Equals(Invoice? other) => other is not null && Id.Equals(other.Id);
-    public override bool Equals(object? obj) => Equals(obj as Invoice);
-    public override int GetHashCode() => Id.GetHashCode();
-    public static bool operator ==(Invoice? left, Invoice? right) => left is null ? right is null : left.Equals(right);
-    public static bool operator !=(Invoice? left, Invoice? right) => !(left == right);
+    public bool Equals(Invoice? other)
+        => other is not null && Id.Equals(other.Id);
+    public override bool Equals(object? obj)
+        => Equals(obj as Invoice);
+    public override int GetHashCode()
+        => Id.GetHashCode();
+    public static bool operator ==(Invoice? left, Invoice? right)
+        => left is null ? right is null : left.Equals(right);
+    public static bool operator !=(Invoice? left, Invoice? right)
+        => !(left == right);
 }
 
 // ==== Billing/Pricing/Money.cs ====
@@ -148,7 +161,8 @@ public sealed class Money : ValueObject
         Currency = currency;
     }
 
-    public override string ToString() => $"Money {{ Amount = {Amount}, Currency = {Currency} }}";
+    public override string ToString()
+        => $"Money {{ Amount = {Amount}, Currency = {Currency} }}";
 
     protected override IEnumerable<object?> GetEqualityComponents()
     {
@@ -203,7 +217,9 @@ public abstract class ValueObject
     public override bool Equals(object? obj)
     {
         if (obj is null || obj.GetType() != GetType())
+        {
             return false;
+        }
         return GetEqualityComponents().SequenceEqual(((ValueObject)obj).GetEqualityComponents());
     }
 
@@ -215,18 +231,19 @@ public abstract class ValueObject
         return hash.ToHashCode();
     }
 
-    public static bool operator ==(ValueObject? left, ValueObject? right) =>
-        left is null ? right is null : left.Equals(right);
+    public static bool operator ==(ValueObject? left, ValueObject? right)
+        => left is null ? right is null : left.Equals(right);
 
-    public static bool operator !=(ValueObject? left, ValueObject? right) => !(left == right);
+    public static bool operator !=(ValueObject? left, ValueObject? right)
+        => !(left == right);
 
     /// <summary>Wraps an ordered collection (list) as a by-element equality component.</summary>
-    protected static object? Ordered(System.Collections.IEnumerable? items) =>
-        items is null ? null : new SequenceComponent(items, ordered: true);
+    protected static object? Ordered(System.Collections.IEnumerable? items)
+        => items is null ? null : new SequenceComponent(items, ordered: true);
 
     /// <summary>Wraps an unordered collection (set/map) as a by-element equality component.</summary>
-    protected static object? Unordered(System.Collections.IEnumerable? items) =>
-        items is null ? null : new SequenceComponent(items, ordered: false);
+    protected static object? Unordered(System.Collections.IEnumerable? items)
+        => items is null ? null : new SequenceComponent(items, ordered: false);
 
     private sealed class SequenceComponent
     {
@@ -242,7 +259,9 @@ public abstract class ValueObject
         public override bool Equals(object? obj)
         {
             if (obj is not SequenceComponent other || _items.Count != other._items.Count)
+            {
                 return false;
+            }
             return _ordered
                 ? _items.SequenceEqual(other._items)
                 : _items.All(x => _items.Count(i => Equals(i, x)) == other._items.Count(i => Equals(i, x)));
@@ -284,11 +303,16 @@ public sealed class Quote
         Freight = freight;
     }
 
-    public bool Equals(Quote? other) => other is not null && Id.Equals(other.Id);
-    public override bool Equals(object? obj) => Equals(obj as Quote);
-    public override int GetHashCode() => Id.GetHashCode();
-    public static bool operator ==(Quote? left, Quote? right) => left is null ? right is null : left.Equals(right);
-    public static bool operator !=(Quote? left, Quote? right) => !(left == right);
+    public bool Equals(Quote? other)
+        => other is not null && Id.Equals(other.Id);
+    public override bool Equals(object? obj)
+        => Equals(obj as Quote);
+    public override int GetHashCode()
+        => Id.GetHashCode();
+    public static bool operator ==(Quote? left, Quote? right)
+        => left is null ? right is null : left.Equals(right);
+    public static bool operator !=(Quote? left, Quote? right)
+        => !(left == right);
 }
 
 // ==== Sales/QuoteId.cs ====
@@ -306,9 +330,11 @@ public sealed class QuoteId : ValueObject
 {
     public Guid Value { get; }
 
-    public QuoteId(Guid value) => Value = value;
+    public QuoteId(Guid value)
+        => Value = value;
 
-    public static QuoteId New() => new(Guid.NewGuid());
+    public static QuoteId New()
+        => new(Guid.NewGuid());
 
     protected override IEnumerable<object?> GetEqualityComponents()
     {

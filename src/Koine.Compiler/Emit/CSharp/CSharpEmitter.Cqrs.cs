@@ -25,7 +25,7 @@ public sealed partial class CSharpEmitter
         var sb = new StringBuilder();
         WriteXmlDoc(sb, "Transactional boundary over this context's aggregate repositories.", "");
         sb.Append("public interface IUnitOfWork\n{\n");
-        foreach (var agg in aggregates)
+        foreach (AggregateDecl agg in aggregates)
         {
             // The repository lives in the aggregate's namespace; when that is a module
             // sub-namespace (R13.3), fully-qualify it so the base-namespace UoW resolves it.
@@ -52,14 +52,17 @@ public sealed partial class CSharpEmitter
         sb.Append("public interface ").Append(iface).Append("\n{\n");
 
         var first = true;
-        foreach (var uc in svc.UseCases)
+        foreach (UseCaseDecl uc in svc.UseCases)
         {
             if (!first)
+            {
                 sb.Append('\n');
+            }
+
             first = false;
             WriteXmlDoc(sb, uc.Doc, Indent);
             var ret = uc.ReturnType is null ? "Task" : $"Task<{typeMapper.Map(uc.ReturnType)}>";
-            var args = uc.Parameters
+            IEnumerable<string> args = uc.Parameters
                 .Select(p => $"{typeMapper.Map(p.Type)} {CSharpNaming.ToCamelCase(p.Name)}")
                 // The use case is an async boundary: flow cancellation, like every
                 // other generated async seam (repositories, UoW, query handlers).
@@ -88,18 +91,18 @@ public sealed partial class CSharpEmitter
         // A read model emits into the base context namespace, so `ns` is the context used
         // to resolve its source (R13.2) when a type name is shared across contexts.
         var context = ContextOf(ns);
-        var sourceMembers = ReadModelSourceMembers(context, rm.SourceType, index);
+        IReadOnlyList<Member> sourceMembers = ReadModelSourceMembers(context, rm.SourceType, index);
         var translator = new CSharpExpressionTranslator(index, sourceMembers, enumMemberToType, memberReceiver: "src", context: context);
 
         var fields = new List<(string CsType, string Prop, string Rhs)>();
-        foreach (var f in rm.Fields)
+        foreach (ReadModelField f in rm.Fields)
         {
             var prop = CSharpNaming.ToPascalCase(f.Name);
             string csType, rhs;
             if (f.Projection is null)
             {
                 // Direct field: type and value come from the like-named source member.
-                csType = index.TryGetMemberType(context, rm.SourceType, f.Name, out var t) ? typeMapper.Map(t) : "object";
+                csType = index.TryGetMemberType(context, rm.SourceType, f.Name, out TypeRef t) ? typeMapper.Map(t) : "object";
                 rhs = $"src.{prop}";
             }
             else
@@ -119,8 +122,8 @@ public sealed partial class CSharpEmitter
         WriteXmlDoc(sb, $"Projects {rm.SourceType} to {rm.Name}.", "");
         sb.Append("public static class ").Append(rm.Name).Append("Projection\n{\n");
         sb.Append(Indent).Append("public static ").Append(rm.Name).Append(" To").Append(rm.Name)
-          .Append("(this ").Append(rm.SourceType).Append(" src) =>\n");
-        sb.Append(Indent).Append(Indent).Append("new ").Append(rm.Name).Append('(')
+          .Append("(this ").Append(rm.SourceType).Append(" src)\n");
+        sb.Append(Indent).Append(Indent).Append("=> new ").Append(rm.Name).Append('(')
           .Append(string.Join(", ", fields.Select(f => f.Rhs))).Append(");\n");
         sb.Append("}\n");
 
@@ -134,8 +137,11 @@ public sealed partial class CSharpEmitter
     /// </summary>
     private static IReadOnlyList<Member> ReadModelSourceMembers(string context, string sourceType, ModelIndex index)
     {
-        if (!index.TryGetDeclIn(context, sourceType, out var decl) && !index.TryGetDecl(sourceType, out decl))
+        if (!index.TryGetDeclIn(context, sourceType, out TypeDecl decl) && !index.TryGetDecl(sourceType, out decl))
+        {
             return Array.Empty<Member>();
+        }
+
         return decl switch
         {
             ValueObjectDecl v => v.Members,
@@ -185,14 +191,23 @@ public sealed partial class CSharpEmitter
     private static string Pluralize(string name)
     {
         if (name.Length == 0)
+        {
             return name;
+        }
+
         if (name.EndsWith("s", StringComparison.Ordinal) || name.EndsWith("x", StringComparison.Ordinal)
-            || name.EndsWith("z", StringComparison.Ordinal) || name.EndsWith("ch", StringComparison.Ordinal)
-            || name.EndsWith("sh", StringComparison.Ordinal))
+                                                         || name.EndsWith("z", StringComparison.Ordinal) || name.EndsWith("ch", StringComparison.Ordinal)
+                                                         || name.EndsWith("sh", StringComparison.Ordinal))
+        {
             return name + "es";
+        }
+
         if (name.Length >= 2 && char.ToLowerInvariant(name[^1]) == 'y'
-            && "aeiou".IndexOf(char.ToLowerInvariant(name[^2])) < 0)
+                             && "aeiou".IndexOf(char.ToLowerInvariant(name[^2])) < 0)
+        {
             return name[..^1] + "ies";
+        }
+
         return name + "s";
     }
 }

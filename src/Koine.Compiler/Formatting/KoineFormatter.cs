@@ -35,7 +35,7 @@ public sealed class KoineFormatter
 
     public FormatResult Format(string source)
     {
-        var tokens = Lex(source);
+        List<IToken> tokens = Lex(source);
         var formatted = Render(tokens);
         return new FormatResult(formatted, !string.Equals(formatted, source, StringComparison.Ordinal));
     }
@@ -53,14 +53,14 @@ public sealed class KoineFormatter
 
     private static string Render(IReadOnlyList<IToken> tokens)
     {
-        var groups = GroupByLine(tokens);
+        List<List<IToken>> groups = GroupByLine(tokens);
         var lines = new List<Line>();
 
         var depth = 0;
         var prevEndLine = -1;
         var prevLastType = -1;
 
-        foreach (var group in groups)
+        foreach (List<IToken> group in groups)
         {
             var startLine = group[0].Line;
 
@@ -71,12 +71,17 @@ public sealed class KoineFormatter
                 var prevOpened = prevLastType == KoineLexer.LBRACE;
                 var curCloses = group[0].Type == KoineLexer.RBRACE;
                 if (hadBlank && !prevOpened && !curCloses)
+                {
                     lines.Add(new Line(0, IsBlank: true, IsField: false, "", ""));
+                }
             }
 
             var leadingClose = 0;
             while (leadingClose < group.Count && group[leadingClose].Type == KoineLexer.RBRACE)
+            {
                 leadingClose++;
+            }
+
             var indentDepth = Math.Max(0, depth - leadingClose);
 
             if (IsFieldLine(group))
@@ -106,7 +111,7 @@ public sealed class KoineFormatter
     {
         var groups = new List<List<IToken>>();
         var currentLine = -1;
-        foreach (var t in tokens)
+        foreach (IToken t in tokens)
         {
             if (t.Line != currentLine)
             {
@@ -136,11 +141,19 @@ public sealed class KoineFormatter
     {
         var text = t.Text;
         if (text is null)
+        {
             return t.Line;
+        }
+
         var newlines = 0;
         foreach (var c in text)
+        {
             if (c == '\n')
+            {
                 newlines++;
+            }
+        }
+
         return t.Line + newlines;
     }
 
@@ -151,17 +164,23 @@ public sealed class KoineFormatter
         IToken? prev = null;
         var genericDepth = 0;
 
-        foreach (var t in tokens)
+        foreach (IToken t in tokens)
         {
             if (prev is not null && NeedsSpace(prev, t, genericDepth))
+            {
                 sb.Append(' ');
+            }
 
             // Track generic nesting so '<'/'>' inside a type argument list stay tight
             // and don't get operator spacing.
             if (t.Type == KoineLexer.LT && IsGenericOpen(prev))
+            {
                 genericDepth++;
+            }
             else if (t.Type == KoineLexer.GT && genericDepth > 0)
+            {
                 genericDepth--;
+            }
 
             sb.Append(t.Text);
             prev = t;
@@ -179,30 +198,52 @@ public sealed class KoineFormatter
 
         // Punctuation that glues to the preceding token.
         if (c is KoineLexer.COMMA or KoineLexer.COLON or KoineLexer.QUESTION or KoineLexer.RPAREN)
+        {
             return false;
+        }
 
         // Member access / qualified names: no space either side of '.'.
         if (c == KoineLexer.DOT || p == KoineLexer.DOT)
+        {
             return false;
+        }
 
         if (p == KoineLexer.LPAREN)
+        {
             return false;   // no space just inside '('
+        }
+
         if (p == KoineLexer.AT)
+        {
             return false;        // @annotation glued to its name
+        }
+
         if (p == KoineLexer.NOT)
+        {
             return false;       // unary ! glued to its operand
+        }
 
         // Generic type argument lists: List<OrderLine>, Map<K, V>.
         if (c == KoineLexer.LT && IsGenericOpen(prev))
+        {
             return false;  // before the opening '<'
+        }
+
         if (p == KoineLexer.LT && genericDepth > 0)
+        {
             return false;     // after an opening generic '<'
+        }
+
         if (c == KoineLexer.GT && genericDepth > 0)
+        {
             return false;     // before a closing generic '>'
+        }
 
         // Call / construction parentheses glue to the callee (foo(...), Currency("€", 2)).
         if (c == KoineLexer.LPAREN && (p == KoineLexer.Identifier || p == KoineLexer.RPAREN || p == KoineLexer.GT))
+        {
             return false;
+        }
 
         return true;
     }
@@ -214,7 +255,7 @@ public sealed class KoineFormatter
 
         for (var i = 0; i < lines.Count; i++)
         {
-            var line = lines[i];
+            Line line = lines[i];
             if (line.IsBlank)
             {
                 rendered.Add("");
@@ -234,14 +275,20 @@ public sealed class KoineFormatter
             for (var j = i + 1; j < lines.Count; j++)
             {
                 if (!lines[j].IsField || lines[j].IndentDepth != line.IndentDepth)
+                {
                     break;
+                }
+
                 groupMax = Math.Max(groupMax, lines[j].FieldName.Length);
             }
             // Re-scan backwards too, so every member of the group shares one width.
             for (var j = i - 1; j >= 0; j--)
             {
                 if (!lines[j].IsField || lines[j].IndentDepth != line.IndentDepth)
+                {
                     break;
+                }
+
                 groupMax = Math.Max(groupMax, lines[j].FieldName.Length);
             }
 
@@ -251,7 +298,10 @@ public sealed class KoineFormatter
 
         var sb = new StringBuilder();
         foreach (var r in rendered)
+        {
             sb.Append(r.TrimEnd()).Append('\n');
+        }
+
         return sb.ToString();
     }
 

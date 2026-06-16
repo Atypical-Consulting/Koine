@@ -63,7 +63,9 @@ internal sealed class WatchSession
                     // Either the change source completed (stop) or the interval elapsed
                     // with no change (do a safety-net full rebuild and keep watching).
                     if (changes.IsAddingCompleted)
+                    {
                         break;
+                    }
                     // periodic full rebuild
                 }
                 SafeBuild();

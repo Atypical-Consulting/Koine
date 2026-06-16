@@ -55,7 +55,7 @@ csharp_style_expression_bodied_accessors = true:suggestion
 csharp_style_expression_bodied_lambdas = true:suggestion
 
 # --- modern C# idioms ---
-csharp_prefer_braces = true:silent
+csharp_prefer_braces = true:warning   # if/else/for/while always use braces, even single-statement bodies
 csharp_style_prefer_switch_expression = true:suggestion
 csharp_style_prefer_pattern_matching = true:suggestion
 csharp_style_pattern_matching_over_is_with_cast_check = true:warning

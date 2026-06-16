@@ -73,9 +73,11 @@ public sealed class SemanticTokenProvider
     /// </summary>
     public IReadOnlyList<SemanticToken> Tokenize(string source)
     {
-        var (model, _) = _compiler.Parse(source);
+        (KoineModel? model, _) = _compiler.Parse(source);
         if (model is null)
+        {
             return Array.Empty<SemanticToken>();
+        }
 
         var index = new ModelIndex(model);
         var lines = SplitLines(source);
@@ -83,24 +85,28 @@ public sealed class SemanticTokenProvider
         // Declaration spans, by (1-based line, 0-based column), so a token at a declaration
         // site gets the right type AND the declaration modifier (e.g. the NAME in
         // `value Money { … }` or a member name in its body).
-        var declarations = CollectDeclarations(index, lines);
+        IReadOnlyDictionary<(int, int), DeclKind> declarations = CollectDeclarations(index, lines);
 
         // Member/property names declared anywhere (so a `field.` selector or an invariant
         // operand highlights as a property even though it is not a declared TYPE name).
-        var propertyNames = CollectPropertyNames(index);
+        IReadOnlySet<string> propertyNames = CollectPropertyNames(index);
 
         var tokens = new List<SemanticToken>();
-        foreach (var tok in IdentifierTokens(source))
+        foreach (IToken tok in IdentifierTokens(source))
         {
             var text = tok.Text;
             if (string.IsNullOrEmpty(text))
+            {
                 continue;
+            }
 
             var line = tok.Line;       // 1-based
             var col = tok.Column;      // 0-based
-            var classified = Classify(text, line, col, index, declarations, propertyNames);
+            Classification? classified = Classify(text, line, col, index, declarations, propertyNames);
             if (classified is not { } c)
+            {
                 continue;
+            }
 
             tokens.Add(new SemanticToken(line - 1, col, text.Length, c.Type, c.Modifiers));
         }
@@ -123,7 +129,7 @@ public sealed class SemanticTokenProvider
         var data = new List<int>(tokens.Count * 5);
         var prevLine = 0;
         var prevChar = 0;
-        foreach (var t in tokens)
+        foreach (SemanticToken t in tokens)
         {
             var deltaLine = t.Line - prevLine;
             var deltaChar = deltaLine == 0 ? t.StartChar - prevChar : t.StartChar;
@@ -148,13 +154,14 @@ public sealed class SemanticTokenProvider
         IReadOnlyDictionary<(int, int), DeclKind> declarations,
         IReadOnlySet<string> propertyNames)
     {
-        var isDeclaration = declarations.TryGetValue((line, col), out var declKind);
+        var isDeclaration = declarations.TryGetValue((line, col), out DeclKind declKind);
         var declModifier = isDeclaration ? 1 << (int)SemanticTokenModifier.Declaration : 0;
 
         // A declaration site is authoritative about what it declares (a member name that
         // collides with a type name elsewhere still highlights as a property at its own
         // declaration, etc.).
         if (isDeclaration)
+        {
             return declKind switch
             {
                 DeclKind.Enum => new Classification(SemanticTokenType.Enum, declModifier),
@@ -163,21 +170,30 @@ public sealed class SemanticTokenProvider
                 DeclKind.Parameter => new Classification(SemanticTokenType.Parameter, declModifier),
                 _ => new Classification(SemanticTokenType.Type, declModifier),
             };
+        }
 
         // Reference sites: classify by the model.
         if (index.IsEnumType(text))
+        {
             return new Classification(SemanticTokenType.Enum, 0);
+        }
 
         if (index.IsKnownType(text) || ModelIndex.Primitives.Contains(text)
-            || text is ModelIndex.ListTypeName or ModelIndex.SetTypeName
-                or ModelIndex.MapTypeName or ModelIndex.RangeTypeName)
+                                    || text is ModelIndex.ListTypeName or ModelIndex.SetTypeName
+                                        or ModelIndex.MapTypeName or ModelIndex.RangeTypeName)
+        {
             return new Classification(SemanticTokenType.Type, 0);
+        }
 
         if (index.EnumMemberToType.ContainsKey(text))
+        {
             return new Classification(SemanticTokenType.EnumMember, 0);
+        }
 
         if (propertyNames.Contains(text))
+        {
             return new Classification(SemanticTokenType.Property, 0);
+        }
 
         return null; // not something we highlight semantically (let the grammar handle it)
     }
@@ -201,7 +217,9 @@ public sealed class SemanticTokenProvider
         void Add(SourceSpan span, DeclKind kind)
         {
             if (span != SourceSpan.None)
+            {
                 map[(span.Line, span.Column - 1)] = kind; // SourceSpan.Column is 1-based
+            }
         }
 
         // Adds a TYPE/ENUM declaration at its NAME: the span points at the keyword, so find
@@ -209,60 +227,104 @@ public sealed class SemanticTokenProvider
         void AddNamed(SourceSpan span, string name, DeclKind kind)
         {
             if (span == SourceSpan.None)
+            {
                 return;
+            }
+
             var line = span.Line - 1;      // 0-based
             var keywordCol = span.Column - 1;
             if (line < 0 || line >= lines.Length)
+            {
                 return;
+            }
+
             var idx = lines[line].IndexOf(name, Math.Max(0, keywordCol), StringComparison.Ordinal);
             if (idx >= 0)
+            {
                 map[(span.Line, idx)] = kind;
+            }
         }
 
-        foreach (var t in index.AllTypes())
+        foreach (TypeDecl t in index.AllTypes())
         {
             AddNamed(t.Span, t.Name, t is EnumDecl ? DeclKind.Enum : DeclKind.Type);
             switch (t)
             {
                 case ValueObjectDecl v:
-                    foreach (var m in v.Members)
+                    foreach (Member m in v.Members)
+                    {
                         Add(m.Span, DeclKind.Property);
+                    }
+
                     break;
                 case EntityDecl e:
-                    foreach (var m in e.Members)
+                    foreach (Member m in e.Members)
+                    {
                         Add(m.Span, DeclKind.Property);
-                    foreach (var c in e.Commands)
-                        foreach (var p in c.Parameters)
+                    }
+
+                    foreach (CommandDecl c in e.Commands)
+                    {
+                        foreach (Param p in c.Parameters)
+                        {
                             Add(p.Span, DeclKind.Parameter);
-                    foreach (var f in e.Factories)
-                        foreach (var p in f.Parameters)
+                        }
+                    }
+
+                    foreach (FactoryDecl f in e.Factories)
+                    {
+                        foreach (Param p in f.Parameters)
+                        {
                             Add(p.Span, DeclKind.Parameter);
+                        }
+                    }
+
                     break;
                 case EventDecl ev:
-                    foreach (var m in ev.Members)
+                    foreach (Member m in ev.Members)
+                    {
                         Add(m.Span, DeclKind.Property);
+                    }
+
                     break;
                 case IntegrationEventDecl ie:
-                    foreach (var m in ie.Members)
+                    foreach (Member m in ie.Members)
+                    {
                         Add(m.Span, DeclKind.Property);
+                    }
+
                     break;
                 case EnumDecl en:
-                    foreach (var m in en.Members)
+                    foreach (EnumMember m in en.Members)
+                    {
                         Add(m.Span, DeclKind.EnumMember);
+                    }
+
                     break;
             }
         }
 
-        foreach (var ctx in index.Model.Contexts)
-            foreach (var svc in ctx.Services)
+        foreach (ContextNode ctx in index.Model.Contexts)
+        {
+            foreach (ServiceDecl svc in ctx.Services)
             {
-                foreach (var op in svc.Operations)
-                    foreach (var p in op.Parameters)
+                foreach (OperationDecl op in svc.Operations)
+                {
+                    foreach (Param p in op.Parameters)
+                    {
                         Add(p.Span, DeclKind.Parameter);
-                foreach (var uc in svc.UseCases)
-                    foreach (var p in uc.Parameters)
+                    }
+                }
+
+                foreach (UseCaseDecl uc in svc.UseCases)
+                {
+                    foreach (Param p in uc.Parameters)
+                    {
                         Add(p.Span, DeclKind.Parameter);
+                    }
+                }
             }
+        }
 
         return map;
     }
@@ -271,9 +333,14 @@ public sealed class SemanticTokenProvider
     private static IReadOnlySet<string> CollectPropertyNames(ModelIndex index)
     {
         var names = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var t in index.AllTypes())
+        foreach (TypeDecl t in index.AllTypes())
+        {
             foreach (var n in index.MemberNames(t.Name))
+            {
                 names.Add(n);
+            }
+        }
+
         return names;
     }
 
@@ -285,8 +352,12 @@ public sealed class SemanticTokenProvider
     {
         var lexer = new KoineLexer(new AntlrInputStream(source));
         lexer.RemoveErrorListeners();
-        foreach (var t in lexer.GetAllTokens())
+        foreach (IToken? t in lexer.GetAllTokens())
+        {
             if (t.Type == KoineLexer.Identifier)
+            {
                 yield return t;
+            }
+        }
     }
 }

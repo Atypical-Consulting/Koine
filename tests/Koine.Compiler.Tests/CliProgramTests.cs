@@ -294,7 +294,10 @@ public class CliProgramTests
             {
                 builds++;
                 if (builds >= 3)
+                {
                     cts.Cancel();   // initial build + at least two interval-driven rebuilds
+                }
+
                 return true;
             },
             TextWriter.Null,

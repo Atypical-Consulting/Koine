@@ -57,7 +57,9 @@ internal sealed class UsingCollector
     private void Add(string ns)
     {
         if (!_usings.Contains(ns))
+        {
             _usings.Add(ns);
+        }
     }
 
     /// <summary>
@@ -73,13 +75,18 @@ internal sealed class UsingCollector
         AddIfReferenced(body, FixedNamespaces[1]); // System.Collections.Generic
         AddIfReferenced(body, FixedNamespaces[2]); // System.Collections.ObjectModel
         if (usesLinq)
+        {
             Add("System.Linq");
+        }
+
         AddIfReferenced(body, FixedNamespaces[3]); // System.Threading.Tasks
         AddIfReferenced(body, FixedNamespaces[4]); // System.Threading
         AddIfReferenced(body, FixedNamespaces[5]); // System.Text.RegularExpressions
 
         if (ns != RuntimeNamespace && ReferencesAny(body, RuntimeMarkers))
+        {
             Add(RuntimeNamespace);
+        }
     }
 
     /// <summary>
@@ -90,8 +97,12 @@ internal sealed class UsingCollector
     public void CollectUserTypeNamespaces(string ns, string body, IEnumerable<KeyValuePair<string, string>> visibleTypes)
     {
         foreach (var (name, typeNs) in visibleTypes)
+        {
             if (typeNs != ns && ContainsWord(body, name))
+            {
                 Add(typeNs);
+            }
+        }
     }
 
     /// <summary>The collected namespaces, sorted with System/System.* first, then ordinal.</summary>
@@ -103,14 +114,21 @@ internal sealed class UsingCollector
     private void AddIfReferenced(string body, NamespaceMarkers entry)
     {
         if (ReferencesAny(body, entry.Tokens))
+        {
             Add(entry.Namespace);
+        }
     }
 
     private static bool ReferencesAny(string body, string[] tokens)
     {
         foreach (var t in tokens)
+        {
             if (body.Contains(t, StringComparison.Ordinal))
+            {
                 return true;
+            }
+        }
+
         return false;
     }
 
@@ -124,7 +142,10 @@ internal sealed class UsingCollector
             var afterIdx = i + word.Length;
             var after = afterIdx >= text.Length || !IsIdentChar(text[afterIdx]);
             if (before && after)
+            {
                 return true;
+            }
+
             i = afterIdx;
         }
         return false;

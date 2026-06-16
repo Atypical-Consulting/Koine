@@ -32,13 +32,13 @@ public sealed class Currency : IEquatable<Currency>
 
     public static IReadOnlyList<Currency> All { get; } = new[] { EUR, USD, GBP };
 
-    public static Currency FromName(string name) =>
-        All.FirstOrDefault(e => e.Name == name)
-        ?? throw new ArgumentOutOfRangeException(nameof(name), $"No Currency with name '{name}'.");
+    public static Currency FromName(string name)
+        => All.FirstOrDefault(e => e.Name == name)
+            ?? throw new ArgumentOutOfRangeException(nameof(name), $"No Currency with name '{name}'.");
 
-    public static Currency FromValue(int value) =>
-        All.FirstOrDefault(e => e.Value == value)
-        ?? throw new ArgumentOutOfRangeException(nameof(value), $"No Currency with value {value}.");
+    public static Currency FromValue(int value)
+        => All.FirstOrDefault(e => e.Value == value)
+            ?? throw new ArgumentOutOfRangeException(nameof(value), $"No Currency with value {value}.");
 
     public static bool TryFromName(string name, out Currency result)
     {
@@ -55,8 +55,8 @@ public sealed class Currency : IEquatable<Currency>
     public TResult Match<TResult>(
         Func<TResult> eUR,
         Func<TResult> uSD,
-        Func<TResult> gBP) =>
-        Value switch
+        Func<TResult> gBP)
+        => Value switch
         {
             0 => eUR(),
             1 => uSD(),
@@ -78,10 +78,16 @@ public sealed class Currency : IEquatable<Currency>
         }
     }
 
-    public override string ToString() => Name;
-    public bool Equals(Currency? other) => other is not null && Value == other.Value;
-    public override bool Equals(object? obj) => Equals(obj as Currency);
-    public override int GetHashCode() => Value;
-    public static bool operator ==(Currency? left, Currency? right) => left is null ? right is null : left.Equals(right);
-    public static bool operator !=(Currency? left, Currency? right) => !(left == right);
+    public override string ToString()
+        => Name;
+    public bool Equals(Currency? other)
+        => other is not null && Value == other.Value;
+    public override bool Equals(object? obj)
+        => Equals(obj as Currency);
+    public override int GetHashCode()
+        => Value;
+    public static bool operator ==(Currency? left, Currency? right)
+        => left is null ? right is null : left.Equals(right);
+    public static bool operator !=(Currency? left, Currency? right)
+        => !(left == right);
 }

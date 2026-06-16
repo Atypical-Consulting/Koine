@@ -56,7 +56,9 @@ internal static class Program
         var info = Assembly.GetExecutingAssembly()
             .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion;
         if (string.IsNullOrEmpty(info))
+        {
             return Assembly.GetExecutingAssembly().GetName().Version?.ToString() ?? "0.0.0";
+        }
 
         var plus = info.IndexOf('+');
         return plus < 0 ? info : info[..plus];
@@ -145,9 +147,15 @@ internal static class Program
     private static int RunBuild(string[] args)
     {
         if (WantsHelp(args))
+        {
             return PrintHelp(BuildHelp);
+        }
+
         if (!TryParseBuild(args, out var request, out var error))
+        {
             return UsageError(error!, BuildHelp);
+        }
+
         return BuildOnce(request, out var exitCode) ? 0 : exitCode;
     }
 
@@ -179,7 +187,9 @@ internal static class Program
 
         // A path may be a single .koi file or a directory of them (compiled as one model).
         if (!TryReadSources(file, "file", out var sources, out exitCode))
+        {
             return false;
+        }
 
         var compiler = new KoineCompiler();
         var result = compiler.Compile(sources, emitter);
@@ -188,14 +198,18 @@ internal static class Program
         foreach (var diag in result.Diagnostics)
         {
             if (diag.Severity == DiagnosticSeverity.Error)
+            {
                 hasError = true;
+            }
             // MSBuild/Roslyn-parseable: file:line:col: severity CODE: message
             var severity = diag.Severity.ToString().ToLowerInvariant();
             Console.Error.WriteLine($"{diag.File ?? file}:{diag.Line}:{diag.Column}: {severity} {diag.Code}: {diag.Message}");
         }
 
         if (hasError)
+        {
             return false;
+        }
 
         // --glossary writes a Markdown glossary to a specific file, independent of
         // the chosen --target/--out (so you can emit C# AND a glossary in one run).
@@ -204,7 +218,10 @@ internal static class Program
             var glossary = new GlossaryEmitter().Emit(result.Model)[0];
             var dir = Path.GetDirectoryName(glossaryFile);
             if (!string.IsNullOrEmpty(dir))
+            {
                 Directory.CreateDirectory(dir);
+            }
+
             WriteFileAtomic(glossaryFile, glossary.Contents);
             Console.WriteLine($"wrote glossary to {glossaryFile}");
         }
@@ -212,7 +229,10 @@ internal static class Program
         if (outDir is null)
         {
             if (glossaryFile is null)
+            {
                 Console.WriteLine($"OK: {file} parsed and validated");
+            }
+
             exitCode = 0;
             return true;
         }
@@ -253,20 +273,28 @@ internal static class Program
                     var path = Path.Combine(stageDir, relUnderRoot);
                     var dir = Path.GetDirectoryName(path);
                     if (!string.IsNullOrEmpty(dir))
+                    {
                         Directory.CreateDirectory(dir);
+                    }
+
                     File.WriteAllText(path, emitted.Contents);
                     count++;
                 }
 
                 // Swap: replace the live folder with the fully-written staging folder.
                 if (Directory.Exists(finalDir))
+                {
                     Directory.Delete(finalDir, recursive: true);
+                }
+
                 Directory.Move(stageDir, finalDir);
             }
             finally
             {
                 if (Directory.Exists(stageDir))
+                {
                     Directory.Delete(stageDir, recursive: true);
+                }
             }
         }
 
@@ -279,7 +307,10 @@ internal static class Program
         var tmp = path + $".koine-tmp-{Guid.NewGuid():N}";
         File.WriteAllText(tmp, contents);
         if (File.Exists(path))
+        {
             File.Delete(path);
+        }
+
         File.Move(tmp, path);
     }
 
@@ -288,7 +319,9 @@ internal static class Program
     private static int RunFmt(string[] args)
     {
         if (WantsHelp(args))
+        {
             return PrintHelp(FmtHelp);
+        }
 
         string? path = null;
         var check = false;
@@ -296,20 +329,32 @@ internal static class Program
         foreach (var arg in args)
         {
             if (arg == "--check")
+            {
                 check = true;
+            }
             else if (arg.StartsWith('-'))
+            {
                 return UsageError($"unknown option '{arg}'", FmtHelp);
+            }
             else if (path is not null)
+            {
                 return UsageError($"unexpected argument '{arg}'", FmtHelp);
+            }
             else
+            {
                 path = arg;
+            }
         }
 
         if (path is null)
+        {
             return UsageError("fmt requires a <file.koi> or directory argument", FmtHelp);
+        }
 
         if (!TryReadSources(path, "file", out var sources, out var exitCode))
+        {
             return exitCode;
+        }
 
         var compiler = new KoineCompiler();
         var formatter = new Koine.Compiler.Formatting.KoineFormatter();
@@ -325,14 +370,20 @@ internal static class Program
             {
                 unparseable++;
                 foreach (var diag in diagnostics.Where(d => d.Severity == DiagnosticSeverity.Error))
+                {
                     Console.Error.WriteLine($"{diag.File ?? source.Path}:{diag.Line}:{diag.Column}: error {diag.Code}: {diag.Message}");
+                }
+
                 Console.Error.WriteLine($"{source.Path}: cannot format (does not parse) — fix the syntax, then re-run");
                 continue;
             }
 
             var result = formatter.Format(source.Source);
             if (!result.Changed)
+            {
                 continue;
+            }
+
             changed++;
 
             if (check)
@@ -433,7 +484,9 @@ internal static class Program
     private static int RunInit(string[] args)
     {
         if (WantsHelp(args))
+        {
             return PrintHelp(InitHelp);
+        }
 
         string? dir = null;
         var force = false;
@@ -441,13 +494,21 @@ internal static class Program
         foreach (var arg in args)
         {
             if (arg == "--force")
+            {
                 force = true;
+            }
             else if (arg.StartsWith('-'))
+            {
                 return UsageError($"unknown option '{arg}'", InitHelp);
+            }
             else if (dir is not null)
+            {
                 return UsageError($"unexpected argument '{arg}'", InitHelp);
+            }
             else
+            {
                 dir = arg;
+            }
         }
 
         return InitProject(dir ?? ".", force, Console.Out, Console.Error) ? 0 : 1;
@@ -483,7 +544,9 @@ internal static class Program
         }
 
         foreach (var (name, content) in files)
+        {
             File.WriteAllText(Path.Combine(dir, name), content);
+        }
 
         stdout.WriteLine($"initialized koine project in {dir}");
         stdout.WriteLine("  domain.koi     starter model");
@@ -498,15 +561,21 @@ internal static class Program
     private static int RunWatch(string[] args)
     {
         if (WantsHelp(args))
+        {
             return PrintHelp(WatchHelp);
+        }
 
         // `--clear` is watch-only (not a build flag), so peel it off before TryParseBuild.
         var clear = args.Contains("--clear");
         if (clear)
+        {
             args = args.Where(a => a != "--clear").ToArray();
+        }
 
         if (!TryParseBuild(args, out var request, out var error))
+        {
             return UsageError(error!, WatchHelp);
+        }
 
         // Watch the input's directory (or the directory itself), filtered to .koi files.
         var watchDir = Directory.Exists(request.File)
@@ -562,7 +631,9 @@ internal static class Program
     private static int RunCheck(string[] args)
     {
         if (WantsHelp(args))
+        {
             return PrintHelp(CheckHelp);
+        }
 
         string? current = null;
         string? baseline = null;
@@ -575,26 +646,40 @@ internal static class Program
             {
                 case "--baseline":
                     if (i + 1 >= args.Length)
+                    {
                         return UsageError("--baseline requires a <dir> value", CheckHelp);
+                    }
+
                     baseline = args[++i];
                     break;
                 case "--config":
                     if (i + 1 >= args.Length)
+                    {
                         return UsageError("--config requires a <file> value", CheckHelp);
+                    }
+
                     configPath = args[++i];
                     break;
                 default:
                     if (arg.StartsWith('-'))
+                    {
                         return UsageError($"unknown option '{arg}'", CheckHelp);
+                    }
+
                     if (current is not null)
+                    {
                         return UsageError($"unexpected argument '{arg}'", CheckHelp);
+                    }
+
                     current = arg;
                     break;
             }
         }
 
         if (current is null)
+        {
             return UsageError("check requires a <file.koi|dir> argument (the current model)", CheckHelp);
+        }
 
         // A koine.config (explicit --config, or discovered beside the input) may supply the
         // default baseline, for symmetry with build/watch — an explicit --baseline wins.
@@ -604,7 +689,10 @@ internal static class Program
             if (configPath is not null)
             {
                 if (!File.Exists(configPath))
+                {
                     return RuntimeError($"config not found: {configPath}");
+                }
+
                 config = KoineConfig.Parse(File.ReadAllText(configPath));
             }
             else
@@ -615,21 +703,29 @@ internal static class Program
         }
 
         if (baseline is null)
+        {
             return UsageError("check requires --baseline <dir> (or a `baseline` key in koine.config)", CheckHelp);
+        }
 
         var compiler = new KoineCompiler();
         if (!TryParseModel(compiler, current, "current", out var currentModel) ||
             !TryParseModel(compiler, baseline, "baseline", out var baselineModel))
+        {
             return 1;
+        }
 
         var report = new CompatibilityChecker().Check(baselineModel, currentModel);
 
         foreach (var change in report.Changes)
         {
             if (change.Impact == CompatibilityImpact.Breaking)
+            {
                 Console.Error.WriteLine($"breaking {change.Code}: {change.Message}");
+            }
             else
+            {
                 Console.WriteLine($"non-breaking: {change.Message}");
+            }
         }
 
         if (report.HasBreakingChanges)
@@ -649,7 +745,9 @@ internal static class Program
         model = null!;
 
         if (!TryReadSources(path, label, out var sources, out _))
+        {
             return false;
+        }
 
         var (parsed, diagnostics) = compiler.Parse(sources);
         if (parsed is null)
@@ -674,10 +772,12 @@ internal static class Program
     private static List<SourceFile> ReadSources(string path)
     {
         if (Directory.Exists(path))
+        {
             return Directory.EnumerateFiles(path, "*.koi", SearchOption.AllDirectories)
                 .OrderBy(p => p, StringComparer.Ordinal)
                 .Select(p => new SourceFile(p, File.ReadAllText(p)))
                 .ToList();
+        }
 
         return new List<SourceFile> { new(path, File.ReadAllText(path)) };
     }
@@ -690,9 +790,14 @@ internal static class Program
     {
         Console.Error.WriteLine($"error: {message}");
         if (commandHelp is not null)
+        {
             Console.Error.WriteLine(commandHelp);
+        }
         else
+        {
             PrintUsage();
+        }
+
         return 1;
     }
 
@@ -705,7 +810,10 @@ internal static class Program
     {
         Console.Error.WriteLine($"error: {message}");
         if (hint is not null)
+        {
             Console.Error.WriteLine($"hint: {hint}");
+        }
+
         return 1;
     }
 

@@ -12,7 +12,10 @@ using Kernel = Catalog__Ordering.Kernel;
 static void Check(bool condition, string what)
 {
     if (!condition)
+    {
         throw new Exception($"DEMO ASSERTION FAILED: {what}");
+    }
+
     Console.WriteLine($"  ok  {what}");
 }
 

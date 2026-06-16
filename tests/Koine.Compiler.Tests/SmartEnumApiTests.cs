@@ -202,4 +202,66 @@ public class SmartEnumApiTests
         only.GetMethod("Switch")!.Invoke(instance, new object[] { act });
         Assert.True(ran);
     }
+
+    // ======================================================================
+    // Member names that are C# keywords must emit as @-escaped identifiers,
+    // while the member's Name string stays the original spelling.
+    // ======================================================================
+
+    [Fact]
+    public void Keyword_named_member_emits_compilable_csharp_and_round_trips()
+    {
+        // `default` is a legal Koine identifier but a C# keyword; the static field, `All`,
+        // and Match arm must escape it to `@default` while Name/FromName keep "default".
+        var e = CompiledType("context C { enum E { Other, default } }", "C.E");
+
+        var def = TestSupport.EnumValue(e, "default");
+        Assert.Equal("default", e.GetProperty("Name")!.GetValue(def));
+
+        var fromName = e.GetMethod("FromName")!.Invoke(null, new object[] { "default" });
+        Assert.True(def.Equals(fromName));
+
+        var all = (System.Collections.IEnumerable)e.GetProperty("All")!.GetValue(null)!;
+        Assert.Equal(2, all.Cast<object>().Count());
+
+        var match = e.GetMethod("Match")!.MakeGenericMethod(typeof(int));
+        Func<int> onOther = () => 1;
+        Func<int> onDefault = () => 2;
+        Assert.Equal(2, match.Invoke(def, new object[] { onOther, onDefault }));
+    }
+
+    [Fact]
+    public void Keyword_named_member_works_as_enum_default_and_in_expressions()
+    {
+        // Exercises the enum-default emit site and bare-member scoped resolution in an
+        // expression — both reference the member as a C# identifier and must escape it.
+        var src = """
+            context C {
+              enum E { Other, default }
+              value V {
+                kind: E = default
+                isDefault: Bool = kind == default
+              }
+            }
+            """;
+        Assert.NotNull(CompiledType(src, "C.V"));
+    }
+
+    [Fact]
+    public void Keyword_named_member_works_in_a_state_machine()
+    {
+        // Exercises the state-machine guard emit site, which references members as identifiers.
+        var src = """
+            context C {
+              enum E { Other, default }
+              aggregate A root R {
+                entity R identified by RId {
+                  kind: E = default
+                  states kind { default -> Other }
+                }
+              }
+            }
+            """;
+        Assert.NotNull(CompiledType(src, "C.R"));
+    }
 }

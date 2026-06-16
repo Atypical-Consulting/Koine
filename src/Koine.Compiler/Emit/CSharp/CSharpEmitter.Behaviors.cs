@@ -18,9 +18,12 @@ public sealed partial class CSharpEmitter
     /// <summary>The spec name -&gt; body map for a target type (for inlining references).</summary>
     private static IReadOnlyDictionary<string, Expr> SpecBodiesFor(string typeName, ModelIndex index)
     {
-        var specs = index.SpecsFor(typeName);
+        IReadOnlyDictionary<string, SpecDecl> specs = index.SpecsFor(typeName);
         if (specs.Count == 0)
+        {
             return EmptySpecBodies;
+        }
+
         return specs.ToDictionary(kv => kv.Key, kv => kv.Value.Condition, StringComparer.Ordinal);
     }
 
@@ -37,8 +40,11 @@ public sealed partial class CSharpEmitter
     /// <summary>The members in scope for a spec on <paramref name="typeName"/> (entities add a synthetic <c>id</c>), resolved in <paramref name="context"/> when shared across contexts.</summary>
     private static IReadOnlyList<Member> SpecTargetMembers(string typeName, ModelIndex index, string? context = null)
     {
-        if (!(context is not null && index.TryGetDeclIn(context, typeName, out var decl)) && !index.TryGetDecl(typeName, out decl))
+        if (!(context is not null && index.TryGetDeclIn(context, typeName, out TypeDecl decl)) && !index.TryGetDecl(typeName, out decl))
+        {
             return Array.Empty<Member>();
+        }
+
         return decl switch
         {
             ValueObjectDecl v => v.Members,
@@ -66,19 +72,23 @@ public sealed partial class CSharpEmitter
 
         var first = true;
         var usesLinq = false;
-        foreach (var spec in specs)
+        foreach (SpecDecl spec in specs)
         {
-            var members = SpecTargetMembers(spec.TargetType, index, ContextOf(ns));
+            IReadOnlyList<Member> members = SpecTargetMembers(spec.TargetType, index, ContextOf(ns));
             var translator = new CSharpExpressionTranslator(
                 index, members, enumMemberToType, SpecBodiesFor(spec.TargetType, index), memberReceiver: "x", context: ContextOf(ns));
             var body = translator.TranslateTopLevel(spec.Condition, CSharpExpressionTranslator.NameMode.Property);
 
             if (!first)
+            {
                 sb.Append('\n');
+            }
+
             first = false;
             WriteXmlDoc(sb, spec.Doc, Indent);
             sb.Append(Indent).Append("public static bool ").Append(CSharpNaming.ToPascalCase(spec.Name))
-              .Append("(this ").Append(spec.TargetType).Append(" x) => ").Append(body).Append(";\n");
+              .Append("(this ").Append(spec.TargetType).Append(" x)\n");
+            sb.Append(Indent).Append(Indent).Append("=> ").Append(body).Append(";\n");
             usesLinq |= ExprUsesLinq(spec.Condition);
         }
 
@@ -107,10 +117,13 @@ public sealed partial class CSharpEmitter
 
         var translator = new CSharpExpressionTranslator(index, Array.Empty<Member>(), enumMemberToType, context: ContextOf(ns));
         var first = true;
-        foreach (var op in svc.Operations)
+        foreach (OperationDecl op in svc.Operations)
         {
             if (!first)
+            {
                 sb.Append('\n');
+            }
+
             first = false;
             WriteXmlDoc(sb, op.Doc, Indent);
 
@@ -126,15 +139,21 @@ public sealed partial class CSharpEmitter
             }
             else
             {
-                foreach (var p in op.Parameters)
+                foreach (Param p in op.Parameters)
+                {
                     translator.PushLocal(p.Name, p.Type);
+                }
+
                 var expectedEnum = index.Classify(op.ReturnType.Name) == TypeKind.Enum ? op.ReturnType.Name : null;
                 var body = translator.TranslateTopLevel(op.Body, CSharpExpressionTranslator.NameMode.Property, expectedEnum);
-                foreach (var p in op.Parameters)
+                foreach (Param p in op.Parameters)
+                {
                     translator.PopLocal(p.Name);
+                }
 
                 sb.Append(Indent).Append("public ").Append(ret).Append(' ')
-                  .Append(method).Append('(').Append(paramList).Append(") => ").Append(body).Append(";\n");
+                  .Append(method).Append('(').Append(paramList).Append(")\n");
+                sb.Append(Indent).Append(Indent).Append("=> ").Append(body).Append(";\n");
             }
         }
 
@@ -160,11 +179,11 @@ public sealed partial class CSharpEmitter
         var iface = "I" + policyType;
 
         // Render the reaction sketch with event fields rooted at the handler param `e`.
-        var eventMembers = index.TryGetDecl(policy.EventName, out var ed) && ed is EventDecl ev
+        IReadOnlyList<Member> eventMembers = index.TryGetDecl(policy.EventName, out TypeDecl ed) && ed is EventDecl ev
             ? ev.Members
             : Array.Empty<Member>();
         var translator = new CSharpExpressionTranslator(index, eventMembers, enumMemberToType, memberReceiver: "e", context: ContextOf(ns));
-        var r = policy.Reaction;
+        PolicyReaction r = policy.Reaction;
         var argText = string.Join(", ", r.Args.Select(a =>
             $"{a.Parameter}: {translator.TranslateTopLevel(a.Value, CSharpExpressionTranslator.NameMode.Property)}"));
         var sketch = $"{r.TargetType}.{r.CommandName}({argText})";

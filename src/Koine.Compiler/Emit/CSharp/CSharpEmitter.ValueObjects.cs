@@ -37,10 +37,13 @@ public sealed partial class CSharpEmitter
         sb.Append("{\n");
 
         // Properties (one per member, in declaration order).
-        foreach (var m in vo.Members)
+        foreach (Member m in vo.Members)
         {
             if (MemberAnalysis.IsDerived(m, memberNames))
+            {
                 continue; // derived emitted later as computed property
+            }
+
             var csType = typeMapper.Map(m.Type, out var comment);
             WriteXmlDoc(sb, m.Doc, Indent);
             WriteObsolete(sb, m.Deprecated, Indent);
@@ -55,7 +58,7 @@ public sealed partial class CSharpEmitter
         WriteConstructor(sb, vo.Name, ctorParams, vo.Invariants, memberNames, translator, typeMapper, enumMemberToType, index);
 
         // Derived (computed) properties after the constructor.
-        foreach (var m in derived)
+        foreach (Member m in derived)
         {
             var csType = typeMapper.Map(m.Type);
             var body = translator.TranslateTopLevel(m.Initializer!, CSharpExpressionTranslator.NameMode.Property, EnumExpected(m, index));
@@ -63,7 +66,8 @@ public sealed partial class CSharpEmitter
             WriteXmlDoc(sb, m.Doc, Indent);
             WriteObsolete(sb, m.Deprecated, Indent);
             sb.Append(Indent).Append("public ").Append(csType).Append(' ')
-              .Append(CSharpNaming.ToPascalCase(m.Name)).Append(" => ").Append(body).Append(";\n");
+              .Append(CSharpNaming.ToPascalCase(m.Name)).Append('\n');
+            sb.Append(Indent).Append(Indent).Append("=> ").Append(body).Append(";\n");
         }
 
         // A quantity (R9.2) gets explicit, unit-checked arithmetic instead of the
@@ -85,19 +89,23 @@ public sealed partial class CSharpEmitter
 
             // Scalar arithmetic operators: emitted only when this value object is actually
             // multiplied by a scalar in a derived expression.
-            if (emit.ScalarNeeds.TryGetValue(vo.Name, out var scalarTypes))
+            if (emit.ScalarNeeds.TryGetValue(vo.Name, out IReadOnlySet<string>? scalarTypes))
             {
-                var numericFields = NumericFields(vo);
+                IReadOnlyList<Member> numericFields = NumericFields(vo);
                 if (numericFields.Count > 0)
+                {
                     WriteScalarOperators(sb, vo, numericFields, scalarTypes, typeMapper);
+                }
             }
 
             // Additive operator for value objects that are summed (e.g. lines.sum(l => l.subtotal)).
             if (emit.AdditiveNeeds.Contains(vo.Name))
             {
-                var numericFields = NumericFields(vo);
+                IReadOnlyList<Member> numericFields = NumericFields(vo);
                 if (numericFields.Count > 0)
+                {
                     WriteAdditiveOperator(sb, vo, numericFields);
+                }
             }
         }
 
@@ -124,7 +132,8 @@ public sealed partial class CSharpEmitter
         sb.Append('\n');
         if (members.Count == 0)
         {
-            sb.Append(Indent).Append("public override string ToString() => \"").Append(typeName).Append("\";\n");
+            sb.Append(Indent).Append("public override string ToString()\n");
+            sb.Append(Indent).Append(Indent).Append("=> \"").Append(typeName).Append("\";\n");
             return;
         }
         var fields = string.Join(", ", members.Select(m =>
@@ -132,7 +141,8 @@ public sealed partial class CSharpEmitter
             var prop = CSharpNaming.ToPascalCase(m.Name);
             return prop + " = {" + prop + "}";
         }));
-        sb.Append(Indent).Append("public override string ToString() => $\"")
+        sb.Append(Indent).Append("public override string ToString()\n");
+        sb.Append(Indent).Append(Indent).Append("=> $\"")
           .Append(typeName).Append(" {{ ").Append(fields).Append(" }}\";\n");
     }
 
@@ -153,7 +163,7 @@ public sealed partial class CSharpEmitter
         }
         else
         {
-            foreach (var m in members)
+            foreach (Member m in members)
             {
                 var prop = CSharpNaming.ToPascalCase(m.Name);
                 // Collections must compare by element, not by reference: wrap them in
@@ -195,7 +205,10 @@ public sealed partial class CSharpEmitter
             {
                 var prop = $"left.{CSharpNaming.ToPascalCase(m.Name)}";
                 if (!numericNames.Contains(m.Name))
+                {
                     return prop;
+                }
+
                 var product = $"{prop} * right";
                 // int field * decimal scalar yields decimal -> cast back to int.
                 return typeMapper.Map(m.Type) == "int" && scalar == "decimal"
@@ -205,7 +218,8 @@ public sealed partial class CSharpEmitter
 
             sb.Append('\n').Append(Indent)
               .Append("public static ").Append(vo.Name).Append(" operator *(")
-              .Append(vo.Name).Append(" left, ").Append(scalar).Append(" right) => new ")
+              .Append(vo.Name).Append(" left, ").Append(scalar).Append(" right)\n")
+              .Append(Indent).Append(Indent).Append("=> new ")
               .Append(vo.Name).Append('(').Append(args).Append(");\n");
         }
     }
@@ -221,10 +235,12 @@ public sealed partial class CSharpEmitter
     {
         var memberNames = new HashSet<string>(vo.Members.Select(m => m.Name), StringComparer.Ordinal);
         var nonDerived = vo.Members.Where(m => !MemberAnalysis.IsDerived(m, memberNames)).ToList();
-        var amount = nonDerived.FirstOrDefault(m => m.Type.Name == "Decimal" && !m.Type.IsOptional);
-        var unit = nonDerived.FirstOrDefault(m => index.Classify(m.Type.Name) == TypeKind.Enum && !m.Type.IsOptional);
+        Member? amount = nonDerived.FirstOrDefault(m => m.Type.Name == "Decimal" && !m.Type.IsOptional);
+        Member? unit = nonDerived.FirstOrDefault(m => index.Classify(m.Type.Name) == TypeKind.Enum && !m.Type.IsOptional);
         if (amount is null || unit is null)
+        {
             return; // a malformed quantity is already a validation error; emit no operators
+        }
 
         var name = vo.Name;
         var amtProp = CSharpNaming.ToPascalCase(amount.Name);
@@ -246,10 +262,12 @@ public sealed partial class CSharpEmitter
             sb.Append(Indent).Append("{\n");
             sb.Append(Indent).Append(Indent).Append("if (left.").Append(unitProp)
               .Append(" != right.").Append(unitProp).Append(")\n");
+            sb.Append(Indent).Append(Indent).Append("{\n");
             sb.Append(Indent).Append(Indent).Append(Indent).Append("throw new DomainInvariantViolationException(\n");
             sb.Append(Indent).Append(Indent).Append(Indent).Append(Indent).Append("type: nameof(").Append(name).Append("),\n");
             sb.Append(Indent).Append(Indent).Append(Indent).Append(Indent)
               .Append("rule: \"cannot ").Append(verb).Append(" quantities of different units\");\n");
+            sb.Append(Indent).Append(Indent).Append("}\n");
             sb.Append(Indent).Append(Indent).Append("return ")
               .Append(Construct($"left.{amtProp} {op} right.{amtProp}", $"left.{unitProp}")).Append(";\n");
             sb.Append(Indent).Append("}\n");
@@ -257,11 +275,16 @@ public sealed partial class CSharpEmitter
 
         // The amount is always Decimal, so scalar */÷ by int or decimal stays exact.
         foreach (var op in new[] { "*", "/" })
+        {
             foreach (var scalar in new[] { "int", "decimal" })
+            {
                 sb.Append('\n').Append(Indent)
                   .Append("public static ").Append(name).Append(" operator ").Append(op).Append('(')
-                  .Append(name).Append(" left, ").Append(scalar).Append(" right) => ")
+                  .Append(name).Append(" left, ").Append(scalar).Append(" right)\n")
+                  .Append(Indent).Append(Indent).Append("=> ")
                   .Append(Construct($"left.{amtProp} {op} right", $"left.{unitProp}")).Append(";\n");
+            }
+        }
     }
 
     private static IReadOnlyList<Member> NumericFields(ValueObjectDecl vo)
@@ -305,22 +328,25 @@ public sealed partial class CSharpEmitter
 
         if (carried.Count == 0)
         {
-            sb.Append(" => new ").Append(vo.Name).Append('(').Append(args).Append(");\n");
+            sb.Append('\n').Append(Indent).Append(Indent)
+              .Append("=> new ").Append(vo.Name).Append('(').Append(args).Append(");\n");
             return;
         }
 
         sb.Append('\n').Append(Indent).Append("{\n");
-        foreach (var m in carried)
+        foreach (Member m in carried)
         {
             var prop = CSharpNaming.ToPascalCase(m.Name);
             sb.Append(Indent).Append(Indent).Append("if (!Equals(left.").Append(prop)
               .Append(", right.").Append(prop).Append("))\n");
+            sb.Append(Indent).Append(Indent).Append("{\n");
             sb.Append(Indent).Append(Indent).Append(Indent).Append("throw new DomainInvariantViolationException(\n");
             sb.Append(Indent).Append(Indent).Append(Indent).Append(Indent)
               .Append("type: nameof(").Append(vo.Name).Append("),\n");
             sb.Append(Indent).Append(Indent).Append(Indent).Append(Indent)
               .Append("rule: \"cannot combine ").Append(vo.Name).Append(" values with a different ")
               .Append(CSharpNaming.ToCamelCase(m.Name)).Append("\");\n");
+            sb.Append(Indent).Append(Indent).Append("}\n");
         }
         sb.Append(Indent).Append(Indent).Append("return new ").Append(vo.Name)
           .Append('(').Append(args).Append(");\n");

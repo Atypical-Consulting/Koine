@@ -57,7 +57,10 @@ public sealed partial class CSharpEmitter
         WriteObsolete(sb, entity.Deprecated, "");
         sb.Append("public sealed class ").Append(entity.Name);
         if (isRoot)
+        {
             sb.Append(" : IAggregateRoot");
+        }
+
         sb.Append('\n');
         sb.Append("{\n");
 
@@ -97,7 +100,9 @@ public sealed partial class CSharpEmitter
 
         // Shared invariant-checking method (DRY: called by the constructor and each command).
         if (entity.Invariants.Count > 0)
+        {
             WriteCheckInvariants(sb, entity, translator);
+        }
 
         // Derived (computed) properties.
         foreach (var m in derived)
@@ -108,7 +113,8 @@ public sealed partial class CSharpEmitter
             WriteXmlDoc(sb, m.Doc, Indent);
             WriteObsolete(sb, m.Deprecated, Indent);
             sb.Append(Indent).Append("public ").Append(csType).Append(' ')
-              .Append(CSharpNaming.ToPascalCase(m.Name)).Append(" => ").Append(body).Append(";\n");
+              .Append(CSharpNaming.ToPascalCase(m.Name)).Append('\n');
+            sb.Append(Indent).Append(Indent).Append("=> ").Append(body).Append(";\n");
         }
 
         // Domain-event recording (when any command or factory emits events).
@@ -117,31 +123,42 @@ public sealed partial class CSharpEmitter
         {
             sb.Append('\n');
             sb.Append(Indent).Append("private readonly List<IDomainEvent> _domainEvents = new();\n");
-            sb.Append(Indent).Append("public IReadOnlyList<IDomainEvent> DomainEvents => _domainEvents;\n");
-            sb.Append(Indent).Append("public void ClearDomainEvents() => _domainEvents.Clear();\n");
+            sb.Append(Indent).Append("public IReadOnlyList<IDomainEvent> DomainEvents\n");
+            sb.Append(Indent).Append(Indent).Append("=> _domainEvents;\n");
+            sb.Append(Indent).Append("public void ClearDomainEvents()\n");
+            sb.Append(Indent).Append(Indent).Append("=> _domainEvents.Clear();\n");
         }
 
         // Commands: intention-revealing state-changing methods.
         foreach (var cmd in entity.Commands)
+        {
             WriteCommand(sb, entity, cmd, translator, typeMapper, index);
+        }
 
         // Factories: intention-revealing creation through validated static methods.
         foreach (var factory in entity.Factories)
+        {
             WriteFactory(sb, entity, factory, ctorMembers, memberNames, translator, typeMapper, index);
+        }
 
         // Identity-based equality.
         sb.Append('\n');
         sb.Append(Indent).Append("public bool Equals(").Append(entity.Name)
-          .Append("? other) => other is not null && Id.Equals(other.Id);\n");
-        sb.Append(Indent).Append("public override bool Equals(object? obj) => Equals(obj as ")
+          .Append("? other)\n");
+        sb.Append(Indent).Append(Indent).Append("=> other is not null && Id.Equals(other.Id);\n");
+        sb.Append(Indent).Append("public override bool Equals(object? obj)\n");
+        sb.Append(Indent).Append(Indent).Append("=> Equals(obj as ")
           .Append(entity.Name).Append(");\n");
-        sb.Append(Indent).Append("public override int GetHashCode() => Id.GetHashCode();\n");
+        sb.Append(Indent).Append("public override int GetHashCode()\n");
+        sb.Append(Indent).Append(Indent).Append("=> Id.GetHashCode();\n");
         // Operators so `==`/`!=` compare by identity too (else they'd fall back to
         // reference equality), matching enums and value objects.
         sb.Append(Indent).Append("public static bool operator ==(").Append(entity.Name).Append("? left, ")
-          .Append(entity.Name).Append("? right) => left is null ? right is null : left.Equals(right);\n");
+          .Append(entity.Name).Append("? right)\n");
+        sb.Append(Indent).Append(Indent).Append("=> left is null ? right is null : left.Equals(right);\n");
         sb.Append(Indent).Append("public static bool operator !=(").Append(entity.Name).Append("? left, ")
-          .Append(entity.Name).Append("? right) => !(left == right);\n");
+          .Append(entity.Name).Append("? right)\n");
+        sb.Append(Indent).Append(Indent).Append("=> !(left == right);\n");
 
         sb.Append("}\n");
 
@@ -185,22 +202,28 @@ public sealed partial class CSharpEmitter
             sb.Append(Indent).Append("public ").Append(idName).Append("(string value)\n");
             sb.Append(Indent).Append("{\n");
             sb.Append(Indent).Append(Indent).Append("if (string.IsNullOrWhiteSpace(value))\n");
+            sb.Append(Indent).Append(Indent).Append("{\n");
             sb.Append(Indent).Append(Indent).Append(Indent).Append("throw new DomainInvariantViolationException(\n");
             sb.Append(Indent).Append(Indent).Append(Indent).Append(Indent).Append("type: nameof(").Append(idName).Append("),\n");
             sb.Append(Indent).Append(Indent).Append(Indent).Append(Indent).Append("rule: \"identity value cannot be blank\");\n");
+            sb.Append(Indent).Append(Indent).Append("}\n");
             sb.Append(Indent).Append(Indent).Append("Value = value;\n");
             sb.Append(Indent).Append("}\n\n");
         }
         else
         {
             sb.Append(Indent).Append("public ").Append(idName).Append('(').Append(backingType)
-              .Append(" value) => Value = value;\n\n");
+              .Append(" value)\n");
+            sb.Append(Indent).Append(Indent).Append("=> Value = value;\n\n");
         }
 
         // Only a Guid identity is generated client-side; sequence/natural keys are
         // supplied by the store or the caller respectively.
         if (strategy == IdentityStrategy.Guid)
-            sb.Append(Indent).Append("public static ").Append(idName).Append(" New() => new(Guid.NewGuid());\n\n");
+        {
+            sb.Append(Indent).Append("public static ").Append(idName).Append(" New()\n");
+            sb.Append(Indent).Append(Indent).Append("=> new(Guid.NewGuid());\n\n");
+        }
 
         sb.Append(Indent).Append("protected override IEnumerable<object?> GetEqualityComponents()\n");
         sb.Append(Indent).Append("{\n");
