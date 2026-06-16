@@ -227,22 +227,47 @@ public sealed class GlossaryEmitter : IEmitter
     }
 
     /// <summary>A compact, target-agnostic rendering of an expression (for unnamed rules).</summary>
-    private static string Describe(Expr e) => e switch
+    private static string Describe(Expr e) => DescribeVisitor.Instance.Visit(e);
+
+    /// <summary>
+    /// Renders an expression compactly for the glossary. Exhaustive
+    /// (<see cref="ExprVisitor{T}"/>): every node — including <c>let … in …</c> — renders rather
+    /// than collapsing to an ellipsis placeholder.
+    /// </summary>
+    private sealed class DescribeVisitor : ExprVisitor<string>
     {
-        IdentifierExpr id => id.Name,
-        LiteralExpr { Kind: LiteralKind.String } lit => $"\"{lit.Text}\"",
-        LiteralExpr lit => lit.Text,
-        MemberAccessExpr ma => $"{Describe(ma.Target)}.{ma.MemberName}",
-        CallExpr c => $"{Describe(c.Target)}.{c.Method}({string.Join(", ", c.Args.Select(Describe))})",
-        LambdaExpr l => $"{l.Parameter} => {Describe(l.Body)}",
-        ConditionalExpr cd => $"if {Describe(cd.Condition)} then {Describe(cd.Then)} else {Describe(cd.Else)}",
-        CoalesceExpr co => $"{Describe(co.Left)} ?? {Describe(co.Right)}",
-        UnaryExpr u => (u.Op == UnaryOp.Not ? "!" : "-") + Describe(u.Operand),
-        BinaryExpr b => $"{Describe(b.Left)} {Operator(b.Op)} {Describe(b.Right)}",
-        MatchExpr m => $"{Describe(m.Target)} matches /{m.Pattern}/",
-        GuardExpr g => $"{Describe(g.Body)} when {Describe(g.Condition)}",
-        _ => "…"
-    };
+        public static readonly DescribeVisitor Instance = new();
+
+        private DescribeVisitor() { }
+
+        protected override string VisitIdentifier(IdentifierExpr n) => n.Name;
+
+        protected override string VisitLiteral(LiteralExpr n) =>
+            n.Kind == LiteralKind.String ? $"\"{n.Text}\"" : n.Text;
+
+        protected override string VisitMemberAccess(MemberAccessExpr n) => $"{Visit(n.Target)}.{n.MemberName}";
+
+        protected override string VisitCall(CallExpr n) =>
+            $"{Visit(n.Target)}.{n.Method}({string.Join(", ", n.Args.Select(Visit))})";
+
+        protected override string VisitLambda(LambdaExpr n) => $"{n.Parameter} => {Visit(n.Body)}";
+
+        protected override string VisitConditional(ConditionalExpr n) =>
+            $"if {Visit(n.Condition)} then {Visit(n.Then)} else {Visit(n.Else)}";
+
+        protected override string VisitCoalesce(CoalesceExpr n) => $"{Visit(n.Left)} ?? {Visit(n.Right)}";
+
+        protected override string VisitUnary(UnaryExpr n) => (n.Op == UnaryOp.Not ? "!" : "-") + Visit(n.Operand);
+
+        protected override string VisitBinary(BinaryExpr n) => $"{Visit(n.Left)} {Operator(n.Op)} {Visit(n.Right)}";
+
+        protected override string VisitMatch(MatchExpr n) => $"{Visit(n.Target)} matches /{n.Pattern}/";
+
+        protected override string VisitGuard(GuardExpr n) => $"{Visit(n.Body)} when {Visit(n.Condition)}";
+
+        protected override string VisitLet(LetExpr n) =>
+            $"let {string.Join(", ", n.Bindings.Select(b => $"{b.Name} = {Visit(b.Value)}"))} in {Visit(n.Body)}";
+    }
 
     private static string Operator(BinaryOp op) => op switch
     {
