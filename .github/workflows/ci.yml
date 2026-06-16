@@ -18,7 +18,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Setup .NET
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@v5
         with:
           # All projects target net10.0; pin the 10.0.x channel and allow preview
           # builds in case the GA SDK is not yet on the runner image.
