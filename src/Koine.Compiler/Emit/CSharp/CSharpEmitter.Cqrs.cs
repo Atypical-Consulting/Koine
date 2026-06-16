@@ -36,7 +36,7 @@ public sealed partial class CSharpEmitter
         sb.Append('\n');
         sb.Append(Indent).Append("Task<int> SaveChangesAsync(CancellationToken ct = default);\n");
         sb.Append("}\n");
-        return new EmittedFile($"{FolderFor(ns)}/IUnitOfWork.cs", Assemble(emit, ns, sb.ToString(), usesLinq: false));
+        return new EmittedFile(PathFor(ns, KindFolder.Abstractions, "IUnitOfWork.cs"), Assemble(emit, ns, sb.ToString(), usesLinq: false));
     }
 
     /// <summary>
@@ -72,7 +72,7 @@ public sealed partial class CSharpEmitter
         }
 
         sb.Append("}\n");
-        return new EmittedFile($"{FolderFor(ns)}/{iface}.cs", Assemble(emit, ns, sb.ToString(), usesLinq: false));
+        return new EmittedFile(PathFor(ns, KindFolder.Services, $"{iface}.cs"), Assemble(emit, ns, sb.ToString(), usesLinq: false));
     }
 
     /// <summary>
@@ -128,7 +128,7 @@ public sealed partial class CSharpEmitter
         sb.Append("}\n");
 
         var usesLinq = rm.Fields.Any(f => f.Projection is not null && ExprUsesLinq(f.Projection));
-        return new EmittedFile($"{FolderFor(ns)}/{rm.Name}.cs", Assemble(emit, ns, sb.ToString(), usesLinq));
+        return new EmittedFile(PathFor(ns, KindFolder.ReadModels, $"{rm.Name}.cs"), Assemble(emit, ns, sb.ToString(), usesLinq));
     }
 
     /// <summary>
@@ -168,7 +168,7 @@ public sealed partial class CSharpEmitter
             $"{typeMapper.Map(p.Type)} {CSharpNaming.ToPascalCase(p.Name)}"));
         sb.Append("public sealed record ").Append(q.Name).Append('(').Append(criteria).Append(");\n");
 
-        return new EmittedFile($"{FolderFor(ns)}/{q.Name}.cs", Assemble(emit, ns, sb.ToString(), usesLinq: false));
+        return new EmittedFile(PathFor(ns, KindFolder.Queries, $"{q.Name}.cs"), Assemble(emit, ns, sb.ToString(), usesLinq: false));
     }
 
     /// <summary>True when the model declares any query object (gates the query-handler runtime type).</summary>
