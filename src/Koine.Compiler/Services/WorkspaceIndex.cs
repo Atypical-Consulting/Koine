@@ -94,30 +94,64 @@ public sealed class WorkspaceIndex
     internal static SourceSpan? StrongSpan(SemanticModel sema, string name) => sema.GetSymbol(name)?.DeclSpan;
 
     /// <summary>
-    /// Every reference to <paramref name="name"/> across the workspace: each identifier
-    /// token whose text equals the name, in any file. References are only returned when
-    /// the name resolves to a strong declaration (a declared type, an unambiguous enum
-    /// member, or a spec) somewhere in the workspace — otherwise the result is empty, so a
-    /// random local variable never reports spurious "references". Koine type/enum/spec
-    /// names are flat and globally unique within a model, so a token-text match is a
-    /// faithful reference set; member-access selectors on unrelated receivers are the only
-    /// possible false positive and are rare in practice.
+    /// Every reference to the symbol declared/used at <paramref name="offset"/> in
+    /// <paramref name="activeUri"/>, across the workspace (the declaration's own name included).
+    ///
+    /// <para>The cursor is first resolved to a target <see cref="Symbol"/> (via the active
+    /// document's <see cref="SemanticModel.DefinitionAt(int)"/>, falling back to
+    /// <see cref="SemanticModel.GetSymbol(string, string?)"/> with the lexical
+    /// <paramref name="enclosingType"/>). The two target kinds are then handled differently:</para>
+    ///
+    /// <para><b>Member target (a field):</b> fully resolved — file- and type-scoped. Each candidate
+    /// token whose text equals the name is itself resolved in its own document, honoring its
+    /// enclosing-type scope, and kept only when it resolves to the SAME member declaration. So
+    /// renaming <c>amount</c> on type <c>Money</c> never touches an unrelated <c>amount</c> on type
+    /// <c>Order</c>.</para>
+    ///
+    /// <para><b>Non-member target (type / enum-member / spec / ID):</b> a workspace-wide token-text
+    /// match, MINUS any candidate token that, in its own document, is the name of a declaration in a
+    /// DIFFERENT namespace than the target (a field/parameter/let-binding name, an enum-member name
+    /// when the target is not an enum member, or a type-name when the target IS an enum member). This
+    /// is a single-file role check, not cross-file resolution — so a cross-file <c>TypeRef</c> (which
+    /// is not a declaration name and cannot be classified) is conservatively KEPT, preserving
+    /// cross-file type rename. It prevents the corruption where renaming a type <c>Status</c> also
+    /// rewrote a same-named enum member or field. Member-access selectors (the <c>total</c> in
+    /// <c>order.total</c>) need receiver-type inference we do not have here and are out of scope.</para>
     /// </summary>
-    public IReadOnlyList<Reference> FindReferences(string activeUri, string name)
+    public IReadOnlyList<Reference> FindReferences(string activeUri, string name, int? offset = null, string? enclosingType = null)
     {
-        if (!IsRenameableName(activeUri, name))
+        Symbol? target = ResolveTarget(activeUri, name, offset, enclosingType);
+        if (target is null)
         {
             return Array.Empty<Reference>();
+        }
+
+        // A member is file- and type-scoped; everything else (type / enum member / spec / ID) is a
+        // flat, globally-unique name, so a token-text match across the workspace is faithful — minus
+        // same-named declaration names from a different namespace (handled below).
+        if (target is MemberSymbol member)
+        {
+            return MemberReferences(activeUri, member);
+        }
+
+        // An enum member shares the same name across unrelated enums (Phase.Active vs State.Active),
+        // so a flat text match would corrupt the sibling enum. Resolve each candidate to its owning
+        // enum and keep only those that are the SAME declaration.
+        if (target is EnumMemberSymbol enumMember)
+        {
+            return EnumMemberReferences(enumMember);
         }
 
         var refs = new List<Reference>();
         foreach (var (uri, text) in _documents)
         {
+            _byUri.TryGetValue(uri, out SemanticModel? sema);
             foreach (IToken tok in IdentifierTokens(text))
             {
-                if (string.Equals(tok.Text, name, StringComparison.Ordinal))
+                if (string.Equals(tok.Text, name, StringComparison.Ordinal)
+                    && !IsDifferentNamespaceDeclName(sema, tok, target))
                 {
-                    refs.Add(new Reference(uri, tok.Line, tok.Column, tok.Column + (tok.Text?.Length ?? 0)));
+                    refs.Add(ToReference(uri, tok));
                 }
             }
         }
@@ -126,9 +160,169 @@ public sealed class WorkspaceIndex
     }
 
     /// <summary>
-    /// True when <paramref name="name"/> names a strong, renameable declaration somewhere in
-    /// the workspace (a declared type, an unambiguous enum member, or a spec) — the gate for
-    /// both find-references and rename.
+    /// True when <paramref name="tok"/> belongs, in its own document's <paramref name="sema"/>, to a
+    /// DIFFERENT namespace than the non-member <paramref name="target"/> — so renaming the target must
+    /// not rewrite it. The token's structural role is read from its own model:
+    /// <list type="bullet">
+    /// <item>a declaration NAME (<see cref="SemanticModel.DeclarationNameAt"/>) of a field /
+    /// parameter / let-binding, or an enum member when the target is not one, or a type/spec name
+    /// when the target IS an enum member — excluded;</item>
+    /// <item>a <see cref="TypeRef"/> occurrence — kept for a type/spec/ID target (this is the
+    /// cross-file type reference we must rename) but excluded for an enum-member target;</item>
+    /// <item>anything else unclassifiable (an identifier-expression reference) — conservatively
+    /// KEPT.</item>
+    /// </list>
+    /// </summary>
+    private static bool IsDifferentNamespaceDeclName(SemanticModel? sema, IToken tok, Symbol target)
+    {
+        if (sema is null)
+        {
+            return false; // a file that failed to parse: keep, can't classify
+        }
+
+        var targetIsEnumMember = target is EnumMemberSymbol;
+
+        if (sema.DeclarationNameAt(tok.StartIndex) is { } declName)
+        {
+            return declName switch
+            {
+                // Per-scope binding names are never in the type / enum-member namespace.
+                Member or Param or LetBinding => true,
+                // An enum member is the target's namespace only when the target itself is one.
+                EnumMember => !targetIsEnumMember,
+                // A declared type / spec name shares the target's namespace ONLY when the target is a
+                // type/spec/ID — exclude it precisely when the target is an enum member.
+                TypeDecl or SpecDecl => targetIsEnumMember,
+                _ => false,
+            };
+        }
+
+        // Not a declaration name. A type reference belongs to the type namespace, so it must be
+        // excluded for an enum-member target (renaming the member must not touch a same-named type's
+        // uses) but kept for a type/spec/ID target (the cross-file type reference to rename).
+        return targetIsEnumMember && sema.NodeAt(tok.StartIndex) is TypeRef;
+    }
+
+    /// <summary>
+    /// Resolves the rename/find-references target under the cursor to a <see cref="Symbol"/>:
+    /// the precise position→node resolution first (so a field reference inside an expression
+    /// resolves to its member, and a declaration site resolves to its OWN declaration even when its
+    /// name collides with another — e.g. an enum member vs a same-named type), then the
+    /// lexically-scoped name lookup. <c>null</c> when the cursor is not on a renameable name.
+    /// </summary>
+    private Symbol? ResolveTarget(string activeUri, string name, int? offset, string? enclosingType)
+    {
+        if (_byUri.TryGetValue(activeUri, out SemanticModel? active))
+        {
+            if (offset is { } off && active.DefinitionAt(off) is { } byOffset)
+            {
+                return byOffset;
+            }
+
+            // The cursor sits on a declaration's own name: resolve to THAT declaration by position,
+            // so a same-named collision (enum member vs type) does not mis-target the rename.
+            if (offset is { } declOff && active.DeclaredSymbolAt(declOff) is { } byDecl)
+            {
+                return byDecl;
+            }
+
+            if (active.GetSymbol(name, enclosingType) is { } byName)
+            {
+                return byName;
+            }
+        }
+
+        // Fall back to the workspace-wide gate: a token whose declaration lives in another file
+        // (e.g. a cross-file type reference) still names a renameable symbol.
+        return _byUri.Values
+            .Select(sema => sema.GetSymbol(name))
+            .FirstOrDefault(s => s is not null);
+    }
+
+    /// <summary>
+    /// References to a field <paramref name="member"/>, confined to the file that declares it:
+    /// the declaration's own name plus every identifier token that resolves (in that file, with
+    /// its own enclosing-type scope) to the SAME member declaration. Cross-file is impossible —
+    /// a member only exists within its declaring type's file.
+    /// </summary>
+    private IReadOnlyList<Reference> MemberReferences(string activeUri, MemberSymbol member)
+    {
+        if (!_documents.TryGetValue(activeUri, out var text) || !_byUri.TryGetValue(activeUri, out SemanticModel? sema))
+        {
+            return Array.Empty<Reference>();
+        }
+
+        var refs = new List<Reference>();
+        foreach (IToken tok in IdentifierTokens(text))
+        {
+            if (!string.Equals(tok.Text, member.Name, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            var tokOffset = tok.StartIndex;
+
+            // The declaration's own name is always a reference (the DefinitionAt path resolves
+            // expression references, not the declaration token itself).
+            var isDecl = tokOffset >= member.DeclSpan.Offset
+                && tokOffset < member.DeclSpan.Offset + member.DeclSpan.Length;
+            if (isDecl || sema.DefinitionAt(tokOffset) is MemberSymbol m
+                && string.Equals(m.OwnerType, member.OwnerType, StringComparison.Ordinal)
+                && m.DeclSpan == member.DeclSpan)
+            {
+                refs.Add(ToReference(activeUri, tok));
+            }
+        }
+
+        return refs;
+    }
+
+    /// <summary>
+    /// References to an enum member, scoped to the SAME declaration: every identifier token whose
+    /// text matches and which resolves (in its own document, by position) to an enum member of the
+    /// same owning enum (compared by <see cref="Symbol.DeclSpan"/>). This keeps a rename of
+    /// <c>Phase.Active</c> from touching an unrelated <c>State.Active</c>. The declaration token
+    /// resolves via <see cref="SemanticModel.DeclaredSymbolAt"/>; in-expression references via
+    /// <see cref="SemanticModel.DefinitionAt"/>. (Member-access selectors like <c>Phase.Active</c>
+    /// need receiver typing we lack and are out of scope — see the class remarks.)
+    /// </summary>
+    private IReadOnlyList<Reference> EnumMemberReferences(EnumMemberSymbol target)
+    {
+        var refs = new List<Reference>();
+        foreach (var (uri, text) in _documents)
+        {
+            if (!_byUri.TryGetValue(uri, out SemanticModel? sema))
+            {
+                continue;
+            }
+
+            foreach (IToken tok in IdentifierTokens(text))
+            {
+                if (!string.Equals(tok.Text, target.Name, StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                var off = tok.StartIndex;
+                Symbol? resolved = sema.DeclaredSymbolAt(off) ?? sema.DefinitionAt(off);
+                if (resolved is EnumMemberSymbol em && em.DeclSpan == target.DeclSpan)
+                {
+                    refs.Add(ToReference(uri, tok));
+                }
+            }
+        }
+
+        return refs;
+    }
+
+    private static Reference ToReference(string uri, IToken tok) =>
+        new(uri, tok.Line, tok.Column, tok.Column + (tok.Text?.Length ?? 0));
+
+    /// <summary>
+    /// True when <paramref name="name"/> names a strong, globally-unique declaration somewhere in
+    /// the workspace (a declared type, an unambiguous enum member, or a spec). Note this does NOT
+    /// gate member-field renames, which are resolved precisely (offset + enclosing type) by
+    /// <see cref="FindReferences"/>; it is the model-wide name gate only.
     /// </summary>
     public bool IsRenameableName(string activeUri, string name) =>
         _byUri.Values.Any(sema => StrongSpan(sema, name) is not null);
