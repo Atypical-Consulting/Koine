@@ -140,7 +140,10 @@ internal static class Program
             config = KoineConfig.Discover(file);
         }
 
-        request = new BuildRequest(file, target ?? config.Target ?? "csharp", outDir ?? config.OutDir, glossaryFile);
+        // Per-target out-dir (R16.1): an explicit --out wins, then targets.<t>.out, then the flat out.
+        var resolvedTarget = target ?? config.Target ?? "csharp";
+        var resolvedOut = outDir ?? config.OptionsFor(resolvedTarget).OutDir ?? config.OutDir;
+        request = new BuildRequest(file, resolvedTarget, resolvedOut, glossaryFile);
         return true;
     }
 
