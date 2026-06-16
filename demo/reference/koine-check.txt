@@ -1,0 +1,5 @@
+$ koine check examples/versioning/v2 --baseline examples/versioning/v1
+breaking KOI1511: field 'coupon' of published integration event 'OrderPlaced' was removed.
+non-breaking: field 'note' of published integration event 'OrderPlaced' was added.
+error: 1 breaking change(s) to published surfaces
+(exit code: 1)

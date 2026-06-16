@@ -15,4 +15,13 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
 
+  <!-- Pack as an installable dotnet global tool: `dotnet tool install -g Koine.Cli`
+       then invoke as `koine`. Version/Authors/RepositoryUrl come from Directory.Build.props. -->
+  <PropertyGroup>
+    <PackAsTool>true</PackAsTool>
+    <ToolCommandName>koine</ToolCommandName>
+    <PackageId>Koine.Cli</PackageId>
+    <Description>Koine — a DSL for Domain-Driven Design. The `koine` CLI builds, formats, watches, scaffolds, and compatibility-checks .koi domain models.</Description>
+  </PropertyGroup>
+
 </Project>

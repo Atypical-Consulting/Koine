@@ -72,6 +72,10 @@ internal sealed class CSharpExpressionTranslator
     // generated static specification methods, where members hang off a parameter `x`).
     private readonly string? _memberReceiver;
 
+    // Monotonic counter giving each emitted value-object `sum` fold a unique pattern
+    // binding name (`__sum0`, `__sum1`, …), so sibling folds in one expression never collide.
+    private int _sumCounter;
+
     /// <param name="members">The members of the type being emitted.</param>
     /// <param name="enumMemberToType">Map from an enum member name to its owning enum type name.</param>
     /// <param name="specBodies">Spec name -&gt; body, for inlining spec references (R10.1).</param>
@@ -207,15 +211,64 @@ internal sealed class CSharpExpressionTranslator
     {
         if (expr is BinaryExpr bin)
         {
-            WriteOperand(bin.Left, mode, sb, EnumTypeName(bin.Right));
+            WriteBinaryChild(bin.Left, mode, sb, EnumTypeName(bin.Right), bin.Op, rightOperand: false);
             sb.Append(' ').Append(OperatorOf(bin.Op)).Append(' ');
-            WriteOperand(bin.Right, mode, sb, EnumTypeName(bin.Left));
+            WriteBinaryChild(bin.Right, mode, sb, EnumTypeName(bin.Left), bin.Op, rightOperand: true);
         }
         else
         {
             Write(expr, mode, sb);
         }
     }
+
+    /// <summary>
+    /// Renders one operand of a binary expression, parenthesizing a nested binary
+    /// child only when C# precedence/associativity actually requires it. A
+    /// higher-precedence child (e.g. <c>&gt;</c> under <c>||</c>) and a same-precedence
+    /// left child of a left-associative operator (e.g. <c>a + b</c> under <c>+ c</c>)
+    /// drop their redundant parens, flattening associative chains.
+    /// </summary>
+    private void WriteBinaryChild(Expr expr, NameMode mode, StringBuilder sb, string? enumHint, BinaryOp parentOp, bool rightOperand)
+    {
+        if (expr is BinaryExpr child && !NeedsParens(child.Op, parentOp, rightOperand))
+        {
+            // Render the child binary without its own wrapping parens (recurse top-level).
+            WriteBinaryChild(child.Left, mode, sb, EnumTypeName(child.Right), child.Op, rightOperand: false);
+            sb.Append(' ').Append(OperatorOf(child.Op)).Append(' ');
+            WriteBinaryChild(child.Right, mode, sb, EnumTypeName(child.Left), child.Op, rightOperand: true);
+            return;
+        }
+        WriteOperand(expr, mode, sb, enumHint);
+    }
+
+    /// <summary>
+    /// True when a nested binary <paramref name="childOp"/> must be parenthesized inside
+    /// a parent binary <paramref name="parentOp"/>. A strictly lower-precedence child
+    /// always needs parens; a same-precedence child needs them only as the right operand
+    /// of a left-associative operator (to preserve the original grouping).
+    /// </summary>
+    private static bool NeedsParens(BinaryOp childOp, BinaryOp parentOp, bool rightOperand)
+    {
+        var childPrec = Precedence(childOp);
+        var parentPrec = Precedence(parentOp);
+        if (childPrec < parentPrec)
+            return true;
+        // Equal precedence: all C# binary operators here are left-associative, so the
+        // right operand keeps parens (a - (b - c) != a - b - c), the left drops them.
+        return childPrec == parentPrec && rightOperand;
+    }
+
+    /// <summary>C# binary-operator precedence tiers (higher binds tighter), for redundant-paren elision.</summary>
+    private static int Precedence(BinaryOp op) => op switch
+    {
+        BinaryOp.Or => 1,
+        BinaryOp.And => 2,
+        BinaryOp.Eq or BinaryOp.Neq => 3,
+        BinaryOp.Lt or BinaryOp.Le or BinaryOp.Gt or BinaryOp.Ge => 4,
+        BinaryOp.Add or BinaryOp.Sub => 5,
+        BinaryOp.Mul or BinaryOp.Div => 6,
+        _ => 0
+    };
 
     /// <summary>True when a conditional's two branches are the bool literals true/false (in either order).</summary>
     private static bool TryBoolLiterals(ConditionalExpr c, out bool whenTrue)
@@ -267,10 +320,12 @@ internal sealed class CSharpExpressionTranslator
                 break;
 
             case BinaryExpr bin:
+                // Keep the outer parens (this node may be embedded in a unary/conditional
+                // operand) but elide redundant inner parens within associative chains.
                 sb.Append('(');
-                WriteOperand(bin.Left, mode, sb, EnumTypeName(bin.Right));
+                WriteBinaryChild(bin.Left, mode, sb, EnumTypeName(bin.Right), bin.Op, rightOperand: false);
                 sb.Append(' ').Append(OperatorOf(bin.Op)).Append(' ');
-                WriteOperand(bin.Right, mode, sb, EnumTypeName(bin.Left));
+                WriteBinaryChild(bin.Right, mode, sb, EnumTypeName(bin.Left), bin.Op, rightOperand: true);
                 sb.Append(')');
                 break;
 
@@ -470,16 +525,34 @@ internal sealed class CSharpExpressionTranslator
     private void WriteSum(CallExpr call, string target, NameMode mode, StringBuilder sb)
     {
         // Numeric selector -> LINQ Sum (returns 0 for an empty sequence).
-        // Value-object selector -> fold with the generated operator+. NOTE: a value
-        // object has no identity/zero element, so this fold throws on an EMPTY
-        // collection (unlike numeric Sum). Until Koine models a zero (roadmap R9),
-        // sum over a possibly-empty value-object collection is the caller's concern.
+        // Value-object selector -> fold with the generated operator+. A value object
+        // has no identity/zero element, so an EMPTY collection cannot fold; rather than
+        // leak LINQ's opaque "Sequence contains no elements" InvalidOperationException,
+        // we guard the fold and throw a DomainInvariantViolationException with a clear
+        // message. (Until Koine models a zero — roadmap R9 — there is no neutral seed.)
         var selectorType = InferSelectorType(call);
         if (_resolver.IsValueLike(selectorType))
-            sb.Append(target).Append(".Select(").Append(RenderLambda(call, mode))
-              .Append(").Aggregate((a, b) => a + b)");
+        {
+            // Materialize the projection, then guard emptiness with a list pattern: a
+            // non-empty list folds with the generated operator+ (over NON-nullable elements,
+            // so no nullable warnings), while an empty list throws a clear domain error
+            // rather than leaking LINQ's opaque "Sequence contains no elements".
+            // The whole thing is parenthesized so the low-precedence `throw`/`?:` stays
+            // self-contained when this sum is embedded in a larger expression.
+            var voName = selectorType!.Name;
+            var rule = $"cannot sum an empty collection of {voName} (no zero value)";
+            // Unique binding name so sibling sums in one expression never collide.
+            var bind = "__sum" + _sumCounter++;
+            sb.Append('(').Append(target).Append(".Select(").Append(RenderLambda(call, mode))
+              .Append(").ToList() is { Count: > 0 } ").Append(bind)
+              .Append(" ? ").Append(bind).Append(".Aggregate((a, b) => a + b)")
+              .Append(" : throw new DomainInvariantViolationException(type: \"")
+              .Append(voName).Append("\", rule: \"").Append(rule).Append("\"))");
+        }
         else
+        {
             sb.Append(target).Append(".Sum(").Append(RenderLambda(call, mode)).Append(')');
+        }
     }
 
     /// <summary>The inferred type a collection call's lambda selector produces.</summary>

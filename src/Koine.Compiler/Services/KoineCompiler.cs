@@ -141,6 +141,20 @@ public sealed class KoineCompiler
         return new SemanticValidator().Validate(model);
     }
 
+    /// <summary>
+    /// Parses and validates a whole workspace as ONE model (like <see cref="Compile(IReadOnlyList{SourceFile}, IEmitter)"/>
+    /// but without emitting), so cross-file errors surface. Returns every diagnostic; each
+    /// carries its originating <see cref="Diagnostic.File"/> (when the model builder stamped one).
+    /// Used by the LSP server to publish per-file diagnostics over the merged workspace.
+    /// </summary>
+    public IReadOnlyList<Diagnostic> DiagnoseWorkspace(IReadOnlyList<SourceFile> files)
+    {
+        var (model, syntax) = Parse(files);
+        if (model is null)
+            return syntax;
+        return new SemanticValidator().Validate(model);
+    }
+
     /// <summary>Runs the full pipeline for a single source through the given emitter.</summary>
     public CompileResult Compile(string source, IEmitter emitter) =>
         Compile(new[] { new SourceFile("<source>", source) }, emitter);

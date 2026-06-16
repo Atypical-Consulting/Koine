@@ -5,7 +5,7 @@
 
 [![Documentation](https://img.shields.io/badge/docs-koine-3245b8)](https://atypical-consulting.github.io/Koine/)
 [![.NET](https://img.shields.io/badge/.NET-10-512BD4)](https://dotnet.microsoft.com/)
-[![Tests](https://img.shields.io/badge/tests-450%20passing-2ea44f)](tests/)
+[![Tests](https://img.shields.io/badge/tests-503%20passing-2ea44f)](tests/)
 ![Target](https://img.shields.io/badge/emits-C%23-178600)
 
 **Koine** is a domain-specific language for **Domain-Driven Design**. Instead of hand-writing the
@@ -251,10 +251,12 @@ this lets a regex literal be read as a single token without colliding with the `
 
 ## Status
 
-Shipped through **epic R15** of the roadmap — the full tactical *and* strategic DDD toolkit on a C#
-emitter. The [feature catalogue](https://atypical-consulting.github.io/Koine/guides/feature-catalogue/)
-maps every construct (R1–R15) to the C# it emits. Next up is R16 (multi-target emitters: C# config,
-TypeScript, Rust) — see [`USER-STORIES.md`](USER-STORIES.md).
+Shipped through **R1–R15 + R17 tooling** of the roadmap — the full tactical *and* strategic DDD
+toolkit on a C# emitter, plus the editor tooling (TextMate grammar, `koine lsp` language server, and
+the `fmt`/`init`/`watch` commands). The
+[feature catalogue](https://atypical-consulting.github.io/Koine/guides/feature-catalogue/) maps every
+construct (R1–R17) to the C# it emits. Next up is R16 (multi-target emitters: C# config, TypeScript,
+Rust) — see [`USER-STORIES.md`](USER-STORIES.md).
 
 ## Demo
 

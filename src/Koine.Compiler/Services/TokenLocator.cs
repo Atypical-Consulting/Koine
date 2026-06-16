@@ -23,8 +23,8 @@ internal static class TokenLocator
     // Keywords that introduce a `{ }` block, used to label the enclosing scope.
     private static readonly HashSet<string> BlockKeywords = new(StringComparer.Ordinal)
     {
-        "context", "value", "quantity", "entity", "aggregate", "enum", "event",
-        "spec", "service", "policy", "repository", "states",
+        "context", "module", "value", "quantity", "entity", "aggregate", "enum", "event",
+        "spec", "service", "policy", "repository", "states", "readmodel",
     };
 
     // Block keywords whose declared type has fields that are in scope inside its body

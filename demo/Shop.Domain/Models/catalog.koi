@@ -1,5 +1,5 @@
 // Catalog bounded context — the products a shop sells.
-// Version 2 of the published model (R15): a `barcode` field was added since v2.
+// Version 2 of the published model (R15): a `barcode` field was added in v2.
 context Catalog version 2 {
 
   // R9.1 — enum members carrying associated data: each currency carries its

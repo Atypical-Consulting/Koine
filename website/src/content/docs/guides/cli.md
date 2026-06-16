@@ -1,9 +1,9 @@
 ---
 title: "CLI reference"
-description: "The koine command — build, check, lsp, and every flag, with exit codes and diagnostic format."
+description: "The koine command — build, check, fmt, init, watch, lsp, and every flag, with exit codes and diagnostic format."
 ---
 
-The `koine` CLI is the whole compiler. It has three subcommands — `build`, `check`, and `lsp` — plus `--version`. Everything you do with Koine, from emitting C# to gating a CI pipeline on breaking changes, runs through this one tool.
+The `koine` CLI is the whole compiler. It has six subcommands — `build`, `check`, `fmt`, `init`, `watch`, and `lsp` — plus `--version`. Everything you do with Koine, from emitting C# to scaffolding a project, formatting `.koi`, or gating a CI pipeline on breaking changes, runs through this one tool.
 
 In this repo you invoke it via `dotnet run`:
 
@@ -17,8 +17,11 @@ Everything after `--` is passed to `koine`. The examples below use `koine` for b
 
 ```bash
 koine --version
-koine build <file.koi|dir> [--target csharp|glossary] [--out <dir>] [--glossary <file.md>]
-koine check <file.koi|dir> --baseline <dir>   # flag breaking changes vs a published baseline
+koine build <file.koi|dir> [--target csharp|glossary] [--out <dir>] [--glossary <file.md>] [--config <file>]
+koine watch <file.koi|dir> [--target …] [--out …] [--config <file>]   # rebuild on every change
+koine fmt   <file.koi|dir> [--check]            # canonically format .koi (--check: verify only)
+koine init  [dir] [--force]                    # scaffold a starter project
+koine check <file.koi|dir> --baseline <dir>    # flag breaking changes vs a published baseline
 koine lsp                                      # Language Server (stdio) for editor diagnostics
 ```
 
@@ -50,6 +53,9 @@ Parses and validates the model, then — if you ask for output — emits files.
 | `--target` | `csharp` | The emitter: `csharp` or `glossary`. |
 | `--out <dir>` | *(none)* | Write the emitted files under this directory. Omit to only validate. |
 | `--glossary <file.md>` | *(none)* | Also write a Markdown ubiquitous-language glossary to this file. |
+| `--config <file>` | *(discovered)* | Read build defaults from this `koine.config` instead of the discovered one. See [`koine.config`](#koineconfig). |
+
+`--target` and `--out` may also be supplied by a `koine.config` beside the model — an explicit flag always wins. See [`koine.config`](#koineconfig) below.
 
 ### Validate only
 
@@ -88,6 +94,102 @@ koine build demo/Shop.Domain/Models --out Generated --glossary shop.glossary.md
 ```
 
 Alternatively, `--target glossary` makes the glossary the primary output (paired with `--out`). Either way the glossary is grouped by context (each heading shows its `version`), then by type, listing fields, derived fields, and business rules.
+
+### `koine.config`
+
+A `koine.config` file supplies defaults for the `build`/`watch` flags so you don't repeat `--target`/`--out` on every invocation. It is a tiny `key = value` format — one pair per line, `#` starts a comment:
+
+```ini
+# koine.config — build defaults for this domain model.
+target = csharp
+out = generated
+```
+
+**Discovery.** Unless you pass `--config <file>` explicitly, `build` and `watch` look for a file literally named `koine.config`, in order:
+
+1. the directory of the input path (or the input directory itself, when you point the command at a folder), then
+2. the current working directory.
+
+The first one found wins; if none is found, no defaults are applied. A flag on the command line always overrides the config.
+
+**Keys read today.** Only two flat keys are honoured: `target` (`csharp` or `glossary`) and `out` (the output directory). Every other key is **silently ignored**, which keeps the file forward-compatible — older tooling tolerates a newer config.
+
+:::note[`targets.*` is reserved for R16]
+A structured `targets.<name> = { … }` block (per-target namespace maps, `instantMode`, output layout) is sketched in the scaffolded config but **not yet implemented** — it is reserved for [R16](/Koine/guides/roadmap/#r16--multi-target-emitters) and ignored today. `koine init` writes a commented example of it for forward reference.
+:::
+
+## `koine fmt`
+
+Canonically formats `.koi` source. The formatter is a deterministic, **idempotent** token-stream reprinter: running it twice produces the same bytes as running it once. Point it at a file or a directory (every `.koi` underneath is formatted).
+
+```bash
+koine fmt demo/Shop.Domain/Models
+# formatted demo/Shop.Domain/Models/catalog.koi
+# formatted 1 of 7 file(s)
+```
+
+| Flag | Default | What it does |
+|------|---------|--------------|
+| *(positional)* | — | The `.koi` file or directory to format. Required. |
+| `--check` | off | **Verify only.** Writes nothing; reports each file that is not already formatted and exits non-zero if any need formatting. Use it in CI. |
+
+Without `--check`, `fmt` rewrites each unformatted file in place and prints what it changed; files already in canonical form are left untouched (`OK: N file(s) already formatted`).
+
+With `--check`, nothing is written. Each unformatted file is reported to stderr (`path: not formatted`); if any file would change, it prints an `error: N file(s) need formatting` message (telling you to run `koine fmt`) and exits `1`. A clean tree prints `OK: N file(s) already formatted` and exits `0` — drop it straight into a CI step.
+
+### Exit codes
+
+| Exit | Meaning |
+|------|---------|
+| `0` | Files formatted (or all already formatted; with `--check`, all already formatted). |
+| `1` | Path not found, no `.koi` files found, a usage error — or, with `--check`, at least one file needs formatting. |
+
+## `koine init`
+
+Scaffolds a starter Koine project: a `domain.koi` model, a `koine.config` with build defaults, and a `README.md`. The scaffold builds end-to-end out of the box.
+
+```bash
+koine init my-domain
+# initialized koine project in my-domain
+#   domain.koi     starter model
+#   koine.config   build defaults
+#   README.md      project notes
+# next: koine build my-domain/domain.koi
+```
+
+| Flag | Default | What it does |
+|------|---------|--------------|
+| *(positional)* | `.` | The target directory (created if missing). Defaults to the current directory. |
+| `--force` | off | Overwrite existing scaffold files. Without it, `init` refuses if any of `domain.koi`, `koine.config`, or `README.md` already exist. |
+
+Without `--force`, `init` will not clobber your work: if any scaffold file already exists it prints `error: refusing to overwrite existing file(s): … (use --force)` and exits `1`.
+
+### Exit codes
+
+| Exit | Meaning |
+|------|---------|
+| `0` | Project scaffolded. |
+| `1` | A scaffold file already exists and `--force` was not given, or a usage error. |
+
+## `koine watch`
+
+Like `build`, but it stays running and **re-emits on every change**. It watches the input's directory (recursively) for `*.koi` edits, debounces a burst of saves, and runs a fresh build for each batch — fast feedback while you model. It accepts the same flags as `build` (`--target`, `--out`, `--config`); `--out` makes it re-emit C# on save, while omitting it gives you continuous validation.
+
+```bash
+koine watch demo/Shop.Domain/Models --out demo/Shop.Domain/Generated
+# watching demo/Shop.Domain/Models for *.koi changes — press Ctrl+C to stop
+```
+
+Press **Ctrl+C** to stop; `watch` unwinds cleanly and exits `0`. Like `build`, `--target`/`--out` fall back to a discovered (or `--config`) `koine.config` when omitted.
+
+### Exit codes
+
+| Exit | Meaning |
+|------|---------|
+| `0` | Stopped cleanly with Ctrl+C. |
+| `1` | A usage error before the watch loop starts (e.g. missing path, unknown option). |
+
+A failing build *within* a watch session prints its diagnostics but keeps watching — `watch` doesn't exit on a per-build error, so you fix and save again.
 
 ## `koine check`
 
@@ -184,8 +286,8 @@ Diagnostics go to **stderr**; success messages (`OK: …`, `wrote N files to …
 
 | Code | When |
 |------|------|
-| `0` | Success — model valid, files written, or no breaking changes. |
-| `1` | Usage error, file/path not found, a parse/validation error, an unknown command, or a breaking change from `check`. |
+| `0` | Success — model valid, files written, formatted (or already formatted), project scaffolded, no breaking changes, or `watch` stopped cleanly. |
+| `1` | Usage error, file/path not found, a parse/validation error, an unknown command, a breaking change from `check`, a `--check` formatting failure, or `init` refusing to overwrite. |
 
 ## See also
 

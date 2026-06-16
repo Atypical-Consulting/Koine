@@ -9,7 +9,7 @@ namespace Koine.Cli;
 /// <c>targets.*</c> block — is ignored, keeping the file forward-compatible.
 /// Lines are <c>key = value</c>; <c>#</c> starts a comment.
 /// </summary>
-internal sealed record KoineConfig(string? Target, string? OutDir)
+internal sealed record KoineConfig(string? Target, string? OutDir, string? Baseline = null)
 {
     public static readonly KoineConfig Empty = new(null, null);
 
@@ -20,6 +20,7 @@ internal sealed record KoineConfig(string? Target, string? OutDir)
     {
         string? target = null;
         string? outDir = null;
+        string? baseline = null;
 
         foreach (var raw in text.Split('\n'))
         {
@@ -40,12 +41,13 @@ internal sealed record KoineConfig(string? Target, string? OutDir)
             {
                 case "target": target = value; break;
                 case "out": outDir = value; break;
+                case "baseline": baseline = value; break;
                 // Unknown / structured keys (the R16 `targets.*` block, etc.) are
                 // intentionally ignored so older tooling tolerates newer configs.
             }
         }
 
-        return new KoineConfig(target, outDir);
+        return new KoineConfig(target, outDir, baseline);
     }
 
     /// <summary>

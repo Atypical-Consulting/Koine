@@ -183,6 +183,8 @@ public sealed class Inventory : IAggregateRoot
     public bool Equals(Inventory? other) => other is not null && Id.Equals(other.Id);
     public override bool Equals(object? obj) => Equals(obj as Inventory);
     public override int GetHashCode() => Id.GetHashCode();
+    public static bool operator ==(Inventory? left, Inventory? right) => left is null ? right is null : left.Equals(right);
+    public static bool operator !=(Inventory? left, Inventory? right) => !(left == right);
 }
 
 // ==== Sales/InventoryId.cs ====
@@ -359,6 +361,6 @@ namespace Sales;
 /// <summary>Reusable domain specifications (predicates) for this context.</summary>
 public static class SalesSpecifications
 {
-    public static bool IsLarge(Order x) => (x.LineCount > 10) || (x.Total > 1000);
+    public static bool IsLarge(Order x) => x.LineCount > 10 || x.Total > 1000;
 }
 

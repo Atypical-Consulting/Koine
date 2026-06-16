@@ -208,6 +208,8 @@ public sealed class Invoice
     public bool Equals(Invoice? other) => other is not null && Id.Equals(other.Id);
     public override bool Equals(object? obj) => Equals(obj as Invoice);
     public override int GetHashCode() => Id.GetHashCode();
+    public static bool operator ==(Invoice? left, Invoice? right) => left is null ? right is null : left.Equals(right);
+    public static bool operator !=(Invoice? left, Invoice? right) => !(left == right);
 }
 
 // ==== Sales/InvoiceNo.cs ====
@@ -253,12 +255,14 @@ public sealed class Order : IAggregateRoot
     {
         Id = id;
         Customer = customer;
-        Lines = new List<OrderLine>(lines);
+        Lines = new List<OrderLine>(lines).AsReadOnly();
     }
 
     public bool Equals(Order? other) => other is not null && Id.Equals(other.Id);
     public override bool Equals(object? obj) => Equals(obj as Order);
     public override int GetHashCode() => Id.GetHashCode();
+    public static bool operator ==(Order? left, Order? right) => left is null ? right is null : left.Equals(right);
+    public static bool operator !=(Order? left, Order? right) => !(left == right);
 }
 
 // ==== Sales/OrderId.cs ====
@@ -335,6 +339,8 @@ public sealed class Product
     public bool Equals(Product? other) => other is not null && Id.Equals(other.Id);
     public override bool Equals(object? obj) => Equals(obj as Product);
     public override int GetHashCode() => Id.GetHashCode();
+    public static bool operator ==(Product? left, Product? right) => left is null ? right is null : left.Equals(right);
+    public static bool operator !=(Product? left, Product? right) => !(left == right);
 }
 
 // ==== Sales/ProductId.cs ====

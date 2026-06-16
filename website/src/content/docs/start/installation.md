@@ -3,9 +3,9 @@ title: "Installation"
 description: "Get the Koine compiler building and run it from the .NET CLI."
 ---
 
-Koine ships as source today. You clone the repository, build it with the .NET SDK, and invoke the
-compiler through `dotnet run`. There is no NuGet package or global tool yet — see
-[No NuGet package yet](#no-nuget-package-yet) below.
+Koine ships as source. You clone the repository and build it with the .NET SDK; the CLI is packaged
+as a [.NET tool](#install-as-a-global-tool), so you can also install a short `koine` command instead
+of typing `dotnet run` each time — see [Install the `koine` command](#install-the-koine-command) below.
 
 ## Prerequisites
 
@@ -79,9 +79,12 @@ Koine — a DSL for Domain-Driven Design.
 
 Usage:
   koine --version
-  koine build <file.koi|dir> [--target csharp|glossary] [--out <dir>] [--glossary <file.md>]
-  koine check <file.koi|dir> --baseline <dir>   # flag breaking changes vs a published baseline
-  koine lsp                       # Language Server (stdio) for editor diagnostics
+  koine build <file.koi|dir> [--target csharp|glossary] [--out <dir>] [--glossary <file.md>] [--config <file>]
+  koine watch <file.koi|dir> [--target …] [--out …] [--config <file>]   # rebuild on every change
+  koine fmt   <file.koi|dir> [--check]            # canonically format .koi (--check: verify only)
+  koine init  [dir] [--force]                    # scaffold a starter project
+  koine check <file.koi|dir> --baseline <dir>    # flag breaking changes vs a published baseline
+  koine lsp                                      # Language Server (stdio) for editor diagnostics
 ```
 
 ## Build your first model
@@ -118,17 +121,45 @@ compiles every `.koi` file underneath it as one model — that's how multi-file 
 [demo](https://github.com/Atypical-Consulting/Koine/tree/main/demo) are built.
 :::
 
-## No NuGet package yet
+## Install the `koine` command
 
-Koine is feature-complete through epic R15, but it is not yet published to NuGet and there is no
-`dotnet tool install` path. For now you **build from source** as shown above and invoke the compiler
-with `dotnet run --project src/Koine.Cli -- …`. If you want a shorter command, publish the CLI once
-and call the produced binary directly:
+Typing `dotnet run --project src/Koine.Cli -- …` for every invocation gets old fast. There are two
+ways to get a short `koine` command.
+
+### Install as a global tool
+
+The CLI is packaged as a .NET tool (`PackAsTool`, command name `koine`). Pack it from source, then
+install it globally:
+
+```bash
+dotnet pack src/Koine.Cli -c Release -o ./nupkg
+dotnet tool install -g --add-source ./nupkg Koine.Cli
+koine --version
+```
+
+```text
+0.17.3
+```
+
+`koine` is now on your `PATH`, so every example in the docs works verbatim — `koine build …`,
+`koine fmt …`, `koine init …`. Update later with `dotnet tool update -g --add-source ./nupkg Koine.Cli`,
+or remove it with `dotnet tool uninstall -g Koine.Cli`.
+
+### Or publish a self-contained binary
+
+If you'd rather not install a tool, publish the CLI once and alias the produced binary to `koine`:
 
 ```bash
 dotnet publish src/Koine.Cli -c Release -o ./bin
-./bin/Koine.Cli --version
+alias koine="$PWD/bin/Koine.Cli"
+koine --version
 ```
+
+:::note[Feature status]
+Koine ships **R1–R15 plus the R17 developer tooling** (`koine fmt`, `init`, `watch`, and the `lsp`
+language server). The multi-target emitters of [R16](/Koine/guides/roadmap/#r16--multi-target-emitters)
+(TypeScript, Rust, C# emitter configuration) are still on the roadmap.
+:::
 
 ## Next steps
 

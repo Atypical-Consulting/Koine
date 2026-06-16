@@ -1,11 +1,14 @@
 ---
 title: "Roadmap"
-description: "What Koine ships today (R1–R15) and what comes next (R16 multi-target emitters, R17 editor tooling)."
+description: "What Koine ships today (R1–R15 plus R17 editor tooling) and what comes next (R16 multi-target emitters)."
 ---
 
 Koine is built as a sequence of **epics** (R1–R17), each a cohesive slice of Domain-Driven Design
-capability. The compiler is **feature-complete through R15**: every tactical and strategic construct
-described in the reference is implemented, tested, and demonstrated in the [Shop demo](https://github.com/Atypical-Consulting/Koine/tree/main/demo).
+capability. The compiler ships the **full tactical and strategic toolkit (R1–R15)** plus the
+**R17 editor tooling** — the TextMate grammar, the `koine lsp` language server, and the
+`fmt`/`init`/`watch` commands. Every construct described in the reference is implemented, tested,
+and demonstrated in the [Shop demo](https://github.com/Atypical-Consulting/Koine/tree/main/demo).
+The one remaining epic is **R16** (multi-target emitters).
 
 This page is the honest status report — what you can rely on now, and what is still ahead.
 
@@ -92,11 +95,11 @@ For the complete, copy-pasteable showcase, browse the
 and the [emitted C#](https://github.com/Atypical-Consulting/Koine/tree/main/demo/Shop.Domain/Generated)
 right next to them.
 
-## Next: R16–R17
+## Next: R16
 
-These epics are specified but **not yet implemented**. The acceptance criteria below are summarized from
-[`USER-STORIES.md`](https://github.com/Atypical-Consulting/Koine/blob/main/USER-STORIES.md), which holds
-the full gap analysis.
+This is the one remaining epic — specified but **not yet implemented**. The acceptance criteria below
+are summarized from [`USER-STORIES.md`](https://github.com/Atypical-Consulting/Koine/blob/main/USER-STORIES.md),
+which holds the full gap analysis.
 
 ### R16 — Multi-target emitters
 
@@ -121,18 +124,20 @@ Until R16 lands, `koine build --target` accepts only `csharp` and `glossary`; an
 error. The roadmap deliberately sequences emitters **last** so they build on a mature, stable AST.
 :::
 
-### R17 — Editor tooling & developer experience
+## Shipped: R17 — Editor tooling & developer experience
 
-Three stories that close the gap between "a compiler exists" and "developers enjoy writing `.koi`":
+R17 closes the gap between "a compiler exists" and "developers enjoy writing `.koi`". **All three
+stories are now delivered.**
 
-- **R17.1 — TextMate grammar.** ✅ **Already delivered** — syntax highlighting for VS Code and Rider.
+- **R17.1 — TextMate grammar.** ✅ **Delivered** — syntax highlighting for VS Code and Rider.
   See [`tooling/README.md`](https://github.com/Atypical-Consulting/Koine/blob/main/tooling/README.md).
-- **R17.2 — Language Server.** ✅ A `koine lsp` server is **already in place**, reusing the compiler for
-  diagnostics, hover, completion, and cross-file go-to-definition. R17.2 tracks rounding it out further
-  (richer completion and hover coverage). See the [editor tooling](https://github.com/Atypical-Consulting/Koine/blob/main/tooling/README.md) docs.
-- **R17.3 — `koine fmt`, `init`, and `watch`.** A canonical idempotent formatter (with `--check`), a
-  one-command project scaffold, and a `watch` mode that re-emits on change with fast feedback. **Not yet
-  implemented.**
+- **R17.2 — Language Server.** ✅ **Delivered** — a `koine lsp` server, reusing the compiler for
+  diagnostics, hover, completion, and cross-file go-to-definition, backed by a workspace index over
+  all `.koi` files. See the [editor tooling](/Koine/guides/editor-tooling/) guide.
+- **R17.3 — `koine fmt`, `init`, and `watch`.** ✅ **Delivered** — a canonical, idempotent
+  token-stream formatter (with `--check` for CI), a one-command project scaffold (`koine init`, with
+  `--force`), and a `koine watch` mode that re-emits on every change for fast feedback. See the
+  [CLI reference](/Koine/guides/cli/#koine-fmt).
 
 ## The full gap analysis
 

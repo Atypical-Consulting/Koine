@@ -11,7 +11,13 @@ namespace Koine.Cli;
 
 internal static class Program
 {
-    private static int Main(string[] args)
+    private static int Main(string[] args) => Run(args);
+
+    /// <summary>
+    /// The CLI entry point, factored out of <see cref="Main"/> so tests can drive argument
+    /// handling directly (internals are visible to Koine.Compiler.Tests) and assert exit codes.
+    /// </summary>
+    internal static int Run(string[] args)
     {
         if (args.Length == 0)
         {
@@ -35,9 +41,25 @@ internal static class Program
 
     private static int RunVersion()
     {
-        var version = Assembly.GetExecutingAssembly().GetName().Version?.ToString() ?? "0.0.0";
-        Console.WriteLine(version);
+        Console.WriteLine(GetVersion());
         return 0;
+    }
+
+    /// <summary>
+    /// The display version, read from <see cref="AssemblyInformationalVersionAttribute"/>
+    /// (set from <c>Version</c> in Directory.Build.props) rather than the four-part
+    /// <c>AssemblyVersion</c>, which defaults to <c>1.0.0.0</c>. The SDK may append a
+    /// <c>+&lt;commit&gt;</c> build-metadata suffix, which we trim off.
+    /// </summary>
+    internal static string GetVersion()
+    {
+        var info = Assembly.GetExecutingAssembly()
+            .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion;
+        if (string.IsNullOrEmpty(info))
+            return Assembly.GetExecutingAssembly().GetName().Version?.ToString() ?? "0.0.0";
+
+        var plus = info.IndexOf('+');
+        return plus < 0 ? info : info[..plus];
     }
 
     private static int UnknownCommand(string command)
@@ -114,17 +136,22 @@ internal static class Program
 
     private static int RunBuild(string[] args)
     {
+        if (WantsHelp(args))
+            return PrintHelp(BuildHelp);
         if (!TryParseBuild(args, out var request, out var error))
-            return UsageError(error!);
-        return BuildOnce(request) ? 0 : 1;
+            return UsageError(error!, BuildHelp);
+        return BuildOnce(request, out var exitCode) ? 0 : exitCode;
     }
 
     /// <summary>
     /// Runs one build for <paramref name="r"/>, printing diagnostics and progress, and
     /// returns whether it succeeded. Shared by <c>build</c> (once) and <c>watch</c> (per change).
     /// </summary>
-    private static bool BuildOnce(BuildRequest r)
+    private static bool BuildOnce(BuildRequest r) => BuildOnce(r, out _);
+
+    private static bool BuildOnce(BuildRequest r, out int exitCode)
     {
+        exitCode = 1;
         var file = r.File;
         var target = r.Target;
         var outDir = r.OutDir;
@@ -138,32 +165,13 @@ internal static class Program
         };
         if (emitter is null)
         {
-            Console.Error.WriteLine($"error: unsupported target '{target}' (supported: csharp, glossary)");
+            exitCode = RuntimeError($"unsupported target '{target}' (supported: csharp, glossary)");
             return false;
         }
 
         // A path may be a single .koi file or a directory of them (compiled as one model).
-        List<SourceFile> sources;
-        try
-        {
-            sources = ReadSources(file);
-        }
-        catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException)
-        {
-            Console.Error.WriteLine($"error: file not found: {file}");
+        if (!TryReadSources(file, "file", out var sources, out exitCode))
             return false;
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-        {
-            Console.Error.WriteLine($"error: cannot read '{file}': {ex.Message}");
-            return false;
-        }
-
-        if (sources.Count == 0)
-        {
-            Console.Error.WriteLine($"error: no .koi files found under '{file}'");
-            return false;
-        }
 
         var compiler = new KoineCompiler();
         var result = compiler.Compile(sources, emitter);
@@ -189,7 +197,7 @@ internal static class Program
             var dir = Path.GetDirectoryName(glossaryFile);
             if (!string.IsNullOrEmpty(dir))
                 Directory.CreateDirectory(dir);
-            File.WriteAllText(glossaryFile, glossary.Contents);
+            WriteFileAtomic(glossaryFile, glossary.Contents);
             Console.WriteLine($"wrote glossary to {glossaryFile}");
         }
 
@@ -197,40 +205,83 @@ internal static class Program
         {
             if (glossaryFile is null)
                 Console.WriteLine($"OK: {file} parsed and validated");
+            exitCode = 0;
             return true;
         }
 
-        // Remove previously generated output we own (top-level namespace folders),
-        // so types renamed/removed since the last run don't leave stale orphans.
-        var ownedRoots = result.Files
-            .Select(f => f.RelativePath.Replace('\\', '/').Split('/')[0])
-            .Distinct(StringComparer.Ordinal);
-        foreach (var root in ownedRoots)
-        {
-            var dir = Path.Combine(outDir, root);
-            if (Directory.Exists(dir))
-                Directory.Delete(dir, recursive: true);
-        }
+        var count = WriteOutputAtomic(outDir, result.Files);
+        Console.WriteLine($"wrote {count} files to {outDir}");
+        exitCode = 0;
+        return true;
+    }
+
+    /// <summary>
+    /// Writes the emitted files into <paramref name="outDir"/> one owned top-level folder
+    /// (namespace root) at a time, swapping each via a sibling temp directory. This avoids
+    /// the delete-then-recreate window in which a watching consumer could observe an empty
+    /// or partially-written folder, and still drops stale orphans from a previous run.
+    /// </summary>
+    private static int WriteOutputAtomic(string outDir, IReadOnlyList<EmittedFile> files)
+    {
+        Directory.CreateDirectory(outDir);
+
+        // Group emitted files by their owned top-level folder (the namespace root).
+        var byRoot = files
+            .GroupBy(f => f.RelativePath.Replace('\\', '/').Split('/')[0], StringComparer.Ordinal);
 
         var count = 0;
-        foreach (var emitted in result.Files)
+        foreach (var group in byRoot)
         {
-            var path = Path.Combine(outDir, emitted.RelativePath);
-            var dir = Path.GetDirectoryName(path);
-            if (!string.IsNullOrEmpty(dir))
-                Directory.CreateDirectory(dir);
-            File.WriteAllText(path, emitted.Contents);
-            count++;
+            var root = group.Key;
+            var finalDir = Path.Combine(outDir, root);
+            var stageDir = Path.Combine(outDir, $".{root}.koine-tmp-{Guid.NewGuid():N}");
+
+            try
+            {
+                foreach (var emitted in group)
+                {
+                    // RelativePath starts with `root/…`; re-root it under the staging dir.
+                    var relUnderRoot = emitted.RelativePath.Replace('\\', '/')[(root.Length)..].TrimStart('/');
+                    var path = Path.Combine(stageDir, relUnderRoot);
+                    var dir = Path.GetDirectoryName(path);
+                    if (!string.IsNullOrEmpty(dir))
+                        Directory.CreateDirectory(dir);
+                    File.WriteAllText(path, emitted.Contents);
+                    count++;
+                }
+
+                // Swap: replace the live folder with the fully-written staging folder.
+                if (Directory.Exists(finalDir))
+                    Directory.Delete(finalDir, recursive: true);
+                Directory.Move(stageDir, finalDir);
+            }
+            finally
+            {
+                if (Directory.Exists(stageDir))
+                    Directory.Delete(stageDir, recursive: true);
+            }
         }
 
-        Console.WriteLine($"wrote {count} files to {outDir}");
-        return true;
+        return count;
+    }
+
+    /// <summary>Writes a single file atomically via a temp file + replace, so readers never see a half-written file.</summary>
+    private static void WriteFileAtomic(string path, string contents)
+    {
+        var tmp = path + $".koine-tmp-{Guid.NewGuid():N}";
+        File.WriteAllText(tmp, contents);
+        if (File.Exists(path))
+            File.Delete(path);
+        File.Move(tmp, path);
     }
 
     // ---- fmt (R17.3) -------------------------------------------------------
 
     private static int RunFmt(string[] args)
     {
+        if (WantsHelp(args))
+            return PrintHelp(FmtHelp);
+
         string? path = null;
         var check = false;
 
@@ -239,38 +290,38 @@ internal static class Program
             if (arg == "--check")
                 check = true;
             else if (arg.StartsWith('-'))
-                return UsageError($"unknown option '{arg}'");
+                return UsageError($"unknown option '{arg}'", FmtHelp);
             else if (path is not null)
-                return UsageError($"unexpected argument '{arg}'");
+                return UsageError($"unexpected argument '{arg}'", FmtHelp);
             else
                 path = arg;
         }
 
         if (path is null)
-            return UsageError("fmt requires a <file.koi> or directory argument");
+            return UsageError("fmt requires a <file.koi> or directory argument", FmtHelp);
 
-        List<SourceFile> sources;
-        try
-        {
-            sources = ReadSources(path);
-        }
-        catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException)
-        {
-            Console.Error.WriteLine($"error: file not found: {path}");
-            return 1;
-        }
+        if (!TryReadSources(path, "file", out var sources, out var exitCode))
+            return exitCode;
 
-        if (sources.Count == 0)
-        {
-            Console.Error.WriteLine($"error: no .koi files found under '{path}'");
-            return 1;
-        }
-
+        var compiler = new KoineCompiler();
         var formatter = new Koine.Compiler.Formatting.KoineFormatter();
         var changed = 0;
+        var unparseable = 0;
 
         foreach (var source in sources)
         {
+            // fmt only adjusts whitespace; it cannot fix syntax. Report files that fail to
+            // parse (with a file:line message) and leave them untouched.
+            var (model, diagnostics) = compiler.Parse(source.Source, source.Path);
+            if (model is null)
+            {
+                unparseable++;
+                foreach (var diag in diagnostics.Where(d => d.Severity == DiagnosticSeverity.Error))
+                    Console.Error.WriteLine($"{diag.File ?? source.Path}:{diag.Line}:{diag.Column}: error {diag.Code}: {diag.Message}");
+                Console.Error.WriteLine($"{source.Path}: cannot format (does not parse) — fix the syntax, then re-run");
+                continue;
+            }
+
             var result = formatter.Format(source.Source);
             if (!result.Changed)
                 continue;
@@ -286,6 +337,14 @@ internal static class Program
                 File.WriteAllText(source.Path, result.Text);
                 Console.WriteLine($"formatted {source.Path}");
             }
+        }
+
+        // Unparseable files always fail (in both --check and write modes): fmt cannot
+        // canonically format what it cannot parse.
+        if (unparseable > 0)
+        {
+            Console.Error.WriteLine($"error: {unparseable} file(s) could not be parsed (fmt does not fix unparseable files)");
+            return 1;
         }
 
         if (check)
@@ -365,6 +424,9 @@ internal static class Program
 
     private static int RunInit(string[] args)
     {
+        if (WantsHelp(args))
+            return PrintHelp(InitHelp);
+
         string? dir = null;
         var force = false;
 
@@ -373,9 +435,9 @@ internal static class Program
             if (arg == "--force")
                 force = true;
             else if (arg.StartsWith('-'))
-                return UsageError($"unknown option '{arg}'");
+                return UsageError($"unknown option '{arg}'", InitHelp);
             else if (dir is not null)
-                return UsageError($"unexpected argument '{arg}'");
+                return UsageError($"unexpected argument '{arg}'", InitHelp);
             else
                 dir = arg;
         }
@@ -427,8 +489,16 @@ internal static class Program
 
     private static int RunWatch(string[] args)
     {
+        if (WantsHelp(args))
+            return PrintHelp(WatchHelp);
+
+        // `--clear` is watch-only (not a build flag), so peel it off before TryParseBuild.
+        var clear = args.Contains("--clear");
+        if (clear)
+            args = args.Where(a => a != "--clear").ToArray();
+
         if (!TryParseBuild(args, out var request, out var error))
-            return UsageError(error!);
+            return UsageError(error!, WatchHelp);
 
         // Watch the input's directory (or the directory itself), filtered to .koi files.
         var watchDir = Directory.Exists(request.File)
@@ -441,12 +511,18 @@ internal static class Program
             NotifyFilter = NotifyFilters.LastWrite | NotifyFilters.FileName | NotifyFilters.Size,
         };
 
+        // Give the OS a roomy buffer so bursts of saves are less likely to overflow.
+        watcher.InternalBufferSize = 64 * 1024;
+
         var changes = new BlockingCollection<object>();
         void Bump() { try { changes.Add(new object()); } catch (InvalidOperationException) { } }
         watcher.Changed += (_, _) => Bump();
         watcher.Created += (_, _) => Bump();
         watcher.Deleted += (_, _) => Bump();
         watcher.Renamed += (_, _) => Bump();
+        // If the buffer overflows, individual events are lost; force a rebuild so the
+        // output never silently lags behind the source.
+        watcher.Error += (_, _) => Bump();
         watcher.EnableRaisingEvents = true;
 
         using var cts = new CancellationTokenSource();
@@ -458,7 +534,13 @@ internal static class Program
         };
 
         Console.WriteLine($"watching {watchDir} for *.koi changes — press Ctrl+C to stop");
-        var session = new WatchSession(() => BuildOnce(request), Console.Out, TimeSpan.FromMilliseconds(250));
+        var session = new WatchSession(
+            () => BuildOnce(request),
+            Console.Out,
+            TimeSpan.FromMilliseconds(250),
+            // A safety-net full rebuild every minute, in case any change event was dropped.
+            fullRebuildInterval: TimeSpan.FromMinutes(1),
+            beforeBuild: clear ? () => Console.Clear() : null);
         session.Run(changes, cts.Token);
         return 0;
     }
@@ -470,8 +552,12 @@ internal static class Program
     /// </summary>
     private static int RunCheck(string[] args)
     {
+        if (WantsHelp(args))
+            return PrintHelp(CheckHelp);
+
         string? current = null;
         string? baseline = null;
+        string? configPath = null;
 
         for (var i = 0; i < args.Length; i++)
         {
@@ -480,23 +566,47 @@ internal static class Program
             {
                 case "--baseline":
                     if (i + 1 >= args.Length)
-                        return UsageError("--baseline requires a <dir> value");
+                        return UsageError("--baseline requires a <dir> value", CheckHelp);
                     baseline = args[++i];
+                    break;
+                case "--config":
+                    if (i + 1 >= args.Length)
+                        return UsageError("--config requires a <file> value", CheckHelp);
+                    configPath = args[++i];
                     break;
                 default:
                     if (arg.StartsWith('-'))
-                        return UsageError($"unknown option '{arg}'");
+                        return UsageError($"unknown option '{arg}'", CheckHelp);
                     if (current is not null)
-                        return UsageError($"unexpected argument '{arg}'");
+                        return UsageError($"unexpected argument '{arg}'", CheckHelp);
                     current = arg;
                     break;
             }
         }
 
         if (current is null)
-            return UsageError("check requires a <file.koi|dir> argument (the current model)");
+            return UsageError("check requires a <file.koi|dir> argument (the current model)", CheckHelp);
+
+        // A koine.config (explicit --config, or discovered beside the input) may supply the
+        // default baseline, for symmetry with build/watch — an explicit --baseline wins.
         if (baseline is null)
-            return UsageError("check requires --baseline <dir> (the previously published model)");
+        {
+            KoineConfig config;
+            if (configPath is not null)
+            {
+                if (!File.Exists(configPath))
+                    return RuntimeError($"config not found: {configPath}");
+                config = KoineConfig.Parse(File.ReadAllText(configPath));
+            }
+            else
+            {
+                config = KoineConfig.Discover(current);
+            }
+            baseline = config.Baseline;
+        }
+
+        if (baseline is null)
+            return UsageError("check requires --baseline <dir> (or a `baseline` key in koine.config)", CheckHelp);
 
         var compiler = new KoineCompiler();
         if (!TryParseModel(compiler, current, "current", out var currentModel) ||
@@ -529,27 +639,8 @@ internal static class Program
     {
         model = null!;
 
-        List<SourceFile> sources;
-        try
-        {
-            sources = ReadSources(path);
-        }
-        catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException)
-        {
-            Console.Error.WriteLine($"error: {label} not found: {path}");
+        if (!TryReadSources(path, label, out var sources, out _))
             return false;
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-        {
-            Console.Error.WriteLine($"error: cannot read {label} '{path}': {ex.Message}");
-            return false;
-        }
-
-        if (sources.Count == 0)
-        {
-            Console.Error.WriteLine($"error: no .koi files found under {label} '{path}'");
-            return false;
-        }
 
         var (parsed, diagnostics) = compiler.Parse(sources);
         if (parsed is null)
@@ -582,12 +673,69 @@ internal static class Program
         return new List<SourceFile> { new(path, File.ReadAllText(path)) };
     }
 
-    private static int UsageError(string message)
+    /// <summary>
+    /// A usage error: the user typed a bad flag/argument. Prints the message followed by
+    /// the (optionally command-specific) usage block, and exits non-zero.
+    /// </summary>
+    private static int UsageError(string message, string? commandHelp = null)
     {
         Console.Error.WriteLine($"error: {message}");
-        PrintUsage();
+        if (commandHelp is not null)
+            Console.Error.WriteLine(commandHelp);
+        else
+            PrintUsage();
         return 1;
     }
+
+    /// <summary>
+    /// A runtime error: the flags were fine but the input was not (missing file, no .koi
+    /// files, unsupported target, parse failure). Prints the message plus an actionable
+    /// hint instead of dumping the full global usage, and exits non-zero.
+    /// </summary>
+    private static int RuntimeError(string message, string? hint = null)
+    {
+        Console.Error.WriteLine($"error: {message}");
+        if (hint is not null)
+            Console.Error.WriteLine($"hint: {hint}");
+        return 1;
+    }
+
+    /// <summary>
+    /// Shared <c>.koi</c> source loading for <c>build</c>/<c>fmt</c>/<c>check</c>: reads a
+    /// file or directory, turning the I/O and "nothing found" cases into a single
+    /// actionable <see cref="RuntimeError"/>. Returns <c>false</c> (with <paramref name="exitCode"/>
+    /// set) on failure; otherwise yields the sources.
+    /// </summary>
+    private static bool TryReadSources(string path, string label, out List<SourceFile> sources, out int exitCode)
+    {
+        sources = new List<SourceFile>();
+        exitCode = 0;
+        try
+        {
+            sources = ReadSources(path);
+        }
+        catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException)
+        {
+            exitCode = RuntimeError($"{label} not found: {path}", "run `koine init` to scaffold a starter model");
+            return false;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            exitCode = RuntimeError($"cannot read {label} '{path}': {ex.Message}");
+            return false;
+        }
+
+        if (sources.Count == 0)
+        {
+            exitCode = RuntimeError($"no .koi files found under '{path}'", "run `koine init` to scaffold a starter model");
+            return false;
+        }
+
+        return true;
+    }
+
+    /// <summary>True when the args request command help (<c>--help</c>/<c>-h</c>).</summary>
+    private static bool WantsHelp(string[] args) => args.Any(a => a is "--help" or "-h");
 
     private static void PrintUsage() => PrintUsageTo(Console.Error);
 
@@ -603,6 +751,110 @@ internal static class Program
         writer.WriteLine("  koine init  [dir] [--force]                    # scaffold a starter project");
         writer.WriteLine("  koine check <file.koi|dir> --baseline <dir>    # flag breaking changes vs a published baseline");
         writer.WriteLine("  koine lsp                                      # Language Server (stdio) for editor diagnostics");
+        return 0;
+    }
+
+    // ---- per-subcommand help (R17) -----------------------------------------
+
+    internal const string BuildHelp =
+        """
+        koine build — compile a .koi model and (optionally) emit code.
+
+        Usage:
+          koine build <file.koi|dir> [--target csharp|glossary] [--out <dir>] [--glossary <file.md>] [--config <file>]
+
+        Options:
+          --target <t>      output target: csharp (default) or glossary
+          --out <dir>       directory to write generated files into; omit to only parse/validate
+          --glossary <md>   also write a Markdown glossary to this file (independent of --target)
+          --config <file>   read defaults (target/out) from this koine.config instead of discovering one
+
+        Without --out, build parses and validates only. A koine.config beside the input
+        supplies target/out when the matching flag is omitted.
+
+        Examples:
+          koine build domain.koi
+          koine build domain.koi --out generated
+          koine build ./model --target glossary --out docs
+        """;
+
+    internal const string CheckHelp =
+        """
+        koine check — flag breaking changes against a published baseline (R15.2).
+
+        Usage:
+          koine check <file.koi|dir> --baseline <dir> [--config <file>]
+
+        Options:
+          --baseline <dir>  the previously published model to compare against (required
+                            unless a koine.config / --config supplies a `baseline` key)
+          --config <file>   read defaults from this koine.config instead of discovering one
+
+        Exits non-zero if any breaking change to a published surface is found, or if
+        either model fails to parse.
+
+        Examples:
+          koine check domain.koi --baseline ./published
+          koine check ./model --baseline ./v1
+        """;
+
+    internal const string FmtHelp =
+        """
+        koine fmt — canonically format .koi source.
+
+        Usage:
+          koine fmt <file.koi|dir> [--check]
+
+        Options:
+          --check   do not write; exit non-zero if any file is unformatted or unparseable
+
+        Formatting only adjusts whitespace; it never rewrites code or fixes syntax.
+        Files that fail to parse are reported (with a file:line message) and are left
+        untouched — fix the syntax, then re-run fmt.
+
+        Examples:
+          koine fmt domain.koi
+          koine fmt ./model --check
+        """;
+
+    internal const string InitHelp =
+        """
+        koine init — scaffold a starter Koine project.
+
+        Usage:
+          koine init [dir] [--force]
+
+        Options:
+          --force   overwrite existing domain.koi / koine.config / README.md
+
+        Writes domain.koi (a model that builds end-to-end), koine.config, and README.md
+        into [dir] (default: the current directory).
+
+        Examples:
+          koine init
+          koine init ./catalog
+          koine init . --force
+        """;
+
+    internal const string WatchHelp =
+        """
+        koine watch — rebuild on every .koi change until Ctrl+C.
+
+        Usage:
+          koine watch <file.koi|dir> [--target …] [--out …] [--glossary <file.md>] [--config <file>] [--clear]
+
+        Options:
+          --target/--out/--glossary/--config   as for `koine build`
+          --clear   clear the console before each rebuild
+
+        Examples:
+          koine watch domain.koi --out generated
+          koine watch ./model --clear
+        """;
+
+    private static int PrintHelp(string help)
+    {
+        Console.Out.WriteLine(help);
         return 0;
     }
 }
