@@ -43,13 +43,14 @@ public sealed class WorkspaceIndex
     }
 
     /// <summary>
-    /// Resolves <paramref name="name"/> to a declaration location: the active file
-    /// wins if it declares the name; otherwise a unique declaration among the other
-    /// files; otherwise null (unknown or ambiguous across ≥2 other files).
+    /// Resolves <paramref name="name"/> to a declaration location: the active file wins if it
+    /// declares the name (or, when <paramref name="enclosingType"/> is given, if the name is a field
+    /// of that type — in-expression navigation); otherwise a unique declaration among the other files;
+    /// otherwise null (unknown or ambiguous across ≥2 other files).
     /// </summary>
-    public DeclLocation? ResolveDefinition(string activeUri, string name)
+    public DeclLocation? ResolveDefinition(string activeUri, string name, string? enclosingType = null)
     {
-        if (_byUri.TryGetValue(activeUri, out SemanticModel? active) && StrongSpan(active, name) is { } localSpan)
+        if (_byUri.TryGetValue(activeUri, out SemanticModel? active) && active.GetSymbol(name, enclosingType)?.DeclSpan is { } localSpan)
         {
             return new DeclLocation(activeUri, localSpan);
         }
@@ -147,11 +148,21 @@ public sealed class WorkspaceIndex
     /// active file, else a unique strong declaration across other files, else a weak
     /// minimal card for primitives/collections/ID-convention names. Null if unknown.
     /// </summary>
-    public string? ResolveHover(string activeUri, string name)
+    public string? ResolveHover(string activeUri, string name, string? enclosingType = null)
     {
-        if (_byUri.TryGetValue(activeUri, out SemanticModel? active) && StrongHover(active.Index, name) is { } local)
+        if (_byUri.TryGetValue(activeUri, out SemanticModel? active))
         {
-            return local;
+            // In-expression member reference (field of the enclosing type): a precise card.
+            if (active.GetSymbol(name, enclosingType) is MemberSymbol ms)
+            {
+                return $"**{ms.Name}** *(field of {ms.OwnerType})* : `{TypeLabel(ms.Member.Type)}`"
+                    + (ms.Doc is { Length: > 0 } d ? "\n\n" + d : string.Empty);
+            }
+
+            if (StrongHover(active.Index, name) is { } local)
+            {
+                return local;
+            }
         }
 
         string? found = null;
