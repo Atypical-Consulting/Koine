@@ -1,6 +1,7 @@
 using System.Text;
 using System.Text.Json;
 using Koine.Cli;
+using Koine.Compiler.Ast;
 using Koine.Compiler.Diagnostics;
 using Koine.Compiler.Services;
 
@@ -77,10 +78,56 @@ public class LspServerTests
     public void ToRange_underlines_the_offending_token()
     {
         var lines = LspServer.SplitLines("context C {\n  value V { x: Nope }\n}\n");
-        var (line, start, end) = LspServer.ToRange(Diagnostic.Error(DiagnosticCodes.UnknownType, "unknown type 'Nope'", 2, 16), lines);
+        var (line, start, endLine, end) = LspServer.ToRange(Diagnostic.Error(DiagnosticCodes.UnknownType, "unknown type 'Nope'", 2, 16), lines);
         Assert.Equal(1, line);            // 0-based line 1 == source line 2
         Assert.Equal(15, start);          // 0-based col
+        Assert.Equal(1, endLine);         // single-line fallback ends on the same line
         Assert.Equal(19, end);            // spans "Nope"
+    }
+
+    [Fact]
+    public void ToRange_uses_the_carried_end_when_known()
+    {
+        // A diagnostic built from a node span carries an exact end; no forward scan needed.
+        var lines = LspServer.SplitLines("context C {\n  value V { x: Nope }\n}\n");
+        var span = new SourceSpan(2, 16, 2, 20, 0, 0); // 1-based start col 16, end-exclusive col 20
+        var (line, start, endLine, end) = LspServer.ToRange(
+            Diagnostic.FromSpan(DiagnosticCodes.UnknownType, "unknown type 'Nope'", span), lines);
+        Assert.Equal(1, line);            // 0-based line 1
+        Assert.Equal(15, start);          // 0-based start col
+        Assert.Equal(1, endLine);         // 0-based end line
+        Assert.Equal(19, end);            // 0-based end-exclusive col -> spans "Nope"
+    }
+
+    [Fact]
+    public void ToRange_supports_multi_line_spans()
+    {
+        var lines = LspServer.SplitLines("context C {\n  value V {\n  }\n}\n");
+        // A span that opens on line 2 and closes on line 3.
+        var span = new SourceSpan(2, 3, 3, 4, 0, 0);
+        var (line, start, endLine, end) = LspServer.ToRange(
+            Diagnostic.FromSpan(DiagnosticCodes.DuplicateMember, "dup", span), lines);
+        Assert.Equal(1, line);            // start line 0-based
+        Assert.Equal(2, start);           // start col 0-based
+        Assert.Equal(2, endLine);         // end line 0-based (source line 3)
+        Assert.Equal(3, end);             // end col 0-based
+    }
+
+    [Fact]
+    public void FromSpan_leaves_end_unknown_for_zero_width_point()
+    {
+        var d = Diagnostic.FromSpan(DiagnosticCodes.UnknownType, "x", new SourceSpan(2, 16));
+        Assert.False(d.HasEnd);
+        Assert.Equal(0, d.EndLine);
+        Assert.Equal(0, d.EndColumn);
+
+        // Falls back to the forward scan when the end is unknown.
+        var lines = LspServer.SplitLines("context C {\n  value V { x: Nope }\n}\n");
+        var (line, start, endLine, end) = LspServer.ToRange(d, lines);
+        Assert.Equal(1, line);
+        Assert.Equal(15, start);
+        Assert.Equal(1, endLine);
+        Assert.Equal(19, end);            // forward scan still spans "Nope"
     }
 
     // ---- helpers ----------------------------------------------------------
@@ -313,6 +360,43 @@ public class LspServerTests
         var output = RunSession(Initialize(), DidOpen("file:///t.koi", doc), Definition("file:///t.koi", 2, 23));
         Assert.Contains("\"range\"", output);
         Assert.Contains("file:///t.koi", output);
+    }
+
+    [Fact]
+    public void Definition_range_spans_the_target_name_not_zero_width()
+    {
+        // line 1 (0-based): "  value Money { amount: Decimal }" — `Money` at chars 8..13.
+        var doc = "context C {\n  value Money { amount: Decimal }\n  value Line { price: Money }\n}\n";
+        var output = RunSession(Initialize(), DidOpen("file:///t.koi", doc), Definition("file:///t.koi", 2, 23));
+
+        // The range is the real identifier range: start char 8, end char 13 on line 1.
+        Assert.Contains("\"start\":{\"line\":1,\"character\":8}", output);
+        Assert.Contains("\"end\":{\"line\":1,\"character\":13}", output);
+    }
+
+    [Fact]
+    public void Definition_inside_a_spec_body_resolves_to_the_field()
+    {
+        // Spec-body navigation: clicking `amount` inside the spec body lands on the field name.
+        // line 1: "  value Money { amount: Decimal }" — field `amount` at chars 16..22.
+        // line 2: "  spec Positive on Money = amount > 0" — `amount` operand at char 27.
+        var doc = "context C {\n  value Money { amount: Decimal }\n  spec Positive on Money = amount > 0\n}\n";
+        var output = RunSession(Initialize(), DidOpen("file:///t.koi", doc), Definition("file:///t.koi", 2, 28));
+
+        Assert.Contains("\"start\":{\"line\":1,\"character\":16}", output);
+        Assert.Contains("\"end\":{\"line\":1,\"character\":22}", output);
+    }
+
+    [Fact]
+    public void DocumentSymbol_selectionRange_is_the_name_and_range_is_the_full_decl()
+    {
+        // line 1: "  value Money { amount: Decimal }" — full decl chars 2..33, name `Money` 8..13.
+        var doc = "context Shop {\n  value Money { amount: Decimal }\n}\n";
+        var output = RunSession(Initialize(), DidOpen("file:///t.koi", doc), DocumentSymbol("file:///t.koi"));
+
+        // The Money symbol's selectionRange is the identifier; its range is the whole declaration.
+        Assert.Contains("\"selectionRange\":{\"start\":{\"line\":1,\"character\":8},\"end\":{\"line\":1,\"character\":13}}", output);
+        Assert.Contains("\"range\":{\"start\":{\"line\":1,\"character\":2}", output);
     }
 
     [Fact]

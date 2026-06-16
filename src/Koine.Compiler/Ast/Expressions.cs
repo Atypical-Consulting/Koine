@@ -82,8 +82,12 @@ public sealed record IdentifierExpr(string Name) : Expr;
 /// </summary>
 public sealed record LetExpr(IReadOnlyList<LetBinding> Bindings, Expr Body) : Expr;
 
-/// <summary>A single <c>name = value</c> binding inside a <see cref="LetExpr"/>.</summary>
-public sealed record LetBinding(string Name, Expr Value);
+/// <summary>
+/// A single <c>name = value</c> binding inside a <see cref="LetExpr"/>. A <see cref="KoineNode"/>
+/// so the position→node walk descends into <see cref="Value"/> (making references inside a binding
+/// navigable); <see cref="KoineNode.NameSpan"/> covers the introduced <see cref="Name"/>.
+/// </summary>
+public sealed record LetBinding(string Name, Expr Value) : KoineNode;
 
 /// <summary>
 /// A literal. <see cref="Text"/> is the canonical source text of the value:

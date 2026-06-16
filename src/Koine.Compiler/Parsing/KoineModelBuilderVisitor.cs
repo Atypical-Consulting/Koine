@@ -117,7 +117,10 @@ public sealed class KoineModelBuilderVisitor : KoineParserBaseVisitor<object?>
             ctx.Identifier().GetText(), types, specs, services, policies, imports, moduleNames, publishes, subscribes)
         {
             Span = SpanOf(ctx),
+            NameSpan = SpanOf(ctx.Identifier()),
             Doc = DocFor(ctx),
+            LeadingTrivia = LeadingTriviaFor(ctx),
+            TrailingTrivia = TrailingTriviaFor(ctx),
             Version = version
         };
     }
@@ -272,7 +275,10 @@ public sealed class KoineModelBuilderVisitor : KoineParserBaseVisitor<object?>
         new(ctx.Identifier().GetText(), ctx.typeName().GetText(), BuildExpression(ctx.expression()))
         {
             Span = SpanOf(ctx),
-            Doc = DocFor(ctx)
+            NameSpan = SpanOf(ctx.Identifier()),
+            Doc = DocFor(ctx),
+            LeadingTrivia = LeadingTriviaFor(ctx),
+            TrailingTrivia = TrailingTriviaFor(ctx)
         };
 
     private ServiceDecl BuildService(KoineParser.ServiceDeclContext ctx)
@@ -290,7 +296,14 @@ public sealed class KoineModelBuilderVisitor : KoineParserBaseVisitor<object?>
                 useCases.Add(BuildUseCase(uc));
             }
         }
-        return new ServiceDecl(ctx.Identifier().GetText(), operations, useCases) { Span = SpanOf(ctx), Doc = DocFor(ctx) };
+        return new ServiceDecl(ctx.Identifier().GetText(), operations, useCases)
+        {
+            Span = SpanOf(ctx),
+            NameSpan = SpanOf(ctx.Identifier()),
+            Doc = DocFor(ctx),
+            LeadingTrivia = LeadingTriviaFor(ctx),
+            TrailingTrivia = TrailingTriviaFor(ctx)
+        };
     }
 
     private UseCaseDecl BuildUseCase(KoineParser.UsecaseDeclContext ctx)
@@ -302,7 +315,10 @@ public sealed class KoineModelBuilderVisitor : KoineParserBaseVisitor<object?>
         return new UseCaseDecl(ctx.Identifier().GetText(), parameters, returnType)
         {
             Span = SpanOf(ctx),
-            Doc = DocFor(ctx)
+            NameSpan = SpanOf(ctx.Identifier()),
+            Doc = DocFor(ctx),
+            LeadingTrivia = LeadingTriviaFor(ctx),
+            TrailingTrivia = TrailingTriviaFor(ctx)
         };
     }
 
@@ -312,12 +328,19 @@ public sealed class KoineModelBuilderVisitor : KoineParserBaseVisitor<object?>
         {
             TypeRef? type = f.typeRef() is { } tr ? BuildTypeRef(tr) : null;
             Expr? projection = f.expression() is { } e ? BuildExpression(e) : null;
-            return new ReadModelField(f.softName().GetText(), type, projection) { Span = SpanOf(f) };
+            return new ReadModelField(f.softName().GetText(), type, projection)
+            {
+                Span = SpanOf(f),
+                NameSpan = SpanOf(f.softName())
+            };
         }).ToList();
         return new ReadModelDecl(ctx.Identifier().GetText(), ctx.typeName().GetText(), fields)
         {
             Span = SpanOf(ctx),
-            Doc = DocFor(ctx)
+            NameSpan = SpanOf(ctx.Identifier()),
+            Doc = DocFor(ctx),
+            LeadingTrivia = LeadingTriviaFor(ctx),
+            TrailingTrivia = TrailingTriviaFor(ctx)
         };
     }
 
@@ -329,7 +352,10 @@ public sealed class KoineModelBuilderVisitor : KoineParserBaseVisitor<object?>
         return new QueryDecl(ctx.Identifier().GetText(), criteria, BuildTypeRef(ctx.typeRef()))
         {
             Span = SpanOf(ctx),
-            Doc = DocFor(ctx)
+            NameSpan = SpanOf(ctx.Identifier()),
+            Doc = DocFor(ctx),
+            LeadingTrivia = LeadingTriviaFor(ctx),
+            TrailingTrivia = TrailingTriviaFor(ctx)
         };
     }
 
@@ -342,7 +368,10 @@ public sealed class KoineModelBuilderVisitor : KoineParserBaseVisitor<object?>
         return new OperationDecl(ctx.Identifier().GetText(), parameters, BuildTypeRef(ctx.typeRef()), body)
         {
             Span = SpanOf(ctx),
-            Doc = DocFor(ctx)
+            NameSpan = SpanOf(ctx.Identifier()),
+            Doc = DocFor(ctx),
+            LeadingTrivia = LeadingTriviaFor(ctx),
+            TrailingTrivia = TrailingTriviaFor(ctx)
         };
     }
 
@@ -361,7 +390,10 @@ public sealed class KoineModelBuilderVisitor : KoineParserBaseVisitor<object?>
         return new PolicyDecl(ctx.Identifier(0).GetText(), ctx.Identifier(1).GetText(), reaction)
         {
             Span = SpanOf(ctx),
-            Doc = DocFor(ctx)
+            NameSpan = SpanOf(ctx.Identifier(0)),
+            Doc = DocFor(ctx),
+            LeadingTrivia = LeadingTriviaFor(ctx),
+            TrailingTrivia = TrailingTriviaFor(ctx)
         };
     }
 
@@ -414,7 +446,10 @@ public sealed class KoineModelBuilderVisitor : KoineParserBaseVisitor<object?>
         return new ValueObjectDecl(ctx.Identifier().GetText(), members, invariants)
         {
             Span = SpanOf(ctx),
+            NameSpan = SpanOf(ctx.Identifier()),
             Doc = DocFor(ctx),
+            LeadingTrivia = LeadingTriviaFor(ctx),
+            TrailingTrivia = TrailingTriviaFor(ctx),
             Since = since,
             Deprecated = deprecated
         };
@@ -429,7 +464,10 @@ public sealed class KoineModelBuilderVisitor : KoineParserBaseVisitor<object?>
         return new ValueObjectDecl(ctx.Identifier().GetText(), members, invariants, IsQuantity: true)
         {
             Span = SpanOf(ctx),
+            NameSpan = SpanOf(ctx.Identifier()),
             Doc = DocFor(ctx),
+            LeadingTrivia = LeadingTriviaFor(ctx),
+            TrailingTrivia = TrailingTriviaFor(ctx),
             Since = since,
             Deprecated = deprecated
         };
@@ -451,7 +489,10 @@ public sealed class KoineModelBuilderVisitor : KoineParserBaseVisitor<object?>
         return new EntityDecl(name, identityName, members, invariants, commands, states, factories, strategy, backing)
         {
             Span = SpanOf(ctx),
+            NameSpan = SpanOf(ctx.Identifier(0)),
             Doc = DocFor(ctx),
+            LeadingTrivia = LeadingTriviaFor(ctx),
+            TrailingTrivia = TrailingTriviaFor(ctx),
             Since = since,
             Deprecated = deprecated
         };
@@ -478,7 +519,7 @@ public sealed class KoineModelBuilderVisitor : KoineParserBaseVisitor<object?>
     private StatesDecl BuildStates(KoineParser.StatesDeclContext ctx)
     {
         var rules = ctx.stateRule().Select(BuildStateRule).ToList();
-        return new StatesDecl(ctx.softName().GetText(), rules) { Span = SpanOf(ctx) };
+        return new StatesDecl(ctx.softName().GetText(), rules) { Span = SpanOf(ctx), NameSpan = SpanOf(ctx.softName()) };
     }
 
     private StateRule BuildStateRule(KoineParser.StateRuleContext ctx)
@@ -501,12 +542,15 @@ public sealed class KoineModelBuilderVisitor : KoineParserBaseVisitor<object?>
         return new CommandDecl(ctx.Identifier().GetText(), parameters, body, returnType)
         {
             Span = SpanOf(ctx),
-            Doc = DocFor(ctx)
+            NameSpan = SpanOf(ctx.Identifier()),
+            Doc = DocFor(ctx),
+            LeadingTrivia = LeadingTriviaFor(ctx),
+            TrailingTrivia = TrailingTriviaFor(ctx)
         };
     }
 
     private Param BuildParam(KoineParser.ParamContext ctx) =>
-        new(ctx.softName().GetText(), BuildTypeRef(ctx.typeRef())) { Span = SpanOf(ctx) };
+        new(ctx.softName().GetText(), BuildTypeRef(ctx.typeRef())) { Span = SpanOf(ctx), NameSpan = SpanOf(ctx.softName()) };
 
     private FactoryDecl BuildFactory(KoineParser.FactoryDeclContext ctx)
     {
@@ -518,7 +562,10 @@ public sealed class KoineModelBuilderVisitor : KoineParserBaseVisitor<object?>
         return new FactoryDecl(ctx.Identifier().GetText(), parameters, body)
         {
             Span = SpanOf(ctx),
-            Doc = DocFor(ctx)
+            NameSpan = SpanOf(ctx.Identifier()),
+            Doc = DocFor(ctx),
+            LeadingTrivia = LeadingTriviaFor(ctx),
+            TrailingTrivia = TrailingTriviaFor(ctx)
         };
     }
 
@@ -608,7 +655,10 @@ public sealed class KoineModelBuilderVisitor : KoineParserBaseVisitor<object?>
         return new AggregateDecl(name, rootName, types, specs, versioned, repository)
         {
             Span = SpanOf(ctx),
+            NameSpan = SpanOf(ctx.Identifier(0)),
             Doc = DocFor(ctx),
+            LeadingTrivia = LeadingTriviaFor(ctx),
+            TrailingTrivia = TrailingTriviaFor(ctx),
             Since = since,
             Deprecated = deprecated
         };
@@ -630,7 +680,8 @@ public sealed class KoineModelBuilderVisitor : KoineParserBaseVisitor<object?>
             : new List<Param>();
         return new FinderDecl(ctx.Identifier().GetText(), parameters, BuildTypeRef(ctx.typeRef()))
         {
-            Span = SpanOf(ctx)
+            Span = SpanOf(ctx),
+            NameSpan = SpanOf(ctx.Identifier())
         };
     }
 
@@ -644,14 +695,17 @@ public sealed class KoineModelBuilderVisitor : KoineParserBaseVisitor<object?>
             .Select(m => new EnumMember(
                 m.Identifier().GetText(),
                 m.expression().Select(BuildExpression).ToList())
-            { Span = SpanOf(m) })
+            { Span = SpanOf(m), NameSpan = SpanOf(m.Identifier()) })
             .ToList();
 
         var (since, deprecated) = ReadAnnotations(ctx.annotation());
         return new EnumDecl(ctx.Identifier().GetText(), members, signature)
         {
             Span = SpanOf(ctx),
+            NameSpan = SpanOf(ctx.Identifier()),
             Doc = DocFor(ctx),
+            LeadingTrivia = LeadingTriviaFor(ctx),
+            TrailingTrivia = TrailingTriviaFor(ctx),
             Since = since,
             Deprecated = deprecated
         };
@@ -664,7 +718,10 @@ public sealed class KoineModelBuilderVisitor : KoineParserBaseVisitor<object?>
         return new EventDecl(ctx.Identifier().GetText(), members)
         {
             Span = SpanOf(ctx),
+            NameSpan = SpanOf(ctx.Identifier()),
             Doc = DocFor(ctx),
+            LeadingTrivia = LeadingTriviaFor(ctx),
+            TrailingTrivia = TrailingTriviaFor(ctx),
             Since = since,
             Deprecated = deprecated
         };
@@ -677,7 +734,10 @@ public sealed class KoineModelBuilderVisitor : KoineParserBaseVisitor<object?>
         return new IntegrationEventDecl(ctx.Identifier().GetText(), members)
         {
             Span = SpanOf(ctx),
+            NameSpan = SpanOf(ctx.Identifier()),
             Doc = DocFor(ctx),
+            LeadingTrivia = LeadingTriviaFor(ctx),
+            TrailingTrivia = TrailingTriviaFor(ctx),
             Since = since,
             Deprecated = deprecated
         };
@@ -692,10 +752,95 @@ public sealed class KoineModelBuilderVisitor : KoineParserBaseVisitor<object?>
         return new Member(ctx.softName().GetText(), type, initializer)
         {
             Span = SpanOf(ctx),
+            NameSpan = SpanOf(ctx.softName()),
             Doc = DocFor(ctx),
+            LeadingTrivia = LeadingTriviaFor(ctx),
+            TrailingTrivia = TrailingTriviaFor(ctx),
             Since = since,
             Deprecated = deprecated
         };
+    }
+
+    /// <summary>
+    /// Gathers the lossless trivia immediately before a rule's first token (whitespace,
+    /// blank lines, and comments on the TRIVIA/HIDDEN/DOC channels — see <c>KoineLexer.g4</c>),
+    /// in source order. This is the leading half of the trivia attachment that generalizes the
+    /// doc-comment recovery of <see cref="DocFor"/>; the doc-comment contiguity/own-line rules
+    /// stay in <see cref="DocFor"/> which projects the same tokens onto <see cref="KoineNode.Doc"/>.
+    /// </summary>
+    private IReadOnlyList<SyntaxTrivia> LeadingTriviaFor(ParserRuleContext ctx) =>
+        TriviaFrom(_tokens?.GetHiddenTokensToLeft(ctx.Start.TokenIndex, -1));
+
+    /// <summary>
+    /// Gathers the lossless trivia immediately after a rule's last token, in source order.
+    /// The trailing half of the trivia attachment.
+    /// </summary>
+    private IReadOnlyList<SyntaxTrivia> TrailingTriviaFor(ParserRuleContext ctx)
+    {
+        if (_tokens is null)
+        {
+            return [];
+        }
+
+        IToken stop = ctx.Stop ?? ctx.Start;
+
+        // Single-owner rule: trivia between two nodes belongs to the FOLLOWING node as its leading
+        // trivia, so each run is attached exactly once. A node owns its right-hand trivia as trailing
+        // ONLY when nothing real follows it (the next default-channel token is EOF) — i.e. it is the
+        // last node and carries the file/block trailer. Without this, the text between siblings A and B
+        // lands in both A.TrailingTrivia and B.LeadingTrivia, double-emitting when their prints compose.
+        if (!NextRealTokenIsEof(stop.TokenIndex))
+        {
+            return [];
+        }
+
+        return TriviaFrom(_tokens.GetHiddenTokensToRight(stop.TokenIndex, -1));
+    }
+
+    /// <summary>True when the nearest following default-channel token is EOF (only trivia remains to the right).</summary>
+    private bool NextRealTokenIsEof(int tokenIndex)
+    {
+        for (var i = tokenIndex + 1; i < _tokens!.Size; i++)
+        {
+            IToken t = _tokens.Get(i);
+            if (t.Channel == TokenConstants.DefaultChannel)
+            {
+                return t.Type == TokenConstants.EOF;
+            }
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// Maps a run of hidden/trivia tokens to <see cref="SyntaxTrivia"/> pieces, classifying each by
+    /// its lexer token type (whitespace with two-or-more newlines becomes a <see cref="SyntaxTriviaKind.BlankLine"/>).
+    /// </summary>
+    private IReadOnlyList<SyntaxTrivia> TriviaFrom(IList<IToken>? tokens)
+    {
+        if (tokens is null || tokens.Count == 0)
+        {
+            return [];
+        }
+
+        var pieces = new List<SyntaxTrivia>(tokens.Count);
+        foreach (IToken t in tokens)
+        {
+            var text = t.Text ?? string.Empty;
+            SyntaxTriviaKind kind = t.Type switch
+            {
+                KoineLexer.WS => TokenGeometry.NewlineCount(text) >= 2
+                    ? SyntaxTriviaKind.BlankLine
+                    : SyntaxTriviaKind.Whitespace,
+                KoineLexer.LINE_COMMENT => SyntaxTriviaKind.LineComment,
+                KoineLexer.BLOCK_COMMENT => SyntaxTriviaKind.BlockComment,
+                KoineLexer.DocComment => SyntaxTriviaKind.Doc,
+                _ => SyntaxTriviaKind.Whitespace
+            };
+            pieces.Add(new SyntaxTrivia(kind, text, SpanOf(t)));
+        }
+
+        return pieces;
     }
 
     /// <summary>
@@ -797,7 +942,13 @@ public sealed class KoineModelBuilderVisitor : KoineParserBaseVisitor<object?>
             ? UnescapeString(StripQuotes(str.GetText()))
             : null;
 
-        return new Invariant(condition, message) { Span = SpanOf(ctx), Doc = DocFor(ctx) };
+        return new Invariant(condition, message)
+        {
+            Span = SpanOf(ctx),
+            Doc = DocFor(ctx),
+            LeadingTrivia = LeadingTriviaFor(ctx),
+            TrailingTrivia = TrailingTriviaFor(ctx)
+        };
     }
 
     // ------------------------------------------------------------------------
@@ -816,7 +967,11 @@ public sealed class KoineModelBuilderVisitor : KoineParserBaseVisitor<object?>
         }
 
         var bindings = ctx.letBinding()
-            .Select(b => new LetBinding(b.softName().GetText(), BuildExpression(b.expression())))
+            .Select(b => new LetBinding(b.softName().GetText(), BuildExpression(b.expression()))
+            {
+                Span = SpanOf(b),
+                NameSpan = SpanOf(b.softName())
+            })
             .ToList();
         Expr body = BuildLet(ctx.letExpr());
         return new LetExpr(bindings, body) { Span = SpanOf(ctx) };
@@ -1069,8 +1224,19 @@ public sealed class KoineModelBuilderVisitor : KoineParserBaseVisitor<object?>
     // Helpers
     // ------------------------------------------------------------------------
 
+    /// <summary>
+    /// The full <see cref="SourceSpan"/> of a parser rule: from <c>ctx.Start</c> through
+    /// <c>ctx.Stop</c> (1-based start, 1-based end-EXCLUSIVE, 0-based offset + length),
+    /// correctly handling a multi-line stop token (block comment / multi-line string).
+    /// </summary>
     private SourceSpan SpanOf(ParserRuleContext ctx) =>
-        new(ctx.Start.Line, ctx.Start.Column + 1, _file);
+        TokenGeometry.SpanOf(ctx.Start, ctx.Stop ?? ctx.Start, _file);
+
+    /// <summary>The single-token span of a name terminal (used for <see cref="KoineNode.NameSpan"/>).</summary>
+    private SourceSpan SpanOf(IToken token) => TokenGeometry.SpanOf(token, _file);
+
+    /// <summary>The single-token span of a name terminal node (used for <see cref="KoineNode.NameSpan"/>).</summary>
+    private SourceSpan SpanOf(ITerminalNode node) => TokenGeometry.SpanOf(node.Symbol, _file);
 
     /// <summary>
     /// Picks the n-th binary operator (0-based) among a rule's child terminals,
