@@ -10,6 +10,10 @@ is to compile one domain model to many targets (C#, TypeScript, Rust). **This re
 only**, but the architecture keeps the parser and semantic model strictly target-agnostic so a second
 emitter can be added without touching them.
 
+📖 **Documentation:** the full guide — getting started, tutorials, a complete language reference,
+the feature catalogue, and the CLI — lives at **<https://atypical-consulting.github.io/Koine/>**
+(source in [`website/`](website/); run it locally with `cd website && npm install && npm run dev`).
+
 ---
 
 ## Quick start
