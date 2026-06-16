@@ -100,7 +100,7 @@ See [specs, services & policies](/Koine/reference/specs-services-policies/).
 
 | Construct | `.koi` syntax (short) | Emits | Demo location |
 |---|---|---|---|
-| Specification | `spec IsVip on Customer = …` | a static predicate `bool IsVip(Customer x)` in `<Context>Specifications.cs`; reusable in invariants | `Customers.IsVip` |
+| Specification | `spec IsVip on Customer = …` | an extension-method predicate `bool IsVip(this Customer x)` in `<Context>Specifications.cs`; call as `customer.IsVip()`; reusable in invariants | `Customers.IsVip` |
 | Domain service (pure) | `service LoyaltyService { operation discountRate(…): Decimal = … }` | a `sealed class` with one expression-bodied method per operation | `Customers.LoyaltyService` |
 | Domain service (seam) | `service Calc { operation run(a: Int): Int }` | an `abstract class` with abstract method seams | (any bodyless operation) |
 | Policy | `policy PostToLedger when PaymentAuthorized then Ledger.post(…)` | `IPostToLedgerPolicy` + an abstract `PostToLedgerPolicy` seam (the reaction is a doc sketch, not executed code) | `Payments.PostToLedger` |

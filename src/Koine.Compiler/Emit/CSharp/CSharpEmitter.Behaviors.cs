@@ -48,9 +48,9 @@ public sealed partial class CSharpEmitter
     }
 
     /// <summary>
-    /// Emits a context's reusable specifications as static boolean predicates in a
-    /// <c>&lt;Context&gt;Specifications</c> class. Each predicate takes its target type as
-    /// the parameter <c>x</c>; spec-to-spec references inline (R10.1).
+    /// Emits a context's reusable specifications as boolean <b>extension methods</b> in a
+    /// static <c>&lt;Context&gt;Specifications</c> class. Each predicate extends its target type
+    /// (so it reads as <c>order.IsLarge()</c>); spec-to-spec references inline (R10.1).
     /// </summary>
     private EmittedFile EmitSpecifications(
         EmitContext emit,
@@ -77,7 +77,7 @@ public sealed partial class CSharpEmitter
             first = false;
             WriteXmlDoc(sb, spec.Doc, Indent);
             sb.Append(Indent).Append("public static bool ").Append(CSharpNaming.ToPascalCase(spec.Name))
-              .Append('(').Append(spec.TargetType).Append(" x) => ").Append(body).Append(";\n");
+              .Append("(this ").Append(spec.TargetType).Append(" x) => ").Append(body).Append(";\n");
             usesLinq |= ExprUsesLinq(spec.Condition);
         }
 
