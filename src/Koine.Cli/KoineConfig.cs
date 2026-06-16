@@ -1,26 +1,52 @@
 namespace Koine.Cli;
 
 /// <summary>
-/// Minimal <c>koine.config</c> reader (R17.3): it supplies defaults for the
-/// <c>build</c>/<c>watch</c> CLI flags when a flag is omitted. Only the flat keys
-/// <c>target</c> and <c>out</c> are recognized today; the structured per-target
-/// emitter options sketched in R16.1 (namespace maps, <c>instantMode</c>, layout)
-/// are not yet implemented, so every other key — including a future
-/// <c>targets.*</c> block — is ignored, keeping the file forward-compatible.
+/// Per-target emitter options (R16.1) parsed from a <c>targets.&lt;name&gt;.*</c> block in
+/// <c>koine.config</c>. <see cref="OutDir"/> overrides the flat <c>out</c> for that target;
+/// <see cref="NamespaceMap"/> remaps a context name to an emitted namespace (e.g.
+/// <c>Catalog → Acme.Catalog</c>); <see cref="InstantMode"/>/<see cref="Layout"/> are forward
+/// keys the emitters consume as they gain support. Absent keys are <c>null</c>/empty so a
+/// target with no block behaves exactly as before.
+/// </summary>
+internal sealed record TargetOptions(
+    string? OutDir,
+    IReadOnlyDictionary<string, string> NamespaceMap,
+    string? InstantMode,
+    string? Layout)
+{
+    public static readonly TargetOptions Empty =
+        new(null, new Dictionary<string, string>(StringComparer.Ordinal), null, null);
+}
+
+/// <summary>
+/// <c>koine.config</c> reader (R17.3 + R16.1): supplies defaults for the
+/// <c>build</c>/<c>watch</c> CLI flags when a flag is omitted. The flat keys <c>target</c>,
+/// <c>out</c>, and <c>baseline</c> are recognized, plus the structured per-target block
+/// <c>targets.&lt;name&gt;.{out,instantMode,layout}</c> and <c>targets.&lt;name&gt;.namespaces.&lt;Context&gt;</c>
+/// (R16.1). Any other key is ignored, keeping the file forward-compatible.
 /// Lines are <c>key = value</c>; <c>#</c> starts a comment.
 /// </summary>
-internal sealed record KoineConfig(string? Target, string? OutDir, string? Baseline = null)
+internal sealed record KoineConfig(
+    string? Target,
+    string? OutDir,
+    string? Baseline = null,
+    IReadOnlyDictionary<string, TargetOptions>? Targets = null)
 {
     public static readonly KoineConfig Empty = new(null, null);
 
     /// <summary>The conventional config file name, looked up beside the build input.</summary>
     public const string FileName = "koine.config";
 
+    /// <summary>The parsed options for <paramref name="target"/>, or <see cref="TargetOptions.Empty"/>.</summary>
+    public TargetOptions OptionsFor(string target) =>
+        Targets is not null && Targets.TryGetValue(target, out TargetOptions? opts) ? opts : TargetOptions.Empty;
+
     public static KoineConfig Parse(string text)
     {
         string? target = null;
         string? outDir = null;
         string? baseline = null;
+        var targets = new Dictionary<string, TargetBuilder>(StringComparer.Ordinal);
 
         foreach (var raw in text.Split('\n'))
         {
@@ -54,12 +80,63 @@ internal sealed record KoineConfig(string? Target, string? OutDir, string? Basel
                 case "baseline":
                     baseline = value;
                     break;
-                    // Unknown / structured keys (the R16 `targets.*` block, etc.) are
-                    // intentionally ignored so older tooling tolerates newer configs.
+                default:
+                    // `targets.<name>.<rest>` (R16.1); any other unknown key is ignored.
+                    if (key.StartsWith("targets.", StringComparison.Ordinal))
+                    {
+                        ApplyTargetKey(targets, key, value);
+                    }
+
+                    break;
             }
         }
 
-        return new KoineConfig(target, outDir, baseline);
+        IReadOnlyDictionary<string, TargetOptions>? built = targets.Count == 0
+            ? null
+            : targets.ToDictionary(kv => kv.Key, kv => kv.Value.Build(), StringComparer.Ordinal);
+        return new KoineConfig(target, outDir, baseline, built);
+    }
+
+    /// <summary>
+    /// Applies one <c>targets.&lt;name&gt;.&lt;rest&gt;</c> key. Recognized <c>rest</c>: <c>out</c>,
+    /// <c>instantMode</c>, <c>layout</c>, and <c>namespaces.&lt;Context&gt;</c>. Malformed/partial
+    /// keys are ignored (forward-compatible).
+    /// </summary>
+    private static void ApplyTargetKey(Dictionary<string, TargetBuilder> targets, string key, string value)
+    {
+        var parts = key.Split('.');
+        if (parts.Length < 3)
+        {
+            return; // need at least targets.<name>.<rest>
+        }
+
+        var name = parts[1];
+        if (name.Length == 0)
+        {
+            return;
+        }
+
+        if (!targets.TryGetValue(name, out TargetBuilder? builder))
+        {
+            builder = new TargetBuilder();
+            targets[name] = builder;
+        }
+
+        switch (parts[2])
+        {
+            case "out" when parts.Length == 3:
+                builder.OutDir = value;
+                break;
+            case "instantMode" when parts.Length == 3:
+                builder.InstantMode = value;
+                break;
+            case "layout" when parts.Length == 3:
+                builder.Layout = value;
+                break;
+            case "namespaces" when parts.Length == 4 && parts[3].Length > 0:
+                builder.NamespaceMap[parts[3]] = value;
+                break;
+        }
     }
 
     /// <summary>
@@ -95,5 +172,16 @@ internal sealed record KoineConfig(string? Target, string? OutDir, string? Basel
     {
         var hash = line.IndexOf('#');
         return hash < 0 ? line : line[..hash];
+    }
+
+    /// <summary>Mutable accumulator for one target's keys during parsing.</summary>
+    private sealed class TargetBuilder
+    {
+        public string? OutDir;
+        public string? InstantMode;
+        public string? Layout;
+        public readonly Dictionary<string, string> NamespaceMap = new(StringComparer.Ordinal);
+
+        public TargetOptions Build() => new(OutDir, NamespaceMap, InstantMode, Layout);
     }
 }
