@@ -76,7 +76,7 @@ public sealed partial class CSharpEmitter
         {
             IReadOnlyList<Member> members = SpecTargetMembers(spec.TargetType, index, ContextOf(ns));
             var translator = new CSharpExpressionTranslator(
-                index, members, enumMemberToType, SpecBodiesFor(spec.TargetType, index), memberReceiver: "x", context: ContextOf(ns));
+                index, members, enumMemberToType, SpecBodiesFor(spec.TargetType, index), memberReceiver: "x", context: ContextOf(ns), options: _options);
             var body = translator.TranslateTopLevel(spec.Condition, CSharpExpressionTranslator.NameMode.Property);
 
             if (!first)
@@ -93,7 +93,7 @@ public sealed partial class CSharpEmitter
         }
 
         sb.Append("}\n");
-        return new EmittedFile(PathFor(ns, KindFolder.Specifications, $"{ns}Specifications.cs"), Assemble(emit, ns, sb.ToString(), usesLinq));
+        return new EmittedFile(PathFor(emit, ns, KindFolder.Specifications, $"{ns}Specifications.cs"), Assemble(emit, ns, sb.ToString(), usesLinq));
     }
 
     /// <summary>
@@ -115,7 +115,7 @@ public sealed partial class CSharpEmitter
         WriteXmlDoc(sb, svc.Doc ?? "A stateless domain service.", "");
         sb.Append("public ").Append(isAbstract ? "abstract" : "sealed").Append(" class ").Append(svc.Name).Append("\n{\n");
 
-        var translator = new CSharpExpressionTranslator(index, Array.Empty<Member>(), enumMemberToType, context: ContextOf(ns));
+        var translator = new CSharpExpressionTranslator(index, Array.Empty<Member>(), enumMemberToType, context: ContextOf(ns), options: _options);
         var first = true;
         foreach (OperationDecl op in svc.Operations)
         {
@@ -159,7 +159,7 @@ public sealed partial class CSharpEmitter
 
         sb.Append("}\n");
         var usesLinq = svc.Operations.Any(o => o.Body is not null && ExprUsesLinq(o.Body));
-        return new EmittedFile(PathFor(ns, KindFolder.Services, $"{svc.Name}.cs"), Assemble(emit, ns, sb.ToString(), usesLinq));
+        return new EmittedFile(PathFor(emit, ns, KindFolder.Services, $"{svc.Name}.cs"), Assemble(emit, ns, sb.ToString(), usesLinq));
     }
 
     /// <summary>
@@ -182,7 +182,7 @@ public sealed partial class CSharpEmitter
         IReadOnlyList<Member> eventMembers = index.TryGetDecl(policy.EventName, out TypeDecl ed) && ed is EventDecl ev
             ? ev.Members
             : Array.Empty<Member>();
-        var translator = new CSharpExpressionTranslator(index, eventMembers, enumMemberToType, memberReceiver: "e", context: ContextOf(ns));
+        var translator = new CSharpExpressionTranslator(index, eventMembers, enumMemberToType, memberReceiver: "e", context: ContextOf(ns), options: _options);
         PolicyReaction r = policy.Reaction;
         var argText = string.Join(", ", r.Args.Select(a =>
             $"{a.Parameter}: {translator.TranslateTopLevel(a.Value, CSharpExpressionTranslator.NameMode.Property)}"));
@@ -204,6 +204,6 @@ public sealed partial class CSharpEmitter
         sb.Append(Indent).Append("public abstract Task Handle(").Append(policy.EventName).Append(" e, CancellationToken ct = default);\n");
         sb.Append("}\n");
 
-        return new EmittedFile(PathFor(ns, KindFolder.Policies, $"{policyType}.cs"), Assemble(emit, ns, sb.ToString(), usesLinq: false));
+        return new EmittedFile(PathFor(emit, ns, KindFolder.Policies, $"{policyType}.cs"), Assemble(emit, ns, sb.ToString(), usesLinq: false));
     }
 }

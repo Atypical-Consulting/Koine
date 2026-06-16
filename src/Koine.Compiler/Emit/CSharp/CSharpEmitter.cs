@@ -17,6 +17,17 @@ public sealed partial class CSharpEmitter : IEmitter
 
     private const string Indent = "    ";
 
+    private readonly CSharpEmitterOptions _options;
+
+    /// <summary>The default emitter: no configured options, byte-identical historical output.</summary>
+    public CSharpEmitter()
+        : this(CSharpEmitterOptions.Empty)
+    {
+    }
+
+    /// <summary>An emitter configured with R16.1 options (namespace remapping, Instant handling).</summary>
+    internal CSharpEmitter(CSharpEmitterOptions options) => _options = options;
+
     public IReadOnlyList<EmittedFile> Emit(KoineModel model) => Emit(model, null);
 
     public IReadOnlyList<EmittedFile> Emit(KoineModel model, SemanticModel? semantic)
@@ -24,7 +35,7 @@ public sealed partial class CSharpEmitter : IEmitter
         // Reuse the shared resolution when given (the normal pipeline path); fall back to building
         // our own only when invoked standalone (e.g. a direct emitter test).
         var index = (semantic ?? new SemanticModel(model)).Index;
-        var typeMapper = new CSharpTypeMapper(index);
+        var typeMapper = new CSharpTypeMapper(index, _options);
         Dictionary<string, string> enumMemberToType = BuildEnumMemberMap(model);
 
         // All per-run state lives in this immutable record, threaded through the emit
@@ -34,7 +45,8 @@ public sealed partial class CSharpEmitter : IEmitter
             ScalarNeeds: OperatorNeedsAnalyzer.BuildScalarOperatorNeeds(model, index),
             AdditiveNeeds: OperatorNeedsAnalyzer.BuildAdditiveOperatorNeeds(model, index),
             ContextNames: model.Contexts.Select(c => c.Name).ToList(),
-            IdStrategies: BuildIdentityStrategies(model));
+            IdStrategies: BuildIdentityStrategies(model),
+            Options: _options);
 
         var files = new List<EmittedFile>();
 
@@ -223,7 +235,7 @@ public sealed partial class CSharpEmitter : IEmitter
 
         // Associated-data args are literal expressions; reuse the translator so string
         // escaping and the decimal `m` suffix match the rest of the emitted code.
-        var translator = new CSharpExpressionTranslator(index, Array.Empty<Member>(), enumMemberToType);
+        var translator = new CSharpExpressionTranslator(index, Array.Empty<Member>(), enumMemberToType, options: _options);
 
         WriteXmlDoc(sb, @enum.Doc ?? "A type-safe smart enum: static instances with value equality.", "");
         WriteObsolete(sb, @enum.Deprecated, "");
@@ -369,7 +381,7 @@ public sealed partial class CSharpEmitter : IEmitter
 
         sb.Append("}\n");
 
-        return new EmittedFile(PathFor(ns, KindFolder.Enums, $"{name}.cs"), Assemble(emit, ns, sb.ToString(), usesLinq: true));
+        return new EmittedFile(PathFor(emit, ns, KindFolder.Enums, $"{name}.cs"), Assemble(emit, ns, sb.ToString(), usesLinq: true));
     }
 
     // ----------------------------------------------------------------------
@@ -442,7 +454,7 @@ public sealed partial class CSharpEmitter : IEmitter
         IReadOnlyDictionary<string, string> enumMemberToType)
     {
         var memberNames = new HashSet<string>(ev.Members.Select(m => m.Name), StringComparer.Ordinal);
-        var translator = new CSharpExpressionTranslator(index, ev.Members, enumMemberToType, context: ContextOf(ns));
+        var translator = new CSharpExpressionTranslator(index, ev.Members, enumMemberToType, context: ContextOf(ns), options: _options);
         var ctorMembers = ev.Members.Where(m => !MemberAnalysis.IsDerived(m, memberNames)).ToList();
         var derived = ev.Members.Where(m => MemberAnalysis.IsDerived(m, memberNames)).ToList();
 
@@ -484,7 +496,7 @@ public sealed partial class CSharpEmitter : IEmitter
         }
 
         sb.Append("}\n");
-        return new EmittedFile(PathFor(ns, KindFolder.Events, $"{ev.Name}.cs"),
+        return new EmittedFile(PathFor(emit, ns, KindFolder.Events, $"{ev.Name}.cs"),
             Assemble(emit, ns, sb.ToString(), UsesLinq(ev.Members, Array.Empty<Invariant>())));
     }
 
@@ -501,7 +513,7 @@ public sealed partial class CSharpEmitter : IEmitter
         IReadOnlyDictionary<string, string> enumMemberToType)
     {
         var memberNames = new HashSet<string>(ev.Members.Select(m => m.Name), StringComparer.Ordinal);
-        var translator = new CSharpExpressionTranslator(index, ev.Members, enumMemberToType, context: ContextOf(ns));
+        var translator = new CSharpExpressionTranslator(index, ev.Members, enumMemberToType, context: ContextOf(ns), options: _options);
         var ctorMembers = ev.Members.Where(m => !MemberAnalysis.IsDerived(m, memberNames)).ToList();
         var derived = ev.Members.Where(m => MemberAnalysis.IsDerived(m, memberNames)).ToList();
 
@@ -543,7 +555,7 @@ public sealed partial class CSharpEmitter : IEmitter
         }
 
         sb.Append("}\n");
-        return new EmittedFile(PathFor(ns, KindFolder.IntegrationEvents, $"{ev.Name}.cs"),
+        return new EmittedFile(PathFor(emit, ns, KindFolder.IntegrationEvents, $"{ev.Name}.cs"),
             Assemble(emit, ns, sb.ToString(), UsesLinq(ev.Members, Array.Empty<Invariant>())));
     }
 
@@ -554,8 +566,9 @@ public sealed partial class CSharpEmitter : IEmitter
     private EmittedFile EmitIntegrationEventHandler(EmitContext emit, SubscribeDecl sub, string subscriberContext, ModelIndex index)
     {
         // Fully-qualify the event type with the publisher's namespace so it can never bind to a
-        // same-named integration event the subscriber happens to declare locally (R14.3).
-        var publisherNs = index.NamespaceOfTypeIn(sub.Context, sub.EventName) ?? sub.Context;
+        // same-named integration event the subscriber happens to declare locally (R14.3). The
+        // publisher namespace honors any configured context→namespace remap (R16.1).
+        var publisherNs = emit.RemapNamespace(index.NamespaceOfTypeIn(sub.Context, sub.EventName) ?? sub.Context);
         var eventType = publisherNs + "." + sub.EventName;
         var sb = new StringBuilder();
 
@@ -565,7 +578,7 @@ public sealed partial class CSharpEmitter : IEmitter
         sb.Append(Indent).Append("Task Handle(").Append(eventType).Append(" theEvent, CancellationToken ct = default);\n");
         sb.Append("}\n");
 
-        return new EmittedFile(PathFor(subscriberContext, KindFolder.Abstractions, $"IHandle{sub.EventName}.cs"),
+        return new EmittedFile(PathFor(emit, subscriberContext, KindFolder.Abstractions, $"IHandle{sub.EventName}.cs"),
             Assemble(emit, subscriberContext, sb.ToString(), usesLinq: false));
     }
 
@@ -579,9 +592,10 @@ public sealed partial class CSharpEmitter : IEmitter
         var sb = new StringBuilder();
 
         // Fully-qualify each mapped type with the namespace it ACTUALLY emits into (which may be a
-        // module sub-namespace or a shared-kernel namespace), not the bare context name (R14.2).
+        // module sub-namespace or a shared-kernel namespace), not the bare context name (R14.2),
+        // honoring any configured context→namespace remap (R16.1).
         string Fqn(string context, string type) =>
-            (index.NamespaceOfTypeIn(context, type) ?? context) + "." + type;
+            emit.RemapNamespace(index.NamespaceOfTypeIn(context, type) ?? context) + "." + type;
 
         sb.Append("/// <summary>Anti-corruption translator from upstream context ").Append(r.Upstream)
           .Append(" into ").Append(r.Downstream).Append(".</summary>\n");
@@ -597,7 +611,7 @@ public sealed partial class CSharpEmitter : IEmitter
 
         sb.Append("}\n");
 
-        return new EmittedFile(PathFor(r.Downstream, KindFolder.Abstractions, $"{iface}.cs"),
+        return new EmittedFile(PathFor(emit, r.Downstream, KindFolder.Abstractions, $"{iface}.cs"),
             Assemble(emit, r.Downstream, sb.ToString(), usesLinq: false));
     }
 
@@ -1355,16 +1369,21 @@ public sealed partial class CSharpEmitter : IEmitter
         // modules of the same context) emit unqualified, so a precise `using` is added for
         // each referenced type's namespace (R13.2/R13.3). Qualified refs emit fully-qualified
         // and need none. The runtime files never reference user types.
+        // The namespace this file emits into, after any configured context→namespace remap
+        // (R16.1). Cross-context `using`s and the namespace declaration are computed against
+        // the remapped form so a relocated context is referenced by its new namespace everywhere.
+        var emittedNs = emit.RemapNamespace(ns);
+
         var context = ns.Split('.')[0];
         if (emit.ContextNames.Contains(context))
         {
-            collector.CollectUserTypeNamespaces(ns, body, emit.Index.VisibleTypeNamespaces(context));
+            collector.CollectUserTypeNamespaces(emittedNs, body, RemapNamespaces(emit, emit.Index.VisibleTypeNamespaces(context)));
         }
         // A shared-kernel file lives in a synthetic namespace (not a real context); resolve its
         // cross-namespace references against its partner contexts' visible types (R14.2).
         else if (emit.Index.IsKernelNamespace(ns))
         {
-            collector.CollectUserTypeNamespaces(ns, body, emit.Index.KernelVisibleTypeNamespaces(ns));
+            collector.CollectUserTypeNamespaces(emittedNs, body, RemapNamespaces(emit, emit.Index.KernelVisibleTypeNamespaces(ns)));
         }
 
         var sb = new StringBuilder();
@@ -1382,9 +1401,23 @@ public sealed partial class CSharpEmitter : IEmitter
             sb.Append('\n');
         }
 
-        sb.Append("namespace ").Append(ns).Append(";\n\n");
+        sb.Append("namespace ").Append(emittedNs).Append(";\n\n");
         sb.Append(body);
         return sb.ToString();
+    }
+
+    /// <summary>
+    /// Remaps the namespace values of a visible-type map through <see cref="EmitContext.RemapNamespace"/>
+    /// (R16.1), so a cross-context <c>using</c> targets a relocated context's emitted namespace.
+    /// The type names (keys) are unchanged. A no-op (returns the same entries) when no map is configured.
+    /// </summary>
+    private static IEnumerable<KeyValuePair<string, string>> RemapNamespaces(
+        EmitContext emit, IEnumerable<KeyValuePair<string, string>> visibleTypes)
+    {
+        foreach (var (name, typeNs) in visibleTypes)
+        {
+            yield return new KeyValuePair<string, string>(name, emit.RemapNamespace(typeNs));
+        }
     }
 
     /// <summary>The declared enum type of an enum-typed member (hint for qualifying bare members), else null.</summary>
@@ -1480,12 +1513,16 @@ public sealed partial class CSharpEmitter : IEmitter
     /// optional DDD building-block subfolder (e.g. "Entities", "ValueObjects"),
     /// and the file name. An empty <paramref name="kindFolder"/> places the file
     /// at the namespace root — used for aggregate roots (the aggregate is the
-    /// context's entry point) and for runtime support types.
+    /// context's entry point) and for runtime support types. The folder reflects any
+    /// configured context→namespace remap (R16.1), staying in step with the declaration.
     /// </summary>
-    private static string PathFor(string ns, string kindFolder, string fileName)
-        => kindFolder.Length == 0
-            ? $"{FolderFor(ns)}/{fileName}"
-            : $"{FolderFor(ns)}/{kindFolder}/{fileName}";
+    private static string PathFor(EmitContext emit, string ns, string kindFolder, string fileName)
+    {
+        var folder = FolderFor(emit.RemapNamespace(ns));
+        return kindFolder.Length == 0
+            ? $"{folder}/{fileName}"
+            : $"{folder}/{kindFolder}/{fileName}";
+    }
 
     /// <summary>The DDD building-block subfolders generated files are grouped into.</summary>
     private static class KindFolder

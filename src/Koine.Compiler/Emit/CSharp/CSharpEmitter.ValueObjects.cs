@@ -24,7 +24,7 @@ public sealed partial class CSharpEmitter
         IReadOnlyDictionary<string, string> enumMemberToType)
     {
         var memberNames = new HashSet<string>(vo.Members.Select(m => m.Name), StringComparer.Ordinal);
-        var translator = new CSharpExpressionTranslator(index, vo.Members, enumMemberToType, SpecBodiesFor(vo.Name, index), context: ContextOf(ns));
+        var translator = new CSharpExpressionTranslator(index, vo.Members, enumMemberToType, SpecBodiesFor(vo.Name, index), context: ContextOf(ns), options: _options);
 
         var ctorParams = vo.Members.Where(m => !MemberAnalysis.IsDerived(m, memberNames)).ToList();
         var derived = vo.Members.Where(m => MemberAnalysis.IsDerived(m, memberNames)).ToList();
@@ -118,7 +118,7 @@ public sealed partial class CSharpEmitter
 
         sb.Append("}\n");
 
-        return new EmittedFile(PathFor(ns, KindFolder.ValueObjects, $"{vo.Name}.cs"),
+        return new EmittedFile(PathFor(emit, ns, KindFolder.ValueObjects, $"{vo.Name}.cs"),
             Assemble(emit, ns, sb.ToString(), UsesLinq(vo.Members, vo.Invariants) || SpecBodiesUseLinq(vo.Name, index)));
     }
 

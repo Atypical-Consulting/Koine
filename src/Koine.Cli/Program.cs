@@ -5,6 +5,7 @@ using Koine.Compiler.Diagnostics;
 using Koine.Compiler.Emit;
 using Koine.Compiler.Emit.CSharp;
 using Koine.Compiler.Emit.Glossary;
+using Koine.Compiler.Emit.TypeScript;
 using Koine.Compiler.Services;
 
 namespace Koine.Cli;
@@ -72,7 +73,7 @@ internal static class Program
     }
 
     /// <summary>A parsed, config-resolved build invocation, shared by <c>build</c> and <c>watch</c>.</summary>
-    private readonly record struct BuildRequest(string File, string Target, string? OutDir, string? GlossaryFile);
+    private readonly record struct BuildRequest(string File, string Target, string? OutDir, string? GlossaryFile, TargetOptions Options);
 
     /// <summary>
     /// Parses the flags common to <c>build</c> and <c>watch</c> (<c>--target</c>,
@@ -142,8 +143,9 @@ internal static class Program
 
         // Per-target out-dir (R16.1): an explicit --out wins, then targets.<t>.out, then the flat out.
         var resolvedTarget = target ?? config.Target ?? "csharp";
-        var resolvedOut = outDir ?? config.OptionsFor(resolvedTarget).OutDir ?? config.OutDir;
-        request = new BuildRequest(file, resolvedTarget, resolvedOut, glossaryFile);
+        var targetOptions = config.OptionsFor(resolvedTarget);
+        var resolvedOut = outDir ?? targetOptions.OutDir ?? config.OutDir;
+        request = new BuildRequest(file, resolvedTarget, resolvedOut, glossaryFile, targetOptions);
         return true;
     }
 
@@ -178,13 +180,14 @@ internal static class Program
 
         IEmitter emitter = target.ToLowerInvariant() switch
         {
-            "csharp" => new CSharpEmitter(),
+            "csharp" => new CSharpEmitter(ToCSharpOptions(r.Options)),
+            "typescript" => new TypeScriptEmitter(),
             "glossary" => new GlossaryEmitter(),
             _ => null!
         };
         if (emitter is null)
         {
-            exitCode = RuntimeError($"unsupported target '{target}' (supported: csharp, glossary)");
+            exitCode = RuntimeError($"unsupported target '{target}' (supported: csharp, typescript, glossary)");
             return false;
         }
 
@@ -244,6 +247,27 @@ internal static class Program
         Console.WriteLine($"wrote {count} files to {outDir}");
         exitCode = 0;
         return true;
+    }
+
+    /// <summary>
+    /// Maps the CLI's parsed per-target <see cref="TargetOptions"/> to the C# emitter's
+    /// <see cref="CSharpEmitterOptions"/> (R16.1). An empty options bag maps to
+    /// <see cref="CSharpEmitterOptions.Empty"/>, so an unconfigured target emits byte-identical
+    /// output. <c>instantMode = nodaTime</c> (case-insensitive) selects the NodaTime mode;
+    /// anything else (incl. <c>dateTimeOffset</c> and absent) keeps the DateTimeOffset default.
+    /// The <c>layout</c> key is accepted and currently a no-op (file-per-type is the only layout).
+    /// </summary>
+    private static CSharpEmitterOptions ToCSharpOptions(TargetOptions options)
+    {
+        if (options.NamespaceMap.Count == 0 && options.InstantMode is null)
+        {
+            return CSharpEmitterOptions.Empty;
+        }
+
+        var instant = string.Equals(options.InstantMode, "nodaTime", StringComparison.OrdinalIgnoreCase)
+            ? CSharpInstantMode.NodaTime
+            : CSharpInstantMode.DateTimeOffset;
+        return new CSharpEmitterOptions(options.NamespaceMap, instant);
     }
 
     /// <summary>
@@ -865,7 +889,7 @@ internal static class Program
         writer.WriteLine();
         writer.WriteLine("Usage:");
         writer.WriteLine("  koine --version");
-        writer.WriteLine("  koine build <file.koi|dir> [--target csharp|glossary] [--out <dir>] [--glossary <file.md>] [--config <file>]");
+        writer.WriteLine("  koine build <file.koi|dir> [--target csharp|typescript|glossary] [--out <dir>] [--glossary <file.md>] [--config <file>]");
         writer.WriteLine("  koine watch <file.koi|dir> [--target …] [--out …] [--config <file>]   # rebuild on every change");
         writer.WriteLine("  koine fmt   <file.koi|dir> [--check]            # canonically format .koi (--check: verify only)");
         writer.WriteLine("  koine init  [dir] [--force]                    # scaffold a starter project");
@@ -881,10 +905,10 @@ internal static class Program
         koine build — compile a .koi model and (optionally) emit code.
 
         Usage:
-          koine build <file.koi|dir> [--target csharp|glossary] [--out <dir>] [--glossary <file.md>] [--config <file>]
+          koine build <file.koi|dir> [--target csharp|typescript|glossary] [--out <dir>] [--glossary <file.md>] [--config <file>]
 
         Options:
-          --target <t>      output target: csharp (default) or glossary
+          --target <t>      output target: csharp (default), typescript, or glossary
           --out <dir>       directory to write generated files into; omit to only parse/validate
           --glossary <md>   also write a Markdown glossary to this file (independent of --target)
           --config <file>   read defaults (target/out) from this koine.config instead of discovering one

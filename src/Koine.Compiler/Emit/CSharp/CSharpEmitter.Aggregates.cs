@@ -145,7 +145,7 @@ public sealed partial class CSharpEmitter
         }
 
         sb.Append("}\n");
-        return new EmittedFile(PathFor(ns, KindFolder.Repositories, $"{iface}.cs"), Assemble(emit, ns, sb.ToString(), usesLinq: false));
+        return new EmittedFile(PathFor(emit, ns, KindFolder.Repositories, $"{iface}.cs"), Assemble(emit, ns, sb.ToString(), usesLinq: false));
     }
 
     /// <summary>Maps every owned ID type name to its declared identity strategy (R11.1).</summary>

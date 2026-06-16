@@ -28,6 +28,7 @@ internal sealed class CSharpExpressionTranslator
         new Dictionary<string, string>(StringComparer.Ordinal) { ["now"] = "DateTimeOffset.UtcNow" };
 
     private readonly ModelIndex _index;
+    private readonly CSharpEmitterOptions _options;
     private readonly TypeResolver _resolver;
     private readonly TypeScope _scope;
     private readonly ISet<string> _memberNames;
@@ -99,9 +100,11 @@ internal sealed class CSharpExpressionTranslator
         IReadOnlyDictionary<string, string> enumMemberToType,
         IReadOnlyDictionary<string, Expr>? specBodies = null,
         string? memberReceiver = null,
-        string? context = null)
+        string? context = null,
+        CSharpEmitterOptions? options = null)
     {
         _index = index;
+        _options = options ?? CSharpEmitterOptions.Empty;
         _resolver = new TypeResolver(index, context);
         _scope = TypeScope.FromMembers(members, index);
         _memberNames = new HashSet<string>(members.Select(m => m.Name), StringComparer.Ordinal);
@@ -450,7 +453,7 @@ internal sealed class CSharpExpressionTranslator
         }
 
         TypeRef? bodyType = _resolver.Infer(let.Body, scope);
-        var ret = bodyType is not null ? new CSharpTypeMapper(_index).Map(bodyType) : "object";
+        var ret = bodyType is not null ? new CSharpTypeMapper(_index, _options).Map(bodyType) : "object";
 
         // Fully-qualify Func so the lowering never depends on a `using System;` in the
         // generated file's fixed using-set.
