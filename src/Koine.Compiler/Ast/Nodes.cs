@@ -14,11 +14,34 @@ public abstract record KoineNode
     public SourceSpan Span { get; init; } = SourceSpan.None;
 
     /// <summary>
+    /// The span of just this declaration's identifier (the name), distinct from the full
+    /// node <see cref="Span"/>. Set by the parser for every named declaration/member so
+    /// go-to-definition and the LSP <c>selectionRange</c> land on the name with real width;
+    /// <see cref="SourceSpan.None"/> for nodes that have no name.
+    /// </summary>
+    public SourceSpan NameSpan { get; init; } = SourceSpan.None;
+
+    /// <summary>
     /// The <c>///</c> doc comment attached to this declaration/member, with the
     /// leading <c>///</c> stripped and lines joined by <c>\n</c>; <c>null</c> when
     /// none. Target-agnostic: no markup. The emitter decides how to render it.
+    /// This is the convenience projection of the <see cref="SyntaxTriviaKind.Doc"/>
+    /// pieces in <see cref="LeadingTrivia"/>.
     /// </summary>
     public string? Doc { get; init; }
+
+    /// <summary>
+    /// Lossless trivia (whitespace, blank lines, comments) immediately before this node's first
+    /// token, in source order (#5). Empty by default; populated by the parser so an AST → source
+    /// printer can reproduce the original layout verbatim. Target-agnostic.
+    /// </summary>
+    public IReadOnlyList<SyntaxTrivia> LeadingTrivia { get; init; } = [];
+
+    /// <summary>
+    /// Lossless trivia immediately after this node's last token, in source order (#5). Empty by
+    /// default; populated by the parser. Target-agnostic.
+    /// </summary>
+    public IReadOnlyList<SyntaxTrivia> TrailingTrivia { get; init; } = [];
 }
 
 /// <summary>

@@ -3,6 +3,7 @@ using System.Text.Json;
 using Koine.Compiler.Diagnostics;
 using Koine.Compiler.Formatting;
 using Koine.Compiler.Services;
+using SourceSpan = Koine.Compiler.Ast.SourceSpan;
 
 namespace Koine.Cli;
 
@@ -355,45 +356,39 @@ internal sealed class LspServer
             return null;
         }
 
-        var workspace = Workspace();
-        var def = _ls.DefinitionAt(workspace, uri, line, ch);
+        var def = _ls.DefinitionAt(Workspace(), uri, line, ch);
         if (def is null)
         {
             return null;
         }
 
-        // SpanOf points at the declaration KEYWORD (1-based). Select the declared NAME by
-        // locating the requested identifier on the target line, so the editor highlights the
-        // name rather than the keyword. The name being navigated to is the token under the
-        // request cursor; fall back to a zero-width range at the keyword when it can't be found.
-        var startLine = Math.Max(0, def.Target.Line - 1);
-        var keywordChar = Math.Max(0, def.Target.Column - 1);
-        var (startChar, endChar) = (keywordChar, keywordChar);
-
-        var requested = _ls.NameAt(workspace, uri, line, ch);
-        if (requested is { Length: > 0 }
-            && workspace.TryGetValue(def.Uri, out var targetText))
-        {
-            var targetLines = SplitLines(targetText);
-            if (startLine < targetLines.Length)
-            {
-                var idx = targetLines[startLine].IndexOf(requested, keywordChar, StringComparison.Ordinal);
-                if (idx >= 0)
-                { startChar = idx; endChar = idx + requested.Length; }
-            }
-        }
-
+        // The target is the declaration's NameSpan: a real range over the identifier. Convert it
+        // straight to an LSP range — no name-search heuristic, no zero-width fallback.
         return new Dictionary<string, object?>
         {
             // The target may live in a different file than the request (cross-file resolution).
             ["uri"] = def.Uri,
-            ["range"] = new Dictionary<string, object?>
-            {
-                ["start"] = new Dictionary<string, object?> { ["line"] = startLine, ["character"] = startChar },
-                ["end"] = new Dictionary<string, object?> { ["line"] = startLine, ["character"] = endChar },
-            },
+            ["range"] = SpanRange(def.Target),
         };
     }
+
+    /// <summary>
+    /// Converts a 1-based, end-EXCLUSIVE <see cref="SourceSpan"/> to a 0-based LSP range
+    /// (<c>start.character = Column - 1</c>, <c>end.character = EndColumn - 1</c>).
+    /// </summary>
+    private static Dictionary<string, object?> SpanRange(SourceSpan span) => new()
+    {
+        ["start"] = new Dictionary<string, object?>
+        {
+            ["line"] = Math.Max(0, span.Line - 1),
+            ["character"] = Math.Max(0, span.Column - 1),
+        },
+        ["end"] = new Dictionary<string, object?>
+        {
+            ["line"] = Math.Max(0, span.EndLine - 1),
+            ["character"] = Math.Max(0, span.EndColumn - 1),
+        },
+    };
 
     // ---- Formatting -------------------------------------------------------
 
@@ -442,21 +437,16 @@ internal sealed class LspServer
 
     private static object ToLspSymbol(DocumentSymbol s)
     {
-        // Range and selectionRange are both the declaration point (zero-width); editors only
-        // require them to be present and contain the cursor.
-        var startLine = Math.Max(0, s.Position.Line - 1);
-        var startChar = Math.Max(0, s.Position.Column - 1);
-        var range = new Dictionary<string, object?>
-        {
-            ["start"] = new Dictionary<string, object?> { ["line"] = startLine, ["character"] = startChar },
-            ["end"] = new Dictionary<string, object?> { ["line"] = startLine, ["character"] = startChar },
-        };
+        // range = the full declaration; selectionRange = just the identifier. The LSP spec
+        // requires selectionRange to be contained within range, which holds (NameSpan ⊆ Span).
+        // A declaration with no name span (selectionRange == None) falls back to the full range.
+        var selection = s.SelectionRange.IsNone ? s.Range : s.SelectionRange;
         return new Dictionary<string, object?>
         {
             ["name"] = s.Name,
             ["kind"] = LspSymbolKind(s.Kind),
-            ["range"] = range,
-            ["selectionRange"] = range,
+            ["range"] = SpanRange(s.Range),
+            ["selectionRange"] = SpanRange(selection),
             ["children"] = s.Children.Select(ToLspSymbol).ToArray(),
         };
     }
@@ -713,13 +703,13 @@ internal sealed class LspServer
 
     private static Dictionary<string, object?> ToLspDiagnostic(Diagnostic d, string[] lines)
     {
-        var (startLine, startChar, endChar) = ToRange(d, lines);
+        var (startLine, startChar, endLine, endChar) = ToRange(d, lines);
         return new Dictionary<string, object?>
         {
             ["range"] = new Dictionary<string, object?>
             {
                 ["start"] = new Dictionary<string, object?> { ["line"] = startLine, ["character"] = startChar },
-                ["end"] = new Dictionary<string, object?> { ["line"] = startLine, ["character"] = endChar },
+                ["end"] = new Dictionary<string, object?> { ["line"] = endLine, ["character"] = endChar },
             },
             ["severity"] = d.Severity == DiagnosticSeverity.Error ? 1 : 2, // 1=Error, 2=Warning
             ["code"] = d.Code,
@@ -729,15 +719,27 @@ internal sealed class LspServer
     }
 
     /// <summary>
-    /// Maps a 1-based Koine <see cref="Diagnostic"/> position to a 0-based LSP range,
-    /// underlining the token at the position (or one character when none is found).
+    /// Maps a 1-based Koine <see cref="Diagnostic"/> to a 0-based LSP range. When the diagnostic
+    /// carries a known end (<see cref="Diagnostic.HasEnd"/>, i.e. it was built from a node's full
+    /// <see cref="SourceSpan"/>), the exact range — possibly multi-token or multi-line — is used.
+    /// Otherwise it falls back to a forward scan that underlines the identifier token at the start
+    /// position (or one character when none is found).
     /// </summary>
-    internal static (int Line, int StartChar, int EndChar) ToRange(Diagnostic d, string[] lines)
+    internal static (int StartLine, int StartChar, int EndLine, int EndChar) ToRange(Diagnostic d, string[] lines)
     {
         var line = Math.Max(0, d.Line - 1);
         var col = Math.Max(0, d.Column - 1);
-        var endCol = col + 1;
 
+        // Exact range carried by the diagnostic (end-EXCLUSIVE, 1-based -> 0-based).
+        if (d.HasEnd)
+        {
+            var endLine = Math.Max(0, d.EndLine - 1);
+            var endChar = Math.Max(0, d.EndColumn - 1);
+            return (line, col, endLine, endChar);
+        }
+
+        // Fallback: forward-scan the identifier token at the start position (single line).
+        var scanEndCol = col + 1;
         if (line < lines.Length)
         {
             var text = lines[line];
@@ -747,10 +749,10 @@ internal sealed class LspServer
                 e++;
             }
 
-            endCol = e > col ? e : Math.Min(col + 1, Math.Max(text.Length, col + 1));
+            scanEndCol = e > col ? e : Math.Min(col + 1, Math.Max(text.Length, col + 1));
         }
 
-        return (line, col, endCol);
+        return (line, col, line, scanEndCol);
     }
 
     internal static string[] SplitLines(string text) =>

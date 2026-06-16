@@ -20,13 +20,16 @@ public sealed record DefinitionResult(string Uri, SourceSpan Target);
 public enum SymbolKind { Namespace, Class, Enum, EnumMember, Field, Method, Constructor, Interface, Struct }
 
 /// <summary>
-/// One node of a document's symbol outline: a name, a kind, the declaration's 1-based
-/// position, and its nested children (context &gt; type &gt; members). Editor-agnostic.
+/// One node of a document's symbol outline: a name, a kind, the full declaration
+/// <see cref="Range"/> (the LSP <c>range</c>), the identifier <see cref="SelectionRange"/>
+/// (the LSP <c>selectionRange</c>), and its nested children (context &gt; type &gt; members).
+/// Editor-agnostic.
 /// </summary>
 public sealed record DocumentSymbol(
     string Name,
     SymbolKind Kind,
-    SourceSpan Position,
+    SourceSpan Range,
+    SourceSpan SelectionRange,
     IReadOnlyList<DocumentSymbol> Children);
 
 /// <summary>
@@ -364,6 +367,37 @@ public sealed class KoineLanguageService
         return ctx.InsideStringOrRegex ? null : ctx.CurrentToken?.Text;
     }
 
+    /// <summary>
+    /// The 0-based absolute character offset of an LSP 0-based <paramref name="line"/>/
+    /// <paramref name="character"/> in <paramref name="source"/>, matching ANTLR's
+    /// <c>StartIndex</c> (which counts every character of the raw stream, including <c>\r</c>).
+    /// Out-of-range positions clamp to the end of the document.
+    /// </summary>
+    internal static int OffsetOf(string source, int line, int character)
+    {
+        var offset = 0;
+        var currentLine = 0;
+        while (currentLine < line && offset < source.Length)
+        {
+            if (source[offset] == '\n')
+            {
+                currentLine++;
+            }
+
+            offset++;
+        }
+
+        // Advance `character` columns within the target line, stopping at a line break / EOF.
+        var col = 0;
+        while (col < character && offset < source.Length && source[offset] != '\n')
+        {
+            offset++;
+            col++;
+        }
+
+        return offset;
+    }
+
     public HoverResult? HoverAt(IReadOnlyDictionary<string, string> documents, string activeUri, int line, int character)
     {
         if (!documents.TryGetValue(activeUri, out var source))
@@ -396,7 +430,8 @@ public sealed class KoineLanguageService
             return null;
         }
 
-        var loc = new WorkspaceIndex(documents).ResolveDefinition(activeUri, name, ctx.EnclosingTypeName);
+        var offset = OffsetOf(source, line, character);
+        var loc = new WorkspaceIndex(documents).ResolveDefinition(activeUri, name, ctx.EnclosingTypeName, offset);
         return loc is null ? null : new DefinitionResult(loc.Uri, loc.Span);
     }
 
@@ -430,11 +465,11 @@ public sealed class KoineLanguageService
             {
                 if (spec.Span != SourceSpan.None)
                 {
-                    children.Add(new DocumentSymbol(spec.Name, SymbolKind.Method, spec.Span, Array.Empty<DocumentSymbol>()));
+                    children.Add(new DocumentSymbol(spec.Name, SymbolKind.Method, spec.Span, spec.NameSpan, Array.Empty<DocumentSymbol>()));
                 }
             }
 
-            contexts.Add(new DocumentSymbol(ctx.Name, SymbolKind.Namespace, ctx.Span, children));
+            contexts.Add(new DocumentSymbol(ctx.Name, SymbolKind.Namespace, ctx.Span, ctx.NameSpan, children));
         }
         return contexts;
     }
@@ -453,7 +488,7 @@ public sealed class KoineLanguageService
                 {
                     if (c.Span != SourceSpan.None)
                     {
-                        children.Add(new DocumentSymbol(c.Name, SymbolKind.Method, c.Span, Array.Empty<DocumentSymbol>()));
+                        children.Add(new DocumentSymbol(c.Name, SymbolKind.Method, c.Span, c.NameSpan, Array.Empty<DocumentSymbol>()));
                     }
                 }
 
@@ -461,7 +496,7 @@ public sealed class KoineLanguageService
                 {
                     if (f.Span != SourceSpan.None)
                     {
-                        children.Add(new DocumentSymbol(f.Name, SymbolKind.Constructor, f.Span, Array.Empty<DocumentSymbol>()));
+                        children.Add(new DocumentSymbol(f.Name, SymbolKind.Constructor, f.Span, f.NameSpan, Array.Empty<DocumentSymbol>()));
                     }
                 }
 
@@ -477,7 +512,7 @@ public sealed class KoineLanguageService
                 {
                     if (m.Span != SourceSpan.None)
                     {
-                        children.Add(new DocumentSymbol(m.Name, SymbolKind.EnumMember, m.Span, Array.Empty<DocumentSymbol>()));
+                        children.Add(new DocumentSymbol(m.Name, SymbolKind.EnumMember, m.Span, m.NameSpan, Array.Empty<DocumentSymbol>()));
                     }
                 }
 
@@ -490,7 +525,7 @@ public sealed class KoineLanguageService
 
                 break;
         }
-        return new DocumentSymbol(t.Name, SymbolKindOf(t), t.Span, children);
+        return new DocumentSymbol(t.Name, SymbolKindOf(t), t.Span, t.NameSpan, children);
     }
 
     private static DocumentSymbol SymbolForService(ServiceDecl svc)
@@ -500,7 +535,7 @@ public sealed class KoineLanguageService
         {
             if (op.Span != SourceSpan.None)
             {
-                children.Add(new DocumentSymbol(op.Name, SymbolKind.Method, op.Span, Array.Empty<DocumentSymbol>()));
+                children.Add(new DocumentSymbol(op.Name, SymbolKind.Method, op.Span, op.NameSpan, Array.Empty<DocumentSymbol>()));
             }
         }
 
@@ -508,11 +543,11 @@ public sealed class KoineLanguageService
         {
             if (uc.Span != SourceSpan.None)
             {
-                children.Add(new DocumentSymbol(uc.Name, SymbolKind.Method, uc.Span, Array.Empty<DocumentSymbol>()));
+                children.Add(new DocumentSymbol(uc.Name, SymbolKind.Method, uc.Span, uc.NameSpan, Array.Empty<DocumentSymbol>()));
             }
         }
 
-        return new DocumentSymbol(svc.Name, SymbolKind.Interface, svc.Span, children);
+        return new DocumentSymbol(svc.Name, SymbolKind.Interface, svc.Span, svc.NameSpan, children);
     }
 
     private static void AddMembers(List<DocumentSymbol> children, IReadOnlyList<Member> members)
@@ -521,7 +556,7 @@ public sealed class KoineLanguageService
         {
             if (m.Span != SourceSpan.None)
             {
-                children.Add(new DocumentSymbol(m.Name, SymbolKind.Field, m.Span, Array.Empty<DocumentSymbol>()));
+                children.Add(new DocumentSymbol(m.Name, SymbolKind.Field, m.Span, m.NameSpan, Array.Empty<DocumentSymbol>()));
             }
         }
     }

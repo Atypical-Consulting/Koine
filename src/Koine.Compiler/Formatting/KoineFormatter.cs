@@ -23,6 +23,12 @@ public sealed record FormatResult(string Text, bool Changed);
 /// hug a brace). Source line breaks are preserved (the formatter normalizes layout, it
 /// does not reflow), which — together with re-emitting the exact token text — makes it
 /// idempotent: <c>Format(Format(x)) == Format(x)</c>.</para>
+///
+/// <para><b>Role vs. <see cref="AstPrinter"/>:</b> this is the CANONICAL, file-level
+/// pretty-printer (normalizes layout). For VERBATIM AST-level round-trip / refactors that must
+/// preserve the original whitespace and comments, use <see cref="AstPrinter"/> instead (#5). Rename
+/// is a third, text-level path (layout-preserving edits over the original source). The three are
+/// intentionally separate; do not fold one into another.</para>
 /// </summary>
 public sealed class KoineFormatter
 {
@@ -44,7 +50,13 @@ public sealed class KoineFormatter
     {
         var lexer = new KoineLexer(new AntlrInputStream(source));
         lexer.RemoveErrorListeners();   // never throw on malformed input — format best-effort
-        return lexer.GetAllTokens().Where(t => t.Type != TokenConstants.EOF).ToList();
+        // Drop EOF and whitespace: the formatter computes its own canonical whitespace from token
+        // geometry (lines/columns), so it must not see the raw WS tokens. WS now rides the TRIVIA
+        // channel (for lossless AST trivia, #5) instead of being lexer-`skip`ped, so it would
+        // otherwise appear in GetAllTokens(); comments stay (HIDDEN/DOC) so they are preserved.
+        return lexer.GetAllTokens()
+            .Where(t => t.Type != TokenConstants.EOF && t.Channel != KoineLexer.TRIVIA)
+            .ToList();
     }
 
     // ---- A rendered logical line --------------------------------------------
@@ -137,25 +149,7 @@ public sealed class KoineFormatter
     private static bool IsWordStart(string? s) =>
         !string.IsNullOrEmpty(s) && (char.IsLetter(s[0]) || s[0] == '_');
 
-    private static int EndLineOf(IToken t)
-    {
-        var text = t.Text;
-        if (text is null)
-        {
-            return t.Line;
-        }
-
-        var newlines = 0;
-        foreach (var c in text)
-        {
-            if (c == '\n')
-            {
-                newlines++;
-            }
-        }
-
-        return t.Line + newlines;
-    }
+    private static int EndLineOf(IToken t) => Parsing.TokenGeometry.EndLineOf(t);
 
     /// <summary>Renders a token run with canonical inter-token spacing (no leading indent).</summary>
     private static string RenderTokens(IEnumerable<IToken> tokens)

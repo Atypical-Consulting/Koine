@@ -268,7 +268,7 @@ public sealed class SemanticValidator
 
                 if (type is not AggregateDecl && !seen.Add(type.Name))
                 {
-                    diagnostics.Add(Diagnostic.Error(DiagnosticCodes.DuplicateType, $"duplicate type '{type.Name}'", type.Span));
+                    diagnostics.Add(Diagnostic.FromSpan(DiagnosticCodes.DuplicateType, $"duplicate type '{type.Name}'", type.Span));
                 }
             }
 
@@ -278,7 +278,7 @@ public sealed class SemanticValidator
             {
                 if (!seen.Add(svc.Name))
                 {
-                    diagnostics.Add(Diagnostic.Error(DiagnosticCodes.DuplicateType,
+                    diagnostics.Add(Diagnostic.FromSpan(DiagnosticCodes.DuplicateType,
                         $"service '{svc.Name}' collides with a type or service of the same name", svc.Span));
                 }
             }
@@ -453,7 +453,7 @@ public sealed class SemanticValidator
             // 2. Duplicate member, reported at the second occurrence's span.
             if (!seen.Add(m.Name))
             {
-                diagnostics.Add(Diagnostic.Error(DiagnosticCodes.DuplicateMember, $"duplicate member '{m.Name}'", m.Span));
+                diagnostics.Add(Diagnostic.FromSpan(DiagnosticCodes.DuplicateMember, $"duplicate member '{m.Name}'", m.Span));
             }
 
             // 3. The member initializer.
@@ -1029,19 +1029,19 @@ public sealed class SemanticValidator
             case TypeKind.List or TypeKind.Set or TypeKind.Range:
                 if (type.Element is null)
                 {
-                    diagnostics.Add(Diagnostic.Error(DiagnosticCodes.GenericArity, $"'{type.Name}' requires a type argument", type.Span));
+                    diagnostics.Add(Diagnostic.FromSpan(DiagnosticCodes.GenericArity, $"'{type.Name}' requires a type argument", type.Span));
                 }
 
                 if (type.Value is not null)
                 {
-                    diagnostics.Add(Diagnostic.Error(DiagnosticCodes.GenericArity, $"'{type.Name}' takes a single type argument", type.Span));
+                    diagnostics.Add(Diagnostic.FromSpan(DiagnosticCodes.GenericArity, $"'{type.Name}' takes a single type argument", type.Span));
                 }
 
                 break;
             case TypeKind.Map:
                 if (type.Element is null || type.Value is null)
                 {
-                    diagnostics.Add(Diagnostic.Error(DiagnosticCodes.GenericArity, "'Map' requires two type arguments <Key, Value>", type.Span));
+                    diagnostics.Add(Diagnostic.FromSpan(DiagnosticCodes.GenericArity, "'Map' requires two type arguments <Key, Value>", type.Span));
                 }
 
                 break;
