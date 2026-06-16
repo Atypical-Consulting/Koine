@@ -207,7 +207,7 @@ public class R10ServicesTests
 
         Assert.Contains("Sales/ReserveStockPolicy.cs", files);
         Assert.Contains("public interface IReserveStockPolicy", files);
-        Assert.Contains("void Handle(OrderPlaced e);", files);
+        Assert.Contains("Task Handle(OrderPlaced e, CancellationToken ct = default);", files);
         Assert.Contains("public abstract partial class ReserveStockPolicy : IReserveStockPolicy", files);
         Assert.Contains("Inventory.reserve(order: e.OrderId)", files); // intended-reaction sketch
 

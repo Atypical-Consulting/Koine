@@ -146,8 +146,8 @@ public class R12ApplicationTests
         var (asm, files) = Build(Fixture);
         var svc = FileContents(files, "Sales/IOrderService.cs");
         Assert.Contains("public interface IOrderService", svc);
-        Assert.Contains("Task<OrderId> PlaceOrder(CustomerId customer, IReadOnlyList<OrderLine> lines);", svc);
-        Assert.Contains("Task CancelOrder(OrderId order);", svc); // void use case -> Task
+        Assert.Contains("Task<OrderId> PlaceOrder(CustomerId customer, IReadOnlyList<OrderLine> lines, CancellationToken ct = default);", svc);
+        Assert.Contains("Task CancelOrder(OrderId order, CancellationToken ct = default);", svc); // void use case -> Task
         Assert.NotNull(asm.GetType("Sales.IOrderService"));
     }
 
@@ -194,8 +194,8 @@ public class R12ApplicationTests
         Assert.Empty(Diagnose(src));
         var (_, files) = Build(src);
         var svc = FileContents(files, "Sales/IQueries.cs");
-        Assert.Contains("Task<OrderSummary> GetOrder(OrderId order);", svc);
-        Assert.Contains("Task<IReadOnlyList<OrderSummary>> ListOrders();", svc);
+        Assert.Contains("Task<OrderSummary> GetOrder(OrderId order, CancellationToken ct = default);", svc);
+        Assert.Contains("Task<IReadOnlyList<OrderSummary>> ListOrders(CancellationToken ct = default);", svc);
     }
 
     [Fact]

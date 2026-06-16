@@ -16,6 +16,8 @@ public sealed class Customer : ValueObject
         Name = name;
     }
 
+    public override string ToString() => $"Customer {{ Name = {Name} }}";
+
     protected override IEnumerable<object?> GetEqualityComponents()
     {
         yield return Name;
@@ -53,6 +55,8 @@ public sealed class Invoice : ValueObject
         Amount = amount;
     }
 
+    public override string ToString() => $"Invoice {{ Amount = {Amount} }}";
+
     protected override IEnumerable<object?> GetEqualityComponents()
     {
         yield return Amount;
@@ -76,6 +80,8 @@ public sealed class Money : ValueObject
     {
         Amount = amount;
     }
+
+    public override string ToString() => $"Money {{ Amount = {Amount} }}";
 
     protected override IEnumerable<object?> GetEqualityComponents()
     {
@@ -220,6 +226,8 @@ public sealed class Account : ValueObject
     {
         Reference = reference;
     }
+
+    public override string ToString() => $"Account {{ Reference = {Reference} }}";
 
     protected override IEnumerable<object?> GetEqualityComponents()
     {

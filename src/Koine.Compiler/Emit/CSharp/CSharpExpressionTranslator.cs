@@ -134,6 +134,74 @@ internal sealed class CSharpExpressionTranslator
         return sb.ToString();
     }
 
+    /// <summary>
+    /// Renders the logical negation of a boolean condition idiomatically, for guard
+    /// emission where the assertion's failure must be tested. A leading <c>!</c> is
+    /// peeled (<c>!lines.isEmpty</c> → <c>Lines.Count == 0</c>), a top-level comparison
+    /// has its operator flipped (<c>amount &gt;= 0</c> → <c>amount &lt; 0</c>), and only a
+    /// compound/other expression falls back to wrapping in <c>!(...)</c>. This avoids the
+    /// double negations and redundant wrappers a blanket <c>!(...)</c> would produce.
+    /// </summary>
+    public string TranslateNegated(Expr expr, NameMode mode, string? expectedEnum = null)
+    {
+        _expectedEnum = expectedEnum;
+        var sb = new StringBuilder();
+        WriteNegated(expr, mode, sb);
+        _expectedEnum = null;
+        return sb.ToString();
+    }
+
+    private void WriteNegated(Expr expr, NameMode mode, StringBuilder sb)
+    {
+        switch (expr)
+        {
+            // !(X)  ->  X   (peel the negation rather than stacking a second one).
+            case UnaryExpr { Op: UnaryOp.Not } un:
+                WriteTopLevel(un.Operand, mode, sb);
+                break;
+
+            // a <cmp> b  ->  a <flipped cmp> b   (flip rather than wrap in !(...)).
+            case BinaryExpr bin when Flip(bin.Op) is { } flipped:
+                WriteOperand(bin.Left, mode, sb, EnumTypeName(bin.Right));
+                sb.Append(' ').Append(flipped).Append(' ');
+                WriteOperand(bin.Right, mode, sb, EnumTypeName(bin.Left));
+                break;
+
+            // `cond ? true : false` => `!(cond)`; `cond ? false : true` => `cond`.
+            case ConditionalExpr c when TryBoolLiterals(c, out var whenTrue):
+                if (whenTrue)
+                {
+                    sb.Append("!(");
+                    Write(c.Condition, mode, sb);
+                    sb.Append(')');
+                }
+                else
+                {
+                    WriteTopLevel(c.Condition, mode, sb);
+                }
+                break;
+
+            // Compound (&&/||) or anything else: negate by wrapping once.
+            default:
+                sb.Append("!(");
+                WriteTopLevel(expr, mode, sb);
+                sb.Append(')');
+                break;
+        }
+    }
+
+    /// <summary>The negated form of a comparison operator, or <c>null</c> for a non-comparison.</summary>
+    private static string? Flip(BinaryOp op) => op switch
+    {
+        BinaryOp.Eq => "!=",
+        BinaryOp.Neq => "==",
+        BinaryOp.Lt => ">=",
+        BinaryOp.Le => ">",
+        BinaryOp.Gt => "<=",
+        BinaryOp.Ge => "<",
+        _ => null
+    };
+
     /// <summary>Renders an expression in a parenthesized position, omitting the outer parens a top-level binary operator would add.</summary>
     private void WriteTopLevel(Expr expr, NameMode mode, StringBuilder sb)
     {

@@ -115,6 +115,8 @@ public sealed class Email : ValueObject
         Raw = raw;
     }
 
+    public override string ToString() => $"Email {{ Raw = {Raw} }}";
+
     protected override IEnumerable<object?> GetEqualityComponents()
     {
         yield return Raw;
@@ -175,7 +177,7 @@ public sealed class Money : ValueObject
 
     public Money(decimal amount, Currency currency)
     {
-        if (!(amount >= 0))
+        if (amount < 0)
             throw new DomainInvariantViolationException(
                 type: nameof(Money),
                 rule: "a monetary amount cannot be negative");
@@ -185,6 +187,8 @@ public sealed class Money : ValueObject
     }
 
     public static Money operator *(Money left, int right) => new Money(left.Amount * right, left.Currency);
+
+    public override string ToString() => $"Money {{ Amount = {Amount}, Currency = {Currency} }}";
 
     protected override IEnumerable<object?> GetEqualityComponents()
     {
@@ -213,15 +217,21 @@ public sealed class Order : IAggregateRoot
     {
         status ??= OrderStatus.Draft;
 
-        if (lines.Count == 0 && !(status == OrderStatus.Draft))
-            throw new DomainInvariantViolationException(
-                type: nameof(Order),
-                rule: "status == Draft when lines.isEmpty");
-
         Id = id;
         Customer = customer;
         Lines = new List<OrderLine>(lines);
         Status = status;
+
+        CheckInvariants();
+    }
+
+    /// <summary>Validates every invariant; run after construction and each state change.</summary>
+    private void CheckInvariants()
+    {
+        if (Lines.Count == 0 && !(Status == OrderStatus.Draft))
+            throw new DomainInvariantViolationException(
+                type: nameof(Order),
+                rule: "status == Draft when lines.isEmpty");
     }
 
     public bool Equals(Order? other) => other is not null && Id.Equals(other.Id);
@@ -277,6 +287,8 @@ public sealed class OrderLine : ValueObject
     }
 
     public Money Subtotal => UnitPrice * Quantity;
+
+    public override string ToString() => $"OrderLine {{ Product = {Product}, Quantity = {Quantity}, UnitPrice = {UnitPrice} }}";
 
     protected override IEnumerable<object?> GetEqualityComponents()
     {

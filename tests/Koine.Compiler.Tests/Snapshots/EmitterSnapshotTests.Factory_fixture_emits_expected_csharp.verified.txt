@@ -215,7 +215,7 @@ public sealed class Order : IAggregateRoot
     {
         var id = OrderId.New();
 
-        if (!(!(lines.Count == 0)))
+        if (lines.Count == 0)
             throw new DomainInvariantViolationException(
                 type: nameof(Order),
                 rule: "cannot open an empty order");
@@ -274,6 +274,8 @@ public sealed class OrderLine : ValueObject
         Product = product;
         Quantity = quantity;
     }
+
+    public override string ToString() => $"OrderLine {{ Product = {Product}, Quantity = {Quantity} }}";
 
     protected override IEnumerable<object?> GetEqualityComponents()
     {

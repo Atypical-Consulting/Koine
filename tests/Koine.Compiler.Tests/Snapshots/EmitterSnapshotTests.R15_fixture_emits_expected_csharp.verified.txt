@@ -138,6 +138,8 @@ public sealed class LegacyMoney : ValueObject
         Amount = amount;
     }
 
+    public override string ToString() => $"LegacyMoney {{ Amount = {Amount} }}";
+
     protected override IEnumerable<object?> GetEqualityComponents()
     {
         yield return Amount;
@@ -165,6 +167,8 @@ public sealed class Money : ValueObject
         Amount = amount;
         LegacyAmount = legacyAmount;
     }
+
+    public override string ToString() => $"Money {{ Amount = {Amount}, LegacyAmount = {LegacyAmount} }}";
 
     protected override IEnumerable<object?> GetEqualityComponents()
     {

@@ -349,10 +349,13 @@ public sealed class CSharpEmitter : IEmitter
             first = false;
             WriteXmlDoc(sb, uc.Doc, Indent);
             var ret = uc.ReturnType is null ? "Task" : $"Task<{typeMapper.Map(uc.ReturnType)}>";
-            var paramList = string.Join(", ", uc.Parameters.Select(p =>
-                $"{typeMapper.Map(p.Type)} {CSharpNaming.ToCamelCase(p.Name)}"));
+            var args = uc.Parameters
+                .Select(p => $"{typeMapper.Map(p.Type)} {CSharpNaming.ToCamelCase(p.Name)}")
+                // The use case is an async boundary: flow cancellation, like every
+                // other generated async seam (repositories, UoW, query handlers).
+                .Append("CancellationToken ct = default");
             sb.Append(Indent).Append(ret).Append(' ').Append(CSharpNaming.ToPascalCase(uc.Name))
-              .Append('(').Append(paramList).Append(");\n");
+              .Append('(').Append(string.Join(", ", args)).Append(");\n");
         }
 
         sb.Append("}\n");
@@ -563,6 +566,10 @@ public sealed class CSharpEmitter : IEmitter
             }
         }
 
+        // A readable ToString for logs/tests/debugging (object.ToString would only
+        // show the type name); enums already do this.
+        WriteValueObjectToString(sb, vo.Name, ctorParams);
+
         // Structural value equality: the components are the non-derived fields.
         WriteEqualityComponents(sb, ctorParams);
 
@@ -570,6 +577,28 @@ public sealed class CSharpEmitter : IEmitter
 
         return new EmittedFile($"{FolderFor(ns)}/{vo.Name}.cs",
             Assemble(ns, sb.ToString(), UsesLinq(vo.Members, vo.Invariants) || SpecBodiesUseLinq(vo.Name, index)));
+    }
+
+    /// <summary>
+    /// Emits a deterministic, record-style <c>ToString()</c> over the non-derived
+    /// fields (e.g. <c>Money { Amount = 10, Currency = EUR }</c>), so value objects are
+    /// readable in logs and test output instead of falling back to the type name.
+    /// </summary>
+    private void WriteValueObjectToString(StringBuilder sb, string typeName, IReadOnlyList<Member> members)
+    {
+        sb.Append('\n');
+        if (members.Count == 0)
+        {
+            sb.Append(Indent).Append("public override string ToString() => \"").Append(typeName).Append("\";\n");
+            return;
+        }
+        var fields = string.Join(", ", members.Select(m =>
+        {
+            var prop = CSharpNaming.ToPascalCase(m.Name);
+            return prop + " = {" + prop + "}";
+        }));
+        sb.Append(Indent).Append("public override string ToString() => $\"")
+          .Append(typeName).Append(" {{ ").Append(fields).Append(" }}\";\n");
     }
 
     /// <summary>
@@ -730,10 +759,37 @@ public sealed class CSharpEmitter : IEmitter
                 : $"left.{prop}";
         }));
 
+        // Non-numeric fields (e.g. a Money's Currency) are carried from the left operand.
+        // The operands must agree on them, else the fold would silently coerce one
+        // (EUR + USD -> EUR). Guard each, mirroring unit-checked quantity arithmetic.
+        var carried = ctorMembers.Where(m => !numericNames.Contains(m.Name)).ToList();
+
         sb.Append('\n').Append(Indent)
           .Append("public static ").Append(vo.Name).Append(" operator +(")
-          .Append(vo.Name).Append(" left, ").Append(vo.Name).Append(" right) => new ")
-          .Append(vo.Name).Append('(').Append(args).Append(");\n");
+          .Append(vo.Name).Append(" left, ").Append(vo.Name).Append(" right)");
+
+        if (carried.Count == 0)
+        {
+            sb.Append(" => new ").Append(vo.Name).Append('(').Append(args).Append(");\n");
+            return;
+        }
+
+        sb.Append('\n').Append(Indent).Append("{\n");
+        foreach (var m in carried)
+        {
+            var prop = CSharpNaming.ToPascalCase(m.Name);
+            sb.Append(Indent).Append(Indent).Append("if (!Equals(left.").Append(prop)
+              .Append(", right.").Append(prop).Append("))\n");
+            sb.Append(Indent).Append(Indent).Append(Indent).Append("throw new DomainInvariantViolationException(\n");
+            sb.Append(Indent).Append(Indent).Append(Indent).Append(Indent)
+              .Append("type: nameof(").Append(vo.Name).Append("),\n");
+            sb.Append(Indent).Append(Indent).Append(Indent).Append(Indent)
+              .Append("rule: \"cannot combine ").Append(vo.Name).Append(" values with a different ")
+              .Append(CSharpNaming.ToCamelCase(m.Name)).Append("\");\n");
+        }
+        sb.Append(Indent).Append(Indent).Append("return new ").Append(vo.Name)
+          .Append('(').Append(args).Append(");\n");
+        sb.Append(Indent).Append("}\n");
     }
 
     /// <summary>
@@ -1115,6 +1171,10 @@ public sealed class CSharpEmitter : IEmitter
         sb.Append('\n');
         WriteEntityConstructor(sb, entity, ctorMembers, memberNames, translator, typeMapper, enumMemberToType, index);
 
+        // Shared invariant-checking method (DRY: called by the constructor and each command).
+        if (entity.Invariants.Count > 0)
+            WriteCheckInvariants(sb, entity, translator);
+
         // Derived (computed) properties.
         foreach (var m in derived)
         {
@@ -1400,6 +1460,8 @@ public sealed class CSharpEmitter : IEmitter
         }
 
         // Occurrence metadata, defaulted at construction (part of value equality).
+        // `init` keeps it immutable yet settable for reconstruction from an event store
+        // or deterministic tests; `with` only ever produces a copy, never a mutation.
         sb.Append(Indent).Append("public DateTimeOffset OccurredOn { get; init; } = DateTimeOffset.UtcNow;\n");
 
         sb.Append('\n');
@@ -1455,6 +1517,8 @@ public sealed class CSharpEmitter : IEmitter
         }
 
         // Occurrence metadata, defaulted at construction (part of value equality).
+        // `init` keeps it immutable yet settable for reconstruction from an event store
+        // or deterministic tests; `with` only ever produces a copy, never a mutation.
         sb.Append(Indent).Append("public DateTimeOffset OccurredOn { get; init; } = DateTimeOffset.UtcNow;\n");
 
         sb.Append('\n');
@@ -1681,7 +1745,7 @@ public sealed class CSharpEmitter : IEmitter
         var sb = new StringBuilder();
         WriteXmlDoc(sb, policy.Doc ?? $"Reacts to {policy.EventName} via {policy.Name}.", "");
         sb.Append("public interface ").Append(iface).Append("\n{\n");
-        sb.Append(Indent).Append("void Handle(").Append(policy.EventName).Append(" e);\n");
+        sb.Append(Indent).Append("Task Handle(").Append(policy.EventName).Append(" e, CancellationToken ct = default);\n");
         sb.Append("}\n\n");
 
         sb.Append("/// <summary>\n");
@@ -1691,7 +1755,7 @@ public sealed class CSharpEmitter : IEmitter
         sb.Append("/// </summary>\n");
         sb.Append("public abstract partial class ").Append(policyType).Append(" : ").Append(iface).Append("\n{\n");
         sb.Append(Indent).Append("/// <remarks>Intended reaction: ").Append(EscapeXml(sketch)).Append(".</remarks>\n");
-        sb.Append(Indent).Append("public abstract void Handle(").Append(policy.EventName).Append(" e);\n");
+        sb.Append(Indent).Append("public abstract Task Handle(").Append(policy.EventName).Append(" e, CancellationToken ct = default);\n");
         sb.Append("}\n");
 
         return new EmittedFile($"{FolderFor(ns)}/{policyType}.cs", Assemble(ns, sb.ToString(), usesLinq: false));
@@ -1750,14 +1814,36 @@ public sealed class CSharpEmitter : IEmitter
         sb.Append(Indent).Append("{\n");
 
         WriteEnumDefaultCoalesce(sb, ctorMembers, translator, index);
-        WriteInvariantGuards(sb, entity.Name, entity.Invariants, translator);
-        if (entity.Invariants.Count > 0)
-            sb.Append('\n');
 
         sb.Append(Indent).Append(Indent).Append("Id = id;\n");
         foreach (var m in ctorMembers)
             WriteAssignment(sb, m, typeMapper);
 
+        // Invariants are validated once, through the shared CheckInvariants() method
+        // (re-used after every state change), rather than inlined here. Checking after
+        // assignment means the guards read the persisted properties, like the re-checks.
+        if (entity.Invariants.Count > 0)
+        {
+            sb.Append('\n');
+            sb.Append(Indent).Append(Indent).Append("CheckInvariants();\n");
+        }
+
+        sb.Append(Indent).Append("}\n");
+    }
+
+    /// <summary>
+    /// Emits the entity's single <c>CheckInvariants()</c> method: every invariant guard
+    /// in one place, called by the constructor and re-invoked after each command's state
+    /// change so the aggregate is valid at every observable point.
+    /// </summary>
+    private void WriteCheckInvariants(StringBuilder sb, EntityDecl entity, CSharpExpressionTranslator translator)
+    {
+        sb.Append('\n');
+        sb.Append(Indent).Append("/// <summary>Validates every invariant; run after construction and each state change.</summary>\n");
+        sb.Append(Indent).Append("private void CheckInvariants()\n");
+        sb.Append(Indent).Append("{\n");
+        WriteInvariantGuards(sb, entity.Name, entity.Invariants, translator,
+            CSharpExpressionTranslator.NameMode.Property);
         sb.Append(Indent).Append("}\n");
     }
 
@@ -1906,8 +1992,9 @@ public sealed class CSharpEmitter : IEmitter
         }
         else
         {
-            var cond = translator.TranslateTopLevel(condition, mode);
-            sb.Append(Indent).Append(Indent).Append("if (!(").Append(cond).Append("))\n");
+            // Emit the idiomatic negation (`if (amount < 0)`, not `if (!(amount >= 0))`).
+            var cond = translator.TranslateNegated(condition, mode);
+            sb.Append(Indent).Append(Indent).Append("if (").Append(cond).Append(")\n");
         }
 
         sb.Append(Indent).Append(Indent).Append(Indent)
@@ -1963,6 +2050,12 @@ public sealed class CSharpEmitter : IEmitter
                 translator, CSharpExpressionTranslator.NameMode.Property);
         }
 
+        // Positive renderings of the preconditions, used to suppress a state-machine
+        // reachability guard that would merely restate one of them.
+        var requiresConds = new HashSet<string>(
+            requires.Select(r => translator.TranslateTopLevel(r.Condition, CSharpExpressionTranslator.NameMode.Property)),
+            StringComparer.Ordinal);
+
         // 2. State transitions.
         if (requires.Count > 0 && transitions.Count > 0) sb.Append('\n');
         foreach (var tr in transitions)
@@ -1970,9 +2063,15 @@ public sealed class CSharpEmitter : IEmitter
             var expectedEnum = memberTypes.TryGetValue(tr.Field, out var ft) && index.Classify(ft.Name) == TypeKind.Enum
                 ? ft.Name : null;
 
-            // A state machine on this field guards the (literal) target's reachability.
-            if (expectedEnum is not null)
-                WriteStateMachineGuard(sb, entity, tr, expectedEnum, translator, index, cmd.Parameters);
+            // A state machine on this field guards the (literal) target's reachability —
+            // unless that guard reduces to a single source check a precondition already
+            // enforces, in which case it would be a verbatim duplicate.
+            if (expectedEnum is not null
+                && BuildStateMachineConditions(entity, tr, expectedEnum, translator, index, cmd.Parameters) is { } conds
+                && !(conds.Count == 1 && requiresConds.Contains(conds[0].Positive)))
+            {
+                WriteStateMachineGuard(sb, entity, conds, tr.Field, ((IdentifierExpr)tr.Value).Name);
+            }
 
             var value = translator.TranslateTopLevel(tr.Value, CSharpExpressionTranslator.NameMode.Property, expectedEnum);
             sb.Append(Indent).Append(Indent).Append(CSharpNaming.ToPascalCase(tr.Field))
@@ -1989,12 +2088,11 @@ public sealed class CSharpEmitter : IEmitter
         // a parameter that happens to share a field's name).
         foreach (var p in cmd.Parameters) translator.PopLocal(p.Name);
 
-        // 3. Re-check every entity invariant after the state change.
+        // 3. Re-check every entity invariant after the state change (one shared method).
         if (transitions.Count > 0 && entity.Invariants.Count > 0)
         {
             sb.Append('\n');
-            WriteInvariantGuards(sb, entity.Name, entity.Invariants, translator,
-                CSharpExpressionTranslator.NameMode.Property);
+            sb.Append(Indent).Append(Indent).Append("CheckInvariants();\n");
         }
 
         // 4. Record domain events (only reached if preconditions + re-check pass).
@@ -2013,18 +2111,21 @@ public sealed class CSharpEmitter : IEmitter
     /// literal target: the current state must be a source that can reach the target
     /// (optionally satisfying that rule's guard), else throw.
     /// </summary>
-    private void WriteStateMachineGuard(
-        StringBuilder sb, EntityDecl entity, Transition tr, string enumType,
+    /// <summary>One legal source of a transition: the positive reachability check and its negation.</summary>
+    private readonly record struct StateSource(string Positive, string Negated);
+
+    private List<StateSource>? BuildStateMachineConditions(
+        EntityDecl entity, Transition tr, string enumType,
         CSharpExpressionTranslator translator, ModelIndex index, IReadOnlyList<Param> commandParams)
     {
         var states = entity.States.FirstOrDefault(s => s.Field == tr.Field);
         if (states is null || tr.Value is not IdentifierExpr stateRef
             || !index.EnumsDeclaring(stateRef.Name).Contains(enumType))
-            return; // no state machine, or a dynamic (non-literal) target
+            return null; // no state machine, or a dynamic (non-literal) target
 
         var sources = states.Rules.Where(r => r.To.Contains(stateRef.Name)).ToList();
         if (sources.Count == 0)
-            return; // unreachable target — already a semantic error (KOI0703)
+            return null; // unreachable target — already a semantic error (KOI0703)
 
         var prop = CSharpNaming.ToPascalCase(tr.Field);
 
@@ -2034,20 +2135,35 @@ public sealed class CSharpEmitter : IEmitter
         foreach (var p in commandParams) translator.PopLocal(p.Name);
         var conditions = sources.Select(r =>
         {
-            var c = $"{prop} == {enumType}.{r.From}";
-            if (r.Guard is not null)
-                // Translate (not TranslateTopLevel) so a binary guard keeps its parentheses:
-                // an OR guard must bind below the && that joins it to the source check.
-                c = $"{c} && {translator.Translate(r.Guard, CSharpExpressionTranslator.NameMode.Property)}";
-            return $"({c})";
+            var srcEq = $"{prop} == {enumType}.{r.From}";
+            if (r.Guard is null)
+                // A bare source: its negation is the simple `!=` (no wrapping needed).
+                return new StateSource(srcEq, $"{prop} != {enumType}.{r.From}");
+
+            // A guarded source: keep the binary guard's parentheses (Translate, not
+            // TranslateTopLevel) so an OR guard binds below the && joining the source check.
+            var positive = $"{srcEq} && {translator.Translate(r.Guard, CSharpExpressionTranslator.NameMode.Property)}";
+            return new StateSource(positive, $"!({positive})");
         }).ToList();
         foreach (var p in commandParams) translator.PushLocal(p.Name);
+        return conditions;
+    }
 
-        sb.Append(Indent).Append(Indent).Append("if (!(").Append(string.Join(" || ", conditions)).Append("))\n");
+    /// <summary>
+    /// Emits a reachability guard from prebuilt source conditions: the transition is
+    /// illegal unless the current state is one of the legal sources. The check is the
+    /// De Morgan negation — <c>!(a || b || c)</c> rendered as <c>!a &amp;&amp; !b &amp;&amp; !c</c> —
+    /// so it reads as a plain "is none of these" test with no nested-paren negation.
+    /// </summary>
+    private void WriteStateMachineGuard(
+        StringBuilder sb, EntityDecl entity, IReadOnlyList<StateSource> conditions, string field, string targetState)
+    {
+        var test = string.Join(" && ", conditions.Select(c => c.Negated));
+        sb.Append(Indent).Append(Indent).Append("if (").Append(test).Append(")\n");
         sb.Append(Indent).Append(Indent).Append(Indent).Append("throw new DomainInvariantViolationException(\n");
         sb.Append(Indent).Append(Indent).Append(Indent).Append(Indent).Append("type: nameof(").Append(entity.Name).Append("),\n");
         sb.Append(Indent).Append(Indent).Append(Indent).Append(Indent)
-          .Append("rule: \"illegal transition of ").Append(tr.Field).Append(" to ").Append(stateRef.Name).Append("\");\n");
+          .Append("rule: \"illegal transition of ").Append(field).Append(" to ").Append(targetState).Append("\");\n");
     }
 
     /// <summary>
