@@ -62,11 +62,14 @@ internal static class TokenLocator
 
             if (t.Channel != TokenConstants.DefaultChannel)
             {
-                // Off-channel tokens are `///` doc comments. They are intentionally
-                // treated as not-code: a cursor inside a doc comment sets
-                // insideStringOrRegex so completion is suppressed there too, per spec.
-                // (Don't "fix" this branch — suppression inside doc comments is desired.)
-                if (Contains(t, targetLine, targetCol))
+                // Off-channel tokens are comments (DOC `///` and HIDDEN `//` / `/* */`) and, since
+                // #5, whitespace on the TRIVIA channel. Comments are intentionally treated as
+                // not-code: a cursor inside one sets insideStringOrRegex so completion is suppressed
+                // there too, per spec. (Don't "fix" the comment case — suppression is desired.)
+                // Whitespace, however, is NOT code-suppressing: a cursor in a WS gap is a perfectly
+                // valid completion position (e.g. just after `x: `), so skip WS without suppressing.
+                if (t.Type != KoineLexer.WS && t.Type != KoineLexer.REGEX_WS
+                    && Contains(t, targetLine, targetCol))
                 {
                     insideStringOrRegex = true;
                 }

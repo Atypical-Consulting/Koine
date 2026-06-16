@@ -257,4 +257,25 @@ public class R3DiagnosticsTests
             "}\n";
         Assert.Contains(Diagnose(src), d => d.Code == DiagnosticCodes.AmbiguousEnumMember);
     }
+
+    // ---- Phase 5: node-sourced diagnostics carry an exact end --------------
+
+    [Fact]
+    public void Node_sourced_diagnostic_carries_exact_end_span()
+    {
+        // The duplicate-member diagnostic is raised from the member's full node span,
+        // so it underlines the exact member text rather than relying on a forward scan.
+        const string src =
+            "context C {\n" +
+            "  value V {\n" +
+            "    amount: Int\n" +
+            "    amount: Int\n" +
+            "  }\n" +
+            "}\n";
+        var dup = Diagnose(src).Single(d => d.Code == DiagnosticCodes.DuplicateMember);
+        Assert.True(dup.HasEnd);
+        Assert.Equal(4, dup.Line);            // second occurrence on source line 4
+        Assert.Equal(4, dup.EndLine);
+        Assert.True(dup.EndColumn > dup.Column); // a real width, not a zero-length point
+    }
 }

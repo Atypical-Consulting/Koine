@@ -1,8 +1,9 @@
 lexer grammar KoineLexer;
 
-// Doc comments (`///`) are kept (off the default channel) so the model builder
-// can attach them to the following declaration; ordinary `//` comments are skipped.
-channels { DOC }
+// Doc comments (`///`) ride DOC, ordinary comments ride HIDDEN, and whitespace
+// rides TRIVIA — all off the default channel so the model builder can recover them
+// (lossless trivia, #5) while the parser still reads only the default channel.
+channels { DOC, TRIVIA }
 
 // ============================================================================
 // Koine lexer. Split from the parser so the regex sublanguage can use a lexer
@@ -133,7 +134,10 @@ Identifier     : [a-zA-Z_] [a-zA-Z0-9_]* ;
 
 // ---- Trivia ----------------------------------------------------------------
 
-WS            : [ \t\r\n]+ -> skip ;
+// Whitespace rides the TRIVIA channel (not `skip`) so the model builder can attach
+// leading/trailing whitespace + blank lines to nodes for lossless AST round-trip (#5).
+// The parser reads only the default channel, so this does NOT affect parsing.
+WS            : [ \t\r\n]+ -> channel(TRIVIA) ;
 // `///` doc comment — defined BEFORE LINE_COMMENT so it wins the maximal-munch tie.
 // A 4th slash is excluded so `////…` is a longer match for LINE_COMMENT (and skipped),
 // matching the C#/Rust convention that `////` is an ordinary divider comment.
