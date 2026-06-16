@@ -237,13 +237,12 @@ internal static class OperatorNeedsAnalyzer
         {
             if (n.Method == "sum" && n.Args is [LambdaExpr lambda])
             {
-                TypeRef? element = TypeResolver.ElementOf(_resolver.Infer(n.Target, _scope));
-                if (element is not null)
+                if (_resolver.TypeOf(n.Target, _scope).SequenceElement is { } element)
                 {
-                    TypeRef? selector = _resolver.Infer(lambda.Body, _scope.With(lambda.Parameter, element));
-                    if (_resolver.IsValueLike(selector))
+                    KoineType selector = _resolver.TypeOf(lambda.Body, _scope.With(lambda.Parameter, element.ToTypeRef()!));
+                    if (selector.IsValueLike)
                     {
-                        _needs.Add(selector!.Name);
+                        _needs.Add(selector.Name!);
                     }
                 }
             }

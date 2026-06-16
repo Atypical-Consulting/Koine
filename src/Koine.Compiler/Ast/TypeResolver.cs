@@ -73,6 +73,13 @@ public sealed class TypeResolver
     public TypeRef? Infer(Expr expr, TypeScope scope) => new InferVisitor(this, scope).Visit(expr);
 
     /// <summary>
+    /// The resolved type of an expression as a <see cref="KoineType"/> (never <c>null</c>; an
+    /// undeterminable type is <see cref="ErrorType"/>). The structural-type entry point that consumers
+    /// should prefer over <see cref="Infer"/>; <see cref="Infer"/> remains as a <c>TypeRef?</c> shim.
+    /// </summary>
+    public KoineType TypeOf(Expr expr, TypeScope scope) => KoineType.From(Infer(expr, scope), _index);
+
+    /// <summary>
     /// The exhaustive expression-type inference. Carries the lexical <see cref="TypeScope"/> as a
     /// mutable field, pushed/restored around the sub-scopes introduced by <c>let</c> bindings and
     /// collection-aggregate lambdas. A fresh instance is created per <see cref="Infer"/> call, so
