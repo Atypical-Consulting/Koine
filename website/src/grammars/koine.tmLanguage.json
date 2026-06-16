@@ -1,0 +1,120 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "Koine",
+  "scopeName": "source.koine",
+  "fileTypes": ["koi"],
+  "patterns": [
+    { "include": "#comments" },
+    { "include": "#strings" },
+    { "include": "#regex" },
+    { "include": "#declarations" },
+    { "include": "#clauses" },
+    { "include": "#keywords" },
+    { "include": "#builtin-types" },
+    { "include": "#constants" },
+    { "include": "#numbers" },
+    { "include": "#field" },
+    { "include": "#typename" },
+    { "include": "#operators" }
+  ],
+  "repository": {
+    "comments": {
+      "patterns": [
+        {
+          "name": "comment.line.double-slash.koine",
+          "match": "//.*$"
+        },
+        {
+          "name": "comment.block.koine",
+          "begin": "/\\*",
+          "end": "\\*/"
+        }
+      ]
+    },
+    "strings": {
+      "name": "string.quoted.double.koine",
+      "begin": "\"",
+      "end": "\"",
+      "patterns": [
+        { "name": "constant.character.escape.koine", "match": "\\\\." }
+      ]
+    },
+    "regex": {
+      "name": "string.regexp.koine",
+      "begin": "(?<=matches)\\s*/",
+      "end": "/",
+      "patterns": [
+        { "name": "constant.character.escape.koine", "match": "\\\\." }
+      ]
+    },
+    "declarations": {
+      "patterns": [
+        {
+          "match": "\\b(context|value|entity|aggregate|enum)\\s+([A-Za-z_][A-Za-z0-9_]*)",
+          "captures": {
+            "1": { "name": "storage.type.koine" },
+            "2": { "name": "entity.name.type.koine" }
+          }
+        }
+      ]
+    },
+    "clauses": {
+      "patterns": [
+        {
+          "match": "\\b(identified)\\s+(by)\\s+([A-Za-z_][A-Za-z0-9_]*)",
+          "captures": {
+            "1": { "name": "keyword.control.koine" },
+            "2": { "name": "keyword.control.koine" },
+            "3": { "name": "entity.name.type.koine" }
+          }
+        },
+        {
+          "match": "\\b(root)\\s+([A-Za-z_][A-Za-z0-9_]*)",
+          "captures": {
+            "1": { "name": "keyword.control.koine" },
+            "2": { "name": "entity.name.type.koine" }
+          }
+        }
+      ]
+    },
+    "keywords": {
+      "patterns": [
+        {
+          "name": "keyword.control.koine",
+          "match": "\\b(invariant|identified|by|root|when|matches)\\b"
+        },
+        {
+          "name": "storage.type.koine",
+          "match": "\\b(context|value|entity|aggregate|enum)\\b"
+        }
+      ]
+    },
+    "builtin-types": {
+      "name": "support.type.primitive.koine",
+      "match": "\\b(String|Int|Decimal|Bool|Instant|List)\\b"
+    },
+    "constants": {
+      "name": "constant.language.koine",
+      "match": "\\b(true|false)\\b"
+    },
+    "numbers": {
+      "name": "constant.numeric.koine",
+      "match": "\\b[0-9]+(\\.[0-9]+)?\\b"
+    },
+    "field": {
+      "match": "\\b([a-z_][A-Za-z0-9_]*)\\s*(:)",
+      "captures": {
+        "1": { "name": "variable.other.property.koine" },
+        "2": { "name": "punctuation.separator.koine" }
+      }
+    },
+    "typename": {
+      "name": "entity.name.type.koine",
+      "match": "\\b[A-Z][A-Za-z0-9_]*\\b"
+    },
+    "operators": {
+      "name": "keyword.operator.koine",
+      "match": "(==|!=|<=|>=|&&|\\|\\||[<>+\\-*/!=])"
+    }
+  }
+}
