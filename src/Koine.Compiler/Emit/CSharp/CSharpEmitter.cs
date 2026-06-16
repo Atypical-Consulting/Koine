@@ -1475,6 +1475,36 @@ public sealed partial class CSharpEmitter : IEmitter
     /// <summary>Maps a namespace to its emit folder path.</summary>
     private static string FolderFor(string ns) => ns.Replace('.', '/');
 
+    /// <summary>
+    /// Builds the output path for a generated file: the namespace folder, an
+    /// optional DDD building-block subfolder (e.g. "Entities", "ValueObjects"),
+    /// and the file name. An empty <paramref name="kindFolder"/> places the file
+    /// at the namespace root — used for aggregate roots (the aggregate is the
+    /// context's entry point) and for runtime support types.
+    /// </summary>
+    private static string PathFor(string ns, string kindFolder, string fileName)
+        => kindFolder.Length == 0
+            ? $"{FolderFor(ns)}/{fileName}"
+            : $"{FolderFor(ns)}/{kindFolder}/{fileName}";
+
+    /// <summary>The DDD building-block subfolders generated files are grouped into.</summary>
+    private static class KindFolder
+    {
+        public const string Root = "";
+        public const string Entities = "Entities";
+        public const string ValueObjects = "ValueObjects";
+        public const string Enums = "Enums";
+        public const string Events = "Events";
+        public const string IntegrationEvents = "IntegrationEvents";
+        public const string ReadModels = "ReadModels";
+        public const string Queries = "Queries";
+        public const string Services = "Services";
+        public const string Specifications = "Specifications";
+        public const string Policies = "Policies";
+        public const string Repositories = "Repositories";
+        public const string Abstractions = "Abstractions";
+    }
+
     /// <summary>The bounded context owning a namespace (its first segment); the resolution scope for R13.2.</summary>
     private static string ContextOf(string ns)
     {
