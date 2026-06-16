@@ -18,4 +18,11 @@ public interface IEmitter
 
     /// <summary>Emits source files for the whole model.</summary>
     IReadOnlyList<EmittedFile> Emit(KoineModel model);
+
+    /// <summary>
+    /// Emits using a shared <see cref="SemanticModel"/> so resolution is reused rather than rebuilt.
+    /// Defaults to <see cref="Emit(KoineModel)"/> for backends that build their own; the C# backend
+    /// overrides it to consume the shared model.
+    /// </summary>
+    IReadOnlyList<EmittedFile> Emit(KoineModel model, SemanticModel? semantic) => Emit(model);
 }

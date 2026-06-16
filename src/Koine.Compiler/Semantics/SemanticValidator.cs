@@ -12,9 +12,16 @@ namespace Koine.Compiler.Semantics;
 public sealed class SemanticValidator
 {
     /// <summary>Validates the model and returns all semantic diagnostics.</summary>
-    public IReadOnlyList<Diagnostic> Validate(KoineModel model)
+    public IReadOnlyList<Diagnostic> Validate(KoineModel model) => Validate(new SemanticModel(model));
+
+    /// <summary>
+    /// Validates the model using a shared <see cref="SemanticModel"/> (so the single
+    /// <see cref="ModelIndex"/> is reused rather than rebuilt) and returns all semantic diagnostics.
+    /// </summary>
+    public IReadOnlyList<Diagnostic> Validate(SemanticModel semantic)
     {
-        var index = new ModelIndex(model);
+        KoineModel model = semantic.Model;
+        ModelIndex index = semantic.Index;
         IReadOnlySet<string> enumMembers = CollectEnumMembers(model);
         var diagnostics = new List<Diagnostic>();
 

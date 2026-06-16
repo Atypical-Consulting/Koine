@@ -148,7 +148,7 @@ public sealed class KoineCompiler
             return syntax;
         }
 
-        return new SemanticValidator().Validate(model);
+        return new SemanticValidator().Validate(new SemanticModel(model));
     }
 
     /// <summary>
@@ -165,7 +165,7 @@ public sealed class KoineCompiler
             return syntax;
         }
 
-        return new SemanticValidator().Validate(model);
+        return new SemanticValidator().Validate(new SemanticModel(model));
     }
 
     /// <summary>Runs the full pipeline for a single source through the given emitter.</summary>
@@ -181,13 +181,15 @@ public sealed class KoineCompiler
             return new CompileResult(null, syntax, Array.Empty<EmittedFile>());
         }
 
-        var semantic = new SemanticValidator().Validate(model);
+        // Build the shared resolution once and reuse it for both validation and emission.
+        var semanticModel = new SemanticModel(model);
+        var semantic = new SemanticValidator().Validate(semanticModel);
         if (semantic.Any(d => d.Severity == DiagnosticSeverity.Error))
         {
             return new CompileResult(model, semantic, Array.Empty<EmittedFile>());
         }
 
-        var emitted = emitter.Emit(model);
+        var emitted = emitter.Emit(model, semanticModel);
         return new CompileResult(model, semantic, emitted);
     }
 }
