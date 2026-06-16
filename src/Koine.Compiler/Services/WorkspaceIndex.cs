@@ -22,12 +22,12 @@ public sealed record Reference(string Uri, int Line, int StartColumn, int EndCol
 /// </summary>
 public sealed class WorkspaceIndex
 {
-    private readonly Dictionary<string, ModelIndex> _byUri = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, SemanticModel> _byUri = new(StringComparer.Ordinal);
     private readonly IReadOnlyDictionary<string, string> _documents;
 
     public WorkspaceIndex(IReadOnlyDictionary<string, string> documents)
     {
-        // Re-parses every document eagerly. A fresh index is built per hover/definition
+        // Re-parses every document eagerly. A fresh semantic model is built per hover/definition
         // request today — fine at human (on-demand) speed; TODO: cache per (uri, content)
         // if this is ever wired to a per-keystroke feature.
         _documents = documents;
@@ -37,7 +37,7 @@ public sealed class WorkspaceIndex
             (KoineModel? model, _) = compiler.Parse(text);
             if (model is not null)
             {
-                _byUri[uri] = new ModelIndex(model); // a file that fails to parse is simply absent
+                _byUri[uri] = new SemanticModel(model); // a file that fails to parse is simply absent
             }
         }
     }
@@ -49,20 +49,20 @@ public sealed class WorkspaceIndex
     /// </summary>
     public DeclLocation? ResolveDefinition(string activeUri, string name)
     {
-        if (_byUri.TryGetValue(activeUri, out ModelIndex? active) && StrongSpan(active, name) is { } localSpan)
+        if (_byUri.TryGetValue(activeUri, out SemanticModel? active) && StrongSpan(active, name) is { } localSpan)
         {
             return new DeclLocation(activeUri, localSpan);
         }
 
         DeclLocation? found = null;
-        foreach ((var uri, ModelIndex index) in _byUri)
+        foreach ((var uri, SemanticModel sema) in _byUri)
         {
             if (string.Equals(uri, activeUri, StringComparison.Ordinal))
             {
                 continue;
             }
 
-            if (StrongSpan(index, name) is { } span)
+            if (StrongSpan(sema, name) is { } span)
             {
                 if (found is not null)
                 {
@@ -80,41 +80,7 @@ public sealed class WorkspaceIndex
     /// model: a declared type, an unambiguous enum member, a spec, or the entity that
     /// owns the ID type. Null otherwise (primitives/collections are not declarations).
     /// </summary>
-    internal static SourceSpan? StrongSpan(ModelIndex index, string name)
-    {
-        if (index.TryGetDecl(name, out TypeDecl decl) && decl.Span != SourceSpan.None)
-        {
-            return decl.Span;
-        }
-
-        IReadOnlyList<string> owners = index.EnumsDeclaring(name);
-        if (owners.Count == 1 && index.TryGetDecl(owners[0], out TypeDecl ed) && ed is EnumDecl e)
-        {
-            EnumMember? member = e.Members.FirstOrDefault(m => m.Name == name);
-            if (member is not null && member.Span != SourceSpan.None)
-            {
-                return member.Span;
-            }
-        }
-
-        SpecDecl? spec = index.AllSpecs().FirstOrDefault(s => s.Name == name);
-        if (spec is not null && spec.Span != SourceSpan.None)
-        {
-            return spec.Span;
-        }
-
-        // ID type (e.g. ProductId) -> the entity that declares `identified by <name>`.
-        // There is no standalone ID node, so navigation deliberately lands on the owning
-        // entity's declaration. O(types) scan — fine for on-demand hover/definition;
-        // TODO: precompute an identity-name -> entity map if this ever runs per keystroke.
-        EntityDecl? owner = index.AllTypes().OfType<EntityDecl>().FirstOrDefault(en => en.IdentityName == name);
-        if (owner is not null && owner.Span != SourceSpan.None)
-        {
-            return owner.Span;
-        }
-
-        return null;
-    }
+    internal static SourceSpan? StrongSpan(SemanticModel sema, string name) => sema.GetSymbol(name)?.DeclSpan;
 
     /// <summary>
     /// Every reference to <paramref name="name"/> across the workspace: each identifier
@@ -154,7 +120,7 @@ public sealed class WorkspaceIndex
     /// both find-references and rename.
     /// </summary>
     public bool IsRenameableName(string activeUri, string name) =>
-        _byUri.Values.Any(index => StrongSpan(index, name) is not null);
+        _byUri.Values.Any(sema => StrongSpan(sema, name) is not null);
 
     /// <summary>Validates a proposed rename target against the lexer's <c>Identifier</c> rule (<c>[a-zA-Z_]\w*</c>).</summary>
     public static bool IsValidIdentifier(string name) =>
@@ -183,20 +149,20 @@ public sealed class WorkspaceIndex
     /// </summary>
     public string? ResolveHover(string activeUri, string name)
     {
-        if (_byUri.TryGetValue(activeUri, out ModelIndex? active) && StrongHover(active, name) is { } local)
+        if (_byUri.TryGetValue(activeUri, out SemanticModel? active) && StrongHover(active.Index, name) is { } local)
         {
             return local;
         }
 
         string? found = null;
-        foreach ((var uri, ModelIndex index) in _byUri)
+        foreach ((var uri, SemanticModel sema) in _byUri)
         {
             if (string.Equals(uri, activeUri, StringComparison.Ordinal))
             {
                 continue;
             }
 
-            if (StrongHover(index, name) is { } card)
+            if (StrongHover(sema.Index, name) is { } card)
             {
                 if (found is not null)
                 {
