@@ -71,6 +71,18 @@ single token:
 | `open-host` | Upstream publishes a service for anyone. **Authorizes** subscriptions. |
 | `published-language` | Upstream commits to a stable contract. Documentary. |
 
+### Contextual keywords: the hyphen rule
+
+The role names are the **verbatim vocabulary from Eric Evans' DDD** - `shared-kernel`,
+`customer-supplier`, `anti-corruption-layer`, `open-host`, `published-language`. The hyphen is
+part of the spelling of the role, and these are the *only* place hyphens appear anywhere in the
+language. Everywhere else `-` is the subtraction operator and identifiers may not contain it.
+
+Each role is a single contextual keyword that is valid in exactly one position: as the role after
+the `:` in a relation. Because it occupies that one slot - and is never an identifier - matching
+the literature verbatim creates no ambiguity. The practical consequence: write `shared-kernel`,
+never `shared - kernel` or `shared_kernel`. Roles are case-sensitive and always lower-case.
+
 Two of these change how cross-context **references** resolve. With a `conformist` (or
 `shared-kernel`) relation, the downstream context can name an upstream type directly and the
 emitted file gets a precise `using` automatically - no `import` needed:

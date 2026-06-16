@@ -403,8 +403,9 @@ public sealed class KoineModelBuilderVisitor : KoineParserBaseVisitor<object?>
             ? pl.param().Select(BuildParam).ToList()
             : new List<Param>();
         var body = ctx.commandStmt().Select(BuildCommandStmt).ToList();
+        var returnType = ctx.typeRef() is { } tr ? BuildTypeRef(tr) : null;
 
-        return new CommandDecl(ctx.Identifier().GetText(), parameters, body)
+        return new CommandDecl(ctx.Identifier().GetText(), parameters, body, returnType)
         {
             Span = SpanOf(ctx),
             Doc = DocFor(ctx)
@@ -471,6 +472,11 @@ public sealed class KoineModelBuilderVisitor : KoineParserBaseVisitor<object?>
                     new EmitArg(a.softName().GetText(), BuildExpression(a.expression())) { Span = SpanOf(a) }).ToList()
                 : new List<EmitArg>();
             return new EmitClause(emit.Identifier().GetText(), args) { Span = SpanOf(emit) };
+        }
+
+        if (ctx.resultClause() is { } res)
+        {
+            return new ResultClause(BuildExpression(res.expression())) { Span = SpanOf(res) };
         }
 
         var transition = ctx.transition();
@@ -667,7 +673,20 @@ public sealed class KoineModelBuilderVisitor : KoineParserBaseVisitor<object?>
     // ------------------------------------------------------------------------
 
     private Expr BuildExpression(KoineParser.ExpressionContext ctx) =>
-        BuildGuard(ctx.guardExpr());
+        BuildLet(ctx.letExpr());
+
+    private Expr BuildLet(KoineParser.LetExprContext ctx)
+    {
+        // No `let` keyword => the plain `guardExpr` fall-through (every existing expression).
+        if (ctx.LET() is null)
+            return BuildGuard(ctx.guardExpr());
+
+        var bindings = ctx.letBinding()
+            .Select(b => new LetBinding(b.softName().GetText(), BuildExpression(b.expression())))
+            .ToList();
+        var body = BuildLet(ctx.letExpr());
+        return new LetExpr(bindings, body) { Span = SpanOf(ctx) };
+    }
 
     private Expr BuildGuard(KoineParser.GuardExprContext ctx)
     {

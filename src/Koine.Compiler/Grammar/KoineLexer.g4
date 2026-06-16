@@ -24,6 +24,7 @@ ROOT       : 'root' ;
 INVARIANT  : 'invariant' ;
 COMMAND    : 'command' ;
 REQUIRES   : 'requires' ;
+RESULT     : 'result' ;
 EVENT      : 'event' ;
 EMIT       : 'emit' ;
 STATES     : 'states' ;
@@ -50,8 +51,19 @@ MODULE     : 'module' ;
 // R15.1 — model versioning. `version` (the context clause keyword) must lose the
 // maximal-munch tie to `versioned` (longer), which it does by length, not order.
 VERSION    : 'version' ;
-// R14 — context map (hyphenated roles MUST be single literal tokens; '-' is MINUS).
+// R14 — context map.
 CONTEXTMAP         : 'contextmap' ;
+// ---- Context-map role keywords (R14) ---------------------------------------
+// These are CONTEXTUAL keywords: the hyphen is part of the spelling and is the
+// verbatim Evans-DDD vocabulary ('shared-kernel', 'anti-corruption-layer',
+// 'open-host', ...). The general Identifier rule disallows '-' and '-' is
+// otherwise MINUS, so each hyphenated role MUST be its own single literal token
+// (maximal munch then never splits 'shared-kernel' into Identifier MINUS
+// Identifier). This is the ONLY place hyphens are legal in the language: these
+// tokens are valid solely as `relationRole`, after the ':' in a relationDecl
+// (see KoineParser.g4 relationRole), and are never usable as identifiers. The
+// inconsistency with the no-hyphen Identifier rule is intentional and bounded,
+// not a lexing accident — matching the literature verbatim is the feature.
 PARTNERSHIP        : 'partnership' ;
 SHARED_KERNEL      : 'shared-kernel' ;
 CUSTOMER_SUPPLIER  : 'customer-supplier' ;
@@ -68,6 +80,12 @@ WHEN       : 'when' ;
 IF         : 'if' ;
 THEN       : 'then' ;
 ELSE       : 'else' ;
+// R-let — expression-local bindings: `let x = e, y = e in body`. Neither `let`
+// nor `in` prefixes any existing literal, so there is no maximal-munch ordering
+// concern; both are added to declKeyword so existing models using them as field
+// or type names keep working (they only become reserved as a LEADING expression).
+LET        : 'let' ;
+IN         : 'in' ;
 BoolLiteral : 'true' | 'false' ;
 
 // `matches` switches into regex mode for the following `/.../ ` literal.
@@ -95,9 +113,8 @@ GE  : '>=' ;
 LT  : '<' ;
 GT  : '>' ;
 
-RARROW : '->' ;   // state transition: `status -> Placed` (before MINUS for maximal munch)
-BIARROW : '<->' ; // bidirectional context-map relation (before LARROW/LT for maximal munch)
-LARROW : '<-' ;   // factory field initialization: `total <- lines.sum(...)`
+RARROW : '->' ;   // state transition AND factory field init: `status -> Placed` / `total -> ...` (before MINUS for maximal munch)
+BIARROW : '<->' ; // bidirectional context-map relation (before LT for maximal munch)
 PLUS  : '+' ;
 MINUS : '-' ;
 STAR  : '*' ;

@@ -21,8 +21,8 @@ public class R8FactoryTests
 
               create forCustomer(customer: CustomerId, lines: List<OrderLine>) {
                 requires !lines.isEmpty "cannot open an empty order"
-                customer <- customer
-                lines    <- lines
+                customer -> customer
+                lines    -> lines
                 emit OrderOpened(orderId: id, customer: customer, lineCount: lines.count)
               }
             }
@@ -166,7 +166,7 @@ public class R8FactoryTests
     [Fact]
     public void Initialization_to_unknown_field_is_reported()
     {
-        var src = Head + "    create make { bogus <- 1 }\n  }\n}\n";
+        var src = Head + "    create make { bogus -> 1 }\n  }\n}\n";
         Assert.Contains(Diagnose(src), d => d.Code == DiagnosticCodes.InvalidInitializationTarget);
     }
 
@@ -175,42 +175,42 @@ public class R8FactoryTests
     {
         const string src =
             "context C {\n  entity E identified by EId {\n    n: Int\n    doubled: Int = n + n\n" +
-            "    create make(v: Int) { n <- v  doubled <- 5 }\n  }\n}\n";
+            "    create make(v: Int) { n -> v  doubled -> 5 }\n  }\n}\n";
         Assert.Contains(Diagnose(src), d => d.Code == DiagnosticCodes.InvalidInitializationTarget);
     }
 
     [Fact]
     public void Initialization_with_incompatible_type_is_reported()
     {
-        var src = Head + "    create make { n <- \"x\" }\n  }\n}\n";
+        var src = Head + "    create make { n -> \"x\" }\n  }\n}\n";
         Assert.Contains(Diagnose(src), d => d.Code == DiagnosticCodes.InitializationTypeMismatch);
     }
 
     [Fact]
     public void Duplicate_initialization_is_reported()
     {
-        var src = Head + "    create make(v: Int) { n <- v  n <- v }\n  }\n}\n";
+        var src = Head + "    create make(v: Int) { n -> v  n -> v }\n  }\n}\n";
         Assert.Contains(Diagnose(src), d => d.Code == DiagnosticCodes.DuplicateInitialization);
     }
 
     [Fact]
     public void Duplicate_factory_name_is_reported()
     {
-        var src = Head + "    create make(v: Int) { n <- v }\n    create make(v: Int) { n <- v }\n  }\n}\n";
+        var src = Head + "    create make(v: Int) { n -> v }\n    create make(v: Int) { n -> v }\n  }\n}\n";
         Assert.Contains(Diagnose(src), d => d.Code == DiagnosticCodes.DuplicateFactory);
     }
 
     [Fact]
     public void Factory_colliding_with_a_property_is_reported()
     {
-        var src = Head + "    create n(v: Int) { n <- v }\n  }\n}\n";
+        var src = Head + "    create n(v: Int) { n -> v }\n  }\n}\n";
         Assert.Contains(Diagnose(src), d => d.Code == DiagnosticCodes.FactoryNameCollision);
     }
 
     [Fact]
     public void Factory_colliding_with_a_command_is_reported()
     {
-        var src = Head + "    command go { n -> 1 }\n    create go(v: Int) { n <- v }\n  }\n}\n";
+        var src = Head + "    command go { n -> 1 }\n    create go(v: Int) { n -> v }\n  }\n}\n";
         Assert.Contains(Diagnose(src), d => d.Code == DiagnosticCodes.FactoryNameCollision);
     }
 
@@ -220,7 +220,7 @@ public class R8FactoryTests
         // `name` is required (no default, not optional) and the factory never sets it.
         const string src =
             "context C {\n  entity E identified by EId {\n    n: Int\n    name: String\n" +
-            "    create make(v: Int) { n <- v }\n  }\n}\n";
+            "    create make(v: Int) { n -> v }\n  }\n}\n";
         var diags = Diagnose(src);
         Assert.Contains(diags, d => d.Code == DiagnosticCodes.UninitializedFactoryField
             && d.Severity == DiagnosticSeverity.Warning);
@@ -231,7 +231,7 @@ public class R8FactoryTests
     {
         const string src =
             "context C {\n  entity E identified by EId {\n    n: Int\n    name: String\n" +
-            "    create make(v: Int, label: String) { n <- v  name <- label }\n  }\n}\n";
+            "    create make(v: Int, label: String) { n -> v  name -> label }\n  }\n}\n";
         Assert.DoesNotContain(Diagnose(src), d => d.Code == DiagnosticCodes.UninitializedFactoryField);
     }
 
@@ -240,7 +240,7 @@ public class R8FactoryTests
     {
         const string src =
             "context C {\n  entity E identified by EId {\n    n: Int\n" +
-            "    create make(v: Int) {\n      requires v > 0 \"positive\"\n      n <- v\n    }\n  }\n}\n";
+            "    create make(v: Int) {\n      requires v > 0 \"positive\"\n      n -> v\n    }\n  }\n}\n";
         Assert.Empty(Diagnose(src));
 
         var result = new KoineCompiler().Compile(src, new CSharpEmitter());
@@ -261,7 +261,7 @@ public class R8FactoryTests
     public void Factory_parameter_named_id_is_rejected()
     {
         // `id` collides with the auto-generated identity local in the emitted method.
-        var src = Head + "    create make(id: Int) { n <- id }\n  }\n}\n";
+        var src = Head + "    create make(id: Int) { n -> id }\n  }\n}\n";
         Assert.Contains(Diagnose(src), d => d.Code == DiagnosticCodes.ReservedFactoryParameter);
     }
 
@@ -270,7 +270,7 @@ public class R8FactoryTests
     {
         // `create getHashCode` would emit `public static E GetHashCode()` alongside the
         // generated `public override int GetHashCode()` (CS0111).
-        var src = Head + "    create getHashCode { n <- 1 }\n  }\n}\n";
+        var src = Head + "    create getHashCode { n -> 1 }\n  }\n}\n";
         Assert.Contains(Diagnose(src), d => d.Code == DiagnosticCodes.FactoryNameCollision);
     }
 
@@ -278,7 +278,7 @@ public class R8FactoryTests
     public void Same_named_parameter_auto_initializes_a_required_field()
     {
         // The canonical R8.1 example: a `customer` parameter populates the `customer`
-        // field without an explicit `customer <- customer`, and no warning fires.
+        // field without an explicit `customer -> customer`, and no warning fires.
         const string src = """
             context Sales {
               value OrderLine { product: ProductId  quantity: Int }
@@ -331,7 +331,7 @@ public class R8FactoryTests
                 entity Cart identified by CartId {
                   total: Money
                   create forLines(lines: List<Line>) {
-                    total <- lines.sum(l => l.price)
+                    total -> lines.sum(l => l.price)
                   }
                 }
               }
@@ -360,5 +360,28 @@ public class R8FactoryTests
         var result = new KoineCompiler().Compile(src, new CSharpEmitter());
         var (asm, errors) = TestSupport.Compile(result.Files);
         Assert.True(asm is not null, "generated C# failed to compile:\n" + string.Join("\n", errors));
+    }
+
+    // ---- arrow unification: `<-` merged into `->` --------------------------
+
+    [Fact]
+    public void Factory_initialization_uses_the_RARROW_arrow()
+    {
+        // After unifying the arrows, factory field init spells `field -> expr`, the same
+        // `->` as a command transition; the create {} block disambiguates init from mutate.
+        var src = Head + "    create make(v: Int) { n -> v }\n  }\n}\n";
+        Assert.Empty(Diagnose(src));
+
+        var result = new KoineCompiler().Compile(src, new CSharpEmitter());
+        var (asm, errors) = TestSupport.Compile(result.Files);
+        Assert.True(asm is not null, "generated C# failed to compile:\n" + string.Join("\n", errors));
+    }
+
+    [Fact]
+    public void Old_LARROW_init_arrow_is_no_longer_a_valid_token()
+    {
+        // `<-` has been removed from the lexer; the legacy spelling must now be rejected.
+        var src = Head + "    create make(v: Int) { n <- v }\n  }\n}\n";
+        Assert.NotEmpty(Diagnose(src));
     }
 }

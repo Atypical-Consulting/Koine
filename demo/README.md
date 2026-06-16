@@ -76,7 +76,7 @@ dotnet run --project src/Koine.Cli -- build demo/Shop.Domain/Models --out /tmp/o
 | Commands: `requires` + `field -> value` + invariant re-check | R5 | `Order.submit/cancel`, `Shipment.dispatch`, `Payment.capture/refund` |
 | Domain events: `event` + `emit` → `DomainEvents` | R6 | `OrderSubmitted`, `OrderOpened`, `ShipmentScheduled`, `PaymentAuthorized` |
 | State machines: legal transitions | R7 | `Order`, `Shipment`, `Payment` lifecycles |
-| **Factories** (`create … { requires; field <- value; emit }`) | R8 | `Order.open`, `Shipment.schedule`, `Payment.authorize` |
+| **Factories** (`create … { requires; field -> value; emit }`) | R8 | `Order.open`, `Shipment.schedule`, `Payment.authorize` |
 | **Enum with associated data** | R9.1 | `Currency(symbol, decimals)` |
 | **Quantity value object** (unit-checked arithmetic) | R9.2 | `Weight { amount: Decimal  unit: MassUnit }` |
 | **`Range<T>`** (Contains/Overlaps, start≤end) | R9.3 | `SalePeriod.window` |

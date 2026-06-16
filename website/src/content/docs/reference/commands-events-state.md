@@ -16,7 +16,8 @@ illegal lifecycle transition throws before any field changes.
 
 A `command` is a named, intention-revealing mutation. It declares preconditions with `requires`, assigns fields
 with the transition operator `->`, and may `emit` domain events. It compiles to a `public void` method on the
-entity (commands with parameters take those parameters).
+entity (commands with parameters take those parameters) — or, when it declares a return type, a method that
+hands a value back (see [Returning a value](#returning-a-value)).
 
 ```koine
 command submit {
@@ -67,10 +68,11 @@ The body of a command runs in a fixed order:
    never leave the aggregate in a state its `invariant`s forbid.
 
 :::note
-The `->` token (RARROW) is the **transition** operator used in command bodies and `states` blocks. It is a
-distinct, atomic token from `<-` (LARROW), the [factory](/Koine/reference/factories/)
-*initialization* operator. Keep the two characters adjacent — write `status -> Submitted`, never `status - >
-Submitted`.
+The `->` token (RARROW) is the **state-effect** arrow. It is used both for **transitions** in command
+bodies and `states` blocks and for [factory](/Koine/reference/factories/) field **initialization** — the
+enclosing `command {}` vs `create {}` block, not the arrow, distinguishes mutate from init. Keep the two
+characters adjacent — write `status -> Submitted`, never `status - > Submitted`. Koine has just two
+assignment-like arrows: `=` (declaration default) and `->` (state effect).
 :::
 
 ### Preconditions vs. invariants
@@ -104,6 +106,56 @@ public void Record(decimal amount)
 ```
 
 `record` (lowercase) is fine as a command name — Koine PascalCases it to the C# method `Record`.
+
+### Returning a value
+
+A command is normally `void` — it mutates and emits. But the mainstream DDD case *"a command returns the
+identity of what it created"* (a generated token, a receipt id, a child entity's id) needs the command to hand
+a value back. Declare a return type after the signature with `: Type`, then end the body with a `result`
+clause naming the expression to return:
+
+```koine
+command cancel(): OrderId {
+  requires status != Cancelled "already cancelled"
+  status -> Cancelled
+  emit OrderCancelled(orderId: id)
+  result id
+}
+```
+
+```csharp
+public OrderId Cancel()
+{
+    if (Status == OrderStatus.Cancelled)
+        throw new DomainInvariantViolationException(
+            type: nameof(Order),
+            rule: "already cancelled");
+
+    Status = OrderStatus.Cancelled;
+
+    var __result = Id;
+    _domainEvents.Add(new OrderCancelled(__result));
+
+    return __result;
+}
+```
+
+The `result` expression is evaluated over the **post-mutation** state, in the same scope as `emit` payloads, so
+it can reference parameters, `id`, and just-assigned fields. It is the **terminal** statement: the value is only
+returned from a fully-valid, fully-eventful aggregate (after the precondition guards, the post-transition
+invariant re-check, and every `emit`). When the same value is also carried by an event — the *create-and-return-id*
+idiom — Koine hoists it into a single `var __result`, computing it once. A result that no event references is
+returned inline (`return <expr>;`).
+
+Rules:
+
+- `result` requires a declared return type. A `result` with no `: Type` is reported (`KOI0506`).
+- A declared return type requires **exactly one** `result` clause — zero or more than one is reported (`KOI0507`).
+- The `result` expression must be assignable to the declared return type (`KOI0508`).
+
+This mirrors what [factories](/Koine/reference/factories/) (which already `return` the aggregate) and
+[use-cases](/Koine/reference/application-layer/) (which already take an optional `: Type` mapping to `Task<T>`)
+have always done. Commands without a return type are unchanged — they stay `public void`.
 
 ## Domain events
 
@@ -275,7 +327,7 @@ context Payments version 1 {
 
 ## Where to go next
 
-- [Factories](/Koine/reference/factories/) — the `create` block, the `<-` initialization
+- [Factories](/Koine/reference/factories/) — the `create` block, the `->` initialization
   operator, and why the all-args constructor goes private.
 - [Aggregates](/Koine/reference/aggregates/) — the consistency boundary that owns these
   commands and events.

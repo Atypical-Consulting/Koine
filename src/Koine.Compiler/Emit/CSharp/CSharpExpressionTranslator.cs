@@ -19,6 +19,14 @@ internal sealed class CSharpExpressionTranslator
         Property
     }
 
+    /// <summary>
+    /// C#-target rendering for each target-agnostic nullary value builtin declared in
+    /// <see cref="BuiltinOps.NullaryValueOps"/> (e.g. <c>now</c> -> <c>DateTimeOffset.UtcNow</c>).
+    /// The registry owns the surface names; this table owns only their C# spelling.
+    /// </summary>
+    private static readonly IReadOnlyDictionary<string, string> NullaryValueOpsCSharp =
+        new Dictionary<string, string>(StringComparer.Ordinal) { ["now"] = "DateTimeOffset.UtcNow" };
+
     private readonly ModelIndex _index;
     private readonly TypeResolver _resolver;
     private readonly TypeScope _scope;
@@ -400,9 +408,70 @@ internal sealed class CSharpExpressionTranslator
                 Write(g.Body, mode, sb);
                 break;
 
+            case LetExpr let:
+                WriteLet(let, mode, sb);
+                break;
+
             default:
                 sb.Append("/* unsupported expression */");
                 break;
+        }
+    }
+
+    /// <summary>
+    /// Lowers <c>let x = e (, y = e)* in body</c> to an immediately-invoked lambda
+    /// with <c>var</c> locals, preserving evaluation order and giving each binding a
+    /// genuinely private C# local (not a public property):
+    /// <code>((Func&lt;RET&gt;)(() => { var x = EXPR; var y = EXPR; return BODY; }))()</code>
+    /// Binding references render verbatim (camelCase) via the existing local machinery,
+    /// exactly like lambda parameters. Bindings are registered sequentially so each
+    /// value sees the previous ones, matching the language's scoping.
+    /// </summary>
+    private void WriteLet(LetExpr let, NameMode mode, StringBuilder sb)
+    {
+        // Infer the body's type to name the IIFE's delegate, folding bindings into the
+        // scope in order (each binding's value sees the previous ones).
+        var scope = EffectiveScope();
+        foreach (var b in let.Bindings)
+            scope = scope.With(b.Name, _resolver.Infer(b.Value, scope) ?? new TypeRef("?"));
+        var bodyType = _resolver.Infer(let.Body, scope);
+        var ret = bodyType is not null ? new CSharpTypeMapper(_index).Map(bodyType) : "object";
+
+        // Fully-qualify Func so the lowering never depends on a `using System;` in the
+        // generated file's fixed using-set.
+        sb.Append("((System.Func<").Append(ret).Append(">)(() => { ");
+
+        // Emit each binding as a `var` local, registering it so later bindings and the
+        // body render references to it verbatim. Save/restore guards against shadowing
+        // an outer local of the same name.
+        var pushed = new List<(string Name, bool WasPresent, TypeRef? Type)>();
+        foreach (var b in let.Bindings)
+        {
+            var wasPresent = _locals.Contains(b.Name);
+            var prevType = _localTypes.TryGetValue(b.Name, out var pt) ? pt : null;
+            sb.Append("var ").Append(CSharpNaming.ToCamelCase(b.Name)).Append(" = ");
+            sb.Append(Render(b.Value, mode));
+            sb.Append("; ");
+            // Register only AFTER rendering the value (the value must not see itself).
+            PushLocal(b.Name, _resolver.Infer(b.Value, EffectiveScope()));
+            pushed.Add((b.Name, wasPresent, prevType));
+        }
+
+        sb.Append("return ").Append(Render(let.Body, mode)).Append("; }))()");
+
+        // Restore the local stack in reverse so an outer binding of the same name survives.
+        for (var i = pushed.Count - 1; i >= 0; i--)
+        {
+            var (name, wasPresent, prevType) = pushed[i];
+            if (wasPresent)
+            {
+                _locals.Add(name);
+                if (prevType is not null) _localTypes[name] = prevType; else _localTypes.Remove(name);
+            }
+            else
+            {
+                PopLocal(name);
+            }
         }
     }
 
@@ -415,10 +484,11 @@ internal sealed class CSharpExpressionTranslator
             return;
         }
 
-        // `now` built-in (unless shadowed by a real member).
-        if (name == "now" && !_memberNames.Contains(name))
+        // Nullary value builtin such as `now` (unless shadowed by a real member).
+        if (BuiltinOps.IsNullaryValueOp(name) && !_memberNames.Contains(name)
+            && NullaryValueOpsCSharp.TryGetValue(name, out var csharp))
         {
-            sb.Append("DateTimeOffset.UtcNow");
+            sb.Append(csharp);
             return;
         }
 

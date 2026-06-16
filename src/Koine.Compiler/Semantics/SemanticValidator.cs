@@ -370,13 +370,18 @@ public sealed class SemanticValidator
                 {
                     checker.Check(m.Initializer, scope, m.Type);
 
-                    // `now` is non-deterministic, so it cannot be a STORED default
-                    // (a derived/computed field re-evaluating `now` is fine).
-                    if (!MemberAnalysis.IsDerived(m, memberNames)
-                        && MemberAnalysis.ReferencedIdentifiers(m.Initializer).Contains("now"))
-                        diagnostics.Add(Diagnostic.Error(DiagnosticCodes.NowAsStoredDefault,
-                            $"'now' cannot be used as a stored default for '{m.Name}'",
-                            m.Span));
+                    // A nullary builtin like `now` is non-deterministic, so it cannot be a
+                    // STORED default (a derived/computed field re-evaluating it is fine).
+                    if (!MemberAnalysis.IsDerived(m, memberNames))
+                    {
+                        var referenced = new HashSet<string>(
+                            MemberAnalysis.ReferencedIdentifiers(m.Initializer), StringComparer.Ordinal);
+                        var nondeterministic = BuiltinOps.NullaryValueOps.Keys.FirstOrDefault(referenced.Contains);
+                        if (nondeterministic is not null)
+                            diagnostics.Add(Diagnostic.Error(DiagnosticCodes.NowAsStoredDefault,
+                                $"'{nondeterministic}' cannot be used as a stored default for '{m.Name}'",
+                                m.Span));
+                    }
 
                     // An optional value can't initialize a non-optional field without a fallback.
                     var initType = resolver.Infer(m.Initializer, scope);

@@ -200,7 +200,7 @@ public sealed class KoineLanguageService
         or KoineLexer.ELSE or KoineLexer.COALESCE or KoineLexer.NOT or KoineLexer.MINUS
         or KoineLexer.PLUS or KoineLexer.STAR or KoineLexer.SLASH or KoineLexer.EQ
         or KoineLexer.NEQ or KoineLexer.LT or KoineLexer.LE or KoineLexer.GT or KoineLexer.GE
-        or KoineLexer.AND or KoineLexer.OR or KoineLexer.MATCHES or KoineLexer.LARROW;
+        or KoineLexer.AND or KoineLexer.OR or KoineLexer.MATCHES or KoineLexer.RARROW;
 
     private static IReadOnlyList<CompletionItem> FieldCandidates(ModelIndex index, string typeName) =>
         index.MemberNames(typeName)

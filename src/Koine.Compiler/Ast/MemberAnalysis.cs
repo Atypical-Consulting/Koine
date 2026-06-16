@@ -104,6 +104,22 @@ public static class MemberAnalysis
                 foreach (var n in ReferencedIdentifiers(g.Body)) yield return n;
                 foreach (var n in ReferencedIdentifiers(g.Condition)) yield return n;
                 break;
+            case LetExpr let:
+            {
+                // Binding names are bound variables, not free references: a value sees
+                // earlier bindings, and the body sees them all, so yield only the FREE
+                // identifiers (those not introduced by an earlier-or-current binding).
+                var boundNames = new HashSet<string>(StringComparer.Ordinal);
+                foreach (var binding in let.Bindings)
+                {
+                    foreach (var n in ReferencedIdentifiers(binding.Value))
+                        if (!boundNames.Contains(n)) yield return n;
+                    boundNames.Add(binding.Name);
+                }
+                foreach (var n in ReferencedIdentifiers(let.Body))
+                    if (!boundNames.Contains(n)) yield return n;
+                break;
+            }
             case LiteralExpr:
                 break;
         }

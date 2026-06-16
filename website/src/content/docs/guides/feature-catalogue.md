@@ -55,12 +55,14 @@ See [commands, events & state](/Koine/reference/commands-events-state/).
 | Construct | `.koi` syntax (short) | Emits | Demo location |
 |---|---|---|---|
 | Command | `command submit() { requires …; status -> Placed; emit … }` | a mutating method that checks `requires`, applies `field -> value` transitions, re-checks invariants | `Order.submit/cancel`, `Shipment.dispatch`, `Payment.capture/refund` |
+| Command returning a value | `command cancel(): OrderId { …; result id }` | a typed method (`public <T> Name(…)`) that returns the `result` expression as its terminal statement (the create-and-return-id idiom) | — |
 | Domain event | `event OrderSubmitted { … }` + `emit OrderSubmitted(…)` | a record recorded into the root's `DomainEvents` collection | `OrderSubmitted`, `OrderOpened`, `ShipmentScheduled`, `PaymentAuthorized` |
 | State machine | `states { Draft -> Placed; … }` | runtime-checked legal transitions; illegal transition throws | `Order`, `Shipment`, `Payment` lifecycles |
 
 :::caution
-`->` (transition / state rule) and `<-` (factory init, below) are single atomic tokens — keep the two
-characters adjacent (`status -> Placed`, never `status - > Placed`).
+`->` (the single state-effect arrow: transition, state rule, **and** factory init below) is one atomic
+token — keep the two characters adjacent (`status -> Placed`, never `status - > Placed`). Koine has just
+two assignment-like arrows: `=` (declaration default) and `->` (state effect).
 :::
 
 ## Factories (R8)
@@ -70,8 +72,8 @@ The aggregate's only public construction path. See [factories](/Koine/reference/
 | Construct | `.koi` syntax (short) | Emits | Demo location |
 |---|---|---|---|
 | Named factory | `create open(customer: CustomerId, …) { … }` | `public static <Entity> Open(…)`: generate id, check `requires`, construct with named ctor args, emit, return | `Order.open`, `Shipment.schedule`, `Payment.authorize` |
-| Field init | `total <- lines.sum(l => l.price)` | a named ctor argument `total: <expr>` | factory bodies |
-| Auto-bind | `create open(customer: CustomerId, …)` (param name = field) | binds the matching field without an explicit `<-` | `Order.open` |
+| Field init | `total -> lines.sum(l => l.price)` | a named ctor argument `total: <expr>` | factory bodies |
+| Auto-bind | `create open(customer: CustomerId, …)` (param name = field) | binds the matching field without an explicit `->` | `Order.open` |
 | Creation event | `emit OrderOpened(orderId: id, …)` | records the event into `DomainEvents` after construction | factory bodies |
 | Factory-only construction | (presence of any `create`) | the all-args constructor becomes `private` | every aggregate with a factory |
 

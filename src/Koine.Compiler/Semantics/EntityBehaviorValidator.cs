@@ -98,7 +98,30 @@ internal static class EntityBehaviorValidator
                                 emit.Span));
                         ValidateEmit(emit, index, checker, scope, diagnostics);
                         break;
+
+                    case ResultClause res:
+                        // A `result` clause only makes sense when the command declares a
+                        // return type; its value must be assignable to that type.
+                        if (cmd.ReturnType is { } rt)
+                            checker.CheckCommandResult(res.Value, rt, cmd.Name, scope);
+                        else
+                            diagnostics.Add(Diagnostic.Error(DiagnosticCodes.ResultWithoutReturnType,
+                                $"command '{cmd.Name}' has a 'result' clause but no declared return type", res.Span));
+                        break;
                 }
+            }
+
+            // A command that declares a return type must hand a value back: exactly one
+            // `result` clause is required (zero is a missing return, validated here; >1 is
+            // also reported so only a single terminal value is emitted).
+            if (cmd.ReturnType is { } returnType)
+            {
+                SemanticValidator.ValidateTypeRef(returnType, index, diagnostics);
+                var resultCount = cmd.Body.OfType<ResultClause>().Count();
+                if (resultCount != 1)
+                    diagnostics.Add(Diagnostic.Error(DiagnosticCodes.MissingCommandResult,
+                        $"command '{cmd.Name}' declares return type '{returnType.Name}' and must have exactly one 'result' clause",
+                        cmd.Span));
             }
         }
     }
