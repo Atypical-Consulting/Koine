@@ -17,9 +17,13 @@ public sealed partial class CSharpEmitter : IEmitter
 
     private const string Indent = "    ";
 
-    public IReadOnlyList<EmittedFile> Emit(KoineModel model)
+    public IReadOnlyList<EmittedFile> Emit(KoineModel model) => Emit(model, null);
+
+    public IReadOnlyList<EmittedFile> Emit(KoineModel model, SemanticModel? semantic)
     {
-        var index = new ModelIndex(model);
+        // Reuse the shared resolution when given (the normal pipeline path); fall back to building
+        // our own only when invoked standalone (e.g. a direct emitter test).
+        var index = (semantic ?? new SemanticModel(model)).Index;
         var typeMapper = new CSharpTypeMapper(index);
         Dictionary<string, string> enumMemberToType = BuildEnumMemberMap(model);
 
