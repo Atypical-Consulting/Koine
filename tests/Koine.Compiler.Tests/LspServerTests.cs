@@ -243,6 +243,42 @@ public class LspServerTests
             },
         }));
 
+    private static byte[] CodeActionRange(string uri, int startLine, int startChar, int endLine, int endChar) =>
+        Frame(JsonSerializer.Serialize(new
+        {
+            jsonrpc = "2.0",
+            id = 24,
+            method = "textDocument/codeAction",
+            @params = new
+            {
+                textDocument = new { uri },
+                range = new
+                {
+                    start = new { line = startLine, character = startChar },
+                    end = new { line = endLine, character = endChar },
+                },
+                context = new { diagnostics = Array.Empty<object>() },
+            },
+        }));
+
+    private static byte[] CodeActionRangeOnly(string uri, int startLine, int startChar, int endLine, int endChar, string[] only) =>
+        Frame(JsonSerializer.Serialize(new
+        {
+            jsonrpc = "2.0",
+            id = 24,
+            method = "textDocument/codeAction",
+            @params = new
+            {
+                textDocument = new { uri },
+                range = new
+                {
+                    start = new { line = startLine, character = startChar },
+                    end = new { line = endLine, character = endChar },
+                },
+                context = new { diagnostics = Array.Empty<object>(), only },
+            },
+        }));
+
     private static byte[] SemanticTokensFull(string uri) =>
         Frame(JsonSerializer.Serialize(new
         {
@@ -443,8 +479,10 @@ public class LspServerTests
         Assert.Contains("\"documentFormattingProvider\":true", output);
         Assert.Contains("\"documentSymbolProvider\":true", output);
         Assert.Contains("\"referencesProvider\":true", output);
-        Assert.Contains("\"renameProvider\":true", output);
-        Assert.Contains("\"codeActionProvider\":true", output);
+        Assert.Contains("\"renameProvider\":{\"prepareProvider\":true}", output);
+        // codeActionProvider is now an object advertising the supported code-action kinds (so
+        // editors surface the refactors), not a bare boolean.
+        Assert.Contains("\"codeActionProvider\":{\"codeActionKinds\":[\"quickfix\",\"refactor\",\"refactor.extract\"]}", output);
     }
 
     [Fact]
@@ -522,6 +560,63 @@ public class LspServerTests
         Assert.Contains("\"title\":\"Change to 'String'\"", output);
         Assert.Contains("\"kind\":\"quickfix\"", output);
         Assert.Contains("\"newText\":\"String\"", output);
+    }
+
+    [Fact]
+    public void CodeAction_over_a_field_range_offers_an_extract_value_object_refactor()
+    {
+        // Selecting the `street` field of an Address value object should offer the extract refactor
+        // with a non-empty WorkspaceEdit. Line 2 (0-based): "  value Address { street: String }".
+        var doc = "context C {\n  value Address { street: String }\n}\n";
+        // "street" begins at character 18 and ends at 24 on line 1 (0-based).
+        var output = RunSession(
+            Initialize(),
+            DidOpen("file:///t.koi", doc),
+            CodeActionRange("file:///t.koi", 1, 18, 1, 24));
+        Assert.Contains("\"kind\":\"refactor.extract\"", output);
+        Assert.Contains("\"edit\":", output);
+        Assert.Contains("\"changes\":", output);
+        Assert.Contains("value ExtractedValue", output);
+    }
+
+    [Fact]
+    public void CodeAction_over_a_non_field_range_offers_no_refactor()
+    {
+        // A selection on the `value` keyword (not on a field) yields no extract refactor.
+        var doc = "context C {\n  value Address { street: String }\n}\n";
+        var output = RunSession(
+            Initialize(),
+            DidOpen("file:///t.koi", doc),
+            CodeActionRange("file:///t.koi", 1, 2, 1, 7)); // the "value" keyword
+        // The capabilities response advertises "refactor.extract" as a supported kind, so assert
+        // the absence of an emitted action (which carries a "kind":"refactor.extract" property).
+        Assert.DoesNotContain("\"kind\":\"refactor.extract\"", output);
+    }
+
+    [Fact]
+    public void CodeAction_with_only_quickfix_does_not_return_the_extract_refactor()
+    {
+        // context.only = ["quickfix"] scopes the request to quickfixes; the extract refactor
+        // (kind "refactor.extract") must NOT be offered, even though the selection lands on a field.
+        var doc = "context C {\n  value Address { street: String }\n}\n";
+        var output = RunSession(
+            Initialize(),
+            DidOpen("file:///t.koi", doc),
+            CodeActionRangeOnly("file:///t.koi", 1, 18, 1, 24, new[] { "quickfix" }));
+        Assert.DoesNotContain("\"kind\":\"refactor.extract\"", output);
+    }
+
+    [Fact]
+    public void CodeAction_with_only_refactor_returns_the_extract_refactor()
+    {
+        // context.only = ["refactor"] admits "refactor.extract" by hierarchical prefix match.
+        var doc = "context C {\n  value Address { street: String }\n}\n";
+        var output = RunSession(
+            Initialize(),
+            DidOpen("file:///t.koi", doc),
+            CodeActionRangeOnly("file:///t.koi", 1, 18, 1, 24, new[] { "refactor" }));
+        Assert.Contains("\"kind\":\"refactor.extract\"", output);
+        Assert.Contains("value ExtractedValue", output);
     }
 
     [Fact]
