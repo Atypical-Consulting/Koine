@@ -274,10 +274,22 @@ public sealed class SemanticValidator
             case EnumDecl en:
                 // Duplicate enum members produce uncompilable C#.
                 var seenMembers = new HashSet<string>(StringComparer.Ordinal);
+                // Each member also becomes a camelCase delegate parameter on the generated
+                // Match/Switch; two members differing only by leading-char case (Foo/foo)
+                // collapse to one parameter, so guard that collision here too.
+                var seenCamel = new HashSet<string>(StringComparer.Ordinal);
                 foreach (var member in en.MemberNames)
+                {
                     if (!seenMembers.Add(member))
                         diagnostics.Add(Diagnostic.Error(DiagnosticCodes.DuplicateEnumMember,
                             $"duplicate enum member '{member}'", en.Span));
+                    else if (GeneratedEnumMembers.Contains(member))
+                        diagnostics.Add(Diagnostic.Error(DiagnosticCodes.ReservedEnumMember,
+                            $"enum member '{member}' collides with a generated smart-enum member", en.Span));
+                    if (member.Length > 0 && !seenCamel.Add(char.ToLowerInvariant(member[0]) + member[1..]))
+                        diagnostics.Add(Diagnostic.Error(DiagnosticCodes.EnumMemberCamelCaseCollision,
+                            $"enum member '{member}' differs from another only by leading-character case and would collapse to one Match/Switch parameter", en.Span));
+                }
                 ValidateEnumAssociatedData(en, index, diagnostics);
                 break;
             case EventDecl ev:
@@ -309,6 +321,18 @@ public sealed class SemanticValidator
     /// <summary>The C# property identifier a member name maps to (first char upper-cased), for collision checks.</summary>
     internal static string PropertyKey(string name) =>
         name.Length == 0 ? name : char.ToUpperInvariant(name[0]) + name[1..];
+
+    /// <summary>
+    /// Identifiers generated on every smart-enum class. A member named exactly one of these
+    /// would clash with the generated property/method of the same name (C# is case-sensitive,
+    /// so the collision is on the exact identifier).
+    /// </summary>
+    private static readonly IReadOnlySet<string> GeneratedEnumMembers =
+        new HashSet<string>(StringComparer.Ordinal)
+        {
+            "Name", "Value", "All", "FromName", "FromValue", "TryFromName", "TryFromValue",
+            "Match", "Switch", "ToString", "Equals", "GetHashCode"
+        };
 
     /// <summary>Members a positional <c>record</c> synthesizes; a field/criterion mapping to one fails to compile.</summary>
     private static readonly IReadOnlySet<string> RecordReservedMembers =
@@ -730,7 +754,8 @@ public sealed class SemanticValidator
         // Names generated on every smart enum; an associated field of these would clash.
         var reserved = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         {
-            "Name", "Value", "All", "FromName", "FromValue", "ToString", "Equals", "GetHashCode"
+            "Name", "Value", "All", "FromName", "FromValue", "TryFromName", "TryFromValue",
+            "Match", "Switch", "ToString", "Equals", "GetHashCode"
         };
         foreach (var p in sig)
         {

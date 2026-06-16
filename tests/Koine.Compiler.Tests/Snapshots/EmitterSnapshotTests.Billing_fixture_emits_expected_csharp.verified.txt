@@ -34,6 +34,44 @@ public sealed class Currency : IEquatable<Currency>
         All.FirstOrDefault(e => e.Value == value)
         ?? throw new ArgumentOutOfRangeException(nameof(value), $"No Currency with value {value}.");
 
+    public static bool TryFromName(string name, out Currency result)
+    {
+        result = All.FirstOrDefault(e => e.Name == name)!;
+        return result is not null;
+    }
+
+    public static bool TryFromValue(int value, out Currency result)
+    {
+        result = All.FirstOrDefault(e => e.Value == value)!;
+        return result is not null;
+    }
+
+    public TResult Match<TResult>(
+        Func<TResult> eUR,
+        Func<TResult> uSD,
+        Func<TResult> gBP) =>
+        Value switch
+        {
+            0 => eUR(),
+            1 => uSD(),
+            2 => gBP(),
+            _ => throw new InvalidOperationException($"Unhandled Currency '{Name}'.")
+        };
+
+    public void Switch(
+        Action eUR,
+        Action uSD,
+        Action gBP)
+    {
+        switch (Value)
+        {
+            case 0: eUR(); break;
+            case 1: uSD(); break;
+            case 2: gBP(); break;
+            default: throw new InvalidOperationException($"Unhandled Currency '{Name}'.");
+        }
+    }
+
     public override string ToString() => Name;
     public bool Equals(Currency? other) => other is not null && Value == other.Value;
     public override bool Equals(object? obj) => Equals(obj as Currency);
@@ -338,6 +376,48 @@ public sealed class OrderStatus : IEquatable<OrderStatus>
     public static OrderStatus FromValue(int value) =>
         All.FirstOrDefault(e => e.Value == value)
         ?? throw new ArgumentOutOfRangeException(nameof(value), $"No OrderStatus with value {value}.");
+
+    public static bool TryFromName(string name, out OrderStatus result)
+    {
+        result = All.FirstOrDefault(e => e.Name == name)!;
+        return result is not null;
+    }
+
+    public static bool TryFromValue(int value, out OrderStatus result)
+    {
+        result = All.FirstOrDefault(e => e.Value == value)!;
+        return result is not null;
+    }
+
+    public TResult Match<TResult>(
+        Func<TResult> draft,
+        Func<TResult> placed,
+        Func<TResult> shipped,
+        Func<TResult> cancelled) =>
+        Value switch
+        {
+            0 => draft(),
+            1 => placed(),
+            2 => shipped(),
+            3 => cancelled(),
+            _ => throw new InvalidOperationException($"Unhandled OrderStatus '{Name}'.")
+        };
+
+    public void Switch(
+        Action draft,
+        Action placed,
+        Action shipped,
+        Action cancelled)
+    {
+        switch (Value)
+        {
+            case 0: draft(); break;
+            case 1: placed(); break;
+            case 2: shipped(); break;
+            case 3: cancelled(); break;
+            default: throw new InvalidOperationException($"Unhandled OrderStatus '{Name}'.");
+        }
+    }
 
     public override string ToString() => Name;
     public bool Equals(OrderStatus? other) => other is not null && Value == other.Value;

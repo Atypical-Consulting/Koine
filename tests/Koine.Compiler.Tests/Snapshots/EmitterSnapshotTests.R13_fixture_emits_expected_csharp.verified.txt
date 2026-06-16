@@ -33,6 +33,40 @@ public sealed class Currency : IEquatable<Currency>
         All.FirstOrDefault(e => e.Value == value)
         ?? throw new ArgumentOutOfRangeException(nameof(value), $"No Currency with value {value}.");
 
+    public static bool TryFromName(string name, out Currency result)
+    {
+        result = All.FirstOrDefault(e => e.Name == name)!;
+        return result is not null;
+    }
+
+    public static bool TryFromValue(int value, out Currency result)
+    {
+        result = All.FirstOrDefault(e => e.Value == value)!;
+        return result is not null;
+    }
+
+    public TResult Match<TResult>(
+        Func<TResult> eUR,
+        Func<TResult> uSD) =>
+        Value switch
+        {
+            0 => eUR(),
+            1 => uSD(),
+            _ => throw new InvalidOperationException($"Unhandled Currency '{Name}'.")
+        };
+
+    public void Switch(
+        Action eUR,
+        Action uSD)
+    {
+        switch (Value)
+        {
+            case 0: eUR(); break;
+            case 1: uSD(); break;
+            default: throw new InvalidOperationException($"Unhandled Currency '{Name}'.");
+        }
+    }
+
     public override string ToString() => Name;
     public bool Equals(Currency? other) => other is not null && Value == other.Value;
     public override bool Equals(object? obj) => Equals(obj as Currency);
