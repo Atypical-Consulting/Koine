@@ -323,7 +323,9 @@ public class R1ExpressionTests
 
         var stats = asm.GetType("N.Stats")!;
         var ints = (System.Collections.IList)Activator.CreateInstance(typeof(List<int>))!;
-        ints.Add(3); ints.Add(1); ints.Add(2);
+        ints.Add(3);
+        ints.Add(1);
+        ints.Add(2);
         var s = Activator.CreateInstance(stats, ints);
         Assert.Equal(1, stats.GetProperty("Lowest")!.GetValue(s));
     }

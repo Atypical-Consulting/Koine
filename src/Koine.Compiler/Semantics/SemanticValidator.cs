@@ -172,8 +172,10 @@ public sealed class SemanticValidator
             foreach (var up in owners)
             {
                 // If the name is imported from a single owner that is not this upstream, it binds there.
-                if (importOwners.Count == 1 && importOwners[0] != up) continue;
-                if (permittedElsewhere) continue;
+                if (importOwners.Count == 1 && importOwners[0] != up)
+                    continue;
+                if (permittedElsewhere)
+                    continue;
                 if (index.HasAclRelation(up, fromContext))
                 {
                     diagnostics.Add(Diagnostic.Warning(DiagnosticCodes.AclDirectUpstreamReference,
@@ -757,13 +759,17 @@ public sealed class SemanticValidator
             "Name", "Value", "All", "FromName", "FromValue", "TryFromName", "TryFromValue",
             "Match", "Switch", "ToString", "Equals", "GetHashCode"
         };
+        // A field generates a PascalCase property; a member is emitted as a static field of
+        // its (verbatim) name. If the two identifiers coincide the class declares one name
+        // twice, so an associated field whose property name equals a member name also clashes.
+        var memberNames = new HashSet<string>(en.MemberNames, StringComparer.Ordinal);
         foreach (var p in sig)
         {
             ValidateTypeRef(p.Type, index, diagnostics);
             if (!seenFields.Add(p.Name))
                 diagnostics.Add(Diagnostic.Error(DiagnosticCodes.DuplicateParameter,
                     $"duplicate associated-data field '{p.Name}' in enum '{en.Name}'", p.Span));
-            if (reserved.Contains(p.Name))
+            if (reserved.Contains(p.Name) || memberNames.Contains(PropertyKey(p.Name)))
                 diagnostics.Add(Diagnostic.Error(DiagnosticCodes.EnumReservedAssociatedField,
                     $"associated-data field '{p.Name}' collides with a generated smart-enum member", p.Span));
             // Associated values are literals, so the field must be a literal-expressible

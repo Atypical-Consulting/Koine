@@ -39,11 +39,17 @@ internal sealed record KoineConfig(string? Target, string? OutDir, string? Basel
 
             switch (key)
             {
-                case "target": target = value; break;
-                case "out": outDir = value; break;
-                case "baseline": baseline = value; break;
-                // Unknown / structured keys (the R16 `targets.*` block, etc.) are
-                // intentionally ignored so older tooling tolerates newer configs.
+                case "target":
+                    target = value;
+                    break;
+                case "out":
+                    outDir = value;
+                    break;
+                case "baseline":
+                    baseline = value;
+                    break;
+                    // Unknown / structured keys (the R16 `targets.*` block, etc.) are
+                    // intentionally ignored so older tooling tolerates newer configs.
             }
         }
 

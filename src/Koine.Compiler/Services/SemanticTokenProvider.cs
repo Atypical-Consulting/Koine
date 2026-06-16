@@ -225,23 +225,30 @@ public sealed class SemanticTokenProvider
             switch (t)
             {
                 case ValueObjectDecl v:
-                    foreach (var m in v.Members) Add(m.Span, DeclKind.Property);
+                    foreach (var m in v.Members)
+                        Add(m.Span, DeclKind.Property);
                     break;
                 case EntityDecl e:
-                    foreach (var m in e.Members) Add(m.Span, DeclKind.Property);
+                    foreach (var m in e.Members)
+                        Add(m.Span, DeclKind.Property);
                     foreach (var c in e.Commands)
-                        foreach (var p in c.Parameters) Add(p.Span, DeclKind.Parameter);
+                        foreach (var p in c.Parameters)
+                            Add(p.Span, DeclKind.Parameter);
                     foreach (var f in e.Factories)
-                        foreach (var p in f.Parameters) Add(p.Span, DeclKind.Parameter);
+                        foreach (var p in f.Parameters)
+                            Add(p.Span, DeclKind.Parameter);
                     break;
                 case EventDecl ev:
-                    foreach (var m in ev.Members) Add(m.Span, DeclKind.Property);
+                    foreach (var m in ev.Members)
+                        Add(m.Span, DeclKind.Property);
                     break;
                 case IntegrationEventDecl ie:
-                    foreach (var m in ie.Members) Add(m.Span, DeclKind.Property);
+                    foreach (var m in ie.Members)
+                        Add(m.Span, DeclKind.Property);
                     break;
                 case EnumDecl en:
-                    foreach (var m in en.Members) Add(m.Span, DeclKind.EnumMember);
+                    foreach (var m in en.Members)
+                        Add(m.Span, DeclKind.EnumMember);
                     break;
             }
         }
@@ -250,9 +257,11 @@ public sealed class SemanticTokenProvider
             foreach (var svc in ctx.Services)
             {
                 foreach (var op in svc.Operations)
-                    foreach (var p in op.Parameters) Add(p.Span, DeclKind.Parameter);
+                    foreach (var p in op.Parameters)
+                        Add(p.Span, DeclKind.Parameter);
                 foreach (var uc in svc.UseCases)
-                    foreach (var p in uc.Parameters) Add(p.Span, DeclKind.Parameter);
+                    foreach (var p in uc.Parameters)
+                        Add(p.Span, DeclKind.Parameter);
             }
 
         return map;

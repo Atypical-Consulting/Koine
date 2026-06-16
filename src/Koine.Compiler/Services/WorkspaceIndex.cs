@@ -53,10 +53,12 @@ public sealed class WorkspaceIndex
         DeclLocation? found = null;
         foreach (var (uri, index) in _byUri)
         {
-            if (string.Equals(uri, activeUri, StringComparison.Ordinal)) continue;
+            if (string.Equals(uri, activeUri, StringComparison.Ordinal))
+                continue;
             if (StrongSpan(index, name) is { } span)
             {
-                if (found is not null) return null; // ambiguous across files
+                if (found is not null)
+                    return null; // ambiguous across files
                 found = new DeclLocation(uri, span);
             }
         }
@@ -156,10 +158,12 @@ public sealed class WorkspaceIndex
         string? found = null;
         foreach (var (uri, index) in _byUri)
         {
-            if (string.Equals(uri, activeUri, StringComparison.Ordinal)) continue;
+            if (string.Equals(uri, activeUri, StringComparison.Ordinal))
+                continue;
             if (StrongHover(index, name) is { } card)
             {
-                if (found is not null) return null; // ambiguous across files
+                if (found is not null)
+                    return null; // ambiguous across files
                 found = card;
             }
         }
@@ -254,7 +258,8 @@ public sealed class WorkspaceIndex
             case AggregateDecl agg:
                 // Listing the aggregate's owned/nested types is intentionally omitted for now.
                 sb.Append("\n\nroot `").Append(agg.RootName).Append('`');
-                if (agg.IsVersioned) sb.Append(" *(versioned)*");
+                if (agg.IsVersioned)
+                    sb.Append(" *(versioned)*");
                 break;
         }
     }

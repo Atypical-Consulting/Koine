@@ -85,8 +85,10 @@ public sealed class TypeResolver
             case IdentifierExpr id:
                 // A name bound to the "?" sentinel (e.g. a lambda parameter whose
                 // element type couldn't be determined) is treated as unknown.
-                if (scope.TryGet(id.Name, out var bound)) return bound.Name == "?" ? null : bound;
-                if (BuiltinOps.NullaryValueOps.TryGetValue(id.Name, out var builtinType)) return new TypeRef(builtinType);
+                if (scope.TryGet(id.Name, out var bound))
+                    return bound.Name == "?" ? null : bound;
+                if (BuiltinOps.NullaryValueOps.TryGetValue(id.Name, out var builtinType))
+                    return new TypeRef(builtinType);
                 return _index.EnumMemberToType.TryGetValue(id.Name, out var en) ? new TypeRef(en) : null;
 
             case UnaryExpr u:
@@ -102,26 +104,26 @@ public sealed class TypeResolver
                 return Infer(g.Body, scope);
 
             case ConditionalExpr c:
-            {
-                // The result is optional if EITHER branch is optional.
-                var then = Infer(c.Then, scope);
-                var @else = Infer(c.Else, scope);
-                var result = then ?? @else;
-                return result is null
-                    ? null
-                    : result with { IsOptional = (then?.IsOptional ?? false) || (@else?.IsOptional ?? false) };
-            }
+                {
+                    // The result is optional if EITHER branch is optional.
+                    var then = Infer(c.Then, scope);
+                    var @else = Infer(c.Else, scope);
+                    var result = then ?? @else;
+                    return result is null
+                        ? null
+                        : result with { IsOptional = (then?.IsOptional ?? false) || (@else?.IsOptional ?? false) };
+                }
 
             case CoalesceExpr co:
-            {
-                // `a ?? b` is non-null only if the fallback `b` is non-null.
-                var left = Infer(co.Left, scope);
-                var right = Infer(co.Right, scope);
-                var result = left ?? right;
-                return result is null
-                    ? null
-                    : result with { IsOptional = right is null || right.IsOptional };
-            }
+                {
+                    // `a ?? b` is non-null only if the fallback `b` is non-null.
+                    var left = Infer(co.Left, scope);
+                    var right = Infer(co.Right, scope);
+                    var result = left ?? right;
+                    return result is null
+                        ? null
+                        : result with { IsOptional = right is null || right.IsOptional };
+                }
 
             case MemberAccessExpr ma:
                 return InferMember(ma, scope);
@@ -130,14 +132,14 @@ public sealed class TypeResolver
                 return InferCall(call, scope);
 
             case LetExpr let:
-            {
-                // Fold bindings into the scope in order (each sees the previous), then
-                // infer the body in the extended scope.
-                var letScope = scope;
-                foreach (var b in let.Bindings)
-                    letScope = letScope.With(b.Name, Infer(b.Value, letScope) ?? new TypeRef("?"));
-                return Infer(let.Body, letScope);
-            }
+                {
+                    // Fold bindings into the scope in order (each sees the previous), then
+                    // infer the body in the extended scope.
+                    var letScope = scope;
+                    foreach (var b in let.Bindings)
+                        letScope = letScope.With(b.Name, Infer(b.Value, letScope) ?? new TypeRef("?"));
+                    return Infer(let.Body, letScope);
+                }
 
             default:
                 return null; // LambdaExpr only has meaning inside a CallExpr
@@ -173,12 +175,18 @@ public sealed class TypeResolver
             return new TypeRef(typeId.Name);
 
         var op = ma.MemberName;
-        if (op == "length") return Int;
-        if (op is "trim" or "lower" or "upper") return String;
-        if (op == "isBlank") return Bool;
-        if (op == "count") return Int;
-        if (op is "isEmpty" or "isNotEmpty") return Bool;
-        if (op is "isPresent" or "isNone") return Bool;
+        if (op == "length")
+            return Int;
+        if (op is "trim" or "lower" or "upper")
+            return String;
+        if (op == "isBlank")
+            return Bool;
+        if (op == "count")
+            return Int;
+        if (op is "isEmpty" or "isNotEmpty")
+            return Bool;
+        if (op is "isPresent" or "isNone")
+            return Bool;
 
         // Otherwise a field access on a value/entity type — resolved in the receiver's
         // qualifier context, else this resolver's context (R13.2).
@@ -191,8 +199,10 @@ public sealed class TypeResolver
     private TypeRef? InferCall(CallExpr call, TypeScope scope)
     {
         var op = call.Method;
-        if (BuiltinOps.StringCallOps.Contains(op)) return Bool;          // startsWith/endsWith/contains
-        if (BuiltinOps.CollectionPredicateOps.Contains(op)) return Bool; // all/any/none/distinctBy
+        if (BuiltinOps.StringCallOps.Contains(op))
+            return Bool;          // startsWith/endsWith/contains
+        if (BuiltinOps.CollectionPredicateOps.Contains(op))
+            return Bool; // all/any/none/distinctBy
 
         if (BuiltinOps.CollectionAggregateOps.Contains(op))             // sum/min/max
         {

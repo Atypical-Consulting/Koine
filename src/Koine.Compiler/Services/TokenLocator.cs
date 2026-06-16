@@ -102,7 +102,8 @@ internal static class TokenLocator
         {
             foreach (var t in def)
             {
-                if (ReferenceEquals(t, preceding)) break;
+                if (ReferenceEquals(t, preceding))
+                    break;
                 if (EndsAtOrBefore(t, preceding.Line, preceding.Column))
                     beforePreceding = t;
             }
@@ -119,7 +120,8 @@ internal static class TokenLocator
 
     private static bool IsWord(IToken t)
     {
-        if (t.Type == KoineLexer.Identifier) return true;
+        if (t.Type == KoineLexer.Identifier)
+            return true;
         var s = t.Text;
         return s.Length > 0 && (char.IsLetter(s[0]) || s[0] == '_');
     }
@@ -127,7 +129,8 @@ internal static class TokenLocator
     /// <summary>True when the cursor sits within <c>(start, end]</c> of the token on its line.</summary>
     private static bool Contains(IToken t, int line, int col)
     {
-        if (t.Line != line) return false;
+        if (t.Line != line)
+            return false;
         int start = t.Column;
         int end = start + (t.Text?.Length ?? 0);
         return col > start && col <= end;
@@ -135,8 +138,10 @@ internal static class TokenLocator
 
     private static bool EndsAtOrBefore(IToken t, int line, int col)
     {
-        if (t.Line < line) return true;
-        if (t.Line > line) return false;
+        if (t.Line < line)
+            return true;
+        if (t.Line > line)
+            return false;
         return t.Column + (t.Text?.Length ?? 0) <= col;
     }
 
@@ -167,7 +172,8 @@ internal static class TokenLocator
             }
             else if (t.Type == KoineLexer.RBRACE)
             {
-                if (stack.Count > 0) stack.Pop();
+                if (stack.Count > 0)
+                    stack.Pop();
                 pendingKeyword = null;
                 pendingName = null;
             }

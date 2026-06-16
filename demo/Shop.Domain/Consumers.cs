@@ -31,7 +31,8 @@ public static class Consumers
         {
             // A real adapter would enforce the optimistic-concurrency Version here.
             var index = _orders.FindIndex(o => o.Id.Equals(aggregate.Id));
-            if (index >= 0) _orders[index] = aggregate;
+            if (index >= 0)
+                _orders[index] = aggregate;
             return Task.CompletedTask;
         }
 
@@ -173,7 +174,8 @@ public static class Consumers
 
     private static void Require(bool condition, string what)
     {
-        if (!condition) throw new Exception($"DEMO ASSERTION FAILED: {what}");
+        if (!condition)
+            throw new Exception($"DEMO ASSERTION FAILED: {what}");
         Console.WriteLine($"  ok  {what}");
     }
 }

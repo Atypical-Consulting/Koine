@@ -41,10 +41,14 @@ internal sealed class CSharpTypeMapper
     {
         switch (type.Name)
         {
-            case "String": return "string";
-            case "Int": return "int";
-            case "Decimal": return "decimal";
-            case "Bool": return "bool";
+            case "String":
+                return "string";
+            case "Int":
+                return "int";
+            case "Decimal":
+                return "decimal";
+            case "Bool":
+                return "bool";
             case "Instant":
                 // A point in time maps to DateTimeOffset (UTC-anchored, offset-aware).
                 return "DateTimeOffset";

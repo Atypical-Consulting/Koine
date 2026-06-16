@@ -73,7 +73,8 @@ public sealed partial class CSharpEmitter
                 index, members, enumMemberToType, SpecBodiesFor(spec.TargetType, index), memberReceiver: "x", context: ContextOf(ns));
             var body = translator.TranslateTopLevel(spec.Condition, CSharpExpressionTranslator.NameMode.Property);
 
-            if (!first) sb.Append('\n');
+            if (!first)
+                sb.Append('\n');
             first = false;
             WriteXmlDoc(sb, spec.Doc, Indent);
             sb.Append(Indent).Append("public static bool ").Append(CSharpNaming.ToPascalCase(spec.Name))
@@ -108,7 +109,8 @@ public sealed partial class CSharpEmitter
         var first = true;
         foreach (var op in svc.Operations)
         {
-            if (!first) sb.Append('\n');
+            if (!first)
+                sb.Append('\n');
             first = false;
             WriteXmlDoc(sb, op.Doc, Indent);
 
@@ -124,10 +126,12 @@ public sealed partial class CSharpEmitter
             }
             else
             {
-                foreach (var p in op.Parameters) translator.PushLocal(p.Name, p.Type);
+                foreach (var p in op.Parameters)
+                    translator.PushLocal(p.Name, p.Type);
                 var expectedEnum = index.Classify(op.ReturnType.Name) == TypeKind.Enum ? op.ReturnType.Name : null;
                 var body = translator.TranslateTopLevel(op.Body, CSharpExpressionTranslator.NameMode.Property, expectedEnum);
-                foreach (var p in op.Parameters) translator.PopLocal(p.Name);
+                foreach (var p in op.Parameters)
+                    translator.PopLocal(p.Name);
 
                 sb.Append(Indent).Append("public ").Append(ret).Append(' ')
                   .Append(method).Append('(').Append(paramList).Append(") => ").Append(body).Append(";\n");

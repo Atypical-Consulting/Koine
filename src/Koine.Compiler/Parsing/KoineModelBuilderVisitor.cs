@@ -64,16 +64,26 @@ public sealed class KoineModelBuilderVisitor : KoineParserBaseVisitor<object?>
 
         foreach (var member in ctx.contextMember())
         {
-            if (member.typeDecl() is { } t) types.Add(BuildTypeDecl(t));
-            else if (member.specDecl() is { } s) specs.Add(BuildSpec(s));
-            else if (member.serviceDecl() is { } sv) services.Add(BuildService(sv));
-            else if (member.policyDecl() is { } p) policies.Add(BuildPolicy(p));
-            else if (member.readmodelDecl() is { } rm) types.Add(BuildReadModel(rm));
-            else if (member.queryDecl() is { } q) types.Add(BuildQuery(q));
-            else if (member.importDecl() is { } i) imports.Add(BuildImport(i));
-            else if (member.moduleDecl() is { } m) FlattenModule(m, Array.Empty<string>(), types, moduleNames);
-            else if (member.publishDecl() is { } pub) publishes.Add(BuildPublish(pub));
-            else if (member.subscribeDecl() is { } sub) subscribes.Add(BuildSubscribe(sub));
+            if (member.typeDecl() is { } t)
+                types.Add(BuildTypeDecl(t));
+            else if (member.specDecl() is { } s)
+                specs.Add(BuildSpec(s));
+            else if (member.serviceDecl() is { } sv)
+                services.Add(BuildService(sv));
+            else if (member.policyDecl() is { } p)
+                policies.Add(BuildPolicy(p));
+            else if (member.readmodelDecl() is { } rm)
+                types.Add(BuildReadModel(rm));
+            else if (member.queryDecl() is { } q)
+                types.Add(BuildQuery(q));
+            else if (member.importDecl() is { } i)
+                imports.Add(BuildImport(i));
+            else if (member.moduleDecl() is { } m)
+                FlattenModule(m, Array.Empty<string>(), types, moduleNames);
+            else if (member.publishDecl() is { } pub)
+                publishes.Add(BuildPublish(pub));
+            else if (member.subscribeDecl() is { } sub)
+                subscribes.Add(BuildSubscribe(sub));
         }
 
         // `int.TryParse`, not `Parse`: an absurd literal (e.g. `version 99999999999999999999`,
@@ -137,12 +147,18 @@ public sealed class KoineModelBuilderVisitor : KoineParserBaseVisitor<object?>
 
     private static ContextRelationKind BuildRelationKind(KoineParser.RelationRoleContext ctx)
     {
-        if (ctx.PARTNERSHIP() is not null) return ContextRelationKind.Partnership;
-        if (ctx.SHARED_KERNEL() is not null) return ContextRelationKind.SharedKernel;
-        if (ctx.CUSTOMER_SUPPLIER() is not null) return ContextRelationKind.CustomerSupplier;
-        if (ctx.CONFORMIST() is not null) return ContextRelationKind.Conformist;
-        if (ctx.ANTI_CORRUPTION() is not null) return ContextRelationKind.AntiCorruptionLayer;
-        if (ctx.OPEN_HOST() is not null) return ContextRelationKind.OpenHost;
+        if (ctx.PARTNERSHIP() is not null)
+            return ContextRelationKind.Partnership;
+        if (ctx.SHARED_KERNEL() is not null)
+            return ContextRelationKind.SharedKernel;
+        if (ctx.CUSTOMER_SUPPLIER() is not null)
+            return ContextRelationKind.CustomerSupplier;
+        if (ctx.CONFORMIST() is not null)
+            return ContextRelationKind.Conformist;
+        if (ctx.ANTI_CORRUPTION() is not null)
+            return ContextRelationKind.AntiCorruptionLayer;
+        if (ctx.OPEN_HOST() is not null)
+            return ContextRelationKind.OpenHost;
         return ContextRelationKind.PublishedLanguage;
     }
 
@@ -191,8 +207,10 @@ public sealed class KoineModelBuilderVisitor : KoineParserBaseVisitor<object?>
 
         foreach (var member in ctx.moduleMember())
         {
-            if (member.typeDecl() is { } t) types.Add(WithModulePath(BuildTypeDecl(t), path));
-            else if (member.moduleDecl() is { } nested) FlattenModule(nested, path, types, moduleNames);
+            if (member.typeDecl() is { } t)
+                types.Add(WithModulePath(BuildTypeDecl(t), path));
+            else if (member.moduleDecl() is { } nested)
+                FlattenModule(nested, path, types, moduleNames);
         }
     }
 
@@ -220,8 +238,10 @@ public sealed class KoineModelBuilderVisitor : KoineParserBaseVisitor<object?>
         var useCases = new List<UseCaseDecl>();
         foreach (var member in ctx.serviceMember())
         {
-            if (member.operationDecl() is { } op) operations.Add(BuildOperation(op));
-            else if (member.usecaseDecl() is { } uc) useCases.Add(BuildUseCase(uc));
+            if (member.operationDecl() is { } op)
+                operations.Add(BuildOperation(op));
+            else if (member.usecaseDecl() is { } uc)
+                useCases.Add(BuildUseCase(uc));
         }
         return new ServiceDecl(ctx.Identifier().GetText(), operations, useCases) { Span = SpanOf(ctx), Doc = DocFor(ctx) };
     }
@@ -493,9 +513,12 @@ public sealed class KoineModelBuilderVisitor : KoineParserBaseVisitor<object?>
         RepositoryDecl? repository = null;
         foreach (var member in ctx.aggregateMember())
         {
-            if (member.typeDecl() is { } t) types.Add(BuildTypeDecl(t));
-            else if (member.specDecl() is { } s) specs.Add(BuildSpec(s));
-            else if (member.repositoryDecl() is { } r) repository = BuildRepository(r);
+            if (member.typeDecl() is { } t)
+                types.Add(BuildTypeDecl(t));
+            else if (member.specDecl() is { } s)
+                specs.Add(BuildSpec(s));
+            else if (member.repositoryDecl() is { } r)
+                repository = BuildRepository(r);
         }
 
         var name = ctx.Identifier(0).GetText();
@@ -541,13 +564,17 @@ public sealed class KoineModelBuilderVisitor : KoineParserBaseVisitor<object?>
         var members = ctx.enumMember()
             .Select(m => new EnumMember(
                 m.Identifier().GetText(),
-                m.expression().Select(BuildExpression).ToList()) { Span = SpanOf(m) })
+                m.expression().Select(BuildExpression).ToList())
+            { Span = SpanOf(m) })
             .ToList();
 
         var (since, deprecated) = ReadAnnotations(ctx.annotation());
         return new EnumDecl(ctx.Identifier().GetText(), members, signature)
         {
-            Span = SpanOf(ctx), Doc = DocFor(ctx), Since = since, Deprecated = deprecated
+            Span = SpanOf(ctx),
+            Doc = DocFor(ctx),
+            Since = since,
+            Deprecated = deprecated
         };
     }
 
@@ -557,7 +584,10 @@ public sealed class KoineModelBuilderVisitor : KoineParserBaseVisitor<object?>
         var (since, deprecated) = ReadAnnotations(ctx.annotation());
         return new EventDecl(ctx.Identifier().GetText(), members)
         {
-            Span = SpanOf(ctx), Doc = DocFor(ctx), Since = since, Deprecated = deprecated
+            Span = SpanOf(ctx),
+            Doc = DocFor(ctx),
+            Since = since,
+            Deprecated = deprecated
         };
     }
 
@@ -567,7 +597,10 @@ public sealed class KoineModelBuilderVisitor : KoineParserBaseVisitor<object?>
         var (since, deprecated) = ReadAnnotations(ctx.annotation());
         return new IntegrationEventDecl(ctx.Identifier().GetText(), members)
         {
-            Span = SpanOf(ctx), Doc = DocFor(ctx), Since = since, Deprecated = deprecated
+            Span = SpanOf(ctx),
+            Doc = DocFor(ctx),
+            Since = since,
+            Deprecated = deprecated
         };
     }
 
@@ -610,9 +643,12 @@ public sealed class KoineModelBuilderVisitor : KoineParserBaseVisitor<object?>
         for (var i = hidden.Count - 1; i >= 0; i--)
         {
             var t = hidden[i];
-            if (t.Type != KoineLexer.DocComment) continue;
-            if (t.Line != expectedLine) break;            // not adjacent (gap / blank line)
-            if (t.Line == previousVisibleLine) break;     // trailing comment on prior code
+            if (t.Type != KoineLexer.DocComment)
+                continue;
+            if (t.Line != expectedLine)
+                break;            // not adjacent (gap / blank line)
+            if (t.Line == previousVisibleLine)
+                break;     // trailing comment on prior code
             lines.Add(StripDocPrefix(t.Text));
             expectedLine = t.Line - 1;
         }
@@ -941,19 +977,45 @@ public sealed class KoineModelBuilderVisitor : KoineParserBaseVisitor<object?>
     {
         switch (text)
         {
-            case "||": op = BinaryOp.Or; return true;
-            case "&&": op = BinaryOp.And; return true;
-            case "==": op = BinaryOp.Eq; return true;
-            case "!=": op = BinaryOp.Neq; return true;
-            case "<": op = BinaryOp.Lt; return true;
-            case "<=": op = BinaryOp.Le; return true;
-            case ">": op = BinaryOp.Gt; return true;
-            case ">=": op = BinaryOp.Ge; return true;
-            case "+": op = BinaryOp.Add; return true;
-            case "-": op = BinaryOp.Sub; return true;
-            case "*": op = BinaryOp.Mul; return true;
-            case "/": op = BinaryOp.Div; return true;
-            default: op = default; return false;
+            case "||":
+                op = BinaryOp.Or;
+                return true;
+            case "&&":
+                op = BinaryOp.And;
+                return true;
+            case "==":
+                op = BinaryOp.Eq;
+                return true;
+            case "!=":
+                op = BinaryOp.Neq;
+                return true;
+            case "<":
+                op = BinaryOp.Lt;
+                return true;
+            case "<=":
+                op = BinaryOp.Le;
+                return true;
+            case ">":
+                op = BinaryOp.Gt;
+                return true;
+            case ">=":
+                op = BinaryOp.Ge;
+                return true;
+            case "+":
+                op = BinaryOp.Add;
+                return true;
+            case "-":
+                op = BinaryOp.Sub;
+                return true;
+            case "*":
+                op = BinaryOp.Mul;
+                return true;
+            case "/":
+                op = BinaryOp.Div;
+                return true;
+            default:
+                op = default;
+                return false;
         }
     }
 

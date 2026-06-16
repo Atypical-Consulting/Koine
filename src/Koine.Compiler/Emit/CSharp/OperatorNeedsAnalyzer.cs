@@ -25,43 +25,44 @@ internal static class OperatorNeedsAnalyzer
         var needs = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
 
         foreach (var ctx in model.Contexts)
-        foreach (var type in ctx.AllTypeDecls())
-        {
-            IReadOnlyList<Member>? members = type switch
+            foreach (var type in ctx.AllTypeDecls())
             {
-                ValueObjectDecl v => v.Members,
-                EntityDecl e => e.Members,
-                EventDecl ev => ev.Members,
-                _ => null
-            };
-            if (members is null) continue;
+                IReadOnlyList<Member>? members = type switch
+                {
+                    ValueObjectDecl v => v.Members,
+                    EntityDecl e => e.Members,
+                    EventDecl ev => ev.Members,
+                    _ => null
+                };
+                if (members is null)
+                    continue;
 
-            var memberTypes = members.ToDictionary(m => m.Name, m => m.Type, StringComparer.Ordinal);
-            foreach (var m in members)
-                if (m.Initializer is not null)
-                    ScanForScalarMul(m.Initializer, memberTypes, index, needs);
+                var memberTypes = members.ToDictionary(m => m.Name, m => m.Type, StringComparer.Ordinal);
+                foreach (var m in members)
+                    if (m.Initializer is not null)
+                        ScanForScalarMul(m.Initializer, memberTypes, index, needs);
 
-            // Command bodies and state-rule guards can also use value-object arithmetic.
-            if (type is EntityDecl entity)
-            {
-                foreach (var (expr, scope) in CommandExpressions(entity, memberTypes))
-                    ScanForScalarMul(expr, scope, index, needs);
-                foreach (var (expr, scope) in FactoryExpressions(entity, memberTypes))
-                    ScanForScalarMul(expr, scope, index, needs);
-                foreach (var guard in StateGuards(entity))
-                    ScanForScalarMul(guard, memberTypes, index, needs);
+                // Command bodies and state-rule guards can also use value-object arithmetic.
+                if (type is EntityDecl entity)
+                {
+                    foreach (var (expr, scope) in CommandExpressions(entity, memberTypes))
+                        ScanForScalarMul(expr, scope, index, needs);
+                    foreach (var (expr, scope) in FactoryExpressions(entity, memberTypes))
+                        ScanForScalarMul(expr, scope, index, needs);
+                    foreach (var guard in StateGuards(entity))
+                        ScanForScalarMul(guard, memberTypes, index, needs);
+                }
             }
-        }
 
         // Service operation bodies can use value-object * scalar arithmetic.
         foreach (var ctx in model.Contexts)
-        foreach (var svc in ctx.Services)
-        foreach (var op in svc.Operations)
-            if (op.Body is not null)
-            {
-                var scope = op.Parameters.ToDictionary(p => p.Name, p => p.Type, StringComparer.Ordinal);
-                ScanForScalarMul(op.Body, scope, index, needs);
-            }
+            foreach (var svc in ctx.Services)
+                foreach (var op in svc.Operations)
+                    if (op.Body is not null)
+                    {
+                        var scope = op.Parameters.ToDictionary(p => p.Name, p => p.Type, StringComparer.Ordinal);
+                        ScanForScalarMul(op.Body, scope, index, needs);
+                    }
 
         // Spec conditions over their target type's members can use value-object arithmetic.
         foreach (var spec in AllSpecs(model))
@@ -84,61 +85,68 @@ internal static class OperatorNeedsAnalyzer
         var needs = new HashSet<string>(StringComparer.Ordinal);
 
         foreach (var ctx in model.Contexts)
-        foreach (var type in ctx.AllTypeDecls())
-        {
-            IReadOnlyList<Member>? members = type switch
+            foreach (var type in ctx.AllTypeDecls())
             {
-                ValueObjectDecl v => v.Members,
-                EntityDecl e => e.Members,
-                EventDecl ev => ev.Members,
-                _ => null
-            };
-            if (members is null) continue;
-
-            var scope = TypeScope.FromMembers(members);
-            foreach (var m in members)
-                if (m.Initializer is not null)
-                    ScanForValueObjectSum(m.Initializer, scope, resolver, needs);
-
-            // Command bodies and state-rule guards can also fold value objects with sum.
-            if (type is EntityDecl entity)
-            {
-                foreach (var cmd in entity.Commands)
+                IReadOnlyList<Member>? members = type switch
                 {
-                    var cmdScope = cmd.Parameters.Aggregate(scope, (s, p) => s.With(p.Name, p.Type));
-                    foreach (var stmt in cmd.Body)
-                    {
-                        if (stmt is RequiresClause req) ScanForValueObjectSum(req.Condition, cmdScope, resolver, needs);
-                        else if (stmt is Transition tr) ScanForValueObjectSum(tr.Value, cmdScope, resolver, needs);
-                        else if (stmt is EmitClause em)
-                            foreach (var arg in em.Args) ScanForValueObjectSum(arg.Value, cmdScope, resolver, needs);
-                    }
-                }
-                foreach (var factory in entity.Factories)
+                    ValueObjectDecl v => v.Members,
+                    EntityDecl e => e.Members,
+                    EventDecl ev => ev.Members,
+                    _ => null
+                };
+                if (members is null)
+                    continue;
+
+                var scope = TypeScope.FromMembers(members);
+                foreach (var m in members)
+                    if (m.Initializer is not null)
+                        ScanForValueObjectSum(m.Initializer, scope, resolver, needs);
+
+                // Command bodies and state-rule guards can also fold value objects with sum.
+                if (type is EntityDecl entity)
                 {
-                    var factScope = factory.Parameters.Aggregate(scope, (s, p) => s.With(p.Name, p.Type));
-                    foreach (var stmt in factory.Body)
+                    foreach (var cmd in entity.Commands)
                     {
-                        if (stmt is RequiresClause req) ScanForValueObjectSum(req.Condition, factScope, resolver, needs);
-                        else if (stmt is Initialization ini) ScanForValueObjectSum(ini.Value, factScope, resolver, needs);
-                        else if (stmt is EmitClause em)
-                            foreach (var arg in em.Args) ScanForValueObjectSum(arg.Value, factScope, resolver, needs);
+                        var cmdScope = cmd.Parameters.Aggregate(scope, (s, p) => s.With(p.Name, p.Type));
+                        foreach (var stmt in cmd.Body)
+                        {
+                            if (stmt is RequiresClause req)
+                                ScanForValueObjectSum(req.Condition, cmdScope, resolver, needs);
+                            else if (stmt is Transition tr)
+                                ScanForValueObjectSum(tr.Value, cmdScope, resolver, needs);
+                            else if (stmt is EmitClause em)
+                                foreach (var arg in em.Args)
+                                    ScanForValueObjectSum(arg.Value, cmdScope, resolver, needs);
+                        }
                     }
+                    foreach (var factory in entity.Factories)
+                    {
+                        var factScope = factory.Parameters.Aggregate(scope, (s, p) => s.With(p.Name, p.Type));
+                        foreach (var stmt in factory.Body)
+                        {
+                            if (stmt is RequiresClause req)
+                                ScanForValueObjectSum(req.Condition, factScope, resolver, needs);
+                            else if (stmt is Initialization ini)
+                                ScanForValueObjectSum(ini.Value, factScope, resolver, needs);
+                            else if (stmt is EmitClause em)
+                                foreach (var arg in em.Args)
+                                    ScanForValueObjectSum(arg.Value, factScope, resolver, needs);
+                        }
+                    }
+                    foreach (var guard in StateGuards(entity))
+                        ScanForValueObjectSum(guard, scope, resolver, needs);
                 }
-                foreach (var guard in StateGuards(entity))
-                    ScanForValueObjectSum(guard, scope, resolver, needs);
             }
-        }
 
         // Service operation bodies can also fold value objects with sum.
         foreach (var ctx in model.Contexts)
-        foreach (var svc in ctx.Services)
-        foreach (var op in svc.Operations)
-            if (op.Body is not null)
-            {
-                var scope = new TypeScope(op.Parameters.Select(p => new KeyValuePair<string, TypeRef>(p.Name, p.Type)));
-                ScanForValueObjectSum(op.Body, scope, resolver, needs);
-            }
+            foreach (var svc in ctx.Services)
+                foreach (var op in svc.Operations)
+                    if (op.Body is not null)
+                    {
+                        var scope = new TypeScope(op.Parameters.Select(p => new KeyValuePair<string, TypeRef>(p.Name, p.Type)));
+                        ScanForValueObjectSum(op.Body, scope, resolver, needs);
+                    }
 
         // Spec conditions (rendered over the target type's members) can fold value objects too.
         foreach (var spec in AllSpecs(model))
@@ -163,15 +171,22 @@ internal static class OperatorNeedsAnalyzer
                     }
                 }
                 ScanForValueObjectSum(call.Target, scope, resolver, needs);
-                foreach (var arg in call.Args) ScanForValueObjectSum(arg, scope, resolver, needs);
+                foreach (var arg in call.Args)
+                    ScanForValueObjectSum(arg, scope, resolver, needs);
                 break;
-            case LambdaExpr l: ScanForValueObjectSum(l.Body, scope, resolver, needs); break;
+            case LambdaExpr l:
+                ScanForValueObjectSum(l.Body, scope, resolver, needs);
+                break;
             case BinaryExpr b:
                 ScanForValueObjectSum(b.Left, scope, resolver, needs);
                 ScanForValueObjectSum(b.Right, scope, resolver, needs);
                 break;
-            case UnaryExpr u: ScanForValueObjectSum(u.Operand, scope, resolver, needs); break;
-            case MemberAccessExpr ma: ScanForValueObjectSum(ma.Target, scope, resolver, needs); break;
+            case UnaryExpr u:
+                ScanForValueObjectSum(u.Operand, scope, resolver, needs);
+                break;
+            case MemberAccessExpr ma:
+                ScanForValueObjectSum(ma.Target, scope, resolver, needs);
+                break;
             case ConditionalExpr c:
                 ScanForValueObjectSum(c.Condition, scope, resolver, needs);
                 ScanForValueObjectSum(c.Then, scope, resolver, needs);
@@ -181,7 +196,9 @@ internal static class OperatorNeedsAnalyzer
                 ScanForValueObjectSum(g.Body, scope, resolver, needs);
                 ScanForValueObjectSum(g.Condition, scope, resolver, needs);
                 break;
-            case MatchExpr mt: ScanForValueObjectSum(mt.Target, scope, resolver, needs); break;
+            case MatchExpr mt:
+                ScanForValueObjectSum(mt.Target, scope, resolver, needs);
+                break;
         }
     }
 
@@ -190,10 +207,12 @@ internal static class OperatorNeedsAnalyzer
     {
         foreach (var ctx in model.Contexts)
         {
-            foreach (var s in ctx.Specs) yield return s;
+            foreach (var s in ctx.Specs)
+                yield return s;
             foreach (var t in ctx.Types)
                 if (t is AggregateDecl agg)
-                    foreach (var s in agg.Specs) yield return s;
+                    foreach (var s in agg.Specs)
+                        yield return s;
         }
     }
 
@@ -212,14 +231,18 @@ internal static class OperatorNeedsAnalyzer
         foreach (var cmd in entity.Commands)
         {
             var scope = new Dictionary<string, TypeRef>(memberTypes, StringComparer.Ordinal);
-            foreach (var p in cmd.Parameters) scope[p.Name] = p.Type;
+            foreach (var p in cmd.Parameters)
+                scope[p.Name] = p.Type;
 
             foreach (var stmt in cmd.Body)
             {
-                if (stmt is RequiresClause req) yield return (req.Condition, scope);
-                else if (stmt is Transition tr) yield return (tr.Value, scope);
+                if (stmt is RequiresClause req)
+                    yield return (req.Condition, scope);
+                else if (stmt is Transition tr)
+                    yield return (tr.Value, scope);
                 else if (stmt is EmitClause em)
-                    foreach (var arg in em.Args) yield return (arg.Value, scope);
+                    foreach (var arg in em.Args)
+                        yield return (arg.Value, scope);
             }
         }
     }
@@ -235,14 +258,18 @@ internal static class OperatorNeedsAnalyzer
         foreach (var factory in entity.Factories)
         {
             var scope = new Dictionary<string, TypeRef>(memberTypes, StringComparer.Ordinal);
-            foreach (var p in factory.Parameters) scope[p.Name] = p.Type;
+            foreach (var p in factory.Parameters)
+                scope[p.Name] = p.Type;
 
             foreach (var stmt in factory.Body)
             {
-                if (stmt is RequiresClause req) yield return (req.Condition, scope);
-                else if (stmt is Initialization ini) yield return (ini.Value, scope);
+                if (stmt is RequiresClause req)
+                    yield return (req.Condition, scope);
+                else if (stmt is Initialization ini)
+                    yield return (ini.Value, scope);
                 else if (stmt is EmitClause em)
-                    foreach (var arg in em.Args) yield return (arg.Value, scope);
+                    foreach (var arg in em.Args)
+                        yield return (arg.Value, scope);
             }
         }
     }
@@ -260,25 +287,36 @@ internal static class OperatorNeedsAnalyzer
                 {
                     var (lValue, lScalar) = InferOperand(b.Left, memberTypes, index);
                     var (rValue, rScalar) = InferOperand(b.Right, memberTypes, index);
-                    if (lValue is not null && rScalar is not null) Record(needs, lValue, rScalar);
-                    if (rValue is not null && lScalar is not null) Record(needs, rValue, lScalar);
+                    if (lValue is not null && rScalar is not null)
+                        Record(needs, lValue, rScalar);
+                    if (rValue is not null && lScalar is not null)
+                        Record(needs, rValue, lScalar);
                 }
                 ScanForScalarMul(b.Left, memberTypes, index, needs);
                 ScanForScalarMul(b.Right, memberTypes, index, needs);
                 break;
-            case UnaryExpr u: ScanForScalarMul(u.Operand, memberTypes, index, needs); break;
-            case MemberAccessExpr ma: ScanForScalarMul(ma.Target, memberTypes, index, needs); break;
+            case UnaryExpr u:
+                ScanForScalarMul(u.Operand, memberTypes, index, needs);
+                break;
+            case MemberAccessExpr ma:
+                ScanForScalarMul(ma.Target, memberTypes, index, needs);
+                break;
             case CallExpr call:
                 ScanForScalarMul(call.Target, memberTypes, index, needs);
-                foreach (var arg in call.Args) ScanForScalarMul(arg, memberTypes, index, needs);
+                foreach (var arg in call.Args)
+                    ScanForScalarMul(arg, memberTypes, index, needs);
                 break;
-            case LambdaExpr lam: ScanForScalarMul(lam.Body, memberTypes, index, needs); break;
+            case LambdaExpr lam:
+                ScanForScalarMul(lam.Body, memberTypes, index, needs);
+                break;
             case ConditionalExpr c:
                 ScanForScalarMul(c.Condition, memberTypes, index, needs);
                 ScanForScalarMul(c.Then, memberTypes, index, needs);
                 ScanForScalarMul(c.Else, memberTypes, index, needs);
                 break;
-            case MatchExpr mt: ScanForScalarMul(mt.Target, memberTypes, index, needs); break;
+            case MatchExpr mt:
+                ScanForScalarMul(mt.Target, memberTypes, index, needs);
+                break;
             case GuardExpr g:
                 ScanForScalarMul(g.Body, memberTypes, index, needs);
                 ScanForScalarMul(g.Condition, memberTypes, index, needs);
@@ -293,13 +331,19 @@ internal static class OperatorNeedsAnalyzer
         switch (expr)
         {
             case IdentifierExpr id when memberTypes.TryGetValue(id.Name, out var t):
-                if (index.Classify(t.Name) == TypeKind.Value) return (t.Name, null);
-                if (t.Name == "Int") return (null, "int");
-                if (t.Name == "Decimal") return (null, "decimal");
+                if (index.Classify(t.Name) == TypeKind.Value)
+                    return (t.Name, null);
+                if (t.Name == "Int")
+                    return (null, "int");
+                if (t.Name == "Decimal")
+                    return (null, "decimal");
                 return (null, null);
-            case LiteralExpr lit when lit.Kind == LiteralKind.Int: return (null, "int");
-            case LiteralExpr lit when lit.Kind == LiteralKind.Decimal: return (null, "decimal");
-            default: return (null, null);
+            case LiteralExpr lit when lit.Kind == LiteralKind.Int:
+                return (null, "int");
+            case LiteralExpr lit when lit.Kind == LiteralKind.Decimal:
+                return (null, "decimal");
+            default:
+                return (null, null);
         }
     }
 
