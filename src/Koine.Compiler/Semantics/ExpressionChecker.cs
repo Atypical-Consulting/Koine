@@ -12,8 +12,6 @@ namespace Koine.Compiler.Semantics;
 /// </summary>
 internal sealed class ExpressionChecker
 {
-    private static readonly TypeRef UnknownType = new("?");
-
     private readonly ModelIndex _index;
     private readonly TypeResolver _resolver;
     private readonly IReadOnlySet<string> _enumMembers;
@@ -153,8 +151,9 @@ internal sealed class ExpressionChecker
                     $"duplicate let binding '{binding.Name}'", let);
             }
 
-            // The binding's value is in scope for the bindings that follow and the body.
-            bound = bound.With(binding.Name, _resolver.Infer(binding.Value, bound) ?? UnknownType);
+            // The binding's value is in scope for the bindings that follow and the body
+            // (an undeterminable value resolves to ErrorType).
+            bound = bound.With(binding.Name, _resolver.TypeOf(binding.Value, bound));
         }
         Check(let.Body, bound, expected);
     }
@@ -489,7 +488,8 @@ internal sealed class ExpressionChecker
             if (call.Args is [LambdaExpr lambda])
             {
                 TypeRef? element = TypeResolver.ElementOf(target);
-                TypeScope inner = scope.With(lambda.Parameter, element ?? UnknownType);
+                // A null element resolves to ErrorType (the lambda parameter's type is undeterminable).
+                TypeScope inner = scope.With(lambda.Parameter, KoineType.From(element, _index));
                 Check(lambda.Body, inner);
                 CheckAggregateSelector(op, lambda, inner, call);
             }

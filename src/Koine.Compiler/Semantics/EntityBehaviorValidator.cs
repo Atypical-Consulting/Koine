@@ -64,7 +64,7 @@ internal static class EntityBehaviorValidator
             var scopePairs = entity.Members.Select(m => new KeyValuePair<string, TypeRef>(m.Name, m.Type))
                 .Append(new KeyValuePair<string, TypeRef>("id", new TypeRef(entity.IdentityName)))
                 .Concat(cmd.Parameters.Select(p => new KeyValuePair<string, TypeRef>(p.Name, p.Type)));
-            var scope = new TypeScope(scopePairs);
+            var scope = TypeScope.FromRefPairs(scopePairs, index);
 
             var seenParams = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (var p in cmd.Parameters)
@@ -210,7 +210,7 @@ internal static class EntityBehaviorValidator
             // Scope: the factory's parameters plus the synthetic `id` (its identity).
             var scopePairs = IdScopePair(entity)
                 .Concat(factory.Parameters.Select(p => new KeyValuePair<string, TypeRef>(p.Name, p.Type)));
-            var scope = new TypeScope(scopePairs);
+            var scope = TypeScope.FromRefPairs(scopePairs, index);
 
             var seenParams = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (var p in factory.Parameters)
@@ -479,7 +479,7 @@ internal static class EntityBehaviorValidator
         List<Diagnostic> diagnostics)
     {
         var memberByName = entity.Members.ToDictionary(m => m.Name, m => m, StringComparer.Ordinal);
-        var scope = TypeScope.FromMembers(entity.Members);
+        var scope = TypeScope.FromMembers(entity.Members, index);
         var checker = new ExpressionChecker(index, resolver, enumMembers, diagnostics);
 
         // A field may have at most one states block: the reachability check and the

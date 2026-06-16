@@ -39,7 +39,7 @@ internal static class CqrsValidator
         }
 
         var sourceMemberNames = memberByName.Keys.ToArray();
-        var scope = TypeScope.FromMembers(sourceMembers);
+        var scope = TypeScope.FromMembers(sourceMembers, index);
         var checker = new ExpressionChecker(index, resolver, enumMembers, diagnostics);
         // The record property a field emits to (R12.3): a positional record property is
         // PascalCased, so two fields differing only by their first-letter case collide.

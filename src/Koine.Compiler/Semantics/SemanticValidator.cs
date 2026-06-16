@@ -442,7 +442,7 @@ public sealed class SemanticValidator
     {
         var memberNames = new HashSet<string>(members.Select(m => m.Name), StringComparer.Ordinal);
         var seen = new HashSet<string>(StringComparer.Ordinal);
-        var scope = TypeScope.FromMembers(members);
+        var scope = TypeScope.FromMembers(members, index);
         var checker = new ExpressionChecker(index, resolver, enumMembers, diagnostics, specNames);
 
         foreach (Member m in members)
@@ -594,7 +594,7 @@ public sealed class SemanticValidator
                         $"spec '{spec.Name}' duplicates another spec or a member of '{target}'", spec.Span));
                 }
 
-                var scope = TypeScope.FromMembers(members);
+                var scope = TypeScope.FromMembers(members, index);
                 var checker = new ExpressionChecker(index, resolver, enumMembers, diagnostics, specNames);
                 checker.Check(spec.Condition, scope);
 
@@ -717,7 +717,7 @@ public sealed class SemanticValidator
 
                 if (op.Body is not null)
                 {
-                    var scope = new TypeScope(op.Parameters.Select(p => new KeyValuePair<string, TypeRef>(p.Name, p.Type)));
+                    var scope = TypeScope.FromParams(op.Parameters, index);
                     checker.CheckOperationReturn(op.Body, op.ReturnType, scope);
                 }
             }
@@ -793,7 +793,7 @@ public sealed class SemanticValidator
             }
 
             // Reaction argument values resolve against the event's fields.
-            TypeScope eventScope = ev is not null ? TypeScope.FromMembers(ev.Members) : new TypeScope(Array.Empty<KeyValuePair<string, TypeRef>>());
+            TypeScope eventScope = ev is not null ? TypeScope.FromMembers(ev.Members, index) : new TypeScope(Array.Empty<KeyValuePair<string, KoineType>>());
             var checker = new ExpressionChecker(index, resolver, enumMembers, diagnostics);
             var cmdParams = cmd?.Parameters.ToDictionary(p => p.Name, p => p.Type, StringComparer.Ordinal);
             var provided = new HashSet<string>(StringComparer.Ordinal);

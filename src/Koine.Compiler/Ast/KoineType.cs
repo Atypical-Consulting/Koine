@@ -85,9 +85,10 @@ public abstract class KoineType
                 KoineType element = tr.Element is null ? ErrorType.Instance : From(tr.Element, index);
                 KoineType? value = tr.Value is null ? null : From(tr.Value, index);
                 return new CollectionType(kind, element, value, tr.IsOptional);
-            case TypeKind.Unknown:
-                return ErrorType.Instance;
             default:
+                // An unknown name stays a (Unknown-kind) named type, NOT ErrorType: it round-trips
+                // back to its TypeRef so the Infer shim is byte-identical for invalid models. Only a
+                // genuinely undeterminable type (a null reference) is ErrorType.
                 return new NamedType(tr.Name, kind, tr.IsOptional, tr.Qualifier);
         }
     }
