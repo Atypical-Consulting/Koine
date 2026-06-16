@@ -139,7 +139,7 @@ public class R17ToolingTests
         var builds = 0;
         var log = new StringWriter();
         // The initial build throws; the loop must survive and still process the change.
-        var session = new WatchSession(() => { builds++; if (builds == 1) throw new InvalidOperationException("boom"); return true; },
+        var session = new WatchSession(() => { builds++; if (builds == 1) { throw new InvalidOperationException("boom"); } return true; },
             log, TimeSpan.Zero);
 
         var changes = new BlockingCollection<object> { new object() };

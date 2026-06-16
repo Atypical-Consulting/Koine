@@ -1,13 +1,28 @@
 {
   "name": "koine",
   "displayName": "Koine",
-  "description": "Syntax highlighting for the Koine DDD language (.koi).",
-  "version": "0.1.0",
-  "publisher": "koine",
-  "engines": { "vscode": "^1.60.0" },
-  "categories": ["Programming Languages"],
+  "description": "Syntax highlighting and live diagnostics for the Koine DDD language (.koi).",
+  "version": "0.2.0",
+  "publisher": "atypical-consulting",
+  "icon": "assets/icon.png",
+  "engines": { "vscode": "^1.75.0" },
+  "categories": ["Programming Languages", "Linters"],
+  "keywords": ["koine", "ddd", "domain-driven-design", "dsl", "language-server"],
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Atypical-Consulting/Koine.git",
+    "directory": "tooling/koine-textmate"
+  },
+  "bugs": {
+    "url": "https://github.com/Atypical-Consulting/Koine/issues"
+  },
+  "main": "./out/extension.js",
+  "activationEvents": ["onLanguage:koine"],
   "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
     "package": "vsce package",
     "install-vsce": "npm i -g @vscode/vsce"
   },
@@ -26,6 +41,36 @@
         "scopeName": "source.koine",
         "path": "./syntaxes/koine.tmLanguage.json"
       }
-    ]
+    ],
+    "configuration": {
+      "title": "Koine",
+      "properties": {
+        "koine.server.path": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "How to launch the Koine language server.\n\n- Leave **empty** to use the `koine` executable on your `PATH` (`koine lsp`).\n- Set to an absolute path of a published `koine` binary (it is invoked as `<path> lsp`).\n- Set to `dotnet` to run the CLI from source — combine with `#koine.server.args#`."
+        },
+        "koine.server.args": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": [],
+          "markdownDescription": "Extra arguments inserted **before** the `lsp` subcommand. Use this when `#koine.server.path#` is `dotnet`, e.g. `[\"run\", \"--project\", \"src/Koine.Cli\", \"--\"]` or `[\"/abs/path/Koine.Cli.dll\"]`."
+        },
+        "koine.trace.server": {
+          "type": "string",
+          "enum": ["off", "messages", "verbose"],
+          "default": "off",
+          "description": "Traces the communication between VS Code and the Koine language server."
+        }
+      }
+    }
+  },
+  "dependencies": {
+    "vscode-languageclient": "^9.0.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "@types/vscode": "^1.75.0",
+    "typescript": "^5.4.0"
   }
 }

@@ -59,7 +59,7 @@ Read it top to bottom — that's exactly the order it runs in:
 | `emit Event(...)` | Records a domain event (covered below). |
 
 :::caution
-The transition arrow `->` and the factory-init arrow `<-` are different tokens. Inside a `command`, mutating an existing field uses `->`. Keep them as single atomic tokens — `status -> Submitted`, not `status - > Submitted`.
+The state-effect arrow `->` is one token used for both a command's transition and a factory's field init — the enclosing `command {}` vs `create {}` block tells the two apart. Inside a `command`, mutating an existing field uses `->`. Keep it a single atomic token — `status -> Submitted`, not `status - > Submitted`.
 :::
 
 ### What `submit` compiles to

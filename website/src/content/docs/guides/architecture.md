@@ -100,6 +100,25 @@ Shared runtime types — `DomainInvariantViolationException`, `IAggregateRoot`, 
 
 A Koine field whose name happens to be a C# keyword (e.g. `base`, `event`) is emitted as a verbatim identifier (`@base`, `@event`) so the output always compiles. This is a target-specific concern, so it lives in `CSharpNaming` — a TypeScript emitter would handle reserved words its own way.
 
+## Beyond emission: tooling services
+
+The same target-agnostic model feeds three services that aren't emitters at all — they live alongside the pipeline and reuse its earlier stages.
+
+### The formatter
+
+`KoineFormatter` (`Formatting/KoineFormatter.cs`) is a **token-stream reprinter**, not an AST printer. It lexes the source (so ordinary comments ride along as tokens) and re-emits the tokens with canonical whitespace, returning a `FormatResult(Text, Changed)`. Driving off the token stream — and re-emitting each token's exact text — makes the formatter total and **idempotent**: it never reflows or rewrites token content, only normalizes the spacing between tokens, so it can format any lexable file (even one that wouldn't pass semantic validation) and formatting twice is identical to formatting once. The CLI's `koine fmt` (and its `--check` mode) is a thin shell over it.
+
+### The workspace index and language service
+
+The editor experience is split into two reusable, LSP-free pieces so the same logic backs every editor:
+
+- `WorkspaceIndex` (`Services/WorkspaceIndex.cs`) builds a **cross-file** view: it resolves a declaration reference (a type name, an `*Id`, a member) to the file URI and 1-based span that *declares* it, and renders the hover markdown card for it. Because it indexes every `.koi` in the workspace, an `OrderId`/`ProductId` reference resolves to the `entity … identified by …` that owns it even when that lives in another file.
+- `KoineLanguageService` (`Services/KoineLanguageService.cs`) is the editor-facing query surface — completion candidates, hover cards, and go-to-definition targets — expressed in plain records with **no LSP or JSON concepts**. The `koine lsp` shell maps those records onto the wire protocol, and the diagnostics it serves come straight from `KoineCompiler`, so editor squiggles match `koine build` exactly.
+
+### The compatibility checker
+
+`CompatibilityChecker` (`Services/CompatibilityChecker.cs`) powers `koine check`. It takes a baseline model and a current model and **diffs only their published surfaces** — integration events, shared-kernel types, open-host value objects — classifying each change as breaking or non-breaking and returning them in deterministic order. Internal refactors are invisible to it by construction. The CLI exits non-zero when any change is breaking; see [versioning & evolution](/Koine/reference/versioning/) for the rules.
+
 ## How it's tested
 
 The compiler's correctness rests on two complementary kinds of test in `tests/Koine.Compiler.Tests/`:

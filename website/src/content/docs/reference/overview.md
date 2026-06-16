@@ -42,7 +42,7 @@ Each construct family has its own reference page. Start here and follow the link
 | comparisons, arithmetic, `matches`, lambdas | the pure expression sublanguage | [Expressions](/Koine/reference/expressions/) |
 | `invariant`, `spec` as guard | constructor guards, regex and conditional rules | [Invariants](/Koine/reference/invariants/) |
 | `command`, `event`, `states` | behaviour, domain events, state machines | [Commands, events & state machines](/Koine/reference/commands-events-state/) |
-| `create … { … <- … emit … }` | factory methods and `<-` field initialization | [Factories](/Koine/reference/factories/) |
+| `create … { … -> … emit … }` | factory methods and `->` field initialization | [Factories](/Koine/reference/factories/) |
 | `spec`, `service`, `policy` | named predicates, domain services, reaction seams | [Specs, services & policies](/Koine/reference/specs-services-policies/) |
 | `repository`, `find`, `versioned` | repository contracts, finders, optimistic concurrency | [Repositories & concurrency](/Koine/reference/repositories-concurrency/) |
 | `service … usecase …`, `readmodel`, `query` | application services, CQRS read models and queries | [Application layer & CQRS](/Koine/reference/application-cqrs/) |
@@ -107,15 +107,16 @@ An annotation is `@` followed by an ordinary identifier, so `@since` and `@depre
 
 ## A note on operator spacing
 
-Three multi-character operators are single, atomic tokens and must be written without internal spaces:
+Two multi-character operators are single, atomic tokens and must be written without internal spaces:
 
 | Token | Meaning | Used in |
 |-------|---------|---------|
-| `<-` | field initialization | [factories](/Koine/reference/factories/) (`total <- lines.sum(…)`) |
-| `->` | state transition / directed relation | [commands & state](/Koine/reference/commands-events-state/), [context maps](/Koine/reference/context-maps-integration/) |
+| `->` | state effect (field init / state transition / directed relation) | [factories](/Koine/reference/factories/) (`total -> lines.sum(…)`), [commands & state](/Koine/reference/commands-events-state/), [context maps](/Koine/reference/context-maps-integration/) |
 | `<->` | bidirectional relation | [context maps](/Koine/reference/context-maps-integration/) (`A <-> B : partnership`) |
 
-Because of maximal munch, write `n <- v`, not `n < - v`. One consequence: a comparison against a negative literal needs a space — write `x < -1`, not `x<-1`, so the `<-` token isn't formed.
+Koine has exactly two assignment-like arrows: `=` is the declaration default, and `->` is the state effect
+(factory init **and** command transition — the enclosing `create {}` vs `command {}` block disambiguates them).
+Because of maximal munch, write `status -> Submitted`, not `status - > Submitted`.
 
 ## Where to next
 

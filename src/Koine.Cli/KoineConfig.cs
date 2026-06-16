@@ -9,7 +9,7 @@ namespace Koine.Cli;
 /// <c>targets.*</c> block — is ignored, keeping the file forward-compatible.
 /// Lines are <c>key = value</c>; <c>#</c> starts a comment.
 /// </summary>
-internal sealed record KoineConfig(string? Target, string? OutDir)
+internal sealed record KoineConfig(string? Target, string? OutDir, string? Baseline = null)
 {
     public static readonly KoineConfig Empty = new(null, null);
 
@@ -20,32 +20,46 @@ internal sealed record KoineConfig(string? Target, string? OutDir)
     {
         string? target = null;
         string? outDir = null;
+        string? baseline = null;
 
         foreach (var raw in text.Split('\n'))
         {
             var line = StripComment(raw).Trim();
             if (line.Length == 0)
+            {
                 continue;
+            }
 
             var eq = line.IndexOf('=');
             if (eq <= 0)
+            {
                 continue;
+            }
 
             var key = line[..eq].Trim();
             var value = line[(eq + 1)..].Trim();
             if (value.Length == 0)
+            {
                 continue;
+            }
 
             switch (key)
             {
-                case "target": target = value; break;
-                case "out": outDir = value; break;
-                // Unknown / structured keys (the R16 `targets.*` block, etc.) are
-                // intentionally ignored so older tooling tolerates newer configs.
+                case "target":
+                    target = value;
+                    break;
+                case "out":
+                    outDir = value;
+                    break;
+                case "baseline":
+                    baseline = value;
+                    break;
+                    // Unknown / structured keys (the R16 `targets.*` block, etc.) are
+                    // intentionally ignored so older tooling tolerates newer configs.
             }
         }
 
-        return new KoineConfig(target, outDir);
+        return new KoineConfig(target, outDir, baseline);
     }
 
     /// <summary>
@@ -59,7 +73,9 @@ internal sealed record KoineConfig(string? Target, string? OutDir)
         {
             var path = Path.Combine(dir, FileName);
             if (File.Exists(path))
+            {
                 return Parse(File.ReadAllText(path));
+            }
         }
         return Empty;
     }
@@ -68,7 +84,10 @@ internal sealed record KoineConfig(string? Target, string? OutDir)
     {
         var inputDir = Directory.Exists(inputPath) ? inputPath : Path.GetDirectoryName(inputPath);
         if (!string.IsNullOrEmpty(inputDir))
+        {
             yield return inputDir;
+        }
+
         yield return Directory.GetCurrentDirectory();
     }
 

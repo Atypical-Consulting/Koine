@@ -21,7 +21,10 @@ internal static class Suggestions
         foreach (var candidate in candidates)
         {
             if (candidate == target)
+            {
                 continue;
+            }
+
             var distance = Levenshtein(target, candidate);
             if (distance < bestDistance || (distance == bestDistance && string.CompareOrdinal(candidate, best) < 0))
             {
@@ -39,7 +42,10 @@ internal static class Suggestions
     {
         var prev = new int[b.Length + 1];
         var curr = new int[b.Length + 1];
-        for (var j = 0; j <= b.Length; j++) prev[j] = j;
+        for (var j = 0; j <= b.Length; j++)
+        {
+            prev[j] = j;
+        }
 
         for (var i = 1; i <= a.Length; i++)
         {

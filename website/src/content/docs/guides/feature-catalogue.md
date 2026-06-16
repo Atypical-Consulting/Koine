@@ -1,10 +1,10 @@
 ---
-title: "Feature catalogue (R1–R15)"
+title: "Feature catalogue (R1–R17)"
 description: "Every shipped Koine construct mapped to its .koi syntax, what it emits, and where the demo uses it."
 ---
 
-This is the everything-at-a-glance page: every construct Koine ships through epic **R15**, the short
-`.koi` syntax for it, the C# (or Markdown) it emits, and a pointer into the canonical
+This is the everything-at-a-glance page: every construct Koine ships through epic **R15** — plus the
+**R17 developer tooling** — the short `.koi` syntax for it, the C# (or Markdown) it emits, and a pointer into the canonical
 [Shop demo](https://github.com/Atypical-Consulting/Koine/tree/main/demo). Tables are grouped by epic.
 Each family links to its reference page for the full story.
 
@@ -55,12 +55,14 @@ See [commands, events & state](/Koine/reference/commands-events-state/).
 | Construct | `.koi` syntax (short) | Emits | Demo location |
 |---|---|---|---|
 | Command | `command submit() { requires …; status -> Placed; emit … }` | a mutating method that checks `requires`, applies `field -> value` transitions, re-checks invariants | `Order.submit/cancel`, `Shipment.dispatch`, `Payment.capture/refund` |
+| Command returning a value | `command cancel(): OrderId { …; result id }` | a typed method (`public <T> Name(…)`) that returns the `result` expression as its terminal statement (the create-and-return-id idiom) | — |
 | Domain event | `event OrderSubmitted { … }` + `emit OrderSubmitted(…)` | a record recorded into the root's `DomainEvents` collection | `OrderSubmitted`, `OrderOpened`, `ShipmentScheduled`, `PaymentAuthorized` |
 | State machine | `states { Draft -> Placed; … }` | runtime-checked legal transitions; illegal transition throws | `Order`, `Shipment`, `Payment` lifecycles |
 
 :::caution
-`->` (transition / state rule) and `<-` (factory init, below) are single atomic tokens — keep the two
-characters adjacent (`status -> Placed`, never `status - > Placed`).
+`->` (the single state-effect arrow: transition, state rule, **and** factory init below) is one atomic
+token — keep the two characters adjacent (`status -> Placed`, never `status - > Placed`). Koine has just
+two assignment-like arrows: `=` (declaration default) and `->` (state effect).
 :::
 
 ## Factories (R8)
@@ -70,8 +72,8 @@ The aggregate's only public construction path. See [factories](/Koine/reference/
 | Construct | `.koi` syntax (short) | Emits | Demo location |
 |---|---|---|---|
 | Named factory | `create open(customer: CustomerId, …) { … }` | `public static <Entity> Open(…)`: generate id, check `requires`, construct with named ctor args, emit, return | `Order.open`, `Shipment.schedule`, `Payment.authorize` |
-| Field init | `total <- lines.sum(l => l.price)` | a named ctor argument `total: <expr>` | factory bodies |
-| Auto-bind | `create open(customer: CustomerId, …)` (param name = field) | binds the matching field without an explicit `<-` | `Order.open` |
+| Field init | `total -> lines.sum(l => l.price)` | a named ctor argument `total: <expr>` | factory bodies |
+| Auto-bind | `create open(customer: CustomerId, …)` (param name = field) | binds the matching field without an explicit `->` | `Order.open` |
 | Creation event | `emit OrderOpened(orderId: id, …)` | records the event into `DomainEvents` after construction | factory bodies |
 | Factory-only construction | (presence of any `create`) | the all-args constructor becomes `private` | every aggregate with a factory |
 
@@ -98,7 +100,7 @@ See [specs, services & policies](/Koine/reference/specs-services-policies/).
 
 | Construct | `.koi` syntax (short) | Emits | Demo location |
 |---|---|---|---|
-| Specification | `spec IsVip on Customer = …` | a static predicate `bool IsVip(Customer x)` in `<Context>Specifications.cs`; reusable in invariants | `Customers.IsVip` |
+| Specification | `spec IsVip on Customer = …` | an extension-method predicate `bool IsVip(this Customer x)` in `<Context>Specifications.cs`; call as `customer.IsVip()`; reusable in invariants | `Customers.IsVip` |
 | Domain service (pure) | `service LoyaltyService { operation discountRate(…): Decimal = … }` | a `sealed class` with one expression-bodied method per operation | `Customers.LoyaltyService` |
 | Domain service (seam) | `service Calc { operation run(a: Int): Int }` | an `abstract class` with abstract method seams | (any bodyless operation) |
 | Policy | `policy PostToLedger when PaymentAuthorized then Ledger.post(…)` | `IPostToLedgerPolicy` + an abstract `PostToLedgerPolicy` seam (the reaction is a doc sketch, not executed code) | `Payments.PostToLedger` |
@@ -192,6 +194,27 @@ See [model versioning](/Koine/reference/versioning/) and the
 `koine check` only flags changes to **published** surfaces — integration events, shared-kernel types, and
 open-host value objects. Internal refactors are ignored. Adding an optional field (`note: String?`) is
 non-breaking; removing a published field or making it required is breaking.
+:::
+
+## Developer tooling (R17)
+
+Not language constructs, but the commands and editor support that make `.koi` pleasant to write. See
+the [CLI reference](/Koine/guides/cli/) and [editor tooling](/Koine/guides/editor-tooling/).
+
+| Tool | Invocation | What it does | Reference |
+|---|---|---|---|
+| Formatter | `koine fmt <path> [--check]` | Canonically, idempotently reformats `.koi` in place; `--check` verifies without writing (CI gate) | [CLI](/Koine/guides/cli/#koine-fmt) |
+| Project scaffold | `koine init [dir] [--force]` | Writes a buildable starter `domain.koi`, `koine.config`, and `README.md`; `--force` overwrites | [CLI](/Koine/guides/cli/#koine-init) |
+| Watch mode | `koine watch <path> [--out <dir>]` | Re-emits (or re-validates) on every `.koi` change with debounced fast feedback | [CLI](/Koine/guides/cli/#koine-watch) |
+| Language server | `koine lsp` | LSP over stdio: live diagnostics, hover, completion, and cross-file go-to-definition | [Editor tooling](/Koine/guides/editor-tooling/) |
+| TextMate grammar | (editor extension) | Syntax highlighting for `.koi` in VS Code and Rider | [Editor tooling](/Koine/guides/editor-tooling/) |
+
+:::tip[Optionality is a feature, not a footnote]
+Null-safety is a deliberate strength of the model, not an afterthought. A field is required by default;
+you opt into absence explicitly with `?` (`description: String?`), and the emitted C# carries that
+through as a nullable property with `??` and `.isPresent` support. Because optionality is part of the
+*published* surface, `koine check` treats making a field required (or removing an optional one) as a
+breaking change — so the model and the contract stay honest about what may legitimately be missing.
 :::
 
 ## See also

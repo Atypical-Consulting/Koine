@@ -24,7 +24,7 @@ invariant becomes a constructor guard.
 | Spec body | `spec S on T = expr` | `spec IsVip on Customer = tier == Gold` |
 | Operation body | `operation o(...): T = expr` | `operation discountRate(tier: LoyaltyTier): Decimal = ...` |
 | Read-model field | `name: Type = expr` | `lineCount: Int = lines.count` |
-| Factory init / command transition | `field <- expr` / `field -> expr` | `total <- lines.sum(l => l.price)` |
+| Factory init / command transition | `field -> expr` | `total -> lines.sum(l => l.price)` |
 
 ## Literals and identifiers
 
@@ -211,29 +211,31 @@ There is no `null` literal in Koine — you never write `null`. Absence is expre
 field unset; you reach for it with `??`, `.isPresent`, and `.isNone`.
 :::
 
-## Operator spacing: `<-` and `->` are atomic tokens
+## Operator spacing: `->` and `<->` are atomic tokens
 
-The initialization operator `<-` (factory field init), the transition operator `->` (command/state body),
-and the context-map operator `<->` are **single, indivisible tokens**. Keep their characters adjacent — never
-split them with a space.
+The state-effect arrow `->` (factory field init **and** command/state transition) and the context-map
+operator `<->` are **single, indivisible tokens**. Keep their characters adjacent — never split them with a
+space.
 
 ```koine
-total <- lines.sum(l => l.price)   // correct: <- is one token
-status -> Submitted                // correct: -> is one token
+total -> lines.sum(l => l.price)   // correct: -> is one token (factory init)
+status -> Submitted                // correct: -> is one token (command transition)
 ```
 
-Writing `total < - …` would lex as a comparison `<` followed by a unary minus, not an initialization. The
+Writing `status - > …` would lex as a unary minus followed by a comparison `>`, not a state effect. The
 lambda arrow `=>` is likewise atomic. Everywhere else, spacing is free.
 
-:::tip
-`<-` (initialize) and `->` (transition) are easy to confuse. Initialization sets a field's starting value in
-a [factory](/Koine/reference/factories/); transition assigns new state in a
-[command](/Koine/reference/commands-events-state/). They are distinct operators.
+:::tip[Two arrows, not three]
+Koine has exactly two assignment-like arrows. `=` is the **declaration default** (`status: OrderStatus = Draft`),
+and `->` is the **state effect** — it sets a field's value, whether that is a factory's initial value (`n -> v`
+in a [factory](/Koine/reference/factories/)) or a command's transition (`status -> Submitted` in a
+[command](/Koine/reference/commands-events-state/)). The enclosing `create {}` vs `command {}` block, not the
+arrow, tells you which one you are reading. (A former third arrow, `<-` for factory init, has been merged into `->`.)
 :::
 
 ## See also
 
 - [Value objects](/Koine/reference/value-objects/) — derived fields use expressions.
 - [Invariants](/Koine/reference/invariants/) — boolean expressions plus `matches` and `when` guards.
-- [Commands, events & state](/Koine/reference/commands-events-state/) and [Factories](/Koine/reference/factories/) — bodies use `requires`, `<-`, and `->`.
+- [Commands, events & state](/Koine/reference/commands-events-state/) and [Factories](/Koine/reference/factories/) — bodies use `requires`, `->`, and `emit`.
 - [Specs, services & policies](/Koine/reference/specs-services-policies/) — named expression bodies.

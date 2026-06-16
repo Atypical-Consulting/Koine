@@ -15,8 +15,12 @@ public class R17FmtTests
     {
         var root = RepoRoot();
         foreach (var dir in new[] { "examples", "demo" })
+        {
             foreach (var f in Directory.EnumerateFiles(Path.Combine(root, dir), "*.koi", SearchOption.AllDirectories))
+            {
                 yield return new object[] { f };
+            }
+        }
     }
 
     [Theory]
@@ -154,7 +158,10 @@ public class R17FmtTests
     {
         var dir = new DirectoryInfo(AppContext.BaseDirectory);
         while (dir is not null && !Directory.Exists(Path.Combine(dir.FullName, "examples")))
+        {
             dir = dir.Parent;
+        }
+
         Assert.NotNull(dir);
         return dir!.FullName;
     }

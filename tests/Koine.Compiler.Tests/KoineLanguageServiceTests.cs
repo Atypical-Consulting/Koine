@@ -49,12 +49,14 @@ public class KoineLanguageServiceTests
     }
 
     [Fact]
-    public void Inside_service_offers_operation_keyword()
+    public void Inside_service_offers_operation_and_usecase_keywords()
     {
+        // serviceMember : operationDecl | usecaseDecl — both are legal at service scope.
         var src = "context C {\n  service S {\n    \n  }\n}\n";
         var items = Complete(src, line: 2, ch: 4);
         Assert.Contains(items, i => i.Label == "operation");
-        Assert.DoesNotContain(items, i => i.Label == "usecase");
+        Assert.Contains(items, i => i.Label == "usecase");
+        Assert.DoesNotContain(items, i => i.Label == "value"); // not a service member
     }
 
     [Fact]
@@ -293,6 +295,177 @@ public class KoineLanguageServiceTests
         var def = Svc.DefinitionAt(docs, "file:///ordering.koi", line: 1, character: 25); // on "ProductId"
         Assert.NotNull(def);
         Assert.Equal("file:///catalog.koi", def!.Uri);
+    }
+
+    // ---- Completion: new keyword starters --------------------------------
+
+    [Fact]
+    public void Context_scope_offers_readmodel_query_module_import_keywords()
+    {
+        var src = "context C {\n  \n}\n";
+        var items = Complete(src, line: 1, ch: 2);
+        foreach (var kw in new[] { "module", "import", "readmodel", "query", "value", "service" })
+        {
+            Assert.Contains(items, i => i.Label == kw && i.Kind == CompletionItemKind.Keyword);
+        }
+    }
+
+    [Fact]
+    public void File_scope_offers_contextmap_keyword()
+    {
+        var items = Complete("\n", line: 0, ch: 0);
+        Assert.Contains(items, i => i.Label == "contextmap");
+        Assert.Contains(items, i => i.Label == "context");
+    }
+
+    [Fact]
+    public void Module_scope_offers_type_keywords_not_services()
+    {
+        var src = "context C {\n  module M {\n    \n  }\n}\n";
+        var items = Complete(src, line: 2, ch: 4);
+        Assert.Contains(items, i => i.Label == "value");
+        Assert.Contains(items, i => i.Label == "module");
+        Assert.DoesNotContain(items, i => i.Label == "service"); // not a module member
+    }
+
+    // ---- Completion: member access after '.' -------------------------------
+
+    [Fact]
+    public void Member_access_offers_enum_members_after_enum_type_dot()
+    {
+        var src =
+            "context C {\n" +
+            "  enum Color { Red, Green }\n" +
+            "  value Paint { c: Color = Color. }\n" +
+            "}\n";
+        var items = Complete(src, line: 2, ch: 33); // just past "Color."
+        Assert.Contains(items, i => i.Label == "Red" && i.Kind == CompletionItemKind.EnumMember);
+        Assert.Contains(items, i => i.Label == "Green");
+    }
+
+    [Fact]
+    public void Member_access_offers_field_type_members_in_an_invariant()
+    {
+        // `total.` where `total : Money` -> Money's members (amount).
+        var src =
+            "context C {\n" +
+            "  value Money { amount: Decimal }\n" +
+            "  value Line {\n" +
+            "    total: Money\n" +
+            "    invariant total. \n" +
+            "  }\n" +
+            "}\n";
+        var items = Complete(src, line: 4, ch: 20); // just past "total."
+        var amount = Assert.Single(items, i => i.Label == "amount");
+        Assert.Equal(CompletionItemKind.Property, amount.Kind);
+        Assert.Equal("Decimal", amount.Detail);
+    }
+
+    [Fact]
+    public void Member_access_on_broken_document_offers_nothing()
+    {
+        var src = "context C {\n  value Money { amount: Decimal }\n  value Line { total: Money. ";
+        var items = Complete(src, line: 2, ch: 28);
+        Assert.Empty(items);
+    }
+
+    // ---- Document symbols -------------------------------------------------
+
+    [Fact]
+    public void DocumentSymbols_are_hierarchical_context_type_members()
+    {
+        var src =
+            "context Shop {\n" +
+            "  value Money { amount: Decimal }\n" +
+            "  enum Status { Open, Closed }\n" +
+            "}\n";
+        var symbols = Svc.DocumentSymbols(src);
+        var shop = Assert.Single(symbols);
+        Assert.Equal("Shop", shop.Name);
+        Assert.Equal(SymbolKind.Namespace, shop.Kind);
+
+        var money = Assert.Single(shop.Children, c => c.Name == "Money");
+        Assert.Equal(SymbolKind.Class, money.Kind);
+        Assert.Contains(money.Children, c => c.Name == "amount" && c.Kind == SymbolKind.Field);
+
+        var status = Assert.Single(shop.Children, c => c.Name == "Status");
+        Assert.Equal(SymbolKind.Enum, status.Kind);
+        Assert.Contains(status.Children, c => c.Name == "Open" && c.Kind == SymbolKind.EnumMember);
+    }
+
+    [Fact]
+    public void DocumentSymbols_on_broken_document_is_empty()
+    {
+        Assert.Empty(Svc.DocumentSymbols("context C {\n  value V { x: "));
+    }
+
+    // ---- Find references --------------------------------------------------
+
+    [Fact]
+    public void References_include_declaration_and_all_uses()
+    {
+        var src =
+            "context C {\n" +
+            "  value Money { amount: Decimal }\n" +
+            "  value Line { price: Money }\n" +
+            "  value Bill { fee: Money }\n" +
+            "}\n";
+        // Cursor on the "Money" use in Line.
+        var refs = Svc.ReferencesAt(Doc(src), U, line: 2, character: 23);
+        Assert.Equal(3, refs.Count); // declaration + two uses
+        Assert.All(refs, r => Assert.Equal(U, r.Uri));
+    }
+
+    [Fact]
+    public void References_resolve_across_files()
+    {
+        var ordering = "context Ordering {\n  value Line { product: ProductId }\n}\n";
+        var catalog = "context Catalog {\n  entity Product identified by ProductId { sku: String }\n}\n";
+        var docs = new Dictionary<string, string>
+        {
+            ["file:///ordering.koi"] = ordering,
+            ["file:///catalog.koi"] = catalog,
+        };
+        var refs = Svc.ReferencesAt(docs, "file:///catalog.koi", line: 1, character: 32); // on "ProductId" decl
+        Assert.Contains(refs, r => r.Uri == "file:///ordering.koi");
+        Assert.Contains(refs, r => r.Uri == "file:///catalog.koi");
+    }
+
+    [Fact]
+    public void References_for_a_non_declaration_name_are_empty()
+    {
+        var src = "context C {\n  value V { x: Decimal }\n}\n";
+        Assert.Empty(Svc.ReferencesAt(Doc(src), U, line: 1, character: 18)); // on "Decimal" (primitive)
+    }
+
+    // ---- Rename -----------------------------------------------------------
+
+    [Fact]
+    public void Rename_returns_edits_for_every_reference()
+    {
+        var src =
+            "context C {\n" +
+            "  value Money { amount: Decimal }\n" +
+            "  value Line { price: Money }\n" +
+            "}\n";
+        var edits = Svc.RenameAt(Doc(src), U, line: 1, character: 9, newName: "Cash"); // on "Money" decl
+        Assert.NotNull(edits);
+        Assert.Equal(2, edits!.Count); // declaration + one use
+    }
+
+    [Fact]
+    public void Rename_rejects_an_invalid_identifier()
+    {
+        var src = "context C {\n  value Money { amount: Decimal }\n}\n";
+        Assert.Null(Svc.RenameAt(Doc(src), U, line: 1, character: 9, newName: "1Bad"));
+        Assert.Null(Svc.RenameAt(Doc(src), U, line: 1, character: 9, newName: "has space"));
+    }
+
+    [Fact]
+    public void Rename_on_a_primitive_returns_null()
+    {
+        var src = "context C {\n  value V { x: Decimal }\n}\n";
+        Assert.Null(Svc.RenameAt(Doc(src), U, line: 1, character: 18, newName: "Money"));
     }
 
     [Fact]

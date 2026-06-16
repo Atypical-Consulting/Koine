@@ -19,6 +19,14 @@ internal sealed class CSharpExpressionTranslator
         Property
     }
 
+    /// <summary>
+    /// C#-target rendering for each target-agnostic nullary value builtin declared in
+    /// <see cref="BuiltinOps.NullaryValueOps"/> (e.g. <c>now</c> -> <c>DateTimeOffset.UtcNow</c>).
+    /// The registry owns the surface names; this table owns only their C# spelling.
+    /// </summary>
+    private static readonly IReadOnlyDictionary<string, string> NullaryValueOpsCSharp =
+        new Dictionary<string, string>(StringComparer.Ordinal) { ["now"] = "DateTimeOffset.UtcNow" };
+
     private readonly ModelIndex _index;
     private readonly TypeResolver _resolver;
     private readonly TypeScope _scope;
@@ -39,7 +47,9 @@ internal sealed class CSharpExpressionTranslator
     {
         _locals.Add(name);
         if (type is not null)
+        {
             _localTypes[name] = type;
+        }
     }
 
     /// <summary>Removes a previously-registered local.</summary>
@@ -52,9 +62,12 @@ internal sealed class CSharpExpressionTranslator
     /// <summary>The member scope extended with any known local (parameter) types.</summary>
     private TypeScope EffectiveScope()
     {
-        var scope = _scope;
-        foreach (var kv in _localTypes)
+        TypeScope scope = _scope;
+        foreach (KeyValuePair<string, TypeRef> kv in _localTypes)
+        {
             scope = scope.With(kv.Key, kv.Value);
+        }
+
         return scope;
     }
 
@@ -71,6 +84,10 @@ internal sealed class CSharpExpressionTranslator
     // When set, member identifiers render as `<receiver>.Member` (used inside the
     // generated static specification methods, where members hang off a parameter `x`).
     private readonly string? _memberReceiver;
+
+    // Monotonic counter giving each emitted value-object `sum` fold a unique pattern
+    // binding name (`__sum0`, `__sum1`, …), so sibling folds in one expression never collide.
+    private int _sumCounter;
 
     /// <param name="members">The members of the type being emitted.</param>
     /// <param name="enumMemberToType">Map from an enum member name to its owning enum type name.</param>
@@ -207,15 +224,67 @@ internal sealed class CSharpExpressionTranslator
     {
         if (expr is BinaryExpr bin)
         {
-            WriteOperand(bin.Left, mode, sb, EnumTypeName(bin.Right));
+            WriteBinaryChild(bin.Left, mode, sb, EnumTypeName(bin.Right), bin.Op, rightOperand: false);
             sb.Append(' ').Append(OperatorOf(bin.Op)).Append(' ');
-            WriteOperand(bin.Right, mode, sb, EnumTypeName(bin.Left));
+            WriteBinaryChild(bin.Right, mode, sb, EnumTypeName(bin.Left), bin.Op, rightOperand: true);
         }
         else
         {
             Write(expr, mode, sb);
         }
     }
+
+    /// <summary>
+    /// Renders one operand of a binary expression, parenthesizing a nested binary
+    /// child only when C# precedence/associativity actually requires it. A
+    /// higher-precedence child (e.g. <c>&gt;</c> under <c>||</c>) and a same-precedence
+    /// left child of a left-associative operator (e.g. <c>a + b</c> under <c>+ c</c>)
+    /// drop their redundant parens, flattening associative chains.
+    /// </summary>
+    private void WriteBinaryChild(Expr expr, NameMode mode, StringBuilder sb, string? enumHint, BinaryOp parentOp, bool rightOperand)
+    {
+        if (expr is BinaryExpr child && !NeedsParens(child.Op, parentOp, rightOperand))
+        {
+            // Render the child binary without its own wrapping parens (recurse top-level).
+            WriteBinaryChild(child.Left, mode, sb, EnumTypeName(child.Right), child.Op, rightOperand: false);
+            sb.Append(' ').Append(OperatorOf(child.Op)).Append(' ');
+            WriteBinaryChild(child.Right, mode, sb, EnumTypeName(child.Left), child.Op, rightOperand: true);
+            return;
+        }
+        WriteOperand(expr, mode, sb, enumHint);
+    }
+
+    /// <summary>
+    /// True when a nested binary <paramref name="childOp"/> must be parenthesized inside
+    /// a parent binary <paramref name="parentOp"/>. A strictly lower-precedence child
+    /// always needs parens; a same-precedence child needs them only as the right operand
+    /// of a left-associative operator (to preserve the original grouping).
+    /// </summary>
+    private static bool NeedsParens(BinaryOp childOp, BinaryOp parentOp, bool rightOperand)
+    {
+        var childPrec = Precedence(childOp);
+        var parentPrec = Precedence(parentOp);
+        if (childPrec < parentPrec)
+        {
+            return true;
+        }
+
+        // Equal precedence: all C# binary operators here are left-associative, so the
+        // right operand keeps parens (a - (b - c) != a - b - c), the left drops them.
+        return childPrec == parentPrec && rightOperand;
+    }
+
+    /// <summary>C# binary-operator precedence tiers (higher binds tighter), for redundant-paren elision.</summary>
+    private static int Precedence(BinaryOp op) => op switch
+    {
+        BinaryOp.Or => 1,
+        BinaryOp.And => 2,
+        BinaryOp.Eq or BinaryOp.Neq => 3,
+        BinaryOp.Lt or BinaryOp.Le or BinaryOp.Gt or BinaryOp.Ge => 4,
+        BinaryOp.Add or BinaryOp.Sub => 5,
+        BinaryOp.Mul or BinaryOp.Div => 6,
+        _ => 0
+    };
 
     /// <summary>True when a conditional's two branches are the bool literals true/false (in either order).</summary>
     private static bool TryBoolLiterals(ConditionalExpr c, out bool whenTrue)
@@ -235,15 +304,19 @@ internal sealed class CSharpExpressionTranslator
     private void WriteOperand(Expr expr, NameMode mode, StringBuilder sb, string? enumHint)
     {
         if (expr is IdentifierExpr id)
+        {
             WriteIdentifier(id.Name, mode, sb, enumHint);
+        }
         else
+        {
             Write(expr, mode, sb);
+        }
     }
 
     /// <summary>The enum type name an expression resolves to, else <c>null</c>.</summary>
     private string? EnumTypeName(Expr expr)
     {
-        var type = _resolver.Infer(expr, _scope);
+        TypeRef? type = _resolver.Infer(expr, _scope);
         return type is not null && _index.Classify(type.Name) == TypeKind.Enum ? type.Name : null;
     }
 
@@ -267,10 +340,12 @@ internal sealed class CSharpExpressionTranslator
                 break;
 
             case BinaryExpr bin:
+                // Keep the outer parens (this node may be embedded in a unary/conditional
+                // operand) but elide redundant inner parens within associative chains.
                 sb.Append('(');
-                WriteOperand(bin.Left, mode, sb, EnumTypeName(bin.Right));
+                WriteBinaryChild(bin.Left, mode, sb, EnumTypeName(bin.Right), bin.Op, rightOperand: false);
                 sb.Append(' ').Append(OperatorOf(bin.Op)).Append(' ');
-                WriteOperand(bin.Right, mode, sb, EnumTypeName(bin.Left));
+                WriteBinaryChild(bin.Right, mode, sb, EnumTypeName(bin.Left), bin.Op, rightOperand: true);
                 sb.Append(')');
                 break;
 
@@ -345,9 +420,80 @@ internal sealed class CSharpExpressionTranslator
                 Write(g.Body, mode, sb);
                 break;
 
+            case LetExpr let:
+                WriteLet(let, mode, sb);
+                break;
+
             default:
                 sb.Append("/* unsupported expression */");
                 break;
+        }
+    }
+
+    /// <summary>
+    /// Lowers <c>let x = e (, y = e)* in body</c> to an immediately-invoked lambda
+    /// with <c>var</c> locals, preserving evaluation order and giving each binding a
+    /// genuinely private C# local (not a public property):
+    /// <code>((Func&lt;RET&gt;)(() => { var x = EXPR; var y = EXPR; return BODY; }))()</code>
+    /// Binding references render verbatim (camelCase) via the existing local machinery,
+    /// exactly like lambda parameters. Bindings are registered sequentially so each
+    /// value sees the previous ones, matching the language's scoping.
+    /// </summary>
+    private void WriteLet(LetExpr let, NameMode mode, StringBuilder sb)
+    {
+        // Infer the body's type to name the IIFE's delegate, folding bindings into the
+        // scope in order (each binding's value sees the previous ones).
+        TypeScope scope = EffectiveScope();
+        foreach (LetBinding b in let.Bindings)
+        {
+            scope = scope.With(b.Name, _resolver.Infer(b.Value, scope) ?? new TypeRef("?"));
+        }
+
+        TypeRef? bodyType = _resolver.Infer(let.Body, scope);
+        var ret = bodyType is not null ? new CSharpTypeMapper(_index).Map(bodyType) : "object";
+
+        // Fully-qualify Func so the lowering never depends on a `using System;` in the
+        // generated file's fixed using-set.
+        sb.Append("((System.Func<").Append(ret).Append(">)(() => { ");
+
+        // Emit each binding as a `var` local, registering it so later bindings and the
+        // body render references to it verbatim. Save/restore guards against shadowing
+        // an outer local of the same name.
+        var pushed = new List<(string Name, bool WasPresent, TypeRef? Type)>();
+        foreach (LetBinding b in let.Bindings)
+        {
+            var wasPresent = _locals.Contains(b.Name);
+            TypeRef? prevType = _localTypes.TryGetValue(b.Name, out TypeRef? pt) ? pt : null;
+            sb.Append("var ").Append(CSharpNaming.ToCamelCase(b.Name)).Append(" = ");
+            sb.Append(Render(b.Value, mode));
+            sb.Append("; ");
+            // Register only AFTER rendering the value (the value must not see itself).
+            PushLocal(b.Name, _resolver.Infer(b.Value, EffectiveScope()));
+            pushed.Add((b.Name, wasPresent, prevType));
+        }
+
+        sb.Append("return ").Append(Render(let.Body, mode)).Append("; }))()");
+
+        // Restore the local stack in reverse so an outer binding of the same name survives.
+        for (var i = pushed.Count - 1; i >= 0; i--)
+        {
+            (var name, var wasPresent, TypeRef? prevType) = pushed[i];
+            if (wasPresent)
+            {
+                _locals.Add(name);
+                if (prevType is not null)
+                {
+                    _localTypes[name] = prevType;
+                }
+                else
+                {
+                    _localTypes.Remove(name);
+                }
+            }
+            else
+            {
+                PopLocal(name);
+            }
         }
     }
 
@@ -360,10 +506,11 @@ internal sealed class CSharpExpressionTranslator
             return;
         }
 
-        // `now` built-in (unless shadowed by a real member).
-        if (name == "now" && !_memberNames.Contains(name))
+        // Nullary value builtin such as `now` (unless shadowed by a real member).
+        if (BuiltinOps.IsNullaryValueOp(name) && !_memberNames.Contains(name)
+            && NullaryValueOpsCSharp.TryGetValue(name, out var csharp))
         {
-            sb.Append("DateTimeOffset.UtcNow");
+            sb.Append(csharp);
             return;
         }
 
@@ -372,7 +519,7 @@ internal sealed class CSharpExpressionTranslator
         // type of the surrounding expression, when available.
         if (!_memberNames.Contains(name))
         {
-            var owners = _index.EnumsDeclaring(name);
+            IReadOnlyList<string> owners = _index.EnumsDeclaring(name);
             if (owners.Count > 0)
             {
                 var hint = enumHint ?? _expectedEnum;
@@ -381,7 +528,7 @@ internal sealed class CSharpExpressionTranslator
                     : owners.Count == 1
                         ? owners[0]
                         : _enumMemberToType.TryGetValue(name, out var fallback) ? fallback : owners[0];
-                sb.Append(enumType).Append('.').Append(name);
+                sb.Append(enumType).Append('.').Append(CSharpNaming.EscapeIdentifier(name));
                 return;
             }
         }
@@ -390,17 +537,22 @@ internal sealed class CSharpExpressionTranslator
         {
             // A receiver (the static-spec `x`) makes members property accesses on it.
             if (_memberReceiver is not null)
+            {
                 sb.Append(_memberReceiver).Append('.').Append(CSharpNaming.ToPascalCase(name));
+            }
             else
+            {
                 sb.Append(mode == NameMode.Parameter
                     ? CSharpNaming.ToCamelCase(name)
                     : CSharpNaming.ToPascalCase(name));
+            }
+
             return;
         }
 
         // A spec reference (R10.1): inline its body, recursively, in the current mode.
         // Cycle detection at validation time guarantees this terminates.
-        if (_specBodies.TryGetValue(name, out var specBody) && _inliningSpecs.Add(name))
+        if (_specBodies.TryGetValue(name, out Expr? specBody) && _inliningSpecs.Add(name))
         {
             sb.Append('(');
             Write(specBody, mode, sb);
@@ -419,20 +571,42 @@ internal sealed class CSharpExpressionTranslator
         switch (ma.MemberName)
         {
             // Collection ops.
-            case "isEmpty": sb.Append(t).Append(".Count == 0"); return;
-            case "isNotEmpty": sb.Append(t).Append(".Count != 0"); return;
-            case "count": sb.Append(t).Append(".Count"); return;
+            case "isEmpty":
+                sb.Append(t).Append(".Count == 0");
+                return;
+            case "isNotEmpty":
+                sb.Append(t).Append(".Count != 0");
+                return;
+            case "count":
+                sb.Append(t).Append(".Count");
+                return;
             // String ops.
-            case "length": sb.Append(t).Append(".Length"); return;
-            case "trim": sb.Append(t).Append(".Trim()"); return;
-            case "lower": sb.Append(t).Append(".ToLowerInvariant()"); return;
-            case "upper": sb.Append(t).Append(".ToUpperInvariant()"); return;
-            case "isBlank": sb.Append("string.IsNullOrWhiteSpace(").Append(t).Append(')'); return;
+            case "length":
+                sb.Append(t).Append(".Length");
+                return;
+            case "trim":
+                sb.Append(t).Append(".Trim()");
+                return;
+            case "lower":
+                sb.Append(t).Append(".ToLowerInvariant()");
+                return;
+            case "upper":
+                sb.Append(t).Append(".ToUpperInvariant()");
+                return;
+            case "isBlank":
+                sb.Append("string.IsNullOrWhiteSpace(").Append(t).Append(')');
+                return;
             // Optional presence checks.
-            case "isPresent": sb.Append(t).Append(" is not null"); return;
-            case "isNone": sb.Append(t).Append(" is null"); return;
+            case "isPresent":
+                sb.Append(t).Append(" is not null");
+                return;
+            case "isNone":
+                sb.Append(t).Append(" is null");
+                return;
             // Plain field access.
-            default: sb.Append(t).Append('.').Append(CSharpNaming.ToPascalCase(ma.MemberName)); return;
+            default:
+                sb.Append(t).Append('.').Append(CSharpNaming.ToPascalCase(ma.MemberName));
+                return;
         }
     }
 
@@ -444,17 +618,35 @@ internal sealed class CSharpExpressionTranslator
         switch (op)
         {
             // String / collection membership (both map to .Contains).
-            case "startsWith": sb.Append(t).Append(".StartsWith(").Append(Render(call.Args[0], mode)).Append(')'); return;
-            case "endsWith": sb.Append(t).Append(".EndsWith(").Append(Render(call.Args[0], mode)).Append(')'); return;
-            case "contains": sb.Append(t).Append(".Contains(").Append(Render(call.Args[0], mode)).Append(')'); return;
+            case "startsWith":
+                sb.Append(t).Append(".StartsWith(").Append(Render(call.Args[0], mode)).Append(')');
+                return;
+            case "endsWith":
+                sb.Append(t).Append(".EndsWith(").Append(Render(call.Args[0], mode)).Append(')');
+                return;
+            case "contains":
+                sb.Append(t).Append(".Contains(").Append(Render(call.Args[0], mode)).Append(')');
+                return;
 
             // Collection predicates / aggregations (lambda argument).
-            case "all": sb.Append(t).Append(".All(").Append(RenderLambda(call, mode)).Append(')'); return;
-            case "any": sb.Append(t).Append(".Any(").Append(RenderLambda(call, mode)).Append(')'); return;
-            case "none": sb.Append('!').Append(t).Append(".Any(").Append(RenderLambda(call, mode)).Append(')'); return;
-            case "min": sb.Append(t).Append(".Min(").Append(RenderLambda(call, mode)).Append(')'); return;
-            case "max": sb.Append(t).Append(".Max(").Append(RenderLambda(call, mode)).Append(')'); return;
-            case "sum": WriteSum(call, t, mode, sb); return;
+            case "all":
+                sb.Append(t).Append(".All(").Append(RenderLambda(call, mode)).Append(')');
+                return;
+            case "any":
+                sb.Append(t).Append(".Any(").Append(RenderLambda(call, mode)).Append(')');
+                return;
+            case "none":
+                sb.Append('!').Append(t).Append(".Any(").Append(RenderLambda(call, mode)).Append(')');
+                return;
+            case "min":
+                sb.Append(t).Append(".Min(").Append(RenderLambda(call, mode)).Append(')');
+                return;
+            case "max":
+                sb.Append(t).Append(".Max(").Append(RenderLambda(call, mode)).Append(')');
+                return;
+            case "sum":
+                WriteSum(call, t, mode, sb);
+                return;
             case "distinctBy":
                 // "all distinct by the selector": count of distinct keys equals count.
                 sb.Append(t).Append(".Select(").Append(RenderLambda(call, mode))
@@ -470,39 +662,66 @@ internal sealed class CSharpExpressionTranslator
     private void WriteSum(CallExpr call, string target, NameMode mode, StringBuilder sb)
     {
         // Numeric selector -> LINQ Sum (returns 0 for an empty sequence).
-        // Value-object selector -> fold with the generated operator+. NOTE: a value
-        // object has no identity/zero element, so this fold throws on an EMPTY
-        // collection (unlike numeric Sum). Until Koine models a zero (roadmap R9),
-        // sum over a possibly-empty value-object collection is the caller's concern.
-        var selectorType = InferSelectorType(call);
+        // Value-object selector -> fold with the generated operator+. A value object
+        // has no identity/zero element, so an EMPTY collection cannot fold; rather than
+        // leak LINQ's opaque "Sequence contains no elements" InvalidOperationException,
+        // we guard the fold and throw a DomainInvariantViolationException with a clear
+        // message. (Until Koine models a zero — roadmap R9 — there is no neutral seed.)
+        TypeRef? selectorType = InferSelectorType(call);
         if (_resolver.IsValueLike(selectorType))
-            sb.Append(target).Append(".Select(").Append(RenderLambda(call, mode))
-              .Append(").Aggregate((a, b) => a + b)");
+        {
+            // Materialize the projection, then guard emptiness with a list pattern: a
+            // non-empty list folds with the generated operator+ (over NON-nullable elements,
+            // so no nullable warnings), while an empty list throws a clear domain error
+            // rather than leaking LINQ's opaque "Sequence contains no elements".
+            // The whole thing is parenthesized so the low-precedence `throw`/`?:` stays
+            // self-contained when this sum is embedded in a larger expression.
+            var voName = selectorType!.Name;
+            var rule = $"cannot sum an empty collection of {voName} (no zero value)";
+            // Unique binding name so sibling sums in one expression never collide.
+            var bind = "__sum" + _sumCounter++;
+            sb.Append('(').Append(target).Append(".Select(").Append(RenderLambda(call, mode))
+              .Append(").ToList() is { Count: > 0 } ").Append(bind)
+              .Append(" ? ").Append(bind).Append(".Aggregate((a, b) => a + b)")
+              .Append(" : throw new DomainInvariantViolationException(type: \"")
+              .Append(voName).Append("\", rule: \"").Append(rule).Append("\"))");
+        }
         else
+        {
             sb.Append(target).Append(".Sum(").Append(RenderLambda(call, mode)).Append(')');
+        }
     }
 
     /// <summary>The inferred type a collection call's lambda selector produces.</summary>
     private TypeRef? InferSelectorType(CallExpr call)
     {
-        var scope = EffectiveScope();
-        var element = TypeResolver.ElementOf(_resolver.Infer(call.Target, scope));
+        TypeScope scope = EffectiveScope();
+        TypeRef? element = TypeResolver.ElementOf(_resolver.Infer(call.Target, scope));
         if (element is not null && call.Args is [LambdaExpr lambda])
+        {
             return _resolver.Infer(lambda.Body, scope.With(lambda.Parameter, element));
+        }
+
         return null;
     }
 
     private string RenderLambda(CallExpr call, NameMode mode)
     {
         if (call.Args is not [LambdaExpr lambda])
+        {
             return "/* expected lambda */";
+        }
 
         // Save/restore: a lambda parameter that shadows an outer local (e.g. a
         // command parameter of the same name) must not delete the outer binding.
         var wasPresent = _locals.Contains(lambda.Parameter);
         _locals.Add(lambda.Parameter);
         var body = Render(lambda.Body, mode);
-        if (!wasPresent) _locals.Remove(lambda.Parameter);
+        if (!wasPresent)
+        {
+            _locals.Remove(lambda.Parameter);
+        }
+
         return $"{CSharpNaming.ToCamelCase(lambda.Parameter)} => {body}";
     }
 
@@ -530,12 +749,24 @@ internal sealed class CSharpExpressionTranslator
         {
             switch (c)
             {
-                case '\\': sb.Append("\\\\"); break;
-                case '"': sb.Append("\\\""); break;
-                case '\n': sb.Append("\\n"); break;
-                case '\r': sb.Append("\\r"); break;
-                case '\t': sb.Append("\\t"); break;
-                default: sb.Append(c); break;
+                case '\\':
+                    sb.Append("\\\\");
+                    break;
+                case '"':
+                    sb.Append("\\\"");
+                    break;
+                case '\n':
+                    sb.Append("\\n");
+                    break;
+                case '\r':
+                    sb.Append("\\r");
+                    break;
+                case '\t':
+                    sb.Append("\\t");
+                    break;
+                default:
+                    sb.Append(c);
+                    break;
             }
         }
         return sb.ToString();

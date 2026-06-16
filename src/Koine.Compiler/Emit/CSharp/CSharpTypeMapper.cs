@@ -14,7 +14,7 @@ internal sealed class CSharpTypeMapper
 
     /// <summary>
     /// Returns the C# type name for a member's declared type. When the mapping
-    /// requires a comment (e.g. Instant -> DateTimeOffset), it is returned via
+    /// requires a clarifying comment, it is returned via
     /// <paramref name="trailingComment"/> (without the leading <c>//</c>).
     /// </summary>
     public string Map(TypeRef type, out string? trailingComment)
@@ -41,12 +41,16 @@ internal sealed class CSharpTypeMapper
     {
         switch (type.Name)
         {
-            case "String": return "string";
-            case "Int": return "int";
-            case "Decimal": return "decimal";
-            case "Bool": return "bool";
+            case "String":
+                return "string";
+            case "Int":
+                return "int";
+            case "Decimal":
+                return "decimal";
+            case "Bool":
+                return "bool";
             case "Instant":
-                trailingComment = "TODO: NodaTime";
+                // A point in time maps to DateTimeOffset (UTC-anchored, offset-aware).
                 return "DateTimeOffset";
             case ModelIndex.ListTypeName:
                 return $"IReadOnlyList<{MapArg(type.Element, ref trailingComment)}>";

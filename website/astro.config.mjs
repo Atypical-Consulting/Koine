@@ -77,7 +77,7 @@ export default defineConfig({
 				{
 					label: 'Guides',
 					items: [
-						{ label: 'Feature catalogue (R1–R15)', slug: 'guides/feature-catalogue' },
+						{ label: 'Feature catalogue (R1–R17)', slug: 'guides/feature-catalogue' },
 						{ label: 'CLI reference', slug: 'guides/cli' },
 						{ label: 'Architecture', slug: 'guides/architecture' },
 						{ label: 'Editor tooling', slug: 'guides/editor-tooling' },

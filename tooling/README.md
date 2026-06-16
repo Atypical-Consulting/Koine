@@ -136,9 +136,49 @@ If the server "stopped unexpectedly", there are three places to look:
 
 ### VS Code
 
-The TextMate extension supplies the `koine` language id and highlighting. To add diagnostics, pair it
-with a thin language client (`vscode-languageclient`) that spawns `koine lsp` for documents of language
-`koine` — a small follow-up (see `USER-STORIES.md` R17.2).
+The `koine-textmate/` extension is a full VS Code extension: it contributes the `koine` language id and
+highlighting **and** ships a language client (`vscode-languageclient`) that spawns `koine lsp`, so `.koi`
+files get live diagnostics, completion, hover, and go-to-definition out of the box.
+
+```
+koine-textmate/
+├── package.json                    # language + grammar + LSP client contribution
+├── language-configuration.json     # comments, brackets, auto-closing
+├── tsconfig.json                   # TypeScript build config (out/)
+├── assets/icon.png                 # marketplace icon (placeholder — see note below)
+├── src/extension.ts                # LanguageClient that launches the Koine LSP server
+└── syntaxes/koine.tmLanguage.json  # the TextMate grammar (scopeName: source.koine)
+```
+
+**Build & run (from `tooling/koine-textmate/`):**
+
+```bash
+npm install        # installs vscode-languageclient + the TypeScript toolchain
+npm run compile    # tsc -> out/extension.js
+```
+
+Then open the `koine-textmate/` folder in VS Code and press **F5** ("Run Extension") to launch an
+Extension Development Host with the extension loaded. Open any `.koi` file and diagnostics appear as you
+type. To package a `.vsix`: `npm run install-vsce && npm run package`.
+
+**How it spawns the server.** On the first `.koi` document (`activationEvents: onLanguage:koine`),
+`extension.ts` starts a `LanguageClient` whose `serverOptions` spawn the server over stdio. The command
+is driven by settings:
+
+| Setting | Default | Effect |
+| --- | --- | --- |
+| `koine.server.path` | *(empty)* | Launches `koine lsp` from your `PATH`. Set to an absolute published binary, or to `dotnet` to run from source. |
+| `koine.server.args` | `[]` | Args inserted **before** `lsp`. For source: `["run", "--project", "src/Koine.Cli", "--"]`. |
+| `koine.trace.server` | `off` | LSP traffic tracing (`messages` / `verbose`) in the *Koine Language Server* output channel. |
+
+So `koine.server.path: "dotnet"` + `koine.server.args: ["run", "--project", "src/Koine.Cli", "--"]`
+runs `dotnet run --project src/Koine.Cli -- lsp`. The client forces `DOTNET_NOLOGO=1` and
+`DOTNET_CLI_TELEMETRY_OPTOUT=1` in the server's environment so the .NET host's first-run banner can't
+corrupt the stdio JSON-RPC stream.
+
+> **Publishing notes.** `package.json` uses the placeholder publisher `atypical-consulting`; register it
+> on the VS Code Marketplace (`vsce create-publisher`) before publishing. `assets/icon.png` is a generated
+> solid-color placeholder — replace it with a real 128×128 icon for the listing.
 
 ### Verifying the grammar
 

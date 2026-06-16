@@ -9,6 +9,9 @@ context Payments version 1 {
 
   value Money {
     amount:   Decimal
+    // `currency` is intentionally a primitive String, not the shared-kernel
+    // Currency enum: Payments is downstream of the shared kernel and does not
+    // import Currency (see context-map.koi), so it keeps money's currency loose.
     currency: String
     invariant amount >= 0   "an amount cannot be negative"
   }

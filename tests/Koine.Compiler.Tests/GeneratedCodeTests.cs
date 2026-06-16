@@ -93,7 +93,7 @@ public class GeneratedCodeTests
         Assert.True(result.Success, string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
 
         var file = result.Files.Single(f => f.RelativePath.EndsWith("V.cs"));
-        Assert.Contains("IsGold => Tier == Tier.Gold;", file.Contents);
+        Assert.Contains("IsGold\n        => Tier == Tier.Gold;", file.Contents);
         Assert.DoesNotContain("? true : false", file.Contents);
 
         var (asm, errors) = TestSupport.Compile(result.Files);
