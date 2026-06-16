@@ -112,6 +112,105 @@ public sealed class SemanticModel
     }
 
     /// <summary>
+    /// The innermost declaration/member node whose <see cref="KoineNode.NameSpan"/> covers the
+    /// 0-based absolute <paramref name="offset"/> — i.e. the node for which the offset sits on the
+    /// declaration's own name, as opposed to anywhere in its body. <c>null</c> when the offset is
+    /// not on any declaration name. Used by rename to classify whether a same-named token is a
+    /// declaration's name (and of what structural role) versus a mere reference.
+    /// </summary>
+    public KoineNode? DeclarationNameAt(int offset)
+    {
+        KoineNode? best = null;
+        var bestLength = int.MaxValue;
+        foreach (KoineNode node in NodeWalker.Descendants(Model))
+        {
+            SourceSpan span = node.NameSpan;
+            if (span.IsNone || span.Length <= 0)
+            {
+                continue;
+            }
+
+            if (offset >= span.Offset && offset < span.Offset + span.Length && span.Length < bestLength)
+            {
+                best = node;
+                bestLength = span.Length;
+            }
+        }
+
+        return best;
+    }
+
+    /// <summary>
+    /// The <see cref="Symbol"/> for the declaration whose own name sits at the 0-based absolute
+    /// <paramref name="offset"/> (a "GetDeclaredSymbol" entry point). Unlike
+    /// <see cref="GetSymbol(string,string?)"/>, this resolves by POSITION, so an enum member whose
+    /// name collides with a type name resolves to the enum member (the thing actually under the
+    /// cursor), not the type. <c>null</c> when the offset is not on a renameable declaration name.
+    /// </summary>
+    public Symbol? DeclaredSymbolAt(int offset)
+    {
+        if (DeclarationNameAt(offset) is not { } node)
+        {
+            return null;
+        }
+
+        switch (node)
+        {
+            // A member's owning type is the nearest enclosing fielded-type declaration.
+            case Member m when EnclosingFieldedTypeNameAt(offset) is { } owner:
+                return new MemberSymbol(m.Name, m.NameSpan, owner, m);
+            // An enum member resolves precisely to its owning enum, even when a same-named type exists.
+            case EnumMember em when EnclosingEnumNameAt(offset) is { } enumName:
+                return new EnumMemberSymbol(em.Name, em.NameSpan, enumName, em);
+            // Type / spec declarations resolve through the name path (they are globally unique).
+            case TypeDecl t:
+                return GetSymbol(t.Name);
+            case SpecDecl s:
+                return GetSymbol(s.Name);
+            default:
+                return null;
+        }
+    }
+
+    /// <summary>The name of the innermost value/entity/event/integration-event declaration whose body contains <paramref name="offset"/>.</summary>
+    private string? EnclosingFieldedTypeNameAt(int offset)
+    {
+        string? name = null;
+        var bestLength = int.MaxValue;
+        foreach (KoineNode node in NodeWalker.Descendants(Model))
+        {
+            if (node is ValueObjectDecl or EntityDecl or EventDecl or IntegrationEventDecl
+                && Contains(node.Span, offset) && node.Span.Length < bestLength)
+            {
+                name = ((TypeDecl)node).Name;
+                bestLength = node.Span.Length;
+            }
+        }
+
+        return name;
+    }
+
+    /// <summary>The name of the innermost enum declaration whose body contains <paramref name="offset"/>.</summary>
+    private string? EnclosingEnumNameAt(int offset)
+    {
+        string? name = null;
+        var bestLength = int.MaxValue;
+        foreach (KoineNode node in NodeWalker.Descendants(Model))
+        {
+            if (node is EnumDecl e && Contains(node.Span, offset) && node.Span.Length < bestLength)
+            {
+                name = e.Name;
+                bestLength = node.Span.Length;
+            }
+        }
+
+        return name;
+    }
+
+    private static bool Contains(SourceSpan span, int offset) =>
+        !span.IsNone && span.Length > 0 && offset >= span.Offset && offset < span.Offset + span.Length;
+
+    /// <summary>
     /// Resolves go-to-definition at a 0-based absolute <paramref name="offset"/>: finds the
     /// innermost name-bearing node under the cursor (an identifier / member-access / call, a
     /// type reference, or a declaration's own name) and resolves it via

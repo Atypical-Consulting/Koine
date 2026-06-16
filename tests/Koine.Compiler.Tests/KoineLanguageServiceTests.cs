@@ -167,7 +167,7 @@ public class KoineLanguageServiceTests
             "}\n";
         var hover = Svc.HoverAt(Doc(src), U, line: 3, character: 23); // over "Money"
         Assert.NotNull(hover);
-        Assert.Contains("The amount owed", hover!.Markdown);
+        Assert.Contains("The amount owed", hover.Markdown);
     }
 
     [Fact]
@@ -180,7 +180,7 @@ public class KoineLanguageServiceTests
             "}\n";
         var hover = Svc.HoverAt(Doc(src), U, line: 2, character: 23); // over "Money" (col 22; cursor must land strictly after the token's start column)
         Assert.NotNull(hover);
-        Assert.Contains("Money", hover!.Markdown);
+        Assert.Contains("Money", hover.Markdown);
         Assert.Contains("Value", hover.Markdown);     // the kind label
         Assert.Contains("amount", hover.Markdown);     // a member
     }
@@ -209,7 +209,7 @@ public class KoineLanguageServiceTests
             "}\n";
         var hover = Svc.HoverAt(Doc(src), U, line: 2, character: 9); // over "Basket"
         Assert.NotNull(hover);
-        Assert.Contains("List<OrderLine>", hover!.Markdown);
+        Assert.Contains("List<OrderLine>", hover.Markdown);
     }
 
     [Fact]
@@ -222,7 +222,7 @@ public class KoineLanguageServiceTests
             "}\n";
         var hover = Svc.HoverAt(Doc(src), U, line: 2, character: 28); // over "Red"
         Assert.NotNull(hover);
-        Assert.Contains("enum member of Color", hover!.Markdown);
+        Assert.Contains("enum member of Color", hover.Markdown);
     }
 
     [Fact]
@@ -235,7 +235,7 @@ public class KoineLanguageServiceTests
             "}\n";
         var hover = Svc.HoverAt(Doc(src), U, line: 2, character: 9); // over "Positive"
         Assert.NotNull(hover);
-        Assert.Contains("spec on Money", hover!.Markdown);
+        Assert.Contains("spec on Money", hover.Markdown);
     }
 
     [Fact]
@@ -248,7 +248,7 @@ public class KoineLanguageServiceTests
             "}\n";
         var def = Svc.DefinitionAt(Doc(src), U, line: 2, character: 23); // over "Money"
         Assert.NotNull(def);
-        Assert.Equal(2, def!.Target.Line);  // 1-based line of "value Money"
+        Assert.Equal(2, def.Target.Line);  // 1-based line of "value Money"
     }
 
     [Fact]
@@ -261,7 +261,7 @@ public class KoineLanguageServiceTests
             "}\n";
         var def = Svc.DefinitionAt(Doc(src), U, line: 2, character: 54); // over "Draft" value
         Assert.NotNull(def);
-        Assert.Equal(2, def!.Target.Line);
+        Assert.Equal(2, def.Target.Line);
     }
 
     [Fact]
@@ -281,7 +281,7 @@ public class KoineLanguageServiceTests
             "}\n";
         var def = Svc.DefinitionAt(Doc(src), U, line: 2, character: 9); // over "Positive"
         Assert.NotNull(def);
-        Assert.Equal(3, def!.Target.Line); // 1-based line of the spec declaration
+        Assert.Equal(3, def.Target.Line); // 1-based line of the spec declaration
     }
 
     [Fact]
@@ -310,7 +310,7 @@ public class KoineLanguageServiceTests
         };
         var def = Svc.DefinitionAt(docs, "file:///ordering.koi", line: 1, character: 25); // on "ProductId"
         Assert.NotNull(def);
-        Assert.Equal("file:///catalog.koi", def!.Uri);
+        Assert.Equal("file:///catalog.koi", def.Uri);
     }
 
     // ---- Completion: new keyword starters --------------------------------
@@ -466,7 +466,7 @@ public class KoineLanguageServiceTests
             "}\n";
         var edits = Svc.RenameAt(Doc(src), U, line: 1, character: 9, newName: "Cash"); // on "Money" decl
         Assert.NotNull(edits);
-        Assert.Equal(2, edits!.Count); // declaration + one use
+        Assert.Equal(2, edits.Count); // declaration + one use
     }
 
     [Fact]
@@ -485,6 +485,174 @@ public class KoineLanguageServiceTests
     }
 
     [Fact]
+    public void Rename_of_a_field_is_scoped_to_its_owning_type()
+    {
+        // Two types each declare a field named "amount". Renaming Money.amount must NOT
+        // touch Order.amount — the field is type-scoped.
+        var src =
+            "context C {\n" +
+            "  value Money { amount: Decimal\n" +
+            "    invariant amount >= 0 }\n" +
+            "  value Order { amount: Decimal }\n" +
+            "}\n";
+        // Cursor on the "amount" declaration in Money (line index 1 = "value Money …").
+        var edits = Svc.RenameAt(Doc(src), U, line: 1, character: 18, newName: "total");
+        Assert.NotNull(edits);
+        // Money's declaration (line 2, 1-based) + its use in the invariant (line 3); Order.amount excluded.
+        Assert.Equal(2, edits.Count);
+        Assert.Contains(edits, r => r.Line == 2); // the declaration
+        Assert.Contains(edits, r => r.Line == 3); // the invariant reference
+        // Crucially: no edit lands on Order's "amount" (line 4, 1-based).
+        Assert.DoesNotContain(edits, r => r.Line == 4);
+    }
+
+    [Fact]
+    public void Rename_of_an_enum_member_is_scoped_to_its_owning_enum()
+    {
+        // Two enums each declare a member "Active". Renaming Phase.Active must NOT touch State.Active.
+        var src =
+            "context C {\n" +
+            "  enum Phase { Active, Done }\n" +
+            "  enum State { Active, Closed }\n" +
+            "}\n";
+        // Cursor inside the "Active" declaration in Phase (line index 1).
+        var edits = Svc.RenameAt(Doc(src), U, line: 1, character: 16, newName: "Running");
+        Assert.NotNull(edits);
+        Assert.Single(edits);                            // only Phase.Active's declaration
+        Assert.Contains(edits, r => r.Line == 2);        // Phase line (1-based)
+        Assert.DoesNotContain(edits, r => r.Line == 3);  // State.Active untouched
+    }
+
+    [Fact]
+    public void Rename_of_a_type_still_updates_all_references_across_files()
+    {
+        var ordering = "context Ordering {\n  value Line { product: ProductId }\n}\n";
+        var catalog = "context Catalog {\n  entity Product identified by ProductId { sku: String }\n}\n";
+        var docs = new Dictionary<string, string>
+        {
+            ["file:///ordering.koi"] = ordering,
+            ["file:///catalog.koi"] = catalog,
+        };
+        // Rename the ProductId ID type from its declaration in catalog.koi.
+        var edits = Svc.RenameAt(docs, "file:///catalog.koi", line: 1, character: 32, newName: "ProdId");
+        Assert.NotNull(edits);
+        Assert.Contains(edits, r => r.Uri == "file:///ordering.koi");
+        Assert.Contains(edits, r => r.Uri == "file:///catalog.koi");
+    }
+
+    [Fact]
+    public void Rename_of_a_type_does_not_touch_a_same_named_enum_member_or_field()
+    {
+        // The corruption repro: a TYPE Status, an enum member Status, and a field typed Status all
+        // share the name. Renaming the TYPE must rewrite only the type declaration and its TypeRef
+        // uses — never the Phase enum member named Status, nor a field name.
+        var src =
+            "context C {\n" +
+            "  enum Phase { Status, Done }\n" +
+            "  value Status { x: Decimal }\n" +
+            "  value Line { p: Status }\n" +
+            "}\n";
+        // Cursor on the "Status" TYPE declaration (line index 2 = "value Status …", col 8).
+        var edits = Svc.RenameAt(Doc(src), U, line: 2, character: 9, newName: "Phase2");
+        Assert.NotNull(edits);
+        // The type decl (line 3, 1-based) + its TypeRef use in Line (line 4). The enum member on
+        // line 2 must NOT be rewritten.
+        Assert.Equal(2, edits.Count);
+        Assert.Contains(edits, r => r.Line == 3); // the type declaration
+        Assert.Contains(edits, r => r.Line == 4); // the TypeRef use
+        Assert.DoesNotContain(edits, r => r.Line == 2); // the Phase enum member named Status
+    }
+
+    [Fact]
+    public void Rename_of_an_enum_member_does_not_touch_a_same_named_type()
+    {
+        var src =
+            "context C {\n" +
+            "  enum Phase { Status, Done }\n" +
+            "  value Status { x: Decimal }\n" +
+            "  value Line { p: Status }\n" +
+            "}\n";
+        // Cursor on the "Status" ENUM MEMBER (line index 1, "enum Phase { Status, Done }", col ~15).
+        var enumMemberCol = src.Split('\n')[1].IndexOf("Status", StringComparison.Ordinal) + 1;
+        var edits = Svc.RenameAt(Doc(src), U, line: 1, character: enumMemberCol, newName: "Active");
+        Assert.NotNull(edits);
+        // Only the enum member declaration (line 2). The TYPE Status (line 3) and its use (line 4)
+        // must be untouched.
+        Assert.Contains(edits, r => r.Line == 2);
+        Assert.DoesNotContain(edits, r => r.Line == 3); // the type declaration
+        Assert.DoesNotContain(edits, r => r.Line == 4); // the TypeRef use
+    }
+
+    [Fact]
+    public void Rename_of_a_field_on_an_event_returns_edits()
+    {
+        // Finding B: a field on an `event` resolves enclosingType via TokenLocator; without `event`
+        // in the fielded-type set this was a silent no-op (RenameAt returned null). The event body
+        // is members-only (no expression context), so the only reference is the declaration itself.
+        var src =
+            "context C {\n" +
+            "  event Placed { total: Decimal }\n" +
+            "}\n";
+        // Cursor on the "total" field declaration (line index 1).
+        var col = src.Split('\n')[1].IndexOf("total", StringComparison.Ordinal) + 1;
+        var edits = Svc.RenameAt(Doc(src), U, line: 1, character: col, newName: "amount");
+        Assert.NotNull(edits);
+        Assert.Single(edits);
+        Assert.Contains(edits, r => r.Line == 2); // the declaration
+    }
+
+    [Fact]
+    public void Rename_of_a_field_on_an_integration_event_returns_edits()
+    {
+        var src =
+            "context C {\n" +
+            "  integration event Placed { total: Decimal }\n" +
+            "}\n";
+        var col = src.Split('\n')[1].IndexOf("total", StringComparison.Ordinal) + 1;
+        var edits = Svc.RenameAt(Doc(src), U, line: 1, character: col, newName: "amount");
+        Assert.NotNull(edits);
+        Assert.Single(edits);
+        Assert.Contains(edits, r => r.Line == 2);
+    }
+
+    // ---- Prepare rename ---------------------------------------------------
+
+    [Fact]
+    public void PrepareRename_returns_the_identifier_range_and_placeholder()
+    {
+        var src =
+            "context C {\n" +
+            "  value Money { amount: Decimal }\n" +
+            "  value Line { price: Money }\n" +
+            "}\n";
+        var range = Svc.PrepareRenameAt(Doc(src), U, line: 1, character: 9); // on "Money" decl
+        Assert.NotNull(range);
+        Assert.Equal(2, range.Line);          // 1-based line of the "Money" token
+        Assert.Equal(8, range.StartColumn);   // 0-based column where "Money" starts
+        Assert.Equal(13, range.EndColumn);    // half-open end (8 + len("Money"))
+
+        // The placeholder is the current name.
+        var name = Svc.NameAt(Doc(src), U, line: 1, character: 9);
+        Assert.Equal("Money", name);
+    }
+
+    [Fact]
+    public void PrepareRename_inside_a_string_literal_returns_null()
+    {
+        // A doc comment / string context: cursor inside the quoted text.
+        var src = "context C {\n  value V { x: String = \"Money\" }\n}\n";
+        // Column 26 is inside the "Money" string literal.
+        Assert.Null(Svc.PrepareRenameAt(Doc(src), U, line: 1, character: 26));
+    }
+
+    [Fact]
+    public void PrepareRename_on_a_primitive_returns_null()
+    {
+        var src = "context C {\n  value V { x: Decimal }\n}\n";
+        Assert.Null(Svc.PrepareRenameAt(Doc(src), U, line: 1, character: 18)); // on "Decimal"
+    }
+
+    [Fact]
     public void HoverAt_resolves_across_files()
     {
         var ordering = "context Ordering {\n  value Line { product: ProductId }\n}\n";
@@ -496,6 +664,6 @@ public class KoineLanguageServiceTests
         };
         var hover = Svc.HoverAt(docs, "file:///ordering.koi", line: 1, character: 25); // on "ProductId"
         Assert.NotNull(hover);
-        Assert.Contains("Product", hover!.Markdown); // owning entity
+        Assert.Contains("Product", hover.Markdown); // owning entity
     }
 }

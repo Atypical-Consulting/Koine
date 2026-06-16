@@ -145,8 +145,14 @@ internal sealed class LspServer
                                     ["documentFormattingProvider"] = true,
                                     ["documentSymbolProvider"] = true,
                                     ["referencesProvider"] = true,
-                                    ["renameProvider"] = true,
-                                    ["codeActionProvider"] = true,
+                                    ["renameProvider"] = new Dictionary<string, object?>
+                                    {
+                                        ["prepareProvider"] = true,
+                                    },
+                                    ["codeActionProvider"] = new Dictionary<string, object?>
+                                    {
+                                        ["codeActionKinds"] = new[] { "quickfix", "refactor", "refactor.extract" },
+                                    },
                                     ["semanticTokensProvider"] = new Dictionary<string, object?>
                                     {
                                         ["legend"] = new Dictionary<string, object?>
@@ -241,6 +247,14 @@ internal sealed class LspServer
                             if (root.TryGetProperty("id", out _))
                             {
                                 Respond(root, ReferencesResultJson(root));
+                            }
+
+                            break;
+
+                        case "textDocument/prepareRename":
+                            if (root.TryGetProperty("id", out _))
+                            {
+                                Respond(root, PrepareRenameResultJson(root));
                             }
 
                             break;
@@ -479,6 +493,28 @@ internal sealed class LspServer
         return refs.Select(ToLocation).ToArray();
     }
 
+    private object? PrepareRenameResultJson(JsonElement root)
+    {
+        if (!TryGetUri(root, out var uri) || !TryGetPosition(root, out var line, out var ch))
+        {
+            return null;
+        }
+
+        var range = _ls.PrepareRenameAt(Workspace(), uri, line, ch);
+        if (range is null)
+        {
+            return null;
+        }
+
+        // The placeholder is the current identifier text the editor pre-fills the rename box with.
+        var name = _ls.NameAt(Workspace(), uri, line, ch);
+        return new Dictionary<string, object?>
+        {
+            ["range"] = RangeOf(range),
+            ["placeholder"] = name,
+        };
+    }
+
     private object? RenameResultJson(JsonElement root)
     {
         if (!TryGetUri(root, out var uri) || !TryGetPosition(root, out var line, out var ch)
@@ -530,57 +566,169 @@ internal sealed class LspServer
     // ---- Code actions -----------------------------------------------------
 
     /// <summary>
-    /// Turns a "did you mean 'X'?" suggestion carried in a diagnostic message into a quickfix
-    /// that rewrites the unknown identifier to the suggested name. The diagnostics in the
-    /// request's context already carry their range and message, so the fix is purely textual.
+    /// Builds the code actions for the request: diagnostic-driven "did you mean 'X'?" quickfixes
+    /// (from the context's diagnostics) plus selection-driven refactors over the request's
+    /// <c>params.range</c> (e.g. <c>refactor.extract</c> from <see cref="KoineLanguageService.RefactorsAt"/>).
+    /// Each refactor carries an inline WorkspaceEdit; the quickfix behavior is unchanged.
     /// </summary>
     private object? CodeActionResultJson(JsonElement root)
     {
-        if (!TryGetUri(root, out var uri)
-            || !root.TryGetProperty("params", out var p)
-            || !p.TryGetProperty("context", out var context)
-            || !context.TryGetProperty("diagnostics", out var diags)
-            || diags.ValueKind != JsonValueKind.Array)
+        if (!TryGetUri(root, out var uri) || !root.TryGetProperty("params", out var p))
         {
             return Array.Empty<object>();
         }
 
         var actions = new List<object>();
-        foreach (var d in diags.EnumerateArray())
+
+        // The client may scope the request to specific kinds via context.only (an array of LSP
+        // hierarchical kind strings). When present, an action is offered only if its kind is at or
+        // below one of the requested kinds (prefix match, e.g. "refactor" admits "refactor.extract").
+        // When absent, all applicable actions are offered (unchanged behavior).
+        var only = ReadOnlyKinds(p);
+
+        // 1. Diagnostic quickfixes (unchanged behavior, now gated by context.only).
+        if (KindAllowed("quickfix", only)
+            && p.TryGetProperty("context", out var context)
+            && context.TryGetProperty("diagnostics", out var diags)
+            && diags.ValueKind == JsonValueKind.Array)
         {
-            if (!d.TryGetProperty("message", out var msgEl) || msgEl.ValueKind != JsonValueKind.String)
+            foreach (var d in diags.EnumerateArray())
             {
-                continue;
-            }
-
-            var suggestion = ExtractSuggestion(msgEl.GetString()!);
-            if (suggestion is null || !d.TryGetProperty("range", out var range))
-            {
-                continue;
-            }
-
-            actions.Add(new Dictionary<string, object?>
-            {
-                ["title"] = $"Change to '{suggestion}'",
-                ["kind"] = "quickfix",
-                ["diagnostics"] = new[] { (object)d.Clone() },
-                ["edit"] = new Dictionary<string, object?>
+                if (!d.TryGetProperty("message", out var msgEl) || msgEl.ValueKind != JsonValueKind.String)
                 {
-                    ["changes"] = new Dictionary<string, object?>
+                    continue;
+                }
+
+                var suggestion = ExtractSuggestion(msgEl.GetString()!);
+                if (suggestion is null || !d.TryGetProperty("range", out var range))
+                {
+                    continue;
+                }
+
+                actions.Add(new Dictionary<string, object?>
+                {
+                    ["title"] = $"Change to '{suggestion}'",
+                    ["kind"] = "quickfix",
+                    ["diagnostics"] = new[] { (object)d.Clone() },
+                    ["edit"] = new Dictionary<string, object?>
                     {
-                        [uri] = new[]
+                        ["changes"] = new Dictionary<string, object?>
                         {
-                            (object)new Dictionary<string, object?>
+                            [uri] = new[]
                             {
-                                ["range"] = range.Clone(),
-                                ["newText"] = suggestion,
+                                (object)new Dictionary<string, object?>
+                                {
+                                    ["range"] = range.Clone(),
+                                    ["newText"] = suggestion,
+                                },
                             },
                         },
                     },
-                },
-            });
+                });
+            }
         }
+
+        // 2. Selection-driven refactors over params.range (each gated by context.only on its kind).
+        if (TryGetRange(p, out var sl, out var sc, out var el, out var ec))
+        {
+            foreach (var refactor in _ls.RefactorsAt(Workspace(), uri, sl, sc, el, ec))
+            {
+                if (!KindAllowed(refactor.Kind, only))
+                {
+                    continue;
+                }
+
+                actions.Add(new Dictionary<string, object?>
+                {
+                    ["title"] = refactor.Title,
+                    ["kind"] = refactor.Kind,
+                    ["edit"] = new Dictionary<string, object?>
+                    {
+                        ["changes"] = new Dictionary<string, object?>
+                        {
+                            [uri] = refactor.Edits
+                                .Select(e => (object)new Dictionary<string, object?>
+                                {
+                                    ["range"] = SpanRange(e.Range),
+                                    ["newText"] = e.NewText,
+                                })
+                                .ToArray(),
+                        },
+                    },
+                });
+            }
+        }
+
         return actions;
+    }
+
+    /// <summary>
+    /// Reads <c>params.context.only</c> — the requested code-action kinds — as a list, or
+    /// <c>null</c> when absent (the client did not scope the request). An empty/malformed array
+    /// reads as an empty list (the client scoped the request to nothing).
+    /// </summary>
+    private static IReadOnlyList<string>? ReadOnlyKinds(JsonElement p)
+    {
+        if (p.TryGetProperty("context", out var context)
+            && context.TryGetProperty("only", out var only)
+            && only.ValueKind == JsonValueKind.Array)
+        {
+            var kinds = new List<string>();
+            foreach (var k in only.EnumerateArray())
+            {
+                if (k.ValueKind == JsonValueKind.String && k.GetString() is { } s && s.Length > 0)
+                {
+                    kinds.Add(s);
+                }
+            }
+
+            return kinds;
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Whether an action of <paramref name="kind"/> is admitted under the requested
+    /// <paramref name="only"/> kinds. <c>null</c> <paramref name="only"/> (absent) admits everything.
+    /// Otherwise an LSP hierarchical kind matches when a requested kind is a prefix of it
+    /// (e.g. requested <c>"refactor"</c> admits <c>"refactor.extract"</c>); equal kinds match too.
+    /// </summary>
+    private static bool KindAllowed(string kind, IReadOnlyList<string>? only)
+    {
+        if (only is null)
+        {
+            return true;
+        }
+
+        foreach (var requested in only)
+        {
+            if (string.Equals(kind, requested, StringComparison.Ordinal)
+                || kind.StartsWith(requested + ".", StringComparison.Ordinal))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>Reads the 0-based LSP <c>range</c> from a request's <c>params</c>; false when absent or malformed.</summary>
+    private static bool TryGetRange(JsonElement p, out int startLine, out int startChar, out int endLine, out int endChar)
+    {
+        startLine = startChar = endLine = endChar = 0;
+        if (p.TryGetProperty("range", out var range)
+            && range.TryGetProperty("start", out var start)
+            && range.TryGetProperty("end", out var end)
+            && start.TryGetProperty("line", out var sl) && sl.TryGetInt32(out startLine)
+            && start.TryGetProperty("character", out var sc) && sc.TryGetInt32(out startChar)
+            && end.TryGetProperty("line", out var el) && el.TryGetInt32(out endLine)
+            && end.TryGetProperty("character", out var ec) && ec.TryGetInt32(out endChar))
+        {
+            return true;
+        }
+
+        return false;
     }
 
     // ---- Semantic tokens --------------------------------------------------
