@@ -39,7 +39,8 @@ internal static class Suggestions
     {
         var prev = new int[b.Length + 1];
         var curr = new int[b.Length + 1];
-        for (var j = 0; j <= b.Length; j++) prev[j] = j;
+        for (var j = 0; j <= b.Length; j++)
+            prev[j] = j;
 
         for (var i = 1; i <= a.Length; i++)
         {

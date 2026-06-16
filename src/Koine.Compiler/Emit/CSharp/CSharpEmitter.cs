@@ -314,27 +314,27 @@ public sealed partial class CSharpEmitter : IEmitter
     private static bool UsesRange(KoineModel model)
     {
         foreach (var ctx in model.Contexts)
-        foreach (var t in ctx.AllTypeDecls())
-        {
-            IReadOnlyList<Member>? members = t switch
+            foreach (var t in ctx.AllTypeDecls())
             {
-                ValueObjectDecl v => v.Members,
-                EntityDecl e => e.Members,
-                EventDecl ev => ev.Members,
-                _ => null
-            };
-            if (members is not null && members.Any(m => TypeRefMentions(m.Type, ModelIndex.RangeTypeName)))
-                return true;
-
-            if (t is EntityDecl en)
-            {
-                var paramTypes = en.Commands.SelectMany(c => c.Parameters)
-                    .Concat(en.Factories.SelectMany(f => f.Parameters))
-                    .Select(p => p.Type);
-                if (paramTypes.Any(pt => TypeRefMentions(pt, ModelIndex.RangeTypeName)))
+                IReadOnlyList<Member>? members = t switch
+                {
+                    ValueObjectDecl v => v.Members,
+                    EntityDecl e => e.Members,
+                    EventDecl ev => ev.Members,
+                    _ => null
+                };
+                if (members is not null && members.Any(m => TypeRefMentions(m.Type, ModelIndex.RangeTypeName)))
                     return true;
+
+                if (t is EntityDecl en)
+                {
+                    var paramTypes = en.Commands.SelectMany(c => c.Parameters)
+                        .Concat(en.Factories.SelectMany(f => f.Parameters))
+                        .Select(p => p.Type);
+                    if (paramTypes.Any(pt => TypeRefMentions(pt, ModelIndex.RangeTypeName)))
+                        return true;
+                }
             }
-        }
         return false;
     }
 
@@ -806,7 +806,8 @@ public sealed partial class CSharpEmitter : IEmitter
         sb.Append(Indent).Append("{\n");
 
         // Command parameters are locals inside the body (members render as properties).
-        foreach (var p in cmd.Parameters) translator.PushLocal(p.Name, p.Type);
+        foreach (var p in cmd.Parameters)
+            translator.PushLocal(p.Name, p.Type);
 
         var requires = cmd.Body.OfType<RequiresClause>().ToList();
         var transitions = cmd.Body.OfType<Transition>().ToList();
@@ -817,7 +818,8 @@ public sealed partial class CSharpEmitter : IEmitter
         var firstGuard = true;
         foreach (var req in requires)
         {
-            if (!firstGuard) sb.Append('\n');
+            if (!firstGuard)
+                sb.Append('\n');
             firstGuard = false;
             WriteGuard(sb, entity.Name, req.Condition, req.Message ?? SynthesizeMessage(req.Condition),
                 translator, CSharpExpressionTranslator.NameMode.Property);
@@ -830,7 +832,8 @@ public sealed partial class CSharpEmitter : IEmitter
             StringComparer.Ordinal);
 
         // 2. State transitions.
-        if (requires.Count > 0 && transitions.Count > 0) sb.Append('\n');
+        if (requires.Count > 0 && transitions.Count > 0)
+            sb.Append('\n');
         foreach (var tr in transitions)
         {
             var expectedEnum = memberTypes.TryGetValue(tr.Field, out var ft) && index.Classify(ft.Name) == TypeKind.Enum
@@ -873,7 +876,8 @@ public sealed partial class CSharpEmitter : IEmitter
         // Parameters leave scope BEFORE the re-check: entity invariants reference
         // only entity state, which must render as the just-assigned properties (not
         // a parameter that happens to share a field's name).
-        foreach (var p in cmd.Parameters) translator.PopLocal(p.Name);
+        foreach (var p in cmd.Parameters)
+            translator.PopLocal(p.Name);
 
         // 3. Re-check every entity invariant after the state change (one shared method).
         if (transitions.Count > 0 && entity.Invariants.Count > 0)
@@ -893,7 +897,8 @@ public sealed partial class CSharpEmitter : IEmitter
         // 5. Record domain events (only reached if preconditions + re-check pass).
         if (emitStatements.Count > 0)
         {
-            if (!hoistResult) sb.Append('\n');
+            if (!hoistResult)
+                sb.Append('\n');
             foreach (var stmt in emitStatements)
             {
                 var rendered = hoistResult
@@ -941,7 +946,8 @@ public sealed partial class CSharpEmitter : IEmitter
         // A state-rule guard is validated against entity members only, so it must
         // render with command parameters out of scope: a parameter sharing a member's
         // name would otherwise shadow it (and be read instead of the persisted state).
-        foreach (var p in commandParams) translator.PopLocal(p.Name);
+        foreach (var p in commandParams)
+            translator.PopLocal(p.Name);
         var conditions = sources.Select(r =>
         {
             var srcEq = $"{prop} == {enumType}.{r.From}";
@@ -954,7 +960,8 @@ public sealed partial class CSharpEmitter : IEmitter
             var positive = $"{srcEq} && {translator.Translate(r.Guard, CSharpExpressionTranslator.NameMode.Property)}";
             return new StateSource(positive, $"!({positive})");
         }).ToList();
-        foreach (var p in commandParams) translator.PushLocal(p.Name);
+        foreach (var p in commandParams)
+            translator.PushLocal(p.Name);
         return conditions;
     }
 
@@ -1006,7 +1013,8 @@ public sealed partial class CSharpEmitter : IEmitter
         // Factory scope: the synthetic `id` and the factory's parameters are locals
         // (entity members are not in scope — the aggregate does not exist yet).
         translator.PushLocal("id", new TypeRef(entity.IdentityName));
-        foreach (var p in factory.Parameters) translator.PushLocal(p.Name, p.Type);
+        foreach (var p in factory.Parameters)
+            translator.PushLocal(p.Name, p.Type);
 
         var requires = factory.Body.OfType<RequiresClause>().ToList();
         var inits = factory.Body.OfType<Initialization>().ToList();
@@ -1018,16 +1026,19 @@ public sealed partial class CSharpEmitter : IEmitter
         sb.Append(Indent).Append(Indent).Append("var id = ").Append(entity.IdentityName).Append(".New();\n");
 
         // 2. Preconditions — checked before any state is constructed.
-        if (requires.Count > 0) sb.Append('\n');
+        if (requires.Count > 0)
+            sb.Append('\n');
         var firstGuard = true;
         foreach (var req in requires)
         {
-            if (!firstGuard) sb.Append('\n');
+            if (!firstGuard)
+                sb.Append('\n');
             firstGuard = false;
             WriteGuard(sb, entity.Name, req.Condition, req.Message ?? SynthesizeMessage(req.Condition),
                 translator, CSharpExpressionTranslator.NameMode.Property);
         }
-        if (requires.Count > 0) sb.Append('\n');
+        if (requires.Count > 0)
+            sb.Append('\n');
 
         // 3. Construct. Each ctor member draws its value, in priority order, from: an
         //    explicit `field <- expr` (named arg); a same-named parameter (auto-bind);
@@ -1062,7 +1073,8 @@ public sealed partial class CSharpEmitter : IEmitter
         // 4. Record creation events (payloads may reference `id` and parameters).
         var emitStatements = emits.Select(e => BuildEmitStatement(e, translator, index, "instance.")).ToList();
 
-        foreach (var p in factory.Parameters) translator.PopLocal(p.Name);
+        foreach (var p in factory.Parameters)
+            translator.PopLocal(p.Name);
         translator.PopLocal("id");
 
         foreach (var stmt in emitStatements)
@@ -1317,7 +1329,8 @@ public sealed partial class CSharpEmitter : IEmitter
 
     private static bool TypeRefMentions(TypeRef type, string name)
     {
-        if (type.Name == name) return true;
+        if (type.Name == name)
+            return true;
         return (type.Element is not null && TypeRefMentions(type.Element, name))
             || (type.Value is not null && TypeRefMentions(type.Value, name));
     }

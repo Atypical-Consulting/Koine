@@ -125,6 +125,9 @@ The payoff is closed-set safety a C# `enum` cannot give: **adding a member adds 
 parameter, so every call site stops compiling until it handles the new case.** Delegate parameters
 are the camelCased member names (`OrderStatus.Draft` → `draft`).
 
+Both are **total** over the closed set: there is exactly one arm per member and every instance
+carries an in-range ordinal, so a match always hits an arm — you never write a fallback.
+
 :::caution
 Because these members are generated on every enum, two member-name rules apply to **all** enums:
 

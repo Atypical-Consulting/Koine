@@ -1,6 +1,6 @@
+using Customers;                       // brings the generated spec extension methods (e.g. customer.IsVip()) into scope
 using Koine.Runtime;
 using Shop.Domain;
-using Customers;                       // brings the generated spec extension methods (e.g. customer.IsVip()) into scope
 using Kernel = Catalog__Ordering.Kernel;
 
 // Runnable demo entry point. Everything below USES the Koine-generated types and
@@ -11,7 +11,8 @@ using Kernel = Catalog__Ordering.Kernel;
 
 static void Check(bool condition, string what)
 {
-    if (!condition) throw new Exception($"DEMO ASSERTION FAILED: {what}");
+    if (!condition)
+        throw new Exception($"DEMO ASSERTION FAILED: {what}");
     Console.WriteLine($"  ok  {what}");
 }
 

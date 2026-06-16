@@ -89,7 +89,8 @@ public sealed partial class CSharpEmitter
         sb.Append("public interface ").Append(iface).Append("\n{\n");
 
         var first = true;
-        void Gap() { if (!first) sb.Append('\n'); first = false; }
+        void Gap()
+        { if (!first) sb.Append('\n'); first = false; }
 
         if (ops.Contains("getById"))
         {

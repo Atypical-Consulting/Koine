@@ -151,4 +151,55 @@ public class SmartEnumApiTests
     {
         Assert.Empty(Diagnose(Src));
     }
+
+    [Fact]
+    public void Member_colliding_with_an_associated_data_property_is_rejected()
+    {
+        // `mass` generates a `Mass` property; a member also named `Mass` would declare the
+        // same identifier twice (static field + property) and produce uncompilable C#.
+        Assert.Contains(Diagnose("context C { enum E(mass: Int) { Mass(5) Other(3) } }"),
+            d => d.Code == DiagnosticCodes.EnumReservedAssociatedField);
+    }
+
+    // ======================================================================
+    // Behavioral coverage on shapes the bare fixture does not exercise
+    // ======================================================================
+
+    private static Type CompiledType(string source, string fqn)
+    {
+        var result = new KoineCompiler().Compile(source, new CSharpEmitter());
+        Assert.True(result.Success, string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+        var (asm, errors) = TestSupport.Compile(result.Files);
+        Assert.True(asm is not null, "generated C# failed to compile:\n" + string.Join("\n", errors));
+        return asm!.GetType(fqn)!;
+    }
+
+    [Fact]
+    public void Match_dispatches_correctly_on_an_associated_data_enum()
+    {
+        var currency = CompiledType(
+            """context Catalog { enum Currency(symbol: String, decimals: Int) { EUR("e", 2) USD("d", 2) } }""",
+            "Catalog.Currency");
+        var eur = TestSupport.EnumValue(currency, "EUR");
+        var match = currency.GetMethod("Match")!.MakeGenericMethod(typeof(int));
+        Func<int> onEur = () => 1;
+        Func<int> onUsd = () => 2;
+        Assert.Equal(1, match.Invoke(eur, new object[] { onEur, onUsd }));
+    }
+
+    [Fact]
+    public void Match_and_Switch_handle_a_single_member_enum()
+    {
+        var only = CompiledType("context C { enum E { Only } }", "C.E");
+        var instance = TestSupport.EnumValue(only, "Only");
+
+        var match = only.GetMethod("Match")!.MakeGenericMethod(typeof(int));
+        Func<int> arm = () => 7;
+        Assert.Equal(7, match.Invoke(instance, new object[] { arm }));
+
+        var ran = false;
+        Action act = () => ran = true;
+        only.GetMethod("Switch")!.Invoke(instance, new object[] { act });
+        Assert.True(ran);
+    }
 }

@@ -257,11 +257,11 @@ public sealed partial class CSharpEmitter
 
         // The amount is always Decimal, so scalar */÷ by int or decimal stays exact.
         foreach (var op in new[] { "*", "/" })
-        foreach (var scalar in new[] { "int", "decimal" })
-            sb.Append('\n').Append(Indent)
-              .Append("public static ").Append(name).Append(" operator ").Append(op).Append('(')
-              .Append(name).Append(" left, ").Append(scalar).Append(" right) => ")
-              .Append(Construct($"left.{amtProp} {op} right", $"left.{unitProp}")).Append(";\n");
+            foreach (var scalar in new[] { "int", "decimal" })
+                sb.Append('\n').Append(Indent)
+                  .Append("public static ").Append(name).Append(" operator ").Append(op).Append('(')
+                  .Append(name).Append(" left, ").Append(scalar).Append(" right) => ")
+                  .Append(Construct($"left.{amtProp} {op} right", $"left.{unitProp}")).Append(";\n");
     }
 
     private static IReadOnlyList<Member> NumericFields(ValueObjectDecl vo)

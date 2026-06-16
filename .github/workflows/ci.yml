@@ -25,6 +25,12 @@ jobs:
           dotnet-version: '10.0.x'
           dotnet-quality: preview
 
+      # Enforce .editorconfig on hand-written code (generated files carry the
+      # auto-generated header and are skipped here; their conformance is verified
+      # against the freshly emitted demo below).
+      - name: Verify formatting
+        run: dotnet format Koine.slnx --verify-no-changes
+
       - name: Build
         run: dotnet build -c Release
 
@@ -35,3 +41,8 @@ jobs:
       # A demo build failure is a CI failure (it proves the emitter still works).
       - name: Build generated demo
         run: dotnet build demo/Shop.Domain/Shop.Domain.csproj -c Release
+
+      # Generated code must respect the same .editorconfig as hand-written code.
+      # The build above re-emits the demo; verify the emitter's output conforms.
+      - name: Verify generated code formatting
+        run: dotnet format demo/Shop.Domain/Shop.Domain.csproj --include-generated --verify-no-changes

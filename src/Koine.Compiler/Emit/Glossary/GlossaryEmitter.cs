@@ -129,8 +129,10 @@ public sealed class GlossaryEmitter : IEmitter
     private static string Tag(int? since, string? deprecated)
     {
         var parts = new List<string>();
-        if (since is { } s) parts.Add("since v" + s);
-        if (!string.IsNullOrEmpty(deprecated)) parts.Add("deprecated: " + deprecated);
+        if (since is { } s)
+            parts.Add("since v" + s);
+        if (!string.IsNullOrEmpty(deprecated))
+            parts.Add("deprecated: " + deprecated);
         return parts.Count == 0 ? string.Empty : " _(" + Prose(string.Join("; ", parts)) + ")_";
     }
 
@@ -207,10 +209,18 @@ public sealed class GlossaryEmitter : IEmitter
 
     private static string Operator(BinaryOp op) => op switch
     {
-        BinaryOp.Or => "||", BinaryOp.And => "&&",
-        BinaryOp.Eq => "==", BinaryOp.Neq => "!=",
-        BinaryOp.Lt => "<", BinaryOp.Le => "<=", BinaryOp.Gt => ">", BinaryOp.Ge => ">=",
-        BinaryOp.Add => "+", BinaryOp.Sub => "-", BinaryOp.Mul => "*", BinaryOp.Div => "/",
+        BinaryOp.Or => "||",
+        BinaryOp.And => "&&",
+        BinaryOp.Eq => "==",
+        BinaryOp.Neq => "!=",
+        BinaryOp.Lt => "<",
+        BinaryOp.Le => "<=",
+        BinaryOp.Gt => ">",
+        BinaryOp.Ge => ">=",
+        BinaryOp.Add => "+",
+        BinaryOp.Sub => "-",
+        BinaryOp.Mul => "*",
+        BinaryOp.Div => "/",
         _ => "?"
     };
 

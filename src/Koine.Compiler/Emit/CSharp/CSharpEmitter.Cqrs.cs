@@ -54,7 +54,8 @@ public sealed partial class CSharpEmitter
         var first = true;
         foreach (var uc in svc.UseCases)
         {
-            if (!first) sb.Append('\n');
+            if (!first)
+                sb.Append('\n');
             first = false;
             WriteXmlDoc(sb, uc.Doc, Indent);
             var ret = uc.ReturnType is null ? "Task" : $"Task<{typeMapper.Map(uc.ReturnType)}>";

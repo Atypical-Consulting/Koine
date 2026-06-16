@@ -310,15 +310,20 @@ internal sealed class ExpressionChecker
                 yield return id.Name;
                 break;
             case UnaryExpr { Op: UnaryOp.Not } u:
-                foreach (var n in CollectPresent(u.Operand, !positive)) yield return n;
+                foreach (var n in CollectPresent(u.Operand, !positive))
+                    yield return n;
                 break;
             case BinaryExpr { Op: BinaryOp.And } b when positive:
-                foreach (var n in CollectPresent(b.Left, true)) yield return n;
-                foreach (var n in CollectPresent(b.Right, true)) yield return n;
+                foreach (var n in CollectPresent(b.Left, true))
+                    yield return n;
+                foreach (var n in CollectPresent(b.Right, true))
+                    yield return n;
                 break;
             case BinaryExpr { Op: BinaryOp.Or } b when !positive:
-                foreach (var n in CollectPresent(b.Left, false)) yield return n;
-                foreach (var n in CollectPresent(b.Right, false)) yield return n;
+                foreach (var n in CollectPresent(b.Left, false))
+                    yield return n;
+                foreach (var n in CollectPresent(b.Right, false))
+                    yield return n;
                 break;
         }
     }
@@ -370,7 +375,8 @@ internal sealed class ExpressionChecker
         else
         {
             // A plain field access. If the receiver is known we can be strict.
-            if (target is null) return;
+            if (target is null)
+                return;
             if (target.Name == "String")
                 Report(DiagnosticCodes.UnknownStringOperation, $"unknown string operation '{op}'", ma);
             else if (IsCollection(target))
@@ -418,12 +424,14 @@ internal sealed class ExpressionChecker
             else
             {
                 Report(DiagnosticCodes.OperationArgument, $"operation '{op}' expects a single lambda argument", call);
-                foreach (var arg in call.Args) Check(arg, scope);
+                foreach (var arg in call.Args)
+                    Check(arg, scope);
             }
         }
         else if (BuiltinOps.StringCallOps.Contains(op) || BuiltinOps.CollectionElementCallOps.Contains(op))
         {
-            foreach (var arg in call.Args) Check(arg, scope);
+            foreach (var arg in call.Args)
+                Check(arg, scope);
             var collectionContains = op == "contains" && target is not null && IsIterable(target);
             if (target is not null && target.Name != "String" && !collectionContains)
                 Report(DiagnosticCodes.StringOperationOnNonString, $"string operation '{op}' cannot be applied to '{target.Name}'", call);
@@ -436,7 +444,8 @@ internal sealed class ExpressionChecker
         else
         {
             Report(DiagnosticCodes.UnknownOperation, $"unknown operation '{op}'", call);
-            foreach (var arg in call.Args) Check(arg, scope);
+            foreach (var arg in call.Args)
+                Check(arg, scope);
         }
     }
 
@@ -609,11 +618,16 @@ internal sealed class ExpressionChecker
     /// <summary>Structural type equivalence, recursing into generic arguments (ignores optionality).</summary>
     private static bool SameShape(TypeRef a, TypeRef b)
     {
-        if (a.Name != b.Name) return false;
-        if ((a.Element is null) != (b.Element is null)) return false;
-        if (a.Element is not null && !SameShape(a.Element, b.Element!)) return false;
-        if ((a.Value is null) != (b.Value is null)) return false;
-        if (a.Value is not null && !SameShape(a.Value, b.Value!)) return false;
+        if (a.Name != b.Name)
+            return false;
+        if ((a.Element is null) != (b.Element is null))
+            return false;
+        if (a.Element is not null && !SameShape(a.Element, b.Element!))
+            return false;
+        if ((a.Value is null) != (b.Value is null))
+            return false;
+        if (a.Value is not null && !SameShape(a.Value, b.Value!))
+            return false;
         return true;
     }
 

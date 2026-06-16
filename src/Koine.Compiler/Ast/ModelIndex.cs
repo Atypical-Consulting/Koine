@@ -180,10 +180,12 @@ public sealed class ModelIndex
         // 3b. Index specs by their target type (from context AND aggregate scope).
         foreach (var ctx in model.Contexts)
         {
-            foreach (var spec in ctx.Specs) IndexSpec(spec);
+            foreach (var spec in ctx.Specs)
+                IndexSpec(spec);
             foreach (var t in ctx.Types)
                 if (t is AggregateDecl agg)
-                    foreach (var spec in agg.Specs) IndexSpec(spec);
+                    foreach (var spec in agg.Specs)
+                        IndexSpec(spec);
         }
 
         // 3c. Register each context's ID value objects (emitted into its BASE namespace,
@@ -230,15 +232,18 @@ public sealed class ModelIndex
         //     convention and have a dedicated emission path, so they are never redirected.
         foreach (var r in _relations)
         {
-            if (r.Kind != ContextRelationKind.SharedKernel) continue;
+            if (r.Kind != ContextRelationKind.SharedKernel)
+                continue;
             var kernelNs = KernelNamespaceOf(r.Upstream, r.Downstream);
             var (lo, hi) = string.CompareOrdinal(r.Upstream, r.Downstream) <= 0
                 ? (r.Upstream, r.Downstream) : (r.Downstream, r.Upstream);
             foreach (var name in r.SharedTypes)
             {
-                if (_idTypeNames.Contains(name) || IsIdConvention(name)) continue;  // *Id convention handles it
+                if (_idTypeNames.Contains(name) || IsIdConvention(name))
+                    continue;  // *Id convention handles it
                 var owner = DeclaresType(lo, name) ? lo : DeclaresType(hi, name) ? hi : null;
-                if (owner is null) continue;                 // unknown kernel type (validator reports it)
+                if (owner is null)
+                    continue;                 // unknown kernel type (validator reports it)
                 // A type may belong to only one kernel; a second, conflicting pair is reported
                 // (KOI1416) and ignored here so emission stays deterministic.
                 if (_kernelNamespaceByType.TryGetValue(name, out var existing) && existing != kernelNs)
@@ -313,9 +318,15 @@ public sealed class ModelIndex
         IReadOnlyList<Member> members;
         switch (decl)
         {
-            case ValueObjectDecl v: members = v.Members; break;
-            case EventDecl ev: members = ev.Members; break;
-            case IntegrationEventDecl ie: members = ie.Members; break;
+            case ValueObjectDecl v:
+                members = v.Members;
+                break;
+            case EventDecl ev:
+                members = ev.Members;
+                break;
+            case IntegrationEventDecl ie:
+                members = ie.Members;
+                break;
             case EntityDecl e:
                 if (memberName is "id" or "Id")
                 {
@@ -324,7 +335,8 @@ public sealed class ModelIndex
                 }
                 members = e.Members;
                 break;
-            default: return false;
+            default:
+                return false;
         }
 
         foreach (var m in members)
@@ -349,35 +361,44 @@ public sealed class ModelIndex
             switch (t)
             {
                 case ValueObjectDecl v:
-                    foreach (var m in v.Members) yield return m.Type;
+                    foreach (var m in v.Members)
+                        yield return m.Type;
                     break;
                 case EntityDecl e:
-                    foreach (var m in e.Members) yield return m.Type;
+                    foreach (var m in e.Members)
+                        yield return m.Type;
                     foreach (var c in e.Commands)
-                        foreach (var p in c.Parameters) yield return p.Type;
+                        foreach (var p in c.Parameters)
+                            yield return p.Type;
                     foreach (var f in e.Factories)
-                        foreach (var p in f.Parameters) yield return p.Type;
+                        foreach (var p in f.Parameters)
+                            yield return p.Type;
                     break;
                 case EventDecl ev:
-                    foreach (var m in ev.Members) yield return m.Type;
+                    foreach (var m in ev.Members)
+                        yield return m.Type;
                     break;
                 case IntegrationEventDecl ie:
-                    foreach (var m in ie.Members) yield return m.Type;
+                    foreach (var m in ie.Members)
+                        yield return m.Type;
                     break;
                 case AggregateDecl agg when agg.Repository is { } repo:
                     foreach (var finder in repo.Finders)
                     {
                         yield return finder.ResultType;
-                        foreach (var p in finder.Parameters) yield return p.Type;
+                        foreach (var p in finder.Parameters)
+                            yield return p.Type;
                     }
                     break;
                 case ReadModelDecl rm:
                     foreach (var f in rm.Fields)
-                        if (f.Type is not null) yield return f.Type;
+                        if (f.Type is not null)
+                            yield return f.Type;
                     break;
                 case QueryDecl q:
                     yield return q.ResultType;
-                    foreach (var p in q.Criteria) yield return p.Type;
+                    foreach (var p in q.Criteria)
+                        yield return p.Type;
                     break;
             }
         }
@@ -387,12 +408,15 @@ public sealed class ModelIndex
             foreach (var op in svc.Operations)
             {
                 yield return op.ReturnType;
-                foreach (var p in op.Parameters) yield return p.Type;
+                foreach (var p in op.Parameters)
+                    yield return p.Type;
             }
             foreach (var uc in svc.UseCases)
             {
-                if (uc.ReturnType is not null) yield return uc.ReturnType;
-                foreach (var p in uc.Parameters) yield return p.Type;
+                if (uc.ReturnType is not null)
+                    yield return uc.ReturnType;
+                foreach (var p in uc.Parameters)
+                    yield return p.Type;
             }
         }
     }
@@ -433,14 +457,18 @@ public sealed class ModelIndex
     private static void NoteIdNamesIn(TypeRef tr, Action<string> note)
     {
         note(tr.Name);
-        if (tr.Element is not null) NoteIdNamesIn(tr.Element, note);
-        if (tr.Value is not null) NoteIdNamesIn(tr.Value, note);
+        if (tr.Element is not null)
+            NoteIdNamesIn(tr.Element, note);
+        if (tr.Value is not null)
+            NoteIdNamesIn(tr.Value, note);
     }
 
     private void NoteIdReferences(TypeRef type)
     {
-        if (type.Element is not null) NoteIdReferences(type.Element);
-        if (type.Value is not null) NoteIdReferences(type.Value);
+        if (type.Element is not null)
+            NoteIdReferences(type.Element);
+        if (type.Value is not null)
+            NoteIdReferences(type.Value);
         if (!_byName.ContainsKey(type.Name) && IsIdConvention(type.Name))
             _idTypeNames.Add(type.Name);
     }
@@ -560,11 +588,13 @@ public sealed class ModelIndex
     {
         foreach (var r in _relations)
         {
-            if (!PermitKinds.Contains(r.Kind)) continue;
+            if (!PermitKinds.Contains(r.Kind))
+                continue;
             // Directed: downstream (fromContext) may see upstream's types. Bidirectional: either way.
             var match = (r.Downstream == fromContext && r.Upstream == upstream)
                         || (r.IsBidirectional && r.Upstream == fromContext && r.Downstream == upstream);
-            if (match) return true;
+            if (match)
+                return true;
         }
         return false;
     }
@@ -609,9 +639,12 @@ public sealed class ModelIndex
         {
             var kindOk = r.Kind is ContextRelationKind.OpenHost
                 or ContextRelationKind.PublishedLanguage or ContextRelationKind.CustomerSupplier;
-            if (!kindOk) continue;
-            if (r.Upstream == publisher && r.Downstream == subscriber) return true;
-            if (r.IsBidirectional && r.Downstream == publisher && r.Upstream == subscriber) return true;
+            if (!kindOk)
+                continue;
+            if (r.Upstream == publisher && r.Downstream == subscriber)
+                return true;
+            if (r.IsBidirectional && r.Downstream == publisher && r.Upstream == subscriber)
+                return true;
         }
         return false;
     }
@@ -715,11 +748,16 @@ public sealed class ModelIndex
     /// <summary>Classifies a type by its simple name.</summary>
     public TypeKind Classify(string typeName)
     {
-        if (Primitives.Contains(typeName)) return TypeKind.Primitive;
-        if (typeName == ListTypeName) return TypeKind.List;
-        if (typeName == SetTypeName) return TypeKind.Set;
-        if (typeName == MapTypeName) return TypeKind.Map;
-        if (typeName == RangeTypeName) return TypeKind.Range;
+        if (Primitives.Contains(typeName))
+            return TypeKind.Primitive;
+        if (typeName == ListTypeName)
+            return TypeKind.List;
+        if (typeName == SetTypeName)
+            return TypeKind.Set;
+        if (typeName == MapTypeName)
+            return TypeKind.Map;
+        if (typeName == RangeTypeName)
+            return TypeKind.Range;
         if (_byName.TryGetValue(typeName, out var decl))
             return decl switch
             {
@@ -733,7 +771,8 @@ public sealed class ModelIndex
                 QueryDecl => TypeKind.Query,
                 _ => TypeKind.Unknown
             };
-        if (_idTypeNames.Contains(typeName) || IsIdConvention(typeName)) return TypeKind.IdValueObject;
+        if (_idTypeNames.Contains(typeName) || IsIdConvention(typeName))
+            return TypeKind.IdValueObject;
         return TypeKind.Unknown;
     }
 

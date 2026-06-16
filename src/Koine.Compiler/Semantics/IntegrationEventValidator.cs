@@ -95,7 +95,9 @@ internal static class IntegrationEventValidator
             diagnostics.Add(Diagnostic.Error(DiagnosticCodes.IntegrationEventLeaksInternals,
                 $"integration-event field type '{tr.Name}' references an internal type; only primitives, enums, ID value objects, and other integration events may cross a boundary", tr.Span));
 
-        if (tr.Element is not null) CheckIntegrationEventFieldType(context, tr.Element, index, diagnostics);
-        if (tr.Value is not null) CheckIntegrationEventFieldType(context, tr.Value, index, diagnostics);
+        if (tr.Element is not null)
+            CheckIntegrationEventFieldType(context, tr.Element, index, diagnostics);
+        if (tr.Value is not null)
+            CheckIntegrationEventFieldType(context, tr.Value, index, diagnostics);
     }
 }

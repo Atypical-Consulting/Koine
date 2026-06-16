@@ -82,16 +82,20 @@ internal sealed class WatchSession
         var ms = (int)_debounce.TotalMilliseconds;
         if (ms <= 0)
         {
-            while (changes.TryTake(out _)) { }
+            while (changes.TryTake(out _))
+            { }
             return;
         }
-        try { while (changes.TryTake(out _, ms, ct)) { } }
+        try
+        { while (changes.TryTake(out _, ms, ct)) { } }
         catch (OperationCanceledException) { }
     }
 
     private void SafeBuild()
     {
-        try { _beforeBuild?.Invoke(); } catch { /* a failed console clear must not stop the watch */ }
+        try
+        { _beforeBuild?.Invoke(); }
+        catch { /* a failed console clear must not stop the watch */ }
 
         var stamp = _clock().ToString("HH:mm:ss");
         try

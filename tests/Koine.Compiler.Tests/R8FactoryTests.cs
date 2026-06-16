@@ -57,7 +57,8 @@ public class R8FactoryTests
     {
         var line = asm.GetType("Sales.OrderLine")!;
         var list = (IList)Activator.CreateInstance(typeof(List<>).MakeGenericType(line))!;
-        for (var i = 0; i < count; i++) list.Add(NewLine(asm));
+        for (var i = 0; i < count; i++)
+            list.Add(NewLine(asm));
         return list;
     }
 

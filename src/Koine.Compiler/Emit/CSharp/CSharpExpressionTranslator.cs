@@ -466,7 +466,10 @@ internal sealed class CSharpExpressionTranslator
             if (wasPresent)
             {
                 _locals.Add(name);
-                if (prevType is not null) _localTypes[name] = prevType; else _localTypes.Remove(name);
+                if (prevType is not null)
+                    _localTypes[name] = prevType;
+                else
+                    _localTypes.Remove(name);
             }
             else
             {
@@ -544,20 +547,42 @@ internal sealed class CSharpExpressionTranslator
         switch (ma.MemberName)
         {
             // Collection ops.
-            case "isEmpty": sb.Append(t).Append(".Count == 0"); return;
-            case "isNotEmpty": sb.Append(t).Append(".Count != 0"); return;
-            case "count": sb.Append(t).Append(".Count"); return;
+            case "isEmpty":
+                sb.Append(t).Append(".Count == 0");
+                return;
+            case "isNotEmpty":
+                sb.Append(t).Append(".Count != 0");
+                return;
+            case "count":
+                sb.Append(t).Append(".Count");
+                return;
             // String ops.
-            case "length": sb.Append(t).Append(".Length"); return;
-            case "trim": sb.Append(t).Append(".Trim()"); return;
-            case "lower": sb.Append(t).Append(".ToLowerInvariant()"); return;
-            case "upper": sb.Append(t).Append(".ToUpperInvariant()"); return;
-            case "isBlank": sb.Append("string.IsNullOrWhiteSpace(").Append(t).Append(')'); return;
+            case "length":
+                sb.Append(t).Append(".Length");
+                return;
+            case "trim":
+                sb.Append(t).Append(".Trim()");
+                return;
+            case "lower":
+                sb.Append(t).Append(".ToLowerInvariant()");
+                return;
+            case "upper":
+                sb.Append(t).Append(".ToUpperInvariant()");
+                return;
+            case "isBlank":
+                sb.Append("string.IsNullOrWhiteSpace(").Append(t).Append(')');
+                return;
             // Optional presence checks.
-            case "isPresent": sb.Append(t).Append(" is not null"); return;
-            case "isNone": sb.Append(t).Append(" is null"); return;
+            case "isPresent":
+                sb.Append(t).Append(" is not null");
+                return;
+            case "isNone":
+                sb.Append(t).Append(" is null");
+                return;
             // Plain field access.
-            default: sb.Append(t).Append('.').Append(CSharpNaming.ToPascalCase(ma.MemberName)); return;
+            default:
+                sb.Append(t).Append('.').Append(CSharpNaming.ToPascalCase(ma.MemberName));
+                return;
         }
     }
 
@@ -569,17 +594,35 @@ internal sealed class CSharpExpressionTranslator
         switch (op)
         {
             // String / collection membership (both map to .Contains).
-            case "startsWith": sb.Append(t).Append(".StartsWith(").Append(Render(call.Args[0], mode)).Append(')'); return;
-            case "endsWith": sb.Append(t).Append(".EndsWith(").Append(Render(call.Args[0], mode)).Append(')'); return;
-            case "contains": sb.Append(t).Append(".Contains(").Append(Render(call.Args[0], mode)).Append(')'); return;
+            case "startsWith":
+                sb.Append(t).Append(".StartsWith(").Append(Render(call.Args[0], mode)).Append(')');
+                return;
+            case "endsWith":
+                sb.Append(t).Append(".EndsWith(").Append(Render(call.Args[0], mode)).Append(')');
+                return;
+            case "contains":
+                sb.Append(t).Append(".Contains(").Append(Render(call.Args[0], mode)).Append(')');
+                return;
 
             // Collection predicates / aggregations (lambda argument).
-            case "all": sb.Append(t).Append(".All(").Append(RenderLambda(call, mode)).Append(')'); return;
-            case "any": sb.Append(t).Append(".Any(").Append(RenderLambda(call, mode)).Append(')'); return;
-            case "none": sb.Append('!').Append(t).Append(".Any(").Append(RenderLambda(call, mode)).Append(')'); return;
-            case "min": sb.Append(t).Append(".Min(").Append(RenderLambda(call, mode)).Append(')'); return;
-            case "max": sb.Append(t).Append(".Max(").Append(RenderLambda(call, mode)).Append(')'); return;
-            case "sum": WriteSum(call, t, mode, sb); return;
+            case "all":
+                sb.Append(t).Append(".All(").Append(RenderLambda(call, mode)).Append(')');
+                return;
+            case "any":
+                sb.Append(t).Append(".Any(").Append(RenderLambda(call, mode)).Append(')');
+                return;
+            case "none":
+                sb.Append('!').Append(t).Append(".Any(").Append(RenderLambda(call, mode)).Append(')');
+                return;
+            case "min":
+                sb.Append(t).Append(".Min(").Append(RenderLambda(call, mode)).Append(')');
+                return;
+            case "max":
+                sb.Append(t).Append(".Max(").Append(RenderLambda(call, mode)).Append(')');
+                return;
+            case "sum":
+                WriteSum(call, t, mode, sb);
+                return;
             case "distinctBy":
                 // "all distinct by the selector": count of distinct keys equals count.
                 sb.Append(t).Append(".Select(").Append(RenderLambda(call, mode))
@@ -645,7 +688,8 @@ internal sealed class CSharpExpressionTranslator
         var wasPresent = _locals.Contains(lambda.Parameter);
         _locals.Add(lambda.Parameter);
         var body = Render(lambda.Body, mode);
-        if (!wasPresent) _locals.Remove(lambda.Parameter);
+        if (!wasPresent)
+            _locals.Remove(lambda.Parameter);
         return $"{CSharpNaming.ToCamelCase(lambda.Parameter)} => {body}";
     }
 
@@ -673,12 +717,24 @@ internal sealed class CSharpExpressionTranslator
         {
             switch (c)
             {
-                case '\\': sb.Append("\\\\"); break;
-                case '"': sb.Append("\\\""); break;
-                case '\n': sb.Append("\\n"); break;
-                case '\r': sb.Append("\\r"); break;
-                case '\t': sb.Append("\\t"); break;
-                default: sb.Append(c); break;
+                case '\\':
+                    sb.Append("\\\\");
+                    break;
+                case '"':
+                    sb.Append("\\\"");
+                    break;
+                case '\n':
+                    sb.Append("\\n");
+                    break;
+                case '\r':
+                    sb.Append("\\r");
+                    break;
+                case '\t':
+                    sb.Append("\\t");
+                    break;
+                default:
+                    sb.Append(c);
+                    break;
             }
         }
         return sb.ToString();

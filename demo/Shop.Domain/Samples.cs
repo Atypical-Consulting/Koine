@@ -1,5 +1,5 @@
-using Koine.Runtime;
 using Customers;                       // spec extension methods (customer.IsVip())
+using Koine.Runtime;
 using Kernel = Catalog__Ordering.Kernel;
 
 namespace Shop.Domain;

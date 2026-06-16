@@ -94,35 +94,43 @@ internal static class Program
             switch (arg)
             {
                 case "--target":
-                    if (i + 1 >= args.Length) { error = "--target requires a value"; return false; }
+                    if (i + 1 >= args.Length)
+                    { error = "--target requires a value"; return false; }
                     target = args[++i];
                     break;
                 case "--out":
-                    if (i + 1 >= args.Length) { error = "--out requires a value"; return false; }
+                    if (i + 1 >= args.Length)
+                    { error = "--out requires a value"; return false; }
                     outDir = args[++i];
                     break;
                 case "--glossary":
-                    if (i + 1 >= args.Length) { error = "--glossary requires a <file> value"; return false; }
+                    if (i + 1 >= args.Length)
+                    { error = "--glossary requires a <file> value"; return false; }
                     glossaryFile = args[++i];
                     break;
                 case "--config":
-                    if (i + 1 >= args.Length) { error = "--config requires a <file> value"; return false; }
+                    if (i + 1 >= args.Length)
+                    { error = "--config requires a <file> value"; return false; }
                     configPath = args[++i];
                     break;
                 default:
-                    if (arg.StartsWith('-')) { error = $"unknown option '{arg}'"; return false; }
-                    if (file is not null) { error = $"unexpected argument '{arg}'"; return false; }
+                    if (arg.StartsWith('-'))
+                    { error = $"unknown option '{arg}'"; return false; }
+                    if (file is not null)
+                    { error = $"unexpected argument '{arg}'"; return false; }
                     file = arg;
                     break;
             }
         }
 
-        if (file is null) { error = "requires a <file.koi> or directory argument"; return false; }
+        if (file is null)
+        { error = "requires a <file.koi> or directory argument"; return false; }
 
         KoineConfig config;
         if (configPath is not null)
         {
-            if (!File.Exists(configPath)) { error = $"config not found: {configPath}"; return false; }
+            if (!File.Exists(configPath))
+            { error = $"config not found: {configPath}"; return false; }
             config = KoineConfig.Parse(File.ReadAllText(configPath));
         }
         else
@@ -515,7 +523,8 @@ internal static class Program
         watcher.InternalBufferSize = 64 * 1024;
 
         var changes = new BlockingCollection<object>();
-        void Bump() { try { changes.Add(new object()); } catch (InvalidOperationException) { } }
+        void Bump()
+        { try { changes.Add(new object()); } catch (InvalidOperationException) { } }
         watcher.Changed += (_, _) => Bump();
         watcher.Created += (_, _) => Bump();
         watcher.Deleted += (_, _) => Bump();

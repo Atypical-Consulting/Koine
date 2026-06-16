@@ -135,10 +135,12 @@ public sealed class KoineFormatter
     private static int EndLineOf(IToken t)
     {
         var text = t.Text;
-        if (text is null) return t.Line;
+        if (text is null)
+            return t.Line;
         var newlines = 0;
         foreach (var c in text)
-            if (c == '\n') newlines++;
+            if (c == '\n')
+                newlines++;
         return t.Line + newlines;
     }
 
@@ -183,14 +185,20 @@ public sealed class KoineFormatter
         if (c == KoineLexer.DOT || p == KoineLexer.DOT)
             return false;
 
-        if (p == KoineLexer.LPAREN) return false;   // no space just inside '('
-        if (p == KoineLexer.AT) return false;        // @annotation glued to its name
-        if (p == KoineLexer.NOT) return false;       // unary ! glued to its operand
+        if (p == KoineLexer.LPAREN)
+            return false;   // no space just inside '('
+        if (p == KoineLexer.AT)
+            return false;        // @annotation glued to its name
+        if (p == KoineLexer.NOT)
+            return false;       // unary ! glued to its operand
 
         // Generic type argument lists: List<OrderLine>, Map<K, V>.
-        if (c == KoineLexer.LT && IsGenericOpen(prev)) return false;  // before the opening '<'
-        if (p == KoineLexer.LT && genericDepth > 0) return false;     // after an opening generic '<'
-        if (c == KoineLexer.GT && genericDepth > 0) return false;     // before a closing generic '>'
+        if (c == KoineLexer.LT && IsGenericOpen(prev))
+            return false;  // before the opening '<'
+        if (p == KoineLexer.LT && genericDepth > 0)
+            return false;     // after an opening generic '<'
+        if (c == KoineLexer.GT && genericDepth > 0)
+            return false;     // before a closing generic '>'
 
         // Call / construction parentheses glue to the callee (foo(...), Currency("€", 2)).
         if (c == KoineLexer.LPAREN && (p == KoineLexer.Identifier || p == KoineLexer.RPAREN || p == KoineLexer.GT))
@@ -225,13 +233,15 @@ public sealed class KoineFormatter
             var groupMax = line.FieldName.Length;
             for (var j = i + 1; j < lines.Count; j++)
             {
-                if (!lines[j].IsField || lines[j].IndentDepth != line.IndentDepth) break;
+                if (!lines[j].IsField || lines[j].IndentDepth != line.IndentDepth)
+                    break;
                 groupMax = Math.Max(groupMax, lines[j].FieldName.Length);
             }
             // Re-scan backwards too, so every member of the group shares one width.
             for (var j = i - 1; j >= 0; j--)
             {
-                if (!lines[j].IsField || lines[j].IndentDepth != line.IndentDepth) break;
+                if (!lines[j].IsField || lines[j].IndentDepth != line.IndentDepth)
+                    break;
                 groupMax = Math.Max(groupMax, lines[j].FieldName.Length);
             }
 

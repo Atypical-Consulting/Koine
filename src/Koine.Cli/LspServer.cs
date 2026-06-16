@@ -67,12 +67,16 @@ internal sealed class LspServer
     private static void Log(string message)
     {
         var line = $"[koine-lsp] {message}";
-        try { Console.Error.WriteLine(line); } catch { /* never fail on logging */ }
+        try
+        { Console.Error.WriteLine(line); }
+        catch { /* never fail on logging */ }
 
         var path = Environment.GetEnvironmentVariable("KOINE_LSP_LOG");
         if (!string.IsNullOrEmpty(path))
         {
-            try { File.AppendAllText(path, line + Environment.NewLine); } catch { /* ignore */ }
+            try
+            { File.AppendAllText(path, line + Environment.NewLine); }
+            catch { /* ignore */ }
         }
     }
 
@@ -85,7 +89,8 @@ internal sealed class LspServer
                 return 0; // EOF
 
             JsonDocument doc;
-            try { doc = JsonDocument.Parse(message); }
+            try
+            { doc = JsonDocument.Parse(message); }
             catch (JsonException) { continue; }
 
             using (doc)
@@ -98,153 +103,153 @@ internal sealed class LspServer
                 Log("<- " + method);
                 try
                 {
-                switch (method)
-                {
-                    case "initialize":
-                        if (root.TryGetProperty("params", out var initParams))
-                        {
-                            if (initParams.TryGetProperty("rootUri", out var ru) && ru.ValueKind == JsonValueKind.String)
-                                ScanWorkspace(ru.GetString()!);
-                            if (initParams.TryGetProperty("workspaceFolders", out var folders)
-                                && folders.ValueKind == JsonValueKind.Array)
-                                foreach (var f in folders.EnumerateArray())
-                                    if (f.TryGetProperty("uri", out var fu) && fu.ValueKind == JsonValueKind.String)
-                                        ScanWorkspace(fu.GetString()!);
-                        }
-                        Respond(root, new Dictionary<string, object?>
-                        {
-                            ["capabilities"] = new Dictionary<string, object?>
+                    switch (method)
+                    {
+                        case "initialize":
+                            if (root.TryGetProperty("params", out var initParams))
                             {
-                                ["textDocumentSync"] = 1, // Full
-                                ["completionProvider"] = new Dictionary<string, object?>
+                                if (initParams.TryGetProperty("rootUri", out var ru) && ru.ValueKind == JsonValueKind.String)
+                                    ScanWorkspace(ru.GetString()!);
+                                if (initParams.TryGetProperty("workspaceFolders", out var folders)
+                                    && folders.ValueKind == JsonValueKind.Array)
+                                    foreach (var f in folders.EnumerateArray())
+                                        if (f.TryGetProperty("uri", out var fu) && fu.ValueKind == JsonValueKind.String)
+                                            ScanWorkspace(fu.GetString()!);
+                            }
+                            Respond(root, new Dictionary<string, object?>
+                            {
+                                ["capabilities"] = new Dictionary<string, object?>
                                 {
-                                    ["resolveProvider"] = false,
-                                    ["triggerCharacters"] = new[] { ":", "." },
-                                },
-                                ["hoverProvider"] = true,
-                                ["definitionProvider"] = true,
-                                ["documentFormattingProvider"] = true,
-                                ["documentSymbolProvider"] = true,
-                                ["referencesProvider"] = true,
-                                ["renameProvider"] = true,
-                                ["codeActionProvider"] = true,
-                                ["semanticTokensProvider"] = new Dictionary<string, object?>
-                                {
-                                    ["legend"] = new Dictionary<string, object?>
+                                    ["textDocumentSync"] = 1, // Full
+                                    ["completionProvider"] = new Dictionary<string, object?>
                                     {
-                                        ["tokenTypes"] = SemanticTokenProvider.TokenTypeNames,
-                                        ["tokenModifiers"] = SemanticTokenProvider.TokenModifierNames,
+                                        ["resolveProvider"] = false,
+                                        ["triggerCharacters"] = new[] { ":", "." },
                                     },
-                                    ["full"] = true,
+                                    ["hoverProvider"] = true,
+                                    ["definitionProvider"] = true,
+                                    ["documentFormattingProvider"] = true,
+                                    ["documentSymbolProvider"] = true,
+                                    ["referencesProvider"] = true,
+                                    ["renameProvider"] = true,
+                                    ["codeActionProvider"] = true,
+                                    ["semanticTokensProvider"] = new Dictionary<string, object?>
+                                    {
+                                        ["legend"] = new Dictionary<string, object?>
+                                        {
+                                            ["tokenTypes"] = SemanticTokenProvider.TokenTypeNames,
+                                            ["tokenModifiers"] = SemanticTokenProvider.TokenModifierNames,
+                                        },
+                                        ["full"] = true,
+                                    },
                                 },
-                            },
-                            ["serverInfo"] = new Dictionary<string, object?>
+                                ["serverInfo"] = new Dictionary<string, object?>
+                                {
+                                    ["name"] = "koine",
+                                    ["version"] = typeof(LspServer).Assembly.GetName().Version?.ToString() ?? "0.0.0",
+                                },
+                            });
+                            break;
+
+                        case "textDocument/didOpen":
+                            if (TryGetTextDocument(root, out var openUri, out var openText))
                             {
-                                ["name"] = "koine",
-                                ["version"] = typeof(LspServer).Assembly.GetName().Version?.ToString() ?? "0.0.0",
-                            },
-                        });
-                        break;
+                                _docs[openUri] = openText;
+                                PublishWorkspaceDiagnostics();
+                            }
+                            break;
 
-                    case "textDocument/didOpen":
-                        if (TryGetTextDocument(root, out var openUri, out var openText))
-                        {
-                            _docs[openUri] = openText;
-                            PublishWorkspaceDiagnostics();
-                        }
-                        break;
+                        case "textDocument/didChange":
+                            if (TryGetChange(root, out var changeUri, out var changeText))
+                            {
+                                _docs[changeUri] = changeText;
+                                PublishWorkspaceDiagnostics();
+                            }
+                            break;
 
-                    case "textDocument/didChange":
-                        if (TryGetChange(root, out var changeUri, out var changeText))
-                        {
-                            _docs[changeUri] = changeText;
-                            PublishWorkspaceDiagnostics();
-                        }
-                        break;
+                        case "textDocument/didSave":
+                            if (TryGetSave(root, out var saveUri, out var saveText) && saveText is not null)
+                            {
+                                _docs[saveUri] = saveText;
+                                PublishWorkspaceDiagnostics();
+                            }
+                            break;
 
-                    case "textDocument/didSave":
-                        if (TryGetSave(root, out var saveUri, out var saveText) && saveText is not null)
-                        {
-                            _docs[saveUri] = saveText;
-                            PublishWorkspaceDiagnostics();
-                        }
-                        break;
+                        case "textDocument/didClose":
+                            if (TryGetUri(root, out var closeUri))
+                            {
+                                _docs.Remove(closeUri);
+                                PublishDiagnostics(closeUri, diagnostics: Array.Empty<object>()); // clear
+                            }
+                            break;
 
-                    case "textDocument/didClose":
-                        if (TryGetUri(root, out var closeUri))
-                        {
-                            _docs.Remove(closeUri);
-                            PublishDiagnostics(closeUri, diagnostics: Array.Empty<object>()); // clear
-                        }
-                        break;
+                        case "textDocument/completion":
+                            if (root.TryGetProperty("id", out _))
+                                Respond(root, CompletionResult(root));
+                            break;
 
-                    case "textDocument/completion":
-                        if (root.TryGetProperty("id", out _))
-                            Respond(root, CompletionResult(root));
-                        break;
+                        case "textDocument/hover":
+                            if (root.TryGetProperty("id", out _))
+                                Respond(root, HoverResultJson(root));
+                            break;
 
-                    case "textDocument/hover":
-                        if (root.TryGetProperty("id", out _))
-                            Respond(root, HoverResultJson(root));
-                        break;
+                        case "textDocument/definition":
+                            if (root.TryGetProperty("id", out _))
+                                Respond(root, DefinitionResultJson(root));
+                            break;
 
-                    case "textDocument/definition":
-                        if (root.TryGetProperty("id", out _))
-                            Respond(root, DefinitionResultJson(root));
-                        break;
+                        case "textDocument/formatting":
+                            if (root.TryGetProperty("id", out _))
+                                Respond(root, FormattingResultJson(root));
+                            break;
 
-                    case "textDocument/formatting":
-                        if (root.TryGetProperty("id", out _))
-                            Respond(root, FormattingResultJson(root));
-                        break;
+                        case "textDocument/documentSymbol":
+                            if (root.TryGetProperty("id", out _))
+                                Respond(root, DocumentSymbolResultJson(root));
+                            break;
 
-                    case "textDocument/documentSymbol":
-                        if (root.TryGetProperty("id", out _))
-                            Respond(root, DocumentSymbolResultJson(root));
-                        break;
+                        case "textDocument/references":
+                            if (root.TryGetProperty("id", out _))
+                                Respond(root, ReferencesResultJson(root));
+                            break;
 
-                    case "textDocument/references":
-                        if (root.TryGetProperty("id", out _))
-                            Respond(root, ReferencesResultJson(root));
-                        break;
+                        case "textDocument/rename":
+                            if (root.TryGetProperty("id", out _))
+                                Respond(root, RenameResultJson(root));
+                            break;
 
-                    case "textDocument/rename":
-                        if (root.TryGetProperty("id", out _))
-                            Respond(root, RenameResultJson(root));
-                        break;
+                        case "textDocument/codeAction":
+                            if (root.TryGetProperty("id", out _))
+                                Respond(root, CodeActionResultJson(root));
+                            break;
 
-                    case "textDocument/codeAction":
-                        if (root.TryGetProperty("id", out _))
-                            Respond(root, CodeActionResultJson(root));
-                        break;
+                        case "textDocument/semanticTokens/full":
+                            if (root.TryGetProperty("id", out _))
+                                Respond(root, SemanticTokensResultJson(root));
+                            break;
 
-                    case "textDocument/semanticTokens/full":
-                        if (root.TryGetProperty("id", out _))
-                            Respond(root, SemanticTokensResultJson(root));
-                        break;
+                        case "shutdown":
+                            Respond(root, result: (object?)null);
+                            break;
 
-                    case "shutdown":
-                        Respond(root, result: (object?)null);
-                        break;
+                        case "exit":
+                            return 0;
 
-                    case "exit":
-                        return 0;
+                        // Lifecycle/trace notifications we accept but don't act on. Listed
+                        // explicitly so they're documented no-ops rather than "method not found"
+                        // noise in the logs. (They carry no id, so no response is owed.)
+                        case "initialized":
+                        case "$/cancelRequest":
+                        case "$/setTrace":
+                            break;
 
-                    // Lifecycle/trace notifications we accept but don't act on. Listed
-                    // explicitly so they're documented no-ops rather than "method not found"
-                    // noise in the logs. (They carry no id, so no response is owed.)
-                    case "initialized":
-                    case "$/cancelRequest":
-                    case "$/setTrace":
-                        break;
-
-                    default:
-                        // Unknown request (has an id): reply method-not-found so the
-                        // client doesn't block waiting. Unknown notifications: ignore.
-                        if (root.TryGetProperty("id", out _))
-                            RespondError(root, -32601, "method not found: " + method);
-                        break;
-                }
+                        default:
+                            // Unknown request (has an id): reply method-not-found so the
+                            // client doesn't block waiting. Unknown notifications: ignore.
+                            if (root.TryGetProperty("id", out _))
+                                RespondError(root, -32601, "method not found: " + method);
+                            break;
+                    }
                 }
                 catch (Exception ex)
                 {
@@ -320,7 +325,8 @@ internal sealed class LspServer
             if (startLine < targetLines.Length)
             {
                 var idx = targetLines[startLine].IndexOf(requested, keywordChar, StringComparison.Ordinal);
-                if (idx >= 0) { startChar = idx; endChar = idx + requested.Length; }
+                if (idx >= 0)
+                { startChar = idx; endChar = idx + requested.Length; }
             }
         }
 
@@ -537,7 +543,8 @@ internal sealed class LspServer
     {
         const string marker = "did you mean '";
         var i = message.IndexOf(marker, StringComparison.Ordinal);
-        if (i < 0) return null;
+        if (i < 0)
+            return null;
         var start = i + marker.Length;
         var end = message.IndexOf('\'', start);
         return end > start ? message[start..end] : null;
@@ -558,7 +565,8 @@ internal sealed class LspServer
 
     private static bool TryGetPosition(JsonElement root, out int line, out int character)
     {
-        line = 0; character = 0;
+        line = 0;
+        character = 0;
         if (root.TryGetProperty("params", out var p)
             && p.TryGetProperty("position", out var pos)
             && pos.TryGetProperty("line", out var l)
@@ -758,12 +766,16 @@ internal sealed class LspServer
 
     private static string? PathToUri(string path)
     {
-        try { return new Uri(path).AbsoluteUri; } catch { return null; }
+        try
+        { return new Uri(path).AbsoluteUri; }
+        catch { return null; }
     }
 
     private static string? UriToPath(string uri)
     {
-        try { var u = new Uri(uri); return u.IsFile ? u.LocalPath : null; } catch { return null; }
+        try
+        { var u = new Uri(uri); return u.IsFile ? u.LocalPath : null; }
+        catch { return null; }
     }
 
     /// <summary>Scans the workspace root for *.koi files into <see cref="_workspaceFiles"/>.</summary>
@@ -782,8 +794,10 @@ internal sealed class LspServer
                 if (rel.Contains("/bin/") || rel.Contains("/obj/") || rel.Contains("/.git/"))
                     continue;
                 var uri = PathToUri(path);
-                if (uri is null) continue;
-                try { _workspaceFiles[uri] = File.ReadAllText(path); }
+                if (uri is null)
+                    continue;
+                try
+                { _workspaceFiles[uri] = File.ReadAllText(path); }
                 catch (Exception ex) { Log($"skip {path}: {ex.Message}"); }
             }
             Log($"workspace scan indexed {_workspaceFiles.Count} .koi file(s)");
@@ -806,7 +820,8 @@ internal sealed class LspServer
 
     private static bool TryGetTextDocument(JsonElement root, out string uri, out string text)
     {
-        uri = ""; text = "";
+        uri = "";
+        text = "";
         if (root.TryGetProperty("params", out var p)
             && p.TryGetProperty("textDocument", out var td)
             && td.TryGetProperty("uri", out var u)
@@ -821,7 +836,8 @@ internal sealed class LspServer
 
     private static bool TryGetChange(JsonElement root, out string uri, out string text)
     {
-        uri = ""; text = "";
+        uri = "";
+        text = "";
         if (!TryGetUri(root, out uri))
             return false;
         if (root.TryGetProperty("params", out var p)
