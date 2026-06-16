@@ -1,10 +1,32 @@
 # Koine editor tooling
 
+## Command-line developer tools (R17.3)
+
+Beyond `koine build`, the CLI ships the day-to-day workflow commands:
+
+```bash
+koine init [dir] [--force]     # scaffold domain.koi + koine.config + README.md (must build immediately)
+koine fmt  <file|dir> [--check] # canonically format .koi; --check verifies without writing (exit 1 if not)
+koine watch <file|dir> [...]    # rebuild on every change, debounced, honoring --target/--out/koine.config
+```
+
+- **`koine fmt`** is a token-stream reprinter: 2-space indentation, K&R braces, one space after `:`
+  with the type columns of consecutive `name: Type` fields aligned, single spaces around binary
+  operators, and collapsed blank runs. It preserves every comment and emits string/regex literals
+  byte-for-byte, and is idempotent (`fmt(fmt(x)) == fmt(x)`). Source line breaks are preserved
+  (it normalizes layout, it does not reflow).
+- **`koine.config`** (written by `init`, read by `build`/`watch`) supplies defaults for `--target`
+  and `--out`; its structured `targets.*` block is reserved for R16 and ignored today.
+
 ## Syntax highlighting for `.koi`
 
 `koine-textmate/` is a TextMate grammar bundle (also a valid VS Code grammar extension) that
-highlights Koine source. It scopes keywords, declaration names, field names, primitive types,
-invariants, the `matches /regex/` literal, strings, numbers, comments, and operators.
+highlights Koine source. It scopes every keyword (all declaration kinds, clauses, and the
+hyphenated context-map roles), declaration names, field names, primitive and collection types
+(`List`/`Set`/`Map`/`Range`), annotations (`@since`), invariants, the `matches /regex/` literal,
+strings, numbers, line/block/doc comments, and the full operator set (`-> <-> <- => ?? @` …). The
+grammar is verified against the real TextMate engine over every `.koi` in `examples/` and `demo/`.
+Package it as a `.vsix` with `npm run package` (after `npm run install-vsce`).
 
 ```
 koine-textmate/

@@ -15,6 +15,7 @@ internal sealed record TokenContext(
     IToken? CurrentToken,
     string Partial,
     string? EnclosingKeyword,
+    string? EnclosingTypeName,
     bool InsideStringOrRegex);
 
 internal static class TokenLocator
@@ -24,6 +25,13 @@ internal static class TokenLocator
     {
         "context", "value", "quantity", "entity", "aggregate", "enum", "event",
         "spec", "service", "policy", "repository", "states",
+    };
+
+    // Block keywords whose declared type has fields that are in scope inside its body
+    // (so an expression there can reference them) — used for field-name completion.
+    private static readonly HashSet<string> FieldedTypeKeywords = new(StringComparer.Ordinal)
+    {
+        "value", "quantity", "entity", "aggregate",
     };
 
     /// <summary>
@@ -104,8 +112,9 @@ internal static class TokenLocator
             ? ""
             : current.Text.Substring(0, Math.Clamp(targetCol - current.Column, 0, current.Text.Length));
 
+        var (enclosingKeyword, enclosingType) = EnclosingScope(def, targetLine, targetCol);
         return new TokenContext(preceding, beforePreceding, current, partial,
-            EnclosingKeyword(def, targetLine, targetCol), insideStringOrRegex);
+            enclosingKeyword, enclosingType, insideStringOrRegex);
     }
 
     private static bool IsWord(IToken t)
@@ -135,35 +144,54 @@ internal static class TokenLocator
         t.Line < line || (t.Line == line && t.Column < col);
 
     /// <summary>
-    /// The keyword of the innermost <c>{ }</c> block enclosing the cursor (e.g.
-    /// <c>service</c>, <c>entity</c>), or <c>null</c> at file scope. A forward scan
-    /// pushes the most recent block keyword on each <c>{</c> and pops on <c>}</c>.
+    /// The innermost <c>{ }</c> block enclosing the cursor: its introducing keyword
+    /// (e.g. <c>service</c>, <c>entity</c>), and the name of the nearest enclosing
+    /// fielded type (value/entity/aggregate/quantity) whose fields are in scope — used
+    /// to offer field-name completions inside invariant/command/create bodies. A forward
+    /// scan pushes each block's (keyword, name) on <c>{</c> and pops on <c>}</c>.
     /// </summary>
-    private static string? EnclosingKeyword(List<IToken> def, int line, int col)
+    private static (string? Keyword, string? FieldedType) EnclosingScope(List<IToken> def, int line, int col)
     {
-        var stack = new Stack<string>();
-        string? pending = null;
+        var stack = new Stack<(string Keyword, string? Name)>();
+        string? pendingKeyword = null;
+        string? pendingName = null;
         foreach (var t in def)
         {
             if (!Before(t, line, col))
                 break;
             if (t.Type == KoineLexer.LBRACE)
             {
-                stack.Push(pending ?? "");
-                pending = null;
+                stack.Push((pendingKeyword ?? "", pendingName));
+                pendingKeyword = null;
+                pendingName = null;
             }
             else if (t.Type == KoineLexer.RBRACE)
             {
                 if (stack.Count > 0) stack.Pop();
-                pending = null;
+                pendingKeyword = null;
+                pendingName = null;
             }
             else if (BlockKeywords.Contains(t.Text))
             {
-                pending = t.Text;
+                pendingKeyword = t.Text;
+                pendingName = null;
+            }
+            else if (pendingKeyword is not null && pendingName is null && IsWord(t))
+            {
+                pendingName = t.Text; // the declared name following the block keyword
             }
         }
-        if (stack.Count == 0) return null;
-        var top = stack.Peek();
-        return top.Length == 0 ? null : top;
+
+        string? keyword = stack.Count == 0 ? null : (stack.Peek().Keyword.Length == 0 ? null : stack.Peek().Keyword);
+
+        string? fieldedType = null;
+        foreach (var frame in stack) // Stack enumerates innermost-first
+            if (FieldedTypeKeywords.Contains(frame.Keyword) && frame.Name is not null)
+            {
+                fieldedType = frame.Name;
+                break;
+            }
+
+        return (keyword, fieldedType);
     }
 }

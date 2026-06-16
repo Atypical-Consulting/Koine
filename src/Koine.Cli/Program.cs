@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Reflection;
 using Koine.Compiler.Ast;
 using Koine.Compiler.Diagnostics;
@@ -23,6 +24,9 @@ internal static class Program
             "--version" or "-v" => RunVersion(),
             "build" => RunBuild(args.Skip(1).ToArray()),
             "check" => RunCheck(args.Skip(1).ToArray()),
+            "fmt" => RunFmt(args.Skip(1).ToArray()),
+            "init" => RunInit(args.Skip(1).ToArray()),
+            "watch" => RunWatch(args.Skip(1).ToArray()),
             "lsp" => LspServer.Run(),
             "--help" or "-h" or "help" => PrintUsageTo(Console.Out),
             _ => UnknownCommand(args[0]),
@@ -43,12 +47,24 @@ internal static class Program
         return 1;
     }
 
-    private static int RunBuild(string[] args)
+    /// <summary>A parsed, config-resolved build invocation, shared by <c>build</c> and <c>watch</c>.</summary>
+    private readonly record struct BuildRequest(string File, string Target, string? OutDir, string? GlossaryFile);
+
+    /// <summary>
+    /// Parses the flags common to <c>build</c> and <c>watch</c> (<c>--target</c>,
+    /// <c>--out</c>, <c>--glossary</c>, <c>--config</c>) and the positional input path,
+    /// then fills any omitted <c>--target</c>/<c>--out</c> from a <c>koine.config</c>.
+    /// </summary>
+    private static bool TryParseBuild(string[] args, out BuildRequest request, out string? error)
     {
+        request = default;
+        error = null;
+
         string? file = null;
-        string target = "csharp";
+        string? target = null;
         string? outDir = null;
         string? glossaryFile = null;
+        string? configPath = null;
 
         for (var i = 0; i < args.Length; i++)
         {
@@ -56,32 +72,63 @@ internal static class Program
             switch (arg)
             {
                 case "--target":
-                    if (i + 1 >= args.Length)
-                        return UsageError("--target requires a value");
+                    if (i + 1 >= args.Length) { error = "--target requires a value"; return false; }
                     target = args[++i];
                     break;
                 case "--out":
-                    if (i + 1 >= args.Length)
-                        return UsageError("--out requires a value");
+                    if (i + 1 >= args.Length) { error = "--out requires a value"; return false; }
                     outDir = args[++i];
                     break;
                 case "--glossary":
-                    if (i + 1 >= args.Length)
-                        return UsageError("--glossary requires a <file> value");
+                    if (i + 1 >= args.Length) { error = "--glossary requires a <file> value"; return false; }
                     glossaryFile = args[++i];
                     break;
+                case "--config":
+                    if (i + 1 >= args.Length) { error = "--config requires a <file> value"; return false; }
+                    configPath = args[++i];
+                    break;
                 default:
-                    if (arg.StartsWith('-'))
-                        return UsageError($"unknown option '{arg}'");
-                    if (file is not null)
-                        return UsageError($"unexpected argument '{arg}'");
+                    if (arg.StartsWith('-')) { error = $"unknown option '{arg}'"; return false; }
+                    if (file is not null) { error = $"unexpected argument '{arg}'"; return false; }
                     file = arg;
                     break;
             }
         }
 
-        if (file is null)
-            return UsageError("build requires a <file.koi> or directory argument");
+        if (file is null) { error = "requires a <file.koi> or directory argument"; return false; }
+
+        KoineConfig config;
+        if (configPath is not null)
+        {
+            if (!File.Exists(configPath)) { error = $"config not found: {configPath}"; return false; }
+            config = KoineConfig.Parse(File.ReadAllText(configPath));
+        }
+        else
+        {
+            config = KoineConfig.Discover(file);
+        }
+
+        request = new BuildRequest(file, target ?? config.Target ?? "csharp", outDir ?? config.OutDir, glossaryFile);
+        return true;
+    }
+
+    private static int RunBuild(string[] args)
+    {
+        if (!TryParseBuild(args, out var request, out var error))
+            return UsageError(error!);
+        return BuildOnce(request) ? 0 : 1;
+    }
+
+    /// <summary>
+    /// Runs one build for <paramref name="r"/>, printing diagnostics and progress, and
+    /// returns whether it succeeded. Shared by <c>build</c> (once) and <c>watch</c> (per change).
+    /// </summary>
+    private static bool BuildOnce(BuildRequest r)
+    {
+        var file = r.File;
+        var target = r.Target;
+        var outDir = r.OutDir;
+        var glossaryFile = r.GlossaryFile;
 
         IEmitter emitter = target.ToLowerInvariant() switch
         {
@@ -90,7 +137,10 @@ internal static class Program
             _ => null!
         };
         if (emitter is null)
-            return UsageError($"unsupported target '{target}' (supported: csharp, glossary)");
+        {
+            Console.Error.WriteLine($"error: unsupported target '{target}' (supported: csharp, glossary)");
+            return false;
+        }
 
         // A path may be a single .koi file or a directory of them (compiled as one model).
         List<SourceFile> sources;
@@ -101,18 +151,18 @@ internal static class Program
         catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException)
         {
             Console.Error.WriteLine($"error: file not found: {file}");
-            return 1;
+            return false;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             Console.Error.WriteLine($"error: cannot read '{file}': {ex.Message}");
-            return 1;
+            return false;
         }
 
         if (sources.Count == 0)
         {
             Console.Error.WriteLine($"error: no .koi files found under '{file}'");
-            return 1;
+            return false;
         }
 
         var compiler = new KoineCompiler();
@@ -129,7 +179,7 @@ internal static class Program
         }
 
         if (hasError)
-            return 1;
+            return false;
 
         // --glossary writes a Markdown glossary to a specific file, independent of
         // the chosen --target/--out (so you can emit C# AND a glossary in one run).
@@ -147,7 +197,7 @@ internal static class Program
         {
             if (glossaryFile is null)
                 Console.WriteLine($"OK: {file} parsed and validated");
-            return 0;
+            return true;
         }
 
         // Remove previously generated output we own (top-level namespace folders),
@@ -174,6 +224,242 @@ internal static class Program
         }
 
         Console.WriteLine($"wrote {count} files to {outDir}");
+        return true;
+    }
+
+    // ---- fmt (R17.3) -------------------------------------------------------
+
+    private static int RunFmt(string[] args)
+    {
+        string? path = null;
+        var check = false;
+
+        foreach (var arg in args)
+        {
+            if (arg == "--check")
+                check = true;
+            else if (arg.StartsWith('-'))
+                return UsageError($"unknown option '{arg}'");
+            else if (path is not null)
+                return UsageError($"unexpected argument '{arg}'");
+            else
+                path = arg;
+        }
+
+        if (path is null)
+            return UsageError("fmt requires a <file.koi> or directory argument");
+
+        List<SourceFile> sources;
+        try
+        {
+            sources = ReadSources(path);
+        }
+        catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException)
+        {
+            Console.Error.WriteLine($"error: file not found: {path}");
+            return 1;
+        }
+
+        if (sources.Count == 0)
+        {
+            Console.Error.WriteLine($"error: no .koi files found under '{path}'");
+            return 1;
+        }
+
+        var formatter = new Koine.Compiler.Formatting.KoineFormatter();
+        var changed = 0;
+
+        foreach (var source in sources)
+        {
+            var result = formatter.Format(source.Source);
+            if (!result.Changed)
+                continue;
+            changed++;
+
+            if (check)
+            {
+                // --check never writes; it reports each unformatted file and exits non-zero.
+                Console.Error.WriteLine($"{source.Path}: not formatted");
+            }
+            else
+            {
+                File.WriteAllText(source.Path, result.Text);
+                Console.WriteLine($"formatted {source.Path}");
+            }
+        }
+
+        if (check)
+        {
+            if (changed > 0)
+            {
+                Console.Error.WriteLine($"error: {changed} file(s) need formatting (run `koine fmt`)");
+                return 1;
+            }
+            Console.WriteLine($"OK: {sources.Count} file(s) already formatted");
+            return 0;
+        }
+
+        Console.WriteLine(changed == 0
+            ? $"OK: {sources.Count} file(s) already formatted"
+            : $"formatted {changed} of {sources.Count} file(s)");
+        return 0;
+    }
+
+    // ---- init (R17.3) ------------------------------------------------------
+
+    /// <summary>The starter domain model written by <c>koine init</c>. It must build end-to-end.</summary>
+    internal const string ScaffoldModel =
+        """
+        /// The Catalog bounded context: the products available for sale.
+        context Catalog {
+
+          /// A monetary amount in a given currency. Amounts are never negative.
+          value Money {
+            amount:   Decimal
+            currency: Currency
+            invariant amount >= 0 "a monetary amount cannot be negative"
+          }
+
+          /// The currencies the catalog supports.
+          enum Currency { EUR, USD, GBP }
+
+          /// A product offered in the catalog, identified by a generated id.
+          entity Product identified by ProductId {
+            name:  String
+            price: Money
+          }
+        }
+        """ + "\n";
+
+    /// <summary>A forward-compatible <c>koine.config</c>; only <c>target</c>/<c>out</c> are read today.</summary>
+    internal const string ScaffoldConfig =
+        """
+        # koine.config — build defaults for this domain model (R17.3).
+        # `koine build` / `koine watch` use these when the matching flag is omitted.
+
+        target = csharp
+        out = generated
+
+        # Forward-compatible (R16, not yet implemented): structured per-target emitter
+        # options such as namespace mapping, Instant handling, and output layout, e.g.
+        #   targets.csharp = { namespaces = { Catalog = "Acme.Catalog" }, instantMode = dateTimeOffset, layout = filePerType }
+        """ + "\n";
+
+    private const string ScaffoldReadme =
+        """
+        # Koine domain model
+
+        This project models a bounded context with [Koine](https://github.com/Atypical-Consulting/Koine).
+
+        ## Build
+
+        ```bash
+        koine build domain.koi          # emits C# into ./generated (see koine.config)
+        koine watch domain.koi          # re-emits on every save
+        koine fmt domain.koi            # canonically formats the model
+        ```
+
+        Edit `domain.koi` to describe your own value objects, entities, aggregates,
+        and the invariants that must always hold.
+        """ + "\n";
+
+    private static int RunInit(string[] args)
+    {
+        string? dir = null;
+        var force = false;
+
+        foreach (var arg in args)
+        {
+            if (arg == "--force")
+                force = true;
+            else if (arg.StartsWith('-'))
+                return UsageError($"unknown option '{arg}'");
+            else if (dir is not null)
+                return UsageError($"unexpected argument '{arg}'");
+            else
+                dir = arg;
+        }
+
+        return InitProject(dir ?? ".", force, Console.Out, Console.Error) ? 0 : 1;
+    }
+
+    /// <summary>
+    /// Scaffolds <c>domain.koi</c>, <c>koine.config</c>, and <c>README.md</c> in
+    /// <paramref name="dir"/>. Refuses to overwrite any existing scaffold file unless
+    /// <paramref name="force"/>. Returns whether the project was written.
+    /// </summary>
+    internal static bool InitProject(string dir, bool force, TextWriter stdout, TextWriter stderr)
+    {
+        var files = new (string Name, string Content)[]
+        {
+            ("domain.koi", ScaffoldModel),
+            (KoineConfig.FileName, ScaffoldConfig),
+            ("README.md", ScaffoldReadme),
+        };
+
+        Directory.CreateDirectory(dir);
+
+        if (!force)
+        {
+            var existing = files
+                .Where(f => File.Exists(Path.Combine(dir, f.Name)))
+                .Select(f => f.Name)
+                .ToList();
+            if (existing.Count > 0)
+            {
+                stderr.WriteLine($"error: refusing to overwrite existing file(s): {string.Join(", ", existing)} (use --force)");
+                return false;
+            }
+        }
+
+        foreach (var (name, content) in files)
+            File.WriteAllText(Path.Combine(dir, name), content);
+
+        stdout.WriteLine($"initialized koine project in {dir}");
+        stdout.WriteLine("  domain.koi     starter model");
+        stdout.WriteLine("  koine.config   build defaults");
+        stdout.WriteLine("  README.md      project notes");
+        stdout.WriteLine($"next: koine build {Path.Combine(dir, "domain.koi")}");
+        return true;
+    }
+
+    // ---- watch (R17.3) -----------------------------------------------------
+
+    private static int RunWatch(string[] args)
+    {
+        if (!TryParseBuild(args, out var request, out var error))
+            return UsageError(error!);
+
+        // Watch the input's directory (or the directory itself), filtered to .koi files.
+        var watchDir = Directory.Exists(request.File)
+            ? request.File
+            : Path.GetDirectoryName(Path.GetFullPath(request.File)) ?? ".";
+
+        using var watcher = new FileSystemWatcher(watchDir, "*.koi")
+        {
+            IncludeSubdirectories = true,
+            NotifyFilter = NotifyFilters.LastWrite | NotifyFilters.FileName | NotifyFilters.Size,
+        };
+
+        var changes = new BlockingCollection<object>();
+        void Bump() { try { changes.Add(new object()); } catch (InvalidOperationException) { } }
+        watcher.Changed += (_, _) => Bump();
+        watcher.Created += (_, _) => Bump();
+        watcher.Deleted += (_, _) => Bump();
+        watcher.Renamed += (_, _) => Bump();
+        watcher.EnableRaisingEvents = true;
+
+        using var cts = new CancellationTokenSource();
+        Console.CancelKeyPress += (_, e) =>
+        {
+            e.Cancel = true;            // let the loop unwind cleanly instead of killing the process
+            cts.Cancel();
+            changes.CompleteAdding();
+        };
+
+        Console.WriteLine($"watching {watchDir} for *.koi changes — press Ctrl+C to stop");
+        var session = new WatchSession(() => BuildOnce(request), Console.Out, TimeSpan.FromMilliseconds(250));
+        session.Run(changes, cts.Token);
         return 0;
     }
 
@@ -311,9 +597,12 @@ internal static class Program
         writer.WriteLine();
         writer.WriteLine("Usage:");
         writer.WriteLine("  koine --version");
-        writer.WriteLine("  koine build <file.koi|dir> [--target csharp|glossary] [--out <dir>] [--glossary <file.md>]");
-        writer.WriteLine("  koine check <file.koi|dir> --baseline <dir>   # flag breaking changes vs a published baseline");
-        writer.WriteLine("  koine lsp                       # Language Server (stdio) for editor diagnostics");
+        writer.WriteLine("  koine build <file.koi|dir> [--target csharp|glossary] [--out <dir>] [--glossary <file.md>] [--config <file>]");
+        writer.WriteLine("  koine watch <file.koi|dir> [--target …] [--out …] [--config <file>]   # rebuild on every change");
+        writer.WriteLine("  koine fmt   <file.koi|dir> [--check]            # canonically format .koi (--check: verify only)");
+        writer.WriteLine("  koine init  [dir] [--force]                    # scaffold a starter project");
+        writer.WriteLine("  koine check <file.koi|dir> --baseline <dir>    # flag breaking changes vs a published baseline");
+        writer.WriteLine("  koine lsp                                      # Language Server (stdio) for editor diagnostics");
         return 0;
     }
 }

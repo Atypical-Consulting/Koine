@@ -89,7 +89,43 @@ public sealed class KoineLanguageService
             || trigger == KoineLexer.RBRACE)
             return Keywords(StartersFor(ctx.EnclosingKeyword));
 
+        // Expression-operand position inside a fielded type body (e.g. `invariant
+        // amount >= 0`, `requires qty > 0`): offer that type's field names. We only
+        // fire after a token that begins/continues an expression, so we never add
+        // noise at a declaration or parameter position.
+        if (index is not null && ctx.EnclosingTypeName is { } scopeType && IsExpressionOperand(trigger))
+            return FieldCandidates(index, scopeType);
+
         return Array.Empty<CompletionItem>();
+    }
+
+    // Tokens after which an identifier is an expression operand (so a field name fits).
+    // ASSIGN (enum defaults) and DOT (member access, kept noise-free) are deliberately excluded.
+    private static bool IsExpressionOperand(int? trigger) => trigger is
+        KoineLexer.INVARIANT or KoineLexer.REQUIRES or KoineLexer.WHEN or KoineLexer.IF
+        or KoineLexer.ELSE or KoineLexer.COALESCE or KoineLexer.NOT or KoineLexer.MINUS
+        or KoineLexer.PLUS or KoineLexer.STAR or KoineLexer.SLASH or KoineLexer.EQ
+        or KoineLexer.NEQ or KoineLexer.LT or KoineLexer.LE or KoineLexer.GT or KoineLexer.GE
+        or KoineLexer.AND or KoineLexer.OR or KoineLexer.MATCHES or KoineLexer.LARROW;
+
+    private static IReadOnlyList<CompletionItem> FieldCandidates(ModelIndex index, string typeName) =>
+        index.MemberNames(typeName)
+            .Select(name =>
+            {
+                var detail = index.TryGetMemberType(typeName, name, out var t) ? RenderType(t) : "field";
+                return new CompletionItem(name, CompletionItemKind.Field, detail, null);
+            })
+            .ToList();
+
+    /// <summary>Renders a (possibly generic/optional) type reference for a completion detail, e.g. <c>List&lt;OrderLine&gt;?</c>.</summary>
+    private static string RenderType(TypeRef t)
+    {
+        var name = t.Qualifier is { } q ? $"{q}.{t.Name}" : t.Name;
+        if (t.Element is not null)
+            name += t.Value is not null
+                ? $"<{RenderType(t.Element)}, {RenderType(t.Value)}>"
+                : $"<{RenderType(t.Element)}>";
+        return t.IsOptional ? name + "?" : name;
     }
 
     private static bool IsGenericArgPosition(TokenContext ctx, ModelIndex? index)

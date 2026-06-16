@@ -818,6 +818,8 @@ context Sales version 3 {
 
 _BRIEF §9 and the README position TypeScript and Rust as the proof that the Ast/ + IEmitter seam is genuinely target-agnostic; today only CSharpEmitter exists and the CLI hard-rejects any non-csharp target (Program.cs). Rust in particular forces error handling to map to `Result<T,E>` instead of the exception-based DomainInvariantViolationException — the strongest test of the seam. Real projects also need to configure the existing C# emitter (namespace mapping, NodaTime mode — still a literal 'TODO: NodaTime' in CSharpTypeMapper, output layout). This is the capstone of the long-term vision, sequenced last because it benefits from a mature, stable AST._
 
+> **⏸ Deferred.** R16 is intentionally held until the compiler core is stronger and the AST has stabilized (it is the capstone, and a multi-target seam is only worth proving on a mature model). `koine init` already emits a forward-compatible `koine.config` whose structured `targets.*` block (R16.1) is reserved but ignored by today's build, so adopting R16 later needs no migration.
+
 ### R16.1 C# emitter configuration (namespaces, NodaTime, layout)  ·  🟡 Medium
 *As an Architect, I want a structured emitter options object to map contexts to concrete namespaces, choose the Instant mapping, and control output layout, so that generated code drops into our existing project conventions.*
 
@@ -878,7 +880,7 @@ _BRIEF §8 lists LSP/editor tooling as a v0 non-goal, but it is squarely in scop
 - Highlighting is verified on examples/billing.koi including the regex invariant and the `when` guard
 
 ### R17.2 Language Server Protocol implementation  ·  🟡 Medium
-*As a Domain Developer, I want an LSP server for Koine, so that I get inline diagnostics, hover, completion, and go-to-definition while editing .koi files.*
+✅ **Delivered** — *As a Domain Developer, I want an LSP server for Koine, so that I get inline diagnostics, hover, completion, and go-to-definition while editing .koi files.*
 
 **Acceptance criteria**
 - A `koine lsp` (or separate Koine.LanguageServer) speaks LSP over stdio and reuses KoineCompiler for parse + semantic diagnostics
@@ -887,7 +889,7 @@ _BRIEF §8 lists LSP/editor tooling as a v0 non-goal, but it is squarely in scop
 - Integration tests drive the server with sample LSP messages and assert responses
 
 ### R17.3 koine fmt, init, and watch  ·  ⚪ Low
-*As a Domain Developer, I want `koine fmt`, `koine init`, and `koine watch`, so that .koi files stay canonically formatted, new projects scaffold in one command, and edits regenerate code automatically with fast feedback.*
+✅ **Delivered** — *As a Domain Developer, I want `koine fmt`, `koine init`, and `koine watch`, so that .koi files stay canonically formatted, new projects scaffold in one command, and edits regenerate code automatically with fast feedback.*
 
 **Acceptance criteria**
 - `koine fmt <file|dir>` rewrites files to a canonical style (consistent indentation, aligned `: type` columns, normalized operator spacing, preserved doc comments) and is idempotent; `--check` exits non-zero on unformatted files without writing

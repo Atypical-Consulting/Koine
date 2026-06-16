@@ -121,8 +121,11 @@ WS            : [ \t\r\n]+ -> skip ;
 // A 4th slash is excluded so `////…` is a longer match for LINE_COMMENT (and skipped),
 // matching the C#/Rust convention that `////` is an ordinary divider comment.
 DocComment    : '///' ( ~[/\r\n] ~[\r\n]* )? -> channel(DOC) ;
-LINE_COMMENT  : '//' ~[\r\n]* -> skip ;
-BLOCK_COMMENT : '/*' .*? '*/' -> skip ;
+// Ordinary comments go to the HIDDEN channel (not `skip`) so the formatter can
+// recover and preserve them; the parser only reads the default channel, so this
+// does not affect parsing or any semantic behaviour.
+LINE_COMMENT  : '//' ~[\r\n]* -> channel(HIDDEN) ;
+BLOCK_COMMENT : '/*' .*? '*/' -> channel(HIDDEN) ;
 
 // ---- Regex mode ------------------------------------------------------------
 
