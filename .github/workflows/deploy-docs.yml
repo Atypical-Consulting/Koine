@@ -33,6 +33,8 @@ jobs:
         uses: withastro/action@v3
         with:
           path: ./website
+          # Astro 6 / Starlight require Node >= 22.12 (the action defaults to 20).
+          node-version: 22
 
   deploy:
     needs: build
