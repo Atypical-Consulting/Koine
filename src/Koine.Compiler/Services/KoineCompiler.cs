@@ -33,7 +33,10 @@ public sealed class KoineCompiler
     {
         var (contexts, relations, diagnostics) = ParseUnit(source, file);
         if (contexts is null)
+        {
             return (null, diagnostics);
+        }
+
         return (Merge(contexts, relations), diagnostics);
     }
 
@@ -54,7 +57,9 @@ public sealed class KoineCompiler
             var (parsed, parsedRelations, diags) = ParseUnit(f.Source, f.Path);
             diagnostics.AddRange(diags);
             if (parsed is null)
+            {
                 anyFailed = true;
+            }
             else
             {
                 contexts.AddRange(parsed);
@@ -82,7 +87,9 @@ public sealed class KoineCompiler
 
         var tree = parser.program();
         if (listener.HasErrors)
+        {
             return (null, Array.Empty<ContextRelation>(), listener.Errors);
+        }
 
         var model = new KoineModelBuilderVisitor(tokens, file).BuildModel(tree);
         var relations = model.ContextMap?.Relations ?? Array.Empty<ContextRelation>();
@@ -137,7 +144,27 @@ public sealed class KoineCompiler
     {
         var (model, syntax) = Parse(source, file);
         if (model is null)
+        {
             return syntax;
+        }
+
+        return new SemanticValidator().Validate(model);
+    }
+
+    /// <summary>
+    /// Parses and validates a whole workspace as ONE model (like <see cref="Compile(IReadOnlyList{SourceFile}, IEmitter)"/>
+    /// but without emitting), so cross-file errors surface. Returns every diagnostic; each
+    /// carries its originating <see cref="Diagnostic.File"/> (when the model builder stamped one).
+    /// Used by the LSP server to publish per-file diagnostics over the merged workspace.
+    /// </summary>
+    public IReadOnlyList<Diagnostic> DiagnoseWorkspace(IReadOnlyList<SourceFile> files)
+    {
+        var (model, syntax) = Parse(files);
+        if (model is null)
+        {
+            return syntax;
+        }
+
         return new SemanticValidator().Validate(model);
     }
 
@@ -150,11 +177,15 @@ public sealed class KoineCompiler
     {
         var (model, syntax) = Parse(files);
         if (model is null)
+        {
             return new CompileResult(null, syntax, Array.Empty<EmittedFile>());
+        }
 
         var semantic = new SemanticValidator().Validate(model);
         if (semantic.Any(d => d.Severity == DiagnosticSeverity.Error))
+        {
             return new CompileResult(model, semantic, Array.Empty<EmittedFile>());
+        }
 
         var emitted = emitter.Emit(model);
         return new CompileResult(model, semantic, emitted);

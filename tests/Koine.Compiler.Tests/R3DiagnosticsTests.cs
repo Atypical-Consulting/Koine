@@ -223,4 +223,38 @@ public class R3DiagnosticsTests
             "}\n";
         Assert.Contains(Diagnose(src), d => d.Code == DiagnosticCodes.AmbiguousEnumMember);
     }
+
+    // A bare shared member in a comparison resolves against the EXPECTED enum type
+    // flowing in (not just the sibling operand): the comparison path now uses the
+    // same fallback context as the conditional/coalesce paths and the emitter, so a
+    // comparison the enclosing enum type makes unambiguous no longer needs
+    // qualification. (Deferred design: contextual typing for shared bare members.)
+    [Fact]
+    public void Shared_enum_member_in_comparison_resolves_by_expected_type()
+    {
+        const string src =
+            "context C {\n" +
+            "  enum A { Shared, OnlyA }\n" +
+            "  enum B { Shared, OnlyB }\n" +
+            // expected type A flows into the coalesce, pinning both bare `Shared`
+            // members in the right-hand comparison to enum A — no KOI0213.
+            "  value V { flag: Bool?  pick: A = flag ?? (Shared == Shared) }\n" +
+            "}\n";
+        Assert.DoesNotContain(Diagnose(src), d => d.Code == DiagnosticCodes.AmbiguousEnumMember);
+    }
+
+    // The expected type must be an enum that declares the member; when the expected
+    // type is Bool (the result of `==`), neither operand nor context selects a
+    // unique enum, so the bare-vs-bare comparison is still genuinely ambiguous.
+    [Fact]
+    public void Shared_enum_member_in_comparison_still_ambiguous_when_expected_is_not_enum()
+    {
+        const string src =
+            "context C {\n" +
+            "  enum A { Shared, OnlyA }\n" +
+            "  enum B { Shared, OnlyB }\n" +
+            "  value V { flag: Bool = Shared == Shared }\n" +
+            "}\n";
+        Assert.Contains(Diagnose(src), d => d.Code == DiagnosticCodes.AmbiguousEnumMember);
+    }
 }

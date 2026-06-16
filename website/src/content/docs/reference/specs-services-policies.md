@@ -18,14 +18,17 @@ spec IsVip on Customer = tier == Gold
 ```
 
 The expression is written in terms of the target type's members — `tier` refers to `Customer.tier`. Each spec
-becomes one static predicate on a per-context class `<Context>Specifications`, with the target instance bound
-to the parameter `x`:
+becomes one boolean **extension method** on a per-context static class `<Context>Specifications`, with the
+target instance bound to the parameter `x`. Because it extends the target type, you can call it fluently
+(`customer.IsVip()`) or statically (`CustomersSpecifications.IsVip(customer)`):
 
 ```csharp
 public static class CustomersSpecifications
 {
-    public static bool IsVip(Customer x) => x.Tier == LoyaltyTier.Gold;
+    public static bool IsVip(this Customer x) => x.Tier == LoyaltyTier.Gold;
 }
+
+// usage: customer.IsVip()  (with `using Customers;` in scope)
 ```
 
 ### Composing and referencing specs
@@ -155,7 +158,7 @@ lost. Referencing an unknown event or target command is a diagnostic.
 
 | Construct | Scope | Emitted file | Emitted shape |
 | --- | --- | --- | --- |
-| `spec N on T = <bool>` | context or aggregate | `<Context>Specifications.cs` | `static bool N(T x)` predicate |
+| `spec N on T = <bool>` | context or aggregate | `<Context>Specifications.cs` | `static bool N(this T x)` extension-method predicate |
 | `service N { operation … }` | context | `<Service>.cs` | `sealed class` (all pure) or `abstract class` (any seam) |
 | `policy N when E then …` | context | `<N>Policy.cs` | `I<N>Policy` interface + `abstract partial class <N>Policy` |
 

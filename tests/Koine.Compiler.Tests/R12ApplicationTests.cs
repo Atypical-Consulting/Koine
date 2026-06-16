@@ -79,7 +79,9 @@ public class R12ApplicationTests
         var (_, files) = Build(Fixture);
         var uow = FileContents(files, "Sales/IUnitOfWork.cs");
         foreach (var banned in new[] { "EntityFrameworkCore", "System.Data", "Dapper", "MongoDB", "DbContext" })
+        {
             Assert.DoesNotContain(banned, uow);
+        }
     }
 
     [Fact]

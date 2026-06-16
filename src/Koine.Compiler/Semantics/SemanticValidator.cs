@@ -15,16 +15,18 @@ public sealed class SemanticValidator
     public IReadOnlyList<Diagnostic> Validate(KoineModel model)
     {
         var index = new ModelIndex(model);
-        var enumMembers = CollectEnumMembers(model);
+        IReadOnlySet<string> enumMembers = CollectEnumMembers(model);
         var diagnostics = new List<Diagnostic>();
 
         ValidateUniqueTypeNames(model, diagnostics);
 
         // The context map is model-scoped (R14.1/R14.2): validate it once before the per-context loop.
         if (model.ContextMap is { } map)
-            ValidateContextMap(map, index, diagnostics);
+        {
+            ContextMapValidator.Validate(map, index, diagnostics);
+        }
 
-        foreach (var ctx in model.Contexts)
+        foreach (ContextNode ctx in model.Contexts)
         {
             // A per-context resolver so a type name shared across contexts (R13.2) resolves
             // to THIS context's declaration when checking member access.
@@ -33,13 +35,15 @@ public sealed class SemanticValidator
             ValidateContextScoping(ctx, index, diagnostics);
             ValidateAnnotationVersions(ctx, diagnostics);
 
-            foreach (var type in ctx.Types)
+            foreach (TypeDecl type in ctx.Types)
+            {
                 ValidateType(type, index, resolver, enumMembers, diagnostics);
+            }
 
             ValidateSpecs(ctx, index, resolver, enumMembers, diagnostics);
             ValidateServices(ctx, index, resolver, enumMembers, diagnostics);
             ValidatePolicies(ctx, index, resolver, enumMembers, diagnostics);
-            ValidateIntegrationEvents(ctx, index, model.ContextMap is not null, diagnostics);
+            IntegrationEventValidator.Validate(ctx, index, model.ContextMap is not null, diagnostics);
         }
 
         return diagnostics;
@@ -53,31 +57,45 @@ public sealed class SemanticValidator
     private static void ValidateAnnotationVersions(ContextNode ctx, List<Diagnostic> diagnostics)
     {
         if (ctx.Version is not { } ceiling)
+        {
             return;
+        }
 
-        foreach (var type in ctx.Types)
+        foreach (TypeDecl type in ctx.Types)
+        {
             ValidateAnnotationVersionsOfType(type, ctx.Name, ceiling, diagnostics);
+        }
     }
 
     private static void ValidateAnnotationVersionsOfType(
         TypeDecl type, string contextName, int ceiling, List<Diagnostic> diagnostics)
     {
         if (type.Since is { } typeSince && typeSince > ceiling)
+        {
             diagnostics.Add(Diagnostic.Warning(
                 DiagnosticCodes.AnnotationVersionAboveContext,
                 $"'{type.Name}' is annotated @since({typeSince}) but context '{contextName}' is only version {ceiling}.",
                 type.Span));
+        }
 
-        foreach (var m in AnnotatableMembers(type))
+        foreach (Member m in AnnotatableMembers(type))
+        {
             if (m.Since is { } memberSince && memberSince > ceiling)
+            {
                 diagnostics.Add(Diagnostic.Warning(
                     DiagnosticCodes.AnnotationVersionAboveContext,
                     $"Field '{m.Name}' is annotated @since({memberSince}) but context '{contextName}' is only version {ceiling}.",
                     m.Span));
+            }
+        }
 
         if (type is AggregateDecl agg)
-            foreach (var nested in agg.Types)
+        {
+            foreach (TypeDecl nested in agg.Types)
+            {
                 ValidateAnnotationVersionsOfType(nested, contextName, ceiling, diagnostics);
+            }
+        }
     }
 
     /// <summary>The member-bearing fields of a type (value/entity/event/integration event); empty otherwise.</summary>
@@ -100,7 +118,7 @@ public sealed class SemanticValidator
     private static void ValidateContextScoping(ContextNode ctx, ModelIndex index, List<Diagnostic> diagnostics)
     {
         // 1. Imports resolve to a declared context and (for named imports) exported types.
-        foreach (var imp in ctx.Imports)
+        foreach (ImportDecl imp in ctx.Imports)
         {
             if (!index.IsContext(imp.Context))
             {
@@ -109,31 +127,41 @@ public sealed class SemanticValidator
                 continue;
             }
             foreach (var name in imp.Names)
+            {
                 if (!index.DeclaresType(imp.Context, name))
+                {
                     diagnostics.Add(Diagnostic.Error(DiagnosticCodes.NotExported,
                         $"context '{imp.Context}' does not declare '{name}'", imp.Span));
+                }
+            }
         }
 
         // 2. A module name must not collide with a type name in the same context.
         if (ctx.ModuleNames.Count > 0)
         {
-            var typeNames = new HashSet<string>(FlattenTypeDecls(ctx).Select(t => t.Name), StringComparer.Ordinal);
+            var typeNames = new HashSet<string>(ctx.AllTypeDecls().Select(t => t.Name), StringComparer.Ordinal);
             foreach (var module in ctx.ModuleNames)
+            {
                 if (typeNames.Contains(module))
+                {
                     diagnostics.Add(Diagnostic.Error(DiagnosticCodes.ModuleNameCollision,
                         $"module '{module}' collides with a type of the same name in context '{ctx.Name}'",
                         ctx.Span));
+                }
+            }
         }
 
         // 3. Every referenced type resolves in this context's scope.
-        foreach (var tr in ModelIndex.AllTypeRefsIn(ctx))
+        foreach (TypeRef tr in ModelIndex.AllTypeRefsIn(ctx))
+        {
             ValidateReference(ctx.Name, tr, index, diagnostics);
+        }
     }
 
     /// <summary>Resolves a type reference (and its generic arguments) against a context's scope.</summary>
     private static void ValidateReference(string fromContext, TypeRef tr, ModelIndex index, List<Diagnostic> diagnostics)
     {
-        var r = index.ResolveReference(fromContext, tr);
+        ModelIndex.RefResolution r = index.ResolveReference(fromContext, tr);
         switch (r.Kind)
         {
             case ModelIndex.RefKind.UnimportedCrossContext:
@@ -164,7 +192,7 @@ public sealed class SemanticValidator
             && !index.DeclaresType(fromContext, tr.Name)
             && !index.IsKernelVisibleFrom(fromContext, tr.Name))
         {
-            var importOwners = index.ImportOwnersOf(fromContext, tr.Name);
+            IReadOnlyList<string> importOwners = index.ImportOwnersOf(fromContext, tr.Name);
             var owners = index.DeclaringContextsOf(tr.Name).Where(c => c != fromContext).ToList();
             // If a NON-ACL permit relation (open-host/conformist/…) makes a same-named type visible,
             // the reference binds there, not to the ACL upstream — no direct-reference warning.
@@ -172,8 +200,16 @@ public sealed class SemanticValidator
             foreach (var up in owners)
             {
                 // If the name is imported from a single owner that is not this upstream, it binds there.
-                if (importOwners.Count == 1 && importOwners[0] != up) continue;
-                if (permittedElsewhere) continue;
+                if (importOwners.Count == 1 && importOwners[0] != up)
+                {
+                    continue;
+                }
+
+                if (permittedElsewhere)
+                {
+                    continue;
+                }
+
                 if (index.HasAclRelation(up, fromContext))
                 {
                     diagnostics.Add(Diagnostic.Warning(DiagnosticCodes.AclDirectUpstreamReference,
@@ -185,211 +221,14 @@ public sealed class SemanticValidator
         }
 
         if (tr.Element is not null)
+        {
             ValidateReference(fromContext, tr.Element, index, diagnostics);
+        }
+
         if (tr.Value is not null)
+        {
             ValidateReference(fromContext, tr.Value, index, diagnostics);
-    }
-
-    /// <summary>Every type a context declares, flattening modules (already in Types) and aggregates' nested types.</summary>
-    private static IEnumerable<TypeDecl> FlattenTypeDecls(ContextNode ctx)
-    {
-        foreach (var t in ctx.Types)
-        {
-            yield return t;
-            if (t is AggregateDecl agg)
-                foreach (var nested in agg.Types)
-                    yield return nested;
         }
-    }
-
-    // ------------------------------------------------------------------------
-    // R14 — context map, shared kernel & ACL
-    // ------------------------------------------------------------------------
-
-    /// <summary>
-    /// Validates the strategic context map (R14.1/R14.2): both endpoints must be declared,
-    /// no self-relation, no duplicate pair; a <c>shared-kernel { }</c> block is only valid on a
-    /// shared-kernel relation (its types must be declared by a partner); an <c>acl { }</c> block
-    /// is only valid on an anti-corruption-layer relation (its mappings must map a real upstream
-    /// type to a real downstream type).
-    /// </summary>
-    private static void ValidateContextMap(ContextMapNode map, ModelIndex index, List<Diagnostic> diagnostics)
-    {
-        var seenPairs = new HashSet<(string, string)>();
-        // Which (normalized) kernel pair first claimed each shared type, to flag conflicting kernels.
-        var kernelOf = new Dictionary<string, (string, string)>(StringComparer.Ordinal);
-
-        foreach (var r in map.Relations)
-        {
-            // 1. Endpoints declared.
-            foreach (var endpoint in new[] { r.Upstream, r.Downstream })
-                if (!index.IsContext(endpoint))
-                    diagnostics.Add(Diagnostic.Error(DiagnosticCodes.ContextMapUnknownContext,
-                        $"context-map relation names unknown context '{endpoint}'", r.Span));
-
-            // 2. No self-relation.
-            if (r.Upstream == r.Downstream)
-                diagnostics.Add(Diagnostic.Error(DiagnosticCodes.SelfRelation,
-                    $"context '{r.Upstream}' cannot be related to itself", r.Span));
-
-            // 3. No duplicate pair (order-normalized, so reversed bidirectional pairs collide too).
-            var pair = string.CompareOrdinal(r.Upstream, r.Downstream) <= 0
-                ? (r.Upstream, r.Downstream) : (r.Downstream, r.Upstream);
-            if (!seenPairs.Add(pair) && r.Upstream != r.Downstream)
-                diagnostics.Add(Diagnostic.Error(DiagnosticCodes.DuplicateContextRelation,
-                    $"duplicate context-map relation between '{r.Upstream}' and '{r.Downstream}'", r.Span));
-
-            // 4. Block-vs-role agreement.
-            if (r.SharedTypes.Count > 0 && r.Kind != ContextRelationKind.SharedKernel)
-                diagnostics.Add(Diagnostic.Error(DiagnosticCodes.SharedTypesOnNonKernel,
-                    $"'shared-kernel {{ }}' block is only valid on a shared-kernel relation ('{r.Upstream}' -> '{r.Downstream}' is {RoleName(r.Kind)})", r.Span));
-            if (r.AclMappings.Count > 0 && r.Kind != ContextRelationKind.AntiCorruptionLayer)
-                diagnostics.Add(Diagnostic.Error(DiagnosticCodes.AclOnNonAclRole,
-                    $"'acl {{ }}' block is only valid on an anti-corruption-layer relation ('{r.Upstream}' -> '{r.Downstream}' is {RoleName(r.Kind)})", r.Span));
-
-            // 5. Shared-kernel membership: each listed type must be declared by a partner, and a
-            //    type may belong to only one kernel (a second, conflicting pair is an error).
-            if (r.Kind == ContextRelationKind.SharedKernel)
-            {
-                var kernelPair = string.CompareOrdinal(r.Upstream, r.Downstream) <= 0
-                    ? (r.Upstream, r.Downstream) : (r.Downstream, r.Upstream);
-                foreach (var t in r.SharedTypes)
-                {
-                    if (!index.DeclaresType(r.Upstream, t) && !index.DeclaresType(r.Downstream, t))
-                        diagnostics.Add(Diagnostic.Error(DiagnosticCodes.UnknownSharedKernelType,
-                            $"shared-kernel type '{t}' is declared by neither '{r.Upstream}' nor '{r.Downstream}'", r.Span));
-                    else if (index.Classify(t) is TypeKind.Entity or TypeKind.Aggregate)
-                        diagnostics.Add(Diagnostic.Error(DiagnosticCodes.SharedKernelNotShareable,
-                            $"shared-kernel type '{t}' is an {(index.Classify(t) == TypeKind.Entity ? "entity" : "aggregate")}; a shared kernel may contain only value objects and enums (identity-bearing types belong to one context)", r.Span));
-                    else if (kernelOf.TryGetValue(t, out var first) && first != kernelPair)
-                        diagnostics.Add(Diagnostic.Error(DiagnosticCodes.SharedKernelTypeConflict,
-                            $"type '{t}' is shared by more than one kernel ('{first.Item1}'/'{first.Item2}' and '{kernelPair.Item1}'/'{kernelPair.Item2}'); a type may belong to only one shared kernel", r.Span));
-                    else
-                        kernelOf[t] = kernelPair;
-                }
-            }
-
-            // 6. ACL mappings: partner agreement, existence, and no duplicate upstream type.
-            if (r.Kind == ContextRelationKind.AntiCorruptionLayer)
-            {
-                var seenUpstream = new HashSet<string>(StringComparer.Ordinal);
-                foreach (var m in r.AclMappings)
-                {
-                    var ok = m.UpstreamContext == r.Upstream && m.LocalContext == r.Downstream
-                             && index.DeclaresType(r.Upstream, m.UpstreamType)
-                             && index.DeclaresType(r.Downstream, m.LocalType)
-                             && seenUpstream.Add(m.UpstreamType);
-                    if (!ok)
-                        diagnostics.Add(Diagnostic.Error(DiagnosticCodes.AclMappingType,
-                            $"ACL mapping '{m.UpstreamContext}.{m.UpstreamType} -> {m.LocalContext}.{m.LocalType}' must map a distinct upstream '{r.Upstream}' type to a downstream '{r.Downstream}' type that both exist", m.Span));
-                }
-            }
-        }
-    }
-
-    /// <summary>The original hyphenated spelling of a relation role (for diagnostic messages).</summary>
-    private static string RoleName(ContextRelationKind kind) => kind switch
-    {
-        ContextRelationKind.Partnership => "partnership",
-        ContextRelationKind.SharedKernel => "shared-kernel",
-        ContextRelationKind.CustomerSupplier => "customer-supplier",
-        ContextRelationKind.Conformist => "conformist",
-        ContextRelationKind.AntiCorruptionLayer => "anti-corruption-layer",
-        ContextRelationKind.OpenHost => "open-host",
-        ContextRelationKind.PublishedLanguage => "published-language",
-        _ => kind.ToString()
-    };
-
-    // ------------------------------------------------------------------------
-    // R14.3 — integration events, publish & subscribe
-    // ------------------------------------------------------------------------
-
-    /// <summary>
-    /// Validates integration events (R14.3): field types may not leak internal types; a context may
-    /// only publish a locally-declared integration event (no duplicates); a subscription must name a
-    /// declared context that actually publishes the event, authorized by the context map.
-    /// </summary>
-    private static void ValidateIntegrationEvents(
-        ContextNode ctx, ModelIndex index, bool hasContextMap, List<Diagnostic> diagnostics)
-    {
-        // 1. Field-type leak check (KOI1409).
-        foreach (var decl in FlattenTypeDecls(ctx))
-            if (decl is IntegrationEventDecl ev)
-                foreach (var m in ev.Members)
-                    CheckIntegrationEventFieldType(ctx.Name, m.Type, index, diagnostics);
-
-        // 2. publishes: must name a local integration event; no duplicates.
-        var published = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var p in ctx.Publishes)
-        {
-            if (!published.Add(p.EventName))
-                diagnostics.Add(Diagnostic.Error(DiagnosticCodes.DuplicatePublish,
-                    $"context '{ctx.Name}' publishes '{p.EventName}' more than once", p.Span));
-            else if (!index.IsIntegrationEventIn(ctx.Name, p.EventName))
-                diagnostics.Add(Diagnostic.Error(DiagnosticCodes.UnknownPublishedEvent,
-                    $"'{p.EventName}' is not an integration event declared in context '{ctx.Name}'", p.Span));
-        }
-
-        // 3. subscribes: declared publisher context, actually published, map-authorized; no duplicates.
-        //    The handler seam is named IHandle<Event> from the simple event name, so two events that
-        //    share a name (from different publishers) would collide — reject that case (KOI1417).
-        var subscribed = new HashSet<(string, string)>();
-        var handlerNames = new Dictionary<string, string>(StringComparer.Ordinal);
-        foreach (var s in ctx.Subscribes)
-        {
-            if (!subscribed.Add((s.Context, s.EventName)))
-            {
-                diagnostics.Add(Diagnostic.Error(DiagnosticCodes.DuplicateSubscribe,
-                    $"context '{ctx.Name}' subscribes to '{s.Context}.{s.EventName}' more than once", s.Span));
-                continue;
-            }
-            if (handlerNames.TryGetValue(s.EventName, out var otherPublisher) && otherPublisher != s.Context)
-                diagnostics.Add(Diagnostic.Error(DiagnosticCodes.SubscribeHandlerNameCollision,
-                    $"context '{ctx.Name}' subscribes to '{s.EventName}' from both '{otherPublisher}' and '{s.Context}'; the generated IHandle{s.EventName} handler would collide", s.Span));
-            else
-                handlerNames[s.EventName] = s.Context;
-            if (!index.IsContext(s.Context))
-            {
-                diagnostics.Add(Diagnostic.Error(DiagnosticCodes.SubscribeUnknownContext,
-                    $"subscribe to unknown context '{s.Context}'", s.Span));
-                continue;
-            }
-            if (!index.PublishesEvent(s.Context, s.EventName))
-            {
-                diagnostics.Add(Diagnostic.Error(DiagnosticCodes.SubscribeNotPublished,
-                    $"context '{s.Context}' does not publish an integration event '{s.EventName}'", s.Span));
-                continue;
-            }
-            // A subscribe requires an authorizing relation — but only once a map is declared at all.
-            if (hasContextMap && !index.MaySubscribe(s.Context, ctx.Name))
-                diagnostics.Add(Diagnostic.Error(DiagnosticCodes.SubscribeNoRelation,
-                    $"context '{ctx.Name}' may not subscribe to '{s.Context}.{s.EventName}': no open-host, published-language, or customer-supplier relation from '{s.Context}' authorizes it", s.Span));
-        }
-    }
-
-    /// <summary>
-    /// Reports an integration-event field whose (possibly nested) type references an internal type.
-    /// Allowed: primitives, enums, ID value objects, other integration events, and collections of those.
-    /// </summary>
-    private static void CheckIntegrationEventFieldType(
-        string context, TypeRef tr, ModelIndex index, List<Diagnostic> diagnostics)
-    {
-        var kind = index.Classify(tr.Name);
-        var allowed = kind switch
-        {
-            TypeKind.Primitive or TypeKind.List or TypeKind.Set or TypeKind.Map or TypeKind.Range => true,
-            TypeKind.Enum or TypeKind.IdValueObject or TypeKind.IntegrationEvent => true,
-            // A qualified foreign integration event is allowed even if the local Classify can't see it.
-            TypeKind.Unknown when tr.Qualifier is { } q && index.IsIntegrationEventIn(q, tr.Name) => true,
-            TypeKind.Unknown => true,   // genuinely-unknown names are reported as KOI0101 elsewhere
-            _ => false                  // Value, Entity, Aggregate, Event (domain), ReadModel, Query
-        };
-        if (!allowed)
-            diagnostics.Add(Diagnostic.Error(DiagnosticCodes.IntegrationEventLeaksInternals,
-                $"integration-event field type '{tr.Name}' references an internal type; only primitives, enums, ID value objects, and other integration events may cross a boundary", tr.Span));
-
-        if (tr.Element is not null) CheckIntegrationEventFieldType(context, tr.Element, index, diagnostics);
-        if (tr.Value is not null) CheckIntegrationEventFieldType(context, tr.Value, index, diagnostics);
     }
 
     /// <summary>
@@ -409,35 +248,33 @@ public sealed class SemanticValidator
 
         // Uniqueness is now PER CONTEXT (R13.2): two bounded contexts may each declare a
         // `Money`; only a name duplicated within one context is a collision.
-        foreach (var ctx in model.Contexts)
+        foreach (ContextNode ctx in model.Contexts)
         {
             var seen = new HashSet<string>(StringComparer.Ordinal);
-            foreach (var type in Flatten(ctx))
+            foreach (TypeDecl type in ctx.AllTypeDecls())
             {
                 if (reserved.Contains(type.Name))
+                {
                     diagnostics.Add(Diagnostic.Error(DiagnosticCodes.ReservedTypeName,
                         $"'{type.Name}' is a reserved built-in generic name and cannot name a type", type.Span));
+                }
+
                 if (type is not AggregateDecl && !seen.Add(type.Name))
+                {
                     diagnostics.Add(Diagnostic.Error(DiagnosticCodes.DuplicateType, $"duplicate type '{type.Name}'", type.Span));
+                }
             }
 
             // A service emits a class into the context namespace, so its name shares the
             // type namespace — a collision with a type (or another service) is a duplicate.
-            foreach (var svc in ctx.Services)
+            foreach (ServiceDecl svc in ctx.Services)
+            {
                 if (!seen.Add(svc.Name))
+                {
                     diagnostics.Add(Diagnostic.Error(DiagnosticCodes.DuplicateType,
                         $"service '{svc.Name}' collides with a type or service of the same name", svc.Span));
-        }
-    }
-
-    private static IEnumerable<TypeDecl> Flatten(ContextNode ctx)
-    {
-        foreach (var t in ctx.Types)
-        {
-            yield return t;
-            if (t is AggregateDecl agg)
-                foreach (var nested in agg.Types)
-                    yield return nested;
+                }
+            }
         }
     }
 
@@ -455,42 +292,72 @@ public sealed class SemanticValidator
                 ReportGeneratedMemberCollisions(v.Members, ValueObjectGeneratedMembers, "value object", diagnostics);
                 ValidateMembersAndInvariants(v.Members, v.Invariants, index, resolver, enumMembers, diagnostics, SpecNames(index, v.Name));
                 if (v.IsQuantity)
+                {
                     ValidateQuantity(v, index, diagnostics);
+                }
+
                 break;
             case EntityDecl e:
-                ValidateIdentityStrategy(e, diagnostics);
+                EntityBehaviorValidator.ValidateIdentityStrategy(e, diagnostics);
                 ReportGeneratedMemberCollisions(e.Members, EntityGeneratedMembers, "entity", diagnostics);
-                var entitySpecs = SpecNames(index, e.Name);
+                IReadOnlySet<string> entitySpecs = SpecNames(index, e.Name);
                 ValidateMembersAndInvariants(e.Members, e.Invariants, index, resolver, enumMembers, diagnostics, entitySpecs);
-                ValidateStates(e, index, resolver, enumMembers, diagnostics);
+                EntityBehaviorValidator.ValidateStates(e, index, resolver, enumMembers, diagnostics);
                 // Events may be emitted only from a standalone entity or the aggregate root.
                 var emitAllowed = aggregateRoot is null || aggregateRoot == e.Name;
-                ValidateCommands(e, index, resolver, enumMembers, diagnostics, emitAllowed, entitySpecs);
-                ValidateFactories(e, index, resolver, enumMembers, diagnostics, emitAllowed);
+                EntityBehaviorValidator.ValidateCommands(e, index, resolver, enumMembers, diagnostics, emitAllowed, entitySpecs);
+                EntityBehaviorValidator.ValidateFactories(e, index, resolver, enumMembers, diagnostics, emitAllowed);
                 break;
             case AggregateDecl agg:
                 // The root must name an ENTITY declared inside the aggregate: a non-entity
                 // root has no identity/repository, and would leave the Unit of Work
                 // referencing an I<Root>Repository that is never emitted.
-                var rootDecl = agg.Types.FirstOrDefault(t => t.Name == agg.RootName);
+                TypeDecl? rootDecl = agg.Types.FirstOrDefault(t => t.Name == agg.RootName);
                 if (rootDecl is null)
+                {
                     diagnostics.Add(Diagnostic.Error(DiagnosticCodes.UnknownAggregateRoot,
                         $"unknown aggregate root '{agg.RootName}'", agg.Span));
+                }
                 else if (rootDecl is not EntityDecl)
+                {
                     diagnostics.Add(Diagnostic.Error(DiagnosticCodes.UnknownAggregateRoot,
                         $"aggregate root '{agg.RootName}' must be an entity", agg.Span));
-                foreach (var nested in agg.Types)
+                }
+
+                foreach (TypeDecl nested in agg.Types)
+                {
                     ValidateType(nested, index, resolver, enumMembers, diagnostics, agg.RootName);
-                ValidateVersioning(agg, diagnostics);
-                ValidateRepository(agg, index, diagnostics);
+                }
+
+                EntityBehaviorValidator.ValidateVersioning(agg, diagnostics);
+                EntityBehaviorValidator.ValidateRepository(agg, index, diagnostics);
                 break;
             case EnumDecl en:
                 // Duplicate enum members produce uncompilable C#.
                 var seenMembers = new HashSet<string>(StringComparer.Ordinal);
+                // Each member also becomes a camelCase delegate parameter on the generated
+                // Match/Switch; two members differing only by leading-char case (Foo/foo)
+                // collapse to one parameter, so guard that collision here too.
+                var seenCamel = new HashSet<string>(StringComparer.Ordinal);
                 foreach (var member in en.MemberNames)
+                {
                     if (!seenMembers.Add(member))
+                    {
                         diagnostics.Add(Diagnostic.Error(DiagnosticCodes.DuplicateEnumMember,
                             $"duplicate enum member '{member}'", en.Span));
+                    }
+                    else if (GeneratedEnumMembers.Contains(member))
+                    {
+                        diagnostics.Add(Diagnostic.Error(DiagnosticCodes.ReservedEnumMember,
+                            $"enum member '{member}' collides with a generated smart-enum member", en.Span));
+                    }
+
+                    if (member.Length > 0 && !seenCamel.Add(char.ToLowerInvariant(member[0]) + member[1..]))
+                    {
+                        diagnostics.Add(Diagnostic.Error(DiagnosticCodes.EnumMemberCamelCaseCollision,
+                            $"enum member '{member}' differs from another only by leading-character case and would collapse to one Match/Switch parameter", en.Span));
+                    }
+                }
                 ValidateEnumAssociatedData(en, index, diagnostics);
                 break;
             case EventDecl ev:
@@ -498,153 +365,46 @@ public sealed class SemanticValidator
                 ValidateMembersAndInvariants(ev.Members, Array.Empty<Invariant>(), index, resolver, enumMembers, diagnostics);
                 // An event is a record: the always-present `OccurredOn` metadata and the
                 // record-synthesized members (Equals/GetHashCode/ToString/…) are reserved.
-                foreach (var m in ev.Members)
+                foreach (Member m in ev.Members)
                 {
                     if (string.Equals(m.Name, "OccurredOn", StringComparison.OrdinalIgnoreCase))
+                    {
                         diagnostics.Add(Diagnostic.Error(DiagnosticCodes.ReservedEventField,
                             $"event field '{m.Name}' collides with the reserved 'OccurredOn' metadata property",
                             m.Span));
+                    }
                     else if (IsReservedRecordMember(m.Name))
+                    {
                         diagnostics.Add(Diagnostic.Error(DiagnosticCodes.ReservedRecordMember,
                             $"event field '{m.Name}' collides with a record-synthesized member",
                             m.Span));
+                    }
                 }
                 break;
             case ReadModelDecl rm:
-                ValidateReadModel(rm, index, resolver, enumMembers, diagnostics);
+                CqrsValidator.ValidateReadModel(rm, index, resolver, enumMembers, diagnostics);
                 break;
             case QueryDecl q:
-                ValidateQuery(q, index, diagnostics);
+                CqrsValidator.ValidateQuery(q, index, diagnostics);
                 break;
         }
     }
 
-    /// <summary>
-    /// Validates a read model (R12.3): the source must be a declared value/entity;
-    /// field names are unique; a direct field must name a source member; a derived
-    /// field's projection must resolve over the source and produce a value assignable
-    /// to its declared type.
-    /// </summary>
-    private static void ValidateReadModel(
-        ReadModelDecl rm, ModelIndex index, TypeResolver resolver, IReadOnlySet<string> enumMembers, List<Diagnostic> diagnostics)
-    {
-        var sourceMembers = ReadModelSourceMembers(resolver.Context, rm.SourceType, index);
-        if (sourceMembers is null)
-        {
-            diagnostics.Add(Diagnostic.Error(DiagnosticCodes.ReadModelUnknownSource,
-                $"read model '{rm.Name}' projects from '{rm.SourceType}', which is not a declared value or entity type",
-                rm.Span));
-            return;
-        }
-
-        // Build defensively (last-wins): a source value object with duplicate members
-        // (reported elsewhere as KOI0103) must not crash this loop.
-        var memberByName = new Dictionary<string, Member>(StringComparer.Ordinal);
-        foreach (var m in sourceMembers)
-            memberByName[m.Name] = m;
-        var sourceMemberNames = memberByName.Keys.ToArray();
-        var scope = TypeScope.FromMembers(sourceMembers);
-        var checker = new ExpressionChecker(index, resolver, enumMembers, diagnostics);
-        // The record property a field emits to (R12.3): a positional record property is
-        // PascalCased, so two fields differing only by their first-letter case collide.
-        var seen = new HashSet<string>(StringComparer.Ordinal);
-
-        foreach (var field in rm.Fields)
-        {
-            if (!seen.Add(PropertyKey(field.Name)))
-                diagnostics.Add(Diagnostic.Error(DiagnosticCodes.DuplicateReadModelField,
-                    $"duplicate field '{field.Name}' in read model '{rm.Name}'", field.Span));
-            if (IsReservedRecordMember(field.Name))
-                diagnostics.Add(Diagnostic.Error(DiagnosticCodes.ReservedRecordMember,
-                    $"read-model field '{field.Name}' collides with a record-synthesized member", field.Span));
-
-            if (field.Projection is null)
-            {
-                // A direct field must name a member (or the synthetic `id`) of the source.
-                if (!memberByName.ContainsKey(field.Name))
-                    diagnostics.Add(Diagnostic.Error(DiagnosticCodes.ReadModelUnknownField,
-                        $"read model '{rm.Name}' field '{field.Name}' is not a member of '{rm.SourceType}'{Suggestions.For(field.Name, sourceMemberNames)}",
-                        field.Span));
-            }
-            else
-            {
-                // A derived field: the projection resolves over the source; its declared
-                // type must be known and accept the projected value.
-                ValidateTypeRef(field.Type!, index, diagnostics);
-                checker.Check(field.Projection, scope, field.Type);
-                var inferred = resolver.Infer(field.Projection, scope);
-                if (inferred is not null && index.IsKnownType(field.Type!.Name)
-                    && !MemberAnalysis.IsAssignable(inferred, field.Type!))
-                    diagnostics.Add(Diagnostic.Error(DiagnosticCodes.ReadModelFieldTypeMismatch,
-                        $"read model '{rm.Name}' field '{field.Name}' is declared '{field.Type!.Name}' but projects a '{inferred.Name}'",
-                        field.Span));
-            }
-        }
-    }
-
-    /// <summary>
-    /// Validates a query (R12.4): criteria parameter types and names, and that the
-    /// result is a declared read model or a <c>List</c> of one.
-    /// </summary>
-    private static void ValidateQuery(QueryDecl q, ModelIndex index, List<Diagnostic> diagnostics)
-    {
-        // Criteria become positional record properties (PascalCased), so dedup on the
-        // emitted property key and reject names that collide with record members.
-        var seenParams = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var p in q.Criteria)
-        {
-            ValidateTypeRef(p.Type, index, diagnostics);
-            if (!seenParams.Add(PropertyKey(p.Name)))
-                diagnostics.Add(Diagnostic.Error(DiagnosticCodes.DuplicateParameter,
-                    $"duplicate criterion '{p.Name}' in query '{q.Name}'", p.Span));
-            if (IsReservedRecordMember(p.Name))
-                diagnostics.Add(Diagnostic.Error(DiagnosticCodes.ReservedRecordMember,
-                    $"query criterion '{p.Name}' collides with a record-synthesized member", p.Span));
-        }
-
-        ValidateTypeRef(q.ResultType, index, diagnostics);
-        var resultName = q.ResultType.Name == ModelIndex.ListTypeName
-            ? q.ResultType.Element?.Name
-            : q.ResultType.Name;
-        if (resultName is not null && index.Classify(resultName) != TypeKind.ReadModel)
-            diagnostics.Add(Diagnostic.Error(DiagnosticCodes.QueryResultNotReadModel,
-                $"query '{q.Name}' must return a read model or 'List<readmodel>', not '{q.ResultType.Name}'",
-                q.Span));
-    }
-
-    /// <summary>
-    /// The members a read model can project from its source (entities add the synthetic
-    /// <c>id</c>); <c>null</c> when the source is not a value/entity type.
-    /// </summary>
-    private static IReadOnlyList<Member>? ReadModelSourceMembers(string? context, string sourceType, ModelIndex index)
-    {
-        // Resolve the source in the read model's own context first (R13.2), so a name
-        // shared across contexts binds to the right declaration.
-        TypeDecl? decl = null;
-        if (context is not null && index.TryGetDeclIn(context, sourceType, out var local))
-            decl = local;
-        else if (index.TryGetDecl(sourceType, out var global))
-            decl = global;
-        return decl switch
-        {
-            ValueObjectDecl v => v.Members,
-            EntityDecl e => EntityProjectionMembers(e),
-            _ => null
-        };
-    }
-
-    /// <summary>
-    /// An entity's members plus the synthetic <c>id</c> — added only when the entity does
-    /// not already declare its own <c>id</c> member (which would otherwise duplicate it).
-    /// </summary>
-    private static IReadOnlyList<Member> EntityProjectionMembers(EntityDecl e) =>
-        e.Members.Any(m => string.Equals(m.Name, "id", StringComparison.OrdinalIgnoreCase))
-            ? e.Members
-            : e.Members.Append(new Member("id", new TypeRef(e.IdentityName), null)).ToList();
-
     /// <summary>The C# property identifier a member name maps to (first char upper-cased), for collision checks.</summary>
-    private static string PropertyKey(string name) =>
+    internal static string PropertyKey(string name) =>
         name.Length == 0 ? name : char.ToUpperInvariant(name[0]) + name[1..];
+
+    /// <summary>
+    /// Identifiers generated on every smart-enum class. A member named exactly one of these
+    /// would clash with the generated property/method of the same name (C# is case-sensitive,
+    /// so the collision is on the exact identifier).
+    /// </summary>
+    private static readonly IReadOnlySet<string> GeneratedEnumMembers =
+        new HashSet<string>(StringComparer.Ordinal)
+        {
+            "Name", "Value", "All", "FromName", "FromValue", "TryFromName", "TryFromValue",
+            "Match", "Switch", "ToString", "Equals", "GetHashCode"
+        };
 
     /// <summary>Members a positional <c>record</c> synthesizes; a field/criterion mapping to one fails to compile.</summary>
     private static readonly IReadOnlySet<string> RecordReservedMembers =
@@ -653,12 +413,12 @@ public sealed class SemanticValidator
             "Equals", "GetHashCode", "ToString", "GetType", "EqualityContract", "PrintMembers", "Deconstruct"
         };
 
-    private static bool IsReservedRecordMember(string name) => RecordReservedMembers.Contains(PropertyKey(name));
+    internal static bool IsReservedRecordMember(string name) => RecordReservedMembers.Contains(PropertyKey(name));
 
     /// <summary>The spec names declared over <paramref name="typeName"/> (R10.1), or empty.</summary>
     private static IReadOnlySet<string> SpecNames(ModelIndex index, string typeName)
     {
-        var specs = index.SpecsFor(typeName);
+        IReadOnlyDictionary<string, SpecDecl> specs = index.SpecsFor(typeName);
         return specs.Count == 0 ? EmptyNames : new HashSet<string>(specs.Keys, StringComparer.Ordinal);
     }
 
@@ -678,14 +438,16 @@ public sealed class SemanticValidator
         var scope = TypeScope.FromMembers(members);
         var checker = new ExpressionChecker(index, resolver, enumMembers, diagnostics, specNames);
 
-        foreach (var m in members)
+        foreach (Member m in members)
         {
             // 1. Unknown type reference (and its element for List<T>).
             ValidateTypeRef(m.Type, index, diagnostics);
 
             // 2. Duplicate member, reported at the second occurrence's span.
             if (!seen.Add(m.Name))
+            {
                 diagnostics.Add(Diagnostic.Error(DiagnosticCodes.DuplicateMember, $"duplicate member '{m.Name}'", m.Span));
+            }
 
             // 3. The member initializer.
             if (m.Initializer is not null)
@@ -694,252 +456,52 @@ public sealed class SemanticValidator
                 // THAT enum (not just any enum in the model).
                 if (m.Initializer is IdentifierExpr enumDefault
                     && index.Classify(m.Type.Name) == TypeKind.Enum
-                    && index.TryGetDecl(m.Type.Name, out var decl)
+                    && index.TryGetDecl(m.Type.Name, out TypeDecl decl)
                     && decl is EnumDecl en)
                 {
                     if (!en.MemberNames.Contains(enumDefault.Name))
+                    {
                         diagnostics.Add(Diagnostic.Error(DiagnosticCodes.UnknownEnumMemberForType,
                             $"unknown enum member '{enumDefault.Name}' for type '{m.Type.Name}'{Suggestions.For(enumDefault.Name, en.MemberNames)}",
                             enumDefault.Span));
+                    }
                 }
                 else
                 {
                     checker.Check(m.Initializer, scope, m.Type);
 
-                    // `now` is non-deterministic, so it cannot be a STORED default
-                    // (a derived/computed field re-evaluating `now` is fine).
-                    if (!MemberAnalysis.IsDerived(m, memberNames)
-                        && MemberAnalysis.ReferencedIdentifiers(m.Initializer).Contains("now"))
-                        diagnostics.Add(Diagnostic.Error(DiagnosticCodes.NowAsStoredDefault,
-                            $"'now' cannot be used as a stored default for '{m.Name}'",
-                            m.Span));
+                    // A nullary builtin like `now` is non-deterministic, so it cannot be a
+                    // STORED default (a derived/computed field re-evaluating it is fine).
+                    if (!MemberAnalysis.IsDerived(m, memberNames))
+                    {
+                        var referenced = new HashSet<string>(
+                            MemberAnalysis.ReferencedIdentifiers(m.Initializer), StringComparer.Ordinal);
+                        var nondeterministic = BuiltinOps.NullaryValueOps.Keys.FirstOrDefault(referenced.Contains);
+                        if (nondeterministic is not null)
+                        {
+                            diagnostics.Add(Diagnostic.Error(DiagnosticCodes.NowAsStoredDefault,
+                                $"'{nondeterministic}' cannot be used as a stored default for '{m.Name}'",
+                                m.Span));
+                        }
+                    }
 
                     // An optional value can't initialize a non-optional field without a fallback.
-                    var initType = resolver.Infer(m.Initializer, scope);
+                    TypeRef? initType = resolver.Infer(m.Initializer, scope);
                     if (initType is { IsOptional: true } && !m.Type.IsOptional)
+                    {
                         diagnostics.Add(Diagnostic.Error(DiagnosticCodes.OptionalAssignedToNonOptional,
                             $"optional value assigned to non-optional field '{m.Name}'; provide a fallback with '??'",
                             m.Span));
+                    }
                 }
             }
         }
 
-        foreach (var inv in invariants)
+        foreach (Invariant inv in invariants)
+        {
             checker.Check(inv.Condition, scope);
-    }
-
-    /// <summary>
-    /// Validates an entity's commands: parameter type refs, <c>requires</c>
-    /// preconditions, and <c>field -&gt; value</c> transitions (target must be a
-    /// mutable, non-derived member; value must be type-compatible). Scope for
-    /// expressions is the entity's members plus the command's parameters.
-    /// </summary>
-    private static void ValidateCommands(
-        EntityDecl entity,
-        ModelIndex index,
-        TypeResolver resolver,
-        IReadOnlySet<string> enumMembers,
-        List<Diagnostic> diagnostics,
-        bool emitAllowed,
-        IReadOnlySet<string>? specNames = null)
-    {
-        var memberNames = new HashSet<string>(entity.Members.Select(m => m.Name), StringComparer.Ordinal);
-        var memberByName = new Dictionary<string, Member>(StringComparer.Ordinal);
-        foreach (var m in entity.Members)
-            memberByName[m.Name] = m;
-
-        // A command `requires` may reference a spec on the entity (R10.1).
-        var checker = new ExpressionChecker(index, resolver, enumMembers, diagnostics, specNames);
-
-        // Names are compared case-insensitively because both commands (methods) and
-        // members (properties) emit Pascal/camel-cased C# identifiers; a clash there
-        // produces uncompilable output (CS0102/CS0111).
-        var seenCommands = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        var propertyNames = new HashSet<string>(entity.Members.Select(m => m.Name), StringComparer.OrdinalIgnoreCase)
-        {
-            "Id", "Equals", "GetHashCode"
-        };
-
-        foreach (var cmd in entity.Commands)
-        {
-            if (!seenCommands.Add(cmd.Name))
-                diagnostics.Add(Diagnostic.Error(DiagnosticCodes.DuplicateCommand,
-                    $"command '{cmd.Name}' is declared more than once on '{entity.Name}'", cmd.Span));
-            else if (propertyNames.Contains(cmd.Name))
-                diagnostics.Add(Diagnostic.Error(DiagnosticCodes.CommandNameCollision,
-                    $"command '{cmd.Name}' collides with a property of '{entity.Name}'", cmd.Span));
-
-            // Scope: the entity's members, the synthetic `id` (its identity), and the
-            // command's parameters.
-            var scopePairs = entity.Members.Select(m => new KeyValuePair<string, TypeRef>(m.Name, m.Type))
-                .Append(new KeyValuePair<string, TypeRef>("id", new TypeRef(entity.IdentityName)))
-                .Concat(cmd.Parameters.Select(p => new KeyValuePair<string, TypeRef>(p.Name, p.Type)));
-            var scope = new TypeScope(scopePairs);
-
-            var seenParams = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            foreach (var p in cmd.Parameters)
-            {
-                ValidateTypeRef(p.Type, index, diagnostics);
-                if (!seenParams.Add(p.Name))
-                    diagnostics.Add(Diagnostic.Error(DiagnosticCodes.DuplicateParameter,
-                        $"duplicate parameter '{p.Name}' in command '{cmd.Name}'", p.Span));
-            }
-
-            foreach (var stmt in cmd.Body)
-            {
-                switch (stmt)
-                {
-                    case RequiresClause req:
-                        checker.Check(req.Condition, scope);
-                        break;
-
-                    case Transition tr:
-                        if (!memberByName.TryGetValue(tr.Field, out var target))
-                            diagnostics.Add(Diagnostic.Error(DiagnosticCodes.InvalidTransitionTarget,
-                                $"cannot transition '{tr.Field}': not a field of '{entity.Name}'", tr.Span));
-                        else if (MemberAnalysis.IsDerived(target, memberNames))
-                            diagnostics.Add(Diagnostic.Error(DiagnosticCodes.InvalidTransitionTarget,
-                                $"cannot transition derived field '{tr.Field}'", tr.Span));
-                        else
-                        {
-                            checker.CheckTransitionValue(tr.Value, target.Type, tr.Field, scope);
-                            CheckTransitionReachable(entity, tr, target, index, diagnostics);
-                        }
-                        break;
-
-                    case EmitClause emit:
-                        if (!emitAllowed)
-                            diagnostics.Add(Diagnostic.Error(DiagnosticCodes.EmitOutsideRoot,
-                                $"events may only be emitted from the aggregate root, not from '{entity.Name}'",
-                                emit.Span));
-                        ValidateEmit(emit, index, checker, scope, diagnostics);
-                        break;
-                }
-            }
         }
     }
-
-    /// <summary>
-    /// Validates an entity's factories: parameter type refs, <c>requires</c>
-    /// preconditions, <c>field &lt;- value</c> initializations (target must be a
-    /// settable, non-derived member; value must be type-compatible), and creation
-    /// <c>emit</c>s. The expression scope is the factory's parameters plus the
-    /// synthetic <c>id</c> (the auto-generated identity); entity members are NOT in
-    /// scope because the aggregate does not exist until construction. A required
-    /// member left uninitialized with no default is reported (R8.2).
-    /// </summary>
-    private static void ValidateFactories(
-        EntityDecl entity,
-        ModelIndex index,
-        TypeResolver resolver,
-        IReadOnlySet<string> enumMembers,
-        List<Diagnostic> diagnostics,
-        bool emitAllowed)
-    {
-        if (entity.Factories.Count == 0)
-            return;
-
-        var memberNames = new HashSet<string>(entity.Members.Select(m => m.Name), StringComparer.Ordinal);
-        var memberByName = new Dictionary<string, Member>(StringComparer.Ordinal);
-        foreach (var m in entity.Members)
-            memberByName[m.Name] = m;
-
-        var checker = new ExpressionChecker(index, resolver, enumMembers, diagnostics);
-
-        // A factory emits a `public static` method; its name must not collide (case-
-        // insensitively) with a property, a command (instance method), another factory,
-        // or an always-generated member (Id, the domain-event API, the value-equality
-        // members) — any of which would yield uncompilable C# (CS0102/CS0111).
-        var reserved = new HashSet<string>(entity.Members.Select(m => m.Name), StringComparer.OrdinalIgnoreCase)
-        {
-            "Id", "DomainEvents", "ClearDomainEvents", "Equals", "GetHashCode"
-        };
-        foreach (var cmd in entity.Commands)
-            reserved.Add(cmd.Name);
-
-        var seenFactories = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-
-        foreach (var factory in entity.Factories)
-        {
-            if (!seenFactories.Add(factory.Name))
-                diagnostics.Add(Diagnostic.Error(DiagnosticCodes.DuplicateFactory,
-                    $"factory '{factory.Name}' is declared more than once on '{entity.Name}'", factory.Span));
-            else if (reserved.Contains(factory.Name))
-                diagnostics.Add(Diagnostic.Error(DiagnosticCodes.FactoryNameCollision,
-                    $"factory '{factory.Name}' collides with a property or command of '{entity.Name}'", factory.Span));
-
-            // Scope: the factory's parameters plus the synthetic `id` (its identity).
-            var scopePairs = IdScopePair(entity)
-                .Concat(factory.Parameters.Select(p => new KeyValuePair<string, TypeRef>(p.Name, p.Type)));
-            var scope = new TypeScope(scopePairs);
-
-            var seenParams = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            foreach (var p in factory.Parameters)
-            {
-                ValidateTypeRef(p.Type, index, diagnostics);
-                if (!seenParams.Add(p.Name))
-                    diagnostics.Add(Diagnostic.Error(DiagnosticCodes.DuplicateParameter,
-                        $"duplicate parameter '{p.Name}' in factory '{factory.Name}'", p.Span));
-                // `id` is reserved for the auto-generated identity local; a parameter of
-                // that name would collide with it in the emitted method (CS0136).
-                if (string.Equals(p.Name, "id", StringComparison.OrdinalIgnoreCase))
-                    diagnostics.Add(Diagnostic.Error(DiagnosticCodes.ReservedFactoryParameter,
-                        $"factory parameter '{p.Name}' is reserved; the identity is generated automatically", p.Span));
-            }
-
-            var initialized = new HashSet<string>(StringComparer.Ordinal);
-            foreach (var stmt in factory.Body)
-            {
-                switch (stmt)
-                {
-                    case RequiresClause req:
-                        checker.Check(req.Condition, scope);
-                        break;
-
-                    case Initialization init:
-                        if (!memberByName.TryGetValue(init.Field, out var target))
-                            diagnostics.Add(Diagnostic.Error(DiagnosticCodes.InvalidInitializationTarget,
-                                $"cannot initialize '{init.Field}': not a field of '{entity.Name}'", init.Span));
-                        else if (MemberAnalysis.IsDerived(target, memberNames))
-                            diagnostics.Add(Diagnostic.Error(DiagnosticCodes.InvalidInitializationTarget,
-                                $"cannot initialize derived field '{init.Field}'", init.Span));
-                        else
-                        {
-                            if (!initialized.Add(init.Field))
-                                diagnostics.Add(Diagnostic.Error(DiagnosticCodes.DuplicateInitialization,
-                                    $"field '{init.Field}' is initialized more than once in factory '{factory.Name}'", init.Span));
-                            checker.CheckInitializationValue(init.Value, target.Type, init.Field, scope);
-                        }
-                        break;
-
-                    case EmitClause emit:
-                        if (!emitAllowed)
-                            diagnostics.Add(Diagnostic.Error(DiagnosticCodes.EmitOutsideRoot,
-                                $"events may only be emitted from the aggregate root, not from '{entity.Name}'",
-                                emit.Span));
-                        ValidateEmit(emit, index, checker, scope, diagnostics);
-                        break;
-                }
-            }
-
-            // R8.2: a required member (no default, not optional, not derived) that the
-            // factory neither explicitly initializes (`field <- expr`) nor supplies via
-            // a same-named parameter (auto-bind) is constructed as `default!` — a latent
-            // bug, so warn.
-            foreach (var m in entity.Members)
-                if (!MemberAnalysis.IsDerived(m, memberNames)
-                    && m.Initializer is null && !m.Type.IsOptional
-                    && !initialized.Contains(m.Name)
-                    && !factory.Parameters.Any(p => MemberAnalysis.AutoBinds(p, m)))
-                    diagnostics.Add(Diagnostic.Warning(DiagnosticCodes.UninitializedFactoryField,
-                        $"factory '{factory.Name}' leaves required field '{m.Name}' uninitialized and it has no default",
-                        factory.Span));
-        }
-    }
-
-    /// <summary>The synthetic <c>id</c> binding (an entity's identity) for factory scope.</summary>
-    private static IEnumerable<KeyValuePair<string, TypeRef>> IdScopePair(EntityDecl entity) =>
-        new[] { new KeyValuePair<string, TypeRef>("id", new TypeRef(entity.IdentityName)) };
 
     /// <summary>Members every generated entity carries; a member mapping to one fails to compile (CS0102).</summary>
     private static readonly IReadOnlySet<string> EntityGeneratedMembers =
@@ -963,237 +525,15 @@ public sealed class SemanticValidator
     private static void ReportGeneratedMemberCollisions(
         IReadOnlyList<Member> members, IReadOnlySet<string> generated, string kind, List<Diagnostic> diagnostics)
     {
-        foreach (var m in members)
+        foreach (Member m in members)
+        {
             if (generated.Contains(PropertyKey(m.Name)))
+            {
                 diagnostics.Add(Diagnostic.Error(DiagnosticCodes.ReservedGeneratedMember,
                     $"{kind} member '{m.Name}' collides with the generated '{PropertyKey(m.Name)}' member",
                     m.Span));
-    }
-
-    /// <summary>
-    /// Validates an entity's identity strategy (R11.1): a <c>natural(T)</c> key must
-    /// wrap a supported primitive (<c>String</c> or <c>Int</c>). Guid and sequence
-    /// strategies carry no backing type and need no check.
-    /// </summary>
-    private static void ValidateIdentityStrategy(EntityDecl entity, List<Diagnostic> diagnostics)
-    {
-        if (entity.IdStrategy != IdentityStrategy.Natural)
-            return;
-        if (entity.IdBackingType is not ("String" or "Int"))
-            diagnostics.Add(Diagnostic.Error(DiagnosticCodes.NaturalIdBackingType,
-                $"natural identity '{entity.IdentityName}' must wrap String or Int, not '{entity.IdBackingType}'",
-                entity.Span));
-    }
-
-    /// <summary>
-    /// Validates a versioned aggregate (R11.4): the generated root carries a synthetic
-    /// <c>Version</c> token, so the root entity must not declare a member that collides
-    /// with it (which would emit a duplicate property, CS0102).
-    /// </summary>
-    private static void ValidateVersioning(AggregateDecl agg, List<Diagnostic> diagnostics)
-    {
-        if (!agg.IsVersioned)
-            return;
-        var root = agg.Types.OfType<EntityDecl>().FirstOrDefault(e => e.Name == agg.RootName);
-        if (root is null)
-            return;
-        foreach (var m in root.Members)
-            if (string.Equals(m.Name, "Version", StringComparison.OrdinalIgnoreCase))
-                diagnostics.Add(Diagnostic.Error(DiagnosticCodes.ReservedVersionMember,
-                    $"member '{m.Name}' collides with the generated 'Version' token of versioned aggregate '{agg.Name}'",
-                    m.Span));
-    }
-
-    /// <summary>The operation keywords a <c>repository</c> block may list (R11.3).</summary>
-    private static readonly IReadOnlySet<string> ValidRepositoryOps =
-        new HashSet<string>(StringComparer.Ordinal) { "getById", "add", "update", "remove" };
-
-    /// <summary>
-    /// Validates an aggregate's repository declaration (R11.3): every listed
-    /// operation keyword is known; finder names are unique; finder parameters are
-    /// well-typed with distinct names; and each finder's result type is the
-    /// aggregate root or a <c>List</c> of it.
-    /// </summary>
-    private static void ValidateRepository(AggregateDecl agg, ModelIndex index, List<Diagnostic> diagnostics)
-    {
-        if (agg.Repository is not { } repo)
-            return;
-
-        if (repo.Operations is not null)
-            foreach (var op in repo.Operations)
-                if (!ValidRepositoryOps.Contains(op))
-                    diagnostics.Add(Diagnostic.Error(DiagnosticCodes.UnknownRepositoryOperation,
-                        $"unknown repository operation '{op}' (expected: getById, add, update, remove)",
-                        agg.Span));
-
-        var seenFinders = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var finder in repo.Finders)
-        {
-            if (!seenFinders.Add(finder.Name))
-                diagnostics.Add(Diagnostic.Error(DiagnosticCodes.DuplicateFinder,
-                    $"finder '{finder.Name}' is declared more than once in the repository of '{agg.Name}'",
-                    finder.Span));
-            // A finder emits `<Name>Async`; a name that resolves to a built-in operation
-            // method would declare a duplicate (or confusingly-overloaded) member.
-            else if (ValidRepositoryOps.Any(op => string.Equals(op, finder.Name, StringComparison.OrdinalIgnoreCase)))
-                diagnostics.Add(Diagnostic.Error(DiagnosticCodes.FinderNameCollision,
-                    $"finder '{finder.Name}' collides with the built-in repository operation of the same name",
-                    finder.Span));
-
-            var seenParams = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            foreach (var p in finder.Parameters)
-            {
-                ValidateTypeRef(p.Type, index, diagnostics);
-                if (!seenParams.Add(p.Name))
-                    diagnostics.Add(Diagnostic.Error(DiagnosticCodes.DuplicateParameter,
-                        $"duplicate parameter '{p.Name}' in finder '{finder.Name}'", p.Span));
-                // `ct` is reserved for the generated CancellationToken on every finder method.
-                if (string.Equals(p.Name, "ct", StringComparison.OrdinalIgnoreCase))
-                    diagnostics.Add(Diagnostic.Error(DiagnosticCodes.ReservedFinderParameter,
-                        $"finder parameter '{p.Name}' is reserved; it collides with the generated cancellation token",
-                        p.Span));
-            }
-
-            // The result is a single root or a List<root>; anything else can't be a
-            // well-typed lookup over this aggregate.
-            ValidateTypeRef(finder.ResultType, index, diagnostics);
-            var elementName = CSharpListElement(finder.ResultType);
-            if (elementName != agg.RootName)
-                diagnostics.Add(Diagnostic.Error(DiagnosticCodes.FinderResultType,
-                    $"finder '{finder.Name}' must return '{agg.RootName}' or 'List<{agg.RootName}>', not '{finder.ResultType.Name}'",
-                    finder.Span));
-        }
-    }
-
-    /// <summary>
-    /// The root-type name a finder result denotes: the element of a <c>List&lt;T&gt;</c>,
-    /// or the type itself when it is a bare single result.
-    /// </summary>
-    private static string CSharpListElement(TypeRef result) =>
-        result.Name == ModelIndex.ListTypeName ? result.Element?.Name ?? "" : result.Name;
-
-    /// <summary>
-    /// When the transitioned field has a state machine and the value is a literal
-    /// state of that enum, flags a target that NO rule can reach (always-illegal).
-    /// </summary>
-    private static void CheckTransitionReachable(
-        EntityDecl entity, Transition tr, Member target, ModelIndex index, List<Diagnostic> diagnostics)
-    {
-        var states = entity.States.FirstOrDefault(s => s.Field == tr.Field);
-        if (states is null || states.Rules.Count == 0)
-            return;
-        if (tr.Value is not IdentifierExpr stateRef)
-            return; // dynamic target: only a runtime guard applies
-        if (index.Classify(target.Type.Name) != TypeKind.Enum
-            || !index.EnumsDeclaring(stateRef.Name).Contains(target.Type.Name))
-            return; // not a literal state of the bound enum (other errors cover it)
-
-        if (!states.Rules.Any(r => r.To.Contains(stateRef.Name)))
-            diagnostics.Add(Diagnostic.Error(DiagnosticCodes.UnreachableTransition,
-                $"no state rule allows transitioning '{tr.Field}' to '{stateRef.Name}'", tr.Span));
-    }
-
-    /// <summary>
-    /// Validates an entity's <c>states</c> blocks: each binds to an enum-typed
-    /// member; every state names a member of that enum; per-rule guards resolve
-    /// against the entity's members.
-    /// </summary>
-    private static void ValidateStates(
-        EntityDecl entity,
-        ModelIndex index,
-        TypeResolver resolver,
-        IReadOnlySet<string> enumMembers,
-        List<Diagnostic> diagnostics)
-    {
-        var memberByName = entity.Members.ToDictionary(m => m.Name, m => m, StringComparer.Ordinal);
-        var scope = TypeScope.FromMembers(entity.Members);
-        var checker = new ExpressionChecker(index, resolver, enumMembers, diagnostics);
-
-        // A field may have at most one states block: the reachability check and the
-        // emitted guard each consult a single block, so a second would silently drop rules.
-        var seenFields = new HashSet<string>(StringComparer.Ordinal);
-
-        foreach (var states in entity.States)
-        {
-            if (!seenFields.Add(states.Field))
-            {
-                diagnostics.Add(Diagnostic.Error(DiagnosticCodes.DuplicateStatesBlock,
-                    $"field '{states.Field}' already has a states block", states.Span));
-                continue;
-            }
-
-            if (!memberByName.TryGetValue(states.Field, out var field))
-            {
-                diagnostics.Add(Diagnostic.Error(DiagnosticCodes.InvalidStatesBinding,
-                    $"states binds to '{states.Field}', which is not a field of '{entity.Name}'", states.Span));
-                continue;
-            }
-            if (index.Classify(field.Type.Name) != TypeKind.Enum)
-            {
-                diagnostics.Add(Diagnostic.Error(DiagnosticCodes.InvalidStatesBinding,
-                    $"states field '{states.Field}' must be an enum, but is '{field.Type.Name}'", states.Span));
-                continue;
-            }
-
-            var enumName = field.Type.Name;
-            var validStates = index.TryGetDecl(enumName, out var decl) && decl is EnumDecl en
-                ? new HashSet<string>(en.MemberNames, StringComparer.Ordinal)
-                : new HashSet<string>(StringComparer.Ordinal);
-
-            foreach (var rule in states.Rules)
-            {
-                foreach (var state in new[] { rule.From }.Concat(rule.To))
-                    if (!validStates.Contains(state))
-                        diagnostics.Add(Diagnostic.Error(DiagnosticCodes.UnknownState,
-                            $"'{state}' is not a member of enum '{enumName}'", rule.Span));
-
-                if (rule.Guard is not null)
-                    checker.Check(rule.Guard, scope);
             }
         }
-    }
-
-    /// <summary>
-    /// Validates an <c>emit EventName(field: value, …)</c>: the name must be a
-    /// declared event, every argument must name a distinct event field with a
-    /// type-compatible value, and every event field must be supplied.
-    /// </summary>
-    private static void ValidateEmit(
-        EmitClause emit,
-        ModelIndex index,
-        ExpressionChecker checker,
-        TypeScope scope,
-        List<Diagnostic> diagnostics)
-    {
-        if (!index.TryGetDecl(emit.EventName, out var decl) || decl is not EventDecl ev)
-        {
-            diagnostics.Add(Diagnostic.Error(DiagnosticCodes.UnknownEvent,
-                $"unknown event '{emit.EventName}'", emit.Span));
-            foreach (var arg in emit.Args)
-                checker.Check(arg.Value, scope);
-            return;
-        }
-
-        var eventFields = ev.Members.ToDictionary(m => m.Name, m => m.Type, StringComparer.Ordinal);
-        var provided = new HashSet<string>(StringComparer.Ordinal);
-
-        foreach (var arg in emit.Args)
-        {
-            if (!provided.Add(arg.Field))
-                diagnostics.Add(Diagnostic.Error(DiagnosticCodes.EmitPayloadMismatch,
-                    $"duplicate field '{arg.Field}' in emit of '{ev.Name}'", arg.Span));
-
-            if (eventFields.TryGetValue(arg.Field, out var fieldType))
-                checker.CheckEmitArg(arg.Value, fieldType, ev.Name, arg.Field, scope);
-            else
-                diagnostics.Add(Diagnostic.Error(DiagnosticCodes.EmitPayloadMismatch,
-                    $"event '{ev.Name}' has no field '{arg.Field}'", arg.Span));
-        }
-
-        foreach (var field in ev.Members)
-            if (!provided.Contains(field.Name))
-                diagnostics.Add(Diagnostic.Error(DiagnosticCodes.EmitPayloadMismatch,
-                    $"emit of '{ev.Name}' is missing field '{field.Name}'", emit.Span));
     }
 
     // ------------------------------------------------------------------------
@@ -1211,26 +551,28 @@ public sealed class SemanticValidator
     {
         var specs = ctx.Specs.Concat(ctx.Types.OfType<AggregateDecl>().SelectMany(a => a.Specs)).ToList();
         if (specs.Count == 0)
+        {
             return;
+        }
 
-        foreach (var group in specs.GroupBy(s => s.TargetType, StringComparer.Ordinal))
+        foreach (IGrouping<string, SpecDecl> group in specs.GroupBy(s => s.TargetType, StringComparer.Ordinal))
         {
             var target = group.Key;
             var specList = group.ToList();
             var specNames = new HashSet<string>(specList.Select(s => s.Name), StringComparer.Ordinal);
 
             // Resolve the spec's target in its own context first (R13.2).
-            TypeDecl? decl = index.TryGetDeclIn(ctx.Name, target, out var localDecl) ? localDecl
-                : index.TryGetDecl(target, out var globalDecl) ? globalDecl : null;
+            TypeDecl? decl = index.TryGetDeclIn(ctx.Name, target, out TypeDecl localDecl) ? localDecl
+                : index.TryGetDecl(target, out TypeDecl globalDecl) ? globalDecl : null;
             IReadOnlyList<Member>? members =
                 decl switch { ValueObjectDecl v => v.Members, EntityDecl e => e.Members, _ => null };
 
             var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            var memberNames = members is null
+            HashSet<string> memberNames = members is null
                 ? new HashSet<string>(StringComparer.OrdinalIgnoreCase)
                 : new HashSet<string>(members.Select(m => m.Name), StringComparer.OrdinalIgnoreCase);
 
-            foreach (var spec in specList)
+            foreach (SpecDecl spec in specList)
             {
                 if (members is null)
                 {
@@ -1240,21 +582,27 @@ public sealed class SemanticValidator
                 }
 
                 if (!seen.Add(spec.Name) || memberNames.Contains(spec.Name))
+                {
                     diagnostics.Add(Diagnostic.Error(DiagnosticCodes.DuplicateSpec,
                         $"spec '{spec.Name}' duplicates another spec or a member of '{target}'", spec.Span));
+                }
 
                 var scope = TypeScope.FromMembers(members);
                 var checker = new ExpressionChecker(index, resolver, enumMembers, diagnostics, specNames);
                 checker.Check(spec.Condition, scope);
 
-                var inferred = resolver.Infer(spec.Condition, scope);
+                TypeRef? inferred = resolver.Infer(spec.Condition, scope);
                 if (inferred is not null && inferred.Name != "Bool")
+                {
                     diagnostics.Add(Diagnostic.Error(DiagnosticCodes.SpecNotBoolean,
                         $"spec '{spec.Name}' condition must be boolean, but is '{inferred.Name}'", spec.Span));
+                }
             }
 
             if (members is not null)
+            {
                 DetectSpecCycles(specList, specNames, diagnostics);
+            }
         }
     }
 
@@ -1262,9 +610,11 @@ public sealed class SemanticValidator
     private static void DetectSpecCycles(IReadOnlyList<SpecDecl> specs, IReadOnlySet<string> specNames, List<Diagnostic> diagnostics)
     {
         var deps = new Dictionary<string, List<string>>(StringComparer.Ordinal);
-        foreach (var s in specs)
+        foreach (SpecDecl s in specs)
+        {
             deps[s.Name] = MemberAnalysis.ReferencedIdentifiers(s.Condition)
                 .Where(specNames.Contains).Distinct(StringComparer.Ordinal).ToList();
+        }
 
         var state = new Dictionary<string, int>(StringComparer.Ordinal); // 0 unvisited, 1 visiting, 2 done
         var stack = new List<string>();
@@ -1278,23 +628,37 @@ public sealed class SemanticValidator
             {
                 var st = state.GetValueOrDefault(dep, 0);
                 if (st == 0)
+                {
                     Dfs(dep);
+                }
                 else if (st == 1)
+                {
                     for (var i = stack.IndexOf(dep); i >= 0 && i < stack.Count; i++)
+                    {
                         onCycle.Add(stack[i]);
+                    }
+                }
             }
             stack.RemoveAt(stack.Count - 1);
             state[node] = 2;
         }
 
-        foreach (var s in specs)
+        foreach (SpecDecl s in specs)
+        {
             if (!state.ContainsKey(s.Name))
+            {
                 Dfs(s.Name);
+            }
+        }
 
-        foreach (var s in specs)
+        foreach (SpecDecl s in specs)
+        {
             if (onCycle.Contains(s.Name))
+            {
                 diagnostics.Add(Diagnostic.Error(DiagnosticCodes.SpecCycle,
                     $"spec '{s.Name}' is part of a reference cycle", s.Span));
+            }
+        }
     }
 
     /// <summary>
@@ -1308,32 +672,40 @@ public sealed class SemanticValidator
         var seenServices = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var checker = new ExpressionChecker(index, resolver, enumMembers, diagnostics);
 
-        foreach (var svc in ctx.Services)
+        foreach (ServiceDecl svc in ctx.Services)
         {
             if (!seenServices.Add(svc.Name))
+            {
                 diagnostics.Add(Diagnostic.Error(DiagnosticCodes.DuplicateService,
                     $"service '{svc.Name}' is declared more than once", svc.Span));
+            }
 
             var seenOps = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            foreach (var op in svc.Operations)
+            foreach (OperationDecl op in svc.Operations)
             {
                 if (!seenOps.Add(op.Name))
+                {
                     diagnostics.Add(Diagnostic.Error(DiagnosticCodes.DuplicateOperation,
                         $"operation '{op.Name}' is declared more than once in service '{svc.Name}'", op.Span));
+                }
                 // A method cannot share its enclosing class's name (CS0542).
                 else if (string.Equals(op.Name, svc.Name, StringComparison.OrdinalIgnoreCase))
+                {
                     diagnostics.Add(Diagnostic.Error(DiagnosticCodes.DuplicateOperation,
                         $"operation '{op.Name}' collides with its service's name '{svc.Name}'", op.Span));
+                }
 
                 ValidateTypeRef(op.ReturnType, index, diagnostics);
 
                 var seenParams = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-                foreach (var p in op.Parameters)
+                foreach (Param p in op.Parameters)
                 {
                     ValidateTypeRef(p.Type, index, diagnostics);
                     if (!seenParams.Add(p.Name))
+                    {
                         diagnostics.Add(Diagnostic.Error(DiagnosticCodes.DuplicateParameter,
                             $"duplicate parameter '{p.Name}' in operation '{op.Name}'", p.Span));
+                    }
                 }
 
                 if (op.Body is not null)
@@ -1346,22 +718,28 @@ public sealed class SemanticValidator
             // Application use cases (R12.2): unique names (they emit interface methods),
             // valid parameter and return type refs.
             var seenUseCases = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            foreach (var uc in svc.UseCases)
+            foreach (UseCaseDecl uc in svc.UseCases)
             {
                 if (!seenUseCases.Add(uc.Name))
+                {
                     diagnostics.Add(Diagnostic.Error(DiagnosticCodes.DuplicateUseCase,
                         $"use case '{uc.Name}' is declared more than once in service '{svc.Name}'", uc.Span));
+                }
 
                 if (uc.ReturnType is not null)
+                {
                     ValidateTypeRef(uc.ReturnType, index, diagnostics);
+                }
 
                 var seenParams = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-                foreach (var p in uc.Parameters)
+                foreach (Param p in uc.Parameters)
                 {
                     ValidateTypeRef(p.Type, index, diagnostics);
                     if (!seenParams.Add(p.Name))
+                    {
                         diagnostics.Add(Diagnostic.Error(DiagnosticCodes.DuplicateParameter,
                             $"duplicate parameter '{p.Name}' in use case '{uc.Name}'", p.Span));
+                    }
                 }
             }
         }
@@ -1377,77 +755,102 @@ public sealed class SemanticValidator
     {
         var seenPolicies = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-        foreach (var policy in ctx.Policies)
+        foreach (PolicyDecl policy in ctx.Policies)
         {
             if (!seenPolicies.Add(policy.Name))
+            {
                 diagnostics.Add(Diagnostic.Error(DiagnosticCodes.DuplicatePolicy,
                     $"policy '{policy.Name}' is declared more than once", policy.Span));
+            }
 
-            var ev = index.TryGetDecl(policy.EventName, out var ed) && ed is EventDecl e ? e : null;
+            EventDecl? ev = index.TryGetDecl(policy.EventName, out TypeDecl ed) && ed is EventDecl e ? e : null;
             if (ev is null)
+            {
                 diagnostics.Add(Diagnostic.Error(DiagnosticCodes.PolicyUnknownEvent,
                     $"policy '{policy.Name}' reacts to '{policy.EventName}', which is not a declared event", policy.Span));
+            }
 
-            var reaction = policy.Reaction;
-            var targetRoot = ResolveTargetRoot(reaction.TargetType, index);
+            PolicyReaction reaction = policy.Reaction;
+            EntityDecl? targetRoot = ResolveTargetRoot(reaction.TargetType, index);
             if (targetRoot is null)
+            {
                 diagnostics.Add(Diagnostic.Error(DiagnosticCodes.PolicyUnknownTarget,
                     $"policy '{policy.Name}' targets '{reaction.TargetType}', which is not a declared aggregate or entity", reaction.Span));
+            }
 
-            var cmd = targetRoot?.Commands.FirstOrDefault(c => string.Equals(c.Name, reaction.CommandName, StringComparison.OrdinalIgnoreCase));
+            CommandDecl? cmd = targetRoot?.Commands.FirstOrDefault(c => string.Equals(c.Name, reaction.CommandName, StringComparison.OrdinalIgnoreCase));
             if (targetRoot is not null && cmd is null)
+            {
                 diagnostics.Add(Diagnostic.Error(DiagnosticCodes.PolicyUnknownCommand,
                     $"'{reaction.TargetType}' has no command '{reaction.CommandName}'", reaction.Span));
+            }
 
             // Reaction argument values resolve against the event's fields.
-            var eventScope = ev is not null ? TypeScope.FromMembers(ev.Members) : new TypeScope(Array.Empty<KeyValuePair<string, TypeRef>>());
+            TypeScope eventScope = ev is not null ? TypeScope.FromMembers(ev.Members) : new TypeScope(Array.Empty<KeyValuePair<string, TypeRef>>());
             var checker = new ExpressionChecker(index, resolver, enumMembers, diagnostics);
             var cmdParams = cmd?.Parameters.ToDictionary(p => p.Name, p => p.Type, StringComparer.Ordinal);
             var provided = new HashSet<string>(StringComparer.Ordinal);
 
-            foreach (var arg in reaction.Args)
+            foreach (PolicyArg arg in reaction.Args)
             {
                 if (ev is not null)
+                {
                     checker.Check(arg.Value, eventScope);
+                }
 
                 if (cmdParams is null)
+                {
                     continue;
+                }
 
                 if (!provided.Add(arg.Parameter))
+                {
                     diagnostics.Add(Diagnostic.Error(DiagnosticCodes.PolicyArgMismatch,
                         $"duplicate argument '{arg.Parameter}' in policy '{policy.Name}'", arg.Span));
+                }
 
-                if (!cmdParams.TryGetValue(arg.Parameter, out var paramType))
+                if (!cmdParams.TryGetValue(arg.Parameter, out TypeRef? paramType))
                 {
                     diagnostics.Add(Diagnostic.Error(DiagnosticCodes.PolicyArgMismatch,
                         $"command '{reaction.CommandName}' has no parameter '{arg.Parameter}'", arg.Span));
                 }
                 else if (ev is not null)
                 {
-                    var valueType = resolver.Infer(arg.Value, eventScope);
+                    TypeRef? valueType = resolver.Infer(arg.Value, eventScope);
                     if (valueType is not null && !MemberAnalysis.IsAssignable(valueType, paramType))
+                    {
                         diagnostics.Add(Diagnostic.Error(DiagnosticCodes.PolicyArgType,
                             $"argument '{arg.Parameter}' expects '{paramType.Name}', but the value is '{valueType.Name}'", arg.Span));
+                    }
                 }
             }
 
             if (cmdParams is not null)
-                foreach (var p in cmd!.Parameters)
+            {
+                foreach (Param p in cmd!.Parameters)
+                {
                     if (!provided.Contains(p.Name))
+                    {
                         diagnostics.Add(Diagnostic.Error(DiagnosticCodes.PolicyArgMismatch,
                             $"policy '{policy.Name}' is missing argument '{p.Name}'", reaction.Span));
+                    }
+                }
+            }
         }
     }
 
     /// <summary>The root entity of a policy target (an aggregate's root, or the entity itself).</summary>
     private static EntityDecl? ResolveTargetRoot(string targetType, ModelIndex index)
     {
-        if (!index.TryGetDecl(targetType, out var decl))
+        if (!index.TryGetDecl(targetType, out TypeDecl decl))
+        {
             return null;
+        }
+
         return decl switch
         {
             EntityDecl e => e,
-            AggregateDecl agg => agg.Types.OfType<EntityDecl>().FirstOrDefault(en => en.Name == agg.RootName),
+            AggregateDecl agg => agg.RootEntity(),
             _ => null
         };
     }
@@ -1472,18 +875,27 @@ public sealed class SemanticValidator
         var unitCount = q.Members.Count(IsUnit);
 
         if (unitCount != 1)
+        {
             diagnostics.Add(Diagnostic.Error(DiagnosticCodes.QuantityUnitCardinality,
                 $"quantity '{q.Name}' must declare exactly one enum-typed unit member, found {unitCount}", q.Span));
+        }
+
         if (amountCount != 1)
+        {
             diagnostics.Add(Diagnostic.Error(DiagnosticCodes.QuantityAmountCardinality,
                 $"quantity '{q.Name}' must declare exactly one Decimal amount member, found {amountCount}", q.Span));
+        }
 
         // Only the amount and unit are restricted; derived/computed projections are fine.
-        foreach (var m in q.Members)
+        foreach (Member m in q.Members)
+        {
             if (!MemberAnalysis.IsDerived(m, memberNames) && !IsAmount(m) && !IsUnit(m))
+            {
                 diagnostics.Add(Diagnostic.Error(DiagnosticCodes.QuantityMemberNotAllowed,
                     $"quantity '{q.Name}' may declare only its amount and unit members (plus derived projections); '{m.Name}' is not allowed",
                     m.Span));
+            }
+        }
     }
 
     /// <summary>
@@ -1494,31 +906,44 @@ public sealed class SemanticValidator
     /// </summary>
     private static void ValidateEnumAssociatedData(EnumDecl en, ModelIndex index, List<Diagnostic> diagnostics)
     {
-        var sig = en.Signature;
+        IReadOnlyList<Param> sig = en.Signature;
 
         var seenFields = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         // Names generated on every smart enum; an associated field of these would clash.
         var reserved = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         {
-            "Name", "Value", "All", "FromName", "FromValue", "ToString", "Equals", "GetHashCode"
+            "Name", "Value", "All", "FromName", "FromValue", "TryFromName", "TryFromValue",
+            "Match", "Switch", "ToString", "Equals", "GetHashCode"
         };
-        foreach (var p in sig)
+        // A field generates a PascalCase property; a member is emitted as a static field of
+        // its (verbatim) name. If the two identifiers coincide the class declares one name
+        // twice, so an associated field whose property name equals a member name also clashes.
+        var memberNames = new HashSet<string>(en.MemberNames, StringComparer.Ordinal);
+        foreach (Param p in sig)
         {
             ValidateTypeRef(p.Type, index, diagnostics);
             if (!seenFields.Add(p.Name))
+            {
                 diagnostics.Add(Diagnostic.Error(DiagnosticCodes.DuplicateParameter,
                     $"duplicate associated-data field '{p.Name}' in enum '{en.Name}'", p.Span));
-            if (reserved.Contains(p.Name))
+            }
+
+            if (reserved.Contains(p.Name) || memberNames.Contains(PropertyKey(p.Name)))
+            {
                 diagnostics.Add(Diagnostic.Error(DiagnosticCodes.EnumReservedAssociatedField,
                     $"associated-data field '{p.Name}' collides with a generated smart-enum member", p.Span));
+            }
+
             // Associated values are literals, so the field must be a literal-expressible
             // primitive (v0: String/Int/Decimal/Bool) — not a collection, value, or enum.
             if (!IsLiteralFieldType(p.Type))
+            {
                 diagnostics.Add(Diagnostic.Error(DiagnosticCodes.EnumAssociatedFieldType,
                     $"enum '{en.Name}' associated-data field '{p.Name}' must be String, Int, Decimal, or Bool", p.Span));
+            }
         }
 
-        foreach (var member in en.Members)
+        foreach (EnumMember member in en.Members)
         {
             if (member.Args.Count != sig.Count)
             {
@@ -1533,8 +958,12 @@ public sealed class SemanticValidator
             // Only check values for fields with a valid literal type (an invalid field
             // type is already reported above; per-member checks would just be noise).
             for (var i = 0; i < sig.Count; i++)
+            {
                 if (IsLiteralFieldType(sig[i].Type))
+                {
                     CheckEnumArg(member.Args[i], sig[i].Type, en.Name, sig[i].Name, diagnostics);
+                }
+            }
         }
     }
 
@@ -1546,7 +975,7 @@ public sealed class SemanticValidator
     private static void CheckEnumArg(Expr arg, TypeRef expected, string enumName, string field, List<Diagnostic> diagnostics)
     {
         // A negative number parses as `-` applied to a numeric literal; accept it.
-        var (lit, negated) = arg switch
+        (LiteralExpr? lit, var negated) = arg switch
         {
             LiteralExpr l => (l, false),
             UnaryExpr { Op: UnaryOp.Negate, Operand: LiteralExpr l } => (l, true),
@@ -1569,32 +998,45 @@ public sealed class SemanticValidator
             _ => false
         };
         if (!ok)
+        {
             diagnostics.Add(Diagnostic.Error(DiagnosticCodes.EnumMemberArgType,
                 $"enum '{enumName}' field '{field}' expects '{expected.Name}', but got a {lit.Kind.ToString().ToLowerInvariant()} literal",
                 arg.Span));
+        }
     }
 
-    private static void ValidateTypeRef(TypeRef type, ModelIndex index, List<Diagnostic> diagnostics)
+    internal static void ValidateTypeRef(TypeRef type, ModelIndex index, List<Diagnostic> diagnostics)
     {
         // A qualified `Context.T` is validated by the context-scoping pass (UnknownContext /
         // NotExported); skip the global unknown-type check here to avoid a double report.
         if (type.Qualifier is null && !index.IsKnownType(type.Name))
+        {
             diagnostics.Add(Diagnostic.Error(DiagnosticCodes.UnknownType,
                 $"unknown type '{type.Name}'{Suggestions.For(type.Name, index.CandidateTypeNames)}",
                 type.Span));
+        }
 
         // Generic arity: List/Set/Range take one type argument; Map takes two.
         switch (index.Classify(type.Name))
         {
             case TypeKind.List or TypeKind.Set or TypeKind.Range:
                 if (type.Element is null)
+                {
                     diagnostics.Add(Diagnostic.Error(DiagnosticCodes.GenericArity, $"'{type.Name}' requires a type argument", type.Span));
+                }
+
                 if (type.Value is not null)
+                {
                     diagnostics.Add(Diagnostic.Error(DiagnosticCodes.GenericArity, $"'{type.Name}' takes a single type argument", type.Span));
+                }
+
                 break;
             case TypeKind.Map:
                 if (type.Element is null || type.Value is null)
+                {
                     diagnostics.Add(Diagnostic.Error(DiagnosticCodes.GenericArity, "'Map' requires two type arguments <Key, Value>", type.Span));
+                }
+
                 break;
         }
 
@@ -1602,23 +1044,35 @@ public sealed class SemanticValidator
         // Only flag a KNOWN non-orderable element; an unknown element is already KOI0101.
         if (index.Classify(type.Name) == TypeKind.Range && type.Element is not null
             && index.IsKnownType(type.Element.Name) && !BuiltinOps.IsOrderable(type.Element.Name))
+        {
             diagnostics.Add(Diagnostic.Error(DiagnosticCodes.RangeNotOrderable,
                 $"range element type '{type.Element.Name}' is not orderable; ranges require Int, Decimal, or Instant",
                 type.Element.Span));
+        }
 
         if (type.Element is not null)
+        {
             ValidateTypeRef(type.Element, index, diagnostics);
+        }
+
         if (type.Value is not null)
+        {
             ValidateTypeRef(type.Value, index, diagnostics);
+        }
     }
 
     /// <summary>Collects every enum member name declared anywhere in the model.</summary>
     private static IReadOnlySet<string> CollectEnumMembers(KoineModel model)
     {
         var names = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var ctx in model.Contexts)
-            foreach (var type in ctx.Types)
+        foreach (ContextNode ctx in model.Contexts)
+        {
+            foreach (TypeDecl type in ctx.Types)
+            {
                 CollectEnumMembers(type, names);
+            }
+        }
+
         return names;
     }
 
@@ -1628,11 +1082,17 @@ public sealed class SemanticValidator
         {
             case EnumDecl e:
                 foreach (var member in e.MemberNames)
+                {
                     names.Add(member);
+                }
+
                 break;
             case AggregateDecl agg:
-                foreach (var nested in agg.Types)
+                foreach (TypeDecl nested in agg.Types)
+                {
                     CollectEnumMembers(nested, names);
+                }
+
                 break;
         }
     }

@@ -13,8 +13,10 @@ public sealed class TypeScope
         // Tolerate duplicate names (e.g. an invalid model with a repeated member):
         // last writer wins, and the duplicate is reported elsewhere.
         _names = new Dictionary<string, TypeRef>(StringComparer.Ordinal);
-        foreach (var pair in names)
+        foreach (KeyValuePair<string, TypeRef> pair in names)
+        {
             _names[pair.Key] = pair.Value;
+        }
     }
 
     public static TypeScope FromMembers(IEnumerable<Member> members) =>
@@ -85,8 +87,16 @@ public sealed class TypeResolver
             case IdentifierExpr id:
                 // A name bound to the "?" sentinel (e.g. a lambda parameter whose
                 // element type couldn't be determined) is treated as unknown.
-                if (scope.TryGet(id.Name, out var bound)) return bound.Name == "?" ? null : bound;
-                if (id.Name == "now") return Instant;
+                if (scope.TryGet(id.Name, out TypeRef bound))
+                {
+                    return bound.Name == "?" ? null : bound;
+                }
+
+                if (BuiltinOps.NullaryValueOps.TryGetValue(id.Name, out var builtinType))
+                {
+                    return new TypeRef(builtinType);
+                }
+
                 return _index.EnumMemberToType.TryGetValue(id.Name, out var en) ? new TypeRef(en) : null;
 
             case UnaryExpr u:
@@ -102,32 +112,45 @@ public sealed class TypeResolver
                 return Infer(g.Body, scope);
 
             case ConditionalExpr c:
-            {
-                // The result is optional if EITHER branch is optional.
-                var then = Infer(c.Then, scope);
-                var @else = Infer(c.Else, scope);
-                var result = then ?? @else;
-                return result is null
-                    ? null
-                    : result with { IsOptional = (then?.IsOptional ?? false) || (@else?.IsOptional ?? false) };
-            }
+                {
+                    // The result is optional if EITHER branch is optional.
+                    TypeRef? then = Infer(c.Then, scope);
+                    TypeRef? @else = Infer(c.Else, scope);
+                    TypeRef? result = then ?? @else;
+                    return result is null
+                        ? null
+                        : result with { IsOptional = (then?.IsOptional ?? false) || (@else?.IsOptional ?? false) };
+                }
 
             case CoalesceExpr co:
-            {
-                // `a ?? b` is non-null only if the fallback `b` is non-null.
-                var left = Infer(co.Left, scope);
-                var right = Infer(co.Right, scope);
-                var result = left ?? right;
-                return result is null
-                    ? null
-                    : result with { IsOptional = right is null || right.IsOptional };
-            }
+                {
+                    // `a ?? b` is non-null only if the fallback `b` is non-null.
+                    TypeRef? left = Infer(co.Left, scope);
+                    TypeRef? right = Infer(co.Right, scope);
+                    TypeRef? result = left ?? right;
+                    return result is null
+                        ? null
+                        : result with { IsOptional = right is null || right.IsOptional };
+                }
 
             case MemberAccessExpr ma:
                 return InferMember(ma, scope);
 
             case CallExpr call:
                 return InferCall(call, scope);
+
+            case LetExpr let:
+                {
+                    // Fold bindings into the scope in order (each sees the previous), then
+                    // infer the body in the extended scope.
+                    TypeScope letScope = scope;
+                    foreach (LetBinding b in let.Bindings)
+                    {
+                        letScope = letScope.With(b.Name, Infer(b.Value, letScope) ?? new TypeRef("?"));
+                    }
+
+                    return Infer(let.Body, letScope);
+                }
 
             default:
                 return null; // LambdaExpr only has meaning inside a CallExpr
@@ -143,8 +166,8 @@ public sealed class TypeResolver
               or BinaryOp.Lt or BinaryOp.Le or BinaryOp.Gt or BinaryOp.Ge:
                 return Bool;
             default: // arithmetic
-                var l = Infer(b.Left, scope);
-                var r = Infer(b.Right, scope);
+                TypeRef? l = Infer(b.Left, scope);
+                TypeRef? r = Infer(b.Right, scope);
                 var optional = (l?.IsOptional ?? false) || (r?.IsOptional ?? false);
                 TypeRef? arithmetic =
                     IsValueLike(l) ? l :                              // value-object scalar arithmetic (Money * qty)
@@ -160,35 +183,72 @@ public sealed class TypeResolver
     {
         // Qualified enum reference: `EnumType.Member` -> the enum type.
         if (ma.Target is IdentifierExpr typeId && _index.IsEnumType(typeId.Name))
+        {
             return new TypeRef(typeId.Name);
+        }
 
         var op = ma.MemberName;
-        if (op == "length") return Int;
-        if (op is "trim" or "lower" or "upper") return String;
-        if (op == "isBlank") return Bool;
-        if (op == "count") return Int;
-        if (op is "isEmpty" or "isNotEmpty") return Bool;
-        if (op is "isPresent" or "isNone") return Bool;
+        if (op == "length")
+        {
+            return Int;
+        }
+
+        if (op is "trim" or "lower" or "upper")
+        {
+            return String;
+        }
+
+        if (op == "isBlank")
+        {
+            return Bool;
+        }
+
+        if (op == "count")
+        {
+            return Int;
+        }
+
+        if (op is "isEmpty" or "isNotEmpty")
+        {
+            return Bool;
+        }
+
+        if (op is "isPresent" or "isNone")
+        {
+            return Bool;
+        }
 
         // Otherwise a field access on a value/entity type — resolved in the receiver's
         // qualifier context, else this resolver's context (R13.2).
-        var target = Infer(ma.Target, scope);
-        if (target is not null && _index.TryGetMemberType(target.Qualifier ?? Context, target.Name, op, out var mt))
+        TypeRef? target = Infer(ma.Target, scope);
+        if (target is not null && _index.TryGetMemberType(target.Qualifier ?? Context, target.Name, op, out TypeRef mt))
+        {
             return mt;
+        }
+
         return null;
     }
 
     private TypeRef? InferCall(CallExpr call, TypeScope scope)
     {
         var op = call.Method;
-        if (BuiltinOps.StringCallOps.Contains(op)) return Bool;          // startsWith/endsWith/contains
-        if (BuiltinOps.CollectionPredicateOps.Contains(op)) return Bool; // all/any/none/distinctBy
+        if (BuiltinOps.StringCallOps.Contains(op))
+        {
+            return Bool;          // startsWith/endsWith/contains
+        }
+
+        if (BuiltinOps.CollectionPredicateOps.Contains(op))
+        {
+            return Bool; // all/any/none/distinctBy
+        }
 
         if (BuiltinOps.CollectionAggregateOps.Contains(op))             // sum/min/max
         {
-            var element = ElementOf(Infer(call.Target, scope));
+            TypeRef? element = ElementOf(Infer(call.Target, scope));
             if (element is not null && call.Args is [LambdaExpr lambda])
+            {
                 return Infer(lambda.Body, scope.With(lambda.Parameter, element));
+            }
         }
         return null;
     }

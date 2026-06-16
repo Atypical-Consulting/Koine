@@ -6,3 +6,4 @@ Generated/
 .vs/
 .idea/
 *.received.*
+.DS_Store

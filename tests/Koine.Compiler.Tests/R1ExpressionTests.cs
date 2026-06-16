@@ -323,8 +323,61 @@ public class R1ExpressionTests
 
         var stats = asm.GetType("N.Stats")!;
         var ints = (System.Collections.IList)Activator.CreateInstance(typeof(List<int>))!;
-        ints.Add(3); ints.Add(1); ints.Add(2);
+        ints.Add(3);
+        ints.Add(1);
+        ints.Add(2);
         var s = Activator.CreateInstance(stats, ints);
         Assert.Equal(1, stats.GetProperty("Lowest")!.GetValue(s));
+    }
+
+    // ---- R1.4 `now` as a first-class builtin -------------------------------
+
+    [Fact]
+    public void Now_is_a_registered_nullary_builtin_typed_as_instant()
+    {
+        // Single source of truth: `now` is defined once in BuiltinOps, not as a
+        // scattered string literal across resolver/checker/emitter.
+        Assert.True(Ast.BuiltinOps.IsNullaryValueOp("now"));
+        Assert.Equal("Instant", Ast.BuiltinOps.NullaryValueOps["now"]);
+    }
+
+    [Fact]
+    public void Now_emits_utc_now_in_generated_csharp()
+    {
+        const string src =
+            "context T {\n" +
+            "  value Event {\n" +
+            "    startsAt: Instant\n" +
+            "    isPast:   Bool = startsAt < now\n" +
+            "  }\n" +
+            "}\n";
+        Assert.Empty(Diagnose(src));
+
+        var result = new KoineCompiler().Compile(src, new CSharpEmitter());
+        Assert.True(result.Success, string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var source = string.Join("\n", result.Files.Select(f => f.Contents));
+        Assert.Contains("DateTimeOffset.UtcNow", source);
+    }
+
+    [Fact]
+    public void Field_named_now_shadows_the_builtin()
+    {
+        // `now` stays a (shadowable) Identifier, not a reserved word: a member named
+        // `now` resolves to the member, not the builtin current-instant value.
+        const string src =
+            "context T {\n" +
+            "  value Snapshot {\n" +
+            "    now:    Instant\n" +
+            "    sameAs: Bool = now == now\n" +
+            "  }\n" +
+            "}\n";
+        Assert.Empty(Diagnose(src));
+
+        var result = new KoineCompiler().Compile(src, new CSharpEmitter());
+        Assert.True(result.Success, string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var source = string.Join("\n", result.Files.Select(f => f.Contents));
+        Assert.DoesNotContain("DateTimeOffset.UtcNow", source);
     }
 }

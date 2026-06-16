@@ -7,6 +7,8 @@
     { "include": "#comments" },
     { "include": "#strings" },
     { "include": "#regex" },
+    { "include": "#annotations" },
+    { "include": "#roles" },
     { "include": "#declarations" },
     { "include": "#clauses" },
     { "include": "#keywords" },
@@ -20,6 +22,10 @@
   "repository": {
     "comments": {
       "patterns": [
+        {
+          "name": "comment.line.documentation.koine",
+          "match": "///(?!/).*$"
+        },
         {
           "name": "comment.line.double-slash.koine",
           "match": "//.*$"
@@ -47,13 +53,39 @@
         { "name": "constant.character.escape.koine", "match": "\\\\." }
       ]
     },
+    "annotations": {
+      "match": "(@)([A-Za-z_][A-Za-z0-9_]*)",
+      "captures": {
+        "1": { "name": "punctuation.definition.annotation.koine" },
+        "2": { "name": "storage.modifier.annotation.koine" }
+      }
+    },
+    "roles": {
+      "name": "keyword.other.role.koine",
+      "match": "\\b(partnership|shared-kernel|customer-supplier|conformist|anti-corruption-layer|open-host|published-language|acl)\\b"
+    },
     "declarations": {
       "patterns": [
         {
-          "match": "\\b(context|value|entity|aggregate|enum)\\s+([A-Za-z_][A-Za-z0-9_]*)",
+          "match": "\\b(integration)\\s+(event)\\s+([A-Za-z_][A-Za-z0-9_]*)",
+          "captures": {
+            "1": { "name": "storage.type.koine" },
+            "2": { "name": "storage.type.koine" },
+            "3": { "name": "entity.name.type.koine" }
+          }
+        },
+        {
+          "match": "\\b(context|value|quantity|entity|aggregate|enum|event|module|readmodel|query|service)\\s+([A-Za-z_][A-Za-z0-9_]*)",
           "captures": {
             "1": { "name": "storage.type.koine" },
             "2": { "name": "entity.name.type.koine" }
+          }
+        },
+        {
+          "match": "\\b(spec|policy|usecase|operation|command|create|find)\\s+([A-Za-z_][A-Za-z0-9_]*)",
+          "captures": {
+            "1": { "name": "storage.type.koine" },
+            "2": { "name": "entity.name.function.koine" }
           }
         }
       ]
@@ -74,6 +106,13 @@
             "1": { "name": "keyword.control.koine" },
             "2": { "name": "entity.name.type.koine" }
           }
+        },
+        {
+          "match": "\\b(as)\\s+(guid|sequence|natural)\\b",
+          "captures": {
+            "1": { "name": "keyword.control.koine" },
+            "2": { "name": "storage.modifier.koine" }
+          }
         }
       ]
     },
@@ -81,21 +120,21 @@
       "patterns": [
         {
           "name": "keyword.control.koine",
-          "match": "\\b(invariant|identified|by|root|when|matches)\\b"
+          "match": "\\b(identified|by|root|as|guid|sequence|natural|versioned|version|invariant|requires|emit|on|from|operations|import|publishes|subscribes|when|if|then|else|matches|let|in|result)\\b"
         },
         {
           "name": "storage.type.koine",
-          "match": "\\b(context|value|entity|aggregate|enum)\\b"
+          "match": "\\b(contextmap|context|value|quantity|entity|aggregate|enum|event|integration|module|service|spec|policy|repository|readmodel|query|usecase|operation|command|create|states|find)\\b"
         }
       ]
     },
     "builtin-types": {
       "name": "support.type.primitive.koine",
-      "match": "\\b(String|Int|Decimal|Bool|Instant|List)\\b"
+      "match": "\\b(String|Int|Decimal|Bool|Instant|List|Set|Map|Range)\\b"
     },
     "constants": {
       "name": "constant.language.koine",
-      "match": "\\b(true|false)\\b"
+      "match": "\\b(true|false|now)\\b"
     },
     "numbers": {
       "name": "constant.numeric.koine",
@@ -114,7 +153,7 @@
     },
     "operators": {
       "name": "keyword.operator.koine",
-      "match": "(==|!=|<=|>=|&&|\\|\\||[<>+\\-*/!=])"
+      "match": "(<->|->|=>|\\?\\?|==|!=|<=|>=|&&|\\|\\||[<>+\\-*/!=])"
     }
   }
 }

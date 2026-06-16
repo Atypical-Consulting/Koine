@@ -1,3 +1,4 @@
+using Customers;                       // spec extension methods (customer.IsVip())
 using Koine.Runtime;
 using Kernel = Catalog__Ordering.Kernel;
 
@@ -25,7 +26,7 @@ public static class Samples
 
         var product = new Catalog.Product(
             new Catalog.ProductCode("KEYBOARD-01"),             // natural string key (no New())
-            new Catalog.Sku("  abc-1234  "),                    // normalized => "ABC-1234"
+            new Catalog.Sku("ABC-1234"),                        // raw passes /^[A-Z]{3}-[0-9]{4}$/; Normalized => "ABC-1234"
             "Mechanical Keyboard",
             new Catalog.Price(129.95m, Kernel.Currency.EUR),    // Currency is a shared-kernel enum
             new Catalog.Weight(1.1m, Catalog.MassUnit.Kilogram),
@@ -40,12 +41,12 @@ public static class Samples
         _ = product.Summary;                    // description ?? name
         _ = product.IsAvailable;                // availability == InStock
         _ = product.OnSale;                     // sale.isPresent => true
-        return product;
+        return product;                         // Program.cs asserts these outcomes
     }
 
     /// <summary>
     /// Builds a customer and exercises the generated specification
-    /// (<c>CustomersSpecifications.IsVip</c>) and domain service
+    /// (<c>customer.IsVip()</c> extension method) and domain service
     /// (<c>LoyaltyService.DiscountRate</c>).
     /// </summary>
     public static Customers.Customer BuildCustomer()
@@ -59,7 +60,7 @@ public static class Samples
             Customers.LoyaltyTier.Gold,
             nickname: "Ada");                                   // displayName => "Ada"
 
-        _ = Customers.CustomersSpecifications.IsVip(customer);  // spec predicate => true (Gold)
+        _ = customer.IsVip();  // spec extension method => true (Gold)
         _ = new Customers.LoyaltyService().DiscountRate(customer.Tier); // 0.10 for Gold
         return customer;
     }

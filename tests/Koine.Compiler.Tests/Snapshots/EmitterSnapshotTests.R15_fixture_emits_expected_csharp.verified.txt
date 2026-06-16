@@ -58,7 +58,9 @@ public abstract class ValueObject
     public override bool Equals(object? obj)
     {
         if (obj is null || obj.GetType() != GetType())
+        {
             return false;
+        }
         return GetEqualityComponents().SequenceEqual(((ValueObject)obj).GetEqualityComponents());
     }
 
@@ -70,18 +72,19 @@ public abstract class ValueObject
         return hash.ToHashCode();
     }
 
-    public static bool operator ==(ValueObject? left, ValueObject? right) =>
-        left is null ? right is null : left.Equals(right);
+    public static bool operator ==(ValueObject? left, ValueObject? right)
+        => left is null ? right is null : left.Equals(right);
 
-    public static bool operator !=(ValueObject? left, ValueObject? right) => !(left == right);
+    public static bool operator !=(ValueObject? left, ValueObject? right)
+        => !(left == right);
 
     /// <summary>Wraps an ordered collection (list) as a by-element equality component.</summary>
-    protected static object? Ordered(System.Collections.IEnumerable? items) =>
-        items is null ? null : new SequenceComponent(items, ordered: true);
+    protected static object? Ordered(System.Collections.IEnumerable? items)
+        => items is null ? null : new SequenceComponent(items, ordered: true);
 
     /// <summary>Wraps an unordered collection (set/map) as a by-element equality component.</summary>
-    protected static object? Unordered(System.Collections.IEnumerable? items) =>
-        items is null ? null : new SequenceComponent(items, ordered: false);
+    protected static object? Unordered(System.Collections.IEnumerable? items)
+        => items is null ? null : new SequenceComponent(items, ordered: false);
 
     private sealed class SequenceComponent
     {
@@ -97,7 +100,9 @@ public abstract class ValueObject
         public override bool Equals(object? obj)
         {
             if (obj is not SequenceComponent other || _items.Count != other._items.Count)
+            {
                 return false;
+            }
             return _ordered
                 ? _items.SequenceEqual(other._items)
                 : _items.All(x => _items.Count(i => Equals(i, x)) == other._items.Count(i => Equals(i, x)));
@@ -138,7 +143,8 @@ public sealed class LegacyMoney : ValueObject
         Amount = amount;
     }
 
-    public override string ToString() => $"LegacyMoney {{ Amount = {Amount} }}";
+    public override string ToString()
+        => $"LegacyMoney {{ Amount = {Amount} }}";
 
     protected override IEnumerable<object?> GetEqualityComponents()
     {
@@ -168,7 +174,8 @@ public sealed class Money : ValueObject
         LegacyAmount = legacyAmount;
     }
 
-    public override string ToString() => $"Money {{ Amount = {Amount}, LegacyAmount = {LegacyAmount} }}";
+    public override string ToString()
+        => $"Money {{ Amount = {Amount}, LegacyAmount = {LegacyAmount} }}";
 
     protected override IEnumerable<object?> GetEqualityComponents()
     {
@@ -192,9 +199,11 @@ public sealed class OrderId : ValueObject
 {
     public Guid Value { get; }
 
-    public OrderId(Guid value) => Value = value;
+    public OrderId(Guid value)
+        => Value = value;
 
-    public static OrderId New() => new(Guid.NewGuid());
+    public static OrderId New()
+        => new(Guid.NewGuid());
 
     protected override IEnumerable<object?> GetEqualityComponents()
     {

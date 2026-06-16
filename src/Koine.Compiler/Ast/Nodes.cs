@@ -313,7 +313,8 @@ public sealed record Invariant(Expr Condition, string? Message) : KoineNode;
 public sealed record CommandDecl(
     string Name,
     IReadOnlyList<Param> Parameters,
-    IReadOnlyList<CommandStmt> Body) : KoineNode;
+    IReadOnlyList<CommandStmt> Body,
+    TypeRef? ReturnType = null) : KoineNode;
 
 /// <summary>A typed command parameter.</summary>
 public sealed record Param(string Name, TypeRef Type) : KoineNode;
@@ -346,6 +347,13 @@ public sealed record Initialization(string Field, Expr Value) : CommandStmt;
 
 /// <summary>Records a domain event: <c>emit EventName(field: value, ...)</c>.</summary>
 public sealed record EmitClause(string EventName, IReadOnlyList<EmitArg> Args) : CommandStmt;
+
+/// <summary>
+/// A command's return value: <c>result &lt;expr&gt;</c>. Only valid when the command
+/// declares a return type; the expression is the terminal statement of the emitted
+/// method and is evaluated over the post-mutation state.
+/// </summary>
+public sealed record ResultClause(Expr Value) : CommandStmt;
 
 /// <summary>A named payload argument of an <see cref="EmitClause"/>: <c>field: value</c>.</summary>
 public sealed record EmitArg(string Field, Expr Value) : KoineNode;

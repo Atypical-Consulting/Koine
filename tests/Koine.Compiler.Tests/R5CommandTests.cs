@@ -54,7 +54,9 @@ public class R5CommandTests
 
         var lines = (System.Collections.IList)Activator.CreateInstance(typeof(List<>).MakeGenericType(line))!;
         if (withLine)
+        {
             lines.Add(Activator.CreateInstance(line, productId.GetMethod("New")!.Invoke(null, null), 1));
+        }
 
         // ctor: (OrderId id, IReadOnlyList<OrderLine> lines, OrderStatus? status = null)
         return Activator.CreateInstance(order, orderId.GetMethod("New")!.Invoke(null, null), lines, null)!;

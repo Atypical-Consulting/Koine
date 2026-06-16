@@ -1,0 +1,48 @@
+name: CI
+
+# Build, test, and verify the generated demo on every push and pull request.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          # All projects target net10.0; pin the 10.0.x channel and allow preview
+          # builds in case the GA SDK is not yet on the runner image.
+          dotnet-version: '10.0.x'
+          dotnet-quality: preview
+
+      # Enforce .editorconfig on hand-written code (generated files carry the
+      # auto-generated header and are skipped here; their conformance is verified
+      # against the freshly emitted demo below).
+      - name: Verify formatting
+        run: dotnet format Koine.slnx --verify-no-changes
+
+      - name: Build
+        run: dotnet build -c Release
+
+      - name: Test
+        run: dotnet test tests/Koine.Compiler.Tests/Koine.Compiler.Tests.csproj -c Release --no-build
+
+      # End-to-end guard: the demo regenerates C# from .koi and compiles it.
+      # A demo build failure is a CI failure (it proves the emitter still works).
+      - name: Build generated demo
+        run: dotnet build demo/Shop.Domain/Shop.Domain.csproj -c Release
+
+      # Generated code must respect the same .editorconfig as hand-written code.
+      # The build above re-emits the demo; verify the emitter's output conforms.
+      - name: Verify generated code formatting
+        run: dotnet format demo/Shop.Domain/Shop.Domain.csproj --include-generated --verify-no-changes

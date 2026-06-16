@@ -75,6 +75,17 @@ public sealed record CoalesceExpr(Expr Left, Expr Right) : Expr;
 public sealed record IdentifierExpr(string Name) : Expr;
 
 /// <summary>
+/// Expression-local bindings: <c>let x = e (, y = e)* in body</c>. Each binding
+/// is in scope for the bindings that follow it and for <see cref="Body"/>;
+/// bindings see only earlier ones (sequential, like C# locals). The whole node is
+/// an expression and nests anywhere a value is expected.
+/// </summary>
+public sealed record LetExpr(IReadOnlyList<LetBinding> Bindings, Expr Body) : Expr;
+
+/// <summary>A single <c>name = value</c> binding inside a <see cref="LetExpr"/>.</summary>
+public sealed record LetBinding(string Name, Expr Value);
+
+/// <summary>
 /// A literal. <see cref="Text"/> is the canonical source text of the value:
 /// for <see cref="LiteralKind.String"/> it is the UNESCAPED content without the
 /// surrounding quotes; for numbers and booleans it is the literal as written.

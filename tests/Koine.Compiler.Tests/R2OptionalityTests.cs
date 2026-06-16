@@ -87,7 +87,8 @@ public class R2OptionalityTests
         var id = catalogId.GetMethod("New")!.Invoke(null, null);
 
         var tags = (ISet<string>)Activator.CreateInstance(typeof(HashSet<string>))!;
-        tags.Add("a"); tags.Add("b");
+        tags.Add("a");
+        tags.Add("b");
 
         var prices = (IDictionary)Activator.CreateInstance(
             typeof(Dictionary<,>).MakeGenericType(productId, money))!;
@@ -271,7 +272,8 @@ public class R2OptionalityTests
         var eid = asm.GetType("S.EId")!;
         var id = eid.GetMethod("New")!.Invoke(null, null);
         var tags = (ISet<string>)Activator.CreateInstance(typeof(HashSet<string>))!;
-        tags.Add("x"); tags.Add("y");
+        tags.Add("x");
+        tags.Add("y");
 
         var inst = Activator.CreateInstance(e, id, tags);
         Assert.Equal(2, e.GetProperty("N")!.GetValue(inst));

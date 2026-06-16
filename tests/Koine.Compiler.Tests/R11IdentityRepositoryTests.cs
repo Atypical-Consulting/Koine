@@ -45,7 +45,7 @@ public class R11IdentityRepositoryTests
         var (asm, files) = Build(ThreeStrategies);
         var src = FileContents(files, "Catalog/OrderId.cs");
         Assert.Contains("public Guid Value { get; }", src);
-        Assert.Contains("public static OrderId New() => new(Guid.NewGuid());", src);
+        Assert.Contains("public static OrderId New()\n        => new(Guid.NewGuid());", src);
 
         var orderId = asm.GetType("Catalog.OrderId")!;
         Assert.NotNull(orderId.GetMethod("New", BindingFlags.Public | BindingFlags.Static));
