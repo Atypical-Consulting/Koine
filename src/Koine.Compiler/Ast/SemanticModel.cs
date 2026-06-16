@@ -39,4 +39,44 @@ public sealed class SemanticModel
     /// </summary>
     public KoineType GetTypeInfo(Expr expr, TypeScope scope, string? context = null) =>
         ResolverFor(context).TypeOf(expr, scope);
+
+    /// <summary>
+    /// Resolves a "strong" name to the declaration it refers to: a declared type, an unambiguous enum
+    /// member, a named spec, or the entity that owns an ID value object. Returns <c>null</c> for
+    /// primitives/collections and unknown or ambiguous names. The single resolution path the editor
+    /// services share for go-to-definition, hover, and rename (R17).
+    /// </summary>
+    public Symbol? GetSymbol(string name)
+    {
+        if (Index.TryGetDecl(name, out TypeDecl decl) && decl.Span != SourceSpan.None)
+        {
+            return new TypeSymbol(name, decl.Span, Index.Classify(name), decl);
+        }
+
+        IReadOnlyList<string> owners = Index.EnumsDeclaring(name);
+        if (owners.Count == 1 && Index.TryGetDecl(owners[0], out TypeDecl ed) && ed is EnumDecl e)
+        {
+            EnumMember? member = e.Members.FirstOrDefault(m => m.Name == name);
+            if (member is not null && member.Span != SourceSpan.None)
+            {
+                return new EnumMemberSymbol(name, member.Span, owners[0], member);
+            }
+        }
+
+        SpecDecl? spec = Index.AllSpecs().FirstOrDefault(s => s.Name == name);
+        if (spec is not null && spec.Span != SourceSpan.None)
+        {
+            return new SpecSymbol(name, spec.Span, spec);
+        }
+
+        // ID type (e.g. ProductId) -> the entity that declares `identified by <name>`. There is no
+        // standalone ID node, so navigation deliberately lands on the owning entity's declaration.
+        EntityDecl? owner = Index.AllTypes().OfType<EntityDecl>().FirstOrDefault(en => en.IdentityName == name);
+        if (owner is not null && owner.Span != SourceSpan.None)
+        {
+            return new IdValueObjectSymbol(name, owner.Span, owner);
+        }
+
+        return null;
+    }
 }
