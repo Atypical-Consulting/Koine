@@ -16,6 +16,7 @@ public sealed partial class CSharpEmitter
     // ----------------------------------------------------------------------
 
     private void EmitAggregate(
+        EmitContext emit,
         List<EmittedFile> files,
         AggregateDecl agg,
         string ns,
@@ -29,30 +30,30 @@ public sealed partial class CSharpEmitter
             switch (type)
             {
                 case ValueObjectDecl vo:
-                    files.Add(EmitValueObject(vo, ns, index, typeMapper, enumMemberToType));
+                    files.Add(EmitValueObject(emit, vo, ns, index, typeMapper, enumMemberToType));
                     break;
                 case EntityDecl entity:
                     var isRoot = entity.Name == agg.RootName;
-                    EmitEntityAndId(files, entity, ns, isRoot, isRoot && agg.IsVersioned, index, typeMapper, enumMemberToType);
+                    EmitEntityAndId(emit, files, entity, ns, isRoot, isRoot && agg.IsVersioned, index, typeMapper, enumMemberToType);
                     break;
                 case EnumDecl @enum:
-                    files.Add(EmitEnum(@enum, ns, index, typeMapper, enumMemberToType));
+                    files.Add(EmitEnum(emit, @enum, ns, index, typeMapper, enumMemberToType));
                     break;
                 case EventDecl @event:
-                    files.Add(EmitEvent(@event, ns, index, typeMapper, enumMemberToType));
+                    files.Add(EmitEvent(emit, @event, ns, index, typeMapper, enumMemberToType));
                     break;
                 case IntegrationEventDecl @event:
-                    files.Add(EmitIntegrationEvent(@event, ns, index, typeMapper, enumMemberToType));
+                    files.Add(EmitIntegrationEvent(emit, @event, ns, index, typeMapper, enumMemberToType));
                     break;
                 case AggregateDecl nested:
                     // Nested aggregates are not part of v0 fixtures, but recurse safely.
-                    EmitAggregate(files, nested, ns, index, typeMapper, enumMemberToType);
+                    EmitAggregate(emit, files, nested, ns, index, typeMapper, enumMemberToType);
                     break;
             }
         }
 
         // The aggregate root's repository contract (R11.2/R11.3).
-        if (EmitRepository(agg, ns, index, typeMapper) is { } repo)
+        if (EmitRepository(emit, agg, ns, index, typeMapper) is { } repo)
             files.Add(repo);
     }
 
@@ -71,7 +72,7 @@ public sealed partial class CSharpEmitter
     /// root's ID value object. Returns <c>null</c> if the root cannot be resolved
     /// (already a validation error).
     /// </summary>
-    private EmittedFile? EmitRepository(AggregateDecl agg, string ns, ModelIndex index, CSharpTypeMapper typeMapper)
+    private EmittedFile? EmitRepository(EmitContext emit, AggregateDecl agg, string ns, ModelIndex index, CSharpTypeMapper typeMapper)
     {
         var root = agg.RootEntity();
         if (root is null)
@@ -124,7 +125,7 @@ public sealed partial class CSharpEmitter
         }
 
         sb.Append("}\n");
-        return new EmittedFile($"{FolderFor(ns)}/{iface}.cs", Assemble(ns, sb.ToString(), usesLinq: false));
+        return new EmittedFile($"{FolderFor(ns)}/{iface}.cs", Assemble(emit, ns, sb.ToString(), usesLinq: false));
     }
 
     /// <summary>Maps every owned ID type name to its declared identity strategy (R11.1).</summary>

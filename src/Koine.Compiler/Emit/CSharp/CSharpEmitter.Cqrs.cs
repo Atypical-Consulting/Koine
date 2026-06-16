@@ -20,7 +20,7 @@ public sealed partial class CSharpEmitter
     /// (in declaration order) plus <c>SaveChangesAsync</c>. A pure abstraction — no
     /// infrastructure type appears.
     /// </summary>
-    private EmittedFile EmitUnitOfWork(string ns, IReadOnlyList<AggregateDecl> aggregates)
+    private EmittedFile EmitUnitOfWork(EmitContext emit, string ns, IReadOnlyList<AggregateDecl> aggregates)
     {
         var sb = new StringBuilder();
         WriteXmlDoc(sb, "Transactional boundary over this context's aggregate repositories.", "");
@@ -36,7 +36,7 @@ public sealed partial class CSharpEmitter
         sb.Append('\n');
         sb.Append(Indent).Append("Task<int> SaveChangesAsync(CancellationToken ct = default);\n");
         sb.Append("}\n");
-        return new EmittedFile($"{FolderFor(ns)}/IUnitOfWork.cs", Assemble(ns, sb.ToString(), usesLinq: false));
+        return new EmittedFile($"{FolderFor(ns)}/IUnitOfWork.cs", Assemble(emit, ns, sb.ToString(), usesLinq: false));
     }
 
     /// <summary>
@@ -44,7 +44,7 @@ public sealed partial class CSharpEmitter
     /// async method per use case (<c>Task</c> or <c>Task&lt;Result&gt;</c>), inputs mapped through
     /// the type mapper.
     /// </summary>
-    private EmittedFile EmitApplicationService(ServiceDecl svc, string ns, CSharpTypeMapper typeMapper)
+    private EmittedFile EmitApplicationService(EmitContext emit, ServiceDecl svc, string ns, CSharpTypeMapper typeMapper)
     {
         var iface = "I" + svc.Name;
         var sb = new StringBuilder();
@@ -68,7 +68,7 @@ public sealed partial class CSharpEmitter
         }
 
         sb.Append("}\n");
-        return new EmittedFile($"{FolderFor(ns)}/{iface}.cs", Assemble(ns, sb.ToString(), usesLinq: false));
+        return new EmittedFile($"{FolderFor(ns)}/{iface}.cs", Assemble(emit, ns, sb.ToString(), usesLinq: false));
     }
 
     /// <summary>
@@ -77,6 +77,7 @@ public sealed partial class CSharpEmitter
     /// the source property; derived fields translate their projection (rooted at <c>src</c>).
     /// </summary>
     private EmittedFile EmitReadModel(
+        EmitContext emit,
         ReadModelDecl rm,
         string ns,
         ModelIndex index,
@@ -123,7 +124,7 @@ public sealed partial class CSharpEmitter
         sb.Append("}\n");
 
         var usesLinq = rm.Fields.Any(f => f.Projection is not null && ExprUsesLinq(f.Projection));
-        return new EmittedFile($"{FolderFor(ns)}/{rm.Name}.cs", Assemble(ns, sb.ToString(), usesLinq));
+        return new EmittedFile($"{FolderFor(ns)}/{rm.Name}.cs", Assemble(emit, ns, sb.ToString(), usesLinq));
     }
 
     /// <summary>
@@ -148,7 +149,7 @@ public sealed partial class CSharpEmitter
     /// Emits a query object (R12.4): a <c>sealed record</c> carrying the criteria, handled via
     /// the generic runtime <c>IQueryHandler&lt;TQuery,TResult&gt;</c> (named in its doc).
     /// </summary>
-    private EmittedFile EmitQuery(QueryDecl q, string ns, CSharpTypeMapper typeMapper)
+    private EmittedFile EmitQuery(EmitContext emit, QueryDecl q, string ns, CSharpTypeMapper typeMapper)
     {
         var isList = q.ResultType.Name == ModelIndex.ListTypeName;
         var resultName = isList ? q.ResultType.Element!.Name : q.ResultType.Name;
@@ -160,7 +161,7 @@ public sealed partial class CSharpEmitter
             $"{typeMapper.Map(p.Type)} {CSharpNaming.ToPascalCase(p.Name)}"));
         sb.Append("public sealed record ").Append(q.Name).Append('(').Append(criteria).Append(");\n");
 
-        return new EmittedFile($"{FolderFor(ns)}/{q.Name}.cs", Assemble(ns, sb.ToString(), usesLinq: false));
+        return new EmittedFile($"{FolderFor(ns)}/{q.Name}.cs", Assemble(emit, ns, sb.ToString(), usesLinq: false));
     }
 
     /// <summary>True when the model declares any query object (gates the query-handler runtime type).</summary>
@@ -168,7 +169,7 @@ public sealed partial class CSharpEmitter
         model.Contexts.SelectMany(c => c.AllTypeDecls()).OfType<QueryDecl>().Any();
 
     /// <summary>Emits the generic <c>IQueryHandler&lt;TQuery,TResult&gt;</c> once into Koine.Runtime (R12.4).</summary>
-    private EmittedFile EmitQueryHandlerInterface()
+    private EmittedFile EmitQueryHandlerInterface(EmitContext emit)
     {
         var sb = new StringBuilder();
         sb.Append("/// <summary>Handles a query object, returning its typed result.</summary>\n");
@@ -176,7 +177,7 @@ public sealed partial class CSharpEmitter
         sb.Append(Indent).Append("Task<TResult> HandleAsync(TQuery query, CancellationToken ct = default);\n");
         sb.Append("}\n");
         return new EmittedFile($"{FolderFor(RuntimeNamespace)}/IQueryHandler.cs",
-            Assemble(RuntimeNamespace, sb.ToString(), usesLinq: false));
+            Assemble(emit, RuntimeNamespace, sb.ToString(), usesLinq: false));
     }
 
     /// <summary>A small English pluralizer for repository property names (Order -&gt; Orders, Category -&gt; Categories).</summary>
