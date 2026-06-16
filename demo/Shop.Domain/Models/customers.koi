@@ -1,5 +1,5 @@
 // Customers bounded context — who buys from the shop.
-context Customers {
+context Customers version 1 {
 
   enum LoyaltyTier { Bronze, Silver, Gold }
 
@@ -10,6 +10,8 @@ context Customers {
     invariant raw matches /^[^@]+@[^@]+\.[^@]+$/      "invalid email address"
   }
 
+  // Exported to Shipping as a customer-supplier type (see context-map.koi):
+  // Shipping `import`s this to address its shipments.
   value PostalAddress {
     street:     String
     city:       String
@@ -36,5 +38,16 @@ context Customers {
 
     // Conditional (R1.1): Gold members ship free.
     freeShipping:    Bool = if tier == Gold then true else false
+  }
+
+  // R10.1 — a named, reusable specification over Customer, emitted as a static
+  // predicate (CustomersSpecifications.IsVip).
+  spec IsVip on Customer = tier == Gold
+
+  // R10.2 — a domain service with a pure operation (expression body): the
+  // loyalty discount rate for a tier.
+  service LoyaltyService {
+    operation discountRate(tier: LoyaltyTier): Decimal =
+      if tier == Gold then 0.10 else if tier == Silver then 0.05 else 0.0
   }
 }

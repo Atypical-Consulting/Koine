@@ -1,0 +1,15 @@
+// Evolved (v2) of the Sales contract. Compared against v1 with:
+//   koine check examples/versioning/v2 --baseline examples/versioning/v1
+// Adding `note` (optional) is backward-compatible; REMOVING the published
+// `coupon` field is a breaking change and makes `koine check` fail.
+context Sales version 2 {
+
+  integration event OrderPlaced {
+    orderId: OrderId
+    total:   Decimal
+    // coupon removed  -> BREAKING (PublishedFieldRemoved)
+    @since(2) note: String?     // added optional field -> backward-compatible
+  }
+
+  publishes OrderPlaced
+}
