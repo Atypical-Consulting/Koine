@@ -37,7 +37,7 @@ public class R10ServicesTests
     public void Spec_emits_a_reusable_predicate_that_evaluates()
     {
         var (asm, files) = Compile(SpecSrc);
-        Assert.Contains("Shop/ShopSpecifications.cs", files);
+        Assert.Contains("Shop/Specifications/ShopSpecifications.cs", files);
 
         var specs = asm.GetType("Shop.ShopSpecifications")!;
         var order = asm.GetType("Shop.Order")!;
@@ -205,7 +205,7 @@ public class R10ServicesTests
         Assert.Empty(Diagnose(PolicySrc));
         var (asm, files) = Compile(PolicySrc);
 
-        Assert.Contains("Sales/ReserveStockPolicy.cs", files);
+        Assert.Contains("Sales/Policies/ReserveStockPolicy.cs", files);
         Assert.Contains("public interface IReserveStockPolicy", files);
         Assert.Contains("Task Handle(OrderPlaced e, CancellationToken ct = default);", files);
         Assert.Contains("public abstract partial class ReserveStockPolicy : IReserveStockPolicy", files);

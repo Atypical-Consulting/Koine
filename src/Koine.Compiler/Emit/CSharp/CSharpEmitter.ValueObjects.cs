@@ -118,7 +118,7 @@ public sealed partial class CSharpEmitter
 
         sb.Append("}\n");
 
-        return new EmittedFile($"{FolderFor(ns)}/{vo.Name}.cs",
+        return new EmittedFile(PathFor(ns, KindFolder.ValueObjects, $"{vo.Name}.cs"),
             Assemble(emit, ns, sb.ToString(), UsesLinq(vo.Members, vo.Invariants) || SpecBodiesUseLinq(vo.Name, index)));
     }
 

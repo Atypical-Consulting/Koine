@@ -369,7 +369,7 @@ public sealed partial class CSharpEmitter : IEmitter
 
         sb.Append("}\n");
 
-        return new EmittedFile($"{FolderFor(ns)}/{name}.cs", Assemble(emit, ns, sb.ToString(), usesLinq: true));
+        return new EmittedFile(PathFor(ns, KindFolder.Enums, $"{name}.cs"), Assemble(emit, ns, sb.ToString(), usesLinq: true));
     }
 
     // ----------------------------------------------------------------------
@@ -484,7 +484,7 @@ public sealed partial class CSharpEmitter : IEmitter
         }
 
         sb.Append("}\n");
-        return new EmittedFile($"{FolderFor(ns)}/{ev.Name}.cs",
+        return new EmittedFile(PathFor(ns, KindFolder.Events, $"{ev.Name}.cs"),
             Assemble(emit, ns, sb.ToString(), UsesLinq(ev.Members, Array.Empty<Invariant>())));
     }
 
@@ -543,7 +543,7 @@ public sealed partial class CSharpEmitter : IEmitter
         }
 
         sb.Append("}\n");
-        return new EmittedFile($"{FolderFor(ns)}/{ev.Name}.cs",
+        return new EmittedFile(PathFor(ns, KindFolder.IntegrationEvents, $"{ev.Name}.cs"),
             Assemble(emit, ns, sb.ToString(), UsesLinq(ev.Members, Array.Empty<Invariant>())));
     }
 
@@ -565,7 +565,7 @@ public sealed partial class CSharpEmitter : IEmitter
         sb.Append(Indent).Append("Task Handle(").Append(eventType).Append(" theEvent, CancellationToken ct = default);\n");
         sb.Append("}\n");
 
-        return new EmittedFile($"{FolderFor(subscriberContext)}/IHandle{sub.EventName}.cs",
+        return new EmittedFile(PathFor(subscriberContext, KindFolder.Abstractions, $"IHandle{sub.EventName}.cs"),
             Assemble(emit, subscriberContext, sb.ToString(), usesLinq: false));
     }
 
@@ -597,7 +597,7 @@ public sealed partial class CSharpEmitter : IEmitter
 
         sb.Append("}\n");
 
-        return new EmittedFile($"{FolderFor(r.Downstream)}/{iface}.cs",
+        return new EmittedFile(PathFor(r.Downstream, KindFolder.Abstractions, $"{iface}.cs"),
             Assemble(emit, r.Downstream, sb.ToString(), usesLinq: false));
     }
 
@@ -1474,6 +1474,36 @@ public sealed partial class CSharpEmitter : IEmitter
 
     /// <summary>Maps a namespace to its emit folder path.</summary>
     private static string FolderFor(string ns) => ns.Replace('.', '/');
+
+    /// <summary>
+    /// Builds the output path for a generated file: the namespace folder, an
+    /// optional DDD building-block subfolder (e.g. "Entities", "ValueObjects"),
+    /// and the file name. An empty <paramref name="kindFolder"/> places the file
+    /// at the namespace root — used for aggregate roots (the aggregate is the
+    /// context's entry point) and for runtime support types.
+    /// </summary>
+    private static string PathFor(string ns, string kindFolder, string fileName)
+        => kindFolder.Length == 0
+            ? $"{FolderFor(ns)}/{fileName}"
+            : $"{FolderFor(ns)}/{kindFolder}/{fileName}";
+
+    /// <summary>The DDD building-block subfolders generated files are grouped into.</summary>
+    private static class KindFolder
+    {
+        public const string Root = "";
+        public const string Entities = "Entities";
+        public const string ValueObjects = "ValueObjects";
+        public const string Enums = "Enums";
+        public const string Events = "Events";
+        public const string IntegrationEvents = "IntegrationEvents";
+        public const string ReadModels = "ReadModels";
+        public const string Queries = "Queries";
+        public const string Services = "Services";
+        public const string Specifications = "Specifications";
+        public const string Policies = "Policies";
+        public const string Repositories = "Repositories";
+        public const string Abstractions = "Abstractions";
+    }
 
     /// <summary>The bounded context owning a namespace (its first segment); the resolution scope for R13.2.</summary>
     private static string ContextOf(string ns)

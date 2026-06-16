@@ -66,7 +66,7 @@ public class R12ApplicationTests
     public void Context_with_an_aggregate_emits_a_unit_of_work()
     {
         var (asm, files) = Build(Fixture);
-        var uow = FileContents(files, "Sales/IUnitOfWork.cs");
+        var uow = FileContents(files, "Sales/Abstractions/IUnitOfWork.cs");
         Assert.Contains("public interface IUnitOfWork", uow);
         Assert.Contains("IOrderRepository Orders { get; }", uow);
         Assert.Contains("Task<int> SaveChangesAsync(CancellationToken ct = default);", uow);
@@ -77,7 +77,7 @@ public class R12ApplicationTests
     public void Unit_of_work_references_no_infrastructure_namespace()
     {
         var (_, files) = Build(Fixture);
-        var uow = FileContents(files, "Sales/IUnitOfWork.cs");
+        var uow = FileContents(files, "Sales/Abstractions/IUnitOfWork.cs");
         foreach (var banned in new[] { "EntityFrameworkCore", "System.Data", "Dapper", "MongoDB", "DbContext" })
         {
             Assert.DoesNotContain(banned, uow);
@@ -98,7 +98,7 @@ public class R12ApplicationTests
             }
             """;
         var (asm, files) = Build(src);
-        var uow = FileContents(files, "Sales/IUnitOfWork.cs");
+        var uow = FileContents(files, "Sales/Abstractions/IUnitOfWork.cs");
         Assert.Contains("IOrderRepository Orders { get; }", uow);
         Assert.Contains("IShipmentRepository Shipments { get; }", uow);
         Assert.True(uow.IndexOf("Orders", StringComparison.Ordinal) < uow.IndexOf("Shipments", StringComparison.Ordinal));
@@ -123,7 +123,7 @@ public class R12ApplicationTests
     {
         const string src = "context C {\n  value V { n: Int }\n}\n";
         var (_, files) = Build(src);
-        Assert.DoesNotContain(files, f => f.RelativePath == "C/IUnitOfWork.cs");
+        Assert.DoesNotContain(files, f => f.RelativePath == "C/Abstractions/IUnitOfWork.cs");
     }
 
     [Fact]
@@ -137,7 +137,7 @@ public class R12ApplicationTests
             }
             """;
         var (_, files) = Build(src);
-        Assert.Contains("ICategoryRepository Categories { get; }", FileContents(files, "Library/IUnitOfWork.cs"));
+        Assert.Contains("ICategoryRepository Categories { get; }", FileContents(files, "Library/Abstractions/IUnitOfWork.cs"));
     }
 
     // ---- R12.2 — application service interfaces ----------------------------
@@ -146,7 +146,7 @@ public class R12ApplicationTests
     public void Use_cases_emit_an_application_service_interface()
     {
         var (asm, files) = Build(Fixture);
-        var svc = FileContents(files, "Sales/IOrderService.cs");
+        var svc = FileContents(files, "Sales/Services/IOrderService.cs");
         Assert.Contains("public interface IOrderService", svc);
         Assert.Contains("Task<OrderId> PlaceOrder(CustomerId customer, IReadOnlyList<OrderLine> lines, CancellationToken ct = default);", svc);
         Assert.Contains("Task CancelOrder(OrderId order, CancellationToken ct = default);", svc); // void use case -> Task
@@ -157,7 +157,7 @@ public class R12ApplicationTests
     public void Service_with_only_use_cases_emits_no_domain_class()
     {
         var (_, files) = Build(Fixture);
-        Assert.DoesNotContain(files, f => f.RelativePath == "Sales/OrderService.cs");
+        Assert.DoesNotContain(files, f => f.RelativePath == "Sales/Services/OrderService.cs");
     }
 
     [Fact]
@@ -173,8 +173,8 @@ public class R12ApplicationTests
             }
             """;
         var (_, files) = Build(src);
-        Assert.Contains(files, f => f.RelativePath == "Sales/Pricing.cs");   // domain class (operation)
-        Assert.Contains(files, f => f.RelativePath == "Sales/IPricing.cs");  // app interface (usecase)
+        Assert.Contains(files, f => f.RelativePath == "Sales/Services/Pricing.cs");   // domain class (operation)
+        Assert.Contains(files, f => f.RelativePath == "Sales/Services/IPricing.cs");  // app interface (usecase)
     }
 
     [Fact]
@@ -195,7 +195,7 @@ public class R12ApplicationTests
             """;
         Assert.Empty(Diagnose(src));
         var (_, files) = Build(src);
-        var svc = FileContents(files, "Sales/IQueries.cs");
+        var svc = FileContents(files, "Sales/Services/IQueries.cs");
         Assert.Contains("Task<OrderSummary> GetOrder(OrderId order, CancellationToken ct = default);", svc);
         Assert.Contains("Task<IReadOnlyList<OrderSummary>> ListOrders(CancellationToken ct = default);", svc);
     }
@@ -227,7 +227,7 @@ public class R12ApplicationTests
     public void Read_model_emits_a_record_and_a_projection_mapper()
     {
         var (_, files) = Build(Fixture);
-        var rm = FileContents(files, "Sales/OrderSummary.cs");
+        var rm = FileContents(files, "Sales/ReadModels/OrderSummary.cs");
         Assert.Contains("public sealed record OrderSummary(", rm);
         Assert.Contains("OrderId Id", rm);
         Assert.Contains("OrderStatus Status", rm);
@@ -349,7 +349,7 @@ public class R12ApplicationTests
             """;
         Assert.Empty(Diagnose(src));
         var (_, files) = Build(src);
-        var rm = FileContents(files, "C/CartTotal.cs");
+        var rm = FileContents(files, "C/ReadModels/CartTotal.cs");
         Assert.Contains("using System.Linq;", rm);
         Assert.Contains(".Sum(", rm);
     }
@@ -360,8 +360,8 @@ public class R12ApplicationTests
     public void Queries_emit_dtos_and_a_shared_handler_interface()
     {
         var (asm, files) = Build(Fixture);
-        Assert.Contains("public sealed record OrdersByStatus(OrderStatus Status);", FileContents(files, "Sales/OrdersByStatus.cs"));
-        Assert.Contains("public sealed record OrderById(OrderId Id);", FileContents(files, "Sales/OrderById.cs"));
+        Assert.Contains("public sealed record OrdersByStatus(OrderStatus Status);", FileContents(files, "Sales/Queries/OrdersByStatus.cs"));
+        Assert.Contains("public sealed record OrderById(OrderId Id);", FileContents(files, "Sales/Queries/OrderById.cs"));
 
         var handler = FileContents(files, "Koine/Runtime/IQueryHandler.cs");
         Assert.Contains("public interface IQueryHandler<TQuery, TResult>", handler);

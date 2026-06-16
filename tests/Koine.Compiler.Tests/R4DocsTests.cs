@@ -36,13 +36,13 @@ public class R4DocsTests
     [Fact]
     public void Doc_comments_render_as_xml_summaries()
     {
-        var money = Emit(Doced, new CSharpEmitter(), "Billing/Money.cs");
+        var money = Emit(Doced, new CSharpEmitter(), "Billing/ValueObjects/Money.cs");
 
         Assert.Contains("/// <summary>A monetary amount in a specific currency.</summary>", money);
         // member doc + XML escaping of < > &
         Assert.Contains("/// <summary>The amount; never negative. Holds a List&lt;T&gt; &amp; co.</summary>", money);
 
-        var currency = Emit(Doced, new CSharpEmitter(), "Billing/Currency.cs");
+        var currency = Emit(Doced, new CSharpEmitter(), "Billing/Enums/Currency.cs");
         Assert.Contains("/// <summary>Supported currencies.</summary>", currency);
     }
 
@@ -58,7 +58,7 @@ public class R4DocsTests
     public void Absent_doc_comment_emits_no_summary()
     {
         // `currency` has no doc; its property must not carry a <summary>.
-        var money = Emit(Doced, new CSharpEmitter(), "Billing/Money.cs");
+        var money = Emit(Doced, new CSharpEmitter(), "Billing/ValueObjects/Money.cs");
         var currencyProp = money.Split('\n').First(l => l.Contains("public Currency Currency"));
         Assert.DoesNotContain("<summary>", currencyProp);
     }
@@ -67,7 +67,7 @@ public class R4DocsTests
     public void Ordinary_line_comments_are_not_captured()
     {
         const string src = "context C {\n  // not a doc comment\n  value V { x: Int }\n}\n";
-        var v = Emit(src, new CSharpEmitter(), "C/V.cs");
+        var v = Emit(src, new CSharpEmitter(), "C/ValueObjects/V.cs");
         Assert.DoesNotContain("not a doc comment", v);
     }
 
@@ -126,7 +126,7 @@ public class R4DocsTests
             "    y: Int\n" +
             "  }\n" +
             "}\n";
-        var v = Emit(src, new CSharpEmitter(), "C/V.cs");
+        var v = Emit(src, new CSharpEmitter(), "C/ValueObjects/V.cs");
 
         Assert.Contains("/// <summary>real doc for y</summary>", v);
         Assert.DoesNotContain("trailing on x", v);   // dropped, not mis-attached to y
@@ -143,7 +143,7 @@ public class R4DocsTests
             "    x: Int\n" +
             "  }\n" +
             "}\n";
-        var v = Emit(src, new CSharpEmitter(), "C/V.cs");
+        var v = Emit(src, new CSharpEmitter(), "C/ValueObjects/V.cs");
         Assert.DoesNotContain("far away", v);
     }
 
@@ -155,7 +155,7 @@ public class R4DocsTests
             "  //// section divider, not a doc\n" +
             "  value V { x: Int }\n" +
             "}\n";
-        var v = Emit(src, new CSharpEmitter(), "C/V.cs");
+        var v = Emit(src, new CSharpEmitter(), "C/ValueObjects/V.cs");
         Assert.DoesNotContain("<summary>", v);
         Assert.DoesNotContain("section divider", v);
     }
