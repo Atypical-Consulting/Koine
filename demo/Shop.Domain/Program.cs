@@ -1,5 +1,6 @@
 using Koine.Runtime;
 using Shop.Domain;
+using Customers;                       // brings the generated spec extension methods (e.g. customer.IsVip()) into scope
 using Kernel = Catalog__Ordering.Kernel;
 
 // Runnable demo entry point. Everything below USES the Koine-generated types and
@@ -42,7 +43,7 @@ Check((product.Weight + product.Weight).Amount == 2.2m, "Weight + Weight = 2.2 k
 // --- Customers: specifications + domain service ---------------------------------
 Console.WriteLine("\nCustomers");
 var customer = Samples.BuildCustomer();
-Check(Customers.CustomersSpecifications.IsVip(customer), "IsVip(customer) for a Gold-tier member");
+Check(customer.IsVip(), "customer.IsVip() extension method for a Gold-tier member");
 Check(new Customers.LoyaltyService().DiscountRate(Customers.LoyaltyTier.Gold) == 0.10m, "LoyaltyService.DiscountRate(Gold) == 0.10");
 Check(new Customers.LoyaltyService().DiscountRate(Customers.LoyaltyTier.Silver) == 0.05m, "LoyaltyService.DiscountRate(Silver) == 0.05");
 

@@ -361,6 +361,6 @@ namespace Sales;
 /// <summary>Reusable domain specifications (predicates) for this context.</summary>
 public static class SalesSpecifications
 {
-    public static bool IsLarge(Order x) => x.LineCount > 10 || x.Total > 1000;
+    public static bool IsLarge(this Order x) => x.LineCount > 10 || x.Total > 1000;
 }
 

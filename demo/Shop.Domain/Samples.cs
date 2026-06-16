@@ -1,4 +1,5 @@
 using Koine.Runtime;
+using Customers;                       // spec extension methods (customer.IsVip())
 using Kernel = Catalog__Ordering.Kernel;
 
 namespace Shop.Domain;
@@ -45,7 +46,7 @@ public static class Samples
 
     /// <summary>
     /// Builds a customer and exercises the generated specification
-    /// (<c>CustomersSpecifications.IsVip</c>) and domain service
+    /// (<c>customer.IsVip()</c> extension method) and domain service
     /// (<c>LoyaltyService.DiscountRate</c>).
     /// </summary>
     public static Customers.Customer BuildCustomer()
@@ -59,7 +60,7 @@ public static class Samples
             Customers.LoyaltyTier.Gold,
             nickname: "Ada");                                   // displayName => "Ada"
 
-        _ = Customers.CustomersSpecifications.IsVip(customer);  // spec predicate => true (Gold)
+        _ = customer.IsVip();  // spec extension method => true (Gold)
         _ = new Customers.LoyaltyService().DiscountRate(customer.Tier); // 0.10 for Gold
         return customer;
     }
