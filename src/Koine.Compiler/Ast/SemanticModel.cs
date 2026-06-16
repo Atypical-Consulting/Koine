@@ -31,4 +31,12 @@ public sealed class SemanticModel
     /// contexts (R13.2) resolves to that context's declaration; <c>null</c> resolves globally.
     /// </summary>
     public TypeResolver ResolverFor(string? context = null) => new(Index, context);
+
+    /// <summary>
+    /// The resolved type of <paramref name="expr"/> in the given <paramref name="scope"/>, as seen from
+    /// <paramref name="context"/> (R13.2). Never <c>null</c> — an undeterminable type is
+    /// <see cref="ErrorType"/>. The façade entry point for resolved-type queries.
+    /// </summary>
+    public KoineType GetTypeInfo(Expr expr, TypeScope scope, string? context = null) =>
+        ResolverFor(context).TypeOf(expr, scope);
 }
