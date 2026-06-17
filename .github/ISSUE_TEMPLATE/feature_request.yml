@@ -1,0 +1,43 @@
+name: Feature request
+description: Propose a new language construct, emitter, or tooling capability
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Koine's roadmap is tracked as user stories in
+        [`USER-STORIES.md`](https://github.com/Atypical-Consulting/Koine/blob/main/USER-STORIES.md) —
+        a quick look there may show the idea is already planned.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem / motivation
+      description: What DDD modelling need isn't served today? Who is the persona (Domain Developer, Architect, …)?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: How might it look in a `.koi` model, and what should it emit?
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Language / grammar
+        - Semantic model / validation
+        - C# emitter
+        - TypeScript emitter
+        - New emitter target
+        - CLI / LSP / tooling
+        - Docs / website
+    validations:
+      required: true

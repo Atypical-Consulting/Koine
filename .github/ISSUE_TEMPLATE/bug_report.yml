@@ -1,0 +1,53 @@
+name: Bug report
+description: Something in the compiler, CLI, generated code, or tooling is wrong
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report! A **minimal `.koi` snippet that reproduces the problem** is the single
+        most helpful thing you can include.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: Describe the bug and what you expected instead.
+    validations:
+      required: true
+  - type: textarea
+    id: koi-source
+    attributes:
+      label: Minimal .koi model
+      description: The smallest model that reproduces the issue.
+      render: text
+    validations:
+      required: false
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: e.g. the exact `koine build …` command you ran.
+      placeholder: |
+        1. Save the model above as repro.koi
+        2. Run `dotnet run --project src/Koine.Cli -- build repro.koi --target csharp --out ./out`
+        3. ...
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual output / error
+      description: Compiler diagnostics, stack trace, or the incorrect generated code.
+      render: text
+  - type: input
+    id: version
+    attributes:
+      label: Koine version
+      description: Output of `koine --version` (or the commit SHA).
+    validations:
+      required: true
+  - type: input
+    id: env
+    attributes:
+      label: Environment
+      placeholder: "OS, .NET SDK version (dotnet --version)"
