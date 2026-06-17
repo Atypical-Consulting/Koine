@@ -50,11 +50,14 @@ context Billing {
 }
 ```
 
-Run `koine build billing.koi --target csharp --out ./generated` and you get a flat, predictable tree:
-one folder per context, one file per type, plus a tiny `Koine/Runtime/` folder with the shared marker
-types. The emitted `Money.cs` is a `sealed class : ValueObject` whose constructor throws **before** an
-invalid instance can exist — no NuGet dependency, no reflection, nothing to learn. It's the C# you'd
-have written by hand on a good day, every time.
+Run `koine build billing.koi --target csharp --out ./generated` and you get a predictable, nested tree:
+one folder per context, sub-folders by category (`ValueObjects/`, `Enums/`, `Entities/`, …), plus a
+tiny `Koine/Runtime/` folder with the shared marker types. For example, `Money` lands at
+`Billing/ValueObjects/Money.cs` and `Currency` at `Billing/Enums/Currency.cs` — namespaces stay flat
+(`namespace Billing;`), only the folders are categorised. The emitted `Money.cs` is a
+`sealed class : ValueObject` whose constructor throws **before** an invalid instance can exist — no
+NuGet dependency, no reflection, nothing to learn. It's the C# you'd have written by hand on a good
+day, every time.
 
 ## Why a *language*, not a library
 
