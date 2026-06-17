@@ -3,6 +3,7 @@ import { defineConfig } from 'astro/config';
 import starlight from '@astrojs/starlight';
 import sitemap from '@astrojs/sitemap';
 import starlightBlog from 'starlight-blog';
+import mermaid from 'astro-mermaid';
 
 import koineGrammar from './src/grammars/koine.tmLanguage.json' with { type: 'json' };
 
@@ -27,6 +28,10 @@ export default defineConfig({
 	// Emit clean, trailing-slash URLs so canonical links and the sitemap agree.
 	trailingSlash: 'always',
 	integrations: [
+		// Render ```mermaid fences (emitted by the `docs` target) as live SVG diagrams with
+		// light/dark theme switching. MUST come before Starlight so its rehype pass claims the
+		// mermaid fences before Expressive Code turns them into plain highlighted code blocks.
+		mermaid({ theme: 'neutral', autoTheme: true }),
 		sitemap(),
 		starlight({
 			title: 'Koine',
