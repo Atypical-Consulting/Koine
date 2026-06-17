@@ -143,23 +143,7 @@ public sealed class GlossaryEmitter : IEmitter
     }
 
     /// <summary>The evolution suffix for a type/field heading: <c> _(since v2; deprecated: reason)_</c> (R15.1).</summary>
-    private static string Tag(TypeDecl t) => Tag(t.Since, t.Deprecated);
-
-    private static string Tag(int? since, string? deprecated)
-    {
-        var parts = new List<string>();
-        if (since is { } s)
-        {
-            parts.Add("since v" + s);
-        }
-
-        if (!string.IsNullOrEmpty(deprecated))
-        {
-            parts.Add("deprecated: " + deprecated);
-        }
-
-        return parts.Count == 0 ? string.Empty : " _(" + Prose(string.Join("; ", parts)) + ")_";
-    }
+    private static string Tag(TypeDecl t) => MarkdownDoc.Tag(t);
 
     private static void WriteHeading(StringBuilder sb, string heading, string name, string kind, string? doc, string tag = "")
     {
@@ -170,131 +154,12 @@ public sealed class GlossaryEmitter : IEmitter
         }
     }
 
-    private static void WriteFields(StringBuilder sb, IReadOnlyList<Member> members)
-    {
-        if (members.Count == 0)
-        {
-            return;
-        }
+    private static void WriteFields(StringBuilder sb, IReadOnlyList<Member> members) =>
+        MarkdownDoc.WriteFields(sb, members);
 
-        var names = new HashSet<string>(members.Select(m => m.Name), StringComparer.Ordinal);
-
-        sb.Append("\n| Field | Type | Description |\n| --- | --- | --- |\n");
-        foreach (Member m in members)
-        {
-            var description = Cell(m.Doc);
-            if (MemberAnalysis.IsDerived(m, names))
-            {
-                description = description.Length == 0 ? "_derived_" : "_derived_ — " + description;
-            }
-
-            var tag = Tag(m.Since, m.Deprecated);
-            if (tag.Length != 0)
-            {
-                description = description.Length == 0 ? tag.Trim() : description + tag;
-            }
-
-            sb.Append("| ").Append(m.Name)
-              .Append(" | `").Append(KoineType(m.Type)).Append('`')
-              .Append(" | ").Append(description).Append(" |\n");
-        }
-    }
-
-    private static void WriteRules(StringBuilder sb, IReadOnlyList<Invariant> invariants)
-    {
-        if (invariants.Count == 0)
-        {
-            return;
-        }
-
-        sb.Append("\n**Business rules**\n");
-        foreach (Invariant inv in invariants)
-        {
-            sb.Append("- ").Append(Prose(inv.Message ?? Describe(inv.Condition))).Append('\n');
-        }
-    }
-
-    /// <summary>Renders a Koine type reference in source syntax (target-agnostic).</summary>
-    private static string KoineType(TypeRef t)
-    {
-        var s = t switch
-        {
-            { Value: not null, Element: not null } => $"{t.Name}<{KoineType(t.Element)}, {KoineType(t.Value)}>",
-            { Element: not null } => $"{t.Name}<{KoineType(t.Element)}>",
-            _ => t.Name
-        };
-        return t.IsOptional ? s + "?" : s;
-    }
-
-    /// <summary>A compact, target-agnostic rendering of an expression (for unnamed rules).</summary>
-    private static string Describe(Expr e) => DescribeVisitor.Instance.Visit(e);
-
-    /// <summary>
-    /// Renders an expression compactly for the glossary. Exhaustive
-    /// (<see cref="ExprVisitor{T}"/>): every node — including <c>let … in …</c> — renders rather
-    /// than collapsing to an ellipsis placeholder.
-    /// </summary>
-    private sealed class DescribeVisitor : ExprVisitor<string>
-    {
-        public static readonly DescribeVisitor Instance = new();
-
-        private DescribeVisitor() { }
-
-        protected override string VisitIdentifier(IdentifierExpr n) => n.Name;
-
-        protected override string VisitLiteral(LiteralExpr n) =>
-            n.Kind == LiteralKind.String ? $"\"{n.Text}\"" : n.Text;
-
-        protected override string VisitMemberAccess(MemberAccessExpr n) => $"{Visit(n.Target)}.{n.MemberName}";
-
-        protected override string VisitCall(CallExpr n) =>
-            $"{Visit(n.Target)}.{n.Method}({string.Join(", ", n.Args.Select(Visit))})";
-
-        protected override string VisitLambda(LambdaExpr n) => $"{n.Parameter} => {Visit(n.Body)}";
-
-        protected override string VisitConditional(ConditionalExpr n) =>
-            $"if {Visit(n.Condition)} then {Visit(n.Then)} else {Visit(n.Else)}";
-
-        protected override string VisitCoalesce(CoalesceExpr n) => $"{Visit(n.Left)} ?? {Visit(n.Right)}";
-
-        protected override string VisitUnary(UnaryExpr n) => (n.Op == UnaryOp.Not ? "!" : "-") + Visit(n.Operand);
-
-        protected override string VisitBinary(BinaryExpr n) => $"{Visit(n.Left)} {Operator(n.Op)} {Visit(n.Right)}";
-
-        protected override string VisitMatch(MatchExpr n) => $"{Visit(n.Target)} matches /{n.Pattern}/";
-
-        protected override string VisitGuard(GuardExpr n) => $"{Visit(n.Body)} when {Visit(n.Condition)}";
-
-        protected override string VisitLet(LetExpr n) =>
-            $"let {string.Join(", ", n.Bindings.Select(b => $"{b.Name} = {Visit(b.Value)}"))} in {Visit(n.Body)}";
-    }
-
-    private static string Operator(BinaryOp op) => op switch
-    {
-        BinaryOp.Or => "||",
-        BinaryOp.And => "&&",
-        BinaryOp.Eq => "==",
-        BinaryOp.Neq => "!=",
-        BinaryOp.Lt => "<",
-        BinaryOp.Le => "<=",
-        BinaryOp.Gt => ">",
-        BinaryOp.Ge => ">=",
-        BinaryOp.Add => "+",
-        BinaryOp.Sub => "-",
-        BinaryOp.Mul => "*",
-        BinaryOp.Div => "/",
-        _ => "?"
-    };
-
-    /// <summary>Collapses a (possibly multi-line) doc into a single Markdown table cell.</summary>
-    private static string Cell(string? doc) =>
-        string.IsNullOrEmpty(doc) ? string.Empty : EscapeMarkdown(doc).Replace("\n", " ").Replace("|", "\\|");
+    private static void WriteRules(StringBuilder sb, IReadOnlyList<Invariant> invariants) =>
+        MarkdownDoc.WriteRules(sb, invariants);
 
     /// <summary>Normalizes a doc/rule for prose (single line, escaped).</summary>
-    private static string Prose(string text) =>
-        EscapeMarkdown(text).Replace("\r", string.Empty).Replace("\n", " ").Trim();
-
-    /// <summary>Escapes characters Markdown/CommonMark treats as raw HTML or entities.</summary>
-    private static string EscapeMarkdown(string s) =>
-        s.Replace("&", "&amp;").Replace("<", "&lt;").Replace(">", "&gt;");
+    private static string Prose(string text) => MarkdownDoc.Prose(text);
 }

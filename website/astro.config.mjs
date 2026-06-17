@@ -117,6 +117,23 @@ export default defineConfig({
 					],
 				},
 				{
+					// Living documentation generated from the Shop demo model by
+					// scripts/build-docs.mjs (the `docs` emitter). Regenerated on every build;
+					// the pages live under src/content/docs/reference/domain/ (gitignored).
+					label: 'Domain reference (generated)',
+					items: [
+						{ label: 'Overview', slug: 'reference/domain' },
+						{ label: 'Catalog', slug: 'reference/domain/catalog' },
+						{ label: 'Customers', slug: 'reference/domain/customers' },
+						{ label: 'Ordering', slug: 'reference/domain/ordering' },
+						{ label: 'Payments', slug: 'reference/domain/payments' },
+						{ label: 'Shipping', slug: 'reference/domain/shipping' },
+						{ label: 'Legacy', slug: 'reference/domain/legacy' },
+						{ label: 'Context map', slug: 'reference/domain/context-map' },
+						{ label: 'Integration events', slug: 'reference/domain/integration-events' },
+					],
+				},
+				{
 					label: 'Guides',
 					items: [
 						{ label: 'Feature catalogue (R1–R17)', slug: 'guides/feature-catalogue' },
