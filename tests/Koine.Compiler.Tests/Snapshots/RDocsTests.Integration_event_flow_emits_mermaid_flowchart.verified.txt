@@ -1,0 +1,63 @@
+﻿// ==== docs/Ordering.md ====
+# Ordering
+
+## Events
+
+### Integration Events
+
+#### `OrderPlaced`
+
+| Field | Type | Description |
+| --- | --- | --- |
+| orderId | `OrderId` |  |
+| total | `Decimal` |  |
+
+_Published by this context._
+
+// ==== docs/Payments.md ====
+# Payments
+
+_This bounded context has no declared types yet._
+
+// ==== docs/Shipping.md ====
+# Shipping
+
+_This bounded context has no declared types yet._
+
+// ==== docs/index.md ====
+# Domain Documentation
+
+Living documentation generated from the Koine model. Each bounded context has its own
+page with the ubiquitous language, aggregates, and Mermaid diagrams of its lifecycles.
+
+## Bounded Contexts
+
+- [Ordering](./Ordering.md)
+- [Shipping](./Shipping.md)
+- [Payments](./Payments.md)
+
+## Strategic Views
+
+- [Integration Events](./integration-events.md) — cross-context published-language flows
+
+// ==== docs/integration-events.md ====
+# Integration Events
+
+The cross-context published-language flows: who emits each integration event and who consumes it.
+
+```mermaid
+flowchart LR
+    Ordering -->|publishes| evt_Ordering_OrderPlaced(["Ordering.OrderPlaced"])
+    evt_Ordering_OrderPlaced -->|consumed by| Payments
+    evt_Ordering_OrderPlaced -->|consumed by| Shipping
+```
+
+## Event Schemas
+
+### Ordering.OrderPlaced
+
+| Field | Type | Description |
+| --- | --- | --- |
+| orderId | `OrderId` |  |
+| total | `Decimal` |  |
+

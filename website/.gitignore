@@ -6,6 +6,9 @@ dist/
 public/koine-wasm/
 # generated social-share card (produced by scripts/og-image.mjs)
 public/og.png
+# generated living-documentation (produced by scripts/build-docs.mjs)
+.koine-docs/
+src/content/docs/reference/domain/
 
 # dependencies
 node_modules/

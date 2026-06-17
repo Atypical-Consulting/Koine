@@ -4,7 +4,7 @@
 
 ### Currency — enum
 
-Values: EUR, USD, GBP
+Values: EUR("€", 2), USD("$", 2), GBP("£", 2)
 
 ### MassUnit — enum
 
