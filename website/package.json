@@ -3,14 +3,27 @@
   "type": "module",
   "version": "0.0.1",
   "scripts": {
+    "build:wasm": "node scripts/build-wasm.mjs",
+    "predev": "node scripts/build-wasm.mjs",
     "dev": "astro dev",
     "start": "astro dev",
+    "prebuild": "node scripts/build-wasm.mjs",
     "build": "astro build",
     "preview": "astro preview",
     "astro": "astro"
   },
   "dependencies": {
     "@astrojs/starlight": "^0.40.0",
+    "@codemirror/autocomplete": "^6.18.6",
+    "@codemirror/commands": "^6.8.1",
+    "@codemirror/language": "^6.11.0",
+    "@codemirror/lint": "^6.8.5",
+    "@codemirror/state": "^6.5.2",
+    "@codemirror/view": "^6.38.1",
+    "@fontsource-variable/archivo": "^5.2.5",
+    "@fontsource-variable/hanken-grotesk": "^5.2.5",
+    "@fontsource-variable/jetbrains-mono": "^5.2.5",
+    "@lezer/highlight": "^1.2.1",
     "astro": "^6.4.5",
     "sharp": "^0.35.0"
   }

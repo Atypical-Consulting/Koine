@@ -8,6 +8,8 @@ No DDD theory yet — just the shortest path from a domain idea to compiling cod
 
 If you haven't installed the compiler, do that first: [Installation](/Koine/start/installation/).
 
+<a class="koi-try" href="/Koine/playground/?example=billing">Prefer to try it now? Open the Playground</a>
+
 ## Write `hello.koi`
 
 Create a file called `hello.koi` anywhere you like. We'll model a tiny slice of a hiring

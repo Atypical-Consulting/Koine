@@ -1,0 +1,84 @@
+/*
+  Koine "Architectural Blueprint" design tokens.
+  Indigo/cyan on paper, a faint technical-drawing grid, distinctive sans + mono.
+  Shared by the custom landing page and the Playground. Fonts are self-hosted via
+  Fontsource (imported in the consuming page/layout).
+*/
+:root {
+  /* Brand ink — the existing badge indigo, deepened for structure/text. */
+  --koi-indigo: #3245b8;
+  --koi-indigo-deep: #1b2356;
+  --koi-indigo-700: #283a9e;
+  --koi-cyan: #16a6c4;
+  --koi-cyan-bright: #22c0dd;
+
+  /* Paper canvas + ink. */
+  --koi-paper: #f6f8fc;
+  --koi-paper-2: #eef2fa;
+  --koi-surface: #ffffff;
+  --koi-ink: #141a33;
+  --koi-ink-soft: #44507a;
+  --koi-line: #c9d4ec;
+  --koi-line-soft: #dde5f4;
+
+  /* Roles. */
+  --koi-bg: var(--koi-paper);
+  --koi-fg: var(--koi-ink);
+  --koi-muted: var(--koi-ink-soft);
+  --koi-accent: var(--koi-indigo);
+  --koi-accent-2: var(--koi-cyan);
+  --koi-grid: rgba(50, 69, 184, 0.07);
+  --koi-grid-strong: rgba(50, 69, 184, 0.14);
+
+  /* Type. */
+  --koi-font-display: 'Archivo Variable', ui-sans-serif, system-ui, sans-serif;
+  --koi-font-body: 'Hanken Grotesk Variable', ui-sans-serif, system-ui, sans-serif;
+  --koi-font-mono: 'JetBrains Mono Variable', ui-monospace, 'SFMono-Regular', monospace;
+
+  /* Radii + shadow — crisp, technical, low blur. */
+  --koi-radius: 10px;
+  --koi-radius-sm: 6px;
+  --koi-shadow: 0 1px 0 var(--koi-line-soft), 0 12px 30px -18px rgba(20, 26, 51, 0.35);
+  --koi-shadow-lg: 0 24px 60px -30px rgba(27, 35, 86, 0.5);
+
+  /* Layout. */
+  --koi-maxw: 1180px;
+  --koi-gap: clamp(1rem, 2.5vw, 2rem);
+}
+
+/* Dark variant — navy canvas, cyan lines (mapped onto Starlight's dark theme too). */
+:root[data-theme='dark'],
+.koi-dark {
+  --koi-paper: #0c1024;
+  --koi-paper-2: #11173a;
+  --koi-surface: #141b3d;
+  --koi-ink: #e7ecfb;
+  --koi-ink-soft: #a6b1d8;
+  --koi-line: #2b366b;
+  --koi-line-soft: #232c57;
+  --koi-bg: var(--koi-paper);
+  --koi-fg: var(--koi-ink);
+  --koi-muted: var(--koi-ink-soft);
+  --koi-accent: #7d8ff0;
+  --koi-accent-2: var(--koi-cyan-bright);
+  --koi-grid: rgba(125, 143, 240, 0.08);
+  --koi-grid-strong: rgba(125, 143, 240, 0.16);
+  --koi-shadow: 0 1px 0 rgba(0, 0, 0, 0.4), 0 18px 40px -22px rgba(0, 0, 0, 0.8);
+  --koi-shadow-lg: 0 30px 70px -30px rgba(0, 0, 0, 0.85);
+}
+
+/* The signature blueprint grid backdrop — apply to a positioned container. */
+.koi-blueprint {
+  background-color: var(--koi-bg);
+  background-image:
+    linear-gradient(var(--koi-grid) 1px, transparent 1px),
+    linear-gradient(90deg, var(--koi-grid) 1px, transparent 1px),
+    linear-gradient(var(--koi-grid-strong) 1px, transparent 1px),
+    linear-gradient(90deg, var(--koi-grid-strong) 1px, transparent 1px);
+  background-size:
+    28px 28px,
+    28px 28px,
+    140px 140px,
+    140px 140px;
+  background-position: -1px -1px;
+}

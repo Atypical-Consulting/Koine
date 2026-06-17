@@ -1,0 +1,84 @@
+// Behavior — commands mutate state and record domain events, a state machine
+// constrains the legal transitions, and a factory is the only way to create an order.
+context Ordering {
+
+  enum Currency    { EUR, USD, GBP }
+  enum OrderStatus { Draft, Submitted, Paid, Shipped, Cancelled }
+
+  value Money {
+    amount:   Decimal
+    currency: Currency
+    invariant amount >= 0   "an amount cannot be negative"
+  }
+
+  aggregate Order root Order versioned {
+
+    repository {
+      operations: getById, add, update
+      find byCustomer(customer: CustomerId): List<Order>
+    }
+
+    event OrderOpened {
+      orderId:   OrderId
+      customer:  CustomerId
+      lineCount: Int
+    }
+
+    event OrderSubmitted {
+      orderId:   OrderId
+      lineCount: Int
+    }
+
+    value OrderLine {
+      product:   ProductId
+      quantity:  Int
+      unitPrice: Money
+      lineTotal: Money = unitPrice * quantity
+      // a 10% bulk discount at 10+ units (a conditional derived field)
+      payable:   Money = if quantity >= 10 then lineTotal * 0.9 else lineTotal
+      invariant quantity >= 1   "an order line needs at least one unit"
+    }
+
+    entity Order identified by OrderId {
+      customer:    CustomerId
+      lines:       List<OrderLine>
+      status:      OrderStatus = Draft
+      submittedAt: Instant?
+
+      total:       Money = lines.sum(l => l.payable)
+      lineCount:   Int   = lines.count
+      isPlaced:    Bool  = submittedAt.isPresent
+
+      invariant lines.all(l => l.quantity >= 1)    "every line needs a positive quantity"
+      invariant status == Draft when lines.isEmpty
+
+      // the order's legal lifecycle — only these transitions are permitted
+      states status {
+        Draft     -> Submitted, Cancelled
+        Submitted -> Paid, Cancelled
+        Paid      -> Shipped, Cancelled
+        Shipped
+        Cancelled
+      }
+
+      command submit {
+        requires status == Draft   "only a draft order can be submitted"
+        requires !lines.isEmpty    "cannot submit an empty order"
+        status      -> Submitted
+        submittedAt -> now
+        emit OrderSubmitted(orderId: id, lineCount: lines.count)
+      }
+
+      command cancel {
+        requires status != Shipped "a shipped order cannot be cancelled"
+        status -> Cancelled
+      }
+
+      // factory-only creation: the presence of `create` makes the constructor private
+      create open(customer: CustomerId, lines: List<OrderLine>) {
+        requires !lines.isEmpty   "cannot open an empty order"
+        emit OrderOpened(orderId: id, customer: customer, lineCount: lines.count)
+      }
+    }
+  }
+}

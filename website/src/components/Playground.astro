@@ -1,0 +1,311 @@
+---
+// The Koine Playground IDE: an editor wired to the in-browser wasm compiler. Used full-page
+// on /playground and in "embedded" mode on the landing page.
+interface Props {
+  embedded?: boolean;
+}
+const { embedded = false } = Astro.props;
+---
+
+<div class="koi-ide" data-embedded={String(embedded)}>
+  <div class="koi-ide__bar">
+    <select class="koi-sample" aria-label="Choose a sample model"></select>
+    <div class="koi-targets" role="tablist" aria-label="Output target">
+      <button data-target="csharp" class="is-active" type="button">C#</button>
+      <button data-target="typescript" type="button">TypeScript</button>
+      <button data-target="glossary" type="button">Glossary</button>
+    </div>
+    <span class="koi-status" data-kind="busy">loading compiler...</span>
+    <div class="koi-bar-right">
+      <button class="koi-share" type="button">Share</button>
+      <a class="koi-open" href="#">Open full Playground &#9656;</a>
+    </div>
+  </div>
+
+  <div class="koi-ide__body">
+    <div class="koi-pane koi-pane--editor">
+      <div class="koi-pane__label">model.koi</div>
+      <div class="koi-editor"></div>
+    </div>
+    <div class="koi-pane koi-pane--output">
+      <div class="koi-pane__label">generated</div>
+      <div class="koi-output">
+        <div class="koi-files"></div>
+        <pre class="koi-code"><code></code></pre>
+      </div>
+      <div class="koi-diagnostics" hidden></div>
+    </div>
+  </div>
+</div>
+
+<script>
+  import { mountPlayground } from '../playground/controller';
+  for (const el of document.querySelectorAll('.koi-ide')) {
+    mountPlayground(el);
+  }
+</script>
+
+<style is:global>
+  .koi-ide {
+    display: flex;
+    flex-direction: column;
+    border: 1px solid var(--koi-line);
+    border-radius: var(--koi-radius);
+    background: var(--koi-surface);
+    box-shadow: var(--koi-shadow);
+    overflow: hidden;
+    min-height: 0;
+  }
+
+  .koi-ide__bar {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    padding: 0.5rem 0.7rem;
+    border-bottom: 1px solid var(--koi-line);
+    background: var(--koi-paper-2);
+    font-family: var(--koi-font-mono);
+    font-size: 0.8rem;
+    flex-wrap: wrap;
+  }
+  .koi-bar-right {
+    margin-left: auto;
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+  }
+
+  /* Embedded (landing) hides the sample picker + Share; full page hides the "open" link. */
+  .koi-ide[data-embedded='true'] .koi-sample,
+  .koi-ide[data-embedded='true'] .koi-share {
+    display: none;
+  }
+  .koi-ide[data-embedded='false'] .koi-open {
+    display: none;
+  }
+
+  .koi-sample {
+    font-family: var(--koi-font-body);
+    font-size: 0.82rem;
+    padding: 0.32rem 0.5rem;
+    border: 1px solid var(--koi-line);
+    border-radius: var(--koi-radius-sm);
+    background: var(--koi-surface);
+    color: var(--koi-fg);
+    max-width: 16rem;
+  }
+
+  .koi-targets {
+    display: inline-flex;
+    border: 1px solid var(--koi-line);
+    border-radius: var(--koi-radius-sm);
+    overflow: hidden;
+  }
+  .koi-targets button {
+    appearance: none;
+    border: 0;
+    border-right: 1px solid var(--koi-line);
+    background: var(--koi-surface);
+    color: var(--koi-muted);
+    font: 600 0.78rem/1 var(--koi-font-mono);
+    padding: 0.36rem 0.66rem;
+    cursor: pointer;
+    transition: background 0.12s, color 0.12s;
+  }
+  .koi-targets button:last-child {
+    border-right: 0;
+  }
+  .koi-targets button.is-active {
+    background: var(--koi-accent);
+    color: #fff;
+  }
+  .koi-targets button:not(.is-active):hover {
+    color: var(--koi-fg);
+    background: var(--koi-paper);
+  }
+
+  .koi-status {
+    font-size: 0.78rem;
+    font-weight: 600;
+    letter-spacing: 0.01em;
+  }
+  .koi-status[data-kind='ok'] {
+    color: #16915a;
+  }
+  .koi-status[data-kind='err'] {
+    color: #c0392b;
+  }
+  .koi-status[data-kind='busy'] {
+    color: var(--koi-muted);
+  }
+  .koi-status[data-kind='busy']::before {
+    content: '';
+    display: inline-block;
+    width: 0.6em;
+    height: 0.6em;
+    margin-right: 0.4em;
+    border-radius: 50%;
+    background: var(--koi-cyan);
+    animation: koi-pulse 1s ease-in-out infinite;
+  }
+  @keyframes koi-pulse {
+    0%,
+    100% {
+      opacity: 0.25;
+    }
+    50% {
+      opacity: 1;
+    }
+  }
+
+  .koi-share,
+  .koi-open {
+    font: 600 0.78rem/1 var(--koi-font-mono);
+    padding: 0.36rem 0.66rem;
+    border-radius: var(--koi-radius-sm);
+    border: 1px solid var(--koi-accent);
+    background: transparent;
+    color: var(--koi-accent);
+    cursor: pointer;
+    text-decoration: none;
+    transition: background 0.12s, color 0.12s;
+  }
+  .koi-share:hover,
+  .koi-open:hover {
+    background: var(--koi-accent);
+    color: #fff;
+  }
+
+  .koi-ide__body {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    min-height: 0;
+    flex: 1;
+  }
+  @media (max-width: 760px) {
+    .koi-ide__body {
+      grid-template-columns: 1fr;
+    }
+  }
+
+  .koi-pane {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    min-height: 0;
+  }
+  .koi-pane--editor {
+    border-right: 1px solid var(--koi-line);
+  }
+  @media (max-width: 760px) {
+    .koi-pane--editor {
+      border-right: 0;
+      border-bottom: 1px solid var(--koi-line);
+    }
+  }
+  .koi-pane__label {
+    font: 600 0.68rem/1 var(--koi-font-mono);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--koi-muted);
+    padding: 0.4rem 0.7rem;
+    border-bottom: 1px dashed var(--koi-line-soft);
+    background: var(--koi-paper);
+  }
+
+  .koi-editor {
+    flex: 1;
+    min-height: 0;
+    overflow: auto;
+    background: var(--koi-surface);
+  }
+  .koi-editor .cm-editor {
+    height: 100%;
+  }
+
+  .koi-output {
+    flex: 1;
+    display: flex;
+    min-height: 0;
+  }
+  .koi-files {
+    width: 40%;
+    max-width: 16rem;
+    overflow: auto;
+    border-right: 1px solid var(--koi-line-soft);
+    background: var(--koi-paper);
+    padding: 0.3rem;
+  }
+  .koi-file {
+    display: block;
+    width: 100%;
+    text-align: left;
+    border: 0;
+    background: transparent;
+    color: var(--koi-muted);
+    font: 0.74rem/1.5 var(--koi-font-mono);
+    padding: 0.28rem 0.4rem;
+    border-radius: var(--koi-radius-sm);
+    cursor: pointer;
+    word-break: break-all;
+  }
+  .koi-file:hover {
+    background: var(--koi-paper-2);
+    color: var(--koi-fg);
+  }
+  .koi-file.is-active {
+    background: var(--koi-accent);
+    color: #fff;
+  }
+
+  .koi-code {
+    flex: 1;
+    margin: 0;
+    overflow: auto;
+    padding: 0.8rem 1rem;
+    background: var(--koi-surface);
+    color: var(--koi-fg);
+    font: 0.8rem/1.6 var(--koi-font-mono);
+    tab-size: 4;
+    white-space: pre;
+  }
+
+  .koi-diagnostics {
+    border-top: 1px solid var(--koi-line);
+    max-height: 30%;
+    overflow: auto;
+    background: var(--koi-paper);
+  }
+  .koi-diag {
+    display: flex;
+    gap: 0.6rem;
+    width: 100%;
+    text-align: left;
+    align-items: baseline;
+    border: 0;
+    border-bottom: 1px solid var(--koi-line-soft);
+    background: transparent;
+    cursor: pointer;
+    padding: 0.4rem 0.7rem;
+    font: 0.76rem/1.4 var(--koi-font-mono);
+    color: var(--koi-fg);
+  }
+  .koi-diag:hover {
+    background: var(--koi-paper-2);
+  }
+  .koi-diag__pos {
+    color: var(--koi-muted);
+    min-width: 3.2em;
+  }
+  .koi-diag__code {
+    color: #c0392b;
+    font-weight: 600;
+    min-width: 5em;
+  }
+  .koi-diag--warning .koi-diag__code {
+    color: #b8860b;
+  }
+  .koi-diag__msg {
+    color: var(--koi-fg);
+  }
+</style>

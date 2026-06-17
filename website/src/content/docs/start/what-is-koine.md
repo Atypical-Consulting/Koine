@@ -7,6 +7,8 @@ Koine is a target-agnostic compiler for **Domain-Driven Design**. You describe t
 
 The model is written once and stays free of any host-language concepts. **This release emits C#**, with TypeScript and Rust emitters on the roadmap — the parser and semantic model are kept strictly target-agnostic so a second backend can be added without touching them.
 
+<a class="koi-try" href="/Koine/playground/">Try Koine now — the compiler runs in your browser</a>
+
 ## The problem
 
 In a real DDD codebase, the *interesting* part of a value object or entity is tiny — a name, a few fields, an invariant or two. Everything else is mechanical:

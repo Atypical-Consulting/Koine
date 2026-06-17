@@ -2,6 +2,8 @@
 dist/
 # generated types
 .astro/
+# generated wasm compiler bundle (produced by scripts/build-wasm.mjs)
+public/koine-wasm/
 
 # dependencies
 node_modules/
