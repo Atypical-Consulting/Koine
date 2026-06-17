@@ -232,10 +232,6 @@ export function mountPlayground(root: HTMLElement): void {
     parent: editorHost,
     doc: init.code,
     onChange: onDocChanged,
-    onRun: () => {
-      cache.delete(target);
-      run();
-    },
     lintSource: async (src) => {
       try {
         const r = await compile(src, target);

@@ -35,7 +35,7 @@ const { embedded = false } = Astro.props;
     <div class="koi-pane koi-pane--editor">
       <div class="koi-pane__label">
         <span>model.koi</span>
-        <span class="koi-hint">&#8984;&#9166; run &middot; &#8984;F find</span>
+        <span class="koi-hint">compiles as you type &middot; &#8984;F to find</span>
       </div>
       <div class="koi-editor"></div>
     </div>
@@ -120,7 +120,7 @@ const { embedded = false } = Astro.props;
   }
   .koi-targets button.is-active {
     background: var(--koi-accent);
-    color: #fff;
+    color: var(--koi-on-accent);
   }
   .koi-targets button:not(.is-active):hover {
     color: var(--koi-fg);
@@ -149,7 +149,7 @@ const { embedded = false } = Astro.props;
   }
   .koi-mobile-tabs button.is-active {
     background: var(--koi-accent);
-    color: #fff;
+    color: var(--koi-on-accent);
   }
 
   .koi-status {
@@ -216,7 +216,7 @@ const { embedded = false } = Astro.props;
   }
   .koi-bar-right button.is-flash {
     background: var(--koi-accent);
-    color: #fff;
+    color: var(--koi-on-accent);
     border-color: var(--koi-accent);
   }
   .koi-share,
@@ -227,7 +227,7 @@ const { embedded = false } = Astro.props;
   .koi-share:hover,
   .koi-open:hover {
     background: var(--koi-accent);
-    color: #fff !important;
+    color: var(--koi-on-accent) !important;
   }
 
   /* Body — flex so the divider can resize the panes. */
@@ -355,7 +355,7 @@ const { embedded = false } = Astro.props;
   }
   .koi-file.is-active {
     background: var(--koi-accent);
-    color: #fff;
+    color: var(--koi-on-accent);
   }
 
   .koi-view {
@@ -404,13 +404,11 @@ const { embedded = false } = Astro.props;
     color: var(--koi-fg);
   }
 
-  /* Embedded (landing) — compact: hide picker/file tree/most actions and the resizer. */
+  /* Embedded (landing) — compact: hide the sample picker, Share, and the resizer, but keep
+     the file tree so all generated files are browsable. */
   .koi-ide[data-embedded='true'] .koi-sample,
   .koi-ide[data-embedded='true'] .koi-reset,
-  .koi-ide[data-embedded='true'] .koi-copy,
-  .koi-ide[data-embedded='true'] .koi-download,
   .koi-ide[data-embedded='true'] .koi-share,
-  .koi-ide[data-embedded='true'] .koi-files,
   .koi-ide[data-embedded='true'] .koi-resizer {
     display: none;
   }

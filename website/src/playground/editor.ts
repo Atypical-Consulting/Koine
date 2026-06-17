@@ -134,11 +134,71 @@ const sharedTheme = EditorView.theme({
   '.cm-activeLineGutter': { backgroundColor: 'transparent', color: 'var(--koi-accent)' },
   '.cm-selectionMatch': { backgroundColor: 'color-mix(in srgb, var(--koi-cyan) 22%, transparent)' },
   '.cm-searchMatch': { backgroundColor: 'color-mix(in srgb, var(--koi-cyan) 28%, transparent)' },
-  '.cm-panels': { backgroundColor: 'var(--koi-paper-2)', color: 'var(--koi-fg)' },
+  '.cm-searchMatch.cm-searchMatch-selected': {
+    backgroundColor: 'color-mix(in srgb, var(--koi-accent) 40%, transparent)',
+  },
+  // Find/replace panel — styled to match the blueprint chrome.
+  '.cm-panels': { backgroundColor: 'var(--koi-paper-2)', color: 'var(--koi-fg)', borderColor: 'var(--koi-line)' },
+  '.cm-panels.cm-panels-top': { borderBottom: '1px solid var(--koi-line)' },
+  '.cm-panels.cm-panels-bottom': { borderTop: '1px solid var(--koi-line)' },
+  '.cm-panel.cm-search': {
+    padding: '8px 10px',
+    fontFamily: 'var(--koi-font-body)',
+    fontSize: '0.82rem',
+    display: 'flex',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    gap: '6px',
+  },
+  '.cm-panel.cm-search label': {
+    color: 'var(--koi-muted)',
+    fontSize: '0.78rem',
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: '4px',
+  },
+  '.cm-textfield': {
+    backgroundColor: 'var(--koi-surface)',
+    color: 'var(--koi-fg)',
+    border: '1px solid var(--koi-line)',
+    borderRadius: '6px',
+    padding: '4px 8px',
+    fontFamily: 'var(--koi-font-mono)',
+    fontSize: '0.8rem',
+  },
+  '.cm-textfield:focus-visible': { outline: 'none', borderColor: 'var(--koi-accent)' },
+  '.cm-button': {
+    backgroundColor: 'var(--koi-surface)',
+    backgroundImage: 'none',
+    color: 'var(--koi-ink-soft)',
+    border: '1px solid var(--koi-line)',
+    borderRadius: '6px',
+    padding: '4px 9px',
+    fontFamily: 'var(--koi-font-mono)',
+    fontSize: '0.76rem',
+    cursor: 'pointer',
+  },
+  '.cm-button:hover': { borderColor: 'var(--koi-accent)', color: 'var(--koi-fg)' },
+  '.cm-panel.cm-search [name=close]': {
+    position: 'absolute',
+    top: '4px',
+    right: '8px',
+    color: 'var(--koi-muted)',
+    cursor: 'pointer',
+    fontSize: '1.1rem',
+    padding: '0 4px',
+    background: 'transparent',
+    border: '0',
+  },
+  '.cm-panel.cm-search [name=close]:hover': { color: 'var(--koi-fg)' },
   '.cm-tooltip': {
     backgroundColor: 'var(--koi-surface)',
     border: '1px solid var(--koi-line)',
     borderRadius: '6px',
+  },
+  '.cm-tooltip-autocomplete ul li[aria-selected]': {
+    backgroundColor: 'var(--koi-accent)',
+    color: 'var(--koi-on-accent)',
   },
 });
 
@@ -148,8 +208,6 @@ export interface KoineEditorOptions {
   parent: HTMLElement;
   doc: string;
   onChange?: (doc: string) => void;
-  /** Triggered by Mod-Enter (force compile). */
-  onRun?: () => void;
   lintSource?: (doc: string) => Promise<KoineDiagnostic[]>;
 }
 
@@ -190,17 +248,6 @@ export function createKoineEditor(opts: KoineEditorOptions): KoineEditor {
       )
     : [];
 
-  const runKey = keymap.of([
-    {
-      key: 'Mod-Enter',
-      preventDefault: true,
-      run: () => {
-        opts.onRun?.();
-        return true;
-      },
-    },
-  ]);
-
   const view = new EditorView({
     parent: opts.parent,
     state: EditorState.create({
@@ -217,7 +264,6 @@ export function createKoineEditor(opts: KoineEditorOptions): KoineEditor {
         highlightSelectionMatches(),
         search({ top: true }),
         autocompletion({ override: [koineCompletions], icons: false }),
-        runKey,
         keymap.of([...closeBracketsKeymap, ...searchKeymap, ...defaultKeymap, ...historyKeymap, indentWithTab]),
         koineLanguage,
         syntaxHighlighting(koineHighlight),

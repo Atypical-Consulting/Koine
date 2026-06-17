@@ -169,7 +169,7 @@ const pillars = [
       margin: 0 auto;
       padding: clamp(2.5rem, 7vw, 5.5rem) clamp(1rem, 4vw, 2.5rem);
       display: grid;
-      grid-template-columns: 1.05fr 0.95fr;
+      grid-template-columns: 1.35fr 0.65fr;
       gap: clamp(1.5rem, 4vw, 3.5rem);
       align-items: center;
     }
@@ -186,10 +186,15 @@ const pillars = [
     .hero h1 {
       font-family: var(--koi-font-display);
       font-weight: 800;
-      font-size: clamp(2.4rem, 6vw, 4rem);
-      line-height: 1.02;
+      font-size: clamp(2.3rem, 5vw, 3.7rem);
+      line-height: 1.04;
       letter-spacing: -0.03em;
       margin: 0 0 1.1rem;
+      text-wrap: balance;
+    }
+    /* Keep each line of the headline intact (it already has an explicit <br>). */
+    .hero h1 br {
+      display: inline;
     }
     .lede {
       font-size: clamp(1.02rem, 1.6vw, 1.22rem);
@@ -215,7 +220,7 @@ const pillars = [
     .btn--primary {
       background: var(--koi-accent);
       border-color: var(--koi-accent);
-      color: #fff;
+      color: var(--koi-on-accent);
     }
     .btn--primary:hover { box-shadow: 0 14px 30px -12px var(--koi-accent); }
     .hero__note { font-size: 0.85rem; color: var(--koi-muted); margin: 1rem 0 0; font-family: var(--koi-font-mono); }
@@ -226,6 +231,9 @@ const pillars = [
       flex-direction: column;
       gap: 0.7rem;
       align-items: stretch;
+      width: 100%;
+      max-width: 360px;
+      justify-self: end;
     }
     .chip {
       margin: 0;
@@ -341,7 +349,7 @@ const pillars = [
     @media (max-width: 880px) { .teaser { grid-template-columns: 1fr; } }
     .teaser__copy h2 { font-family: var(--koi-font-display); font-size: clamp(1.5rem, 3.5vw, 2.1rem); margin: 0 0 0.7rem; letter-spacing: -0.02em; }
     .teaser__copy p { color: var(--koi-ink-soft); line-height: 1.6; margin: 0 0 1.4rem; }
-    .teaser__copy a { color: var(--koi-accent); }
+    .teaser__copy p a { color: var(--koi-accent); }
     .teaser__targets {
       display: flex;
       flex-wrap: wrap;
@@ -357,7 +365,7 @@ const pillars = [
       color: var(--koi-ink-soft);
       background: var(--koi-paper-2);
     }
-    .tgt--on { background: var(--koi-accent); color: #fff; border-color: var(--koi-accent); }
+    .tgt--on { background: var(--koi-accent); color: var(--koi-on-accent); border-color: var(--koi-accent); }
     .tgt--soon { color: var(--koi-muted); border-style: dashed; }
     .tgt__arrow { color: var(--koi-accent-2); font-weight: 700; }
   </style>
