@@ -1,0 +1,127 @@
+---
+// Shared chrome for the custom (non-Starlight) pages: the landing page and the Playground.
+// Self-hosted fonts + design tokens, a blueprint header, and theme sync with the docs
+// (reads Starlight's stored theme so the wordmark/nav match what the reader picked).
+import '@fontsource-variable/archivo';
+import '@fontsource-variable/hanken-grotesk';
+import '@fontsource-variable/jetbrains-mono';
+import '../styles/tokens.css';
+
+interface Props {
+  title: string;
+  description?: string;
+  /** Fill the viewport with no page scroll (used by the Playground). */
+  fullbleed?: boolean;
+}
+const { title, description = '', fullbleed = false } = Astro.props;
+const base = import.meta.env.BASE_URL.replace(/\/$/, '');
+---
+
+<!doctype html>
+<html lang="en" data-theme="light">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{title}</title>
+    {description && <meta name="description" content={description} />}
+    <link rel="icon" href={`${base}/favicon.svg`} />
+    <script is:inline>
+      // Match the docs' chosen theme (Starlight persists it under `starlight-theme`).
+      try {
+        const stored = localStorage.getItem('starlight-theme');
+        const dark = stored ? stored === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches;
+        document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+      } catch (_) {}
+    </script>
+  </head>
+  <body class:list={['koi-page', { 'koi-page--fullbleed': fullbleed }]}>
+    <header class="koi-nav">
+      <a class="koi-wordmark" href={`${base}/`}>
+        <span class="koi-mark">Κ</span>oine
+      </a>
+      <nav class="koi-navlinks">
+        <a href={`${base}/start/what-is-koine/`}>Docs</a>
+        <a href={`${base}/playground/`}>Playground</a>
+        <a href={`${base}/guides/feature-catalogue/`}>Features</a>
+        <a href="https://github.com/Atypical-Consulting/Koine" rel="external">GitHub ↗</a>
+      </nav>
+    </header>
+
+    <slot />
+
+    {
+      !fullbleed && (
+        <footer class="koi-foot">
+          <span class="koi-mono">// Κοινή — the common tongue of your domain</span>
+          <nav>
+            <a href={`${base}/playground/`}>Playground</a>
+            <a href={`${base}/start/what-is-koine/`}>Get started</a>
+            <a href="https://github.com/Atypical-Consulting/Koine" rel="external">GitHub</a>
+          </nav>
+        </footer>
+      )
+    }
+
+    <style is:global>
+      *, *::before, *::after { box-sizing: border-box; }
+      html { color-scheme: light dark; }
+      body.koi-page {
+        margin: 0;
+        background: var(--koi-bg);
+        color: var(--koi-fg);
+        font-family: var(--koi-font-body);
+        -webkit-font-smoothing: antialiased;
+        text-rendering: optimizeLegibility;
+      }
+      body.koi-page--fullbleed { height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
+
+      .koi-nav {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 1rem;
+        padding: 0.85rem clamp(1rem, 4vw, 2.5rem);
+        border-bottom: 1px solid var(--koi-line);
+        background: color-mix(in srgb, var(--koi-bg) 86%, transparent);
+        backdrop-filter: blur(8px);
+        position: sticky;
+        top: 0;
+        z-index: 20;
+      }
+      .koi-wordmark {
+        font-family: var(--koi-font-display);
+        font-weight: 800;
+        font-size: 1.3rem;
+        letter-spacing: -0.02em;
+        color: var(--koi-fg);
+        text-decoration: none;
+      }
+      .koi-mark { color: var(--koi-accent); }
+      .koi-navlinks { display: flex; gap: clamp(0.7rem, 2vw, 1.6rem); flex-wrap: wrap; }
+      .koi-navlinks a {
+        color: var(--koi-muted);
+        text-decoration: none;
+        font-size: 0.92rem;
+        font-weight: 600;
+        transition: color 0.12s;
+      }
+      .koi-navlinks a:hover { color: var(--koi-accent); }
+
+      .koi-foot {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 1rem;
+        flex-wrap: wrap;
+        padding: 2rem clamp(1rem, 4vw, 2.5rem);
+        border-top: 1px solid var(--koi-line);
+        color: var(--koi-muted);
+        margin-top: 4rem;
+      }
+      .koi-foot nav { display: flex; gap: 1.2rem; }
+      .koi-foot a { color: var(--koi-muted); text-decoration: none; font-weight: 600; }
+      .koi-foot a:hover { color: var(--koi-accent); }
+      .koi-mono { font-family: var(--koi-font-mono); font-size: 0.8rem; }
+    </style>
+  </body>
+</html>

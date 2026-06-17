@@ -60,20 +60,52 @@ public class AstPurityTests
         const BindingFlags All = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static | BindingFlags.DeclaredOnly;
         var seen = new HashSet<Type>();
 
-        if (t.BaseType is { } b) { foreach (var x in Expand(b, seen)) yield return x; }
-        foreach (Type i in t.GetInterfaces()) { foreach (var x in Expand(i, seen)) yield return x; }
+        if (t.BaseType is { } b)
+        {
+            foreach (var x in Expand(b, seen))
+            {
+                yield return x;
+            }
+        }
+
+        foreach (Type i in t.GetInterfaces())
+        {
+            foreach (var x in Expand(i, seen))
+            {
+                yield return x;
+            }
+        }
 
         foreach (FieldInfo f in Safe(() => t.GetFields(All)))
-            foreach (var x in Expand(f.FieldType, seen)) yield return x;
+        {
+            foreach (var x in Expand(f.FieldType, seen))
+            {
+                yield return x;
+            }
+        }
 
         foreach (PropertyInfo p in Safe(() => t.GetProperties(All)))
-            foreach (var x in Expand(p.PropertyType, seen)) yield return x;
+        {
+            foreach (var x in Expand(p.PropertyType, seen))
+            {
+                yield return x;
+            }
+        }
 
         foreach (MethodInfo m in Safe(() => t.GetMethods(All)))
         {
-            foreach (var x in Expand(m.ReturnType, seen)) yield return x;
+            foreach (var x in Expand(m.ReturnType, seen))
+            {
+                yield return x;
+            }
+
             foreach (ParameterInfo prm in m.GetParameters())
-                foreach (var x in Expand(prm.ParameterType, seen)) yield return x;
+            {
+                foreach (var x in Expand(prm.ParameterType, seen))
+                {
+                    yield return x;
+                }
+            }
         }
     }
 
@@ -87,7 +119,12 @@ public class AstPurityTests
         if (t.IsGenericType)
         {
             foreach (Type arg in t.GetGenericArguments())
-                foreach (var x in Expand(arg, seen)) yield return x;
+            {
+                foreach (var x in Expand(arg, seen))
+                {
+                    yield return x;
+                }
+            }
         }
     }
 

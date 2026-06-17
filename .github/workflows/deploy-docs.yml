@@ -1,6 +1,7 @@
 name: Deploy docs to GitHub Pages
 
-# Builds the Astro Starlight site in website/ and publishes it to GitHub Pages.
+# Builds the Astro Starlight site in website/ (including the in-browser Koine compiler, a
+# .NET WebAssembly module) and publishes it to GitHub Pages.
 # Enable once under: repo Settings → Pages → Build and deployment → Source: GitHub Actions.
 
 on:
@@ -8,6 +9,9 @@ on:
     branches: [main]
     paths:
       - 'website/**'
+      # The Playground bundles the compiler to wasm, so compiler changes must redeploy.
+      - 'src/**'
+      - 'Directory.Build.props'
       - '.github/workflows/deploy-docs.yml'
   workflow_dispatch:
 
@@ -27,9 +31,28 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+
+      # The Playground runs the Koine compiler as a .NET WebAssembly module; building it
+      # needs the SDK plus the wasm workloads (emscripten + the browser-wasm runtime pack).
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+          dotnet-quality: preview
+
+      - name: Install wasm workloads
+        run: dotnet workload install wasm-tools wasm-experimental
+
+      # Publishes src/Koine.Wasm and copies the AppBundle into website/public/koine-wasm/,
+      # so the subsequent `astro build` bundles it into dist/. (Only needs dotnet + Node, no
+      # npm deps — the Astro step below installs those.)
+      - name: Build Koine wasm compiler module
+        working-directory: ./website
+        run: node scripts/build-wasm.mjs
+
       - name: Build site
-        # withastro/action installs deps (auto-detects the package manager),
-        # runs `astro build`, and uploads the Pages artifact from website/dist.
+        # withastro/action installs deps (auto-detects the package manager), runs the build,
+        # and uploads the Pages artifact from website/dist.
         uses: withastro/action@v6
         with:
           path: ./website

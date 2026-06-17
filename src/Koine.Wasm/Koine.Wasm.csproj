@@ -1,0 +1,51 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Compiles the Koine compiler to a .NET WebAssembly module that runs entirely in the
+    browser (no server) so the docs-site Playground can compile .koi → C#/TS/glossary live.
+    Build output (_framework/dotnet.js + assemblies) is published and copied into the Astro
+    site's public/koine-wasm/ by website/scripts/build-wasm.mjs.
+
+    This is the ONLY browser-aware project: Koine.Compiler stays platform-neutral.
+  -->
+  <PropertyGroup>
+    <!-- net10.0 + the browser-wasm RID is what engages the WebAssembly SDK and emits the
+         _framework/dotnet.js AppBundle (the wasm-experimental 'wasmbrowser' model). -->
+    <TargetFramework>net10.0</TargetFramework>
+    <RuntimeIdentifier>browser-wasm</RuntimeIdentifier>
+    <OutputType>Exe</OutputType>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <WasmMainJSPath>main.js</WasmMainJSPath>
+
+    <!-- Single-threaded; the compiler is pure CPU work on the UI worker. -->
+    <WasmEnableThreads>false</WasmEnableThreads>
+    <!-- The compiler/diagnostics don't need culture data; shrinks the bundle. -->
+    <InvariantGlobalization>true</InvariantGlobalization>
+
+    <!--
+      Trim the BCL to shrink the ~26 MB untrimmed bundle, but ROOT the compiler and ANTLR
+      assemblies whole: the AST walker (Ast/NodeWalker) reflects over the compiler's own node
+      types, and ANTLR deserializes its ATN, so trimming their members would break at runtime.
+      The interop DTO JSON is source-generated (InteropJson), so it needs no reflection roots.
+      smoke-test.mjs re-runs after each change to catch trim breakage headlessly.
+    -->
+    <PublishTrimmed>true</PublishTrimmed>
+    <TrimMode>full</TrimMode>
+
+    <!-- Not a NuGet package; clear the inherited packaging metadata from Directory.Build.props. -->
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Koine.Compiler\Koine.Compiler.csproj" />
+  </ItemGroup>
+
+  <!-- Preserve the compiler + ANTLR fully (they use reflection); trim everything else. -->
+  <ItemGroup>
+    <TrimmerRootAssembly Include="Koine.Compiler" />
+    <TrimmerRootAssembly Include="Antlr4.Runtime.Standard" />
+  </ItemGroup>
+
+</Project>

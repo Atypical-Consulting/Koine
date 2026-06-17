@@ -13,6 +13,8 @@ dotnet run --project src/Koine.Cli -- <subcommand> [args]
 
 Everything after `--` is passed to `koine`. The examples below use `koine` for brevity; prefix them with `dotnet run --project src/Koine.Cli --` when running from source.
 
+Want to try the compiler without installing anything? The <a class="koi-try" href="/Koine/playground/">browser Playground</a> runs the same parser, validator, and emitters as the CLI.
+
 ## At a glance
 
 ```bash

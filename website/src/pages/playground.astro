@@ -1,0 +1,46 @@
+---
+import BlueprintLayout from '../layouts/BlueprintLayout.astro';
+import Playground from '../components/Playground.astro';
+---
+
+<BlueprintLayout
+  title="Playground — Koine"
+  description="Write a Koine domain model and compile it to C#, TypeScript, and a glossary live in your browser."
+  fullbleed
+>
+  <main class="koi-pg">
+    <div class="koi-pg__intro">
+      <h1>Playground</h1>
+      <p>
+        Edit the model on the left — it compiles in your browser (no install, no server) the moment
+        you stop typing. Switch the output target, click a diagnostic to jump to it, or
+        <strong>Share</strong> a link to your model.
+      </p>
+    </div>
+    <div class="koi-pg__ide">
+      <Playground />
+    </div>
+  </main>
+</BlueprintLayout>
+
+<style>
+  .koi-pg {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    padding: clamp(0.8rem, 2vw, 1.4rem) clamp(0.8rem, 4vw, 2.5rem) clamp(1rem, 2vw, 1.6rem);
+    gap: 1rem;
+  }
+  .koi-pg__intro { max-width: 60ch; }
+  .koi-pg__intro h1 {
+    font-family: var(--koi-font-display);
+    font-size: clamp(1.6rem, 4vw, 2.2rem);
+    letter-spacing: -0.02em;
+    margin: 0 0 0.3rem;
+  }
+  .koi-pg__intro p { margin: 0; color: var(--koi-muted); line-height: 1.55; }
+  .koi-pg__intro strong { color: var(--koi-fg); }
+  .koi-pg__ide { flex: 1; min-height: 0; display: flex; }
+  .koi-pg__ide :global(.koi-ide) { flex: 1; }
+</style>

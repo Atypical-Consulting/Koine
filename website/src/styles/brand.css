@@ -1,0 +1,74 @@
+/*
+  Light brand pass over Starlight's docs theme — registered via `customCss` in astro.config.
+  Brings the "Architectural Blueprint" accent + display/mono fonts into the docs WITHOUT
+  changing Starlight's proven body readability. Self-hosted fonts are imported by the pages
+  that need them; here we only remap Starlight's design tokens.
+*/
+@import '@fontsource-variable/archivo';
+@import '@fontsource-variable/hanken-grotesk';
+@import '@fontsource-variable/jetbrains-mono';
+@import './tokens.css';
+
+:root {
+  /* Accent ramp — Starlight derives links, focus rings, active nav from these. */
+  --sl-color-accent-low: #d9e0f7;
+  --sl-color-accent: #3245b8;
+  --sl-color-accent-high: #1b2356;
+
+  /* Typography: distinctive display for headings, refined sans for body, mono for code. */
+  --sl-font: 'Hanken Grotesk Variable', ui-sans-serif, system-ui, sans-serif;
+  --sl-font-mono: 'JetBrains Mono Variable', ui-monospace, 'SFMono-Regular', monospace;
+}
+
+:root[data-theme='dark'] {
+  --sl-color-accent-low: #1d2452;
+  --sl-color-accent: #6d7fe8;
+  --sl-color-accent-high: #d6ddff;
+}
+
+/* Headings get the architectural display face with tightened tracking. */
+.sl-markdown-content h1,
+.sl-markdown-content h2,
+.sl-markdown-content h3,
+.sl-markdown-content h4,
+site-title,
+.site-title {
+  font-family: 'Archivo Variable', ui-sans-serif, system-ui, sans-serif;
+  letter-spacing: -0.012em;
+}
+
+/* The wordmark in the header — small-caps blueprint label feel. */
+.site-title {
+  font-weight: 700;
+}
+
+/* Hairline-accented hero/cards already come from Starlight; nudge the link underlines
+   to the cyan accent on hover for a touch of the blueprint palette. */
+.sl-markdown-content a:hover {
+  text-decoration-color: var(--koi-cyan);
+}
+
+/* "Open in Playground" affordance used in docs (see PlaygroundLink). */
+.koi-try {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4em;
+  margin: 0.25rem 0 1rem;
+  padding: 0.3rem 0.7rem;
+  font: 600 0.82rem/1 'JetBrains Mono Variable', ui-monospace, monospace;
+  color: var(--sl-color-accent-high);
+  background: var(--sl-color-accent-low);
+  border: 1px solid var(--sl-color-accent);
+  border-radius: 6px;
+  text-decoration: none;
+  transition: transform 0.12s ease, box-shadow 0.12s ease;
+}
+.koi-try:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 16px -10px var(--sl-color-accent);
+  text-decoration: none;
+}
+.koi-try::before {
+  content: '▸';
+  color: var(--koi-cyan);
+}
