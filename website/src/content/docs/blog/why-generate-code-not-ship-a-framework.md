@@ -1,0 +1,100 @@
+---
+title: "Why Koine generates code instead of shipping a framework"
+description: "Most DDD tooling is a runtime library you depend on. Koine is a compiler that emits dependency-free C# you own. Here's the reasoning behind generating code over shipping a base-class framework."
+excerpt: "A base library makes your domain depend on the framework forever. A compiler hands you plain C# and then gets out of the way. We picked the compiler."
+date: 2026-06-10
+authors:
+  - phmatray
+tags:
+  - architecture
+  - code-generation
+  - domain-driven-design
+---
+
+There are two ways to help someone write less Domain-Driven Design boilerplate. You can ship a
+**framework** — base classes like `ValueObject<T>`, an `AggregateRoot`, a `Result<T>` — that they
+inherit from and depend on at runtime. Or you can ship a **compiler** that reads a model and emits the
+boilerplate as ordinary source code they own.
+
+Koine is firmly in the second camp. This post is about why.
+
+## The cost of a base-class framework
+
+A runtime library is the obvious choice, and it has real benefits: it's familiar, it's a single NuGet
+reference, and updates arrive by bumping a version. But it also bakes in costs that compound over the
+life of a system:
+
+- **A permanent dependency.** Your `Money` *is-a* `FrameworkValueObject`. That coupling never goes
+  away. Upgrading the framework is a domain-wide event; abandoning it is a rewrite.
+- **Magic at runtime.** Equality, validation, and serialization often lean on reflection or
+  convention. When something misbehaves, you're debugging the framework's internals, not your code.
+- **An abstraction you can't see.** The most important code in your system — the rules that define
+  what a valid `Order` *is* — lives behind an inherited member you have to trust rather than read.
+
+None of these are fatal. But for the layer that's supposed to be the clearest in the whole codebase,
+they're exactly the wrong trade.
+
+## What a compiler hands you instead
+
+Koine reads a `.koi` model and writes the C# you would have written by hand. The output has **no
+external dependencies**. A small set of marker types (`ValueObject`, `IAggregateRoot`,
+`DomainInvariantViolationException`, …) is emitted into a `Koine/Runtime/` folder **only when your
+model actually uses them** — a model with no events never gets `IDomainEvent`.
+
+So a value object with an invariant compiles to this, and nothing more:
+
+```csharp
+public sealed class Email : ValueObject
+{
+    public string Raw { get; }
+
+    public Email(string raw)
+    {
+        if (!(raw.Trim().Length > 0))
+            throw new DomainInvariantViolationException(
+                type: nameof(Email),
+                rule: "an email cannot be blank");
+
+        Raw = raw;
+    }
+
+    protected override IEnumerable<object?> GetEqualityComponents()
+    {
+        yield return Raw;
+    }
+}
+```
+
+You can read every line. You can step through it in a debugger without leaving your own assembly. You
+can review it in a pull request — and because codegen is **deterministic**, the same model always
+produces byte-identical output, so a meaningful diff means a meaningful *model* change. There's no
+hidden behavior because there's no framework underneath; the marker base class is a dozen lines you can
+open and read too.
+
+## "A green build proves the domain"
+
+The strongest argument for generating code is what it lets you guarantee. Every construct Koine emits
+is covered two ways in the test suite:
+
+1. **Snapshot tests** pin the exact generated text, so an unintended change to the output is caught as
+   a diff.
+2. **A Roslyn meta-test** compiles the emitted C# in-memory *and runs it*, asserting that invariants
+   throw, equality works by value, and state machines reject illegal transitions.
+
+When `dotnet test` is green, the generated C# isn't just plausible — it's been compiled and executed.
+That's a much stronger claim than a framework can make about the code you write on top of it.
+
+## The part that matters most: leverage
+
+Keeping C# out of the semantic model isn't only architectural tidiness — it's what makes the output
+*portable*. The parser and semantic model don't know what C# is. The emitter does. Add a second
+emitter and the same model compiles to a second language for free: a TypeScript target is already in
+progress, and Rust is on the roadmap. A framework can't do that; its base classes *are* the target.
+
+Generating code costs you a build step. In return you get output you own, output you can read, output
+that's been proven by execution, and a model that outlives any single target language. For the
+ubiquitous language — the one part of the system that should be the clearest — that's a trade worth
+making.
+
+Want to see the output for yourself? [Reading the generated C#](/Koine/start/reading-the-output/)
+walks one value object from `.koi` to `.cs`, line by line.
