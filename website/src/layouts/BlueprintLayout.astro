@@ -15,6 +15,17 @@ interface Props {
 }
 const { title, description = '', fullbleed = false } = Astro.props;
 const base = import.meta.env.BASE_URL.replace(/\/$/, '');
+
+// Starlight emits canonical/OpenGraph/Twitter tags for the docs pages automatically, but
+// these custom (non-Starlight) pages don't get them — build the same set by hand so the
+// landing page and Playground unfurl properly when shared and are cleanly indexable.
+const siteName = 'Koine';
+const canonical = Astro.site
+  ? new URL(Astro.url.pathname, Astro.site).href
+  : Astro.url.pathname;
+const ogImage = Astro.site
+  ? new URL(`${base}/og.png`, Astro.site).href
+  : `${base}/og.png`;
 ---
 
 <!doctype html>
@@ -24,6 +35,27 @@ const base = import.meta.env.BASE_URL.replace(/\/$/, '');
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>{title}</title>
     {description && <meta name="description" content={description} />}
+    <link rel="canonical" href={canonical} />
+    <meta name="theme-color" content="#3245b8" />
+
+    <!-- Open Graph -->
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content={siteName} />
+    <meta property="og:title" content={title} />
+    {description && <meta property="og:description" content={description} />}
+    <meta property="og:url" content={canonical} />
+    <meta property="og:locale" content="en" />
+    <meta property="og:image" content={ogImage} />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="Koine — model the domain, compile the code" />
+
+    <!-- Twitter -->
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content={title} />
+    {description && <meta name="twitter:description" content={description} />}
+    <meta name="twitter:image" content={ogImage} />
+
     <link rel="icon" href={`${base}/favicon.svg`} />
     <script is:inline>
       // Match the docs' chosen theme (Starlight persists it under `starlight-theme`).
@@ -43,6 +75,7 @@ const base = import.meta.env.BASE_URL.replace(/\/$/, '');
         <a href={`${base}/start/what-is-koine/`}>Docs</a>
         <a href={`${base}/playground/`}>Playground</a>
         <a href={`${base}/guides/feature-catalogue/`}>Features</a>
+        <a href={`${base}/blog/`}>Blog</a>
         <a href="https://github.com/Atypical-Consulting/Koine" rel="external">GitHub ↗</a>
       </nav>
     </header>
@@ -56,6 +89,7 @@ const base = import.meta.env.BASE_URL.replace(/\/$/, '');
           <nav>
             <a href={`${base}/playground/`}>Playground</a>
             <a href={`${base}/start/what-is-koine/`}>Get started</a>
+            <a href={`${base}/blog/`}>Blog</a>
             <a href="https://github.com/Atypical-Consulting/Koine" rel="external">GitHub</a>
           </nav>
         </footer>

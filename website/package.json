@@ -4,15 +4,17 @@
   "version": "0.0.1",
   "scripts": {
     "build:wasm": "node scripts/build-wasm.mjs",
-    "predev": "node scripts/build-wasm.mjs",
+    "build:og": "node scripts/og-image.mjs",
+    "predev": "node scripts/build-wasm.mjs && node scripts/og-image.mjs",
     "dev": "astro dev",
     "start": "astro dev",
-    "prebuild": "node scripts/build-wasm.mjs",
+    "prebuild": "node scripts/build-wasm.mjs && node scripts/og-image.mjs",
     "build": "astro build",
     "preview": "astro preview",
     "astro": "astro"
   },
   "dependencies": {
+    "@astrojs/sitemap": "^3.7.3",
     "@astrojs/starlight": "^0.40.0",
     "@codemirror/autocomplete": "^6.18.6",
     "@codemirror/commands": "^6.8.1",
@@ -27,6 +29,7 @@
     "@fontsource-variable/jetbrains-mono": "^5.2.5",
     "@lezer/highlight": "^1.2.1",
     "astro": "^6.4.5",
-    "sharp": "^0.35.0"
+    "sharp": "^0.35.0",
+    "starlight-blog": "^0.26.1"
   }
 }
