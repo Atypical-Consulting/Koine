@@ -24,6 +24,32 @@ public class SyntaxGraphTests
         "  spec Positive on Money = amount > 0\n" +
         "}\n";
 
+    // The InExpressionNavigationTests fixture: a field referenced inside an invariant body.
+    private const string InvariantSrc =
+        "context Shop {\n" +
+        "  value Money {\n" +
+        "    amount: Decimal\n" +
+        "    invariant amount > 0\n" +
+        "  }\n" +
+        "}\n";
+
+    // Resolves a named corpus entry to its source. Kept lazy (vs a static dictionary) so the
+    // billing fixture's file read happens inside the test, not at type-load / test-discovery.
+    private static string SourceFor(string key) => key switch
+    {
+        "inline" => Src,
+        "invariant" => InvariantSrc,
+        "billing" => TestSupport.BillingFixture,
+        _ => throw new ArgumentOutOfRangeException(nameof(key), key, "unknown oracle corpus source")
+    };
+
+    // The corpus the FullSpan-descent lookup is proven equivalent against: the two inline nav
+    // fixtures plus billing.koi (contexts, value objects, enums, entities, aggregates, invariants,
+    // a regex `matches`, computed fields, defaults, List&lt;&gt;) — far more node shapes, nesting
+    // depth, and span adjacency than the original single 4-line source exercised.
+    public static IEnumerable<object[]> OracleCorpus() =>
+        new[] { new object[] { "inline" }, new object[] { "invariant" }, new object[] { "billing" } };
+
     [Fact]
     public void Parent_uses_reference_identity_not_value_equality()
     {
@@ -126,25 +152,29 @@ public class SyntaxGraphTests
         return best;
     }
 
-    [Fact]
-    public void FindNode_matches_the_brute_force_scan_for_every_offset()
+    [Theory]
+    [MemberData(nameof(OracleCorpus))]
+    public void FindNode_matches_the_brute_force_scan_for_every_offset(string source)
     {
-        var model = Parse(Src);
+        var src = SourceFor(source);
+        var model = Parse(src);
         var graph = new SyntaxGraph(model);
 
-        for (var offset = 0; offset <= Src.Length; offset++)
+        for (var offset = 0; offset <= src.Length; offset++)
         {
             Assert.Same(BruteInnermost(model, offset, useNameSpan: false), graph.FindNode(offset));
         }
     }
 
-    [Fact]
-    public void FindNameNode_matches_the_brute_force_scan_for_every_offset()
+    [Theory]
+    [MemberData(nameof(OracleCorpus))]
+    public void FindNameNode_matches_the_brute_force_scan_for_every_offset(string source)
     {
-        var model = Parse(Src);
+        var src = SourceFor(source);
+        var model = Parse(src);
         var graph = new SyntaxGraph(model);
 
-        for (var offset = 0; offset <= Src.Length; offset++)
+        for (var offset = 0; offset <= src.Length; offset++)
         {
             Assert.Same(BruteInnermost(model, offset, useNameSpan: true), graph.FindNameNode(offset));
         }
