@@ -44,6 +44,16 @@
   /* Layout. */
   --koi-maxw: 1180px;
   --koi-gap: clamp(1rem, 2.5vw, 2rem);
+
+  /* Syntax highlighting (editor + generated-output viewer), light theme. */
+  --koi-hl-keyword: #2f3fb0;
+  --koi-hl-type: #0e7490;
+  --koi-hl-string: #1a8f5a;
+  --koi-hl-regex: #c2410c;
+  --koi-hl-number: #9a5b00;
+  --koi-hl-comment: #6b779e;
+  --koi-hl-meta: #7c3aed;
+  --koi-hl-punct: #5b668c;
 }
 
 /* Dark variant — navy canvas, cyan lines (mapped onto Starlight's dark theme too). */
@@ -65,6 +75,16 @@
   --koi-grid-strong: rgba(125, 143, 240, 0.16);
   --koi-shadow: 0 1px 0 rgba(0, 0, 0, 0.4), 0 18px 40px -22px rgba(0, 0, 0, 0.8);
   --koi-shadow-lg: 0 30px 70px -30px rgba(0, 0, 0, 0.85);
+
+  /* Syntax highlighting, dark theme. */
+  --koi-hl-keyword: #8aa0ff;
+  --koi-hl-type: #5ec8e0;
+  --koi-hl-string: #6cd29b;
+  --koi-hl-regex: #ffab70;
+  --koi-hl-number: #e2b06b;
+  --koi-hl-comment: #7e8ab5;
+  --koi-hl-meta: #c4a7ff;
+  --koi-hl-punct: #93a0c8;
 }
 
 /* The signature blueprint grid backdrop — apply to a positioned container. */
