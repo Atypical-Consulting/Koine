@@ -30,7 +30,7 @@ jobs:
       - name: Build site
         # withastro/action installs deps (auto-detects the package manager),
         # runs `astro build`, and uploads the Pages artifact from website/dist.
-        uses: withastro/action@v3
+        uses: withastro/action@v6
         with:
           path: ./website
           # Astro 6 / Starlight require Node >= 22.12 (the action defaults to 20).
