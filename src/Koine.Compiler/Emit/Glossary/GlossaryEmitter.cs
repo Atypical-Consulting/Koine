@@ -114,7 +114,9 @@ public sealed class GlossaryEmitter : IEmitter
 
             case EnumDecl en:
                 WriteHeading(sb, heading, en.Name, "enum", en.Doc, Tag(en));
-                sb.Append("\nValues: ").Append(string.Join(", ", en.MemberNames)).Append('\n');
+                // Render any associated constant data (e.g. EUR("€", 2)), matching the docs emitter
+                // rather than dropping payloads to bare member names.
+                sb.Append("\nValues: ").Append(MarkdownDoc.EnumValues(en)).Append('\n');
                 break;
 
             case ValueObjectDecl vo:

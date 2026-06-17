@@ -91,6 +91,22 @@ public class R4DocsTests
     }
 
     [Fact]
+    public void Glossary_renders_enum_associated_data()
+    {
+        // An enum carrying constant data (R9.1) must show its payload, not just bare member names —
+        // aligning the glossary with the docs emitter.
+        const string src =
+            "context Catalog {\n" +
+            "  enum Currency(symbol: String, decimals: Int) {\n" +
+            "    EUR(\"€\", 2)\n" +
+            "    USD(\"$\", 2)\n" +
+            "  }\n" +
+            "}\n";
+        var md = Emit(src, new GlossaryEmitter(), GlossaryEmitter.FileName);
+        Assert.Contains("Values: EUR(\"€\", 2), USD(\"$\", 2)", md);
+    }
+
+    [Fact]
     public void Glossary_groups_nested_types_under_their_aggregate()
     {
         const string src =
