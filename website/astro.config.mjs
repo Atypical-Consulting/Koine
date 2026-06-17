@@ -3,6 +3,7 @@ import { defineConfig } from 'astro/config';
 import starlight from '@astrojs/starlight';
 import sitemap from '@astrojs/sitemap';
 import starlightBlog from 'starlight-blog';
+import mermaid from 'astro-mermaid';
 
 import koineGrammar from './src/grammars/koine.tmLanguage.json' with { type: 'json' };
 
@@ -27,6 +28,10 @@ export default defineConfig({
 	// Emit clean, trailing-slash URLs so canonical links and the sitemap agree.
 	trailingSlash: 'always',
 	integrations: [
+		// Render ```mermaid fences (emitted by the `docs` target) as live SVG diagrams with
+		// light/dark theme switching. MUST come before Starlight so its rehype pass claims the
+		// mermaid fences before Expressive Code turns them into plain highlighted code blocks.
+		mermaid({ theme: 'neutral', autoTheme: true }),
 		sitemap(),
 		starlight({
 			title: 'Koine',
@@ -114,6 +119,23 @@ export default defineConfig({
 						{ label: 'Multi-file, imports & modules', slug: 'reference/multi-file-imports-modules' },
 						{ label: 'Context maps & integration', slug: 'reference/context-maps-integration' },
 						{ label: 'Versioning & evolution', slug: 'reference/versioning' },
+					],
+				},
+				{
+					// Living documentation generated from the Shop demo model by
+					// scripts/build-docs.mjs (the `docs` emitter). Regenerated on every build;
+					// the pages live under src/content/docs/reference/domain/ (gitignored).
+					label: 'Domain reference (generated)',
+					items: [
+						{ label: 'Overview', slug: 'reference/domain' },
+						{ label: 'Catalog', slug: 'reference/domain/catalog' },
+						{ label: 'Customers', slug: 'reference/domain/customers' },
+						{ label: 'Ordering', slug: 'reference/domain/ordering' },
+						{ label: 'Payments', slug: 'reference/domain/payments' },
+						{ label: 'Shipping', slug: 'reference/domain/shipping' },
+						{ label: 'Legacy', slug: 'reference/domain/legacy' },
+						{ label: 'Context map', slug: 'reference/domain/context-map' },
+						{ label: 'Integration events', slug: 'reference/domain/integration-events' },
 					],
 				},
 				{

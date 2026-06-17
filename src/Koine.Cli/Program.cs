@@ -4,6 +4,7 @@ using Koine.Compiler.Ast;
 using Koine.Compiler.Diagnostics;
 using Koine.Compiler.Emit;
 using Koine.Compiler.Emit.CSharp;
+using Koine.Compiler.Emit.Docs;
 using Koine.Compiler.Emit.Glossary;
 using Koine.Compiler.Emit.TypeScript;
 using Koine.Compiler.Services;
@@ -73,7 +74,7 @@ internal static class Program
     }
 
     /// <summary>A parsed, config-resolved build invocation, shared by <c>build</c> and <c>watch</c>.</summary>
-    private readonly record struct BuildRequest(string File, string Target, string? OutDir, string? GlossaryFile, TargetOptions Options);
+    private readonly record struct BuildRequest(string File, string Target, string? OutDir, string? GlossaryFile, string? DocsDir, TargetOptions Options);
 
     /// <summary>
     /// Parses the flags common to <c>build</c> and <c>watch</c> (<c>--target</c>,
@@ -89,6 +90,7 @@ internal static class Program
         string? target = null;
         string? outDir = null;
         string? glossaryFile = null;
+        string? docsDir = null;
         string? configPath = null;
 
         for (var i = 0; i < args.Length; i++)
@@ -110,6 +112,11 @@ internal static class Program
                     if (i + 1 >= args.Length)
                     { error = "--glossary requires a <file> value"; return false; }
                     glossaryFile = args[++i];
+                    break;
+                case "--docs":
+                    if (i + 1 >= args.Length)
+                    { error = "--docs requires a <dir> value"; return false; }
+                    docsDir = args[++i];
                     break;
                 case "--config":
                     if (i + 1 >= args.Length)
@@ -145,7 +152,7 @@ internal static class Program
         var resolvedTarget = target ?? config.Target ?? "csharp";
         var targetOptions = config.OptionsFor(resolvedTarget);
         var resolvedOut = outDir ?? targetOptions.OutDir ?? config.OutDir;
-        request = new BuildRequest(file, resolvedTarget, resolvedOut, glossaryFile, targetOptions);
+        request = new BuildRequest(file, resolvedTarget, resolvedOut, glossaryFile, docsDir, targetOptions);
         return true;
     }
 
@@ -177,17 +184,19 @@ internal static class Program
         var target = r.Target;
         var outDir = r.OutDir;
         var glossaryFile = r.GlossaryFile;
+        var docsDir = r.DocsDir;
 
         IEmitter emitter = target.ToLowerInvariant() switch
         {
             "csharp" => new CSharpEmitter(ToCSharpOptions(r.Options)),
             "typescript" => new TypeScriptEmitter(),
             "glossary" => new GlossaryEmitter(),
+            "docs" => new DocsEmitter(),
             _ => null!
         };
         if (emitter is null)
         {
-            exitCode = RuntimeError($"unsupported target '{target}' (supported: csharp, typescript, glossary)");
+            exitCode = RuntimeError($"unsupported target '{target}' (supported: csharp, typescript, glossary, docs)");
             return false;
         }
 
@@ -232,9 +241,18 @@ internal static class Program
             Console.WriteLine($"wrote glossary to {glossaryFile}");
         }
 
+        // --docs writes living documentation (Mermaid-in-Markdown) to a directory, independent of
+        // the chosen --target/--out (so you can emit C# AND living docs in one run).
+        if (docsDir is not null && result.Model is not null)
+        {
+            var docs = new DocsEmitter().Emit(result.Model);
+            var docsCount = WriteOutputAtomic(docsDir, docs);
+            Console.WriteLine($"wrote {docsCount} doc files to {docsDir}");
+        }
+
         if (outDir is null)
         {
-            if (glossaryFile is null)
+            if (glossaryFile is null && docsDir is null)
             {
                 Console.WriteLine($"OK: {file} parsed and validated");
             }
@@ -889,7 +907,7 @@ internal static class Program
         writer.WriteLine();
         writer.WriteLine("Usage:");
         writer.WriteLine("  koine --version");
-        writer.WriteLine("  koine build <file.koi|dir> [--target csharp|typescript|glossary] [--out <dir>] [--glossary <file.md>] [--config <file>]");
+        writer.WriteLine("  koine build <file.koi|dir> [--target csharp|typescript|glossary|docs] [--out <dir>] [--glossary <file.md>] [--docs <dir>] [--config <file>]");
         writer.WriteLine("  koine watch <file.koi|dir> [--target …] [--out …] [--config <file>]   # rebuild on every change");
         writer.WriteLine("  koine fmt   <file.koi|dir> [--check]            # canonically format .koi (--check: verify only)");
         writer.WriteLine("  koine init  [dir] [--force]                    # scaffold a starter project");
@@ -905,12 +923,13 @@ internal static class Program
         koine build — compile a .koi model and (optionally) emit code.
 
         Usage:
-          koine build <file.koi|dir> [--target csharp|typescript|glossary] [--out <dir>] [--glossary <file.md>] [--config <file>]
+          koine build <file.koi|dir> [--target csharp|typescript|glossary|docs] [--out <dir>] [--glossary <file.md>] [--docs <dir>] [--config <file>]
 
         Options:
-          --target <t>      output target: csharp (default), typescript, or glossary
+          --target <t>      output target: csharp (default), typescript, glossary, or docs
           --out <dir>       directory to write generated files into; omit to only parse/validate
           --glossary <md>   also write a Markdown glossary to this file (independent of --target)
+          --docs <dir>      also write living documentation (Mermaid-in-Markdown) to this directory (independent of --target)
           --config <file>   read defaults (target/out) from this koine.config instead of discovering one
 
         Without --out, build parses and validates only. A koine.config beside the input
@@ -920,6 +939,7 @@ internal static class Program
           koine build domain.koi
           koine build domain.koi --out generated
           koine build ./model --target glossary --out docs
+          koine build ./model --docs ./website/docs
         """;
 
     internal const string CheckHelp =
@@ -985,10 +1005,10 @@ internal static class Program
         koine watch — rebuild on every .koi change until Ctrl+C.
 
         Usage:
-          koine watch <file.koi|dir> [--target …] [--out …] [--glossary <file.md>] [--config <file>] [--clear]
+          koine watch <file.koi|dir> [--target …] [--out …] [--glossary <file.md>] [--docs <dir>] [--config <file>] [--clear]
 
         Options:
-          --target/--out/--glossary/--config   as for `koine build`
+          --target/--out/--glossary/--docs/--config   as for `koine build`
           --clear   clear the console before each rebuild
 
         Examples:

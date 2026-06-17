@@ -1,0 +1,62 @@
+﻿// ==== docs/Ordering.md ====
+# Ordering
+
+## Aggregates
+
+### Order
+
+**Root entity:** `Order` (identified by `OrderId`)
+
+```mermaid
+classDiagram
+    class Order {
+        <<aggregate root>>
+        +OrderId id
+        +Decimal total
+        +OrderStatus status
+        +submit()
+    }
+```
+
+#### Lifecycle
+
+```mermaid
+stateDiagram-v2
+    [*] --> Draft
+    Draft --> Submitted: when total &gt; 0 &amp;&amp; total &lt;= 100
+    Submitted --> Done
+    Done --> [*]
+```
+
+| From | To | Guard |
+| --- | --- | --- |
+| `Draft` | `Submitted` | `total &gt; 0 &amp;&amp; total &lt;= 100` |
+| `Submitted` | `Done` |  |
+| `Done` | _(terminal)_ | |
+
+#### Commands
+
+##### `submit()`
+
+**Preconditions:**
+- only a draft can be submitted
+
+**Effects:**
+- `status -> Submitted`
+
+## Domain Types
+
+### OrderStatus — enum
+
+Values: Draft, Submitted, Done
+
+// ==== docs/index.md ====
+# Domain Documentation
+
+Living documentation generated from the Koine model. Each bounded context has its own
+page with the ubiquitous language, aggregates, and Mermaid diagrams of its lifecycles.
+
+## Bounded Contexts
+
+- [Ordering](./Ordering.md)
+

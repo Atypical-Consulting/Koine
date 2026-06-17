@@ -1,0 +1,135 @@
+﻿// ==== docs/Catalog.md ====
+# Catalog
+
+## Domain Types
+
+### Sku — value object
+
+| Field | Type | Description |
+| --- | --- | --- |
+| code | `String` |  |
+
+### Currency — enum
+
+Values: EUR, USD
+
+// ==== docs/Customers.md ====
+# Customers
+
+## Domain Types
+
+### Account — value object
+
+| Field | Type | Description |
+| --- | --- | --- |
+| ref | `String` |  |
+
+// ==== docs/Legacy.md ====
+# Legacy
+
+## Domain Types
+
+### GatewayResult — value object
+
+| Field | Type | Description |
+| --- | --- | --- |
+| code | `String` |  |
+
+// ==== docs/Ordering.md ====
+# Ordering
+
+## Domain Types
+
+### Order — value object
+
+| Field | Type | Description |
+| --- | --- | --- |
+| sku | `Sku` |  |
+
+### Currency — enum
+
+Values: EUR, USD
+
+// ==== docs/Payments.md ====
+# Payments
+
+## Domain Types
+
+### Receipt — value object
+
+| Field | Type | Description |
+| --- | --- | --- |
+| n | `Int` |  |
+
+// ==== docs/Shipping.md ====
+# Shipping
+
+## Domain Types
+
+### Parcel — value object
+
+| Field | Type | Description |
+| --- | --- | --- |
+| n | `Int` |  |
+
+// ==== docs/context-map.md ====
+# Context Map
+
+The strategic relationships between the bounded contexts of this domain.
+
+```mermaid
+flowchart LR
+    Catalog["Catalog"]
+    Customers["Customers"]
+    Legacy["Legacy"]
+    Ordering["Ordering"]
+    Payments["Payments"]
+    Shipping["Shipping"]
+
+    Catalog <-->|Shared Kernel| Ordering
+    Catalog -->|Conformist| Shipping
+    Customers -->|Customer-Supplier| Shipping
+    Ordering -->|Open Host| Shipping
+    Ordering -->|Open Host| Payments
+    Shipping <-->|Partnership| Payments
+    Legacy -.->|ACL| Payments
+```
+
+## Shared Kernels
+
+- **Catalog & Ordering** — shared types: `Currency`
+
+## Anti-Corruption Layers
+
+- **Legacy -> Payments**
+  - `Legacy.GatewayResult` -> `Payments.Receipt`
+
+## Relationships
+
+- `Catalog <-> Ordering` — Shared Kernel
+- `Catalog -> Shipping` — Conformist
+- `Customers -> Shipping` — Customer-Supplier
+- `Ordering -> Shipping` — Open Host
+- `Ordering -> Payments` — Open Host
+- `Shipping <-> Payments` — Partnership
+- `Legacy -> Payments` — ACL
+
+// ==== docs/index.md ====
+# Domain Documentation
+
+Living documentation generated from the Koine model. Each bounded context has its own
+page with the ubiquitous language, aggregates, and Mermaid diagrams of its lifecycles.
+
+## Bounded Contexts
+
+- [Catalog](./Catalog.md)
+- [Ordering](./Ordering.md)
+- [Shipping](./Shipping.md)
+- [Customers](./Customers.md)
+- [Payments](./Payments.md)
+- [Legacy](./Legacy.md)
+
+## Strategic Views
+
+- [Context Map](./context-map.md) — the strategic relationships between contexts
+

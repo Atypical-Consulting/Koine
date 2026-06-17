@@ -1,0 +1,101 @@
+﻿// ==== docs/Billing.md ====
+# Billing
+
+## Aggregates
+
+### Order
+
+**Root entity:** `Order` (identified by `OrderId`)
+
+```mermaid
+classDiagram
+    class Order {
+        <<aggregate root>>
+        +OrderId id
+        +CustomerId customer
+        +List~OrderLine~ lines
+        +OrderStatus status
+    }
+    Order *-- OrderStatus
+    class OrderStatus {
+        <<enumeration>>
+        Draft
+        Placed
+        Shipped
+        Cancelled
+    }
+    Order *-- OrderLine
+    class OrderLine {
+        <<value object>>
+        +ProductId product
+        +Int quantity
+        +Money unitPrice
+    }
+```
+
+#### Value Objects
+
+**`OrderLine`**
+
+| Field | Type | Description |
+| --- | --- | --- |
+| product | `ProductId` |  |
+| quantity | `Int` |  |
+| unitPrice | `Money` |  |
+| subtotal | `Money` | _derived_ |
+
+#### Enumerations
+
+**`OrderStatus`**
+
+Values: Draft, Placed, Shipped, Cancelled
+
+#### Invariants
+
+**Business rules**
+- status == Draft when lines.isEmpty
+
+## Domain Types
+
+### Money — value object
+
+| Field | Type | Description |
+| --- | --- | --- |
+| amount | `Decimal` |  |
+| currency | `Currency` |  |
+
+**Business rules**
+- a monetary amount cannot be negative
+
+### Email — value object
+
+| Field | Type | Description |
+| --- | --- | --- |
+| raw | `String` |  |
+
+**Business rules**
+- invalid email address
+
+### Currency — enum
+
+Values: EUR, USD, GBP
+
+### Customer — entity
+
+Identified by `CustomerId`.
+
+| Field | Type | Description |
+| --- | --- | --- |
+| name | `String` |  |
+| email | `Email` |  |
+
+// ==== docs/index.md ====
+# Domain Documentation
+
+Living documentation generated from the Koine model. Each bounded context has its own
+page with the ubiquitous language, aggregates, and Mermaid diagrams of its lifecycles.
+
+## Bounded Contexts
+
+- [Billing](./Billing.md)
+
