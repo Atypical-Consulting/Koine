@@ -1,3 +1,5 @@
+using System.Threading;
+
 namespace Koine.Compiler.Ast;
 
 /// <summary>
@@ -20,11 +22,31 @@ public sealed class SemanticModel
     /// <summary>The one name/type resolution index for the whole compilation.</summary>
     public ModelIndex Index { get; }
 
+    private readonly Lazy<SyntaxGraph> _graph;
+
     public SemanticModel(KoineModel model)
     {
         Model = model;
         Index = new ModelIndex(model);
+        // Built on first position/navigation query only — the emit path never touches it.
+        // Thread-safe so a cached/shared SemanticModel can't race the build under concurrent LSP requests.
+        _graph = new Lazy<SyntaxGraph>(() => new SyntaxGraph(Model), LazyThreadSafetyMode.ExecutionAndPublication);
     }
+
+    /// <summary>The node's parent, or <c>null</c> for the root. Red-layer navigation (Roslyn <c>Parent</c>).</summary>
+    public KoineNode? Parent(KoineNode node) => _graph.Value.Parent(node);
+
+    /// <summary>The node's child nodes in source order.</summary>
+    public IReadOnlyList<KoineNode> ChildNodes(KoineNode node) => _graph.Value.ChildNodes(node);
+
+    /// <summary>The parent chain, nearest-first, excluding <paramref name="node"/>.</summary>
+    public IEnumerable<KoineNode> Ancestors(KoineNode node) => _graph.Value.Ancestors(node);
+
+    /// <summary><paramref name="node"/> first, then its ancestors.</summary>
+    public IEnumerable<KoineNode> AncestorsAndSelf(KoineNode node) => _graph.Value.AncestorsAndSelf(node);
+
+    /// <summary>The nearest <typeparamref name="T"/> at or above <paramref name="node"/>, or <c>null</c>.</summary>
+    public T? FirstAncestorOrSelf<T>(KoineNode node) where T : KoineNode => _graph.Value.FirstAncestorOrSelf<T>(node);
 
     /// <summary>
     /// A type resolver scoped to <paramref name="context"/> so a type name shared across bounded
@@ -84,61 +106,18 @@ public sealed class SemanticModel
     }
 
     /// <summary>
-    /// The innermost node whose <see cref="SourceSpan.Span"/> contains the 0-based absolute
-    /// <paramref name="offset"/>, or <c>null</c> when none does. <see cref="SourceSpan.None"/>
-    /// nodes (no width) never match. This is the precise position→node map that powers
+    /// The innermost node whose <see cref="SourceSpan"/> contains the 0-based absolute
+    /// <paramref name="offset"/>, or <c>null</c> when none does. The position→node map that powers
     /// in-expression and spec-body navigation.
     /// </summary>
-    public KoineNode? NodeAt(int offset)
-    {
-        KoineNode? best = null;
-        var bestLength = int.MaxValue;
-        foreach (KoineNode node in NodeWalker.Descendants(Model))
-        {
-            SourceSpan span = node.Span;
-            if (span.IsNone || span.Length <= 0)
-            {
-                continue;
-            }
-
-            if (offset >= span.Offset && offset < span.Offset + span.Length && span.Length < bestLength)
-            {
-                best = node;
-                bestLength = span.Length;
-            }
-        }
-
-        return best;
-    }
+    public KoineNode? NodeAt(int offset) => _graph.Value.FindNode(offset);
 
     /// <summary>
     /// The innermost declaration/member node whose <see cref="KoineNode.NameSpan"/> covers the
-    /// 0-based absolute <paramref name="offset"/> — i.e. the node for which the offset sits on the
-    /// declaration's own name, as opposed to anywhere in its body. <c>null</c> when the offset is
-    /// not on any declaration name. Used by rename to classify whether a same-named token is a
-    /// declaration's name (and of what structural role) versus a mere reference.
+    /// 0-based absolute <paramref name="offset"/>; <c>null</c> when the offset is not on any
+    /// declaration name. Used by rename to classify a token as a declaration's own name.
     /// </summary>
-    public KoineNode? DeclarationNameAt(int offset)
-    {
-        KoineNode? best = null;
-        var bestLength = int.MaxValue;
-        foreach (KoineNode node in NodeWalker.Descendants(Model))
-        {
-            SourceSpan span = node.NameSpan;
-            if (span.IsNone || span.Length <= 0)
-            {
-                continue;
-            }
-
-            if (offset >= span.Offset && offset < span.Offset + span.Length && span.Length < bestLength)
-            {
-                best = node;
-                bestLength = span.Length;
-            }
-        }
-
-        return best;
-    }
+    public KoineNode? DeclarationNameAt(int offset) => _graph.Value.FindNameNode(offset);
 
     /// <summary>
     /// The <see cref="Symbol"/> for the declaration whose own name sits at the 0-based absolute
@@ -172,111 +151,79 @@ public sealed class SemanticModel
         }
     }
 
-    /// <summary>The name of the innermost value/entity/event/integration-event declaration whose body contains <paramref name="offset"/>.</summary>
+    /// <summary>The name of the innermost value/entity/event/integration-event declaration enclosing <paramref name="offset"/>.</summary>
     private string? EnclosingFieldedTypeNameAt(int offset)
     {
-        string? name = null;
-        var bestLength = int.MaxValue;
-        foreach (KoineNode node in NodeWalker.Descendants(Model))
+        if (_graph.Value.FindNode(offset) is not { } node)
         {
-            if (node is ValueObjectDecl or EntityDecl or EventDecl or IntegrationEventDecl
-                && Contains(node.Span, offset) && node.Span.Length < bestLength)
+            return null;
+        }
+
+        foreach (KoineNode anc in _graph.Value.AncestorsAndSelf(node))
+        {
+            if (anc is ValueObjectDecl or EntityDecl or EventDecl or IntegrationEventDecl)
             {
-                name = ((TypeDecl)node).Name;
-                bestLength = node.Span.Length;
+                return ((TypeDecl)anc).Name;
             }
         }
 
-        return name;
+        return null;
     }
 
-    /// <summary>The name of the innermost enum declaration whose body contains <paramref name="offset"/>.</summary>
+    /// <summary>The name of the innermost enum declaration enclosing <paramref name="offset"/>.</summary>
     private string? EnclosingEnumNameAt(int offset)
     {
-        string? name = null;
-        var bestLength = int.MaxValue;
-        foreach (KoineNode node in NodeWalker.Descendants(Model))
+        if (_graph.Value.FindNode(offset) is not { } node)
         {
-            if (node is EnumDecl e && Contains(node.Span, offset) && node.Span.Length < bestLength)
-            {
-                name = e.Name;
-                bestLength = node.Span.Length;
-            }
+            return null;
         }
 
-        return name;
+        return _graph.Value.FirstAncestorOrSelf<EnumDecl>(node)?.Name;
     }
 
-    private static bool Contains(SourceSpan span, int offset) =>
-        !span.IsNone && span.Length > 0 && offset >= span.Offset && offset < span.Offset + span.Length;
-
     /// <summary>
-    /// Resolves go-to-definition at a 0-based absolute <paramref name="offset"/>: finds the
-    /// innermost name-bearing node under the cursor (an identifier / member-access / call, a
-    /// type reference, or a declaration's own name) and resolves it via
-    /// <see cref="GetSymbol(string, string?)"/> using the enclosing type as the lexical scope.
-    /// Returns <c>null</c> when nothing name-bearing sits at the offset or it does not resolve.
+    /// Resolves go-to-definition at a 0-based absolute <paramref name="offset"/>: finds the innermost
+    /// name-bearing node under the cursor (a bare identifier reference or a type reference) and
+    /// resolves it via <see cref="GetSymbol(string, string?)"/> using the enclosing type as the
+    /// lexical scope. <c>null</c> when nothing name-bearing sits at the offset or it does not resolve.
     /// </summary>
     public Symbol? DefinitionAt(int offset)
     {
-        string? name = null;
-        string? enclosingType = null;
-        var nameLength = int.MaxValue;
-
-        // Track the innermost enclosing type declaration AND the innermost name-bearing node,
-        // in a single pass over the tree.
-        foreach (KoineNode node in NodeWalker.Descendants(Model))
+        if (_graph.Value.FindNode(offset) is not { } node)
         {
-            SourceSpan span = node.Span;
-            if (span.IsNone || span.Length <= 0)
+            return null;
+        }
+
+        string? name = node switch
+        {
+            IdentifierExpr id => id.Name,
+            TypeRef tr => tr.Name,
+            _ => null
+        };
+        if (name is null)
+        {
+            return null;
+        }
+
+        // The lexical scope: the nearest enclosing fielded type, or a spec body's target type.
+        string? enclosingType = null;
+        foreach (KoineNode anc in _graph.Value.AncestorsAndSelf(node))
+        {
+            if (anc is ValueObjectDecl or EntityDecl or EventDecl or IntegrationEventDecl)
             {
-                continue;
+                enclosingType = ((TypeDecl)anc).Name;
+                break;
             }
 
-            var contains = offset >= span.Offset && offset < span.Offset + span.Length;
-            if (!contains)
+            if (anc is SpecDecl spec)
             {
-                continue;
-            }
-
-            switch (node)
-            {
-                // A type body: its own fields are in scope.
-                case ValueObjectDecl or EntityDecl or EventDecl or IntegrationEventDecl:
-                    enclosingType = ((TypeDecl)node).Name;
-                    break;
-                // A spec body resolves field references against the spec's target type (R10.1),
-                // which unblocks navigation inside `spec X on T = <expr>`.
-                case SpecDecl spec:
-                    enclosingType = spec.TargetType;
-                    break;
-            }
-
-            if (NameAtNode(node, offset) is { } candidate && candidate.Length < nameLength)
-            {
-                name = candidate.Name;
-                nameLength = candidate.Length;
+                enclosingType = spec.TargetType;
+                break;
             }
         }
 
-        return name is null ? null : GetSymbol(name, enclosingType);
+        return GetSymbol(name, enclosingType);
     }
-
-    /// <summary>
-    /// The name (and the width of the node it came from, for innermost-wins tie-breaking) that a
-    /// node contributes at <paramref name="offset"/>, or <c>null</c> if the node carries no
-    /// navigable name there. Only a bare <see cref="IdentifierExpr"/> reference and a
-    /// <see cref="TypeRef"/> resolve precisely by offset. A member-access/call selector
-    /// (e.g. the <c>total</c> in <c>order.total</c>) is NOT resolved here — that needs the
-    /// receiver's inferred type, beyond the name-only <see cref="GetSymbol(string, string?)"/> path —
-    /// so the cursor there falls through to the legacy token-based resolution.
-    /// </summary>
-    private static (string Name, int Length)? NameAtNode(KoineNode node, int offset) => node switch
-    {
-        IdentifierExpr id => (id.Name, node.Span.Length),
-        TypeRef tr => (tr.Name, node.Span.Length),
-        _ => null
-    };
 
     public Symbol? GetSymbol(string name)
     {
