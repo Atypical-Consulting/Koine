@@ -5,17 +5,18 @@
 
 [![Documentation](https://img.shields.io/badge/docs-koine-3245b8)](https://atypical-consulting.github.io/Koine/)
 [![.NET](https://img.shields.io/badge/.NET-10-512BD4)](https://dotnet.microsoft.com/)
-[![Tests](https://img.shields.io/badge/tests-503%20passing-2ea44f)](tests/)
-![Target](https://img.shields.io/badge/emits-C%23-178600)
+[![Tests](https://img.shields.io/badge/tests-670%2B%20passing-2ea44f)](tests/)
+![Target](https://img.shields.io/badge/emits-C%23%20%C2%B7%20TypeScript-178600)
+[![License](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 
 **Koine** is a domain-specific language for **Domain-Driven Design**. Instead of hand-writing the
 boilerplate-heavy tactical code — value objects, entities, aggregates, invariants, repositories — you
 describe a bounded context in a small, readable DSL and the Koine compiler generates it for you.
 
-The name evokes Koine Greek, the *common* language that became a lingua franca. The long-term goal
-is to compile one domain model to many targets (C#, TypeScript, Rust). **This release targets C#
-only**, but the architecture keeps the parser and semantic model strictly target-agnostic so a second
-emitter can be added without touching them.
+The name evokes Koine Greek, the *common* language that became a lingua franca. The goal is to compile
+one domain model to many targets. **C# is the primary, most complete target**; a **TypeScript** emitter
+also ships (`--target typescript`), and the architecture keeps the parser and semantic model strictly
+target-agnostic so further emitters (e.g. Rust) can be added without touching them.
 
 📖 **Read the docs → <https://atypical-consulting.github.io/Koine/>** — getting started, a six-part
 tutorial, a complete language reference, the feature catalogue, and the CLI. (Source in
@@ -152,21 +153,23 @@ The pipeline is strictly layered so backends are pluggable:
   → Lexer/Parser (ANTLR, generated from Grammar/KoineLexer.g4 + KoineParser.g4)
   → KoineModelBuilderVisitor → semantic model (Ast/, target-agnostic)
   → SemanticValidator (Semantics/) → diagnostics with line/column
-  → IEmitter (Emit/CSharp/CSharpEmitter) → C# source files
+  → IEmitter (Emit/CSharp, Emit/TypeScript, …) → source files
 ```
 
 ```
-Koine.sln
+Koine.slnx
 ├── src/
 │   ├── Koine.Compiler/
 │   │   ├── Grammar/        # KoineLexer.g4, KoineParser.g4
-│   │   ├── Ast/            # semantic model + ModelIndex (NO C# concepts)
+│   │   ├── Ast/            # semantic model + ModelIndex (NO target-specific concepts)
 │   │   ├── Parsing/        # KoineModelBuilderVisitor, SyntaxErrorListener
-│   │   ├── Semantics/      # SemanticValidator
+│   │   ├── Semantics/      # SemanticValidator (+ focused validators)
 │   │   ├── Emit/           # IEmitter + EmittedFile
-│   │   │   └── CSharp/     # CSharpEmitter (the only emitter for now)
+│   │   │   ├── CSharp/     # CSharpEmitter (primary target)
+│   │   │   ├── TypeScript/ # TypeScriptEmitter
+│   │   │   └── Glossary/   # ubiquitous-language glossary
 │   │   ├── Diagnostics/    # Diagnostic
-│   │   └── Services/       # KoineCompiler (orchestrator)
+│   │   └── Services/       # KoineCompiler (orchestrator) + LSP/tooling backend
 │   └── Koine.Cli/          # `koine` command-line tool
 └── tests/
     └── Koine.Compiler.Tests/   # parsing, semantic, snapshot (Verify), Roslyn compile meta-tests
@@ -251,19 +254,20 @@ this lets a regex literal be read as a single token without colliding with the `
 
 ## Status
 
-Shipped through **R1–R15 + R17 tooling** of the roadmap — the full tactical *and* strategic DDD
-toolkit on a C# emitter, plus the editor tooling (TextMate grammar, `koine lsp` language server, and
-the `fmt`/`init`/`watch` commands). The
+Shipped through **R1–R17** of the roadmap — the full tactical *and* strategic DDD toolkit, a second
+emitter target (**TypeScript**, R16) alongside C#, and the editor tooling (TextMate grammar, `koine lsp`
+language server, and the `fmt`/`init`/`watch` commands). The
 [feature catalogue](https://atypical-consulting.github.io/Koine/guides/feature-catalogue/) maps every
-construct (R1–R17) to the C# it emits. Next up is R16 (multi-target emitters: C# config, TypeScript,
-Rust) — see [`USER-STORIES.md`](USER-STORIES.md).
+construct (R1–R17) to the C# it emits. Next up: a **docs** target (Markdown + Mermaid diagrams, in
+progress) and a **Rust** emitter (errors as `Result<T,E>` rather than exceptions) — see
+[`USER-STORIES.md`](USER-STORIES.md).
 
 ## Demo
 
 [`demo/`](demo/) models a Shop domain across **six bounded contexts** tied together by a context map,
 and consumes the generated C# from a real .NET project (`dotnet build demo/Shop.Domain` regenerates
-and compiles it). Between the `.koi` models and `Samples.cs` it exercises **every shipped feature
-(R1–R15)** — see [`demo/README.md`](demo/README.md) for the full feature-to-location map.
+and compiles it). Between the `.koi` models and `Samples.cs` it exercises **the full shipped feature
+set** — see [`demo/README.md`](demo/README.md) for the full feature-to-location map.
 
 ## Editor support
 
@@ -279,8 +283,19 @@ Hover and go-to-definition resolve **across all `.koi` files in the workspace** 
 
 ## Roadmap
 
-The full gap analysis toward a complete DDD implementation — commands, events, policies, repositories,
-read models, context mapping, and the TypeScript/Rust emitters — is captured as actionable user stories
-in [`USER-STORIES.md`](USER-STORIES.md). In short: `command` / `event` / `policy`, repository interfaces,
-then a second emitter (TypeScript) to prove the semantic model is truly target-agnostic, then Rust
-(errors as `Result<T,E>` rather than exceptions).
+The full roadmap — every release R1–R17 and what remains — is captured as actionable user stories in
+[`USER-STORIES.md`](USER-STORIES.md). The tactical *and* strategic DDD toolkit (R1–R15), multi-target
+emitters (R16: a TypeScript emitter alongside C#), and the editor tooling (R17) have shipped. What's
+next: a **docs** target (Markdown + Mermaid diagrams) and a **Rust** emitter (errors as `Result<T,E>`
+rather than exceptions) to further prove the semantic model is truly target-agnostic.
+
+## Contributing
+
+Contributions are welcome! See [`CONTRIBUTING.md`](CONTRIBUTING.md) for how to build, test, and submit
+a change, and please follow our [Code of Conduct](CODE_OF_CONDUCT.md). Security issues should be reported
+privately — see [`SECURITY.md`](SECURITY.md). Notable changes are tracked in [`CHANGELOG.md`](CHANGELOG.md).
+
+## License
+
+Koine is licensed under the **Apache License 2.0** — see [`LICENSE`](LICENSE). Copyright © 2026 Atypical
+Consulting / Philippe Matray.
