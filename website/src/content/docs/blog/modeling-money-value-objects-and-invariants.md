@@ -47,8 +47,9 @@ Three things are happening:
 
 ## The C# you get back
 
-`koine build` emits `Billing/Money.cs`. The shape is the same one you'd write by hand — a sealed class,
-a validating constructor, by-value equality:
+`koine build` emits `Billing/ValueObjects/Money.cs` (output is nested by category — value objects go
+under `ValueObjects/`, enums under `Enums/`). The shape is the same one you'd write by hand — a sealed
+class, a validating constructor, by-value equality:
 
 ```csharp
 public sealed class Money : ValueObject
@@ -58,14 +59,19 @@ public sealed class Money : ValueObject
 
     public Money(decimal amount, Currency currency)
     {
-        if (!(amount >= 0))
+        if (amount < 0)
+        {
             throw new DomainInvariantViolationException(
                 type: nameof(Money),
                 rule: "a monetary amount cannot be negative");
+        }
 
         Amount = amount;
         Currency = currency;
     }
+
+    public override string ToString()
+        => $"Money {{ Amount = {Amount}, Currency = {Currency} }}";
 
     protected override IEnumerable<object?> GetEqualityComponents()
     {
@@ -74,6 +80,61 @@ public sealed class Money : ValueObject
     }
 }
 ```
+
+The guard is **inverted**: the emitter negates `amount >= 0` to `amount < 0` and always wraps it in
+braces — the constructor fails fast with the literal message you wrote in the model.
+
+The `Currency` field type is the smart enum generated alongside Money into
+`Billing/Enums/Currency.cs`. Here's a representative excerpt:
+
+```csharp
+/// <summary>A type-safe smart enum: static instances with value equality.</summary>
+public sealed class Currency : IEquatable<Currency>
+{
+    public static readonly Currency EUR = new("EUR", 0, "€", 2);
+    public static readonly Currency USD = new("USD", 1, "$", 2);
+    public static readonly Currency GBP = new("GBP", 2, "£", 2);
+
+    public string Name { get; }
+    public int Value { get; }
+    public string Symbol { get; }
+    public int Decimals { get; }
+
+    private Currency(string name, int value, string symbol, int decimals)
+    {
+        Name = name;
+        Value = value;
+        Symbol = symbol;
+        Decimals = decimals;
+    }
+
+    public static IReadOnlyList<Currency> All { get; } = new[] { EUR, USD, GBP };
+
+    public static Currency FromName(string name)
+        => All.FirstOrDefault(e => e.Name == name)
+            ?? throw new ArgumentOutOfRangeException(nameof(name), $"No Currency with name '{name}'.");
+
+    // … TryFromName / FromValue / TryFromValue …
+
+    public TResult Match<TResult>(
+        Func<TResult> eUR,
+        Func<TResult> uSD,
+        Func<TResult> gBP)
+        => Value switch
+        {
+            0 => eUR(),
+            1 => uSD(),
+            2 => gBP(),
+            _ => throw new InvalidOperationException($"Unhandled Currency '{Name}'.")
+        };
+
+    // … Switch / ToString / Equals / GetHashCode / == / != …
+}
+```
+
+`EUR` isn't just a name: it carries `Symbol = "€"` and `Decimals = 2`. The `Match` signature is
+exhaustive — the compiler forces you to handle every member. This is the class that `Money.Currency`
+references; `Money` carries a `Currency` reference, not a raw string or integer.
 
 The key move is **where** the invariant lands: it's a guard at the *top* of the constructor, before any
 field is assigned. There is no way to construct a negative `Money`. The object is valid by the time it
