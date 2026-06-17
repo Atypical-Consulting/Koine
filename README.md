@@ -15,8 +15,9 @@ describe a bounded context in a small, readable DSL and the Koine compiler gener
 
 The name evokes Koine Greek, the *common* language that became a lingua franca. The goal is to compile
 one domain model to many targets. **C# is the primary, most complete target**; a **TypeScript** emitter
-also ships (`--target typescript`), and the architecture keeps the parser and semantic model strictly
-target-agnostic so further emitters (e.g. Rust) can be added without touching them.
+also ships (`--target typescript`), a **docs** target emits living documentation (`--target docs` →
+Markdown + Mermaid diagrams) straight from the model, and the architecture keeps the parser and semantic
+model strictly target-agnostic so further emitters (e.g. Rust) can be added without touching them.
 
 📖 **Read the docs → <https://atypical-consulting.github.io/Koine/>** — getting started, a six-part
 tutorial, a complete language reference, the feature catalogue, and the CLI. (Source in
@@ -45,6 +46,9 @@ tutorial, a complete language reference, the feature catalogue, and the CLI. (So
 
 # Compile a domain model to C#
 dotnet run --project src/Koine.Cli -- build examples/billing.koi --target csharp --out ./generated
+
+# Generate living documentation (Markdown + Mermaid state/class/context-map diagrams)
+dotnet run --project src/Koine.Cli -- build examples/billing.koi --target docs --out ./docs
 
 # Just check a model parses & validates (no output)
 dotnet run --project src/Koine.Cli -- build examples/billing.koi
@@ -167,7 +171,8 @@ Koine.slnx
 │   │   ├── Emit/           # IEmitter + EmittedFile
 │   │   │   ├── CSharp/     # CSharpEmitter (primary target)
 │   │   │   ├── TypeScript/ # TypeScriptEmitter
-│   │   │   └── Glossary/   # ubiquitous-language glossary
+│   │   │   ├── Glossary/   # ubiquitous-language glossary
+│   │   │   └── Docs/       # living documentation (Markdown + Mermaid diagrams)
 │   │   ├── Diagnostics/    # Diagnostic
 │   │   └── Services/       # KoineCompiler (orchestrator) + LSP/tooling backend
 │   └── Koine.Cli/          # `koine` command-line tool
@@ -258,8 +263,9 @@ Shipped through **R1–R17** of the roadmap — the full tactical *and* strategi
 emitter target (**TypeScript**, R16) alongside C#, and the editor tooling (TextMate grammar, `koine lsp`
 language server, and the `fmt`/`init`/`watch` commands). The
 [feature catalogue](https://atypical-consulting.github.io/Koine/guides/feature-catalogue/) maps every
-construct (R1–R17) to the C# it emits. Next up: a **docs** target (Markdown + Mermaid diagrams, in
-progress) and a **Rust** emitter (errors as `Result<T,E>` rather than exceptions) — see
+construct (R1–R17) to the C# it emits. A **docs** target also ships — `--target docs` emits living
+documentation (Markdown with Mermaid state, class, context-map, and integration-event diagrams) straight
+from the model. Next up: a **Rust** emitter (errors as `Result<T,E>` rather than exceptions) — see
 [`USER-STORIES.md`](USER-STORIES.md).
 
 ## Demo
@@ -285,9 +291,10 @@ Hover and go-to-definition resolve **across all `.koi` files in the workspace** 
 
 The full roadmap — every release R1–R17 and what remains — is captured as actionable user stories in
 [`USER-STORIES.md`](USER-STORIES.md). The tactical *and* strategic DDD toolkit (R1–R15), multi-target
-emitters (R16: a TypeScript emitter alongside C#), and the editor tooling (R17) have shipped. What's
-next: a **docs** target (Markdown + Mermaid diagrams) and a **Rust** emitter (errors as `Result<T,E>`
-rather than exceptions) to further prove the semantic model is truly target-agnostic.
+emitters (R16: a TypeScript emitter alongside C#), and the editor tooling (R17) have shipped, as has a
+**docs** target that emits living documentation (Markdown + Mermaid diagrams) from the model. What's
+next: a **Rust** emitter (errors as `Result<T,E>` rather than exceptions) to further prove the semantic
+model is truly target-agnostic.
 
 ## Contributing
 
