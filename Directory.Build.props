@@ -20,6 +20,9 @@
     <Authors>Philippe Matray</Authors>
     <Company>Atypical Consulting</Company>
     <RepositoryUrl>https://github.com/Atypical-Consulting/Koine</RepositoryUrl>
+    <PackageProjectUrl>https://github.com/Atypical-Consulting/Koine</PackageProjectUrl>
+    <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
+    <Copyright>Copyright (c) 2026 Atypical Consulting / Philippe Matray</Copyright>
   </PropertyGroup>
 
 </Project>

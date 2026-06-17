@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 📖 Documentation
+    url: https://atypical-consulting.github.io/Koine/
+    about: Getting started, the tutorial, the full language reference, and the CLI.
+  - name: 💬 Questions & ideas
+    url: https://github.com/Atypical-Consulting/Koine/discussions
+    about: Ask a question or discuss an idea before filing a feature request.
+  - name: 🔒 Report a security issue
+    url: https://github.com/Atypical-Consulting/Koine/security/advisories/new
+    about: Please report vulnerabilities privately — see SECURITY.md.
