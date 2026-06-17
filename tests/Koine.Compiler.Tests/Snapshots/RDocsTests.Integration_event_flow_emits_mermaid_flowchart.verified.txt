@@ -17,8 +17,12 @@ _Published by this context._
 // ==== docs/Payments.md ====
 # Payments
 
+_This bounded context has no declared types yet._
+
 // ==== docs/Shipping.md ====
 # Shipping
+
+_This bounded context has no declared types yet._
 
 // ==== docs/index.md ====
 # Domain Documentation

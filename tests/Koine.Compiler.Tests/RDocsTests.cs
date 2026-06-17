@@ -208,6 +208,19 @@ public class RDocsTests
     }
 
     [Fact]
+    public void Empty_context_renders_a_placeholder_note()
+    {
+        // A context that declares no types or behavior must not emit a bare heading-only page.
+        const string src = "context Empty { }\n";
+        var result = new KoineCompiler().Compile(
+            new[] { new SourceFile("empty.koi", src) }, new DocsEmitter());
+        Assert.True(result.Success, string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var page = result.Files.Single(f => f.RelativePath == "docs/Empty.md").Contents;
+        Assert.Contains("_This bounded context has no declared types yet._", page);
+    }
+
+    [Fact]
     public Task Billing_fixture_emits_baseline_docs()
     {
         var result = new KoineCompiler().Compile(TestSupport.BillingFixture, new DocsEmitter());

@@ -29,7 +29,18 @@ public sealed partial class DocsEmitter
         WriteAggregateNarratives(sb, ctx);
         WriteStandaloneTypes(sb, ctx);
         WriteBehavioralNarrative(sb, ctx);
+
+        if (!HasRenderableContent(ctx))
+        {
+            // A context with no types or behavioral declarations would otherwise be a heading-only
+            // page; leave a note so the generated doc reads intentionally, not truncated.
+            sb.Append("\n_This bounded context has no declared types yet._\n");
+        }
     }
+
+    /// <summary>True when the context declares anything the narrative renders below its heading.</summary>
+    private static bool HasRenderableContent(ContextNode ctx) =>
+        ctx.Types.Count > 0 || ctx.Specs.Count > 0 || ctx.Services.Count > 0 || ctx.Policies.Count > 0;
 
     /// <summary>Writes one section per aggregate: structure diagram, nested-type glossary, lifecycle.</summary>
     private static void WriteAggregateNarratives(StringBuilder sb, ContextNode ctx)
