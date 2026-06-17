@@ -45,10 +45,9 @@ const { embedded = false } = Astro.props;
     <div class="koi-pane koi-pane--output">
       <div class="koi-pane__label">
         <span>generated</span>
-        <span class="koi-out-name"></span>
+        <select class="koi-filepick" aria-label="Generated file"></select>
       </div>
       <div class="koi-output">
-        <div class="koi-files"></div>
         <div class="koi-view"></div>
       </div>
       <div class="koi-diagnostics" hidden></div>
@@ -277,21 +276,41 @@ const { embedded = false } = Astro.props;
     letter-spacing: 0.06em;
     text-transform: uppercase;
     color: var(--koi-muted);
-    padding: 0.42rem 0.7rem;
+    /* Fixed height + horizontal-only padding so both pane headers stay the same height
+       whether the right side holds plain text or the (taller) file picker. */
+    height: 2.4rem;
+    flex: 0 0 auto;
+    padding: 0 0.7rem;
     border-bottom: 1px dashed var(--koi-line-soft);
     background: var(--koi-paper);
-    min-height: 1.9rem;
   }
-  .koi-out-name {
+  .koi-filepick {
     text-transform: none;
     letter-spacing: 0;
+    font: 600 0.74rem/1 var(--koi-font-mono);
     color: var(--koi-accent);
-    font-weight: 600;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    direction: rtl; /* keep the filename end visible when truncating */
-    text-align: right;
+    background: var(--koi-surface);
+    border: 1px solid var(--koi-line);
+    border-radius: var(--koi-radius-sm);
+    padding: 0.26rem 0.5rem;
+    max-width: 72%;
+    cursor: pointer;
+  }
+  .koi-filepick:hover {
+    border-color: var(--koi-accent);
+  }
+  .koi-filepick:focus-visible {
+    outline: none;
+    border-color: var(--koi-accent);
+  }
+  .koi-filepick optgroup {
+    color: var(--koi-muted);
+    font-style: normal;
+    font-family: var(--koi-font-mono);
+  }
+  .koi-filepick option {
+    color: var(--koi-fg);
+    font-weight: 500;
   }
   .koi-hint {
     text-transform: none;
@@ -317,47 +336,6 @@ const { embedded = false } = Astro.props;
     display: flex;
     min-height: 0;
   }
-  .koi-files {
-    width: 38%;
-    max-width: 17rem;
-    overflow: auto;
-    border-right: 1px solid var(--koi-line-soft);
-    background: var(--koi-paper);
-    padding: 0.35rem 0.3rem;
-  }
-  .koi-group {
-    font: 600 0.66rem/1.4 var(--koi-font-mono);
-    letter-spacing: 0.04em;
-    color: var(--koi-muted);
-    padding: 0.5rem 0.45rem 0.2rem;
-    text-transform: none;
-    word-break: break-all;
-  }
-  .koi-group:first-child {
-    padding-top: 0.2rem;
-  }
-  .koi-file {
-    display: block;
-    width: 100%;
-    text-align: left;
-    border: 0;
-    background: transparent;
-    color: var(--koi-ink-soft);
-    font: 0.76rem/1.5 var(--koi-font-mono);
-    padding: 0.26rem 0.45rem 0.26rem 0.9rem;
-    border-radius: var(--koi-radius-sm);
-    cursor: pointer;
-    word-break: break-all;
-  }
-  .koi-file:hover {
-    background: var(--koi-paper-2);
-    color: var(--koi-fg);
-  }
-  .koi-file.is-active {
-    background: var(--koi-accent);
-    color: var(--koi-on-accent);
-  }
-
   .koi-view {
     flex: 1;
     min-width: 0;
@@ -440,9 +418,6 @@ const { embedded = false } = Astro.props;
     }
     .koi-ide[data-view='output'] .koi-pane--editor {
       display: none;
-    }
-    .koi-files {
-      width: 34%;
     }
     .koi-hint {
       display: none;

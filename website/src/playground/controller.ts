@@ -80,9 +80,8 @@ export function mountPlayground(root: HTMLElement): void {
   const editorHost = $('.koi-editor')!;
   const viewHost = $('.koi-view')!;
   const statusEl = $('.koi-status')!;
-  const filesEl = $('.koi-files')!;
   const diagEl = $('.koi-diagnostics')!;
-  const outLabelEl = $('.koi-out-name');
+  const filePick = $<HTMLSelectElement>('.koi-filepick');
   const sampleSel = $<HTMLSelectElement>('.koi-sample');
   const shareBtn = $<HTMLButtonElement>('.koi-share');
   const copyBtn = $<HTMLButtonElement>('.koi-copy');
@@ -112,50 +111,45 @@ export function mountPlayground(root: HTMLElement): void {
   const currentResult = () => cache.get(target);
   const currentFile = () => currentResult()?.files[activeFile] ?? currentResult()?.files[0];
 
-  function renderFiles(result: CompileResult) {
-    filesEl.innerHTML = '';
-    if (result.files.length <= 1) {
-      filesEl.hidden = true;
+  // Populate the file picker: grouped by directory (optgroups), everything sorted A→Z.
+  function renderFilePicker(result: CompileResult) {
+    if (!filePick) return;
+    filePick.innerHTML = '';
+    if (result.files.length === 0) {
+      filePick.hidden = true;
       return;
     }
-    filesEl.hidden = false;
+    filePick.hidden = false;
 
-    // Group by directory for an IDE-like tree.
-    const groups = new Map<string, { idx: number; name: string }[]>();
-    result.files.forEach((f, idx) => {
+    const entries = result.files.map((f, idx) => {
       const slash = f.path.lastIndexOf('/');
-      const dir = slash >= 0 ? f.path.slice(0, slash) : '';
-      const name = slash >= 0 ? f.path.slice(slash + 1) : f.path;
-      if (!groups.has(dir)) groups.set(dir, []);
-      groups.get(dir)!.push({ idx, name });
+      return {
+        idx,
+        dir: slash >= 0 ? f.path.slice(0, slash) : '',
+        name: slash >= 0 ? f.path.slice(slash + 1) : f.path,
+      };
     });
+    const dirs = [...new Set(entries.map((e) => e.dir))].sort((a, b) => a.localeCompare(b));
 
-    for (const [dir, items] of groups) {
-      if (dir) {
-        const head = document.createElement('div');
-        head.className = 'koi-group';
-        head.textContent = dir;
-        filesEl.appendChild(head);
-      }
+    for (const dir of dirs) {
+      const items = entries.filter((e) => e.dir === dir).sort((a, b) => a.name.localeCompare(b.name));
+      const parent = dir ? document.createElement('optgroup') : null;
+      if (parent) parent.label = dir;
       for (const it of items) {
-        const b = document.createElement('button');
-        b.className = 'koi-file' + (it.idx === activeFile ? ' is-active' : '');
-        b.textContent = it.name;
-        b.title = result.files[it.idx].path;
-        b.onclick = () => {
-          activeFile = it.idx;
-          renderFiles(result);
-          renderCode(result);
-        };
-        filesEl.appendChild(b);
+        const opt = document.createElement('option');
+        opt.value = String(it.idx);
+        opt.textContent = it.name;
+        (parent ?? filePick).appendChild(opt);
       }
+      if (parent) filePick.appendChild(parent);
     }
+    filePick.value = String(activeFile);
   }
 
   function renderCode(result: CompileResult) {
     const file = result.files[activeFile] ?? result.files[0];
     output.setContent(file ? file.contents : '// no output — fix the errors on the left', TARGET_LANG[target]);
-    if (outLabelEl) outLabelEl.textContent = file ? file.path : '';
+    if (filePick && result.files.length) filePick.value = String(activeFile);
     if (copyBtn) copyBtn.disabled = !file;
     if (downloadBtn) downloadBtn.disabled = result.files.length === 0;
   }
@@ -182,7 +176,7 @@ export function mountPlayground(root: HTMLElement): void {
 
   function paint(result: CompileResult, ms?: number) {
     if (result.files.length && activeFile >= result.files.length) activeFile = 0;
-    renderFiles(result);
+    renderFilePicker(result);
     renderCode(result);
     renderDiagnostics(result);
     const errs = result.diagnostics.filter((d) => d.severity === 'error').length;
@@ -265,6 +259,16 @@ export function mountPlayground(root: HTMLElement): void {
       editor.setDoc(s.code);
       writeLS(LS.buffer, s.code);
       run(true);
+    };
+  }
+
+  // --- file picker ---
+  if (filePick) {
+    filePick.onchange = () => {
+      const r = currentResult();
+      if (!r) return;
+      activeFile = Number(filePick.value);
+      renderCode(r);
     };
   }
 
