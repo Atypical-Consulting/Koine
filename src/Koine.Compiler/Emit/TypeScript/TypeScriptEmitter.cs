@@ -30,7 +30,8 @@ public sealed partial class TypeScriptEmitter : IEmitter
         "{\n" +
         "  \"compilerOptions\": {\n" +
         "    \"target\": \"ES2022\",\n" +
-        "    \"moduleResolution\": \"node\",\n" +
+        "    \"module\": \"ESNext\",\n" +
+        "    \"moduleResolution\": \"bundler\",\n" +
         "    \"strict\": true,\n" +
         "    \"noEmit\": true,\n" +
         "    \"skipLibCheck\": true,\n" +

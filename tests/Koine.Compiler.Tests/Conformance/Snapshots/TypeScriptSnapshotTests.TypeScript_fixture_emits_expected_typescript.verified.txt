@@ -635,7 +635,8 @@ export class Range<T> {
 {
   "compilerOptions": {
     "target": "ES2022",
-    "moduleResolution": "node",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
     "strict": true,
     "noEmit": true,
     "skipLibCheck": true,

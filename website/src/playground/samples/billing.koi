@@ -1,0 +1,41 @@
+// Billing — the 5-minute tour. A value object with an invariant, a regex-validated
+// Email, a smart enum, an entity with identity, and an aggregate with a derived field.
+context Billing {
+
+  value Money {
+    amount: Decimal
+    currency: Currency
+    invariant amount >= 0        "a monetary amount cannot be negative"
+  }
+
+  enum Currency { EUR, USD, GBP }
+
+  value Email {
+    raw: String
+    invariant raw matches /^[^@]+@[^@]+$/   "invalid email address"
+  }
+
+  entity Customer identified by CustomerId {
+    name: String
+    email: Email
+  }
+
+  aggregate Order root Order {
+
+    enum OrderStatus { Draft, Placed, Shipped, Cancelled }
+
+    value OrderLine {
+      product:   ProductId
+      quantity:  Int
+      unitPrice: Money
+      subtotal:  Money = unitPrice * quantity     // derived (computed) field
+    }
+
+    entity Order identified by OrderId {
+      customer: CustomerId
+      lines:    List<OrderLine>
+      status:   OrderStatus = Draft               // default value
+      invariant status == Draft when lines.isEmpty
+    }
+  }
+}

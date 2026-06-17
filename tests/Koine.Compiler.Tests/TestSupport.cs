@@ -144,8 +144,10 @@ public static class TestSupport
                 psi.ArgumentList.Add("--strict");
                 psi.ArgumentList.Add("--target");
                 psi.ArgumentList.Add("ES2022");
+                psi.ArgumentList.Add("--module");
+                psi.ArgumentList.Add("ESNext");
                 psi.ArgumentList.Add("--moduleResolution");
-                psi.ArgumentList.Add("node");
+                psi.ArgumentList.Add("bundler");
                 foreach (EmittedFile f in files.Where(f => f.RelativePath.EndsWith(".ts", StringComparison.OrdinalIgnoreCase)))
                 {
                     psi.ArgumentList.Add(f.RelativePath);

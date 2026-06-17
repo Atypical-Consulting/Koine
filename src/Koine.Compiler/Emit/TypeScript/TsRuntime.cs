@@ -5,7 +5,7 @@ namespace Koine.Compiler.Emit.TypeScript;
 /// <c>Koine.Runtime</c> files. It is written to a single <c>runtime.ts</c> at the output
 /// root and exports the shared domain primitives every generated module imports:
 /// <list type="bullet">
-/// <item><see cref="Decimal"/> — a string-backed exact decimal (money fidelity; a JS
+/// <item><c>Decimal</c> — a string-backed exact decimal (money fidelity; a JS
 /// <c>number</c> is lossy).</item>
 /// <item><c>Instant</c> — a branded ISO-8601 string with <c>Instant.now()</c>.</item>
 /// <item><c>DomainInvariantViolationError</c> — thrown when an invariant/illegal transition fails.</item>

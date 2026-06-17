@@ -1,0 +1,426 @@
+---
+// The Koine Playground IDE: a CodeMirror editor wired to the in-browser wasm compiler with a
+// syntax-highlighted output viewer. Used full-page on /playground and "embedded" on the landing.
+// All controls render unconditionally and are toggled by [data-embedded] via CSS (Astro
+// miscompiles sibling markup interleaved with {cond && <jsx>} expressions, so we avoid those).
+interface Props {
+  embedded?: boolean;
+}
+const { embedded = false } = Astro.props;
+---
+
+<div class="koi-ide" data-embedded={String(embedded)} data-view="editor">
+  <div class="koi-ide__bar">
+    <select class="koi-sample" aria-label="Choose a sample model"></select>
+    <div class="koi-targets" role="tablist" aria-label="Output target">
+      <button data-target="csharp" class="is-active" type="button" role="tab">C#</button>
+      <button data-target="typescript" type="button" role="tab">TypeScript</button>
+      <button data-target="glossary" type="button" role="tab">Glossary</button>
+    </div>
+    <div class="koi-mobile-tabs" role="tablist" aria-label="Pane">
+      <button data-mobile="editor" class="is-active" type="button">Model</button>
+      <button data-mobile="output" type="button">Output</button>
+    </div>
+    <span class="koi-status" data-kind="busy">loading compiler...</span>
+    <div class="koi-bar-right">
+      <button class="koi-reset" type="button" title="Reset to the sample">Reset</button>
+      <button class="koi-copy" type="button" title="Copy the current file">Copy</button>
+      <button class="koi-download" type="button" title="Download all files as a .zip">Download</button>
+      <button class="koi-share" type="button" title="Copy a shareable link">Share</button>
+      <a class="koi-open" href="#">Open full Playground &#9656;</a>
+    </div>
+  </div>
+
+  <div class="koi-ide__body">
+    <div class="koi-pane koi-pane--editor">
+      <div class="koi-pane__label">
+        <span>model.koi</span>
+        <span class="koi-hint">compiles as you type &middot; &#8984;F to find</span>
+      </div>
+      <div class="koi-editor"></div>
+    </div>
+
+    <div class="koi-resizer" role="separator" aria-orientation="vertical" title="Drag to resize"></div>
+
+    <div class="koi-pane koi-pane--output">
+      <div class="koi-pane__label">
+        <span>generated</span>
+        <select class="koi-filepick" aria-label="Generated file"></select>
+      </div>
+      <div class="koi-output">
+        <div class="koi-view"></div>
+      </div>
+      <div class="koi-diagnostics" hidden></div>
+    </div>
+  </div>
+</div>
+
+<script>
+  import { mountPlayground } from '../playground/controller';
+  for (const el of document.querySelectorAll('.koi-ide')) {
+    mountPlayground(el);
+  }
+</script>
+
+<style is:global>
+  .koi-ide {
+    display: flex;
+    flex-direction: column;
+    border: 1px solid var(--koi-line);
+    border-radius: var(--koi-radius);
+    background: var(--koi-surface);
+    box-shadow: var(--koi-shadow);
+    overflow: hidden;
+    min-height: 0;
+  }
+
+  .koi-ide__bar {
+    display: flex;
+    align-items: center;
+    gap: 0.55rem;
+    padding: 0.5rem 0.7rem;
+    border-bottom: 1px solid var(--koi-line);
+    background: var(--koi-paper-2);
+    font-family: var(--koi-font-mono);
+    font-size: 0.8rem;
+    flex-wrap: wrap;
+  }
+
+  .koi-sample {
+    font-family: var(--koi-font-body);
+    font-size: 0.82rem;
+    padding: 0.32rem 0.5rem;
+    border: 1px solid var(--koi-line);
+    border-radius: var(--koi-radius-sm);
+    background: var(--koi-surface);
+    color: var(--koi-fg);
+    max-width: 15rem;
+  }
+
+  .koi-targets {
+    display: inline-flex;
+    border: 1px solid var(--koi-line);
+    border-radius: var(--koi-radius-sm);
+    overflow: hidden;
+  }
+  .koi-targets button {
+    appearance: none;
+    border: 0;
+    border-right: 1px solid var(--koi-line);
+    background: var(--koi-surface);
+    color: var(--koi-muted);
+    font: 600 0.78rem/1 var(--koi-font-mono);
+    padding: 0.36rem 0.66rem;
+    cursor: pointer;
+    transition: background 0.12s, color 0.12s;
+  }
+  .koi-targets button:last-child {
+    border-right: 0;
+  }
+  .koi-targets button.is-active {
+    background: var(--koi-accent);
+    color: var(--koi-on-accent);
+  }
+  .koi-targets button:not(.is-active):hover {
+    color: var(--koi-fg);
+    background: var(--koi-paper);
+  }
+
+  /* Mobile editor/output toggle — shown only on narrow screens. */
+  .koi-mobile-tabs {
+    display: none;
+    border: 1px solid var(--koi-line);
+    border-radius: var(--koi-radius-sm);
+    overflow: hidden;
+  }
+  .koi-mobile-tabs button {
+    appearance: none;
+    border: 0;
+    border-right: 1px solid var(--koi-line);
+    background: var(--koi-surface);
+    color: var(--koi-muted);
+    font: 600 0.78rem/1 var(--koi-font-mono);
+    padding: 0.36rem 0.66rem;
+    cursor: pointer;
+  }
+  .koi-mobile-tabs button:last-child {
+    border-right: 0;
+  }
+  .koi-mobile-tabs button.is-active {
+    background: var(--koi-accent);
+    color: var(--koi-on-accent);
+  }
+
+  .koi-status {
+    font-size: 0.78rem;
+    font-weight: 600;
+    letter-spacing: 0.01em;
+    white-space: nowrap;
+  }
+  .koi-status[data-kind='ok'] {
+    color: var(--koi-ok, #16915a);
+  }
+  .koi-status[data-kind='err'] {
+    color: #d14b3c;
+  }
+  .koi-status[data-kind='busy'] {
+    color: var(--koi-muted);
+  }
+  .koi-status[data-kind='busy']::before {
+    content: '';
+    display: inline-block;
+    width: 0.6em;
+    height: 0.6em;
+    margin-right: 0.4em;
+    border-radius: 50%;
+    background: var(--koi-cyan);
+    animation: koi-pulse 1s ease-in-out infinite;
+  }
+  @keyframes koi-pulse {
+    0%,
+    100% {
+      opacity: 0.25;
+    }
+    50% {
+      opacity: 1;
+    }
+  }
+
+  .koi-bar-right {
+    margin-left: auto;
+    display: flex;
+    gap: 0.45rem;
+    align-items: center;
+  }
+  .koi-bar-right button,
+  .koi-open {
+    font: 600 0.76rem/1 var(--koi-font-mono);
+    padding: 0.36rem 0.62rem;
+    border-radius: var(--koi-radius-sm);
+    border: 1px solid var(--koi-line);
+    background: var(--koi-surface);
+    color: var(--koi-ink-soft);
+    cursor: pointer;
+    text-decoration: none;
+    transition: background 0.12s, color 0.12s, border-color 0.12s, transform 0.1s;
+  }
+  .koi-bar-right button:hover:not(:disabled),
+  .koi-open:hover {
+    color: var(--koi-fg);
+    border-color: var(--koi-accent);
+  }
+  .koi-bar-right button:disabled {
+    opacity: 0.4;
+    cursor: default;
+  }
+  .koi-bar-right button.is-flash {
+    background: var(--koi-accent);
+    color: var(--koi-on-accent);
+    border-color: var(--koi-accent);
+  }
+  .koi-share,
+  .koi-open {
+    border-color: var(--koi-accent) !important;
+    color: var(--koi-accent) !important;
+  }
+  .koi-share:hover,
+  .koi-open:hover {
+    background: var(--koi-accent);
+    color: var(--koi-on-accent) !important;
+  }
+
+  /* Body — flex so the divider can resize the panes. */
+  .koi-ide__body {
+    display: flex;
+    min-height: 0;
+    flex: 1;
+  }
+  .koi-pane {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    min-height: 0;
+  }
+  .koi-pane--editor {
+    flex: 0 0 var(--koi-editor-w, 50%);
+  }
+  .koi-pane--output {
+    flex: 1;
+    border-left: 1px solid var(--koi-line);
+  }
+  .koi-resizer {
+    flex: 0 0 7px;
+    cursor: col-resize;
+    background:
+      linear-gradient(var(--koi-line), var(--koi-line)) center / 1px 100% no-repeat;
+    position: relative;
+    touch-action: none;
+  }
+  .koi-resizer::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: transparent;
+    transition: background 0.12s;
+  }
+  .koi-resizer:hover::after {
+    background: color-mix(in srgb, var(--koi-accent) 18%, transparent);
+  }
+
+  .koi-pane__label {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.8rem;
+    font: 600 0.68rem/1.2 var(--koi-font-mono);
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--koi-muted);
+    /* Fixed height + horizontal-only padding so both pane headers stay the same height
+       whether the right side holds plain text or the (taller) file picker. */
+    height: 2.4rem;
+    flex: 0 0 auto;
+    padding: 0 0.7rem;
+    border-bottom: 1px dashed var(--koi-line-soft);
+    background: var(--koi-paper);
+  }
+  .koi-filepick {
+    text-transform: none;
+    letter-spacing: 0;
+    font: 600 0.74rem/1 var(--koi-font-mono);
+    color: var(--koi-accent);
+    background: var(--koi-surface);
+    border: 1px solid var(--koi-line);
+    border-radius: var(--koi-radius-sm);
+    padding: 0.26rem 0.5rem;
+    max-width: 72%;
+    cursor: pointer;
+  }
+  .koi-filepick:hover {
+    border-color: var(--koi-accent);
+  }
+  .koi-filepick:focus-visible {
+    outline: none;
+    border-color: var(--koi-accent);
+  }
+  .koi-filepick optgroup {
+    color: var(--koi-muted);
+    font-style: normal;
+    font-family: var(--koi-font-mono);
+  }
+  .koi-filepick option {
+    color: var(--koi-fg);
+    font-weight: 500;
+  }
+  .koi-hint {
+    text-transform: none;
+    letter-spacing: 0;
+    color: var(--koi-muted);
+    opacity: 0.8;
+    font-weight: 500;
+  }
+
+  .koi-editor {
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+    background: var(--koi-surface);
+  }
+  .koi-editor .cm-editor,
+  .koi-view .cm-editor {
+    height: 100%;
+  }
+
+  .koi-output {
+    flex: 1;
+    display: flex;
+    min-height: 0;
+  }
+  .koi-view {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    background: var(--koi-surface);
+  }
+
+  .koi-diagnostics {
+    border-top: 1px solid var(--koi-line);
+    max-height: 32%;
+    overflow: auto;
+    background: var(--koi-paper);
+  }
+  .koi-diag {
+    display: flex;
+    gap: 0.6rem;
+    width: 100%;
+    text-align: left;
+    align-items: baseline;
+    border: 0;
+    border-bottom: 1px solid var(--koi-line-soft);
+    background: transparent;
+    cursor: pointer;
+    padding: 0.4rem 0.7rem;
+    font: 0.76rem/1.4 var(--koi-font-mono);
+    color: var(--koi-fg);
+  }
+  .koi-diag:hover {
+    background: var(--koi-paper-2);
+  }
+  .koi-diag__pos {
+    color: var(--koi-muted);
+    min-width: 3.2em;
+  }
+  .koi-diag__code {
+    color: #d14b3c;
+    font-weight: 600;
+    min-width: 5em;
+  }
+  .koi-diag--warning .koi-diag__code {
+    color: #b8860b;
+  }
+  .koi-diag__msg {
+    color: var(--koi-fg);
+  }
+
+  /* Embedded (landing) — compact: hide the sample picker, Share, and the resizer, but keep
+     the file tree so all generated files are browsable. */
+  .koi-ide[data-embedded='true'] .koi-sample,
+  .koi-ide[data-embedded='true'] .koi-reset,
+  .koi-ide[data-embedded='true'] .koi-share,
+  .koi-ide[data-embedded='true'] .koi-resizer {
+    display: none;
+  }
+  .koi-ide[data-embedded='true'] .koi-pane--editor {
+    flex: 0 0 50%;
+  }
+  .koi-ide[data-embedded='false'] .koi-open {
+    display: none;
+  }
+
+  /* Mobile: stack to a single pane toggled by the Model/Output tabs. */
+  @media (max-width: 760px) {
+    .koi-ide__body {
+      flex-direction: column;
+    }
+    .koi-pane--editor,
+    .koi-pane--output {
+      flex: 1 1 auto !important;
+      border-left: 0;
+    }
+    .koi-resizer {
+      display: none;
+    }
+    .koi-mobile-tabs {
+      display: inline-flex;
+    }
+    .koi-ide[data-view='editor'] .koi-pane--output {
+      display: none;
+    }
+    .koi-ide[data-view='output'] .koi-pane--editor {
+      display: none;
+    }
+    .koi-hint {
+      display: none;
+    }
+  }
+</style>

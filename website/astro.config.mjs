@@ -29,10 +29,18 @@ export default defineConfig({
 			expressiveCode: {
 				shiki: { langs: [koineLang] },
 			},
+			// Light blueprint brand pass over the docs (accent + display/mono fonts), kept
+			// separate from Starlight's body readability. See src/styles/brand.css.
+			customCss: ['./src/styles/brand.css'],
 			editLink: {
 				baseUrl: 'https://github.com/Atypical-Consulting/Koine/edit/main/website/',
 			},
 			sidebar: [
+				{
+					// Link out to the custom (non-Starlight) Playground page.
+					label: '▸ Playground',
+					link: '/playground/',
+				},
 				{
 					label: 'Start here',
 					items: [
