@@ -64,6 +64,13 @@ export function createExplorer(cb: ExplorerCallbacks): Explorer {
   // Directory tokens the user has collapsed. Honoured across re-renders so a folder doesn't pop back
   // open when the tree is rebuilt (renderTree runs on every diagnostics push).
   const collapsed = new Set<string>();
+  // renderTree fires on every diagnostics push — including mid-interaction. Tearing the tree down
+  // while an inline rename is open or a context menu is up would destroy the rename input (committing
+  // a half-typed name on the resulting blur) or yank the menu out from under the user. So a render
+  // that arrives during either is deferred and replayed once the interaction ends.
+  let renaming = false;
+  let rendering = false;
+  let pendingRender: { entries: FsEntry[]; token: string } | null = null;
 
   // --- name prompts (v1 uses window.prompt) -----------------------------------
 
@@ -73,8 +80,9 @@ export function createExplorer(cb: ExplorerCallbacks): Explorer {
     if (name == null) return null;
     const trimmed = name.trim();
     if (!trimmed) return null;
-    if (trimmed.includes('/') || trimmed.includes('\\')) {
-      window.alert('Name cannot contain a path separator.');
+    // Reject path separators and the `.`/`..` traversal names so a prompt can't escape the folder.
+    if (trimmed.includes('/') || trimmed.includes('\\') || trimmed === '.' || trimmed === '..') {
+      window.alert('Invalid name: cannot contain a path separator or be "." / "..".');
       return null;
     }
     return trimmed;
@@ -251,6 +259,10 @@ export function createExplorer(cb: ExplorerCallbacks): Explorer {
   }
 
   function onRowKeydown(ev: KeyboardEvent, li: HTMLLIElement, entry: FsEntry, parentDir: string): void {
+    // Each nested treeitem <li> is a DOM descendant of its ancestor directory <li>s, which also carry
+    // this handler. Stop here so a keydown on a nested row isn't re-run for every ancestor (which
+    // would move focus by the wrong index). The innermost (focused) li handles the event.
+    ev.stopPropagation();
     const items = visibleItems();
     const idx = items.indexOf(li);
     const isDir = entry.kind === 'dir';
@@ -327,16 +339,19 @@ export function createExplorer(cb: ExplorerCallbacks): Explorer {
     input.setAttribute('aria-label', `Rename ${entry.name}`);
     input.spellcheck = false;
     label.replaceWith(input);
+    renaming = true; // defer diagnostics-driven re-renders so the tree isn't torn down mid-edit
 
     let done = false;
     const finish = (commit: boolean): void => {
       if (done) return;
       done = true;
+      renaming = false;
       const next = cleanName(input.value);
       input.replaceWith(label);
       if (commit && next && next !== entry.name) cb.onRename(entry, next);
       li.tabIndex = 0;
       li.focus();
+      flushPendingRender(); // catch up on any render that arrived while renaming
     };
 
     input.addEventListener('keydown', (ev) => {
@@ -379,6 +394,9 @@ export function createExplorer(cb: ExplorerCallbacks): Explorer {
     // are not dropped onto document.body when the menu dismisses.
     if (menuTrigger && menuTrigger.isConnected) menuTrigger.focus();
     menuTrigger = null;
+    // A diagnostics re-render may have been deferred while the menu was open; replay it now (skipped
+    // when called from within render(), where `rendering` is set).
+    flushPendingRender();
   }
 
   function onDocPointerDown(ev: PointerEvent): void {
@@ -487,12 +505,21 @@ export function createExplorer(cb: ExplorerCallbacks): Explorer {
 
   function render(entries: FsEntry[], token: string): void {
     rootToken = token;
+    // Defer a re-render that lands during an inline rename or an open context menu — replaying it
+    // when the interaction ends — so we never detach the focused rename input (which would commit a
+    // half-typed name on blur) or dismiss the menu mid-aim.
+    if (renaming || menuEl) {
+      pendingRender = { entries, token };
+      return;
+    }
+    rendering = true;
     closeMenu();
-    // renderTree runs on every diagnostics push; if the user was navigating the tree by keyboard,
-    // remember which treeitem had focus so we can restore it after the full rebuild (avoiding a
-    // focus drop to document.body and a roving-tabindex jump back to the first row).
+    // If the user was navigating the tree by keyboard, remember which treeitem had focus (reading the
+    // token off the focused element OR its nearest treeitem ancestor — e.g. the focused '⋯' button)
+    // so we can restore it after the full rebuild instead of dropping focus to document.body.
     const active = document.activeElement as HTMLElement | null;
-    const refocusToken = active && tree.contains(active) ? (active as HTMLLIElement).dataset?.token : undefined;
+    const focusedItem = active && tree.contains(active) ? active.closest<HTMLElement>('li[role="treeitem"]') : null;
+    const refocusToken = focusedItem?.dataset.token;
 
     tree.innerHTML = '';
     for (const entry of entries) tree.appendChild(buildItem(entry, 1, token));
@@ -507,6 +534,17 @@ export function createExplorer(cb: ExplorerCallbacks): Explorer {
       // Otherwise make the first treeitem the single tab stop.
       const first = tree.querySelector<HTMLElement>('li[role="treeitem"]');
       if (first) first.tabIndex = 0;
+    }
+    rendering = false;
+    pendingRender = null;
+  }
+
+  // Replay a render that was deferred during a rename / open menu, once both have cleared.
+  function flushPendingRender(): void {
+    if (pendingRender && !renaming && !menuEl && !rendering) {
+      const p = pendingRender;
+      pendingRender = null;
+      render(p.entries, p.token);
     }
   }
 

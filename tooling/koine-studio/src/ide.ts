@@ -415,10 +415,13 @@ export function init(): void {
   /** The folder-relative, forward-slashed path of a token under the opened folder ('' for the root). */
   function relOfToken(token: string): string {
     if (folderRootToken == null || token === folderRootToken) return '';
-    // Slice off the root prefix + its trailing separator (native '/' or Windows '\'), then normalise.
-    return token.startsWith(folderRootToken)
-      ? token.slice(folderRootToken.length + 1).replace(/\\/g, '/')
-      : token;
+    // Require a real separator boundary after the root prefix so a sibling that merely shares the
+    // root as a string prefix (e.g. root `/work/app`, token `/work/app2/x`) isn't mis-sliced. Then
+    // strip the prefix + separator and normalise Windows '\' to '/'.
+    if (token.startsWith(folderRootToken + '/') || token.startsWith(folderRootToken + '\\')) {
+      return token.slice(folderRootToken.length + 1).replace(/\\/g, '/');
+    }
+    return token;
   }
 
   /** Re-read the folder's entry tree from the host and re-render the explorer. */
@@ -457,7 +460,11 @@ export function init(): void {
   async function handleNewFile(parentDirToken: string, name: string): Promise<void> {
     if (folderRootToken == null) return;
     const parentRel = relOfToken(parentDirToken);
-    const relPath = parentRel ? `${parentRel}/${name}` : name;
+    // The explorer only surfaces directories and .koi files, so default an extensionless name to
+    // `.koi` — otherwise the created file would be invisible (listEntries filters it out) and the
+    // user would think New File silently failed.
+    const fileName = name.includes('.') ? name : `${name}.koi`;
+    const relPath = parentRel ? `${parentRel}/${fileName}` : fileName;
     try {
       const token = await platform.createFile(folderRootToken, relPath, '');
       await refreshEntries();
@@ -530,12 +537,17 @@ export function init(): void {
         else await syncOpenKoi(); // a duplicated folder may contain new .koi files
         return;
       } catch (e) {
-        if (e instanceof Error && e.message.includes('already exists')) continue;
+        // A collision means "try the next candidate name". The desktop (Tauri) host rejects with a
+        // plain string, the browser with an Error — match on the message text, not the type, so the
+        // retry works on both backends.
+        if (String(e instanceof Error ? e.message : e).includes('already exists')) continue;
         setStatus('could not duplicate', 'error');
         console.error('duplicate failed:', e);
         return;
       }
     }
+    // Every candidate name collided — don't fail silently.
+    setStatus('could not duplicate (too many copies)', 'error');
   }
 
   // --- mutation helpers ------------------------------------------------------

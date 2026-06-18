@@ -367,4 +367,56 @@ describe('explorer', () => {
     fileRow(ex, 'shared.koi').dispatchEvent(new KeyboardEvent('keydown', { key: 'Backspace', bubbles: true }));
     expect(cb.onDelete).not.toHaveBeenCalled();
   });
+
+  it('defers a re-render while an inline rename is in progress (no teardown / no spurious commit)', () => {
+    const cb = makeCallbacks();
+    const ex = createExplorer(cb);
+    document.body.appendChild(ex.el);
+    ex.render(sampleTree(), 'ROOT');
+
+    const row = fileRow(ex, 'shared.koi');
+    row.dispatchEvent(new KeyboardEvent('keydown', { key: 'F2', bubbles: true }));
+    const input = row.querySelector<HTMLInputElement>('.explorer-rename')!;
+    input.value = 'ren'; // half-typed, not yet committed
+
+    // A diagnostics push re-renders mid-edit; it must be deferred, not tear the input down.
+    ex.render(sampleTree(), 'ROOT');
+    expect(document.querySelector('.explorer-rename')).not.toBeNull();
+    expect(cb.onRename).not.toHaveBeenCalled();
+
+    // Committing the rename replays the deferred render with the fresh tree.
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    expect((cb.onRename as ReturnType<typeof vi.fn>).mock.calls[0][1]).toBe('ren');
+    expect(document.querySelector('.explorer-rename')).toBeNull();
+  });
+
+  it('does not double-fire keydown through nested treeitem ancestors', () => {
+    const cb = makeCallbacks();
+    const ex = createExplorer(cb);
+    document.body.appendChild(ex.el);
+    const nested: FsEntry[] = [
+      {
+        token: 'R/a',
+        name: 'a',
+        relPath: 'a',
+        kind: 'dir',
+        children: [
+          { token: 'R/a/a1.koi', name: 'a1.koi', relPath: 'a/a1.koi', kind: 'file' },
+          { token: 'R/a/a2.koi', name: 'a2.koi', relPath: 'a/a2.koi', kind: 'file' },
+        ],
+      },
+      { token: 'R/b.koi', name: 'b.koi', relPath: 'b.koi', kind: 'file' },
+    ];
+    ex.render(nested, 'R');
+
+    const a1 = Array.from(ex.el.querySelectorAll<HTMLElement>('li[data-kind="file"]')).find(
+      (li) => li.dataset.token === 'R/a/a1.koi',
+    )!;
+    a1.tabIndex = 0;
+    a1.focus();
+    // ArrowDown on the nested a1 must land on a2 — not be overridden by the ancestor dir's handler
+    // re-running and snapping focus back up.
+    a1.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
+    expect((document.activeElement as HTMLElement).dataset.token).toBe('R/a/a2.koi');
+  });
 });

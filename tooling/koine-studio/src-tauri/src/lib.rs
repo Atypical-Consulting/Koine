@@ -287,12 +287,7 @@ fn list_koi_files(dir: String) -> Result<Vec<KoiFile>, String> {
             }
             if file_type.is_dir() {
                 stack.push(path);
-            } else if file_type.is_file()
-                && path
-                    .extension()
-                    .and_then(|e| e.to_str())
-                    .is_some_and(|e| e.eq_ignore_ascii_case("koi"))
-            {
+            } else if file_type.is_file() && is_koi_file(&path) {
                 let name = path
                     .file_name()
                     .and_then(|n| n.to_str())
@@ -356,6 +351,22 @@ fn is_koi_file(path: &std::path::Path) -> bool {
     path.extension()
         .and_then(|e| e.to_str())
         .is_some_and(|e| e.eq_ignore_ascii_case("koi"))
+}
+
+/// A caller-supplied relative path is safe only if it is non-empty, not absolute, and made entirely
+/// of normal components (no `.`, `..`, root or drive prefix) — defence in depth so a name typed in
+/// the UI can never write outside the opened workspace folder.
+fn is_safe_relpath(rel: &str) -> bool {
+    !rel.is_empty()
+        && !std::path::Path::new(rel).is_absolute()
+        && std::path::Path::new(rel)
+            .components()
+            .all(|c| matches!(c, std::path::Component::Normal(_)))
+}
+
+/// A single entry name (for rename) is safe only if non-empty, separator-free, and not `.`/`..`.
+fn is_safe_name(name: &str) -> bool {
+    !name.is_empty() && !name.contains('/') && !name.contains('\\') && name != "." && name != ".."
 }
 
 /// Build the explorer subtree for `dir`: every non-skipped child directory
@@ -427,6 +438,9 @@ fn list_entries(dir: String) -> Result<Vec<FsEntry>, String> {
 /// return its absolute path. Errors if the file already exists.
 #[tauri::command]
 fn create_file(folder: String, rel_path: String, contents: String) -> Result<String, String> {
+    if !is_safe_relpath(&rel_path) {
+        return Err(format!("invalid path: {rel_path}"));
+    }
     let target = std::path::Path::new(&folder).join(&rel_path);
     if target.exists() {
         return Err(format!("already exists: {}", target.display()));
@@ -444,6 +458,9 @@ fn create_file(folder: String, rel_path: String, contents: String) -> Result<Str
 /// its absolute path.
 #[tauri::command]
 fn create_folder(folder: String, rel_path: String) -> Result<String, String> {
+    if !is_safe_relpath(&rel_path) {
+        return Err(format!("invalid path: {rel_path}"));
+    }
     let target = std::path::Path::new(&folder).join(&rel_path);
     std::fs::create_dir_all(&target)
         .map_err(|e| format!("failed to create {}: {e}", target.display()))?;
@@ -454,6 +471,9 @@ fn create_folder(folder: String, rel_path: String) -> Result<String, String> {
 /// return the new absolute path. Errors if the target name already exists.
 #[tauri::command]
 fn rename_entry(token: String, new_name: String) -> Result<String, String> {
+    if !is_safe_name(&new_name) {
+        return Err(format!("invalid name: {new_name}"));
+    }
     let src = std::path::Path::new(&token);
     let parent = src
         .parent()
@@ -510,6 +530,9 @@ fn move_entry(
     new_rel_path: String,
     copy: bool,
 ) -> Result<String, String> {
+    if !is_safe_relpath(&new_rel_path) {
+        return Err(format!("invalid path: {new_rel_path}"));
+    }
     let src = std::path::Path::new(&token);
     let dest = std::path::Path::new(&dest_folder).join(&new_rel_path);
     // Never clobber an existing destination — mirrors create_file/rename_entry and the browser
@@ -1040,6 +1063,25 @@ mod tests {
             .unwrap()
             .iter()
             .any(|e| e.name == "node_modules"));
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn mutations_reject_path_traversal() {
+        let root = std::env::temp_dir().join(format!("koine_trav_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let folder = root.to_string_lossy().into_owned();
+        let f = root.join("a.koi");
+        std::fs::write(&f, "x").unwrap();
+
+        assert!(create_file(folder.clone(), "../escape.koi".into(), "x".into()).is_err());
+        assert!(create_folder(folder.clone(), "../escape".into()).is_err());
+        assert!(rename_entry(f.to_string_lossy().into_owned(), "..".into()).is_err());
+        assert!(move_entry(f.to_string_lossy().into_owned(), folder, "../escape.koi".into(), true).is_err());
+        // The escaping target was never created in the parent of the workspace.
+        assert!(!root.parent().unwrap().join("escape.koi").exists());
 
         let _ = std::fs::remove_dir_all(&root);
     }

@@ -10,7 +10,8 @@ import type { FsEntry, KoiFile, SourceDoc } from '../types';
 
 // --- minimal File System Access typings (not in the TS DOM lib) --------------
 interface FsWritable {
-  write(data: string): Promise<void>;
+  // Accepts a string (new file contents) or a Blob/File (a faithful byte copy of an existing file).
+  write(data: string | Blob): Promise<void>;
   close(): Promise<void>;
 }
 interface FsFileHandle {
@@ -214,18 +215,28 @@ function childToken(folderToken: string, relPath: string): string {
   return relPath ? `${folderToken}/${relPath}` : folderToken;
 }
 
-/** Reject an empty or blank-segment relPath so we never create a garbage entry named `''`. */
+/** Reject an empty, blank-segment, or `.`/`..` relPath so we never create a garbage or escaping entry. */
 function assertRelPath(relPath: string): void {
-  if (!relPath || relPath.split('/').some((seg) => seg.trim() === '')) {
+  if (!relPath || relPath.split('/').some((seg) => seg.trim() === '' || seg === '.' || seg === '..')) {
     throw new Error('invalid path: ' + JSON.stringify(relPath));
   }
 }
 
-/** Reject a blank single name or one containing a path separator (a name is one path segment). */
+/** Reject a blank single name, a path separator, or a `.`/`..` traversal (a name is one segment). */
 function assertName(name: string): void {
-  if (!name.trim() || name.includes('/') || name.includes('\\')) {
+  if (!name.trim() || name.includes('/') || name.includes('\\') || name === '.' || name === '..') {
     throw new Error('invalid name: ' + JSON.stringify(name));
   }
+}
+
+/** Faithful byte copy of a file into `destDir` under `name` (writes the Blob, not re-encoded text). */
+async function copyFileInto(srcFile: FsFileHandle, destDir: FsDirHandle, name: string): Promise<FsFileHandle> {
+  const file = await srcFile.getFile();
+  const dest = await destDir.getFileHandle(name, { create: true });
+  const writable = await dest.createWritable();
+  await writable.write(file);
+  await writable.close();
+  return dest;
 }
 
 /** Resolve a directory token to a live handle, walking from the opened folder when not yet cached. */
@@ -373,11 +384,7 @@ export async function renameEntry(token: string, newName: string): Promise<strin
     if (typeof src.move === 'function') {
       await src.move(newName);
     } else {
-      const text = await (await src.getFile()).text();
-      const dest = await parent.getFileHandle(newName, { create: true });
-      const writable = await dest.createWritable();
-      await writable.write(text);
-      await writable.close();
+      await copyFileInto(src, parent, newName);
       await parent.removeEntry(oldName);
     }
   }
@@ -428,12 +435,7 @@ export async function moveEntry(
       purgeRegistries(token);
       return reRegister(destParent, destLeaf, false, destToken);
     }
-    const text = await (await src.getFile()).text();
-    const dest = await destParent.getFileHandle(destLeaf, { create: true });
-    const writable = await dest.createWritable();
-    await writable.write(text);
-    await writable.close();
-    fileHandles.set(destToken, dest);
+    fileHandles.set(destToken, await copyFileInto(src, destParent, destLeaf));
   }
   if (copy !== true) await deleteEntry(token);
   return destToken;
@@ -453,8 +455,8 @@ async function reRegister(parent: FsDirHandle, name: string, isDir: boolean, new
  * (including build/VCS dirs) — so a copy-based rename/move/duplicate never drops data the explorer
  * doesn't surface. Mirrors the desktop backend's copy_recursive / fs::rename whole-tree semantics.
  * Only `.koi` files and non-skipped dirs are cached in the registries (that is all the explorer
- * lists); the bytes of everything else are still copied. Files are copied as UTF-8 text — adequate
- * for a model workspace (`.koi`/`.md`/`.cs` source); a binary file would be re-encoded.
+ * lists); the bytes of everything else are still copied. Files are copied byte-for-byte (the Blob),
+ * so binary content survives a rename/move/duplicate intact.
  */
 async function copyDirInto(
   src: FsDirHandle,
@@ -470,11 +472,7 @@ async function copyDirInto(
       if (!SKIP_DIRS.has(entry.name)) dirHandles.set(childTok, subDest);
       await copyDirInto(entry, subDest, folderToken, childRel);
     } else {
-      const text = await (await entry.getFile()).text();
-      const fileDest = await dest.getFileHandle(entry.name, { create: true });
-      const writable = await fileDest.createWritable();
-      await writable.write(text);
-      await writable.close();
+      const fileDest = await copyFileInto(entry, dest, entry.name);
       if (entry.name.toLowerCase().endsWith('.koi')) fileHandles.set(childTok, fileDest);
     }
   }

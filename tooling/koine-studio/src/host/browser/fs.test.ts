@@ -26,8 +26,10 @@ class MockFile {
   }
   async createWritable() {
     return {
-      write: async (data: string) => {
-        this.contents = data;
+      // Production writes a string for new content and a Blob/File (with .text()) for a byte copy;
+      // mirror both so the byte-copy paths (copyFileInto) are exercised by the suite.
+      write: async (data: string | { text(): Promise<string> }) => {
+        this.contents = typeof data === 'string' ? data : await data.text();
       },
       close: async () => {},
     };
