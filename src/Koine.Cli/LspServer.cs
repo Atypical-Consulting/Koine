@@ -171,6 +171,7 @@ internal sealed class LspServer
                                         ["koineEmitPreview"] = true,
                                         ["koineGlossary"] = true,
                                         ["koineContextMap"] = true,
+                                        ["koineDocs"] = true,
                                         ["koineCheck"] = true,
                                     },
                                 },
@@ -315,6 +316,14 @@ internal sealed class LspServer
                             if (root.TryGetProperty("id", out _))
                             {
                                 Respond(root, ContextMapResultJson(root));
+                            }
+
+                            break;
+
+                        case "koine/docs":
+                            if (root.TryGetProperty("id", out _))
+                            {
+                                Respond(root, DocsResultJson());
                             }
 
                             break;
@@ -980,6 +989,31 @@ internal sealed class LspServer
         ["localContext"] = a.LocalContext,
         ["localType"] = a.LocalType,
     };
+
+    /// <summary>
+    /// Emits the living-documentation files (Mermaid-in-Markdown) for the whole merged workspace,
+    /// reusing the same <see cref="Koine.Compiler.Emit.Docs.DocsEmitter"/> as
+    /// <c>koine build … --target docs</c>. A null model (any file has a syntax error) degrades to
+    /// <c>{ "files": [] }</c> rather than throwing. Returns <c>{ files: [{ path, contents }] }</c>.
+    /// </summary>
+    private object? DocsResultJson()
+    {
+        var sources = Workspace().Select(kv => new SourceFile(kv.Key, kv.Value)).ToList();
+        var (model, _) = _compiler.Parse(sources);
+        if (model is null)
+        {
+            return new Dictionary<string, object?> { ["files"] = Array.Empty<object>() };
+        }
+
+        var files = new Koine.Compiler.Emit.Docs.DocsEmitter().Emit(model)
+            .Select(f => (object)new Dictionary<string, object?>
+            {
+                ["path"] = f.RelativePath,
+                ["contents"] = f.Contents,
+            })
+            .ToArray();
+        return new Dictionary<string, object?> { ["files"] = files };
+    }
 
     /// <summary>
     /// Runs the model-versioning compatibility check of the merged workspace (the current model)

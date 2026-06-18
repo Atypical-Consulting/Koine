@@ -12,6 +12,16 @@ export interface Settings {
   fontSize: number;
   formatOnSave: boolean;
   lspTrace: 'off' | 'messages' | 'verbose';
+  /** Which AI backend the assistant uses. */
+  aiProvider: 'anthropic' | 'openai';
+  /** Base URL for the OpenAI-compatible provider (OpenAI / Ollama / LM Studio / …). */
+  aiBaseUrl: string;
+  /** API key for the AI assistant (stored locally; empty for keyless local servers). */
+  aiApiKey: string;
+  /** Anthropic model id. */
+  aiModel: string;
+  /** OpenAI-compatible model id (kept separate so switching providers doesn't send a Claude id to OpenAI). */
+  aiModelOpenai: string;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -19,6 +29,11 @@ export const DEFAULT_SETTINGS: Settings = {
   fontSize: 13.5,
   formatOnSave: true,
   lspTrace: 'off',
+  aiProvider: 'anthropic',
+  aiBaseUrl: 'https://api.openai.com/v1',
+  aiApiKey: '',
+  aiModel: 'claude-opus-4-8',
+  aiModelOpenai: '',
 };
 
 // --- storage keys ------------------------------------------------------------
@@ -86,6 +101,12 @@ export function loadSettings(): Settings {
       fontSize: coerceFontSize(parsed.fontSize),
       formatOnSave: typeof parsed.formatOnSave === 'boolean' ? parsed.formatOnSave : DEFAULT_SETTINGS.formatOnSave,
       lspTrace: coerceTrace(parsed.lspTrace),
+      aiProvider: parsed.aiProvider === 'openai' ? 'openai' : DEFAULT_SETTINGS.aiProvider,
+      aiBaseUrl:
+        typeof parsed.aiBaseUrl === 'string' && parsed.aiBaseUrl.length > 0 ? parsed.aiBaseUrl : DEFAULT_SETTINGS.aiBaseUrl,
+      aiApiKey: typeof parsed.aiApiKey === 'string' ? parsed.aiApiKey : DEFAULT_SETTINGS.aiApiKey,
+      aiModel: typeof parsed.aiModel === 'string' && parsed.aiModel.length > 0 ? parsed.aiModel : DEFAULT_SETTINGS.aiModel,
+      aiModelOpenai: typeof parsed.aiModelOpenai === 'string' ? parsed.aiModelOpenai : DEFAULT_SETTINGS.aiModelOpenai,
     };
   } catch {
     return { ...DEFAULT_SETTINGS };

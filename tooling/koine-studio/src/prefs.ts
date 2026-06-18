@@ -83,11 +83,65 @@ export function createPreferences(cb: PrefsCallbacks): PrefsHandle {
     traceSelect.appendChild(opt);
   }
 
+  // AI assistant — provider, base URL, key, model. All stored locally (localStorage) and used
+  // only to call the chosen API directly from this app.
+  const aiProviderSelect = document.createElement('select');
+  aiProviderSelect.className = 'koi-select';
+  for (const [value, text] of [
+    ['anthropic', 'Anthropic (Claude)'],
+    ['openai', 'OpenAI-compatible'],
+  ] as const) {
+    const opt = document.createElement('option');
+    opt.value = value;
+    opt.textContent = text;
+    aiProviderSelect.appendChild(opt);
+  }
+
+  // Base URL — only used by the OpenAI-compatible provider. A datalist offers the common presets
+  // (OpenAI cloud, Ollama, LM Studio) while still letting the user type any endpoint.
+  const aiBaseUrlInput = document.createElement('input');
+  aiBaseUrlInput.type = 'text';
+  aiBaseUrlInput.className = 'koi-text';
+  aiBaseUrlInput.spellcheck = false;
+  aiBaseUrlInput.placeholder = 'https://api.openai.com/v1';
+  aiBaseUrlInput.setAttribute('list', 'koi-ai-base-presets');
+  const presets = document.createElement('datalist');
+  presets.id = 'koi-ai-base-presets';
+  for (const url of ['https://api.openai.com/v1', 'http://localhost:11434/v1', 'http://localhost:1234/v1']) {
+    const opt = document.createElement('option');
+    opt.value = url;
+    presets.appendChild(opt);
+  }
+
+  const aiKeyInput = document.createElement('input');
+  aiKeyInput.type = 'password';
+  aiKeyInput.className = 'koi-text';
+  aiKeyInput.autocomplete = 'off';
+  aiKeyInput.placeholder = 'sk-…  (blank for local Ollama / LM Studio)';
+
+  const aiModelInput = document.createElement('input');
+  aiModelInput.type = 'text';
+  aiModelInput.className = 'koi-text';
+  aiModelInput.spellcheck = false;
+  aiModelInput.placeholder = 'claude-opus-4-8';
+
+  // The base-URL field is only meaningful for the OpenAI-compatible provider; hide it for Anthropic.
+  const baseUrlField = field('Base URL', aiBaseUrlInput);
+  function syncProviderFields(): void {
+    baseUrlField.hidden = aiProviderSelect.value !== 'openai';
+    aiModelInput.placeholder = aiProviderSelect.value === 'openai' ? 'gpt-4o  ·  qwen2.5-coder  ·  …' : 'claude-opus-4-8';
+  }
+
   modal.body.append(
     field('Theme', themeSelect),
     field('Editor font size', fontInput),
     field('Format on save', formatCheckbox),
     field('LSP trace', traceSelect),
+    field('AI provider', aiProviderSelect),
+    baseUrlField,
+    field('API key', aiKeyInput),
+    field('Assistant model', aiModelInput),
+    presets,
   );
 
   // --- commit helpers -------------------------------------------------------
@@ -127,6 +181,27 @@ export function createPreferences(cb: PrefsCallbacks): PrefsHandle {
     commit({ lspTrace });
   });
 
+  aiProviderSelect.addEventListener('change', () => {
+    const aiProvider = aiProviderSelect.value === 'openai' ? 'openai' : 'anthropic';
+    const merged = patchSettings({ aiProvider });
+    // Swap the model field to the model remembered for the now-selected provider, so a Claude id
+    // is never left sitting in front of an OpenAI endpoint (and vice-versa).
+    aiModelInput.value = aiProvider === 'openai' ? merged.aiModelOpenai : merged.aiModel;
+    syncProviderFields();
+    cb.onChange(merged);
+  });
+  aiBaseUrlInput.addEventListener('change', () => {
+    const url = aiBaseUrlInput.value.trim();
+    commit({ aiBaseUrl: url || 'https://api.openai.com/v1' });
+  });
+  // The key/model commit on change OR blur so an edit isn't lost if the dialog is dismissed.
+  aiKeyInput.addEventListener('change', () => commit({ aiApiKey: aiKeyInput.value.trim() }));
+  // The model is stored per provider so switching providers can't carry one's model into the other.
+  aiModelInput.addEventListener('change', () => {
+    const model = aiModelInput.value.trim();
+    commit(aiProviderSelect.value === 'openai' ? { aiModelOpenai: model } : { aiModel: model });
+  });
+
   // Populate every control from the freshly loaded Settings, then move focus to the first
   // control so keyboard users land inside the dialog (overriding the modal's default focus).
   modal.onOpen(() => {
@@ -135,6 +210,11 @@ export function createPreferences(cb: PrefsCallbacks): PrefsHandle {
     fontInput.value = String(s.fontSize);
     formatCheckbox.checked = s.formatOnSave;
     traceSelect.value = s.lspTrace;
+    aiProviderSelect.value = s.aiProvider;
+    aiBaseUrlInput.value = s.aiBaseUrl;
+    aiKeyInput.value = s.aiApiKey;
+    aiModelInput.value = s.aiProvider === 'openai' ? s.aiModelOpenai : s.aiModel;
+    syncProviderFields();
     themeSelect.focus();
   });
 
