@@ -309,7 +309,7 @@ public sealed class KoineModelBuilderVisitor : KoineParserBaseVisitor<object?>
     private UseCaseDecl BuildUseCase(KoineParser.UsecaseDeclContext ctx)
     {
         List<Param> parameters = ctx.paramList() is { } pl
-            ? pl.param().Select(BuildParam).ToList()
+            ? Map(pl.param(), BuildParam)
             : new List<Param>();
         TypeRef? returnType = ctx.typeRef() is { } tr ? BuildTypeRef(tr) : null;
         return new UseCaseDecl(ctx.Identifier().GetText(), parameters, returnType)
@@ -347,7 +347,7 @@ public sealed class KoineModelBuilderVisitor : KoineParserBaseVisitor<object?>
     private QueryDecl BuildQuery(KoineParser.QueryDeclContext ctx)
     {
         List<Param> criteria = ctx.paramList() is { } pl
-            ? pl.param().Select(BuildParam).ToList()
+            ? Map(pl.param(), BuildParam)
             : new List<Param>();
         return new QueryDecl(ctx.Identifier().GetText(), criteria, BuildTypeRef(ctx.typeRef()))
         {
@@ -362,7 +362,7 @@ public sealed class KoineModelBuilderVisitor : KoineParserBaseVisitor<object?>
     private OperationDecl BuildOperation(KoineParser.OperationDeclContext ctx)
     {
         List<Param> parameters = ctx.paramList() is { } pl
-            ? pl.param().Select(BuildParam).ToList()
+            ? Map(pl.param(), BuildParam)
             : new List<Param>();
         Expr? body = ctx.expression() is { } e ? BuildExpression(e) : null;
         return new OperationDecl(ctx.Identifier().GetText(), parameters, BuildTypeRef(ctx.typeRef()), body)
@@ -437,10 +437,26 @@ public sealed class KoineModelBuilderVisitor : KoineParserBaseVisitor<object?>
         throw new InvalidOperationException("Unknown type declaration.");
     }
 
+    /// <summary>
+    /// Projects an ANTLR rule-context list into a pre-sized <see cref="List{T}"/>. The generated
+    /// accessors return arrays with a known length, but <c>.Select(build).ToList()</c> erases that
+    /// length — so the list regrows geometrically — and allocates a Select iterator. This avoids both.
+    /// </summary>
+    private static List<TDst> Map<TSrc, TDst>(IReadOnlyList<TSrc> src, Func<TSrc, TDst> build)
+    {
+        var list = new List<TDst>(src.Count);
+        for (var i = 0; i < src.Count; i++)
+        {
+            list.Add(build(src[i]));
+        }
+
+        return list;
+    }
+
     private ValueObjectDecl BuildValue(KoineParser.ValueDeclContext ctx)
     {
-        var members = ctx.member().Select(BuildMember).ToList();
-        var invariants = ctx.invariant().Select(BuildInvariant).ToList();
+        var members = Map(ctx.member(), BuildMember);
+        var invariants = Map(ctx.invariant(), BuildInvariant);
         var (since, deprecated) = ReadAnnotations(ctx.annotation());
 
         return new ValueObjectDecl(ctx.Identifier().GetText(), members, invariants)
@@ -457,8 +473,8 @@ public sealed class KoineModelBuilderVisitor : KoineParserBaseVisitor<object?>
 
     private ValueObjectDecl BuildQuantity(KoineParser.QuantityDeclContext ctx)
     {
-        var members = ctx.member().Select(BuildMember).ToList();
-        var invariants = ctx.invariant().Select(BuildInvariant).ToList();
+        var members = Map(ctx.member(), BuildMember);
+        var invariants = Map(ctx.invariant(), BuildInvariant);
         var (since, deprecated) = ReadAnnotations(ctx.annotation());
 
         return new ValueObjectDecl(ctx.Identifier().GetText(), members, invariants, IsQuantity: true)
@@ -475,11 +491,11 @@ public sealed class KoineModelBuilderVisitor : KoineParserBaseVisitor<object?>
 
     private EntityDecl BuildEntity(KoineParser.EntityDeclContext ctx)
     {
-        var members = ctx.member().Select(BuildMember).ToList();
-        var invariants = ctx.invariant().Select(BuildInvariant).ToList();
-        var states = ctx.statesDecl().Select(BuildStates).ToList();
-        var commands = ctx.commandDecl().Select(BuildCommand).ToList();
-        var factories = ctx.factoryDecl().Select(BuildFactory).ToList();
+        var members = Map(ctx.member(), BuildMember);
+        var invariants = Map(ctx.invariant(), BuildInvariant);
+        var states = Map(ctx.statesDecl(), BuildStates);
+        var commands = Map(ctx.commandDecl(), BuildCommand);
+        var factories = Map(ctx.factoryDecl(), BuildFactory);
 
         var name = ctx.Identifier(0).GetText();
         var identityName = ctx.Identifier(1).GetText();
@@ -518,7 +534,7 @@ public sealed class KoineModelBuilderVisitor : KoineParserBaseVisitor<object?>
 
     private StatesDecl BuildStates(KoineParser.StatesDeclContext ctx)
     {
-        var rules = ctx.stateRule().Select(BuildStateRule).ToList();
+        var rules = Map(ctx.stateRule(), BuildStateRule);
         return new StatesDecl(ctx.softName().GetText(), rules) { Span = SpanOf(ctx), NameSpan = SpanOf(ctx.softName()) };
     }
 
@@ -534,9 +550,9 @@ public sealed class KoineModelBuilderVisitor : KoineParserBaseVisitor<object?>
     private CommandDecl BuildCommand(KoineParser.CommandDeclContext ctx)
     {
         List<Param> parameters = ctx.paramList() is { } pl
-            ? pl.param().Select(BuildParam).ToList()
+            ? Map(pl.param(), BuildParam)
             : new List<Param>();
-        var body = ctx.commandStmt().Select(BuildCommandStmt).ToList();
+        var body = Map(ctx.commandStmt(), BuildCommandStmt);
         TypeRef? returnType = ctx.typeRef() is { } tr ? BuildTypeRef(tr) : null;
 
         return new CommandDecl(ctx.Identifier().GetText(), parameters, body, returnType)
@@ -555,9 +571,9 @@ public sealed class KoineModelBuilderVisitor : KoineParserBaseVisitor<object?>
     private FactoryDecl BuildFactory(KoineParser.FactoryDeclContext ctx)
     {
         List<Param> parameters = ctx.paramList() is { } pl
-            ? pl.param().Select(BuildParam).ToList()
+            ? Map(pl.param(), BuildParam)
             : new List<Param>();
-        var body = ctx.factoryStmt().Select(BuildFactoryStmt).ToList();
+        var body = Map(ctx.factoryStmt(), BuildFactoryStmt);
 
         return new FactoryDecl(ctx.Identifier().GetText(), parameters, body)
         {
@@ -669,14 +685,14 @@ public sealed class KoineModelBuilderVisitor : KoineParserBaseVisitor<object?>
         List<string>? operations = ctx.operationsClause() is { } ops
             ? ops.Identifier().Select(i => i.GetText()).ToList()
             : null;
-        var finders = ctx.finderDecl().Select(BuildFinder).ToList();
+        var finders = Map(ctx.finderDecl(), BuildFinder);
         return new RepositoryDecl(operations, finders) { Span = SpanOf(ctx) };
     }
 
     private FinderDecl BuildFinder(KoineParser.FinderDeclContext ctx)
     {
         List<Param> parameters = ctx.paramList() is { } pl
-            ? pl.param().Select(BuildParam).ToList()
+            ? Map(pl.param(), BuildParam)
             : new List<Param>();
         return new FinderDecl(ctx.Identifier().GetText(), parameters, BuildTypeRef(ctx.typeRef()))
         {
@@ -688,7 +704,7 @@ public sealed class KoineModelBuilderVisitor : KoineParserBaseVisitor<object?>
     private EnumDecl BuildEnum(KoineParser.EnumDeclContext ctx)
     {
         List<Param> signature = ctx.paramList() is { } pl
-            ? pl.param().Select(BuildParam).ToList()
+            ? Map(pl.param(), BuildParam)
             : new List<Param>();
 
         var members = ctx.enumMember()
@@ -713,7 +729,7 @@ public sealed class KoineModelBuilderVisitor : KoineParserBaseVisitor<object?>
 
     private EventDecl BuildEvent(KoineParser.EventDeclContext ctx)
     {
-        var members = ctx.member().Select(BuildMember).ToList();
+        var members = Map(ctx.member(), BuildMember);
         var (since, deprecated) = ReadAnnotations(ctx.annotation());
         return new EventDecl(ctx.Identifier().GetText(), members)
         {
@@ -729,7 +745,7 @@ public sealed class KoineModelBuilderVisitor : KoineParserBaseVisitor<object?>
 
     private IntegrationEventDecl BuildIntegrationEvent(KoineParser.IntegrationEventDeclContext ctx)
     {
-        var members = ctx.member().Select(BuildMember).ToList();
+        var members = Map(ctx.member(), BuildMember);
         var (since, deprecated) = ReadAnnotations(ctx.annotation());
         return new IntegrationEventDecl(ctx.Identifier().GetText(), members)
         {
@@ -1169,7 +1185,7 @@ public sealed class KoineModelBuilderVisitor : KoineParserBaseVisitor<object?>
     }
 
     private IReadOnlyList<Expr> BuildArgList(KoineParser.ArgListContext ctx) =>
-        ctx.argument().Select(BuildArgument).ToList();
+        Map(ctx.argument(), BuildArgument);
 
     private Expr BuildArgument(KoineParser.ArgumentContext ctx) =>
         ctx.lambda() is { } lambda
