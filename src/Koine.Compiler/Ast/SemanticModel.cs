@@ -49,6 +49,9 @@ public sealed class SemanticModel
     /// <summary>The lowered invariants of a value object (the migrated slice's entry point, Commit 4).</summary>
     internal IReadOnlyList<BoundInvariant> BoundInvariantsFor(ValueObjectDecl vo) => _bound.Value.InvariantsFor(vo);
 
+    /// <summary>The lowered field projection + invariants of a value object (the widened slice, Commit 5).</summary>
+    internal BoundValueObject BoundValueObjectFor(ValueObjectDecl vo) => _bound.Value.BoundValueObjectFor(vo);
+
     /// <summary>
     /// The symbol a reference-bearing node resolves to (Roslyn <c>GetSymbolInfo</c>). Never <c>null</c>
     /// — an unresolved reference is <see cref="ErrorSymbol.Instance"/>, mirroring <see cref="ErrorType"/>.

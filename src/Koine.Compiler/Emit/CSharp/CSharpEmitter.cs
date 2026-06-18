@@ -1,5 +1,6 @@
 using System.Text;
 using Koine.Compiler.Ast;
+using Koine.Compiler.Ast.Bound;
 
 namespace Koine.Compiler.Emit.CSharp;
 
@@ -652,6 +653,46 @@ public sealed partial class CSharpEmitter : IEmitter
         sb.Append(Indent).Append("}\n");
     }
 
+    /// <summary>
+    /// The value-object constructor (Commit 5): driven entirely from the lowered
+    /// <see cref="BoundValueObject"/> projection. Parameter order comes from
+    /// <see cref="BoundValueObject.CtorParams"/> (defaulted/optional last, owned by the lowerer rather than
+    /// re-derived by <c>OrderCtorParams</c>); default dispositions from each <see cref="BoundField.DefaultKind"/>;
+    /// assignments and enum-default coalesce from the stored fields in declaration order; and the guards from
+    /// the folded <see cref="BoundValueObject.Invariants"/>. The emitted C# is byte-identical to the former
+    /// raw-syntax path — only the source of the classification moved.
+    /// </summary>
+    private void WriteValueObjectConstructor(
+        StringBuilder sb,
+        string typeName,
+        BoundValueObject bound,
+        CSharpExpressionTranslator translator,
+        CSharpTypeMapper typeMapper,
+        ModelIndex index)
+    {
+        var storedFields = bound.StoredFields.ToList();
+        IReadOnlyList<BoundInvariant> invariants = bound.Invariants;
+
+        sb.Append(Indent).Append("public ").Append(typeName).Append('(');
+        sb.Append(string.Join(", ", bound.CtorParams.Select(f => FormatParam(f, typeMapper, translator, index))));
+        sb.Append(")\n");
+        sb.Append(Indent).Append("{\n");
+
+        WriteEnumDefaultCoalesce(sb, storedFields, translator, index);
+        WriteInvariantGuards(sb, typeName, invariants, translator);
+        if (invariants.Count > 0 && storedFields.Count > 0)
+        {
+            sb.Append('\n');
+        }
+
+        foreach (BoundField f in storedFields)
+        {
+            WriteAssignment(sb, f, typeMapper);
+        }
+
+        sb.Append(Indent).Append("}\n");
+    }
+
     private void WriteEntityConstructor(
         StringBuilder sb,
         EntityDecl entity,
@@ -738,12 +779,54 @@ public sealed partial class CSharpEmitter : IEmitter
         return param;
     }
 
+    /// <summary>
+    /// The value-object <see cref="BoundField"/> overload (Commit 5): the parameter's default disposition
+    /// comes from the lowered <see cref="BoundField.DefaultKind"/> rather than re-classifying the member's
+    /// initializer/optionality here. Byte-identical to the <see cref="Member"/> overload.
+    /// </summary>
+    private string FormatParam(BoundField f, CSharpTypeMapper typeMapper, CSharpExpressionTranslator translator, ModelIndex index)
+    {
+        var m = (Member)f.Syntax;
+        var csType = typeMapper.Map(m.Type);
+        var paramName = CSharpNaming.ToCamelCase(f.Name);
+        var param = $"{csType} {paramName}";
+
+        switch (f.DefaultKind)
+        {
+            // A smart-enum value is NOT a compile-time constant, so an enum-typed default can't be a
+            // parameter default; the param becomes nullable and the body coalesces (WriteEnumDefaultCoalesce).
+            case DefaultKind.EnumDefault:
+                var nullableType = csType.EndsWith('?') ? csType : csType + "?";
+                return $"{nullableType} {paramName} = null";
+            case DefaultKind.ConstantDefault:
+                var def = translator.Translate(m.Initializer!, CSharpExpressionTranslator.NameMode.Property, EnumExpected(m, index));
+                return param + $" = {def}";
+            case DefaultKind.OptionalNull:
+                return param + " = null";
+            default:
+                return param;
+        }
+    }
+
     private void WriteAssignment(StringBuilder sb, Member m, CSharpTypeMapper typeMapper)
     {
         var prop = CSharpNaming.ToPascalCase(m.Name);
         var param = CSharpNaming.ToCamelCase(m.Name);
         sb.Append(Indent).Append(Indent).Append(prop).Append(" = ")
           .Append(CopyExpression(m.Type, param, typeMapper)).Append(";\n");
+    }
+
+    /// <summary>
+    /// The value-object <see cref="BoundField"/> overload (Commit 5): the defensive-copy decision is driven
+    /// by the field's lowered <see cref="BoundField.CollectionShape"/> rather than re-classifying the type.
+    /// Byte-identical to the <see cref="Member"/> overload.
+    /// </summary>
+    private void WriteAssignment(StringBuilder sb, BoundField f, CSharpTypeMapper typeMapper)
+    {
+        var prop = CSharpNaming.ToPascalCase(f.Name);
+        var param = CSharpNaming.ToCamelCase(f.Name);
+        sb.Append(Indent).Append(Indent).Append(prop).Append(" = ")
+          .Append(CopyExpression(f, param, typeMapper)).Append(";\n");
     }
 
     /// <summary>
@@ -764,6 +847,32 @@ public sealed partial class CSharpEmitter : IEmitter
 
             sb.Append(Indent).Append(Indent).Append(CSharpNaming.ToCamelCase(m.Name))
               .Append(" ??= ").Append(EnumDefaultValue(m, translator, index)).Append(";\n");
+            any = true;
+        }
+        if (any)
+        {
+            sb.Append('\n');
+        }
+    }
+
+    /// <summary>
+    /// The value-object <see cref="BoundField"/> overload (Commit 5): emits the nullable-param coalesce for
+    /// each enum-defaulted stored field, selected by <see cref="BoundField.DefaultKind"/> rather than
+    /// re-classifying the member type. Byte-identical to the <see cref="Member"/> overload.
+    /// </summary>
+    private void WriteEnumDefaultCoalesce(StringBuilder sb, IReadOnlyList<BoundField> storedFields,
+        CSharpExpressionTranslator translator, ModelIndex index)
+    {
+        var any = false;
+        foreach (BoundField f in storedFields)
+        {
+            if (f.DefaultKind != DefaultKind.EnumDefault)
+            {
+                continue;
+            }
+
+            sb.Append(Indent).Append(Indent).Append(CSharpNaming.ToCamelCase(f.Name))
+              .Append(" ??= ").Append(EnumDefaultValue((Member)f.Syntax, translator, index)).Append(";\n");
             any = true;
         }
         if (any)
@@ -808,6 +917,31 @@ public sealed partial class CSharpEmitter : IEmitter
             var v = typeMapper.Map(type.Value ?? ObjectType);
             copy = $"new ReadOnlyDictionary<{k}, {v}>(new Dictionary<{k}, {v}>({param}))";
         }
+
+        if (copy is null)
+        {
+            return param; // scalar: direct assignment
+        }
+
+        return type.IsOptional ? $"{param} is null ? null : {copy}" : copy;
+    }
+
+    /// <summary>
+    /// The value-object <see cref="BoundField"/> overload (Commit 5): the list/set/map decision comes from
+    /// the lowered <see cref="BoundField.CollectionShape"/> instead of re-classifying the type, while the
+    /// element/value C# types and the optional-null guard are still rendered off the syntactic member type.
+    /// Byte-identical to the <see cref="TypeRef"/> overload.
+    /// </summary>
+    private static string CopyExpression(BoundField f, string param, CSharpTypeMapper typeMapper)
+    {
+        var type = ((Member)f.Syntax).Type;
+        string? copy = f.CollectionShape switch
+        {
+            CollectionShape.List => $"new List<{typeMapper.Map(type.Element ?? ObjectType)}>({param}).AsReadOnly()",
+            CollectionShape.Set => $"new ReadOnlySet<{typeMapper.Map(type.Element ?? ObjectType)}>(new HashSet<{typeMapper.Map(type.Element ?? ObjectType)}>({param}))",
+            CollectionShape.Map => $"new ReadOnlyDictionary<{typeMapper.Map(type.Element ?? ObjectType)}, {typeMapper.Map(type.Value ?? ObjectType)}>(new Dictionary<{typeMapper.Map(type.Element ?? ObjectType)}, {typeMapper.Map(type.Value ?? ObjectType)}>({param}))",
+            _ => null
+        };
 
         if (copy is null)
         {
@@ -879,11 +1013,12 @@ public sealed partial class CSharpEmitter : IEmitter
     }
 
     /// <summary>
-    /// The value-object overload (Commit 4): renders a guard from a lowered
-    /// <see cref="Ast.Bound.BoundInvariant"/>. The condition is rendered from its <em>syntactic</em>
-    /// origin (so the translator path — and therefore the emitted C# — is unchanged) and the message is
-    /// taken verbatim off the bound node (the C# default already applied in the lowerer). ADDITIVE: the
-    /// raw-<see cref="Expr"/> overload below stays for entity/command callers.
+    /// The value-object overload (Commit 4–6): renders a guard from a lowered
+    /// <see cref="Ast.Bound.BoundInvariant"/>. The condition's resolved types are read from the lowered
+    /// bound tree (Commit 6) — the translator no longer re-infers them — while the rendering structure
+    /// walks the condition's syntactic origin (1:1 with the bound tree). The message is taken verbatim off
+    /// the bound node (the C# default already applied in the lowerer). ADDITIVE: the raw-<see cref="Expr"/>
+    /// overload below stays for entity/command callers.
     /// </summary>
     private void WriteGuard(
         StringBuilder sb,
@@ -892,9 +1027,17 @@ public sealed partial class CSharpEmitter : IEmitter
         CSharpExpressionTranslator translator,
         CSharpExpressionTranslator.NameMode mode)
     {
-        // The bound condition's syntactic origin drives the unchanged translator; the message is final.
-        var condition = (Expr)invariant.Condition.Syntax;
-        WriteGuard(sb, typeName, condition, invariant.Message, translator, mode);
+        // Activate bound-tree type lookup for the whole condition, then render via the syntactic origin so
+        // the existing guard/negation/match branches and translator are reused unchanged.
+        translator.EnterBoundScope(invariant.Condition);
+        try
+        {
+            WriteGuard(sb, typeName, (Expr)invariant.Condition.Syntax, invariant.Message, translator, mode);
+        }
+        finally
+        {
+            translator.ExitBoundScope();
+        }
     }
 
     /// <summary>

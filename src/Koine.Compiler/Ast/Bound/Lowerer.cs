@@ -37,6 +37,63 @@ internal sealed class Lowerer : KoineSyntaxVisitor<BoundNode>
     public BoundInvariant LowerInvariant(Invariant inv) =>
         new(LowerExpr(inv.Condition), inv.Message ?? SourceText(inv.Condition)) { Syntax = inv };
 
+    /// <summary>
+    /// Lowers a value object to its canonical field projection plus its lowered invariants (Commit 5):
+    /// classifies each member ONCE (ctor-param vs derived, default disposition, collection shape), resolves
+    /// its type, and lowers a derived member's initializer body. The constructor ordering policy lives on
+    /// the projection (<see cref="BoundValueObject.CtorParams"/>), so the emitter no longer re-derives any
+    /// of this. Scoped exactly as the invariant lowering — the resolved types match what the emitter saw.
+    /// </summary>
+    public BoundValueObject LowerValueObject(ValueObjectDecl vo)
+    {
+        var memberNames = new HashSet<string>(vo.Members.Select(m => m.Name), StringComparer.Ordinal);
+        var fields = vo.Members.Select(m => LowerField(m, memberNames)).ToList();
+        var invariants = vo.Invariants.Select(LowerInvariant).ToList();
+        return new BoundValueObject(fields, invariants) { Syntax = vo };
+    }
+
+    private BoundField LowerField(Member m, ISet<string> memberNames)
+    {
+        bool derived = MemberAnalysis.IsDerived(m, memberNames);
+        return new BoundField(
+            m.Name,
+            derived ? FieldKind.Derived : FieldKind.CtorParam,
+            derived ? DefaultKind.None : ClassifyDefault(m),
+            ClassifyShape(m.Type),
+            derived ? LowerExpr(m.Initializer!) : null)
+        {
+            Syntax = m,
+            Type = KoineType.From(m.Type, _model.Index)
+        };
+    }
+
+    /// <summary>
+    /// The default-value disposition of a constructor field, mirroring the C# emitter's former
+    /// <c>FormatParam</c>/<c>WriteEnumDefaultCoalesce</c> classification but named target-neutrally: an
+    /// enum-typed initializer is not a compile-time constant (<see cref="DefaultKind.EnumDefault"/>); any
+    /// other initializer is a constant default; an optional field with no initializer is omittable.
+    /// </summary>
+    private DefaultKind ClassifyDefault(Member m)
+    {
+        if (m.Initializer is null)
+        {
+            return m.Type.IsOptional ? DefaultKind.OptionalNull : DefaultKind.None;
+        }
+
+        return _model.Index.Classify(m.Type.Name) == TypeKind.Enum
+            ? DefaultKind.EnumDefault
+            : DefaultKind.ConstantDefault;
+    }
+
+    /// <summary>The collection shape of a member type, mirroring <c>ModelIndex</c>'s List/Set/Map names.</summary>
+    private static CollectionShape ClassifyShape(TypeRef type) => type.Name switch
+    {
+        ModelIndex.ListTypeName => CollectionShape.List,
+        ModelIndex.SetTypeName => CollectionShape.Set,
+        ModelIndex.MapTypeName => CollectionShape.Map,
+        _ => CollectionShape.None
+    };
+
     private KoineType TypeOf(Expr e) => _model.GetTypeInfo(e, _scope, _context);
 
     public override BoundNode VisitBinaryExpr(BinaryExpr n) =>
