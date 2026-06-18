@@ -102,8 +102,8 @@ internal sealed class BuildCommand : Command<BuildSettings>
         var compiler = new KoineCompiler();
         var result = compiler.Compile(sources, emitter);
 
-        // Diagnostics print as plain `file:line:col: severity CODE: message` (MSBuild/Roslyn-parseable).
-        if (DiagnosticPrinter.Print(result.Diagnostics, r.File))
+        // Diagnostics print plain (MSBuild/Roslyn-parseable) when redirected, pretty in a terminal.
+        if (DiagnosticPrinter.Print(result.Diagnostics, sources, r.File))
         {
             return 1;
         }

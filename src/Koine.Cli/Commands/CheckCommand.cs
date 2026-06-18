@@ -107,7 +107,7 @@ internal sealed class CheckCommand : Command<CheckSettings>
         var (parsed, diagnostics) = compiler.Parse(sources);
         if (parsed is null)
         {
-            DiagnosticPrinter.Print(diagnostics, path);
+            DiagnosticPrinter.Print(diagnostics, sources, path);
             Console.Error.WriteLine($"error: {label} model failed to parse");
             return false;
         }

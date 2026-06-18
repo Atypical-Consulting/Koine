@@ -41,7 +41,7 @@ internal sealed class FmtCommand : Command<FmtSettings>
             if (model is null)
             {
                 unparseable++;
-                DiagnosticPrinter.PrintErrors(diagnostics, source.Path);
+                DiagnosticPrinter.PrintErrors(diagnostics, new[] { source }, source.Path);
                 Console.Error.WriteLine($"{source.Path}: cannot format (does not parse) — fix the syntax, then re-run");
                 continue;
             }
