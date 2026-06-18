@@ -1,0 +1,49 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>Koine.Mcp</RootNamespace>
+  </PropertyGroup>
+
+  <!-- Pack as an installable dotnet global tool: `dotnet tool install -g Koine.Mcp`
+       then register `koine-mcp` as an MCP server. Metadata comes from Directory.Build.props. -->
+  <PropertyGroup>
+    <PackAsTool>true</PackAsTool>
+    <ToolCommandName>koine-mcp</ToolCommandName>
+    <PackageId>Koine.Mcp</PackageId>
+    <Description>Koine MCP server — exposes the Koine DSL-for-DDD compiler (validate, compile, format) and the language reference to AI agents over the Model Context Protocol (stdio), so an agent can author a complete domain in .koi.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="ModelContextProtocol" Version="1.4.0" />
+    <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.9" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Koine.Compiler\Koine.Compiler.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Koine.Mcp.Tests" />
+  </ItemGroup>
+
+  <!-- Knowledge surfaced to agents. The reference cheatsheet lives in-project; the example
+       models are linked from the repo's real examples/demo so they never drift. All are embedded
+       (read via the assembly manifest in KnowledgeStore) so the packaged tool is self-contained.
+       Explicit LogicalName keeps resource names stable regardless of on-disk location. -->
+  <ItemGroup>
+    <EmbeddedResource Include="Knowledge\reference.md" LogicalName="koine.reference.md" />
+    <EmbeddedResource Include="..\..\examples\billing.koi" LogicalName="koine.examples.billing.koi" />
+    <EmbeddedResource Include="..\..\demo\Shop.Domain\Models\catalog.koi" LogicalName="koine.examples.shop-catalog.koi" />
+    <EmbeddedResource Include="..\..\demo\Shop.Domain\Models\customers.koi" LogicalName="koine.examples.shop-customers.koi" />
+    <EmbeddedResource Include="..\..\demo\Shop.Domain\Models\ordering.koi" LogicalName="koine.examples.shop-ordering.koi" />
+    <EmbeddedResource Include="..\..\demo\Shop.Domain\Models\payments.koi" LogicalName="koine.examples.shop-payments.koi" />
+    <EmbeddedResource Include="..\..\demo\Shop.Domain\Models\shipping.koi" LogicalName="koine.examples.shop-shipping.koi" />
+    <EmbeddedResource Include="..\..\demo\Shop.Domain\Models\context-map.koi" LogicalName="koine.examples.shop-context-map.koi" />
+    <EmbeddedResource Include="..\..\demo\Shop.Domain\Models\legacy.koi" LogicalName="koine.examples.shop-legacy.koi" />
+  </ItemGroup>
+
+</Project>

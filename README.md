@@ -287,6 +287,22 @@ It reuses the compiler's parser + validator, so editor diagnostics match `koine 
 Hover and go-to-definition resolve **across all `.koi` files in the workspace** — e.g. an
 `OrderId`/`ProductId` reference jumps to the `entity … identified by …` that owns it, even in another file.
 
+## AI agents (MCP server)
+
+[`src/Koine.Mcp`](src/Koine.Mcp) is an **MCP server** (`koine-mcp`) that lets an AI agent author a
+complete domain in `.koi` over the [Model Context Protocol](https://modelcontextprotocol.io): tools
+to `koine_validate`, `koine_compile` (csharp/typescript/glossary/docs), and `koine_format`, plus
+`koine_reference` and `koine_examples` so the agent learns the language. It reuses the same parser,
+validator, and emitters as `koine build`. Install with `dotnet tool install -g Koine.Mcp`, then add it
+to your MCP client:
+
+```json
+{ "mcpServers": { "koine": { "command": "koine-mcp" } } }
+```
+
+See [`website` → Guides → MCP server](website/src/content/docs/guides/mcp-server.md) for the full
+tool list and the typical author → validate → compile loop.
+
 ## Roadmap
 
 The full roadmap — every release R1–R17 and what remains — is captured as actionable user stories in
