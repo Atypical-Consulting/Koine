@@ -849,6 +849,21 @@ public class LspServerTests
     }
 
     [Fact]
+    public void EmitPreview_python_target_emits_py_files()
+    {
+        var doc = "context C {\n  value Money { amount: Decimal }\n}\n";
+        var output = RunSession(
+            Initialize(),
+            DidOpen("file:///t.koi", doc),
+            EmitPreview("file:///t.koi", "python"));
+
+        Assert.Contains("\"target\":\"python\"", output);
+        Assert.Contains(".py", output);
+        Assert.DoesNotContain("\"files\":[]", output);
+        Assert.Contains("\"error\":null", output);
+    }
+
+    [Fact]
     public void EmitPreview_unknown_target_returns_error_result_not_throw()
     {
         var doc = "context C {\n  value Money { amount: Decimal }\n}\n";
