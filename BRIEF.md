@@ -20,7 +20,7 @@
   - `Grammar/*.g4` — the ANTLR grammar.
   - A visitor class that walks the parse tree and builds a model (the template's `CSVVisitor` is the pattern to follow).
   - `Models/` for the produced model types, `Services/` for the orchestration entry points.
-  - **NUKE** build (`build.sh` / `build.ps1` / `build.cmd`).
+  - **NUKE** build (`scripts/build/build.sh` / `build.ps1` / `build.cmd`).
 - Configure the ANTLR build to emit a visitor: in the project file set the `Antlr4` item with `Visitor="true" Listener="false"`.
 
 If `dotnet new antlr4` is available in the environment, scaffold from it and strip the CSV sample. If not, reproduce the equivalent layout by hand.
