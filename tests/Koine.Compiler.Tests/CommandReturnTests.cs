@@ -52,6 +52,27 @@ public class CommandReturnTests
         }
         """;
 
+    // A result (`tax`) whose rendered form is a PREFIX of a sibling emit argument (`taxRate`), and
+    // also appears as a sub-expression of a compound argument (`taxRate + tax`) and as a SECOND
+    // whole argument (`doubled`): hoisting must substitute `__result` for EVERY whole-argument match
+    // and leave the prefix sibling and the compound's inner `tax` untouched — never splice the
+    // substring out (a substring-replace bug found reviewing #60).
+    private const string PrefixCollisionFixture = """
+        context Sales {
+          event Quoted { amount: Int  rate: Int  doubled: Int }
+          aggregate Order root Order {
+            entity Order identified by OrderId {
+              tax:     Int = 0
+              taxRate: Int = 0
+              command quote(): Int {
+                emit Quoted(amount: tax, rate: taxRate + tax, doubled: tax)
+                result tax
+              }
+            }
+          }
+        }
+        """;
+
     private static IReadOnlyList<Diagnostic> Diagnose(string source) => new KoineCompiler().Diagnose(source);
 
     private static (Assembly Asm, string OrderCs) CompileFixture(string fixture)
@@ -126,6 +147,19 @@ public class CommandReturnTests
         Assert.Contains("public int Bump(int by)", orderCs);
         Assert.Contains("return Total;", orderCs); // post-mutation state, no hoist
         Assert.DoesNotContain("__result", orderCs);
+    }
+
+    [Fact]
+    public void Result_that_is_a_prefix_of_a_sibling_emit_arg_does_not_splice_the_sibling()
+    {
+        var (_, orderCs) = CompileFixture(PrefixCollisionFixture);
+        // Every WHOLE-argument reuse of the result (`amount`, `doubled`) becomes `__result`; the
+        // sibling `rate: taxRate + tax` is left intact — neither mangled into `__resultRate` by a
+        // substring replace, nor its inner `tax` spliced (only whole arguments are substituted).
+        Assert.Contains("var __result = Tax;", orderCs);
+        Assert.Contains("_domainEvents.Add(new Quoted(__result, TaxRate + Tax, __result));", orderCs);
+        Assert.DoesNotContain("__resultRate", orderCs);
+        Assert.Contains("return __result;", orderCs);
     }
 
     // ---- emit (Roslyn behaviour) -------------------------------------------
