@@ -11,7 +11,7 @@ import {
   isValidProjectName,
 } from './generateProject';
 
-type Target = 'csharp' | 'typescript';
+type Target = 'csharp' | 'typescript' | 'python';
 type StatusKind = 'info' | 'error' | 'success';
 
 /** Everything the wizard needs from the rest of the app, injected so it can be wired to any host. */
@@ -42,6 +42,7 @@ const NAME_ERR_ID = 'koi-gen-name-err';
 const TARGETS: { value: Target; title: string; blurb: string }[] = [
   { value: 'csharp', title: 'C#', blurb: 'Idiomatic, self-contained .NET source (value objects, aggregates, CQRS, …).' },
   { value: 'typescript', title: 'TypeScript', blurb: 'The TypeScript emitter output for the same model.' },
+  { value: 'python', title: 'Python', blurb: 'Python dataclasses and protocols for the same model.' },
 ];
 
 interface WizardState {

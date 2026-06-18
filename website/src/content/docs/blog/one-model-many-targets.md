@@ -149,9 +149,12 @@ language?"
 
 That discipline is also why the [Playground](/Koine/playground/) can show C#, TypeScript, and a
 glossary side by side from one model: it's the same compile, three emitters. C# is the most complete
-target today and TypeScript is emitting now; a Rust target is on the
-[roadmap](/Koine/guides/roadmap/). When it arrives, your existing `.koi` models compile to it without
-a single edit — because they never described C# in the first place.
+target today; TypeScript is emitting now, and **Python** (Phase 1: tactical core — value objects,
+smart enums, identity entities, events, and repository protocols, all dependency-free and
+`mypy --strict`-clean) is available today via the CLI and MCP server (wiring it into the in-browser
+Playground is a follow-up). A Rust target is on the [roadmap](/Koine/guides/roadmap/). When it
+arrives, your existing `.koi` models compile to it without a single edit — because they never
+described C# in the first place.
 
 Want to see it live? Open the [Ordering example](/Koine/playground/?example=ordering) and flip the
 target dropdown between C# and TypeScript — same model, recompiled on the spot.

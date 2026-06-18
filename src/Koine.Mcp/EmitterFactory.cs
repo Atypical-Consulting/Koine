@@ -2,6 +2,7 @@ using Koine.Compiler.Emit;
 using Koine.Compiler.Emit.CSharp;
 using Koine.Compiler.Emit.Docs;
 using Koine.Compiler.Emit.Glossary;
+using Koine.Compiler.Emit.Python;
 using Koine.Compiler.Emit.TypeScript;
 
 namespace Koine.Mcp;
@@ -14,7 +15,7 @@ namespace Koine.Mcp;
 internal static class EmitterFactory
 {
     /// <summary>The output targets the server understands, in display order.</summary>
-    public static readonly IReadOnlyList<string> Targets = new[] { "csharp", "typescript", "glossary", "docs" };
+    public static readonly IReadOnlyList<string> Targets = new[] { "csharp", "typescript", "python", "glossary", "docs" };
 
     /// <summary>
     /// Resolves an emitter for <paramref name="target"/> (case-insensitive; null/blank means
@@ -28,6 +29,7 @@ internal static class EmitterFactory
         {
             "csharp" => new CSharpEmitter(),
             "typescript" => new TypeScriptEmitter(),
+            "python" => new PythonEmitter(),
             "glossary" => new GlossaryEmitter(),
             "docs" => new DocsEmitter(),
             _ => null!,

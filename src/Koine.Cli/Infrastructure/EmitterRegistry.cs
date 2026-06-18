@@ -2,6 +2,7 @@ using Koine.Compiler.Emit;
 using Koine.Compiler.Emit.CSharp;
 using Koine.Compiler.Emit.Docs;
 using Koine.Compiler.Emit.Glossary;
+using Koine.Compiler.Emit.Python;
 using Koine.Compiler.Emit.TypeScript;
 
 namespace Koine.Cli.Infrastructure;
@@ -18,13 +19,14 @@ internal static class EmitterRegistry
         {
             ["csharp"] = opts => new CSharpEmitter(ToCSharpOptions(opts)),
             ["typescript"] = _ => new TypeScriptEmitter(),
+            ["python"] = opts => new PythonEmitter(ToPythonOptions(opts)),
             ["glossary"] = _ => new GlossaryEmitter(),
             ["docs"] = _ => new DocsEmitter(),
         };
 
     /// <summary>The supported target names, in display order for help and error messages.</summary>
     public static IReadOnlyList<string> SupportedTargets { get; } =
-        new[] { "csharp", "typescript", "glossary", "docs" };
+        new[] { "csharp", "typescript", "python", "glossary", "docs" };
 
     /// <summary>A comma-separated list of <see cref="SupportedTargets"/>, for messages.</summary>
     public static string SupportedList => string.Join(", ", SupportedTargets);
@@ -63,5 +65,22 @@ internal static class EmitterRegistry
             ? CSharpInstantMode.NodaTime
             : CSharpInstantMode.DateTimeOffset;
         return new CSharpEmitterOptions(options.NamespaceMap, instant);
+    }
+
+    /// <summary>
+    /// Maps the CLI's parsed per-target <see cref="TargetOptions"/> to the Python emitter's
+    /// <see cref="PythonEmitterOptions"/>. The <c>namespace_map</c> (shared config key) is
+    /// reused as the Python package remap; there is no config key for <c>EmitDictHelpers</c>,
+    /// so it stays at the default <c>false</c>. An empty options bag maps to
+    /// <see cref="PythonEmitterOptions.Empty"/>, so unconfigured targets emit byte-identical output.
+    /// </summary>
+    private static PythonEmitterOptions ToPythonOptions(TargetOptions options)
+    {
+        if (options.NamespaceMap.Count == 0)
+        {
+            return PythonEmitterOptions.Empty;
+        }
+
+        return new PythonEmitterOptions(options.NamespaceMap);
     }
 }

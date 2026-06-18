@@ -3,7 +3,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
 // The Koine MCP server. It speaks the Model Context Protocol over stdio so an AI agent
-// can author a complete domain in .koi: validate it, compile it to C#/TypeScript/glossary/docs,
+// can author a complete domain in .koi: validate it, compile it to C#/TypeScript/Python/glossary/docs,
 // format it, and read the language reference + real examples. Every tool is a thin wrapper over
 // the existing Koine.Compiler service API — no compiler changes.
 //

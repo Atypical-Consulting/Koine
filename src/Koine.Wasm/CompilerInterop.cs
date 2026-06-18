@@ -5,6 +5,7 @@ using Koine.Compiler.Diagnostics;
 using Koine.Compiler.Emit;
 using Koine.Compiler.Emit.CSharp;
 using Koine.Compiler.Emit.Glossary;
+using Koine.Compiler.Emit.Python;
 using Koine.Compiler.Emit.TypeScript;
 using Koine.Compiler.Services;
 
@@ -39,7 +40,7 @@ public static partial class CompilerInterop
 
     /// <summary>
     /// Compiles <paramref name="source"/> with the emitter named by <paramref name="target"/>
-    /// (<c>csharp</c> | <c>typescript</c> | <c>glossary</c>) and returns
+    /// (<c>csharp</c> | <c>typescript</c> | <c>python</c> | <c>glossary</c>) and returns
     /// <c>{ ok, target, diagnostics, files:[{path, contents}] }</c> as JSON.
     /// </summary>
     [JSExport]
@@ -50,6 +51,7 @@ public static partial class CompilerInterop
             IEmitter emitter = (target ?? "csharp").ToLowerInvariant() switch
             {
                 "typescript" or "ts" => new TypeScriptEmitter(),
+                "python" or "py" => new PythonEmitter(),
                 "glossary" or "md" => new GlossaryEmitter(),
                 _ => new CSharpEmitter(),
             };
