@@ -69,10 +69,17 @@ internal static class EmitterRegistry
 
     /// <summary>
     /// Maps the CLI's parsed per-target <see cref="TargetOptions"/> to the Python emitter's
-    /// <see cref="PythonEmitterOptions"/>. The <c>namespace_map</c> (shared config key) is
-    /// reused as the Python package remap; there is no config key for <c>EmitDictHelpers</c>,
-    /// so it stays at the default <c>false</c>. An empty options bag maps to
+    /// <see cref="PythonEmitterOptions"/>. The shared <c>targets.&lt;name&gt;.namespaces.&lt;Context&gt;</c>
+    /// config block is reused as the Python package remap; there is no config key for
+    /// <c>EmitDictHelpers</c>, so it stays at the default <c>false</c>. An empty options bag maps to
     /// <see cref="PythonEmitterOptions.Empty"/>, so unconfigured targets emit byte-identical output.
+    /// <para>
+    /// The context keys are <c>snake_case</c>d here so they match the heads the emitter computes:
+    /// <see cref="PythonEmitterOptions.RemapPackage"/> looks up an already-lowered package head
+    /// (<c>Catalog → catalog</c>), so a config key written as the user names the context
+    /// (<c>Catalog</c>) would otherwise never match. (<see cref="ToCSharpOptions"/> needs no such
+    /// step: C# namespace heads stay PascalCase, matching the config key as written.)
+    /// </para>
     /// </summary>
     private static PythonEmitterOptions ToPythonOptions(TargetOptions options)
     {
@@ -81,6 +88,12 @@ internal static class EmitterRegistry
             return PythonEmitterOptions.Empty;
         }
 
-        return new PythonEmitterOptions(options.NamespaceMap);
+        var packageMap = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var (context, package) in options.NamespaceMap)
+        {
+            packageMap[PythonNaming.ToSnakeCase(context)] = package;
+        }
+
+        return new PythonEmitterOptions(packageMap);
     }
 }

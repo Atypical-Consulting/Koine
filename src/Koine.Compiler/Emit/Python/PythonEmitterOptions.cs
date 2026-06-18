@@ -3,9 +3,11 @@ namespace Koine.Compiler.Emit.Python;
 /// <summary>
 /// Per-emit configuration for the Python backend, mapped from the CLI's
 /// <c>targets.python.*</c> block. <see cref="PackageMap"/> remaps a bounded context's emitted
-/// Python package name (e.g. <c>Catalog → acme.catalog</c>): the mapped value replaces the
+/// Python package name (e.g. <c>catalog → acme.catalog</c>): the mapped value replaces the
 /// context-name prefix of every logical package path the emitter computes, keeping module
-/// declarations, folder layout, and cross-context imports all consistent.
+/// declarations, folder layout, and cross-context imports all consistent. Keys are the
+/// <c>snake_case</c> package head the emitter computes (the CLI lowers the config's context names
+/// when building this map), so <see cref="RemapPackage"/> can match with a plain ordinal lookup.
 /// <see cref="Empty"/> applies no remapping, so emitted output is byte-identical to the
 /// unconfigured emitter.
 /// <para>
