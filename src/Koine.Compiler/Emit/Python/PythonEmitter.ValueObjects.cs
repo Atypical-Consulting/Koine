@@ -50,7 +50,7 @@ public sealed partial class PythonEmitter
             WriteDoc(sb, m.Doc, Indent);
             var field = PythonNaming.EscapeIdentifier(PythonNaming.ToSnakeCase(m.Name));
             sb.Append(Indent).Append(field).Append(": ").Append(typeMapper.Map(m.Type));
-            if (DefaultExpr(m, translator) is { } def)
+            if (DefaultExpr(m, translator, emit.Index) is { } def)
             {
                 sb.Append(" = ").Append(def);
             }
@@ -285,12 +285,20 @@ public sealed partial class PythonEmitter
     /// collection types already map to immutable <c>tuple</c>/<c>frozenset</c> values, and a constant
     /// initializer for one would be an immutable literal.
     /// </summary>
-    private static string? DefaultExpr(Member m, PythonExpressionTranslator translator)
+    /// <param name="index">
+    /// The model index used to resolve the field's declared type so that an enum-member default is
+    /// always qualified with the <em>correct</em> enum class — not the first owner found in a global
+    /// scan (which is ambiguous when two contexts both declare a member with the same name).
+    /// </param>
+    private static string? DefaultExpr(Member m, PythonExpressionTranslator translator, ModelIndex index)
     {
         if (m.Initializer is not null)
         {
             // A constant default (not derived) — render the literal/enum-member expression directly.
-            return translator.Translate(m.Initializer, NameModeForDefault(m), null);
+            // Pass the field's own declared enum type as the hint so an ambiguous member name (one
+            // that exists in multiple enums) resolves to the correct owner rather than the first
+            // match the translator finds in the global enum-member → type map.
+            return translator.Translate(m.Initializer, NameModeForDefault(m), EnumExpected(m, index));
         }
         if (m.Type.IsOptional)
         {

@@ -272,6 +272,70 @@ public class PythonConformanceTests
         AssertStrictlyTypeChecks(result.Files);
     }
 
+    /// <summary>
+    /// Regression test for the ambiguous-enum-member-default bug: when two contexts both declare an
+    /// enum with a shared member name (here <c>Pending</c>), a stored entity field whose declared type
+    /// is the <em>second</em> enum (<c>ShipmentStatus</c>) and whose default value is that shared member
+    /// must resolve to the <em>correct</em> enum class — <c>ShipmentStatus.PENDING</c> — not the first
+    /// owner the translator finds in the global enum-member map (<c>RefundStatus.PENDING</c>).
+    ///
+    /// Before the fix <c>DefaultExpr</c> passed <c>null</c> as the enum hint, so the translator fell
+    /// back to the first registered owner and emitted the wrong qualified name; mypy --strict then
+    /// reported an "Incompatible types in assignment" error. The fix threads <c>EnumExpected(m, index)</c>
+    /// so the field's own declared type is always used as the resolution hint.
+    /// </summary>
+    [Fact]
+    public void Ambiguous_enum_member_default_resolves_to_correct_enum_class()
+    {
+        // Two contexts each declare an enum with a shared member name "Pending".
+        // Context B's entity uses ShipmentStatus as the field type, defaulting to Pending.
+        const string source = """
+            context Refunds {
+              enum RefundStatus { Pending Approved Rejected }
+            }
+
+            context Shipping {
+              enum ShipmentStatus { Pending InTransit Delivered }
+
+              aggregate Shipments root Shipment {
+                entity Shipment identified by ShipmentId {
+                  trackingCode: String
+                  status: ShipmentStatus = Pending
+                }
+              }
+            }
+            """;
+
+        var result = new KoineCompiler().Compile(source, new PythonEmitter());
+        Assert.True(result.Success, string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        // The emitted entity must contain the CORRECT qualified default: ShipmentStatus.PENDING,
+        // not RefundStatus.PENDING (which was the bug).
+        var shipment = FileText(result.Files, "shipping/shipment.py");
+        Assert.Contains("ShipmentStatus.PENDING", shipment);
+        Assert.DoesNotContain("RefundStatus.PENDING", shipment);
+
+        // Also gate with the toolchain: syntax + mypy --strict must pass.
+        TestSupport.PythonCheck syntax = TestSupport.SyntaxCheckPython(result.Files);
+        if (!syntax.ToolchainAvailable)
+        {
+            _output.WriteLine(NoInterpreterNotice);
+        }
+        else
+        {
+            Assert.True(syntax.Ok, "emitted Python should parse (ast.parse):\n" + string.Join("\n", syntax.Errors));
+        }
+
+        TestSupport.PythonCheck types = TestSupport.TypeCheckPython(result.Files);
+        if (!types.ToolchainAvailable)
+        {
+            _output.WriteLine(NoToolchainNotice);
+            return;
+        }
+
+        Assert.True(types.Ok, "emitted Python should type-check under mypy --strict:\n" + string.Join("\n", types.Errors));
+    }
+
     /// <summary>The full text of an emitted file, by relative path (fails the test if absent).</summary>
     private static string FileText(IReadOnlyList<EmittedFile> files, string relativePath)
     {

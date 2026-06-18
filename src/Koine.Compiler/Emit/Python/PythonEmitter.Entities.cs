@@ -69,7 +69,7 @@ public sealed partial class PythonEmitter
             WriteDoc(sb, m.Doc, Indent);
             var field = PythonNaming.EscapeIdentifier(PythonNaming.ToSnakeCase(m.Name));
             sb.Append(Indent).Append(field).Append(": ").Append(typeMapper.Map(m.Type));
-            if (DefaultExpr(m, translator) is { } def)
+            if (DefaultExpr(m, translator, emit.Index) is { } def)
             {
                 sb.Append(" = ").Append(def);
             }
