@@ -7,3 +7,4 @@ Generated/
 .idea/
 *.received.*
 .DS_Store
+BenchmarkDotNet.Artifacts/
