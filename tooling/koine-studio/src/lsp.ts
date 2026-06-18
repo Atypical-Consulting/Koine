@@ -1,8 +1,8 @@
-// A tiny LSP client over Tauri IPC. Brokers JSON-RPC to the `koine lsp` child process
-// via the Rust commands `lsp_start` / `lsp_send` and the events `lsp://message` /
-// `lsp://exit`. Hand-rolled JSON-RPC with an id->resolver map.
-import { invoke } from '@tauri-apps/api/core';
-import { listen, type UnlistenFn } from '@tauri-apps/api/event';
+// A tiny LSP client. Hand-rolled JSON-RPC with an id->resolver map, decoupled from how the bytes
+// move via an injected LspTransport: the desktop transport brokers the `koine lsp` child over
+// Tauri IPC, the browser transport drives an in-process WASM-backed server. This class is
+// transport-agnostic — it only frames messages and tracks pending requests + open documents.
+import type { LspTransport } from './host/types';
 
 // --- protocol types (mirror the server contract) ----------------------------
 
@@ -126,9 +126,6 @@ interface OpenDoc {
 export class KoineLsp {
   private nextId = 1;
   private pending = new Map<number, { resolve: (v: any) => void; reject: (e: any) => void; timer: ReturnType<typeof setTimeout> }>();
-  private unlistenMsg?: UnlistenFn;
-  private unlistenExit?: UnlistenFn;
-  private unlistenRestart?: UnlistenFn;
   // Per-uri open buffers (text + monotonic version). The active uri is the one all
   // request methods target; didChange is debounced per active uri.
   private docs = new Map<string, OpenDoc>();
@@ -137,6 +134,8 @@ export class KoineLsp {
   private onExit?: (code: number) => void;
   private onRestart?: () => void;
   private activeUri = SCRATCH_URI;
+
+  constructor(private readonly transport: LspTransport) {}
 
   /** The uri every request method currently targets. */
   get active(): string {
@@ -156,21 +155,21 @@ export class KoineLsp {
     this.onRestart = cb;
   }
 
-  /** Attach event listeners FIRST, then spawn the child, then initialize. */
+  /** Attach transport handlers FIRST, then bring the server up, then initialize. */
   async start(): Promise<void> {
-    this.unlistenMsg = await listen<string>('lsp://message', (e) => {
-      this.handle(JSON.parse(e.payload) as JsonRpcMessage);
+    this.transport.onMessage((json) => {
+      this.handle(JSON.parse(json) as JsonRpcMessage);
     });
-    this.unlistenExit = await listen<number>('lsp://exit', (e) => {
-      this.onExit?.(typeof e.payload === 'number' ? e.payload : -1);
+    this.transport.onExit((code) => {
+      this.onExit?.(code);
     });
-    // Stream B may respawn the sidecar and emit `lsp://restart`. When it does, the fresh
-    // child knows nothing about our document, so re-handshake and re-open from the latest text.
-    this.unlistenRestart = await listen('lsp://restart', () => {
+    // The transport may respawn the server (desktop sidecar) and signal a restart. When it does,
+    // the fresh server knows nothing about our documents, so re-handshake and re-open them.
+    this.transport.onRestart(() => {
       void this.reinitialize();
     });
 
-    await invoke('lsp_start');
+    await this.transport.start();
     await this.handshake();
   }
 
@@ -230,7 +229,7 @@ export class KoineLsp {
   }
 
   private send(obj: object): Promise<void> {
-    return invoke('lsp_send', { message: JSON.stringify(obj) });
+    return this.transport.send(JSON.stringify(obj));
   }
 
   private request<T>(method: string, params: unknown): Promise<T> {
@@ -367,19 +366,23 @@ export class KoineLsp {
     });
   }
 
-  /** Model-versioning compatibility of the active buffer against a baseline model folder. */
-  check(baseline: string): Promise<CheckResult> {
+  /**
+   * Model-versioning compatibility of the active buffer against a baseline model folder.
+   * `baseline` is a folder token the desktop server reads server-side; in the browser there is no
+   * filesystem, so the caller passes the baseline `{uri,text}` sources directly via
+   * `baselineSources` and the in-process server uses those instead of the token.
+   */
+  check(baseline: string, baselineSources?: { uri: string; text: string }[]): Promise<CheckResult> {
     return this.request<CheckResult>('koine/check', {
       textDocument: { uri: this.activeUri },
       baseline,
+      ...(baselineSources ? { baselineSources } : {}),
     });
   }
 
   dispose(): void {
     clearTimeout(this.changeTimer);
-    this.unlistenMsg?.();
-    this.unlistenExit?.();
-    this.unlistenRestart?.();
+    void this.transport.stop();
     for (const entry of this.pending.values()) {
       clearTimeout(entry.timer);
       entry.reject(new Error('LSP client disposed'));

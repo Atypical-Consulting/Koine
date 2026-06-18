@@ -25,6 +25,7 @@ export const DEFAULT_SETTINGS: Settings = {
 
 const SETTINGS_KEY = 'koine.studio.settings';
 const RECENT_KEY = 'koine.studio.recentFolders';
+const SCRATCH_KEY = 'koine.studio.scratch';
 const RECENT_CAP = 8;
 
 // Editor font-size bounds — must match the Preferences input range (prefs.ts) so a stored
@@ -134,4 +135,27 @@ export function pushRecentFolder(path: string): void {
 /** Forget all recent folders. */
 export function clearRecentFolders(): void {
   writeRaw(RECENT_KEY, JSON.stringify([]));
+}
+
+// --- scratch buffer (session restore) ----------------------------------------
+// The unsaved scratch model is persisted so a reload restores the user's work instead of resetting
+// to the seed. Only the single scratch buffer is kept here; folder-mode files live on disk.
+
+/** The persisted scratch-buffer text, or null when nothing has been saved. */
+export function loadScratch(): string | null {
+  return readRaw(SCRATCH_KEY);
+}
+
+/** Persist the scratch-buffer text (best-effort). */
+export function saveScratch(text: string): void {
+  writeRaw(SCRATCH_KEY, text);
+}
+
+/** Forget the persisted scratch buffer (e.g. on New, or once it is saved to a real file). */
+export function clearScratch(): void {
+  try {
+    localStorage.removeItem(SCRATCH_KEY);
+  } catch {
+    // storage unavailable — nothing to clear
+  }
 }

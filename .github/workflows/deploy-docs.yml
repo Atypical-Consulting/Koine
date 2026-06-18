@@ -11,6 +11,8 @@ on:
       - 'website/**'
       # The Playground bundles the compiler to wasm, so compiler changes must redeploy.
       - 'src/**'
+      # The browser edition of Koine Studio is built into the site at /Koine/studio/.
+      - 'tooling/koine-studio/**'
       - 'Directory.Build.props'
       - '.github/workflows/deploy-docs.yml'
   workflow_dispatch:

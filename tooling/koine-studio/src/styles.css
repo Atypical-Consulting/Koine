@@ -1,7 +1,14 @@
 :root {
-  /* fonts */
-  --koi-font-mono: ui-monospace, "SF Mono", "JetBrains Mono", "Fira Code", Menlo, Consolas, monospace;
-  --koi-font-body: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  /* fonts — the brand typefaces, shared with the docs site (self-hosted via @fontsource) */
+  --koi-font-mono: "JetBrains Mono Variable", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --koi-font-body: "Hanken Grotesk Variable", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --koi-font-display: "Archivo Variable", "Hanken Grotesk Variable", system-ui, sans-serif;
+
+  /* geometry + depth */
+  --koi-radius: 8px;
+  --koi-radius-sm: 6px;
+  --koi-shadow: 0 18px 50px rgba(3, 7, 14, 0.5);
+  --koi-accent-grad: linear-gradient(135deg, var(--koi-accent), var(--koi-cyan));
 
   /* surfaces (dark theme) */
   --koi-paper: #0e1117;
@@ -100,72 +107,167 @@ body {
 }
 
 /* --- toolbar --- */
+/* Three zones: brand (left) · model actions (center) · utilities + status (right). A hairline
+   accent gradient under the bar gives a thin signature edge without shouting. */
 #toolbar {
   display: flex;
   align-items: center;
-  gap: 16px;
-  padding: 10px 16px;
-  background: var(--koi-paper-2);
+  gap: 18px;
+  padding: 11px 16px;
+  background: linear-gradient(180deg, var(--koi-paper-2), color-mix(in srgb, var(--koi-paper-2) 80%, var(--koi-paper)));
   border-bottom: 1px solid var(--koi-line);
   flex: 0 0 auto;
+  position: relative;
+  z-index: 2;
 }
 
-#toolbar h1 {
-  margin: 0;
-  font-size: 1rem;
-  font-weight: 600;
-  letter-spacing: 0.2px;
-  color: var(--koi-fg);
+#toolbar::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1px;
+  height: 1px;
+  background: var(--koi-accent-grad);
+  opacity: 0.5;
 }
 
 .toolbar-actions {
   display: flex;
+  align-items: center;
   gap: 8px;
+  margin: 0 auto 0 4px;
 }
 
-.toolbar-actions button {
-  background: var(--koi-surface);
-  color: var(--koi-fg);
+/* A segmented cluster of related buttons. */
+.tb-group {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  background: color-mix(in srgb, var(--koi-paper) 55%, transparent);
   border: 1px solid var(--koi-line);
-  border-radius: 6px;
-  padding: 5px 12px;
-  font-family: var(--koi-font-body);
-  font-size: 0.8rem;
-  cursor: pointer;
+  border-radius: var(--koi-radius-sm);
 }
 
-.toolbar-actions button:hover:not(:disabled) {
-  border-color: var(--koi-accent);
+.tb-divider {
+  width: 1px;
+  height: 20px;
+  background: var(--koi-line);
+}
+
+.toolbar-actions button,
+#btn-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: transparent;
+  color: var(--koi-ink-soft);
+  border: 1px solid transparent;
+  border-radius: 5px;
+  padding: 5px 11px;
+  font-family: var(--koi-font-body);
+  font-size: 0.82rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+}
+
+#btn-check {
+  background: color-mix(in srgb, var(--koi-paper) 55%, transparent);
+  border-color: var(--koi-line);
+}
+
+.toolbar-actions button:hover:not(:disabled),
+#btn-check:hover:not(:disabled) {
+  background: var(--koi-surface);
   color: var(--koi-fg);
 }
 
 .toolbar-actions button:disabled {
-  opacity: 0.5;
+  opacity: 0.45;
   cursor: default;
 }
 
+/* The .tb-ico glyphs are drawn as 1px strokes that pick up the button's text color. */
+.tb-ico {
+  width: 15px;
+  height: 15px;
+  flex: 0 0 auto;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* Primary (emit) actions read as the headline verbs: accent text + ghost-accent surface. */
+.tb-primary {
+  color: var(--koi-accent) !important;
+}
+
+.tb-primary:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--koi-accent) 16%, transparent) !important;
+  color: var(--koi-accent) !important;
+}
+
+.toolbar-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 #status {
-  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
   font-family: var(--koi-font-mono);
-  font-size: 0.78rem;
-  padding: 3px 10px;
+  font-size: 0.74rem;
+  letter-spacing: 0.2px;
+  padding: 4px 11px 4px 9px;
   border-radius: 999px;
   border: 1px solid var(--koi-line);
+  background: color-mix(in srgb, var(--koi-paper) 50%, transparent);
   color: var(--koi-muted);
+}
+
+#status::before {
+  content: '';
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: currentColor;
+  box-shadow: 0 0 0 0 currentColor;
 }
 
 #status[data-kind="connecting"] {
   color: var(--koi-muted);
 }
 
+#status[data-kind="connecting"]::before {
+  animation: koi-pulse 1.3s ease-in-out infinite;
+}
+
 #status[data-kind="green"] {
   color: var(--koi-hl-string);
   border-color: color-mix(in srgb, var(--koi-hl-string) 40%, var(--koi-line));
+  background: color-mix(in srgb, var(--koi-hl-string) 9%, transparent);
 }
 
 #status[data-kind="error"] {
   color: var(--koi-error);
   border-color: color-mix(in srgb, var(--koi-error) 40%, var(--koi-line));
+  background: color-mix(in srgb, var(--koi-error) 9%, transparent);
+}
+
+@keyframes koi-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, currentColor 60%, transparent);
+  }
+  50% {
+    box-shadow: 0 0 0 4px transparent;
+  }
 }
 
 /* --- split body --- */
@@ -316,22 +418,38 @@ body {
 #tabs {
   flex: 0 0 auto;
   display: flex;
-  align-items: stretch;
+  align-items: center;
   gap: 2px;
-  padding: 6px 8px 0;
+  padding: 0 10px;
+  background: var(--koi-paper-2);
   border-bottom: 1px solid var(--koi-line);
 }
 
 #tabs .tab {
+  position: relative;
   background: transparent;
   color: var(--koi-muted);
-  border: 1px solid transparent;
-  border-bottom: none;
-  border-radius: 6px 6px 0 0;
-  padding: 6px 12px;
+  border: none;
+  padding: 11px 12px 12px;
   font-family: var(--koi-font-body);
-  font-size: 0.78rem;
+  font-size: 0.8rem;
+  font-weight: 500;
   cursor: pointer;
+  transition: color 0.14s ease;
+}
+
+/* The active tab is marked by a gradient underline that grows from the center. */
+#tabs .tab::after {
+  content: '';
+  position: absolute;
+  left: 10px;
+  right: 10px;
+  bottom: -1px;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--koi-accent-grad);
+  transform: scaleX(0);
+  transition: transform 0.18s ease;
 }
 
 #tabs .tab:hover {
@@ -340,28 +458,31 @@ body {
 
 #tabs .tab[aria-selected='true'] {
   color: var(--koi-fg);
-  background: var(--koi-paper);
-  border-color: var(--koi-line);
-  margin-bottom: -1px;
+}
+
+#tabs .tab[aria-selected='true']::after {
+  transform: scaleX(1);
 }
 
 .tab-refresh {
   margin-left: auto;
   align-self: center;
-  background: var(--koi-surface);
+  background: transparent;
   color: var(--koi-muted);
-  border: 1px solid var(--koi-line);
-  border-radius: 6px;
-  width: 26px;
-  height: 24px;
-  font-size: 0.85rem;
+  border: 1px solid transparent;
+  border-radius: var(--koi-radius-sm);
+  width: 28px;
+  height: 26px;
+  font-size: 0.9rem;
   line-height: 1;
   cursor: pointer;
+  transition: color 0.12s ease, transform 0.3s ease, background 0.12s ease;
 }
 
 .tab-refresh:hover {
   color: var(--koi-fg);
-  border-color: var(--koi-accent);
+  background: var(--koi-surface);
+  transform: rotate(90deg);
 }
 
 #views {
@@ -408,14 +529,16 @@ body {
 .koi-md h2,
 .koi-md h3,
 .koi-md h4 {
-  font-weight: 600;
-  line-height: 1.3;
-  margin: 1.2em 0 0.5em;
+  font-family: var(--koi-font-display);
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  line-height: 1.25;
+  margin: 1.3em 0 0.5em;
   color: var(--koi-fg);
 }
 
 .koi-md h1 {
-  font-size: 1.15rem;
+  font-size: 1.25rem;
 }
 .koi-md h2 {
   font-size: 1rem;
@@ -571,28 +694,41 @@ body {
   overflow-y: auto;
   background: var(--koi-paper-2);
   border-top: 1px solid var(--koi-line);
-  padding: 6px 10px;
+  padding: 7px 12px;
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 1px;
   font-family: var(--koi-font-mono);
-  font-size: 0.78rem;
+  font-size: 0.76rem;
 }
 
 .diag {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   text-align: left;
   background: transparent;
   border: none;
-  color: var(--koi-fg);
-  padding: 3px 6px;
-  border-radius: 4px;
+  color: var(--koi-ink-soft);
+  padding: 4px 7px;
+  border-radius: var(--koi-radius-sm);
   cursor: pointer;
   font-family: inherit;
   font-size: inherit;
 }
 
+.diag::before {
+  content: '';
+  flex: 0 0 auto;
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: currentColor;
+}
+
 .diag:hover {
   background: var(--koi-surface);
+  color: var(--koi-fg);
 }
 
 .diag-err {
@@ -604,8 +740,18 @@ body {
 }
 
 .diag-empty {
+  display: flex;
+  align-items: center;
+  gap: 7px;
   color: var(--koi-muted);
-  padding: 3px 6px;
+  padding: 4px 7px;
+  font-style: italic;
+}
+
+.diag-empty::before {
+  content: '✓';
+  font-style: normal;
+  color: var(--koi-hl-string);
 }
 
 /* ============================================================================
@@ -617,7 +763,7 @@ body {
 .brand {
   display: flex;
   align-items: center;
-  gap: 9px;
+  gap: 11px;
   color: var(--koi-fg);
   flex: 0 0 auto;
 }
@@ -628,16 +774,35 @@ body {
 }
 
 .brand-logo svg {
-  height: 28px;
-  width: auto;
+  height: 30px;
+  width: 30px;
   display: block;
+  border-radius: 9px;
+  box-shadow: 0 2px 10px color-mix(in srgb, var(--koi-accent) 30%, transparent);
+}
+
+.brand-text {
+  display: flex;
+  flex-direction: column;
+  line-height: 1;
+  gap: 2px;
 }
 
 .brand-name {
-  font-size: 1rem;
-  font-weight: 600;
-  letter-spacing: 0.2px;
+  font-family: var(--koi-font-display);
+  font-size: 1.12rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
   color: var(--koi-fg);
+}
+
+.brand-eyebrow {
+  font-family: var(--koi-font-mono);
+  font-size: 0.6rem;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.28em;
+  color: var(--koi-muted);
 }
 
 .palette-hint {
@@ -645,32 +810,35 @@ body {
   font-size: 0.72rem;
   color: var(--koi-muted);
   border: 1px solid var(--koi-line);
-  border-radius: 6px;
+  border-bottom-width: 2px;
+  border-radius: 5px;
   padding: 2px 7px;
   user-select: none;
 }
 
-/* New / theme / prefs / about header buttons reuse the toolbar button look. */
-#btn-new,
-#btn-theme,
-#btn-prefs,
-#btn-about {
-  background: var(--koi-surface);
-  color: var(--koi-fg);
-  border: 1px solid var(--koi-line);
-  border-radius: 6px;
-  padding: 5px 12px;
+/* Compact square ghost buttons for theme / prefs / about. */
+.icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  background: transparent;
+  color: var(--koi-muted);
+  border: 1px solid transparent;
+  border-radius: var(--koi-radius-sm);
   font-family: var(--koi-font-body);
-  font-size: 0.8rem;
+  font-size: 0.95rem;
+  font-style: normal;
+  line-height: 1;
   cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
 }
 
-#btn-new:hover,
-#btn-theme:hover,
-#btn-prefs:hover,
-#btn-about:hover {
-  border-color: var(--koi-accent);
+.icon-btn:hover {
+  background: var(--koi-surface);
   color: var(--koi-fg);
+  border-color: var(--koi-line);
 }
 
 /* --- welcome / empty-state overlay (above #app, below modals) --- */
@@ -1128,4 +1296,164 @@ body.resizing .koi-resizer {
 body.resizing {
   user-select: none;
   cursor: col-resize;
+}
+
+/* ============================================================================
+   DESIGN v2 — typographic accents, atmosphere, and one orchestrated load reveal
+   ============================================================================ */
+
+/* Glossary/table readability: zebra rows + emphasized first column (the term names). */
+.koi-md tbody tr:nth-child(even) td {
+  background: color-mix(in srgb, var(--koi-surface) 38%, transparent);
+}
+
+.koi-md tbody td:first-child {
+  color: var(--koi-fg);
+  font-weight: 600;
+}
+
+/* The leading sentence of a glossary entry reads as a definition rather than body copy. */
+.koi-md h2 + p {
+  color: var(--koi-ink-soft);
+}
+
+/* Copy-generated-code button, floated over the emitted-preview pane. Fades out when there is
+   nothing to copy (disabled), and is clipped to the preview pane (hidden with it off-tab). */
+.koi-copy {
+  position: absolute;
+  top: 10px;
+  right: 16px;
+  z-index: 3;
+  background: color-mix(in srgb, var(--koi-paper-2) 86%, transparent);
+  color: var(--koi-ink-soft);
+  border: 1px solid var(--koi-line);
+  border-radius: var(--koi-radius-sm);
+  padding: 4px 11px;
+  font-family: var(--koi-font-body);
+  font-size: 0.74rem;
+  font-weight: 500;
+  cursor: pointer;
+  backdrop-filter: blur(6px);
+  transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease, opacity 0.15s ease;
+}
+
+.koi-copy:hover:not(:disabled) {
+  background: var(--koi-surface);
+  color: var(--koi-fg);
+  border-color: var(--koi-accent);
+}
+
+.koi-copy:disabled {
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* Welcome screen atmosphere: a faint blueprint grid fading into a soft accent glow. */
+.koi-welcome {
+  overflow: hidden;
+}
+
+.koi-welcome::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(var(--koi-line) 1px, transparent 1px),
+    linear-gradient(90deg, var(--koi-line) 1px, transparent 1px);
+  background-size: 32px 32px;
+  opacity: 0.28;
+  -webkit-mask-image: radial-gradient(circle at 50% 42%, #000 0%, transparent 72%);
+  mask-image: radial-gradient(circle at 50% 42%, #000 0%, transparent 72%);
+}
+
+.koi-welcome::after {
+  content: '';
+  position: absolute;
+  width: 640px;
+  height: 640px;
+  left: 50%;
+  top: 38%;
+  transform: translate(-50%, -50%);
+  background: radial-gradient(circle, color-mix(in srgb, var(--koi-accent) 20%, transparent) 0%, transparent 60%);
+  filter: blur(22px);
+  pointer-events: none;
+}
+
+.koi-welcome-card {
+  position: relative;
+  z-index: 1;
+  animation: koi-rise 0.45s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+
+.koi-welcome-logo svg {
+  border-radius: 14px;
+  box-shadow: 0 10px 30px color-mix(in srgb, var(--koi-accent) 38%, transparent);
+}
+
+.koi-welcome-title {
+  font-family: var(--koi-font-display);
+  font-weight: 800;
+  letter-spacing: -0.02em;
+}
+
+.koi-welcome-action {
+  transition: transform 0.12s ease, border-color 0.12s ease, background 0.12s ease;
+}
+
+.koi-welcome-action:hover {
+  transform: translateY(-1px);
+}
+
+/* Modal + palette entrances. */
+.koi-modal,
+.koi-palette {
+  animation: koi-rise 0.18s ease both;
+}
+
+/* --- a single orchestrated reveal of the shell on first paint --- */
+@keyframes koi-rise {
+  from {
+    opacity: 0;
+    transform: translateY(7px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes koi-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.brand {
+  animation: koi-rise 0.4s ease both;
+}
+.toolbar-actions {
+  animation: koi-rise 0.4s ease 0.05s both;
+}
+.toolbar-right {
+  animation: koi-rise 0.4s ease 0.1s both;
+}
+#editor-pane {
+  animation: koi-fade 0.5s ease 0.12s both;
+}
+#right {
+  animation: koi-fade 0.5s ease 0.18s both;
+}
+
+/* Respect users who prefer less motion: collapse every animation/transition. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
 }
