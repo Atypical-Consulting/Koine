@@ -128,7 +128,7 @@ function koineCompletions(ctx: CompletionContext) {
 }
 
 const sharedTheme = EditorView.theme({
-  '&': { height: '100%', fontSize: '13.5px' },
+  '&': { height: '100%', fontSize: 'var(--koi-editor-font-size, 13.5px)' },
   '.cm-scroller': { fontFamily: 'var(--koi-font-mono)', lineHeight: '1.6' },
   '.cm-gutters': { backgroundColor: 'transparent', color: 'var(--koi-muted)', border: 'none' },
   '.cm-content': { caretColor: 'var(--koi-accent)' },
