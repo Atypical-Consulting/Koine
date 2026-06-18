@@ -84,6 +84,17 @@ public class SetDocEditorTests
     }
 
     [Fact]
+    public void Uses_the_source_line_ending_for_crlf_files()
+    {
+        // A CRLF source must get a CRLF-terminated doc comment, not a bare-LF line that would
+        // leave the file with mixed endings (the LSP/Rider path syncs verbatim Windows text).
+        var (model, files) = Parse("context C {\r\n  value Money { amount: Decimal }\r\n}\r\n");
+        var newText = SetDocEditor.Build(model, files, "C.Money", "A monetary amount.").Edits[0].NewText;
+
+        Assert.Equal("  /// A monetary amount.\r\n", newText);
+    }
+
+    [Fact]
     public void Empty_description_clears_an_existing_doc()
     {
         var (model, files) = Parse("context C {\n  /// old\n  value Money { amount: Decimal }\n}\n");

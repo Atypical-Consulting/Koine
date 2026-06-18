@@ -64,6 +64,9 @@ public static class SetDocEditor
             return new DocEditResult(usedPath, Array.Empty<DocTextEdit>());
         }
 
+        // Match the file's existing newline convention so a CRLF source never gets bare-LF doc
+        // lines (which would leave the .koi with mixed endings on the LSP/Windows path).
+        var lineEnding = source.Contains("\r\n") ? "\r\n" : "\n";
         var indent = LeadingWhitespace(source, node.Span.Line);
         var proseLines = NormalizeProse(description);
         var docPieces = node.LeadingTrivia.Where(t => t.Kind == SyntaxTriviaKind.Doc).ToList();
@@ -86,7 +89,7 @@ public static class SetDocEditor
             range = new SourceSpan(node.Span.Line, 1, node.Span.Line, 1, 0, 0, usedPath);
         }
 
-        var newText = string.Concat(proseLines.Select(line => $"{indent}/// {line}\n"));
+        var newText = string.Concat(proseLines.Select(line => $"{indent}/// {line}{lineEnding}"));
         return new DocEditResult(usedPath, new[] { new DocTextEdit(range, newText) });
     }
 
