@@ -78,6 +78,10 @@ public sealed class ModelIndex
     // is emitted exactly once); the emitter skips the type in any other context.
     private readonly Dictionary<string, string> _kernelOwnerByType = new(StringComparer.Ordinal);
     private readonly Dictionary<string, HashSet<string>> _kernelVisibleByContext = new(StringComparer.Ordinal);
+    // Memoized VisibleTypeNamespaces results. The index is immutable for these reads, and the
+    // emitter asks for the same context's visible-type map once per emitted file (R13.2/R13.3),
+    // so the per-context dictionary is built once and reused across all of that context's files.
+    private readonly Dictionary<string, IReadOnlyDictionary<string, string>> _visibleTypeNamespacesCache = new(StringComparer.Ordinal);
     // Each kernel namespace -> its (order-normalized) partner contexts, for cross-namespace
     // using computation in the emitter (the kernel namespace is not a real context).
     private readonly Dictionary<string, List<string>> _kernelNamespaces = new(StringComparer.Ordinal);
@@ -845,6 +849,11 @@ public sealed class ModelIndex
     /// </summary>
     public IReadOnlyDictionary<string, string> VisibleTypeNamespaces(string context)
     {
+        if (_visibleTypeNamespacesCache.TryGetValue(context, out IReadOnlyDictionary<string, string>? cached))
+        {
+            return cached;
+        }
+
         var result = new Dictionary<string, string>(StringComparer.Ordinal);
         if (_namespaceByContextType.TryGetValue(context, out Dictionary<string, string>? local))
         {
@@ -898,6 +907,7 @@ public sealed class ModelIndex
             }
         }
 
+        _visibleTypeNamespacesCache[context] = result;
         return result;
     }
 
