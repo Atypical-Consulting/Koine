@@ -112,8 +112,93 @@ public sealed partial class TypeScriptEmitter : IEmitter
                 {
                     EmitType(emit, files, nested, ns, aggRoot, typeMapper);
                 }
+                // The aggregate root's persistence-ignorant repository contract (mirrors the C#
+                // I<Root>Repository): getById/add/update/remove plus the model's declarative finders.
+                if (EmitRepository(emit, agg, aggRoot, ns, typeMapper) is { } repo)
+                {
+                    files.Add(repo);
+                }
                 break;
         }
+    }
+
+    // ----------------------------------------------------------------------
+    // Repositories — the aggregate root's persistence seam (mirrors the C# emitter).
+    // ----------------------------------------------------------------------
+
+    /// <summary>The mutating + query operations a repository exposes when none are listed.</summary>
+    private static readonly IReadOnlyList<string> DefaultRepositoryOps =
+        new[] { "getById", "add", "update", "remove" };
+
+    /// <summary>
+    /// Emits the <c>I&lt;Root&gt;Repository</c> interface for an aggregate: the fundamental
+    /// <c>getById</c> lookup (keyed on the root's branded ID), the configured mutating operations
+    /// (default add/update/remove), and any declarative finders. Every member returns a
+    /// <c>Promise</c> — the TS analogue of the C# emitter's <c>Task</c>-returning contract — and a
+    /// single-result lookup widens to <c>| undefined</c> (the TS analogue of C#'s nullable
+    /// <c>Root?</c>). Interface only, no concrete implementation, matching C#. Returns <c>null</c>
+    /// when the root cannot be resolved (already a validation error).
+    /// </summary>
+    private EmittedFile? EmitRepository(
+        TsEmitContext emit, AggregateDecl agg, EntityDecl? root, string ns, TypeScriptTypeMapper typeMapper)
+    {
+        if (root is null)
+        {
+            return null;
+        }
+
+        var rootName = TypeScriptNaming.ToPascalCase(root.Name);
+        var idType = TypeScriptNaming.ToPascalCase(root.IdentityName);
+        IReadOnlyList<string> ops = agg.Repository?.Operations ?? DefaultRepositoryOps;
+        IReadOnlyList<FinderDecl> finders = agg.Repository?.Finders ?? Array.Empty<FinderDecl>();
+        var iface = $"I{rootName}Repository";
+
+        var sb = new StringBuilder();
+        WriteDoc(sb, $"Persistence-ignorant repository contract for the {rootName} aggregate root.", "");
+        sb.Append("export interface ").Append(iface).Append(" {\n");
+
+        var first = true;
+        void Gap()
+        {
+            if (!first)
+            {
+                sb.Append('\n');
+            }
+
+            first = false;
+        }
+
+        if (ops.Contains("getById"))
+        {
+            Gap();
+            sb.Append(Indent).Append("getById(id: ").Append(idType).Append("): Promise<")
+              .Append(rootName).Append(" | undefined>;\n");
+        }
+
+        foreach (var op in new[] { "add", "update", "remove" })
+        {
+            if (ops.Contains(op))
+            {
+                Gap();
+                sb.Append(Indent).Append(op).Append("(aggregate: ").Append(rootName).Append("): Promise<void>;\n");
+            }
+        }
+
+        foreach (FinderDecl finder in finders)
+        {
+            Gap();
+            var isList = finder.ResultType.Name == ModelIndex.ListTypeName;
+            var ret = isList ? $"Promise<readonly {rootName}[]>" : $"Promise<{rootName} | undefined>";
+            var paramList = string.Join(", ", finder.Parameters.Select(p =>
+                $"{TypeScriptNaming.ToCamelCase(p.Name)}: {typeMapper.Map(p.Type)}"));
+            sb.Append(Indent).Append(TypeScriptNaming.ToCamelCase(finder.Name)).Append('(')
+              .Append(paramList).Append("): ").Append(ret).Append(";\n");
+        }
+
+        sb.Append("}\n");
+        return new EmittedFile(
+            PathFor(ns, KindFolder.Repositories, iface),
+            Assemble(emit, ns, KindFolder.Repositories, sb.ToString()));
     }
 
     // ----------------------------------------------------------------------
