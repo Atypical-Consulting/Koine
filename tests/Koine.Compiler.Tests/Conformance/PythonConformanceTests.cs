@@ -1,4 +1,6 @@
 using Koine.Compiler.Emit;
+using Koine.Compiler.Emit.Python;
+using Koine.Compiler.Services;
 using Xunit.Abstractions;
 
 namespace Koine.Compiler.Tests.Conformance;
@@ -111,5 +113,39 @@ public class PythonConformanceTests
         }
 
         Assert.True(r.Ok, string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
+    /// The Task-5 acceptance check: the Python the emitter actually produces for the shared Phase-1
+    /// fixture must parse (<c>ast.parse</c>) and type-check cleanly under <c>mypy --strict</c>. In this
+    /// task only the regular value objects emit (the quantity/enum/entity/event constructs land
+    /// later), so the tree is the runtime + root files + value-object modules + their <c>__init__.py</c>s
+    /// — and it must be dangling-import-free and strict-clean. Inconclusive (logged, not failed) only
+    /// when no toolchain is present; with one it MUST pass with zero diagnostics.
+    /// </summary>
+    [Fact]
+    public void Emitted_python_typechecks_under_strict()
+    {
+        var result = new KoineCompiler().Compile(PythonSnapshotTests.Fixture, new PythonEmitter());
+        Assert.True(result.Success, string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        TestSupport.PythonCheck syntax = TestSupport.SyntaxCheckPython(result.Files);
+        if (!syntax.ToolchainAvailable)
+        {
+            _output.WriteLine(NoInterpreterNotice);
+        }
+        else
+        {
+            Assert.True(syntax.Ok, "emitted Python should parse (ast.parse):\n" + string.Join("\n", syntax.Errors));
+        }
+
+        TestSupport.PythonCheck types = TestSupport.TypeCheckPython(result.Files);
+        if (!types.ToolchainAvailable)
+        {
+            _output.WriteLine(NoToolchainNotice);
+            return;
+        }
+
+        Assert.True(types.Ok, "emitted Python should type-check under mypy --strict:\n" + string.Join("\n", types.Errors));
     }
 }

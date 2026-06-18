@@ -21,6 +21,9 @@ internal static class PyRuntime
     /// <summary>The emitted runtime file path, at the output root.</summary>
     public const string FileName = "koine_runtime.py";
 
+    /// <summary>The dotted import name of the runtime module (<c>from koine_runtime import …</c>).</summary>
+    public const string ModuleName = "koine_runtime";
+
     /// <summary>The full source of the runtime module.</summary>
     public const string Source =
         """"
@@ -30,7 +33,7 @@ internal static class PyRuntime
 
         from datetime import datetime, timezone
         from decimal import Decimal
-        from typing import Callable, Generic, Iterable, Protocol, TypeVar, runtime_checkable
+        from typing import Any, Callable, Generic, Iterable, Protocol, TypeVar, runtime_checkable
 
 
         class DomainInvariantViolationError(Exception):
@@ -71,11 +74,16 @@ internal static class PyRuntime
 
 
         class _Comparable(Protocol):
-            """An element type orderable via `<` / `<=` (the default `Range` ordering)."""
+            """An element type orderable via `<` / `<=` (the default `Range` ordering).
 
-            def __lt__(self, other: object) -> bool: ...
+            The comparison parameter is typed `Any` (not `object`) so a stdlib orderable such as
+            `datetime` — whose `__lt__`/`__le__` accept only their own type, not arbitrary `object`
+            — structurally satisfies the protocol (the typeshed `SupportsRichComparison` approach).
+            """
 
-            def __le__(self, other: object) -> bool: ...
+            def __lt__(self, other: Any) -> bool: ...
+
+            def __le__(self, other: Any) -> bool: ...
 
 
         T = TypeVar("T", bound=_Comparable)

@@ -1,23 +1,23 @@
 using Koine.Compiler.Ast;
+using Koine.Compiler.Emit.CSharp;
 
 namespace Koine.Compiler.Emit.Python;
 
 /// <summary>
-/// The Python backend (skeleton). Turns a validated <see cref="KoineModel"/> into idiomatic,
+/// The Python backend. Turns a validated <see cref="KoineModel"/> into idiomatic,
 /// <c>mypy --strict</c>-clean Python that preserves Koine's domain semantics. Modeled on the
-/// TypeScript backend: one module per type, DDD subfolders, and a fixed-string runtime emitted
-/// once at the output root.
+/// TypeScript backend: one module per type, DDD subfolders (<c>value_objects/</c>, <c>entities/</c>,
+/// <c>enums/</c>, <c>events/</c>, <c>repositories/</c>), and a fixed-string runtime emitted once at
+/// the output root.
 /// <para>
-/// This first slice emits only the project-root support files — the runtime plus
-/// <c>mypy.ini</c>, <c>py.typed</c>, and <c>pyproject.toml</c>. Construct emission (value objects,
-/// entities, enums, …) is dispatched through <see cref="EmitType"/>, currently a no-op, and lands
-/// in later tasks. All Python-specific decisions live in this folder; the AST stays agnostic.
+/// Value objects (and quantities) emit as frozen dataclasses (Task 5). Entities, enums, aggregates,
+/// events, and repositories are dispatched through <see cref="EmitType"/> and land in later tasks
+/// (currently no-ops). All Python-specific decisions live in this folder; the AST stays agnostic.
 /// </para>
 /// </summary>
 public sealed partial class PythonEmitter : IEmitter
 {
-    // Options are stored for use by construct-emitting passes in later tasks (Task 5+).
-    // They influence package remapping and optional dict-helper generation.
+    // Options influence package remapping (and, in a later phase, optional dict-helper generation).
     private readonly PythonEmitterOptions _options;
 
     /// <summary>Creates a <see cref="PythonEmitter"/> with default options
@@ -31,6 +31,8 @@ public sealed partial class PythonEmitter : IEmitter
     }
 
     public string TargetName => "python";
+
+    private const string Indent = "    ";
 
     /// <summary>
     /// A strict <c>mypy.ini</c> pinned to the supported Python floor (3.11). The emitted tree is
@@ -59,31 +61,71 @@ public sealed partial class PythonEmitter : IEmitter
     public IReadOnlyList<EmittedFile> Emit(KoineModel model, SemanticModel? semantic)
     {
         ModelIndex index = (semantic ?? new SemanticModel(model)).Index;
+        var typeMapper = new PythonTypeMapper(index);
+
+        var emit = new PyEmitContext(
+            index,
+            BuildEnumMemberMap(model),
+            BuildTypeLocations(model),
+            model.Contexts.Select(c => c.Name).ToList(),
+            // Demand-driven operator emission (R9): a value object only gets an additive `__add__`
+            // (where the model `sum`s it) or a scalar `__mul__` (where the model multiplies it by a
+            // scalar) — shared with the C#/TS emitters so the three stay semantically aligned.
+            OperatorNeedsAnalyzer.BuildAdditiveOperatorNeeds(model, index),
+            OperatorNeedsAnalyzer.BuildScalarOperatorNeeds(model, index));
 
         var files = new List<EmittedFile>();
 
-        // Runtime support and the project-root files, emitted once at the output root. The
-        // construct-emitting passes (over `index`/`model.Contexts`) land in later tasks.
+        // 1. Runtime support and the project-root files, emitted once at the output root.
         files.Add(new EmittedFile(PyRuntime.FileName, PyRuntime.Source + "\n"));
         files.Add(new EmittedFile("mypy.ini", MypyIni));
         files.Add(new EmittedFile("py.typed", PyTyped));
         files.Add(new EmittedFile("pyproject.toml", PyProjectToml));
 
-        _ = index;
+        // 2. Per-context user types, one module each.
+        foreach (ContextNode ctx in model.Contexts)
+        {
+            foreach (TypeDecl type in ctx.AllTypeDecls())
+            {
+                var ns = ModelIndex.NamespaceOf(ctx.Name, type.ModulePath);
+                EmitType(emit, files, type, ns, typeMapper);
+            }
+        }
+
+        // 3. An `__init__.py` for every package directory implied by the emitted module paths, so the
+        //    tree imports cleanly and mypy treats each directory as a package.
+        EmitPackageInits(files);
+
         return files;
     }
 
     /// <summary>
-    /// Dispatches a single <see cref="TypeDecl"/> to its construct emitter. A no-op in this slice;
-    /// later tasks fill in value objects, entities, enums, events, aggregates, and repositories.
+    /// Dispatches a single <see cref="TypeDecl"/> to its construct emitter. Regular value objects
+    /// emit now; quantities, entities, enums, aggregates, events, and repositories are no-ops until
+    /// their later tasks.
     /// </summary>
-    private void EmitType(List<EmittedFile> files, TypeDecl type, string ns, ModelIndex index)
+    private void EmitType(PyEmitContext emit, List<EmittedFile> files, TypeDecl type, string ns, PythonTypeMapper typeMapper)
     {
-        _ = files;
-        _ = type;
-        _ = ns;
-        _ = index;
-        // _options is used here in later tasks (package remapping, EmitDictHelpers).
-        _ = _options;
+        // `AllTypeDecls()` already flattens each aggregate's nested types into the iteration, so an
+        // `AggregateDecl` itself is a no-op here (its entity/events arrive as their own decls); only
+        // the leaf constructs are routed.
+        switch (type)
+        {
+            // A `quantity` is a value object whose unit member is REQUIRED to be enum-typed (R9.2 /
+            // KOI0904), so it unavoidably references an enum. Enums don't emit until the next task, so
+            // emitting a quantity now would dangle that import and break the per-task `mypy --strict`
+            // run. Quantities therefore land WITH their unit enum in the next task; the declaration
+            // stays in the model (and the shared fixture), just not emitted yet.
+            case ValueObjectDecl { IsQuantity: false } vo:
+                files.Add(EmitValueObject(emit, vo, ns, typeMapper));
+                break;
+            case ValueObjectDecl:        // a quantity — deferred (see above)
+            case EntityDecl:
+            case EnumDecl:
+            case EventDecl:
+            case AggregateDecl:
+                // Filled in by later tasks (quantities+enums, entities, events, aggregates/repositories).
+                break;
+        }
     }
 }
