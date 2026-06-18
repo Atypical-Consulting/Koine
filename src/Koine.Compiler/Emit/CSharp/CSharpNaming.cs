@@ -1,3 +1,5 @@
+using System.Collections.Concurrent;
+using System.Collections.Frozen;
 using System.Text;
 
 namespace Koine.Compiler.Emit.CSharp;
@@ -8,29 +10,37 @@ namespace Koine.Compiler.Emit.CSharp;
 /// </summary>
 internal static class CSharpNaming
 {
-    /// <summary>Converts a name to PascalCase (used for property/type names).</summary>
-    public static string ToPascalCase(string name)
-    {
-        if (string.IsNullOrEmpty(name))
-        {
-            return name;
-        }
+    // The same member name is cased many times across one emit (property, ctor param, ToString,
+    // equality, operators). Memoize the conversions that actually allocate a new string — names
+    // already in the target case hit the fast path and never enter the cache, so no-ops add no
+    // overhead. Conversion is a pure function of the name, so a shared cache stays correct and
+    // keeps the emitter reentrant (ConcurrentDictionary).
+    private static readonly ConcurrentDictionary<string, string> PascalCache = new(StringComparer.Ordinal);
+    private static readonly ConcurrentDictionary<string, string> CamelCache = new(StringComparer.Ordinal);
 
-        var pascal = char.IsUpper(name[0]) ? name : char.ToUpperInvariant(name[0]) + name[1..];
-        return Escape(pascal);
-    }
+    /// <summary>Converts a name to PascalCase (used for property/type names).</summary>
+    public static string ToPascalCase(string name) =>
+        string.IsNullOrEmpty(name) || char.IsUpper(name[0])
+            ? Escape(name)
+            : PascalCache.GetOrAdd(name, static n => Escape(WithFirstChar(n, char.ToUpperInvariant(n[0]))));
 
     /// <summary>Converts a name to camelCase (used for constructor parameter names).</summary>
-    public static string ToCamelCase(string name)
-    {
-        if (string.IsNullOrEmpty(name))
-        {
-            return name;
-        }
+    public static string ToCamelCase(string name) =>
+        string.IsNullOrEmpty(name) || char.IsLower(name[0])
+            ? Escape(name)
+            : CamelCache.GetOrAdd(name, static n => Escape(WithFirstChar(n, char.ToLowerInvariant(n[0]))));
 
-        var camel = char.IsLower(name[0]) ? name : char.ToLowerInvariant(name[0]) + name[1..];
-        return Escape(camel);
-    }
+    /// <summary>
+    /// Returns <paramref name="name"/> with its first character replaced by <paramref name="first"/>,
+    /// in a single allocation. Avoids the boxing + substring that <c>first + name[1..]</c> incurs
+    /// (<c>char + string</c> binds to <see cref="string.Concat(object?, object?)"/>, boxing the char).
+    /// </summary>
+    private static string WithFirstChar(string name, char first) =>
+        string.Create(name.Length, (name, first), static (span, state) =>
+        {
+            state.name.CopyTo(span);
+            span[0] = state.first;
+        });
 
     /// <summary>
     /// Emits a name verbatim (preserving case) as a C# identifier, prefixing it with
@@ -43,7 +53,7 @@ internal static class CSharpNaming
     private static string Escape(string identifier) =>
         Keywords.Contains(identifier) ? "@" + identifier : identifier;
 
-    private static readonly HashSet<string> Keywords = new(StringComparer.Ordinal)
+    private static readonly FrozenSet<string> Keywords = new HashSet<string>(StringComparer.Ordinal)
     {
         "abstract", "as", "base", "bool", "break", "byte", "case", "catch", "char", "checked",
         "class", "const", "continue", "decimal", "default", "delegate", "do", "double", "else",
@@ -54,5 +64,5 @@ internal static class CSharpNaming
         "sizeof", "stackalloc", "static", "string", "struct", "switch", "this", "throw", "true",
         "try", "typeof", "uint", "ulong", "unchecked", "unsafe", "ushort", "using", "virtual",
         "void", "volatile", "while"
-    };
+    }.ToFrozenSet(StringComparer.Ordinal);
 }

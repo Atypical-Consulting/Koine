@@ -140,14 +140,22 @@ public sealed partial class CSharpEmitter
             sb.Append(Indent).Append(Indent).Append("=> \"").Append(typeName).Append("\";\n");
             return;
         }
-        var fields = string.Join(", ", members.Select(m =>
-        {
-            var prop = CSharpNaming.ToPascalCase(m.Name);
-            return prop + " = {" + prop + "}";
-        }));
         sb.Append(Indent).Append("public override string ToString()\n");
-        sb.Append(Indent).Append(Indent).Append("=> $\"")
-          .Append(typeName).Append(" {{ ").Append(fields).Append(" }}\";\n");
+        sb.Append(Indent).Append(Indent).Append("=> $\"").Append(typeName).Append(" {{ ");
+        var firstField = true;
+        foreach (var m in members)
+        {
+            if (!firstField)
+            {
+                sb.Append(", ");
+            }
+
+            firstField = false;
+            var prop = CSharpNaming.ToPascalCase(m.Name);
+            sb.Append(prop).Append(" = {").Append(prop).Append('}');
+        }
+
+        sb.Append(" }}\";\n");
     }
 
     /// <summary>

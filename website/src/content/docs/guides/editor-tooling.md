@@ -127,11 +127,30 @@ at directly (`/path/to/koine lsp`) instead of `dotnet … .dll lsp`. This also s
 
 ### Setup in VS Code
 
-The TextMate extension already supplies the `koine` language id and highlighting. To add diagnostics,
-pair it with a thin language client (`vscode-languageclient`) that spawns `koine lsp` for documents of
-language `koine`. This client is a small follow-up — tracked as R17.2 in
-[USER-STORIES.md](https://github.com/Atypical-Consulting/Koine/blob/main/USER-STORIES.md) — and isn't
-shipped yet; highlighting works today regardless.
+The **Koine** extension (`tooling/koine-textmate`) supplies the `koine` language id and highlighting
+**and** ships a language client that spawns `koine lsp` — so diagnostics, hover, go-to-definition,
+outline, rename, and formatting work out of the box, plus four commands for the Koine-specific
+requests: **Preview Emitted Code**, **Show Glossary**, **Show Context Map**, and **Check
+Compatibility**.
+
+By default the client launches `koine` from your `PATH`. Point it at a different server with two
+settings (e.g. to run the CLI straight from source):
+
+```jsonc
+// .vscode/settings.json
+{
+  "koine.server.path": "dotnet",
+  "koine.server.args": ["run", "--project", "src/Koine.Cli", "--"]
+}
+```
+
+`koine.server.path` empty → `koine lsp` (executable on PATH); set it to a self-contained `koine`
+binary (`dotnet publish src/Koine.Cli -p:PublishProfile=osx-arm64`) for the fastest startup. Set
+`koine.trace.server` to `verbose` to log JSON-RPC traffic.
+
+The same enriched `koine lsp` server also backs **[Koine Studio](/guides/koine-studio/)**, the
+standalone desktop IDE — both clients share one server, so a capability added to the LSP appears in
+both.
 
 ## Troubleshooting the server
 

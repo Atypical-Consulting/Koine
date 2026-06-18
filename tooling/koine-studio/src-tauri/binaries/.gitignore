@@ -1,0 +1,6 @@
+# Sidecar binaries are produced per-platform by CI / the publish profile
+# (see tauri.conf.json -> bundle.externalBin "binaries/koine"). Tauri resolves
+# them with a target-triple suffix (e.g. koine-aarch64-apple-darwin). They are
+# build artifacts, not source — never commit them. A local placeholder may exist
+# here to satisfy the build-script validation during development.
+koine-*

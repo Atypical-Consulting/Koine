@@ -1,7 +1,50 @@
 // Koine Studio app composition: wires the .koi editor, the live LSP diagnostics,
-// the status line, the diagnostics strip, and the emit-preview output pane.
-import { createKoineEditor, createOutputView, setEditorDiagnostics } from './editor';
-import { KoineLsp, type LspDiagnostic } from './lsp';
+// the status line, the diagnostics strip, and the tabbed inspector (emitted preview,
+// glossary, and context map).
+import { createKoineEditor, createOutputView, renderMarkdown, renderSymbolTree, setEditorDiagnostics } from './editor';
+import { KoineLsp, SCRATCH_URI, type CheckResult, type ContextMapResult, type Location, type LspDiagnostic } from './lsp';
+import { open as openDialog } from '@tauri-apps/plugin-dialog';
+import { invoke } from '@tauri-apps/api/core';
+
+// --- workspace fs contract (Rust commands from Stream G) ---------------------
+
+/** A `.koi` file discovered under an opened folder. */
+interface KoiFile {
+  path: string; // absolute path on disk
+  name: string; // file name
+  relPath: string; // path relative to the opened folder
+}
+
+/** A client-side open buffer keyed by its file:// uri. `path` is null in scratch mode. */
+interface Buffer {
+  uri: string;
+  path: string | null;
+  relPath: string;
+  name: string;
+  text: string;
+  dirty: boolean;
+}
+
+/**
+ * Build a file:// uri from an absolute path. Each non-empty segment is percent-encoded.
+ * A Windows drive path ('C:\…') is normalised to forward slashes and gets a 'file:///'
+ * prefix; POSIX absolute paths get 'file://' + the encoded path so the leading slash
+ * yields the canonical triple-slash form.
+ */
+function pathToFileUri(path: string): string {
+  if (/^[A-Za-z]:[\\/]/.test(path)) {
+    // Windows: C:\a\b -> file:///C:/a/b
+    const parts = path.replace(/\\/g, '/').split('/').filter((s) => s.length > 0);
+    const drive = parts.shift()!; // 'C:'
+    const tail = parts.map((s) => encodeURIComponent(s)).join('/');
+    return 'file:///' + drive + (tail ? '/' + tail : '');
+  }
+  const encoded = path
+    .split('/')
+    .map((s) => (s.length ? encodeURIComponent(s) : ''))
+    .join('/');
+  return 'file://' + encoded;
+}
 
 // Seed model — examples/billing.koi, inlined (the renderer has no fs access).
 const SEED = `context Billing {
@@ -51,18 +94,142 @@ function el<T extends HTMLElement>(id: string): T {
   return node as T;
 }
 
+// --- context-map rendering (mirrors koine-textmate's renderContextMap) -------
+
+function renderContextMapHtml(res: ContextMapResult): string {
+  const esc = (s: string) =>
+    s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const parts: string[] = ['<h2>Contexts</h2>'];
+
+  if (!res.contexts.length) {
+    parts.push('<p class="muted">No contexts.</p>');
+  } else {
+    parts.push('<ul>' + res.contexts.map((c) => `<li>${esc(c)}</li>`).join('') + '</ul>');
+  }
+
+  parts.push('<h2>Relations</h2>');
+  if (!res.relations.length) {
+    parts.push('<p class="muted">No context map declared.</p>');
+  } else {
+    const rows = res.relations
+      .map((r) => {
+        const direction = r.bidirectional ? '&lt;-&gt;' : '-&gt;';
+        const shared = r.sharedTypes.length ? esc(r.sharedTypes.join(', ')) : '—';
+        const acl = r.acl.length
+          ? r.acl
+              .map(
+                (a) =>
+                  `${esc(a.upstreamContext)}.${esc(a.upstreamType)} → ${esc(a.localContext)}.${esc(a.localType)}`,
+              )
+              .join('<br>')
+          : '—';
+        return (
+          '<tr>' +
+          `<td>${esc(r.upstream)}</td>` +
+          `<td class="dir">${direction}</td>` +
+          `<td>${esc(r.downstream)}</td>` +
+          `<td>${esc(r.kind)}</td>` +
+          `<td>${shared}</td>` +
+          `<td>${acl}</td>` +
+          '</tr>'
+        );
+      })
+      .join('');
+    parts.push(
+      '<table class="ctxmap"><thead><tr>' +
+        '<th>Upstream</th><th>Direction</th><th>Downstream</th><th>Kind</th><th>Shared Types</th><th>ACL</th>' +
+        '</tr></thead><tbody>' +
+        rows +
+        '</tbody></table>',
+    );
+  }
+  return parts.join('\n');
+}
+
+// --- compatibility-check rendering (mirrors koine-textmate's renderCheck) -----
+
+function escapeCell(text: string): string {
+  return text.replace(/\|/g, '\\|').replace(/\r?\n/g, ' ');
+}
+
+function renderCheckMarkdown(res: CheckResult): string {
+  const out: string[] = [];
+  out.push(res.hasBreakingChanges ? '# ⚠️ Breaking changes detected' : '# ✅ No breaking changes');
+  out.push('');
+
+  const breaking = res.changes.filter((c) => c.impact === 'Breaking').length;
+  const nonBreaking = res.changes.length - breaking;
+  out.push(`${res.changes.length} change(s): ${breaking} breaking, ${nonBreaking} non-breaking.`, '');
+
+  if (res.changes.length === 0) {
+    out.push('_No changes detected._', '');
+  } else {
+    out.push('| Impact | Code | Message |', '| --- | --- | --- |');
+    for (const c of res.changes) {
+      out.push(`| ${escapeCell(c.impact)} | ${escapeCell(c.code)} | ${escapeCell(c.message)} |`);
+    }
+    out.push('');
+  }
+  return out.join('\n');
+}
+
+type RightView = 'preview' | 'glossary' | 'contextmap' | 'outline' | 'check';
+
 export function init(): void {
   const editor = createKoineEditor({
     parent: el('editor-pane'),
     doc: SEED,
-    onChange: (doc) => lsp.didChange(doc),
+    onChange: (doc) => {
+      const buf = buffers.get(activeUri);
+      let becameDirty = false;
+      if (buf) {
+        if (buf.path != null && !buf.dirty && buf.text !== doc) becameDirty = true;
+        buf.text = doc;
+        if (becameDirty) buf.dirty = true;
+      }
+      lsp.changeDoc(activeUri, doc);
+      onDocEdited();
+      // Re-render the tree only when the active file's dirty dot just appeared (cheap path).
+      if (folderMode && becameDirty) renderTree();
+    },
+    onHover: (line, character) => lsp.hover(line, character),
+    onDefinition: (line, character) => lsp.definition(line, character),
+    onNavigate: (loc) => navigateToDefinition(loc),
+    // Save (Cmd/Ctrl-S) is owned by ide.ts's window keydown handler below: it formats AND
+    // writes the active buffer to disk. We deliberately do NOT pass onFormat here so the
+    // editor's Mod-s keymap stays inert and there's exactly one save path.
   });
-  const output = createOutputView(el('output-pane'));
+  const output = createOutputView(el('view-preview'));
 
   const statusEl = el('status');
   const stripEl = el('diagnostics');
 
   const lsp = new KoineLsp();
+
+  // --- workspace model ------------------------------------------------------
+  // `buffers` holds every open document keyed by its file:// uri; `activeUri` is the one
+  // shown in the editor and targeted by all lsp requests. `diagnosticsByUri` keeps the
+  // latest pushed diagnostics per uri so switching files can re-render the active one and
+  // the tree can badge files with errors. Scratch mode = a single buffer at SCRATCH_URI
+  // with path null; folder mode = one buffer per discovered .koi file.
+  const buffers = new Map<string, Buffer>();
+  const diagnosticsByUri = new Map<string, LspDiagnostic[]>();
+  let activeUri = SCRATCH_URI;
+  let folderMode = false;
+
+  const treeEl = el<HTMLElement>('filetree');
+  const treeListEl = el<HTMLUListElement>('filetree-list');
+  const treeTitleEl = el<HTMLElement>('filetree-title');
+
+  // Seed the scratch buffer up front so onChange/diagnostics have somewhere to land.
+  buffers.set(SCRATCH_URI, {
+    uri: SCRATCH_URI,
+    path: null,
+    relPath: 'model.koi',
+    name: 'model.koi',
+    text: SEED,
+    dirty: false,
+  });
 
   function setStatus(text: string, kind: 'connecting' | 'green' | 'error'): void {
     statusEl.textContent = text;
@@ -104,16 +271,263 @@ export function init(): void {
     }
   }
 
-  lsp.onPublishDiagnostics((_uri, diags) => {
-    setEditorDiagnostics(editor.view, diags);
-    renderStrip(diags);
-    updateStatus(diags);
+  // Diagnostics are pushed per-uri for every file in the workspace. Store them all; only the
+  // ACTIVE file's diagnostics drive the editor gutter, the strip, and the status pill. The
+  // tree is re-rendered so non-active files can badge their error/warning counts.
+  lsp.onPublishDiagnostics((uri, diags) => {
+    diagnosticsByUri.set(uri, diags);
+    if (uri === activeUri) {
+      setEditorDiagnostics(editor.view, diags);
+      renderStrip(diags);
+      updateStatus(diags);
+    }
+    if (folderMode) renderTree();
   });
   lsp.onServerExit((code) => {
     setStatus(`server exited (${code})`, 'error');
   });
 
-  // Preview buttons.
+  // --- file tree ------------------------------------------------------------
+
+  function diagCounts(uri: string): { errors: number; warnings: number } {
+    const diags = diagnosticsByUri.get(uri) ?? [];
+    let errors = 0;
+    let warnings = 0;
+    for (const d of diags) {
+      if (d.severity === 2) warnings++;
+      else errors++; // severity 1 or unset = error
+    }
+    return { errors, warnings };
+  }
+
+  // Render the open-buffer list into the left rail, sorted by relPath. Each row shows the
+  // file name (with a dirty dot), the parent folder as muted context, and an error/warning
+  // badge when the file currently has diagnostics. Clicking a row activates that file.
+  function renderTree(): void {
+    treeListEl.innerHTML = '';
+    const rows = Array.from(buffers.values())
+      .filter((b) => b.path != null) // scratch buffer is not listed in folder mode
+      .sort((a, b) => a.relPath.localeCompare(b.relPath));
+    for (const buf of rows) {
+      const li = document.createElement('li');
+      li.setAttribute('role', 'treeitem');
+      const row = document.createElement('button');
+      row.type = 'button';
+      row.className = 'tree-row';
+      if (buf.uri === activeUri) row.setAttribute('aria-current', 'true');
+
+      const slash = buf.relPath.lastIndexOf('/');
+      const dir = slash >= 0 ? buf.relPath.slice(0, slash + 1) : '';
+      const label = document.createElement('span');
+      label.className = 'tree-name';
+      label.textContent = buf.name;
+      if (buf.dirty) {
+        const dot = document.createElement('span');
+        dot.className = 'tree-dirty';
+        dot.title = 'Unsaved changes';
+        dot.textContent = '•';
+        label.appendChild(dot);
+      }
+      row.appendChild(label);
+
+      if (dir) {
+        const dirEl = document.createElement('span');
+        dirEl.className = 'tree-dir';
+        dirEl.textContent = dir;
+        row.appendChild(dirEl);
+      }
+
+      const { errors, warnings } = diagCounts(buf.uri);
+      if (errors || warnings) {
+        const badge = document.createElement('span');
+        badge.className = errors ? 'tree-badge tree-badge-err' : 'tree-badge tree-badge-warn';
+        badge.textContent = String(errors || warnings);
+        badge.title = `${errors} error(s), ${warnings} warning(s)`;
+        row.appendChild(badge);
+      }
+
+      row.addEventListener('click', () => activateFile(buf.uri));
+      li.appendChild(row);
+      treeListEl.appendChild(li);
+    }
+  }
+
+  // Switch the editor + lsp to a different open buffer. Saves the current editor text back to
+  // the leaving buffer first (preserving unsaved edits), swaps the doc, points lsp at the new
+  // uri, re-renders diagnostics for it, and invalidates the doc views so they re-fetch.
+  function activateFile(uri: string): void {
+    if (uri === activeUri) return;
+    const leaving = buffers.get(activeUri);
+    if (leaving) leaving.text = editor.getDoc();
+    const next = buffers.get(uri);
+    if (!next) return;
+    activeUri = uri;
+    lsp.setActive(uri);
+    editor.setDoc(next.text);
+    const diags = diagnosticsByUri.get(uri) ?? [];
+    setEditorDiagnostics(editor.view, diags);
+    renderStrip(diags);
+    updateStatus(diags);
+    invalidateDocViews();
+    renderTree();
+  }
+
+  // Cross-file go-to-definition: if the resolved Location is a different OPEN file, activate it
+  // before jumping; otherwise jump within the current file. Unknown uris are ignored.
+  function navigateToDefinition(loc: Location): void {
+    if (loc.uri && loc.uri !== activeUri && buffers.has(loc.uri)) {
+      activateFile(loc.uri);
+    }
+    editor.gotoRange(loc.range.start, loc.range.end);
+  }
+
+  // --- tabbed inspector (preview / glossary / context map) ------------------
+
+  const glossaryView = el('view-glossary');
+  const contextMapView = el('view-contextmap');
+  const outlineView = el('view-outline');
+  const checkView = el('view-check');
+  const tabs = Array.from(document.querySelectorAll<HTMLButtonElement>('#tabs .tab'));
+  const viewEls: Record<RightView, HTMLElement> = {
+    preview: el('view-preview'),
+    glossary: glossaryView,
+    contextmap: contextMapView,
+    outline: outlineView,
+    check: checkView,
+  };
+  let activeView: RightView = 'preview';
+  // Track which doc-based views need a (re)fetch — invalidated on every edit so a tab
+  // switch always shows data for the current model rather than a stale render. The check
+  // view is excluded: it is only (re)run on demand via the Check button.
+  const docViewsLoaded: Record<'glossary' | 'contextmap' | 'outline', boolean> = {
+    glossary: false,
+    contextmap: false,
+    outline: false,
+  };
+
+  function docMessage(view: HTMLElement, text: string, kind: 'muted' | 'error' = 'muted'): void {
+    view.innerHTML = `<p class="${kind === 'error' ? 'doc-error' : 'muted'}">${text}</p>`;
+  }
+
+  async function loadGlossary(): Promise<void> {
+    docMessage(glossaryView, 'Loading glossary…');
+    try {
+      const res = await lsp.glossary();
+      if (!res.markdown || !res.markdown.trim()) {
+        docMessage(glossaryView, 'Glossary is empty (the model may have syntax errors).');
+      } else {
+        glossaryView.innerHTML = `<div class="koi-md">${renderMarkdown(res.markdown)}</div>`;
+      }
+      docViewsLoaded.glossary = true;
+    } catch (e) {
+      docMessage(glossaryView, 'Glossary request failed: ' + String(e), 'error');
+    }
+  }
+
+  async function loadContextMap(): Promise<void> {
+    docMessage(contextMapView, 'Loading context map…');
+    try {
+      const res = await lsp.contextMap();
+      contextMapView.innerHTML = `<div class="koi-md">${renderContextMapHtml(res)}</div>`;
+      docViewsLoaded.contextmap = true;
+    } catch (e) {
+      docMessage(contextMapView, 'Context map request failed: ' + String(e), 'error');
+    }
+  }
+
+  async function loadOutline(): Promise<void> {
+    docMessage(outlineView, 'Loading outline…');
+    try {
+      const symbols = await lsp.documentSymbols();
+      if (!symbols.length) {
+        docMessage(outlineView, 'No symbols (the model may have syntax errors).');
+      } else {
+        outlineView.innerHTML = '';
+        outlineView.appendChild(renderSymbolTree(symbols, (line, col) => editor.goto(line, col)));
+      }
+      docViewsLoaded.outline = true;
+    } catch (e) {
+      docMessage(outlineView, 'Outline request failed: ' + String(e), 'error');
+    }
+  }
+
+  function ensureLoaded(view: RightView): void {
+    if (view === 'glossary' && !docViewsLoaded.glossary) void loadGlossary();
+    if (view === 'contextmap' && !docViewsLoaded.contextmap) void loadContextMap();
+    if (view === 'outline' && !docViewsLoaded.outline) void loadOutline();
+  }
+
+  // Mark the cached glossary/context-map/outline stale (e.g. after an edit or a file switch).
+  function invalidateDocViews(): void {
+    docViewsLoaded.glossary = false;
+    docViewsLoaded.contextmap = false;
+    docViewsLoaded.outline = false;
+  }
+
+  // An edit makes any cached glossary/context-map/outline stale. Mark them dirty; if a doc
+  // view is on screen, refresh it (debounced) so it tracks the model without a manual click.
+  let editDebounce: ReturnType<typeof setTimeout> | undefined;
+  function onDocEdited(): void {
+    invalidateDocViews();
+    if (activeView === 'preview' || activeView === 'check') return;
+    clearTimeout(editDebounce);
+    editDebounce = setTimeout(() => ensureLoaded(activeView), 350);
+  }
+
+  function selectView(view: RightView): void {
+    activeView = view;
+    for (const tab of tabs) {
+      const isActive = tab.dataset.view === view;
+      tab.setAttribute('aria-selected', String(isActive));
+    }
+    for (const key of Object.keys(viewEls) as RightView[]) {
+      viewEls[key].hidden = key !== view;
+    }
+    ensureLoaded(view);
+  }
+
+  for (const tab of tabs) {
+    tab.addEventListener('click', () => selectView(tab.dataset.view as RightView));
+  }
+
+  // Refresh re-fetches the active doc view (preview is driven by its own buttons; check by
+  // the Check… toolbar button which re-prompts for a baseline).
+  el<HTMLButtonElement>('btn-refresh').addEventListener('click', () => {
+    if (activeView === 'glossary') void loadGlossary();
+    else if (activeView === 'contextmap') void loadContextMap();
+    else if (activeView === 'outline') void loadOutline();
+  });
+
+  // Check… — pick a baseline folder and diff the current buffer against it. Needs Stream F's
+  // Rust dialog plugin + capability to function at runtime; the build does not depend on it.
+  el<HTMLButtonElement>('btn-check').addEventListener('click', () => void runCheck());
+
+  async function runCheck(): Promise<void> {
+    let folder: string | null;
+    try {
+      const picked = await openDialog({ directory: true, title: 'Select baseline model folder' });
+      folder = Array.isArray(picked) ? picked[0] ?? null : picked;
+    } catch (e) {
+      docMessage(checkView, 'Could not open the folder picker: ' + String(e), 'error');
+      selectView('check');
+      return;
+    }
+    if (!folder) return; // cancelled — abort silently
+    selectView('check');
+    docMessage(checkView, 'Checking against baseline…');
+    try {
+      const res = await lsp.check(folder);
+      if (res.error) {
+        docMessage(checkView, 'Compatibility check failed: ' + res.error, 'error');
+        return;
+      }
+      checkView.innerHTML = `<div class="koi-md">${renderMarkdown(renderCheckMarkdown(res))}</div>`;
+    } catch (e) {
+      docMessage(checkView, 'Check request failed: ' + String(e), 'error');
+    }
+  }
+
+  // Preview buttons. Previewing also surfaces the preview tab.
   const btnCs = el<HTMLButtonElement>('btn-preview-cs');
   const btnTs = el<HTMLButtonElement>('btn-preview-ts');
 
@@ -123,6 +537,7 @@ export function init(): void {
   }
 
   async function preview(target: 'csharp' | 'typescript'): Promise<void> {
+    selectView('preview');
     setPreviewBusy(true);
     try {
       const res = await lsp.emitPreview(target);
@@ -146,12 +561,132 @@ export function init(): void {
   btnCs.addEventListener('click', () => void preview('csharp'));
   btnTs.addEventListener('click', () => void preview('typescript'));
 
+  // --- open folder (directory-mode workspace) -------------------------------
+
+  el<HTMLButtonElement>('btn-open-folder').addEventListener('click', () => void openFolder());
+
+  async function openFolder(): Promise<void> {
+    let folder: string | null;
+    try {
+      const picked = await openDialog({ directory: true, title: 'Open a folder of .koi models' });
+      folder = Array.isArray(picked) ? picked[0] ?? null : picked;
+    } catch (e) {
+      setStatus('could not open folder picker', 'error');
+      console.error('Open folder dialog failed:', e);
+      return;
+    }
+    if (!folder) return; // cancelled
+
+    let files: KoiFile[];
+    try {
+      files = await invoke<KoiFile[]>('list_koi_files', { dir: folder });
+    } catch (e) {
+      setStatus('could not read folder', 'error');
+      console.error('list_koi_files failed:', e);
+      return;
+    }
+    if (!files.length) {
+      setStatus('no .koi files in folder', 'error');
+      return;
+    }
+
+    // Leaving scratch mode: close the scratch doc so the server drops it from the workspace.
+    if (!folderMode) {
+      lsp.closeDoc(SCRATCH_URI);
+      buffers.delete(SCRATCH_URI);
+      diagnosticsByUri.delete(SCRATCH_URI);
+    } else {
+      // Re-opening a folder: close every previously open file first.
+      for (const uri of Array.from(buffers.keys())) {
+        lsp.closeDoc(uri);
+      }
+      buffers.clear();
+      diagnosticsByUri.clear();
+    }
+
+    // Read + open every file as one workspace (cross-file refs resolve via didOpen).
+    for (const f of files) {
+      let text: string;
+      try {
+        text = await invoke<string>('read_text_file', { path: f.path });
+      } catch (e) {
+        console.error('read_text_file failed for', f.path, e);
+        continue;
+      }
+      const uri = pathToFileUri(f.path);
+      buffers.set(uri, { uri, path: f.path, relPath: f.relPath, name: f.name, text, dirty: false });
+      lsp.openDoc(uri, text);
+    }
+
+    folderMode = true;
+    // Activate the first file (sorted by relPath) and show the tree.
+    const first = Array.from(buffers.values()).sort((a, b) => a.relPath.localeCompare(b.relPath))[0];
+    activeUri = first.uri;
+    lsp.setActive(first.uri);
+    editor.setDoc(first.text);
+    treeTitleEl.textContent = folder.split(/[\\/]/).filter(Boolean).pop() ?? folder;
+    treeEl.hidden = false;
+    invalidateDocViews();
+    renderTree();
+    ensureLoaded(activeView);
+  }
+
+  // --- save (format + write to disk) ----------------------------------------
+  // The editor intercepts Cmd/Ctrl-S and calls onFormat; we additionally write the formatted
+  // active buffer to disk. To run AFTER the format edits land, save is also wired here on the
+  // window so it can read the post-format editor text. The editor's own format keymap already
+  // ran preventDefault, so this listener only persists.
+  window.addEventListener('keydown', (e) => {
+    const mod = e.metaKey || e.ctrlKey;
+    if (mod && (e.key === 's' || e.key === 'S')) {
+      e.preventDefault();
+      void saveActive();
+    }
+  });
+
+  let saveQueued = false;
+  async function saveActive(): Promise<void> {
+    if (saveQueued) return;
+    saveQueued = true;
+    try {
+      // Format first (mirrors the editor's Mod-S), then persist the formatted text.
+      try {
+        const edits = await lsp.format();
+        editor.applyEdits(edits);
+      } catch (e) {
+        console.error('format on save failed:', e);
+      }
+      const buf = buffers.get(activeUri);
+      if (!buf) return;
+      buf.text = editor.getDoc();
+      lsp.changeDoc(activeUri, buf.text);
+      if (!buf.path) return; // scratch mode: format only, nothing to write
+      try {
+        await invoke('write_text_file', { path: buf.path, contents: buf.text });
+        buf.dirty = false;
+        lsp.didSave();
+        renderTree();
+      } catch (e) {
+        setStatus('save failed', 'error');
+        console.error('write_text_file failed:', e);
+      }
+    } finally {
+      saveQueued = false;
+    }
+  }
+
   // Boot: attach listeners (inside start) before messages flow, then open the doc.
   setStatus('connecting…', 'connecting');
+  lsp.onServerRestart(() => {
+    // Fresh sidecar is back in sync; refresh whatever doc view is showing.
+    invalidateDocViews();
+    ensureLoaded(activeView);
+  });
   lsp
     .start()
     .then(() => {
-      lsp.didOpen(editor.getDoc());
+      // Scratch mode on startup: open the single seed doc at SCRATCH_URI.
+      lsp.openDoc(SCRATCH_URI, editor.getDoc());
     })
     .catch((e) => {
       setStatus('connection failed', 'error');
