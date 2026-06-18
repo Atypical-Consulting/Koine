@@ -994,25 +994,25 @@ public sealed partial class CSharpEmitter : IEmitter
         switch (f.CollectionShape)
         {
             case CollectionShape.List:
-            {
-                var elem = typeMapper.Map(type.Element ?? ObjectType);
-                sb.Append("new List<").Append(elem).Append(">(").Append(param).Append(").AsReadOnly()");
-                break;
-            }
+                {
+                    var elem = typeMapper.Map(type.Element ?? ObjectType);
+                    sb.Append("new List<").Append(elem).Append(">(").Append(param).Append(").AsReadOnly()");
+                    break;
+                }
             case CollectionShape.Set:
-            {
-                var elem = typeMapper.Map(type.Element ?? ObjectType);
-                sb.Append("new ReadOnlySet<").Append(elem).Append(">(new HashSet<").Append(elem).Append(">(").Append(param).Append("))");
-                break;
-            }
+                {
+                    var elem = typeMapper.Map(type.Element ?? ObjectType);
+                    sb.Append("new ReadOnlySet<").Append(elem).Append(">(new HashSet<").Append(elem).Append(">(").Append(param).Append("))");
+                    break;
+                }
             default: // Map
-            {
-                var k = typeMapper.Map(type.Element ?? ObjectType);
-                var v = typeMapper.Map(type.Value ?? ObjectType);
-                sb.Append("new ReadOnlyDictionary<").Append(k).Append(", ").Append(v)
-                  .Append(">(new Dictionary<").Append(k).Append(", ").Append(v).Append(">(").Append(param).Append("))");
-                break;
-            }
+                {
+                    var k = typeMapper.Map(type.Element ?? ObjectType);
+                    var v = typeMapper.Map(type.Value ?? ObjectType);
+                    sb.Append("new ReadOnlyDictionary<").Append(k).Append(", ").Append(v)
+                      .Append(">(new Dictionary<").Append(k).Append(", ").Append(v).Append(">(").Append(param).Append("))");
+                    break;
+                }
         }
     }
 
