@@ -162,6 +162,17 @@ internal sealed class LspServer
                                         },
                                         ["full"] = true,
                                     },
+
+                                    // Custom (non-standard) koine/* requests, advertised under the
+                                    // LSP "experimental" capability so clients can discover them
+                                    // without breaking spec-conformant clients. Purely additive.
+                                    ["experimental"] = new Dictionary<string, object?>
+                                    {
+                                        ["koineEmitPreview"] = true,
+                                        ["koineGlossary"] = true,
+                                        ["koineContextMap"] = true,
+                                        ["koineCheck"] = true,
+                                    },
                                 },
                                 ["serverInfo"] = new Dictionary<string, object?>
                                 {
@@ -279,6 +290,39 @@ internal sealed class LspServer
                             if (root.TryGetProperty("id", out _))
                             {
                                 Respond(root, SemanticTokensResultJson(root));
+                            }
+
+                            break;
+
+                        // ---- Custom koine/* requests ----
+                        case "koine/emitPreview":
+                            if (root.TryGetProperty("id", out _))
+                            {
+                                Respond(root, EmitPreviewResultJson(root));
+                            }
+
+                            break;
+
+                        case "koine/glossary":
+                            if (root.TryGetProperty("id", out _))
+                            {
+                                Respond(root, GlossaryResultJson(root));
+                            }
+
+                            break;
+
+                        case "koine/contextMap":
+                            if (root.TryGetProperty("id", out _))
+                            {
+                                Respond(root, ContextMapResultJson(root));
+                            }
+
+                            break;
+
+                        case "koine/check":
+                            if (root.TryGetProperty("id", out _))
+                            {
+                                Respond(root, CheckResultJson(root));
                             }
 
                             break;
@@ -751,6 +795,274 @@ internal sealed class LspServer
         var data = SemanticTokenProvider.Encode(tokens);
         return new Dictionary<string, object?> { ["data"] = data };
     }
+
+    // ---- Custom koine/* requests ------------------------------------------
+
+    /// <summary>
+    /// Previews the emitter output for the merged workspace (directory semantics, matching the
+    /// build) through the SAME registry/pipeline the CLI uses, so the returned files are
+    /// byte-identical to <c>koine build</c>. The optional <c>params.target</c> selects the
+    /// emitter (<c>"csharp"</c> default, also <c>"typescript"</c>); any other target — including
+    /// <c>glossary</c>/<c>docs</c>, which have dedicated requests — yields a structured error
+    /// result (never a JSON-RPC error, never a throw). Diagnostics reuse the existing
+    /// <see cref="ToLspDiagnostic"/> shape plus a per-item <c>uri</c> so a multi-file preview is
+    /// unambiguous; on any model error the emitter produces no files and <c>files</c> is empty.
+    /// </summary>
+    private object? EmitPreviewResultJson(JsonElement root)
+    {
+        // 1. Effective target: default "csharp" when absent/empty/non-string.
+        var target = "csharp";
+        if (root.TryGetProperty("params", out var p)
+            && p.TryGetProperty("target", out var t)
+            && t.ValueKind == JsonValueKind.String
+            && t.GetString() is { Length: > 0 } requested)
+        {
+            target = requested;
+        }
+
+        // 2. Gate to the two preview targets BEFORE the registry (which also accepts
+        //    glossary/docs — those have dedicated koine/glossary requests).
+        if (!string.Equals(target, "csharp", StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(target, "typescript", StringComparison.OrdinalIgnoreCase))
+        {
+            return new Dictionary<string, object?>
+            {
+                ["target"] = target,
+                ["files"] = Array.Empty<object>(),
+                ["diagnostics"] = Array.Empty<object>(),
+                ["error"] = $"unknown target '{target}'; expected 'csharp' or 'typescript'",
+            };
+        }
+
+        // 3. Build the merged-workspace sources (directory semantics).
+        var workspace = Workspace();
+        var sources = workspace.Select(kv => new SourceFile(kv.Key, kv.Value)).ToList();
+
+        // 4. Create the emitter via the SAME registry the CLI uses, with the SAME per-target
+        //    options the build resolves from koine.config (namespace map, instant mode), so the
+        //    preview is byte-identical to `koine build` even for a configured workspace.
+        if (!Infrastructure.EmitterRegistry.TryCreate(target, ResolveTargetOptions(root, target), out var emitter))
+        {
+            return new Dictionary<string, object?>
+            {
+                ["target"] = target,
+                ["files"] = Array.Empty<object>(),
+                ["diagnostics"] = Array.Empty<object>(),
+                ["error"] = $"unknown target '{target}'; expected 'csharp' or 'typescript'",
+            };
+        }
+
+        // 5. Compile through the shared pipeline (identical to BuildCommand).
+        var result = _compiler.Compile(sources, emitter);
+
+        // 6. Map files (Compile returns empty Files on any error — no special-casing needed).
+        var files = result.Files
+            .Select(f => (object)new Dictionary<string, object?>
+            {
+                ["path"] = f.RelativePath,
+                ["contents"] = f.Contents,
+            })
+            .ToArray();
+
+        // 7. Map diagnostics with per-file ranges, stamping the originating uri.
+        var items = result.Diagnostics
+            .Select(d =>
+            {
+                var lines = d.File is { } file && workspace.TryGetValue(file, out var txt)
+                    ? SplitLines(txt)
+                    : Array.Empty<string>();
+                var dto = ToLspDiagnostic(d, lines);
+                dto["uri"] = d.File;
+                return (object)dto;
+            })
+            .ToArray();
+
+        return new Dictionary<string, object?>
+        {
+            ["target"] = target,
+            ["files"] = files,
+            ["diagnostics"] = items,
+            ["error"] = (object?)null,
+        };
+    }
+
+    /// <summary>
+    /// Resolves the per-target emitter options exactly as the build does: discover the
+    /// <c>koine.config</c> beside (or above) the previewed document — anchored on the request's
+    /// <c>textDocument.uri</c>, falling back to a scanned workspace root — and read its
+    /// <c>targets.&lt;target&gt;.*</c> block. Returns <see cref="TargetOptions.Empty"/> when no
+    /// anchor resolves or no config is found, so an unconfigured workspace previews identically.
+    /// </summary>
+    private TargetOptions ResolveTargetOptions(JsonElement root, string target)
+    {
+        var anchor = TryGetUri(root, out var uri) ? UriToPath(uri) : null;
+        anchor ??= _scannedRoots.FirstOrDefault();
+        if (anchor is null)
+        {
+            return TargetOptions.Empty;
+        }
+
+        return KoineConfig.Discover(anchor).OptionsFor(target);
+    }
+
+    /// <summary>
+    /// Emits the ubiquitous-language glossary (markdown) for the whole merged workspace, reusing
+    /// the same <see cref="Koine.Compiler.Emit.Glossary.GlossaryEmitter"/> as <c>koine build … --glossary</c>.
+    /// The request is workspace-scoped; the <c>uri</c> is a conventional anchor only. A null model
+    /// (any file has a syntax error) degrades to <c>{ "markdown": "" }</c> rather than throwing.
+    /// </summary>
+    private object? GlossaryResultJson(JsonElement root)
+    {
+        var sources = Workspace().Select(kv => new SourceFile(kv.Key, kv.Value)).ToList();
+        var (model, _) = _compiler.Parse(sources);
+        if (model is null)
+        {
+            return new Dictionary<string, object?> { ["markdown"] = "" };
+        }
+
+        var markdown = new Koine.Compiler.Emit.Glossary.GlossaryEmitter().Emit(model)[0].Contents;
+        return new Dictionary<string, object?> { ["markdown"] = markdown };
+    }
+
+    /// <summary>
+    /// Projects the strategic context map of the merged workspace to a plain DTO:
+    /// the context names plus each relation (upstream/downstream/kind/bidirectional/sharedTypes/acl).
+    /// The request is workspace-scoped; the <c>uri</c> only validates well-formedness. A malformed
+    /// request or a null model yields the empty DTO <c>{ contexts:[], relations:[] }</c>; a valid
+    /// model with no context map yields populated <c>contexts</c> and empty <c>relations</c>.
+    /// </summary>
+    private object? ContextMapResultJson(JsonElement root)
+    {
+        if (!TryGetUri(root, out _))
+        {
+            return EmptyContextMap();
+        }
+
+        var sources = Workspace().Select(kv => new SourceFile(kv.Key, kv.Value)).ToList();
+        var (model, _) = _compiler.Parse(sources);
+        if (model is null)
+        {
+            return EmptyContextMap();
+        }
+
+        var contexts = model.Contexts.Select(c => (object)c.Name).ToArray();
+        var relations = model.ContextMap is null
+            ? Array.Empty<object>()
+            : model.ContextMap.Relations.Select(MapRelation).ToArray();
+
+        return new Dictionary<string, object?>
+        {
+            ["contexts"] = contexts,
+            ["relations"] = relations,
+        };
+    }
+
+    private static Dictionary<string, object?> EmptyContextMap() => new()
+    {
+        ["contexts"] = Array.Empty<object>(),
+        ["relations"] = Array.Empty<object>(),
+    };
+
+    private static object MapRelation(Koine.Compiler.Ast.ContextRelation r) => new Dictionary<string, object?>
+    {
+        ["upstream"] = r.Upstream,
+        ["downstream"] = r.Downstream,
+        ["kind"] = r.Kind.ToString(),
+        ["bidirectional"] = r.IsBidirectional,
+        ["sharedTypes"] = r.SharedTypes.Select(s => (object)s).ToArray(),
+        ["acl"] = r.AclMappings.Select(MapAcl).ToArray(),
+    };
+
+    private static object MapAcl(Koine.Compiler.Ast.AclMapping a) => new Dictionary<string, object?>
+    {
+        ["upstreamContext"] = a.UpstreamContext,
+        ["upstreamType"] = a.UpstreamType,
+        ["localContext"] = a.LocalContext,
+        ["localType"] = a.LocalType,
+    };
+
+    /// <summary>
+    /// Runs the model-versioning compatibility check of the merged workspace (the current model)
+    /// against the <c>params.baseline</c> path/dir (or <c>file://</c> URI), via the same
+    /// <see cref="CompatibilityChecker"/> as <c>koine check</c>. Returns a structured result with
+    /// <c>hasBreakingChanges</c> and the per-change list. Every failure mode (missing/empty
+    /// baseline param, unreadable path, no .koi files, baseline or current model that fails to
+    /// parse) returns a normal result object carrying an <c>error</c> string — never a JSON-RPC
+    /// error and never a throw — so the client always renders a payload.
+    /// </summary>
+    private object? CheckResultJson(JsonElement root)
+    {
+        // 1. Read the baseline param.
+        if (!root.TryGetProperty("params", out var p)
+            || !p.TryGetProperty("baseline", out var b)
+            || b.ValueKind != JsonValueKind.String
+            || string.IsNullOrWhiteSpace(b.GetString()))
+        {
+            return ErrorResult("baseline path is required");
+        }
+
+        var baseline = b.GetString()!;
+
+        // 2. Normalize a file:// URI to a filesystem path; plain paths pass through.
+        var resolvedPath = baseline.StartsWith("file:", StringComparison.OrdinalIgnoreCase)
+            ? UriToPath(baseline) ?? baseline
+            : baseline;
+
+        // 3. Load baseline sources, guarding I/O.
+        List<SourceFile> baselineSources;
+        try
+        {
+            baselineSources = Infrastructure.SourceLoader.ReadSources(resolvedPath);
+        }
+        catch (Exception ex)
+        {
+            return ErrorResult($"cannot read baseline '{baseline}': {ex.Message}");
+        }
+
+        if (baselineSources.Count == 0)
+        {
+            return ErrorResult($"no .koi files found at baseline '{baseline}'");
+        }
+
+        // 4. Parse the baseline model.
+        var (baselineModel, baselineDiags) = _compiler.Parse(baselineSources);
+        if (baselineModel is null)
+        {
+            return ErrorResult("baseline failed to parse: " + string.Join("; ", baselineDiags.Select(d => d.Message)));
+        }
+
+        // 5. Build the current model from the merged workspace.
+        var sources = Workspace().Select(kv => new SourceFile(kv.Key, kv.Value)).ToList();
+        var (currentModel, currentDiags) = _compiler.Parse(sources);
+        if (currentModel is null)
+        {
+            return ErrorResult("current model failed to parse: " + string.Join("; ", currentDiags.Select(d => d.Message)));
+        }
+
+        // 6. Run the check.
+        var report = new CompatibilityChecker().Check(baselineModel, currentModel);
+
+        // 7. Serialize the success DTO.
+        return new Dictionary<string, object?>
+        {
+            ["hasBreakingChanges"] = report.HasBreakingChanges,
+            ["changes"] = report.Changes
+                .Select(c => (object)new Dictionary<string, object?>
+                {
+                    ["impact"] = c.Impact.ToString(),
+                    ["code"] = c.Code,
+                    ["message"] = c.Message,
+                })
+                .ToArray(),
+        };
+    }
+
+    private static Dictionary<string, object?> ErrorResult(string message) => new()
+    {
+        ["error"] = message,
+        ["hasBreakingChanges"] = false,
+        ["changes"] = Array.Empty<object>(),
+    };
 
     /// <summary>Extracts <c>X</c> from a Suggestions-style message ending in <c>… — did you mean 'X'?</c>.</summary>
     internal static string? ExtractSuggestion(string message)

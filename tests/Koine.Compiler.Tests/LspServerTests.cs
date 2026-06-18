@@ -679,4 +679,431 @@ public class LspServerTests
         Assert.Equal("String", LspServer.ExtractSuggestion("unknown type 'Strng' — did you mean 'String'?"));
         Assert.Null(LspServer.ExtractSuggestion("unknown type 'Strng'"));
     }
+
+    // ---- Custom koine/* requests ----
+
+    private static byte[] EmitPreview(string uri, string? target) =>
+        Frame(JsonSerializer.Serialize(target is null
+            ? (object)new
+            {
+                jsonrpc = "2.0",
+                id = 30,
+                method = "koine/emitPreview",
+                @params = new { textDocument = new { uri } },
+            }
+            : new
+            {
+                jsonrpc = "2.0",
+                id = 30,
+                method = "koine/emitPreview",
+                @params = new { textDocument = new { uri }, target },
+            }));
+
+    private static byte[] Glossary(string uri) =>
+        Frame(JsonSerializer.Serialize(new
+        {
+            jsonrpc = "2.0",
+            id = 30,
+            method = "koine/glossary",
+            @params = new { textDocument = new { uri } },
+        }));
+
+    private static byte[] ContextMap(string uri) =>
+        Frame(JsonSerializer.Serialize(new
+        {
+            jsonrpc = "2.0",
+            id = 30,
+            method = "koine/contextMap",
+            @params = new { textDocument = new { uri } },
+        }));
+
+    private static byte[] Check(string uri, string baseline) =>
+        Frame(JsonSerializer.Serialize(new
+        {
+            jsonrpc = "2.0",
+            id = 30,
+            method = "koine/check",
+            @params = new { textDocument = new { uri }, baseline },
+        }));
+
+    // ---- koine/emitPreview ----
+
+    [Fact]
+    public void EmitPreview_default_target_emits_csharp_files()
+    {
+        var doc = "context C {\n  value Money { amount: Decimal }\n}\n";
+        var output = RunSession(
+            Initialize(),
+            DidOpen("file:///t.koi", doc),
+            EmitPreview("file:///t.koi", target: null));
+
+        Assert.Contains("\"target\":\"csharp\"", output);
+        Assert.Contains("\"files\":[", output);
+        Assert.DoesNotContain("\"files\":[]", output);
+        Assert.Contains(".cs", output);
+        Assert.Contains("Money", output);
+        Assert.Contains("\"error\":null", output);
+    }
+
+    [Fact]
+    public void EmitPreview_typescript_target_emits_ts_files()
+    {
+        var doc = "context C {\n  value Money { amount: Decimal }\n}\n";
+        var output = RunSession(
+            Initialize(),
+            DidOpen("file:///t.koi", doc),
+            EmitPreview("file:///t.koi", "typescript"));
+
+        Assert.Contains("\"target\":\"typescript\"", output);
+        Assert.Contains(".ts", output);
+        Assert.DoesNotContain("\"files\":[]", output);
+        Assert.Contains("\"error\":null", output);
+    }
+
+    [Fact]
+    public void EmitPreview_unknown_target_returns_error_result_not_throw()
+    {
+        var doc = "context C {\n  value Money { amount: Decimal }\n}\n";
+        var output = RunSession(
+            Initialize(),
+            DidOpen("file:///t.koi", doc),
+            EmitPreview("file:///t.koi", "rust"));
+
+        Assert.Contains("unknown target 'rust'", output);
+        Assert.Contains("\"files\":[]", output);
+        Assert.DoesNotContain("-32601", output); // a normal result, not a JSON-RPC error
+        Assert.Contains("\"id\":30", output);     // response correlated to the request id
+    }
+
+    [Fact]
+    public void EmitPreview_model_with_errors_yields_empty_files_plus_diagnostics()
+    {
+        var doc = "context C {\n  value V { x: Nope }\n}\n";
+        var output = RunSession(
+            Initialize(),
+            DidOpen("file:///t.koi", doc),
+            EmitPreview("file:///t.koi", "csharp"));
+
+        Assert.Contains("\"files\":[]", output);
+        Assert.Contains("unknown type 'Nope'", output);
+        Assert.Contains("\"severity\":1", output);
+        Assert.Contains("\"error\":null", output);
+        Assert.Contains("file:///t.koi", output); // per-diagnostic uri
+    }
+
+    [Fact]
+    public void EmitPreview_honors_koine_config_so_it_matches_the_build()
+    {
+        // The preview must resolve the SAME per-target options the build does (R16.1 namespace
+        // remap), so a configured workspace previews byte-identically to `koine build`. Discovery
+        // is anchored on the previewed document's path, so the .koi lives on disk beside the config.
+        var dir = Directory.CreateTempSubdirectory("koi-cfg-");
+        try
+        {
+            File.WriteAllText(Path.Combine(dir.FullName, "koine.config"),
+                "target = csharp\ntargets.csharp.namespaces.Billing = Acme.Billing\n");
+            var koiPath = Path.Combine(dir.FullName, "billing.koi");
+            const string doc = "context Billing {\n  value Money { amount: Decimal }\n}\n";
+            File.WriteAllText(koiPath, doc);
+
+            var rootUri = new Uri(dir.FullName).AbsoluteUri;
+            var koiUri = new Uri(koiPath).AbsoluteUri;
+
+            var output = RunSession(
+                InitializeWithRoot(rootUri),
+                DidOpen(koiUri, doc),
+                EmitPreview(koiUri, "csharp"));
+
+            // The configured namespace remap is applied — exactly as the build would emit it.
+            Assert.Contains("namespace Acme.Billing;", output);
+            Assert.DoesNotContain("namespace Billing;", output);
+        }
+        finally { dir.Delete(recursive: true); }
+    }
+
+    // ---- koine/glossary ----
+
+    [Fact]
+    public void Glossary_returns_markdown_for_open_model()
+    {
+        var doc = "context C {\n  value Money { amount: Decimal }\n}\n";
+        var output = RunSession(
+            Initialize(),
+            DidOpen("file:///t.koi", doc),
+            Glossary("file:///t.koi"));
+
+        Assert.Contains("\"markdown\":", output);
+        Assert.Contains("# Ubiquitous Language Glossary", output);
+        Assert.Contains("## C", output);
+        Assert.Contains("Money", output);
+        Assert.Contains("\"id\":30", output);
+        Assert.DoesNotContain("\"markdown\":\"\"", output);
+    }
+
+    [Fact]
+    public void Glossary_null_model_returns_empty_markdown()
+    {
+        var badDoc = "context C {\n  value {\n  }\n}\n"; // unnamed value: does not parse
+        var output = RunSession(
+            Initialize(),
+            DidOpen("file:///bad.koi", badDoc),
+            Glossary("file:///bad.koi"));
+
+        Assert.Contains("\"markdown\":\"\"", output);
+        Assert.Contains("\"id\":30", output);
+        Assert.DoesNotContain("Ubiquitous Language Glossary", output);
+    }
+
+    [Fact]
+    public void Glossary_merges_whole_workspace_across_open_files()
+    {
+        var catalog = "context Catalog {\n  value Product { sku: String }\n}\n";
+        var sales = "context Sales {\n  value Order { total: Decimal }\n}\n";
+        var output = RunSession(
+            Initialize(),
+            DidOpen("file:///catalog.koi", catalog),
+            DidOpen("file:///sales.koi", sales),
+            Glossary("file:///catalog.koi"));
+
+        Assert.Contains("## Catalog", output);
+        Assert.Contains("## Sales", output);
+        Assert.Contains("Product", output);
+        Assert.Contains("Order", output);
+    }
+
+    // ---- koine/contextMap ----
+
+    [Fact]
+    public void ContextMap_request_returns_contexts_and_relations()
+    {
+        var doc = "context Catalog {\n  entity Product identified by ProductId { sku: String }\n}\n"
+                + "context Sales {\n  value Order { ref: String }\n}\n"
+                + "contextmap {\n  Catalog -> Sales : conformist\n}\n";
+        var output = RunSession(
+            Initialize(),
+            DidOpen("file:///cm.koi", doc),
+            ContextMap("file:///cm.koi"));
+
+        Assert.Contains("\"contexts\":[", output);
+        Assert.Contains("Catalog", output);
+        Assert.Contains("Sales", output);
+        Assert.Contains("\"upstream\":\"Catalog\"", output);
+        Assert.Contains("\"downstream\":\"Sales\"", output);
+        Assert.Contains("\"kind\":\"Conformist\"", output);
+        Assert.Contains("\"bidirectional\":false", output);
+        Assert.DoesNotContain("\"relations\":[]", output);
+    }
+
+    [Fact]
+    public void ContextMap_with_no_map_returns_contexts_and_empty_relations()
+    {
+        var doc = "context Catalog {\n  value Product { sku: String }\n}\n";
+        var output = RunSession(
+            Initialize(),
+            DidOpen("file:///nomap.koi", doc),
+            ContextMap("file:///nomap.koi"));
+
+        Assert.Contains("Catalog", output);
+        Assert.Contains("\"relations\":[]", output);
+    }
+
+    [Fact]
+    public void ContextMap_bidirectional_partnership_marks_bidirectional_true()
+    {
+        var doc = "context A {\n  value X { v: String }\n}\n"
+                + "context B {\n  value Y { v: String }\n}\n"
+                + "contextmap {\n  A <-> B : partnership\n}\n";
+        var output = RunSession(
+            Initialize(),
+            DidOpen("file:///part.koi", doc),
+            ContextMap("file:///part.koi"));
+
+        Assert.Contains("\"kind\":\"Partnership\"", output);
+        Assert.Contains("\"bidirectional\":true", output);
+        Assert.Contains("\"upstream\":\"A\"", output);
+        Assert.Contains("\"downstream\":\"B\"", output);
+    }
+
+    [Fact]
+    public void ContextMap_shared_kernel_relation_exposes_shared_types()
+    {
+        // A shared-kernel relation carries the shared type names; the DTO must surface them in
+        // `sharedTypes` (empty for every other relation kind).
+        var doc = "context Sales {\n  value Money { amount: Decimal }\n}\n"
+                + "context Shipping {\n  value Money { amount: Decimal }\n}\n"
+                + "contextmap {\n  Sales <-> Shipping : shared-kernel { Money }\n}\n";
+        var output = RunSession(
+            Initialize(),
+            DidOpen("file:///sk.koi", doc),
+            ContextMap("file:///sk.koi"));
+
+        Assert.Contains("\"kind\":\"SharedKernel\"", output);
+        Assert.Contains("\"sharedTypes\":[\"Money\"]", output);
+        Assert.Contains("\"bidirectional\":true", output);
+    }
+
+    [Fact]
+    public void ContextMap_anti_corruption_layer_relation_exposes_acl_mappings()
+    {
+        // An anti-corruption-layer relation carries Upstream.Type -> Local.Type mappings; the DTO
+        // must surface each as an `acl` entry with the four qualified parts.
+        var doc = "context Legacy {\n  value Account { id: String }\n  value Charge { id: String }\n}\n"
+                + "context Billing {\n  value Customer { id: String }\n  value Invoice { id: String }\n}\n"
+                + "contextmap {\n  Legacy -> Billing : anti-corruption-layer\n"
+                + "    acl { Legacy.Account -> Billing.Customer\n"
+                + "          Legacy.Charge  -> Billing.Invoice }\n}\n";
+        var output = RunSession(
+            Initialize(),
+            DidOpen("file:///acl.koi", doc),
+            ContextMap("file:///acl.koi"));
+
+        Assert.Contains("\"kind\":\"AntiCorruptionLayer\"", output);
+        Assert.Contains("\"upstreamContext\":\"Legacy\"", output);
+        Assert.Contains("\"upstreamType\":\"Account\"", output);
+        Assert.Contains("\"localContext\":\"Billing\"", output);
+        Assert.Contains("\"localType\":\"Customer\"", output);
+    }
+
+    [Fact]
+    public void ContextMap_malformed_request_without_uri_returns_empty_dto()
+    {
+        // A request with no textDocument.uri must degrade to the empty DTO, not throw.
+        var noUri = Frame("{\"jsonrpc\":\"2.0\",\"id\":30,\"method\":\"koine/contextMap\",\"params\":{}}");
+        var output = RunSession(Initialize(), noUri);
+
+        Assert.Contains("\"contexts\":[]", output);
+        Assert.Contains("\"relations\":[]", output);
+        Assert.DoesNotContain("-32601", output); // a normal result, not a JSON-RPC error
+    }
+
+    // ---- koine/check ----
+
+    [Fact]
+    public void Check_reports_a_breaking_change_against_a_baseline()
+    {
+        var dir = Directory.CreateTempSubdirectory("koi-check-");
+        try
+        {
+            File.WriteAllText(Path.Combine(dir.FullName, "baseline.koi"),
+                "context Sales {\n  integration event OrderPlaced {\n    orderId: OrderId\n    total:   Decimal\n    note:    String?\n  }\n}\n");
+
+            var output = RunSession(
+                Initialize(),
+                DidOpen("file:///current.koi", "context Sales { }"),
+                Check("file:///current.koi", dir.FullName));
+
+            Assert.Contains("\"hasBreakingChanges\":true", output);
+            Assert.Contains("KOI1510", output);
+            Assert.Contains("\"impact\":\"Breaking\"", output);
+            Assert.Contains("OrderPlaced", output);
+        }
+        finally { dir.Delete(recursive: true); }
+    }
+
+    [Fact]
+    public void Check_reports_no_breaking_changes_for_identical_model()
+    {
+        const string source = "context Sales {\n  integration event OrderPlaced {\n    orderId: OrderId\n    total:   Decimal\n    note:    String?\n  }\n}\n";
+        var dir = Directory.CreateTempSubdirectory("koi-check-");
+        try
+        {
+            File.WriteAllText(Path.Combine(dir.FullName, "baseline.koi"), source);
+
+            var output = RunSession(
+                Initialize(),
+                DidOpen("file:///current.koi", source),
+                Check("file:///current.koi", dir.FullName));
+
+            Assert.Contains("\"hasBreakingChanges\":false", output);
+            Assert.Contains("\"changes\":[]", output);
+            Assert.DoesNotContain("\"impact\":\"Breaking\"", output);
+        }
+        finally { dir.Delete(recursive: true); }
+    }
+
+    [Fact]
+    public void Check_with_missing_baseline_param_returns_error_result()
+    {
+        var source = "context Sales {\n  integration event OrderPlaced { orderId: OrderId }\n}\n";
+        var noBaseline = Frame("{\"jsonrpc\":\"2.0\",\"id\":30,\"method\":\"koine/check\",\"params\":{\"textDocument\":{\"uri\":\"file:///current.koi\"}}}");
+        var output = RunSession(
+            Initialize(),
+            DidOpen("file:///current.koi", source),
+            noBaseline);
+
+        Assert.Contains("\"error\":\"baseline path is required\"", output);
+        Assert.Contains("\"hasBreakingChanges\":false", output);
+        Assert.DoesNotContain("-32601", output);
+    }
+
+    [Fact]
+    public void Check_with_unparseable_baseline_returns_error_with_message()
+    {
+        var dir = Directory.CreateTempSubdirectory("koi-check-");
+        try
+        {
+            File.WriteAllText(Path.Combine(dir.FullName, "baseline.koi"),
+                "context Sales {\n  value {\n  }\n}\n"); // syntactically broken
+
+            var output = RunSession(
+                Initialize(),
+                DidOpen("file:///current.koi", "context Sales {\n  integration event OrderPlaced { orderId: OrderId }\n}\n"),
+                Check("file:///current.koi", dir.FullName));
+
+            Assert.Contains("baseline failed to parse", output);
+            Assert.Contains("\"hasBreakingChanges\":false", output);
+            Assert.DoesNotContain("\"impact\":\"Breaking\"", output);
+        }
+        finally { dir.Delete(recursive: true); }
+    }
+
+    [Fact]
+    public void Check_with_empty_baseline_dir_returns_no_koi_files_error()
+    {
+        // An existing directory with no .koi files is the "nothing to compare" branch.
+        var dir = Directory.CreateTempSubdirectory("koi-check-");
+        try
+        {
+            var output = RunSession(
+                Initialize(),
+                DidOpen("file:///current.koi", "context Sales { }"),
+                Check("file:///current.koi", dir.FullName));
+
+            Assert.Contains("no .koi files found", output);
+            Assert.Contains("\"hasBreakingChanges\":false", output);
+            Assert.DoesNotContain("-32601", output);
+        }
+        finally { dir.Delete(recursive: true); }
+    }
+
+    [Fact]
+    public void Check_with_nonexistent_baseline_path_returns_error_not_throw()
+    {
+        // A path that does not exist surfaces as a structured error result, never a throw.
+        var missing = Path.Combine(Path.GetTempPath(), "koi-check-does-not-exist-9d3f", "baseline");
+        var output = RunSession(
+            Initialize(),
+            DidOpen("file:///current.koi", "context Sales { }"),
+            Check("file:///current.koi", missing));
+
+        Assert.Contains("cannot read baseline", output);
+        Assert.Contains("\"hasBreakingChanges\":false", output);
+        Assert.DoesNotContain("-32601", output);
+    }
+
+    // ---- capability discovery ----
+
+    [Fact]
+    public void Initialize_advertises_custom_requests_under_experimental()
+    {
+        var output = RunSession(Initialize());
+        Assert.Contains("\"experimental\"", output);
+        Assert.Contains("\"koineEmitPreview\":true", output);
+        Assert.Contains("\"koineGlossary\":true", output);
+        Assert.Contains("\"koineContextMap\":true", output);
+        Assert.Contains("\"koineCheck\":true", output);
+        // Additive — existing capabilities unchanged.
+        Assert.Contains("\"hoverProvider\":true", output);
+        Assert.Contains("\"textDocumentSync\":1", output);
+    }
 }
