@@ -40,6 +40,11 @@
     <File Path="SECURITY.md" />
     <File Path="USER-STORIES.md" />
   </Folder>
+  <Folder Name="/scripts/build/">
+    <File Path="scripts/build/build.cmd" />
+    <File Path="scripts/build/build.ps1" />
+    <File Path="scripts/build/build.sh" />
+  </Folder>
   <Folder Name="/scripts/install-mcp/">
     <File Path="scripts/install-mcp/install-mcp.cmd" />
     <File Path="scripts/install-mcp/install-mcp.ps1" />
@@ -53,9 +58,6 @@
   <Folder Name="/_solution-items/">
     <File Path=".editorconfig" />
     <File Path=".gitignore" />
-    <File Path="build.cmd" />
-    <File Path="build.ps1" />
-    <File Path="build.sh" />
     <File Path="Directory.Build.props" />
     <File Path="renovate.json" />
   </Folder>

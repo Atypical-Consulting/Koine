@@ -31,11 +31,11 @@ cd Koine
 Build the solution and run the test suite in one shot:
 
 ```bash
-./build.sh
+./scripts/build/build.sh
 ```
 
-`build.sh` is a thin wrapper around the SDK — it runs `dotnet build` followed by `dotnet test`. If you
-prefer to drive the SDK yourself (or you're on Windows), the equivalent is:
+`scripts/build/build.sh` is a thin wrapper around the SDK — it runs `dotnet build` followed by
+`dotnet test`. If you prefer to drive the SDK yourself (or you're on Windows), the equivalent is:
 
 ```bash
 dotnet build
@@ -43,7 +43,7 @@ dotnet test
 ```
 
 :::tip
-On Windows, `build.cmd` and `build.ps1` do the same thing as `build.sh`.
+On Windows, `scripts\build\build.cmd` and `build.ps1` do the same thing as `build.sh`.
 :::
 
 A green test run means the compiler is ready to use.

@@ -29,7 +29,7 @@ git -c user.email=phmatray@gmail.com -c user.name="Philippe Matray" commit -m ".
 .NET 10. Solution is the modern `Koine.slnx`. From this directory:
 
 ```bash
-./build.sh                  # dotnet build && dotnet test (build.ps1 / build.cmd are equivalents)
+./scripts/build/build.sh    # dotnet build && dotnet test (build.ps1 / build.cmd are equivalents)
 dotnet build                # build only
 dotnet test                 # run all tests (~500)
 dotnet test --filter "FullyQualifiedName~R9ValueObjectTests"   # a single test class
