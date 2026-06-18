@@ -1013,11 +1013,12 @@ public sealed partial class CSharpEmitter : IEmitter
     }
 
     /// <summary>
-    /// The value-object overload (Commit 4): renders a guard from a lowered
-    /// <see cref="Ast.Bound.BoundInvariant"/>. The condition is rendered from its <em>syntactic</em>
-    /// origin (so the translator path — and therefore the emitted C# — is unchanged) and the message is
-    /// taken verbatim off the bound node (the C# default already applied in the lowerer). ADDITIVE: the
-    /// raw-<see cref="Expr"/> overload below stays for entity/command callers.
+    /// The value-object overload (Commit 4–6): renders a guard from a lowered
+    /// <see cref="Ast.Bound.BoundInvariant"/>. The condition's resolved types are read from the lowered
+    /// bound tree (Commit 6) — the translator no longer re-infers them — while the rendering structure
+    /// walks the condition's syntactic origin (1:1 with the bound tree). The message is taken verbatim off
+    /// the bound node (the C# default already applied in the lowerer). ADDITIVE: the raw-<see cref="Expr"/>
+    /// overload below stays for entity/command callers.
     /// </summary>
     private void WriteGuard(
         StringBuilder sb,
@@ -1026,9 +1027,17 @@ public sealed partial class CSharpEmitter : IEmitter
         CSharpExpressionTranslator translator,
         CSharpExpressionTranslator.NameMode mode)
     {
-        // The bound condition's syntactic origin drives the unchanged translator; the message is final.
-        var condition = (Expr)invariant.Condition.Syntax;
-        WriteGuard(sb, typeName, condition, invariant.Message, translator, mode);
+        // Activate bound-tree type lookup for the whole condition, then render via the syntactic origin so
+        // the existing guard/negation/match branches and translator are reused unchanged.
+        translator.EnterBoundScope(invariant.Condition);
+        try
+        {
+            WriteGuard(sb, typeName, (Expr)invariant.Condition.Syntax, invariant.Message, translator, mode);
+        }
+        finally
+        {
+            translator.ExitBoundScope();
+        }
     }
 
     /// <summary>

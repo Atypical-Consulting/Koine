@@ -1,5 +1,6 @@
 using System.Text;
 using Koine.Compiler.Ast;
+using Koine.Compiler.Ast.Bound;
 
 namespace Koine.Compiler.Emit.CSharp;
 
@@ -76,6 +77,82 @@ internal sealed class CSharpExpressionTranslator
     // member of enum type). Used to qualify a bare shared enum member in positions
     // a comparison hint doesn't reach (conditional/coalesce branches, a bare value).
     private string? _expectedEnum;
+
+    // VO-path rendering (Commit 6): when set, resolved types come from the lowered BoundExpression tree
+    // (keyed by syntactic origin) instead of re-inferring via _resolver. The values ARE the same
+    // TypeResolver results — precomputed in the lowerer with the same member scope + bounded context — so
+    // rendering is byte-identical; the bound tree simply becomes the source of the resolved types instead
+    // of the translator re-deriving them. Null for the non-VO callers (entities/commands/factories/specs),
+    // which keep the resolver path unchanged.
+    private IReadOnlyDictionary<Expr, KoineType>? _boundTypes;
+
+    /// <summary>
+    /// Renders a VO bound subtree (an invariant condition or a derived-member body), reading every resolved
+    /// type from the lowered <see cref="BoundExpression"/> tree rather than re-inferring it. Delegates to
+    /// <see cref="TranslateTopLevel"/> over the bound node's syntactic origin (the structure is 1:1), with
+    /// the bound type map active for the duration.
+    /// </summary>
+    public string TranslateTopLevelBound(BoundExpression bound, NameMode mode, string? expectedEnum = null)
+    {
+        EnterBoundScope(bound);
+        try
+        {
+            return TranslateTopLevel((Expr)bound.Syntax, mode, expectedEnum);
+        }
+        finally
+        {
+            ExitBoundScope();
+        }
+    }
+
+    /// <summary>Activates bound-tree type lookup for the given root and all its descendants (Commit 6).</summary>
+    public void EnterBoundScope(BoundExpression root)
+    {
+        var map = new Dictionary<Expr, KoineType>(ReferenceEqualityComparer.Instance);
+        CollectBoundTypes(root, map);
+        _boundTypes = map;
+    }
+
+    /// <summary>Deactivates bound-tree type lookup; subsequent queries re-infer via the resolver.</summary>
+    public void ExitBoundScope() => _boundTypes = null;
+
+    private static void CollectBoundTypes(BoundExpression node, Dictionary<Expr, KoineType> map)
+    {
+        if (node.Syntax is Expr e)
+        {
+            map[e] = node.Type;
+        }
+
+        foreach (BoundExpression child in BoundChildren(node))
+        {
+            CollectBoundTypes(child, map);
+        }
+    }
+
+    private static IEnumerable<BoundExpression> BoundChildren(BoundExpression e) => e switch
+    {
+        BoundBinary b => new[] { b.Left, b.Right },
+        BoundUnary u => new[] { u.Operand },
+        BoundMemberAccess m => new[] { m.Receiver },
+        BoundCall c => new[] { c.Receiver }.Concat(c.Args),
+        BoundConditional cd => new[] { cd.Condition, cd.Then, cd.Else },
+        BoundCoalesce co => new[] { co.Left, co.Right },
+        BoundMatch ma => new[] { ma.Target },
+        BoundGuard g => new[] { g.Body, g.Condition },
+        BoundLambda l => new[] { l.Body },
+        BoundLet let => let.Bindings.Select(bn => bn.Value).Append(let.Body),
+        _ => Enumerable.Empty<BoundExpression>()
+    };
+
+    /// <summary>
+    /// The resolved type of a syntactic expression — from the lowered bound tree when rendering a VO bound
+    /// subtree (Commit 6), else re-inferred via the resolver (the unchanged path for non-VO callers). The
+    /// bound value is byte-identical to the resolver result (same scope + context).
+    /// </summary>
+    private TypeRef? InferType(Expr expr) =>
+        _boundTypes is not null && _boundTypes.TryGetValue(expr, out KoineType? t)
+            ? t.ToTypeRef()
+            : _resolver.Infer(expr, _scope);
 
     // Spec bodies referenceable by name in the current target type (R10.1); a bare
     // reference to one is inlined (the spec is a named boolean expression).
@@ -319,7 +396,7 @@ internal sealed class CSharpExpressionTranslator
     /// <summary>The enum type name an expression resolves to, else <c>null</c>.</summary>
     private string? EnumTypeName(Expr expr)
     {
-        TypeRef? type = _resolver.Infer(expr, _scope);
+        TypeRef? type = InferType(expr);
         return type is not null && _index.Classify(type.Name) == TypeKind.Enum ? type.Name : null;
     }
 
@@ -444,15 +521,25 @@ internal sealed class CSharpExpressionTranslator
     /// </summary>
     private void WriteLet(LetExpr let, NameMode mode, StringBuilder sb)
     {
-        // Infer the body's type to name the IIFE's delegate, folding bindings into the
-        // scope in order (each binding's value sees the previous ones).
-        TypeScope scope = EffectiveScope();
-        foreach (LetBinding b in let.Bindings)
+        // Infer the body's type to name the IIFE's delegate. On the VO bound path the let's own resolved
+        // type IS its body type (the lowerer's resolver threads the binding scope when typing the whole
+        // let), so read it directly; otherwise fold the bindings into the scope and re-infer.
+        TypeRef? bodyType;
+        if (_boundTypes is not null && _boundTypes.TryGetValue(let, out KoineType? letType))
         {
-            scope = scope.With(b.Name, _resolver.TypeOf(b.Value, scope));
+            bodyType = letType.ToTypeRef();
+        }
+        else
+        {
+            TypeScope scope = EffectiveScope();
+            foreach (LetBinding b in let.Bindings)
+            {
+                scope = scope.With(b.Name, _resolver.TypeOf(b.Value, scope));
+            }
+
+            bodyType = _resolver.Infer(let.Body, scope);
         }
 
-        TypeRef? bodyType = _resolver.Infer(let.Body, scope);
         var ret = bodyType is not null ? new CSharpTypeMapper(_index, _options).Map(bodyType) : "object";
 
         // Fully-qualify Func so the lowering never depends on a `using System;` in the
@@ -698,6 +785,13 @@ internal sealed class CSharpExpressionTranslator
     /// <summary>The inferred type a collection call's lambda selector produces.</summary>
     private TypeRef? InferSelectorType(CallExpr call)
     {
+        // On the VO bound path the aggregate call's own resolved type IS the selector type (the lowerer's
+        // resolver threads the lambda-parameter scope when typing the whole call), so read it directly.
+        if (_boundTypes is not null && _boundTypes.TryGetValue(call, out KoineType? bound))
+        {
+            return bound.ToTypeRef();
+        }
+
         TypeScope scope = EffectiveScope();
         TypeRef? element = TypeResolver.ElementOf(_resolver.Infer(call.Target, scope));
         if (element is not null && call.Args is [LambdaExpr lambda])

@@ -388,6 +388,37 @@ public class BoundIrLoweringTests
         Assert.DoesNotContain(b.Fields, f => f.Kind == FieldKind.Derived);
     }
 
+    [Fact]
+    public void Derived_initializer_carries_resolved_types_the_emitter_consumes_for_rendering()
+    {
+        // Commit 6: the C# emitter renders a derived body from its lowered BoundExpression, reading
+        // resolved types (e.g. the enum type of a member reference, for enum-member qualification) off the
+        // bound tree instead of re-inferring them. This proves that payload is present and correct.
+        const string src = """
+            context Shop {
+              enum Status { Draft, Active }
+              value Sale {
+                status: Status
+                isActive: Bool = status == Active
+              }
+            }
+            """;
+        var sema = Build(src);
+        ValueObjectDecl sale = ValueObjects(sema).Single();
+        BoundField isActive = sema.BoundValueObjectFor(sale).Fields.Single(f => f.Name == "isActive");
+
+        Assert.Equal(FieldKind.Derived, isActive.Kind);
+        Assert.NotNull(isActive.DerivedInitializer);
+
+        // The `status` reference inside the body resolves to the Status enum on the bound node — the type
+        // the translator's enum-hint logic now consumes rather than re-deriving.
+        BoundReference statusRef = Descend(isActive.DerivedInitializer!)
+            .OfType<BoundReference>()
+            .Single(r => r.Symbol.Name == "status");
+        Assert.Equal("Status", statusRef.Type.Name);
+        Assert.Equal(TypeKind.Enum, statusRef.Type.Kind);
+    }
+
     // ----------------------------------------------------------------------
     // Helpers
     // ----------------------------------------------------------------------

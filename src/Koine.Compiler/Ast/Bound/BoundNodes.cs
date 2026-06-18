@@ -7,8 +7,12 @@ namespace Koine.Compiler.Ast.Bound;
 // carries its resolved KoineType; every reference carries the interned Commit-3
 // Symbol; every node keeps a back-pointer to the Syntax it was lowered from.
 //
-// This commit introduces ONLY the forms reachable from a value-object invariant
-// condition (the one migrated emitter slice). Other declaration/expression forms
+// The forms here cover the value-object slice: the expression forms reachable from a
+// VO invariant condition or derived-member body (Commits 4 & 6), plus the VO field
+// projection / invariant declaration forms (Commit 5). The C# emitter consumes both —
+// projection (fields, defaults, ordering, collection shape) AND resolved expression
+// types (enum hints, aggregate selector + let body types) — from these nodes rather
+// than re-deriving them. Other declaration/expression forms (entities, commands, …)
 // are added by the slices that need them, to avoid unused-form churn.
 // ============================================================================
 

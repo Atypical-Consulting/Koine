@@ -63,7 +63,9 @@ public sealed partial class CSharpEmitter
         {
             var m = (Member)f.Syntax;
             var csType = typeMapper.Map(m.Type);
-            var body = translator.TranslateTopLevel(m.Initializer!, CSharpExpressionTranslator.NameMode.Property, EnumExpected(m, index));
+            // Render the derived body from its LOWERED bound initializer (Commit 6): resolved types come
+            // from the bound tree rather than being re-inferred by the translator.
+            var body = translator.TranslateTopLevelBound(f.DerivedInitializer!, CSharpExpressionTranslator.NameMode.Property, EnumExpected(m, index));
             sb.Append('\n');
             WriteXmlDoc(sb, m.Doc, Indent);
             WriteObsolete(sb, m.Deprecated, Indent);
