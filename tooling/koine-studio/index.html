@@ -56,6 +56,10 @@
               <svg class="tb-ico" viewBox="0 0 16 16" aria-hidden="true"><path d="M6 4 2.5 8 6 12M10 4l3.5 4L10 12" /></svg>
               TS
             </button>
+            <button type="button" id="btn-generate-project" class="tb-primary" title="Generate a downloadable project">
+              <svg class="tb-ico" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2.6v6.8M5.2 6.8 8 9.6l2.8-2.8M3.4 12.6h9.2" /></svg>
+              Generate
+            </button>
           </div>
           <span class="tb-divider" aria-hidden="true"></span>
           <button type="button" id="btn-check">
@@ -108,11 +112,17 @@
             <button type="button" class="tab" id="tab-glossary" role="tab" data-view="glossary" aria-selected="false">
               Glossary
             </button>
+            <button type="button" class="tab" id="tab-diagrams" role="tab" data-view="diagrams" aria-selected="false">
+              Diagrams
+            </button>
             <button type="button" class="tab" id="tab-contextmap" role="tab" data-view="contextmap" aria-selected="false">
               Context Map
             </button>
             <button type="button" class="tab" id="tab-outline" role="tab" data-view="outline" aria-selected="false">
               Outline
+            </button>
+            <button type="button" class="tab" id="tab-assistant" role="tab" data-view="assistant" aria-selected="false">
+              Assistant
             </button>
             <button type="button" class="tab" id="tab-check" role="tab" data-view="check" aria-selected="false">
               Check
@@ -122,8 +132,10 @@
           <div id="views">
             <div id="view-preview" class="view" role="tabpanel"></div>
             <div id="view-glossary" class="view doc-view" role="tabpanel" hidden></div>
+            <div id="view-diagrams" class="view doc-view" role="tabpanel" hidden></div>
             <div id="view-contextmap" class="view doc-view" role="tabpanel" hidden></div>
             <div id="view-outline" class="view doc-view" role="tabpanel" hidden></div>
+            <div id="view-assistant" class="view" role="tabpanel" hidden></div>
             <div id="view-check" class="view doc-view" role="tabpanel" hidden></div>
           </div>
         </section>

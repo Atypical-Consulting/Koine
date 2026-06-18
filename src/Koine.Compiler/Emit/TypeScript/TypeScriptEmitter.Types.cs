@@ -400,12 +400,18 @@ public sealed partial class TypeScriptEmitter
               .Append(" = ").Append(translator.Translate(tr.Value, expectedEnum)).Append(";\n");
         }
 
+        // Translate the result FIRST, in the same scope as the emit payloads, so the emit builder
+        // can substitute it. If the same value also appears as a WHOLE emit argument it is hoisted
+        // into a single `const __result` computed once — mirroring the C# emitter. The match is
+        // per-argument and exact (not a substring of the rendered statement), so a sibling argument
+        // that merely shares a prefix — e.g. `this.taxRate` vs a `this.tax` result — is left intact.
+        string? resultExpr = result is not null ? translator.Translate(result.Value, cmd.ReturnType?.Name) : null;
+
         // Domain events are recorded while parameters are still in scope (their payloads may
         // reference parameters), but rendered AFTER the post-mutation invariant re-check so an
         // invalid state throws before any event is recorded — mirroring the C# emitter's order.
-        var emitStatements = emits.Select(e => BuildEmitStatement(e, translator, index, "this.")).ToList();
-
-        string? resultExpr = result is not null ? translator.Translate(result.Value, cmd.ReturnType?.Name) : null;
+        var emitStatements = emits.Select(e => BuildEmitStatement(e, translator, index, "this.", resultExpr)).ToList();
+        bool hoistResult = emitStatements.Any(s => s.Hoisted);
 
         foreach (Param p in cmd.Parameters)
         {
@@ -417,14 +423,22 @@ public sealed partial class TypeScriptEmitter
             sb.Append(Indent).Append(Indent).Append("this.checkInvariants();\n");
         }
 
+        // Compute the hoisted result (once) BEFORE the events so an emit payload can carry the
+        // same value without recomputing it.
+        if (hoistResult)
+        {
+            sb.Append(Indent).Append(Indent).Append("const __result = ").Append(resultExpr).Append(";\n");
+        }
+
         foreach (var stmt in emitStatements)
         {
-            sb.Append(Indent).Append(Indent).Append(stmt).Append('\n');
+            sb.Append(Indent).Append(Indent).Append(stmt.Text).Append('\n');
         }
 
         if (resultExpr is not null)
         {
-            sb.Append(Indent).Append(Indent).Append("return ").Append(resultExpr).Append(";\n");
+            sb.Append(Indent).Append(Indent).Append("return ")
+              .Append(hoistResult ? "__result" : resultExpr).Append(";\n");
         }
 
         sb.Append(Indent).Append("}\n");
@@ -492,7 +506,8 @@ public sealed partial class TypeScriptEmitter
         // Creation events (payloads may reference `id` and parameters, so build them before
         // those locals leave scope) record onto the freshly-constructed instance.
         var emits = factory.Body.OfType<EmitClause>().ToList();
-        var emitStatements = emits.Select(e => BuildEmitStatement(e, translator, index, "instance.")).ToList();
+        // Factories have no `result` clause, so there is nothing to hoist — take the text only.
+        var emitStatements = emits.Select(e => BuildEmitStatement(e, translator, index, "instance.").Text).ToList();
 
         translator.PopLocal("id");
         foreach (Param p in factory.Parameters)
@@ -628,31 +643,45 @@ public sealed partial class TypeScriptEmitter
     /// Builds the <c>&lt;prefix&gt;_domainEvents.push(new EventName(...));</c> statement for an
     /// <c>emit</c> clause. Positional arguments follow the event's emitted constructor order
     /// (<see cref="OrderCtorParams"/> moves defaulted/optional fields last); <c>occurredOn</c>
-    /// is supplied by the event constructor's own default. The TS analogue of the C# emitter's
-    /// <c>BuildEmitStatement</c>.
+    /// is supplied by the event constructor's own default. When <paramref name="hoistedResultExpr"/>
+    /// is supplied, any argument whose WHOLE rendered form equals it is replaced with the
+    /// <c>__result</c> local and <c>Hoisted</c> is returned true, so the caller knows to emit the
+    /// <c>const __result = …;</c> binding. The TS analogue of the C# emitter's <c>BuildEmitStatement</c>.
     /// </summary>
-    private string BuildEmitStatement(EmitClause emit, TypeScriptExpressionTranslator translator, ModelIndex index, string targetPrefix)
+    private (string Text, bool Hoisted) BuildEmitStatement(
+        EmitClause emit, TypeScriptExpressionTranslator translator, ModelIndex index,
+        string targetPrefix, string? hoistedResultExpr = null)
     {
         if (!index.TryGetDecl(emit.EventName, out TypeDecl decl) || decl is not EventDecl ev)
         {
-            return $"/* unknown event '{emit.EventName}' */";
+            return ($"/* unknown event '{emit.EventName}' */", false);
         }
 
         var eventMemberNames = new HashSet<string>(ev.Members.Select(m => m.Name), StringComparer.Ordinal);
         var ctorFields = OrderCtorParams(ev.Members.Where(m => !MemberAnalysis.IsDerived(m, eventMemberNames))).ToList();
         var argByField = emit.Args.ToDictionary(a => a.Field, a => a.Value, StringComparer.Ordinal);
 
+        bool hoisted = false;
         var args = ctorFields.Select(f =>
         {
             if (!argByField.TryGetValue(f.Name, out Expr? value))
             {
                 return "undefined as never"; // validator guarantees presence; defensive
             }
-            return translator.Translate(value, EnumExpected(f, index));
-        });
+
+            var rendered = translator.Translate(value, EnumExpected(f, index));
+            // Substitute the hoisted local only when the WHOLE argument is the result expression; a
+            // substring match (a sibling argument sharing a prefix) must NOT be rewritten.
+            if (hoistedResultExpr is not null && string.Equals(rendered, hoistedResultExpr, StringComparison.Ordinal))
+            {
+                hoisted = true;
+                return "__result";
+            }
+            return rendered;
+        }).ToList();
 
         var eventName = TypeScriptNaming.ToPascalCase(ev.Name);
-        return $"{targetPrefix}_domainEvents.push(new {eventName}({string.Join(", ", args)}));";
+        return ($"{targetPrefix}_domainEvents.push(new {eventName}({string.Join(", ", args)}));", hoisted);
     }
 
     /// <summary>A readable fallback rule message synthesized from a condition (mirrors the C# emitter's intent).</summary>

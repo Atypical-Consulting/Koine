@@ -99,6 +99,21 @@ export class TauriPlatform implements Platform {
     });
   }
 
+  // Save generated-project bytes: prompt for a destination, then write the raw zip via the Rust
+  // `write_bytes` command (the text-only `write_text_file` would corrupt binary). Bytes cross the
+  // IPC boundary as a JSON number array — fine for the small archives Koine emits. Returns false
+  // when the user dismisses the save dialog so the caller doesn't claim a save happened.
+  async saveZip(defaultName: string, data: Uint8Array): Promise<boolean> {
+    const path = await saveDialog({
+      title: 'Save generated project',
+      defaultPath: defaultName,
+      filters: [{ name: 'Zip archive', extensions: ['zip'] }],
+    });
+    if (!path) return false; // cancelled
+    await invoke('write_bytes', { path, contents: Array.from(data) });
+    return true;
+  }
+
   // The desktop compatibility check reads the baseline path server-side, so this is unused; it is
   // implemented for interface parity (and would work if a caller ever needs it).
   async readFolderSources(token: string): Promise<SourceDoc[]> {

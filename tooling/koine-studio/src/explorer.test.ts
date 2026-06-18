@@ -1,3 +1,7 @@
+// @vitest-environment jsdom
+// The explorer is a focus/keyboard-heavy role=tree widget; these tests rely on jsdom's focus and
+// blur semantics (and its window.prompt/confirm) — the repo default is happy-dom, so this file pins
+// jsdom per-file. (The browser fs tests stay on the happy-dom default.)
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import type { FsEntry } from './host';
 import { createExplorer, type ExplorerCallbacks } from './explorer';

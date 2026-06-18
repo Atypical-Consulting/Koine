@@ -170,7 +170,10 @@ internal sealed class LspServer
                                     {
                                         ["koineEmitPreview"] = true,
                                         ["koineGlossary"] = true,
+                                        ["koineGlossaryModel"] = true,
                                         ["koineContextMap"] = true,
+                                        ["koineSetDoc"] = true,
+                                        ["koineDocs"] = true,
                                         ["koineCheck"] = true,
                                     },
                                 },
@@ -315,6 +318,30 @@ internal sealed class LspServer
                             if (root.TryGetProperty("id", out _))
                             {
                                 Respond(root, ContextMapResultJson(root));
+                            }
+
+                            break;
+
+                        case "koine/glossaryModel":
+                            if (root.TryGetProperty("id", out _))
+                            {
+                                Respond(root, GlossaryModelResultJson(root));
+                            }
+
+                            break;
+
+                        case "koine/setDoc":
+                            if (root.TryGetProperty("id", out _))
+                            {
+                                Respond(root, SetDocResultJson(root));
+                            }
+
+                            break;
+
+                        case "koine/docs":
+                            if (root.TryGetProperty("id", out _))
+                            {
+                                Respond(root, DocsResultJson());
                             }
 
                             break;
@@ -957,6 +984,81 @@ internal sealed class LspServer
         };
     }
 
+    /// <summary>
+    /// Projects the structured ubiquitous-language glossary of the merged workspace (#67): one entry
+    /// per context/type with kind, owning context, qualified id, doc-comment presence (for coverage),
+    /// and the name's source range. Workspace-scoped; the <c>uri</c> only validates well-formedness.
+    /// A malformed request or a null model yields <c>{ entries: [] }</c>.
+    /// </summary>
+    private object? GlossaryModelResultJson(JsonElement root)
+    {
+        if (!TryGetUri(root, out _))
+        {
+            return new Dictionary<string, object?> { ["entries"] = Array.Empty<object>() };
+        }
+
+        var sources = Workspace().Select(kv => new SourceFile(kv.Key, kv.Value)).ToList();
+        var (model, _) = _compiler.Parse(sources);
+        if (model is null)
+        {
+            return new Dictionary<string, object?> { ["entries"] = Array.Empty<object>() };
+        }
+
+        var entries = Koine.Compiler.Emit.Glossary.GlossaryModelBuilder.Build(model).Entries
+            .Select(e => (object)new Dictionary<string, object?>
+            {
+                ["id"] = e.Id,
+                ["name"] = e.Name,
+                ["kind"] = e.Kind,
+                ["context"] = e.Context,
+                ["qualifiedName"] = e.QualifiedName,
+                ["doc"] = e.Doc,
+                ["nameRange"] = SpanRange(e.NameSpan),
+            })
+            .ToArray();
+
+        return new Dictionary<string, object?> { ["entries"] = entries };
+    }
+
+    /// <summary>
+    /// Computes the doc-comment edit for a glossary declaration addressed by <c>params.id</c>, setting
+    /// it to <c>params.text</c> (#67). Returns <c>{ uri, edits }</c> — the file the edits apply to and
+    /// the localized <c>TextEdit</c>s (insert/replace/clear of the <c>///</c> block). An unknown id or
+    /// null model yields <c>{ uri: null, edits: [] }</c>.
+    /// </summary>
+    private object? SetDocResultJson(JsonElement root)
+    {
+        if (!root.TryGetProperty("params", out var p)
+            || !p.TryGetProperty("id", out var idEl)
+            || idEl.ValueKind != JsonValueKind.String
+            || idEl.GetString() is not { } id)
+        {
+            return new Dictionary<string, object?> { ["uri"] = null, ["edits"] = Array.Empty<object>() };
+        }
+
+        var text = p.TryGetProperty("text", out var textEl) && textEl.ValueKind == JsonValueKind.String
+            ? textEl.GetString() ?? string.Empty
+            : string.Empty;
+
+        var sources = Workspace().Select(kv => new SourceFile(kv.Key, kv.Value)).ToList();
+        var (model, _) = _compiler.Parse(sources);
+        if (model is null)
+        {
+            return new Dictionary<string, object?> { ["uri"] = null, ["edits"] = Array.Empty<object>() };
+        }
+
+        var result = SetDocEditor.Build(model, sources, id, text);
+        var edits = result.Edits
+            .Select(e => (object)new Dictionary<string, object?>
+            {
+                ["range"] = SpanRange(e.Range),
+                ["newText"] = e.NewText,
+            })
+            .ToArray();
+
+        return new Dictionary<string, object?> { ["uri"] = result.Uri, ["edits"] = edits };
+    }
+
     private static Dictionary<string, object?> EmptyContextMap() => new()
     {
         ["contexts"] = Array.Empty<object>(),
@@ -980,6 +1082,31 @@ internal sealed class LspServer
         ["localContext"] = a.LocalContext,
         ["localType"] = a.LocalType,
     };
+
+    /// <summary>
+    /// Emits the living-documentation files (Mermaid-in-Markdown) for the whole merged workspace,
+    /// reusing the same <see cref="Koine.Compiler.Emit.Docs.DocsEmitter"/> as
+    /// <c>koine build … --target docs</c>. A null model (any file has a syntax error) degrades to
+    /// <c>{ "files": [] }</c> rather than throwing. Returns <c>{ files: [{ path, contents }] }</c>.
+    /// </summary>
+    private object? DocsResultJson()
+    {
+        var sources = Workspace().Select(kv => new SourceFile(kv.Key, kv.Value)).ToList();
+        var (model, _) = _compiler.Parse(sources);
+        if (model is null)
+        {
+            return new Dictionary<string, object?> { ["files"] = Array.Empty<object>() };
+        }
+
+        var files = new Koine.Compiler.Emit.Docs.DocsEmitter().Emit(model)
+            .Select(f => (object)new Dictionary<string, object?>
+            {
+                ["path"] = f.RelativePath,
+                ["contents"] = f.Contents,
+            })
+            .ToArray();
+        return new Dictionary<string, object?> { ["files"] = files };
+    }
 
     /// <summary>
     /// Runs the model-versioning compatibility check of the merged workspace (the current model)

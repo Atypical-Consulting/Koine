@@ -1,10 +1,11 @@
 import { defineConfig } from 'vitest/config';
 
-// Unit/integration tests for the studio's host fs layer and the explorer UI run under jsdom
-// (the explorer builds real DOM; the browser fs ops are driven against mocked FS-Access handles).
+// Unit/integration tests run under happy-dom: the overlay/modal chrome (focus, keydown, document.body
+// mounting) and the file explorer's role=tree (focus, keyboard nav, DOM rebuild) behave as they do in
+// the browser; the browser fs ops are driven against mocked File-System-Access handles.
 export default defineConfig({
   test: {
-    environment: 'jsdom',
+    environment: 'happy-dom',
     include: ['src/**/*.test.ts'],
   },
 });

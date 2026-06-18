@@ -91,6 +91,14 @@ export interface Platform {
   pickSavePath(defaultName: string): Promise<string | null>;
 
   /**
+   * Save binary bytes (a generated-project `.zip`) to a host-chosen destination: a browser
+   * download in the web host, or a native save dialog + write on the desktop. `defaultName` is the
+   * suggested file name (e.g. `Shop.zip`). Resolves `true` once the bytes are delivered, or `false`
+   * when the user cancels a native save dialog (so callers don't report a false success).
+   */
+  saveZip(defaultName: string, data: Uint8Array): Promise<boolean>;
+
+  /**
    * Read every `.koi` source under an opened folder as `{uri,text}`. Used by the browser
    * compatibility check, which must pass the baseline contents to the in-process compiler
    * (there is no filesystem to read a path from). Unused on the desktop.

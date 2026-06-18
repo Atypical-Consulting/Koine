@@ -525,13 +525,23 @@ async function isDirToken(token: string): Promise<boolean> {
   return dirExists(parent, name);
 }
 
-function downloadFile(name: string, contents: string): void {
-  const url = URL.createObjectURL(new Blob([contents], { type: 'text/plain' }));
+/** Save a Blob to disk via a transient object-URL anchor (the download fallback for both helpers). */
+function triggerDownload(name: string, blob: Blob): void {
+  const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
   a.download = name;
   a.click();
   URL.revokeObjectURL(url);
+}
+
+function downloadFile(name: string, contents: string): void {
+  triggerDownload(name, new Blob([contents], { type: 'text/plain' }));
+}
+
+/** Download arbitrary bytes (e.g. a generated-project zip). */
+export function downloadBytes(name: string, data: Uint8Array, mime = 'application/octet-stream'): void {
+  triggerDownload(name, new Blob([data as BlobPart], { type: mime }));
 }
 
 // --- IndexedDB handle store (recent folders across reloads) ------------------
