@@ -97,10 +97,41 @@ public class CrossEmitterConformanceTests
         }
         """;
 
+    /// <summary>
+    /// A command that BOTH returns a <c>result</c> AND <c>emit</c>s a domain event whose payload
+    /// reuses the same sub-expression (<c>id</c>). The C# emitter hoists that shared value into a
+    /// single local; the TypeScript emitter must do the same (issue #60). Behaviour is identical
+    /// either way, so this fixture proves the two backends still AGREE on the result/event a
+    /// result+emit command produces — the shape that was previously uncovered by the corpus.
+    /// </summary>
+    private const string CancelModel = """
+        context Sales {
+          enum OrderStatus { Draft, Cancelled }
+
+          aggregate Order root Order {
+            event OrderCancelled {
+              orderId: OrderId
+            }
+
+            entity Order identified by OrderId {
+              status: OrderStatus = Draft
+
+              command cancel(): OrderId {
+                requires status != Cancelled "an order cannot be cancelled twice"
+                status -> Cancelled
+                emit OrderCancelled(orderId: id)
+                result id
+              }
+            }
+          }
+        }
+        """;
+
     public static IEnumerable<object[]> Corpus()
     {
         yield return ["Money invariant", MoneyModel, MoneyScenarios()];
         yield return ["Order command + event", OrderModel, OrderScenarios()];
+        yield return ["Cancel result + emit hoist", CancelModel, CancelScenarios()];
     }
 
     /// <summary>Money(amount): accepted iff amount &gt;= 0.</summary>
@@ -165,6 +196,51 @@ public class CrossEmitterConformanceTests
                     "if (o.DomainEvents.Count != 1) throw new System.Exception(\"expected one event\"); }",
                 Ts: "{ const o = new Order(OrderIdNew(), 1); o.place(); " +
                     "if (o.domainEvents.length !== 1) throw new Error('expected one event'); }",
+                TsImports: tsImports,
+                CsIsStatement: true,
+                TsIsStatement: true),
+        ];
+    }
+
+    /// <summary>
+    /// The <c>cancel</c> command (result + emit reusing <c>id</c>). Beyond the guard accept/reject,
+    /// the last scenario asserts the hoisting parity directly: the value the command RETURNS is the
+    /// same value its event RECORDED — true in both backends regardless of whether the shared
+    /// sub-expression was hoisted, which is exactly the cross-emitter guarantee issue #60 protects.
+    /// </summary>
+    private static IReadOnlyList<Scenario> CancelScenarios()
+    {
+        const string tsImports =
+            "import { Order } from './Sales/Order';\n" +
+            "import { OrderIdNew } from './Sales/value-objects/OrderId';\n" +
+            "import { OrderCancelled } from './Sales/events/OrderCancelled';";
+
+        return
+        [
+            new("cancel() on a draft order accepted", Accept: true,
+                Cs: "{ var o = new Sales.Order(Sales.OrderId.New()); o.Cancel(); }",
+                Ts: "{ const o = new Order(OrderIdNew()); o.cancel(); }",
+                TsImports: tsImports,
+                CsIsStatement: true,
+                TsIsStatement: true),
+            new("cancel() twice rejected", Accept: false,
+                Cs: "{ var o = new Sales.Order(Sales.OrderId.New()); o.Cancel(); o.Cancel(); }",
+                Ts: "{ const o = new Order(OrderIdNew()); o.cancel(); o.cancel(); }",
+                TsImports: tsImports,
+                CsIsStatement: true,
+                TsIsStatement: true),
+
+            // Hoisting parity: the returned id must equal the id recorded on the single emitted
+            // event — the result and the emit payload reference the SAME value in both targets.
+            new("cancel() returns the id its event recorded", Accept: true,
+                Cs: "{ var o = new Sales.Order(Sales.OrderId.New()); var rid = o.Cancel(); " +
+                    "if (o.DomainEvents.Count != 1) throw new System.Exception(\"expected one event\"); " +
+                    "var ev = (Sales.OrderCancelled)o.DomainEvents[0]; " +
+                    "if (!rid.Equals(ev.OrderId)) throw new System.Exception(\"result/event id mismatch\"); }",
+                Ts: "{ const o = new Order(OrderIdNew()); const rid = o.cancel(); " +
+                    "if (o.domainEvents.length !== 1) throw new Error('expected one event'); " +
+                    "const ev = o.domainEvents[0] as OrderCancelled; " +
+                    "if (!rid.equals(ev.orderId)) throw new Error('result/event id mismatch'); }",
                 TsImports: tsImports,
                 CsIsStatement: true,
                 TsIsStatement: true),

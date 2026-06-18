@@ -405,7 +405,12 @@ public sealed partial class TypeScriptEmitter
         // invalid state throws before any event is recorded — mirroring the C# emitter's order.
         var emitStatements = emits.Select(e => BuildEmitStatement(e, translator, index, "this.")).ToList();
 
+        // Translate the result in the same scope as the emit payloads. If the same value also
+        // appears in an emit payload, hoist it into a single `const __result` so it is computed
+        // once (single source of truth) — mirroring the C# emitter's hoistResult behaviour.
         string? resultExpr = result is not null ? translator.Translate(result.Value, cmd.ReturnType?.Name) : null;
+        bool hoistResult = resultExpr is not null
+            && emitStatements.Any(s => s.Contains(resultExpr, StringComparison.Ordinal));
 
         foreach (Param p in cmd.Parameters)
         {
@@ -417,14 +422,25 @@ public sealed partial class TypeScriptEmitter
             sb.Append(Indent).Append(Indent).Append("this.checkInvariants();\n");
         }
 
+        // Compute the hoisted result (once) BEFORE the events so an emit payload can carry the
+        // same value without recomputing it.
+        if (hoistResult)
+        {
+            sb.Append(Indent).Append(Indent).Append("const __result = ").Append(resultExpr).Append(";\n");
+        }
+
         foreach (var stmt in emitStatements)
         {
-            sb.Append(Indent).Append(Indent).Append(stmt).Append('\n');
+            var rendered = hoistResult
+                ? stmt.Replace(resultExpr!, "__result", StringComparison.Ordinal)
+                : stmt;
+            sb.Append(Indent).Append(Indent).Append(rendered).Append('\n');
         }
 
         if (resultExpr is not null)
         {
-            sb.Append(Indent).Append(Indent).Append("return ").Append(resultExpr).Append(";\n");
+            sb.Append(Indent).Append(Indent).Append("return ")
+              .Append(hoistResult ? "__result" : resultExpr).Append(";\n");
         }
 
         sb.Append(Indent).Append("}\n");
