@@ -662,6 +662,21 @@ export function init(): void {
       lsp.openDoc(uri, text);
     }
 
+    // Every read failed after a non-empty listing (files deleted / permissions revoked
+    // between list and read). The scratch doc was already closed above, so don't leave the
+    // app with no active buffer — re-establish scratch from the current editor contents.
+    if (buffers.size === 0) {
+      setStatus('could not read any files in folder', 'error');
+      const text = editor.getDoc();
+      buffers.set(SCRATCH_URI, { uri: SCRATCH_URI, path: null, relPath: 'model.koi', name: 'model.koi', text, dirty: false });
+      lsp.openDoc(SCRATCH_URI, text);
+      activeUri = SCRATCH_URI;
+      lsp.setActive(SCRATCH_URI);
+      folderMode = false;
+      treeEl.hidden = true;
+      return;
+    }
+
     folderMode = true;
     // Activate the first file (sorted by relPath) and show the tree.
     const first = Array.from(buffers.values()).sort((a, b) => a.relPath.localeCompare(b.relPath))[0];
@@ -676,6 +691,13 @@ export function init(): void {
     ensureLoaded(activeView);
   }
 
+  // True when the command palette or a modal dialog (prefs/help/about) is open, so global
+  // shortcuts don't fire 'through' an overlay at the editor underneath. The welcome screen is
+  // deliberately excluded — its own actions own that surface.
+  function overlayOpen(): boolean {
+    return document.querySelector('.koi-palette-backdrop:not([hidden]), .koi-modal-backdrop:not([hidden])') !== null;
+  }
+
   // --- save (format + write to disk) ----------------------------------------
   // The editor intercepts Cmd/Ctrl-S and calls onFormat; we additionally write the formatted
   // active buffer to disk. To run AFTER the format edits land, save is also wired here on the
@@ -684,6 +706,7 @@ export function init(): void {
   window.addEventListener('keydown', (e) => {
     const mod = e.metaKey || e.ctrlKey;
     if (mod && (e.key === 's' || e.key === 'S')) {
+      if (overlayOpen()) return; // don't save the editor under an open overlay
       e.preventDefault();
       void saveActive();
     }
@@ -850,10 +873,16 @@ export function init(): void {
     const mod = e.metaKey || e.ctrlKey;
     if (!mod && e.key !== 'F1') return;
 
+    // mod+K always toggles the palette (so it can also dismiss itself); every other global
+    // shortcut is suppressed while an overlay is open so it doesn't act on the editor beneath.
     if (mod && (e.key === 'k' || e.key === 'K')) {
       e.preventDefault();
       palette.toggle();
-    } else if (mod && e.shiftKey && (e.key === 'o' || e.key === 'O')) {
+      return;
+    }
+    if (overlayOpen()) return;
+
+    if (mod && e.shiftKey && (e.key === 'o' || e.key === 'O')) {
       e.preventDefault();
       void openFolder();
     } else if (mod && !e.shiftKey && (e.key === 'n' || e.key === 'N')) {

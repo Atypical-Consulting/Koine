@@ -27,6 +27,11 @@ const SETTINGS_KEY = 'koine.studio.settings';
 const RECENT_KEY = 'koine.studio.recentFolders';
 const RECENT_CAP = 8;
 
+// Editor font-size bounds — must match the Preferences input range (prefs.ts) so a stored
+// value can never drive the editor outside what the UI itself permits.
+const FONT_MIN = 10;
+const FONT_MAX = 22;
+
 // --- raw localStorage helpers (never throw) ----------------------------------
 
 /** Read a key, returning null on any error or when storage is unavailable. */
@@ -54,9 +59,10 @@ function coerceTheme(v: unknown): ThemeName {
   return v === 'light' || v === 'dark' ? v : DEFAULT_SETTINGS.theme;
 }
 
-/** A finite number in the editor font range, else the default. */
+/** A finite number clamped into the editor font range, else the default. */
 function coerceFontSize(v: unknown): number {
-  return typeof v === 'number' && Number.isFinite(v) ? v : DEFAULT_SETTINGS.fontSize;
+  if (typeof v !== 'number' || !Number.isFinite(v)) return DEFAULT_SETTINGS.fontSize;
+  return Math.min(Math.max(v, FONT_MIN), FONT_MAX);
 }
 
 /** A valid LSP trace level, else the default. */
