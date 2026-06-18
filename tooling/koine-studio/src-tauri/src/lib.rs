@@ -234,6 +234,95 @@ fn spawn_reader_thread(
     });
 }
 
+// --- workspace filesystem (open-folder directory mode) ----------------------
+
+/// One `.koi` file discovered under a user-picked workspace folder. JSON keys are
+/// camelCased (`path` / `name` / `relPath`) for the frontend tree.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct KoiFile {
+    /// Absolute path to the file.
+    path: String,
+    /// File name (last path component).
+    name: String,
+    /// Path relative to the picked folder, forward-slashed for stable tree keys.
+    rel_path: String,
+}
+
+/// True if `path` lies under a directory the workspace scan must skip: a build
+/// output (`bin`/`obj`) or a git dir. Mirrors the server's `ScanWorkspace` filter.
+fn is_skipped_path(path: &std::path::Path) -> bool {
+    path.components().any(|c| {
+        matches!(
+            c.as_os_str().to_str(),
+            Some("bin") | Some("obj") | Some(".git")
+        )
+    })
+}
+
+/// Recursively collect every `.koi` file (case-insensitive extension) under `dir`,
+/// skipping `bin`/`obj`/`.git` subtrees. Results are sorted by `rel_path` for a
+/// stable tree order. Returns `Err` if the root directory cannot be read.
+#[tauri::command]
+fn list_koi_files(dir: String) -> Result<Vec<KoiFile>, String> {
+    let root = std::path::Path::new(&dir);
+    let mut out: Vec<KoiFile> = Vec::new();
+    // Explicit stack to avoid recursion-depth limits and a walkdir dependency.
+    let mut stack: Vec<std::path::PathBuf> = vec![root.to_path_buf()];
+
+    while let Some(current) = stack.pop() {
+        let entries = std::fs::read_dir(&current)
+            .map_err(|e| format!("failed to read directory {}: {e}", current.display()))?;
+        for entry in entries {
+            let entry = entry.map_err(|e| e.to_string())?;
+            let path = entry.path();
+            let file_type = entry.file_type().map_err(|e| e.to_string())?;
+            if is_skipped_path(&path) {
+                continue;
+            }
+            if file_type.is_dir() {
+                stack.push(path);
+            } else if file_type.is_file()
+                && path
+                    .extension()
+                    .and_then(|e| e.to_str())
+                    .is_some_and(|e| e.eq_ignore_ascii_case("koi"))
+            {
+                let name = path
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or_default()
+                    .to_string();
+                let rel = path
+                    .strip_prefix(root)
+                    .unwrap_or(&path)
+                    .to_string_lossy()
+                    .replace('\\', "/");
+                out.push(KoiFile {
+                    path: path.to_string_lossy().into_owned(),
+                    name,
+                    rel_path: rel,
+                });
+            }
+        }
+    }
+
+    out.sort_by(|a, b| a.rel_path.cmp(&b.rel_path));
+    Ok(out)
+}
+
+/// Read a file's contents as UTF-8 text. Errors are surfaced as strings.
+#[tauri::command]
+fn read_text_file(path: String) -> Result<String, String> {
+    std::fs::read_to_string(&path).map_err(|e| format!("failed to read {path}: {e}"))
+}
+
+/// Write `contents` to `path`, replacing any existing file. Errors as strings.
+#[tauri::command]
+fn write_text_file(path: String, contents: String) -> Result<(), String> {
+    std::fs::write(&path, contents).map_err(|e| format!("failed to write {path}: {e}"))
+}
+
 // --- tauri commands ---------------------------------------------------------
 
 #[tauri::command]
@@ -300,7 +389,13 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .manage(LspState::default())
         .invoke_handler(tauri::generate_handler![
-            lsp_start, lsp_send, lsp_stop, app_version
+            lsp_start,
+            lsp_send,
+            lsp_stop,
+            app_version,
+            list_koi_files,
+            read_text_file,
+            write_text_file
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
@@ -426,5 +521,60 @@ mod tests {
     fn app_version_matches_cargo_pkg_version() {
         assert_eq!(app_version(), env!("CARGO_PKG_VERSION"));
         assert!(!app_version().is_empty());
+    }
+
+    // --- workspace filesystem tests -----------------------------------------
+
+    #[test]
+    fn list_koi_files_recurses_sorts_and_skips_bin() {
+        // Unique-ish temp root derived from the pid (no Instant/SystemTime).
+        let root = std::env::temp_dir().join(format!("koine_studio_fs_test_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root); // clean any stale leftover
+        let nested = root.join("contexts");
+        let bin = root.join("bin");
+        std::fs::create_dir_all(&nested).unwrap();
+        std::fs::create_dir_all(&bin).unwrap();
+
+        std::fs::write(root.join("billing.koi"), "context Billing {}").unwrap();
+        std::fs::write(nested.join("orders.KOI"), "context Orders {}").unwrap();
+        std::fs::write(bin.join("skip.koi"), "context Skip {}").unwrap();
+        std::fs::write(root.join("notes.txt"), "not a koi file").unwrap();
+
+        let files = list_koi_files(root.to_string_lossy().into_owned()).unwrap();
+
+        // Sorted by rel_path; forward-slashed; bin/ excluded; .txt excluded.
+        let rels: Vec<&str> = files.iter().map(|f| f.rel_path.as_str()).collect();
+        assert_eq!(rels, vec!["billing.koi", "contexts/orders.KOI"]);
+
+        // Names and absolute paths are populated.
+        assert_eq!(files[0].name, "billing.koi");
+        assert_eq!(files[1].name, "orders.KOI");
+        assert!(files[0].path.ends_with("billing.koi"));
+        assert!(std::path::Path::new(&files[1].path).is_absolute());
+
+        // No skipped file leaked through.
+        assert!(!files.iter().any(|f| f.rel_path.contains("bin/")));
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn list_koi_files_errors_on_missing_dir() {
+        let missing = std::env::temp_dir()
+            .join(format!("koine_studio_missing_{}", std::process::id()))
+            .to_string_lossy()
+            .into_owned();
+        assert!(list_koi_files(missing).is_err());
+    }
+
+    #[test]
+    fn read_and_write_text_file_round_trip() {
+        let path = std::env::temp_dir()
+            .join(format!("koine_studio_rw_{}.koi", std::process::id()));
+        let body = "context Demo {\n  value Money\n}\n";
+        write_text_file(path.to_string_lossy().into_owned(), body.to_string()).unwrap();
+        let got = read_text_file(path.to_string_lossy().into_owned()).unwrap();
+        assert_eq!(got, body);
+        let _ = std::fs::remove_file(&path);
     }
 }
