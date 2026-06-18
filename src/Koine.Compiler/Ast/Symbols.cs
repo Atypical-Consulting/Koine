@@ -7,7 +7,13 @@ public enum SymbolKind
     Member,
     EnumMember,
     Spec,
-    IdValueObject
+    IdValueObject,
+    // Additive (Commit 3): binding-scope symbols that string resolution handled implicitly but never named.
+    Context,
+    Parameter,
+    Local,
+    LambdaParameter,
+    Error
 }
 
 /// <summary>
@@ -27,6 +33,16 @@ public abstract class Symbol
     public string? Doc { get; }
 
     public abstract SymbolKind Kind { get; }
+
+    /// <summary>
+    /// The Roslyn containment spine: the symbol that lexically encloses this one (a member's
+    /// declaring type, a type's bounded context, a local's enclosing behavior), or <c>null</c> for a
+    /// top-level <see cref="ContextSymbol"/> / the <see cref="ErrorSymbol"/>. Set by the
+    /// <see cref="SymbolTable"/> builder during interning (an <c>init</c>-only auto-property), so
+    /// every existing constructor and construction site stays source-compatible. Identity is by
+    /// reference (interning); equality is never overridden.
+    /// </summary>
+    public Symbol? ContainingSymbol { get; init; }
 
     protected Symbol(string name, SourceSpan declSpan, string? doc)
     {
@@ -109,10 +125,14 @@ public sealed class SpecSymbol : Symbol
 /// <summary>
 /// A generated ID value object (e.g. <c>OrderId</c>). There is no standalone declaration node, so the
 /// symbol points at the entity that declares <c>identified by &lt;name&gt;</c> (navigation lands there).
+/// <see cref="Owner"/> is <c>null</c> only for a <em>convention-only</em> <c>*Id</c> (a name matching
+/// <c>^[A-Z]\w*Id$</c> referenced as a field type with no declaring entity); the legacy
+/// <see cref="SemanticModel.GetSymbol(string)"/> never produces that case (it returns <c>null</c>),
+/// but the binder interns it so a <c>product: ProductId</c> reference still has a stable symbol.
 /// </summary>
 public sealed class IdValueObjectSymbol : Symbol
 {
-    public EntityDecl Owner { get; }
+    public EntityDecl? Owner { get; }
 
     public IdValueObjectSymbol(string name, SourceSpan declSpan, EntityDecl owner)
         : base(name, declSpan, owner.Doc)
@@ -120,5 +140,90 @@ public sealed class IdValueObjectSymbol : Symbol
         Owner = owner;
     }
 
+    /// <summary>Interns a convention-only <c>*Id</c> with no owning entity (binder-only).</summary>
+    internal IdValueObjectSymbol(string name)
+        : base(name, SourceSpan.None, doc: null)
+    {
+        Owner = null;
+    }
+
     public override SymbolKind Kind => SymbolKind.IdValueObject;
+}
+
+/// <summary>
+/// A bounded context (e.g. <c>Billing</c>) — the container for the types it declares. Resolves R13.2
+/// name sharing structurally: two same-named <see cref="TypeSymbol"/>s differ by their
+/// <see cref="Symbol.ContainingSymbol"/>. Deliberately named <c>ContextSymbol</c>, not
+/// <c>NamespaceSymbol</c>: it models the Koine bounded context only — the unit R13.2 disambiguates on
+/// — never a C#/TS module path (which <see cref="ModelIndex.NamespaceOf"/> computes separately).
+/// </summary>
+public sealed class ContextSymbol : Symbol
+{
+    public ContextNode Declaration { get; }
+
+    public ContextSymbol(string name, SourceSpan declSpan, ContextNode declaration)
+        : base(name, declSpan, declaration.Doc)
+    {
+        Declaration = declaration;
+    }
+
+    public override SymbolKind Kind => SymbolKind.Context;
+}
+
+/// <summary>A command/factory/operation/finder/query parameter; container is the behavior's owning type symbol.</summary>
+public sealed class ParameterSymbol : Symbol
+{
+    public Param Declaration { get; }
+
+    public ParameterSymbol(string name, SourceSpan declSpan, Param declaration)
+        : base(name, declSpan, declaration.Doc)
+    {
+        Declaration = declaration;
+    }
+
+    public override SymbolKind Kind => SymbolKind.Parameter;
+}
+
+/// <summary>A <c>let</c>-binding name; container is the enclosing behavior/spec symbol.</summary>
+public sealed class LocalSymbol : Symbol
+{
+    public LetBinding Declaration { get; }
+
+    public LocalSymbol(string name, SourceSpan declSpan, LetBinding declaration)
+        : base(name, declSpan, declaration.Doc)
+    {
+        Declaration = declaration;
+    }
+
+    public override SymbolKind Kind => SymbolKind.Local;
+}
+
+/// <summary>A collection-aggregate lambda parameter; container is the enclosing expression's symbol.</summary>
+public sealed class LambdaParameterSymbol : Symbol
+{
+    public LambdaExpr Declaration { get; }
+
+    public LambdaParameterSymbol(string name, SourceSpan declSpan, LambdaExpr declaration)
+        : base(name, declSpan, declaration.Doc)
+    {
+        Declaration = declaration;
+    }
+
+    public override SymbolKind Kind => SymbolKind.LambdaParameter;
+}
+
+/// <summary>
+/// A singleton sentinel for an unresolved reference, mirroring <see cref="ErrorType.Instance"/>.
+/// <see cref="SemanticModel.GetSymbolInfo"/> returns it (never <c>null</c>) so the "never-null,
+/// explicit error" discipline matches the type side.
+/// </summary>
+public sealed class ErrorSymbol : Symbol
+{
+    public static readonly ErrorSymbol Instance = new();
+
+    private ErrorSymbol() : base(string.Empty, SourceSpan.None, doc: null)
+    {
+    }
+
+    public override SymbolKind Kind => SymbolKind.Error;
 }
