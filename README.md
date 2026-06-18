@@ -300,6 +300,9 @@ to your MCP client:
 { "mcpServers": { "koine": { "command": "koine-mcp" } } }
 ```
 
+From a checkout, `./install-mcp.sh` (or `install-mcp.ps1` / `install-mcp.cmd`) packs, installs, and
+registers the server with **Claude Desktop** in one step.
+
 See [`website` → Guides → MCP server](website/src/content/docs/guides/mcp-server.md) for the full
 tool list and the typical author → validate → compile loop.
 

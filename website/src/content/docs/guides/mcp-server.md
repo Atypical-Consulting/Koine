@@ -29,6 +29,23 @@ resolve — pass each file as its own entry in the `files` list.
 
 ## Install & register
 
+### Quick install (from a checkout)
+
+If you have the repo cloned, one script packs the server, installs it as a global tool, and
+registers it with **Claude Desktop** (merging into your existing `claude_desktop_config.json`
+without disturbing other servers):
+
+```bash
+./install-mcp.sh        # macOS / Linux
+./install-mcp.ps1       # any OS with PowerShell
+install-mcp.cmd         # Windows
+```
+
+Then fully quit and reopen Claude Desktop. The rest of this section covers manual registration for
+other MCP clients (or the published package).
+
+### Manual
+
 The server is packaged as a .NET tool:
 
 ```bash
