@@ -3,7 +3,9 @@
 # Packs src/Koine.Mcp from this checkout, installs it as a global .NET tool
 # (koine-mcp), then merges a `koine` entry into claude_desktop_config.json.
 $ErrorActionPreference = "Stop"
-Set-Location $PSScriptRoot
+# This script lives in scripts/install-mcp/; run from the repo root so the
+# relative paths below (Directory.Build.props, src/Koine.Mcp) resolve.
+Set-Location (Join-Path $PSScriptRoot "../..")
 
 # Version to pin, read straight from Directory.Build.props so the install
 # resolves the package we just packed rather than something off nuget.org.
