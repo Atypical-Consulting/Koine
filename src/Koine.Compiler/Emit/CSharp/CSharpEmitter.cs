@@ -1239,24 +1239,22 @@ public sealed partial class CSharpEmitter : IEmitter
               .Append(" = ").Append(value).Append(";\n");
         }
 
+        // Translate the result expression in the same scope as emit payloads (parameters
+        // as locals, members as properties) so it can reference parameters, `id`, and
+        // just-assigned fields. If the same value also appears as a WHOLE emit argument,
+        // hoist it into a single `var __result` so it is computed once (single source of
+        // truth). The match is per-argument and exact — not a substring of the rendered
+        // statement — so a sibling argument sharing a prefix (e.g. `TaxRate` vs a `Tax`
+        // result) is left untouched.
+        string? resultExpr = result is null ? null
+            : translator.TranslateTopLevel(
+                result.Value, CSharpExpressionTranslator.NameMode.Property, cmd.ReturnType?.Name);
+
         // Translate the emit statements while parameters are still in scope (their
         // payloads may reference parameters); they are written AFTER the re-check so
         // an invalid post-state throws before any event is recorded.
-        var emitStatements = emits.Select(e => BuildEmitStatement(e, translator, index)).ToList();
-
-        // Translate the result expression in the same scope as emit payloads (parameters
-        // as locals, members as properties) so it can reference parameters, `id`, and
-        // just-assigned fields. If the same value also appears in an emit payload, hoist
-        // it into a single `var __result` so it is computed once (single source of truth).
-        string? resultExpr = null;
-        bool hoistResult = false;
-        if (result is not null)
-        {
-            resultExpr = translator.TranslateTopLevel(
-                result.Value, CSharpExpressionTranslator.NameMode.Property,
-                cmd.ReturnType?.Name);
-            hoistResult = emitStatements.Any(s => s.Contains(resultExpr, StringComparison.Ordinal));
-        }
+        var emitStatements = emits.Select(e => BuildEmitStatement(e, translator, index, "", resultExpr)).ToList();
+        bool hoistResult = emitStatements.Any(s => s.Hoisted);
 
         // Parameters leave scope BEFORE the re-check: entity invariants reference
         // only entity state, which must render as the just-assigned properties (not
@@ -1291,10 +1289,7 @@ public sealed partial class CSharpEmitter : IEmitter
 
             foreach (var stmt in emitStatements)
             {
-                var rendered = hoistResult
-                    ? stmt.Replace(resultExpr!, "__result", StringComparison.Ordinal)
-                    : stmt;
-                sb.Append(Indent).Append(Indent).Append(rendered).Append('\n');
+                sb.Append(Indent).Append(Indent).Append(stmt.Text).Append('\n');
             }
         }
 
@@ -1489,7 +1484,8 @@ public sealed partial class CSharpEmitter : IEmitter
           .Append('(').Append(string.Join(", ", args)).Append(");\n");
 
         // 4. Record creation events (payloads may reference `id` and parameters).
-        var emitStatements = emits.Select(e => BuildEmitStatement(e, translator, index, "instance.")).ToList();
+        // Factories have no `result` clause, so there is nothing to hoist — take the text only.
+        var emitStatements = emits.Select(e => BuildEmitStatement(e, translator, index, "instance.").Text).ToList();
 
         foreach (Param p in factory.Parameters)
         {
@@ -1513,11 +1509,13 @@ public sealed partial class CSharpEmitter : IEmitter
         || entity.Factories.SelectMany(f => f.Body).OfType<EmitClause>().Any();
 
     /// <summary>Builds the <c>[prefix]_domainEvents.Add(new EventName(...));</c> statement for an emit.</summary>
-    private string BuildEmitStatement(EmitClause emit, CSharpExpressionTranslator translator, ModelIndex index, string targetPrefix = "")
+    private (string Text, bool Hoisted) BuildEmitStatement(
+        EmitClause emit, CSharpExpressionTranslator translator, ModelIndex index,
+        string targetPrefix = "", string? hoistedResultExpr = null)
     {
         if (!index.TryGetDecl(emit.EventName, out TypeDecl decl) || decl is not EventDecl ev)
         {
-            return $"/* unknown event '{emit.EventName}' */";
+            return ($"/* unknown event '{emit.EventName}' */", false);
         }
 
         var eventMemberNames = new HashSet<string>(ev.Members.Select(m => m.Name), StringComparer.Ordinal);
@@ -1526,7 +1524,8 @@ public sealed partial class CSharpEmitter : IEmitter
         var ctorFields = OrderCtorParams(ev.Members.Where(m => !MemberAnalysis.IsDerived(m, eventMemberNames))).ToList();
         var argByField = emit.Args.ToDictionary(a => a.Field, a => a.Value, StringComparer.Ordinal);
 
-        IEnumerable<string> args = ctorFields.Select(f =>
+        bool hoisted = false;
+        var args = ctorFields.Select(f =>
         {
             if (!argByField.TryGetValue(f.Name, out Expr? value))
             {
@@ -1534,10 +1533,18 @@ public sealed partial class CSharpEmitter : IEmitter
             }
 
             var expectedEnum = index.Classify(f.Type.Name) == TypeKind.Enum ? f.Type.Name : null;
-            return translator.TranslateTopLevel(value, CSharpExpressionTranslator.NameMode.Property, expectedEnum);
-        });
+            var rendered = translator.TranslateTopLevel(value, CSharpExpressionTranslator.NameMode.Property, expectedEnum);
+            // Substitute the hoisted local only when the WHOLE argument is the result expression; a
+            // substring match (a sibling argument sharing a prefix) must NOT be rewritten.
+            if (hoistedResultExpr is not null && string.Equals(rendered, hoistedResultExpr, StringComparison.Ordinal))
+            {
+                hoisted = true;
+                return "__result";
+            }
+            return rendered;
+        }).ToList();
 
-        return $"{targetPrefix}_domainEvents.Add(new {ev.Name}({string.Join(", ", args)}));";
+        return ($"{targetPrefix}_domainEvents.Add(new {ev.Name}({string.Join(", ", args)}));", hoisted);
     }
 
     /// <summary>

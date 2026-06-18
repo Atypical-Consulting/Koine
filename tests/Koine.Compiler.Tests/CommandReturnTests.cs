@@ -52,6 +52,25 @@ public class CommandReturnTests
         }
         """;
 
+    // A result whose rendered form (`Tax`) is a PREFIX of a sibling emit argument's rendering
+    // (`TaxRate`): hoisting must substitute ONLY the argument that is the SAME expression, never
+    // splice the substring out of the unrelated sibling (a substring-replace bug found reviewing #60).
+    private const string PrefixCollisionFixture = """
+        context Sales {
+          event Quoted { amount: Int  rate: Int }
+          aggregate Order root Order {
+            entity Order identified by OrderId {
+              tax:     Int = 0
+              taxRate: Int = 0
+              command quote(): Int {
+                emit Quoted(amount: tax, rate: taxRate)
+                result tax
+              }
+            }
+          }
+        }
+        """;
+
     private static IReadOnlyList<Diagnostic> Diagnose(string source) => new KoineCompiler().Diagnose(source);
 
     private static (Assembly Asm, string OrderCs) CompileFixture(string fixture)
@@ -126,6 +145,18 @@ public class CommandReturnTests
         Assert.Contains("public int Bump(int by)", orderCs);
         Assert.Contains("return Total;", orderCs); // post-mutation state, no hoist
         Assert.DoesNotContain("__result", orderCs);
+    }
+
+    [Fact]
+    public void Result_that_is_a_prefix_of_a_sibling_emit_arg_does_not_splice_the_sibling()
+    {
+        var (_, orderCs) = CompileFixture(PrefixCollisionFixture);
+        // Only the `tax` arg (the same expression as the result) is hoisted; the sibling `taxRate`
+        // arg is left intact — NOT mangled into `__resultRate` by a blind substring replace.
+        Assert.Contains("var __result = Tax;", orderCs);
+        Assert.Contains("_domainEvents.Add(new Quoted(__result, TaxRate));", orderCs);
+        Assert.DoesNotContain("__resultRate", orderCs);
+        Assert.Contains("return __result;", orderCs);
     }
 
     // ---- emit (Roslyn behaviour) -------------------------------------------

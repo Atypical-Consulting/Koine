@@ -99,28 +99,28 @@ public class CrossEmitterConformanceTests
 
     /// <summary>
     /// A command that BOTH returns a <c>result</c> AND <c>emit</c>s a domain event whose payload
-    /// reuses the same sub-expression (<c>id</c>). The C# emitter hoists that shared value into a
-    /// single local; the TypeScript emitter must do the same (issue #60). Behaviour is identical
-    /// either way, so this fixture proves the two backends still AGREE on the result/event a
-    /// result+emit command produces — the shape that was previously uncovered by the corpus.
+    /// reuses that result (<c>tax</c>) ALONGSIDE a sibling argument whose rendering shares the
+    /// result's prefix (<c>taxRate</c>). This is the result/emit hoisting case (issue #60) plus the
+    /// regression guard for the substring-splice bug found in review: the hoist must rewrite only
+    /// the whole-argument match (<c>tax</c> → the hoisted local) and leave <c>taxRate</c> intact. A
+    /// blind substring replace would emit <c>__resultRate</c> and the generated code would not
+    /// compile — so this fixture fails the harness in BOTH backends if the bug ever returns.
     /// </summary>
-    private const string CancelModel = """
+    private const string QuoteModel = """
         context Sales {
-          enum OrderStatus { Draft, Cancelled }
+          event Quoted {
+            amount: Int
+            rate:   Int
+          }
 
           aggregate Order root Order {
-            event OrderCancelled {
-              orderId: OrderId
-            }
-
             entity Order identified by OrderId {
-              status: OrderStatus = Draft
+              tax:     Int = 0
+              taxRate: Int = 0
 
-              command cancel(): OrderId {
-                requires status != Cancelled "an order cannot be cancelled twice"
-                status -> Cancelled
-                emit OrderCancelled(orderId: id)
-                result id
+              command quote(): Int {
+                emit Quoted(amount: tax, rate: taxRate)
+                result tax
               }
             }
           }
@@ -131,7 +131,7 @@ public class CrossEmitterConformanceTests
     {
         yield return ["Money invariant", MoneyModel, MoneyScenarios()];
         yield return ["Order command + event", OrderModel, OrderScenarios()];
-        yield return ["Cancel result + emit hoist", CancelModel, CancelScenarios()];
+        yield return ["Quote result + emit hoist (prefix-safe)", QuoteModel, QuoteScenarios()];
     }
 
     /// <summary>Money(amount): accepted iff amount &gt;= 0.</summary>
@@ -203,44 +203,32 @@ public class CrossEmitterConformanceTests
     }
 
     /// <summary>
-    /// The <c>cancel</c> command (result + emit reusing <c>id</c>). Beyond the guard accept/reject,
-    /// the last scenario asserts the hoisting parity directly: the value the command RETURNS is the
-    /// same value its event RECORDED — true in both backends regardless of whether the shared
-    /// sub-expression was hoisted, which is exactly the cross-emitter guarantee issue #60 protects.
+    /// The <c>quote</c> command (result + emit reusing <c>tax</c>, beside the prefix-sharing sibling
+    /// <c>taxRate</c>). The scenario reads BOTH event payload fields back: the hoisted result must
+    /// flow into <c>amount</c> while <c>rate</c> keeps the un-rewritten <c>taxRate</c> — so a
+    /// substring-splice regression would either fail to compile (caught by the harness's tsc/Roslyn
+    /// step) or produce the wrong <c>rate</c>, and the two backends must agree either way.
     /// </summary>
-    private static IReadOnlyList<Scenario> CancelScenarios()
+    private static IReadOnlyList<Scenario> QuoteScenarios()
     {
         const string tsImports =
             "import { Order } from './Sales/Order';\n" +
             "import { OrderIdNew } from './Sales/value-objects/OrderId';\n" +
-            "import { OrderCancelled } from './Sales/events/OrderCancelled';";
+            "import { Quoted } from './Sales/events/Quoted';";
 
         return
         [
-            new("cancel() on a draft order accepted", Accept: true,
-                Cs: "{ var o = new Sales.Order(Sales.OrderId.New()); o.Cancel(); }",
-                Ts: "{ const o = new Order(OrderIdNew()); o.cancel(); }",
-                TsImports: tsImports,
-                CsIsStatement: true,
-                TsIsStatement: true),
-            new("cancel() twice rejected", Accept: false,
-                Cs: "{ var o = new Sales.Order(Sales.OrderId.New()); o.Cancel(); o.Cancel(); }",
-                Ts: "{ const o = new Order(OrderIdNew()); o.cancel(); o.cancel(); }",
-                TsImports: tsImports,
-                CsIsStatement: true,
-                TsIsStatement: true),
-
-            // Hoisting parity: the returned id must equal the id recorded on the single emitted
-            // event — the result and the emit payload reference the SAME value in both targets.
-            new("cancel() returns the id its event recorded", Accept: true,
-                Cs: "{ var o = new Sales.Order(Sales.OrderId.New()); var rid = o.Cancel(); " +
-                    "if (o.DomainEvents.Count != 1) throw new System.Exception(\"expected one event\"); " +
-                    "var ev = (Sales.OrderCancelled)o.DomainEvents[0]; " +
-                    "if (!rid.Equals(ev.OrderId)) throw new System.Exception(\"result/event id mismatch\"); }",
-                Ts: "{ const o = new Order(OrderIdNew()); const rid = o.cancel(); " +
-                    "if (o.domainEvents.length !== 1) throw new Error('expected one event'); " +
-                    "const ev = o.domainEvents[0] as OrderCancelled; " +
-                    "if (!rid.equals(ev.orderId)) throw new Error('result/event id mismatch'); }",
+            // The returned result is `tax`; the event records `amount: tax` (hoisted) and
+            // `rate: taxRate` (NOT hoisted). All three must read back uncorrupted in both targets.
+            new("quote() returns tax and records both args uncorrupted", Accept: true,
+                Cs: "{ var o = new Sales.Order(Sales.OrderId.New(), 5, 2); var r = o.Quote(); " +
+                    "if (r != 5) throw new System.Exception(\"wrong result\"); " +
+                    "var ev = (Sales.Quoted)o.DomainEvents[0]; " +
+                    "if (ev.Amount != 5 || ev.Rate != 2) throw new System.Exception(\"payload corrupted\"); }",
+                Ts: "{ const o = new Order(OrderIdNew(), 5, 2); const r = o.quote(); " +
+                    "if (r !== 5) throw new Error('wrong result'); " +
+                    "const ev = o.domainEvents[0] as Quoted; " +
+                    "if (ev.amount !== 5 || ev.rate !== 2) throw new Error('payload corrupted'); }",
                 TsImports: tsImports,
                 CsIsStatement: true,
                 TsIsStatement: true),
