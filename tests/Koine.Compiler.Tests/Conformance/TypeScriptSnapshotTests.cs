@@ -46,6 +46,19 @@ public class TypeScriptSnapshotTests
           }
 
           aggregate Order root Order {
+            /// Raised when an order is opened by the factory (R6/R8).
+            event OrderOpened {
+              orderId:   OrderId
+              customer:  CustomerId
+              lineCount: Int
+            }
+
+            /// Raised when a draft order is placed (R6).
+            event OrderPlaced {
+              orderId:   OrderId
+              lineCount: Int
+            }
+
             entity Order identified by OrderId {
               customer: CustomerId
               lines:    List<OrderLine>
@@ -57,10 +70,12 @@ public class TypeScriptSnapshotTests
               command place {
                 requires status == Draft "only a draft order can be placed"
                 status -> Placed
+                emit OrderPlaced(orderId: id, lineCount: lines.count)
               }
 
               create forCustomer(customer: CustomerId, lines: List<OrderLine>) {
                 requires !lines.isEmpty "cannot open an empty order"
+                emit OrderOpened(orderId: id, customer: customer, lineCount: lines.count)
               }
             }
           }
