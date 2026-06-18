@@ -130,21 +130,21 @@ public class BinderTests
             switch (node)
             {
                 case IdentifierExpr id when !id.Span.IsNone:
-                {
-                    Symbol bound = sema.GetSymbolInfo(id);
-                    Symbol? legacy = sema.DefinitionAt(id.Span.Offset);
-                    AssertOracle(bound, legacy);
-                    checkedIdentifiers++;
-                    break;
-                }
+                    {
+                        Symbol bound = sema.GetSymbolInfo(id);
+                        Symbol? legacy = sema.DefinitionAt(id.Span.Offset);
+                        AssertOracle(bound, legacy);
+                        checkedIdentifiers++;
+                        break;
+                    }
                 case TypeRef tr when !tr.Span.IsNone && IsUserType(sema, tr.Name):
-                {
-                    Symbol bound = sema.GetSymbolInfo(tr);
-                    Symbol? legacy = sema.DefinitionAt(tr.Span.Offset);
-                    AssertOracle(bound, legacy);
-                    checkedTypeRefs++;
-                    break;
-                }
+                    {
+                        Symbol bound = sema.GetSymbolInfo(tr);
+                        Symbol? legacy = sema.DefinitionAt(tr.Span.Offset);
+                        AssertOracle(bound, legacy);
+                        checkedTypeRefs++;
+                        break;
+                    }
             }
         }
 
