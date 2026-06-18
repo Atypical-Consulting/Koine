@@ -4,6 +4,12 @@
     <ProjectReference Include="..\Koine.Compiler\Koine.Compiler.csproj" />
   </ItemGroup>
 
+  <!-- The CLI's command parsing, help generation, and dispatch (Spectre.Console.Cli).
+       This is the project's only NuGet dependency; the compiler stays dependency-light. -->
+  <ItemGroup>
+    <PackageReference Include="Spectre.Console.Cli" Version="0.55.0" />
+  </ItemGroup>
+
   <ItemGroup>
     <InternalsVisibleTo Include="Koine.Compiler.Tests" />
   </ItemGroup>
