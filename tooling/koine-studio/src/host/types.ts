@@ -75,6 +75,15 @@ export interface Platform {
   /** Prompt for a folder. Resolves to its opaque token, or null when cancelled/unsupported. */
   pickFolder(title: string): Promise<string | null>;
 
+  /**
+   * Materialize a set of in-memory files into a real, openable workspace folder and return its
+   * token (then opened via the normal folder-mode path, so the explorer + file mutations all
+   * work). Used by the multi-file starter examples. Optional: a host that can't back a synthetic
+   * workspace omits it, and the caller falls back to opening the example as a single scratch
+   * buffer. `name` is a stable per-example slug; `files` carry forward-slashed relPaths.
+   */
+  materializeWorkspace?(name: string, files: { relPath: string; contents: string }[]): Promise<string | null>;
+
   /** A human-readable display name for a folder token (the last path segment). */
   folderName(token: string): string;
 
