@@ -5,12 +5,27 @@
 // Content-Length framed JSON-RPC off the child's stdout and re-emits each body as a
 // Tauri event (`lsp://message`, `lsp://exit`), and exposes `lsp_send` to write framed
 // JSON-RPC to the child. No async runtime — just std::process + std::thread + std::io.
+//
+// The sidecar is supervised: if the child exits unexpectedly the reader thread
+// relaunches it (bounded retries with a short backoff), swaps in the fresh stdin,
+// starts a new reader thread, and emits `lsp://restart` so the frontend can re-run
+// `initialize` and re-open its document. An intentional shutdown (the `lsp_stop`
+// command, or `shutdown`/`exit` flowing through `lsp_send`) sets a flag that
+// suppresses the restart so teardown stays clean. `lsp://exit` is emitted only once
+// the retry budget is exhausted (or after a clean stop).
 
 use std::io::{self, BufRead, BufReader, Write};
 use std::process::{Child, ChildStdin, Command, Stdio};
-use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, Emitter, Manager, State};
+
+/// Maximum number of relaunch attempts after an unexpected sidecar exit.
+const MAX_RESTART_RETRIES: u32 = 3;
+/// Backoff between relaunch attempts.
+const RESTART_BACKOFF: Duration = Duration::from_millis(500);
 
 // --- managed state ----------------------------------------------------------
 
@@ -20,6 +35,8 @@ struct LspState {
     stdin: Mutex<Option<ChildStdin>>,
     /// keep the Child so it is not dropped; lets us guard against a double start.
     child: Mutex<Option<Child>>,
+    /// set once the user/app asks to stop; suppresses auto-restart on child exit.
+    shutting_down: Arc<AtomicBool>,
 }
 
 // --- pure framing functions (the cargo test gate) ---------------------------
@@ -77,6 +94,21 @@ fn read_frame<R: BufRead>(r: &mut R) -> io::Result<Option<String>> {
         .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
 }
 
+// --- supervision decision (pure, unit-tested) -------------------------------
+
+/// Decide whether the supervisor should relaunch the sidecar after it exited.
+/// Pure so the policy is testable without spawning a real process:
+/// - never restart during an intentional shutdown,
+/// - otherwise restart while attempts already made is below the retry budget.
+/// `attempts_made` is the number of relaunches already tried this supervision
+/// session (0 on the first unexpected exit).
+fn should_restart(shutting_down: bool, attempts_made: u32, max_retries: u32) -> bool {
+    if shutting_down {
+        return false;
+    }
+    attempts_made < max_retries
+}
+
 // --- sidecar resolution -----------------------------------------------------
 
 /// Resolve how to launch the language server.
@@ -100,6 +132,108 @@ fn resolve_sidecar_command() -> Command {
     }
 }
 
+// --- sidecar spawning + supervision -----------------------------------------
+
+/// Spawn the sidecar process with the broker's standard stdio wiring and detach
+/// its stdin/stdout. Returns the live `Child` plus its piped stdin and stdout.
+fn spawn_sidecar() -> Result<(Child, ChildStdin, std::process::ChildStdout), String> {
+    let mut cmd = resolve_sidecar_command();
+    cmd.env("DOTNET_NOLOGO", "1")
+        .env("DOTNET_CLI_TELEMETRY_OPTOUT", "1")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::inherit());
+
+    let mut child = cmd.spawn().map_err(|e| format!("failed to spawn LSP: {e}"))?;
+    let stdin = child.stdin.take().ok_or("no stdin on child")?;
+    let stdout = child.stdout.take().ok_or("no stdout on child")?;
+    Ok((child, stdin, stdout))
+}
+
+/// Spawn the reader/supervisor thread. It frames JSON-RPC off `stdout`, re-emits
+/// each body as `lsp://message`, and on an unexpected child exit relaunches the
+/// sidecar (bounded retries, short backoff), swaps the managed stdin, emits
+/// `lsp://restart`, and continues reading the new child's stdout. `lsp://exit` is
+/// emitted only when the retry budget is exhausted or a clean stop is in effect.
+fn spawn_reader_thread(
+    app: AppHandle,
+    mut stdout: std::process::ChildStdout,
+    shutting_down: Arc<AtomicBool>,
+) {
+    std::thread::spawn(move || {
+        // attempts_made counts relaunches performed in this supervision session.
+        let mut attempts_made: u32 = 0;
+        loop {
+            let mut reader = BufReader::new(stdout);
+            let clean_eof = loop {
+                match read_frame(&mut reader) {
+                    Ok(Some(body)) => {
+                        let _ = app.emit("lsp://message", body);
+                    }
+                    Ok(None) => break true, // clean EOF
+                    Err(_) => break false,  // malformed / IO error
+                }
+            };
+
+            // The child's stdout is gone; decide whether to relaunch.
+            if !should_restart(
+                shutting_down.load(Ordering::SeqCst),
+                attempts_made,
+                MAX_RESTART_RETRIES,
+            ) {
+                let code = if shutting_down.load(Ordering::SeqCst) || clean_eof {
+                    0i32
+                } else {
+                    -1i32
+                };
+                let _ = app.emit("lsp://exit", code);
+                return;
+            }
+
+            // Try to relaunch, consuming one attempt per spawn try and honouring the
+            // retry budget and a shutdown that may race in during the backoff.
+            let state = app.state::<LspState>();
+            let new_stdout = loop {
+                std::thread::sleep(RESTART_BACKOFF);
+                attempts_made += 1;
+
+                if shutting_down.load(Ordering::SeqCst) {
+                    let _ = app.emit("lsp://exit", 0i32);
+                    return;
+                }
+
+                match spawn_sidecar() {
+                    Ok((child, stdin, new_stdout)) => {
+                        // Swap in fresh handles under the same locks used by lsp_start.
+                        if let Ok(mut g) = state.stdin.lock() {
+                            *g = Some(stdin);
+                        }
+                        if let Ok(mut g) = state.child.lock() {
+                            *g = Some(child);
+                        }
+                        break new_stdout;
+                    }
+                    Err(_) => {
+                        // Spawn itself failed; retry until the budget is exhausted.
+                        if !should_restart(
+                            shutting_down.load(Ordering::SeqCst),
+                            attempts_made,
+                            MAX_RESTART_RETRIES,
+                        ) {
+                            let _ = app.emit("lsp://exit", -1i32);
+                            return;
+                        }
+                    }
+                }
+            };
+
+            stdout = new_stdout;
+            let _ = app.emit("lsp://restart", ());
+            // loop continues, reading the relaunched child's stdout.
+        }
+    });
+}
+
 // --- tauri commands ---------------------------------------------------------
 
 #[tauri::command]
@@ -112,41 +246,15 @@ fn lsp_start(app: AppHandle, state: State<'_, LspState>) -> Result<(), String> {
         return Ok(());
     }
 
-    let mut cmd = resolve_sidecar_command();
-    cmd.env("DOTNET_NOLOGO", "1")
-        .env("DOTNET_CLI_TELEMETRY_OPTOUT", "1")
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::inherit());
+    // A fresh start clears any prior shutdown intent so the supervisor is armed.
+    state.shutting_down.store(false, Ordering::SeqCst);
 
-    let mut child = cmd.spawn().map_err(|e| format!("failed to spawn LSP: {e}"))?;
-
-    let stdin = child.stdin.take().ok_or("no stdin on child")?;
-    let stdout = child.stdout.take().ok_or("no stdout on child")?;
+    let (child, stdin, stdout) = spawn_sidecar()?;
 
     *state.stdin.lock().map_err(|e| e.to_string())? = Some(stdin);
     *child_guard = Some(child); // stored while still holding the guard => atomic
 
-    // Reader thread owns stdout; emits each JSON body as a Tauri event.
-    let app_for_thread = app.clone();
-    std::thread::spawn(move || {
-        let mut reader = BufReader::new(stdout);
-        loop {
-            match read_frame(&mut reader) {
-                Ok(Some(body)) => {
-                    let _ = app_for_thread.emit("lsp://message", body);
-                }
-                Ok(None) => {
-                    let _ = app_for_thread.emit("lsp://exit", 0i32);
-                    break;
-                }
-                Err(_) => {
-                    let _ = app_for_thread.emit("lsp://exit", -1i32);
-                    break;
-                }
-            }
-        }
-    });
+    spawn_reader_thread(app.clone(), stdout, state.shutting_down.clone());
 
     Ok(())
 }
@@ -159,12 +267,41 @@ fn lsp_send(state: State<'_, LspState>, message: String) -> Result<(), String> {
     Ok(())
 }
 
+/// Intentional shutdown: arm the no-restart flag and tear the child down. After
+/// this the reader thread will emit `lsp://exit` (code 0) rather than relaunch.
+/// Idempotent and safe to call when nothing is running.
+#[tauri::command]
+fn lsp_stop(state: State<'_, LspState>) -> Result<(), String> {
+    state.shutting_down.store(true, Ordering::SeqCst);
+    // Drop stdin so the child sees EOF, then kill to be certain it exits.
+    if let Ok(mut g) = state.stdin.lock() {
+        *g = None;
+    }
+    if let Ok(mut g) = state.child.lock() {
+        if let Some(mut child) = g.take() {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+    }
+    Ok(())
+}
+
+/// Return the application version (from Cargo metadata) so the About panel can
+/// display it.
+#[tauri::command]
+fn app_version() -> String {
+    env!("CARGO_PKG_VERSION").to_string()
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
         .manage(LspState::default())
-        .invoke_handler(tauri::generate_handler![lsp_start, lsp_send])
+        .invoke_handler(tauri::generate_handler![
+            lsp_start, lsp_send, lsp_stop, app_version
+        ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
@@ -253,5 +390,41 @@ mod tests {
         );
         let mut cur = Cursor::new(framed.into_bytes());
         assert_eq!(read_frame(&mut cur).unwrap().as_deref(), Some(body));
+    }
+
+    // --- supervision-decision tests -----------------------------------------
+
+    #[test]
+    fn restart_allowed_within_budget() {
+        // First unexpected exit (0 attempts made) with a budget of 3 => restart.
+        assert!(should_restart(false, 0, 3));
+        assert!(should_restart(false, 1, 3));
+        assert!(should_restart(false, 2, 3));
+    }
+
+    #[test]
+    fn restart_denied_once_budget_exhausted() {
+        // After 3 relaunches with a budget of 3, stop restarting.
+        assert!(!should_restart(false, 3, 3));
+        assert!(!should_restart(false, 4, 3));
+    }
+
+    #[test]
+    fn shutdown_suppresses_restart_even_with_budget_left() {
+        // An intentional shutdown must never restart, regardless of attempts left.
+        assert!(!should_restart(true, 0, 3));
+        assert!(!should_restart(true, 2, 3));
+    }
+
+    #[test]
+    fn zero_budget_never_restarts() {
+        // A retry budget of 0 disables auto-restart entirely.
+        assert!(!should_restart(false, 0, 0));
+    }
+
+    #[test]
+    fn app_version_matches_cargo_pkg_version() {
+        assert_eq!(app_version(), env!("CARGO_PKG_VERSION"));
+        assert!(!app_version().is_empty());
     }
 }

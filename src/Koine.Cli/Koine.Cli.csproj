@@ -30,4 +30,30 @@
     <Description>Koine — a DSL for Domain-Driven Design. The `koine` CLI builds, formats, watches, scaffolds, and compatibility-checks .koi domain models.</Description>
   </PropertyGroup>
 
+  <!-- Self-contained, single-file publish (Properties/PublishProfiles/<rid>.pubxml) renames the
+       produced executable to `koine`/`koine.exe` so Koine Studio and the VS Code extension can
+       ship and launch the LSP sidecar (`koine lsp`).
+
+       This rename happens AFTER publish (rather than via <AssemblyName> in the pubxml) on purpose:
+       Koine.Compiler grants internals access to the assembly literally named `Koine.Cli`
+       (its InternalsVisibleTo), and the CLI consumes those internals (e.g. CSharpEmitterOptions).
+       Renaming the assembly identity would break that friend relationship and fail the build, so we
+       keep the assembly identity as `Koine.Cli` and rename only the on-disk binary. The global-tool
+       packaging (PackAsTool / ToolCommandName) is likewise unaffected. -->
+  <PropertyGroup>
+    <PublishedBinaryName>koine</PublishedBinaryName>
+  </PropertyGroup>
+
+  <Target Name="RenamePublishedBinaryToKoine"
+          AfterTargets="Publish"
+          Condition="'$(PublishSingleFile)' == 'true' and '$(AssemblyName)' != '$(PublishedBinaryName)'">
+    <PropertyGroup>
+      <_PublishedExeExtension Condition="$(RuntimeIdentifier.StartsWith('win'))">.exe</_PublishedExeExtension>
+      <_SourceExe>$([System.IO.Path]::Combine('$(PublishDir)', '$(AssemblyName)$(_PublishedExeExtension)'))</_SourceExe>
+      <_TargetExe>$([System.IO.Path]::Combine('$(PublishDir)', '$(PublishedBinaryName)$(_PublishedExeExtension)'))</_TargetExe>
+    </PropertyGroup>
+    <Move SourceFiles="$(_SourceExe)" DestinationFiles="$(_TargetExe)" Condition="Exists('$(_SourceExe)')" OverwriteReadOnlyFiles="true" />
+    <Message Importance="high" Text="Koine: published self-contained binary -> $(_TargetExe)" Condition="Exists('$(_TargetExe)')" />
+  </Target>
+
 </Project>
