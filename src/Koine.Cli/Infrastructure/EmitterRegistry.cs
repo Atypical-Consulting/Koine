@@ -19,7 +19,7 @@ internal static class EmitterRegistry
         {
             ["csharp"] = opts => new CSharpEmitter(ToCSharpOptions(opts)),
             ["typescript"] = _ => new TypeScriptEmitter(),
-            ["python"] = _ => new PythonEmitter(),
+            ["python"] = opts => new PythonEmitter(ToPythonOptions(opts)),
             ["glossary"] = _ => new GlossaryEmitter(),
             ["docs"] = _ => new DocsEmitter(),
         };
@@ -65,5 +65,22 @@ internal static class EmitterRegistry
             ? CSharpInstantMode.NodaTime
             : CSharpInstantMode.DateTimeOffset;
         return new CSharpEmitterOptions(options.NamespaceMap, instant);
+    }
+
+    /// <summary>
+    /// Maps the CLI's parsed per-target <see cref="TargetOptions"/> to the Python emitter's
+    /// <see cref="PythonEmitterOptions"/>. The <c>namespace_map</c> (shared config key) is
+    /// reused as the Python package remap; there is no config key for <c>EmitDictHelpers</c>,
+    /// so it stays at the default <c>false</c>. An empty options bag maps to
+    /// <see cref="PythonEmitterOptions.Empty"/>, so unconfigured targets emit byte-identical output.
+    /// </summary>
+    private static PythonEmitterOptions ToPythonOptions(TargetOptions options)
+    {
+        if (options.NamespaceMap.Count == 0)
+        {
+            return PythonEmitterOptions.Empty;
+        }
+
+        return new PythonEmitterOptions(options.NamespaceMap);
     }
 }

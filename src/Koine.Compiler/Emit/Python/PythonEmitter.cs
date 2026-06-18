@@ -16,6 +16,20 @@ namespace Koine.Compiler.Emit.Python;
 /// </summary>
 public sealed partial class PythonEmitter : IEmitter
 {
+    // Options are stored for use by construct-emitting passes in later tasks (Task 5+).
+    // They influence package remapping and optional dict-helper generation.
+    private readonly PythonEmitterOptions _options;
+
+    /// <summary>Creates a <see cref="PythonEmitter"/> with default options
+    /// (<see cref="PythonEmitterOptions.Empty"/>).</summary>
+    public PythonEmitter() : this(PythonEmitterOptions.Empty) { }
+
+    /// <summary>Creates a <see cref="PythonEmitter"/> with the supplied options.</summary>
+    internal PythonEmitter(PythonEmitterOptions options)
+    {
+        _options = options;
+    }
+
     public string TargetName => "python";
 
     /// <summary>
@@ -69,5 +83,7 @@ public sealed partial class PythonEmitter : IEmitter
         _ = type;
         _ = ns;
         _ = index;
+        // _options is used here in later tasks (package remapping, EmitDictHelpers).
+        _ = _options;
     }
 }
