@@ -847,8 +847,9 @@ public sealed partial class CSharpEmitter : IEmitter
     {
         var prop = CSharpNaming.ToPascalCase(m.Name);
         var param = CSharpNaming.ToCamelCase(m.Name);
-        sb.Append(Indent).Append(Indent).Append(prop).Append(" = ")
-          .Append(CopyExpression(m.Type, param, typeMapper)).Append(";\n");
+        sb.Append(Indent).Append(Indent).Append(prop).Append(" = ");
+        AppendCopyExpression(sb, m.Type, param, typeMapper);
+        sb.Append(";\n");
     }
 
     /// <summary>
@@ -860,8 +861,9 @@ public sealed partial class CSharpEmitter : IEmitter
     {
         var prop = CSharpNaming.ToPascalCase(f.Name);
         var param = CSharpNaming.ToCamelCase(f.Name);
-        sb.Append(Indent).Append(Indent).Append(prop).Append(" = ")
-          .Append(CopyExpression(f, param, typeMapper)).Append(";\n");
+        sb.Append(Indent).Append(Indent).Append(prop).Append(" = ");
+        AppendCopyExpression(sb, f, param, typeMapper);
+        sb.Append(";\n");
     }
 
     /// <summary>
@@ -933,32 +935,39 @@ public sealed partial class CSharpEmitter : IEmitter
     /// <item>map  -> <c>new ReadOnlyDictionary&lt;K,V&gt;(new Dictionary&lt;K,V&gt;(p))</c></item>
     /// </list>
     /// </summary>
-    private static string CopyExpression(TypeRef type, string param, CSharpTypeMapper typeMapper)
+    private static void AppendCopyExpression(StringBuilder sb, TypeRef type, string param, CSharpTypeMapper typeMapper)
     {
-        string? copy = null;
-        if (CSharpTypeMapper.IsList(type))
+        var isList = CSharpTypeMapper.IsList(type);
+        var isSet = !isList && CSharpTypeMapper.IsSet(type);
+        var isMap = !isList && !isSet && CSharpTypeMapper.IsMap(type);
+        if (!isList && !isSet && !isMap)
+        {
+            sb.Append(param); // scalar: direct assignment
+            return;
+        }
+
+        if (type.IsOptional)
+        {
+            sb.Append(param).Append(" is null ? null : ");
+        }
+
+        if (isList)
         {
             var elem = typeMapper.Map(type.Element ?? ObjectType);
-            copy = $"new List<{elem}>({param}).AsReadOnly()";
+            sb.Append("new List<").Append(elem).Append(">(").Append(param).Append(").AsReadOnly()");
         }
-        else if (CSharpTypeMapper.IsSet(type))
+        else if (isSet)
         {
             var elem = typeMapper.Map(type.Element ?? ObjectType);
-            copy = $"new ReadOnlySet<{elem}>(new HashSet<{elem}>({param}))";
+            sb.Append("new ReadOnlySet<").Append(elem).Append(">(new HashSet<").Append(elem).Append(">(").Append(param).Append("))");
         }
-        else if (CSharpTypeMapper.IsMap(type))
+        else
         {
             var k = typeMapper.Map(type.Element ?? ObjectType);
             var v = typeMapper.Map(type.Value ?? ObjectType);
-            copy = $"new ReadOnlyDictionary<{k}, {v}>(new Dictionary<{k}, {v}>({param}))";
+            sb.Append("new ReadOnlyDictionary<").Append(k).Append(", ").Append(v)
+              .Append(">(new Dictionary<").Append(k).Append(", ").Append(v).Append(">(").Append(param).Append("))");
         }
-
-        if (copy is null)
-        {
-            return param; // scalar: direct assignment
-        }
-
-        return type.IsOptional ? $"{param} is null ? null : {copy}" : copy;
     }
 
     /// <summary>
@@ -967,23 +976,43 @@ public sealed partial class CSharpEmitter : IEmitter
     /// element/value C# types and the optional-null guard are still rendered off the syntactic member type.
     /// Byte-identical to the <see cref="TypeRef"/> overload.
     /// </summary>
-    private static string CopyExpression(BoundField f, string param, CSharpTypeMapper typeMapper)
+    private static void AppendCopyExpression(StringBuilder sb, BoundField f, string param, CSharpTypeMapper typeMapper)
     {
         var type = ((Member)f.Syntax).Type;
-        string? copy = f.CollectionShape switch
+        if (f.CollectionShape is not (CollectionShape.List or CollectionShape.Set or CollectionShape.Map))
         {
-            CollectionShape.List => $"new List<{typeMapper.Map(type.Element ?? ObjectType)}>({param}).AsReadOnly()",
-            CollectionShape.Set => $"new ReadOnlySet<{typeMapper.Map(type.Element ?? ObjectType)}>(new HashSet<{typeMapper.Map(type.Element ?? ObjectType)}>({param}))",
-            CollectionShape.Map => $"new ReadOnlyDictionary<{typeMapper.Map(type.Element ?? ObjectType)}, {typeMapper.Map(type.Value ?? ObjectType)}>(new Dictionary<{typeMapper.Map(type.Element ?? ObjectType)}, {typeMapper.Map(type.Value ?? ObjectType)}>({param}))",
-            _ => null
-        };
-
-        if (copy is null)
-        {
-            return param; // scalar: direct assignment
+            sb.Append(param); // scalar: direct assignment
+            return;
         }
 
-        return type.IsOptional ? $"{param} is null ? null : {copy}" : copy;
+        if (type.IsOptional)
+        {
+            sb.Append(param).Append(" is null ? null : ");
+        }
+
+        switch (f.CollectionShape)
+        {
+            case CollectionShape.List:
+            {
+                var elem = typeMapper.Map(type.Element ?? ObjectType);
+                sb.Append("new List<").Append(elem).Append(">(").Append(param).Append(").AsReadOnly()");
+                break;
+            }
+            case CollectionShape.Set:
+            {
+                var elem = typeMapper.Map(type.Element ?? ObjectType);
+                sb.Append("new ReadOnlySet<").Append(elem).Append(">(new HashSet<").Append(elem).Append(">(").Append(param).Append("))");
+                break;
+            }
+            default: // Map
+            {
+                var k = typeMapper.Map(type.Element ?? ObjectType);
+                var v = typeMapper.Map(type.Value ?? ObjectType);
+                sb.Append("new ReadOnlyDictionary<").Append(k).Append(", ").Append(v)
+                  .Append(">(new Dictionary<").Append(k).Append(", ").Append(v).Append(">(").Append(param).Append("))");
+                break;
+            }
+        }
     }
 
     private static readonly TypeRef ObjectType = new("object");
