@@ -10,6 +10,11 @@ on:
 permissions:
   contents: read
 
+# Cancel superseded runs on the same PR branch; never cancel a push to main.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   build-and-test:
     runs-on: ubuntu-latest
@@ -25,14 +30,24 @@ jobs:
           dotnet-version: '10.0.x'
           dotnet-quality: preview
 
-      # Enforce .editorconfig on hand-written code (generated files carry the
-      # auto-generated header and are skipped here; their conformance is verified
-      # against the freshly emitted demo below).
-      - name: Verify formatting
-        run: dotnet format Koine.slnx --verify-no-changes
+      # No central package management / lock files, so cache the global NuGet
+      # package folder keyed on the project files that pin versions.
+      - name: Cache NuGet
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj', 'Directory.Build.props') }}
+          restore-keys: ${{ runner.os }}-nuget-
 
       - name: Build
         run: dotnet build -c Release
+
+      # Enforce .editorconfig on hand-written code (generated files carry the
+      # auto-generated header and are skipped here; their conformance is verified
+      # against the freshly emitted demo below). Runs after Build so it reuses the
+      # restore instead of triggering a second implicit compile of the solution.
+      - name: Verify formatting
+        run: dotnet format Koine.slnx --verify-no-changes --no-restore
 
       - name: Test
         run: dotnet test tests/Koine.Compiler.Tests/Koine.Compiler.Tests.csproj -c Release --no-build
