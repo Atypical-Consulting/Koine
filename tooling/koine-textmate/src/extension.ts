@@ -5,8 +5,29 @@ import {
   ServerOptions,
   TransportKind,
 } from "vscode-languageclient/node";
+import { registerKoineFeatures } from "./features";
 
 let client: LanguageClient | undefined;
+let clientReady: Promise<void> | undefined;
+
+/**
+ * Resolves the started LanguageClient once its `start()` handshake (initialize)
+ * has completed — that is exactly when the server's experimental capabilities
+ * (koineEmitPreview, koineGlossary, koineContextMap, koineCheck) are known, so
+ * awaiting it is sufficient before any custom `sendRequest`. Returns undefined
+ * when the client is absent or failed to start, so callers can warn gracefully.
+ */
+async function getReadyClient(): Promise<LanguageClient | undefined> {
+  if (!client) {
+    return undefined;
+  }
+  try {
+    await clientReady;
+  } catch {
+    return undefined;
+  }
+  return client;
+}
 
 /**
  * Activated on the first `.koi` document (see `activationEvents`). Spawns the
@@ -34,12 +55,18 @@ export function activate(context: vscode.ExtensionContext): void {
   );
 
   // Starts the server and the client; surfaces a friendly error if the
-  // executable can't be found (the most common misconfiguration).
-  client.start().catch((err) => {
+  // executable can't be found (the most common misconfiguration). The promise
+  // is stored so the custom commands can await initialize before sendRequest.
+  clientReady = client.start();
+  clientReady.catch((err) => {
     void vscode.window.showErrorMessage(
       `Koine: failed to start the language server. Check the "koine.server.path" setting. (${err})`
     );
   });
+
+  // Add UI for the custom koine/* LSP requests (emit preview, glossary,
+  // context map, compatibility check). Standard LSP features are unchanged.
+  registerKoineFeatures(context, getReadyClient);
 }
 
 export function deactivate(): Thenable<void> | undefined {
