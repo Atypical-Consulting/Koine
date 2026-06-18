@@ -1,4 +1,6 @@
 using Antlr4.Runtime;
+using Antlr4.Runtime.Atn;
+using Antlr4.Runtime.Misc;
 using Koine.Compiler.Ast;
 using Koine.Compiler.Diagnostics;
 using Koine.Compiler.Emit;
@@ -83,9 +85,30 @@ public sealed class KoineCompiler
         var tokens = new CommonTokenStream(lexer);
         var parser = new KoineParser(tokens);
         parser.RemoveErrorListeners();
-        parser.AddErrorListener(listener);
 
-        var tree = parser.program();
+        // Two-stage parsing (the canonical ANTLR speedup): try the cheap SLL prediction
+        // mode first, suppressing diagnostics with a bail strategy. SLL parses the
+        // overwhelming majority of inputs far cheaper than full adaptive LL(*); when it
+        // cannot decide (a genuine syntax error, or a construct that needs full context)
+        // it throws, and we re-parse once with full LL plus the real error listener — so
+        // both the resulting tree and any reported diagnostics are identical to the
+        // single-stage LL path the tests pin down.
+        KoineParser.ProgramContext tree;
+        parser.Interpreter.PredictionMode = PredictionMode.SLL;
+        parser.ErrorHandler = new BailErrorStrategy();
+        try
+        {
+            tree = parser.program();
+        }
+        catch (ParseCanceledException)
+        {
+            parser.Reset();
+            parser.ErrorHandler = new DefaultErrorStrategy();
+            parser.AddErrorListener(listener);
+            parser.Interpreter.PredictionMode = PredictionMode.LL;
+            tree = parser.program();
+        }
+
         if (listener.HasErrors)
         {
             return (null, Array.Empty<ContextRelation>(), listener.Errors);
