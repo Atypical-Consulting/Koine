@@ -211,6 +211,7 @@ function helpRows(): ShortcutRow[] {
     { keys: 'mod+N', description: 'New scratch model' },
     { keys: 'mod+1', description: 'Preview C#' },
     { keys: 'mod+2', description: 'Preview TypeScript' },
+    { keys: 'mod+3', description: 'Preview Python' },
     { keys: 'F2', description: 'Rename symbol' },
     { keys: 'Shift+F12', description: 'Find all references' },
     { keys: 'mod+.', description: 'Quick fixes & refactors' },
@@ -737,19 +738,21 @@ export function init(): void {
   // Preview buttons. Previewing also surfaces the preview tab.
   const btnCs = el<HTMLButtonElement>('btn-preview-cs');
   const btnTs = el<HTMLButtonElement>('btn-preview-ts');
+  const btnPy = el<HTMLButtonElement>('btn-preview-py');
 
   function setPreviewBusy(busy: boolean): void {
     btnCs.disabled = busy;
     btnTs.disabled = busy;
+    btnPy.disabled = busy;
   }
 
-  async function preview(target: 'csharp' | 'typescript'): Promise<void> {
+  async function preview(target: 'csharp' | 'typescript' | 'python'): Promise<void> {
     selectView('preview');
     setPreviewBusy(true);
     try {
       const res = await lsp.emitPreview(target);
       let content: string;
-      let lang: 'csharp' | 'typescript' | 'plain';
+      let lang: 'csharp' | 'typescript' | 'python' | 'plain';
       let copyable = false;
       if (res.error) {
         content = '// emit error\n' + res.error;
@@ -759,7 +762,7 @@ export function init(): void {
         lang = 'plain';
       } else {
         content = res.files.map((f) => `// ==== ${f.path} ====\n${f.contents}`).join('\n\n');
-        lang = target === 'csharp' ? 'csharp' : 'typescript';
+        lang = target === 'csharp' ? 'csharp' : target === 'typescript' ? 'typescript' : 'python';
         copyable = true;
       }
       output.setContent(content, lang);
@@ -776,6 +779,7 @@ export function init(): void {
 
   btnCs.addEventListener('click', () => void preview('csharp'));
   btnTs.addEventListener('click', () => void preview('typescript'));
+  btnPy.addEventListener('click', () => void preview('python'));
 
   // --- open folder (directory-mode workspace) -------------------------------
 
@@ -1145,6 +1149,7 @@ export function init(): void {
     const cmds: Command[] = [
       { id: 'preview-cs', title: 'Preview C#', hint: 'mod+1', group: 'Preview', run: () => void preview('csharp') },
       { id: 'preview-ts', title: 'Preview TypeScript', hint: 'mod+2', group: 'Preview', run: () => void preview('typescript') },
+      { id: 'preview-py', title: 'Preview Python', hint: 'mod+3', group: 'Preview', run: () => void preview('python') },
       { id: 'format', title: 'Format document', hint: 'mod+S', group: 'Edit', run: () => void formatActive() },
       { id: 'open-folder', title: 'Open folder…', hint: 'mod+Shift+O', group: 'File', run: () => void openFolder() },
       { id: 'new-scratch', title: 'New scratch model', hint: 'mod+N', group: 'File', run: () => newScratch() },
@@ -1204,6 +1209,9 @@ export function init(): void {
     } else if (mod && e.key === '2') {
       e.preventDefault();
       void preview('typescript');
+    } else if (mod && e.key === '3') {
+      e.preventDefault();
+      void preview('python');
     } else if (mod && e.key === ',') {
       e.preventDefault();
       prefs.open();
