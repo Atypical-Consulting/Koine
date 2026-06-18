@@ -48,6 +48,31 @@ export interface KoineWasmApi {
   Docs(filesJson: string): string;
 }
 
+/**
+ * The names of every [JSExport] method the compiler bundle is expected to provide (keep in sync with
+ * `KoineWasmApi` above). The guard only flags a *known* export name that failed to resolve as a stale
+ * bundle; any other property access (`then`, `toString`, `catch`, …) must pass through untouched — see
+ * `guardWasmSurface`.
+ */
+const KOINE_WASM_EXPORTS: ReadonlySet<string> = new Set<keyof KoineWasmApi>([
+  'DiagnoseWorkspace',
+  'EmitPreview',
+  'Glossary',
+  'GlossaryModel',
+  'ContextMap',
+  'SetDoc',
+  'Hover',
+  'Definition',
+  'DocumentSymbols',
+  'Format',
+  'Check',
+  'References',
+  'PrepareRename',
+  'Rename',
+  'CodeActions',
+  'Docs',
+]);
+
 let apiPromise: Promise<KoineWasmApi> | null = null;
 let loaderSeq = 0;
 
@@ -113,9 +138,14 @@ export function guardWasmSurface(raw: Record<string, unknown>): KoineWasmApi {
   return new Proxy(raw, {
     get(target, prop, receiver) {
       const value = Reflect.get(target, prop, receiver);
-      // Symbols / inherited members (then, toString, …) pass through untouched; only a *named*
-      // export that didn't resolve to a function is treated as a stale-bundle call site.
-      if (typeof prop !== 'string' || typeof value === 'function') return value;
+      // Only a *known* export name that didn't resolve to a function is treated as a stale-bundle
+      // call site. Everything else passes through untouched — crucially `then`: the Promise that
+      // resolves to this proxy probes `proxy.then` to decide if it's a thenable, so returning a
+      // throwing function there would make the whole language-server boot reject with a bogus
+      // `export "then" is missing`. Symbols and non-export strings (toString, catch, …) likewise
+      // pass through.
+      if (typeof prop !== 'string' || typeof value === 'function' || !KOINE_WASM_EXPORTS.has(prop))
+        return value;
       return () => {
         throw new Error(
           `Koine WASM export "${prop}" is missing — the compiler bundle in public/koine-wasm/ is ` +
