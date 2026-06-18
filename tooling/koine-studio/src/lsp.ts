@@ -54,6 +54,28 @@ export interface ContextMapResult {
   relations: ContextRelation[];
 }
 
+// `koine/glossaryModel`: one entry per context/type, with doc presence (for coverage) and the
+// name's range. `doc` is null when the declaration is undocumented.
+export interface GlossaryEntry {
+  id: string;
+  name: string;
+  kind: string;
+  context: string;
+  qualifiedName: string;
+  doc: string | null;
+  nameRange: Range;
+}
+export interface GlossaryModel {
+  entries: GlossaryEntry[];
+}
+
+// `koine/setDoc` result: the file the edits apply to (null when the id is unknown) and the
+// localized TextEdits that insert/replace/clear the declaration's `///` block.
+export interface SetDocResult {
+  uri: string | null;
+  edits: TextEdit[];
+}
+
 // Standard LSP Hover. `contents` is a MarkupContent ({kind,value}), a MarkedString
 // (string | {language,value}), or an array of those. `range` is optional.
 export interface MarkupContent {
@@ -320,6 +342,22 @@ export class KoineLsp {
   contextMap(): Promise<ContextMapResult> {
     return this.request<ContextMapResult>('koine/contextMap', {
       textDocument: { uri: this.activeUri },
+    });
+  }
+
+  /** Structured ubiquitous-language glossary (entries + doc presence) for the merged workspace. */
+  glossaryModel(): Promise<GlossaryModel> {
+    return this.request<GlossaryModel>('koine/glossaryModel', {
+      textDocument: { uri: this.activeUri },
+    });
+  }
+
+  /** Set (insert/replace/clear) a declaration's `///` doc comment, addressed by its glossary id. */
+  setDoc(id: string, text: string): Promise<SetDocResult> {
+    return this.request<SetDocResult>('koine/setDoc', {
+      textDocument: { uri: this.activeUri },
+      id,
+      text,
     });
   }
 

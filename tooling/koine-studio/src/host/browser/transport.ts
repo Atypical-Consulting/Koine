@@ -132,6 +132,12 @@ export class WasmLspTransport implements LspTransport {
       case 'koine/contextMap':
         return [result(JSON.parse(api.ContextMap(this.filesJson())))];
 
+      case 'koine/glossaryModel':
+        return [result(JSON.parse(api.GlossaryModel(this.filesJson())))];
+
+      case 'koine/setDoc':
+        return [result(JSON.parse(api.SetDoc(this.filesJson(), msg.params?.id ?? '', msg.params?.text ?? '')))];
+
       case 'koine/check': {
         const baseline = JSON.stringify(msg.params?.baselineSources ?? []);
         return [result(JSON.parse(api.Check(this.filesJson(), baseline)))];
