@@ -349,7 +349,13 @@ export async function renameEntry(token: string, newName: string): Promise<strin
   // Reject if the target name is already taken in the parent (file or directory).
   if (await entryExists(parent, newName)) throw new Error('already exists: ' + newName);
 
-  const isDir = dirHandles.has(token) || !(await fileExists(parent, oldName));
+  // Classify from the registries first, else a POSITIVE directory probe — so a transient IO error
+  // from a file probe can't misclassify a file as a directory.
+  const isDir = dirHandles.has(token)
+    ? true
+    : fileHandles.has(token)
+      ? false
+      : await dirExists(parent, oldName);
   // Prefer the atomic FileSystemHandle.move() (keeps the whole entry); otherwise fall back to a
   // full create+copy+delete that copies every file/subdir, so nothing the explorer doesn't list
   // is lost when the source is removed.

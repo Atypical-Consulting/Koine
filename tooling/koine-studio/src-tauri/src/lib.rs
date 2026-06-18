@@ -250,12 +250,17 @@ struct KoiFile {
 }
 
 /// True if `path` lies under a directory the workspace scan must skip: a build
-/// output (`bin`/`obj`) or a git dir. Mirrors the server's `ScanWorkspace` filter.
-fn is_skipped_path(path: &std::path::Path) -> bool {
-    path.components().any(|c| {
+/// output (`bin`/`obj`), a git dir, or `node_modules`. Only segments BELOW the
+/// opened `root` are considered — so a workspace whose own path happens to sit
+/// under e.g. a `bin/` ancestor is still scanned (matching the browser backend
+/// and the server's relative-path `ScanWorkspace` filter). `node_modules` is
+/// skipped to stay consistent with the browser explorer.
+fn is_skipped_path(path: &std::path::Path, root: &std::path::Path) -> bool {
+    let rel = path.strip_prefix(root).unwrap_or(path);
+    rel.components().any(|c| {
         matches!(
             c.as_os_str().to_str(),
-            Some("bin") | Some("obj") | Some(".git")
+            Some("bin") | Some("obj") | Some(".git") | Some("node_modules")
         )
     })
 }
@@ -277,7 +282,7 @@ fn list_koi_files(dir: String) -> Result<Vec<KoiFile>, String> {
             let entry = entry.map_err(|e| e.to_string())?;
             let path = entry.path();
             let file_type = entry.file_type().map_err(|e| e.to_string())?;
-            if is_skipped_path(&path) {
+            if is_skipped_path(&path, root) {
                 continue;
             }
             if file_type.is_dir() {
@@ -369,7 +374,7 @@ fn build_entries(
         let entry = entry.map_err(|e| e.to_string())?;
         let path = entry.path();
         let file_type = entry.file_type().map_err(|e| e.to_string())?;
-        if is_skipped_path(&path) {
+        if is_skipped_path(&path, root) {
             continue;
         }
         let name = path
@@ -998,6 +1003,43 @@ mod tests {
         // Both files untouched by the rejected move.
         assert_eq!(std::fs::read_to_string(&occupied).unwrap(), "BBB");
         assert_eq!(std::fs::read_to_string(&src).unwrap(), "AAA");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn scan_skips_only_below_root_not_an_ancestor_named_bin() {
+        // A workspace whose own path sits under a `bin/` ancestor must still be scanned: the
+        // skip filter only applies to segments BELOW the opened root.
+        let outer = std::env::temp_dir().join(format!("koine_bin_anc_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&outer);
+        let root = outer.join("bin").join("models"); // 'bin' is an ANCESTOR of the opened root
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("orders.koi"), "context Orders {}").unwrap();
+
+        let files = list_koi_files(root.to_string_lossy().into_owned()).unwrap();
+        assert_eq!(files.iter().map(|f| f.rel_path.as_str()).collect::<Vec<_>>(), vec!["orders.koi"]);
+        let tree = list_entries(root.to_string_lossy().into_owned()).unwrap();
+        assert_eq!(tree.iter().map(|e| e.name.as_str()).collect::<Vec<_>>(), vec!["orders.koi"]);
+
+        let _ = std::fs::remove_dir_all(&outer);
+    }
+
+    #[test]
+    fn scan_skips_node_modules_subtree() {
+        let root = std::env::temp_dir().join(format!("koine_nm_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let nm = root.join("node_modules").join("pkg");
+        std::fs::create_dir_all(&nm).unwrap();
+        std::fs::write(root.join("keep.koi"), "context Keep {}").unwrap();
+        std::fs::write(nm.join("skip.koi"), "context Skip {}").unwrap();
+
+        let files = list_koi_files(root.to_string_lossy().into_owned()).unwrap();
+        assert_eq!(files.iter().map(|f| f.rel_path.as_str()).collect::<Vec<_>>(), vec!["keep.koi"]);
+        assert!(!list_entries(root.to_string_lossy().into_owned())
+            .unwrap()
+            .iter()
+            .any(|e| e.name == "node_modules"));
 
         let _ = std::fs::remove_dir_all(&root);
     }

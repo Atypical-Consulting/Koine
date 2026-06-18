@@ -326,4 +326,45 @@ describe('explorer', () => {
     const labels = Array.from(document.querySelectorAll('.explorer-menu-item')).map((b) => b.textContent);
     expect(labels).toEqual(['New File', 'New Folder']);
   });
+
+  it('keeps a collapsed folder collapsed across a re-render', () => {
+    const cb = makeCallbacks();
+    const ex = createExplorer(cb);
+    document.body.appendChild(ex.el);
+    ex.render(sampleTree(), 'ROOT');
+
+    const li = ex.el.querySelector<HTMLElement>('li[data-kind="dir"]')!;
+    expect(li.getAttribute('aria-expanded')).toBe('true');
+    dirRow(ex).click(); // collapse
+    expect(li.getAttribute('aria-expanded')).toBe('false');
+
+    // A diagnostics push re-renders the whole tree; the folder must stay collapsed.
+    ex.render(sampleTree(), 'ROOT');
+    expect(ex.el.querySelector('li[data-kind="dir"]')!.getAttribute('aria-expanded')).toBe('false');
+  });
+
+  it('focuses the treeitem <li> (not a bare row) on keyboard navigation', () => {
+    const cb = makeCallbacks();
+    const ex = createExplorer(cb);
+    document.body.appendChild(ex.el);
+    ex.render(sampleTree(), 'ROOT');
+
+    const folderLi = dirRow(ex).closest('li')!;
+    folderLi.tabIndex = 0;
+    folderLi.focus();
+    dirRow(ex).dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
+    const active = document.activeElement as HTMLElement;
+    expect(active.getAttribute('role')).toBe('treeitem');
+    expect(active.querySelector('.explorer-name')?.textContent).toBe('order.koi');
+  });
+
+  it('does not delete on Backspace', () => {
+    const cb = makeCallbacks();
+    const ex = createExplorer(cb);
+    document.body.appendChild(ex.el);
+    ex.render(sampleTree(), 'ROOT');
+
+    fileRow(ex, 'shared.koi').dispatchEvent(new KeyboardEvent('keydown', { key: 'Backspace', bubbles: true }));
+    expect(cb.onDelete).not.toHaveBeenCalled();
+  });
 });

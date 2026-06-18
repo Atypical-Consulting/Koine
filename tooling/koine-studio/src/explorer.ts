@@ -3,7 +3,7 @@
 // (folders-first then alpha) and pre-tokenized by the platform; the explorer never parses a token.
 //
 // It mounts a <div class="explorer"> (the `el` field) — a toolbar (root New File / New Folder) plus
-// a <ul role="tree"> — into #filetree, and re-renders on demand. Directories are collapsible; file
+// a <ul role="tree"> — into #filetree-body, and re-renders on demand. Directories are collapsible; file
 // rows open on click. Mutations are surfaced through the ExplorerCallbacks the integrator supplies —
 // the explorer does the prompting (name input) and confirmation, but the actual fs work happens in
 // the host. Dirty dot, active state and the error/warning badge mirror ide.ts/renderTree so the
@@ -25,7 +25,7 @@ export interface ExplorerCallbacks {
 }
 
 export interface Explorer {
-  /** The root <div class="explorer"> (toolbar + <ul role="tree">) to mount into #filetree. */
+  /** The root <div class="explorer"> (toolbar + <ul role="tree">) to mount into #filetree-body. */
   el: HTMLElement;
   /** (Re)render the whole tree. `rootToken` is the opened-folder token used as the New File/Folder parent at the top level. */
   render(entries: FsEntry[], rootToken: string): void;
@@ -59,6 +59,11 @@ export function createExplorer(cb: ExplorerCallbacks): Explorer {
   let rootToken = '';
   // The single floating context menu, lazily mounted to document.body and reused.
   let menuEl: HTMLElement | null = null;
+  // The element to return focus to when the context menu closes (the row/li or '⋯' that opened it).
+  let menuTrigger: HTMLElement | null = null;
+  // Directory tokens the user has collapsed. Honoured across re-renders so a folder doesn't pop back
+  // open when the tree is rebuilt (renderTree runs on every diagnostics push).
+  const collapsed = new Set<string>();
 
   // --- name prompts (v1 uses window.prompt) -----------------------------------
 
@@ -104,11 +109,15 @@ export function createExplorer(cb: ExplorerCallbacks): Explorer {
     li.setAttribute('aria-level', String(level));
     li.dataset.kind = entry.kind;
 
+    // The <li> (role=treeitem) is the focusable unit — focusing it gives assistive tech the
+    // treeitem's name, level and expanded/selected state. Roving tabindex is managed by the
+    // keyboard handler; the token lets focus-restore recover the same row after a re-render.
+    li.tabIndex = -1;
+    li.dataset.token = entry.token;
+
     const row = document.createElement('div');
     row.className = 'explorer-row';
     row.style.setProperty('--depth', String(level - 1));
-    // A treeitem is the focusable unit; roving tabindex is managed by the keyboard handler.
-    row.tabIndex = -1;
 
     const isDir = entry.kind === 'dir';
 
@@ -116,7 +125,6 @@ export function createExplorer(cb: ExplorerCallbacks): Explorer {
     const twisty = document.createElement('span');
     twisty.className = 'explorer-twisty';
     twisty.setAttribute('aria-hidden', 'true');
-    if (isDir) twisty.textContent = '▸';
     row.appendChild(twisty);
 
     const label = document.createElement('span');
@@ -168,7 +176,9 @@ export function createExplorer(cb: ExplorerCallbacks): Explorer {
     li.appendChild(row);
 
     if (isDir) {
-      li.setAttribute('aria-expanded', 'true');
+      const expanded = !collapsed.has(entry.token); // honour the user's persisted collapse state
+      li.setAttribute('aria-expanded', String(expanded));
+      twisty.textContent = expanded ? '▾' : '▸';
       const childList = document.createElement('ul');
       childList.className = 'explorer-children';
       childList.setAttribute('role', 'group');
@@ -190,36 +200,39 @@ export function createExplorer(cb: ExplorerCallbacks): Explorer {
       ev.preventDefault();
       openMenu(entry, parentDir, ev.clientX, ev.clientY);
     });
-    row.addEventListener('keydown', (ev) => onRowKeydown(ev, li, entry, parentDir));
-    // Store the entry + containing-dir token so keyboard nav and inline rename can recover them.
+    li.addEventListener('keydown', (ev) => onRowKeydown(ev, li, entry, parentDir));
+    // Store the entry + owning <li> so keyboard nav, inline rename and focus-restore recover them.
     (row as RowEl)._entry = entry;
     (row as RowEl)._li = li;
-    (row as RowEl)._parentDir = parentDir;
     return li;
   }
 
   // Expand/collapse a directory <li> (toggles aria-expanded; CSS hides .explorer-children).
   function toggleDir(li: HTMLLIElement): void {
-    const expanded = li.getAttribute('aria-expanded') === 'true';
-    setExpanded(li, !expanded);
+    setExpanded(li, li.getAttribute('aria-expanded') !== 'true');
   }
 
   function setExpanded(li: HTMLLIElement, expanded: boolean): void {
     li.setAttribute('aria-expanded', String(expanded));
     const twisty = li.querySelector<HTMLElement>(':scope > .explorer-row > .explorer-twisty');
     if (twisty) twisty.textContent = expanded ? '▾' : '▸';
+    // Persist so the folder keeps its state across re-renders (renderTree runs on every diag push).
+    const token = li.dataset.token;
+    if (token) {
+      if (expanded) collapsed.delete(token);
+      else collapsed.add(token);
+    }
   }
 
   // --- keyboard navigation (WAI-ARIA tree pattern) ----------------------------
 
-  // Every visible (not inside a collapsed ancestor) treeitem row, in DOM/visual order.
-  function visibleRows(): RowEl[] {
-    const out: RowEl[] = [];
+  // Every visible (not inside a collapsed ancestor) treeitem <li>, in DOM/visual order.
+  function visibleItems(): HTMLLIElement[] {
+    const out: HTMLLIElement[] = [];
     const walk = (list: HTMLElement): void => {
       for (const li of Array.from(list.children) as HTMLLIElement[]) {
         if (li.getAttribute('role') !== 'treeitem') continue;
-        const row = li.querySelector<RowEl>(':scope > .explorer-row');
-        if (row) out.push(row);
+        out.push(li);
         if (li.dataset.kind === 'dir' && li.getAttribute('aria-expanded') === 'true') {
           const group = li.querySelector<HTMLElement>(':scope > .explorer-children');
           if (group) walk(group);
@@ -230,33 +243,32 @@ export function createExplorer(cb: ExplorerCallbacks): Explorer {
     return out;
   }
 
-  // Move roving focus to `row` (single tabbable row at a time, per the tree pattern).
-  function focusRow(row: RowEl): void {
-    for (const r of tree.querySelectorAll<HTMLElement>('.explorer-row')) r.tabIndex = -1;
-    row.tabIndex = 0;
-    row.focus();
+  // Move roving focus to `li` (a single tabbable treeitem at a time, per the tree pattern).
+  function focusItem(li: HTMLLIElement): void {
+    for (const item of tree.querySelectorAll<HTMLElement>('li[role="treeitem"]')) item.tabIndex = -1;
+    li.tabIndex = 0;
+    li.focus();
   }
 
   function onRowKeydown(ev: KeyboardEvent, li: HTMLLIElement, entry: FsEntry, parentDir: string): void {
-    const rows = visibleRows();
-    const current = li.querySelector<RowEl>(':scope > .explorer-row');
-    const idx = current ? rows.indexOf(current) : -1;
+    const items = visibleItems();
+    const idx = items.indexOf(li);
     const isDir = entry.kind === 'dir';
 
     switch (ev.key) {
       case 'ArrowDown':
         ev.preventDefault();
-        if (idx >= 0 && idx < rows.length - 1) focusRow(rows[idx + 1]);
+        if (idx >= 0 && idx < items.length - 1) focusItem(items[idx + 1]);
         break;
       case 'ArrowUp':
         ev.preventDefault();
-        if (idx > 0) focusRow(rows[idx - 1]);
+        if (idx > 0) focusItem(items[idx - 1]);
         break;
       case 'ArrowRight':
         ev.preventDefault();
         if (isDir) {
           if (li.getAttribute('aria-expanded') !== 'true') setExpanded(li, true);
-          else if (idx >= 0 && idx < rows.length - 1) focusRow(rows[idx + 1]);
+          else if (idx >= 0 && idx < items.length - 1) focusItem(items[idx + 1]);
         }
         break;
       case 'ArrowLeft':
@@ -264,9 +276,8 @@ export function createExplorer(cb: ExplorerCallbacks): Explorer {
         if (isDir && li.getAttribute('aria-expanded') === 'true') {
           setExpanded(li, false);
         } else {
-          // Collapse to / focus the parent treeitem.
-          const parentRow = parentRowOf(li);
-          if (parentRow) focusRow(parentRow);
+          const parent = parentItemOf(li);
+          if (parent) focusItem(parent);
         }
         break;
       case 'Enter':
@@ -279,25 +290,24 @@ export function createExplorer(cb: ExplorerCallbacks): Explorer {
         startRename(li, entry);
         break;
       case 'Delete':
-      case 'Backspace':
         ev.preventDefault();
         confirmDelete(entry);
         break;
       case 'ContextMenu': {
         ev.preventDefault();
-        const r = current?.getBoundingClientRect();
-        if (r) openMenu(entry, parentDir, r.left, r.bottom);
+        const r = li.getBoundingClientRect();
+        openMenu(entry, parentDir, r.left, r.bottom);
         break;
       }
     }
   }
 
-  function parentRowOf(li: HTMLLIElement): RowEl | null {
+  function parentItemOf(li: HTMLLIElement): HTMLLIElement | null {
     const group = li.parentElement; // .explorer-children or the root tree
     if (!group || !group.classList.contains('explorer-children')) return null;
     const parentLi = group.parentElement as HTMLLIElement | null;
     if (!parentLi || parentLi.getAttribute('role') !== 'treeitem') return null;
-    return parentLi.querySelector<RowEl>(':scope > .explorer-row');
+    return parentLi;
   }
 
   // --- inline rename ----------------------------------------------------------
@@ -325,8 +335,8 @@ export function createExplorer(cb: ExplorerCallbacks): Explorer {
       const next = cleanName(input.value);
       input.replaceWith(label);
       if (commit && next && next !== entry.name) cb.onRename(entry, next);
-      row.tabIndex = 0;
-      row.focus();
+      li.tabIndex = 0;
+      li.focus();
     };
 
     input.addEventListener('keydown', (ev) => {
@@ -365,6 +375,10 @@ export function createExplorer(cb: ExplorerCallbacks): Explorer {
     }
     document.removeEventListener('pointerdown', onDocPointerDown, true);
     document.removeEventListener('keydown', onMenuKeydown, true);
+    // Return focus to whatever opened the menu (the treeitem / '⋯' button) so keyboard/AT users
+    // are not dropped onto document.body when the menu dismisses.
+    if (menuTrigger && menuTrigger.isConnected) menuTrigger.focus();
+    menuTrigger = null;
   }
 
   function onDocPointerDown(ev: PointerEvent): void {
@@ -376,7 +390,9 @@ export function createExplorer(cb: ExplorerCallbacks): Explorer {
     const items = Array.from(menuEl.querySelectorAll<HTMLElement>('.explorer-menu-item'));
     const active = document.activeElement as HTMLElement | null;
     const i = active ? items.indexOf(active) : -1;
-    if (ev.key === 'Escape') {
+    if (ev.key === 'Escape' || ev.key === 'Tab') {
+      // Tab (per the APG menu pattern) and Escape both dismiss the menu rather than leaving it
+      // orphaned with focus elsewhere.
       ev.preventDefault();
       closeMenu();
     } else if (ev.key === 'ArrowDown') {
@@ -385,6 +401,12 @@ export function createExplorer(cb: ExplorerCallbacks): Explorer {
     } else if (ev.key === 'ArrowUp') {
       ev.preventDefault();
       items[Math.max(0, i - 1)]?.focus();
+    } else if (ev.key === 'Home') {
+      ev.preventDefault();
+      items[0]?.focus();
+    } else if (ev.key === 'End') {
+      ev.preventDefault();
+      items[items.length - 1]?.focus();
     }
   }
 
@@ -434,6 +456,8 @@ export function createExplorer(cb: ExplorerCallbacks): Explorer {
       li.appendChild(btn);
       menu.appendChild(li);
     }
+    // Remember the trigger (the focused treeitem or '⋯' button) so closeMenu can restore focus.
+    menuTrigger = document.activeElement as HTMLElement | null;
     document.body.appendChild(menu);
     menuEl = menu;
     menu.querySelector<HTMLElement>('.explorer-menu-item')?.focus();
@@ -464,21 +488,41 @@ export function createExplorer(cb: ExplorerCallbacks): Explorer {
   function render(entries: FsEntry[], token: string): void {
     rootToken = token;
     closeMenu();
+    // renderTree runs on every diagnostics push; if the user was navigating the tree by keyboard,
+    // remember which treeitem had focus so we can restore it after the full rebuild (avoiding a
+    // focus drop to document.body and a roving-tabindex jump back to the first row).
+    const active = document.activeElement as HTMLElement | null;
+    const refocusToken = active && tree.contains(active) ? (active as HTMLLIElement).dataset?.token : undefined;
+
     tree.innerHTML = '';
     for (const entry of entries) tree.appendChild(buildItem(entry, 1, token));
-    // Make the first row tabbable so the tree has a single tab stop.
-    const first = tree.querySelector<HTMLElement>('.explorer-row');
-    if (first) first.tabIndex = 0;
+
+    const restore = refocusToken
+      ? tree.querySelector<HTMLElement>(`li[role="treeitem"][data-token="${cssEscape(refocusToken)}"]`)
+      : null;
+    if (restore) {
+      restore.tabIndex = 0;
+      restore.focus();
+    } else {
+      // Otherwise make the first treeitem the single tab stop.
+      const first = tree.querySelector<HTMLElement>('li[role="treeitem"]');
+      if (first) first.tabIndex = 0;
+    }
   }
 
   return { el: root, render };
+}
+
+/** Escape a token for use inside a CSS attribute selector (CSS.escape when available). */
+function cssEscape(value: string): string {
+  const c = (globalThis as { CSS?: { escape?: (s: string) => string } }).CSS;
+  return c?.escape ? c.escape(value) : value.replace(/["\\]/g, '\\$&');
 }
 
 // A .explorer-row carries its FsEntry and owning <li> so keyboard/menu code can recover them.
 interface RowEl extends HTMLElement {
   _entry?: FsEntry;
   _li?: HTMLLIElement;
-  _parentDir?: string;
 }
 
 function toolbarButton(label: string, glyph: string, onClick: () => void): HTMLButtonElement {
@@ -487,7 +531,12 @@ function toolbarButton(label: string, glyph: string, onClick: () => void): HTMLB
   btn.className = 'explorer-tool';
   btn.setAttribute('aria-label', label);
   btn.title = label;
-  btn.textContent = glyph;
+  // The glyph is decorative — aria-hidden so screen readers announce only the aria-label, not the
+  // emoji/glyph name (avoids a double "New folder, file folder" announcement).
+  const icon = document.createElement('span');
+  icon.setAttribute('aria-hidden', 'true');
+  icon.textContent = glyph;
+  btn.appendChild(icon);
   btn.addEventListener('click', onClick);
   return btn;
 }

@@ -130,6 +130,9 @@ export class KoineLsp {
   // request methods target; didChange is debounced per active uri.
   private docs = new Map<string, OpenDoc>();
   private changeTimer?: ReturnType<typeof setTimeout>;
+  // The uri whose debounced didChange is currently queued (so closeDoc can drop a pending change
+  // for a doc it is about to close — avoiding a didChange-after-didClose on a dropped/renamed uri).
+  private changeQueuedUri?: string;
   private onDiagnostics?: (uri: string, diags: LspDiagnostic[]) => void;
   private onExit?: (code: number) => void;
   private onRestart?: () => void;
@@ -281,7 +284,9 @@ export class KoineLsp {
     if (!doc) return; // not opened yet — drop
     doc.text = text;
     clearTimeout(this.changeTimer);
+    this.changeQueuedUri = uri;
     this.changeTimer = setTimeout(() => {
+      this.changeQueuedUri = undefined;
       this.notify('textDocument/didChange', {
         textDocument: { uri, version: ++doc.version },
         contentChanges: [{ text }],
@@ -292,6 +297,12 @@ export class KoineLsp {
   /** Close and stop tracking a document. Sends textDocument/didClose. */
   closeDoc(uri: string): void {
     if (!this.docs.delete(uri)) return;
+    // Drop any pending debounced didChange for this uri so we never send didChange after didClose
+    // (and never target a uri that was just renamed/deleted by a workspace mutation).
+    if (this.changeQueuedUri === uri) {
+      clearTimeout(this.changeTimer);
+      this.changeQueuedUri = undefined;
+    }
     this.notify('textDocument/didClose', {
       textDocument: { uri },
     });

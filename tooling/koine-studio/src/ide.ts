@@ -1081,6 +1081,11 @@ export function init(): void {
     // Ensure the server has a fresh scratch doc, then load the SEED into the editor.
     lsp.openDoc(SCRATCH_URI, SEED);
     editor.setDoc(SEED);
+    // Clear the editor gutter / strip / status pill so a previously-active file's diagnostics don't
+    // linger until the server publishes fresh scratch diagnostics (mirrors activateFile/Fallback).
+    setEditorDiagnostics(editor.view, []);
+    renderStrip([]);
+    updateStatus([]);
     invalidateDocViews();
     renderTree();
     ensureLoaded(activeView);

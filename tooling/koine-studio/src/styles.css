@@ -344,50 +344,11 @@ body {
   overflow: hidden;
 }
 
-.tree-row {
-  display: flex;
-  align-items: baseline;
-  gap: 6px;
-  width: 100%;
-  text-align: left;
-  background: transparent;
-  border: none;
-  color: var(--koi-fg);
-  padding: 4px 12px;
-  cursor: pointer;
-  font-family: var(--koi-font-mono);
-  font-size: 0.78rem;
-}
-
-.tree-row:hover {
-  background: var(--koi-surface);
-}
-
-.tree-row[aria-current='true'] {
-  background: color-mix(in srgb, var(--koi-accent) 14%, transparent);
-  color: var(--koi-fg);
-}
-
-.tree-name {
-  flex: 0 1 auto;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
+/* .tree-dirty + .tree-badge* are shared with the explorer (explorer.ts reuses these classes for the
+   per-file dirty dot and the error/warning badge). The old flat-tree row styles were removed. */
 .tree-dirty {
   color: var(--koi-accent);
   margin-left: 3px;
-}
-
-.tree-dir {
-  flex: 1 1 auto;
-  min-width: 0;
-  color: var(--koi-muted);
-  font-size: 0.7rem;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 
 .tree-badge {
@@ -489,7 +450,11 @@ body {
   background: color-mix(in srgb, var(--koi-accent) 14%, transparent);
 }
 
-.explorer-row:focus-visible {
+/* Focus lives on the <li role=treeitem> (the focusable unit); paint the ring on its row. */
+.explorer-tree li[role='treeitem']:focus {
+  outline: none;
+}
+.explorer-tree li[role='treeitem']:focus-visible > .explorer-row {
   outline: 2px solid var(--koi-accent);
   outline-offset: -2px;
 }
