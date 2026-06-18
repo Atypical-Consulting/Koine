@@ -31,9 +31,9 @@ public class PythonTypeMapperTests
     // =========================================================================
 
     [Theory]
-    [InlineData("String",  "str")]
-    [InlineData("Int",     "int")]
-    [InlineData("Bool",    "bool")]
+    [InlineData("String", "str")]
+    [InlineData("Int", "int")]
+    [InlineData("Bool", "bool")]
     [InlineData("Decimal", "Decimal")]
     [InlineData("Instant", "datetime")]
     public void Primitive_types_map_correctly(string koineName, string expected)
