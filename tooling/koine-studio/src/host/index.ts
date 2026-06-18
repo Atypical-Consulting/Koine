@@ -5,7 +5,7 @@ import type { Platform } from './types';
 import { TauriPlatform } from './tauri';
 import { BrowserPlatform } from './browser';
 
-export type { KoiFile, LspTransport, Platform, SourceDoc } from './types';
+export type { FsEntry, KoiFile, LspTransport, Platform, SourceDoc } from './types';
 
 /** True when running inside the Tauri desktop shell (v2 injects `__TAURI_INTERNALS__`). */
 export function isTauri(): boolean {

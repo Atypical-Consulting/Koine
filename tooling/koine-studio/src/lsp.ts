@@ -345,8 +345,9 @@ export class KoineLsp {
     this.changeTimer = setTimeout(() => {
       this.changeTimer = undefined;
       this.pendingUri = undefined;
-      // Re-check the doc is still open: it may have been closed (folder teardown) during the
-      // debounce window — sending didChange after didClose would be a protocol violation.
+      // Re-check the doc is still open: it may have been closed (folder teardown, or a workspace
+      // rename/delete) during the debounce window — sending didChange after didClose would be a
+      // protocol violation.
       const current = this.docs.get(uri);
       if (!current) return;
       this.notify('textDocument/didChange', {
@@ -398,6 +399,8 @@ export class KoineLsp {
   /** Close and stop tracking a document. Sends textDocument/didClose. */
   closeDoc(uri: string): void {
     if (!this.docs.delete(uri)) return;
+    // A debounced didChange may still be queued for this uri; the changeDoc timer re-checks the doc
+    // is open before firing, so the now-deleted uri is dropped rather than sent after didClose.
     this.notify('textDocument/didClose', {
       textDocument: { uri },
     });

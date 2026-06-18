@@ -250,12 +250,17 @@ struct KoiFile {
 }
 
 /// True if `path` lies under a directory the workspace scan must skip: a build
-/// output (`bin`/`obj`) or a git dir. Mirrors the server's `ScanWorkspace` filter.
-fn is_skipped_path(path: &std::path::Path) -> bool {
-    path.components().any(|c| {
+/// output (`bin`/`obj`), a git dir, or `node_modules`. Only segments BELOW the
+/// opened `root` are considered — so a workspace whose own path happens to sit
+/// under e.g. a `bin/` ancestor is still scanned (matching the browser backend
+/// and the server's relative-path `ScanWorkspace` filter). `node_modules` is
+/// skipped to stay consistent with the browser explorer.
+fn is_skipped_path(path: &std::path::Path, root: &std::path::Path) -> bool {
+    let rel = path.strip_prefix(root).unwrap_or(path);
+    rel.components().any(|c| {
         matches!(
             c.as_os_str().to_str(),
-            Some("bin") | Some("obj") | Some(".git")
+            Some("bin") | Some("obj") | Some(".git") | Some("node_modules")
         )
     })
 }
@@ -277,17 +282,12 @@ fn list_koi_files(dir: String) -> Result<Vec<KoiFile>, String> {
             let entry = entry.map_err(|e| e.to_string())?;
             let path = entry.path();
             let file_type = entry.file_type().map_err(|e| e.to_string())?;
-            if is_skipped_path(&path) {
+            if is_skipped_path(&path, root) {
                 continue;
             }
             if file_type.is_dir() {
                 stack.push(path);
-            } else if file_type.is_file()
-                && path
-                    .extension()
-                    .and_then(|e| e.to_str())
-                    .is_some_and(|e| e.eq_ignore_ascii_case("koi"))
-            {
+            } else if file_type.is_file() && is_koi_file(&path) {
                 let name = path
                     .file_name()
                     .and_then(|n| n.to_str())
@@ -321,6 +321,243 @@ fn read_text_file(path: String) -> Result<String, String> {
 #[tauri::command]
 fn write_text_file(path: String, contents: String) -> Result<(), String> {
     std::fs::write(&path, contents).map_err(|e| format!("failed to write {path}: {e}"))
+}
+
+// --- workspace explorer tree + mutations ------------------------------------
+
+/// One node in the workspace explorer tree under an opened folder — every
+/// non-skipped directory (even empty) plus every `.koi` file. JSON keys are
+/// camelCased (`token` / `name` / `relPath` / `kind` / `children`) for the
+/// frontend; `token` is the absolute path, the same read/write token scheme as
+/// `KoiFile.path`. `children` is `Some` for directories (the eager subtree) and
+/// `None` for files.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct FsEntry {
+    /// Absolute path to the entry (its opaque token).
+    token: String,
+    /// Last path segment (file or directory name).
+    name: String,
+    /// Path relative to the opened folder, forward-slashed for stable tree keys.
+    rel_path: String,
+    /// `"file"` for a `.koi` file, `"dir"` for a directory.
+    kind: &'static str,
+    /// The eager child subtree for a directory; `None` for a file.
+    children: Option<Vec<FsEntry>>,
+}
+
+/// True if a `.koi` file (case-insensitive extension).
+fn is_koi_file(path: &std::path::Path) -> bool {
+    path.extension()
+        .and_then(|e| e.to_str())
+        .is_some_and(|e| e.eq_ignore_ascii_case("koi"))
+}
+
+/// A caller-supplied relative path is safe only if it is non-empty, not absolute, and made entirely
+/// of normal components (no `.`, `..`, root or drive prefix) — defence in depth so a name typed in
+/// the UI can never write outside the opened workspace folder.
+fn is_safe_relpath(rel: &str) -> bool {
+    !rel.is_empty()
+        && !std::path::Path::new(rel).is_absolute()
+        && std::path::Path::new(rel)
+            .components()
+            .all(|c| matches!(c, std::path::Component::Normal(_)))
+}
+
+/// A single entry name (for rename) is safe only if non-empty, separator-free, and not `.`/`..`.
+fn is_safe_name(name: &str) -> bool {
+    !name.is_empty() && !name.contains('/') && !name.contains('\\') && name != "." && name != ".."
+}
+
+/// Build the explorer subtree for `dir`: every non-skipped child directory
+/// (recursively, even when empty) plus every `.koi` file, sorted folders-first
+/// then by name at each level. `root` anchors the forward-slashed `rel_path`.
+fn build_entries(
+    dir: &std::path::Path,
+    root: &std::path::Path,
+) -> Result<Vec<FsEntry>, String> {
+    let mut dirs: Vec<FsEntry> = Vec::new();
+    let mut files: Vec<FsEntry> = Vec::new();
+
+    let entries = std::fs::read_dir(dir)
+        .map_err(|e| format!("failed to read directory {}: {e}", dir.display()))?;
+    for entry in entries {
+        let entry = entry.map_err(|e| e.to_string())?;
+        let path = entry.path();
+        let file_type = entry.file_type().map_err(|e| e.to_string())?;
+        if is_skipped_path(&path, root) {
+            continue;
+        }
+        let name = path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or_default()
+            .to_string();
+        let rel = path
+            .strip_prefix(root)
+            .unwrap_or(&path)
+            .to_string_lossy()
+            .replace('\\', "/");
+        if file_type.is_dir() {
+            dirs.push(FsEntry {
+                token: path.to_string_lossy().into_owned(),
+                name,
+                rel_path: rel,
+                kind: "dir",
+                children: Some(build_entries(&path, root)?),
+            });
+        } else if file_type.is_file() && is_koi_file(&path) {
+            files.push(FsEntry {
+                token: path.to_string_lossy().into_owned(),
+                name,
+                rel_path: rel,
+                kind: "file",
+                children: None,
+            });
+        }
+    }
+
+    // Folders first, then files; alphabetical by name within each group.
+    dirs.sort_by(|a, b| a.name.cmp(&b.name));
+    files.sort_by(|a, b| a.name.cmp(&b.name));
+    dirs.append(&mut files);
+    Ok(dirs)
+}
+
+/// The full explorer tree (directories AND `.koi` files) under an opened folder.
+/// Directories are included even when empty; `bin`/`obj`/`.git` subtrees are
+/// skipped. Sorted folders-first then alphabetically at every level. Returns
+/// `Err` if the root directory cannot be read.
+#[tauri::command]
+fn list_entries(dir: String) -> Result<Vec<FsEntry>, String> {
+    let root = std::path::Path::new(&dir);
+    build_entries(root, root)
+}
+
+/// Create a file at `rel_path` under `folder`, creating intermediate dirs, and
+/// return its absolute path. Errors if the file already exists.
+#[tauri::command]
+fn create_file(folder: String, rel_path: String, contents: String) -> Result<String, String> {
+    if !is_safe_relpath(&rel_path) {
+        return Err(format!("invalid path: {rel_path}"));
+    }
+    let target = std::path::Path::new(&folder).join(&rel_path);
+    if target.exists() {
+        return Err(format!("already exists: {}", target.display()));
+    }
+    if let Some(parent) = target.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| format!("failed to create {}: {e}", parent.display()))?;
+    }
+    std::fs::write(&target, contents)
+        .map_err(|e| format!("failed to write {}: {e}", target.display()))?;
+    Ok(target.to_string_lossy().into_owned())
+}
+
+/// Create a (possibly nested) directory at `rel_path` under `folder` and return
+/// its absolute path.
+#[tauri::command]
+fn create_folder(folder: String, rel_path: String) -> Result<String, String> {
+    if !is_safe_relpath(&rel_path) {
+        return Err(format!("invalid path: {rel_path}"));
+    }
+    let target = std::path::Path::new(&folder).join(&rel_path);
+    std::fs::create_dir_all(&target)
+        .map_err(|e| format!("failed to create {}: {e}", target.display()))?;
+    Ok(target.to_string_lossy().into_owned())
+}
+
+/// Rename the entry at `token` (a file or directory) in place to `new_name` and
+/// return the new absolute path. Errors if the target name already exists.
+#[tauri::command]
+fn rename_entry(token: String, new_name: String) -> Result<String, String> {
+    if !is_safe_name(&new_name) {
+        return Err(format!("invalid name: {new_name}"));
+    }
+    let src = std::path::Path::new(&token);
+    let parent = src
+        .parent()
+        .ok_or_else(|| format!("no parent for {token}"))?;
+    let target = parent.join(&new_name);
+    if target.exists() {
+        return Err(format!("already exists: {}", target.display()));
+    }
+    std::fs::rename(src, &target)
+        .map_err(|e| format!("failed to rename {token}: {e}"))?;
+    Ok(target.to_string_lossy().into_owned())
+}
+
+/// Delete the entry at `token`: a directory and everything under it, or a file.
+#[tauri::command]
+fn delete_entry(token: String) -> Result<(), String> {
+    let path = std::path::Path::new(&token);
+    let result = if path.is_dir() {
+        std::fs::remove_dir_all(path)
+    } else {
+        std::fs::remove_file(path)
+    };
+    result.map_err(|e| format!("failed to delete {token}: {e}"))
+}
+
+/// Recursively copy `src` to `dst`. `src` may be a file or a directory tree;
+/// intermediate destination directories are created as needed.
+fn copy_recursive(src: &std::path::Path, dst: &std::path::Path) -> Result<(), String> {
+    if src.is_dir() {
+        std::fs::create_dir_all(dst)
+            .map_err(|e| format!("failed to create {}: {e}", dst.display()))?;
+        let entries = std::fs::read_dir(src)
+            .map_err(|e| format!("failed to read directory {}: {e}", src.display()))?;
+        for entry in entries {
+            let entry = entry.map_err(|e| e.to_string())?;
+            copy_recursive(&entry.path(), &dst.join(entry.file_name()))?;
+        }
+        Ok(())
+    } else {
+        std::fs::copy(src, dst)
+            .map(|_| ())
+            .map_err(|e| format!("failed to copy {} -> {}: {e}", src.display(), dst.display()))
+    }
+}
+
+/// Move (or, when `copy` is true, duplicate) the entry at `token` to
+/// `new_rel_path` under `dest_folder`, creating intermediate dirs, and return
+/// the destination absolute path. A move uses `fs::rename`; a copy walks the
+/// file or directory tree (leaving the source intact).
+#[tauri::command]
+fn move_entry(
+    token: String,
+    dest_folder: String,
+    new_rel_path: String,
+    copy: bool,
+) -> Result<String, String> {
+    if !is_safe_relpath(&new_rel_path) {
+        return Err(format!("invalid path: {new_rel_path}"));
+    }
+    let src = std::path::Path::new(&token);
+    let dest = std::path::Path::new(&dest_folder).join(&new_rel_path);
+    // Never clobber an existing destination — mirrors create_file/rename_entry and the browser
+    // backend (fs::rename would silently overwrite a file / merge a dir, diverging from them).
+    if dest.exists() {
+        return Err(format!("already exists: {}", dest.display()));
+    }
+    if let Some(parent) = dest.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| format!("failed to create {}: {e}", parent.display()))?;
+    }
+    if copy {
+        copy_recursive(src, &dest)?;
+    } else if std::fs::rename(src, &dest).is_err() {
+        // fs::rename fails across filesystems (EXDEV); fall back to copy + delete so a move still
+        // works across volumes, matching the browser backend's copy-based move semantics.
+        copy_recursive(src, &dest)?;
+        let removed = if src.is_dir() {
+            std::fs::remove_dir_all(src)
+        } else {
+            std::fs::remove_file(src)
+        };
+        removed.map_err(|e| format!("failed to remove source {token} after move: {e}"))?;
+    }
+    Ok(dest.to_string_lossy().into_owned())
 }
 
 /// Write raw bytes to `path`, replacing any existing file. Used to save a generated-project zip
@@ -403,7 +640,13 @@ pub fn run() {
             list_koi_files,
             read_text_file,
             write_text_file,
-            write_bytes
+            write_bytes,
+            list_entries,
+            create_file,
+            create_folder,
+            rename_entry,
+            delete_entry,
+            move_entry
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
@@ -584,6 +827,271 @@ mod tests {
         let got = read_text_file(path.to_string_lossy().into_owned()).unwrap();
         assert_eq!(got, body);
         let _ = std::fs::remove_file(&path);
+    }
+
+    // --- explorer-tree + mutation tests -------------------------------------
+
+    #[test]
+    fn list_entries_nests_dirs_and_koi_skips_bin_and_sorts_folders_first() {
+        let root = std::env::temp_dir()
+            .join(format!("koine_studio_entries_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root); // clean any stale leftover
+        let contexts = root.join("contexts");
+        let empty = root.join("empty");
+        let bin = root.join("bin");
+        std::fs::create_dir_all(&contexts).unwrap();
+        std::fs::create_dir_all(&empty).unwrap();
+        std::fs::create_dir_all(&bin).unwrap();
+
+        std::fs::write(root.join("billing.koi"), "context Billing {}").unwrap();
+        std::fs::write(contexts.join("orders.KOI"), "context Orders {}").unwrap();
+        std::fs::write(bin.join("skip.koi"), "context Skip {}").unwrap();
+        std::fs::write(root.join("notes.txt"), "not a koi file").unwrap();
+
+        let tree = list_entries(root.to_string_lossy().into_owned()).unwrap();
+
+        // Folders first (alpha), then files: contexts/, empty/, billing.koi.
+        // bin/ skipped entirely; notes.txt (non-.koi) excluded.
+        let names: Vec<&str> = tree.iter().map(|e| e.name.as_str()).collect();
+        assert_eq!(names, vec!["contexts", "empty", "billing.koi"]);
+
+        // Directories carry Some(children); files carry None.
+        assert_eq!(tree[0].kind, "dir");
+        assert!(tree[0].children.is_some());
+        assert_eq!(tree[2].kind, "file");
+        assert!(tree[2].children.is_none());
+
+        // The empty directory is still present, with an empty child list.
+        assert_eq!(tree[1].name, "empty");
+        assert_eq!(tree[1].children.as_ref().unwrap().len(), 0);
+
+        // The nested .koi is reachable, with a forward-slashed rel_path and an
+        // absolute token.
+        let nested = &tree[0].children.as_ref().unwrap()[0];
+        assert_eq!(nested.name, "orders.KOI");
+        assert_eq!(nested.rel_path, "contexts/orders.KOI");
+        assert!(std::path::Path::new(&nested.token).is_absolute());
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn create_file_and_folder_write_to_disk_and_return_absolute_paths() {
+        let root = std::env::temp_dir()
+            .join(format!("koine_studio_create_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let folder = root.to_string_lossy().into_owned();
+
+        // create_file makes intermediate dirs and returns the absolute path.
+        let file_token = create_file(
+            folder.clone(),
+            "contexts/billing.koi".to_string(),
+            "context Billing {}".to_string(),
+        )
+        .unwrap();
+        assert!(std::path::Path::new(&file_token).is_absolute());
+        assert!(file_token.ends_with("billing.koi"));
+        assert_eq!(
+            std::fs::read_to_string(&file_token).unwrap(),
+            "context Billing {}"
+        );
+
+        // create_file errors if the target already exists.
+        assert!(create_file(
+            folder.clone(),
+            "contexts/billing.koi".to_string(),
+            String::new()
+        )
+        .is_err());
+
+        // create_folder makes a (nested) directory and returns the absolute path.
+        let folder_token =
+            create_folder(folder, "contexts/nested/deep".to_string()).unwrap();
+        assert!(std::path::Path::new(&folder_token).is_absolute());
+        assert!(std::path::Path::new(&folder_token).is_dir());
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn rename_entry_renames_on_disk() {
+        let root = std::env::temp_dir()
+            .join(format!("koine_studio_rename_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let src = root.join("old.koi");
+        std::fs::write(&src, "context Old {}").unwrap();
+
+        let new_token = rename_entry(
+            src.to_string_lossy().into_owned(),
+            "new.koi".to_string(),
+        )
+        .unwrap();
+
+        assert!(new_token.ends_with("new.koi"));
+        assert!(std::path::Path::new(&new_token).exists());
+        assert!(!src.exists());
+        assert_eq!(
+            std::fs::read_to_string(&new_token).unwrap(),
+            "context Old {}"
+        );
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn delete_entry_removes_a_directory_recursively() {
+        let root = std::env::temp_dir()
+            .join(format!("koine_studio_delete_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let nested = root.join("contexts");
+        std::fs::create_dir_all(&nested).unwrap();
+        std::fs::write(nested.join("orders.koi"), "context Orders {}").unwrap();
+
+        delete_entry(nested.to_string_lossy().into_owned()).unwrap();
+        assert!(!nested.exists());
+        // The parent (root) is untouched.
+        assert!(root.exists());
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn move_entry_with_copy_leaves_the_source() {
+        let root = std::env::temp_dir()
+            .join(format!("koine_studio_move_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let src = root.join("billing.koi");
+        std::fs::write(&src, "context Billing {}").unwrap();
+        let dest_folder = root.to_string_lossy().into_owned();
+
+        // copy = true duplicates: both source and destination exist afterwards.
+        let dest_token = move_entry(
+            src.to_string_lossy().into_owned(),
+            dest_folder,
+            "contexts/billing.koi".to_string(),
+            true,
+        )
+        .unwrap();
+
+        assert!(dest_token.ends_with("billing.koi"));
+        assert!(std::path::Path::new(&dest_token).exists());
+        assert!(src.exists()); // source left intact on a copy
+        assert_eq!(
+            std::fs::read_to_string(&dest_token).unwrap(),
+            "context Billing {}"
+        );
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn move_entry_without_copy_relocates_the_entry() {
+        let root = std::env::temp_dir()
+            .join(format!("koine_studio_move_rel_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let src = root.join("orders.koi");
+        std::fs::write(&src, "context Orders {}").unwrap();
+
+        // copy = false MOVES: the source is gone, the destination has the bytes.
+        let dest_token = move_entry(
+            src.to_string_lossy().into_owned(),
+            root.to_string_lossy().into_owned(),
+            "contexts/orders.koi".to_string(),
+            false,
+        )
+        .unwrap();
+
+        assert!(!src.exists()); // source removed on a move
+        assert!(std::path::Path::new(&dest_token).exists());
+        assert_eq!(std::fs::read_to_string(&dest_token).unwrap(), "context Orders {}");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn move_entry_rejects_an_existing_destination() {
+        let root = std::env::temp_dir()
+            .join(format!("koine_studio_move_clash_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let src = root.join("a.koi");
+        let occupied = root.join("b.koi");
+        std::fs::write(&src, "AAA").unwrap();
+        std::fs::write(&occupied, "BBB").unwrap();
+
+        let err = move_entry(
+            src.to_string_lossy().into_owned(),
+            root.to_string_lossy().into_owned(),
+            "b.koi".to_string(),
+            false,
+        )
+        .unwrap_err();
+        assert!(err.contains("already exists"), "got: {err}");
+        // Both files untouched by the rejected move.
+        assert_eq!(std::fs::read_to_string(&occupied).unwrap(), "BBB");
+        assert_eq!(std::fs::read_to_string(&src).unwrap(), "AAA");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn scan_skips_only_below_root_not_an_ancestor_named_bin() {
+        // A workspace whose own path sits under a `bin/` ancestor must still be scanned: the
+        // skip filter only applies to segments BELOW the opened root.
+        let outer = std::env::temp_dir().join(format!("koine_bin_anc_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&outer);
+        let root = outer.join("bin").join("models"); // 'bin' is an ANCESTOR of the opened root
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("orders.koi"), "context Orders {}").unwrap();
+
+        let files = list_koi_files(root.to_string_lossy().into_owned()).unwrap();
+        assert_eq!(files.iter().map(|f| f.rel_path.as_str()).collect::<Vec<_>>(), vec!["orders.koi"]);
+        let tree = list_entries(root.to_string_lossy().into_owned()).unwrap();
+        assert_eq!(tree.iter().map(|e| e.name.as_str()).collect::<Vec<_>>(), vec!["orders.koi"]);
+
+        let _ = std::fs::remove_dir_all(&outer);
+    }
+
+    #[test]
+    fn scan_skips_node_modules_subtree() {
+        let root = std::env::temp_dir().join(format!("koine_nm_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let nm = root.join("node_modules").join("pkg");
+        std::fs::create_dir_all(&nm).unwrap();
+        std::fs::write(root.join("keep.koi"), "context Keep {}").unwrap();
+        std::fs::write(nm.join("skip.koi"), "context Skip {}").unwrap();
+
+        let files = list_koi_files(root.to_string_lossy().into_owned()).unwrap();
+        assert_eq!(files.iter().map(|f| f.rel_path.as_str()).collect::<Vec<_>>(), vec!["keep.koi"]);
+        assert!(!list_entries(root.to_string_lossy().into_owned())
+            .unwrap()
+            .iter()
+            .any(|e| e.name == "node_modules"));
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn mutations_reject_path_traversal() {
+        let root = std::env::temp_dir().join(format!("koine_trav_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let folder = root.to_string_lossy().into_owned();
+        let f = root.join("a.koi");
+        std::fs::write(&f, "x").unwrap();
+
+        assert!(create_file(folder.clone(), "../escape.koi".into(), "x".into()).is_err());
+        assert!(create_folder(folder.clone(), "../escape".into()).is_err());
+        assert!(rename_entry(f.to_string_lossy().into_owned(), "..".into()).is_err());
+        assert!(move_entry(f.to_string_lossy().into_owned(), folder, "../escape.koi".into(), true).is_err());
+        // The escaping target was never created in the parent of the workspace.
+        assert!(!root.parent().unwrap().join("escape.koi").exists());
+
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]

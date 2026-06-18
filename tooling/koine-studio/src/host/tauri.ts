@@ -6,7 +6,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { open as openDialog, save as saveDialog } from '@tauri-apps/plugin-dialog';
-import type { KoiFile, LspTransport, Platform, SourceDoc } from './types';
+import type { FsEntry, KoiFile, LspTransport, Platform, SourceDoc } from './types';
 
 /** LSP transport over Tauri IPC. Mirrors the wiring previously inlined in lsp.ts. */
 class TauriLspTransport implements LspTransport {
@@ -127,5 +127,38 @@ export class TauriPlatform implements Platform {
       }
     }
     return out;
+  }
+
+  // --- workspace file management ---------------------------------------------
+  // Tokens are absolute paths; the Rust host does the filesystem work. Tauri converts these
+  // camelCase JS arg keys to the snake_case Rust command parameters.
+
+  listEntries(folderToken: string): Promise<FsEntry[]> {
+    return invoke<FsEntry[]>('list_entries', { dir: folderToken });
+  }
+
+  createFile(folderToken: string, relPath: string, contents?: string): Promise<string> {
+    return invoke<string>('create_file', { folder: folderToken, relPath, contents: contents ?? '' });
+  }
+
+  createFolder(folderToken: string, relPath: string): Promise<string> {
+    return invoke<string>('create_folder', { folder: folderToken, relPath });
+  }
+
+  renameEntry(token: string, newName: string): Promise<string> {
+    return invoke<string>('rename_entry', { token, newName });
+  }
+
+  deleteEntry(token: string): Promise<void> {
+    return invoke('delete_entry', { token }) as Promise<void>;
+  }
+
+  moveEntry(token: string, destFolderToken: string, newRelPath: string, copy?: boolean): Promise<string> {
+    return invoke<string>('move_entry', {
+      token,
+      destFolder: destFolderToken,
+      newRelPath,
+      copy: copy ?? false,
+    });
   }
 }

@@ -7,14 +7,14 @@
     "dev": "vite",
     "dev:web": "vite --mode web",
     "predev:web": "node scripts/build-wasm.mjs",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "build": "tsc && vite build",
     "build:wasm": "node scripts/build-wasm.mjs",
     "build:web": "tsc && vite build --mode web",
     "prebuild:web": "node scripts/build-wasm.mjs",
     "preview": "vite preview",
     "preview:web": "vite preview --mode web",
-    "test": "vitest run",
-    "test:watch": "vitest",
     "tauri": "tauri"
   },
   "dependencies": {
@@ -41,6 +41,7 @@
   "devDependencies": {
     "@tauri-apps/cli": "^2",
     "happy-dom": "^20.10.6",
+    "jsdom": "^29.1.1",
     "typescript": "~6.0.0",
     "vite": "^8.0.0",
     "vitest": "^4.1.9"
