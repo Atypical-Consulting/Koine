@@ -302,7 +302,6 @@ public sealed partial class PythonEmitter
     private IReadOnlyList<PyTypeLocation> BuildTypeLocations(KoineModel model)
     {
         var locations = new List<PyTypeLocation>();
-        ModelIndex index = new SemanticModel(model).Index;
 
         foreach (ContextNode ctx in model.Contexts)
         {
