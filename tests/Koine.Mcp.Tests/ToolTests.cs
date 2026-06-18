@@ -159,6 +159,54 @@ public sealed class ToolTests
         Assert.Contains("value", section);
     }
 
+    [Fact]
+    public void Reference_code_snippets_are_syntactically_valid_Koine()
+    {
+        // Regression guard: the cheatsheet once documented `;` as a field separator, which the
+        // parser rejects — agents copied it and burned a validate round-trip. Every complete,
+        // context-rooted ```koine``` block in the reference must parse without a KOI0001 syntax
+        // error. (Semantic errors are tolerated: shape examples reference undeclared types on
+        // purpose; we only assert the *syntax* the doc teaches is real.)
+        var contextRooted = ExtractKoineBlocks(ReferenceTool.Reference())
+            .Where(b => b.StartsWith("context", StringComparison.Ordinal))
+            .ToList();
+
+        Assert.NotEmpty(contextRooted);
+        foreach (var block in contextRooted)
+        {
+            var result = ValidateTool.Validate(Files(block, "reference-snippet.koi"));
+            var syntaxErrors = result.Diagnostics.Where(d => d.Code == "KOI0001").ToList();
+            Assert.True(
+                syntaxErrors.Count == 0,
+                $"reference snippet has a syntax error ({syntaxErrors.FirstOrDefault()?.Message}):\n{block}");
+        }
+    }
+
+    /// <summary>Extracts the bodies of all ```koine fenced code blocks from a Markdown document.</summary>
+    private static IEnumerable<string> ExtractKoineBlocks(string markdown)
+    {
+        var lines = markdown.Replace("\r\n", "\n").Split('\n');
+        var inBlock = false;
+        var current = new List<string>();
+        foreach (var line in lines)
+        {
+            if (!inBlock && line.TrimStart().StartsWith("```koine", StringComparison.Ordinal))
+            {
+                inBlock = true;
+                current.Clear();
+            }
+            else if (inBlock && line.TrimStart().StartsWith("```", StringComparison.Ordinal))
+            {
+                inBlock = false;
+                yield return string.Join("\n", current).Trim();
+            }
+            else if (inBlock)
+            {
+                current.Add(line);
+            }
+        }
+    }
+
     // ---- koine_examples ----
 
     [Fact]
