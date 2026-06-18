@@ -33,13 +33,19 @@ namespace Koine.Compiler.Emit.CSharp;
 /// The configured C# emitter options (R16.1): namespace remapping, Instant handling. Empty
 /// (no remapping) by default, so an unconfigured emit is byte-identical to the historical output.
 /// </param>
+/// <param name="Semantic">
+/// The shared resolved model. The migrated value-object-invariant slice (Commit 4) reads its lowered
+/// bound invariants off this (<see cref="SemanticModel.BoundInvariantsFor"/>); every other path ignores
+/// it, so the lazy bound layer is forced only for the migrated slice.
+/// </param>
 internal sealed record EmitContext(
     ModelIndex Index,
     IReadOnlyDictionary<string, IReadOnlySet<string>> ScalarNeeds,
     IReadOnlySet<string> AdditiveNeeds,
     IReadOnlyList<string> ContextNames,
     IReadOnlyDictionary<string, (IdentityStrategy Strategy, string? Backing)> IdStrategies,
-    CSharpEmitterOptions Options)
+    CSharpEmitterOptions Options,
+    SemanticModel Semantic)
 {
     /// <summary>
     /// Remaps a logical namespace to its emitted form per the configured

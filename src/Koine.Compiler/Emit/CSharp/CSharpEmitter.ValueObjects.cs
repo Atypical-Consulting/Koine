@@ -53,9 +53,12 @@ public sealed partial class CSharpEmitter
             sb.Append('\n');
         }
 
-        // Constructor.
+        // Constructor. The invariant guards are driven from the LOWERED bound invariants (Commit 4):
+        // the message default is already applied in the lowerer and the condition is still rendered from
+        // its syntactic origin, so the emitted C# is byte-identical to the historical raw-Invariant path.
         sb.Append('\n');
-        WriteConstructor(sb, vo.Name, ctorParams, vo.Invariants, memberNames, translator, typeMapper, enumMemberToType, index);
+        IReadOnlyList<Ast.Bound.BoundInvariant> boundInvariants = emit.Semantic.BoundInvariantsFor(vo);
+        WriteConstructor(sb, vo.Name, ctorParams, boundInvariants, memberNames, translator, typeMapper, enumMemberToType, index);
 
         // Derived (computed) properties after the constructor.
         foreach (Member m in derived)

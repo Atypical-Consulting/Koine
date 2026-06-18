@@ -34,7 +34,8 @@ public sealed partial class CSharpEmitter : IEmitter
     {
         // Reuse the shared resolution when given (the normal pipeline path); fall back to building
         // our own only when invoked standalone (e.g. a direct emitter test).
-        var index = (semantic ?? new SemanticModel(model)).Index;
+        var sema = semantic ?? new SemanticModel(model);
+        var index = sema.Index;
         var typeMapper = new CSharpTypeMapper(index, _options);
         Dictionary<string, string> enumMemberToType = BuildEnumMemberMap(model);
 
@@ -46,7 +47,8 @@ public sealed partial class CSharpEmitter : IEmitter
             AdditiveNeeds: OperatorNeedsAnalyzer.BuildAdditiveOperatorNeeds(model, index),
             ContextNames: model.Contexts.Select(c => c.Name).ToList(),
             IdStrategies: BuildIdentityStrategies(model),
-            Options: _options);
+            Options: _options,
+            Semantic: sema);
 
         var files = new List<EmittedFile>();
 
@@ -481,7 +483,7 @@ public sealed partial class CSharpEmitter : IEmitter
         sb.Append(Indent).Append("public DateTimeOffset OccurredOn { get; init; } = DateTimeOffset.UtcNow;\n");
 
         sb.Append('\n');
-        WriteConstructor(sb, ev.Name, ctorMembers, Array.Empty<Invariant>(), memberNames, translator, typeMapper, enumMemberToType, index);
+        WriteConstructor(sb, ev.Name, ctorMembers, Array.Empty<Ast.Bound.BoundInvariant>(), memberNames, translator, typeMapper, enumMemberToType, index);
 
         foreach (Member m in derived)
         {
@@ -540,7 +542,7 @@ public sealed partial class CSharpEmitter : IEmitter
         sb.Append(Indent).Append("public DateTimeOffset OccurredOn { get; init; } = DateTimeOffset.UtcNow;\n");
 
         sb.Append('\n');
-        WriteConstructor(sb, ev.Name, ctorMembers, Array.Empty<Invariant>(), memberNames, translator, typeMapper, enumMemberToType, index);
+        WriteConstructor(sb, ev.Name, ctorMembers, Array.Empty<Ast.Bound.BoundInvariant>(), memberNames, translator, typeMapper, enumMemberToType, index);
 
         foreach (Member m in derived)
         {
@@ -623,7 +625,7 @@ public sealed partial class CSharpEmitter : IEmitter
         StringBuilder sb,
         string typeName,
         IReadOnlyList<Member> ctorMembers,
-        IReadOnlyList<Invariant> invariants,
+        IReadOnlyList<Ast.Bound.BoundInvariant> invariants,
         ISet<string> memberNames,
         CSharpExpressionTranslator translator,
         CSharpTypeMapper typeMapper,
@@ -845,6 +847,54 @@ public sealed partial class CSharpEmitter : IEmitter
             first = false;
             WriteGuard(sb, typeName, inv.Condition, inv.Message ?? SynthesizeMessage(inv.Condition), translator, mode);
         }
+    }
+
+    /// <summary>
+    /// The value-object overload (Commit 4): drives the guards from the lowered
+    /// <see cref="Ast.Bound.BoundInvariant"/> instead of the raw <see cref="Invariant"/>. The message is
+    /// already final on the bound node (the <c>?? SourceText</c> default applied in the lowerer) and the
+    /// condition is rendered from its <em>syntactic</em> origin
+    /// (<see cref="Ast.Bound.BoundExpression.Syntax"/>), so the emitted C# is byte-identical to the
+    /// raw-<see cref="Invariant"/> path. ADDITIVE: the entity-invariant / command-<c>requires</c>
+    /// callers keep the raw-<see cref="Invariant"/> overload above.
+    /// </summary>
+    private void WriteInvariantGuards(
+        StringBuilder sb,
+        string typeName,
+        IReadOnlyList<Ast.Bound.BoundInvariant> invariants,
+        CSharpExpressionTranslator translator,
+        CSharpExpressionTranslator.NameMode mode = CSharpExpressionTranslator.NameMode.Parameter)
+    {
+        var first = true;
+        foreach (Ast.Bound.BoundInvariant inv in invariants)
+        {
+            if (!first)
+            {
+                sb.Append('\n');
+            }
+
+            first = false;
+            WriteGuard(sb, typeName, inv, translator, mode);
+        }
+    }
+
+    /// <summary>
+    /// The value-object overload (Commit 4): renders a guard from a lowered
+    /// <see cref="Ast.Bound.BoundInvariant"/>. The condition is rendered from its <em>syntactic</em>
+    /// origin (so the translator path — and therefore the emitted C# — is unchanged) and the message is
+    /// taken verbatim off the bound node (the C# default already applied in the lowerer). ADDITIVE: the
+    /// raw-<see cref="Expr"/> overload below stays for entity/command callers.
+    /// </summary>
+    private void WriteGuard(
+        StringBuilder sb,
+        string typeName,
+        Ast.Bound.BoundInvariant invariant,
+        CSharpExpressionTranslator translator,
+        CSharpExpressionTranslator.NameMode mode)
+    {
+        // The bound condition's syntactic origin drives the unchanged translator; the message is final.
+        var condition = (Expr)invariant.Condition.Syntax;
+        WriteGuard(sb, typeName, condition, invariant.Message, translator, mode);
     }
 
     /// <summary>
@@ -1282,68 +1332,14 @@ public sealed partial class CSharpEmitter : IEmitter
         return $"{targetPrefix}_domainEvents.Add(new {ev.Name}({string.Join(", ", args)}));";
     }
 
-    /// <summary>Synthesizes a readable rule message from an unmessaged invariant.</summary>
-    private static string SynthesizeMessage(Expr condition) => SourceText(condition);
-
-    private static string SourceText(Expr expr) => SourceTextVisitor.Instance.Visit(expr);
-
-    private static string SourceOp(BinaryOp op) => op switch
-    {
-        BinaryOp.Or => "or",
-        BinaryOp.And => "and",
-        BinaryOp.Eq => "==",
-        BinaryOp.Neq => "!=",
-        BinaryOp.Lt => "<",
-        BinaryOp.Le => "<=",
-        BinaryOp.Gt => ">",
-        BinaryOp.Ge => ">=",
-        BinaryOp.Add => "+",
-        BinaryOp.Sub => "-",
-        BinaryOp.Mul => "*",
-        BinaryOp.Div => "/",
-        _ => "?"
-    };
-
     /// <summary>
-    /// Renders an expression back to Koine source syntax, for synthesizing a readable rule
-    /// message from an unmessaged invariant. Exhaustive (<see cref="ExprVisitor{T}"/>) so every
-    /// node — including <c>??</c> and <c>let … in …</c> — round-trips rather than collapsing to
-    /// a generic placeholder.
+    /// Synthesizes a readable rule message from an unmessaged invariant. The Koine-source round-trip
+    /// (<see cref="Ast.Bound.Lowerer.SourceText"/>) was relocated VERBATIM into <c>Ast/Bound/</c>
+    /// (it renders Koine syntax only — target-agnostic) and is the C# message default the bound
+    /// VO-invariant slice now produces; the still-syntactic entity-invariant / command-<c>requires</c>
+    /// paths call it directly here.
     /// </summary>
-    private sealed class SourceTextVisitor : ExprVisitor<string>
-    {
-        public static readonly SourceTextVisitor Instance = new();
-
-        private SourceTextVisitor() { }
-
-        protected override string VisitIdentifier(IdentifierExpr n) => n.Name;
-
-        protected override string VisitLiteral(LiteralExpr n) =>
-            n.Kind == LiteralKind.String ? $"\"{n.Text}\"" : n.Text;
-
-        protected override string VisitMemberAccess(MemberAccessExpr n) => $"{Visit(n.Target)}.{n.MemberName}";
-
-        protected override string VisitCall(CallExpr n) =>
-            $"{Visit(n.Target)}.{n.Method}({string.Join(", ", n.Args.Select(Visit))})";
-
-        protected override string VisitLambda(LambdaExpr n) => $"{n.Parameter} => {Visit(n.Body)}";
-
-        protected override string VisitConditional(ConditionalExpr n) =>
-            $"if {Visit(n.Condition)} then {Visit(n.Then)} else {Visit(n.Else)}";
-
-        protected override string VisitCoalesce(CoalesceExpr n) => $"{Visit(n.Left)} ?? {Visit(n.Right)}";
-
-        protected override string VisitUnary(UnaryExpr n) => (n.Op == UnaryOp.Not ? "not " : "-") + Visit(n.Operand);
-
-        protected override string VisitBinary(BinaryExpr n) => $"{Visit(n.Left)} {SourceOp(n.Op)} {Visit(n.Right)}";
-
-        protected override string VisitMatch(MatchExpr n) => $"{Visit(n.Target)} matches /{n.Pattern}/";
-
-        protected override string VisitGuard(GuardExpr n) => $"{Visit(n.Body)} when {Visit(n.Condition)}";
-
-        protected override string VisitLet(LetExpr n) =>
-            $"let {string.Join(", ", n.Bindings.Select(b => $"{b.Name} = {Visit(b.Value)}"))} in {Visit(n.Body)}";
-    }
+    private static string SynthesizeMessage(Expr condition) => Ast.Bound.Lowerer.SourceText(condition);
 
     // ----------------------------------------------------------------------
     // File header (using block + namespace)

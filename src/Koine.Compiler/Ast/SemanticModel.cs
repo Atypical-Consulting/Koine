@@ -1,4 +1,5 @@
 using System.Threading;
+using Koine.Compiler.Ast.Bound;
 
 namespace Koine.Compiler.Ast;
 
@@ -24,6 +25,7 @@ public sealed class SemanticModel
 
     private readonly Lazy<SyntaxGraph> _graph;
     private readonly Lazy<(SymbolTable Symbols, BindingTable Bindings)> _binding;
+    private readonly Lazy<BoundModel> _bound;
 
     public SemanticModel(KoineModel model)
     {
@@ -36,9 +38,16 @@ public sealed class SemanticModel
         // thread-safety discipline as _graph; the emit path (which goes through Index) never forces it.
         _binding = new Lazy<(SymbolTable, BindingTable)>(
             () => Binder.Bind(Model, Index), LazyThreadSafetyMode.ExecutionAndPublication);
+        // The lowered bound-IR slice (Commit 4): VO invariants, lowered + cached, built lazily with the
+        // same thread-safety discipline. Only the migrated VO-invariant emit path forces it; everything
+        // else in the C# emitter and ALL of the TS emitter never touch it, so they pay nothing.
+        _bound = new Lazy<BoundModel>(() => BoundModel.Build(this), LazyThreadSafetyMode.ExecutionAndPublication);
     }
 
     private SymbolTable Symbols => _binding.Value.Symbols;
+
+    /// <summary>The lowered invariants of a value object (the migrated slice's entry point, Commit 4).</summary>
+    internal IReadOnlyList<BoundInvariant> BoundInvariantsFor(ValueObjectDecl vo) => _bound.Value.InvariantsFor(vo);
 
     /// <summary>
     /// The symbol a reference-bearing node resolves to (Roslyn <c>GetSymbolInfo</c>). Never <c>null</c>
