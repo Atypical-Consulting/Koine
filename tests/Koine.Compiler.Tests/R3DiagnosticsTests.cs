@@ -298,6 +298,24 @@ public class R3DiagnosticsTests
     }
 
     [Fact]
+    public void Span_overloads_preserve_a_multi_line_end()
+    {
+        // A span crossing lines must carry the distinct end line/column so the printer
+        // and LSP ranges cover the full multi-line construct, not just the first line.
+        var span = new Ast.SourceSpan(3, 5, 4, 2, 0, 10);
+
+        var err = Diagnostic.Error(DiagnosticCodes.UnknownType, "boom", span);
+        Assert.True(err.HasEnd);
+        Assert.Equal(4, err.EndLine);
+        Assert.Equal(2, err.EndColumn);
+
+        var warn = Diagnostic.Warning(DiagnosticCodes.UnknownType, "boom", span);
+        Assert.True(warn.HasEnd);
+        Assert.Equal(4, warn.EndLine);
+        Assert.Equal(2, warn.EndColumn);
+    }
+
+    [Fact]
     public void Span_overloads_leave_a_zero_width_point_span_without_an_end()
     {
         // A point span (end == start) stays a point diagnostic — behavior preserved.
