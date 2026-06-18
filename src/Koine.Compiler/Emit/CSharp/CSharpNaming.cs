@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Collections.Frozen;
 using System.Text;
 
@@ -9,29 +10,25 @@ namespace Koine.Compiler.Emit.CSharp;
 /// </summary>
 internal static class CSharpNaming
 {
-    /// <summary>Converts a name to PascalCase (used for property/type names).</summary>
-    public static string ToPascalCase(string name)
-    {
-        if (string.IsNullOrEmpty(name))
-        {
-            return name;
-        }
+    // The same member name is cased many times across one emit (property, ctor param, ToString,
+    // equality, operators). Memoize the conversions that actually allocate a new string — names
+    // already in the target case hit the fast path and never enter the cache, so no-ops add no
+    // overhead. Conversion is a pure function of the name, so a shared cache stays correct and
+    // keeps the emitter reentrant (ConcurrentDictionary).
+    private static readonly ConcurrentDictionary<string, string> PascalCache = new(StringComparer.Ordinal);
+    private static readonly ConcurrentDictionary<string, string> CamelCache = new(StringComparer.Ordinal);
 
-        var pascal = char.IsUpper(name[0]) ? name : WithFirstChar(name, char.ToUpperInvariant(name[0]));
-        return Escape(pascal);
-    }
+    /// <summary>Converts a name to PascalCase (used for property/type names).</summary>
+    public static string ToPascalCase(string name) =>
+        string.IsNullOrEmpty(name) || char.IsUpper(name[0])
+            ? Escape(name)
+            : PascalCache.GetOrAdd(name, static n => Escape(WithFirstChar(n, char.ToUpperInvariant(n[0]))));
 
     /// <summary>Converts a name to camelCase (used for constructor parameter names).</summary>
-    public static string ToCamelCase(string name)
-    {
-        if (string.IsNullOrEmpty(name))
-        {
-            return name;
-        }
-
-        var camel = char.IsLower(name[0]) ? name : WithFirstChar(name, char.ToLowerInvariant(name[0]));
-        return Escape(camel);
-    }
+    public static string ToCamelCase(string name) =>
+        string.IsNullOrEmpty(name) || char.IsLower(name[0])
+            ? Escape(name)
+            : CamelCache.GetOrAdd(name, static n => Escape(WithFirstChar(n, char.ToLowerInvariant(n[0]))));
 
     /// <summary>
     /// Returns <paramref name="name"/> with its first character replaced by <paramref name="first"/>,

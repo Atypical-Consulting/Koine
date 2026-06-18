@@ -1616,6 +1616,12 @@ public sealed partial class CSharpEmitter : IEmitter
     /// The type names (keys) are unchanged. A no-op (returns the same entries) when no map is configured.
     /// </summary>
     private static IEnumerable<KeyValuePair<string, string>> RemapNamespaces(
+        EmitContext emit, IEnumerable<KeyValuePair<string, string>> visibleTypes) =>
+        // No remapping configured (the default): hand back the source untouched rather than
+        // allocating an iterator that re-wraps every entry once per emitted file.
+        emit.Options.NamespaceMap.Count == 0 ? visibleTypes : RemapNamespacesCore(emit, visibleTypes);
+
+    private static IEnumerable<KeyValuePair<string, string>> RemapNamespacesCore(
         EmitContext emit, IEnumerable<KeyValuePair<string, string>> visibleTypes)
     {
         foreach (var (name, typeNs) in visibleTypes)
