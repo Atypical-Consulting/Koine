@@ -7,6 +7,7 @@ import {
   SCRATCH_URI,
   type CheckResult,
   type ContextMapResult,
+  type GlossaryEntry,
   type Location,
   type LspDiagnostic,
   type Range,
@@ -25,6 +26,7 @@ import { createAboutDialog } from './about';
 import { createGenerateProject } from './generateProjectWizard';
 import { formatChord } from './platform';
 import { renderDiagrams } from './diagrams';
+import { renderGlossary, type GlossaryHandlers } from './glossary';
 import { createAssistantPanel, type AssistantPanel } from './aiPanel';
 import { buildShareUrl, clearModelHash, readModelFromHash } from './share';
 
@@ -585,18 +587,46 @@ export function init(): void {
     view.innerHTML = `<p class="${kind === 'error' ? 'doc-error' : 'muted'}">${text}</p>`;
   }
 
+  // The glossary tab is the ubiquitous-language editor (#67): it lists every concept across
+  // contexts with a documentation-coverage gauge, and lets anyone (especially non-coders) add or
+  // edit a plain-prose description that is written back into the `.koi` as a `///` doc comment.
   async function loadGlossary(): Promise<void> {
     docMessage(glossaryView, 'Loading glossary…');
     try {
-      const res = await lsp.glossary();
-      if (!res.markdown || !res.markdown.trim()) {
-        docMessage(glossaryView, 'Glossary is empty (the model may have syntax errors).');
+      const model = await lsp.glossaryModel();
+      if (!model.entries.length) {
+        docMessage(glossaryView, 'No concepts yet — declare some types, or fix syntax errors to populate the glossary.');
       } else {
-        glossaryView.innerHTML = `<div class="koi-md">${renderMarkdown(res.markdown)}</div>`;
+        glossaryView.innerHTML = '';
+        glossaryView.appendChild(renderGlossary(model, glossaryHandlers));
       }
       docViewsLoaded.glossary = true;
     } catch (e) {
       docMessage(glossaryView, 'Glossary request failed: ' + String(e), 'error');
+    }
+  }
+
+  // Wires the pure (testable) glossary view in ./glossary to the editor + LSP: jump-to-source and
+  // persist-a-description. The view builds the DOM; these handlers are the only side effects.
+  const glossaryHandlers: GlossaryHandlers = {
+    onGoto: (range) => editor.gotoRange(range.start, range.end),
+    onSave: (entry, text) => void saveDescription(entry, text),
+  };
+
+  /**
+   * Persists a description by asking the server for the doc-comment edit and applying it to the
+   * buffer. The applied edit fires onChange → onDocEdited, which reloads the glossary (debounced),
+   * refreshing coverage. A no-op result (e.g. an unknown id) needs no action — the inline editor
+   * has already closed optimistically.
+   */
+  async function saveDescription(entry: GlossaryEntry, text: string): Promise<void> {
+    try {
+      const result = await lsp.setDoc(entry.id, text);
+      if (!result.edits.length) return;
+      if (result.uri && result.uri !== activeUri && buffers.has(result.uri)) activateFile(result.uri);
+      editor.applyEdits(result.edits);
+    } catch (e) {
+      docMessage(glossaryView, 'Saving description failed: ' + String(e), 'error');
     }
   }
 
