@@ -29,7 +29,8 @@ internal static class PyRuntime
         from __future__ import annotations
 
         from datetime import datetime, timezone
-        from typing import Callable, Generic, Protocol, TypeVar, runtime_checkable
+        from decimal import Decimal
+        from typing import Callable, Generic, Iterable, Protocol, TypeVar, runtime_checkable
 
 
         class DomainInvariantViolationError(Exception):
@@ -145,5 +146,46 @@ internal static class PyRuntime
             """Handles a read-side query, returning its result (the CQRS query seam)."""
 
             def handle(self, query: TQuery) -> TResult: ...
+
+
+        TFold = TypeVar("TFold", bound=_Comparable)
+
+
+        def koine_min(values: Iterable[TFold]) -> TFold:
+            """The minimum element, raising a domain error on an empty collection (no value)."""
+            it = iter(values)
+            try:
+                result = next(it)
+            except StopIteration:
+                raise DomainInvariantViolationError(
+                    "collection", "cannot take min of an empty collection (no value)"
+                ) from None
+            for value in it:
+                if value < result:
+                    result = value
+            return result
+
+
+        def koine_max(values: Iterable[TFold]) -> TFold:
+            """The maximum element, raising a domain error on an empty collection (no value)."""
+            it = iter(values)
+            try:
+                result = next(it)
+            except StopIteration:
+                raise DomainInvariantViolationError(
+                    "collection", "cannot take max of an empty collection (no value)"
+                ) from None
+            for value in it:
+                if result < value:
+                    result = value
+            return result
+
+
+        def koine_sum(values: Iterable[Decimal]) -> Decimal:
+            """The Decimal-safe sum of a collection (never float); empty sums to Decimal zero."""
+            total = Decimal(0)
+            for value in values:
+                total += value
+            return total
         """";
 }
