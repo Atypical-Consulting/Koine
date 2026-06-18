@@ -3,8 +3,10 @@
 # compiler in-process via WebAssembly (no Tauri, no Rust, no `koine lsp` sidecar). Useful for
 # debugging/iterating on the front-end with browser tooling.
 #
-# Builds the Koine.Wasm compiler bundle on first run (when missing), installs the frontend deps,
-# then starts the Vite web dev server. Extra arguments are forwarded to `npm run dev:web`.
+# Installs the frontend deps, then starts the Vite web dev server. `npm run dev:web` rebuilds the
+# Koine.Wasm compiler bundle first via its `predev:web` hook, so the in-browser compiler always
+# matches the current C# sources (no stale public/koine-wasm/). Extra arguments are forwarded to
+# `npm run dev:web`.
 #
 # Requirements: .NET SDK + the wasm workloads (dotnet workload install wasm-tools wasm-experimental),
 # and Node/npm. No Rust toolchain needed.
@@ -14,19 +16,7 @@ Set-Location (Join-Path $PSScriptRoot "../..")
 
 $studio = "tooling/koine-studio"
 
-# 1. Build the in-browser compiler bundle if it isn't present yet (slow wasm publish — only when
-#    missing; re-run `npm run build:wasm` in the studio to refresh after a compiler change).
-$wasmEntry = Join-Path $studio "public/koine-wasm/_framework/dotnet.js"
-if (-not (Test-Path $wasmEntry)) {
-    Write-Host "Building the Koine.Wasm compiler bundle (first run)…"
-    Push-Location $studio
-    npm run build:wasm
-    $code = $LASTEXITCODE
-    Pop-Location
-    if ($code -ne 0) { exit $code }
-}
-
-# 2. Install the frontend deps when missing or out of date (mirrors run-ide.ps1).
+# 1. Install the frontend deps when missing or out of date (mirrors run-ide.ps1).
 $nodeModules = Join-Path $studio "node_modules"
 $stamp = Join-Path $nodeModules ".package-lock.json"
 $lockFile = Join-Path $studio "package-lock.json"
@@ -40,7 +30,9 @@ if ($needsInstall) {
     if ($code -ne 0) { exit $code }
 }
 
-# 3. Launch the web dev server (Vite on http://localhost:1430).
+# 2. Launch the web dev server (Vite on http://localhost:1430). The predev:web hook publishes
+#    src/Koine.Wasm and refreshes public/koine-wasm/ first — slow on the first run / after a
+#    compiler change, fast (incremental) otherwise.
 Push-Location $studio
 npm run dev:web -- @args
 $code = $LASTEXITCODE
