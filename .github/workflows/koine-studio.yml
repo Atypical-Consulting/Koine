@@ -1,0 +1,115 @@
+name: Koine Studio
+
+# Cross-platform CI for the Koine IDE stack: publishes the `koine lsp` sidecar,
+# runs the headless LSP JSON-RPC tests, and builds Koine Studio (the Tauri v2
+# desktop app) on Linux, Windows, and macOS. Mirrors the action versions and
+# .NET setup used by ci.yml / release.yml.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  studio:
+    name: studio (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            rid: linux-x64
+            triple: x86_64-unknown-linux-gnu
+          - os: windows-latest
+            rid: win-x64
+            triple: x86_64-pc-windows-msvc
+          - os: macos-latest
+            rid: osx-arm64
+            triple: aarch64-apple-darwin
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          # All projects target net10.0; pin the 10.0.x channel and allow preview
+          # builds in case the GA SDK is not yet on the runner image (matches ci.yml).
+          dotnet-version: '10.0.x'
+          dotnet-quality: preview
+
+      # Tauri v2 on Linux needs WebKitGTK + libsoup and the standard GTK/app-indicator
+      # system libraries; the Windows and macOS runners ship their web views already.
+      - name: Install Linux system dependencies (Tauri v2)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libsoup-3.0-dev \
+            libgtk-3-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf
+
+      # (a) Publish the self-contained `koine lsp` sidecar for this OS's RID using
+      #     Stream A's publish profile (Properties/PublishProfiles/<rid>.pubxml).
+      - name: Publish LSP sidecar
+        run: dotnet publish src/Koine.Cli -p:PublishProfile=${{ matrix.rid }}
+
+      # (b) Headless LSP coverage: the JSON-RPC server tests run over stdio with no
+      #     editor attached. Filtered to the LSP suite rather than the full ~500 tests.
+      - name: Run headless LSP tests
+        run: dotnet test tests/Koine.Compiler.Tests/Koine.Compiler.Tests.csproj -c Release --filter "FullyQualifiedName~LspServerTests"
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: tooling/koine-studio/package-lock.json
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            tooling/koine-studio/src-tauri/target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('tooling/koine-studio/src-tauri/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      # Stage the published sidecar where Tauri's `externalBin` resolves it: the
+      # build script (tauri_build) validates `binaries/koine-<target-triple>` exists
+      # at COMPILE time, so this must run before any cargo build/test of the host.
+      - name: Stage sidecar for Tauri (externalBin)
+        shell: bash
+        run: |
+          ext=""
+          [ "${{ runner.os }}" = "Windows" ] && ext=".exe"
+          mkdir -p tooling/koine-studio/src-tauri/binaries
+          cp "src/Koine.Cli/bin/publish/${{ matrix.rid }}/koine${ext}" \
+             "tooling/koine-studio/src-tauri/binaries/koine-${{ matrix.triple }}${ext}"
+
+      # (c) Build Koine Studio: the Rust host (framing + broker, with unit tests) and
+      #     the web frontend (TypeScript typecheck + Vite bundle).
+      - name: Build Rust host (cargo)
+        working-directory: tooling/koine-studio/src-tauri
+        run: |
+          cargo build --locked
+          cargo test --locked
+
+      - name: Build frontend (npm)
+        working-directory: tooling/koine-studio
+        run: |
+          npm ci
+          npm run build

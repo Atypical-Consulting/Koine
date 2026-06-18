@@ -11,6 +11,8 @@ import {
   highlightActiveLine,
   highlightActiveLineGutter,
   drawSelection,
+  hoverTooltip,
+  type Tooltip,
 } from '@codemirror/view';
 import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands';
 import {
@@ -33,7 +35,7 @@ import { csharp } from '@codemirror/legacy-modes/mode/clike';
 import { typescript } from '@codemirror/legacy-modes/mode/javascript';
 import { tags as t } from '@lezer/highlight';
 import { lintGutter, setDiagnostics, type Diagnostic as CmDiagnostic } from '@codemirror/lint';
-import type { LspDiagnostic } from './lsp';
+import type { DocumentSymbol, HoverResult, Location, LspDiagnostic, MarkedString, TextEdit } from './lsp';
 
 // --- .koi token highlighter -------------------------------------------------
 
@@ -190,12 +192,172 @@ const sharedTheme = EditorView.theme({
   },
 });
 
+// --- tiny markdown renderer -------------------------------------------------
+// Shared by the hover tooltip here and the Glossary pane in ide.ts. We render only
+// the small subset of markdown the language server produces (headings, lists,
+// fenced/inline code, bold/italic, paragraphs) rather than pulling in a dependency.
+// Source is trusted (the LSP server) but still HTML-escaped before assembly.
+
+function escapeHtml(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+function inlineMd(text: string): string {
+  let out = text;
+  out = out.replace(/`([^`]+)`/g, (_m, c) => `<code>${c}</code>`);
+  out = out.replace(/\*\*([^*]+)\*\*/g, (_m, c) => `<strong>${c}</strong>`);
+  out = out.replace(/(^|[^*])\*([^*\n]+)\*/g, (_m, p, c) => `${p}<em>${c}</em>`);
+  out = out.replace(/(^|[^_])_([^_\n]+)_/g, (_m, p, c) => `${p}<em>${c}</em>`);
+  return out;
+}
+
+/** Render a small subset of markdown to an HTML string. */
+export function renderMarkdown(md: string): string {
+  const lines = escapeHtml(md.replace(/\r\n/g, '\n')).split('\n');
+  const html: string[] = [];
+  let i = 0;
+  let listOpen = false;
+  let paragraph: string[] = [];
+
+  const flushParagraph = () => {
+    if (paragraph.length) {
+      html.push(`<p>${inlineMd(paragraph.join(' '))}</p>`);
+      paragraph = [];
+    }
+  };
+  const closeList = () => {
+    if (listOpen) {
+      html.push('</ul>');
+      listOpen = false;
+    }
+  };
+
+  while (i < lines.length) {
+    const line = lines[i];
+
+    const fence = line.match(/^\s*```(.*)$/);
+    if (fence) {
+      flushParagraph();
+      closeList();
+      const body: string[] = [];
+      i++;
+      while (i < lines.length && !/^\s*```\s*$/.test(lines[i])) {
+        body.push(lines[i]);
+        i++;
+      }
+      i++; // skip closing fence
+      html.push(`<pre><code>${body.join('\n')}</code></pre>`);
+      continue;
+    }
+
+    const heading = line.match(/^(#{1,6})\s+(.*)$/);
+    if (heading) {
+      flushParagraph();
+      closeList();
+      const level = heading[1].length;
+      html.push(`<h${level}>${inlineMd(heading[2].trim())}</h${level}>`);
+      i++;
+      continue;
+    }
+
+    const item = line.match(/^\s*[-*+]\s+(.*)$/);
+    if (item) {
+      flushParagraph();
+      if (!listOpen) {
+        html.push('<ul>');
+        listOpen = true;
+      }
+      html.push(`<li>${inlineMd(item[1])}</li>`);
+      i++;
+      continue;
+    }
+
+    if (line.trim() === '') {
+      flushParagraph();
+      closeList();
+      i++;
+      continue;
+    }
+
+    closeList();
+    paragraph.push(line.trim());
+    i++;
+  }
+
+  flushParagraph();
+  closeList();
+  return html.join('\n');
+}
+
+// --- hover tooltips ---------------------------------------------------------
+
+export type HoverFn = (line: number, character: number) => Promise<HoverResult | null>;
+
+/** Flatten an LSP Hover's `contents` (MarkupContent | MarkedString | array) into markdown. */
+function hoverToMarkdown(hover: HoverResult): string {
+  const fromMarked = (m: MarkedString): string =>
+    typeof m === 'string' ? m : '```' + m.language + '\n' + m.value + '\n```';
+  const c = hover.contents;
+  if (Array.isArray(c)) return c.map(fromMarked).join('\n\n');
+  if (typeof c === 'string') return c;
+  if ('kind' in c) return c.value; // MarkupContent
+  return fromMarked(c); // {language,value} MarkedString
+}
+
+/**
+ * CodeMirror hover tooltip backed by `lsp.hover()`. Converts the CM offset to a 0-based
+ * {line,character}, requests a hover, and renders the returned markup. Degrades silently
+ * (no tooltip) when hover returns null/empty or the request fails.
+ */
+function koineHoverTooltip(hover: HoverFn) {
+  return hoverTooltip(async (view, pos): Promise<Tooltip | null> => {
+    const lineInfo = view.state.doc.lineAt(pos);
+    const lspLine = lineInfo.number - 1; // CM line is 1-based, LSP 0-based
+    const character = pos - lineInfo.from;
+    let res: HoverResult | null;
+    try {
+      res = await hover(lspLine, character);
+    } catch {
+      return null; // request failed/timed out — show nothing
+    }
+    if (!res || !res.contents) return null;
+    const markdown = hoverToMarkdown(res).trim();
+    if (!markdown) return null;
+
+    // Anchor to the word under the cursor when the doc has not changed shape.
+    const word = view.state.wordAt(pos);
+    return {
+      pos: word?.from ?? pos,
+      end: word?.to ?? pos,
+      above: true,
+      create() {
+        const dom = document.createElement('div');
+        dom.className = 'koi-hover koi-md';
+        dom.innerHTML = renderMarkdown(markdown);
+        return { dom };
+      },
+    };
+  });
+}
+
 // --- editable editor --------------------------------------------------------
+
+/** Go-to-definition provider; resolves a 0-based position to a Location (or array/null). */
+export type DefinitionFn = (line: number, character: number) => Promise<Location | Location[] | null>;
+
+/** Format provider; resolves to the LSP TextEdits to apply to the whole document. */
+export type FormatFn = () => Promise<TextEdit[]>;
 
 export interface KoineEditorOptions {
   parent: HTMLElement;
   doc: string;
   onChange?: (doc: string) => void;
+  /** Optional LSP hover provider; when given, hover tooltips are enabled. */
+  onHover?: HoverFn;
+  /** Optional go-to-definition provider; when given, Cmd/Ctrl-click and F12 jump. */
+  onDefinition?: DefinitionFn;
+  /** Optional format provider; when given, Cmd/Ctrl-S formats the document. */
+  onFormat?: FormatFn;
 }
 
 export interface KoineEditor {
@@ -203,6 +365,10 @@ export interface KoineEditor {
   getDoc(): string;
   setDoc(doc: string): void;
   goto(line: number, col: number): void;
+  /** Resolve and jump to the definition for the symbol at a CodeMirror offset. */
+  gotoDefinition(pos: number): Promise<void>;
+  /** Apply LSP TextEdits to the document in one transaction (edits sorted internally). */
+  applyEdits(edits: TextEdit[]): void;
   destroy(): void;
 }
 
@@ -228,7 +394,78 @@ export function setEditorDiagnostics(view: EditorView, diags: LspDiagnostic[]): 
   view.dispatch(setDiagnostics(view.state, diags.map((d) => lspToCm(view, d))));
 }
 
+/** Convert a 0-based LSP {line,character} to a CodeMirror document offset (clamped). */
+function lspPosToOffset(view: EditorView, line: number, character: number): number {
+  const doc = view.state.doc;
+  const ln = Math.min(Math.max(line, 0), doc.lines - 1) + 1; // doc.line() is 1-based
+  const lineInfo = doc.line(ln);
+  return Math.min(lineInfo.from + Math.max(character, 0), lineInfo.to);
+}
+
+/** Jump the editor to a 0-based {line,character}, selecting through to an end position. */
+function jumpToRange(view: EditorView, start: { line: number; character: number }, end: { line: number; character: number }): void {
+  const anchor = lspPosToOffset(view, start.line, start.character);
+  const head = lspPosToOffset(view, end.line, end.character);
+  view.dispatch({ selection: { anchor, head }, scrollIntoView: true });
+  view.focus();
+}
+
 export function createKoineEditor(opts: KoineEditorOptions): KoineEditor {
+  // Resolve and jump to the definition for the symbol at a CM offset. Degrades silently
+  // (no-op) when there is no provider, no result, or the request fails.
+  async function gotoDefinition(pos: number): Promise<void> {
+    if (!opts.onDefinition) return;
+    const lineInfo = view.state.doc.lineAt(pos);
+    const lspLine = lineInfo.number - 1; // CM line is 1-based, LSP 0-based
+    const character = pos - lineInfo.from;
+    let res: Location | Location[] | null;
+    try {
+      res = await opts.onDefinition(lspLine, character);
+    } catch {
+      return;
+    }
+    const loc = Array.isArray(res) ? res[0] : res;
+    if (!loc) return;
+    jumpToRange(view, loc.range.start, loc.range.end);
+  }
+
+  // Cmd/Ctrl-click jumps to definition (only when a provider is wired).
+  const definitionClick = opts.onDefinition
+    ? [
+        EditorView.domEventHandlers({
+          mousedown(event, v) {
+            if (!(event.metaKey || event.ctrlKey)) return false;
+            const pos = v.posAtCoords({ x: event.clientX, y: event.clientY });
+            if (pos == null) return false;
+            event.preventDefault();
+            void gotoDefinition(pos);
+            return true;
+          },
+        }),
+      ]
+    : [];
+
+  // F12 (go-to-definition) and Cmd/Ctrl-S (format) keybindings.
+  const extraKeys = keymap.of([
+    {
+      key: 'F12',
+      run: () => {
+        if (!opts.onDefinition) return false;
+        void gotoDefinition(view.state.selection.main.head);
+        return true;
+      },
+    },
+    {
+      key: 'Mod-s',
+      preventDefault: true,
+      run: () => {
+        if (!opts.onFormat) return false;
+        void opts.onFormat().then((edits) => editorHandle.applyEdits(edits));
+        return true;
+      },
+    },
+  ]);
+
   const view = new EditorView({
     parent: opts.parent,
     state: EditorState.create({
@@ -245,10 +482,13 @@ export function createKoineEditor(opts: KoineEditorOptions): KoineEditor {
         highlightSelectionMatches(),
         search({ top: true }),
         autocompletion({ override: [koineCompletions], icons: false }),
+        extraKeys,
         keymap.of([...closeBracketsKeymap, ...searchKeymap, ...defaultKeymap, ...historyKeymap, indentWithTab]),
+        ...definitionClick,
         koineLanguage,
         syntaxHighlighting(koineHighlight),
         lintGutter(),
+        ...(opts.onHover ? [koineHoverTooltip(opts.onHover)] : []),
         sharedTheme,
         EditorView.updateListener.of((u) => {
           // Fire onChange immediately; the LSP client debounces didChange.
@@ -258,7 +498,7 @@ export function createKoineEditor(opts: KoineEditorOptions): KoineEditor {
     }),
   });
 
-  return {
+  const editorHandle: KoineEditor = {
     view,
     getDoc: () => view.state.doc.toString(),
     setDoc(doc: string) {
@@ -271,10 +511,79 @@ export function createKoineEditor(opts: KoineEditorOptions): KoineEditor {
       view.dispatch({ selection: { anchor: pos }, scrollIntoView: true });
       view.focus();
     },
+    gotoDefinition,
+    applyEdits(edits: TextEdit[]) {
+      if (!edits.length) return;
+      // Convert each LSP range to offsets, then apply sorted by `from` descending so
+      // earlier edits don't shift the offsets of later ones.
+      const changes = edits
+        .map((e) => ({
+          from: lspPosToOffset(view, e.range.start.line, e.range.start.character),
+          to: lspPosToOffset(view, e.range.end.line, e.range.end.character),
+          insert: e.newText,
+        }))
+        .sort((a, b) => b.from - a.from);
+      view.dispatch({ changes });
+    },
     destroy() {
       view.destroy();
     },
   };
+
+  return editorHandle;
+}
+
+// --- document outline rendering ---------------------------------------------
+
+// Map common SymbolKind numbers to a short label badge shown before each row.
+const SYMBOL_KIND_LABEL: Record<number, string> = {
+  3: 'ctx', // Namespace / context
+  5: 'class',
+  6: 'method',
+  8: 'field',
+  10: 'enum',
+  13: 'val', // Variable
+  22: 'case', // EnumMember
+  23: 'value', // Struct / value object
+};
+
+/**
+ * Render a DocumentSymbol[] tree into nested <ul>/<button> rows. Clicking a row calls
+ * `goto(line, col)` with the 1-based position of the symbol's selectionRange (falling
+ * back to its range) start.
+ */
+export function renderSymbolTree(
+  symbols: DocumentSymbol[],
+  goto: (line: number, col: number) => void,
+): HTMLElement {
+  const build = (nodes: DocumentSymbol[]): HTMLUListElement => {
+    const ul = document.createElement('ul');
+    ul.className = 'outline-list';
+    for (const sym of nodes) {
+      const li = document.createElement('li');
+      const row = document.createElement('button');
+      row.type = 'button';
+      row.className = 'outline-row';
+      const kind = SYMBOL_KIND_LABEL[sym.kind];
+      if (kind) {
+        const badge = document.createElement('span');
+        badge.className = 'outline-kind';
+        badge.textContent = kind;
+        row.appendChild(badge);
+      }
+      const name = document.createElement('span');
+      name.className = 'outline-name';
+      name.textContent = sym.name;
+      row.appendChild(name);
+      const target = sym.selectionRange ?? sym.range;
+      row.addEventListener('click', () => goto(target.start.line + 1, target.start.character + 1));
+      li.appendChild(row);
+      if (sym.children && sym.children.length) li.appendChild(build(sym.children));
+      ul.appendChild(li);
+    }
+    return ul;
+  };
+  return build(symbols);
 }
 
 // --- read-only output viewer ------------------------------------------------

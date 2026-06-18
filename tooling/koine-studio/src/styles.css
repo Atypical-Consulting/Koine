@@ -141,12 +141,262 @@ body {
   border-right: 1px solid var(--koi-line);
 }
 
-#output-pane {
+/* --- right inspector (tabbed: preview / glossary / context map) --- */
+#right {
+  display: flex;
+  flex-direction: column;
   background: var(--koi-paper-2);
+}
+
+#tabs {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: stretch;
+  gap: 2px;
+  padding: 6px 8px 0;
+  border-bottom: 1px solid var(--koi-line);
+}
+
+#tabs .tab {
+  background: transparent;
+  color: var(--koi-muted);
+  border: 1px solid transparent;
+  border-bottom: none;
+  border-radius: 6px 6px 0 0;
+  padding: 6px 12px;
+  font-family: var(--koi-font-body);
+  font-size: 0.78rem;
+  cursor: pointer;
+}
+
+#tabs .tab:hover {
+  color: var(--koi-fg);
+}
+
+#tabs .tab[aria-selected='true'] {
+  color: var(--koi-fg);
+  background: var(--koi-paper);
+  border-color: var(--koi-line);
+  margin-bottom: -1px;
+}
+
+.tab-refresh {
+  margin-left: auto;
+  align-self: center;
+  background: var(--koi-surface);
+  color: var(--koi-muted);
+  border: 1px solid var(--koi-line);
+  border-radius: 6px;
+  width: 26px;
+  height: 24px;
+  font-size: 0.85rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.tab-refresh:hover {
+  color: var(--koi-fg);
+  border-color: var(--koi-accent);
+}
+
+#views {
+  flex: 1 1 auto;
+  min-height: 0;
+  position: relative;
+}
+
+.view {
+  position: absolute;
+  inset: 0;
+  min-height: 0;
+}
+
+.doc-view {
+  overflow-y: auto;
+  padding: 16px 20px;
 }
 
 .cm-editor {
   height: 100%;
+}
+
+/* --- documentation panes (glossary + context map) --- */
+.muted {
+  color: var(--koi-muted);
+}
+
+.doc-error {
+  color: #ff7b7b;
+  font-family: var(--koi-font-mono);
+  font-size: 0.8rem;
+  white-space: pre-wrap;
+}
+
+.koi-md {
+  color: var(--koi-fg);
+  font-family: var(--koi-font-body);
+  font-size: 0.86rem;
+  line-height: 1.6;
+}
+
+.koi-md h1,
+.koi-md h2,
+.koi-md h3,
+.koi-md h4 {
+  font-weight: 600;
+  line-height: 1.3;
+  margin: 1.2em 0 0.5em;
+  color: var(--koi-fg);
+}
+
+.koi-md h1 {
+  font-size: 1.15rem;
+}
+.koi-md h2 {
+  font-size: 1rem;
+  border-bottom: 1px solid var(--koi-line);
+  padding-bottom: 0.3em;
+}
+.koi-md h3 {
+  font-size: 0.92rem;
+}
+.koi-md > :first-child {
+  margin-top: 0;
+}
+
+.koi-md p {
+  margin: 0.6em 0;
+}
+
+.koi-md ul {
+  margin: 0.5em 0;
+  padding-left: 1.4em;
+}
+
+.koi-md li {
+  margin: 0.2em 0;
+}
+
+.koi-md code {
+  font-family: var(--koi-font-mono);
+  font-size: 0.82em;
+  background: var(--koi-surface);
+  border: 1px solid var(--koi-line);
+  border-radius: 4px;
+  padding: 1px 5px;
+}
+
+.koi-md pre {
+  background: var(--koi-paper);
+  border: 1px solid var(--koi-line);
+  border-radius: 6px;
+  padding: 10px 12px;
+  overflow-x: auto;
+}
+
+.koi-md pre code {
+  background: none;
+  border: none;
+  padding: 0;
+  font-size: 0.8rem;
+}
+
+.koi-md table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 0.6em 0;
+  font-size: 0.8rem;
+}
+
+.koi-md th,
+.koi-md td {
+  border: 1px solid var(--koi-line);
+  padding: 6px 9px;
+  text-align: left;
+  vertical-align: top;
+}
+
+.koi-md th {
+  background: var(--koi-surface);
+  font-weight: 600;
+  color: var(--koi-ink-soft);
+}
+
+.koi-md table.ctxmap td.dir {
+  font-family: var(--koi-font-mono);
+  color: var(--koi-cyan);
+  text-align: center;
+}
+
+/* --- outline (document symbol tree) --- */
+.outline-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.outline-list .outline-list {
+  margin-left: 14px;
+  border-left: 1px solid var(--koi-line);
+  padding-left: 6px;
+}
+
+.outline-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: none;
+  color: var(--koi-fg);
+  padding: 3px 6px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-family: var(--koi-font-body);
+  font-size: 0.84rem;
+}
+
+.outline-row:hover {
+  background: var(--koi-surface);
+}
+
+.outline-kind {
+  flex: 0 0 auto;
+  font-family: var(--koi-font-mono);
+  font-size: 0.66rem;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  color: var(--koi-accent);
+  background: color-mix(in srgb, var(--koi-accent) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--koi-accent) 30%, var(--koi-line));
+  border-radius: 4px;
+  padding: 0 5px;
+  min-width: 38px;
+  text-align: center;
+}
+
+.outline-name {
+  font-family: var(--koi-font-mono);
+}
+
+/* --- hover tooltip --- */
+.cm-tooltip .koi-hover {
+  max-width: 420px;
+  padding: 8px 11px;
+}
+
+.koi-hover.koi-md {
+  font-size: 0.8rem;
+  line-height: 1.5;
+}
+
+.koi-hover.koi-md > :first-child {
+  margin-top: 0;
+}
+
+.koi-hover.koi-md > :last-child {
+  margin-bottom: 0;
 }
 
 /* --- diagnostics strip --- */

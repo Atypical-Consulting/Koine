@@ -145,6 +145,7 @@ export default defineConfig({
 						{ label: 'CLI reference', slug: 'guides/cli' },
 						{ label: 'Architecture', slug: 'guides/architecture' },
 						{ label: 'Editor tooling', slug: 'guides/editor-tooling' },
+						{ label: 'Koine Studio', slug: 'guides/koine-studio' },
 						{ label: 'MCP server', slug: 'guides/mcp-server' },
 						{ label: 'Roadmap', slug: 'guides/roadmap' },
 					],

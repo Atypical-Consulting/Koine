@@ -31,6 +31,79 @@ export interface EmitPreviewResult {
   error: string | null;
 }
 
+export interface GlossaryResult {
+  markdown: string;
+}
+
+export interface AclMapping {
+  upstreamContext: string;
+  upstreamType: string;
+  localContext: string;
+  localType: string;
+}
+export interface ContextRelation {
+  upstream: string;
+  downstream: string;
+  kind: string;
+  bidirectional: boolean;
+  sharedTypes: string[];
+  acl: AclMapping[];
+}
+export interface ContextMapResult {
+  contexts: string[];
+  relations: ContextRelation[];
+}
+
+// Standard LSP Hover. `contents` is a MarkupContent ({kind,value}), a MarkedString
+// (string | {language,value}), or an array of those. `range` is optional.
+export interface MarkupContent {
+  kind: 'plaintext' | 'markdown';
+  value: string;
+}
+export type MarkedString = string | { language: string; value: string };
+export interface HoverResult {
+  contents: MarkupContent | MarkedString | MarkedString[];
+  range?: Range;
+}
+
+// Standard LSP Location: a uri + a range within it. `definition` may resolve to one,
+// an array, or null.
+export interface Location {
+  uri: string;
+  range: Range;
+}
+
+// Standard LSP DocumentSymbol tree. `kind` is the SymbolKind number (e.g. 5=Class,
+// 10=Enum, 22=EnumMember, 8=Field, 6=Method, 23=Struct, 13=Variable, 3=Namespace).
+export interface DocumentSymbol {
+  name: string;
+  kind: number;
+  range: Range;
+  selectionRange: Range;
+  children?: DocumentSymbol[];
+}
+
+// Standard LSP TextEdit: replace `range` with `newText`.
+export interface TextEdit {
+  range: Range;
+  newText: string;
+}
+
+// `koine/check` change record (mirrors the server contract).
+export interface CheckChange {
+  impact: 'Breaking' | 'NonBreaking';
+  code: string;
+  message: string;
+}
+
+// `koine/check` result. `error` is set when the baseline could not be read/compiled;
+// otherwise `hasBreakingChanges` + `changes` describe the diff.
+export interface CheckResult {
+  error?: string;
+  hasBreakingChanges: boolean;
+  changes: CheckChange[];
+}
+
 interface JsonRpcMessage {
   jsonrpc?: string;
   id?: number | string | null;
@@ -47,11 +120,14 @@ export class KoineLsp {
   private pending = new Map<number, { resolve: (v: any) => void; reject: (e: any) => void; timer: ReturnType<typeof setTimeout> }>();
   private unlistenMsg?: UnlistenFn;
   private unlistenExit?: UnlistenFn;
+  private unlistenRestart?: UnlistenFn;
   private version = 0;
   private opened = false;
   private changeTimer?: ReturnType<typeof setTimeout>;
+  private lastText = '';
   private onDiagnostics?: (uri: string, diags: LspDiagnostic[]) => void;
   private onExit?: (code: number) => void;
+  private onRestart?: () => void;
   private readonly uri = 'file:///model.koi';
 
   onPublishDiagnostics(cb: (uri: string, diags: LspDiagnostic[]) => void): void {
@@ -62,6 +138,11 @@ export class KoineLsp {
     this.onExit = cb;
   }
 
+  /** Fired AFTER the client has re-initialized and re-opened the document on a sidecar restart. */
+  onServerRestart(cb: () => void): void {
+    this.onRestart = cb;
+  }
+
   /** Attach event listeners FIRST, then spawn the child, then initialize. */
   async start(): Promise<void> {
     this.unlistenMsg = await listen<string>('lsp://message', (e) => {
@@ -70,15 +151,50 @@ export class KoineLsp {
     this.unlistenExit = await listen<number>('lsp://exit', (e) => {
       this.onExit?.(typeof e.payload === 'number' ? e.payload : -1);
     });
+    // Stream B may respawn the sidecar and emit `lsp://restart`. When it does, the fresh
+    // child knows nothing about our document, so re-handshake and re-open from the latest text.
+    this.unlistenRestart = await listen('lsp://restart', () => {
+      void this.reinitialize();
+    });
 
     await invoke('lsp_start');
+    await this.handshake();
+  }
 
+  /** initialize + initialized. Pending requests from a dead sidecar are rejected first. */
+  private async handshake(): Promise<void> {
     await this.request('initialize', {
       processId: null,
       rootUri: null,
       capabilities: {},
     });
     this.notify('initialized', {});
+  }
+
+  /**
+   * Re-handshake the fresh sidecar after a restart and re-open the current document so the
+   * new server has our state. Any in-flight requests belong to the dead child — reject them.
+   */
+  private async reinitialize(): Promise<void> {
+    this.opened = false;
+    clearTimeout(this.changeTimer);
+    for (const entry of this.pending.values()) {
+      clearTimeout(entry.timer);
+      entry.reject(new Error('LSP server restarted'));
+    }
+    this.pending.clear();
+    try {
+      await this.handshake();
+      this.reopen();
+      this.onRestart?.();
+    } catch (e) {
+      console.error('LSP reinitialize after restart failed:', e);
+    }
+  }
+
+  /** Re-send didOpen with the latest known editor text (used after a restart). */
+  reopen(): void {
+    this.didOpen(this.lastText);
   }
 
   private handle(msg: JsonRpcMessage): void {
@@ -125,6 +241,7 @@ export class KoineLsp {
   }
 
   didOpen(text: string): void {
+    this.lastText = text;
     this.notify('textDocument/didOpen', {
       textDocument: { uri: this.uri, languageId: 'koine', version: ++this.version, text },
     });
@@ -137,6 +254,7 @@ export class KoineLsp {
    * didOpen carries the editor's current full text). Also no-ops once disposed.
    */
   didChange(text: string): void {
+    this.lastText = text;
     if (!this.opened) return;
     clearTimeout(this.changeTimer);
     this.changeTimer = setTimeout(() => {
@@ -154,11 +272,67 @@ export class KoineLsp {
     });
   }
 
+  /** Ubiquitous-language glossary as markdown for the current document. */
+  glossary(): Promise<GlossaryResult> {
+    return this.request<GlossaryResult>('koine/glossary', {
+      textDocument: { uri: this.uri },
+    });
+  }
+
+  /** Context map (contexts + relations) for the current document. */
+  contextMap(): Promise<ContextMapResult> {
+    return this.request<ContextMapResult>('koine/contextMap', {
+      textDocument: { uri: this.uri },
+    });
+  }
+
+  /** Standard LSP hover at a 0-based position. Resolves to null when there is nothing to show. */
+  hover(line: number, character: number): Promise<HoverResult | null> {
+    return this.request<HoverResult | null>('textDocument/hover', {
+      textDocument: { uri: this.uri },
+      position: { line, character },
+    });
+  }
+
+  /** Go-to-definition at a 0-based position. Resolves to a Location, an array, or null. */
+  definition(line: number, character: number): Promise<Location | Location[] | null> {
+    return this.request<Location | Location[] | null>('textDocument/definition', {
+      textDocument: { uri: this.uri },
+      position: { line, character },
+    });
+  }
+
+  /** Document outline as a DocumentSymbol tree. Resolves to [] when the server returns null. */
+  async documentSymbols(): Promise<DocumentSymbol[]> {
+    const res = await this.request<DocumentSymbol[] | null>('textDocument/documentSymbol', {
+      textDocument: { uri: this.uri },
+    });
+    return res ?? [];
+  }
+
+  /** Canonical formatting edits for the whole document. Resolves to [] when nothing changes. */
+  async format(tabSize = 2, insertSpaces = true): Promise<TextEdit[]> {
+    const res = await this.request<TextEdit[] | null>('textDocument/formatting', {
+      textDocument: { uri: this.uri },
+      options: { tabSize, insertSpaces },
+    });
+    return res ?? [];
+  }
+
+  /** Model-versioning compatibility of the current buffer against a baseline model folder. */
+  check(baseline: string): Promise<CheckResult> {
+    return this.request<CheckResult>('koine/check', {
+      textDocument: { uri: this.uri },
+      baseline,
+    });
+  }
+
   dispose(): void {
     this.opened = false;
     clearTimeout(this.changeTimer);
     this.unlistenMsg?.();
     this.unlistenExit?.();
+    this.unlistenRestart?.();
     for (const entry of this.pending.values()) {
       clearTimeout(entry.timer);
       entry.reject(new Error('LSP client disposed'));
