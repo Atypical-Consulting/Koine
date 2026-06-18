@@ -9,6 +9,11 @@ may include breaking changes.
 ## [Unreleased]
 
 ### Added
+- **MCP server (`koine-mcp`).** A Model Context Protocol server (`src/Koine.Mcp`) that lets an AI agent
+  author a complete domain in `.koi` over stdio: `koine_validate`, `koine_compile`
+  (csharp/typescript/glossary/docs), and `koine_format` tools, plus `koine_reference` and
+  `koine_examples` (also exposed as `koine://` resources) so the agent learns the language. Reuses the
+  same parser, validator, and emitters as `koine build`. Packaged as a `dotnet tool`.
 - Documentation emitter (`--target docs`): emits Markdown with Mermaid diagrams (context maps as
   flowcharts, state machines as state diagrams, integration-event flows) — _in progress_.
 
