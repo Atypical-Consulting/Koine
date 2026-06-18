@@ -1,16 +1,27 @@
-// The inline Koine logo, shared by the welcome overlay and the About dialog so the
-// `currentColor` wordmark themes with the surrounding text (an <img> could not). The
-// header in index.html inlines the same markup statically. Keep these in sync with
-// src/assets/koine-logo.svg.
-export const LOGO_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 84 28" fill="none" role="img" aria-label="Koine">
-  <g fill="var(--koi-accent)">
-    <rect x="2" y="3" width="4.4" height="22" rx="1.4"/>
+// The Koine monogram — a rounded "K" tile with the brand gradient (accent → cyan). Shared by the
+// welcome overlay and the About dialog; the header in index.html inlines an equivalent mark next to
+// the Archivo wordmark. Uses CSS-var stops so it tracks the active theme. The gradient id is
+// suffixed per call site to avoid duplicate-id clashes when several copies share the document.
+// Keep in sync with src/assets/koine-mark.svg (the favicon, which uses literal colors).
+
+/** Build the monogram SVG with a unique gradient id (default 'w' for the welcome/about tier). */
+export function koineMark(idSuffix = 'w'): string {
+  const g = `koi-grad-${idSuffix}`;
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" fill="none" role="img" aria-label="Koine">
+  <defs>
+    <linearGradient id="${g}" x1="2" y1="2" x2="30" y2="30" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="var(--koi-accent)"/>
+      <stop offset="1" stop-color="var(--koi-cyan)"/>
+    </linearGradient>
+  </defs>
+  <rect x="1" y="1" width="30" height="30" rx="8.5" fill="url(#${g})"/>
+  <rect x="1.6" y="1.6" width="28.8" height="28.8" rx="8" fill="none" stroke="rgba(255,255,255,0.22)" stroke-width="1"/>
+  <g fill="var(--koi-on-accent)" transform="translate(6.7,4.7) scale(0.86)">
+    <rect x="2" y="3" width="4.4" height="22" rx="1.6"/>
     <path d="M8.2 13.6 18 3h5.6l-9.5 10.3L24 25h-5.9l-7.8-9.3-2.1 2.2z"/>
   </g>
-  <g fill="currentColor">
-    <path d="M38.4 10.1c4 0 6.9 3 6.9 7.5s-2.9 7.6-6.9 7.6-6.9-3.1-6.9-7.6 2.9-7.5 6.9-7.5zm0 3.9c-1.6 0-2.7 1.4-2.7 3.6s1.1 3.7 2.7 3.7 2.7-1.5 2.7-3.7-1.1-3.6-2.7-3.6z"/>
-    <path d="M49.2 4.3c1.4 0 2.5 1.1 2.5 2.5s-1.1 2.4-2.5 2.4-2.4-1-2.4-2.4 1.1-2.5 2.4-2.5zm-2.1 6.2h4.2V25h-4.2z"/>
-    <path d="M54.1 10.5h4.2v2c.9-1.5 2.4-2.4 4.3-2.4 3.2 0 5.2 2.2 5.2 5.8V25h-4.2v-8.1c0-1.8-.9-2.8-2.5-2.8s-2.6 1.1-2.6 2.9V25h-4.4z"/>
-    <path d="M77.9 20.4l3.5 1.6c-1.2 2.2-3.5 3.5-6.4 3.5-4.2 0-7.1-3.1-7.1-7.6s2.9-7.6 6.9-7.6 6.7 3 6.7 7.4c0 .5 0 1-.1 1.4h-9.4c.3 1.8 1.5 2.9 3.2 2.9 1.2 0 2.2-.5 2.8-1.6zm-5.4-4.1h5.3c-.3-1.6-1.3-2.6-2.6-2.6s-2.4 1-2.7 2.6z"/>
-  </g>
 </svg>`;
+}
+
+/** The monogram for the welcome overlay and the About dialog. */
+export const LOGO_SVG = koineMark('w');

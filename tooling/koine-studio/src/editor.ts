@@ -211,6 +211,22 @@ function inlineMd(text: string): string {
   return out;
 }
 
+// GFM tables. The glossary emitter produces `| Field | Type | Description |` blocks, so split a row
+// into trimmed cells (honoring an escaped `\|` inside a cell) and recognise the `|---|:--:|`
+// separator row that promotes the preceding row to a header.
+function splitTableRow(line: string): string[] {
+  let s = line.trim();
+  if (s.startsWith('|')) s = s.slice(1);
+  if (s.endsWith('|')) s = s.slice(0, -1);
+  return s.split(/(?<!\\)\|/).map((c) => c.trim().replace(/\\\|/g, '|'));
+}
+
+function isTableSeparator(line: string): boolean {
+  if (!line.includes('-')) return false;
+  const cells = splitTableRow(line);
+  return cells.length > 0 && cells.every((c) => /^:?-+:?$/.test(c));
+}
+
 /** Render a small subset of markdown to an HTML string. */
 export function renderMarkdown(md: string): string {
   const lines = escapeHtml(md.replace(/\r\n/g, '\n')).split('\n');
@@ -257,6 +273,23 @@ export function renderMarkdown(md: string): string {
       const level = heading[1].length;
       html.push(`<h${level}>${inlineMd(heading[2].trim())}</h${level}>`);
       i++;
+      continue;
+    }
+
+    // GFM table: a row immediately followed by a `|---|---|` separator row.
+    if (line.includes('|') && i + 1 < lines.length && isTableSeparator(lines[i + 1])) {
+      flushParagraph();
+      closeList();
+      const headerCells = splitTableRow(line);
+      i += 2; // consume the header row + the separator row
+      const bodyRows: string[] = [];
+      while (i < lines.length && lines[i].includes('|') && lines[i].trim() !== '') {
+        const cells = splitTableRow(lines[i]);
+        bodyRows.push('<tr>' + cells.map((c) => `<td>${inlineMd(c)}</td>`).join('') + '</tr>');
+        i++;
+      }
+      const head = '<thead><tr>' + headerCells.map((c) => `<th>${inlineMd(c)}</th>`).join('') + '</tr></thead>';
+      html.push(`<table>${head}<tbody>${bodyRows.join('')}</tbody></table>`);
       continue;
     }
 
