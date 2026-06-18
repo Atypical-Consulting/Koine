@@ -573,6 +573,7 @@ export function init(): void {
     name.className = 'koi-gloss-name';
     name.textContent = entry.name;
     name.title = 'Go to definition';
+    name.setAttribute('aria-label', `Go to definition: ${entry.name}`);
     name.addEventListener('click', () => editor.gotoRange(entry.nameRange.start, entry.nameRange.end));
     const kind = document.createElement('span');
     kind.className = 'koi-gloss-kind';
@@ -598,6 +599,7 @@ export function init(): void {
     editBtn.type = 'button';
     editBtn.className = 'koi-gloss-edit';
     editBtn.textContent = hasDoc ? 'Edit' : 'Add description';
+    editBtn.setAttribute('aria-label', `${hasDoc ? 'Edit' : 'Add'} description for ${entry.name}`);
     editBtn.addEventListener('click', () => openDescriptionEditor(entry, body));
 
     body.append(text, editBtn);
@@ -611,6 +613,7 @@ export function init(): void {
     input.rows = 2;
     input.value = entry.doc?.trim() ?? '';
     input.placeholder = `Describe ${entry.name} in plain language…`;
+    input.setAttribute('aria-label', `Description for ${entry.name}`);
 
     const actions = document.createElement('div');
     actions.className = 'koi-gloss-actions';
@@ -618,10 +621,12 @@ export function init(): void {
     save.type = 'button';
     save.className = 'koi-gloss-save';
     save.textContent = 'Save';
+    save.setAttribute('aria-label', `Save description for ${entry.name}`);
     const cancel = document.createElement('button');
     cancel.type = 'button';
     cancel.className = 'koi-gloss-cancel';
     cancel.textContent = 'Cancel';
+    cancel.setAttribute('aria-label', `Cancel editing description for ${entry.name}`);
     save.addEventListener('click', () => void saveDescription(entry, body, input.value));
     cancel.addEventListener('click', () => renderDescription(entry, body));
     input.addEventListener('keydown', (ev) => {
