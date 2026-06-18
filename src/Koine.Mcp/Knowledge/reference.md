@@ -20,15 +20,29 @@ model**, so contexts of the same name merge and cross-file imports / context map
 
 ```koine
 context Billing {
-  value Money { amount: Decimal; currency: Currency; invariant amount >= 0 "must be >= 0" }
   enum Currency { EUR, USD, GBP }
-  entity Customer identified by CustomerId { name: String; email: Email }
+
+  value Money {
+    amount:   Decimal
+    currency: Currency
+    invariant amount >= 0 "must be >= 0"
+  }
+
+  entity Customer identified by CustomerId {
+    name:  String
+    email: Email
+  }
 }
 ```
 
 - A context may carry a version: `context Ordering version 1 { … }` (used by model versioning).
 - `///` doc comments above a declaration become the ubiquitous-language glossary/XML docs.
-- Whitespace is free-form; field separators may be newlines or `;`. Run `koine_format` to canonicalize.
+- **Fields are separated by newlines, one per line** — `;` and `,` are NOT field separators (a
+  `;` inside a `{ … }` body is a `KOI0001` token error). Run `koine_format` to canonicalize layout.
+- **Member order inside an entity / aggregate root is fixed and parser-enforced:** fields → derived
+  fields → invariants → `states` → `command`s → `create` factories (always last). An `invariant`
+  after a `command`, or a `command` after a `create`, is a parse error
+  (`extraneous input … expecting {'create','}'}`).
 
 <!-- topic: types -->
 ## Type system
@@ -90,6 +104,9 @@ Identity strategies:
 - `identified by … as sequence` — a sequence-assigned id.
 
 Entities can also declare `command`s, a `states` machine, and `create` factories (see those topics).
+**These members must appear in a fixed, parser-enforced order:** fields → derived fields →
+invariants → `states` → `command`s → `create` (always last). Reordering them — e.g. an `invariant`
+after a `command`, or a `command` after a `create` — is a parse error.
 
 <!-- topic: aggregate -->
 ## Aggregates (`aggregate`)
@@ -99,11 +116,20 @@ events are declared inside it.
 
 ```koine
 aggregate Order root Order versioned {
-  repository { operations: getById, add, update
-               find byCustomer(customer: CustomerId): List<Order> }
-  event OrderSubmitted { orderId: OrderId; lineCount: Int }
-  value OrderLine { product: ProductId; quantity: Int; unitPrice: Money }
-  entity Order identified by OrderId { /* root: fields, invariants, states, commands, create */ }
+  repository {
+    operations: getById, add, update
+    find byCustomer(customer: CustomerId): List<Order>
+  }
+  event OrderSubmitted {
+    orderId:   OrderId
+    lineCount: Int
+  }
+  value OrderLine {
+    product:   ProductId
+    quantity:  Int
+    unitPrice: Money
+  }
+  entity Order identified by OrderId { /* root: fields → derived → invariants → states → commands → create */ }
 }
 ```
 
@@ -169,6 +195,19 @@ service operations.
   `.all(x => expr)`, `.any(x => expr)`, `.none(x => expr)`, `.contains(...)`, `.distinctBy(x => expr)`.
 - Regex: `field matches /pattern/`.
 
+**Collections are immutable and there is NO append / concat operator.** `list + element` does not add
+an item — for a non-numeric element type it errors (`KOI0502`), and for a numeric one it may slip past
+validation yet emit non-compiling code. To change a collection field, assign a **whole** new collection:
+take a `List<T>` parameter and replace the field wholesale.
+
+```koine
+// NOT supported:  toppings -> toppings + topping
+command reviseRecipe(newToppings: List<Topping>) {   // accept the full new list
+  requires newToppings.isNotEmpty "a pizza needs at least one topping"
+  toppings -> newToppings                            // assign it wholesale
+}
+```
+
 ```koine
 total:    Money = lines.sum(l => l.payable)
 payable:  Money = if quantity >= 10 then lineTotal * 0.9 else lineTotal
@@ -208,6 +247,9 @@ command submit {
 - `requires <expr> "msg"` — a precondition.
 - `field -> value` — assign a new value (a state field's target must be a legal `states` transition).
 - `emit Event(arg: expr, …)` — record a domain event.
+- **Avoid naming a parameter the same as the field it assigns.** In `field -> param`, a parameter
+  that shadows the field makes the right-hand side ambiguous; name it distinctly (e.g. a parameter
+  `newToppings` assigning the field `toppings`).
 
 <!-- topic: event -->
 ## Domain events (`event`) 
@@ -215,7 +257,11 @@ command submit {
 Immutable records of something that happened, declared inside the aggregate and recorded via `emit`.
 
 ```koine
-event OrderOpened { orderId: OrderId; customer: CustomerId; lineCount: Int }
+event OrderOpened {
+  orderId:   OrderId
+  customer:  CustomerId
+  lineCount: Int
+}
 ```
 
 <!-- topic: state -->
@@ -237,7 +283,8 @@ states status {
 ## Factories (`create`)
 
 Named, validated construction. Declaring any `create` makes the all-args constructor private, so
-callers must go through the factory (e.g. `Order.Open(...)`).
+callers must go through the factory (e.g. `Order.Open(...)`). A `create` must be the **last** member of
+its entity (after fields, invariants, `states`, and `command`s).
 
 ```koine
 create open(customer: CustomerId, lines: List<OrderLine>) {
@@ -245,6 +292,11 @@ create open(customer: CustomerId, lines: List<OrderLine>) {
   emit OrderOpened(orderId: id, customer: customer, lineCount: lines.count)
 }
 ```
+
+- **Fields are initialized by parameter-name match:** each parameter whose name equals a field
+  (`customer`, `lines`) sets that field. A required field with no matching parameter and no default /
+  `?` is left uninitialized and raises `KOI0806` — give it a same-named parameter, a default, or make
+  it optional.
 
 <!-- topic: repository -->
 ## Repositories (`repository`)
