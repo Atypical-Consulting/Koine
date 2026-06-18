@@ -42,7 +42,7 @@ tutorial, a complete language reference, the feature catalogue, and the CLI. (So
 
 ```bash
 # Build everything and run the tests
-./build.sh                       # or: dotnet build && dotnet test
+./scripts/build/build.sh         # or: dotnet build && dotnet test
 
 # Compile a domain model to C#
 dotnet run --project src/Koine.Cli -- build examples/billing.koi --target csharp --out ./generated

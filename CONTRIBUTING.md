@@ -20,7 +20,7 @@ under the project's [Apache-2.0 License](LICENSE).
 The solution is the modern `Koine.slnx`.
 
 ```bash
-./build.sh        # build + test (build.ps1 / build.cmd are equivalents)
+./scripts/build/build.sh   # build + test (build.ps1 / build.cmd are equivalents)
 dotnet build      # build only
 dotnet test       # run the full suite (~670 tests)
 
