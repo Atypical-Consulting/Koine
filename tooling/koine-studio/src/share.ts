@@ -7,14 +7,18 @@
 
 const HASH_KEY = 'model';
 
-/** UTF-8-safe base64 encode (btoa only handles Latin-1, so widen through encodeURIComponent). */
+/**
+ * UTF-8-safe, URL-safe base64 encode (btoa only handles Latin-1, so widen through
+ * encodeURIComponent; then map `+`/`/` to `-`/`_` so the payload survives a URL fragment that
+ * passes through form-decoding surfaces — a raw `+` would otherwise be turned into a space).
+ */
 function encodeBase64(text: string): string {
-  return btoa(unescape(encodeURIComponent(text)));
+  return btoa(unescape(encodeURIComponent(text))).replace(/\+/g, '-').replace(/\//g, '_');
 }
 
 /** Inverse of {@link encodeBase64}; throws on malformed input (callers guard). */
 function decodeBase64(b64: string): string {
-  return decodeURIComponent(escape(atob(b64)));
+  return decodeURIComponent(escape(atob(b64.replace(/-/g, '+').replace(/_/g, '/'))));
 }
 
 /** A full shareable URL (origin + path + `#model=…`) for the given model source. */

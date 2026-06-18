@@ -219,7 +219,11 @@ export class KoineLsp {
    * reject them.
    */
   private async reinitialize(): Promise<void> {
+    // Drop any pending debounced edit so the initialize handshake's flush() is a no-op — otherwise
+    // it would emit a didChange before reopen() re-sends didOpen (didChange-before-didOpen).
     clearTimeout(this.changeTimer);
+    this.changeTimer = undefined;
+    this.pendingUri = undefined;
     for (const entry of this.pending.values()) {
       clearTimeout(entry.timer);
       entry.reject(new Error('LSP server restarted'));
@@ -319,8 +323,12 @@ export class KoineLsp {
     this.changeTimer = setTimeout(() => {
       this.changeTimer = undefined;
       this.pendingUri = undefined;
+      // Re-check the doc is still open: it may have been closed (folder teardown) during the
+      // debounce window — sending didChange after didClose would be a protocol violation.
+      const current = this.docs.get(uri);
+      if (!current) return;
       this.notify('textDocument/didChange', {
-        textDocument: { uri, version: ++doc.version },
+        textDocument: { uri, version: ++current.version },
         contentChanges: [{ text }],
       });
     }, 250);

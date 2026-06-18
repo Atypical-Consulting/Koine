@@ -183,8 +183,12 @@ export function createPreferences(cb: PrefsCallbacks): PrefsHandle {
 
   aiProviderSelect.addEventListener('change', () => {
     const aiProvider = aiProviderSelect.value === 'openai' ? 'openai' : 'anthropic';
+    const merged = patchSettings({ aiProvider });
+    // Swap the model field to the model remembered for the now-selected provider, so a Claude id
+    // is never left sitting in front of an OpenAI endpoint (and vice-versa).
+    aiModelInput.value = aiProvider === 'openai' ? merged.aiModelOpenai : merged.aiModel;
     syncProviderFields();
-    commit({ aiProvider });
+    cb.onChange(merged);
   });
   aiBaseUrlInput.addEventListener('change', () => {
     const url = aiBaseUrlInput.value.trim();
@@ -192,7 +196,11 @@ export function createPreferences(cb: PrefsCallbacks): PrefsHandle {
   });
   // The key/model commit on change OR blur so an edit isn't lost if the dialog is dismissed.
   aiKeyInput.addEventListener('change', () => commit({ aiApiKey: aiKeyInput.value.trim() }));
-  aiModelInput.addEventListener('change', () => commit({ aiModel: aiModelInput.value.trim() }));
+  // The model is stored per provider so switching providers can't carry one's model into the other.
+  aiModelInput.addEventListener('change', () => {
+    const model = aiModelInput.value.trim();
+    commit(aiProviderSelect.value === 'openai' ? { aiModelOpenai: model } : { aiModel: model });
+  });
 
   // Populate every control from the freshly loaded Settings, then move focus to the first
   // control so keyboard users land inside the dialog (overriding the modal's default focus).
@@ -205,7 +213,7 @@ export function createPreferences(cb: PrefsCallbacks): PrefsHandle {
     aiProviderSelect.value = s.aiProvider;
     aiBaseUrlInput.value = s.aiBaseUrl;
     aiKeyInput.value = s.aiApiKey;
-    aiModelInput.value = s.aiModel;
+    aiModelInput.value = s.aiProvider === 'openai' ? s.aiModelOpenai : s.aiModel;
     syncProviderFields();
     themeSelect.focus();
   });

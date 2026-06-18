@@ -32,12 +32,23 @@ let anthropicPromise: Promise<typeof AnthropicSdk> | null = null;
 let openaiPromise: Promise<typeof OpenAiSdk> | null = null;
 
 async function loadAnthropic(): Promise<typeof AnthropicSdk> {
-  if (!anthropicPromise) anthropicPromise = import('@anthropic-ai/sdk').then((m) => m.default);
+  if (!anthropicPromise) {
+    anthropicPromise = import('@anthropic-ai/sdk').then((m) => m.default);
+    // Don't cache a rejected import — null it so a retry re-imports (e.g. after the network recovers).
+    anthropicPromise.catch(() => {
+      anthropicPromise = null;
+    });
+  }
   return anthropicPromise;
 }
 
 async function loadOpenAi(): Promise<typeof OpenAiSdk> {
-  if (!openaiPromise) openaiPromise = import('openai').then((m) => m.default);
+  if (!openaiPromise) {
+    openaiPromise = import('openai').then((m) => m.default);
+    openaiPromise.catch(() => {
+      openaiPromise = null;
+    });
+  }
   return openaiPromise;
 }
 
@@ -84,7 +95,12 @@ async function runAnthropic(req: AssistantRequest): Promise<string> {
     full += delta;
     req.onText(delta);
   });
-  await stream.finalMessage();
+  const final = await stream.finalMessage();
+  // A safety-classifier refusal resolves normally (HTTP 200) with stop_reason 'refusal' and no
+  // text — surface it as an error so the UI shows a message instead of a blank reply.
+  if (final.stop_reason === 'refusal' && !full.trim()) {
+    throw new Error('The model declined to respond to this request.');
+  }
   return full;
 }
 

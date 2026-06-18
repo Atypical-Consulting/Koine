@@ -22,6 +22,10 @@ let renderSeq = 0;
 async function getMermaid(theme: 'dark' | 'light'): Promise<MermaidApi> {
   if (!mermaidPromise) {
     mermaidPromise = import('mermaid').then((m) => ((m as { default?: unknown }).default ?? m) as unknown as MermaidApi);
+    // Don't cache a rejected import — null it so a later visit retries (e.g. after the network recovers).
+    mermaidPromise.catch(() => {
+      mermaidPromise = null;
+    });
   }
   const mermaid = await mermaidPromise;
   if (initializedTheme !== theme) {
@@ -92,7 +96,10 @@ export async function renderDiagrams(
   try {
     mermaid = await getMermaid(theme);
   } catch (e) {
-    container.innerHTML = `<p class="doc-error">Could not load the diagram renderer: ${String(e)}</p>`;
+    // Guard like the other container writes: a superseded render must not clobber a newer one.
+    if (isCurrent()) {
+      container.innerHTML = `<p class="doc-error">Could not load the diagram renderer: ${String(e)}</p>`;
+    }
     return;
   }
 

@@ -18,8 +18,10 @@ export interface Settings {
   aiBaseUrl: string;
   /** API key for the AI assistant (stored locally; empty for keyless local servers). */
   aiApiKey: string;
-  /** Model id for the AI assistant. */
+  /** Anthropic model id. */
   aiModel: string;
+  /** OpenAI-compatible model id (kept separate so switching providers doesn't send a Claude id to OpenAI). */
+  aiModelOpenai: string;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -31,6 +33,7 @@ export const DEFAULT_SETTINGS: Settings = {
   aiBaseUrl: 'https://api.openai.com/v1',
   aiApiKey: '',
   aiModel: 'claude-opus-4-8',
+  aiModelOpenai: '',
 };
 
 // --- storage keys ------------------------------------------------------------
@@ -103,6 +106,7 @@ export function loadSettings(): Settings {
         typeof parsed.aiBaseUrl === 'string' && parsed.aiBaseUrl.length > 0 ? parsed.aiBaseUrl : DEFAULT_SETTINGS.aiBaseUrl,
       aiApiKey: typeof parsed.aiApiKey === 'string' ? parsed.aiApiKey : DEFAULT_SETTINGS.aiApiKey,
       aiModel: typeof parsed.aiModel === 'string' && parsed.aiModel.length > 0 ? parsed.aiModel : DEFAULT_SETTINGS.aiModel,
+      aiModelOpenai: typeof parsed.aiModelOpenai === 'string' ? parsed.aiModelOpenai : DEFAULT_SETTINGS.aiModelOpenai,
     };
   } catch {
     return { ...DEFAULT_SETTINGS };

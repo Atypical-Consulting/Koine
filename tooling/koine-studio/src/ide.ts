@@ -9,6 +9,7 @@ import {
   type ContextMapResult,
   type Location,
   type LspDiagnostic,
+  type Range,
   type TextEdit,
   type WorkspaceEdit,
 } from './lsp';
@@ -188,6 +189,15 @@ function renderCheckMarkdown(res: CheckResult): string {
   return out.join('\n');
 }
 
+// The active file's diagnostics that intersect a 0-based request range, so a code-action request is
+// scoped to the cursor/selection (otherwise the quickfix menu would offer "did you mean" fixes for
+// unrelated typos elsewhere in the file, and applying one would edit an off-screen region).
+function diagnosticsInRange(diags: LspDiagnostic[], range: Range): LspDiagnostic[] {
+  const lte = (a: { line: number; character: number }, b: { line: number; character: number }): boolean =>
+    a.line < b.line || (a.line === b.line && a.character <= b.character);
+  return diags.filter((d) => lte(d.range.start, range.end) && lte(range.start, d.range.end));
+}
+
 type RightView = 'preview' | 'glossary' | 'diagrams' | 'contextmap' | 'outline' | 'assistant' | 'check';
 
 // Keyboard shortcuts shown in the help overlay; mirrors the global keydown handler and the
@@ -264,7 +274,7 @@ export function init(): void {
     onReferences: (line, character) => lsp.references(line, character),
     onNavigateLocation: (loc) => navigateToDefinition(loc),
     uriLabel: (uri) => buffers.get(uri)?.relPath ?? (uri.split('/').pop() ?? uri),
-    onCodeActions: (range) => lsp.codeActions(range, diagnosticsByUri.get(activeUri) ?? []),
+    onCodeActions: (range) => lsp.codeActions(range, diagnosticsInRange(diagnosticsByUri.get(activeUri) ?? [], range)),
     onApplyWorkspaceEdit: (edit) => applyWorkspaceEdit(edit),
     // Save (Cmd/Ctrl-S) is owned by ide.ts's window keydown handler below: it formats AND
     // writes the active buffer to disk. We deliberately do NOT pass onFormat here so the
@@ -534,16 +544,11 @@ export function init(): void {
     onDocEdited();
   }
 
-  // Replace the active document's contents (used by the AI "Apply to editor" action and the
-  // example gallery). Mirrors an edit: swap the editor doc, sync the buffer + server, refresh views.
+  // Replace the active document's contents (used by the AI "Apply to editor" action). Setting the
+  // editor doc dispatches a change, so the editor's onChange handler runs the full sync pipeline
+  // (buffer text, lsp.changeDoc, scratch persistence, doc-view refresh, tree) — don't repeat it here.
   function replaceActiveDoc(source: string): void {
     editor.setDoc(source);
-    const buf = buffers.get(activeUri);
-    if (buf) buf.text = source;
-    lsp.changeDoc(activeUri, source);
-    if (!folderMode && activeUri === SCRATCH_URI) scheduleScratchSave(source);
-    onDocEdited();
-    if (folderMode) renderTree();
   }
 
   // --- tabbed inspector (preview / glossary / context map) ------------------
@@ -1064,7 +1069,10 @@ export function init(): void {
       getProvider: () => loadSettings().aiProvider,
       getBaseUrl: () => loadSettings().aiBaseUrl,
       getApiKey: () => loadSettings().aiApiKey,
-      getModel: () => loadSettings().aiModel,
+      getModel: () => {
+        const s = loadSettings();
+        return s.aiProvider === 'openai' ? s.aiModelOpenai : s.aiModel;
+      },
       getContext: () => {
         const diagnostics = (diagnosticsByUri.get(activeUri) ?? []).map((d) => ({
           line: d.range.start.line + 1,
