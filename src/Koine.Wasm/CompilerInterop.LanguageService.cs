@@ -169,6 +169,61 @@ public static partial class CompilerInterop
     }
 
     /// <summary>
+    /// Projects the structured ubiquitous-language glossary of the merged workspace (#67): one entry
+    /// per context/type with kind, owning context, qualified id, doc-comment presence (for coverage)
+    /// and the name's range. A null model yields <c>{ entries: [] }</c>.
+    /// </summary>
+    [JSExport]
+    public static string GlossaryModel(string filesJson)
+    {
+        try
+        {
+            var sources = DeserializeFiles(filesJson).Select(f => new SourceFile(f.Uri, f.Text)).ToList();
+            var (model, _) = Compiler.Parse(sources);
+            if (model is null)
+            {
+                return JsonSerializer.Serialize(new WGlossaryModel([]), LangJson.Default.WGlossaryModel);
+            }
+
+            var entries = GlossaryModelBuilder.Build(model).Entries
+                .Select(e => new WGlossaryEntry(e.Id, e.Name, e.Kind, e.Context, e.QualifiedName, e.Doc, SpanRange(e.NameSpan)))
+                .ToArray();
+            return JsonSerializer.Serialize(new WGlossaryModel(entries), LangJson.Default.WGlossaryModel);
+        }
+        catch
+        {
+            return JsonSerializer.Serialize(new WGlossaryModel([]), LangJson.Default.WGlossaryModel);
+        }
+    }
+
+    /// <summary>
+    /// Computes the doc-comment edit for the glossary declaration addressed by <paramref name="id"/>,
+    /// setting it to <paramref name="text"/> (insert/replace/clear of the <c>///</c> block, #67).
+    /// Returns <c>{ uri, edits }</c>; an unknown id or null model yields <c>{ uri: null, edits: [] }</c>.
+    /// </summary>
+    [JSExport]
+    public static string SetDoc(string filesJson, string id, string text)
+    {
+        try
+        {
+            var sources = DeserializeFiles(filesJson).Select(f => new SourceFile(f.Uri, f.Text)).ToList();
+            var (model, _) = Compiler.Parse(sources);
+            if (model is null)
+            {
+                return JsonSerializer.Serialize(new WSetDocResult(null, []), LangJson.Default.WSetDocResult);
+            }
+
+            var result = SetDocEditor.Build(model, sources, id, text);
+            var edits = result.Edits.Select(e => new WTextEdit(SpanRange(e.Range), e.NewText)).ToArray();
+            return JsonSerializer.Serialize(new WSetDocResult(result.Uri, edits), LangJson.Default.WSetDocResult);
+        }
+        catch
+        {
+            return JsonSerializer.Serialize(new WSetDocResult(null, []), LangJson.Default.WSetDocResult);
+        }
+    }
+
+    /// <summary>
     /// Hover at a 0-based position in <paramref name="activeUri"/>, resolved against the whole
     /// workspace. Returns an LSP <c>Hover</c> (<c>{ contents: { kind, value } }</c>) or the JSON
     /// literal <c>null</c> when there is nothing to show.
@@ -644,6 +699,16 @@ public sealed record WContextRelation(
 /// <summary>Strategic context map: contexts + relations.</summary>
 public sealed record WContextMapResult(string[] Contexts, WContextRelation[] Relations);
 
+/// <summary>One structured glossary entry (shape mirrors lsp.ts <c>GlossaryEntry</c>).</summary>
+public sealed record WGlossaryEntry(
+    string Id, string Name, string Kind, string Context, string QualifiedName, string? Doc, WRange NameRange);
+
+/// <summary>Structured ubiquitous-language glossary: entries in declaration order.</summary>
+public sealed record WGlossaryModel(WGlossaryEntry[] Entries);
+
+/// <summary>Result of a set-doc request: the file the edits apply to, plus the doc-comment edits.</summary>
+public sealed record WSetDocResult(string? Uri, WTextEdit[] Edits);
+
 /// <summary>LSP MarkupContent.</summary>
 public sealed record WMarkupContent(string Kind, string Value);
 
@@ -689,7 +754,9 @@ public sealed record WSourceFileDto(string Uri, string Text);
 [JsonSerializable(typeof(WFileDiagnostics[]))]
 [JsonSerializable(typeof(WEmitPreviewResult))]
 [JsonSerializable(typeof(WGlossaryResult))]
+[JsonSerializable(typeof(WGlossaryModel))]
 [JsonSerializable(typeof(WContextMapResult))]
+[JsonSerializable(typeof(WSetDocResult))]
 [JsonSerializable(typeof(WHoverResult))]
 [JsonSerializable(typeof(WLocation))]
 [JsonSerializable(typeof(WLocation[]))]

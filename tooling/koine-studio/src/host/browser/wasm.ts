@@ -12,8 +12,12 @@ export interface KoineWasmApi {
   EmitPreview(filesJson: string, target: string): string;
   /** Glossary markdown for the merged workspace → JSON `{markdown}`. */
   Glossary(filesJson: string): string;
+  /** Structured glossary for the merged workspace → JSON `{entries}`. */
+  GlossaryModel(filesJson: string): string;
   /** Strategic context map → JSON `{contexts, relations}`. */
   ContextMap(filesJson: string): string;
+  /** Set a declaration's doc comment by id → JSON `{uri, edits:[TextEdit]}`. */
+  SetDoc(filesJson: string, id: string, text: string): string;
   /** Hover at a 0-based position → JSON Hover or `null`. */
   Hover(filesJson: string, activeUri: string, line: number, character: number): string;
   /** Go-to-definition at a 0-based position → JSON Location or `null`. */

@@ -726,6 +726,85 @@ public class LspServerTests
             @params = new { textDocument = new { uri }, baseline },
         }));
 
+    private static byte[] GlossaryModel(string uri) =>
+        Frame(JsonSerializer.Serialize(new
+        {
+            jsonrpc = "2.0",
+            id = 30,
+            method = "koine/glossaryModel",
+            @params = new { textDocument = new { uri } },
+        }));
+
+    private static byte[] SetDoc(string uri, string id, string text) =>
+        Frame(JsonSerializer.Serialize(new
+        {
+            jsonrpc = "2.0",
+            id = 30,
+            method = "koine/setDoc",
+            @params = new { textDocument = new { uri }, id, text },
+        }));
+
+    // ---- koine/glossaryModel ----
+
+    [Fact]
+    public void GlossaryModel_returns_structured_entries_for_open_model()
+    {
+        var doc = "/// The C context.\ncontext C {\n  value Money { amount: Decimal }\n  enum Currency { EUR, USD }\n}\n";
+        var output = RunSession(
+            Initialize(),
+            DidOpen("file:///t.koi", doc),
+            GlossaryModel("file:///t.koi"));
+
+        Assert.Contains("\"entries\":[", output);
+        Assert.Contains("\"qualifiedName\":\"C.Money\"", output);
+        Assert.Contains("\"kind\":\"value\"", output);
+        Assert.Contains("\"kind\":\"enum\"", output);
+        Assert.Contains("\"id\":30", output);
+    }
+
+    [Fact]
+    public void GlossaryModel_reports_undocumented_entries_with_null_doc()
+    {
+        var doc = "context C {\n  value Money { amount: Decimal }\n}\n";
+        var output = RunSession(
+            Initialize(),
+            DidOpen("file:///t.koi", doc),
+            GlossaryModel("file:///t.koi"));
+
+        Assert.Contains("\"doc\":null", output);
+    }
+
+    // ---- koine/setDoc ----
+
+    [Fact]
+    public void SetDoc_returns_edits_for_a_known_declaration()
+    {
+        var doc = "context C {\n  value Money { amount: Decimal }\n}\n";
+        var output = RunSession(
+            Initialize(),
+            DidOpen("file:///t.koi", doc),
+            SetDoc("file:///t.koi", "C.Money", "A monetary amount."));
+
+        Assert.Contains("\"edits\":[", output);
+        Assert.DoesNotContain("\"edits\":[]", output);
+        Assert.Contains("/// A monetary amount.", output);
+        Assert.Contains("\"uri\":\"file:///t.koi\"", output);
+        Assert.Contains("\"id\":30", output);
+    }
+
+    [Fact]
+    public void SetDoc_unknown_id_returns_no_edits()
+    {
+        var doc = "context C {\n  value Money { amount: Decimal }\n}\n";
+        var output = RunSession(
+            Initialize(),
+            DidOpen("file:///t.koi", doc),
+            SetDoc("file:///t.koi", "C.Nope", "x"));
+
+        Assert.Contains("\"edits\":[]", output);
+        Assert.Contains("\"id\":30", output);
+    }
+
     private static byte[] Docs(string uri) =>
         Frame(JsonSerializer.Serialize(new
         {

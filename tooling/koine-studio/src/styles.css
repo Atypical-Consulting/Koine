@@ -1458,6 +1458,140 @@ body.resizing {
   }
 }
 
+/* --- glossary editor (#67): ubiquitous-language browser + description enrichment ------------ */
+.koi-gloss {
+  padding: 0.5rem 0.75rem 1.25rem;
+}
+.koi-gloss-coverage {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.35rem;
+}
+.koi-gloss-bar {
+  height: 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--koi-fg) 12%, transparent);
+  overflow: hidden;
+  margin-bottom: 1rem;
+}
+.koi-gloss-bar-fill {
+  height: 100%;
+  background: var(--koi-accent-grad);
+  transition: width 0.25s ease;
+}
+.koi-gloss-ctx {
+  margin-bottom: 1.1rem;
+}
+.koi-gloss-ctx > h3 {
+  margin: 0 0 0.4rem;
+  font-size: 0.82rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--koi-muted);
+}
+.koi-gloss-entry {
+  padding: 0.5rem 0.6rem;
+  border-radius: 8px;
+  border: 1px solid color-mix(in srgb, var(--koi-fg) 10%, transparent);
+  margin-bottom: 0.45rem;
+  background: color-mix(in srgb, var(--koi-surface) 60%, transparent);
+}
+.koi-gloss-entry-head {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.koi-gloss-name {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  font-weight: 600;
+  color: var(--koi-accent);
+  cursor: pointer;
+}
+.koi-gloss-name:hover {
+  text-decoration: underline;
+}
+.koi-gloss-kind {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--koi-muted);
+  padding: 0.05rem 0.4rem;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--koi-fg) 9%, transparent);
+}
+.koi-gloss-body {
+  margin-top: 0.35rem;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.6rem;
+}
+.koi-gloss-doc {
+  margin: 0;
+  color: var(--koi-fg);
+  font-size: 0.86rem;
+  line-height: 1.4;
+}
+.koi-gloss-needsdoc {
+  margin: 0;
+  color: var(--koi-muted);
+  font-style: italic;
+  font-size: 0.84rem;
+}
+.koi-gloss-edit {
+  flex: none;
+  background: none;
+  border: 1px solid color-mix(in srgb, var(--koi-accent) 35%, transparent);
+  color: var(--koi-accent);
+  border-radius: 6px;
+  padding: 0.15rem 0.55rem;
+  font-size: 0.78rem;
+  cursor: pointer;
+}
+.koi-gloss-edit:hover {
+  background: color-mix(in srgb, var(--koi-accent) 14%, transparent);
+}
+.koi-gloss-input {
+  flex: 1;
+  width: 100%;
+  resize: vertical;
+  font: inherit;
+  font-size: 0.86rem;
+  color: var(--koi-fg);
+  background: var(--koi-surface);
+  border: 1px solid color-mix(in srgb, var(--koi-accent) 40%, transparent);
+  border-radius: 6px;
+  padding: 0.4rem 0.5rem;
+}
+.koi-gloss-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+.koi-gloss-save,
+.koi-gloss-cancel {
+  font: inherit;
+  font-size: 0.78rem;
+  border-radius: 6px;
+  padding: 0.2rem 0.6rem;
+  cursor: pointer;
+  border: 1px solid transparent;
+}
+.koi-gloss-save {
+  background: var(--koi-accent);
+  color: #fff;
+}
+.koi-gloss-cancel {
+  background: none;
+  border-color: color-mix(in srgb, var(--koi-fg) 20%, transparent);
+  color: var(--koi-muted);
+}
+
 /* ============================================================================
    Refactors, quick fixes, diagrams, assistant, gallery — added components.
    ============================================================================ */
