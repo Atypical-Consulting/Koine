@@ -6,6 +6,8 @@
   "scripts": {
     "dev": "vite",
     "dev:web": "vite --mode web",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "build": "tsc && vite build",
     "build:wasm": "node scripts/build-wasm.mjs",
     "build:web": "tsc && vite build --mode web",
@@ -14,9 +16,6 @@
     "tauri": "tauri"
   },
   "dependencies": {
-    "@fontsource-variable/archivo": "^5.2.5",
-    "@fontsource-variable/hanken-grotesk": "^5.2.5",
-    "@fontsource-variable/jetbrains-mono": "^5.2.5",
     "@codemirror/autocomplete": "^6.18.6",
     "@codemirror/commands": "^6.8.1",
     "@codemirror/language": "^6.11.0",
@@ -25,6 +24,9 @@
     "@codemirror/search": "^6.5.11",
     "@codemirror/state": "^6.5.2",
     "@codemirror/view": "^6.38.1",
+    "@fontsource-variable/archivo": "^5.2.5",
+    "@fontsource-variable/hanken-grotesk": "^5.2.5",
+    "@fontsource-variable/jetbrains-mono": "^5.2.5",
     "@lezer/highlight": "^1.2.1",
     "@tauri-apps/api": "^2",
     "@tauri-apps/plugin-dialog": "^2",
@@ -32,7 +34,9 @@
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2",
+    "jsdom": "^29.1.1",
+    "typescript": "~6.0.0",
     "vite": "^8.0.0",
-    "typescript": "~6.0.0"
+    "vitest": "^4.1.9"
   }
 }
