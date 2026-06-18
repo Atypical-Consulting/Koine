@@ -19,6 +19,7 @@ import { createExplorer } from './explorer';
 import { currentTheme, initTheme, onThemeChange, toggleTheme } from './theme';
 import { clearScratch, loadScratch, loadSettings, pushRecentFolder, saveScratch, type Settings } from './store';
 import { createWelcome } from './welcome';
+import { type Example } from './examples';
 import { createCommandPalette, type Command } from './palette';
 import { createPreferences } from './prefs';
 import { initSplitResizer } from './resize';
@@ -1295,11 +1296,29 @@ export function init(): void {
 
   // --- overlays + polish surfaces -------------------------------------------
 
+  // Open a starter example: a multi-file example materializes a real workspace (folder mode → the
+  // explorer); a single-file one — or any host that can't back a synthetic workspace — opens as a
+  // scratch buffer.
+  async function openExample(example: Example): Promise<void> {
+    if (example.files?.length && platform.materializeWorkspace) {
+      try {
+        const token = await platform.materializeWorkspace(example.id, example.files);
+        if (token) {
+          await openFolderPath(token);
+          return;
+        }
+      } catch (e) {
+        console.error('Opening example workspace failed; falling back to scratch:', e);
+      }
+    }
+    openScratchWith(example.source);
+  }
+
   const welcome = createWelcome({
     onNewScratch: () => newScratch(),
     onOpenFolder: () => void openFolder(),
     onOpenRecent: (path) => void openFolderPath(path),
-    onOpenExample: (example) => openScratchWith(example.source),
+    onOpenExample: (example) => void openExample(example),
   });
 
   const palette = createCommandPalette(() => getCommands());

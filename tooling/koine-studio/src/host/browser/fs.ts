@@ -143,6 +143,57 @@ export async function listKoiFiles(token: string): Promise<KoiFile[]> {
   return out;
 }
 
+// --- synthetic in-memory workspaces (multi-file examples) --------------------
+// Starter examples are materialized into the Origin Private File System (OPFS) — a real
+// File-System-Access directory that needs no picker and no permission prompt — then registered like
+// any opened folder. Opening one therefore reuses the ENTIRE folder-mode path (explorer tree +
+// create/rename/delete/move) with no special-casing downstream.
+
+interface StorageWithOpfs {
+  getDirectory?(): Promise<FsDirHandle>;
+}
+
+function opfsRoot(): Promise<FsDirHandle> | null {
+  const storage = (navigator as Navigator & { storage?: StorageWithOpfs }).storage;
+  return typeof storage?.getDirectory === 'function' ? storage.getDirectory() : null;
+}
+
+/** Whether a synthetic example workspace can be materialized in this browser (OPFS available). */
+export function canMaterializeWorkspace(): boolean {
+  return opfsRoot() !== null;
+}
+
+export async function materializeWorkspace(
+  name: string,
+  files: { relPath: string; contents: string }[],
+): Promise<string | null> {
+  const rootPromise = opfsRoot();
+  if (!rootPromise) return null;
+  const root = await rootPromise;
+  // One OPFS directory per example, recreated fresh on every open so re-opening starts from a clean
+  // copy (edits/renames/deletes from a previous session are discarded).
+  const dirName = `example-${name}`;
+  await root.removeEntry(dirName, { recursive: true }).catch(() => {});
+  const dir = await root.getDirectoryHandle(dirName, { create: true });
+  for (const file of files) {
+    const segments = file.relPath.split('/');
+    const leaf = segments.pop()!;
+    let cur = dir;
+    for (const seg of segments) cur = await cur.getDirectoryHandle(seg, { create: true });
+    const handle = await cur.getFileHandle(leaf, { create: true });
+    const writable = await handle.createWritable();
+    await writable.write(file.contents);
+    await writable.close();
+  }
+  // Register under a fresh in-memory token (display the example name, not the OPFS prefix). Not
+  // persisted to IndexedDB — a synthetic workspace lives only for the session.
+  const token = await uniqueToken(name);
+  folders.set(token, dir);
+  folderNames.set(token, name);
+  dirHandles.set(token, dir);
+  return token;
+}
+
 // --- read / write -------------------------------------------------------------
 
 export async function readTextFile(path: string): Promise<string> {

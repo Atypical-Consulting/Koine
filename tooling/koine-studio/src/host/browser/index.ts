@@ -24,6 +24,10 @@ export class BrowserPlatform implements Platform {
     return fs.pickFolder(title);
   }
 
+  materializeWorkspace(name: string, files: { relPath: string; contents: string }[]): Promise<string | null> {
+    return fs.materializeWorkspace(name, files);
+  }
+
   folderName(token: string): string {
     return fs.folderName(token);
   }
