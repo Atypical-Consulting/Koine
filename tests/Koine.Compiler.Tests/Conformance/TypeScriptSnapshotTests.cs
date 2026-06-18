@@ -8,7 +8,9 @@ namespace Koine.Compiler.Tests.Conformance;
 /// (Verify). The fixture is representative of the spec's semantics — a value object with an
 /// invariant, an entity with a command + invariant + factory, a smart enum (string-literal union +
 /// const member object + Match/Switch/TryFrom*), and a <c>Range</c> — so the reviewed
-/// <c>.verified.txt</c> locks in the emitted TypeScript exactly as the C# snapshots do.
+/// <c>.verified.txt</c> locks in the emitted TypeScript exactly as the C# snapshots do. The
+/// <c>place</c> command both returns a <c>result</c> and <c>emit</c>s an event reusing the same
+/// <c>id</c>, so the snapshot also locks the C#-parity <c>const __result</c> hoist (issue #60).
 /// </summary>
 public class TypeScriptSnapshotTests
 {
@@ -67,10 +69,11 @@ public class TypeScriptSnapshotTests
 
               invariant !lines.isEmpty "an order must have at least one line"
 
-              command place {
+              command place(): OrderId {
                 requires status == Draft "only a draft order can be placed"
                 status -> Placed
                 emit OrderPlaced(orderId: id, lineCount: lines.count)
+                result id
               }
 
               create forCustomer(customer: CustomerId, lines: List<OrderLine>) {

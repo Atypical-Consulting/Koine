@@ -298,7 +298,210 @@ public static partial class CompilerInterop
         }
     }
 
+    /// <summary>
+    /// Every reference to the name at a 0-based position in <paramref name="activeUri"/>, across the
+    /// merged workspace (declaration included). Returns a JSON <c>Location[]</c> — empty when the
+    /// cursor is not on a renameable type/enum-member/spec name. Parity with the stdio LSP's
+    /// <c>textDocument/references</c>.
+    /// </summary>
+    [JSExport]
+    public static string References(string filesJson, string activeUri, int line, int character)
+    {
+        try
+        {
+            var docs = DeserializeFiles(filesJson).ToDictionary(f => f.Uri, f => f.Text, StringComparer.Ordinal);
+            var refs = LanguageService.ReferencesAt(docs, activeUri, line, character)
+                .Select(r => new WLocation(r.Uri, RangeOf(r)))
+                .ToArray();
+            return JsonSerializer.Serialize(refs, LangJson.Default.WLocationArray);
+        }
+        catch
+        {
+            return "[]";
+        }
+    }
+
+    /// <summary>
+    /// The editable identifier range under the cursor (LSP <c>prepareRename</c>): <c>{ range, placeholder }</c>
+    /// or the JSON literal <c>null</c> when a rename is not valid there. Parity with the stdio LSP.
+    /// </summary>
+    [JSExport]
+    public static string PrepareRename(string filesJson, string activeUri, int line, int character)
+    {
+        try
+        {
+            var docs = DeserializeFiles(filesJson).ToDictionary(f => f.Uri, f => f.Text, StringComparer.Ordinal);
+            var range = LanguageService.PrepareRenameAt(docs, activeUri, line, character);
+            if (range is null)
+            {
+                return "null";
+            }
+
+            var name = LanguageService.NameAt(docs, activeUri, line, character);
+            return JsonSerializer.Serialize(new WPrepareRename(RangeOf(range), name), LangJson.Default.WPrepareRename);
+        }
+        catch
+        {
+            return "null";
+        }
+    }
+
+    /// <summary>
+    /// Workspace edit that renames the name under the cursor to <paramref name="newName"/> across the
+    /// merged workspace: <c>{ changes: { uri: TextEdit[] } }</c>, or the JSON literal <c>null</c> when
+    /// no rename applies (cursor not on a renameable name, invalid identifier, or unchanged).
+    /// </summary>
+    [JSExport]
+    public static string Rename(string filesJson, string activeUri, int line, int character, string newName)
+    {
+        try
+        {
+            var docs = DeserializeFiles(filesJson).ToDictionary(f => f.Uri, f => f.Text, StringComparer.Ordinal);
+            var refs = LanguageService.RenameAt(docs, activeUri, line, character, newName);
+            if (refs is null)
+            {
+                return "null";
+            }
+
+            var changes = refs
+                .GroupBy(r => r.Uri, StringComparer.Ordinal)
+                .ToDictionary(
+                    g => g.Key,
+                    g => g.Select(r => new WTextEdit(RangeOf(r), newName)).ToArray(),
+                    StringComparer.Ordinal);
+            return JsonSerializer.Serialize(new WWorkspaceEdit(changes), LangJson.Default.WWorkspaceEdit);
+        }
+        catch
+        {
+            return "null";
+        }
+    }
+
+    /// <summary>
+    /// Code actions for the request: diagnostic-driven "did you mean 'X'?" quickfixes (extracted from
+    /// the <paramref name="diagnosticsJson"/> the client holds for the active file) plus selection-driven
+    /// refactors over the 0-based range (e.g. Extract value object). Each action carries an inline
+    /// workspace edit. Returns a JSON <c>CodeAction[]</c>. Parity with the stdio LSP's <c>textDocument/codeAction</c>.
+    /// </summary>
+    [JSExport]
+    public static string CodeActions(
+        string filesJson, string activeUri, int startLine, int startChar, int endLine, int endChar, string diagnosticsJson)
+    {
+        try
+        {
+            var docs = DeserializeFiles(filesJson).ToDictionary(f => f.Uri, f => f.Text, StringComparer.Ordinal);
+            var actions = new List<WCodeAction>();
+
+            // 1. Diagnostic quickfixes: a "… — did you mean 'X'?" message yields a one-edit fix.
+            //    Guard each item (a message-less diagnostic deserializes to a null Message); mirror
+            //    the stdio LSP's per-item skip so one malformed diagnostic can't abort the whole
+            //    handler and suppress the selection-driven refactors below.
+            foreach (var d in TryDeserializeInDiagnostics(diagnosticsJson))
+            {
+                if (string.IsNullOrEmpty(d.Message))
+                {
+                    continue;
+                }
+
+                var suggestion = ExtractSuggestion(d.Message);
+                if (suggestion is null)
+                {
+                    continue;
+                }
+
+                var changes = new Dictionary<string, WTextEdit[]>(StringComparer.Ordinal)
+                {
+                    [activeUri] = [new WTextEdit(d.Range, suggestion)],
+                };
+                actions.Add(new WCodeAction($"Change to '{suggestion}'", "quickfix", new WWorkspaceEdit(changes)));
+            }
+
+            // 2. Selection-driven refactors (Extract value object, …).
+            foreach (var refactor in LanguageService.RefactorsAt(docs, activeUri, startLine, startChar, endLine, endChar))
+            {
+                var edits = refactor.Edits.Select(e => new WTextEdit(SpanRange(e.Range), e.NewText)).ToArray();
+                var changes = new Dictionary<string, WTextEdit[]>(StringComparer.Ordinal) { [activeUri] = edits };
+                actions.Add(new WCodeAction(refactor.Title, refactor.Kind, new WWorkspaceEdit(changes)));
+            }
+
+            return JsonSerializer.Serialize(actions.ToArray(), LangJson.Default.WCodeActionArray);
+        }
+        catch
+        {
+            return "[]";
+        }
+    }
+
+    /// <summary>
+    /// Living-documentation files (Mermaid-in-Markdown) for the merged workspace, reusing the same
+    /// <see cref="Koine.Compiler.Emit.Docs.DocsEmitter"/> as <c>koine build … --target docs</c>. A model
+    /// that fails to parse degrades to <c>{ files: [] }</c> rather than throwing. Returns
+    /// <c>{ files: [{ path, contents }] }</c>.
+    /// </summary>
+    [JSExport]
+    public static string Docs(string filesJson)
+    {
+        try
+        {
+            var sources = DeserializeFiles(filesJson).Select(f => new SourceFile(f.Uri, f.Text)).ToList();
+            var (model, _) = Compiler.Parse(sources);
+            if (model is null)
+            {
+                return JsonSerializer.Serialize(new WDocsResult([]), LangJson.Default.WDocsResult);
+            }
+
+            var files = new Koine.Compiler.Emit.Docs.DocsEmitter().Emit(model)
+                .Select(f => new WEmitFile(f.RelativePath, f.Contents))
+                .ToArray();
+            return JsonSerializer.Serialize(new WDocsResult(files), LangJson.Default.WDocsResult);
+        }
+        catch
+        {
+            return JsonSerializer.Serialize(new WDocsResult([]), LangJson.Default.WDocsResult);
+        }
+    }
+
     // ---- mapping helpers (mirror LspServer.cs) --------------------------------
+
+    /// <summary>Deserializes the client's active-file diagnostics (<c>[{range, message}]</c>); empty on any error.</summary>
+    private static IReadOnlyList<WInDiagnostic> TryDeserializeInDiagnostics(string diagnosticsJson)
+    {
+        if (string.IsNullOrWhiteSpace(diagnosticsJson))
+        {
+            return [];
+        }
+
+        try
+        {
+            return JsonSerializer.Deserialize(diagnosticsJson, LangJson.Default.WInDiagnosticArray) ?? [];
+        }
+        catch
+        {
+            return [];
+        }
+    }
+
+    /// <summary>Extracts <c>X</c> from a Suggestions-style message ending in <c>… — did you mean 'X'?</c>.</summary>
+    private static string? ExtractSuggestion(string message)
+    {
+        const string marker = "did you mean '";
+        var i = message.IndexOf(marker, StringComparison.Ordinal);
+        if (i < 0)
+        {
+            return null;
+        }
+
+        var start = i + marker.Length;
+        var end = message.IndexOf('\'', start);
+        return end > start ? message[start..end] : null;
+    }
+
+    /// <summary>Converts a <see cref="Reference"/> (1-based line, 0-based columns) to a 0-based LSP range.</summary>
+    private static WRange RangeOf(Reference r)
+    {
+        var line = Math.Max(0, r.Line - 1);
+        return new WRange(new WPosition(line, r.StartColumn), new WPosition(line, r.EndColumn));
+    }
 
     private static IReadOnlyList<WSourceFileDto> DeserializeFiles(string filesJson) =>
         JsonSerializer.Deserialize(filesJson, LangJson.Default.WSourceFileDtoArray) ?? [];
@@ -456,6 +659,21 @@ public sealed record WDocumentSymbol(string Name, int Kind, WRange Range, WRange
 /// <summary>LSP TextEdit.</summary>
 public sealed record WTextEdit(WRange Range, string NewText);
 
+/// <summary>LSP prepareRename answer: the editable identifier range + the current name placeholder.</summary>
+public sealed record WPrepareRename(WRange Range, string? Placeholder);
+
+/// <summary>LSP WorkspaceEdit: per-file text edits keyed by uri.</summary>
+public sealed record WWorkspaceEdit(Dictionary<string, WTextEdit[]> Changes);
+
+/// <summary>LSP CodeAction with an inline workspace edit (quickfix or refactor).</summary>
+public sealed record WCodeAction(string Title, string Kind, WWorkspaceEdit Edit);
+
+/// <summary>Living-documentation files (Mermaid-in-Markdown) for the merged workspace.</summary>
+public sealed record WDocsResult(WEmitFile[] Files);
+
+/// <summary>Input shape: one of the client's active-file diagnostics (only range + message are read).</summary>
+public sealed record WInDiagnostic(WRange Range, string Message);
+
 /// <summary>One model-versioning compatibility change.</summary>
 public sealed record WCheckChange(string Impact, string Code, string Message);
 
@@ -474,7 +692,13 @@ public sealed record WSourceFileDto(string Uri, string Text);
 [JsonSerializable(typeof(WContextMapResult))]
 [JsonSerializable(typeof(WHoverResult))]
 [JsonSerializable(typeof(WLocation))]
+[JsonSerializable(typeof(WLocation[]))]
 [JsonSerializable(typeof(WDocumentSymbol[]))]
 [JsonSerializable(typeof(WTextEdit[]))]
+[JsonSerializable(typeof(WPrepareRename))]
+[JsonSerializable(typeof(WWorkspaceEdit))]
+[JsonSerializable(typeof(WCodeAction[]))]
+[JsonSerializable(typeof(WDocsResult))]
+[JsonSerializable(typeof(WInDiagnostic[]))]
 [JsonSerializable(typeof(WCheckResult))]
 internal sealed partial class LangJson : JsonSerializerContext;

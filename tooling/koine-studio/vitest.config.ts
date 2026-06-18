@@ -1,10 +1,10 @@
-import { defineConfig } from 'vitest/config';
+import { defineConfig } from "vitest/config";
 
-// Unit tests for the studio's pure logic (project-name helpers, zip assembly, the
-// can-generate guard). Node environment is enough — nothing here touches the DOM.
+// Unit tests run against a happy-dom DOM so the overlay/modal chrome (focus, keydown,
+// document.body mounting) behaves as it does in the browser.
 export default defineConfig({
   test: {
-    environment: 'node',
-    include: ['src/**/*.test.ts'],
+    environment: "happy-dom",
+    include: ["src/**/*.test.ts"],
   },
 });

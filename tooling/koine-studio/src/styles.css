@@ -1458,6 +1458,366 @@ body.resizing {
   }
 }
 
+/* ============================================================================
+   Refactors, quick fixes, diagrams, assistant, gallery — added components.
+   ============================================================================ */
+
+/* The tab strip now carries more tabs; let it scroll horizontally rather than squish labels. */
+#tabs {
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+#tabs .tab {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+/* --- floating action menu (code actions + references) + inline rename --- */
+.koi-action-menu {
+  min-width: 220px;
+  max-width: 360px;
+  max-height: 320px;
+  overflow-y: auto;
+  background: var(--koi-paper-2);
+  border: 1px solid var(--koi-line);
+  border-radius: var(--koi-radius);
+  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.4);
+  padding: 4px;
+  outline: none;
+}
+.koi-action-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: none;
+  border-radius: var(--koi-radius-sm);
+  padding: 7px 10px;
+  color: var(--koi-fg);
+  font-family: var(--koi-font-body);
+  font-size: 0.82rem;
+  cursor: pointer;
+}
+.koi-action-row[aria-selected='true'] {
+  background: var(--koi-accent);
+  color: var(--koi-on-accent);
+}
+.koi-action-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.koi-action-detail {
+  flex: 0 0 auto;
+  font-family: var(--koi-font-mono);
+  font-size: 0.7rem;
+  opacity: 0.7;
+}
+.koi-action-empty {
+  padding: 8px 10px;
+  color: var(--koi-muted);
+  font-family: var(--koi-font-body);
+  font-size: 0.8rem;
+}
+.koi-rename {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--koi-paper-2);
+  border: 1px solid var(--koi-accent);
+  border-radius: var(--koi-radius-sm);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
+  padding: 5px 7px;
+}
+.koi-rename-input {
+  background: var(--koi-surface);
+  color: var(--koi-fg);
+  border: 1px solid var(--koi-line);
+  border-radius: var(--koi-radius-sm);
+  padding: 4px 8px;
+  font-family: var(--koi-font-mono);
+  font-size: 0.82rem;
+  min-width: 160px;
+}
+.koi-rename-input:focus-visible {
+  outline: none;
+  border-color: var(--koi-accent);
+}
+.koi-rename-hint {
+  color: var(--koi-muted);
+  font-family: var(--koi-font-body);
+  font-size: 0.7rem;
+  white-space: nowrap;
+}
+
+/* --- live diagrams --- */
+.koi-diagrams {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+}
+.koi-diagram-page {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.koi-diagram-title {
+  font-family: var(--koi-font-display);
+  font-weight: 700;
+  font-size: 0.95rem;
+  letter-spacing: -0.01em;
+  color: var(--koi-fg);
+  margin: 0;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--koi-line);
+}
+.koi-diagram {
+  margin: 0;
+  background: var(--koi-paper-2);
+  border: 1px solid var(--koi-line);
+  border-radius: var(--koi-radius);
+  padding: 12px;
+}
+.koi-diagram-caption {
+  color: var(--koi-muted);
+  font-family: var(--koi-font-body);
+  font-size: 0.78rem;
+  margin-bottom: 8px;
+}
+.koi-diagram-surface {
+  overflow-x: auto;
+}
+.koi-diagram-surface svg {
+  max-width: 100%;
+  height: auto;
+}
+.koi-diagram-fallback {
+  font-family: var(--koi-font-mono);
+  font-size: 0.74rem;
+  white-space: pre-wrap;
+  color: var(--koi-fg);
+  background: var(--koi-surface);
+  border-radius: var(--koi-radius-sm);
+  padding: 8px;
+  overflow-x: auto;
+}
+
+/* --- AI assistant panel --- */
+.koi-assistant {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+.koi-assistant-transcript {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 16px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.koi-assistant-intro {
+  color: var(--koi-muted);
+  font-family: var(--koi-font-body);
+  font-size: 0.84rem;
+  line-height: 1.55;
+}
+.koi-msg {
+  max-width: 92%;
+  padding: 9px 12px;
+  border-radius: var(--koi-radius);
+  font-family: var(--koi-font-body);
+  font-size: 0.84rem;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.koi-msg-user {
+  align-self: flex-end;
+  background: var(--koi-accent);
+  color: var(--koi-on-accent);
+  white-space: pre-wrap;
+}
+.koi-msg-assistant {
+  align-self: flex-start;
+  background: var(--koi-paper-2);
+  border: 1px solid var(--koi-line);
+  color: var(--koi-fg);
+}
+.koi-msg-assistant .koi-md {
+  white-space: normal;
+}
+.koi-msg-note {
+  background: color-mix(in srgb, var(--koi-accent) 12%, transparent);
+  border-color: color-mix(in srgb, var(--koi-accent) 40%, var(--koi-line));
+}
+.koi-msg-error {
+  border-color: var(--koi-error);
+  color: var(--koi-error);
+}
+.koi-assistant-stopped {
+  margin-top: 6px;
+  color: var(--koi-muted);
+  font-family: var(--koi-font-body);
+  font-size: 0.72rem;
+}
+.koi-assistant-apply,
+.koi-link-btn {
+  margin-top: 8px;
+  background: var(--koi-surface);
+  color: var(--koi-fg);
+  border: 1px solid var(--koi-line);
+  border-radius: var(--koi-radius-sm);
+  padding: 5px 10px;
+  font-family: var(--koi-font-body);
+  font-size: 0.76rem;
+  cursor: pointer;
+}
+.koi-assistant-apply:hover,
+.koi-link-btn:hover {
+  border-color: var(--koi-accent);
+}
+.koi-assistant-apply:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+.koi-assistant-controls {
+  flex: 0 0 auto;
+  border-top: 1px solid var(--koi-line);
+  padding: 10px 12px 12px;
+  background: var(--koi-paper-2);
+}
+.koi-assistant-quick {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+.koi-assistant-action {
+  background: var(--koi-surface);
+  color: var(--koi-fg);
+  border: 1px solid var(--koi-line);
+  border-radius: 999px;
+  padding: 4px 11px;
+  font-family: var(--koi-font-body);
+  font-size: 0.74rem;
+  cursor: pointer;
+}
+.koi-assistant-action:hover:not(:disabled) {
+  border-color: var(--koi-accent);
+  color: var(--koi-fg);
+}
+.koi-assistant-action:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.koi-assistant-inputrow {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+}
+.koi-assistant-input {
+  flex: 1 1 auto;
+  resize: vertical;
+  background: var(--koi-surface);
+  color: var(--koi-fg);
+  border: 1px solid var(--koi-line);
+  border-radius: var(--koi-radius-sm);
+  padding: 8px 10px;
+  font-family: var(--koi-font-body);
+  font-size: 0.82rem;
+  line-height: 1.5;
+}
+.koi-assistant-input:focus-visible {
+  outline: none;
+  border-color: var(--koi-accent);
+}
+.koi-assistant-send,
+.koi-assistant-stop {
+  flex: 0 0 auto;
+  border: 1px solid var(--koi-line);
+  border-radius: var(--koi-radius-sm);
+  padding: 8px 14px;
+  font-family: var(--koi-font-body);
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+.koi-assistant-send {
+  background: var(--koi-accent-grad);
+  color: var(--koi-on-accent);
+  border-color: transparent;
+}
+.koi-assistant-send:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+.koi-assistant-stop {
+  background: var(--koi-surface);
+  color: var(--koi-fg);
+}
+
+/* --- welcome example gallery --- */
+.koi-welcome-gallery {
+  margin-top: 22px;
+  text-align: left;
+}
+.koi-welcome-gallery-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-top: 8px;
+}
+.koi-welcome-example {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  text-align: left;
+  background: var(--koi-surface);
+  border: 1px solid var(--koi-line);
+  border-radius: var(--koi-radius-sm);
+  padding: 9px 11px;
+  cursor: pointer;
+  transition: border-color 0.12s ease, transform 0.12s ease;
+}
+.koi-welcome-example:hover {
+  border-color: var(--koi-accent);
+  transform: translateY(-1px);
+}
+.koi-welcome-example-name {
+  font-family: var(--koi-font-body);
+  font-weight: 600;
+  font-size: 0.82rem;
+  color: var(--koi-fg);
+}
+.koi-welcome-example-blurb {
+  font-family: var(--koi-font-body);
+  font-size: 0.72rem;
+  color: var(--koi-muted);
+  line-height: 1.4;
+}
+
+/* --- preferences text inputs (API key + model), matching the select/number controls --- */
+.koi-text {
+  width: 100%;
+  min-width: 200px;
+  background: var(--koi-surface);
+  color: var(--koi-fg);
+  border: 1px solid var(--koi-line);
+  border-radius: var(--koi-radius-sm);
+  padding: 6px 9px;
+  font-family: var(--koi-font-mono);
+  font-size: 0.8rem;
+}
+.koi-text:hover,
+.koi-text:focus-visible {
+  outline: none;
+  border-color: var(--koi-accent);
+}
+
 /* Visually hidden but exposed to assistive tech (the wizard's aria-live announcer). */
 .koi-sr-only {
   position: absolute;
@@ -1547,9 +1907,6 @@ body.resizing {
 
 .koi-wizard-content {
   min-height: 168px;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
 }
 
 /* Language step: selectable cards. */

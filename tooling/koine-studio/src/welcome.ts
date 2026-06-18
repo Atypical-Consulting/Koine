@@ -5,12 +5,15 @@
 import { getRecentFolders } from './store';
 import { LOGO_SVG } from './logo';
 import { registerOverlay } from './overlay';
+import { EXAMPLES, type Example } from './examples';
 
 /** What the welcome actions delegate to; the host (ide.ts) performs the real work. */
 export interface WelcomeCallbacks {
   onNewScratch(): void;
   onOpenFolder(): void;
   onOpenRecent(path: string): void;
+  /** Open one of the starter examples as a scratch model. */
+  onOpenExample(example: Example): void;
 }
 
 /** Imperative handle returned by createWelcome. */
@@ -80,6 +83,35 @@ export function createWelcome(cb: WelcomeCallbacks): WelcomeHandle {
     cb.onOpenFolder();
   });
   actions.appendChild(openBtn);
+
+  // Example gallery — one-click starter models so a first run has something real to explore.
+  const gallery = document.createElement('div');
+  gallery.className = 'koi-welcome-gallery';
+  const galleryTitle = document.createElement('div');
+  galleryTitle.className = 'koi-welcome-recent-title';
+  galleryTitle.textContent = 'Start from an example';
+  gallery.appendChild(galleryTitle);
+  const galleryGrid = document.createElement('div');
+  galleryGrid.className = 'koi-welcome-gallery-grid';
+  for (const example of EXAMPLES) {
+    const item = document.createElement('button');
+    item.type = 'button';
+    item.className = 'koi-welcome-example';
+    const name = document.createElement('span');
+    name.className = 'koi-welcome-example-name';
+    name.textContent = example.name;
+    const blurb = document.createElement('span');
+    blurb.className = 'koi-welcome-example-blurb';
+    blurb.textContent = example.blurb;
+    item.append(name, blurb);
+    item.addEventListener('click', () => {
+      hide();
+      cb.onOpenExample(example);
+    });
+    galleryGrid.appendChild(item);
+  }
+  gallery.appendChild(galleryGrid);
+  card.appendChild(gallery);
 
   // Recent folders — populated on each show().
   const recent = document.createElement('div');
