@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="stylesheet" href="/src/styles.css" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Koine Studio</title>
+    <script type="module" src="/src/main.ts" defer></script>
+  </head>
+
+  <body>
+    <div id="app">
+      <header id="toolbar">
+        <h1>Koine Studio</h1>
+        <div class="toolbar-actions">
+          <button type="button" id="btn-preview-cs">Preview C#</button>
+          <button type="button" id="btn-preview-ts">Preview TypeScript</button>
+        </div>
+        <div id="status" data-kind="connecting">connecting…</div>
+      </header>
+
+      <main id="split">
+        <section id="editor-pane" class="pane" aria-label="Editor"></section>
+        <section id="output-pane" class="pane" aria-label="Generated output"></section>
+      </main>
+
+      <footer id="diagnostics" aria-label="Diagnostics"></footer>
+    </div>
+  </body>
+</html>
