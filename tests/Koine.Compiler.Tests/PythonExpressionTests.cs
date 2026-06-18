@@ -33,6 +33,7 @@ public class PythonExpressionTests
             prices: List<Decimal>
             lines: List<Money>
             tags: List<String>
+            counts: List<Int>
           }
         }
         """;
@@ -227,8 +228,28 @@ public class PythonExpressionTests
     // =========================================================================
 
     [Fact]
-    public void Sum_uses_decimal_safe_runtime_helper()
+    public void Sum_of_Int_projection_uses_builtin_sum_returning_zero_on_empty()
     {
+        // Int projection: empty collection must return 0 (matches C#/TS).
+        // Expect Python builtin `sum(...)`, NOT `koine_sum(...)`.
+        var selector = new LambdaExpr("c", Id("c"));
+        var expr = new CallExpr(Id("counts"), "sum", new Expr[] { selector });
+        Assert.Equal("sum(c for c in self.counts)", Translate(expr));
+    }
+
+    [Fact]
+    public void Sum_of_Decimal_projection_uses_koine_sum_guarding_empty()
+    {
+        // Decimal projection: empty collection has no zero, so must raise — keep koine_sum.
+        var selector = new LambdaExpr("p", Id("p"));
+        var expr = new CallExpr(Id("prices"), "sum", new Expr[] { selector });
+        Assert.Equal("koine_sum(p for p in self.prices)", Translate(expr));
+    }
+
+    [Fact]
+    public void Sum_of_value_object_projection_uses_koine_sum_guarding_empty()
+    {
+        // Value-object (Money) projection: no zero value — keep koine_sum.
         var selector = new LambdaExpr("m", new MemberAccessExpr(Id("m"), "amount"));
         var expr = new CallExpr(Id("lines"), "sum", new Expr[] { selector });
         Assert.Equal("koine_sum(m.amount for m in self.lines)", Translate(expr));

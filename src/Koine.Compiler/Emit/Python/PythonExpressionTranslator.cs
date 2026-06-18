@@ -500,7 +500,7 @@ internal sealed class PythonExpressionTranslator
                 sb.Append("koine_max(").Append(RenderComprehension(call, t)).Append(')');
                 return;
             case "sum":
-                sb.Append("koine_sum(").Append(RenderComprehension(call, t)).Append(')');
+                WriteSum(call, t, sb);
                 return;
             case "distinctBy":
                 sb.Append("len({").Append(RenderComprehension(call, t)).Append("}) == len(").Append(t).Append(')');
@@ -509,6 +509,51 @@ internal sealed class PythonExpressionTranslator
                 sb.Append("None  # unsupported call '").Append(call.Method).Append('\'');
                 return;
         }
+    }
+
+    /// <summary>
+    /// Lowers a <c>.sum(p =&gt; body)</c> call.
+    /// <para>
+    /// When the projected element type is a bare <c>Int</c>, Python's builtin <c>sum(...)</c>
+    /// is used — it defaults to <c>start=0</c>, so an empty collection returns <c>0</c>,
+    /// exactly matching the C# and TypeScript emitters' behaviour.
+    /// </para>
+    /// <para>
+    /// For <c>Decimal</c> or value-object projections there is no domain zero, so the runtime
+    /// helper <c>koine_sum</c> is kept — it raises <c>DomainInvariantViolationError</c> on an
+    /// empty collection, mirroring the C#/TS seedless-fold behaviour.
+    /// </para>
+    /// </summary>
+    private void WriteSum(CallExpr call, string target, StringBuilder sb)
+    {
+        TypeRef? selectorType = InferSelectorType(call);
+        if (selectorType?.Name == "Int")
+        {
+            // Bare numeric Int: builtin sum(...) defaults start=0, so empty → 0.
+            sb.Append("sum(").Append(RenderComprehension(call, target)).Append(')');
+        }
+        else
+        {
+            // Decimal or value-object: no zero value — guard emptiness via koine_sum.
+            sb.Append("koine_sum(").Append(RenderComprehension(call, target)).Append(')');
+        }
+    }
+
+    /// <summary>
+    /// Infers the type produced by the lambda body inside a <c>sum</c>/<c>min</c>/<c>max</c>
+    /// call (i.e., the type of each element after applying the selector projection). Mirrors
+    /// the identical method in <see cref="TypeScript.TypeScriptExpressionTranslator"/>.
+    /// </summary>
+    private TypeRef? InferSelectorType(CallExpr call)
+    {
+        TypeScope scope = EffectiveScope();
+        TypeRef? element = TypeResolver.ElementOf(_resolver.Infer(call.Target, scope));
+        if (element is not null && call.Args is [LambdaExpr lambda])
+        {
+            return _resolver.Infer(lambda.Body, scope.With(lambda.Parameter, KoineType.From(element, _index)));
+        }
+
+        return null;
     }
 
     /// <summary>
