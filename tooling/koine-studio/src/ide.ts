@@ -12,6 +12,7 @@ import { createPreferences } from './prefs';
 import { initSplitResizer } from './resize';
 import { createHelpOverlay, type ShortcutRow } from './help';
 import { createAboutDialog } from './about';
+import { createGenerateProject } from './generateProjectWizard';
 import { formatChord } from './platform';
 
 // --- workspace fs contract ---------------------------------------------------
@@ -903,6 +904,13 @@ export function init(): void {
   });
   const help = createHelpOverlay(helpRows());
   const about = createAboutDialog();
+  // Generate Project wizard: compiles the active model, then bundles the emitted files into a
+  // downloadable archive. I/O is injected so the wizard stays decoupled from the LSP/host wiring.
+  const generateProject = createGenerateProject({
+    emitPreview: (target) => lsp.emitPreview(target),
+    glossary: () => lsp.glossary(),
+    saveZip: (name, data) => platform.saveZip(name, data),
+  });
 
   initSplitResizer({ split: el('split'), handle: el('split-resizer') });
 
@@ -910,6 +918,7 @@ export function init(): void {
   const hintEl = document.querySelector('.palette-hint');
   if (hintEl) hintEl.textContent = formatChord('mod+K'); // ⌘+K / Ctrl+K per platform
   el<HTMLButtonElement>('btn-new').addEventListener('click', () => newScratch());
+  el<HTMLButtonElement>('btn-generate-project').addEventListener('click', () => generateProject.open());
   el<HTMLButtonElement>('btn-theme').addEventListener('click', () => toggleTheme());
   el<HTMLButtonElement>('btn-prefs').addEventListener('click', () => prefs.open());
   el<HTMLButtonElement>('btn-about').addEventListener('click', () => about.open());
@@ -936,6 +945,7 @@ export function init(): void {
       { id: 'open-folder', title: 'Open folder…', hint: 'mod+Shift+O', group: 'File', run: () => void openFolder() },
       { id: 'new-scratch', title: 'New scratch model', hint: 'mod+N', group: 'File', run: () => newScratch() },
       { id: 'check', title: 'Check against baseline…', group: 'File', run: () => void runCheck() },
+      { id: 'generate-project', title: 'Generate project…', group: 'File', run: () => generateProject.open() },
       { id: 'toggle-theme', title: 'Toggle theme', group: 'View', run: () => toggleTheme() },
       { id: 'prefs', title: 'Preferences…', hint: 'mod+,', group: 'View', run: () => prefs.open() },
       { id: 'help', title: 'Keyboard shortcuts', hint: 'F1', group: 'Help', run: () => help.open() },

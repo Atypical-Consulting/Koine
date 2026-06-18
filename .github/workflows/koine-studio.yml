@@ -128,6 +128,11 @@ jobs:
           npm ci
           npm run build
 
+      # Unit + DOM tests for the frontend's pure logic (project-name/zip helpers, the wizard flow).
+      - name: Test frontend (npm)
+        working-directory: tooling/koine-studio
+        run: npm test
+
   # Validate the BROWSER edition of the studio: the Koine.Wasm compiler bundle plus the web
   # frontend (TypeScript typecheck + Vite bundle). Linux-only — the output is platform-neutral
   # static assets. This is the build the docs-site deploy folds into /Koine/studio/.
