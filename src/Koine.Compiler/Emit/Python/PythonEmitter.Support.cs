@@ -184,9 +184,27 @@ public sealed partial class PythonEmitter
             stdlib.Add("from decimal import Decimal");
         }
 
+        // `collections.abc` exports both `Mapping` (Map<K,V> fields) and `Callable` (enum
+        // match/switch handler parameters); collapse them into one deterministic import line.
+        var abc = new List<string>();
+        if (present.Contains("Callable"))
+        {
+            abc.Add("Callable");
+        }
         if (present.Contains("Mapping"))
         {
-            stdlib.Add("from collections.abc import Mapping");
+            abc.Add("Mapping");
+        }
+        if (abc.Count > 0)
+        {
+            abc.Sort(StringComparer.Ordinal);
+            stdlib.Add("from collections.abc import " + string.Join(", ", abc));
+        }
+
+        // Smart enums need `enum.Enum` and a module-level `TypeVar` for the generic `match` return.
+        if (present.Contains("TypeVar"))
+        {
+            stdlib.Add("from typing import TypeVar");
         }
 
         if (present.Contains("enum"))

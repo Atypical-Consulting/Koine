@@ -100,8 +100,8 @@ public sealed partial class PythonEmitter : IEmitter
     }
 
     /// <summary>
-    /// Dispatches a single <see cref="TypeDecl"/> to its construct emitter. Regular value objects
-    /// emit now; quantities, entities, enums, aggregates, events, and repositories are no-ops until
+    /// Dispatches a single <see cref="TypeDecl"/> to its construct emitter. Value objects (regular
+    /// and quantities) and smart enums emit now; entities, aggregates, and events are no-ops until
     /// their later tasks.
     /// </summary>
     private void EmitType(PyEmitContext emit, List<EmittedFile> files, TypeDecl type, string ns, PythonTypeMapper typeMapper)
@@ -111,20 +111,20 @@ public sealed partial class PythonEmitter : IEmitter
         // the leaf constructs are routed.
         switch (type)
         {
-            // A `quantity` is a value object whose unit member is REQUIRED to be enum-typed (R9.2 /
-            // KOI0904), so it unavoidably references an enum. Enums don't emit until the next task, so
-            // emitting a quantity now would dangle that import and break the per-task `mypy --strict`
-            // run. Quantities therefore land WITH their unit enum in the next task; the declaration
-            // stays in the model (and the shared fixture), just not emitted yet.
-            case ValueObjectDecl { IsQuantity: false } vo:
+            // A `quantity` and a regular `value` share one emitter; the quantity flag inside
+            // `EmitValueObject` routes the unit-checked dunder ops. A quantity's unit member is
+            // enum-typed (R9.2 / KOI0904), and enums now emit, so the cross-module enum import
+            // resolves.
+            case ValueObjectDecl vo:
                 files.Add(EmitValueObject(emit, vo, ns, typeMapper));
                 break;
-            case ValueObjectDecl:        // a quantity — deferred (see above)
+            case EnumDecl @enum:
+                files.Add(EmitEnum(emit, @enum, ns, typeMapper));
+                break;
             case EntityDecl:
-            case EnumDecl:
             case EventDecl:
             case AggregateDecl:
-                // Filled in by later tasks (quantities+enums, entities, events, aggregates/repositories).
+                // Filled in by later tasks (entities, events, aggregates/repositories).
                 break;
         }
     }
