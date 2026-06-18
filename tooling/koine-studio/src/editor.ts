@@ -345,6 +345,13 @@ function koineHoverTooltip(hover: HoverFn) {
 /** Go-to-definition provider; resolves a 0-based position to a Location (or array/null). */
 export type DefinitionFn = (line: number, character: number) => Promise<Location | Location[] | null>;
 
+/**
+ * Navigation handler invoked once a definition resolves. ide.ts decides what to do: a
+ * cross-file Location switches the active file before jumping; a same-file Location just
+ * jumps. The editor only resolves the Location and hands it off — it does NOT navigate itself.
+ */
+export type NavigateFn = (loc: Location) => void;
+
 /** Format provider; resolves to the LSP TextEdits to apply to the whole document. */
 export type FormatFn = () => Promise<TextEdit[]>;
 
@@ -354,8 +361,10 @@ export interface KoineEditorOptions {
   onChange?: (doc: string) => void;
   /** Optional LSP hover provider; when given, hover tooltips are enabled. */
   onHover?: HoverFn;
-  /** Optional go-to-definition provider; when given, Cmd/Ctrl-click and F12 jump. */
+  /** Optional go-to-definition provider; when given, Cmd/Ctrl-click and F12 resolve. */
   onDefinition?: DefinitionFn;
+  /** Where a resolved definition Location is sent; ide.ts performs the navigation. */
+  onNavigate?: NavigateFn;
   /** Optional format provider; when given, Cmd/Ctrl-S formats the document. */
   onFormat?: FormatFn;
 }
@@ -365,7 +374,9 @@ export interface KoineEditor {
   getDoc(): string;
   setDoc(doc: string): void;
   goto(line: number, col: number): void;
-  /** Resolve and jump to the definition for the symbol at a CodeMirror offset. */
+  /** Jump to (and select through) a 0-based LSP range in the current document. */
+  gotoRange(start: { line: number; character: number }, end: { line: number; character: number }): void;
+  /** Resolve the definition for the symbol at a CodeMirror offset (delegates navigation to onNavigate). */
   gotoDefinition(pos: number): Promise<void>;
   /** Apply LSP TextEdits to the document in one transaction (edits sorted internally). */
   applyEdits(edits: TextEdit[]): void;
@@ -411,7 +422,8 @@ function jumpToRange(view: EditorView, start: { line: number; character: number 
 }
 
 export function createKoineEditor(opts: KoineEditorOptions): KoineEditor {
-  // Resolve and jump to the definition for the symbol at a CM offset. Degrades silently
+  // Resolve the definition for the symbol at a CM offset and hand the Location to ide.ts
+  // (onNavigate), which decides whether to switch files before jumping. Degrades silently
   // (no-op) when there is no provider, no result, or the request fails.
   async function gotoDefinition(pos: number): Promise<void> {
     if (!opts.onDefinition) return;
@@ -426,7 +438,8 @@ export function createKoineEditor(opts: KoineEditorOptions): KoineEditor {
     }
     const loc = Array.isArray(res) ? res[0] : res;
     if (!loc) return;
-    jumpToRange(view, loc.range.start, loc.range.end);
+    if (opts.onNavigate) opts.onNavigate(loc);
+    else jumpToRange(view, loc.range.start, loc.range.end); // fallback: same-doc jump
   }
 
   // Cmd/Ctrl-click jumps to definition (only when a provider is wired).
@@ -510,6 +523,9 @@ export function createKoineEditor(opts: KoineEditorOptions): KoineEditor {
       const pos = Math.min(lineInfo.from + Math.max(col - 1, 0), lineInfo.to);
       view.dispatch({ selection: { anchor: pos }, scrollIntoView: true });
       view.focus();
+    },
+    gotoRange(start, end) {
+      jumpToRange(view, start, end);
     },
     gotoDefinition,
     applyEdits(edits: TextEdit[]) {

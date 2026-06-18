@@ -115,20 +115,33 @@ interface JsonRpcMessage {
 
 const REQUEST_TIMEOUT_MS = 15000;
 
+/** The default scratch-mode document uri. Used until a folder is opened. */
+export const SCRATCH_URI = 'file:///model.koi';
+
+interface OpenDoc {
+  text: string;
+  version: number;
+}
+
 export class KoineLsp {
   private nextId = 1;
   private pending = new Map<number, { resolve: (v: any) => void; reject: (e: any) => void; timer: ReturnType<typeof setTimeout> }>();
   private unlistenMsg?: UnlistenFn;
   private unlistenExit?: UnlistenFn;
   private unlistenRestart?: UnlistenFn;
-  private version = 0;
-  private opened = false;
+  // Per-uri open buffers (text + monotonic version). The active uri is the one all
+  // request methods target; didChange is debounced per active uri.
+  private docs = new Map<string, OpenDoc>();
   private changeTimer?: ReturnType<typeof setTimeout>;
-  private lastText = '';
   private onDiagnostics?: (uri: string, diags: LspDiagnostic[]) => void;
   private onExit?: (code: number) => void;
   private onRestart?: () => void;
-  private readonly uri = 'file:///model.koi';
+  private activeUri = SCRATCH_URI;
+
+  /** The uri every request method currently targets. */
+  get active(): string {
+    return this.activeUri;
+  }
 
   onPublishDiagnostics(cb: (uri: string, diags: LspDiagnostic[]) => void): void {
     this.onDiagnostics = cb;
@@ -172,11 +185,11 @@ export class KoineLsp {
   }
 
   /**
-   * Re-handshake the fresh sidecar after a restart and re-open the current document so the
-   * new server has our state. Any in-flight requests belong to the dead child — reject them.
+   * Re-handshake the fresh sidecar after a restart and re-open EVERY currently-open document so
+   * the new server regains the whole workspace. Any in-flight requests belong to the dead child —
+   * reject them.
    */
   private async reinitialize(): Promise<void> {
-    this.opened = false;
     clearTimeout(this.changeTimer);
     for (const entry of this.pending.values()) {
       clearTimeout(entry.timer);
@@ -192,9 +205,13 @@ export class KoineLsp {
     }
   }
 
-  /** Re-send didOpen with the latest known editor text (used after a restart). */
+  /** Re-send didOpen for every tracked document with its latest text (used after a restart). */
   reopen(): void {
-    this.didOpen(this.lastText);
+    for (const [uri, doc] of this.docs) {
+      this.notify('textDocument/didOpen', {
+        textDocument: { uri, languageId: 'koine', version: ++doc.version, text: doc.text },
+      });
+    }
   }
 
   private handle(msg: JsonRpcMessage): void {
@@ -240,56 +257,77 @@ export class KoineLsp {
     });
   }
 
-  didOpen(text: string): void {
-    this.lastText = text;
+  /**
+   * Open a document under `uri` and track it. Sends textDocument/didOpen. The first opened
+   * document becomes the active uri if none has been set yet by the caller. Re-opening a uri
+   * already tracked just re-sends didOpen with the new text.
+   */
+  openDoc(uri: string, text: string): void {
+    const existing = this.docs.get(uri);
+    const version = existing ? existing.version + 1 : 1;
+    this.docs.set(uri, { text, version });
     this.notify('textDocument/didOpen', {
-      textDocument: { uri: this.uri, languageId: 'koine', version: ++this.version, text },
+      textDocument: { uri, languageId: 'koine', version, text },
     });
-    this.opened = true;
   }
 
   /**
-   * Full-text sync, debounced ~250ms. Dropped until the document has been opened so a
-   * didChange can never precede didOpen (edits made during the connect window are safe:
-   * didOpen carries the editor's current full text). Also no-ops once disposed.
+   * Full-text sync for `uri`, debounced ~250ms. Dropped until the document has been opened so a
+   * didChange can never precede didOpen (edits made during the connect window are safe: didOpen
+   * carries the editor's current full text). The debounce is shared and re-armed per call, so it
+   * always flushes the most recent edit to whichever uri was last changed.
    */
-  didChange(text: string): void {
-    this.lastText = text;
-    if (!this.opened) return;
+  changeDoc(uri: string, text: string): void {
+    const doc = this.docs.get(uri);
+    if (!doc) return; // not opened yet — drop
+    doc.text = text;
     clearTimeout(this.changeTimer);
     this.changeTimer = setTimeout(() => {
       this.notify('textDocument/didChange', {
-        textDocument: { uri: this.uri, version: ++this.version },
+        textDocument: { uri, version: ++doc.version },
         contentChanges: [{ text }],
       });
     }, 250);
   }
 
+  /** Close and stop tracking a document. Sends textDocument/didClose. */
+  closeDoc(uri: string): void {
+    if (!this.docs.delete(uri)) return;
+    this.notify('textDocument/didClose', {
+      textDocument: { uri },
+    });
+  }
+
+  /** Switch which uri all request methods target. Does NOT send any notification. */
+  setActive(uri: string): void {
+    this.activeUri = uri;
+  }
+
   emitPreview(target: 'csharp' | 'typescript'): Promise<EmitPreviewResult> {
     return this.request<EmitPreviewResult>('koine/emitPreview', {
-      textDocument: { uri: this.uri },
+      textDocument: { uri: this.activeUri },
       target,
     });
   }
 
-  /** Ubiquitous-language glossary as markdown for the current document. */
+  /** Ubiquitous-language glossary as markdown for the active document. */
   glossary(): Promise<GlossaryResult> {
     return this.request<GlossaryResult>('koine/glossary', {
-      textDocument: { uri: this.uri },
+      textDocument: { uri: this.activeUri },
     });
   }
 
-  /** Context map (contexts + relations) for the current document. */
+  /** Context map (contexts + relations) for the active document. */
   contextMap(): Promise<ContextMapResult> {
     return this.request<ContextMapResult>('koine/contextMap', {
-      textDocument: { uri: this.uri },
+      textDocument: { uri: this.activeUri },
     });
   }
 
   /** Standard LSP hover at a 0-based position. Resolves to null when there is nothing to show. */
   hover(line: number, character: number): Promise<HoverResult | null> {
     return this.request<HoverResult | null>('textDocument/hover', {
-      textDocument: { uri: this.uri },
+      textDocument: { uri: this.activeUri },
       position: { line, character },
     });
   }
@@ -297,7 +335,7 @@ export class KoineLsp {
   /** Go-to-definition at a 0-based position. Resolves to a Location, an array, or null. */
   definition(line: number, character: number): Promise<Location | Location[] | null> {
     return this.request<Location | Location[] | null>('textDocument/definition', {
-      textDocument: { uri: this.uri },
+      textDocument: { uri: this.activeUri },
       position: { line, character },
     });
   }
@@ -305,30 +343,39 @@ export class KoineLsp {
   /** Document outline as a DocumentSymbol tree. Resolves to [] when the server returns null. */
   async documentSymbols(): Promise<DocumentSymbol[]> {
     const res = await this.request<DocumentSymbol[] | null>('textDocument/documentSymbol', {
-      textDocument: { uri: this.uri },
+      textDocument: { uri: this.activeUri },
     });
     return res ?? [];
   }
 
-  /** Canonical formatting edits for the whole document. Resolves to [] when nothing changes. */
+  /** Canonical formatting edits for the whole active document. Resolves to [] when nothing changes. */
   async format(tabSize = 2, insertSpaces = true): Promise<TextEdit[]> {
     const res = await this.request<TextEdit[] | null>('textDocument/formatting', {
-      textDocument: { uri: this.uri },
+      textDocument: { uri: this.activeUri },
       options: { tabSize, insertSpaces },
     });
     return res ?? [];
   }
 
-  /** Model-versioning compatibility of the current buffer against a baseline model folder. */
+  /** Notify the server the active document was saved (optional; harmless if unhandled). */
+  didSave(): void {
+    const doc = this.docs.get(this.activeUri);
+    if (!doc) return;
+    this.notify('textDocument/didSave', {
+      textDocument: { uri: this.activeUri },
+      text: doc.text,
+    });
+  }
+
+  /** Model-versioning compatibility of the active buffer against a baseline model folder. */
   check(baseline: string): Promise<CheckResult> {
     return this.request<CheckResult>('koine/check', {
-      textDocument: { uri: this.uri },
+      textDocument: { uri: this.activeUri },
       baseline,
     });
   }
 
   dispose(): void {
-    this.opened = false;
     clearTimeout(this.changeTimer);
     this.unlistenMsg?.();
     this.unlistenExit?.();

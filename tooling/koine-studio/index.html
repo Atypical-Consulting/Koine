@@ -13,6 +13,7 @@
       <header id="toolbar">
         <h1>Koine Studio</h1>
         <div class="toolbar-actions">
+          <button type="button" id="btn-open-folder">Open Folder…</button>
           <button type="button" id="btn-preview-cs">Preview C#</button>
           <button type="button" id="btn-preview-ts">Preview TypeScript</button>
           <button type="button" id="btn-check">Check…</button>
@@ -21,6 +22,12 @@
       </header>
 
       <main id="split">
+        <aside id="filetree" class="pane" aria-label="Workspace files" hidden>
+          <div id="filetree-header">
+            <span id="filetree-title">Scratch</span>
+          </div>
+          <ul id="filetree-list" role="tree" aria-label="Open files"></ul>
+        </aside>
         <section id="editor-pane" class="pane" aria-label="Editor"></section>
         <section id="right" class="pane" aria-label="Inspector">
           <div id="tabs" role="tablist" aria-label="Right panel views">
