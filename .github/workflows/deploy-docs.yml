@@ -30,7 +30,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       # The Playground runs the Koine compiler as a .NET WebAssembly module; building it
       # needs the SDK plus the wasm workloads (emscripten + the browser-wasm runtime pack).
