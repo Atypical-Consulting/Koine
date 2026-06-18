@@ -5,7 +5,7 @@ import { createKoineEditor, createOutputView, renderMarkdown, renderSymbolTree, 
 import { KoineLsp, SCRATCH_URI, type CheckResult, type ContextMapResult, type Location, type LspDiagnostic } from './lsp';
 import { getPlatform, type KoiFile } from './host';
 import { initTheme, toggleTheme } from './theme';
-import { loadSettings, pushRecentFolder, type Settings } from './store';
+import { clearScratch, loadScratch, loadSettings, pushRecentFolder, saveScratch, type Settings } from './store';
 import { createWelcome } from './welcome';
 import { createCommandPalette, type Command } from './palette';
 import { createPreferences } from './prefs';
@@ -210,9 +210,15 @@ export function init(): void {
   }
   applyFontSize();
 
+  // Session restore: if the user has unsaved scratch work from a previous visit, open that instead
+  // of the seed (and skip the welcome screen — see the boot section). Folder workspaces are not
+  // restored; they live on disk and are re-opened explicitly.
+  const restoredScratch = loadScratch();
+  const initialDoc = restoredScratch ?? SEED;
+
   const editor = createKoineEditor({
     parent: el('editor-pane'),
-    doc: SEED,
+    doc: initialDoc,
     onChange: (doc) => {
       // First edit dismisses the welcome overlay (it only shows in untouched scratch mode).
       if (welcome.visible) welcome.hide();
@@ -225,6 +231,8 @@ export function init(): void {
       }
       lsp.changeDoc(activeUri, doc);
       onDocEdited();
+      // Persist the scratch buffer (debounced) so a reload restores it.
+      if (!folderMode && activeUri === SCRATCH_URI) scheduleScratchSave(doc);
       // Re-render the tree only when the active file's dirty dot just appeared (cheap path).
       if (folderMode && becameDirty) renderTree();
     },
@@ -236,6 +244,29 @@ export function init(): void {
     // editor's Mod-s keymap stays inert and there's exactly one save path.
   });
   const output = createOutputView(el('view-preview'));
+
+  // A copy affordance overlaid on the emitted-preview pane (auto-hidden with the pane when another
+  // inspector tab is active). Tracks the most recent generated output; disabled until there is some.
+  let lastPreview = '';
+  let copyResetTimer: ReturnType<typeof setTimeout> | undefined;
+  const copyBtn = document.createElement('button');
+  copyBtn.type = 'button';
+  copyBtn.className = 'koi-copy';
+  copyBtn.textContent = 'Copy';
+  copyBtn.title = 'Copy generated code';
+  copyBtn.disabled = true;
+  copyBtn.addEventListener('click', () => {
+    if (!lastPreview) return;
+    void navigator.clipboard
+      .writeText(lastPreview)
+      .then(() => (copyBtn.textContent = 'Copied ✓'))
+      .catch(() => (copyBtn.textContent = 'Copy failed'))
+      .finally(() => {
+        clearTimeout(copyResetTimer);
+        copyResetTimer = setTimeout(() => (copyBtn.textContent = 'Copy'), 1600);
+      });
+  });
+  el('view-preview').appendChild(copyBtn);
 
   const statusEl = el('status');
   const stripEl = el('diagnostics');
@@ -263,9 +294,20 @@ export function init(): void {
     path: null,
     relPath: 'model.koi',
     name: 'model.koi',
-    text: SEED,
+    text: initialDoc,
     dirty: false,
   });
+
+  // Debounced persistence of the scratch buffer. The seed is treated as "no saved state" so the
+  // welcome screen still appears on a fresh reload; any real edit is restored next time.
+  let scratchSaveTimer: ReturnType<typeof setTimeout> | undefined;
+  function scheduleScratchSave(text: string): void {
+    clearTimeout(scratchSaveTimer);
+    scratchSaveTimer = setTimeout(() => {
+      if (text === SEED) clearScratch();
+      else saveScratch(text);
+    }, 400);
+  }
 
   function setStatus(text: string, kind: 'connecting' | 'green' | 'error'): void {
     statusEl.textContent = text;
@@ -584,18 +626,27 @@ export function init(): void {
     setPreviewBusy(true);
     try {
       const res = await lsp.emitPreview(target);
+      let content: string;
+      let lang: 'csharp' | 'typescript' | 'plain';
+      let copyable = false;
       if (res.error) {
-        output.setContent('// emit error\n' + res.error, 'plain');
-        return;
+        content = '// emit error\n' + res.error;
+        lang = 'plain';
+      } else if (!res.files.length) {
+        content = '// no files emitted (fix diagnostics first)';
+        lang = 'plain';
+      } else {
+        content = res.files.map((f) => `// ==== ${f.path} ====\n${f.contents}`).join('\n\n');
+        lang = target === 'csharp' ? 'csharp' : 'typescript';
+        copyable = true;
       }
-      if (!res.files.length) {
-        output.setContent('// no files emitted (fix diagnostics first)', 'plain');
-        return;
-      }
-      const body = res.files.map((f) => `// ==== ${f.path} ====\n${f.contents}`).join('\n\n');
-      output.setContent(body, target === 'csharp' ? 'csharp' : 'typescript');
+      output.setContent(content, lang);
+      lastPreview = content;
+      copyBtn.disabled = !copyable;
     } catch (e) {
       output.setContent('// preview request failed\n' + String(e), 'plain');
+      lastPreview = '';
+      copyBtn.disabled = true;
     } finally {
       setPreviewBusy(false);
     }
@@ -797,12 +848,14 @@ export function init(): void {
     activeUri = newUri;
     lsp.openDoc(newUri, buf.text);
     lsp.setActive(newUri);
+    clearScratch(); // the scratch is now a real file — don't also restore it as scratch on reload
   }
 
   // --- new scratch model ----------------------------------------------------
   // Reset to a single untouched scratch buffer holding the SEED. In folder mode this
   // tears the folder workspace down (closes every open doc) and re-establishes scratch.
   function newScratch(): void {
+    clearScratch(); // reset to the seed baseline; forget any restored scratch
     if (folderMode) {
       for (const uri of Array.from(buffers.keys())) lsp.closeDoc(uri);
       buffers.clear();
@@ -861,6 +914,17 @@ export function init(): void {
   el<HTMLButtonElement>('btn-prefs').addEventListener('click', () => prefs.open());
   el<HTMLButtonElement>('btn-about').addEventListener('click', () => about.open());
 
+  // Format the active document via the LSP and apply the edits (shared by the palette command
+  // and format-on-save). Degrades silently if the request fails.
+  async function formatActive(): Promise<void> {
+    try {
+      const edits = await lsp.format();
+      editor.applyEdits(edits);
+    } catch (e) {
+      console.error('format failed:', e);
+    }
+  }
+
   // --- command palette command set ------------------------------------------
   // Hints are authored with a literal 'mod' and formatted to ⌘ / Ctrl per platform so the
   // palette, help overlay, and toolbar hint all show the same key.
@@ -868,6 +932,7 @@ export function init(): void {
     const cmds: Command[] = [
       { id: 'preview-cs', title: 'Preview C#', hint: 'mod+1', group: 'Preview', run: () => void preview('csharp') },
       { id: 'preview-ts', title: 'Preview TypeScript', hint: 'mod+2', group: 'Preview', run: () => void preview('typescript') },
+      { id: 'format', title: 'Format document', hint: 'mod+S', group: 'Edit', run: () => void formatActive() },
       { id: 'open-folder', title: 'Open folder…', hint: 'mod+Shift+O', group: 'File', run: () => void openFolder() },
       { id: 'new-scratch', title: 'New scratch model', hint: 'mod+N', group: 'File', run: () => newScratch() },
       { id: 'check', title: 'Check against baseline…', group: 'File', run: () => void runCheck() },
@@ -880,6 +945,17 @@ export function init(): void {
       { id: 'view-contextmap', title: 'Show Context Map', group: 'Inspector', run: () => selectView('contextmap') },
       { id: 'view-outline', title: 'Show Outline', group: 'Inspector', run: () => selectView('outline') },
     ];
+
+    // In folder mode, surface every open file as a "Go to File" entry so the palette doubles as a
+    // fuzzy quick-open (type part of a path to jump). The palette re-reads this on each open.
+    if (folderMode) {
+      for (const buf of Array.from(buffers.values())
+        .filter((b) => b.path != null)
+        .sort((a, b) => a.relPath.localeCompare(b.relPath))) {
+        cmds.push({ id: 'goto:' + buf.uri, title: buf.relPath, group: 'Go to File', run: () => activateFile(buf.uri) });
+      }
+    }
+
     return cmds.map((c) => (c.hint ? { ...c, hint: formatChord(c.hint) } : c));
   }
 
@@ -926,9 +1002,10 @@ export function init(): void {
     }
   });
 
-  // Welcome screen on boot: we start in untouched scratch mode, so surface the empty state.
-  // The first edit, New scratch, Open folder, or opening a recent folder all hide it.
-  welcome.show();
+  // Welcome screen on boot: shown only on a fresh start (no restored scratch). When the user has
+  // unsaved work from a previous visit we resume straight into it. The first edit, New scratch,
+  // Open folder, or opening a recent folder all hide it.
+  if (restoredScratch === null) welcome.show();
 
   // Boot: attach listeners (inside start) before messages flow, then open the doc.
   setStatus('connecting…', 'connecting');
