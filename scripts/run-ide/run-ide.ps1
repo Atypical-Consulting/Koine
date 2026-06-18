@@ -18,7 +18,21 @@ $studio = "tooling/koine-studio"
 dotnet build src/Koine.Cli/Koine.Cli.csproj
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-# 2. Install the frontend deps on first run.
+# 2. Satisfy Tauri's externalBin validation. The build script (tauri_build) checks at
+#    COMPILE time that binaries/koine-<target-triple> exists (see tauri.conf.json ->
+#    bundle.externalBin). In dev the Rust host runs the sidecar via the DLL above, so a
+#    zero-byte placeholder is enough; CI/publish overwrites it with the real binary.
+#    Don't clobber an existing (real) sidecar.
+$triple = (& rustc -vV | Select-String '^host: ').ToString() -replace '^host: ', ''
+$ext = if ($triple -like '*windows*') { ".exe" } else { "" }
+$binDir = Join-Path $studio "src-tauri/binaries"
+$placeholder = Join-Path $binDir "koine-$triple$ext"
+if (-not (Test-Path $placeholder)) {
+    New-Item -ItemType Directory -Force -Path $binDir | Out-Null
+    New-Item -ItemType File -Force -Path $placeholder | Out-Null
+}
+
+# 3. Install the frontend deps on first run.
 if (-not (Test-Path (Join-Path $studio "node_modules"))) {
     Push-Location $studio
     npm install
@@ -27,7 +41,7 @@ if (-not (Test-Path (Join-Path $studio "node_modules"))) {
     if ($code -ne 0) { exit $code }
 }
 
-# 3. Launch the desktop IDE (Vite dev server + Tauri shell).
+# 4. Launch the desktop IDE (Vite dev server + Tauri shell).
 Push-Location $studio
 npm run tauri dev -- @args
 $code = $LASTEXITCODE
