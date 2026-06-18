@@ -52,18 +52,20 @@ public class TypeScriptCommandReturnTests
         }
         """;
 
-    // A result whose rendered form (`this.tax`) is a PREFIX of a sibling emit argument's rendering
-    // (`this.taxRate`): hoisting must substitute ONLY the argument that is the SAME expression, never
-    // splice the substring out of the unrelated sibling (a substring-replace bug found reviewing #60).
+    // A result (`tax`) whose rendered form is a PREFIX of a sibling emit argument (`taxRate`), and
+    // also appears as a sub-expression of a compound argument (`taxRate + tax`) and as a SECOND
+    // whole argument (`doubled`): hoisting must substitute `__result` for EVERY whole-argument match
+    // and leave the prefix sibling and the compound's inner `tax` untouched — never splice the
+    // substring out (a substring-replace bug found reviewing #60).
     private const string PrefixCollisionFixture = """
         context Sales {
-          event Quoted { amount: Int  rate: Int }
+          event Quoted { amount: Int  rate: Int  doubled: Int }
           aggregate Order root Order {
             entity Order identified by OrderId {
               tax:     Int = 0
               taxRate: Int = 0
               command quote(): Int {
-                emit Quoted(amount: tax, rate: taxRate)
+                emit Quoted(amount: tax, rate: taxRate + tax, doubled: tax)
                 result tax
               }
             }
@@ -93,17 +95,18 @@ public class TypeScriptCommandReturnTests
     {
         var orderTs = CompileOrderTs(ComputedResultFixture);
         Assert.Contains("return this.total;", orderTs); // post-mutation state, no hoist
-        Assert.DoesNotContain("const __result = this.total", orderTs); // `total` is not hoisted
+        Assert.DoesNotContain("__result", orderTs);     // parity with the C# sibling; no stray hoist
     }
 
     [Fact]
     public void Result_that_is_a_prefix_of_a_sibling_emit_arg_does_not_splice_the_sibling()
     {
         var orderTs = CompileOrderTs(PrefixCollisionFixture);
-        // Only the `tax` arg (the same expression as the result) is hoisted; the sibling `taxRate`
-        // arg is left intact — NOT mangled into `__resultRate` by a blind substring replace.
+        // Every WHOLE-argument reuse of the result (`amount`, `doubled`) becomes `__result`; the
+        // sibling `rate: taxRate + tax` is left intact — neither mangled into `__resultRate` by a
+        // substring replace, nor its inner `tax` spliced (only whole arguments are substituted).
         Assert.Contains("const __result = this.tax;", orderTs);
-        Assert.Contains("this._domainEvents.push(new Quoted(__result, this.taxRate));", orderTs);
+        Assert.Contains("this._domainEvents.push(new Quoted(__result, (this.taxRate + this.tax), __result));", orderTs);
         Assert.DoesNotContain("__resultRate", orderTs);
         Assert.Contains("return __result;", orderTs);
     }

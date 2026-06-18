@@ -1508,7 +1508,12 @@ public sealed partial class CSharpEmitter : IEmitter
         entity.Commands.SelectMany(c => c.Body).OfType<EmitClause>().Any()
         || entity.Factories.SelectMany(f => f.Body).OfType<EmitClause>().Any();
 
-    /// <summary>Builds the <c>[prefix]_domainEvents.Add(new EventName(...));</c> statement for an emit.</summary>
+    /// <summary>
+    /// Builds the <c>[prefix]_domainEvents.Add(new EventName(...));</c> statement for an emit. When
+    /// <paramref name="hoistedResultExpr"/> is supplied, any argument whose WHOLE rendered form
+    /// equals it is replaced with the <c>__result</c> local and <c>Hoisted</c> is returned true, so
+    /// the caller knows to emit the <c>var __result = …;</c> binding (single source of truth).
+    /// </summary>
     private (string Text, bool Hoisted) BuildEmitStatement(
         EmitClause emit, CSharpExpressionTranslator translator, ModelIndex index,
         string targetPrefix = "", string? hoistedResultExpr = null)

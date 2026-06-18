@@ -643,8 +643,10 @@ public sealed partial class TypeScriptEmitter
     /// Builds the <c>&lt;prefix&gt;_domainEvents.push(new EventName(...));</c> statement for an
     /// <c>emit</c> clause. Positional arguments follow the event's emitted constructor order
     /// (<see cref="OrderCtorParams"/> moves defaulted/optional fields last); <c>occurredOn</c>
-    /// is supplied by the event constructor's own default. The TS analogue of the C# emitter's
-    /// <c>BuildEmitStatement</c>.
+    /// is supplied by the event constructor's own default. When <paramref name="hoistedResultExpr"/>
+    /// is supplied, any argument whose WHOLE rendered form equals it is replaced with the
+    /// <c>__result</c> local and <c>Hoisted</c> is returned true, so the caller knows to emit the
+    /// <c>const __result = …;</c> binding. The TS analogue of the C# emitter's <c>BuildEmitStatement</c>.
     /// </summary>
     private (string Text, bool Hoisted) BuildEmitStatement(
         EmitClause emit, TypeScriptExpressionTranslator translator, ModelIndex index,

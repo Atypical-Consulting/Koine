@@ -205,9 +205,11 @@ public class CrossEmitterConformanceTests
     /// <summary>
     /// The <c>quote</c> command (result + emit reusing <c>tax</c>, beside the prefix-sharing sibling
     /// <c>taxRate</c>). The scenario reads BOTH event payload fields back: the hoisted result must
-    /// flow into <c>amount</c> while <c>rate</c> keeps the un-rewritten <c>taxRate</c> — so a
-    /// substring-splice regression would either fail to compile (caught by the harness's tsc/Roslyn
-    /// step) or produce the wrong <c>rate</c>, and the two backends must agree either way.
+    /// flow into <c>amount</c> while <c>rate</c> keeps the un-rewritten <c>taxRate</c>. A
+    /// substring-splice regression would emit uncompilable code or the wrong <c>rate</c>: the C#
+    /// half (Roslyn) catches it on every run, and the TypeScript half catches it whenever the
+    /// Node/tsc toolchain is present (CI). The unconditional TS guard is the text-shape unit test in
+    /// <c>TypeScriptCommandReturnTests</c>.
     /// </summary>
     private static IReadOnlyList<Scenario> QuoteScenarios()
     {
