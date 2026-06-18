@@ -1,4 +1,5 @@
 using System.Threading;
+using Koine.Compiler.Ast.Bound;
 
 namespace Koine.Compiler.Ast;
 
@@ -23,6 +24,8 @@ public sealed class SemanticModel
     public ModelIndex Index { get; }
 
     private readonly Lazy<SyntaxGraph> _graph;
+    private readonly Lazy<(SymbolTable Symbols, BindingTable Bindings)> _binding;
+    private readonly Lazy<BoundModel> _bound;
 
     public SemanticModel(KoineModel model)
     {
@@ -31,7 +34,32 @@ public sealed class SemanticModel
         // Built on first position/navigation query only — the emit path never touches it.
         // Thread-safe so a cached/shared SemanticModel can't race the build under concurrent LSP requests.
         _graph = new Lazy<SyntaxGraph>(() => new SyntaxGraph(Model), LazyThreadSafetyMode.ExecutionAndPublication);
+        // The interned symbol identity + binding table (Commit 3), built lazily with the same
+        // thread-safety discipline as _graph; the emit path (which goes through Index) never forces it.
+        _binding = new Lazy<(SymbolTable, BindingTable)>(
+            () => Binder.Bind(Model, Index), LazyThreadSafetyMode.ExecutionAndPublication);
+        // The lowered bound-IR slice (Commit 4): VO invariants, lowered + cached, built lazily with the
+        // same thread-safety discipline. Only the migrated VO-invariant emit path forces it; everything
+        // else in the C# emitter and ALL of the TS emitter never touch it, so they pay nothing.
+        _bound = new Lazy<BoundModel>(() => BoundModel.Build(this), LazyThreadSafetyMode.ExecutionAndPublication);
     }
+
+    private SymbolTable Symbols => _binding.Value.Symbols;
+
+    /// <summary>The lowered invariants of a value object (the migrated slice's entry point, Commit 4).</summary>
+    internal IReadOnlyList<BoundInvariant> BoundInvariantsFor(ValueObjectDecl vo) => _bound.Value.InvariantsFor(vo);
+
+    /// <summary>
+    /// The symbol a reference-bearing node resolves to (Roslyn <c>GetSymbolInfo</c>). Never <c>null</c>
+    /// — an unresolved reference is <see cref="ErrorSymbol.Instance"/>, mirroring <see cref="ErrorType"/>.
+    /// </summary>
+    public Symbol GetSymbolInfo(KoineNode node) => _binding.Value.Bindings.GetSymbolInfo(node);
+
+    /// <summary>
+    /// The interned symbol declared by a declaration node (Roslyn <c>GetDeclaredSymbol</c>), or
+    /// <c>null</c> when the node is not a declaration. The same instance is returned every call.
+    /// </summary>
+    public Symbol? GetDeclaredSymbol(KoineNode declaration) => Symbols.DeclaredSymbol(declaration);
 
     /// <summary>The node's parent, or <c>null</c> for the root. Red-layer navigation (Roslyn <c>Parent</c>).</summary>
     public KoineNode? Parent(KoineNode node) => _graph.Value.Parent(node);
@@ -84,26 +112,12 @@ public sealed class SemanticModel
         return GetSymbol(name);
     }
 
-    /// <summary>The <see cref="MemberSymbol"/> for a field of a value/entity/event type, else <c>null</c>.</summary>
-    private MemberSymbol? MemberOf(string typeName, string memberName)
-    {
-        if (!Index.TryGetDecl(typeName, out TypeDecl decl))
-        {
-            return null;
-        }
-
-        IReadOnlyList<Member>? members = decl switch
-        {
-            ValueObjectDecl v => v.Members,
-            EntityDecl e => e.Members,
-            EventDecl ev => ev.Members,
-            IntegrationEventDecl ie => ie.Members,
-            _ => null
-        };
-
-        Member? m = members?.FirstOrDefault(x => x.Name == memberName);
-        return m is not null && !m.NameSpan.IsNone ? new MemberSymbol(memberName, m.NameSpan, typeName, m) : null;
-    }
+    /// <summary>
+    /// The <see cref="MemberSymbol"/> for a field of a value/entity/event type, else <c>null</c>.
+    /// Re-pointed (Commit 3) to return the INTERNED symbol from the table — identity is gained while
+    /// the null/non-null contract and all carried fields stay byte-identical.
+    /// </summary>
+    private MemberSymbol? MemberOf(string typeName, string memberName) => Symbols.MemberOf(typeName, memberName);
 
     /// <summary>
     /// The innermost node whose <see cref="SourceSpan"/> contains the 0-based absolute
@@ -135,12 +149,13 @@ public sealed class SemanticModel
 
         switch (node)
         {
-            // A member's owning type is the nearest enclosing fielded-type declaration.
-            case Member m when EnclosingFieldedTypeNameAt(offset) is { } owner:
-                return new MemberSymbol(m.Name, m.NameSpan, owner, m);
+            // A member's owning type is the nearest enclosing fielded-type declaration. Re-pointed
+            // (Commit 3) to the interned symbol; the enclosing-type guard preserves legacy behavior.
+            case Member m when EnclosingFieldedTypeNameAt(offset) is { }:
+                return Symbols.MemberSymbolOf(m);
             // An enum member resolves precisely to its owning enum, even when a same-named type exists.
-            case EnumMember em when EnclosingEnumNameAt(offset) is { } enumName:
-                return new EnumMemberSymbol(em.Name, em.NameSpan, enumName, em);
+            case EnumMember em when EnclosingEnumNameAt(offset) is { }:
+                return Symbols.EnumMemberSymbolOf(em);
             // Type / spec declarations resolve through the name path (they are globally unique).
             case TypeDecl t:
                 return GetSymbol(t.Name);
@@ -227,35 +242,10 @@ public sealed class SemanticModel
 
     public Symbol? GetSymbol(string name)
     {
-        if (Index.TryGetDecl(name, out TypeDecl decl) && !decl.NameSpan.IsNone)
-        {
-            return new TypeSymbol(name, decl.NameSpan, Index.Classify(name), decl);
-        }
-
-        IReadOnlyList<string> owners = Index.EnumsDeclaring(name);
-        if (owners.Count == 1 && Index.TryGetDecl(owners[0], out TypeDecl ed) && ed is EnumDecl e)
-        {
-            EnumMember? member = e.Members.FirstOrDefault(m => m.Name == name);
-            if (member is not null && !member.NameSpan.IsNone)
-            {
-                return new EnumMemberSymbol(name, member.NameSpan, owners[0], member);
-            }
-        }
-
-        SpecDecl? spec = Index.AllSpecs().FirstOrDefault(s => s.Name == name);
-        if (spec is not null && !spec.NameSpan.IsNone)
-        {
-            return new SpecSymbol(name, spec.NameSpan, spec);
-        }
-
-        // ID type (e.g. ProductId) -> the entity that declares `identified by <name>`. There is no
-        // standalone ID node, so navigation deliberately lands on the owning entity's name.
-        EntityDecl? owner = Index.AllTypes().OfType<EntityDecl>().FirstOrDefault(en => en.IdentityName == name);
-        if (owner is not null && !owner.NameSpan.IsNone)
-        {
-            return new IdValueObjectSymbol(name, owner.NameSpan, owner);
-        }
-
-        return null;
+        // Re-pointed (Commit 3) to the INTERNED table. SymbolTable.StrongSymbol reproduces the legacy
+        // decisions EXACTLY (declared type → unambiguous enum member → spec → entity-owned ID; null for
+        // primitives/collections, unknown/ambiguous names, and convention-only *Id), so callers like
+        // WorkspaceIndex.StrongSpan keep their null-for-unknown contract while gaining identity.
+        return Symbols.StrongSymbol(name);
     }
 }
