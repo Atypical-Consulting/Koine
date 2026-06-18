@@ -116,15 +116,35 @@ public sealed partial class CSharpEmitter
 
         var sb = new StringBuilder();
         WriteXmlDoc(sb, rm.Doc, "");
-        sb.Append("public sealed record ").Append(rm.Name).Append('(')
-          .Append(string.Join(", ", fields.Select(f => $"{f.CsType} {f.Prop}"))).Append(");\n\n");
+        sb.Append("public sealed record ").Append(rm.Name).Append('(');
+        for (var i = 0; i < fields.Count; i++)
+        {
+            if (i > 0)
+            {
+                sb.Append(", ");
+            }
+
+            sb.Append(fields[i].CsType).Append(' ').Append(fields[i].Prop);
+        }
+
+        sb.Append(");\n\n");
 
         WriteXmlDoc(sb, $"Projects {rm.SourceType} to {rm.Name}.", "");
         sb.Append("public static class ").Append(rm.Name).Append("Projection\n{\n");
         sb.Append(Indent).Append("public static ").Append(rm.Name).Append(" To").Append(rm.Name)
           .Append("(this ").Append(rm.SourceType).Append(" src)\n");
-        sb.Append(Indent).Append(Indent).Append("=> new ").Append(rm.Name).Append('(')
-          .Append(string.Join(", ", fields.Select(f => f.Rhs))).Append(");\n");
+        sb.Append(Indent).Append(Indent).Append("=> new ").Append(rm.Name).Append('(');
+        for (var i = 0; i < fields.Count; i++)
+        {
+            if (i > 0)
+            {
+                sb.Append(", ");
+            }
+
+            sb.Append(fields[i].Rhs);
+        }
+
+        sb.Append(");\n");
         sb.Append("}\n");
 
         var usesLinq = rm.Fields.Any(f => f.Projection is not null && ExprUsesLinq(f.Projection));

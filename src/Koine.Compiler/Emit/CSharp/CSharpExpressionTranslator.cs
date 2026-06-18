@@ -116,6 +116,9 @@ internal sealed class CSharpExpressionTranslator
     /// <summary>Deactivates bound-tree type lookup; subsequent queries re-infer via the resolver.</summary>
     public void ExitBoundScope() => _boundTypes = null;
 
+    // Recurse directly over bound children rather than materializing an enumerable per node:
+    // the old `BoundChildren` switch allocated a small array (and a Concat/Select/Append iterator)
+    // for every node visited while building the bound-type map.
     private static void CollectBoundTypes(BoundExpression node, Dictionary<Expr, KoineType> map)
     {
         if (node.Syntax is Expr e)
@@ -123,26 +126,55 @@ internal sealed class CSharpExpressionTranslator
             map[e] = node.Type;
         }
 
-        foreach (BoundExpression child in BoundChildren(node))
+        switch (node)
         {
-            CollectBoundTypes(child, map);
+            case BoundBinary b:
+                CollectBoundTypes(b.Left, map);
+                CollectBoundTypes(b.Right, map);
+                break;
+            case BoundUnary u:
+                CollectBoundTypes(u.Operand, map);
+                break;
+            case BoundMemberAccess m:
+                CollectBoundTypes(m.Receiver, map);
+                break;
+            case BoundCall c:
+                CollectBoundTypes(c.Receiver, map);
+                foreach (BoundExpression arg in c.Args)
+                {
+                    CollectBoundTypes(arg, map);
+                }
+
+                break;
+            case BoundConditional cd:
+                CollectBoundTypes(cd.Condition, map);
+                CollectBoundTypes(cd.Then, map);
+                CollectBoundTypes(cd.Else, map);
+                break;
+            case BoundCoalesce co:
+                CollectBoundTypes(co.Left, map);
+                CollectBoundTypes(co.Right, map);
+                break;
+            case BoundMatch ma:
+                CollectBoundTypes(ma.Target, map);
+                break;
+            case BoundGuard g:
+                CollectBoundTypes(g.Body, map);
+                CollectBoundTypes(g.Condition, map);
+                break;
+            case BoundLambda l:
+                CollectBoundTypes(l.Body, map);
+                break;
+            case BoundLet let:
+                foreach (BoundLetBinding binding in let.Bindings)
+                {
+                    CollectBoundTypes(binding.Value, map);
+                }
+
+                CollectBoundTypes(let.Body, map);
+                break;
         }
     }
-
-    private static IEnumerable<BoundExpression> BoundChildren(BoundExpression e) => e switch
-    {
-        BoundBinary b => new[] { b.Left, b.Right },
-        BoundUnary u => new[] { u.Operand },
-        BoundMemberAccess m => new[] { m.Receiver },
-        BoundCall c => new[] { c.Receiver }.Concat(c.Args),
-        BoundConditional cd => new[] { cd.Condition, cd.Then, cd.Else },
-        BoundCoalesce co => new[] { co.Left, co.Right },
-        BoundMatch ma => new[] { ma.Target },
-        BoundGuard g => new[] { g.Body, g.Condition },
-        BoundLambda l => new[] { l.Body },
-        BoundLet let => let.Bindings.Select(bn => bn.Value).Append(let.Body),
-        _ => Enumerable.Empty<BoundExpression>()
-    };
 
     /// <summary>
     /// The resolved type of a syntactic expression — from the lowered bound tree when rendering a VO bound
