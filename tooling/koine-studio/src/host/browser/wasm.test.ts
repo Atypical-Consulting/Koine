@@ -23,4 +23,19 @@ describe('guardWasmSurface', () => {
     const api = guardWasmSurface({}) as unknown as Record<PropertyKey, unknown>;
     expect(api[Symbol.toPrimitive]).toBeUndefined();
   });
+
+  // Regression: the Promise resolution machinery probes `value.then` to decide if the resolved value
+  // is a thenable. If the guard returned a throwing function for the (unknown, non-export) string
+  // `then`, the proxy would masquerade as a thenable and the whole language-server boot would reject
+  // with a bogus `export "then" is missing`. So `then` and other non-export strings must pass through.
+  test('non-export string props (then, toString) pass through so the proxy is not a fake thenable', () => {
+    const api = guardWasmSurface({ Glossary: () => '{}' }) as unknown as Record<string, unknown>;
+    expect(api.then).toBeUndefined();
+    expect(typeof api.toString).toBe('function');
+  });
+
+  test('a proxied surface resolves cleanly when returned from a promise (await does not throw)', async () => {
+    const api = guardWasmSurface({ Glossary: () => '{"entries":[]}' });
+    await expect(Promise.resolve(api)).resolves.toBe(api);
+  });
 });
