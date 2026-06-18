@@ -14,6 +14,11 @@ on:
 permissions:
   contents: read
 
+# Cancel superseded PR runs (each run spans 3 OS legs); never cancel a push to main.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   studio:
     name: studio (${{ matrix.os }})
@@ -42,6 +47,15 @@ jobs:
           # builds in case the GA SDK is not yet on the runner image (matches ci.yml).
           dotnet-version: '10.0.x'
           dotnet-quality: preview
+
+      # No central package management / lock files, so cache the global NuGet
+      # package folder keyed on the project files that pin versions.
+      - name: Cache NuGet
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj', 'Directory.Build.props') }}
+          restore-keys: ${{ runner.os }}-nuget-
 
       # Tauri v2 on Linux needs WebKitGTK + libsoup and the standard GTK/app-indicator
       # system libraries; the Windows and macOS runners ship their web views already.
