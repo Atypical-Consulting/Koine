@@ -38,6 +38,7 @@ public sealed partial class TypeScriptEmitter
         public const string ValueObjects = "value-objects";
         public const string Enums = "enums";
         public const string Events = "events";
+        public const string Repositories = "repositories";
     }
 
     private static string FolderFor(string ns) => ns.Replace('.', '/');
@@ -200,11 +201,17 @@ public sealed partial class TypeScriptEmitter
 
         foreach (ContextNode ctx in model.Contexts)
         {
+            // Aggregate root entities are emitted at the context root (no `entities/` subfolder, see
+            // EmitEntity), so their location must match — otherwise a cross-file importer (e.g. the
+            // root's repository interface) would resolve a non-existent `entities/<Root>` module.
+            var rootEntityNames = new HashSet<string>(
+                ctx.AllTypeDecls().OfType<AggregateDecl>().Select(a => a.RootName), StringComparer.Ordinal);
+
             var idsHere = new HashSet<string>(StringComparer.Ordinal);
             foreach (TypeDecl type in ctx.AllTypeDecls())
             {
                 var ns = ModelIndex.NamespaceOf(ctx.Name, type.ModulePath);
-                Record(locations, ctx.Name, type, ns);
+                Record(locations, ctx.Name, type, ns, rootEntityNames);
                 if (type is EntityDecl entity)
                 {
                     var idName = TypeScriptNaming.ToPascalCase(entity.IdentityName);
@@ -227,7 +234,7 @@ public sealed partial class TypeScriptEmitter
         return locations;
     }
 
-    private static void Record(List<TsTypeLocation> locations, string context, TypeDecl type, string ns)
+    private static void Record(List<TsTypeLocation> locations, string context, TypeDecl type, string ns, IReadOnlySet<string> rootEntityNames)
     {
         switch (type)
         {
@@ -238,7 +245,7 @@ public sealed partial class TypeScriptEmitter
                 Add(locations, context, en.Name, ns, KindFolder.Enums, EnumAuxExports(TypeScriptNaming.ToPascalCase(en.Name)));
                 break;
             case EntityDecl entity:
-                Add(locations, context, entity.Name, ns, KindFolder.Entities);
+                Add(locations, context, entity.Name, ns, rootEntityNames.Contains(entity.Name) ? KindFolder.Root : KindFolder.Entities);
                 break;
             case EventDecl ev:
                 Add(locations, context, ev.Name, ns, KindFolder.Events);

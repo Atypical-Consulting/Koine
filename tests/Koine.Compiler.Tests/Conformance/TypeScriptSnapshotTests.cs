@@ -78,6 +78,11 @@ public class TypeScriptSnapshotTests
                 emit OrderOpened(orderId: id, customer: customer, lineCount: lines.count)
               }
             }
+
+            repository {
+              find byCustomer(customer: CustomerId): List<Order>
+              find mostRecent(customer: CustomerId): Order
+            }
           }
         }
         """;
