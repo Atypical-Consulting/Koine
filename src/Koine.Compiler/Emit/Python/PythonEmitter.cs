@@ -129,17 +129,24 @@ public sealed partial class PythonEmitter : IEmitter
             case EnumDecl @enum:
                 files.Add(EmitEnum(emit, @enum, ns, typeMapper));
                 break;
-            // An entity emits as a mutable @dataclass(eq=False) with identity equality, plus its
-            // branded `<XId>` value object (per ID strategy). Its commands/factories/state machines
-            // land in Task 8; aggregate-root placement (context-root module) lands in Task 9, so for
-            // now every entity — including an aggregate root — emits into `entities/`.
+            // An entity emits as a mutable @dataclass(eq=False) with identity equality (including its
+            // commands as mutating methods and `create` factories as classmethods, Task 8), plus its
+            // branded `<XId>` value object (per ID strategy). Aggregate-root placement (context-root
+            // module) lands in Task 9, so for now every entity — including an aggregate root — emits
+            // into `entities/`.
             case EntityDecl entity:
                 files.Add(EmitEntity(emit, entity, ns, typeMapper));
                 files.Add(EmitIdType(emit, entity.IdentityName, ns, entity.IdStrategy, entity.IdBackingType));
                 break;
-            case EventDecl:
+            // A domain `event` and an `integration event` both emit as frozen-dataclass DTOs (Task 8).
+            case EventDecl ev:
+                files.Add(EmitEvent(emit, ev.Name, ev.Doc, ev.Members, ns, typeMapper));
+                break;
+            case IntegrationEventDecl iev:
+                files.Add(EmitEvent(emit, iev.Name, iev.Doc, iev.Members, ns, typeMapper));
+                break;
             case AggregateDecl:
-                // Filled in by later tasks (events, aggregates/repositories).
+                // Filled in by a later task (aggregates/repositories).
                 break;
         }
     }

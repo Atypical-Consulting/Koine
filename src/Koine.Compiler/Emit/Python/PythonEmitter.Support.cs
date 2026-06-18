@@ -373,6 +373,9 @@ public sealed partial class PythonEmitter
             case EventDecl ev:
                 Add(locations, context, ev.Name, ns, KindFolder.Events);
                 break;
+            case IntegrationEventDecl iev:
+                Add(locations, context, iev.Name, ns, KindFolder.Events);
+                break;
         }
     }
 

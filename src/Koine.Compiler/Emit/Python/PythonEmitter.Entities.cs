@@ -75,6 +75,15 @@ public sealed partial class PythonEmitter
             sb.Append('\n');
         }
 
+        // Domain-event recording buffer (when any command or factory emits events). A non-constructor
+        // `_domain_events` field plus a read-only `domain_events` snapshot and a `clear_domain_events`
+        // drain — the Python analogue of the C# aggregate's `DomainEvents`/`ClearDomainEvents`.
+        var hasEmits = EmitsEvents(entity);
+        if (hasEmits)
+        {
+            WriteDomainEventsBuffer(sb);
+        }
+
         // Invariants run in __post_init__ once all fields are bound (self.<field> reads).
         if (entity.Invariants.Count > 0)
         {
@@ -96,6 +105,18 @@ public sealed partial class PythonEmitter
             WriteDoc(sb, m.Doc, Indent + Indent);
             sb.Append(Indent).Append(Indent).Append("return ")
               .Append(translator.Translate(m.Initializer!, EnumExpected(m, emit.Index))).Append('\n');
+        }
+
+        // Commands: mutating instance methods (guards -> transitions -> re-check -> emit -> return).
+        foreach (CommandDecl cmd in entity.Commands)
+        {
+            WriteCommand(sb, entity, cmd, translator, typeMapper, emit.Index);
+        }
+
+        // Factories: `create` rendered as a @classmethod minting the identity and constructing.
+        foreach (FactoryDecl factory in entity.Factories)
+        {
+            WriteFactory(sb, entity, name, idName, factory, fields, translator, typeMapper, emit.Index);
         }
 
         // Identity equality/hashing. `eq=False` keeps the dataclass mutable AND lets us define these
