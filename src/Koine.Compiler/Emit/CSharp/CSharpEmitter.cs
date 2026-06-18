@@ -634,7 +634,18 @@ public sealed partial class CSharpEmitter : IEmitter
         ModelIndex index)
     {
         sb.Append(Indent).Append("public ").Append(typeName).Append('(');
-        sb.Append(string.Join(", ", OrderCtorParams(ctorMembers).Select(m => FormatParam(m, typeMapper, translator, index))));
+        var firstParam = true;
+        foreach (Member m in OrderCtorParams(ctorMembers))
+        {
+            if (!firstParam)
+            {
+                sb.Append(", ");
+            }
+
+            firstParam = false;
+            AppendParam(sb, m, typeMapper, translator, index);
+        }
+
         sb.Append(")\n");
         sb.Append(Indent).Append("{\n");
 
@@ -674,7 +685,18 @@ public sealed partial class CSharpEmitter : IEmitter
         IReadOnlyList<BoundInvariant> invariants = bound.Invariants;
 
         sb.Append(Indent).Append("public ").Append(typeName).Append('(');
-        sb.Append(string.Join(", ", bound.CtorParams.Select(f => FormatParam(f, typeMapper, translator, index))));
+        var firstParam = true;
+        foreach (BoundField f in bound.CtorParams)
+        {
+            if (!firstParam)
+            {
+                sb.Append(", ");
+            }
+
+            firstParam = false;
+            AppendParam(sb, f, typeMapper, translator, index);
+        }
+
         sb.Append(")\n");
         sb.Append(Indent).Append("{\n");
 
@@ -703,15 +725,19 @@ public sealed partial class CSharpEmitter : IEmitter
         IReadOnlyDictionary<string, string> enumMemberToType,
         ModelIndex index)
     {
-        var allParams = new List<string> { $"{entity.IdentityName} id" };
-        allParams.AddRange(OrderCtorParams(ctorMembers).Select(m => FormatParam(m, typeMapper, translator, index)));
-
         // When the entity declares a factory, construction is funneled through it:
         // the all-args constructor becomes private (callable only by the static
         // factory on the same class). Without a factory, it stays public (R8.2).
         var access = entity.Factories.Count > 0 ? "private" : "public";
-        sb.Append(Indent).Append(access).Append(' ').Append(entity.Name).Append('(')
-          .Append(string.Join(", ", allParams)).Append(")\n");
+        sb.Append(Indent).Append(access).Append(' ').Append(entity.Name).Append('(');
+        sb.Append(entity.IdentityName).Append(" id");
+        foreach (Member m in OrderCtorParams(ctorMembers))
+        {
+            sb.Append(", ");
+            AppendParam(sb, m, typeMapper, translator, index);
+        }
+
+        sb.Append(")\n");
         sb.Append(Indent).Append("{\n");
 
         WriteEnumDefaultCoalesce(sb, ctorMembers, translator, index);
@@ -750,11 +776,12 @@ public sealed partial class CSharpEmitter : IEmitter
         sb.Append(Indent).Append("}\n");
     }
 
-    private string FormatParam(Member m, CSharpTypeMapper typeMapper, CSharpExpressionTranslator translator, ModelIndex index)
+    // Appends a constructor parameter directly to the builder (no intermediate per-param string
+    // or string.Join). Output is byte-identical to the former string-returning FormatParam.
+    private void AppendParam(StringBuilder sb, Member m, CSharpTypeMapper typeMapper, CSharpExpressionTranslator translator, ModelIndex index)
     {
         var csType = typeMapper.Map(m.Type);
         var paramName = CSharpNaming.ToCamelCase(m.Name);
-        var param = $"{csType} {paramName}";
 
         // DEFAULT-valued members keep a C# default value.
         if (m.Initializer is not null)
@@ -764,19 +791,21 @@ public sealed partial class CSharpEmitter : IEmitter
             // the body coalesces to the real default (see WriteAssignment).
             if (index.Classify(m.Type.Name) == TypeKind.Enum)
             {
-                var nullableType = csType.EndsWith('?') ? csType : csType + "?";
-                return $"{nullableType} {paramName} = null";
+                AppendNullable(sb, csType).Append(' ').Append(paramName).Append(" = null");
+                return;
             }
 
-            var def = translator.Translate(m.Initializer, CSharpExpressionTranslator.NameMode.Property, EnumExpected(m, index));
-            param += $" = {def}";
+            sb.Append(csType).Append(' ').Append(paramName).Append(" = ");
+            sb.Append(translator.Translate(m.Initializer, CSharpExpressionTranslator.NameMode.Property, EnumExpected(m, index)));
+            return;
         }
-        else if (m.Type.IsOptional)
+
+        sb.Append(csType).Append(' ').Append(paramName);
+        if (m.Type.IsOptional)
         {
             // An optional field with no initializer defaults to null (omittable).
-            param += " = null";
+            sb.Append(" = null");
         }
-        return param;
     }
 
     /// <summary>
@@ -784,29 +813,35 @@ public sealed partial class CSharpEmitter : IEmitter
     /// comes from the lowered <see cref="BoundField.DefaultKind"/> rather than re-classifying the member's
     /// initializer/optionality here. Byte-identical to the <see cref="Member"/> overload.
     /// </summary>
-    private string FormatParam(BoundField f, CSharpTypeMapper typeMapper, CSharpExpressionTranslator translator, ModelIndex index)
+    private void AppendParam(StringBuilder sb, BoundField f, CSharpTypeMapper typeMapper, CSharpExpressionTranslator translator, ModelIndex index)
     {
         var m = (Member)f.Syntax;
         var csType = typeMapper.Map(m.Type);
         var paramName = CSharpNaming.ToCamelCase(f.Name);
-        var param = $"{csType} {paramName}";
 
         switch (f.DefaultKind)
         {
             // A smart-enum value is NOT a compile-time constant, so an enum-typed default can't be a
             // parameter default; the param becomes nullable and the body coalesces (WriteEnumDefaultCoalesce).
             case DefaultKind.EnumDefault:
-                var nullableType = csType.EndsWith('?') ? csType : csType + "?";
-                return $"{nullableType} {paramName} = null";
+                AppendNullable(sb, csType).Append(' ').Append(paramName).Append(" = null");
+                break;
             case DefaultKind.ConstantDefault:
-                var def = translator.Translate(m.Initializer!, CSharpExpressionTranslator.NameMode.Property, EnumExpected(m, index));
-                return param + $" = {def}";
+                sb.Append(csType).Append(' ').Append(paramName).Append(" = ");
+                sb.Append(translator.Translate(m.Initializer!, CSharpExpressionTranslator.NameMode.Property, EnumExpected(m, index)));
+                break;
             case DefaultKind.OptionalNull:
-                return param + " = null";
+                sb.Append(csType).Append(' ').Append(paramName).Append(" = null");
+                break;
             default:
-                return param;
+                sb.Append(csType).Append(' ').Append(paramName);
+                break;
         }
     }
+
+    // Appends a C# type, ensuring it is nullable (adds '?' unless already present).
+    private static StringBuilder AppendNullable(StringBuilder sb, string csType) =>
+        csType.EndsWith('?') ? sb.Append(csType) : sb.Append(csType).Append('?');
 
     private void WriteAssignment(StringBuilder sb, Member m, CSharpTypeMapper typeMapper)
     {
