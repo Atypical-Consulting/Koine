@@ -4,6 +4,8 @@ dist/
 .astro/
 # generated wasm compiler bundle (produced by scripts/build-wasm.mjs)
 public/koine-wasm/
+# generated browser-IDE build (produced by scripts/build-studio.mjs)
+public/studio/
 # generated social-share card (produced by scripts/og-image.mjs)
 public/og.png
 # generated living-documentation (produced by scripts/build-docs.mjs)

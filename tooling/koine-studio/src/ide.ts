@@ -3,8 +3,7 @@
 // glossary, and context map).
 import { createKoineEditor, createOutputView, renderMarkdown, renderSymbolTree, setEditorDiagnostics } from './editor';
 import { KoineLsp, SCRATCH_URI, type CheckResult, type ContextMapResult, type Location, type LspDiagnostic } from './lsp';
-import { open as openDialog, save as saveDialog } from '@tauri-apps/plugin-dialog';
-import { invoke } from '@tauri-apps/api/core';
+import { getPlatform, type KoiFile } from './host';
 import { initTheme, toggleTheme } from './theme';
 import { loadSettings, pushRecentFolder, type Settings } from './store';
 import { createWelcome } from './welcome';
@@ -15,14 +14,9 @@ import { createHelpOverlay, type ShortcutRow } from './help';
 import { createAboutDialog } from './about';
 import { formatChord } from './platform';
 
-// --- workspace fs contract (Rust commands from Stream G) ---------------------
-
-/** A `.koi` file discovered under an opened folder. */
-interface KoiFile {
-  path: string; // absolute path on disk
-  name: string; // file name
-  relPath: string; // path relative to the opened folder
-}
+// --- workspace fs contract ---------------------------------------------------
+// `KoiFile` (path / name / relPath) is provided by the host platform layer (src/host), whose
+// backends supply it from the native filesystem (desktop) or the File System Access API (browser).
 
 /** A client-side open buffer keyed by its file:// uri. `path` is null in scratch mode. */
 interface Buffer {
@@ -202,6 +196,11 @@ function helpRows(): ShortcutRow[] {
 }
 
 export function init(): void {
+  // The host backend: the Tauri desktop shell, or a plain browser (compiler via WASM, files via
+  // the File System Access API). Everything host-specific — the LSP transport, folder/file I/O,
+  // dialogs, the app version — goes through this.
+  const platform = getPlatform();
+
   // Apply the persisted theme + editor font size before CodeMirror is created so the
   // editor picks up the right tokens / size on first paint.
   initTheme();
@@ -241,7 +240,7 @@ export function init(): void {
   const statusEl = el('status');
   const stripEl = el('diagnostics');
 
-  const lsp = new KoineLsp();
+  const lsp = new KoineLsp(platform.createLspTransport());
 
   // --- workspace model ------------------------------------------------------
   // `buffers` holds every open document keyed by its file:// uri; `activeUri` is the one
@@ -540,10 +539,14 @@ export function init(): void {
   el<HTMLButtonElement>('btn-check').addEventListener('click', () => void runCheck());
 
   async function runCheck(): Promise<void> {
+    if (!platform.canOpenFolders) {
+      docMessage(checkView, 'Selecting a baseline folder needs a Chromium-based browser.', 'error');
+      selectView('check');
+      return;
+    }
     let folder: string | null;
     try {
-      const picked = await openDialog({ directory: true, title: 'Select baseline model folder' });
-      folder = Array.isArray(picked) ? picked[0] ?? null : picked;
+      folder = await platform.pickFolder('Select baseline model folder');
     } catch (e) {
       docMessage(checkView, 'Could not open the folder picker: ' + String(e), 'error');
       selectView('check');
@@ -553,7 +556,10 @@ export function init(): void {
     selectView('check');
     docMessage(checkView, 'Checking against baseline…');
     try {
-      const res = await lsp.check(folder);
+      // The browser has no server-side filesystem: read the baseline sources here and pass them to
+      // the in-process compiler. The desktop server reads the folder path itself.
+      const baselineSources = platform.kind === 'browser' ? await platform.readFolderSources(folder) : undefined;
+      const res = await lsp.check(folder, baselineSources);
       if (res.error) {
         docMessage(checkView, 'Compatibility check failed: ' + res.error, 'error');
         return;
@@ -603,10 +609,13 @@ export function init(): void {
   el<HTMLButtonElement>('btn-open-folder').addEventListener('click', () => void openFolder());
 
   async function openFolder(): Promise<void> {
+    if (!platform.canOpenFolders) {
+      setStatus('opening a folder needs a Chromium-based browser', 'error');
+      return;
+    }
     let folder: string | null;
     try {
-      const picked = await openDialog({ directory: true, title: 'Open a folder of .koi models' });
-      folder = Array.isArray(picked) ? picked[0] ?? null : picked;
+      folder = await platform.pickFolder('Open a folder of .koi models');
     } catch (e) {
       setStatus('could not open folder picker', 'error');
       console.error('Open folder dialog failed:', e);
@@ -623,10 +632,10 @@ export function init(): void {
     welcome.hide();
     let files: KoiFile[];
     try {
-      files = await invoke<KoiFile[]>('list_koi_files', { dir: folder });
+      files = await platform.listKoiFiles(folder);
     } catch (e) {
       setStatus('could not read folder', 'error');
-      console.error('list_koi_files failed:', e);
+      console.error('listKoiFiles failed:', e);
       return;
     }
     if (!files.length) {
@@ -652,9 +661,9 @@ export function init(): void {
     for (const f of files) {
       let text: string;
       try {
-        text = await invoke<string>('read_text_file', { path: f.path });
+        text = await platform.readTextFile(f.path);
       } catch (e) {
-        console.error('read_text_file failed for', f.path, e);
+        console.error('readTextFile failed for', f.path, e);
         continue;
       }
       const uri = pathToFileUri(f.path);
@@ -683,7 +692,7 @@ export function init(): void {
     activeUri = first.uri;
     lsp.setActive(first.uri);
     editor.setDoc(first.text);
-    treeTitleEl.textContent = folder.split(/[\\/]/).filter(Boolean).pop() ?? folder;
+    treeTitleEl.textContent = platform.folderName(folder);
     treeEl.hidden = false;
     pushRecentFolder(folder);
     invalidateDocViews();
@@ -736,13 +745,13 @@ export function init(): void {
         return;
       }
       try {
-        await invoke('write_text_file', { path: buf.path, contents: buf.text });
+        await platform.writeTextFile(buf.path, buf.text);
         buf.dirty = false;
         lsp.didSave();
         renderTree();
       } catch (e) {
         setStatus('save failed', 'error');
-        console.error('write_text_file failed:', e);
+        console.error('writeTextFile failed:', e);
       }
     } finally {
       saveQueued = false;
@@ -754,11 +763,7 @@ export function init(): void {
   async function saveScratchAs(buf: Buffer): Promise<void> {
     let target: string | null;
     try {
-      target = await saveDialog({
-        title: 'Save model',
-        defaultPath: 'model.koi',
-        filters: [{ name: 'Koine model', extensions: ['koi'] }],
-      });
+      target = await platform.pickSavePath('model.koi');
     } catch (e) {
       setStatus('could not open save dialog', 'error');
       console.error('save dialog failed:', e);
@@ -766,15 +771,18 @@ export function init(): void {
     }
     if (!target) return; // cancelled
     try {
-      await invoke('write_text_file', { path: target, contents: buf.text });
+      await platform.writeTextFile(target, buf.text);
     } catch (e) {
       setStatus('save failed', 'error');
-      console.error('write_text_file failed:', e);
+      console.error('writeTextFile failed:', e);
       return;
     }
     // Re-key the buffer + LSP doc from the scratch uri to the real file uri so the
-    // "non-null path ⇒ keyed by pathToFileUri(path)" invariant holds (matches openFolderPath),
-    // and a later folder-open of the same file can't produce a duplicate buffer.
+    // "non-null path ⇒ keyed by pathToFileUri(path)" invariant holds. On the desktop the token is
+    // an absolute path, so this matches openFolderPath and a later folder-open of the same file
+    // reuses this buffer. In the browser the token is only the file's base name (the File System
+    // Access API exposes no path), so a folder-opened copy of the same file is keyed differently
+    // and is a distinct buffer — acceptable, just not de-duplicated.
     const name = target.split(/[\\/]/).filter(Boolean).pop() ?? target;
     const newUri = pathToFileUri(target);
     lsp.closeDoc(buf.uri);

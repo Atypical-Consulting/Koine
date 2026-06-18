@@ -127,3 +127,56 @@ jobs:
         run: |
           npm ci
           npm run build
+
+  # Validate the BROWSER edition of the studio: the Koine.Wasm compiler bundle plus the web
+  # frontend (TypeScript typecheck + Vite bundle). Linux-only — the output is platform-neutral
+  # static assets. This is the build the docs-site deploy folds into /Koine/studio/.
+  studio-web:
+    name: studio (web)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+          dotnet-quality: preview
+
+      - name: Cache NuGet
+        uses: actions/cache@v5
+        with:
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj', 'Directory.Build.props') }}
+          restore-keys: ${{ runner.os }}-nuget-
+
+      # The browser compiler is a .NET WebAssembly module; building it needs the wasm workloads.
+      - name: Cache wasm workloads
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.dotnet/sdk-manifests
+            ~/.dotnet/packs
+            ~/.dotnet/metadata
+            ~/.dotnet/sdk-advertising
+          key: ${{ runner.os }}-wasm-workloads-${{ hashFiles('Directory.Build.props') }}
+          restore-keys: ${{ runner.os }}-wasm-workloads-
+
+      - name: Install wasm workloads
+        run: dotnet workload install wasm-tools wasm-experimental
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: tooling/koine-studio/package-lock.json
+
+      # (a) Publish + bundle the in-browser compiler, then (b) typecheck and bundle the web frontend.
+      - name: Build studio (web)
+        working-directory: tooling/koine-studio
+        run: |
+          npm ci
+          npm run build:wasm
+          npm run build:web

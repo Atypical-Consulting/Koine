@@ -6,10 +6,11 @@
     "build:wasm": "node scripts/build-wasm.mjs",
     "build:og": "node scripts/og-image.mjs",
     "build:docs": "node scripts/build-docs.mjs",
+    "build:studio": "node scripts/build-studio.mjs",
     "predev": "node scripts/build-wasm.mjs && node scripts/og-image.mjs && node scripts/build-docs.mjs",
     "dev": "astro dev",
     "start": "astro dev",
-    "prebuild": "node scripts/build-wasm.mjs && node scripts/og-image.mjs && node scripts/build-docs.mjs",
+    "prebuild": "node scripts/build-wasm.mjs && node scripts/og-image.mjs && node scripts/build-docs.mjs && node scripts/build-studio.mjs",
     "build": "astro build",
     "preview": "astro preview",
     "astro": "astro"

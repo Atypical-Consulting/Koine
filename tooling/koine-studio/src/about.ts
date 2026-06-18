@@ -1,7 +1,8 @@
 // About dialog for Koine Studio: uses the shared createModal() chrome to show the app logo,
-// the version fetched from the `app_version` Tauri command, and a one-line tagline. The
-// version is (re)fetched each time the dialog opens; a failed fetch shows a neutral fallback.
-import { invoke } from '@tauri-apps/api/core';
+// the version from the platform (the `app_version` Tauri command on desktop, a build-time
+// constant in the browser), and a one-line tagline. The version is (re)fetched each time the
+// dialog opens; a failed fetch shows a neutral fallback.
+import { getPlatform } from './host';
 import { createModal } from './overlay';
 import { LOGO_SVG } from './logo';
 
@@ -34,7 +35,8 @@ export function createAboutDialog(): AboutHandle {
   // Fetch the version lazily on each open so a slow/absent command never blocks construction.
   // A failed invoke leaves a neutral "Koine Studio" label rather than surfacing an error.
   modal.onOpen(() => {
-    void invoke<string>('app_version')
+    void getPlatform()
+      .appVersion()
       .then((v) => {
         version.textContent = v ? `Koine Studio v${v}` : 'Koine Studio';
       })
