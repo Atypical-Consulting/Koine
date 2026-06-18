@@ -36,9 +36,9 @@ registers it with **Claude Desktop** (merging into your existing `claude_desktop
 without disturbing other servers):
 
 ```bash
-./install-mcp.sh        # macOS / Linux
-./install-mcp.ps1       # any OS with PowerShell
-install-mcp.cmd         # Windows
+./scripts/install-mcp/install-mcp.sh        # macOS / Linux
+./scripts/install-mcp/install-mcp.ps1       # any OS with PowerShell
+scripts/install-mcp/install-mcp.cmd         # Windows
 ```
 
 Then fully quit and reopen Claude Desktop. The rest of this section covers manual registration for
