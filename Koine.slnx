@@ -3,6 +3,7 @@
     <Project Path="src/Koine.Cli/Koine.Cli.csproj" />
     <Project Path="src/Koine.Compiler/Koine.Compiler.csproj" />
     <Project Path="src/Koine.Compiler.SourceGen/Koine.Compiler.SourceGen.csproj" />
+    <Project Path="src/Koine.Mcp/Koine.Mcp.csproj" />
     <!-- Koine.Wasm is intentionally NOT in the solution: it targets the browser-wasm RID and
          needs the wasm-experimental workload + emscripten, which the CI build/test pipeline
          (ci.yml) doesn't install. It's built standalone by website/scripts/build-wasm.mjs in
@@ -10,6 +11,7 @@
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Koine.Compiler.Tests/Koine.Compiler.Tests.csproj" />
+    <Project Path="tests/Koine.Mcp.Tests/Koine.Mcp.Tests.csproj" />
   </Folder>
   <Folder Name="/benchmarks/">
     <Project Path="benchmarks/Koine.Compiler.Benchmarks/Koine.Compiler.Benchmarks.csproj" />
