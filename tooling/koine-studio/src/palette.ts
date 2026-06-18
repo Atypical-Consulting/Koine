@@ -1,8 +1,10 @@
 // Command palette for Koine Studio: a Cmd/Ctrl-K style overlay that self-mounts to
 // document.body once. The app supplies commands via a getCommands() provider snapshotted
 // on every open(); typing filters by case-insensitive subsequence/substring match on title;
-// Up/Down move (wrapping), Enter runs the selected command then closes, Esc/backdrop-click
-// closes. The palette does NOT bind Cmd-K itself — the app wires the global shortcut.
+// Up/Down move (wrapping), Enter runs the selected command then closes. Esc is handled
+// centrally by the shared overlay stack (./overlay). The palette does NOT bind Cmd-K itself —
+// the app wires the global shortcut.
+import { registerOverlay } from './overlay';
 
 export interface Command {
   id: string;
@@ -37,9 +39,11 @@ function matches(title: string, query: string): boolean {
 export function createCommandPalette(getCommands: () => Command[]): PaletteHandle {
   let open = false;
   let opener: HTMLElement | null = null; // element focused before the palette opened
+  let unregister: (() => void) | null = null;
   let commands: Command[] = []; // snapshot taken on open()
   let filtered: Command[] = [];
   let selected = 0;
+  let rowEls: HTMLElement[] = []; // current row elements, parallel to `filtered`
 
   const backdrop = document.createElement('div');
   backdrop.className = 'koi-palette-backdrop';
@@ -66,9 +70,27 @@ export function createCommandPalette(getCommands: () => Command[]): PaletteHandl
   backdrop.appendChild(panel);
   document.body.appendChild(backdrop);
 
-  // Rebuild the list rows from `filtered`, marking `selected` and scrolling it into view.
+  function scrollSelectedIntoView(): void {
+    rowEls[selected]?.scrollIntoView({ block: 'nearest' });
+  }
+
+  // Flip aria-selected on the affected rows and scroll — no DOM rebuild (hot path on hover).
+  function applySelection(): void {
+    rowEls.forEach((row, i) => row.setAttribute('aria-selected', i === selected ? 'true' : 'false'));
+    scrollSelectedIntoView();
+  }
+
+  function setSelected(i: number): void {
+    if (i === selected) return;
+    selected = i;
+    applySelection();
+  }
+
+  // Rebuild the list rows from `filtered` — only called when the filtered SET changes, not on
+  // selection moves (those mutate aria-selected via applySelection).
   function renderList(): void {
     list.replaceChildren();
+    rowEls = [];
     if (!filtered.length) {
       const empty = document.createElement('div');
       empty.className = 'koi-palette-empty';
@@ -94,18 +116,14 @@ export function createCommandPalette(getCommands: () => Command[]): PaletteHandl
         row.appendChild(hint);
       }
 
-      // Pointer hover previews selection; click runs immediately.
-      row.addEventListener('mousemove', () => {
-        if (selected !== i) {
-          selected = i;
-          renderList();
-        }
-      });
+      // Pointer hover previews selection (cheap flag flip); click runs immediately.
+      row.addEventListener('mousemove', () => setSelected(i));
       row.addEventListener('click', () => runAt(i));
 
       list.appendChild(row);
+      rowEls.push(row);
     });
-    list.children[selected]?.scrollIntoView({ block: 'nearest' });
+    scrollSelectedIntoView();
   }
 
   // Recompute `filtered` from the current input, clamp selection, and re-render.
@@ -120,7 +138,7 @@ export function createCommandPalette(getCommands: () => Command[]): PaletteHandl
   function move(delta: number): void {
     if (!filtered.length) return;
     selected = (selected + delta + filtered.length) % filtered.length;
-    renderList();
+    applySelection();
   }
 
   // Run the command at index `i` (if any), then close.
@@ -141,10 +159,8 @@ export function createCommandPalette(getCommands: () => Command[]): PaletteHandl
     } else if (e.key === 'Enter') {
       e.preventDefault();
       runAt(selected);
-    } else if (e.key === 'Escape') {
-      e.preventDefault();
-      close();
     }
+    // Escape is handled centrally by the overlay stack.
   }
 
   function onBackdropClick(e: MouseEvent): void {
@@ -160,6 +176,7 @@ export function createCommandPalette(getCommands: () => Command[]): PaletteHandl
     input.value = '';
     open = true;
     backdrop.hidden = false;
+    unregister = registerOverlay(close);
     renderList();
     // Focus after the overlay is visible so the caret lands in the input.
     input.focus();
@@ -169,8 +186,11 @@ export function createCommandPalette(getCommands: () => Command[]): PaletteHandl
     if (!open) return;
     open = false;
     backdrop.hidden = true;
+    unregister?.();
+    unregister = null;
     commands = [];
     filtered = [];
+    rowEls = [];
     opener?.focus?.(); // restore focus (e.g. back to the editor) on close
     opener = null;
   }

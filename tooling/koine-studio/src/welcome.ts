@@ -4,6 +4,7 @@
 // store.getRecentFolders() on every show() so it always reflects the latest history.
 import { getRecentFolders } from './store';
 import { LOGO_SVG } from './logo';
+import { registerOverlay } from './overlay';
 
 /** What the welcome actions delegate to; the host (ide.ts) performs the real work. */
 export interface WelcomeCallbacks {
@@ -126,26 +127,26 @@ export function createWelcome(cb: WelcomeCallbacks): WelcomeHandle {
     }
   }
 
+  // Registered with the shared overlay stack while shown, so Esc dismisses the welcome screen
+  // (revealing the seeded scratch editor behind it) and layered overlays close top-first.
+  let unregister: (() => void) | null = null;
+
   function show(): void {
+    if (shown) return;
     renderRecent();
     root.hidden = false;
     shown = true;
+    unregister = registerOverlay(hide);
     newBtn.focus();
   }
 
   function hide(): void {
+    if (!shown) return;
     root.hidden = true;
     shown = false;
+    unregister?.();
+    unregister = null;
   }
-
-  // Esc dismisses the welcome screen (revealing the seeded scratch editor behind it) so
-  // keyboard users aren't forced to click an action.
-  document.addEventListener('keydown', (e) => {
-    if (shown && e.key === 'Escape') {
-      e.preventDefault();
-      hide();
-    }
-  });
 
   document.body.appendChild(root);
 

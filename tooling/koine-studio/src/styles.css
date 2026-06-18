@@ -69,28 +69,7 @@ html[data-theme='light'] {
   --koi-hl-punct: #57606a;
 }
 
-/* Explicit dark selector mirrors :root for completeness (optional — :root is already the default). */
-html[data-theme='dark'] {
-  --koi-paper: #0e1117;
-  --koi-paper-2: #161b22;
-  --koi-surface: #1c2230;
-  --koi-line: #2a3242;
-  --koi-fg: #d6dde8;
-  --koi-muted: #7d8694;
-  --koi-ink-soft: #aeb8c6;
-  --koi-accent: #5aa9ff;
-  --koi-on-accent: #08111f;
-  --koi-cyan: #34d3c4;
-  --koi-error: #ff6b6b;
-  --koi-hl-keyword: #c98cff;
-  --koi-hl-type: #5ad1ff;
-  --koi-hl-string: #7ee787;
-  --koi-hl-regex: #ffab70;
-  --koi-hl-number: #f0b86e;
-  --koi-hl-comment: #6a7484;
-  --koi-hl-meta: #ff9bce;
-  --koi-hl-punct: #9aa6b6;
-}
+/* The dark theme is the :root default; data-theme='dark' needs no override block. */
 
 /* Editor font size: the CodeMirror theme reads var(--koi-editor-font-size, 13.5px). That variable
    is set at runtime by the settings layer (prefs.ts / store.ts) on the document element — it is

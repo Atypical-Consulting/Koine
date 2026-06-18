@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 84 28" fill="none" role="img" aria-label="Koine">
-  <!-- Accent glyph: a stylised 'K' mark in koi-accent (#5aa9ff). Vertical stem + two diagonals forming the K. -->
-  <g fill="#5aa9ff">
+  <!-- Accent glyph: a stylised 'K' mark in the koi-accent token. Vertical stem + two diagonals forming the K. -->
+  <g fill="var(--koi-accent)">
     <rect x="2" y="3" width="4.4" height="22" rx="1.4"/>
     <path d="M8.2 13.6 18 3h5.6l-9.5 10.3L24 25h-5.9l-7.8-9.3-2.1 2.2z"/>
   </g>

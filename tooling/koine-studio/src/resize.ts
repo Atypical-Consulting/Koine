@@ -21,10 +21,11 @@ export function initSplitResizer(opts: SplitResizerOptions): void {
   const storageKey = opts.storageKey ?? DEFAULT_KEY;
   const min = opts.min ?? DEFAULT_MIN;
 
-  // Clamp a desired inspector width to [min, max], where max defaults to 70% of the
-  // split's current width (recomputed per drag so window resizes stay honoured).
-  const clamp = (width: number): number => {
-    const max = opts.max ?? split.getBoundingClientRect().width * 0.7;
+  // Clamp a desired inspector width to [min, max], where max defaults to 70% of the given
+  // container width. The container width is passed in so the drag path can reuse a value
+  // captured once per drag rather than measuring on every pointermove.
+  const clampWidth = (width: number, containerWidth: number): number => {
+    const max = opts.max ?? containerWidth * 0.7;
     return Math.min(Math.max(width, min), Math.max(max, min));
   };
 
@@ -37,16 +38,23 @@ export function initSplitResizer(opts: SplitResizerOptions): void {
     const saved = localStorage.getItem(storageKey);
     if (saved) {
       const px = parseFloat(saved);
-      if (Number.isFinite(px)) setWidth(clamp(px));
+      if (Number.isFinite(px)) setWidth(clampWidth(px, split.getBoundingClientRect().width));
     }
   } catch {
     // ignore — no persistence available
   }
 
   let dragging = false;
+  // Split geometry captured at pointerdown — invariant for the duration of one drag, so we
+  // avoid a forced reflow (getBoundingClientRect) on every pointermove.
+  let splitRight = 0;
+  let splitWidth = 0;
 
   handle.addEventListener('pointerdown', (e: PointerEvent) => {
     dragging = true;
+    const rect = split.getBoundingClientRect();
+    splitRight = rect.right;
+    splitWidth = rect.width;
     handle.setPointerCapture(e.pointerId);
     document.body.classList.add('resizing');
     e.preventDefault();
@@ -54,9 +62,8 @@ export function initSplitResizer(opts: SplitResizerOptions): void {
 
   handle.addEventListener('pointermove', (e: PointerEvent) => {
     if (!dragging) return;
-    // Inspector width = distance from the pointer to the split's right edge.
-    const right = split.getBoundingClientRect().right;
-    setWidth(clamp(right - e.clientX));
+    // Inspector width = distance from the pointer to the split's (captured) right edge.
+    setWidth(clampWidth(splitRight - e.clientX, splitWidth));
   });
 
   const end = (e: PointerEvent): void => {

@@ -1,12 +1,12 @@
-// Preferences modal for Koine Studio: a generic .koi-modal* dialog exposing the four
-// persisted Settings (theme, editor font size, format-on-save, LSP trace). Reads the
-// current Settings via loadSettings() on open, writes each change through patchSettings()
-// (so localStorage stays the source of truth), and reports the merged Settings back to the
-// app via onChange. The Theme control applies live through ./theme's setTheme so flipping
-// the select re-themes the editor immediately. Self-mounts to document.body once; Esc and a
-// backdrop click close it. No CodeMirror, no framework — plain DOM.
+// Preferences modal for Koine Studio: uses the shared createModal() chrome and exposes the
+// four persisted Settings (theme, editor font size, format-on-save, LSP trace). Reads the
+// current Settings via loadSettings() on each open, writes each change through patchSettings()
+// (so localStorage stays the source of truth), and reports the merged Settings back to the app
+// via onChange. The Theme control applies live through ./theme's setTheme so flipping the
+// select re-themes the editor immediately.
 import { loadSettings, patchSettings, type Settings } from './store';
 import { setTheme } from './theme';
+import { createModal } from './overlay';
 
 export interface PrefsCallbacks {
   /** Fired after every committed change with the merged, persisted Settings. */
@@ -23,39 +23,12 @@ const FONT_MAX = 22;
 const FONT_STEP = 0.5;
 
 /**
- * Build the preferences modal and return an imperative handle. The DOM is created once and
- * kept hidden between opens; open() repopulates every control from the freshly loaded
- * Settings so the dialog never shows stale values.
+ * Build the preferences modal and return an imperative handle. The DOM is created once; each
+ * open() repopulates every control from the freshly loaded Settings so the dialog never shows
+ * stale values (e.g. after a theme toggle from the toolbar or command palette).
  */
 export function createPreferences(cb: PrefsCallbacks): PrefsHandle {
-  // --- backdrop + panel (generic modal shell) -------------------------------
-  const backdrop = document.createElement('div');
-  backdrop.className = 'koi-modal-backdrop';
-  backdrop.hidden = true;
-
-  const modal = document.createElement('div');
-  modal.className = 'koi-modal';
-  modal.setAttribute('role', 'dialog');
-  modal.setAttribute('aria-modal', 'true');
-  modal.setAttribute('aria-label', 'Preferences');
-  backdrop.appendChild(modal);
-
-  const header = document.createElement('div');
-  header.className = 'koi-modal-header';
-  const title = document.createElement('h2');
-  title.className = 'koi-modal-title';
-  title.textContent = 'Preferences';
-  const closeBtn = document.createElement('button');
-  closeBtn.type = 'button';
-  closeBtn.className = 'koi-modal-close';
-  closeBtn.setAttribute('aria-label', 'Close');
-  closeBtn.textContent = '✕';
-  header.append(title, closeBtn);
-
-  const body = document.createElement('div');
-  body.className = 'koi-modal-body';
-
-  modal.append(header, body);
+  const modal = createModal({ title: 'Preferences' });
 
   // --- field factory --------------------------------------------------------
   // Each row is a .koi-field with a .koi-field-label and a .koi-field-control wrapper around
@@ -110,7 +83,7 @@ export function createPreferences(cb: PrefsCallbacks): PrefsHandle {
     traceSelect.appendChild(opt);
   }
 
-  body.append(
+  modal.body.append(
     field('Theme', themeSelect),
     field('Editor font size', fontInput),
     field('Format on save', formatCheckbox),
@@ -154,49 +127,16 @@ export function createPreferences(cb: PrefsCallbacks): PrefsHandle {
     commit({ lspTrace });
   });
 
-  // --- open/close -----------------------------------------------------------
-  // Populate every control from the freshly loaded Settings so the dialog reflects whatever
-  // other surfaces (toolbar toggle, command palette) may have changed since the last open.
-  function populate(): void {
+  // Populate every control from the freshly loaded Settings, then move focus to the first
+  // control so keyboard users land inside the dialog (overriding the modal's default focus).
+  modal.onOpen(() => {
     const s = loadSettings();
     themeSelect.value = s.theme;
     fontInput.value = String(s.fontSize);
     formatCheckbox.checked = s.formatOnSave;
     traceSelect.value = s.lspTrace;
-  }
-
-  let opener: HTMLElement | null = null;
-
-  function open(): void {
-    opener = document.activeElement as HTMLElement | null;
-    populate();
-    backdrop.hidden = false;
-    // Focus the first control so keyboard users land inside the dialog.
     themeSelect.focus();
-  }
-
-  function close(): void {
-    backdrop.hidden = true;
-    opener?.focus?.(); // restore focus to whatever opened the dialog
-    opener = null;
-  }
-
-  // Backdrop click (outside the panel) closes; clicks inside the panel do not bubble out.
-  backdrop.addEventListener('mousedown', (e) => {
-    if (e.target === backdrop) close();
-  });
-  closeBtn.addEventListener('click', close);
-
-  // Esc closes while open. Scoped to the backdrop subtree so it only fires when focus is
-  // inside the dialog; the app's global Esc-closes-top-overlay handler covers other cases.
-  backdrop.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') {
-      e.stopPropagation();
-      close();
-    }
   });
 
-  document.body.appendChild(backdrop);
-
-  return { open, close };
+  return { open: modal.open, close: modal.close };
 }

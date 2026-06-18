@@ -1,8 +1,8 @@
-// Keyboard-shortcuts help overlay for Koine Studio. A generic modal (.koi-modal*)
-// that renders a list of ShortcutRow into a .koi-help-table, splitting each chord on
-// '+' into individual .koi-kbd keycaps. Self-mounts to document.body once; Esc and a
-// backdrop click close it. The app supplies the rows and wires the F1 shortcut.
-
+// Keyboard-shortcuts help overlay for Koine Studio. Uses the shared createModal() chrome and
+// renders a list of ShortcutRow into a .koi-help-table, splitting each chord on '+' into
+// individual .koi-kbd keycaps (with 'mod' rendered as ⌘ / Ctrl per platform). The app supplies
+// the rows and wires the F1 shortcut.
+import { createModal } from './overlay';
 import { modKey } from './platform';
 
 export interface ShortcutRow {
@@ -16,77 +16,11 @@ export interface HelpHandle {
   toggle(): void;
 }
 
-/** Build the help overlay, mount it (hidden) on document.body, and return a handle. */
+/** Build the help overlay (once) and return a handle. */
 export function createHelpOverlay(rows: ShortcutRow[]): HelpHandle {
-  const backdrop = document.createElement('div');
-  backdrop.className = 'koi-modal-backdrop';
-  backdrop.hidden = true;
-  backdrop.setAttribute('role', 'dialog');
-  backdrop.setAttribute('aria-modal', 'true');
-  backdrop.setAttribute('aria-label', 'Keyboard shortcuts');
-
-  const modal = document.createElement('div');
-  modal.className = 'koi-modal';
-
-  const header = document.createElement('div');
-  header.className = 'koi-modal-header';
-  const title = document.createElement('h2');
-  title.className = 'koi-modal-title';
-  title.textContent = 'Keyboard shortcuts';
-  const closeBtn = document.createElement('button');
-  closeBtn.type = 'button';
-  closeBtn.className = 'koi-modal-close';
-  closeBtn.setAttribute('aria-label', 'Close');
-  closeBtn.textContent = '✕';
-  header.append(title, closeBtn);
-
-  const body = document.createElement('div');
-  body.className = 'koi-modal-body';
-  body.appendChild(buildTable(rows));
-
-  modal.append(header, body);
-  backdrop.appendChild(modal);
-  document.body.appendChild(backdrop);
-
-  let isOpen = false;
-  let opener: HTMLElement | null = null;
-
-  function open(): void {
-    if (isOpen) return;
-    isOpen = true;
-    opener = document.activeElement as HTMLElement | null;
-    backdrop.hidden = false;
-    closeBtn.focus();
-  }
-
-  function close(): void {
-    if (!isOpen) return;
-    isOpen = false;
-    backdrop.hidden = true;
-    opener?.focus?.(); // restore focus to whatever opened the overlay
-    opener = null;
-  }
-
-  function toggle(): void {
-    if (isOpen) close();
-    else open();
-  }
-
-  // Backdrop click (outside the panel) closes; clicks inside the modal don't bubble out.
-  backdrop.addEventListener('mousedown', (e) => {
-    if (e.target === backdrop) close();
-  });
-  closeBtn.addEventListener('click', close);
-
-  // Esc closes while open. Captured at document level so it works regardless of focus.
-  document.addEventListener('keydown', (e) => {
-    if (isOpen && e.key === 'Escape') {
-      e.preventDefault();
-      close();
-    }
-  });
-
-  return { open, close, toggle };
+  const modal = createModal({ title: 'Keyboard shortcuts' });
+  modal.body.appendChild(buildTable(rows));
+  return { open: modal.open, close: modal.close, toggle: modal.toggle };
 }
 
 /** Render the rows into a .koi-help-table; each row is a keycaps cell + a description cell. */

@@ -772,14 +772,23 @@ export function init(): void {
       console.error('write_text_file failed:', e);
       return;
     }
+    // Re-key the buffer + LSP doc from the scratch uri to the real file uri so the
+    // "non-null path ⇒ keyed by pathToFileUri(path)" invariant holds (matches openFolderPath),
+    // and a later folder-open of the same file can't produce a duplicate buffer.
     const name = target.split(/[\\/]/).filter(Boolean).pop() ?? target;
+    const newUri = pathToFileUri(target);
+    lsp.closeDoc(buf.uri);
+    buffers.delete(buf.uri);
+    diagnosticsByUri.delete(buf.uri);
+    buf.uri = newUri;
     buf.path = target;
     buf.name = name;
     buf.relPath = name;
     buf.dirty = false;
-    lsp.didSave();
-    treeTitleEl.textContent = name;
-    renderTree();
+    buffers.set(newUri, buf);
+    activeUri = newUri;
+    lsp.openDoc(newUri, buf.text);
+    lsp.setActive(newUri);
   }
 
   // --- new scratch model ----------------------------------------------------
