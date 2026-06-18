@@ -6,8 +6,10 @@ namespace Koine.Compiler.Tests;
 /// <summary>
 /// Process-level / argv tests for the CLI entry point (<see cref="Program.Run"/>), driven
 /// through the internal entry point (InternalsVisibleTo) so we can assert exit codes and the
-/// exact text printed to stdout/stderr. Covers version, global &amp; per-command help, unknown
-/// commands, and fmt --check on good and broken input.
+/// text printed to stdout/stderr. The CLI is built on Spectre.Console.Cli, so framework
+/// concerns (command dispatch, unknown command/option, missing argument, help) are rendered by
+/// Spectre to <em>stdout</em>; the CLI's own runtime errors (missing input, unsupported target)
+/// stay plain on <em>stderr</em>.
 /// </summary>
 public class CliProgramTests
 {
@@ -32,6 +34,15 @@ public class CliProgramTests
         }
     }
 
+    /// <summary>Writes <paramref name="content"/> to a fresh temp dir and returns the file path and its dir.</summary>
+    private static (string File, string Dir) TempModel(string content, string name = "domain.koi")
+    {
+        var dir = Directory.CreateTempSubdirectory("koi-cli-").FullName;
+        var path = Path.Combine(dir, name);
+        File.WriteAllText(path, content);
+        return (path, dir);
+    }
+
     // ---- version -----------------------------------------------------------
 
     [Theory]
@@ -51,34 +62,36 @@ public class CliProgramTests
     // ---- global help / no args / unknown command ---------------------------
 
     [Fact]
-    public void No_args_prints_usage_to_stderr_and_exits_nonzero()
+    public void No_args_prints_help_to_stdout()
     {
-        var (code, _, stderr) = Run();
+        var (code, stdout, _) = Run();
 
-        Assert.Equal(1, code);
-        Assert.Contains("Usage:", stderr);
+        // Spectre prints the root help when no command is given.
+        Assert.Equal(0, code);
+        Assert.Contains("USAGE:", stdout);
+        Assert.Contains("build", stdout);
     }
 
     [Theory]
     [InlineData("--help")]
     [InlineData("-h")]
-    [InlineData("help")]
     public void Global_help_prints_usage_to_stdout_and_exits_zero(string flag)
     {
         var (code, stdout, _) = Run(flag);
 
         Assert.Equal(0, code);
-        Assert.Contains("Usage:", stdout);
-        Assert.Contains("koine build", stdout);
+        Assert.Contains("USAGE:", stdout);
+        Assert.Contains("build", stdout);
+        Assert.Contains("lsp", stdout);
     }
 
     [Fact]
     public void Unknown_command_reports_the_command_and_exits_nonzero()
     {
-        var (code, _, stderr) = Run("frobnicate");
+        var (code, stdout, _) = Run("frobnicate");
 
         Assert.Equal(1, code);
-        Assert.Contains("unknown command 'frobnicate'", stderr);
+        Assert.Contains("Unknown command 'frobnicate'", stdout);
     }
 
     // ---- per-command help --------------------------------------------------
@@ -95,8 +108,8 @@ public class CliProgramTests
 
         Assert.Equal(0, code);
         Assert.Contains($"koine {command}", stdout);
-        Assert.Contains("Usage:", stdout);
-        Assert.Contains("Examples:", stdout);
+        Assert.Contains("USAGE:", stdout);
+        Assert.Contains("EXAMPLES:", stdout);
     }
 
     [Fact]
@@ -108,16 +121,30 @@ public class CliProgramTests
         Assert.Contains("koine build", stdout);
     }
 
-    // ---- usage errors show command help ------------------------------------
+    // ---- usage errors (Spectre, on stdout) ---------------------------------
 
     [Fact]
-    public void Unknown_option_on_a_subcommand_shows_that_commands_help()
+    public void Unknown_option_on_a_subcommand_is_a_parse_error()
     {
-        var (code, _, stderr) = Run("fmt", "--bogus");
+        // A valid positional first, so the unknown-option error (not "missing argument") wins.
+        var (file, dir) = TempModel("context C { value Money { amount: Decimal } }\n");
+        try
+        {
+            var (code, stdout, _) = Run("fmt", file, "--bogus");
+
+            Assert.Equal(1, code);
+            Assert.Contains("Unknown option 'bogus'", stdout);
+        }
+        finally { Directory.Delete(dir, recursive: true); }
+    }
+
+    [Fact]
+    public void Missing_required_argument_is_a_parse_error()
+    {
+        var (code, stdout, _) = Run("build");
 
         Assert.Equal(1, code);
-        Assert.Contains("unknown option '--bogus'", stderr);
-        Assert.Contains("koine fmt", stderr);
+        Assert.Contains("missing required argument", stdout);
     }
 
     // ---- fmt --check on good and broken files ------------------------------
@@ -125,14 +152,11 @@ public class CliProgramTests
     [Fact]
     public void Fmt_check_passes_on_a_canonically_formatted_file()
     {
-        var dir = Directory.CreateTempSubdirectory("koi-cli-").FullName;
+        // A canonical model formats to itself, so --check must be clean (exit 0).
+        var formatted = new Formatting.KoineFormatter().Format(Program.ScaffoldModel).Text;
+        var (path, dir) = TempModel(formatted);
         try
         {
-            // A canonical model formats to itself, so --check must be clean (exit 0).
-            var formatted = new Formatting.KoineFormatter().Format(Program.ScaffoldModel).Text;
-            var path = Path.Combine(dir, "domain.koi");
-            File.WriteAllText(path, formatted);
-
             var (code, stdout, _) = Run("fmt", path, "--check");
 
             Assert.Equal(0, code);
@@ -144,13 +168,10 @@ public class CliProgramTests
     [Fact]
     public void Fmt_check_flags_an_unformatted_file_without_writing()
     {
-        var dir = Directory.CreateTempSubdirectory("koi-cli-").FullName;
+        const string messy = "context C {\n  value Money{amount:Decimal}\n}\n";
+        var (path, dir) = TempModel(messy, "messy.koi");
         try
         {
-            const string messy = "context C {\n  value Money{amount:Decimal}\n}\n";
-            var path = Path.Combine(dir, "messy.koi");
-            File.WriteAllText(path, messy);
-
             var (code, _, stderr) = Run("fmt", path, "--check");
 
             Assert.Equal(1, code);
@@ -163,14 +184,11 @@ public class CliProgramTests
     [Fact]
     public void Fmt_check_reports_an_unparseable_file_with_a_file_line_message()
     {
-        var dir = Directory.CreateTempSubdirectory("koi-cli-").FullName;
+        // Missing closing brace etc. — the formatter cannot fix this; fmt must report it.
+        const string broken = "context C {\n  value Money { amount: \n";
+        var (path, dir) = TempModel(broken, "broken.koi");
         try
         {
-            // Missing closing brace etc. — the formatter cannot fix this; fmt must report it.
-            const string broken = "context C {\n  value Money { amount: \n";
-            var path = Path.Combine(dir, "broken.koi");
-            File.WriteAllText(path, broken);
-
             var (code, _, stderr) = Run("fmt", path, "--check");
 
             Assert.Equal(1, code);
@@ -184,13 +202,10 @@ public class CliProgramTests
     [Fact]
     public void Fmt_write_mode_refuses_an_unparseable_file_and_exits_nonzero()
     {
-        var dir = Directory.CreateTempSubdirectory("koi-cli-").FullName;
+        const string broken = "context C {\n  value Money { amount: \n";
+        var (path, dir) = TempModel(broken, "broken.koi");
         try
         {
-            const string broken = "context C {\n  value Money { amount: \n";
-            var path = Path.Combine(dir, "broken.koi");
-            File.WriteAllText(path, broken);
-
             var (code, _, _) = Run("fmt", path);
 
             Assert.Equal(1, code);
@@ -199,45 +214,33 @@ public class CliProgramTests
         finally { Directory.Delete(dir, recursive: true); }
     }
 
-    // ---- runtime errors do not dump the global usage -----------------------
+    // ---- runtime errors are plain on stderr (no help dump) -----------------
 
     [Fact]
-    public void Missing_input_file_reports_a_runtime_error_with_a_hint_not_global_usage()
+    public void Missing_input_file_reports_a_runtime_error_with_a_hint_on_stderr()
     {
         var (code, _, stderr) = Run("build", "/no/such/file.koi");
 
         Assert.Equal(1, code);
         Assert.Contains("not found", stderr);
-        Assert.Contains("koine init", stderr);   // actionable hint
-        Assert.DoesNotContain("Usage:", stderr);  // not the full global usage dump
+        Assert.Contains("koine init", stderr);    // actionable hint
+        Assert.DoesNotContain("USAGE", stderr);   // not a help dump
     }
 
     [Fact]
-    public void Unsupported_target_reports_a_runtime_error_not_global_usage()
+    public void Unsupported_target_reports_a_runtime_error_on_stderr()
     {
-        var dir = Directory.CreateTempSubdirectory("koi-cli-").FullName;
+        var (path, dir) = TempModel(Program.ScaffoldModel);
         try
         {
-            var path = Path.Combine(dir, "domain.koi");
-            File.WriteAllText(path, Program.ScaffoldModel);
-
             var (code, _, stderr) = Run("build", path, "--target", "rust");
 
             Assert.Equal(1, code);
             Assert.Contains("unsupported target 'rust'", stderr);
-            Assert.DoesNotContain("Usage:", stderr);
+            Assert.Contains("csharp", stderr);        // lists the supported targets
+            Assert.DoesNotContain("USAGE", stderr);
         }
         finally { Directory.Delete(dir, recursive: true); }
-    }
-
-    [Fact]
-    public void Bad_flag_on_build_is_a_usage_error_that_shows_build_help()
-    {
-        var (code, _, stderr) = Run("build", "--nope");
-
-        Assert.Equal(1, code);
-        Assert.Contains("unknown option '--nope'", stderr);
-        Assert.Contains("koine build", stderr);
     }
 
     // ---- build success writes output atomically ----------------------------
@@ -245,11 +248,9 @@ public class CliProgramTests
     [Fact]
     public void Build_with_out_writes_generated_files_and_exits_zero()
     {
-        var dir = Directory.CreateTempSubdirectory("koi-cli-").FullName;
+        var (src, dir) = TempModel(Program.ScaffoldModel);
         try
         {
-            var src = Path.Combine(dir, "domain.koi");
-            File.WriteAllText(src, Program.ScaffoldModel);
             var outDir = Path.Combine(dir, "generated");
 
             var (code, stdout, _) = Run("build", src, "--out", outDir);
@@ -260,6 +261,21 @@ public class CliProgramTests
             // The swap must leave no staging directories behind.
             Assert.DoesNotContain(Directory.EnumerateDirectories(outDir),
                 d => Path.GetFileName(d).Contains("koine-tmp"));
+        }
+        finally { Directory.Delete(dir, recursive: true); }
+    }
+
+    [Fact]
+    public void Build_without_out_only_validates_and_exits_zero()
+    {
+        // An isolated dir (no koine.config beside it) so nothing supplies a default --out.
+        var (src, dir) = TempModel(Program.ScaffoldModel);
+        try
+        {
+            var (code, stdout, _) = Run("build", src);
+
+            Assert.Equal(0, code);
+            Assert.Contains("parsed and validated", stdout);
         }
         finally { Directory.Delete(dir, recursive: true); }
     }
