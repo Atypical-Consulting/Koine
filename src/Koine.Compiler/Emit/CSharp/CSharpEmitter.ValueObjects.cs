@@ -1,5 +1,6 @@
 using System.Text;
 using Koine.Compiler.Ast;
+using Koine.Compiler.Ast.Bound;
 
 namespace Koine.Compiler.Emit.CSharp;
 
@@ -23,11 +24,13 @@ public sealed partial class CSharpEmitter
         CSharpTypeMapper typeMapper,
         IReadOnlyDictionary<string, string> enumMemberToType)
     {
-        var memberNames = new HashSet<string>(vo.Members.Select(m => m.Name), StringComparer.Ordinal);
         var translator = new CSharpExpressionTranslator(index, vo.Members, enumMemberToType, SpecBodiesFor(vo.Name, index), context: ContextOf(ns), options: _options);
 
-        var ctorParams = vo.Members.Where(m => !MemberAnalysis.IsDerived(m, memberNames)).ToList();
-        var derived = vo.Members.Where(m => MemberAnalysis.IsDerived(m, memberNames)).ToList();
+        // The lowered field projection (Commit 5): ctor-vs-derived classification, default dispositions,
+        // collection shape, and canonical ctor ordering are all owned by the bound nodes now, computed
+        // once in the lowerer rather than re-derived from raw syntax here.
+        BoundValueObject bound = emit.Semantic.BoundValueObjectFor(vo);
+        var storedFields = bound.StoredFields.ToList();
 
         var sb = new StringBuilder();
 
@@ -36,40 +39,38 @@ public sealed partial class CSharpEmitter
         sb.Append("public sealed class ").Append(vo.Name).Append(" : ValueObject\n");
         sb.Append("{\n");
 
-        // Properties (one per member, in declaration order).
-        foreach (Member m in vo.Members)
+        // Properties (one per stored field, in declaration order).
+        foreach (BoundField f in storedFields)
         {
-            if (MemberAnalysis.IsDerived(m, memberNames))
-            {
-                continue; // derived emitted later as computed property
-            }
-
+            var m = (Member)f.Syntax;
             var csType = typeMapper.Map(m.Type, out var comment);
             WriteXmlDoc(sb, m.Doc, Indent);
             WriteObsolete(sb, m.Deprecated, Indent);
             sb.Append(Indent).Append("public ").Append(csType).Append(' ')
-              .Append(CSharpNaming.ToPascalCase(m.Name)).Append(" { get; }");
+              .Append(CSharpNaming.ToPascalCase(f.Name)).Append(" { get; }");
             AppendComment(sb, comment);
             sb.Append('\n');
         }
 
-        // Constructor. The invariant guards are driven from the LOWERED bound invariants (Commit 4):
-        // the message default is already applied in the lowerer and the condition is still rendered from
-        // its syntactic origin, so the emitted C# is byte-identical to the historical raw-Invariant path.
+        // Constructor: driven entirely from the lowered projection — ordered ctor params, default
+        // dispositions, and the folded invariant guards (Commit 5). The condition rendering is migrated
+        // to the bound expressions separately; field projection alone keeps output byte-identical.
         sb.Append('\n');
-        IReadOnlyList<Ast.Bound.BoundInvariant> boundInvariants = emit.Semantic.BoundInvariantsFor(vo);
-        WriteConstructor(sb, vo.Name, ctorParams, boundInvariants, memberNames, translator, typeMapper, enumMemberToType, index);
+        WriteValueObjectConstructor(sb, vo.Name, bound, translator, typeMapper, index);
 
         // Derived (computed) properties after the constructor.
-        foreach (Member m in derived)
+        foreach (BoundField f in bound.DerivedFields)
         {
+            var m = (Member)f.Syntax;
             var csType = typeMapper.Map(m.Type);
-            var body = translator.TranslateTopLevel(m.Initializer!, CSharpExpressionTranslator.NameMode.Property, EnumExpected(m, index));
+            // Render the derived body from its LOWERED bound initializer (Commit 6): resolved types come
+            // from the bound tree rather than being re-inferred by the translator.
+            var body = translator.TranslateTopLevelBound(f.DerivedInitializer!, CSharpExpressionTranslator.NameMode.Property, EnumExpected(m, index));
             sb.Append('\n');
             WriteXmlDoc(sb, m.Doc, Indent);
             WriteObsolete(sb, m.Deprecated, Indent);
             sb.Append(Indent).Append("public ").Append(csType).Append(' ')
-              .Append(CSharpNaming.ToPascalCase(m.Name)).Append('\n');
+              .Append(CSharpNaming.ToPascalCase(f.Name)).Append('\n');
             sb.Append(Indent).Append(Indent).Append("=> ").Append(body).Append(";\n");
         }
 
@@ -78,7 +79,7 @@ public sealed partial class CSharpEmitter
         // avoid emitting a duplicate operator).
         if (vo.IsQuantity)
         {
-            WriteQuantityOperators(sb, vo, index);
+            WriteQuantityOperators(sb, vo, bound, index);
         }
         else
         {
@@ -94,30 +95,30 @@ public sealed partial class CSharpEmitter
             // multiplied by a scalar in a derived expression.
             if (emit.ScalarNeeds.TryGetValue(vo.Name, out IReadOnlySet<string>? scalarTypes))
             {
-                IReadOnlyList<Member> numericFields = NumericFields(vo);
+                IReadOnlyList<Member> numericFields = NumericFields(bound);
                 if (numericFields.Count > 0)
                 {
-                    WriteScalarOperators(sb, vo, numericFields, scalarTypes, typeMapper);
+                    WriteScalarOperators(sb, vo, bound, numericFields, scalarTypes, typeMapper);
                 }
             }
 
             // Additive operator for value objects that are summed (e.g. lines.sum(l => l.subtotal)).
             if (emit.AdditiveNeeds.Contains(vo.Name))
             {
-                IReadOnlyList<Member> numericFields = NumericFields(vo);
+                IReadOnlyList<Member> numericFields = NumericFields(bound);
                 if (numericFields.Count > 0)
                 {
-                    WriteAdditiveOperator(sb, vo, numericFields);
+                    WriteAdditiveOperator(sb, vo, bound, numericFields);
                 }
             }
         }
 
         // A readable ToString for logs/tests/debugging (object.ToString would only
         // show the type name); enums already do this.
-        WriteValueObjectToString(sb, vo.Name, ctorParams);
+        WriteValueObjectToString(sb, vo.Name, storedFields);
 
-        // Structural value equality: the components are the non-derived fields.
-        WriteEqualityComponents(sb, ctorParams);
+        // Structural value equality: the components are the non-derived (stored) fields.
+        WriteEqualityComponents(sb, storedFields);
 
         sb.Append("}\n");
 
@@ -130,7 +131,7 @@ public sealed partial class CSharpEmitter
     /// fields (e.g. <c>Money { Amount = 10, Currency = EUR }</c>), so value objects are
     /// readable in logs and test output instead of falling back to the type name.
     /// </summary>
-    private void WriteValueObjectToString(StringBuilder sb, string typeName, IReadOnlyList<Member> members)
+    private void WriteValueObjectToString(StringBuilder sb, string typeName, IReadOnlyList<BoundField> members)
     {
         sb.Append('\n');
         if (members.Count == 0)
@@ -154,7 +155,7 @@ public sealed partial class CSharpEmitter
     /// <see cref="ValueObject"/> base's structural equality: each non-derived field,
     /// in declaration order.
     /// </summary>
-    private void WriteEqualityComponents(StringBuilder sb, IReadOnlyList<Member> members)
+    private void WriteEqualityComponents(StringBuilder sb, IReadOnlyList<BoundField> members)
     {
         sb.Append('\n');
         sb.Append(Indent).Append("protected override IEnumerable<object?> GetEqualityComponents()\n");
@@ -166,15 +167,17 @@ public sealed partial class CSharpEmitter
         }
         else
         {
-            foreach (Member m in members)
+            foreach (BoundField f in members)
             {
-                var prop = CSharpNaming.ToPascalCase(m.Name);
+                var prop = CSharpNaming.ToPascalCase(f.Name);
                 // Collections must compare by element, not by reference: wrap them in
                 // the base's structural helpers (ordered for lists, unordered for sets/maps).
-                var component =
-                    CSharpTypeMapper.IsList(m.Type) ? $"Ordered({prop})"
-                    : CSharpTypeMapper.IsSet(m.Type) || CSharpTypeMapper.IsMap(m.Type) ? $"Unordered({prop})"
-                    : prop;
+                var component = f.CollectionShape switch
+                {
+                    CollectionShape.List => $"Ordered({prop})",
+                    CollectionShape.Set or CollectionShape.Map => $"Unordered({prop})",
+                    _ => prop
+                };
                 sb.Append(Indent).Append(Indent).Append("yield return ").Append(component).Append(";\n");
             }
         }
@@ -191,14 +194,14 @@ public sealed partial class CSharpEmitter
     private void WriteScalarOperators(
         StringBuilder sb,
         ValueObjectDecl vo,
+        BoundValueObject bound,
         IReadOnlyList<Member> numericFields,
         IReadOnlySet<string> scalarTypes,
         CSharpTypeMapper typeMapper)
     {
-        var memberNames = new HashSet<string>(vo.Members.Select(m => m.Name), StringComparer.Ordinal);
-        // Constructor args must be passed in the SAME order the constructor declares
-        // its parameters (OrderCtorParams moves defaulted/optional fields last).
-        var ctorMembers = OrderCtorParams(vo.Members.Where(m => !MemberAnalysis.IsDerived(m, memberNames))).ToList();
+        // Constructor args must be passed in the SAME order the constructor declares its
+        // parameters — the projection's CtorParams owns that order (defaulted/optional last).
+        var ctorMembers = bound.CtorParams.Select(f => (Member)f.Syntax).ToList();
         var numericNames = new HashSet<string>(numericFields.Select(m => m.Name), StringComparer.Ordinal);
 
         // Deterministic order; only the scalar types actually used.
@@ -234,10 +237,9 @@ public sealed partial class CSharpEmitter
     /// scale the amount and preserve the unit. Operators are emitted in a fixed order
     /// for byte-identical determinism.
     /// </summary>
-    private void WriteQuantityOperators(StringBuilder sb, ValueObjectDecl vo, ModelIndex index)
+    private void WriteQuantityOperators(StringBuilder sb, ValueObjectDecl vo, BoundValueObject bound, ModelIndex index)
     {
-        var memberNames = new HashSet<string>(vo.Members.Select(m => m.Name), StringComparer.Ordinal);
-        var nonDerived = vo.Members.Where(m => !MemberAnalysis.IsDerived(m, memberNames)).ToList();
+        var nonDerived = bound.StoredFields.Select(f => (Member)f.Syntax).ToList();
         Member? amount = nonDerived.FirstOrDefault(m => m.Type.Name == "Decimal" && !m.Type.IsOptional);
         Member? unit = nonDerived.FirstOrDefault(m => index.Classify(m.Type.Name) == TypeKind.Enum && !m.Type.IsOptional);
         if (amount is null || unit is null)
@@ -248,7 +250,7 @@ public sealed partial class CSharpEmitter
         var name = vo.Name;
         var amtProp = CSharpNaming.ToPascalCase(amount.Name);
         var unitProp = CSharpNaming.ToPascalCase(unit.Name);
-        var ctorOrder = OrderCtorParams(nonDerived).ToList();
+        var ctorOrder = bound.CtorParams.Select(f => (Member)f.Syntax).ToList();
 
         // Build `new Name(...)` with the amount/unit values placed in constructor order.
         string Construct(string amtExpr, string unitExpr) =>
@@ -290,14 +292,11 @@ public sealed partial class CSharpEmitter
         }
     }
 
-    private static IReadOnlyList<Member> NumericFields(ValueObjectDecl vo)
-    {
-        var memberNames = new HashSet<string>(vo.Members.Select(m => m.Name), StringComparer.Ordinal);
-        return vo.Members
-            .Where(m => !MemberAnalysis.IsDerived(m, memberNames))
+    private static IReadOnlyList<Member> NumericFields(BoundValueObject bound) =>
+        bound.StoredFields
+            .Select(f => (Member)f.Syntax)
             .Where(m => m.Type.Name is "Int" or "Decimal")
             .ToList();
-    }
 
     /// <summary>
     /// Generates a structural <c>+</c> operator so a value object can be folded by
@@ -305,11 +304,10 @@ public sealed partial class CSharpEmitter
     /// every numeric field pairwise and carries the rest from the left operand,
     /// mirroring the scalar-operator heuristic.
     /// </summary>
-    private void WriteAdditiveOperator(StringBuilder sb, ValueObjectDecl vo, IReadOnlyList<Member> numericFields)
+    private void WriteAdditiveOperator(StringBuilder sb, ValueObjectDecl vo, BoundValueObject bound, IReadOnlyList<Member> numericFields)
     {
-        var memberNames = new HashSet<string>(vo.Members.Select(m => m.Name), StringComparer.Ordinal);
-        // Same ordering rule as the constructor (defaulted/optional fields last).
-        var ctorMembers = OrderCtorParams(vo.Members.Where(m => !MemberAnalysis.IsDerived(m, memberNames))).ToList();
+        // Same ordering rule as the constructor (the projection's CtorParams: defaulted/optional last).
+        var ctorMembers = bound.CtorParams.Select(f => (Member)f.Syntax).ToList();
         var numericNames = new HashSet<string>(numericFields.Select(m => m.Name), StringComparer.Ordinal);
 
         var args = string.Join(", ", ctorMembers.Select(m =>
