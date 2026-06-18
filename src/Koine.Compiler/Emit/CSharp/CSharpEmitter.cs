@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Text;
 using Koine.Compiler.Ast;
 using Koine.Compiler.Ast.Bound;
@@ -1677,8 +1678,13 @@ public sealed partial class CSharpEmitter : IEmitter
         sb.Append(indent).Append("/// </summary>\n");
     }
 
+    private static readonly SearchValues<char> XmlEscapeChars = SearchValues.Create("&<>");
+
     private static string EscapeXml(string s) =>
-        s.Replace("&", "&amp;").Replace("<", "&lt;").Replace(">", "&gt;");
+        // Fast path (the common case): nothing to escape -> return as-is, no Replace allocations.
+        s.AsSpan().IndexOfAny(XmlEscapeChars) < 0
+            ? s
+            : s.Replace("&", "&amp;").Replace("<", "&lt;").Replace(">", "&gt;");
 
     /// <summary>
     /// Renders a target-agnostic <c>@deprecated("reason")</c> annotation (R15.1) as a C#
@@ -1696,9 +1702,13 @@ public sealed partial class CSharpEmitter : IEmitter
     }
 
     /// <summary>Escapes a string for embedding in a C# double-quoted literal.</summary>
+    private static readonly SearchValues<char> CSharpStringEscapeChars = SearchValues.Create("\\\"\n\r\t");
+
     private static string EscapeCSharpString(string s) =>
-        s.Replace("\\", "\\\\").Replace("\"", "\\\"")
-         .Replace("\n", "\\n").Replace("\r", "\\r").Replace("\t", "\\t");
+        s.AsSpan().IndexOfAny(CSharpStringEscapeChars) < 0
+            ? s
+            : s.Replace("\\", "\\\\").Replace("\"", "\\\"")
+               .Replace("\n", "\\n").Replace("\r", "\\r").Replace("\t", "\\t");
 
     private static void AppendComment(StringBuilder sb, string? comment)
     {

@@ -1,3 +1,4 @@
+using System.Collections.Frozen;
 using System.Text;
 
 namespace Koine.Compiler.Emit.CSharp;
@@ -55,7 +56,7 @@ internal static class CSharpNaming
     private static string Escape(string identifier) =>
         Keywords.Contains(identifier) ? "@" + identifier : identifier;
 
-    private static readonly HashSet<string> Keywords = new(StringComparer.Ordinal)
+    private static readonly FrozenSet<string> Keywords = new HashSet<string>(StringComparer.Ordinal)
     {
         "abstract", "as", "base", "bool", "break", "byte", "case", "catch", "char", "checked",
         "class", "const", "continue", "decimal", "default", "delegate", "do", "double", "else",
@@ -66,5 +67,5 @@ internal static class CSharpNaming
         "sizeof", "stackalloc", "static", "string", "struct", "switch", "this", "throw", "true",
         "try", "typeof", "uint", "ulong", "unchecked", "unsafe", "ushort", "using", "virtual",
         "void", "volatile", "while"
-    };
+    }.ToFrozenSet(StringComparer.Ordinal);
 }
