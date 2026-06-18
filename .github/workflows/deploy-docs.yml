@@ -41,7 +41,7 @@ jobs:
           dotnet-quality: preview
 
       - name: Cache NuGet
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ~/.nuget/packages
           key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj', 'Directory.Build.props') }}
@@ -50,7 +50,7 @@ jobs:
       # The wasm workloads (emscripten + browser-wasm runtime pack) are slow to
       # download; cache the SDK workload folders keyed on the SDK version.
       - name: Cache wasm workloads
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             ~/.dotnet/sdk-manifests
