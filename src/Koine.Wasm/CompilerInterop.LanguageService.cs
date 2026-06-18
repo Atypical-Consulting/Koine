@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices.JavaScript;
+using System.Runtime.Versioning;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Koine.Compiler.Ast;
@@ -31,6 +32,9 @@ namespace Koine.Wasm;
 /// <para>All DTOs are source-generated (trim-safe under <c>TrimMode=full</c>) and camelCased to
 /// match the protocol shapes declared in <c>lsp.ts</c>.</para>
 /// </summary>
+/// <remarks>Browser-only, like the rest of this assembly — see the partial in
+/// <c>CompilerInterop.cs</c> for why <see cref="SupportedOSPlatformAttribute"/> is applied.</remarks>
+[SupportedOSPlatform("browser")]
 public static partial class CompilerInterop
 {
     private static readonly KoineLanguageService LanguageService = new();

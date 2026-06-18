@@ -36,6 +36,13 @@
 
     <!-- Not a NuGet package; clear the inherited packaging metadata from Directory.Build.props. -->
     <IsPackable>false</IsPackable>
+
+    <!--
+      Antlr4.Runtime.Standard is rooted whole (below), so the trim analyzer's per-assembly IL2104
+      ("assembly produced trim warnings") is moot here — nothing in it is trimmed. The compiler's
+      own trim concern (NodeWalker reflection) is covered by an UnconditionalSuppressMessage there.
+    -->
+    <NoWarn>$(NoWarn);IL2104</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>
