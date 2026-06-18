@@ -67,14 +67,14 @@ public interface IEmitter
 }
 ```
 
-`CSharpEmitter` (`Emit/CSharp/`) is the only implementation today. It takes the validated model and produces a set of `EmittedFile`s — relative path plus file contents — which the CLI writes to `--out`. Its work is split across focused collaborators:
+`CSharpEmitter` (`Emit/CSharp/`) is the primary implementation; `TypeScriptEmitter` (`Emit/TypeScript/`) and `PythonEmitter` (`Emit/Python/`) also ship. Each takes the validated model and produces a set of `EmittedFile`s — relative path plus file contents — which the CLI writes to `--out`. The C# emitter's work is split across focused collaborators:
 
 - `CSharpEmitter` — orchestrates which files to emit and assembles them.
 - `CSharpTypeMapper` — maps Koine primitives to C# (`Decimal` → `decimal`, `List<T>` → `IReadOnlyList<T>`, `Instant` → `DateTimeOffset`).
 - `CSharpExpressionTranslator` — turns the pure expression sublanguage into C# expressions (`lines.isEmpty` → `Lines.Count == 0`, `lines.sum(l => l.qty)` → `.Sum(...)`).
 - `CSharpNaming` — applies C# casing conventions (camelCase fields → PascalCase properties) and verbatim-escapes keywords.
 
-A `GlossaryEmitter` (`Emit/Glossary/`) is a second `IEmitter` that proves the seam already works for a non-C# target: it emits a Markdown glossary of the ubiquitous language instead of code. You select it with `--target glossary`.
+A `GlossaryEmitter` (`Emit/Glossary/`) proves the seam works for a non-code target: it emits a Markdown glossary of the ubiquitous language instead of code (`--target glossary`). `TypeScriptEmitter` (`Emit/TypeScript/`) and `PythonEmitter` (`Emit/Python/`) prove it works for different programming languages.
 
 ## Notable design decisions
 
@@ -130,11 +130,11 @@ On top of these sit ordinary parsing and semantic unit tests that assert specifi
 
 ## Where a second emitter plugs in
 
-Because every stage before emission is target-agnostic, adding a TypeScript or Rust backend is a **closed, additive change**:
+Because every stage before emission is target-agnostic, adding a TypeScript, Python, or Rust backend is a **closed, additive change**:
 
-1. Write a new class implementing `IEmitter` — say `TypeScriptEmitter` — with `TargetName => "typescript"` and an `Emit(KoineModel model)` that walks the same `Ast/` model and returns `EmittedFile`s.
-2. Register it in the CLI's target switch (`src/Koine.Cli/Program.cs`), next to `"csharp" => new CSharpEmitter()`.
-3. Add a Roslyn-equivalent compile meta-test for the new target (e.g. compile the emitted TypeScript with `tsc`) plus Verify snapshots.
+1. Write a new class implementing `IEmitter` — say `PythonEmitter` — with `TargetName => "python"` and an `Emit(KoineModel model)` that walks the same `Ast/` model and returns `EmittedFile`s.
+2. Register it in the CLI's `EmitterRegistry` (`src/Koine.Cli/Infrastructure/EmitterRegistry.cs`), next to `"csharp" => new CSharpEmitter()`.
+3. Add a toolchain compile meta-test for the new target (e.g. `mypy --strict` for Python, `tsc --noEmit` for TypeScript, `cargo check` for Rust) plus Verify snapshots.
 
 That's the entire surface area. You don't touch the grammar, the model builder, the `Ast/` model, or `SemanticValidator` — they already produce a portable model. The design decisions above (where to put a runtime type, how to escape a reserved word, which operators to synthesize) are re-answered inside the new emitter for its target language; the semantic facts they're answered *from* (`MemberAnalysis`, `BuiltinOps`, `TypeResolver`) are shared.
 
@@ -147,4 +147,4 @@ A Rust emitter would likely model invariant failures as `Result<T, E>` instead o
 - [Reading the output](/Koine/start/reading-the-output/) — what the C# emitter actually produces, file by file.
 - [Language reference overview](/Koine/reference/overview/) — the construct-by-construct spec the model is built from.
 - [CLI reference](/Koine/guides/cli/) — the `koine build` / `koine check` flags that drive the pipeline.
-- [Roadmap](/Koine/guides/roadmap/) — the planned TypeScript and Rust emitters.
+- [Roadmap](/Koine/guides/roadmap/) — the shipped TypeScript and Python emitters, and the planned Rust emitter.

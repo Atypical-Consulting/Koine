@@ -1,6 +1,6 @@
 // Client controller for the Playground IDE. Wires the CodeMirror editor to the wasm compiler
 // and drives the full ergonomic surface: live diagnostics, compile-on-change + ⌘⏎ run, target
-// switching (C#/TS/glossary) with syntax-highlighted output, a grouped file tree, copy +
+// switching (C#/TS/Python/glossary) with syntax-highlighted output, a grouped file tree, copy +
 // download-as-zip, a resizable split, a mobile editor/output toggle, localStorage persistence,
 // and ?example=/?code= deep-linking + Share.
 import { createKoineEditor, createOutputView, type KoineEditor, type OutputView, type OutputLang } from './editor';
@@ -11,6 +11,7 @@ import { makeZip, downloadBlob } from './zip';
 const TARGET_LANG: Record<Target, OutputLang> = {
   csharp: 'csharp',
   typescript: 'typescript',
+  python: 'python',
   glossary: 'plain',
 };
 const LS ={ buffer: 'koine-pg-buffer', target: 'koine-pg-target', split: 'koine-pg-split' };

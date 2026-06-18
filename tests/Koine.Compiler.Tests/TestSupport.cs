@@ -175,6 +175,264 @@ public static class TestSupport
         }
     }
 
+    /// <summary>
+    /// Result of a Python type-check run. <see cref="ToolchainAvailable"/> is false when no
+    /// <c>mypy</c> could be located locally — callers should SKIP (not fail) in that case so
+    /// <c>dotnet test</c> stays green without a mypy toolchain. When the toolchain IS available,
+    /// <see cref="Ok"/> reflects whether <c>mypy</c> reported errors.
+    /// </summary>
+    public readonly record struct PythonCheck(bool ToolchainAvailable, bool Ok, IReadOnlyList<string> Errors)
+    {
+        /// <summary>A skipped result: no toolchain present, so nothing was verified.</summary>
+        public static PythonCheck Skipped { get; } =
+            new(ToolchainAvailable: false, Ok: false, Errors: Array.Empty<string>());
+    }
+
+    /// <summary>
+    /// Writes the emitted Python files to a fresh temp directory and type-checks them with
+    /// <c>mypy</c> (the same role the Roslyn <see cref="Compile"/> harness plays for C#). When an
+    /// emitted <c>mypy.ini</c> is present the check runs <c>mypy --config-file mypy.ini .</c> so it
+    /// validates EXACTLY the configuration users get; otherwise it runs <c>mypy --strict .</c>
+    /// (the analogue of the TypeScript <c>tsc -p .</c> vs explicit-flags split). When no <c>mypy</c>
+    /// is found the result is <see cref="PythonCheck.Skipped"/> (<see cref="PythonCheck.ToolchainAvailable"/>
+    /// == false) so the suite stays green without a Python toolchain — it NEVER silently passes a real
+    /// error and NEVER fails merely because <c>mypy</c> is missing. CI is expected to have the toolchain
+    /// and therefore actually run the check.
+    /// </summary>
+    public static PythonCheck TypeCheckPython(IEnumerable<EmittedFile> files)
+    {
+        var fileList = files.ToList();
+        if (ResolveMypy() is not { } mypy)
+        {
+            return PythonCheck.Skipped;
+        }
+
+        string root = Path.Combine(Path.GetTempPath(), "koine-mypy-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            foreach (EmittedFile f in fileList)
+            {
+                string path = Path.Combine(root, f.RelativePath);
+                Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+                File.WriteAllText(path, f.Contents);
+            }
+
+            var args = new List<string>(mypy.Arguments);
+
+            // When the emitter shipped a mypy.ini, type-check via `--config-file mypy.ini .` so the
+            // test validates EXACTLY the configuration users get (strict flags / python_version live
+            // there). Otherwise (hand-authored fixtures with no config) pass `--strict .`.
+            bool hasConfig = fileList.Any(f => string.Equals(f.RelativePath, "mypy.ini", StringComparison.OrdinalIgnoreCase));
+            if (hasConfig)
+            {
+                args.Add("--config-file");
+                args.Add("mypy.ini");
+                args.Add(".");
+            }
+            else
+            {
+                args.Add("--strict");
+                args.Add(".");
+            }
+
+            if (RunProcess(mypy.FileName, args, root) is not { } run)
+            {
+                // The resolved mypy refused to launch (e.g. a broken shebang). Treat as no toolchain.
+                return PythonCheck.Skipped;
+            }
+
+            if (run.ExitCode == 0)
+            {
+                return new PythonCheck(ToolchainAvailable: true, Ok: true, Array.Empty<string>());
+            }
+
+            var errors = (run.StdOut + run.StdErr)
+                .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .ToList();
+            return new PythonCheck(ToolchainAvailable: true, Ok: false, errors);
+        }
+        finally
+        {
+            try { Directory.Delete(root, recursive: true); } catch { /* best-effort cleanup */ }
+        }
+    }
+
+    /// <summary>
+    /// Parses every emitted <c>.py</c> file with <c>ast.parse</c> via a resolved Python interpreter —
+    /// an always-on syntax gate that catches malformed emission even without a type-checker. When no
+    /// interpreter is found the result is <see cref="PythonCheck.Skipped"/> so the suite stays green.
+    /// The resolver prefers a versioned <c>python3.11+</c> over bare <c>python3</c> because the system
+    /// <c>python3</c> may be 3.9, which cannot parse <c>match</c> statements (3.11+ syntax).
+    /// </summary>
+    public static PythonCheck SyntaxCheckPython(IEnumerable<EmittedFile> files)
+    {
+        var fileList = files.ToList();
+        if (ResolvePython() is not { } python)
+        {
+            return PythonCheck.Skipped;
+        }
+
+        string root = Path.Combine(Path.GetTempPath(), "koine-pyast-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            var pyFiles = new List<string>();
+            foreach (EmittedFile f in fileList)
+            {
+                string path = Path.Combine(root, f.RelativePath);
+                Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+                File.WriteAllText(path, f.Contents);
+                if (f.RelativePath.EndsWith(".py", StringComparison.OrdinalIgnoreCase))
+                {
+                    pyFiles.Add(path);
+                }
+            }
+
+            if (pyFiles.Count == 0)
+            {
+                // Nothing to parse — vacuously OK (a toolchain was found).
+                return new PythonCheck(ToolchainAvailable: true, Ok: true, Array.Empty<string>());
+            }
+
+            // One invocation that reads + ast.parse()s every path, reporting the first failure.
+            const string script =
+                "import ast, sys\n" +
+                "for p in sys.argv[1:]:\n" +
+                "    with open(p, 'r', encoding='utf-8') as fh:\n" +
+                "        src = fh.read()\n" +
+                "    try:\n" +
+                "        ast.parse(src, filename=p)\n" +
+                "    except SyntaxError as e:\n" +
+                "        print(f'{p}: {e}', file=sys.stderr)\n" +
+                "        sys.exit(1)\n";
+
+            var args = new List<string>(python.Arguments) { "-c", script };
+            args.AddRange(pyFiles);
+
+            if (RunProcess(python.FileName, args, root) is not { } run)
+            {
+                return PythonCheck.Skipped;
+            }
+
+            if (run.ExitCode == 0)
+            {
+                return new PythonCheck(ToolchainAvailable: true, Ok: true, Array.Empty<string>());
+            }
+
+            var errors = (run.StdOut + run.StdErr)
+                .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .ToList();
+            return new PythonCheck(ToolchainAvailable: true, Ok: false, errors);
+        }
+        finally
+        {
+            try { Directory.Delete(root, recursive: true); } catch { /* best-effort cleanup */ }
+        }
+    }
+
+    /// <summary>How to invoke a tool: a program plus leading arguments (e.g. <c>python -m mypy</c>).</summary>
+    private readonly record struct ToolInvocation(string FileName, IReadOnlyList<string> Arguments);
+
+    /// <summary>
+    /// Locates a usable <c>mypy</c>: an explicit <c>KOINE_MYPY</c> override (always wins), a direct
+    /// <c>mypy</c> on PATH, or <c>&lt;python&gt; -m mypy</c> via a resolved interpreter. Returns
+    /// <c>null</c> when none works so the caller can skip. Each candidate launch is probed in a
+    /// try/catch: a candidate whose process refuses to start (e.g. a <c>mypy</c> on PATH with a
+    /// shebang pointing at a removed interpreter) is skipped and the next candidate is tried.
+    /// </summary>
+    private static ToolInvocation? ResolveMypy()
+    {
+        if (Environment.GetEnvironmentVariable("KOINE_MYPY") is { Length: > 0 } overrideMypy)
+        {
+            return new ToolInvocation(overrideMypy, Array.Empty<string>());
+        }
+
+        if (OnPath("mypy") is { } direct && CanRun(direct, ["--version"]))
+        {
+            return new ToolInvocation(direct, Array.Empty<string>());
+        }
+
+        if (ResolvePython() is { } python && CanRun(python.FileName, [.. python.Arguments, "-m", "mypy", "--version"]))
+        {
+            return new ToolInvocation(python.FileName, [.. python.Arguments, "-m", "mypy"]);
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Locates a usable Python interpreter, preferring versioned 3.11+ binaries over bare
+    /// <c>python3</c> (which may be 3.9 and cannot parse <c>match</c> / PEP&#160;604 unions). Order:
+    /// <c>KOINE_PYTHON</c> override → <c>python3.13</c> → <c>python3.12</c> → <c>python3.11</c> →
+    /// <c>python3</c> → <c>python</c>. Returns <c>null</c> when none launches. Each candidate is
+    /// probed via <see cref="CanRun"/> so a broken binary is skipped rather than crashing.
+    /// </summary>
+    private static ToolInvocation? ResolvePython()
+    {
+        if (Environment.GetEnvironmentVariable("KOINE_PYTHON") is { Length: > 0 } overridePython)
+        {
+            return new ToolInvocation(overridePython, Array.Empty<string>());
+        }
+
+        foreach (string name in new[] { "python3.13", "python3.12", "python3.11", "python3", "python" })
+        {
+            if (OnPath(name) is { } found && CanRun(found, ["--version"]))
+            {
+                return new ToolInvocation(found, Array.Empty<string>());
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>Captured result of a child process: exit code plus full stdout/stderr.</summary>
+    private readonly record struct ProcessRun(int ExitCode, string StdOut, string StdErr);
+
+    /// <summary>
+    /// Runs a process to completion in <paramref name="workingDirectory"/>, capturing its exit code,
+    /// stdout, and stderr. Returns <c>null</c> when the process fails to even start (e.g. a broken
+    /// shebang) so callers can fall through to the next candidate instead of crashing.
+    /// </summary>
+    private static ProcessRun? RunProcess(string fileName, IReadOnlyList<string> args, string? workingDirectory = null)
+    {
+        try
+        {
+            var psi = new ProcessStartInfo
+            {
+                FileName = fileName,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true,
+            };
+            if (workingDirectory is not null)
+            {
+                psi.WorkingDirectory = workingDirectory;
+            }
+
+            foreach (string a in args)
+            {
+                psi.ArgumentList.Add(a);
+            }
+
+            using var proc = Process.Start(psi);
+            if (proc is null)
+            {
+                return null;
+            }
+
+            string stdout = proc.StandardOutput.ReadToEnd();
+            string stderr = proc.StandardError.ReadToEnd();
+            proc.WaitForExit();
+            return new ProcessRun(proc.ExitCode, stdout, stderr);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
     /// <summary>How to invoke <c>tsc</c>: a program plus leading arguments (e.g. <c>npx tsc</c>).</summary>
     private readonly record struct TscInvocation(string FileName, IReadOnlyList<string> Arguments);
 
