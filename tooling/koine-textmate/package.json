@@ -2,7 +2,7 @@
   "name": "koine",
   "displayName": "Koine",
   "description": "Syntax highlighting and live diagnostics for the Koine DDD language (.koi).",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "publisher": "atypical-consulting",
   "icon": "assets/icon.png",
   "engines": { "vscode": "^1.75.0" },
@@ -23,10 +23,25 @@
     "vscode:prepublish": "npm run compile",
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
+    "test:lsp": "node test/lsp-smoke.mjs",
     "package": "vsce package",
     "install-vsce": "npm i -g @vscode/vsce"
   },
   "contributes": {
+    "commands": [
+      { "command": "koine.previewEmit", "title": "Preview Emitted Code", "category": "Koine" },
+      { "command": "koine.showGlossary", "title": "Show Glossary", "category": "Koine" },
+      { "command": "koine.showContextMap", "title": "Show Context Map", "category": "Koine" },
+      { "command": "koine.checkCompatibility", "title": "Check Compatibility (vs baseline)", "category": "Koine" }
+    ],
+    "menus": {
+      "commandPalette": [
+        { "command": "koine.previewEmit", "when": "editorLangId == koine" },
+        { "command": "koine.showGlossary", "when": "editorLangId == koine" },
+        { "command": "koine.showContextMap", "when": "editorLangId == koine" },
+        { "command": "koine.checkCompatibility", "when": "editorLangId == koine" }
+      ]
+    },
     "languages": [
       {
         "id": "koine",
