@@ -726,6 +726,15 @@ public class LspServerTests
             @params = new { textDocument = new { uri }, baseline },
         }));
 
+    private static byte[] Docs(string uri) =>
+        Frame(JsonSerializer.Serialize(new
+        {
+            jsonrpc = "2.0",
+            id = 31,
+            method = "koine/docs",
+            @params = new { textDocument = new { uri } },
+        }));
+
     // ---- koine/emitPreview ----
 
     [Fact]
@@ -1091,6 +1100,48 @@ public class LspServerTests
         Assert.DoesNotContain("-32601", output);
     }
 
+    // ---- koine/docs ----
+
+    [Fact]
+    public void Docs_returns_mermaid_files_for_open_model()
+    {
+        // A state machine produces a Mermaid stateDiagram in the context's docs file.
+        var doc = "context C {\n"
+                + "  aggregate Order root Order {\n"
+                + "    enum OrderStatus { Draft, Placed }\n"
+                + "    entity Order identified by OrderId {\n"
+                + "      status: OrderStatus = Draft\n"
+                + "      states status { Draft -> Placed }\n"
+                + "    }\n"
+                + "  }\n"
+                + "}\n";
+        var output = RunSession(
+            Initialize(),
+            DidOpen("file:///t.koi", doc),
+            Docs("file:///t.koi"));
+
+        Assert.Contains("\"files\":[", output);
+        Assert.DoesNotContain("\"files\":[]", output);
+        Assert.Contains("docs/C.md", output);   // one page per bounded context
+        Assert.Contains("docs/index.md", output);
+        Assert.Contains("mermaid", output);      // inline Mermaid diagram fences
+        Assert.Contains("\"id\":31", output);
+    }
+
+    [Fact]
+    public void Docs_null_model_returns_empty_files()
+    {
+        var badDoc = "context C {\n  value {\n  }\n}\n"; // unnamed value: does not parse
+        var output = RunSession(
+            Initialize(),
+            DidOpen("file:///bad.koi", badDoc),
+            Docs("file:///bad.koi"));
+
+        Assert.Contains("\"files\":[]", output);
+        Assert.Contains("\"id\":31", output);
+        Assert.DoesNotContain("-32601", output); // a normal result, not a JSON-RPC error
+    }
+
     // ---- capability discovery ----
 
     [Fact]
@@ -1101,6 +1152,7 @@ public class LspServerTests
         Assert.Contains("\"koineEmitPreview\":true", output);
         Assert.Contains("\"koineGlossary\":true", output);
         Assert.Contains("\"koineContextMap\":true", output);
+        Assert.Contains("\"koineDocs\":true", output);
         Assert.Contains("\"koineCheck\":true", output);
         // Additive — existing capabilities unchanged.
         Assert.Contains("\"hoverProvider\":true", output);
