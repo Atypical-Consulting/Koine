@@ -201,10 +201,21 @@ public sealed partial class PythonEmitter
             stdlib.Add("from collections.abc import " + string.Join(", ", abc));
         }
 
-        // Smart enums need `enum.Enum` and a module-level `TypeVar` for the generic `match` return.
+        // `typing` exports: `Protocol` (repository/service contracts) and `TypeVar` (a smart enum's
+        // generic `match` return). Collapse into one deterministic import line when both appear.
+        var typing = new List<string>();
+        if (present.Contains("Protocol"))
+        {
+            typing.Add("Protocol");
+        }
         if (present.Contains("TypeVar"))
         {
-            stdlib.Add("from typing import TypeVar");
+            typing.Add("TypeVar");
+        }
+        if (typing.Count > 0)
+        {
+            typing.Sort(StringComparer.Ordinal);
+            stdlib.Add("from typing import " + string.Join(", ", typing));
         }
 
         if (present.Contains("enum"))
@@ -324,11 +335,17 @@ public sealed partial class PythonEmitter
 
         foreach (ContextNode ctx in model.Contexts)
         {
+            // Aggregate-root entities emit at the context package root (no `entities/` subfolder, see
+            // EmitEntity), so their recorded location must match — otherwise a cross-module importer
+            // (e.g. the root's repository Protocol) would resolve a non-existent `entities/<root>`.
+            var rootEntityNames = new HashSet<string>(
+                ctx.AllTypeDecls().OfType<AggregateDecl>().Select(a => a.RootName), StringComparer.Ordinal);
+
             var idsHere = new HashSet<string>(StringComparer.Ordinal);
             foreach (TypeDecl type in ctx.AllTypeDecls())
             {
                 var ns = ModelIndex.NamespaceOf(ctx.Name, type.ModulePath);
-                Record(locations, ctx.Name, type, ns);
+                Record(locations, ctx.Name, type, ns, rootEntityNames);
                 if (type is EntityDecl entity)
                 {
                     // The branded ID type lives alongside value objects.
@@ -354,7 +371,7 @@ public sealed partial class PythonEmitter
         return locations;
     }
 
-    private void Record(List<PyTypeLocation> locations, string context, TypeDecl type, string ns)
+    private void Record(List<PyTypeLocation> locations, string context, TypeDecl type, string ns, IReadOnlySet<string> rootEntityNames)
     {
         switch (type)
         {
@@ -364,11 +381,12 @@ public sealed partial class PythonEmitter
             case EnumDecl en:
                 Add(locations, context, en.Name, ns, KindFolder.Enums);
                 break;
-            // Every entity — including an aggregate root — is recorded in `entities/` for now;
-            // aggregate-root context-root placement lands in Task 9 (and updates this together with
-            // EmitEntity, so the two stay consistent).
+            // An aggregate-root entity is recorded at the context package root (KindFolder.Root) so
+            // importers resolve `sales.order`, not `sales.entities.order`; non-root entities stay in
+            // `entities/`. This MUST agree with EmitEntity's PathFor decision.
             case EntityDecl entity:
-                Add(locations, context, entity.Name, ns, KindFolder.Entities);
+                Add(locations, context, entity.Name, ns,
+                    rootEntityNames.Contains(entity.Name) ? KindFolder.Root : KindFolder.Entities);
                 break;
             case EventDecl ev:
                 Add(locations, context, ev.Name, ns, KindFolder.Events);

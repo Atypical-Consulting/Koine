@@ -82,13 +82,24 @@ public sealed partial class PythonEmitter : IEmitter
         files.Add(new EmittedFile("py.typed", PyTyped));
         files.Add(new EmittedFile("pyproject.toml", PyProjectToml));
 
-        // 2. Per-context user types, one module each.
+        // 2. Per-context user types, one module each. Iterate `ctx.Types` (NOT the flattened
+        //    `AllTypeDecls()`): an `AggregateDecl` is routed through `EmitType`, which recurses over
+        //    its nested types — emitting the ROOT entity at the context package root and the rest in
+        //    their kind folders — then emits the root's repository. (The TS emitter's structure.)
         foreach (ContextNode ctx in model.Contexts)
         {
-            foreach (TypeDecl type in ctx.AllTypeDecls())
+            foreach (TypeDecl type in ctx.Types)
             {
                 var ns = ModelIndex.NamespaceOf(ctx.Name, type.ModulePath);
-                EmitType(emit, files, type, ns, typeMapper);
+                EmitType(emit, files, type, ns, root: null, typeMapper);
+            }
+
+            // Application services and pure domain operations: a `service` lives on
+            // `ContextNode.Services` (not in `Types`), so iterate it separately. Each emits a
+            // `typing.Protocol` whose async members are the use cases (and any seam operations).
+            foreach (ServiceDecl svc in ctx.Services)
+            {
+                EmitServiceFiles(emit, files, svc, ctx.Name, typeMapper);
             }
 
             // ID types referenced but not owned by an entity in this context (e.g. a foreign *Id):
@@ -109,14 +120,16 @@ public sealed partial class PythonEmitter : IEmitter
 
     /// <summary>
     /// Dispatches a single <see cref="TypeDecl"/> to its construct emitter. Value objects (regular
-    /// and quantities) and smart enums emit now; entities, aggregates, and events are no-ops until
-    /// their later tasks.
+    /// and quantities), smart enums, entities, events, and aggregates emit. The
+    /// <paramref name="root"/>/<paramref name="versioned"/> flags flow from the enclosing
+    /// <see cref="AggregateDecl"/>: the aggregate ROOT entity emits at the context package root
+    /// (<see cref="KindFolder.Root"/>) and — when the aggregate is <c>versioned</c> — gains a
+    /// <c>version</c> field; every other entity lands in <c>entities/</c>.
     /// </summary>
-    private void EmitType(PyEmitContext emit, List<EmittedFile> files, TypeDecl type, string ns, PythonTypeMapper typeMapper)
+    private void EmitType(
+        PyEmitContext emit, List<EmittedFile> files, TypeDecl type, string ns,
+        EntityDecl? root, PythonTypeMapper typeMapper, bool versioned = false)
     {
-        // `AllTypeDecls()` already flattens each aggregate's nested types into the iteration, so an
-        // `AggregateDecl` itself is a no-op here (its entity/events arrive as their own decls); only
-        // the leaf constructs are routed.
         switch (type)
         {
             // A `quantity` and a regular `value` share one emitter; the quantity flag inside
@@ -129,13 +142,13 @@ public sealed partial class PythonEmitter : IEmitter
             case EnumDecl @enum:
                 files.Add(EmitEnum(emit, @enum, ns, typeMapper));
                 break;
-            // An entity emits as a mutable @dataclass(eq=False) with identity equality (including its
-            // commands as mutating methods and `create` factories as classmethods, Task 8), plus its
-            // branded `<XId>` value object (per ID strategy). Aggregate-root placement (context-root
-            // module) lands in Task 9, so for now every entity — including an aggregate root — emits
-            // into `entities/`.
+            // An entity emits as a mutable @dataclass(eq=False) with identity equality (commands,
+            // factories, Task 8), plus its branded `<XId>` value object. The aggregate root emits at
+            // the context package root and is marked an `AggregateRoot`; non-root entities stay in
+            // `entities/`.
             case EntityDecl entity:
-                files.Add(EmitEntity(emit, entity, ns, typeMapper));
+                var isRoot = ReferenceEquals(entity, root);
+                files.Add(EmitEntity(emit, entity, ns, isRoot, isRoot && versioned, typeMapper));
                 files.Add(EmitIdType(emit, entity.IdentityName, ns, entity.IdStrategy, entity.IdBackingType));
                 break;
             // A domain `event` and an `integration event` both emit as frozen-dataclass DTOs (Task 8).
@@ -145,8 +158,20 @@ public sealed partial class PythonEmitter : IEmitter
             case IntegrationEventDecl iev:
                 files.Add(EmitEvent(emit, iev.Name, iev.Doc, iev.Members, ns, typeMapper));
                 break;
-            case AggregateDecl:
-                // Filled in by a later task (aggregates/repositories).
+            // An aggregate emits each nested type (the root at the context package root, the rest in
+            // their kind folders) followed by the root's persistence-ignorant repository Protocol.
+            case AggregateDecl agg:
+                EntityDecl? aggRoot = agg.RootEntity();
+                foreach (TypeDecl nested in agg.Types)
+                {
+                    EmitType(emit, files, nested, ns, aggRoot, typeMapper, agg.IsVersioned);
+                }
+
+                if (EmitRepository(emit, agg, aggRoot, ns, typeMapper) is { } repo)
+                {
+                    files.Add(repo);
+                }
+
                 break;
         }
     }

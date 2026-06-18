@@ -30,7 +30,8 @@ public sealed partial class PythonEmitter
     // Entity (mutable @dataclass(eq=False) with identity equality)
     // ----------------------------------------------------------------------
 
-    private EmittedFile EmitEntity(PyEmitContext emit, EntityDecl entity, string ns, PythonTypeMapper typeMapper)
+    private EmittedFile EmitEntity(
+        PyEmitContext emit, EntityDecl entity, string ns, bool isRoot, bool isVersioned, PythonTypeMapper typeMapper)
     {
         var name = PythonNaming.ToPascalCase(entity.Name);
         var idName = PythonNaming.ToPascalCase(entity.IdentityName);
@@ -73,6 +74,16 @@ public sealed partial class PythonEmitter
                 sb.Append(" = ").Append(def);
             }
             sb.Append('\n');
+        }
+
+        // Optimistic-concurrency token on a versioned aggregate's ROOT (the Python analogue of the C#
+        // `Version { get; init; }` / TS `version`). Defaulted to 0 so it follows every non-defaulted
+        // field legally and is assignable by the persistence layer; excluded from identity equality
+        // (which is by `id` alone). A stale write raises the runtime `ConcurrencyConflictError`.
+        if (isVersioned)
+        {
+            WriteDoc(sb, "Optimistic-concurrency token, assigned by the persistence layer.", Indent);
+            sb.Append(Indent).Append("version: int = 0\n");
         }
 
         // Domain-event recording buffer (when any command or factory emits events). A non-constructor
@@ -130,9 +141,26 @@ public sealed partial class PythonEmitter
         sb.Append(Indent).Append("def __hash__(self) -> int:\n");
         sb.Append(Indent).Append(Indent).Append("return hash(self.id)\n");
 
+        // Aggregate-root marking (the Python analogue of the C# `: IAggregateRoot` / TS root flag).
+        // The runtime `AggregateRoot` is a `@runtime_checkable` structural Protocol exposing `id`;
+        // the entity's `id` field already satisfies it. We assert that structurally with a
+        // module-level `type[AggregateRoot]` binding rather than inheriting — inheriting the Protocol
+        // would shadow the dataclass `id` field with a setter-less property and break construction —
+        // so the mark is mypy-strict-verified AND the dataclass keeps working.
+        if (isRoot)
+        {
+            sb.Append('\n').Append('\n');
+            sb.Append("_AGGREGATE_ROOT_CHECK: type[AggregateRoot] = ").Append(name).Append('\n');
+        }
+
+        // The aggregate root emits at the context package ROOT (`sales/order.py`), every other entity
+        // under `entities/` (`sales/entities/<name>.py`). The placement MUST agree with the
+        // type-location map (`Record`/`BuildTypeLocations`), or a cross-module importer would resolve
+        // a non-existent `entities/<root>` module.
+        var folder = isRoot ? KindFolder.Root : KindFolder.Entities;
         return new EmittedFile(
-            PathFor(ns, KindFolder.Entities, entity.Name),
-            Assemble(emit, ns, KindFolder.Entities, sb.ToString(), name));
+            PathFor(ns, folder, entity.Name),
+            Assemble(emit, ns, folder, sb.ToString(), name));
     }
 
     // ----------------------------------------------------------------------

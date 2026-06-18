@@ -148,4 +148,161 @@ public class PythonConformanceTests
 
         Assert.True(types.Ok, "emitted Python should type-check under mypy --strict:\n" + string.Join("\n", types.Errors));
     }
+
+    /// <summary>
+    /// A <c>versioned</c> aggregate plus its repository must emit and type-check under
+    /// <c>mypy --strict</c>: the root carries a defaulted <c>version: int</c> field (legal dataclass
+    /// ordering), is marked an <c>AggregateRoot</c>, and the repository is a <c>typing.Protocol</c>
+    /// with async members. Proves Parts B and C.
+    /// </summary>
+    [Fact]
+    public void Versioned_aggregate_and_repository_typecheck_under_strict()
+    {
+        const string source = """
+            context Inventory {
+              /// A stock item whose level is guarded by optimistic concurrency.
+              aggregate Stock root Stock versioned {
+                entity Stock identified by StockId {
+                  sku:   String
+                  level: Int = 0
+                  invariant level >= 0 "stock level cannot be negative"
+                }
+
+                repository {
+                  find bySku(sku: String): Stock
+                }
+              }
+
+              /// A domain service computing a reorder signal (a pure operation).
+              service ReorderPolicy {
+                operation needsReorder(level: Int, threshold: Int): Bool = level < threshold
+              }
+
+              /// An application boundary for stock adjustments (async use cases).
+              service StockAppService {
+                usecase AdjustLevel(stock: StockId, delta: Int): StockId
+                usecase Retire(stock: StockId)
+              }
+            }
+            """;
+
+        var result = new KoineCompiler().Compile(source, new PythonEmitter());
+        Assert.True(result.Success, string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        // The versioned root carries `version` and is marked an AggregateRoot; the repository is an
+        // async Protocol. Assert the emitted shapes regardless of toolchain availability.
+        var root = FileText(result.Files, "inventory/stock.py");
+        Assert.Contains("version: int = 0", root);
+        Assert.Contains("_AGGREGATE_ROOT_CHECK: type[AggregateRoot] = Stock", root);
+
+        var repo = FileText(result.Files, "inventory/repositories/stock_repository.py");
+        Assert.Contains("class StockRepository(Protocol):", repo);
+        Assert.Contains("async def get(self, id: StockId) -> Stock | None: ...", repo);
+        Assert.Contains("async def save(self, aggregate: Stock) -> None: ...", repo);
+        Assert.Contains("async def by_sku(self, sku: str) -> Stock | None: ...", repo);
+
+        var domainService = FileText(result.Files, "inventory/reorder_policy.py");
+        Assert.Contains("class ReorderPolicy(Protocol):", domainService);
+        Assert.Contains("def needs_reorder(self, level: int, threshold: int) -> bool:", domainService);
+
+        var appService = FileText(result.Files, "inventory/stock_app_service.py");
+        Assert.Contains("class StockAppService(Protocol):", appService);
+        Assert.Contains("async def adjust_level(self, stock: StockId, delta: int) -> StockId: ...", appService);
+        Assert.Contains("async def retire(self, stock: StockId) -> None: ...", appService);
+
+        AssertStrictlyTypeChecks(result.Files);
+    }
+
+    /// <summary>
+    /// A two-context model where context <c>Sales</c> references a <c>value</c> from context
+    /// <c>Catalog</c> must emit a QUALIFIED cross-context import to the type's real module
+    /// (<c>from catalog.value_objects.sku import Sku</c>), never a guessed/relative path — both in the
+    /// referencing value object AND in the aggregate-root repository Protocol. Proves Part D, which the
+    /// single-context main fixture cannot exercise.
+    /// </summary>
+    [Fact]
+    public void Cross_context_reference_resolves_to_qualified_import_and_typechecks()
+    {
+        const string source = """
+            context Catalog {
+              /// A stock-keeping unit identifying a catalog product.
+              value Sku {
+                code: String
+                invariant code != "" "a sku code cannot be empty"
+              }
+            }
+
+            context Sales {
+              import Catalog.{ Sku }
+
+              /// A line item referencing a catalog Sku from another bounded context.
+              value BasketLine {
+                sku:      Sku
+                quantity: Int
+                invariant quantity >= 1 "a line needs at least one unit"
+              }
+
+              aggregate Basket root Basket {
+                entity Basket identified by BasketId {
+                  lines: List<BasketLine>
+                  invariant !lines.isEmpty "a basket must have at least one line"
+                }
+
+                repository {
+                  find bySku(sku: Sku): List<Basket>
+                }
+              }
+            }
+            """;
+
+        var result = new KoineCompiler().Compile(source, new PythonEmitter());
+        Assert.True(result.Success, string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        // The cross-context `Sku` resolves to Catalog's real module — in the value object and the repo.
+        var line = FileText(result.Files, "sales/value_objects/basket_line.py");
+        Assert.Contains("from catalog.value_objects.sku import Sku", line);
+
+        var repo = FileText(result.Files, "sales/repositories/basket_repository.py");
+        Assert.Contains("from catalog.value_objects.sku import Sku", repo);
+        Assert.Contains("async def by_sku(self, sku: Sku) -> tuple[Basket, ...]: ...", repo);
+
+        // The root emits at the context package root (not under entities/).
+        Assert.Contains(result.Files, f => f.RelativePath == "sales/basket.py");
+
+        AssertStrictlyTypeChecks(result.Files);
+    }
+
+    /// <summary>The full text of an emitted file, by relative path (fails the test if absent).</summary>
+    private static string FileText(IReadOnlyList<EmittedFile> files, string relativePath)
+    {
+        EmittedFile? file = files.FirstOrDefault(f => f.RelativePath == relativePath);
+        Assert.True(file is not null, $"expected an emitted file at '{relativePath}'");
+        return file!.Contents;
+    }
+
+    /// <summary>
+    /// Runs the always-on syntax gate and the mypy <c>--strict</c> type-check over the emitted tree.
+    /// Inconclusive (logged, not failed) when no toolchain is present; with one, BOTH must pass.
+    /// </summary>
+    private void AssertStrictlyTypeChecks(IReadOnlyList<EmittedFile> files)
+    {
+        TestSupport.PythonCheck syntax = TestSupport.SyntaxCheckPython(files);
+        if (!syntax.ToolchainAvailable)
+        {
+            _output.WriteLine(NoInterpreterNotice);
+        }
+        else
+        {
+            Assert.True(syntax.Ok, "emitted Python should parse (ast.parse):\n" + string.Join("\n", syntax.Errors));
+        }
+
+        TestSupport.PythonCheck types = TestSupport.TypeCheckPython(files);
+        if (!types.ToolchainAvailable)
+        {
+            _output.WriteLine(NoToolchainNotice);
+            return;
+        }
+
+        Assert.True(types.Ok, "emitted Python should type-check under mypy --strict:\n" + string.Join("\n", types.Errors));
+    }
 }
