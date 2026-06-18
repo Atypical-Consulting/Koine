@@ -11,6 +11,9 @@
   <Folder Name="/tests/">
     <Project Path="tests/Koine.Compiler.Tests/Koine.Compiler.Tests.csproj" />
   </Folder>
+  <Folder Name="/benchmarks/">
+    <Project Path="benchmarks/Koine.Compiler.Benchmarks/Koine.Compiler.Benchmarks.csproj" />
+  </Folder>
   <Folder Name="/demo/">
     <Project Path="demo/Shop.Domain/Shop.Domain.csproj" />
   </Folder>

@@ -1,0 +1,29 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+    <RootNamespace>Koine.Compiler.Benchmarks</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="BenchmarkDotNet" Version="0.15.4" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Koine.Compiler\Koine.Compiler.csproj" />
+  </ItemGroup>
+
+  <!-- Copy a representative .koi corpus next to the binary so benchmarks can read real
+       inputs at runtime (resolved via AppContext.BaseDirectory/corpus). -->
+  <ItemGroup>
+    <None Include="..\..\examples\billing.koi" Link="corpus\billing.koi"
+          CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\demo\Shop.Domain\Models\*.koi" Link="corpus\shop\%(Filename)%(Extension)"
+          CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>
