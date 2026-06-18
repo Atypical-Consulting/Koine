@@ -400,8 +400,9 @@ public class CrossEmitterConformanceTests
 
     /// <summary>
     /// Locates a Node toolchain binary (<c>tsc</c> or <c>node</c>): an explicit <c>KOINE_TSC</c> /
-    /// <c>KOINE_NODE</c> override first, then PATH. Returns <c>null</c> when absent so the TS half is
-    /// skipped (reported inconclusive) rather than failing.
+    /// <c>KOINE_NODE</c> override first, then PATH, then the repo-local install under
+    /// <c>tooling/koine-textmate/node_modules/.bin</c>. Returns <c>null</c> when absent so the TS half
+    /// is skipped (reported inconclusive) rather than failing.
     /// </summary>
     private static string? ResolveNodeTool(string tool)
     {
@@ -426,6 +427,41 @@ public class CrossEmitterConformanceTests
                     return candidate;
                 }
             }
+        }
+
+        // Fall back to the repo-local install, mirroring TestSupport.ResolveTsc(): a dev who ran
+        // `npm install` under tooling/koine-textmate gets a `.bin/tsc` even with nothing on PATH, so
+        // the cross-emitter check runs for real instead of staying dormant. (`node` is not vendored
+        // there, so it must still be on PATH — which it is whenever npm is available.)
+        return RepoLocalBin(names);
+    }
+
+    /// <summary>
+    /// Probes <c>tooling/koine-textmate/node_modules/.bin/&lt;tool&gt;</c> by walking up from the test
+    /// assembly directory to the repo root (the directory containing <c>.git</c>). Returns the first
+    /// existing candidate, or <c>null</c> when the repo root or the install is absent.
+    /// </summary>
+    private static string? RepoLocalBin(string[] names)
+    {
+        for (DirectoryInfo? dir = new(AppContext.BaseDirectory); dir is not null; dir = dir.Parent)
+        {
+            if (!Directory.Exists(Path.Combine(dir.FullName, ".git")) &&
+                !File.Exists(Path.Combine(dir.FullName, ".git")))
+            {
+                continue;
+            }
+
+            foreach (string n in names)
+            {
+                string candidate = Path.Combine(
+                    dir.FullName, "tooling", "koine-textmate", "node_modules", ".bin", n);
+                if (File.Exists(candidate))
+                {
+                    return candidate;
+                }
+            }
+
+            return null;
         }
 
         return null;
