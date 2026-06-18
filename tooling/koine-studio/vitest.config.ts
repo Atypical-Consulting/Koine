@@ -1,10 +1,11 @@
-import { defineConfig } from "vitest/config";
+import { defineConfig } from 'vitest/config';
 
-// Unit tests run against a happy-dom DOM so the overlay/modal chrome (focus, keydown,
-// document.body mounting) behaves as it does in the browser.
+// Unit/integration tests run under happy-dom: the overlay/modal chrome (focus, keydown, document.body
+// mounting) and the file explorer's role=tree (focus, keyboard nav, DOM rebuild) behave as they do in
+// the browser; the browser fs ops are driven against mocked File-System-Access handles.
 export default defineConfig({
   test: {
-    environment: "happy-dom",
-    include: ["src/**/*.test.ts"],
+    environment: 'happy-dom',
+    include: ['src/**/*.test.ts'],
   },
 });

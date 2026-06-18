@@ -14,7 +14,8 @@ import {
   type TextEdit,
   type WorkspaceEdit,
 } from './lsp';
-import { getPlatform, type KoiFile } from './host';
+import { getPlatform, type FsEntry, type KoiFile } from './host';
+import { createExplorer } from './explorer';
 import { currentTheme, initTheme, onThemeChange, toggleTheme } from './theme';
 import { clearScratch, loadScratch, loadSettings, pushRecentFolder, saveScratch, type Settings } from './store';
 import { createWelcome } from './welcome';
@@ -324,10 +325,30 @@ export function init(): void {
   const diagnosticsByUri = new Map<string, LspDiagnostic[]>();
   let activeUri = SCRATCH_URI;
   let folderMode = false;
+  // The opened-folder token and the last explorer tree fetched for it. The explorer is a *view*:
+  // it renders this cached tree (re-reading dirty/diagnostics/active state via callbacks), while
+  // the open .koi `buffers` remain the compiled workspace. Mutations refresh both.
+  let folderRootToken: string | null = null;
+  let entriesCache: FsEntry[] = [];
 
   const treeEl = el<HTMLElement>('filetree');
-  const treeListEl = el<HTMLUListElement>('filetree-list');
+  const treeBodyEl = el<HTMLElement>('filetree-body');
   const treeTitleEl = el<HTMLElement>('filetree-title');
+
+  // The workspace file explorer. It deals in opaque fs tokens; ide.ts maps token ↔ file:// uri
+  // (pathToFileUri) to keep `buffers`, `activeUri` and the LSP workspace coherent on every mutation.
+  const explorer = createExplorer({
+    onOpenFile: (token) => void openFileToken(token),
+    onNewFile: (parentDirToken, name) => void handleNewFile(parentDirToken, name),
+    onNewFolder: (parentDirToken, name) => void handleNewFolder(parentDirToken, name),
+    onRename: (entry, newName) => void handleRename(entry, newName),
+    onDelete: (entry) => void handleDelete(entry),
+    onDuplicate: (entry) => void handleDuplicate(entry),
+    isActive: (token) => pathToFileUri(token) === activeUri,
+    isDirty: (token) => buffers.get(pathToFileUri(token))?.dirty ?? false,
+    diagCounts: (token) => diagCounts(pathToFileUri(token)),
+  });
+  treeBodyEl.appendChild(explorer.el);
 
   // Seed the scratch buffer up front so onChange/diagnostics have somewhere to land.
   buffers.set(SCRATCH_URI, {
@@ -419,55 +440,240 @@ export function init(): void {
     return { errors, warnings };
   }
 
-  // Render the open-buffer list into the left rail, sorted by relPath. Each row shows the
-  // file name (with a dirty dot), the parent folder as muted context, and an error/warning
-  // badge when the file currently has diagnostics. Clicking a row activates that file.
+  // Re-render the explorer from the cached entry tree. Cheap to call on any state change (dirty,
+  // diagnostics, active file) — the explorer reads those per row via the callbacks. A no-op outside
+  // folder mode (the tree is hidden then).
   function renderTree(): void {
-    treeListEl.innerHTML = '';
-    const rows = Array.from(buffers.values())
-      .filter((b) => b.path != null) // scratch buffer is not listed in folder mode
-      .sort((a, b) => a.relPath.localeCompare(b.relPath));
-    for (const buf of rows) {
-      const li = document.createElement('li');
-      li.setAttribute('role', 'treeitem');
-      const row = document.createElement('button');
-      row.type = 'button';
-      row.className = 'tree-row';
-      if (buf.uri === activeUri) row.setAttribute('aria-current', 'true');
+    if (!folderMode || folderRootToken == null) return;
+    explorer.render(entriesCache, folderRootToken);
+  }
 
-      const slash = buf.relPath.lastIndexOf('/');
-      const dir = slash >= 0 ? buf.relPath.slice(0, slash + 1) : '';
-      const label = document.createElement('span');
-      label.className = 'tree-name';
-      label.textContent = buf.name;
-      if (buf.dirty) {
-        const dot = document.createElement('span');
-        dot.className = 'tree-dirty';
-        dot.title = 'Unsaved changes';
-        dot.textContent = '•';
-        label.appendChild(dot);
+  // --- workspace mutations (create / rename / delete / move) -----------------
+  // The explorer surfaces user intent as opaque tokens; these handlers do the host fs op, then keep
+  // `buffers` / `activeUri` / the LSP workspace coherent and refresh the tree. relPaths handed to
+  // the host are always relative to the opened folder (folderRootToken).
+
+  /** The folder-relative, forward-slashed path of a token under the opened folder ('' for the root). */
+  function relOfToken(token: string): string {
+    if (folderRootToken == null || token === folderRootToken) return '';
+    // Require a real separator boundary after the root prefix so a sibling that merely shares the
+    // root as a string prefix (e.g. root `/work/app`, token `/work/app2/x`) isn't mis-sliced. Then
+    // strip the prefix + separator and normalise Windows '\' to '/'.
+    if (token.startsWith(folderRootToken + '/') || token.startsWith(folderRootToken + '\\')) {
+      return token.slice(folderRootToken.length + 1).replace(/\\/g, '/');
+    }
+    return token;
+  }
+
+  /** Re-read the folder's entry tree from the host and re-render the explorer. */
+  async function refreshEntries(): Promise<void> {
+    if (folderRootToken == null) return;
+    try {
+      entriesCache = await platform.listEntries(folderRootToken);
+    } catch (e) {
+      console.error('listEntries failed:', e);
+    }
+    renderTree();
+  }
+
+  /** Open a .koi file token as a buffer if it isn't open yet; returns its uri (or null on failure). */
+  async function ensureBuffer(token: string): Promise<string | null> {
+    const uri = pathToFileUri(token);
+    if (buffers.has(uri)) return uri;
+    let text: string;
+    try {
+      text = await platform.readTextFile(token);
+    } catch (e) {
+      console.error('readTextFile failed for', token, e);
+      return null;
+    }
+    buffers.set(uri, { uri, path: token, relPath: relOfToken(token), name: nameOf(token), text, dirty: false });
+    lsp.openDoc(uri, text);
+    return uri;
+  }
+
+  // Clicking a file row: open it (if needed) and make it the active editor buffer.
+  async function openFileToken(token: string): Promise<void> {
+    const uri = await ensureBuffer(token);
+    if (uri) activateFile(uri);
+  }
+
+  async function handleNewFile(parentDirToken: string, name: string): Promise<void> {
+    if (folderRootToken == null) return;
+    const parentRel = relOfToken(parentDirToken);
+    // The explorer only surfaces directories and .koi files, so default an extensionless name to
+    // `.koi` — otherwise the created file would be invisible (listEntries filters it out) and the
+    // user would think New File silently failed.
+    const fileName = name.includes('.') ? name : `${name}.koi`;
+    const relPath = parentRel ? `${parentRel}/${fileName}` : fileName;
+    try {
+      const token = await platform.createFile(folderRootToken, relPath, '');
+      await refreshEntries();
+      if (token.toLowerCase().endsWith('.koi')) await openFileToken(token);
+    } catch (e) {
+      setStatus('could not create file', 'error');
+      console.error('createFile failed:', e);
+    }
+  }
+
+  async function handleNewFolder(parentDirToken: string, name: string): Promise<void> {
+    if (folderRootToken == null) return;
+    const parentRel = relOfToken(parentDirToken);
+    const relPath = parentRel ? `${parentRel}/${name}` : name;
+    try {
+      await platform.createFolder(folderRootToken, relPath);
+      await refreshEntries();
+    } catch (e) {
+      setStatus('could not create folder', 'error');
+      console.error('createFolder failed:', e);
+    }
+  }
+
+  async function handleDelete(entry: FsEntry): Promise<void> {
+    try {
+      await platform.deleteEntry(entry.token);
+    } catch (e) {
+      setStatus('could not delete', 'error');
+      console.error('deleteEntry failed:', e);
+      return;
+    }
+    // Close every open buffer at or under the deleted token; re-point active if it was one of them.
+    let activeRemoved = false;
+    for (const buf of [...buffers.values()]) {
+      if (buf.path != null && isUnder(buf.path, entry.token)) {
+        if (buf.uri === activeUri) activeRemoved = true;
+        lsp.closeDoc(buf.uri);
+        buffers.delete(buf.uri);
+        diagnosticsByUri.delete(buf.uri);
       }
-      row.appendChild(label);
+    }
+    if (activeRemoved) activateFallback();
+    await refreshEntries();
+  }
 
-      if (dir) {
-        const dirEl = document.createElement('span');
-        dirEl.className = 'tree-dir';
-        dirEl.textContent = dir;
-        row.appendChild(dirEl);
+  async function handleRename(entry: FsEntry, newName: string): Promise<void> {
+    let newToken: string;
+    try {
+      newToken = await platform.renameEntry(entry.token, newName);
+    } catch (e) {
+      setStatus('could not rename', 'error');
+      console.error('renameEntry failed:', e);
+      return;
+    }
+    rekeyBuffers(entry.token, newToken);
+    await refreshEntries();
+  }
+
+  async function handleDuplicate(entry: FsEntry): Promise<void> {
+    if (folderRootToken == null) return;
+    const parentRel = relOfToken(parentTokenOf(entry.token) ?? folderRootToken);
+    // Try "<base> copy", then "<base> copy 2", … until the host accepts a non-colliding name.
+    for (let i = 1; i <= 50; i++) {
+      const dupName = copyName(entry.name, i, entry.kind === 'file');
+      const relPath = parentRel ? `${parentRel}/${dupName}` : dupName;
+      try {
+        const token = await platform.moveEntry(entry.token, folderRootToken, relPath, true);
+        await refreshEntries();
+        if (entry.kind === 'file' && token.toLowerCase().endsWith('.koi')) await openFileToken(token);
+        else await syncOpenKoi(); // a duplicated folder may contain new .koi files
+        return;
+      } catch (e) {
+        // A collision means "try the next candidate name". The desktop (Tauri) host rejects with a
+        // plain string, the browser with an Error — match on the message text, not the type, so the
+        // retry works on both backends.
+        if (String(e instanceof Error ? e.message : e).includes('already exists')) continue;
+        setStatus('could not duplicate', 'error');
+        console.error('duplicate failed:', e);
+        return;
       }
+    }
+    // Every candidate name collided — don't fail silently.
+    setStatus('could not duplicate (too many copies)', 'error');
+  }
 
-      const { errors, warnings } = diagCounts(buf.uri);
-      if (errors || warnings) {
-        const badge = document.createElement('span');
-        badge.className = errors ? 'tree-badge tree-badge-err' : 'tree-badge tree-badge-warn';
-        badge.textContent = String(errors || warnings);
-        badge.title = `${errors} error(s), ${warnings} warning(s)`;
-        row.appendChild(badge);
+  // --- mutation helpers ------------------------------------------------------
+
+  /** True if `path` is the token itself or lives under the `ancestor` directory token (any separator). */
+  function isUnder(path: string, ancestor: string): boolean {
+    return path === ancestor || path.startsWith(ancestor + '/') || path.startsWith(ancestor + '\\');
+  }
+
+  function nameOf(token: string): string {
+    return token.split(/[\\/]/).filter(Boolean).pop() ?? token;
+  }
+
+  function parentTokenOf(token: string): string | null {
+    const slash = Math.max(token.lastIndexOf('/'), token.lastIndexOf('\\'));
+    return slash >= 0 ? token.slice(0, slash) : null;
+  }
+
+  /** "order.koi" → "order copy.koi" (i=1) / "order copy 2.koi" (i=2); dirs get no extension split. */
+  function copyName(name: string, i: number, isFile: boolean): string {
+    const suffix = i === 1 ? ' copy' : ` copy ${i}`;
+    const dot = isFile ? name.lastIndexOf('.') : -1;
+    if (dot > 0) return `${name.slice(0, dot)}${suffix}${name.slice(dot)}`;
+    return `${name}${suffix}`;
+  }
+
+  // Re-key every buffer at/under `oldToken` to its path under `newToken` (a file or folder rename/
+  // move), preserving each buffer's unsaved text + dirty flag and keeping the LSP workspace in sync.
+  function rekeyBuffers(oldToken: string, newToken: string): void {
+    for (const buf of [...buffers.values()]) {
+      if (buf.path == null || !isUnder(buf.path, oldToken)) continue;
+      const newPath = newToken + buf.path.slice(oldToken.length);
+      const newUri = pathToFileUri(newPath);
+      const wasActive = buf.uri === activeUri;
+      lsp.closeDoc(buf.uri);
+      buffers.delete(buf.uri);
+      const diags = diagnosticsByUri.get(buf.uri);
+      diagnosticsByUri.delete(buf.uri);
+      buf.uri = newUri;
+      buf.path = newPath;
+      buf.relPath = relOfToken(newPath);
+      buf.name = nameOf(newPath);
+      buffers.set(newUri, buf);
+      if (diags) diagnosticsByUri.set(newUri, diags);
+      lsp.openDoc(newUri, buf.text);
+      if (wasActive) {
+        activeUri = newUri;
+        lsp.setActive(newUri);
       }
+    }
+  }
 
-      row.addEventListener('click', () => activateFile(buf.uri));
-      li.appendChild(row);
-      treeListEl.appendChild(li);
+  // After the active buffer is deleted, fall back to another open file, or re-establish scratch when
+  // the workspace is now empty (mirrors openFolderPath's empty-folder recovery).
+  function activateFallback(): void {
+    const next = Array.from(buffers.values())
+      .filter((b) => b.path != null)
+      .sort((a, b) => a.relPath.localeCompare(b.relPath))[0];
+    if (next) {
+      activeUri = next.uri;
+      lsp.setActive(next.uri);
+      editor.setDoc(next.text);
+      const diags = diagnosticsByUri.get(next.uri) ?? [];
+      setEditorDiagnostics(editor.view, diags);
+      renderStrip(diags);
+      updateStatus(diags);
+      invalidateDocViews();
+      return;
+    }
+    // Empty workspace: leave folder mode and reset to a fresh scratch buffer.
+    newScratch();
+  }
+
+  // Open any .koi file present in the folder but not yet buffered (used after creating/duplicating
+  // folders that may introduce new .koi files), so the compiled workspace stays complete.
+  async function syncOpenKoi(): Promise<void> {
+    if (folderRootToken == null) return;
+    let files: KoiFile[];
+    try {
+      files = await platform.listKoiFiles(folderRootToken);
+    } catch {
+      return;
+    }
+    for (const f of files) {
+      if (!buffers.has(pathToFileUri(f.path))) await ensureBuffer(f.path);
     }
   }
 
@@ -889,11 +1095,14 @@ export function init(): void {
       activeUri = SCRATCH_URI;
       lsp.setActive(SCRATCH_URI);
       folderMode = false;
+      folderRootToken = null;
+      entriesCache = [];
       treeEl.hidden = true;
       return;
     }
 
     folderMode = true;
+    folderRootToken = folder;
     // Activate the first file (sorted by relPath) and show the tree.
     const first = Array.from(buffers.values()).sort((a, b) => a.relPath.localeCompare(b.relPath))[0];
     activeUri = first.uri;
@@ -903,7 +1112,8 @@ export function init(): void {
     treeEl.hidden = false;
     pushRecentFolder(folder);
     invalidateDocViews();
-    renderTree();
+    // Fetch the full explorer tree (dirs + .koi) and render it; falls back silently on failure.
+    await refreshEntries();
     ensureLoaded(activeView);
   }
 
@@ -1017,6 +1227,9 @@ export function init(): void {
       buffers.clear();
       diagnosticsByUri.clear();
       folderMode = false;
+      folderRootToken = null;
+      entriesCache = [];
+      explorer.render([], '');
       treeEl.hidden = true;
       treeTitleEl.textContent = 'Scratch';
     } else {
@@ -1036,6 +1249,11 @@ export function init(): void {
     // Ensure the server has a fresh scratch doc, then load the SEED into the editor.
     lsp.openDoc(SCRATCH_URI, SEED);
     editor.setDoc(SEED);
+    // Clear the editor gutter / strip / status pill so a previously-active file's diagnostics don't
+    // linger until the server publishes fresh scratch diagnostics (mirrors activateFile/Fallback).
+    setEditorDiagnostics(editor.view, []);
+    renderStrip([]);
+    updateStatus([]);
     invalidateDocViews();
     renderTree();
     ensureLoaded(activeView);
