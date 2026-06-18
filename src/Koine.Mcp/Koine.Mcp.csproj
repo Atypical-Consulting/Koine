@@ -35,15 +35,39 @@
        (read via the assembly manifest in KnowledgeStore) so the packaged tool is self-contained.
        Explicit LogicalName keeps resource names stable regardless of on-disk location. -->
   <ItemGroup>
+    <EmbeddedResource Include="..\..\demo\Shop.Domain\Models\catalog.koi">
+      <LogicalName>koine.examples.shop-catalog.koi</LogicalName>
+      <Link>Models\catalog.koi</Link>
+    </EmbeddedResource>
+    <EmbeddedResource Include="..\..\demo\Shop.Domain\Models\context-map.koi">
+      <LogicalName>koine.examples.shop-context-map.koi</LogicalName>
+      <Link>Models\context-map.koi</Link>
+    </EmbeddedResource>
+    <EmbeddedResource Include="..\..\demo\Shop.Domain\Models\customers.koi">
+      <LogicalName>koine.examples.shop-customers.koi</LogicalName>
+      <Link>Models\customers.koi</Link>
+    </EmbeddedResource>
+    <EmbeddedResource Include="..\..\demo\Shop.Domain\Models\legacy.koi">
+      <LogicalName>koine.examples.shop-legacy.koi</LogicalName>
+      <Link>Models\legacy.koi</Link>
+    </EmbeddedResource>
+    <EmbeddedResource Include="..\..\demo\Shop.Domain\Models\ordering.koi">
+      <LogicalName>koine.examples.shop-ordering.koi</LogicalName>
+      <Link>Models\ordering.koi</Link>
+    </EmbeddedResource>
+    <EmbeddedResource Include="..\..\demo\Shop.Domain\Models\payments.koi">
+      <LogicalName>koine.examples.shop-payments.koi</LogicalName>
+      <Link>Models\payments.koi</Link>
+    </EmbeddedResource>
+    <EmbeddedResource Include="..\..\demo\Shop.Domain\Models\shipping.koi">
+      <LogicalName>koine.examples.shop-shipping.koi</LogicalName>
+      <Link>Models\shipping.koi</Link>
+    </EmbeddedResource>
+    <EmbeddedResource Include="..\..\examples\billing.koi">
+      <LogicalName>koine.examples.billing.koi</LogicalName>
+      <Link>Models\billing.koi</Link>
+    </EmbeddedResource>
     <EmbeddedResource Include="Knowledge\reference.md" LogicalName="koine.reference.md" />
-    <EmbeddedResource Include="..\..\examples\billing.koi" LogicalName="koine.examples.billing.koi" />
-    <EmbeddedResource Include="..\..\demo\Shop.Domain\Models\catalog.koi" LogicalName="koine.examples.shop-catalog.koi" />
-    <EmbeddedResource Include="..\..\demo\Shop.Domain\Models\customers.koi" LogicalName="koine.examples.shop-customers.koi" />
-    <EmbeddedResource Include="..\..\demo\Shop.Domain\Models\ordering.koi" LogicalName="koine.examples.shop-ordering.koi" />
-    <EmbeddedResource Include="..\..\demo\Shop.Domain\Models\payments.koi" LogicalName="koine.examples.shop-payments.koi" />
-    <EmbeddedResource Include="..\..\demo\Shop.Domain\Models\shipping.koi" LogicalName="koine.examples.shop-shipping.koi" />
-    <EmbeddedResource Include="..\..\demo\Shop.Domain\Models\context-map.koi" LogicalName="koine.examples.shop-context-map.koi" />
-    <EmbeddedResource Include="..\..\demo\Shop.Domain\Models\legacy.koi" LogicalName="koine.examples.shop-legacy.koi" />
   </ItemGroup>
 
 </Project>
