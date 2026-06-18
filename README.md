@@ -6,7 +6,7 @@
 [![Documentation](https://img.shields.io/badge/docs-koine-3245b8)](https://atypical-consulting.github.io/Koine/)
 [![.NET](https://img.shields.io/badge/.NET-10-512BD4)](https://dotnet.microsoft.com/)
 [![Tests](https://img.shields.io/badge/tests-670%2B%20passing-2ea44f)](tests/)
-![Target](https://img.shields.io/badge/emits-C%23%20%C2%B7%20TypeScript-178600)
+![Target](https://img.shields.io/badge/emits-C%23%20%C2%B7%20TypeScript%20%C2%B7%20Python-178600)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 
 **Koine** is a domain-specific language for **Domain-Driven Design**. Instead of hand-writing the
@@ -15,9 +15,11 @@ describe a bounded context in a small, readable DSL and the Koine compiler gener
 
 The name evokes Koine Greek, the *common* language that became a lingua franca. The goal is to compile
 one domain model to many targets. **C# is the primary, most complete target**; a **TypeScript** emitter
-also ships (`--target typescript`), a **docs** target emits living documentation (`--target docs` →
-Markdown + Mermaid diagrams) straight from the model, and the architecture keeps the parser and semantic
-model strictly target-agnostic so further emitters (e.g. Rust) can be added without touching them.
+also ships (`--target typescript`), a **Python** emitter ships (`--target python`) emitting
+dependency-free Python 3.11+ (Phase 1: tactical core — value objects, smart enums, entities, events,
+repositories), a **docs** target emits living documentation (`--target docs` → Markdown + Mermaid
+diagrams) straight from the model, and the architecture keeps the parser and semantic model strictly
+target-agnostic so further emitters (e.g. Rust) can be added without touching them.
 
 📖 **Read the docs → <https://atypical-consulting.github.io/Koine/>** — getting started, a six-part
 tutorial, a complete language reference, the feature catalogue, and the CLI. (Source in
@@ -46,6 +48,9 @@ tutorial, a complete language reference, the feature catalogue, and the CLI. (So
 
 # Compile a domain model to C#
 dotnet run --project src/Koine.Cli -- build examples/billing.koi --target csharp --out ./generated
+
+# Compile a domain model to Python (Phase 1: tactical core — value objects, enums, entities, events)
+dotnet run --project src/Koine.Cli -- build examples/billing.koi --target python --out ./generated_py
 
 # Generate living documentation (Markdown + Mermaid state/class/context-map diagrams)
 dotnet run --project src/Koine.Cli -- build examples/billing.koi --target docs --out ./docs
@@ -157,7 +162,7 @@ The pipeline is strictly layered so backends are pluggable:
   → Lexer/Parser (ANTLR, generated from Grammar/KoineLexer.g4 + KoineParser.g4)
   → KoineModelBuilderVisitor → semantic model (Ast/, target-agnostic)
   → SemanticValidator (Semantics/) → diagnostics with line/column
-  → IEmitter (Emit/CSharp, Emit/TypeScript, …) → source files
+  → IEmitter (Emit/CSharp, Emit/TypeScript, Emit/Python, …) → source files
 ```
 
 ```
@@ -171,6 +176,7 @@ Koine.slnx
 │   │   ├── Emit/           # IEmitter + EmittedFile
 │   │   │   ├── CSharp/     # CSharpEmitter (primary target)
 │   │   │   ├── TypeScript/ # TypeScriptEmitter
+│   │   │   ├── Python/     # PythonEmitter (Phase 1: tactical core)
 │   │   │   ├── Glossary/   # ubiquitous-language glossary
 │   │   │   └── Docs/       # living documentation (Markdown + Mermaid diagrams)
 │   │   ├── Diagnostics/    # Diagnostic
@@ -260,8 +266,10 @@ this lets a regex literal be read as a single token without colliding with the `
 ## Status
 
 Shipped through **R1–R17** of the roadmap — the full tactical *and* strategic DDD toolkit, a second
-emitter target (**TypeScript**, R16) alongside C#, and the editor tooling (TextMate grammar, `koine lsp`
-language server, and the `fmt`/`init`/`watch` commands). The
+emitter target (**TypeScript**, R16) alongside C#, a **Python** emitter (Phase 1: tactical core —
+dependency-free Python 3.11+, `mypy --strict`-clean, covering value objects, smart enums, entities,
+events, and repositories), and the editor tooling (TextMate grammar, `koine lsp` language server, and
+the `fmt`/`init`/`watch` commands). The
 [feature catalogue](https://atypical-consulting.github.io/Koine/guides/feature-catalogue/) maps every
 construct (R1–R17) to the C# it emits. A **docs** target also ships — `--target docs` emits living
 documentation (Markdown with Mermaid state, class, context-map, and integration-event diagrams) straight
@@ -291,10 +299,9 @@ Hover and go-to-definition resolve **across all `.koi` files in the workspace** 
 
 [`src/Koine.Mcp`](src/Koine.Mcp) is an **MCP server** (`koine-mcp`) that lets an AI agent author a
 complete domain in `.koi` over the [Model Context Protocol](https://modelcontextprotocol.io): tools
-to `koine_validate`, `koine_compile` (csharp/typescript/glossary/docs), and `koine_format`, plus
-`koine_reference` and `koine_examples` so the agent learns the language. It reuses the same parser,
-validator, and emitters as `koine build`. Install with `dotnet tool install -g Koine.Mcp`, then add it
-to your MCP client:
+to `koine_validate`, `koine_compile` (csharp/typescript/python/glossary/docs), and `koine_format`, plus
+`koine_reference` and `koine_examples` so the agent learns the language. It reuses the same parser, validator, and emitters as `koine build` (including `--target python`).
+Install with `dotnet tool install -g Koine.Mcp`, then add it to your MCP client:
 
 ```json
 { "mcpServers": { "koine": { "command": "koine-mcp" } } }
@@ -311,10 +318,11 @@ tool list and the typical author → validate → compile loop.
 
 The full roadmap — every release R1–R17 and what remains — is captured as actionable user stories in
 [`USER-STORIES.md`](USER-STORIES.md). The tactical *and* strategic DDD toolkit (R1–R15), multi-target
-emitters (R16: a TypeScript emitter alongside C#), and the editor tooling (R17) have shipped, as has a
-**docs** target that emits living documentation (Markdown + Mermaid diagrams) from the model. What's
-next: a **Rust** emitter (errors as `Result<T,E>` rather than exceptions) to further prove the semantic
-model is truly target-agnostic.
+emitters (R16: TypeScript and Python emitters alongside C#), and the editor tooling (R17) have shipped,
+as has a **docs** target that emits living documentation (Markdown + Mermaid diagrams) from the model.
+The Python emitter covers the tactical core (Phase 1); the CQRS/strategic layer is deferred to Phase 2.
+What's next: a **Rust** emitter (errors as `Result<T,E>` rather than exceptions) to further prove the
+semantic model is truly target-agnostic.
 
 ## Contributing
 

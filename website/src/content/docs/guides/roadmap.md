@@ -1,23 +1,16 @@
 ---
 title: "Roadmap"
-description: "What Koine ships today (R1–R15 plus R17 editor tooling) and what comes next (R16 multi-target emitters)."
+description: "What Koine ships today (R1–R17: full DDD toolkit, TypeScript, Python Phase 1, and editor tooling) and what comes next."
 ---
 
 Koine is built as a sequence of **epics** (R1–R17), each a cohesive slice of Domain-Driven Design
-capability. The compiler ships the **full tactical and strategic toolkit (R1–R15)** plus the
+capability. The compiler ships the **full tactical and strategic toolkit (R1–R15)**, the
+**R16 multi-target emitters** (TypeScript and Python Phase 1), and the
 **R17 editor tooling** — the TextMate grammar, the `koine lsp` language server, and the
 `fmt`/`init`/`watch` commands. Every construct described in the reference is implemented, tested,
 and demonstrated in the [Shop demo](https://github.com/Atypical-Consulting/Koine/tree/main/demo).
-The one remaining epic is **R16** (multi-target emitters).
 
 This page is the honest status report — what you can rely on now, and what is still ahead.
-
-:::caution[C# only, for now]
-Koine emits **C# exclusively** today. The parser and semantic model are kept strictly target-agnostic
-(no C# concepts leak into `Ast/`), which is what makes the planned TypeScript and Rust emitters
-possible — but they are **not shipped yet**. If you need another target language, that work lives in
-[R16](#r16--multi-target-emitters), still on the roadmap.
-:::
 
 ## Shipped: R1–R15
 
@@ -95,34 +88,32 @@ For the complete, copy-pasteable showcase, browse the
 and the [emitted C#](https://github.com/Atypical-Consulting/Koine/tree/main/demo/Shop.Domain/Generated)
 right next to them.
 
-## Next: R16
+## Shipped: R16 — Multi-target emitters (partial)
 
-This is the one remaining epic — specified but **not yet implemented**. The acceptance criteria below
-are summarized from [`USER-STORIES.md`](https://github.com/Atypical-Consulting/Koine/blob/main/USER-STORIES.md),
-which holds the full gap analysis.
+R16 is the capstone that proves the `IEmitter` seam is genuinely target-agnostic. Three of four
+stories are delivered; Rust remains on the roadmap.
 
-### R16 — Multi-target emitters
-
-This is the capstone that proves the `IEmitter` seam is genuinely target-agnostic. Four stories:
-
-- **R16.1 — C# emitter configuration.** A structured options object (via `koine.config` and/or CLI
-  flags) to remap contexts to concrete namespaces, choose the `Instant` mapping (the current
-  `DateTimeOffset` default **or NodaTime**, replacing the literal `// TODO: NodaTime` in the type
-  mapper), and control output layout (`filePerType` / `filePerContext` / `filePerAggregate`).
-- **R16.2 — TypeScript emitter.** `koine build model.koi --target typescript` producing idiomatic value
-  objects, identity-equal entities, and enums (or string-literal unions), with `*Id` types as branded
-  primitives. The full fixture must pass `tsc --noEmit`.
-- **R16.3 — Rust emitter.** `koine build model.koi --target rust`, where invariants surface as
-  `Result<T, DomainError>` constructors rather than panics — the strongest test of the seam, since the
-  exception-vs-`Result` decision must live entirely in the emitter. The fixture must pass `cargo check`.
-- **R16.4 — Conformance harness.** A shared suite that runs every fixture through every registered
-  emitter and compiles the output (Roslyn for C#, `tsc` for TS, `cargo check` for Rust), plus a guard
-  test that fails the build if anything under `Ast/` references a target-specific concept.
-
-:::note
-Until R16 lands, `koine build --target` accepts only `csharp` and `glossary`; any other value is a usage
-error. The roadmap deliberately sequences emitters **last** so they build on a mature, stable AST.
-:::
+- **R16.1 — C# emitter configuration.** ✅ **Delivered** — a `koine.config` options object to remap
+  contexts to concrete namespaces, choose the `Instant` mapping (`DateTimeOffset` default or NodaTime),
+  and control output layout.
+- **R16.2 — TypeScript emitter.** ✅ **Delivered** — `koine build model.koi --target typescript`
+  producing idiomatic TypeScript: value objects, identity-equal entities, smart enums as typed
+  `const` objects, `*Id` branded primitives. Output passes `tsc --noEmit --strict`.
+- **R16.3 — Python emitter (Phase 1: tactical core).** ✅ **Delivered** — `koine build model.koi
+  --target python` producing dependency-free Python 3.11+ from the tactical core:
+  - `@dataclass(frozen=True)` value objects with invariant checks
+  - `enum.Enum` smart enums (including data-carrying enums with associated fields)
+  - Identity-equal entities with `Guid`/natural/sequence ID strategies
+  - Frozen-dataclass domain events
+  - `typing.Protocol` repository and service interfaces
+  - Output is `mypy --strict`-clean and passes `ast.parse` syntax checking.
+  - *Phase 2 (CQRS/strategic layer: read models, queries, policies, state machines, context maps)
+    is not yet emitted in Python — document those as C#/TypeScript only.*
+- **R16.4 — Rust emitter.** Not yet implemented. Invariants will surface as `Result<T, DomainError>`
+  rather than panics — the strongest test of the seam. Fixture must pass `cargo check`.
+- **R16.5 — Conformance harness.** ✅ **Delivered** — a suite that runs every fixture through each
+  registered emitter and compiles the output (Roslyn for C#, `tsc` for TS, `mypy` for Python), plus an
+  `AstPurityTests` guard that fails the build if anything under `Ast/` references a target-specific concept.
 
 ## Shipped: R17 — Editor tooling & developer experience
 
