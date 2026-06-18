@@ -1892,6 +1892,11 @@ body.resizing {
   flex-direction: column;
   height: 100%;
 }
+/* `display: flex` above would otherwise beat the UA `[hidden] { display: none }`, so the panel
+   stays visible after a tab switch (its intro/controls leaking onto another view). */
+.koi-assistant[hidden] {
+  display: none;
+}
 .koi-assistant-transcript {
   flex: 1 1 auto;
   min-height: 0;
