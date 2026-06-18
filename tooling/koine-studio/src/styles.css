@@ -1817,3 +1817,340 @@ body.resizing {
   outline: none;
   border-color: var(--koi-accent);
 }
+
+/* Visually hidden but exposed to assistive tech (the wizard's aria-live announcer). */
+.koi-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  border: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* --- Generate Project wizard (in the shared modal chrome) --- */
+.koi-wizard {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 380px;
+  max-width: 460px;
+}
+
+/* Step indicator: numbered pills joined by a rule. */
+.koi-wizard-steps {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  counter-reset: koi-wizard-step;
+}
+
+.koi-wizard-step {
+  flex: 1 1 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.74rem;
+  color: var(--koi-muted);
+  white-space: nowrap;
+}
+
+.koi-wizard-step::before {
+  counter-increment: koi-wizard-step;
+  content: counter(koi-wizard-step);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  border: 1px solid var(--koi-line);
+  background: var(--koi-surface);
+  font-size: 0.72rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.koi-wizard-step:not(:last-child)::after {
+  content: '';
+  flex: 1 1 auto;
+  height: 1px;
+  background: var(--koi-line);
+}
+
+.koi-wizard-step.active {
+  color: var(--koi-fg);
+}
+
+.koi-wizard-step.active::before {
+  border-color: var(--koi-accent);
+  color: var(--koi-accent);
+}
+
+.koi-wizard-step.done {
+  color: var(--koi-fg);
+}
+
+.koi-wizard-step.done::before {
+  content: '✓';
+  background: var(--koi-accent);
+  border-color: var(--koi-accent);
+  color: var(--koi-on-accent);
+}
+
+.koi-wizard-content {
+  min-height: 168px;
+}
+
+/* Language step: selectable cards. */
+.koi-wizard-options {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.koi-wizard-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 14px;
+  border: 1px solid var(--koi-line);
+  border-radius: 8px;
+  background: var(--koi-surface);
+  cursor: pointer;
+}
+
+.koi-wizard-option:hover {
+  border-color: var(--koi-accent);
+}
+
+.koi-wizard-option.selected {
+  border-color: var(--koi-accent);
+  background: color-mix(in srgb, var(--koi-accent) 12%, transparent);
+}
+
+.koi-wizard-option input {
+  margin-top: 2px;
+  accent-color: var(--koi-accent);
+}
+
+.koi-wizard-option-text {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.koi-wizard-option-title {
+  font-size: 0.92rem;
+  font-weight: 600;
+  color: var(--koi-fg);
+}
+
+.koi-wizard-option-blurb {
+  font-size: 0.8rem;
+  color: var(--koi-muted);
+}
+
+/* Artifacts step: checkbox rows. */
+.koi-wizard-checks {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.koi-wizard-check {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 2px;
+  border-bottom: 1px solid var(--koi-line);
+  cursor: pointer;
+}
+
+.koi-wizard-check:last-child {
+  border-bottom: none;
+}
+
+.koi-wizard-check input {
+  margin-top: 2px;
+}
+
+.koi-wizard-check input:disabled {
+  cursor: default;
+}
+
+.koi-wizard-check-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.koi-wizard-check-label {
+  font-size: 0.88rem;
+  color: var(--koi-fg);
+}
+
+.koi-wizard-check-hint {
+  font-size: 0.78rem;
+  color: var(--koi-muted);
+}
+
+/* Name step. */
+.koi-wizard-name {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.koi-input {
+  width: 100%;
+  box-sizing: border-box;
+  background: var(--koi-surface);
+  color: var(--koi-fg);
+  border: 1px solid var(--koi-line);
+  border-radius: 6px;
+  padding: 9px 11px;
+  font-family: var(--koi-font-mono);
+  font-size: 0.9rem;
+}
+
+.koi-input:hover,
+.koi-input:focus {
+  border-color: var(--koi-accent);
+  outline: none;
+}
+
+.koi-wizard-hint {
+  margin: 0;
+  font-size: 0.8rem;
+  color: var(--koi-muted);
+}
+
+.koi-wizard-invalid {
+  margin: 0;
+  font-size: 0.8rem;
+  color: var(--koi-error);
+}
+
+/* Generate step: summary + result. */
+.koi-wizard-generate {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.koi-wizard-summary-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 9px 2px;
+  border-bottom: 1px solid var(--koi-line);
+  font-size: 0.86rem;
+}
+
+.koi-wizard-summary-row:last-child {
+  border-bottom: none;
+}
+
+.koi-wizard-summary-key {
+  color: var(--koi-muted);
+}
+
+.koi-wizard-summary-val {
+  color: var(--koi-fg);
+  text-align: right;
+  font-family: var(--koi-font-mono);
+}
+
+/* Status / progress / error / success live region above the wizard content. */
+.koi-wizard-banner {
+  margin: 0;
+  padding: 9px 12px;
+  border-radius: 6px;
+  border: 1px solid var(--koi-line);
+  background: var(--koi-surface);
+  color: var(--koi-fg);
+  font-size: 0.84rem;
+}
+
+.koi-wizard-banner.error {
+  border-color: color-mix(in srgb, var(--koi-error) 40%, var(--koi-line));
+  background: color-mix(in srgb, var(--koi-error) 9%, transparent);
+  color: var(--koi-error);
+}
+
+.koi-wizard-banner.success {
+  border-color: color-mix(in srgb, var(--koi-cyan) 40%, var(--koi-line));
+  background: color-mix(in srgb, var(--koi-cyan) 10%, transparent);
+  color: var(--koi-fg);
+}
+
+/* Decorative check mark — kept out of the text so screen readers announce just the message. */
+.koi-wizard-banner.success::before {
+  content: '✓ ';
+  color: var(--koi-cyan);
+  font-weight: 600;
+}
+
+/* Footer navigation. */
+.koi-wizard-footer {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.koi-wizard-btn {
+  background: var(--koi-surface);
+  color: var(--koi-fg);
+  border: 1px solid var(--koi-line);
+  border-radius: 6px;
+  padding: 8px 16px;
+  font-family: var(--koi-font-body);
+  font-size: 0.86rem;
+  cursor: pointer;
+}
+
+.koi-wizard-btn:hover:not(:disabled) {
+  border-color: var(--koi-accent);
+}
+
+.koi-wizard-btn.primary {
+  margin-left: auto;
+  background: var(--koi-accent);
+  color: var(--koi-on-accent);
+  border-color: var(--koi-accent);
+  font-weight: 600;
+}
+
+.koi-wizard-btn.primary:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--koi-accent) 88%, #fff);
+}
+
+.koi-wizard-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* Visible keyboard focus for the wizard's interactive controls (and the prefs fields that share
+   these classes): a clear outline rather than only the accent border, which is also the hover cue. */
+.koi-input:focus-visible,
+.koi-select:focus-visible,
+.koi-number:focus-visible,
+.koi-checkbox:focus-visible,
+.koi-wizard-btn:focus-visible {
+  outline: 2px solid var(--koi-accent);
+  outline-offset: 2px;
+}
+
+.koi-wizard-option:focus-within,
+.koi-wizard-check:focus-within {
+  outline: 2px solid var(--koi-accent);
+  outline-offset: 2px;
+}
