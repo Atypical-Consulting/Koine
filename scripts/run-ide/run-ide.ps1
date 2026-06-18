@@ -32,8 +32,17 @@ if (-not (Test-Path $placeholder)) {
     New-Item -ItemType File -Force -Path $placeholder | Out-Null
 }
 
-# 3. Install the frontend deps on first run.
-if (-not (Test-Path (Join-Path $studio "node_modules"))) {
+# 3. Install the frontend deps when missing or out of date. npm stamps
+#    node_modules/.package-lock.json on every install, so a package-lock.json that's
+#    newer means a dependency was added/changed since the last install (e.g. a new
+#    @tauri-apps/plugin-* package) and we must reinstall — otherwise the stale
+#    node_modules makes Vite fail to resolve the new import.
+$nodeModules = Join-Path $studio "node_modules"
+$stamp = Join-Path $nodeModules ".package-lock.json"
+$lockFile = Join-Path $studio "package-lock.json"
+$needsInstall = (-not (Test-Path $nodeModules)) -or (-not (Test-Path $stamp)) -or `
+    ((Get-Item $lockFile).LastWriteTime -gt (Get-Item $stamp).LastWriteTime)
+if ($needsInstall) {
     Push-Location $studio
     npm install
     $code = $LASTEXITCODE

@@ -31,8 +31,13 @@ if [[ ! -e "$placeholder" ]]; then
   touch "$placeholder"
 fi
 
-# 3. Install the frontend deps on first run.
-if [[ ! -d "$studio/node_modules" ]]; then
+# 3. Install the frontend deps when missing or out of date. npm stamps
+#    node_modules/.package-lock.json on every install, so a package-lock.json that's
+#    newer means a dependency was added/changed since the last install (e.g. a new
+#    @tauri-apps/plugin-* package) and we must reinstall — otherwise the stale
+#    node_modules makes Vite fail to resolve the new import.
+stamp="$studio/node_modules/.package-lock.json"
+if [[ ! -d "$studio/node_modules" || "$studio/package-lock.json" -nt "$stamp" ]]; then
   (cd "$studio" && npm install)
 fi
 
