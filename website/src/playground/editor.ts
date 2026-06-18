@@ -30,6 +30,7 @@ import {
 import { search, searchKeymap, highlightSelectionMatches } from '@codemirror/search';
 import { csharp } from '@codemirror/legacy-modes/mode/clike';
 import { typescript } from '@codemirror/legacy-modes/mode/javascript';
+import { python } from '@codemirror/legacy-modes/mode/python';
 import { tags as t } from '@lezer/highlight';
 import { linter, lintGutter, type Diagnostic as CmDiagnostic } from '@codemirror/lint';
 import type { KoineDiagnostic } from './koine';
@@ -303,11 +304,12 @@ export function createKoineEditor(opts: KoineEditorOptions): KoineEditor {
 
 // --- read-only output viewer ------------------------------------------------
 
-export type OutputLang = 'csharp' | 'typescript' | 'plain';
+export type OutputLang = 'csharp' | 'typescript' | 'python' | 'plain';
 
 const langExt = (lang: OutputLang): Extension => {
   if (lang === 'csharp') return StreamLanguage.define(csharp);
   if (lang === 'typescript') return StreamLanguage.define(typescript);
+  if (lang === 'python') return StreamLanguage.define(python);
   return [];
 };
 

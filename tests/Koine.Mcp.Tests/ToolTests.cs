@@ -70,6 +70,17 @@ public sealed class ToolTests
     }
 
     [Fact]
+    public void Compile_python_emits_files()
+    {
+        var result = CompileTool.Compile(Files(Billing), "python");
+
+        Assert.True(result.Success);
+        Assert.NotEmpty(result.Files);
+        Assert.Contains(result.Files, f => f.Path.EndsWith("koine_runtime.py", StringComparison.Ordinal));
+        Assert.All(result.Files, f => Assert.False(string.IsNullOrWhiteSpace(f.Path)));
+    }
+
+    [Fact]
     public void Compile_defaults_to_csharp_and_honors_glossary_target()
     {
         var glossary = CompileTool.Compile(Files(Billing), "glossary");

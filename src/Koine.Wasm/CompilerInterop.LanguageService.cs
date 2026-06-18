@@ -5,6 +5,7 @@ using Koine.Compiler.Ast;
 using Koine.Compiler.Diagnostics;
 using Koine.Compiler.Emit.CSharp;
 using Koine.Compiler.Emit.Glossary;
+using Koine.Compiler.Emit.Python;
 using Koine.Compiler.Emit.TypeScript;
 using Koine.Compiler.Formatting;
 using Koine.Compiler.Services;
@@ -77,7 +78,7 @@ public static partial class CompilerInterop
     /// <summary>
     /// Previews the emitter output for the merged workspace through the shared compile pipeline, so
     /// the returned files match <c>koine build</c> (modulo <c>koine.config</c> options). Only
-    /// <c>csharp</c>/<c>typescript</c> are valid; any other target yields a structured error result
+    /// <c>csharp</c>/<c>typescript</c>/<c>python</c> are valid; any other target yields a structured error result
     /// rather than a throw. Returns <c>{ target, files, diagnostics, error }</c>.
     /// </summary>
     [JSExport]
@@ -87,10 +88,11 @@ public static partial class CompilerInterop
         try
         {
             if (!string.Equals(target, "csharp", StringComparison.OrdinalIgnoreCase)
-                && !string.Equals(target, "typescript", StringComparison.OrdinalIgnoreCase))
+                && !string.Equals(target, "typescript", StringComparison.OrdinalIgnoreCase)
+                && !string.Equals(target, "python", StringComparison.OrdinalIgnoreCase))
             {
                 return SerializeEmit(new WEmitPreviewResult(
-                    target, [], [], $"unknown target '{target}'; expected 'csharp' or 'typescript'"));
+                    target, [], [], $"unknown target '{target}'; expected 'csharp', 'typescript', or 'python'"));
             }
 
             var files = DeserializeFiles(filesJson);
@@ -98,9 +100,9 @@ public static partial class CompilerInterop
             var sources = files.Select(f => new SourceFile(f.Uri, f.Text)).ToList();
 
             Koine.Compiler.Emit.IEmitter emitter =
-                string.Equals(target, "typescript", StringComparison.OrdinalIgnoreCase)
-                    ? new TypeScriptEmitter()
-                    : new CSharpEmitter();
+                string.Equals(target, "typescript", StringComparison.OrdinalIgnoreCase) ? new TypeScriptEmitter()
+                : string.Equals(target, "python", StringComparison.OrdinalIgnoreCase) ? new PythonEmitter()
+                : new CSharpEmitter();
 
             var result = Compiler.Compile(sources, emitter);
             var emittedFiles = result.Files

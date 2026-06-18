@@ -16,7 +16,7 @@ matches what the CLI produces. The server lives in `src/Koine.Mcp` and talks **s
 | Tool | What it does |
 |------|--------------|
 | `koine_validate` | Parse + full semantic checks over one or many `.koi` files; returns diagnostics with stable codes and 1-based line/column spans. The loop-closer: fix and re-validate until `ok`. |
-| `koine_compile` | Run the full pipeline through a target emitter — `csharp` (default), `typescript`, `glossary`, or `docs` — and return the generated files. |
+| `koine_compile` | Run the full pipeline through a target emitter — `csharp` (default), `typescript`, `python`, `glossary`, or `docs` — and return the generated files. |
 | `koine_format` | Canonically format a single `.koi` source string. |
 | `koine_reference` | A compact cheatsheet of every construct, the type system, and the expression/invariant sublanguage. Call with no topic for the whole thing, or a topic slug (e.g. `value`, `aggregate`, `expressions`, `context-map`) for one section. |
 | `koine_examples` | Real, compilable example models — `billing` (small) and the six-context `shop-*` domain — to learn the syntax and idioms. |
@@ -83,7 +83,7 @@ To run it straight from a checkout instead of the installed tool:
 1. `koine_reference` / `koine_examples` — learn the syntax (models rarely know Koine cold).
 2. Draft the `.koi` model.
 3. `koine_validate` — read diagnostics, fix, repeat until `ok` is `true`.
-4. `koine_compile` — inspect the generated C# (or TypeScript / glossary / docs).
+4. `koine_compile` — inspect the generated C# (or TypeScript / Python / glossary / docs).
 
 Because a green compile is snapshot- *and* Roslyn-tested in this repo, `koine_compile` returning
 `success` means the emitted C# actually builds.

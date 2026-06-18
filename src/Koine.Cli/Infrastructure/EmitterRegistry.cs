@@ -2,6 +2,7 @@ using Koine.Compiler.Emit;
 using Koine.Compiler.Emit.CSharp;
 using Koine.Compiler.Emit.Docs;
 using Koine.Compiler.Emit.Glossary;
+using Koine.Compiler.Emit.Python;
 using Koine.Compiler.Emit.TypeScript;
 
 namespace Koine.Cli.Infrastructure;
@@ -18,13 +19,14 @@ internal static class EmitterRegistry
         {
             ["csharp"] = opts => new CSharpEmitter(ToCSharpOptions(opts)),
             ["typescript"] = _ => new TypeScriptEmitter(),
+            ["python"] = opts => new PythonEmitter(ToPythonOptions(opts)),
             ["glossary"] = _ => new GlossaryEmitter(),
             ["docs"] = _ => new DocsEmitter(),
         };
 
     /// <summary>The supported target names, in display order for help and error messages.</summary>
     public static IReadOnlyList<string> SupportedTargets { get; } =
-        new[] { "csharp", "typescript", "glossary", "docs" };
+        new[] { "csharp", "typescript", "python", "glossary", "docs" };
 
     /// <summary>A comma-separated list of <see cref="SupportedTargets"/>, for messages.</summary>
     public static string SupportedList => string.Join(", ", SupportedTargets);
@@ -63,5 +65,35 @@ internal static class EmitterRegistry
             ? CSharpInstantMode.NodaTime
             : CSharpInstantMode.DateTimeOffset;
         return new CSharpEmitterOptions(options.NamespaceMap, instant);
+    }
+
+    /// <summary>
+    /// Maps the CLI's parsed per-target <see cref="TargetOptions"/> to the Python emitter's
+    /// <see cref="PythonEmitterOptions"/>. The shared <c>targets.&lt;name&gt;.namespaces.&lt;Context&gt;</c>
+    /// config block is reused as the Python package remap; there is no config key for
+    /// <c>EmitDictHelpers</c>, so it stays at the default <c>false</c>. An empty options bag maps to
+    /// <see cref="PythonEmitterOptions.Empty"/>, so unconfigured targets emit byte-identical output.
+    /// <para>
+    /// The context keys are <c>snake_case</c>d here so they match the heads the emitter computes:
+    /// <see cref="PythonEmitterOptions.RemapPackage"/> looks up an already-lowered package head
+    /// (<c>Catalog → catalog</c>), so a config key written as the user names the context
+    /// (<c>Catalog</c>) would otherwise never match. (<see cref="ToCSharpOptions"/> needs no such
+    /// step: C# namespace heads stay PascalCase, matching the config key as written.)
+    /// </para>
+    /// </summary>
+    private static PythonEmitterOptions ToPythonOptions(TargetOptions options)
+    {
+        if (options.NamespaceMap.Count == 0)
+        {
+            return PythonEmitterOptions.Empty;
+        }
+
+        var packageMap = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var (context, package) in options.NamespaceMap)
+        {
+            packageMap[PythonNaming.ToSnakeCase(context)] = package;
+        }
+
+        return new PythonEmitterOptions(packageMap);
     }
 }
