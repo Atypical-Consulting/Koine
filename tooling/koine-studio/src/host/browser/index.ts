@@ -1,7 +1,7 @@
 // Browser platform backend: the compiler runs in-process via Koine.Wasm (WasmLspTransport) and
 // files go through the File System Access API (fs.ts). Used when the studio is served as a plain
 // web page rather than hosted in the Tauri desktop shell.
-import type { KoiFile, LspTransport, Platform, SourceDoc } from '../types';
+import type { FsEntry, KoiFile, LspTransport, Platform, SourceDoc } from '../types';
 import { WasmLspTransport } from './transport';
 import * as fs from './fs';
 
@@ -46,5 +46,29 @@ export class BrowserPlatform implements Platform {
 
   readFolderSources(token: string): Promise<SourceDoc[]> {
     return fs.readFolderSources(token);
+  }
+
+  listEntries(folderToken: string): Promise<FsEntry[]> {
+    return fs.listEntries(folderToken);
+  }
+
+  createFile(folderToken: string, relPath: string, contents?: string): Promise<string> {
+    return fs.createFile(folderToken, relPath, contents);
+  }
+
+  createFolder(folderToken: string, relPath: string): Promise<string> {
+    return fs.createFolder(folderToken, relPath);
+  }
+
+  renameEntry(token: string, newName: string): Promise<string> {
+    return fs.renameEntry(token, newName);
+  }
+
+  deleteEntry(token: string): Promise<void> {
+    return fs.deleteEntry(token);
+  }
+
+  moveEntry(token: string, destFolderToken: string, newRelPath: string, copy?: boolean): Promise<string> {
+    return fs.moveEntry(token, destFolderToken, newRelPath, copy);
   }
 }
