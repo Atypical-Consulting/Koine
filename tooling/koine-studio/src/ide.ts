@@ -2,7 +2,7 @@
 // the status line, the diagnostics strip, and the tabbed inspector (emitted preview,
 // glossary, and context map).
 import { createKoineEditor, createOutputView, renderMarkdown, renderSymbolTree, setEditorDiagnostics } from './editor';
-import { KoineLsp, SCRATCH_URI, type CheckResult, type ContextMapResult, type Location, type LspDiagnostic } from './lsp';
+import { KoineLsp, SCRATCH_URI, type CheckResult, type ContextMapResult, type GlossaryEntry, type GlossaryModel, type Location, type LspDiagnostic } from './lsp';
 import { getPlatform, type KoiFile } from './host';
 import { initTheme, toggleTheme } from './theme';
 import { clearScratch, loadScratch, loadSettings, pushRecentFolder, saveScratch, type Settings } from './store';
@@ -487,18 +487,173 @@ export function init(): void {
     view.innerHTML = `<p class="${kind === 'error' ? 'doc-error' : 'muted'}">${text}</p>`;
   }
 
+  // The glossary tab is the ubiquitous-language editor (#67): it lists every concept across
+  // contexts with a documentation-coverage gauge, and lets anyone (especially non-coders) add or
+  // edit a plain-prose description that is written back into the `.koi` as a `///` doc comment.
   async function loadGlossary(): Promise<void> {
     docMessage(glossaryView, 'Loading glossary…');
     try {
-      const res = await lsp.glossary();
-      if (!res.markdown || !res.markdown.trim()) {
-        docMessage(glossaryView, 'Glossary is empty (the model may have syntax errors).');
+      const model = await lsp.glossaryModel();
+      if (!model.entries.length) {
+        docMessage(glossaryView, 'No concepts yet — declare some types, or fix syntax errors to populate the glossary.');
       } else {
-        glossaryView.innerHTML = `<div class="koi-md">${renderMarkdown(res.markdown)}</div>`;
+        glossaryView.innerHTML = '';
+        glossaryView.appendChild(renderGlossary(model));
       }
       docViewsLoaded.glossary = true;
     } catch (e) {
       docMessage(glossaryView, 'Glossary request failed: ' + String(e), 'error');
+    }
+  }
+
+  /** Builds the glossary editor: a coverage gauge, then concepts grouped by bounded context. */
+  function renderGlossary(model: GlossaryModel): HTMLElement {
+    const root = document.createElement('div');
+    root.className = 'koi-gloss';
+
+    const documented = model.entries.filter((e) => e.doc != null && e.doc.trim().length > 0).length;
+    const total = model.entries.length;
+    const pct = total === 0 ? 0 : Math.round((documented / total) * 100);
+
+    const gauge = document.createElement('div');
+    gauge.className = 'koi-gloss-coverage';
+    const label = document.createElement('span');
+    label.innerHTML = `<strong>Ubiquitous language</strong>`;
+    const count = document.createElement('span');
+    count.className = 'muted';
+    count.textContent = `${documented} / ${total} documented · ${pct}%`;
+    gauge.append(label, count);
+    const bar = document.createElement('div');
+    bar.className = 'koi-gloss-bar';
+    const fill = document.createElement('div');
+    fill.className = 'koi-gloss-bar-fill';
+    fill.style.width = `${pct}%`;
+    bar.appendChild(fill);
+    root.append(gauge, bar);
+
+    // Group entries by their owning context, preserving declaration order.
+    const groups: { context: string; entries: GlossaryEntry[] }[] = [];
+    for (const e of model.entries) {
+      let g = groups.find((x) => x.context === e.context);
+      if (!g) {
+        g = { context: e.context, entries: [] };
+        groups.push(g);
+      }
+      g.entries.push(e);
+    }
+
+    for (const g of groups) {
+      const section = document.createElement('section');
+      section.className = 'koi-gloss-ctx';
+      const h = document.createElement('h3');
+      h.textContent = g.context;
+      section.appendChild(h);
+      // The context's own entry first (so its description can be authored), then its types.
+      for (const entry of g.entries.filter((e) => e.kind === 'context')) {
+        section.appendChild(renderEntry(entry));
+      }
+      for (const entry of g.entries.filter((e) => e.kind !== 'context')) {
+        section.appendChild(renderEntry(entry));
+      }
+      root.appendChild(section);
+    }
+
+    return root;
+  }
+
+  /** One glossary row: name (jumps to source) + kind badge + description with an inline editor. */
+  function renderEntry(entry: GlossaryEntry): HTMLElement {
+    const row = document.createElement('div');
+    row.className = 'koi-gloss-entry';
+
+    const head = document.createElement('div');
+    head.className = 'koi-gloss-entry-head';
+    const name = document.createElement('button');
+    name.type = 'button';
+    name.className = 'koi-gloss-name';
+    name.textContent = entry.name;
+    name.title = 'Go to definition';
+    name.addEventListener('click', () => editor.gotoRange(entry.nameRange.start, entry.nameRange.end));
+    const kind = document.createElement('span');
+    kind.className = 'koi-gloss-kind';
+    kind.textContent = entry.kind;
+    head.append(name, kind);
+
+    const body = document.createElement('div');
+    body.className = 'koi-gloss-body';
+    row.append(head, body);
+    renderDescription(entry, body);
+    return row;
+  }
+
+  /** Renders the read view of a description (or a "needs description" prompt) with an edit button. */
+  function renderDescription(entry: GlossaryEntry, body: HTMLElement): void {
+    body.innerHTML = '';
+    const hasDoc = entry.doc != null && entry.doc.trim().length > 0;
+    const text = document.createElement('p');
+    text.className = hasDoc ? 'koi-gloss-doc' : 'koi-gloss-needsdoc';
+    text.textContent = hasDoc ? entry.doc!.trim() : 'Needs description';
+
+    const editBtn = document.createElement('button');
+    editBtn.type = 'button';
+    editBtn.className = 'koi-gloss-edit';
+    editBtn.textContent = hasDoc ? 'Edit' : 'Add description';
+    editBtn.addEventListener('click', () => openDescriptionEditor(entry, body));
+
+    body.append(text, editBtn);
+  }
+
+  /** Opens the inline prose editor for a description; Save writes a `///` doc comment to source. */
+  function openDescriptionEditor(entry: GlossaryEntry, body: HTMLElement): void {
+    body.innerHTML = '';
+    const input = document.createElement('textarea');
+    input.className = 'koi-gloss-input';
+    input.rows = 2;
+    input.value = entry.doc?.trim() ?? '';
+    input.placeholder = `Describe ${entry.name} in plain language…`;
+
+    const actions = document.createElement('div');
+    actions.className = 'koi-gloss-actions';
+    const save = document.createElement('button');
+    save.type = 'button';
+    save.className = 'koi-gloss-save';
+    save.textContent = 'Save';
+    const cancel = document.createElement('button');
+    cancel.type = 'button';
+    cancel.className = 'koi-gloss-cancel';
+    cancel.textContent = 'Cancel';
+    save.addEventListener('click', () => void saveDescription(entry, body, input.value));
+    cancel.addEventListener('click', () => renderDescription(entry, body));
+    input.addEventListener('keydown', (ev) => {
+      if (ev.key === 'Enter' && (ev.metaKey || ev.ctrlKey)) {
+        ev.preventDefault();
+        void saveDescription(entry, body, input.value);
+      } else if (ev.key === 'Escape') {
+        ev.preventDefault();
+        renderDescription(entry, body);
+      }
+    });
+    actions.append(save, cancel);
+    body.append(input, actions);
+    input.focus();
+  }
+
+  /**
+   * Persists a description by asking the server for the doc-comment edit and applying it to the
+   * buffer. The applied edit fires onChange → onDocEdited, which reloads the glossary (debounced),
+   * refreshing coverage. When nothing changes (e.g. an unknown id) we just close the editor.
+   */
+  async function saveDescription(entry: GlossaryEntry, body: HTMLElement, text: string): Promise<void> {
+    try {
+      const result = await lsp.setDoc(entry.id, text);
+      if (!result.edits.length) {
+        renderDescription({ ...entry, doc: text.trim() || null }, body);
+        return;
+      }
+      if (result.uri && result.uri !== activeUri && buffers.has(result.uri)) activateFile(result.uri);
+      editor.applyEdits(result.edits);
+    } catch (e) {
+      docMessage(glossaryView, 'Saving description failed: ' + String(e), 'error');
     }
   }
 
