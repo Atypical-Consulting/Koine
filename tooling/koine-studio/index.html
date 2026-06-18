@@ -67,9 +67,26 @@
         <div class="toolbar-right">
           <span class="palette-hint" title="Command palette">⌘K</span>
           <span class="tb-divider" aria-hidden="true"></span>
-          <button type="button" id="btn-theme" class="icon-btn" title="Toggle theme" aria-label="Toggle theme">◐</button>
-          <button type="button" id="btn-prefs" class="icon-btn" title="Preferences" aria-label="Preferences">⚙</button>
-          <button type="button" id="btn-about" class="icon-btn" title="About Koine Studio" aria-label="About">i</button>
+          <button type="button" id="btn-theme" class="icon-btn" title="Toggle theme" aria-label="Toggle theme">
+            <svg class="tb-ico" viewBox="0 0 16 16" aria-hidden="true">
+              <circle cx="8" cy="8" r="5.5" />
+              <path d="M8 2.5a5.5 5.5 0 0 0 0 11z" fill="currentColor" stroke="none" />
+            </svg>
+          </button>
+          <button type="button" id="btn-prefs" class="icon-btn" title="Preferences" aria-label="Preferences">
+            <svg class="tb-ico" viewBox="0 0 16 16" aria-hidden="true">
+              <path d="M2.5 5.5h11M2.5 10.5h11" />
+              <circle cx="6" cy="5.5" r="1.7" />
+              <circle cx="10" cy="10.5" r="1.7" />
+            </svg>
+          </button>
+          <button type="button" id="btn-about" class="icon-btn" title="About Koine Studio" aria-label="About">
+            <svg class="tb-ico" viewBox="0 0 16 16" aria-hidden="true">
+              <circle cx="8" cy="8" r="5.8" />
+              <path d="M8 7.3v3.4" />
+              <circle cx="8" cy="4.9" r="0.9" fill="currentColor" stroke="none" />
+            </svg>
+          </button>
           <div id="status" data-kind="connecting" role="status" aria-live="polite">connecting…</div>
         </div>
       </header>
