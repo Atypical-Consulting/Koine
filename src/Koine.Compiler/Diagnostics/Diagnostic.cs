@@ -60,13 +60,13 @@ public sealed record Diagnostic(
     }
 
     public static Diagnostic Error(string code, string message, SourceSpan span) =>
-        new(DiagnosticSeverity.Error, code, message, span);
+        FromSpan(DiagnosticSeverity.Error, code, message, span);
 
     public static Diagnostic Error(string code, string message, int line, int column) =>
         new(DiagnosticSeverity.Error, code, message, new SourceSpan(line, column));
 
     public static Diagnostic Warning(string code, string message, SourceSpan span) =>
-        new(DiagnosticSeverity.Warning, code, message, span);
+        FromSpan(DiagnosticSeverity.Warning, code, message, span);
 
     public static Diagnostic Warning(string code, string message, int line, int column) =>
         new(DiagnosticSeverity.Warning, code, message, new SourceSpan(line, column));
