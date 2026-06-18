@@ -1,0 +1,29 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Roslyn incremental source generator that reads the KoineNode record hierarchy out of
+    Koine.Compiler's Ast/ source and emits the typed visitor/rewriter family
+    (KoineSyntaxVisitor / KoineSyntaxVisitor<TResult> / KoineSyntaxRewriter /
+    KoineSyntaxChildEnumerator). It is referenced by Koine.Compiler as an Analyzer.
+
+    netstandard2.0 is MANDATORY for an analyzer/source generator loaded into the compiler host;
+    this is the one project in the repo not on net10.0. Directory.Build.props applies
+    Nullable / ImplicitUsings / LangVersion latest / Deterministic harmlessly (it sets no
+    TargetFramework, so there is no conflict).
+  -->
+  <PropertyGroup>
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <IsRoslynComponent>true</IsRoslynComponent>
+    <EnforceExtendedAnalyzerRules>true</EnforceExtendedAnalyzerRules>
+    <IncludeBuildOutput>false</IncludeBuildOutput>
+    <IsPackable>false</IsPackable>
+    <!-- RS2008 (analyzer release tracking) is not worth a tracking file for a single in-repo diagnostic. -->
+    <NoWarn>$(NoWarn);RS2008</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- PrivateAssets=all: the generator's Roslyn dependency must not flow to the referencing project. -->
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="4.14.0" PrivateAssets="all" />
+  </ItemGroup>
+
+</Project>

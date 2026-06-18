@@ -37,7 +37,10 @@ internal sealed class SyntaxGraph
     private void Build(KoineNode node, KoineNode? parent)
     {
         _parent[node] = parent;
-        IReadOnlyList<KoineNode> children = NodeWalker.ChildNodes(node).ToList();
+        // The generated child enumerator (Commit 2) replaces the reflection-based NodeWalker.ChildNodes
+        // on the one production traversal. Fully qualified: 'ChildNodes' (the generated static facade)
+        // would otherwise collide with this type's own ChildNodes(node) instance method.
+        IReadOnlyList<KoineNode> children = global::Koine.Compiler.Ast.ChildNodes.Of(node).ToList();
         _children[node] = children;
 
         // Seed with the node's own span (if positioned), then union in each child's FullSpan.

@@ -2,6 +2,7 @@
   <Folder Name="/src/">
     <Project Path="src/Koine.Cli/Koine.Cli.csproj" />
     <Project Path="src/Koine.Compiler/Koine.Compiler.csproj" />
+    <Project Path="src/Koine.Compiler.SourceGen/Koine.Compiler.SourceGen.csproj" />
     <!-- Koine.Wasm is intentionally NOT in the solution: it targets the browser-wasm RID and
          needs the wasm-experimental workload + emscripten, which the CI build/test pipeline
          (ci.yml) doesn't install. It's built standalone by website/scripts/build-wasm.mjs in
