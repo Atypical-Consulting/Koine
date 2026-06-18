@@ -40,6 +40,16 @@
     <File Path="SECURITY.md" />
     <File Path="USER-STORIES.md" />
   </Folder>
+  <Folder Name="/scripts/install-mcp/">
+    <File Path="scripts/install-mcp/install-mcp.cmd" />
+    <File Path="scripts/install-mcp/install-mcp.ps1" />
+    <File Path="scripts/install-mcp/install-mcp.sh" />
+  </Folder>
+  <Folder Name="/scripts/run-benchmarks/">
+    <File Path="scripts/run-benchmarks/run-benchmarks.cmd" />
+    <File Path="scripts/run-benchmarks/run-benchmarks.ps1" />
+    <File Path="scripts/run-benchmarks/run-benchmarks.sh" />
+  </Folder>
   <Folder Name="/_solution-items/">
     <File Path=".editorconfig" />
     <File Path=".gitignore" />

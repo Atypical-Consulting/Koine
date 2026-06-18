@@ -27,6 +27,9 @@ benchmark always runs against the committed sample domains.
 
 Release is **mandatory** — BenchmarkDotNet refuses to run Debug builds.
 
+The `scripts/run-benchmarks/` wrappers (`run-benchmarks.sh` / `.ps1` / `.cmd`) do the canonical full
+run with no arguments and forward any arguments to the harness — e.g. `./scripts/run-benchmarks/run-benchmarks.sh --filter '*Compile*'`.
+
 ```bash
 # Full run AND refresh the committed numbers below (the canonical command)
 dotnet run -c Release --project benchmarks/Koine.Compiler.Benchmarks -- --filter '*' --update-docs
