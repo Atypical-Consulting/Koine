@@ -3,8 +3,17 @@
 // glossary, and context map).
 import { createKoineEditor, createOutputView, renderMarkdown, renderSymbolTree, setEditorDiagnostics } from './editor';
 import { KoineLsp, SCRATCH_URI, type CheckResult, type ContextMapResult, type Location, type LspDiagnostic } from './lsp';
-import { open as openDialog } from '@tauri-apps/plugin-dialog';
+import { open as openDialog, save as saveDialog } from '@tauri-apps/plugin-dialog';
 import { invoke } from '@tauri-apps/api/core';
+import { initTheme, toggleTheme } from './theme';
+import { loadSettings, pushRecentFolder, type Settings } from './store';
+import { createWelcome } from './welcome';
+import { createCommandPalette, type Command } from './palette';
+import { createPreferences } from './prefs';
+import { initSplitResizer } from './resize';
+import { createHelpOverlay, type ShortcutRow } from './help';
+import { createAboutDialog } from './about';
+import { formatChord } from './platform';
 
 // --- workspace fs contract (Rust commands from Stream G) ---------------------
 
@@ -175,11 +184,39 @@ function renderCheckMarkdown(res: CheckResult): string {
 
 type RightView = 'preview' | 'glossary' | 'contextmap' | 'outline' | 'check';
 
+// Keyboard shortcuts shown in the help overlay; mirrors the global keydown handler and the
+// palette command hints. 'mod' renders as a keycap as-is (Cmd on mac / Ctrl elsewhere).
+function helpRows(): ShortcutRow[] {
+  return [
+    { keys: 'mod+K', description: 'Command palette' },
+    { keys: 'mod+S', description: 'Save / format the active model' },
+    { keys: 'mod+Shift+O', description: 'Open a folder of models' },
+    { keys: 'mod+N', description: 'New scratch model' },
+    { keys: 'mod+1', description: 'Preview C#' },
+    { keys: 'mod+2', description: 'Preview TypeScript' },
+    { keys: 'mod+,', description: 'Preferences' },
+    { keys: 'mod+B', description: 'Toggle file tree (folder mode)' },
+    { keys: 'F1', description: 'Keyboard shortcuts' },
+    { keys: 'Esc', description: 'Close the open overlay' },
+  ];
+}
+
 export function init(): void {
+  // Apply the persisted theme + editor font size before CodeMirror is created so the
+  // editor picks up the right tokens / size on first paint.
+  initTheme();
+  let settings: Settings = loadSettings();
+  function applyFontSize(): void {
+    document.documentElement.style.setProperty('--koi-editor-font-size', settings.fontSize + 'px');
+  }
+  applyFontSize();
+
   const editor = createKoineEditor({
     parent: el('editor-pane'),
     doc: SEED,
     onChange: (doc) => {
+      // First edit dismisses the welcome overlay (it only shows in untouched scratch mode).
+      if (welcome.visible) welcome.hide();
       const buf = buffers.get(activeUri);
       let becameDirty = false;
       if (buf) {
@@ -576,7 +613,14 @@ export function init(): void {
       return;
     }
     if (!folder) return; // cancelled
+    await openFolderPath(folder);
+  }
 
+  // Load + open every .koi file under `folder` as one workspace. Shared by the toolbar
+  // button (which picks a folder first) and the welcome screen's recent-folder items
+  // (which pass a known path directly).
+  async function openFolderPath(folder: string): Promise<void> {
+    welcome.hide();
     let files: KoiFile[];
     try {
       files = await invoke<KoiFile[]>('list_koi_files', { dir: folder });
@@ -626,6 +670,7 @@ export function init(): void {
     editor.setDoc(first.text);
     treeTitleEl.textContent = folder.split(/[\\/]/).filter(Boolean).pop() ?? folder;
     treeEl.hidden = false;
+    pushRecentFolder(folder);
     invalidateDocViews();
     renderTree();
     ensureLoaded(activeView);
@@ -649,18 +694,24 @@ export function init(): void {
     if (saveQueued) return;
     saveQueued = true;
     try {
-      // Format first (mirrors the editor's Mod-S), then persist the formatted text.
-      try {
-        const edits = await lsp.format();
-        editor.applyEdits(edits);
-      } catch (e) {
-        console.error('format on save failed:', e);
+      // Format first (mirrors the editor's Mod-S) when format-on-save is enabled, then persist.
+      if (settings.formatOnSave) {
+        try {
+          const edits = await lsp.format();
+          editor.applyEdits(edits);
+        } catch (e) {
+          console.error('format on save failed:', e);
+        }
       }
       const buf = buffers.get(activeUri);
       if (!buf) return;
       buf.text = editor.getDoc();
       lsp.changeDoc(activeUri, buf.text);
-      if (!buf.path) return; // scratch mode: format only, nothing to write
+      if (!buf.path) {
+        // Scratch mode with no backing file: prompt for a target path (save-as), then write.
+        await saveScratchAs(buf);
+        return;
+      }
       try {
         await invoke('write_text_file', { path: buf.path, contents: buf.text });
         buf.dirty = false;
@@ -674,6 +725,164 @@ export function init(): void {
       saveQueued = false;
     }
   }
+
+  // Save-as for an unsaved scratch buffer: pick a destination, write it, then promote the
+  // buffer to a real file (path/name/relPath set, clean) and surface it in the tree.
+  async function saveScratchAs(buf: Buffer): Promise<void> {
+    let target: string | null;
+    try {
+      target = await saveDialog({
+        title: 'Save model',
+        defaultPath: 'model.koi',
+        filters: [{ name: 'Koine model', extensions: ['koi'] }],
+      });
+    } catch (e) {
+      setStatus('could not open save dialog', 'error');
+      console.error('save dialog failed:', e);
+      return;
+    }
+    if (!target) return; // cancelled
+    try {
+      await invoke('write_text_file', { path: target, contents: buf.text });
+    } catch (e) {
+      setStatus('save failed', 'error');
+      console.error('write_text_file failed:', e);
+      return;
+    }
+    const name = target.split(/[\\/]/).filter(Boolean).pop() ?? target;
+    buf.path = target;
+    buf.name = name;
+    buf.relPath = name;
+    buf.dirty = false;
+    lsp.didSave();
+    treeTitleEl.textContent = name;
+    renderTree();
+  }
+
+  // --- new scratch model ----------------------------------------------------
+  // Reset to a single untouched scratch buffer holding the SEED. In folder mode this
+  // tears the folder workspace down (closes every open doc) and re-establishes scratch.
+  function newScratch(): void {
+    if (folderMode) {
+      for (const uri of Array.from(buffers.keys())) lsp.closeDoc(uri);
+      buffers.clear();
+      diagnosticsByUri.clear();
+      folderMode = false;
+      treeEl.hidden = true;
+      treeTitleEl.textContent = 'Scratch';
+    } else {
+      // Reuse the existing scratch buffer; drop any stale diagnostics.
+      diagnosticsByUri.delete(SCRATCH_URI);
+    }
+    buffers.set(SCRATCH_URI, {
+      uri: SCRATCH_URI,
+      path: null,
+      relPath: 'model.koi',
+      name: 'model.koi',
+      text: SEED,
+      dirty: false,
+    });
+    activeUri = SCRATCH_URI;
+    lsp.setActive(SCRATCH_URI);
+    // Ensure the server has a fresh scratch doc, then load the SEED into the editor.
+    lsp.openDoc(SCRATCH_URI, SEED);
+    editor.setDoc(SEED);
+    invalidateDocViews();
+    renderTree();
+    ensureLoaded(activeView);
+    welcome.hide();
+  }
+
+  // --- overlays + polish surfaces -------------------------------------------
+
+  const welcome = createWelcome({
+    onNewScratch: () => newScratch(),
+    onOpenFolder: () => void openFolder(),
+    onOpenRecent: (path) => void openFolderPath(path),
+  });
+
+  const palette = createCommandPalette(() => getCommands());
+  const prefs = createPreferences({
+    onChange: (s) => {
+      settings = s;
+      applyFontSize(); // theme already applied live by prefs via setTheme
+    },
+  });
+  const help = createHelpOverlay(helpRows());
+  const about = createAboutDialog();
+
+  initSplitResizer({ split: el('split'), handle: el('split-resizer') });
+
+  // Toolbar buttons unique to this phase.
+  const hintEl = document.querySelector('.palette-hint');
+  if (hintEl) hintEl.textContent = formatChord('mod+K'); // ⌘+K / Ctrl+K per platform
+  el<HTMLButtonElement>('btn-new').addEventListener('click', () => newScratch());
+  el<HTMLButtonElement>('btn-theme').addEventListener('click', () => toggleTheme());
+  el<HTMLButtonElement>('btn-prefs').addEventListener('click', () => prefs.open());
+  el<HTMLButtonElement>('btn-about').addEventListener('click', () => about.open());
+
+  // --- command palette command set ------------------------------------------
+  // Hints are authored with a literal 'mod' and formatted to ⌘ / Ctrl per platform so the
+  // palette, help overlay, and toolbar hint all show the same key.
+  function getCommands(): Command[] {
+    const cmds: Command[] = [
+      { id: 'preview-cs', title: 'Preview C#', hint: 'mod+1', group: 'Preview', run: () => void preview('csharp') },
+      { id: 'preview-ts', title: 'Preview TypeScript', hint: 'mod+2', group: 'Preview', run: () => void preview('typescript') },
+      { id: 'open-folder', title: 'Open folder…', hint: 'mod+Shift+O', group: 'File', run: () => void openFolder() },
+      { id: 'new-scratch', title: 'New scratch model', hint: 'mod+N', group: 'File', run: () => newScratch() },
+      { id: 'check', title: 'Check against baseline…', group: 'File', run: () => void runCheck() },
+      { id: 'toggle-theme', title: 'Toggle theme', group: 'View', run: () => toggleTheme() },
+      { id: 'prefs', title: 'Preferences…', hint: 'mod+,', group: 'View', run: () => prefs.open() },
+      { id: 'help', title: 'Keyboard shortcuts', hint: 'F1', group: 'Help', run: () => help.open() },
+      { id: 'about', title: 'About Koine Studio', group: 'Help', run: () => about.open() },
+      { id: 'view-preview', title: 'Show Emitted Preview', group: 'Inspector', run: () => selectView('preview') },
+      { id: 'view-glossary', title: 'Show Glossary', group: 'Inspector', run: () => selectView('glossary') },
+      { id: 'view-contextmap', title: 'Show Context Map', group: 'Inspector', run: () => selectView('contextmap') },
+      { id: 'view-outline', title: 'Show Outline', group: 'Inspector', run: () => selectView('outline') },
+    ];
+    return cmds.map((c) => (c.hint ? { ...c, hint: formatChord(c.hint) } : c));
+  }
+
+  // --- global keyboard shortcuts --------------------------------------------
+  // The existing Cmd/Ctrl-S save listener lives below this. This handler owns the rest of
+  // the global chords; each overlay binds its own Esc, so Esc is intentionally not handled here.
+  window.addEventListener('keydown', (e) => {
+    const mod = e.metaKey || e.ctrlKey;
+    if (!mod && e.key !== 'F1') return;
+
+    if (mod && (e.key === 'k' || e.key === 'K')) {
+      e.preventDefault();
+      palette.toggle();
+    } else if (mod && e.shiftKey && (e.key === 'o' || e.key === 'O')) {
+      e.preventDefault();
+      void openFolder();
+    } else if (mod && !e.shiftKey && (e.key === 'n' || e.key === 'N')) {
+      e.preventDefault();
+      newScratch();
+    } else if (mod && e.key === '1') {
+      e.preventDefault();
+      void preview('csharp');
+    } else if (mod && e.key === '2') {
+      e.preventDefault();
+      void preview('typescript');
+    } else if (mod && e.key === ',') {
+      e.preventDefault();
+      prefs.open();
+    } else if (e.key === 'F1') {
+      e.preventDefault();
+      help.toggle();
+    } else if (mod && (e.key === 'b' || e.key === 'B')) {
+      // Toggle the file tree — only meaningful in folder mode.
+      if (folderMode) {
+        e.preventDefault();
+        treeEl.hidden = !treeEl.hidden;
+      }
+    }
+  });
+
+  // Welcome screen on boot: we start in untouched scratch mode, so surface the empty state.
+  // The first edit, New scratch, Open folder, or opening a recent folder all hide it.
+  welcome.show();
 
   // Boot: attach listeners (inside start) before messages flow, then open the doc.
   setStatus('connecting…', 'connecting');

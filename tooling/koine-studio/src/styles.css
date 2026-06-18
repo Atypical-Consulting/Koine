@@ -19,6 +19,9 @@
   --koi-on-accent: #08111f;
   --koi-cyan: #34d3c4;
 
+  /* state */
+  --koi-error: #ff6b6b;
+
   /* syntax highlighting */
   --koi-hl-keyword: #c98cff;
   --koi-hl-type: #5ad1ff;
@@ -29,6 +32,69 @@
   --koi-hl-meta: #ff9bce;
   --koi-hl-punct: #9aa6b6;
 }
+
+/* --- light theme override ---
+   The active theme is selected by document.documentElement.dataset.theme. :root above stays the
+   dark default; this block redefines EVERY --koi-* token for light. Because the CodeMirror editor
+   theme reads the same var() tokens, flipping data-theme re-themes the editor for free — no CM
+   reconfiguration. Syntax tokens are darkened for legible contrast on a white background. */
+html[data-theme='light'] {
+  /* surfaces */
+  --koi-paper: #ffffff;
+  --koi-paper-2: #f4f6fa;
+  --koi-surface: #e9edf3;
+  --koi-line: #d2d9e3;
+
+  /* text */
+  --koi-fg: #1c2230;
+  --koi-muted: #5b6573;
+  --koi-ink-soft: #3a4452;
+
+  /* accents */
+  --koi-accent: #2f7fe0;
+  --koi-on-accent: #ffffff;
+  --koi-cyan: #0b9d8f;
+
+  /* state (darker red for legible contrast on white) */
+  --koi-error: #cf222e;
+
+  /* syntax highlighting (contrast-safe on white) */
+  --koi-hl-keyword: #8a3ffc;
+  --koi-hl-type: #0b7fb8;
+  --koi-hl-string: #1a7f37;
+  --koi-hl-regex: #bc4c00;
+  --koi-hl-number: #9a6700;
+  --koi-hl-comment: #6a7484;
+  --koi-hl-meta: #bf3989;
+  --koi-hl-punct: #57606a;
+}
+
+/* Explicit dark selector mirrors :root for completeness (optional — :root is already the default). */
+html[data-theme='dark'] {
+  --koi-paper: #0e1117;
+  --koi-paper-2: #161b22;
+  --koi-surface: #1c2230;
+  --koi-line: #2a3242;
+  --koi-fg: #d6dde8;
+  --koi-muted: #7d8694;
+  --koi-ink-soft: #aeb8c6;
+  --koi-accent: #5aa9ff;
+  --koi-on-accent: #08111f;
+  --koi-cyan: #34d3c4;
+  --koi-error: #ff6b6b;
+  --koi-hl-keyword: #c98cff;
+  --koi-hl-type: #5ad1ff;
+  --koi-hl-string: #7ee787;
+  --koi-hl-regex: #ffab70;
+  --koi-hl-number: #f0b86e;
+  --koi-hl-comment: #6a7484;
+  --koi-hl-meta: #ff9bce;
+  --koi-hl-punct: #9aa6b6;
+}
+
+/* Editor font size: the CodeMirror theme reads var(--koi-editor-font-size, 13.5px). That variable
+   is set at runtime by the settings layer (prefs.ts / store.ts) on the document element — it is
+   intentionally NOT declared here so the fallback (13.5px) applies until a preference is saved. */
 
 * {
   box-sizing: border-box;
@@ -91,7 +157,7 @@ body {
 
 .toolbar-actions button:hover:not(:disabled) {
   border-color: var(--koi-accent);
-  color: #fff;
+  color: var(--koi-fg);
 }
 
 .toolbar-actions button:disabled {
@@ -119,18 +185,35 @@ body {
 }
 
 #status[data-kind="error"] {
-  color: #ff6b6b;
-  border-color: color-mix(in srgb, #ff6b6b 40%, var(--koi-line));
+  color: var(--koi-error);
+  border-color: color-mix(in srgb, var(--koi-error) 40%, var(--koi-line));
 }
 
 /* --- split body --- */
 /* The file tree is the first (auto) track: collapsed to 0 when hidden (scratch mode), and
-   a fixed-ish rail when a folder is open. Editor + inspector keep the 1fr 1fr split. */
+   a fixed-ish rail when a folder is open. Then: editor (1fr), a 6px draggable resizer, and the
+   inspector whose width is driven by --koi-inspector-w (defaults to 1fr until the user drags). */
 #split {
   flex: 1 1 auto;
   display: grid;
-  grid-template-columns: auto 1fr 1fr;
+  grid-template-columns: auto 1fr 6px var(--koi-inspector-w, 1fr);
   min-height: 0;
+}
+
+/* Pin each pane to its track so a hidden filetree (scratch mode) just leaves track 1
+   empty rather than letting the remaining items auto-place into the wrong columns
+   (which would crush the inspector into the 6px resizer track). */
+#filetree {
+  grid-column: 1;
+}
+#editor-pane {
+  grid-column: 2;
+}
+#split-resizer {
+  grid-column: 3;
+}
+#right {
+  grid-column: 4;
 }
 
 .pane {
@@ -200,7 +283,7 @@ body {
 
 .tree-row[aria-current='true'] {
   background: color-mix(in srgb, var(--koi-accent) 14%, transparent);
-  color: #fff;
+  color: var(--koi-fg);
 }
 
 .tree-name {
@@ -235,8 +318,8 @@ body {
 }
 
 .tree-badge-err {
-  color: #ff7b7b;
-  background: color-mix(in srgb, #ff7b7b 16%, transparent);
+  color: var(--koi-error);
+  background: color-mix(in srgb, var(--koi-error) 16%, transparent);
 }
 
 .tree-badge-warn {
@@ -329,7 +412,7 @@ body {
 }
 
 .doc-error {
-  color: #ff7b7b;
+  color: var(--koi-error);
   font-family: var(--koi-font-mono);
   font-size: 0.8rem;
   white-space: pre-wrap;
@@ -534,14 +617,536 @@ body {
 }
 
 .diag-err {
-  color: #ff7b7b;
+  color: var(--koi-error);
 }
 
 .diag-warn {
-  color: #f0b86e;
+  color: var(--koi-hl-number);
 }
 
 .diag-empty {
   color: var(--koi-muted);
   padding: 3px 6px;
+}
+
+/* ============================================================================
+   STUDIO POLISH — header brand, overlays, modals, resizer
+   Shared design language: 6px radius, 1px var(--koi-line) borders, accent hover.
+   ============================================================================ */
+
+/* --- branded header (in #toolbar) --- */
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  color: var(--koi-fg);
+  flex: 0 0 auto;
+}
+
+.brand-logo {
+  display: inline-flex;
+  align-items: center;
+}
+
+.brand-logo svg {
+  height: 28px;
+  width: auto;
+  display: block;
+}
+
+.brand-name {
+  font-size: 1rem;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+  color: var(--koi-fg);
+}
+
+.palette-hint {
+  font-family: var(--koi-font-mono);
+  font-size: 0.72rem;
+  color: var(--koi-muted);
+  border: 1px solid var(--koi-line);
+  border-radius: 6px;
+  padding: 2px 7px;
+  user-select: none;
+}
+
+/* New / theme / prefs / about header buttons reuse the toolbar button look. */
+#btn-new,
+#btn-theme,
+#btn-prefs,
+#btn-about {
+  background: var(--koi-surface);
+  color: var(--koi-fg);
+  border: 1px solid var(--koi-line);
+  border-radius: 6px;
+  padding: 5px 12px;
+  font-family: var(--koi-font-body);
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+
+#btn-new:hover,
+#btn-theme:hover,
+#btn-prefs:hover,
+#btn-about:hover {
+  border-color: var(--koi-accent);
+  color: var(--koi-fg);
+}
+
+/* --- welcome / empty-state overlay (above #app, below modals) --- */
+.koi-welcome {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--koi-paper);
+  padding: 24px;
+}
+
+.koi-welcome[hidden] {
+  display: none;
+}
+
+.koi-welcome-card {
+  width: 100%;
+  max-width: 520px;
+  background: var(--koi-paper-2);
+  border: 1px solid var(--koi-line);
+  border-radius: 10px;
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.45);
+  padding: 36px 36px 30px;
+  text-align: center;
+}
+
+.koi-welcome-logo {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--koi-fg);
+  margin-bottom: 18px;
+  min-height: 48px;
+}
+
+.koi-welcome-logo svg {
+  height: 48px;
+  width: auto;
+}
+
+.koi-welcome-title {
+  margin: 0 0 6px;
+  font-size: 1.4rem;
+  font-weight: 600;
+  color: var(--koi-fg);
+}
+
+.koi-welcome-tagline {
+  margin: 0 0 24px;
+  font-size: 0.9rem;
+  color: var(--koi-muted);
+}
+
+.koi-welcome-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.koi-welcome-action {
+  display: block;
+  width: 100%;
+  text-align: center;
+  background: var(--koi-surface);
+  color: var(--koi-fg);
+  border: 1px solid var(--koi-line);
+  border-radius: 6px;
+  padding: 11px 14px;
+  font-family: var(--koi-font-body);
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+
+.koi-welcome-action:hover {
+  border-color: var(--koi-accent);
+}
+
+.koi-welcome-action.primary {
+  background: var(--koi-accent);
+  color: var(--koi-on-accent);
+  border-color: var(--koi-accent);
+  font-weight: 600;
+}
+
+.koi-welcome-action.primary:hover {
+  background: color-mix(in srgb, var(--koi-accent) 88%, #fff);
+}
+
+.koi-welcome-recent {
+  margin-top: 22px;
+  text-align: left;
+  border-top: 1px solid var(--koi-line);
+  padding-top: 16px;
+}
+
+.koi-welcome-recent-title {
+  font-family: var(--koi-font-mono);
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: var(--koi-muted);
+  margin: 0 0 8px;
+}
+
+.koi-welcome-recent-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  color: var(--koi-fg);
+  border: 1px solid transparent;
+  border-radius: 6px;
+  padding: 7px 10px;
+  font-family: var(--koi-font-mono);
+  font-size: 0.78rem;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.koi-welcome-recent-item:hover {
+  background: var(--koi-surface);
+  border-color: var(--koi-line);
+}
+
+.koi-welcome-recent-item-name {
+  display: block;
+  color: var(--koi-fg);
+}
+
+.koi-welcome-recent-item-path {
+  display: block;
+  color: var(--koi-muted);
+  font-size: 0.7rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.koi-welcome-empty {
+  color: var(--koi-muted);
+  font-size: 0.8rem;
+  font-style: italic;
+}
+
+/* --- command palette (above #app, modal tier) --- */
+.koi-palette-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  background: rgba(8, 11, 18, 0.55);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 12vh;
+}
+
+.koi-palette-backdrop[hidden] {
+  display: none;
+}
+
+.koi-palette {
+  width: 100%;
+  max-width: 520px;
+  background: var(--koi-paper-2);
+  border: 1px solid var(--koi-line);
+  border-radius: 10px;
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.5);
+  overflow: hidden;
+}
+
+.koi-palette-input {
+  width: 100%;
+  background: var(--koi-paper-2);
+  color: var(--koi-fg);
+  border: none;
+  border-bottom: 1px solid var(--koi-line);
+  padding: 13px 16px;
+  font-family: var(--koi-font-body);
+  font-size: 0.95rem;
+  outline: none;
+}
+
+.koi-palette-input::placeholder {
+  color: var(--koi-muted);
+}
+
+.koi-palette-list {
+  list-style: none;
+  margin: 0;
+  padding: 6px;
+  max-height: 340px;
+  overflow-y: auto;
+}
+
+.koi-palette-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  color: var(--koi-fg);
+  border: 1px solid transparent;
+  border-radius: 6px;
+  padding: 8px 11px;
+  cursor: pointer;
+  font-family: var(--koi-font-body);
+  font-size: 0.86rem;
+}
+
+.koi-palette-item[aria-selected='true'] {
+  background: color-mix(in srgb, var(--koi-accent) 16%, transparent);
+  border-color: color-mix(in srgb, var(--koi-accent) 40%, var(--koi-line));
+}
+
+.koi-palette-item-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.koi-palette-item-hint {
+  flex: 0 0 auto;
+  margin-left: auto;
+  font-family: var(--koi-font-mono);
+  font-size: 0.72rem;
+  color: var(--koi-muted);
+}
+
+.koi-palette-empty {
+  color: var(--koi-muted);
+  font-size: 0.82rem;
+  padding: 14px 12px;
+  text-align: center;
+}
+
+/* --- generic modal (Preferences, About, Help) --- */
+.koi-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  background: rgba(8, 11, 18, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+
+.koi-modal-backdrop[hidden] {
+  display: none;
+}
+
+.koi-modal {
+  width: 100%;
+  max-width: 520px;
+  background: var(--koi-paper-2);
+  border: 1px solid var(--koi-line);
+  border-radius: 10px;
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.5);
+  display: flex;
+  flex-direction: column;
+  max-height: 86vh;
+}
+
+.koi-modal-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--koi-line);
+}
+
+.koi-modal-title {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--koi-fg);
+}
+
+.koi-modal-close {
+  margin-left: auto;
+  background: transparent;
+  color: var(--koi-muted);
+  border: 1px solid transparent;
+  border-radius: 6px;
+  width: 28px;
+  height: 28px;
+  font-size: 1.05rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.koi-modal-close:hover {
+  color: var(--koi-fg);
+  border-color: var(--koi-accent);
+}
+
+.koi-modal-body {
+  padding: 18px;
+  overflow-y: auto;
+}
+
+.koi-modal-footer {
+  padding: 12px 18px;
+  border-top: 1px solid var(--koi-line);
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.koi-modal-footer:empty {
+  display: none;
+}
+
+/* --- preferences fields --- */
+.koi-field {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--koi-line);
+}
+
+.koi-field:last-child {
+  border-bottom: none;
+}
+
+.koi-field-label {
+  flex: 1 1 auto;
+  font-size: 0.88rem;
+  color: var(--koi-fg);
+}
+
+.koi-field-control {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+}
+
+.koi-select,
+.koi-number {
+  background: var(--koi-surface);
+  color: var(--koi-fg);
+  border: 1px solid var(--koi-line);
+  border-radius: 6px;
+  padding: 6px 10px;
+  font-family: var(--koi-font-body);
+  font-size: 0.84rem;
+  cursor: pointer;
+}
+
+.koi-number {
+  width: 80px;
+}
+
+.koi-select:hover,
+.koi-number:hover,
+.koi-select:focus,
+.koi-number:focus {
+  border-color: var(--koi-accent);
+  outline: none;
+}
+
+.koi-checkbox {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--koi-accent);
+  cursor: pointer;
+}
+
+/* --- help overlay (keyboard shortcuts) --- */
+.koi-help-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.86rem;
+}
+
+.koi-help-table tr {
+  border-bottom: 1px solid var(--koi-line);
+}
+
+.koi-help-table tr:last-child {
+  border-bottom: none;
+}
+
+.koi-help-table td {
+  padding: 9px 6px;
+  vertical-align: middle;
+  color: var(--koi-fg);
+}
+
+.koi-help-table td:first-child {
+  width: 1%;
+  white-space: nowrap;
+}
+
+.koi-kbd {
+  display: inline-block;
+  font-family: var(--koi-font-mono);
+  font-size: 0.74rem;
+  color: var(--koi-ink-soft);
+  background: var(--koi-surface);
+  border: 1px solid var(--koi-line);
+  border-bottom-width: 2px;
+  border-radius: 5px;
+  padding: 2px 7px;
+  margin-right: 4px;
+  min-width: 18px;
+  text-align: center;
+}
+
+/* --- about dialog --- */
+.koi-about-version {
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--koi-fg);
+  margin: 12px 0 4px;
+  text-align: center;
+}
+
+.koi-about-tagline {
+  font-size: 0.86rem;
+  color: var(--koi-muted);
+  text-align: center;
+  margin: 0;
+}
+
+/* --- split resizer handle (the 6px grid track in #split) --- */
+.koi-resizer {
+  width: 6px;
+  cursor: col-resize;
+  background: var(--koi-line);
+  border: none;
+  padding: 0;
+  align-self: stretch;
+  position: relative;
+  transition: background 0.12s ease;
+}
+
+.koi-resizer:hover,
+.koi-resizer:active,
+body.resizing .koi-resizer {
+  background: var(--koi-accent);
+}
+
+/* Disable text selection while dragging the split. */
+body.resizing {
+  user-select: none;
+  cursor: col-resize;
 }
