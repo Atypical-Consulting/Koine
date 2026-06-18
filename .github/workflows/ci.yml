@@ -42,7 +42,9 @@ jobs:
           node-version: '22'
 
       - name: Install TypeScript
-        run: npm install -g typescript
+        # Pin the major so a future tsc release tightening `--strict` inference
+        # can't redden the conformance suite on an unrelated day with no source change.
+        run: npm install -g typescript@6
 
       # No central package management / lock files, so cache the global NuGet
       # package folder keyed on the project files that pin versions.
