@@ -15,6 +15,7 @@
         <div class="toolbar-actions">
           <button type="button" id="btn-preview-cs">Preview C#</button>
           <button type="button" id="btn-preview-ts">Preview TypeScript</button>
+          <button type="button" id="btn-check">Check…</button>
         </div>
         <div id="status" data-kind="connecting">connecting…</div>
       </header>
@@ -32,12 +33,20 @@
             <button type="button" class="tab" id="tab-contextmap" role="tab" data-view="contextmap" aria-selected="false">
               Context Map
             </button>
+            <button type="button" class="tab" id="tab-outline" role="tab" data-view="outline" aria-selected="false">
+              Outline
+            </button>
+            <button type="button" class="tab" id="tab-check" role="tab" data-view="check" aria-selected="false">
+              Check
+            </button>
             <button type="button" id="btn-refresh" class="tab-refresh" title="Refresh this view">↻</button>
           </div>
           <div id="views">
             <div id="view-preview" class="view" role="tabpanel"></div>
             <div id="view-glossary" class="view doc-view" role="tabpanel" hidden></div>
             <div id="view-contextmap" class="view doc-view" role="tabpanel" hidden></div>
+            <div id="view-outline" class="view doc-view" role="tabpanel" hidden></div>
+            <div id="view-check" class="view doc-view" role="tabpanel" hidden></div>
           </div>
         </section>
       </main>

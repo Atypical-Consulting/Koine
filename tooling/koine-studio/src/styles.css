@@ -328,6 +328,58 @@ body {
   text-align: center;
 }
 
+/* --- outline (document symbol tree) --- */
+.outline-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.outline-list .outline-list {
+  margin-left: 14px;
+  border-left: 1px solid var(--koi-line);
+  padding-left: 6px;
+}
+
+.outline-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: none;
+  color: var(--koi-fg);
+  padding: 3px 6px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-family: var(--koi-font-body);
+  font-size: 0.84rem;
+}
+
+.outline-row:hover {
+  background: var(--koi-surface);
+}
+
+.outline-kind {
+  flex: 0 0 auto;
+  font-family: var(--koi-font-mono);
+  font-size: 0.66rem;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  color: var(--koi-accent);
+  background: color-mix(in srgb, var(--koi-accent) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--koi-accent) 30%, var(--koi-line));
+  border-radius: 4px;
+  padding: 0 5px;
+  min-width: 38px;
+  text-align: center;
+}
+
+.outline-name {
+  font-family: var(--koi-font-mono);
+}
+
 /* --- hover tooltip --- */
 .cm-tooltip .koi-hover {
   max-width: 420px;

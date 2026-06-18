@@ -1,8 +1,9 @@
 // Koine Studio app composition: wires the .koi editor, the live LSP diagnostics,
 // the status line, the diagnostics strip, and the tabbed inspector (emitted preview,
 // glossary, and context map).
-import { createKoineEditor, createOutputView, renderMarkdown, setEditorDiagnostics } from './editor';
-import { KoineLsp, type ContextMapResult, type LspDiagnostic } from './lsp';
+import { createKoineEditor, createOutputView, renderMarkdown, renderSymbolTree, setEditorDiagnostics } from './editor';
+import { KoineLsp, type CheckResult, type ContextMapResult, type LspDiagnostic } from './lsp';
+import { open as openDialog } from '@tauri-apps/plugin-dialog';
 
 // Seed model — examples/billing.koi, inlined (the renderer has no fs access).
 const SEED = `context Billing {
@@ -104,7 +105,34 @@ function renderContextMapHtml(res: ContextMapResult): string {
   return parts.join('\n');
 }
 
-type RightView = 'preview' | 'glossary' | 'contextmap';
+// --- compatibility-check rendering (mirrors koine-textmate's renderCheck) -----
+
+function escapeCell(text: string): string {
+  return text.replace(/\|/g, '\\|').replace(/\r?\n/g, ' ');
+}
+
+function renderCheckMarkdown(res: CheckResult): string {
+  const out: string[] = [];
+  out.push(res.hasBreakingChanges ? '# ⚠️ Breaking changes detected' : '# ✅ No breaking changes');
+  out.push('');
+
+  const breaking = res.changes.filter((c) => c.impact === 'Breaking').length;
+  const nonBreaking = res.changes.length - breaking;
+  out.push(`${res.changes.length} change(s): ${breaking} breaking, ${nonBreaking} non-breaking.`, '');
+
+  if (res.changes.length === 0) {
+    out.push('_No changes detected._', '');
+  } else {
+    out.push('| Impact | Code | Message |', '| --- | --- | --- |');
+    for (const c of res.changes) {
+      out.push(`| ${escapeCell(c.impact)} | ${escapeCell(c.code)} | ${escapeCell(c.message)} |`);
+    }
+    out.push('');
+  }
+  return out.join('\n');
+}
+
+type RightView = 'preview' | 'glossary' | 'contextmap' | 'outline' | 'check';
 
 export function init(): void {
   const editor = createKoineEditor({
@@ -115,6 +143,8 @@ export function init(): void {
       onDocEdited();
     },
     onHover: (line, character) => lsp.hover(line, character),
+    onDefinition: (line, character) => lsp.definition(line, character),
+    onFormat: () => lsp.format(),
   });
   const output = createOutputView(el('view-preview'));
 
@@ -176,18 +206,24 @@ export function init(): void {
 
   const glossaryView = el('view-glossary');
   const contextMapView = el('view-contextmap');
+  const outlineView = el('view-outline');
+  const checkView = el('view-check');
   const tabs = Array.from(document.querySelectorAll<HTMLButtonElement>('#tabs .tab'));
   const viewEls: Record<RightView, HTMLElement> = {
     preview: el('view-preview'),
     glossary: glossaryView,
     contextmap: contextMapView,
+    outline: outlineView,
+    check: checkView,
   };
   let activeView: RightView = 'preview';
   // Track which doc-based views need a (re)fetch — invalidated on every edit so a tab
-  // switch always shows data for the current model rather than a stale render.
-  const docViewsLoaded: Record<'glossary' | 'contextmap', boolean> = {
+  // switch always shows data for the current model rather than a stale render. The check
+  // view is excluded: it is only (re)run on demand via the Check button.
+  const docViewsLoaded: Record<'glossary' | 'contextmap' | 'outline', boolean> = {
     glossary: false,
     contextmap: false,
+    outline: false,
   };
 
   function docMessage(view: HTMLElement, text: string, kind: 'muted' | 'error' = 'muted'): void {
@@ -220,18 +256,36 @@ export function init(): void {
     }
   }
 
+  async function loadOutline(): Promise<void> {
+    docMessage(outlineView, 'Loading outline…');
+    try {
+      const symbols = await lsp.documentSymbols();
+      if (!symbols.length) {
+        docMessage(outlineView, 'No symbols (the model may have syntax errors).');
+      } else {
+        outlineView.innerHTML = '';
+        outlineView.appendChild(renderSymbolTree(symbols, (line, col) => editor.goto(line, col)));
+      }
+      docViewsLoaded.outline = true;
+    } catch (e) {
+      docMessage(outlineView, 'Outline request failed: ' + String(e), 'error');
+    }
+  }
+
   function ensureLoaded(view: RightView): void {
     if (view === 'glossary' && !docViewsLoaded.glossary) void loadGlossary();
     if (view === 'contextmap' && !docViewsLoaded.contextmap) void loadContextMap();
+    if (view === 'outline' && !docViewsLoaded.outline) void loadOutline();
   }
 
-  // An edit makes any cached glossary/context-map stale. Mark them dirty; if a doc view is
-  // on screen, refresh it (debounced) so it tracks the model without a manual click.
+  // An edit makes any cached glossary/context-map/outline stale. Mark them dirty; if a doc
+  // view is on screen, refresh it (debounced) so it tracks the model without a manual click.
   let editDebounce: ReturnType<typeof setTimeout> | undefined;
   function onDocEdited(): void {
     docViewsLoaded.glossary = false;
     docViewsLoaded.contextmap = false;
-    if (activeView === 'preview') return;
+    docViewsLoaded.outline = false;
+    if (activeView === 'preview' || activeView === 'check') return;
     clearTimeout(editDebounce);
     editDebounce = setTimeout(() => ensureLoaded(activeView), 350);
   }
@@ -252,11 +306,42 @@ export function init(): void {
     tab.addEventListener('click', () => selectView(tab.dataset.view as RightView));
   }
 
-  // Refresh re-fetches the active doc view (preview is driven by its own buttons).
+  // Refresh re-fetches the active doc view (preview is driven by its own buttons; check by
+  // the Check… toolbar button which re-prompts for a baseline).
   el<HTMLButtonElement>('btn-refresh').addEventListener('click', () => {
     if (activeView === 'glossary') void loadGlossary();
     else if (activeView === 'contextmap') void loadContextMap();
+    else if (activeView === 'outline') void loadOutline();
   });
+
+  // Check… — pick a baseline folder and diff the current buffer against it. Needs Stream F's
+  // Rust dialog plugin + capability to function at runtime; the build does not depend on it.
+  el<HTMLButtonElement>('btn-check').addEventListener('click', () => void runCheck());
+
+  async function runCheck(): Promise<void> {
+    let folder: string | null;
+    try {
+      const picked = await openDialog({ directory: true, title: 'Select baseline model folder' });
+      folder = Array.isArray(picked) ? picked[0] ?? null : picked;
+    } catch (e) {
+      docMessage(checkView, 'Could not open the folder picker: ' + String(e), 'error');
+      selectView('check');
+      return;
+    }
+    if (!folder) return; // cancelled — abort silently
+    selectView('check');
+    docMessage(checkView, 'Checking against baseline…');
+    try {
+      const res = await lsp.check(folder);
+      if (res.error) {
+        docMessage(checkView, 'Compatibility check failed: ' + res.error, 'error');
+        return;
+      }
+      checkView.innerHTML = `<div class="koi-md">${renderMarkdown(renderCheckMarkdown(res))}</div>`;
+    } catch (e) {
+      docMessage(checkView, 'Check request failed: ' + String(e), 'error');
+    }
+  }
 
   // Preview buttons. Previewing also surfaces the preview tab.
   const btnCs = el<HTMLButtonElement>('btn-preview-cs');
@@ -298,6 +383,7 @@ export function init(): void {
     // Fresh sidecar is back in sync; refresh whatever doc view is showing.
     docViewsLoaded.glossary = false;
     docViewsLoaded.contextmap = false;
+    docViewsLoaded.outline = false;
     ensureLoaded(activeView);
   });
   lsp

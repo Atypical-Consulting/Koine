@@ -66,6 +66,44 @@ export interface HoverResult {
   range?: Range;
 }
 
+// Standard LSP Location: a uri + a range within it. `definition` may resolve to one,
+// an array, or null.
+export interface Location {
+  uri: string;
+  range: Range;
+}
+
+// Standard LSP DocumentSymbol tree. `kind` is the SymbolKind number (e.g. 5=Class,
+// 10=Enum, 22=EnumMember, 8=Field, 6=Method, 23=Struct, 13=Variable, 3=Namespace).
+export interface DocumentSymbol {
+  name: string;
+  kind: number;
+  range: Range;
+  selectionRange: Range;
+  children?: DocumentSymbol[];
+}
+
+// Standard LSP TextEdit: replace `range` with `newText`.
+export interface TextEdit {
+  range: Range;
+  newText: string;
+}
+
+// `koine/check` change record (mirrors the server contract).
+export interface CheckChange {
+  impact: 'Breaking' | 'NonBreaking';
+  code: string;
+  message: string;
+}
+
+// `koine/check` result. `error` is set when the baseline could not be read/compiled;
+// otherwise `hasBreakingChanges` + `changes` describe the diff.
+export interface CheckResult {
+  error?: string;
+  hasBreakingChanges: boolean;
+  changes: CheckChange[];
+}
+
 interface JsonRpcMessage {
   jsonrpc?: string;
   id?: number | string | null;
@@ -253,6 +291,39 @@ export class KoineLsp {
     return this.request<HoverResult | null>('textDocument/hover', {
       textDocument: { uri: this.uri },
       position: { line, character },
+    });
+  }
+
+  /** Go-to-definition at a 0-based position. Resolves to a Location, an array, or null. */
+  definition(line: number, character: number): Promise<Location | Location[] | null> {
+    return this.request<Location | Location[] | null>('textDocument/definition', {
+      textDocument: { uri: this.uri },
+      position: { line, character },
+    });
+  }
+
+  /** Document outline as a DocumentSymbol tree. Resolves to [] when the server returns null. */
+  async documentSymbols(): Promise<DocumentSymbol[]> {
+    const res = await this.request<DocumentSymbol[] | null>('textDocument/documentSymbol', {
+      textDocument: { uri: this.uri },
+    });
+    return res ?? [];
+  }
+
+  /** Canonical formatting edits for the whole document. Resolves to [] when nothing changes. */
+  async format(tabSize = 2, insertSpaces = true): Promise<TextEdit[]> {
+    const res = await this.request<TextEdit[] | null>('textDocument/formatting', {
+      textDocument: { uri: this.uri },
+      options: { tabSize, insertSpaces },
+    });
+    return res ?? [];
+  }
+
+  /** Model-versioning compatibility of the current buffer against a baseline model folder. */
+  check(baseline: string): Promise<CheckResult> {
+    return this.request<CheckResult>('koine/check', {
+      textDocument: { uri: this.uri },
+      baseline,
     });
   }
 
