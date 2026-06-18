@@ -43,6 +43,15 @@ internal static class TsRuntime
         }
 
         /**
+         * The marker every domain event satisfies: a record of something that happened,
+         * stamped with the instant it occurred. An aggregate records these as it mutates
+         * (its `domainEvents` collection) — the analogue of the C# `IDomainEvent`.
+         */
+        export interface DomainEvent {
+          readonly occurredOn: Instant;
+        }
+
+        /**
          * An exact, string-backed decimal for money fidelity (a JS `number` is lossy).
          * The value is normalized to a canonical string so structural equality is reliable.
          *

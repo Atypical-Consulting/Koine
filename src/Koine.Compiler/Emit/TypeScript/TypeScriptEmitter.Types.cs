@@ -326,6 +326,21 @@ public sealed partial class TypeScriptEmitter
             sb.Append(Indent).Append("}\n");
         }
 
+        // Domain-event recording (when any command or factory emits events). The collection
+        // is exposed read-only via the `domainEvents` getter; `clearDomainEvents()` drains it
+        // after dispatch — the idiomatic-TS analogue of the C# aggregate's `DomainEvents`.
+        if (EmitsEvents(entity))
+        {
+            sb.Append('\n');
+            sb.Append(Indent).Append("private readonly _domainEvents: DomainEvent[] = [];\n");
+            sb.Append(Indent).Append("get domainEvents(): readonly DomainEvent[] {\n");
+            sb.Append(Indent).Append(Indent).Append("return this._domainEvents;\n");
+            sb.Append(Indent).Append("}\n");
+            sb.Append(Indent).Append("clearDomainEvents(): void {\n");
+            sb.Append(Indent).Append(Indent).Append("this._domainEvents.length = 0;\n");
+            sb.Append(Indent).Append("}\n");
+        }
+
         // Commands.
         foreach (CommandDecl cmd in entity.Commands)
         {
@@ -369,6 +384,7 @@ public sealed partial class TypeScriptEmitter
 
         var requires = cmd.Body.OfType<RequiresClause>().ToList();
         var transitions = cmd.Body.OfType<Transition>().ToList();
+        var emits = cmd.Body.OfType<EmitClause>().ToList();
         ResultClause? result = cmd.Body.OfType<ResultClause>().FirstOrDefault();
 
         foreach (RequiresClause req in requires)
@@ -384,6 +400,11 @@ public sealed partial class TypeScriptEmitter
               .Append(" = ").Append(translator.Translate(tr.Value, expectedEnum)).Append(";\n");
         }
 
+        // Domain events are recorded while parameters are still in scope (their payloads may
+        // reference parameters), but rendered AFTER the post-mutation invariant re-check so an
+        // invalid state throws before any event is recorded — mirroring the C# emitter's order.
+        var emitStatements = emits.Select(e => BuildEmitStatement(e, translator, index, "this.")).ToList();
+
         string? resultExpr = result is not null ? translator.Translate(result.Value, cmd.ReturnType?.Name) : null;
 
         foreach (Param p in cmd.Parameters)
@@ -394,6 +415,11 @@ public sealed partial class TypeScriptEmitter
         if (transitions.Count > 0 && entity.Invariants.Count > 0)
         {
             sb.Append(Indent).Append(Indent).Append("this.checkInvariants();\n");
+        }
+
+        foreach (var stmt in emitStatements)
+        {
+            sb.Append(Indent).Append(Indent).Append(stmt).Append('\n');
         }
 
         if (resultExpr is not null)
@@ -463,13 +489,30 @@ public sealed partial class TypeScriptEmitter
             }
         }
 
+        // Creation events (payloads may reference `id` and parameters, so build them before
+        // those locals leave scope) record onto the freshly-constructed instance.
+        var emits = factory.Body.OfType<EmitClause>().ToList();
+        var emitStatements = emits.Select(e => BuildEmitStatement(e, translator, index, "instance.")).ToList();
+
         translator.PopLocal("id");
         foreach (Param p in factory.Parameters)
         {
             translator.PopLocal(p.Name);
         }
 
-        sb.Append(Indent).Append(Indent).Append("return new ").Append(name).Append('(').Append(string.Join(", ", args)).Append(");\n");
+        if (emitStatements.Count > 0)
+        {
+            sb.Append(Indent).Append(Indent).Append("const instance = new ").Append(name).Append('(').Append(string.Join(", ", args)).Append(");\n");
+            foreach (var stmt in emitStatements)
+            {
+                sb.Append(Indent).Append(Indent).Append(stmt).Append('\n');
+            }
+            sb.Append(Indent).Append(Indent).Append("return instance;\n");
+        }
+        else
+        {
+            sb.Append(Indent).Append(Indent).Append("return new ").Append(name).Append('(').Append(string.Join(", ", args)).Append(");\n");
+        }
         sb.Append(Indent).Append("}\n");
     }
 
@@ -575,6 +618,42 @@ public sealed partial class TypeScriptEmitter
 
     private static string? EnumExpected(Member m, ModelIndex index) =>
         index.Classify(m.Type.Name) == TypeKind.Enum ? m.Type.Name : null;
+
+    /// <summary>True when any command or factory of the entity records a domain event.</summary>
+    private static bool EmitsEvents(EntityDecl entity) =>
+        entity.Commands.SelectMany(c => c.Body).OfType<EmitClause>().Any()
+        || entity.Factories.SelectMany(f => f.Body).OfType<EmitClause>().Any();
+
+    /// <summary>
+    /// Builds the <c>&lt;prefix&gt;_domainEvents.push(new EventName(...));</c> statement for an
+    /// <c>emit</c> clause. Positional arguments follow the event's emitted constructor order
+    /// (<see cref="OrderCtorParams"/> moves defaulted/optional fields last); <c>occurredOn</c>
+    /// is supplied by the event constructor's own default. The TS analogue of the C# emitter's
+    /// <c>BuildEmitStatement</c>.
+    /// </summary>
+    private string BuildEmitStatement(EmitClause emit, TypeScriptExpressionTranslator translator, ModelIndex index, string targetPrefix)
+    {
+        if (!index.TryGetDecl(emit.EventName, out TypeDecl decl) || decl is not EventDecl ev)
+        {
+            return $"/* unknown event '{emit.EventName}' */";
+        }
+
+        var eventMemberNames = new HashSet<string>(ev.Members.Select(m => m.Name), StringComparer.Ordinal);
+        var ctorFields = OrderCtorParams(ev.Members.Where(m => !MemberAnalysis.IsDerived(m, eventMemberNames))).ToList();
+        var argByField = emit.Args.ToDictionary(a => a.Field, a => a.Value, StringComparer.Ordinal);
+
+        var args = ctorFields.Select(f =>
+        {
+            if (!argByField.TryGetValue(f.Name, out Expr? value))
+            {
+                return "undefined as never"; // validator guarantees presence; defensive
+            }
+            return translator.Translate(value, EnumExpected(f, index));
+        });
+
+        var eventName = TypeScriptNaming.ToPascalCase(ev.Name);
+        return $"{targetPrefix}_domainEvents.push(new {eventName}({string.Join(", ", args)}));";
+    }
 
     /// <summary>A readable fallback rule message synthesized from a condition (mirrors the C# emitter's intent).</summary>
     private static string SynthesizeMessage(Expr condition) => "invariant failed";

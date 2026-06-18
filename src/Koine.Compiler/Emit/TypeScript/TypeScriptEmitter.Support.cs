@@ -68,7 +68,7 @@ public sealed partial class TypeScriptEmitter
 
     /// <summary>The runtime symbols any file may reference, and the order they import in.</summary>
     private static readonly IReadOnlyList<string> RuntimeSymbols =
-        new[] { "DomainInvariantViolationError", "Decimal", "Instant", "structuralEquals", "ValueObject", "Range", "defaultCompare" };
+        new[] { "DomainInvariantViolationError", "DomainEvent", "Decimal", "Instant", "structuralEquals", "ValueObject", "Range", "defaultCompare" };
 
     private static readonly Regex IdentifierRegex = new(@"\b[A-Za-z_][A-Za-z0-9_]*\b", RegexOptions.Compiled);
 
