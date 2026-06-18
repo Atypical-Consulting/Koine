@@ -16,7 +16,7 @@ internal static class CSharpNaming
             return name;
         }
 
-        var pascal = char.IsUpper(name[0]) ? name : char.ToUpperInvariant(name[0]) + name[1..];
+        var pascal = char.IsUpper(name[0]) ? name : WithFirstChar(name, char.ToUpperInvariant(name[0]));
         return Escape(pascal);
     }
 
@@ -28,9 +28,21 @@ internal static class CSharpNaming
             return name;
         }
 
-        var camel = char.IsLower(name[0]) ? name : char.ToLowerInvariant(name[0]) + name[1..];
+        var camel = char.IsLower(name[0]) ? name : WithFirstChar(name, char.ToLowerInvariant(name[0]));
         return Escape(camel);
     }
+
+    /// <summary>
+    /// Returns <paramref name="name"/> with its first character replaced by <paramref name="first"/>,
+    /// in a single allocation. Avoids the boxing + substring that <c>first + name[1..]</c> incurs
+    /// (<c>char + string</c> binds to <see cref="string.Concat(object?, object?)"/>, boxing the char).
+    /// </summary>
+    private static string WithFirstChar(string name, char first) =>
+        string.Create(name.Length, (name, first), static (span, state) =>
+        {
+            state.name.CopyTo(span);
+            span[0] = state.first;
+        });
 
     /// <summary>
     /// Emits a name verbatim (preserving case) as a C# identifier, prefixing it with
