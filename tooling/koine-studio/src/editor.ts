@@ -145,6 +145,9 @@ const sharedTheme = EditorView.theme({
   '.cm-scroller': { fontFamily: 'var(--koi-font-mono)', lineHeight: '1.6' },
   '.cm-gutters': { backgroundColor: 'transparent', color: 'var(--koi-muted)', border: 'none' },
   '.cm-content': { caretColor: 'var(--koi-accent)' },
+  // drawSelection() hides the native caret and paints its own .cm-cursor via border-left, which
+  // otherwise falls back to CodeMirror's default black — invisible on the dark theme's background.
+  '.cm-cursor, .cm-dropCursor': { borderLeftColor: 'var(--koi-accent)' },
   '&.cm-focused': { outline: 'none' },
   '.cm-activeLine': { backgroundColor: 'color-mix(in srgb, var(--koi-accent) 6%, transparent)' },
   '.cm-activeLineGutter': { backgroundColor: 'transparent', color: 'var(--koi-accent)' },
