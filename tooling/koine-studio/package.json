@@ -6,9 +6,11 @@
   "scripts": {
     "dev": "vite",
     "dev:web": "vite --mode web",
+    "predev:web": "node scripts/build-wasm.mjs",
     "build": "tsc && vite build",
     "build:wasm": "node scripts/build-wasm.mjs",
     "build:web": "tsc && vite build --mode web",
+    "prebuild:web": "node scripts/build-wasm.mjs",
     "preview": "vite preview",
     "preview:web": "vite preview --mode web",
     "test": "vitest run",
