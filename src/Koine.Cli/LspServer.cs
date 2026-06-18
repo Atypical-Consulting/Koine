@@ -829,8 +829,8 @@ internal sealed class LspServer
     /// Previews the emitter output for the merged workspace (directory semantics, matching the
     /// build) through the SAME registry/pipeline the CLI uses, so the returned files are
     /// byte-identical to <c>koine build</c>. The optional <c>params.target</c> selects the
-    /// emitter (<c>"csharp"</c> default, also <c>"typescript"</c>); any other target — including
-    /// <c>glossary</c>/<c>docs</c>, which have dedicated requests — yields a structured error
+    /// emitter (<c>"csharp"</c> default, also <c>"typescript"</c> and <c>"python"</c>); any other
+    /// target — including <c>glossary</c>/<c>docs</c>, which have dedicated requests — yields a structured error
     /// result (never a JSON-RPC error, never a throw). Diagnostics reuse the existing
     /// <see cref="ToLspDiagnostic"/> shape plus a per-item <c>uri</c> so a multi-file preview is
     /// unambiguous; on any model error the emitter produces no files and <c>files</c> is empty.
@@ -847,17 +847,18 @@ internal sealed class LspServer
             target = requested;
         }
 
-        // 2. Gate to the two preview targets BEFORE the registry (which also accepts
+        // 2. Gate to the code-emitter preview targets BEFORE the registry (which also accepts
         //    glossary/docs — those have dedicated koine/glossary requests).
         if (!string.Equals(target, "csharp", StringComparison.OrdinalIgnoreCase)
-            && !string.Equals(target, "typescript", StringComparison.OrdinalIgnoreCase))
+            && !string.Equals(target, "typescript", StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(target, "python", StringComparison.OrdinalIgnoreCase))
         {
             return new Dictionary<string, object?>
             {
                 ["target"] = target,
                 ["files"] = Array.Empty<object>(),
                 ["diagnostics"] = Array.Empty<object>(),
-                ["error"] = $"unknown target '{target}'; expected 'csharp' or 'typescript'",
+                ["error"] = $"unknown target '{target}'; expected 'csharp', 'typescript', or 'python'",
             };
         }
 
@@ -875,7 +876,7 @@ internal sealed class LspServer
                 ["target"] = target,
                 ["files"] = Array.Empty<object>(),
                 ["diagnostics"] = Array.Empty<object>(),
-                ["error"] = $"unknown target '{target}'; expected 'csharp' or 'typescript'",
+                ["error"] = $"unknown target '{target}'; expected 'csharp', 'typescript', or 'python'",
             };
         }
 
