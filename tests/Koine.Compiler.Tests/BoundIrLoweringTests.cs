@@ -246,6 +246,149 @@ public class BoundIrLoweringTests
     }
 
     // ----------------------------------------------------------------------
+    // 7. Value-object field projection (Commit 5) — the widened slice.
+    // ----------------------------------------------------------------------
+
+    private const string ProjectionSrc = """
+        context Shop {
+          enum Status { Draft, Active }
+          value Probe {
+            amount:  Decimal
+            tags:    List<String>
+            codes:   Set<String>
+            meta:    Map<String, String>
+            note:    String?
+            qty:     Int = 1
+            status:  Status = Draft
+            doubled: Decimal = amount * 2
+          }
+        }
+        """;
+
+    private static BoundValueObject Probe(SemanticModel sema) =>
+        sema.BoundValueObjectFor(ValueObjects(sema).Single(v => v.Name == "Probe"));
+
+    [Fact]
+    public void Projection_has_one_field_per_member_in_declaration_order_with_matching_kind()
+    {
+        var sema = Build(ProjectionSrc);
+        ValueObjectDecl probe = ValueObjects(sema).Single(v => v.Name == "Probe");
+        BoundValueObject bound = sema.BoundValueObjectFor(probe);
+
+        // One bound field per declared member, same order, same name.
+        Assert.Equal(probe.Members.Select(m => m.Name), bound.Fields.Select(f => f.Name));
+
+        // Kind matches the shared MemberAnalysis classification the emitter used to re-derive.
+        var memberNames = new HashSet<string>(probe.Members.Select(m => m.Name), StringComparer.Ordinal);
+        foreach ((Member m, BoundField f) in probe.Members.Zip(bound.Fields))
+        {
+            FieldKind expected = MemberAnalysis.IsDerived(m, memberNames) ? FieldKind.Derived : FieldKind.CtorParam;
+            Assert.Equal(expected, f.Kind);
+            // Every field carries a resolved type and back-points to its member.
+            Assert.NotNull(f.Type);
+            Assert.Same(m, f.Syntax);
+        }
+
+        Assert.Equal(FieldKind.Derived, bound.Fields.Single(f => f.Name == "doubled").Kind);
+    }
+
+    [Fact]
+    public void Ctor_params_put_defaulted_and_optional_fields_last_preserving_declaration_order()
+    {
+        var sema = Build(ProjectionSrc);
+        var order = Probe(sema).CtorParams.Select(f => f.Name).ToList();
+
+        // Required fields (declaration order) first; defaulted/optional (declaration order) last.
+        // 'doubled' is derived and excluded entirely.
+        Assert.Equal(new[] { "amount", "tags", "codes", "meta", "note", "qty", "status" }, order);
+    }
+
+    [Fact]
+    public void Default_kind_classifies_required_optional_constant_and_enum_defaults()
+    {
+        var sema = Build(ProjectionSrc);
+        var byName = Probe(sema).Fields.ToDictionary(f => f.Name);
+
+        Assert.Equal(DefaultKind.None, byName["amount"].DefaultKind);   // required, no initializer
+        Assert.Equal(DefaultKind.OptionalNull, byName["note"].DefaultKind); // optional, no initializer
+        Assert.Equal(DefaultKind.ConstantDefault, byName["qty"].DefaultKind); // non-enum initializer
+        Assert.Equal(DefaultKind.EnumDefault, byName["status"].DefaultKind);  // enum-typed initializer
+        Assert.Equal(DefaultKind.None, byName["doubled"].DefaultKind);  // derived => no ctor default
+    }
+
+    [Fact]
+    public void Collection_shape_classifies_list_set_map_and_scalar()
+    {
+        var sema = Build(ProjectionSrc);
+        var byName = Probe(sema).Fields.ToDictionary(f => f.Name);
+
+        Assert.Equal(CollectionShape.List, byName["tags"].CollectionShape);
+        Assert.Equal(CollectionShape.Set, byName["codes"].CollectionShape);
+        Assert.Equal(CollectionShape.Map, byName["meta"].CollectionShape);
+        Assert.Equal(CollectionShape.None, byName["amount"].CollectionShape);
+    }
+
+    [Fact]
+    public void Derived_field_carries_its_lowered_initializer_and_ctor_fields_do_not()
+    {
+        var sema = Build(ProjectionSrc);
+        ValueObjectDecl probe = ValueObjects(sema).Single(v => v.Name == "Probe");
+        var byName = sema.BoundValueObjectFor(probe).Fields.ToDictionary(f => f.Name);
+
+        BoundField doubled = byName["doubled"];
+        Assert.NotNull(doubled.DerivedInitializer);
+        // The lowered initializer back-points to the member's syntactic initializer.
+        Assert.Same(probe.Members.Single(m => m.Name == "doubled").Initializer, doubled.DerivedInitializer!.Syntax);
+
+        Assert.Null(byName["amount"].DerivedInitializer);
+        Assert.Null(byName["qty"].DerivedInitializer); // a constant default is NOT a derived initializer
+    }
+
+    [Fact]
+    public void Projection_folds_in_the_lowered_invariants()
+    {
+        const string src = """
+            context Shop {
+              value Money {
+                amount: Decimal
+                invariant amount >= 0
+              }
+            }
+            """;
+        var sema = Build(src);
+        ValueObjectDecl money = ValueObjects(sema).Single();
+
+        BoundValueObject bound = sema.BoundValueObjectFor(money);
+        BoundInvariant folded = Assert.Single(bound.Invariants);
+        // The folded invariants are the same projection the Commit-4 entry point exposes.
+        Assert.Equal(sema.BoundInvariantsFor(money), bound.Invariants);
+        Assert.Equal("amount >= 0", folded.Message);
+    }
+
+    [Fact]
+    public void Projection_cache_is_reference_keyed_across_same_named_value_objects()
+    {
+        const string src = """
+            context A {
+              value Money { amount: Decimal  half: Decimal = amount / 2 }
+            }
+            context B {
+              value Money { amount: Decimal }
+            }
+            """;
+        var sema = Build(src);
+        List<ValueObjectDecl> monies = ValueObjects(sema).Where(v => v.Name == "Money").ToList();
+        Assert.Equal(2, monies.Count);
+
+        BoundValueObject a = sema.BoundValueObjectFor(monies[0]);
+        BoundValueObject b = sema.BoundValueObjectFor(monies[1]);
+
+        // Distinct projections: A has a derived field, B does not (a value-keyed cache would collide them).
+        Assert.Contains(a.Fields, f => f.Kind == FieldKind.Derived);
+        Assert.DoesNotContain(b.Fields, f => f.Kind == FieldKind.Derived);
+    }
+
+    // ----------------------------------------------------------------------
     // Helpers
     // ----------------------------------------------------------------------
 
