@@ -35,28 +35,30 @@ public static class SetDocEditor
             return new DocEditResult(null, Array.Empty<DocTextEdit>());
         }
 
-        // Resolve the source text + path the declaration lives in (fall back to the first file for
-        // the single-document case, where the parser may not have stamped a span File).
-        string? usedPath = null;
+        // Resolve the source text + path the declaration lives in. Match on the span's stamped file;
+        // fall back to the sole input ONLY for the single-document case where the parser left the
+        // span File null. A stamped-but-unmatched file is never silently retargeted to files[0]
+        // (that would write the edit into the wrong document) — we return no edits instead.
+        string? usedPath = node.Span.File;
         string? source = null;
-        var file = node.Span.File;
-        if (file is not null)
+        if (usedPath is null)
+        {
+            if (files.Count > 0)
+            {
+                source = files[0].Source;
+                usedPath = files[0].Path;
+            }
+        }
+        else
         {
             foreach (var f in files)
             {
-                if (f.Path == file)
+                if (f.Path == usedPath)
                 {
                     source = f.Source;
-                    usedPath = f.Path;
                     break;
                 }
             }
-        }
-
-        if (source is null && files.Count > 0)
-        {
-            source = files[0].Source;
-            usedPath = files[0].Path;
         }
 
         if (source is null)

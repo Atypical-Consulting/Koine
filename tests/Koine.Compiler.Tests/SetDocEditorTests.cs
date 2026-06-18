@@ -77,6 +77,22 @@ public class SetDocEditorTests
     }
 
     [Fact]
+    public void Targets_the_declarations_own_file_in_a_multi_file_workspace()
+    {
+        var files = new[]
+        {
+            new SourceFile("a.koi", "context A {\n  value Alpha { x: Decimal }\n}\n"),
+            new SourceFile("b.koi", "context B {\n  value Beta { y: Decimal }\n}\n"),
+        };
+        var model = new KoineCompiler().Parse(files).Model!;
+
+        var result = SetDocEditor.Build(model, files, "B.Beta", "The beta value.");
+
+        Assert.Equal("b.koi", result.Uri);                 // not a.koi (files[0]) — the declaration's own file
+        Assert.Equal(2, result.Edits[0].Range.Line);       // the `value Beta` line within b.koi
+    }
+
+    [Fact]
     public void Unknown_id_returns_no_edits()
     {
         var (model, files) = Parse("context C {\n  value Money { amount: Decimal }\n}\n");
