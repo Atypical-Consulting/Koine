@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices.JavaScript;
+using System.Runtime.Versioning;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Koine.Compiler.Diagnostics;
@@ -16,6 +17,12 @@ namespace Koine.Wasm;
 /// return a JSON string, so the JavaScript boundary stays trivial (string in / string out).
 /// Exposed to the Playground via <c>getAssemblyExports(...).Koine.Wasm.CompilerInterop.*</c>.
 /// </summary>
+/// <remarks>
+/// This whole assembly only ever runs in the browser-wasm runtime (see the project header in
+/// <c>Koine.Wasm.csproj</c>), so the type is marked browser-only — that matches the platform of
+/// <see cref="JSExportAttribute"/> and keeps the <c>[JSExport]</c> methods CA1416-clean.
+/// </remarks>
+[SupportedOSPlatform("browser")]
 public static partial class CompilerInterop
 {
     private static readonly KoineCompiler Compiler = new();

@@ -1,4 +1,5 @@
 using System.Collections;
+using System.Diagnostics.CodeAnalysis;
 using System.Reflection;
 
 namespace Koine.Compiler.Ast;
@@ -51,6 +52,12 @@ internal static class NodeWalker
         }
     }
 
+    [UnconditionalSuppressMessage("Trimming", "IL2070",
+        Justification = "Reflects over Koine.Compiler's own node types. The only trimmed build " +
+            "(the browser-wasm publish) roots the whole Koine.Compiler assembly via " +
+            "<TrimmerRootAssembly> (see src/Koine.Wasm/Koine.Wasm.csproj), so every node type's " +
+            "public properties are preserved regardless of dataflow analysis. Annotating the " +
+            "parameter would only move the warning to the open-hierarchy GetType() call site.")]
     private static PropertyInfo[] PropertiesFor(Type type)
     {
         lock (ChildProps)
