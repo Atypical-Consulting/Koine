@@ -21,7 +21,25 @@
 
       <main id="split">
         <section id="editor-pane" class="pane" aria-label="Editor"></section>
-        <section id="output-pane" class="pane" aria-label="Generated output"></section>
+        <section id="right" class="pane" aria-label="Inspector">
+          <div id="tabs" role="tablist" aria-label="Right panel views">
+            <button type="button" class="tab" id="tab-preview" role="tab" data-view="preview" aria-selected="true">
+              Emitted Preview
+            </button>
+            <button type="button" class="tab" id="tab-glossary" role="tab" data-view="glossary" aria-selected="false">
+              Glossary
+            </button>
+            <button type="button" class="tab" id="tab-contextmap" role="tab" data-view="contextmap" aria-selected="false">
+              Context Map
+            </button>
+            <button type="button" id="btn-refresh" class="tab-refresh" title="Refresh this view">↻</button>
+          </div>
+          <div id="views">
+            <div id="view-preview" class="view" role="tabpanel"></div>
+            <div id="view-glossary" class="view doc-view" role="tabpanel" hidden></div>
+            <div id="view-contextmap" class="view doc-view" role="tabpanel" hidden></div>
+          </div>
+        </section>
       </main>
 
       <footer id="diagnostics" aria-label="Diagnostics"></footer>

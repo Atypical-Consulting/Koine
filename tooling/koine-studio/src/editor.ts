@@ -11,6 +11,8 @@ import {
   highlightActiveLine,
   highlightActiveLineGutter,
   drawSelection,
+  hoverTooltip,
+  type Tooltip,
 } from '@codemirror/view';
 import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands';
 import {
@@ -33,7 +35,7 @@ import { csharp } from '@codemirror/legacy-modes/mode/clike';
 import { typescript } from '@codemirror/legacy-modes/mode/javascript';
 import { tags as t } from '@lezer/highlight';
 import { lintGutter, setDiagnostics, type Diagnostic as CmDiagnostic } from '@codemirror/lint';
-import type { LspDiagnostic } from './lsp';
+import type { HoverResult, LspDiagnostic, MarkedString } from './lsp';
 
 // --- .koi token highlighter -------------------------------------------------
 
@@ -190,12 +192,162 @@ const sharedTheme = EditorView.theme({
   },
 });
 
+// --- tiny markdown renderer -------------------------------------------------
+// Shared by the hover tooltip here and the Glossary pane in ide.ts. We render only
+// the small subset of markdown the language server produces (headings, lists,
+// fenced/inline code, bold/italic, paragraphs) rather than pulling in a dependency.
+// Source is trusted (the LSP server) but still HTML-escaped before assembly.
+
+function escapeHtml(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+function inlineMd(text: string): string {
+  let out = text;
+  out = out.replace(/`([^`]+)`/g, (_m, c) => `<code>${c}</code>`);
+  out = out.replace(/\*\*([^*]+)\*\*/g, (_m, c) => `<strong>${c}</strong>`);
+  out = out.replace(/(^|[^*])\*([^*\n]+)\*/g, (_m, p, c) => `${p}<em>${c}</em>`);
+  out = out.replace(/(^|[^_])_([^_\n]+)_/g, (_m, p, c) => `${p}<em>${c}</em>`);
+  return out;
+}
+
+/** Render a small subset of markdown to an HTML string. */
+export function renderMarkdown(md: string): string {
+  const lines = escapeHtml(md.replace(/\r\n/g, '\n')).split('\n');
+  const html: string[] = [];
+  let i = 0;
+  let listOpen = false;
+  let paragraph: string[] = [];
+
+  const flushParagraph = () => {
+    if (paragraph.length) {
+      html.push(`<p>${inlineMd(paragraph.join(' '))}</p>`);
+      paragraph = [];
+    }
+  };
+  const closeList = () => {
+    if (listOpen) {
+      html.push('</ul>');
+      listOpen = false;
+    }
+  };
+
+  while (i < lines.length) {
+    const line = lines[i];
+
+    const fence = line.match(/^\s*```(.*)$/);
+    if (fence) {
+      flushParagraph();
+      closeList();
+      const body: string[] = [];
+      i++;
+      while (i < lines.length && !/^\s*```\s*$/.test(lines[i])) {
+        body.push(lines[i]);
+        i++;
+      }
+      i++; // skip closing fence
+      html.push(`<pre><code>${body.join('\n')}</code></pre>`);
+      continue;
+    }
+
+    const heading = line.match(/^(#{1,6})\s+(.*)$/);
+    if (heading) {
+      flushParagraph();
+      closeList();
+      const level = heading[1].length;
+      html.push(`<h${level}>${inlineMd(heading[2].trim())}</h${level}>`);
+      i++;
+      continue;
+    }
+
+    const item = line.match(/^\s*[-*+]\s+(.*)$/);
+    if (item) {
+      flushParagraph();
+      if (!listOpen) {
+        html.push('<ul>');
+        listOpen = true;
+      }
+      html.push(`<li>${inlineMd(item[1])}</li>`);
+      i++;
+      continue;
+    }
+
+    if (line.trim() === '') {
+      flushParagraph();
+      closeList();
+      i++;
+      continue;
+    }
+
+    closeList();
+    paragraph.push(line.trim());
+    i++;
+  }
+
+  flushParagraph();
+  closeList();
+  return html.join('\n');
+}
+
+// --- hover tooltips ---------------------------------------------------------
+
+export type HoverFn = (line: number, character: number) => Promise<HoverResult | null>;
+
+/** Flatten an LSP Hover's `contents` (MarkupContent | MarkedString | array) into markdown. */
+function hoverToMarkdown(hover: HoverResult): string {
+  const fromMarked = (m: MarkedString): string =>
+    typeof m === 'string' ? m : '```' + m.language + '\n' + m.value + '\n```';
+  const c = hover.contents;
+  if (Array.isArray(c)) return c.map(fromMarked).join('\n\n');
+  if (typeof c === 'string') return c;
+  if ('kind' in c) return c.value; // MarkupContent
+  return fromMarked(c); // {language,value} MarkedString
+}
+
+/**
+ * CodeMirror hover tooltip backed by `lsp.hover()`. Converts the CM offset to a 0-based
+ * {line,character}, requests a hover, and renders the returned markup. Degrades silently
+ * (no tooltip) when hover returns null/empty or the request fails.
+ */
+function koineHoverTooltip(hover: HoverFn) {
+  return hoverTooltip(async (view, pos): Promise<Tooltip | null> => {
+    const lineInfo = view.state.doc.lineAt(pos);
+    const lspLine = lineInfo.number - 1; // CM line is 1-based, LSP 0-based
+    const character = pos - lineInfo.from;
+    let res: HoverResult | null;
+    try {
+      res = await hover(lspLine, character);
+    } catch {
+      return null; // request failed/timed out — show nothing
+    }
+    if (!res || !res.contents) return null;
+    const markdown = hoverToMarkdown(res).trim();
+    if (!markdown) return null;
+
+    // Anchor to the word under the cursor when the doc has not changed shape.
+    const word = view.state.wordAt(pos);
+    return {
+      pos: word?.from ?? pos,
+      end: word?.to ?? pos,
+      above: true,
+      create() {
+        const dom = document.createElement('div');
+        dom.className = 'koi-hover koi-md';
+        dom.innerHTML = renderMarkdown(markdown);
+        return { dom };
+      },
+    };
+  });
+}
+
 // --- editable editor --------------------------------------------------------
 
 export interface KoineEditorOptions {
   parent: HTMLElement;
   doc: string;
   onChange?: (doc: string) => void;
+  /** Optional LSP hover provider; when given, hover tooltips are enabled. */
+  onHover?: HoverFn;
 }
 
 export interface KoineEditor {
@@ -249,6 +401,7 @@ export function createKoineEditor(opts: KoineEditorOptions): KoineEditor {
         koineLanguage,
         syntaxHighlighting(koineHighlight),
         lintGutter(),
+        ...(opts.onHover ? [koineHoverTooltip(opts.onHover)] : []),
         sharedTheme,
         EditorView.updateListener.of((u) => {
           // Fire onChange immediately; the LSP client debounces didChange.
