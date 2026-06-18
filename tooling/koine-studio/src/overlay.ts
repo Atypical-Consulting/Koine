@@ -15,6 +15,16 @@ type CloseFn = () => void;
 // Open overlays, bottom-to-top. The last entry is the one Esc closes.
 const stack: CloseFn[] = [];
 
+// Elements that can hold keyboard focus, used to find a modal's first/last tab stop.
+const FOCUSABLE_SELECTOR = [
+  'a[href]',
+  'button:not([disabled])',
+  'input:not([disabled])',
+  'select:not([disabled])',
+  'textarea:not([disabled])',
+  '[tabindex]:not([tabindex="-1"])',
+].join(',');
+
 /**
  * Register an open overlay as the new top of the Esc stack. Returns an unregister function
  * the overlay MUST call when it closes by any path (button, backdrop, Esc, programmatic).
@@ -125,6 +135,28 @@ export function createModal(opts: ModalOptions): ModalHandle {
   closeBtn.addEventListener('click', close);
   backdrop.addEventListener('mousedown', (e) => {
     if (e.target === backdrop) close(); // click outside the panel closes
+  });
+
+  // Tab focus trap: keep Tab/Shift+Tab cycling within the modal so focus never reaches the
+  // toolbar/editor behind the backdrop, honouring the aria-modal contract (WCAG 2.4.3).
+  modal.addEventListener('keydown', (e) => {
+    if (e.key !== 'Tab') return;
+    const focusable = Array.from(
+      modal.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR),
+    ).filter((el) => !el.hasAttribute('hidden'));
+    if (focusable.length === 0) return;
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    const active = document.activeElement;
+    if (e.shiftKey) {
+      if (active === first) {
+        e.preventDefault();
+        last.focus();
+      }
+    } else if (active === last) {
+      e.preventDefault();
+      first.focus();
+    }
   });
 
   return {
