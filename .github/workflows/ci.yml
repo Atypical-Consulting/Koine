@@ -30,6 +30,20 @@ jobs:
           dotnet-version: '10.0.x'
           dotnet-quality: preview
 
+      # Node + TypeScript so the TypeScript conformance harness
+      # (tests/Koine.Compiler.Tests/TestSupport.cs) can resolve `tsc` on PATH and
+      # actually run `tsc --noEmit --strict` against emitted TypeScript. Without
+      # this the harness returns Skipped and every TS check passes as INCONCLUSIVE
+      # without ever type-checking. ResolveTsc() finds `tsc` on PATH, which a
+      # global `npm i -g typescript` install satisfies (KOINE_TSC is the override).
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+
+      - name: Install TypeScript
+        run: npm install -g typescript
+
       # No central package management / lock files, so cache the global NuGet
       # package folder keyed on the project files that pin versions.
       - name: Cache NuGet
@@ -49,8 +63,11 @@ jobs:
       - name: Verify formatting
         run: dotnet format Koine.slnx --verify-no-changes --no-restore
 
+      # Run the whole solution so both test projects execute: the compiler suite
+      # (including the TypeScript conformance harness, which now type-checks for real
+      # against the tsc installed above) and tests/Koine.Mcp.Tests.
       - name: Test
-        run: dotnet test tests/Koine.Compiler.Tests/Koine.Compiler.Tests.csproj -c Release --no-build
+        run: dotnet test Koine.slnx -c Release --no-build
 
       # End-to-end guard: the demo regenerates C# from .koi and compiles it.
       # A demo build failure is a CI failure (it proves the emitter still works).
