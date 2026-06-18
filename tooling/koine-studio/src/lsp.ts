@@ -126,6 +126,34 @@ export interface CheckResult {
   changes: CheckChange[];
 }
 
+// Standard LSP WorkspaceEdit: text edits grouped by the file:// uri they apply to.
+export interface WorkspaceEdit {
+  changes: Record<string, TextEdit[]>;
+}
+
+// Standard LSP CodeAction: a titled quickfix/refactor carrying an inline WorkspaceEdit.
+export interface CodeAction {
+  title: string;
+  kind: string;
+  edit?: WorkspaceEdit;
+  diagnostics?: LspDiagnostic[];
+}
+
+// Standard LSP prepareRename answer: the editable identifier range + the current name to pre-fill.
+export interface PrepareRenameResult {
+  range: Range;
+  placeholder?: string;
+}
+
+// `koine/docs` result: one living-documentation file (Mermaid-in-Markdown) per emitted page.
+export interface DocsFile {
+  path: string;
+  contents: string;
+}
+export interface DocsResult {
+  files: DocsFile[];
+}
+
 interface JsonRpcMessage {
   jsonrpc?: string;
   id?: number | string | null;
@@ -152,6 +180,8 @@ export class KoineLsp {
   // request methods target; didChange is debounced per active uri.
   private docs = new Map<string, OpenDoc>();
   private changeTimer?: ReturnType<typeof setTimeout>;
+  // The uri of the document with a debounced didChange still pending (see changeDoc/flush).
+  private pendingUri?: string;
   private onDiagnostics?: (uri: string, diags: LspDiagnostic[]) => void;
   private onExit?: (code: number) => void;
   private onRestart?: () => void;
@@ -211,7 +241,11 @@ export class KoineLsp {
    * reject them.
    */
   private async reinitialize(): Promise<void> {
+    // Drop any pending debounced edit so the initialize handshake's flush() is a no-op — otherwise
+    // it would emit a didChange before reopen() re-sends didOpen (didChange-before-didOpen).
     clearTimeout(this.changeTimer);
+    this.changeTimer = undefined;
+    this.pendingUri = undefined;
     for (const entry of this.pending.values()) {
       clearTimeout(entry.timer);
       entry.reject(new Error('LSP server restarted'));
@@ -255,6 +289,10 @@ export class KoineLsp {
   }
 
   private request<T>(method: string, params: unknown): Promise<T> {
+    // Flush any debounced edit first so the server answers against the current document text —
+    // critical for the mutating refactors (rename/code-action) and format, whose returned ranges
+    // are applied to the live editor text. A no-op when nothing is pending.
+    this.flush();
     const id = this.nextId++;
     return new Promise<T>((resolve, reject) => {
       const timer = setTimeout(() => {
@@ -302,13 +340,59 @@ export class KoineLsp {
     const doc = this.docs.get(uri);
     if (!doc) return; // not opened yet — drop
     doc.text = text;
+    this.pendingUri = uri;
     clearTimeout(this.changeTimer);
     this.changeTimer = setTimeout(() => {
+      this.changeTimer = undefined;
+      this.pendingUri = undefined;
+      // Re-check the doc is still open: it may have been closed (folder teardown) during the
+      // debounce window — sending didChange after didClose would be a protocol violation.
+      const current = this.docs.get(uri);
+      if (!current) return;
       this.notify('textDocument/didChange', {
-        textDocument: { uri, version: ++doc.version },
+        textDocument: { uri, version: ++current.version },
         contentChanges: [{ text }],
       });
     }, 250);
+  }
+
+  /**
+   * Synchronously send any debounced didChange that is still pending, so the server's document
+   * snapshot is current before a request reads it. A no-op when nothing is pending. Called before
+   * every request method (so a refactor/format/preview can't run against stale text) and before
+   * switching the active file (so the leaving file's last edits aren't dropped by the shared timer).
+   */
+  flush(): void {
+    if (this.changeTimer === undefined) return;
+    clearTimeout(this.changeTimer);
+    this.changeTimer = undefined;
+    const uri = this.pendingUri;
+    this.pendingUri = undefined;
+    if (uri === undefined) return;
+    const doc = this.docs.get(uri);
+    if (!doc) return;
+    this.notify('textDocument/didChange', {
+      textDocument: { uri, version: ++doc.version },
+      contentChanges: [{ text: doc.text }],
+    });
+  }
+
+  /**
+   * Immediately push the full text of `uri` to the server (no debounce), used when a non-active
+   * buffer is edited programmatically (e.g. a cross-file rename). Falls back to openDoc for an
+   * untracked uri so a didChange never precedes a didOpen.
+   */
+  syncDoc(uri: string, text: string): void {
+    const doc = this.docs.get(uri);
+    if (!doc) {
+      this.openDoc(uri, text);
+      return;
+    }
+    doc.text = text;
+    this.notify('textDocument/didChange', {
+      textDocument: { uri, version: ++doc.version },
+      contentChanges: [{ text }],
+    });
   }
 
   /** Close and stop tracking a document. Sends textDocument/didClose. */
@@ -352,6 +436,13 @@ export class KoineLsp {
     });
   }
 
+  /** Living-documentation files (Mermaid-in-Markdown) for the merged workspace. */
+  livingDocs(): Promise<DocsResult> {
+    return this.request<DocsResult>('koine/docs', {
+      textDocument: { uri: this.activeUri },
+    });
+  }
+
   /** Set (insert/replace/clear) a declaration's `///` doc comment, addressed by its glossary id. */
   setDoc(id: string, text: string): Promise<SetDocResult> {
     return this.request<SetDocResult>('koine/setDoc', {
@@ -359,6 +450,55 @@ export class KoineLsp {
       id,
       text,
     });
+  }
+
+  /**
+   * Every reference to the symbol at a 0-based position across the workspace (declaration
+   * included). Resolves to [] when the cursor is not on a renameable name.
+   */
+  async references(line: number, character: number): Promise<Location[]> {
+    const res = await this.request<Location[] | null>('textDocument/references', {
+      textDocument: { uri: this.activeUri },
+      position: { line, character },
+      context: { includeDeclaration: true },
+    });
+    return res ?? [];
+  }
+
+  /**
+   * The editable identifier range under the cursor (LSP prepareRename). Resolves to null when a
+   * rename is not valid there (string/regex, non-word token, or no resolvable symbol).
+   */
+  prepareRename(line: number, character: number): Promise<PrepareRenameResult | null> {
+    return this.request<PrepareRenameResult | null>('textDocument/prepareRename', {
+      textDocument: { uri: this.activeUri },
+      position: { line, character },
+    });
+  }
+
+  /**
+   * Compute the workspace edit to rename the symbol under the cursor to `newName`. Resolves to
+   * null when no rename applies (cursor not on a renameable name, invalid identifier, unchanged).
+   */
+  rename(line: number, character: number, newName: string): Promise<WorkspaceEdit | null> {
+    return this.request<WorkspaceEdit | null>('textDocument/rename', {
+      textDocument: { uri: this.activeUri },
+      position: { line, character },
+      newName,
+    });
+  }
+
+  /**
+   * Code actions for a 0-based range: diagnostic quickfixes (from the supplied active-file
+   * diagnostics) plus selection-driven refactors. Resolves to [] when none apply.
+   */
+  async codeActions(range: Range, diagnostics: LspDiagnostic[]): Promise<CodeAction[]> {
+    const res = await this.request<CodeAction[] | null>('textDocument/codeAction', {
+      textDocument: { uri: this.activeUri },
+      range,
+      context: { diagnostics },
+    });
+    return res ?? [];
   }
 
   /** Standard LSP hover at a 0-based position. Resolves to null when there is nothing to show. */

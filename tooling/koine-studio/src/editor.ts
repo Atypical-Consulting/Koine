@@ -35,7 +35,19 @@ import { csharp } from '@codemirror/legacy-modes/mode/clike';
 import { typescript } from '@codemirror/legacy-modes/mode/javascript';
 import { tags as t } from '@lezer/highlight';
 import { lintGutter, setDiagnostics, type Diagnostic as CmDiagnostic } from '@codemirror/lint';
-import type { DocumentSymbol, HoverResult, Location, LspDiagnostic, MarkedString, TextEdit } from './lsp';
+import type {
+  CodeAction,
+  DocumentSymbol,
+  HoverResult,
+  Location,
+  LspDiagnostic,
+  MarkedString,
+  PrepareRenameResult,
+  Range as LspRange,
+  TextEdit,
+  WorkspaceEdit,
+} from './lsp';
+import { dismissFloating, showActionMenu, showRenameInput } from './actions';
 
 // --- .koi token highlighter -------------------------------------------------
 
@@ -388,6 +400,21 @@ export type NavigateFn = (loc: Location) => void;
 /** Format provider; resolves to the LSP TextEdits to apply to the whole document. */
 export type FormatFn = () => Promise<TextEdit[]>;
 
+/** prepareRename provider; resolves the editable identifier range under the cursor (or null). */
+export type PrepareRenameFn = (line: number, character: number) => Promise<PrepareRenameResult | null>;
+/** rename provider; resolves the workspace edit renaming the symbol under the cursor (or null). */
+export type RenameFn = (line: number, character: number, newName: string) => Promise<WorkspaceEdit | null>;
+/** find-references provider; resolves every reference to the symbol under the cursor. */
+export type ReferencesFn = (line: number, character: number) => Promise<Location[]>;
+/** code-action provider; resolves the quickfixes + refactors for a 0-based selection range. */
+export type CodeActionsFn = (range: LspRange) => Promise<CodeAction[]>;
+/** Applies a resolved WorkspaceEdit; ide.ts spreads the edits across its open buffers. */
+export type ApplyWorkspaceEditFn = (edit: WorkspaceEdit) => void;
+/** Navigates to a picked reference Location; ide.ts switches files if needed and jumps. */
+export type NavigateLocationFn = (location: Location) => void;
+/** Maps a file:// uri to a short label for the references picker (e.g. its relPath). */
+export type UriLabelFn = (uri: string) => string;
+
 export interface KoineEditorOptions {
   parent: HTMLElement;
   doc: string;
@@ -400,6 +427,20 @@ export interface KoineEditorOptions {
   onNavigate?: NavigateFn;
   /** Optional format provider; when given, Cmd/Ctrl-S formats the document. */
   onFormat?: FormatFn;
+  /** Optional prepareRename provider; with onRename, enables F2 rename-symbol. */
+  onPrepareRename?: PrepareRenameFn;
+  /** Optional rename provider; resolves the workspace edit applied via onApplyWorkspaceEdit. */
+  onRename?: RenameFn;
+  /** Optional find-references provider; with onNavigateLocation, enables Shift-F12. */
+  onReferences?: ReferencesFn;
+  /** Navigates to a reference the user picks from the references menu. */
+  onNavigateLocation?: NavigateLocationFn;
+  /** Maps a reference's uri to a short label (relPath) for the references menu. */
+  uriLabel?: UriLabelFn;
+  /** Optional code-action provider; when given, Mod-. opens the quickfix/refactor menu. */
+  onCodeActions?: CodeActionsFn;
+  /** Applies a WorkspaceEdit from a rename/code-action (ide.ts spreads it across buffers). */
+  onApplyWorkspaceEdit?: ApplyWorkspaceEditFn;
 }
 
 export interface KoineEditor {
@@ -475,6 +516,90 @@ export function createKoineEditor(opts: KoineEditorOptions): KoineEditor {
     else jumpToRange(view, loc.range.start, loc.range.end); // fallback: same-doc jump
   }
 
+  // Convert a CodeMirror document offset to a 0-based LSP {line, character}.
+  function posToLsp(pos: number): { line: number; character: number } {
+    const lineInfo = view.state.doc.lineAt(pos);
+    return { line: lineInfo.number - 1, character: pos - lineInfo.from };
+  }
+
+  // F2 rename: prepareRename to find the editable identifier range, show the inline field
+  // pre-filled with the current name, then resolve + apply the workspace edit on submit.
+  async function startRename(pos: number): Promise<void> {
+    if (!opts.onPrepareRename || !opts.onRename) return;
+    const at = posToLsp(pos);
+    let prep: PrepareRenameResult | null;
+    try {
+      prep = await opts.onPrepareRename(at.line, at.character);
+    } catch {
+      return;
+    }
+    if (!prep) return;
+    const anchor = lspPosToOffset(view, prep.range.start.line, prep.range.start.character);
+    const end = lspPosToOffset(view, prep.range.end.line, prep.range.end.character);
+    const placeholder = prep.placeholder ?? view.state.sliceDoc(anchor, end);
+    const renameAt = prep.range.start;
+    showRenameInput(view, anchor, placeholder, (newName) => {
+      void (async () => {
+        let edit: WorkspaceEdit | null;
+        try {
+          edit = await opts.onRename!(renameAt.line, renameAt.character, newName);
+        } catch {
+          return;
+        }
+        if (edit && opts.onApplyWorkspaceEdit) opts.onApplyWorkspaceEdit(edit);
+      })();
+    });
+  }
+
+  // Shift-F12 find-references: resolve every reference and show a picker at the cursor; picking
+  // one navigates via onNavigateLocation (ide.ts switches files when needed).
+  async function findReferences(pos: number): Promise<void> {
+    if (!opts.onReferences || !opts.onNavigateLocation) return;
+    const at = posToLsp(pos);
+    let locs: Location[];
+    try {
+      locs = await opts.onReferences(at.line, at.character);
+    } catch {
+      return;
+    }
+    const label = opts.uriLabel ?? ((uri: string) => uri.split('/').pop() ?? uri);
+    showActionMenu(
+      view,
+      pos,
+      locs.map((loc) => ({
+        label: label(loc.uri),
+        detail: `${loc.range.start.line + 1}:${loc.range.start.character + 1}`,
+        run: () => opts.onNavigateLocation!(loc),
+      })),
+      { emptyText: 'No references found.' },
+    );
+  }
+
+  // Mod-. code actions: resolve quickfixes + refactors for the selection and open the menu.
+  async function showCodeActions(): Promise<void> {
+    if (!opts.onCodeActions) return;
+    const sel = view.state.selection.main;
+    const range: LspRange = { start: posToLsp(sel.from), end: posToLsp(sel.to) };
+    let actions: CodeAction[];
+    try {
+      actions = await opts.onCodeActions(range);
+    } catch {
+      return;
+    }
+    showActionMenu(
+      view,
+      sel.head,
+      actions.map((a) => ({
+        label: a.title,
+        detail: a.kind === 'quickfix' ? 'Quick Fix' : a.kind.startsWith('refactor') ? 'Refactor' : a.kind,
+        run: () => {
+          if (a.edit && opts.onApplyWorkspaceEdit) opts.onApplyWorkspaceEdit(a.edit);
+        },
+      })),
+      { emptyText: 'No quick fixes or refactors here.' },
+    );
+  }
+
   // Cmd/Ctrl-click jumps to definition (only when a provider is wired).
   const definitionClick = opts.onDefinition
     ? [
@@ -507,6 +632,33 @@ export function createKoineEditor(opts: KoineEditorOptions): KoineEditor {
       run: () => {
         if (!opts.onFormat) return false;
         void opts.onFormat().then((edits) => editorHandle.applyEdits(edits));
+        return true;
+      },
+    },
+    {
+      key: 'F2',
+      preventDefault: true,
+      run: () => {
+        if (!opts.onPrepareRename || !opts.onRename) return false;
+        void startRename(view.state.selection.main.head);
+        return true;
+      },
+    },
+    {
+      key: 'Shift-F12',
+      preventDefault: true,
+      run: () => {
+        if (!opts.onReferences || !opts.onNavigateLocation) return false;
+        void findReferences(view.state.selection.main.head);
+        return true;
+      },
+    },
+    {
+      key: 'Mod-.',
+      preventDefault: true,
+      run: () => {
+        if (!opts.onCodeActions) return false;
+        void showCodeActions();
         return true;
       },
     },
@@ -575,6 +727,7 @@ export function createKoineEditor(opts: KoineEditorOptions): KoineEditor {
       view.dispatch({ changes });
     },
     destroy() {
+      dismissFloating();
       view.destroy();
     },
   };

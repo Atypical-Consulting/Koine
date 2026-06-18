@@ -138,6 +138,42 @@ export class WasmLspTransport implements LspTransport {
       case 'koine/setDoc':
         return [result(JSON.parse(api.SetDoc(this.filesJson(), msg.params?.id ?? '', msg.params?.text ?? '')))];
 
+      case 'koine/docs':
+        return [result(JSON.parse(api.Docs(this.filesJson())))];
+
+      case 'textDocument/references':
+        return [result(JSON.parse(api.References(this.filesJson(), uri ?? '', pos?.line ?? 0, pos?.character ?? 0)))];
+
+      case 'textDocument/prepareRename':
+        return [result(JSON.parse(api.PrepareRename(this.filesJson(), uri ?? '', pos?.line ?? 0, pos?.character ?? 0)))];
+
+      case 'textDocument/rename':
+        return [
+          result(
+            JSON.parse(api.Rename(this.filesJson(), uri ?? '', pos?.line ?? 0, pos?.character ?? 0, msg.params?.newName ?? '')),
+          ),
+        ];
+
+      case 'textDocument/codeAction': {
+        const range = msg.params?.range;
+        const diagnosticsJson = JSON.stringify(msg.params?.context?.diagnostics ?? []);
+        return [
+          result(
+            JSON.parse(
+              api.CodeActions(
+                this.filesJson(),
+                uri ?? '',
+                range?.start?.line ?? 0,
+                range?.start?.character ?? 0,
+                range?.end?.line ?? 0,
+                range?.end?.character ?? 0,
+                diagnosticsJson,
+              ),
+            ),
+          ),
+        ];
+      }
+
       case 'koine/check': {
         const baseline = JSON.stringify(msg.params?.baselineSources ?? []);
         return [result(JSON.parse(api.Check(this.filesJson(), baseline)))];

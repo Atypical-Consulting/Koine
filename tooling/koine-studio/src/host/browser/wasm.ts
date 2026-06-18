@@ -28,6 +28,24 @@ export interface KoineWasmApi {
   Format(source: string): string;
   /** Compatibility of current vs baseline workspace → JSON CheckResult. */
   Check(currentFilesJson: string, baselineFilesJson: string): string;
+  /** Every reference to the name at a 0-based position → JSON Location[]. */
+  References(filesJson: string, activeUri: string, line: number, character: number): string;
+  /** Editable identifier range under the cursor → JSON `{range, placeholder}` or `null`. */
+  PrepareRename(filesJson: string, activeUri: string, line: number, character: number): string;
+  /** Workspace edit renaming the symbol under the cursor → JSON WorkspaceEdit or `null`. */
+  Rename(filesJson: string, activeUri: string, line: number, character: number, newName: string): string;
+  /** Quickfixes + refactors for a 0-based range → JSON CodeAction[]. */
+  CodeActions(
+    filesJson: string,
+    activeUri: string,
+    startLine: number,
+    startChar: number,
+    endLine: number,
+    endChar: number,
+    diagnosticsJson: string,
+  ): string;
+  /** Living-documentation files (Mermaid-in-Markdown) for the merged workspace → JSON `{files}`. */
+  Docs(filesJson: string): string;
 }
 
 let apiPromise: Promise<KoineWasmApi> | null = null;

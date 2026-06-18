@@ -323,6 +323,13 @@ fn write_text_file(path: String, contents: String) -> Result<(), String> {
     std::fs::write(&path, contents).map_err(|e| format!("failed to write {path}: {e}"))
 }
 
+/// Write raw bytes to `path`, replacing any existing file. Used to save a generated-project zip
+/// picked via the dialog plugin; `write_text_file` can't carry binary. Errors as strings.
+#[tauri::command]
+fn write_bytes(path: String, contents: Vec<u8>) -> Result<(), String> {
+    std::fs::write(&path, contents).map_err(|e| format!("failed to write {path}: {e}"))
+}
+
 // --- tauri commands ---------------------------------------------------------
 
 #[tauri::command]
@@ -395,7 +402,8 @@ pub fn run() {
             app_version,
             list_koi_files,
             read_text_file,
-            write_text_file
+            write_text_file,
+            write_bytes
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
@@ -574,6 +582,19 @@ mod tests {
         let body = "context Demo {\n  value Money\n}\n";
         write_text_file(path.to_string_lossy().into_owned(), body.to_string()).unwrap();
         let got = read_text_file(path.to_string_lossy().into_owned()).unwrap();
+        assert_eq!(got, body);
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn write_bytes_round_trips_binary() {
+        let path = std::env::temp_dir()
+            .join(format!("koine_studio_bytes_{}.zip", std::process::id()));
+        // Bytes that are not valid UTF-8 (a zip's local-file-header magic + a stray 0xFF) must
+        // survive write_bytes intact, which write_text_file could not carry.
+        let body: Vec<u8> = vec![0x50, 0x4b, 0x03, 0x04, 0x00, 0xff, 0xfe];
+        write_bytes(path.to_string_lossy().into_owned(), body.clone()).unwrap();
+        let got = std::fs::read(&path).unwrap();
         assert_eq!(got, body);
         let _ = std::fs::remove_file(&path);
     }

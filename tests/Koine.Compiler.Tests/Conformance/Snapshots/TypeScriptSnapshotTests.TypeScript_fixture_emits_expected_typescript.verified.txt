@@ -43,13 +43,15 @@ export class Order {
     this._domainEvents.length = 0;
   }
 
-  place(): void {
+  place(): OrderId {
     if (this.status !== OrderStatus.Draft) {
       throw new DomainInvariantViolationError('Order', 'only a draft order can be placed');
     }
     this.status = OrderStatus.Placed;
     this.checkInvariants();
-    this._domainEvents.push(new OrderPlaced(this.id, this.lines.length));
+    const __result = this.id;
+    this._domainEvents.push(new OrderPlaced(__result, this.lines.length));
+    return __result;
   }
 
   static forCustomer(customer: CustomerId, lines: readonly OrderLine[]): Order {

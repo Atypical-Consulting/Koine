@@ -2,9 +2,21 @@
 // the status line, the diagnostics strip, and the tabbed inspector (emitted preview,
 // glossary, and context map).
 import { createKoineEditor, createOutputView, renderMarkdown, renderSymbolTree, setEditorDiagnostics } from './editor';
-import { KoineLsp, SCRATCH_URI, type CheckResult, type ContextMapResult, type GlossaryEntry, type GlossaryModel, type Location, type LspDiagnostic } from './lsp';
+import {
+  KoineLsp,
+  SCRATCH_URI,
+  type CheckResult,
+  type ContextMapResult,
+  type GlossaryEntry,
+  type GlossaryModel,
+  type Location,
+  type LspDiagnostic,
+  type Range,
+  type TextEdit,
+  type WorkspaceEdit,
+} from './lsp';
 import { getPlatform, type KoiFile } from './host';
-import { initTheme, toggleTheme } from './theme';
+import { currentTheme, initTheme, onThemeChange, toggleTheme } from './theme';
 import { clearScratch, loadScratch, loadSettings, pushRecentFolder, saveScratch, type Settings } from './store';
 import { createWelcome } from './welcome';
 import { createCommandPalette, type Command } from './palette';
@@ -12,7 +24,11 @@ import { createPreferences } from './prefs';
 import { initSplitResizer } from './resize';
 import { createHelpOverlay, type ShortcutRow } from './help';
 import { createAboutDialog } from './about';
+import { createGenerateProject } from './generateProjectWizard';
 import { formatChord } from './platform';
+import { renderDiagrams } from './diagrams';
+import { createAssistantPanel, type AssistantPanel } from './aiPanel';
+import { buildShareUrl, clearModelHash, readModelFromHash } from './share';
 
 // --- workspace fs contract ---------------------------------------------------
 // `KoiFile` (path / name / relPath) is provided by the host platform layer (src/host), whose
@@ -176,7 +192,16 @@ function renderCheckMarkdown(res: CheckResult): string {
   return out.join('\n');
 }
 
-type RightView = 'preview' | 'glossary' | 'contextmap' | 'outline' | 'check';
+// The active file's diagnostics that intersect a 0-based request range, so a code-action request is
+// scoped to the cursor/selection (otherwise the quickfix menu would offer "did you mean" fixes for
+// unrelated typos elsewhere in the file, and applying one would edit an off-screen region).
+function diagnosticsInRange(diags: LspDiagnostic[], range: Range): LspDiagnostic[] {
+  const lte = (a: { line: number; character: number }, b: { line: number; character: number }): boolean =>
+    a.line < b.line || (a.line === b.line && a.character <= b.character);
+  return diags.filter((d) => lte(d.range.start, range.end) && lte(range.start, d.range.end));
+}
+
+type RightView = 'preview' | 'glossary' | 'diagrams' | 'contextmap' | 'outline' | 'assistant' | 'check';
 
 // Keyboard shortcuts shown in the help overlay; mirrors the global keydown handler and the
 // palette command hints. 'mod' renders as a keycap as-is (Cmd on mac / Ctrl elsewhere).
@@ -188,6 +213,9 @@ function helpRows(): ShortcutRow[] {
     { keys: 'mod+N', description: 'New scratch model' },
     { keys: 'mod+1', description: 'Preview C#' },
     { keys: 'mod+2', description: 'Preview TypeScript' },
+    { keys: 'F2', description: 'Rename symbol' },
+    { keys: 'Shift+F12', description: 'Find all references' },
+    { keys: 'mod+.', description: 'Quick fixes & refactors' },
     { keys: 'mod+,', description: 'Preferences' },
     { keys: 'mod+B', description: 'Toggle file tree (folder mode)' },
     { keys: 'F1', description: 'Keyboard shortcuts' },
@@ -210,11 +238,14 @@ export function init(): void {
   }
   applyFontSize();
 
+  // A model carried in the URL hash (a shared playground link) takes precedence over both the seed
+  // and any restored scratch, so opening a link always lands on the shared model.
+  const sharedModel = readModelFromHash();
   // Session restore: if the user has unsaved scratch work from a previous visit, open that instead
   // of the seed (and skip the welcome screen — see the boot section). Folder workspaces are not
   // restored; they live on disk and are re-opened explicitly.
   const restoredScratch = loadScratch();
-  const initialDoc = restoredScratch ?? SEED;
+  const initialDoc = sharedModel ?? restoredScratch ?? SEED;
 
   const editor = createKoineEditor({
     parent: el('editor-pane'),
@@ -239,6 +270,15 @@ export function init(): void {
     onHover: (line, character) => lsp.hover(line, character),
     onDefinition: (line, character) => lsp.definition(line, character),
     onNavigate: (loc) => navigateToDefinition(loc),
+    // Refactors + quick fixes (F2 rename, Shift-F12 references, Mod-. code actions). The editor
+    // owns the in-editor widgets; ide.ts resolves the data and applies the resulting edits.
+    onPrepareRename: (line, character) => lsp.prepareRename(line, character),
+    onRename: (line, character, newName) => lsp.rename(line, character, newName),
+    onReferences: (line, character) => lsp.references(line, character),
+    onNavigateLocation: (loc) => navigateToDefinition(loc),
+    uriLabel: (uri) => buffers.get(uri)?.relPath ?? (uri.split('/').pop() ?? uri),
+    onCodeActions: (range) => lsp.codeActions(range, diagnosticsInRange(diagnosticsByUri.get(activeUri) ?? [], range)),
+    onApplyWorkspaceEdit: (edit) => applyWorkspaceEdit(edit),
     // Save (Cmd/Ctrl-S) is owned by ide.ts's window keydown handler below: it formats AND
     // writes the active buffer to disk. We deliberately do NOT pass onFormat here so the
     // editor's Mod-s keymap stays inert and there's exactly one save path.
@@ -435,6 +475,9 @@ export function init(): void {
   // uri, re-renders diagnostics for it, and invalidates the doc views so they re-fetch.
   function activateFile(uri: string): void {
     if (uri === activeUri) return;
+    // Flush the leaving file's debounced edits to the server before switching: the shared change
+    // timer is re-armed for the new file on setDoc below, which would otherwise drop them.
+    lsp.flush();
     const leaving = buffers.get(activeUri);
     if (leaving) leaving.text = editor.getDoc();
     const next = buffers.get(uri);
@@ -459,26 +502,83 @@ export function init(): void {
     editor.gotoRange(loc.range.start, loc.range.end);
   }
 
+  // Apply LSP TextEdits to a plain string (for non-active buffers in a cross-file rename). Edits
+  // are applied from the end backward so earlier edits don't shift the offsets of later ones.
+  function applyTextEditsToString(text: string, edits: TextEdit[]): string {
+    const lines = text.split('\n');
+    const offsetOf = (line: number, character: number): number => {
+      const ln = Math.min(Math.max(line, 0), lines.length - 1);
+      let offset = 0;
+      for (let i = 0; i < ln; i++) offset += lines[i].length + 1; // + the '\n'
+      return offset + Math.min(Math.max(character, 0), lines[ln].length);
+    };
+    const sorted = edits
+      .map((e) => ({
+        from: offsetOf(e.range.start.line, e.range.start.character),
+        to: offsetOf(e.range.end.line, e.range.end.character),
+        insert: e.newText,
+      }))
+      .sort((a, b) => b.from - a.from);
+    let result = text;
+    for (const edit of sorted) result = result.slice(0, edit.from) + edit.insert + result.slice(edit.to);
+    return result;
+  }
+
+  // Apply a rename/code-action WorkspaceEdit across open buffers. The active file is edited through
+  // the editor (so undo history + the onChange sync path fire); other OPEN files are patched in
+  // their stored text and pushed to the server immediately. Edits to non-open files are ignored.
+  function applyWorkspaceEdit(edit: WorkspaceEdit): void {
+    if (!edit?.changes) return;
+    let treeChanged = false;
+    for (const [uri, edits] of Object.entries(edit.changes)) {
+      if (!edits.length) continue;
+      if (uri === activeUri) {
+        editor.applyEdits(edits); // dispatch → onChange updates the buffer + lsp + doc views
+      } else {
+        const buf = buffers.get(uri);
+        if (!buf) continue;
+        buf.text = applyTextEditsToString(buf.text, edits);
+        if (buf.path != null) buf.dirty = true;
+        lsp.syncDoc(uri, buf.text);
+        treeChanged = true;
+      }
+    }
+    if (treeChanged) renderTree();
+    onDocEdited();
+  }
+
+  // Replace the active document's contents (used by the AI "Apply to editor" action). Setting the
+  // editor doc dispatches a change, so the editor's onChange handler runs the full sync pipeline
+  // (buffer text, lsp.changeDoc, scratch persistence, doc-view refresh, tree) — don't repeat it here.
+  function replaceActiveDoc(source: string): void {
+    editor.setDoc(source);
+  }
+
   // --- tabbed inspector (preview / glossary / context map) ------------------
 
   const glossaryView = el('view-glossary');
+  const diagramsView = el('view-diagrams');
   const contextMapView = el('view-contextmap');
   const outlineView = el('view-outline');
+  const assistantView = el('view-assistant');
   const checkView = el('view-check');
   const tabs = Array.from(document.querySelectorAll<HTMLButtonElement>('#tabs .tab'));
   const viewEls: Record<RightView, HTMLElement> = {
     preview: el('view-preview'),
     glossary: glossaryView,
+    diagrams: diagramsView,
     contextmap: contextMapView,
     outline: outlineView,
+    assistant: assistantView,
     check: checkView,
   };
   let activeView: RightView = 'preview';
   // Track which doc-based views need a (re)fetch — invalidated on every edit so a tab
   // switch always shows data for the current model rather than a stale render. The check
-  // view is excluded: it is only (re)run on demand via the Check button.
-  const docViewsLoaded: Record<'glossary' | 'contextmap' | 'outline', boolean> = {
+  // view (on-demand via the Check button) and the assistant (interactive) are excluded.
+  const docViewsLoaded: Record<'glossary' | 'diagrams' | 'contextmap' | 'outline', boolean> = {
     glossary: false,
+    diagrams: false,
     contextmap: false,
     outline: false,
   };
@@ -689,15 +789,34 @@ export function init(): void {
     }
   }
 
+  // Live domain diagrams: fetch the DocsEmitter output (Mermaid-in-Markdown) and render it.
+  // Marked loaded only on success so a transient failure re-fetches on the next visit. A monotonic
+  // token drops the result of a render that a newer one (edit / theme flip / refresh) superseded.
+  let diagramsSeq = 0;
+  async function loadDiagrams(): Promise<void> {
+    const seq = ++diagramsSeq;
+    docMessage(diagramsView, 'Rendering diagrams…');
+    try {
+      const res = await lsp.livingDocs();
+      if (seq !== diagramsSeq) return;
+      await renderDiagrams(diagramsView, res.files, currentTheme(), () => seq === diagramsSeq);
+      if (seq === diagramsSeq) docViewsLoaded.diagrams = true;
+    } catch (e) {
+      if (seq === diagramsSeq) docMessage(diagramsView, 'Diagrams request failed: ' + String(e), 'error');
+    }
+  }
+
   function ensureLoaded(view: RightView): void {
     if (view === 'glossary' && !docViewsLoaded.glossary) void loadGlossary();
+    if (view === 'diagrams' && !docViewsLoaded.diagrams) void loadDiagrams();
     if (view === 'contextmap' && !docViewsLoaded.contextmap) void loadContextMap();
     if (view === 'outline' && !docViewsLoaded.outline) void loadOutline();
   }
 
-  // Mark the cached glossary/context-map/outline stale (e.g. after an edit or a file switch).
+  // Mark the cached doc views stale (e.g. after an edit or a file switch).
   function invalidateDocViews(): void {
     docViewsLoaded.glossary = false;
+    docViewsLoaded.diagrams = false;
     docViewsLoaded.contextmap = false;
     docViewsLoaded.outline = false;
   }
@@ -707,7 +826,7 @@ export function init(): void {
   let editDebounce: ReturnType<typeof setTimeout> | undefined;
   function onDocEdited(): void {
     invalidateDocViews();
-    if (activeView === 'preview' || activeView === 'check') return;
+    if (activeView === 'preview' || activeView === 'check' || activeView === 'assistant') return;
     clearTimeout(editDebounce);
     editDebounce = setTimeout(() => ensureLoaded(activeView), 350);
   }
@@ -721,6 +840,10 @@ export function init(): void {
     for (const key of Object.keys(viewEls) as RightView[]) {
       viewEls[key].hidden = key !== view;
     }
+    if (view === 'assistant') {
+      ensureAssistant().focusInput();
+      return;
+    }
     ensureLoaded(view);
   }
 
@@ -732,6 +855,7 @@ export function init(): void {
   // the Check… toolbar button which re-prompts for a baseline).
   el<HTMLButtonElement>('btn-refresh').addEventListener('click', () => {
     if (activeView === 'glossary') void loadGlossary();
+    else if (activeView === 'diagrams') void loadDiagrams();
     else if (activeView === 'contextmap') void loadContextMap();
     else if (activeView === 'outline') void loadOutline();
   });
@@ -1046,12 +1170,46 @@ export function init(): void {
     welcome.hide();
   }
 
+  // Open `source` as a fresh scratch model (used by the example gallery and shared links). Tears
+  // down a folder workspace if one is open, then seeds a single scratch buffer with the source.
+  function openScratchWith(source: string): void {
+    if (folderMode) {
+      for (const uri of Array.from(buffers.keys())) lsp.closeDoc(uri);
+      buffers.clear();
+      diagnosticsByUri.clear();
+      folderMode = false;
+      treeEl.hidden = true;
+      treeTitleEl.textContent = 'Scratch';
+    } else {
+      diagnosticsByUri.delete(SCRATCH_URI);
+    }
+    buffers.set(SCRATCH_URI, {
+      uri: SCRATCH_URI,
+      path: null,
+      relPath: 'model.koi',
+      name: 'model.koi',
+      text: source,
+      dirty: false,
+    });
+    activeUri = SCRATCH_URI;
+    lsp.setActive(SCRATCH_URI);
+    lsp.openDoc(SCRATCH_URI, source);
+    editor.setDoc(source);
+    invalidateDocViews();
+    renderTree();
+    ensureLoaded(activeView);
+    welcome.hide();
+    if (source === SEED) clearScratch();
+    else scheduleScratchSave(source);
+  }
+
   // --- overlays + polish surfaces -------------------------------------------
 
   const welcome = createWelcome({
     onNewScratch: () => newScratch(),
     onOpenFolder: () => void openFolder(),
     onOpenRecent: (path) => void openFolderPath(path),
+    onOpenExample: (example) => openScratchWith(example.source),
   });
 
   const palette = createCommandPalette(() => getCommands());
@@ -1063,6 +1221,62 @@ export function init(): void {
   });
   const help = createHelpOverlay(helpRows());
   const about = createAboutDialog();
+  // Generate Project wizard: compiles the active model, then bundles the emitted files into a
+  // downloadable archive. I/O is injected so the wizard stays decoupled from the LSP/host wiring.
+  const generateProject = createGenerateProject({
+    emitPreview: (target) => lsp.emitPreview(target),
+    glossary: () => lsp.glossary(),
+    saveZip: (name, data) => platform.saveZip(name, data),
+  });
+
+  // The AI assistant panel is created lazily the first time its tab is shown (the Anthropic SDK
+  // is dynamically imported inside ai.ts, so creating the panel does not load it — only sending).
+  let assistant: AssistantPanel | null = null;
+  function ensureAssistant(): AssistantPanel {
+    if (assistant) return assistant;
+    assistant = createAssistantPanel({
+      container: assistantView,
+      getProvider: () => loadSettings().aiProvider,
+      getBaseUrl: () => loadSettings().aiBaseUrl,
+      getApiKey: () => loadSettings().aiApiKey,
+      getModel: () => {
+        const s = loadSettings();
+        return s.aiProvider === 'openai' ? s.aiModelOpenai : s.aiModel;
+      },
+      getContext: () => {
+        const diagnostics = (diagnosticsByUri.get(activeUri) ?? []).map((d) => ({
+          line: d.range.start.line + 1,
+          col: d.range.start.character + 1,
+          severity: (d.severity === 2 ? 'warning' : 'error') as 'warning' | 'error',
+          message: d.message,
+        }));
+        return { fileName: buffers.get(activeUri)?.name ?? 'model.koi', source: editor.getDoc(), diagnostics };
+      },
+      onApplyModel: (source) => replaceActiveDoc(source),
+      onOpenPrefs: () => prefs.open(),
+    });
+    return assistant;
+  }
+
+  // Diagrams are rendered with a theme-matched Mermaid palette; re-render on a theme flip (covers
+  // the toolbar toggle, the command palette, and Preferences — all route through setTheme).
+  onThemeChange(() => {
+    docViewsLoaded.diagrams = false;
+    if (activeView === 'diagrams') void loadDiagrams();
+  });
+
+  // Copy a shareable playground link (the current model encoded in the URL hash) to the clipboard,
+  // flashing a transient confirmation in the status pill. After the flash, re-derive the pill from
+  // the CURRENT diagnostics rather than restoring a snapshot (which could clobber a fresh push).
+  async function copyShareLink(): Promise<void> {
+    try {
+      await navigator.clipboard.writeText(buildShareUrl(editor.getDoc()));
+      setStatus('link copied ✓', 'green');
+      setTimeout(() => updateStatus(diagnosticsByUri.get(activeUri) ?? []), 1500);
+    } catch (e) {
+      console.error('copy share link failed:', e);
+    }
+  }
 
   initSplitResizer({ split: el('split'), handle: el('split-resizer') });
 
@@ -1070,6 +1284,7 @@ export function init(): void {
   const hintEl = document.querySelector('.palette-hint');
   if (hintEl) hintEl.textContent = formatChord('mod+K'); // ⌘+K / Ctrl+K per platform
   el<HTMLButtonElement>('btn-new').addEventListener('click', () => newScratch());
+  el<HTMLButtonElement>('btn-generate-project').addEventListener('click', () => generateProject.open());
   el<HTMLButtonElement>('btn-theme').addEventListener('click', () => toggleTheme());
   el<HTMLButtonElement>('btn-prefs').addEventListener('click', () => prefs.open());
   el<HTMLButtonElement>('btn-about').addEventListener('click', () => about.open());
@@ -1095,15 +1310,19 @@ export function init(): void {
       { id: 'format', title: 'Format document', hint: 'mod+S', group: 'Edit', run: () => void formatActive() },
       { id: 'open-folder', title: 'Open folder…', hint: 'mod+Shift+O', group: 'File', run: () => void openFolder() },
       { id: 'new-scratch', title: 'New scratch model', hint: 'mod+N', group: 'File', run: () => newScratch() },
+      { id: 'share', title: 'Copy shareable link', group: 'File', run: () => void copyShareLink() },
       { id: 'check', title: 'Check against baseline…', group: 'File', run: () => void runCheck() },
+      { id: 'generate-project', title: 'Generate project…', group: 'File', run: () => generateProject.open() },
       { id: 'toggle-theme', title: 'Toggle theme', group: 'View', run: () => toggleTheme() },
       { id: 'prefs', title: 'Preferences…', hint: 'mod+,', group: 'View', run: () => prefs.open() },
       { id: 'help', title: 'Keyboard shortcuts', hint: 'F1', group: 'Help', run: () => help.open() },
       { id: 'about', title: 'About Koine Studio', group: 'Help', run: () => about.open() },
       { id: 'view-preview', title: 'Show Emitted Preview', group: 'Inspector', run: () => selectView('preview') },
       { id: 'view-glossary', title: 'Show Glossary', group: 'Inspector', run: () => selectView('glossary') },
+      { id: 'view-diagrams', title: 'Show Diagrams', group: 'Inspector', run: () => selectView('diagrams') },
       { id: 'view-contextmap', title: 'Show Context Map', group: 'Inspector', run: () => selectView('contextmap') },
       { id: 'view-outline', title: 'Show Outline', group: 'Inspector', run: () => selectView('outline') },
+      { id: 'view-assistant', title: 'Show Assistant', group: 'Inspector', run: () => selectView('assistant') },
     ];
 
     // In folder mode, surface every open file as a "Go to File" entry so the palette doubles as a
@@ -1162,10 +1381,16 @@ export function init(): void {
     }
   });
 
-  // Welcome screen on boot: shown only on a fresh start (no restored scratch). When the user has
-  // unsaved work from a previous visit we resume straight into it. The first edit, New scratch,
-  // Open folder, or opening a recent folder all hide it.
-  if (restoredScratch === null) welcome.show();
+  // Welcome screen on boot: shown only on a fresh start (no restored scratch, no shared link).
+  // A shared-link model is persisted as the scratch buffer and the hash is cleared so a reload
+  // resumes into it cleanly. Otherwise, unsaved work from a previous visit resumes straight in.
+  // The first edit, New scratch, Open folder, or opening a recent folder all hide the welcome.
+  if (sharedModel !== null) {
+    saveScratch(sharedModel);
+    clearModelHash();
+  } else if (restoredScratch === null) {
+    welcome.show();
+  }
 
   // Boot: attach listeners (inside start) before messages flow, then open the doc.
   setStatus('connecting…', 'connecting');

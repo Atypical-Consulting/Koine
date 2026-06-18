@@ -97,10 +97,41 @@ public class CrossEmitterConformanceTests
         }
         """;
 
+    /// <summary>
+    /// A command that BOTH returns a <c>result</c> AND <c>emit</c>s a domain event whose payload
+    /// reuses that result (<c>tax</c>) ALONGSIDE a sibling argument whose rendering shares the
+    /// result's prefix (<c>taxRate</c>). This is the result/emit hoisting case (issue #60) plus the
+    /// regression guard for the substring-splice bug found in review: the hoist must rewrite only
+    /// the whole-argument match (<c>tax</c> → the hoisted local) and leave <c>taxRate</c> intact. A
+    /// blind substring replace would emit <c>__resultRate</c> and the generated code would not
+    /// compile — so this fixture fails the harness in BOTH backends if the bug ever returns.
+    /// </summary>
+    private const string QuoteModel = """
+        context Sales {
+          event Quoted {
+            amount: Int
+            rate:   Int
+          }
+
+          aggregate Order root Order {
+            entity Order identified by OrderId {
+              tax:     Int = 0
+              taxRate: Int = 0
+
+              command quote(): Int {
+                emit Quoted(amount: tax, rate: taxRate)
+                result tax
+              }
+            }
+          }
+        }
+        """;
+
     public static IEnumerable<object[]> Corpus()
     {
         yield return ["Money invariant", MoneyModel, MoneyScenarios()];
         yield return ["Order command + event", OrderModel, OrderScenarios()];
+        yield return ["Quote result + emit hoist (prefix-safe)", QuoteModel, QuoteScenarios()];
     }
 
     /// <summary>Money(amount): accepted iff amount &gt;= 0.</summary>
@@ -165,6 +196,41 @@ public class CrossEmitterConformanceTests
                     "if (o.DomainEvents.Count != 1) throw new System.Exception(\"expected one event\"); }",
                 Ts: "{ const o = new Order(OrderIdNew(), 1); o.place(); " +
                     "if (o.domainEvents.length !== 1) throw new Error('expected one event'); }",
+                TsImports: tsImports,
+                CsIsStatement: true,
+                TsIsStatement: true),
+        ];
+    }
+
+    /// <summary>
+    /// The <c>quote</c> command (result + emit reusing <c>tax</c>, beside the prefix-sharing sibling
+    /// <c>taxRate</c>). The scenario reads BOTH event payload fields back: the hoisted result must
+    /// flow into <c>amount</c> while <c>rate</c> keeps the un-rewritten <c>taxRate</c>. A
+    /// substring-splice regression would emit uncompilable code or the wrong <c>rate</c>: the C#
+    /// half (Roslyn) catches it on every run, and the TypeScript half catches it whenever the
+    /// Node/tsc toolchain is present (CI). The unconditional TS guard is the text-shape unit test in
+    /// <c>TypeScriptCommandReturnTests</c>.
+    /// </summary>
+    private static IReadOnlyList<Scenario> QuoteScenarios()
+    {
+        const string tsImports =
+            "import { Order } from './Sales/Order';\n" +
+            "import { OrderIdNew } from './Sales/value-objects/OrderId';\n" +
+            "import { Quoted } from './Sales/events/Quoted';";
+
+        return
+        [
+            // The returned result is `tax`; the event records `amount: tax` (hoisted) and
+            // `rate: taxRate` (NOT hoisted). All three must read back uncorrupted in both targets.
+            new("quote() returns tax and records both args uncorrupted", Accept: true,
+                Cs: "{ var o = new Sales.Order(Sales.OrderId.New(), 5, 2); var r = o.Quote(); " +
+                    "if (r != 5) throw new System.Exception(\"wrong result\"); " +
+                    "var ev = (Sales.Quoted)o.DomainEvents[0]; " +
+                    "if (ev.Amount != 5 || ev.Rate != 2) throw new System.Exception(\"payload corrupted\"); }",
+                Ts: "{ const o = new Order(OrderIdNew(), 5, 2); const r = o.quote(); " +
+                    "if (r !== 5) throw new Error('wrong result'); " +
+                    "const ev = o.domainEvents[0] as Quoted; " +
+                    "if (ev.amount !== 5 || ev.rate !== 2) throw new Error('payload corrupted'); }",
                 TsImports: tsImports,
                 CsIsStatement: true,
                 TsIsStatement: true),
