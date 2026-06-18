@@ -278,4 +278,57 @@ public class R3DiagnosticsTests
         Assert.Equal(4, dup.EndLine);
         Assert.True(dup.EndColumn > dup.Column); // a real width, not a zero-length point
     }
+
+    [Fact]
+    public void Span_overloads_preserve_a_real_width_end()
+    {
+        // The Error/Warning(code, message, span) overloads must carry the span's end so
+        // the printer underlines the full token, not a single caret.
+        var span = new Ast.SourceSpan(3, 5, 3, 12, 0, 7);
+
+        var err = Diagnostic.Error(DiagnosticCodes.UnknownType, "boom", span);
+        Assert.True(err.HasEnd);
+        Assert.Equal(3, err.EndLine);
+        Assert.Equal(12, err.EndColumn);
+
+        var warn = Diagnostic.Warning(DiagnosticCodes.UnknownType, "boom", span);
+        Assert.True(warn.HasEnd);
+        Assert.Equal(3, warn.EndLine);
+        Assert.Equal(12, warn.EndColumn);
+    }
+
+    [Fact]
+    public void Span_overloads_preserve_a_multi_line_end()
+    {
+        // A span crossing lines must carry the distinct end line/column so the printer
+        // and LSP ranges cover the full multi-line construct, not just the first line.
+        var span = new Ast.SourceSpan(3, 5, 4, 2, 0, 10);
+
+        var err = Diagnostic.Error(DiagnosticCodes.UnknownType, "boom", span);
+        Assert.True(err.HasEnd);
+        Assert.Equal(4, err.EndLine);
+        Assert.Equal(2, err.EndColumn);
+
+        var warn = Diagnostic.Warning(DiagnosticCodes.UnknownType, "boom", span);
+        Assert.True(warn.HasEnd);
+        Assert.Equal(4, warn.EndLine);
+        Assert.Equal(2, warn.EndColumn);
+    }
+
+    [Fact]
+    public void Span_overloads_leave_a_zero_width_point_span_without_an_end()
+    {
+        // A point span (end == start) stays a point diagnostic — behavior preserved.
+        var point = new Ast.SourceSpan(3, 5);
+
+        var err = Diagnostic.Error(DiagnosticCodes.UnknownType, "boom", point);
+        Assert.False(err.HasEnd);
+        Assert.Equal(0, err.EndLine);
+        Assert.Equal(0, err.EndColumn);
+
+        var warn = Diagnostic.Warning(DiagnosticCodes.UnknownType, "boom", point);
+        Assert.False(warn.HasEnd);
+        Assert.Equal(0, warn.EndLine);
+        Assert.Equal(0, warn.EndColumn);
+    }
 }
