@@ -320,24 +320,33 @@ public sealed partial class PythonEmitter
     private IReadOnlyList<PyTypeLocation> BuildTypeLocations(KoineModel model)
     {
         var locations = new List<PyTypeLocation>();
+        ModelIndex index = new SemanticModel(model).Index;
 
         foreach (ContextNode ctx in model.Contexts)
         {
-            // Aggregate roots emit at the context package root (no `entities/` subfolder), so their
-            // recorded location must match — a cross-module importer would otherwise resolve a
-            // non-existent `entities.<root>` module.
-            var rootEntityNames = new HashSet<string>(
-                ctx.AllTypeDecls().OfType<AggregateDecl>().Select(a => a.RootName), StringComparer.Ordinal);
-
+            var idsHere = new HashSet<string>(StringComparer.Ordinal);
             foreach (TypeDecl type in ctx.AllTypeDecls())
             {
                 var ns = ModelIndex.NamespaceOf(ctx.Name, type.ModulePath);
-                Record(locations, ctx.Name, type, ns, rootEntityNames);
+                Record(locations, ctx.Name, type, ns);
                 if (type is EntityDecl entity)
                 {
                     // The branded ID type lives alongside value objects.
                     var idName = PythonNaming.ToPascalCase(entity.IdentityName);
                     locations.Add(new PyTypeLocation(ctx.Name, ModuleDottedFor(ns, KindFolder.ValueObjects, entity.IdentityName), idName));
+                    idsHere.Add(entity.IdentityName);
+                }
+            }
+
+            // Foreign *Id types referenced here but not owned by a local entity are materialized at
+            // the context package root (value_objects/) — register their location so importers
+            // resolve them. Mirrors the TS emitter's unowned-id registration.
+            foreach (var idName in OrderedUnownedIds(ctx, index))
+            {
+                if (idsHere.Add(idName))
+                {
+                    var py = PythonNaming.ToPascalCase(idName);
+                    locations.Add(new PyTypeLocation(ctx.Name, ModuleDottedFor(ctx.Name, KindFolder.ValueObjects, idName), py));
                 }
             }
         }
@@ -345,7 +354,7 @@ public sealed partial class PythonEmitter
         return locations;
     }
 
-    private void Record(List<PyTypeLocation> locations, string context, TypeDecl type, string ns, IReadOnlySet<string> rootEntityNames)
+    private void Record(List<PyTypeLocation> locations, string context, TypeDecl type, string ns)
     {
         switch (type)
         {
@@ -355,8 +364,11 @@ public sealed partial class PythonEmitter
             case EnumDecl en:
                 Add(locations, context, en.Name, ns, KindFolder.Enums);
                 break;
+            // Every entity — including an aggregate root — is recorded in `entities/` for now;
+            // aggregate-root context-root placement lands in Task 9 (and updates this together with
+            // EmitEntity, so the two stay consistent).
             case EntityDecl entity:
-                Add(locations, context, entity.Name, ns, rootEntityNames.Contains(entity.Name) ? KindFolder.Root : KindFolder.Entities);
+                Add(locations, context, entity.Name, ns, KindFolder.Entities);
                 break;
             case EventDecl ev:
                 Add(locations, context, ev.Name, ns, KindFolder.Events);

@@ -90,6 +90,14 @@ public sealed partial class PythonEmitter : IEmitter
                 var ns = ModelIndex.NamespaceOf(ctx.Name, type.ModulePath);
                 EmitType(emit, files, type, ns, typeMapper);
             }
+
+            // ID types referenced but not owned by an entity in this context (e.g. a foreign *Id):
+            // materialize a standalone branded-guid identity at the context package root so a
+            // cross-context reference resolves to a real module. Deterministic (sorted).
+            foreach (var idName in OrderedUnownedIds(ctx, index))
+            {
+                files.Add(EmitIdType(emit, idName, ctx.Name, IdentityStrategy.Guid, null));
+            }
         }
 
         // 3. An `__init__.py` for every package directory implied by the emitted module paths, so the
@@ -121,10 +129,17 @@ public sealed partial class PythonEmitter : IEmitter
             case EnumDecl @enum:
                 files.Add(EmitEnum(emit, @enum, ns, typeMapper));
                 break;
-            case EntityDecl:
+            // An entity emits as a mutable @dataclass(eq=False) with identity equality, plus its
+            // branded `<XId>` value object (per ID strategy). Its commands/factories/state machines
+            // land in Task 8; aggregate-root placement (context-root module) lands in Task 9, so for
+            // now every entity — including an aggregate root — emits into `entities/`.
+            case EntityDecl entity:
+                files.Add(EmitEntity(emit, entity, ns, typeMapper));
+                files.Add(EmitIdType(emit, entity.IdentityName, ns, entity.IdStrategy, entity.IdBackingType));
+                break;
             case EventDecl:
             case AggregateDecl:
-                // Filled in by later tasks (entities, events, aggregates/repositories).
+                // Filled in by later tasks (events, aggregates/repositories).
                 break;
         }
     }

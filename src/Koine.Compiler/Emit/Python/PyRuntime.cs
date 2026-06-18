@@ -159,6 +159,21 @@ internal static class PyRuntime
         TFold = TypeVar("TFold", bound=_Comparable)
 
 
+        class _Addable(Protocol):
+            """An element type that folds under `+` to its own type (the `sum` element bound).
+
+            Both `Decimal` and the generated value objects (whose demand-driven `__add__` returns
+            their own type) structurally satisfy this, so one generic `koine_sum` covers a sum of
+            money amounts and a sum of `Money` value objects alike. `other` is typed `Any` (not
+            `object`) so an `__add__` accepting only its own type still satisfies the protocol.
+            """
+
+            def __add__(self: TAdd, other: Any) -> TAdd: ...
+
+
+        TAdd = TypeVar("TAdd", bound=_Addable)
+
+
         def koine_min(values: Iterable[TFold]) -> TFold:
             """The minimum element, raising a domain error on an empty collection (no value)."""
             it = iter(values)
@@ -189,11 +204,23 @@ internal static class PyRuntime
             return result
 
 
-        def koine_sum(values: Iterable[Decimal]) -> Decimal:
-            """The Decimal-safe sum of a collection (never float); empty sums to Decimal zero."""
-            total = Decimal(0)
-            for value in values:
-                total += value
+        def koine_sum(values: Iterable[TAdd]) -> TAdd:
+            """The sum of a collection, folding under `+` from the first element.
+
+            Generic over any addable element — a `Decimal` amount or a value object whose
+            `__add__` returns its own type — so the result keeps the element's type (Decimal-safe,
+            never float). A value object has no neutral zero, so an EMPTY collection raises a
+            domain error rather than fabricating one (mirrors the C#/TS empty-fold guard).
+            """
+            it = iter(values)
+            try:
+                total = next(it)
+            except StopIteration:
+                raise DomainInvariantViolationError(
+                    "collection", "cannot sum an empty collection (no zero value)"
+                ) from None
+            for value in it:
+                total = total + value
             return total
         """";
 }
