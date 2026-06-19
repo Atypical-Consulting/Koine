@@ -784,7 +784,8 @@ export function init(): void {
   // Track which doc-based views need a (re)fetch — invalidated on every edit so a tab
   // switch always shows data for the current model rather than a stale render. The check
   // view (on-demand via the Check button) and the assistant (interactive) are excluded.
-  const docViewsLoaded: Record<'glossary' | 'diagrams' | 'contextmap' | 'outline', boolean> = {
+  const docViewsLoaded: Record<'preview' | 'glossary' | 'diagrams' | 'contextmap' | 'outline', boolean> = {
+    preview: false,
     glossary: false,
     diagrams: false,
     contextmap: false,
@@ -883,6 +884,7 @@ export function init(): void {
   }
 
   function ensureLoaded(view: RightView): void {
+    if (view === 'preview' && !docViewsLoaded.preview) void loadPreview();
     if (view === 'glossary' && !docViewsLoaded.glossary) void loadGlossary();
     if (view === 'diagrams' && !docViewsLoaded.diagrams) void loadDiagrams();
     if (view === 'contextmap' && !docViewsLoaded.contextmap) void loadContextMap();
@@ -891,18 +893,21 @@ export function init(): void {
 
   // Mark the cached doc views stale (e.g. after an edit or a file switch).
   function invalidateDocViews(): void {
+    docViewsLoaded.preview = false;
     docViewsLoaded.glossary = false;
     docViewsLoaded.diagrams = false;
     docViewsLoaded.contextmap = false;
     docViewsLoaded.outline = false;
   }
 
-  // An edit makes any cached glossary/context-map/outline stale. Mark them dirty; if a doc
-  // view is on screen, refresh it (debounced) so it tracks the model without a manual click.
+  // An edit makes any cached doc view (preview/glossary/context-map/outline) stale. Mark them
+  // dirty; if one is on screen, refresh it (debounced) so it tracks the model without a manual
+  // click — this is what makes the emitted preview live. Check (on-demand) and the interactive
+  // assistant opt out.
   let editDebounce: ReturnType<typeof setTimeout> | undefined;
   function onDocEdited(): void {
     invalidateDocViews();
-    if (activeView === 'preview' || activeView === 'check' || activeView === 'assistant') return;
+    if (activeView === 'check' || activeView === 'assistant') return;
     clearTimeout(editDebounce);
     editDebounce = setTimeout(() => ensureLoaded(activeView), 350);
   }
@@ -927,10 +932,11 @@ export function init(): void {
     tab.addEventListener('click', () => selectView(tab.dataset.view as RightView));
   }
 
-  // Refresh re-fetches the active doc view (preview is driven by its own buttons; check by
-  // the Check… toolbar button which re-prompts for a baseline).
+  // Refresh re-fetches the active doc view (check is driven by the Check… toolbar button, which
+  // re-prompts for a baseline; the assistant is interactive).
   el<HTMLButtonElement>('btn-refresh').addEventListener('click', () => {
-    if (activeView === 'glossary') void loadGlossary();
+    if (activeView === 'preview') void loadPreview();
+    else if (activeView === 'glossary') void loadGlossary();
     else if (activeView === 'diagrams') void loadDiagrams();
     else if (activeView === 'contextmap') void loadContextMap();
     else if (activeView === 'outline') void loadOutline();
@@ -993,11 +999,6 @@ export function init(): void {
     currentLabel.textContent = meta.label;
     currentDot.dataset.lang = target;
     runBtn.title = `Preview ${meta.name} (${meta.hint})`;
-  }
-
-  function setPreviewBusy(busy: boolean): void {
-    runBtn.disabled = busy;
-    caretBtn.disabled = busy;
   }
 
   // --- language picker popover (mirrors the explorer context menu) ------------
@@ -1081,12 +1082,18 @@ export function init(): void {
     }
   }
 
-  async function preview(target: PreviewTarget): Promise<void> {
-    setTarget(target);
-    selectView('preview');
-    setPreviewBusy(true);
+  // Emit the current target into the preview pane. Folded into the doc-view lifecycle (like the
+  // glossary/diagrams tabs) so it loads on open and tracks edits live — no button press required. A
+  // monotonic token drops a stale emit that a newer edit or target switch has superseded; the prior
+  // output stays on screen across a refresh (only the very first load shows a placeholder) so live
+  // typing never flashes the pane empty.
+  let previewSeq = 0;
+  async function loadPreview(): Promise<void> {
+    const seq = ++previewSeq;
+    if (!lastPreview) output.setContent('// generating preview…', 'plain');
     try {
-      const res = await lsp.emitPreview(target);
+      const res = await lsp.emitPreview(currentTarget);
+      if (seq !== previewSeq) return;
       let content: string;
       let lang: 'csharp' | 'typescript' | 'python' | 'plain';
       let copyable = false;
@@ -1098,19 +1105,27 @@ export function init(): void {
         lang = 'plain';
       } else {
         content = res.files.map((f) => `// ==== ${f.path} ====\n${f.contents}`).join('\n\n');
-        lang = target === 'csharp' ? 'csharp' : target === 'typescript' ? 'typescript' : 'python';
+        lang = currentTarget;
         copyable = true;
       }
       output.setContent(content, lang);
       lastPreview = content;
       copyBtn.disabled = !copyable;
+      docViewsLoaded.preview = true;
     } catch (e) {
+      if (seq !== previewSeq) return;
       output.setContent('// preview request failed\n' + String(e), 'plain');
       lastPreview = '';
       copyBtn.disabled = true;
-    } finally {
-      setPreviewBusy(false);
     }
+  }
+
+  // Explicit preview action (run button, language menu, ⌘1/2/3, palette): adopt the target, surface
+  // the preview tab, and force a re-emit even when it was already shown (e.g. for another target).
+  function preview(target: PreviewTarget): void {
+    setTarget(target);
+    docViewsLoaded.preview = false;
+    selectView('preview');
   }
 
   runBtn.addEventListener('click', () => void preview(currentTarget));
