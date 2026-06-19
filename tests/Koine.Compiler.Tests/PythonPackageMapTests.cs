@@ -31,9 +31,9 @@ public class PythonPackageMapTests
     private static IReadOnlyList<EmittedFile> EmitPythonWithConfig(string config)
     {
         var options = KoineConfig.Parse(config).OptionsFor("python");
-        Assert.True(EmitterRegistry.TryCreate("python", options, out var emitter));
+        EmitterRegistry.TryCreate("python", options, out var emitter).ShouldBeTrue();
         var result = new KoineCompiler().Compile(Fixture, emitter);
-        Assert.True(result.Success, string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
         return result.Files;
     }
 
@@ -51,16 +51,14 @@ public class PythonPackageMapTests
 
         // The remapped context's modules live under the new package folder...
         var product = File(files, "product.py");
-        Assert.Equal("acme/catalog/value_objects/product.py", product.RelativePath);
+        product.RelativePath.ShouldBe("acme/catalog/value_objects/product.py");
 
         // ...and an intra-context import resolves Sku through the remapped dotted package.
-        Assert.Contains("from acme.catalog.value_objects.sku import Sku", product.Contents);
+        product.Contents.ShouldContain("from acme.catalog.value_objects.sku import Sku");
 
         // The un-remapped `catalog` package head must not survive anywhere.
-        Assert.DoesNotContain("from catalog.", product.Contents);
-        Assert.DoesNotContain("from catalog.", File(files, "sku.py").Contents);
-        Assert.False(
-            files.Any(f => f.RelativePath.StartsWith("catalog/", StringComparison.Ordinal)),
-            "no module should remain under the un-remapped `catalog/` folder");
+        product.Contents.ShouldNotContain("from catalog.");
+        File(files, "sku.py").Contents.ShouldNotContain("from catalog.");
+        files.Any(f => f.RelativePath.StartsWith("catalog/", StringComparison.Ordinal)).ShouldBeFalse("no module should remain under the un-remapped `catalog/` folder");
     }
 }

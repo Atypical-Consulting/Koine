@@ -10,10 +10,10 @@ public class ParsingTests
     {
         var (model, diagnostics) = new KoineCompiler().Parse(TestSupport.BillingFixture);
 
-        Assert.Empty(diagnostics);
-        Assert.NotNull(model);
-        Assert.Single(model.Contexts);
-        Assert.Equal("Billing", model.Contexts[0].Name);
+        diagnostics.ShouldBeEmpty();
+        model.ShouldNotBeNull();
+        model.Contexts.ShouldHaveSingleItem();
+        model.Contexts[0].Name.ShouldBe("Billing");
     }
 
     [Fact]
@@ -24,12 +24,12 @@ public class ParsingTests
 
         var (model, diagnostics) = new KoineCompiler().Parse(source);
 
-        Assert.Null(model);
-        Assert.NotEmpty(diagnostics);
+        model.ShouldBeNull();
+        diagnostics.ShouldNotBeEmpty();
         var first = diagnostics[0];
-        Assert.Equal(DiagnosticSeverity.Error, first.Severity);
-        Assert.Equal(2, first.Line);          // the offending `{` is on line 2
-        Assert.True(first.Column > 0);
+        first.Severity.ShouldBe(DiagnosticSeverity.Error);
+        first.Line.ShouldBe(2);          // the offending `{` is on line 2
+        (first.Column > 0).ShouldBeTrue();
     }
 
     [Fact]
@@ -37,9 +37,9 @@ public class ParsingTests
     {
         var (model, diagnostics) = new KoineCompiler().Parse("");
 
-        Assert.Empty(diagnostics);
-        Assert.NotNull(model);
-        Assert.Empty(model.Contexts);
+        diagnostics.ShouldBeEmpty();
+        model.ShouldNotBeNull();
+        model.Contexts.ShouldBeEmpty();
     }
 
     [Fact]
@@ -49,8 +49,8 @@ public class ParsingTests
         const string src =
             "context C {\n  value V {\n    raw: String\n    invariant raw matches\n      /^[a-z]+$/ \"lower\"\n  }\n}\n";
         var (model, diagnostics) = new KoineCompiler().Parse(src);
-        Assert.Empty(diagnostics);
-        Assert.NotNull(model);
+        diagnostics.ShouldBeEmpty();
+        model.ShouldNotBeNull();
     }
 
     [Fact]
@@ -60,10 +60,10 @@ public class ParsingTests
         const string src =
             "context C {\n  value V {\n    x: Int\n    invariant x >= 0 \"a\\nb\\tc\\\\d\\\"e\"\n  }\n}\n";
         var (model, diagnostics) = new KoineCompiler().Parse(src);
-        Assert.Empty(diagnostics);
+        diagnostics.ShouldBeEmpty();
 
         var value = (Ast.ValueObjectDecl)model!.Contexts[0].Types[0];
-        Assert.Equal("a\nb\tc\\d\"e", value.Invariants[0].Message);
+        value.Invariants[0].Message.ShouldBe("a\nb\tc\\d\"e");
     }
 
     [Fact]
@@ -75,12 +75,12 @@ public class ParsingTests
 
         var (model, diagnostics) = new KoineCompiler().Parse(source);
 
-        Assert.Null(model);
+        model.ShouldBeNull();
         var first = diagnostics[0];
-        Assert.Equal(DiagnosticCodes.ReservedWordInDeclarationName, first.Code);
-        Assert.Contains("'from' is a Koine keyword", first.Message);
-        Assert.Contains("plain identifier", first.Message);
-        Assert.Equal(2, first.Line);
+        first.Code.ShouldBe(DiagnosticCodes.ReservedWordInDeclarationName);
+        first.Message.ShouldContain("'from' is a Koine keyword");
+        first.Message.ShouldContain("plain identifier");
+        first.Line.ShouldBe(2);
     }
 
     [Fact]
@@ -91,8 +91,7 @@ public class ParsingTests
 
         var (_, diagnostics) = new KoineCompiler().Parse(source);
 
-        Assert.Contains(diagnostics,
-            d => d.Code == DiagnosticCodes.ReservedWordInDeclarationName && d.Message.Contains("'query'"));
+        diagnostics.ShouldContain(d => d.Code == DiagnosticCodes.ReservedWordInDeclarationName && d.Message.Contains("'query'"));
     }
 
     [Fact]
@@ -103,10 +102,10 @@ public class ParsingTests
 
         var (model, diagnostics) = new KoineCompiler().Parse(source);
 
-        Assert.Null(model);
+        model.ShouldBeNull();
         var first = diagnostics[0];
-        Assert.Equal(DiagnosticCodes.ReservedWordInDeclarationName, first.Code);
-        Assert.Contains("fully reserved", first.Message);
+        first.Code.ShouldBe(DiagnosticCodes.ReservedWordInDeclarationName);
+        first.Message.ShouldContain("fully reserved");
     }
 
     [Fact]
@@ -117,8 +116,8 @@ public class ParsingTests
 
         var (model, diagnostics) = new KoineCompiler().Parse(source);
 
-        Assert.NotNull(model);
-        Assert.DoesNotContain(diagnostics, d => d.Code == DiagnosticCodes.ReservedWordInDeclarationName);
+        model.ShouldNotBeNull();
+        diagnostics.ShouldNotContain(d => d.Code == DiagnosticCodes.ReservedWordInDeclarationName);
     }
 
     [Fact]
@@ -129,6 +128,6 @@ public class ParsingTests
 
         var (_, diagnostics) = new KoineCompiler().Parse(source);
 
-        Assert.Equal(DiagnosticCodes.SyntaxError, diagnostics[0].Code);
+        diagnostics[0].Code.ShouldBe(DiagnosticCodes.SyntaxError);
     }
 }

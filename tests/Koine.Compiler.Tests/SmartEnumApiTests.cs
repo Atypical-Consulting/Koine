@@ -23,9 +23,9 @@ public class SmartEnumApiTests
     private static Type StatusType(string source = Src)
     {
         var result = new KoineCompiler().Compile(source, new CSharpEmitter());
-        Assert.True(result.Success, string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
         var (asm, errors) = TestSupport.Compile(result.Files);
-        Assert.True(asm is not null, "generated C# failed to compile:\n" + string.Join("\n", errors));
+        (asm is not null).ShouldBeTrue("generated C# failed to compile:\n" + string.Join("\n", errors));
         return asm!.GetType("Shop.OrderStatus")!;
     }
 
@@ -39,8 +39,8 @@ public class SmartEnumApiTests
         var status = StatusType();
         var args = new object?[] { "Paid", null };
         var ok = (bool)status.GetMethod("TryFromName")!.Invoke(null, args)!;
-        Assert.True(ok);
-        Assert.True(TestSupport.EnumValue(status, "Paid").Equals(args[1]));
+        ok.ShouldBeTrue();
+        TestSupport.EnumValue(status, "Paid").Equals(args[1]).ShouldBeTrue();
     }
 
     [Fact]
@@ -49,8 +49,8 @@ public class SmartEnumApiTests
         var status = StatusType();
         var args = new object?[] { "Nope", null };
         var ok = (bool)status.GetMethod("TryFromName")!.Invoke(null, args)!;
-        Assert.False(ok);
-        Assert.Null(args[1]);
+        ok.ShouldBeFalse();
+        args[1].ShouldBeNull();
     }
 
     [Fact]
@@ -59,8 +59,8 @@ public class SmartEnumApiTests
         var status = StatusType();
         var args = new object?[] { 2, null };
         var ok = (bool)status.GetMethod("TryFromValue")!.Invoke(null, args)!;
-        Assert.True(ok);
-        Assert.True(TestSupport.EnumValue(status, "Paid").Equals(args[1]));
+        ok.ShouldBeTrue();
+        TestSupport.EnumValue(status, "Paid").Equals(args[1]).ShouldBeTrue();
     }
 
     [Fact]
@@ -69,8 +69,8 @@ public class SmartEnumApiTests
         var status = StatusType();
         var args = new object?[] { 99, null };
         var ok = (bool)status.GetMethod("TryFromValue")!.Invoke(null, args)!;
-        Assert.False(ok);
-        Assert.Null(args[1]);
+        ok.ShouldBeFalse();
+        args[1].ShouldBeNull();
     }
 
     // ======================================================================
@@ -91,7 +91,7 @@ public class SmartEnumApiTests
         Func<string> cancelled = () => "cancelled";
 
         var result = match.Invoke(paid, new object[] { draft, submitted, paidArm, shipped, cancelled });
-        Assert.Equal("paid", result);
+        result.ShouldBe("paid");
     }
 
     [Fact]
@@ -108,7 +108,7 @@ public class SmartEnumApiTests
         Action cancelled = () => hit = "cancelled";
 
         status.GetMethod("Switch")!.Invoke(shipped, new object[] { draft, submitted, paid, shippedArm, cancelled });
-        Assert.Equal("shipped", hit);
+        hit.ShouldBe("shipped");
     }
 
     // ======================================================================
@@ -118,12 +118,9 @@ public class SmartEnumApiTests
     [Fact]
     public void Member_named_like_a_generated_method_is_rejected()
     {
-        Assert.Contains(Diagnose("context C { enum E { Match, Other } }"),
-            d => d.Code == DiagnosticCodes.ReservedEnumMember);
-        Assert.Contains(Diagnose("context C { enum E { Switch, Other } }"),
-            d => d.Code == DiagnosticCodes.ReservedEnumMember);
-        Assert.Contains(Diagnose("context C { enum E { TryFromName, Other } }"),
-            d => d.Code == DiagnosticCodes.ReservedEnumMember);
+        Diagnose("context C { enum E { Match, Other } }").ShouldContain(d => d.Code == DiagnosticCodes.ReservedEnumMember);
+        Diagnose("context C { enum E { Switch, Other } }").ShouldContain(d => d.Code == DiagnosticCodes.ReservedEnumMember);
+        Diagnose("context C { enum E { TryFromName, Other } }").ShouldContain(d => d.Code == DiagnosticCodes.ReservedEnumMember);
     }
 
     [Fact]
@@ -131,10 +128,8 @@ public class SmartEnumApiTests
     {
         // Pre-existing latent hole now closed: a member named `Value`/`All` collided
         // with the generated property of the same name and produced uncompilable C#.
-        Assert.Contains(Diagnose("context C { enum E { Value, Other } }"),
-            d => d.Code == DiagnosticCodes.ReservedEnumMember);
-        Assert.Contains(Diagnose("context C { enum E { All, Other } }"),
-            d => d.Code == DiagnosticCodes.ReservedEnumMember);
+        Diagnose("context C { enum E { Value, Other } }").ShouldContain(d => d.Code == DiagnosticCodes.ReservedEnumMember);
+        Diagnose("context C { enum E { All, Other } }").ShouldContain(d => d.Code == DiagnosticCodes.ReservedEnumMember);
     }
 
     [Fact]
@@ -142,14 +137,13 @@ public class SmartEnumApiTests
     {
         // Match/Switch generate one camelCase delegate parameter per member; two members
         // differing only by the case of their leading char would collapse to one parameter.
-        Assert.Contains(Diagnose("context C { enum E { Foo, foo } }"),
-            d => d.Code == DiagnosticCodes.EnumMemberCamelCaseCollision);
+        Diagnose("context C { enum E { Foo, foo } }").ShouldContain(d => d.Code == DiagnosticCodes.EnumMemberCamelCaseCollision);
     }
 
     [Fact]
     public void Ordinary_enum_members_remain_valid()
     {
-        Assert.Empty(Diagnose(Src));
+        Diagnose(Src).ShouldBeEmpty();
     }
 
     [Fact]
@@ -157,8 +151,7 @@ public class SmartEnumApiTests
     {
         // `mass` generates a `Mass` property; a member also named `Mass` would declare the
         // same identifier twice (static field + property) and produce uncompilable C#.
-        Assert.Contains(Diagnose("context C { enum E(mass: Int) { Mass(5) Other(3) } }"),
-            d => d.Code == DiagnosticCodes.EnumReservedAssociatedField);
+        Diagnose("context C { enum E(mass: Int) { Mass(5) Other(3) } }").ShouldContain(d => d.Code == DiagnosticCodes.EnumReservedAssociatedField);
     }
 
     // ======================================================================
@@ -168,9 +161,9 @@ public class SmartEnumApiTests
     private static Type CompiledType(string source, string fqn)
     {
         var result = new KoineCompiler().Compile(source, new CSharpEmitter());
-        Assert.True(result.Success, string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
         var (asm, errors) = TestSupport.Compile(result.Files);
-        Assert.True(asm is not null, "generated C# failed to compile:\n" + string.Join("\n", errors));
+        (asm is not null).ShouldBeTrue("generated C# failed to compile:\n" + string.Join("\n", errors));
         return asm!.GetType(fqn)!;
     }
 
@@ -184,7 +177,7 @@ public class SmartEnumApiTests
         var match = currency.GetMethod("Match")!.MakeGenericMethod(typeof(int));
         Func<int> onEur = () => 1;
         Func<int> onUsd = () => 2;
-        Assert.Equal(1, match.Invoke(eur, new object[] { onEur, onUsd }));
+        match.Invoke(eur, new object[] { onEur, onUsd }).ShouldBe(1);
     }
 
     [Fact]
@@ -195,12 +188,12 @@ public class SmartEnumApiTests
 
         var match = only.GetMethod("Match")!.MakeGenericMethod(typeof(int));
         Func<int> arm = () => 7;
-        Assert.Equal(7, match.Invoke(instance, new object[] { arm }));
+        match.Invoke(instance, new object[] { arm }).ShouldBe(7);
 
         var ran = false;
         Action act = () => ran = true;
         only.GetMethod("Switch")!.Invoke(instance, new object[] { act });
-        Assert.True(ran);
+        ran.ShouldBeTrue();
     }
 
     // ======================================================================
@@ -216,18 +209,18 @@ public class SmartEnumApiTests
         var e = CompiledType("context C { enum E { Other, default } }", "C.E");
 
         var def = TestSupport.EnumValue(e, "default");
-        Assert.Equal("default", e.GetProperty("Name")!.GetValue(def));
+        e.GetProperty("Name")!.GetValue(def).ShouldBe("default");
 
         var fromName = e.GetMethod("FromName")!.Invoke(null, new object[] { "default" });
-        Assert.True(def.Equals(fromName));
+        def.Equals(fromName).ShouldBeTrue();
 
         var all = (System.Collections.IEnumerable)e.GetProperty("All")!.GetValue(null)!;
-        Assert.Equal(2, all.Cast<object>().Count());
+        all.Cast<object>().Count().ShouldBe(2);
 
         var match = e.GetMethod("Match")!.MakeGenericMethod(typeof(int));
         Func<int> onOther = () => 1;
         Func<int> onDefault = () => 2;
-        Assert.Equal(2, match.Invoke(def, new object[] { onOther, onDefault }));
+        match.Invoke(def, new object[] { onOther, onDefault }).ShouldBe(2);
     }
 
     [Fact]
@@ -244,7 +237,7 @@ public class SmartEnumApiTests
               }
             }
             """;
-        Assert.NotNull(CompiledType(src, "C.V"));
+        CompiledType(src, "C.V").ShouldNotBeNull();
     }
 
     [Fact]
@@ -262,6 +255,6 @@ public class SmartEnumApiTests
               }
             }
             """;
-        Assert.NotNull(CompiledType(src, "C.R"));
+        CompiledType(src, "C.R").ShouldNotBeNull();
     }
 }

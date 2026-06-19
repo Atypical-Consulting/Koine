@@ -37,35 +37,35 @@ public class PhpTypeMapperTests
     public void Primitive_types_map_correctly(string koineName, string expected)
     {
         var mapper = new PhpTypeMapper(EmptyIndex());
-        Assert.Equal(expected, mapper.Map(new TypeRef(koineName)));
+        mapper.Map(new TypeRef(koineName)).ShouldBe(expected);
     }
 
     [Fact]
     public void Decimal_maps_to_runtime_Decimal()
     {
         var mapper = new PhpTypeMapper(EmptyIndex());
-        Assert.Equal(@"\Koine\Runtime\Decimal", mapper.Map(new TypeRef("Decimal")));
+        mapper.Map(new TypeRef("Decimal")).ShouldBe(@"\Koine\Runtime\Decimal");
     }
 
     [Fact]
     public void Instant_maps_to_DateTimeImmutable()
     {
         var mapper = new PhpTypeMapper(EmptyIndex());
-        Assert.Equal(@"\DateTimeImmutable", mapper.Map(new TypeRef("Instant")));
+        mapper.Map(new TypeRef("Instant")).ShouldBe(@"\DateTimeImmutable");
     }
 
     [Fact]
     public void Uuid_maps_to_string()
     {
         var mapper = new PhpTypeMapper(EmptyIndex());
-        Assert.Equal("string", mapper.Map(new TypeRef("Uuid")));
+        mapper.Map(new TypeRef("Uuid")).ShouldBe("string");
     }
 
     [Fact]
     public void Guid_maps_to_string()
     {
         var mapper = new PhpTypeMapper(EmptyIndex());
-        Assert.Equal("string", mapper.Map(new TypeRef("Guid")));
+        mapper.Map(new TypeRef("Guid")).ShouldBe("string");
     }
 
     // =========================================================================
@@ -77,7 +77,7 @@ public class PhpTypeMapperTests
     {
         var mapper = new PhpTypeMapper(EmptyIndex());
         var t = new TypeRef(ModelIndex.ListTypeName, Element: new TypeRef("Int"));
-        Assert.Equal("array", mapper.Map(t));
+        mapper.Map(t).ShouldBe("array");
     }
 
     [Fact]
@@ -85,7 +85,7 @@ public class PhpTypeMapperTests
     {
         var mapper = new PhpTypeMapper(EmptyIndex());
         var t = new TypeRef(ModelIndex.SetTypeName, Element: new TypeRef("String"));
-        Assert.Equal("array", mapper.Map(t));
+        mapper.Map(t).ShouldBe("array");
     }
 
     [Fact]
@@ -93,7 +93,7 @@ public class PhpTypeMapperTests
     {
         var mapper = new PhpTypeMapper(EmptyIndex());
         var t = new TypeRef(ModelIndex.MapTypeName, Element: new TypeRef("String"), Value: new TypeRef("Int"));
-        Assert.Equal("array", mapper.Map(t));
+        mapper.Map(t).ShouldBe("array");
     }
 
     // =========================================================================
@@ -105,7 +105,7 @@ public class PhpTypeMapperTests
     {
         var mapper = new PhpTypeMapper(EmptyIndex());
         var t = new TypeRef("Int", IsOptional: true);
-        Assert.Equal("?int", mapper.Map(t));
+        mapper.Map(t).ShouldBe("?int");
     }
 
     [Fact]
@@ -113,7 +113,7 @@ public class PhpTypeMapperTests
     {
         var mapper = new PhpTypeMapper(EmptyIndex());
         var t = new TypeRef("String", IsOptional: true);
-        Assert.Equal("?string", mapper.Map(t));
+        mapper.Map(t).ShouldBe("?string");
     }
 
     [Fact]
@@ -121,7 +121,7 @@ public class PhpTypeMapperTests
     {
         var mapper = new PhpTypeMapper(EmptyIndex());
         var t = new TypeRef("Decimal", IsOptional: true);
-        Assert.Equal(@"?\Koine\Runtime\Decimal", mapper.Map(t));
+        mapper.Map(t).ShouldBe(@"?\Koine\Runtime\Decimal");
     }
 
     [Fact]
@@ -129,7 +129,7 @@ public class PhpTypeMapperTests
     {
         var mapper = new PhpTypeMapper(EmptyIndex());
         var t = new TypeRef(ModelIndex.ListTypeName, Element: new TypeRef("Int"), IsOptional: true);
-        Assert.Equal("?array", mapper.Map(t));
+        mapper.Map(t).ShouldBe("?array");
     }
 
     // =========================================================================
@@ -141,7 +141,7 @@ public class PhpTypeMapperTests
     {
         var mapper = new PhpTypeMapper(IndexWithEnum());
         var t = new TypeRef("Status");
-        Assert.Equal("Status", mapper.Map(t));
+        mapper.Map(t).ShouldBe("Status");
     }
 
     // =========================================================================
@@ -152,7 +152,7 @@ public class PhpTypeMapperTests
     public void Unknown_type_maps_to_PascalCase()
     {
         var mapper = new PhpTypeMapper(EmptyIndex());
-        Assert.Equal("SomeType", mapper.Map(new TypeRef("SomeType")));
+        mapper.Map(new TypeRef("SomeType")).ShouldBe("SomeType");
     }
 
     // =========================================================================
@@ -162,22 +162,22 @@ public class PhpTypeMapperTests
     [Fact]
     public void IsList_returns_true_for_List()
     {
-        Assert.True(PhpTypeMapper.IsList(new TypeRef(ModelIndex.ListTypeName)));
-        Assert.False(PhpTypeMapper.IsList(new TypeRef(ModelIndex.SetTypeName)));
+        PhpTypeMapper.IsList(new TypeRef(ModelIndex.ListTypeName)).ShouldBeTrue();
+        PhpTypeMapper.IsList(new TypeRef(ModelIndex.SetTypeName)).ShouldBeFalse();
     }
 
     [Fact]
     public void IsMap_returns_true_for_Map()
     {
-        Assert.True(PhpTypeMapper.IsMap(new TypeRef(ModelIndex.MapTypeName)));
-        Assert.False(PhpTypeMapper.IsMap(new TypeRef(ModelIndex.ListTypeName)));
+        PhpTypeMapper.IsMap(new TypeRef(ModelIndex.MapTypeName)).ShouldBeTrue();
+        PhpTypeMapper.IsMap(new TypeRef(ModelIndex.ListTypeName)).ShouldBeFalse();
     }
 
     [Fact]
     public void IsEnum_returns_true_for_enum_type()
     {
         var mapper = new PhpTypeMapper(IndexWithEnum());
-        Assert.True(mapper.IsEnum(new TypeRef("Status")));
-        Assert.False(mapper.IsEnum(new TypeRef("Int")));
+        mapper.IsEnum(new TypeRef("Status")).ShouldBeTrue();
+        mapper.IsEnum(new TypeRef("Int")).ShouldBeFalse();
     }
 }

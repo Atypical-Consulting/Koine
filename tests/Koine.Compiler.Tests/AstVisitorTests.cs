@@ -30,9 +30,9 @@ public class AstVisitorTests
 
         var free = MemberAnalysis.ReferencedIdentifiers(expr).ToHashSet();
 
-        Assert.Contains("lines", free);
-        Assert.Contains("threshold", free);
-        Assert.DoesNotContain("l", free); // the lambda parameter is bound, not free
+        free.ShouldContain("lines");
+        free.ShouldContain("threshold");
+        free.ShouldNotContain("l"); // the lambda parameter is bound, not free
     }
 
     [Fact]
@@ -49,9 +49,9 @@ public class AstVisitorTests
 
         var free = MemberAnalysis.ReferencedIdentifiers(expr).ToHashSet();
 
-        Assert.Equal(new HashSet<string> { "a", "b" }, free);
-        Assert.DoesNotContain("x", free); // bound by the let
-        Assert.DoesNotContain("y", free); // bound by the let
+        free.ShouldBe(new HashSet<string> { "a", "b" });
+        free.ShouldNotContain("x"); // bound by the let
+        free.ShouldNotContain("y"); // bound by the let
     }
 
     [Fact]
@@ -65,7 +65,7 @@ public class AstVisitorTests
 
         var free = MemberAnalysis.ReferencedIdentifiers(expr).ToList();
 
-        Assert.Equal(new[] { "x" }, free); // exactly one free occurrence: the binding value
+        free.ShouldBe(new[] { "x" }); // exactly one free occurrence: the binding value
     }
 
     /// <summary>
@@ -87,11 +87,11 @@ public class AstVisitorTests
             """;
 
         var result = new KoineCompiler().Compile(src, new CSharpEmitter());
-        Assert.True(result.Success, string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
 
-        Assert.Contains(result.Files, f => f.Contents.Contains("using System.Linq;"));
+        result.Files.ShouldContain(f => f.Contents.Contains("using System.Linq;"));
 
         var (asm, errors) = TestSupport.Compile(result.Files);
-        Assert.True(asm is not null, "generated C# failed to compile:\n" + string.Join("\n", errors));
+        (asm is not null).ShouldBeTrue("generated C# failed to compile:\n" + string.Join("\n", errors));
     }
 }

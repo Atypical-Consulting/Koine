@@ -29,7 +29,7 @@ public class R17FmtTests
     {
         var once = Fmt.Format(File.ReadAllText(path)).Text;
         var twice = Fmt.Format(once).Text;
-        Assert.Equal(once, twice);
+        twice.ShouldBe(once);
     }
 
     [Theory]
@@ -40,7 +40,7 @@ public class R17FmtTests
         // (type + exact text — so string/regex literals are byte-identical) is unchanged.
         var src = File.ReadAllText(path);
         var formatted = Fmt.Format(src).Text;
-        Assert.Equal(CodeTokens(src), CodeTokens(formatted));
+        CodeTokens(formatted).ShouldBe(CodeTokens(src));
     }
 
     [Theory]
@@ -49,7 +49,7 @@ public class R17FmtTests
     {
         var src = File.ReadAllText(path);
         var formatted = Fmt.Format(src).Text;
-        Assert.Equal(CommentCount(src), CommentCount(formatted));
+        CommentCount(formatted).ShouldBe(CommentCount(src));
     }
 
     // ---- canonical style & --check semantics -------------------------------
@@ -73,7 +73,7 @@ public class R17FmtTests
             "    invariant amount >= 0 \"neg\"\n" +
             "  }\n" +
             "}\n";
-        Assert.Equal(expected, Fmt.Format(messy).Text);
+        Fmt.Format(messy).Text.ShouldBe(expected);
     }
 
     [Fact]
@@ -88,18 +88,18 @@ public class R17FmtTests
             "}\n" +
             "}\n";
         var formatted = Fmt.Format(messy).Text;
-        Assert.Contains("  customer: CustomerId", formatted);
-        Assert.Contains("  lines:    List<OrderLine>", formatted);
-        Assert.Contains("  note:     String?", formatted);
+        formatted.ShouldContain("  customer: CustomerId");
+        formatted.ShouldContain("  lines:    List<OrderLine>");
+        formatted.ShouldContain("  note:     String?");
     }
 
     [Fact]
     public void Check_flags_unformatted_and_accepts_canonical()
     {
         const string messy = "context C {\n  value Money{amount:Decimal}\n}\n";
-        Assert.True(Fmt.Format(messy).Changed);                 // messy → needs formatting (exit 1 under --check)
+        Fmt.Format(messy).Changed.ShouldBeTrue();                 // messy → needs formatting (exit 1 under --check)
         var canonical = Fmt.Format(messy).Text;
-        Assert.False(Fmt.Format(canonical).Changed);            // canonical → already formatted (exit 0)
+        Fmt.Format(canonical).Changed.ShouldBeFalse();            // canonical → already formatted (exit 0)
     }
 
     [Fact]
@@ -113,8 +113,8 @@ public class R17FmtTests
             "  }\n" +
             "}\n";
         var formatted = Fmt.Format(src).Text;
-        Assert.Contains("/// A monetary amount.", formatted);
-        Assert.Contains("// the raw value", formatted);
+        formatted.ShouldContain("/// A monetary amount.");
+        formatted.ShouldContain("// the raw value");
     }
 
     [Fact]
@@ -131,9 +131,9 @@ public class R17FmtTests
             "\n" +
             "}\n";
         var formatted = Fmt.Format(src).Text;
-        Assert.DoesNotContain("\n\n\n", formatted);          // no run of 2+ blank lines
-        Assert.StartsWith("context C {\n  value A", formatted); // no blank hugging the opening brace
-        Assert.EndsWith("value B { y: Int }\n}\n", formatted);  // no blank hugging the closing brace
+        formatted.ShouldNotContain("\n\n\n");          // no run of 2+ blank lines
+        formatted.ShouldStartWith("context C {\n  value A"); // no blank hugging the opening brace
+        formatted.ShouldEndWith("value B { y: Int }\n}\n");  // no blank hugging the closing brace
     }
 
     // ---- helpers -----------------------------------------------------------
@@ -162,7 +162,7 @@ public class R17FmtTests
             dir = dir.Parent;
         }
 
-        Assert.NotNull(dir);
+        dir.ShouldNotBeNull();
         return dir!.FullName;
     }
 }

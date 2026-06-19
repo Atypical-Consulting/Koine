@@ -21,16 +21,14 @@ public class PythonDeterminismTests
         var compiler = new KoineCompiler();
 
         var result1 = compiler.Compile(PythonSnapshotTests.Fixture, new PythonEmitter());
-        Assert.True(result1.Success,
-            "First compile failed: " + string.Join("\n", result1.Diagnostics.Select(d => d.ToString())));
+        result1.Success.ShouldBeTrue("First compile failed: " + string.Join("\n", result1.Diagnostics.Select(d => d.ToString())));
 
         var result2 = compiler.Compile(PythonSnapshotTests.Fixture, new PythonEmitter());
-        Assert.True(result2.Success,
-            "Second compile failed: " + string.Join("\n", result2.Diagnostics.Select(d => d.ToString())));
+        result2.Success.ShouldBeTrue("Second compile failed: " + string.Join("\n", result2.Diagnostics.Select(d => d.ToString())));
 
         var rendered1 = TestSupport.Render(result1.Files);
         var rendered2 = TestSupport.Render(result2.Files);
 
-        Assert.Equal(rendered1, rendered2);
+        rendered2.ShouldBe(rendered1);
     }
 }

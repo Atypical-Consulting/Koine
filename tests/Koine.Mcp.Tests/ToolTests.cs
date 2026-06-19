@@ -22,9 +22,9 @@ public sealed class ToolTests
     {
         var result = ValidateTool.Validate(Files(Billing));
 
-        Assert.True(result.Ok);
-        Assert.Equal(0, result.ErrorCount);
-        Assert.Empty(result.Diagnostics);
+        result.Ok.ShouldBeTrue();
+        result.ErrorCount.ShouldBe(0);
+        result.Diagnostics.ShouldBeEmpty();
     }
 
     [Fact]
@@ -33,12 +33,12 @@ public sealed class ToolTests
         // Missing field type — a syntax error the parser flags with a position.
         var result = ValidateTool.Validate(Files("context Billing { value Money { amount: } }"));
 
-        Assert.False(result.Ok);
-        Assert.True(result.ErrorCount > 0);
-        var error = Assert.Single(result.Diagnostics, d => d.Severity == "error");
-        Assert.False(string.IsNullOrEmpty(error.Code));
-        Assert.True(error.Line >= 1);
-        Assert.True(error.Column >= 1);
+        result.Ok.ShouldBeFalse();
+        (result.ErrorCount > 0).ShouldBeTrue();
+        var error = result.Diagnostics.Where(d => d.Severity == "error").ShouldHaveSingleItem();
+        string.IsNullOrEmpty(error.Code).ShouldBeFalse();
+        (error.Line >= 1).ShouldBeTrue();
+        (error.Column >= 1).ShouldBeTrue();
     }
 
     [Fact]
@@ -52,8 +52,8 @@ public sealed class ToolTests
 
         var result = ValidateTool.Validate(files);
 
-        Assert.False(result.Ok);
-        Assert.Contains(result.Diagnostics, d => d.File == "b.koi");
+        result.Ok.ShouldBeFalse();
+        result.Diagnostics.ShouldContain(d => d.File == "b.koi");
     }
 
     // ---- koine_compile ----
@@ -63,10 +63,10 @@ public sealed class ToolTests
     {
         var result = CompileTool.Compile(Files(Billing));
 
-        Assert.True(result.Success);
-        Assert.NotEmpty(result.Files);
-        Assert.Contains(result.Files, f => f.Contents.Contains("Money"));
-        Assert.All(result.Files, f => Assert.False(string.IsNullOrWhiteSpace(f.Path)));
+        result.Success.ShouldBeTrue();
+        result.Files.ShouldNotBeEmpty();
+        result.Files.ShouldContain(f => f.Contents.Contains("Money"));
+        result.Files.ShouldAllBe(f => !string.IsNullOrWhiteSpace(f.Path));
     }
 
     [Fact]
@@ -74,10 +74,10 @@ public sealed class ToolTests
     {
         var result = CompileTool.Compile(Files(Billing), "python");
 
-        Assert.True(result.Success);
-        Assert.NotEmpty(result.Files);
-        Assert.Contains(result.Files, f => f.Path.EndsWith("koine_runtime.py", StringComparison.Ordinal));
-        Assert.All(result.Files, f => Assert.False(string.IsNullOrWhiteSpace(f.Path)));
+        result.Success.ShouldBeTrue();
+        result.Files.ShouldNotBeEmpty();
+        result.Files.ShouldContain(f => f.Path.EndsWith("koine_runtime.py", StringComparison.Ordinal));
+        result.Files.ShouldAllBe(f => !string.IsNullOrWhiteSpace(f.Path));
     }
 
     [Fact]
@@ -85,8 +85,8 @@ public sealed class ToolTests
     {
         var glossary = CompileTool.Compile(Files(Billing), "glossary");
 
-        Assert.True(glossary.Success);
-        Assert.NotEmpty(glossary.Files);
+        glossary.Success.ShouldBeTrue();
+        glossary.Files.ShouldNotBeEmpty();
     }
 
     [Fact]
@@ -94,9 +94,9 @@ public sealed class ToolTests
     {
         var result = CompileTool.Compile(Files(Billing), "rust");
 
-        Assert.False(result.Success);
-        Assert.Empty(result.Files);
-        Assert.Contains(result.Diagnostics, d => d.Message.Contains("unsupported target"));
+        result.Success.ShouldBeFalse();
+        result.Files.ShouldBeEmpty();
+        result.Diagnostics.ShouldContain(d => d.Message.Contains("unsupported target"));
     }
 
     [Fact]
@@ -104,9 +104,9 @@ public sealed class ToolTests
     {
         var result = CompileTool.Compile(Files("context Billing { value Money { amount: } }"));
 
-        Assert.False(result.Success);
-        Assert.Empty(result.Files);
-        Assert.True(result.ErrorCount > 0);
+        result.Success.ShouldBeFalse();
+        result.Files.ShouldBeEmpty();
+        (result.ErrorCount > 0).ShouldBeTrue();
     }
 
     // ---- koine_format ----
@@ -117,12 +117,12 @@ public sealed class ToolTests
         const string messy = "context A{value V{x:Int\ny:Int}}";
 
         var first = FormatTool.Format(messy);
-        Assert.True(first.Changed);
-        Assert.Empty(first.Diagnostics);
+        first.Changed.ShouldBeTrue();
+        first.Diagnostics.ShouldBeEmpty();
 
         var second = FormatTool.Format(first.Text);
-        Assert.False(second.Changed);
-        Assert.Equal(first.Text, second.Text);
+        second.Changed.ShouldBeFalse();
+        second.Text.ShouldBe(first.Text);
     }
 
     [Fact]
@@ -132,9 +132,9 @@ public sealed class ToolTests
 
         var result = FormatTool.Format(broken);
 
-        Assert.False(result.Changed);
-        Assert.Equal(broken, result.Text);
-        Assert.NotEmpty(result.Diagnostics);
+        result.Changed.ShouldBeFalse();
+        result.Text.ShouldBe(broken);
+        result.Diagnostics.ShouldNotBeEmpty();
     }
 
     // ---- koine_reference ----
@@ -144,8 +144,8 @@ public sealed class ToolTests
     {
         var reference = ReferenceTool.Reference();
 
-        Assert.Contains("Koine language reference", reference);
-        Assert.Contains("context-map", reference);
+        reference.ShouldContain("Koine language reference");
+        reference.ShouldContain("context-map");
     }
 
     [Theory]
@@ -157,8 +157,8 @@ public sealed class ToolTests
     {
         var section = ReferenceTool.Reference(topic);
 
-        Assert.DoesNotContain("Unknown topic", section);
-        Assert.False(string.IsNullOrWhiteSpace(section));
+        section.ShouldNotContain("Unknown topic");
+        string.IsNullOrWhiteSpace(section).ShouldBeFalse();
     }
 
     [Fact]
@@ -166,8 +166,8 @@ public sealed class ToolTests
     {
         var section = ReferenceTool.Reference("does-not-exist");
 
-        Assert.Contains("Unknown topic", section);
-        Assert.Contains("value", section);
+        section.ShouldContain("Unknown topic");
+        section.ShouldContain("value");
     }
 
     [Fact]
@@ -182,14 +182,12 @@ public sealed class ToolTests
             .Where(b => b.StartsWith("context", StringComparison.Ordinal))
             .ToList();
 
-        Assert.NotEmpty(contextRooted);
+        contextRooted.ShouldNotBeEmpty();
         foreach (var block in contextRooted)
         {
             var result = ValidateTool.Validate(Files(block, "reference-snippet.koi"));
             var syntaxErrors = result.Diagnostics.Where(d => d.Code == "KOI0001").ToList();
-            Assert.True(
-                syntaxErrors.Count == 0,
-                $"reference snippet has a syntax error ({syntaxErrors.FirstOrDefault()?.Message}):\n{block}");
+            (syntaxErrors.Count == 0).ShouldBeTrue($"reference snippet has a syntax error ({syntaxErrors.FirstOrDefault()?.Message}):\n{block}");
         }
     }
 
@@ -225,8 +223,8 @@ public sealed class ToolTests
     {
         var listing = ExamplesTool.Examples();
 
-        Assert.Contains("billing", listing);
-        Assert.Contains("shop-ordering", listing);
+        listing.ShouldContain("billing");
+        listing.ShouldContain("shop-ordering");
     }
 
     [Fact]
@@ -234,7 +232,7 @@ public sealed class ToolTests
     {
         var source = ExamplesTool.Examples("shop-ordering");
 
-        Assert.Contains("context Ordering", source);
+        source.ShouldContain("context Ordering");
     }
 
     [Fact]
@@ -242,8 +240,8 @@ public sealed class ToolTests
     {
         var source = ExamplesTool.Examples("nope");
 
-        Assert.Contains("Unknown example", source);
-        Assert.Contains("billing", source);
+        source.ShouldContain("Unknown example");
+        source.ShouldContain("billing");
     }
 
     [Fact]
@@ -252,6 +250,6 @@ public sealed class ToolTests
         // The example models are linked from the repo's real examples/demo. Validating the
         // standalone `billing` example proves the embedded knowledge is real, compilable Koine.
         var result = ValidateTool.Validate(Files(Billing, "billing.koi"));
-        Assert.True(result.Ok);
+        result.Ok.ShouldBeTrue();
     }
 }

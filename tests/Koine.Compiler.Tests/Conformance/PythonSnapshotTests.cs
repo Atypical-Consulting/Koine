@@ -118,7 +118,7 @@ public class PythonSnapshotTests
     public Task Python_fixture_emits_expected_python()
     {
         var result = new KoineCompiler().Compile(Fixture, new PythonEmitter());
-        Assert.True(result.Success, string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
 
         return Verify(TestSupport.Render(result.Files))
             .UseDirectory("Snapshots");

@@ -14,9 +14,9 @@ public class R12ApplicationTests
     private static (Assembly Asm, IReadOnlyList<Emit.EmittedFile> Files) Build(string source)
     {
         var result = new KoineCompiler().Compile(source, new CSharpEmitter());
-        Assert.True(result.Success, string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
         var (asm, errors) = TestSupport.Compile(result.Files);
-        Assert.True(asm is not null, "generated C# failed to compile:\n" + string.Join("\n", errors));
+        (asm is not null).ShouldBeTrue("generated C# failed to compile:\n" + string.Join("\n", errors));
         return (asm, result.Files);
     }
 
@@ -56,7 +56,7 @@ public class R12ApplicationTests
     [Fact]
     public void Full_fixture_is_valid_and_compiles()
     {
-        Assert.Empty(Diagnose(Fixture));
+        Diagnose(Fixture).ShouldBeEmpty();
         Build(Fixture);
     }
 
@@ -67,10 +67,10 @@ public class R12ApplicationTests
     {
         var (asm, files) = Build(Fixture);
         var uow = FileContents(files, "Sales/Abstractions/IUnitOfWork.cs");
-        Assert.Contains("public interface IUnitOfWork", uow);
-        Assert.Contains("IOrderRepository Orders { get; }", uow);
-        Assert.Contains("Task<int> SaveChangesAsync(CancellationToken ct = default);", uow);
-        Assert.NotNull(asm.GetType("Sales.IUnitOfWork"));
+        uow.ShouldContain("public interface IUnitOfWork");
+        uow.ShouldContain("IOrderRepository Orders { get; }");
+        uow.ShouldContain("Task<int> SaveChangesAsync(CancellationToken ct = default);");
+        asm.GetType("Sales.IUnitOfWork").ShouldNotBeNull();
     }
 
     [Fact]
@@ -80,7 +80,7 @@ public class R12ApplicationTests
         var uow = FileContents(files, "Sales/Abstractions/IUnitOfWork.cs");
         foreach (var banned in new[] { "EntityFrameworkCore", "System.Data", "Dapper", "MongoDB", "DbContext" })
         {
-            Assert.DoesNotContain(banned, uow);
+            uow.ShouldNotContain(banned);
         }
     }
 
@@ -99,10 +99,10 @@ public class R12ApplicationTests
             """;
         var (asm, files) = Build(src);
         var uow = FileContents(files, "Sales/Abstractions/IUnitOfWork.cs");
-        Assert.Contains("IOrderRepository Orders { get; }", uow);
-        Assert.Contains("IShipmentRepository Shipments { get; }", uow);
-        Assert.True(uow.IndexOf("Orders", StringComparison.Ordinal) < uow.IndexOf("Shipments", StringComparison.Ordinal));
-        Assert.NotNull(asm.GetType("Sales.IUnitOfWork"));
+        uow.ShouldContain("IOrderRepository Orders { get; }");
+        uow.ShouldContain("IShipmentRepository Shipments { get; }");
+        (uow.IndexOf("Orders", StringComparison.Ordinal) < uow.IndexOf("Shipments", StringComparison.Ordinal)).ShouldBeTrue();
+        asm.GetType("Sales.IUnitOfWork").ShouldNotBeNull();
     }
 
     [Fact]
@@ -115,7 +115,7 @@ public class R12ApplicationTests
               }
             }
             """;
-        Assert.Contains(Diagnose(src), d => d.Code == DiagnosticCodes.UnknownAggregateRoot);
+        Diagnose(src).ShouldContain(d => d.Code == DiagnosticCodes.UnknownAggregateRoot);
     }
 
     [Fact]
@@ -123,7 +123,7 @@ public class R12ApplicationTests
     {
         const string src = "context C {\n  value V { n: Int }\n}\n";
         var (_, files) = Build(src);
-        Assert.DoesNotContain(files, f => f.RelativePath == "C/Abstractions/IUnitOfWork.cs");
+        files.ShouldNotContain(f => f.RelativePath == "C/Abstractions/IUnitOfWork.cs");
     }
 
     [Fact]
@@ -137,7 +137,7 @@ public class R12ApplicationTests
             }
             """;
         var (_, files) = Build(src);
-        Assert.Contains("ICategoryRepository Categories { get; }", FileContents(files, "Library/Abstractions/IUnitOfWork.cs"));
+        FileContents(files, "Library/Abstractions/IUnitOfWork.cs").ShouldContain("ICategoryRepository Categories { get; }");
     }
 
     // ---- R12.2 — application service interfaces ----------------------------
@@ -147,17 +147,17 @@ public class R12ApplicationTests
     {
         var (asm, files) = Build(Fixture);
         var svc = FileContents(files, "Sales/Services/IOrderService.cs");
-        Assert.Contains("public interface IOrderService", svc);
-        Assert.Contains("Task<OrderId> PlaceOrder(CustomerId customer, IReadOnlyList<OrderLine> lines, CancellationToken ct = default);", svc);
-        Assert.Contains("Task CancelOrder(OrderId order, CancellationToken ct = default);", svc); // void use case -> Task
-        Assert.NotNull(asm.GetType("Sales.IOrderService"));
+        svc.ShouldContain("public interface IOrderService");
+        svc.ShouldContain("Task<OrderId> PlaceOrder(CustomerId customer, IReadOnlyList<OrderLine> lines, CancellationToken ct = default);");
+        svc.ShouldContain("Task CancelOrder(OrderId order, CancellationToken ct = default);"); // void use case -> Task
+        asm.GetType("Sales.IOrderService").ShouldNotBeNull();
     }
 
     [Fact]
     public void Service_with_only_use_cases_emits_no_domain_class()
     {
         var (_, files) = Build(Fixture);
-        Assert.DoesNotContain(files, f => f.RelativePath == "Sales/Services/OrderService.cs");
+        files.ShouldNotContain(f => f.RelativePath == "Sales/Services/OrderService.cs");
     }
 
     [Fact]
@@ -173,8 +173,8 @@ public class R12ApplicationTests
             }
             """;
         var (_, files) = Build(src);
-        Assert.Contains(files, f => f.RelativePath == "Sales/Services/Pricing.cs");   // domain class (operation)
-        Assert.Contains(files, f => f.RelativePath == "Sales/Services/IPricing.cs");  // app interface (usecase)
+        files.ShouldContain(f => f.RelativePath == "Sales/Services/Pricing.cs");   // domain class (operation)
+        files.ShouldContain(f => f.RelativePath == "Sales/Services/IPricing.cs");  // app interface (usecase)
     }
 
     [Fact]
@@ -193,11 +193,11 @@ public class R12ApplicationTests
               }
             }
             """;
-        Assert.Empty(Diagnose(src));
+        Diagnose(src).ShouldBeEmpty();
         var (_, files) = Build(src);
         var svc = FileContents(files, "Sales/Services/IQueries.cs");
-        Assert.Contains("Task<OrderSummary> GetOrder(OrderId order, CancellationToken ct = default);", svc);
-        Assert.Contains("Task<IReadOnlyList<OrderSummary>> ListOrders(CancellationToken ct = default);", svc);
+        svc.ShouldContain("Task<OrderSummary> GetOrder(OrderId order, CancellationToken ct = default);");
+        svc.ShouldContain("Task<IReadOnlyList<OrderSummary>> ListOrders(CancellationToken ct = default);");
     }
 
     [Fact]
@@ -211,14 +211,14 @@ public class R12ApplicationTests
               }
             }
             """;
-        Assert.Contains(Diagnose(src), d => d.Code == DiagnosticCodes.DuplicateUseCase);
+        Diagnose(src).ShouldContain(d => d.Code == DiagnosticCodes.DuplicateUseCase);
     }
 
     [Fact]
     public void Use_case_with_unknown_type_is_reported()
     {
         const string src = "context C {\n  service S {\n    usecase Do(n: Nope): Int\n  }\n}\n";
-        Assert.Contains(Diagnose(src), d => d.Code == DiagnosticCodes.UnknownType);
+        Diagnose(src).ShouldContain(d => d.Code == DiagnosticCodes.UnknownType);
     }
 
     // ---- R12.3 — read models & projection mappers --------------------------
@@ -228,14 +228,14 @@ public class R12ApplicationTests
     {
         var (_, files) = Build(Fixture);
         var rm = FileContents(files, "Sales/ReadModels/OrderSummary.cs");
-        Assert.Contains("public sealed record OrderSummary(", rm);
-        Assert.Contains("OrderId Id", rm);
-        Assert.Contains("OrderStatus Status", rm);
-        Assert.Contains("int LineCount", rm);
-        Assert.Contains("public static OrderSummary ToOrderSummary(this Order src)", rm);
-        Assert.Contains("new OrderSummary(src.Id, src.Customer, src.Status, src.Lines.Count)", rm);
-        Assert.DoesNotContain("IAggregateRoot", rm);
-        Assert.DoesNotContain("invariant", rm);
+        rm.ShouldContain("public sealed record OrderSummary(");
+        rm.ShouldContain("OrderId Id");
+        rm.ShouldContain("OrderStatus Status");
+        rm.ShouldContain("int LineCount");
+        rm.ShouldContain("public static OrderSummary ToOrderSummary(this Order src)");
+        rm.ShouldContain("new OrderSummary(src.Id, src.Customer, src.Status, src.Lines.Count)");
+        rm.ShouldNotContain("IAggregateRoot");
+        rm.ShouldNotContain("invariant");
     }
 
     [Fact]
@@ -259,15 +259,15 @@ public class R12ApplicationTests
         var mapper = asm.GetType("Sales.OrderSummaryProjection")!;
         var summary = mapper.GetMethod("ToOrderSummary")!.Invoke(null, new[] { order })!;
         var summaryT = summary.GetType();
-        Assert.Equal(id, summaryT.GetProperty("Id")!.GetValue(summary));
-        Assert.Equal(2, summaryT.GetProperty("LineCount")!.GetValue(summary)); // lines.count
+        summaryT.GetProperty("Id")!.GetValue(summary).ShouldBe(id);
+        summaryT.GetProperty("LineCount")!.GetValue(summary).ShouldBe(2); // lines.count
     }
 
     [Fact]
     public void Read_model_unknown_source_is_reported()
     {
         const string src = "context C {\n  readmodel R from Nope { a }\n}\n";
-        Assert.Contains(Diagnose(src), d => d.Code == DiagnosticCodes.ReadModelUnknownSource);
+        Diagnose(src).ShouldContain(d => d.Code == DiagnosticCodes.ReadModelUnknownSource);
     }
 
     [Fact]
@@ -279,7 +279,7 @@ public class R12ApplicationTests
               readmodel R from V { a  bogus }
             }
             """;
-        Assert.Contains(Diagnose(src), d => d.Code == DiagnosticCodes.ReadModelUnknownField);
+        Diagnose(src).ShouldContain(d => d.Code == DiagnosticCodes.ReadModelUnknownField);
     }
 
     [Fact]
@@ -291,7 +291,7 @@ public class R12ApplicationTests
               readmodel R from V { a  a }
             }
             """;
-        Assert.Contains(Diagnose(src), d => d.Code == DiagnosticCodes.DuplicateReadModelField);
+        Diagnose(src).ShouldContain(d => d.Code == DiagnosticCodes.DuplicateReadModelField);
     }
 
     [Fact]
@@ -304,7 +304,7 @@ public class R12ApplicationTests
               readmodel R from V { total: Int = 1  Total: Int = 2 }
             }
             """;
-        Assert.Contains(Diagnose(src), d => d.Code == DiagnosticCodes.DuplicateReadModelField);
+        Diagnose(src).ShouldContain(d => d.Code == DiagnosticCodes.DuplicateReadModelField);
     }
 
     [Fact]
@@ -316,7 +316,7 @@ public class R12ApplicationTests
               readmodel R from V { equals: Int = 1 }
             }
             """;
-        Assert.Contains(Diagnose(src), d => d.Code == DiagnosticCodes.ReservedRecordMember);
+        Diagnose(src).ShouldContain(d => d.Code == DiagnosticCodes.ReservedRecordMember);
     }
 
     [Fact]
@@ -331,7 +331,7 @@ public class R12ApplicationTests
             }
             """;
         var diags = Diagnose(src); // must return (not throw)
-        Assert.Contains(diags, d => d.Code == DiagnosticCodes.DuplicateMember);
+        diags.ShouldContain(d => d.Code == DiagnosticCodes.DuplicateMember);
     }
 
     [Fact]
@@ -347,11 +347,11 @@ public class R12ApplicationTests
               readmodel CartTotal from Cart { units: Int = lines.sum(l => l.quantity) }
             }
             """;
-        Assert.Empty(Diagnose(src));
+        Diagnose(src).ShouldBeEmpty();
         var (_, files) = Build(src);
         var rm = FileContents(files, "C/ReadModels/CartTotal.cs");
-        Assert.Contains("using System.Linq;", rm);
-        Assert.Contains(".Sum(", rm);
+        rm.ShouldContain("using System.Linq;");
+        rm.ShouldContain(".Sum(");
     }
 
     // ---- R12.4 — query objects --------------------------------------------
@@ -360,21 +360,21 @@ public class R12ApplicationTests
     public void Queries_emit_dtos_and_a_shared_handler_interface()
     {
         var (asm, files) = Build(Fixture);
-        Assert.Contains("public sealed record OrdersByStatus(OrderStatus Status);", FileContents(files, "Sales/Queries/OrdersByStatus.cs"));
-        Assert.Contains("public sealed record OrderById(OrderId Id);", FileContents(files, "Sales/Queries/OrderById.cs"));
+        FileContents(files, "Sales/Queries/OrdersByStatus.cs").ShouldContain("public sealed record OrdersByStatus(OrderStatus Status);");
+        FileContents(files, "Sales/Queries/OrderById.cs").ShouldContain("public sealed record OrderById(OrderId Id);");
 
         var handler = FileContents(files, "Koine/Runtime/IQueryHandler.cs");
-        Assert.Contains("public interface IQueryHandler<TQuery, TResult>", handler);
-        Assert.Contains("Task<TResult> HandleAsync(TQuery query, CancellationToken ct = default);", handler);
-        Assert.NotNull(asm.GetType("Sales.OrdersByStatus"));
-        Assert.NotNull(asm.GetType("Koine.Runtime.IQueryHandler`2"));
+        handler.ShouldContain("public interface IQueryHandler<TQuery, TResult>");
+        handler.ShouldContain("Task<TResult> HandleAsync(TQuery query, CancellationToken ct = default);");
+        asm.GetType("Sales.OrdersByStatus").ShouldNotBeNull();
+        asm.GetType("Koine.Runtime.IQueryHandler`2").ShouldNotBeNull();
     }
 
     [Fact]
     public void Query_handler_runtime_type_is_emitted_once()
     {
         var (_, files) = Build(Fixture);
-        Assert.Single(files, f => f.RelativePath == "Koine/Runtime/IQueryHandler.cs");
+        files.Where(f => f.RelativePath == "Koine/Runtime/IQueryHandler.cs").ShouldHaveSingleItem();
     }
 
     [Fact]
@@ -382,7 +382,7 @@ public class R12ApplicationTests
     {
         const string src = "context C {\n  value V { n: Int }\n}\n";
         var (_, files) = Build(src);
-        Assert.DoesNotContain(files, f => f.RelativePath == "Koine/Runtime/IQueryHandler.cs");
+        files.ShouldNotContain(f => f.RelativePath == "Koine/Runtime/IQueryHandler.cs");
     }
 
     [Fact]
@@ -394,7 +394,7 @@ public class R12ApplicationTests
               query Q(n: Int): V
             }
             """;
-        Assert.Contains(Diagnose(src), d => d.Code == DiagnosticCodes.QueryResultNotReadModel);
+        Diagnose(src).ShouldContain(d => d.Code == DiagnosticCodes.QueryResultNotReadModel);
     }
 
     // ---- soft keywords -----------------------------------------------------
@@ -407,6 +407,6 @@ public class R12ApplicationTests
               value V { usecase: Int  readmodel: Int  from: Int  query: Int }
             }
             """;
-        Assert.Empty(Diagnose(src));
+        Diagnose(src).ShouldBeEmpty();
     }
 }

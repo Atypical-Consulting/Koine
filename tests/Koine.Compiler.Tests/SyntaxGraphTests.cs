@@ -13,8 +13,8 @@ public class SyntaxGraphTests
     private static KoineModel Parse(string src)
     {
         var (model, diagnostics) = new KoineCompiler().Parse(src);
-        Assert.Empty(diagnostics);
-        Assert.NotNull(model);
+        diagnostics.ShouldBeEmpty();
+        model.ShouldNotBeNull();
         return model!;
     }
 
@@ -57,8 +57,8 @@ public class SyntaxGraphTests
         // collapse them to one entry; reference identity keeps them distinct.
         var idA = new IdentifierExpr("x");
         var idB = new IdentifierExpr("x");
-        Assert.Equal(idA, idB);                 // value equality holds...
-        Assert.NotSame(idA, idB);               // ...but they are distinct instances
+        idB.ShouldBe(idA);                 // value equality holds...
+        idB.ShouldNotBeSameAs(idA);               // ...but they are distinct instances
 
         var lit0 = new LiteralExpr(LiteralKind.Int, "0");
         var lit9 = new LiteralExpr(LiteralKind.Int, "9");
@@ -68,9 +68,9 @@ public class SyntaxGraphTests
 
         var graph = new SyntaxGraph(root);
 
-        Assert.Same(gt, graph.Parent(idA));
-        Assert.Same(lt, graph.Parent(idB));
-        Assert.Null(graph.Parent(root));
+        graph.Parent(idA).ShouldBeSameAs(gt);
+        graph.Parent(idB).ShouldBeSameAs(lt);
+        graph.Parent(root).ShouldBeNull();
     }
 
     [Fact]
@@ -83,12 +83,12 @@ public class SyntaxGraphTests
         var id = NodeWalker.Descendants(model).OfType<IdentifierExpr>().Single(n => n.Name == "amount");
 
         var ancestors = graph.Ancestors(id).ToList();
-        Assert.DoesNotContain(id, ancestors);
-        Assert.Same(model, ancestors[^1]);                       // walk terminates at the root
+        ancestors.ShouldNotContain(id);
+        ancestors[^1].ShouldBeSameAs(model);                       // walk terminates at the root
 
         var withSelf = graph.AncestorsAndSelf(id).ToList();
-        Assert.Same(id, withSelf[0]);                            // self first
-        Assert.Equal(ancestors, withSelf.Skip(1).ToList());      // then the ancestors, in order
+        withSelf[0].ShouldBeSameAs(id);                            // self first
+        withSelf.Skip(1).ToList().ShouldBe(ancestors);      // then the ancestors, in order
     }
 
     [Fact]
@@ -102,8 +102,8 @@ public class SyntaxGraphTests
         // so the nearest enclosing declaration is the SpecDecl — not the Money value object, which the
         // spec targets by name but does not lexically nest.
         var spec = graph.FirstAncestorOrSelf<SpecDecl>(id);
-        Assert.NotNull(spec);
-        Assert.Equal("Positive", spec!.Name);
+        spec.ShouldNotBeNull();
+        spec!.Name.ShouldBe("Positive");
     }
 
     [Fact]
@@ -126,8 +126,8 @@ public class SyntaxGraphTests
                 continue;
             }
 
-            Assert.True(ancestor.Span.Offset <= node.Span.Offset);
-            Assert.True(ancestor.Span.Offset + ancestor.Span.Length >= node.Span.Offset + node.Span.Length);
+            (ancestor.Span.Offset <= node.Span.Offset).ShouldBeTrue();
+            (ancestor.Span.Offset + ancestor.Span.Length >= node.Span.Offset + node.Span.Length).ShouldBeTrue();
         }
     }
 
@@ -162,7 +162,7 @@ public class SyntaxGraphTests
 
         for (var offset = 0; offset <= src.Length; offset++)
         {
-            Assert.Same(BruteInnermost(model, offset, useNameSpan: false), graph.FindNode(offset));
+            graph.FindNode(offset).ShouldBeSameAs(BruteInnermost(model, offset, useNameSpan: false));
         }
     }
 
@@ -176,7 +176,7 @@ public class SyntaxGraphTests
 
         for (var offset = 0; offset <= src.Length; offset++)
         {
-            Assert.Same(BruteInnermost(model, offset, useNameSpan: true), graph.FindNameNode(offset));
+            graph.FindNameNode(offset).ShouldBeSameAs(BruteInnermost(model, offset, useNameSpan: true));
         }
     }
 
@@ -184,8 +184,8 @@ public class SyntaxGraphTests
     public void FindNode_returns_null_outside_any_positioned_node()
     {
         var graph = new SyntaxGraph(Parse(Src));
-        Assert.Null(graph.FindNode(int.MaxValue));
-        Assert.Null(graph.FindNode(-1));
+        graph.FindNode(int.MaxValue).ShouldBeNull();
+        graph.FindNode(-1).ShouldBeNull();
     }
 
     [Fact]
@@ -202,8 +202,8 @@ public class SyntaxGraphTests
         var offset = Src.IndexOf("Money", StringComparison.Ordinal);
         var node = graph.FindNameNode(offset);
 
-        Assert.NotNull(node);
-        var voDecl = Assert.IsType<ValueObjectDecl>(node);
-        Assert.Equal("Money", voDecl.Name);
+        node.ShouldNotBeNull();
+        var voDecl = node.ShouldBeOfType<ValueObjectDecl>();
+        voDecl.Name.ShouldBe("Money");
     }
 }

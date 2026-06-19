@@ -78,9 +78,9 @@ public class CommandReturnTests
     private static (Assembly Asm, string OrderCs) CompileFixture(string fixture)
     {
         var result = new KoineCompiler().Compile(fixture, new CSharpEmitter());
-        Assert.True(result.Success, string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
         var (asm, errors) = TestSupport.Compile(result.Files);
-        Assert.True(asm is not null, "generated C# failed to compile:\n" + string.Join("\n", errors));
+        (asm is not null).ShouldBeTrue("generated C# failed to compile:\n" + string.Join("\n", errors));
         var orderCs = result.Files.Single(f => f.RelativePath == "Sales/Order.cs").Contents;
         return (asm!, orderCs);
     }
@@ -90,8 +90,8 @@ public class CommandReturnTests
     [Fact]
     public void Command_return_type_and_result_clause_parse_and_validate()
     {
-        Assert.Empty(Diagnose(IdResultFixture));
-        Assert.Empty(Diagnose(ComputedResultFixture));
+        Diagnose(IdResultFixture).ShouldBeEmpty();
+        Diagnose(ComputedResultFixture).ShouldBeEmpty();
     }
 
     [Fact]
@@ -106,7 +106,7 @@ public class CommandReturnTests
               }
             }
             """;
-        Assert.Empty(Diagnose(src));
+        Diagnose(src).ShouldBeEmpty();
     }
 
     [Fact]
@@ -118,7 +118,7 @@ public class CommandReturnTests
               value V { a: Int  result: Int = a + 1 }
             }
             """;
-        Assert.Empty(Diagnose(src));
+        Diagnose(src).ShouldBeEmpty();
     }
 
     // ---- emit (text shape) -------------------------------------------------
@@ -127,7 +127,7 @@ public class CommandReturnTests
     public void Declared_return_type_renders_a_typed_method_signature()
     {
         var (_, orderCs) = CompileFixture(IdResultFixture);
-        Assert.Contains("public OrderId Cancel()", orderCs);
+        orderCs.ShouldContain("public OrderId Cancel()");
     }
 
     [Fact]
@@ -135,18 +135,18 @@ public class CommandReturnTests
     {
         var (_, orderCs) = CompileFixture(IdResultFixture);
         // Computed once, before the event references it, then returned.
-        Assert.Contains("var __result = Id;", orderCs);
-        Assert.Contains("_domainEvents.Add(new OrderCancelled(__result));", orderCs);
-        Assert.Contains("return __result;", orderCs);
+        orderCs.ShouldContain("var __result = Id;");
+        orderCs.ShouldContain("_domainEvents.Add(new OrderCancelled(__result));");
+        orderCs.ShouldContain("return __result;");
     }
 
     [Fact]
     public void Computed_result_not_referenced_by_an_event_is_returned_inline()
     {
         var (_, orderCs) = CompileFixture(ComputedResultFixture);
-        Assert.Contains("public int Bump(int by)", orderCs);
-        Assert.Contains("return Total;", orderCs); // post-mutation state, no hoist
-        Assert.DoesNotContain("__result", orderCs);
+        orderCs.ShouldContain("public int Bump(int by)");
+        orderCs.ShouldContain("return Total;"); // post-mutation state, no hoist
+        orderCs.ShouldNotContain("__result");
     }
 
     [Fact]
@@ -156,10 +156,10 @@ public class CommandReturnTests
         // Every WHOLE-argument reuse of the result (`amount`, `doubled`) becomes `__result`; the
         // sibling `rate: taxRate + tax` is left intact — neither mangled into `__resultRate` by a
         // substring replace, nor its inner `tax` spliced (only whole arguments are substituted).
-        Assert.Contains("var __result = Tax;", orderCs);
-        Assert.Contains("_domainEvents.Add(new Quoted(__result, TaxRate + Tax, __result));", orderCs);
-        Assert.DoesNotContain("__resultRate", orderCs);
-        Assert.Contains("return __result;", orderCs);
+        orderCs.ShouldContain("var __result = Tax;");
+        orderCs.ShouldContain("_domainEvents.Add(new Quoted(__result, TaxRate + Tax, __result));");
+        orderCs.ShouldNotContain("__resultRate");
+        orderCs.ShouldContain("return __result;");
     }
 
     // ---- emit (Roslyn behaviour) -------------------------------------------
@@ -177,8 +177,8 @@ public class CommandReturnTests
         var returned = order.GetMethod("Cancel")!.Invoke(o, null);
 
         // The command hands back the aggregate's own id (the same one the event carries).
-        Assert.Equal(o.GetType().GetProperty("Id")!.GetValue(o), returned);
-        Assert.Equal(id, returned);
+        returned.ShouldBe(o.GetType().GetProperty("Id")!.GetValue(o));
+        returned.ShouldBe(id);
     }
 
     [Fact]
@@ -192,8 +192,8 @@ public class CommandReturnTests
         var o = Activator.CreateInstance(order, orderId.GetMethod("New")!.Invoke(null, null), null, 0)!;
         var returned = order.GetMethod("Bump")!.Invoke(o, new object?[] { 7 });
 
-        Assert.Equal(7, returned);                                       // 0 + 7, the post-mutation total
-        Assert.Equal(7, order.GetProperty("Total")!.GetValue(o));
+        returned.ShouldBe(7);                                       // 0 + 7, the post-mutation total
+        order.GetProperty("Total")!.GetValue(o).ShouldBe(7);
     }
 
     [Fact]
@@ -207,7 +207,7 @@ public class CommandReturnTests
         order.GetMethod("Cancel")!.Invoke(o, null);
 
         var events = (System.Collections.IEnumerable)order.GetProperty("DomainEvents")!.GetValue(o)!;
-        Assert.Single(events.Cast<object>());
+        events.Cast<object>().ShouldHaveSingleItem();
     }
 
     // ---- diagnostics -------------------------------------------------------
@@ -223,7 +223,7 @@ public class CommandReturnTests
               }
             }
             """;
-        Assert.Contains(Diagnose(src), d => d.Code == DiagnosticCodes.ResultWithoutReturnType);
+        Diagnose(src).ShouldContain(d => d.Code == DiagnosticCodes.ResultWithoutReturnType);
     }
 
     [Fact]
@@ -237,7 +237,7 @@ public class CommandReturnTests
               }
             }
             """;
-        Assert.Contains(Diagnose(src), d => d.Code == DiagnosticCodes.MissingCommandResult);
+        Diagnose(src).ShouldContain(d => d.Code == DiagnosticCodes.MissingCommandResult);
     }
 
     [Fact]
@@ -251,7 +251,7 @@ public class CommandReturnTests
               }
             }
             """;
-        Assert.Contains(Diagnose(src), d => d.Code == DiagnosticCodes.MissingCommandResult);
+        Diagnose(src).ShouldContain(d => d.Code == DiagnosticCodes.MissingCommandResult);
     }
 
     [Fact]
@@ -265,6 +265,6 @@ public class CommandReturnTests
               }
             }
             """;
-        Assert.Contains(Diagnose(src), d => d.Code == DiagnosticCodes.CommandResultMismatch);
+        Diagnose(src).ShouldContain(d => d.Code == DiagnosticCodes.CommandResultMismatch);
     }
 }

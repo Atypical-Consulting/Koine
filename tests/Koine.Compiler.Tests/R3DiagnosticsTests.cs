@@ -17,14 +17,14 @@ public class R3DiagnosticsTests
     public void Diagnostics_carry_their_stable_code()
     {
         var diags = Diagnose("context C {\n  value V { x: Nope }\n}\n");
-        Assert.Contains(diags, d => d.Code == DiagnosticCodes.UnknownType);
+        diags.ShouldContain(d => d.Code == DiagnosticCodes.UnknownType);
     }
 
     [Fact]
     public void Diagnostic_to_string_includes_code()
     {
         var d = Diagnostic.Error(DiagnosticCodes.UnknownType, "unknown type 'Nope'", 2, 16);
-        Assert.Equal("2:16: error KOI0101: unknown type 'Nope'", d.ToString());
+        d.ToString().ShouldBe("2:16: error KOI0101: unknown type 'Nope'");
     }
 
     [Fact]
@@ -37,9 +37,9 @@ public class R3DiagnosticsTests
             .Select(f => (string)f.GetRawConstantValue()!)
             .ToList();
 
-        Assert.Equal(constants.Count, constants.Distinct().Count());          // codes are unique
-        Assert.All(constants, c => Assert.True(DiagnosticCodes.Catalogue.ContainsKey(c), $"{c} undocumented"));
-        Assert.Equal(constants.Count, DiagnosticCodes.Catalogue.Count);       // no stray catalogue entries
+        constants.Distinct().Count().ShouldBe(constants.Count);          // codes are unique
+        constants.ShouldAllBe(c => DiagnosticCodes.Catalogue.ContainsKey(c));
+        DiagnosticCodes.Catalogue.Count.ShouldBe(constants.Count);       // no stray catalogue entries
     }
 
     // ---- R3.2 parser error recovery ----------------------------------------
@@ -54,8 +54,8 @@ public class R3DiagnosticsTests
             "  value D { y Int }\n" + // missing colon
             "}\n";
         var diags = Diagnose(src);
-        Assert.True(diags.Count >= 3, $"expected ≥3 syntax errors, got {diags.Count}");
-        Assert.All(diags, d => Assert.Equal(DiagnosticCodes.SyntaxError, d.Code));
+        (diags.Count >= 3).ShouldBeTrue($"expected ≥3 syntax errors, got {diags.Count}");
+        diags.ShouldAllBe(d => d.Code == DiagnosticCodes.SyntaxError);
     }
 
     // ---- R3.3 did-you-mean -------------------------------------------------
@@ -64,28 +64,28 @@ public class R3DiagnosticsTests
     public void Unknown_type_suggests_closest_known_type()
     {
         var diags = Diagnose("context C {\n  enum Currency { EUR }\n  value V { x: Currancy }\n}\n");
-        Assert.Contains(diags, d => d.Message.Contains("did you mean 'Currency'?"));
+        diags.ShouldContain(d => d.Message.Contains("did you mean 'Currency'?"));
     }
 
     [Fact]
     public void Unknown_field_suggests_sibling_member()
     {
         var diags = Diagnose("context C {\n  value V {\n    amount: Int\n    invariant amaunt >= 0 \"x\"\n  }\n}\n");
-        Assert.Contains(diags, d => d.Message.Contains("did you mean 'amount'?"));
+        diags.ShouldContain(d => d.Message.Contains("did you mean 'amount'?"));
     }
 
     [Fact]
     public void Unknown_enum_default_suggests_member()
     {
         var diags = Diagnose("context C {\n  enum E { Draft, Placed }\n  value V {\n    s: E = Draf\n  }\n}\n");
-        Assert.Contains(diags, d => d.Message.Contains("did you mean 'Draft'?"));
+        diags.ShouldContain(d => d.Message.Contains("did you mean 'Draft'?"));
     }
 
     [Fact]
     public void No_suggestion_when_nothing_is_close()
     {
         var diags = Diagnose("context C {\n  value V { x: Wxyz }\n}\n");
-        Assert.Contains(diags, d => d.Code == DiagnosticCodes.UnknownType && !d.Message.Contains("did you mean"));
+        diags.ShouldContain(d => d.Code == DiagnosticCodes.UnknownType && !d.Message.Contains("did you mean"));
     }
 
     // ---- R3.4 soft keywords ------------------------------------------------
@@ -102,15 +102,15 @@ public class R3DiagnosticsTests
             "    doubled: Decimal = value + value\n" +
             "  }\n" +
             "}\n";
-        Assert.Empty(Diagnose(src));
+        Diagnose(src).ShouldBeEmpty();
 
         var result = new KoineCompiler().Compile(src, new CSharpEmitter());
         var (asm, errors) = TestSupport.Compile(result.Files);
-        Assert.True(asm is not null, "generated C# failed to compile:\n" + string.Join("\n", errors));
+        (asm is not null).ShouldBeTrue("generated C# failed to compile:\n" + string.Join("\n", errors));
 
         var m = asm.GetType("C.Measurement")!;
         var inst = Activator.CreateInstance(m, 4m, "kg", 1);
-        Assert.Equal(8m, m.GetProperty("Doubled")!.GetValue(inst));
+        m.GetProperty("Doubled")!.GetValue(inst).ShouldBe(8m);
     }
 
     // ---- R3.5 scoped enum resolution ---------------------------------------
@@ -129,11 +129,11 @@ public class R3DiagnosticsTests
             "    refDone: Bool = refund == RefundStatus.Cancelled\n" +
             "  }\n" +
             "}\n";
-        Assert.Empty(Diagnose(src));
+        Diagnose(src).ShouldBeEmpty();
 
         var result = new KoineCompiler().Compile(src, new CSharpEmitter());
         var (asm, errors) = TestSupport.Compile(result.Files);
-        Assert.True(asm is not null, "generated C# failed to compile:\n" + string.Join("\n", errors));
+        (asm is not null).ShouldBeTrue("generated C# failed to compile:\n" + string.Join("\n", errors));
     }
 
     [Fact]
@@ -145,7 +145,7 @@ public class R3DiagnosticsTests
             "  enum B { Cancelled, Closed }\n" +
             "  value V { flag: Bool = Cancelled == Cancelled }\n" +
             "}\n";
-        Assert.Contains(Diagnose(src), d => d.Code == DiagnosticCodes.AmbiguousEnumMember);
+        Diagnose(src).ShouldContain(d => d.Code == DiagnosticCodes.AmbiguousEnumMember);
     }
 
     [Fact]
@@ -156,7 +156,7 @@ public class R3DiagnosticsTests
             "  enum OrderStatus { Draft }\n" +
             "  value V { ok: Bool = OrderStatus.Nope == OrderStatus.Draft }\n" +
             "}\n";
-        Assert.Contains(Diagnose(src), d => d.Code == DiagnosticCodes.UnknownEnumMemberForType);
+        Diagnose(src).ShouldContain(d => d.Code == DiagnosticCodes.UnknownEnumMemberForType);
     }
 
     // ---- regressions found by the R3 review --------------------------------
@@ -178,17 +178,17 @@ public class R3DiagnosticsTests
             "  }\n" +
             "  value W { when: Int  positive: Bool = when > 0 }\n" + // bare 'when' read
             "}\n";
-        Assert.Empty(Diagnose(src));
+        Diagnose(src).ShouldBeEmpty();
 
         var result = new KoineCompiler().Compile(src, new CSharpEmitter());
         var (asm, errors) = TestSupport.Compile(result.Files);
-        Assert.True(asm is not null, "generated C# failed to compile:\n" + string.Join("\n", errors));
+        (asm is not null).ShouldBeTrue("generated C# failed to compile:\n" + string.Join("\n", errors));
 
         var inner = asm.GetType("C.Inner")!;
         var outer = asm.GetType("C.Outer")!;
         var i = Activator.CreateInstance(inner, 7, 3);
         var o = Activator.CreateInstance(outer, i);
-        Assert.Equal(7, outer.GetProperty("D")!.GetValue(o));   // inner.value
+        outer.GetProperty("D")!.GetValue(o).ShouldBe(7);   // inner.value
     }
 
     [Fact]
@@ -205,11 +205,11 @@ public class R3DiagnosticsTests
             "    pickN: OrderStatus = s ?? Cancelled\n" +                     // coalesce
             "  }\n" +
             "}\n";
-        Assert.Empty(Diagnose(src)); // no false KOI0209/KOI0213
+        Diagnose(src).ShouldBeEmpty(); // no false KOI0209/KOI0213
 
         var result = new KoineCompiler().Compile(src, new CSharpEmitter());
         var (asm, errors) = TestSupport.Compile(result.Files);
-        Assert.True(asm is not null, "generated C# failed to compile:\n" + string.Join("\n", errors));
+        (asm is not null).ShouldBeTrue("generated C# failed to compile:\n" + string.Join("\n", errors));
     }
 
     [Fact]
@@ -221,7 +221,7 @@ public class R3DiagnosticsTests
             "  enum B { Shared, OnlyB }\n" +
             "  value V { flag: Bool  pick: Bool = if flag then Shared == Shared else false }\n" +
             "}\n";
-        Assert.Contains(Diagnose(src), d => d.Code == DiagnosticCodes.AmbiguousEnumMember);
+        Diagnose(src).ShouldContain(d => d.Code == DiagnosticCodes.AmbiguousEnumMember);
     }
 
     // A bare shared member in a comparison resolves against the EXPECTED enum type
@@ -240,7 +240,7 @@ public class R3DiagnosticsTests
             // members in the right-hand comparison to enum A — no KOI0213.
             "  value V { flag: Bool?  pick: A = flag ?? (Shared == Shared) }\n" +
             "}\n";
-        Assert.DoesNotContain(Diagnose(src), d => d.Code == DiagnosticCodes.AmbiguousEnumMember);
+        Diagnose(src).ShouldNotContain(d => d.Code == DiagnosticCodes.AmbiguousEnumMember);
     }
 
     // The expected type must be an enum that declares the member; when the expected
@@ -255,7 +255,7 @@ public class R3DiagnosticsTests
             "  enum B { Shared, OnlyB }\n" +
             "  value V { flag: Bool = Shared == Shared }\n" +
             "}\n";
-        Assert.Contains(Diagnose(src), d => d.Code == DiagnosticCodes.AmbiguousEnumMember);
+        Diagnose(src).ShouldContain(d => d.Code == DiagnosticCodes.AmbiguousEnumMember);
     }
 
     // ---- Phase 5: node-sourced diagnostics carry an exact end --------------
@@ -273,10 +273,10 @@ public class R3DiagnosticsTests
             "  }\n" +
             "}\n";
         var dup = Diagnose(src).Single(d => d.Code == DiagnosticCodes.DuplicateMember);
-        Assert.True(dup.HasEnd);
-        Assert.Equal(4, dup.Line);            // second occurrence on source line 4
-        Assert.Equal(4, dup.EndLine);
-        Assert.True(dup.EndColumn > dup.Column); // a real width, not a zero-length point
+        dup.HasEnd.ShouldBeTrue();
+        dup.Line.ShouldBe(4);            // second occurrence on source line 4
+        dup.EndLine.ShouldBe(4);
+        (dup.EndColumn > dup.Column).ShouldBeTrue(); // a real width, not a zero-length point
     }
 
     [Fact]
@@ -287,14 +287,14 @@ public class R3DiagnosticsTests
         var span = new Ast.SourceSpan(3, 5, 3, 12, 0, 7);
 
         var err = Diagnostic.Error(DiagnosticCodes.UnknownType, "boom", span);
-        Assert.True(err.HasEnd);
-        Assert.Equal(3, err.EndLine);
-        Assert.Equal(12, err.EndColumn);
+        err.HasEnd.ShouldBeTrue();
+        err.EndLine.ShouldBe(3);
+        err.EndColumn.ShouldBe(12);
 
         var warn = Diagnostic.Warning(DiagnosticCodes.UnknownType, "boom", span);
-        Assert.True(warn.HasEnd);
-        Assert.Equal(3, warn.EndLine);
-        Assert.Equal(12, warn.EndColumn);
+        warn.HasEnd.ShouldBeTrue();
+        warn.EndLine.ShouldBe(3);
+        warn.EndColumn.ShouldBe(12);
     }
 
     [Fact]
@@ -305,14 +305,14 @@ public class R3DiagnosticsTests
         var span = new Ast.SourceSpan(3, 5, 4, 2, 0, 10);
 
         var err = Diagnostic.Error(DiagnosticCodes.UnknownType, "boom", span);
-        Assert.True(err.HasEnd);
-        Assert.Equal(4, err.EndLine);
-        Assert.Equal(2, err.EndColumn);
+        err.HasEnd.ShouldBeTrue();
+        err.EndLine.ShouldBe(4);
+        err.EndColumn.ShouldBe(2);
 
         var warn = Diagnostic.Warning(DiagnosticCodes.UnknownType, "boom", span);
-        Assert.True(warn.HasEnd);
-        Assert.Equal(4, warn.EndLine);
-        Assert.Equal(2, warn.EndColumn);
+        warn.HasEnd.ShouldBeTrue();
+        warn.EndLine.ShouldBe(4);
+        warn.EndColumn.ShouldBe(2);
     }
 
     [Fact]
@@ -322,13 +322,13 @@ public class R3DiagnosticsTests
         var point = new Ast.SourceSpan(3, 5);
 
         var err = Diagnostic.Error(DiagnosticCodes.UnknownType, "boom", point);
-        Assert.False(err.HasEnd);
-        Assert.Equal(0, err.EndLine);
-        Assert.Equal(0, err.EndColumn);
+        err.HasEnd.ShouldBeFalse();
+        err.EndLine.ShouldBe(0);
+        err.EndColumn.ShouldBe(0);
 
         var warn = Diagnostic.Warning(DiagnosticCodes.UnknownType, "boom", point);
-        Assert.False(warn.HasEnd);
-        Assert.Equal(0, warn.EndLine);
-        Assert.Equal(0, warn.EndColumn);
+        warn.HasEnd.ShouldBeFalse();
+        warn.EndLine.ShouldBe(0);
+        warn.EndColumn.ShouldBe(0);
     }
 }

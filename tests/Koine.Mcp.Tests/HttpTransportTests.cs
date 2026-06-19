@@ -17,7 +17,7 @@ public sealed class HttpTransportTests : IAsyncLifetime
     private WebApplication _app = null!;
     private McpClient _client = null!;
 
-    public async Task InitializeAsync()
+    public async ValueTask InitializeAsync()
     {
         // --port 0 ⇒ the OS assigns a free loopback port, so the test never collides with a
         // long-running server or another test run.
@@ -33,7 +33,7 @@ public sealed class HttpTransportTests : IAsyncLifetime
         _client = await McpClient.CreateAsync(transport, cancellationToken: CancellationToken.None);
     }
 
-    public async Task DisposeAsync()
+    public async ValueTask DisposeAsync()
     {
         await _client.DisposeAsync();
         await _app.DisposeAsync();
@@ -42,14 +42,14 @@ public sealed class HttpTransportTests : IAsyncLifetime
     [Fact]
     public async Task Http_server_lists_all_koine_tools()
     {
-        var tools = await _client.ListToolsAsync();
+        var tools = await _client.ListToolsAsync(cancellationToken: TestContext.Current.CancellationToken);
         var names = tools.Select(t => t.Name).ToHashSet();
 
-        Assert.Contains("koine_validate", names);
-        Assert.Contains("koine_compile", names);
-        Assert.Contains("koine_format", names);
-        Assert.Contains("koine_reference", names);
-        Assert.Contains("koine_examples", names);
+        names.ShouldContain("koine_validate");
+        names.ShouldContain("koine_compile");
+        names.ShouldContain("koine_format");
+        names.ShouldContain("koine_reference");
+        names.ShouldContain("koine_examples");
     }
 
     [Fact]
@@ -70,9 +70,9 @@ public sealed class HttpTransportTests : IAsyncLifetime
             },
             cancellationToken: CancellationToken.None);
 
-        Assert.False(result.IsError ?? false);
+        (result.IsError ?? false).ShouldBeFalse();
         var text = result.Content.OfType<TextContentBlock>().First().Text;
-        Assert.Contains("\"ok\"", text, StringComparison.OrdinalIgnoreCase);
+        text.ShouldContain("\"ok\"", Case.Insensitive);
     }
 
     [Fact]
@@ -96,10 +96,10 @@ public sealed class HttpTransportTests : IAsyncLifetime
         // The tool call itself succeeds; the diagnostics it returns describe the model's error.
         // The diagnostic reads "unknown type 'Nope'" — assert the escaping-agnostic parts (the
         // serializer renders the apostrophes around the type name as ' on the wire).
-        Assert.False(result.IsError ?? false);
+        (result.IsError ?? false).ShouldBeFalse();
         var text = result.Content.OfType<TextContentBlock>().First().Text;
-        Assert.Contains("\"ok\":false", text);
-        Assert.Contains("unknown type", text);
-        Assert.Contains("Nope", text);
+        text.ShouldContain("\"ok\":false");
+        text.ShouldContain("unknown type");
+        text.ShouldContain("Nope");
     }
 }

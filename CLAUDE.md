@@ -92,8 +92,8 @@ code; edit the `.g4` files.
 
 ## Testing stack & conventions
 
-xUnit v2 + **Verify** snapshots + an in-memory **Roslyn** meta-test (`Microsoft.CodeAnalysis.CSharp`)
-that actually compiles and executes the emitted C#. Tests live in `tests/Koine.Compiler.Tests/`, with
+xUnit v3 + **Shouldly** assertions + **Verify** snapshots + an in-memory **Roslyn** meta-test
+(`Microsoft.CodeAnalysis.CSharp`) that actually compiles and executes the emitted C#. Tests live in `tests/Koine.Compiler.Tests/`, with
 files named per release (`R1ExpressionTests.cs` … `R17ToolingTests.cs`) plus focused suites.
 
 - A **green build proves the domain**: emitted code is snapshot-tested *and* Roslyn-compile-tested, so
@@ -102,8 +102,9 @@ files named per release (`R1ExpressionTests.cs` … `R17ToolingTests.cs`) plus f
   intentionally change emitter output, review and accept the new `.received.txt` (the diff *is* the
   review of generated code). Don't blindly overwrite.
 - The compiler exposes internals to the test and CLI projects via `InternalsVisibleTo`.
-- Note the house standard elsewhere in the workspace is Shouldly, but **this project's tests use plain
-  xUnit asserts** — match the surrounding file.
+- The suite runs on **xUnit v3** with **Shouldly** assertions (`actual.ShouldBe(expected)`), matching the
+  workspace house standard. Verify `await Verify(...)` snapshots and the Roslyn compile/execute meta-test
+  are **not** assertions — leave them exactly as-is.
 
 ## The demo (`demo/Shop.Domain`)
 

@@ -20,8 +20,8 @@ public class LetBindingTests
     private static Member SingleDerivedMember(string source, string typeName, string memberName)
     {
         var (model, diagnostics) = new KoineCompiler().Parse(source);
-        Assert.Empty(diagnostics);
-        Assert.NotNull(model);
+        diagnostics.ShouldBeEmpty();
+        model.ShouldNotBeNull();
         var vo = model!.Contexts[0].Types.OfType<ValueObjectDecl>().Single(t => t.Name == typeName);
         return vo.Members.Single(m => m.Name == memberName);
     }
@@ -42,10 +42,10 @@ public class LetBindingTests
             """;
 
         var member = SingleDerivedMember(src, "V", "total");
-        var let = Assert.IsType<LetExpr>(member.Initializer);
-        var binding = Assert.Single(let.Bindings);
-        Assert.Equal("lineTotal", binding.Name);
-        Assert.IsType<IdentifierExpr>(let.Body);
+        var let = member.Initializer.ShouldBeOfType<LetExpr>();
+        var binding = let.Bindings.ShouldHaveSingleItem();
+        binding.Name.ShouldBe("lineTotal");
+        let.Body.ShouldBeOfType<IdentifierExpr>();
     }
 
     [Fact]
@@ -62,9 +62,9 @@ public class LetBindingTests
             """;
 
         var member = SingleDerivedMember(src, "V", "result");
-        var let = Assert.IsType<LetExpr>(member.Initializer);
-        Assert.Equal(2, let.Bindings.Count);
-        Assert.Equal(new[] { "x", "y" }, let.Bindings.Select(b => b.Name));
+        var let = member.Initializer.ShouldBeOfType<LetExpr>();
+        let.Bindings.Count.ShouldBe(2);
+        let.Bindings.Select(b => b.Name).ShouldBe(new[] { "x", "y" });
     }
 
     [Fact]
@@ -82,8 +82,8 @@ public class LetBindingTests
             """;
 
         var member = SingleDerivedMember(src, "V", "result");
-        var cond = Assert.IsType<ConditionalExpr>(member.Initializer);
-        Assert.IsType<LetExpr>(cond.Then);
+        var cond = member.Initializer.ShouldBeOfType<ConditionalExpr>();
+        cond.Then.ShouldBeOfType<LetExpr>();
     }
 
     [Fact]
@@ -100,7 +100,7 @@ public class LetBindingTests
             }
             """;
 
-        Assert.Empty(Diagnose(src));
+        Diagnose(src).ShouldBeEmpty();
     }
 
     // ---- Semantics ---------------------------------------------------------
@@ -117,7 +117,7 @@ public class LetBindingTests
             }
             """;
 
-        Assert.Empty(Diagnose(src));
+        Diagnose(src).ShouldBeEmpty();
     }
 
     [Fact]
@@ -132,7 +132,7 @@ public class LetBindingTests
             }
             """;
 
-        Assert.Contains(Diagnose(src), d => d.Code == DiagnosticCodes.UnknownField);
+        Diagnose(src).ShouldContain(d => d.Code == DiagnosticCodes.UnknownField);
     }
 
     [Fact]
@@ -148,7 +148,7 @@ public class LetBindingTests
             }
             """;
 
-        Assert.Contains(Diagnose(src), d => d.Code == DiagnosticCodes.UnknownField);
+        Diagnose(src).ShouldContain(d => d.Code == DiagnosticCodes.UnknownField);
     }
 
     [Fact]
@@ -163,7 +163,7 @@ public class LetBindingTests
             }
             """;
 
-        Assert.Contains(Diagnose(src), d => d.Code == DiagnosticCodes.DuplicateLetBinding);
+        Diagnose(src).ShouldContain(d => d.Code == DiagnosticCodes.DuplicateLetBinding);
     }
 
     [Fact]
@@ -179,7 +179,7 @@ public class LetBindingTests
             }
             """;
 
-        Assert.Contains(Diagnose(src), d => d.Code == DiagnosticCodes.StringOperationOnNonString);
+        Diagnose(src).ShouldContain(d => d.Code == DiagnosticCodes.StringOperationOnNonString);
     }
 
     // ---- Emit / Roslyn -----------------------------------------------------
@@ -198,17 +198,17 @@ public class LetBindingTests
     private static Assembly CompileEmitFixture()
     {
         var result = new KoineCompiler().Compile(EmitFixture, new CSharpEmitter());
-        Assert.True(result.Success, string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
 
         var (asm, errors) = TestSupport.Compile(result.Files);
-        Assert.True(asm is not null, "generated C# failed to compile:\n" + string.Join("\n", errors));
+        (asm is not null).ShouldBeTrue("generated C# failed to compile:\n" + string.Join("\n", errors));
         return asm!;
     }
 
     [Fact]
     public void Let_fixture_is_valid_and_compiles()
     {
-        Assert.Empty(Diagnose(EmitFixture));
+        Diagnose(EmitFixture).ShouldBeEmpty();
         CompileEmitFixture();
     }
 
@@ -221,7 +221,7 @@ public class LetBindingTests
         // unitPrice 10, quantity 3 => lineTotal 30; taxRate 0.1 => tax 3 => total 33.
         var p = Activator.CreateInstance(pricing, 10m, 3, 0.1m);
         var total = pricing.GetProperty("Total")!.GetValue(p);
-        Assert.Equal(33m, (decimal)total!);
+        ((decimal)total!).ShouldBe(33m);
     }
 
     [Fact]
@@ -233,6 +233,6 @@ public class LetBindingTests
 
         var p = Activator.CreateInstance(pricing, 4m, 5, 0.5m); // line 20, tax 10 => 30
         var total = pricing.GetProperty("Total")!.GetValue(p);
-        Assert.Equal(30m, (decimal)total!);
+        ((decimal)total!).ShouldBe(30m);
     }
 }

@@ -37,9 +37,9 @@ public class R5CommandTests
     private static Assembly Compile()
     {
         var result = new KoineCompiler().Compile(Fixture, new CSharpEmitter());
-        Assert.True(result.Success, string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
         var (asm, errors) = TestSupport.Compile(result.Files);
-        Assert.True(asm is not null, "generated C# failed to compile:\n" + string.Join("\n", errors));
+        (asm is not null).ShouldBeTrue("generated C# failed to compile:\n" + string.Join("\n", errors));
         return asm;
     }
 
@@ -67,7 +67,7 @@ public class R5CommandTests
     [Fact]
     public void Fixture_is_valid_and_compiles()
     {
-        Assert.Empty(Diagnose(Fixture));
+        Diagnose(Fixture).ShouldBeEmpty();
         Compile();
     }
 
@@ -79,7 +79,7 @@ public class R5CommandTests
         var o = NewOrder(asm, withLine: true);
 
         order.GetMethod("Place")!.Invoke(o, null);
-        Assert.True(Status(asm, "Placed").Equals(order.GetProperty("Status")!.GetValue(o)));
+        Status(asm, "Placed").Equals(order.GetProperty("Status")!.GetValue(o)).ShouldBeTrue();
     }
 
     [Fact]
@@ -89,10 +89,10 @@ public class R5CommandTests
         var order = asm.GetType("Sales.Order")!;
         var o = NewOrder(asm, withLine: false); // empty -> place precondition fails
 
-        var ex = Assert.Throws<TargetInvocationException>(() => order.GetMethod("Place")!.Invoke(o, null));
-        Assert.Equal("DomainInvariantViolationException", ex.InnerException!.GetType().Name);
+        var ex = Should.Throw<TargetInvocationException>(() => order.GetMethod("Place")!.Invoke(o, null));
+        ex.InnerException!.GetType().Name.ShouldBe("DomainInvariantViolationException");
         // state unchanged (still Draft)
-        Assert.True(Status(asm, "Draft").Equals(order.GetProperty("Status")!.GetValue(o)));
+        Status(asm, "Draft").Equals(order.GetProperty("Status")!.GetValue(o)).ShouldBeTrue();
     }
 
     [Fact]
@@ -104,7 +104,7 @@ public class R5CommandTests
 
         order.GetMethod("Place")!.Invoke(o, null);   // Draft -> Placed
         order.GetMethod("Cancel")!.Invoke(o, null);  // Placed -> Cancelled (allowed; not Shipped)
-        Assert.True(Status(asm, "Cancelled").Equals(order.GetProperty("Status")!.GetValue(o)));
+        Status(asm, "Cancelled").Equals(order.GetProperty("Status")!.GetValue(o)).ShouldBeTrue();
     }
 
     [Fact]
@@ -112,8 +112,8 @@ public class R5CommandTests
     {
         var result = new KoineCompiler().Compile(Fixture, new CSharpEmitter());
         var order = result.Files.Single(f => f.RelativePath == "Sales/Order.cs").Contents;
-        Assert.Contains("public OrderStatus Status { get; private set; }", order);
-        Assert.Contains("public IReadOnlyList<OrderLine> Lines { get; }", order); // not mutated
+        order.ShouldContain("public OrderStatus Status { get; private set; }");
+        order.ShouldContain("public IReadOnlyList<OrderLine> Lines { get; }"); // not mutated
     }
 
     // ---- diagnostics -------------------------------------------------------
@@ -123,7 +123,7 @@ public class R5CommandTests
     {
         const string src =
             "context C {\n  entity E identified by EId {\n    n: Int\n    command go { bogus -> 1 }\n  }\n}\n";
-        Assert.Contains(Diagnose(src), d => d.Code == DiagnosticCodes.InvalidTransitionTarget);
+        Diagnose(src).ShouldContain(d => d.Code == DiagnosticCodes.InvalidTransitionTarget);
     }
 
     [Fact]
@@ -131,7 +131,7 @@ public class R5CommandTests
     {
         const string src =
             "context C {\n  entity E identified by EId {\n    n: Int\n    doubled: Int = n + n\n    command go { doubled -> 5 }\n  }\n}\n";
-        Assert.Contains(Diagnose(src), d => d.Code == DiagnosticCodes.InvalidTransitionTarget);
+        Diagnose(src).ShouldContain(d => d.Code == DiagnosticCodes.InvalidTransitionTarget);
     }
 
     [Fact]
@@ -139,7 +139,7 @@ public class R5CommandTests
     {
         const string src =
             "context C {\n  enum E2 { A }\n  entity E identified by EId {\n    s: E2 = A\n    command go { s -> 5 }\n  }\n}\n";
-        Assert.Contains(Diagnose(src), d => d.Code == DiagnosticCodes.TransitionTypeMismatch);
+        Diagnose(src).ShouldContain(d => d.Code == DiagnosticCodes.TransitionTypeMismatch);
     }
 
     [Fact]
@@ -147,7 +147,7 @@ public class R5CommandTests
     {
         const string src =
             "context C {\n  entity E identified by EId {\n    n: Int\n    command go { requires bogus > 0 \"x\" }\n  }\n}\n";
-        Assert.Contains(Diagnose(src), d => d.Code == DiagnosticCodes.UnknownField);
+        Diagnose(src).ShouldContain(d => d.Code == DiagnosticCodes.UnknownField);
     }
 
     [Fact]
@@ -155,11 +155,11 @@ public class R5CommandTests
     {
         const string src =
             "context C {\n  entity E identified by EId {\n    n: Int\n    command setN(v: Int) {\n      requires v > 0 \"positive\"\n      n -> v\n    }\n  }\n}\n";
-        Assert.Empty(Diagnose(src));
+        Diagnose(src).ShouldBeEmpty();
 
         var result = new KoineCompiler().Compile(src, new CSharpEmitter());
         var (asm, errors) = TestSupport.Compile(result.Files);
-        Assert.True(asm is not null, "generated C# failed to compile:\n" + string.Join("\n", errors));
+        (asm is not null).ShouldBeTrue("generated C# failed to compile:\n" + string.Join("\n", errors));
     }
 
     // ---- regressions found by the R5 review --------------------------------
@@ -179,14 +179,14 @@ public class R5CommandTests
             "}\n";
         var result = new KoineCompiler().Compile(src, new CSharpEmitter());
         var (asm, errors) = TestSupport.Compile(result.Files);
-        Assert.True(asm is not null, "generated C# failed to compile:\n" + string.Join("\n", errors));
+        (asm is not null).ShouldBeTrue("generated C# failed to compile:\n" + string.Join("\n", errors));
 
         var e = asm.GetType("C.E")!;
         var eid = asm.GetType("C.EId")!;
         var inst = Activator.CreateInstance(e, eid.GetMethod("New")!.Invoke(null, null), 0);
 
-        var ex = Assert.Throws<TargetInvocationException>(() => e.GetMethod("SetCount")!.Invoke(inst, new object[] { 5 }));
-        Assert.Equal("DomainInvariantViolationException", ex.InnerException!.GetType().Name);
+        var ex = Should.Throw<TargetInvocationException>(() => e.GetMethod("SetCount")!.Invoke(inst, new object[] { 5 }));
+        ex.InnerException!.GetType().Name.ShouldBe("DomainInvariantViolationException");
     }
 
     [Fact]
@@ -206,37 +206,37 @@ public class R5CommandTests
             "}\n";
         var result = new KoineCompiler().Compile(src, new CSharpEmitter());
         var cart = result.Files.Single(f => f.RelativePath == "C/Entities/Cart.cs").Contents;
-        Assert.Contains("N = v;", cart);  // not `N = default`/dropped binding
+        cart.ShouldContain("N = v;");  // not `N = default`/dropped binding
 
         var (asm, errors) = TestSupport.Compile(result.Files);
-        Assert.True(asm is not null, "generated C# failed to compile:\n" + string.Join("\n", errors));
+        (asm is not null).ShouldBeTrue("generated C# failed to compile:\n" + string.Join("\n", errors));
     }
 
     [Fact]
     public void Duplicate_command_name_is_reported()
     {
         const string src = "context C {\n  entity E identified by EId {\n    n: Int\n    command go { n -> 1 }\n    command go { n -> 2 }\n  }\n}\n";
-        Assert.Contains(Diagnose(src), d => d.Code == DiagnosticCodes.DuplicateCommand);
+        Diagnose(src).ShouldContain(d => d.Code == DiagnosticCodes.DuplicateCommand);
     }
 
     [Fact]
     public void Duplicate_command_parameter_is_reported()
     {
         const string src = "context C {\n  entity E identified by EId {\n    n: Int\n    command go(v: Int, v: Int) { n -> v }\n  }\n}\n";
-        Assert.Contains(Diagnose(src), d => d.Code == DiagnosticCodes.DuplicateParameter);
+        Diagnose(src).ShouldContain(d => d.Code == DiagnosticCodes.DuplicateParameter);
     }
 
     [Fact]
     public void Command_name_colliding_with_a_property_is_reported()
     {
         const string src = "context C {\n  enum S { Draft, Placed }\n  entity E identified by EId {\n    status: S = Draft\n    command status { status -> Placed }\n  }\n}\n";
-        Assert.Contains(Diagnose(src), d => d.Code == DiagnosticCodes.CommandNameCollision);
+        Diagnose(src).ShouldContain(d => d.Code == DiagnosticCodes.CommandNameCollision);
     }
 
     [Fact]
     public void Command_and_requires_are_usable_as_field_names()
     {
         const string src = "context C {\n  value V {\n    command: Int\n    requires: Int\n  }\n}\n";
-        Assert.Empty(Diagnose(src));
+        Diagnose(src).ShouldBeEmpty();
     }
 }

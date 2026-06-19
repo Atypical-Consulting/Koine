@@ -10,7 +10,7 @@ public class R15CheckTests
     private static KoineModel Model(string source)
     {
         var (model, diagnostics) = new KoineCompiler().Parse(source);
-        Assert.True(model is not null, string.Join("\n", diagnostics.Select(d => d.ToString())));
+        (model is not null).ShouldBeTrue(string.Join("\n", diagnostics.Select(d => d.ToString())));
         return model!;
     }
 
@@ -30,10 +30,10 @@ public class R15CheckTests
 
     private static void AssertSingleBreaking(CompatibilityReport report, string code)
     {
-        Assert.True(report.HasBreakingChanges);
+        report.HasBreakingChanges.ShouldBeTrue();
         var breaking = report.Changes.Where(c => c.Impact == CompatibilityImpact.Breaking).ToList();
-        var change = Assert.Single(breaking);
-        Assert.Equal(code, change.Code);
+        var change = breaking.ShouldHaveSingleItem();
+        change.Code.ShouldBe(code);
     }
 
     // ---- breaking changes --------------------------------------------------
@@ -43,7 +43,7 @@ public class R15CheckTests
     {
         var report = Check(Baseline, "context Sales { }");
         AssertSingleBreaking(report, DiagnosticCodes.PublishedTypeRemoved);
-        Assert.Contains("OrderPlaced", report.Changes[0].Message);
+        report.Changes[0].Message.ShouldContain("OrderPlaced");
     }
 
     [Fact]
@@ -58,7 +58,7 @@ public class R15CheckTests
             }
             """);
         AssertSingleBreaking(report, DiagnosticCodes.PublishedFieldRemoved);
-        Assert.Contains("total", report.Changes[0].Message);
+        report.Changes[0].Message.ShouldContain("total");
     }
 
     [Fact]
@@ -122,8 +122,8 @@ public class R15CheckTests
               }
             }
             """);
-        Assert.False(report.HasBreakingChanges);
-        Assert.Contains(report.Changes, c => c.Impact == CompatibilityImpact.NonBreaking && c.Message.Contains("tax"));
+        report.HasBreakingChanges.ShouldBeFalse();
+        report.Changes.ShouldContain(c => c.Impact == CompatibilityImpact.NonBreaking && c.Message.Contains("tax"));
     }
 
     [Fact]
@@ -135,14 +135,14 @@ public class R15CheckTests
               integration event OrderShipped { orderId: OrderId }
             }
             """);
-        Assert.False(report.HasBreakingChanges);
-        Assert.Contains(report.Changes, c => c.Message.Contains("OrderShipped"));
+        report.HasBreakingChanges.ShouldBeFalse();
+        report.Changes.ShouldContain(c => c.Message.Contains("OrderShipped"));
     }
 
     [Fact]
     public void Identical_models_report_no_changes()
     {
-        Assert.Empty(Check(Baseline, Baseline).Changes);
+        Check(Baseline, Baseline).Changes.ShouldBeEmpty();
     }
 
     [Fact]
@@ -160,7 +160,7 @@ public class R15CheckTests
               value Internal { a: Decimal }
             }
             """;
-        Assert.Empty(Check(baseline, current).Changes);
+        Check(baseline, current).Changes.ShouldBeEmpty();
     }
 
     // ---- shared-kernel & open-host surfaces --------------------------------
@@ -188,7 +188,7 @@ public class R15CheckTests
             }
             """);
         AssertSingleBreaking(report, DiagnosticCodes.PublishedFieldRemoved);
-        Assert.Contains("shared-kernel", report.Changes[0].Message);
+        report.Changes[0].Message.ShouldContain("shared-kernel");
     }
 
     [Fact]
@@ -233,7 +233,7 @@ public class R15CheckTests
               value Address { city: String }
             }
             """;
-        Assert.Empty(Check(baseline, "context Sales { }").Changes);
+        Check(baseline, "context Sales { }").Changes.ShouldBeEmpty();
     }
 
     // ---- enums on a shared kernel ------------------------------------------
@@ -275,7 +275,7 @@ public class R15CheckTests
               Sales <-> Billing : shared-kernel { Currency }
             }
             """);
-        Assert.False(report.HasBreakingChanges);
-        Assert.Contains(report.Changes, c => c.Message.Contains("GBP"));
+        report.HasBreakingChanges.ShouldBeFalse();
+        report.Changes.ShouldContain(c => c.Message.Contains("GBP"));
     }
 }

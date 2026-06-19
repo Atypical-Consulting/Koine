@@ -21,7 +21,7 @@ public class PhpNamingTests
     [InlineData("order_id", "OrderId")]
     public void ClassName_returns_PascalCase(string input, string expected)
     {
-        Assert.Equal(expected, PhpNaming.ClassName(input));
+        PhpNaming.ClassName(input).ShouldBe(expected);
     }
 
     [Theory]
@@ -57,7 +57,7 @@ public class PhpNamingTests
     [InlineData("Status", "Status")]
     public void ClassName_escapes_reserved_words(string input, string expected)
     {
-        Assert.Equal(expected, PhpNaming.ClassName(input));
+        PhpNaming.ClassName(input).ShouldBe(expected);
     }
 
     // =========================================================================
@@ -75,7 +75,7 @@ public class PhpNamingTests
     [InlineData("OrderID", "orderId")]
     public void MethodName_returns_camelCase(string input, string expected)
     {
-        Assert.Equal(expected, PhpNaming.MethodName(input));
+        PhpNaming.MethodName(input).ShouldBe(expected);
     }
 
     [Theory]
@@ -89,7 +89,7 @@ public class PhpNamingTests
     [InlineData("print", "print_")]
     public void MethodName_escapes_reserved_words(string input, string expected)
     {
-        Assert.Equal(expected, PhpNaming.MethodName(input));
+        PhpNaming.MethodName(input).ShouldBe(expected);
     }
 
     // =========================================================================
@@ -103,7 +103,7 @@ public class PhpNamingTests
     [InlineData("OrderLine", "orderLine")]
     public void PropertyName_returns_camelCase(string input, string expected)
     {
-        Assert.Equal(expected, PhpNaming.PropertyName(input));
+        PhpNaming.PropertyName(input).ShouldBe(expected);
     }
 
     [Theory]
@@ -112,7 +112,7 @@ public class PhpNamingTests
     [InlineData("default", "default_")]
     public void PropertyName_escapes_reserved_words(string input, string expected)
     {
-        Assert.Equal(expected, PhpNaming.PropertyName(input));
+        PhpNaming.PropertyName(input).ShouldBe(expected);
     }
 
     // =========================================================================
@@ -126,13 +126,13 @@ public class PhpNamingTests
     [InlineData("TotalAmount", "TOTAL_AMOUNT")]
     public void ConstName_returns_UPPER_SNAKE(string input, string expected)
     {
-        Assert.Equal(expected, PhpNaming.ConstName(input));
+        PhpNaming.ConstName(input).ShouldBe(expected);
     }
 
     [Fact]
     public void ConstName_from_spec_OrderStatus()
     {
-        Assert.Equal("ORDER_STATUS", PhpNaming.ConstName("OrderStatus"));
+        PhpNaming.ConstName("OrderStatus").ShouldBe("ORDER_STATUS");
     }
 
     // =========================================================================
@@ -142,19 +142,19 @@ public class PhpNamingTests
     [Fact]
     public void Namespace_wraps_context_in_Koine_prefix()
     {
-        Assert.Equal(@"Koine\Billing", PhpNaming.Namespace("Billing"));
+        PhpNaming.Namespace("Billing").ShouldBe(@"Koine\Billing");
     }
 
     [Fact]
     public void Namespace_pascalcases_context_name()
     {
-        Assert.Equal(@"Koine\Catalog", PhpNaming.Namespace("catalog"));
+        PhpNaming.Namespace("catalog").ShouldBe(@"Koine\Catalog");
     }
 
     [Fact]
     public void Namespace_handles_snake_case_context()
     {
-        Assert.Equal(@"Koine\OrderManagement", PhpNaming.Namespace("order_management"));
+        PhpNaming.Namespace("order_management").ShouldBe(@"Koine\OrderManagement");
     }
 
     // =========================================================================
@@ -195,18 +195,18 @@ public class PhpNamingTests
     [InlineData("status", "status")]
     public void EscapeIdentifier_handles_keyword_and_non_keyword(string input, string expected)
     {
-        Assert.Equal(expected, PhpNaming.EscapeIdentifier(input));
+        PhpNaming.EscapeIdentifier(input).ShouldBe(expected);
     }
 
     [Fact]
     public void EscapeIdentifier_from_spec_match()
     {
-        Assert.Equal("match_", PhpNaming.EscapeIdentifier("match"));
+        PhpNaming.EscapeIdentifier("match").ShouldBe("match_");
     }
 
     [Fact]
     public void EscapeIdentifier_from_spec_amount()
     {
-        Assert.Equal("amount", PhpNaming.EscapeIdentifier("amount"));
+        PhpNaming.EscapeIdentifier("amount").ShouldBe("amount");
     }
 }

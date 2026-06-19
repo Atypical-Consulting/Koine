@@ -18,9 +18,9 @@ public class KoineLanguageServiceTests
         // Cursor at col 14 = space between ':' and 'S'; partial is empty so all types are offered.
         var src = "context C {\n  value V { x: S }\n}\n";
         var items = Complete(src, line: 1, ch: 14);
-        Assert.Contains(items, i => i.Label == "Decimal");
-        Assert.Contains(items, i => i.Label == "List");
-        Assert.Contains(items, i => i.Label == "V");
+        items.ShouldContain(i => i.Label == "Decimal");
+        items.ShouldContain(i => i.Label == "List");
+        items.ShouldContain(i => i.Label == "V");
     }
 
     [Fact]
@@ -28,8 +28,8 @@ public class KoineLanguageServiceTests
     {
         var src = "context C {\n  value V { x: Stri }\n}\n";
         var items = Complete(src, line: 1, ch: 18);
-        Assert.Contains(items, i => i.Label == "String");
-        Assert.DoesNotContain(items, i => i.Label == "Decimal");
+        items.ShouldContain(i => i.Label == "String");
+        items.ShouldNotContain(i => i.Label == "Decimal");
     }
 
     [Fact]
@@ -37,15 +37,15 @@ public class KoineLanguageServiceTests
     {
         var src = "context C {\n  value V { x: ";
         var items = Complete(src, line: 1, ch: 15);
-        Assert.Contains(items, i => i.Label == "String");
-        Assert.Contains(items, i => i.Label == "List");
+        items.ShouldContain(i => i.Label == "String");
+        items.ShouldContain(i => i.Label == "List");
     }
 
     [Fact]
     public void Top_level_declaration_start_offers_context_keyword()
     {
         var items = Complete("\n", line: 0, ch: 0);
-        Assert.Contains(items, i => i.Label == "context" && i.Kind == CompletionItemKind.Keyword);
+        items.ShouldContain(i => i.Label == "context" && i.Kind == CompletionItemKind.Keyword);
     }
 
     [Fact]
@@ -54,9 +54,9 @@ public class KoineLanguageServiceTests
         // serviceMember : operationDecl | usecaseDecl — both are legal at service scope.
         var src = "context C {\n  service S {\n    \n  }\n}\n";
         var items = Complete(src, line: 2, ch: 4);
-        Assert.Contains(items, i => i.Label == "operation");
-        Assert.Contains(items, i => i.Label == "usecase");
-        Assert.DoesNotContain(items, i => i.Label == "value"); // not a service member
+        items.ShouldContain(i => i.Label == "operation");
+        items.ShouldContain(i => i.Label == "usecase");
+        items.ShouldNotContain(i => i.Label == "value"); // not a service member
     }
 
     [Fact]
@@ -64,7 +64,7 @@ public class KoineLanguageServiceTests
     {
         var src = "context C {\n  value V { invariant raw matches /ab\n}\n";
         var items = Complete(src, line: 1, ch: 36);
-        Assert.Empty(items);
+        items.ShouldBeEmpty();
     }
 
     [Fact]
@@ -77,8 +77,8 @@ public class KoineLanguageServiceTests
             "  entity E identified by EId { status: OrderStatus = Dr }\n" +
             "}\n";
         var items = Complete(src, 2, 55);
-        Assert.Contains(items, i => i.Label == "Draft" && i.Kind == CompletionItemKind.EnumMember);
-        Assert.DoesNotContain(items, i => i.Label == "Placed");
+        items.ShouldContain(i => i.Label == "Draft" && i.Kind == CompletionItemKind.EnumMember);
+        items.ShouldNotContain(i => i.Label == "Placed");
     }
 
     [Fact]
@@ -92,7 +92,7 @@ public class KoineLanguageServiceTests
             "  spec S on V = v.\n" +
             "}\n";
         var items = Complete(src, 2, 18); // one past the '.' on line 2
-        Assert.Empty(items);
+        items.ShouldBeEmpty();
     }
 
     [Fact]
@@ -108,9 +108,9 @@ public class KoineLanguageServiceTests
             "  }\n" +
             "}\n";
         var items = Complete(src, line: 3, ch: 26);
-        var amount = Assert.Single(items, i => i.Label == "amount");
-        Assert.Equal(CompletionItemKind.Field, amount.Kind);
-        Assert.Equal("Decimal", amount.Detail);
+        var amount = items.Where(i => i.Label == "amount").ShouldHaveSingleItem();
+        amount.Kind.ShouldBe(CompletionItemKind.Field);
+        amount.Detail.ShouldBe("Decimal");
     }
 
     [Fact]
@@ -125,9 +125,9 @@ public class KoineLanguageServiceTests
             "  }\n" +
             "}\n";
         var items = Complete(src, line: 4, ch: 25); // after the "li" prefix
-        var lines = Assert.Single(items, i => i.Label == "lines");
-        Assert.Equal(CompletionItemKind.Field, lines.Kind);
-        Assert.Equal("List<OrderLine>", lines.Detail);
+        var lines = items.Where(i => i.Label == "lines").ShouldHaveSingleItem();
+        lines.Kind.ShouldBe(CompletionItemKind.Field);
+        lines.Detail.ShouldBe("List<OrderLine>");
     }
 
     [Fact]
@@ -142,8 +142,8 @@ public class KoineLanguageServiceTests
             "  spec IsBig on Basket = n > 5\n" +
             "}\n";
         var items = Complete(src, line: 3, ch: 24); // after "&& I"
-        var spec = Assert.Single(items, i => i.Label == "IsBig");
-        Assert.Equal(CompletionItemKind.Method, spec.Kind);
+        var spec = items.Where(i => i.Label == "IsBig").ShouldHaveSingleItem();
+        spec.Kind.ShouldBe(CompletionItemKind.Method);
     }
 
     [Fact]
@@ -152,8 +152,8 @@ public class KoineLanguageServiceTests
         // After ':' the type list — not field names — must be offered (no Field-kind noise).
         var src = "context C {\n  value Money {\n    amount: Decimal\n    other:  \n  }\n}\n";
         var items = Complete(src, line: 3, ch: 11); // after "other: "
-        Assert.DoesNotContain(items, i => i.Kind == CompletionItemKind.Field);
-        Assert.Contains(items, i => i.Label == "Decimal");
+        items.ShouldNotContain(i => i.Kind == CompletionItemKind.Field);
+        items.ShouldContain(i => i.Label == "Decimal");
     }
 
     [Fact]
@@ -166,8 +166,8 @@ public class KoineLanguageServiceTests
             "  value Line { price: Money }\n" +
             "}\n";
         var hover = Svc.HoverAt(Doc(src), U, line: 3, character: 23); // over "Money"
-        Assert.NotNull(hover);
-        Assert.Contains("The amount owed", hover.Markdown);
+        hover.ShouldNotBeNull();
+        hover.Markdown.ShouldContain("The amount owed");
     }
 
     [Fact]
@@ -179,24 +179,24 @@ public class KoineLanguageServiceTests
             "  value Line { price: Money }\n" +
             "}\n";
         var hover = Svc.HoverAt(Doc(src), U, line: 2, character: 23); // over "Money" (col 22; cursor must land strictly after the token's start column)
-        Assert.NotNull(hover);
-        Assert.Contains("Money", hover.Markdown);
-        Assert.Contains("Value", hover.Markdown);     // the kind label
-        Assert.Contains("amount", hover.Markdown);     // a member
+        hover.ShouldNotBeNull();
+        hover.Markdown.ShouldContain("Money");
+        hover.Markdown.ShouldContain("Value");     // the kind label
+        hover.Markdown.ShouldContain("amount");     // a member
     }
 
     [Fact]
     public void Hover_returns_null_on_a_broken_document()
     {
         var src = "context C {\n  value Money { amount: ";
-        Assert.Null(Svc.HoverAt(Doc(src), U, line: 1, character: 9)); // over "Money", parse fails
+        Svc.HoverAt(Doc(src), U, line: 1, character: 9).ShouldBeNull(); // over "Money", parse fails
     }
 
     [Fact]
     public void Hover_over_whitespace_returns_null()
     {
         var src = "context C {\n  value Money { amount: Decimal }\n}\n";
-        Assert.Null(Svc.HoverAt(Doc(src), U, line: 0, character: 0));
+        Svc.HoverAt(Doc(src), U, line: 0, character: 0).ShouldBeNull();
     }
 
     [Fact]
@@ -208,8 +208,8 @@ public class KoineLanguageServiceTests
             "  value Basket { lines: List<OrderLine> }\n" +
             "}\n";
         var hover = Svc.HoverAt(Doc(src), U, line: 2, character: 9); // over "Basket"
-        Assert.NotNull(hover);
-        Assert.Contains("List<OrderLine>", hover.Markdown);
+        hover.ShouldNotBeNull();
+        hover.Markdown.ShouldContain("List<OrderLine>");
     }
 
     [Fact]
@@ -221,8 +221,8 @@ public class KoineLanguageServiceTests
             "  value Paint { c: Color = Red }\n" +
             "}\n";
         var hover = Svc.HoverAt(Doc(src), U, line: 2, character: 28); // over "Red"
-        Assert.NotNull(hover);
-        Assert.Contains("enum member of Color", hover.Markdown);
+        hover.ShouldNotBeNull();
+        hover.Markdown.ShouldContain("enum member of Color");
     }
 
     [Fact]
@@ -234,8 +234,8 @@ public class KoineLanguageServiceTests
             "  spec Positive on Money = amount > 0\n" +
             "}\n";
         var hover = Svc.HoverAt(Doc(src), U, line: 2, character: 9); // over "Positive"
-        Assert.NotNull(hover);
-        Assert.Contains("spec on Money", hover.Markdown);
+        hover.ShouldNotBeNull();
+        hover.Markdown.ShouldContain("spec on Money");
     }
 
     [Fact]
@@ -247,8 +247,8 @@ public class KoineLanguageServiceTests
             "  value Line { price: Money }\n" +
             "}\n";
         var def = Svc.DefinitionAt(Doc(src), U, line: 2, character: 23); // over "Money"
-        Assert.NotNull(def);
-        Assert.Equal(2, def.Target.Line);  // 1-based line of "value Money"
+        def.ShouldNotBeNull();
+        def.Target.Line.ShouldBe(2);  // 1-based line of "value Money"
     }
 
     [Fact]
@@ -260,15 +260,15 @@ public class KoineLanguageServiceTests
             "  entity E identified by EId { status: OrderStatus = Draft }\n" +
             "}\n";
         var def = Svc.DefinitionAt(Doc(src), U, line: 2, character: 54); // over "Draft" value
-        Assert.NotNull(def);
-        Assert.Equal(2, def.Target.Line);
+        def.ShouldNotBeNull();
+        def.Target.Line.ShouldBe(2);
     }
 
     [Fact]
     public void Definition_of_a_primitive_is_null()
     {
         var src = "context C {\n  value V { x: Decimal }\n}\n";
-        Assert.Null(Svc.DefinitionAt(Doc(src), U, line: 1, character: 18)); // over "Decimal"
+        Svc.DefinitionAt(Doc(src), U, line: 1, character: 18).ShouldBeNull(); // over "Decimal"
     }
 
     [Fact]
@@ -280,8 +280,8 @@ public class KoineLanguageServiceTests
             "  spec Positive on Money = amount > 0\n" +
             "}\n";
         var def = Svc.DefinitionAt(Doc(src), U, line: 2, character: 9); // over "Positive"
-        Assert.NotNull(def);
-        Assert.Equal(3, def.Target.Line); // 1-based line of the spec declaration
+        def.ShouldNotBeNull();
+        def.Target.Line.ShouldBe(3); // 1-based line of the spec declaration
     }
 
     [Fact]
@@ -295,7 +295,7 @@ public class KoineLanguageServiceTests
             "  value V { a: A = Shared }\n" +
             "}\n";
         var def = Svc.DefinitionAt(Doc(src), U, line: 3, character: 20); // over "Shared"
-        Assert.Null(def);
+        def.ShouldBeNull();
     }
 
     [Fact]
@@ -309,8 +309,8 @@ public class KoineLanguageServiceTests
             ["file:///catalog.koi"] = catalog,
         };
         var def = Svc.DefinitionAt(docs, "file:///ordering.koi", line: 1, character: 25); // on "ProductId"
-        Assert.NotNull(def);
-        Assert.Equal("file:///catalog.koi", def.Uri);
+        def.ShouldNotBeNull();
+        def.Uri.ShouldBe("file:///catalog.koi");
     }
 
     // ---- Completion: new keyword starters --------------------------------
@@ -322,7 +322,7 @@ public class KoineLanguageServiceTests
         var items = Complete(src, line: 1, ch: 2);
         foreach (var kw in new[] { "module", "import", "readmodel", "query", "value", "service" })
         {
-            Assert.Contains(items, i => i.Label == kw && i.Kind == CompletionItemKind.Keyword);
+            items.ShouldContain(i => i.Label == kw && i.Kind == CompletionItemKind.Keyword);
         }
     }
 
@@ -330,8 +330,8 @@ public class KoineLanguageServiceTests
     public void File_scope_offers_contextmap_keyword()
     {
         var items = Complete("\n", line: 0, ch: 0);
-        Assert.Contains(items, i => i.Label == "contextmap");
-        Assert.Contains(items, i => i.Label == "context");
+        items.ShouldContain(i => i.Label == "contextmap");
+        items.ShouldContain(i => i.Label == "context");
     }
 
     [Fact]
@@ -339,9 +339,9 @@ public class KoineLanguageServiceTests
     {
         var src = "context C {\n  module M {\n    \n  }\n}\n";
         var items = Complete(src, line: 2, ch: 4);
-        Assert.Contains(items, i => i.Label == "value");
-        Assert.Contains(items, i => i.Label == "module");
-        Assert.DoesNotContain(items, i => i.Label == "service"); // not a module member
+        items.ShouldContain(i => i.Label == "value");
+        items.ShouldContain(i => i.Label == "module");
+        items.ShouldNotContain(i => i.Label == "service"); // not a module member
     }
 
     // ---- Completion: member access after '.' -------------------------------
@@ -355,8 +355,8 @@ public class KoineLanguageServiceTests
             "  value Paint { c: Color = Color. }\n" +
             "}\n";
         var items = Complete(src, line: 2, ch: 33); // just past "Color."
-        Assert.Contains(items, i => i.Label == "Red" && i.Kind == CompletionItemKind.EnumMember);
-        Assert.Contains(items, i => i.Label == "Green");
+        items.ShouldContain(i => i.Label == "Red" && i.Kind == CompletionItemKind.EnumMember);
+        items.ShouldContain(i => i.Label == "Green");
     }
 
     [Fact]
@@ -372,9 +372,9 @@ public class KoineLanguageServiceTests
             "  }\n" +
             "}\n";
         var items = Complete(src, line: 4, ch: 20); // just past "total."
-        var amount = Assert.Single(items, i => i.Label == "amount");
-        Assert.Equal(CompletionItemKind.Property, amount.Kind);
-        Assert.Equal("Decimal", amount.Detail);
+        var amount = items.Where(i => i.Label == "amount").ShouldHaveSingleItem();
+        amount.Kind.ShouldBe(CompletionItemKind.Property);
+        amount.Detail.ShouldBe("Decimal");
     }
 
     [Fact]
@@ -382,7 +382,7 @@ public class KoineLanguageServiceTests
     {
         var src = "context C {\n  value Money { amount: Decimal }\n  value Line { total: Money. ";
         var items = Complete(src, line: 2, ch: 28);
-        Assert.Empty(items);
+        items.ShouldBeEmpty();
     }
 
     // ---- Document symbols -------------------------------------------------
@@ -396,23 +396,23 @@ public class KoineLanguageServiceTests
             "  enum Status { Open, Closed }\n" +
             "}\n";
         var symbols = Svc.DocumentSymbols(src);
-        var shop = Assert.Single(symbols);
-        Assert.Equal("Shop", shop.Name);
-        Assert.Equal(SymbolKind.Namespace, shop.Kind);
+        var shop = symbols.ShouldHaveSingleItem();
+        shop.Name.ShouldBe("Shop");
+        shop.Kind.ShouldBe(SymbolKind.Namespace);
 
-        var money = Assert.Single(shop.Children, c => c.Name == "Money");
-        Assert.Equal(SymbolKind.Class, money.Kind);
-        Assert.Contains(money.Children, c => c.Name == "amount" && c.Kind == SymbolKind.Field);
+        var money = shop.Children.Where(c => c.Name == "Money").ShouldHaveSingleItem();
+        money.Kind.ShouldBe(SymbolKind.Class);
+        money.Children.ShouldContain(c => c.Name == "amount" && c.Kind == SymbolKind.Field);
 
-        var status = Assert.Single(shop.Children, c => c.Name == "Status");
-        Assert.Equal(SymbolKind.Enum, status.Kind);
-        Assert.Contains(status.Children, c => c.Name == "Open" && c.Kind == SymbolKind.EnumMember);
+        var status = shop.Children.Where(c => c.Name == "Status").ShouldHaveSingleItem();
+        status.Kind.ShouldBe(SymbolKind.Enum);
+        status.Children.ShouldContain(c => c.Name == "Open" && c.Kind == SymbolKind.EnumMember);
     }
 
     [Fact]
     public void DocumentSymbols_on_broken_document_is_empty()
     {
-        Assert.Empty(Svc.DocumentSymbols("context C {\n  value V { x: "));
+        Svc.DocumentSymbols("context C {\n  value V { x: ").ShouldBeEmpty();
     }
 
     // ---- Find references --------------------------------------------------
@@ -428,8 +428,8 @@ public class KoineLanguageServiceTests
             "}\n";
         // Cursor on the "Money" use in Line.
         var refs = Svc.ReferencesAt(Doc(src), U, line: 2, character: 23);
-        Assert.Equal(3, refs.Count); // declaration + two uses
-        Assert.All(refs, r => Assert.Equal(U, r.Uri));
+        refs.Count.ShouldBe(3); // declaration + two uses
+        refs.ShouldAllBe(r => r.Uri == U);
     }
 
     [Fact]
@@ -443,15 +443,15 @@ public class KoineLanguageServiceTests
             ["file:///catalog.koi"] = catalog,
         };
         var refs = Svc.ReferencesAt(docs, "file:///catalog.koi", line: 1, character: 32); // on "ProductId" decl
-        Assert.Contains(refs, r => r.Uri == "file:///ordering.koi");
-        Assert.Contains(refs, r => r.Uri == "file:///catalog.koi");
+        refs.ShouldContain(r => r.Uri == "file:///ordering.koi");
+        refs.ShouldContain(r => r.Uri == "file:///catalog.koi");
     }
 
     [Fact]
     public void References_for_a_non_declaration_name_are_empty()
     {
         var src = "context C {\n  value V { x: Decimal }\n}\n";
-        Assert.Empty(Svc.ReferencesAt(Doc(src), U, line: 1, character: 18)); // on "Decimal" (primitive)
+        Svc.ReferencesAt(Doc(src), U, line: 1, character: 18).ShouldBeEmpty(); // on "Decimal" (primitive)
     }
 
     // ---- Rename -----------------------------------------------------------
@@ -465,23 +465,23 @@ public class KoineLanguageServiceTests
             "  value Line { price: Money }\n" +
             "}\n";
         var edits = Svc.RenameAt(Doc(src), U, line: 1, character: 9, newName: "Cash"); // on "Money" decl
-        Assert.NotNull(edits);
-        Assert.Equal(2, edits.Count); // declaration + one use
+        edits.ShouldNotBeNull();
+        edits.Count.ShouldBe(2); // declaration + one use
     }
 
     [Fact]
     public void Rename_rejects_an_invalid_identifier()
     {
         var src = "context C {\n  value Money { amount: Decimal }\n}\n";
-        Assert.Null(Svc.RenameAt(Doc(src), U, line: 1, character: 9, newName: "1Bad"));
-        Assert.Null(Svc.RenameAt(Doc(src), U, line: 1, character: 9, newName: "has space"));
+        Svc.RenameAt(Doc(src), U, line: 1, character: 9, newName: "1Bad").ShouldBeNull();
+        Svc.RenameAt(Doc(src), U, line: 1, character: 9, newName: "has space").ShouldBeNull();
     }
 
     [Fact]
     public void Rename_on_a_primitive_returns_null()
     {
         var src = "context C {\n  value V { x: Decimal }\n}\n";
-        Assert.Null(Svc.RenameAt(Doc(src), U, line: 1, character: 18, newName: "Money"));
+        Svc.RenameAt(Doc(src), U, line: 1, character: 18, newName: "Money").ShouldBeNull();
     }
 
     [Fact]
@@ -497,13 +497,13 @@ public class KoineLanguageServiceTests
             "}\n";
         // Cursor on the "amount" declaration in Money (line index 1 = "value Money …").
         var edits = Svc.RenameAt(Doc(src), U, line: 1, character: 18, newName: "total");
-        Assert.NotNull(edits);
+        edits.ShouldNotBeNull();
         // Money's declaration (line 2, 1-based) + its use in the invariant (line 3); Order.amount excluded.
-        Assert.Equal(2, edits.Count);
-        Assert.Contains(edits, r => r.Line == 2); // the declaration
-        Assert.Contains(edits, r => r.Line == 3); // the invariant reference
+        edits.Count.ShouldBe(2);
+        edits.ShouldContain(r => r.Line == 2); // the declaration
+        edits.ShouldContain(r => r.Line == 3); // the invariant reference
         // Crucially: no edit lands on Order's "amount" (line 4, 1-based).
-        Assert.DoesNotContain(edits, r => r.Line == 4);
+        edits.ShouldNotContain(r => r.Line == 4);
     }
 
     [Fact]
@@ -517,10 +517,10 @@ public class KoineLanguageServiceTests
             "}\n";
         // Cursor inside the "Active" declaration in Phase (line index 1).
         var edits = Svc.RenameAt(Doc(src), U, line: 1, character: 16, newName: "Running");
-        Assert.NotNull(edits);
-        Assert.Single(edits);                            // only Phase.Active's declaration
-        Assert.Contains(edits, r => r.Line == 2);        // Phase line (1-based)
-        Assert.DoesNotContain(edits, r => r.Line == 3);  // State.Active untouched
+        edits.ShouldNotBeNull();
+        edits.ShouldHaveSingleItem();                            // only Phase.Active's declaration
+        edits.ShouldContain(r => r.Line == 2);        // Phase line (1-based)
+        edits.ShouldNotContain(r => r.Line == 3);  // State.Active untouched
     }
 
     [Fact]
@@ -535,9 +535,9 @@ public class KoineLanguageServiceTests
         };
         // Rename the ProductId ID type from its declaration in catalog.koi.
         var edits = Svc.RenameAt(docs, "file:///catalog.koi", line: 1, character: 32, newName: "ProdId");
-        Assert.NotNull(edits);
-        Assert.Contains(edits, r => r.Uri == "file:///ordering.koi");
-        Assert.Contains(edits, r => r.Uri == "file:///catalog.koi");
+        edits.ShouldNotBeNull();
+        edits.ShouldContain(r => r.Uri == "file:///ordering.koi");
+        edits.ShouldContain(r => r.Uri == "file:///catalog.koi");
     }
 
     [Fact]
@@ -554,13 +554,13 @@ public class KoineLanguageServiceTests
             "}\n";
         // Cursor on the "Status" TYPE declaration (line index 2 = "value Status …", col 8).
         var edits = Svc.RenameAt(Doc(src), U, line: 2, character: 9, newName: "Phase2");
-        Assert.NotNull(edits);
+        edits.ShouldNotBeNull();
         // The type decl (line 3, 1-based) + its TypeRef use in Line (line 4). The enum member on
         // line 2 must NOT be rewritten.
-        Assert.Equal(2, edits.Count);
-        Assert.Contains(edits, r => r.Line == 3); // the type declaration
-        Assert.Contains(edits, r => r.Line == 4); // the TypeRef use
-        Assert.DoesNotContain(edits, r => r.Line == 2); // the Phase enum member named Status
+        edits.Count.ShouldBe(2);
+        edits.ShouldContain(r => r.Line == 3); // the type declaration
+        edits.ShouldContain(r => r.Line == 4); // the TypeRef use
+        edits.ShouldNotContain(r => r.Line == 2); // the Phase enum member named Status
     }
 
     [Fact]
@@ -575,12 +575,12 @@ public class KoineLanguageServiceTests
         // Cursor on the "Status" ENUM MEMBER (line index 1, "enum Phase { Status, Done }", col ~15).
         var enumMemberCol = src.Split('\n')[1].IndexOf("Status", StringComparison.Ordinal) + 1;
         var edits = Svc.RenameAt(Doc(src), U, line: 1, character: enumMemberCol, newName: "Active");
-        Assert.NotNull(edits);
+        edits.ShouldNotBeNull();
         // Only the enum member declaration (line 2). The TYPE Status (line 3) and its use (line 4)
         // must be untouched.
-        Assert.Contains(edits, r => r.Line == 2);
-        Assert.DoesNotContain(edits, r => r.Line == 3); // the type declaration
-        Assert.DoesNotContain(edits, r => r.Line == 4); // the TypeRef use
+        edits.ShouldContain(r => r.Line == 2);
+        edits.ShouldNotContain(r => r.Line == 3); // the type declaration
+        edits.ShouldNotContain(r => r.Line == 4); // the TypeRef use
     }
 
     [Fact]
@@ -596,9 +596,9 @@ public class KoineLanguageServiceTests
         // Cursor on the "total" field declaration (line index 1).
         var col = src.Split('\n')[1].IndexOf("total", StringComparison.Ordinal) + 1;
         var edits = Svc.RenameAt(Doc(src), U, line: 1, character: col, newName: "amount");
-        Assert.NotNull(edits);
-        Assert.Single(edits);
-        Assert.Contains(edits, r => r.Line == 2); // the declaration
+        edits.ShouldNotBeNull();
+        edits.ShouldHaveSingleItem();
+        edits.ShouldContain(r => r.Line == 2); // the declaration
     }
 
     [Fact]
@@ -610,9 +610,9 @@ public class KoineLanguageServiceTests
             "}\n";
         var col = src.Split('\n')[1].IndexOf("total", StringComparison.Ordinal) + 1;
         var edits = Svc.RenameAt(Doc(src), U, line: 1, character: col, newName: "amount");
-        Assert.NotNull(edits);
-        Assert.Single(edits);
-        Assert.Contains(edits, r => r.Line == 2);
+        edits.ShouldNotBeNull();
+        edits.ShouldHaveSingleItem();
+        edits.ShouldContain(r => r.Line == 2);
     }
 
     // ---- Prepare rename ---------------------------------------------------
@@ -626,14 +626,14 @@ public class KoineLanguageServiceTests
             "  value Line { price: Money }\n" +
             "}\n";
         var range = Svc.PrepareRenameAt(Doc(src), U, line: 1, character: 9); // on "Money" decl
-        Assert.NotNull(range);
-        Assert.Equal(2, range.Line);          // 1-based line of the "Money" token
-        Assert.Equal(8, range.StartColumn);   // 0-based column where "Money" starts
-        Assert.Equal(13, range.EndColumn);    // half-open end (8 + len("Money"))
+        range.ShouldNotBeNull();
+        range.Line.ShouldBe(2);          // 1-based line of the "Money" token
+        range.StartColumn.ShouldBe(8);   // 0-based column where "Money" starts
+        range.EndColumn.ShouldBe(13);    // half-open end (8 + len("Money"))
 
         // The placeholder is the current name.
         var name = Svc.NameAt(Doc(src), U, line: 1, character: 9);
-        Assert.Equal("Money", name);
+        name.ShouldBe("Money");
     }
 
     [Fact]
@@ -642,14 +642,14 @@ public class KoineLanguageServiceTests
         // A doc comment / string context: cursor inside the quoted text.
         var src = "context C {\n  value V { x: String = \"Money\" }\n}\n";
         // Column 26 is inside the "Money" string literal.
-        Assert.Null(Svc.PrepareRenameAt(Doc(src), U, line: 1, character: 26));
+        Svc.PrepareRenameAt(Doc(src), U, line: 1, character: 26).ShouldBeNull();
     }
 
     [Fact]
     public void PrepareRename_on_a_primitive_returns_null()
     {
         var src = "context C {\n  value V { x: Decimal }\n}\n";
-        Assert.Null(Svc.PrepareRenameAt(Doc(src), U, line: 1, character: 18)); // on "Decimal"
+        Svc.PrepareRenameAt(Doc(src), U, line: 1, character: 18).ShouldBeNull(); // on "Decimal"
     }
 
     [Fact]
@@ -663,7 +663,7 @@ public class KoineLanguageServiceTests
             ["file:///catalog.koi"] = catalog,
         };
         var hover = Svc.HoverAt(docs, "file:///ordering.koi", line: 1, character: 25); // on "ProductId"
-        Assert.NotNull(hover);
-        Assert.Contains("Product", hover.Markdown); // owning entity
+        hover.ShouldNotBeNull();
+        hover.Markdown.ShouldContain("Product"); // owning entity
     }
 }

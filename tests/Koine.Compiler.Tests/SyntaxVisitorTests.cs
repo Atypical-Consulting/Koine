@@ -19,8 +19,8 @@ public class SyntaxVisitorTests
     private static KoineModel Parse(string src)
     {
         var (model, diagnostics) = new KoineCompiler().Parse(src);
-        Assert.Empty(diagnostics);
-        Assert.NotNull(model);
+        diagnostics.ShouldBeEmpty();
+        model.ShouldNotBeNull();
         return model!;
     }
 
@@ -67,8 +67,7 @@ public class SyntaxVisitorTests
 
             // SetEquals over the reference-identity comparer: value-equal-but-distinct nodes
             // (the many IdentifierExpr("amount")) are kept distinct, exactly as the graph needs.
-            Assert.True(oracle.SetEquals(generated),
-                $"Child set mismatch for {node.GetType().Name}: " +
+            oracle.SetEquals(generated).ShouldBeTrue($"Child set mismatch for {node.GetType().Name}: " +
                 $"oracle={oracle.Count}, generated={generated.Count}");
         }
     }
@@ -80,7 +79,7 @@ public class SyntaxVisitorTests
         var left = new IdentifierExpr("a");
         var right = new LiteralExpr(LiteralKind.Int, "1");
         var bin = new BinaryExpr(BinaryOp.Gt, left, right);
-        Assert.Equal(new KoineNode[] { left, right }, KoineSyntaxChildEnumerator.Children(bin).ToArray());
+        KoineSyntaxChildEnumerator.Children(bin).ToArray().ShouldBe(new KoineNode[] { left, right });
 
         // ContextNode: child slots are the KoineNode lists in primary-ctor order
         // (Types, Specs, Services, Policies, Imports, Publishes, Subscribes) — ModuleNames
@@ -97,9 +96,9 @@ public class SyntaxVisitorTests
             Subscribes: Array.Empty<SubscribeDecl>());
 
         var kids = KoineSyntaxChildEnumerator.Children(ctx).ToArray();
-        Assert.Equal(2, kids.Length);
-        Assert.IsType<ValueObjectDecl>(kids[0]);   // Types come before Imports in the ctor
-        Assert.IsType<ImportDecl>(kids[1]);
+        kids.Length.ShouldBe(2);
+        kids[0].ShouldBeOfType<ValueObjectDecl>();   // Types come before Imports in the ctor
+        kids[1].ShouldBeOfType<ImportDecl>();
     }
 
     // ------------------------------------------------------------------------
@@ -115,15 +114,15 @@ public class SyntaxVisitorTests
         var model = Parse(src);
         var rewritten = new NoOpRewriter().Visit(model);
 
-        Assert.Same(model, rewritten);
+        rewritten.ShouldBeSameAs(model);
 
         // Stronger: every descendant is reference-identical (a no-op must allocate nothing).
         var before = NodeWalker.Descendants(model).ToList();
         var after = NodeWalker.Descendants((KoineModel)rewritten!).ToList();
-        Assert.Equal(before.Count, after.Count);
+        after.Count.ShouldBe(before.Count);
         for (var i = 0; i < before.Count; i++)
         {
-            Assert.Same(before[i], after[i]);
+            after[i].ShouldBeSameAs(before[i]);
         }
     }
 
@@ -157,16 +156,16 @@ public class SyntaxVisitorTests
         var spine = new HashSet<KoineNode>(graph.AncestorsAndSelf(target), ReferenceEqualityComparer.Instance);
 
         var replacement = new LiteralExpr(LiteralKind.Int, "0");   // value-equal but a DIFFERENT instance
-        Assert.NotSame(target, replacement);
+        replacement.ShouldNotBeSameAs(target);
 
         var rewritten = (KoineModel)new ReplaceLiteralRewriter(target, replacement).Visit(model)!;
-        Assert.NotSame(model, rewritten);
+        rewritten.ShouldNotBeSameAs(model);
 
         // Every ORIGINAL node NOT on the spine must be reference-identical in the rewritten tree.
         // Match nodes positionally against the original walk (canonical order is stable).
         var originals = NodeWalker.Descendants(model).ToList();
         var rewrittenNodes = NodeWalker.Descendants(rewritten).ToList();
-        Assert.Equal(originals.Count, rewrittenNodes.Count);
+        rewrittenNodes.Count.ShouldBe(originals.Count);
 
         var spineReallocated = false;
         for (var i = 0; i < originals.Count; i++)
@@ -181,13 +180,13 @@ public class SyntaxVisitorTests
             else
             {
                 // Off-spine subtree keeps its identity (O(depth) structural sharing).
-                Assert.Same(originals[i], rewrittenNodes[i]);
+                rewrittenNodes[i].ShouldBeSameAs(originals[i]);
             }
         }
 
-        Assert.True(spineReallocated, "expected the leaf→root spine to reallocate");
+        spineReallocated.ShouldBeTrue("expected the leaf→root spine to reallocate");
         // The leaf itself was replaced with the new instance.
-        Assert.Contains(rewrittenNodes, n => ReferenceEquals(n, replacement));
+        rewrittenNodes.ShouldContain(n => ReferenceEquals(n, replacement));
     }
 
     // ------------------------------------------------------------------------
@@ -219,14 +218,14 @@ public class SyntaxVisitorTests
 
         // A value-equal Member, but a distinct instance.
         var replacement = new Member("amount", new TypeRef("Decimal"), Initializer: null);
-        Assert.Equal(amount, replacement);     // value equality holds
-        Assert.NotSame(amount, replacement);
+        replacement.ShouldBe(amount);     // value equality holds
+        replacement.ShouldNotBeSameAs(amount);
 
         var rewritten = (ValueObjectDecl)new ReplaceMemberRewriter(amount, replacement).Visit(vo)!;
 
-        Assert.NotSame(vo, rewritten);                       // spine reallocated
-        Assert.NotSame(vo.Members, rewritten.Members);       // list reallocated
-        Assert.Same(replacement, rewritten.Members[0]);      // the new instance is in place
+        rewritten.ShouldNotBeSameAs(vo);                       // spine reallocated
+        rewritten.Members.ShouldNotBeSameAs(vo.Members);       // list reallocated
+        rewritten.Members[0].ShouldBeSameAs(replacement);      // the new instance is in place
     }
 
     // ------------------------------------------------------------------------
@@ -243,9 +242,9 @@ public class SyntaxVisitorTests
     public void Required_slot_rewritten_to_null_throws_naming_the_slot()
     {
         var bin = new BinaryExpr(BinaryOp.Gt, new IdentifierExpr("a"), new LiteralExpr(LiteralKind.Int, "0"));
-        var ex = Assert.Throws<InvalidOperationException>(() => new NullRequiredRewriter().Visit(bin));
-        Assert.Contains("Left", ex.Message);
-        Assert.Contains("BinaryExpr", ex.Message);
+        var ex = Should.Throw<InvalidOperationException>(() => new NullRequiredRewriter().Visit(bin));
+        ex.Message.ShouldContain("Left");
+        ex.Message.ShouldContain("BinaryExpr");
     }
 
     private sealed class ClearOptionalRewriter : KoineSyntaxRewriter
@@ -260,9 +259,9 @@ public class SyntaxVisitorTests
         var member = new Member("status", new TypeRef("Int"), new LiteralExpr(LiteralKind.Int, "1"));
         var rewritten = (Member)new ClearOptionalRewriter().Visit(member)!;
 
-        Assert.NotSame(member, rewritten);
-        Assert.Null(rewritten.Initializer);
-        Assert.Same(member.Type, rewritten.Type);   // the type slot was untouched
+        rewritten.ShouldNotBeSameAs(member);
+        rewritten.Initializer.ShouldBeNull();
+        rewritten.Type.ShouldBeSameAs(member.Type);   // the type slot was untouched
     }
 
     private sealed class NullListElementRewriter : KoineSyntaxRewriter
@@ -276,8 +275,8 @@ public class SyntaxVisitorTests
         var member = new Member("amount", new TypeRef("Decimal"), Initializer: null);
         var vo = new ValueObjectDecl("Money", new[] { member }, Array.Empty<Invariant>());
 
-        var ex = Assert.Throws<InvalidOperationException>(() => new NullListElementRewriter().Visit(vo));
-        Assert.Contains("Members", ex.Message);
+        var ex = Should.Throw<InvalidOperationException>(() => new NullListElementRewriter().Visit(vo));
+        ex.Message.ShouldContain("Members");
     }
 
     // Returns a non-Expr (a TypeRef) where a required Expr slot is expected — the generated cast throws.
@@ -290,7 +289,7 @@ public class SyntaxVisitorTests
     public void Wrong_typed_slot_rewrite_throws_InvalidCastException()
     {
         var bin = new BinaryExpr(BinaryOp.Gt, new IdentifierExpr("a"), new LiteralExpr(LiteralKind.Int, "0"));
-        Assert.Throws<InvalidCastException>(() => new WrongTypeRewriter().Visit(bin));
+        Should.Throw<InvalidCastException>(() => new WrongTypeRewriter().Visit(bin));
     }
 
     // ------------------------------------------------------------------------
@@ -310,8 +309,8 @@ public class SyntaxVisitorTests
         var rewritten = (KoineModel)new NoOpRewriter().Visit(model)!;
         var (rewrittenDiags, rewrittenCSharp) = ValidateAndEmit(rewritten);
 
-        Assert.Equal(baselineDiags, rewrittenDiags);
-        Assert.Equal(baselineCSharp, rewrittenCSharp);
+        rewrittenDiags.ShouldBe(baselineDiags);
+        rewrittenCSharp.ShouldBe(baselineCSharp);
     }
 
     private static (string Diags, string CSharp) ValidateAndEmit(KoineModel model)
@@ -365,7 +364,7 @@ public class SyntaxVisitorTests
         var oracle = NodeWalker.Descendants(model).OfType<IdentifierExpr>().Count();
         var counted = new IdentifierCounter().Visit(model);
 
-        Assert.Equal(oracle, counted);
+        counted.ShouldBe(oracle);
     }
 
     // ------------------------------------------------------------------------
@@ -377,15 +376,15 @@ public class SyntaxVisitorTests
     {
         // Member with no initializer → only its TypeRef child.
         var member = new Member("amount", new TypeRef("Decimal"), Initializer: null);
-        Assert.Single(KoineSyntaxChildEnumerator.Children(member));   // just the TypeRef
+        KoineSyntaxChildEnumerator.Children(member).ShouldHaveSingleItem();   // just the TypeRef
 
         // CallExpr with empty Args → only the Target child.
         var call = new CallExpr(new IdentifierExpr("x"), "method", Array.Empty<Expr>());
-        Assert.Single(KoineSyntaxChildEnumerator.Children(call));     // just the Target
+        KoineSyntaxChildEnumerator.Children(call).ShouldHaveSingleItem();     // just the Target
 
         // KoineModel with null ContextMap → only its Contexts.
         var model = new KoineModel(Array.Empty<ContextNode>(), ContextMap: null);
-        Assert.Empty(KoineSyntaxChildEnumerator.Children(model));
+        KoineSyntaxChildEnumerator.Children(model).ShouldBeEmpty();
     }
 
     // ------------------------------------------------------------------------
@@ -399,12 +398,12 @@ public class SyntaxVisitorTests
         // yield no children. Assert a known node's children are enumerated by the GENERATED switch.
         var bin = new BinaryExpr(BinaryOp.Gt, new IdentifierExpr("a"), new LiteralExpr(LiteralKind.Int, "0"));
         var children = KoineSyntaxChildEnumerator.Children(bin).ToArray();
-        Assert.Equal(2, children.Length);
+        children.Length.ShouldBe(2);
 
         // And a void visitor reaches the generated VisitBinaryExpr hook.
         var probe = new VisitProbe();
         probe.Visit(bin);
-        Assert.True(probe.SawBinaryExpr);
+        probe.SawBinaryExpr.ShouldBeTrue();
     }
 
     private sealed class VisitProbe : KoineSyntaxVisitor

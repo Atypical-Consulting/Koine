@@ -13,10 +13,10 @@ public class GeneratedCodeTests
     private static Assembly CompileFixture()
     {
         var result = new KoineCompiler().Compile(TestSupport.BillingFixture, new CSharpEmitter());
-        Assert.True(result.Success, string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
 
         var (asm, errors) = TestSupport.Compile(result.Files);
-        Assert.True(asm is not null, "generated C# failed to compile:\n" + string.Join("\n", errors));
+        (asm is not null).ShouldBeTrue("generated C# failed to compile:\n" + string.Join("\n", errors));
         return asm;
     }
 
@@ -24,8 +24,8 @@ public class GeneratedCodeTests
     public void Generated_csharp_compiles()
     {
         var asm = CompileFixture();
-        Assert.NotNull(asm.GetType("Billing.Money"));
-        Assert.NotNull(asm.GetType("Billing.Order"));
+        asm.GetType("Billing.Money").ShouldNotBeNull();
+        asm.GetType("Billing.Order").ShouldNotBeNull();
     }
 
     [Fact]
@@ -38,12 +38,11 @@ public class GeneratedCodeTests
 
         // Money(0, EUR) succeeds.
         var ok = Activator.CreateInstance(money, 0m, eur);
-        Assert.NotNull(ok);
+        ok.ShouldNotBeNull();
 
         // Money(-1, EUR) throws DomainInvariantViolationException (wrapped by reflection).
-        var ex = Assert.Throws<TargetInvocationException>(
-            () => Activator.CreateInstance(money, -1m, eur));
-        Assert.Equal("DomainInvariantViolationException", ex.InnerException!.GetType().Name);
+        var ex = Should.Throw<TargetInvocationException>(() => Activator.CreateInstance(money, -1m, eur));
+        ex.InnerException!.GetType().Name.ShouldBe("DomainInvariantViolationException");
     }
 
     [Fact]
@@ -60,15 +59,15 @@ public class GeneratedCodeTests
         var c = Activator.CreateInstance(money, 10m, usd); // differs by a component
 
         // Structural equality from the ValueObject base (not a record, not reference equality).
-        Assert.Equal(a, b);
-        Assert.Equal(a!.GetHashCode(), b!.GetHashCode());
-        Assert.False(ReferenceEquals(a, b));
-        Assert.NotEqual(a, c);
+        b.ShouldBe(a);
+        b!.GetHashCode().ShouldBe(a!.GetHashCode());
+        ReferenceEquals(a, b).ShouldBeFalse();
+        c.ShouldNotBe(a);
 
         // The == / != operators (defined on the ValueObject base) compare by value too.
         var op = money.BaseType!.GetMethod("op_Equality")!;
-        Assert.True((bool)op.Invoke(null, new[] { a, b })!);
-        Assert.False((bool)op.Invoke(null, new[] { a, c })!);
+        ((bool)op.Invoke(null, new[] { a, b })!).ShouldBeTrue();
+        ((bool)op.Invoke(null, new[] { a, c })!).ShouldBeFalse();
     }
 
     [Fact]
@@ -77,9 +76,8 @@ public class GeneratedCodeTests
         var asm = CompileFixture();
         var money = asm.GetType("Billing.Money")!;
 
-        Assert.Equal("ValueObject", money.BaseType!.Name);
-        Assert.False(money.IsSealed && money.GetMethods().Any(m => m.Name == "<Clone>$"),
-            "value objects must not be compiler-generated records");
+        money.BaseType!.Name.ShouldBe("ValueObject");
+        (money.IsSealed && money.GetMethods().Any(m => m.Name == "<Clone>$")).ShouldBeFalse("value objects must not be compiler-generated records");
     }
 
     [Fact]
@@ -90,14 +88,14 @@ public class GeneratedCodeTests
             "context C {\n  enum Tier { Bronze, Gold }\n" +
             "  value V {\n    tier: Tier\n    isGold: Bool = if tier == Gold then true else false\n  }\n}\n";
         var result = new KoineCompiler().Compile(src, new CSharpEmitter());
-        Assert.True(result.Success, string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
 
         var file = result.Files.Single(f => f.RelativePath.EndsWith("V.cs"));
-        Assert.Contains("IsGold\n        => Tier == Tier.Gold;", file.Contents);
-        Assert.DoesNotContain("? true : false", file.Contents);
+        file.Contents.ShouldContain("IsGold\n        => Tier == Tier.Gold;");
+        file.Contents.ShouldNotContain("? true : false");
 
         var (asm, errors) = TestSupport.Compile(result.Files);
-        Assert.True(asm is not null, "generated C# failed to compile:\n" + string.Join("\n", errors));
+        (asm is not null).ShouldBeTrue("generated C# failed to compile:\n" + string.Join("\n", errors));
     }
 
     [Fact]
@@ -114,8 +112,8 @@ public class GeneratedCodeTests
         var c1 = Activator.CreateInstance(customer, id, "Alice", mail);
         var c2 = Activator.CreateInstance(customer, id, "Bob", mail); // different name, same id
 
-        Assert.True(c1!.Equals(c2)); // equal by identity only
-        Assert.Equal(c1.GetHashCode(), c2.GetHashCode());
+        c1!.Equals(c2).ShouldBeTrue(); // equal by identity only
+        c2.GetHashCode().ShouldBe(c1.GetHashCode());
     }
 
     [Fact]
@@ -134,7 +132,7 @@ public class GeneratedCodeTests
 
         var subtotal = line.GetProperty("Subtotal")!.GetValue(orderLine);
         var amount = (decimal)money.GetProperty("Amount")!.GetValue(subtotal)!;
-        Assert.Equal(15m, amount); // 5 * 3
+        amount.ShouldBe(15m); // 5 * 3
     }
 
     [Fact]
@@ -142,7 +140,7 @@ public class GeneratedCodeTests
     {
         var asm = CompileFixture();
         var order = asm.GetType("Billing.Order")!;
-        Assert.Contains(order.GetInterfaces(), i => i.Name == "IAggregateRoot");
+        order.GetInterfaces().ShouldContain(i => i.Name == "IAggregateRoot");
     }
 
     [Fact]
@@ -152,11 +150,11 @@ public class GeneratedCodeTests
         const string src =
             "context C {\n  value Weighted {\n    base: Decimal\n    factor: Decimal\n  }\n}\n";
         var result = new KoineCompiler().Compile(src, new CSharpEmitter());
-        Assert.True(result.Success);
+        result.Success.ShouldBeTrue();
 
         var (asm, errors) = TestSupport.Compile(result.Files);
-        Assert.True(asm is not null, "generated C# failed to compile:\n" + string.Join("\n", errors));
-        Assert.NotNull(asm.GetType("C.Weighted"));
+        (asm is not null).ShouldBeTrue("generated C# failed to compile:\n" + string.Join("\n", errors));
+        asm.GetType("C.Weighted").ShouldNotBeNull();
     }
 
     [Fact]
@@ -165,11 +163,11 @@ public class GeneratedCodeTests
         // GetEqualityComponents must stay a valid iterator (yield break) with no fields.
         const string src = "context Demo {\n  value Empty { }\n}\n";
         var result = new KoineCompiler().Compile(src, new CSharpEmitter());
-        Assert.True(result.Success, string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
 
         var (asm, errors) = TestSupport.Compile(result.Files);
-        Assert.True(asm is not null, "generated C# failed to compile:\n" + string.Join("\n", errors));
-        Assert.NotNull(asm.GetType("Demo.Empty"));
+        (asm is not null).ShouldBeTrue("generated C# failed to compile:\n" + string.Join("\n", errors));
+        asm.GetType("Demo.Empty").ShouldNotBeNull();
     }
 
     [Fact]
@@ -181,14 +179,14 @@ public class GeneratedCodeTests
             "context Shared {\n  value Money { amount: Decimal }\n}\n" +
             "context Sales {\n  import Shared.{ Money }\n  value Quote { price: Money }\n}\n";
         var result = new KoineCompiler().Compile(src, new CSharpEmitter());
-        Assert.True(result.Success, string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
 
         var quote = result.Files.Single(f => f.RelativePath == "Sales/ValueObjects/Quote.cs").Contents;
-        Assert.Contains("using Shared;", quote);
+        quote.ShouldContain("using Shared;");
 
         var (asm, errors) = TestSupport.Compile(result.Files);
-        Assert.True(asm is not null, "generated C# failed to compile:\n" + string.Join("\n", errors));
-        Assert.NotNull(asm.GetType("Sales.Quote"));
+        (asm is not null).ShouldBeTrue("generated C# failed to compile:\n" + string.Join("\n", errors));
+        asm.GetType("Sales.Quote").ShouldNotBeNull();
     }
 
     [Fact]
@@ -196,10 +194,10 @@ public class GeneratedCodeTests
     {
         const string src = "context Cart {\n  value Tags {\n    labels: List<String>\n    codes:  Set<Int>\n  }\n}\n";
         var result = new KoineCompiler().Compile(src, new CSharpEmitter());
-        Assert.True(result.Success, string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
 
         var (asm, errors) = TestSupport.Compile(result.Files);
-        Assert.True(asm is not null, "generated C# failed to compile:\n" + string.Join("\n", errors));
+        (asm is not null).ShouldBeTrue("generated C# failed to compile:\n" + string.Join("\n", errors));
         var tags = asm.GetType("Cart.Tags")!;
 
         // ctor: (IReadOnlyList<string> labels, IReadOnlySet<int> codes).
@@ -208,9 +206,9 @@ public class GeneratedCodeTests
         var listReordered = Activator.CreateInstance(tags, new List<string> { "b", "a" }, new HashSet<int> { 1, 2 })!;
 
         // List is order-sensitive, Set is order-insensitive — both compared by content, not reference.
-        Assert.Equal(t1, sameContent);
-        Assert.Equal(t1.GetHashCode(), sameContent.GetHashCode());
-        Assert.NotEqual(t1, listReordered);
+        sameContent.ShouldBe(t1);
+        sameContent.GetHashCode().ShouldBe(t1.GetHashCode());
+        listReordered.ShouldNotBe(t1);
     }
 
     [Fact]
@@ -220,6 +218,6 @@ public class GeneratedCodeTests
         var first = compiler.Compile(TestSupport.BillingFixture, new CSharpEmitter()).Files;
         var second = compiler.Compile(TestSupport.BillingFixture, new CSharpEmitter()).Files;
 
-        Assert.Equal(TestSupport.Render(first), TestSupport.Render(second));
+        TestSupport.Render(second).ShouldBe(TestSupport.Render(first));
     }
 }
