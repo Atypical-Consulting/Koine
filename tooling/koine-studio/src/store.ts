@@ -2,6 +2,13 @@
 // backed by localStorage. Pure data — no DOM, no Tauri. Every read is guarded against
 // absent storage and malformed JSON so a corrupt key never breaks the app; every write
 // is best-effort and swallows quota/security errors.
+//
+// One field is special: aiApiKey is a secret and is NEVER written to the plaintext localStorage
+// blob. It lives encrypted in IndexedDB (secrets.ts) and is decrypted once at boot (initSecrets)
+// into an in-memory cache, so the synchronous Settings API can keep exposing it without leaking it
+// to disk in the clear.
+
+import { loadSecret, saveSecret } from './secrets';
 
 // --- settings model ----------------------------------------------------------
 
@@ -66,6 +73,13 @@ const SETTINGS_KEY = 'koine.studio.settings';
 const RECENT_KEY = 'koine.studio.recentFolders';
 const SCRATCH_KEY = 'koine.studio.scratch';
 const RECENT_CAP = 8;
+
+/** The secret kept out of the plaintext blob and in the encrypted store; also its key name there. */
+const API_KEY_SECRET = 'aiApiKey';
+
+// The decrypted API key, populated once by initSecrets() and updated by saveApiKey()/clearApiKey().
+// loadSettings() reads from here so the secret never round-trips through localStorage.
+let secretCache = '';
 
 // Editor font-size bounds — must match the Settings input range (prefs.ts) so a stored
 // value can never drive the editor outside what the UI itself permits.
@@ -144,10 +158,11 @@ function coerceMcpClient(v: unknown): McpClientId {
  */
 export function loadSettings(): Settings {
   const raw = readRaw(SETTINGS_KEY);
-  if (raw === null) return { ...DEFAULT_SETTINGS };
+  // Even with no stored blob, surface the cached secret so the key survives a fresh settings object.
+  if (raw === null) return { ...DEFAULT_SETTINGS, aiApiKey: secretCache };
   try {
     const parsed = JSON.parse(raw) as Record<string, unknown>;
-    if (parsed === null || typeof parsed !== 'object') return { ...DEFAULT_SETTINGS };
+    if (parsed === null || typeof parsed !== 'object') return { ...DEFAULT_SETTINGS, aiApiKey: secretCache };
     return {
       theme: coerceTheme(parsed.theme),
       accent: coerceAccent(parsed.accent),
@@ -160,20 +175,25 @@ export function loadSettings(): Settings {
       aiProvider: parsed.aiProvider === 'openai' ? 'openai' : DEFAULT_SETTINGS.aiProvider,
       aiBaseUrl:
         typeof parsed.aiBaseUrl === 'string' && parsed.aiBaseUrl.length > 0 ? parsed.aiBaseUrl : DEFAULT_SETTINGS.aiBaseUrl,
-      aiApiKey: typeof parsed.aiApiKey === 'string' ? parsed.aiApiKey : DEFAULT_SETTINGS.aiApiKey,
+      // The API key is never stored in this blob; it comes from the encrypted in-memory cache.
+      aiApiKey: secretCache,
       aiModel: typeof parsed.aiModel === 'string' && parsed.aiModel.length > 0 ? parsed.aiModel : DEFAULT_SETTINGS.aiModel,
       aiModelOpenai: typeof parsed.aiModelOpenai === 'string' ? parsed.aiModelOpenai : DEFAULT_SETTINGS.aiModelOpenai,
       mcpEnabled: typeof parsed.mcpEnabled === 'boolean' ? parsed.mcpEnabled : DEFAULT_SETTINGS.mcpEnabled,
       mcpClient: coerceMcpClient(parsed.mcpClient),
     };
   } catch {
-    return { ...DEFAULT_SETTINGS };
+    return { ...DEFAULT_SETTINGS, aiApiKey: secretCache };
   }
 }
 
-/** Persist a full settings object. */
+/**
+ * Persist a full settings object — minus the secret. aiApiKey is deliberately stripped so the
+ * plaintext blob never carries it; the key is owned by saveApiKey()/the encrypted store instead.
+ */
 export function saveSettings(s: Settings): void {
-  writeRaw(SETTINGS_KEY, JSON.stringify(s));
+  const { aiApiKey: _omit, ...persisted } = s;
+  writeRaw(SETTINGS_KEY, JSON.stringify(persisted));
 }
 
 /** Merge a partial onto current settings, persist, and return the merged result. */
@@ -181,6 +201,58 @@ export function patchSettings(p: Partial<Settings>): Settings {
   const merged: Settings = { ...loadSettings(), ...p };
   saveSettings(merged);
   return merged;
+}
+
+// --- secret API key (encrypted in IndexedDB, cached in memory) ----------------
+
+// Memoized so repeated calls (and whenSecretsReady) share one decrypt, and so callers can await the
+// exact moment secretCache is populated rather than racing the fire-and-forget boot call.
+let secretsReady: Promise<void> | null = null;
+
+/**
+ * Decrypt the stored API key into the in-memory cache, run once at boot before any AI request.
+ * Also performs a one-time migration: a key left in the legacy plaintext settings blob is moved
+ * into the encrypted store and scrubbed from the blob. Idempotent — the first call does the work.
+ */
+export function initSecrets(): Promise<void> {
+  if (!secretsReady) secretsReady = doInitSecrets();
+  return secretsReady;
+}
+
+/** Resolves once the secret cache has been populated (or immediately if never initialized). */
+export function whenSecretsReady(): Promise<void> {
+  return secretsReady ?? Promise.resolve();
+}
+
+async function doInitSecrets(): Promise<void> {
+  const raw = readRaw(SETTINGS_KEY);
+  if (raw !== null) {
+    try {
+      const parsed = JSON.parse(raw) as Record<string, unknown>;
+      const legacy = typeof parsed?.aiApiKey === 'string' ? parsed.aiApiKey : '';
+      if (legacy.length > 0) {
+        await saveSecret(API_KEY_SECRET, legacy);
+        // Rewrite the blob without the secret (loadSettings injects secretCache below).
+        delete parsed.aiApiKey;
+        writeRaw(SETTINGS_KEY, JSON.stringify(parsed));
+      }
+    } catch {
+      // malformed blob — nothing to migrate
+    }
+  }
+  secretCache = await loadSecret(API_KEY_SECRET);
+}
+
+/** Update and persist the secret API key (encrypted). An empty value clears it. */
+export async function saveApiKey(value: string): Promise<void> {
+  secretCache = value;
+  await saveSecret(API_KEY_SECRET, value);
+}
+
+/** Forget the secret API key (memory + encrypted store). */
+export async function clearApiKey(): Promise<void> {
+  secretCache = '';
+  await saveSecret(API_KEY_SECRET, '');
 }
 
 // --- recent folders ----------------------------------------------------------

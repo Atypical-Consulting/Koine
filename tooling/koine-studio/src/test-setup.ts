@@ -2,6 +2,11 @@
 // `localStorage` (store.ts) can't be exercised without a shim. Install a minimal in-memory
 // localStorage/sessionStorage on the global. Never bundled into the app — only vitest loads this.
 
+// happy-dom ships no IndexedDB either; the secret store (secrets.ts) needs one. fake-indexeddb/auto
+// installs an in-memory IndexedDB on the global. A fresh environment per test file isolates it.
+import 'fake-indexeddb/auto';
+import { webcrypto } from 'node:crypto';
+
 function makeStorage(): Storage {
   const m = new Map<string, string>();
   return {
@@ -16,6 +21,10 @@ function makeStorage(): Storage {
   } as Storage;
 }
 
-const g = globalThis as unknown as { localStorage?: Storage; sessionStorage?: Storage };
+const g = globalThis as unknown as { localStorage?: Storage; sessionStorage?: Storage; crypto?: Crypto };
 if (!g.localStorage) g.localStorage = makeStorage();
 if (!g.sessionStorage) g.sessionStorage = makeStorage();
+
+// secrets.ts needs Web Crypto (crypto.subtle). happy-dom may not expose it; back it with Node's
+// WebCrypto so AES-GCM encrypt/decrypt behaves as it does in the browser.
+if (!g.crypto?.subtle) g.crypto = webcrypto as unknown as Crypto;

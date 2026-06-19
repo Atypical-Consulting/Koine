@@ -1,5 +1,13 @@
 import { describe, expect, test, beforeEach } from 'vitest';
-import { loadSettings, saveSettings, DEFAULT_SETTINGS } from './store';
+import {
+  loadSettings,
+  saveSettings,
+  patchSettings,
+  DEFAULT_SETTINGS,
+  initSecrets,
+  saveApiKey,
+  clearApiKey,
+} from './store';
 
 describe('MCP settings', () => {
   beforeEach(() => localStorage.clear());
@@ -19,5 +27,37 @@ describe('MCP settings', () => {
     saveSettings({ ...DEFAULT_SETTINGS, mcpEnabled: true, mcpClient: 'cursor' });
     expect(loadSettings().mcpEnabled).toBe(true);
     expect(loadSettings().mcpClient).toBe('cursor');
+  });
+});
+
+describe('API key secret', () => {
+  beforeEach(async () => {
+    localStorage.clear();
+    await clearApiKey();
+  });
+
+  test('is never written to the plaintext settings blob, yet surfaces via loadSettings', async () => {
+    await saveApiKey('sk-must-not-leak');
+    patchSettings({ theme: 'light' }); // force a saveSettings write
+    const raw = localStorage.getItem('koine.studio.settings') ?? '';
+    expect(raw).not.toContain('sk-must-not-leak');
+    expect(raw).not.toContain('aiApiKey');
+    expect(loadSettings().aiApiKey).toBe('sk-must-not-leak');
+  });
+
+  test('migrates a legacy plaintext key into the encrypted store and scrubs the blob', async () => {
+    localStorage.setItem('koine.studio.settings', JSON.stringify({ ...DEFAULT_SETTINGS, aiApiKey: 'sk-legacy' }));
+    await initSecrets();
+    expect(loadSettings().aiApiKey).toBe('sk-legacy');
+    const raw = localStorage.getItem('koine.studio.settings') ?? '';
+    expect(raw).not.toContain('sk-legacy');
+    expect(JSON.parse(raw).aiApiKey).toBeUndefined();
+  });
+
+  test('clearApiKey forgets the secret', async () => {
+    await saveApiKey('sk-temp');
+    expect(loadSettings().aiApiKey).toBe('sk-temp');
+    await clearApiKey();
+    expect(loadSettings().aiApiKey).toBe('');
   });
 });
