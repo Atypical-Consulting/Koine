@@ -825,9 +825,10 @@ body {
   outline-offset: 1px;
 }
 
-/* --- delete confirm (built on the shared createModal chrome; only the body message + footer
-   buttons are explorer-specific) --- */
-.explorer-confirm-msg {
+/* --- confirm dialogs (built on the shared createModal chrome; only the body message + footer
+   buttons are bespoke). Shared by the explorer's delete prompt and the generic confirmDialog. --- */
+.explorer-confirm-msg,
+.koi-confirm-msg {
   margin: 0;
   font-family: var(--koi-font-body);
   font-size: 0.82rem;
@@ -835,7 +836,8 @@ body {
   line-height: 1.45;
 }
 
-.explorer-confirm-btn {
+.explorer-confirm-btn,
+.koi-confirm-btn {
   background: transparent;
   border: 1px solid var(--koi-line);
   border-radius: var(--koi-radius-sm);
@@ -846,22 +848,26 @@ body {
   font-size: 0.82rem;
 }
 
-.explorer-confirm-btn:hover {
+.explorer-confirm-btn:hover,
+.koi-confirm-btn:hover {
   background: var(--koi-surface);
 }
 
-.explorer-confirm-btn:focus-visible {
+.explorer-confirm-btn:focus-visible,
+.koi-confirm-btn:focus-visible {
   outline: 2px solid var(--koi-accent);
   outline-offset: 1px;
 }
 
-.explorer-confirm-btn-danger {
+.explorer-confirm-btn-danger,
+.koi-confirm-btn-danger {
   border-color: color-mix(in srgb, var(--koi-error) 55%, var(--koi-line));
   background: color-mix(in srgb, var(--koi-error) 16%, transparent);
   color: var(--koi-error);
 }
 
-.explorer-confirm-btn-danger:hover {
+.explorer-confirm-btn-danger:hover,
+.koi-confirm-btn-danger:hover {
   background: color-mix(in srgb, var(--koi-error) 26%, transparent);
 }
 

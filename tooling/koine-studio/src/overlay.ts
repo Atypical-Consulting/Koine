@@ -180,3 +180,76 @@ export function createModal(opts: ModalOptions): ModalHandle {
     },
   };
 }
+
+export interface ConfirmRequest {
+  /** Heading shown in the modal header. */
+  title: string;
+  /** Body copy explaining the consequence and, ideally, the safe alternative. */
+  message: string;
+  /** Label for the affirmative (proceed) button. */
+  confirmLabel: string;
+  /** Label for the dismiss button. Defaults to 'Cancel'. */
+  cancelLabel?: string;
+  /** Style the affirmative button as destructive (red). Defaults to false. */
+  danger?: boolean;
+}
+
+export interface ConfirmDialog {
+  /** Resolve true if the user confirms, false on cancel / Esc / backdrop / ✕. */
+  ask(req: ConfirmRequest): Promise<boolean>;
+}
+
+/**
+ * A reusable yes/no confirmation built once on top of createModal(), so it inherits the app's
+ * Esc-stack, focus trap, theming, and focus restore. Unlike a delete prompt, the dismiss button
+ * is focused by default — a reflexive Enter must never trigger a destructive proceed.
+ */
+export function createConfirmDialog(): ConfirmDialog {
+  const modal = createModal({ title: 'Confirm', ariaLabel: 'Confirm' });
+  const titleEl = modal.backdrop.querySelector<HTMLElement>('.koi-modal-title');
+  const msgEl = document.createElement('p');
+  msgEl.className = 'koi-confirm-msg';
+  modal.body.appendChild(msgEl);
+
+  const footer = modal.backdrop.querySelector<HTMLElement>('.koi-modal-footer')!;
+  const cancelBtn = document.createElement('button');
+  cancelBtn.type = 'button';
+  cancelBtn.className = 'koi-confirm-btn';
+  const okBtn = document.createElement('button');
+  okBtn.type = 'button';
+  footer.append(cancelBtn, okBtn);
+
+  let resolve: ((ok: boolean) => void) | null = null;
+  const settle = (ok: boolean): void => {
+    const r = resolve;
+    resolve = null;
+    r?.(ok);
+  };
+
+  cancelBtn.addEventListener('click', () => {
+    settle(false);
+    modal.close();
+  });
+  okBtn.addEventListener('click', () => {
+    settle(true);
+    modal.close();
+  });
+  // Esc / backdrop / ✕ all route through close → resolve false (if still pending).
+  modal.onClose(() => settle(false));
+
+  return {
+    ask(req) {
+      settle(false); // defensively settle any stale promise before reusing the dialog
+      if (titleEl) titleEl.textContent = req.title;
+      msgEl.textContent = req.message;
+      cancelBtn.textContent = req.cancelLabel ?? 'Cancel';
+      okBtn.textContent = req.confirmLabel;
+      okBtn.className = req.danger ? 'koi-confirm-btn koi-confirm-btn-danger' : 'koi-confirm-btn';
+      return new Promise<boolean>((res) => {
+        resolve = res;
+        modal.open();
+        cancelBtn.focus(); // safe default: createModal focuses ✕; we prefer Cancel here
+      });
+    },
+  };
+}
