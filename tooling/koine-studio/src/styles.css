@@ -1262,12 +1262,33 @@ body {
    ============================================================================ */
 
 /* --- branded header (in #toolbar) --- */
+/* The brand is a button: clicking the logo returns to the start screen (the universal "logo = home"
+   convention). Reset the native button chrome so it still reads as a wordmark, not a control. */
 .brand {
   display: flex;
   align-items: center;
   gap: 11px;
   color: var(--koi-fg);
   flex: 0 0 auto;
+  border: 0;
+  background: transparent;
+  margin: 0;
+  padding: 4px 6px;
+  margin-left: -6px; /* keep the logo flush-left despite the hover-target padding */
+  border-radius: var(--koi-radius-sm);
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+  transition: background 0.15s ease;
+}
+
+.brand:hover {
+  background: var(--koi-surface);
+}
+
+.brand:focus-visible {
+  outline: 2px solid var(--koi-accent);
+  outline-offset: 1px;
 }
 
 .brand-logo {
@@ -1379,6 +1400,37 @@ body {
   box-shadow: 0 18px 50px rgba(0, 0, 0, 0.45);
   padding: 36px 36px 30px;
   text-align: center;
+}
+
+/* Top-right dismiss on the start screen — a visible way back to the editor (Esc was the only
+   exit before, which is invisible now that the screen is a deliberate destination). */
+.koi-welcome-close {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: var(--koi-radius-sm);
+  background: transparent;
+  color: var(--koi-muted);
+  font-size: 0.85rem;
+  line-height: 1;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.koi-welcome-close:hover {
+  background: var(--koi-surface);
+  color: var(--koi-fg);
+}
+
+.koi-welcome-close:focus-visible {
+  outline: 2px solid var(--koi-accent);
+  outline-offset: 1px;
 }
 
 .koi-welcome-logo {

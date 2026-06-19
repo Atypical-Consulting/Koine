@@ -1439,22 +1439,26 @@ export function init(): void {
     return text.trim() !== '' && text !== SEED && text !== BLANK;
   }
 
+  // Confirm before an action that would replace the current model and lose unsaved work. Resolves
+  // true to proceed (nothing to lose, or the user confirmed), false to abort. Shared by New and the
+  // start-screen actions that swap the workspace (open folder / recent / example).
+  async function confirmReplaceWork(title: string, confirmLabel: string): Promise<boolean> {
+    if (!hasUnsavedWork()) return true;
+    const save = formatChord('mod+S');
+    return confirmDialog.ask({
+      title,
+      message: folderMode
+        ? `Files with unsaved changes will lose them. Save with ${save} first to keep them.`
+        : `Your current model has unsaved changes that will be lost. Save it with ${save} first to keep it.`,
+      confirmLabel,
+      danger: true,
+    });
+  }
+
   // User-initiated New (button, ⌘N, palette, welcome). Confirms before discarding unsaved work;
   // proceeds straight to a fresh stub when there's nothing to lose.
   async function requestNewScratch(): Promise<void> {
-    if (hasUnsavedWork()) {
-      const save = formatChord('mod+S');
-      const ok = await confirmDialog.ask({
-        title: 'Start a new model?',
-        message: folderMode
-          ? `This closes the open folder. Files with unsaved changes will lose them. Save with ${save} first to keep them.`
-          : `Your current model has unsaved changes that will be lost. Save it with ${save} first to keep it.`,
-        confirmLabel: 'Discard & start new',
-        danger: true,
-      });
-      if (!ok) return;
-    }
-    newScratch();
+    if (await confirmReplaceWork('Start a new model?', 'Discard & start new')) newScratch();
   }
 
   // Open `source` as a fresh scratch model (used by the example gallery and shared links). Tears
@@ -1510,11 +1514,24 @@ export function init(): void {
     openScratchWith(example.source);
   }
 
+  // Reopen the start screen ("home"). Non-destructive: it's an overlay over the current model, so
+  // showing it loses nothing — only its actions navigate. Wired to the brand logo and the palette.
+  function goHome(): void {
+    welcome.show();
+  }
+
+  // A start-screen action that swaps the workspace. Confirms unsaved work first. On cancel we do
+  // nothing: the welcome already hid itself when the action was clicked, so the user lands back in
+  // the editor with their unsaved work intact — Cancel means "keep what I have", not "back to home".
+  async function leaveHomeFor(title: string, action: () => void | Promise<void>): Promise<void> {
+    if (await confirmReplaceWork(title, 'Discard & open')) await action();
+  }
+
   const welcome = createWelcome({
     onNewScratch: () => void requestNewScratch(),
-    onOpenFolder: () => void openFolder(),
-    onOpenRecent: (path) => void openFolderPath(path),
-    onOpenExample: (example) => void openExample(example),
+    onOpenFolder: () => void leaveHomeFor('Open a folder?', () => openFolder()),
+    onOpenRecent: (path) => void leaveHomeFor('Open this folder?', () => openFolderPath(path)),
+    onOpenExample: (example) => void leaveHomeFor('Open this example?', () => openExample(example)),
   });
 
   const palette = createCommandPalette(() => getCommands());
@@ -1594,6 +1611,7 @@ export function init(): void {
   // Toolbar buttons unique to this phase.
   const hintEl = document.querySelector('.palette-hint');
   if (hintEl) hintEl.textContent = formatChord('mod+K'); // ⌘+K / Ctrl+K per platform
+  el<HTMLButtonElement>('btn-home').addEventListener('click', () => goHome());
   el<HTMLButtonElement>('btn-new').addEventListener('click', () => void requestNewScratch());
   el<HTMLButtonElement>('btn-generate-project').addEventListener('click', () => generateProject.open());
   el<HTMLButtonElement>('btn-theme').addEventListener('click', () => toggleTheme());
@@ -1620,6 +1638,7 @@ export function init(): void {
       { id: 'preview-ts', title: 'Preview TypeScript', hint: 'mod+2', group: 'Preview', run: () => void preview('typescript') },
       { id: 'preview-py', title: 'Preview Python', hint: 'mod+3', group: 'Preview', run: () => void preview('python') },
       { id: 'format', title: 'Format document', hint: 'mod+S', group: 'Edit', run: () => void formatActive() },
+      { id: 'home', title: 'Go to start screen', group: 'File', run: () => goHome() },
       { id: 'open-folder', title: 'Open folder…', hint: 'mod+Shift+O', group: 'File', run: () => void openFolder() },
       { id: 'new-scratch', title: 'New scratch model', hint: 'mod+N', group: 'File', run: () => void requestNewScratch() },
       { id: 'share', title: 'Copy shareable link', group: 'File', run: () => void copyShareLink() },

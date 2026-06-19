@@ -12,7 +12,7 @@
   <body>
     <div id="app">
       <header id="toolbar">
-        <div class="brand">
+        <button type="button" id="btn-home" class="brand" title="Back to the start screen" aria-label="Back to the start screen">
           <!-- Monogram injected from the shared koineMark() template at startup (see ide.ts) so the
                app's marks have a single source; only the favicon SVG is a separate literal-colour copy. -->
           <span class="brand-logo" aria-hidden="true"></span>
@@ -20,7 +20,7 @@
             <span class="brand-name">Koine</span>
             <span class="brand-eyebrow">Studio</span>
           </span>
-        </div>
+        </button>
 
         <div class="toolbar-actions" role="toolbar" aria-label="Model actions">
           <div class="tb-group">

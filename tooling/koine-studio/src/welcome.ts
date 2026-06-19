@@ -38,10 +38,26 @@ export function createWelcome(cb: WelcomeCallbacks): WelcomeHandle {
   const root = document.createElement('div');
   root.className = 'koi-welcome';
   root.hidden = true;
+  // Clicking the dimmed area outside the card returns to the editor — mirrors the modal
+  // backdrop convention now that the start screen is reachable on demand (logo / palette).
+  root.addEventListener('mousedown', (e) => {
+    if (e.target === root) hide();
+  });
 
   const card = document.createElement('div');
   card.className = 'koi-welcome-card';
   root.appendChild(card);
+
+  // Dismiss back to the current editor. Invisible Esc was the only exit before; now that "home"
+  // is a deliberate destination, the way back has to be visible.
+  const closeBtn = document.createElement('button');
+  closeBtn.type = 'button';
+  closeBtn.className = 'koi-welcome-close';
+  closeBtn.setAttribute('aria-label', 'Back to editor');
+  closeBtn.title = 'Back to editor';
+  closeBtn.textContent = '✕';
+  closeBtn.addEventListener('click', () => hide());
+  card.appendChild(closeBtn);
 
   // Logo container — the inline SVG (currentColor wordmark) themes with the surrounding text.
   const logo = document.createElement('div');
