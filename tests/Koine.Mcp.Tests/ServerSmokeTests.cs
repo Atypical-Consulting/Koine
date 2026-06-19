@@ -33,11 +33,11 @@ public sealed class ServerSmokeTests
         var tools = await client.ListToolsAsync();
         var names = tools.Select(t => t.Name).ToHashSet();
 
-        Assert.Contains("koine_validate", names);
-        Assert.Contains("koine_compile", names);
-        Assert.Contains("koine_format", names);
-        Assert.Contains("koine_reference", names);
-        Assert.Contains("koine_examples", names);
+        names.ShouldContain("koine_validate");
+        names.ShouldContain("koine_compile");
+        names.ShouldContain("koine_format");
+        names.ShouldContain("koine_reference");
+        names.ShouldContain("koine_examples");
     }
 
     [Fact]
@@ -50,9 +50,9 @@ public sealed class ServerSmokeTests
             new Dictionary<string, object?> { ["name"] = "billing" },
             cancellationToken: CancellationToken.None);
 
-        Assert.False(result.IsError ?? false);
+        (result.IsError ?? false).ShouldBeFalse();
         var text = result.Content.OfType<TextContentBlock>().First().Text;
-        Assert.Contains("context Billing", text);
+        text.ShouldContain("context Billing");
     }
 
     [Fact]
@@ -76,8 +76,8 @@ public sealed class ServerSmokeTests
             },
             cancellationToken: CancellationToken.None);
 
-        Assert.False(result.IsError ?? false);
+        (result.IsError ?? false).ShouldBeFalse();
         var text = result.Content.OfType<TextContentBlock>().First().Text;
-        Assert.Contains("\"ok\"", text, StringComparison.OrdinalIgnoreCase);
+        text.ShouldContain("\"ok\"", Case.Insensitive);
     }
 }

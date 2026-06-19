@@ -18,7 +18,7 @@ public sealed class CliMcpTests
         // The CLI dll is copied next to the test assembly via the project reference; run it with
         // `dotnet <dll>` so the test is independent of build configuration and OS.
         var cliDll = Path.Combine(AppContext.BaseDirectory, "Koine.Cli.dll");
-        Assert.True(File.Exists(cliDll), $"Koine.Cli.dll not found next to the test assembly: {cliDll}");
+        File.Exists(cliDll).ShouldBeTrue($"Koine.Cli.dll not found next to the test assembly: {cliDll}");
 
         var psi = new ProcessStartInfo("dotnet")
         {
@@ -44,11 +44,11 @@ public sealed class CliMcpTests
             await using var client = await McpClient.CreateAsync(transport, cancellationToken: CancellationToken.None);
 
             var names = (await client.ListToolsAsync()).Select(t => t.Name).ToHashSet();
-            Assert.Contains("koine_validate", names);
-            Assert.Contains("koine_compile", names);
-            Assert.Contains("koine_format", names);
-            Assert.Contains("koine_reference", names);
-            Assert.Contains("koine_examples", names);
+            names.ShouldContain("koine_validate");
+            names.ShouldContain("koine_compile");
+            names.ShouldContain("koine_format");
+            names.ShouldContain("koine_reference");
+            names.ShouldContain("koine_examples");
         }
         finally
         {
