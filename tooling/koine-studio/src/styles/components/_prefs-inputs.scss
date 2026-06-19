@@ -1,0 +1,17 @@
+/* --- preferences text inputs (API key + model), matching the select/number controls --- */
+.koi-text {
+  width: 100%;
+  min-width: 200px;
+  background: var(--koi-surface);
+  color: var(--koi-fg);
+  border: 1px solid var(--koi-line);
+  border-radius: var(--koi-radius-sm);
+  padding: 6px 9px;
+  font-family: var(--koi-font-mono);
+  font-size: 0.8rem;
+}
+.koi-text:hover,
+.koi-text:focus-visible {
+  outline: none;
+  border-color: var(--koi-accent);
+}

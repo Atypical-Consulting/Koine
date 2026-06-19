@@ -1,0 +1,55 @@
+/* Welcome screen atmosphere: a faint blueprint grid fading into a soft accent glow. */
+.koi-welcome {
+  overflow: hidden;
+}
+
+.koi-welcome::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(var(--koi-line) 1px, transparent 1px),
+    linear-gradient(90deg, var(--koi-line) 1px, transparent 1px);
+  background-size: 32px 32px;
+  opacity: 0.28;
+  -webkit-mask-image: radial-gradient(circle at 50% 42%, #000 0%, transparent 72%);
+  mask-image: radial-gradient(circle at 50% 42%, #000 0%, transparent 72%);
+}
+
+.koi-welcome::after {
+  content: '';
+  position: absolute;
+  width: 640px;
+  height: 640px;
+  left: 50%;
+  top: 38%;
+  transform: translate(-50%, -50%);
+  background: radial-gradient(circle, color-mix(in srgb, var(--koi-accent) 20%, transparent) 0%, transparent 60%);
+  filter: blur(22px);
+  pointer-events: none;
+}
+
+.koi-welcome-card {
+  position: relative;
+  z-index: 1;
+  animation: koi-rise 0.45s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+
+.koi-welcome-logo svg {
+  border-radius: 14px;
+  box-shadow: 0 10px 30px color-mix(in srgb, var(--koi-accent) 38%, transparent);
+}
+
+.koi-welcome-title {
+  font-family: var(--koi-font-display);
+  font-weight: 800;
+  letter-spacing: -0.02em;
+}
+
+.koi-welcome-action {
+  transition: transform 0.12s ease, border-color 0.12s ease, background 0.12s ease;
+}
+
+.koi-welcome-action:hover {
+  transform: translateY(-1px);
+}

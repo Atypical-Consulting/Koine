@@ -1,0 +1,7 @@
+/* Editor font size: the CodeMirror theme reads var(--koi-editor-font-size, 13.5px). That variable
+   is set at runtime by the settings layer (prefs.ts / store.ts) on the document element — it is
+   intentionally NOT declared here so the fallback (13.5px) applies until a preference is saved. */
+
+* {
+  box-sizing: border-box;
+}

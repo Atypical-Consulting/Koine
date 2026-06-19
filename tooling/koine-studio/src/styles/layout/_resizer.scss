@@ -1,0 +1,23 @@
+/* --- split resizer handle (the 6px grid track in #split) --- */
+.koi-resizer {
+  width: 6px;
+  cursor: col-resize;
+  background: var(--koi-line);
+  border: none;
+  padding: 0;
+  align-self: stretch;
+  position: relative;
+  transition: background 0.12s ease;
+}
+
+.koi-resizer:hover,
+.koi-resizer:active,
+body.resizing .koi-resizer {
+  background: var(--koi-accent);
+}
+
+/* Disable text selection while dragging the split. */
+body.resizing {
+  user-select: none;
+  cursor: col-resize;
+}

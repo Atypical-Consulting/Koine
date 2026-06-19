@@ -1,0 +1,40 @@
+/* --- help overlay (keyboard shortcuts) --- */
+.koi-help-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.86rem;
+}
+
+.koi-help-table tr {
+  border-bottom: 1px solid var(--koi-line);
+}
+
+.koi-help-table tr:last-child {
+  border-bottom: none;
+}
+
+.koi-help-table td {
+  padding: 9px 6px;
+  vertical-align: middle;
+  color: var(--koi-fg);
+}
+
+.koi-help-table td:first-child {
+  width: 1%;
+  white-space: nowrap;
+}
+
+.koi-kbd {
+  display: inline-block;
+  font-family: var(--koi-font-mono);
+  font-size: 0.74rem;
+  color: var(--koi-ink-soft);
+  background: var(--koi-surface);
+  border: 1px solid var(--koi-line);
+  border-bottom-width: 2px;
+  border-radius: 5px;
+  padding: 2px 7px;
+  margin-right: 4px;
+  min-width: 18px;
+  text-align: center;
+}

@@ -1,0 +1,44 @@
+/* --- destination-language split button (emit current target | pick another) --- */
+.lang-split {
+  display: inline-flex;
+  align-items: stretch;
+}
+
+/* The two halves read as one unit: square the joined edge, hairline the seam. */
+.lang-run {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+  padding-right: 9px;
+}
+
+.lang-caret {
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+  padding-left: 7px;
+  padding-right: 8px;
+  border-left: 1px solid color-mix(in srgb, var(--koi-accent) 22%, transparent);
+}
+
+.lang-caret-ico {
+  width: 13px;
+  height: 13px;
+  transition: transform 0.15s ease;
+}
+
+.lang-caret[aria-expanded="true"] .lang-caret-ico {
+  transform: rotate(180deg);
+}
+
+/* The active target's identity dot — also the lead mark on each menu row. */
+.lang-dot {
+  width: 8px;
+  height: 8px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: var(--dot, var(--koi-accent));
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--dot, var(--koi-accent)) 22%, transparent);
+}
+
+.lang-dot[data-lang="csharp"] { --dot: var(--lang-csharp); }
+.lang-dot[data-lang="typescript"] { --dot: var(--lang-typescript); }
+.lang-dot[data-lang="python"] { --dot: var(--lang-python); }

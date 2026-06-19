@@ -1,0 +1,39 @@
+/* --- light theme override ---
+   The active theme is selected by document.documentElement.dataset.theme. :root above stays the
+   dark default; this block redefines EVERY --koi-* token for light. Because the CodeMirror editor
+   theme reads the same var() tokens, flipping data-theme re-themes the editor for free — no CM
+   reconfiguration. Syntax tokens are darkened for legible contrast on a white background. */
+html[data-theme='light'] {
+  /* surfaces */
+  --koi-paper: #ffffff;
+  --koi-paper-2: #f4f6fa;
+  --koi-surface: #e9edf3;
+  --koi-line: #d2d9e3;
+
+  /* text */
+  --koi-fg: #1c2230;
+  --koi-muted: #5b6573;
+  --koi-ink-soft: #3a4452;
+
+  /* accents */
+  --koi-accent: #2f7fe0;
+  --koi-on-accent: #ffffff;
+  --koi-cyan: #0b9d8f;
+
+  /* state (darker red for legible contrast on white) */
+  --koi-error: #cf222e;
+  /* ink on a filled --koi-error surface — white reads on the light theme's deep red */
+  --koi-on-error: #ffffff;
+
+  /* syntax highlighting (contrast-safe on white) */
+  --koi-hl-keyword: #8a3ffc;
+  --koi-hl-type: #0b7fb8;
+  --koi-hl-string: #1a7f37;
+  --koi-hl-regex: #bc4c00;
+  --koi-hl-number: #9a6700;
+  --koi-hl-comment: #6a7484;
+  --koi-hl-meta: #bf3989;
+  --koi-hl-punct: #57606a;
+}
+
+/* The dark theme is the :root default; data-theme='dark' needs no override block. */

@@ -1,0 +1,16 @@
+/* ============================================================================
+   Refactors, quick fixes, diagrams, assistant, gallery — added components.
+   ============================================================================ */
+
+/* The tab strip now carries more tabs; let it scroll horizontally rather than squish labels.
+   overflow-y is pinned to hidden: with only overflow-x set, the spec promotes overflow-y to
+   auto, which produced a stray vertical scrollbar once the horizontal bar reserved its height.
+   (Scrollbar styling is handled globally; see the --koi-scrollbar-* rules near the top.) */
+#tabs {
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+#tabs .tab {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
