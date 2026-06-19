@@ -124,9 +124,15 @@ internal sealed class PhpExpressionTranslator
             case UnaryExpr { Op: UnaryOp.Not } un:
                 Write(un.Operand, sb);
                 break;
-            case BinaryExpr bin when Flip(bin.Op) is { } flipped:
+            case BinaryExpr bin when FlipOp(bin.Op) is { } flippedOp:
+                // A Decimal/value-object comparison can't be flipped with a native operator (PHP has
+                // no operator overloading); render the logically-negated comparison as a method call.
+                if (TryWriteValueBinary(new BinaryExpr(flippedOp, bin.Left, bin.Right), sb, parenthesize: false))
+                {
+                    break;
+                }
                 WriteOperand(bin.Left, sb, EnumTypeName(bin.Right));
-                sb.Append(' ').Append(flipped).Append(' ');
+                sb.Append(' ').Append(OperatorOf(flippedOp)).Append(' ');
                 WriteOperand(bin.Right, sb, EnumTypeName(bin.Left));
                 break;
             case ConditionalExpr c when TryBoolLiterals(c, out var whenTrue):
@@ -152,14 +158,15 @@ internal sealed class PhpExpressionTranslator
         return sb.ToString();
     }
 
-    private static string? Flip(BinaryOp op) => op switch
+    /// <summary>The logically-negated comparison operator, or <c>null</c> for a non-comparison op.</summary>
+    private static BinaryOp? FlipOp(BinaryOp op) => op switch
     {
-        BinaryOp.Eq => "!==",
-        BinaryOp.Neq => "===",
-        BinaryOp.Lt => ">=",
-        BinaryOp.Le => ">",
-        BinaryOp.Gt => "<=",
-        BinaryOp.Ge => "<",
+        BinaryOp.Eq => BinaryOp.Neq,
+        BinaryOp.Neq => BinaryOp.Eq,
+        BinaryOp.Lt => BinaryOp.Ge,
+        BinaryOp.Le => BinaryOp.Gt,
+        BinaryOp.Gt => BinaryOp.Le,
+        BinaryOp.Ge => BinaryOp.Lt,
         _ => null
     };
 
@@ -267,6 +274,14 @@ internal sealed class PhpExpressionTranslator
 
     private void WriteBinary(BinaryExpr bin, StringBuilder sb, bool parenthesize)
     {
+        // PHP has NO operator overloading, so a native operator on a runtime Decimal or a value
+        // object is invalid — those lower to method calls (compareTo/equals/add/sub/mul/div, or the
+        // VO's own add/subtract/multipliedBy/dividedBy). Plain primitives keep native operators.
+        if (TryWriteValueBinary(bin, sb, parenthesize))
+        {
+            return;
+        }
+
         if (parenthesize)
         {
             sb.Append('(');
@@ -281,6 +296,253 @@ internal sealed class PhpExpressionTranslator
             sb.Append(')');
         }
     }
+
+    /// <summary>
+    /// Renders a binary expression whose operand(s) are a runtime <c>Decimal</c> or a value object,
+    /// lowering it to method calls (PHP has no operator overloading). Returns <c>false</c> when both
+    /// operands are plain primitives, leaving the native-operator path to the caller.
+    /// </summary>
+    private bool TryWriteValueBinary(BinaryExpr bin, StringBuilder sb, bool parenthesize)
+    {
+        TypeRef? left = InferType(bin.Left);
+        TypeRef? right = InferType(bin.Right);
+
+        if (IsDecimal(left) || IsDecimal(right))
+        {
+            // Decimal arithmetic/comparison. Whichever side is the Decimal is the receiver; the
+            // other operand is coerced to a Decimal expression.
+            bool leftIsDecimal = IsDecimal(left);
+            Expr receiver = leftIsDecimal ? bin.Left : bin.Right;
+            Expr operand = leftIsDecimal ? bin.Right : bin.Left;
+            WriteDecimalBinary(bin.Op, receiver, operand, leftIsDecimal, sb, parenthesize);
+            return true;
+        }
+
+        if (IsArithmeticValueObject(left) || IsArithmeticValueObject(right))
+        {
+            WriteValueObjectBinary(bin, left, right, sb, parenthesize);
+            return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Lowers a binary op where one operand is a runtime <c>Decimal</c>. Comparisons go through
+    /// <c>compareTo(...) OP 0</c>, equality through <c>equals(...)</c>, arithmetic through
+    /// <c>add/sub/mul/div</c>. A non-Decimal operand is wrapped via <see cref="WriteAsDecimal"/>.
+    /// </summary>
+    private void WriteDecimalBinary(
+        BinaryOp op, Expr receiver, Expr operand, bool receiverIsLeft, StringBuilder sb, bool parenthesize)
+    {
+        switch (op)
+        {
+            case BinaryOp.Eq:
+            case BinaryOp.Neq:
+                if (op == BinaryOp.Neq)
+                {
+                    sb.Append('!');
+                }
+                WriteReceiver(receiver, sb);
+                sb.Append("->equals(");
+                WriteAsDecimal(operand, sb);
+                sb.Append(')');
+                return;
+
+            case BinaryOp.Lt:
+            case BinaryOp.Le:
+            case BinaryOp.Gt:
+            case BinaryOp.Ge:
+                // compareTo returns sign; keep the operator's orientation relative to the receiver.
+                if (parenthesize)
+                {
+                    sb.Append('(');
+                }
+                WriteReceiver(receiver, sb);
+                sb.Append("->compareTo(");
+                WriteAsDecimal(operand, sb);
+                sb.Append(") ").Append(CompareOperator(op, receiverIsLeft)).Append(" 0");
+                if (parenthesize)
+                {
+                    sb.Append(')');
+                }
+                return;
+
+            default:
+                // Arithmetic: add/sub/mul/div. These are non-commutative for sub/div, so respect side.
+                Expr left = receiverIsLeft ? receiver : operand;
+                Expr right = receiverIsLeft ? operand : receiver;
+                WriteAsDecimal(left, sb);
+                sb.Append("->").Append(DecimalArithMethod(op)).Append('(');
+                WriteAsDecimal(right, sb);
+                sb.Append(')');
+                return;
+        }
+    }
+
+    /// <summary>
+    /// Lowers a binary op where one operand is a value object that exposes arithmetic methods.
+    /// VO+VO -&gt; <c>add</c>, VO-VO -&gt; <c>subtract</c>, VO*scalar -&gt; <c>multipliedBy</c>,
+    /// VO/scalar -&gt; <c>dividedBy</c>, equality -&gt; <c>equals</c>, comparison -&gt; compare the
+    /// underlying <c>amount</c> accessor (no comparison method is generated on the VO).
+    /// </summary>
+    private void WriteValueObjectBinary(
+        BinaryExpr bin, TypeRef? left, TypeRef? right, StringBuilder sb, bool parenthesize)
+    {
+        bool leftIsVo = IsArithmeticValueObject(left);
+        Expr vo = leftIsVo ? bin.Left : bin.Right;
+        Expr other = leftIsVo ? bin.Right : bin.Left;
+
+        switch (bin.Op)
+        {
+            case BinaryOp.Eq:
+            case BinaryOp.Neq:
+                if (bin.Op == BinaryOp.Neq)
+                {
+                    sb.Append('!');
+                }
+                WriteReceiver(vo, sb);
+                sb.Append("->equals(");
+                Write(other, sb);
+                sb.Append(')');
+                return;
+
+            case BinaryOp.Add:
+                WriteReceiver(bin.Left, sb);
+                sb.Append("->add(");
+                Write(bin.Right, sb);
+                sb.Append(')');
+                return;
+
+            case BinaryOp.Sub:
+                WriteReceiver(bin.Left, sb);
+                sb.Append("->subtract(");
+                Write(bin.Right, sb);
+                sb.Append(')');
+                return;
+
+            case BinaryOp.Mul:
+                WriteReceiver(vo, sb);
+                sb.Append("->multipliedBy(");
+                WriteAsDecimal(other, sb);
+                sb.Append(')');
+                return;
+
+            case BinaryOp.Div:
+                WriteReceiver(vo, sb);
+                sb.Append("->dividedBy(");
+                WriteAsDecimal(other, sb);
+                sb.Append(')');
+                return;
+
+            default:
+                // Comparison: no comparison method is generated on the VO, so compare the underlying
+                // Decimal `amount` accessor. Both operands are the same VO type here.
+                if (parenthesize)
+                {
+                    sb.Append('(');
+                }
+                WriteReceiver(bin.Left, sb);
+                sb.Append("->amount->compareTo(");
+                WriteReceiver(bin.Right, sb);
+                sb.Append("->amount) ").Append(CompareOperator(bin.Op, receiverIsLeft: true)).Append(" 0");
+                if (parenthesize)
+                {
+                    sb.Append(')');
+                }
+                return;
+        }
+    }
+
+    /// <summary>Writes an operand as a method receiver, parenthesizing a compound expression.</summary>
+    private void WriteReceiver(Expr expr, StringBuilder sb)
+    {
+        if (expr is IdentifierExpr or MemberAccessExpr or CallExpr)
+        {
+            Write(expr, sb);
+        }
+        else
+        {
+            sb.Append('(');
+            Write(expr, sb);
+            sb.Append(')');
+        }
+    }
+
+    /// <summary>
+    /// Writes an operand coerced to a runtime <c>Decimal</c> expression. A Decimal operand is
+    /// emitted as-is; an integer literal <c>n</c> becomes <c>new \Koine\Runtime\Decimal('n')</c>;
+    /// any other (e.g. an <c>Int</c> member) is wrapped as <c>new \Koine\Runtime\Decimal(e)</c>.
+    /// </summary>
+    private void WriteAsDecimal(Expr expr, StringBuilder sb)
+    {
+        if (IsDecimal(InferType(expr)))
+        {
+            Write(expr, sb);
+            return;
+        }
+
+        if (expr is LiteralExpr { Kind: LiteralKind.Int } lit)
+        {
+            sb.Append(@"new \Koine\Runtime\Decimal('").Append(lit.Text).Append("')");
+            return;
+        }
+
+        sb.Append(@"new \Koine\Runtime\Decimal(");
+        Write(expr, sb);
+        sb.Append(')');
+    }
+
+    private TypeRef? InferType(Expr expr) => _resolver.Infer(expr, EffectiveScope());
+
+    private static bool IsDecimal(TypeRef? t) => t is { Name: "Decimal", IsOptional: false };
+
+    /// <summary>
+    /// True when the type is a value object (or quantity) that exposes arithmetic methods — i.e. a
+    /// declared <c>value</c>/<c>quantity</c>. (ID value objects do not get arithmetic.)
+    /// </summary>
+    private bool IsArithmeticValueObject(TypeRef? t)
+    {
+        if (t is null || t.IsOptional)
+        {
+            return false;
+        }
+
+        return _index.Classify(t.Name) == TypeKind.Value;
+    }
+
+    /// <summary>The comparison operator to place after <c>compareTo(...)</c>, oriented to the receiver.</summary>
+    private static string CompareOperator(BinaryOp op, bool receiverIsLeft)
+    {
+        BinaryOp effective = receiverIsLeft ? op : Mirror(op);
+        return effective switch
+        {
+            BinaryOp.Lt => "<",
+            BinaryOp.Le => "<=",
+            BinaryOp.Gt => ">",
+            BinaryOp.Ge => ">=",
+            _ => "?"
+        };
+    }
+
+    /// <summary>Mirrors a comparison when the Decimal receiver is on the right-hand side.</summary>
+    private static BinaryOp Mirror(BinaryOp op) => op switch
+    {
+        BinaryOp.Lt => BinaryOp.Gt,
+        BinaryOp.Le => BinaryOp.Ge,
+        BinaryOp.Gt => BinaryOp.Lt,
+        BinaryOp.Ge => BinaryOp.Le,
+        _ => op
+    };
+
+    private static string DecimalArithMethod(BinaryOp op) => op switch
+    {
+        BinaryOp.Add => "add",
+        BinaryOp.Sub => "sub",
+        BinaryOp.Mul => "mul",
+        BinaryOp.Div => "div",
+        _ => "add"
+    };
 
     private void WriteOperand(Expr expr, StringBuilder sb, string? enumHint)
     {

@@ -20,14 +20,24 @@ public class PhpExpressionTests
         """
         context Shop {
           enum OrderStatus { Draft, Placed, Cancelled }
+          enum MassUnit { Gram, Kilogram }
 
           value Money { amount: Decimal }
+
+          quantity Weight {
+            amount: Decimal
+            unit:   MassUnit
+          }
 
           value Order {
             code: String
             quantity: Int
             status: OrderStatus
             note: String?
+            price: Decimal
+            limit: Decimal
+            weight: Weight
+            otherWeight: Weight
             prices: List<Decimal>
             lines: List<Money>
             tags: List<String>
@@ -65,6 +75,7 @@ public class PhpExpressionTests
     private static IdentifierExpr Id(string name) => new(name);
     private static MemberAccessExpr Member(string target, string member) => new(Id(target), member);
     private static LiteralExpr Int(string text) => new(LiteralKind.Int, text);
+    private static LiteralExpr Decimal(string text) => new(LiteralKind.Decimal, text);
     private static LiteralExpr Bool(bool b) => new(LiteralKind.Bool, b ? "true" : "false");
 
     // =========================================================================
@@ -124,6 +135,136 @@ public class PhpExpressionTests
     {
         var expr = new BinaryExpr(BinaryOp.Neq, Id("quantity"), Int("0"));
         Assert.Equal("($this->quantity !== 0)", Translate(expr));
+    }
+
+    // =========================================================================
+    // Decimal operands — PHP has no operator overloading, so native operators on a
+    // runtime Decimal are invalid; comparisons go through compareTo()/equals() and
+    // arithmetic through add()/sub()/mul()/div(). A non-Decimal operand is wrapped.
+    // =========================================================================
+
+    [Fact]
+    public void Decimal_comparison_against_int_literal_lowers_to_compareTo()
+    {
+        // `price >= 0` where price is Decimal -> price->compareTo(new Decimal('0')) >= 0
+        var expr = new BinaryExpr(BinaryOp.Ge, Id("price"), Int("0"));
+        Assert.Equal(
+            "($this->price->compareTo(new \\Koine\\Runtime\\Decimal('0')) >= 0)",
+            Translate(expr));
+    }
+
+    [Fact]
+    public void Decimal_less_than_lowers_to_compareTo()
+    {
+        var expr = new BinaryExpr(BinaryOp.Lt, Id("price"), Int("0"));
+        Assert.Equal(
+            "($this->price->compareTo(new \\Koine\\Runtime\\Decimal('0')) < 0)",
+            Translate(expr));
+    }
+
+    [Fact]
+    public void Decimal_comparison_against_decimal_operand_uses_it_directly()
+    {
+        // `price < limit` where both are Decimal -> no wrapping of the right operand.
+        var expr = new BinaryExpr(BinaryOp.Lt, Id("price"), Id("limit"));
+        Assert.Equal(
+            "($this->price->compareTo($this->limit) < 0)",
+            Translate(expr));
+    }
+
+    [Fact]
+    public void Decimal_equality_lowers_to_equals()
+    {
+        var eq = new BinaryExpr(BinaryOp.Eq, Id("price"), Decimal("0"));
+        var ne = new BinaryExpr(BinaryOp.Neq, Id("price"), Decimal("0"));
+        Assert.Equal("$this->price->equals(new \\Koine\\Runtime\\Decimal('0'))", Translate(eq));
+        Assert.Equal("!$this->price->equals(new \\Koine\\Runtime\\Decimal('0'))", Translate(ne));
+    }
+
+    [Fact]
+    public void Decimal_arithmetic_lowers_to_method_calls()
+    {
+        Assert.Equal("$this->price->add($this->limit)", Translate(new BinaryExpr(BinaryOp.Add, Id("price"), Id("limit"))));
+        Assert.Equal("$this->price->sub($this->limit)", Translate(new BinaryExpr(BinaryOp.Sub, Id("price"), Id("limit"))));
+        Assert.Equal("$this->price->mul($this->limit)", Translate(new BinaryExpr(BinaryOp.Mul, Id("price"), Id("limit"))));
+        Assert.Equal("$this->price->div($this->limit)", Translate(new BinaryExpr(BinaryOp.Div, Id("price"), Id("limit"))));
+    }
+
+    [Fact]
+    public void Decimal_arithmetic_wraps_int_operand_in_decimal()
+    {
+        // `price * quantity` (Decimal * Int) -> wrap the Int operand as a Decimal expression.
+        var expr = new BinaryExpr(BinaryOp.Mul, Id("price"), Id("quantity"));
+        Assert.Equal(
+            "$this->price->mul(new \\Koine\\Runtime\\Decimal($this->quantity))",
+            Translate(expr));
+    }
+
+    [Fact]
+    public void Decimal_negated_comparison_flips_via_compareTo()
+    {
+        // The invariant-guard path: `price >= 0` negated must still use compareTo, not `<`.
+        var (t, _) = Make();
+        var expr = new BinaryExpr(BinaryOp.Ge, Id("price"), Int("0"));
+        Assert.Equal(
+            "$this->price->compareTo(new \\Koine\\Runtime\\Decimal('0')) < 0",
+            t.TranslateNegated(expr));
+    }
+
+    // =========================================================================
+    // Quantity / value-object operands — use the VO's generated methods.
+    // =========================================================================
+
+    [Fact]
+    public void Quantity_times_scalar_lowers_to_multipliedBy()
+    {
+        // `weight * quantity` (Weight quantity * Int) -> weight->multipliedBy(new Decimal(quantity)).
+        var expr = new BinaryExpr(BinaryOp.Mul, Id("weight"), Id("quantity"));
+        Assert.Equal(
+            "$this->weight->multipliedBy(new \\Koine\\Runtime\\Decimal($this->quantity))",
+            Translate(expr));
+    }
+
+    [Fact]
+    public void Quantity_divided_by_scalar_lowers_to_dividedBy()
+    {
+        var expr = new BinaryExpr(BinaryOp.Div, Id("weight"), Id("quantity"));
+        Assert.Equal(
+            "$this->weight->dividedBy(new \\Koine\\Runtime\\Decimal($this->quantity))",
+            Translate(expr));
+    }
+
+    [Fact]
+    public void Quantity_plus_quantity_lowers_to_add()
+    {
+        var expr = new BinaryExpr(BinaryOp.Add, Id("weight"), Id("otherWeight"));
+        Assert.Equal("$this->weight->add($this->otherWeight)", Translate(expr));
+    }
+
+    [Fact]
+    public void Quantity_minus_quantity_lowers_to_subtract()
+    {
+        var expr = new BinaryExpr(BinaryOp.Sub, Id("weight"), Id("otherWeight"));
+        Assert.Equal("$this->weight->subtract($this->otherWeight)", Translate(expr));
+    }
+
+    [Fact]
+    public void Value_object_equality_lowers_to_equals()
+    {
+        var eq = new BinaryExpr(BinaryOp.Eq, Id("weight"), Id("otherWeight"));
+        var ne = new BinaryExpr(BinaryOp.Neq, Id("weight"), Id("otherWeight"));
+        Assert.Equal("$this->weight->equals($this->otherWeight)", Translate(eq));
+        Assert.Equal("!$this->weight->equals($this->otherWeight)", Translate(ne));
+    }
+
+    [Fact]
+    public void Value_object_comparison_compares_underlying_amount()
+    {
+        // No generated VO comparison method, so compare the underlying Decimal amount accessor.
+        var expr = new BinaryExpr(BinaryOp.Lt, Id("weight"), Id("otherWeight"));
+        Assert.Equal(
+            "($this->weight->amount->compareTo($this->otherWeight->amount) < 0)",
+            Translate(expr));
     }
 
     // =========================================================================
@@ -242,13 +383,16 @@ public class PhpExpressionTests
     [Fact]
     public void All_any_none_lower_to_array_comprehensions()
     {
+        // `m.amount > 0` is a Decimal compared with an Int literal: PHP has no operator overloading,
+        // so it lowers to compareTo() with the literal wrapped as a Decimal.
         var pred = new BinaryExpr(BinaryOp.Gt, new MemberAccessExpr(Id("m"), "amount"), Int("0"));
         var all = new CallExpr(Id("lines"), "all", new Expr[] { new LambdaExpr("m", pred) });
         var any = new CallExpr(Id("lines"), "any", new Expr[] { new LambdaExpr("m", pred) });
         var none = new CallExpr(Id("lines"), "none", new Expr[] { new LambdaExpr("m", pred) });
-        Assert.Equal("array_reduce($this->lines, fn($carry, $m) => $carry && ($m->amount > 0), true)", Translate(all));
-        Assert.Equal("array_reduce($this->lines, fn($carry, $m) => $carry || ($m->amount > 0), false)", Translate(any));
-        Assert.Equal("!array_reduce($this->lines, fn($carry, $m) => $carry || ($m->amount > 0), false)", Translate(none));
+        const string cmp = "($m->amount->compareTo(new \\Koine\\Runtime\\Decimal('0')) > 0)";
+        Assert.Equal($"array_reduce($this->lines, fn($carry, $m) => $carry && {cmp}, true)", Translate(all));
+        Assert.Equal($"array_reduce($this->lines, fn($carry, $m) => $carry || {cmp}, false)", Translate(any));
+        Assert.Equal($"!array_reduce($this->lines, fn($carry, $m) => $carry || {cmp}, false)", Translate(none));
     }
 
     // =========================================================================
