@@ -29,6 +29,8 @@ public sealed partial class PhpEmitter
     /// <summary>DDD kind subfolders (mirrors the Python emitter's KindFolder).</summary>
     private static class KindFolder
     {
+        /// <summary>The context package root (no subfolder — e.g. domain services).</summary>
+        public const string Root = "";
         public const string ValueObjects = "ValueObjects";
         public const string Entities = "Entities";
         public const string Enums = "Enums";
@@ -39,12 +41,15 @@ public sealed partial class PhpEmitter
     /// <summary>
     /// The PSR-4 output path for a type: <c>src/&lt;Context&gt;/&lt;Kind&gt;/&lt;ClassName&gt;.php</c>.
     /// Example: <c>Sales/Money</c> in <c>ValueObjects</c> → <c>src/Sales/ValueObjects/Money.php</c>.
+    /// When <paramref name="kindFolder"/> is empty the type lands directly under the context folder.
     /// </summary>
     private static string PathFor(string contextName, string kindFolder, string typeName)
     {
         var ctx = PhpNaming.ToPascalCase(contextName);
         var cls = PhpNaming.ClassName(typeName);
-        return $"src/{ctx}/{kindFolder}/{cls}.php";
+        return kindFolder.Length == 0
+            ? $"src/{ctx}/{cls}.php"
+            : $"src/{ctx}/{kindFolder}/{cls}.php";
     }
 
     // -------------------------------------------------------------------------

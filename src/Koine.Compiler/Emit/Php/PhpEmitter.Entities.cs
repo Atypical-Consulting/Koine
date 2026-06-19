@@ -80,7 +80,7 @@ public sealed partial class PhpEmitter
         sb.Append("{\n");
 
         // Public typed properties (not promoted — entity is mutable, properties may be reassigned
-        // by commands in later tasks). The identity property is declared separately.
+        // by commands). The identity property is declared separately.
         sb.Append(Indent).Append("public ").Append(idTypeName).Append(" $id;\n");
 
         foreach (Member m in fields)
@@ -113,6 +113,32 @@ public sealed partial class PhpEmitter
         // Identity equality: compares runtime type (via instanceof) and id only.
         sb.Append('\n');
         WriteEntityEquals(sb, name);
+
+        // checkInvariants() private helper — emitted when any command mutates state (so it can
+        // re-check invariants after the transition, before recording events).
+        bool hasTransitions = entity.Commands.Any(c => c.Body.OfType<Transition>().Any());
+        if (hasTransitions && entity.Invariants.Count > 0)
+        {
+            WriteCheckInvariants(sb, name, entity.Invariants, translator);
+        }
+
+        // Domain-event buffer — emitted when any command or factory records an event.
+        if (EmitsEvents(entity))
+        {
+            WriteDomainEventsBuffer(sb);
+        }
+
+        // Commands — mutating instance methods.
+        foreach (CommandDecl cmd in entity.Commands)
+        {
+            WriteCommand(sb, entity, cmd, translator, typeMapper, emit.Index);
+        }
+
+        // Factories — static creation methods.
+        foreach (FactoryDecl factory in entity.Factories)
+        {
+            WriteFactory(sb, entity, name, idTypeName, factory, fields, translator, typeMapper, emit.Index);
+        }
 
         sb.Append("}\n");
 

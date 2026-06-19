@@ -71,8 +71,6 @@ public sealed partial class PhpEmitter : IEmitter
 
     /// <summary>
     /// Dispatches a single <see cref="TypeDecl"/> to its construct emitter.
-    /// Value objects and quantities emit in Task 5; other construct kinds are no-ops until
-    /// their respective tasks land.
     /// </summary>
     private void EmitType(
         PhpEmitContext emit, List<EmittedFile> files, TypeDecl type, string contextName, PhpTypeMapper typeMapper)
@@ -88,14 +86,26 @@ public sealed partial class PhpEmitter : IEmitter
             case EntityDecl entity:
                 EmitEntity(emit, files, entity, contextName, typeMapper);
                 break;
+            case EventDecl ev:
+                files.Add(EmitEvent(emit, ev.Name, ev.Doc, ev.Members, contextName, typeMapper));
+                break;
+            case IntegrationEventDecl iev:
+                files.Add(EmitEvent(emit, iev.Name, iev.Doc, iev.Members, contextName, typeMapper));
+                break;
             case AggregateDecl agg:
                 // Recurse into aggregate-nested types (entities, events).
                 foreach (TypeDecl nested in agg.Types)
                 {
                     EmitType(emit, files, nested, contextName, typeMapper);
                 }
+                // Emit the repository interface for the aggregate root.
+                var root = agg.Types.OfType<EntityDecl>().FirstOrDefault(e => e.Name == agg.RootName);
+                var repo = EmitRepository(emit, agg, root, contextName, typeMapper);
+                if (repo is not null)
+                {
+                    files.Add(repo);
+                }
                 break;
-            // EventDecl, IntegrationEventDecl → no-op until later tasks.
         }
     }
 }

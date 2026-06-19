@@ -152,4 +152,79 @@ public class PhpSnapshotTests
         return Verify(TestSupport.Render(result.Files))
             .UseDirectory("Snapshots");
     }
+
+    // -----------------------------------------------------------------------
+    // Task 8: end-to-end fixture (commands, events, aggregates, repositories)
+    // -----------------------------------------------------------------------
+
+    /// <summary>
+    /// A six-construct end-to-end fixture: value object, smart enum, entity with a command and
+    /// a factory, domain events, and a repository. Exercises Task 8's full dispatch.
+    /// </summary>
+    internal const string EndToEndFixture = """
+        context Billing {
+          /// The monetary amount for an invoice line.
+          value Amount {
+            value: Decimal
+            invariant value >= 0 "amount cannot be negative"
+          }
+
+          /// Invoice lifecycle states.
+          enum InvoiceStatus { Draft, Issued, Paid, Voided }
+
+          aggregate Invoice root Invoice {
+            /// Raised when an invoice is created.
+            event InvoiceCreated {
+              invoiceId: InvoiceId
+              customerId: String
+            }
+
+            /// Raised when an invoice is issued.
+            event InvoiceIssued {
+              invoiceId: InvoiceId
+            }
+
+            entity Invoice identified by InvoiceId {
+              customerId: String
+              total:      Amount
+              status:     InvoiceStatus = Draft
+
+              invariant customerId.length > 0 "customer id must not be empty"
+
+              command issue {
+                requires status == Draft "only a draft invoice can be issued"
+                status -> Issued
+                emit InvoiceIssued(invoiceId: id)
+              }
+
+              create forCustomer(customerId: String, total: Amount) {
+                requires customerId.length > 0 "customer id required"
+                emit InvoiceCreated(invoiceId: id, customerId: customerId)
+              }
+            }
+
+            repository {
+              find byCustomer(customerId: String): List<Invoice>
+              find latest(customerId: String): Invoice
+            }
+          }
+        }
+        """;
+
+    /// <summary>
+    /// End-to-end snapshot test: value object, enum, entity with command + factory, events,
+    /// and repository interface — exercising Task 8's full per-type dispatch in PHP.
+    /// </summary>
+    [Fact]
+    public Task Php_end_to_end_emits_expected_php()
+    {
+        var result = new KoineCompiler().Compile(EndToEndFixture, new PhpEmitter());
+        Assert.True(result.Success, string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        // Always-on syntax gate: INCONCLUSIVE when no PHP interpreter is available locally.
+        _ = TestSupport.SyntaxCheckPhp(result.Files);
+
+        return Verify(TestSupport.Render(result.Files))
+            .UseDirectory("Snapshots");
+    }
 }
