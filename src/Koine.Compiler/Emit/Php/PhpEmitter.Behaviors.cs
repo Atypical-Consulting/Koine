@@ -114,7 +114,11 @@ public sealed partial class PhpEmitter
         var first = true;
         foreach (Param p in cmd.Parameters)
         {
-            if (!first) sb.Append(", ");
+            if (!first)
+            {
+                sb.Append(", ");
+            }
+
             first = false;
             sb.Append(typeMapper.Map(p.Type)).Append(" $")
               .Append(PhpNaming.EscapeIdentifier(PhpNaming.PropertyName(p.Name)));
@@ -220,7 +224,11 @@ public sealed partial class PhpEmitter
         var first = true;
         foreach (Param p in factory.Parameters)
         {
-            if (!first) sb.Append(", ");
+            if (!first)
+            {
+                sb.Append(", ");
+            }
+
             first = false;
             sb.Append(typeMapper.Map(p.Type)).Append(" $")
               .Append(PhpNaming.EscapeIdentifier(PhpNaming.PropertyName(p.Name)));

@@ -79,7 +79,7 @@ public class PhpRuntimeTests
     }
 
     [Fact]
-    public void composer_json_contains_PSR4_Koine_namespace()
+    public void Composer_json_contains_PSR4_Koine_namespace()
     {
         var files = EmitTrivial();
         var composer = files.Single(f => f.RelativePath == "composer.json");

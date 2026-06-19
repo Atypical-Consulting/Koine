@@ -60,7 +60,11 @@ public sealed partial class PhpEmitter
         var firstMember = true;
         void Gap()
         {
-            if (!firstMember) sb.Append('\n');
+            if (!firstMember)
+            {
+                sb.Append('\n');
+            }
+
             firstMember = false;
         }
 
@@ -159,7 +163,11 @@ public sealed partial class PhpEmitter
         var first = true;
         foreach (OperationDecl op in svc.Operations)
         {
-            if (!first) sb.Append('\n');
+            if (!first)
+            {
+                sb.Append('\n');
+            }
+
             first = false;
 
             WriteDoc(sb, op.Doc, Indent);
@@ -195,7 +203,11 @@ public sealed partial class PhpEmitter
         var first = true;
         foreach (UseCaseDecl uc in svc.UseCases)
         {
-            if (!first) sb.Append('\n');
+            if (!first)
+            {
+                sb.Append('\n');
+            }
+
             first = false;
 
             WriteDoc(sb, uc.Doc, Indent);

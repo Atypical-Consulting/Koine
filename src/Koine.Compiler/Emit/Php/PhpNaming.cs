@@ -180,7 +180,11 @@ internal static class PhpNaming
         sb.Append(segments[0]); // first word stays lowercase
         for (int i = 1; i < segments.Length; i++)
         {
-            if (segments[i].Length == 0) continue;
+            if (segments[i].Length == 0)
+            {
+                continue;
+            }
+
             sb.Append(char.ToUpperInvariant(segments[i][0]));
             sb.Append(segments[i][1..]);
         }
