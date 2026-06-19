@@ -43,7 +43,7 @@ public sealed class CliMcpTests
             });
             await using var client = await McpClient.CreateAsync(transport, cancellationToken: CancellationToken.None);
 
-            var names = (await client.ListToolsAsync()).Select(t => t.Name).ToHashSet();
+            var names = (await client.ListToolsAsync(cancellationToken: TestContext.Current.CancellationToken)).Select(t => t.Name).ToHashSet();
             names.ShouldContain("koine_validate");
             names.ShouldContain("koine_compile");
             names.ShouldContain("koine_format");

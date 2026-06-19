@@ -290,10 +290,11 @@ public class CliProgramTests
             () => true, TextWriter.Null, TimeSpan.Zero,
             beforeBuild: () => beforeBuilds++);
 
-        var changes = new BlockingCollection<object> { new object() };
+        var changes = new BlockingCollection<object>();
+        changes.Add(new object(), TestContext.Current.CancellationToken);
         changes.CompleteAdding();
 
-        session.Run(changes);
+        session.Run(changes, TestContext.Current.CancellationToken);
 
         beforeBuilds.ShouldBe(2);   // initial build + the one rebuild
     }

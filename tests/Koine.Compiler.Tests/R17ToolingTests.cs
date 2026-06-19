@@ -109,10 +109,11 @@ public class R17ToolingTests
         var builds = 0;
         var session = new WatchSession(() => { builds++; return true; }, TextWriter.Null, TimeSpan.Zero);
 
-        var changes = new BlockingCollection<object> { new object() };
+        var changes = new BlockingCollection<object>();
+        changes.Add(new object(), TestContext.Current.CancellationToken);
         changes.CompleteAdding();
 
-        var rebuilds = session.Run(changes);
+        var rebuilds = session.Run(changes, TestContext.Current.CancellationToken);
 
         rebuilds.ShouldBe(1);   // one change → one rebuild
         builds.ShouldBe(2);     // initial build + the rebuild
@@ -124,10 +125,13 @@ public class R17ToolingTests
         var builds = 0;
         var session = new WatchSession(() => { builds++; return true; }, TextWriter.Null, TimeSpan.FromMilliseconds(20));
 
-        var changes = new BlockingCollection<object> { new object(), new object(), new object() };
+        var changes = new BlockingCollection<object>();
+        changes.Add(new object(), TestContext.Current.CancellationToken);
+        changes.Add(new object(), TestContext.Current.CancellationToken);
+        changes.Add(new object(), TestContext.Current.CancellationToken);
         changes.CompleteAdding();
 
-        var rebuilds = session.Run(changes);
+        var rebuilds = session.Run(changes, TestContext.Current.CancellationToken);
 
         rebuilds.ShouldBe(1);   // three rapid saves collapse into a single rebuild
         builds.ShouldBe(2);
@@ -142,10 +146,11 @@ public class R17ToolingTests
         var session = new WatchSession(() => { builds++; if (builds == 1) { throw new InvalidOperationException("boom"); } return true; },
             log, TimeSpan.Zero);
 
-        var changes = new BlockingCollection<object> { new object() };
+        var changes = new BlockingCollection<object>();
+        changes.Add(new object(), TestContext.Current.CancellationToken);
         changes.CompleteAdding();
 
-        var rebuilds = session.Run(changes);
+        var rebuilds = session.Run(changes, TestContext.Current.CancellationToken);
 
         rebuilds.ShouldBe(1);
         builds.ShouldBe(2);
@@ -158,10 +163,11 @@ public class R17ToolingTests
         var log = new StringWriter();
         var session = new WatchSession(() => false, log, TimeSpan.Zero);
 
-        var changes = new BlockingCollection<object> { new object() };
+        var changes = new BlockingCollection<object>();
+        changes.Add(new object(), TestContext.Current.CancellationToken);
         changes.CompleteAdding();
 
-        session.Run(changes);
+        session.Run(changes, TestContext.Current.CancellationToken);
 
         log.ToString().ShouldContain("build failed");
     }

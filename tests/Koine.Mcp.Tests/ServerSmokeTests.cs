@@ -28,9 +28,9 @@ public sealed class ServerSmokeTests
     [Fact]
     public async Task Server_lists_all_koine_tools()
     {
-        await using var client = await McpClient.CreateAsync(ServerTransport());
+        await using var client = await McpClient.CreateAsync(ServerTransport(), cancellationToken: TestContext.Current.CancellationToken);
 
-        var tools = await client.ListToolsAsync();
+        var tools = await client.ListToolsAsync(cancellationToken: TestContext.Current.CancellationToken);
         var names = tools.Select(t => t.Name).ToHashSet();
 
         names.ShouldContain("koine_validate");
@@ -43,7 +43,7 @@ public sealed class ServerSmokeTests
     [Fact]
     public async Task Server_answers_a_tool_call_over_stdio()
     {
-        await using var client = await McpClient.CreateAsync(ServerTransport());
+        await using var client = await McpClient.CreateAsync(ServerTransport(), cancellationToken: TestContext.Current.CancellationToken);
 
         var result = await client.CallToolAsync(
             "koine_examples",
@@ -58,7 +58,7 @@ public sealed class ServerSmokeTests
     [Fact]
     public async Task Server_validates_a_file_list_argument_over_stdio()
     {
-        await using var client = await McpClient.CreateAsync(ServerTransport());
+        await using var client = await McpClient.CreateAsync(ServerTransport(), cancellationToken: TestContext.Current.CancellationToken);
 
         // Exercises binding of the KoineFile[] argument across the wire (the core agent path).
         var result = await client.CallToolAsync(

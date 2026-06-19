@@ -42,7 +42,7 @@ public sealed class HttpTransportTests : IAsyncLifetime
     [Fact]
     public async Task Http_server_lists_all_koine_tools()
     {
-        var tools = await _client.ListToolsAsync();
+        var tools = await _client.ListToolsAsync(cancellationToken: TestContext.Current.CancellationToken);
         var names = tools.Select(t => t.Name).ToHashSet();
 
         names.ShouldContain("koine_validate");
