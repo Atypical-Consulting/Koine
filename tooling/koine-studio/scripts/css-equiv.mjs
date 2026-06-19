@@ -160,7 +160,10 @@ function buildMaps(root) {
         }
       });
       keyframesMap.set(name, frames);
-      return; // keyframes children already processed via node.each() above; walk skips them
+      // fall through: walk still descends into the frame rules, but the keyframes-parent guard below
+      // keeps them out of ruleMap. (A bare return continues the walk; returning false would abort
+      // the ENTIRE traversal and drop every rule after this block.)
+      return;
     }
 
     if (node.type === 'rule') {

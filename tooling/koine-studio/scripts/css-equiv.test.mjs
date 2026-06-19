@@ -206,6 +206,7 @@ describe('(i) duplicate property order sensitivity', () => {
 // ---------------------------------------------------------------------------
 // (j) postcss rule.selectors — commas inside :is(), :where() must not shred
 // ---------------------------------------------------------------------------
+// NOTE: sections (k) and (l) are added BELOW (j) on purpose — keep alphabetical.
 describe('(j) postcss rule.selectors comma-awareness', () => {
   it('produces a single selector key for :is(.a,.b) and compares equal to itself', async () => {
     const css = '.x:is(.a, .b) { color: red; }';
@@ -220,6 +221,41 @@ describe('(j) postcss rule.selectors comma-awareness', () => {
     // different selector must be NOT EQUIVALENT.
     const a = '.x:is(.a, .b) { color: red; }';
     const b = '.x:is(.a, .c) { color: red; }';
+    const result = await cmp(a, b);
+    expect(result.equivalent).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// (k) @keyframes walk-abort regression — rules AFTER a mid-file @keyframes
+//
+// Under the old bug, buildMaps used `return false` inside the `@keyframes`
+// branch of root.walk().  In postcss, `return false` ABORTS the entire walk,
+// so every rule that appears AFTER the first @keyframes block was silently
+// dropped from ruleMap on BOTH sides, producing a spurious EQUIVALENT result.
+// The fix changes it to a bare `return` (skip children, but continue the walk).
+// ---------------------------------------------------------------------------
+describe('(k) @keyframes walk-abort regression: rules after @keyframes must be compared', () => {
+  const KF = '@keyframes spin { 0% { opacity: 0 } 100% { opacity: 1 } }';
+
+  it('[NEGATIVE] detects a changed rule that appears AFTER a @keyframes block', async () => {
+    // Under the old `return false` bug, both sides dropped `.after` → spurious EQUIVALENT.
+    // With the fix (bare `return`), `.after` is included in ruleMap and the difference is detected.
+    const a = `${KF} .after { color: red }`;
+    const b = `${KF} .after { color: blue }`;
+    const result = await cmp(a, b);
+    expect(result.equivalent).toBe(false);
+  });
+
+  it('[POSITIVE] two identical post-keyframes rules are EQUIVALENT', async () => {
+    const css = `${KF} .after { color: red }`;
+    const result = await cmp(css, css);
+    expect(result.equivalent).toBe(true);
+  });
+
+  it('[ONE-SIDED] post-keyframes rule present in baseline but absent from candidate is NOT EQUIVALENT', async () => {
+    const a = `${KF} .after { color: red }`;
+    const b = `${KF}`;
     const result = await cmp(a, b);
     expect(result.equivalent).toBe(false);
   });
