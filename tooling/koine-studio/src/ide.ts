@@ -1547,6 +1547,9 @@ export function init(): void {
     // Desktop hosts launch a `koine mcp --http` sidecar and return its loopback URL; the browser
     // returns null, so Settings hides the MCP affordance there.
     mcpEndpoint: () => platform.mcpEndpoint(),
+    mcpStop: () => platform.mcpStop(),
+    // Only the desktop shell can host the sidecar; the web build shows recipes but disables the toggle.
+    mcpHostable: platform.kind === 'tauri',
   });
   const help = createHelpOverlay(helpRows());
   const about = createAboutDialog();
@@ -1585,6 +1588,11 @@ export function init(): void {
       },
       onApplyModel: (source) => replaceActiveDoc(source),
       onOpenPrefs: () => prefs.open(),
+      // Let the assistant call koine tools (validate/compile/format), executed by the host: in-WASM in
+      // the browser, via the `koine mcp --http` sidecar on the desktop.
+      runCompilerTool: platform.runCompilerTool
+        ? (name, argsJson) => platform.runCompilerTool!(name, argsJson)
+        : undefined,
     });
     return assistant;
   }

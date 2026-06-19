@@ -11,5 +11,7 @@ export default defineConfig({
       // scripts tests run in Node — no DOM needed
       ['scripts/**', 'node'],
     ],
+    // happy-dom 20 has no Web Storage; the setup installs an in-memory localStorage shim.
+    setupFiles: ['./src/test-setup.ts'],
   },
 });

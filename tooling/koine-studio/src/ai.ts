@@ -12,12 +12,17 @@
 // developer tool, not a shared server key.
 import type AnthropicSdk from '@anthropic-ai/sdk';
 import type OpenAiSdk from 'openai';
+import type { ChatCompletionMessageParam } from 'openai/resources/chat/completions';
+import { KOINE_TOOLS, summarizeForChip } from './assistantTools';
 
 /** A turn in the assistant transcript. */
 export interface ChatMessage {
   role: 'user' | 'assistant';
   content: string;
 }
+
+/** Most tool round-trips the agentic loop will run before forcing a final text answer. */
+export const MAX_TOOL_ROUNDS = 5;
 
 /** The configured AI backend. */
 export type AiProvider = 'anthropic' | 'openai';
@@ -64,6 +69,14 @@ export interface AssistantRequest {
   onText: (delta: string) => void;
   /** Optional abort signal so the caller can cancel an in-flight request. */
   signal?: AbortSignal;
+  /**
+   * Execute a Koine compiler tool (validate/compile/format) by name with JSON args, resolving its
+   * result as a string. When present (OpenAI-compatible path only), the assistant advertises the
+   * koine tools and runs an agentic loop so the model can call them; absent → plain chat.
+   */
+  runCompilerTool?: (name: string, argsJson: string) => Promise<string>;
+  /** Notified each time the model invokes a tool, for transcript visibility (name + short status). */
+  onToolCall?: (name: string, summary: string) => void;
 }
 
 /**
@@ -117,25 +130,82 @@ async function runOpenAiCompatible(req: AssistantRequest): Promise<string> {
     dangerouslyAllowBrowser: true,
   });
 
-  const stream = await client.chat.completions.create(
-    {
-      model: req.model || DEFAULT_OPENAI_MODEL,
-      stream: true,
-      messages: [
-        { role: 'system', content: req.system },
-        ...req.messages.map((m) => ({ role: m.role, content: m.content })),
-      ],
-    },
-    { signal: req.signal },
-  );
+  const exec = req.runCompilerTool;
+  // The conversation grows in place: each tool round appends the model's tool-call turn and our tool
+  // results, then we re-ask. These intermediate turns stay LOCAL to this function — the caller's
+  // transcript only ever sees the final assistant text, so its history/rollback stays simple.
+  const messages: ChatCompletionMessageParam[] = [
+    { role: 'system', content: req.system },
+    ...req.messages.map((m) => ({ role: m.role, content: m.content })),
+  ];
 
-  let full = '';
-  for await (const chunk of stream) {
-    const delta = chunk.choices?.[0]?.delta?.content;
-    if (delta) {
-      full += delta;
-      req.onText(delta);
+  for (let round = 0; round <= MAX_TOOL_ROUNDS; round++) {
+    // Offer tools until the last allowed round, where we drop them so the model must answer in text —
+    // a hard stop against a model that would otherwise keep requesting tools forever.
+    const offerTools = exec && round < MAX_TOOL_ROUNDS;
+    const stream = await client.chat.completions.create(
+      {
+        model: req.model || DEFAULT_OPENAI_MODEL,
+        stream: true,
+        messages,
+        ...(offerTools ? { tools: KOINE_TOOLS, tool_choice: 'auto' as const } : {}),
+      },
+      { signal: req.signal },
+    );
+
+    // Tool calls arrive as index-keyed delta fragments; the `arguments` pieces are NOT individually
+    // valid JSON, so we concatenate per index and only parse once the stream completes.
+    const calls = new Map<number, { id: string; name: string; args: string }>();
+    let assistantText = '';
+    let finish: string | null = null;
+    for await (const chunk of stream) {
+      const choice = chunk.choices?.[0];
+      if (!choice) continue;
+      const delta = choice.delta;
+      if (delta?.content) {
+        // Stream this round's text live. If the round turns out to be a tool call, its text was a
+        // "thinking" preamble: the panel clears it (onToolCall) and it never enters history — only the
+        // terminating round's text is returned below.
+        assistantText += delta.content;
+        req.onText(delta.content);
+      }
+      for (const tc of delta?.tool_calls ?? []) {
+        const cur = calls.get(tc.index) ?? { id: '', name: '', args: '' };
+        if (tc.id) cur.id = tc.id;
+        if (tc.function?.name) cur.name = tc.function.name;
+        if (tc.function?.arguments) cur.args += tc.function.arguments;
+        calls.set(tc.index, cur);
+      }
+      if (choice.finish_reason) finish = choice.finish_reason;
+    }
+
+    // No tool request (or no executor / final round) → this round's text IS the answer. Returning only
+    // this round's text (not earlier tool-round preambles) keeps the caller's history clean.
+    if (finish !== 'tool_calls' || calls.size === 0 || !exec || round === MAX_TOOL_ROUNDS) {
+      return assistantText;
+    }
+
+    // Synthesize an id for any call whose streamed deltas carried none, so the assistant tool_calls
+    // entry and its tool result stay paired (and unique) even on a non-compliant local backend.
+    const ordered = [...calls.entries()]
+      .sort((a, b) => a[0] - b[0])
+      .map(([index, c]) => ({ ...c, id: c.id || `call_${index}` }));
+    messages.push({
+      role: 'assistant',
+      content: assistantText || null,
+      tool_calls: ordered.map((c) => ({ id: c.id, type: 'function', function: { name: c.name, arguments: c.args } })),
+    });
+    for (const c of ordered) {
+      let result: string;
+      try {
+        result = await exec(c.name, c.args);
+      } catch (e) {
+        // A failed tool is recoverable: hand the error back as the tool result so the model can adapt.
+        result = `Error: ${e instanceof Error ? e.message : String(e)}`;
+      }
+      req.onToolCall?.(c.name, summarizeForChip(c.name, result));
+      messages.push({ role: 'tool', tool_call_id: c.id, content: result });
     }
   }
-  return full;
+  return '';
 }

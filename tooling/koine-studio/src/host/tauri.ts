@@ -8,6 +8,8 @@ import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { open as openDialog, save as saveDialog } from '@tauri-apps/plugin-dialog';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import type { FsEntry, KoiFile, LspTransport, Platform, SourceDoc } from './types';
+import { normalizeCompileTarget } from '../assistantTools';
+import { mcpCall } from '../mcp';
 
 /** LSP transport over Tauri IPC. Mirrors the wiring previously inlined in lsp.ts. */
 class TauriLspTransport implements LspTransport {
@@ -75,6 +77,39 @@ export class TauriPlatform implements Platform {
   // and resolves the loopback endpoint it announces, or null if it can't be brought up.
   mcpEndpoint(): Promise<string | null> {
     return invoke<string | null>('mcp_endpoint');
+  }
+
+  // Kill the `koine mcp --http` sidecar (and clear its cached endpoint) so disabling MCP in Settings
+  // actually stops the background server; a later mcpEndpoint() re-spawns a fresh one.
+  mcpStop(): Promise<void> {
+    return invoke('mcp_stop') as Promise<void>;
+  }
+
+  // The Assistant's koine tools run through the `koine mcp --http` sidecar (the same server the MCP
+  // panel offers to external clients) — mcpEndpoint() lazily starts it. The model's single-file
+  // `{source[,target]}` args are translated into the MCP tools' multi-file `{files[,target]}` shape.
+  async runCompilerTool(name: string, argsJson: string): Promise<string> {
+    const url = await this.mcpEndpoint();
+    if (!url) return 'Error: the Koine MCP server is not available. Enable MCP in Settings, then retry.';
+    let args: { source?: unknown; target?: unknown };
+    try {
+      args = JSON.parse(argsJson || '{}');
+    } catch {
+      return 'Error: the tool arguments were not valid JSON.';
+    }
+    const source = typeof args.source === 'string' ? args.source : '';
+    const files = [{ path: 'model.koi', source }];
+    const mcpArgs =
+      name === 'koine_format'
+        ? { source }
+        : name === 'koine_compile'
+          ? { files, target: normalizeCompileTarget(args.target) }
+          : { files };
+    try {
+      return await mcpCall(url, name, mcpArgs);
+    } catch (e) {
+      return `Error: ${e instanceof Error ? e.message : String(e)}`;
+    }
   }
 
   openExternal(url: string): void {

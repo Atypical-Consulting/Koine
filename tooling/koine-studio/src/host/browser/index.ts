@@ -3,6 +3,7 @@
 // web page rather than hosted in the Tauri desktop shell.
 import type { FsEntry, KoiFile, LspTransport, Platform, SourceDoc } from '../types';
 import { WasmLspTransport } from './transport';
+import { runWasmTool } from './tools';
 import * as fs from './fs';
 
 // Injected by Vite's `define` (see vite.config.ts) from package.json's version.
@@ -24,6 +25,16 @@ export class BrowserPlatform implements Platform {
   // `koine mcp --http` CLI recipe covers the web user. Null hides the desktop-only affordance.
   async mcpEndpoint(): Promise<string | null> {
     return null;
+  }
+
+  // A browser tab never launched a server, so there is nothing to stop.
+  async mcpStop(): Promise<void> {
+    // no-op
+  }
+
+  // The Assistant's koine tools run in-process against the resident Koine.Wasm compiler.
+  runCompilerTool(name: string, argsJson: string): Promise<string> {
+    return runWasmTool(name, argsJson);
   }
 
   openExternal(url: string): void {

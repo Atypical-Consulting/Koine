@@ -433,6 +433,202 @@ public static class TestSupport
         }
     }
 
+    // -------------------------------------------------------------------------
+    // PHP conformance harness (mirrors the Python harness above exactly)
+    // -------------------------------------------------------------------------
+
+    /// <summary>
+    /// Result of a PHP toolchain run. <see cref="ToolchainAvailable"/> is false when no
+    /// <c>phpstan</c> (or <c>php</c>) could be located locally — callers should SKIP (not fail)
+    /// in that case so <c>dotnet test</c> stays green without a PHP toolchain. When the toolchain
+    /// IS available, <see cref="Ok"/> reflects whether the tool reported errors.
+    /// </summary>
+    public readonly record struct PhpCheck(bool ToolchainAvailable, bool Ok, IReadOnlyList<string> Errors)
+    {
+        /// <summary>A skipped result: no toolchain present, so nothing was verified.</summary>
+        public static PhpCheck Skipped { get; } =
+            new(ToolchainAvailable: false, Ok: false, Errors: Array.Empty<string>());
+    }
+
+    /// <summary>
+    /// Writes the emitted PHP files to a fresh temp directory and analyses them with
+    /// <c>phpstan analyse --level max --no-progress --error-format=raw</c>. When no
+    /// <c>phpstan</c> is found the result is <see cref="PhpCheck.Skipped"/> so the suite stays
+    /// green without a PHP toolchain — it NEVER silently passes a real error and NEVER fails
+    /// merely because <c>phpstan</c> is missing.
+    /// </summary>
+    public static PhpCheck TypeCheckPhp(IEnumerable<EmittedFile> files)
+    {
+        var fileList = files.ToList();
+        if (ResolvePhpStan() is not { } phpstan)
+        {
+            return PhpCheck.Skipped;
+        }
+
+        string root = Path.Combine(Path.GetTempPath(), "koine-phpstan-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            foreach (EmittedFile f in fileList)
+            {
+                string path = Path.Combine(root, f.RelativePath);
+                Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+                File.WriteAllText(path, f.Contents);
+            }
+
+            var args = new List<string>(phpstan.Arguments)
+            {
+                "analyse",
+                "--level", "max",
+                "--no-progress",
+                "--error-format=raw",
+                root,
+            };
+
+            if (RunProcess(phpstan.FileName, args, root) is not { } run)
+            {
+                // phpstan refused to launch; treat as no toolchain.
+                return PhpCheck.Skipped;
+            }
+
+            if (run.ExitCode == 0)
+            {
+                return new PhpCheck(ToolchainAvailable: true, Ok: true, Array.Empty<string>());
+            }
+
+            var errors = (run.StdOut + run.StdErr)
+                .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .ToList();
+            return new PhpCheck(ToolchainAvailable: true, Ok: false, errors);
+        }
+        finally
+        {
+            try { Directory.Delete(root, recursive: true); } catch { /* best-effort cleanup */ }
+        }
+    }
+
+    /// <summary>
+    /// Runs <c>php -l</c> on every emitted <c>.php</c> file — an always-on syntax gate that
+    /// catches malformed emission even without PHPStan. When no interpreter is found the result
+    /// is <see cref="PhpCheck.Skipped"/> so the suite stays green.
+    /// </summary>
+    public static PhpCheck SyntaxCheckPhp(IEnumerable<EmittedFile> files)
+    {
+        var fileList = files.ToList();
+        if (ResolvePhp() is not { } php)
+        {
+            return PhpCheck.Skipped;
+        }
+
+        string root = Path.Combine(Path.GetTempPath(), "koine-php-lint-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            var phpFiles = new List<string>();
+            foreach (EmittedFile f in fileList)
+            {
+                string path = Path.Combine(root, f.RelativePath);
+                Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+                File.WriteAllText(path, f.Contents);
+                if (f.RelativePath.EndsWith(".php", StringComparison.OrdinalIgnoreCase))
+                {
+                    phpFiles.Add(path);
+                }
+            }
+
+            if (phpFiles.Count == 0)
+            {
+                // Nothing to lint — vacuously OK (a toolchain was found).
+                return new PhpCheck(ToolchainAvailable: true, Ok: true, Array.Empty<string>());
+            }
+
+            var allErrors = new List<string>();
+            foreach (string phpFile in phpFiles)
+            {
+                var args = new List<string>(php.Arguments) { "-l", phpFile };
+                if (RunProcess(php.FileName, args, root) is not { } run)
+                {
+                    return PhpCheck.Skipped;
+                }
+
+                if (run.ExitCode != 0)
+                {
+                    var fileErrors = (run.StdOut + run.StdErr)
+                        .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                        .ToList();
+                    allErrors.AddRange(fileErrors);
+                }
+            }
+
+            return allErrors.Count == 0
+                ? new PhpCheck(ToolchainAvailable: true, Ok: true, Array.Empty<string>())
+                : new PhpCheck(ToolchainAvailable: true, Ok: false, allErrors);
+        }
+        finally
+        {
+            try { Directory.Delete(root, recursive: true); } catch { /* best-effort cleanup */ }
+        }
+    }
+
+    /// <summary>
+    /// Locates a usable <c>phpstan</c>: an explicit <c>KOINE_PHPSTAN</c> override (always wins),
+    /// a direct <c>phpstan</c> on PATH, or <c>vendor/bin/phpstan</c> resolved from the repo root.
+    /// Returns <c>null</c> when none works so the caller can skip.
+    /// </summary>
+    private static ToolInvocation? ResolvePhpStan()
+    {
+        if (Environment.GetEnvironmentVariable("KOINE_PHPSTAN") is { Length: > 0 } overridePhpStan)
+        {
+            return new ToolInvocation(overridePhpStan, Array.Empty<string>());
+        }
+
+        if (OnPath("phpstan") is { } direct && CanRun(direct, ["--version"]))
+        {
+            return new ToolInvocation(direct, Array.Empty<string>());
+        }
+
+        // vendor/bin/phpstan — walk up to the repo root (contains .git) and try there.
+        for (DirectoryInfo? dir = new(AppContext.BaseDirectory); dir is not null; dir = dir.Parent)
+        {
+            if (!Directory.Exists(Path.Combine(dir.FullName, ".git")) &&
+                !File.Exists(Path.Combine(dir.FullName, ".git")))
+            {
+                continue;
+            }
+
+            string candidate = Path.Combine(dir.FullName, "vendor", "bin", "phpstan");
+            if (File.Exists(candidate) && CanRun(candidate, ["--version"]))
+            {
+                return new ToolInvocation(candidate, Array.Empty<string>());
+            }
+
+            break; // found repo root but no vendor phpstan
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Locates a usable <c>php</c> interpreter. Order: <c>KOINE_PHP</c> override → <c>php</c> on
+    /// PATH. Returns <c>null</c> when none launches.
+    /// </summary>
+    private static ToolInvocation? ResolvePhp()
+    {
+        if (Environment.GetEnvironmentVariable("KOINE_PHP") is { Length: > 0 } overridePhp)
+        {
+            return new ToolInvocation(overridePhp, Array.Empty<string>());
+        }
+
+        if (OnPath("php") is { } found && CanRun(found, ["--version"]))
+        {
+            return new ToolInvocation(found, Array.Empty<string>());
+        }
+
+        return null;
+    }
+
+    // -------------------------------------------------------------------------
+
     /// <summary>How to invoke <c>tsc</c>: a program plus leading arguments (e.g. <c>npx tsc</c>).</summary>
     private readonly record struct TscInvocation(string FileName, IReadOnlyList<string> Arguments);
 

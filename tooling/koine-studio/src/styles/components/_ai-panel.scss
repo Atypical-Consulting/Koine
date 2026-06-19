@@ -63,6 +63,21 @@
   font-family: var(--koi-font-body);
   font-size: 0.72rem;
 }
+/* One muted line per koine tool the assistant invoked, shown above its final reply. */
+.koi-assistant-tool {
+  margin: 2px 0;
+  padding-left: 18px;
+  color: var(--koi-muted);
+  font-family: var(--koi-font-mono, monospace);
+  font-size: 0.72rem;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.koi-assistant-tool::before {
+  content: '\1F527'; /* 🔧 */
+  margin-left: -18px;
+  margin-right: 6px;
+}
 .koi-assistant-apply,
 .koi-link-btn {
   margin-top: 8px;

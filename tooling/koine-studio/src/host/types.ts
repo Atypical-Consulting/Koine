@@ -81,6 +81,23 @@ export interface Platform {
   mcpEndpoint(): Promise<string | null>;
 
   /**
+   * Stop the local MCP sidecar if one is running and forget its endpoint, so the next
+   * {@link mcpEndpoint} re-launches a fresh server. On the desktop this kills the `koine mcp --http`
+   * child; in the browser, where nothing is hosted, it is a no-op. Idempotent.
+   */
+  mcpStop(): Promise<void>;
+
+  /**
+   * Execute a Koine compiler tool (`koine_validate` / `koine_compile` / `koine_format`) by name with a
+   * JSON args string, resolving its result as text for the Assistant's agentic tool loop (src/ai.ts).
+   * The browser host runs it in-process via Koine.Wasm; the desktop host proxies it to the
+   * `koine mcp --http` sidecar. Both hosts implement it; a host that couldn't would omit it and the
+   * Assistant would stay plain chat. Resolves an error string (never throws) on bad input so the model
+   * can recover.
+   */
+  runCompilerTool?(name: string, argsJson: string): Promise<string>;
+
+  /**
    * Open an absolute http(s) URL in the user's default browser. In the browser host this is a new
    * tab; on the desktop it hands off to the OS via the opener plugin (a normal `<a>` navigation
    * would otherwise try to load the page inside the Tauri webview). Used by the About dialog's

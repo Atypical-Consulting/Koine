@@ -19,7 +19,7 @@ Want to try the compiler without installing anything? The <a class="koi-try" hre
 
 ```bash
 koine --version
-koine build <file.koi|dir> [--target csharp|glossary] [--out <dir>] [--glossary <file.md>] [--config <file>]
+koine build <file.koi|dir> [--target csharp|typescript|python|php|glossary|docs] [--out <dir>] [--glossary <file.md>] [--config <file>]
 koine watch <file.koi|dir> [--target …] [--out …] [--config <file>]   # rebuild on every change
 koine fmt   <file.koi|dir> [--check]            # canonically format .koi (--check: verify only)
 koine init  [dir] [--force]                    # scaffold a starter project
@@ -52,7 +52,7 @@ Parses and validates the model, then — if you ask for output — emits files.
 | Flag | Default | What it does |
 |------|---------|--------------|
 | *(positional)* | — | The `.koi` file or directory to compile. Required. |
-| `--target` | `csharp` | The emitter: `csharp` or `glossary`. |
+| `--target` | `csharp` | The emitter: `csharp`, `typescript`, `python`, `php`, `glossary`, or `docs`. |
 | `--out <dir>` | *(none)* | Write the emitted files under this directory. Omit to only validate. |
 | `--glossary <file.md>` | *(none)* | Also write a Markdown ubiquitous-language glossary to this file. |
 | `--config <file>` | *(discovered)* | Read build defaults from this `koine.config` instead of the discovered one. See [`koine.config`](#koineconfig). |
@@ -114,7 +114,7 @@ out = generated
 
 The first one found wins; if none is found, no defaults are applied. A flag on the command line always overrides the config.
 
-**Keys read today.** Only two flat keys are honoured: `target` (`csharp` or `glossary`) and `out` (the output directory). Every other key is **silently ignored**, which keeps the file forward-compatible — older tooling tolerates a newer config.
+**Keys read today.** Only two flat keys are honoured: `target` (`csharp`, `typescript`, `python`, `php`, `glossary`, or `docs`) and `out` (the output directory). Every other key is **silently ignored**, which keeps the file forward-compatible — older tooling tolerates a newer config.
 
 :::note[`targets.*` is reserved for R16]
 A structured `targets.<name> = { … }` block (per-target namespace maps, `instantMode`, output layout) is sketched in the scaffolded config but **not yet implemented** — it is reserved for [R16](/Koine/guides/roadmap/#r16--multi-target-emitters) and ignored today. `koine init` writes a commented example of it for forward reference.
