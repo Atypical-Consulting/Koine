@@ -30,7 +30,21 @@ brokered over stdio by the Rust host.
 
 The **MCP HTTP sidecar** is independent of the LSP one: `mcp_endpoint` spawns `koine mcp --http
 --port 0`, scrapes the `[koine-mcp] http://127.0.0.1:PORT/mcp` line off its stderr, and hands the
-URL to **Settings → Assistant** so the user can copy a ready-to-paste `mcp.json` for LM Studio.
+URL to the **Settings → MCP** panel.
+
+That panel (`src/prefs.ts`, data-driven off `src/mcp.ts`) is where the user wires an LLM to Koine:
+
+- **Enable MCP server** — a persisted, opt-in toggle (`mcpEnabled`). Enabling calls `mcp_endpoint`
+  (start + reveal the URL); disabling calls `mcp_stop`. Nothing runs until the user opts in.
+- **Client recipes** — a picker (Claude Desktop · LM Studio · Cursor · VS Code · Generic) renders the
+  exact copy-paste config per client: the stdio `{ "command": "koine-mcp" }` form for spawn-style
+  clients, the `{ "url": … }` block for URL clients, each with a config-file hint.
+- **Test connection** — Studio acts as a minimal Streamable-HTTP MCP client (`probeMcp` in `mcp.ts`:
+  `initialize` → `tools/list`) and reports `Connected ✓ — 5 tools` / `Not reachable`, confirming the
+  endpoint an LLM will hit is live.
+
+The web build can't host a server, so it passes `mcpHostable: false`: the toggle is disabled and the
+endpoint/test rows hide, but the recipes still render (pointing at the `koine mcp --http` CLI).
 
 ## Run
 

@@ -119,10 +119,21 @@ isn't meant to be exposed off-host).
 
 ### From Koine Studio (desktop)
 
-The desktop build of **Koine Studio** launches the HTTP server for you as a sidecar and surfaces the
-endpoint under **Settings → Assistant**, with a **Copy `mcp.json`** button — so connecting LM Studio
-to Koine is a single paste. (The browser build can't host a server; use the `koine mcp --http` recipe
-above instead.)
+The desktop build of **Koine Studio** has a dedicated **Settings → MCP** panel that runs the HTTP
+server for you and helps you connect any client:
+
+- **Enable MCP server** — a toggle that launches the `koine mcp --http` sidecar (and stops it when you
+  switch it off). It's opt-in, so no background server runs until you turn it on.
+- **Client** — pick **Claude Desktop**, **LM Studio**, **Cursor**, **VS Code**, or **Generic**, and the
+  panel shows the exact copy-paste snippet for that client (the stdio `koine-mcp` command for Claude
+  Desktop, the HTTP `url` block for the rest) plus where its config file lives. A **Copy `mcp.json`**
+  button next to the endpoint covers the quick URL case.
+- **Test connection** — Studio probes the running endpoint as an MCP client (`initialize` →
+  `tools/list`) and reports **Connected ✓ — 5 tools** or **Not reachable**, so you can confirm an LLM
+  will actually reach Koine before switching to your assistant.
+
+The browser build can't host a server, so the toggle is disabled there — the recipes still render;
+just run the `koine mcp --http` recipe above from a terminal and paste the URL.
 
 ## A typical agent loop
 

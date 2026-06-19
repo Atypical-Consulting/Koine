@@ -9,7 +9,7 @@ import { loadSettings, patchSettings, saveSettings, DEFAULT_SETTINGS, type Setti
 import { setTheme } from './theme';
 import { ACCENTS, ACCENT_ORDER } from './appearance';
 import { createModal } from './overlay';
-import { mcpJsonSnippet } from './mcp';
+import { mcpJsonSnippet, MCP_CLIENTS, probeMcp } from './mcp';
 
 export interface PrefsCallbacks {
   /** Fired after every committed change with the merged, persisted Settings. */
@@ -21,6 +21,19 @@ export interface PrefsCallbacks {
    * stays hidden. Optional: a caller that doesn't wire it simply never shows the row.
    */
   mcpEndpoint?(): Promise<string | null>;
+
+  /**
+   * Stop the local MCP sidecar when the user disables it. Optional: a host that never starts one
+   * (browser) can omit it. Pairs with {@link mcpEndpoint}, which (re)starts it.
+   */
+  mcpStop?(): Promise<void>;
+
+  /**
+   * Whether this host can actually run the MCP sidecar — the desktop shell can, a browser tab cannot.
+   * Defaults to true when omitted; the web build passes false so the toggle is shown disabled and the
+   * endpoint/test rows stay hidden (the copy-paste recipes still render, pointing at the CLI).
+   */
+  mcpHostable?: boolean;
 }
 
 export interface PrefsHandle {
@@ -44,6 +57,8 @@ const ICON = {
     '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6 4 2.4 8 6 12"/><path d="M10 4l3.6 4-3.6 4"/></svg>',
   assistant:
     '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2.2l1.5 3.9 3.9 1.5-3.9 1.5L8 13l-1.5-3.9L2.6 7.6l3.9-1.5z"/></svg>',
+  mcp:
+    '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6 2.6v4.2M10 2.6v4.2M4.4 6.8h7.2v1.4a3.6 3.6 0 0 1-3.6 3.6 3.6 3.6 0 0 1-3.6-3.6z"/><path d="M8 12v1.8"/></svg>',
   advanced:
     '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.6 4.6h10.8M2.6 8h10.8M2.6 11.4h10.8"/><circle cx="6" cy="4.6" r="1.7" fill="var(--koi-paper-2)"/><circle cx="10.4" cy="8" r="1.7" fill="var(--koi-paper-2)"/><circle cx="5" cy="11.4" r="1.7" fill="var(--koi-paper-2)"/></svg>',
 } as const;
@@ -335,8 +350,39 @@ export function createPreferences(cb: PrefsCallbacks): PrefsHandle {
     commit(aiProviderSelect.value === 'openai' ? { aiModelOpenai: model } : { aiModel: model });
   });
 
-  // MCP server (desktop only): expose Koine's compiler tools to an external MCP client by URL. The
-  // row is hidden until the desktop shell resolves the sidecar endpoint (the web build never does).
+  const assistantPanel = panel(
+    'assistant',
+    row('Provider', 'Which API the assistant talks to.', aiProviderSelect),
+    baseUrlRow,
+    row('API key', 'Stored locally in this browser — sent only to the provider you choose.', aiKeyInput),
+    row('Model', 'The model id the assistant requests.', aiModelInput),
+    presets,
+  );
+
+  // --- MCP server (Settings → MCP) ------------------------------------------
+  // The desktop shell hosts a `koine mcp --http` sidecar; this panel toggles it on/off, shows the
+  // right copy-paste recipe per client, and self-probes the endpoint to confirm an LLM can reach
+  // Koine's tools. The web build can't host a server, so the toggle is disabled and only the recipes
+  // (pointing at the `koine mcp --http` CLI) are shown.
+
+  // URL shown inside HTTP recipes before a live endpoint resolves (or on the web build).
+  const MCP_URL_PLACEHOLDER = 'http://127.0.0.1:PORT/mcp';
+
+  const mcpEnableToggle = toggle('Enable MCP server', (on) => void applyMcpEnabled(on));
+  const mcpEnableRow = row(
+    'Enable MCP server',
+    'Serve Koine’s compiler tools to an external MCP client (LM Studio, Claude Desktop…).',
+    mcpEnableToggle.el,
+  );
+
+  // A browser tab can't host a server — surfaced as a caption when !mcpHostable.
+  const mcpWebHint = document.createElement('p');
+  mcpWebHint.className = 'koi-mcp-note';
+  mcpWebHint.textContent =
+    'A browser tab can’t host a server. Run `koine mcp --http` from the CLI, then use the recipe below.';
+  mcpWebHint.hidden = true;
+
+  // Endpoint URL (read-only) + Copy mcp.json — the quick path for a URL client.
   const mcpUrlInput = document.createElement('input');
   mcpUrlInput.type = 'text';
   mcpUrlInput.className = 'koi-text';
@@ -366,36 +412,165 @@ export function createPreferences(cb: PrefsCallbacks): PrefsHandle {
   const mcpControl = document.createElement('div');
   mcpControl.className = 'koi-mcp-control';
   mcpControl.append(mcpUrlInput, mcpCopyBtn);
-  const mcpRow = row('MCP endpoint', 'Point an MCP client (LM Studio…) at this URL to use Koine’s tools.', mcpControl);
-  mcpRow.hidden = true;
+  const mcpEndpointRow = row('Endpoint', 'The loopback URL a URL-based client connects to.', mcpControl);
 
-  // Resolve (and on the desktop, lazily launch) the MCP sidecar endpoint, revealing the row when a
-  // URL comes back. Browser hosts return null, so the row stays hidden. Best-effort: any failure
-  // simply leaves the affordance hidden rather than surfacing an error in Settings.
-  async function refreshMcpEndpoint(): Promise<void> {
-    if (!cb.mcpEndpoint) {
-      mcpRow.hidden = true;
-      return;
-    }
+  // Per-client recipe picker.
+  const mcpClientSelect = select(MCP_CLIENTS.map((c) => ({ value: c.id, label: c.label })));
+  mcpClientSelect.addEventListener('change', () => {
+    commit({ mcpClient: mcpClientSelect.value as Settings['mcpClient'] });
+    renderRecipe();
+  });
+  const mcpClientRow = row('Client', 'Pick your MCP client for its exact setup snippet.', mcpClientSelect);
 
+  // The recipe body: a heading + Copy, the snippet, the config hint, and an optional caveat.
+  const mcpSnippet = document.createElement('pre');
+  mcpSnippet.className = 'koi-mcp-snippet';
+  mcpSnippet.tabIndex = 0;
+  mcpSnippet.setAttribute('aria-label', 'MCP client configuration snippet');
+
+  const mcpRecipeCopy = document.createElement('button');
+  mcpRecipeCopy.type = 'button';
+  mcpRecipeCopy.className = 'koi-set-action';
+  mcpRecipeCopy.textContent = 'Copy';
+  let mcpRecipeTimer: ReturnType<typeof setTimeout> | undefined;
+  mcpRecipeCopy.addEventListener('click', () => {
+    navigator.clipboard
+      .writeText(mcpSnippet.textContent ?? '')
+      .then(() => (mcpRecipeCopy.textContent = 'Copied ✓'))
+      .catch(() => (mcpRecipeCopy.textContent = 'Copy failed'))
+      .finally(() => {
+        clearTimeout(mcpRecipeTimer);
+        mcpRecipeTimer = setTimeout(() => (mcpRecipeCopy.textContent = 'Copy'), 1600);
+      });
+  });
+
+  const mcpRecipeHead = document.createElement('div');
+  mcpRecipeHead.className = 'koi-mcp-recipe-head';
+  const mcpRecipeTitle = document.createElement('span');
+  mcpRecipeTitle.className = 'koi-set-label';
+  mcpRecipeTitle.textContent = 'Configuration';
+  mcpRecipeHead.append(mcpRecipeTitle, mcpRecipeCopy);
+
+  const mcpRecipeHint = document.createElement('p');
+  mcpRecipeHint.className = 'koi-mcp-hint';
+  const mcpRecipeNote = document.createElement('p');
+  mcpRecipeNote.className = 'koi-mcp-note';
+
+  const mcpRecipe = document.createElement('div');
+  mcpRecipe.className = 'koi-mcp-recipe';
+  mcpRecipe.append(mcpRecipeHead, mcpSnippet, mcpRecipeHint, mcpRecipeNote);
+
+  function renderRecipe(): void {
+    const client = MCP_CLIENTS.find((c) => c.id === mcpClientSelect.value) ?? MCP_CLIENTS[0];
+    const url = mcpUrlInput.value.trim() || MCP_URL_PLACEHOLDER;
+    mcpSnippet.textContent = client.snippet(url);
+    mcpRecipeHint.textContent = client.configHint;
+    mcpRecipeNote.textContent = client.note ?? '';
+    mcpRecipeNote.hidden = !client.note;
+  }
+
+  // Connection test: Studio probes the endpoint as a minimal MCP client and reports the tool count.
+  const mcpTestBtn = document.createElement('button');
+  mcpTestBtn.type = 'button';
+  mcpTestBtn.className = 'koi-set-action';
+  mcpTestBtn.textContent = 'Test connection';
+
+  const mcpStatus = document.createElement('span');
+  mcpStatus.className = 'koi-mcp-status';
+  mcpStatus.setAttribute('role', 'status');
+  mcpStatus.setAttribute('aria-live', 'polite');
+
+  type McpStatusKind = 'idle' | 'off' | 'checking' | 'ok' | 'fail';
+  const STATUS_LABEL: Record<McpStatusKind, string> = {
+    idle: 'Not checked',
+    off: 'Server off',
+    checking: 'Checking…',
+    ok: 'Connected',
+    fail: 'Not reachable',
+  };
+  function setMcpStatus(kind: McpStatusKind, text?: string): void {
+    mcpStatus.dataset.state = kind;
+    mcpStatus.textContent = text ?? STATUS_LABEL[kind];
+  }
+
+  const mcpTestControl = document.createElement('div');
+  mcpTestControl.className = 'koi-mcp-control';
+  mcpTestControl.append(mcpTestBtn, mcpStatus);
+  const mcpTestRow = row('Connection', 'Confirm an LLM can reach Koine’s tools at this URL.', mcpTestControl);
+
+  // Monotonic token bumped by every enable/disable/reset/open. A slow async result (endpoint launch,
+  // probe) checks its captured token before writing the UI and drops itself if a newer action has
+  // since superseded it — so a late enable can't re-show a URL for a server the user just disabled,
+  // and a probe can't overwrite "Server off" after a disable.
+  let mcpGen = 0;
+
+  mcpTestBtn.addEventListener('click', () => void runMcpTest());
+  async function runMcpTest(): Promise<void> {
+    if (!loadSettings().mcpEnabled) return setMcpStatus('off');
+    const url = mcpUrlInput.value.trim();
+    if (!url) return setMcpStatus('fail', 'No endpoint');
+    const gen = ++mcpGen;
+    setMcpStatus('checking');
+    const result = await probeMcp(url);
+    if (gen !== mcpGen) return; // a newer toggle/test ran while we probed — don't clobber its status
+    if (result.ok) setMcpStatus('ok', `Connected ✓ — ${result.tools.length} tools`);
+    else setMcpStatus('fail');
+  }
+
+  // Resolve (and on the desktop, lazily launch) the MCP sidecar endpoint URL, or '' if it can't be
+  // brought up. DOM-free so callers can guard the write against a newer action via mcpGen.
+  async function resolveMcpEndpoint(): Promise<string> {
+    if (!cb.mcpEndpoint) return '';
     try {
-      const url = await cb.mcpEndpoint();
-      mcpUrlInput.value = url ?? '';
-      mcpRow.hidden = url === null;
+      return (await cb.mcpEndpoint()) ?? '';
     } catch {
-      mcpRow.hidden = true;
+      return '';
     }
   }
 
-  const assistantPanel = panel(
-    'assistant',
-    row('Provider', 'Which API the assistant talks to.', aiProviderSelect),
-    baseUrlRow,
-    row('API key', 'Stored locally in this browser — sent only to the provider you choose.', aiKeyInput),
-    row('Model', 'The model id the assistant requests.', aiModelInput),
-    mcpRow,
-    presets,
-  );
+  // Paint the "server off" state: no endpoint, the recipe on its placeholder URL, status off.
+  function showMcpOff(): void {
+    mcpUrlInput.value = '';
+    renderRecipe();
+    setMcpStatus('off');
+  }
+
+  // Apply an enable result to the UI: reveal the URL + recipe, or surface a start failure (a blank
+  // URL means the sidecar never came up) instead of a benign "Not checked".
+  function showMcpStarted(url: string): void {
+    mcpUrlInput.value = url;
+    renderRecipe();
+    if (url) setMcpStatus('idle');
+    else setMcpStatus('fail', 'Server didn’t start');
+  }
+
+  // Toggle the sidecar: start + reveal the endpoint on enable, stop + clear it on disable.
+  async function applyMcpEnabled(on: boolean): Promise<void> {
+    const gen = ++mcpGen;
+    commit({ mcpEnabled: on });
+    if (on) {
+      const url = await resolveMcpEndpoint();
+      if (gen !== mcpGen) return; // superseded by a newer toggle/reset — drop this stale result
+      showMcpStarted(url);
+    } else {
+      await cb.mcpStop?.();
+      if (gen !== mcpGen) return;
+      showMcpOff();
+    }
+    syncMcpUi(on);
+  }
+
+  // Reflect enabled state + host capability: the endpoint and test rows only matter when a server is
+  // actually running here; the recipes are always useful, so they stay visible.
+  function syncMcpUi(enabled: boolean = loadSettings().mcpEnabled): void {
+    const hostable = cb.mcpHostable !== false;
+    mcpEnableToggle.el.disabled = !hostable;
+    mcpWebHint.hidden = hostable;
+    mcpEndpointRow.hidden = !hostable || !enabled;
+    mcpTestRow.hidden = !hostable || !enabled;
+  }
+
+  const mcpPanel = panel('mcp', mcpEnableRow, mcpWebHint, mcpEndpointRow, mcpClientRow, mcpRecipe, mcpTestRow);
 
   // --- Advanced -------------------------------------------------------------
 
@@ -435,6 +610,10 @@ export function createPreferences(cb: PrefsCallbacks): PrefsHandle {
     const fresh = loadSettings();
     setTheme(fresh.theme); // theme has its own live-apply path (not covered by applyAppearance)
     populate(fresh);
+    void cb.mcpStop?.(); // defaults disable MCP — stop any running sidecar and reflect it
+    ++mcpGen; // supersede any in-flight enable/probe so it can't repaint the panel after reset
+    showMcpOff();
+    syncMcpUi(false);
     cb.onChange(fresh); // re-skins accent/motion/editor metrics + soft-wrap via the app's onChange
   });
 
@@ -450,6 +629,7 @@ export function createPreferences(cb: PrefsCallbacks): PrefsHandle {
     { id: 'appearance', label: 'Appearance', icon: ICON.appearance, panel: appearancePanel },
     { id: 'editor', label: 'Editor', icon: ICON.editor, panel: editorPanel },
     { id: 'assistant', label: 'Assistant', icon: ICON.assistant, panel: assistantPanel },
+    { id: 'mcp', label: 'MCP', icon: ICON.mcp, panel: mcpPanel },
     { id: 'advanced', label: 'Advanced', icon: ICON.advanced, panel: advancedPanel },
   ] as const;
 
@@ -525,13 +705,28 @@ export function createPreferences(cb: PrefsCallbacks): PrefsHandle {
     aiKeyInput.value = s.aiApiKey;
     aiModelInput.value = s.aiProvider === 'openai' ? s.aiModelOpenai : s.aiModel;
     traceSelect.value = s.lspTrace;
+    mcpEnableToggle.set(s.mcpEnabled);
+    mcpClientSelect.value = s.mcpClient;
+    renderRecipe();
     syncProviderFields();
   }
 
   modal.onOpen(() => {
     disarmReset();
-    populate(loadSettings());
-    void refreshMcpEndpoint(); // desktop: lazily start the sidecar and reveal its endpoint
+    const s = loadSettings();
+    populate(s);
+    // Only the desktop, and only when the user has enabled MCP, (re)starts the sidecar on open — the
+    // server is opt-in, so an unopened Settings dialog never spawns a background process.
+    if (s.mcpEnabled && cb.mcpHostable !== false) {
+      const gen = ++mcpGen;
+      void resolveMcpEndpoint().then((url) => {
+        if (gen === mcpGen) showMcpStarted(url);
+      });
+    } else {
+      ++mcpGen;
+      showMcpOff();
+    }
+    syncMcpUi(s.mcpEnabled);
     selectCategory(activeIndex); // keep the last-open category across opens
     tabs[activeIndex].focus();
   });

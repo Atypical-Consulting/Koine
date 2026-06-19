@@ -7,5 +7,7 @@ export default defineConfig({
   test: {
     environment: 'happy-dom',
     include: ['src/**/*.test.ts'],
+    // happy-dom 20 has no Web Storage; the setup installs an in-memory localStorage shim.
+    setupFiles: ['./src/test-setup.ts'],
   },
 });
