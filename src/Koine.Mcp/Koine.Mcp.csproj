@@ -19,7 +19,19 @@
 
   <ItemGroup>
     <PackageReference Include="ModelContextProtocol" Version="1.4.0" />
-    <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.9" />
+    <!-- The Streamable HTTP / SSE server transport (WithHttpTransport + MapMcp) lives in the
+         ASP.NET Core companion package; it brings the Microsoft.AspNetCore.App framework reference
+         transitively. Only the HTTP host (HttpHost) uses it; the stdio host is unaffected. -->
+    <PackageReference Include="ModelContextProtocol.AspNetCore" Version="1.4.0" />
+    <!-- Microsoft.Extensions.Hosting (Host.CreateApplicationBuilder, WaitForShutdownAsync) is now
+         provided by the Microsoft.AspNetCore.App framework reference below, so it is no longer a
+         separate package dependency. -->
+  </ItemGroup>
+
+  <!-- Lets HttpHost use WebApplication / Kestrel from a plain (non-Web) SDK console app. Redundant
+       with the package above's transitive framework reference, but explicit about the dependency. -->
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
   </ItemGroup>
 
   <ItemGroup>

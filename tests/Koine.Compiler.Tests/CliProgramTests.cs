@@ -102,6 +102,7 @@ public class CliProgramTests
     [InlineData("fmt")]
     [InlineData("init")]
     [InlineData("watch")]
+    [InlineData("mcp")]
     public void Per_command_help_exits_zero_with_a_focused_usage_block(string command)
     {
         var (code, stdout, _) = Run(command, "--help");

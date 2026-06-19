@@ -25,6 +25,12 @@ brokered over stdio by the Rust host.
 | JS → Rust command | `lsp_send` | `{ message: string }` (a JSON-RPC frame body) |
 | Rust → JS event | `lsp://message` | `string` — one JSON-RPC message body |
 | Rust → JS event | `lsp://exit` | `i32` — `0` clean, `-1` error |
+| JS → Rust command | `mcp_endpoint` | — → `string \| null` (lazily starts the `koine mcp --http` sidecar; resolves the loopback URL it announces) |
+| JS → Rust command | `mcp_stop` | — (stops the MCP sidecar; idempotent) |
+
+The **MCP HTTP sidecar** is independent of the LSP one: `mcp_endpoint` spawns `koine mcp --http
+--port 0`, scrapes the `[koine-mcp] http://127.0.0.1:PORT/mcp` line off its stderr, and hands the
+URL to **Settings → Assistant** so the user can copy a ready-to-paste `mcp.json` for LM Studio.
 
 ## Run
 
@@ -52,6 +58,10 @@ When `KOINE_LSP` is unset, the host falls back to
 crate at compile time). Both branches set `DOTNET_NOLOGO=1` / `DOTNET_CLI_TELEMETRY_OPTOUT=1`
 to keep stdout pure JSON-RPC.
 
+The **MCP HTTP sidecar** resolves the same way: `KOINE_MCP` (falling back to `KOINE_LSP`, since it is
+the same `koine` binary) runs `<bin> mcp --http --port 0`; otherwise it falls back to the Debug DLL
+via `dotnet`.
+
 ## Develop / verify
 
 ```bash
@@ -64,7 +74,8 @@ cd tooling/koine-studio && npm install && npm run build
 
 ## Layout
 
-- `src-tauri/src/lib.rs` — LSP-sidecar broker (`lsp_start` / `lsp_send`, framing + tests).
+- `src-tauri/src/lib.rs` — LSP-sidecar broker (`lsp_start` / `lsp_send`, framing + tests) and the
+  MCP HTTP-sidecar broker (`mcp_endpoint` / `mcp_stop`, endpoint-scrape + tests).
 - `src/lsp.ts` — Tauri-IPC LSP client (JSON-RPC, debounced `didChange`, `emitPreview`).
 - `src/editor.ts` — CodeMirror `.koi` editor + read-only output viewer; push-based diagnostics.
 - `src/ide.ts` — app composition (editor, status line, diagnostics strip, preview buttons).

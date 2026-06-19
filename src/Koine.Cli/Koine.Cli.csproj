@@ -2,6 +2,10 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Koine.Compiler\Koine.Compiler.csproj" />
+    <!-- `koine mcp` hosts the MCP server in-process by reusing Koine.Mcp's StdioHost / HttpHost
+         (one implementation, shared with the standalone koine-mcp tool). This pulls in the ASP.NET
+         Core framework reference transitively, used only by the HTTP host. -->
+    <ProjectReference Include="..\Koine.Mcp\Koine.Mcp.csproj" />
   </ItemGroup>
 
   <!-- The CLI's command parsing, help generation, and dispatch (Spectre.Console.Cli).
@@ -19,6 +23,11 @@
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <!-- Koine.Mcp is itself an executable (the packable `koine-mcp` tool), but the CLI consumes it
+         purely as a library (StdioHost / HttpHost). Without this, the self-contained single-file
+         publish fails NETSDK1150 ("a self-contained executable cannot reference a non self-contained
+         executable"). We reference it as a library, so opt out of that validation. -->
+    <ValidateExecutableReferencesMatchSelfContained>false</ValidateExecutableReferencesMatchSelfContained>
   </PropertyGroup>
 
   <!-- Pack as an installable dotnet global tool: `dotnet tool install -g Koine.Cli`

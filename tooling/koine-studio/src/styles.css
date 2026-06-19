@@ -2052,12 +2052,51 @@ body {
   color: var(--koi-on-error);
 }
 
+/* MCP endpoint row: a read-only URL field beside a "Copy mcp.json" action. Widen the control so the
+   loopback URL is readable, and lay the field + button out side by side. */
+.koi-set-row:has(.koi-mcp-control) .koi-set-control {
+  flex: 0 0 248px;
+}
+
+.koi-mcp-control {
+  display: flex;
+  width: 100%;
+  gap: 6px;
+  align-items: center;
+}
+
+.koi-mcp-control .koi-text {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* A neutral settings action button (reuses the danger button's shape, without the destructive hue). */
+.koi-set-action {
+  flex: 0 0 auto;
+  border: 1px solid var(--koi-line);
+  border-radius: var(--koi-radius-sm);
+  background: var(--koi-surface);
+  color: var(--koi-fg);
+  padding: 6px 12px;
+  font-family: inherit;
+  font-size: 0.82rem;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.koi-set-action:hover {
+  border-color: var(--koi-accent);
+  color: var(--koi-accent);
+}
+
 /* visible keyboard focus for the dialog's bespoke controls */
 .koi-settings-tab:focus-visible,
 .koi-switch:focus-visible,
 .koi-seg:focus-visible,
 .koi-accent-swatch:focus-visible,
-.koi-set-danger:focus-visible {
+.koi-set-danger:focus-visible,
+.koi-set-action:focus-visible {
   outline: 2px solid var(--koi-accent);
   outline-offset: 2px;
 }
