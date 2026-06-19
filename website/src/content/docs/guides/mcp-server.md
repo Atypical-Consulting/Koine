@@ -9,7 +9,9 @@ complete domain in `.koi` end-to-end: write source, get compiler diagnostics, in
 C#, and stay grounded in the language — without shelling out to the CLI.
 
 It reuses the exact same parser, validator, and emitters as `koine build`, so what the agent sees
-matches what the CLI produces. The server lives in `src/Koine.Mcp` and talks **stdio**.
+matches what the CLI produces. The server lives in `src/Koine.Mcp` and speaks two transports with the
+**same tools**: **stdio** (the default, for editor-spawned clients like Claude Desktop) and **HTTP**
+(Streamable HTTP/SSE, so any client connects by URL — see [Over HTTP](#over-http-lm-studio-any-client-by-url)).
 
 ## Tools
 
@@ -77,6 +79,50 @@ To run it straight from a checkout instead of the installed tool:
   }
 }
 ```
+
+## Over HTTP (LM Studio, any client by URL)
+
+stdio is ideal when the client *spawns* the server, but some clients — **LM Studio**, browser-based
+MCP clients — would rather point at a **URL**. The same five tools are served over the SDK's
+**Streamable HTTP / SSE** transport, so there are no DLL paths to wire up:
+
+```bash
+koine mcp --http               # or: koine-mcp --http
+koine mcp --http --port 3001   # pin a port (default 0 = OS-assigned)
+```
+
+It binds **loopback only** (`127.0.0.1`) and prints the endpoint to stderr:
+
+```
+[koine-mcp] http://127.0.0.1:50286/mcp
+```
+
+Point the client at that URL. An LM Studio `mcp.json` collapses to one line:
+
+```json
+{
+  "mcpServers": {
+    "koine": {
+      "url": "http://127.0.0.1:50286/mcp"
+    }
+  }
+}
+```
+
+:::note
+Tools only work with a **tool-capable model** — pick one whose card shows tool/function-calling
+support in LM Studio, or the model can't call `koine_validate` & friends.
+:::
+
+The bind is loopback, so the surface is local to your machine; there is no auth in this mode (it
+isn't meant to be exposed off-host).
+
+### From Koine Studio (desktop)
+
+The desktop build of **Koine Studio** launches the HTTP server for you as a sidecar and surfaces the
+endpoint under **Settings → Assistant**, with a **Copy `mcp.json`** button — so connecting LM Studio
+to Koine is a single paste. (The browser build can't host a server; use the `koine mcp --http` recipe
+above instead.)
 
 ## A typical agent loop
 

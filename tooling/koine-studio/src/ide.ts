@@ -1544,6 +1544,9 @@ export function init(): void {
       editor.setLineWrap(s.wordWrap);
       output.setLineWrap(s.wordWrap);
     },
+    // Desktop hosts launch a `koine mcp --http` sidecar and return its loopback URL; the browser
+    // returns null, so Settings hides the MCP affordance there.
+    mcpEndpoint: () => platform.mcpEndpoint(),
   });
   const help = createHelpOverlay(helpRows());
   const about = createAboutDialog();

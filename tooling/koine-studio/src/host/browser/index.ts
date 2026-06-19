@@ -20,6 +20,12 @@ export class BrowserPlatform implements Platform {
     return typeof __APP_VERSION__ === 'string' ? __APP_VERSION__ : '0.0.0';
   }
 
+  // A browser tab cannot listen as a server, so there is no MCP HTTP endpoint to advertise; the
+  // `koine mcp --http` CLI recipe covers the web user. Null hides the desktop-only affordance.
+  async mcpEndpoint(): Promise<string | null> {
+    return null;
+  }
+
   openExternal(url: string): void {
     // A null return means the popup blocker (or a sandboxed frame) stopped the new tab; log it so a
     // link that does nothing isn't completely silent.

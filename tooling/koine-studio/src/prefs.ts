@@ -9,10 +9,18 @@ import { loadSettings, patchSettings, saveSettings, DEFAULT_SETTINGS, type Setti
 import { setTheme } from './theme';
 import { ACCENTS, ACCENT_ORDER } from './appearance';
 import { createModal } from './overlay';
+import { mcpJsonSnippet } from './mcp';
 
 export interface PrefsCallbacks {
   /** Fired after every committed change with the merged, persisted Settings. */
   onChange(s: Settings): void;
+
+  /**
+   * Resolve the local MCP HTTP endpoint URL to surface in the Assistant settings (so the user can
+   * paste it into LM Studio), or null when the host can't serve one — the web build, where the row
+   * stays hidden. Optional: a caller that doesn't wire it simply never shows the row.
+   */
+  mcpEndpoint?(): Promise<string | null>;
 }
 
 export interface PrefsHandle {
@@ -327,12 +335,65 @@ export function createPreferences(cb: PrefsCallbacks): PrefsHandle {
     commit(aiProviderSelect.value === 'openai' ? { aiModelOpenai: model } : { aiModel: model });
   });
 
+  // MCP server (desktop only): expose Koine's compiler tools to an external MCP client by URL. The
+  // row is hidden until the desktop shell resolves the sidecar endpoint (the web build never does).
+  const mcpUrlInput = document.createElement('input');
+  mcpUrlInput.type = 'text';
+  mcpUrlInput.className = 'koi-text';
+  mcpUrlInput.readOnly = true;
+  mcpUrlInput.spellcheck = false;
+  mcpUrlInput.placeholder = 'starting…';
+  mcpUrlInput.setAttribute('aria-label', 'Koine MCP endpoint URL');
+
+  const mcpCopyBtn = document.createElement('button');
+  mcpCopyBtn.type = 'button';
+  mcpCopyBtn.className = 'koi-set-action';
+  mcpCopyBtn.textContent = 'Copy mcp.json';
+  let mcpCopyTimer: ReturnType<typeof setTimeout> | undefined;
+  mcpCopyBtn.addEventListener('click', () => {
+    const url = mcpUrlInput.value.trim();
+    if (!url) return;
+    navigator.clipboard
+      .writeText(mcpJsonSnippet(url))
+      .then(() => (mcpCopyBtn.textContent = 'Copied ✓'))
+      .catch(() => (mcpCopyBtn.textContent = 'Copy failed'))
+      .finally(() => {
+        clearTimeout(mcpCopyTimer);
+        mcpCopyTimer = setTimeout(() => (mcpCopyBtn.textContent = 'Copy mcp.json'), 1600);
+      });
+  });
+
+  const mcpControl = document.createElement('div');
+  mcpControl.className = 'koi-mcp-control';
+  mcpControl.append(mcpUrlInput, mcpCopyBtn);
+  const mcpRow = row('MCP endpoint', 'Point an MCP client (LM Studio…) at this URL to use Koine’s tools.', mcpControl);
+  mcpRow.hidden = true;
+
+  // Resolve (and on the desktop, lazily launch) the MCP sidecar endpoint, revealing the row when a
+  // URL comes back. Browser hosts return null, so the row stays hidden. Best-effort: any failure
+  // simply leaves the affordance hidden rather than surfacing an error in Settings.
+  async function refreshMcpEndpoint(): Promise<void> {
+    if (!cb.mcpEndpoint) {
+      mcpRow.hidden = true;
+      return;
+    }
+
+    try {
+      const url = await cb.mcpEndpoint();
+      mcpUrlInput.value = url ?? '';
+      mcpRow.hidden = url === null;
+    } catch {
+      mcpRow.hidden = true;
+    }
+  }
+
   const assistantPanel = panel(
     'assistant',
     row('Provider', 'Which API the assistant talks to.', aiProviderSelect),
     baseUrlRow,
     row('API key', 'Stored locally in this browser — sent only to the provider you choose.', aiKeyInput),
     row('Model', 'The model id the assistant requests.', aiModelInput),
+    mcpRow,
     presets,
   );
 
@@ -470,6 +531,7 @@ export function createPreferences(cb: PrefsCallbacks): PrefsHandle {
   modal.onOpen(() => {
     disarmReset();
     populate(loadSettings());
+    void refreshMcpEndpoint(); // desktop: lazily start the sidecar and reveal its endpoint
     selectCategory(activeIndex); // keep the last-open category across opens
     tabs[activeIndex].focus();
   });

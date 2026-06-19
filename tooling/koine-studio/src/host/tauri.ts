@@ -71,6 +71,12 @@ export class TauriPlatform implements Platform {
     return invoke<string>('app_version');
   }
 
+  // Lazily starts the `koine mcp --http` sidecar (the same `koine` binary brokered for `koine lsp`)
+  // and resolves the loopback endpoint it announces, or null if it can't be brought up.
+  mcpEndpoint(): Promise<string | null> {
+    return invoke<string | null>('mcp_endpoint');
+  }
+
   openExternal(url: string): void {
     // Surface a denied/failed OS handoff (e.g. scheme not in the opener allowlist) instead of
     // swallowing the rejection, so a dead link leaves a trace rather than nothing at all.
