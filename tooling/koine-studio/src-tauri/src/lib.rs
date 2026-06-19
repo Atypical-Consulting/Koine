@@ -39,6 +39,18 @@ struct LspState {
     shutting_down: Arc<AtomicBool>,
 }
 
+/// State for the MCP HTTP sidecar (`koine mcp --http`). Unlike the LSP child this is a fire-and-
+/// forget HTTP server: there is no stdin piping or framing — we just keep the child alive and read
+/// its stderr to scrape the loopback URL it binds, so the UI can show a copy-paste `mcp.json`.
+#[derive(Default)]
+struct McpState {
+    /// keep the Child so it is not dropped; lets `mcp_endpoint` guard against a double start.
+    child: Mutex<Option<Child>>,
+    /// the scraped `http://HOST:PORT/mcp` endpoint, once the sidecar announces it on stderr. An
+    /// `Arc` so the stderr-reader thread can own a clone (managed `State` is not `'static`).
+    endpoint: Arc<Mutex<Option<String>>>,
+}
+
 // --- pure framing functions (the cargo test gate) ---------------------------
 
 /// Write one LSP frame: `Content-Length: N\r\n\r\n<body>` where N is the BYTE length.
@@ -129,6 +141,39 @@ fn resolve_sidecar_command() -> Command {
         let mut c = Command::new("dotnet");
         c.arg(dll).arg("lsp");
         c
+    }
+}
+
+/// Resolve how to launch the MCP HTTP server. Mirrors [`resolve_sidecar_command`]: `KOINE_MCP`
+/// then `KOINE_LSP` (the same self-contained `koine` binary) take precedence; otherwise fall back
+/// to the Debug DLL via `dotnet`. The server is asked to bind a loopback OS-assigned port (`--port
+/// 0`) and announce it on stderr, which `mcp_endpoint` scrapes.
+fn resolve_mcp_command() -> Command {
+    let mcp_args = ["mcp", "--http", "--port", "0"];
+    if let Ok(bin) = std::env::var("KOINE_MCP").or_else(|_| std::env::var("KOINE_LSP")) {
+        let mut c = Command::new(bin);
+        c.args(mcp_args);
+        c
+    } else {
+        let dll = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../src/Koine.Cli/bin/Debug/net10.0/Koine.Cli.dll"
+        );
+        let mut c = Command::new("dotnet");
+        c.arg(dll).args(mcp_args);
+        c
+    }
+}
+
+/// Extract the announced MCP endpoint URL from one stderr line. `HttpHost` prints
+/// `[koine-mcp] http://127.0.0.1:PORT/mcp`; any other line (Kestrel's own startup logs included)
+/// yields `None`. Pure so the scrape policy is unit-tested without spawning a process.
+fn parse_mcp_endpoint(line: &str) -> Option<String> {
+    let rest = line.split_once("[koine-mcp]")?.1.trim();
+    if rest.starts_with("http://") || rest.starts_with("https://") {
+        Some(rest.to_string())
+    } else {
+        None
     }
 }
 
@@ -619,6 +664,82 @@ fn lsp_stop(state: State<'_, LspState>) -> Result<(), String> {
     Ok(())
 }
 
+/// Lazily start the `koine mcp --http` sidecar (idempotent) and return the loopback endpoint URL it
+/// announces on stderr, or `None` if it does not appear within the wait budget. The browser backend
+/// never calls this (its `Platform.mcpEndpoint` returns null without touching IPC), so a desktop-only
+/// affordance can gate purely on the resolved value.
+#[tauri::command]
+fn mcp_endpoint(state: State<'_, McpState>) -> Result<Option<String>, String> {
+    // Spawn once. Hold the child lock across check-spawn-store so two concurrent calls can't both
+    // pass the guard and launch duplicate servers.
+    {
+        let mut child_guard = state.child.lock().map_err(|e| e.to_string())?;
+        if child_guard.is_none() {
+            let mut cmd = resolve_mcp_command();
+            cmd.env("DOTNET_NOLOGO", "1")
+                .env("DOTNET_CLI_TELEMETRY_OPTOUT", "1")
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::piped());
+
+            let mut child = cmd
+                .spawn()
+                .map_err(|e| format!("failed to spawn MCP server: {e}"))?;
+            let stderr = child.stderr.take().ok_or("no stderr on MCP child")?;
+            *child_guard = Some(child);
+
+            // Reader thread: scrape the endpoint into shared state, then keep draining stderr so the
+            // pipe never fills and blocks the server. Owns a clone of the Arc (State isn't 'static).
+            let endpoint = state.endpoint.clone();
+            std::thread::spawn(move || {
+                let mut reader = BufReader::new(stderr);
+                let mut line = String::new();
+                loop {
+                    line.clear();
+                    match reader.read_line(&mut line) {
+                        Ok(0) | Err(_) => break, // EOF or read error: the child is gone
+                        Ok(_) => {
+                            if let Some(url) = parse_mcp_endpoint(&line) {
+                                if let Ok(mut g) = endpoint.lock() {
+                                    *g = Some(url);
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+        }
+    }
+
+    // Wait (bounded) for the announce line; the server binds in well under a second, so this returns
+    // promptly on the first call and instantly on later ones (the URL is cached in state).
+    for _ in 0..100 {
+        if let Ok(g) = state.endpoint.lock() {
+            if let Some(url) = g.as_ref() {
+                return Ok(Some(url.clone()));
+            }
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+
+    Ok(None)
+}
+
+/// Stop the MCP sidecar and forget its endpoint. Idempotent and safe when nothing is running.
+#[tauri::command]
+fn mcp_stop(state: State<'_, McpState>) -> Result<(), String> {
+    if let Ok(mut g) = state.child.lock() {
+        if let Some(mut child) = g.take() {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+    }
+    if let Ok(mut g) = state.endpoint.lock() {
+        *g = None;
+    }
+    Ok(())
+}
+
 /// Return the application version (from Cargo metadata) so the About panel can
 /// display it.
 #[tauri::command]
@@ -632,10 +753,13 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .manage(LspState::default())
+        .manage(McpState::default())
         .invoke_handler(tauri::generate_handler![
             lsp_start,
             lsp_send,
             lsp_stop,
+            mcp_endpoint,
+            mcp_stop,
             app_version,
             list_koi_files,
             read_text_file,
@@ -772,6 +896,33 @@ mod tests {
     fn app_version_matches_cargo_pkg_version() {
         assert_eq!(app_version(), env!("CARGO_PKG_VERSION"));
         assert!(!app_version().is_empty());
+    }
+
+    // --- MCP endpoint scrape (pure) -----------------------------------------
+
+    #[test]
+    fn parse_mcp_endpoint_extracts_the_announced_url() {
+        assert_eq!(
+            parse_mcp_endpoint("[koine-mcp] http://127.0.0.1:50286/mcp").as_deref(),
+            Some("http://127.0.0.1:50286/mcp")
+        );
+        // Tolerates a logger prefix before the tag and surrounding whitespace.
+        assert_eq!(
+            parse_mcp_endpoint("  warn: [koine-mcp]   http://127.0.0.1:1/mcp  ").as_deref(),
+            Some("http://127.0.0.1:1/mcp")
+        );
+    }
+
+    #[test]
+    fn parse_mcp_endpoint_ignores_unrelated_lines() {
+        // Kestrel's own startup log carries a URL but not the koine-mcp tag.
+        assert_eq!(
+            parse_mcp_endpoint("info: Now listening on: http://127.0.0.1:5000"),
+            None
+        );
+        // The tag without a URL (e.g. a future status line) is not an endpoint.
+        assert_eq!(parse_mcp_endpoint("[koine-mcp] starting"), None);
+        assert_eq!(parse_mcp_endpoint(""), None);
     }
 
     // --- workspace filesystem tests -----------------------------------------

@@ -73,6 +73,14 @@ export interface Platform {
   appVersion(): Promise<string>;
 
   /**
+   * The local MCP server endpoint URL (`http://127.0.0.1:PORT/mcp`) to hand to an external MCP
+   * client such as LM Studio, or null when the host can't serve one. The desktop shell lazily
+   * launches a `koine mcp --http` sidecar and returns the URL it binds; a browser tab cannot listen
+   * as a server, so it returns null and the UI hides the affordance.
+   */
+  mcpEndpoint(): Promise<string | null>;
+
+  /**
    * Open an absolute http(s) URL in the user's default browser. In the browser host this is a new
    * tab; on the desktop it hands off to the OS via the opener plugin (a normal `<a>` navigation
    * would otherwise try to load the page inside the Tauri webview). Used by the About dialog's

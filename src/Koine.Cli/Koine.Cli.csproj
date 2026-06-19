@@ -23,6 +23,11 @@
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <!-- Koine.Mcp is itself an executable (the packable `koine-mcp` tool), but the CLI consumes it
+         purely as a library (StdioHost / HttpHost). Without this, the self-contained single-file
+         publish fails NETSDK1150 ("a self-contained executable cannot reference a non self-contained
+         executable"). We reference it as a library, so opt out of that validation. -->
+    <ValidateExecutableReferencesMatchSelfContained>false</ValidateExecutableReferencesMatchSelfContained>
   </PropertyGroup>
 
   <!-- Pack as an installable dotnet global tool: `dotnet tool install -g Koine.Cli`
