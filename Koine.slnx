@@ -13,10 +13,7 @@
     <Project Path="src/Koine.Compiler/Koine.Compiler.csproj" />
     <Project Path="src/Koine.Compiler.SourceGen/Koine.Compiler.SourceGen.csproj" />
     <Project Path="src/Koine.Mcp/Koine.Mcp.csproj" />
-    <!-- Koine.Wasm is intentionally NOT in the solution: it targets the browser-wasm RID and
-         needs the wasm-experimental workload + emscripten, which the CI build/test pipeline
-         (ci.yml) doesn't install. It's built standalone by website/scripts/build-wasm.mjs in
-         the docs pipeline (deploy-docs.yml). -->
+    <Project Path="src/Koine.Wasm/Koine.Wasm.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Koine.Compiler.Tests/Koine.Compiler.Tests.csproj" />
@@ -54,6 +51,16 @@
     <File Path="scripts/run-benchmarks/run-benchmarks.cmd" />
     <File Path="scripts/run-benchmarks/run-benchmarks.ps1" />
     <File Path="scripts/run-benchmarks/run-benchmarks.sh" />
+  </Folder>
+  <Folder Name="/scripts/run-ide/">
+    <File Path="scripts/run-ide/run-ide.cmd" />
+    <File Path="scripts/run-ide/run-ide.ps1" />
+    <File Path="scripts/run-ide/run-ide.sh" />
+  </Folder>
+  <Folder Name="/scripts/run-ide-web/">
+    <File Path="scripts/run-ide-web/run-ide-web.cmd" />
+    <File Path="scripts/run-ide-web/run-ide-web.ps1" />
+    <File Path="scripts/run-ide-web/run-ide-web.sh" />
   </Folder>
   <Folder Name="/_solution-items/">
     <File Path=".editorconfig" />
