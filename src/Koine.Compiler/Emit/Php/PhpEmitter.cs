@@ -15,6 +15,18 @@ namespace Koine.Compiler.Emit.Php;
 /// </summary>
 public sealed partial class PhpEmitter : IEmitter
 {
+    private readonly PhpEmitterOptions _options;
+
+    /// <summary>Creates a <see cref="PhpEmitter"/> with default options
+    /// (<see cref="PhpEmitterOptions.Empty"/>).</summary>
+    public PhpEmitter() : this(PhpEmitterOptions.Empty) { }
+
+    /// <summary>Creates a <see cref="PhpEmitter"/> with the supplied options.</summary>
+    internal PhpEmitter(PhpEmitterOptions options)
+    {
+        _options = options;
+    }
+
     /// <inheritdoc/>
     public string TargetName => "php";
 
