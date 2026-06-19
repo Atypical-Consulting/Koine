@@ -32,6 +32,7 @@ import { renderDiagrams } from './diagrams';
 import { renderGlossary, type GlossaryHandlers } from './glossary';
 import { createAssistantPanel, type AssistantPanel } from './aiPanel';
 import { buildShareUrl, clearModelHash, readModelFromHash } from './share';
+import { createConfirmDialog } from './overlay';
 
 // --- workspace fs contract ---------------------------------------------------
 // `KoiFile` (path / name / relPath) is provided by the host platform layer (src/host), whose
@@ -107,6 +108,16 @@ const SEED = `context Billing {
       invariant status == Draft when lines.isEmpty
     }
   }
+}
+`;
+
+// What "New" opens: a clean, valid, empty bounded context — NOT the Billing SEED. "New" means a
+// fresh canvas; loading a full sample is the welcome screen's example gallery's job, not this one's.
+// An empty-bodied context is valid Koine (the same shape `koine init` and the LSP tests use).
+const BLANK = `context NewModel {
+
+  // Describe your bounded context here — add value objects, entities, and aggregates.
+
 }
 `;
 
@@ -1375,10 +1386,12 @@ export function init(): void {
   }
 
   // --- new scratch model ----------------------------------------------------
-  // Reset to a single untouched scratch buffer holding the SEED. In folder mode this
-  // tears the folder workspace down (closes every open doc) and re-establishes scratch.
+  // Reset to a single untouched scratch buffer holding the BLANK stub (an empty context — NOT the
+  // Billing SEED). In folder mode this tears the folder workspace down (closes every open doc) and
+  // re-establishes scratch. This is the raw reset with no confirmation; user-initiated New goes
+  // through requestNewScratch() (below), which guards unsaved work first.
   function newScratch(): void {
-    clearScratch(); // reset to the seed baseline; forget any restored scratch
+    clearScratch(); // forget any restored scratch; New starts from the blank stub
     if (folderMode) {
       for (const uri of Array.from(buffers.keys())) lsp.closeDoc(uri);
       buffers.clear();
@@ -1398,14 +1411,14 @@ export function init(): void {
       path: null,
       relPath: 'model.koi',
       name: 'model.koi',
-      text: SEED,
+      text: BLANK,
       dirty: false,
     });
     activeUri = SCRATCH_URI;
     lsp.setActive(SCRATCH_URI);
-    // Ensure the server has a fresh scratch doc, then load the SEED into the editor.
-    lsp.openDoc(SCRATCH_URI, SEED);
-    editor.setDoc(SEED);
+    // Ensure the server has a fresh scratch doc, then load the blank stub into the editor.
+    lsp.openDoc(SCRATCH_URI, BLANK);
+    editor.setDoc(BLANK);
     // Clear the editor gutter / strip / status pill so a previously-active file's diagnostics don't
     // linger until the server publishes fresh scratch diagnostics (mirrors activateFile/Fallback).
     setEditorDiagnostics(editor.view, []);
@@ -1415,6 +1428,34 @@ export function init(): void {
     renderTree();
     ensureLoaded(activeView);
     welcome.hide();
+  }
+
+  // Does the workspace hold unsaved work that New would destroy? In scratch mode, anything other
+  // than an empty buffer / the seed backdrop / the blank stub counts (mirrors scheduleScratchSave's
+  // "is this the untouched seed?" test). In folder mode, files live on disk, so only a dirty open
+  // buffer is at risk.
+  function hasUnsavedWork(): boolean {
+    if (folderMode) return Array.from(buffers.values()).some((b) => b.dirty);
+    const text = editor.getDoc();
+    return text.trim() !== '' && text !== SEED && text !== BLANK;
+  }
+
+  // User-initiated New (button, ⌘N, palette, welcome). Confirms before discarding unsaved work;
+  // proceeds straight to a fresh stub when there's nothing to lose.
+  async function requestNewScratch(): Promise<void> {
+    if (hasUnsavedWork()) {
+      const save = formatChord('mod+S');
+      const ok = await confirmDialog.ask({
+        title: 'Start a new model?',
+        message: folderMode
+          ? `This closes the open folder. Files with unsaved changes will lose them. Save with ${save} first to keep them.`
+          : `Your current model has unsaved changes that will be lost. Save it with ${save} first to keep it.`,
+        confirmLabel: 'Discard & start new',
+        danger: true,
+      });
+      if (!ok) return;
+    }
+    newScratch();
   }
 
   // Open `source` as a fresh scratch model (used by the example gallery and shared links). Tears
@@ -1471,7 +1512,7 @@ export function init(): void {
   }
 
   const welcome = createWelcome({
-    onNewScratch: () => newScratch(),
+    onNewScratch: () => void requestNewScratch(),
     onOpenFolder: () => void openFolder(),
     onOpenRecent: (path) => void openFolderPath(path),
     onOpenExample: (example) => void openExample(example),
@@ -1486,6 +1527,8 @@ export function init(): void {
   });
   const help = createHelpOverlay(helpRows());
   const about = createAboutDialog();
+  // Guards the user-initiated New command against silently discarding unsaved work.
+  const confirmDialog = createConfirmDialog();
   // Generate Project wizard: compiles the active model, then bundles the emitted files into a
   // downloadable archive. I/O is injected so the wizard stays decoupled from the LSP/host wiring.
   const generateProject = createGenerateProject({
@@ -1548,7 +1591,7 @@ export function init(): void {
   // Toolbar buttons unique to this phase.
   const hintEl = document.querySelector('.palette-hint');
   if (hintEl) hintEl.textContent = formatChord('mod+K'); // ⌘+K / Ctrl+K per platform
-  el<HTMLButtonElement>('btn-new').addEventListener('click', () => newScratch());
+  el<HTMLButtonElement>('btn-new').addEventListener('click', () => void requestNewScratch());
   el<HTMLButtonElement>('btn-generate-project').addEventListener('click', () => generateProject.open());
   el<HTMLButtonElement>('btn-theme').addEventListener('click', () => toggleTheme());
   el<HTMLButtonElement>('btn-prefs').addEventListener('click', () => prefs.open());
@@ -1575,7 +1618,7 @@ export function init(): void {
       { id: 'preview-py', title: 'Preview Python', hint: 'mod+3', group: 'Preview', run: () => void preview('python') },
       { id: 'format', title: 'Format document', hint: 'mod+S', group: 'Edit', run: () => void formatActive() },
       { id: 'open-folder', title: 'Open folder…', hint: 'mod+Shift+O', group: 'File', run: () => void openFolder() },
-      { id: 'new-scratch', title: 'New scratch model', hint: 'mod+N', group: 'File', run: () => newScratch() },
+      { id: 'new-scratch', title: 'New scratch model', hint: 'mod+N', group: 'File', run: () => void requestNewScratch() },
       { id: 'share', title: 'Copy shareable link', group: 'File', run: () => void copyShareLink() },
       { id: 'check', title: 'Check against baseline…', group: 'File', run: () => void runCheck() },
       { id: 'generate-project', title: 'Generate project…', group: 'File', run: () => generateProject.open() },
@@ -1625,7 +1668,7 @@ export function init(): void {
       void openFolder();
     } else if (mod && !e.shiftKey && (e.key === 'n' || e.key === 'N')) {
       e.preventDefault();
-      newScratch();
+      void requestNewScratch();
     } else if (mod && e.key === '1') {
       e.preventDefault();
       void preview('csharp');
