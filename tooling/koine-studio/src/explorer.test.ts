@@ -31,6 +31,7 @@ function makeCallbacks(): ExplorerCallbacks {
     onRename: vi.fn(),
     onDelete: vi.fn(),
     onDuplicate: vi.fn(),
+    onMove: vi.fn(),
     isActive: vi.fn(() => false),
     isDirty: vi.fn(() => false),
     diagCounts: vi.fn(() => ({ errors: 0, warnings: 0 })),
@@ -137,16 +138,16 @@ describe('explorer', () => {
     expect(activeRow!.getAttribute('aria-current')).toBe('true');
   });
 
-  it('creates a top-level file via the toolbar, passing the root token and prompted name', () => {
+  it('creates a top-level file via the toolbar, passing the root token and typed name', () => {
     const cb = makeCallbacks();
-    const promptSpy = vi.spyOn(window, 'prompt').mockReturnValue('catalog.koi');
     const ex = createExplorer(cb);
     document.body.appendChild(ex.el);
     ex.render(sampleTree(), 'ROOT');
 
+    // The first .explorer-tool is "New file" — clicking it opens an inline new-row input.
     ex.el.querySelector<HTMLElement>('.explorer-toolbar .explorer-tool')!.click();
+    commitCreate(ex, 'catalog.koi');
     expect(cb.onNewFile).toHaveBeenCalledWith('ROOT', 'catalog.koi');
-    promptSpy.mockRestore();
   });
 
   it('starts inline rename on F2 and commits the new name on Enter', () => {
@@ -170,9 +171,8 @@ describe('explorer', () => {
     expect(renamed[1]).toBe('common.koi');
   });
 
-  it('confirms before deleting on the Delete key', () => {
+  it('shows an in-pane confirm before deleting on the Delete key, then deletes on confirm', async () => {
     const cb = makeCallbacks();
-    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
     const ex = createExplorer(cb);
     document.body.appendChild(ex.el);
     ex.render(sampleTree(), 'ROOT');
@@ -182,9 +182,29 @@ describe('explorer', () => {
     )!;
     fileRow.dispatchEvent(new KeyboardEvent('keydown', { key: 'Delete', bubbles: true }));
 
-    expect(confirmSpy).toHaveBeenCalled();
+    expect(confirmShown()).toBe(true);
+    expect(cb.onDelete).not.toHaveBeenCalled(); // not until confirmed
+
+    document.querySelector<HTMLElement>('.explorer-confirm-btn-danger')!.click();
+    await flush();
     expect((cb.onDelete as ReturnType<typeof vi.fn>).mock.calls[0][0].token).toBe('ROOT/shared.koi');
-    confirmSpy.mockRestore();
+    expect(confirmShown()).toBe(false); // dialog dismissed
+  });
+
+  it('cancels the in-pane delete confirm without deleting', async () => {
+    const cb = makeCallbacks();
+    const ex = createExplorer(cb);
+    document.body.appendChild(ex.el);
+    ex.render(sampleTree(), 'ROOT');
+
+    fileRow(ex, 'shared.koi').dispatchEvent(new KeyboardEvent('keydown', { key: 'Delete', bubbles: true }));
+    const cancel = Array.from(document.querySelectorAll<HTMLElement>('.explorer-confirm-btn')).find(
+      (b) => b.textContent === 'Cancel',
+    )!;
+    cancel.click();
+    await flush();
+    expect(cb.onDelete).not.toHaveBeenCalled();
+    expect(confirmShown()).toBe(false);
   });
 
   it('opens a context menu on right-click with the expected actions', () => {
@@ -217,6 +237,23 @@ describe('explorer', () => {
     )!;
     item.click();
   }
+  // Drive the inline new-file/new-folder input that beginCreate inserts: type `value` and press Enter.
+  function commitCreate(ex: { el: HTMLElement }, value: string): void {
+    const input = ex.el.querySelector<HTMLInputElement>('.explorer-create .explorer-rename')!;
+    expect(input).not.toBeNull();
+    input.value = value;
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+  }
+  // Let a pending microtask (e.g. the confirm dialog's Promise → onDelete) settle.
+  function flush(): Promise<void> {
+    return new Promise((r) => setTimeout(r, 0));
+  }
+  // The confirm dialog is the shared createModal chrome: a .koi-modal-backdrop that is hidden when
+  // closed. It's shown iff the backdrop is present and not hidden.
+  function confirmShown(): boolean {
+    const bd = document.querySelector<HTMLElement>('.koi-modal-backdrop');
+    return !!bd && !bd.hidden;
+  }
 
   it('sets aria-selected on the active treeitem', () => {
     const cb = makeCallbacks();
@@ -231,46 +268,42 @@ describe('explorer', () => {
 
   it('New File from a nested file row targets its containing directory', () => {
     const cb = makeCallbacks();
-    const promptSpy = vi.spyOn(window, 'prompt').mockReturnValue('extra.koi');
     const ex = createExplorer(cb);
     document.body.appendChild(ex.el);
     ex.render(sampleTree(), 'ROOT');
 
     fileRow(ex, 'order.koi').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 5, clientY: 5 }));
     clickMenuItem('New File');
+    commitCreate(ex, 'extra.koi');
     expect(cb.onNewFile).toHaveBeenCalledWith('ROOT/orders', 'extra.koi');
-    promptSpy.mockRestore();
   });
 
   it('New File from a top-level file row falls back to the root token', () => {
     const cb = makeCallbacks();
-    const promptSpy = vi.spyOn(window, 'prompt').mockReturnValue('extra.koi');
     const ex = createExplorer(cb);
     document.body.appendChild(ex.el);
     ex.render(sampleTree(), 'ROOT');
 
     fileRow(ex, 'shared.koi').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 5, clientY: 5 }));
     clickMenuItem('New File');
+    commitCreate(ex, 'extra.koi');
     expect(cb.onNewFile).toHaveBeenCalledWith('ROOT', 'extra.koi');
-    promptSpy.mockRestore();
   });
 
   it('New Folder from a directory row targets that directory', () => {
     const cb = makeCallbacks();
-    const promptSpy = vi.spyOn(window, 'prompt').mockReturnValue('sub');
     const ex = createExplorer(cb);
     document.body.appendChild(ex.el);
     ex.render(sampleTree(), 'ROOT');
 
     dirRow(ex).dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 5, clientY: 5 }));
     clickMenuItem('New Folder');
+    commitCreate(ex, 'sub');
     expect(cb.onNewFolder).toHaveBeenCalledWith('ROOT/orders', 'sub');
-    promptSpy.mockRestore();
   });
 
-  it('menu Duplicate and Delete invoke their callbacks', () => {
+  it('menu Duplicate and Delete invoke their callbacks', async () => {
     const cb = makeCallbacks();
-    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
     const ex = createExplorer(cb);
     document.body.appendChild(ex.el);
     ex.render(sampleTree(), 'ROOT');
@@ -281,8 +314,9 @@ describe('explorer', () => {
 
     fileRow(ex, 'shared.koi').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 5, clientY: 5 }));
     clickMenuItem('Delete');
+    document.querySelector<HTMLElement>('.explorer-confirm-btn-danger')!.click();
+    await flush();
     expect((cb.onDelete as ReturnType<typeof vi.fn>).mock.calls[0][0].token).toBe('ROOT/shared.koi');
-    confirmSpy.mockRestore();
   });
 
   it('ArrowDown moves focus to the next visible row and Enter opens a file', () => {
@@ -422,5 +456,260 @@ describe('explorer', () => {
     // re-running and snapping focus back up.
     a1.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
     expect((document.activeElement as HTMLElement).dataset.token).toBe('R/a/a2.koi');
+  });
+
+  // --- icons -----------------------------------------------------------------
+
+  it('marks .koi files with the koi context icon and folders with a folder icon', () => {
+    const cb = makeCallbacks();
+    const ex = createExplorer(cb);
+    document.body.appendChild(ex.el);
+    ex.render(sampleTree(), 'ROOT');
+
+    const fileIcon = fileRow(ex, 'shared.koi').querySelector('.explorer-icon');
+    expect(fileIcon?.classList.contains('explorer-icon--koi')).toBe(true);
+    expect(fileIcon?.querySelector('svg')).not.toBeNull();
+
+    const dirIcon = dirRow(ex).querySelector('.explorer-icon');
+    expect(dirIcon?.classList.contains('explorer-icon--dir')).toBe(true);
+    expect(dirIcon?.querySelector('svg')).not.toBeNull();
+  });
+
+  // --- filter ----------------------------------------------------------------
+
+  function setFilter(ex: { el: HTMLElement }, value: string): void {
+    const input = ex.el.querySelector<HTMLInputElement>('.explorer-filter')!;
+    input.value = value;
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  }
+  function visibleNames(ex: { el: HTMLElement }): string[] {
+    return Array.from(ex.el.querySelectorAll<HTMLElement>('.explorer-tree .explorer-name')).map(
+      (n) => n.textContent ?? '',
+    );
+  }
+
+  it('filters to matching entries, revealing ancestor folders, and counts files + folders', () => {
+    const cb = makeCallbacks();
+    const ex = createExplorer(cb);
+    document.body.appendChild(ex.el);
+    ex.render(sampleTree(), 'ROOT');
+
+    setFilter(ex, 'order');
+    const names = visibleNames(ex);
+    expect(names).toContain('orders'); // folder 'orders' matches by name
+    expect(names).toContain('order.koi'); // file 'order.koi' matches
+    expect(names).not.toContain('shared.koi'); // non-match hidden
+    // Both the folder 'orders' and the file 'order.koi' match → 2.
+    expect(ex.el.querySelector('.explorer-filter-count')?.textContent).toBe('2 matches');
+  });
+
+  it('reveals a name-matched folder’s contents and counts the folder (never "0 matches" beside it)', () => {
+    const cb = makeCallbacks();
+    const ex = createExplorer(cb);
+    document.body.appendChild(ex.el);
+    ex.render(sampleTree(), 'ROOT');
+
+    // 'orders' matches the folder name but no file name (order.koi does not contain "orders").
+    setFilter(ex, 'orders');
+    const names = visibleNames(ex);
+    expect(names).toContain('orders'); // the matched folder
+    expect(names).toContain('order.koi'); // its child revealed (folder isn't shown empty)
+    expect(ex.el.querySelector('.explorer-filter-count')?.textContent).toBe('1 match');
+  });
+
+  it('shows a no-match empty state and clears the filter on Escape', () => {
+    const cb = makeCallbacks();
+    const ex = createExplorer(cb);
+    document.body.appendChild(ex.el);
+    ex.render(sampleTree(), 'ROOT');
+
+    setFilter(ex, 'zzz-nothing');
+    expect(ex.el.querySelector('.explorer-empty')).not.toBeNull();
+    expect(visibleNames(ex)).toEqual([]);
+
+    const input = ex.el.querySelector<HTMLInputElement>('.explorer-filter')!;
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    expect(visibleNames(ex)).toContain('shared.koi'); // tree restored
+  });
+
+  // --- collapse all ----------------------------------------------------------
+
+  it('collapse-all collapses every directory, expand-all re-opens them', () => {
+    const cb = makeCallbacks();
+    const ex = createExplorer(cb);
+    document.body.appendChild(ex.el);
+    ex.render(sampleTree(), 'ROOT');
+
+    const dir = () => ex.el.querySelector('li[data-kind="dir"]')!;
+    expect(dir().getAttribute('aria-expanded')).toBe('true');
+
+    ex.el.querySelector<HTMLElement>('.explorer-tool[aria-label="Collapse all"]')!.click();
+    expect(dir().getAttribute('aria-expanded')).toBe('false');
+
+    ex.el.querySelector<HTMLElement>('.explorer-tool[aria-label="Expand all"]')!.click();
+    expect(dir().getAttribute('aria-expanded')).toBe('true');
+  });
+
+  it('prunes stale collapsed-state so a folder reusing an old token is not wrongly collapsed', () => {
+    const cb = makeCallbacks();
+    const ex = createExplorer(cb);
+    document.body.appendChild(ex.el);
+    ex.render(sampleTree(), 'ROOT');
+
+    dirRow(ex).click(); // collapse orders/
+    expect(ex.el.querySelector('li[data-kind="dir"]')!.getAttribute('aria-expanded')).toBe('false');
+
+    // orders/ disappears (deleted) — its token must be pruned from the collapsed set...
+    ex.render([{ token: 'ROOT/shared.koi', name: 'shared.koi', relPath: 'shared.koi', kind: 'file' }], 'ROOT');
+    // ...so a new folder reusing the same token renders EXPANDED, not stuck-collapsed.
+    ex.render(sampleTree(), 'ROOT');
+    expect(ex.el.querySelector('li[data-kind="dir"]')!.getAttribute('aria-expanded')).toBe('true');
+  });
+
+  // --- empty state -----------------------------------------------------------
+
+  it('renders an empty state whose New file action creates at the root', () => {
+    const cb = makeCallbacks();
+    const ex = createExplorer(cb);
+    document.body.appendChild(ex.el);
+    ex.render([], 'ROOT');
+
+    const action = ex.el.querySelector<HTMLElement>('.explorer-empty-action');
+    expect(action).not.toBeNull();
+    action!.click();
+    commitCreate(ex, 'first.koi');
+    expect(cb.onNewFile).toHaveBeenCalledWith('ROOT', 'first.koi');
+  });
+
+  // --- inline create ---------------------------------------------------------
+
+  it('cancels an inline create on Escape without creating', () => {
+    const cb = makeCallbacks();
+    const ex = createExplorer(cb);
+    document.body.appendChild(ex.el);
+    ex.render(sampleTree(), 'ROOT');
+
+    ex.el.querySelector<HTMLElement>('.explorer-toolbar .explorer-tool')!.click(); // New file
+    const input = ex.el.querySelector<HTMLInputElement>('.explorer-create .explorer-rename')!;
+    input.value = 'scrap.koi';
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+
+    expect(cb.onNewFile).not.toHaveBeenCalled();
+    expect(ex.el.querySelector('.explorer-create')).toBeNull();
+  });
+
+  it('discards an invalid rename on blur and unblocks re-renders (no stuck `renaming`)', () => {
+    const cb = makeCallbacks();
+    const ex = createExplorer(cb);
+    document.body.appendChild(ex.el);
+    ex.render(sampleTree(), 'ROOT');
+
+    const row = fileRow(ex, 'shared.koi');
+    row.dispatchEvent(new KeyboardEvent('keydown', { key: 'F2', bubbles: true }));
+    const input = row.querySelector<HTMLInputElement>('.explorer-rename')!;
+    input.value = 'bad/name';
+    input.dispatchEvent(new Event('blur')); // Tab/click away with an invalid name
+
+    expect(cb.onRename).not.toHaveBeenCalled();
+    expect(ex.el.querySelector('.explorer-rename')).toBeNull(); // input discarded, label restored
+
+    // `renaming` must have cleared: a subsequent render is NOT deferred, so a freshly-dirtied file
+    // picks up its dirty dot. (If renaming were stuck, this render would be queued and never applied.)
+    (cb.isDirty as ReturnType<typeof vi.fn>).mockImplementation((t: string) => t === 'ROOT/shared.koi');
+    ex.render(sampleTree(), 'ROOT');
+    expect(fileRow(ex, 'shared.koi').querySelector('.tree-dirty')).not.toBeNull();
+  });
+
+  it('keeps an inline create open and flags an invalid name instead of creating', () => {
+    const cb = makeCallbacks();
+    const ex = createExplorer(cb);
+    document.body.appendChild(ex.el);
+    ex.render(sampleTree(), 'ROOT');
+
+    ex.el.querySelector<HTMLElement>('.explorer-toolbar .explorer-tool')!.click(); // New file
+    const input = ex.el.querySelector<HTMLInputElement>('.explorer-create .explorer-rename')!;
+    input.value = 'bad/name';
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+
+    expect(cb.onNewFile).not.toHaveBeenCalled();
+    expect(input.classList.contains('is-invalid')).toBe(true);
+    expect(ex.el.querySelector('.explorer-create')).not.toBeNull(); // still open to fix
+  });
+
+  // --- drag-and-drop move ----------------------------------------------------
+
+  function fireDrag(el: HTMLElement, type: string): void {
+    el.dispatchEvent(new Event(type, { bubbles: true, cancelable: true }));
+  }
+
+  it('moves an entry into a directory via drag-and-drop', () => {
+    const cb = makeCallbacks();
+    const ex = createExplorer(cb);
+    document.body.appendChild(ex.el);
+    ex.render(sampleTree(), 'ROOT');
+
+    fireDrag(fileRow(ex, 'shared.koi'), 'dragstart');
+    fireDrag(dirRow(ex), 'dragover');
+    fireDrag(dirRow(ex), 'drop');
+
+    const call = (cb.onMove as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(call[0].token).toBe('ROOT/shared.koi');
+    expect(call[1]).toBe('ROOT/orders');
+  });
+
+  it('defers a re-render while a drag is in progress so drop-validity checks stay valid', () => {
+    const cb = makeCallbacks();
+    const ex = createExplorer(cb);
+    document.body.appendChild(ex.el);
+    ex.render(sampleTree(), 'ROOT');
+
+    const shared = fileRow(ex, 'shared.koi');
+    const draggedLi = shared.closest('li');
+    fireDrag(shared, 'dragstart');
+
+    // A diagnostics push mid-drag must be deferred — NOT rebuild the tree (which would detach dragLi
+    // and bypass the DOM-containment drop guards).
+    ex.render(sampleTree(), 'ROOT');
+    expect(fileRow(ex, 'shared.koi').closest('li')).toBe(draggedLi); // same node, not rebuilt
+
+    // Drop still validates against the live dragLi and fires the move.
+    fireDrag(dirRow(ex), 'dragover');
+    fireDrag(dirRow(ex), 'drop');
+    expect((cb.onMove as ReturnType<typeof vi.fn>).mock.calls[0][1]).toBe('ROOT/orders');
+
+    fireDrag(shared, 'dragend'); // replays the deferred render
+  });
+
+  it('rejects a drag-drop back into the same parent directory (no-op)', () => {
+    const cb = makeCallbacks();
+    const ex = createExplorer(cb);
+    document.body.appendChild(ex.el);
+    ex.render(sampleTree(), 'ROOT');
+
+    fireDrag(fileRow(ex, 'order.koi'), 'dragstart'); // already inside orders/
+    fireDrag(dirRow(ex), 'drop');
+    expect(cb.onMove).not.toHaveBeenCalled();
+  });
+
+  // --- reveal active ---------------------------------------------------------
+
+  it('expands a collapsed ancestor to reveal a newly-active file, but respects a later manual collapse', () => {
+    const cb = makeCallbacks();
+    const ex = createExplorer(cb);
+    document.body.appendChild(ex.el);
+    ex.render(sampleTree(), 'ROOT');
+
+    dirRow(ex).click(); // collapse orders/
+    expect(ex.el.querySelector('li[data-kind="dir"]')!.getAttribute('aria-expanded')).toBe('false');
+
+    // order.koi becomes active; a re-render auto-reveals it by re-expanding orders/.
+    (cb.isActive as ReturnType<typeof vi.fn>).mockImplementation((t: string) => t === 'ROOT/orders/order.koi');
+    ex.render(sampleTree(), 'ROOT');
+    expect(ex.el.querySelector('li[data-kind="dir"]')!.getAttribute('aria-expanded')).toBe('true');
+
+    // The user collapses again; a diagnostics re-render with the SAME active file must not fight them.
+    dirRow(ex).click();
+    ex.render(sampleTree(), 'ROOT');
+    expect(ex.el.querySelector('li[data-kind="dir"]')!.getAttribute('aria-expanded')).toBe('false');
   });
 });

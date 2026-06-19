@@ -345,6 +345,7 @@ export function init(): void {
     onRename: (entry, newName) => void handleRename(entry, newName),
     onDelete: (entry) => void handleDelete(entry),
     onDuplicate: (entry) => void handleDuplicate(entry),
+    onMove: (entry, destDirToken) => void handleMove(entry, destDirToken),
     isActive: (token) => pathToFileUri(token) === activeUri,
     isDirty: (token) => buffers.get(pathToFileUri(token))?.dirty ?? false,
     diagCounts: (token) => diagCounts(pathToFileUri(token)),
@@ -579,10 +580,8 @@ export function init(): void {
         else await syncOpenKoi(); // a duplicated folder may contain new .koi files
         return;
       } catch (e) {
-        // A collision means "try the next candidate name". The desktop (Tauri) host rejects with a
-        // plain string, the browser with an Error — match on the message text, not the type, so the
-        // retry works on both backends.
-        if (String(e instanceof Error ? e.message : e).includes('already exists')) continue;
+        // A collision means "try the next candidate name".
+        if (isAlreadyExists(e)) continue;
         setStatus('could not duplicate', 'error');
         console.error('duplicate failed:', e);
         return;
@@ -590,6 +589,31 @@ export function init(): void {
     }
     // Every candidate name collided — don't fail silently.
     setStatus('could not duplicate (too many copies)', 'error');
+  }
+
+  // Drag-and-drop move: reparent `entry` into `destDirToken` (the opened folder for root), keeping its
+  // name. The explorer already rejects no-op and into-own-subtree drops, so this just performs the host
+  // move and re-keys the open buffers / LSP workspace, mirroring rename.
+  async function handleMove(entry: FsEntry, destDirToken: string): Promise<void> {
+    if (folderRootToken == null) return;
+    const destRel = relOfToken(destDirToken);
+    const newRelPath = destRel ? `${destRel}/${entry.name}` : entry.name;
+    let newToken: string;
+    try {
+      newToken = await platform.moveEntry(entry.token, folderRootToken, newRelPath, false);
+    } catch (e) {
+      // A name clash at the destination is the common, recoverable case — surface it, don't overwrite.
+      if (isAlreadyExists(e)) {
+        setStatus(`“${entry.name}” already exists there`, 'error');
+      } else {
+        setStatus('could not move', 'error');
+        console.error('moveEntry failed:', e);
+      }
+      return;
+    }
+    rekeyBuffers(entry.token, newToken);
+    await refreshEntries();
+    if (entry.kind === 'dir') await syncOpenKoi(); // moved folder may carry .koi files to re-key
   }
 
   // --- mutation helpers ------------------------------------------------------
@@ -606,6 +630,15 @@ export function init(): void {
   function parentTokenOf(token: string): string | null {
     const slash = Math.max(token.lastIndexOf('/'), token.lastIndexOf('\\'));
     return slash >= 0 ? token.slice(0, slash) : null;
+  }
+
+  /**
+   * True when a host fs op failed because the destination name is taken. The desktop (Tauri) host
+   * rejects with a plain string and the browser with an Error, so match the message text (not the
+   * type) — shared by handleDuplicate (retry next name) and handleMove (surface the clash).
+   */
+  function isAlreadyExists(e: unknown): boolean {
+    return String(e instanceof Error ? e.message : e).includes('already exists');
   }
 
   /** "order.koi" → "order copy.koi" (i=1) / "order copy 2.koi" (i=2); dirs get no extension split. */

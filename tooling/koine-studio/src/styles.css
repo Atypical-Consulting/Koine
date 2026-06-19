@@ -533,13 +533,61 @@ body {
   min-height: 0;
 }
 
+/* The pane head: filter field above a thin action toolbar. */
+.explorer-head {
+  flex: 0 0 auto;
+  border-bottom: 1px solid var(--koi-line);
+}
+
+.explorer-filter-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px 4px;
+}
+
+/* Type-to-filter field — the index of contexts. */
+.explorer-filter {
+  flex: 1 1 auto;
+  min-width: 0;
+  background: var(--koi-paper);
+  color: var(--koi-fg);
+  border: 1px solid var(--koi-line);
+  border-radius: var(--koi-radius-sm);
+  padding: 3px 8px;
+  font-family: var(--koi-font-mono);
+  font-size: 0.74rem;
+}
+
+.explorer-filter::placeholder {
+  color: var(--koi-muted);
+}
+
+.explorer-filter:focus-visible {
+  outline: none;
+  border-color: var(--koi-accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--koi-accent) 28%, transparent);
+}
+
+.explorer-filter-count {
+  flex: 0 0 auto;
+  font-family: var(--koi-font-mono);
+  font-size: 0.66rem;
+  color: var(--koi-muted);
+  white-space: nowrap;
+}
+
 .explorer-toolbar {
   flex: 0 0 auto;
   display: flex;
+  align-items: center;
   gap: 4px;
-  justify-content: flex-end;
-  padding: 4px 8px;
-  border-bottom: 1px solid var(--koi-line);
+  padding: 0 8px 5px;
+}
+
+/* Pushes the fold actions (Collapse/Expand all) to the right, create actions stay left. */
+.explorer-toolbar-spacer {
+  flex: 1 1 auto;
 }
 
 .explorer-tool {
@@ -555,6 +603,15 @@ body {
   cursor: pointer;
   font-size: 0.86rem;
   line-height: 1;
+}
+
+.explorer-tool-icon {
+  display: inline-flex;
+}
+
+.explorer-tool-icon svg {
+  width: 15px;
+  height: 15px;
 }
 
 .explorer-tool:hover {
@@ -587,10 +644,10 @@ body {
 
 .explorer-row {
   display: flex;
-  align-items: baseline;
-  gap: 6px;
+  align-items: center;
+  gap: 5px;
   /* --depth is the 0-based nesting level; each level adds a fixed indent. */
-  padding: 4px 12px 4px calc(12px + var(--depth, 0) * 14px);
+  padding: 3px 12px 3px calc(12px + var(--depth, 0) * 14px);
   cursor: pointer;
   color: var(--koi-fg);
   font-family: var(--koi-font-mono);
@@ -599,6 +656,20 @@ body {
 
 .explorer-row:hover {
   background: var(--koi-surface);
+}
+
+/* Drag-and-drop move: dragged row dims; valid directory / root drop targets light up in accent. */
+.explorer-tree li.is-dragging > .explorer-row {
+  opacity: 0.45;
+}
+
+.explorer-row.is-drop-target {
+  background: color-mix(in srgb, var(--koi-accent) 20%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--koi-accent) 55%, transparent);
+}
+
+.explorer-tree.is-drop-root {
+  box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--koi-accent) 45%, transparent);
 }
 
 .explorer-row[aria-current='true'] {
@@ -624,11 +695,47 @@ body {
   user-select: none;
 }
 
+/* Type icon: brand diamond for .koi contexts, folder for dirs, neutral doc for everything else.
+   The SVGs inherit currentColor, so each modifier just sets the tint. */
+.explorer-icon {
+  flex: 0 0 auto;
+  display: inline-flex;
+  width: 14px;
+  height: 14px;
+}
+
+.explorer-icon svg {
+  width: 14px;
+  height: 14px;
+  fill: currentColor;
+}
+
+.explorer-icon--koi {
+  color: var(--koi-accent);
+}
+
+/* Folders stay neutral so the accent-blue .koi context-mark is the tree's single colour signature
+   (and so a folder glyph never reads as the amber warning badge). */
+.explorer-icon--dir {
+  color: var(--koi-muted);
+}
+
+.explorer-icon--file {
+  color: var(--koi-muted);
+}
+
 .explorer-name {
   flex: 0 1 auto;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* The filter match, highlighted inside the filename. */
+.explorer-hl {
+  background: color-mix(in srgb, var(--koi-accent) 30%, transparent);
+  color: inherit;
+  border-radius: 2px;
 }
 
 /* Per-row "…" action button — revealed on hover/focus, but always reachable by keyboard. */
@@ -661,7 +768,7 @@ body {
   margin-left: 4px;
 }
 
-/* Inline rename input — replaces the .explorer-name label in place. */
+/* Inline rename / inline-create input — replaces the .explorer-name label (or seeds a new row). */
 .explorer-rename {
   flex: 1 1 auto;
   min-width: 0;
@@ -673,6 +780,89 @@ body {
   font-family: var(--koi-font-mono);
   font-size: 0.78rem;
   outline: none;
+}
+
+.explorer-rename.is-invalid {
+  border-color: var(--koi-error);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--koi-error) 26%, transparent);
+}
+
+/* Empty / no-match state shown in place of the tree rows. */
+.explorer-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 22px 16px;
+  text-align: center;
+  color: var(--koi-muted);
+  font-family: var(--koi-font-body);
+  font-size: 0.8rem;
+}
+
+.explorer-empty-line {
+  margin: 0;
+}
+
+.explorer-empty-action {
+  background: transparent;
+  border: 1px solid var(--koi-line);
+  border-radius: var(--koi-radius-sm);
+  color: var(--koi-fg);
+  cursor: pointer;
+  padding: 4px 12px;
+  font-family: var(--koi-font-mono);
+  font-size: 0.74rem;
+}
+
+.explorer-empty-action:hover {
+  background: var(--koi-surface);
+  border-color: color-mix(in srgb, var(--koi-accent) 50%, var(--koi-line));
+}
+
+.explorer-empty-action:focus-visible {
+  outline: 2px solid var(--koi-accent);
+  outline-offset: 1px;
+}
+
+/* --- delete confirm (built on the shared createModal chrome; only the body message + footer
+   buttons are explorer-specific) --- */
+.explorer-confirm-msg {
+  margin: 0;
+  font-family: var(--koi-font-body);
+  font-size: 0.82rem;
+  color: var(--koi-muted);
+  line-height: 1.45;
+}
+
+.explorer-confirm-btn {
+  background: transparent;
+  border: 1px solid var(--koi-line);
+  border-radius: var(--koi-radius-sm);
+  color: var(--koi-fg);
+  cursor: pointer;
+  padding: 5px 14px;
+  font-family: var(--koi-font-body);
+  font-size: 0.82rem;
+}
+
+.explorer-confirm-btn:hover {
+  background: var(--koi-surface);
+}
+
+.explorer-confirm-btn:focus-visible {
+  outline: 2px solid var(--koi-accent);
+  outline-offset: 1px;
+}
+
+.explorer-confirm-btn-danger {
+  border-color: color-mix(in srgb, var(--koi-error) 55%, var(--koi-line));
+  background: color-mix(in srgb, var(--koi-error) 16%, transparent);
+  color: var(--koi-error);
+}
+
+.explorer-confirm-btn-danger:hover {
+  background: color-mix(in srgb, var(--koi-error) 26%, transparent);
 }
 
 /* --- explorer context menu (floating, mounted to body) --- */
