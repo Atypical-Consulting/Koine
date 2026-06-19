@@ -81,6 +81,14 @@ aiPanel.send() → runAssistant() → runOpenAiCompatible()   [ai.ts]
   because their content is already injected via `KOINE_PRIMER` + live source/diagnostics.
 - Anthropic-path tool loop (reuse the provider-neutral tool defs).
 
+### Known follow-ups from the implementation review (low severity)
+
+- **Desktop result parity** — the desktop (MCP-sidecar) path returns the MCP tool's raw JSON text,
+  while the browser path returns the compact `formatValidate`/`formatCompile` summaries. Both are
+  usable; reformatting the desktop results to match was deferred (no Tauri test harness here).
+- **`notifications/initialized`** — `mcpCall`/`probeMcp` skip the spec's post-initialize notification.
+  The Koine MCP server works without it (verified live), so this is a spec-compliance nicety only.
+
 ## Docs (item 2)
 
 New `website/` Starlight page: LM Studio + tools setup — `lms server start --cors`, a tool-capable
