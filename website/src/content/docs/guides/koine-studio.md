@@ -1,15 +1,29 @@
 ---
 title: "Koine Studio"
-description: "A Tauri desktop IDE for .koi files, driven by the same koine lsp server as the VS Code extension."
+description: "The Koine IDE for .koi files — run it in your browser at /Koine/studio/, or as a native Tauri desktop app. Both share the same compiler."
 ---
 
-**Koine Studio** is a desktop IDE for `.koi` files. It's a [Tauri v2](https://tauri.app/) app —
-a Rust host wrapping a web frontend — that spawns the Koine language server (`koine lsp`) as a child
-process and talks to it over JSON-RPC. You write your model in a live editor and see diagnostics, a
-glossary, a context map, and the emitted C# / TypeScript without leaving the window.
+**Koine Studio** is the full IDE for `.koi` files: a live editor with push-based diagnostics, an
+emitted-code preview (C# / TypeScript), the ubiquitous-language glossary, a context map, hover docs,
+and go-to-definition. It runs **two ways from one codebase** (`tooling/koine-studio/`):
 
-It lives in `tooling/koine-studio/` and is currently an **MVP**: the core editor + LSP loop works,
-and it shares its entire language backend with the [VS Code extension](/Koine/guides/editor-tooling/).
+:::tip[Try it now — nothing to install]
+**[Open Koine Studio in your browser ▸](/Koine/studio/)** — the compiler is shipped as WebAssembly,
+so the whole IDE runs client-side. No download, no .NET SDK.
+:::
+
+- **Web edition** (hosted) — runs entirely in the browser. The Koine compiler is published as a
+  WebAssembly module (`src/Koine.Wasm`) and called directly from the page, so parsing, validation,
+  and emit all happen client-side. This is what you get at
+  **[atypical-consulting.github.io/Koine/studio/](/Koine/studio/)**, and it shares the WASM bundle
+  with the [Playground](/Koine/playground/).
+- **Desktop edition** — a [Tauri v2](https://tauri.app/) app (a Rust host wrapping the same web
+  frontend) that spawns the Koine language server (`koine lsp`) as a child process and talks to it
+  over JSON-RPC. Build it from `tooling/koine-studio/` — see [Run it (desktop)](#run-it-desktop).
+
+Both editions are currently an **MVP** and share their entire language backend with the
+[VS Code extension](/Koine/guides/editor-tooling/) — the same parser, validator, and emitters as the
+`koine` CLI. What you see in the browser is exactly what the build produces.
 
 ## Why a separate app
 
@@ -19,6 +33,11 @@ self-contained window with nothing to configure. Open it, type, and the model is
 and previewed — the same way the build does it, because it *is* the same compiler.
 
 ## How it works
+
+The **web edition** loads the WebAssembly compiler bundle once, then calls its language-service
+exports (`DiagnoseWorkspace`, `EmitPreview`, `Glossary`, `Hover`, …) directly from the page — there
+is no server and no `koine lsp` process. The **desktop edition** reaches the same language service
+over a `koine lsp` child process instead:
 
 ```
 Koine Studio (Tauri v2)
@@ -67,9 +86,10 @@ go-to-definition) and the Koine-specific requests (`koine/emitPreview`, glossary
 implemented once, in the compiler's language service, and reused by both. Fix a rule in the compiler
 and both clients get it — there is nothing IDE-specific to keep in sync.
 
-## Run it
+## Run it (desktop)
 
-A helper script under `scripts/run-ide/` builds the CLI (so the `koine lsp` sidecar exists), installs
+The hosted [web edition](/Koine/studio/) needs nothing to run. To build the **desktop** app:
+a helper script under `scripts/run-ide/` builds the CLI (so the `koine lsp` sidecar exists), installs
 the frontend deps on first run, and launches the Tauri dev shell:
 
 ```bash

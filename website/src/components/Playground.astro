@@ -28,6 +28,7 @@ const { embedded = false } = Astro.props;
       <button class="koi-copy" type="button" title="Copy the current file">Copy</button>
       <button class="koi-download" type="button" title="Download all files as a .zip">Download</button>
       <button class="koi-share" type="button" title="Copy a shareable link">Share</button>
+      <a class="koi-studio" href="#" target="_blank" rel="noopener" title="Open this model in the full Koine Studio IDE">Open in Studio &#9656;</a>
       <a class="koi-open" href="#">Open full Playground &#9656;</a>
     </div>
   </div>
@@ -194,7 +195,8 @@ const { embedded = false } = Astro.props;
     align-items: center;
   }
   .koi-bar-right button,
-  .koi-open {
+  .koi-open,
+  .koi-studio {
     font: 600 0.76rem/1 var(--koi-font-mono);
     padding: 0.36rem 0.62rem;
     border-radius: var(--koi-radius-sm);
@@ -206,7 +208,8 @@ const { embedded = false } = Astro.props;
     transition: background 0.12s, color 0.12s, border-color 0.12s, transform 0.1s;
   }
   .koi-bar-right button:hover:not(:disabled),
-  .koi-open:hover {
+  .koi-open:hover,
+  .koi-studio:hover {
     color: var(--koi-fg);
     border-color: var(--koi-accent);
   }
@@ -220,12 +223,14 @@ const { embedded = false } = Astro.props;
     border-color: var(--koi-accent);
   }
   .koi-share,
-  .koi-open {
+  .koi-open,
+  .koi-studio {
     border-color: var(--koi-accent) !important;
     color: var(--koi-accent) !important;
   }
   .koi-share:hover,
-  .koi-open:hover {
+  .koi-open:hover,
+  .koi-studio:hover {
     background: var(--koi-accent);
     color: var(--koi-on-accent) !important;
   }
@@ -388,6 +393,7 @@ const { embedded = false } = Astro.props;
   .koi-ide[data-embedded='true'] .koi-sample,
   .koi-ide[data-embedded='true'] .koi-reset,
   .koi-ide[data-embedded='true'] .koi-share,
+  .koi-ide[data-embedded='true'] .koi-studio,
   .koi-ide[data-embedded='true'] .koi-resizer {
     display: none;
   }
