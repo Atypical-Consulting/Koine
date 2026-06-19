@@ -4,8 +4,8 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "dev:web": "vite --mode web",
+    "dev": "cross-env NODE_OPTIONS=--max-http-header-size=65536 vite",
+    "dev:web": "cross-env NODE_OPTIONS=--max-http-header-size=65536 vite --mode web",
     "predev:web": "node scripts/build-wasm.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
@@ -34,12 +34,13 @@
     "@tauri-apps/api": "^2",
     "@tauri-apps/plugin-dialog": "^2",
     "@tauri-apps/plugin-opener": "^2",
-    "mermaid": "^11.4.0",
     "jszip": "^3.10.1",
+    "mermaid": "^11.4.0",
     "openai": "^6.44.0"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2",
+    "cross-env": "^7.0.3",
     "happy-dom": "^20.10.6",
     "jsdom": "^29.1.1",
     "typescript": "~6.0.0",
