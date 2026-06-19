@@ -82,6 +82,9 @@ public sealed partial class PhpEmitter : IEmitter
             case ValueObjectDecl vo:
                 files.Add(EmitValueObject(emit, vo, contextName, typeMapper));
                 break;
+            case EnumDecl enumDecl:
+                files.Add(EmitEnum(emit, enumDecl, contextName, typeMapper));
+                break;
             case AggregateDecl agg:
                 // Recurse into aggregate-nested types (entities, events) — no-ops for now.
                 foreach (TypeDecl nested in agg.Types)
@@ -89,7 +92,7 @@ public sealed partial class PhpEmitter : IEmitter
                     EmitType(emit, files, nested, contextName, typeMapper);
                 }
                 break;
-            // EnumDecl, EntityDecl, EventDecl, IntegrationEventDecl → no-op until later tasks.
+            // EntityDecl, EventDecl, IntegrationEventDecl → no-op until later tasks.
         }
     }
 }
