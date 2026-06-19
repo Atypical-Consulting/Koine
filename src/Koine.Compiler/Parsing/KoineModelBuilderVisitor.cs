@@ -1284,7 +1284,13 @@ public sealed class KoineModelBuilderVisitor : KoineParserBaseVisitor<object?>
 
         if (ctx.exprName() is { } identifier)
         {
-            return new IdentifierExpr(identifier.GetText()) { Span = SpanOf(ctx) };
+            return new IdentifierExpr(identifier.GetText())
+            {
+                Span = SpanOf(ctx),
+                LeafText = identifier.GetText(),
+                LeadingTrivia = LeadingTriviaFor(ctx),
+                TrailingTrivia = TrailingTriviaFor(ctx)
+            };
         }
 
         // Parenthesized expression.
@@ -1293,24 +1299,43 @@ public sealed class KoineModelBuilderVisitor : KoineParserBaseVisitor<object?>
 
     private Expr BuildLiteral(KoineParser.LiteralContext ctx)
     {
+        // Verbatim source spelling of the literal (incl. quotes/escapes for strings), so the leaf
+        // node can reconstruct its own text tree-driven via ToFullString(); the model's typed
+        // LiteralExpr.Text keeps the parsed/unescaped value, distinct from this raw leaf text.
+        var leafText = ctx.GetText();
+        IReadOnlyList<SyntaxTrivia> leading = LeadingTriviaFor(ctx);
+        IReadOnlyList<SyntaxTrivia> trailing = TrailingTriviaFor(ctx);
+
         if (ctx.IntLiteral() is { } intLit)
         {
-            return new LiteralExpr(LiteralKind.Int, intLit.GetText()) { Span = SpanOf(ctx) };
+            return new LiteralExpr(LiteralKind.Int, intLit.GetText())
+            {
+                Span = SpanOf(ctx), LeafText = leafText, LeadingTrivia = leading, TrailingTrivia = trailing
+            };
         }
 
         if (ctx.DecimalLiteral() is { } decLit)
         {
-            return new LiteralExpr(LiteralKind.Decimal, decLit.GetText()) { Span = SpanOf(ctx) };
+            return new LiteralExpr(LiteralKind.Decimal, decLit.GetText())
+            {
+                Span = SpanOf(ctx), LeafText = leafText, LeadingTrivia = leading, TrailingTrivia = trailing
+            };
         }
 
         if (ctx.BoolLiteral() is { } boolLit)
         {
-            return new LiteralExpr(LiteralKind.Bool, boolLit.GetText()) { Span = SpanOf(ctx) };
+            return new LiteralExpr(LiteralKind.Bool, boolLit.GetText())
+            {
+                Span = SpanOf(ctx), LeafText = leafText, LeadingTrivia = leading, TrailingTrivia = trailing
+            };
         }
 
         // String literal: inner content, unescaped, no surrounding quotes.
         var text = UnescapeString(StripQuotes(ctx.StringLiteral().GetText()));
-        return new LiteralExpr(LiteralKind.String, text) { Span = SpanOf(ctx) };
+        return new LiteralExpr(LiteralKind.String, text)
+        {
+            Span = SpanOf(ctx), LeafText = leafText, LeadingTrivia = leading, TrailingTrivia = trailing
+        };
     }
 
     // ------------------------------------------------------------------------

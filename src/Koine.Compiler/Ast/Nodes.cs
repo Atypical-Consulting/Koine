@@ -1,3 +1,5 @@
+using System.Text;
+
 namespace Koine.Compiler.Ast;
 
 // ============================================================================
@@ -56,6 +58,59 @@ public abstract record KoineNode
     /// the original source. Target-agnostic.
     /// </summary>
     public string? LeafText { get; init; }
+
+    /// <summary>
+    /// Reconstructs this node's source text <b>from the tree</b> (Roslyn-style), with no access to
+    /// the original source string: emits its <see cref="LeadingTrivia"/>, then its own text, then
+    /// its <see cref="TrailingTrivia"/>. A leaf node's own text is its <see cref="LeafText"/>; a
+    /// composite node's is the concatenation of its child nodes' <see cref="ToFullString"/> taken in
+    /// source order (ascending <see cref="SourceSpan.Offset"/>).
+    /// <para>
+    /// This is the leaf-text-first fidelity step: it reconstructs verbatim for leaf nodes
+    /// (identifiers, literals — which carry <see cref="LeafText"/>) and for composite nodes whose
+    /// children fully tile their text. Koine has no <c>SyntaxToken</c> layer, so structural keywords
+    /// and punctuation (<c>value</c>, <c>{</c>, <c>:</c>, operators) are not nodes and are absent
+    /// from a pure tree walk; a composite node interspersed with such tokens therefore still needs
+    /// the original source for a byte-perfect render — that is the documented <c>SyntaxToken</c>
+    /// escalation, and is why <see cref="Koine.Compiler.Formatting.AstPrinter"/> keeps a source-slice
+    /// fallback. Target-agnostic.
+    /// </para>
+    /// </summary>
+    public string ToFullString()
+    {
+        var sb = new StringBuilder();
+        AppendFullString(sb);
+        return sb.ToString();
+    }
+
+    private void AppendFullString(StringBuilder sb)
+    {
+        foreach (SyntaxTrivia t in LeadingTrivia)
+        {
+            sb.Append(t.Text);
+        }
+
+        if (LeafText is not null)
+        {
+            sb.Append(LeafText);
+        }
+        else
+        {
+            // Compose composite nodes from their children in source order. ChildNodes is
+            // reflection-driven and not ordered, so sort by offset; spans with no position
+            // (synthesized nodes) sort stably to the end.
+            foreach (KoineNode child in NodeWalker.ChildNodes(this)
+                .OrderBy(c => c.Span.IsNone ? int.MaxValue : c.Span.Offset))
+            {
+                child.AppendFullString(sb);
+            }
+        }
+
+        foreach (SyntaxTrivia t in TrailingTrivia)
+        {
+            sb.Append(t.Text);
+        }
+    }
 }
 
 /// <summary>
