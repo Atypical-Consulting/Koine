@@ -6,6 +6,10 @@ import { defineConfig } from 'vitest/config';
 export default defineConfig({
   test: {
     environment: 'happy-dom',
-    include: ['src/**/*.test.ts'],
+    include: ['src/**/*.test.ts', 'scripts/**/*.test.mjs'],
+    environmentMatchGlobs: [
+      // scripts tests run in Node — no DOM needed
+      ['scripts/**', 'node'],
+    ],
   },
 });
