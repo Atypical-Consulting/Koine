@@ -1,3 +1,5 @@
+@use '../abstracts' as a;
+
 /* --- Settings dialog: a two-pane preference center -------------------------------------------
    A vertical category rail on the left, the active category's controls on the right. The dialog
    reuses the generic .koi-modal chrome but widens it and lets its own layout own the padding. */
@@ -336,7 +338,7 @@
 }
 
 /* On narrow viewports the rail folds into a horizontal strip above the panels. */
-@media (max-width: 640px) {
+@media (max-width: a.$bp-narrow) {
   .koi-settings-layout {
     flex-direction: column;
     min-height: 0;
