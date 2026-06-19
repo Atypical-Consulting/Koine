@@ -103,4 +103,8 @@ describe('BrowserPlatform.mcpEndpoint', () => {
   test('returns null — a browser tab cannot host an MCP server, so the affordance hides', async () => {
     await expect(new BrowserPlatform().mcpEndpoint()).resolves.toBeNull();
   });
+
+  test('mcpStop resolves (no server to stop in a tab)', async () => {
+    await expect(new BrowserPlatform().mcpStop()).resolves.toBeUndefined();
+  });
 });

@@ -77,6 +77,12 @@ export class TauriPlatform implements Platform {
     return invoke<string | null>('mcp_endpoint');
   }
 
+  // Kill the `koine mcp --http` sidecar (and clear its cached endpoint) so disabling MCP in Settings
+  // actually stops the background server; a later mcpEndpoint() re-spawns a fresh one.
+  mcpStop(): Promise<void> {
+    return invoke('mcp_stop') as Promise<void>;
+  }
+
   openExternal(url: string): void {
     // Surface a denied/failed OS handoff (e.g. scheme not in the opener allowlist) instead of
     // swallowing the rejection, so a dead link leaves a trace rather than nothing at all.

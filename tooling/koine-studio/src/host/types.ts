@@ -81,6 +81,13 @@ export interface Platform {
   mcpEndpoint(): Promise<string | null>;
 
   /**
+   * Stop the local MCP sidecar if one is running and forget its endpoint, so the next
+   * {@link mcpEndpoint} re-launches a fresh server. On the desktop this kills the `koine mcp --http`
+   * child; in the browser, where nothing is hosted, it is a no-op. Idempotent.
+   */
+  mcpStop(): Promise<void>;
+
+  /**
    * Open an absolute http(s) URL in the user's default browser. In the browser host this is a new
    * tab; on the desktop it hands off to the OS via the opener plugin (a normal `<a>` navigation
    * would otherwise try to load the page inside the Tauri webview). Used by the About dialog's
