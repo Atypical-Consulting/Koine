@@ -972,18 +972,117 @@ export function init(): void {
     }
   }
 
-  // Preview buttons. Previewing also surfaces the preview tab.
-  const btnCs = el<HTMLButtonElement>('btn-preview-cs');
-  const btnTs = el<HTMLButtonElement>('btn-preview-ts');
-  const btnPy = el<HTMLButtonElement>('btn-preview-py');
+  // Destination-language split button: the main half previews the current target, the caret opens a
+  // picker. Previewing also surfaces the preview tab and adopts that target as the new "current".
+  type PreviewTarget = 'csharp' | 'typescript' | 'python';
+  const LANGS: { id: PreviewTarget; label: string; name: string; hint: string }[] = [
+    { id: 'csharp', label: 'C#', name: 'C#', hint: '⌘1' },
+    { id: 'typescript', label: 'TS', name: 'TypeScript', hint: '⌘2' },
+    { id: 'python', label: 'Python', name: 'Python', hint: '⌘3' },
+  ];
+  let currentTarget: PreviewTarget = 'csharp';
 
-  function setPreviewBusy(busy: boolean): void {
-    btnCs.disabled = busy;
-    btnTs.disabled = busy;
-    btnPy.disabled = busy;
+  const runBtn = el<HTMLButtonElement>('btn-preview-run');
+  const caretBtn = el<HTMLButtonElement>('btn-lang-menu');
+  const currentLabel = el<HTMLElement>('lang-current-label');
+  const currentDot = runBtn.querySelector<HTMLElement>('.lang-dot')!;
+
+  function setTarget(target: PreviewTarget): void {
+    currentTarget = target;
+    const meta = LANGS.find((l) => l.id === target)!;
+    currentLabel.textContent = meta.label;
+    currentDot.dataset.lang = target;
+    runBtn.title = `Preview ${meta.name} (${meta.hint})`;
   }
 
-  async function preview(target: 'csharp' | 'typescript' | 'python'): Promise<void> {
+  function setPreviewBusy(busy: boolean): void {
+    runBtn.disabled = busy;
+    caretBtn.disabled = busy;
+  }
+
+  // --- language picker popover (mirrors the explorer context menu) ------------
+  let langMenuEl: HTMLUListElement | null = null;
+
+  function openLangMenu(): void {
+    if (langMenuEl) {
+      closeLangMenu();
+      return;
+    }
+    const rect = (runBtn.parentElement as HTMLElement).getBoundingClientRect();
+    const menu = document.createElement('ul');
+    menu.className = 'lang-menu';
+    menu.setAttribute('role', 'menu');
+    menu.style.left = `${rect.left}px`;
+    menu.style.top = `${rect.bottom + 4}px`;
+    for (const lang of LANGS) {
+      const li = document.createElement('li');
+      li.setAttribute('role', 'none');
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'lang-menu-item';
+      btn.setAttribute('role', 'menuitemradio');
+      btn.setAttribute('aria-checked', String(lang.id === currentTarget));
+      btn.innerHTML =
+        `<span class="lang-dot" data-lang="${lang.id}" aria-hidden="true"></span>` +
+        `<span class="lang-name">${lang.name}</span>` +
+        `<span class="lang-hint">${lang.hint}</span>` +
+        '<svg class="lang-check" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8.4 6.4 12 13 4.4" /></svg>';
+      btn.addEventListener('click', () => {
+        closeLangMenu();
+        void preview(lang.id);
+      });
+      li.appendChild(btn);
+      menu.appendChild(li);
+    }
+    document.body.appendChild(menu);
+    langMenuEl = menu;
+    caretBtn.setAttribute('aria-expanded', 'true');
+    const items = Array.from(menu.querySelectorAll<HTMLElement>('.lang-menu-item'));
+    (items.find((b) => b.getAttribute('aria-checked') === 'true') ?? items[0])?.focus();
+    document.addEventListener('pointerdown', onLangDocPointer, true);
+    document.addEventListener('keydown', onLangKeydown, true);
+  }
+
+  function closeLangMenu(): void {
+    if (!langMenuEl) return;
+    langMenuEl.remove();
+    langMenuEl = null;
+    caretBtn.setAttribute('aria-expanded', 'false');
+    document.removeEventListener('pointerdown', onLangDocPointer, true);
+    document.removeEventListener('keydown', onLangKeydown, true);
+  }
+
+  function onLangDocPointer(ev: PointerEvent): void {
+    const t = ev.target as Node;
+    if (langMenuEl && !langMenuEl.contains(t) && !caretBtn.contains(t)) closeLangMenu();
+  }
+
+  function onLangKeydown(ev: KeyboardEvent): void {
+    if (!langMenuEl) return;
+    const items = Array.from(langMenuEl.querySelectorAll<HTMLElement>('.lang-menu-item'));
+    const active = document.activeElement as HTMLElement | null;
+    const i = active ? items.indexOf(active) : -1;
+    if (ev.key === 'Escape' || ev.key === 'Tab') {
+      ev.preventDefault();
+      closeLangMenu();
+      caretBtn.focus();
+    } else if (ev.key === 'ArrowDown') {
+      ev.preventDefault();
+      items[Math.min(items.length - 1, i + 1)]?.focus();
+    } else if (ev.key === 'ArrowUp') {
+      ev.preventDefault();
+      items[Math.max(0, i - 1)]?.focus();
+    } else if (ev.key === 'Home') {
+      ev.preventDefault();
+      items[0]?.focus();
+    } else if (ev.key === 'End') {
+      ev.preventDefault();
+      items[items.length - 1]?.focus();
+    }
+  }
+
+  async function preview(target: PreviewTarget): Promise<void> {
+    setTarget(target);
     selectView('preview');
     setPreviewBusy(true);
     try {
@@ -1014,9 +1113,12 @@ export function init(): void {
     }
   }
 
-  btnCs.addEventListener('click', () => void preview('csharp'));
-  btnTs.addEventListener('click', () => void preview('typescript'));
-  btnPy.addEventListener('click', () => void preview('python'));
+  runBtn.addEventListener('click', () => void preview(currentTarget));
+  caretBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    openLangMenu();
+  });
+  setTarget(currentTarget);
 
   // --- open folder (directory-mode workspace) -------------------------------
 
