@@ -48,18 +48,15 @@
           </div>
           <span class="tb-divider" aria-hidden="true"></span>
           <div class="tb-group">
-            <button type="button" id="btn-preview-cs" class="tb-primary">
-              <svg class="tb-ico" viewBox="0 0 16 16" aria-hidden="true"><path d="M6 4 2.5 8 6 12M10 4l3.5 4L10 12" /></svg>
-              C#
-            </button>
-            <button type="button" id="btn-preview-ts" class="tb-primary">
-              <svg class="tb-ico" viewBox="0 0 16 16" aria-hidden="true"><path d="M6 4 2.5 8 6 12M10 4l3.5 4L10 12" /></svg>
-              TS
-            </button>
-            <button type="button" id="btn-preview-py" class="tb-primary">
-              <svg class="tb-ico" viewBox="0 0 16 16" aria-hidden="true"><path d="M6 4 2.5 8 6 12M10 4l3.5 4L10 12" /></svg>
-              Python
-            </button>
+            <div class="lang-split" role="group" aria-label="Destination language">
+              <button type="button" id="btn-preview-run" class="tb-primary lang-run" title="Preview C# (⌘1)">
+                <span class="lang-dot" data-lang="csharp" aria-hidden="true"></span>
+                <span class="lang-run-label" id="lang-current-label">C#</span>
+              </button>
+              <button type="button" id="btn-lang-menu" class="tb-primary lang-caret" aria-haspopup="menu" aria-expanded="false" aria-label="Choose destination language" title="Choose destination language">
+                <svg class="tb-ico lang-caret-ico" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 6.5 8 10 12 6.5" /></svg>
+              </button>
+            </div>
             <button type="button" id="btn-generate-project" class="tb-primary" title="Generate a downloadable project">
               <svg class="tb-ico" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2.6v6.8M5.2 6.8 8 9.6l2.8-2.8M3.4 12.6h9.2" /></svg>
               Generate
