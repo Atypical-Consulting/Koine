@@ -16,6 +16,7 @@ import {
 } from './lsp';
 import { getPlatform, type FsEntry, type KoiFile } from './host';
 import { createExplorer } from './explorer';
+import { koineMark } from './logo';
 import { currentTheme, initTheme, onThemeChange, toggleTheme } from './theme';
 import { clearScratch, loadScratch, loadSettings, pushRecentFolder, saveScratch, type Settings } from './store';
 import { createWelcome } from './welcome';
@@ -231,6 +232,11 @@ export function init(): void {
   // the File System Access API). Everything host-specific — the LSP transport, folder/file I/O,
   // dialogs, the app version — goes through this.
   const platform = getPlatform();
+
+  // Render the header monogram from the shared template ('h' = a stable gradient id) so the welcome,
+  // about, and header marks all flow from logo.ts and can't drift apart on the next tweak.
+  const brandLogo = document.querySelector('.brand-logo');
+  if (brandLogo) brandLogo.innerHTML = koineMark('h');
 
   // Apply the persisted theme + editor font size before CodeMirror is created so the
   // editor picks up the right tokens / size on first paint.

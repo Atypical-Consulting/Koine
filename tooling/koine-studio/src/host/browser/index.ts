@@ -20,6 +20,13 @@ export class BrowserPlatform implements Platform {
     return typeof __APP_VERSION__ === 'string' ? __APP_VERSION__ : '0.0.0';
   }
 
+  openExternal(url: string): void {
+    // A null return means the popup blocker (or a sandboxed frame) stopped the new tab; log it so a
+    // link that does nothing isn't completely silent.
+    const win = window.open(url, '_blank', 'noopener,noreferrer');
+    if (!win) console.warn(`Browser blocked opening external URL: ${url}`);
+  }
+
   pickFolder(title: string): Promise<string | null> {
     return fs.pickFolder(title);
   }

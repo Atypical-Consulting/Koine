@@ -349,7 +349,7 @@ export function createExplorer(cb: ExplorerCallbacks): Explorer {
       openMenu(entry, parentDir, ev.clientX, ev.clientY);
     });
     li.addEventListener('keydown', (ev) => onRowKeydown(ev, li, entry, parentDir));
-    wireDrag(row, li, entry, parentDir);
+    wireDrag(row, li, entry);
     // Store the entry + owning <li> so keyboard nav, inline rename and focus-restore recover them.
     (row as RowEl)._entry = entry;
     (row as RowEl)._li = li;
@@ -505,11 +505,13 @@ export function createExplorer(cb: ExplorerCallbacks): Explorer {
   }
 
   // --- drag-and-drop move -----------------------------------------------------
-  // Rows are draggable; directory rows and the empty tree background are drop targets. Validity is
-  // checked structurally via DOM containment (a token is opaque, so we can't parse ancestry): a drop
-  // is rejected onto the dragged row itself, into its own subtree, or back into its current parent.
+  // Every row is draggable AND a drop target; the empty tree background drops to the opened-folder
+  // root. A directory accepts a drop INTO itself; a file accepts into its parent directory (drop
+  // "next to" it), so a drop onto a file row is never a dead zone. Validity is checked structurally
+  // via DOM containment (a token is opaque, so we can't parse ancestry): a drop is rejected onto the
+  // dragged row itself, into its own subtree, or back into the dragged item's current parent.
 
-  function wireDrag(row: HTMLElement, li: HTMLLIElement, entry: FsEntry, parentDir: string): void {
+  function wireDrag(row: HTMLElement, li: HTMLLIElement, entry: FsEntry): void {
     row.draggable = true;
     row.addEventListener('dragstart', (ev) => {
       // A rename/create input owns its own text drag; don't start a row move from inside it.
@@ -523,50 +525,50 @@ export function createExplorer(cb: ExplorerCallbacks): Explorer {
       ev.dataTransfer?.setData('text/plain', entry.name);
       if (ev.dataTransfer) ev.dataTransfer.effectAllowed = 'move';
     });
-    row.addEventListener('dragend', () => {
-      li.classList.remove('is-dragging');
+    row.addEventListener('dragend', endDrag);
+
+    row.addEventListener('dragover', (ev) => {
+      const destLi = dropDirOf(li, entry);
+      if (!canDropTo(destLi)) return;
+      ev.preventDefault();
+      ev.stopPropagation();
+      if (ev.dataTransfer) ev.dataTransfer.dropEffect = 'move';
       clearDropMarks();
-      dragEntry = null;
-      dragLi = null;
-      flushPendingRender(); // replay any diagnostics render deferred during the drag
+      markDropTarget(destLi);
     });
-
-    if (entry.kind === 'dir') {
-      row.addEventListener('dragover', (ev) => {
-        if (!canDropInto(li, entry, parentDir)) return;
-        ev.preventDefault();
-        ev.stopPropagation();
-        if (ev.dataTransfer) ev.dataTransfer.dropEffect = 'move';
-        clearDropMarks();
-        row.classList.add('is-drop-target');
-      });
-      row.addEventListener('dragleave', () => row.classList.remove('is-drop-target'));
-      row.addEventListener('drop', (ev) => {
-        if (!canDropInto(li, entry, parentDir)) return;
-        ev.preventDefault();
-        ev.stopPropagation();
-        const moved = dragEntry;
-        clearDropMarks();
-        if (moved) cb.onMove(moved, entry.token);
-      });
-    }
+    row.addEventListener('dragleave', clearDropMarks);
+    row.addEventListener('drop', (ev) => {
+      const destLi = dropDirOf(li, entry);
+      if (!canDropTo(destLi)) return;
+      ev.preventDefault();
+      ev.stopPropagation();
+      const moved = dragEntry;
+      clearDropMarks();
+      if (moved) cb.onMove(moved, destLi?.dataset.token ?? rootToken);
+      endDrag(); // don't wait for dragend, which may not fire after a synthetic/edge drop
+    });
   }
 
-  // Can the in-flight drag drop INTO directory `li`? No self-drop, no drop into the dragged subtree,
-  // and no no-op back into the item's current parent.
-  function canDropInto(li: HTMLLIElement, entry: FsEntry, _parentDir: string): boolean {
-    if (!dragEntry || !dragLi) return false;
-    if (li === dragLi) return false; // onto itself
-    if (dragLi.contains(li)) return false; // into its own descendant
-    // Already a direct child of this directory → moving here is a no-op.
-    if (parentItemOf(dragLi) === li) return false;
-    return entry.kind === 'dir';
+  // The destination directory for a drop onto `li`: the directory itself, a file's parent directory,
+  // or null for the opened-folder root (a top-level row has no parent treeitem).
+  function dropDirOf(li: HTMLLIElement, entry: FsEntry): HTMLLIElement | null {
+    return entry.kind === 'dir' ? li : parentItemOf(li);
   }
 
-  // Can the drag drop onto the empty tree background (i.e. move to the opened-folder root)?
-  function canDropRoot(): boolean {
+  // Can the in-flight drag drop into `destLi` (null = the opened-folder root)? No self-drop, no drop
+  // into the dragged subtree, and no no-op back into the dragged item's current parent.
+  function canDropTo(destLi: HTMLLIElement | null): boolean {
     if (!dragEntry || !dragLi) return false;
-    return parentItemOf(dragLi) !== null; // already at root → no-op
+    if (destLi === null) return parentItemOf(dragLi) !== null; // already at root → no-op
+    if (destLi === dragLi) return false; // onto itself
+    if (dragLi.contains(destLi)) return false; // into its own descendant
+    if (parentItemOf(dragLi) === destLi) return false; // already a direct child → no-op
+    return true;
+  }
+
+  function markDropTarget(destLi: HTMLLIElement | null): void {
+    if (destLi) destLi.querySelector(':scope > .explorer-row')?.classList.add('is-drop-target');
+    else tree.classList.add('is-drop-root');
   }
 
   function clearDropMarks(): void {
@@ -574,10 +576,21 @@ export function createExplorer(cb: ExplorerCallbacks): Explorer {
     tree.classList.remove('is-drop-root');
   }
 
+  // Clear the drag state and replay any render deferred during the drag. Idempotent: runs on both
+  // `dragend` and a successful `drop`, so a missing dragend can't strand `dragEntry` and freeze
+  // every later diagnostics re-render.
+  function endDrag(): void {
+    dragLi?.classList.remove('is-dragging');
+    clearDropMarks();
+    dragEntry = null;
+    dragLi = null;
+    flushPendingRender();
+  }
+
   // The tree background is a drop target for "move to root".
   tree.addEventListener('dragover', (ev) => {
     if ((ev.target as HTMLElement).closest('.explorer-row')) return; // a row handles its own dragover
-    if (!canDropRoot()) return;
+    if (!canDropTo(null)) return;
     ev.preventDefault();
     if (ev.dataTransfer) ev.dataTransfer.dropEffect = 'move';
     clearDropMarks();
@@ -588,11 +601,12 @@ export function createExplorer(cb: ExplorerCallbacks): Explorer {
   });
   tree.addEventListener('drop', (ev) => {
     if ((ev.target as HTMLElement).closest('.explorer-row')) return;
-    if (!canDropRoot()) return;
+    if (!canDropTo(null)) return;
     ev.preventDefault();
     const moved = dragEntry;
     clearDropMarks();
     if (moved) cb.onMove(moved, rootToken);
+    endDrag();
   });
 
   // --- inline create ----------------------------------------------------------
@@ -654,46 +668,19 @@ export function createExplorer(cb: ExplorerCallbacks): Explorer {
     li.appendChild(row);
     container.prepend(li);
 
-    let done = false;
-    const cancel = (): void => {
-      if (done) return;
-      done = true;
-      creating = false;
-      li.remove();
-      flushPendingRender();
-    };
-    const commit = (): void => {
-      if (done) return;
-      const raw = input.value.trim();
-      if (!raw) return cancel();
-      if (invalidSegment(raw)) {
-        markInvalid(input);
-        return; // keep the row open so the user can fix it
-      }
-      done = true;
-      creating = false;
-      li.remove();
-      if (kind === 'dir') cb.onNewFolder(parentDirToken, raw);
-      else cb.onNewFile(parentDirToken, raw);
-      flushPendingRender();
-    };
-
-    input.addEventListener('keydown', (ev) => {
-      ev.stopPropagation();
-      if (ev.key === 'Enter') {
-        ev.preventDefault();
-        commit();
-      } else if (ev.key === 'Escape') {
-        ev.preventDefault();
-        cancel();
-      }
-    });
-    input.addEventListener('input', () => input.classList.remove('is-invalid'));
-    // Blur commits a valid name, otherwise cancels — never traps the user in a bad-name row.
-    input.addEventListener('blur', () => {
-      const raw = input.value.trim();
-      if (raw && !invalidSegment(raw)) commit();
-      else cancel();
+    wireInlineEdit(input, {
+      onCommit: (raw) => {
+        creating = false;
+        li.remove();
+        if (kind === 'dir') cb.onNewFolder(parentDirToken, raw);
+        else cb.onNewFile(parentDirToken, raw);
+        flushPendingRender();
+      },
+      onCancel: () => {
+        creating = false;
+        li.remove();
+        flushPendingRender();
+      },
     });
 
     input.focus();
@@ -702,6 +689,50 @@ export function createExplorer(cb: ExplorerCallbacks): Explorer {
   function markInvalid(input: HTMLInputElement): void {
     input.classList.add('is-invalid');
     input.title = 'A name can’t contain “/”, “\\”, “.” or “..”.';
+  }
+
+  // Shared lifecycle for an inline-edit <input> (create + rename). Enter commits a valid name via
+  // onCommit(raw); an invalid name is flagged and the row stays open to fix; an empty name — or
+  // Escape — cancels. Blur commits a valid name, otherwise cancels, so the user is never trapped in
+  // a bad-name row. Typing clears the invalid mark. The first commit/cancel wins; onCommit/onCancel
+  // own their own teardown (row removal / label restore, flushPendingRender, focus).
+  function wireInlineEdit(
+    input: HTMLInputElement,
+    handlers: { onCommit: (raw: string) => void; onCancel: () => void },
+  ): void {
+    let done = false;
+    const cancel = (): void => {
+      if (done) return;
+      done = true;
+      handlers.onCancel();
+    };
+    const tryCommit = (): void => {
+      if (done) return;
+      const raw = input.value.trim();
+      if (!raw) return cancel();
+      if (invalidSegment(raw)) {
+        markInvalid(input);
+        return; // keep the row open so the user can fix it
+      }
+      done = true;
+      handlers.onCommit(raw);
+    };
+    input.addEventListener('keydown', (ev) => {
+      ev.stopPropagation();
+      if (ev.key === 'Enter') {
+        ev.preventDefault();
+        tryCommit();
+      } else if (ev.key === 'Escape') {
+        ev.preventDefault();
+        cancel();
+      }
+    });
+    input.addEventListener('input', () => input.classList.remove('is-invalid'));
+    input.addEventListener('blur', () => {
+      const raw = input.value.trim();
+      if (raw && !invalidSegment(raw)) tryCommit();
+      else cancel();
+    });
   }
 
   // --- inline rename ----------------------------------------------------------
@@ -724,41 +755,26 @@ export function createExplorer(cb: ExplorerCallbacks): Explorer {
     renaming = true; // defer diagnostics-driven re-renders so the tree isn't torn down mid-edit
     row.draggable = false; // let the input own text selection instead of starting a row drag
 
-    let done = false;
-    const finish = (commit: boolean): void => {
-      if (done) return;
-      const raw = input.value.trim();
-      if (commit && raw && invalidSegment(raw)) {
-        markInvalid(input);
-        return; // keep editing so a bad name can be corrected rather than silently dropped
-      }
-      done = true;
+    // Restore the row to its non-editing state (shared by commit and cancel). An invalid name on
+    // blur cancels (label restored) rather than staying open — otherwise `renaming` would stay true
+    // and freeze every later re-render; Enter still keeps an invalid name open for correction.
+    const teardown = (): void => {
       renaming = false;
       row.draggable = true;
       input.replaceWith(label);
-      if (commit && raw && raw !== entry.name) cb.onRename(entry, raw);
       li.tabIndex = 0;
       li.focus();
-      flushPendingRender(); // catch up on any render that arrived while renaming
     };
-
-    input.addEventListener('keydown', (ev) => {
-      ev.stopPropagation();
-      if (ev.key === 'Enter') {
-        ev.preventDefault();
-        finish(true);
-      } else if (ev.key === 'Escape') {
-        ev.preventDefault();
-        finish(false);
-      }
-    });
-    input.addEventListener('input', () => input.classList.remove('is-invalid'));
-    // Blur commits a valid edit; an invalid name on blur is discarded (label restored) rather than
-    // left open — otherwise `renaming` would stay true and freeze every later re-render. Enter still
-    // keeps an invalid name open for correction (the input keeps focus). Mirrors beginCreate's blur.
-    input.addEventListener('blur', () => {
-      const raw = input.value.trim();
-      finish(!(raw && invalidSegment(raw)));
+    wireInlineEdit(input, {
+      onCommit: (raw) => {
+        teardown();
+        if (raw !== entry.name) cb.onRename(entry, raw);
+        flushPendingRender(); // catch up on any render that arrived while renaming
+      },
+      onCancel: () => {
+        teardown();
+        flushPendingRender();
+      },
     });
 
     input.focus();
@@ -958,18 +974,24 @@ export function createExplorer(cb: ExplorerCallbacks): Explorer {
     openRootMenu(ev.clientX, ev.clientY);
   });
 
-  // Filter field: re-render on input; Escape clears (and keeps focus in the field).
-  filterInput.addEventListener('input', () => {
+  // Filter field: re-render on input (debounced — each keystroke would otherwise rebuild the whole
+  // tree); Escape clears immediately (and keeps focus in the field).
+  let filterTimer: ReturnType<typeof setTimeout> | undefined;
+  const applyFilter = (): void => {
     filterText = filterInput.value.trim().toLowerCase();
     render(lastEntries, lastToken);
+  };
+  filterInput.addEventListener('input', () => {
+    clearTimeout(filterTimer);
+    filterTimer = setTimeout(applyFilter, 110);
   });
   filterInput.addEventListener('keydown', (ev) => {
     if (ev.key === 'Escape' && filterInput.value) {
       ev.preventDefault();
       ev.stopPropagation();
+      clearTimeout(filterTimer);
       filterInput.value = '';
-      filterText = '';
-      render(lastEntries, lastToken);
+      applyFilter();
     }
   });
 
@@ -999,11 +1021,14 @@ export function createExplorer(cb: ExplorerCallbacks): Explorer {
     }
 
     // Auto-reveal the active file when it CHANGES: expand its ancestor folders (even ones the user
-    // collapsed) and, after the rebuild, scroll its row into view. Skipped while filtering (the filter
-    // drives visibility) and not repeated for an unchanged active file, so a diagnostics push doesn't
-    // fight the user re-collapsing a folder.
+    // collapsed) and, after the rebuild, scroll its row into view. Not repeated for an unchanged
+    // active file, so a diagnostics push doesn't fight the user re-collapsing a folder.
     let scrollActive = false;
-    if (!filterText) {
+    if (filterText) {
+      // The filter drives visibility, so don't reveal now — but forget what we last revealed so that
+      // clearing the filter re-reveals the active file (its ancestors may have been collapsed since).
+      revealedActive = null;
+    } else {
       const act = currentAnalysis.active;
       if (act && act.token !== revealedActive) {
         for (const t of act.ancestors) collapsed.delete(t);
