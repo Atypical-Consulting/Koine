@@ -30,7 +30,7 @@ export interface CompileResult {
   files: EmittedFile[];
 }
 
-export type Target = 'csharp' | 'typescript' | 'python' | 'glossary';
+export type Target = 'csharp' | 'typescript' | 'python' | 'php' | 'glossary';
 
 let apiPromise: Promise<KoineWasmApi> | null = null;
 

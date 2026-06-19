@@ -46,6 +46,7 @@ internal static class Program
                 .WithDescription("Compile a .koi model and (optionally) emit code.")
                 .WithExample("build", "domain.koi")
                 .WithExample("build", "domain.koi", "--out", "generated")
+                .WithExample("build", "./model", "--target", "php", "--out", "generated_php")
                 .WithExample("build", "./model", "--target", "glossary", "--out", "docs");
 
             config.AddCommand<WatchCommand>("watch")
