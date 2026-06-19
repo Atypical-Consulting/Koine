@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { mcpJsonSnippet, mcpStdioSnippet, MCP_CLIENTS, parseToolsList, probeMcp } from './mcp';
+import { mcpCall, mcpJsonSnippet, mcpStdioSnippet, MCP_CLIENTS, parseToolsList, probeMcp } from './mcp';
 import { BrowserPlatform } from './host/browser';
 
 describe('mcpJsonSnippet', () => {
@@ -115,6 +115,86 @@ describe('MCP probe', () => {
     const r = await probeMcp('http://127.0.0.1:1/mcp', fetchFn);
     expect(r.ok).toBe(false);
     expect(r.tools).toEqual([]);
+  });
+});
+
+describe('mcpCall', () => {
+  test('initializes, calls the tool with the session, and extracts the text result', async () => {
+    const seen: string[] = [];
+    const fetchFn = ((_url: string, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body));
+      seen.push(body.method);
+      if (body.method === 'initialize') {
+        return Promise.resolve(
+          new Response(JSON.stringify({ result: { serverInfo: { name: 'koine' } } }), {
+            status: 200,
+            headers: { 'content-type': 'application/json', 'mcp-session-id': 's1' },
+          }),
+        );
+      }
+      // tools/call: the session header is carried through and the args are passed verbatim.
+      expect(init?.headers).toMatchObject({ 'mcp-session-id': 's1' });
+      expect(body.params).toEqual({ name: 'koine_validate', arguments: { files: [{ path: 'model.koi', source: 'context X {}' }] } });
+      return Promise.resolve(
+        new Response(JSON.stringify({ result: { content: [{ type: 'text', text: 'ok: true' }] } }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        }),
+      );
+    }) as unknown as typeof fetch;
+
+    const out = await mcpCall(
+      'http://127.0.0.1:1/mcp',
+      'koine_validate',
+      { files: [{ path: 'model.koi', source: 'context X {}' }] },
+      fetchFn,
+    );
+    expect(out).toBe('ok: true');
+    expect(seen).toEqual(['initialize', 'tools/call']);
+  });
+
+  test('reads an SSE-framed tool result', async () => {
+    const fetchFn = ((_url: string, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body));
+      const payload =
+        body.method === 'initialize'
+          ? { result: { serverInfo: { name: 'koine' } } }
+          : { result: { content: [{ type: 'text', text: 'compiled to csharp' }] } };
+      return Promise.resolve(
+        new Response(`event: message\ndata: ${JSON.stringify(payload)}\n\n`, {
+          status: 200,
+          headers: { 'content-type': 'text/event-stream' },
+        }),
+      );
+    }) as unknown as typeof fetch;
+    await expect(mcpCall('http://127.0.0.1:1/mcp', 'koine_compile', {}, fetchFn)).resolves.toBe('compiled to csharp');
+  });
+
+  test('marks an isError tool result so the model treats it as a failure', async () => {
+    const fetchFn = ((_url: string, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body));
+      const payload =
+        body.method === 'initialize'
+          ? { result: {} }
+          : { result: { content: [{ type: 'text', text: 'syntax error at 1:1' }], isError: true } };
+      return Promise.resolve(
+        new Response(JSON.stringify(payload), { status: 200, headers: { 'content-type': 'application/json' } }),
+      );
+    }) as unknown as typeof fetch;
+    const out = await mcpCall('http://127.0.0.1:1/mcp', 'koine_validate', {}, fetchFn);
+    expect(out).toBe('Error: syntax error at 1:1');
+  });
+
+  test('rejects on a non-2xx tools/call', async () => {
+    const fetchFn = ((_url: string, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body));
+      return body.method === 'initialize'
+        ? Promise.resolve(
+            new Response(JSON.stringify({ result: {} }), { status: 200, headers: { 'content-type': 'application/json' } }),
+          )
+        : Promise.resolve(new Response('nope', { status: 500 }));
+    }) as unknown as typeof fetch;
+    await expect(mcpCall('http://127.0.0.1:1/mcp', 'koine_format', {}, fetchFn)).rejects.toThrow();
   });
 });
 
