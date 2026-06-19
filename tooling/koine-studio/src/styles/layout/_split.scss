@@ -1,28 +1,36 @@
 /* --- split body --- */
-/* The file tree is the first (auto) track: collapsed to 0 when hidden (scratch mode), and
-   a fixed-ish rail when a folder is open. Then: editor (1fr), a 6px draggable resizer, and the
-   inspector whose width is driven by --koi-inspector-w (defaults to 1fr until the user drags). */
+/* Five tracks: file tree (width --koi-filetree-w, defaults to auto), its 6px drag rail
+   (--koi-filetree-rail, 0 in scratch mode so no stray handle shows), editor (1fr), the
+   editor/inspector 6px resizer, and the inspector whose width is driven by --koi-inspector-w
+   (defaults to 1fr until the user drags). */
 #split {
   flex: 1 1 auto;
   display: grid;
-  grid-template-columns: auto 1fr 6px var(--koi-inspector-w, 1fr);
+  grid-template-columns:
+    var(--koi-filetree-w, auto) var(--koi-filetree-rail, 0px)
+    1fr 6px var(--koi-inspector-w, 1fr);
   min-height: 0;
 }
 
-/* Pin each pane to its track so a hidden filetree (scratch mode) just leaves track 1
+/* Pin each pane to its track so a hidden filetree (scratch mode) just leaves tracks 1–2
    empty rather than letting the remaining items auto-place into the wrong columns
-   (which would crush the inspector into the 6px resizer track). */
+   (which would crush the inspector into a resizer track). */
 #filetree {
   grid-column: 1;
 }
-#editor-pane {
+#filetree-resizer {
   grid-column: 2;
+  /* Fill the (0px-or-6px) rail track; hidden until a folder opens and sets --koi-filetree-rail. */
+  width: 100%;
 }
-#split-resizer {
+#editor-pane {
   grid-column: 3;
 }
-#right {
+#split-resizer {
   grid-column: 4;
+}
+#right {
+  grid-column: 5;
 }
 
 .pane {
@@ -47,14 +55,27 @@
   transition: background 0.12s ease;
 }
 
+/* Horizontal variant: a full-width handle that resizes the panel above/below it. */
+.koi-resizer-y {
+  width: 100%;
+  height: 6px;
+  cursor: row-resize;
+  align-self: auto;
+}
+
 .koi-resizer:hover,
 .koi-resizer:active,
 body.resizing .koi-resizer {
   background: var(--koi-accent);
 }
 
-/* Disable text selection while dragging the split. */
+/* Disable text selection while dragging, with the cursor matching the drag axis. */
 body.resizing {
   user-select: none;
+}
+body.resizing-x {
   cursor: col-resize;
+}
+body.resizing-y {
+  cursor: row-resize;
 }

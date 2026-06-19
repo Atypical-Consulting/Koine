@@ -88,6 +88,19 @@ export interface HoverResult {
   range?: Range;
 }
 
+// Standard LSP completion. `kind` is the numeric CompletionItemKind (14=Keyword, 7=Class,
+// 13=Enum, 20=EnumMember, 5=Field, 10=Property, 2=Method, …).
+export interface CompletionItem {
+  label: string;
+  kind?: number;
+  detail?: string | null;
+  documentation?: string | null;
+}
+export interface CompletionList {
+  isIncomplete: boolean;
+  items: CompletionItem[];
+}
+
 // Standard LSP Location: a uri + a range within it. `definition` may resolve to one,
 // an array, or null.
 export interface Location {
@@ -411,7 +424,7 @@ export class KoineLsp {
     this.activeUri = uri;
   }
 
-  emitPreview(target: 'csharp' | 'typescript' | 'python'): Promise<EmitPreviewResult> {
+  emitPreview(target: 'csharp' | 'typescript' | 'python' | 'php'): Promise<EmitPreviewResult> {
     return this.request<EmitPreviewResult>('koine/emitPreview', {
       textDocument: { uri: this.activeUri },
       target,
@@ -510,6 +523,16 @@ export class KoineLsp {
       textDocument: { uri: this.activeUri },
       position: { line, character },
     });
+  }
+
+  /** IntelliSense completions at a 0-based position. Resolves to [] when there are none. */
+  async completion(line: number, character: number): Promise<CompletionItem[]> {
+    const res = await this.request<CompletionList | CompletionItem[] | null>('textDocument/completion', {
+      textDocument: { uri: this.activeUri },
+      position: { line, character },
+    });
+    if (!res) return [];
+    return Array.isArray(res) ? res : res.items;
   }
 
   /** Go-to-definition at a 0-based position. Resolves to a Location, an array, or null. */

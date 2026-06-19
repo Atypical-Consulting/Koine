@@ -114,6 +114,9 @@ export class WasmLspTransport implements LspTransport {
       case 'textDocument/hover':
         return [result(JSON.parse(api.Hover(this.filesJson(), uri ?? '', pos?.line ?? 0, pos?.character ?? 0)))];
 
+      case 'textDocument/completion':
+        return [result(JSON.parse(api.Completions(this.filesJson(), uri ?? '', pos?.line ?? 0, pos?.character ?? 0)))];
+
       case 'textDocument/definition':
         return [result(JSON.parse(api.Definition(this.filesJson(), uri ?? '', pos?.line ?? 0, pos?.character ?? 0)))];
 
