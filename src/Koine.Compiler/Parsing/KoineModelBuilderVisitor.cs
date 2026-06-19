@@ -121,8 +121,64 @@ public sealed class KoineModelBuilderVisitor : KoineParserBaseVisitor<object?>
             Doc = DocFor(ctx),
             LeadingTrivia = LeadingTriviaFor(ctx),
             TrailingTrivia = TrailingTriviaFor(ctx),
-            Version = version
+            Version = version,
+            Errors = HarvestErrors(ctx)
         };
+    }
+
+    /// <summary>
+    /// Walks the ANTLR error-recovery subtree under a context and surfaces every recovery point
+    /// as a target-agnostic <see cref="ErrorNode"/> marker, instead of silently dropping it
+    /// (resilient syntax). Two cases are collected:
+    /// <list type="bullet">
+    /// <item>each <see cref="IErrorNode"/> terminal for a skipped/unexpected token → a marker over
+    /// that token's source range;</item>
+    /// <item>each ANTLR-synthesized <b>missing</b> token (single-token insertion during recovery,
+    /// detected by its zero/negative geometry — <c>StartIndex &gt; StopIndex</c>) → a marker with
+    /// <see cref="KoineNode.IsMissing"/> set and a zero-length span at the insertion point.</item>
+    /// </list>
+    /// </summary>
+    private IReadOnlyList<ErrorNode> HarvestErrors(IParseTree node)
+    {
+        var errors = new List<ErrorNode>();
+        CollectErrors(node, errors);
+        return errors.Count == 0 ? [] : errors;
+    }
+
+    private void CollectErrors(IParseTree node, List<ErrorNode> sink)
+    {
+        if (node is IErrorNode errorNode)
+        {
+            IToken token = errorNode.Symbol;
+
+            // An ANTLR-inserted phantom token (single-token insertion) has no backing source text.
+            // ANTLR renders such a token's Text as the synthesized "<missing '...'>" form (and gives
+            // it zero/negative geometry, StartIndex > StopIndex). A genuinely skipped or unexpected
+            // token carries its real source text and geometry. Detect the phantom by either signal.
+            var missing = token.StartIndex > token.StopIndex
+                || (token.Text is { } txt && txt.StartsWith("<missing", StringComparison.Ordinal));
+            if (missing)
+            {
+                // Zero-length point span at the insertion point; the phantom occupies no source.
+                var point = TokenGeometry.SpanOf(token, _file) with { Length = 0, EndLine = token.Line, EndColumn = token.Column + 1 };
+                sink.Add(new ErrorNode(token.Text ?? string.Empty) { Span = point, IsMissing = true });
+            }
+            else
+            {
+                sink.Add(new ErrorNode(token.Text ?? string.Empty)
+                {
+                    Span = TokenGeometry.SpanOf(token, _file),
+                    LeafText = token.Text
+                });
+            }
+
+            return;
+        }
+
+        for (var i = 0; i < node.ChildCount; i++)
+        {
+            CollectErrors(node.GetChild(i), sink);
+        }
     }
 
     /// <summary>

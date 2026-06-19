@@ -140,6 +140,15 @@ public sealed record ContextNode(
     /// annotations and surfaces in the glossary.
     /// </summary>
     public int? Version { get; init; }
+
+    /// <summary>
+    /// Error markers harvested from the ANTLR error-recovery tree for this context: one
+    /// <see cref="ErrorNode"/> per skipped/unexpected token and per ANTLR-synthesized missing
+    /// token (resilient syntax). Empty when the context parsed cleanly. Init-only so the
+    /// positional constructor and existing call sites are unchanged; <see cref="NodeWalker"/>
+    /// enumerates it automatically. Target-agnostic: pure source artifacts, no target concept.
+    /// </summary>
+    public IReadOnlyList<ErrorNode> Errors { get; init; } = [];
 }
 
 /// <summary>A context's declaration that it publishes an integration event (R14.3).</summary>
