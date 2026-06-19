@@ -18,7 +18,7 @@ import { getPlatform, type FsEntry, type KoiFile } from './host';
 import { createExplorer } from './explorer';
 import { koineMark } from './logo';
 import { currentTheme, initTheme, onThemeChange, toggleTheme } from './theme';
-import { clearScratch, loadScratch, loadSettings, pushRecentFolder, saveScratch, type Settings } from './store';
+import { clearScratch, initSecrets, loadScratch, loadSettings, pushRecentFolder, saveScratch, type Settings } from './store';
 import { createWelcome } from './welcome';
 import { type Example } from './examples';
 import { createCommandPalette, type Command } from './palette';
@@ -244,6 +244,11 @@ export function init(): void {
   // the File System Access API). Everything host-specific — the LSP transport, folder/file I/O,
   // dialogs, the app version — goes through this.
   const platform = getPlatform();
+
+  // Decrypt the assistant API key into store.ts's in-memory cache (and migrate any legacy plaintext
+  // key out of localStorage). Fire-and-forget: nothing at boot needs the key synchronously — the
+  // assistant reads it lazily per request, long after this resolves.
+  void initSecrets();
 
   // Render the header monogram from the shared template ('h' = a stable gradient id) so the welcome,
   // about, and header marks all flow from logo.ts and can't drift apart on the next tweak.

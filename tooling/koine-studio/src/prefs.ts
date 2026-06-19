@@ -5,7 +5,17 @@
 // reports the merged Settings back via onChange. The app's onChange handler is the single place that
 // re-skins the studio (applyAppearance + editor soft-wrap), so flipping a control applies live there;
 // only Theme is applied here directly, through ./theme's setTheme (its own live-apply + listeners).
-import { loadSettings, patchSettings, saveSettings, DEFAULT_SETTINGS, type Settings, type AccentName } from './store';
+import {
+  loadSettings,
+  patchSettings,
+  saveSettings,
+  saveApiKey,
+  clearApiKey,
+  whenSecretsReady,
+  DEFAULT_SETTINGS,
+  type Settings,
+  type AccentName,
+} from './store';
 import { setTheme } from './theme';
 import { ACCENTS, ACCENT_ORDER } from './appearance';
 import { createModal } from './overlay';
@@ -344,7 +354,10 @@ export function createPreferences(cb: PrefsCallbacks): PrefsHandle {
     const url = aiBaseUrlInput.value.trim();
     commit({ aiBaseUrl: url || 'https://api.openai.com/v1' });
   });
-  aiKeyInput.addEventListener('change', () => commit({ aiApiKey: aiKeyInput.value.trim() }));
+  // The key is a secret: it goes through the encrypted store, not the plaintext settings blob.
+  aiKeyInput.addEventListener('change', () => {
+    void saveApiKey(aiKeyInput.value.trim()).then(() => cb.onChange(loadSettings()));
+  });
   aiModelInput.addEventListener('change', () => {
     const model = aiModelInput.value.trim();
     commit(aiProviderSelect.value === 'openai' ? { aiModelOpenai: model } : { aiModel: model });
@@ -354,7 +367,7 @@ export function createPreferences(cb: PrefsCallbacks): PrefsHandle {
     'assistant',
     row('Provider', 'Which API the assistant talks to.', aiProviderSelect),
     baseUrlRow,
-    row('API key', 'Stored locally in this browser — sent only to the provider you choose.', aiKeyInput),
+    row('API key', 'Encrypted in this browser and never leaves this device — sent only to the provider you choose.', aiKeyInput),
     row('Model', 'The model id the assistant requests.', aiModelInput),
     presets,
   );
@@ -607,6 +620,7 @@ export function createPreferences(cb: PrefsCallbacks): PrefsHandle {
     }
     disarmReset();
     saveSettings({ ...DEFAULT_SETTINGS });
+    void clearApiKey(); // reset wipes the secret too, not just the plaintext settings
     const fresh = loadSettings();
     setTheme(fresh.theme); // theme has its own live-apply path (not covered by applyAppearance)
     populate(fresh);
@@ -715,6 +729,11 @@ export function createPreferences(cb: PrefsCallbacks): PrefsHandle {
     disarmReset();
     const s = loadSettings();
     populate(s);
+    // On a very fast first open the secret may still be decrypting; back-fill the key once it lands,
+    // but never clobber a value the user has already started typing.
+    void whenSecretsReady().then(() => {
+      if (aiKeyInput.value === '') aiKeyInput.value = loadSettings().aiApiKey;
+    });
     // Only the desktop, and only when the user has enabled MCP, (re)starts the sidecar on open — the
     // server is opt-in, so an unopened Settings dialog never spawns a background process.
     if (s.mcpEnabled && cb.mcpHostable !== false) {
