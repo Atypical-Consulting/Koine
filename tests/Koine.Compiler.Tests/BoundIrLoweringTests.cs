@@ -17,8 +17,8 @@ public class BoundIrLoweringTests
     private static SemanticModel Build(string src)
     {
         var (model, diagnostics) = new KoineCompiler().Parse(src);
-        Assert.Empty(diagnostics);
-        Assert.NotNull(model);
+        diagnostics.ShouldBeEmpty();
+        model.ShouldNotBeNull();
         return new SemanticModel(model!);
     }
 
@@ -38,33 +38,33 @@ public class BoundIrLoweringTests
         foreach (ValueObjectDecl vo in ValueObjects(sema))
         {
             IReadOnlyList<BoundInvariant> bound = sema.BoundInvariantsFor(vo);
-            Assert.Equal(vo.Invariants.Count, bound.Count);
+            bound.Count.ShouldBe(vo.Invariants.Count);
 
             foreach (BoundInvariant bi in bound)
             {
                 any = true;
                 // Every bound expression carries a non-null resolved type (ErrorType only where the
                 // syntactic resolver also yields error).
-                Assert.NotNull(bi.Condition.Type);
+                bi.Condition.Type.ShouldNotBeNull();
 
                 // Every BoundReference carries the SAME interned symbol the binder hands out for its
                 // syntactic origin (identity flows from the binder, not a re-lookup).
                 foreach (BoundExpression bx in Descend(bi.Condition))
                 {
-                    Assert.NotNull(bx.Type);
+                    bx.Type.ShouldNotBeNull();
                     if (bx is BoundReference r)
                     {
-                        Assert.Same(sema.GetSymbolInfo(bx.Syntax), r.Symbol);
+                        r.Symbol.ShouldBeSameAs(sema.GetSymbolInfo(bx.Syntax));
                     }
                 }
 
                 // The Syntax back-pointer is the invariant / its condition expr it was lowered from.
-                Assert.IsAssignableFrom<Invariant>(bi.Syntax);
-                Assert.Same(((Invariant)bi.Syntax).Condition, bi.Condition.Syntax);
+                bi.Syntax.ShouldBeAssignableTo<Invariant>();
+                bi.Condition.Syntax.ShouldBeSameAs(((Invariant)bi.Syntax).Condition);
             }
         }
 
-        Assert.True(any, "the billing corpus must contain at least one value-object invariant");
+        any.ShouldBeTrue("the billing corpus must contain at least one value-object invariant");
     }
 
     // ----------------------------------------------------------------------
@@ -90,13 +90,13 @@ public class BoundIrLoweringTests
 
         var byName = ValueObjects(sema).ToDictionary(v => v.Name);
 
-        BoundInvariant money = Assert.Single(sema.BoundInvariantsFor(byName["Money"]));
-        Assert.Equal("a monetary amount cannot be negative", money.Message);
+        BoundInvariant money = sema.BoundInvariantsFor(byName["Money"]).ShouldHaveSingleItem();
+        money.Message.ShouldBe("a monetary amount cannot be negative");
 
-        BoundInvariant ratio = Assert.Single(sema.BoundInvariantsFor(byName["Ratio"]));
+        BoundInvariant ratio = sema.BoundInvariantsFor(byName["Ratio"]).ShouldHaveSingleItem();
         // The `?? SourceText(condition)` default now lives in the lowerer and round-trips the Koine source.
-        Assert.Equal("value <= 1", ratio.Message);
-        Assert.Equal(Lowerer.SourceText(byName["Ratio"].Invariants[0].Condition), ratio.Message);
+        ratio.Message.ShouldBe("value <= 1");
+        ratio.Message.ShouldBe(Lowerer.SourceText(byName["Ratio"].Invariants[0].Condition));
     }
 
     // ----------------------------------------------------------------------
@@ -126,8 +126,8 @@ public class BoundIrLoweringTests
             .Where(r => r.Symbol.Name == "lo")
             .ToList();
 
-        Assert.Equal(2, loRefs.Count);
-        Assert.Same(loRefs[0].Symbol, loRefs[1].Symbol);
+        loRefs.Count.ShouldBe(2);
+        loRefs[1].Symbol.ShouldBeSameAs(loRefs[0].Symbol);
     }
 
     [Fact]
@@ -145,16 +145,16 @@ public class BoundIrLoweringTests
             """;
         var sema = Build(src);
         List<ValueObjectDecl> monies = ValueObjects(sema).Where(v => v.Name == "Money").ToList();
-        Assert.Equal(2, monies.Count);
-        Assert.NotSame(monies[0], monies[1]);
+        monies.Count.ShouldBe(2);
+        monies[1].ShouldNotBeSameAs(monies[0]);
 
-        BoundInvariant a = Assert.Single(sema.BoundInvariantsFor(monies[0]));
-        BoundInvariant b = Assert.Single(sema.BoundInvariantsFor(monies[1]));
+        BoundInvariant a = sema.BoundInvariantsFor(monies[0]).ShouldHaveSingleItem();
+        BoundInvariant b = sema.BoundInvariantsFor(monies[1]).ShouldHaveSingleItem();
 
         // Distinct cache entries: the two synthesized messages differ (>= 0 vs >= 1). A value-keyed
         // cache would collide them to one entry and one of these assertions would fail.
-        Assert.Equal("amount >= 0", a.Message);
-        Assert.Equal("amount >= 1", b.Message);
+        a.Message.ShouldBe("amount >= 0");
+        b.Message.ShouldBe("amount >= 1");
     }
 
     // ----------------------------------------------------------------------
@@ -189,31 +189,31 @@ public class BoundIrLoweringTests
         ValueObjectDecl probe = ValueObjects(sema).Single();
 
         IReadOnlyList<BoundInvariant> bound = sema.BoundInvariantsFor(probe);
-        Assert.Equal(probe.Invariants.Count, bound.Count);
+        bound.Count.ShouldBe(probe.Invariants.Count);
 
         // Every bound condition is a typed BoundExpression and every descendant has a non-null type.
         foreach (BoundInvariant bi in bound)
         {
             foreach (BoundExpression bx in Descend(bi.Condition))
             {
-                Assert.NotNull(bx.Type);
+                bx.Type.ShouldNotBeNull();
             }
         }
 
         // At least one of each headline form was actually produced.
         var all = bound.SelectMany(b => Descend(b.Condition)).ToList();
-        Assert.Contains(all, x => x is BoundBinary);
-        Assert.Contains(all, x => x is BoundUnary);
-        Assert.Contains(all, x => x is BoundMatch);
-        Assert.Contains(all, x => x is BoundGuard);
-        Assert.Contains(all, x => x is BoundMemberAccess);
-        Assert.Contains(all, x => x is BoundCall);
-        Assert.Contains(all, x => x is BoundConditional);
-        Assert.Contains(all, x => x is BoundCoalesce);
-        Assert.Contains(all, x => x is BoundLet);
-        Assert.Contains(all, x => x is BoundLambda);
-        Assert.Contains(all, x => x is BoundLiteral);
-        Assert.Contains(all, x => x is BoundReference);
+        all.ShouldContain(x => x is BoundBinary);
+        all.ShouldContain(x => x is BoundUnary);
+        all.ShouldContain(x => x is BoundMatch);
+        all.ShouldContain(x => x is BoundGuard);
+        all.ShouldContain(x => x is BoundMemberAccess);
+        all.ShouldContain(x => x is BoundCall);
+        all.ShouldContain(x => x is BoundConditional);
+        all.ShouldContain(x => x is BoundCoalesce);
+        all.ShouldContain(x => x is BoundLet);
+        all.ShouldContain(x => x is BoundLambda);
+        all.ShouldContain(x => x is BoundLiteral);
+        all.ShouldContain(x => x is BoundReference);
     }
 
     [Fact]
@@ -241,8 +241,8 @@ public class BoundIrLoweringTests
         BoundInvariant bound = lowerer.LowerInvariant(inv);
 
         var reference = Descend(bound.Condition).OfType<BoundReference>().Single();
-        Assert.Same(ErrorSymbol.Instance, reference.Symbol);
-        Assert.Equal("nope >= 0", bound.Message);
+        reference.Symbol.ShouldBeSameAs(ErrorSymbol.Instance);
+        bound.Message.ShouldBe("nope >= 0");
     }
 
     // ----------------------------------------------------------------------
@@ -276,20 +276,20 @@ public class BoundIrLoweringTests
         BoundValueObject bound = sema.BoundValueObjectFor(probe);
 
         // One bound field per declared member, same order, same name.
-        Assert.Equal(probe.Members.Select(m => m.Name), bound.Fields.Select(f => f.Name));
+        bound.Fields.Select(f => f.Name).ShouldBe(probe.Members.Select(m => m.Name));
 
         // Kind matches the shared MemberAnalysis classification the emitter used to re-derive.
         var memberNames = new HashSet<string>(probe.Members.Select(m => m.Name), StringComparer.Ordinal);
         foreach ((Member m, BoundField f) in probe.Members.Zip(bound.Fields))
         {
             FieldKind expected = MemberAnalysis.IsDerived(m, memberNames) ? FieldKind.Derived : FieldKind.CtorParam;
-            Assert.Equal(expected, f.Kind);
+            f.Kind.ShouldBe(expected);
             // Every field carries a resolved type and back-points to its member.
-            Assert.NotNull(f.Type);
-            Assert.Same(m, f.Syntax);
+            f.Type.ShouldNotBeNull();
+            f.Syntax.ShouldBeSameAs(m);
         }
 
-        Assert.Equal(FieldKind.Derived, bound.Fields.Single(f => f.Name == "doubled").Kind);
+        bound.Fields.Single(f => f.Name == "doubled").Kind.ShouldBe(FieldKind.Derived);
     }
 
     [Fact]
@@ -300,7 +300,7 @@ public class BoundIrLoweringTests
 
         // Required fields (declaration order) first; defaulted/optional (declaration order) last.
         // 'doubled' is derived and excluded entirely.
-        Assert.Equal(new[] { "amount", "tags", "codes", "meta", "note", "qty", "status" }, order);
+        order.ShouldBe(new[] { "amount", "tags", "codes", "meta", "note", "qty", "status" });
     }
 
     [Fact]
@@ -309,11 +309,11 @@ public class BoundIrLoweringTests
         var sema = Build(ProjectionSrc);
         var byName = Probe(sema).Fields.ToDictionary(f => f.Name);
 
-        Assert.Equal(DefaultKind.None, byName["amount"].DefaultKind);   // required, no initializer
-        Assert.Equal(DefaultKind.OptionalNull, byName["note"].DefaultKind); // optional, no initializer
-        Assert.Equal(DefaultKind.ConstantDefault, byName["qty"].DefaultKind); // non-enum initializer
-        Assert.Equal(DefaultKind.EnumDefault, byName["status"].DefaultKind);  // enum-typed initializer
-        Assert.Equal(DefaultKind.None, byName["doubled"].DefaultKind);  // derived => no ctor default
+        byName["amount"].DefaultKind.ShouldBe(DefaultKind.None);   // required, no initializer
+        byName["note"].DefaultKind.ShouldBe(DefaultKind.OptionalNull); // optional, no initializer
+        byName["qty"].DefaultKind.ShouldBe(DefaultKind.ConstantDefault); // non-enum initializer
+        byName["status"].DefaultKind.ShouldBe(DefaultKind.EnumDefault);  // enum-typed initializer
+        byName["doubled"].DefaultKind.ShouldBe(DefaultKind.None);  // derived => no ctor default
     }
 
     [Fact]
@@ -322,10 +322,10 @@ public class BoundIrLoweringTests
         var sema = Build(ProjectionSrc);
         var byName = Probe(sema).Fields.ToDictionary(f => f.Name);
 
-        Assert.Equal(CollectionShape.List, byName["tags"].CollectionShape);
-        Assert.Equal(CollectionShape.Set, byName["codes"].CollectionShape);
-        Assert.Equal(CollectionShape.Map, byName["meta"].CollectionShape);
-        Assert.Equal(CollectionShape.None, byName["amount"].CollectionShape);
+        byName["tags"].CollectionShape.ShouldBe(CollectionShape.List);
+        byName["codes"].CollectionShape.ShouldBe(CollectionShape.Set);
+        byName["meta"].CollectionShape.ShouldBe(CollectionShape.Map);
+        byName["amount"].CollectionShape.ShouldBe(CollectionShape.None);
     }
 
     [Fact]
@@ -336,12 +336,12 @@ public class BoundIrLoweringTests
         var byName = sema.BoundValueObjectFor(probe).Fields.ToDictionary(f => f.Name);
 
         BoundField doubled = byName["doubled"];
-        Assert.NotNull(doubled.DerivedInitializer);
+        doubled.DerivedInitializer.ShouldNotBeNull();
         // The lowered initializer back-points to the member's syntactic initializer.
-        Assert.Same(probe.Members.Single(m => m.Name == "doubled").Initializer, doubled.DerivedInitializer!.Syntax);
+        doubled.DerivedInitializer!.Syntax.ShouldBeSameAs(probe.Members.Single(m => m.Name == "doubled").Initializer);
 
-        Assert.Null(byName["amount"].DerivedInitializer);
-        Assert.Null(byName["qty"].DerivedInitializer); // a constant default is NOT a derived initializer
+        byName["amount"].DerivedInitializer.ShouldBeNull();
+        byName["qty"].DerivedInitializer.ShouldBeNull(); // a constant default is NOT a derived initializer
     }
 
     [Fact]
@@ -359,10 +359,10 @@ public class BoundIrLoweringTests
         ValueObjectDecl money = ValueObjects(sema).Single();
 
         BoundValueObject bound = sema.BoundValueObjectFor(money);
-        BoundInvariant folded = Assert.Single(bound.Invariants);
+        BoundInvariant folded = bound.Invariants.ShouldHaveSingleItem();
         // The folded invariants are the same projection the Commit-4 entry point exposes.
-        Assert.Equal(sema.BoundInvariantsFor(money), bound.Invariants);
-        Assert.Equal("amount >= 0", folded.Message);
+        bound.Invariants.ShouldBe(sema.BoundInvariantsFor(money));
+        folded.Message.ShouldBe("amount >= 0");
     }
 
     [Fact]
@@ -378,14 +378,14 @@ public class BoundIrLoweringTests
             """;
         var sema = Build(src);
         List<ValueObjectDecl> monies = ValueObjects(sema).Where(v => v.Name == "Money").ToList();
-        Assert.Equal(2, monies.Count);
+        monies.Count.ShouldBe(2);
 
         BoundValueObject a = sema.BoundValueObjectFor(monies[0]);
         BoundValueObject b = sema.BoundValueObjectFor(monies[1]);
 
         // Distinct projections: A has a derived field, B does not (a value-keyed cache would collide them).
-        Assert.Contains(a.Fields, f => f.Kind == FieldKind.Derived);
-        Assert.DoesNotContain(b.Fields, f => f.Kind == FieldKind.Derived);
+        a.Fields.ShouldContain(f => f.Kind == FieldKind.Derived);
+        b.Fields.ShouldNotContain(f => f.Kind == FieldKind.Derived);
     }
 
     [Fact]
@@ -407,16 +407,16 @@ public class BoundIrLoweringTests
         ValueObjectDecl sale = ValueObjects(sema).Single();
         BoundField isActive = sema.BoundValueObjectFor(sale).Fields.Single(f => f.Name == "isActive");
 
-        Assert.Equal(FieldKind.Derived, isActive.Kind);
-        Assert.NotNull(isActive.DerivedInitializer);
+        isActive.Kind.ShouldBe(FieldKind.Derived);
+        isActive.DerivedInitializer.ShouldNotBeNull();
 
         // The `status` reference inside the body resolves to the Status enum on the bound node — the type
         // the translator's enum-hint logic now consumes rather than re-deriving.
         BoundReference statusRef = Descend(isActive.DerivedInitializer!)
             .OfType<BoundReference>()
             .Single(r => r.Symbol.Name == "status");
-        Assert.Equal("Status", statusRef.Type.Name);
-        Assert.Equal(TypeKind.Enum, statusRef.Type.Kind);
+        statusRef.Type.Name.ShouldBe("Status");
+        statusRef.Type.Kind.ShouldBe(TypeKind.Enum);
     }
 
     // ----------------------------------------------------------------------

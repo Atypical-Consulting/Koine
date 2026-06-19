@@ -1,7 +1,6 @@
 using Koine.Compiler.Emit;
 using Koine.Compiler.Emit.TypeScript;
 using Koine.Compiler.Services;
-using Xunit.Abstractions;
 
 namespace Koine.Compiler.Tests.Conformance;
 
@@ -52,7 +51,7 @@ public class TypeScriptConformanceTests
             return;
         }
 
-        Assert.True(result.Ok, "expected well-typed TS to compile:\n" + string.Join("\n", result.Errors));
+        result.Ok.ShouldBeTrue("expected well-typed TS to compile:\n" + string.Join("\n", result.Errors));
     }
 
     /// <summary>
@@ -80,8 +79,8 @@ public class TypeScriptConformanceTests
             return;
         }
 
-        Assert.False(result.Ok, "expected ill-typed TS to be rejected by tsc --strict");
-        Assert.NotEmpty(result.Errors);
+        result.Ok.ShouldBeFalse("expected ill-typed TS to be rejected by tsc --strict");
+        result.Errors.ShouldNotBeEmpty();
     }
 
     /// <summary>
@@ -94,7 +93,7 @@ public class TypeScriptConformanceTests
     public void Emitted_typescript_typechecks_under_strict()
     {
         var result = new KoineCompiler().Compile(TypeScriptSnapshotTests.Fixture, new TypeScriptEmitter());
-        Assert.True(result.Success, string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
 
         TestSupport.TypeScriptCheck check = TestSupport.TypeCheckTypeScript(result.Files);
         if (!check.ToolchainAvailable)
@@ -103,7 +102,7 @@ public class TypeScriptConformanceTests
             return;
         }
 
-        Assert.True(check.Ok, "emitted TypeScript should type-check under --strict:\n" + string.Join("\n", check.Errors));
+        check.Ok.ShouldBeTrue("emitted TypeScript should type-check under --strict:\n" + string.Join("\n", check.Errors));
     }
 
     /// <summary>
@@ -123,7 +122,7 @@ public class TypeScriptConformanceTests
             "  }\n" +
             "}\n";
         var result = new KoineCompiler().Compile(new[] { new SourceFile("c.koi", src) }, new TypeScriptEmitter());
-        Assert.True(result.Success, string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
 
         TestSupport.TypeScriptCheck check = TestSupport.TypeCheckTypeScript(result.Files);
         if (!check.ToolchainAvailable)
@@ -132,7 +131,7 @@ public class TypeScriptConformanceTests
             return;
         }
 
-        Assert.True(check.Ok, "min/max over Decimal should type-check under --strict:\n" + string.Join("\n", check.Errors));
+        check.Ok.ShouldBeTrue("min/max over Decimal should type-check under --strict:\n" + string.Join("\n", check.Errors));
     }
 
     /// <summary>A missing toolchain yields an inconclusive-shaped result rather than a false pass.</summary>
@@ -140,8 +139,8 @@ public class TypeScriptConformanceTests
     public void Skipped_result_does_not_claim_success()
     {
         TestSupport.TypeScriptCheck skipped = TestSupport.TypeScriptCheck.Skipped;
-        Assert.False(skipped.ToolchainAvailable);
-        Assert.False(skipped.Ok);
-        Assert.Empty(skipped.Errors);
+        skipped.ToolchainAvailable.ShouldBeFalse();
+        skipped.Ok.ShouldBeFalse();
+        skipped.Errors.ShouldBeEmpty();
     }
 }

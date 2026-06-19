@@ -13,9 +13,9 @@ public class R11IdentityRepositoryTests
     private static (Assembly Asm, IReadOnlyList<Emit.EmittedFile> Files) Build(string source)
     {
         var result = new KoineCompiler().Compile(source, new CSharpEmitter());
-        Assert.True(result.Success, string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
         var (asm, errors) = TestSupport.Compile(result.Files);
-        Assert.True(asm is not null, "generated C# failed to compile:\n" + string.Join("\n", errors));
+        (asm is not null).ShouldBeTrue("generated C# failed to compile:\n" + string.Join("\n", errors));
         return (asm, result.Files);
     }
 
@@ -35,7 +35,7 @@ public class R11IdentityRepositoryTests
     [Fact]
     public void All_three_identity_strategies_compile()
     {
-        Assert.Empty(Diagnose(ThreeStrategies));
+        Diagnose(ThreeStrategies).ShouldBeEmpty();
         Build(ThreeStrategies);
     }
 
@@ -44,11 +44,11 @@ public class R11IdentityRepositoryTests
     {
         var (asm, files) = Build(ThreeStrategies);
         var src = FileContents(files, "Catalog/ValueObjects/OrderId.cs");
-        Assert.Contains("public Guid Value { get; }", src);
-        Assert.Contains("public static OrderId New()\n        => new(Guid.NewGuid());", src);
+        src.ShouldContain("public Guid Value { get; }");
+        src.ShouldContain("public static OrderId New()\n        => new(Guid.NewGuid());");
 
         var orderId = asm.GetType("Catalog.OrderId")!;
-        Assert.NotNull(orderId.GetMethod("New", BindingFlags.Public | BindingFlags.Static));
+        orderId.GetMethod("New", BindingFlags.Public | BindingFlags.Static).ShouldNotBeNull();
     }
 
     [Fact]
@@ -56,20 +56,20 @@ public class R11IdentityRepositoryTests
     {
         var (asm, files) = Build(ThreeStrategies);
         var src = FileContents(files, "Catalog/ValueObjects/Sku.cs");
-        Assert.Contains("public string Value { get; }", src);
-        Assert.DoesNotContain("New()", src);
+        src.ShouldContain("public string Value { get; }");
+        src.ShouldNotContain("New()");
 
         var sku = asm.GetType("Catalog.Sku")!;
-        Assert.Null(sku.GetMethod("New", BindingFlags.Public | BindingFlags.Static));
+        sku.GetMethod("New", BindingFlags.Public | BindingFlags.Static).ShouldBeNull();
 
         // Value equality on the wrapped string.
         var a = Activator.CreateInstance(sku, "ABC-1")!;
         var b = Activator.CreateInstance(sku, "ABC-1")!;
-        Assert.Equal(a, b);
+        b.ShouldBe(a);
 
         // A blank natural key is rejected at construction.
-        var ex = Assert.Throws<TargetInvocationException>(() => Activator.CreateInstance(sku, "   "));
-        Assert.Equal("DomainInvariantViolationException", ex.InnerException!.GetType().Name);
+        var ex = Should.Throw<TargetInvocationException>(() => Activator.CreateInstance(sku, "   "));
+        ex.InnerException!.GetType().Name.ShouldBe("DomainInvariantViolationException");
     }
 
     [Fact]
@@ -77,29 +77,29 @@ public class R11IdentityRepositoryTests
     {
         var (asm, files) = Build(ThreeStrategies);
         var src = FileContents(files, "Catalog/ValueObjects/InvoiceNo.cs");
-        Assert.Contains("public long Value { get; }", src);
-        Assert.DoesNotContain("New()", src);
+        src.ShouldContain("public long Value { get; }");
+        src.ShouldNotContain("New()");
 
         var inv = asm.GetType("Catalog.InvoiceNo")!;
-        Assert.Null(inv.GetMethod("New", BindingFlags.Public | BindingFlags.Static));
+        inv.GetMethod("New", BindingFlags.Public | BindingFlags.Static).ShouldBeNull();
         var id = Activator.CreateInstance(inv, 42L)!;
-        Assert.Equal(42L, inv.GetProperty("Value")!.GetValue(id));
+        inv.GetProperty("Value")!.GetValue(id).ShouldBe(42L);
     }
 
     [Fact]
     public void Natural_int_identity_wraps_int()
     {
         const string src = "context C {\n  entity E identified by EKey as natural(Int) { n: Int }\n}\n";
-        Assert.Empty(Diagnose(src));
+        Diagnose(src).ShouldBeEmpty();
         var (_, files) = Build(src);
-        Assert.Contains("public int Value { get; }", FileContents(files, "C/ValueObjects/EKey.cs"));
+        FileContents(files, "C/ValueObjects/EKey.cs").ShouldContain("public int Value { get; }");
     }
 
     [Fact]
     public void Natural_with_unsupported_backing_type_is_reported()
     {
         const string src = "context C {\n  entity E identified by EKey as natural(Decimal) { n: Int }\n}\n";
-        Assert.Contains(Diagnose(src), d => d.Code == DiagnosticCodes.NaturalIdBackingType);
+        Diagnose(src).ShouldContain(d => d.Code == DiagnosticCodes.NaturalIdBackingType);
     }
 
     // ---- R11.2 / R11.3 — repository interface ------------------------------
@@ -121,10 +121,10 @@ public class R11IdentityRepositoryTests
     {
         var (asm, files) = Build(OrderAggregate);
         var src = FileContents(files, "Sales/Repositories/IOrderRepository.cs");
-        Assert.Contains("public interface IOrderRepository", src);
-        Assert.Contains("Task<Order?> GetByIdAsync(OrderId id, CancellationToken ct = default);", src);
-        Assert.Contains("Task AddAsync(Order aggregate, CancellationToken ct = default);", src);
-        Assert.NotNull(asm.GetType("Sales.IOrderRepository"));
+        src.ShouldContain("public interface IOrderRepository");
+        src.ShouldContain("Task<Order?> GetByIdAsync(OrderId id, CancellationToken ct = default);");
+        src.ShouldContain("Task AddAsync(Order aggregate, CancellationToken ct = default);");
+        asm.GetType("Sales.IOrderRepository").ShouldNotBeNull();
     }
 
     [Fact]
@@ -132,8 +132,8 @@ public class R11IdentityRepositoryTests
     {
         var (_, files) = Build(OrderAggregate);
         var src = FileContents(files, "Sales/Repositories/IOrderRepository.cs");
-        Assert.Contains("UpdateAsync(", src);
-        Assert.Contains("RemoveAsync(", src);
+        src.ShouldContain("UpdateAsync(");
+        src.ShouldContain("RemoveAsync(");
     }
 
     [Fact]
@@ -149,9 +149,9 @@ public class R11IdentityRepositoryTests
             }
             """;
         var (_, files) = Build(src);
-        Assert.Single(files, f => f.RelativePath.EndsWith("Repository.cs"));
-        Assert.DoesNotContain(files, f => f.RelativePath == "Sales/Repositories/ICustomerRepository.cs");
-        Assert.DoesNotContain(files, f => f.RelativePath == "Sales/Repositories/IOrderLineRepository.cs");
+        files.Where(f => f.RelativePath.EndsWith("Repository.cs")).ShouldHaveSingleItem();
+        files.ShouldNotContain(f => f.RelativePath == "Sales/Repositories/ICustomerRepository.cs");
+        files.ShouldNotContain(f => f.RelativePath == "Sales/Repositories/IOrderLineRepository.cs");
     }
 
     [Fact]
@@ -169,11 +169,11 @@ public class R11IdentityRepositoryTests
               }
             }
             """;
-        Assert.Empty(Diagnose(src));
+        Diagnose(src).ShouldBeEmpty();
         var (_, files) = Build(src);
         var repo = FileContents(files, "Sales/Repositories/IOrderRepository.cs");
-        Assert.Contains("Task<IReadOnlyList<Order>> ByCustomerAsync(CustomerId customer, CancellationToken ct = default);", repo);
-        Assert.Contains("Task<Order?> MostRecentAsync(CustomerId customer, CancellationToken ct = default);", repo);
+        repo.ShouldContain("Task<IReadOnlyList<Order>> ByCustomerAsync(CustomerId customer, CancellationToken ct = default);");
+        repo.ShouldContain("Task<Order?> MostRecentAsync(CustomerId customer, CancellationToken ct = default);");
     }
 
     [Fact]
@@ -190,14 +190,14 @@ public class R11IdentityRepositoryTests
               }
             }
             """;
-        Assert.Empty(Diagnose(src));
+        Diagnose(src).ShouldBeEmpty();
         var (_, files) = Build(src);
         var repo = FileContents(files, "Audit/Repositories/IAuditEntryRepository.cs");
-        Assert.Contains("GetByIdAsync(", repo);
-        Assert.Contains("AddAsync(", repo);
-        Assert.DoesNotContain("UpdateAsync(", repo);
-        Assert.DoesNotContain("RemoveAsync(", repo);
-        Assert.Contains("ByMessageAsync(", repo);
+        repo.ShouldContain("GetByIdAsync(");
+        repo.ShouldContain("AddAsync(");
+        repo.ShouldNotContain("UpdateAsync(");
+        repo.ShouldNotContain("RemoveAsync(");
+        repo.ShouldContain("ByMessageAsync(");
     }
 
     [Fact]
@@ -211,7 +211,7 @@ public class R11IdentityRepositoryTests
               }
             }
             """;
-        Assert.Contains(Diagnose(src), d => d.Code == DiagnosticCodes.UnknownRepositoryOperation);
+        Diagnose(src).ShouldContain(d => d.Code == DiagnosticCodes.UnknownRepositoryOperation);
     }
 
     [Fact]
@@ -225,7 +225,7 @@ public class R11IdentityRepositoryTests
               }
             }
             """;
-        Assert.Contains(Diagnose(src), d => d.Code == DiagnosticCodes.FinderResultType);
+        Diagnose(src).ShouldContain(d => d.Code == DiagnosticCodes.FinderResultType);
     }
 
     [Fact]
@@ -240,7 +240,7 @@ public class R11IdentityRepositoryTests
               }
             }
             """;
-        Assert.Contains(Diagnose(src), d => d.Code == DiagnosticCodes.ReservedFinderParameter);
+        Diagnose(src).ShouldContain(d => d.Code == DiagnosticCodes.ReservedFinderParameter);
     }
 
     [Fact]
@@ -255,7 +255,7 @@ public class R11IdentityRepositoryTests
               }
             }
             """;
-        Assert.Contains(Diagnose(src), d => d.Code == DiagnosticCodes.FinderNameCollision);
+        Diagnose(src).ShouldContain(d => d.Code == DiagnosticCodes.FinderNameCollision);
     }
 
     [Fact]
@@ -269,7 +269,7 @@ public class R11IdentityRepositoryTests
               }
             }
             """;
-        Assert.Contains(Diagnose(src), d => d.Code == DiagnosticCodes.DuplicateParameter);
+        Diagnose(src).ShouldContain(d => d.Code == DiagnosticCodes.DuplicateParameter);
     }
 
     [Fact]
@@ -283,7 +283,7 @@ public class R11IdentityRepositoryTests
               }
             }
             """;
-        Assert.Contains(Diagnose(src), d => d.Code == DiagnosticCodes.ReservedVersionMember);
+        Diagnose(src).ShouldContain(d => d.Code == DiagnosticCodes.ReservedVersionMember);
     }
 
     [Fact]
@@ -300,7 +300,7 @@ public class R11IdentityRepositoryTests
               }
             }
             """;
-        Assert.Contains(Diagnose(src), d => d.Code == DiagnosticCodes.DuplicateFinder);
+        Diagnose(src).ShouldContain(d => d.Code == DiagnosticCodes.DuplicateFinder);
     }
 
     // ---- R11.4 — optimistic concurrency -----------------------------------
@@ -316,21 +316,21 @@ public class R11IdentityRepositoryTests
     [Fact]
     public void Versioned_aggregate_and_its_repository_compile()
     {
-        Assert.Empty(Diagnose(VersionedAggregate));
+        Diagnose(VersionedAggregate).ShouldBeEmpty();
         var (asm, files) = Build(VersionedAggregate);
 
-        Assert.Contains("public int Version { get; init; }", FileContents(files, "Sales/Order.cs"));
-        Assert.NotNull(asm.GetType("Sales.Order")!.GetProperty("Version"));
-        Assert.NotNull(asm.GetType("Koine.Runtime.ConcurrencyConflictException"));
-        Assert.Contains(files, f => f.RelativePath == "Koine/Runtime/ConcurrencyConflictException.cs");
+        FileContents(files, "Sales/Order.cs").ShouldContain("public int Version { get; init; }");
+        asm.GetType("Sales.Order")!.GetProperty("Version").ShouldNotBeNull();
+        asm.GetType("Koine.Runtime.ConcurrencyConflictException").ShouldNotBeNull();
+        files.ShouldContain(f => f.RelativePath == "Koine/Runtime/ConcurrencyConflictException.cs");
     }
 
     [Fact]
     public void Non_versioned_aggregate_has_no_version_property_or_concurrency_type()
     {
         var (_, files) = Build(OrderAggregate);
-        Assert.DoesNotContain("Version", FileContents(files, "Sales/Order.cs"));
-        Assert.DoesNotContain(files, f => f.RelativePath == "Koine/Runtime/ConcurrencyConflictException.cs");
+        FileContents(files, "Sales/Order.cs").ShouldNotContain("Version");
+        files.ShouldNotContain(f => f.RelativePath == "Koine/Runtime/ConcurrencyConflictException.cs");
     }
 
     // ---- soft keywords -----------------------------------------------------
@@ -345,6 +345,6 @@ public class R11IdentityRepositoryTests
               value V { find: Int  as: Int  natural: Int  sequence: Int  versioned: Int  repository: Int  operations: Int  guid: Int }
             }
             """;
-        Assert.Empty(Diagnose(src));
+        Diagnose(src).ShouldBeEmpty();
     }
 }

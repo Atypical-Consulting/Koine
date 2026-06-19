@@ -20,23 +20,23 @@ public class PythonRuntimeTests
     [Fact]
     public void Target_name_is_python()
     {
-        Assert.Equal("python", new PythonEmitter().TargetName);
+        new PythonEmitter().TargetName.ShouldBe("python");
     }
 
     [Fact]
     public void Emits_runtime_and_root_support_files()
     {
         var result = new KoineCompiler().Compile("context C { value V { x: Int } }", new PythonEmitter());
-        Assert.True(result.Success, string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
 
         EmittedFile? runtime = Find(result.Files, "koine_runtime.py");
-        Assert.NotNull(runtime);
-        Assert.Contains("class DomainInvariantViolationError", runtime!.Contents);
-        Assert.Contains("class ConcurrencyConflictError", runtime.Contents);
-        Assert.Contains("class Range", runtime.Contents);
+        runtime.ShouldNotBeNull();
+        runtime!.Contents.ShouldContain("class DomainInvariantViolationError");
+        runtime.Contents.ShouldContain("class ConcurrencyConflictError");
+        runtime.Contents.ShouldContain("class Range");
 
-        Assert.NotNull(Find(result.Files, "mypy.ini"));
-        Assert.NotNull(Find(result.Files, "py.typed"));
-        Assert.NotNull(Find(result.Files, "pyproject.toml"));
+        Find(result.Files, "mypy.ini").ShouldNotBeNull();
+        Find(result.Files, "py.typed").ShouldNotBeNull();
+        Find(result.Files, "pyproject.toml").ShouldNotBeNull();
     }
 }

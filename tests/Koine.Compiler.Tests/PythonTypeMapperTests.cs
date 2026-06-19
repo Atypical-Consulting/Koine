@@ -39,21 +39,21 @@ public class PythonTypeMapperTests
     public void Primitive_types_map_correctly(string koineName, string expected)
     {
         var mapper = new PythonTypeMapper(EmptyIndex());
-        Assert.Equal(expected, mapper.Map(new TypeRef(koineName)));
+        mapper.Map(new TypeRef(koineName)).ShouldBe(expected);
     }
 
     [Fact]
     public void Decimal_maps_to_Decimal()
     {
         var mapper = new PythonTypeMapper(EmptyIndex());
-        Assert.Equal("Decimal", mapper.Map(new TypeRef("Decimal")));
+        mapper.Map(new TypeRef("Decimal")).ShouldBe("Decimal");
     }
 
     [Fact]
     public void Instant_maps_to_datetime()
     {
         var mapper = new PythonTypeMapper(EmptyIndex());
-        Assert.Equal("datetime", mapper.Map(new TypeRef("Instant")));
+        mapper.Map(new TypeRef("Instant")).ShouldBe("datetime");
     }
 
     // =========================================================================
@@ -65,7 +65,7 @@ public class PythonTypeMapperTests
     {
         var mapper = new PythonTypeMapper(EmptyIndex());
         var t = new TypeRef(ModelIndex.ListTypeName, Element: new TypeRef("Int"));
-        Assert.Equal("tuple[int, ...]", mapper.Map(t));
+        mapper.Map(t).ShouldBe("tuple[int, ...]");
     }
 
     [Fact]
@@ -73,7 +73,7 @@ public class PythonTypeMapperTests
     {
         var mapper = new PythonTypeMapper(EmptyIndex());
         var t = new TypeRef(ModelIndex.SetTypeName, Element: new TypeRef("String"));
-        Assert.Equal("frozenset[str]", mapper.Map(t));
+        mapper.Map(t).ShouldBe("frozenset[str]");
     }
 
     [Fact]
@@ -81,7 +81,7 @@ public class PythonTypeMapperTests
     {
         var mapper = new PythonTypeMapper(EmptyIndex());
         var t = new TypeRef(ModelIndex.MapTypeName, Element: new TypeRef("String"), Value: new TypeRef("Int"));
-        Assert.Equal("Mapping[str, int]", mapper.Map(t));
+        mapper.Map(t).ShouldBe("Mapping[str, int]");
     }
 
     [Fact]
@@ -89,7 +89,7 @@ public class PythonTypeMapperTests
     {
         var mapper = new PythonTypeMapper(EmptyIndex());
         var t = new TypeRef(ModelIndex.RangeTypeName, Element: new TypeRef("Int"));
-        Assert.Equal("Range[int]", mapper.Map(t));
+        mapper.Map(t).ShouldBe("Range[int]");
     }
 
     // =========================================================================
@@ -101,7 +101,7 @@ public class PythonTypeMapperTests
     {
         var mapper = new PythonTypeMapper(EmptyIndex());
         var t = new TypeRef("Int", IsOptional: true);
-        Assert.Equal("int | None", mapper.Map(t));
+        mapper.Map(t).ShouldBe("int | None");
     }
 
     [Fact]
@@ -109,7 +109,7 @@ public class PythonTypeMapperTests
     {
         var mapper = new PythonTypeMapper(EmptyIndex());
         var t = new TypeRef(ModelIndex.ListTypeName, Element: new TypeRef("Int"), IsOptional: true);
-        Assert.Equal("tuple[int, ...] | None", mapper.Map(t));
+        mapper.Map(t).ShouldBe("tuple[int, ...] | None");
     }
 
     [Fact]
@@ -117,7 +117,7 @@ public class PythonTypeMapperTests
     {
         var mapper = new PythonTypeMapper(EmptyIndex());
         var t = new TypeRef("String", IsOptional: true);
-        Assert.Equal("str | None", mapper.Map(t));
+        mapper.Map(t).ShouldBe("str | None");
     }
 
     [Fact]
@@ -125,7 +125,7 @@ public class PythonTypeMapperTests
     {
         var mapper = new PythonTypeMapper(EmptyIndex());
         var t = new TypeRef("Decimal", IsOptional: true);
-        Assert.Equal("Decimal | None", mapper.Map(t));
+        mapper.Map(t).ShouldBe("Decimal | None");
     }
 
     // =========================================================================
@@ -137,7 +137,7 @@ public class PythonTypeMapperTests
     {
         var mapper = new PythonTypeMapper(EmptyIndex());
         var t = new TypeRef(ModelIndex.ListTypeName); // no element arg
-        Assert.Equal("tuple[object, ...]", mapper.Map(t));
+        mapper.Map(t).ShouldBe("tuple[object, ...]");
     }
 
     // =========================================================================
@@ -149,7 +149,7 @@ public class PythonTypeMapperTests
     {
         var mapper = new PythonTypeMapper(IndexWithEnum());
         var t = new TypeRef("Status");
-        Assert.Equal("Status", mapper.Map(t));
+        mapper.Map(t).ShouldBe("Status");
     }
 
     // =========================================================================
@@ -160,7 +160,7 @@ public class PythonTypeMapperTests
     public void Unknown_type_maps_to_PascalCase()
     {
         var mapper = new PythonTypeMapper(EmptyIndex());
-        Assert.Equal("SomeType", mapper.Map(new TypeRef("SomeType")));
+        mapper.Map(new TypeRef("SomeType")).ShouldBe("SomeType");
     }
 
     // =========================================================================
@@ -170,29 +170,29 @@ public class PythonTypeMapperTests
     [Fact]
     public void IsList_returns_true_for_List()
     {
-        Assert.True(PythonTypeMapper.IsList(new TypeRef(ModelIndex.ListTypeName)));
-        Assert.False(PythonTypeMapper.IsList(new TypeRef(ModelIndex.SetTypeName)));
+        PythonTypeMapper.IsList(new TypeRef(ModelIndex.ListTypeName)).ShouldBeTrue();
+        PythonTypeMapper.IsList(new TypeRef(ModelIndex.SetTypeName)).ShouldBeFalse();
     }
 
     [Fact]
     public void IsSet_returns_true_for_Set()
     {
-        Assert.True(PythonTypeMapper.IsSet(new TypeRef(ModelIndex.SetTypeName)));
-        Assert.False(PythonTypeMapper.IsSet(new TypeRef(ModelIndex.ListTypeName)));
+        PythonTypeMapper.IsSet(new TypeRef(ModelIndex.SetTypeName)).ShouldBeTrue();
+        PythonTypeMapper.IsSet(new TypeRef(ModelIndex.ListTypeName)).ShouldBeFalse();
     }
 
     [Fact]
     public void IsMap_returns_true_for_Map()
     {
-        Assert.True(PythonTypeMapper.IsMap(new TypeRef(ModelIndex.MapTypeName)));
-        Assert.False(PythonTypeMapper.IsMap(new TypeRef(ModelIndex.ListTypeName)));
+        PythonTypeMapper.IsMap(new TypeRef(ModelIndex.MapTypeName)).ShouldBeTrue();
+        PythonTypeMapper.IsMap(new TypeRef(ModelIndex.ListTypeName)).ShouldBeFalse();
     }
 
     [Fact]
     public void IsEnum_returns_true_for_enum_type()
     {
         var mapper = new PythonTypeMapper(IndexWithEnum());
-        Assert.True(mapper.IsEnum(new TypeRef("Status")));
-        Assert.False(mapper.IsEnum(new TypeRef("Int")));
+        mapper.IsEnum(new TypeRef("Status")).ShouldBeTrue();
+        mapper.IsEnum(new TypeRef("Int")).ShouldBeFalse();
     }
 }

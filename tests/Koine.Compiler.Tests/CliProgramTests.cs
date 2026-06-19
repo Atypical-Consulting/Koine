@@ -52,11 +52,11 @@ public class CliProgramTests
     {
         var (code, stdout, _) = Run(flag);
 
-        Assert.Equal(0, code);
-        Assert.Equal(Program.GetVersion(), stdout.Trim());
+        code.ShouldBe(0);
+        stdout.Trim().ShouldBe(Program.GetVersion());
         // Regression: it must not fall back to the four-part AssemblyVersion default.
-        Assert.NotEqual("1.0.0.0", stdout.Trim());
-        Assert.Equal("0.17.3", stdout.Trim());
+        stdout.Trim().ShouldNotBe("1.0.0.0");
+        stdout.Trim().ShouldBe("0.17.3");
     }
 
     // ---- global help / no args / unknown command ---------------------------
@@ -67,9 +67,9 @@ public class CliProgramTests
         var (code, stdout, _) = Run();
 
         // Spectre prints the root help when no command is given.
-        Assert.Equal(0, code);
-        Assert.Contains("USAGE:", stdout);
-        Assert.Contains("build", stdout);
+        code.ShouldBe(0);
+        stdout.ShouldContain("USAGE:");
+        stdout.ShouldContain("build");
     }
 
     [Theory]
@@ -79,10 +79,10 @@ public class CliProgramTests
     {
         var (code, stdout, _) = Run(flag);
 
-        Assert.Equal(0, code);
-        Assert.Contains("USAGE:", stdout);
-        Assert.Contains("build", stdout);
-        Assert.Contains("lsp", stdout);
+        code.ShouldBe(0);
+        stdout.ShouldContain("USAGE:");
+        stdout.ShouldContain("build");
+        stdout.ShouldContain("lsp");
     }
 
     [Fact]
@@ -90,8 +90,8 @@ public class CliProgramTests
     {
         var (code, stdout, _) = Run("frobnicate");
 
-        Assert.Equal(1, code);
-        Assert.Contains("Unknown command 'frobnicate'", stdout);
+        code.ShouldBe(1);
+        stdout.ShouldContain("Unknown command 'frobnicate'");
     }
 
     // ---- per-command help --------------------------------------------------
@@ -107,10 +107,10 @@ public class CliProgramTests
     {
         var (code, stdout, _) = Run(command, "--help");
 
-        Assert.Equal(0, code);
-        Assert.Contains($"koine {command}", stdout);
-        Assert.Contains("USAGE:", stdout);
-        Assert.Contains("EXAMPLES:", stdout);
+        code.ShouldBe(0);
+        stdout.ShouldContain($"koine {command}");
+        stdout.ShouldContain("USAGE:");
+        stdout.ShouldContain("EXAMPLES:");
     }
 
     [Fact]
@@ -118,8 +118,8 @@ public class CliProgramTests
     {
         var (code, stdout, _) = Run("build", "-h");
 
-        Assert.Equal(0, code);
-        Assert.Contains("koine build", stdout);
+        code.ShouldBe(0);
+        stdout.ShouldContain("koine build");
     }
 
     // ---- usage errors (Spectre, on stdout) ---------------------------------
@@ -133,8 +133,8 @@ public class CliProgramTests
         {
             var (code, stdout, _) = Run("fmt", file, "--bogus");
 
-            Assert.Equal(1, code);
-            Assert.Contains("Unknown option 'bogus'", stdout);
+            code.ShouldBe(1);
+            stdout.ShouldContain("Unknown option 'bogus'");
         }
         finally { Directory.Delete(dir, recursive: true); }
     }
@@ -144,8 +144,8 @@ public class CliProgramTests
     {
         var (code, stdout, _) = Run("build");
 
-        Assert.Equal(1, code);
-        Assert.Contains("missing required argument", stdout);
+        code.ShouldBe(1);
+        stdout.ShouldContain("missing required argument");
     }
 
     // ---- fmt --check on good and broken files ------------------------------
@@ -160,8 +160,8 @@ public class CliProgramTests
         {
             var (code, stdout, _) = Run("fmt", path, "--check");
 
-            Assert.Equal(0, code);
-            Assert.Contains("already formatted", stdout);
+            code.ShouldBe(0);
+            stdout.ShouldContain("already formatted");
         }
         finally { Directory.Delete(dir, recursive: true); }
     }
@@ -175,9 +175,9 @@ public class CliProgramTests
         {
             var (code, _, stderr) = Run("fmt", path, "--check");
 
-            Assert.Equal(1, code);
-            Assert.Contains("not formatted", stderr);
-            Assert.Equal(messy, File.ReadAllText(path));   // --check never writes
+            code.ShouldBe(1);
+            stderr.ShouldContain("not formatted");
+            File.ReadAllText(path).ShouldBe(messy);   // --check never writes
         }
         finally { Directory.Delete(dir, recursive: true); }
     }
@@ -192,10 +192,10 @@ public class CliProgramTests
         {
             var (code, _, stderr) = Run("fmt", path, "--check");
 
-            Assert.Equal(1, code);
-            Assert.Contains("could not be parsed", stderr);
-            Assert.Contains($"{path}:", stderr);            // file:line:col diagnostic
-            Assert.Equal(broken, File.ReadAllText(path));   // never modified
+            code.ShouldBe(1);
+            stderr.ShouldContain("could not be parsed");
+            stderr.ShouldContain($"{path}:");            // file:line:col diagnostic
+            File.ReadAllText(path).ShouldBe(broken);   // never modified
         }
         finally { Directory.Delete(dir, recursive: true); }
     }
@@ -209,8 +209,8 @@ public class CliProgramTests
         {
             var (code, _, _) = Run("fmt", path);
 
-            Assert.Equal(1, code);
-            Assert.Equal(broken, File.ReadAllText(path));   // fmt does not fix unparseable files
+            code.ShouldBe(1);
+            File.ReadAllText(path).ShouldBe(broken);   // fmt does not fix unparseable files
         }
         finally { Directory.Delete(dir, recursive: true); }
     }
@@ -222,10 +222,10 @@ public class CliProgramTests
     {
         var (code, _, stderr) = Run("build", "/no/such/file.koi");
 
-        Assert.Equal(1, code);
-        Assert.Contains("not found", stderr);
-        Assert.Contains("koine init", stderr);    // actionable hint
-        Assert.DoesNotContain("USAGE", stderr);   // not a help dump
+        code.ShouldBe(1);
+        stderr.ShouldContain("not found");
+        stderr.ShouldContain("koine init");    // actionable hint
+        stderr.ShouldNotContain("USAGE");   // not a help dump
     }
 
     [Fact]
@@ -236,10 +236,10 @@ public class CliProgramTests
         {
             var (code, _, stderr) = Run("build", path, "--target", "rust");
 
-            Assert.Equal(1, code);
-            Assert.Contains("unsupported target 'rust'", stderr);
-            Assert.Contains("csharp", stderr);        // lists the supported targets
-            Assert.DoesNotContain("USAGE", stderr);
+            code.ShouldBe(1);
+            stderr.ShouldContain("unsupported target 'rust'");
+            stderr.ShouldContain("csharp");        // lists the supported targets
+            stderr.ShouldNotContain("USAGE");
         }
         finally { Directory.Delete(dir, recursive: true); }
     }
@@ -256,12 +256,11 @@ public class CliProgramTests
 
             var (code, stdout, _) = Run("build", src, "--out", outDir);
 
-            Assert.Equal(0, code);
-            Assert.Contains("wrote", stdout);
-            Assert.True(Directory.EnumerateFiles(outDir, "*.cs", SearchOption.AllDirectories).Any());
+            code.ShouldBe(0);
+            stdout.ShouldContain("wrote");
+            Directory.EnumerateFiles(outDir, "*.cs", SearchOption.AllDirectories).Any().ShouldBeTrue();
             // The swap must leave no staging directories behind.
-            Assert.DoesNotContain(Directory.EnumerateDirectories(outDir),
-                d => Path.GetFileName(d).Contains("koine-tmp"));
+            Directory.EnumerateDirectories(outDir).ShouldNotContain(d => Path.GetFileName(d).Contains("koine-tmp"));
         }
         finally { Directory.Delete(dir, recursive: true); }
     }
@@ -275,8 +274,8 @@ public class CliProgramTests
         {
             var (code, stdout, _) = Run("build", src);
 
-            Assert.Equal(0, code);
-            Assert.Contains("parsed and validated", stdout);
+            code.ShouldBe(0);
+            stdout.ShouldContain("parsed and validated");
         }
         finally { Directory.Delete(dir, recursive: true); }
     }
@@ -291,12 +290,13 @@ public class CliProgramTests
             () => true, TextWriter.Null, TimeSpan.Zero,
             beforeBuild: () => beforeBuilds++);
 
-        var changes = new BlockingCollection<object> { new object() };
+        var changes = new BlockingCollection<object>();
+        changes.Add(new object(), TestContext.Current.CancellationToken);
         changes.CompleteAdding();
 
-        session.Run(changes);
+        session.Run(changes, TestContext.Current.CancellationToken);
 
-        Assert.Equal(2, beforeBuilds);   // initial build + the one rebuild
+        beforeBuilds.ShouldBe(2);   // initial build + the one rebuild
     }
 
     [Fact]
@@ -324,6 +324,6 @@ public class CliProgramTests
         var changes = new BlockingCollection<object>();   // never completed, never fed
         session.Run(changes, cts.Token);
 
-        Assert.True(builds >= 3);
+        (builds >= 3).ShouldBeTrue();
     }
 }

@@ -30,53 +30,53 @@ public class KindFolderLayoutTests
     private static IReadOnlyList<string> Paths()
     {
         var result = new KoineCompiler().Compile(Fixture, new CSharpEmitter());
-        Assert.True(result.Success, string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
         return result.Files.Select(f => f.RelativePath).ToList();
     }
 
     [Fact]
     public void Aggregate_root_sits_at_the_context_root()
     {
-        Assert.Contains("Catalog/Product.cs", Paths());
+        Paths().ShouldContain("Catalog/Product.cs");
     }
 
     [Fact]
     public void Non_root_entity_goes_under_Entities()
     {
-        Assert.Contains("Catalog/Entities/ProductReview.cs", Paths());
+        Paths().ShouldContain("Catalog/Entities/ProductReview.cs");
     }
 
     [Fact]
     public void Value_objects_and_generated_ids_go_under_ValueObjects()
     {
         var paths = Paths();
-        Assert.Contains("Catalog/ValueObjects/Sku.cs", paths);
-        Assert.Contains("Catalog/ValueObjects/ProductId.cs", paths);
-        Assert.Contains("Catalog/ValueObjects/ReviewId.cs", paths);
+        paths.ShouldContain("Catalog/ValueObjects/Sku.cs");
+        paths.ShouldContain("Catalog/ValueObjects/ProductId.cs");
+        paths.ShouldContain("Catalog/ValueObjects/ReviewId.cs");
     }
 
     [Fact]
     public void Enums_go_under_Enums()
     {
-        Assert.Contains("Catalog/Enums/Availability.cs", Paths());
+        Paths().ShouldContain("Catalog/Enums/Availability.cs");
     }
 
     [Fact]
     public void Domain_events_go_under_Events()
     {
-        Assert.Contains("Catalog/Events/ProductListed.cs", Paths());
+        Paths().ShouldContain("Catalog/Events/ProductListed.cs");
     }
 
     [Fact]
     public void Repository_interfaces_go_under_Repositories()
     {
-        Assert.Contains("Catalog/Repositories/IProductRepository.cs", Paths());
+        Paths().ShouldContain("Catalog/Repositories/IProductRepository.cs");
     }
 
     [Fact]
     public void Unit_of_work_goes_under_Abstractions()
     {
-        Assert.Contains("Catalog/Abstractions/IUnitOfWork.cs", Paths());
+        Paths().ShouldContain("Catalog/Abstractions/IUnitOfWork.cs");
     }
 
     [Fact]
@@ -84,6 +84,6 @@ public class KindFolderLayoutTests
     {
         var result = new KoineCompiler().Compile(Fixture, new CSharpEmitter());
         var sku = result.Files.Single(f => f.RelativePath == "Catalog/ValueObjects/Sku.cs").Contents;
-        Assert.Contains("namespace Catalog;", sku);
+        sku.ShouldContain("namespace Catalog;");
     }
 }

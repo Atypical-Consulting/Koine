@@ -5,7 +5,6 @@ using Koine.Compiler.Emit;
 using Koine.Compiler.Emit.CSharp;
 using Koine.Compiler.Emit.TypeScript;
 using Koine.Compiler.Services;
-using Xunit.Abstractions;
 
 namespace Koine.Compiler.Tests.Conformance;
 
@@ -254,14 +253,12 @@ public class CrossEmitterConformanceTests
             Scenario s = scenarios[i];
 
             // 1) C# must match the declared expected outcome.
-            Assert.True(csOutcomes[i] == s.Accept,
-                $"C#: scenario '{s.Name}' expected {Verb(s.Accept)} but got {Verb(csOutcomes[i])}.");
+            (csOutcomes[i] == s.Accept).ShouldBeTrue($"C#: scenario '{s.Name}' expected {Verb(s.Accept)} but got {Verb(csOutcomes[i])}.");
 
             // 2) When the TS toolchain ran, TS must match C# (the cross-emitter assertion).
             if (ts.ToolchainAvailable)
             {
-                Assert.True(ts.Outcomes[i] == csOutcomes[i],
-                    $"CROSS-EMITTER DIVERGENCE on '{s.Name}': C# {Verb(csOutcomes[i])} but " +
+                (ts.Outcomes[i] == csOutcomes[i]).ShouldBeTrue($"CROSS-EMITTER DIVERGENCE on '{s.Name}': C# {Verb(csOutcomes[i])} but " +
                     $"TypeScript {Verb(ts.Outcomes[i])} the same input.");
             }
         }
@@ -279,7 +276,7 @@ public class CrossEmitterConformanceTests
     private static bool[] RunCsharp(string koi, IReadOnlyList<Scenario> scenarios)
     {
         CompileResult emit = new KoineCompiler().Compile(koi, new CSharpEmitter());
-        Assert.True(emit.Success, "C# emit failed:\n" + string.Join("\n", emit.Diagnostics.Select(d => d.ToString())));
+        emit.Success.ShouldBeTrue("C# emit failed:\n" + string.Join("\n", emit.Diagnostics.Select(d => d.ToString())));
 
         var driver = new StringBuilder();
         driver.Append("namespace __Conformance { public static class Driver {\n");
@@ -298,7 +295,7 @@ public class CrossEmitterConformanceTests
         files.Add(new EmittedFile("__ConformanceDriver.cs", driver.ToString()));
 
         var (asm, errors) = TestSupport.Compile(files);
-        Assert.True(asm is not null, "generated C# (with driver) failed to compile:\n" + string.Join("\n", errors));
+        (asm is not null).ShouldBeTrue("generated C# (with driver) failed to compile:\n" + string.Join("\n", errors));
 
         MethodInfo run = asm!.GetType("__Conformance.Driver")!.GetMethod("Run", BindingFlags.Public | BindingFlags.Static)!;
         return (bool[])run.Invoke(null, null)!;
@@ -316,7 +313,7 @@ public class CrossEmitterConformanceTests
         }
 
         CompileResult emit = new KoineCompiler().Compile(koi, new TypeScriptEmitter());
-        Assert.True(emit.Success, "TS emit failed:\n" + string.Join("\n", emit.Diagnostics.Select(d => d.ToString())));
+        emit.Success.ShouldBeTrue("TS emit failed:\n" + string.Join("\n", emit.Diagnostics.Select(d => d.ToString())));
 
         string root = Path.Combine(Path.GetTempPath(), "koine-xemit-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(root);
@@ -393,8 +390,7 @@ public class CrossEmitterConformanceTests
             .Where(l => l is "ACCEPT" or "REJECT")
             .ToList();
 
-        Assert.True(lines.Count == expected,
-            $"TS driver printed {lines.Count} ACCEPT/REJECT lines, expected {expected}. Raw output:\n{stdout}");
+        (lines.Count == expected).ShouldBeTrue($"TS driver printed {lines.Count} ACCEPT/REJECT lines, expected {expected}. Raw output:\n{stdout}");
 
         return lines.Select(l => l == "ACCEPT").ToArray();
     }
@@ -422,7 +418,7 @@ public class CrossEmitterConformanceTests
         string stdout = proc.StandardOutput.ReadToEnd();
         string stderr = proc.StandardError.ReadToEnd();
         proc.WaitForExit();
-        Assert.True(proc.ExitCode == 0, "tsc failed to transpile the emitted TypeScript:\n" + stdout + stderr);
+        (proc.ExitCode == 0).ShouldBeTrue("tsc failed to transpile the emitted TypeScript:\n" + stdout + stderr);
     }
 
     private static string RunNode(string node, string root)
@@ -436,7 +432,7 @@ public class CrossEmitterConformanceTests
         string stdout = proc.StandardOutput.ReadToEnd();
         string stderr = proc.StandardError.ReadToEnd();
         proc.WaitForExit();
-        Assert.True(proc.ExitCode == 0, "node failed to run the conformance driver:\n" + stdout + stderr);
+        (proc.ExitCode == 0).ShouldBeTrue("node failed to run the conformance driver:\n" + stdout + stderr);
         return stdout;
     }
 

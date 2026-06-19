@@ -29,7 +29,7 @@ public class R16NamespaceMapTests
     private static IReadOnlyList<EmittedFile> Emit(string fixture, CSharpEmitterOptions options)
     {
         var result = new KoineCompiler().Compile(fixture, new CSharpEmitter(options));
-        Assert.True(result.Success, string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
         return result.Files;
     }
 
@@ -48,7 +48,7 @@ public class R16NamespaceMapTests
         var unconfigured = TestSupport.Render(
             new KoineCompiler().Compile(CrossContextFixture, new CSharpEmitter()).Files);
 
-        Assert.Equal(unconfigured, defaultRender);
+        defaultRender.ShouldBe(unconfigured);
     }
 
     [Fact]
@@ -58,14 +58,14 @@ public class R16NamespaceMapTests
 
         // The remapped context's types live under the new namespace AND the new folder.
         var money = File(files, "Money.cs");
-        Assert.StartsWith("Acme/Billing/", money.RelativePath);
-        Assert.Contains("namespace Acme.Billing;", money.Contents);
-        Assert.DoesNotContain("namespace Billing;", money.Contents);
+        money.RelativePath.ShouldStartWith("Acme/Billing/");
+        money.Contents.ShouldContain("namespace Acme.Billing;");
+        money.Contents.ShouldNotContain("namespace Billing;");
 
         // An unmapped context is untouched.
         var quote = File(files, "Quote.cs");
-        Assert.StartsWith("Sales/", quote.RelativePath);
-        Assert.Contains("namespace Sales;", quote.Contents);
+        quote.RelativePath.ShouldStartWith("Sales/");
+        quote.Contents.ShouldContain("namespace Sales;");
     }
 
     [Fact]
@@ -75,14 +75,14 @@ public class R16NamespaceMapTests
         var quote = File(files, "Quote.cs");
 
         // The imported (unqualified) cross-context use now imports the remapped namespace.
-        Assert.Contains("using Acme.Billing;", quote.Contents);
-        Assert.DoesNotContain("using Billing;", quote.Contents);
+        quote.Contents.ShouldContain("using Acme.Billing;");
+        quote.Contents.ShouldNotContain("using Billing;");
 
         // The fully-qualified reference (`Billing.Money` in the model) is rewritten too, so the
         // relocated context is referenced by its new namespace everywhere.
-        Assert.Contains("Acme.Billing.Money", quote.Contents);
+        quote.Contents.ShouldContain("Acme.Billing.Money");
         // The bare `Billing.Money` qualifier must not survive (guard against a substring of the new one).
-        Assert.DoesNotContain(" Billing.Money", quote.Contents);
+        quote.Contents.ShouldNotContain(" Billing.Money");
     }
 
     [Fact]
@@ -94,8 +94,8 @@ public class R16NamespaceMapTests
         // The Currency enum lives in Billing -> it moves; QuoteId lives in Sales -> it must not.
         var baselineQuoteId = File(baseline, "ValueObjects/QuoteId.cs");
         var remappedQuoteId = File(remapped, "ValueObjects/QuoteId.cs");
-        Assert.Equal(baselineQuoteId.RelativePath, remappedQuoteId.RelativePath);
-        Assert.Equal(baselineQuoteId.Contents, remappedQuoteId.Contents);
+        remappedQuoteId.RelativePath.ShouldBe(baselineQuoteId.RelativePath);
+        remappedQuoteId.Contents.ShouldBe(baselineQuoteId.Contents);
     }
 
     // A derived Sales member whose `let … in` body returns a cross-context value type
@@ -122,14 +122,14 @@ public class R16NamespaceMapTests
         var quote = File(files, "Quote.cs");
 
         // The IIFE delegate's return type is the remapped, fully-qualified cross-context type.
-        Assert.Contains("System.Func<Acme.Billing.Money>", quote.Contents);
+        quote.Contents.ShouldContain("System.Func<Acme.Billing.Money>");
         // The stale, unmapped qualifier must not survive anywhere in the file.
-        Assert.DoesNotContain("System.Func<Billing.Money>", quote.Contents);
-        Assert.DoesNotContain(" Billing.Money", quote.Contents);
+        quote.Contents.ShouldNotContain("System.Func<Billing.Money>");
+        quote.Contents.ShouldNotContain(" Billing.Money");
 
         // The whole tree must Roslyn-compile: the file no longer mixes old + new namespaces.
         var (assembly, errors) = TestSupport.Compile(files);
-        Assert.True(assembly is not null, string.Join("\n", errors));
+        (assembly is not null).ShouldBeTrue(string.Join("\n", errors));
     }
 
     [Fact]
@@ -140,7 +140,7 @@ public class R16NamespaceMapTests
             .Compile(LetReturningCrossContextFixture, new CSharpEmitter()).Files;
         var emptyFiles = Emit(LetReturningCrossContextFixture, CSharpEmitterOptions.Empty);
 
-        Assert.Equal(TestSupport.Render(defaultFiles), TestSupport.Render(emptyFiles));
+        TestSupport.Render(emptyFiles).ShouldBe(TestSupport.Render(defaultFiles));
     }
 
     [Fact]
@@ -153,7 +153,7 @@ public class R16NamespaceMapTests
             """);
         var parsed = config.OptionsFor("csharp");
 
-        Assert.Equal("Acme.Billing", parsed.NamespaceMap["Billing"]);
-        Assert.Equal("nodaTime", parsed.InstantMode);
+        parsed.NamespaceMap["Billing"].ShouldBe("Acme.Billing");
+        parsed.InstantMode.ShouldBe("nodaTime");
     }
 }

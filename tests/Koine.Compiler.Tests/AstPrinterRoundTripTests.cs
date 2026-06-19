@@ -15,9 +15,9 @@ public class AstPrinterRoundTripTests
     private static ContextNode ParseSingleContext(string src)
     {
         var (model, diagnostics) = new KoineCompiler().Parse(src);
-        Assert.Empty(diagnostics);
-        Assert.NotNull(model);
-        Assert.Single(model!.Contexts);
+        diagnostics.ShouldBeEmpty();
+        model.ShouldNotBeNull();
+        model!.Contexts.ShouldHaveSingleItem();
         return model.Contexts[0];
     }
 
@@ -25,7 +25,7 @@ public class AstPrinterRoundTripTests
     {
         ContextNode ctx = ParseSingleContext(src);
         var printed = new AstPrinter(src).Print(ctx);
-        Assert.Equal(src, printed);
+        printed.ShouldBe(src);
     }
 
     [Fact]
@@ -111,13 +111,13 @@ public class AstPrinterRoundTripTests
             "context B {\n  value N { y: Decimal }\n}\n" +
             "// trailer\n";
         var (model, diagnostics) = new KoineCompiler().Parse(src);
-        Assert.Empty(diagnostics);
-        Assert.NotNull(model);
-        Assert.Equal(2, model!.Contexts.Count);
+        diagnostics.ShouldBeEmpty();
+        model.ShouldNotBeNull();
+        model!.Contexts.Count.ShouldBe(2);
 
         var printer = new AstPrinter(src);
         var printed = string.Concat(model.Contexts.Select(printer.Print));
-        Assert.Equal(src, printed);
+        printed.ShouldBe(src);
     }
 
     [Fact]
@@ -132,8 +132,8 @@ public class AstPrinterRoundTripTests
         ContextNode b = model.Contexts[1];
 
         // The between-comment belongs to B's leading trivia only, never A's trailing.
-        Assert.DoesNotContain(a.TrailingTrivia, t => t.Kind == SyntaxTriviaKind.LineComment);
-        Assert.Contains(b.LeadingTrivia, t => t.Kind == SyntaxTriviaKind.LineComment);
+        a.TrailingTrivia.ShouldNotContain(t => t.Kind == SyntaxTriviaKind.LineComment);
+        b.LeadingTrivia.ShouldContain(t => t.Kind == SyntaxTriviaKind.LineComment);
     }
 
     [Fact]
@@ -146,7 +146,7 @@ public class AstPrinterRoundTripTests
         ContextNode ctx = ParseSingleContext(src);
 
         // The leading trivia of the context includes the blank-line run and the line comment.
-        Assert.Contains(ctx.LeadingTrivia, t => t.Kind == SyntaxTriviaKind.BlankLine);
-        Assert.Contains(ctx.LeadingTrivia, t => t.Kind == SyntaxTriviaKind.LineComment);
+        ctx.LeadingTrivia.ShouldContain(t => t.Kind == SyntaxTriviaKind.BlankLine);
+        ctx.LeadingTrivia.ShouldContain(t => t.Kind == SyntaxTriviaKind.LineComment);
     }
 }

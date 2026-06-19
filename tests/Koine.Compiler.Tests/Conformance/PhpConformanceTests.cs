@@ -1,5 +1,4 @@
 using Koine.Compiler.Emit;
-using Xunit.Abstractions;
 
 namespace Koine.Compiler.Tests.Conformance;
 
@@ -53,7 +52,7 @@ public class PhpConformanceTests
             return;
         }
 
-        Assert.True(r.Ok, string.Join("\n", r.Errors));
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
     }
 
     /// <summary>
@@ -81,17 +80,17 @@ public class PhpConformanceTests
             return;
         }
 
-        Assert.False(r.Ok);
-        Assert.NotEmpty(r.Errors);
+        r.Ok.ShouldBeFalse();
+        r.Errors.ShouldNotBeEmpty();
     }
 
     /// <summary>A missing toolchain yields an inconclusive-shaped result rather than a false pass.</summary>
     [Fact]
     public void Skipped_result_does_not_claim_success()
     {
-        Assert.False(TestSupport.PhpCheck.Skipped.ToolchainAvailable);
-        Assert.False(TestSupport.PhpCheck.Skipped.Ok);
-        Assert.Empty(TestSupport.PhpCheck.Skipped.Errors);
+        TestSupport.PhpCheck.Skipped.ToolchainAvailable.ShouldBeFalse();
+        TestSupport.PhpCheck.Skipped.Ok.ShouldBeFalse();
+        TestSupport.PhpCheck.Skipped.Errors.ShouldBeEmpty();
     }
 
     /// <summary>
@@ -122,6 +121,6 @@ public class PhpConformanceTests
             return;
         }
 
-        Assert.True(r.Ok, string.Join("\n", r.Errors));
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
     }
 }

@@ -9,18 +9,18 @@ public class TokenLocatorTests
     public void After_colon_and_space_preceding_is_colon_with_empty_partial()
     {
         var ctx = TokenLocator.Locate("value V {\n  amount: \n}\n", line: 1, character: 10);
-        Assert.NotNull(ctx.PrecedingToken);
-        Assert.Equal(KoineLexer.COLON, ctx.PrecedingToken!.Type);
-        Assert.Equal("", ctx.Partial);
-        Assert.Null(ctx.CurrentToken);
+        ctx.PrecedingToken.ShouldNotBeNull();
+        ctx.PrecedingToken!.Type.ShouldBe(KoineLexer.COLON);
+        ctx.Partial.ShouldBe("");
+        ctx.CurrentToken.ShouldBeNull();
     }
 
     [Fact]
     public void Mid_identifier_yields_partial_prefix()
     {
         var ctx = TokenLocator.Locate("value V {\n  status: Dr\n}\n", line: 1, character: 12);
-        Assert.NotNull(ctx.CurrentToken);
-        Assert.Equal("Dr", ctx.Partial);
+        ctx.CurrentToken.ShouldNotBeNull();
+        ctx.Partial.ShouldBe("Dr");
     }
 
     [Fact]
@@ -28,9 +28,9 @@ public class TokenLocatorTests
     {
         var src = "entity E identified by EId {\n  invariant lines.\n}\n";
         var ctx = TokenLocator.Locate(src, line: 1, character: 18);
-        Assert.NotNull(ctx.PrecedingToken);
-        Assert.Equal(KoineLexer.DOT, ctx.PrecedingToken!.Type);
-        Assert.Equal("", ctx.Partial);
+        ctx.PrecedingToken.ShouldNotBeNull();
+        ctx.PrecedingToken!.Type.ShouldBe(KoineLexer.DOT);
+        ctx.Partial.ShouldBe("");
     }
 
     [Fact]
@@ -38,7 +38,7 @@ public class TokenLocatorTests
     {
         var src = "value V {\n  invariant raw matches /ab/\n}\n";
         var ctx = TokenLocator.Locate(src, line: 1, character: 26);
-        Assert.True(ctx.InsideStringOrRegex);
+        ctx.InsideStringOrRegex.ShouldBeTrue();
     }
 
     [Fact]
@@ -46,21 +46,21 @@ public class TokenLocatorTests
     {
         var src = "context C {\n  service S {\n    \n  }\n}\n";
         var ctx = TokenLocator.Locate(src, line: 2, character: 4);
-        Assert.Equal("service", ctx.EnclosingKeyword);
+        ctx.EnclosingKeyword.ShouldBe("service");
     }
 
     [Fact]
     public void Top_level_has_no_enclosing_keyword()
     {
         var ctx = TokenLocator.Locate("\n", line: 0, character: 0);
-        Assert.Null(ctx.EnclosingKeyword);
+        ctx.EnclosingKeyword.ShouldBeNull();
     }
 
     [Fact]
     public void Broken_document_does_not_throw()
     {
         var ctx = TokenLocator.Locate("context C { value {{{ : ", line: 0, character: 24);
-        Assert.NotNull(ctx);
+        ctx.ShouldNotBeNull();
     }
 
     [Fact]
@@ -69,7 +69,7 @@ public class TokenLocatorTests
         // /// docs ...   — completion is intentionally suppressed inside doc comments
         var src = "/// describes the value\nvalue V {\n}\n";
         var ctx = TokenLocator.Locate(src, line: 0, character: 8);
-        Assert.True(ctx.InsideStringOrRegex);
+        ctx.InsideStringOrRegex.ShouldBeTrue();
     }
 
     [Fact]
@@ -77,8 +77,8 @@ public class TokenLocatorTests
     {
         // "  x: String" — cursor inside "String": current=String, preceding=':', beforePreceding='x'
         var ctx = TokenLocator.Locate("value V {\n  x: String\n}\n", line: 1, character: 8);
-        Assert.NotNull(ctx.TokenBeforePreceding);
-        Assert.Equal("x", ctx.TokenBeforePreceding!.Text);
+        ctx.TokenBeforePreceding.ShouldNotBeNull();
+        ctx.TokenBeforePreceding!.Text.ShouldBe("x");
     }
 
     [Fact]
@@ -86,6 +86,6 @@ public class TokenLocatorTests
     {
         // "  status: Dr" — cursor between 'D' and 'r' (character 11) yields "D"
         var ctx = TokenLocator.Locate("value V {\n  status: Dr\n}\n", line: 1, character: 11);
-        Assert.Equal("D", ctx.Partial);
+        ctx.Partial.ShouldBe("D");
     }
 }

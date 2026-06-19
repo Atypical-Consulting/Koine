@@ -14,8 +14,8 @@ public class BinderTests
     private static SemanticModel Build(string src)
     {
         var (model, diagnostics) = new KoineCompiler().Parse(src);
-        Assert.Empty(diagnostics);
-        Assert.NotNull(model);
+        diagnostics.ShouldBeEmpty();
+        model.ShouldNotBeNull();
         return new SemanticModel(model!);
     }
 
@@ -39,17 +39,17 @@ public class BinderTests
 
         // The two `amount` identifier references (one per invariant) are value-equal records.
         var refs = Descendants(sema).OfType<IdentifierExpr>().Where(i => i.Name == "amount").ToList();
-        Assert.Equal(2, refs.Count);
+        refs.Count.ShouldBe(2);
 
-        var s0 = Assert.IsType<MemberSymbol>(sema.GetSymbolInfo(refs[0]));
-        var s1 = Assert.IsType<MemberSymbol>(sema.GetSymbolInfo(refs[1]));
+        var s0 = sema.GetSymbolInfo(refs[0]).ShouldBeOfType<MemberSymbol>();
+        var s1 = sema.GetSymbolInfo(refs[1]).ShouldBeOfType<MemberSymbol>();
 
         // Distinct member symbols with distinct containers — fails loudly if the table dropped the
         // reference-identity comparer (both would collide to one binding).
-        Assert.NotSame(s0, s1);
-        Assert.NotSame(s0.ContainingSymbol, s1.ContainingSymbol);
-        Assert.Equal("A", ((TypeSymbol)s0.ContainingSymbol!).Name);
-        Assert.Equal("B", ((TypeSymbol)s1.ContainingSymbol!).Name);
+        s1.ShouldNotBeSameAs(s0);
+        s1.ContainingSymbol.ShouldNotBeSameAs(s0.ContainingSymbol);
+        ((TypeSymbol)s0.ContainingSymbol!).Name.ShouldBe("A");
+        ((TypeSymbol)s1.ContainingSymbol!).Name.ShouldBe("B");
     }
 
     // ----------------------------------------------------------------------
@@ -64,8 +64,8 @@ public class BinderTests
 
         Symbol? a = sema.GetDeclaredSymbol(money);
         Symbol? b = sema.GetDeclaredSymbol(money);
-        Assert.NotNull(a);
-        Assert.Same(a, b);
+        a.ShouldNotBeNull();
+        b.ShouldBeSameAs(a);
     }
 
     [Fact]
@@ -80,14 +80,13 @@ public class BinderTests
             """;
         var sema = Build(src);
 
-        TypeSymbol declared = Assert.IsType<TypeSymbol>(
-            sema.GetDeclaredSymbol(Descendants(sema).OfType<ValueObjectDecl>().Single(v => v.Name == "Money")));
+        TypeSymbol declared = sema.GetDeclaredSymbol(Descendants(sema).OfType<ValueObjectDecl>().Single(v => v.Name == "Money")).ShouldBeOfType<TypeSymbol>();
 
         var moneyRefs = Descendants(sema).OfType<TypeRef>().Where(t => t.Name == "Money").ToList();
-        Assert.Equal(3, moneyRefs.Count);
+        moneyRefs.Count.ShouldBe(3);
         foreach (TypeRef tr in moneyRefs)
         {
-            Assert.Same(declared, sema.GetSymbolInfo(tr));
+            sema.GetSymbolInfo(tr).ShouldBeSameAs(declared);
         }
     }
 
@@ -99,8 +98,8 @@ public class BinderTests
         IdentifierExpr amountRef = Descendants(sema).OfType<IdentifierExpr>().Single(i => i.Name == "amount");
 
         Symbol? declared = sema.GetDeclaredSymbol(amountDecl);
-        Assert.NotNull(declared);
-        Assert.Same(declared, sema.GetSymbolInfo(amountRef));
+        declared.ShouldNotBeNull();
+        sema.GetSymbolInfo(amountRef).ShouldBeSameAs(declared);
     }
 
     // ----------------------------------------------------------------------
@@ -148,8 +147,8 @@ public class BinderTests
             }
         }
 
-        Assert.True(checkedIdentifiers > 0, "expected at least one identifier reference");
-        Assert.True(checkedTypeRefs > 0, "expected at least one user-type reference");
+        (checkedIdentifiers > 0).ShouldBeTrue("expected at least one identifier reference");
+        (checkedTypeRefs > 0).ShouldBeTrue("expected at least one user-type reference");
     }
 
     private static bool IsUserType(SemanticModel sema, string name) =>
@@ -167,10 +166,10 @@ public class BinderTests
             return;
         }
 
-        Assert.IsType(legacy.GetType(), bound);
-        Assert.Equal(legacy.Kind, bound.Kind);
-        Assert.Equal(legacy.Name, bound.Name);
-        Assert.Equal(legacy.DeclSpan, bound.DeclSpan);
+        bound.ShouldBeOfType(legacy.GetType());
+        bound.Kind.ShouldBe(legacy.Kind);
+        bound.Name.ShouldBe(legacy.Name);
+        bound.DeclSpan.ShouldBe(legacy.DeclSpan);
     }
 
     [Fact]
@@ -185,14 +184,14 @@ public class BinderTests
         var sema = Build(src);
 
         TypeRef productId = Descendants(sema).OfType<TypeRef>().Single(t => t.Name == "ProductId");
-        var sym = Assert.IsType<IdValueObjectSymbol>(sema.GetSymbolInfo(productId));
-        Assert.Equal(Ast.SymbolKind.IdValueObject, sym.Kind);
-        Assert.Equal("ProductId", sym.Name);
-        Assert.Null(sym.Owner); // convention-only: no owning entity
+        var sym = sema.GetSymbolInfo(productId).ShouldBeOfType<IdValueObjectSymbol>();
+        sym.Kind.ShouldBe(Ast.SymbolKind.IdValueObject);
+        sym.Name.ShouldBe("ProductId");
+        sym.Owner.ShouldBeNull(); // convention-only: no owning entity
 
         // Legacy GetSymbol stays null for a convention-only *Id (contract preserved).
-        Assert.Null(sema.GetSymbol("ProductId"));
-        Assert.Null(sema.DefinitionAt(productId.Span.Offset));
+        sema.GetSymbol("ProductId").ShouldBeNull();
+        sema.DefinitionAt(productId.Span.Offset).ShouldBeNull();
     }
 
     [Fact]
@@ -207,10 +206,10 @@ public class BinderTests
         var sema = Build(src);
 
         TypeRef orderId = Descendants(sema).OfType<TypeRef>().Single(t => t.Name == "OrderId");
-        var sym = Assert.IsType<IdValueObjectSymbol>(sema.GetSymbolInfo(orderId));
-        Assert.Equal("OrderId", sym.Name);
-        Assert.NotNull(sym.Owner);
-        Assert.Equal("Order", sym.Owner!.Name);
+        var sym = sema.GetSymbolInfo(orderId).ShouldBeOfType<IdValueObjectSymbol>();
+        sym.Name.ShouldBe("OrderId");
+        sym.Owner.ShouldNotBeNull();
+        sym.Owner!.Name.ShouldBe("Order");
     }
 
     [Fact]
@@ -233,12 +232,12 @@ public class BinderTests
         TypeRef inB = Descendants(sema).OfType<TypeRef>()
             .Single(t => t.Name == "Money" && AncestorTypeName(sema, t) == "Purse");
 
-        var symA = Assert.IsType<TypeSymbol>(sema.GetSymbolInfo(inA));
-        var symB = Assert.IsType<TypeSymbol>(sema.GetSymbolInfo(inB));
+        var symA = sema.GetSymbolInfo(inA).ShouldBeOfType<TypeSymbol>();
+        var symB = sema.GetSymbolInfo(inB).ShouldBeOfType<TypeSymbol>();
 
-        Assert.NotSame(symA, symB);
-        Assert.Equal("A", ((ContextSymbol)symA.ContainingSymbol!).Name);
-        Assert.Equal("B", ((ContextSymbol)symB.ContainingSymbol!).Name);
+        symB.ShouldNotBeSameAs(symA);
+        ((ContextSymbol)symA.ContainingSymbol!).Name.ShouldBe("A");
+        ((ContextSymbol)symB.ContainingSymbol!).Name.ShouldBe("B");
     }
 
     private static string? AncestorTypeName(SemanticModel sema, KoineNode node) =>
@@ -253,12 +252,12 @@ public class BinderTests
     {
         var sema = Build("context Shop { value Money { amount: Decimal } }");
         Member amount = Descendants(sema).OfType<Member>().Single(m => m.Name == "amount");
-        var sym = Assert.IsType<MemberSymbol>(sema.GetDeclaredSymbol(amount));
-        var owner = Assert.IsType<TypeSymbol>(sym.ContainingSymbol);
-        Assert.Equal("Money", owner.Name);
-        var ctx = Assert.IsType<ContextSymbol>(owner.ContainingSymbol);
-        Assert.Equal("Shop", ctx.Name);
-        Assert.Null(ctx.ContainingSymbol); // a context is top-level
+        var sym = sema.GetDeclaredSymbol(amount).ShouldBeOfType<MemberSymbol>();
+        var owner = sym.ContainingSymbol.ShouldBeOfType<TypeSymbol>();
+        owner.Name.ShouldBe("Money");
+        var ctx = owner.ContainingSymbol.ShouldBeOfType<ContextSymbol>();
+        ctx.Name.ShouldBe("Shop");
+        ctx.ContainingSymbol.ShouldBeNull(); // a context is top-level
     }
 
     [Fact]
@@ -285,7 +284,7 @@ public class BinderTests
                 continue;
             }
 
-            Assert.NotNull(declared.ContainingSymbol);
+            declared.ContainingSymbol.ShouldNotBeNull();
         }
     }
 
@@ -304,9 +303,9 @@ public class BinderTests
 
         // The `x` reference in the body binds to the LocalSymbol whose container is the Money type.
         IdentifierExpr xRef = Descendants(sema).OfType<IdentifierExpr>().Single(i => i.Name == "x");
-        var local = Assert.IsType<LocalSymbol>(sema.GetSymbolInfo(xRef));
-        Assert.NotNull(local.ContainingSymbol);
-        Assert.Equal(Ast.SymbolKind.Local, local.Kind);
+        var local = sema.GetSymbolInfo(xRef).ShouldBeOfType<LocalSymbol>();
+        local.ContainingSymbol.ShouldNotBeNull();
+        local.Kind.ShouldBe(Ast.SymbolKind.Local);
     }
 
     // ----------------------------------------------------------------------
@@ -328,8 +327,8 @@ public class BinderTests
         var sema = Build(src);
 
         IdentifierExpr nowRef = Descendants(sema).OfType<IdentifierExpr>().Single(i => i.Name == "now");
-        Assert.Same(ErrorSymbol.Instance, sema.GetSymbolInfo(nowRef));
-        Assert.Null(sema.DefinitionAt(nowRef.Span.Offset));
+        sema.GetSymbolInfo(nowRef).ShouldBeSameAs(ErrorSymbol.Instance);
+        sema.DefinitionAt(nowRef.Span.Offset).ShouldBeNull();
     }
 
     [Fact]
@@ -338,6 +337,6 @@ public class BinderTests
         var sema = Build("context Shop { value Money { amount: Decimal } }");
         // A ValueObjectDecl is a declaration, not a reference — GetSymbolInfo returns the sentinel.
         ValueObjectDecl decl = Descendants(sema).OfType<ValueObjectDecl>().Single();
-        Assert.Same(ErrorSymbol.Instance, sema.GetSymbolInfo(decl));
+        sema.GetSymbolInfo(decl).ShouldBeSameAs(ErrorSymbol.Instance);
     }
 }

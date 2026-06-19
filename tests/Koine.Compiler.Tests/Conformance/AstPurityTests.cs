@@ -22,7 +22,7 @@ public class AstPurityTests
         var astTypes = compiler.GetTypes()
             .Where(t => (t.Namespace ?? string.Empty).StartsWith(AstNamespace, StringComparison.Ordinal))
             .ToList();
-        Assert.NotEmpty(astTypes); // sanity: we actually found the AST
+        astTypes.ShouldNotBeEmpty(); // sanity: we actually found the AST
 
         var violations = new List<string>();
         foreach (Type t in astTypes)
@@ -36,8 +36,7 @@ public class AstPurityTests
             }
         }
 
-        Assert.True(violations.Count == 0,
-            "AST must not reference emitter types:\n" + string.Join("\n", violations.Distinct()));
+        (violations.Count == 0).ShouldBeTrue("AST must not reference emitter types:\n" + string.Join("\n", violations.Distinct()));
     }
 
     /// <summary>
@@ -48,7 +47,7 @@ public class AstPurityTests
     public void Guard_detects_an_emitter_reference()
     {
         Type probe = typeof(EmitReferencingProbe);
-        Assert.Contains(ReferencedTypes(probe), IsEmitType);
+        ReferencedTypes(probe).ShouldContain(t => IsEmitType(t));
     }
 
     private static bool IsEmitType(Type t) =>

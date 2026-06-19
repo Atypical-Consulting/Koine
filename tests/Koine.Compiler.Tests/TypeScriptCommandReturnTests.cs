@@ -76,7 +76,7 @@ public class TypeScriptCommandReturnTests
     private static string CompileOrderTs(string fixture)
     {
         var result = new KoineCompiler().Compile(fixture, new TypeScriptEmitter());
-        Assert.True(result.Success, string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
         return result.Files.Single(f => f.RelativePath == "Sales/Order.ts").Contents;
     }
 
@@ -85,17 +85,17 @@ public class TypeScriptCommandReturnTests
     {
         var orderTs = CompileOrderTs(IdResultFixture);
         // Computed once, before the event references it, then returned.
-        Assert.Contains("const __result = this.id;", orderTs);
-        Assert.Contains("this._domainEvents.push(new OrderCancelled(__result));", orderTs);
-        Assert.Contains("return __result;", orderTs);
+        orderTs.ShouldContain("const __result = this.id;");
+        orderTs.ShouldContain("this._domainEvents.push(new OrderCancelled(__result));");
+        orderTs.ShouldContain("return __result;");
     }
 
     [Fact]
     public void Computed_result_not_referenced_by_an_event_is_returned_inline()
     {
         var orderTs = CompileOrderTs(ComputedResultFixture);
-        Assert.Contains("return this.total;", orderTs); // post-mutation state, no hoist
-        Assert.DoesNotContain("__result", orderTs);     // parity with the C# sibling; no stray hoist
+        orderTs.ShouldContain("return this.total;"); // post-mutation state, no hoist
+        orderTs.ShouldNotContain("__result");     // parity with the C# sibling; no stray hoist
     }
 
     [Fact]
@@ -105,9 +105,9 @@ public class TypeScriptCommandReturnTests
         // Every WHOLE-argument reuse of the result (`amount`, `doubled`) becomes `__result`; the
         // sibling `rate: taxRate + tax` is left intact — neither mangled into `__resultRate` by a
         // substring replace, nor its inner `tax` spliced (only whole arguments are substituted).
-        Assert.Contains("const __result = this.tax;", orderTs);
-        Assert.Contains("this._domainEvents.push(new Quoted(__result, (this.taxRate + this.tax), __result));", orderTs);
-        Assert.DoesNotContain("__resultRate", orderTs);
-        Assert.Contains("return __result;", orderTs);
+        orderTs.ShouldContain("const __result = this.tax;");
+        orderTs.ShouldContain("this._domainEvents.push(new Quoted(__result, (this.taxRate + this.tax), __result));");
+        orderTs.ShouldNotContain("__resultRate");
+        orderTs.ShouldContain("return __result;");
     }
 }

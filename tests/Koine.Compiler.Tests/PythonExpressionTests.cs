@@ -41,7 +41,7 @@ public class PythonExpressionTests
     private static (PythonExpressionTranslator translator, IReadOnlyList<Member> members) Make()
     {
         var result = new KoineCompiler().Compile(Source, new PythonEmitter());
-        Assert.True(result.Success, string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
 
         var model = result.Model!;
         var semantic = new SemanticModel(model);
@@ -78,21 +78,21 @@ public class PythonExpressionTests
     {
         var expr = new BinaryExpr(BinaryOp.And, Id("a"), Id("b"));
         // `a`/`b` are not members, so they fall through to bare snake identifiers.
-        Assert.Equal("(a and b)", Translate(expr));
+        Translate(expr).ShouldBe("(a and b)");
     }
 
     [Fact]
     public void Or_lowers_to_python_or()
     {
         var expr = new BinaryExpr(BinaryOp.Or, Id("a"), Id("b"));
-        Assert.Equal("(a or b)", Translate(expr));
+        Translate(expr).ShouldBe("(a or b)");
     }
 
     [Fact]
     public void Not_lowers_to_python_not()
     {
         var expr = new UnaryExpr(UnaryOp.Not, Id("a"));
-        Assert.Equal("not (a)", Translate(expr));
+        Translate(expr).ShouldBe("not (a)");
     }
 
     // =========================================================================
@@ -103,7 +103,7 @@ public class PythonExpressionTests
     public void Comparison_member_renders_self_property()
     {
         var expr = new BinaryExpr(BinaryOp.Ge, Id("quantity"), Int("1"));
-        Assert.Equal("(self.quantity >= 1)", Translate(expr));
+        Translate(expr).ShouldBe("(self.quantity >= 1)");
     }
 
     [Fact]
@@ -111,7 +111,7 @@ public class PythonExpressionTests
     {
         var (t, _) = Make();
         var expr = new BinaryExpr(BinaryOp.Ge, Id("quantity"), Int("1"));
-        Assert.Equal("(quantity >= 1)", t.Translate(expr, PythonExpressionTranslator.NameMode.Parameter));
+        t.Translate(expr, PythonExpressionTranslator.NameMode.Parameter).ShouldBe("(quantity >= 1)");
     }
 
     // =========================================================================
@@ -122,44 +122,44 @@ public class PythonExpressionTests
     public void IsEmpty_lowers_to_len_zero()
     {
         var expr = Member("lines", "isEmpty");
-        Assert.Equal("len(self.lines) == 0", Translate(expr));
+        Translate(expr).ShouldBe("len(self.lines) == 0");
     }
 
     [Fact]
     public void IsNotEmpty_lowers_to_len_not_zero()
     {
         var expr = Member("lines", "isNotEmpty");
-        Assert.Equal("len(self.lines) != 0", Translate(expr));
+        Translate(expr).ShouldBe("len(self.lines) != 0");
     }
 
     [Fact]
     public void Length_lowers_to_len()
     {
         var expr = Member("tags", "length");
-        Assert.Equal("len(self.tags)", Translate(expr));
+        Translate(expr).ShouldBe("len(self.tags)");
     }
 
     [Fact]
     public void Count_lowers_to_len()
     {
         var expr = Member("lines", "count");
-        Assert.Equal("len(self.lines)", Translate(expr));
+        Translate(expr).ShouldBe("len(self.lines)");
     }
 
     [Fact]
     public void StringOps_lower_natively()
     {
-        Assert.Equal("self.code.strip()", Translate(Member("code", "trim")));
-        Assert.Equal("self.code.lower()", Translate(Member("code", "lower")));
-        Assert.Equal("self.code.upper()", Translate(Member("code", "upper")));
-        Assert.Equal("(not self.code or self.code.isspace())", Translate(Member("code", "isBlank")));
+        Translate(Member("code", "trim")).ShouldBe("self.code.strip()");
+        Translate(Member("code", "lower")).ShouldBe("self.code.lower()");
+        Translate(Member("code", "upper")).ShouldBe("self.code.upper()");
+        Translate(Member("code", "isBlank")).ShouldBe("(not self.code or self.code.isspace())");
     }
 
     [Fact]
     public void OptionalOps_lower_to_none_checks()
     {
-        Assert.Equal("self.note is not None", Translate(Member("note", "isPresent")));
-        Assert.Equal("self.note is None", Translate(Member("note", "isNone")));
+        Translate(Member("note", "isPresent")).ShouldBe("self.note is not None");
+        Translate(Member("note", "isNone")).ShouldBe("self.note is None");
     }
 
     // =========================================================================
@@ -170,7 +170,7 @@ public class PythonExpressionTests
     public void Coalesce_lowers_to_conditional_expression()
     {
         var expr = new CoalesceExpr(Id("note"), new LiteralExpr(LiteralKind.String, "n/a"));
-        Assert.Equal("(self.note if self.note is not None else \"n/a\")", Translate(expr));
+        Translate(expr).ShouldBe("(self.note if self.note is not None else \"n/a\")");
     }
 
     [Fact]
@@ -180,15 +180,15 @@ public class PythonExpressionTests
             new BinaryExpr(BinaryOp.Ge, Id("quantity"), Int("1")),
             Int("10"),
             Int("0"));
-        Assert.Equal("(10 if (self.quantity >= 1) else 0)", Translate(expr));
+        Translate(expr).ShouldBe("(10 if (self.quantity >= 1) else 0)");
     }
 
     [Fact]
     public void Ternary_with_bool_literals_simplifies()
     {
         var cond = new BinaryExpr(BinaryOp.Ge, Id("quantity"), Int("1"));
-        Assert.Equal("(self.quantity >= 1)", Translate(new ConditionalExpr(cond, Bool(true), Bool(false))));
-        Assert.Equal("not ((self.quantity >= 1))", Translate(new ConditionalExpr(cond, Bool(false), Bool(true))));
+        Translate(new ConditionalExpr(cond, Bool(true), Bool(false))).ShouldBe("(self.quantity >= 1)");
+        Translate(new ConditionalExpr(cond, Bool(false), Bool(true))).ShouldBe("not ((self.quantity >= 1))");
     }
 
     // =========================================================================
@@ -199,7 +199,7 @@ public class PythonExpressionTests
     public void Contains_lowers_to_in()
     {
         var expr = new CallExpr(Id("tags"), "contains", new Expr[] { new LiteralExpr(LiteralKind.String, "x") });
-        Assert.Equal("(\"x\" in self.tags)", Translate(expr));
+        Translate(expr).ShouldBe("(\"x\" in self.tags)");
     }
 
     [Fact]
@@ -207,8 +207,8 @@ public class PythonExpressionTests
     {
         var sw = new CallExpr(Id("code"), "startsWith", new Expr[] { new LiteralExpr(LiteralKind.String, "X") });
         var ew = new CallExpr(Id("code"), "endsWith", new Expr[] { new LiteralExpr(LiteralKind.String, "Y") });
-        Assert.Equal("self.code.startswith(\"X\")", Translate(sw));
-        Assert.Equal("self.code.endswith(\"Y\")", Translate(ew));
+        Translate(sw).ShouldBe("self.code.startswith(\"X\")");
+        Translate(ew).ShouldBe("self.code.endswith(\"Y\")");
     }
 
     [Fact]
@@ -218,9 +218,9 @@ public class PythonExpressionTests
         var all = new CallExpr(Id("lines"), "all", new Expr[] { new LambdaExpr("m", pred) });
         var any = new CallExpr(Id("lines"), "any", new Expr[] { new LambdaExpr("m", pred) });
         var none = new CallExpr(Id("lines"), "none", new Expr[] { new LambdaExpr("m", pred) });
-        Assert.Equal("all((m.amount > 0) for m in self.lines)", Translate(all));
-        Assert.Equal("any((m.amount > 0) for m in self.lines)", Translate(any));
-        Assert.Equal("not any((m.amount > 0) for m in self.lines)", Translate(none));
+        Translate(all).ShouldBe("all((m.amount > 0) for m in self.lines)");
+        Translate(any).ShouldBe("any((m.amount > 0) for m in self.lines)");
+        Translate(none).ShouldBe("not any((m.amount > 0) for m in self.lines)");
     }
 
     // =========================================================================
@@ -234,7 +234,7 @@ public class PythonExpressionTests
         // Expect Python builtin `sum(...)`, NOT `koine_sum(...)`.
         var selector = new LambdaExpr("c", Id("c"));
         var expr = new CallExpr(Id("counts"), "sum", new Expr[] { selector });
-        Assert.Equal("sum(c for c in self.counts)", Translate(expr));
+        Translate(expr).ShouldBe("sum(c for c in self.counts)");
     }
 
     [Fact]
@@ -243,7 +243,7 @@ public class PythonExpressionTests
         // Decimal projection: empty collection has no zero, so must raise — keep koine_sum.
         var selector = new LambdaExpr("p", Id("p"));
         var expr = new CallExpr(Id("prices"), "sum", new Expr[] { selector });
-        Assert.Equal("koine_sum(p for p in self.prices)", Translate(expr));
+        Translate(expr).ShouldBe("koine_sum(p for p in self.prices)");
     }
 
     [Fact]
@@ -252,7 +252,7 @@ public class PythonExpressionTests
         // Value-object (Money) projection: no zero value — keep koine_sum.
         var selector = new LambdaExpr("m", new MemberAccessExpr(Id("m"), "amount"));
         var expr = new CallExpr(Id("lines"), "sum", new Expr[] { selector });
-        Assert.Equal("koine_sum(m.amount for m in self.lines)", Translate(expr));
+        Translate(expr).ShouldBe("koine_sum(m.amount for m in self.lines)");
     }
 
     [Fact]
@@ -261,8 +261,8 @@ public class PythonExpressionTests
         var selector = new LambdaExpr("p", new MemberAccessExpr(Id("p"), "amount"));
         var min = new CallExpr(Id("lines"), "min", new Expr[] { selector });
         var max = new CallExpr(Id("lines"), "max", new Expr[] { selector });
-        Assert.Equal("koine_min(p.amount for p in self.lines)", Translate(min));
-        Assert.Equal("koine_max(p.amount for p in self.lines)", Translate(max));
+        Translate(min).ShouldBe("koine_min(p.amount for p in self.lines)");
+        Translate(max).ShouldBe("koine_max(p.amount for p in self.lines)");
     }
 
     [Fact]
@@ -270,7 +270,7 @@ public class PythonExpressionTests
     {
         var selector = new LambdaExpr("m", new MemberAccessExpr(Id("m"), "amount"));
         var expr = new CallExpr(Id("lines"), "distinctBy", new Expr[] { selector });
-        Assert.Equal("len({m.amount for m in self.lines}) == len(self.lines)", Translate(expr));
+        Translate(expr).ShouldBe("len({m.amount for m in self.lines}) == len(self.lines)");
     }
 
     // =========================================================================
@@ -281,7 +281,7 @@ public class PythonExpressionTests
     public void Matches_lowers_to_re_search()
     {
         var expr = new MatchExpr(Id("code"), "[A-Z]{3}");
-        Assert.Equal("(re.search(r\"[A-Z]{3}\", self.code) is not None)", Translate(expr));
+        Translate(expr).ShouldBe("(re.search(r\"[A-Z]{3}\", self.code) is not None)");
     }
 
     // =========================================================================
@@ -298,7 +298,7 @@ public class PythonExpressionTests
         };
         var body = new BinaryExpr(BinaryOp.Add, Id("x"), Id("y"));
         var expr = new LetExpr(bindings, body);
-        Assert.Equal("(lambda x: (lambda y: (x + y))(2))(1)", Translate(expr));
+        Translate(expr).ShouldBe("(lambda x: (lambda y: (x + y))(2))(1)");
     }
 
     // =========================================================================
@@ -309,28 +309,28 @@ public class PythonExpressionTests
     public void Qualified_enum_access_renders_upper_snake_member()
     {
         var expr = new MemberAccessExpr(Id("OrderStatus"), "Cancelled");
-        Assert.Equal("OrderStatus.CANCELLED", Translate(expr));
+        Translate(expr).ShouldBe("OrderStatus.CANCELLED");
     }
 
     [Fact]
     public void Decimal_literal_renders_money_safe_decimal()
     {
         var expr = new LiteralExpr(LiteralKind.Decimal, "9.99");
-        Assert.Equal("Decimal(\"9.99\")", Translate(expr));
+        Translate(expr).ShouldBe("Decimal(\"9.99\")");
     }
 
     [Fact]
     public void Bool_literals_render_python_capitalised()
     {
-        Assert.Equal("True", Translate(Bool(true)));
-        Assert.Equal("False", Translate(Bool(false)));
+        Translate(Bool(true)).ShouldBe("True");
+        Translate(Bool(false)).ShouldBe("False");
     }
 
     [Fact]
     public void String_literal_is_double_quoted_and_escaped()
     {
         var expr = new LiteralExpr(LiteralKind.String, "a\"b\\c");
-        Assert.Equal("\"a\\\"b\\\\c\"", Translate(expr));
+        Translate(expr).ShouldBe("\"a\\\"b\\\\c\"");
     }
 
     // =========================================================================
@@ -342,7 +342,7 @@ public class PythonExpressionTests
     {
         var (t, _) = Make();
         var expr = new BinaryExpr(BinaryOp.Ge, Id("quantity"), Int("1"));
-        Assert.Equal("self.quantity < 1", t.TranslateNegated(expr));
+        t.TranslateNegated(expr).ShouldBe("self.quantity < 1");
     }
 
     [Fact]
@@ -350,7 +350,7 @@ public class PythonExpressionTests
     {
         var (t, _) = Make();
         var expr = new UnaryExpr(UnaryOp.Not, Id("a"));
-        Assert.Equal("a", t.TranslateNegated(expr));
+        t.TranslateNegated(expr).ShouldBe("a");
     }
 
     [Fact]
@@ -358,6 +358,6 @@ public class PythonExpressionTests
     {
         var (t, _) = Make();
         var expr = Member("lines", "isEmpty");
-        Assert.Equal("not (len(self.lines) == 0)", t.TranslateNegated(expr));
+        t.TranslateNegated(expr).ShouldBe("not (len(self.lines) == 0)");
     }
 }

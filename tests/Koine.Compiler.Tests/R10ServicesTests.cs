@@ -13,9 +13,9 @@ public class R10ServicesTests
     private static (Assembly Asm, string Files) Compile(string source)
     {
         var result = new KoineCompiler().Compile(source, new CSharpEmitter());
-        Assert.True(result.Success, string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
         var (asm, errors) = TestSupport.Compile(result.Files);
-        Assert.True(asm is not null, "generated C# failed to compile:\n" + string.Join("\n", errors));
+        (asm is not null).ShouldBeTrue("generated C# failed to compile:\n" + string.Join("\n", errors));
         return (asm, TestSupport.Render(result.Files));
     }
 
@@ -37,7 +37,7 @@ public class R10ServicesTests
     public void Spec_emits_a_reusable_predicate_that_evaluates()
     {
         var (asm, files) = Compile(SpecSrc);
-        Assert.Contains("Shop/Specifications/ShopSpecifications.cs", files);
+        files.ShouldContain("Shop/Specifications/ShopSpecifications.cs");
 
         var specs = asm.GetType("Shop.ShopSpecifications")!;
         var order = asm.GetType("Shop.Order")!;
@@ -45,8 +45,8 @@ public class R10ServicesTests
 
         var big = Activator.CreateInstance(order, 5, 2000);   // total > 1000
         var small = Activator.CreateInstance(order, 1, 1);
-        Assert.True((bool)isLarge.Invoke(null, new[] { big })!);
-        Assert.False((bool)isLarge.Invoke(null, new[] { small })!);
+        ((bool)isLarge.Invoke(null, new[] { big })!).ShouldBeTrue();
+        ((bool)isLarge.Invoke(null, new[] { small })!).ShouldBeFalse();
     }
 
     [Fact]
@@ -62,13 +62,13 @@ public class R10ServicesTests
               spec IsLarge on Order = lineCount > 10 || total > 1000
             }
             """;
-        Assert.Empty(Diagnose(src));
+        Diagnose(src).ShouldBeEmpty();
         var (asm, _) = Compile(src);
         var order = asm.GetType("Shop.Order")!;
 
         Activator.CreateInstance(order, 20, 1); // satisfies IsLarge
-        var ex = Assert.Throws<TargetInvocationException>(() => Activator.CreateInstance(order, 1, 1));
-        Assert.Equal("DomainInvariantViolationException", ex.InnerException!.GetType().Name);
+        var ex = Should.Throw<TargetInvocationException>(() => Activator.CreateInstance(order, 1, 1));
+        ex.InnerException!.GetType().Name.ShouldBe("DomainInvariantViolationException");
     }
 
     [Fact]
@@ -81,49 +81,45 @@ public class R10ServicesTests
               spec IsBig     on Order = HasLines && total > 1000
             }
             """;
-        Assert.Empty(Diagnose(src));
+        Diagnose(src).ShouldBeEmpty();
         var (asm, _) = Compile(src);
         var specs = asm.GetType("Shop.ShopSpecifications")!;
         var order = asm.GetType("Shop.Order")!;
         var isBig = specs.GetMethod("IsBig")!;
 
-        Assert.True((bool)isBig.Invoke(null, new[] { Activator.CreateInstance(order, 1, 2000) })!);
-        Assert.False((bool)isBig.Invoke(null, new[] { Activator.CreateInstance(order, 0, 2000) })!); // HasLines fails
+        ((bool)isBig.Invoke(null, new[] { Activator.CreateInstance(order, 1, 2000) })!).ShouldBeTrue();
+        ((bool)isBig.Invoke(null, new[] { Activator.CreateInstance(order, 0, 2000) })!).ShouldBeFalse(); // HasLines fails
     }
 
     [Fact]
     public void Spec_on_unknown_target_is_reported()
     {
-        Assert.Contains(Diagnose("context C { spec X on Bogus = true }"),
-            d => d.Code == DiagnosticCodes.SpecUnknownTarget);
+        Diagnose("context C { spec X on Bogus = true }").ShouldContain(d => d.Code == DiagnosticCodes.SpecUnknownTarget);
     }
 
     [Fact]
     public void Non_boolean_spec_is_reported()
     {
-        Assert.Contains(Diagnose("context C { value V { n: Int }  spec X on V = n }"),
-            d => d.Code == DiagnosticCodes.SpecNotBoolean);
+        Diagnose("context C { value V { n: Int }  spec X on V = n }").ShouldContain(d => d.Code == DiagnosticCodes.SpecNotBoolean);
     }
 
     [Fact]
     public void Spec_cycle_is_reported()
     {
         const string src = "context C { value V { n: Int }  spec A on V = B  spec B on V = A }";
-        Assert.Contains(Diagnose(src), d => d.Code == DiagnosticCodes.SpecCycle);
+        Diagnose(src).ShouldContain(d => d.Code == DiagnosticCodes.SpecCycle);
     }
 
     [Fact]
     public void Self_referential_spec_is_reported()
     {
-        Assert.Contains(Diagnose("context C { value V { n: Int }  spec A on V = A && n > 0 }"),
-            d => d.Code == DiagnosticCodes.SpecCycle);
+        Diagnose("context C { value V { n: Int }  spec A on V = A && n > 0 }").ShouldContain(d => d.Code == DiagnosticCodes.SpecCycle);
     }
 
     [Fact]
     public void Spec_colliding_with_a_member_is_reported()
     {
-        Assert.Contains(Diagnose("context C { value V { active: Bool }  spec active on V = active }"),
-            d => d.Code == DiagnosticCodes.DuplicateSpec);
+        Diagnose("context C { value V { active: Bool }  spec active on V = active }").ShouldContain(d => d.Code == DiagnosticCodes.DuplicateSpec);
     }
 
     // ======================================================================
@@ -141,45 +137,44 @@ public class R10ServicesTests
               }
             }
             """;
-        Assert.Empty(Diagnose(src));
+        Diagnose(src).ShouldBeEmpty();
         var (asm, _) = Compile(src);
 
         var svcType = asm.GetType("Fx.ExchangeRateService")!;
         var money = asm.GetType("Fx.Money")!;
         var svc = Activator.CreateInstance(svcType);
         var result = svcType.GetMethod("Convert")!.Invoke(svc, new[] { Activator.CreateInstance(money, 2.0m), 3.0m });
-        Assert.Equal(6.0m, money.GetProperty("Amount")!.GetValue(result));
+        money.GetProperty("Amount")!.GetValue(result).ShouldBe(6.0m);
     }
 
     [Fact]
     public void Seam_operation_emits_an_abstract_class()
     {
         const string src = "context C { service Calc { operation run(a: Int): Int } }";
-        Assert.Empty(Diagnose(src));
+        Diagnose(src).ShouldBeEmpty();
         var (asm, files) = Compile(src);
-        Assert.Contains("public abstract class Calc", files);
-        Assert.Contains("public abstract int Run(int a);", files);
-        Assert.True(asm.GetType("C.Calc")!.IsAbstract);
+        files.ShouldContain("public abstract class Calc");
+        files.ShouldContain("public abstract int Run(int a);");
+        asm.GetType("C.Calc")!.IsAbstract.ShouldBeTrue();
     }
 
     [Fact]
     public void Operation_return_type_mismatch_is_reported()
     {
-        Assert.Contains(Diagnose("context C { service S { operation f(a: Int): String = a } }"),
-            d => d.Code == DiagnosticCodes.ServiceReturnMismatch);
+        Diagnose("context C { service S { operation f(a: Int): String = a } }").ShouldContain(d => d.Code == DiagnosticCodes.ServiceReturnMismatch);
     }
 
     [Fact]
     public void Duplicate_operation_is_reported()
     {
         const string src = "context C { service S { operation f(a: Int): Int = a  operation f(b: Int): Int = b } }";
-        Assert.Contains(Diagnose(src), d => d.Code == DiagnosticCodes.DuplicateOperation);
+        Diagnose(src).ShouldContain(d => d.Code == DiagnosticCodes.DuplicateOperation);
     }
 
     [Fact]
     public void Service_is_usable_as_a_field_name()
     {
-        Assert.Empty(Diagnose("context C { value V { service: Int  operation: Int } }"));
+        Diagnose("context C { value V { service: Int  operation: Int } }").ShouldBeEmpty();
     }
 
     // ======================================================================
@@ -202,17 +197,17 @@ public class R10ServicesTests
     [Fact]
     public void Policy_emits_a_handler_seam()
     {
-        Assert.Empty(Diagnose(PolicySrc));
+        Diagnose(PolicySrc).ShouldBeEmpty();
         var (asm, files) = Compile(PolicySrc);
 
-        Assert.Contains("Sales/Policies/ReserveStockPolicy.cs", files);
-        Assert.Contains("public interface IReserveStockPolicy", files);
-        Assert.Contains("Task Handle(OrderPlaced e, CancellationToken ct = default);", files);
-        Assert.Contains("public abstract partial class ReserveStockPolicy : IReserveStockPolicy", files);
-        Assert.Contains("Inventory.reserve(order: e.OrderId)", files); // intended-reaction sketch
+        files.ShouldContain("Sales/Policies/ReserveStockPolicy.cs");
+        files.ShouldContain("public interface IReserveStockPolicy");
+        files.ShouldContain("Task Handle(OrderPlaced e, CancellationToken ct = default);");
+        files.ShouldContain("public abstract partial class ReserveStockPolicy : IReserveStockPolicy");
+        files.ShouldContain("Inventory.reserve(order: e.OrderId)"); // intended-reaction sketch
 
-        Assert.True(asm.GetType("Sales.IReserveStockPolicy")!.IsInterface);
-        Assert.True(asm.GetType("Sales.ReserveStockPolicy")!.IsAbstract);
+        asm.GetType("Sales.IReserveStockPolicy")!.IsInterface.ShouldBeTrue();
+        asm.GetType("Sales.ReserveStockPolicy")!.IsAbstract.ShouldBeTrue();
     }
 
     [Fact]
@@ -226,7 +221,7 @@ public class R10ServicesTests
               policy P when Nope then Inventory.reserve(order: orderId)
             }
             """;
-        Assert.Contains(Diagnose(src), d => d.Code == DiagnosticCodes.PolicyUnknownEvent);
+        Diagnose(src).ShouldContain(d => d.Code == DiagnosticCodes.PolicyUnknownEvent);
     }
 
     [Fact]
@@ -241,7 +236,7 @@ public class R10ServicesTests
               policy P when OrderPlaced then Inventory.bogus(order: orderId)
             }
             """;
-        Assert.Contains(Diagnose(src), d => d.Code == DiagnosticCodes.PolicyUnknownCommand);
+        Diagnose(src).ShouldContain(d => d.Code == DiagnosticCodes.PolicyUnknownCommand);
     }
 
     [Fact]
@@ -256,7 +251,7 @@ public class R10ServicesTests
               policy P when OrderPlaced then Inventory.reserve(wrong: orderId)
             }
             """;
-        Assert.Contains(Diagnose(src), d => d.Code == DiagnosticCodes.PolicyArgMismatch);
+        Diagnose(src).ShouldContain(d => d.Code == DiagnosticCodes.PolicyArgMismatch);
     }
 
     [Fact]
@@ -272,7 +267,7 @@ public class R10ServicesTests
               policy P when OrderPlaced then Inventory.reserve(order: orderId)
             }
             """;
-        Assert.Contains(Diagnose(src), d => d.Code == DiagnosticCodes.DuplicatePolicy);
+        Diagnose(src).ShouldContain(d => d.Code == DiagnosticCodes.DuplicatePolicy);
     }
 
     [Fact]
@@ -280,8 +275,8 @@ public class R10ServicesTests
     {
         // A spec/service/policy-free model produces no new files (back-compat).
         var (_, files) = Compile("context C { value V { n: Int } }");
-        Assert.DoesNotContain("Specifications.cs", files);
-        Assert.DoesNotContain("Policy.cs", files);
+        files.ShouldNotContain("Specifications.cs");
+        files.ShouldNotContain("Policy.cs");
     }
 
     // ======================================================================
@@ -301,7 +296,7 @@ public class R10ServicesTests
               spec AllPositive on Order = lines.all(l => l > 0)
             }
             """;
-        Assert.Empty(Diagnose(src));
+        Diagnose(src).ShouldBeEmpty();
         Compile(src); // asserts the generated C# compiles
     }
 
@@ -321,7 +316,7 @@ public class R10ServicesTests
               spec Consistent on Line = total == price * quantity
             }
             """;
-        Assert.Empty(Diagnose(src));
+        Diagnose(src).ShouldBeEmpty();
         Compile(src); // fails at C# compile if Money.operator* is missing
     }
 
@@ -329,20 +324,20 @@ public class R10ServicesTests
     public void Service_colliding_with_a_type_is_reported()
     {
         const string src = "context C { value Pricing { amount: Decimal }  service Pricing { operation noop(x: Decimal): Decimal = x } }";
-        Assert.Contains(Diagnose(src), d => d.Code == DiagnosticCodes.DuplicateType);
+        Diagnose(src).ShouldContain(d => d.Code == DiagnosticCodes.DuplicateType);
     }
 
     [Fact]
     public void Operation_named_like_its_service_is_reported()
     {
         const string src = "context C { service Tax { operation tax(x: Decimal): Decimal = x } }";
-        Assert.Contains(Diagnose(src), d => d.Code == DiagnosticCodes.DuplicateOperation);
+        Diagnose(src).ShouldContain(d => d.Code == DiagnosticCodes.DuplicateOperation);
     }
 
     [Fact]
     public void Spec_referenced_on_the_wrong_target_is_reported()
     {
         const string src = "context C { value A { n: Int  invariant IsB } value B { m: Int }  spec IsB on B = m > 0 }";
-        Assert.Contains(Diagnose(src), d => d.Code == DiagnosticCodes.SpecTargetMismatch);
+        Diagnose(src).ShouldContain(d => d.Code == DiagnosticCodes.SpecTargetMismatch);
     }
 }

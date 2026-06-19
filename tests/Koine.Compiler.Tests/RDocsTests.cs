@@ -172,7 +172,7 @@ public class RDocsTests
     {
         var result = new KoineCompiler().Compile(
             new[] { new SourceFile("ordering.koi", OrderingFixture) }, new DocsEmitter());
-        Assert.True(result.Success, string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
 
         return Verify(TestSupport.Render(result.Files)).UseDirectory("Snapshots");
     }
@@ -182,7 +182,7 @@ public class RDocsTests
     {
         var result = new KoineCompiler().Compile(
             new[] { new SourceFile("guarded.koi", GuardedStateMachineFixture) }, new DocsEmitter());
-        Assert.True(result.Success, string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
 
         return Verify(TestSupport.Render(result.Files)).UseDirectory("Snapshots");
     }
@@ -192,7 +192,7 @@ public class RDocsTests
     {
         var result = new KoineCompiler().Compile(
             new[] { new SourceFile("map.koi", ContextMapFixture) }, new DocsEmitter());
-        Assert.True(result.Success, string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
 
         return Verify(TestSupport.Render(result.Files)).UseDirectory("Snapshots");
     }
@@ -202,7 +202,7 @@ public class RDocsTests
     {
         var result = new KoineCompiler().Compile(
             new[] { new SourceFile("events.koi", IntegrationEventFixture) }, new DocsEmitter());
-        Assert.True(result.Success, string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
 
         return Verify(TestSupport.Render(result.Files)).UseDirectory("Snapshots");
     }
@@ -214,17 +214,17 @@ public class RDocsTests
         const string src = "context Empty { }\n";
         var result = new KoineCompiler().Compile(
             new[] { new SourceFile("empty.koi", src) }, new DocsEmitter());
-        Assert.True(result.Success, string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
 
         var page = result.Files.Single(f => f.RelativePath == "docs/Empty.md").Contents;
-        Assert.Contains("_This bounded context has no declared types yet._", page);
+        page.ShouldContain("_This bounded context has no declared types yet._");
     }
 
     [Fact]
     public Task Billing_fixture_emits_baseline_docs()
     {
         var result = new KoineCompiler().Compile(TestSupport.BillingFixture, new DocsEmitter());
-        Assert.True(result.Success, string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
 
         return Verify(TestSupport.Render(result.Files)).UseDirectory("Snapshots");
     }

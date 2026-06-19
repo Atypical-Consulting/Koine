@@ -102,14 +102,14 @@ public class PhpSnapshotTests
     public Task Php_fixture_emits_expected_php()
     {
         var result = new KoineCompiler().Compile(Fixture, new PhpEmitter());
-        Assert.True(result.Success, string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
 
         // Always-on syntax gate: runs php -l when a PHP interpreter is available, and asserts on it.
         // Stays INCONCLUSIVE (no assertion) when no interpreter is present locally.
         var syntax = TestSupport.SyntaxCheckPhp(result.Files);
         if (syntax.ToolchainAvailable)
         {
-            Assert.True(syntax.Ok, string.Join("\n", syntax.Errors));
+            syntax.Ok.ShouldBeTrue(string.Join("\n", syntax.Errors));
         }
 
         return Verify(TestSupport.Render(result.Files))
@@ -148,13 +148,13 @@ public class PhpSnapshotTests
     public Task Php_entity_emits_expected_php()
     {
         var result = new KoineCompiler().Compile(EntityFixture, new PhpEmitter());
-        Assert.True(result.Success, string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
 
         // Always-on syntax gate: asserts php -l succeeds when available; INCONCLUSIVE otherwise.
         var syntax = TestSupport.SyntaxCheckPhp(result.Files);
         if (syntax.ToolchainAvailable)
         {
-            Assert.True(syntax.Ok, string.Join("\n", syntax.Errors));
+            syntax.Ok.ShouldBeTrue(string.Join("\n", syntax.Errors));
         }
 
         return Verify(TestSupport.Render(result.Files))
@@ -227,13 +227,13 @@ public class PhpSnapshotTests
     public Task Php_end_to_end_emits_expected_php()
     {
         var result = new KoineCompiler().Compile(EndToEndFixture, new PhpEmitter());
-        Assert.True(result.Success, string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
 
         // Always-on syntax gate: asserts php -l succeeds when available; INCONCLUSIVE otherwise.
         var syntax = TestSupport.SyntaxCheckPhp(result.Files);
         if (syntax.ToolchainAvailable)
         {
-            Assert.True(syntax.Ok, string.Join("\n", syntax.Errors));
+            syntax.Ok.ShouldBeTrue(string.Join("\n", syntax.Errors));
         }
 
         return Verify(TestSupport.Render(result.Files))

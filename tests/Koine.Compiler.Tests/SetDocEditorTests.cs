@@ -44,8 +44,8 @@ public class SetDocEditorTests
         var (model, files) = Parse("context C {\n  value Money { amount: Decimal }\n}\n");
         var result = SetDocEditor.Build(model, files, "C.Money", "A monetary amount.");
 
-        Assert.Equal("t.koi", result.Uri);
-        Assert.Contains("  /// A monetary amount.\n  value Money", Apply(files[0].Source, result.Edits));
+        result.Uri.ShouldBe("t.koi");
+        Apply(files[0].Source, result.Edits).ShouldContain("  /// A monetary amount.\n  value Money");
     }
 
     [Fact]
@@ -54,8 +54,8 @@ public class SetDocEditorTests
         var (model, files) = Parse("context C {\n  /// old\n  value Money { amount: Decimal }\n}\n");
         var applied = Apply(files[0].Source, SetDocEditor.Build(model, files, "C.Money", "new desc").Edits);
 
-        Assert.Contains("/// new desc", applied);
-        Assert.DoesNotContain("/// old", applied);
+        applied.ShouldContain("/// new desc");
+        applied.ShouldNotContain("/// old");
     }
 
     [Fact]
@@ -64,7 +64,7 @@ public class SetDocEditorTests
         var (model, files) = Parse("context C {\n  value Money { amount: Decimal }\n}\n");
         var applied = Apply(files[0].Source, SetDocEditor.Build(model, files, "C.Money", "line one\nline two").Edits);
 
-        Assert.Contains("  /// line one\n  /// line two\n", applied);
+        applied.ShouldContain("  /// line one\n  /// line two\n");
     }
 
     [Fact]
@@ -73,7 +73,7 @@ public class SetDocEditorTests
         var (model, files) = Parse("context C {\n  value Money { amount: Decimal }\n}\n");
         var applied = Apply(files[0].Source, SetDocEditor.Build(model, files, "C", "The C context.").Edits);
 
-        Assert.Contains("/// The C context.\ncontext C {", applied);
+        applied.ShouldContain("/// The C context.\ncontext C {");
     }
 
     [Fact]
@@ -88,15 +88,15 @@ public class SetDocEditorTests
 
         var result = SetDocEditor.Build(model, files, "B.Beta", "The beta value.");
 
-        Assert.Equal("b.koi", result.Uri);                 // not a.koi (files[0]) — the declaration's own file
-        Assert.Equal(2, result.Edits[0].Range.Line);       // the `value Beta` line within b.koi
+        result.Uri.ShouldBe("b.koi");                 // not a.koi (files[0]) — the declaration's own file
+        result.Edits[0].Range.Line.ShouldBe(2);       // the `value Beta` line within b.koi
     }
 
     [Fact]
     public void Unknown_id_returns_no_edits()
     {
         var (model, files) = Parse("context C {\n  value Money { amount: Decimal }\n}\n");
-        Assert.Empty(SetDocEditor.Build(model, files, "C.Nope", "x").Edits);
+        SetDocEditor.Build(model, files, "C.Nope", "x").Edits.ShouldBeEmpty();
     }
 
     [Fact]
@@ -107,7 +107,7 @@ public class SetDocEditorTests
         var (model, files) = Parse("context C {\r\n  value Money { amount: Decimal }\r\n}\r\n");
         var newText = SetDocEditor.Build(model, files, "C.Money", "A monetary amount.").Edits[0].NewText;
 
-        Assert.Equal("  /// A monetary amount.\r\n", newText);
+        newText.ShouldBe("  /// A monetary amount.\r\n");
     }
 
     [Fact]
@@ -116,7 +116,7 @@ public class SetDocEditorTests
         var (model, files) = Parse("context C {\n  /// old\n  value Money { amount: Decimal }\n}\n");
         var applied = Apply(files[0].Source, SetDocEditor.Build(model, files, "C.Money", "   ").Edits);
 
-        Assert.DoesNotContain("/// old", applied);
-        Assert.Contains("  value Money", applied);
+        applied.ShouldNotContain("/// old");
+        applied.ShouldContain("  value Money");
     }
 }

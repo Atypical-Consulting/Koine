@@ -15,8 +15,8 @@ public class SourceRangeTests
     private static KoineModel Parse(string src)
     {
         var (model, diagnostics) = new KoineCompiler().Parse(src);
-        Assert.Empty(diagnostics);
-        Assert.NotNull(model);
+        diagnostics.ShouldBeEmpty();
+        model.ShouldNotBeNull();
         return model!;
     }
 
@@ -32,17 +32,17 @@ public class SourceRangeTests
         var money = model.Contexts[0].Types[0];
 
         // Span starts at the `value` keyword (line 2, column 3, 1-based).
-        Assert.Equal(2, money.Span.Line);
-        Assert.Equal(3, money.Span.Column);
+        money.Span.Line.ShouldBe(2);
+        money.Span.Column.ShouldBe(3);
 
         // Span ends just past the closing brace (end-EXCLUSIVE) on the same line.
-        Assert.Equal(2, money.Span.EndLine);
+        money.Span.EndLine.ShouldBe(2);
         var line2 = "  value Money { amount: Decimal }";
-        Assert.Equal(line2.Length + 1, money.Span.EndColumn); // 1-based exclusive
+        money.Span.EndColumn.ShouldBe(line2.Length + 1); // 1-based exclusive
 
         // Offset + length identify the exact substring in the raw source.
         var sub = src.Substring(money.Span.Offset, money.Span.Length);
-        Assert.Equal("value Money { amount: Decimal }", sub);
+        sub.ShouldBe("value Money { amount: Decimal }");
     }
 
     [Fact]
@@ -52,12 +52,12 @@ public class SourceRangeTests
         var model = Parse(src);
         var money = model.Contexts[0].Types[0];
 
-        Assert.False(money.NameSpan.IsNone);
+        money.NameSpan.IsNone.ShouldBeFalse();
         var name = src.Substring(money.NameSpan.Offset, money.NameSpan.Length);
-        Assert.Equal("Money", name);
+        name.ShouldBe("Money");
 
         // The name span sits inside the full span and is exactly the identifier width.
-        Assert.Equal(money.NameSpan.EndColumn - money.NameSpan.Column, "Money".Length);
+        "Money".Length.ShouldBe(money.NameSpan.EndColumn - money.NameSpan.Column);
     }
 
     [Fact]
@@ -68,7 +68,7 @@ public class SourceRangeTests
         var amount = ((ValueObjectDecl)model.Contexts[0].Types[0]).Members[0];
 
         var name = src.Substring(amount.NameSpan.Offset, amount.NameSpan.Length);
-        Assert.Equal("amount", name);
+        name.ShouldBe("amount");
     }
 
     [Fact]
@@ -87,7 +87,7 @@ public class SourceRangeTests
         var money = model.Contexts[0].Types[0];
 
         // The closing brace of `value Money { ... }` is on line 5 (1-based).
-        Assert.Equal(5, money.Span.EndLine);
+        money.Span.EndLine.ShouldBe(5);
     }
 
     [Fact]
@@ -106,8 +106,8 @@ public class SourceRangeTests
         var inv = ((ValueObjectDecl)model.Contexts[0].Types[0]).Invariants[0];
 
         // The invariant starts on line 4 and ends on line 5 (the string's second line).
-        Assert.Equal(4, inv.Span.Line);
-        Assert.Equal(5, inv.Span.EndLine);
-        Assert.Equal("line two\"".Length + 1, inv.Span.EndColumn); // 1-based exclusive end col
+        inv.Span.Line.ShouldBe(4);
+        inv.Span.EndLine.ShouldBe(5);
+        inv.Span.EndColumn.ShouldBe("line two\"".Length + 1); // 1-based exclusive end col
     }
 }

@@ -14,22 +14,22 @@ public class LspServerTests
     [Fact]
     public void Diagnose_valid_fixture_is_clean()
     {
-        Assert.Empty(new KoineCompiler().Diagnose(TestSupport.BillingFixture));
+        new KoineCompiler().Diagnose(TestSupport.BillingFixture).ShouldBeEmpty();
     }
 
     [Fact]
     public void Diagnose_reports_syntax_errors()
     {
         var diags = new KoineCompiler().Diagnose("context C {\n  value {\n  }\n}\n");
-        Assert.NotEmpty(diags);
-        Assert.Equal(2, diags[0].Line);
+        diags.ShouldNotBeEmpty();
+        diags[0].Line.ShouldBe(2);
     }
 
     [Fact]
     public void Diagnose_reports_semantic_errors()
     {
         var diags = new KoineCompiler().Diagnose("context C {\n  value V { x: Nope }\n}\n");
-        Assert.Contains(diags, d => d.Message.Contains("unknown type 'Nope'"));
+        diags.ShouldContain(d => d.Message.Contains("unknown type 'Nope'"));
     }
 
     // ---- LSP message loop -------------------------------------------------
@@ -42,9 +42,9 @@ public class LspServerTests
             Initialize(),
             DidOpen("file:///t.koi", badDoc));
 
-        Assert.Contains("textDocument/publishDiagnostics", output);
-        Assert.Contains("unknown type 'Nope'", output);
-        Assert.Contains("\"severity\":1", output); // Error
+        output.ShouldContain("textDocument/publishDiagnostics");
+        output.ShouldContain("unknown type 'Nope'");
+        output.ShouldContain("\"severity\":1"); // Error
     }
 
     [Fact]
@@ -54,16 +54,16 @@ public class LspServerTests
             Initialize(),
             DidOpen("file:///ok.koi", TestSupport.BillingFixture));
 
-        Assert.Contains("publishDiagnostics", output);
-        Assert.Contains("\"diagnostics\":[]", output);
+        output.ShouldContain("publishDiagnostics");
+        output.ShouldContain("\"diagnostics\":[]");
     }
 
     [Fact]
     public void Initialize_advertises_full_text_sync()
     {
         var output = RunSession(Initialize());
-        Assert.Contains("\"textDocumentSync\":1", output);
-        Assert.Contains("\"name\":\"koine\"", output);
+        output.ShouldContain("\"textDocumentSync\":1");
+        output.ShouldContain("\"name\":\"koine\"");
     }
 
     [Fact]
@@ -71,7 +71,7 @@ public class LspServerTests
     {
         var unknown = Frame("{\"jsonrpc\":\"2.0\",\"id\":7,\"method\":\"textDocument/foo\",\"params\":{}}");
         var output = RunSession(Initialize(), unknown);
-        Assert.Contains("-32601", output);   // method-not-found, so the client doesn't hang
+        output.ShouldContain("-32601");   // method-not-found, so the client doesn't hang
     }
 
     [Fact]
@@ -79,10 +79,10 @@ public class LspServerTests
     {
         var lines = LspServer.SplitLines("context C {\n  value V { x: Nope }\n}\n");
         var (line, start, endLine, end) = LspServer.ToRange(Diagnostic.Error(DiagnosticCodes.UnknownType, "unknown type 'Nope'", 2, 16), lines);
-        Assert.Equal(1, line);            // 0-based line 1 == source line 2
-        Assert.Equal(15, start);          // 0-based col
-        Assert.Equal(1, endLine);         // single-line fallback ends on the same line
-        Assert.Equal(19, end);            // spans "Nope"
+        line.ShouldBe(1);            // 0-based line 1 == source line 2
+        start.ShouldBe(15);          // 0-based col
+        endLine.ShouldBe(1);         // single-line fallback ends on the same line
+        end.ShouldBe(19);            // spans "Nope"
     }
 
     [Fact]
@@ -93,10 +93,10 @@ public class LspServerTests
         var span = new SourceSpan(2, 16, 2, 20, 0, 0); // 1-based start col 16, end-exclusive col 20
         var (line, start, endLine, end) = LspServer.ToRange(
             Diagnostic.FromSpan(DiagnosticCodes.UnknownType, "unknown type 'Nope'", span), lines);
-        Assert.Equal(1, line);            // 0-based line 1
-        Assert.Equal(15, start);          // 0-based start col
-        Assert.Equal(1, endLine);         // 0-based end line
-        Assert.Equal(19, end);            // 0-based end-exclusive col -> spans "Nope"
+        line.ShouldBe(1);            // 0-based line 1
+        start.ShouldBe(15);          // 0-based start col
+        endLine.ShouldBe(1);         // 0-based end line
+        end.ShouldBe(19);            // 0-based end-exclusive col -> spans "Nope"
     }
 
     [Fact]
@@ -107,27 +107,27 @@ public class LspServerTests
         var span = new SourceSpan(2, 3, 3, 4, 0, 0);
         var (line, start, endLine, end) = LspServer.ToRange(
             Diagnostic.FromSpan(DiagnosticCodes.DuplicateMember, "dup", span), lines);
-        Assert.Equal(1, line);            // start line 0-based
-        Assert.Equal(2, start);           // start col 0-based
-        Assert.Equal(2, endLine);         // end line 0-based (source line 3)
-        Assert.Equal(3, end);             // end col 0-based
+        line.ShouldBe(1);            // start line 0-based
+        start.ShouldBe(2);           // start col 0-based
+        endLine.ShouldBe(2);         // end line 0-based (source line 3)
+        end.ShouldBe(3);             // end col 0-based
     }
 
     [Fact]
     public void FromSpan_leaves_end_unknown_for_zero_width_point()
     {
         var d = Diagnostic.FromSpan(DiagnosticCodes.UnknownType, "x", new SourceSpan(2, 16));
-        Assert.False(d.HasEnd);
-        Assert.Equal(0, d.EndLine);
-        Assert.Equal(0, d.EndColumn);
+        d.HasEnd.ShouldBeFalse();
+        d.EndLine.ShouldBe(0);
+        d.EndColumn.ShouldBe(0);
 
         // Falls back to the forward scan when the end is unknown.
         var lines = LspServer.SplitLines("context C {\n  value V { x: Nope }\n}\n");
         var (line, start, endLine, end) = LspServer.ToRange(d, lines);
-        Assert.Equal(1, line);
-        Assert.Equal(15, start);
-        Assert.Equal(1, endLine);
-        Assert.Equal(19, end);            // forward scan still spans "Nope"
+        line.ShouldBe(1);
+        start.ShouldBe(15);
+        endLine.ShouldBe(1);
+        end.ShouldBe(19);            // forward scan still spans "Nope"
     }
 
     // ---- helpers ----------------------------------------------------------
@@ -307,8 +307,8 @@ public class LspServerTests
             DidOpen("file:///ordering.koi", ordering),
             DidOpen("file:///catalog.koi", catalog),
             Definition("file:///ordering.koi", 1, 25)); // on "ProductId"
-        Assert.Contains("file:///catalog.koi", output);
-        Assert.Contains("\"range\"", output);
+        output.ShouldContain("file:///catalog.koi");
+        output.ShouldContain("\"range\"");
     }
 
     [Fact]
@@ -328,7 +328,7 @@ public class LspServerTests
                 DidOpen(orderingUri, ordering),
                 Definition(orderingUri, 1, 25)); // on "ProductId"; catalog.koi NOT opened
 
-            Assert.Contains("catalog.koi", output); // resolved via the on-disk workspace scan
+            output.ShouldContain("catalog.koi"); // resolved via the on-disk workspace scan
         }
         finally { dir.Delete(recursive: true); }
     }
@@ -356,8 +356,8 @@ public class LspServerTests
                 DidOpen(orderingUri, ordering),
                 Hover(orderingUri, 1, 25)); // hover "ProductId" -> owning entity
 
-            Assert.Contains("Widget", output);                 // open (edited) version wins
-            Assert.DoesNotContain("identity of Product", output);
+            output.ShouldContain("Widget");                 // open (edited) version wins
+            output.ShouldNotContain("identity of Product");
         }
         finally { dir.Delete(recursive: true); }
     }
@@ -366,9 +366,9 @@ public class LspServerTests
     public void Initialize_advertises_intellisense_capabilities()
     {
         var output = RunSession(Initialize());
-        Assert.Contains("\"completionProvider\"", output);
-        Assert.Contains("\"hoverProvider\":true", output);
-        Assert.Contains("\"definitionProvider\":true", output);
+        output.ShouldContain("\"completionProvider\"");
+        output.ShouldContain("\"hoverProvider\":true");
+        output.ShouldContain("\"definitionProvider\":true");
     }
 
     [Fact]
@@ -376,8 +376,8 @@ public class LspServerTests
     {
         var doc = "context C {\n  value V { x:  }\n}\n";
         var output = RunSession(Initialize(), DidOpen("file:///t.koi", doc), Completion("file:///t.koi", 1, 14));
-        Assert.Contains("\"items\"", output);
-        Assert.Contains("Decimal", output);
+        output.ShouldContain("\"items\"");
+        output.ShouldContain("Decimal");
     }
 
     [Fact]
@@ -385,8 +385,8 @@ public class LspServerTests
     {
         var doc = "context C {\n  value Money { amount: Decimal }\n  value Line { price: Money }\n}\n";
         var output = RunSession(Initialize(), DidOpen("file:///t.koi", doc), Hover("file:///t.koi", 2, 23));
-        Assert.Contains("\"kind\":\"markdown\"", output);
-        Assert.Contains("Money", output);
+        output.ShouldContain("\"kind\":\"markdown\"");
+        output.ShouldContain("Money");
     }
 
     [Fact]
@@ -394,8 +394,8 @@ public class LspServerTests
     {
         var doc = "context C {\n  value Money { amount: Decimal }\n  value Line { price: Money }\n}\n";
         var output = RunSession(Initialize(), DidOpen("file:///t.koi", doc), Definition("file:///t.koi", 2, 23));
-        Assert.Contains("\"range\"", output);
-        Assert.Contains("file:///t.koi", output);
+        output.ShouldContain("\"range\"");
+        output.ShouldContain("file:///t.koi");
     }
 
     [Fact]
@@ -406,8 +406,8 @@ public class LspServerTests
         var output = RunSession(Initialize(), DidOpen("file:///t.koi", doc), Definition("file:///t.koi", 2, 23));
 
         // The range is the real identifier range: start char 8, end char 13 on line 1.
-        Assert.Contains("\"start\":{\"line\":1,\"character\":8}", output);
-        Assert.Contains("\"end\":{\"line\":1,\"character\":13}", output);
+        output.ShouldContain("\"start\":{\"line\":1,\"character\":8}");
+        output.ShouldContain("\"end\":{\"line\":1,\"character\":13}");
     }
 
     [Fact]
@@ -419,8 +419,8 @@ public class LspServerTests
         var doc = "context C {\n  value Money { amount: Decimal }\n  spec Positive on Money = amount > 0\n}\n";
         var output = RunSession(Initialize(), DidOpen("file:///t.koi", doc), Definition("file:///t.koi", 2, 28));
 
-        Assert.Contains("\"start\":{\"line\":1,\"character\":16}", output);
-        Assert.Contains("\"end\":{\"line\":1,\"character\":22}", output);
+        output.ShouldContain("\"start\":{\"line\":1,\"character\":16}");
+        output.ShouldContain("\"end\":{\"line\":1,\"character\":22}");
     }
 
     [Fact]
@@ -431,15 +431,15 @@ public class LspServerTests
         var output = RunSession(Initialize(), DidOpen("file:///t.koi", doc), DocumentSymbol("file:///t.koi"));
 
         // The Money symbol's selectionRange is the identifier; its range is the whole declaration.
-        Assert.Contains("\"selectionRange\":{\"start\":{\"line\":1,\"character\":8},\"end\":{\"line\":1,\"character\":13}}", output);
-        Assert.Contains("\"range\":{\"start\":{\"line\":1,\"character\":2}", output);
+        output.ShouldContain("\"selectionRange\":{\"start\":{\"line\":1,\"character\":8},\"end\":{\"line\":1,\"character\":13}}");
+        output.ShouldContain("\"range\":{\"start\":{\"line\":1,\"character\":2}");
     }
 
     [Fact]
     public void Completion_for_unopened_document_returns_no_items()
     {
         var output = RunSession(Initialize(), Completion("file:///never-opened.koi", 0, 0));
-        Assert.DoesNotContain("\"items\"", output);
+        output.ShouldNotContain("\"items\"");
     }
 
     [Fact]
@@ -456,8 +456,8 @@ public class LspServerTests
             DidChange("file:///e.koi", broken),   // edit introduces an error
             DidChange("file:///e.koi", fixedUp)); // edit fixes it
 
-        Assert.Contains("unknown type 'Nope'", output); // error streamed after the breaking edit
-        Assert.Contains("\"diagnostics\":[]", output);   // cleared after the fixing edit
+        output.ShouldContain("unknown type 'Nope'"); // error streamed after the breaking edit
+        output.ShouldContain("\"diagnostics\":[]");   // cleared after the fixing edit
     }
 
     [Fact]
@@ -465,9 +465,9 @@ public class LspServerTests
     {
         var doc = "context C {\n  value Money {\n    amount: Decimal\n    invariant amount >= am\n  }\n}\n";
         var output = RunSession(Initialize(), DidOpen("file:///t.koi", doc), Completion("file:///t.koi", 3, 26));
-        Assert.Contains("\"items\"", output);
-        Assert.Contains("amount", output);
-        Assert.Contains("\"kind\":5", output); // CompletionItemKind.Field
+        output.ShouldContain("\"items\"");
+        output.ShouldContain("amount");
+        output.ShouldContain("\"kind\":5"); // CompletionItemKind.Field
     }
 
     // ---- New capabilities -------------------------------------------------
@@ -476,13 +476,13 @@ public class LspServerTests
     public void Initialize_advertises_new_capabilities()
     {
         var output = RunSession(Initialize());
-        Assert.Contains("\"documentFormattingProvider\":true", output);
-        Assert.Contains("\"documentSymbolProvider\":true", output);
-        Assert.Contains("\"referencesProvider\":true", output);
-        Assert.Contains("\"renameProvider\":{\"prepareProvider\":true}", output);
+        output.ShouldContain("\"documentFormattingProvider\":true");
+        output.ShouldContain("\"documentSymbolProvider\":true");
+        output.ShouldContain("\"referencesProvider\":true");
+        output.ShouldContain("\"renameProvider\":{\"prepareProvider\":true}");
         // codeActionProvider is now an object advertising the supported code-action kinds (so
         // editors surface the refactors), not a bare boolean.
-        Assert.Contains("\"codeActionProvider\":{\"codeActionKinds\":[\"quickfix\",\"refactor\",\"refactor.extract\"]}", output);
+        output.ShouldContain("\"codeActionProvider\":{\"codeActionKinds\":[\"quickfix\",\"refactor\",\"refactor.extract\"]}");
     }
 
     [Fact]
@@ -491,8 +491,8 @@ public class LspServerTests
         // Messy indentation/spacing the formatter will canonicalize.
         var doc = "context C {\n    value V {x:String}\n}\n";
         var output = RunSession(Initialize(), DidOpen("file:///t.koi", doc), Formatting("file:///t.koi"));
-        Assert.Contains("\"newText\"", output);
-        Assert.Contains("x: String", output); // canonical "name: Type" spacing
+        output.ShouldContain("\"newText\"");
+        output.ShouldContain("x: String"); // canonical "name: Type" spacing
     }
 
     [Fact]
@@ -500,7 +500,7 @@ public class LspServerTests
     {
         var doc = "context C {\n  value V {\n    x: String\n  }\n}\n";
         var output = RunSession(Initialize(), DidOpen("file:///t.koi", doc), Formatting("file:///t.koi"));
-        Assert.Contains("\"result\":[]", output); // nothing to change
+        output.ShouldContain("\"result\":[]"); // nothing to change
     }
 
     [Fact]
@@ -508,10 +508,10 @@ public class LspServerTests
     {
         var doc = "context Shop {\n  value Money { amount: Decimal }\n}\n";
         var output = RunSession(Initialize(), DidOpen("file:///t.koi", doc), DocumentSymbol("file:///t.koi"));
-        Assert.Contains("\"name\":\"Shop\"", output);
-        Assert.Contains("\"name\":\"Money\"", output);
-        Assert.Contains("\"name\":\"amount\"", output);
-        Assert.Contains("\"children\"", output);
+        output.ShouldContain("\"name\":\"Shop\"");
+        output.ShouldContain("\"name\":\"Money\"");
+        output.ShouldContain("\"name\":\"amount\"");
+        output.ShouldContain("\"children\"");
     }
 
     [Fact]
@@ -519,8 +519,8 @@ public class LspServerTests
     {
         var doc = "context C {\n  value Money { amount: Decimal }\n  value Line { price: Money }\n}\n";
         var output = RunSession(Initialize(), DidOpen("file:///t.koi", doc), References("file:///t.koi", 2, 23));
-        Assert.Contains("\"range\"", output);
-        Assert.Contains("file:///t.koi", output);
+        output.ShouldContain("\"range\"");
+        output.ShouldContain("file:///t.koi");
     }
 
     [Fact]
@@ -528,8 +528,8 @@ public class LspServerTests
     {
         var doc = "context C {\n  value Money { amount: Decimal }\n  value Line { price: Money }\n}\n";
         var output = RunSession(Initialize(), DidOpen("file:///t.koi", doc), Rename("file:///t.koi", 1, 9, "Cash"));
-        Assert.Contains("\"changes\"", output);
-        Assert.Contains("\"newText\":\"Cash\"", output);
+        output.ShouldContain("\"changes\"");
+        output.ShouldContain("\"newText\":\"Cash\"");
     }
 
     [Fact]
@@ -537,8 +537,8 @@ public class LspServerTests
     {
         var doc = "context C {\n  value Money { amount: Decimal }\n}\n";
         var output = RunSession(Initialize(), DidOpen("file:///t.koi", doc), Rename("file:///t.koi", 1, 9, "1Bad"));
-        Assert.Contains("\"result\":null,\"id\":23", output); // no WorkspaceEdit produced
-        Assert.DoesNotContain("\"changes\"", output);
+        output.ShouldContain("\"result\":null,\"id\":23"); // no WorkspaceEdit produced
+        output.ShouldNotContain("\"changes\"");
     }
 
     [Fact]
@@ -557,9 +557,9 @@ public class LspServerTests
         };
         var doc = "context C {\n  value V { x: Strng }\n}\n";
         var output = RunSession(Initialize(), DidOpen("file:///t.koi", doc), CodeAction("file:///t.koi", diag));
-        Assert.Contains("\"title\":\"Change to 'String'\"", output);
-        Assert.Contains("\"kind\":\"quickfix\"", output);
-        Assert.Contains("\"newText\":\"String\"", output);
+        output.ShouldContain("\"title\":\"Change to 'String'\"");
+        output.ShouldContain("\"kind\":\"quickfix\"");
+        output.ShouldContain("\"newText\":\"String\"");
     }
 
     [Fact]
@@ -573,10 +573,10 @@ public class LspServerTests
             Initialize(),
             DidOpen("file:///t.koi", doc),
             CodeActionRange("file:///t.koi", 1, 18, 1, 24));
-        Assert.Contains("\"kind\":\"refactor.extract\"", output);
-        Assert.Contains("\"edit\":", output);
-        Assert.Contains("\"changes\":", output);
-        Assert.Contains("value ExtractedValue", output);
+        output.ShouldContain("\"kind\":\"refactor.extract\"");
+        output.ShouldContain("\"edit\":");
+        output.ShouldContain("\"changes\":");
+        output.ShouldContain("value ExtractedValue");
     }
 
     [Fact]
@@ -590,7 +590,7 @@ public class LspServerTests
             CodeActionRange("file:///t.koi", 1, 2, 1, 7)); // the "value" keyword
         // The capabilities response advertises "refactor.extract" as a supported kind, so assert
         // the absence of an emitted action (which carries a "kind":"refactor.extract" property).
-        Assert.DoesNotContain("\"kind\":\"refactor.extract\"", output);
+        output.ShouldNotContain("\"kind\":\"refactor.extract\"");
     }
 
     [Fact]
@@ -603,7 +603,7 @@ public class LspServerTests
             Initialize(),
             DidOpen("file:///t.koi", doc),
             CodeActionRangeOnly("file:///t.koi", 1, 18, 1, 24, new[] { "quickfix" }));
-        Assert.DoesNotContain("\"kind\":\"refactor.extract\"", output);
+        output.ShouldNotContain("\"kind\":\"refactor.extract\"");
     }
 
     [Fact]
@@ -615,8 +615,8 @@ public class LspServerTests
             Initialize(),
             DidOpen("file:///t.koi", doc),
             CodeActionRangeOnly("file:///t.koi", 1, 18, 1, 24, new[] { "refactor" }));
-        Assert.Contains("\"kind\":\"refactor.extract\"", output);
-        Assert.Contains("value ExtractedValue", output);
+        output.ShouldContain("\"kind\":\"refactor.extract\"");
+        output.ShouldContain("value ExtractedValue");
     }
 
     [Fact]
@@ -632,8 +632,8 @@ public class LspServerTests
             DidOpen("file:///catalog.koi", catalog),
             DidOpen("file:///ordering.koi", ordering));
         // With both files merged, Ordering's reference to the imported Product resolves: no error.
-        Assert.Contains("file:///ordering.koi", output);
-        Assert.Contains("\"diagnostics\":[]", output);
+        output.ShouldContain("file:///ordering.koi");
+        output.ShouldContain("\"diagnostics\":[]");
     }
 
     // ---- Semantic tokens --------------------------------------------------
@@ -642,11 +642,11 @@ public class LspServerTests
     public void Initialize_advertises_semantic_tokens_with_a_legend()
     {
         var output = RunSession(Initialize());
-        Assert.Contains("\"semanticTokensProvider\"", output);
-        Assert.Contains("\"legend\"", output);
-        Assert.Contains("\"tokenTypes\":[\"type\",\"enum\",\"enumMember\",\"property\",\"keyword\",\"parameter\"]", output);
-        Assert.Contains("\"tokenModifiers\":[\"declaration\"]", output);
-        Assert.Contains("\"full\":true", output);
+        output.ShouldContain("\"semanticTokensProvider\"");
+        output.ShouldContain("\"legend\"");
+        output.ShouldContain("\"tokenTypes\":[\"type\",\"enum\",\"enumMember\",\"property\",\"keyword\",\"parameter\"]");
+        output.ShouldContain("\"tokenModifiers\":[\"declaration\"]");
+        output.ShouldContain("\"full\":true");
     }
 
     [Fact]
@@ -654,8 +654,8 @@ public class LspServerTests
     {
         var doc = "context C {\n  value Money { amount: Decimal }\n}\n";
         var output = RunSession(Initialize(), DidOpen("file:///t.koi", doc), SemanticTokensFull("file:///t.koi"));
-        Assert.Contains("\"data\":[", output);
-        Assert.DoesNotContain("\"data\":[]", output); // a parsing model produces tokens
+        output.ShouldContain("\"data\":[");
+        output.ShouldNotContain("\"data\":[]"); // a parsing model produces tokens
     }
 
     [Fact]
@@ -663,21 +663,21 @@ public class LspServerTests
     {
         var doc = "context C {\n  value {\n  }\n}\n"; // unnamed value: does not parse
         var output = RunSession(Initialize(), DidOpen("file:///t.koi", doc), SemanticTokensFull("file:///t.koi"));
-        Assert.Contains("\"data\":[]", output);
+        output.ShouldContain("\"data\":[]");
     }
 
     [Fact]
     public void SemanticTokens_full_for_unopened_document_returns_empty_data()
     {
         var output = RunSession(Initialize(), SemanticTokensFull("file:///never-opened.koi"));
-        Assert.Contains("\"data\":[]", output);
+        output.ShouldContain("\"data\":[]");
     }
 
     [Fact]
     public void ExtractSuggestion_parses_the_did_you_mean_marker()
     {
-        Assert.Equal("String", LspServer.ExtractSuggestion("unknown type 'Strng' — did you mean 'String'?"));
-        Assert.Null(LspServer.ExtractSuggestion("unknown type 'Strng'"));
+        LspServer.ExtractSuggestion("unknown type 'Strng' — did you mean 'String'?").ShouldBe("String");
+        LspServer.ExtractSuggestion("unknown type 'Strng'").ShouldBeNull();
     }
 
     // ---- Custom koine/* requests ----
@@ -755,11 +755,11 @@ public class LspServerTests
             DidOpen("file:///t.koi", doc),
             GlossaryModel("file:///t.koi"));
 
-        Assert.Contains("\"entries\":[", output);
-        Assert.Contains("\"qualifiedName\":\"C.Money\"", output);
-        Assert.Contains("\"kind\":\"value\"", output);
-        Assert.Contains("\"kind\":\"enum\"", output);
-        Assert.Contains("\"id\":30", output);
+        output.ShouldContain("\"entries\":[");
+        output.ShouldContain("\"qualifiedName\":\"C.Money\"");
+        output.ShouldContain("\"kind\":\"value\"");
+        output.ShouldContain("\"kind\":\"enum\"");
+        output.ShouldContain("\"id\":30");
     }
 
     [Fact]
@@ -771,7 +771,7 @@ public class LspServerTests
             DidOpen("file:///t.koi", doc),
             GlossaryModel("file:///t.koi"));
 
-        Assert.Contains("\"doc\":null", output);
+        output.ShouldContain("\"doc\":null");
     }
 
     // ---- koine/setDoc ----
@@ -785,11 +785,11 @@ public class LspServerTests
             DidOpen("file:///t.koi", doc),
             SetDoc("file:///t.koi", "C.Money", "A monetary amount."));
 
-        Assert.Contains("\"edits\":[", output);
-        Assert.DoesNotContain("\"edits\":[]", output);
-        Assert.Contains("/// A monetary amount.", output);
-        Assert.Contains("\"uri\":\"file:///t.koi\"", output);
-        Assert.Contains("\"id\":30", output);
+        output.ShouldContain("\"edits\":[");
+        output.ShouldNotContain("\"edits\":[]");
+        output.ShouldContain("/// A monetary amount.");
+        output.ShouldContain("\"uri\":\"file:///t.koi\"");
+        output.ShouldContain("\"id\":30");
     }
 
     [Fact]
@@ -801,8 +801,8 @@ public class LspServerTests
             DidOpen("file:///t.koi", doc),
             SetDoc("file:///t.koi", "C.Nope", "x"));
 
-        Assert.Contains("\"edits\":[]", output);
-        Assert.Contains("\"id\":30", output);
+        output.ShouldContain("\"edits\":[]");
+        output.ShouldContain("\"id\":30");
     }
 
     private static byte[] Docs(string uri) =>
@@ -825,12 +825,12 @@ public class LspServerTests
             DidOpen("file:///t.koi", doc),
             EmitPreview("file:///t.koi", target: null));
 
-        Assert.Contains("\"target\":\"csharp\"", output);
-        Assert.Contains("\"files\":[", output);
-        Assert.DoesNotContain("\"files\":[]", output);
-        Assert.Contains(".cs", output);
-        Assert.Contains("Money", output);
-        Assert.Contains("\"error\":null", output);
+        output.ShouldContain("\"target\":\"csharp\"");
+        output.ShouldContain("\"files\":[");
+        output.ShouldNotContain("\"files\":[]");
+        output.ShouldContain(".cs");
+        output.ShouldContain("Money");
+        output.ShouldContain("\"error\":null");
     }
 
     [Fact]
@@ -842,10 +842,10 @@ public class LspServerTests
             DidOpen("file:///t.koi", doc),
             EmitPreview("file:///t.koi", "typescript"));
 
-        Assert.Contains("\"target\":\"typescript\"", output);
-        Assert.Contains(".ts", output);
-        Assert.DoesNotContain("\"files\":[]", output);
-        Assert.Contains("\"error\":null", output);
+        output.ShouldContain("\"target\":\"typescript\"");
+        output.ShouldContain(".ts");
+        output.ShouldNotContain("\"files\":[]");
+        output.ShouldContain("\"error\":null");
     }
 
     [Fact]
@@ -857,10 +857,10 @@ public class LspServerTests
             DidOpen("file:///t.koi", doc),
             EmitPreview("file:///t.koi", "python"));
 
-        Assert.Contains("\"target\":\"python\"", output);
-        Assert.Contains(".py", output);
-        Assert.DoesNotContain("\"files\":[]", output);
-        Assert.Contains("\"error\":null", output);
+        output.ShouldContain("\"target\":\"python\"");
+        output.ShouldContain(".py");
+        output.ShouldNotContain("\"files\":[]");
+        output.ShouldContain("\"error\":null");
     }
 
     [Fact]
@@ -872,10 +872,10 @@ public class LspServerTests
             DidOpen("file:///t.koi", doc),
             EmitPreview("file:///t.koi", "rust"));
 
-        Assert.Contains("unknown target 'rust'", output);
-        Assert.Contains("\"files\":[]", output);
-        Assert.DoesNotContain("-32601", output); // a normal result, not a JSON-RPC error
-        Assert.Contains("\"id\":30", output);     // response correlated to the request id
+        output.ShouldContain("unknown target 'rust'");
+        output.ShouldContain("\"files\":[]");
+        output.ShouldNotContain("-32601"); // a normal result, not a JSON-RPC error
+        output.ShouldContain("\"id\":30");     // response correlated to the request id
     }
 
     [Fact]
@@ -887,11 +887,11 @@ public class LspServerTests
             DidOpen("file:///t.koi", doc),
             EmitPreview("file:///t.koi", "csharp"));
 
-        Assert.Contains("\"files\":[]", output);
-        Assert.Contains("unknown type 'Nope'", output);
-        Assert.Contains("\"severity\":1", output);
-        Assert.Contains("\"error\":null", output);
-        Assert.Contains("file:///t.koi", output); // per-diagnostic uri
+        output.ShouldContain("\"files\":[]");
+        output.ShouldContain("unknown type 'Nope'");
+        output.ShouldContain("\"severity\":1");
+        output.ShouldContain("\"error\":null");
+        output.ShouldContain("file:///t.koi"); // per-diagnostic uri
     }
 
     [Fact]
@@ -918,8 +918,8 @@ public class LspServerTests
                 EmitPreview(koiUri, "csharp"));
 
             // The configured namespace remap is applied — exactly as the build would emit it.
-            Assert.Contains("namespace Acme.Billing;", output);
-            Assert.DoesNotContain("namespace Billing;", output);
+            output.ShouldContain("namespace Acme.Billing;");
+            output.ShouldNotContain("namespace Billing;");
         }
         finally { dir.Delete(recursive: true); }
     }
@@ -935,12 +935,12 @@ public class LspServerTests
             DidOpen("file:///t.koi", doc),
             Glossary("file:///t.koi"));
 
-        Assert.Contains("\"markdown\":", output);
-        Assert.Contains("# Ubiquitous Language Glossary", output);
-        Assert.Contains("## C", output);
-        Assert.Contains("Money", output);
-        Assert.Contains("\"id\":30", output);
-        Assert.DoesNotContain("\"markdown\":\"\"", output);
+        output.ShouldContain("\"markdown\":");
+        output.ShouldContain("# Ubiquitous Language Glossary");
+        output.ShouldContain("## C");
+        output.ShouldContain("Money");
+        output.ShouldContain("\"id\":30");
+        output.ShouldNotContain("\"markdown\":\"\"");
     }
 
     [Fact]
@@ -952,9 +952,9 @@ public class LspServerTests
             DidOpen("file:///bad.koi", badDoc),
             Glossary("file:///bad.koi"));
 
-        Assert.Contains("\"markdown\":\"\"", output);
-        Assert.Contains("\"id\":30", output);
-        Assert.DoesNotContain("Ubiquitous Language Glossary", output);
+        output.ShouldContain("\"markdown\":\"\"");
+        output.ShouldContain("\"id\":30");
+        output.ShouldNotContain("Ubiquitous Language Glossary");
     }
 
     [Fact]
@@ -968,10 +968,10 @@ public class LspServerTests
             DidOpen("file:///sales.koi", sales),
             Glossary("file:///catalog.koi"));
 
-        Assert.Contains("## Catalog", output);
-        Assert.Contains("## Sales", output);
-        Assert.Contains("Product", output);
-        Assert.Contains("Order", output);
+        output.ShouldContain("## Catalog");
+        output.ShouldContain("## Sales");
+        output.ShouldContain("Product");
+        output.ShouldContain("Order");
     }
 
     // ---- koine/contextMap ----
@@ -987,14 +987,14 @@ public class LspServerTests
             DidOpen("file:///cm.koi", doc),
             ContextMap("file:///cm.koi"));
 
-        Assert.Contains("\"contexts\":[", output);
-        Assert.Contains("Catalog", output);
-        Assert.Contains("Sales", output);
-        Assert.Contains("\"upstream\":\"Catalog\"", output);
-        Assert.Contains("\"downstream\":\"Sales\"", output);
-        Assert.Contains("\"kind\":\"Conformist\"", output);
-        Assert.Contains("\"bidirectional\":false", output);
-        Assert.DoesNotContain("\"relations\":[]", output);
+        output.ShouldContain("\"contexts\":[");
+        output.ShouldContain("Catalog");
+        output.ShouldContain("Sales");
+        output.ShouldContain("\"upstream\":\"Catalog\"");
+        output.ShouldContain("\"downstream\":\"Sales\"");
+        output.ShouldContain("\"kind\":\"Conformist\"");
+        output.ShouldContain("\"bidirectional\":false");
+        output.ShouldNotContain("\"relations\":[]");
     }
 
     [Fact]
@@ -1006,8 +1006,8 @@ public class LspServerTests
             DidOpen("file:///nomap.koi", doc),
             ContextMap("file:///nomap.koi"));
 
-        Assert.Contains("Catalog", output);
-        Assert.Contains("\"relations\":[]", output);
+        output.ShouldContain("Catalog");
+        output.ShouldContain("\"relations\":[]");
     }
 
     [Fact]
@@ -1021,10 +1021,10 @@ public class LspServerTests
             DidOpen("file:///part.koi", doc),
             ContextMap("file:///part.koi"));
 
-        Assert.Contains("\"kind\":\"Partnership\"", output);
-        Assert.Contains("\"bidirectional\":true", output);
-        Assert.Contains("\"upstream\":\"A\"", output);
-        Assert.Contains("\"downstream\":\"B\"", output);
+        output.ShouldContain("\"kind\":\"Partnership\"");
+        output.ShouldContain("\"bidirectional\":true");
+        output.ShouldContain("\"upstream\":\"A\"");
+        output.ShouldContain("\"downstream\":\"B\"");
     }
 
     [Fact]
@@ -1040,9 +1040,9 @@ public class LspServerTests
             DidOpen("file:///sk.koi", doc),
             ContextMap("file:///sk.koi"));
 
-        Assert.Contains("\"kind\":\"SharedKernel\"", output);
-        Assert.Contains("\"sharedTypes\":[\"Money\"]", output);
-        Assert.Contains("\"bidirectional\":true", output);
+        output.ShouldContain("\"kind\":\"SharedKernel\"");
+        output.ShouldContain("\"sharedTypes\":[\"Money\"]");
+        output.ShouldContain("\"bidirectional\":true");
     }
 
     [Fact]
@@ -1060,11 +1060,11 @@ public class LspServerTests
             DidOpen("file:///acl.koi", doc),
             ContextMap("file:///acl.koi"));
 
-        Assert.Contains("\"kind\":\"AntiCorruptionLayer\"", output);
-        Assert.Contains("\"upstreamContext\":\"Legacy\"", output);
-        Assert.Contains("\"upstreamType\":\"Account\"", output);
-        Assert.Contains("\"localContext\":\"Billing\"", output);
-        Assert.Contains("\"localType\":\"Customer\"", output);
+        output.ShouldContain("\"kind\":\"AntiCorruptionLayer\"");
+        output.ShouldContain("\"upstreamContext\":\"Legacy\"");
+        output.ShouldContain("\"upstreamType\":\"Account\"");
+        output.ShouldContain("\"localContext\":\"Billing\"");
+        output.ShouldContain("\"localType\":\"Customer\"");
     }
 
     [Fact]
@@ -1074,9 +1074,9 @@ public class LspServerTests
         var noUri = Frame("{\"jsonrpc\":\"2.0\",\"id\":30,\"method\":\"koine/contextMap\",\"params\":{}}");
         var output = RunSession(Initialize(), noUri);
 
-        Assert.Contains("\"contexts\":[]", output);
-        Assert.Contains("\"relations\":[]", output);
-        Assert.DoesNotContain("-32601", output); // a normal result, not a JSON-RPC error
+        output.ShouldContain("\"contexts\":[]");
+        output.ShouldContain("\"relations\":[]");
+        output.ShouldNotContain("-32601"); // a normal result, not a JSON-RPC error
     }
 
     // ---- koine/check ----
@@ -1095,10 +1095,10 @@ public class LspServerTests
                 DidOpen("file:///current.koi", "context Sales { }"),
                 Check("file:///current.koi", dir.FullName));
 
-            Assert.Contains("\"hasBreakingChanges\":true", output);
-            Assert.Contains("KOI1510", output);
-            Assert.Contains("\"impact\":\"Breaking\"", output);
-            Assert.Contains("OrderPlaced", output);
+            output.ShouldContain("\"hasBreakingChanges\":true");
+            output.ShouldContain("KOI1510");
+            output.ShouldContain("\"impact\":\"Breaking\"");
+            output.ShouldContain("OrderPlaced");
         }
         finally { dir.Delete(recursive: true); }
     }
@@ -1117,9 +1117,9 @@ public class LspServerTests
                 DidOpen("file:///current.koi", source),
                 Check("file:///current.koi", dir.FullName));
 
-            Assert.Contains("\"hasBreakingChanges\":false", output);
-            Assert.Contains("\"changes\":[]", output);
-            Assert.DoesNotContain("\"impact\":\"Breaking\"", output);
+            output.ShouldContain("\"hasBreakingChanges\":false");
+            output.ShouldContain("\"changes\":[]");
+            output.ShouldNotContain("\"impact\":\"Breaking\"");
         }
         finally { dir.Delete(recursive: true); }
     }
@@ -1134,9 +1134,9 @@ public class LspServerTests
             DidOpen("file:///current.koi", source),
             noBaseline);
 
-        Assert.Contains("\"error\":\"baseline path is required\"", output);
-        Assert.Contains("\"hasBreakingChanges\":false", output);
-        Assert.DoesNotContain("-32601", output);
+        output.ShouldContain("\"error\":\"baseline path is required\"");
+        output.ShouldContain("\"hasBreakingChanges\":false");
+        output.ShouldNotContain("-32601");
     }
 
     [Fact]
@@ -1153,9 +1153,9 @@ public class LspServerTests
                 DidOpen("file:///current.koi", "context Sales {\n  integration event OrderPlaced { orderId: OrderId }\n}\n"),
                 Check("file:///current.koi", dir.FullName));
 
-            Assert.Contains("baseline failed to parse", output);
-            Assert.Contains("\"hasBreakingChanges\":false", output);
-            Assert.DoesNotContain("\"impact\":\"Breaking\"", output);
+            output.ShouldContain("baseline failed to parse");
+            output.ShouldContain("\"hasBreakingChanges\":false");
+            output.ShouldNotContain("\"impact\":\"Breaking\"");
         }
         finally { dir.Delete(recursive: true); }
     }
@@ -1172,9 +1172,9 @@ public class LspServerTests
                 DidOpen("file:///current.koi", "context Sales { }"),
                 Check("file:///current.koi", dir.FullName));
 
-            Assert.Contains("no .koi files found", output);
-            Assert.Contains("\"hasBreakingChanges\":false", output);
-            Assert.DoesNotContain("-32601", output);
+            output.ShouldContain("no .koi files found");
+            output.ShouldContain("\"hasBreakingChanges\":false");
+            output.ShouldNotContain("-32601");
         }
         finally { dir.Delete(recursive: true); }
     }
@@ -1189,9 +1189,9 @@ public class LspServerTests
             DidOpen("file:///current.koi", "context Sales { }"),
             Check("file:///current.koi", missing));
 
-        Assert.Contains("cannot read baseline", output);
-        Assert.Contains("\"hasBreakingChanges\":false", output);
-        Assert.DoesNotContain("-32601", output);
+        output.ShouldContain("cannot read baseline");
+        output.ShouldContain("\"hasBreakingChanges\":false");
+        output.ShouldNotContain("-32601");
     }
 
     // ---- koine/docs ----
@@ -1214,12 +1214,12 @@ public class LspServerTests
             DidOpen("file:///t.koi", doc),
             Docs("file:///t.koi"));
 
-        Assert.Contains("\"files\":[", output);
-        Assert.DoesNotContain("\"files\":[]", output);
-        Assert.Contains("docs/C.md", output);   // one page per bounded context
-        Assert.Contains("docs/index.md", output);
-        Assert.Contains("mermaid", output);      // inline Mermaid diagram fences
-        Assert.Contains("\"id\":31", output);
+        output.ShouldContain("\"files\":[");
+        output.ShouldNotContain("\"files\":[]");
+        output.ShouldContain("docs/C.md");   // one page per bounded context
+        output.ShouldContain("docs/index.md");
+        output.ShouldContain("mermaid");      // inline Mermaid diagram fences
+        output.ShouldContain("\"id\":31");
     }
 
     [Fact]
@@ -1231,9 +1231,9 @@ public class LspServerTests
             DidOpen("file:///bad.koi", badDoc),
             Docs("file:///bad.koi"));
 
-        Assert.Contains("\"files\":[]", output);
-        Assert.Contains("\"id\":31", output);
-        Assert.DoesNotContain("-32601", output); // a normal result, not a JSON-RPC error
+        output.ShouldContain("\"files\":[]");
+        output.ShouldContain("\"id\":31");
+        output.ShouldNotContain("-32601"); // a normal result, not a JSON-RPC error
     }
 
     // ---- capability discovery ----
@@ -1242,14 +1242,14 @@ public class LspServerTests
     public void Initialize_advertises_custom_requests_under_experimental()
     {
         var output = RunSession(Initialize());
-        Assert.Contains("\"experimental\"", output);
-        Assert.Contains("\"koineEmitPreview\":true", output);
-        Assert.Contains("\"koineGlossary\":true", output);
-        Assert.Contains("\"koineContextMap\":true", output);
-        Assert.Contains("\"koineDocs\":true", output);
-        Assert.Contains("\"koineCheck\":true", output);
+        output.ShouldContain("\"experimental\"");
+        output.ShouldContain("\"koineEmitPreview\":true");
+        output.ShouldContain("\"koineGlossary\":true");
+        output.ShouldContain("\"koineContextMap\":true");
+        output.ShouldContain("\"koineDocs\":true");
+        output.ShouldContain("\"koineCheck\":true");
         // Additive — existing capabilities unchanged.
-        Assert.Contains("\"hoverProvider\":true", output);
-        Assert.Contains("\"textDocumentSync\":1", output);
+        output.ShouldContain("\"hoverProvider\":true");
+        output.ShouldContain("\"textDocumentSync\":1");
     }
 }

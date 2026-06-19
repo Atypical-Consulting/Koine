@@ -28,37 +28,37 @@ public sealed class ServerSmokeTests
     [Fact]
     public async Task Server_lists_all_koine_tools()
     {
-        await using var client = await McpClient.CreateAsync(ServerTransport());
+        await using var client = await McpClient.CreateAsync(ServerTransport(), cancellationToken: TestContext.Current.CancellationToken);
 
-        var tools = await client.ListToolsAsync();
+        var tools = await client.ListToolsAsync(cancellationToken: TestContext.Current.CancellationToken);
         var names = tools.Select(t => t.Name).ToHashSet();
 
-        Assert.Contains("koine_validate", names);
-        Assert.Contains("koine_compile", names);
-        Assert.Contains("koine_format", names);
-        Assert.Contains("koine_reference", names);
-        Assert.Contains("koine_examples", names);
+        names.ShouldContain("koine_validate");
+        names.ShouldContain("koine_compile");
+        names.ShouldContain("koine_format");
+        names.ShouldContain("koine_reference");
+        names.ShouldContain("koine_examples");
     }
 
     [Fact]
     public async Task Server_answers_a_tool_call_over_stdio()
     {
-        await using var client = await McpClient.CreateAsync(ServerTransport());
+        await using var client = await McpClient.CreateAsync(ServerTransport(), cancellationToken: TestContext.Current.CancellationToken);
 
         var result = await client.CallToolAsync(
             "koine_examples",
             new Dictionary<string, object?> { ["name"] = "billing" },
             cancellationToken: CancellationToken.None);
 
-        Assert.False(result.IsError ?? false);
+        (result.IsError ?? false).ShouldBeFalse();
         var text = result.Content.OfType<TextContentBlock>().First().Text;
-        Assert.Contains("context Billing", text);
+        text.ShouldContain("context Billing");
     }
 
     [Fact]
     public async Task Server_validates_a_file_list_argument_over_stdio()
     {
-        await using var client = await McpClient.CreateAsync(ServerTransport());
+        await using var client = await McpClient.CreateAsync(ServerTransport(), cancellationToken: TestContext.Current.CancellationToken);
 
         // Exercises binding of the KoineFile[] argument across the wire (the core agent path).
         var result = await client.CallToolAsync(
@@ -76,8 +76,8 @@ public sealed class ServerSmokeTests
             },
             cancellationToken: CancellationToken.None);
 
-        Assert.False(result.IsError ?? false);
+        (result.IsError ?? false).ShouldBeFalse();
         var text = result.Content.OfType<TextContentBlock>().First().Text;
-        Assert.Contains("\"ok\"", text, StringComparison.OrdinalIgnoreCase);
+        text.ShouldContain("\"ok\"", Case.Insensitive);
     }
 }

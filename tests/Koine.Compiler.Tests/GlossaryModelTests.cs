@@ -25,27 +25,26 @@ public class GlossaryModelTests
     public void Build_includes_the_context_and_its_types_with_kinds()
     {
         var g = Build(Sample);
-        Assert.Contains(g.Entries, e => e.Kind == "context" && e.Name == "Ordering");
-        Assert.Contains(g.Entries, e => e.Kind == "value" && e.Name == "Money");
-        Assert.Contains(g.Entries, e => e.Kind == "enum" && e.Name == "Currency");
+        g.Entries.ShouldContain(e => e.Kind == "context" && e.Name == "Ordering");
+        g.Entries.ShouldContain(e => e.Kind == "value" && e.Name == "Money");
+        g.Entries.ShouldContain(e => e.Kind == "enum" && e.Name == "Currency");
     }
 
     [Fact]
     public void Build_reports_doc_presence_for_coverage()
     {
         var g = Build(Sample);
-        Assert.Equal("A monetary amount.", g.Entries.Single(e => e.Name == "Money").Doc?.Trim());
-        Assert.Null(g.Entries.Single(e => e.Name == "Currency").Doc);   // undocumented => coverage gap
+        (g.Entries.Single(e => e.Name == "Money").Doc?.Trim()).ShouldBe("A monetary amount.");
+        g.Entries.Single(e => e.Name == "Currency").Doc.ShouldBeNull();   // undocumented => coverage gap
     }
 
     [Fact]
     public void Build_ids_are_unique_and_qualified_by_context()
     {
         var g = Build(Sample);
-        Assert.Equal(g.Entries.Select(e => e.Id), g.Entries.Select(e => e.Id).Distinct());
-        Assert.Equal("Ordering.Money", g.Entries.Single(e => e.Name == "Money").QualifiedName);
-        Assert.Equal(g.Entries.Single(e => e.Name == "Money").QualifiedName,
-                     g.Entries.Single(e => e.Name == "Money").Id);
+        g.Entries.Select(e => e.Id).Distinct().ShouldBe(g.Entries.Select(e => e.Id));
+        g.Entries.Single(e => e.Name == "Money").QualifiedName.ShouldBe("Ordering.Money");
+        g.Entries.Single(e => e.Name == "Money").Id.ShouldBe(g.Entries.Single(e => e.Name == "Money").QualifiedName);
     }
 
     [Fact]
@@ -61,9 +60,9 @@ public class GlossaryModelTests
             }
             """;
         var g = Build(src);
-        Assert.Contains(g.Entries, e => e.Kind == "aggregate" && e.QualifiedName == "Sales.Cart");
-        Assert.Contains(g.Entries, e => e.Kind == "entity" && e.QualifiedName == "Sales.Cart.CartHead");
-        Assert.Equal("A line.", g.Entries.Single(e => e.Name == "CartLine").Doc?.Trim());
-        Assert.Equal("Sales.Cart.CartLine", g.Entries.Single(e => e.Name == "CartLine").QualifiedName);
+        g.Entries.ShouldContain(e => e.Kind == "aggregate" && e.QualifiedName == "Sales.Cart");
+        g.Entries.ShouldContain(e => e.Kind == "entity" && e.QualifiedName == "Sales.Cart.CartHead");
+        (g.Entries.Single(e => e.Name == "CartLine").Doc?.Trim()).ShouldBe("A line.");
+        g.Entries.Single(e => e.Name == "CartLine").QualifiedName.ShouldBe("Sales.Cart.CartLine");
     }
 }

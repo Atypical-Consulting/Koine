@@ -42,9 +42,9 @@ public class R6EventTests
     private static (Assembly Asm, IReadOnlyList<EmittedFile> Files) Compile(string source)
     {
         var result = new KoineCompiler().Compile(source, new CSharpEmitter());
-        Assert.True(result.Success, string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
         var (asm, errors) = TestSupport.Compile(result.Files);
-        Assert.True(asm is not null, "generated C# failed to compile:\n" + string.Join("\n", errors));
+        (asm is not null).ShouldBeTrue("generated C# failed to compile:\n" + string.Join("\n", errors));
         return (asm, result.Files);
     }
 
@@ -59,12 +59,12 @@ public class R6EventTests
         var ev = asm.GetType("Sales.OrderPlaced")!;
         var orderId = asm.GetType("Sales.OrderId")!;
 
-        Assert.Contains(ev.GetInterfaces(), i => i.Name == "IDomainEvent");
+        ev.GetInterfaces().ShouldContain(i => i.Name == "IDomainEvent");
 
         var e = Activator.CreateInstance(ev, orderId.GetMethod("New")!.Invoke(null, null), 3)!;
         var occurredOn = (DateTimeOffset)ev.GetProperty("OccurredOn")!.GetValue(e)!;
-        Assert.True(occurredOn > DateTimeOffset.UtcNow.AddMinutes(-1));
-        Assert.Equal(3, ev.GetProperty("LineCount")!.GetValue(e));
+        (occurredOn > DateTimeOffset.UtcNow.AddMinutes(-1)).ShouldBeTrue();
+        ev.GetProperty("LineCount")!.GetValue(e).ShouldBe(3);
     }
 
     [Fact]
@@ -79,22 +79,22 @@ public class R6EventTests
         var e2 = Activator.CreateInstance(ev, id, 3)!;
         // Align the only non-field member (the occurrence timestamp) so we compare on data.
         ev.GetProperty("OccurredOn")!.SetValue(e2, ev.GetProperty("OccurredOn")!.GetValue(e1));
-        Assert.True(e1.Equals(e2));   // value equality
+        e1.Equals(e2).ShouldBeTrue();   // value equality
 
         var e3 = Activator.CreateInstance(ev, id, 99)!;
         ev.GetProperty("OccurredOn")!.SetValue(e3, ev.GetProperty("OccurredOn")!.GetValue(e1));
-        Assert.False(e1.Equals(e3));  // different field -> not equal
+        e1.Equals(e3).ShouldBeFalse();  // different field -> not equal
     }
 
     [Fact]
     public void IDomainEvent_runtime_is_emitted_only_when_events_exist()
     {
         var (_, withEvents) = Compile(Fixture);
-        Assert.Contains(withEvents, f => f.RelativePath == "Koine/Runtime/IDomainEvent.cs");
+        withEvents.ShouldContain(f => f.RelativePath == "Koine/Runtime/IDomainEvent.cs");
 
         const string noEvents = "context C {\n  value V { x: Int }\n}\n";
         var result = new KoineCompiler().Compile(noEvents, new CSharpEmitter());
-        Assert.DoesNotContain(result.Files, f => f.RelativePath == "Koine/Runtime/IDomainEvent.cs");
+        result.Files.ShouldNotContain(f => f.RelativePath == "Koine/Runtime/IDomainEvent.cs");
     }
 
     // ---- R6.2 emit ---------------------------------------------------------
@@ -116,13 +116,13 @@ public class R6EventTests
 
         var events = (IEnumerable)order.GetProperty("DomainEvents")!.GetValue(o)!;
         var recorded = events.Cast<object>().ToList();
-        Assert.Single(recorded);
-        Assert.Equal("OrderPlaced", recorded[0].GetType().Name);
-        Assert.Equal(1, recorded[0].GetType().GetProperty("LineCount")!.GetValue(recorded[0]));
-        Assert.Equal(order.GetProperty("Id")!.GetValue(o), recorded[0].GetType().GetProperty("OrderId")!.GetValue(recorded[0]));
+        recorded.ShouldHaveSingleItem();
+        recorded[0].GetType().Name.ShouldBe("OrderPlaced");
+        recorded[0].GetType().GetProperty("LineCount")!.GetValue(recorded[0]).ShouldBe(1);
+        recorded[0].GetType().GetProperty("OrderId")!.GetValue(recorded[0]).ShouldBe(order.GetProperty("Id")!.GetValue(o));
 
         order.GetMethod("ClearDomainEvents")!.Invoke(o, null);
-        Assert.Empty(((IEnumerable)order.GetProperty("DomainEvents")!.GetValue(o)!).Cast<object>());
+        ((IEnumerable)order.GetProperty("DomainEvents")!.GetValue(o)!).Cast<object>().ShouldBeEmpty();
     }
 
     // ---- diagnostics -------------------------------------------------------
@@ -132,7 +132,7 @@ public class R6EventTests
     {
         const string src =
             "context C {\n  entity E identified by EId {\n    n: Int\n    command go { emit Nope(x: n) }\n  }\n}\n";
-        Assert.Contains(Diagnose(src), d => d.Code == DiagnosticCodes.UnknownEvent);
+        Diagnose(src).ShouldContain(d => d.Code == DiagnosticCodes.UnknownEvent);
     }
 
     [Fact]
@@ -141,7 +141,7 @@ public class R6EventTests
         const string src =
             "context C {\n  event Happened { n: Int }\n  entity E identified by EId {\n    n: Int\n    command go { emit Happened(bogus: n) }\n  }\n}\n";
         var diags = Diagnose(src);
-        Assert.Contains(diags, d => d.Code == DiagnosticCodes.EmitPayloadMismatch && d.Message.Contains("no field 'bogus'"));
+        diags.ShouldContain(d => d.Code == DiagnosticCodes.EmitPayloadMismatch && d.Message.Contains("no field 'bogus'"));
     }
 
     [Fact]
@@ -149,7 +149,7 @@ public class R6EventTests
     {
         const string src =
             "context C {\n  event Happened { a: Int  b: Int }\n  entity E identified by EId {\n    a: Int\n    command go { emit Happened(a: a) }\n  }\n}\n";
-        Assert.Contains(Diagnose(src), d => d.Code == DiagnosticCodes.EmitPayloadMismatch && d.Message.Contains("missing field 'b'"));
+        Diagnose(src).ShouldContain(d => d.Code == DiagnosticCodes.EmitPayloadMismatch && d.Message.Contains("missing field 'b'"));
     }
 
     [Fact]
@@ -157,7 +157,7 @@ public class R6EventTests
     {
         const string src =
             "context C {\n  event Happened { name: String }\n  entity E identified by EId {\n    n: Int\n    command go { emit Happened(name: n) }\n  }\n}\n";
-        Assert.Contains(Diagnose(src), d => d.Code == DiagnosticCodes.EmitPayloadMismatch);
+        Diagnose(src).ShouldContain(d => d.Code == DiagnosticCodes.EmitPayloadMismatch);
     }
 
     // ---- regressions found by the R6 review --------------------------------
@@ -175,18 +175,17 @@ public class R6EventTests
             "    command go { n -> n  emit Pair(note: \"hi\", amount: n) }\n" +
             "  }\n" +
             "}\n";
-        Assert.Empty(Diagnose(src));
+        Diagnose(src).ShouldBeEmpty();
 
         var result = new KoineCompiler().Compile(src, new CSharpEmitter());
         var (asm, errors) = TestSupport.Compile(result.Files);
-        Assert.True(asm is not null, "generated C# failed to compile:\n" + string.Join("\n", errors));
+        (asm is not null).ShouldBeTrue("generated C# failed to compile:\n" + string.Join("\n", errors));
     }
 
     [Fact]
     public void Event_field_colliding_with_OccurredOn_is_reported()
     {
-        Assert.Contains(Diagnose("context C {\n  event E { occurredOn: Instant  n: Int }\n}\n"),
-            d => d.Code == DiagnosticCodes.ReservedEventField);
+        Diagnose("context C {\n  event E { occurredOn: Instant  n: Int }\n}\n").ShouldContain(d => d.Code == DiagnosticCodes.ReservedEventField);
     }
 
     [Fact]
@@ -194,7 +193,7 @@ public class R6EventTests
     {
         const string src =
             "context C {\n  event E { xs: List<Int> }\n  entity Ent identified by EId {\n    ys: List<String>\n    command go { emit E(xs: ys) }\n  }\n}\n";
-        Assert.Contains(Diagnose(src), d => d.Code == DiagnosticCodes.EmitPayloadMismatch);
+        Diagnose(src).ShouldContain(d => d.Code == DiagnosticCodes.EmitPayloadMismatch);
     }
 
     [Fact]
@@ -202,11 +201,11 @@ public class R6EventTests
     {
         const string narrowing =
             "context C {\n  event E { n: Int }\n  entity Ent identified by EId {\n    price: Decimal\n    command go { emit E(n: price) }\n  }\n}\n";
-        Assert.Contains(Diagnose(narrowing), d => d.Code == DiagnosticCodes.EmitPayloadMismatch);
+        Diagnose(narrowing).ShouldContain(d => d.Code == DiagnosticCodes.EmitPayloadMismatch);
 
         const string widening =
             "context C {\n  event E { d: Decimal }\n  entity Ent identified by EId {\n    count: Int\n    command go { emit E(d: count) }\n  }\n}\n";
-        Assert.Empty(Diagnose(widening)); // Int -> Decimal is an implicit widening
+        Diagnose(widening).ShouldBeEmpty(); // Int -> Decimal is an implicit widening
     }
 
     [Fact]
@@ -220,6 +219,6 @@ public class R6EventTests
             "    entity Child identified by CId { q: Int  command go { emit Ev(x: q) } }\n" +
             "  }\n" +
             "}\n";
-        Assert.Contains(Diagnose(src), d => d.Code == DiagnosticCodes.EmitOutsideRoot);
+        Diagnose(src).ShouldContain(d => d.Code == DiagnosticCodes.EmitOutsideRoot);
     }
 }

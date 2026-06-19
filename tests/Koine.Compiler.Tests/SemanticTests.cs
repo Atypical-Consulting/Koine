@@ -9,15 +9,15 @@ public class SemanticTests
     private static IReadOnlyList<Diagnostic> Validate(string source)
     {
         var (model, syntax) = new KoineCompiler().Parse(source);
-        Assert.Empty(syntax);
-        Assert.NotNull(model);
+        syntax.ShouldBeEmpty();
+        model.ShouldNotBeNull();
         return new SemanticValidator().Validate(model);
     }
 
     [Fact]
     public void Valid_fixture_has_no_diagnostics()
     {
-        Assert.Empty(Validate(TestSupport.BillingFixture));
+        Validate(TestSupport.BillingFixture).ShouldBeEmpty();
     }
 
     [Fact]
@@ -25,7 +25,7 @@ public class SemanticTests
     {
         const string src = "context C {\n  value V {\n    x: Nope\n  }\n}\n";
         var diags = Validate(src);
-        Assert.Contains(diags, d => d.Code == DiagnosticCodes.UnknownType);
+        diags.ShouldContain(d => d.Code == DiagnosticCodes.UnknownType);
     }
 
     [Theory]
@@ -36,7 +36,7 @@ public class SemanticTests
     public void Entity_member_colliding_with_a_generated_member_is_reported(string member)
     {
         var src = $"context C {{\n  entity E identified by EId {{ {member}: Int }}\n}}\n";
-        Assert.Contains(Validate(src), d => d.Code == DiagnosticCodes.ReservedGeneratedMember);
+        Validate(src).ShouldContain(d => d.Code == DiagnosticCodes.ReservedGeneratedMember);
     }
 
     [Fact]
@@ -44,7 +44,7 @@ public class SemanticTests
     {
         // `gethashcode` PascalCases to `Gethashcode`, which does NOT collide with GetHashCode.
         const string src = "context C {\n  entity E identified by EId { gethashcode: Int }\n}\n";
-        Assert.DoesNotContain(Validate(src), d => d.Code == DiagnosticCodes.ReservedGeneratedMember);
+        Validate(src).ShouldNotContain(d => d.Code == DiagnosticCodes.ReservedGeneratedMember);
     }
 
     [Theory]
@@ -54,7 +54,7 @@ public class SemanticTests
     public void Value_object_member_colliding_with_a_generated_member_is_reported(string member)
     {
         var src = $"context C {{\n  value V {{ {member}: Int }}\n}}\n";
-        Assert.Contains(Validate(src), d => d.Code == DiagnosticCodes.ReservedGeneratedMember);
+        Validate(src).ShouldContain(d => d.Code == DiagnosticCodes.ReservedGeneratedMember);
     }
 
     [Theory]
@@ -64,7 +64,7 @@ public class SemanticTests
     public void Event_field_colliding_with_a_record_member_is_reported(string field)
     {
         var src = $"context C {{\n  event E {{ {field}: Int }}\n}}\n";
-        Assert.Contains(Validate(src), d => d.Code == DiagnosticCodes.ReservedRecordMember);
+        Validate(src).ShouldContain(d => d.Code == DiagnosticCodes.ReservedRecordMember);
     }
 
     [Fact]
@@ -72,7 +72,7 @@ public class SemanticTests
     {
         const string src = "context C {\n  value V {\n    x: Int\n    x: Int\n  }\n}\n";
         var diags = Validate(src);
-        Assert.Contains(diags, d => d.Code == DiagnosticCodes.DuplicateMember);
+        diags.ShouldContain(d => d.Code == DiagnosticCodes.DuplicateMember);
     }
 
     [Fact]
@@ -80,7 +80,7 @@ public class SemanticTests
     {
         const string src = "context C {\n  value V {\n    x: Int\n    invariant y >= 0 \"bad\"\n  }\n}\n";
         var diags = Validate(src);
-        Assert.Contains(diags, d => d.Code == DiagnosticCodes.UnknownField);
+        diags.ShouldContain(d => d.Code == DiagnosticCodes.UnknownField);
     }
 
     [Fact]
@@ -94,14 +94,14 @@ public class SemanticTests
             "    invariant state == A \"must start at A\"\n" +
             "  }\n" +
             "}\n";
-        Assert.Empty(Validate(src));
+        Validate(src).ShouldBeEmpty();
     }
 
     [Fact]
     public void Duplicate_enum_member_is_reported()
     {
         var diags = Validate("context C {\n  enum E { A, A, B }\n}\n");
-        Assert.Contains(diags, d => d.Code == DiagnosticCodes.DuplicateEnumMember && d.Message.Contains("'A'"));
+        diags.ShouldContain(d => d.Code == DiagnosticCodes.DuplicateEnumMember && d.Message.Contains("'A'"));
     }
 
     [Fact]
@@ -110,7 +110,7 @@ public class SemanticTests
         const string src =
             "context C {\n  aggregate Ord root Missing {\n    entity Ord identified by OrdId { x: Int }\n  }\n}\n";
         var diags = Validate(src);
-        Assert.Contains(diags, d => d.Code == DiagnosticCodes.UnknownAggregateRoot);
+        diags.ShouldContain(d => d.Code == DiagnosticCodes.UnknownAggregateRoot);
     }
 
     [Fact]
@@ -119,7 +119,7 @@ public class SemanticTests
         // `aggregate Order root Order` is idiomatic and must NOT be a duplicate-type error.
         const string src =
             "context C {\n  aggregate Order root Order {\n    entity Order identified by OrderId { x: Int }\n  }\n}\n";
-        Assert.Empty(Validate(src));
+        Validate(src).ShouldBeEmpty();
     }
 
     [Fact]
@@ -127,7 +127,7 @@ public class SemanticTests
     {
         const string src = "context C {\n  value Money { a: Int }\n  value Money { b: String }\n}\n";
         var diags = Validate(src);
-        Assert.Contains(diags, d => d.Code == DiagnosticCodes.DuplicateType && d.Message.Contains("Money"));
+        diags.ShouldContain(d => d.Code == DiagnosticCodes.DuplicateType && d.Message.Contains("Money"));
     }
 
     [Fact]
@@ -137,6 +137,6 @@ public class SemanticTests
         const string src =
             "context C {\n  enum A { X }\n  enum B { Y }\n  value V {\n    f: A = Y\n  }\n}\n";
         var diags = Validate(src);
-        Assert.Contains(diags, d => d.Code == DiagnosticCodes.UnknownEnumMemberForType && d.Message.Contains("'Y'"));
+        diags.ShouldContain(d => d.Code == DiagnosticCodes.UnknownEnumMemberForType && d.Message.Contains("'Y'"));
     }
 }
