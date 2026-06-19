@@ -14,6 +14,7 @@ import * as sass from 'sass-embedded';
 import postcss from 'postcss';
 import { readFileSync } from 'node:fs';
 import { extname, resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 
 // ---------------------------------------------------------------------------
 // Step 1: compile input to canonical compressed CSS (mirrors css-canon.mjs)
@@ -75,8 +76,21 @@ function normaliseAtParams(params) {
 }
 
 /**
- * Collect declarations from a postcss Rule/Declaration walk.
- * Returns a sorted array of "prop:value" strings.
+ * Collect declarations from a postcss Rule/Declaration walk and return a
+ * canonical form suitable for order-insensitive comparison.
+ *
+ * When all property NAMES are distinct → sorted array (benign reordering of
+ * distinct properties is still reported EQUIVALENT — e.g. Phase 2 mixin inlining
+ * legitimately reorders distinct properties).
+ *
+ * When any property NAME appears more than once (duplicate property) → the rule
+ * is order-sensitive (CSS last-wins), so the canonical form is the positional
+ * (source-order) list, NOT sorted.  This ensures .foo{color:red;color:blue} and
+ * .foo{color:blue;color:red} are reported NOT EQUIVALENT.
+ *
+ * NOTE: shorthand/longhand interleaving across DIFFERENT property names (e.g.
+ * background + background-color) is NOT detected here; the final visual smoke
+ * test is the backstop for that edge case.
  */
 function collectDeclarations(node) {
   const decls = [];
@@ -85,7 +99,13 @@ function collectDeclarations(node) {
       decls.push(`${child.prop}:${child.value}`);
     }
   });
-  return decls.sort();
+
+  // Check whether any property name is repeated.
+  const propNames = decls.map((d) => d.slice(0, d.indexOf(':')));
+  const hasDuplicateProp = propNames.length !== new Set(propNames).size;
+
+  // Order-sensitive canonical form for duplicate-property rules; sorted otherwise.
+  return hasDuplicateProp ? decls : decls.slice().sort();
 }
 
 /**
@@ -152,11 +172,10 @@ function buildMaps(root) {
       const context = atContext(node);
       const decls = collectDeclarations(node);
 
-      // Expand comma-separated selector list → one map entry per selector
-      const selectors = node.selector
-        .split(',')
-        .map(normaliseSelector)
-        .filter(Boolean);
+      // Expand comma-separated selector list → one map entry per selector.
+      // Use postcss Rule#selectors (comma-aware) instead of split(',') so that
+      // commas inside :is(), :where(), :not(), [attr="x,y"] etc. are not shredded.
+      const selectors = node.selectors.map(normaliseSelector);
 
       for (const sel of selectors) {
         const key = context ? `${context}||${sel}` : sel;
@@ -184,6 +203,7 @@ function setsEqual(a, b) {
   for (const v of a) if (!b.has(v)) return false;
   return true;
 }
+// (setsEqual is kept for potential future use; currently compareMaps uses arraysEqual)
 
 function arraysEqual(a, b) {
   if (a.length !== b.length) return false;
@@ -194,7 +214,7 @@ function arraysEqual(a, b) {
 /**
  * Compare two Maps<key, string[]> and return diff info.
  */
-function compareMaps(mapA, mapB, label) {
+function compareMaps(mapA, mapB) {
   const onlyInA = [];
   const onlyInB = [];
   const different = [];
@@ -235,7 +255,7 @@ function compareKeyframesMaps(mapA, mapB) {
       // Compare frame maps — order-independent
       const framesA = mapA.get(name);
       const framesB = mapB.get(name);
-      const diff = compareMaps(framesA, framesB, `@keyframes ${name}`);
+      const diff = compareMaps(framesA, framesB);
       if (diff.onlyInA.length || diff.onlyInB.length || diff.different.length) {
         different.push({
           key: `@keyframes ${name}`,
@@ -275,7 +295,7 @@ export async function compareCss({ fileA, fileB, cssA, cssB }) {
   const { ruleMap: ruleMapA, keyframesMap: kfMapA } = buildMaps(rootA);
   const { ruleMap: ruleMapB, keyframesMap: kfMapB } = buildMaps(rootB);
 
-  const ruleDiff = compareMaps(ruleMapA, ruleMapB, 'rules');
+  const ruleDiff = compareMaps(ruleMapA, ruleMapB);
   const kfDiff = compareKeyframesMaps(kfMapA, kfMapB);
 
   const isEquivalent =
@@ -343,12 +363,12 @@ export async function compareCss({ fileA, fileB, cssA, cssB }) {
 // CLI entry point
 // ---------------------------------------------------------------------------
 
-// Detect direct invocation (works in both CJS and ESM)
+// Detect direct invocation: compare import.meta.url against the resolved URL of
+// the entry-point script so the check is exact (no substring false-positives).
 const isMain =
   typeof process !== 'undefined' &&
   process.argv[1] &&
-  (process.argv[1].endsWith('css-equiv.mjs') ||
-    process.argv[1].includes('css-equiv'));
+  import.meta.url === pathToFileURL(process.argv[1]).href;
 
 if (isMain) {
   const [, , fileA, fileB] = process.argv;
