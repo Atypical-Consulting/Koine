@@ -447,6 +447,14 @@ public sealed class SemanticValidator
 
         foreach (Member m in members)
         {
+            // Resilient syntax: a placeholder member (empty name, or an error/missing recovery
+            // node) is a syntax-recovery artifact, not a real declaration — skip it entirely so it
+            // produces no spurious duplicate/unknown-type/initializer diagnostics off the error region.
+            if (IsErrorOrMissing(m) || IsPlaceholder(m.Name))
+            {
+                continue;
+            }
+
             // 1. Unknown type reference (and its element for List<T>).
             ValidateTypeRef(m.Type, index, diagnostics);
 
@@ -1014,6 +1022,15 @@ public sealed class SemanticValidator
 
     internal static void ValidateTypeRef(TypeRef type, ModelIndex index, List<Diagnostic> diagnostics)
     {
+        // Resilient syntax: an empty-named TypeRef is the placeholder the builder fills in for a
+        // type reference the parser couldn't recover (e.g. `amount:` with no type). Reporting
+        // "unknown type ''" would be a spurious cascade off a syntax error already diagnosed
+        // upstream, so skip it (and don't recurse into its — likewise placeholder — arguments).
+        if (IsPlaceholder(type))
+        {
+            return;
+        }
+
         // A qualified `Context.T` is validated by the context-scoping pass (UnknownContext /
         // NotExported); skip the global unknown-type check here to avoid a double report.
         if (type.Qualifier is null && !index.IsKnownType(type.Name))
@@ -1116,4 +1133,27 @@ public sealed class SemanticValidator
         MemberAccessExpr ma => RootIdentifier(ma.Target),
         _ => null
     };
+
+    // ------------------------------------------------------------------------
+    // Resilient-syntax guards (#R: error-tolerant parsing)
+    // ------------------------------------------------------------------------
+
+    /// <summary>
+    /// <c>true</c> for a node that is a syntax-recovery artifact rather than a real construct: an
+    /// <see cref="ErrorNode"/> recovery marker or an ANTLR-synthesized <see cref="KoineNode.IsMissing"/>
+    /// phantom. Validators skip such nodes so a partial (recovered) model produces no spurious
+    /// semantic cascade off the error region — the syntax error itself is already diagnosed upstream.
+    /// </summary>
+    internal static bool IsErrorOrMissing(KoineNode node) => node is ErrorNode || node.IsMissing;
+
+    /// <summary>
+    /// <c>true</c> when a name is the empty-named placeholder the builder fills in for a required
+    /// declaration/identifier the parser could not recover (e.g. <c>TypeRef("")</c>,
+    /// <c>IdentifierExpr("")</c>, an empty-named member). Used to suppress diagnostics that would
+    /// otherwise report on the empty name (e.g. "unknown type ''").
+    /// </summary>
+    internal static bool IsPlaceholder(string? name) => string.IsNullOrEmpty(name);
+
+    /// <summary>A <see cref="TypeRef"/> is a placeholder when it is an error/missing node or empty-named.</summary>
+    internal static bool IsPlaceholder(TypeRef type) => IsErrorOrMissing(type) || IsPlaceholder(type.Name);
 }
