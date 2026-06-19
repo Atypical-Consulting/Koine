@@ -1,18 +1,19 @@
 ---
 name: implement-issue
 description: >-
-  Execute a GitHub issue's implementation-plan comment end-to-end for the Koine project — the
-  consumer side of `create-issue`. Reads the issue's `**🛠️ Implementation plan**` comment (the
-  `### Task N` / `- [ ]` checklist), picks an execution mode by plan complexity, spins up a git
-  worktree, opens a DRAFT pull request, then loops task-by-task: implement → commit → tick that
-  task's checkbox on the live issue, until every task is checked. Finishes by running the
-  `code-review` skill, committing the fixes, and flipping the PR from draft to ready. ALWAYS reach
-  for this whenever the user wants to implement, build, execute, ship, work, do, knock out, or
-  "start coding" a GitHub issue or its plan — including phrasings like "implement issue 21", "build
-  the feature from issue #X", "execute the plan on this issue", "ship issue X", "do the
-  implementation plan", "work issue X task-by-task", "pick up issue X", or "turn issue X into a PR".
-  Does NOT apply to CREATING issues (use `create-issue` for that), to merely commenting on / closing
-  / listing issues, or to ad-hoc coding with no issue plan to drive it.
+  Do the actual coding for an existing GitHub issue and turn it into a finished pull request — the
+  "go build it" counterpart to `create-issue` for the Koine project. Use this whenever an issue
+  already carries an implementation plan (a `**🛠️ Implementation plan**` comment with a `### Task N`
+  / `- [ ]` checklist) and the user wants it BUILT: it spins up a git worktree, opens a DRAFT pull
+  request, then loops task-by-task — implement → commit → tick that task's checkbox on the live issue
+  — until every box is checked, then runs the `code-review` skill, applies the fixes, runs the
+  formatter, and flips the PR from draft to ready. ALWAYS reach for it when the user wants to
+  implement, build, code, execute, ship, finish, knock out, work through, resume, or "pick up" a
+  GitHub issue or its plan — e.g. "implement issue 47", "knock out the tasks on issue 71", "execute
+  the plan on this issue and mark the PR ready", "build the feature from issue #X and open a PR", or a
+  bare issue link with "go build it." Does NOT apply to CREATING, filing, or planning a new issue
+  (that's `create-issue`), to editing a plan, or to merely commenting on / closing / listing issues,
+  or to ad-hoc coding with no issue plan to drive it.
 ---
 
 # Implement a Koine issue from its plan comment
