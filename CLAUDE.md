@@ -28,6 +28,11 @@ git -c user.email=phmatray@gmail.com -c user.name="Philippe Matray" commit -m ".
 
 .NET 10. Solution is the modern `Koine.slnx`. From this directory:
 
+> **Prerequisite:** `Koine.slnx` includes `src/Koine.Wasm` (browser-wasm RID), so a bare
+> `dotnet build` / `dotnet test` over the solution needs the WebAssembly workloads. Install
+> them once: `dotnet workload install wasm-tools wasm-experimental`. Without them the solution
+> restore/build fails on the wasm project. (CI installs the same pair; see `.github/workflows/ci.yml`.)
+
 ```bash
 ./scripts/build/build.sh    # dotnet build && dotnet test (build.ps1 / build.cmd are equivalents)
 dotnet build                # build only
