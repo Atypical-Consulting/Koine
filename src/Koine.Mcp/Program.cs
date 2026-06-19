@@ -1,23 +1,19 @@
-using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Hosting;
-using Microsoft.Extensions.Logging;
+using Koine.Mcp;
 
-// The Koine MCP server. It speaks the Model Context Protocol over stdio so an AI agent
-// can author a complete domain in .koi: validate it, compile it to C#/TypeScript/Python/glossary/docs,
-// format it, and read the language reference + real examples. Every tool is a thin wrapper over
-// the existing Koine.Compiler service API — no compiler changes.
+// Entry point for the Koine MCP server. It exposes the Koine.Compiler service API to AI agents so a
+// model can author a complete domain in .koi: validate it, compile it to C#/TypeScript/Python/
+// glossary/docs, format it, and read the language reference + real examples. Every tool is a thin
+// wrapper over Koine.Compiler — no compiler changes.
 //
-// Critical: stdout carries ONLY framed MCP messages, so all logging must go to stderr
-// (mirrors the constraint LspServer.Run() enforces for the LSP server).
-var builder = Host.CreateApplicationBuilder(args);
-
-builder.Logging.AddConsole(options =>
-    options.LogToStandardErrorThreshold = LogLevel.Trace);
-
-builder.Services
-    .AddMcpServer()
-    .WithStdioServerTransport()
-    .WithToolsFromAssembly()
-    .WithResourcesFromAssembly();
-
-await builder.Build().RunAsync();
+// Two transports, same tools:
+//   • default (no --http) → stdio, for an editor/agent that spawns this as a child process.
+//   • --http [--port N] [--host H] → an HTTP (Streamable HTTP/SSE) host any MCP client reaches by
+//     URL (e.g. LM Studio). See StdioHost / HttpHost.
+if (args.Contains("--http"))
+{
+    await HttpHost.RunAsync(args);
+}
+else
+{
+    await StdioHost.RunAsync(args);
+}
