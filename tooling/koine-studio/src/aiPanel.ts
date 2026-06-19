@@ -31,6 +31,12 @@ export interface AssistantPanelOptions {
   onApplyModel: (source: string) => void;
   /** Open Preferences (so the user can add their API key). */
   onOpenPrefs: () => void;
+  /**
+   * Execute a Koine compiler tool (validate/compile/format) by name with JSON args, for the
+   * assistant's tool loop (OpenAI-compatible path). Omitted when the host can't run tools, in which
+   * case the assistant stays plain chat.
+   */
+  runCompilerTool?: (name: string, argsJson: string) => Promise<string>;
 }
 
 export interface AssistantPanel {
@@ -232,6 +238,23 @@ export function createAssistantPanel(opts: AssistantPanelOptions): AssistantPane
     const replyBubble = addBubble('assistant');
     replyBubble.textContent = '…';
 
+    // A muted one-line note per tool call the model makes, inserted above the final reply so the user
+    // can see the assistant ran a koine tool (and its outcome) rather than answering blind. Tracked so
+    // a full turn rollback can remove them too (no orphaned tool lines above a removed user bubble).
+    const toolNodes: HTMLElement[] = [];
+    const addToolStatus = (name: string, summary: string): void => {
+      // Any text streamed this round was a "thinking" preamble before the tool call — clear it so the
+      // tool line and the eventual answer render in chronological order (ai.ts keeps it out of history).
+      full = '';
+      replyBubble.textContent = '…';
+      const node = document.createElement('div');
+      node.className = 'koi-assistant-tool';
+      node.textContent = summary ? `${name} → ${summary}` : `ran ${name}`;
+      transcript.insertBefore(node, replyBubble);
+      toolNodes.push(node);
+      transcript.scrollTop = transcript.scrollHeight;
+    };
+
     aborter = new AbortController();
     setBusy(true);
     let full = '';
@@ -249,6 +272,8 @@ export function createAssistantPanel(opts: AssistantPanelOptions): AssistantPane
           replyBubble.textContent = full;
           transcript.scrollTop = transcript.scrollHeight;
         },
+        runCompilerTool: opts.runCompilerTool,
+        onToolCall: addToolStatus,
       });
       messages.push({ role: 'assistant', content: full });
       replyBubble.innerHTML = `<div class="koi-md">${renderMarkdown(full)}</div>`;
@@ -268,9 +293,10 @@ export function createAssistantPanel(opts: AssistantPanelOptions): AssistantPane
         maybeOfferApply(replyBubble, full);
       } else {
         // Aborted with nothing, or a real error: roll the whole turn back from BOTH history and
-        // transcript (no dangling user turn), and restore the prompt so the user can retry.
+        // transcript (no dangling user turn or orphaned tool lines), and restore the prompt to retry.
         messages.pop();
         userBubble.remove();
+        for (const n of toolNodes) n.remove();
         input.value = prompt;
         replyBubble.classList.add('koi-msg-error');
         replyBubble.textContent = aborted

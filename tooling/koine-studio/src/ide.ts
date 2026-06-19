@@ -1588,6 +1588,11 @@ export function init(): void {
       },
       onApplyModel: (source) => replaceActiveDoc(source),
       onOpenPrefs: () => prefs.open(),
+      // Let the assistant call koine tools (validate/compile/format), executed by the host: in-WASM in
+      // the browser, via the `koine mcp --http` sidecar on the desktop.
+      runCompilerTool: platform.runCompilerTool
+        ? (name, argsJson) => platform.runCompilerTool!(name, argsJson)
+        : undefined,
     });
     return assistant;
   }
