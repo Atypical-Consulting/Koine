@@ -8,7 +8,7 @@
 [![Documentation](https://img.shields.io/badge/docs-koine-3245b8)](https://atypical-consulting.github.io/Koine/)
 [![.NET](https://img.shields.io/badge/.NET-10-512BD4)](https://dotnet.microsoft.com/)
 [![Tests](https://img.shields.io/badge/tests-950%2B%20passing-2ea44f)](tests/)
-![Target](https://img.shields.io/badge/emits-C%23%20%C2%B7%20TypeScript%20%C2%B7%20Python%20%C2%B7%20docs-178600)
+![Target](https://img.shields.io/badge/emits-C%23%20%C2%B7%20TypeScript%20%C2%B7%20Python%20%C2%B7%20PHP%20%C2%B7%20docs-178600)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 
 ## The problem
@@ -30,11 +30,11 @@ sync, and the rules stay front and centre instead of drowning in boilerplate.
 The name evokes **Koine Greek**, the *common* language that became a lingua franca. The goal is to
 compile one domain model to many targets. **C# is the primary, most complete target**; a
 **TypeScript** emitter ships (`--target typescript`), a **Python** emitter ships (`--target python` →
-dependency-free Python 3.11+, `mypy --strict`-clean; Phase 1 covers the tactical core), a **docs**
-target emits living documentation (`--target docs` → Markdown + Mermaid diagrams) straight from the
-model, and the parser and semantic model are kept strictly target-agnostic so further emitters (e.g.
-Rust) can be added without touching
-them.
+dependency-free Python 3.11+, `mypy --strict`-clean; Phase 1 covers the tactical core), a **PHP 8.1**
+emitter ships (`--target php` → dependency-free PHP 8.1, typed properties, readonly promoted properties; Phase 1
+covers the tactical core), a **docs** target emits living documentation (`--target docs` → Markdown +
+Mermaid diagrams) straight from the model, and the parser and semantic model are kept strictly
+target-agnostic so further emitters (e.g. Rust) can be added without touching them.
 
 ## See it run — in your browser
 
@@ -149,6 +149,9 @@ dotnet run --project src/Koine.Cli -- build examples/billing.koi --target typesc
 # Or to Python (Phase 1: tactical core — value objects, smart enums, entities, events, repositories)
 dotnet run --project src/Koine.Cli -- build examples/billing.koi --target python --out ./generated_py
 
+# Or to PHP 8.1 (Phase 1: tactical core — value objects, smart enums, entities, events, repositories)
+dotnet run --project src/Koine.Cli -- build examples/billing.koi --target php --out ./generated_php
+
 # Generate living documentation (Markdown + Mermaid state/class/context-map diagrams)
 dotnet run --project src/Koine.Cli -- build examples/billing.koi --target docs --out ./docs
 
@@ -233,7 +236,7 @@ The pipeline is strictly layered so backends are pluggable:
   → Lexer/Parser (ANTLR, generated from Grammar/KoineLexer.g4 + KoineParser.g4)
   → KoineModelBuilderVisitor → semantic model (Ast/, target-agnostic)
   → SemanticValidator (Semantics/) → diagnostics with line/column
-  → IEmitter (Emit/CSharp, Emit/TypeScript, Emit/Python, …) → source files
+  → IEmitter (Emit/CSharp, Emit/TypeScript, Emit/Python, Emit/Php, …) → source files
 ```
 
 ```
@@ -248,6 +251,7 @@ Koine.slnx
 │   │   │   ├── CSharp/     # CSharpEmitter (primary target)
 │   │   │   ├── TypeScript/ # TypeScriptEmitter
 │   │   │   ├── Python/     # PythonEmitter (Phase 1: tactical core)
+│   │   │   ├── Php/        # PhpEmitter (Phase 1: tactical core, PHP 8.1)
 │   │   │   ├── Glossary/   # ubiquitous-language glossary
 │   │   │   └── Docs/       # living documentation (Markdown + Mermaid diagrams)
 │   │   ├── Diagnostics/    # Diagnostic
@@ -277,7 +281,7 @@ multiple emitters possible.
   every `.koi` file in the workspace. Setup in [`tooling/README.md`](tooling/README.md).
 - **AI agents (MCP server).** [`src/Koine.Mcp`](src/Koine.Mcp) is an
   [MCP](https://modelcontextprotocol.io) server (`koine-mcp`) that lets an AI agent author a complete
-  domain in `.koi`: tools to `koine_validate`, `koine_compile` (csharp/typescript/python/glossary/docs), and
+  domain in `.koi`: tools to `koine_validate`, `koine_compile` (csharp/typescript/python/php/glossary/docs), and
   `koine_format`, plus `koine_reference` and `koine_examples` so the agent learns the language. Install
   with `dotnet tool install -g Koine.Mcp`, then register it over **stdio** (the default, for editor-spawned
   clients like Claude Desktop):
@@ -311,9 +315,9 @@ multiple emitters possible.
 ## Status & roadmap
 
 Koine is at **v0.17.x** and has shipped through **R1–R17** of the roadmap: the full tactical *and*
-strategic DDD toolkit, two more emitter targets (**TypeScript** and **Python** — the latter Phase 1:
-tactical core) alongside C#, a **docs** target that emits living documentation (Markdown + Mermaid
-diagrams), and the editor tooling (TextMate grammar,
+strategic DDD toolkit, three more emitter targets (**TypeScript**, **Python**, and **PHP 8.1** — the
+latter two Phase 1: tactical core) alongside C#, a **docs** target that emits living documentation
+(Markdown + Mermaid diagrams), and the editor tooling (TextMate grammar,
 `koine lsp` language server, and the `fmt` / `init` / `watch` commands). The
 [feature catalogue](https://atypical-consulting.github.io/Koine/guides/feature-catalogue/) maps every
 construct to the C# it emits.
