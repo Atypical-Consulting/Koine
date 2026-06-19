@@ -95,6 +95,10 @@ const pillars = [
     <div class="live">
       <Playground embedded />
     </div>
+    <p class="band__more">
+      Want the full IDE — glossary, context map, hover docs, and go-to-definition, all in the browser?
+      <a href={`${base}/studio/`}>Open Koine Studio ▸</a>
+    </p>
   </section>
 
   <!-- Why Koine -->
@@ -291,6 +295,13 @@ const pillars = [
 
     .live { height: min(70vh, 620px); display: flex; }
     .live :global(.koi-ide) { flex: 1; }
+    .band__more {
+      margin: 1.2rem 0 0;
+      text-align: center;
+      color: var(--koi-muted);
+      font-size: 0.98rem;
+    }
+    .band__more a { color: var(--koi-accent); font-weight: 600; white-space: nowrap; }
 
     /* Pillars */
     .pillars {

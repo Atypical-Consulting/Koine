@@ -81,6 +81,11 @@ export default defineConfig({
 					link: '/playground/',
 				},
 				{
+					// Link out to the hosted web edition of Koine Studio (the full browser IDE).
+					label: '▸ Studio',
+					link: '/studio/',
+				},
+				{
 					label: 'Start here',
 					items: [
 						{ label: 'What is Koine?', slug: 'start/what-is-koine' },
