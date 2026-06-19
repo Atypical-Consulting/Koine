@@ -20,6 +20,8 @@ export interface KoineWasmApi {
   SetDoc(filesJson: string, id: string, text: string): string;
   /** Hover at a 0-based position → JSON Hover or `null`. */
   Hover(filesJson: string, activeUri: string, line: number, character: number): string;
+  /** IntelliSense completions at a 0-based position → JSON CompletionList. */
+  Completions(filesJson: string, activeUri: string, line: number, character: number): string;
   /** Go-to-definition at a 0-based position → JSON Location or `null`. */
   Definition(filesJson: string, activeUri: string, line: number, character: number): string;
   /** Single-file document outline → JSON DocumentSymbol[]. */
@@ -62,6 +64,7 @@ const KOINE_WASM_EXPORTS: ReadonlySet<string> = new Set<keyof KoineWasmApi>([
   'ContextMap',
   'SetDoc',
   'Hover',
+  'Completions',
   'Definition',
   'DocumentSymbols',
   'Format',

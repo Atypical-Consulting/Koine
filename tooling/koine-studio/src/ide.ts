@@ -24,7 +24,7 @@ import { type Example } from './examples';
 import { createCommandPalette, type Command } from './palette';
 import { createPreferences } from './prefs';
 import { applyAppearance } from './appearance';
-import { initSplitResizer } from './resize';
+import { initSplitResizer, initEdgeResizer } from './resize';
 import { createHelpOverlay, type ShortcutRow } from './help';
 import { createAboutDialog } from './about';
 import { createGenerateProject } from './generateProjectWizard';
@@ -292,6 +292,7 @@ export function init(): void {
       if (folderMode && becameDirty) renderTree();
     },
     onHover: (line, character) => lsp.hover(line, character),
+    onCompletion: (line, character) => lsp.completion(line, character),
     onDefinition: (line, character) => lsp.definition(line, character),
     onNavigate: (loc) => navigateToDefinition(loc),
     // Refactors + quick fixes (F2 rename, Shift-F12 references, Mod-. code actions). The editor
@@ -333,7 +334,8 @@ export function init(): void {
   el('view-preview').appendChild(copyBtn);
 
   const statusEl = el('status');
-  const stripEl = el('diagnostics');
+  const diagBodyEl = el('diag-body');
+  const diagCountEl = el('diag-count');
 
   const lsp = new KoineLsp(platform.createLspTransport());
 
@@ -356,6 +358,37 @@ export function init(): void {
   const treeEl = el<HTMLElement>('filetree');
   const treeBodyEl = el<HTMLElement>('filetree-body');
   const treeTitleEl = el<HTMLElement>('filetree-title');
+  const treeBtn = el<HTMLButtonElement>('btn-files');
+  const splitEl = el<HTMLElement>('split');
+
+  // File-tree chrome (the left rail + its toolbar toggle) only exists in folder mode. Visibility
+  // is a persisted user choice; the rail track widens to 6px only when the tree is showing so no
+  // stray resize handle appears in scratch mode.
+  const FILETREE_VIS_KEY = 'koine.studio.filetree';
+  function applyFileTreeVisibility(visible: boolean): void {
+    treeEl.hidden = !visible;
+    treeBtn.setAttribute('aria-pressed', String(visible));
+    splitEl.style.setProperty('--koi-filetree-rail', visible ? '6px' : '0px');
+  }
+  function showFileTreeChrome(): void {
+    treeBtn.hidden = false;
+    applyFileTreeVisibility((localStorage.getItem(FILETREE_VIS_KEY) ?? '1') !== '0');
+  }
+  function hideFileTreeChrome(): void {
+    treeBtn.hidden = true;
+    treeEl.hidden = true;
+    splitEl.style.setProperty('--koi-filetree-rail', '0px');
+  }
+  function toggleFileTree(): void {
+    if (!folderMode) return;
+    const visible = Boolean(treeEl.hidden); // currently hidden → reveal
+    applyFileTreeVisibility(visible);
+    try {
+      localStorage.setItem(FILETREE_VIS_KEY, visible ? '1' : '0');
+    } catch {
+      // ignore — no persistence available
+    }
+  }
 
   // The workspace file explorer. It deals in opaque fs tokens; ide.ts maps token ↔ file:// uri
   // (pathToFileUri) to keep `buffers`, `activeUri` and the LSP workspace coherent on every mutation.
@@ -400,12 +433,25 @@ export function init(): void {
   }
 
   function renderStrip(diags: LspDiagnostic[]): void {
-    stripEl.innerHTML = '';
+    const errors = diags.filter((d) => d.severity === 1 || d.severity == null).length;
+    const warnings = diags.filter((d) => d.severity === 2).length;
+    if (!errors && !warnings) {
+      diagCountEl.textContent = 'clean';
+      diagCountEl.dataset.kind = 'clean';
+    } else {
+      const parts: string[] = [];
+      if (errors) parts.push(`${errors} error${errors === 1 ? '' : 's'}`);
+      if (warnings) parts.push(`${warnings} warning${warnings === 1 ? '' : 's'}`);
+      diagCountEl.textContent = parts.join(' · ');
+      diagCountEl.dataset.kind = errors ? 'error' : 'warn';
+    }
+
+    diagBodyEl.innerHTML = '';
     if (!diags.length) {
       const span = document.createElement('span');
       span.className = 'diag-empty';
       span.textContent = 'No diagnostics.';
-      stripEl.appendChild(span);
+      diagBodyEl.appendChild(span);
       return;
     }
     for (const d of diags) {
@@ -417,7 +463,7 @@ export function init(): void {
       const code = d.code != null ? `${d.code}: ` : '';
       row.textContent = `${d.severity === 2 ? 'warn' : 'error'} ${line}:${col}  ${code}${d.message}`;
       row.addEventListener('click', () => editor.goto(line, col));
-      stripEl.appendChild(row);
+      diagBodyEl.appendChild(row);
     }
   }
 
@@ -1034,11 +1080,12 @@ export function init(): void {
 
   // Destination-language split button: the main half previews the current target, the caret opens a
   // picker. Previewing also surfaces the preview tab and adopts that target as the new "current".
-  type PreviewTarget = 'csharp' | 'typescript' | 'python';
+  type PreviewTarget = 'csharp' | 'typescript' | 'python' | 'php';
   const LANGS: { id: PreviewTarget; label: string; name: string; hint: string }[] = [
     { id: 'csharp', label: 'C#', name: 'C#', hint: '⌘1' },
     { id: 'typescript', label: 'TS', name: 'TypeScript', hint: '⌘2' },
     { id: 'python', label: 'Python', name: 'Python', hint: '⌘3' },
+    { id: 'php', label: 'PHP', name: 'PHP', hint: '⌘4' },
   ];
   let currentTarget: PreviewTarget = 'csharp';
 
@@ -1149,7 +1196,7 @@ export function init(): void {
       const res = await lsp.emitPreview(currentTarget);
       if (seq !== previewSeq) return;
       let content: string;
-      let lang: 'csharp' | 'typescript' | 'python' | 'plain';
+      let lang: 'csharp' | 'typescript' | 'python' | 'php' | 'plain';
       let copyable = false;
       if (res.error) {
         content = '// emit error\n' + res.error;
@@ -1269,7 +1316,7 @@ export function init(): void {
       folderMode = false;
       folderRootToken = null;
       entriesCache = [];
-      treeEl.hidden = true;
+      hideFileTreeChrome();
       return;
     }
 
@@ -1281,7 +1328,7 @@ export function init(): void {
     lsp.setActive(first.uri);
     editor.setDoc(first.text);
     treeTitleEl.textContent = platform.folderName(folder);
-    treeEl.hidden = false;
+    showFileTreeChrome();
     pushRecentFolder(folder);
     invalidateDocViews();
     // Fetch the full explorer tree (dirs + .koi) and render it; falls back silently on failure.
@@ -1404,7 +1451,7 @@ export function init(): void {
       folderRootToken = null;
       entriesCache = [];
       explorer.render([], '');
-      treeEl.hidden = true;
+      hideFileTreeChrome();
       treeTitleEl.textContent = 'Scratch';
     } else {
       // Reuse the existing scratch buffer; drop any stale diagnostics.
@@ -1474,7 +1521,7 @@ export function init(): void {
       buffers.clear();
       diagnosticsByUri.clear();
       folderMode = false;
-      treeEl.hidden = true;
+      hideFileTreeChrome();
       treeTitleEl.textContent = 'Scratch';
     } else {
       diagnosticsByUri.delete(SCRATCH_URI);
@@ -1624,9 +1671,53 @@ export function init(): void {
 
   initSplitResizer({ split: el('split'), handle: el('split-resizer') });
 
+  // File-tree width (left rail) — only draggable when the rail track is shown (folder mode).
+  initEdgeResizer({
+    target: splitEl,
+    handle: el('filetree-resizer'),
+    cssVar: '--koi-filetree-w',
+    anchor: 'left',
+    storageKey: 'koine.studio.filetreeWidth',
+    min: 150,
+    max: (w) => w * 0.5,
+  });
+  treeBtn.addEventListener('click', () => toggleFileTree());
+
+  // Diagnostics strip — draggable height (anchored to the app's bottom edge) + collapse toggle.
+  const diagEl = el('diagnostics');
+  const diagHeader = el('diag-header');
+  initEdgeResizer({
+    target: diagEl,
+    handle: el('diag-resizer'),
+    container: el('app'),
+    cssVar: '--koi-diag-h',
+    anchor: 'bottom',
+    storageKey: 'koine.studio.diagHeight',
+    min: 80,
+    max: (h) => h * 0.5,
+  });
+  const DIAG_COLLAPSED_KEY = 'koine.studio.diagCollapsed';
+  function applyDiagCollapsed(collapsed: boolean): void {
+    diagEl.classList.toggle('collapsed', collapsed);
+    diagHeader.setAttribute('aria-expanded', String(!collapsed));
+  }
+  applyDiagCollapsed((localStorage.getItem(DIAG_COLLAPSED_KEY) ?? '0') === '1');
+  diagHeader.addEventListener('click', () => {
+    const collapsed = !diagEl.classList.contains('collapsed');
+    applyDiagCollapsed(collapsed);
+    try {
+      localStorage.setItem(DIAG_COLLAPSED_KEY, collapsed ? '1' : '0');
+    } catch {
+      // ignore — no persistence available
+    }
+  });
+
   // Toolbar buttons unique to this phase.
   const hintEl = document.querySelector('.palette-hint');
-  if (hintEl) hintEl.textContent = formatChord('mod+K'); // ⌘+K / Ctrl+K per platform
+  if (hintEl) {
+    hintEl.textContent = formatChord('mod+K'); // ⌘+K / Ctrl+K per platform
+    hintEl.addEventListener('click', () => palette.toggle());
+  }
   el<HTMLButtonElement>('btn-home').addEventListener('click', () => goHome());
   el<HTMLButtonElement>('btn-new').addEventListener('click', () => void requestNewScratch());
   el<HTMLButtonElement>('btn-generate-project').addEventListener('click', () => generateProject.open());
@@ -1716,6 +1807,9 @@ export function init(): void {
     } else if (mod && e.key === '3') {
       e.preventDefault();
       void preview('python');
+    } else if (mod && e.key === '4') {
+      e.preventDefault();
+      void preview('php');
     } else if (mod && e.key === ',') {
       e.preventDefault();
       prefs.open();
@@ -1726,7 +1820,7 @@ export function init(): void {
       // Toggle the file tree — only meaningful in folder mode.
       if (folderMode) {
         e.preventDefault();
-        treeEl.hidden = !treeEl.hidden;
+        toggleFileTree();
       }
     }
   });

@@ -28,16 +28,21 @@ import {
   closeBrackets,
   closeBracketsKeymap,
   completeFromList,
+  completionKeymap,
+  type Completion,
   type CompletionContext,
+  type CompletionResult,
 } from '@codemirror/autocomplete';
 import { search, searchKeymap, highlightSelectionMatches } from '@codemirror/search';
 import { csharp } from '@codemirror/legacy-modes/mode/clike';
 import { typescript } from '@codemirror/legacy-modes/mode/javascript';
 import { python } from '@codemirror/legacy-modes/mode/python';
+import { php } from '@codemirror/lang-php';
 import { tags as t } from '@lezer/highlight';
 import { lintGutter, setDiagnostics, type Diagnostic as CmDiagnostic } from '@codemirror/lint';
 import type {
   CodeAction,
+  CompletionItem,
   DocumentSymbol,
   HoverResult,
   Location,
@@ -130,7 +135,8 @@ const koineHighlight = HighlightStyle.define([
   { tag: t.definitionKeyword, color: 'var(--koi-hl-keyword)', fontWeight: '600' },
 ]);
 
-// Keyword/type autocomplete for the editor.
+// Keyword/type autocomplete for the editor — the offline fallback used when no LSP
+// completion provider is wired.
 function koineCompletions(ctx: CompletionContext) {
   const word = ctx.matchBefore(/[A-Za-z_][A-Za-z0-9_]*/);
   if (!word || (word.from === word.to && !ctx.explicit)) return null;
@@ -138,6 +144,51 @@ function koineCompletions(ctx: CompletionContext) {
     ...KEYWORDS.map((k) => ({ label: k, type: 'keyword' })),
     ...TYPES.map((k) => ({ label: k, type: 'type' })),
   ])(ctx);
+}
+
+/** Map a numeric LSP CompletionItemKind to a CodeMirror completion `type` (drives icon/colour). */
+function cmCompletionType(kind?: number): string {
+  switch (kind) {
+    case 14: // Keyword
+      return 'keyword';
+    case 7: // Class
+      return 'class';
+    case 13: // Enum
+    case 20: // EnumMember
+      return 'enum';
+    case 5: // Field
+    case 10: // Property
+      return 'property';
+    case 2: // Method
+      return 'method';
+    default:
+      return 'variable';
+  }
+}
+
+/**
+ * LSP-backed completion source. Fires on an explicit Ctrl-Space, while typing an identifier, or
+ * right after a `.`/`:` trigger; converts the cursor to a 0-based line/character, asks the language
+ * service, and maps the items to CodeMirror completions.
+ */
+function lspCompletionSource(onCompletion: CompletionFn) {
+  return async (ctx: CompletionContext): Promise<CompletionResult | null> => {
+    const word = ctx.matchBefore(/[A-Za-z_][A-Za-z0-9_]*/);
+    const trigger = ctx.matchBefore(/[.:]\s*/);
+    if (!ctx.explicit && !word && !trigger) return null;
+
+    const docLine = ctx.state.doc.lineAt(ctx.pos);
+    const items = await onCompletion(docLine.number - 1, ctx.pos - docLine.from);
+    if (!items.length) return null;
+
+    const options: Completion[] = items.map((i) => ({
+      label: i.label,
+      type: cmCompletionType(i.kind),
+      detail: i.detail ?? undefined,
+      info: i.documentation ?? undefined,
+    }));
+    return { from: word ? word.from : ctx.pos, options, validFor: /^[A-Za-z0-9_]*$/ };
+  };
 }
 
 const sharedTheme = EditorView.theme({
@@ -342,6 +393,9 @@ export function renderMarkdown(md: string): string {
 
 export type HoverFn = (line: number, character: number) => Promise<HoverResult | null>;
 
+/** Completion provider; resolves the LSP completion items at a 0-based position. */
+export type CompletionFn = (line: number, character: number) => Promise<CompletionItem[]>;
+
 /** Flatten an LSP Hover's `contents` (MarkupContent | MarkedString | array) into markdown. */
 function hoverToMarkdown(hover: HoverResult): string {
   const fromMarked = (m: MarkedString): string =>
@@ -427,6 +481,8 @@ export interface KoineEditorOptions {
   lineWrap?: boolean;
   /** Optional LSP hover provider; when given, hover tooltips are enabled. */
   onHover?: HoverFn;
+  /** Optional LSP completion provider; when given, Ctrl-Space / typing yields context-aware completions. */
+  onCompletion?: CompletionFn;
   /** Optional go-to-definition provider; when given, Cmd/Ctrl-click and F12 resolve. */
   onDefinition?: DefinitionFn;
   /** Where a resolved definition Location is sent; ide.ts performs the navigation. */
@@ -691,9 +747,19 @@ export function createKoineEditor(opts: KoineEditorOptions): KoineEditor {
         closeBrackets(),
         highlightSelectionMatches(),
         search({ top: true }),
-        autocompletion({ override: [koineCompletions], icons: false }),
+        autocompletion({
+          override: [opts.onCompletion ? lspCompletionSource(opts.onCompletion) : koineCompletions],
+          icons: false,
+        }),
         extraKeys,
-        keymap.of([...closeBracketsKeymap, ...searchKeymap, ...defaultKeymap, ...historyKeymap, indentWithTab]),
+        keymap.of([
+          ...closeBracketsKeymap,
+          ...completionKeymap,
+          ...searchKeymap,
+          ...defaultKeymap,
+          ...historyKeymap,
+          indentWithTab,
+        ]),
         ...definitionClick,
         koineLanguage,
         syntaxHighlighting(koineHighlight),
@@ -805,12 +871,15 @@ export function renderSymbolTree(
 
 // --- read-only output viewer ------------------------------------------------
 
-export type OutputLang = 'csharp' | 'typescript' | 'python' | 'plain';
+export type OutputLang = 'csharp' | 'typescript' | 'python' | 'php' | 'plain';
 
 const langExt = (lang: OutputLang): Extension => {
   if (lang === 'csharp') return StreamLanguage.define(csharp);
   if (lang === 'typescript') return StreamLanguage.define(typescript);
   if (lang === 'python') return StreamLanguage.define(python);
+  // PHP uses the Lezer-based grammar (lang-php); emitted files open with `<?php`, so the
+  // default mixed-mode config highlights them correctly.
+  if (lang === 'php') return php();
   return [];
 };
 
