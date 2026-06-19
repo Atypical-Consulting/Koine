@@ -69,6 +69,11 @@ internal static class Program
 
             config.AddCommand<LspCommand>("lsp")
                 .WithDescription("Language Server (stdio) for editor diagnostics.");
+
+            config.AddCommand<McpCommand>("mcp")
+                .WithDescription("MCP server exposing the compiler tools to AI agents (stdio, or --http by URL).")
+                .WithExample("mcp", "--http")
+                .WithExample("mcp", "--http", "--port", "3001");
         });
 
         // Spectre returns -1 for its own parse/validation/usage failures; the commands return

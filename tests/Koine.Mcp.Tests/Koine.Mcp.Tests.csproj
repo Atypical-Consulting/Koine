@@ -27,6 +27,10 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Koine.Mcp\Koine.Mcp.csproj" />
+    <!-- Referenced so the built `Koine.Cli.dll` (+ its runtimeconfig) lands next to the test
+         assembly: CliMcpTests launches `dotnet Koine.Cli.dll mcp` (HTTP mode) as a child to cover
+         the CLI surface end-to-end, like ServerSmokeTests launches Koine.Mcp.dll for stdio. -->
+    <ProjectReference Include="..\..\src\Koine.Cli\Koine.Cli.csproj" />
   </ItemGroup>
 
 </Project>
