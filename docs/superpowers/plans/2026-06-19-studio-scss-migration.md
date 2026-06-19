@@ -351,35 +351,73 @@ git -c user.email=phmatray@gmail.com -c user.name="Philippe Matray" commit -m "r
 
 ---
 
-## PHASE 2 — Consolidate & idiomatic (gate: visual smoke)
+## PHASE 2 — Consolidate & idiomatic (gate: rule-set equivalence + final visual smoke)
 
-Phase 2 reorganizes the 39 positional slices into the final ~28-partial taxonomy and rewrites them idiomatically. Selectors now regenerate, so the canonical diff no longer applies — verification is **visual smoke**: screenshots of key screens, light + dark, before vs after.
+Phase 2 reorganizes the 39 positional slices into the final ~28-partial taxonomy and rewrites them
+idiomatically (nesting, mixins, `@each`). Idiomatic SCSS regenerates selectors and reorders output, so
+the strict byte-identical canonical diff no longer applies. Verification is two-tier:
 
-### Task 5: Capture the visual baseline
+- **Per task — deterministic rule-set equivalence (primary gate):** `scripts/css-equiv.mjs` compiles
+  `main.scss`, parses it, and compares *each selector's declaration set* (order-insensitive,
+  at-rule-context-aware) against the proven Phase-1 baseline. EQUIVALENT means no selector gained, lost,
+  or changed a declaration — exhaustive proof nothing renders differently, stronger than eyeballing
+  screenshots. Every Phase 2 task must end EQUIVALENT.
+- **Once at the end — visual smoke (Task 11):** the rule-set diff cannot see cascade-order changes among
+  colliding same-specificity rules; a final screenshot pass over every screen in both themes confirms it.
+  Baseline screenshots are captured at the start of Phase 2 (where the SCSS output is identical to the
+  original), so the final pass is a true before/after.
 
-**Files:** none (produces screenshot artifacts under `/tmp/koine-shots/baseline/`).
+### Task 5: Build the equivalence comparator + capture the visual baseline
 
-- [ ] **Step 1: Start the web build**
+**Files:**
+- Create: `tooling/koine-studio/scripts/css-equiv.mjs`
+- Create: `tooling/koine-studio/scripts/css-equiv.test.mjs` (vitest spec — TDD for the comparator)
+- Modify: `tooling/koine-studio/package.json` (add `postcss` devDependency)
+- Produces baseline screenshots under `/tmp/koine-shots/baseline/` (best-effort)
 
-Run (from `tooling/koine-studio/`), in a background shell:
+**Interfaces:**
+- Produces: `node scripts/css-equiv.mjs <baseline.css|scss> <candidate.css|scss>` → exit 0 + `EQUIVALENT`
+  when every (at-rule-context, selector) has the same declaration set on both sides; exit 1 + a report of
+  added/removed/changed rules otherwise. Canonicalizes each input via the same compressed compile as
+  `css-canon.mjs` (SCSS syntax mode for `.css`).
+
+- [ ] **Step 1 (TDD): write the comparator's failing tests first**
+
+Cover at minimum: (a) identical inputs → EQUIVALENT; (b) a changed declaration value → NOT equivalent
+(reported); (c) an added/removed declaration → NOT equivalent; (d) the SAME rules in a DIFFERENT source
+order → EQUIVALENT (order-insensitive); (e) the same declarations in a different ORDER within one rule →
+EQUIVALENT; (f) a multi-selector rule (`.a,.b{}`) compared per-selector; (g) rules inside
+`@media`/`@supports` keyed by their at-rule context (a rule moved out of an `@media` is NOT equivalent);
+(h) `@keyframes` compared by name→frames as a set.
+
+- [ ] **Step 2: implement `css-equiv.mjs` to pass**
+
+Compile each input to compressed CSS (reuse the `css-canon` syntax-mode logic — SCSS syntax for `.css`),
+parse with `postcss`, walk every rule tracking its at-rule context, expand selector lists, and build a map
+`"<at-context>||<selector>" -> sorted(declarations)`. Compare the two maps; report keys present in only
+one side and keys whose declaration sets differ. Handle `@keyframes` as `name -> sorted frames`.
+
+- [ ] **Step 3: run the tests — all green, output pristine.**
+
+- [ ] **Step 4: self-check against the live baseline**
+
+`node scripts/css-equiv.mjs /tmp/koine-css-baseline.css src/styles/main.scss` must print `EQUIVALENT`
+(current `main.scss` IS the baseline). If not, the comparator has a bug — fix before proceeding.
+
+- [ ] **Step 5: capture the visual baseline (best-effort, for Task 11)**
+
+Start `npm run dev:web` (serves :1430 after building WASM). Via the chrome-devtools MCP, screenshot these
+screens in BOTH dark and light into `/tmp/koine-shots/baseline/<screen>-<theme>.png`: `start` (welcome
+overlay), `editor` (file tree + editor), `settings`, `palette`, `glossary`, `wizard`, `inspector`, `ai`.
+These are the before-images for the final visual pass. If the app cannot be driven to a screen, note which
+and proceed — the deterministic gate is the binding proof.
+
+- [ ] **Step 6: commit**
+
 ```bash
-npm run dev:web
+git add tooling/koine-studio/scripts/css-equiv.mjs tooling/koine-studio/scripts/css-equiv.test.mjs tooling/koine-studio/package.json tooling/koine-studio/package-lock.json
+git -c user.email=phmatray@gmail.com -c user.name="Philippe Matray" commit -m "test(studio): add deterministic CSS rule-set equivalence comparator for Phase 2"
 ```
-Expected: `predev:web` builds the WASM backend (`node scripts/build-wasm.mjs`), then Vite serves on **http://localhost:1430**. Wait for "ready" / the printed Local URL.
-
-- [ ] **Step 2: Screenshot the key screens in BOTH themes via the chrome-devtools MCP**
-
-For each screen below, navigate to `http://localhost:1430`, drive the UI to that state, and `take_screenshot` into `/tmp/koine-shots/baseline/<screen>-<theme>.png`. Toggle theme via the toolbar theme button (or `document.documentElement.dataset.theme = 'light' | 'dark'` through `evaluate_script`). Capture each in **dark** and **light**:
-  1. `start` — welcome / empty-state overlay
-  2. `editor` — editor open with the file tree / explorer visible
-  3. `settings` — Settings dialog (two-pane preference center)
-  4. `palette` — command palette open
-  5. `glossary` — glossary editor pane
-  6. `wizard` — Generate-Project wizard
-  7. `inspector` — right inspector tabs (preview / glossary / context map)
-  8. `ai` — AI assistant panel
-
-Expected: 16 baseline PNGs (8 screens × 2 themes). These are the reference for every Phase 2 task. Keep `dev:web` running for the rest of Phase 2 (Vite HMR re-applies SCSS edits live).
 
 ### Task 6: Create the `abstracts/` layer
 
@@ -502,9 +540,9 @@ Cut the `@keyframes koi-pulse { ... }` block (originally lines 422–431) out of
 
 In `base/_scrollbars.scss` and `base/_animations.scss`, collapse repeated parent selectors into nested blocks (≤3 levels). Do not alter declarations, selector targets, or the `@supports`/`@media (prefers-reduced-motion)` guards.
 
-- [ ] **Step 3: Visual smoke — re-shoot and compare**
+- [ ] **Step 3: Equivalence gate**
 
-With `dev:web` running (HMR has applied the edits), re-screenshot the `start` and `editor` screens (the ones exercising the pulse animation and scrollbars) in both themes into `/tmp/koine-shots/task7/`, and compare against `/tmp/koine-shots/baseline/` using the chrome-devtools MCP. Expected: pixel-identical (allowing for the live pulse animation frame). If different, revert the offending nest.
+Run (from `tooling/koine-studio/`): `node scripts/css-equiv.mjs /tmp/koine-css-baseline.css src/styles/main.scss`. Expected: `EQUIVALENT` (moving a `@keyframes` block and nesting do not change any selector's declaration set). If NOT equivalent, the report names the changed rule — fix the nest/move until equivalent before committing.
 
 - [ ] **Step 4: Commit**
 
@@ -533,9 +571,9 @@ Append the body of `_branded-header.scss` into `_toolbar.scss`, `_resizer.scss` 
 
 Add `@use '../abstracts' as a;` at the top. Replace the duplicated declaration body of `.toolbar-actions button, #btn-check` with `@include a.ghost-button;`, keeping `#btn-check`'s extra `background`/`border-color` inline. Nest `.tb-group`, `.lang-*`, and the branded-header selectors (≤3 levels). Keep `.tb-ico` as its own class (it is shared via the class in HTML — do not mixin-ize it).
 
-- [ ] **Step 3: Visual smoke**
+- [ ] **Step 3: Equivalence gate**
 
-Re-shoot `editor`, `inspector`, and `start` (toolbar + brand header + resizer + inspector tabs) in both themes into `/tmp/koine-shots/task8/`; compare to baseline. Expected: pixel-identical. Pay attention to toolbar button hover/disabled states (drive a hover with the MCP and compare).
+Run: `node scripts/css-equiv.mjs /tmp/koine-css-baseline.css src/styles/main.scss`. Expected: `EQUIVALENT`. The `ghost-button` mixin must reproduce `.toolbar-actions button, #btn-check` and its `:hover`/`:disabled` rules exactly; if the report flags any of those selectors, the mixin's declaration set is off — reconcile until equivalent before committing.
 
 - [ ] **Step 4: Commit**
 
@@ -566,9 +604,9 @@ Create `components/_glossary.scss` = `_glossary-readability.scss` body followed 
 
 Nest child selectors under their block parents (≤3 levels). No declaration changes.
 
-- [ ] **Step 3: Visual smoke**
+- [ ] **Step 3: Equivalence gate**
 
-Re-shoot `start` (welcome atmosphere + gallery), `glossary`, `inspector`/`editor` (doc-panes copy button), `settings`/`wizard` (form fields + prefs inputs) in both themes into `/tmp/koine-shots/task9/`; compare to baseline. Expected: pixel-identical.
+Run: `node scripts/css-equiv.mjs /tmp/koine-css-baseline.css src/styles/main.scss`. Expected: `EQUIVALENT` — merging non-contiguous blocks relocates rules but must not add, drop, or change any selector's declarations. If the report flags a rule, a merge dropped or duplicated something — fix before committing.
 
 - [ ] **Step 4: Commit**
 
@@ -606,9 +644,9 @@ This regenerates the identical three rules in the same order.
 
 In `_lang-picker.scss` (`.lang-menu`), `_context-menu.scss` (`.explorer-menu`), and `_floating-menu.scss`, add `@use '../abstracts' as a;` and replace the exactly-shared chrome declarations with `@include a.popover-surface;`, leaving each selector's unique props (e.g. `.lang-menu`'s `z-index: 120; min-width: 184px;`) inline. Verify per-selector that the union of included + inline declarations equals the original declaration set.
 
-- [ ] **Step 3: Visual smoke + interaction check**
+- [ ] **Step 3: Equivalence gate**
 
-Open the language picker, an explorer context menu, and the floating action menu via the MCP; screenshot each (both themes) into `/tmp/koine-shots/task10/` and compare to baseline. Confirm the active-target identity dot colors (C# purple, TS blue, Python yellow) are unchanged. Expected: pixel-identical.
+Run: `node scripts/css-equiv.mjs /tmp/koine-css-baseline.css src/styles/main.scss`. Expected: `EQUIVALENT`. The `@each` loop must regenerate the three `.lang-dot[data-lang=…]` rules with identical `--dot` values, and `popover-surface` + inline props must equal each menu's original declaration set. If the report flags `.lang-dot`, `.lang-menu`, `.explorer-menu`, or the floating-menu selectors, reconcile before committing.
 
 - [ ] **Step 4: Commit**
 
@@ -626,11 +664,11 @@ git -c user.email=phmatray@gmail.com -c user.name="Philippe Matray" commit -m "r
 
 - [ ] **Step 1: Reorder `main.scss` to the canonical cascade**
 
-Reorder the `@use` list to: `abstracts` (if emitting nothing it can be omitted from `main.scss` and `@use`d only where needed), then `themes/*`, `base/*`, `layout/*`, `components/*`. Because Phase 2 already verified each partial visually, any same-specificity collisions surfaced earlier; this final reorder is validated by the full smoke in Step 2.
+Reorder the `@use` list to: `abstracts` (if emitting nothing it can be omitted from `main.scss` and `@use`d only where needed), then `themes/*`, `base/*`, `layout/*`, `components/*`. The reorder can shift cascade order, so it is validated by BOTH gates in Step 2.
 
-- [ ] **Step 2: Full visual smoke across every screen, both themes**
+- [ ] **Step 2: Final deterministic gate, then the single full visual smoke**
 
-Re-shoot all 8 screens in both themes into `/tmp/koine-shots/final/` and compare against `/tmp/koine-shots/baseline/`. Expected: every pair pixel-identical. Investigate and fix any diff before proceeding.
+First the deterministic proof: `node scripts/css-equiv.mjs /tmp/koine-css-baseline.css src/styles/main.scss` → must be `EQUIVALENT` (no selector's declaration set changed across all of Phase 2). Then the cascade-order confirmation the rule-set diff cannot give: with `npm run dev:web` running, re-shoot all 8 screens in both themes into `/tmp/koine-shots/final/` and compare against `/tmp/koine-shots/baseline/` (from Task 5). Expected: every pair pixel-identical. Investigate and fix any diff before proceeding. If baseline screenshots could not be captured in Task 5, instead walk each screen live in both themes and confirm it renders correctly (the deterministic gate already proves declaration-equivalence; this pass covers cascade order).
 
 - [ ] **Step 3: Full build + tests**
 
@@ -665,7 +703,7 @@ git -c user.email=phmatray@gmail.com -c user.name="Philippe Matray" commit -m "r
 - **`@use`/`@forward`, no `@import`** → Global Constraints; slicer emits `@use`.
 - **`sass-embedded` + `main.ts` import + drop `<link>`** → Tasks 1 & 3 (Vite-8 config confirmed: no `preprocessorOptions` needed).
 - **Phase 1 mechanical empty-diff gate** → Tasks 1–4 (`css-canon.mjs` canonical diff).
-- **Phase 2 visual-smoke gate** → Tasks 5–11 (`dev:web` on :1430, chrome-devtools MCP screenshots, both themes).
+- **Phase 2 gate = rule-set equivalence + final visual** → Task 5 builds `css-equiv.mjs` (TDD); Tasks 6–10 each end `EQUIVALENT` against the Phase-1 baseline; Task 11 runs the deterministic gate plus the single full visual smoke (`dev:web` on :1430, both themes).
 - **Idiomatic payoff (mixins, `@each`)** → Tasks 6/8/10 with concrete code.
-- **Pixel-identical, no redesign** → every Phase 2 task ends in a visual-smoke comparison; Task 11 is the full sweep.
+- **Pixel-identical, no redesign** → every Phase 2 task ends EQUIVALENT (no selector's declaration set changed); Task 11 adds the cascade-order visual sweep.
 - **Worktree + commit identity** → Global Constraints; every commit step uses the identity flags.
