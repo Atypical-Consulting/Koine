@@ -49,7 +49,8 @@ per idea.
 3. **Build a template-compliant body** — read the live issue template and fill it.
 4. **Create the issue** — `gh issue create`, capture the number/URL.
 5. **Comment 1 — Brainstorm**, then **Comment 2 — Spec** (both via `superpowers:brainstorming`).
-6. **Comment 3 — Implementation plan** (via `superpowers:writing-plans`).
+6. **Comment 3 — Implementation plan** (via `superpowers:writing-plans`) — keep its `- [ ]`
+   checkbox task-list format so the plan is trackable on the issue.
 7. **Report** — list each issue with its URL.
 
 ---
@@ -145,15 +146,57 @@ Prefix each comment with a bold marker so the trail is scannable: `**🧠 Brains
 ## Step 6 — Comment 3: Implementation plan
 
 Invoke `superpowers:writing-plans` to load its current guidance, then apply it autonomously to the
-spec from Step 5. Produce a plan with the project's grain in mind (grammar → builder visitor →
-semantic model → validators → emitter → tests; never leak a C# concept into `Ast/`). Keep tasks
-bite-sized and each one independently testable, following the skill's plan structure. Post it:
+spec from Step 5, with the project's grain in mind (grammar → builder visitor → semantic model →
+validators → emitter → tests; never leak a C# concept into `Ast/`). Keep tasks bite-sized and each
+one independently testable.
+
+**Preserve the plan's checkbox task-list format — that's the whole point of this comment.**
+`writing-plans` emits a plan whose every actionable step is a Markdown checkbox (`- [ ]`), and
+GitHub renders those as *live, tickable checkboxes* on the issue. A contributor — or an agentic
+worker running `subagent-driven-development` — checks off real progress against the plan as they go.
+A plan rewritten as prose bullets reads almost the same but throws that tracking away; it becomes a
+wall of text nobody can mark up. So when you compose the comment, the checkboxes must survive: never
+collapse steps into `- **Files:**` / `- **Test:**` prose paragraphs.
+
+Concretely, the posted plan MUST carry all three of these (issue #21's plan is the reference shape):
+
+1. The writing-plans **header note, verbatim**, so an executor knows how to run it:
+   `> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.`
+2. A short **Goal / Architecture / Tech Stack** preamble and a **Global Constraints** list (version
+   floors, the `Ast/`-stays-target-agnostic invariant, the commit-identity line, "no
+   `TreatWarningsAsErrors`") — exact values copied from the spec.
+3. One `### Task N: <name>` per task, each with **Files** + **Interfaces** lines, then **every step
+   as its own `- [ ]` checkbox** (write the failing test → run it red → implement → run it green →
+   commit). The final step of each task is a `- [ ]` checkbox with the commit message.
+
+Shape (abbreviated — keep the checkboxes, never flatten them into prose):
+
+```markdown
+### Task 1: Runtime module + skeleton emitter wired into the CLI
+
+**Files:** create `Emit/Python/PyRuntime.cs`, `PythonEmitter.cs`; modify `src/Koine.Cli/Program.cs`; test `…/PythonRuntimeTests.cs`.
+
+**Interfaces:** `PythonEmitter : IEmitter`, `sealed partial`, `TargetName => "python"`, `Emit(KoineModel)` returning the root files.
+
+- [ ] **Step 1:** Write the failing test in `PythonRuntimeTests.cs` — assert `TargetName == "python"` and `Emit` contains `koine_runtime.py`.
+- [ ] **Step 2:** `dotnet test --filter "FullyQualifiedName~PythonRuntimeTests"` → FAIL (types not found).
+- [ ] **Step 3:** Implement `PyRuntime.cs` — fixed-string `Source` modeled on `TsRuntime.cs`, stdlib-only.
+- [ ] **Step 4:** `dotnet test --filter "FullyQualifiedName~PythonRuntimeTests"` → PASS.
+- [ ] **Step 5:** Commit: `feat(emit-py): Python backend skeleton + runtime`.
+```
+
+Write the plan to a temp file, then **verify it actually contains checkboxes before posting** — zero
+`- [ ]` lines means you drifted into prose and must reformat into the task/checkbox structure above:
 
 ```bash
+grep -c '^- \[ \]' /tmp/koine-c3-plan-<slug>.md   # must be > 0; expect one per actionable step
 gh issue comment <number> --body-file /tmp/koine-c3-plan-<slug>.md
 ```
 
-Prefix with `**🛠️ Implementation plan**`.
+Prefix with `**🛠️ Implementation plan**`. Dispatching `writing-plans` to a **subagent** preserves
+the format most reliably — the plan comes back as one clean artifact instead of competing with this
+skill's own framing mid-stream (issue #21, which kept the checkboxes, was generated that way).
+Inline generation is fine too, as long as the `grep` check above passes before you post.
 
 ## Step 7 — Report
 
@@ -171,5 +214,8 @@ missing label). Keep it short — the issues themselves carry the detail.
 - **Respect the architecture invariant.** Koine keeps `Ast/` target-agnostic. Specs and plans for
   new emitters must add an emitter under `Emit/<Target>/` and must not push target concepts into the
   shared model.
+- **The plan is a checklist, not an essay.** The implementation-plan comment exists so someone can
+  execute it task-by-task and tick off progress. Preserve `writing-plans`' `- [ ]` checkboxes all the
+  way into the posted comment (see Step 6); a plan flattened into prose bullets has lost its job.
 - **One commit, many issues.** When seeding a batch, create all issues and all comments, then give
   one consolidated report.
