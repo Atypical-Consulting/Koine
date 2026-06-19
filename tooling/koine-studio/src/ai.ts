@@ -139,7 +139,6 @@ async function runOpenAiCompatible(req: AssistantRequest): Promise<string> {
     ...req.messages.map((m) => ({ role: m.role, content: m.content })),
   ];
 
-  let full = '';
   for (let round = 0; round <= MAX_TOOL_ROUNDS; round++) {
     // Offer tools until the last allowed round, where we drop them so the model must answer in text —
     // a hard stop against a model that would otherwise keep requesting tools forever.
@@ -164,8 +163,10 @@ async function runOpenAiCompatible(req: AssistantRequest): Promise<string> {
       if (!choice) continue;
       const delta = choice.delta;
       if (delta?.content) {
+        // Stream this round's text live. If the round turns out to be a tool call, its text was a
+        // "thinking" preamble: the panel clears it (onToolCall) and it never enters history — only the
+        // terminating round's text is returned below.
         assistantText += delta.content;
-        full += delta.content;
         req.onText(delta.content);
       }
       for (const tc of delta?.tool_calls ?? []) {
@@ -178,12 +179,17 @@ async function runOpenAiCompatible(req: AssistantRequest): Promise<string> {
       if (choice.finish_reason) finish = choice.finish_reason;
     }
 
-    // No tool request (or no executor / final round) → this is the answer.
+    // No tool request (or no executor / final round) → this round's text IS the answer. Returning only
+    // this round's text (not earlier tool-round preambles) keeps the caller's history clean.
     if (finish !== 'tool_calls' || calls.size === 0 || !exec || round === MAX_TOOL_ROUNDS) {
-      return full;
+      return assistantText;
     }
 
-    const ordered = [...calls.entries()].sort((a, b) => a[0] - b[0]).map(([, c]) => c);
+    // Synthesize an id for any call whose streamed deltas carried none, so the assistant tool_calls
+    // entry and its tool result stay paired (and unique) even on a non-compliant local backend.
+    const ordered = [...calls.entries()]
+      .sort((a, b) => a[0] - b[0])
+      .map(([index, c]) => ({ ...c, id: c.id || `call_${index}` }));
     messages.push({
       role: 'assistant',
       content: assistantText || null,
@@ -201,5 +207,5 @@ async function runOpenAiCompatible(req: AssistantRequest): Promise<string> {
       messages.push({ role: 'tool', tool_call_id: c.id, content: result });
     }
   }
-  return full;
+  return '';
 }

@@ -143,11 +143,18 @@ const TOOL_CALL_TIMEOUT_MS = 20000;
 
 /** Pull the text payload out of a `tools/call` JSON-RPC result (its `content:[{type:'text',text}]`). */
 function extractToolText(rpc: unknown): string {
-  const r = rpc as { result?: { content?: { type?: string; text?: string }[] }; error?: { message?: string } };
+  const r = rpc as {
+    result?: { content?: { type?: string; text?: string }[]; isError?: boolean };
+    error?: { message?: string };
+  };
   if (r?.error) return `Error: ${r.error.message ?? 'MCP error'}`;
   const content = r?.result?.content;
-  if (!Array.isArray(content)) return '';
-  return content.map((c) => (typeof c?.text === 'string' ? c.text : '')).filter(Boolean).join('\n');
+  const text = Array.isArray(content)
+    ? content.map((c) => (typeof c?.text === 'string' ? c.text : '')).filter(Boolean).join('\n')
+    : '';
+  // A tool-level failure (isError) is marked so the model treats it as a failed call, matching the
+  // 'Error:' / 'compile failed' convention the browser formatters use.
+  return r?.result?.isError ? `Error: ${text}` : text;
 }
 
 /**

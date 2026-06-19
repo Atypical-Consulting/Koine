@@ -170,6 +170,21 @@ describe('mcpCall', () => {
     await expect(mcpCall('http://127.0.0.1:1/mcp', 'koine_compile', {}, fetchFn)).resolves.toBe('compiled to csharp');
   });
 
+  test('marks an isError tool result so the model treats it as a failure', async () => {
+    const fetchFn = ((_url: string, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body));
+      const payload =
+        body.method === 'initialize'
+          ? { result: {} }
+          : { result: { content: [{ type: 'text', text: 'syntax error at 1:1' }], isError: true } };
+      return Promise.resolve(
+        new Response(JSON.stringify(payload), { status: 200, headers: { 'content-type': 'application/json' } }),
+      );
+    }) as unknown as typeof fetch;
+    const out = await mcpCall('http://127.0.0.1:1/mcp', 'koine_validate', {}, fetchFn);
+    expect(out).toBe('Error: syntax error at 1:1');
+  });
+
   test('rejects on a non-2xx tools/call', async () => {
     const fetchFn = ((_url: string, init?: RequestInit) => {
       const body = JSON.parse(String(init?.body));

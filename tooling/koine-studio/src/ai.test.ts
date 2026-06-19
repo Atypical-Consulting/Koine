@@ -99,6 +99,49 @@ describe('runOpenAiCompatible — agentic tool loop', () => {
     expect(sent.some((m) => m.role === 'tool' && m.tool_call_id === '42')).toBe(true);
   });
 
+  test('a "thinking" preamble emitted alongside a tool_call does NOT leak into the returned answer', async () => {
+    // Round 1: the model says something AND requests a tool. Round 2: the real answer.
+    const preambleRound = [
+      { choices: [{ delta: { content: 'Let me check that. ' }, finish_reason: null }] },
+      { choices: [{ delta: { tool_calls: [{ index: 0, id: '7', type: 'function', function: { name: 'koine_validate', arguments: '{"source":"x"}' } }] }, finish_reason: null }] },
+      { choices: [{ delta: {}, finish_reason: 'tool_calls' }] },
+    ];
+    const queue = [streamFrom(preambleRound), streamFrom(TEXT)];
+    const sent: { role: string; content?: unknown }[][] = [];
+    h.createImpl = (p) => {
+      sent.push((p as { messages: { role: string; content?: unknown }[] }).messages);
+      return Promise.resolve(queue.shift());
+    };
+    const out = await runAssistant(baseReq({ runCompilerTool: () => Promise.resolve('ok') }));
+
+    // Returned answer (→ history) is only the terminal round, not the preamble.
+    expect(out).toBe('All good ✓');
+    expect(out).not.toContain('Let me check');
+    // …but the model still sees its own preamble as the tool-call message content.
+    const assistantToolMsg = sent[1].find((m) => m.role === 'assistant' && Array.isArray((m as { tool_calls?: unknown[] }).tool_calls));
+    expect(assistantToolMsg?.content).toBe('Let me check that. ');
+  });
+
+  test('synthesizes a tool_call id when the backend omits it (ids stay paired)', async () => {
+    const noId = [
+      { choices: [{ delta: { tool_calls: [{ index: 0, type: 'function', function: { name: 'koine_format', arguments: '{"source":"x"}' } }] }, finish_reason: null }] },
+      { choices: [{ delta: {}, finish_reason: 'tool_calls' }] },
+    ];
+    const queue = [streamFrom(noId), streamFrom(TEXT)];
+    const sent: { role: string; tool_call_id?: string; tool_calls?: { id: string }[] }[][] = [];
+    h.createImpl = (p) => {
+      sent.push((p as { messages: never[] }).messages);
+      return Promise.resolve(queue.shift());
+    };
+    await runAssistant(baseReq({ runCompilerTool: () => Promise.resolve('ok') }));
+
+    const second = sent[1];
+    const assistantMsg = second.find((m) => Array.isArray(m.tool_calls));
+    const toolMsg = second.find((m) => m.role === 'tool');
+    expect(assistantMsg?.tool_calls?.[0].id).toBe('call_0');
+    expect(toolMsg?.tool_call_id).toBe('call_0'); // paired with the synthesized id
+  });
+
   test('caps tool rounds at MAX_TOOL_ROUNDS even if the model keeps requesting tools', async () => {
     h.createImpl = () => Promise.resolve(streamFrom(TOOLCALL)); // never stops asking for tools
     let n = 0;
