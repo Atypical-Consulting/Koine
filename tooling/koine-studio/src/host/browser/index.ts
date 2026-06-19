@@ -26,6 +26,11 @@ export class BrowserPlatform implements Platform {
     return null;
   }
 
+  // A browser tab never launched a server, so there is nothing to stop.
+  async mcpStop(): Promise<void> {
+    // no-op
+  }
+
   openExternal(url: string): void {
     // A null return means the popup blocker (or a sandboxed frame) stopped the new tab; log it so a
     // link that does nothing isn't completely silent.
