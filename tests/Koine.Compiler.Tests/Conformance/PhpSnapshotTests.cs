@@ -111,4 +111,45 @@ public class PhpSnapshotTests
         return Verify(TestSupport.Render(result.Files))
             .UseDirectory("Snapshots");
     }
+
+    /// <summary>
+    /// Dedicated entity fixture: exercises a Guid identity strategy, stored + derived members,
+    /// an invariant, and the identity <c>equals()</c> — the scope of Task 7.
+    /// Commands and factories are intentionally omitted (those land in a later task).
+    /// </summary>
+    internal const string EntityFixture = """
+        context Inventory {
+          enum StockStatus { Available, Reserved, OutOfStock }
+
+          aggregate Product root Product {
+            entity Product identified by ProductId {
+              name:    String
+              stock:   Int
+              status:  StockStatus = Available
+              hasStock: Bool = stock > 0
+
+              invariant name.length > 0 "a product must have a name"
+              invariant stock >= 0 "stock cannot be negative"
+            }
+          }
+        }
+        """;
+
+    /// <summary>
+    /// Emitted PHP for <see cref="EntityFixture"/> must match its reviewed snapshot.
+    /// Covers: Guid identity value object with <c>generate()</c> factory, mutable entity class
+    /// with identity <c>equals()</c>, constructor invariants, and a derived getter.
+    /// </summary>
+    [Fact]
+    public Task Php_entity_emits_expected_php()
+    {
+        var result = new KoineCompiler().Compile(EntityFixture, new PhpEmitter());
+        Assert.True(result.Success, string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        // Always-on syntax gate: INCONCLUSIVE when no PHP interpreter is available locally.
+        _ = TestSupport.SyntaxCheckPhp(result.Files);
+
+        return Verify(TestSupport.Render(result.Files))
+            .UseDirectory("Snapshots");
+    }
 }

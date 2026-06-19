@@ -10,9 +10,9 @@ namespace Koine.Compiler.Emit.Php;
 /// wire/ordinal identity of every member.
 /// <list type="bullet">
 ///   <item>
-///     <b>Plain enum</b> (no associated data): one <c>case Member = ordinal;</c> per member,
-///     names in PascalCase (PHP enum case convention), escaped via
-///     <see cref="PhpNaming.EscapeIdentifier"/> so no reserved word slips through.
+///     <b>Plain enum</b> (no associated data): one <c>case MEMBER = ordinal;</c> per member,
+///     names in UPPER_SNAKE to match the expression translator's
+///     <see cref="PhpNaming.ConstName"/> references.
 ///   </item>
 ///   <item>
 ///     <b>Associated-data enum</b> (<see cref="EnumDecl.HasAssociatedData"/>): PHP backed-enum
@@ -48,9 +48,10 @@ public sealed partial class PhpEmitter
             emit.EnumMemberToType,
             typeMapper);
 
-        // PHP enum case names: PascalCase, reserved-word-escaped.
+        // PHP enum case names: UPPER_SNAKE, so they align with the expression translator's
+        // PhpNaming.ConstName references (e.g. `OrderStatus::CANCELLED`).
         var caseNames = @enum.Members
-            .Select(m => PhpNaming.EscapeIdentifier(PhpNaming.ToPascalCase(m.Name)))
+            .Select(m => PhpNaming.ConstName(m.Name))
             .ToList();
 
         var sb = new StringBuilder();
