@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { mcpJsonSnippet } from './mcp';
+import { mcpJsonSnippet, mcpStdioSnippet, MCP_CLIENTS } from './mcp';
 import { BrowserPlatform } from './host/browser';
 
 describe('mcpJsonSnippet', () => {
@@ -17,6 +17,27 @@ describe('mcpJsonSnippet', () => {
   test('round-trips an arbitrary loopback URL verbatim', () => {
     const url = 'http://localhost:3001/mcp';
     expect(JSON.parse(mcpJsonSnippet(url)).mcpServers.koine.url).toBe(url);
+  });
+});
+
+describe('MCP client recipes', () => {
+  test('stdio snippet is the koine-mcp command block', () => {
+    expect(JSON.parse(mcpStdioSnippet())).toEqual({ mcpServers: { koine: { command: 'koine-mcp' } } });
+  });
+
+  test('every client id has exactly one recipe with a non-empty hint', () => {
+    const ids = MCP_CLIENTS.map((c) => c.id).sort();
+    expect(ids).toEqual(['claude-desktop', 'cursor', 'generic', 'lm-studio', 'vscode']);
+    for (const c of MCP_CLIENTS) expect(c.configHint.length).toBeGreaterThan(0);
+  });
+
+  test('http clients embed the url, stdio clients do not', () => {
+    const url = 'http://127.0.0.1:50286/mcp';
+    for (const c of MCP_CLIENTS) {
+      const snip = c.snippet(url);
+      if (c.transport === 'http') expect(snip).toContain(url);
+      else expect(snip).toContain('koine-mcp');
+    }
   });
 });
 
