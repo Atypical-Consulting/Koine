@@ -17,7 +17,7 @@ public sealed class HttpTransportTests : IAsyncLifetime
     private WebApplication _app = null!;
     private McpClient _client = null!;
 
-    public async Task InitializeAsync()
+    public async ValueTask InitializeAsync()
     {
         // --port 0 ⇒ the OS assigns a free loopback port, so the test never collides with a
         // long-running server or another test run.
@@ -33,7 +33,7 @@ public sealed class HttpTransportTests : IAsyncLifetime
         _client = await McpClient.CreateAsync(transport, cancellationToken: CancellationToken.None);
     }
 
-    public async Task DisposeAsync()
+    public async ValueTask DisposeAsync()
     {
         await _client.DisposeAsync();
         await _app.DisposeAsync();
