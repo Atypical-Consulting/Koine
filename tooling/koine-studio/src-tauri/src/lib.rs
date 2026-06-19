@@ -772,8 +772,29 @@ pub fn run() {
             delete_entry,
             move_entry
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app_handle, event| {
+            // On a clean exit, kill the MCP HTTP sidecar. The LSP child self-terminates (its piped
+            // stdin hits EOF when this process goes away), but the MCP server is spawned with null
+            // stdin and only watches for SIGTERM/Ctrl+C, so without this it would be orphaned and
+            // keep holding its loopback port across Studio restarts. (A SIGKILL/crash can't be
+            // intercepted here — the OS reaps it instead.)
+            if let tauri::RunEvent::Exit = event {
+                // Take the child out in one statement so the lock guard (which borrows `state`) is
+                // released before `state` is dropped, then kill the now-owned process.
+                let taken = app_handle
+                    .state::<McpState>()
+                    .child
+                    .lock()
+                    .ok()
+                    .and_then(|mut g| g.take());
+                if let Some(mut c) = taken {
+                    let _ = c.kill();
+                    let _ = c.wait();
+                }
+            }
+        });
 }
 
 // --- tests ------------------------------------------------------------------
