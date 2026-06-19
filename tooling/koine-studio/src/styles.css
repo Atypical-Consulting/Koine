@@ -10,6 +10,12 @@
   --koi-shadow: 0 18px 50px rgba(3, 7, 14, 0.5);
   --koi-accent-grad: linear-gradient(135deg, var(--koi-accent), var(--koi-cyan));
 
+  /* scrollbars — thumb/track derived from theme tokens so light/dark adapt for free */
+  --koi-scrollbar-size: 10px;
+  --koi-scrollbar-thumb: color-mix(in srgb, var(--koi-muted) 40%, transparent);
+  --koi-scrollbar-thumb-hover: color-mix(in srgb, var(--koi-muted) 65%, transparent);
+  --koi-scrollbar-track: transparent;
+
   /* surfaces (dark theme) */
   --koi-paper: #0e1117;
   --koi-paper-2: #161b22;
@@ -84,6 +90,42 @@ html[data-theme='light'] {
 
 * {
   box-sizing: border-box;
+}
+
+/* Uniform, theme-aware scrollbars across browsers. WebKit-based engines
+   (Chrome/Edge/Arc/Safari) use the ::-webkit-scrollbar pseudo-elements below; Firefox
+   uses the standard scrollbar-width/color. Both read the same --koi-scrollbar-* tokens,
+   so panels look identical everywhere and re-theme on light/dark.
+
+   The standard properties are gated to engines WITHOUT ::-webkit-scrollbar support
+   (Firefox). This matters because Chromium 121+ (which Arc tracks) DISABLES the
+   ::-webkit-scrollbar pseudo-elements on any element that also sets scrollbar-width or
+   scrollbar-color — so applying them globally would silently revert our custom pill to
+   the native bar in newer Chromium. */
+@supports not selector(::-webkit-scrollbar) {
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--koi-scrollbar-thumb) var(--koi-scrollbar-track);
+  }
+}
+*::-webkit-scrollbar {
+  width: var(--koi-scrollbar-size);
+  height: var(--koi-scrollbar-size);
+}
+*::-webkit-scrollbar-track {
+  background: var(--koi-scrollbar-track);
+}
+*::-webkit-scrollbar-thumb {
+  background: var(--koi-scrollbar-thumb);
+  border-radius: 999px;
+  border: 2px solid transparent; /* inset padding so the thumb reads as a slim pill */
+  background-clip: padding-box;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: var(--koi-scrollbar-thumb-hover);
+}
+*::-webkit-scrollbar-corner {
+  background: transparent;
 }
 
 html,
@@ -1743,10 +1785,10 @@ body.resizing {
    Refactors, quick fixes, diagrams, assistant, gallery — added components.
    ============================================================================ */
 
-/* The tab strip now carries more tabs; let it scroll horizontally rather than squish labels. */
+/* The tab strip now carries more tabs; let it scroll horizontally rather than squish labels.
+   (Scrollbar styling is handled globally; see the --koi-scrollbar-* rules near the top.) */
 #tabs {
   overflow-x: auto;
-  scrollbar-width: thin;
 }
 #tabs .tab {
   flex: 0 0 auto;
