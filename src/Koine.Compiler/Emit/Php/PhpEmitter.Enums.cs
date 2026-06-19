@@ -27,7 +27,8 @@ namespace Koine.Compiler.Emit.Php;
 ///   <item><c>fromValue(int $value): self</c> — thin alias for the built-in <c>from()</c>.</item>
 ///   <item><c>tryFromValue(int $value): ?self</c> — thin alias for <c>tryFrom()</c>.</item>
 ///   <item>
-///     Exhaustive <c>match</c> (value-returning) and <c>switch_</c> (side-effecting): one
+///     Exhaustive <c>match_</c> (value-returning, escaped because <c>match</c> is a PHP reserved
+///     word) and <c>switch_</c> (side-effecting): one
 ///     zero-arg callable per member, dispatched via <c>match($this)</c>, throwing
 ///     <see cref="\Koine\Runtime\DomainInvariantViolationException"/> on an unhandled member.
 ///   </item>
@@ -162,7 +163,7 @@ public sealed partial class PhpEmitter
             "$" + PhpNaming.EscapeIdentifier(PhpNaming.MethodName(m.Name))).ToList();
         var paramList = string.Join(", ", paramNames.Select(p => "\\Closure " + p));
         sb.Append(Indent).Append("/** Dispatch to the handler for this member; throws if unhandled. */\n");
-        sb.Append(Indent).Append("public function match(").Append(paramList).Append("): mixed\n");
+        sb.Append(Indent).Append("public function match_(").Append(paramList).Append("): mixed\n");
         sb.Append(Indent).Append("{\n");
         sb.Append(Indent).Append(Indent).Append("return match($this) {\n");
         for (var i = 0; i < members.Count; i++)

@@ -31,7 +31,7 @@ The name evokes **Koine Greek**, the *common* language that became a lingua fran
 compile one domain model to many targets. **C# is the primary, most complete target**; a
 **TypeScript** emitter ships (`--target typescript`), a **Python** emitter ships (`--target python` →
 dependency-free Python 3.11+, `mypy --strict`-clean; Phase 1 covers the tactical core), a **PHP 8.1**
-emitter ships (`--target php` → dependency-free PHP 8.1, typed properties, readonly classes; Phase 1
+emitter ships (`--target php` → dependency-free PHP 8.1, typed properties, readonly promoted properties; Phase 1
 covers the tactical core), a **docs** target emits living documentation (`--target docs` → Markdown +
 Mermaid diagrams) straight from the model, and the parser and semantic model are kept strictly
 target-agnostic so further emitters (e.g. Rust) can be added without touching them.

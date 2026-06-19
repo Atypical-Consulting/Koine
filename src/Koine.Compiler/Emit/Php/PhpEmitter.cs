@@ -50,6 +50,11 @@ public sealed partial class PhpEmitter : IEmitter
             OperatorNeedsAnalyzer.BuildAdditiveOperatorNeeds(model, index),
             OperatorNeedsAnalyzer.BuildScalarOperatorNeeds(model, index));
 
+        // Build the cross-namespace type catalog (short class name → FQN) so each emitted file can
+        // import the sibling-namespace types it references via `use`. Includes the runtime types
+        // referenced by short name and any unowned branded ids that need a self-contained class.
+        _typeCatalog = BuildTypeCatalog(model, index);
+
         var files = new List<EmittedFile>();
 
         // 1. Runtime support files, emitted once at the output root.
@@ -57,7 +62,7 @@ public sealed partial class PhpEmitter : IEmitter
         files.Add(new EmittedFile("composer.json", PhpRuntime.ComposerJson));
         files.Add(new EmittedFile("phpstan.neon", PhpRuntime.PhpStanNeon));
 
-        // 2. Per-type dispatch: value objects and quantities in Task 5; other constructs are no-ops.
+        // 2. Per-type dispatch.
         foreach (ContextNode ctx in model.Contexts)
         {
             foreach (TypeDecl type in ctx.Types)
@@ -65,6 +70,10 @@ public sealed partial class PhpEmitter : IEmitter
                 EmitType(emit, files, type, ctx.Name, typeMapper);
             }
         }
+
+        // 3. Self-containment: emit a minimal branded id value object for any id type referenced by
+        //    the model but not emitted from a declared entity (e.g. a foreign aggregate's id).
+        EmitUnownedIds(emit, model, files);
 
         return files;
     }

@@ -249,6 +249,22 @@ public class PhpExpressionTests
     }
 
     [Fact]
+    public void Value_object_add_with_vo_on_the_right_uses_the_vo_as_receiver()
+    {
+        // The VO is the RIGHT operand; the receiver must be the value object (not the literal),
+        // otherwise we emit `1->add(...)` which is a fatal PHP error. The other operand is the arg.
+        var expr = new BinaryExpr(BinaryOp.Add, Int("1"), Id("weight"));
+        Assert.Equal("$this->weight->add(1)", Translate(expr));
+    }
+
+    [Fact]
+    public void Value_object_subtract_with_vo_on_the_right_uses_the_vo_as_receiver()
+    {
+        var expr = new BinaryExpr(BinaryOp.Sub, Int("1"), Id("weight"));
+        Assert.Equal("$this->weight->subtract(1)", Translate(expr));
+    }
+
+    [Fact]
     public void Value_object_equality_lowers_to_equals()
     {
         var eq = new BinaryExpr(BinaryOp.Eq, Id("weight"), Id("otherWeight"));
@@ -453,6 +469,15 @@ public class PhpExpressionTests
     {
         var expr = new MatchExpr(Id("code"), "[A-Z]{3}");
         Assert.Equal("(bool)preg_match('/[A-Z]{3}/', $this->code)", Translate(expr));
+    }
+
+    [Fact]
+    public void Matches_escapes_a_slash_in_the_pattern()
+    {
+        // A `/` in the pattern would otherwise close the PCRE `/.../` delimiter early — emitting a
+        // broken regex that preg_match rejects (warning + always-false). It must be escaped to `\/`.
+        var expr = new MatchExpr(Id("code"), "a/b");
+        Assert.Equal("(bool)preg_match('/a\\/b/', $this->code)", Translate(expr));
     }
 
     // =========================================================================

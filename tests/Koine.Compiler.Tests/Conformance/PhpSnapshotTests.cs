@@ -104,9 +104,13 @@ public class PhpSnapshotTests
         var result = new KoineCompiler().Compile(Fixture, new PhpEmitter());
         Assert.True(result.Success, string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
 
-        // Always-on syntax gate: runs php -l when a PHP interpreter is available.
-        // Reported as INCONCLUSIVE (no assertion) when no interpreter is present locally.
-        _ = TestSupport.SyntaxCheckPhp(result.Files);
+        // Always-on syntax gate: runs php -l when a PHP interpreter is available, and asserts on it.
+        // Stays INCONCLUSIVE (no assertion) when no interpreter is present locally.
+        var syntax = TestSupport.SyntaxCheckPhp(result.Files);
+        if (syntax.ToolchainAvailable)
+        {
+            Assert.True(syntax.Ok, string.Join("\n", syntax.Errors));
+        }
 
         return Verify(TestSupport.Render(result.Files))
             .UseDirectory("Snapshots");
@@ -146,8 +150,12 @@ public class PhpSnapshotTests
         var result = new KoineCompiler().Compile(EntityFixture, new PhpEmitter());
         Assert.True(result.Success, string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
 
-        // Always-on syntax gate: INCONCLUSIVE when no PHP interpreter is available locally.
-        _ = TestSupport.SyntaxCheckPhp(result.Files);
+        // Always-on syntax gate: asserts php -l succeeds when available; INCONCLUSIVE otherwise.
+        var syntax = TestSupport.SyntaxCheckPhp(result.Files);
+        if (syntax.ToolchainAvailable)
+        {
+            Assert.True(syntax.Ok, string.Join("\n", syntax.Errors));
+        }
 
         return Verify(TestSupport.Render(result.Files))
             .UseDirectory("Snapshots");
@@ -221,8 +229,12 @@ public class PhpSnapshotTests
         var result = new KoineCompiler().Compile(EndToEndFixture, new PhpEmitter());
         Assert.True(result.Success, string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
 
-        // Always-on syntax gate: INCONCLUSIVE when no PHP interpreter is available locally.
-        _ = TestSupport.SyntaxCheckPhp(result.Files);
+        // Always-on syntax gate: asserts php -l succeeds when available; INCONCLUSIVE otherwise.
+        var syntax = TestSupport.SyntaxCheckPhp(result.Files);
+        if (syntax.ToolchainAvailable)
+        {
+            Assert.True(syntax.Ok, string.Join("\n", syntax.Errors));
+        }
 
         return Verify(TestSupport.Render(result.Files))
             .UseDirectory("Snapshots");

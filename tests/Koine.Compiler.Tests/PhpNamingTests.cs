@@ -78,6 +78,20 @@ public class PhpNamingTests
         Assert.Equal(expected, PhpNaming.MethodName(input));
     }
 
+    [Theory]
+    // A derived member or param whose camelCase form is a PHP reserved word must be escaped
+    // so it can appear as a bare method name (e.g. `public function match_()`).
+    [InlineData("match", "match_")]
+    [InlineData("list", "list_")]
+    [InlineData("fn", "fn_")]
+    [InlineData("default", "default_")]
+    [InlineData("echo", "echo_")]
+    [InlineData("print", "print_")]
+    public void MethodName_escapes_reserved_words(string input, string expected)
+    {
+        Assert.Equal(expected, PhpNaming.MethodName(input));
+    }
+
     // =========================================================================
     // PropertyName — camelCase
     // =========================================================================
@@ -88,6 +102,15 @@ public class PhpNamingTests
     [InlineData("subtotal", "subtotal")]
     [InlineData("OrderLine", "orderLine")]
     public void PropertyName_returns_camelCase(string input, string expected)
+    {
+        Assert.Equal(expected, PhpNaming.PropertyName(input));
+    }
+
+    [Theory]
+    [InlineData("match", "match_")]
+    [InlineData("list", "list_")]
+    [InlineData("default", "default_")]
+    public void PropertyName_escapes_reserved_words(string input, string expected)
     {
         Assert.Equal(expected, PhpNaming.PropertyName(input));
     }

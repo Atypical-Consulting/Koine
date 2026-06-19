@@ -152,7 +152,7 @@ glossary side by side from one model: it's the same compile, three emitters. C# 
 target today; TypeScript is emitting now, **Python** (Phase 1: tactical core — value objects,
 smart enums, identity entities, events, and repository protocols, all dependency-free and
 `mypy --strict`-clean) and **PHP 8.1** (Phase 1: the same tactical core, dependency-free, using typed
-properties and readonly classes) are available today via the CLI and MCP server. A Rust target is on
+properties and readonly promoted properties) are available today via the CLI and MCP server. A Rust target is on
 the [roadmap](/Koine/guides/roadmap/). When it
 arrives, your existing `.koi` models compile to it without a single edit — because they never
 described C# in the first place.

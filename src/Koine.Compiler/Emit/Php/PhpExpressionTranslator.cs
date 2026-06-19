@@ -408,16 +408,19 @@ internal sealed class PhpExpressionTranslator
                 return;
 
             case BinaryOp.Add:
-                WriteReceiver(bin.Left, sb);
+                // Receiver is the value object (whichever side it is on); the other operand is the
+                // argument. Using bin.Left unconditionally would emit `1->add(...)` for a VO on the
+                // right — a fatal PHP error.
+                WriteReceiver(vo, sb);
                 sb.Append("->add(");
-                Write(bin.Right, sb);
+                Write(other, sb);
                 sb.Append(')');
                 return;
 
             case BinaryOp.Sub:
-                WriteReceiver(bin.Left, sb);
+                WriteReceiver(vo, sb);
                 sb.Append("->subtract(");
-                Write(bin.Right, sb);
+                Write(other, sb);
                 sb.Append(')');
                 return;
 
@@ -541,7 +544,7 @@ internal sealed class PhpExpressionTranslator
         BinaryOp.Sub => "sub",
         BinaryOp.Mul => "mul",
         BinaryOp.Div => "div",
-        _ => "add"
+        _ => throw new InvalidOperationException($"Not a Decimal arithmetic operator: {op}")
     };
 
     private void WriteOperand(Expr expr, StringBuilder sb, string? enumHint)
@@ -919,6 +922,10 @@ internal sealed class PhpExpressionTranslator
                     break;
                 case '\\':
                     sb.Append("\\\\");
+                    break;
+                case '/':
+                    // Escape the PCRE delimiter so a `/` in the pattern doesn't close `/.../` early.
+                    sb.Append("\\/");
                     break;
                 default:
                     sb.Append(c);

@@ -68,16 +68,19 @@ internal static class PhpNaming
     }
 
     /// <summary>
-    /// Returns the camelCase method name for <paramref name="name"/>.
-    /// Examples: <c>UnitPrice</c> → <c>unitPrice</c>, <c>unit_price</c> → <c>unitPrice</c>.
+    /// Returns the camelCase method name for <paramref name="name"/>, escaping PHP reserved words
+    /// with a trailing <c>_</c> so the result is safe as a bare method name everywhere (a derived
+    /// member named <c>match</c>/<c>list</c>/<c>fn</c> would otherwise emit a keyword → parse error).
+    /// Examples: <c>UnitPrice</c> → <c>unitPrice</c>, <c>match</c> → <c>match_</c>.
     /// </summary>
-    public static string MethodName(string name) => ToCamelCase(name);
+    public static string MethodName(string name) => EscapeIdentifier(ToCamelCase(name));
 
     /// <summary>
-    /// Returns the camelCase property name for <paramref name="name"/>.
-    /// Examples: <c>UnitPrice</c> → <c>unitPrice</c>, <c>unit_price</c> → <c>unitPrice</c>.
+    /// Returns the camelCase property name for <paramref name="name"/>, escaping PHP reserved words
+    /// with a trailing <c>_</c> (same rationale as <see cref="MethodName"/>).
+    /// Examples: <c>UnitPrice</c> → <c>unitPrice</c>, <c>match</c> → <c>match_</c>.
     /// </summary>
-    public static string PropertyName(string name) => ToCamelCase(name);
+    public static string PropertyName(string name) => EscapeIdentifier(ToCamelCase(name));
 
     /// <summary>
     /// Returns the <c>UPPER_SNAKE</c> constant name for <paramref name="name"/>.

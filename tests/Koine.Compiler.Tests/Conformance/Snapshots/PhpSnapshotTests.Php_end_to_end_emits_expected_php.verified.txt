@@ -189,6 +189,12 @@ declare(strict_types=1);
 
 namespace Koine\Billing\Entities;
 
+use Koine\Billing\Enums\InvoiceStatus;
+use Koine\Billing\Events\InvoiceCreated;
+use Koine\Billing\Events\InvoiceIssued;
+use Koine\Billing\ValueObjects\Amount;
+use Koine\Billing\ValueObjects\InvoiceId;
+
 class Invoice
 {
     public InvoiceId $id;
@@ -275,6 +281,8 @@ declare(strict_types=1);
 
 namespace Koine\Billing\Enums;
 
+use Koine\Billing\Entities\Invoice;
+
 /** Invoice lifecycle states. */
 enum InvoiceStatus: int
 {
@@ -318,7 +326,7 @@ enum InvoiceStatus: int
     }
 
     /** Dispatch to the handler for this member; throws if unhandled. */
-    public function match(\Closure $draft, \Closure $issued, \Closure $paid, \Closure $voided): mixed
+    public function match_(\Closure $draft, \Closure $issued, \Closure $paid, \Closure $voided): mixed
     {
         return match($this) {
             self::DRAFT => ($draft)(),
@@ -349,8 +357,10 @@ declare(strict_types=1);
 
 namespace Koine\Billing\Events;
 
+use Koine\Billing\ValueObjects\InvoiceId;
+
 /** Raised when an invoice is created. */
-final readonly class InvoiceCreated
+final class InvoiceCreated
 {
     public function __construct(
         public readonly InvoiceId $invoiceId,
@@ -365,8 +375,10 @@ declare(strict_types=1);
 
 namespace Koine\Billing\Events;
 
+use Koine\Billing\ValueObjects\InvoiceId;
+
 /** Raised when an invoice is issued. */
-final readonly class InvoiceIssued
+final class InvoiceIssued
 {
     public function __construct(
         public readonly InvoiceId $invoiceId
@@ -379,6 +391,9 @@ final readonly class InvoiceIssued
 declare(strict_types=1);
 
 namespace Koine\Billing\Repositories;
+
+use Koine\Billing\Entities\Invoice;
+use Koine\Billing\ValueObjects\InvoiceId;
 
 /** Persistence-ignorant repository contract for the Invoice aggregate root. */
 interface InvoiceRepository

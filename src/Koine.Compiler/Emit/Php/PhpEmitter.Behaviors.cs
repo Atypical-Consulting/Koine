@@ -6,14 +6,15 @@ namespace Koine.Compiler.Emit.Php;
 /// <summary>
 /// The behavioral slice of <see cref="PhpEmitter"/>: an entity's <c>command</c>s (mutating
 /// instance methods), <c>create</c> factories (static methods returning a new instance), and the
-/// domain/integration <c>event</c>s those commands/factories emit (<c>final readonly class</c> DTOs).
+/// domain/integration <c>event</c>s those commands/factories emit (<c>final class</c> DTOs with
+/// <c>public readonly</c> promoted properties — PHP 8.1-valid, since readonly classes are 8.2).
 /// Mirrors the C#/Python/TS emitters' command/factory/event contract — <c>requires</c> guards throw
 /// <c>\Koine\Runtime\DomainInvariantViolationException</c>, <c>f -&gt; v</c> transitions reassign
 /// properties, <c>emit Ev(...)</c> records onto a per-aggregate event buffer, and a
 /// <c>result</c>/return value (or the constructed instance, for a factory) is returned — rendered as
 /// idiomatic PHP 8.1.
 /// <para>
-/// <b>Domain-event recording.</b> Koine events emit as <c>final readonly class</c> DTOs with no
+/// <b>Domain-event recording.</b> Koine events emit as <c>final class</c> DTOs (readonly props) with no
 /// shared base class (each is a plain value-object). An entity that emits any event gains a private
 /// <c>$domainEvents = []</c> property (not a constructor parameter), a <c>domainEvents(): array</c>
 /// snapshot accessor, a <c>releaseDomainEvents(): array</c> drain, and a
@@ -149,8 +150,10 @@ public sealed partial class PhpEmitter
             sb.Append(Indent).Append(Indent).Append("$this->").Append(prop).Append(" = ").Append(value).Append(";\n");
         }
 
-        // Translate emit payloads and result while parameters are still in scope.
-        var emitStatements = emits.Select(e => BuildEmitStatement(e, translator, index, "$this->")).ToList();
+        // Translate emit payloads and result while parameters are still in scope. A command is an
+        // instance method, so member references render as `$this->member` (Property mode).
+        var emitStatements = emits.Select(e =>
+            BuildEmitStatement(e, translator, index, "$this->", PhpExpressionTranslator.NameMode.Property)).ToList();
         string? resultExpr = result is not null
             ? translator.Translate(result.Value, PhpExpressionTranslator.NameMode.Property, cmd.ReturnType?.Name)
             : null;
@@ -261,7 +264,11 @@ public sealed partial class PhpEmitter
             if (initByField.TryGetValue(m.Name, out Expr? value))
             {
                 var expectedEnum = index.Classify(m.Type.Name) == TypeKind.Enum ? m.Type.Name : null;
-                args.Add(translator.Translate(value, PhpExpressionTranslator.NameMode.Property, expectedEnum));
+                // A factory is a STATIC method — Property mode would render an entity-member
+                // reference as `$this->member` ("Cannot use $this in a static method"). Use
+                // Parameter mode so a bare member renders as `$member` (the factory's params and
+                // synthetic `id` are pushed as locals and take precedence anyway).
+                args.Add(translator.Translate(value, PhpExpressionTranslator.NameMode.Parameter, expectedEnum));
             }
             else if (factoryParams.Contains(m.Name))
             {
@@ -270,7 +277,7 @@ public sealed partial class PhpEmitter
             else if (m.Initializer is not null
                 && !MemberAnalysis.IsDerived(m, ctorMembers.Select(f => f.Name).ToHashSet()))
             {
-                args.Add(translator.Translate(m.Initializer, PhpExpressionTranslator.NameMode.Property, m.Type.Name));
+                args.Add(translator.Translate(m.Initializer, PhpExpressionTranslator.NameMode.Parameter, m.Type.Name));
             }
             else if (m.Type.IsOptional)
             {
@@ -282,8 +289,10 @@ public sealed partial class PhpEmitter
         sb.Append(Indent).Append(Indent).Append("$instance = new self(")
           .Append(string.Join(", ", args)).Append(");\n");
 
-        // 4. Record creation events (payloads may reference `id` and parameters).
-        var emitStatements = emits.Select(e => BuildEmitStatement(e, translator, index, "$instance->")).ToList();
+        // 4. Record creation events (payloads may reference `id` and parameters). A factory is a
+        // static method, so use Parameter mode (no `$this->`); `id`/params are locals anyway.
+        var emitStatements = emits.Select(e =>
+            BuildEmitStatement(e, translator, index, "$instance->", PhpExpressionTranslator.NameMode.Parameter)).ToList();
 
         foreach (Param p in factory.Parameters)
         {
@@ -408,7 +417,8 @@ public sealed partial class PhpEmitter
         EmitClause emit,
         PhpExpressionTranslator translator,
         ModelIndex index,
-        string targetPrefix)
+        string targetPrefix,
+        PhpExpressionTranslator.NameMode mode)
     {
         if (!index.TryGetDecl(emit.EventName, out TypeDecl decl) || decl is not EventDecl ev)
         {
@@ -424,7 +434,7 @@ public sealed partial class PhpEmitter
             .Select(f =>
             {
                 var expectedEnum = index.Classify(f.Type.Name) == TypeKind.Enum ? f.Type.Name : null;
-                return translator.Translate(argByField[f.Name], PhpExpressionTranslator.NameMode.Property, expectedEnum);
+                return translator.Translate(argByField[f.Name], mode, expectedEnum);
             });
 
         var eventName = PhpNaming.ClassName(ev.Name);
@@ -432,12 +442,13 @@ public sealed partial class PhpEmitter
     }
 
     // -----------------------------------------------------------------------
-    // Domain / integration events — final readonly class DTOs
+    // Domain / integration events — final class DTOs (readonly promoted props)
     // -----------------------------------------------------------------------
 
     /// <summary>
-    /// Emits a domain <c>event</c> or <c>integration event</c> as a <c>final readonly class</c>
-    /// DTO: each declared member becomes a typed, camelCase constructor-promoted property. An event
+    /// Emits a domain <c>event</c> or <c>integration event</c> as a <c>final class</c>
+    /// DTO with <c>public readonly</c> promoted properties (PHP 8.1-valid; readonly *classes* are
+    /// 8.2): each declared member becomes a typed, camelCase constructor-promoted property. An event
     /// carries no behavior and no shared base class. Constant-default members use constructor
     /// defaults. Integration-event field types are already validated to be safe; the emitter just
     /// renders them.
@@ -459,7 +470,9 @@ public sealed partial class PhpEmitter
         var sb = new StringBuilder();
         WriteDoc(sb, doc, "");
 
-        sb.Append("final readonly class ").Append(name).Append('\n');
+        // PHP 8.1 floor: readonly *properties* are 8.1, readonly *classes* are 8.2 — so the class
+        // is a plain `final class` and immutability comes from the `public readonly` promoted props.
+        sb.Append("final class ").Append(name).Append('\n');
         sb.Append("{\n");
 
         // Constructor-promoted readonly properties for all stored fields.
