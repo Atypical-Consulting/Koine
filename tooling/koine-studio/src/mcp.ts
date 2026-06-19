@@ -138,6 +138,50 @@ export interface McpProbeResult {
   error?: string;
 }
 
+/** How long a `tools/call` waits — longer than a probe, since it runs the compiler server-side. */
+const TOOL_CALL_TIMEOUT_MS = 20000;
+
+/** Pull the text payload out of a `tools/call` JSON-RPC result (its `content:[{type:'text',text}]`). */
+function extractToolText(rpc: unknown): string {
+  const r = rpc as { result?: { content?: { type?: string; text?: string }[] }; error?: { message?: string } };
+  if (r?.error) return `Error: ${r.error.message ?? 'MCP error'}`;
+  const content = r?.result?.content;
+  if (!Array.isArray(content)) return '';
+  return content.map((c) => (typeof c?.text === 'string' ? c.text : '')).filter(Boolean).join('\n');
+}
+
+/**
+ * Call one tool on a Koine MCP HTTP endpoint: `initialize` (capturing the `Mcp-Session-Id`) then
+ * `tools/call` with `{ name, arguments }`, resolving the tool's text result. Used by the desktop
+ * Assistant to run koine tools through the `koine mcp --http` sidecar. `fetchFn` is injectable.
+ * Rejects on transport/HTTP failure (the caller turns that into a tool-error string for the model).
+ */
+export async function mcpCall(
+  url: string,
+  name: string,
+  args: Record<string, unknown>,
+  fetchFn: typeof fetch = fetch,
+): Promise<string> {
+  const headers: Record<string, string> = {
+    'content-type': 'application/json',
+    accept: 'application/json, text/event-stream',
+    'mcp-protocol-version': PROTOCOL_VERSION,
+  };
+  const signal = AbortSignal.timeout(TOOL_CALL_TIMEOUT_MS);
+  const initRes = await fetchFn(url, { method: 'POST', headers, body: mcpInitializeBody(), signal });
+  if (!initRes.ok) throw new Error(`MCP initialize failed: HTTP ${initRes.status}`);
+  await readRpc(initRes);
+  const session = initRes.headers.get('mcp-session-id');
+  const callRes = await fetchFn(url, {
+    method: 'POST',
+    headers: session ? { ...headers, 'mcp-session-id': session } : headers,
+    body: JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name, arguments: args } }),
+    signal,
+  });
+  if (!callRes.ok) throw new Error(`MCP tools/call failed: HTTP ${callRes.status}`);
+  return extractToolText(await readRpc(callRes));
+}
+
 /**
  * Probe a Koine MCP HTTP endpoint: `initialize` then `tools/list`, carrying the `Mcp-Session-Id`
  * the server hands back. Resolves `{ ok, tools }` — never rejects. `fetchFn` is injectable for tests.

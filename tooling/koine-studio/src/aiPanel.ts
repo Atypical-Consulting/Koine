@@ -31,6 +31,12 @@ export interface AssistantPanelOptions {
   onApplyModel: (source: string) => void;
   /** Open Preferences (so the user can add their API key). */
   onOpenPrefs: () => void;
+  /**
+   * Execute a Koine compiler tool (validate/compile/format) by name with JSON args, for the
+   * assistant's tool loop (OpenAI-compatible path). Omitted when the host can't run tools, in which
+   * case the assistant stays plain chat.
+   */
+  runCompilerTool?: (name: string, argsJson: string) => Promise<string>;
 }
 
 export interface AssistantPanel {
@@ -232,6 +238,16 @@ export function createAssistantPanel(opts: AssistantPanelOptions): AssistantPane
     const replyBubble = addBubble('assistant');
     replyBubble.textContent = '…';
 
+    // A muted one-line note per tool call the model makes, inserted above the final reply so the user
+    // can see the assistant ran a koine tool (and its outcome) rather than answering blind.
+    const addToolStatus = (name: string, summary: string): void => {
+      const node = document.createElement('div');
+      node.className = 'koi-assistant-tool';
+      node.textContent = summary ? `${name} → ${summary}` : `ran ${name}`;
+      transcript.insertBefore(node, replyBubble);
+      transcript.scrollTop = transcript.scrollHeight;
+    };
+
     aborter = new AbortController();
     setBusy(true);
     let full = '';
@@ -249,6 +265,8 @@ export function createAssistantPanel(opts: AssistantPanelOptions): AssistantPane
           replyBubble.textContent = full;
           transcript.scrollTop = transcript.scrollHeight;
         },
+        runCompilerTool: opts.runCompilerTool,
+        onToolCall: addToolStatus,
       });
       messages.push({ role: 'assistant', content: full });
       replyBubble.innerHTML = `<div class="koi-md">${renderMarkdown(full)}</div>`;
