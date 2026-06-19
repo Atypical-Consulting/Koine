@@ -7,9 +7,20 @@
 
 export type ThemeName = 'dark' | 'light';
 
+/** Accent presets selectable in Settings → Appearance. 'blue' is the theme default (no override). */
+export type AccentName = 'blue' | 'teal' | 'violet' | 'amber';
+
 export interface Settings {
   theme: ThemeName;
+  /** Accent hue applied over the active theme. */
+  accent: AccentName;
+  /** Collapse UI animations/transitions — an explicit companion to the OS reduced-motion setting. */
+  reduceMotion: boolean;
   fontSize: number;
+  /** Editor line height as a unitless multiple of the font size. */
+  lineHeight: number;
+  /** Soft-wrap long editor lines instead of scrolling horizontally. */
+  wordWrap: boolean;
   formatOnSave: boolean;
   lspTrace: 'off' | 'messages' | 'verbose';
   /** Which AI backend the assistant uses. */
@@ -26,7 +37,11 @@ export interface Settings {
 
 export const DEFAULT_SETTINGS: Settings = {
   theme: 'dark',
+  accent: 'blue',
+  reduceMotion: false,
   fontSize: 13.5,
+  lineHeight: 1.6,
+  wordWrap: false,
   formatOnSave: true,
   lspTrace: 'off',
   aiProvider: 'anthropic',
@@ -43,10 +58,18 @@ const RECENT_KEY = 'koine.studio.recentFolders';
 const SCRATCH_KEY = 'koine.studio.scratch';
 const RECENT_CAP = 8;
 
-// Editor font-size bounds — must match the Preferences input range (prefs.ts) so a stored
+// Editor font-size bounds — must match the Settings input range (prefs.ts) so a stored
 // value can never drive the editor outside what the UI itself permits.
 const FONT_MIN = 10;
 const FONT_MAX = 22;
+
+// Editor line-height bounds — likewise mirror the Settings input range in prefs.ts.
+const LINE_HEIGHT_MIN = 1.2;
+const LINE_HEIGHT_MAX = 2.4;
+
+// The canonical accent roster. This data layer owns the list; the appearance layer derives its
+// presets and picker order from it, so a new accent is added in exactly one place.
+export const ACCENT_NAMES: readonly AccentName[] = ['blue', 'teal', 'violet', 'amber'];
 
 // --- raw localStorage helpers (never throw) ----------------------------------
 
@@ -81,6 +104,17 @@ function coerceFontSize(v: unknown): number {
   return Math.min(Math.max(v, FONT_MIN), FONT_MAX);
 }
 
+/** A finite number clamped into the editor line-height range, else the default. */
+function coerceLineHeight(v: unknown): number {
+  if (typeof v !== 'number' || !Number.isFinite(v)) return DEFAULT_SETTINGS.lineHeight;
+  return Math.min(Math.max(v, LINE_HEIGHT_MIN), LINE_HEIGHT_MAX);
+}
+
+/** A known accent name, else the default. */
+function coerceAccent(v: unknown): AccentName {
+  return ACCENT_NAMES.includes(v as AccentName) ? (v as AccentName) : DEFAULT_SETTINGS.accent;
+}
+
 /** A valid LSP trace level, else the default. */
 function coerceTrace(v: unknown): Settings['lspTrace'] {
   return v === 'messages' || v === 'verbose' || v === 'off' ? v : DEFAULT_SETTINGS.lspTrace;
@@ -98,7 +132,11 @@ export function loadSettings(): Settings {
     if (parsed === null || typeof parsed !== 'object') return { ...DEFAULT_SETTINGS };
     return {
       theme: coerceTheme(parsed.theme),
+      accent: coerceAccent(parsed.accent),
+      reduceMotion: typeof parsed.reduceMotion === 'boolean' ? parsed.reduceMotion : DEFAULT_SETTINGS.reduceMotion,
       fontSize: coerceFontSize(parsed.fontSize),
+      lineHeight: coerceLineHeight(parsed.lineHeight),
+      wordWrap: typeof parsed.wordWrap === 'boolean' ? parsed.wordWrap : DEFAULT_SETTINGS.wordWrap,
       formatOnSave: typeof parsed.formatOnSave === 'boolean' ? parsed.formatOnSave : DEFAULT_SETTINGS.formatOnSave,
       lspTrace: coerceTrace(parsed.lspTrace),
       aiProvider: parsed.aiProvider === 'openai' ? 'openai' : DEFAULT_SETTINGS.aiProvider,

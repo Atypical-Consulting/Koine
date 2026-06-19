@@ -49,6 +49,8 @@ export interface ModalOptions {
   /** Heading shown in the modal header and used as the default aria-label. */
   title: string;
   ariaLabel?: string;
+  /** Extra class added to the .koi-modal element (e.g. a width/layout variant). */
+  variant?: string;
 }
 
 export interface ModalHandle {
@@ -78,6 +80,7 @@ export function createModal(opts: ModalOptions): ModalHandle {
 
   const modal = document.createElement('div');
   modal.className = 'koi-modal';
+  if (opts.variant) modal.classList.add(opts.variant);
   modal.setAttribute('role', 'dialog');
   modal.setAttribute('aria-modal', 'true');
   modal.setAttribute('aria-label', opts.ariaLabel ?? opts.title);
@@ -145,9 +148,13 @@ export function createModal(opts: ModalOptions): ModalHandle {
   // toolbar/editor behind the backdrop, honouring the aria-modal contract (WCAG 2.4.3).
   modal.addEventListener('keydown', (e) => {
     if (e.key !== 'Tab') return;
+    // Only ACTUALLY-rendered controls are valid tab stops: a control inside a display:none panel
+    // (a collapsed Settings category, a hidden field row) has no client rects, so excluding it
+    // keeps the computed first/last stops on visible elements — otherwise the wrap targets an
+    // unfocusable element and focus escapes the modal.
     const focusable = Array.from(
       modal.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR),
-    ).filter((el) => !el.hasAttribute('hidden'));
+    ).filter((el) => !el.hasAttribute('hidden') && el.getClientRects().length > 0);
     if (focusable.length === 0) return;
     const first = focusable[0];
     const last = focusable[focusable.length - 1];
