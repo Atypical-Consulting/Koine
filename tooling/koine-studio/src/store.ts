@@ -10,6 +10,9 @@ export type ThemeName = 'dark' | 'light';
 /** Accent presets selectable in Settings → Appearance. 'blue' is the theme default (no override). */
 export type AccentName = 'blue' | 'teal' | 'violet' | 'amber';
 
+/** MCP client a setup recipe targets in Settings → MCP. */
+export type McpClientId = 'claude-desktop' | 'lm-studio' | 'cursor' | 'vscode' | 'generic';
+
 export interface Settings {
   theme: ThemeName;
   /** Accent hue applied over the active theme. */
@@ -33,6 +36,10 @@ export interface Settings {
   aiModel: string;
   /** OpenAI-compatible model id (kept separate so switching providers doesn't send a Claude id to OpenAI). */
   aiModelOpenai: string;
+  /** Whether the local MCP server (desktop sidecar) is enabled. Opt-in: no background server unless on. */
+  mcpEnabled: boolean;
+  /** Which client the Settings → MCP setup recipe is shown for. */
+  mcpClient: McpClientId;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -49,6 +56,8 @@ export const DEFAULT_SETTINGS: Settings = {
   aiApiKey: '',
   aiModel: 'claude-opus-4-8',
   aiModelOpenai: '',
+  mcpEnabled: false,
+  mcpClient: 'lm-studio',
 };
 
 // --- storage keys ------------------------------------------------------------
@@ -70,6 +79,10 @@ const LINE_HEIGHT_MAX = 2.4;
 // The canonical accent roster. This data layer owns the list; the appearance layer derives its
 // presets and picker order from it, so a new accent is added in exactly one place.
 export const ACCENT_NAMES: readonly AccentName[] = ['blue', 'teal', 'violet', 'amber'];
+
+// The canonical MCP-client roster, used to validate a stored mcpClient. The recipe UI (mcp.ts)
+// owns the per-client copy; this layer only owns the set of valid ids.
+const MCP_CLIENT_IDS: readonly McpClientId[] = ['claude-desktop', 'lm-studio', 'cursor', 'vscode', 'generic'];
 
 // --- raw localStorage helpers (never throw) ----------------------------------
 
@@ -120,6 +133,11 @@ function coerceTrace(v: unknown): Settings['lspTrace'] {
   return v === 'messages' || v === 'verbose' || v === 'off' ? v : DEFAULT_SETTINGS.lspTrace;
 }
 
+/** A known MCP client id, else the default. */
+function coerceMcpClient(v: unknown): McpClientId {
+  return MCP_CLIENT_IDS.includes(v as McpClientId) ? (v as McpClientId) : DEFAULT_SETTINGS.mcpClient;
+}
+
 /**
  * Load settings, merging any stored partial onto DEFAULT_SETTINGS and validating each
  * field. Unknown shapes, bad JSON, and absent storage all fall back to the defaults.
@@ -145,6 +163,8 @@ export function loadSettings(): Settings {
       aiApiKey: typeof parsed.aiApiKey === 'string' ? parsed.aiApiKey : DEFAULT_SETTINGS.aiApiKey,
       aiModel: typeof parsed.aiModel === 'string' && parsed.aiModel.length > 0 ? parsed.aiModel : DEFAULT_SETTINGS.aiModel,
       aiModelOpenai: typeof parsed.aiModelOpenai === 'string' ? parsed.aiModelOpenai : DEFAULT_SETTINGS.aiModelOpenai,
+      mcpEnabled: typeof parsed.mcpEnabled === 'boolean' ? parsed.mcpEnabled : DEFAULT_SETTINGS.mcpEnabled,
+      mcpClient: coerceMcpClient(parsed.mcpClient),
     };
   } catch {
     return { ...DEFAULT_SETTINGS };
