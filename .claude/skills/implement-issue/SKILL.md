@@ -64,7 +64,8 @@ in the plan.
 6. **Loop until every task is checked** — implement the next unchecked task → verify green → commit
    → tick that task's checkboxes on the issue → push.
 7. **Code review** — run the `code-review` skill, apply + commit the fixes, push.
-8. **Verify, then mark ready** — confirm the build/tests are green, then `gh pr ready`.
+8. **Verify, format, then mark ready** — build/tests green AND `dotnet format --verify-no-changes`
+   clean (commit any fixes), then `gh pr ready`.
 9. **Report** — PR URL, what shipped, anything you assumed or deferred.
 
 Resume-safe: re-running mid-flight is fine. A task is "done" when **all** its step checkboxes read
@@ -221,9 +222,12 @@ git push
 
 If the review is clean, say so and skip the fix commit.
 
-## Step 8 — Verify, then mark ready
+## Step 8 — Verify, format, then mark ready
 
-Marking a PR ready says "this is done." Earn it: build and run the relevant tests green first.
+Marking a PR ready says "this is done." Earn it: build and tests green, **and the same gates CI
+runs** clean — a PR that goes red in CI the moment it's opened wasn't ready.
+
+**1. Build + tests.**
 
 ```bash
 dotnet build
@@ -231,7 +235,29 @@ dotnet test                 # full suite needs the wasm workloads (see CLAUDE.md
                             # run the plan's test filters + `dotnet build` and say so in the report
 ```
 
-Only once it's green:
+**2. Format gate (CI enforces it — so must you).** CI runs
+`dotnet format Koine.slnx --verify-no-changes --no-restore` and **fails the build** on any diff. New
+code routinely trips analyzer style rules (e.g. `IDE0011` missing braces) that compile fine but the
+formatter rejects. So before the ready-flip, run the formatter in **apply** mode and commit what it
+changes:
+
+```bash
+dotnet format Koine.slnx                                  # applies whitespace + style + analyzer fixes
+dotnet format Koine.slnx --verify-no-changes --no-restore # must now exit 0 — this is the CI check
+```
+
+Scope the apply to the projects you touched (e.g. `dotnet format src/Koine.Compiler/Koine.Compiler.csproj`)
+so you don't sweep unrelated files; then run the whole-solution `--verify-no-changes` to match CI
+exactly. Some analyzer diagnostics — notably `IDE1006` naming (a snake_case test method that must
+start uppercase) — **can't be auto-fixed** (`dotnet format` prints "doesn't support Fix All"); rename
+those by hand. Commit the result:
+
+```bash
+git -c user.email=phmatray@gmail.com -c user.name="Philippe Matray" \
+  commit -am "style: satisfy dotnet format" && git push
+```
+
+**3. Mark ready** — only once build, tests, and `--verify-no-changes` are all green:
 
 ```bash
 gh pr ready <pr-number>
@@ -261,7 +287,9 @@ Short and concrete:
   strictly layered. Implement tasks along that grain; a plan that says "add an emitter" means a new
   `Emit/<Target>/`, never target concepts pushed into the shared model.
 - **Draft until proven.** The PR stays a draft through the whole loop and review; it only goes ready
-  after the build/tests are green. Reviewers should never see a "ready" PR that doesn't compile.
+  after the build/tests are green **and CI's own gates pass locally** — run `dotnet format
+  --verify-no-changes` (the formatter CI enforces) and fix what it flags. Reviewers should never see a
+  "ready" PR that doesn't compile, or that goes red in CI the instant it opens.
 - **Don't widen the blast radius.** Implement the plan, not your own ideas. If you spot adjacent work
   worth doing, note it in the report (or as a follow-up issue via `create-issue`) — don't smuggle it
   into this PR.
