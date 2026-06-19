@@ -14,24 +14,27 @@
     scrollbar-color: var(--koi-scrollbar-thumb) var(--koi-scrollbar-track);
   }
 }
-*::-webkit-scrollbar {
-  width: var(--koi-scrollbar-size);
-  height: var(--koi-scrollbar-size);
-}
-*::-webkit-scrollbar-track {
-  background: var(--koi-scrollbar-track);
-}
-*::-webkit-scrollbar-thumb {
-  background: var(--koi-scrollbar-thumb);
-  border-radius: 999px;
-  border: 2px solid transparent; /* inset padding so the thumb reads as a slim pill */
-  background-clip: padding-box;
-}
-*::-webkit-scrollbar-thumb:hover {
-  background: var(--koi-scrollbar-thumb-hover);
-}
-*::-webkit-scrollbar-corner {
-  background: transparent;
+
+* {
+  &::-webkit-scrollbar {
+    width: var(--koi-scrollbar-size);
+    height: var(--koi-scrollbar-size);
+  }
+  &::-webkit-scrollbar-track {
+    background: var(--koi-scrollbar-track);
+  }
+  &::-webkit-scrollbar-thumb {
+    background: var(--koi-scrollbar-thumb);
+    border-radius: 999px;
+    border: 2px solid transparent; /* inset padding so the thumb reads as a slim pill */
+    background-clip: padding-box;
+    &:hover {
+      background: var(--koi-scrollbar-thumb-hover);
+    }
+  }
+  &::-webkit-scrollbar-corner {
+    background: transparent;
+  }
 }
 
 html,

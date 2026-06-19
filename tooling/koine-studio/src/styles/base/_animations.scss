@@ -25,6 +25,16 @@
   }
 }
 
+@keyframes koi-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, currentColor 60%, transparent);
+  }
+  50% {
+    box-shadow: 0 0 0 4px transparent;
+  }
+}
+
 .brand {
   animation: koi-rise 0.4s ease both;
 }
@@ -53,10 +63,12 @@
   }
 }
 
-html[data-reduce-motion='true'] *,
-html[data-reduce-motion='true'] *::before,
-html[data-reduce-motion='true'] *::after {
-  animation-duration: 0.001ms !important;
-  animation-iteration-count: 1 !important;
-  transition-duration: 0.001ms !important;
+html[data-reduce-motion='true'] {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
 }

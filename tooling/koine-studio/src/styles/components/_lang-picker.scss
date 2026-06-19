@@ -109,13 +109,3 @@
   border-color: color-mix(in srgb, var(--koi-error) 40%, var(--koi-line));
   background: color-mix(in srgb, var(--koi-error) 9%, transparent);
 }
-
-@keyframes koi-pulse {
-  0%,
-  100% {
-    box-shadow: 0 0 0 0 color-mix(in srgb, currentColor 60%, transparent);
-  }
-  50% {
-    box-shadow: 0 0 0 4px transparent;
-  }
-}

@@ -160,7 +160,7 @@ function buildMaps(root) {
         }
       });
       keyframesMap.set(name, frames);
-      return false; // don't descend further into @keyframes
+      return; // keyframes children already processed via node.each() above; walk skips them
     }
 
     if (node.type === 'rule') {
