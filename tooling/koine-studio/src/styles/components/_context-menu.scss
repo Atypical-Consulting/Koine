@@ -1,15 +1,10 @@
+@use '../abstracts' as a;
+
 /* --- explorer context menu (floating, mounted to body) --- */
 .explorer-menu {
-  position: fixed;
+  @include a.popover-surface;
   z-index: 120;
   min-width: 168px;
-  list-style: none;
-  margin: 0;
-  padding: 4px;
-  background: var(--koi-paper-2);
-  border: 1px solid var(--koi-line);
-  border-radius: var(--koi-radius-sm);
-  box-shadow: var(--koi-shadow);
 }
 
 .explorer-menu-item {

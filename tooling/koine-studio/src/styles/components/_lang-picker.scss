@@ -1,15 +1,10 @@
+@use '../abstracts' as a;
+
 /* --- language picker popover (mirrors .explorer-menu, mounted to body) --- */
 .lang-menu {
-  position: fixed;
+  @include a.popover-surface;
   z-index: 120;
   min-width: 184px;
-  list-style: none;
-  margin: 0;
-  padding: 4px;
-  background: var(--koi-paper-2);
-  border: 1px solid var(--koi-line);
-  border-radius: var(--koi-radius-sm);
-  box-shadow: var(--koi-shadow);
 }
 
 .lang-menu-item {

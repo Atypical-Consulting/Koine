@@ -1,3 +1,5 @@
+@use '../abstracts' as a;
+
 /* --- destination-language split button (emit current target | pick another) --- */
 .lang-split {
   display: inline-flex;
@@ -39,6 +41,6 @@
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--dot, var(--koi-accent)) 22%, transparent);
 }
 
-.lang-dot[data-lang="csharp"] { --dot: var(--lang-csharp); }
-.lang-dot[data-lang="typescript"] { --dot: var(--lang-typescript); }
-.lang-dot[data-lang="python"] { --dot: var(--lang-python); }
+@each $name, $hue in a.$languages {
+  .lang-dot[data-lang="#{$name}"] { --dot: #{$hue}; }
+}
