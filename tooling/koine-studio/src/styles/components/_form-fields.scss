@@ -21,12 +21,13 @@
   width: 80px;
 }
 
-.koi-select:hover,
-.koi-number:hover,
-.koi-select:focus,
-.koi-number:focus {
-  border-color: var(--koi-accent);
-  outline: none;
+.koi-select,
+.koi-number {
+  &:hover,
+  &:focus {
+    border-color: var(--koi-accent);
+    outline: none;
+  }
 }
 
 .koi-checkbox {
@@ -34,4 +35,23 @@
   height: 16px;
   accent-color: var(--koi-accent);
   cursor: pointer;
+}
+
+/* --- preferences text inputs (API key + model), matching the select/number controls --- */
+.koi-text {
+  width: 100%;
+  min-width: 200px;
+  background: var(--koi-surface);
+  color: var(--koi-fg);
+  border: 1px solid var(--koi-line);
+  border-radius: var(--koi-radius-sm);
+  padding: 6px 9px;
+  font-family: var(--koi-font-mono);
+  font-size: 0.8rem;
+
+  &:hover,
+  &:focus-visible {
+    outline: none;
+    border-color: var(--koi-accent);
+  }
 }

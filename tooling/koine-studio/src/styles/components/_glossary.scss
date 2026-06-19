@@ -1,7 +1,25 @@
+/* Glossary/table readability: zebra rows + emphasized first column (the term names). */
+.koi-md {
+  tbody tr:nth-child(even) td {
+    background: color-mix(in srgb, var(--koi-surface) 38%, transparent);
+  }
+
+  tbody td:first-child {
+    color: var(--koi-fg);
+    font-weight: 600;
+  }
+
+  /* The leading sentence of a glossary entry reads as a definition rather than body copy. */
+  h2 + p {
+    color: var(--koi-ink-soft);
+  }
+}
+
 /* --- glossary editor (#67): ubiquitous-language browser + description enrichment ------------ */
 .koi-gloss {
   padding: 0.5rem 0.75rem 1.25rem;
 }
+
 .koi-gloss-coverage {
   display: flex;
   align-items: baseline;
@@ -9,6 +27,7 @@
   gap: 0.75rem;
   margin-bottom: 0.35rem;
 }
+
 .koi-gloss-bar {
   height: 6px;
   border-radius: 999px;
@@ -16,21 +35,25 @@
   overflow: hidden;
   margin-bottom: 1rem;
 }
+
 .koi-gloss-bar-fill {
   height: 100%;
   background: var(--koi-accent-grad);
   transition: width 0.25s ease;
 }
+
 .koi-gloss-ctx {
   margin-bottom: 1.1rem;
+
+  > h3 {
+    margin: 0 0 0.4rem;
+    font-size: 0.82rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--koi-muted);
+  }
 }
-.koi-gloss-ctx > h3 {
-  margin: 0 0 0.4rem;
-  font-size: 0.82rem;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--koi-muted);
-}
+
 .koi-gloss-entry {
   padding: 0.5rem 0.6rem;
   border-radius: 8px;
@@ -38,11 +61,13 @@
   margin-bottom: 0.45rem;
   background: color-mix(in srgb, var(--koi-surface) 60%, transparent);
 }
+
 .koi-gloss-entry-head {
   display: flex;
   align-items: center;
   gap: 0.5rem;
 }
+
 .koi-gloss-name {
   background: none;
   border: none;
@@ -51,10 +76,12 @@
   font-weight: 600;
   color: var(--koi-accent);
   cursor: pointer;
+
+  &:hover {
+    text-decoration: underline;
+  }
 }
-.koi-gloss-name:hover {
-  text-decoration: underline;
-}
+
 .koi-gloss-kind {
   font-size: 0.7rem;
   text-transform: uppercase;
@@ -64,6 +91,7 @@
   border-radius: 999px;
   background: color-mix(in srgb, var(--koi-fg) 9%, transparent);
 }
+
 .koi-gloss-body {
   margin-top: 0.35rem;
   display: flex;
@@ -71,18 +99,21 @@
   justify-content: space-between;
   gap: 0.6rem;
 }
+
 .koi-gloss-doc {
   margin: 0;
   color: var(--koi-fg);
   font-size: 0.86rem;
   line-height: 1.4;
 }
+
 .koi-gloss-needsdoc {
   margin: 0;
   color: var(--koi-muted);
   font-style: italic;
   font-size: 0.84rem;
 }
+
 .koi-gloss-edit {
   flex: none;
   background: none;
@@ -92,10 +123,12 @@
   padding: 0.15rem 0.55rem;
   font-size: 0.78rem;
   cursor: pointer;
+
+  &:hover {
+    background: color-mix(in srgb, var(--koi-accent) 14%, transparent);
+  }
 }
-.koi-gloss-edit:hover {
-  background: color-mix(in srgb, var(--koi-accent) 14%, transparent);
-}
+
 .koi-gloss-input {
   flex: 1;
   width: 100%;
@@ -108,11 +141,13 @@
   border-radius: 6px;
   padding: 0.4rem 0.5rem;
 }
+
 .koi-gloss-actions {
   display: flex;
   flex-direction: column;
   gap: 0.3rem;
 }
+
 .koi-gloss-save,
 .koi-gloss-cancel {
   font: inherit;
@@ -122,10 +157,12 @@
   cursor: pointer;
   border: 1px solid transparent;
 }
+
 .koi-gloss-save {
   background: var(--koi-accent);
   color: #fff;
 }
+
 .koi-gloss-cancel {
   background: none;
   border-color: color-mix(in srgb, var(--koi-fg) 20%, transparent);

@@ -25,15 +25,10 @@
 @use './components/settings';
 @use './components/help';
 @use './components/about';
-@use './components/glossary-readability';
-@use './components/copy-code-button';
-@use './components/welcome-atmosphere';
+@use './components/glossary';
 @use './base/animations';
-@use './components/glossary-editor';
 @use './components/floating-menu';
 @use './components/diagrams';
 @use './components/ai-panel';
-@use './components/welcome-gallery';
-@use './components/prefs-inputs';
-@use './components/a11y';
+@use './base/a11y';
 @use './components/wizard';
