@@ -106,13 +106,27 @@ export function parseToolsList(json: unknown): string[] {
   return tools.map((t) => (typeof t?.name === 'string' ? t.name : '')).filter(Boolean);
 }
 
-/** Read a Streamable-HTTP response that may be a JSON body or an SSE stream (first `data:` frame). */
+/** How long a connection probe waits, total, before giving up. */
+const PROBE_TIMEOUT_MS = 4000;
+
+/** Read a Streamable-HTTP response that may be a JSON body or an SSE stream. */
 async function readRpc(res: Response): Promise<unknown> {
   const text = await res.text();
   const contentType = res.headers.get('content-type') ?? '';
   if (contentType.includes('text/event-stream')) {
-    const dataLine = text.split('\n').find((l) => l.startsWith('data:'));
-    return dataLine ? JSON.parse(dataLine.slice(5).trim()) : {};
+    // An SSE response can carry heartbeats/notifications before the reply, so return the first
+    // `data:` frame that parses to a JSON-RPC message (carries `result`/`error`) — not merely the
+    // first `data:` line, which might be an unrelated event.
+    for (const line of text.split('\n')) {
+      if (!line.startsWith('data:')) continue;
+      try {
+        const msg = JSON.parse(line.slice(5).trim()) as Record<string, unknown>;
+        if (msg && typeof msg === 'object' && ('result' in msg || 'error' in msg)) return msg;
+      } catch {
+        // a partial or non-JSON frame — keep scanning
+      }
+    }
+    return {};
   }
   return text ? JSON.parse(text) : {};
 }
@@ -132,9 +146,14 @@ export async function probeMcp(url: string, fetchFn: typeof fetch = fetch): Prom
   const headers: Record<string, string> = {
     'content-type': 'application/json',
     accept: 'application/json, text/event-stream',
+    // The 2025-06-18 spec wants this on every request after `initialize`; send it from the start.
+    'mcp-protocol-version': PROTOCOL_VERSION,
   };
+  // One shared deadline across both round-trips, so a dead or stale-cached endpoint that never
+  // answers can't pin the UI on "Checking…" until the OS connect timeout.
+  const signal = AbortSignal.timeout(PROBE_TIMEOUT_MS);
   try {
-    const initRes = await fetchFn(url, { method: 'POST', headers, body: mcpInitializeBody() });
+    const initRes = await fetchFn(url, { method: 'POST', headers, body: mcpInitializeBody(), signal });
     if (!initRes.ok) return { ok: false, tools: [], error: `HTTP ${initRes.status}` };
     await readRpc(initRes);
     const session = initRes.headers.get('mcp-session-id');
@@ -142,7 +161,11 @@ export async function probeMcp(url: string, fetchFn: typeof fetch = fetch): Prom
       method: 'POST',
       headers: session ? { ...headers, 'mcp-session-id': session } : headers,
       body: mcpToolsListBody(),
+      signal,
     });
+    // A non-2xx tools/list (e.g. a rejected session, or a protocol-version mismatch) is a failure —
+    // without this check it would fall through to an empty tool list and read as "Connected — 0 tools".
+    if (!listRes.ok) return { ok: false, tools: [], error: `HTTP ${listRes.status}` };
     const tools = parseToolsList(await readRpc(listRes));
     return { ok: true, tools };
   } catch (e) {

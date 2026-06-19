@@ -97,6 +97,25 @@ describe('MCP probe', () => {
     const r = await probeMcp('http://127.0.0.1:1/mcp', fetchFn);
     expect(r.ok).toBe(false);
   });
+
+  test('probeMcp reports not-ok when tools/list fails even though initialize succeeded', async () => {
+    // A server that accepts the handshake but rejects tools/list (stale session, protocol mismatch…)
+    // must read as "Not reachable", not "Connected — 0 tools".
+    const fetchFn = ((_url: string, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body));
+      return body.method === 'initialize'
+        ? Promise.resolve(
+            new Response(JSON.stringify({ result: { serverInfo: { name: 'koine' } } }), {
+              status: 200,
+              headers: { 'content-type': 'application/json' },
+            }),
+          )
+        : Promise.resolve(new Response('bad session', { status: 400 }));
+    }) as unknown as typeof fetch;
+    const r = await probeMcp('http://127.0.0.1:1/mcp', fetchFn);
+    expect(r.ok).toBe(false);
+    expect(r.tools).toEqual([]);
+  });
 });
 
 describe('BrowserPlatform.mcpEndpoint', () => {

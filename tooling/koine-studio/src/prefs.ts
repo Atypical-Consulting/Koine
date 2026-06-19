@@ -498,49 +498,71 @@ export function createPreferences(cb: PrefsCallbacks): PrefsHandle {
   mcpTestControl.append(mcpTestBtn, mcpStatus);
   const mcpTestRow = row('Connection', 'Confirm an LLM can reach Koine’s tools at this URL.', mcpTestControl);
 
+  // Monotonic token bumped by every enable/disable/reset/open. A slow async result (endpoint launch,
+  // probe) checks its captured token before writing the UI and drops itself if a newer action has
+  // since superseded it — so a late enable can't re-show a URL for a server the user just disabled,
+  // and a probe can't overwrite "Server off" after a disable.
+  let mcpGen = 0;
+
   mcpTestBtn.addEventListener('click', () => void runMcpTest());
   async function runMcpTest(): Promise<void> {
     if (!loadSettings().mcpEnabled) return setMcpStatus('off');
     const url = mcpUrlInput.value.trim();
     if (!url) return setMcpStatus('fail', 'No endpoint');
+    const gen = ++mcpGen;
     setMcpStatus('checking');
     const result = await probeMcp(url);
+    if (gen !== mcpGen) return; // a newer toggle/test ran while we probed — don't clobber its status
     if (result.ok) setMcpStatus('ok', `Connected ✓ — ${result.tools.length} tools`);
     else setMcpStatus('fail');
   }
 
-  // Resolve (and on the desktop, lazily launch) the MCP sidecar endpoint, then re-render the recipe
-  // so HTTP snippets carry the live URL. Best-effort: any failure simply leaves the URL blank.
-  async function refreshMcpEndpoint(): Promise<void> {
-    if (cb.mcpEndpoint) {
-      try {
-        mcpUrlInput.value = (await cb.mcpEndpoint()) ?? '';
-      } catch {
-        mcpUrlInput.value = '';
-      }
+  // Resolve (and on the desktop, lazily launch) the MCP sidecar endpoint URL, or '' if it can't be
+  // brought up. DOM-free so callers can guard the write against a newer action via mcpGen.
+  async function resolveMcpEndpoint(): Promise<string> {
+    if (!cb.mcpEndpoint) return '';
+    try {
+      return (await cb.mcpEndpoint()) ?? '';
+    } catch {
+      return '';
     }
-    renderRecipe();
   }
 
-  // Toggle the sidecar: start + reveal the endpoint on enable, stop + hide it on disable.
+  // Paint the "server off" state: no endpoint, the recipe on its placeholder URL, status off.
+  function showMcpOff(): void {
+    mcpUrlInput.value = '';
+    renderRecipe();
+    setMcpStatus('off');
+  }
+
+  // Apply an enable result to the UI: reveal the URL + recipe, or surface a start failure (a blank
+  // URL means the sidecar never came up) instead of a benign "Not checked".
+  function showMcpStarted(url: string): void {
+    mcpUrlInput.value = url;
+    renderRecipe();
+    if (url) setMcpStatus('idle');
+    else setMcpStatus('fail', 'Server didn’t start');
+  }
+
+  // Toggle the sidecar: start + reveal the endpoint on enable, stop + clear it on disable.
   async function applyMcpEnabled(on: boolean): Promise<void> {
+    const gen = ++mcpGen;
     commit({ mcpEnabled: on });
     if (on) {
-      await refreshMcpEndpoint();
-      setMcpStatus('idle');
+      const url = await resolveMcpEndpoint();
+      if (gen !== mcpGen) return; // superseded by a newer toggle/reset — drop this stale result
+      showMcpStarted(url);
     } else {
       await cb.mcpStop?.();
-      mcpUrlInput.value = '';
-      renderRecipe();
-      setMcpStatus('off');
+      if (gen !== mcpGen) return;
+      showMcpOff();
     }
-    syncMcpUi();
+    syncMcpUi(on);
   }
 
   // Reflect enabled state + host capability: the endpoint and test rows only matter when a server is
   // actually running here; the recipes are always useful, so they stay visible.
-  function syncMcpUi(): void {
-    const enabled = loadSettings().mcpEnabled;
+  function syncMcpUi(enabled: boolean = loadSettings().mcpEnabled): void {
     const hostable = cb.mcpHostable !== false;
     mcpEnableToggle.el.disabled = !hostable;
     mcpWebHint.hidden = hostable;
@@ -589,10 +611,9 @@ export function createPreferences(cb: PrefsCallbacks): PrefsHandle {
     setTheme(fresh.theme); // theme has its own live-apply path (not covered by applyAppearance)
     populate(fresh);
     void cb.mcpStop?.(); // defaults disable MCP — stop any running sidecar and reflect it
-    mcpUrlInput.value = '';
-    renderRecipe();
-    setMcpStatus('off');
-    syncMcpUi();
+    ++mcpGen; // supersede any in-flight enable/probe so it can't repaint the panel after reset
+    showMcpOff();
+    syncMcpUi(false);
     cb.onChange(fresh); // re-skins accent/motion/editor metrics + soft-wrap via the app's onChange
   });
 
@@ -697,14 +718,15 @@ export function createPreferences(cb: PrefsCallbacks): PrefsHandle {
     // Only the desktop, and only when the user has enabled MCP, (re)starts the sidecar on open — the
     // server is opt-in, so an unopened Settings dialog never spawns a background process.
     if (s.mcpEnabled && cb.mcpHostable !== false) {
-      void refreshMcpEndpoint();
-      setMcpStatus('idle');
+      const gen = ++mcpGen;
+      void resolveMcpEndpoint().then((url) => {
+        if (gen === mcpGen) showMcpStarted(url);
+      });
     } else {
-      mcpUrlInput.value = '';
-      renderRecipe();
-      setMcpStatus('off');
+      ++mcpGen;
+      showMcpOff();
     }
-    syncMcpUi();
+    syncMcpUi(s.mcpEnabled);
     selectCategory(activeIndex); // keep the last-open category across opens
     tabs[activeIndex].focus();
   });

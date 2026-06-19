@@ -119,4 +119,13 @@ describe('Settings → MCP panel', () => {
     expect(mcpToggle().disabled).toBe(true);
     expect(snippet().textContent).toContain('"url"');
   });
+
+  it('enabling when the sidecar fails to start surfaces a failure status', async () => {
+    openPrefs({ mcpEndpoint: async () => null });
+    await settle();
+    mcpToggle().click();
+    await settle();
+    expect(endpointUrl().value).toBe('');
+    expect(status().dataset.state).toBe('fail');
+  });
 });
