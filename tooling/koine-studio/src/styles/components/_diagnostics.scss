@@ -1,0 +1,66 @@
+/* --- diagnostics strip --- */
+#diagnostics {
+  flex: 0 0 auto;
+  max-height: 160px;
+  overflow-y: auto;
+  background: var(--koi-paper-2);
+  border-top: 1px solid var(--koi-line);
+  padding: 7px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  font-family: var(--koi-font-mono);
+  font-size: 0.76rem;
+}
+
+.diag {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  text-align: left;
+  background: transparent;
+  border: none;
+  color: var(--koi-ink-soft);
+  padding: 4px 7px;
+  border-radius: var(--koi-radius-sm);
+  cursor: pointer;
+  font-family: inherit;
+  font-size: inherit;
+}
+
+.diag::before {
+  content: '';
+  flex: 0 0 auto;
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: currentColor;
+}
+
+.diag:hover {
+  background: var(--koi-surface);
+  color: var(--koi-fg);
+}
+
+.diag-err {
+  color: var(--koi-error);
+}
+
+.diag-warn {
+  color: var(--koi-hl-number);
+}
+
+.diag-empty {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--koi-muted);
+  padding: 4px 7px;
+  font-style: italic;
+}
+
+.diag-empty::before {
+  content: '✓';
+  font-style: normal;
+  color: var(--koi-hl-string);
+}

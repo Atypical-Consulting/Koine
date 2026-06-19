@@ -1,0 +1,202 @@
+@use '../abstracts' as a;
+
+/* --- toolbar --- */
+/* Three zones: brand (left) · model actions (center) · utilities + status (right). A hairline
+   accent gradient under the bar gives a thin signature edge without shouting. */
+#toolbar {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  padding: 11px 16px;
+  background: linear-gradient(180deg, var(--koi-paper-2), color-mix(in srgb, var(--koi-paper-2) 80%, var(--koi-paper)));
+  border-bottom: 1px solid var(--koi-line);
+  flex: 0 0 auto;
+  position: relative;
+  z-index: 2;
+
+  &::after {
+    content: '';
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: -1px;
+    height: 1px;
+    background: var(--koi-accent-grad);
+    opacity: 0.5;
+  }
+}
+
+.toolbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 auto 0 4px;
+}
+
+/* A segmented cluster of related buttons. */
+.tb-group {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  background: color-mix(in srgb, var(--koi-paper) 55%, transparent);
+  border: 1px solid var(--koi-line);
+  border-radius: var(--koi-radius-sm);
+}
+
+.tb-divider {
+  width: 1px;
+  height: 20px;
+  background: var(--koi-line);
+}
+
+.toolbar-actions button,
+#btn-check {
+  @include a.ghost-button;
+}
+
+#btn-check {
+  background: color-mix(in srgb, var(--koi-paper) 55%, transparent);
+  border-color: var(--koi-line);
+}
+
+.toolbar-actions button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+/* The .tb-ico glyphs are drawn as 1px strokes that pick up the button's text color. */
+.tb-ico {
+  width: 15px;
+  height: 15px;
+  flex: 0 0 auto;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* Primary (emit) actions read as the headline verbs: accent text + ghost-accent surface. */
+.tb-primary {
+  color: var(--koi-accent) !important;
+
+  &:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--koi-accent) 16%, transparent) !important;
+    color: var(--koi-accent) !important;
+  }
+}
+
+/* --- branded header (in #toolbar) --- */
+/* The brand is a button: clicking the logo returns to the start screen (the universal "logo = home"
+   convention). Reset the native button chrome so it still reads as a wordmark, not a control. */
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  color: var(--koi-fg);
+  flex: 0 0 auto;
+  border: 0;
+  background: transparent;
+  margin: 0;
+  padding: 4px 6px;
+  margin-left: -6px; /* keep the logo flush-left despite the hover-target padding */
+  border-radius: var(--koi-radius-sm);
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+  transition: background 0.15s ease;
+
+  &:hover {
+    background: var(--koi-surface);
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--koi-accent);
+    outline-offset: 1px;
+  }
+}
+
+.brand-logo {
+  display: inline-flex;
+  align-items: center;
+
+  svg {
+    height: 30px;
+    width: 30px;
+    display: block;
+    border-radius: 9px;
+    box-shadow: 0 2px 10px color-mix(in srgb, var(--koi-accent) 30%, transparent);
+  }
+}
+
+.brand-text {
+  display: flex;
+  flex-direction: column;
+  line-height: 1;
+  gap: 2px;
+}
+
+.brand-name {
+  font-family: var(--koi-font-display);
+  font-size: 1.12rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--koi-fg);
+}
+
+.brand-eyebrow {
+  font-family: var(--koi-font-mono);
+  font-size: 0.6rem;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.28em;
+  color: var(--koi-muted);
+}
+
+.palette-hint {
+  font-family: var(--koi-font-mono);
+  font-size: 0.72rem;
+  color: var(--koi-muted);
+  border: 1px solid var(--koi-line);
+  border-bottom-width: 2px;
+  border-radius: 5px;
+  padding: 2px 7px;
+  user-select: none;
+}
+
+/* Compact square ghost buttons for theme / prefs / about. */
+.icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  background: transparent;
+  color: var(--koi-muted);
+  border: 1px solid transparent;
+  border-radius: var(--koi-radius-sm);
+  font-family: var(--koi-font-body);
+  font-size: 0.95rem;
+  font-style: normal;
+  line-height: 1;
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+
+  &:hover {
+    background: var(--koi-surface);
+    color: var(--koi-fg);
+    border-color: var(--koi-line);
+  }
+}
+
+/* The About control wears the brand blue so the info mark reads as the identity entry point. */
+#btn-about {
+  color: var(--koi-accent);
+
+  &:hover {
+    background: color-mix(in srgb, var(--koi-accent) 14%, transparent);
+    color: var(--koi-accent);
+    border-color: color-mix(in srgb, var(--koi-accent) 40%, transparent);
+  }
+}

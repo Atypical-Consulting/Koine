@@ -1,0 +1,106 @@
+@use '../abstracts' as a;
+
+/* --- language picker popover (mirrors .explorer-menu, mounted to body) --- */
+.lang-menu {
+  @include a.popover-surface;
+  z-index: 120;
+  min-width: 184px;
+}
+
+.lang-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--koi-radius-sm);
+  color: var(--koi-fg);
+  cursor: pointer;
+  padding: 7px 10px;
+  font-family: var(--koi-font-body);
+  font-size: 0.82rem;
+}
+
+.lang-menu-item:hover,
+.lang-menu-item:focus-visible {
+  background: color-mix(in srgb, var(--koi-accent) 16%, transparent);
+  border-color: color-mix(in srgb, var(--koi-accent) 40%, var(--koi-line));
+  outline: none;
+}
+
+.lang-menu-item .lang-name {
+  flex: 1 1 auto;
+}
+
+.lang-menu-item .lang-hint {
+  color: var(--koi-ink-soft);
+  font-family: var(--koi-font-mono);
+  font-size: 0.72rem;
+}
+
+.lang-menu-item .lang-check {
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+  fill: none;
+  stroke: var(--koi-accent);
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  opacity: 0;
+}
+
+.lang-menu-item[aria-checked="true"] .lang-check {
+  opacity: 1;
+}
+
+.toolbar-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+#status {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-family: var(--koi-font-mono);
+  font-size: 0.74rem;
+  letter-spacing: 0.2px;
+  padding: 4px 11px 4px 9px;
+  border-radius: 999px;
+  border: 1px solid var(--koi-line);
+  background: color-mix(in srgb, var(--koi-paper) 50%, transparent);
+  color: var(--koi-muted);
+}
+
+#status::before {
+  content: '';
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: currentColor;
+  box-shadow: 0 0 0 0 currentColor;
+}
+
+#status[data-kind="connecting"] {
+  color: var(--koi-muted);
+}
+
+#status[data-kind="connecting"]::before {
+  animation: koi-pulse 1.3s ease-in-out infinite;
+}
+
+#status[data-kind="green"] {
+  color: var(--koi-hl-string);
+  border-color: color-mix(in srgb, var(--koi-hl-string) 40%, var(--koi-line));
+  background: color-mix(in srgb, var(--koi-hl-string) 9%, transparent);
+}
+
+#status[data-kind="error"] {
+  color: var(--koi-error);
+  border-color: color-mix(in srgb, var(--koi-error) 40%, var(--koi-line));
+  background: color-mix(in srgb, var(--koi-error) 9%, transparent);
+}

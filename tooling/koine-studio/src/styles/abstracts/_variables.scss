@@ -1,0 +1,9 @@
+// Build-time-only SCSS values. NEVER put --koi-* runtime tokens here — those live in themes/.
+$bp-narrow: 640px; // mirrors the @media (max-width: 640px) breakpoint in the source
+
+// Destination-language brand hues — values are the runtime tokens; drives the identity-dot @each loop.
+$languages: (
+  csharp: var(--lang-csharp),
+  typescript: var(--lang-typescript),
+  python: var(--lang-python),
+);

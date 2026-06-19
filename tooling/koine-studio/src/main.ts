@@ -3,6 +3,7 @@
 import '@fontsource-variable/archivo';
 import '@fontsource-variable/hanken-grotesk';
 import '@fontsource-variable/jetbrains-mono';
+import './styles/main.scss';
 import { init } from './ide';
 
 window.addEventListener('DOMContentLoaded', () => init());

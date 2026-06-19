@@ -1,0 +1,54 @@
+:root {
+  /* fonts — the brand typefaces, shared with the docs site (self-hosted via @fontsource) */
+  --koi-font-mono: "JetBrains Mono Variable", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --koi-font-body: "Hanken Grotesk Variable", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --koi-font-display: "Archivo Variable", "Hanken Grotesk Variable", system-ui, sans-serif;
+
+  /* geometry + depth */
+  --koi-radius: 8px;
+  --koi-radius-sm: 6px;
+  --koi-shadow: 0 18px 50px rgba(3, 7, 14, 0.5);
+  --koi-accent-grad: linear-gradient(135deg, var(--koi-accent), var(--koi-cyan));
+
+  /* destination-language identity — real brand hues, shared across themes */
+  --lang-csharp: #a179dc;
+  --lang-typescript: #3178c6;
+  --lang-python: #ffd43b;
+
+  /* scrollbars — thumb/track derived from theme tokens so light/dark adapt for free */
+  --koi-scrollbar-size: 10px;
+  --koi-scrollbar-thumb: color-mix(in srgb, var(--koi-muted) 40%, transparent);
+  --koi-scrollbar-thumb-hover: color-mix(in srgb, var(--koi-muted) 65%, transparent);
+  --koi-scrollbar-track: transparent;
+
+  /* surfaces (dark theme) */
+  --koi-paper: #0e1117;
+  --koi-paper-2: #161b22;
+  --koi-surface: #1c2230;
+  --koi-line: #2a3242;
+
+  /* text */
+  --koi-fg: #d6dde8;
+  --koi-muted: #7d8694;
+  --koi-ink-soft: #aeb8c6;
+
+  /* accents */
+  --koi-accent: #5aa9ff;
+  --koi-on-accent: #08111f;
+  --koi-cyan: #34d3c4;
+
+  /* state */
+  --koi-error: #ff6b6b;
+  /* ink on a filled --koi-error surface — a dark ink reads on the dark theme's light coral */
+  --koi-on-error: #2a0a0a;
+
+  /* syntax highlighting */
+  --koi-hl-keyword: #c98cff;
+  --koi-hl-type: #5ad1ff;
+  --koi-hl-string: #7ee787;
+  --koi-hl-regex: #ffab70;
+  --koi-hl-number: #f0b86e;
+  --koi-hl-comment: #6a7484;
+  --koi-hl-meta: #ff9bce;
+  --koi-hl-punct: #9aa6b6;
+}

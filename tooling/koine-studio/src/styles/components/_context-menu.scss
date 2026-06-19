@@ -1,0 +1,29 @@
+@use '../abstracts' as a;
+
+/* --- explorer context menu (floating, mounted to body) --- */
+.explorer-menu {
+  @include a.popover-surface;
+  z-index: 120;
+  min-width: 168px;
+}
+
+.explorer-menu-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--koi-radius-sm);
+  color: var(--koi-fg);
+  cursor: pointer;
+  padding: 6px 10px;
+  font-family: var(--koi-font-body);
+  font-size: 0.82rem;
+}
+
+.explorer-menu-item:hover,
+.explorer-menu-item:focus-visible {
+  background: color-mix(in srgb, var(--koi-accent) 16%, transparent);
+  border-color: color-mix(in srgb, var(--koi-accent) 40%, var(--koi-line));
+  outline: none;
+}
