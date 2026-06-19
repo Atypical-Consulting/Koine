@@ -254,6 +254,33 @@ public static partial class CompilerInterop
     }
 
     /// <summary>
+    /// IntelliSense completions at a 0-based position in <paramref name="activeUri"/>. Single-file
+    /// and lexer-only (tolerant of broken documents), mirroring the desktop LSP's
+    /// <c>textDocument/completion</c>; returns an LSP-style <c>{ isIncomplete, items[] }</c> list.
+    /// </summary>
+    [JSExport]
+    public static string Completions(string filesJson, string activeUri, int line, int character)
+    {
+        try
+        {
+            var docs = DeserializeFiles(filesJson).ToDictionary(f => f.Uri, f => f.Text, StringComparer.Ordinal);
+            if (!docs.TryGetValue(activeUri, out var text))
+            {
+                return SerializeCompletions(new WCompletionList(false, []));
+            }
+
+            var items = LanguageService.CompleteAt(text, line, character)
+                .Select(i => new WCompletionItem(i.Label, LspCompletionKind(i.Kind), i.Detail, i.Documentation))
+                .ToArray();
+            return SerializeCompletions(new WCompletionList(false, items));
+        }
+        catch
+        {
+            return SerializeCompletions(new WCompletionList(false, []));
+        }
+    }
+
+    /// <summary>
     /// Go-to-definition at a 0-based position in <paramref name="activeUri"/>. Returns an LSP
     /// <c>Location</c> (<c>{ uri, range }</c>) — possibly in another file — or the JSON literal
     /// <c>null</c>.
@@ -586,6 +613,22 @@ public static partial class CompilerInterop
     private static string SerializeCheck(WCheckResult r) =>
         JsonSerializer.Serialize(r, LangJson.Default.WCheckResult);
 
+    private static string SerializeCompletions(WCompletionList r) =>
+        JsonSerializer.Serialize(r, LangJson.Default.WCompletionList);
+
+    /// <summary>Maps a Koine completion kind to the numeric LSP <c>CompletionItemKind</c> (mirrors LspServer).</summary>
+    private static int LspCompletionKind(CompletionItemKind kind) => kind switch
+    {
+        CompletionItemKind.Keyword => 14,
+        CompletionItemKind.Class => 7,
+        CompletionItemKind.Enum => 13,
+        CompletionItemKind.EnumMember => 20,
+        CompletionItemKind.Field => 5,
+        CompletionItemKind.Property => 10,
+        CompletionItemKind.Method => 2,
+        _ => 1,
+    };
+
     private static WContextRelation MapRelation(ContextRelation r) => new(
         r.Upstream,
         r.Downstream,
@@ -724,6 +767,12 @@ public sealed record WMarkupContent(string Kind, string Value);
 /// <summary>LSP Hover.</summary>
 public sealed record WHoverResult(WMarkupContent Contents);
 
+/// <summary>LSP CompletionItem (kind is the numeric LSP <c>CompletionItemKind</c>).</summary>
+public sealed record WCompletionItem(string Label, int Kind, string? Detail, string? Documentation);
+
+/// <summary>LSP CompletionList.</summary>
+public sealed record WCompletionList(bool IsIncomplete, WCompletionItem[] Items);
+
 /// <summary>LSP Location.</summary>
 public sealed record WLocation(string Uri, WRange Range);
 
@@ -767,6 +816,7 @@ public sealed record WSourceFileDto(string Uri, string Text);
 [JsonSerializable(typeof(WContextMapResult))]
 [JsonSerializable(typeof(WSetDocResult))]
 [JsonSerializable(typeof(WHoverResult))]
+[JsonSerializable(typeof(WCompletionList))]
 [JsonSerializable(typeof(WLocation))]
 [JsonSerializable(typeof(WLocation[]))]
 [JsonSerializable(typeof(WDocumentSymbol[]))]

@@ -21,6 +21,7 @@
     "@anthropic-ai/sdk": "^0.105.0",
     "@codemirror/autocomplete": "^6.18.6",
     "@codemirror/commands": "^6.8.1",
+    "@codemirror/lang-php": "^6.0.2",
     "@codemirror/language": "^6.11.0",
     "@codemirror/legacy-modes": "^6.5.1",
     "@codemirror/lint": "^6.8.5",

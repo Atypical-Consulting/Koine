@@ -11,7 +11,7 @@ import {
   isValidProjectName,
 } from './generateProject';
 
-type Target = 'csharp' | 'typescript' | 'python';
+type Target = 'csharp' | 'typescript' | 'python' | 'php';
 type StatusKind = 'info' | 'error' | 'success';
 
 /** Everything the wizard needs from the rest of the app, injected so it can be wired to any host. */
@@ -43,6 +43,7 @@ const TARGETS: { value: Target; title: string; blurb: string }[] = [
   { value: 'csharp', title: 'C#', blurb: 'Idiomatic, self-contained .NET source (value objects, aggregates, CQRS, …).' },
   { value: 'typescript', title: 'TypeScript', blurb: 'The TypeScript emitter output for the same model.' },
   { value: 'python', title: 'Python', blurb: 'Python dataclasses and protocols for the same model.' },
+  { value: 'php', title: 'PHP', blurb: 'Typed PHP classes for the same model.' },
 ];
 
 interface WizardState {
