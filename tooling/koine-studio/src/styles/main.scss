@@ -1,5 +1,19 @@
-// Koine Studio styles — 7-1 SCSS. Generated split (Phase 1); see docs/superpowers/plans.
-// @use order mirrors the original styles.css top-to-bottom so cascade is preserved.
+// Koine Studio — 7-1 SCSS entry point
+//
+// Layers (all partials live under src/styles/):
+//   abstracts/   — variables, mixins, functions (zero CSS output)
+//   themes/      — runtime --koi-* CSS custom properties for light + dark
+//   base/        — resets, typography, scrollbars, animations, a11y
+//   layout/      — toolbar, split-pane, inspector
+//   components/  — every UI widget partial
+//
+// @use ORDER: intentionally kept in the original styles.css source order so the
+// cascade is preserved exactly.  A textbook layer reorder (themes→base→layout→
+// components) would silently flip 65 equal-specificity same-property rules.
+// The 7-1 architecture is expressed by the folder structure, not this list.
+//
+// Runtime tokens stay CSS custom properties (--koi-*), never SCSS $variables,
+// so data-theme switching and the CodeMirror theme keep working at runtime.
 
 @use './themes/dark';
 @use './themes/light';
