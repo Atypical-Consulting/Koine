@@ -6,6 +6,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { open as openDialog, save as saveDialog } from '@tauri-apps/plugin-dialog';
+import { openUrl } from '@tauri-apps/plugin-opener';
 import type { FsEntry, KoiFile, LspTransport, Platform, SourceDoc } from './types';
 
 /** LSP transport over Tauri IPC. Mirrors the wiring previously inlined in lsp.ts. */
@@ -68,6 +69,12 @@ export class TauriPlatform implements Platform {
 
   appVersion(): Promise<string> {
     return invoke<string>('app_version');
+  }
+
+  openExternal(url: string): void {
+    // Surface a denied/failed OS handoff (e.g. scheme not in the opener allowlist) instead of
+    // swallowing the rejection, so a dead link leaves a trace rather than nothing at all.
+    openUrl(url).catch((err) => console.error(`Failed to open external URL: ${url}`, err));
   }
 
   async pickFolder(title: string): Promise<string | null> {

@@ -72,6 +72,14 @@ export interface Platform {
   /** The application version, for the About dialog. */
   appVersion(): Promise<string>;
 
+  /**
+   * Open an absolute http(s) URL in the user's default browser. In the browser host this is a new
+   * tab; on the desktop it hands off to the OS via the opener plugin (a normal `<a>` navigation
+   * would otherwise try to load the page inside the Tauri webview). Used by the About dialog's
+   * project links.
+   */
+  openExternal(url: string): void;
+
   /** Prompt for a folder. Resolves to its opaque token, or null when cancelled/unsupported. */
   pickFolder(title: string): Promise<string | null>;
 

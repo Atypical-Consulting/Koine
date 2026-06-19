@@ -2,7 +2,7 @@
 // The explorer is a focus/keyboard-heavy role=tree widget; these tests rely on jsdom's focus and
 // blur semantics (and its window.prompt/confirm) — the repo default is happy-dom, so this file pins
 // jsdom per-file. (The browser fs tests stay on the happy-dom default.)
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import type { FsEntry } from './host';
 import { createExplorer, type ExplorerCallbacks } from './explorer';
 
@@ -41,6 +41,9 @@ function makeCallbacks(): ExplorerCallbacks {
 describe('explorer', () => {
   beforeEach(() => {
     document.body.innerHTML = '';
+  });
+  afterEach(() => {
+    vi.useRealTimers(); // filter tests opt into fake timers to flush the input debounce
   });
 
   it('renders a ul[role=tree] with a collapsible folder and a nested file row', () => {
@@ -477,10 +480,12 @@ describe('explorer', () => {
 
   // --- filter ----------------------------------------------------------------
 
+  // The filter input is debounced, so each filter test enables fake timers and this flushes them.
   function setFilter(ex: { el: HTMLElement }, value: string): void {
     const input = ex.el.querySelector<HTMLInputElement>('.explorer-filter')!;
     input.value = value;
     input.dispatchEvent(new Event('input', { bubbles: true }));
+    vi.advanceTimersByTime(150);
   }
   function visibleNames(ex: { el: HTMLElement }): string[] {
     return Array.from(ex.el.querySelectorAll<HTMLElement>('.explorer-tree .explorer-name')).map(
@@ -489,6 +494,7 @@ describe('explorer', () => {
   }
 
   it('filters to matching entries, revealing ancestor folders, and counts files + folders', () => {
+    vi.useFakeTimers();
     const cb = makeCallbacks();
     const ex = createExplorer(cb);
     document.body.appendChild(ex.el);
@@ -504,6 +510,7 @@ describe('explorer', () => {
   });
 
   it('reveals a name-matched folder’s contents and counts the folder (never "0 matches" beside it)', () => {
+    vi.useFakeTimers();
     const cb = makeCallbacks();
     const ex = createExplorer(cb);
     document.body.appendChild(ex.el);
@@ -518,6 +525,7 @@ describe('explorer', () => {
   });
 
   it('shows a no-match empty state and clears the filter on Escape', () => {
+    vi.useFakeTimers();
     const cb = makeCallbacks();
     const ex = createExplorer(cb);
     document.body.appendChild(ex.el);
@@ -689,6 +697,20 @@ describe('explorer', () => {
     fireDrag(fileRow(ex, 'order.koi'), 'dragstart'); // already inside orders/
     fireDrag(dirRow(ex), 'drop');
     expect(cb.onMove).not.toHaveBeenCalled();
+  });
+
+  it('dropping onto a FILE row moves into that file’s containing directory (no dead zone)', () => {
+    const cb = makeCallbacks();
+    const ex = createExplorer(cb);
+    document.body.appendChild(ex.el);
+    ex.render(sampleTree(), 'ROOT');
+
+    fireDrag(fileRow(ex, 'shared.koi'), 'dragstart'); // top-level file
+    fireDrag(fileRow(ex, 'order.koi'), 'drop'); // onto a file inside orders/
+
+    const call = (cb.onMove as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(call[0].token).toBe('ROOT/shared.koi');
+    expect(call[1]).toBe('ROOT/orders'); // routed to the file's parent directory, not a no-op
   });
 
   // --- reveal active ---------------------------------------------------------
