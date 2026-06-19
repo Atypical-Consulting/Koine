@@ -6,6 +6,7 @@ using Koine.Compiler.Ast;
 using Koine.Compiler.Diagnostics;
 using Koine.Compiler.Emit.CSharp;
 using Koine.Compiler.Emit.Glossary;
+using Koine.Compiler.Emit.Php;
 using Koine.Compiler.Emit.Python;
 using Koine.Compiler.Emit.TypeScript;
 using Koine.Compiler.Formatting;
@@ -82,8 +83,8 @@ public static partial class CompilerInterop
     /// <summary>
     /// Previews the emitter output for the merged workspace through the shared compile pipeline, so
     /// the returned files match <c>koine build</c> (modulo <c>koine.config</c> options). Only
-    /// <c>csharp</c>/<c>typescript</c>/<c>python</c> are valid; any other target yields a structured error result
-    /// rather than a throw. Returns <c>{ target, files, diagnostics, error }</c>.
+    /// <c>csharp</c>/<c>typescript</c>/<c>python</c>/<c>php</c> are valid; any other target yields a
+    /// structured error result rather than a throw. Returns <c>{ target, files, diagnostics, error }</c>.
     /// </summary>
     [JSExport]
     public static string EmitPreview(string filesJson, string target)
@@ -93,10 +94,11 @@ public static partial class CompilerInterop
         {
             if (!string.Equals(target, "csharp", StringComparison.OrdinalIgnoreCase)
                 && !string.Equals(target, "typescript", StringComparison.OrdinalIgnoreCase)
-                && !string.Equals(target, "python", StringComparison.OrdinalIgnoreCase))
+                && !string.Equals(target, "python", StringComparison.OrdinalIgnoreCase)
+                && !string.Equals(target, "php", StringComparison.OrdinalIgnoreCase))
             {
                 return SerializeEmit(new WEmitPreviewResult(
-                    target, [], [], $"unknown target '{target}'; expected 'csharp', 'typescript', or 'python'"));
+                    target, [], [], $"unknown target '{target}'; expected 'csharp', 'typescript', 'python', or 'php'"));
             }
 
             var files = DeserializeFiles(filesJson);
@@ -106,6 +108,7 @@ public static partial class CompilerInterop
             Koine.Compiler.Emit.IEmitter emitter =
                 string.Equals(target, "typescript", StringComparison.OrdinalIgnoreCase) ? new TypeScriptEmitter()
                 : string.Equals(target, "python", StringComparison.OrdinalIgnoreCase) ? new PythonEmitter()
+                : string.Equals(target, "php", StringComparison.OrdinalIgnoreCase) ? new PhpEmitter()
                 : new CSharpEmitter();
 
             var result = Compiler.Compile(sources, emitter);

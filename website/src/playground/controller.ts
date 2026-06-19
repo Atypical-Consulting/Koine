@@ -12,6 +12,7 @@ const TARGET_LANG: Record<Target, OutputLang> = {
   csharp: 'csharp',
   typescript: 'typescript',
   python: 'python',
+  php: 'plain',
   glossary: 'plain',
 };
 const LS ={ buffer: 'koine-pg-buffer', target: 'koine-pg-target', split: 'koine-pg-split' };
