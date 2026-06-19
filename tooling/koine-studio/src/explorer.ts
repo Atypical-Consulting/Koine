@@ -2,13 +2,19 @@
 // renders the nested FsEntry hierarchy of an opened folder. The data is already sorted
 // (folders-first then alpha) and pre-tokenized by the platform; the explorer never parses a token.
 //
-// It mounts a <div class="explorer"> (the `el` field) — a toolbar (root New File / New Folder) plus
-// a <ul role="tree"> — into #filetree-body, and re-renders on demand. Directories are collapsible; file
-// rows open on click. Mutations are surfaced through the ExplorerCallbacks the integrator supplies —
-// the explorer does the prompting (name input) and confirmation, but the actual fs work happens in
-// the host. Dirty dot, active state and the error/warning badge mirror ide.ts/renderTree so the
-// visual language stays consistent.
+// Design thesis: this pane is the *table of contents of a domain model*, not a generic file drawer.
+// Every `.koi` file is a bounded context, every folder a subdomain — so a `.koi` row carries a small
+// Koine context-mark (the brand diamond), folders carry open/closed glyphs, and a filter field treats
+// the tree as an index of contexts you narrow by typing.
+//
+// It mounts a <div class="explorer"> (the `el` field) — a head (filter field + New File / New Folder /
+// Collapse-all toolbar) plus a <ul role="tree"> — into #filetree-body, and re-renders on demand.
+// Directories are collapsible; file rows open on click. Entries are created inline (a new-row input),
+// renamed inline, moved by drag-and-drop, and deleted behind an in-pane confirm — the explorer does
+// the prompting; the actual fs work happens in the host via the ExplorerCallbacks. Dirty dot, active
+// state and the error/warning badge mirror ide.ts/renderTree so the visual language stays consistent.
 import type { FsEntry } from './host';
+import { createModal, type ModalHandle } from './overlay';
 
 export interface ExplorerCallbacks {
   onOpenFile(fileToken: string): void;
@@ -19,13 +25,15 @@ export interface ExplorerCallbacks {
   onRename(entry: FsEntry, newName: string): void;
   onDelete(entry: FsEntry): void;
   onDuplicate(entry: FsEntry): void;
+  /** Move `entry` into the directory identified by `destDirToken` (the opened-folder token for root). */
+  onMove(entry: FsEntry, destDirToken: string): void;
   isActive(fileToken: string): boolean;
   isDirty(fileToken: string): boolean;
   diagCounts(fileToken: string): { errors: number; warnings: number };
 }
 
 export interface Explorer {
-  /** The root <div class="explorer"> (toolbar + <ul role="tree">) to mount into #filetree-body. */
+  /** The root <div class="explorer"> (head + <ul role="tree">) to mount into #filetree-body. */
   el: HTMLElement;
   /** (Re)render the whole tree. `rootToken` is the opened-folder token used as the New File/Folder parent at the top level. */
   render(entries: FsEntry[], rootToken: string): void;
@@ -37,65 +45,128 @@ interface MenuAction {
   run(): void;
 }
 
+// --- glyphs ------------------------------------------------------------------
+// Small inline SVGs sized to the row. `.koi` files get the brand diamond (a bounded-context node on a
+// context map); directories get an open/closed folder; everything else gets a neutral document. They
+// inherit `currentColor`, so the row's CSS tints them (accent for contexts, muted for the rest).
+const ICON = {
+  koi: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.4 14.6 8 8 14.6 1.4 8z"/></svg>',
+  folder:
+    '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M1.7 4.4c0-.6.5-1.1 1.1-1.1h3c.4 0 .7.2.9.5l.6.9h6c.6 0 1.1.5 1.1 1.1v6c0 .6-.5 1.1-1.1 1.1H2.8c-.6 0-1.1-.5-1.1-1.1z"/></svg>',
+  folderOpen:
+    '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M1.7 4.4c0-.6.5-1.1 1.1-1.1h3c.4 0 .7.2.9.5l.6.9h6c.6 0 1.1.5 1.1 1.1v1.1H4.5c-.5 0-1 .4-1.1.9L1.7 13z"/><path opacity=".5" d="M4.5 7.1h10.3c.5 0 .9.5.7 1l-1.2 4.3c-.1.5-.6.8-1.1.8H2.1c-.5 0-.9-.5-.7-1l1.2-4.3c.1-.5.6-.8 1.1-.8z"/></svg>',
+  file: '<svg viewBox="0 0 16 16" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.1" stroke-linejoin="round" d="M4 1.9h4.8L12 5.1v9H4z"/></svg>',
+};
+
+// Toolbar action glyphs. Drawn as strokes (matching the neutral file icon) so they read clearly at
+// button size: a document/folder with a "+" for the create actions, stacked chevrons for the
+// fold actions — up = collapse (rows fold together), down = expand (rows open out).
+const TOOL_ICON = {
+  newFile:
+    '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"><path d="M8.6 2H4.4c-.6 0-1 .4-1 1v10c0 .6.4 1 1 1h7.2c.6 0 1-.4 1-1V6z"/><path d="M8.6 2v4h4"/><path d="M8 8.3v3.4M6.3 10h3.4"/></svg>',
+  newFolder:
+    '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"><path d="M1.9 4.4c0-.6.4-1 1-1h2.7c.3 0 .6.1.8.4l.7.9h6c.5 0 1 .4 1 1v5.5c0 .6-.5 1-1 1H2.9c-.6 0-1-.4-1-1z"/><path d="M8 7.6v3.3M6.4 9.2h3.3"/></svg>',
+  collapseAll:
+    '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 8.2 8 4.8l3.5 3.4"/><path d="M4.5 11.6 8 8.2l3.5 3.4"/></svg>',
+  expandAll:
+    '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 4.4 8 7.8l3.5-3.4"/><path d="M4.5 7.8 8 11.2l3.5-3.4"/></svg>',
+};
+
 export function createExplorer(cb: ExplorerCallbacks): Explorer {
-  // The mounted root list. Its first child is a toolbar <li> (New File / New Folder for the root);
-  // the rest are treeitem rows. `role=tree` is on the <ul> so the toolbar lives outside it.
+  // The mounted root. Its head (filter + toolbar) sits above the `role=tree` <ul> so neither lives
+  // inside the tree's ARIA scope.
   const root = document.createElement('div');
   root.className = 'explorer';
 
+  // --- head: filter field + toolbar ------------------------------------------
+  const head = document.createElement('div');
+  head.className = 'explorer-head';
+
+  const filterRow = document.createElement('div');
+  filterRow.className = 'explorer-filter-row';
+  const filterInput = document.createElement('input');
+  filterInput.type = 'search';
+  filterInput.className = 'explorer-filter';
+  filterInput.placeholder = 'Filter files…';
+  filterInput.setAttribute('aria-label', 'Filter workspace files');
+  filterInput.spellcheck = false;
+  const filterCount = document.createElement('span');
+  filterCount.className = 'explorer-filter-count';
+  filterCount.setAttribute('aria-live', 'polite');
+  filterRow.append(filterInput, filterCount);
+
   const toolbar = document.createElement('div');
   toolbar.className = 'explorer-toolbar';
-  const newFileBtn = toolbarButton('New file', '＋', () => promptNewFile(rootToken));
-  const newFolderBtn = toolbarButton('New folder', '🗀', () => promptNewFolder(rootToken));
-  toolbar.append(newFileBtn, newFolderBtn);
+  // New file stays the first .explorer-tool (the host wires the top-level create off it). Create
+  // actions sit left, fold actions right (a flexible spacer between the two groups).
+  const newFileBtn = toolbarButton('New file', TOOL_ICON.newFile, () => beginCreate(rootToken, 'file'));
+  const newFolderBtn = toolbarButton('New folder', TOOL_ICON.newFolder, () => beginCreate(rootToken, 'dir'));
+  const collapseBtn = toolbarButton('Collapse all', TOOL_ICON.collapseAll, () => setAllCollapsed(true));
+  const expandBtn = toolbarButton('Expand all', TOOL_ICON.expandAll, () => setAllCollapsed(false));
+  const spacer = document.createElement('span');
+  spacer.className = 'explorer-toolbar-spacer';
+  spacer.setAttribute('aria-hidden', 'true');
+  toolbar.append(newFileBtn, newFolderBtn, spacer, collapseBtn, expandBtn);
+
+  head.append(filterRow, toolbar);
 
   const tree = document.createElement('ul');
   tree.className = 'explorer-tree';
   tree.setAttribute('role', 'tree');
   tree.setAttribute('aria-label', 'Workspace files');
 
-  root.append(toolbar, tree);
+  root.append(head, tree);
 
   let rootToken = '';
+  // The latest data the tree was rendered from, so the filter field, Collapse-all and reveal-active
+  // can re-render without the host re-supplying it.
+  let lastEntries: FsEntry[] = [];
+  let lastToken = '';
   // The single floating context menu, lazily mounted to document.body and reused.
   let menuEl: HTMLElement | null = null;
-  // The element to return focus to when the context menu closes (the row/li or '⋯' that opened it).
+  // The element to return focus to when the context menu closes (the row/li or '⋯').
   let menuTrigger: HTMLElement | null = null;
   // Directory tokens the user has collapsed. Honoured across re-renders so a folder doesn't pop back
   // open when the tree is rebuilt (renderTree runs on every diagnostics push).
   const collapsed = new Set<string>();
+  // The lowercased filter query. When non-empty, only matching entries (and their ancestors) render,
+  // and every shown directory is force-expanded so matches are always visible.
+  let filterText = '';
+  // The active file token we last auto-revealed (expanded ancestors + scrolled into view). Tracked so
+  // a diagnostics re-render with the SAME active file doesn't re-expand folders the user just closed —
+  // we only reveal when the active file actually changes.
+  let revealedActive: string | null = null;
   // renderTree fires on every diagnostics push — including mid-interaction. Tearing the tree down
-  // while an inline rename is open or a context menu is up would destroy the rename input (committing
-  // a half-typed name on the resulting blur) or yank the menu out from under the user. So a render
-  // that arrives during either is deferred and replayed once the interaction ends.
+  // while an inline rename / inline create is open or a context menu / confirm is up would destroy the
+  // input (committing a half-typed name on the resulting blur) or yank the surface out from under the
+  // user. So a render that arrives during any of these is deferred and replayed once it ends.
   let renaming = false;
+  let creating = false;
   let rendering = false;
   let pendingRender: { entries: FsEntry[]; token: string } | null = null;
+  // Drag-and-drop move state: the entry/li currently being dragged (null when not dragging).
+  let dragEntry: FsEntry | null = null;
+  let dragLi: HTMLLIElement | null = null;
+  // The shared confirm dialog (built lazily on first delete) and its in-flight resolver.
+  let confirmModal: ModalHandle | null = null;
+  let confirmTitleEl: HTMLElement | null = null;
+  let confirmMsgEl: HTMLElement | null = null;
+  let confirmOkBtn: HTMLButtonElement | null = null;
+  let confirmResolve: ((ok: boolean) => void) | null = null;
 
-  // --- name prompts (v1 uses window.prompt) -----------------------------------
-
-  // A name is one path segment: reject blanks and path separators so the host can't be tricked into
-  // creating a nested path (or, for rename, a cross-directory move) from a single-name prompt.
-  function cleanName(name: string | null): string | null {
-    if (name == null) return null;
-    const trimmed = name.trim();
-    if (!trimmed) return null;
-    // Reject path separators and the `.`/`..` traversal names so a prompt can't escape the folder.
-    if (trimmed.includes('/') || trimmed.includes('\\') || trimmed === '.' || trimmed === '..') {
-      window.alert('Invalid name: cannot contain a path separator or be "." / "..".');
-      return null;
-    }
-    return trimmed;
+  // True when any modal-ish interaction is in flight (defer re-renders until it clears). A drag is
+  // included: rebuilding the tree mid-drag would detach the dragged <li>, defeating the DOM-containment
+  // drop-validity checks (canDropInto) and tearing down the drag's visual feedback.
+  function interactionOpen(): boolean {
+    return renaming || creating || dragEntry != null || menuEl != null || (confirmModal?.isOpen ?? false);
   }
 
-  function promptNewFile(parentDirToken: string): void {
-    const name = cleanName(window.prompt('New file name (e.g. orders.koi):', ''));
-    if (name) cb.onNewFile(parentDirToken, name);
-  }
+  // --- name validation --------------------------------------------------------
 
-  function promptNewFolder(parentDirToken: string): void {
-    const name = cleanName(window.prompt('New folder name:', ''));
-    if (name) cb.onNewFolder(parentDirToken, name);
+  // A name is one path segment. Reject path separators and the `.`/`..` traversal names so a prompt
+  // can't escape the folder (or, for rename, become a cross-directory move) from a single-name input.
+  function invalidSegment(name: string): boolean {
+    return name.includes('/') || name.includes('\\') || name === '.' || name === '..';
   }
 
   // The directory a New File/Folder should land in for a given row: the entry itself when it is a
@@ -106,12 +177,71 @@ export function createExplorer(cb: ExplorerCallbacks): Explorer {
     return entry.kind === 'dir' ? entry.token : parentDir;
   }
 
+  // --- filtering & per-render analysis ----------------------------------------
+
+  function nameMatches(entry: FsEntry): boolean {
+    return entry.name.toLowerCase().includes(filterText);
+  }
+
+  interface Analysis {
+    /** Tokens to render under the active filter (unused when the filter is empty). */
+    visible: Set<string>;
+    /** Every directory token currently in the tree, used to prune stale entries from `collapsed`. */
+    liveDirs: Set<string>;
+    /** Entries (file OR dir) whose name matches the filter — what the count chip reports. */
+    matchCount: number;
+    /** The active file and its ancestor directory tokens (for auto-reveal), or null. */
+    active: { token: string; ancestors: string[] } | null;
+  }
+
+  // The analysis from the in-progress render, consulted by buildItem (filter visibility + active row)
+  // so it doesn't re-walk the tree or re-call cb.isActive per node.
+  let currentAnalysis: Analysis = { visible: new Set(), liveDirs: new Set(), matchCount: 0, active: null };
+
+  // ONE pre-render pass over the tree computing everything render() and buildItem need: filter
+  // visibility, the live dir tokens, the filter match count, and the active file + its ancestor chain.
+  // Replaces the former separate per-node subtreeMatches, whole-tree countFileMatches, and activePath
+  // walks (which were O(n²) and duplicated cb.isActive). A directory whose OWN name matches reveals its
+  // whole subtree (so a matched folder isn't shown empty); the count includes matched dirs (so the chip
+  // never reads "0 matches" beside a visible folder).
+  function analyze(entries: FsEntry[]): Analysis {
+    const visible = new Set<string>();
+    const liveDirs = new Set<string>();
+    let matchCount = 0;
+    let active: { token: string; ancestors: string[] } | null = null;
+    const filtering = filterText !== '';
+
+    // Returns whether `e` (or a descendant) is visible under the filter. `ancestorMatched` is true when
+    // an ancestor directory's own name matched — that reveals the entire subtree beneath it.
+    const walk = (e: FsEntry, ancestors: string[], ancestorMatched: boolean): boolean => {
+      if (e.kind === 'dir') liveDirs.add(e.token);
+      const selfMatch = filtering && nameMatches(e);
+      if (selfMatch) matchCount++;
+      if (e.kind === 'file' && !active && cb.isActive(e.token)) active = { token: e.token, ancestors };
+
+      const childAncestors = e.kind === 'dir' ? [...ancestors, e.token] : ancestors;
+      let descendantVisible = false;
+      for (const c of e.children ?? []) {
+        if (walk(c, childAncestors, ancestorMatched || selfMatch)) descendantVisible = true;
+      }
+
+      const isVisible = !filtering || selfMatch || descendantVisible || ancestorMatched;
+      if (filtering && isVisible) visible.add(e.token);
+      return isVisible;
+    };
+    for (const e of entries) walk(e, [], false);
+    return { visible, liveDirs, matchCount, active };
+  }
+
   // --- rows -------------------------------------------------------------------
 
   // Build one treeitem <li> for an entry, recursing into directory children. `level` drives the
   // ARIA aria-level and the visual indent; `parentDir` is the token of the containing directory
-  // (the opened-folder token at the top level) so New File/Folder targets the right place.
-  function buildItem(entry: FsEntry, level: number, parentDir: string): HTMLLIElement {
+  // (the opened-folder token at the top level) so New File/Folder targets the right place. Returns
+  // null when a filter is active and neither the entry nor any descendant matches.
+  function buildItem(entry: FsEntry, level: number, parentDir: string): HTMLLIElement | null {
+    if (filterText && !currentAnalysis.visible.has(entry.token)) return null;
+
     const li = document.createElement('li');
     li.setAttribute('role', 'treeitem');
     li.setAttribute('aria-level', String(level));
@@ -128,16 +258,26 @@ export function createExplorer(cb: ExplorerCallbacks): Explorer {
     row.style.setProperty('--depth', String(level - 1));
 
     const isDir = entry.kind === 'dir';
+    const expanded = isDir && (filterText ? true : !collapsed.has(entry.token));
 
     // Twisty: an expand/collapse toggle for directories, a spacer for files (keeps names aligned).
     const twisty = document.createElement('span');
     twisty.className = 'explorer-twisty';
     twisty.setAttribute('aria-hidden', 'true');
+    if (isDir) twisty.textContent = expanded ? '▾' : '▸';
     row.appendChild(twisty);
+
+    // Type icon: brand diamond for .koi contexts, open/closed folder for dirs, neutral doc otherwise.
+    const { svg: iconHtml, modifier: iconMod } = classifyIcon(entry, expanded);
+    const icon = document.createElement('span');
+    icon.className = 'explorer-icon ' + iconMod;
+    icon.setAttribute('aria-hidden', 'true');
+    icon.innerHTML = iconHtml;
+    row.appendChild(icon);
 
     const label = document.createElement('span');
     label.className = 'explorer-name';
-    label.textContent = entry.name;
+    fillName(label, entry.name);
     row.appendChild(label);
 
     if (!isDir) {
@@ -150,7 +290,7 @@ export function createExplorer(cb: ExplorerCallbacks): Explorer {
         dot.textContent = '•';
         row.appendChild(dot);
       }
-      if (cb.isActive(entry.token)) {
+      if (currentAnalysis.active?.token === entry.token) {
         // aria-selected expresses the active treeitem per the WAI-ARIA tree pattern; aria-current
         // on the row drives the visual highlight (mirrors ide.ts/renderTree).
         row.setAttribute('aria-current', 'true');
@@ -174,6 +314,7 @@ export function createExplorer(cb: ExplorerCallbacks): Explorer {
     more.textContent = '⋯';
     more.tabIndex = -1;
     more.setAttribute('aria-label', `Actions for ${entry.name}`);
+    more.draggable = false;
     more.addEventListener('click', (ev) => {
       ev.stopPropagation();
       const rect = more.getBoundingClientRect();
@@ -184,14 +325,13 @@ export function createExplorer(cb: ExplorerCallbacks): Explorer {
     li.appendChild(row);
 
     if (isDir) {
-      const expanded = !collapsed.has(entry.token); // honour the user's persisted collapse state
       li.setAttribute('aria-expanded', String(expanded));
-      twisty.textContent = expanded ? '▾' : '▸';
       const childList = document.createElement('ul');
       childList.className = 'explorer-children';
       childList.setAttribute('role', 'group');
       for (const child of entry.children ?? []) {
-        childList.appendChild(buildItem(child, level + 1, entry.token));
+        const childLi = buildItem(child, level + 1, entry.token);
+        if (childLi) childList.appendChild(childLi);
       }
       li.appendChild(childList);
 
@@ -209,10 +349,37 @@ export function createExplorer(cb: ExplorerCallbacks): Explorer {
       openMenu(entry, parentDir, ev.clientX, ev.clientY);
     });
     li.addEventListener('keydown', (ev) => onRowKeydown(ev, li, entry, parentDir));
+    wireDrag(row, li, entry, parentDir);
     // Store the entry + owning <li> so keyboard nav, inline rename and focus-restore recover them.
     (row as RowEl)._entry = entry;
     (row as RowEl)._li = li;
     return li;
+  }
+
+  // The icon SVG + colour modifier for an entry: brand diamond for .koi contexts, open/closed folder
+  // for dirs, neutral doc otherwise. One classifier so the type rule lives in a single place.
+  function classifyIcon(entry: FsEntry, expanded: boolean): { svg: string; modifier: string } {
+    if (entry.kind === 'dir') {
+      return { svg: expanded ? ICON.folderOpen : ICON.folder, modifier: 'explorer-icon--dir' };
+    }
+    const koi = entry.name.toLowerCase().endsWith('.koi');
+    return { svg: koi ? ICON.koi : ICON.file, modifier: koi ? 'explorer-icon--koi' : 'explorer-icon--file' };
+  }
+
+  // Render a filename into the label, wrapping the filter match in <mark> so the user sees WHY a row
+  // survived the filter. With no filter (or no match) the label is plain text.
+  function fillName(label: HTMLElement, name: string): void {
+    label.textContent = '';
+    const at = filterText ? name.toLowerCase().indexOf(filterText) : -1;
+    if (at < 0) {
+      label.textContent = name;
+      return;
+    }
+    label.append(name.slice(0, at));
+    const hit = document.createElement('mark');
+    hit.className = 'explorer-hl';
+    hit.textContent = name.slice(at, at + filterText.length);
+    label.append(hit, name.slice(at + filterText.length));
   }
 
   // Expand/collapse a directory <li> (toggles aria-expanded; CSS hides .explorer-children).
@@ -224,12 +391,27 @@ export function createExplorer(cb: ExplorerCallbacks): Explorer {
     li.setAttribute('aria-expanded', String(expanded));
     const twisty = li.querySelector<HTMLElement>(':scope > .explorer-row > .explorer-twisty');
     if (twisty) twisty.textContent = expanded ? '▾' : '▸';
+    // Swap the folder glyph open/closed to match.
+    const icon = li.querySelector<HTMLElement>(':scope > .explorer-row > .explorer-icon');
+    if (icon) icon.innerHTML = expanded ? ICON.folderOpen : ICON.folder;
     // Persist so the folder keeps its state across re-renders (renderTree runs on every diag push).
     const token = li.dataset.token;
     if (token) {
       if (expanded) collapsed.delete(token);
       else collapsed.add(token);
     }
+  }
+
+  // Collapse (true) or expand (false) every directory in the tree, then re-render.
+  function setAllCollapsed(collapse: boolean): void {
+    const walk = (e: FsEntry): void => {
+      if (e.kind !== 'dir') return;
+      if (collapse) collapsed.add(e.token);
+      else collapsed.delete(e.token);
+      for (const c of e.children ?? []) walk(c);
+    };
+    for (const e of lastEntries) walk(e);
+    render(lastEntries, lastToken);
   }
 
   // --- keyboard navigation (WAI-ARIA tree pattern) ----------------------------
@@ -303,7 +485,7 @@ export function createExplorer(cb: ExplorerCallbacks): Explorer {
         break;
       case 'Delete':
         ev.preventDefault();
-        confirmDelete(entry);
+        void confirmDelete(entry);
         break;
       case 'ContextMenu': {
         ev.preventDefault();
@@ -320,6 +502,206 @@ export function createExplorer(cb: ExplorerCallbacks): Explorer {
     const parentLi = group.parentElement as HTMLLIElement | null;
     if (!parentLi || parentLi.getAttribute('role') !== 'treeitem') return null;
     return parentLi;
+  }
+
+  // --- drag-and-drop move -----------------------------------------------------
+  // Rows are draggable; directory rows and the empty tree background are drop targets. Validity is
+  // checked structurally via DOM containment (a token is opaque, so we can't parse ancestry): a drop
+  // is rejected onto the dragged row itself, into its own subtree, or back into its current parent.
+
+  function wireDrag(row: HTMLElement, li: HTMLLIElement, entry: FsEntry, parentDir: string): void {
+    row.draggable = true;
+    row.addEventListener('dragstart', (ev) => {
+      // A rename/create input owns its own text drag; don't start a row move from inside it.
+      if (row.querySelector('.explorer-rename')) {
+        ev.preventDefault();
+        return;
+      }
+      dragEntry = entry;
+      dragLi = li;
+      li.classList.add('is-dragging');
+      ev.dataTransfer?.setData('text/plain', entry.name);
+      if (ev.dataTransfer) ev.dataTransfer.effectAllowed = 'move';
+    });
+    row.addEventListener('dragend', () => {
+      li.classList.remove('is-dragging');
+      clearDropMarks();
+      dragEntry = null;
+      dragLi = null;
+      flushPendingRender(); // replay any diagnostics render deferred during the drag
+    });
+
+    if (entry.kind === 'dir') {
+      row.addEventListener('dragover', (ev) => {
+        if (!canDropInto(li, entry, parentDir)) return;
+        ev.preventDefault();
+        ev.stopPropagation();
+        if (ev.dataTransfer) ev.dataTransfer.dropEffect = 'move';
+        clearDropMarks();
+        row.classList.add('is-drop-target');
+      });
+      row.addEventListener('dragleave', () => row.classList.remove('is-drop-target'));
+      row.addEventListener('drop', (ev) => {
+        if (!canDropInto(li, entry, parentDir)) return;
+        ev.preventDefault();
+        ev.stopPropagation();
+        const moved = dragEntry;
+        clearDropMarks();
+        if (moved) cb.onMove(moved, entry.token);
+      });
+    }
+  }
+
+  // Can the in-flight drag drop INTO directory `li`? No self-drop, no drop into the dragged subtree,
+  // and no no-op back into the item's current parent.
+  function canDropInto(li: HTMLLIElement, entry: FsEntry, _parentDir: string): boolean {
+    if (!dragEntry || !dragLi) return false;
+    if (li === dragLi) return false; // onto itself
+    if (dragLi.contains(li)) return false; // into its own descendant
+    // Already a direct child of this directory → moving here is a no-op.
+    if (parentItemOf(dragLi) === li) return false;
+    return entry.kind === 'dir';
+  }
+
+  // Can the drag drop onto the empty tree background (i.e. move to the opened-folder root)?
+  function canDropRoot(): boolean {
+    if (!dragEntry || !dragLi) return false;
+    return parentItemOf(dragLi) !== null; // already at root → no-op
+  }
+
+  function clearDropMarks(): void {
+    for (const el of tree.querySelectorAll('.is-drop-target')) el.classList.remove('is-drop-target');
+    tree.classList.remove('is-drop-root');
+  }
+
+  // The tree background is a drop target for "move to root".
+  tree.addEventListener('dragover', (ev) => {
+    if ((ev.target as HTMLElement).closest('.explorer-row')) return; // a row handles its own dragover
+    if (!canDropRoot()) return;
+    ev.preventDefault();
+    if (ev.dataTransfer) ev.dataTransfer.dropEffect = 'move';
+    clearDropMarks();
+    tree.classList.add('is-drop-root');
+  });
+  tree.addEventListener('dragleave', (ev) => {
+    if (ev.target === tree) tree.classList.remove('is-drop-root');
+  });
+  tree.addEventListener('drop', (ev) => {
+    if ((ev.target as HTMLElement).closest('.explorer-row')) return;
+    if (!canDropRoot()) return;
+    ev.preventDefault();
+    const moved = dragEntry;
+    clearDropMarks();
+    if (moved) cb.onMove(moved, rootToken);
+  });
+
+  // --- inline create ----------------------------------------------------------
+
+  // Insert a transient input row under `parentDirToken` (the root tree for the top level) and create
+  // the file/folder from what the user types. Enter commits via cb.onNewFile/onNewFolder; Escape or an
+  // empty blur cancels. The subsequent host refresh re-renders the tree, replacing this temp row.
+  function beginCreate(parentDirToken: string, kind: 'file' | 'dir'): void {
+    closeMenu();
+    if (creating || renaming) return;
+
+    let container: HTMLElement;
+    let depth = 0;
+    if (parentDirToken === rootToken) {
+      container = tree;
+    } else {
+      const dirLi = tree.querySelector<HTMLLIElement>(
+        `li[role="treeitem"][data-kind="dir"][data-token="${cssEscape(parentDirToken)}"]`,
+      );
+      if (!dirLi) {
+        container = tree;
+      } else {
+        setExpanded(dirLi, true);
+        const group = dirLi.querySelector<HTMLElement>(':scope > .explorer-children');
+        container = group ?? tree;
+        // The create row sits one level below the parent dir. Read the parent's structural depth from
+        // its aria-level (the model `level`), not the --depth presentation variable: a child row's
+        // `--depth` equals its parent's aria-level (row --depth = level - 1, child level = level + 1).
+        depth = Number(dirLi.getAttribute('aria-level') || 1);
+      }
+    }
+
+    creating = true;
+    const li = document.createElement('li');
+    li.className = 'explorer-create-li';
+    const row = document.createElement('div');
+    row.className = 'explorer-row explorer-create';
+    row.style.setProperty('--depth', String(depth));
+
+    const twisty = document.createElement('span');
+    twisty.className = 'explorer-twisty';
+    twisty.setAttribute('aria-hidden', 'true');
+    row.appendChild(twisty);
+
+    const icon = document.createElement('span');
+    icon.className = 'explorer-icon ' + (kind === 'dir' ? 'explorer-icon--dir' : 'explorer-icon--koi');
+    icon.setAttribute('aria-hidden', 'true');
+    icon.innerHTML = kind === 'dir' ? ICON.folder : ICON.koi;
+    row.appendChild(icon);
+
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.className = 'explorer-rename';
+    input.placeholder = kind === 'dir' ? 'folder name' : 'name.koi';
+    input.setAttribute('aria-label', kind === 'dir' ? 'New folder name' : 'New file name');
+    input.spellcheck = false;
+    row.appendChild(input);
+
+    li.appendChild(row);
+    container.prepend(li);
+
+    let done = false;
+    const cancel = (): void => {
+      if (done) return;
+      done = true;
+      creating = false;
+      li.remove();
+      flushPendingRender();
+    };
+    const commit = (): void => {
+      if (done) return;
+      const raw = input.value.trim();
+      if (!raw) return cancel();
+      if (invalidSegment(raw)) {
+        markInvalid(input);
+        return; // keep the row open so the user can fix it
+      }
+      done = true;
+      creating = false;
+      li.remove();
+      if (kind === 'dir') cb.onNewFolder(parentDirToken, raw);
+      else cb.onNewFile(parentDirToken, raw);
+      flushPendingRender();
+    };
+
+    input.addEventListener('keydown', (ev) => {
+      ev.stopPropagation();
+      if (ev.key === 'Enter') {
+        ev.preventDefault();
+        commit();
+      } else if (ev.key === 'Escape') {
+        ev.preventDefault();
+        cancel();
+      }
+    });
+    input.addEventListener('input', () => input.classList.remove('is-invalid'));
+    // Blur commits a valid name, otherwise cancels — never traps the user in a bad-name row.
+    input.addEventListener('blur', () => {
+      const raw = input.value.trim();
+      if (raw && !invalidSegment(raw)) commit();
+      else cancel();
+    });
+
+    input.focus();
+  }
+
+  function markInvalid(input: HTMLInputElement): void {
+    input.classList.add('is-invalid');
+    input.title = 'A name can’t contain “/”, “\\”, “.” or “..”.';
   }
 
   // --- inline rename ----------------------------------------------------------
@@ -340,15 +722,21 @@ export function createExplorer(cb: ExplorerCallbacks): Explorer {
     input.spellcheck = false;
     label.replaceWith(input);
     renaming = true; // defer diagnostics-driven re-renders so the tree isn't torn down mid-edit
+    row.draggable = false; // let the input own text selection instead of starting a row drag
 
     let done = false;
     const finish = (commit: boolean): void => {
       if (done) return;
+      const raw = input.value.trim();
+      if (commit && raw && invalidSegment(raw)) {
+        markInvalid(input);
+        return; // keep editing so a bad name can be corrected rather than silently dropped
+      }
       done = true;
       renaming = false;
-      const next = cleanName(input.value);
+      row.draggable = true;
       input.replaceWith(label);
-      if (commit && next && next !== entry.name) cb.onRename(entry, next);
+      if (commit && raw && raw !== entry.name) cb.onRename(entry, raw);
       li.tabIndex = 0;
       li.focus();
       flushPendingRender(); // catch up on any render that arrived while renaming
@@ -364,7 +752,14 @@ export function createExplorer(cb: ExplorerCallbacks): Explorer {
         finish(false);
       }
     });
-    input.addEventListener('blur', () => finish(true));
+    input.addEventListener('input', () => input.classList.remove('is-invalid'));
+    // Blur commits a valid edit; an invalid name on blur is discarded (label restored) rather than
+    // left open — otherwise `renaming` would stay true and freeze every later re-render. Enter still
+    // keeps an invalid name open for correction (the input keeps focus). Mirrors beginCreate's blur.
+    input.addEventListener('blur', () => {
+      const raw = input.value.trim();
+      finish(!(raw && invalidSegment(raw)));
+    });
 
     input.focus();
     // Preselect the basename (the stem before the final dot) for files, the whole name for dirs.
@@ -372,13 +767,75 @@ export function createExplorer(cb: ExplorerCallbacks): Explorer {
     input.setSelectionRange(0, dot > 0 ? dot : entry.name.length);
   }
 
-  // --- delete -----------------------------------------------------------------
+  // --- delete (in-pane confirm) ----------------------------------------------
 
-  function confirmDelete(entry: FsEntry): void {
-    const what = entry.kind === 'dir' ? 'folder (and its contents)' : 'file';
-    if (window.confirm(`Delete ${what} "${entry.name}"? This cannot be undone.`)) {
-      cb.onDelete(entry);
-    }
+  async function confirmDelete(entry: FsEntry): Promise<void> {
+    const what = entry.kind === 'dir' ? 'folder and everything in it' : 'file';
+    const ok = await openConfirm(
+      `Delete ${entry.name}?`,
+      `This removes the ${what}. It can’t be undone.`,
+      'Delete',
+    );
+    if (ok) cb.onDelete(entry);
+  }
+
+  // The shared confirm dialog, built once on first use atop createModal() so it joins the app's
+  // overlay Esc-stack and reuses its focus trap + focus restore (rather than a bespoke modal).
+  function ensureConfirmModal(): ModalHandle {
+    if (confirmModal) return confirmModal;
+    const modal = createModal({ title: 'Confirm', ariaLabel: 'Confirm' });
+    confirmTitleEl = modal.backdrop.querySelector<HTMLElement>('.koi-modal-title');
+    confirmMsgEl = document.createElement('p');
+    confirmMsgEl.className = 'explorer-confirm-msg';
+    modal.body.appendChild(confirmMsgEl);
+
+    const footer = modal.backdrop.querySelector<HTMLElement>('.koi-modal-footer')!;
+    const cancelBtn = document.createElement('button');
+    cancelBtn.type = 'button';
+    cancelBtn.className = 'explorer-confirm-btn';
+    cancelBtn.textContent = 'Cancel';
+    confirmOkBtn = document.createElement('button');
+    confirmOkBtn.type = 'button';
+    confirmOkBtn.className = 'explorer-confirm-btn explorer-confirm-btn-danger';
+    footer.append(cancelBtn, confirmOkBtn);
+
+    cancelBtn.addEventListener('click', () => settleConfirm(false));
+    confirmOkBtn.addEventListener('click', () => settleConfirm(true));
+    // Esc / backdrop / ✕ all route through createModal.close → here: resolve false (if still pending)
+    // and replay any diagnostics render that was deferred while the dialog was up.
+    modal.onClose(() => {
+      resolveConfirm(false);
+      flushPendingRender();
+    });
+    confirmModal = modal;
+    return modal;
+  }
+
+  function settleConfirm(ok: boolean): void {
+    resolveConfirm(ok); // resolve first so the onClose handler sees nothing pending
+    confirmModal?.close();
+  }
+
+  function resolveConfirm(ok: boolean): void {
+    const resolve = confirmResolve;
+    confirmResolve = null;
+    resolve?.(ok);
+  }
+
+  // Resolves true on confirm, false on cancel/Escape/backdrop. Diagnostics re-renders are deferred
+  // while it is open (interactionOpen() consults confirmModal.isOpen).
+  function openConfirm(title: string, message: string, confirmLabel: string): Promise<boolean> {
+    closeMenu();
+    const modal = ensureConfirmModal();
+    resolveConfirm(false); // settle any stale promise defensively before reusing the dialog
+    if (confirmTitleEl) confirmTitleEl.textContent = title;
+    if (confirmMsgEl) confirmMsgEl.textContent = message;
+    if (confirmOkBtn) confirmOkBtn.textContent = confirmLabel;
+    return new Promise<boolean>((resolve) => {
+      confirmResolve = resolve;
+      modal.open();
+      confirmOkBtn?.focus(); // default focus on the action button (createModal focuses ✕ otherwise)
+    });
   }
 
   // --- context menu -----------------------------------------------------------
@@ -434,11 +891,11 @@ export function createExplorer(cb: ExplorerCallbacks): Explorer {
     closeMenu();
     const parent = parentDirOf(entry, parentDir);
     const actions: MenuAction[] = [
-      { label: 'New File', run: () => promptNewFile(parent) },
-      { label: 'New Folder', run: () => promptNewFolder(parent) },
+      { label: 'New File', run: () => beginCreate(parent, 'file') },
+      { label: 'New Folder', run: () => beginCreate(parent, 'dir') },
       { label: 'Rename', run: () => renameEntryByToken(entry) },
       { label: 'Duplicate', run: () => cb.onDuplicate(entry) },
-      { label: 'Delete', run: () => confirmDelete(entry) },
+      { label: 'Delete', run: () => void confirmDelete(entry) },
     ];
     spawnMenu(actions, x, y);
   }
@@ -447,8 +904,8 @@ export function createExplorer(cb: ExplorerCallbacks): Explorer {
   function openRootMenu(x: number, y: number): void {
     closeMenu();
     const actions: MenuAction[] = [
-      { label: 'New File', run: () => promptNewFile(rootToken) },
-      { label: 'New Folder', run: () => promptNewFolder(rootToken) },
+      { label: 'New File', run: () => beginCreate(rootToken, 'file') },
+      { label: 'New Folder', run: () => beginCreate(rootToken, 'dir') },
     ];
     spawnMenu(actions, x, y);
   }
@@ -501,19 +958,62 @@ export function createExplorer(cb: ExplorerCallbacks): Explorer {
     openRootMenu(ev.clientX, ev.clientY);
   });
 
+  // Filter field: re-render on input; Escape clears (and keeps focus in the field).
+  filterInput.addEventListener('input', () => {
+    filterText = filterInput.value.trim().toLowerCase();
+    render(lastEntries, lastToken);
+  });
+  filterInput.addEventListener('keydown', (ev) => {
+    if (ev.key === 'Escape' && filterInput.value) {
+      ev.preventDefault();
+      ev.stopPropagation();
+      filterInput.value = '';
+      filterText = '';
+      render(lastEntries, lastToken);
+    }
+  });
+
   // --- render -----------------------------------------------------------------
 
   function render(entries: FsEntry[], token: string): void {
     rootToken = token;
-    // Defer a re-render that lands during an inline rename or an open context menu — replaying it
-    // when the interaction ends — so we never detach the focused rename input (which would commit a
-    // half-typed name on blur) or dismiss the menu mid-aim.
-    if (renaming || menuEl) {
+    lastEntries = entries;
+    lastToken = token;
+    // Defer a re-render that lands during an inline rename/create, an open menu/confirm, or an active
+    // drag — replaying it when the interaction ends — so we never detach a focused input (which would
+    // commit a half-typed name on blur), dismiss a surface mid-aim, or invalidate a drag's drop checks.
+    if (interactionOpen()) {
       pendingRender = { entries, token };
       return;
     }
     rendering = true;
     closeMenu();
+
+    // One pass: filter visibility, live dir tokens, match count, and the active file + ancestors.
+    currentAnalysis = analyze(entries);
+
+    // Drop stale tokens from `collapsed` (folders deleted/renamed/moved away since last render) so the
+    // set can't grow unbounded or wrongly collapse a brand-new folder that reuses an old token.
+    for (const t of [...collapsed]) {
+      if (!currentAnalysis.liveDirs.has(t)) collapsed.delete(t);
+    }
+
+    // Auto-reveal the active file when it CHANGES: expand its ancestor folders (even ones the user
+    // collapsed) and, after the rebuild, scroll its row into view. Skipped while filtering (the filter
+    // drives visibility) and not repeated for an unchanged active file, so a diagnostics push doesn't
+    // fight the user re-collapsing a folder.
+    let scrollActive = false;
+    if (!filterText) {
+      const act = currentAnalysis.active;
+      if (act && act.token !== revealedActive) {
+        for (const t of act.ancestors) collapsed.delete(t);
+        revealedActive = act.token;
+        scrollActive = true;
+      } else if (!act) {
+        revealedActive = null;
+      }
+    }
+
     // If the user was navigating the tree by keyboard, remember which treeitem had focus (reading the
     // token off the focused element OR its nearest treeitem ancestor — e.g. the focused '⋯' button)
     // so we can restore it after the full rebuild instead of dropping focus to document.body.
@@ -522,7 +1022,38 @@ export function createExplorer(cb: ExplorerCallbacks): Explorer {
     const refocusToken = focusedItem?.dataset.token;
 
     tree.innerHTML = '';
-    for (const entry of entries) tree.appendChild(buildItem(entry, 1, token));
+    for (const entry of entries) {
+      const li = buildItem(entry, 1, token);
+      if (li) tree.appendChild(li);
+    }
+
+    // Empty / no-match state.
+    if (!tree.querySelector('li[role="treeitem"]')) {
+      const empty = document.createElement('div');
+      empty.className = 'explorer-empty';
+      if (filterText) {
+        empty.textContent = `No files match “${filterInput.value.trim()}”.`;
+      } else {
+        const line = document.createElement('p');
+        line.className = 'explorer-empty-line';
+        line.textContent = 'This folder is empty.';
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'explorer-empty-action';
+        btn.textContent = 'New file';
+        btn.addEventListener('click', () => beginCreate(rootToken, 'file'));
+        empty.append(line, btn);
+      }
+      tree.appendChild(empty);
+    }
+
+    // Filter-count chip.
+    if (filterText) {
+      const n = currentAnalysis.matchCount;
+      filterCount.textContent = `${n} match${n === 1 ? '' : 'es'}`;
+    } else {
+      filterCount.textContent = '';
+    }
 
     const restore = refocusToken
       ? tree.querySelector<HTMLElement>(`li[role="treeitem"][data-token="${cssEscape(refocusToken)}"]`)
@@ -535,13 +1066,19 @@ export function createExplorer(cb: ExplorerCallbacks): Explorer {
       const first = tree.querySelector<HTMLElement>('li[role="treeitem"]');
       if (first) first.tabIndex = 0;
     }
+
+    if (scrollActive) {
+      const activeRow = tree.querySelector<HTMLElement>('.explorer-row[aria-current="true"]');
+      activeRow?.scrollIntoView?.({ block: 'nearest' });
+    }
+
     rendering = false;
     pendingRender = null;
   }
 
-  // Replay a render that was deferred during a rename / open menu, once both have cleared.
+  // Replay a render that was deferred during a rename/create / open menu / confirm, once all clear.
   function flushPendingRender(): void {
-    if (pendingRender && !renaming && !menuEl && !rendering) {
+    if (pendingRender && !interactionOpen() && !rendering) {
       const p = pendingRender;
       pendingRender = null;
       render(p.entries, p.token);
@@ -563,17 +1100,18 @@ interface RowEl extends HTMLElement {
   _li?: HTMLLIElement;
 }
 
-function toolbarButton(label: string, glyph: string, onClick: () => void): HTMLButtonElement {
+function toolbarButton(label: string, svg: string, onClick: () => void): HTMLButtonElement {
   const btn = document.createElement('button');
   btn.type = 'button';
   btn.className = 'explorer-tool';
   btn.setAttribute('aria-label', label);
   btn.title = label;
-  // The glyph is decorative — aria-hidden so screen readers announce only the aria-label, not the
-  // emoji/glyph name (avoids a double "New folder, file folder" announcement).
+  // The icon is decorative — aria-hidden so screen readers announce only the aria-label, not the
+  // SVG, and the button keeps its accessible name from aria-label.
   const icon = document.createElement('span');
+  icon.className = 'explorer-tool-icon';
   icon.setAttribute('aria-hidden', 'true');
-  icon.textContent = glyph;
+  icon.innerHTML = svg;
   btn.appendChild(icon);
   btn.addEventListener('click', onClick);
   return btn;

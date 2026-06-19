@@ -62,6 +62,8 @@ export interface ModalHandle {
   readonly isOpen: boolean;
   /** Register a callback run every time the modal opens (e.g. to (re)populate or fetch). */
   onOpen(cb: () => void): void;
+  /** Register a callback run every time the modal closes by ANY path (button, backdrop, Esc). */
+  onClose(cb: () => void): void;
 }
 
 /**
@@ -106,6 +108,7 @@ export function createModal(opts: ModalOptions): ModalHandle {
   let opener: HTMLElement | null = null;
   let unregister: (() => void) | null = null;
   const openCbs: Array<() => void> = [];
+  const closeCbs: Array<() => void> = [];
 
   function open(): void {
     if (isOpen) return;
@@ -125,6 +128,7 @@ export function createModal(opts: ModalOptions): ModalHandle {
     unregister = null;
     opener?.focus?.();
     opener = null;
+    for (const cb of closeCbs) cb();
   }
 
   function toggle(): void {
@@ -170,6 +174,9 @@ export function createModal(opts: ModalOptions): ModalHandle {
     },
     onOpen(cb) {
       openCbs.push(cb);
+    },
+    onClose(cb) {
+      closeCbs.push(cb);
     },
   };
 }
