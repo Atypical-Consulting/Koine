@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { mcpJsonSnippet, mcpStdioSnippet, MCP_CLIENTS } from './mcp';
+import { mcpJsonSnippet, mcpStdioSnippet, MCP_CLIENTS, parseToolsList, probeMcp } from './mcp';
 import { BrowserPlatform } from './host/browser';
 
 describe('mcpJsonSnippet', () => {
@@ -38,6 +38,64 @@ describe('MCP client recipes', () => {
       if (c.transport === 'http') expect(snip).toContain(url);
       else expect(snip).toContain('koine-mcp');
     }
+  });
+});
+
+describe('MCP probe', () => {
+  const TOOLS = ['koine_validate', 'koine_compile', 'koine_format', 'koine_reference', 'koine_examples'];
+
+  test('parseToolsList pulls tool names from a tools/list result', () => {
+    const result = { result: { tools: TOOLS.map((name) => ({ name })) } };
+    expect(parseToolsList(result)).toEqual(TOOLS);
+    expect(parseToolsList({ nope: true })).toEqual([]);
+  });
+
+  test('probeMcp reports ok + tools from a JSON-bodied server', async () => {
+    const fetchFn = ((_url: string, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body));
+      const payload =
+        body.method === 'initialize'
+          ? { result: { serverInfo: { name: 'koine' } } }
+          : { result: { tools: TOOLS.map((name) => ({ name })) } };
+      return Promise.resolve(
+        new Response(JSON.stringify(payload), {
+          status: 200,
+          headers: { 'content-type': 'application/json', 'mcp-session-id': 's1' },
+        }),
+      );
+    }) as unknown as typeof fetch;
+    await expect(probeMcp('http://127.0.0.1:1/mcp', fetchFn)).resolves.toEqual({ ok: true, tools: TOOLS });
+  });
+
+  test('probeMcp reads a tools/list delivered as an SSE stream', async () => {
+    const fetchFn = ((_url: string, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body));
+      const payload =
+        body.method === 'initialize'
+          ? { result: { serverInfo: { name: 'koine' } } }
+          : { result: { tools: TOOLS.map((name) => ({ name })) } };
+      return Promise.resolve(
+        new Response(`event: message\ndata: ${JSON.stringify(payload)}\n\n`, {
+          status: 200,
+          headers: { 'content-type': 'text/event-stream' },
+        }),
+      );
+    }) as unknown as typeof fetch;
+    await expect(probeMcp('http://127.0.0.1:1/mcp', fetchFn)).resolves.toEqual({ ok: true, tools: TOOLS });
+  });
+
+  test('probeMcp reports not-ok when the server is unreachable', async () => {
+    const fetchFn = (() => Promise.reject(new Error('ECONNREFUSED'))) as unknown as typeof fetch;
+    const r = await probeMcp('http://127.0.0.1:1/mcp', fetchFn);
+    expect(r.ok).toBe(false);
+    expect(r.error).toBeTruthy();
+  });
+
+  test('probeMcp reports not-ok on a non-2xx initialize', async () => {
+    const fetchFn = (() =>
+      Promise.resolve(new Response('nope', { status: 500 }))) as unknown as typeof fetch;
+    const r = await probeMcp('http://127.0.0.1:1/mcp', fetchFn);
+    expect(r.ok).toBe(false);
   });
 });
 

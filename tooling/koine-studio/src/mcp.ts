@@ -71,3 +71,81 @@ export const MCP_CLIENTS: readonly McpClientRecipe[] = [
     configHint: 'Point any URL-based MCP client at this endpoint.',
   },
 ];
+
+// --- connection probe --------------------------------------------------------
+// Studio acts as a minimal Streamable-HTTP MCP client to confirm the endpoint the user's LLM will
+// hit is live and serving the koine_* tools. The request bodies + response parsing are pure; the
+// transport is the injected `fetchFn` so the logic is testable without a live server.
+
+/** The MCP protocol version Studio advertises when probing (latest at time of writing). */
+const PROTOCOL_VERSION = '2025-06-18';
+
+/** The JSON-RPC `initialize` request body. */
+export function mcpInitializeBody(): string {
+  return JSON.stringify({
+    jsonrpc: '2.0',
+    id: 1,
+    method: 'initialize',
+    params: {
+      protocolVersion: PROTOCOL_VERSION,
+      capabilities: {},
+      clientInfo: { name: 'koine-studio', version: '0' },
+    },
+  });
+}
+
+/** The JSON-RPC `tools/list` request body. */
+export function mcpToolsListBody(): string {
+  return JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'tools/list', params: {} });
+}
+
+/** Pull tool names out of a `tools/list` JSON-RPC result, tolerating any unexpected shape. */
+export function parseToolsList(json: unknown): string[] {
+  const tools = (json as { result?: { tools?: { name?: unknown }[] } })?.result?.tools;
+  if (!Array.isArray(tools)) return [];
+  return tools.map((t) => (typeof t?.name === 'string' ? t.name : '')).filter(Boolean);
+}
+
+/** Read a Streamable-HTTP response that may be a JSON body or an SSE stream (first `data:` frame). */
+async function readRpc(res: Response): Promise<unknown> {
+  const text = await res.text();
+  const contentType = res.headers.get('content-type') ?? '';
+  if (contentType.includes('text/event-stream')) {
+    const dataLine = text.split('\n').find((l) => l.startsWith('data:'));
+    return dataLine ? JSON.parse(dataLine.slice(5).trim()) : {};
+  }
+  return text ? JSON.parse(text) : {};
+}
+
+/** The result of a connection probe: reachability plus the tool names the server advertises. */
+export interface McpProbeResult {
+  ok: boolean;
+  tools: string[];
+  error?: string;
+}
+
+/**
+ * Probe a Koine MCP HTTP endpoint: `initialize` then `tools/list`, carrying the `Mcp-Session-Id`
+ * the server hands back. Resolves `{ ok, tools }` — never rejects. `fetchFn` is injectable for tests.
+ */
+export async function probeMcp(url: string, fetchFn: typeof fetch = fetch): Promise<McpProbeResult> {
+  const headers: Record<string, string> = {
+    'content-type': 'application/json',
+    accept: 'application/json, text/event-stream',
+  };
+  try {
+    const initRes = await fetchFn(url, { method: 'POST', headers, body: mcpInitializeBody() });
+    if (!initRes.ok) return { ok: false, tools: [], error: `HTTP ${initRes.status}` };
+    await readRpc(initRes);
+    const session = initRes.headers.get('mcp-session-id');
+    const listRes = await fetchFn(url, {
+      method: 'POST',
+      headers: session ? { ...headers, 'mcp-session-id': session } : headers,
+      body: mcpToolsListBody(),
+    });
+    const tools = parseToolsList(await readRpc(listRes));
+    return { ok: true, tools };
+  } catch (e) {
+    return { ok: false, tools: [], error: e instanceof Error ? e.message : String(e) };
+  }
+}
