@@ -2,6 +2,7 @@ using Koine.Compiler.Emit;
 using Koine.Compiler.Emit.CSharp;
 using Koine.Compiler.Emit.Docs;
 using Koine.Compiler.Emit.Glossary;
+using Koine.Compiler.Emit.Php;
 using Koine.Compiler.Emit.Python;
 using Koine.Compiler.Emit.TypeScript;
 
@@ -20,13 +21,14 @@ internal static class EmitterRegistry
             ["csharp"] = opts => new CSharpEmitter(ToCSharpOptions(opts)),
             ["typescript"] = _ => new TypeScriptEmitter(),
             ["python"] = opts => new PythonEmitter(ToPythonOptions(opts)),
+            ["php"] = _ => new PhpEmitter(),
             ["glossary"] = _ => new GlossaryEmitter(),
             ["docs"] = _ => new DocsEmitter(),
         };
 
     /// <summary>The supported target names, in display order for help and error messages.</summary>
     public static IReadOnlyList<string> SupportedTargets { get; } =
-        new[] { "csharp", "typescript", "python", "glossary", "docs" };
+        new[] { "csharp", "typescript", "python", "php", "glossary", "docs" };
 
     /// <summary>A comma-separated list of <see cref="SupportedTargets"/>, for messages.</summary>
     public static string SupportedList => string.Join(", ", SupportedTargets);
