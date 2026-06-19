@@ -1,0 +1,60 @@
+/* --- split body --- */
+/* The file tree is the first (auto) track: collapsed to 0 when hidden (scratch mode), and
+   a fixed-ish rail when a folder is open. Then: editor (1fr), a 6px draggable resizer, and the
+   inspector whose width is driven by --koi-inspector-w (defaults to 1fr until the user drags). */
+#split {
+  flex: 1 1 auto;
+  display: grid;
+  grid-template-columns: auto 1fr 6px var(--koi-inspector-w, 1fr);
+  min-height: 0;
+}
+
+/* Pin each pane to its track so a hidden filetree (scratch mode) just leaves track 1
+   empty rather than letting the remaining items auto-place into the wrong columns
+   (which would crush the inspector into the 6px resizer track). */
+#filetree {
+  grid-column: 1;
+}
+#editor-pane {
+  grid-column: 2;
+}
+#split-resizer {
+  grid-column: 3;
+}
+#right {
+  grid-column: 4;
+}
+
+.pane {
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+#editor-pane {
+  border-right: 1px solid var(--koi-line);
+}
+
+/* --- split resizer handle (the 6px grid track in #split) --- */
+.koi-resizer {
+  width: 6px;
+  cursor: col-resize;
+  background: var(--koi-line);
+  border: none;
+  padding: 0;
+  align-self: stretch;
+  position: relative;
+  transition: background 0.12s ease;
+}
+
+.koi-resizer:hover,
+.koi-resizer:active,
+body.resizing .koi-resizer {
+  background: var(--koi-accent);
+}
+
+/* Disable text selection while dragging the split. */
+body.resizing {
+  user-select: none;
+  cursor: col-resize;
+}

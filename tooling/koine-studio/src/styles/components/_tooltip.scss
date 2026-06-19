@@ -1,0 +1,18 @@
+/* --- hover tooltip --- */
+.cm-tooltip .koi-hover {
+  max-width: 420px;
+  padding: 8px 11px;
+}
+
+.koi-hover.koi-md {
+  font-size: 0.8rem;
+  line-height: 1.5;
+}
+
+.koi-hover.koi-md > :first-child {
+  margin-top: 0;
+}
+
+.koi-hover.koi-md > :last-child {
+  margin-bottom: 0;
+}

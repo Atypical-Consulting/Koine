@@ -1,0 +1,58 @@
+/* Uniform, theme-aware scrollbars across browsers. WebKit-based engines
+   (Chrome/Edge/Arc/Safari) use the ::-webkit-scrollbar pseudo-elements below; Firefox
+   uses the standard scrollbar-width/color. Both read the same --koi-scrollbar-* tokens,
+   so panels look identical everywhere and re-theme on light/dark.
+
+   The standard properties are gated to engines WITHOUT ::-webkit-scrollbar support
+   (Firefox). This matters because Chromium 121+ (which Arc tracks) DISABLES the
+   ::-webkit-scrollbar pseudo-elements on any element that also sets scrollbar-width or
+   scrollbar-color — so applying them globally would silently revert our custom pill to
+   the native bar in newer Chromium. */
+@supports not selector(::-webkit-scrollbar) {
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--koi-scrollbar-thumb) var(--koi-scrollbar-track);
+  }
+}
+
+* {
+  &::-webkit-scrollbar {
+    width: var(--koi-scrollbar-size);
+    height: var(--koi-scrollbar-size);
+  }
+  &::-webkit-scrollbar-track {
+    background: var(--koi-scrollbar-track);
+  }
+  &::-webkit-scrollbar-thumb {
+    background: var(--koi-scrollbar-thumb);
+    border-radius: 999px;
+    border: 2px solid transparent; /* inset padding so the thumb reads as a slim pill */
+    background-clip: padding-box;
+    &:hover {
+      background: var(--koi-scrollbar-thumb-hover);
+    }
+  }
+  &::-webkit-scrollbar-corner {
+    background: transparent;
+  }
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+}
+
+body {
+  background: var(--koi-paper);
+  color: var(--koi-fg);
+  font-family: var(--koi-font-body);
+  font-size: 14px;
+}
+
+#app {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  overflow: hidden;
+}

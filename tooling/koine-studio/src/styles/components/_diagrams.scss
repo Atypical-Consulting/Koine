@@ -1,0 +1,51 @@
+/* --- live diagrams --- */
+.koi-diagrams {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+}
+.koi-diagram-page {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.koi-diagram-title {
+  font-family: var(--koi-font-display);
+  font-weight: 700;
+  font-size: 0.95rem;
+  letter-spacing: -0.01em;
+  color: var(--koi-fg);
+  margin: 0;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--koi-line);
+}
+.koi-diagram {
+  margin: 0;
+  background: var(--koi-paper-2);
+  border: 1px solid var(--koi-line);
+  border-radius: var(--koi-radius);
+  padding: 12px;
+}
+.koi-diagram-caption {
+  color: var(--koi-muted);
+  font-family: var(--koi-font-body);
+  font-size: 0.78rem;
+  margin-bottom: 8px;
+}
+.koi-diagram-surface {
+  overflow-x: auto;
+}
+.koi-diagram-surface svg {
+  max-width: 100%;
+  height: auto;
+}
+.koi-diagram-fallback {
+  font-family: var(--koi-font-mono);
+  font-size: 0.74rem;
+  white-space: pre-wrap;
+  color: var(--koi-fg);
+  background: var(--koi-surface);
+  border-radius: var(--koi-radius-sm);
+  padding: 8px;
+  overflow-x: auto;
+}

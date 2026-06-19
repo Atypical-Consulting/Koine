@@ -1,0 +1,281 @@
+/* --- welcome / empty-state overlay (above #app, below modals) --- */
+.koi-welcome {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--koi-paper);
+  padding: 24px;
+
+  &[hidden] {
+    display: none;
+  }
+}
+
+/* Top-right dismiss on the start screen — a visible way back to the editor (Esc was the only
+   exit before, which is invisible now that the screen is a deliberate destination). */
+.koi-welcome-close {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: var(--koi-radius-sm);
+  background: transparent;
+  color: var(--koi-muted);
+  font-size: 0.85rem;
+  line-height: 1;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+
+  &:hover {
+    background: var(--koi-surface);
+    color: var(--koi-fg);
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--koi-accent);
+    outline-offset: 1px;
+  }
+}
+
+.koi-welcome-card {
+  width: 100%;
+  max-width: 520px;
+  background: var(--koi-paper-2);
+  border: 1px solid var(--koi-line);
+  border-radius: 10px;
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.45);
+  padding: 36px 36px 30px;
+  text-align: center;
+}
+
+.koi-welcome-logo {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--koi-fg);
+  margin-bottom: 18px;
+  min-height: 48px;
+
+  svg {
+    height: 48px;
+    width: auto;
+  }
+}
+
+.koi-welcome-title {
+  margin: 0 0 6px;
+  font-size: 1.4rem;
+  font-weight: 600;
+  color: var(--koi-fg);
+}
+
+.koi-welcome-tagline {
+  margin: 0 0 24px;
+  font-size: 0.9rem;
+  color: var(--koi-muted);
+}
+
+.koi-welcome-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.koi-welcome-action {
+  display: block;
+  width: 100%;
+  text-align: center;
+  background: var(--koi-surface);
+  color: var(--koi-fg);
+  border: 1px solid var(--koi-line);
+  border-radius: 6px;
+  padding: 11px 14px;
+  font-family: var(--koi-font-body);
+  font-size: 0.9rem;
+  cursor: pointer;
+
+  &:hover {
+    border-color: var(--koi-accent);
+  }
+
+  &.primary {
+    background: var(--koi-accent);
+    color: var(--koi-on-accent);
+    border-color: var(--koi-accent);
+    font-weight: 600;
+
+    &:hover {
+      background: color-mix(in srgb, var(--koi-accent) 88%, #fff);
+    }
+  }
+}
+
+.koi-welcome-recent {
+  margin-top: 22px;
+  text-align: left;
+  border-top: 1px solid var(--koi-line);
+  padding-top: 16px;
+}
+
+.koi-welcome-recent-title {
+  font-family: var(--koi-font-mono);
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: var(--koi-muted);
+  margin: 0 0 8px;
+}
+
+.koi-welcome-recent-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  color: var(--koi-fg);
+  border: 1px solid transparent;
+  border-radius: 6px;
+  padding: 7px 10px;
+  font-family: var(--koi-font-mono);
+  font-size: 0.78rem;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+
+  &:hover {
+    background: var(--koi-surface);
+    border-color: var(--koi-line);
+  }
+}
+
+.koi-welcome-recent-item-name {
+  display: block;
+  color: var(--koi-fg);
+}
+
+.koi-welcome-recent-item-path {
+  display: block;
+  color: var(--koi-muted);
+  font-size: 0.7rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.koi-welcome-empty {
+  color: var(--koi-muted);
+  font-size: 0.8rem;
+  font-style: italic;
+}
+
+/* Welcome screen atmosphere: a faint blueprint grid fading into a soft accent glow. */
+.koi-welcome {
+  overflow: hidden;
+
+  &::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background-image:
+      linear-gradient(var(--koi-line) 1px, transparent 1px),
+      linear-gradient(90deg, var(--koi-line) 1px, transparent 1px);
+    background-size: 32px 32px;
+    opacity: 0.28;
+    -webkit-mask-image: radial-gradient(circle at 50% 42%, #000 0%, transparent 72%);
+    mask-image: radial-gradient(circle at 50% 42%, #000 0%, transparent 72%);
+  }
+
+  &::after {
+    content: '';
+    position: absolute;
+    width: 640px;
+    height: 640px;
+    left: 50%;
+    top: 38%;
+    transform: translate(-50%, -50%);
+    background: radial-gradient(circle, color-mix(in srgb, var(--koi-accent) 20%, transparent) 0%, transparent 60%);
+    filter: blur(22px);
+    pointer-events: none;
+  }
+}
+
+.koi-welcome-card {
+  position: relative;
+  z-index: 1;
+  animation: koi-rise 0.45s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+
+.koi-welcome-logo {
+  svg {
+    border-radius: 14px;
+    box-shadow: 0 10px 30px color-mix(in srgb, var(--koi-accent) 38%, transparent);
+  }
+}
+
+.koi-welcome-title {
+  font-family: var(--koi-font-display);
+  font-weight: 800;
+  letter-spacing: -0.02em;
+}
+
+.koi-welcome-action {
+  transition: transform 0.12s ease, border-color 0.12s ease, background 0.12s ease;
+
+  &:hover {
+    transform: translateY(-1px);
+  }
+}
+
+/* --- welcome example gallery --- */
+.koi-welcome-gallery {
+  margin-top: 22px;
+  text-align: left;
+}
+
+.koi-welcome-gallery-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.koi-welcome-example {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  text-align: left;
+  background: var(--koi-surface);
+  border: 1px solid var(--koi-line);
+  border-radius: var(--koi-radius-sm);
+  padding: 9px 11px;
+  cursor: pointer;
+  transition: border-color 0.12s ease, transform 0.12s ease;
+
+  &:hover {
+    border-color: var(--koi-accent);
+    transform: translateY(-1px);
+  }
+}
+
+.koi-welcome-example-name {
+  font-family: var(--koi-font-body);
+  font-weight: 600;
+  font-size: 0.82rem;
+  color: var(--koi-fg);
+}
+
+.koi-welcome-example-blurb {
+  font-family: var(--koi-font-body);
+  font-size: 0.72rem;
+  color: var(--koi-muted);
+  line-height: 1.4;
+}

@@ -1,0 +1,74 @@
+/* Modal + palette entrances. */
+.koi-modal,
+.koi-palette {
+  animation: koi-rise 0.18s ease both;
+}
+
+/* --- a single orchestrated reveal of the shell on first paint --- */
+@keyframes koi-rise {
+  from {
+    opacity: 0;
+    transform: translateY(7px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes koi-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes koi-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, currentColor 60%, transparent);
+  }
+  50% {
+    box-shadow: 0 0 0 4px transparent;
+  }
+}
+
+.brand {
+  animation: koi-rise 0.4s ease both;
+}
+.toolbar-actions {
+  animation: koi-rise 0.4s ease 0.05s both;
+}
+.toolbar-right {
+  animation: koi-rise 0.4s ease 0.1s both;
+}
+#editor-pane {
+  animation: koi-fade 0.5s ease 0.12s both;
+}
+#right {
+  animation: koi-fade 0.5s ease 0.18s both;
+}
+
+/* Respect users who prefer less motion: collapse every animation/transition. The same rules apply
+   when the user opts in explicitly via Settings → Appearance (html[data-reduce-motion]). */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}
+
+html[data-reduce-motion='true'] {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}

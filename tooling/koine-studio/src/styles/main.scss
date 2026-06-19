@@ -1,0 +1,48 @@
+// Koine Studio — 7-1 SCSS entry point
+//
+// Layers (all partials live under src/styles/):
+//   abstracts/   — variables, mixins, functions (zero CSS output)
+//   themes/      — runtime --koi-* CSS custom properties for light + dark
+//   base/        — resets, typography, scrollbars, animations, a11y
+//   layout/      — toolbar, split-pane, inspector
+//   components/  — every UI widget partial
+//
+// @use ORDER: intentionally kept in the original styles.css source order so the
+// cascade is preserved exactly.  A textbook layer reorder (themes→base→layout→
+// components) would silently flip 65 equal-specificity same-property rules.
+// The 7-1 architecture is expressed by the folder structure, not this list.
+//
+// Runtime tokens stay CSS custom properties (--koi-*), never SCSS $variables,
+// so data-theme switching and the CodeMirror theme keep working at runtime.
+
+@use './themes/dark';
+@use './themes/light';
+@use './base/typography';
+@use './base/scrollbars';
+@use './layout/toolbar';
+@use './components/lang-split-button';
+@use './components/lang-picker';
+@use './layout/split';
+@use './components/file-tree';
+@use './components/explorer';
+@use './components/confirm-dialog';
+@use './components/context-menu';
+@use './layout/inspector';
+@use './components/doc-panes';
+@use './components/outline';
+@use './components/tooltip';
+@use './components/diagnostics';
+@use './components/welcome';
+@use './components/command-palette';
+@use './components/modal';
+@use './components/form-fields';
+@use './components/settings';
+@use './components/help';
+@use './components/about';
+@use './components/glossary';
+@use './base/animations';
+@use './components/floating-menu';
+@use './components/diagrams';
+@use './components/ai-panel';
+@use './base/a11y';
+@use './components/wizard';

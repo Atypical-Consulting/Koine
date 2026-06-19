@@ -1,0 +1,80 @@
+/* --- floating action menu (code actions + references) + inline rename --- */
+.koi-action-menu {
+  min-width: 220px;
+  max-width: 360px;
+  max-height: 320px;
+  overflow-y: auto;
+  background: var(--koi-paper-2);
+  border: 1px solid var(--koi-line);
+  border-radius: var(--koi-radius);
+  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.4);
+  padding: 4px;
+  outline: none;
+}
+.koi-action-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: none;
+  border-radius: var(--koi-radius-sm);
+  padding: 7px 10px;
+  color: var(--koi-fg);
+  font-family: var(--koi-font-body);
+  font-size: 0.82rem;
+  cursor: pointer;
+}
+.koi-action-row[aria-selected='true'] {
+  background: var(--koi-accent);
+  color: var(--koi-on-accent);
+}
+.koi-action-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.koi-action-detail {
+  flex: 0 0 auto;
+  font-family: var(--koi-font-mono);
+  font-size: 0.7rem;
+  opacity: 0.7;
+}
+.koi-action-empty {
+  padding: 8px 10px;
+  color: var(--koi-muted);
+  font-family: var(--koi-font-body);
+  font-size: 0.8rem;
+}
+.koi-rename {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--koi-paper-2);
+  border: 1px solid var(--koi-accent);
+  border-radius: var(--koi-radius-sm);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
+  padding: 5px 7px;
+}
+.koi-rename-input {
+  background: var(--koi-surface);
+  color: var(--koi-fg);
+  border: 1px solid var(--koi-line);
+  border-radius: var(--koi-radius-sm);
+  padding: 4px 8px;
+  font-family: var(--koi-font-mono);
+  font-size: 0.82rem;
+  min-width: 160px;
+}
+.koi-rename-input:focus-visible {
+  outline: none;
+  border-color: var(--koi-accent);
+}
+.koi-rename-hint {
+  color: var(--koi-muted);
+  font-family: var(--koi-font-body);
+  font-size: 0.7rem;
+  white-space: nowrap;
+}

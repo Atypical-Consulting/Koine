@@ -1,0 +1,77 @@
+/* --- generic modal (Preferences, About, Help) --- */
+.koi-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  background: rgba(8, 11, 18, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+
+.koi-modal-backdrop[hidden] {
+  display: none;
+}
+
+.koi-modal {
+  width: 100%;
+  max-width: 520px;
+  background: var(--koi-paper-2);
+  border: 1px solid var(--koi-line);
+  border-radius: 10px;
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.5);
+  display: flex;
+  flex-direction: column;
+  max-height: 86vh;
+}
+
+.koi-modal-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--koi-line);
+}
+
+.koi-modal-title {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--koi-fg);
+}
+
+.koi-modal-close {
+  margin-left: auto;
+  background: transparent;
+  color: var(--koi-muted);
+  border: 1px solid transparent;
+  border-radius: 6px;
+  width: 28px;
+  height: 28px;
+  font-size: 1.05rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.koi-modal-close:hover {
+  color: var(--koi-fg);
+  border-color: var(--koi-accent);
+}
+
+.koi-modal-body {
+  padding: 18px;
+  overflow-y: auto;
+}
+
+.koi-modal-footer {
+  padding: 12px 18px;
+  border-top: 1px solid var(--koi-line);
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.koi-modal-footer:empty {
+  display: none;
+}

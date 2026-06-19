@@ -1,0 +1,57 @@
+/* --- form-field labels (shared with the Generate-Project wizard) --- */
+.koi-field-label {
+  flex: 1 1 auto;
+  font-size: 0.88rem;
+  color: var(--koi-fg);
+}
+
+.koi-select,
+.koi-number {
+  background: var(--koi-surface);
+  color: var(--koi-fg);
+  border: 1px solid var(--koi-line);
+  border-radius: 6px;
+  padding: 6px 10px;
+  font-family: var(--koi-font-body);
+  font-size: 0.84rem;
+  cursor: pointer;
+}
+
+.koi-number {
+  width: 80px;
+}
+
+.koi-select,
+.koi-number {
+  &:hover,
+  &:focus {
+    border-color: var(--koi-accent);
+    outline: none;
+  }
+}
+
+.koi-checkbox {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--koi-accent);
+  cursor: pointer;
+}
+
+/* --- preferences text inputs (API key + model), matching the select/number controls --- */
+.koi-text {
+  width: 100%;
+  min-width: 200px;
+  background: var(--koi-surface);
+  color: var(--koi-fg);
+  border: 1px solid var(--koi-line);
+  border-radius: var(--koi-radius-sm);
+  padding: 6px 9px;
+  font-family: var(--koi-font-mono);
+  font-size: 0.8rem;
+
+  &:hover,
+  &:focus-visible {
+    outline: none;
+    border-color: var(--koi-accent);
+  }
+}

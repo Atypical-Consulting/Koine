@@ -1,0 +1,101 @@
+/* --- right inspector (tabbed: preview / glossary / context map) --- */
+#right {
+  display: flex;
+  flex-direction: column;
+  background: var(--koi-paper-2);
+}
+
+#tabs {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0 10px;
+  background: var(--koi-paper-2);
+  border-bottom: 1px solid var(--koi-line);
+  overflow-x: auto;
+  overflow-y: hidden;
+
+  .tab {
+    position: relative;
+    background: transparent;
+    color: var(--koi-muted);
+    border: none;
+    padding: 11px 12px 12px;
+    font-family: var(--koi-font-body);
+    font-size: 0.8rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: color 0.14s ease;
+    flex: 0 0 auto;
+    white-space: nowrap;
+
+    /* The active tab is marked by a gradient underline that grows from the center. */
+    &::after {
+      content: '';
+      position: absolute;
+      left: 10px;
+      right: 10px;
+      bottom: -1px;
+      height: 2px;
+      border-radius: 2px;
+      background: var(--koi-accent-grad);
+      transform: scaleX(0);
+      transition: transform 0.18s ease;
+    }
+
+    &:hover {
+      color: var(--koi-fg);
+    }
+
+    &[aria-selected='true'] {
+      color: var(--koi-fg);
+
+      &::after {
+        transform: scaleX(1);
+      }
+    }
+  }
+}
+
+.tab-refresh {
+  margin-left: auto;
+  align-self: center;
+  background: transparent;
+  color: var(--koi-muted);
+  border: 1px solid transparent;
+  border-radius: var(--koi-radius-sm);
+  width: 28px;
+  height: 26px;
+  font-size: 0.9rem;
+  line-height: 1;
+  cursor: pointer;
+  transition: color 0.12s ease, transform 0.3s ease, background 0.12s ease;
+
+  &:hover {
+    color: var(--koi-fg);
+    background: var(--koi-surface);
+    transform: rotate(90deg);
+  }
+}
+
+#views {
+  flex: 1 1 auto;
+  min-height: 0;
+  position: relative;
+}
+
+.view {
+  position: absolute;
+  inset: 0;
+  min-height: 0;
+}
+
+.doc-view {
+  overflow-y: auto;
+  padding: 16px 20px;
+}
+
+.cm-editor {
+  height: 100%;
+}

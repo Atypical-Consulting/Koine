@@ -1,0 +1,93 @@
+/* --- command palette (above #app, modal tier) --- */
+.koi-palette-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  background: rgba(8, 11, 18, 0.55);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 12vh;
+}
+
+.koi-palette-backdrop[hidden] {
+  display: none;
+}
+
+.koi-palette {
+  width: 100%;
+  max-width: 520px;
+  background: var(--koi-paper-2);
+  border: 1px solid var(--koi-line);
+  border-radius: 10px;
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.5);
+  overflow: hidden;
+}
+
+.koi-palette-input {
+  width: 100%;
+  background: var(--koi-paper-2);
+  color: var(--koi-fg);
+  border: none;
+  border-bottom: 1px solid var(--koi-line);
+  padding: 13px 16px;
+  font-family: var(--koi-font-body);
+  font-size: 0.95rem;
+  outline: none;
+}
+
+.koi-palette-input::placeholder {
+  color: var(--koi-muted);
+}
+
+.koi-palette-list {
+  list-style: none;
+  margin: 0;
+  padding: 6px;
+  max-height: 340px;
+  overflow-y: auto;
+}
+
+.koi-palette-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  color: var(--koi-fg);
+  border: 1px solid transparent;
+  border-radius: 6px;
+  padding: 8px 11px;
+  cursor: pointer;
+  font-family: var(--koi-font-body);
+  font-size: 0.86rem;
+}
+
+.koi-palette-item[aria-selected='true'] {
+  background: color-mix(in srgb, var(--koi-accent) 16%, transparent);
+  border-color: color-mix(in srgb, var(--koi-accent) 40%, var(--koi-line));
+}
+
+.koi-palette-item-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.koi-palette-item-hint {
+  flex: 0 0 auto;
+  margin-left: auto;
+  font-family: var(--koi-font-mono);
+  font-size: 0.72rem;
+  color: var(--koi-muted);
+}
+
+.koi-palette-empty {
+  color: var(--koi-muted);
+  font-size: 0.82rem;
+  padding: 14px 12px;
+  text-align: center;
+}
