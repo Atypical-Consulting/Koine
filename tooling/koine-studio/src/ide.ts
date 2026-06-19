@@ -1547,6 +1547,9 @@ export function init(): void {
     // Desktop hosts launch a `koine mcp --http` sidecar and return its loopback URL; the browser
     // returns null, so Settings hides the MCP affordance there.
     mcpEndpoint: () => platform.mcpEndpoint(),
+    mcpStop: () => platform.mcpStop(),
+    // Only the desktop shell can host the sidecar; the web build shows recipes but disables the toggle.
+    mcpHostable: platform.kind === 'tauri',
   });
   const help = createHelpOverlay(helpRows());
   const about = createAboutDialog();
