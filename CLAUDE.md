@@ -53,7 +53,9 @@ must still build, so don't add it.
 
 `build` (compile/validate; `--target`, `--out`, `--glossary`, `--config`), `check` (model-versioning
 compatibility against a `--baseline`), `fmt` (canonical formatter), `init` (scaffold), `watch`
-(rebuild on change), `lsp` (language server over stdio). A path argument may be a single `.koi` file
+(rebuild on change), `lsp` (language server over stdio), `mcp` (the MCP server — stdio by default, or
+`--http [--port N] [--host H]` to serve it over HTTP for any client by URL; reuses `Koine.Mcp`'s
+hosts). A path argument may be a single `.koi` file
 **or a directory** — directory mode compiles every `.koi` under it as one model so cross-file
 imports, context maps, and integration events resolve (R13/R14).
 

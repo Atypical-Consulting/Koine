@@ -279,14 +279,26 @@ multiple emitters possible.
   [MCP](https://modelcontextprotocol.io) server (`koine-mcp`) that lets an AI agent author a complete
   domain in `.koi`: tools to `koine_validate`, `koine_compile` (csharp/typescript/python/glossary/docs), and
   `koine_format`, plus `koine_reference` and `koine_examples` so the agent learns the language. Install
-  with `dotnet tool install -g Koine.Mcp`, then register it:
+  with `dotnet tool install -g Koine.Mcp`, then register it over **stdio** (the default, for editor-spawned
+  clients like Claude Desktop):
 
   ```json
   { "mcpServers": { "koine": { "command": "koine-mcp" } } }
   ```
 
-  From a checkout, `./scripts/install-mcp/install-mcp.sh` (or `.ps1` / `.cmd`) packs, installs, and
-  registers the server with **Claude Desktop** in one step. Full tool list in the
+  Or serve it over **HTTP** (Streamable HTTP/SSE) so any client connects by URL — no DLL paths.
+  `koine mcp --http` (or `koine-mcp --http`) binds loopback on an OS-assigned port and prints the
+  endpoint; an [LM Studio](https://lmstudio.ai) `mcp.json` then collapses to one line (use a
+  tool-capable model):
+
+  ```json
+  { "mcpServers": { "koine": { "url": "http://127.0.0.1:PORT/mcp" } } }
+  ```
+
+  On the desktop, **Koine Studio** launches that HTTP server for you and shows the ready-to-paste
+  `mcp.json` under **Settings → Assistant** (a "Copy mcp.json" button). From a checkout,
+  `./scripts/install-mcp/install-mcp.sh` (or `.ps1` / `.cmd`) packs, installs, and registers the stdio
+  server with **Claude Desktop** in one step. Full tool list + the HTTP recipe in the
   [MCP guide](https://atypical-consulting.github.io/Koine/guides/mcp-server/).
 
 ## Tech stack
