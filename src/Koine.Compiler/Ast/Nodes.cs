@@ -42,7 +42,29 @@ public abstract record KoineNode
     /// default; populated by the parser. Target-agnostic.
     /// </summary>
     public IReadOnlyList<SyntaxTrivia> TrailingTrivia { get; init; } = [];
+
+    /// <summary>
+    /// <c>true</c> for an ANTLR-inserted phantom token — a node the parser synthesized during
+    /// error recovery that has no backing source text. Default <c>false</c>. Target-agnostic:
+    /// merely flags that the node is missing from the original source, carrying no target concept.
+    /// </summary>
+    public bool IsMissing { get; init; }
+
+    /// <summary>
+    /// The verbatim source text of a leaf token, when this node directly wraps one; <c>null</c>
+    /// for non-leaf nodes (the default). Used later for tree-driven, lossless reconstruction of
+    /// the original source. Target-agnostic.
+    /// </summary>
+    public string? LeafText { get; init; }
 }
+
+/// <summary>
+/// A target-agnostic error marker wrapping the verbatim text of a skipped or unexpected token
+/// produced during parser error recovery (resilient syntax). Carries no target concept — it is a
+/// pure source artifact so the model can index and reconstruct around malformed input. It still
+/// carries a <see cref="KoineNode.Span"/> via the base, pointing at the offending text.
+/// </summary>
+public sealed record ErrorNode(string Text) : KoineNode;
 
 /// <summary>
 /// Root of the model: the set of bounded contexts in a compilation, plus the optional
