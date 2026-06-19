@@ -214,11 +214,11 @@ export function createAssistantPanel(opts: AssistantPanelOptions): AssistantPane
     if (needsKey && !apiKey) {
       const note = addBubble('assistant');
       note.classList.add('koi-msg-note');
-      note.innerHTML = 'Add your API key in Preferences to use the assistant. ';
+      note.innerHTML = 'Add your API key in Settings to use the assistant. ';
       const open = document.createElement('button');
       open.type = 'button';
       open.className = 'koi-link-btn';
-      open.textContent = 'Open Preferences';
+      open.textContent = 'Open Settings';
       open.addEventListener('click', () => opts.onOpenPrefs());
       note.appendChild(open);
       return;

@@ -23,6 +23,7 @@ import { createWelcome } from './welcome';
 import { type Example } from './examples';
 import { createCommandPalette, type Command } from './palette';
 import { createPreferences } from './prefs';
+import { applyAppearance } from './appearance';
 import { initSplitResizer } from './resize';
 import { createHelpOverlay, type ShortcutRow } from './help';
 import { createAboutDialog } from './about';
@@ -231,7 +232,7 @@ function helpRows(): ShortcutRow[] {
     { keys: 'F2', description: 'Rename symbol' },
     { keys: 'Shift+F12', description: 'Find all references' },
     { keys: 'mod+.', description: 'Quick fixes & refactors' },
-    { keys: 'mod+,', description: 'Preferences' },
+    { keys: 'mod+,', description: 'Settings' },
     { keys: 'mod+B', description: 'Toggle file tree (folder mode)' },
     { keys: 'F1', description: 'Keyboard shortcuts' },
     { keys: 'Esc', description: 'Close the open overlay' },
@@ -249,14 +250,11 @@ export function init(): void {
   const brandLogo = document.querySelector('.brand-logo');
   if (brandLogo) brandLogo.innerHTML = koineMark('h');
 
-  // Apply the persisted theme + editor font size before CodeMirror is created so the
-  // editor picks up the right tokens / size on first paint.
+  // Apply the persisted theme + appearance (accent, reduced motion, editor metrics) before
+  // CodeMirror is created so the editor picks up the right tokens / size on first paint.
   initTheme();
   let settings: Settings = loadSettings();
-  function applyFontSize(): void {
-    document.documentElement.style.setProperty('--koi-editor-font-size', settings.fontSize + 'px');
-  }
-  applyFontSize();
+  applyAppearance(settings);
 
   // A model carried in the URL hash (a shared playground link) takes precedence over both the seed
   // and any restored scratch, so opening a link always lands on the shared model.
@@ -270,6 +268,7 @@ export function init(): void {
   const editor = createKoineEditor({
     parent: el('editor-pane'),
     doc: initialDoc,
+    lineWrap: settings.wordWrap,
     onChange: (doc) => {
       // First edit dismisses the welcome overlay (it only shows in untouched scratch mode).
       if (welcome.visible) welcome.hide();
@@ -303,7 +302,7 @@ export function init(): void {
     // writes the active buffer to disk. We deliberately do NOT pass onFormat here so the
     // editor's Mod-s keymap stays inert and there's exactly one save path.
   });
-  const output = createOutputView(el('view-preview'));
+  const output = createOutputView(el('view-preview'), settings.wordWrap);
 
   // A copy affordance overlaid on the emitted-preview pane (auto-hidden with the pane when another
   // inspector tab is active). Tracks the most recent generated output; disabled until there is some.
@@ -1522,7 +1521,11 @@ export function init(): void {
   const prefs = createPreferences({
     onChange: (s) => {
       settings = s;
-      applyFontSize(); // theme already applied live by prefs via setTheme
+      // onChange is the single re-skin path: apply the document-level appearance, then sync the
+      // pieces prefs can't reach — soft-wrap on both the source editor and the output preview.
+      applyAppearance(s);
+      editor.setLineWrap(s.wordWrap);
+      output.setLineWrap(s.wordWrap);
     },
   });
   const help = createHelpOverlay(helpRows());
@@ -1623,7 +1626,7 @@ export function init(): void {
       { id: 'check', title: 'Check against baseline…', group: 'File', run: () => void runCheck() },
       { id: 'generate-project', title: 'Generate project…', group: 'File', run: () => generateProject.open() },
       { id: 'toggle-theme', title: 'Toggle theme', group: 'View', run: () => toggleTheme() },
-      { id: 'prefs', title: 'Preferences…', hint: 'mod+,', group: 'View', run: () => prefs.open() },
+      { id: 'prefs', title: 'Settings…', hint: 'mod+,', group: 'View', run: () => prefs.open() },
       { id: 'help', title: 'Keyboard shortcuts', hint: 'F1', group: 'Help', run: () => help.open() },
       { id: 'about', title: 'About Koine Studio', group: 'Help', run: () => about.open() },
       { id: 'view-preview', title: 'Show Emitted Preview', group: 'Inspector', run: () => selectView('preview') },

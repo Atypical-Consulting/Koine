@@ -1,11 +1,13 @@
-// Preferences modal for Koine Studio: uses the shared createModal() chrome and exposes the
-// four persisted Settings (theme, editor font size, format-on-save, LSP trace). Reads the
-// current Settings via loadSettings() on each open, writes each change through patchSettings()
-// (so localStorage stays the source of truth), and reports the merged Settings back to the app
-// via onChange. The Theme control applies live through ./theme's setTheme so flipping the
-// select re-themes the editor immediately.
-import { loadSettings, patchSettings, type Settings } from './store';
+// Settings dialog for Koine Studio. Built on the shared createModal() chrome, but laid out as a
+// two-pane preference center: a vertical category rail (Appearance / Editor / Assistant / Advanced)
+// on the left, the active category's controls on the right. The set of persisted Settings is the
+// source of truth (./store); each control writes a single-field patch through patchSettings() and
+// reports the merged Settings back via onChange. The app's onChange handler is the single place that
+// re-skins the studio (applyAppearance + editor soft-wrap), so flipping a control applies live there;
+// only Theme is applied here directly, through ./theme's setTheme (its own live-apply + listeners).
+import { loadSettings, patchSettings, saveSettings, DEFAULT_SETTINGS, type Settings, type AccentName } from './store';
 import { setTheme } from './theme';
+import { ACCENTS, ACCENT_ORDER } from './appearance';
 import { createModal } from './overlay';
 
 export interface PrefsCallbacks {
@@ -22,83 +24,258 @@ const FONT_MIN = 10;
 const FONT_MAX = 22;
 const FONT_STEP = 0.5;
 
+const LINE_HEIGHT_MIN = 1.2;
+const LINE_HEIGHT_MAX = 2.4;
+const LINE_HEIGHT_STEP = 0.1;
+
+// Category rail icons, drawn in the studio's 16×16 line-icon idiom (stroke = currentColor).
+const ICON = {
+  appearance:
+    '<svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="5.6"/><path d="M8 2.4a5.6 5.6 0 0 1 0 11.2z" fill="currentColor" stroke="none"/></svg>',
+  editor:
+    '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6 4 2.4 8 6 12"/><path d="M10 4l3.6 4-3.6 4"/></svg>',
+  assistant:
+    '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2.2l1.5 3.9 3.9 1.5-3.9 1.5L8 13l-1.5-3.9L2.6 7.6l3.9-1.5z"/></svg>',
+  advanced:
+    '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.6 4.6h10.8M2.6 8h10.8M2.6 11.4h10.8"/><circle cx="6" cy="4.6" r="1.7" fill="var(--koi-paper-2)"/><circle cx="10.4" cy="8" r="1.7" fill="var(--koi-paper-2)"/><circle cx="5" cy="11.4" r="1.7" fill="var(--koi-paper-2)"/></svg>',
+} as const;
+
 /**
- * Build the preferences modal and return an imperative handle. The DOM is created once; each
- * open() repopulates every control from the freshly loaded Settings so the dialog never shows
- * stale values (e.g. after a theme toggle from the toolbar or command palette).
+ * Build the Settings dialog and return an imperative handle. The DOM is created once; each open()
+ * repopulates every control from the freshly loaded Settings so the dialog never shows stale values
+ * (e.g. after a theme toggle from the toolbar or command palette).
  */
 export function createPreferences(cb: PrefsCallbacks): PrefsHandle {
-  const modal = createModal({ title: 'Preferences' });
+  const modal = createModal({ title: 'Settings', ariaLabel: 'Koine Studio settings', variant: 'koi-modal--settings' });
 
-  // --- field factory --------------------------------------------------------
-  // Each row is a .koi-field with a .koi-field-label and a .koi-field-control wrapper around
-  // the actual input/select.
-  function field(labelText: string, control: HTMLElement): HTMLElement {
-    const f = document.createElement('label');
-    f.className = 'koi-field';
+  // Every control commits a single-field patch, then reports the merged Settings to the app.
+  function commit(patch: Partial<Settings>): void {
+    cb.onChange(patchSettings(patch));
+  }
+
+  // --- control factories ----------------------------------------------------
+
+  // A labelled settings row: a title (+ optional description) on the left, the control on the right.
+  function row(title: string, description: string, control: HTMLElement): HTMLElement {
+    const r = document.createElement('div');
+    r.className = 'koi-set-row';
+    const text = document.createElement('div');
+    text.className = 'koi-set-text';
     const label = document.createElement('span');
-    label.className = 'koi-field-label';
-    label.textContent = labelText;
-    const ctrl = document.createElement('span');
-    ctrl.className = 'koi-field-control';
+    label.className = 'koi-set-label';
+    label.textContent = title;
+    text.appendChild(label);
+    if (description) {
+      const desc = document.createElement('span');
+      desc.className = 'koi-set-desc';
+      desc.textContent = description;
+      text.appendChild(desc);
+    }
+    const ctrl = document.createElement('div');
+    ctrl.className = 'koi-set-control';
     ctrl.appendChild(control);
-    f.append(label, ctrl);
-    return f;
+    r.append(text, ctrl);
+    return r;
   }
 
-  // Theme — select dark/light. Applies live via setTheme (which persists + re-themes the editor).
-  const themeSelect = document.createElement('select');
-  themeSelect.className = 'koi-select';
-  for (const [value, text] of [['dark', 'Dark'], ['light', 'Light']] as const) {
-    const opt = document.createElement('option');
-    opt.value = value;
-    opt.textContent = text;
-    themeSelect.appendChild(opt);
+  // A panel groups rows under a category.
+  function panel(id: string, ...rows: HTMLElement[]): HTMLElement {
+    const p = document.createElement('section');
+    p.className = 'koi-settings-panel';
+    p.id = `koi-settings-panel-${id}`;
+    p.setAttribute('role', 'tabpanel');
+    p.append(...rows);
+    return p;
   }
 
-  // Editor font size — number input, step 0.5, clamped to [10, 22].
-  const fontInput = document.createElement('input');
-  fontInput.type = 'number';
-  fontInput.className = 'koi-number';
-  fontInput.min = String(FONT_MIN);
-  fontInput.max = String(FONT_MAX);
-  fontInput.step = String(FONT_STEP);
-
-  // Format on save — checkbox.
-  const formatCheckbox = document.createElement('input');
-  formatCheckbox.type = 'checkbox';
-  formatCheckbox.className = 'koi-checkbox';
-
-  // LSP trace — select off/messages/verbose.
-  const traceSelect = document.createElement('select');
-  traceSelect.className = 'koi-select';
-  for (const [value, text] of [
-    ['off', 'Off'],
-    ['messages', 'Messages'],
-    ['verbose', 'Verbose'],
-  ] as const) {
-    const opt = document.createElement('option');
-    opt.value = value;
-    opt.textContent = text;
-    traceSelect.appendChild(opt);
+  // An iOS-style on/off switch backed by role=switch (toggles on click; label via aria-label).
+  function toggle(ariaLabel: string, onChange: (on: boolean) => void): { el: HTMLButtonElement; set(on: boolean): void } {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'koi-switch';
+    btn.setAttribute('role', 'switch');
+    btn.setAttribute('aria-label', ariaLabel);
+    btn.setAttribute('aria-checked', 'false');
+    const thumb = document.createElement('span');
+    thumb.className = 'koi-switch-thumb';
+    btn.appendChild(thumb);
+    const set = (on: boolean) => btn.setAttribute('aria-checked', String(on));
+    btn.addEventListener('click', () => {
+      const next = btn.getAttribute('aria-checked') !== 'true';
+      set(next);
+      onChange(next);
+    });
+    return { el: btn, set };
   }
 
-  // AI assistant — provider, base URL, key, model. All stored locally (localStorage) and used
-  // only to call the chosen API directly from this app.
-  const aiProviderSelect = document.createElement('select');
-  aiProviderSelect.className = 'koi-select';
-  for (const [value, text] of [
-    ['anthropic', 'Anthropic (Claude)'],
-    ['openai', 'OpenAI-compatible'],
-  ] as const) {
-    const opt = document.createElement('option');
-    opt.value = value;
-    opt.textContent = text;
-    aiProviderSelect.appendChild(opt);
+  // A segmented radio group (e.g. Dark / Light). Each option is a button; one is checked at a time.
+  function segmented<T extends string>(
+    ariaLabel: string,
+    options: readonly { value: T; label: string }[],
+    onSelect: (value: T) => void,
+  ): { el: HTMLElement; set(value: T): void } {
+    const group = document.createElement('div');
+    group.className = 'koi-segmented';
+    group.setAttribute('role', 'radiogroup');
+    group.setAttribute('aria-label', ariaLabel);
+    const buttons = options.map(({ value, label }) => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'koi-seg';
+      b.setAttribute('role', 'radio');
+      b.setAttribute('aria-checked', 'false');
+      b.dataset.value = value;
+      b.textContent = label;
+      b.addEventListener('click', () => {
+        set(value);
+        onSelect(value);
+      });
+      group.appendChild(b);
+      return b;
+    });
+    const set = (value: T) => {
+      for (const b of buttons) b.setAttribute('aria-checked', String(b.dataset.value === value));
+    };
+    return { el: group, set };
   }
 
-  // Base URL — only used by the OpenAI-compatible provider. A datalist offers the common presets
-  // (OpenAI cloud, Ollama, LM Studio) while still letting the user type any endpoint.
+  // The accent swatch picker: one coloured dot per preset, single-selection radio group.
+  function accentPicker(onSelect: (value: AccentName) => void): { el: HTMLElement; set(value: AccentName): void } {
+    const group = document.createElement('div');
+    group.className = 'koi-accent-row';
+    group.setAttribute('role', 'radiogroup');
+    group.setAttribute('aria-label', 'Accent colour');
+    const buttons = ACCENT_ORDER.map((name) => {
+      const preset = ACCENTS[name];
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'koi-accent-swatch';
+      b.setAttribute('role', 'radio');
+      b.setAttribute('aria-checked', 'false');
+      b.setAttribute('aria-label', preset.label);
+      b.title = preset.label;
+      b.dataset.value = name;
+      b.style.setProperty('--koi-swatch', preset.swatch);
+      const dot = document.createElement('span');
+      dot.className = 'koi-accent-dot';
+      b.appendChild(dot);
+      b.addEventListener('click', () => {
+        set(name);
+        onSelect(name);
+      });
+      group.appendChild(b);
+      return b;
+    });
+    const set = (value: AccentName) => {
+      for (const b of buttons) b.setAttribute('aria-checked', String(b.dataset.value === value));
+    };
+    return { el: group, set };
+  }
+
+  // A clamped numeric setting input. On commit it parses, restores the prior value for empty/blank
+  // or non-numeric input (Number('') is 0, so the blank case must be caught explicitly), clamps into
+  // [min, max], then writes the single field. The committed change re-applies appearance via onChange.
+  function metricInput(
+    min: number,
+    max: number,
+    step: number,
+    read: () => number,
+    write: (value: number) => void,
+  ): HTMLInputElement {
+    const input = document.createElement('input');
+    input.type = 'number';
+    input.className = 'koi-number';
+    input.min = String(min);
+    input.max = String(max);
+    input.step = String(step);
+    input.addEventListener('change', () => {
+      const text = input.value.trim();
+      const raw = Number(text);
+      if (text === '' || !Number.isFinite(raw)) {
+        input.value = String(read()); // restore the last good value
+        return;
+      }
+      const clamped = Math.min(Math.max(raw, min), max);
+      input.value = String(clamped);
+      write(clamped);
+    });
+    return input;
+  }
+
+  function select<T extends string>(options: readonly { value: T; label: string }[]): HTMLSelectElement {
+    const sel = document.createElement('select');
+    sel.className = 'koi-select';
+    for (const { value, label } of options) {
+      const opt = document.createElement('option');
+      opt.value = value;
+      opt.textContent = label;
+      sel.appendChild(opt);
+    }
+    return sel;
+  }
+
+  // --- Appearance -----------------------------------------------------------
+
+  const themeSeg = segmented<Settings['theme']>(
+    'Theme',
+    [
+      { value: 'dark', label: 'Dark' },
+      { value: 'light', label: 'Light' },
+    ],
+    (theme) => {
+      setTheme(theme); // persists + applies live + notifies theme listeners
+      cb.onChange(loadSettings());
+    },
+  );
+
+  // Appearance fields just commit; the live re-skin happens in onChange via applyAppearance (the one
+  // place that defines how a Settings object maps to the DOM), so there is a single apply path.
+  const accent = accentPicker((name) => commit({ accent: name }));
+  const reduceMotion = toggle('Reduce motion', (on) => commit({ reduceMotion: on }));
+
+  const appearancePanel = panel(
+    'appearance',
+    row('Theme', 'Light or dark surfaces across the whole studio.', themeSeg.el),
+    row('Accent', 'The highlight colour for selections, focus, and actions.', accent.el),
+    row('Reduce motion', 'Collapse animations and transitions.', reduceMotion.el),
+  );
+
+  // --- Editor ---------------------------------------------------------------
+
+  const fontInput = metricInput(
+    FONT_MIN,
+    FONT_MAX,
+    FONT_STEP,
+    () => loadSettings().fontSize,
+    (v) => commit({ fontSize: v }),
+  );
+
+  const lineHeightInput = metricInput(
+    LINE_HEIGHT_MIN,
+    LINE_HEIGHT_MAX,
+    LINE_HEIGHT_STEP,
+    () => loadSettings().lineHeight,
+    (v) => commit({ lineHeight: v }),
+  );
+
+  const wordWrap = toggle('Word wrap', (on) => commit({ wordWrap: on }));
+  const formatOnSave = toggle('Format on save', (on) => commit({ formatOnSave: on }));
+
+  const editorPanel = panel(
+    'editor',
+    row('Font size', 'Editor text size, in pixels.', fontInput),
+    row('Line height', 'Vertical spacing between lines.', lineHeightInput),
+    row('Word wrap', 'Wrap long lines instead of scrolling sideways.', wordWrap.el),
+    row('Format on save', 'Run the Koine formatter when you press save.', formatOnSave.el),
+  );
+
+  // --- Assistant (AI) -------------------------------------------------------
+
+  const aiProviderSelect = select([
+    { value: 'anthropic', label: 'Anthropic (Claude)' },
+    { value: 'openai', label: 'OpenAI-compatible' },
+  ] as const);
+
   const aiBaseUrlInput = document.createElement('input');
   aiBaseUrlInput.type = 'text';
   aiBaseUrlInput.className = 'koi-text';
@@ -125,67 +302,17 @@ export function createPreferences(cb: PrefsCallbacks): PrefsHandle {
   aiModelInput.spellcheck = false;
   aiModelInput.placeholder = 'claude-opus-4-8';
 
-  // The base-URL field is only meaningful for the OpenAI-compatible provider; hide it for Anthropic.
-  const baseUrlField = field('Base URL', aiBaseUrlInput);
+  const baseUrlRow = row('Base URL', 'Endpoint for the OpenAI-compatible provider.', aiBaseUrlInput);
   function syncProviderFields(): void {
-    baseUrlField.hidden = aiProviderSelect.value !== 'openai';
+    baseUrlRow.hidden = aiProviderSelect.value !== 'openai';
     aiModelInput.placeholder = aiProviderSelect.value === 'openai' ? 'gpt-4o  ·  qwen2.5-coder  ·  …' : 'claude-opus-4-8';
   }
-
-  modal.body.append(
-    field('Theme', themeSelect),
-    field('Editor font size', fontInput),
-    field('Format on save', formatCheckbox),
-    field('LSP trace', traceSelect),
-    field('AI provider', aiProviderSelect),
-    baseUrlField,
-    field('API key', aiKeyInput),
-    field('Assistant model', aiModelInput),
-    presets,
-  );
-
-  // --- commit helpers -------------------------------------------------------
-  // Every control commits a single-field patch, then reports the merged Settings. The Theme
-  // field is special-cased: it goes through setTheme so the change applies live AND persists,
-  // after which we still surface the merged Settings to onChange.
-  function commit(patch: Partial<Settings>): void {
-    const merged = patchSettings(patch);
-    cb.onChange(merged);
-  }
-
-  themeSelect.addEventListener('change', () => {
-    const theme = themeSelect.value === 'light' ? 'light' : 'dark';
-    setTheme(theme); // persists + applies + notifies theme listeners
-    cb.onChange(loadSettings()); // report the now-current, merged Settings
-  });
-
-  // Clamp font size into range on commit; ignore non-numeric input.
-  fontInput.addEventListener('change', () => {
-    const raw = Number(fontInput.value);
-    if (!Number.isFinite(raw)) {
-      fontInput.value = String(loadSettings().fontSize);
-      return;
-    }
-    const clamped = Math.min(Math.max(raw, FONT_MIN), FONT_MAX);
-    fontInput.value = String(clamped);
-    commit({ fontSize: clamped });
-  });
-
-  formatCheckbox.addEventListener('change', () => {
-    commit({ formatOnSave: formatCheckbox.checked });
-  });
-
-  traceSelect.addEventListener('change', () => {
-    const v = traceSelect.value;
-    const lspTrace = v === 'messages' || v === 'verbose' ? v : 'off';
-    commit({ lspTrace });
-  });
 
   aiProviderSelect.addEventListener('change', () => {
     const aiProvider = aiProviderSelect.value === 'openai' ? 'openai' : 'anthropic';
     const merged = patchSettings({ aiProvider });
-    // Swap the model field to the model remembered for the now-selected provider, so a Claude id
-    // is never left sitting in front of an OpenAI endpoint (and vice-versa).
+    // Swap the model field to the model remembered for the now-selected provider, so a Claude id is
+    // never left sitting in front of an OpenAI endpoint (and vice-versa).
     aiModelInput.value = aiProvider === 'openai' ? merged.aiModelOpenai : merged.aiModel;
     syncProviderFields();
     cb.onChange(merged);
@@ -194,28 +321,157 @@ export function createPreferences(cb: PrefsCallbacks): PrefsHandle {
     const url = aiBaseUrlInput.value.trim();
     commit({ aiBaseUrl: url || 'https://api.openai.com/v1' });
   });
-  // The key/model commit on change OR blur so an edit isn't lost if the dialog is dismissed.
   aiKeyInput.addEventListener('change', () => commit({ aiApiKey: aiKeyInput.value.trim() }));
-  // The model is stored per provider so switching providers can't carry one's model into the other.
   aiModelInput.addEventListener('change', () => {
     const model = aiModelInput.value.trim();
     commit(aiProviderSelect.value === 'openai' ? { aiModelOpenai: model } : { aiModel: model });
   });
 
-  // Populate every control from the freshly loaded Settings, then move focus to the first
-  // control so keyboard users land inside the dialog (overriding the modal's default focus).
-  modal.onOpen(() => {
-    const s = loadSettings();
-    themeSelect.value = s.theme;
+  const assistantPanel = panel(
+    'assistant',
+    row('Provider', 'Which API the assistant talks to.', aiProviderSelect),
+    baseUrlRow,
+    row('API key', 'Stored locally in this browser — sent only to the provider you choose.', aiKeyInput),
+    row('Model', 'The model id the assistant requests.', aiModelInput),
+    presets,
+  );
+
+  // --- Advanced -------------------------------------------------------------
+
+  const traceSelect = select([
+    { value: 'off', label: 'Off' },
+    { value: 'messages', label: 'Messages' },
+    { value: 'verbose', label: 'Verbose' },
+  ] as const);
+  traceSelect.addEventListener('change', () => {
+    const v = traceSelect.value;
+    commit({ lspTrace: v === 'messages' || v === 'verbose' ? v : 'off' });
+  });
+
+  // Reset is destructive (it clears the assistant key too), so it confirms on a second click and
+  // disarms itself shortly after to avoid an accidental wipe.
+  const resetBtn = document.createElement('button');
+  resetBtn.type = 'button';
+  resetBtn.className = 'koi-set-danger';
+  let armed = false;
+  let disarmTimer: ReturnType<typeof setTimeout> | undefined;
+  function disarmReset(): void {
+    armed = false;
+    resetBtn.classList.remove('is-armed');
+    resetBtn.textContent = 'Reset to defaults';
+    if (disarmTimer) clearTimeout(disarmTimer);
+  }
+  resetBtn.addEventListener('click', () => {
+    if (!armed) {
+      armed = true;
+      resetBtn.classList.add('is-armed');
+      resetBtn.textContent = 'Click again to reset everything';
+      disarmTimer = setTimeout(disarmReset, 4000);
+      return;
+    }
+    disarmReset();
+    saveSettings({ ...DEFAULT_SETTINGS });
+    const fresh = loadSettings();
+    setTheme(fresh.theme); // theme has its own live-apply path (not covered by applyAppearance)
+    populate(fresh);
+    cb.onChange(fresh); // re-skins accent/motion/editor metrics + soft-wrap via the app's onChange
+  });
+
+  const advancedPanel = panel(
+    'advanced',
+    row('Language server trace', 'Verbosity of LSP logging in the console.', traceSelect),
+    row('Reset', 'Restore every setting — including the assistant — to its default.', resetBtn),
+  );
+
+  // --- assemble the two-pane layout -----------------------------------------
+
+  const categories = [
+    { id: 'appearance', label: 'Appearance', icon: ICON.appearance, panel: appearancePanel },
+    { id: 'editor', label: 'Editor', icon: ICON.editor, panel: editorPanel },
+    { id: 'assistant', label: 'Assistant', icon: ICON.assistant, panel: assistantPanel },
+    { id: 'advanced', label: 'Advanced', icon: ICON.advanced, panel: advancedPanel },
+  ] as const;
+
+  const nav = document.createElement('nav');
+  nav.className = 'koi-settings-nav';
+  nav.setAttribute('role', 'tablist');
+  nav.setAttribute('aria-orientation', 'vertical');
+  nav.setAttribute('aria-label', 'Settings categories');
+
+  const panels = document.createElement('div');
+  panels.className = 'koi-settings-panels';
+
+  const tabs = categories.map((c) => {
+    const tab = document.createElement('button');
+    tab.type = 'button';
+    tab.className = 'koi-settings-tab';
+    tab.setAttribute('role', 'tab');
+    tab.id = `koi-settings-tab-${c.id}`;
+    tab.setAttribute('aria-controls', c.panel.id);
+    tab.tabIndex = -1;
+    const icon = document.createElement('span');
+    icon.className = 'koi-settings-tab-icon';
+    icon.setAttribute('aria-hidden', 'true');
+    icon.innerHTML = c.icon;
+    const label = document.createElement('span');
+    label.textContent = c.label;
+    tab.append(icon, label);
+    c.panel.setAttribute('aria-labelledby', tab.id);
+    nav.appendChild(tab);
+    panels.appendChild(c.panel);
+    return tab;
+  });
+
+  let activeIndex = 0;
+  function selectCategory(index: number, focusTab = false): void {
+    activeIndex = index;
+    categories.forEach((c, i) => {
+      const on = i === index;
+      tabs[i].setAttribute('aria-selected', String(on));
+      tabs[i].classList.toggle('is-active', on);
+      tabs[i].tabIndex = on ? 0 : -1;
+      c.panel.hidden = !on;
+    });
+    if (focusTab) tabs[index].focus();
+  }
+
+  tabs.forEach((tab, i) => tab.addEventListener('click', () => selectCategory(i)));
+  // Roving arrow navigation between categories (vertical tablist convention).
+  nav.addEventListener('keydown', (e) => {
+    if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
+    e.preventDefault();
+    const delta = e.key === 'ArrowDown' ? 1 : -1;
+    selectCategory((activeIndex + delta + categories.length) % categories.length, true);
+  });
+
+  const layout = document.createElement('div');
+  layout.className = 'koi-settings-layout';
+  layout.append(nav, panels);
+  modal.body.appendChild(layout);
+
+  // --- populate every control from the current Settings ---------------------
+
+  function populate(s: Settings): void {
+    themeSeg.set(s.theme);
+    accent.set(s.accent);
+    reduceMotion.set(s.reduceMotion);
     fontInput.value = String(s.fontSize);
-    formatCheckbox.checked = s.formatOnSave;
-    traceSelect.value = s.lspTrace;
+    lineHeightInput.value = String(s.lineHeight);
+    wordWrap.set(s.wordWrap);
+    formatOnSave.set(s.formatOnSave);
     aiProviderSelect.value = s.aiProvider;
     aiBaseUrlInput.value = s.aiBaseUrl;
     aiKeyInput.value = s.aiApiKey;
     aiModelInput.value = s.aiProvider === 'openai' ? s.aiModelOpenai : s.aiModel;
+    traceSelect.value = s.lspTrace;
     syncProviderFields();
-    themeSelect.focus();
+  }
+
+  modal.onOpen(() => {
+    disarmReset();
+    populate(loadSettings());
+    selectCategory(activeIndex); // keep the last-open category across opens
+    tabs[activeIndex].focus();
   });
 
   return { open: modal.open, close: modal.close };

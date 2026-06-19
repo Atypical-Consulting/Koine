@@ -142,7 +142,7 @@ function koineCompletions(ctx: CompletionContext) {
 
 const sharedTheme = EditorView.theme({
   '&': { height: '100%', fontSize: 'var(--koi-editor-font-size, 13.5px)' },
-  '.cm-scroller': { fontFamily: 'var(--koi-font-mono)', lineHeight: '1.6' },
+  '.cm-scroller': { fontFamily: 'var(--koi-font-mono)', lineHeight: 'var(--koi-editor-line-height, 1.6)' },
   '.cm-gutters': { backgroundColor: 'transparent', color: 'var(--koi-muted)', border: 'none' },
   '.cm-content': { caretColor: 'var(--koi-accent)' },
   // drawSelection() hides the native caret and paints its own .cm-cursor via border-left, which
@@ -423,6 +423,8 @@ export interface KoineEditorOptions {
   parent: HTMLElement;
   doc: string;
   onChange?: (doc: string) => void;
+  /** Soft-wrap long lines on first paint (later toggled via KoineEditor.setLineWrap). */
+  lineWrap?: boolean;
   /** Optional LSP hover provider; when given, hover tooltips are enabled. */
   onHover?: HoverFn;
   /** Optional go-to-definition provider; when given, Cmd/Ctrl-click and F12 resolve. */
@@ -458,6 +460,8 @@ export interface KoineEditor {
   gotoDefinition(pos: number): Promise<void>;
   /** Apply LSP TextEdits to the document in one transaction (edits sorted internally). */
   applyEdits(edits: TextEdit[]): void;
+  /** Turn editor soft-wrap on/off (reconfigures a compartment; no state loss). */
+  setLineWrap(on: boolean): void;
   destroy(): void;
 }
 
@@ -668,11 +672,15 @@ export function createKoineEditor(opts: KoineEditorOptions): KoineEditor {
     },
   ]);
 
+  // Soft-wrap lives in its own compartment so Settings can flip it without rebuilding the editor.
+  const lineWrap = new Compartment();
+
   const view = new EditorView({
     parent: opts.parent,
     state: EditorState.create({
       doc: opts.doc,
       extensions: [
+        lineWrap.of(opts.lineWrap ? EditorView.lineWrapping : []),
         lineNumbers(),
         highlightActiveLineGutter(),
         highlightActiveLine(),
@@ -729,6 +737,9 @@ export function createKoineEditor(opts: KoineEditorOptions): KoineEditor {
         }))
         .sort((a, b) => b.from - a.from);
       view.dispatch({ changes });
+    },
+    setLineWrap(on: boolean) {
+      view.dispatch({ effects: lineWrap.reconfigure(on ? EditorView.lineWrapping : []) });
     },
     destroy() {
       dismissFloating();
@@ -805,17 +816,21 @@ const langExt = (lang: OutputLang): Extension => {
 
 export interface OutputView {
   setContent(text: string, lang: OutputLang): void;
+  /** Turn soft-wrap on/off so the generated-output pane honours the Word wrap setting too. */
+  setLineWrap(on: boolean): void;
   destroy(): void;
 }
 
 /** A read-only, syntax-highlighted, line-numbered viewer for generated output. */
-export function createOutputView(parent: HTMLElement): OutputView {
+export function createOutputView(parent: HTMLElement, lineWrap = false): OutputView {
   const language = new Compartment();
+  const wrap = new Compartment();
   const view = new EditorView({
     parent,
     state: EditorState.create({
       doc: '',
       extensions: [
+        wrap.of(lineWrap ? EditorView.lineWrapping : []),
         lineNumbers(),
         EditorState.readOnly.of(true),
         EditorView.editable.of(false),
@@ -836,6 +851,9 @@ export function createOutputView(parent: HTMLElement): OutputView {
         changes: { from: 0, to: view.state.doc.length, insert: text },
         effects: language.reconfigure(langExt(lang)),
       });
+    },
+    setLineWrap(on: boolean) {
+      view.dispatch({ effects: wrap.reconfigure(on ? EditorView.lineWrapping : []) });
     },
     destroy: () => view.destroy(),
   };
