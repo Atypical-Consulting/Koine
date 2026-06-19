@@ -33,8 +33,4 @@
     background: var(--koi-surface);
     color: var(--koi-fg);
   }
-  &:disabled {
-    opacity: 0.45;
-    cursor: default;
-  }
 }

@@ -18,7 +18,6 @@
 @use './components/outline';
 @use './components/tooltip';
 @use './components/diagnostics';
-@use './layout/branded-header';
 @use './components/welcome';
 @use './components/command-palette';
 @use './components/modal';
@@ -26,13 +25,11 @@
 @use './components/settings';
 @use './components/help';
 @use './components/about';
-@use './layout/resizer';
 @use './components/glossary-readability';
 @use './components/copy-code-button';
 @use './components/welcome-atmosphere';
 @use './base/animations';
 @use './components/glossary-editor';
-@use './layout/inspector-tabs';
 @use './components/floating-menu';
 @use './components/diagrams';
 @use './components/ai-panel';

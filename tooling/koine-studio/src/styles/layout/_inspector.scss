@@ -13,45 +13,49 @@
   padding: 0 10px;
   background: var(--koi-paper-2);
   border-bottom: 1px solid var(--koi-line);
-}
+  overflow-x: auto;
+  overflow-y: hidden;
 
-#tabs .tab {
-  position: relative;
-  background: transparent;
-  color: var(--koi-muted);
-  border: none;
-  padding: 11px 12px 12px;
-  font-family: var(--koi-font-body);
-  font-size: 0.8rem;
-  font-weight: 500;
-  cursor: pointer;
-  transition: color 0.14s ease;
-}
+  .tab {
+    position: relative;
+    background: transparent;
+    color: var(--koi-muted);
+    border: none;
+    padding: 11px 12px 12px;
+    font-family: var(--koi-font-body);
+    font-size: 0.8rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: color 0.14s ease;
+    flex: 0 0 auto;
+    white-space: nowrap;
 
-/* The active tab is marked by a gradient underline that grows from the center. */
-#tabs .tab::after {
-  content: '';
-  position: absolute;
-  left: 10px;
-  right: 10px;
-  bottom: -1px;
-  height: 2px;
-  border-radius: 2px;
-  background: var(--koi-accent-grad);
-  transform: scaleX(0);
-  transition: transform 0.18s ease;
-}
+    /* The active tab is marked by a gradient underline that grows from the center. */
+    &::after {
+      content: '';
+      position: absolute;
+      left: 10px;
+      right: 10px;
+      bottom: -1px;
+      height: 2px;
+      border-radius: 2px;
+      background: var(--koi-accent-grad);
+      transform: scaleX(0);
+      transition: transform 0.18s ease;
+    }
 
-#tabs .tab:hover {
-  color: var(--koi-fg);
-}
+    &:hover {
+      color: var(--koi-fg);
+    }
 
-#tabs .tab[aria-selected='true'] {
-  color: var(--koi-fg);
-}
+    &[aria-selected='true'] {
+      color: var(--koi-fg);
 
-#tabs .tab[aria-selected='true']::after {
-  transform: scaleX(1);
+      &::after {
+        transform: scaleX(1);
+      }
+    }
+  }
 }
 
 .tab-refresh {
@@ -67,12 +71,12 @@
   line-height: 1;
   cursor: pointer;
   transition: color 0.12s ease, transform 0.3s ease, background 0.12s ease;
-}
 
-.tab-refresh:hover {
-  color: var(--koi-fg);
-  background: var(--koi-surface);
-  transform: rotate(90deg);
+  &:hover {
+    color: var(--koi-fg);
+    background: var(--koi-surface);
+    transform: rotate(90deg);
+  }
 }
 
 #views {
