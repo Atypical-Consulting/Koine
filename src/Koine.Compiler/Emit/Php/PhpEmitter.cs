@@ -1,4 +1,5 @@
 using Koine.Compiler.Ast;
+using Koine.Compiler.Emit.CSharp;
 
 namespace Koine.Compiler.Emit.Php;
 
@@ -41,6 +42,13 @@ public sealed partial class PhpEmitter : IEmitter
     public IReadOnlyList<EmittedFile> Emit(KoineModel model, SemanticModel? semantic)
     {
         ModelIndex index = (semantic ?? new SemanticModel(model)).Index;
+        var typeMapper = new PhpTypeMapper(index);
+
+        var emit = new PhpEmitContext(
+            index,
+            BuildEnumMemberMap(model),
+            OperatorNeedsAnalyzer.BuildAdditiveOperatorNeeds(model, index),
+            OperatorNeedsAnalyzer.BuildScalarOperatorNeeds(model, index));
 
         var files = new List<EmittedFile>();
 
@@ -49,12 +57,12 @@ public sealed partial class PhpEmitter : IEmitter
         files.Add(new EmittedFile("composer.json", PhpRuntime.ComposerJson));
         files.Add(new EmittedFile("phpstan.neon", PhpRuntime.PhpStanNeon));
 
-        // 2. Per-type dispatch (no-op in Task 1; populated in later tasks).
+        // 2. Per-type dispatch: value objects and quantities in Task 5; other constructs are no-ops.
         foreach (ContextNode ctx in model.Contexts)
         {
             foreach (TypeDecl type in ctx.Types)
             {
-                EmitType(files, type, ctx.Name, index);
+                EmitType(emit, files, type, ctx.Name, typeMapper);
             }
         }
 
@@ -63,15 +71,25 @@ public sealed partial class PhpEmitter : IEmitter
 
     /// <summary>
     /// Dispatches a single <see cref="TypeDecl"/> to its construct emitter.
-    /// In Task 1 this is a no-op; subsequent tasks will add emit logic for each construct.
+    /// Value objects and quantities emit in Task 5; other construct kinds are no-ops until
+    /// their respective tasks land.
     /// </summary>
-    private static void EmitType(
-        List<EmittedFile> files, TypeDecl type, string contextName, ModelIndex index)
+    private void EmitType(
+        PhpEmitContext emit, List<EmittedFile> files, TypeDecl type, string contextName, PhpTypeMapper typeMapper)
     {
-        // no-op for Task 1 — per-type emit arrives in later tasks
-        _ = files;
-        _ = type;
-        _ = contextName;
-        _ = index;
+        switch (type)
+        {
+            case ValueObjectDecl vo:
+                files.Add(EmitValueObject(emit, vo, contextName, typeMapper));
+                break;
+            case AggregateDecl agg:
+                // Recurse into aggregate-nested types (entities, events) — no-ops for now.
+                foreach (TypeDecl nested in agg.Types)
+                {
+                    EmitType(emit, files, nested, contextName, typeMapper);
+                }
+                break;
+            // EnumDecl, EntityDecl, EventDecl, IntegrationEventDecl → no-op until later tasks.
+        }
     }
 }
