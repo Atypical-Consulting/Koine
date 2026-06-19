@@ -11,30 +11,28 @@ public class SemanticTokenProviderTests
     [Fact]
     public void Legend_lists_the_expected_token_types_and_modifiers()
     {
-        Assert.Equal(
-            new[] { "type", "enum", "enumMember", "property", "keyword", "parameter" },
-            SemanticTokenProvider.TokenTypeNames);
-        Assert.Equal(new[] { "declaration" }, SemanticTokenProvider.TokenModifierNames);
+        SemanticTokenProvider.TokenTypeNames.ShouldBe(new[] { "type", "enum", "enumMember", "property", "keyword", "parameter" });
+        SemanticTokenProvider.TokenModifierNames.ShouldBe(new[] { "declaration" });
     }
 
     [Fact]
     public void Legend_order_matches_the_enum_numeric_values()
     {
         // The LSP shell emits the enum's int value as the legend index, so they must agree.
-        Assert.Equal("type", SemanticTokenProvider.TokenTypeNames[(int)SemanticTokenType.Type]);
-        Assert.Equal("enum", SemanticTokenProvider.TokenTypeNames[(int)SemanticTokenType.Enum]);
-        Assert.Equal("enumMember", SemanticTokenProvider.TokenTypeNames[(int)SemanticTokenType.EnumMember]);
-        Assert.Equal("property", SemanticTokenProvider.TokenTypeNames[(int)SemanticTokenType.Property]);
-        Assert.Equal("keyword", SemanticTokenProvider.TokenTypeNames[(int)SemanticTokenType.Keyword]);
-        Assert.Equal("parameter", SemanticTokenProvider.TokenTypeNames[(int)SemanticTokenType.Parameter]);
-        Assert.Equal("declaration", SemanticTokenProvider.TokenModifierNames[(int)SemanticTokenModifier.Declaration]);
+        SemanticTokenProvider.TokenTypeNames[(int)SemanticTokenType.Type].ShouldBe("type");
+        SemanticTokenProvider.TokenTypeNames[(int)SemanticTokenType.Enum].ShouldBe("enum");
+        SemanticTokenProvider.TokenTypeNames[(int)SemanticTokenType.EnumMember].ShouldBe("enumMember");
+        SemanticTokenProvider.TokenTypeNames[(int)SemanticTokenType.Property].ShouldBe("property");
+        SemanticTokenProvider.TokenTypeNames[(int)SemanticTokenType.Keyword].ShouldBe("keyword");
+        SemanticTokenProvider.TokenTypeNames[(int)SemanticTokenType.Parameter].ShouldBe("parameter");
+        SemanticTokenProvider.TokenModifierNames[(int)SemanticTokenModifier.Declaration].ShouldBe("declaration");
     }
 
     [Fact]
     public void Broken_document_yields_no_tokens()
     {
         // A value with no name does not parse: degrade gracefully to an empty token set.
-        Assert.Empty(Tokenize("context C {\n  value {\n  }\n}\n"));
+        Tokenize("context C {\n  value {\n  }\n}\n").ShouldBeEmpty();
     }
 
     [Fact]
@@ -45,9 +43,9 @@ public class SemanticTokenProviderTests
 
         // "Money" is declared on line 2 (0-based line 1) at column 8 ("  value ").
         var money = tokens.Single(t => t.Line == 1 && t.StartChar == 8);
-        Assert.Equal(SemanticTokenType.Type, money.Type);
-        Assert.Equal("Money".Length, money.Length);
-        Assert.Equal(1 << (int)SemanticTokenModifier.Declaration, money.Modifiers);
+        money.Type.ShouldBe(SemanticTokenType.Type);
+        money.Length.ShouldBe("Money".Length);
+        money.Modifiers.ShouldBe(1 << (int)SemanticTokenModifier.Declaration);
     }
 
     [Fact]
@@ -59,9 +57,9 @@ public class SemanticTokenProviderTests
         // "amount" is the member name; "Decimal" its (primitive) type.
         var amount = tokens.Single(t => t.Line == 1 && t.Length == "amount".Length
             && t.Type == SemanticTokenType.Property);
-        Assert.Equal(1 << (int)SemanticTokenModifier.Declaration, amount.Modifiers);
+        amount.Modifiers.ShouldBe(1 << (int)SemanticTokenModifier.Declaration);
 
-        Assert.Contains(tokens, t => t.Length == "Decimal".Length && t.Type == SemanticTokenType.Type);
+        tokens.ShouldContain(t => t.Length == "Decimal".Length && t.Type == SemanticTokenType.Type);
     }
 
     [Fact]
@@ -73,7 +71,7 @@ public class SemanticTokenProviderTests
         // "Money" referenced on line 3 (0-based 2) as the field type of price.
         var reference = tokens.Single(t => t.Line == 2 && t.Length == "Money".Length
             && t.Type == SemanticTokenType.Type);
-        Assert.Equal(0, reference.Modifiers); // a reference carries no declaration modifier
+        reference.Modifiers.ShouldBe(0); // a reference carries no declaration modifier
     }
 
     [Fact]
@@ -82,9 +80,9 @@ public class SemanticTokenProviderTests
         var src = "context C {\n  enum Status { Draft, Active }\n}\n";
         var tokens = Tokenize(src);
 
-        Assert.Contains(tokens, t => t.Length == "Status".Length && t.Type == SemanticTokenType.Enum);
-        Assert.Contains(tokens, t => t.Length == "Draft".Length && t.Type == SemanticTokenType.EnumMember);
-        Assert.Contains(tokens, t => t.Length == "Active".Length && t.Type == SemanticTokenType.EnumMember);
+        tokens.ShouldContain(t => t.Length == "Status".Length && t.Type == SemanticTokenType.Enum);
+        tokens.ShouldContain(t => t.Length == "Draft".Length && t.Type == SemanticTokenType.EnumMember);
+        tokens.ShouldContain(t => t.Length == "Active".Length && t.Type == SemanticTokenType.EnumMember);
     }
 
     [Fact]
@@ -95,7 +93,7 @@ public class SemanticTokenProviderTests
         var tokens = Tokenize(src);
 
         // "base" is an operation parameter (declared) — must be a parameter token.
-        Assert.Contains(tokens, t => t.Length == "base".Length && t.Type == SemanticTokenType.Parameter);
+        tokens.ShouldContain(t => t.Length == "base".Length && t.Type == SemanticTokenType.Parameter);
     }
 
     [Fact]
@@ -109,7 +107,7 @@ public class SemanticTokenProviderTests
             var prev = tokens[i - 1];
             var cur = tokens[i];
             var ordered = cur.Line > prev.Line || (cur.Line == prev.Line && cur.StartChar >= prev.StartChar);
-            Assert.True(ordered, "tokens must be ascending by (line, startChar)");
+            ordered.ShouldBeTrue("tokens must be ascending by (line, startChar)");
         }
     }
 
@@ -124,13 +122,13 @@ public class SemanticTokenProviderTests
         };
         var data = SemanticTokenProvider.Encode(tokens);
 
-        Assert.Equal(tokens.Length * 5, data.Count);
+        data.Count.ShouldBe(tokens.Length * 5);
 
         // First token: absolute (deltaLine=1, deltaStart=8, len=5, type=0=Type, mod=1).
-        Assert.Equal(new[] { 1, 8, 5, 0, 1 }, data.Take(5));
+        data.Take(5).ShouldBe(new[] { 1, 8, 5, 0, 1 });
         // Second token on the same line: deltaLine=0, deltaStart relative (15-8=7), type=3=Property.
-        Assert.Equal(new[] { 0, 7, 6, 3, 0 }, data.Skip(5).Take(5));
+        data.Skip(5).Take(5).ShouldBe(new[] { 0, 7, 6, 3, 0 });
         // Third token on a new line: deltaLine=2, deltaStart absolute (2), type=0=Type.
-        Assert.Equal(new[] { 2, 2, 4, 0, 0 }, data.Skip(10).Take(5));
+        data.Skip(10).Take(5).ShouldBe(new[] { 2, 2, 4, 0, 0 });
     }
 }

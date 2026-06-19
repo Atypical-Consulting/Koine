@@ -13,9 +13,9 @@ public class R13ModulesImportsTests
     private static (Assembly Asm, IReadOnlyList<Emit.EmittedFile> Files) Build(params SourceFile[] files)
     {
         var result = new KoineCompiler().Compile(files, new CSharpEmitter());
-        Assert.True(result.Success, string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
         var (asm, errors) = TestSupport.Compile(result.Files);
-        Assert.True(asm is not null, "generated C# failed to compile:\n" + string.Join("\n", errors));
+        (asm is not null).ShouldBeTrue("generated C# failed to compile:\n" + string.Join("\n", errors));
         return (asm!, result.Files);
     }
 
@@ -35,15 +35,15 @@ public class R13ModulesImportsTests
             new SourceFile("billing/order.koi", "context Billing {\n  entity Order identified by OrderId { total: Money }\n}\n"));
 
         // Both types live in one merged Billing namespace, cross-referencing freely.
-        Assert.NotNull(asm.GetType("Billing.Money"));
-        Assert.NotNull(asm.GetType("Billing.Order"));
+        asm.GetType("Billing.Money").ShouldNotBeNull();
+        asm.GetType("Billing.Order").ShouldNotBeNull();
     }
 
     [Fact]
     public void A_single_file_still_compiles_backward_compatible()
     {
         var (asm, _) = Build("context C {\n  value V { n: Int }\n}\n");
-        Assert.NotNull(asm.GetType("C.V"));
+        asm.GetType("C.V").ShouldNotBeNull();
     }
 
     [Fact]
@@ -55,9 +55,9 @@ public class R13ModulesImportsTests
             new SourceFile("good.koi", "context A {\n  value V { n: Int }\n}\n"),
             new SourceFile("bad.koi", "context B {\n  value W { n: !!! }\n}\n"),
         });
-        Assert.Null(model);
-        Assert.Contains(diags, d => d.Code == DiagnosticCodes.SyntaxError && d.File == "bad.koi");
-        Assert.DoesNotContain(diags, d => d.File == "good.koi");
+        model.ShouldBeNull();
+        diags.ShouldContain(d => d.Code == DiagnosticCodes.SyntaxError && d.File == "bad.koi");
+        diags.ShouldNotContain(d => d.File == "good.koi");
     }
 
     [Fact]
@@ -69,7 +69,7 @@ public class R13ModulesImportsTests
             new SourceFile("a.koi", "context A {\n  value V { x: Nope }\n}\n"),
         });
         var diags = new Koine.Compiler.Semantics.SemanticValidator().Validate(model!);
-        Assert.Contains(diags, d => d.Code == DiagnosticCodes.UnknownType && d.File == "a.koi");
+        diags.ShouldContain(d => d.Code == DiagnosticCodes.UnknownType && d.File == "a.koi");
     }
 
     // ---- R13.2 — imports & qualified references ---------------------------
@@ -80,13 +80,13 @@ public class R13ModulesImportsTests
     public void Named_import_resolves_and_emits_a_precise_using()
     {
         var (_, files) = Build(Shared + "context Sales {\n  import Billing.{ Money }\n  value Quote { price: Money }\n}\n");
-        Assert.Contains("using Billing;", FileContents(files, "Sales/ValueObjects/Quote.cs"));
+        FileContents(files, "Sales/ValueObjects/Quote.cs").ShouldContain("using Billing;");
     }
 
     [Fact]
     public void Wildcard_import_resolves()
     {
-        Assert.Empty(Diagnose(Shared + "context Sales {\n  import Billing.*\n  value Quote { price: Money }\n}\n"));
+        Diagnose(Shared + "context Sales {\n  import Billing.*\n  value Quote { price: Money }\n}\n").ShouldBeEmpty();
     }
 
     [Fact]
@@ -94,15 +94,14 @@ public class R13ModulesImportsTests
     {
         var (_, files) = Build(Shared + "context Sales {\n  value Quote { price: Billing.Money }\n}\n");
         var quote = FileContents(files, "Sales/ValueObjects/Quote.cs");
-        Assert.Contains("Billing.Money Price", quote);
-        Assert.DoesNotContain("using Billing;", quote); // fully-qualified needs no using
+        quote.ShouldContain("Billing.Money Price");
+        quote.ShouldNotContain("using Billing;"); // fully-qualified needs no using
     }
 
     [Fact]
     public void Un_imported_cross_context_reference_is_reported()
     {
-        Assert.Contains(Diagnose(Shared + "context Sales {\n  value Quote { price: Money }\n}\n"),
-            d => d.Code == DiagnosticCodes.UnimportedReference);
+        Diagnose(Shared + "context Sales {\n  value Quote { price: Money }\n}\n").ShouldContain(d => d.Code == DiagnosticCodes.UnimportedReference);
     }
 
     [Fact]
@@ -112,7 +111,7 @@ public class R13ModulesImportsTests
             "context A {\n  value Money { a: Decimal }\n}\n" +
             "context B {\n  value Money { a: Decimal }\n}\n" +
             "context C {\n  import A.*\n  import B.*\n  value Q { m: Money }\n}\n";
-        Assert.Contains(Diagnose(src), d => d.Code == DiagnosticCodes.AmbiguousReference);
+        Diagnose(src).ShouldContain(d => d.Code == DiagnosticCodes.AmbiguousReference);
     }
 
     [Fact]
@@ -122,8 +121,8 @@ public class R13ModulesImportsTests
         var (asm, _) = Build(
             "context A {\n  value Money { a: Decimal }\n}\n" +
             "context B {\n  value Money { a: Decimal }\n}\n");
-        Assert.NotNull(asm.GetType("A.Money"));
-        Assert.NotNull(asm.GetType("B.Money"));
+        asm.GetType("A.Money").ShouldNotBeNull();
+        asm.GetType("B.Money").ShouldNotBeNull();
     }
 
     [Fact]
@@ -139,30 +138,27 @@ public class R13ModulesImportsTests
               value Money { cents: Int }
             }
             """;
-        Assert.Empty(Diagnose(src));
+        Diagnose(src).ShouldBeEmpty();
         var (_, files) = Build(src);
-        Assert.Contains("M.Amount", FileContents(files, "A/ValueObjects/Wallet.cs"));
+        FileContents(files, "A/ValueObjects/Wallet.cs").ShouldContain("M.Amount");
     }
 
     [Fact]
     public void Importing_an_unknown_context_is_reported()
     {
-        Assert.Contains(Diagnose("context C {\n  import Nope.{ X }\n  value V { n: Int }\n}\n"),
-            d => d.Code == DiagnosticCodes.UnknownContext);
+        Diagnose("context C {\n  import Nope.{ X }\n  value V { n: Int }\n}\n").ShouldContain(d => d.Code == DiagnosticCodes.UnknownContext);
     }
 
     [Fact]
     public void Importing_a_non_exported_name_is_reported()
     {
-        Assert.Contains(Diagnose(Shared + "context Sales {\n  import Billing.{ Nope }\n  value V { n: Int }\n}\n"),
-            d => d.Code == DiagnosticCodes.NotExported);
+        Diagnose(Shared + "context Sales {\n  import Billing.{ Nope }\n  value V { n: Int }\n}\n").ShouldContain(d => d.Code == DiagnosticCodes.NotExported);
     }
 
     [Fact]
     public void A_qualified_reference_to_an_unknown_context_is_reported()
     {
-        Assert.Contains(Diagnose("context C {\n  value V { x: Nope.Money }\n}\n"),
-            d => d.Code == DiagnosticCodes.UnknownContext);
+        Diagnose("context C {\n  value V { x: Nope.Money }\n}\n").ShouldContain(d => d.Code == DiagnosticCodes.UnknownContext);
     }
 
     // ---- R13.3 — modules --------------------------------------------------
@@ -176,11 +172,11 @@ public class R13ModulesImportsTests
               module Pricing { value Money { amount: Decimal  currency: Currency } }
             }
             """);
-        Assert.Contains(files, f => f.RelativePath == "Billing/Pricing/ValueObjects/Money.cs");
-        Assert.Contains("namespace Billing.Pricing;", FileContents(files, "Billing/Pricing/ValueObjects/Money.cs"));
-        Assert.NotNull(asm.GetType("Billing.Pricing.Money"));
+        files.ShouldContain(f => f.RelativePath == "Billing/Pricing/ValueObjects/Money.cs");
+        FileContents(files, "Billing/Pricing/ValueObjects/Money.cs").ShouldContain("namespace Billing.Pricing;");
+        asm.GetType("Billing.Pricing.Money").ShouldNotBeNull();
         // Currency is in the base namespace; the module file imports it precisely.
-        Assert.Contains("using Billing;", FileContents(files, "Billing/Pricing/ValueObjects/Money.cs"));
+        FileContents(files, "Billing/Pricing/ValueObjects/Money.cs").ShouldContain("using Billing;");
     }
 
     [Fact]
@@ -193,9 +189,9 @@ public class R13ModulesImportsTests
             }
             """);
         var invoice = FileContents(files, "Billing/Invoicing/Entities/Invoice.cs");
-        Assert.Contains("namespace Billing.Invoicing;", invoice);
-        Assert.Contains("using Billing.Pricing;", invoice);
-        Assert.NotNull(asm.GetType("Billing.Invoicing.Invoice"));
+        invoice.ShouldContain("namespace Billing.Invoicing;");
+        invoice.ShouldContain("using Billing.Pricing;");
+        asm.GetType("Billing.Invoicing.Invoice").ShouldNotBeNull();
     }
 
     [Fact]
@@ -206,15 +202,15 @@ public class R13ModulesImportsTests
               module Outer { module Inner { value V { n: Int } } }
             }
             """);
-        Assert.Contains(files, f => f.RelativePath == "C/Outer/Inner/ValueObjects/V.cs");
-        Assert.NotNull(asm.GetType("C.Outer.Inner.V"));
+        files.ShouldContain(f => f.RelativePath == "C/Outer/Inner/ValueObjects/V.cs");
+        asm.GetType("C.Outer.Inner.V").ShouldNotBeNull();
     }
 
     [Fact]
     public void A_module_sharing_a_name_with_a_type_is_reported()
     {
         const string src = "context C {\n  value Pricing { n: Int }\n  module Pricing { value M { a: Decimal } }\n}\n";
-        Assert.Contains(Diagnose(src), d => d.Code == DiagnosticCodes.ModuleNameCollision);
+        Diagnose(src).ShouldContain(d => d.Code == DiagnosticCodes.ModuleNameCollision);
     }
 
     [Fact]
@@ -226,7 +222,7 @@ public class R13ModulesImportsTests
             new SourceFile("a.koi", "context C {\n  value Pricing { n: Int }\n}\n"),
             new SourceFile("b.koi", "context C {\n  module Pricing { value M { a: Decimal } }\n}\n"),
         }, new CSharpEmitter());
-        Assert.Contains(result.Diagnostics, d => d.Code == DiagnosticCodes.ModuleNameCollision);
+        result.Diagnostics.ShouldContain(d => d.Code == DiagnosticCodes.ModuleNameCollision);
     }
 
     [Fact]
@@ -243,11 +239,11 @@ public class R13ModulesImportsTests
               }
             }
             """);
-        Assert.Contains(files, f => f.RelativePath == "Billing/Invoicing/Repositories/IOrderRepository.cs");
-        Assert.Contains("Billing.Invoicing.IOrderRepository Orders { get; }", FileContents(files, "Billing/Abstractions/IUnitOfWork.cs"));
-        Assert.Contains(files, f => f.RelativePath == "Billing/ValueObjects/OrderId.cs"); // ID in BASE namespace
-        Assert.NotNull(asm.GetType("Billing.Invoicing.Order"));
-        Assert.NotNull(asm.GetType("Billing.IUnitOfWork"));
+        files.ShouldContain(f => f.RelativePath == "Billing/Invoicing/Repositories/IOrderRepository.cs");
+        FileContents(files, "Billing/Abstractions/IUnitOfWork.cs").ShouldContain("Billing.Invoicing.IOrderRepository Orders { get; }");
+        files.ShouldContain(f => f.RelativePath == "Billing/ValueObjects/OrderId.cs"); // ID in BASE namespace
+        asm.GetType("Billing.Invoicing.Order").ShouldNotBeNull();
+        asm.GetType("Billing.IUnitOfWork").ShouldNotBeNull();
     }
 
     [Fact]
@@ -263,7 +259,7 @@ public class R13ModulesImportsTests
               value Money { amount: Int }
             }
             """);
-        Assert.Contains("public sealed record MoneyView(decimal Amount);", FileContents(files, "A/ReadModels/MoneyView.cs"));
+        FileContents(files, "A/ReadModels/MoneyView.cs").ShouldContain("public sealed record MoneyView(decimal Amount);");
     }
 
     [Fact]
@@ -278,7 +274,7 @@ public class R13ModulesImportsTests
               value Money { cents: Int }
             }
             """;
-        Assert.Empty(Diagnose(src)); // A.Money has `amount`; the global B.Money must not shadow it
+        Diagnose(src).ShouldBeEmpty(); // A.Money has `amount`; the global B.Money must not shadow it
     }
 
     // ---- soft keywords -----------------------------------------------------
@@ -286,6 +282,6 @@ public class R13ModulesImportsTests
     [Fact]
     public void New_keywords_remain_usable_as_field_names()
     {
-        Assert.Empty(Diagnose("context C {\n  value V { import: Int  module: Int }\n}\n"));
+        Diagnose("context C {\n  value V { import: Int  module: Int }\n}\n").ShouldBeEmpty();
     }
 }

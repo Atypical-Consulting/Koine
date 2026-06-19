@@ -14,8 +14,8 @@ public class NodeAtNavigationTests
     private static SemanticModel Build(string src)
     {
         var (model, diagnostics) = new KoineCompiler().Parse(src);
-        Assert.Empty(diagnostics);
-        Assert.NotNull(model);
+        diagnostics.ShouldBeEmpty();
+        model.ShouldNotBeNull();
         return new SemanticModel(model!);
     }
 
@@ -32,15 +32,15 @@ public class NodeAtNavigationTests
         // Offset of "amount" inside the spec body.
         var offset = Src.IndexOf("amount > 0", StringComparison.Ordinal);
         var node = sema.NodeAt(offset);
-        var id = Assert.IsType<IdentifierExpr>(node);
-        Assert.Equal("amount", id.Name);
+        var id = node.ShouldBeOfType<IdentifierExpr>();
+        id.Name.ShouldBe("amount");
     }
 
     [Fact]
     public void NodeAt_returns_null_outside_any_node()
     {
         var sema = Build(Src);
-        Assert.Null(sema.NodeAt(int.MaxValue));
+        sema.NodeAt(int.MaxValue).ShouldBeNull();
     }
 
     [Fact]
@@ -48,11 +48,11 @@ public class NodeAtNavigationTests
     {
         var sema = Build(Src);
         var offset = Src.IndexOf("amount > 0", StringComparison.Ordinal);
-        var sym = Assert.IsType<MemberSymbol>(sema.DefinitionAt(offset));
-        Assert.Equal("amount", sym.Name);
-        Assert.Equal("Money", sym.OwnerType);
+        var sym = sema.DefinitionAt(offset).ShouldBeOfType<MemberSymbol>();
+        sym.Name.ShouldBe("amount");
+        sym.OwnerType.ShouldBe("Money");
         // Lands on the field's NAME (line 2, 1-based).
-        Assert.Equal(2, sym.DeclSpan.Line);
+        sym.DeclSpan.Line.ShouldBe(2);
     }
 
     [Fact]
@@ -67,9 +67,9 @@ public class NodeAtNavigationTests
             "}\n";
         var sema = Build(src);
         var off = src.IndexOf("amount / 2", StringComparison.Ordinal);
-        var sym = Assert.IsType<MemberSymbol>(sema.DefinitionAt(off));
-        Assert.Equal("amount", sym.Name);
-        Assert.Equal("Money", sym.OwnerType);
+        var sym = sema.DefinitionAt(off).ShouldBeOfType<MemberSymbol>();
+        sym.Name.ShouldBe("amount");
+        sym.OwnerType.ShouldBe("Money");
     }
 
     [Fact]
@@ -82,7 +82,7 @@ public class NodeAtNavigationTests
             "}\n";
         var sema = Build(src);
         var off = src.IndexOf("price: Money", StringComparison.Ordinal) + "price: ".Length;
-        var sym = Assert.IsType<TypeSymbol>(sema.DefinitionAt(off));
-        Assert.Equal("Money", sym.Name);
+        var sym = sema.DefinitionAt(off).ShouldBeOfType<TypeSymbol>();
+        sym.Name.ShouldBe("Money");
     }
 }

@@ -49,7 +49,7 @@ public class PythonConformanceTests
             return;
         }
 
-        Assert.True(r.Ok, string.Join("\n", r.Errors));
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
     }
 
     /// <summary>
@@ -72,17 +72,17 @@ public class PythonConformanceTests
             return;
         }
 
-        Assert.False(r.Ok);
-        Assert.NotEmpty(r.Errors);
+        r.Ok.ShouldBeFalse();
+        r.Errors.ShouldNotBeEmpty();
     }
 
     /// <summary>A missing toolchain yields an inconclusive-shaped result rather than a false pass.</summary>
     [Fact]
     public void Skipped_result_does_not_claim_success()
     {
-        Assert.False(TestSupport.PythonCheck.Skipped.ToolchainAvailable);
-        Assert.False(TestSupport.PythonCheck.Skipped.Ok);
-        Assert.Empty(TestSupport.PythonCheck.Skipped.Errors);
+        TestSupport.PythonCheck.Skipped.ToolchainAvailable.ShouldBeFalse();
+        TestSupport.PythonCheck.Skipped.Ok.ShouldBeFalse();
+        TestSupport.PythonCheck.Skipped.Errors.ShouldBeEmpty();
     }
 
     /// <summary>
@@ -111,7 +111,7 @@ public class PythonConformanceTests
             return;
         }
 
-        Assert.True(r.Ok, string.Join("\n", r.Errors));
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
     }
 
     /// <summary>
@@ -126,7 +126,7 @@ public class PythonConformanceTests
     public void Emitted_python_typechecks_under_strict()
     {
         var result = new KoineCompiler().Compile(PythonSnapshotTests.Fixture, new PythonEmitter());
-        Assert.True(result.Success, string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
 
         TestSupport.PythonCheck syntax = TestSupport.SyntaxCheckPython(result.Files);
         if (!syntax.ToolchainAvailable)
@@ -135,7 +135,7 @@ public class PythonConformanceTests
         }
         else
         {
-            Assert.True(syntax.Ok, "emitted Python should parse (ast.parse):\n" + string.Join("\n", syntax.Errors));
+            syntax.Ok.ShouldBeTrue("emitted Python should parse (ast.parse):\n" + string.Join("\n", syntax.Errors));
         }
 
         TestSupport.PythonCheck types = TestSupport.TypeCheckPython(result.Files);
@@ -145,7 +145,7 @@ public class PythonConformanceTests
             return;
         }
 
-        Assert.True(types.Ok, "emitted Python should type-check under mypy --strict:\n" + string.Join("\n", types.Errors));
+        types.Ok.ShouldBeTrue("emitted Python should type-check under mypy --strict:\n" + string.Join("\n", types.Errors));
     }
 
     /// <summary>
@@ -186,28 +186,28 @@ public class PythonConformanceTests
             """;
 
         var result = new KoineCompiler().Compile(source, new PythonEmitter());
-        Assert.True(result.Success, string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
 
         // The versioned root carries `version` and is marked an AggregateRoot; the repository is an
         // async Protocol. Assert the emitted shapes regardless of toolchain availability.
         var root = FileText(result.Files, "inventory/stock.py");
-        Assert.Contains("version: int = 0", root);
-        Assert.Contains("_AGGREGATE_ROOT_CHECK: type[AggregateRoot] = Stock", root);
+        root.ShouldContain("version: int = 0");
+        root.ShouldContain("_AGGREGATE_ROOT_CHECK: type[AggregateRoot] = Stock");
 
         var repo = FileText(result.Files, "inventory/repositories/stock_repository.py");
-        Assert.Contains("class StockRepository(Protocol):", repo);
-        Assert.Contains("async def get(self, id: StockId) -> Stock | None: ...", repo);
-        Assert.Contains("async def save(self, aggregate: Stock) -> None: ...", repo);
-        Assert.Contains("async def by_sku(self, sku: str) -> Stock | None: ...", repo);
+        repo.ShouldContain("class StockRepository(Protocol):");
+        repo.ShouldContain("async def get(self, id: StockId) -> Stock | None: ...");
+        repo.ShouldContain("async def save(self, aggregate: Stock) -> None: ...");
+        repo.ShouldContain("async def by_sku(self, sku: str) -> Stock | None: ...");
 
         var domainService = FileText(result.Files, "inventory/reorder_policy.py");
-        Assert.Contains("class ReorderPolicy(Protocol):", domainService);
-        Assert.Contains("def needs_reorder(self, level: int, threshold: int) -> bool:", domainService);
+        domainService.ShouldContain("class ReorderPolicy(Protocol):");
+        domainService.ShouldContain("def needs_reorder(self, level: int, threshold: int) -> bool:");
 
         var appService = FileText(result.Files, "inventory/stock_app_service.py");
-        Assert.Contains("class StockAppService(Protocol):", appService);
-        Assert.Contains("async def adjust_level(self, stock: StockId, delta: int) -> StockId: ...", appService);
-        Assert.Contains("async def retire(self, stock: StockId) -> None: ...", appService);
+        appService.ShouldContain("class StockAppService(Protocol):");
+        appService.ShouldContain("async def adjust_level(self, stock: StockId, delta: int) -> StockId: ...");
+        appService.ShouldContain("async def retire(self, stock: StockId) -> None: ...");
 
         AssertStrictlyTypeChecks(result.Files);
     }
@@ -255,18 +255,18 @@ public class PythonConformanceTests
             """;
 
         var result = new KoineCompiler().Compile(source, new PythonEmitter());
-        Assert.True(result.Success, string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
 
         // The cross-context `Sku` resolves to Catalog's real module — in the value object and the repo.
         var line = FileText(result.Files, "sales/value_objects/basket_line.py");
-        Assert.Contains("from catalog.value_objects.sku import Sku", line);
+        line.ShouldContain("from catalog.value_objects.sku import Sku");
 
         var repo = FileText(result.Files, "sales/repositories/basket_repository.py");
-        Assert.Contains("from catalog.value_objects.sku import Sku", repo);
-        Assert.Contains("async def by_sku(self, sku: Sku) -> tuple[Basket, ...]: ...", repo);
+        repo.ShouldContain("from catalog.value_objects.sku import Sku");
+        repo.ShouldContain("async def by_sku(self, sku: Sku) -> tuple[Basket, ...]: ...");
 
         // The root emits at the context package root (not under entities/).
-        Assert.Contains(result.Files, f => f.RelativePath == "sales/basket.py");
+        result.Files.ShouldContain(f => f.RelativePath == "sales/basket.py");
 
         AssertStrictlyTypeChecks(result.Files);
     }
@@ -306,13 +306,13 @@ public class PythonConformanceTests
             """;
 
         var result = new KoineCompiler().Compile(source, new PythonEmitter());
-        Assert.True(result.Success, string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
 
         // The emitted entity must contain the CORRECT qualified default: ShipmentStatus.PENDING,
         // not RefundStatus.PENDING (which was the bug).
         var shipment = FileText(result.Files, "shipping/shipment.py");
-        Assert.Contains("ShipmentStatus.PENDING", shipment);
-        Assert.DoesNotContain("RefundStatus.PENDING", shipment);
+        shipment.ShouldContain("ShipmentStatus.PENDING");
+        shipment.ShouldNotContain("RefundStatus.PENDING");
 
         // Also gate with the toolchain: syntax + mypy --strict must pass.
         TestSupport.PythonCheck syntax = TestSupport.SyntaxCheckPython(result.Files);
@@ -322,7 +322,7 @@ public class PythonConformanceTests
         }
         else
         {
-            Assert.True(syntax.Ok, "emitted Python should parse (ast.parse):\n" + string.Join("\n", syntax.Errors));
+            syntax.Ok.ShouldBeTrue("emitted Python should parse (ast.parse):\n" + string.Join("\n", syntax.Errors));
         }
 
         TestSupport.PythonCheck types = TestSupport.TypeCheckPython(result.Files);
@@ -332,14 +332,14 @@ public class PythonConformanceTests
             return;
         }
 
-        Assert.True(types.Ok, "emitted Python should type-check under mypy --strict:\n" + string.Join("\n", types.Errors));
+        types.Ok.ShouldBeTrue("emitted Python should type-check under mypy --strict:\n" + string.Join("\n", types.Errors));
     }
 
     /// <summary>The full text of an emitted file, by relative path (fails the test if absent).</summary>
     private static string FileText(IReadOnlyList<EmittedFile> files, string relativePath)
     {
         EmittedFile? file = files.FirstOrDefault(f => f.RelativePath == relativePath);
-        Assert.True(file is not null, $"expected an emitted file at '{relativePath}'");
+        (file is not null).ShouldBeTrue($"expected an emitted file at '{relativePath}'");
         return file!.Contents;
     }
 
@@ -356,7 +356,7 @@ public class PythonConformanceTests
         }
         else
         {
-            Assert.True(syntax.Ok, "emitted Python should parse (ast.parse):\n" + string.Join("\n", syntax.Errors));
+            syntax.Ok.ShouldBeTrue("emitted Python should parse (ast.parse):\n" + string.Join("\n", syntax.Errors));
         }
 
         TestSupport.PythonCheck types = TestSupport.TypeCheckPython(files);
@@ -366,6 +366,6 @@ public class PythonConformanceTests
             return;
         }
 
-        Assert.True(types.Ok, "emitted Python should type-check under mypy --strict:\n" + string.Join("\n", types.Errors));
+        types.Ok.ShouldBeTrue("emitted Python should type-check under mypy --strict:\n" + string.Join("\n", types.Errors));
     }
 }

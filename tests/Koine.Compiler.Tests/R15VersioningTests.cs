@@ -14,9 +14,9 @@ public class R15VersioningTests
     private static (Assembly Asm, IReadOnlyList<Emit.EmittedFile> Files) Build(string source)
     {
         var result = new KoineCompiler().Compile(source, new CSharpEmitter());
-        Assert.True(result.Success, string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
         var (asm, errors) = TestSupport.Compile(result.Files);
-        Assert.True(asm is not null, "generated C# failed to compile:\n" + string.Join("\n", errors));
+        (asm is not null).ShouldBeTrue("generated C# failed to compile:\n" + string.Join("\n", errors));
         return (asm!, result.Files);
     }
 
@@ -26,7 +26,7 @@ public class R15VersioningTests
     private static string Glossary(string source)
     {
         var result = new KoineCompiler().Compile(source, new GlossaryEmitter());
-        Assert.True(result.Success, string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
         return result.Files.Single().Contents;
     }
 
@@ -41,32 +41,32 @@ public class R15VersioningTests
             }
             """);
         // Nothing about the version leaks into the C# type itself.
-        Assert.Contains("public sealed class Money", FileContents(files, "Sales/ValueObjects/Money.cs"));
+        FileContents(files, "Sales/ValueObjects/Money.cs").ShouldContain("public sealed class Money");
     }
 
     [Fact]
     public void Version_since_and_deprecated_remain_usable_as_field_names()
     {
         // The new keywords are soft: they may still name fields.
-        Assert.Empty(Diagnose("""
+        Diagnose("""
             context Inventory {
               value Tag { version: Int since: Int deprecated: String }
             }
-            """));
+            """).ShouldBeEmpty();
     }
 
     [Fact]
     public void An_oversized_version_or_since_literal_does_not_crash_the_compiler()
     {
         // `[0-9]+` admits literals far beyond int range; parsing must degrade, not throw.
-        Assert.Empty(Diagnose("""
+        Diagnose("""
             context Sales version 99999999999999999999 {
               value Money {
                 amount: Decimal
                 @since(88888888888888888888) bonus: Decimal
               }
             }
-            """));
+            """).ShouldBeEmpty();
     }
 
     // ---- C# emission: [Obsolete] -------------------------------------------
@@ -83,8 +83,8 @@ public class R15VersioningTests
             }
             """);
         var money = FileContents(files, "Sales/ValueObjects/Money.cs");
-        Assert.Contains("[Obsolete(\"use amount\")]", money);
-        Assert.Contains("using System;", money);
+        money.ShouldContain("[Obsolete(\"use amount\")]");
+        money.ShouldContain("using System;");
     }
 
     [Fact]
@@ -95,7 +95,7 @@ public class R15VersioningTests
               @deprecated("use Money") value OldMoney { amount: Decimal }
             }
             """);
-        Assert.Contains("[Obsolete(\"use Money\")]\npublic sealed class OldMoney", FileContents(files, "Sales/ValueObjects/OldMoney.cs"));
+        FileContents(files, "Sales/ValueObjects/OldMoney.cs").ShouldContain("[Obsolete(\"use Money\")]\npublic sealed class OldMoney");
     }
 
     [Fact]
@@ -111,7 +111,7 @@ public class R15VersioningTests
               }
             }
             """);
-        Assert.Contains("[Obsolete(\"use total\")]", FileContents(files, "Sales/IntegrationEvents/OrderPlaced.cs"));
+        FileContents(files, "Sales/IntegrationEvents/OrderPlaced.cs").ShouldContain("[Obsolete(\"use total\")]");
     }
 
     [Fact]
@@ -125,7 +125,7 @@ public class R15VersioningTests
               }
             }
             """);
-        Assert.Contains("[Obsolete(\"use \\\"amount\\\" instead\")]", FileContents(files, "Sales/ValueObjects/Money.cs"));
+        FileContents(files, "Sales/ValueObjects/Money.cs").ShouldContain("[Obsolete(\"use \\\"amount\\\" instead\")]");
     }
 
     [Fact]
@@ -136,7 +136,7 @@ public class R15VersioningTests
               value Money { amount: Decimal }
             }
             """);
-        Assert.DoesNotContain("[Obsolete", FileContents(files, "Sales/ValueObjects/Money.cs"));
+        FileContents(files, "Sales/ValueObjects/Money.cs").ShouldNotContain("[Obsolete");
     }
 
     // ---- glossary ----------------------------------------------------------
@@ -152,8 +152,8 @@ public class R15VersioningTests
               }
             }
             """);
-        Assert.Contains("## Sales — version 3", glossary);
-        Assert.Contains("since v2", glossary);
+        glossary.ShouldContain("## Sales — version 3");
+        glossary.ShouldContain("since v2");
     }
 
     [Fact]
@@ -164,7 +164,7 @@ public class R15VersioningTests
               @deprecated("use Money") value OldMoney { amount: Decimal }
             }
             """);
-        Assert.Contains("deprecated: use Money", glossary);
+        glossary.ShouldContain("deprecated: use Money");
     }
 
     // ---- version-ceiling warning (KOI1501) ---------------------------------
@@ -180,10 +180,10 @@ public class R15VersioningTests
               }
             }
             """);
-        var warning = Assert.Single(diagnostics);
-        Assert.Equal(DiagnosticCodes.AnnotationVersionAboveContext, warning.Code);
-        Assert.Equal(DiagnosticSeverity.Warning, warning.Severity);
-        Assert.Contains("bonus", warning.Message);
+        var warning = diagnostics.ShouldHaveSingleItem();
+        warning.Code.ShouldBe(DiagnosticCodes.AnnotationVersionAboveContext);
+        warning.Severity.ShouldBe(DiagnosticSeverity.Warning);
+        warning.Message.ShouldContain("bonus");
     }
 
     [Fact]
@@ -194,34 +194,34 @@ public class R15VersioningTests
               @since(7) value Money { amount: Decimal }
             }
             """);
-        var warning = Assert.Single(diagnostics);
-        Assert.Equal(DiagnosticCodes.AnnotationVersionAboveContext, warning.Code);
-        Assert.Contains("Money", warning.Message);
+        var warning = diagnostics.ShouldHaveSingleItem();
+        warning.Code.ShouldBe(DiagnosticCodes.AnnotationVersionAboveContext);
+        warning.Message.ShouldContain("Money");
     }
 
     [Fact]
     public void A_since_within_the_context_version_is_not_warned()
     {
-        Assert.Empty(Diagnose("""
+        Diagnose("""
             context Sales version 5 {
               value Money {
                 amount: Decimal
                 @since(3) bonus: Decimal
               }
             }
-            """));
+            """).ShouldBeEmpty();
     }
 
     [Fact]
     public void An_unversioned_context_never_warns_about_since()
     {
-        Assert.Empty(Diagnose("""
+        Diagnose("""
             context Sales {
               value Money {
                 amount: Decimal
                 @since(3) bonus: Decimal
               }
             }
-            """));
+            """).ShouldBeEmpty();
     }
 }

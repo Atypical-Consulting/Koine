@@ -95,7 +95,7 @@ public class TypeScriptSnapshotTests
     public Task TypeScript_fixture_emits_expected_typescript()
     {
         var result = new KoineCompiler().Compile(Fixture, new TypeScriptEmitter());
-        Assert.True(result.Success, string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
 
         return Verify(TestSupport.Render(result.Files))
             .UseDirectory("Snapshots");

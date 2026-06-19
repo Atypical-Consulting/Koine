@@ -13,7 +13,7 @@ public class EmitterSnapshotTests
     public Task Billing_fixture_emits_expected_csharp()
     {
         var result = new KoineCompiler().Compile(TestSupport.BillingFixture, new CSharpEmitter());
-        Assert.True(result.Success);
+        result.Success.ShouldBeTrue();
 
         return Verify(TestSupport.Render(result.Files))
             .UseDirectory("Snapshots");
@@ -53,7 +53,7 @@ public class EmitterSnapshotTests
             """;
 
         var result = new KoineCompiler().Compile(fixture, new CSharpEmitter());
-        Assert.True(result.Success, string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
 
         return Verify(TestSupport.Render(result.Files))
             .UseDirectory("Snapshots");
@@ -88,7 +88,7 @@ public class EmitterSnapshotTests
             """;
 
         var result = new KoineCompiler().Compile(fixture, new CSharpEmitter());
-        Assert.True(result.Success, string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
 
         return Verify(TestSupport.Render(result.Files))
             .UseDirectory("Snapshots");
@@ -122,7 +122,7 @@ public class EmitterSnapshotTests
             """;
 
         var result = new KoineCompiler().Compile(fixture, new CSharpEmitter());
-        Assert.True(result.Success, string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
 
         return Verify(TestSupport.Render(result.Files))
             .UseDirectory("Snapshots");
@@ -166,7 +166,7 @@ public class EmitterSnapshotTests
             """;
 
         var result = new KoineCompiler().Compile(fixture, new CSharpEmitter());
-        Assert.True(result.Success, string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
 
         return Verify(TestSupport.Render(result.Files))
             .UseDirectory("Snapshots");
@@ -192,7 +192,7 @@ public class EmitterSnapshotTests
             """;
 
         var result = new KoineCompiler().Compile(fixture, new CSharpEmitter());
-        Assert.True(result.Success, string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
 
         return Verify(TestSupport.Render(result.Files))
             .UseDirectory("Snapshots");
@@ -235,7 +235,7 @@ public class EmitterSnapshotTests
             """;
 
         var result = new KoineCompiler().Compile(fixture, new CSharpEmitter());
-        Assert.True(result.Success, string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
 
         return Verify(TestSupport.Render(result.Files))
             .UseDirectory("Snapshots");
@@ -266,7 +266,7 @@ public class EmitterSnapshotTests
             """;
 
         var result = new KoineCompiler().Compile(fixture, new CSharpEmitter());
-        Assert.True(result.Success, string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
 
         return Verify(TestSupport.Render(result.Files))
             .UseDirectory("Snapshots");

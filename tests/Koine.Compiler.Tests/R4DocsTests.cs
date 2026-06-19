@@ -27,7 +27,7 @@ public class R4DocsTests
     private static string Emit(string source, IEmitter emitter, string relativePath)
     {
         var result = new KoineCompiler().Compile(source, emitter);
-        Assert.True(result.Success, string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
         return result.Files.Single(f => f.RelativePath == relativePath).Contents;
     }
 
@@ -38,12 +38,12 @@ public class R4DocsTests
     {
         var money = Emit(Doced, new CSharpEmitter(), "Billing/ValueObjects/Money.cs");
 
-        Assert.Contains("/// <summary>A monetary amount in a specific currency.</summary>", money);
+        money.ShouldContain("/// <summary>A monetary amount in a specific currency.</summary>");
         // member doc + XML escaping of < > &
-        Assert.Contains("/// <summary>The amount; never negative. Holds a List&lt;T&gt; &amp; co.</summary>", money);
+        money.ShouldContain("/// <summary>The amount; never negative. Holds a List&lt;T&gt; &amp; co.</summary>");
 
         var currency = Emit(Doced, new CSharpEmitter(), "Billing/Enums/Currency.cs");
-        Assert.Contains("/// <summary>Supported currencies.</summary>", currency);
+        currency.ShouldContain("/// <summary>Supported currencies.</summary>");
     }
 
     [Fact]
@@ -51,7 +51,7 @@ public class R4DocsTests
     {
         var result = new KoineCompiler().Compile(Doced, new CSharpEmitter());
         var (asm, errors) = TestSupport.Compile(result.Files);
-        Assert.True(asm is not null, "generated C# failed to compile:\n" + string.Join("\n", errors));
+        (asm is not null).ShouldBeTrue("generated C# failed to compile:\n" + string.Join("\n", errors));
     }
 
     [Fact]
@@ -60,7 +60,7 @@ public class R4DocsTests
         // `currency` has no doc; its property must not carry a <summary>.
         var money = Emit(Doced, new CSharpEmitter(), "Billing/ValueObjects/Money.cs");
         var currencyProp = money.Split('\n').First(l => l.Contains("public Currency Currency"));
-        Assert.DoesNotContain("<summary>", currencyProp);
+        currencyProp.ShouldNotContain("<summary>");
     }
 
     [Fact]
@@ -68,7 +68,7 @@ public class R4DocsTests
     {
         const string src = "context C {\n  // not a doc comment\n  value V { x: Int }\n}\n";
         var v = Emit(src, new CSharpEmitter(), "C/ValueObjects/V.cs");
-        Assert.DoesNotContain("not a doc comment", v);
+        v.ShouldNotContain("not a doc comment");
     }
 
     // ---- R4.2 glossary -----------------------------------------------------
@@ -78,16 +78,16 @@ public class R4DocsTests
     {
         var md = Emit(Doced, new GlossaryEmitter(), GlossaryEmitter.FileName);
 
-        Assert.Contains("# Ubiquitous Language Glossary", md);
-        Assert.Contains("## Billing", md);
-        Assert.Contains("The billing bounded context.", md);   // context doc
-        Assert.Contains("### Money — value", md);              // type + kind
-        Assert.Contains("A monetary amount in a specific currency.", md); // type doc
-        Assert.Contains("| amount | `Decimal` |", md);         // field + type
-        Assert.Contains("### Currency — enum", md);
-        Assert.Contains("Values: EUR, USD", md);
-        Assert.Contains("**Business rules**", md);
-        Assert.Contains("- a monetary amount cannot be negative", md); // invariant message
+        md.ShouldContain("# Ubiquitous Language Glossary");
+        md.ShouldContain("## Billing");
+        md.ShouldContain("The billing bounded context.");   // context doc
+        md.ShouldContain("### Money — value");              // type + kind
+        md.ShouldContain("A monetary amount in a specific currency."); // type doc
+        md.ShouldContain("| amount | `Decimal` |");         // field + type
+        md.ShouldContain("### Currency — enum");
+        md.ShouldContain("Values: EUR, USD");
+        md.ShouldContain("**Business rules**");
+        md.ShouldContain("- a monetary amount cannot be negative"); // invariant message
     }
 
     [Fact]
@@ -103,7 +103,7 @@ public class R4DocsTests
             "  }\n" +
             "}\n";
         var md = Emit(src, new GlossaryEmitter(), GlossaryEmitter.FileName);
-        Assert.Contains("Values: EUR(\"€\", 2), USD(\"$\", 2)", md);
+        md.ShouldContain("Values: EUR(\"€\", 2), USD(\"$\", 2)");
     }
 
     [Fact]
@@ -116,9 +116,9 @@ public class R4DocsTests
             "  }\n" +
             "}\n";
         var md = Emit(src, new GlossaryEmitter(), GlossaryEmitter.FileName);
-        Assert.Contains("### Order — aggregate (root: Order)", md);
-        Assert.Contains("#### Order — entity", md);
-        Assert.Contains("Identified by `OrderId`.", md);
+        md.ShouldContain("### Order — aggregate (root: Order)");
+        md.ShouldContain("#### Order — entity");
+        md.ShouldContain("Identified by `OrderId`.");
     }
 
     [Fact]
@@ -126,7 +126,7 @@ public class R4DocsTests
     {
         var first = Emit(Doced, new GlossaryEmitter(), GlossaryEmitter.FileName);
         var second = Emit(Doced, new GlossaryEmitter(), GlossaryEmitter.FileName);
-        Assert.Equal(first, second);
+        second.ShouldBe(first);
     }
 
     // ---- regressions found by the R4 review --------------------------------
@@ -144,8 +144,8 @@ public class R4DocsTests
             "}\n";
         var v = Emit(src, new CSharpEmitter(), "C/ValueObjects/V.cs");
 
-        Assert.Contains("/// <summary>real doc for y</summary>", v);
-        Assert.DoesNotContain("trailing on x", v);   // dropped, not mis-attached to y
+        v.ShouldContain("/// <summary>real doc for y</summary>");
+        v.ShouldNotContain("trailing on x");   // dropped, not mis-attached to y
     }
 
     [Fact]
@@ -160,7 +160,7 @@ public class R4DocsTests
             "  }\n" +
             "}\n";
         var v = Emit(src, new CSharpEmitter(), "C/ValueObjects/V.cs");
-        Assert.DoesNotContain("far away", v);
+        v.ShouldNotContain("far away");
     }
 
     [Fact]
@@ -172,8 +172,8 @@ public class R4DocsTests
             "  value V { x: Int }\n" +
             "}\n";
         var v = Emit(src, new CSharpEmitter(), "C/ValueObjects/V.cs");
-        Assert.DoesNotContain("<summary>", v);
-        Assert.DoesNotContain("section divider", v);
+        v.ShouldNotContain("<summary>");
+        v.ShouldNotContain("section divider");
     }
 
     [Fact]
@@ -187,7 +187,7 @@ public class R4DocsTests
             "  }\n" +
             "}\n";
         var md = Emit(src, new GlossaryEmitter(), GlossaryEmitter.FileName);
-        Assert.Contains("amount of &lt;Money&gt; &amp; co", md);
-        Assert.DoesNotContain("<Money>", md);
+        md.ShouldContain("amount of &lt;Money&gt; &amp; co");
+        md.ShouldNotContain("<Money>");
     }
 }

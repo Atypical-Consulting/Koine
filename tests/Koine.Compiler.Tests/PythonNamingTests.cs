@@ -27,13 +27,13 @@ public class PythonNamingTests
     [InlineData("TotalAmount", "total_amount")]
     public void ToSnakeCase_converts_correctly(string input, string expected)
     {
-        Assert.Equal(expected, PythonNaming.ToSnakeCase(input));
+        PythonNaming.ToSnakeCase(input).ShouldBe(expected);
     }
 
     [Fact]
     public void ToSnakeCase_from_spec_UnitPrice()
     {
-        Assert.Equal("unit_price", PythonNaming.ToSnakeCase("UnitPrice"));
+        PythonNaming.ToSnakeCase("UnitPrice").ShouldBe("unit_price");
     }
 
     // =========================================================================
@@ -47,13 +47,13 @@ public class PythonNamingTests
     [InlineData("TotalAmount", "TOTAL_AMOUNT")]
     public void ToUpperSnake_converts_correctly(string input, string expected)
     {
-        Assert.Equal(expected, PythonNaming.ToUpperSnake(input));
+        PythonNaming.ToUpperSnake(input).ShouldBe(expected);
     }
 
     [Fact]
     public void ToUpperSnake_from_spec_OrderStatus()
     {
-        Assert.Equal("ORDER_STATUS", PythonNaming.ToUpperSnake("OrderStatus"));
+        PythonNaming.ToUpperSnake("OrderStatus").ShouldBe("ORDER_STATUS");
     }
 
     // =========================================================================
@@ -69,19 +69,19 @@ public class PythonNamingTests
     [InlineData("order_id", "OrderId")]
     public void ToPascalCase_converts_correctly(string input, string expected)
     {
-        Assert.Equal(expected, PythonNaming.ToPascalCase(input));
+        PythonNaming.ToPascalCase(input).ShouldBe(expected);
     }
 
     [Fact]
     public void ToPascalCase_from_spec_order_line()
     {
-        Assert.Equal("OrderLine", PythonNaming.ToPascalCase("order_line"));
+        PythonNaming.ToPascalCase("order_line").ShouldBe("OrderLine");
     }
 
     [Fact]
     public void ToPascalCase_already_pascal_unchanged()
     {
-        Assert.Equal("OrderLine", PythonNaming.ToPascalCase("OrderLine"));
+        PythonNaming.ToPascalCase("OrderLine").ShouldBe("OrderLine");
     }
 
     // =========================================================================
@@ -137,18 +137,18 @@ public class PythonNamingTests
     [InlineData("status", "status")]
     public void EscapeIdentifier_handles_keyword_and_non_keyword(string input, string expected)
     {
-        Assert.Equal(expected, PythonNaming.EscapeIdentifier(input));
+        PythonNaming.EscapeIdentifier(input).ShouldBe(expected);
     }
 
     [Fact]
     public void EscapeIdentifier_from_spec_match()
     {
-        Assert.Equal("match_", PythonNaming.EscapeIdentifier("match"));
+        PythonNaming.EscapeIdentifier("match").ShouldBe("match_");
     }
 
     [Fact]
     public void EscapeIdentifier_from_spec_amount()
     {
-        Assert.Equal("amount", PythonNaming.EscapeIdentifier("amount"));
+        PythonNaming.EscapeIdentifier("amount").ShouldBe("amount");
     }
 }

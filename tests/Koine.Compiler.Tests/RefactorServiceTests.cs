@@ -32,8 +32,8 @@ public class RefactorServiceTests
     private static KoineModel Parse(string src)
     {
         var (model, diagnostics) = new KoineCompiler().Parse(src);
-        Assert.Empty(diagnostics);
-        Assert.NotNull(model);
+        diagnostics.ShouldBeEmpty();
+        model.ShouldNotBeNull();
         return model!;
     }
 
@@ -44,23 +44,23 @@ public class RefactorServiceTests
         var src = "context C {\n  value Address { street: String }\n}\n";
         var actions = RefactorsAt(src, 1, 18, 1, 24);
 
-        var extract = Assert.Single(actions, a => a.Kind == "refactor.extract");
-        Assert.Equal(2, extract.Edits.Count);
+        var extract = actions.Where(a => a.Kind == "refactor.extract").ShouldHaveSingleItem();
+        extract.Edits.Count.ShouldBe(2);
 
         var applied = Apply(src, extract);
         var model = Parse(applied); // re-parses cleanly
 
         var types = model.Contexts[0].Types;
         // A new ExtractedValue value object now exists, carrying the moved field.
-        var extracted = Assert.IsType<ValueObjectDecl>(types.Single(t => t.Name == "ExtractedValue"));
-        Assert.Contains(extracted.Members, m => m.Name == "street");
+        var extracted = types.Single(t => t.Name == "ExtractedValue").ShouldBeOfType<ValueObjectDecl>();
+        extracted.Members.ShouldContain(m => m.Name == "street");
 
         // The original Address now references the extracted value via the placeholder field.
-        var address = Assert.IsType<ValueObjectDecl>(types.Single(t => t.Name == "Address"));
-        var field = Assert.Single(address.Members);
-        Assert.Equal("extracted", field.Name);
-        Assert.Equal("ExtractedValue", field.Type.Name);
-        Assert.DoesNotContain(address.Members, m => m.Name == "street");
+        var address = types.Single(t => t.Name == "Address").ShouldBeOfType<ValueObjectDecl>();
+        var field = address.Members.ShouldHaveSingleItem();
+        field.Name.ShouldBe("extracted");
+        field.Type.Name.ShouldBe("ExtractedValue");
+        address.Members.ShouldNotContain(m => m.Name == "street");
     }
 
     [Fact]
@@ -74,7 +74,7 @@ public class RefactorServiceTests
             "  city: String }\n" +
             "}\n";
         // Select "street" on line 1 (cols 18..24).
-        var extract = Assert.Single(RefactorsAt(src, 1, 18, 1, 24), a => a.Kind == "refactor.extract");
+        var extract = RefactorsAt(src, 1, 18, 1, 24).Where(a => a.Kind == "refactor.extract").ShouldHaveSingleItem();
 
         var applied = Apply(src, extract);
         Parse(applied); // re-parses cleanly
@@ -82,10 +82,10 @@ public class RefactorServiceTests
         var commentIdx = applied.IndexOf("// the street name", StringComparison.Ordinal);
         var voIdx = applied.IndexOf("ExtractedValue {", StringComparison.Ordinal);
         var placeholderIdx = applied.IndexOf("extracted: ExtractedValue", StringComparison.Ordinal);
-        Assert.True(commentIdx >= 0, "the comment must survive");
+        (commentIdx >= 0).ShouldBeTrue("the comment must survive");
         // The comment sits inside the extracted value object (after its header, before the placeholder
         // field that replaced the origin), i.e. it moved WITH the field rather than being left behind.
-        Assert.True(commentIdx > voIdx && commentIdx < placeholderIdx);
+        (commentIdx > voIdx && commentIdx < placeholderIdx).ShouldBeTrue();
     }
 
     [Fact]
@@ -103,19 +103,19 @@ public class RefactorServiceTests
         // Select from the start of "street" (line 2, col 4) through the end of "city" (line 3, col 16).
         var actions = RefactorsAt(src, 2, 4, 3, 16);
 
-        var extract = Assert.Single(actions, a => a.Kind == "refactor.extract");
+        var extract = actions.Where(a => a.Kind == "refactor.extract").ShouldHaveSingleItem();
         var model = Parse(Apply(src, extract));
 
         var types = model.Contexts[0].Types;
-        var extracted = Assert.IsType<ValueObjectDecl>(types.Single(t => t.Name == "ExtractedValue"));
-        Assert.Contains(extracted.Members, m => m.Name == "street");
-        Assert.Contains(extracted.Members, m => m.Name == "city");
-        Assert.DoesNotContain(extracted.Members, m => m.Name == "zip");
+        var extracted = types.Single(t => t.Name == "ExtractedValue").ShouldBeOfType<ValueObjectDecl>();
+        extracted.Members.ShouldContain(m => m.Name == "street");
+        extracted.Members.ShouldContain(m => m.Name == "city");
+        extracted.Members.ShouldNotContain(m => m.Name == "zip");
 
-        var address = Assert.IsType<ValueObjectDecl>(types.Single(t => t.Name == "Address"));
-        Assert.Contains(address.Members, m => m.Name == "extracted");
-        Assert.Contains(address.Members, m => m.Name == "zip");
-        Assert.DoesNotContain(address.Members, m => m.Name == "street");
+        var address = types.Single(t => t.Name == "Address").ShouldBeOfType<ValueObjectDecl>();
+        address.Members.ShouldContain(m => m.Name == "extracted");
+        address.Members.ShouldContain(m => m.Name == "zip");
+        address.Members.ShouldNotContain(m => m.Name == "street");
     }
 
     [Fact]
@@ -124,7 +124,7 @@ public class RefactorServiceTests
         var src = "context C {\n  value Address { street: String }\n}\n";
         // Cursor on the "value" keyword (cols 2..7), not on a field.
         var actions = RefactorsAt(src, 1, 2, 1, 7);
-        Assert.DoesNotContain(actions, a => a.Kind == "refactor.extract");
+        actions.ShouldNotContain(a => a.Kind == "refactor.extract");
     }
 
     [Fact]
@@ -139,7 +139,7 @@ public class RefactorServiceTests
         // Line 2 = the spec line; place the cursor on "amount" inside the spec expression.
         var col = src.Split('\n')[2].IndexOf("amount", StringComparison.Ordinal);
         var actions = RefactorsAt(src, 2, col, 2, col + 6);
-        Assert.DoesNotContain(actions, a => a.Kind == "refactor.extract");
+        actions.ShouldNotContain(a => a.Kind == "refactor.extract");
     }
 
     [Fact]
@@ -153,13 +153,13 @@ public class RefactorServiceTests
             "}\n";
         // Line 2 = "    note: String"; "note" begins at col 4.
         var actions = RefactorsAt(src, 2, 4, 2, 8);
-        var extract = Assert.Single(actions, a => a.Kind == "refactor.extract");
+        var extract = actions.Where(a => a.Kind == "refactor.extract").ShouldHaveSingleItem();
 
         var model = Parse(Apply(src, extract));
         var types = model.Contexts[0].Types;
-        Assert.Contains(types, t => t is ValueObjectDecl { Name: "ExtractedValue" });
-        var order = Assert.IsType<EntityDecl>(types.Single(t => t.Name == "Order"));
-        Assert.Contains(order.Members, m => m is { Name: "extracted" } && m.Type.Name == "ExtractedValue");
+        types.Any(t => t is ValueObjectDecl { Name: "ExtractedValue" }).ShouldBeTrue();
+        var order = types.Single(t => t.Name == "Order").ShouldBeOfType<EntityDecl>();
+        order.Members.Any(m => m is { Name: "extracted" } && m.Type.Name == "ExtractedValue").ShouldBeTrue();
     }
 
     [Fact]
@@ -176,21 +176,21 @@ public class RefactorServiceTests
             "}\n";
         // Line 4 (0-based) = "    street: String"; "street" begins at col 4.
         var actions = RefactorsAt(src, 4, 4, 4, 10);
-        var extract = Assert.Single(actions, a => a.Kind == "refactor.extract");
+        var extract = actions.Where(a => a.Kind == "refactor.extract").ShouldHaveSingleItem();
 
         var applied = Apply(src, extract);
         var model = Parse(applied);
         var types = model.Contexts[0].Types;
 
         // The field's own doc travels with it into the new value object.
-        var extracted = Assert.IsType<ValueObjectDecl>(types.Single(t => t.Name == "ExtractedValue"));
-        var moved = Assert.Single(extracted.Members, m => m.Name == "street");
-        Assert.Contains("The street name.", moved.Doc);
+        var extracted = types.Single(t => t.Name == "ExtractedValue").ShouldBeOfType<ValueObjectDecl>();
+        var moved = extracted.Members.Where(m => m.Name == "street").ShouldHaveSingleItem();
+        moved.Doc.ShouldContain("The street name.");
 
         // The origin type keeps its own doc (it was NOT consumed by the inserted value object).
-        var address = Assert.IsType<ValueObjectDecl>(types.Single(t => t.Name == "Address"));
-        Assert.Contains("An address value.", address.Doc);
-        Assert.DoesNotContain(address.Members, m => m.Name == "street");
+        var address = types.Single(t => t.Name == "Address").ShouldBeOfType<ValueObjectDecl>();
+        address.Doc.ShouldContain("An address value.");
+        address.Members.ShouldNotContain(m => m.Name == "street");
     }
 
     [Fact]
@@ -207,21 +207,21 @@ public class RefactorServiceTests
             "}\n";
         // Select from the start of "street" (line 2, col 4) through the end of "city" (line 4, col 16).
         var actions = RefactorsAt(src, 2, 4, 4, 16);
-        var extract = Assert.Single(actions, a => a.Kind == "refactor.extract");
+        var extract = actions.Where(a => a.Kind == "refactor.extract").ShouldHaveSingleItem();
 
         var applied = Apply(src, extract);
         var model = Parse(applied);
 
         // The between-field comment is preserved in the moved range (it landed in the new VO text).
-        Assert.Contains("// the city it sits in", applied);
+        applied.ShouldContain("// the city it sits in");
 
         var types = model.Contexts[0].Types;
-        var extracted = Assert.IsType<ValueObjectDecl>(types.Single(t => t.Name == "ExtractedValue"));
-        Assert.Contains(extracted.Members, m => m.Name == "street");
-        Assert.Contains(extracted.Members, m => m.Name == "city");
+        var extracted = types.Single(t => t.Name == "ExtractedValue").ShouldBeOfType<ValueObjectDecl>();
+        extracted.Members.ShouldContain(m => m.Name == "street");
+        extracted.Members.ShouldContain(m => m.Name == "city");
         // The comment is leading trivia of the `city` member it precedes.
         var city = extracted.Members.Single(m => m.Name == "city");
-        Assert.Contains(city.LeadingTrivia, t => t.Text.Contains("the city it sits in"));
+        city.LeadingTrivia.ShouldContain(t => t.Text.Contains("the city it sits in"));
     }
 
     [Fact]
@@ -237,7 +237,7 @@ public class RefactorServiceTests
             "}\n";
         // Select the derived `subtotal` field on line 4; "subtotal" begins at col 4.
         var actions = RefactorsAt(src, 4, 4, 4, 12);
-        Assert.DoesNotContain(actions, a => a.Kind == "refactor.extract");
+        actions.ShouldNotContain(a => a.Kind == "refactor.extract");
     }
 
     [Fact]
@@ -252,17 +252,17 @@ public class RefactorServiceTests
             "}\n";
         // Line 3 (0-based) = "    street: String"; "street" begins at col 4.
         var actions = RefactorsAt(src, 3, 4, 3, 10);
-        var extract = Assert.Single(actions, a => a.Kind == "refactor.extract");
+        var extract = actions.Where(a => a.Kind == "refactor.extract").ShouldHaveSingleItem();
 
         var model = Parse(Apply(src, extract));
         var types = model.Contexts[0].Types;
 
         // The pre-existing ExtractedValue is untouched; the new VO took a disambiguated name.
-        Assert.Single(types, t => t is ValueObjectDecl { Name: "ExtractedValue" });
-        var generated = Assert.IsType<ValueObjectDecl>(types.Single(t => t.Name == "ExtractedValue2"));
-        Assert.Contains(generated.Members, m => m.Name == "street");
+        types.Where(t => t is ValueObjectDecl { Name: "ExtractedValue" }).ShouldHaveSingleItem();
+        var generated = types.Single(t => t.Name == "ExtractedValue2").ShouldBeOfType<ValueObjectDecl>();
+        generated.Members.ShouldContain(m => m.Name == "street");
 
-        var address = Assert.IsType<ValueObjectDecl>(types.Single(t => t.Name == "Address"));
-        Assert.Contains(address.Members, m => m.Type.Name == "ExtractedValue2");
+        var address = types.Single(t => t.Name == "Address").ShouldBeOfType<ValueObjectDecl>();
+        address.Members.ShouldContain(m => m.Type.Name == "ExtractedValue2");
     }
 }

@@ -35,9 +35,9 @@ public class R2OptionalityTests
     private static Assembly CompileFixture()
     {
         var result = new KoineCompiler().Compile(Fixture, new CSharpEmitter());
-        Assert.True(result.Success, string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
         var (asm, errors) = TestSupport.Compile(result.Files);
-        Assert.True(asm is not null, "generated C# failed to compile:\n" + string.Join("\n", errors));
+        (asm is not null).ShouldBeTrue("generated C# failed to compile:\n" + string.Join("\n", errors));
         return asm;
     }
 
@@ -47,7 +47,7 @@ public class R2OptionalityTests
     [Fact]
     public void Fixture_is_valid_and_compiles()
     {
-        Assert.Empty(Diagnose(Fixture));
+        Diagnose(Fixture).ShouldBeEmpty();
         CompileFixture();
     }
 
@@ -65,13 +65,13 @@ public class R2OptionalityTests
 
         // Constructor order is (id, name, email, nickname=null) — defaulted params last.
         var without = Activator.CreateInstance(customer, id, "Alice", mail, null);
-        Assert.Null(customer.GetProperty("Nickname")!.GetValue(without));
-        Assert.Equal("Alice", customer.GetProperty("Display")!.GetValue(without)); // nickname ?? name
-        Assert.False((bool)customer.GetProperty("HasNick")!.GetValue(without)!);
+        customer.GetProperty("Nickname")!.GetValue(without).ShouldBeNull();
+        customer.GetProperty("Display")!.GetValue(without).ShouldBe("Alice"); // nickname ?? name
+        ((bool)customer.GetProperty("HasNick")!.GetValue(without)!).ShouldBeFalse();
 
         var with = Activator.CreateInstance(customer, id, "Alice", mail, "Ali");
-        Assert.Equal("Ali", customer.GetProperty("Display")!.GetValue(with));
-        Assert.True((bool)customer.GetProperty("HasNick")!.GetValue(with)!);
+        customer.GetProperty("Display")!.GetValue(with).ShouldBe("Ali");
+        ((bool)customer.GetProperty("HasNick")!.GetValue(with)!).ShouldBeTrue();
     }
 
     // ---- R2.2 Set / Map ----------------------------------------------------
@@ -98,14 +98,14 @@ public class R2OptionalityTests
         var c = Activator.CreateInstance(catalog, id, tags, prices, null);
 
         var resultTags = (IEnumerable)catalog.GetProperty("Tags")!.GetValue(c)!;
-        Assert.Equal(2, resultTags.Cast<object>().Count());
+        resultTags.Cast<object>().Count().ShouldBe(2);
 
         // Defensive copy: mutating the source set does not affect the stored set.
         tags.Add("c");
-        Assert.Equal(2, ((IEnumerable)catalog.GetProperty("Tags")!.GetValue(c)!).Cast<object>().Count());
+        ((IEnumerable)catalog.GetProperty("Tags")!.GetValue(c)!).Cast<object>().Count().ShouldBe(2);
 
         var resultPrices = (IDictionary)catalog.GetProperty("Prices")!.GetValue(c)!;
-        Assert.Single(resultPrices.Keys);
+        resultPrices.Keys.Cast<object>().ShouldHaveSingleItem();
     }
 
     // ---- diagnostics -------------------------------------------------------
@@ -115,7 +115,7 @@ public class R2OptionalityTests
     {
         const string src =
             "context C {\n  entity E identified by EId {\n    name: String\n    nickname: String?\n    display: String = nickname\n  }\n}\n";
-        Assert.Contains(Diagnose(src), d => d.Message.Contains("optional value assigned to non-optional field 'display'"));
+        Diagnose(src).ShouldContain(d => d.Message.Contains("optional value assigned to non-optional field 'display'"));
     }
 
     [Fact]
@@ -123,7 +123,7 @@ public class R2OptionalityTests
     {
         const string src =
             "context C {\n  entity E identified by EId {\n    nickname: String?\n    len: Int = nickname.length\n  }\n}\n";
-        Assert.Contains(Diagnose(src), d => d.Message.Contains("optional value may be null"));
+        Diagnose(src).ShouldContain(d => d.Message.Contains("optional value may be null"));
     }
 
     [Fact]
@@ -131,7 +131,7 @@ public class R2OptionalityTests
     {
         const string src =
             "context C {\n  entity E identified by EId {\n    name: String\n    nickname: String?\n    safe: String = nickname ?? name\n    has:  Bool = nickname.isPresent\n  }\n}\n";
-        Assert.Empty(Diagnose(src));
+        Diagnose(src).ShouldBeEmpty();
     }
 
     [Fact]
@@ -139,7 +139,7 @@ public class R2OptionalityTests
     {
         const string src =
             "context C {\n  value V {\n    m: Map<String, Nope>\n  }\n}\n";
-        Assert.Contains(Diagnose(src), d => d.Message.Contains("unknown type 'Nope'"));
+        Diagnose(src).ShouldContain(d => d.Message.Contains("unknown type 'Nope'"));
     }
 
     // ---- regressions found by the R2 review --------------------------------
@@ -154,39 +154,39 @@ public class R2OptionalityTests
             "  value Money { note: String?  amount: Decimal }\n" +
             "  value Line { qty: Int  price: Money  total: Money = price * qty }\n" +
             "}\n";
-        Assert.Empty(Diagnose(src));
+        Diagnose(src).ShouldBeEmpty();
 
         var result = new KoineCompiler().Compile(src, new CSharpEmitter());
         var (asm, errors) = TestSupport.Compile(result.Files);
-        Assert.True(asm is not null, "generated C# failed to compile:\n" + string.Join("\n", errors));
+        (asm is not null).ShouldBeTrue("generated C# failed to compile:\n" + string.Join("\n", errors));
 
         var money = asm.GetType("O.Money")!;
         var line = asm.GetType("O.Line")!;
         var price = Activator.CreateInstance(money, 10m, null); // (decimal amount, string? note = null)
         var l = Activator.CreateInstance(line, 3, price);
         var total = line.GetProperty("Total")!.GetValue(l);
-        Assert.Equal(30m, money.GetProperty("Amount")!.GetValue(total));
+        money.GetProperty("Amount")!.GetValue(total).ShouldBe(30m);
     }
 
     [Fact]
     public void Presence_check_on_non_optional_is_reported()
     {
         const string src = "context C {\n  value V {\n    count: Int\n    has: Bool = count.isPresent\n  }\n}\n";
-        Assert.Contains(Diagnose(src), d => d.Message.Contains("can only be applied to an optional value"));
+        Diagnose(src).ShouldContain(d => d.Message.Contains("can only be applied to an optional value"));
     }
 
     [Fact]
     public void Arithmetic_on_optional_is_reported()
     {
         const string src = "context C {\n  entity E identified by EId {\n    age: Int?\n    twice: Int = age + age\n  }\n}\n";
-        Assert.Contains(Diagnose(src), d => d.Message.Contains("optional value may be null"));
+        Diagnose(src).ShouldContain(d => d.Message.Contains("optional value may be null"));
     }
 
     [Fact]
     public void Relational_on_optional_is_reported()
     {
         const string src = "context C {\n  entity E identified by EId {\n    age: Int?\n    big: Bool = age > 10\n  }\n}\n";
-        Assert.Contains(Diagnose(src), d => d.Message.Contains("optional value may be null"));
+        Diagnose(src).ShouldContain(d => d.Message.Contains("optional value may be null"));
     }
 
     [Fact]
@@ -195,7 +195,7 @@ public class R2OptionalityTests
         // name is also optional, so `nickname ?? name` is still optional -> can't fill String.
         const string src =
             "context C {\n  entity E identified by EId {\n    name: String?\n    nickname: String?\n    display: String = nickname ?? name\n  }\n}\n";
-        Assert.Contains(Diagnose(src), d => d.Message.Contains("optional value assigned to non-optional field 'display'"));
+        Diagnose(src).ShouldContain(d => d.Message.Contains("optional value assigned to non-optional field 'display'"));
     }
 
     [Fact]
@@ -203,21 +203,19 @@ public class R2OptionalityTests
     {
         const string src =
             "context C {\n  entity E identified by EId {\n    name: String\n    nickname: String?\n    chosen: String = if name.isBlank then name else nickname\n  }\n}\n";
-        Assert.Contains(Diagnose(src), d => d.Message.Contains("optional value assigned to non-optional field 'chosen'"));
+        Diagnose(src).ShouldContain(d => d.Message.Contains("optional value assigned to non-optional field 'chosen'"));
     }
 
     [Fact]
     public void Map_missing_value_type_is_reported()
     {
-        Assert.Contains(Diagnose("context C {\n  value V {\n    m: Map<String>\n  }\n}\n"),
-            d => d.Message.Contains("'Map' requires two type arguments"));
+        Diagnose("context C {\n  value V {\n    m: Map<String>\n  }\n}\n").ShouldContain(d => d.Message.Contains("'Map' requires two type arguments"));
     }
 
     [Fact]
     public void List_with_extra_type_argument_is_reported()
     {
-        Assert.Contains(Diagnose("context C {\n  value V {\n    xs: List<String, Int>\n  }\n}\n"),
-            d => d.Message.Contains("'List' takes a single type argument"));
+        Diagnose("context C {\n  value V {\n    xs: List<String, Int>\n  }\n}\n").ShouldContain(d => d.Message.Contains("'List' takes a single type argument"));
     }
 
     [Fact]
@@ -232,11 +230,11 @@ public class R2OptionalityTests
             "    invariant nickname.length > 2 when nickname.isPresent \"nick too short\"\n" +
             "  }\n" +
             "}\n";
-        Assert.Empty(Diagnose(src)); // no false-positive null-safety diagnostic
+        Diagnose(src).ShouldBeEmpty(); // no false-positive null-safety diagnostic
 
         var result = new KoineCompiler().Compile(src, new CSharpEmitter());
         var (asm, errors) = TestSupport.Compile(result.Files);
-        Assert.True(asm is not null, "generated C# failed to compile:\n" + string.Join("\n", errors));
+        (asm is not null).ShouldBeTrue("generated C# failed to compile:\n" + string.Join("\n", errors));
 
         var e = asm.GetType("G.E")!;
         var eid = asm.GetType("G.EId")!;
@@ -244,11 +242,11 @@ public class R2OptionalityTests
 
         // nickname null: guard skipped, no throw; safe == false.
         var unset = Activator.CreateInstance(e, id, "Bob", null);
-        Assert.False((bool)e.GetProperty("Safe")!.GetValue(unset)!);
+        ((bool)e.GetProperty("Safe")!.GetValue(unset)!).ShouldBeFalse();
 
         // nickname "abc": invariant holds (3 > 2); safe == true.
         var set = Activator.CreateInstance(e, id, "Bob", "abc");
-        Assert.True((bool)e.GetProperty("Safe")!.GetValue(set)!);
+        ((bool)e.GetProperty("Safe")!.GetValue(set)!).ShouldBeTrue();
     }
 
     [Fact]
@@ -262,11 +260,11 @@ public class R2OptionalityTests
             "    has:  Bool = tags.contains(\"x\")\n" +
             "  }\n" +
             "}\n";
-        Assert.Empty(Diagnose(src));
+        Diagnose(src).ShouldBeEmpty();
 
         var result = new KoineCompiler().Compile(src, new CSharpEmitter());
         var (asm, errors) = TestSupport.Compile(result.Files);
-        Assert.True(asm is not null, "generated C# failed to compile:\n" + string.Join("\n", errors));
+        (asm is not null).ShouldBeTrue("generated C# failed to compile:\n" + string.Join("\n", errors));
 
         var e = asm.GetType("S.E")!;
         var eid = asm.GetType("S.EId")!;
@@ -276,7 +274,7 @@ public class R2OptionalityTests
         tags.Add("y");
 
         var inst = Activator.CreateInstance(e, id, tags);
-        Assert.Equal(2, e.GetProperty("N")!.GetValue(inst));
-        Assert.True((bool)e.GetProperty("Has")!.GetValue(inst)!);
+        e.GetProperty("N")!.GetValue(inst).ShouldBe(2);
+        ((bool)e.GetProperty("Has")!.GetValue(inst)!).ShouldBeTrue();
     }
 }

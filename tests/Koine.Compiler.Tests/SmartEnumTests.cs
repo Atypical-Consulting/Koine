@@ -23,9 +23,9 @@ public class SmartEnumTests
     private static Assembly Compile()
     {
         var result = new KoineCompiler().Compile(Src, new CSharpEmitter());
-        Assert.True(result.Success, string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
         var (asm, errors) = TestSupport.Compile(result.Files);
-        Assert.True(asm is not null, "generated C# failed to compile:\n" + string.Join("\n", errors));
+        (asm is not null).ShouldBeTrue("generated C# failed to compile:\n" + string.Join("\n", errors));
         return asm;
     }
 
@@ -38,17 +38,17 @@ public class SmartEnumTests
         var draft = TestSupport.EnumValue(status, "Draft");
         var shipped = TestSupport.EnumValue(status, "Shipped");
 
-        Assert.Equal("Draft", status.GetProperty("Name")!.GetValue(draft));
-        Assert.Equal(0, status.GetProperty("Value")!.GetValue(draft));
-        Assert.Equal(2, status.GetProperty("Value")!.GetValue(shipped));
-        Assert.Equal("Draft", draft.ToString());
+        status.GetProperty("Name")!.GetValue(draft).ShouldBe("Draft");
+        status.GetProperty("Value")!.GetValue(draft).ShouldBe(0);
+        status.GetProperty("Value")!.GetValue(shipped).ShouldBe(2);
+        draft.ToString().ShouldBe("Draft");
 
         // value equality + FromName round-trip
         var fromName = status.GetMethod("FromName")!.Invoke(null, new object[] { "Draft" });
-        Assert.True(draft.Equals(fromName));
+        draft.Equals(fromName).ShouldBeTrue();
 
         var all = (System.Collections.IEnumerable)status.GetProperty("All")!.GetValue(null)!;
-        Assert.Equal(4, all.Cast<object>().Count());
+        all.Cast<object>().Count().ShouldBe(4);
     }
 
     [Fact]
@@ -63,11 +63,11 @@ public class SmartEnumTests
         // status omitted (null) -> coalesces to Draft before guards/assignment.
         var o = Activator.CreateInstance(order, id, "hello", null);
         var draft = TestSupport.EnumValue(status, "Draft");
-        Assert.True(draft.Equals(order.GetProperty("Status")!.GetValue(o)));
+        draft.Equals(order.GetProperty("Status")!.GetValue(o)).ShouldBeTrue();
 
         // explicit value is honored.
         var shipped = TestSupport.EnumValue(status, "Shipped");
         var o2 = Activator.CreateInstance(order, id, "hello", shipped);
-        Assert.True(shipped.Equals(order.GetProperty("Status")!.GetValue(o2)));
+        shipped.Equals(order.GetProperty("Status")!.GetValue(o2)).ShouldBeTrue();
     }
 }

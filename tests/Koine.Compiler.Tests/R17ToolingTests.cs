@@ -14,8 +14,8 @@ public class R17ToolingTests
     public void Config_parses_target_and_out()
     {
         var config = KoineConfig.Parse("# header\ntarget = glossary\nout = ./gen\n");
-        Assert.Equal("glossary", config.Target);
-        Assert.Equal("./gen", config.OutDir);
+        config.Target.ShouldBe("glossary");
+        config.OutDir.ShouldBe("./gen");
     }
 
     [Fact]
@@ -23,15 +23,15 @@ public class R17ToolingTests
     {
         // The R16 `targets.*` block and any other key must be tolerated, not rejected.
         var config = KoineConfig.Parse("target = csharp\ntargets.csharp = { namespaces = { A = \"B\" } }\nfuture = 1\n");
-        Assert.Equal("csharp", config.Target);
-        Assert.Null(config.OutDir);
+        config.Target.ShouldBe("csharp");
+        config.OutDir.ShouldBeNull();
     }
 
     [Fact]
     public void Config_strips_inline_comments_and_blank_lines()
     {
         var config = KoineConfig.Parse("\n  target = csharp   # the default target\n\n");
-        Assert.Equal("csharp", config.Target);
+        config.Target.ShouldBe("csharp");
     }
 
     // ---- koine init --------------------------------------------------------
@@ -41,16 +41,16 @@ public class R17ToolingTests
     {
         // The acceptance criterion: the scaffold must compile via `koine build` immediately.
         var result = new KoineCompiler().Compile(Program.ScaffoldModel, new CSharpEmitter());
-        Assert.True(result.Success, string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
-        Assert.NotEmpty(result.Files);
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+        result.Files.ShouldNotBeEmpty();
     }
 
     [Fact]
     public void Init_scaffold_config_points_build_at_the_scaffold()
     {
         var config = KoineConfig.Parse(Program.ScaffoldConfig);
-        Assert.Equal("csharp", config.Target);
-        Assert.Equal("generated", config.OutDir);
+        config.Target.ShouldBe("csharp");
+        config.OutDir.ShouldBe("generated");
     }
 
     [Fact]
@@ -60,10 +60,10 @@ public class R17ToolingTests
         try
         {
             var ok = Program.InitProject(dir.FullName, force: false, TextWriter.Null, TextWriter.Null);
-            Assert.True(ok);
-            Assert.True(File.Exists(Path.Combine(dir.FullName, "domain.koi")));
-            Assert.True(File.Exists(Path.Combine(dir.FullName, "koine.config")));
-            Assert.True(File.Exists(Path.Combine(dir.FullName, "README.md")));
+            ok.ShouldBeTrue();
+            File.Exists(Path.Combine(dir.FullName, "domain.koi")).ShouldBeTrue();
+            File.Exists(Path.Combine(dir.FullName, "koine.config")).ShouldBeTrue();
+            File.Exists(Path.Combine(dir.FullName, "README.md")).ShouldBeTrue();
         }
         finally { dir.Delete(recursive: true); }
     }
@@ -79,9 +79,9 @@ public class R17ToolingTests
             var error = new StringWriter();
             var ok = Program.InitProject(dir.FullName, force: false, TextWriter.Null, error);
 
-            Assert.False(ok);
-            Assert.Contains("refusing to overwrite", error.ToString());
-            Assert.Equal("context Mine {}\n", File.ReadAllText(Path.Combine(dir.FullName, "domain.koi")));
+            ok.ShouldBeFalse();
+            error.ToString().ShouldContain("refusing to overwrite");
+            File.ReadAllText(Path.Combine(dir.FullName, "domain.koi")).ShouldBe("context Mine {}\n");
         }
         finally { dir.Delete(recursive: true); }
     }
@@ -95,8 +95,8 @@ public class R17ToolingTests
             File.WriteAllText(Path.Combine(dir.FullName, "domain.koi"), "context Mine {}\n");
             var ok = Program.InitProject(dir.FullName, force: true, TextWriter.Null, TextWriter.Null);
 
-            Assert.True(ok);
-            Assert.Equal(Program.ScaffoldModel, File.ReadAllText(Path.Combine(dir.FullName, "domain.koi")));
+            ok.ShouldBeTrue();
+            File.ReadAllText(Path.Combine(dir.FullName, "domain.koi")).ShouldBe(Program.ScaffoldModel);
         }
         finally { dir.Delete(recursive: true); }
     }
@@ -114,8 +114,8 @@ public class R17ToolingTests
 
         var rebuilds = session.Run(changes);
 
-        Assert.Equal(1, rebuilds);   // one change → one rebuild
-        Assert.Equal(2, builds);     // initial build + the rebuild
+        rebuilds.ShouldBe(1);   // one change → one rebuild
+        builds.ShouldBe(2);     // initial build + the rebuild
     }
 
     [Fact]
@@ -129,8 +129,8 @@ public class R17ToolingTests
 
         var rebuilds = session.Run(changes);
 
-        Assert.Equal(1, rebuilds);   // three rapid saves collapse into a single rebuild
-        Assert.Equal(2, builds);
+        rebuilds.ShouldBe(1);   // three rapid saves collapse into a single rebuild
+        builds.ShouldBe(2);
     }
 
     [Fact]
@@ -147,9 +147,9 @@ public class R17ToolingTests
 
         var rebuilds = session.Run(changes);
 
-        Assert.Equal(1, rebuilds);
-        Assert.Equal(2, builds);
-        Assert.Contains("build error: boom", log.ToString());
+        rebuilds.ShouldBe(1);
+        builds.ShouldBe(2);
+        log.ToString().ShouldContain("build error: boom");
     }
 
     [Fact]
@@ -163,6 +163,6 @@ public class R17ToolingTests
 
         session.Run(changes);
 
-        Assert.Contains("build failed", log.ToString());
+        log.ToString().ShouldContain("build failed");
     }
 }

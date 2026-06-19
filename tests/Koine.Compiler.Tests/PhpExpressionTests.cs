@@ -49,7 +49,7 @@ public class PhpExpressionTests
     private static (PhpExpressionTranslator translator, IReadOnlyList<Member> members) Make()
     {
         var result = new KoineCompiler().Compile(Source, new PhpEmitter());
-        Assert.True(result.Success, string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
 
         var model = result.Model!;
         var semantic = new SemanticModel(model);
@@ -87,21 +87,21 @@ public class PhpExpressionTests
     {
         var expr = new BinaryExpr(BinaryOp.And, Id("a"), Id("b"));
         // `a`/`b` are not members, so they fall through to bare camelCase identifiers with $ prefix.
-        Assert.Equal("($a && $b)", Translate(expr));
+        Translate(expr).ShouldBe("($a && $b)");
     }
 
     [Fact]
     public void Or_lowers_to_php_or()
     {
         var expr = new BinaryExpr(BinaryOp.Or, Id("a"), Id("b"));
-        Assert.Equal("($a || $b)", Translate(expr));
+        Translate(expr).ShouldBe("($a || $b)");
     }
 
     [Fact]
     public void Not_lowers_to_php_bang()
     {
         var expr = new UnaryExpr(UnaryOp.Not, Id("a"));
-        Assert.Equal("!($a)", Translate(expr));
+        Translate(expr).ShouldBe("!($a)");
     }
 
     // =========================================================================
@@ -112,7 +112,7 @@ public class PhpExpressionTests
     public void Comparison_member_renders_this_arrow_property()
     {
         var expr = new BinaryExpr(BinaryOp.Ge, Id("quantity"), Int("1"));
-        Assert.Equal("($this->quantity >= 1)", Translate(expr));
+        Translate(expr).ShouldBe("($this->quantity >= 1)");
     }
 
     [Fact]
@@ -120,21 +120,21 @@ public class PhpExpressionTests
     {
         var (t, _) = Make();
         var expr = new BinaryExpr(BinaryOp.Ge, Id("quantity"), Int("1"));
-        Assert.Equal("($quantity >= 1)", t.Translate(expr, PhpExpressionTranslator.NameMode.Parameter));
+        t.Translate(expr, PhpExpressionTranslator.NameMode.Parameter).ShouldBe("($quantity >= 1)");
     }
 
     [Fact]
     public void Equality_uses_strict_triple_equals()
     {
         var expr = new BinaryExpr(BinaryOp.Eq, Id("quantity"), Int("0"));
-        Assert.Equal("($this->quantity === 0)", Translate(expr));
+        Translate(expr).ShouldBe("($this->quantity === 0)");
     }
 
     [Fact]
     public void Inequality_uses_strict_not_equals()
     {
         var expr = new BinaryExpr(BinaryOp.Neq, Id("quantity"), Int("0"));
-        Assert.Equal("($this->quantity !== 0)", Translate(expr));
+        Translate(expr).ShouldBe("($this->quantity !== 0)");
     }
 
     // =========================================================================
@@ -148,18 +148,14 @@ public class PhpExpressionTests
     {
         // `price >= 0` where price is Decimal -> price->compareTo(new Decimal('0')) >= 0
         var expr = new BinaryExpr(BinaryOp.Ge, Id("price"), Int("0"));
-        Assert.Equal(
-            "($this->price->compareTo(new \\Koine\\Runtime\\Decimal('0')) >= 0)",
-            Translate(expr));
+        Translate(expr).ShouldBe("($this->price->compareTo(new \\Koine\\Runtime\\Decimal('0')) >= 0)");
     }
 
     [Fact]
     public void Decimal_less_than_lowers_to_compareTo()
     {
         var expr = new BinaryExpr(BinaryOp.Lt, Id("price"), Int("0"));
-        Assert.Equal(
-            "($this->price->compareTo(new \\Koine\\Runtime\\Decimal('0')) < 0)",
-            Translate(expr));
+        Translate(expr).ShouldBe("($this->price->compareTo(new \\Koine\\Runtime\\Decimal('0')) < 0)");
     }
 
     [Fact]
@@ -167,9 +163,7 @@ public class PhpExpressionTests
     {
         // `price < limit` where both are Decimal -> no wrapping of the right operand.
         var expr = new BinaryExpr(BinaryOp.Lt, Id("price"), Id("limit"));
-        Assert.Equal(
-            "($this->price->compareTo($this->limit) < 0)",
-            Translate(expr));
+        Translate(expr).ShouldBe("($this->price->compareTo($this->limit) < 0)");
     }
 
     [Fact]
@@ -177,17 +171,17 @@ public class PhpExpressionTests
     {
         var eq = new BinaryExpr(BinaryOp.Eq, Id("price"), Decimal("0"));
         var ne = new BinaryExpr(BinaryOp.Neq, Id("price"), Decimal("0"));
-        Assert.Equal("$this->price->equals(new \\Koine\\Runtime\\Decimal('0'))", Translate(eq));
-        Assert.Equal("!$this->price->equals(new \\Koine\\Runtime\\Decimal('0'))", Translate(ne));
+        Translate(eq).ShouldBe("$this->price->equals(new \\Koine\\Runtime\\Decimal('0'))");
+        Translate(ne).ShouldBe("!$this->price->equals(new \\Koine\\Runtime\\Decimal('0'))");
     }
 
     [Fact]
     public void Decimal_arithmetic_lowers_to_method_calls()
     {
-        Assert.Equal("$this->price->add($this->limit)", Translate(new BinaryExpr(BinaryOp.Add, Id("price"), Id("limit"))));
-        Assert.Equal("$this->price->sub($this->limit)", Translate(new BinaryExpr(BinaryOp.Sub, Id("price"), Id("limit"))));
-        Assert.Equal("$this->price->mul($this->limit)", Translate(new BinaryExpr(BinaryOp.Mul, Id("price"), Id("limit"))));
-        Assert.Equal("$this->price->div($this->limit)", Translate(new BinaryExpr(BinaryOp.Div, Id("price"), Id("limit"))));
+        Translate(new BinaryExpr(BinaryOp.Add, Id("price"), Id("limit"))).ShouldBe("$this->price->add($this->limit)");
+        Translate(new BinaryExpr(BinaryOp.Sub, Id("price"), Id("limit"))).ShouldBe("$this->price->sub($this->limit)");
+        Translate(new BinaryExpr(BinaryOp.Mul, Id("price"), Id("limit"))).ShouldBe("$this->price->mul($this->limit)");
+        Translate(new BinaryExpr(BinaryOp.Div, Id("price"), Id("limit"))).ShouldBe("$this->price->div($this->limit)");
     }
 
     [Fact]
@@ -195,9 +189,7 @@ public class PhpExpressionTests
     {
         // `price * quantity` (Decimal * Int) -> wrap the Int operand as a Decimal expression.
         var expr = new BinaryExpr(BinaryOp.Mul, Id("price"), Id("quantity"));
-        Assert.Equal(
-            "$this->price->mul(new \\Koine\\Runtime\\Decimal($this->quantity))",
-            Translate(expr));
+        Translate(expr).ShouldBe("$this->price->mul(new \\Koine\\Runtime\\Decimal($this->quantity))");
     }
 
     [Fact]
@@ -206,9 +198,7 @@ public class PhpExpressionTests
         // The invariant-guard path: `price >= 0` negated must still use compareTo, not `<`.
         var (t, _) = Make();
         var expr = new BinaryExpr(BinaryOp.Ge, Id("price"), Int("0"));
-        Assert.Equal(
-            "$this->price->compareTo(new \\Koine\\Runtime\\Decimal('0')) < 0",
-            t.TranslateNegated(expr));
+        t.TranslateNegated(expr).ShouldBe("$this->price->compareTo(new \\Koine\\Runtime\\Decimal('0')) < 0");
     }
 
     // =========================================================================
@@ -220,32 +210,28 @@ public class PhpExpressionTests
     {
         // `weight * quantity` (Weight quantity * Int) -> weight->multipliedBy(new Decimal(quantity)).
         var expr = new BinaryExpr(BinaryOp.Mul, Id("weight"), Id("quantity"));
-        Assert.Equal(
-            "$this->weight->multipliedBy(new \\Koine\\Runtime\\Decimal($this->quantity))",
-            Translate(expr));
+        Translate(expr).ShouldBe("$this->weight->multipliedBy(new \\Koine\\Runtime\\Decimal($this->quantity))");
     }
 
     [Fact]
     public void Quantity_divided_by_scalar_lowers_to_dividedBy()
     {
         var expr = new BinaryExpr(BinaryOp.Div, Id("weight"), Id("quantity"));
-        Assert.Equal(
-            "$this->weight->dividedBy(new \\Koine\\Runtime\\Decimal($this->quantity))",
-            Translate(expr));
+        Translate(expr).ShouldBe("$this->weight->dividedBy(new \\Koine\\Runtime\\Decimal($this->quantity))");
     }
 
     [Fact]
     public void Quantity_plus_quantity_lowers_to_add()
     {
         var expr = new BinaryExpr(BinaryOp.Add, Id("weight"), Id("otherWeight"));
-        Assert.Equal("$this->weight->add($this->otherWeight)", Translate(expr));
+        Translate(expr).ShouldBe("$this->weight->add($this->otherWeight)");
     }
 
     [Fact]
     public void Quantity_minus_quantity_lowers_to_subtract()
     {
         var expr = new BinaryExpr(BinaryOp.Sub, Id("weight"), Id("otherWeight"));
-        Assert.Equal("$this->weight->subtract($this->otherWeight)", Translate(expr));
+        Translate(expr).ShouldBe("$this->weight->subtract($this->otherWeight)");
     }
 
     [Fact]
@@ -254,14 +240,14 @@ public class PhpExpressionTests
         // The VO is the RIGHT operand; the receiver must be the value object (not the literal),
         // otherwise we emit `1->add(...)` which is a fatal PHP error. The other operand is the arg.
         var expr = new BinaryExpr(BinaryOp.Add, Int("1"), Id("weight"));
-        Assert.Equal("$this->weight->add(1)", Translate(expr));
+        Translate(expr).ShouldBe("$this->weight->add(1)");
     }
 
     [Fact]
     public void Value_object_subtract_with_vo_on_the_right_uses_the_vo_as_receiver()
     {
         var expr = new BinaryExpr(BinaryOp.Sub, Int("1"), Id("weight"));
-        Assert.Equal("$this->weight->subtract(1)", Translate(expr));
+        Translate(expr).ShouldBe("$this->weight->subtract(1)");
     }
 
     [Fact]
@@ -269,8 +255,8 @@ public class PhpExpressionTests
     {
         var eq = new BinaryExpr(BinaryOp.Eq, Id("weight"), Id("otherWeight"));
         var ne = new BinaryExpr(BinaryOp.Neq, Id("weight"), Id("otherWeight"));
-        Assert.Equal("$this->weight->equals($this->otherWeight)", Translate(eq));
-        Assert.Equal("!$this->weight->equals($this->otherWeight)", Translate(ne));
+        Translate(eq).ShouldBe("$this->weight->equals($this->otherWeight)");
+        Translate(ne).ShouldBe("!$this->weight->equals($this->otherWeight)");
     }
 
     [Fact]
@@ -278,9 +264,7 @@ public class PhpExpressionTests
     {
         // No generated VO comparison method, so compare the underlying Decimal amount accessor.
         var expr = new BinaryExpr(BinaryOp.Lt, Id("weight"), Id("otherWeight"));
-        Assert.Equal(
-            "($this->weight->amount->compareTo($this->otherWeight->amount) < 0)",
-            Translate(expr));
+        Translate(expr).ShouldBe("($this->weight->amount->compareTo($this->otherWeight->amount) < 0)");
     }
 
     // =========================================================================
@@ -291,14 +275,14 @@ public class PhpExpressionTests
     public void IsEmpty_lowers_to_count_zero()
     {
         var expr = Member("lines", "isEmpty");
-        Assert.Equal("count($this->lines) === 0", Translate(expr));
+        Translate(expr).ShouldBe("count($this->lines) === 0");
     }
 
     [Fact]
     public void IsNotEmpty_lowers_to_count_not_zero()
     {
         var expr = Member("lines", "isNotEmpty");
-        Assert.Equal("count($this->lines) !== 0", Translate(expr));
+        Translate(expr).ShouldBe("count($this->lines) !== 0");
     }
 
     [Fact]
@@ -306,7 +290,7 @@ public class PhpExpressionTests
     {
         // `tags` is List<String>, so uses count()
         var expr = Member("tags", "length");
-        Assert.Equal("count($this->tags)", Translate(expr));
+        Translate(expr).ShouldBe("count($this->tags)");
     }
 
     [Fact]
@@ -314,30 +298,30 @@ public class PhpExpressionTests
     {
         // `code` is String, so uses strlen()
         var expr = Member("code", "length");
-        Assert.Equal("strlen($this->code)", Translate(expr));
+        Translate(expr).ShouldBe("strlen($this->code)");
     }
 
     [Fact]
     public void Count_lowers_to_count()
     {
         var expr = Member("lines", "count");
-        Assert.Equal("count($this->lines)", Translate(expr));
+        Translate(expr).ShouldBe("count($this->lines)");
     }
 
     [Fact]
     public void StringOps_lower_to_php_functions()
     {
-        Assert.Equal("trim($this->code)", Translate(Member("code", "trim")));
-        Assert.Equal("strtolower($this->code)", Translate(Member("code", "lower")));
-        Assert.Equal("strtoupper($this->code)", Translate(Member("code", "upper")));
-        Assert.Equal("(trim($this->code) === '')", Translate(Member("code", "isBlank")));
+        Translate(Member("code", "trim")).ShouldBe("trim($this->code)");
+        Translate(Member("code", "lower")).ShouldBe("strtolower($this->code)");
+        Translate(Member("code", "upper")).ShouldBe("strtoupper($this->code)");
+        Translate(Member("code", "isBlank")).ShouldBe("(trim($this->code) === '')");
     }
 
     [Fact]
     public void OptionalOps_lower_to_null_checks()
     {
-        Assert.Equal("$this->note !== null", Translate(Member("note", "isPresent")));
-        Assert.Equal("$this->note === null", Translate(Member("note", "isNone")));
+        Translate(Member("note", "isPresent")).ShouldBe("$this->note !== null");
+        Translate(Member("note", "isNone")).ShouldBe("$this->note === null");
     }
 
     // =========================================================================
@@ -348,7 +332,7 @@ public class PhpExpressionTests
     public void Coalesce_lowers_to_null_coalescing_operator()
     {
         var expr = new CoalesceExpr(Id("note"), new LiteralExpr(LiteralKind.String, "n/a"));
-        Assert.Equal("($this->note ?? \"n/a\")", Translate(expr));
+        Translate(expr).ShouldBe("($this->note ?? \"n/a\")");
     }
 
     [Fact]
@@ -358,15 +342,15 @@ public class PhpExpressionTests
             new BinaryExpr(BinaryOp.Ge, Id("quantity"), Int("1")),
             Int("10"),
             Int("0"));
-        Assert.Equal("(($this->quantity >= 1) ? 10 : 0)", Translate(expr));
+        Translate(expr).ShouldBe("(($this->quantity >= 1) ? 10 : 0)");
     }
 
     [Fact]
     public void Ternary_with_bool_literals_simplifies()
     {
         var cond = new BinaryExpr(BinaryOp.Ge, Id("quantity"), Int("1"));
-        Assert.Equal("($this->quantity >= 1)", Translate(new ConditionalExpr(cond, Bool(true), Bool(false))));
-        Assert.Equal("!(($this->quantity >= 1))", Translate(new ConditionalExpr(cond, Bool(false), Bool(true))));
+        Translate(new ConditionalExpr(cond, Bool(true), Bool(false))).ShouldBe("($this->quantity >= 1)");
+        Translate(new ConditionalExpr(cond, Bool(false), Bool(true))).ShouldBe("!(($this->quantity >= 1))");
     }
 
     // =========================================================================
@@ -377,14 +361,14 @@ public class PhpExpressionTests
     public void Contains_on_string_lowers_to_str_contains()
     {
         var expr = new CallExpr(Id("code"), "contains", new Expr[] { new LiteralExpr(LiteralKind.String, "x") });
-        Assert.Equal("str_contains($this->code, \"x\")", Translate(expr));
+        Translate(expr).ShouldBe("str_contains($this->code, \"x\")");
     }
 
     [Fact]
     public void Contains_on_list_lowers_to_in_array()
     {
         var expr = new CallExpr(Id("tags"), "contains", new Expr[] { new LiteralExpr(LiteralKind.String, "x") });
-        Assert.Equal("in_array(\"x\", $this->tags, true)", Translate(expr));
+        Translate(expr).ShouldBe("in_array(\"x\", $this->tags, true)");
     }
 
     [Fact]
@@ -392,8 +376,8 @@ public class PhpExpressionTests
     {
         var sw = new CallExpr(Id("code"), "startsWith", new Expr[] { new LiteralExpr(LiteralKind.String, "X") });
         var ew = new CallExpr(Id("code"), "endsWith", new Expr[] { new LiteralExpr(LiteralKind.String, "Y") });
-        Assert.Equal("str_starts_with($this->code, \"X\")", Translate(sw));
-        Assert.Equal("str_ends_with($this->code, \"Y\")", Translate(ew));
+        Translate(sw).ShouldBe("str_starts_with($this->code, \"X\")");
+        Translate(ew).ShouldBe("str_ends_with($this->code, \"Y\")");
     }
 
     [Fact]
@@ -406,9 +390,9 @@ public class PhpExpressionTests
         var any = new CallExpr(Id("lines"), "any", new Expr[] { new LambdaExpr("m", pred) });
         var none = new CallExpr(Id("lines"), "none", new Expr[] { new LambdaExpr("m", pred) });
         const string cmp = "($m->amount->compareTo(new \\Koine\\Runtime\\Decimal('0')) > 0)";
-        Assert.Equal($"array_reduce($this->lines, fn($carry, $m) => $carry && {cmp}, true)", Translate(all));
-        Assert.Equal($"array_reduce($this->lines, fn($carry, $m) => $carry || {cmp}, false)", Translate(any));
-        Assert.Equal($"!array_reduce($this->lines, fn($carry, $m) => $carry || {cmp}, false)", Translate(none));
+        Translate(all).ShouldBe($"array_reduce($this->lines, fn($carry, $m) => $carry && {cmp}, true)");
+        Translate(any).ShouldBe($"array_reduce($this->lines, fn($carry, $m) => $carry || {cmp}, false)");
+        Translate(none).ShouldBe($"!array_reduce($this->lines, fn($carry, $m) => $carry || {cmp}, false)");
     }
 
     // =========================================================================
@@ -421,7 +405,7 @@ public class PhpExpressionTests
         // Int projection: builtin array_sum should work
         var selector = new LambdaExpr("c", Id("c"));
         var expr = new CallExpr(Id("counts"), "sum", new Expr[] { selector });
-        Assert.Equal("array_sum(array_map(fn($c) => $c, $this->counts))", Translate(expr));
+        Translate(expr).ShouldBe("array_sum(array_map(fn($c) => $c, $this->counts))");
     }
 
     [Fact]
@@ -430,7 +414,7 @@ public class PhpExpressionTests
         // Decimal projection: empty collection has no zero, so must raise — keep koine_sum.
         var selector = new LambdaExpr("p", Id("p"));
         var expr = new CallExpr(Id("prices"), "sum", new Expr[] { selector });
-        Assert.Equal("\\Koine\\Runtime\\Decimal::sum(array_map(fn($p) => $p, $this->prices))", Translate(expr));
+        Translate(expr).ShouldBe("\\Koine\\Runtime\\Decimal::sum(array_map(fn($p) => $p, $this->prices))");
     }
 
     [Fact]
@@ -439,7 +423,7 @@ public class PhpExpressionTests
         // Value-object (Money) projection: no zero value — keep runtime sum.
         var selector = new LambdaExpr("m", new MemberAccessExpr(Id("m"), "amount"));
         var expr = new CallExpr(Id("lines"), "sum", new Expr[] { selector });
-        Assert.Equal("\\Koine\\Runtime\\Decimal::sum(array_map(fn($m) => $m->amount, $this->lines))", Translate(expr));
+        Translate(expr).ShouldBe("\\Koine\\Runtime\\Decimal::sum(array_map(fn($m) => $m->amount, $this->lines))");
     }
 
     [Fact]
@@ -448,8 +432,8 @@ public class PhpExpressionTests
         var selector = new LambdaExpr("p", new MemberAccessExpr(Id("p"), "amount"));
         var min = new CallExpr(Id("lines"), "min", new Expr[] { selector });
         var max = new CallExpr(Id("lines"), "max", new Expr[] { selector });
-        Assert.Equal("\\Koine\\Runtime\\Decimal::min(array_map(fn($p) => $p->amount, $this->lines))", Translate(min));
-        Assert.Equal("\\Koine\\Runtime\\Decimal::max(array_map(fn($p) => $p->amount, $this->lines))", Translate(max));
+        Translate(min).ShouldBe("\\Koine\\Runtime\\Decimal::min(array_map(fn($p) => $p->amount, $this->lines))");
+        Translate(max).ShouldBe("\\Koine\\Runtime\\Decimal::max(array_map(fn($p) => $p->amount, $this->lines))");
     }
 
     [Fact]
@@ -457,7 +441,7 @@ public class PhpExpressionTests
     {
         var selector = new LambdaExpr("m", new MemberAccessExpr(Id("m"), "amount"));
         var expr = new CallExpr(Id("lines"), "distinctBy", new Expr[] { selector });
-        Assert.Equal("count(array_unique(array_map(fn($m) => $m->amount, $this->lines))) === count($this->lines)", Translate(expr));
+        Translate(expr).ShouldBe("count(array_unique(array_map(fn($m) => $m->amount, $this->lines))) === count($this->lines)");
     }
 
     // =========================================================================
@@ -468,7 +452,7 @@ public class PhpExpressionTests
     public void Matches_lowers_to_preg_match()
     {
         var expr = new MatchExpr(Id("code"), "[A-Z]{3}");
-        Assert.Equal("(bool)preg_match('/[A-Z]{3}/', $this->code)", Translate(expr));
+        Translate(expr).ShouldBe("(bool)preg_match('/[A-Z]{3}/', $this->code)");
     }
 
     [Fact]
@@ -477,7 +461,7 @@ public class PhpExpressionTests
         // A `/` in the pattern would otherwise close the PCRE `/.../` delimiter early — emitting a
         // broken regex that preg_match rejects (warning + always-false). It must be escaped to `\/`.
         var expr = new MatchExpr(Id("code"), "a/b");
-        Assert.Equal("(bool)preg_match('/a\\/b/', $this->code)", Translate(expr));
+        Translate(expr).ShouldBe("(bool)preg_match('/a\\/b/', $this->code)");
     }
 
     // =========================================================================
@@ -494,7 +478,7 @@ public class PhpExpressionTests
         };
         var body = new BinaryExpr(BinaryOp.Add, Id("x"), Id("y"));
         var expr = new LetExpr(bindings, body);
-        Assert.Equal("(fn($x) => (fn($y) => ($x + $y))(2))(1)", Translate(expr));
+        Translate(expr).ShouldBe("(fn($x) => (fn($y) => ($x + $y))(2))(1)");
     }
 
     // =========================================================================
@@ -505,28 +489,28 @@ public class PhpExpressionTests
     public void Qualified_enum_access_renders_class_constant()
     {
         var expr = new MemberAccessExpr(Id("OrderStatus"), "Cancelled");
-        Assert.Equal("OrderStatus::CANCELLED", Translate(expr));
+        Translate(expr).ShouldBe("OrderStatus::CANCELLED");
     }
 
     [Fact]
     public void Decimal_literal_renders_runtime_decimal_constructor()
     {
         var expr = new LiteralExpr(LiteralKind.Decimal, "9.99");
-        Assert.Equal("new \\Koine\\Runtime\\Decimal('9.99')", Translate(expr));
+        Translate(expr).ShouldBe("new \\Koine\\Runtime\\Decimal('9.99')");
     }
 
     [Fact]
     public void Bool_literals_render_php_lowercase()
     {
-        Assert.Equal("true", Translate(Bool(true)));
-        Assert.Equal("false", Translate(Bool(false)));
+        Translate(Bool(true)).ShouldBe("true");
+        Translate(Bool(false)).ShouldBe("false");
     }
 
     [Fact]
     public void String_literal_is_double_quoted_and_escaped()
     {
         var expr = new LiteralExpr(LiteralKind.String, "a\"b\\c");
-        Assert.Equal("\"a\\\"b\\\\c\"", Translate(expr));
+        Translate(expr).ShouldBe("\"a\\\"b\\\\c\"");
     }
 
     // =========================================================================
@@ -538,7 +522,7 @@ public class PhpExpressionTests
     {
         var (t, _) = Make();
         var expr = new BinaryExpr(BinaryOp.Ge, Id("quantity"), Int("1"));
-        Assert.Equal("$this->quantity < 1", t.TranslateNegated(expr));
+        t.TranslateNegated(expr).ShouldBe("$this->quantity < 1");
     }
 
     [Fact]
@@ -546,7 +530,7 @@ public class PhpExpressionTests
     {
         var (t, _) = Make();
         var expr = new UnaryExpr(UnaryOp.Not, Id("a"));
-        Assert.Equal("$a", t.TranslateNegated(expr));
+        t.TranslateNegated(expr).ShouldBe("$a");
     }
 
     [Fact]
@@ -554,6 +538,6 @@ public class PhpExpressionTests
     {
         var (t, _) = Make();
         var expr = Member("lines", "isEmpty");
-        Assert.Equal("!(count($this->lines) === 0)", t.TranslateNegated(expr));
+        t.TranslateNegated(expr).ShouldBe("!(count($this->lines) === 0)");
     }
 }

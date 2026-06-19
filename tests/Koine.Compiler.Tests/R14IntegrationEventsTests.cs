@@ -13,9 +13,9 @@ public class R14IntegrationEventsTests
     private static (Assembly Asm, IReadOnlyList<Emit.EmittedFile> Files) Build(params SourceFile[] files)
     {
         var result = new KoineCompiler().Compile(files, new CSharpEmitter());
-        Assert.True(result.Success, string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
         var (asm, errors) = TestSupport.Compile(result.Files);
-        Assert.True(asm is not null, "generated C# failed to compile:\n" + string.Join("\n", errors));
+        (asm is not null).ShouldBeTrue("generated C# failed to compile:\n" + string.Join("\n", errors));
         return (asm!, result.Files);
     }
 
@@ -49,17 +49,17 @@ public class R14IntegrationEventsTests
     public void Integration_event_emits_a_record_with_the_runtime_marker()
     {
         var (asm, files) = Build(PubSub);
-        Assert.Contains("public sealed record OrderPlaced : IIntegrationEvent", FileContents(files, "Sales/IntegrationEvents/OrderPlaced.cs"));
-        Assert.Contains(files, f => f.RelativePath == "Koine/Runtime/IIntegrationEvent.cs");
-        Assert.NotNull(asm.GetType("Sales.OrderPlaced"));
-        Assert.NotNull(asm.GetType("Koine.Runtime.IIntegrationEvent"));
+        FileContents(files, "Sales/IntegrationEvents/OrderPlaced.cs").ShouldContain("public sealed record OrderPlaced : IIntegrationEvent");
+        files.ShouldContain(f => f.RelativePath == "Koine/Runtime/IIntegrationEvent.cs");
+        asm.GetType("Sales.OrderPlaced").ShouldNotBeNull();
+        asm.GetType("Koine.Runtime.IIntegrationEvent").ShouldNotBeNull();
     }
 
     [Fact]
     public void The_marker_is_only_emitted_when_integration_events_exist()
     {
         var (_, files) = Build("context C {\n  value V { n: Int }\n}\n");
-        Assert.DoesNotContain(files, f => f.RelativePath == "Koine/Runtime/IIntegrationEvent.cs");
+        files.ShouldNotContain(f => f.RelativePath == "Koine/Runtime/IIntegrationEvent.cs");
     }
 
     [Fact]
@@ -67,25 +67,25 @@ public class R14IntegrationEventsTests
     {
         var (asm, files) = Build(PubSub);
         var handler = FileContents(files, "Shipping/Abstractions/IHandleOrderPlaced.cs");
-        Assert.Contains("public interface IHandleOrderPlaced", handler);
+        handler.ShouldContain("public interface IHandleOrderPlaced");
         // The event type is fully-qualified with the publisher namespace (so it cannot bind to a
         // same-named local integration event).
-        Assert.Contains("Task Handle(Sales.OrderPlaced theEvent, CancellationToken ct = default);", handler);
-        Assert.NotNull(asm.GetType("Shipping.IHandleOrderPlaced"));
+        handler.ShouldContain("Task Handle(Sales.OrderPlaced theEvent, CancellationToken ct = default);");
+        asm.GetType("Shipping.IHandleOrderPlaced").ShouldNotBeNull();
     }
 
     [Fact]
     public void A_publish_only_context_gets_no_handler()
     {
         var (_, files) = Build(PubSub);
-        Assert.DoesNotContain(files, f => f.RelativePath == "Sales/Abstractions/IHandleOrderPlaced.cs");
+        files.ShouldNotContain(f => f.RelativePath == "Sales/Abstractions/IHandleOrderPlaced.cs");
     }
 
     [Fact]
     public void A_subscriber_does_not_re_emit_the_publishers_event_record()
     {
         var (_, files) = Build(PubSub);
-        Assert.DoesNotContain(files, f => f.RelativePath == "Shipping/IntegrationEvents/OrderPlaced.cs");
+        files.ShouldNotContain(f => f.RelativePath == "Shipping/IntegrationEvents/OrderPlaced.cs");
     }
 
     [Fact]
@@ -96,8 +96,8 @@ public class R14IntegrationEventsTests
               module Contracts { integration event OrderPlaced { orderId: OrderId } }
             }
             """);
-        Assert.Contains("namespace Sales.Contracts;", FileContents(files, "Sales/Contracts/IntegrationEvents/OrderPlaced.cs"));
-        Assert.NotNull(asm.GetType("Sales.Contracts.OrderPlaced"));
+        FileContents(files, "Sales/Contracts/IntegrationEvents/OrderPlaced.cs").ShouldContain("namespace Sales.Contracts;");
+        asm.GetType("Sales.Contracts.OrderPlaced").ShouldNotBeNull();
     }
 
     // ---- field-type leak checks (KOI1409) ----------------------------------
@@ -111,7 +111,7 @@ public class R14IntegrationEventsTests
               integration event OrderPlaced { order: Order }
             }
             """;
-        Assert.Contains(Diagnose(src), d => d.Code == DiagnosticCodes.IntegrationEventLeaksInternals);
+        Diagnose(src).ShouldContain(d => d.Code == DiagnosticCodes.IntegrationEventLeaksInternals);
     }
 
     [Fact]
@@ -123,7 +123,7 @@ public class R14IntegrationEventsTests
               integration event OrderPlaced { total: Money }
             }
             """;
-        Assert.Contains(Diagnose(src), d => d.Code == DiagnosticCodes.IntegrationEventLeaksInternals);
+        Diagnose(src).ShouldContain(d => d.Code == DiagnosticCodes.IntegrationEventLeaksInternals);
     }
 
     [Fact]
@@ -135,7 +135,7 @@ public class R14IntegrationEventsTests
               integration event OrderPlaced { opened: OrderOpened }
             }
             """;
-        Assert.Contains(Diagnose(src), d => d.Code == DiagnosticCodes.IntegrationEventLeaksInternals);
+        Diagnose(src).ShouldContain(d => d.Code == DiagnosticCodes.IntegrationEventLeaksInternals);
     }
 
     [Fact]
@@ -153,7 +153,7 @@ public class R14IntegrationEventsTests
               }
             }
             """;
-        Assert.DoesNotContain(Diagnose(src), d => d.Code == DiagnosticCodes.IntegrationEventLeaksInternals);
+        Diagnose(src).ShouldNotContain(d => d.Code == DiagnosticCodes.IntegrationEventLeaksInternals);
     }
 
     // ---- publishes ---------------------------------------------------------
@@ -161,22 +161,21 @@ public class R14IntegrationEventsTests
     [Fact]
     public void Publishing_an_unknown_event_is_reported()
     {
-        Assert.Contains(Diagnose("context Sales {\n  publishes Ghost\n}\n"),
-            d => d.Code == DiagnosticCodes.UnknownPublishedEvent);
+        Diagnose("context Sales {\n  publishes Ghost\n}\n").ShouldContain(d => d.Code == DiagnosticCodes.UnknownPublishedEvent);
     }
 
     [Fact]
     public void Publishing_a_domain_event_rather_than_an_integration_event_is_reported()
     {
         const string src = "context Sales {\n  publishes OrderOpened\n  event OrderOpened { orderId: OrderId }\n}\n";
-        Assert.Contains(Diagnose(src), d => d.Code == DiagnosticCodes.UnknownPublishedEvent);
+        Diagnose(src).ShouldContain(d => d.Code == DiagnosticCodes.UnknownPublishedEvent);
     }
 
     [Fact]
     public void Publishing_the_same_event_twice_is_reported()
     {
         const string src = "context Sales {\n  publishes OrderPlaced\n  publishes OrderPlaced\n  integration event OrderPlaced { orderId: OrderId }\n}\n";
-        Assert.Contains(Diagnose(src), d => d.Code == DiagnosticCodes.DuplicatePublish);
+        Diagnose(src).ShouldContain(d => d.Code == DiagnosticCodes.DuplicatePublish);
     }
 
     // ---- subscribes --------------------------------------------------------
@@ -184,8 +183,7 @@ public class R14IntegrationEventsTests
     [Fact]
     public void Subscribing_to_an_unknown_context_is_reported()
     {
-        Assert.Contains(Diagnose("context Shipping {\n  subscribes Nope.OrderPlaced\n}\n"),
-            d => d.Code == DiagnosticCodes.SubscribeUnknownContext);
+        Diagnose("context Shipping {\n  subscribes Nope.OrderPlaced\n}\n").ShouldContain(d => d.Code == DiagnosticCodes.SubscribeUnknownContext);
     }
 
     [Fact]
@@ -196,7 +194,7 @@ public class R14IntegrationEventsTests
             context Shipping { subscribes Sales.OrderPlaced }
             contextmap { Sales -> Shipping : open-host }
             """;
-        Assert.Contains(Diagnose(src), d => d.Code == DiagnosticCodes.SubscribeNotPublished);
+        Diagnose(src).ShouldContain(d => d.Code == DiagnosticCodes.SubscribeNotPublished);
     }
 
     [Fact]
@@ -207,7 +205,7 @@ public class R14IntegrationEventsTests
             context Shipping { subscribes Sales.OrderPlaced  subscribes Sales.OrderPlaced }
             contextmap { Sales -> Shipping : open-host }
             """;
-        Assert.Contains(Diagnose(src), d => d.Code == DiagnosticCodes.DuplicateSubscribe);
+        Diagnose(src).ShouldContain(d => d.Code == DiagnosticCodes.DuplicateSubscribe);
     }
 
     [Fact]
@@ -218,13 +216,13 @@ public class R14IntegrationEventsTests
             context Shipping { subscribes Sales.OrderPlaced }
             contextmap { Sales -> Shipping : conformist }
             """;
-        Assert.Contains(Diagnose(src), d => d.Code == DiagnosticCodes.SubscribeNoRelation);
+        Diagnose(src).ShouldContain(d => d.Code == DiagnosticCodes.SubscribeNoRelation);
     }
 
     [Fact]
     public void An_open_host_relation_authorizes_a_subscribe()
     {
-        Assert.DoesNotContain(Diagnose(PubSub), d => d.Code == DiagnosticCodes.SubscribeNoRelation);
+        Diagnose(PubSub).ShouldNotContain(d => d.Code == DiagnosticCodes.SubscribeNoRelation);
     }
 
     [Fact]
@@ -235,7 +233,7 @@ public class R14IntegrationEventsTests
             context Shipping { subscribes Sales.OrderPlaced }
             contextmap { Sales -> Shipping : customer-supplier }
             """;
-        Assert.DoesNotContain(Diagnose(src), d => d.Code == DiagnosticCodes.SubscribeNoRelation);
+        Diagnose(src).ShouldNotContain(d => d.Code == DiagnosticCodes.SubscribeNoRelation);
     }
 
     [Fact]
@@ -245,7 +243,7 @@ public class R14IntegrationEventsTests
             context Sales { publishes OrderPlaced  integration event OrderPlaced { orderId: OrderId } }
             context Shipping { subscribes Sales.OrderPlaced }
             """;
-        Assert.DoesNotContain(Diagnose(src), d => d.Code == DiagnosticCodes.SubscribeNoRelation);
+        Diagnose(src).ShouldNotContain(d => d.Code == DiagnosticCodes.SubscribeNoRelation);
     }
 
     // ---- merge & soft keywords --------------------------------------------
@@ -257,13 +255,13 @@ public class R14IntegrationEventsTests
             new SourceFile("sales.koi", "context Sales {\n  publishes OrderPlaced\n  integration event OrderPlaced { orderId: OrderId }\n}\n"),
             new SourceFile("shipping.koi", "context Shipping {\n  subscribes Sales.OrderPlaced\n}\n"),
             new SourceFile("map.koi", "contextmap {\n  Sales -> Shipping : open-host\n}\n"));
-        Assert.Contains(files, f => f.RelativePath == "Shipping/Abstractions/IHandleOrderPlaced.cs");
+        files.ShouldContain(f => f.RelativePath == "Shipping/Abstractions/IHandleOrderPlaced.cs");
     }
 
     [Fact]
     public void New_keywords_remain_usable_as_field_names()
     {
-        Assert.Empty(Diagnose("context C {\n  value V { integration: Int  publishes: Int  subscribes: Int  acl: Int }\n}\n"));
+        Diagnose("context C {\n  value V { integration: Int  publishes: Int  subscribes: Int  acl: Int }\n}\n").ShouldBeEmpty();
     }
 
     // ---- review regressions ------------------------------------------------
@@ -286,7 +284,7 @@ public class R14IntegrationEventsTests
             """);
         var handler = asm.GetType("Shipping.IHandleOrderPlaced")!;
         var param = handler.GetMethod("Handle")!.GetParameters()[0];
-        Assert.Equal("Sales.OrderPlaced", param.ParameterType.FullName);
+        param.ParameterType.FullName.ShouldBe("Sales.OrderPlaced");
     }
 
     [Fact]
@@ -301,6 +299,6 @@ public class R14IntegrationEventsTests
               Inventory -> Hub : open-host
             }
             """;
-        Assert.Contains(Diagnose(src), d => d.Code == DiagnosticCodes.SubscribeHandlerNameCollision);
+        Diagnose(src).ShouldContain(d => d.Code == DiagnosticCodes.SubscribeHandlerNameCollision);
     }
 }

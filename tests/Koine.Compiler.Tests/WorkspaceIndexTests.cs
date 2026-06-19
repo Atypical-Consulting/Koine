@@ -25,9 +25,9 @@ public class WorkspaceIndexTests
     {
         var idx = Index(("file:///ordering.koi", Ordering), ("file:///catalog.koi", Catalog));
         var def = idx.ResolveDefinition("file:///ordering.koi", "ProductId");
-        Assert.NotNull(def);
-        Assert.Equal("file:///catalog.koi", def!.Uri);
-        Assert.Equal(3, def.Span.Line); // line of `entity Product` in Catalog
+        def.ShouldNotBeNull();
+        def!.Uri.ShouldBe("file:///catalog.koi");
+        def.Span.Line.ShouldBe(3); // line of `entity Product` in Catalog
     }
 
     [Fact]
@@ -36,8 +36,8 @@ public class WorkspaceIndexTests
         var a = "context A { value Wrap { c: Currency } }\n";
         var idx = Index(("file:///a.koi", a), ("file:///catalog.koi", Catalog));
         var def = idx.ResolveDefinition("file:///a.koi", "Currency");
-        Assert.NotNull(def);
-        Assert.Equal("file:///catalog.koi", def!.Uri);
+        def.ShouldNotBeNull();
+        def!.Uri.ShouldBe("file:///catalog.koi");
     }
 
     [Fact]
@@ -46,8 +46,8 @@ public class WorkspaceIndexTests
         var local = "context L {\n  enum Currency { GBP }\n  value V { c: Currency }\n}\n";
         var idx = Index(("file:///local.koi", local), ("file:///catalog.koi", Catalog));
         var def = idx.ResolveDefinition("file:///local.koi", "Currency");
-        Assert.NotNull(def);
-        Assert.Equal("file:///local.koi", def!.Uri); // local wins
+        def.ShouldNotBeNull();
+        def!.Uri.ShouldBe("file:///local.koi"); // local wins
     }
 
     [Fact]
@@ -57,7 +57,7 @@ public class WorkspaceIndexTests
         var c = "context C { value Widget { y: Int } }\n";
         var active = "context A { value Uses { w: Widget } }\n";
         var idx = Index(("file:///a.koi", active), ("file:///b.koi", b), ("file:///c.koi", c));
-        Assert.Null(idx.ResolveDefinition("file:///a.koi", "Widget")); // declared in 2 other files
+        idx.ResolveDefinition("file:///a.koi", "Widget").ShouldBeNull(); // declared in 2 other files
     }
 
     [Fact]
@@ -66,16 +66,16 @@ public class WorkspaceIndexTests
         var active = "context A {\n  enum Local { X }\n}\n"; // does not declare Currency
         var idx = Index(("file:///a.koi", active), ("file:///catalog.koi", Catalog));
         var def = idx.ResolveDefinition("file:///a.koi", "EUR"); // a Currency member in Catalog
-        Assert.NotNull(def);
-        Assert.Equal("file:///catalog.koi", def!.Uri);
-        Assert.Equal(2, def.Span.Line); // line of `enum Currency { EUR, USD }`
+        def.ShouldNotBeNull();
+        def!.Uri.ShouldBe("file:///catalog.koi");
+        def.Span.Line.ShouldBe(2); // line of `enum Currency { EUR, USD }`
     }
 
     [Fact]
     public void Empty_workspace_resolves_to_null()
     {
         var idx = new WorkspaceIndex(new Dictionary<string, string>());
-        Assert.Null(idx.ResolveDefinition("file:///x.koi", "Anything"));
+        idx.ResolveDefinition("file:///x.koi", "Anything").ShouldBeNull();
     }
 
     [Fact]
@@ -84,8 +84,8 @@ public class WorkspaceIndexTests
         var broken = "context Broken { value {{{ ";
         var idx = Index(("file:///broken.koi", broken), ("file:///catalog.koi", Catalog));
         var def = idx.ResolveDefinition("file:///broken.koi", "Product");
-        Assert.NotNull(def); // resolves into catalog despite broken active file
-        Assert.Equal("file:///catalog.koi", def!.Uri);
+        def.ShouldNotBeNull(); // resolves into catalog despite broken active file
+        def!.Uri.ShouldBe("file:///catalog.koi");
     }
 
     [Fact]
@@ -94,9 +94,9 @@ public class WorkspaceIndexTests
         var a = "context A { value Wrap { c: Currency } }\n";
         var idx = Index(("file:///a.koi", a), ("file:///catalog.koi", Catalog));
         var md = idx.ResolveHover("file:///a.koi", "Currency");
-        Assert.NotNull(md);
-        Assert.Contains("Currency", md!);
-        Assert.Contains("Enum", md);
+        md.ShouldNotBeNull();
+        md!.ShouldContain("Currency");
+        md.ShouldContain("Enum");
     }
 
     [Fact]
@@ -104,8 +104,8 @@ public class WorkspaceIndexTests
     {
         var idx = Index(("file:///ordering.koi", Ordering), ("file:///catalog.koi", Catalog));
         var md = idx.ResolveHover("file:///ordering.koi", "ProductId");
-        Assert.NotNull(md);
-        Assert.Contains("Product", md!); // names the owning entity
+        md.ShouldNotBeNull();
+        md!.ShouldContain("Product"); // names the owning entity
     }
 
     [Fact]
@@ -113,15 +113,15 @@ public class WorkspaceIndexTests
     {
         var idx = Index(("file:///a.koi", "context A { value V { x: Int } }\n"));
         var md = idx.ResolveHover("file:///a.koi", "Decimal");
-        Assert.NotNull(md);
-        Assert.Contains("Primitive", md!);
+        md.ShouldNotBeNull();
+        md!.ShouldContain("Primitive");
     }
 
     [Fact]
     public void Unknown_name_hover_is_null()
     {
         var idx = Index(("file:///a.koi", "context A { value V { x: Int } }\n"));
-        Assert.Null(idx.ResolveHover("file:///a.koi", "Nonexistent"));
+        idx.ResolveHover("file:///a.koi", "Nonexistent").ShouldBeNull();
     }
 
     [Fact]
@@ -131,7 +131,7 @@ public class WorkspaceIndexTests
         var c = "context C { value Widget { y: Int } }\n";
         var active = "context A { value Uses { w: Widget } }\n";
         var idx = Index(("file:///a.koi", active), ("file:///b.koi", b), ("file:///c.koi", c));
-        Assert.Null(idx.ResolveHover("file:///a.koi", "Widget"));
+        idx.ResolveHover("file:///a.koi", "Widget").ShouldBeNull();
     }
 
     [Fact]
@@ -141,7 +141,7 @@ public class WorkspaceIndexTests
         var active = "context A { value V { x: Int } }\n";
         var idx = Index(("file:///a.koi", active), ("file:///s.koi", specFile));
         var md = idx.ResolveHover("file:///a.koi", "Positive");
-        Assert.NotNull(md);
-        Assert.Contains("spec on Money", md!);
+        md.ShouldNotBeNull();
+        md!.ShouldContain("spec on Money");
     }
 }

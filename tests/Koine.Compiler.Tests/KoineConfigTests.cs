@@ -12,9 +12,9 @@ public class KoineConfigTests
     public void Parses_flat_keys()
     {
         var cfg = KoineConfig.Parse("target = csharp\nout = generated\nbaseline = ./prev\n");
-        Assert.Equal("csharp", cfg.Target);
-        Assert.Equal("generated", cfg.OutDir);
-        Assert.Equal("./prev", cfg.Baseline);
+        cfg.Target.ShouldBe("csharp");
+        cfg.OutDir.ShouldBe("generated");
+        cfg.Baseline.ShouldBe("./prev");
     }
 
     [Fact]
@@ -28,10 +28,10 @@ public class KoineConfigTests
             "targets.typescript.out = generated/ts\n");
 
         var cs = cfg.OptionsFor("csharp");
-        Assert.Equal("generated/cs", cs.OutDir);
-        Assert.Equal("nodatime", cs.InstantMode);
-        Assert.Equal("filePerType", cs.Layout);
-        Assert.Equal("generated/ts", cfg.OptionsFor("typescript").OutDir);
+        cs.OutDir.ShouldBe("generated/cs");
+        cs.InstantMode.ShouldBe("nodatime");
+        cs.Layout.ShouldBe("filePerType");
+        cfg.OptionsFor("typescript").OutDir.ShouldBe("generated/ts");
     }
 
     [Fact]
@@ -42,8 +42,8 @@ public class KoineConfigTests
             "targets.csharp.namespaces.Ordering = Acme.Ordering\n");
 
         var map = cfg.OptionsFor("csharp").NamespaceMap;
-        Assert.Equal("Acme.Catalog", map["Catalog"]);
-        Assert.Equal("Acme.Ordering", map["Ordering"]);
+        map["Catalog"].ShouldBe("Acme.Catalog");
+        map["Ordering"].ShouldBe("Acme.Ordering");
     }
 
     [Fact]
@@ -51,9 +51,9 @@ public class KoineConfigTests
     {
         var cfg = KoineConfig.Parse("target = csharp\n");
         var opts = cfg.OptionsFor("rust");
-        Assert.Same(TargetOptions.Empty, opts);
-        Assert.Null(opts.OutDir);
-        Assert.Empty(opts.NamespaceMap);
+        opts.ShouldBeSameAs(TargetOptions.Empty);
+        opts.OutDir.ShouldBeNull();
+        opts.NamespaceMap.ShouldBeEmpty();
     }
 
     [Fact]
@@ -66,6 +66,6 @@ public class KoineConfigTests
             "targets.csharp = oops\n" +      // missing .<rest>
             "targets..out = nope\n" +         // empty name
             "targets.csharp.out = generated/cs\n");
-        Assert.Equal("generated/cs", cfg.OptionsFor("csharp").OutDir);
+        cfg.OptionsFor("csharp").OutDir.ShouldBe("generated/cs");
     }
 }

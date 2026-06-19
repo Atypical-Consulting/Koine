@@ -15,21 +15,21 @@ public class PhpRuntimeTests
         var result = new KoineCompiler().Compile(
             "context C { value V { x: Int } }",
             new PhpEmitter());
-        Assert.NotNull(result.Model);
+        result.Model.ShouldNotBeNull();
         return result.Files;
     }
 
     [Fact]
     public void TargetName_is_php()
     {
-        Assert.Equal("php", new PhpEmitter().TargetName);
+        new PhpEmitter().TargetName.ShouldBe("php");
     }
 
     [Fact]
     public void Emit_contains_KoineRuntime_php()
     {
         var files = EmitTrivial();
-        Assert.Contains(files, f => f.RelativePath == PhpRuntime.FileName);
+        files.ShouldContain(f => f.RelativePath == PhpRuntime.FileName);
     }
 
     [Fact]
@@ -37,7 +37,7 @@ public class PhpRuntimeTests
     {
         var files = EmitTrivial();
         var runtime = files.Single(f => f.RelativePath == PhpRuntime.FileName);
-        Assert.Contains("DomainInvariantViolationException", runtime.Contents);
+        runtime.Contents.ShouldContain("DomainInvariantViolationException");
     }
 
     [Fact]
@@ -45,7 +45,7 @@ public class PhpRuntimeTests
     {
         var files = EmitTrivial();
         var runtime = files.Single(f => f.RelativePath == PhpRuntime.FileName);
-        Assert.Contains("ConcurrencyConflictException", runtime.Contents);
+        runtime.Contents.ShouldContain("ConcurrencyConflictException");
     }
 
     [Fact]
@@ -53,7 +53,7 @@ public class PhpRuntimeTests
     {
         var files = EmitTrivial();
         var runtime = files.Single(f => f.RelativePath == PhpRuntime.FileName);
-        Assert.Contains("Range", runtime.Contents);
+        runtime.Contents.ShouldContain("Range");
     }
 
     [Fact]
@@ -61,21 +61,21 @@ public class PhpRuntimeTests
     {
         var files = EmitTrivial();
         var runtime = files.Single(f => f.RelativePath == PhpRuntime.FileName);
-        Assert.Contains("Decimal", runtime.Contents);
+        runtime.Contents.ShouldContain("Decimal");
     }
 
     [Fact]
     public void Emit_contains_composer_json()
     {
         var files = EmitTrivial();
-        Assert.Contains(files, f => f.RelativePath == "composer.json");
+        files.ShouldContain(f => f.RelativePath == "composer.json");
     }
 
     [Fact]
     public void Emit_contains_phpstan_neon()
     {
         var files = EmitTrivial();
-        Assert.Contains(files, f => f.RelativePath == "phpstan.neon");
+        files.ShouldContain(f => f.RelativePath == "phpstan.neon");
     }
 
     [Fact]
@@ -83,7 +83,7 @@ public class PhpRuntimeTests
     {
         var files = EmitTrivial();
         var composer = files.Single(f => f.RelativePath == "composer.json");
-        Assert.Contains("Koine\\\\", composer.Contents);
+        composer.Contents.ShouldContain("Koine\\\\");
     }
 
     [Fact]
@@ -91,7 +91,7 @@ public class PhpRuntimeTests
     {
         var files = EmitTrivial();
         var runtime = files.Single(f => f.RelativePath == PhpRuntime.FileName);
-        Assert.StartsWith("<?php", runtime.Contents);
+        runtime.Contents.ShouldStartWith("<?php");
     }
 
     [Fact]
@@ -99,7 +99,7 @@ public class PhpRuntimeTests
     {
         var files = EmitTrivial();
         var runtime = files.Single(f => f.RelativePath == PhpRuntime.FileName);
-        Assert.Contains("declare(strict_types=1)", runtime.Contents);
+        runtime.Contents.ShouldContain("declare(strict_types=1)");
     }
 
     [Fact]
@@ -107,6 +107,6 @@ public class PhpRuntimeTests
     {
         var files = EmitTrivial();
         var runtime = files.Single(f => f.RelativePath == PhpRuntime.FileName);
-        Assert.Contains("namespace Koine\\Runtime", runtime.Contents);
+        runtime.Contents.ShouldContain("namespace Koine\\Runtime");
     }
 }

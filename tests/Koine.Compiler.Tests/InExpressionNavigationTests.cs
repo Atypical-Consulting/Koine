@@ -34,16 +34,16 @@ public class InExpressionNavigationTests
     public void Definition_of_a_field_referenced_in_an_invariant_points_at_the_field()
     {
         var def = Svc.DefinitionAt(Doc(Src), U, line: 3, character: 16); // over "amount" in the invariant
-        Assert.NotNull(def);
-        Assert.Equal(3, def!.Target.Line); // 1-based line of "amount: Decimal"
+        def.ShouldNotBeNull();
+        def!.Target.Line.ShouldBe(3); // 1-based line of "amount: Decimal"
     }
 
     [Fact]
     public void Hover_over_a_field_referenced_in_an_invariant_shows_a_field_card()
     {
         var hover = Svc.HoverAt(Doc(Src), U, line: 3, character: 16); // over "amount" in the invariant
-        Assert.NotNull(hover);
-        Assert.Contains("field of Money", hover!.Markdown);
-        Assert.Contains("Decimal", hover.Markdown);
+        hover.ShouldNotBeNull();
+        hover!.Markdown.ShouldContain("field of Money");
+        hover.Markdown.ShouldContain("Decimal");
     }
 }

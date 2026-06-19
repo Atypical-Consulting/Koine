@@ -66,10 +66,10 @@ public class R1ExpressionTests
     private static Assembly CompileFixture()
     {
         var result = new KoineCompiler().Compile(Fixture, new CSharpEmitter());
-        Assert.True(result.Success, string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
 
         var (asm, errors) = TestSupport.Compile(result.Files);
-        Assert.True(asm is not null, "generated C# failed to compile:\n" + string.Join("\n", errors));
+        (asm is not null).ShouldBeTrue("generated C# failed to compile:\n" + string.Join("\n", errors));
         return asm;
     }
 
@@ -81,7 +81,7 @@ public class R1ExpressionTests
     [Fact]
     public void Fixture_is_valid_and_compiles()
     {
-        Assert.Empty(Diagnose(Fixture));
+        Diagnose(Fixture).ShouldBeEmpty();
         CompileFixture(); // throws on compile failure
     }
 
@@ -104,8 +104,8 @@ public class R1ExpressionTests
             return (decimal)money.GetProperty("Amount")!.GetValue(eff)!;
         }
 
-        Assert.Equal(90m, Effective(10)); // >= 10 -> 100 * 0.9
-        Assert.Equal(100m, Effective(5)); // else  -> 100
+        Effective(10).ShouldBe(90m); // >= 10 -> 100 * 0.9
+        Effective(5).ShouldBe(100m); // else  -> 100
     }
 
     // ---- R1.2 string ops ---------------------------------------------------
@@ -117,11 +117,11 @@ public class R1ExpressionTests
         var postal = asm.GetType("R1.PostalCode")!;
 
         var ok = Activator.CreateInstance(postal, "  ab ");
-        Assert.Equal("AB", postal.GetProperty("Normalized")!.GetValue(ok));
+        postal.GetProperty("Normalized")!.GetValue(ok).ShouldBe("AB");
 
         // raw.trim.length > 0 fails for blank input.
-        var ex = Assert.Throws<TargetInvocationException>(() => Activator.CreateInstance(postal, "   "));
-        Assert.Equal("DomainInvariantViolationException", ex.InnerException!.GetType().Name);
+        var ex = Should.Throw<TargetInvocationException>(() => Activator.CreateInstance(postal, "   "));
+        ex.InnerException!.GetType().Name.ShouldBe("DomainInvariantViolationException");
     }
 
     // ---- R1.3 collection ops + lambdas -------------------------------------
@@ -148,7 +148,7 @@ public class R1ExpressionTests
 
         var c = Activator.CreateInstance(cart, lines);
         var total = cart.GetProperty("Total")!.GetValue(c);
-        Assert.Equal(50m, (decimal)money.GetProperty("Amount")!.GetValue(total)!); // 2*10 + 3*10
+        ((decimal)money.GetProperty("Amount")!.GetValue(total)!).ShouldBe(50m); // 2*10 + 3*10
     }
 
     [Fact]
@@ -167,8 +167,8 @@ public class R1ExpressionTests
             typeof(List<>).MakeGenericType(line))!;
         lines.Add(Activator.CreateInstance(line, newId.Invoke(null, null), 0, Activator.CreateInstance(money, 10m, eur)));
 
-        var ex = Assert.Throws<TargetInvocationException>(() => Activator.CreateInstance(cart, lines));
-        Assert.Equal("DomainInvariantViolationException", ex.InnerException!.GetType().Name);
+        var ex = Should.Throw<TargetInvocationException>(() => Activator.CreateInstance(cart, lines));
+        ex.InnerException!.GetType().Name.ShouldBe("DomainInvariantViolationException");
     }
 
     // ---- R1.4 Instant + now ------------------------------------------------
@@ -181,16 +181,15 @@ public class R1ExpressionTests
         var ev = asm.GetType("R1.Event")!;
 
         var start = DateTimeOffset.UtcNow;
-        Assert.NotNull(Activator.CreateInstance(range, start, start.AddHours(1)));
+        Activator.CreateInstance(range, start, start.AddHours(1)).ShouldNotBeNull();
 
         // start after end violates the invariant.
-        var ex = Assert.Throws<TargetInvocationException>(
-            () => Activator.CreateInstance(range, start, start.AddHours(-1)));
-        Assert.Equal("DomainInvariantViolationException", ex.InnerException!.GetType().Name);
+        var ex = Should.Throw<TargetInvocationException>(() => Activator.CreateInstance(range, start, start.AddHours(-1)));
+        ex.InnerException!.GetType().Name.ShouldBe("DomainInvariantViolationException");
 
         // `now`-based derived field evaluates against the current time.
         var past = Activator.CreateInstance(ev, DateTimeOffset.UtcNow.AddHours(-1));
-        Assert.True((bool)ev.GetProperty("IsPast")!.GetValue(past)!);
+        ((bool)ev.GetProperty("IsPast")!.GetValue(past)!).ShouldBeTrue();
     }
 
     // ---- diagnostics -------------------------------------------------------
@@ -199,42 +198,42 @@ public class R1ExpressionTests
     public void Instant_compared_with_non_instant_is_reported()
     {
         var diags = Diagnose("context C {\n  value V {\n    a: Instant\n    b: Int\n    invariant a <= b \"x\"\n  }\n}\n");
-        Assert.Contains(diags, d => d.Message.Contains("cannot compare 'Instant' with 'Int'"));
+        diags.ShouldContain(d => d.Message.Contains("cannot compare 'Instant' with 'Int'"));
     }
 
     [Fact]
     public void Now_as_stored_default_is_reported()
     {
         var diags = Diagnose("context C {\n  value V {\n    t: Instant = now\n  }\n}\n");
-        Assert.Contains(diags, d => d.Message.Contains("'now' cannot be used as a stored default"));
+        diags.ShouldContain(d => d.Message.Contains("'now' cannot be used as a stored default"));
     }
 
     [Fact]
     public void Unknown_string_operation_is_reported()
     {
         var diags = Diagnose("context C {\n  value V {\n    raw: String\n    normalized: String = raw.bogus\n  }\n}\n");
-        Assert.Contains(diags, d => d.Message.Contains("unknown string operation 'bogus'"));
+        diags.ShouldContain(d => d.Message.Contains("unknown string operation 'bogus'"));
     }
 
     [Fact]
     public void String_op_on_non_string_is_reported()
     {
         var diags = Diagnose("context C {\n  value V {\n    n: Int\n    invariant n.trim.length > 0 \"x\"\n  }\n}\n");
-        Assert.Contains(diags, d => d.Message.Contains("string operation 'trim' cannot be applied to 'Int'"));
+        diags.ShouldContain(d => d.Message.Contains("string operation 'trim' cannot be applied to 'Int'"));
     }
 
     [Fact]
     public void Collection_op_on_non_collection_is_reported()
     {
         var diags = Diagnose("context C {\n  value V {\n    n: Int\n    invariant n.all(x => x > 0) \"y\"\n  }\n}\n");
-        Assert.Contains(diags, d => d.Message.Contains("collection operation 'all' cannot be applied to 'Int'"));
+        diags.ShouldContain(d => d.Message.Contains("collection operation 'all' cannot be applied to 'Int'"));
     }
 
     [Fact]
     public void Conditional_with_incompatible_branches_is_reported()
     {
         var diags = Diagnose("context C {\n  value V {\n    a: Int\n    b: String\n    x: String = if a > 0 then a else b\n  }\n}\n");
-        Assert.Contains(diags, d => d.Message.Contains("incompatible types"));
+        diags.ShouldContain(d => d.Message.Contains("incompatible types"));
     }
 
     [Fact]
@@ -249,7 +248,7 @@ public class R1ExpressionTests
             "  }\n" +
             "}\n";
         var diags = Diagnose(src);
-        Assert.Contains(diags, d => d.Message.Contains("unknown member 'bogus' on type 'Line'"));
+        diags.ShouldContain(d => d.Message.Contains("unknown member 'bogus' on type 'Line'"));
     }
 
     // ---- regressions found by the R1 review --------------------------------
@@ -258,14 +257,14 @@ public class R1ExpressionTests
     public void Relational_on_value_object_is_reported()
     {
         const string src = "context C {\n  value Money { amount: Decimal }\n  value V {\n    a: Money\n    b: Money\n    invariant a < b \"x\"\n  }\n}\n";
-        Assert.Contains(Diagnose(src), d => d.Message.Contains("relational operator cannot be applied to 'Money'"));
+        Diagnose(src).ShouldContain(d => d.Message.Contains("relational operator cannot be applied to 'Money'"));
     }
 
     [Fact]
     public void Enum_compared_with_int_is_reported()
     {
         const string src = "context C {\n  enum E { A }\n  value V {\n    e: E\n    ok: Bool = e == 1\n  }\n}\n";
-        Assert.Contains(Diagnose(src), d => d.Message.Contains("cannot compare 'E' with 'Int'"));
+        Diagnose(src).ShouldContain(d => d.Message.Contains("cannot compare 'E' with 'Int'"));
     }
 
     [Fact]
@@ -280,21 +279,21 @@ public class R1ExpressionTests
             "    cheapest: Money = lines.min(l => l.price)\n" +
             "  }\n" +
             "}\n";
-        Assert.Contains(Diagnose(src), d => d.Message.Contains("min requires a comparable selector"));
+        Diagnose(src).ShouldContain(d => d.Message.Contains("min requires a comparable selector"));
     }
 
     [Fact]
     public void Collection_contains_argument_type_is_checked()
     {
         const string src = "context C {\n  value V {\n    tags: List<String>\n    ok: Bool = tags.contains(5)\n  }\n}\n";
-        Assert.Contains(Diagnose(src), d => d.Message.Contains("collection 'contains' expects an argument of type 'String'"));
+        Diagnose(src).ShouldContain(d => d.Message.Contains("collection 'contains' expects an argument of type 'String'"));
     }
 
     [Fact]
     public void Member_access_on_primitive_element_is_reported()
     {
         const string src = "context C {\n  value V {\n    xs: List<Int>\n    ok: Bool = xs.all(x => x.foo > 0)\n  }\n}\n";
-        Assert.Contains(Diagnose(src), d => d.Message.Contains("unknown member 'foo' on type 'Int'"));
+        Diagnose(src).ShouldContain(d => d.Message.Contains("unknown member 'foo' on type 'Int'"));
     }
 
     [Fact]
@@ -311,15 +310,15 @@ public class R1ExpressionTests
             "    b: Int = - - a\n" +
             "  }\n" +
             "}\n";
-        Assert.Empty(Diagnose(src));
+        Diagnose(src).ShouldBeEmpty();
 
         var result = new KoineCompiler().Compile(src, new CSharpEmitter());
         var (asm, errors) = TestSupport.Compile(result.Files);
-        Assert.True(asm is not null, "generated C# failed to compile:\n" + string.Join("\n", errors));
+        (asm is not null).ShouldBeTrue("generated C# failed to compile:\n" + string.Join("\n", errors));
 
         var neg = asm.GetType("N.Neg")!;
         var n = Activator.CreateInstance(neg, 7);
-        Assert.Equal(7, neg.GetProperty("B")!.GetValue(n)); // -(-7) == 7
+        neg.GetProperty("B")!.GetValue(n).ShouldBe(7); // -(-7) == 7
 
         var stats = asm.GetType("N.Stats")!;
         var ints = (System.Collections.IList)Activator.CreateInstance(typeof(List<int>))!;
@@ -327,7 +326,7 @@ public class R1ExpressionTests
         ints.Add(1);
         ints.Add(2);
         var s = Activator.CreateInstance(stats, ints);
-        Assert.Equal(1, stats.GetProperty("Lowest")!.GetValue(s));
+        stats.GetProperty("Lowest")!.GetValue(s).ShouldBe(1);
     }
 
     // ---- R1.4 `now` as a first-class builtin -------------------------------
@@ -337,8 +336,8 @@ public class R1ExpressionTests
     {
         // Single source of truth: `now` is defined once in BuiltinOps, not as a
         // scattered string literal across resolver/checker/emitter.
-        Assert.True(Ast.BuiltinOps.IsNullaryValueOp("now"));
-        Assert.Equal("Instant", Ast.BuiltinOps.NullaryValueOps["now"]);
+        Ast.BuiltinOps.IsNullaryValueOp("now").ShouldBeTrue();
+        Ast.BuiltinOps.NullaryValueOps["now"].ShouldBe("Instant");
     }
 
     [Fact]
@@ -351,13 +350,13 @@ public class R1ExpressionTests
             "    isPast:   Bool = startsAt < now\n" +
             "  }\n" +
             "}\n";
-        Assert.Empty(Diagnose(src));
+        Diagnose(src).ShouldBeEmpty();
 
         var result = new KoineCompiler().Compile(src, new CSharpEmitter());
-        Assert.True(result.Success, string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
 
         var source = string.Join("\n", result.Files.Select(f => f.Contents));
-        Assert.Contains("DateTimeOffset.UtcNow", source);
+        source.ShouldContain("DateTimeOffset.UtcNow");
     }
 
     [Fact]
@@ -372,12 +371,12 @@ public class R1ExpressionTests
             "    sameAs: Bool = now == now\n" +
             "  }\n" +
             "}\n";
-        Assert.Empty(Diagnose(src));
+        Diagnose(src).ShouldBeEmpty();
 
         var result = new KoineCompiler().Compile(src, new CSharpEmitter());
-        Assert.True(result.Success, string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
 
         var source = string.Join("\n", result.Files.Select(f => f.Contents));
-        Assert.DoesNotContain("DateTimeOffset.UtcNow", source);
+        source.ShouldNotContain("DateTimeOffset.UtcNow");
     }
 }

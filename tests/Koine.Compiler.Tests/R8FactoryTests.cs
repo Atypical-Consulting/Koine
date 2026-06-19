@@ -40,9 +40,9 @@ public class R8FactoryTests
     private static Assembly Compile(string source = Fixture)
     {
         var result = new KoineCompiler().Compile(source, new CSharpEmitter());
-        Assert.True(result.Success, string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
         var (asm, errors) = TestSupport.Compile(result.Files);
-        Assert.True(asm is not null, "generated C# failed to compile:\n" + string.Join("\n", errors));
+        (asm is not null).ShouldBeTrue("generated C# failed to compile:\n" + string.Join("\n", errors));
         return asm;
     }
 
@@ -78,7 +78,7 @@ public class R8FactoryTests
     [Fact]
     public void Fixture_is_valid_and_compiles()
     {
-        Assert.Empty(Diagnose(Fixture));
+        Diagnose(Fixture).ShouldBeEmpty();
         Compile();
     }
 
@@ -90,11 +90,11 @@ public class R8FactoryTests
 
         var o = InvokeFactory(asm, Lines(asm, 2));
 
-        Assert.NotNull(order.GetProperty("Id")!.GetValue(o));
-        Assert.True(TestSupport.EnumValue(asm.GetType("Sales.OrderStatus")!, "Draft")
-            .Equals(order.GetProperty("Status")!.GetValue(o)));
+        order.GetProperty("Id")!.GetValue(o).ShouldNotBeNull();
+        TestSupport.EnumValue(asm.GetType("Sales.OrderStatus")!, "Draft")
+            .Equals(order.GetProperty("Status")!.GetValue(o)).ShouldBeTrue();
         var lines = (IEnumerable)order.GetProperty("Lines")!.GetValue(o)!;
-        Assert.Equal(2, lines.Cast<object>().Count());
+        lines.Cast<object>().Count().ShouldBe(2);
     }
 
     [Fact]
@@ -105,7 +105,7 @@ public class R8FactoryTests
 
         var a = order.GetProperty("Id")!.GetValue(InvokeFactory(asm, Lines(asm, 1)));
         var b = order.GetProperty("Id")!.GetValue(InvokeFactory(asm, Lines(asm, 1)));
-        Assert.NotEqual(a, b);
+        b.ShouldNotBe(a);
     }
 
     [Fact]
@@ -118,9 +118,9 @@ public class R8FactoryTests
 
         var events = (IEnumerable)order.GetProperty("DomainEvents")!.GetValue(o)!;
         var list = events.Cast<object>().ToList();
-        var evt = Assert.Single(list);
-        Assert.Equal("OrderOpened", evt.GetType().Name);
-        Assert.Equal(3, evt.GetType().GetProperty("LineCount")!.GetValue(evt));
+        var evt = list.ShouldHaveSingleItem();
+        evt.GetType().Name.ShouldBe("OrderOpened");
+        evt.GetType().GetProperty("LineCount")!.GetValue(evt).ShouldBe(3);
     }
 
     [Fact]
@@ -128,8 +128,8 @@ public class R8FactoryTests
     {
         var asm = Compile();
 
-        var ex = Assert.Throws<TargetInvocationException>(() => InvokeFactory(asm, Lines(asm, 0)));
-        Assert.Equal("DomainInvariantViolationException", ex.InnerException!.GetType().Name);
+        var ex = Should.Throw<TargetInvocationException>(() => InvokeFactory(asm, Lines(asm, 0)));
+        ex.InnerException!.GetType().Name.ShouldBe("DomainInvariantViolationException");
     }
 
     [Fact]
@@ -137,9 +137,9 @@ public class R8FactoryTests
     {
         var result = new KoineCompiler().Compile(Fixture, new CSharpEmitter());
         var order = result.Files.Single(f => f.RelativePath == "Sales/Order.cs").Contents;
-        Assert.Contains("private Order(", order);
-        Assert.DoesNotContain("public Order(", order);
-        Assert.Contains("public static Order ForCustomer(", order);
+        order.ShouldContain("private Order(");
+        order.ShouldNotContain("public Order(");
+        order.ShouldContain("public static Order ForCustomer(");
     }
 
     [Fact]
@@ -148,8 +148,8 @@ public class R8FactoryTests
         const string src = "context C {\n  entity E identified by EId {\n    n: Int\n  }\n}\n";
         var result = new KoineCompiler().Compile(src, new CSharpEmitter());
         var e = result.Files.Single(f => f.RelativePath == "C/Entities/E.cs").Contents;
-        Assert.Contains("public E(", e);
-        Assert.DoesNotContain("private E(", e);
+        e.ShouldContain("public E(");
+        e.ShouldNotContain("private E(");
     }
 
     [Fact]
@@ -157,10 +157,10 @@ public class R8FactoryTests
     {
         var result = new KoineCompiler().Compile(Fixture, new CSharpEmitter());
         var order = result.Files.Single(f => f.RelativePath == "Sales/Order.cs").Contents;
-        Assert.Contains("var id = OrderId.New();", order);
-        Assert.Contains("customer: customer", order);
-        Assert.Contains("lines: ", order);
-        Assert.Contains("return instance;", order);
+        order.ShouldContain("var id = OrderId.New();");
+        order.ShouldContain("customer: customer");
+        order.ShouldContain("lines: ");
+        order.ShouldContain("return instance;");
     }
 
     // ---- diagnostics -------------------------------------------------------
@@ -171,7 +171,7 @@ public class R8FactoryTests
     public void Initialization_to_unknown_field_is_reported()
     {
         var src = Head + "    create make { bogus -> 1 }\n  }\n}\n";
-        Assert.Contains(Diagnose(src), d => d.Code == DiagnosticCodes.InvalidInitializationTarget);
+        Diagnose(src).ShouldContain(d => d.Code == DiagnosticCodes.InvalidInitializationTarget);
     }
 
     [Fact]
@@ -180,42 +180,42 @@ public class R8FactoryTests
         const string src =
             "context C {\n  entity E identified by EId {\n    n: Int\n    doubled: Int = n + n\n" +
             "    create make(v: Int) { n -> v  doubled -> 5 }\n  }\n}\n";
-        Assert.Contains(Diagnose(src), d => d.Code == DiagnosticCodes.InvalidInitializationTarget);
+        Diagnose(src).ShouldContain(d => d.Code == DiagnosticCodes.InvalidInitializationTarget);
     }
 
     [Fact]
     public void Initialization_with_incompatible_type_is_reported()
     {
         var src = Head + "    create make { n -> \"x\" }\n  }\n}\n";
-        Assert.Contains(Diagnose(src), d => d.Code == DiagnosticCodes.InitializationTypeMismatch);
+        Diagnose(src).ShouldContain(d => d.Code == DiagnosticCodes.InitializationTypeMismatch);
     }
 
     [Fact]
     public void Duplicate_initialization_is_reported()
     {
         var src = Head + "    create make(v: Int) { n -> v  n -> v }\n  }\n}\n";
-        Assert.Contains(Diagnose(src), d => d.Code == DiagnosticCodes.DuplicateInitialization);
+        Diagnose(src).ShouldContain(d => d.Code == DiagnosticCodes.DuplicateInitialization);
     }
 
     [Fact]
     public void Duplicate_factory_name_is_reported()
     {
         var src = Head + "    create make(v: Int) { n -> v }\n    create make(v: Int) { n -> v }\n  }\n}\n";
-        Assert.Contains(Diagnose(src), d => d.Code == DiagnosticCodes.DuplicateFactory);
+        Diagnose(src).ShouldContain(d => d.Code == DiagnosticCodes.DuplicateFactory);
     }
 
     [Fact]
     public void Factory_colliding_with_a_property_is_reported()
     {
         var src = Head + "    create n(v: Int) { n -> v }\n  }\n}\n";
-        Assert.Contains(Diagnose(src), d => d.Code == DiagnosticCodes.FactoryNameCollision);
+        Diagnose(src).ShouldContain(d => d.Code == DiagnosticCodes.FactoryNameCollision);
     }
 
     [Fact]
     public void Factory_colliding_with_a_command_is_reported()
     {
         var src = Head + "    command go { n -> 1 }\n    create go(v: Int) { n -> v }\n  }\n}\n";
-        Assert.Contains(Diagnose(src), d => d.Code == DiagnosticCodes.FactoryNameCollision);
+        Diagnose(src).ShouldContain(d => d.Code == DiagnosticCodes.FactoryNameCollision);
     }
 
     [Fact]
@@ -226,7 +226,7 @@ public class R8FactoryTests
             "context C {\n  entity E identified by EId {\n    n: Int\n    name: String\n" +
             "    create make(v: Int) { n -> v }\n  }\n}\n";
         var diags = Diagnose(src);
-        Assert.Contains(diags, d => d.Code == DiagnosticCodes.UninitializedFactoryField
+        diags.ShouldContain(d => d.Code == DiagnosticCodes.UninitializedFactoryField
             && d.Severity == DiagnosticSeverity.Warning);
     }
 
@@ -236,7 +236,7 @@ public class R8FactoryTests
         const string src =
             "context C {\n  entity E identified by EId {\n    n: Int\n    name: String\n" +
             "    create make(v: Int, label: String) { n -> v  name -> label }\n  }\n}\n";
-        Assert.DoesNotContain(Diagnose(src), d => d.Code == DiagnosticCodes.UninitializedFactoryField);
+        Diagnose(src).ShouldNotContain(d => d.Code == DiagnosticCodes.UninitializedFactoryField);
     }
 
     [Fact]
@@ -245,18 +245,18 @@ public class R8FactoryTests
         const string src =
             "context C {\n  entity E identified by EId {\n    n: Int\n" +
             "    create make(v: Int) {\n      requires v > 0 \"positive\"\n      n -> v\n    }\n  }\n}\n";
-        Assert.Empty(Diagnose(src));
+        Diagnose(src).ShouldBeEmpty();
 
         var result = new KoineCompiler().Compile(src, new CSharpEmitter());
         var (asm, errors) = TestSupport.Compile(result.Files);
-        Assert.True(asm is not null, "generated C# failed to compile:\n" + string.Join("\n", errors));
+        (asm is not null).ShouldBeTrue("generated C# failed to compile:\n" + string.Join("\n", errors));
     }
 
     [Fact]
     public void Create_is_usable_as_a_field_name()
     {
         const string src = "context C {\n  value V {\n    create: Int\n  }\n}\n";
-        Assert.Empty(Diagnose(src));
+        Diagnose(src).ShouldBeEmpty();
     }
 
     // ---- regressions found by the R8 review --------------------------------
@@ -266,7 +266,7 @@ public class R8FactoryTests
     {
         // `id` collides with the auto-generated identity local in the emitted method.
         var src = Head + "    create make(id: Int) { n -> id }\n  }\n}\n";
-        Assert.Contains(Diagnose(src), d => d.Code == DiagnosticCodes.ReservedFactoryParameter);
+        Diagnose(src).ShouldContain(d => d.Code == DiagnosticCodes.ReservedFactoryParameter);
     }
 
     [Fact]
@@ -275,7 +275,7 @@ public class R8FactoryTests
         // `create getHashCode` would emit `public static E GetHashCode()` alongside the
         // generated `public override int GetHashCode()` (CS0111).
         var src = Head + "    create getHashCode { n -> 1 }\n  }\n}\n";
-        Assert.Contains(Diagnose(src), d => d.Code == DiagnosticCodes.FactoryNameCollision);
+        Diagnose(src).ShouldContain(d => d.Code == DiagnosticCodes.FactoryNameCollision);
     }
 
     [Fact]
@@ -300,15 +300,15 @@ public class R8FactoryTests
               }
             }
             """;
-        Assert.Empty(Diagnose(src));
+        Diagnose(src).ShouldBeEmpty();
 
         var result = new KoineCompiler().Compile(src, new CSharpEmitter());
         var order = result.Files.Single(f => f.RelativePath == "Sales/Order.cs").Contents;
-        Assert.Contains("customer: customer", order);   // auto-bound
-        Assert.Contains("lines: lines", order);         // auto-bound
+        order.ShouldContain("customer: customer");   // auto-bound
+        order.ShouldContain("lines: lines");         // auto-bound
 
         var (asm, errors) = TestSupport.Compile(result.Files);
-        Assert.True(asm is not null, "generated C# failed to compile:\n" + string.Join("\n", errors));
+        (asm is not null).ShouldBeTrue("generated C# failed to compile:\n" + string.Join("\n", errors));
 
         var orderType = asm.GetType("Sales.Order")!;
         var customerId = asm.GetType("Sales.CustomerId")!;
@@ -319,7 +319,7 @@ public class R8FactoryTests
         var o = orderType.GetMethod("ForCustomer")!.Invoke(null,
             new[] { customerId.GetMethod("New")!.Invoke(null, null), lines });
 
-        Assert.NotNull(orderType.GetProperty("Customer")!.GetValue(o)); // not default!/null
+        orderType.GetProperty("Customer")!.GetValue(o).ShouldNotBeNull(); // not default!/null
     }
 
     [Fact]
@@ -341,15 +341,15 @@ public class R8FactoryTests
               }
             }
             """;
-        Assert.Empty(Diagnose(src));
+        Diagnose(src).ShouldBeEmpty();
 
         var result = new KoineCompiler().Compile(src, new CSharpEmitter());
         var cart = result.Files.Single(f => f.RelativePath == "Sales/Cart.cs").Contents;
-        Assert.Contains(".Aggregate((a, b) => a + b)", cart); // value-object fold, not .Sum
-        Assert.DoesNotContain(".Sum(", cart);
+        cart.ShouldContain(".Aggregate((a, b) => a + b)"); // value-object fold, not .Sum
+        cart.ShouldNotContain(".Sum(");
 
         var (asm, errors) = TestSupport.Compile(result.Files);
-        Assert.True(asm is not null, "generated C# failed to compile:\n" + string.Join("\n", errors));
+        (asm is not null).ShouldBeTrue("generated C# failed to compile:\n" + string.Join("\n", errors));
     }
 
     [Fact]
@@ -359,11 +359,11 @@ public class R8FactoryTests
         const string src =
             "context C {\n  enum S { A, B }\n  entity E identified by EId {\n    s: S = A\n" +
             "    create make { }\n  }\n}\n";
-        Assert.Empty(Diagnose(src));
+        Diagnose(src).ShouldBeEmpty();
 
         var result = new KoineCompiler().Compile(src, new CSharpEmitter());
         var (asm, errors) = TestSupport.Compile(result.Files);
-        Assert.True(asm is not null, "generated C# failed to compile:\n" + string.Join("\n", errors));
+        (asm is not null).ShouldBeTrue("generated C# failed to compile:\n" + string.Join("\n", errors));
     }
 
     // ---- arrow unification: `<-` merged into `->` --------------------------
@@ -374,11 +374,11 @@ public class R8FactoryTests
         // After unifying the arrows, factory field init spells `field -> expr`, the same
         // `->` as a command transition; the create {} block disambiguates init from mutate.
         var src = Head + "    create make(v: Int) { n -> v }\n  }\n}\n";
-        Assert.Empty(Diagnose(src));
+        Diagnose(src).ShouldBeEmpty();
 
         var result = new KoineCompiler().Compile(src, new CSharpEmitter());
         var (asm, errors) = TestSupport.Compile(result.Files);
-        Assert.True(asm is not null, "generated C# failed to compile:\n" + string.Join("\n", errors));
+        (asm is not null).ShouldBeTrue("generated C# failed to compile:\n" + string.Join("\n", errors));
     }
 
     [Fact]
@@ -386,6 +386,6 @@ public class R8FactoryTests
     {
         // `<-` has been removed from the lexer; the legacy spelling must now be rejected.
         var src = Head + "    create make(v: Int) { n <- v }\n  }\n}\n";
-        Assert.NotEmpty(Diagnose(src));
+        Diagnose(src).ShouldNotBeEmpty();
     }
 }

@@ -13,8 +13,8 @@ public class R14ContextMapsTests
     private static KoineModel Parse(string source)
     {
         var (model, diags) = new KoineCompiler().Parse(source);
-        Assert.NotNull(model);
-        Assert.DoesNotContain(diags, d => d.Code == DiagnosticCodes.SyntaxError);
+        model.ShouldNotBeNull();
+        diags.ShouldNotContain(d => d.Code == DiagnosticCodes.SyntaxError);
         return model!;
     }
 
@@ -30,20 +30,20 @@ public class R14ContextMapsTests
     public void A_directed_relation_parses_with_upstream_left_and_downstream_right()
     {
         var model = Parse(TwoContexts + "contextmap {\n  Catalog -> Sales : conformist\n}\n");
-        var r = Assert.Single(model.ContextMap!.Relations);
-        Assert.Equal("Catalog", r.Upstream);
-        Assert.Equal("Sales", r.Downstream);
-        Assert.Equal(ContextRelationKind.Conformist, r.Kind);
-        Assert.False(r.IsBidirectional);
+        var r = model.ContextMap!.Relations.ShouldHaveSingleItem();
+        r.Upstream.ShouldBe("Catalog");
+        r.Downstream.ShouldBe("Sales");
+        r.Kind.ShouldBe(ContextRelationKind.Conformist);
+        r.IsBidirectional.ShouldBeFalse();
     }
 
     [Fact]
     public void A_bidirectional_relation_parses()
     {
         var model = Parse(TwoContexts + "contextmap {\n  Catalog <-> Sales : partnership\n}\n");
-        var r = Assert.Single(model.ContextMap!.Relations);
-        Assert.True(r.IsBidirectional);
-        Assert.Equal(ContextRelationKind.Partnership, r.Kind);
+        var r = model.ContextMap!.Relations.ShouldHaveSingleItem();
+        r.IsBidirectional.ShouldBeTrue();
+        r.Kind.ShouldBe(ContextRelationKind.Partnership);
     }
 
     [Fact]
@@ -64,14 +64,14 @@ public class R14ContextMapsTests
             """;
         var model = Parse(map);
         var kinds = model.ContextMap!.Relations.Select(r => r.Kind).ToHashSet();
-        Assert.Equal(7, kinds.Count);
+        kinds.Count.ShouldBe(7);
     }
 
     [Fact]
     public void A_program_with_no_map_has_a_null_context_map()
     {
         var model = Parse("context C {\n  value V { n: Int }\n}\n");
-        Assert.Null(model.ContextMap);
+        model.ContextMap.ShouldBeNull();
     }
 
     [Fact]
@@ -83,8 +83,8 @@ public class R14ContextMapsTests
             new SourceFile("m1.koi", "contextmap { A -> B : conformist }\n"),
             new SourceFile("m2.koi", "contextmap { B -> A : open-host }\n"),
         });
-        Assert.NotNull(model);
-        Assert.Equal(2, model!.ContextMap!.Relations.Count);
+        model.ShouldNotBeNull();
+        model!.ContextMap!.Relations.Count.ShouldBe(2);
     }
 
     // ---- validation --------------------------------------------------------
@@ -92,15 +92,13 @@ public class R14ContextMapsTests
     [Fact]
     public void A_relation_to_an_undeclared_context_is_reported()
     {
-        Assert.Contains(Diagnose(TwoContexts + "contextmap {\n  Catalog -> Nope : conformist\n}\n"),
-            d => d.Code == DiagnosticCodes.ContextMapUnknownContext);
+        Diagnose(TwoContexts + "contextmap {\n  Catalog -> Nope : conformist\n}\n").ShouldContain(d => d.Code == DiagnosticCodes.ContextMapUnknownContext);
     }
 
     [Fact]
     public void A_self_relation_is_reported()
     {
-        Assert.Contains(Diagnose(TwoContexts + "contextmap {\n  Sales -> Sales : conformist\n}\n"),
-            d => d.Code == DiagnosticCodes.SelfRelation);
+        Diagnose(TwoContexts + "contextmap {\n  Sales -> Sales : conformist\n}\n").ShouldContain(d => d.Code == DiagnosticCodes.SelfRelation);
     }
 
     [Fact]
@@ -114,7 +112,7 @@ public class R14ContextMapsTests
               B <-> A : shared-kernel
             }
             """;
-        Assert.Contains(Diagnose(src), d => d.Code == DiagnosticCodes.DuplicateContextRelation);
+        Diagnose(src).ShouldContain(d => d.Code == DiagnosticCodes.DuplicateContextRelation);
     }
 
     // ---- map-aware references ----------------------------------------------
@@ -127,7 +125,7 @@ public class R14ContextMapsTests
             context Sales   { value Quote { sku: Sku } }
             contextmap { Catalog -> Sales : conformist }
             """;
-        Assert.DoesNotContain(Diagnose(src), d => d.Code == DiagnosticCodes.UnimportedReference);
+        Diagnose(src).ShouldNotContain(d => d.Code == DiagnosticCodes.UnimportedReference);
     }
 
     [Fact]
@@ -139,11 +137,11 @@ public class R14ContextMapsTests
             "context Catalog { value Sku { code: String } }\n" +
             "context Sales { value Quote { sku: Sku } }\n" +
             "contextmap { Catalog -> Sales : conformist }\n", new CSharpEmitter());
-        Assert.True(result.Success, string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
         var quote = result.Files.Single(f => f.RelativePath == "Sales/ValueObjects/Quote.cs").Contents;
-        Assert.Contains("using Catalog;", quote);
+        quote.ShouldContain("using Catalog;");
         var (asm, errors) = TestSupport.Compile(result.Files);
-        Assert.True(asm is not null, "generated C# failed to compile:\n" + string.Join("\n", errors));
+        (asm is not null).ShouldBeTrue("generated C# failed to compile:\n" + string.Join("\n", errors));
     }
 
     [Fact]
@@ -153,7 +151,7 @@ public class R14ContextMapsTests
             context Catalog { value Sku { code: String } }
             context Sales   { value Quote { sku: Sku } }
             """;
-        Assert.Contains(Diagnose(src), d => d.Code == DiagnosticCodes.UnimportedReference);
+        Diagnose(src).ShouldContain(d => d.Code == DiagnosticCodes.UnimportedReference);
     }
 
     [Fact]
@@ -164,7 +162,7 @@ public class R14ContextMapsTests
             context Sales   { value Quote { sku: Sku } }
             contextmap { Catalog -> Sales : customer-supplier }
             """;
-        Assert.Contains(Diagnose(src), d => d.Code == DiagnosticCodes.UnimportedReference);
+        Diagnose(src).ShouldContain(d => d.Code == DiagnosticCodes.UnimportedReference);
     }
 
     [Fact]
@@ -175,7 +173,6 @@ public class R14ContextMapsTests
             context Billing { value Customer { acct: Account } }
             contextmap { Legacy -> Billing : anti-corruption-layer }
             """;
-        Assert.Contains(Diagnose(src),
-            d => d.Code == DiagnosticCodes.AclDirectUpstreamReference && d.Severity == DiagnosticSeverity.Warning);
+        Diagnose(src).ShouldContain(d => d.Code == DiagnosticCodes.AclDirectUpstreamReference && d.Severity == DiagnosticSeverity.Warning);
     }
 }
