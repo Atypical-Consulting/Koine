@@ -1,5 +1,4 @@
 using Koine.Compiler.Emit;
-using Xunit.Abstractions;
 
 namespace Koine.Compiler.Tests.Conformance;
 

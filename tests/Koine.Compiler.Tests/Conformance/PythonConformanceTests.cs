@@ -1,7 +1,6 @@
 using Koine.Compiler.Emit;
 using Koine.Compiler.Emit.Python;
 using Koine.Compiler.Services;
-using Xunit.Abstractions;
 
 namespace Koine.Compiler.Tests.Conformance;
 
