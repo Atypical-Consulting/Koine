@@ -267,16 +267,16 @@ export function init(): void {
 
   // A model carried in the URL hash (a shared playground link) takes precedence over both the seed
   // and any restored scratch, so opening a link always lands on the shared model.
-  // Task-1 shim: readModelFromHash now returns a discriminated SharePayload; Task 4 will consume the
-  // workspace case. For now, collapse it to the legacy single-string view so existing boot logic is
-  // unchanged — only single-string links import (workspace links fall through to scratch/seed).
+  // A shared link is a discriminated SharePayload: a single-string model (legacy) or a multi-file
+  // workspace. A single model seeds the editor's initial doc directly; a workspace is imported after
+  // the language server is up (see the lsp.start callback) so its didOpen resolves cross-file refs.
   const shared = readModelFromHash();
-  const sharedModel = shared?.kind === 'single' ? shared.text : null;
+  const singleShared = shared?.kind === 'single' ? shared.text : null;
   // Session restore: if the user has unsaved scratch work from a previous visit, open that instead
   // of the seed (and skip the welcome screen — see the boot section). Folder workspaces are not
   // restored; they live on disk and are re-opened explicitly.
   const restoredScratch = loadScratch();
-  const initialDoc = sharedModel ?? restoredScratch ?? SEED;
+  const initialDoc = singleShared ?? restoredScratch ?? SEED;
 
   const editor = createKoineEditor({
     parent: el('editor-pane'),
@@ -1292,6 +1292,19 @@ export function init(): void {
     await openFolderPath(folder);
   }
 
+  // Open a set of file records as workspace buffers in one pass. Each record becomes an open
+  // buffer keyed by its file:// uri and a corresponding LSP didOpen, so cross-file refs resolve.
+  // On-disk files carry their absolute `path`; in-memory shared files pass `path: null` and get a
+  // synthetic-but-stable uri derived from their relPath. The single seam shared by folder-open and
+  // shared-import — neither sets dirty, neither activates (callers pick the active buffer).
+  function populateBuffers(records: { path: string | null; relPath: string; name: string; text: string }[]): void {
+    for (const rec of records) {
+      const uri = rec.path != null ? pathToFileUri(rec.path) : pathToFileUri('/' + rec.relPath);
+      buffers.set(uri, { uri, path: rec.path, relPath: rec.relPath, name: rec.name, text: rec.text, dirty: false });
+      lsp.openDoc(uri, rec.text);
+    }
+  }
+
   // Load + open every .koi file under `folder` as one workspace. Shared by the toolbar
   // button (which picks a folder first) and the welcome screen's recent-folder items
   // (which pass a known path directly).
@@ -1324,7 +1337,10 @@ export function init(): void {
       diagnosticsByUri.clear();
     }
 
-    // Read + open every file as one workspace (cross-file refs resolve via didOpen).
+    // Read + open every file as one workspace (cross-file refs resolve via didOpen). Read text
+    // from disk first (skipping unreadable files), then hand the successful records to the shared
+    // populateBuffers seam so folder-open and shared-import open files through one path.
+    const records: { path: string | null; relPath: string; name: string; text: string }[] = [];
     for (const f of files) {
       let text: string;
       try {
@@ -1333,10 +1349,9 @@ export function init(): void {
         console.error('readTextFile failed for', f.path, e);
         continue;
       }
-      const uri = pathToFileUri(f.path);
-      buffers.set(uri, { uri, path: f.path, relPath: f.relPath, name: f.name, text, dirty: false });
-      lsp.openDoc(uri, text);
+      records.push({ path: f.path, relPath: f.relPath, name: f.name, text });
     }
+    populateBuffers(records);
 
     // Every read failed after a non-empty listing (files deleted / permissions revoked
     // between list and read). The scratch doc was already closed above, so don't leave the
@@ -1674,6 +1689,91 @@ export function init(): void {
     openScratchWith(example.source);
   }
 
+  // Import a multi-file workspace carried in a share link. Mirrors openExample's materialize→open
+  // path: when the host can back a synthetic workspace, the files are materialized into a real
+  // openable token and opened in full folder mode (explorer + compiling preview). When it can't, the
+  // files become an in-memory multi-buffer workspace (all open + compiling, the active one shown).
+  // Runs from the lsp.start callback so the server is up and the resulting didOpens resolve refs.
+  async function importSharedWorkspace(
+    files: { relPath: string; text: string }[],
+    active?: string
+  ): Promise<void> {
+    // Nothing to import — fall through to the restored scratch / SEED that already booted.
+    if (files.length === 0) return;
+
+    // Primary path: materialize a real workspace and open it in folder mode (mirrors openExample).
+    if (platform.materializeWorkspace) {
+      try {
+        const token = await platform.materializeWorkspace(
+          'shared-workspace',
+          files.map((f) => ({ relPath: f.relPath, contents: f.text }))
+        );
+        if (token) {
+          await openFolderPath(token);
+          // openFolderPath activates the first file by relPath; honour the share's `active` when set
+          // and it maps to an open buffer.
+          if (active) {
+            const target = Array.from(buffers.values()).find((b) => b.relPath === active);
+            if (target) activateFile(target.uri);
+          }
+          return;
+        }
+      } catch (e) {
+        console.error('Importing shared workspace failed; falling back to in-memory buffers:', e);
+      }
+    }
+
+    // Fallback path: materializeWorkspace is absent or returned null. Build an in-memory multi-buffer
+    // workspace. There is no host folder behind it, so folderRootToken stays null and the explorer
+    // tree can't render host rows — the buffers are still all open + compiling and reachable via the
+    // command palette's "Go to File", and the active one is shown.
+    lsp.closeDoc(SCRATCH_URI);
+    buffers.delete(SCRATCH_URI);
+    diagnosticsByUri.delete(SCRATCH_URI);
+
+    populateBuffers(
+      files.map((f) => ({
+        path: null,
+        relPath: f.relPath,
+        name: f.relPath.split('/').pop() ?? f.relPath,
+        text: f.text,
+      }))
+    );
+
+    // Shouldn't happen (files is non-empty), but if nothing populated, re-establish scratch and bail
+    // so the app is never left with no active buffer.
+    if (buffers.size === 0) {
+      const text = editor.getDoc();
+      buffers.set(SCRATCH_URI, { uri: SCRATCH_URI, path: null, relPath: 'model.koi', name: 'model.koi', text, dirty: false });
+      lsp.openDoc(SCRATCH_URI, text);
+      activeUri = SCRATCH_URI;
+      lsp.setActive(SCRATCH_URI);
+      folderMode = false;
+      folderRootToken = null;
+      entriesCache = [];
+      hideFileTreeChrome();
+      return;
+    }
+
+    folderMode = true;
+    folderRootToken = null; // in-memory: no host token, so refreshEntries/renderTree skip host rows
+    entriesCache = [];
+    // Pick the active buffer: the shared `active` if it maps to a buffer, else the first by relPath.
+    const sorted = Array.from(buffers.values()).sort((a, b) => a.relPath.localeCompare(b.relPath));
+    const activeBuffer = (active ? sorted.find((b) => b.relPath === active) : undefined) ?? sorted[0];
+    activeUri = activeBuffer.uri;
+    lsp.setActive(activeUri);
+    editor.setDoc(activeBuffer.text);
+    // Show the file-tree chrome (the rail + toggle). renderTree() is a no-op while folderRootToken is
+    // null, so the explorer renders no host rows — guarded so the null token never throws.
+    treeTitleEl.textContent = 'shared-workspace';
+    showFileTreeChrome();
+    renderTree();
+    welcome.hide();
+    invalidateDocViews();
+    ensureLoaded(activeView);
+  }
+
   // Reopen the start screen ("home"). Non-destructive: it's an overlay over the current model, so
   // showing it loses nothing — only its actions navigate. Wired to the brand logo and the palette.
   function goHome(): void {
@@ -1976,12 +2076,16 @@ export function init(): void {
   });
 
   // Welcome screen on boot: shown only on a fresh start (no restored scratch, no shared link).
-  // A shared-link model is persisted as the scratch buffer and the hash is cleared so a reload
-  // resumes into it cleanly. Otherwise, unsaved work from a previous visit resumes straight in.
-  // The first edit, New scratch, Open folder, or opening a recent folder all hide the welcome.
-  if (sharedModel !== null) {
-    saveScratch(sharedModel);
+  // A single-string shared model is persisted as the scratch buffer and the hash is cleared so a
+  // reload resumes into it cleanly. A workspace share does NOT seed scratch — the import below
+  // (run once the server is up) replaces the workspace, and the hash is cleared after it lands.
+  // Otherwise, unsaved work from a previous visit resumes straight in. The first edit, New scratch,
+  // Open folder, or opening a recent folder all hide the welcome.
+  if (shared?.kind === 'single') {
+    saveScratch(shared.text);
     clearModelHash();
+  } else if (shared?.kind === 'workspace') {
+    // Leave clearModelHash() for after importSharedWorkspace lands (in the lsp.start callback).
   } else if (restoredScratch === null) {
     welcome.show();
   }
@@ -1995,9 +2099,14 @@ export function init(): void {
   });
   lsp
     .start()
-    .then(() => {
+    .then(async () => {
       // Scratch mode on startup: open the single seed doc at SCRATCH_URI.
       lsp.openDoc(SCRATCH_URI, editor.getDoc());
+      // A workspace share imports once the server is up so its didOpen resolves cross-file refs.
+      if (shared?.kind === 'workspace') {
+        await importSharedWorkspace(shared.files, shared.active);
+        clearModelHash();
+      }
     })
     .catch((e) => {
       setStatus('connection failed', 'error');
