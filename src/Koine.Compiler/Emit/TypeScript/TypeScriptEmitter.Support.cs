@@ -42,6 +42,7 @@ public sealed partial class TypeScriptEmitter
     private static class KindFolder
     {
         public const string Root = "";
+        public const string Abstractions = "abstractions";
         public const string Entities = "entities";
         public const string ValueObjects = "value-objects";
         public const string Enums = "enums";

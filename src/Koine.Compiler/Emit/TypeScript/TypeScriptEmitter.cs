@@ -132,6 +132,17 @@ public sealed partial class TypeScriptEmitter : IEmitter
             {
                 files.Add(EmitPolicy(emit, policy, ctx.Name, typeMapper));
             }
+
+            // The context's Unit of Work (R12.1, TS parity): a transactional seam over its
+            // aggregate repositories. Emitted only when the context has aggregates whose root is
+            // an entity (only those produce a repository to expose). Mirrors the C# dispatch.
+            var aggregates = ctx.Types.OfType<AggregateDecl>()
+                .Where(a => a.RootEntity() is not null)
+                .ToList();
+            if (aggregates.Count > 0)
+            {
+                files.Add(EmitUnitOfWork(emit, ctx.Name, aggregates));
+            }
         }
 
         // 3. Source maps (gated): attach the per-module declaration segments to the module's
