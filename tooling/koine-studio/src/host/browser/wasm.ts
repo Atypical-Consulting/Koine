@@ -26,6 +26,10 @@ export interface KoineWasmApi {
   Definition(filesJson: string, activeUri: string, line: number, character: number): string;
   /** Single-file document outline → JSON DocumentSymbol[]. */
   DocumentSymbols(source: string): string;
+  /** Collapsible regions of a single file → JSON FoldingRange[] (`{startLine,endLine}`). */
+  FoldingRanges(source: string): string;
+  /** Selection-range chains for a set of 0-based positions → JSON SelectionRange[] (parallel). */
+  SelectionRanges(source: string, positionsJson: string): string;
   /** Canonical formatting edits → JSON TextEdit[]. */
   Format(source: string): string;
   /** Compatibility of current vs baseline workspace → JSON CheckResult. */
@@ -67,6 +71,8 @@ const KOINE_WASM_EXPORTS: ReadonlySet<string> = new Set<keyof KoineWasmApi>([
   'Completions',
   'Definition',
   'DocumentSymbols',
+  'FoldingRanges',
+  'SelectionRanges',
   'Format',
   'Check',
   'References',

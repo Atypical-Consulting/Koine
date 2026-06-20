@@ -168,6 +168,8 @@ internal sealed class LspServer
                                     ["documentFormattingProvider"] = true,
                                     ["documentSymbolProvider"] = true,
                                     ["workspaceSymbolProvider"] = true,
+                                    ["foldingRangeProvider"] = true,
+                                    ["selectionRangeProvider"] = true,
                                     ["referencesProvider"] = true,
                                     ["renameProvider"] = new Dictionary<string, object?>
                                     {
@@ -309,6 +311,22 @@ internal sealed class LspServer
                             if (root.TryGetProperty("id", out _))
                             {
                                 Respond(root, WorkspaceSymbolResultJson(root));
+                            }
+
+                            break;
+
+                        case "textDocument/foldingRange":
+                            if (root.TryGetProperty("id", out _))
+                            {
+                                Respond(root, FoldingRangeResultJson(root));
+                            }
+
+                            break;
+
+                        case "textDocument/selectionRange":
+                            if (root.TryGetProperty("id", out _))
+                            {
+                                Respond(root, SelectionRangeResultJson(root));
                             }
 
                             break;
@@ -647,6 +665,78 @@ internal sealed class LspServer
                 ["containerName"] = s.ContainerName,
             })
             .ToArray();
+    }
+
+    // ---- Folding & selection ranges ---------------------------------------
+
+    private object? FoldingRangeResultJson(JsonElement root)
+    {
+        if (!TryGetUri(root, out var uri) || !_docs.TryGetValue(uri, out var text))
+        {
+            return null;
+        }
+
+        // LSP foldingRange: 0-based startLine/endLine, both inclusive. The block's last line is
+        // (Span.EndLine - 1) (1-based, end-EXCLUSIVE) → -1 → 0-based, then clamp to the start line.
+        return _ls.FoldingRanges(text)
+            .Select(f =>
+            {
+                var startLine = Math.Max(0, f.Range.Line - 1);
+                var endLine = Math.Max(startLine, f.Range.EndLine - 1);
+                return (object)new Dictionary<string, object?>
+                {
+                    ["startLine"] = startLine,
+                    ["endLine"] = endLine,
+                };
+            })
+            .ToArray();
+    }
+
+    private object? SelectionRangeResultJson(JsonElement root)
+    {
+        if (!TryGetUri(root, out var uri) || !_docs.TryGetValue(uri, out var text)
+            || !root.TryGetProperty("params", out var p)
+            || !p.TryGetProperty("positions", out var positions)
+            || positions.ValueKind != JsonValueKind.Array)
+        {
+            return null;
+        }
+
+        // One selection-range chain per requested position, in parallel order.
+        var results = new List<object>();
+        foreach (var pos in positions.EnumerateArray())
+        {
+            var line = pos.TryGetProperty("line", out var l) ? l.GetInt32() : 0;
+            var ch = pos.TryGetProperty("character", out var c) ? c.GetInt32() : 0;
+            var chain = _ls.SelectionRangeAt(text, line, ch);
+            results.Add(ToLspSelectionRange(chain));
+        }
+
+        return results.ToArray();
+    }
+
+    private static object ToLspSelectionRange(SelectionRange? chain)
+    {
+        // A null chain still needs a (degenerate) selection range per the parallel-array contract;
+        // collapse it to an empty range at the document start.
+        if (chain is null)
+        {
+            return new Dictionary<string, object?>
+            {
+                ["range"] = SpanRange(SourceSpan.None),
+            };
+        }
+
+        var node = new Dictionary<string, object?>
+        {
+            ["range"] = SpanRange(chain.Range),
+        };
+        if (chain.Parent is not null)
+        {
+            node["parent"] = ToLspSelectionRange(chain.Parent);
+        }
+
+        return node;
     }
 
     /// <summary>Maps a service <see cref="SymbolKind"/> to its LSP SymbolKind number.</summary>

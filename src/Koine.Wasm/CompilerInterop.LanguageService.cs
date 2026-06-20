@@ -370,6 +370,52 @@ public static partial class CompilerInterop
     }
 
     /// <summary>
+    /// The collapsible regions of <paramref name="source"/> (LSP <c>textDocument/foldingRange</c>):
+    /// one <c>{ startLine, endLine }</c> (0-based, both inclusive) per multi-line block declaration.
+    /// Returns a JSON <c>FoldingRange[]</c>. Parity with the stdio LSP.
+    /// </summary>
+    [JSExport]
+    public static string FoldingRanges(string source)
+    {
+        try
+        {
+            var folds = LanguageService.FoldingRanges(source)
+                .Select(f => new WFoldingRange(
+                    Math.Max(0, f.Range.Line - 1),
+                    Math.Max(Math.Max(0, f.Range.Line - 1), f.Range.EndLine - 1)))
+                .ToArray();
+            return JsonSerializer.Serialize(folds, LangJson.Default.WFoldingRangeArray);
+        }
+        catch
+        {
+            return "[]";
+        }
+    }
+
+    /// <summary>
+    /// The selection-range chains for a set of positions (LSP <c>textDocument/selectionRange</c>):
+    /// <paramref name="positionsJson"/> is a JSON array of <c>{ line, character }</c> (0-based), and
+    /// the result is a parallel JSON array of nested <c>{ range, parent? }</c> chains. Parity with the
+    /// stdio LSP.
+    /// </summary>
+    [JSExport]
+    public static string SelectionRanges(string source, string positionsJson)
+    {
+        try
+        {
+            var positions = JsonSerializer.Deserialize(positionsJson, LangJson.Default.WInPositionArray) ?? [];
+            var chains = positions
+                .Select(p => ToLspSelectionRange(LanguageService.SelectionRangeAt(source, p.Line, p.Character)))
+                .ToArray();
+            return JsonSerializer.Serialize(chains, LangJson.Default.WSelectionRangeArray);
+        }
+        catch
+        {
+            return "[]";
+        }
+    }
+
+    /// <summary>
     /// Canonical formatting edits for <paramref name="source"/>. Returns a single full-document
     /// <c>TextEdit</c> when formatting changes anything, or an empty array when it is already canonical.
     /// </summary>
@@ -701,6 +747,20 @@ public static partial class CompilerInterop
             s.Children.Select(ToLspSymbol).ToArray());
     }
 
+    private static WSelectionRange ToLspSelectionRange(SelectionRange? chain)
+    {
+        // A null chain still yields a degenerate selection range (empty range at doc start) so the
+        // result array stays parallel to the requested positions.
+        if (chain is null)
+        {
+            return new WSelectionRange(SpanRange(SourceSpan.None), null);
+        }
+
+        return new WSelectionRange(
+            SpanRange(chain.Range),
+            chain.Parent is null ? null : ToLspSelectionRange(chain.Parent));
+    }
+
     private static int LspSymbolKind(SymbolKind kind) => kind switch
     {
         SymbolKind.Namespace => 3,
@@ -844,6 +904,15 @@ public sealed record WDocumentSymbol(string Name, int Kind, WRange Range, WRange
 /// <summary>LSP SymbolInformation (flat, workspace-wide): name, kind, location, and container.</summary>
 public sealed record WWorkspaceSymbol(string Name, int Kind, string Uri, WRange Range, string? ContainerName);
 
+/// <summary>LSP FoldingRange: a 0-based, both-inclusive collapsible line span.</summary>
+public sealed record WFoldingRange(int StartLine, int EndLine);
+
+/// <summary>LSP SelectionRange (recursive): a range plus the enclosing parent range it grows into.</summary>
+public sealed record WSelectionRange(WRange Range, WSelectionRange? Parent);
+
+/// <summary>Input shape: one requested position for selection ranges (0-based LSP coordinates).</summary>
+public sealed record WInPosition(int Line, int Character);
+
 /// <summary>LSP TextEdit.</summary>
 public sealed record WTextEdit(WRange Range, string NewText);
 
@@ -887,6 +956,9 @@ public sealed record WSourceFileDto(string Uri, string Text);
 [JsonSerializable(typeof(WSignatureHelp))]
 [JsonSerializable(typeof(WDocumentSymbol[]))]
 [JsonSerializable(typeof(WWorkspaceSymbol[]))]
+[JsonSerializable(typeof(WFoldingRange[]))]
+[JsonSerializable(typeof(WSelectionRange[]))]
+[JsonSerializable(typeof(WInPosition[]))]
 [JsonSerializable(typeof(WTextEdit[]))]
 [JsonSerializable(typeof(WPrepareRename))]
 [JsonSerializable(typeof(WWorkspaceEdit))]

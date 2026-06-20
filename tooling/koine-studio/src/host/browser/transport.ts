@@ -123,6 +123,14 @@ export class WasmLspTransport implements LspTransport {
       case 'textDocument/documentSymbol':
         return [result(JSON.parse(api.DocumentSymbols(this.docs.get(uri ?? '') ?? '')))];
 
+      case 'textDocument/foldingRange':
+        return [result(JSON.parse(api.FoldingRanges(this.docs.get(uri ?? '') ?? '')))];
+
+      case 'textDocument/selectionRange': {
+        const positions = JSON.stringify(msg.params?.positions ?? []);
+        return [result(JSON.parse(api.SelectionRanges(this.docs.get(uri ?? '') ?? '', positions)))];
+      }
+
       case 'textDocument/formatting':
         return [result(JSON.parse(api.Format(this.docs.get(uri ?? '') ?? '')))];
 

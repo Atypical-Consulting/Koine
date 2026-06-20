@@ -82,6 +82,21 @@ public sealed record WorkspaceSymbol(
     string? ContainerName);
 
 /// <summary>
+/// One collapsible region: the <see cref="SourceSpan"/> of a multi-line block declaration
+/// (context, type, service, aggregate, entity, enum, …). The span is 1-based and end-EXCLUSIVE;
+/// the LSP/WASM shells convert it to a 0-based <c>{ startLine, endLine }</c> fold. Editor-agnostic.
+/// </summary>
+public sealed record FoldingRange(SourceSpan Range);
+
+/// <summary>
+/// One link in an LSP selection-range chain: the <see cref="Range"/> the editor expands to,
+/// and the <see cref="Parent"/> range it grows into next (a strictly larger enclosing node),
+/// innermost first. The span is 1-based and end-EXCLUSIVE. Editor-agnostic; the LSP/WASM shells
+/// map the chain to nested <c>{ range, parent? }</c> objects.
+/// </summary>
+public sealed record SelectionRange(SourceSpan Range, SelectionRange? Parent);
+
+/// <summary>
 /// Editor-agnostic language services for <c>.koi</c>. <see cref="CompleteAt"/> is
 /// single-file and lexer-only (works on broken documents). <see cref="HoverAt"/> and
 /// <see cref="DefinitionAt"/> take a workspace document map (uri → source) plus the
@@ -556,6 +571,181 @@ public sealed class KoineLanguageService
             contexts.Add(new DocumentSymbol(ctx.Name, SymbolKind.Namespace, ctx.Span, ctx.NameSpan, children));
         }
         return contexts;
+    }
+
+    /// <summary>
+    /// The collapsible regions of one document — one <see cref="FoldingRange"/> per multi-line
+    /// block declaration (context, type, service, member-bearing entity, enum, aggregate, …).
+    /// Derived from the <see cref="DocumentSymbols(string)"/> outline: any symbol whose full
+    /// <see cref="DocumentSymbol.Range"/> covers more than one line is foldable. Returns an empty
+    /// list when the document does not parse.
+    /// </summary>
+    public IReadOnlyList<FoldingRange> FoldingRanges(string source)
+    {
+        var folds = new List<FoldingRange>();
+        foreach (var top in DocumentSymbols(source))
+        {
+            CollectFolds(folds, top);
+        }
+
+        return folds;
+    }
+
+    private static void CollectFolds(List<FoldingRange> folds, DocumentSymbol symbol)
+    {
+        var range = symbol.Range;
+        // A "multi-line block node" is a positioned node whose declaration spans >1 source line.
+        if (!range.IsNone && range.EndLine > range.Line)
+        {
+            folds.Add(new FoldingRange(range));
+        }
+
+        foreach (var child in symbol.Children)
+        {
+            CollectFolds(folds, child);
+        }
+    }
+
+    /// <summary>
+    /// The selection-range chain at a 0-based LSP <paramref name="line"/>/<paramref name="character"/>:
+    /// the innermost positioned node under the cursor, then each enclosing ancestor with a real span,
+    /// linked innermost-first (each <see cref="SelectionRange.Parent"/> strictly contains its child).
+    /// Returns <c>null</c> when the document does not parse or no node sits under the cursor.
+    /// </summary>
+    public SelectionRange? SelectionRangeAt(string source, int line, int character)
+    {
+        var (model, _) = _compiler.Parse(source);
+        if (model is null)
+        {
+            return null;
+        }
+
+        var semantic = new SemanticModel(model);
+        var offset = OffsetOf(source, line, character);
+
+        // Gather every positioned node whose span contains the offset. The SyntaxGraph parent
+        // chain alone can skip intermediate declarations (e.g. an entity is not the graph-parent of
+        // its members), so we also fold in the DocumentSymbols outline — which nests
+        // member ⊂ type ⊂ context by span — and rank the union by containment (innermost first).
+        var (pl, pc) = OffsetToLineColumn(source, offset);
+        var spans = new List<SourceSpan>();
+
+        void Consider(SourceSpan span)
+        {
+            if (!span.IsNone && Contains(span, pl, pc))
+            {
+                spans.Add(span);
+            }
+        }
+
+        if (semantic.NodeAt(offset) is { } node)
+        {
+            foreach (var n in semantic.AncestorsAndSelf(node))
+            {
+                Consider(n.Span);
+            }
+        }
+
+        foreach (var top in DocumentSymbols(source))
+        {
+            CollectContainingSymbolSpans(top, pl, pc, spans);
+        }
+
+        if (spans.Count == 0)
+        {
+            return null;
+        }
+
+        // Innermost-first: smaller spans before the larger spans that contain them. De-duplicate so
+        // the same declaration does not appear twice (graph + outline), then chain so each parent
+        // strictly contains its child.
+        spans.Sort((a, b) => SpanSize(a).CompareTo(SpanSize(b)));
+
+        SelectionRange? chain = null;
+        var ordered = new List<SourceSpan>();
+        foreach (var span in spans)
+        {
+            if (ordered.Count == 0 || StrictlyContains(span, ordered[^1]))
+            {
+                ordered.Add(span);
+            }
+        }
+
+        for (var i = ordered.Count - 1; i >= 0; i--)
+        {
+            chain = new SelectionRange(ordered[i], chain);
+        }
+
+        return chain;
+    }
+
+    private static void CollectContainingSymbolSpans(DocumentSymbol symbol, int line, int column, List<SourceSpan> spans)
+    {
+        if (!symbol.Range.IsNone && Contains(symbol.Range, line, column))
+        {
+            spans.Add(symbol.Range);
+        }
+
+        if (!symbol.SelectionRange.IsNone && Contains(symbol.SelectionRange, line, column))
+        {
+            spans.Add(symbol.SelectionRange);
+        }
+
+        foreach (var child in symbol.Children)
+        {
+            CollectContainingSymbolSpans(child, line, column, spans);
+        }
+    }
+
+    /// <summary>True when the 1-based <paramref name="line"/>/<paramref name="column"/> point falls
+    /// inside <paramref name="span"/> (end-EXCLUSIVE, matching <see cref="SourceSpan"/>).</summary>
+    private static bool Contains(SourceSpan span, int line, int column)
+    {
+        var afterStart = line > span.Line || (line == span.Line && column >= span.Column);
+        var beforeEnd = line < span.EndLine || (line == span.EndLine && column < span.EndColumn);
+        return afterStart && beforeEnd;
+    }
+
+    /// <summary>A monotone size proxy for a span (line-weighted) used only to order nested spans.</summary>
+    private static long SpanSize(SourceSpan span) =>
+        ((long)(span.EndLine - span.Line) << 20) + (span.EndColumn - span.Column);
+
+    /// <summary>The 1-based line/column of a 0-based absolute <paramref name="offset"/> in <paramref name="source"/>.</summary>
+    private static (int Line, int Column) OffsetToLineColumn(string source, int offset)
+    {
+        var line = 1;
+        var column = 1;
+        var end = Math.Min(offset, source.Length);
+        for (var i = 0; i < end; i++)
+        {
+            if (source[i] == '\n')
+            {
+                line++;
+                column = 1;
+            }
+            else
+            {
+                column++;
+            }
+        }
+
+        return (line, column);
+    }
+
+    /// <summary>
+    /// True when <paramref name="outer"/> contains <paramref name="inner"/> and is strictly larger on
+    /// at least one bound (so the two are not the same range). Bounds are 1-based, end-EXCLUSIVE.
+    /// </summary>
+    private static bool StrictlyContains(SourceSpan outer, SourceSpan inner)
+    {
+        var startsBeforeOrEqual =
+            outer.Line < inner.Line || (outer.Line == inner.Line && outer.Column <= inner.Column);
+        var endsAfterOrEqual =
+            outer.EndLine > inner.EndLine || (outer.EndLine == inner.EndLine && outer.EndColumn >= inner.EndColumn);
+        var strict =
+            outer.Line < inner.Line || outer.Column < inner.Column
+            || outer.EndLine > inner.EndLine || outer.EndColumn > inner.EndColumn;
+        return startsBeforeOrEqual && endsAfterOrEqual && strict;
     }
 
     private static DocumentSymbol SymbolForType(TypeDecl t)

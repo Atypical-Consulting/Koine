@@ -144,6 +144,21 @@ export interface WorkspaceSymbol {
   containerName?: string;
 }
 
+// Standard LSP FoldingRange: a collapsible region. `startLine`/`endLine` are 0-based and both
+// inclusive (the `textDocument/foldingRange` result), one per multi-line block declaration.
+export interface FoldingRange {
+  startLine: number;
+  endLine: number;
+}
+
+// Standard LSP SelectionRange (recursive): the range the editor expands to, plus the enclosing
+// `parent` range it grows into next (the `textDocument/selectionRange` result, one chain per
+// requested position, innermost first).
+export interface SelectionRange {
+  range: Range;
+  parent?: SelectionRange;
+}
+
 // Standard LSP TextEdit: replace `range` with `newText`.
 export interface TextEdit {
   range: Range;
@@ -573,6 +588,26 @@ export class KoineLsp {
   async documentSymbols(): Promise<DocumentSymbol[]> {
     const res = await this.request<DocumentSymbol[] | null>('textDocument/documentSymbol', {
       textDocument: { uri: this.activeUri },
+    });
+    return res ?? [];
+  }
+
+  /** Collapsible regions of the active document. Resolves to [] when the server returns null. */
+  async foldingRanges(): Promise<FoldingRange[]> {
+    const res = await this.request<FoldingRange[] | null>('textDocument/foldingRange', {
+      textDocument: { uri: this.activeUri },
+    });
+    return res ?? [];
+  }
+
+  /**
+   * Selection-range chains for a set of 0-based positions. Returns one chain per requested position,
+   * in parallel order (innermost first, each `parent` strictly enclosing its child).
+   */
+  async selectionRanges(positions: Position[]): Promise<SelectionRange[]> {
+    const res = await this.request<SelectionRange[] | null>('textDocument/selectionRange', {
+      textDocument: { uri: this.activeUri },
+      positions,
     });
     return res ?? [];
   }
