@@ -5,15 +5,15 @@
 import { getRecentFolders } from './store';
 import { LOGO_SVG } from './logo';
 import { registerOverlay } from './overlay';
-import { EXAMPLES, type Example } from './examples';
+import { TEMPLATES, type Template } from './templates';
 
 /** What the welcome actions delegate to; the host (ide.ts) performs the real work. */
 export interface WelcomeCallbacks {
   onNewModel(): void;
   onOpenFolder(): void;
   onOpenRecent(path: string): void;
-  /** Open one of the starter examples. */
-  onOpenExample(example: Example): void;
+  /** Open one of the starter templates as a workspace. */
+  onOpenExample(template: Template): void;
 }
 
 /** Imperative handle returned by createWelcome. */
@@ -109,20 +109,20 @@ export function createWelcome(cb: WelcomeCallbacks): WelcomeHandle {
   gallery.appendChild(galleryTitle);
   const galleryGrid = document.createElement('div');
   galleryGrid.className = 'koi-welcome-gallery-grid';
-  for (const example of EXAMPLES) {
+  for (const template of TEMPLATES) {
     const item = document.createElement('button');
     item.type = 'button';
     item.className = 'koi-welcome-example';
     const name = document.createElement('span');
     name.className = 'koi-welcome-example-name';
-    name.textContent = example.name;
+    name.textContent = template.name;
     const blurb = document.createElement('span');
     blurb.className = 'koi-welcome-example-blurb';
-    blurb.textContent = example.blurb;
+    blurb.textContent = template.tagline;
     item.append(name, blurb);
     item.addEventListener('click', () => {
       hide();
-      cb.onOpenExample(example);
+      cb.onOpenExample(template);
     });
     galleryGrid.appendChild(item);
   }

@@ -19,7 +19,7 @@ import { koineMark } from './logo';
 import { currentTheme, initTheme, onThemeChange, toggleTheme } from './theme';
 import { peekLegacyScratch, clearLegacyScratch, initSecrets, loadSettings, pushRecentFolder, type Settings } from './store';
 import { createWelcome } from './welcome';
-import { type Example } from './examples';
+import { type Template } from './templates';
 import { createCommandPalette, type Command } from './palette';
 import { createPreferences } from './prefs';
 import { applyAppearance } from './appearance';
@@ -1600,15 +1600,15 @@ export function init(): void {
 
   // --- overlays + polish surfaces -------------------------------------------
 
-  // Open a starter example as a real workspace: multi-file examples materialize all their files; a
-  // single-source example materializes a 1-file workspace. Both reuse the folder-mode path.
-  async function openExample(example: Example): Promise<void> {
-    const files = example.files?.length
-      ? example.files
-      : [{ relPath: 'model.koi', contents: example.source }];
-    const token = await platform.materializeWorkspace(example.id, files);
+  // Open a starter template as a real workspace: multi-file templates materialize all their files; a
+  // single-source template materializes a 1-file workspace. Both reuse the folder-mode path.
+  async function openExample(template: Template): Promise<void> {
+    const files = template.files?.length
+      ? template.files
+      : [{ relPath: 'model.koi', contents: template.source }];
+    const token = await platform.materializeWorkspace(template.id, files);
     if (!token) {
-      setStatus('could not open example', 'error');
+      setStatus('could not open template', 'error');
       return;
     }
     await openFolderPath(token, { recent: false });
@@ -1662,7 +1662,7 @@ export function init(): void {
     onNewModel: () => void requestNewModel(),
     onOpenFolder: () => void leaveHomeFor('Open a folder?', () => openFolder()),
     onOpenRecent: (path) => void leaveHomeFor('Open this folder?', () => openFolderPath(path)),
-    onOpenExample: (example) => void leaveHomeFor('Open this example?', () => openExample(example)),
+    onOpenExample: (template) => void leaveHomeFor('Open this template?', () => openExample(template)),
   });
 
   const palette = createCommandPalette(() => getCommands());
