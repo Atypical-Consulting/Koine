@@ -73,6 +73,17 @@ function pathToFileUri(path: string): string {
   return 'file://' + encoded;
 }
 
+/**
+ * Whether a relPath from an (untrusted) share link is safe to materialize to disk or key a buffer
+ * by. Rejects an absolute path, a backslash separator, an empty segment (covers leading/trailing/
+ * double slashes), and any `..` traversal SEGMENT — but not a substring `..` (a legitimate
+ * `My..Context.koi` is fine), mirroring the buildSourceZip/buildProjectZip guard.
+ */
+function isSafeShareRelPath(relPath: string): boolean {
+  if (relPath === '' || relPath.includes('\\')) return false;
+  return relPath.split('/').every((s) => s !== '' && s !== '..');
+}
+
 // Seed model — examples/billing.koi, inlined (the renderer has no fs access).
 const SEED = `context Billing {
 
@@ -1295,11 +1306,13 @@ export function init(): void {
   // Open a set of file records as workspace buffers in one pass. Each record becomes an open
   // buffer keyed by its file:// uri and a corresponding LSP didOpen, so cross-file refs resolve.
   // On-disk files carry their absolute `path`; in-memory shared files pass `path: null` and get a
-  // synthetic-but-stable uri derived from their relPath. The single seam shared by folder-open and
-  // shared-import — neither sets dirty, neither activates (callers pick the active buffer).
+  // synthetic-but-stable uri under a reserved `/__shared__/` root — kept distinct from SCRATCH_URI
+  // (`file:///model.koi`) so a shared file literally named `model.koi` doesn't collide with the
+  // scratch buffer. The single seam shared by folder-open and shared-import — neither sets dirty,
+  // neither activates (callers pick the active buffer).
   function populateBuffers(records: { path: string | null; relPath: string; name: string; text: string }[]): void {
     for (const rec of records) {
-      const uri = rec.path != null ? pathToFileUri(rec.path) : pathToFileUri('/' + rec.relPath);
+      const uri = rec.path != null ? pathToFileUri(rec.path) : pathToFileUri('/__shared__/' + rec.relPath);
       buffers.set(uri, { uri, path: rec.path, relPath: rec.relPath, name: rec.name, text: rec.text, dirty: false });
       lsp.openDoc(uri, rec.text);
     }
@@ -1698,15 +1711,19 @@ export function init(): void {
     files: { relPath: string; text: string }[],
     active?: string
   ): Promise<void> {
-    // Nothing to import — fall through to the restored scratch / SEED that already booted.
-    if (files.length === 0) return;
+    // A share link is untrusted input. Drop any file whose relPath could escape the workspace root
+    // before it reaches platform.materializeWorkspace (which writes to disk) or a synthetic buffer
+    // uri — defense in depth against a malicious `..`/absolute path in the payload.
+    const safeFiles = files.filter((f) => isSafeShareRelPath(f.relPath));
+    // Nothing (safe) to import — fall through to the restored scratch / SEED that already booted.
+    if (safeFiles.length === 0) return;
 
     // Primary path: materialize a real workspace and open it in folder mode (mirrors openExample).
     if (platform.materializeWorkspace) {
       try {
         const token = await platform.materializeWorkspace(
           'shared-workspace',
-          files.map((f) => ({ relPath: f.relPath, contents: f.text }))
+          safeFiles.map((f) => ({ relPath: f.relPath, contents: f.text }))
         );
         if (token) {
           await openFolderPath(token);
@@ -1732,7 +1749,7 @@ export function init(): void {
     diagnosticsByUri.delete(SCRATCH_URI);
 
     populateBuffers(
-      files.map((f) => ({
+      safeFiles.map((f) => ({
         path: null,
         relPath: f.relPath,
         name: f.relPath.split('/').pop() ?? f.relPath,
@@ -2120,9 +2137,18 @@ export function init(): void {
       // Scratch mode on startup: open the single seed doc at SCRATCH_URI.
       lsp.openDoc(SCRATCH_URI, editor.getDoc());
       // A workspace share imports once the server is up so its didOpen resolves cross-file refs.
+      // Isolated in its own try/finally: an import failure must NOT masquerade as a connection
+      // failure (the server connected fine), and the hash is cleared either way so a reload doesn't
+      // re-trigger a failing import and trap the user on a broken boot.
       if (shared?.kind === 'workspace') {
-        await importSharedWorkspace(shared.files, shared.active);
-        clearModelHash();
+        try {
+          await importSharedWorkspace(shared.files, shared.active);
+        } catch (e) {
+          console.error('importing shared workspace failed:', e);
+          setStatus('could not open shared workspace', 'error');
+        } finally {
+          clearModelHash();
+        }
       }
     })
     .catch((e) => {
