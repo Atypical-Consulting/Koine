@@ -1,6 +1,5 @@
 using Koine.Compiler.Ast;
 using Koine.Compiler.Diagnostics;
-using Koine.Compiler.Services;
 
 namespace Koine.Compiler.CodeFixes;
 
@@ -20,21 +19,16 @@ namespace Koine.Compiler.CodeFixes;
 public sealed class CodeFixContext
 {
     public CodeFixContext(
-        KoineCompiler compiler,
         string sourceText,
         KoineModel? model,
         Diagnostic? diagnostic,
         SelectionRange? selection)
     {
-        Compiler = compiler;
         SourceText = sourceText;
         Model = model;
         Diagnostic = diagnostic;
         Selection = selection;
     }
-
-    /// <summary>The compiler, so a provider can (re)parse the source when it needs a model.</summary>
-    public KoineCompiler Compiler { get; }
 
     /// <summary>The full source text of the document the fix applies to.</summary>
     public string SourceText { get; }

@@ -26,7 +26,7 @@ public sealed class SemanticValidator
         new SatisfiabilityAnalyzer(),
     };
 
-    private readonly IReadOnlyList<IModelAnalyzer> _analyzers;
+    private readonly IReadOnlyList<IModelAnalyzer> _externalAnalyzers;
 
     /// <summary>Creates a validator running only the built-in analyzers (today's behavior).</summary>
     public SemanticValidator()
@@ -40,9 +40,9 @@ public sealed class SemanticValidator
     /// </summary>
     public SemanticValidator(IReadOnlyList<IModelAnalyzer>? externalAnalyzers)
     {
-        _analyzers = externalAnalyzers is null || externalAnalyzers.Count == 0
-            ? BuiltInAnalyzers
-            : BuiltInAnalyzers.Concat(externalAnalyzers).ToList();
+        _externalAnalyzers = externalAnalyzers is null || externalAnalyzers.Count == 0
+            ? Array.Empty<IModelAnalyzer>()
+            : externalAnalyzers;
     }
 
     /// <summary>Validates the model and returns all semantic diagnostics.</summary>
@@ -53,16 +53,31 @@ public sealed class SemanticValidator
     /// <see cref="ModelIndex"/> is reused rather than rebuilt) and returns all semantic diagnostics.
     /// Runs each analyzer in order, accumulating its diagnostics through a shared
     /// <see cref="AnalyzerContext"/> (the diagnostic sink and derived artifacts are reused across
-    /// analyzers).
+    /// analyzers). Built-in analyzers are trusted and run unguarded; external analyzers are isolated
+    /// in a try/catch so a misbehaving plugin degrades to "no extra diagnostics" instead of crashing
+    /// the host — the guarantee the <see cref="IModelAnalyzer"/> contract makes.
     /// </summary>
     public IReadOnlyList<Diagnostic> Validate(SemanticModel semantic)
     {
         var diagnostics = new List<Diagnostic>();
         var context = new AnalyzerContext(semantic, diagnostics);
 
-        foreach (IModelAnalyzer analyzer in _analyzers)
+        foreach (IModelAnalyzer analyzer in BuiltInAnalyzers)
         {
             analyzer.Analyze(context);
+        }
+
+        foreach (IModelAnalyzer analyzer in _externalAnalyzers)
+        {
+            try
+            {
+                analyzer.Analyze(context);
+            }
+            catch (Exception)
+            {
+                // A throwing external analyzer is isolated (issue #69 platform contract): skip it and
+                // keep the build / live editor diagnostics alive rather than failing the whole compile.
+            }
         }
 
         return diagnostics;
@@ -490,7 +505,8 @@ public sealed class SemanticValidator
                     {
                         diagnostics.Add(Diagnostic.Error(DiagnosticCodes.UnknownEnumMemberForType,
                             $"unknown enum member '{enumDefault.Name}' for type '{m.Type.Name}'{Suggestions.For(enumDefault.Name, en.MemberNames)}",
-                            enumDefault.Span));
+                            enumDefault.Span) with
+                        { Suggestion = Suggestions.Best(enumDefault.Name, en.MemberNames) });
                     }
                 }
                 else

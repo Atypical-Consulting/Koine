@@ -1087,30 +1087,17 @@ internal sealed class LspServer
             && end.TryGetProperty("character", out var ec) && ec.TryGetInt32(out endChar);
     }
 
-    /// <summary>Maps a 0-based LSP selection range to absolute character offsets <c>[start, end)</c> over the source.</summary>
+    /// <summary>
+    /// Maps a 0-based LSP selection range to absolute character offsets <c>[start, end)</c> over the
+    /// source, reusing <see cref="KoineLanguageService.OffsetOf"/> (the same line/character→offset
+    /// mapping the rest of the language services use, which clamps a column at the line break) so the
+    /// CLI and the WASM host agree on identical selections.
+    /// </summary>
     private static (int Start, int End) SelectionOffsets(string source, int sl, int sc, int el, int ec)
     {
-        var start = OffsetOf(source, sl, sc);
-        var end = OffsetOf(source, el, ec);
+        var start = KoineLanguageService.OffsetOf(source, sl, sc);
+        var end = KoineLanguageService.OffsetOf(source, el, ec);
         return end < start ? (end, start) : (start, end);
-    }
-
-    /// <summary>The 0-based absolute offset of the 0-based <paramref name="line"/>/<paramref name="character"/> in <paramref name="source"/>.</summary>
-    private static int OffsetOf(string source, int line, int character)
-    {
-        var offset = 0;
-        var currentLine = 0;
-        while (currentLine < line && offset < source.Length)
-        {
-            if (source[offset] == '\n')
-            {
-                currentLine++;
-            }
-
-            offset++;
-        }
-
-        return Math.Min(offset + character, source.Length);
     }
 
     /// <summary>

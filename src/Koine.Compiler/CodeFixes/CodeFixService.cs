@@ -1,7 +1,6 @@
 using Koine.Compiler.Ast;
 using Koine.Compiler.CodeFixes.Providers;
 using Koine.Compiler.Diagnostics;
-using Koine.Compiler.Services;
 
 namespace Koine.Compiler.CodeFixes;
 
@@ -42,7 +41,7 @@ public sealed class CodeFixService
     /// </summary>
     public IReadOnlyList<CodeFix> FixesForDiagnostic(string sourceText, KoineModel? model, Diagnostic diagnostic)
     {
-        var context = new CodeFixContext(_compiler, sourceText, model, diagnostic, selection: null);
+        var context = new CodeFixContext(sourceText, model, diagnostic, selection: null);
         var fixes = new List<CodeFix>();
         foreach (var provider in _providers)
         {
@@ -63,7 +62,7 @@ public sealed class CodeFixService
     public IReadOnlyList<CodeFix> RefactorsForSelection(string sourceText, KoineModel model, int startOffset, int endOffset)
     {
         var context = new CodeFixContext(
-            _compiler, sourceText, model, diagnostic: null, new SelectionRange(startOffset, endOffset));
+            sourceText, model, diagnostic: null, new SelectionRange(startOffset, endOffset));
         var fixes = new List<CodeFix>();
         foreach (var provider in _providers)
         {
@@ -126,6 +125,4 @@ public sealed class CodeFixService
 
         return result;
     }
-
-    private readonly KoineCompiler _compiler = new();
 }

@@ -52,7 +52,10 @@ internal sealed record KoineConfig(
         string? baseline = null;
         var targets = new Dictionary<string, TargetBuilder>(StringComparer.Ordinal);
         var severity = new Dictionary<string, string>(StringComparer.Ordinal);
-        var diagnosticSeverity = new Dictionary<string, string>(StringComparer.Ordinal);
+        // Case-insensitive: diagnostic codes are conventionally upper-case (KOI0311), but a user who
+        // writes `diagnostics.koi0311 = error` should not be silently ignored — and the in-source
+        // `// koine:disable` directive already matches codes case-insensitively, so match here too.
+        var diagnosticSeverity = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         List<string>? analyzers = null;
         List<string>? emitters = null;
 

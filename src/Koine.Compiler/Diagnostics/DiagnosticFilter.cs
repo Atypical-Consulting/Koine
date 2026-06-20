@@ -168,6 +168,14 @@ public static class DiagnosticFilter
         var map = new Dictionary<(string?, int), HashSet<string>>();
         foreach ((string? file, string source) in sources)
         {
+            // Cheap pre-filter: the overwhelmingly common source has no directive at all, so skip the
+            // per-line Split + regex entirely unless the marker substring is present. This keeps the
+            // no-op compile path (no overrides/flag/directives) from scanning every line for nothing.
+            if (source.IndexOf("koine:disable", StringComparison.OrdinalIgnoreCase) < 0)
+            {
+                continue;
+            }
+
             var lines = source.Split('\n');
             for (var i = 0; i < lines.Length; i++)
             {
@@ -186,7 +194,13 @@ public static class DiagnosticFilter
 
                 foreach (var code in m.Groups["codes"].Value.Split(new[] { ',', ' ', '\t', '\r' }, StringSplitOptions.RemoveEmptyEntries))
                 {
-                    codes.Add(code);
+                    // A directive's codes are code-shaped tokens (letters then digits, e.g. KOI0101).
+                    // Filtering by "contains a digit" drops a trailing free-text justification
+                    // (`// koine:disable KOI0101 because ...`) so prose words can't suppress diagnostics.
+                    if (code.Any(char.IsDigit))
+                    {
+                        codes.Add(code);
+                    }
                 }
             }
         }

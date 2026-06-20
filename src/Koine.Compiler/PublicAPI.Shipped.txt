@@ -838,8 +838,7 @@ Koine.Compiler.CodeFixes.CodeFix.Kind.init -> void
 Koine.Compiler.CodeFixes.CodeFix.Title.get -> string!
 Koine.Compiler.CodeFixes.CodeFix.Title.init -> void
 Koine.Compiler.CodeFixes.CodeFixContext
-Koine.Compiler.CodeFixes.CodeFixContext.CodeFixContext(Koine.Compiler.Services.KoineCompiler! compiler, string! sourceText, Koine.Compiler.Ast.KoineModel? model, Koine.Compiler.Diagnostics.Diagnostic? diagnostic, Koine.Compiler.CodeFixes.SelectionRange? selection) -> void
-Koine.Compiler.CodeFixes.CodeFixContext.Compiler.get -> Koine.Compiler.Services.KoineCompiler!
+Koine.Compiler.CodeFixes.CodeFixContext.CodeFixContext(string! sourceText, Koine.Compiler.Ast.KoineModel? model, Koine.Compiler.Diagnostics.Diagnostic? diagnostic, Koine.Compiler.CodeFixes.SelectionRange? selection) -> void
 Koine.Compiler.CodeFixes.CodeFixContext.Diagnostic.get -> Koine.Compiler.Diagnostics.Diagnostic?
 Koine.Compiler.CodeFixes.CodeFixContext.Model.get -> Koine.Compiler.Ast.KoineModel?
 Koine.Compiler.CodeFixes.CodeFixContext.Selection.get -> Koine.Compiler.CodeFixes.SelectionRange?

@@ -52,6 +52,28 @@ public class CodeFixProviderTests
     }
 
     [Fact]
+    public void Change_to_provider_also_fixes_an_unknown_field_typo_from_structured_data()
+    {
+        // A misspelled field reference in an invariant: "amont" for "amount". Pre-platform the LSP
+        // offered a "Change to X" quickfix for this (by scraping the prose); the structured path must
+        // keep offering it, so this guards against the regression of narrowing the fix to KOI0101 only.
+        var src = "context C {\n  value V {\n    amount: Int\n    invariant amont > 0\n  }\n}\n";
+        var (model, diags) = Validate(src);
+
+        var unknownField = diags.Single(d => d.Code == DiagnosticCodes.UnknownField);
+        unknownField.Suggestion.ShouldBe("amount");
+
+        // Blank the message to prove the fix comes from the structured Suggestion, not the prose.
+        var fix = Service.FixesForDiagnostic(src, model, unknownField with { Message = string.Empty })
+            .ShouldHaveSingleItem();
+        fix.Title.ShouldBe("Change to 'amount'");
+
+        var edit = fix.Edits.ShouldHaveSingleItem();
+        var applied = src[..edit.Range.Offset] + edit.NewText + src[(edit.Range.Offset + edit.Range.Length)..];
+        applied.ShouldBe("context C {\n  value V {\n    amount: Int\n    invariant amount > 0\n  }\n}\n");
+    }
+
+    [Fact]
     public void Fix_all_aggregates_two_same_code_diagnostics_into_one_edit_set_by_equivalence_key()
     {
         // Two unknown-type typos of the SAME name in one document, both suggesting "String".

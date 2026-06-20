@@ -39,6 +39,19 @@ public class AnalyzerPlatformTests
         }
     }
 
+    /// <summary>
+    /// A misbehaving external analyzer that throws on every model — used to prove the host isolates
+    /// it (the <see cref="IModelAnalyzer"/> contract: "the host isolates a misbehaving external
+    /// analyzer regardless") instead of letting the throw crash the whole compile.
+    /// </summary>
+    public sealed class ThrowingAnalyzer : IModelAnalyzer
+    {
+        public string Id => "test.throwing";
+
+        public void Analyze(AnalyzerContext context) =>
+            throw new InvalidOperationException("boom — a buggy third-party analyzer");
+    }
+
     // ---- built-in analyzer set ---------------------------------------------
 
     [Fact]
@@ -128,6 +141,20 @@ public class AnalyzerPlatformTests
         var diags = new KoineCompiler().Diagnose(NoRepositorySource);
 
         diags.ShouldNotContain(d => d.Code == RequireRepositoryAnalyzer.Code);
+    }
+
+    // ---- external analyzer isolation ----------------------------------------
+
+    [Fact]
+    public void A_throwing_external_analyzer_is_isolated_and_does_not_crash_the_compile()
+    {
+        // A model carrying a real built-in diagnostic (unknown type), plus a throwing external analyzer.
+        const string source = "context S { value V { x: Nope } }";
+        var externals = new IModelAnalyzer[] { new ThrowingAnalyzer() };
+
+        // The throw must NOT escape — the compile completes and still reports the built-in diagnostic.
+        IReadOnlyList<Diagnostic> diags = Should.NotThrow(() => new KoineCompiler(externals).Diagnose(source));
+        diags.ShouldContain(d => d.Code == DiagnosticCodes.UnknownType);
     }
 
     private static readonly string ThisAssemblyName =
