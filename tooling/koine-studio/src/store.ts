@@ -43,6 +43,10 @@ export interface Settings {
   aiModel: string;
   /** OpenAI-compatible model id (kept separate so switching providers doesn't send a Claude id to OpenAI). */
   aiModelOpenai: string;
+  /** Advertise the Koine compiler tools (validate/compile/format) to the OpenAI-compatible model.
+   *  Off by default: many local servers (LM Studio / Ollama) buffer the whole reply instead of
+   *  streaming when tools are present, so opting in trades live streaming for the agentic loop. */
+  aiAgenticTools: boolean;
   /** Whether the local MCP server (desktop sidecar) is enabled. Opt-in: no background server unless on. */
   mcpEnabled: boolean;
   /** Which client the Settings → MCP setup recipe is shown for. */
@@ -63,6 +67,7 @@ export const DEFAULT_SETTINGS: Settings = {
   aiApiKey: '',
   aiModel: 'claude-opus-4-8',
   aiModelOpenai: '',
+  aiAgenticTools: false,
   mcpEnabled: false,
   mcpClient: 'lm-studio',
 };
@@ -179,6 +184,8 @@ export function loadSettings(): Settings {
       aiApiKey: secretCache,
       aiModel: typeof parsed.aiModel === 'string' && parsed.aiModel.length > 0 ? parsed.aiModel : DEFAULT_SETTINGS.aiModel,
       aiModelOpenai: typeof parsed.aiModelOpenai === 'string' ? parsed.aiModelOpenai : DEFAULT_SETTINGS.aiModelOpenai,
+      aiAgenticTools:
+        typeof parsed.aiAgenticTools === 'boolean' ? parsed.aiAgenticTools : DEFAULT_SETTINGS.aiAgenticTools,
       mcpEnabled: typeof parsed.mcpEnabled === 'boolean' ? parsed.mcpEnabled : DEFAULT_SETTINGS.mcpEnabled,
       mcpClient: coerceMcpClient(parsed.mcpClient),
     };

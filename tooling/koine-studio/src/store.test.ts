@@ -30,6 +30,25 @@ describe('MCP settings', () => {
   });
 });
 
+describe('Assistant agentic-tools setting', () => {
+  beforeEach(() => localStorage.clear());
+
+  test('defaults off so replies stream out of the box', () => {
+    expect(DEFAULT_SETTINGS.aiAgenticTools).toBe(false);
+    expect(loadSettings().aiAgenticTools).toBe(false);
+  });
+
+  test('round-trips an opted-in state', () => {
+    saveSettings({ ...DEFAULT_SETTINGS, aiAgenticTools: true });
+    expect(loadSettings().aiAgenticTools).toBe(true);
+  });
+
+  test('falls back to the default when the stored value is not a boolean', () => {
+    saveSettings({ ...DEFAULT_SETTINGS, aiAgenticTools: 'yes' as never });
+    expect(loadSettings().aiAgenticTools).toBe(false);
+  });
+});
+
 describe('API key secret', () => {
   beforeEach(async () => {
     localStorage.clear();
