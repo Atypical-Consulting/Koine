@@ -4,7 +4,6 @@
 import { createKoineEditor, createOutputView, renderMarkdown, renderSymbolTree, setEditorDiagnostics } from './editor';
 import {
   KoineLsp,
-  SCRATCH_URI,
   type CheckResult,
   type ContextMapResult,
   type GlossaryEntry,
@@ -18,7 +17,7 @@ import { getPlatform, type FsEntry, type KoiFile } from './host';
 import { createExplorer } from './explorer';
 import { koineMark } from './logo';
 import { currentTheme, initTheme, onThemeChange, toggleTheme } from './theme';
-import { clearScratch, initSecrets, loadScratch, loadSettings, pushRecentFolder, type Settings } from './store';
+import { takeLegacyScratch, initSecrets, loadSettings, pushRecentFolder, type Settings } from './store';
 import { createWelcome } from './welcome';
 import { type Example } from './examples';
 import { createCommandPalette, type Command } from './palette';
@@ -33,8 +32,8 @@ import { buildSourceZip } from './sourceZip';
 import { formatChord } from './platform';
 import { renderDiagrams } from './diagrams';
 import { renderGlossary, type GlossaryHandlers } from './glossary';
-import { createAssistantPanel, type AssistantPanel, type AssistantContext, type DomainIndex } from './aiPanel';
-import { buildShareUrl, clearModelHash, readModelFromHash, workspaceShareUrlOrNull } from './share';
+import { createAssistantPanel, type AssistantPanel } from './aiPanel';
+import { clearModelHash, readModelFromHash, workspaceShareUrlOrNull } from './share';
 import { dirtyCount, handleBeforeUnload, saveAllDirtyBuffers, titleWithDirty } from './dirty';
 import { clashingRelPaths, isDirtyTrackable } from './sharedWorkspace';
 import { createConfirmDialog } from './overlay';
@@ -43,10 +42,10 @@ import { createConfirmDialog } from './overlay';
 // `KoiFile` (path / name / relPath) is provided by the host platform layer (src/host), whose
 // backends supply it from the native filesystem (desktop) or the File System Access API (browser).
 
-/** A client-side open buffer keyed by its file:// uri. `path` is null in scratch mode. */
+/** A client-side open buffer keyed by its file:// uri. */
 interface Buffer {
   uri: string;
-  path: string | null;
+  path: string;
   relPath: string;
   name: string;
   text: string;
@@ -241,7 +240,7 @@ function helpRows(): ShortcutRow[] {
     { keys: 'mod+S', description: 'Save / format the active model' },
     { keys: 'mod+Alt+S', description: 'Save all unsaved files' },
     { keys: 'mod+Shift+O', description: 'Open a folder of models' },
-    { keys: 'mod+N', description: 'New scratch model' },
+    { keys: 'mod+N', description: 'New model' },
     { keys: 'mod+1', description: 'Preview C#' },
     { keys: 'mod+2', description: 'Preview TypeScript' },
     { keys: 'mod+3', description: 'Preview Python' },
@@ -249,7 +248,7 @@ function helpRows(): ShortcutRow[] {
     { keys: 'Shift+F12', description: 'Find all references' },
     { keys: 'mod+.', description: 'Quick fixes & refactors' },
     { keys: 'mod+,', description: 'Settings' },
-    { keys: 'mod+B', description: 'Toggle file tree (folder mode)' },
+    { keys: 'mod+B', description: 'Toggle file tree' },
     { keys: 'F1', description: 'Keyboard shortcuts' },
     { keys: 'Esc', description: 'Close the open overlay' },
   ];
@@ -285,8 +284,7 @@ export function init(): void {
   const shared = readModelFromHash();
   // One-time migration of the legacy single-file scratch buffer (pre-workspace Studio) into the
   // default workspace's model.koi. Read+clear here so it is applied at most once.
-  const legacyScratch = loadScratch();
-  if (legacyScratch !== null) clearScratch();
+  const legacyScratch = takeLegacyScratch();
   // First paint before the workspace opens; openFolderPath replaces it with the active file's text.
   const initialDoc = (shared?.kind === 'single' ? shared.text : null) ?? legacyScratch ?? SEED;
 
@@ -295,21 +293,19 @@ export function init(): void {
     doc: initialDoc,
     lineWrap: settings.wordWrap,
     onChange: (doc) => {
-      // First edit dismisses the welcome overlay (it only shows in untouched scratch mode).
+      // First edit dismisses the welcome overlay (shown only on a pristine first-run workspace).
       if (welcome.visible) welcome.hide();
       const buf = buffers.get(activeUri);
       let becameDirty = false;
       if (buf) {
-        // Real files and in-memory shared buffers are dirty-tracked; the scratch buffer (path-null but
-        // auto-persisted to localStorage) is deliberately never marked dirty.
-        if (isDirtyTrackable(buf, isInMemoryWorkspace()) && !buf.dirty && buf.text !== doc) becameDirty = true;
+        if (!buf.dirty && buf.text !== doc) becameDirty = true;
         buf.text = doc;
         if (becameDirty) buf.dirty = true;
       }
       lsp.changeDoc(activeUri, doc);
       onDocEdited();
       // Re-render the tree only when the active file's dirty dot just appeared (cheap path).
-      if (folderMode && becameDirty) renderTree();
+      if (becameDirty) renderTree();
     },
     onHover: (line, character) => lsp.hover(line, character),
     onCompletion: (line, character) => lsp.completion(line, character),
@@ -386,16 +382,14 @@ export function init(): void {
   // `buffers` holds every open document keyed by its file:// uri; `activeUri` is the one
   // shown in the editor and targeted by all lsp requests. `diagnosticsByUri` keeps the
   // latest pushed diagnostics per uri so switching files can re-render the active one and
-  // the tree can badge files with errors. Scratch mode = a single buffer at SCRATCH_URI
-  // with path null; folder mode = one buffer per discovered .koi file.
+  // the tree can badge files with errors.
   const buffers = new Map<string, Buffer>();
   const diagnosticsByUri = new Map<string, LspDiagnostic[]>();
-  let activeUri = SCRATCH_URI;
-  let folderMode = false;
+  let activeUri = '';
   // The opened-folder token and the last explorer tree fetched for it. The explorer is a *view*:
   // it renders this cached tree (re-reading dirty/diagnostics/active state via callbacks), while
   // the open .koi `buffers` remain the compiled workspace. Mutations refresh both.
-  let folderRootToken: string | null = null;
+  let folderRootToken: string = '';
   let entriesCache: FsEntry[] = [];
 
   // True when the workspace is the in-memory shared import (folder mode with no host folder behind it):
@@ -412,9 +406,8 @@ export function init(): void {
   const treeBtn = el<HTMLButtonElement>('btn-files');
   const splitEl = el<HTMLElement>('split');
 
-  // File-tree chrome (the left rail + its toolbar toggle) only exists in folder mode. Visibility
-  // is a persisted user choice; the rail track widens to 6px only when the tree is showing so no
-  // stray resize handle appears in scratch mode.
+  // File-tree chrome (the left rail + its toolbar toggle). Visibility is a persisted user choice;
+  // the rail track widens to 6px only when the tree is showing.
   const FILETREE_VIS_KEY = 'koine.studio.filetree';
   function applyFileTreeVisibility(visible: boolean): void {
     treeEl.hidden = !visible;
@@ -425,13 +418,7 @@ export function init(): void {
     treeBtn.hidden = false;
     applyFileTreeVisibility((localStorage.getItem(FILETREE_VIS_KEY) ?? '1') !== '0');
   }
-  function hideFileTreeChrome(): void {
-    treeBtn.hidden = true;
-    treeEl.hidden = true;
-    splitEl.style.setProperty('--koi-filetree-rail', '0px');
-  }
   function toggleFileTree(): void {
-    if (!folderMode) return;
     const visible = Boolean(treeEl.hidden); // currently hidden → reveal
     applyFileTreeVisibility(visible);
     try {
@@ -520,7 +507,7 @@ export function init(): void {
       renderStrip(diags);
       updateStatus(diags);
     }
-    if (folderMode) renderTree();
+    renderTree();
   });
   lsp.onServerExit((code) => {
     setStatus(`server exited (${code})`, 'error');
@@ -540,14 +527,12 @@ export function init(): void {
   }
 
   // Re-render the explorer from the cached entry tree. Cheap to call on any state change (dirty,
-  // diagnostics, active file) — the explorer reads those per row via the callbacks. A no-op outside
-  // folder mode (the tree is hidden then).
+  // diagnostics, active file) — the explorer reads those per row via the callbacks.
   function renderTree(): void {
     // Sync the global unsaved indicator on every tree render — this is the common path for every
-    // dirty transition (edit, save, save-all, cross-file rename, workspace swap), and it runs even
-    // in scratch mode (where the early return below skips the file tree) so the pill always clears.
+    // dirty transition (edit, save, save-all, cross-file rename, workspace swap).
     refreshDirtyIndicator();
-    if (!folderMode || folderRootToken == null) return;
+    if (folderRootToken === '') return;
     explorer.render(entriesCache, folderRootToken);
   }
 
@@ -558,7 +543,7 @@ export function init(): void {
 
   /** The folder-relative, forward-slashed path of a token under the opened folder ('' for the root). */
   function relOfToken(token: string): string {
-    if (folderRootToken == null || token === folderRootToken) return '';
+    if (folderRootToken === '' || token === folderRootToken) return '';
     // Require a real separator boundary after the root prefix so a sibling that merely shares the
     // root as a string prefix (e.g. root `/work/app`, token `/work/app2/x`) isn't mis-sliced. Then
     // strip the prefix + separator and normalise Windows '\' to '/'.
@@ -570,7 +555,7 @@ export function init(): void {
 
   /** Re-read the folder's entry tree from the host and re-render the explorer. */
   async function refreshEntries(): Promise<void> {
-    if (folderRootToken == null) return;
+    if (folderRootToken === '') return;
     try {
       entriesCache = await platform.listEntries(folderRootToken);
     } catch (e) {
@@ -643,7 +628,7 @@ export function init(): void {
     // Close every open buffer at or under the deleted token; re-point active if it was one of them.
     let activeRemoved = false;
     for (const buf of [...buffers.values()]) {
-      if (buf.path != null && isUnder(buf.path, entry.token)) {
+      if (isUnder(buf.path, entry.token)) {
         if (buf.uri === activeUri) activeRemoved = true;
         lsp.closeDoc(buf.uri);
         buffers.delete(buf.uri);
@@ -754,7 +739,7 @@ export function init(): void {
   // move), preserving each buffer's unsaved text + dirty flag and keeping the LSP workspace in sync.
   function rekeyBuffers(oldToken: string, newToken: string): void {
     for (const buf of [...buffers.values()]) {
-      if (buf.path == null || !isUnder(buf.path, oldToken)) continue;
+      if (!isUnder(buf.path, oldToken)) continue;
       const newPath = newToken + buf.path.slice(oldToken.length);
       const newUri = pathToFileUri(newPath);
       const wasActive = buf.uri === activeUri;
@@ -776,11 +761,10 @@ export function init(): void {
     }
   }
 
-  // After the active buffer is deleted, fall back to another open file, or re-establish scratch when
-  // the workspace is now empty (mirrors openFolderPath's empty-folder recovery).
+  // After the active buffer is deleted, fall back to another open file, or open a new blank model
+  // when the workspace is now empty.
   function activateFallback(): void {
     const next = Array.from(buffers.values())
-      .filter((b) => b.path != null)
       .sort((a, b) => a.relPath.localeCompare(b.relPath))[0];
     if (next) {
       activeUri = next.uri;
@@ -800,7 +784,7 @@ export function init(): void {
   // Open any .koi file present in the folder but not yet buffered (used after creating/duplicating
   // folders that may introduce new .koi files), so the compiled workspace stays complete.
   async function syncOpenKoi(): Promise<void> {
-    if (folderRootToken == null) return;
+    if (folderRootToken === '') return;
     let files: KoiFile[];
     try {
       files = await platform.listKoiFiles(folderRootToken);
@@ -880,7 +864,7 @@ export function init(): void {
         const buf = buffers.get(uri);
         if (!buf) continue;
         buf.text = applyTextEditsToString(buf.text, edits);
-        if (buf.path != null) buf.dirty = true;
+        buf.dirty = true;
         lsp.syncDoc(uri, buf.text);
         treeChanged = true;
       }
@@ -891,7 +875,7 @@ export function init(): void {
 
   // Replace the active document's contents (used by the AI "Apply to editor" action). Setting the
   // editor doc dispatches a change, so the editor's onChange handler runs the full sync pipeline
-  // (buffer text, lsp.changeDoc, scratch persistence, doc-view refresh, tree) — don't repeat it here.
+  // (buffer text, lsp.changeDoc, doc-view refresh, tree) — don't repeat it here.
   function replaceActiveDoc(source: string): void {
     editor.setDoc(source);
   }
@@ -1350,14 +1334,11 @@ export function init(): void {
 
   // Open a set of file records as workspace buffers in one pass. Each record becomes an open
   // buffer keyed by its file:// uri and a corresponding LSP didOpen, so cross-file refs resolve.
-  // On-disk files carry their absolute `path`; in-memory shared files pass `path: null` and get a
-  // synthetic-but-stable uri under a reserved `/__shared__/` root — kept distinct from SCRATCH_URI
-  // (`file:///model.koi`) so a shared file literally named `model.koi` doesn't collide with the
-  // scratch buffer. The single seam shared by folder-open and shared-import — neither sets dirty,
+  // The single seam shared by folder-open and shared-import — neither sets dirty,
   // neither activates (callers pick the active buffer).
-  function populateBuffers(records: { path: string | null; relPath: string; name: string; text: string }[]): void {
+  function populateBuffers(records: { path: string; relPath: string; name: string; text: string }[]): void {
     for (const rec of records) {
-      const uri = rec.path != null ? pathToFileUri(rec.path) : pathToFileUri('/__shared__/' + rec.relPath);
+      const uri = pathToFileUri(rec.path);
       buffers.set(uri, { uri, path: rec.path, relPath: rec.relPath, name: rec.name, text: rec.text, dirty: false });
       lsp.openDoc(uri, rec.text);
     }
@@ -1381,24 +1362,17 @@ export function init(): void {
       return;
     }
 
-    // Leaving scratch mode: close the scratch doc so the server drops it from the workspace.
-    if (!folderMode) {
-      lsp.closeDoc(SCRATCH_URI);
-      buffers.delete(SCRATCH_URI);
-      diagnosticsByUri.delete(SCRATCH_URI);
-    } else {
-      // Re-opening a folder: close every previously open file first.
-      for (const uri of Array.from(buffers.keys())) {
-        lsp.closeDoc(uri);
-      }
-      buffers.clear();
-      diagnosticsByUri.clear();
+    // Re-opening a folder: close every previously open file first.
+    for (const uri of Array.from(buffers.keys())) {
+      lsp.closeDoc(uri);
     }
+    buffers.clear();
+    diagnosticsByUri.clear();
 
     // Read + open every file as one workspace (cross-file refs resolve via didOpen). Read text
     // from disk first (skipping unreadable files), then hand the successful records to the shared
     // populateBuffers seam so folder-open and shared-import open files through one path.
-    const records: { path: string | null; relPath: string; name: string; text: string }[] = [];
+    const records: { path: string; relPath: string; name: string; text: string }[] = [];
     for (const f of files) {
       let text: string;
       try {
@@ -1412,23 +1386,12 @@ export function init(): void {
     populateBuffers(records);
 
     // Every read failed after a non-empty listing (files deleted / permissions revoked
-    // between list and read). The scratch doc was already closed above, so don't leave the
-    // app with no active buffer — re-establish scratch from the current editor contents.
+    // between list and read).
     if (buffers.size === 0) {
       setStatus('could not read any files in folder', 'error');
-      const text = editor.getDoc();
-      buffers.set(SCRATCH_URI, { uri: SCRATCH_URI, path: null, relPath: 'model.koi', name: 'model.koi', text, dirty: false });
-      lsp.openDoc(SCRATCH_URI, text);
-      activeUri = SCRATCH_URI;
-      lsp.setActive(SCRATCH_URI);
-      folderMode = false;
-      folderRootToken = null;
-      entriesCache = [];
-      hideFileTreeChrome();
       return;
     }
 
-    folderMode = true;
     folderRootToken = folder;
     // Activate the first file (sorted by relPath) and show the tree.
     const first = Array.from(buffers.values()).sort((a, b) => a.relPath.localeCompare(b.relPath))[0];
@@ -1498,10 +1461,9 @@ export function init(): void {
   });
 
   // Guard against closing/reloading with unsaved work: when any open buffer is dirty, the browser
-  // shows its native "Leave site?" prompt. Folder-mode dirty buffers live only in memory, so without
-  // this a tab close silently drops them. (The scratch buffer auto-persists to localStorage and is
-  // never marked dirty, so a clean scratch session closes without a prompt.) On the desktop host this
-  // covers reloads; the window-close confirm is wired separately in the Tauri host.
+  // shows its native "Leave site?" prompt. Dirty buffers live only in memory, so without this a tab
+  // close silently drops them. On the desktop host this covers reloads; the window-close confirm is
+  // wired separately in the Tauri host.
   function anyDirty(): boolean {
     return dirtyCount(buffers) > 0;
   }
@@ -1526,7 +1488,7 @@ export function init(): void {
       buf.text = editor.getDoc();
       lsp.changeDoc(activeUri, buf.text);
       try {
-        await platform.writeTextFile(buf.path as string, buf.text);
+        await platform.writeTextFile(buf.path, buf.text);
         buf.dirty = false;
         lsp.didSave();
         renderTree();
@@ -1577,7 +1539,7 @@ export function init(): void {
       }
 
       let failures = 0;
-      const saved = await saveAllDirtyBuffers(buffers as Map<string, Buffer & { path: string }>, {
+      const saved = await saveAllDirtyBuffers(buffers, {
         write: (buf) => platform.writeTextFile(buf.path, buf.text),
         onError: (buf, err) => {
           failures++;
@@ -1613,6 +1575,7 @@ export function init(): void {
       await platform.createFile(token, 'model.koi', BLANK);
     } catch (e) {
       console.error('resetting the default workspace failed:', e);
+      setStatus('could not reset the workspace', 'error');
     }
     for (const uri of Array.from(buffers.keys())) lsp.closeDoc(uri);
     buffers.clear();
@@ -1621,13 +1584,10 @@ export function init(): void {
     welcome.hide();
   }
 
-  // Does the workspace hold unsaved work that New would destroy? In scratch mode, anything other
-  // than an empty buffer / the seed backdrop / the blank stub counts. In folder mode, files live
-  // on disk, so only a dirty open buffer is at risk.
+  // Does the workspace hold unsaved work that New would destroy? Files live on disk,
+  // so only a dirty open buffer is at risk.
   function hasUnsavedWork(): boolean {
-    if (folderMode) return Array.from(buffers.values()).some((b) => b.dirty);
-    const text = editor.getDoc();
-    return text.trim() !== '' && text !== SEED && text !== BLANK;
+    return Array.from(buffers.values()).some((b) => b.dirty);
   }
 
   // Confirm before an action that would replace the current model and lose unsaved work. Resolves
@@ -1643,7 +1603,7 @@ export function init(): void {
         : `Your current model has unsaved changes that will be lost. Save it with ${save} first to keep it.`;
     return confirmDialog.ask({
       title,
-      message,
+      message: `Files with unsaved changes will lose them. Save with ${save} first to keep them.`,
       confirmLabel,
       danger: true,
     });
@@ -1716,7 +1676,7 @@ export function init(): void {
   }
 
   const welcome = createWelcome({
-    onNewScratch: () => void requestNewModel(),
+    onNewModel: () => void requestNewModel(),
     onOpenFolder: () => void leaveHomeFor('Open a folder?', () => openFolder()),
     onOpenRecent: (path) => void leaveHomeFor('Open this folder?', () => openFolderPath(path)),
     onOpenExample: (example) => void leaveHomeFor('Open this example?', () => openExample(example)),
@@ -1751,11 +1711,7 @@ export function init(): void {
     if (!anyDirty()) return true;
     return confirmDialog.ask({
       title: 'Close Koine Studio?',
-      message: isInMemoryWorkspace()
-        ? `This shared workspace lives only in memory. Save it to a folder with ${formatChord('mod+S')} first to keep your changes.`
-        : folderMode
-          ? `Files with unsaved changes will lose them. Save with ${formatChord('mod+Alt+S')} first to keep them.`
-          : 'Your current model has unsaved changes that will be lost.',
+      message: `Files with unsaved changes will lose them. Save with ${formatChord('mod+Alt+S')} first to keep them.`,
       confirmLabel: 'Close & discard',
       danger: true,
     });
@@ -1839,25 +1795,20 @@ export function init(): void {
   // flashing a transient confirmation in the status pill. After the flash, re-derive the pill from
   // the CURRENT diagnostics rather than restoring a snapshot (which could clobber a fresh push).
   //
-  // Folder mode shares the WHOLE workspace (every open buffer) under a versioned envelope, with the
-  // active file flagged so the recipient lands on it; scratch mode keeps the legacy single-string
-  // link. A workspace that overflows the URL-length cap is not copied as a broken link — instead we
-  // steer the user to the `.koi` source zip export (see the over-cap toast below).
+  // Shares the WHOLE workspace (every open buffer) under a versioned envelope, with the active file
+  // flagged so the recipient lands on it. A workspace that overflows the URL-length cap is not
+  // copied as a broken link — instead we steer the user to the `.koi` source zip export.
   async function copyShareLink(): Promise<void> {
     try {
-      if (folderMode) {
-        const files = Array.from(buffers.values()).map((b) => ({ relPath: b.relPath, text: b.text }));
-        const activeRelPath = buffers.get(activeUri)?.relPath;
-        const url = workspaceShareUrlOrNull(files, activeRelPath);
-        if (url === null) {
-          setStatus('Workspace too large to share as a link — export a .koi source zip instead', 'error');
-          setTimeout(() => updateStatus(diagnosticsByUri.get(activeUri) ?? []), 1500);
-          return;
-        }
-        await navigator.clipboard.writeText(url);
-      } else {
-        await navigator.clipboard.writeText(buildShareUrl(editor.getDoc()));
+      const files = Array.from(buffers.values()).map((b) => ({ relPath: b.relPath, text: b.text }));
+      const activeRelPath = buffers.get(activeUri)?.relPath;
+      const url = workspaceShareUrlOrNull(files, activeRelPath);
+      if (url === null) {
+        setStatus('Workspace too large to share as a link — export a .koi source zip instead', 'error');
+        setTimeout(() => updateStatus(diagnosticsByUri.get(activeUri) ?? []), 1500);
+        return;
       }
+      await navigator.clipboard.writeText(url);
       setStatus('link copied ✓', 'green');
       setTimeout(() => updateStatus(diagnosticsByUri.get(activeUri) ?? []), 1500);
     } catch (e) {
@@ -1866,15 +1817,12 @@ export function init(): void {
   }
 
   // Bundle every open `.koi` document into a zip and hand it to the host's saveZip seam (Blob
-  // download in the browser, native picker on desktop). Folder mode names the archive after the
-  // opened folder; scratch mode falls back to `KoineSource`. The whole bundle is DOM-free in
-  // sourceZip.ts so it can be unit-tested in isolation.
+  // download in the browser, native picker on desktop). Names the archive after the opened folder.
+  // The whole bundle is DOM-free in sourceZip.ts so it can be unit-tested in isolation.
   async function exportSourceZip(): Promise<void> {
     try {
       const files = Array.from(buffers.values()).map((b) => ({ relPath: b.relPath, text: b.text }));
-      const root = sanitizeProjectName(
-        folderMode && folderRootToken ? platform.folderName(folderRootToken) : 'KoineSource',
-      );
+      const root = sanitizeProjectName(platform.folderName(folderRootToken));
       const bytes = await buildSourceZip(files, { root });
       const saved = await platform.saveZip(`${root}.zip`, bytes);
       if (saved === true) {
@@ -1965,7 +1913,7 @@ export function init(): void {
       { id: 'format', title: 'Format document', hint: 'mod+S', group: 'Edit', run: () => void formatActive() },
       { id: 'home', title: 'Go to start screen', group: 'File', run: () => goHome() },
       { id: 'open-folder', title: 'Open folder…', hint: 'mod+Shift+O', group: 'File', run: () => void openFolder() },
-      { id: 'new-scratch', title: 'New scratch model', hint: 'mod+N', group: 'File', run: () => void requestNewModel() },
+      { id: 'new-scratch', title: 'New model', hint: 'mod+N', group: 'File', run: () => void requestNewModel() },
       { id: 'save-all', title: 'Save all', hint: 'mod+Alt+S', group: 'File', run: () => void saveAllDirty() },
       { id: 'share', title: 'Copy shareable link', group: 'File', run: () => void copyShareLink() },
       { id: 'check', title: 'Check against baseline…', group: 'File', run: () => void runCheck() },
@@ -1984,14 +1932,10 @@ export function init(): void {
       { id: 'assistant-explain', title: 'Explain this construct', group: 'Inspector', run: () => { selectView('assistant'); ensureAssistant().explainSelection(); } },
     ];
 
-    // In folder mode, surface every open file as a "Go to File" entry so the palette doubles as a
+    // Surface every open file as a "Go to File" entry so the palette doubles as a
     // fuzzy quick-open (type part of a path to jump). The palette re-reads this on each open.
-    if (folderMode) {
-      for (const buf of Array.from(buffers.values())
-        .filter((b) => b.uri !== SCRATCH_URI)
-        .sort((a, b) => a.relPath.localeCompare(b.relPath))) {
-        cmds.push({ id: 'goto:' + buf.uri, title: buf.relPath, group: 'Go to File', run: () => activateFile(buf.uri) });
-      }
+    for (const buf of Array.from(buffers.values()).sort((a, b) => a.relPath.localeCompare(b.relPath))) {
+      cmds.push({ id: 'goto:' + buf.uri, title: buf.relPath, group: 'Go to File', run: () => activateFile(buf.uri) });
     }
 
     return cmds.map((c) => (c.hint ? { ...c, hint: formatChord(c.hint) } : c));
@@ -2038,11 +1982,9 @@ export function init(): void {
       e.preventDefault();
       help.toggle();
     } else if (mod && (e.key === 'b' || e.key === 'B')) {
-      // Toggle the file tree — only meaningful in folder mode.
-      if (folderMode) {
-        e.preventDefault();
-        toggleFileTree();
-      }
+      // Toggle the file tree.
+      e.preventDefault();
+      toggleFileTree();
     }
   });
 

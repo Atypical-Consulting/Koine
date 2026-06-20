@@ -302,27 +302,22 @@ export function clearRecentFolders(): void {
   writeRaw(RECENT_KEY, JSON.stringify([]));
 }
 
-// --- scratch buffer (session restore) ----------------------------------------
-// The unsaved scratch model is persisted so a reload restores the user's work instead of resetting
-// to the seed. Only the single scratch buffer is kept here; folder-mode files live on disk.
+// --- legacy scratch migration (one-time read+clear) --------------------------
 
-/** The persisted scratch-buffer text, or null when nothing has been saved. */
-export function loadScratch(): string | null {
-  return readRaw(SCRATCH_KEY);
-}
-
-/** Persist the scratch-buffer text (best-effort). */
-export function saveScratch(text: string): void {
-  writeRaw(SCRATCH_KEY, text);
-}
-
-/** Forget the persisted scratch buffer (e.g. on New, or once it is saved to a real file). */
-export function clearScratch(): void {
-  try {
-    localStorage.removeItem(SCRATCH_KEY);
-  } catch {
-    // storage unavailable — nothing to clear
+/**
+ * One-time read+clear of the legacy single-file scratch buffer (pre-workspace Studio), used by the
+ * boot migration into the default workspace. Returns the text once, then forgets it.
+ */
+export function takeLegacyScratch(): string | null {
+  const text = readRaw(SCRATCH_KEY);
+  if (text !== null) {
+    try {
+      localStorage.removeItem(SCRATCH_KEY);
+    } catch {
+      // storage unavailable — nothing to clear
+    }
   }
+  return text;
 }
 
 // --- assistant conversation (per workspace) ----------------------------------

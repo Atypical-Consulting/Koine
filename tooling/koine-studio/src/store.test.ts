@@ -7,10 +7,7 @@ import {
   initSecrets,
   saveApiKey,
   clearApiKey,
-  loadChat,
-  saveChat,
-  clearChat,
-  CHAT_HISTORY_CAP,
+  takeLegacyScratch,
 } from './store';
 import type { ChatMessage } from './ai';
 
@@ -86,86 +83,12 @@ describe('API key secret', () => {
   });
 });
 
-describe('Assistant conversation persistence', () => {
+describe('takeLegacyScratch', () => {
   beforeEach(() => localStorage.clear());
 
-  test('round-trips a ChatMessage[] for a workspace key', () => {
-    const msgs: ChatMessage[] = [
-      { role: 'user', content: 'model an Order aggregate' },
-      { role: 'assistant', content: '```koine\ncontext Sales { }\n```' },
-    ];
-    saveChat('scratch', msgs);
-    expect(loadChat('scratch')).toEqual(msgs);
-  });
-
-  test('an absent key loads as the empty transcript', () => {
-    expect(loadChat('never-saved')).toEqual([]);
-  });
-
-  test('a malformed stored blob loads as the empty transcript', () => {
-    localStorage.setItem('koine.studio.chat.k', '{bad');
-    expect(loadChat('k')).toEqual([]);
-  });
-
-  test('a stored non-array loads as the empty transcript', () => {
-    localStorage.setItem('koine.studio.chat.k', JSON.stringify({ role: 'user', content: 'hi' }));
-    expect(loadChat('k')).toEqual([]);
-  });
-
-  test('entries with a wrong shape are filtered out', () => {
-    const stored = [
-      { role: 'user', content: 'ok' }, // well-formed
-      { role: 'system', content: 'bad role' }, // wrong role
-      { role: 'assistant', content: 42 }, // non-string content
-      { role: 'assistant' }, // missing content
-      'nope', // not an object
-      { role: 'assistant', content: 'kept' }, // well-formed
-    ];
-    localStorage.setItem('koine.studio.chat.k', JSON.stringify(stored));
-    expect(loadChat('k')).toEqual([
-      { role: 'user', content: 'ok' },
-      { role: 'assistant', content: 'kept' },
-    ]);
-  });
-
-  test('caps the stored transcript to the last CHAT_HISTORY_CAP messages', () => {
-    const overflow: ChatMessage[] = Array.from({ length: CHAT_HISTORY_CAP + 25 }, (_, i) => ({
-      role: i % 2 === 0 ? ('user' as const) : ('assistant' as const),
-      content: `m${i}`,
-    }));
-    saveChat('scratch', overflow);
-    const loaded = loadChat('scratch');
-    expect(loaded.length).toBe(CHAT_HISTORY_CAP);
-    // Only the LAST CHAT_HISTORY_CAP survive — the oldest are dropped.
-    expect(loaded[0].content).toBe(`m${25}`);
-    expect(loaded[loaded.length - 1].content).toBe(`m${CHAT_HISTORY_CAP + 24}`);
-  });
-
-  test('clearChat empties the stored transcript', () => {
-    saveChat('scratch', [{ role: 'user', content: 'hi' }]);
-    expect(loadChat('scratch').length).toBe(1);
-    clearChat('scratch');
-    expect(loadChat('scratch')).toEqual([]);
-  });
-
-  test('uses a distinct namespace, leaving settings/scratch/secrets untouched', async () => {
-    await clearApiKey();
-    await saveApiKey('sk-must-not-leak');
-    patchSettings({ theme: 'light' }); // write a settings blob
-    localStorage.setItem('koine.studio.scratch', 'context Sales { }');
-
-    // Snapshot the sibling blobs, then write a chat under the same logical name.
-    const settingsBefore = localStorage.getItem('koine.studio.settings');
-    const scratchBefore = localStorage.getItem('koine.studio.scratch');
-    saveChat('scratch', [{ role: 'user', content: 'chat content' }]);
-
-    // The settings and scratch blobs are byte-for-byte untouched by the chat write.
-    expect(localStorage.getItem('koine.studio.settings')).toBe(settingsBefore);
-    expect(localStorage.getItem('koine.studio.scratch')).toBe(scratchBefore);
-    // The encrypted secret path is not involved: the plaintext chat blob never carries the key.
-    expect(localStorage.getItem('koine.studio.chat.scratch') ?? '').not.toContain('sk-must-not-leak');
-    expect(loadSettings().aiApiKey).toBe('sk-must-not-leak');
-    // The chat lives under its own namespaced key.
-    expect(loadChat('scratch')).toEqual([{ role: 'user', content: 'chat content' }]);
+  test('takeLegacyScratch returns the stored value once, then clears it', () => {
+    localStorage.setItem('koine.studio.scratch', 'context Legacy {}');
+    expect(takeLegacyScratch()).toBe('context Legacy {}');
+    expect(takeLegacyScratch()).toBeNull(); // cleared after the first read
   });
 });

@@ -236,9 +236,6 @@ interface JsonRpcMessage {
 
 const REQUEST_TIMEOUT_MS = 15000;
 
-/** The default scratch-mode document uri. Used until a folder is opened. */
-export const SCRATCH_URI = 'file:///model.koi';
-
 interface OpenDoc {
   text: string;
   version: number;
@@ -256,7 +253,7 @@ export class KoineLsp {
   private onDiagnostics?: (uri: string, diags: LspDiagnostic[]) => void;
   private onExit?: (code: number) => void;
   private onRestart?: () => void;
-  private activeUri = SCRATCH_URI;
+  private activeUri = '';
 
   constructor(private readonly transport: LspTransport) {}
 
