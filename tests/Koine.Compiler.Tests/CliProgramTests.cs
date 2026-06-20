@@ -326,4 +326,38 @@ public class CliProgramTests
 
         (builds >= 3).ShouldBeTrue();
     }
+
+    // ---- check: per-rule severity config (issue #73, A3) -------------------
+
+    [Fact]
+    public void Check_SeverityConfig_DowngradesRenameToNonBreaking()
+    {
+        const string baselineSrc = """
+            context Sales {
+              integration event OrderPlaced {
+                orderId: OrderId
+                total:   Decimal
+              }
+            }
+            """;
+        const string currentSrc = """
+            context Sales {
+              integration event OrderPlaced {
+                orderId: OrderId
+                amount:  Decimal
+              }
+            }
+            """;
+        var (_, baseDir) = TempModel(baselineSrc, "baseline.koi");
+        var (currentFile, _) = TempModel(currentSrc, "current.koi");
+
+        // Renaming a published field (KOI1515) is breaking by default → non-zero exit.
+        var (code1, _, _) = Run("check", currentFile, "--baseline", baseDir);
+        code1.ShouldBe(1);
+
+        // A koine.config that downgrades the rename to NonBreaking clears the gate → exit 0.
+        var (configFile, _) = TempModel("check.severity.KOI1515 = NonBreaking\n", "koine.config");
+        var (code2, _, _) = Run("check", currentFile, "--baseline", baseDir, "--config", configFile);
+        code2.ShouldBe(0);
+    }
 }
