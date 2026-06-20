@@ -1,7 +1,9 @@
 using System.Globalization;
 using Koine.Compiler.Ast;
 using Koine.Compiler.Ast.Bound;
+using Koine.Compiler.Diagnostics;
 using Koine.Compiler.Semantics;
+using Koine.Compiler.Services;
 
 namespace Koine.Compiler.Tests;
 
@@ -45,5 +47,46 @@ public class SatisfiabilityTests
         BoundExpression expr = Bin(BinaryOp.Div, Int(1), Int(0));
 
         ConstantFolder.Fold(expr).ShouldBeNull();
+    }
+
+    // ----------------------------------------------------------------------
+    // B2 — the satisfiability checker's contradiction diagnostics.
+    // ----------------------------------------------------------------------
+
+    private static IReadOnlyList<Diagnostic> Diagnose(string source) =>
+        new KoineCompiler().Diagnose(source);
+
+    [Fact]
+    public void Satisfiability_FlagsInvertedBound()
+    {
+        // celsius must be >= 100 AND <= 0 — an inverted (inclusive) bound, low > high.
+        var diags = Diagnose("context C { value Temp { celsius: Int  invariant celsius >= 100 && celsius <= 0 } }");
+
+        diags.ShouldContain(d => d.Code == DiagnosticCodes.InvertedBound);
+    }
+
+    [Fact]
+    public void Satisfiability_FlagsContradictoryPair()
+    {
+        // amount > 100 AND amount < 10 — an unsatisfiable pair of strict bounds.
+        var diags = Diagnose("context C { value Money { amount: Decimal  invariant amount > 100 && amount < 10 } }");
+
+        diags.ShouldContain(d => d.Code == DiagnosticCodes.UnsatisfiableInvariantPair);
+    }
+
+    [Fact]
+    public void Satisfiability_DoesNotFlagSatisfiable()
+    {
+        // A perfectly normal bounded range must NOT trip any satisfiability diagnostic.
+        var diags = Diagnose("context C { value Score { points: Int  invariant points >= 0 && points <= 100 } }");
+
+        var satisfiabilityCodes = new[]
+        {
+            DiagnosticCodes.InvertedBound,
+            DiagnosticCodes.UnsatisfiableInvariantPair,
+            DiagnosticCodes.ContradictoryInvariant,
+            DiagnosticCodes.BoundOutsideConstraint,
+        };
+        diags.ShouldNotContain(d => satisfiabilityCodes.Contains(d.Code));
     }
 }
