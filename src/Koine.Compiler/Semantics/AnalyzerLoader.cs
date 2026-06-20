@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Reflection;
 
 namespace Koine.Compiler.Semantics;
@@ -14,6 +15,17 @@ namespace Koine.Compiler.Semantics;
 /// </summary>
 public static class AnalyzerLoader
 {
+    // Discovering analyzers means reflecting over external, user-supplied plugin assemblies named in
+    // koine.config — inherently incompatible with static trim analysis. This is a CLI/MCP filesystem
+    // feature: the only trimmed build (the browser-wasm publish) does no plugin loading and roots
+    // Koine.Compiler whole via <TrimmerRootAssembly> (src/Koine.Wasm/Koine.Wasm.csproj), and external
+    // plugin assemblies are never part of a trimmed bundle, so their types are not subject to the trimmer.
+    private const string AnalyzerPluginsAreTrimUnsafe =
+        "Reflects over external, user-supplied plugin assemblies named in koine.config. This is a " +
+        "CLI/MCP filesystem feature; the only trimmed build (the browser-wasm publish) does no plugin " +
+        "loading and roots Koine.Compiler whole via <TrimmerRootAssembly> (src/Koine.Wasm/Koine.Wasm.csproj), " +
+        "and external plugin assemblies are never part of a trimmed bundle.";
+
     /// <summary>
     /// Loads every external analyzer from the given assembly paths, in path order then discovery
     /// order within each assembly. Unresolvable paths/types are skipped silently. Returns an empty
@@ -35,6 +47,10 @@ public static class AnalyzerLoader
         return analyzers;
     }
 
+    [UnconditionalSuppressMessage("Trimming", "IL2026",
+        Justification = AnalyzerPluginsAreTrimUnsafe)]
+    [UnconditionalSuppressMessage("Trimming", "IL2062",
+        Justification = AnalyzerPluginsAreTrimUnsafe)]
     private static void LoadFromAssembly(string path, List<IModelAnalyzer> sink)
     {
         Assembly assembly;
@@ -85,6 +101,8 @@ public static class AnalyzerLoader
         }
     }
 
+    [UnconditionalSuppressMessage("Trimming", "IL2026",
+        Justification = AnalyzerPluginsAreTrimUnsafe)]
     private static Assembly LoadAssembly(string path)
     {
         var name = SimpleName(path);
@@ -127,6 +145,8 @@ public static class AnalyzerLoader
         return file;
     }
 
+    [UnconditionalSuppressMessage("Trimming", "IL2070",
+        Justification = AnalyzerPluginsAreTrimUnsafe)]
     private static bool IsLoadableAnalyzer(Type type)
     {
         try
