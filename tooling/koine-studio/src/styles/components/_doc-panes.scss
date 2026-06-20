@@ -117,7 +117,7 @@
   position: absolute;
   top: 10px;
   right: 16px;
-  z-index: 3;
+  z-index: var(--koi-z-raised);
   background: color-mix(in srgb, var(--koi-paper-2) 86%, transparent);
   color: var(--koi-ink-soft);
   border: 1px solid var(--koi-line);

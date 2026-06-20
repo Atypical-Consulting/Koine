@@ -2,7 +2,7 @@
 .koi-modal-backdrop {
   position: fixed;
   inset: 0;
-  z-index: 100;
+  z-index: var(--koi-z-modal);
   background: rgba(8, 11, 18, 0.55);
   display: flex;
   align-items: center;

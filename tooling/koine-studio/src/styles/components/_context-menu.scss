@@ -3,7 +3,7 @@
 /* --- explorer context menu (floating, mounted to body) --- */
 .explorer-menu {
   @include a.popover-surface;
-  z-index: 120;
+  z-index: var(--koi-z-popover);
   min-width: 168px;
 }
 

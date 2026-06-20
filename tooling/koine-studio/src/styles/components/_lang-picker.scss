@@ -3,7 +3,7 @@
 /* --- language picker popover (mirrors .explorer-menu, mounted to body) --- */
 .lang-menu {
   @include a.popover-surface;
-  z-index: 120;
+  z-index: var(--koi-z-popover);
   min-width: 184px;
 }
 

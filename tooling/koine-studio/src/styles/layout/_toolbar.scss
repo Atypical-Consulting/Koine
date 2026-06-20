@@ -12,7 +12,7 @@
   border-bottom: 1px solid var(--koi-line);
   flex: 0 0 auto;
   position: relative;
-  z-index: 2;
+  z-index: var(--koi-z-sticky);
 
   &::after {
     content: '';

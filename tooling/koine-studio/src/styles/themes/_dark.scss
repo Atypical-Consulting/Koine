@@ -10,6 +10,20 @@
   --koi-shadow: 0 18px 50px rgba(3, 7, 14, 0.5);
   --koi-accent-grad: linear-gradient(135deg, var(--koi-accent), var(--koi-cyan));
 
+  /* z-index layering scale — the single source of truth for stacking order. Theme-independent.
+     Tiers are ordered ascending by value; each in-use tier keeps the exact literal it replaces so
+     compiled output is unchanged. Tiers above --koi-z-popover are RESERVED headroom for future
+     overlay features (tooltips, toasts, drag ghosts) and are unused today. */
+  --koi-z-base: 1;       /* in-context decorations: inline markers, resizer handles, ::before glows */
+  --koi-z-sticky: 2;     /* sticky chrome that pins within the layout (the toolbar bar) */
+  --koi-z-raised: 3;     /* content floating over its own pane (the copy-code button) */
+  --koi-z-overlay: 50;   /* full-screen app overlay below modals (the welcome / start screen) */
+  --koi-z-modal: 100;    /* centered dialogs + their backdrops (command palette, modals) */
+  --koi-z-popover: 120;  /* transient menus anchored to a trigger (language picker, context menu) */
+  --koi-z-tooltip: 200;  /* reserved: hover tooltips above popovers */
+  --koi-z-toast: 300;    /* reserved: transient notifications / snackbars */
+  --koi-z-drag: 400;     /* reserved: drag ghosts / drop overlays, always on top */
+
   /* destination-language identity — real brand hues, shared across themes */
   --lang-csharp: #a179dc;
   --lang-typescript: #3178c6;

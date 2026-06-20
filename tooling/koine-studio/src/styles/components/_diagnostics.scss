@@ -19,7 +19,7 @@
   left: 0;
   right: 0;
   background: transparent;
-  z-index: 1;
+  z-index: var(--koi-z-base);
 }
 #diag-resizer:hover,
 body.resizing #diag-resizer {

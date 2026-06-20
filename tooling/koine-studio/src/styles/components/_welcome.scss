@@ -2,7 +2,7 @@
 .koi-welcome {
   position: fixed;
   inset: 0;
-  z-index: 50;
+  z-index: var(--koi-z-overlay);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -210,7 +210,7 @@
 
 .koi-welcome-card {
   position: relative;
-  z-index: 1;
+  z-index: var(--koi-z-base);
   animation: koi-rise 0.45s cubic-bezier(0.2, 0.7, 0.2, 1) both;
 }
 
