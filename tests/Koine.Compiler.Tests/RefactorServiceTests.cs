@@ -185,11 +185,11 @@ public class RefactorServiceTests
         // The field's own doc travels with it into the new value object.
         var extracted = types.Single(t => t.Name == "ExtractedValue").ShouldBeOfType<ValueObjectDecl>();
         var moved = extracted.Members.Where(m => m.Name == "street").ShouldHaveSingleItem();
-        moved.Doc.ShouldContain("The street name.");
+        moved.Doc.ShouldNotBeNull().ShouldContain("The street name.");
 
         // The origin type keeps its own doc (it was NOT consumed by the inserted value object).
         var address = types.Single(t => t.Name == "Address").ShouldBeOfType<ValueObjectDecl>();
-        address.Doc.ShouldContain("An address value.");
+        address.Doc.ShouldNotBeNull().ShouldContain("An address value.");
         address.Members.ShouldNotContain(m => m.Name == "street");
     }
 
