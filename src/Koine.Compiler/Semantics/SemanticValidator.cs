@@ -11,51 +11,74 @@ namespace Koine.Compiler.Semantics;
 /// </summary>
 public sealed class SemanticValidator
 {
+    /// <summary>
+    /// The ordered, immutable set of built-in analyzers (issue #69). The order is load-bearing:
+    /// compiler diagnostics are emitted in raw append order (NOT position-sorted before output), so
+    /// this exactly reproduces the pre-refactor <c>Validate</c> sequence — whole-model unique-type
+    /// names, then the model-scoped context map, then the interleaved per-context pass, then the
+    /// whole-model satisfiability check. External analyzers run AFTER these built-ins.
+    /// </summary>
+    internal static readonly IReadOnlyList<IModelAnalyzer> BuiltInAnalyzers = new IModelAnalyzer[]
+    {
+        new UniqueTypeNamesAnalyzer(),
+        new ContextMapAnalyzer(),
+        new PerContextAnalyzer(),
+        new SatisfiabilityAnalyzer(),
+    };
+
+    private readonly IReadOnlyList<IModelAnalyzer> _externalAnalyzers;
+
+    /// <summary>Creates a validator running only the built-in analyzers (today's behavior).</summary>
+    public SemanticValidator()
+        : this(externalAnalyzers: null)
+    {
+    }
+
+    /// <summary>
+    /// Creates a validator that runs the built-in analyzers first, then the supplied external
+    /// analyzers (issue #69) in order. A null/empty list is identical to the default constructor.
+    /// </summary>
+    public SemanticValidator(IReadOnlyList<IModelAnalyzer>? externalAnalyzers)
+    {
+        _externalAnalyzers = externalAnalyzers is null || externalAnalyzers.Count == 0
+            ? Array.Empty<IModelAnalyzer>()
+            : externalAnalyzers;
+    }
+
     /// <summary>Validates the model and returns all semantic diagnostics.</summary>
     public IReadOnlyList<Diagnostic> Validate(KoineModel model) => Validate(new SemanticModel(model));
 
     /// <summary>
     /// Validates the model using a shared <see cref="SemanticModel"/> (so the single
     /// <see cref="ModelIndex"/> is reused rather than rebuilt) and returns all semantic diagnostics.
+    /// Runs each analyzer in order, accumulating its diagnostics through a shared
+    /// <see cref="AnalyzerContext"/> (the diagnostic sink and derived artifacts are reused across
+    /// analyzers). Built-in analyzers are trusted and run unguarded; external analyzers are isolated
+    /// in a try/catch so a misbehaving plugin degrades to "no extra diagnostics" instead of crashing
+    /// the host — the guarantee the <see cref="IModelAnalyzer"/> contract makes.
     /// </summary>
     public IReadOnlyList<Diagnostic> Validate(SemanticModel semantic)
     {
-        KoineModel model = semantic.Model;
-        ModelIndex index = semantic.Index;
-        IReadOnlySet<string> enumMembers = CollectEnumMembers(model);
         var diagnostics = new List<Diagnostic>();
+        var context = new AnalyzerContext(semantic, diagnostics);
 
-        ValidateUniqueTypeNames(model, diagnostics);
-
-        // The context map is model-scoped (R14.1/R14.2): validate it once before the per-context loop.
-        if (model.ContextMap is { } map)
+        foreach (IModelAnalyzer analyzer in BuiltInAnalyzers)
         {
-            ContextMapValidator.Validate(map, index, diagnostics);
+            analyzer.Analyze(context);
         }
 
-        foreach (ContextNode ctx in model.Contexts)
+        foreach (IModelAnalyzer analyzer in _externalAnalyzers)
         {
-            // A per-context resolver so a type name shared across contexts (R13.2) resolves
-            // to THIS context's declaration when checking member access.
-            var resolver = new TypeResolver(index, ctx.Name);
-
-            ValidateContextScoping(ctx, index, diagnostics);
-            ValidateAnnotationVersions(ctx, diagnostics);
-
-            foreach (TypeDecl type in ctx.Types)
+            try
             {
-                ValidateType(type, index, resolver, enumMembers, diagnostics);
+                analyzer.Analyze(context);
             }
-
-            ValidateSpecs(ctx, index, resolver, enumMembers, diagnostics);
-            ValidateServices(ctx, index, resolver, enumMembers, diagnostics);
-            ValidatePolicies(ctx, index, resolver, enumMembers, diagnostics);
-            IntegrationEventValidator.Validate(ctx, index, model.ContextMap is not null, diagnostics);
+            catch (Exception)
+            {
+                // A throwing external analyzer is isolated (issue #69 platform contract): skip it and
+                // keep the build / live editor diagnostics alive rather than failing the whole compile.
+            }
         }
-
-        // DSL-native invariant satisfiability (issue #73): a whole-model pass over the lowered bound IR,
-        // reusing the shared SemanticModel so its bound artifact is built once.
-        SatisfiabilityChecker.Validate(semantic, diagnostics);
 
         return diagnostics;
     }
@@ -65,7 +88,7 @@ public sealed class SemanticValidator
     /// generation newer than the context's own declared <c>version</c> — an evolution mistake.
     /// No-op for an unversioned context (no ceiling to exceed).
     /// </summary>
-    private static void ValidateAnnotationVersions(ContextNode ctx, List<Diagnostic> diagnostics)
+    internal static void ValidateAnnotationVersions(ContextNode ctx, List<Diagnostic> diagnostics)
     {
         if (ctx.Version is not { } ceiling)
         {
@@ -126,7 +149,7 @@ public sealed class SemanticValidator
     /// <c>*Id</c> convention, an import, or a qualifier) — an un-imported or ambiguous foreign
     /// reference is a coded error.
     /// </summary>
-    private static void ValidateContextScoping(ContextNode ctx, ModelIndex index, List<Diagnostic> diagnostics)
+    internal static void ValidateContextScoping(ContextNode ctx, ModelIndex index, List<Diagnostic> diagnostics)
     {
         // 1. Imports resolve to a declared context and (for named imports) exported types.
         foreach (ImportDecl imp in ctx.Imports)
@@ -248,7 +271,7 @@ public sealed class SemanticValidator
     /// aggregate is a namespace/boundary, not an emitted type, and idiomatically
     /// shares its name with its root entity (<c>aggregate Order root Order</c>).
     /// </summary>
-    private static void ValidateUniqueTypeNames(KoineModel model, List<Diagnostic> diagnostics)
+    internal static void ValidateUniqueTypeNames(KoineModel model, List<Diagnostic> diagnostics)
     {
         // Names reserved for built-in generics; a user type with one of these would be
         // shadowed by the built-in at resolution and silently mis-emit.
@@ -289,7 +312,7 @@ public sealed class SemanticValidator
         }
     }
 
-    private static void ValidateType(
+    internal static void ValidateType(
         TypeDecl type,
         ModelIndex index,
         TypeResolver resolver,
@@ -482,7 +505,8 @@ public sealed class SemanticValidator
                     {
                         diagnostics.Add(Diagnostic.Error(DiagnosticCodes.UnknownEnumMemberForType,
                             $"unknown enum member '{enumDefault.Name}' for type '{m.Type.Name}'{Suggestions.For(enumDefault.Name, en.MemberNames)}",
-                            enumDefault.Span));
+                            enumDefault.Span) with
+                        { Suggestion = Suggestions.Best(enumDefault.Name, en.MemberNames) });
                     }
                 }
                 else
@@ -565,7 +589,7 @@ public sealed class SemanticValidator
     /// specs; names are unique and don't collide with a member; and specs must not
     /// form a reference cycle.
     /// </summary>
-    private static void ValidateSpecs(
+    internal static void ValidateSpecs(
         ContextNode ctx, ModelIndex index, TypeResolver resolver, IReadOnlySet<string> enumMembers, List<Diagnostic> diagnostics)
     {
         var specs = ctx.Specs.Concat(ctx.Types.OfType<AggregateDecl>().SelectMany(a => a.Specs)).ToList();
@@ -685,7 +709,7 @@ public sealed class SemanticValidator
     /// parameter and return type refs, and that a pure operation body is assignable
     /// to its declared return type. A bodyless operation is a seam (no body check).
     /// </summary>
-    private static void ValidateServices(
+    internal static void ValidateServices(
         ContextNode ctx, ModelIndex index, TypeResolver resolver, IReadOnlySet<string> enumMembers, List<Diagnostic> diagnostics)
     {
         var seenServices = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -769,7 +793,7 @@ public sealed class SemanticValidator
     /// command must resolve, and the reaction arguments must match the command's
     /// parameters with values drawn from the event's fields.
     /// </summary>
-    private static void ValidatePolicies(
+    internal static void ValidatePolicies(
         ContextNode ctx, ModelIndex index, TypeResolver resolver, IReadOnlySet<string> enumMembers, List<Diagnostic> diagnostics)
     {
         var seenPolicies = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -1039,9 +1063,13 @@ public sealed class SemanticValidator
         // NotExported); skip the global unknown-type check here to avoid a double report.
         if (type.Qualifier is null && !index.IsKnownType(type.Name))
         {
+            // Keep the message prose EXACTLY as-is (snapshots depend on it); additionally surface the
+            // bare candidate as the structured Suggestion the code-fix providers read (no prose scraping).
+            var best = Suggestions.Best(type.Name, index.CandidateTypeNames);
             diagnostics.Add(Diagnostic.Error(DiagnosticCodes.UnknownType,
                 $"unknown type '{type.Name}'{Suggestions.For(type.Name, index.CandidateTypeNames)}",
-                type.Span));
+                type.Span) with
+            { Suggestion = best });
         }
 
         // Generic arity: List/Set/Range take one type argument; Map takes two.
@@ -1086,42 +1114,6 @@ public sealed class SemanticValidator
         if (type.Value is not null)
         {
             ValidateTypeRef(type.Value, index, diagnostics);
-        }
-    }
-
-    /// <summary>Collects every enum member name declared anywhere in the model.</summary>
-    private static IReadOnlySet<string> CollectEnumMembers(KoineModel model)
-    {
-        var names = new HashSet<string>(StringComparer.Ordinal);
-        foreach (ContextNode ctx in model.Contexts)
-        {
-            foreach (TypeDecl type in ctx.Types)
-            {
-                CollectEnumMembers(type, names);
-            }
-        }
-
-        return names;
-    }
-
-    private static void CollectEnumMembers(TypeDecl type, HashSet<string> names)
-    {
-        switch (type)
-        {
-            case EnumDecl e:
-                foreach (var member in e.MemberNames)
-                {
-                    names.Add(member);
-                }
-
-                break;
-            case AggregateDecl agg:
-                foreach (TypeDecl nested in agg.Types)
-                {
-                    CollectEnumMembers(nested, names);
-                }
-
-                break;
         }
     }
 

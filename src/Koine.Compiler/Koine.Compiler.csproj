@@ -7,22 +7,43 @@
     <RootNamespace>Koine.Compiler</RootNamespace>
   </PropertyGroup>
 
+  <!-- Package metadata. Koine.Compiler ships as a library so consumers can embed the compiler,
+       write IModelAnalyzer analyzers, and ship IEmitterProvider emitters (issue #69, Task 6).
+       Version/Authors/Company/RepositoryUrl/License come from Directory.Build.props. -->
+  <PropertyGroup>
+    <IsPackable>true</IsPackable>
+    <PackageId>Koine.Compiler</PackageId>
+    <Description>Koine compiler as a platform — embed the DSL→C# compiler, write analyzers (IModelAnalyzer), and ship emitters (IEmitterProvider). The target-agnostic parser + semantic model with a public, contract-gated API.</Description>
+    <PackageTags>ddd;domain-driven-design;dsl;compiler;code-generation;source-generator;koine</PackageTags>
+  </PropertyGroup>
+
+  <!-- The public API contract gate. The PublicAPI.*.txt files declare the entire public surface;
+       RS0016 fails the build if a public member is missing from them, so unintended public API
+       cannot ship silently. PrivateAssets=all keeps the analyzer out of consumers' packages. -->
+  <ItemGroup>
+    <PackageReference Include="Microsoft.CodeAnalysis.PublicApiAnalyzers" Version="3.3.4" PrivateAssets="all" />
+    <AdditionalFiles Include="PublicAPI.Shipped.txt" />
+    <AdditionalFiles Include="PublicAPI.Unshipped.txt" />
+  </ItemGroup>
+
   <ItemGroup>
     <InternalsVisibleTo Include="Koine.Compiler.Tests" />
-    <!-- The CLI maps its parsed targets.csharp.* options to the internal CSharpEmitterOptions (R16.1). -->
-    <InternalsVisibleTo Include="Koine.Cli" />
   </ItemGroup>
 
   <ItemGroup>
     <!-- Typed visitor/rewriter source generator (Roslyn red-layer, Commit 2). Wired as an analyzer
          so its generated KoineSyntaxVisitor family compiles AS PART OF this project (hence visible
          to the existing InternalsVisibleTo); ReferenceOutputAssembly=false keeps the generator
-         assembly out of this project's references. -->
+         assembly out of this project's references. PrivateAssets=all keeps the build-only generator
+         out of the published package's dependency list (its output is already baked into this DLL). -->
     <ProjectReference Include="..\Koine.Compiler.SourceGen\Koine.Compiler.SourceGen.csproj"
-                      OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
+                      OutputItemType="Analyzer" ReferenceOutputAssembly="false" PrivateAssets="all" />
   </ItemGroup>
 
   <ItemGroup>
+    <!-- Antlr4BuildTasks is build-only (it generates the parser at compile time): PrivateAssets=all
+         keeps it out of the package deps. Antlr4.Runtime.Standard is a genuine runtime dependency
+         (the generated parser uses it) and MUST flow to package consumers, so it has no PrivateAssets. -->
     <PackageReference Include="Antlr4BuildTasks" Version="12.14.0" PrivateAssets="all" />
     <PackageReference Include="Antlr4.Runtime.Standard" Version="4.13.1" />
   </ItemGroup>

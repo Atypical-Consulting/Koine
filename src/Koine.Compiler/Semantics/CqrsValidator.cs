@@ -66,7 +66,8 @@ internal static class CqrsValidator
                 {
                     diagnostics.Add(Diagnostic.Error(DiagnosticCodes.ReadModelUnknownField,
                         $"read model '{rm.Name}' field '{field.Name}' is not a member of '{rm.SourceType}'{Suggestions.For(field.Name, sourceMemberNames)}",
-                        field.Span));
+                        field.Span) with
+                    { Suggestion = Suggestions.Best(field.Name, sourceMemberNames) });
                 }
             }
             else

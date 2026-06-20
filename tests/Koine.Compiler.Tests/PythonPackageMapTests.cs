@@ -31,7 +31,7 @@ public class PythonPackageMapTests
     private static IReadOnlyList<EmittedFile> EmitPythonWithConfig(string config)
     {
         var options = KoineConfig.Parse(config).OptionsFor("python");
-        EmitterRegistry.TryCreate("python", options, out var emitter).ShouldBeTrue();
+        Koine.Cli.Infrastructure.EmitterRegistry.TryCreate("python", options, out var emitter).ShouldBeTrue();
         var result = new KoineCompiler().Compile(Fixture, emitter);
         result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
         return result.Files;

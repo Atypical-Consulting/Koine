@@ -268,6 +268,93 @@ this lets a regex literal be read as a single token without colliding with the `
 The single most important invariant: **no C#-specific concept lives in `Ast/`** — that is what keeps
 multiple emitters possible.
 
+## Koine as a platform
+
+`Koine.Compiler` ships as a NuGet library with a **frozen, contract-gated public API** (guarded by
+`Microsoft.CodeAnalysis.PublicApiAnalyzers`, so unintended public surface can never ship silently).
+You can embed the compiler, write your own analyzers, and ship your own emitters.
+
+**Embed the compiler.** Reference the package and compile a model in process:
+
+```bash
+dotnet add package Koine.Compiler
+```
+
+```csharp
+using Koine.Compiler.Emit;
+using Koine.Compiler.Services;
+
+var registry = new EmitterRegistry();                       // built-in providers (csharp, typescript, …)
+registry.TryCreate("csharp", EmitterOptions.Empty, out var emitter);
+
+var result = new KoineCompiler().Compile(source, emitter);  // string source or IReadOnlyList<SourceFile>
+if (result.Success)
+    foreach (EmittedFile file in result.Files)
+        Console.WriteLine($"{file.RelativePath}\n{file.Contents}");
+else
+    foreach (var d in result.Diagnostics)
+        Console.Error.WriteLine(d);
+```
+
+**Write an analyzer.** Implement `IModelAnalyzer` — a target-agnostic check over the resolved
+semantic model that reports `Diagnostic`s:
+
+```csharp
+using Koine.Compiler.Diagnostics;
+using Koine.Compiler.Semantics;
+
+public sealed class NoLowercaseTypeNames : IModelAnalyzer
+{
+    public string Id => "acme.no-lowercase-type-names";
+
+    public void Analyze(AnalyzerContext context)
+    {
+        foreach (var ctx in context.Model.Contexts)
+            foreach (var type in ctx.Types)
+                if (char.IsLower(type.Name[0]))
+                    context.Report(Diagnostic.Warning("ACME001",
+                        $"type '{type.Name}' should be PascalCase", type.Span));
+    }
+}
+```
+
+Wire it in code via `new KoineCompiler([new NoLowercaseTypeNames()])`, or let the CLI discover it:
+point the `analyzers` key in `koine.config` at the assembly that contains it (a comma-separated list of
+paths) — any public parameterless-constructible `IModelAnalyzer` is loaded and run after the built-ins.
+
+```ini
+# koine.config
+analyzers = ./build/Acme.KoineAnalyzers.dll
+```
+
+**Ship an emitter.** Implement `IEmitterProvider` (returning an `IEmitter` for your target) to add a
+brand-new backend without forking the compiler:
+
+```csharp
+using Koine.Compiler.Ast;
+using Koine.Compiler.Emit;
+
+public sealed class GoEmitterProvider : IEmitterProvider
+{
+    public string Target => "go";
+    public IEmitter Create(EmitterOptions options) => new GoEmitter(options);
+}
+
+public sealed class GoEmitter : IEmitter
+{
+    public IReadOnlyList<EmittedFile> Emit(KoineModel model) => /* … */;
+}
+```
+
+The CLI loads external emitters from the `emitters` key in `koine.config` (same discovery rules as
+analyzers), so `koine build Models/ --target go` resolves your provider through the same
+`EmitterRegistry` the built-in targets use.
+
+```ini
+# koine.config
+emitters = ./build/Acme.GoEmitter.dll
+```
+
 ## Tooling
 
 - **Web IDE.** [Koine Studio](https://atypical-consulting.github.io/Koine/studio/) and the

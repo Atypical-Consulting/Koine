@@ -668,7 +668,7 @@ public sealed class KoineLanguageService
     /// <c>StartIndex</c> (which counts every character of the raw stream, including <c>\r</c>).
     /// Out-of-range positions clamp to the end of the document.
     /// </summary>
-    internal static int OffsetOf(string source, int line, int character)
+    public static int OffsetOf(string source, int line, int character)
     {
         var offset = 0;
         var currentLine = 0;
@@ -1335,8 +1335,21 @@ public sealed class KoineLanguageService
             (startOffset, endOffset) = (endOffset, startOffset);
         }
 
-        return RefactorService.RefactorsFor(_compiler, source, startOffset, endOffset);
+        var (model, _) = _compiler.Parse(source);
+        if (model is null)
+        {
+            return [];
+        }
+
+        // Route through the unified code-fix provider set, adapting the editor-agnostic CodeFix back
+        // to the CodeActionEdit shape this overload's callers (e.g. the WASM bridge) consume.
+        return _codeFixes.RefactorsForSelection(source, model, startOffset, endOffset)
+            .Select(f => new CodeActionEdit(
+                f.Title, f.Kind, f.Edits.Select(e => new TextEditModel(e.Range, e.NewText)).ToList()))
+            .ToList();
     }
+
+    private readonly CodeFixes.CodeFixService _codeFixes = new();
 
     /// <summary>
     /// Signature help for the call enclosing the cursor. Walks back from the cursor to the nearest
