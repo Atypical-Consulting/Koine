@@ -30,6 +30,7 @@ public sealed record CompatibilityReport(IReadOnlyList<CompatibilityChange> Chan
 public sealed class CompatibilityChecker
 {
     private const string AdditiveLabel = "additive";
+    private const string IntegrationEventKind = "integration event";
 
     /// <summary>Diffs the two models' published surfaces and returns every change.</summary>
     public CompatibilityReport Check(KoineModel baseline, KoineModel current)
@@ -65,6 +66,7 @@ public sealed class CompatibilityChecker
 
     private static void DiffFields(PublishedType baseline, PublishedType current, List<CompatibilityChange> changes)
     {
+        int startIndex = changes.Count;
         var currentByName = current.Fields.ToDictionary(f => f.Name, StringComparer.Ordinal);
         var baselineByName = baseline.Fields.ToDictionary(f => f.Name, StringComparer.Ordinal);
 
@@ -139,6 +141,17 @@ public sealed class CompatibilityChecker
                     $"Required {Member(current, cf.Name)} was added."));
             }
         }
+
+        // An integration event is a wire contract: any breaking payload change (a field removed,
+        // retyped, or a required field added) also reports an event-shape change (KOI1517) — a single
+        // event-level signal a tool can gate on, distinct from the per-field codes. A pure rename
+        // (KOI1515) or a purely additive change does not break the shape.
+        if (baseline.Kind == IntegrationEventKind
+            && changes.Skip(startIndex).Any(c => c.Impact == CompatibilityImpact.Breaking && c.Code != DiagnosticCodes.PublishedMemberRenamed))
+        {
+            changes.Add(Breaking(DiagnosticCodes.PublishedEventShapeChanged,
+                $"Published integration event '{baseline.Name}' changed its payload shape."));
+        }
     }
 
     /// <summary>Two fields have the same contract shape (type, ignoring nullability) and optionality — a rename candidate.</summary>
@@ -188,7 +201,7 @@ public sealed class CompatibilityChecker
             {
                 if (type is IntegrationEventDecl)
                 {
-                    result[$"{ctx.Name}.{type.Name}"] = PublishedType.From("integration event", type);
+                    result[$"{ctx.Name}.{type.Name}"] = PublishedType.From(IntegrationEventKind, type);
                 }
                 else if (sharedNames.Contains(type.Name))
                 {

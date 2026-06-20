@@ -36,6 +36,17 @@ public class R15CheckTests
         change.Code.ShouldBe(code);
     }
 
+    /// <summary>
+    /// Asserts a breaking change with <paramref name="code"/> is present. Used for integration-event
+    /// payload changes, which now ALSO carry an event-level <see cref="DiagnosticCodes.PublishedEventShapeChanged"/>
+    /// summary (issue #73, A2) alongside the per-field code.
+    /// </summary>
+    private static void AssertBreakingIncludes(CompatibilityReport report, string code)
+    {
+        report.HasBreakingChanges.ShouldBeTrue();
+        report.Changes.ShouldContain(c => c.Impact == CompatibilityImpact.Breaking && c.Code == code);
+    }
+
     // ---- breaking changes --------------------------------------------------
 
     [Fact]
@@ -57,7 +68,7 @@ public class R15CheckTests
               }
             }
             """);
-        AssertSingleBreaking(report, DiagnosticCodes.PublishedFieldRemoved);
+        AssertBreakingIncludes(report, DiagnosticCodes.PublishedFieldRemoved);
         report.Changes[0].Message.ShouldContain("total");
     }
 
@@ -73,7 +84,7 @@ public class R15CheckTests
               }
             }
             """);
-        AssertSingleBreaking(report, DiagnosticCodes.PublishedFieldTypeChanged);
+        AssertBreakingIncludes(report, DiagnosticCodes.PublishedFieldTypeChanged);
     }
 
     [Fact]
@@ -88,7 +99,7 @@ public class R15CheckTests
               }
             }
             """);
-        AssertSingleBreaking(report, DiagnosticCodes.PublishedFieldNowRequired);
+        AssertBreakingIncludes(report, DiagnosticCodes.PublishedFieldNowRequired);
     }
 
     [Fact]
@@ -104,7 +115,7 @@ public class R15CheckTests
               }
             }
             """);
-        AssertSingleBreaking(report, DiagnosticCodes.PublishedRequiredFieldAdded);
+        AssertBreakingIncludes(report, DiagnosticCodes.PublishedRequiredFieldAdded);
     }
 
     // ---- additive (non-breaking) -------------------------------------------
@@ -314,5 +325,23 @@ public class R15CheckTests
         // Enum-value removal is its own code, NOT the record-field PublishedFieldRemoved.
         AssertSingleBreaking(report, DiagnosticCodes.PublishedEnumMemberRemoved);
         report.Changes.ShouldNotContain(c => c.Code == DiagnosticCodes.PublishedFieldRemoved);
+    }
+
+    [Fact]
+    public void Compat_IntegrationEventPayloadChange_IsBreaking()
+    {
+        // Retyping a payload field changes the event's wire shape: the per-field code AND an
+        // event-level KOI1517 shape-change summary, both breaking.
+        var report = Check(Baseline, """
+            context Sales {
+              integration event OrderPlaced {
+                orderId: OrderId
+                total:   Int
+                note:    String?
+              }
+            }
+            """);
+        AssertBreakingIncludes(report, DiagnosticCodes.PublishedEventShapeChanged);
+        report.Changes.ShouldContain(c => c.Code == DiagnosticCodes.PublishedEventShapeChanged && c.Message.Contains("OrderPlaced"));
     }
 }
