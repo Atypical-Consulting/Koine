@@ -71,6 +71,13 @@ public sealed class KoineCompilation
     /// </summary>
     private readonly ImmutableDictionary<string, Lazy<SemanticModel>> _perFileModels;
 
+    /// <summary>
+    /// The editor query layer over this snapshot, built once and memoized so repeated editor
+    /// requests against a held snapshot reuse the same <see cref="WorkspaceIndex"/> (and its
+    /// per-file model map) instead of rebuilding it per request.
+    /// </summary>
+    private readonly Lazy<WorkspaceIndex> _workspaceIndex;
+
     // -------------------------------------------------------------------------
     // Private constructor (used by all factory paths)
     // -------------------------------------------------------------------------
@@ -95,12 +102,14 @@ public sealed class KoineCompilation
         var perFileBuilder = ImmutableDictionary.CreateBuilder<string, Lazy<SemanticModel>>(StringComparer.Ordinal);
         foreach (var uri in order)
         {
-            var unit = units[uri]; // captured by value in the closure
+            var unit = units[uri]; // a per-iteration local so the closure binds this unit, not the loop variable
             perFileBuilder[uri] = new Lazy<SemanticModel>(
                 () => new SemanticModel(Merge(unit.Contexts, unit.Relations)),
                 LazyThreadSafetyMode.ExecutionAndPublication);
         }
         _perFileModels = perFileBuilder.ToImmutable();
+
+        _workspaceIndex = new Lazy<WorkspaceIndex>(() => new WorkspaceIndex(this), LazyThreadSafetyMode.ExecutionAndPublication);
     }
 
     // -------------------------------------------------------------------------
@@ -128,7 +137,10 @@ public sealed class KoineCompilation
         {
             if (unitsBuilder.ContainsKey(f.Path))
             {
-                // Duplicate uri: keep first-seen position, update text only.
+                // Duplicate uri: keep the first-seen position, but let the LAST occurrence win for
+                // content — re-parse it and update both the unit and the text so Documents[uri] and
+                // _units[uri] never diverge (a uri is the document's identity in a snapshot).
+                unitsBuilder[f.Path] = parser(f);
                 textsBuilder[f.Path] = f.Source;
                 continue;
             }
@@ -147,17 +159,18 @@ public sealed class KoineCompilation
 
     /// <summary>
     /// Returns a new snapshot with <paramref name="uri"/> updated to <paramref name="text"/>.
-    /// If <paramref name="uri"/> already exists with an equal content hash, returns <c>this</c>
-    /// (referential identity preserved — no reparse, no new allocation).
+    /// If <paramref name="uri"/> already exists with identical text, returns <c>this</c>
+    /// (referential identity preserved — no reparse, no new allocation, no hashing).
     /// If <paramref name="uri"/> is new, it is appended at the end of the order.
     /// </summary>
     public KoineCompilation WithDocument(string uri, string text)
     {
-        var hash = ComputeHash(text);
-
-        if (_units.TryGetValue(uri, out var existing) && existing.ContentHash == hash)
+        // Compare the raw text directly: it is exact (no hash-collision reliance) and skips the
+        // SHA-256 entirely on a no-op edit. The content hash is computed exactly once — inside
+        // ParseUnit — only when the file actually changed and must be re-parsed.
+        if (_texts.TryGetValue(uri, out var existingText) && string.Equals(existingText, text, StringComparison.Ordinal))
         {
-            return this; // no-op: same content
+            return this; // no-op: identical content
         }
 
         var newUnit = _parser(new SourceFile(uri, text));
@@ -227,6 +240,13 @@ public sealed class KoineCompilation
     /// The uris of all documents in this snapshot, in first-seen insertion order.
     /// </summary>
     public IReadOnlyCollection<string> Uris => _order;
+
+    /// <summary>
+    /// The editor query layer (hover/definition/references/rename) over this snapshot, built once
+    /// and reused. Because the snapshot is immutable, every editor request against a held snapshot
+    /// shares this index — no re-parse and no per-request index rebuild.
+    /// </summary>
+    public WorkspaceIndex WorkspaceIndex => _workspaceIndex.Value;
 
     /// <summary>
     /// A content fingerprint that is ORDER-INDEPENDENT over the set of (uri, contentHash) pairs.

@@ -362,6 +362,29 @@ public class WarmModelTests
         }
     }
 
+    [Fact]
+    public void Create_DuplicateUri_LastContentWins_AndStaysConsistent()
+    {
+        const string uri = "file:///dup.koi";
+        const string first = "context Catalog { value Sku { code: String } }";
+        const string second = "context Shipping { value TrackingId { code: String } }";
+
+        var comp = KoineCompilation.Create(new[]
+        {
+            new SourceFile(uri, first),
+            new SourceFile(uri, second),
+        });
+
+        // The last occurrence wins for content, and Documents/Model/SemanticModelFor never diverge.
+        comp.Documents[uri].ShouldBe(second);
+        comp.Model.Contexts.ShouldContain(c => c.Name == "Shipping");
+        comp.Model.Contexts.ShouldNotContain(c => c.Name == "Catalog");
+        comp.SemanticModelFor(uri)!.Model.Contexts.ShouldContain(c => c.Name == "Shipping");
+
+        // A WithDocument back to the same (winning) text is a no-op (proves the unit matches Documents).
+        ReferenceEquals(comp, comp.WithDocument(uri, second)).ShouldBeTrue();
+    }
+
     // -------------------------------------------------------------------------
     // 7. SemanticModel is non-null and wraps Model
     // -------------------------------------------------------------------------

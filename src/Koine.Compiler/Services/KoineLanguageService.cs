@@ -453,7 +453,7 @@ public sealed class KoineLanguageService
             return null;
         }
 
-        var markdown = new WorkspaceIndex(compilation).ResolveHover(activeUri, name, ctx.EnclosingTypeName);
+        var markdown = compilation.WorkspaceIndex.ResolveHover(activeUri, name, ctx.EnclosingTypeName);
         return markdown is null ? null : new HoverResult(markdown);
     }
 
@@ -480,7 +480,7 @@ public sealed class KoineLanguageService
         }
 
         var offset = OffsetOf(source, line, character);
-        var loc = new WorkspaceIndex(compilation).ResolveDefinition(activeUri, name, ctx.EnclosingTypeName, offset);
+        var loc = compilation.WorkspaceIndex.ResolveDefinition(activeUri, name, ctx.EnclosingTypeName, offset);
         return loc is null ? null : new DefinitionResult(loc.Uri, loc.Span);
     }
 
@@ -646,7 +646,7 @@ public sealed class KoineLanguageService
         }
 
         var offset = OffsetOf(source, line, character);
-        return new WorkspaceIndex(compilation).FindReferences(activeUri, name, offset, ctx.EnclosingTypeName);
+        return compilation.WorkspaceIndex.FindReferences(activeUri, name, offset, ctx.EnclosingTypeName);
     }
 
     /// <summary>
@@ -682,7 +682,7 @@ public sealed class KoineLanguageService
         }
 
         var offset = OffsetOf(source, line, character);
-        var refs = new WorkspaceIndex(compilation).FindReferences(activeUri, name, offset, ctx.EnclosingTypeName);
+        var refs = compilation.WorkspaceIndex.FindReferences(activeUri, name, offset, ctx.EnclosingTypeName);
         return refs.Count == 0 ? null : refs;
     }
 
@@ -720,7 +720,7 @@ public sealed class KoineLanguageService
         // Only offer a rename range where a rename would actually produce edits: resolve the
         // symbol under the cursor exactly as RenameAt does (offset + enclosing-type scope).
         var offset = OffsetOf(source, line, character);
-        var refs = new WorkspaceIndex(compilation).FindReferences(activeUri, name, offset, ctx.EnclosingTypeName);
+        var refs = compilation.WorkspaceIndex.FindReferences(activeUri, name, offset, ctx.EnclosingTypeName);
         if (refs.Count == 0)
         {
             return null;
