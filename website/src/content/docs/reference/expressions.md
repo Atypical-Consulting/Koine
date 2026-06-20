@@ -196,11 +196,9 @@ For shape constraints beyond equality, use the regex form `field matches /patter
 `String` expression.
 
 ```koine
-value Sku {
-  code:       String
-  normalized: String = code.trim.upper
-  invariant code.trim.length > 0        "a SKU cannot be blank"
-  invariant code matches /^[A-Z0-9-]+$/ "a SKU may only contain uppercase letters, digits, and hyphens"
+value Iban {
+  code: String
+  invariant code matches /^[A-Z]{2}[0-9]{2}[A-Z0-9]+$/   "must look like an IBAN"
 }
 ```
 
