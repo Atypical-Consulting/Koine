@@ -7,6 +7,7 @@
 // shows a prompt to add one rather than calling the API.
 import { runAssistant, type AiProvider, type ChatMessage } from './ai';
 import { renderMarkdown } from './editor';
+import { loadChat, saveChat, clearChat } from './store';
 
 /**
  * The compiled domain structure (contexts/aggregates/relations + glossary coverage), so reviews and
@@ -45,6 +46,11 @@ export interface AssistantPanelOptions {
   /** Open Preferences (so the user can add their API key). */
   onOpenPrefs: () => void;
   /**
+   * The per-workspace storage key for the conversation (the folder identity, or the literal
+   * 'scratch' in scratch mode), so each opened folder keeps its own transcript across reloads.
+   */
+  getWorkspaceKey: () => string;
+  /**
    * Execute a Koine compiler tool (validate/compile/format) by name with JSON args, for the
    * assistant's tool loop (OpenAI-compatible path). Omitted when the host can't run tools, in which
    * case the assistant stays plain chat.
@@ -61,6 +67,12 @@ export interface AssistantPanelOptions {
 export interface AssistantPanel {
   /** Move keyboard focus into the prompt input. */
   focusInput(): void;
+  /**
+   * Re-point the panel at the current workspace's conversation when the folder changed: reload the
+   * transcript from storage and rebuild the bubbles. A no-op when the workspace key is unchanged, so
+   * the host can call it on every tab show without recreating the panel.
+   */
+  syncWorkspace(): void;
 }
 
 // A concise Koine primer so the model emits valid `.koi`. Mirrors README's construct table.
@@ -143,7 +155,10 @@ function extractKoine(markdown: string): string | null {
 }
 
 export function createAssistantPanel(opts: AssistantPanelOptions): AssistantPanel {
-  const messages: ChatMessage[] = [];
+  // The transcript for the workspace this panel is currently pointed at. Restored from storage on
+  // mount and re-pointed by syncWorkspace() when the folder changes; loadedKey tracks which one.
+  let messages: ChatMessage[] = loadChat(opts.getWorkspaceKey());
+  let loadedKey = opts.getWorkspaceKey();
   let aborter: AbortController | null = null;
 
   opts.container.classList.add('koi-assistant');
@@ -222,6 +237,21 @@ export function createAssistantPanel(opts: AssistantPanelOptions): AssistantPane
     quick.appendChild(b);
   }
 
+  // Forget this workspace's conversation: empty the in-memory history, reset the transcript to the
+  // empty state, and drop the stored blob. Refused while a request is in flight so it can't race the
+  // streaming reply (which would re-persist the half-finished turn after the clear).
+  const clearBtn = document.createElement('button');
+  clearBtn.type = 'button';
+  clearBtn.className = 'koi-assistant-clear';
+  clearBtn.textContent = 'Clear conversation';
+  clearBtn.addEventListener('click', () => {
+    if (busy()) return;
+    messages = [];
+    rebuildTranscript();
+    clearChat(opts.getWorkspaceKey());
+  });
+  quick.appendChild(clearBtn);
+
   function busy(): boolean {
     return aborter !== null;
   }
@@ -257,6 +287,29 @@ export function createAssistantPanel(opts: AssistantPanelOptions): AssistantPane
     });
     bubble.appendChild(apply);
   }
+
+  // Render one stored turn into a bubble: user text verbatim, assistant markdown rendered with the
+  // same "Apply to editor" affordance live replies get. Shared by mount and syncWorkspace replay.
+  function replayMessage(m: ChatMessage): void {
+    const bubble = addBubble(m.role);
+    if (m.role === 'assistant') {
+      bubble.innerHTML = `<div class="koi-md">${renderMarkdown(m.content)}</div>`;
+      maybeOfferApply(bubble, m.content);
+    } else {
+      bubble.textContent = m.content;
+    }
+  }
+
+  // Clear the transcript DOM back to the empty state (intro only), then replay the in-memory history.
+  // Used on mount and whenever syncWorkspace swaps to another workspace's conversation.
+  function rebuildTranscript(): void {
+    transcript.innerHTML = '';
+    transcript.appendChild(intro);
+    for (const m of messages) replayMessage(m);
+  }
+
+  // Restore the current workspace's conversation on first paint.
+  rebuildTranscript();
 
   async function send(text: string, ctxOverride?: AssistantContext): Promise<void> {
     const prompt = text.trim();
@@ -334,6 +387,7 @@ export function createAssistantPanel(opts: AssistantPanelOptions): AssistantPane
         onToolCall: addToolStatus,
       });
       messages.push({ role: 'assistant', content: full });
+      saveChat(opts.getWorkspaceKey(), messages);
       replyBubble.innerHTML = `<div class="koi-md">${renderMarkdown(full)}</div>`;
       maybeOfferApply(replyBubble, full);
     } catch (e) {
@@ -343,6 +397,7 @@ export function createAssistantPanel(opts: AssistantPanelOptions): AssistantPane
         // Stopped mid-stream with usable output: commit the (user, partial-assistant) pair so the
         // visible reply and the history agree, and still offer to apply a generated model.
         messages.push({ role: 'assistant', content: full });
+        saveChat(opts.getWorkspaceKey(), messages);
         replyBubble.innerHTML = `<div class="koi-md">${renderMarkdown(full)}</div>`;
         const note = document.createElement('div');
         note.className = 'koi-assistant-stopped';
@@ -380,6 +435,13 @@ export function createAssistantPanel(opts: AssistantPanelOptions): AssistantPane
   return {
     focusInput() {
       input.focus();
+    },
+    syncWorkspace() {
+      const key = opts.getWorkspaceKey();
+      if (key === loadedKey) return;
+      loadedKey = key;
+      messages = loadChat(key);
+      rebuildTranscript();
     },
   };
 }

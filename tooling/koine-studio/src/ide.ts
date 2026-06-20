@@ -1079,7 +1079,11 @@ export function init(): void {
       viewEls[key].hidden = key !== view;
     }
     if (view === 'assistant') {
-      ensureAssistant().focusInput();
+      // Re-pointing to the current folder's conversation BEFORE focus, so switching folders and
+      // re-opening this tab swaps to that folder's history (the single choke point for the swap).
+      const a = ensureAssistant();
+      a.syncWorkspace();
+      a.focusInput();
       return;
     }
     ensureLoaded(view);
@@ -2016,6 +2020,10 @@ export function init(): void {
       },
       onApplyModel: (source) => replaceActiveDoc(source),
       onOpenPrefs: () => prefs.open(),
+      // Per-workspace conversation key: each opened folder keeps its own transcript; scratch mode
+      // (no host folder behind it) uses the literal 'scratch'. selectView calls syncWorkspace on tab
+      // show so re-opening the Assistant after a folder switch loads that folder's history.
+      getWorkspaceKey: () => folderRootToken ?? 'scratch',
       // Let the assistant call koine tools (validate/compile/format), executed by the host: in-WASM in
       // the browser, via the `koine mcp --http` sidecar on the desktop.
       runCompilerTool: platform.runCompilerTool
