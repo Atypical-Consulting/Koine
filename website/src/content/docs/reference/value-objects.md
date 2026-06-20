@@ -146,7 +146,7 @@ by holding onto the collection they passed in. Collection fields participate in 
 ordered for `List<T>`, order-insensitive for `Set<T>` — via the runtime's `Ordered(...)` / `Unordered(...)`
 helpers on the `ValueObject` base.
 
-See the [Contexts & types (§4)](/Koine/reference/contexts-and-types/) for the full list of how Koine types lower to C#.
+See [Contexts & types (§4)](/Koine/reference/contexts-and-types/) for the full list of how Koine types lower to C#.
 
 ## 5.4 Translation to C#
 
@@ -288,7 +288,7 @@ context Catalog version 2 {
 }
 ```
 
-## How value objects relate to entities
+## 5.7 Relation to entities
 
 The key distinction: **value objects have no identity**. An [entity (§6)](/Koine/reference/entities-and-identity/) is
 identified by an id and two entities with identical fields are still different things; two value objects
