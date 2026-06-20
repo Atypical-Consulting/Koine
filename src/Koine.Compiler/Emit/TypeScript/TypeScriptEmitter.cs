@@ -145,7 +145,21 @@ public sealed partial class TypeScriptEmitter : IEmitter
             }
         }
 
-        // 3. Source maps (gated): attach the per-module declaration segments to the module's
+        // 3. Anti-corruption-layer translator interfaces (R14.2, TS parity): one per ACL relation
+        //    that carries a mapping block. Emitted at MODEL level (after the per-context loop),
+        //    into the downstream context, mirroring the C# emitter's placement and order.
+        if (model.ContextMap is { } map)
+        {
+            foreach (ContextRelation r in map.Relations)
+            {
+                if (r.Kind == ContextRelationKind.AntiCorruptionLayer && r.AclMappings.Count > 0)
+                {
+                    files.Add(EmitAclTranslator(emit, r));
+                }
+            }
+        }
+
+        // 4. Source maps (gated): attach the per-module declaration segments to the module's
         // EmittedFile and emit a Source Map v3 sidecar alongside it. No-op when the flag is off
         // (SourceMaps stays empty), so the default path is byte-identical.
         if (emit.SourceMaps.Count > 0)
