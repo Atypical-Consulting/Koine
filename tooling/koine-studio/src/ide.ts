@@ -33,6 +33,7 @@ import { renderDiagrams } from './diagrams';
 import { renderGlossary, type GlossaryHandlers } from './glossary';
 import { createAssistantPanel, type AssistantPanel } from './aiPanel';
 import { buildShareUrl, clearModelHash, readModelFromHash } from './share';
+import { dirtyCount, handleBeforeUnload, saveAllDirtyBuffers, titleWithDirty } from './dirty';
 import { createConfirmDialog } from './overlay';
 
 // --- workspace fs contract ---------------------------------------------------
@@ -224,6 +225,7 @@ function helpRows(): ShortcutRow[] {
   return [
     { keys: 'mod+K', description: 'Command palette' },
     { keys: 'mod+S', description: 'Save / format the active model' },
+    { keys: 'mod+Alt+S', description: 'Save all unsaved files' },
     { keys: 'mod+Shift+O', description: 'Open a folder of models' },
     { keys: 'mod+N', description: 'New scratch model' },
     { keys: 'mod+1', description: 'Preview C#' },
@@ -336,6 +338,29 @@ export function init(): void {
   const statusEl = el('status');
   const diagBodyEl = el('diag-body');
   const diagCountEl = el('diag-count');
+
+  // Global unsaved-work surfacing: the document title gains a `•` and a clickable "N unsaved" pill
+  // appears beside the status whenever any open buffer is dirty. baseTitle is captured once, clean.
+  const baseTitle = document.title;
+  const unsavedEl = el('unsaved-indicator') as HTMLButtonElement;
+  unsavedEl.addEventListener('click', () => void saveAllDirty());
+  // The indicator is refreshed from every renderTree(); cache the last count so an unchanged dirty
+  // total (the common case — most renders don't change it) skips the title/DOM writes.
+  let lastDirtyCount = -1;
+  function refreshDirtyIndicator(): void {
+    const n = dirtyCount(buffers);
+    if (n === lastDirtyCount) return;
+    lastDirtyCount = n;
+    document.title = titleWithDirty(baseTitle, n);
+    if (n > 0) {
+      unsavedEl.textContent = `${n} unsaved`;
+      unsavedEl.setAttribute('aria-label', `Save ${n} unsaved file${n === 1 ? '' : 's'}`);
+      unsavedEl.hidden = false;
+    } else {
+      unsavedEl.textContent = '';
+      unsavedEl.hidden = true;
+    }
+  }
 
   const lsp = new KoineLsp(platform.createLspTransport());
 
@@ -513,6 +538,10 @@ export function init(): void {
   // diagnostics, active file) — the explorer reads those per row via the callbacks. A no-op outside
   // folder mode (the tree is hidden then).
   function renderTree(): void {
+    // Sync the global unsaved indicator on every tree render — this is the common path for every
+    // dirty transition (edit, save, save-all, cross-file rename, workspace swap), and it runs even
+    // in scratch mode (where the early return below skips the file tree) so the pill always clears.
+    refreshDirtyIndicator();
     if (!folderMode || folderRootToken == null) return;
     explorer.render(entriesCache, folderRootToken);
   }
@@ -1350,12 +1379,29 @@ export function init(): void {
   // ran preventDefault, so this listener only persists.
   window.addEventListener('keydown', (e) => {
     const mod = e.metaKey || e.ctrlKey;
-    if (mod && (e.key === 's' || e.key === 'S')) {
-      if (overlayOpen()) return; // don't save the editor under an open overlay
+    if (!mod) return;
+    if (overlayOpen()) return; // don't act on the editor under an open overlay
+    // Mod+Alt+S → Save all. Match on e.code (the physical S key): on macOS, Option composes e.key
+    // into another glyph (e.g. 'ß'), so `e.key === 's'` would miss the chord.
+    if (e.altKey && e.code === 'KeyS') {
+      e.preventDefault();
+      void saveAllDirty();
+    } else if (!e.altKey && (e.key === 's' || e.key === 'S')) {
+      // Mod+S → save / format the active buffer (unchanged single-file behaviour).
       e.preventDefault();
       void saveActive();
     }
   });
+
+  // Guard against closing/reloading with unsaved work: when any open buffer is dirty, the browser
+  // shows its native "Leave site?" prompt. Folder-mode dirty buffers live only in memory, so without
+  // this a tab close silently drops them. (The scratch buffer auto-persists to localStorage and is
+  // never marked dirty, so a clean scratch session closes without a prompt.) On the desktop host this
+  // covers reloads; the window-close confirm is wired separately in the Tauri host.
+  function anyDirty(): boolean {
+    return dirtyCount(buffers) > 0;
+  }
+  window.addEventListener('beforeunload', (e) => handleBeforeUnload(e, anyDirty));
 
   let saveQueued = false;
   async function saveActive(): Promise<void> {
@@ -1434,6 +1480,62 @@ export function init(): void {
     lsp.openDoc(newUri, buf.text);
     lsp.setActive(newUri);
     clearScratch(); // the scratch is now a real file — don't also restore it as scratch on reload
+  }
+
+  // Save EVERY dirty buffer (Mod+Alt+S / "Save all"), so editing several files and then closing
+  // can't silently drop the ones you didn't individually Mod-S. Mirrors saveActive's format+write
+  // but across the whole workspace: the active buffer is formatted + synced from the editor first
+  // (the others already hold their edited text in memory), then each dirty buffer is written. A
+  // per-file write failure leaves that buffer dirty and reports it; the rest still save. The
+  // single-file Mod-S path (saveActive) is unchanged.
+  let saveAllQueued = false;
+  async function saveAllDirty(): Promise<void> {
+    if (saveAllQueued) return;
+    saveAllQueued = true;
+    try {
+      if (settings.formatOnSave) {
+        try {
+          editor.applyEdits(await lsp.format());
+        } catch (e) {
+          console.error('format on save failed:', e);
+        }
+      }
+      const active = buffers.get(activeUri);
+      if (active) {
+        active.text = editor.getDoc();
+        lsp.changeDoc(activeUri, active.text);
+      }
+
+      if (dirtyCount(buffers) === 0) {
+        // Nothing flagged dirty. In scratch mode the single buffer is path-less and never marked
+        // dirty (it auto-persists to localStorage), so fall back to the normal save-as when it
+        // holds real content; in folder mode with nothing dirty this is a neutral no-op.
+        if (active && active.path == null && hasUnsavedWork()) await saveScratchAs(active);
+        else setStatus('No unsaved changes', 'green');
+        return;
+      }
+
+      let failures = 0;
+      const saved = await saveAllDirtyBuffers(buffers, {
+        write: (buf) => platform.writeTextFile(buf.path as string, buf.text),
+        saveScratch: (buf) => saveScratchAs(buf),
+        onError: (buf, err) => {
+          failures++;
+          console.error('writeTextFile failed for', buf.path, err);
+        },
+      });
+      if (saved > 0) {
+        lsp.didSave();
+        renderTree();
+      }
+      if (failures > 0) {
+        setStatus(`Save failed for ${failures} file${failures === 1 ? '' : 's'}`, 'error');
+      } else {
+        setStatus(`Saved ${saved} file${saved === 1 ? '' : 's'}`, 'green');
+      }
+    } finally {
+      saveAllQueued = false;
+    }
   }
 
   // --- new scratch model ----------------------------------------------------
@@ -1607,6 +1709,21 @@ export function init(): void {
   const about = createAboutDialog();
   // Guards the user-initiated New command against silently discarding unsaved work.
   const confirmDialog = createConfirmDialog();
+
+  // Desktop window-close guard (Tauri only): mirror the web beforeunload — confirm before closing
+  // the window when any buffer is dirty. The browser host omits onCloseRequested (its beforeunload
+  // guard already covers tab close / reload), so this is a no-op there.
+  void platform.onCloseRequested?.(async () => {
+    if (!anyDirty()) return true;
+    return confirmDialog.ask({
+      title: 'Close Koine Studio?',
+      message: folderMode
+        ? `Files with unsaved changes will lose them. Save with ${formatChord('mod+Alt+S')} first to keep them.`
+        : 'Your current model has unsaved changes that will be lost.',
+      confirmLabel: 'Close & discard',
+      danger: true,
+    });
+  });
   // Generate Project wizard: compiles the active model, then bundles the emitted files into a
   // downloadable archive. I/O is injected so the wizard stays decoupled from the LSP/host wiring.
   const generateProject = createGenerateProject({
@@ -1751,6 +1868,7 @@ export function init(): void {
       { id: 'home', title: 'Go to start screen', group: 'File', run: () => goHome() },
       { id: 'open-folder', title: 'Open folder…', hint: 'mod+Shift+O', group: 'File', run: () => void openFolder() },
       { id: 'new-scratch', title: 'New scratch model', hint: 'mod+N', group: 'File', run: () => void requestNewScratch() },
+      { id: 'save-all', title: 'Save all', hint: 'mod+Alt+S', group: 'File', run: () => void saveAllDirty() },
       { id: 'share', title: 'Copy shareable link', group: 'File', run: () => void copyShareLink() },
       { id: 'check', title: 'Check against baseline…', group: 'File', run: () => void runCheck() },
       { id: 'generate-project', title: 'Generate project…', group: 'File', run: () => generateProject.open() },
