@@ -1,118 +1,67 @@
-using Koine.Compiler.Emit;
-using Koine.Compiler.Emit.CSharp;
-using Koine.Compiler.Emit.Docs;
-using Koine.Compiler.Emit.Glossary;
-using Koine.Compiler.Emit.Php;
-using Koine.Compiler.Emit.Python;
-using Koine.Compiler.Emit.TypeScript;
+using CompilerEmitterRegistry = Koine.Compiler.Emit.EmitterRegistry;
+using EmitterOptions = Koine.Compiler.Emit.EmitterOptions;
+using IEmitter = Koine.Compiler.Emit.IEmitter;
 
 namespace Koine.Cli.Infrastructure;
 
 /// <summary>
-/// Maps a <c>--target</c> name to the emitter that produces it. The single place that knows
-/// about concrete <see cref="IEmitter"/> implementations, so adding a target is one entry
-/// here (and the validation/help that reads <see cref="SupportedTargets"/> follows).
+/// Maps a <c>--target</c> name to the emitter that produces it. As of issue #69 (Task 5) this is a
+/// thin adapter over the compiler's unified <see cref="CompilerEmitterRegistry"/>: it maps the CLI's
+/// per-target <see cref="TargetOptions"/> to the host-neutral <see cref="EmitterOptions"/> and
+/// delegates the actual lookup. The MCP server delegates to the very same registry, so the two
+/// surfaces can never drift in which targets they support. The validation/help that reads
+/// <see cref="SupportedTargets"/> follows automatically.
 /// </summary>
 internal static class EmitterRegistry
 {
-    private static readonly IReadOnlyDictionary<string, Func<TargetOptions, IEmitter>> Factories =
-        new Dictionary<string, Func<TargetOptions, IEmitter>>(StringComparer.OrdinalIgnoreCase)
-        {
-            ["csharp"] = opts => new CSharpEmitter(ToCSharpOptions(opts)),
-            ["typescript"] = _ => new TypeScriptEmitter(),
-            ["python"] = opts => new PythonEmitter(ToPythonOptions(opts)),
-            ["php"] = opts => new PhpEmitter(ToPhpOptions(opts)),
-            ["glossary"] = _ => new GlossaryEmitter(),
-            ["docs"] = _ => new DocsEmitter(),
-        };
+    /// <summary>The built-in-only registry, shared by the parameterless lookups.</summary>
+    private static readonly CompilerEmitterRegistry BuiltIn = new();
 
     /// <summary>The supported target names, in display order for help and error messages.</summary>
-    public static IReadOnlyList<string> SupportedTargets { get; } =
-        new[] { "csharp", "typescript", "python", "php", "glossary", "docs" };
+    public static IReadOnlyList<string> SupportedTargets => BuiltIn.SupportedTargets;
 
     /// <summary>A comma-separated list of <see cref="SupportedTargets"/>, for messages.</summary>
     public static string SupportedList => string.Join(", ", SupportedTargets);
 
-    public static bool IsSupported(string target) => Factories.ContainsKey(target);
+    public static bool IsSupported(string target) => BuiltIn.IsSupported(target);
 
     /// <summary>Creates the emitter for <paramref name="target"/>, or returns <c>false</c> if unknown.</summary>
-    public static bool TryCreate(string target, TargetOptions options, out IEmitter emitter)
+    public static bool TryCreate(string target, TargetOptions options, out IEmitter emitter) =>
+        BuiltIn.TryCreate(target, ToEmitterOptions(options), out emitter);
+
+    /// <summary>
+    /// Creates the emitter for <paramref name="target"/>, additionally resolving external providers
+    /// from the assemblies named in <paramref name="emitterAssemblies"/> (the <c>emitters</c> config
+    /// key, issue #69). A null/empty list behaves exactly like <see cref="TryCreate(string,TargetOptions,out IEmitter)"/>.
+    /// </summary>
+    public static bool TryCreate(
+        string target,
+        TargetOptions options,
+        IReadOnlyList<string>? emitterAssemblies,
+        out IEmitter emitter)
     {
-        if (Factories.TryGetValue(target, out var factory))
+        if (emitterAssemblies is null || emitterAssemblies.Count == 0)
         {
-            emitter = factory(options);
-            return true;
+            return BuiltIn.TryCreate(target, ToEmitterOptions(options), out emitter);
         }
 
-        emitter = null!;
-        return false;
+        var registry = new CompilerEmitterRegistry(Koine.Compiler.Emit.EmitterLoader.Load(emitterAssemblies));
+        return registry.TryCreate(target, ToEmitterOptions(options), out emitter);
     }
 
     /// <summary>
-    /// Maps the CLI's parsed per-target <see cref="TargetOptions"/> to the C# emitter's
-    /// <see cref="CSharpEmitterOptions"/> (R16.1). An empty options bag maps to
-    /// <see cref="CSharpEmitterOptions.Empty"/>, so an unconfigured target emits byte-identical
-    /// output. <c>instantMode = nodaTime</c> (case-insensitive) selects the NodaTime mode;
-    /// anything else (incl. <c>dateTimeOffset</c> and absent) keeps the DateTimeOffset default.
-    /// The <c>layout</c> key is accepted and currently a no-op (file-per-type is the only layout).
+    /// Maps the CLI's parsed per-target <see cref="TargetOptions"/> to the host-neutral
+    /// <see cref="EmitterOptions"/> the providers consume. <see cref="TargetOptions.OutDir"/> is a
+    /// build concern and is intentionally dropped here. An empty bag maps to
+    /// <see cref="EmitterOptions.Empty"/>, so an unconfigured target emits byte-identical output.
     /// </summary>
-    private static CSharpEmitterOptions ToCSharpOptions(TargetOptions options)
+    private static EmitterOptions ToEmitterOptions(TargetOptions options)
     {
-        if (options.NamespaceMap.Count == 0 && options.InstantMode is null)
+        if (options.NamespaceMap.Count == 0 && options.InstantMode is null && options.Layout is null)
         {
-            return CSharpEmitterOptions.Empty;
+            return EmitterOptions.Empty;
         }
 
-        var instant = string.Equals(options.InstantMode, "nodaTime", StringComparison.OrdinalIgnoreCase)
-            ? CSharpInstantMode.NodaTime
-            : CSharpInstantMode.DateTimeOffset;
-        return new CSharpEmitterOptions(options.NamespaceMap, instant);
-    }
-
-    /// <summary>
-    /// Maps the CLI's parsed per-target <see cref="TargetOptions"/> to the Python emitter's
-    /// <see cref="PythonEmitterOptions"/>. The shared <c>targets.&lt;name&gt;.namespaces.&lt;Context&gt;</c>
-    /// config block is reused as the Python package remap; there is no config key for
-    /// <c>EmitDictHelpers</c>, so it stays at the default <c>false</c>. An empty options bag maps to
-    /// <see cref="PythonEmitterOptions.Empty"/>, so unconfigured targets emit byte-identical output.
-    /// <para>
-    /// The context keys are <c>snake_case</c>d here so they match the heads the emitter computes:
-    /// <see cref="PythonEmitterOptions.RemapPackage"/> looks up an already-lowered package head
-    /// (<c>Catalog → catalog</c>), so a config key written as the user names the context
-    /// (<c>Catalog</c>) would otherwise never match. (<see cref="ToCSharpOptions"/> needs no such
-    /// step: C# namespace heads stay PascalCase, matching the config key as written.)
-    /// </para>
-    /// </summary>
-    private static PythonEmitterOptions ToPythonOptions(TargetOptions options)
-    {
-        if (options.NamespaceMap.Count == 0)
-        {
-            return PythonEmitterOptions.Empty;
-        }
-
-        var packageMap = new Dictionary<string, string>(StringComparer.Ordinal);
-        foreach (var (context, package) in options.NamespaceMap)
-        {
-            packageMap[PythonNaming.ToSnakeCase(context)] = package;
-        }
-
-        return new PythonEmitterOptions(packageMap);
-    }
-
-    /// <summary>
-    /// Maps the CLI's parsed per-target <see cref="TargetOptions"/> to the PHP emitter's
-    /// <see cref="PhpEmitterOptions"/>. The shared <c>targets.&lt;name&gt;.namespaces.&lt;Context&gt;</c>
-    /// config block is reused as the PHP namespace remap; keys are kept PascalCase (matching the
-    /// context names the emitter computes). An empty options bag maps to
-    /// <see cref="PhpEmitterOptions.Empty"/>, so unconfigured targets emit byte-identical output.
-    /// </summary>
-    private static PhpEmitterOptions ToPhpOptions(TargetOptions options)
-    {
-        if (options.NamespaceMap.Count == 0)
-        {
-            return PhpEmitterOptions.Empty;
-        }
-
-        return new PhpEmitterOptions(options.NamespaceMap);
+        return new EmitterOptions(options.NamespaceMap, options.InstantMode, options.Layout);
     }
 }

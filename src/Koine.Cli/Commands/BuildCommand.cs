@@ -70,7 +70,7 @@ internal class BuildSettings : CommandSettings
         var resolvedOut = Out ?? targetOptions.OutDir ?? config.OutDir;
         plan = new BuildPlan(
             Path, resolvedTarget, resolvedOut, Glossary, Docs, targetOptions,
-            config.DiagnosticSeverity, WarningsAsErrors, config.Analyzers);
+            config.DiagnosticSeverity, WarningsAsErrors, config.Analyzers, config.Emitters);
         return true;
     }
 }
@@ -94,7 +94,9 @@ internal sealed class BuildCommand : Command<BuildSettings>
     /// </summary>
     public static int BuildOnce(BuildPlan r)
     {
-        if (!EmitterRegistry.TryCreate(r.Target, r.Options, out var emitter))
+        // External emitter providers from the `emitters` config key (issue #69) resolve alongside the
+        // built-ins; no key → built-ins only → behavior identical to before.
+        if (!EmitterRegistry.TryCreate(r.Target, r.Options, r.Emitters, out var emitter))
         {
             return CliError.Runtime($"unsupported target '{r.Target}' (supported: {EmitterRegistry.SupportedList})");
         }

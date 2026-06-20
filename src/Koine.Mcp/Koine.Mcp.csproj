@@ -40,6 +40,7 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="Koine.Mcp.Tests" />
+    <InternalsVisibleTo Include="Koine.Compiler.Tests" />
   </ItemGroup>
 
   <!-- Knowledge surfaced to agents. The reference cheatsheet lives in-project; the example
