@@ -33,6 +33,7 @@ import { renderDiagrams } from './diagrams';
 import { renderGlossary, type GlossaryHandlers } from './glossary';
 import { createAssistantPanel, type AssistantPanel } from './aiPanel';
 import { buildShareUrl, clearModelHash, readModelFromHash } from './share';
+import { dirtyBuffers, saveAllDirtyBuffers } from './dirty';
 import { createConfirmDialog } from './overlay';
 
 // --- workspace fs contract ---------------------------------------------------
@@ -1350,8 +1351,15 @@ export function init(): void {
   // ran preventDefault, so this listener only persists.
   window.addEventListener('keydown', (e) => {
     const mod = e.metaKey || e.ctrlKey;
-    if (mod && (e.key === 's' || e.key === 'S')) {
-      if (overlayOpen()) return; // don't save the editor under an open overlay
+    if (!mod) return;
+    if (overlayOpen()) return; // don't act on the editor under an open overlay
+    // Mod+Alt+S → Save all. Match on e.code (the physical S key): on macOS, Option composes e.key
+    // into another glyph (e.g. 'ß'), so `e.key === 's'` would miss the chord.
+    if (e.altKey && e.code === 'KeyS') {
+      e.preventDefault();
+      void saveAllDirty();
+    } else if (!e.altKey && (e.key === 's' || e.key === 'S')) {
+      // Mod+S → save / format the active buffer (unchanged single-file behaviour).
       e.preventDefault();
       void saveActive();
     }
@@ -1434,6 +1442,62 @@ export function init(): void {
     lsp.openDoc(newUri, buf.text);
     lsp.setActive(newUri);
     clearScratch(); // the scratch is now a real file — don't also restore it as scratch on reload
+  }
+
+  // Save EVERY dirty buffer (Mod+Alt+S / "Save all"), so editing several files and then closing
+  // can't silently drop the ones you didn't individually Mod-S. Mirrors saveActive's format+write
+  // but across the whole workspace: the active buffer is formatted + synced from the editor first
+  // (the others already hold their edited text in memory), then each dirty buffer is written. A
+  // per-file write failure leaves that buffer dirty and reports it; the rest still save. The
+  // single-file Mod-S path (saveActive) is unchanged.
+  let saveAllQueued = false;
+  async function saveAllDirty(): Promise<void> {
+    if (saveAllQueued) return;
+    saveAllQueued = true;
+    try {
+      if (settings.formatOnSave) {
+        try {
+          editor.applyEdits(await lsp.format());
+        } catch (e) {
+          console.error('format on save failed:', e);
+        }
+      }
+      const active = buffers.get(activeUri);
+      if (active) {
+        active.text = editor.getDoc();
+        lsp.changeDoc(activeUri, active.text);
+      }
+
+      if (dirtyBuffers(buffers).length === 0) {
+        // Nothing flagged dirty. In scratch mode the single buffer is path-less and never marked
+        // dirty (it auto-persists to localStorage), so fall back to the normal save-as when it
+        // holds real content; in folder mode with nothing dirty this is a neutral no-op.
+        if (active && active.path == null && hasUnsavedWork()) await saveScratchAs(active);
+        else setStatus('No unsaved changes', 'green');
+        return;
+      }
+
+      let failures = 0;
+      const saved = await saveAllDirtyBuffers(buffers, {
+        write: (buf) => platform.writeTextFile(buf.path as string, buf.text),
+        saveScratch: (buf) => saveScratchAs(buf),
+        onError: (buf, err) => {
+          failures++;
+          console.error('writeTextFile failed for', buf.path, err);
+        },
+      });
+      if (saved > 0) {
+        lsp.didSave();
+        renderTree();
+      }
+      if (failures > 0) {
+        setStatus(`Save failed for ${failures} file${failures === 1 ? '' : 's'}`, 'error');
+      } else {
+        setStatus(`Saved ${saved} file${saved === 1 ? '' : 's'}`, 'green');
+      }
+    } finally {
+      saveAllQueued = false;
+    }
   }
 
   // --- new scratch model ----------------------------------------------------
@@ -1748,6 +1812,7 @@ export function init(): void {
       { id: 'home', title: 'Go to start screen', group: 'File', run: () => goHome() },
       { id: 'open-folder', title: 'Open folder…', hint: 'mod+Shift+O', group: 'File', run: () => void openFolder() },
       { id: 'new-scratch', title: 'New scratch model', hint: 'mod+N', group: 'File', run: () => void requestNewScratch() },
+      { id: 'save-all', title: 'Save all', hint: 'mod+Alt+S', group: 'File', run: () => void saveAllDirty() },
       { id: 'share', title: 'Copy shareable link', group: 'File', run: () => void copyShareLink() },
       { id: 'check', title: 'Check against baseline…', group: 'File', run: () => void runCheck() },
       { id: 'generate-project', title: 'Generate project…', group: 'File', run: () => generateProject.open() },
