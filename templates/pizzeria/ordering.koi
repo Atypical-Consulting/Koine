@@ -1,0 +1,160 @@
+/// Ordering bounded context — taking and pricing a customer's pizza order. This is
+/// the heart of the template: the `Order` aggregate is the headline aggregate, its
+/// lifecycle is an explicit state machine (R7), it is priced from its line items
+/// (R1), and it publishes `OrderPlaced` so Kitchen, Delivery and Payment can react.
+context Ordering version 1 {
+
+  /// How the customer wants the order fulfilled. Drives routing into Delivery.
+  enum Fulfillment { DineIn, Pickup, Delivery }
+
+  /// The lifecycle state of an order. Drives the `states status { … }` machine on
+  /// the entity, so only the transitions declared there are legal at runtime.
+  enum OrderStatus { Draft, Placed, InKitchen, OutForDelivery, Completed, Cancelled }
+
+  /// A monetary amount in a specific currency. Never negative. `Currency` is a
+  /// shared-kernel type owned jointly with Menu (see context-map.koi) — the same
+  /// enum flows through both contexts without translation.
+  value Money {
+    amount:   Decimal
+    currency: Currency
+    invariant amount >= 0   "an amount cannot be negative"
+  }
+
+  /// Announced to the rest of the system when an order is placed (R14.3). An
+  /// integration event is a *published language* — its fields stay primitive
+  /// (ids/scalars/enums), never leaking internal value objects. Kitchen, Delivery
+  /// and Payment all subscribe to it (authorized by the open-host relations).
+  integration event OrderPlaced {
+    orderId:     OrderId
+    customer:    CustomerId
+    fulfillment: Fulfillment
+    total:       Decimal
+    placedAt:    Instant
+  }
+
+  publishes OrderPlaced
+
+  /// The order aggregate. `versioned` adds an optimistic-concurrency token (R11.4);
+  /// the `repository` block tunes the mutating set and adds intention-revealing
+  /// finders (R11.3); being an aggregate it also joins the context `IUnitOfWork`.
+  aggregate Order root Order versioned {
+
+    repository {
+      operations: getById, add, update
+      find byCustomer(customer: CustomerId): List<Order>
+      find mostRecent(customer: CustomerId): Order
+    }
+
+    /// Raised when an order is opened by the factory (R6/R8).
+    event OrderOpened {
+      orderId:   OrderId
+      customer:  CustomerId
+      lineCount: Int
+    }
+
+    /// Raised when an order is placed for processing (R6).
+    event OrderPlacedInternally {
+      orderId:   OrderId
+      lineCount: Int
+    }
+
+    /// Raised when an order is cancelled (R6).
+    event OrderCancelled {
+      orderId: OrderId
+    }
+
+    /// One line of an order: a pizza, how many, and the unit price. The pricing
+    /// value object of the template — it derives its own totals.
+    value OrderLine {
+      pizza:     PizzaCode
+      /// How many of this pizza. At least one.
+      quantity:  Int
+      unitPrice: Money
+      // Derived (computed, get-only). lineTotal scales Money by a scalar;
+      // payable applies a conditional "buy 5+ get 10% off" deal (R1.1).
+      lineTotal: Money = unitPrice * quantity
+      /// What the customer actually pays for this line (10% off at 5+ pizzas).
+      payable:   Money = if quantity >= 5 then lineTotal * 0.9 else lineTotal
+      invariant quantity >= 1   "an order line needs at least one pizza"
+    }
+
+    /// The order a customer places — the consistency boundary of this aggregate.
+    entity Order identified by OrderId {
+      customer:    CustomerId
+      fulfillment: Fulfillment
+      lines:       List<OrderLine>
+      status:      OrderStatus = Draft
+      placedAt:    Instant?
+
+      // Collection operations over the child lines (R1.3).
+      total:       Money = lines.sum(l => l.payable)
+      lineCount:   Int   = lines.count
+
+      // Presence check on an optional (R2.1) and a scoped enum member (R3.5):
+      // bare `Cancelled` resolves to OrderStatus.
+      isPlaced:    Bool = placedAt.isPresent
+      isCancelled: Bool = status == Cancelled
+      // A delivery order is the one that needs an address downstream (Delivery).
+      isDelivery:  Bool = fulfillment == Delivery
+
+      invariant lines.all(l => l.quantity >= 1)   "every line needs a positive quantity"
+      invariant lines.distinctBy(l => l.pizza)    "no duplicate pizzas in an order"
+      invariant status == Draft when lines.isEmpty
+
+      // The order's legal lifecycle (R7): only these transitions are permitted.
+      states status {
+        Draft          -> Placed, Cancelled
+        Placed         -> InKitchen, Cancelled
+        InKitchen      -> OutForDelivery, Completed, Cancelled
+        OutForDelivery -> Completed
+        Completed
+        Cancelled
+      }
+
+      /// Place a drafted order for processing, stamping the time (R5) and recording
+      /// a domain event (R6). The cross-context announcement is `OrderPlaced`.
+      command place {
+        requires status == Draft   "only a draft order can be placed"
+        requires !lines.isEmpty    "cannot place an empty order"
+        status   -> Placed
+        placedAt -> now
+        emit OrderPlacedInternally(orderId: id, lineCount: lines.count)
+      }
+
+      /// Cancel an order that has not yet gone out for delivery.
+      command cancel {
+        requires status != OutForDelivery   "an order already out for delivery cannot be cancelled"
+        requires status != Completed        "a completed order cannot be cancelled"
+        status -> Cancelled
+        emit OrderCancelled(orderId: id)
+      }
+
+      /// R8 — factory-only creation: open a draft order for a customer. The presence
+      /// of any `create` makes the all-args constructor private, so callers must go
+      /// through `Order.Open(...)`.
+      create open(customer: CustomerId, fulfillment: Fulfillment, lines: List<OrderLine>) {
+        requires !lines.isEmpty   "cannot open an empty order"
+        emit OrderOpened(orderId: id, customer: customer, lineCount: lines.count)
+      }
+    }
+  }
+
+  /// R12.2 — the application/use-case service interface (IOrderingService). Each
+  /// use case maps to one async method; a context with aggregates also gets a UoW.
+  service OrderingService {
+    usecase PlaceOrder(customer: CustomerId, fulfillment: Fulfillment, lines: List<OrderLine>): OrderId
+    usecase CancelOrder(order: OrderId)
+  }
+
+  /// R12.3 — a flat read model + projection mapper for an order board.
+  readmodel OrderSummary from Order {
+    id
+    customer
+    fulfillment
+    status
+    lineCount: Int = lines.count
+  }
+
+  /// R12.4 — a query DTO over the read model.
+  query OrdersByStatus(status: OrderStatus): List<OrderSummary>
+}

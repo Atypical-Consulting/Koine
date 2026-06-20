@@ -1,0 +1,137 @@
+/// Kitchen bounded context — turning a placed order into a cooked pizza. It watches
+/// the orders Ordering publishes and runs each one through the kitchen workflow: a
+/// ticket is queued, prepped, baked, and put up on the pass. Kept in its own context
+/// so "how the kitchen cooks" evolves independently of "how an order is taken".
+context Kitchen version 1 {
+
+  // R13.2 — a named import: Kitchen conforms to Menu (the `Menu -> Kitchen :
+  // conformist` relation in context-map.koi) and reuses its `Topping` value object
+  // so a ticket can list exactly the toppings the menu defines, with no translation.
+  import Menu.{ Topping }
+
+  // R14.3 — react to placed orders (authorized by `Ordering -> Kitchen : open-host`
+  // in context-map.koi). Emits an IHandleOrderPlaced seam the kitchen implements to
+  // open a ticket for the new order.
+  subscribes Ordering.OrderPlaced
+
+  /// The station a ticket is routed to. A plain enum used for load-balancing.
+  enum Station { OvenA, OvenB, Cold }
+
+  /// The lifecycle state of a kitchen ticket. Drives the `states stage { … }`
+  /// machine on the entity, so only the declared transitions are legal at runtime.
+  enum TicketStage { Queued, Prepping, Baking, Ready, Served, Scrapped }
+
+  /// Raised when a ticket is finished and put up on the pass (R6). A delivery /
+  /// dine-in handler reacts to it; kept primitive as a published fact.
+  integration event TicketReady {
+    ticketId: TicketId
+    order:    OrderId
+    readyAt:  Instant
+  }
+
+  publishes TicketReady
+
+  // R13.3 — a module groups the line aggregate into a Kitchen.Line sub-namespace
+  // and sub-folder, mirroring Shop's `module Fulfillment`.
+  module Line {
+
+    /// The kitchen-ticket aggregate: one ticket per order on the line. Being an
+    /// aggregate root it gains an `IKitchenTicketRepository` and joins the context
+    /// UoW; the repository block adds intention-revealing finders (R11.3).
+    aggregate KitchenTicket root KitchenTicket {
+
+      repository {
+        operations: getById, add, update
+        find atStation(station: Station): List<KitchenTicket>
+        find inProgress(): List<KitchenTicket>
+      }
+
+      /// Raised inside the aggregate when a ticket is opened by the factory (R6/R8).
+      event TicketOpened {
+        ticketId: TicketId
+        order:    OrderId
+      }
+
+      /// Raised when a ticket goes into the oven (R6).
+      event TicketStartedBaking {
+        ticketId: TicketId
+        station:  Station
+      }
+
+      entity KitchenTicket identified by TicketId {
+        order:   OrderId
+        station: Station
+        stage:   TicketStage = Queued
+        pizzas:  Int
+        // The toppings the line must add, reusing Menu's imported `Topping` VO so
+        // the kitchen and the menu speak the same ubiquitous language.
+        toppings: List<Topping>
+        startedAt: Instant?
+
+        // Derived (computed, get-only) read helpers (R1.1 / R2.1).
+        isCooking: Bool = stage == Baking
+        isDone:    Bool = stage == Served
+        started:   Bool = startedAt.isPresent
+
+        invariant pizzas >= 1   "a ticket must cook at least one pizza"
+
+        // The kitchen workflow (R7): a ticket is queued, prepped, baked, put up on
+        // the pass, then served — or scrapped if something goes wrong.
+        states stage {
+          Queued   -> Prepping, Scrapped
+          Prepping -> Baking, Scrapped
+          Baking   -> Ready, Scrapped
+          Ready    -> Served, Scrapped
+          Served
+          Scrapped
+        }
+
+        /// Start prepping a queued ticket (R5).
+        command prep {
+          requires stage == Queued   "only a queued ticket can be prepped"
+          stage -> Prepping
+        }
+
+        /// Put a prepped ticket into the oven, stamping the time (R5/R6).
+        command bake {
+          requires stage == Prepping   "only a prepped ticket can be baked"
+          stage     -> Baking
+          startedAt -> now
+          emit TicketStartedBaking(ticketId: id, station: station)
+        }
+
+        /// Pull a baked ticket out and put it up on the pass (R5).
+        command putUp {
+          requires stage == Baking   "only a baking ticket can be put up"
+          stage -> Ready
+        }
+
+        /// Hand a ready ticket off to the front of house or the driver (R5).
+        command serve {
+          requires stage == Ready   "only a ready ticket can be served"
+          stage -> Served
+        }
+
+        /// R8 — open a ticket for a placed order. The same-named parameters auto-bind
+        /// the required fields (`order`, `station`, `pizzas`, `toppings`); `stage`
+        /// defaults to Queued.
+        create open(order: OrderId, station: Station, pizzas: Int, toppings: List<Topping>) {
+          requires pizzas >= 1   "a ticket must cook at least one pizza"
+          emit TicketOpened(ticketId: id, order: order)
+        }
+      }
+    }
+  }
+
+  /// R12.3 — a flat read model for the kitchen display screen.
+  readmodel TicketBoard from KitchenTicket {
+    id
+    order
+    station
+    stage
+    pizzas
+  }
+
+  /// R12.4 — a query DTO over the board.
+  query TicketsByStage(stage: TicketStage): List<TicketBoard>
+}

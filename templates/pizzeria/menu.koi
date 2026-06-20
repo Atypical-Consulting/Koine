@@ -1,0 +1,114 @@
+/// Menu bounded context — the catalogue of pizzas, sizes and toppings the
+/// pizzeria sells. It is the upstream that publishes the *ubiquitous language* of
+/// money and toppings; Ordering shares its `Currency` as a shared kernel and
+/// conforms to its `Topping` weight (see context-map.koi).
+///
+/// Version 2 of the published model (R15): a `kcal` nutrition field was added in
+/// v2, demonstrating contract evolution with `@since`.
+context Menu version 2 {
+
+  // R9.1 — enum members carrying associated data: each currency carries its
+  // display symbol and the number of minor-unit decimal places. `Currency` is
+  // shared with Ordering as a shared-kernel type (see context-map.koi).
+  enum Currency(symbol: String, decimals: Int) {
+    EUR("€", 2)
+    USD("$", 2)
+    GBP("£", 2)
+  }
+
+  /// The unit a topping's portion weight is expressed in. Drives the unit-checked
+  /// arithmetic on the `Portion` quantity below.
+  enum MassUnit { Gram, Kilogram }
+
+  /// The three pizza sizes on offer. A plain enum used for routing and pricing.
+  enum Size { Small, Medium, Large }
+
+  /// Whether a menu item is currently sellable. Defaults to `Available`.
+  enum Availability { Available, SoldOut, Seasonal }
+
+  /// A monetary amount in a specific currency. Never negative. `Currency` is a
+  /// shared-kernel type owned jointly with Ordering (see context-map.koi), so the
+  /// same enum flows through both contexts without translation.
+  value Money {
+    amount:   Decimal
+    currency: Currency
+    invariant amount >= 0   "a price cannot be negative"
+  }
+
+  // R9.2 — a quantity value object: a Decimal amount plus an enum unit, with
+  // generated unit-checked arithmetic (adding Grams to Kilograms throws).
+  quantity Portion {
+    amount: Decimal
+    unit:   MassUnit
+    invariant amount >= 0   "a portion weight cannot be negative"
+  }
+
+  // R9.3 — a Range<Instant> interval value object: Start/End, a start<=end
+  // invariant, and Contains/Overlaps, all emitted by the built-in Range<T>. The
+  // pizzeria's happy-hour window during which discounted prices apply.
+  value HappyHour {
+    window: Range<Instant>
+  }
+
+  /// A topping that can be added to a pizza — pepperoni, mushrooms, extra cheese.
+  /// A first-class value object so a "topping" is never just a bare string, and a
+  /// rich one: it carries its own surcharge and portion weight. Exported to Kitchen,
+  /// which conforms to Menu and imports it to list a ticket's toppings.
+  value Topping {
+    name:      String
+    surcharge: Money
+    portion:   Portion
+    // Derived (computed, get-only): a normalized key for de-duplication (R1.2).
+    key:       String = name.trim.lower
+    invariant name.trim.length > 0   "a topping needs a name"
+  }
+
+  /// A pizza on the menu — the product the pizzeria sells. Its identity is a
+  /// *natural* string key (`PizzaCode as natural(String)`, no client-side New()),
+  /// and being an aggregate root it gains an `IPizzaRepository` and joins the
+  /// context's generated `IUnitOfWork` (R11/R12). The `repository` block tunes the
+  /// mutating set and adds intention-revealing finders (R11.3).
+  aggregate Catalog root Pizza {
+
+    repository {
+      operations: getById, add, update
+      find available(): List<Pizza>
+      find bySize(size: Size): List<Pizza>
+    }
+
+    entity Pizza identified by PizzaCode as natural(String) {
+      name:         String
+      size:         Size
+      basePrice:    Money
+      availability: Availability = Available
+
+      // Optional fields (R2.1) and a uniqueness Set of default toppings (R2.2).
+      description:  String?
+      toppings:     Set<String>
+
+      // R15 — a nutrition field introduced in v2 of the context.
+      @since(2) kcal: Int?
+
+      // Derived fields: string trim, coalescing, comparison, presence check.
+      displayName:  String = name.trim
+      summary:      String = description ?? name
+      isAvailable:  Bool   = availability == Available
+      hasNutrition: Bool   = kcal.isPresent
+
+      invariant name.trim.length > 0   "a pizza needs a name"
+    }
+  }
+
+  // R12.3 — a flat read model projected from the aggregate root, plus a static
+  // ToMenuItem(this Pizza) mapper.
+  readmodel MenuItem from Pizza {
+    name
+    size
+    basePrice
+    available: Bool = availability == Available
+  }
+
+  // R12.4 — query DTOs handled through the shared IQueryHandler<TQuery,TResult>.
+  query PizzasBySize(size: Size): List<MenuItem>
+  query PizzaByCode(code: PizzaCode): MenuItem
+}
