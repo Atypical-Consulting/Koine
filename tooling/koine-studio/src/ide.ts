@@ -34,6 +34,7 @@ import { renderDiagrams } from './diagrams';
 import { NODE_NAVIGATE_EVENT, type DiagramNodeNavigateDetail } from './diagrams-svg';
 import { renderGlossary, type GlossaryHandlers } from './glossary';
 import { createSelectionBus } from './selection';
+import { renderModelOutline, type ModelOutlineHandlers } from './modelOutline';
 import { createAssistantPanel, type AssistantPanel, type AssistantContext, type DomainIndex } from './aiPanel';
 import { clearModelHash, readModelFromHash, workspaceShareUrlOrNull } from './share';
 import { dirtyCount, handleBeforeUnload, saveAllDirtyBuffers, titleWithDirty } from './dirty';
@@ -256,7 +257,7 @@ function diagnosticsInRange(diags: LspDiagnostic[], range: Range): LspDiagnostic
   return diags.filter((d) => lte(d.range.start, range.end) && lte(range.start, d.range.end));
 }
 
-type RightView = 'preview' | 'glossary' | 'diagrams' | 'contextmap' | 'outline' | 'assistant' | 'check';
+type RightView = 'preview' | 'model' | 'glossary' | 'diagrams' | 'contextmap' | 'outline' | 'assistant' | 'check';
 
 // Keyboard shortcuts shown in the help overlay; mirrors the global keydown handler and the
 // palette command hints. 'mod' renders as a keycap as-is (Cmd on mac / Ctrl elsewhere).
@@ -907,6 +908,7 @@ export function init(): void {
   // the same selection; the inspector + outline cross-highlight subscribe to it.
   const selection = createSelectionBus();
 
+  const modelView = el('view-model');
   const glossaryView = el('view-glossary');
   const diagramsView = el('view-diagrams');
   const contextMapView = el('view-contextmap');
@@ -916,6 +918,7 @@ export function init(): void {
   const tabs = Array.from(document.querySelectorAll<HTMLButtonElement>('#tabs .tab'));
   const viewEls: Record<RightView, HTMLElement> = {
     preview: el('view-preview'),
+    model: modelView,
     glossary: glossaryView,
     diagrams: diagramsView,
     contextmap: contextMapView,
@@ -927,8 +930,9 @@ export function init(): void {
   // Track which doc-based views need a (re)fetch — invalidated on every edit so a tab
   // switch always shows data for the current model rather than a stale render. The check
   // view (on-demand via the Check button) and the assistant (interactive) are excluded.
-  const docViewsLoaded: Record<'preview' | 'glossary' | 'diagrams' | 'contextmap' | 'outline', boolean> = {
+  const docViewsLoaded: Record<'preview' | 'model' | 'glossary' | 'diagrams' | 'contextmap' | 'outline', boolean> = {
     preview: false,
+    model: false,
     glossary: false,
     diagrams: false,
     contextmap: false,
@@ -1034,6 +1038,36 @@ export function init(): void {
     }
   }
 
+  // The Model tab is the DDD-aware workspace (#142): a construct-grouped, per-context navigator with
+  // per-context counts over the WHOLE model, sourced from the workspace-merged `glossaryModel`.
+  // Selecting a node drives the element inspector via the shared selection bus (see Task 3 wiring).
+  const modelOutlineHandlers: ModelOutlineHandlers = {
+    onSelect: (entry) => selection.set({ qualifiedName: entry.qualifiedName, context: entry.context }),
+    goto: (line, col) => editor.goto(line, col),
+    onOpenContextMap: () => selectView('contextmap'),
+    onOpenGlossary: () => selectView('glossary'),
+  };
+
+  async function loadModel(): Promise<void> {
+    docMessage(modelView, 'Loading model…');
+    try {
+      const glossary = await lsp.glossaryModel();
+      if (!glossary.entries.length) {
+        docMessage(modelView, 'No elements yet — declare some types, or fix syntax errors to populate the model.');
+        docViewsLoaded.model = true;
+        return;
+      }
+      modelView.innerHTML = '';
+      const workspace = document.createElement('div');
+      workspace.className = 'koi-model-workspace';
+      workspace.appendChild(renderModelOutline(glossary, modelOutlineHandlers));
+      modelView.appendChild(workspace);
+      docViewsLoaded.model = true;
+    } catch (e) {
+      docMessage(modelView, 'Model request failed: ' + String(e), 'error');
+    }
+  }
+
   async function loadContextMap(): Promise<void> {
     docMessage(contextMapView, 'Loading context map…');
     try {
@@ -1123,6 +1157,7 @@ export function init(): void {
 
   function ensureLoaded(view: RightView): void {
     if (view === 'preview' && !docViewsLoaded.preview) void loadPreview();
+    if (view === 'model' && !docViewsLoaded.model) void loadModel();
     if (view === 'glossary' && !docViewsLoaded.glossary) void loadGlossary();
     if (view === 'diagrams' && !docViewsLoaded.diagrams) void loadDiagrams();
     if (view === 'contextmap' && !docViewsLoaded.contextmap) void loadContextMap();
@@ -1132,6 +1167,7 @@ export function init(): void {
   // Mark the cached doc views stale (e.g. after an edit or a file switch).
   function invalidateDocViews(): void {
     docViewsLoaded.preview = false;
+    docViewsLoaded.model = false;
     docViewsLoaded.glossary = false;
     docViewsLoaded.diagrams = false;
     docViewsLoaded.contextmap = false;
@@ -1179,6 +1215,7 @@ export function init(): void {
   // re-prompts for a baseline; the assistant is interactive).
   el<HTMLButtonElement>('btn-refresh').addEventListener('click', () => {
     if (activeView === 'preview') void loadPreview();
+    else if (activeView === 'model') void loadModel();
     else if (activeView === 'glossary') void loadGlossary();
     else if (activeView === 'diagrams') void loadDiagrams();
     else if (activeView === 'contextmap') void loadContextMap();
