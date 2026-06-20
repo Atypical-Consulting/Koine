@@ -1,4 +1,6 @@
 #nullable enable
+Koine.Compiler.Emit.EmitterOptions.EmitSourceMaps.get -> bool
+Koine.Compiler.Emit.EmitterOptions.EmitSourceMaps.init -> void
 Koine.Compiler.Emit.EmittedFile.SourceMap.get -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Emit.SourceMapSegment!>?
 Koine.Compiler.Emit.EmittedFile.SourceMap.init -> void
 Koine.Compiler.Emit.SourceMapSegment

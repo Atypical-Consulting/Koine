@@ -43,7 +43,7 @@ internal sealed class CSharpEmitterProvider : IEmitterProvider
     /// </summary>
     private static CSharpEmitterOptions ToCSharpOptions(EmitterOptions options)
     {
-        if (options.NamespaceMap.Count == 0 && options.InstantMode is null)
+        if (options.NamespaceMap.Count == 0 && options.InstantMode is null && !options.EmitSourceMaps)
         {
             return CSharpEmitterOptions.Empty;
         }
@@ -51,16 +51,31 @@ internal sealed class CSharpEmitterProvider : IEmitterProvider
         var instant = string.Equals(options.InstantMode, "nodaTime", StringComparison.OrdinalIgnoreCase)
             ? CSharpInstantMode.NodaTime
             : CSharpInstantMode.DateTimeOffset;
-        return new CSharpEmitterOptions(options.NamespaceMap, instant);
+        return new CSharpEmitterOptions(options.NamespaceMap, instant, options.EmitSourceMaps);
     }
 }
 
-/// <summary>Provider for the TypeScript backend (no per-emit options today).</summary>
+/// <summary>Provider for the TypeScript backend. Maps the neutral options to <see cref="TsEmitterOptions"/>.</summary>
 internal sealed class TypeScriptEmitterProvider : IEmitterProvider
 {
     public string Target => "typescript";
 
-    public IEmitter Create(EmitterOptions options) => new TypeScriptEmitter();
+    public IEmitter Create(EmitterOptions options) => new TypeScriptEmitter(ToTsOptions(options));
+
+    /// <summary>
+    /// Maps the neutral <see cref="EmitterOptions"/> to <see cref="TsEmitterOptions"/>. Only
+    /// <see cref="EmitterOptions.EmitSourceMaps"/> is consumed today; with it off the result equals
+    /// <see cref="TsEmitterOptions.Default"/>, so an unconfigured target emits byte-identical output.
+    /// </summary>
+    private static TsEmitterOptions ToTsOptions(EmitterOptions options)
+    {
+        if (!options.EmitSourceMaps)
+        {
+            return TsEmitterOptions.Default;
+        }
+
+        return new TsEmitterOptions { EmitSourceMaps = options.EmitSourceMaps };
+    }
 }
 
 /// <summary>Provider for the Python backend. Maps the neutral options to <see cref="PythonEmitterOptions"/>.</summary>

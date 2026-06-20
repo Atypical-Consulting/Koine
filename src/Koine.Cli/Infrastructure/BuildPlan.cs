@@ -15,4 +15,5 @@ internal readonly record struct BuildPlan(
     IReadOnlyDictionary<string, string>? DiagnosticSeverity = null,
     bool WarningsAsErrors = false,
     IReadOnlyList<string>? Analyzers = null,
-    IReadOnlyList<string>? Emitters = null);
+    IReadOnlyList<string>? Emitters = null,
+    bool SourceMaps = false);

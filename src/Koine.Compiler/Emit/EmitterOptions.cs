@@ -9,13 +9,16 @@ namespace Koine.Compiler.Emit;
 /// <para><see cref="NamespaceMap"/> remaps a bounded context's emitted
 /// namespace/package (e.g. <c>Catalog → Acme.Catalog</c>). <see cref="InstantMode"/> and
 /// <see cref="Layout"/> are forward keys consumed by emitters as they gain support; absent keys
-/// are <c>null</c>/empty. <see cref="Empty"/> applies no configuration, so a provider given it
-/// produces output byte-identical to a parameterless emitter.</para>
+/// are <c>null</c>/empty. <see cref="EmitSourceMaps"/> turns on source-map debug info (C#
+/// <c>#line</c> directives, TypeScript <c>*.ts.map</c> sidecars); it defaults to <c>false</c> so
+/// the unconfigured emitter is byte-identical. <see cref="Empty"/> applies no configuration, so a
+/// provider given it produces output byte-identical to a parameterless emitter.</para>
 /// </summary>
 public sealed record EmitterOptions(
     IReadOnlyDictionary<string, string> NamespaceMap,
     string? InstantMode = null,
-    string? Layout = null)
+    string? Layout = null,
+    bool EmitSourceMaps = false)
 {
     /// <summary>An options bag with no remapping and all defaults — the parameterless path.</summary>
     public static readonly EmitterOptions Empty =

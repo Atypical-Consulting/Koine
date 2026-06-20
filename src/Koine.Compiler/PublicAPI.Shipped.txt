@@ -957,7 +957,7 @@ Koine.Compiler.Emit.EmittedFile.RelativePath.get -> string!
 Koine.Compiler.Emit.EmittedFile.RelativePath.init -> void
 Koine.Compiler.Emit.EmitterLoader
 Koine.Compiler.Emit.EmitterOptions
-Koine.Compiler.Emit.EmitterOptions.EmitterOptions(System.Collections.Generic.IReadOnlyDictionary<string!, string!>! NamespaceMap, string? InstantMode = null, string? Layout = null) -> void
+Koine.Compiler.Emit.EmitterOptions.EmitterOptions(System.Collections.Generic.IReadOnlyDictionary<string!, string!>! NamespaceMap, string? InstantMode = null, string? Layout = null, bool EmitSourceMaps = false) -> void
 Koine.Compiler.Emit.EmitterOptions.InstantMode.get -> string?
 Koine.Compiler.Emit.EmitterOptions.InstantMode.init -> void
 Koine.Compiler.Emit.EmitterOptions.Layout.get -> string?

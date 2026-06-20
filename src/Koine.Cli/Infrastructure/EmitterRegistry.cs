@@ -27,41 +27,65 @@ internal static class EmitterRegistry
 
     /// <summary>Creates the emitter for <paramref name="target"/>, or returns <c>false</c> if unknown.</summary>
     public static bool TryCreate(string target, TargetOptions options, out IEmitter emitter) =>
-        BuiltIn.TryCreate(target, ToEmitterOptions(options), out emitter);
+        TryCreate(target, options, emitterAssemblies: null, emitSourceMaps: false, out emitter);
 
     /// <summary>
     /// Creates the emitter for <paramref name="target"/>, additionally resolving external providers
     /// from the assemblies named in <paramref name="emitterAssemblies"/> (the <c>emitters</c> config
-    /// key, issue #69). A null/empty list behaves exactly like <see cref="TryCreate(string,TargetOptions,out IEmitter)"/>.
+    /// key, issue #69) and toggling source-map debug info via <paramref name="emitSourceMaps"/>
+    /// (the <c>--source-maps</c> flag). A null/empty assembly list and <c>emitSourceMaps: false</c>
+    /// behave exactly like <see cref="TryCreate(string,TargetOptions,out IEmitter)"/>.
     /// </summary>
     public static bool TryCreate(
         string target,
         TargetOptions options,
         IReadOnlyList<string>? emitterAssemblies,
+        bool emitSourceMaps,
+        out IEmitter emitter) =>
+        TryCreateCore(target, options, emitterAssemblies, emitSourceMaps, out emitter);
+
+    /// <summary>
+    /// Back-compat overload without the <c>--source-maps</c> flag (defaults off). Equivalent to the
+    /// five-argument overload with <c>emitSourceMaps: false</c>.
+    /// </summary>
+    public static bool TryCreate(
+        string target,
+        TargetOptions options,
+        IReadOnlyList<string>? emitterAssemblies,
+        out IEmitter emitter) =>
+        TryCreateCore(target, options, emitterAssemblies, emitSourceMaps: false, out emitter);
+
+    private static bool TryCreateCore(
+        string target,
+        TargetOptions options,
+        IReadOnlyList<string>? emitterAssemblies,
+        bool emitSourceMaps,
         out IEmitter emitter)
     {
+        var emitterOptions = ToEmitterOptions(options, emitSourceMaps);
         if (emitterAssemblies is null || emitterAssemblies.Count == 0)
         {
-            return BuiltIn.TryCreate(target, ToEmitterOptions(options), out emitter);
+            return BuiltIn.TryCreate(target, emitterOptions, out emitter);
         }
 
         var registry = new CompilerEmitterRegistry(Koine.Compiler.Emit.EmitterLoader.Load(emitterAssemblies));
-        return registry.TryCreate(target, ToEmitterOptions(options), out emitter);
+        return registry.TryCreate(target, emitterOptions, out emitter);
     }
 
     /// <summary>
     /// Maps the CLI's parsed per-target <see cref="TargetOptions"/> to the host-neutral
     /// <see cref="EmitterOptions"/> the providers consume. <see cref="TargetOptions.OutDir"/> is a
-    /// build concern and is intentionally dropped here. An empty bag maps to
-    /// <see cref="EmitterOptions.Empty"/>, so an unconfigured target emits byte-identical output.
+    /// build concern and is intentionally dropped here; <paramref name="emitSourceMaps"/> is the
+    /// <c>--source-maps</c> flag, threaded onto the neutral bag. An empty bag with the flag off maps
+    /// to <see cref="EmitterOptions.Empty"/>, so an unconfigured target emits byte-identical output.
     /// </summary>
-    private static EmitterOptions ToEmitterOptions(TargetOptions options)
+    private static EmitterOptions ToEmitterOptions(TargetOptions options, bool emitSourceMaps = false)
     {
-        if (options.NamespaceMap.Count == 0 && options.InstantMode is null && options.Layout is null)
+        if (options.NamespaceMap.Count == 0 && options.InstantMode is null && options.Layout is null && !emitSourceMaps)
         {
             return EmitterOptions.Empty;
         }
 
-        return new EmitterOptions(options.NamespaceMap, options.InstantMode, options.Layout);
+        return new EmitterOptions(options.NamespaceMap, options.InstantMode, options.Layout, emitSourceMaps);
     }
 }
