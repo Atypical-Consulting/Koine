@@ -2,8 +2,10 @@
 // (sits above #app, below modals) and offers the first actions: start a new model, open a folder, or
 // reopen a recent one. The hero shows the product's thesis as a live artifact — a real `.koi` snippet
 // (the ubiquitous language) that Koine turns into idiomatic code — rather than describing it in prose.
-// The recent list is rebuilt from store.getRecentFolders() on every show() so it always reflects the
-// latest history.
+// The recent list is a managed history rebuilt from store.getRecentFolders() on every show(): each row
+// can be opened, pinned (pinned entries float to the top and survive the cap), have its path copied, or
+// be removed; a search filter appears once the history grows past a threshold, a clear-all control
+// forgets everything, and the list scrolls within its own container so a long history never grows the card.
 import { getRecentFolders, removeRecentFolder, pinRecentFolder, clearRecentFolders } from './store';
 import { LOGO_SVG } from './logo';
 import { registerOverlay } from './overlay';
