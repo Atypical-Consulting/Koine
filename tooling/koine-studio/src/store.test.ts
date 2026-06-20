@@ -11,6 +11,8 @@ import {
   saveChat,
   clearChat,
   CHAT_HISTORY_CAP,
+  peekLegacyScratch,
+  clearLegacyScratch,
 } from './store';
 import type { ChatMessage } from './ai';
 
@@ -167,5 +169,23 @@ describe('Assistant conversation persistence', () => {
     expect(loadSettings().aiApiKey).toBe('sk-must-not-leak');
     // The chat lives under its own namespaced key.
     expect(loadChat('scratch')).toEqual([{ role: 'user', content: 'chat content' }]);
+  });
+});
+
+describe('legacy scratch migration helpers', () => {
+  beforeEach(() => localStorage.clear());
+
+  test('peekLegacyScratch returns the stored value without clearing it', () => {
+    localStorage.setItem('koine.studio.scratch', 'context Legacy {}');
+    expect(peekLegacyScratch()).toBe('context Legacy {}');
+    expect(peekLegacyScratch()).toBe('context Legacy {}'); // still present — not cleared
+    expect(localStorage.getItem('koine.studio.scratch')).toBe('context Legacy {}');
+  });
+
+  test('clearLegacyScratch removes the key; peekLegacyScratch returns null afterward', () => {
+    localStorage.setItem('koine.studio.scratch', 'context Legacy {}');
+    clearLegacyScratch();
+    expect(peekLegacyScratch()).toBeNull();
+    expect(localStorage.getItem('koine.studio.scratch')).toBeNull();
   });
 });

@@ -2,12 +2,12 @@ import { describe, expect, test } from 'vitest';
 import { dirtyBuffers, dirtyCount, handleBeforeUnload, saveAllDirtyBuffers, titleWithDirty } from './dirty';
 
 interface FakeBuffer {
-  path: string | null;
+  path: string;
   text: string;
   dirty: boolean;
 }
 
-function buf(path: string | null, dirty: boolean, text = 'x'): FakeBuffer {
+function buf(path: string, dirty: boolean, text = 'x'): FakeBuffer {
   return { path, text, dirty };
 }
 
@@ -46,10 +46,7 @@ describe('saveAllDirtyBuffers', () => {
     const m = map(['a', a], ['b', b], ['c', c]);
     const written: string[] = [];
     const saved = await saveAllDirtyBuffers(m, {
-      write: async (x) => void written.push(x.path!),
-      saveScratch: async () => {
-        throw new Error('no scratch buffer expected');
-      },
+      write: async (x) => void written.push(x.path),
       onError: () => {
         throw new Error('no error expected');
       },
@@ -59,24 +56,6 @@ describe('saveAllDirtyBuffers', () => {
     expect(a.dirty).toBe(false);
     expect(c.dirty).toBe(false);
     expect(b.dirty).toBe(false); // was already clean — untouched
-  });
-
-  test('routes a path-less (scratch) dirty buffer through saveScratch, not write', async () => {
-    const s = buf(null, true);
-    const m = map(['scratch', s]);
-    const writes: FakeBuffer[] = [];
-    const scratched: FakeBuffer[] = [];
-    const saved = await saveAllDirtyBuffers(m, {
-      write: async (x) => void writes.push(x),
-      saveScratch: async (x) => void scratched.push(x),
-      onError: () => {
-        throw new Error('no error expected');
-      },
-    });
-    expect(writes).toEqual([]);
-    expect(scratched).toEqual([s]);
-    // saveScratch owns the path-less buffer's clean/promote bookkeeping, so it is not counted here.
-    expect(saved).toBe(0);
   });
 
   test('a failing write keeps that buffer dirty, reports it, and still saves the rest', async () => {
@@ -89,10 +68,7 @@ describe('saveAllDirtyBuffers', () => {
       write: async (x) => {
         if (x.path === '/bad') throw new Error('disk full');
       },
-      saveScratch: async () => {
-        throw new Error('no scratch buffer expected');
-      },
-      onError: (x) => void errored.push(x.path!),
+      onError: (x) => void errored.push(x.path),
     });
     expect(saved).toBe(2); // a and c
     expect(a.dirty).toBe(false);

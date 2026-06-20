@@ -302,22 +302,23 @@ export function clearRecentFolders(): void {
   writeRaw(RECENT_KEY, JSON.stringify([]));
 }
 
-// --- scratch buffer (session restore) ----------------------------------------
-// The unsaved scratch model is persisted so a reload restores the user's work instead of resetting
-// to the seed. Only the single scratch buffer is kept here; folder-mode files live on disk.
+// --- legacy scratch migration helpers ----------------------------------------
 
-/** The persisted scratch-buffer text, or null when nothing has been saved. */
-export function loadScratch(): string | null {
+/**
+ * Read the legacy single-file scratch buffer (pre-workspace Studio) without clearing it.
+ * Call this at boot to check whether a migration is needed; call {@link clearLegacyScratch}
+ * only AFTER the default workspace has actually opened, so the content is never lost if OPFS
+ * is unavailable or the open fails.
+ */
+export function peekLegacyScratch(): string | null {
   return readRaw(SCRATCH_KEY);
 }
 
-/** Persist the scratch-buffer text (best-effort). */
-export function saveScratch(text: string): void {
-  writeRaw(SCRATCH_KEY, text);
-}
-
-/** Forget the persisted scratch buffer (e.g. on New, or once it is saved to a real file). */
-export function clearScratch(): void {
+/**
+ * Remove the legacy scratch key from localStorage. Best-effort — swallows storage errors.
+ * Only call this after a successful workspace open so the migration is non-destructive.
+ */
+export function clearLegacyScratch(): void {
   try {
     localStorage.removeItem(SCRATCH_KEY);
   } catch {

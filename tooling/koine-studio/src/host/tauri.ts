@@ -6,6 +6,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { getCurrentWindow } from '@tauri-apps/api/window';
+import { appDataDir, join } from '@tauri-apps/api/path';
 import { open as openDialog, save as saveDialog } from '@tauri-apps/plugin-dialog';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import type { FsEntry, KoiFile, LspTransport, Platform, SourceDoc } from './types';
@@ -124,6 +125,31 @@ export class TauriPlatform implements Platform {
     return Array.isArray(picked) ? picked[0] ?? null : picked;
   }
 
+  // Materialize a synthetic workspace under the app-data dir, fresh each open (mirrors the browser's
+  // OPFS example semantics). Used by multi-file examples and shared-workspace links on the desktop.
+  async materializeWorkspace(
+    name: string,
+    files: { relPath: string; contents: string }[],
+  ): Promise<string | null> {
+    const dir = await join(await appDataDir(), 'workspaces', name);
+    try {
+      await invoke('delete_entry', { token: dir }); // discard a previous copy
+    } catch {
+      // not present — nothing to clear
+    }
+    for (const f of files) await this.createFile(dir, f.relPath, f.contents);
+    return dir;
+  }
+
+  // The persistent default workspace: <appData>/Untitled. Seed model.koi only when the folder holds
+  // no .koi yet, so a reload restores the user's model instead of overwriting it.
+  async defaultWorkspace(seed: string): Promise<string | null> {
+    const dir = await join(await appDataDir(), 'Untitled');
+    const existing = await this.listKoiFiles(dir).catch(() => [] as KoiFile[]);
+    if (existing.length === 0) await this.createFile(dir, 'model.koi', seed);
+    return dir;
+  }
+
   folderName(token: string): string {
     return token.split(/[\\/]/).filter(Boolean).pop() ?? token;
   }
@@ -138,14 +164,6 @@ export class TauriPlatform implements Platform {
 
   writeTextFile(path: string, contents: string): Promise<void> {
     return invoke('write_text_file', { path, contents }) as Promise<void>;
-  }
-
-  pickSavePath(defaultName: string): Promise<string | null> {
-    return saveDialog({
-      title: 'Save model',
-      defaultPath: defaultName,
-      filters: [{ name: 'Koine model', extensions: ['koi'] }],
-    });
   }
 
   // Save generated-project bytes: prompt for a destination, then write the raw zip via the Rust

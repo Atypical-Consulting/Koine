@@ -42,6 +42,7 @@ function decodeBase64(b64: string): string {
   return decodeURIComponent(escape(atob(b64.replace(/-/g, '+').replace(/_/g, '/'))));
 }
 
+// Retained as the legacy single-file link encoder used by the backward-compatibility decode test; no longer called by the app, which now shares whole workspaces.
 /** A full shareable URL (origin + path + `#model=…`) for the given single model source. */
 export function buildShareUrl(source: string): string {
   const { origin, pathname, search } = window.location;

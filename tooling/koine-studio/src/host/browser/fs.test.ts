@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import {
   __setFolderForTest,
   __resetFsForTest,
@@ -8,6 +8,9 @@ import {
   deleteEntry,
   renameEntry,
   moveEntry,
+  openDefaultWorkspace,
+  readTextFile,
+  writeTextFile,
 } from './fs';
 
 // --- in-memory mock of the File System Access handle surface -----------------
@@ -336,5 +339,43 @@ describe('browser fs file management', () => {
     await expect(createFolder('workspace', '')).rejects.toThrow('invalid path');
     await expect(createFile('workspace', 'a//b.koi')).rejects.toThrow('invalid path');
     await expect(renameEntry('workspace/billing/order.koi', 'a/b.koi')).rejects.toThrow('invalid name');
+  });
+});
+
+describe('default workspace (OPFS)', () => {
+  function mockOpfs(root: MockDir): void {
+    (navigator as unknown as { storage: { getDirectory(): Promise<unknown> } }).storage = {
+      getDirectory: async () => root as never,
+    };
+  }
+
+  // Restore navigator.storage after each test so the no-OPFS case (which deletes it) can't leak
+  // into later tests sharing this JS environment.
+  const originalStorage = (navigator as unknown as { storage?: unknown }).storage;
+  afterEach(() => {
+    (navigator as unknown as { storage?: unknown }).storage = originalStorage;
+  });
+
+  it('seeds model.koi on first open and preserves edits on reopen', async () => {
+    __resetFsForTest();
+    mockOpfs(new MockDir('opfs-root'));
+
+    const token = await openDefaultWorkspace('context Seed {}');
+    expect(token).not.toBeNull();
+
+    const entries = await listEntries(token as string);
+    expect(entries.map((e) => e.name)).toEqual(['model.koi']);
+    expect(await readTextFile(`${token as string}/model.koi`)).toBe('context Seed {}');
+
+    // Edit, then reopen with a different seed: the existing file must win (no clobber).
+    await writeTextFile(`${token as string}/model.koi`, 'context Edited {}');
+    const token2 = await openDefaultWorkspace('context Other {}');
+    expect(await readTextFile(`${token2 as string}/model.koi`)).toBe('context Edited {}');
+  });
+
+  it('returns null when OPFS is unavailable', async () => {
+    __resetFsForTest();
+    delete (navigator as unknown as { storage?: unknown }).storage;
+    expect(await openDefaultWorkspace('x')).toBeNull();
   });
 });
