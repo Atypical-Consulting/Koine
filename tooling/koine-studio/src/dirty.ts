@@ -8,9 +8,9 @@ export interface DirtyLike {
   dirty: boolean;
 }
 
-/** A persistable buffer: a real `path` is written to disk; `null` is an unsaved scratch buffer. */
+/** A persistable buffer: a real `path` is written to disk. */
 export interface SaveableBuffer extends DirtyLike {
-  path: string | null;
+  path: string;
 }
 
 /** Every buffer with unsaved changes, in the map's iteration order. */
@@ -57,19 +57,15 @@ export function handleBeforeUnload(event: UnloadEvent, isDirty: () => boolean): 
 
 /** The side effects `saveAllDirtyBuffers` delegates to, so the iteration itself stays pure. */
 export interface SaveAllDeps<T extends SaveableBuffer> {
-  /** Persist a path-bearing buffer; may reject (e.g. the disk write fails). */
+  /** Persist a buffer; may reject (e.g. the disk write fails). */
   write(buffer: T): Promise<void>;
-  /** Persist a path-less scratch buffer (prompts a save-as); owns its own clean/promote bookkeeping. */
-  saveScratch(buffer: T): Promise<void>;
   /** Report a failed `write`; the buffer is left dirty and the remaining buffers still save. */
   onError(buffer: T, error: unknown): void;
 }
 
 /**
- * Save every dirty buffer. A path-bearing buffer is written via `write` and marked clean; a
- * path-less (scratch) buffer is routed through `saveScratch`. A failed `write` keeps that buffer
- * dirty, is reported via `onError`, and does not stop the others. Returns the number of path-bearing
- * buffers successfully written.
+ * Save every dirty buffer via `write`, marking each clean. A failed `write` keeps that buffer dirty,
+ * is reported via `onError`, and does not stop the others. Returns the count successfully written.
  */
 export async function saveAllDirtyBuffers<T extends SaveableBuffer>(
   buffers: Map<string, T>,
@@ -77,10 +73,6 @@ export async function saveAllDirtyBuffers<T extends SaveableBuffer>(
 ): Promise<number> {
   let saved = 0;
   for (const buffer of dirtyBuffers(buffers)) {
-    if (buffer.path == null) {
-      await deps.saveScratch(buffer);
-      continue;
-    }
     try {
       await deps.write(buffer);
       buffer.dirty = false;

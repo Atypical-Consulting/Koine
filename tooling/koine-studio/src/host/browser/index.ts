@@ -52,6 +52,10 @@ export class BrowserPlatform implements Platform {
     return fs.materializeWorkspace(name, files);
   }
 
+  defaultWorkspace(seed: string): Promise<string | null> {
+    return fs.openDefaultWorkspace(seed);
+  }
+
   folderName(token: string): string {
     return fs.folderName(token);
   }
@@ -66,10 +70,6 @@ export class BrowserPlatform implements Platform {
 
   writeTextFile(path: string, contents: string): Promise<void> {
     return fs.writeTextFile(path, contents);
-  }
-
-  pickSavePath(defaultName: string): Promise<string | null> {
-    return fs.pickSavePath(defaultName);
   }
 
   async saveZip(defaultName: string, data: Uint8Array): Promise<boolean> {

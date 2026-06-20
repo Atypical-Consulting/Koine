@@ -9,10 +9,10 @@ import { EXAMPLES, type Example } from './examples';
 
 /** What the welcome actions delegate to; the host (ide.ts) performs the real work. */
 export interface WelcomeCallbacks {
-  onNewScratch(): void;
+  onNewModel(): void;
   onOpenFolder(): void;
   onOpenRecent(path: string): void;
-  /** Open one of the starter examples as a scratch model. */
+  /** Open one of the starter examples. */
   onOpenExample(example: Example): void;
 }
 
@@ -83,10 +83,10 @@ export function createWelcome(cb: WelcomeCallbacks): WelcomeHandle {
   const newBtn = document.createElement('button');
   newBtn.type = 'button';
   newBtn.className = 'koi-welcome-action primary';
-  newBtn.textContent = 'New scratch model';
+  newBtn.textContent = 'New model';
   newBtn.addEventListener('click', () => {
     hide();
-    cb.onNewScratch();
+    cb.onNewModel();
   });
   actions.appendChild(newBtn);
 
