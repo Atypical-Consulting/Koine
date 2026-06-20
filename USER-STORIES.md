@@ -33,6 +33,7 @@ This roadmap was produced by analysing the current compiler (`src/Koine.Compiler
 15. **Model Versioning & Evolution** — 2 stories (0 high)
 16. **Multi-Target Emitters & Emitter Configuration** — 4 stories (2 high)
 17. **Editor Tooling & Developer Experience** — 3 stories (0 high)
+18. **Model as Spec & Coverage** — 1 story (1 high)
 
 ---
 
@@ -896,6 +897,24 @@ _BRIEF §8 lists LSP/editor tooling as a v0 non-goal, but it is squarely in scop
 - `koine init [dir]` scaffolds a starter .koi, a koine.config, and a README stub; it refuses to overwrite without `--force`; the scaffold builds end-to-end via `koine build` immediately
 - `koine watch` monitors input(s) and re-runs the build on change (honoring the same --target/--out/config), debounces rapid saves, keeps watching after reporting errors, and prints a timestamped result
 - Tests cover formatter idempotency, that the init scaffold builds, and that a simulated file change triggers a re-emit
+
+---
+
+## Epic R18 — Model as Spec & Coverage
+
+_With the MCP server (`src/Koine.Mcp`) an AI agent can now author a complete `.koi` model, which reframes Koine's role in AI-assisted development: the model becomes the **reviewable spec**, and the compiler — not the model — writes the implementation. That positioning only pays off if completeness is provable, not hoped-for. A coverage analyzer that proves declared == emitted closes the loop: a human reviews the small model plus a machine-checked report, then `koine build` produces the code deterministically. Sequenced after the emitter and tooling epics because it builds on the existing target-agnostic `IEmitter` seam and the MCP tool surface, adding only an analyzer over emitted files plus its CLI/MCP/docs surfaces._
+
+### R18.1 Model-coverage report (declared == emitted)  ·  🔴 High
+✅ **Delivered** — *As a Domain Developer, I want `koine coverage <path>` to prove every declared type was emitted by the chosen target, so that I can review the model as a spec and trust the deterministic build to be complete.*
+
+**Acceptance criteria**
+- A target-agnostic `ModelCoverage` analyzer (under Ast/) walks the emitted files and reports, per context and per kind (value/entity/aggregate/enum/event/…), how many declared types the target produced — referencing only the `EmittedFile` record and a target string, never a concrete emitter's internals
+- `koine coverage <path>` prints a human-readable summary ending in a ✅/⚠️ status line and exits non-zero when any declared type is uncovered, so it doubles as a CI gate; `--json` emits a stable machine-readable report and `--target` measures against any registered emitter
+- A `koine_coverage` MCP tool exposes the same report so an agent can self-check, and the `docs` target appends a Coverage section
+- A methodology guide ([Model as spec](https://atypical-consulting.github.io/Koine/guides/model-as-spec/)) frames the natural-language-intent → agent-authored model → human review → deterministic compile workflow; README positions Koine as the deterministic implementation step in spec-driven AI development
+- Snapshot + Roslyn-backed tests cover the text report, the `--json` shape, and the docs-section append for the billing template
+
+> **Deferred follow-up:** a hosted/paid service around this workflow (managed authoring, team review, CI integration) is out of scope here and tracked separately as a go-to-market concern — the shipped surface is documentation plus the local CLI/MCP tools only.
 
 ---
 
