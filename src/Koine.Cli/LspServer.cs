@@ -38,6 +38,10 @@ internal sealed class LspServer
     private readonly SemanticTokenProvider _semanticTokens = new();
     private readonly Dictionary<string, string> _docs = new(StringComparer.Ordinal);
 
+    // Held warm-compilation snapshot: mirrors Workspace() (on-disk baseline overlaid by open docs)
+    // and is updated at every mutation point so editor requests never re-parse the whole workspace.
+    private KoineCompilation _compilation = KoineCompilation.Create(Array.Empty<SourceFile>());
+
     // On-disk baseline of every *.koi in the workspace (uri -> text), scanned at initialize.
     private readonly Dictionary<string, string> _workspaceFiles = new(StringComparer.Ordinal);
     private readonly HashSet<string> _scannedRoots = new(StringComparer.Ordinal);
@@ -148,7 +152,7 @@ internal sealed class LspServer
                             {
                                 ["capabilities"] = new Dictionary<string, object?>
                                 {
-                                    ["textDocumentSync"] = 1, // Full
+                                    ["textDocumentSync"] = 2, // Incremental
                                     ["completionProvider"] = new Dictionary<string, object?>
                                     {
                                         ["resolveProvider"] = false,
@@ -203,14 +207,26 @@ internal sealed class LspServer
                             if (TryGetTextDocument(root, out var openUri, out var openText))
                             {
                                 _docs[openUri] = openText;
+                                _compilation = _compilation.WithDocument(openUri, openText);
                                 PublishWorkspaceDiagnostics();
                             }
                             break;
 
                         case "textDocument/didChange":
-                            if (TryGetChange(root, out var changeUri, out var changeText))
+                            if (TryGetUri(root, out var changeUri)
+                                && root.TryGetProperty("params", out var cp)
+                                && cp.TryGetProperty("contentChanges", out var changes)
+                                && changes.ValueKind == JsonValueKind.Array)
                             {
-                                _docs[changeUri] = changeText;
+                                // Start from the maintained text; fall back to workspace/on-disk, else empty.
+                                var current = _docs.TryGetValue(changeUri, out var held) ? held
+                                    : (_workspaceFiles.TryGetValue(changeUri, out var disk) ? disk : "");
+                                foreach (var change in changes.EnumerateArray())
+                                {
+                                    current = ApplyContentChange(current, change);
+                                }
+                                _docs[changeUri] = current;
+                                _compilation = _compilation.WithDocument(changeUri, current);
                                 PublishWorkspaceDiagnostics();
                             }
                             break;
@@ -219,6 +235,7 @@ internal sealed class LspServer
                             if (TryGetSave(root, out var saveUri, out var saveText) && saveText is not null)
                             {
                                 _docs[saveUri] = saveText;
+                                _compilation = _compilation.WithDocument(saveUri, saveText);
                                 PublishWorkspaceDiagnostics();
                             }
                             break;
@@ -227,6 +244,9 @@ internal sealed class LspServer
                             if (TryGetUri(root, out var closeUri))
                             {
                                 _docs.Remove(closeUri);
+                                _compilation = _workspaceFiles.TryGetValue(closeUri, out var diskText)
+                                    ? _compilation.WithDocument(closeUri, diskText)   // revert overlay to on-disk content
+                                    : _compilation.WithoutDocument(closeUri);         // not on disk → drop from snapshot
                                 PublishDiagnostics(closeUri, diagnostics: Array.Empty<object>()); // clear
                             }
                             break;
@@ -432,7 +452,7 @@ internal sealed class LspServer
             return null;
         }
 
-        var hover = _ls.HoverAt(Workspace(), uri, line, ch);
+        var hover = _ls.HoverAt(_compilation, uri, line, ch);
         if (hover is null)
         {
             return null;
@@ -455,7 +475,7 @@ internal sealed class LspServer
             return null;
         }
 
-        var def = _ls.DefinitionAt(Workspace(), uri, line, ch);
+        var def = _ls.DefinitionAt(_compilation, uri, line, ch);
         if (def is null)
         {
             return null;
@@ -574,7 +594,7 @@ internal sealed class LspServer
             return null;
         }
 
-        var refs = _ls.ReferencesAt(Workspace(), uri, line, ch);
+        var refs = _ls.ReferencesAt(_compilation, uri, line, ch);
         return refs.Select(ToLocation).ToArray();
     }
 
@@ -585,14 +605,14 @@ internal sealed class LspServer
             return null;
         }
 
-        var range = _ls.PrepareRenameAt(Workspace(), uri, line, ch);
+        var range = _ls.PrepareRenameAt(_compilation, uri, line, ch);
         if (range is null)
         {
             return null;
         }
 
         // The placeholder is the current identifier text the editor pre-fills the rename box with.
-        var name = _ls.NameAt(Workspace(), uri, line, ch);
+        var name = _ls.NameAt(_compilation, uri, line, ch);
         return new Dictionary<string, object?>
         {
             ["range"] = RangeOf(range),
@@ -610,7 +630,7 @@ internal sealed class LspServer
         }
 
         var newName = nn.GetString()!;
-        var edits = _ls.RenameAt(Workspace(), uri, line, ch, newName);
+        var edits = _ls.RenameAt(_compilation, uri, line, ch, newName);
         if (edits is null)
         {
             return null;
@@ -1266,29 +1286,23 @@ internal sealed class LspServer
     }
 
     /// <summary>
-    /// Diagnoses the merged workspace (every open + on-disk <c>.koi</c> parsed together, as the
-    /// build does) and publishes diagnostics per file, so cross-file errors surface in the
-    /// right document. Each source file's path is its URI, so each diagnostic's
-    /// <see cref="Diagnostic.File"/> identifies the file to publish it to. Files with no
-    /// diagnostic are published an empty array (clearing any stale single-file diagnostics).
+    /// Diagnoses the held warm-compilation snapshot and publishes diagnostics per file, so
+    /// cross-file errors surface in the right document. Each source file's path is its URI,
+    /// so each diagnostic's <see cref="Diagnostic.File"/> identifies the file to publish it to.
+    /// Files with no diagnostic are published an empty array (clearing any stale diagnostics).
     /// </summary>
     private void PublishWorkspaceDiagnostics()
     {
-        var workspace = Workspace();
-        var files = workspace.Select(kv => new SourceFile(kv.Key, kv.Value)).ToList();
-        var diags = _compiler.DiagnoseWorkspace(files);
-
-        // Bucket diagnostics by their originating file (== URI). A diagnostic with no file
-        // (defensive) is dropped rather than mis-attributed.
+        var diags = _compiler.DiagnoseWorkspace(_compilation);
         var byUri = new Dictionary<string, List<object>>(StringComparer.Ordinal);
-        foreach (var uri in workspace.Keys)
+        foreach (var uri in _compilation.Documents.Keys)
         {
             byUri[uri] = new List<object>();
         }
 
         foreach (var d in diags)
         {
-            if (d.File is { } file && workspace.TryGetValue(file, out var text))
+            if (d.File is { } file && _compilation.Documents.TryGetValue(file, out var text))
             {
                 byUri[file].Add(ToLspDiagnostic(d, SplitLines(text)));
             }
@@ -1529,7 +1543,11 @@ internal sealed class LspServer
                 }
 
                 try
-                { _workspaceFiles[uri] = File.ReadAllText(path); }
+                {
+                    var fileText = File.ReadAllText(path);
+                    _workspaceFiles[uri] = fileText;
+                    _compilation = _compilation.WithDocument(uri, fileText);
+                }
                 catch (Exception ex) { Log($"skip {path}: {ex.Message}"); }
             }
             Log($"workspace scan indexed {_workspaceFiles.Count} .koi file(s)");
@@ -1566,29 +1584,30 @@ internal sealed class LspServer
         return false;
     }
 
-    private static bool TryGetChange(JsonElement root, out string uri, out string text)
+    /// <summary>Applies one LSP contentChange to the document text. A change with a <c>range</c> is an
+    /// incremental edit (replace [start,end) with <c>text</c>); a change without a range replaces the whole
+    /// document. Out-of-range offsets clamp via OffsetOf.</summary>
+    private static string ApplyContentChange(string text, JsonElement change)
     {
-        uri = "";
-        text = "";
-        if (!TryGetUri(root, out uri))
+        if (change.TryGetProperty("range", out var range) && range.ValueKind == JsonValueKind.Object
+            && range.TryGetProperty("start", out var start) && range.TryGetProperty("end", out var end)
+            && start.TryGetProperty("line", out var sl) && sl.TryGetInt32(out var startLine)
+            && start.TryGetProperty("character", out var sc) && sc.TryGetInt32(out var startChar)
+            && end.TryGetProperty("line", out var el) && el.TryGetInt32(out var endLine)
+            && end.TryGetProperty("character", out var ec) && ec.TryGetInt32(out var endChar))
         {
-            return false;
+            var startOffset = KoineLanguageService.OffsetOf(text, startLine, startChar);
+            var endOffset = KoineLanguageService.OffsetOf(text, endLine, endChar);
+            if (endOffset < startOffset)
+            {
+                (startOffset, endOffset) = (endOffset, startOffset);
+            }
+
+            var newText = change.TryGetProperty("text", out var rt) ? rt.GetString() ?? "" : "";
+            return string.Concat(text.AsSpan(0, startOffset), newText, text.AsSpan(endOffset));
         }
 
-        if (root.TryGetProperty("params", out var p)
-            && p.TryGetProperty("contentChanges", out var changes)
-            && changes.ValueKind == JsonValueKind.Array
-            && changes.GetArrayLength() > 0)
-        {
-            // Full document sync: take the last change's text.
-            var last = changes[changes.GetArrayLength() - 1];
-            if (last.TryGetProperty("text", out var t))
-            {
-                text = t.GetString() ?? "";
-                return true;
-            }
-        }
-        return false;
+        return change.TryGetProperty("text", out var ft) ? ft.GetString() ?? "" : text;
     }
 
     private static bool TryGetSave(JsonElement root, out string uri, out string? text)

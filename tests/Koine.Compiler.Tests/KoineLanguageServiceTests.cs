@@ -678,4 +678,121 @@ public class KoineLanguageServiceTests
         hover.ShouldNotBeNull();
         hover.Markdown.ShouldContain("Product"); // owning entity
     }
+
+    // ---- Warm-compilation overloads (Task 4) ---------------------------------
+
+    /// <summary>
+    /// Cross-request cache hit: holding a single <see cref="KoineCompilation"/> and calling
+    /// multiple language-service overloads on it must NOT trigger any additional parses after the
+    /// initial <see cref="KoineCompilation.Create"/> call.
+    /// </summary>
+    [Fact]
+    public void Warm_compilation_overloads_do_not_reparse_between_requests()
+    {
+        const string uriOrdering = "file:///ordering.koi";
+        const string uriCatalog = "file:///catalog.koi";
+
+        var ordering = "context Ordering {\n  value Line { product: ProductId }\n}\n";
+        var catalog = "context Catalog {\n  entity Product identified by ProductId { sku: String }\n}\n";
+
+        var files = new[]
+        {
+            new SourceFile(uriOrdering, ordering),
+            new SourceFile(uriCatalog, catalog),
+        };
+
+        var parseCount = 0;
+        Func<SourceFile, ParsedUnit> countingParser = sf =>
+        {
+            Interlocked.Increment(ref parseCount);
+            return KoineCompilation.ParseUnit(sf);
+        };
+
+        // Build the compilation once — parseCount increments here (once per file).
+        var comp = KoineCompilation.Create(files, countingParser);
+        var countAfterCreate = parseCount;
+
+        // Three requests with the SAME held compilation — no additional parses expected.
+        Svc.HoverAt(comp, uriOrdering, line: 1, character: 25);
+        Svc.DefinitionAt(comp, uriOrdering, line: 1, character: 25);
+        Svc.ReferencesAt(comp, uriCatalog, line: 1, character: 32); // on "ProductId" decl in catalog
+
+        parseCount.ShouldBe(countAfterCreate,
+            "Calling HoverAt, DefinitionAt, and ReferencesAt on a held compilation must not trigger any re-parses");
+    }
+
+    /// <summary>
+    /// SemanticModel reuse: <see cref="KoineCompilation.SemanticModelFor"/> returns the SAME
+    /// instance on repeated calls (referential identity — the Lazy is memoized).
+    /// </summary>
+    [Fact]
+    public void SemanticModelFor_returns_same_instance_on_repeated_calls()
+    {
+        const string uri = "file:///t.koi";
+        var files = new[] { new SourceFile(uri, "context C { value V { x: Int } }") };
+        var comp = KoineCompilation.Create(files);
+
+        var first = comp.SemanticModelFor(uri);
+        var second = comp.SemanticModelFor(uri);
+
+        first.ShouldNotBeNull();
+        ReferenceEquals(first, second).ShouldBeTrue(
+            "SemanticModelFor must return the same memoized SemanticModel instance on every call");
+    }
+
+    /// <summary>
+    /// Parity: the new KoineCompilation overloads produce results identical to the existing
+    /// IReadOnlyDictionary-based overloads for the same inputs.
+    /// </summary>
+    [Fact]
+    public void Warm_compilation_overloads_produce_results_equal_to_documents_overloads()
+    {
+        const string uriOrdering = "file:///ordering.koi";
+        const string uriCatalog = "file:///catalog.koi";
+
+        var ordering = "context Ordering {\n  value Line { product: ProductId }\n}\n";
+        var catalog = "context Catalog {\n  entity Product identified by ProductId { sku: String }\n}\n";
+
+        var docs = new Dictionary<string, string>
+        {
+            [uriOrdering] = ordering,
+            [uriCatalog] = catalog,
+        };
+
+        var files = new[]
+        {
+            new SourceFile(uriOrdering, ordering),
+            new SourceFile(uriCatalog, catalog),
+        };
+        var comp = KoineCompilation.Create(files);
+
+        // Hover: ProductId in ordering.koi (line 1, char 25)
+        var hoverDocs = Svc.HoverAt(docs, uriOrdering, line: 1, character: 25);
+        var hoverComp = Svc.HoverAt(comp, uriOrdering, line: 1, character: 25);
+        hoverDocs.ShouldNotBeNull();
+        hoverComp.ShouldNotBeNull();
+        hoverComp.Markdown.ShouldBe(hoverDocs.Markdown,
+            "HoverAt(compilation) must produce markdown identical to HoverAt(documents)");
+
+        // Definition: ProductId in ordering.koi
+        var defDocs = Svc.DefinitionAt(docs, uriOrdering, line: 1, character: 25);
+        var defComp = Svc.DefinitionAt(comp, uriOrdering, line: 1, character: 25);
+        defDocs.ShouldNotBeNull();
+        defComp.ShouldNotBeNull();
+        defComp.Uri.ShouldBe(defDocs.Uri,
+            "DefinitionAt(compilation).Uri must equal DefinitionAt(documents).Uri");
+        defComp.Target.Line.ShouldBe(defDocs.Target.Line,
+            "DefinitionAt(compilation).Target.Line must equal DefinitionAt(documents).Target.Line");
+
+        // References: ProductId declaration in catalog.koi (line 1, char 32)
+        var refsDocs = Svc.ReferencesAt(docs, uriCatalog, line: 1, character: 32);
+        var refsComp = Svc.ReferencesAt(comp, uriCatalog, line: 1, character: 32);
+        refsComp.Count.ShouldBe(refsDocs.Count,
+            "ReferencesAt(compilation) must return the same number of references as ReferencesAt(documents)");
+        foreach (var refItem in refsDocs)
+        {
+            refsComp.ShouldContain(r => r.Uri == refItem.Uri && r.Line == refItem.Line && r.StartColumn == refItem.StartColumn,
+                $"ReferencesAt(compilation) must contain reference at {refItem.Uri}:{refItem.Line}:{refItem.StartColumn}");
+        }
+    }
 }
