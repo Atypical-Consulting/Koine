@@ -175,16 +175,39 @@ additive changes are reported as informational and pass.
 | Change | Verdict | Code |
 | --- | --- | --- |
 | Published type removed | **breaking** | KOI1510 |
-| Published field removed (or enum value removed) | **breaking** | KOI1511 |
+| Published **record** field removed | **breaking** | KOI1511 |
 | Published field's type changed | **breaking** | KOI1512 |
 | Optional field made required (`T?` → `T`) | **breaking** | KOI1513 |
 | New **required** field added | **breaking** | KOI1514 |
+| Published field renamed (same shape, new name) | **breaking** | KOI1515 |
+| Published **enum value** removed | **breaking** | KOI1516 |
+| Integration-event payload shape changed (a breaking add/remove/retype) | **breaking** | KOI1517 |
 | New **optional** field added (`T?`) | non-breaking | — |
 | New event / new type added | non-breaking | — |
 | New enum value added | non-breaking | — |
 
 Optionality is the `?` type suffix: `note: String?` is optional and additive; `note: String`
 is required.
+
+A **rename** (KOI1515) is detected when a removed field and an added field share the same shape
+(type, ignoring nullability) and optionality — so `total: Decimal` → `amount: Decimal` reports a
+single rename rather than a separate remove + add. An **integration event** is a wire contract, so
+any breaking payload change additionally reports an event-level shape-change summary (KOI1517)
+alongside the per-field code.
+
+### Per-rule severity (`koine.config`)
+
+The default verdicts above are a policy, not a law. A `koine.config` can override the impact of any
+code with a `check.severity.<CODE>` key — `Breaking`, `NonBreaking`, or `Ignored`:
+
+```ini
+# koine.config — relax the rename rule for this repo.
+check.severity.KOI1515 = NonBreaking   # a rename no longer fails the gate
+check.severity.KOI1512 = Ignored       # drop type-change reports entirely
+```
+
+`NonBreaking` downgrades a change so it no longer trips the exit code; `Ignored` drops it from the
+report altogether; `Breaking` (re)promotes one. Codes with no override keep their default verdict.
 
 ### A worked example
 

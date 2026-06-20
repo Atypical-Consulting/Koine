@@ -188,6 +188,22 @@ and unmet [command preconditions](/Koine/reference/commands-events-state/) (`req
 `catch (DomainInvariantViolationException ex)` can surface any domain-rule failure, with
 `ex.TypeName` and `ex.Rule` available for logging or mapping to an API error.
 
+## Satisfiability analysis
+
+The compiler statically folds the constant parts of each value object's invariants and flags ones that
+can never hold — a value object whose invariants contradict each other can never be constructed, so the
+generated code would always throw. These are warnings (the code still compiles):
+
+| Code | Meaning |
+| --- | --- |
+| `KOI0310` | The whole invariant condition is a constant that can never hold (always `false`). |
+| `KOI0311` | A field's inclusive bounds are inverted (the lower bound exceeds the upper bound), e.g. `x >= 100 && x <= 0`. |
+| `KOI0312` | A field's constant default lies outside the range its invariants require. |
+| `KOI0313` | Two bounds on the same field cannot both hold; their intersection is empty, e.g. `amount > 100 && amount < 10`. |
+
+A `when`-guarded invariant is conditional, so it is never flagged. Exhaustiveness of a smart-enum
+`Match` stays a compile-time guarantee of the generated code — it is deliberately *not* re-checked here.
+
 ## Quick reference
 
 | Form | Emits |
