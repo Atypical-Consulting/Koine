@@ -49,3 +49,73 @@
   padding: var(--koi-space-2);
   overflow-x: auto;
 }
+
+/* --- hand-rolled, addressable SVG renderer (issue #93) ---
+   The structured `{ nodes, edges }` graph is drawn as real DOM (one `.koi-svg-node` group per node,
+   `.koi-svg-edge` per edge). Fills/strokes are driven from the `--koi-*` theme tokens here so a
+   light/dark flip re-themes without re-laying-out; the renderer only sets geometry attributes. */
+.koi-svg-diagram {
+  max-width: 100%;
+  height: auto;
+  display: block;
+  font-family: var(--koi-font-body);
+}
+
+/* nodes */
+.koi-svg-node-box {
+  fill: var(--koi-surface);
+  stroke: var(--koi-line);
+  stroke-width: 1.5;
+}
+.koi-svg-node-label {
+  fill: var(--koi-fg);
+  font-size: 13px;
+  font-weight: 600;
+  pointer-events: none; /* clicks land on the group, not the text (Task 4 reads the group's data-*) */
+}
+
+/* per-kind accents — aggregate roots / contexts get the accent treatment, the rest read as neutral */
+.koi-svg-node[data-kind='aggregate-root'] .koi-svg-node-box,
+.koi-svg-node[data-kind='aggregate'] .koi-svg-node-box,
+.koi-svg-node[data-kind='context'] .koi-svg-node-box {
+  fill: var(--koi-accent);
+  stroke: var(--koi-accent);
+}
+.koi-svg-node[data-kind='aggregate-root'] .koi-svg-node-label,
+.koi-svg-node[data-kind='aggregate'] .koi-svg-node-label,
+.koi-svg-node[data-kind='context'] .koi-svg-node-label {
+  fill: var(--koi-on-accent);
+}
+.koi-svg-node[data-kind='initial'] .koi-svg-node-box,
+.koi-svg-node[data-kind='final'] .koi-svg-node-box {
+  fill: var(--koi-paper-2);
+  stroke: var(--koi-muted);
+}
+
+/* a node with a known source span is clickable (Task 4 wires the navigation) — show the affordance.
+   Nodes without a span (no `data-line`) stay inert: no pointer cursor, no hover lift. */
+.koi-svg-node[data-line] {
+  cursor: pointer;
+}
+.koi-svg-node[data-line]:hover .koi-svg-node-box {
+  stroke: var(--koi-accent);
+  stroke-width: 2;
+}
+
+/* edges */
+.koi-svg-edge-line {
+  fill: none;
+  stroke: var(--koi-line);
+  stroke-width: 1.5;
+}
+.koi-svg-arrowhead {
+  fill: var(--koi-line);
+}
+.koi-svg-edge-label {
+  fill: var(--koi-muted);
+  font-size: 11px;
+  text-anchor: middle;
+  paint-order: stroke;
+  stroke: var(--koi-paper-2);
+  stroke-width: 3px; /* a halo so the label reads over the edge line beneath it */
+}
