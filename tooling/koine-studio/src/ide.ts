@@ -17,7 +17,7 @@ import { getPlatform, type FsEntry, type KoiFile } from './host';
 import { createExplorer } from './explorer';
 import { koineMark } from './logo';
 import { currentTheme, initTheme, onThemeChange, toggleTheme } from './theme';
-import { takeLegacyScratch, initSecrets, loadSettings, pushRecentFolder, type Settings } from './store';
+import { peekLegacyScratch, clearLegacyScratch, initSecrets, loadSettings, pushRecentFolder, type Settings } from './store';
 import { createWelcome } from './welcome';
 import { type Example } from './examples';
 import { createCommandPalette, type Command } from './palette';
@@ -283,8 +283,10 @@ export function init(): void {
   // the language server is up (see the lsp.start callback) so its didOpen resolves cross-file refs.
   const shared = readModelFromHash();
   // One-time migration of the legacy single-file scratch buffer (pre-workspace Studio) into the
-  // default workspace's model.koi. Read+clear here so it is applied at most once.
-  const legacyScratch = takeLegacyScratch();
+  // default workspace's model.koi. Peek only — clearLegacyScratch() is called inside
+  // openDefaultWorkspaceFlow once the workspace is confirmed open, so content is never lost
+  // if OPFS is unavailable or the open fails.
+  const legacyScratch = peekLegacyScratch();
   // First paint before the workspace opens; openFolderPath replaces it with the active file's text.
   const initialDoc = (shared?.kind === 'single' ? shared.text : null) ?? legacyScratch ?? SEED;
 
@@ -1416,6 +1418,9 @@ export function init(): void {
       output.setContent('// Koine Studio needs OPFS (a modern browser) to store your model.', 'plain');
       return;
     }
+    // Token confirmed — the workspace is open. Clear the legacy scratch key now so the migration
+    // is non-destructive: content was never lost even if OPFS was unavailable on a prior load.
+    clearLegacyScratch();
     await openFolderPath(token, { recent: false });
     const only = buffers.size === 1 ? Array.from(buffers.values())[0] : null;
     if (only && only.text === SEED) welcome.show();

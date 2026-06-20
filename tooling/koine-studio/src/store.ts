@@ -302,22 +302,28 @@ export function clearRecentFolders(): void {
   writeRaw(RECENT_KEY, JSON.stringify([]));
 }
 
-// --- legacy scratch migration (one-time read+clear) --------------------------
+// --- legacy scratch migration helpers ----------------------------------------
 
 /**
- * One-time read+clear of the legacy single-file scratch buffer (pre-workspace Studio), used by the
- * boot migration into the default workspace. Returns the text once, then forgets it.
+ * Read the legacy single-file scratch buffer (pre-workspace Studio) without clearing it.
+ * Call this at boot to check whether a migration is needed; call {@link clearLegacyScratch}
+ * only AFTER the default workspace has actually opened, so the content is never lost if OPFS
+ * is unavailable or the open fails.
  */
-export function takeLegacyScratch(): string | null {
-  const text = readRaw(SCRATCH_KEY);
-  if (text !== null) {
-    try {
-      localStorage.removeItem(SCRATCH_KEY);
-    } catch {
-      // storage unavailable — nothing to clear
-    }
+export function peekLegacyScratch(): string | null {
+  return readRaw(SCRATCH_KEY);
+}
+
+/**
+ * Remove the legacy scratch key from localStorage. Best-effort — swallows storage errors.
+ * Only call this after a successful workspace open so the migration is non-destructive.
+ */
+export function clearLegacyScratch(): void {
+  try {
+    localStorage.removeItem(SCRATCH_KEY);
+  } catch {
+    // storage unavailable — nothing to clear
   }
-  return text;
 }
 
 // --- assistant conversation (per workspace) ----------------------------------

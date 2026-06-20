@@ -7,7 +7,8 @@ import {
   initSecrets,
   saveApiKey,
   clearApiKey,
-  takeLegacyScratch,
+  peekLegacyScratch,
+  clearLegacyScratch,
 } from './store';
 import type { ChatMessage } from './ai';
 
@@ -83,12 +84,20 @@ describe('API key secret', () => {
   });
 });
 
-describe('takeLegacyScratch', () => {
+describe('legacy scratch migration helpers', () => {
   beforeEach(() => localStorage.clear());
 
-  test('takeLegacyScratch returns the stored value once, then clears it', () => {
+  test('peekLegacyScratch returns the stored value without clearing it', () => {
     localStorage.setItem('koine.studio.scratch', 'context Legacy {}');
-    expect(takeLegacyScratch()).toBe('context Legacy {}');
-    expect(takeLegacyScratch()).toBeNull(); // cleared after the first read
+    expect(peekLegacyScratch()).toBe('context Legacy {}');
+    expect(peekLegacyScratch()).toBe('context Legacy {}'); // still present — not cleared
+    expect(localStorage.getItem('koine.studio.scratch')).toBe('context Legacy {}');
+  });
+
+  test('clearLegacyScratch removes the key; peekLegacyScratch returns null afterward', () => {
+    localStorage.setItem('koine.studio.scratch', 'context Legacy {}');
+    clearLegacyScratch();
+    expect(peekLegacyScratch()).toBeNull();
+    expect(localStorage.getItem('koine.studio.scratch')).toBeNull();
   });
 });
