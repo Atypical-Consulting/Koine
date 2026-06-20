@@ -38,6 +38,7 @@ public sealed class ServerSmokeTests
         names.ShouldContain("koine_format");
         names.ShouldContain("koine_reference");
         names.ShouldContain("koine_examples");
+        names.ShouldContain("koine_coverage");
     }
 
     [Fact]

@@ -216,6 +216,18 @@ public sealed class ToolTests
         }
     }
 
+    // ---- koine_coverage ----
+
+    [Fact]
+    public void Coverage_billing_csharp_is_complete_and_includes_money()
+    {
+        var report = CoverageTool.Coverage(Files(Billing));
+
+        report.Target.ShouldBe("csharp");
+        report.IsComplete.ShouldBeTrue();
+        report.Items.ShouldContain(i => i.Kind == "value" && i.Name == "Money");
+    }
+
     // ---- koine_examples ----
 
     [Fact]
