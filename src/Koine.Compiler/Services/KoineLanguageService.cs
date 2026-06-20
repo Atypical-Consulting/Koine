@@ -1274,6 +1274,15 @@ public sealed class KoineLanguageService
         }
 
         var offset = OffsetOf(source, line, character);
+
+        // Reject a rename that would collide with an existing declaration in the SAME namespace
+        // (e.g. type Order -> an existing type Customer). The check is kind-scoped, so a same-named
+        // declaration in a DIFFERENT namespace (an enum member named like a type) does not block it.
+        if (compilation.WorkspaceIndex.WouldCollide(activeUri, name, offset, ctx.EnclosingTypeName, newName))
+        {
+            return null;
+        }
+
         var refs = compilation.WorkspaceIndex.FindReferences(activeUri, name, offset, ctx.EnclosingTypeName);
         return refs.Count == 0 ? null : refs;
     }
