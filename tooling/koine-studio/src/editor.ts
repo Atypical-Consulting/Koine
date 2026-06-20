@@ -199,6 +199,15 @@ const sharedTheme = EditorView.theme({
   // drawSelection() hides the native caret and paints its own .cm-cursor via border-left, which
   // otherwise falls back to CodeMirror's default black — invisible on the dark theme's background.
   '.cm-cursor, .cm-dropCursor': { borderLeftColor: 'var(--koi-accent)' },
+  // drawSelection() also paints the selection range as .cm-selectionBackground in a layer behind
+  // the text. With no rule of our own CodeMirror uses its built-in light-grey defaults
+  // (#d9d9d9, focused #d7d4f0) for both themes — a near-white box that washes out the already
+  // light text in dark mode (the contrast bug). Tint the theme accent instead so the highlight
+  // reads in both themes and keeps syntax colours legible on top. The focused selector mirrors
+  // CodeMirror's own 5-class chain so our rule wins the cascade by source order (equal specificity,
+  // our theme is registered after the low-priority base theme).
+  '.cm-selectionLayer .cm-selectionBackground, &.cm-focused > .cm-scroller > .cm-selectionLayer .cm-selectionBackground':
+    { backgroundColor: 'color-mix(in srgb, var(--koi-accent) 30%, transparent)' },
   '&.cm-focused': { outline: 'none' },
   '.cm-activeLine': { backgroundColor: 'color-mix(in srgb, var(--koi-accent) 6%, transparent)' },
   '.cm-activeLineGutter': { backgroundColor: 'transparent', color: 'var(--koi-accent)' },
