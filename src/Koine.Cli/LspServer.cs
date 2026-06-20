@@ -167,6 +167,7 @@ internal sealed class LspServer
                                     ["definitionProvider"] = true,
                                     ["documentFormattingProvider"] = true,
                                     ["documentSymbolProvider"] = true,
+                                    ["workspaceSymbolProvider"] = true,
                                     ["referencesProvider"] = true,
                                     ["renameProvider"] = new Dictionary<string, object?>
                                     {
@@ -300,6 +301,14 @@ internal sealed class LspServer
                             if (root.TryGetProperty("id", out _))
                             {
                                 Respond(root, DocumentSymbolResultJson(root));
+                            }
+
+                            break;
+
+                        case "workspace/symbol":
+                            if (root.TryGetProperty("id", out _))
+                            {
+                                Respond(root, WorkspaceSymbolResultJson(root));
                             }
 
                             break;
@@ -612,6 +621,32 @@ internal sealed class LspServer
             ["selectionRange"] = SpanRange(selection),
             ["children"] = s.Children.Select(ToLspSymbol).ToArray(),
         };
+    }
+
+    // ---- Workspace symbols ------------------------------------------------
+
+    private object? WorkspaceSymbolResultJson(JsonElement root)
+    {
+        var query = root.TryGetProperty("params", out var p)
+            && p.TryGetProperty("query", out var q)
+            && q.ValueKind == JsonValueKind.String
+                ? q.GetString() ?? ""
+                : "";
+
+        // Search the merged view: on-disk workspace files overlaid by open/edited docs.
+        return _ls.WorkspaceSymbols(Workspace(), query)
+            .Select(s => (object)new Dictionary<string, object?>
+            {
+                ["name"] = s.Name,
+                ["kind"] = LspSymbolKind(s.Kind),
+                ["location"] = new Dictionary<string, object?>
+                {
+                    ["uri"] = s.Uri,
+                    ["range"] = SpanRange(s.Range),
+                },
+                ["containerName"] = s.ContainerName,
+            })
+            .ToArray();
     }
 
     /// <summary>Maps a service <see cref="SymbolKind"/> to its LSP SymbolKind number.</summary>

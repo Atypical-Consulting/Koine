@@ -68,6 +68,20 @@ public sealed record DocumentSymbol(
     IReadOnlyList<DocumentSymbol> Children);
 
 /// <summary>
+/// One flat workspace-wide symbol: a declaration's <see cref="Name"/> and <see cref="Kind"/>,
+/// the <see cref="Uri"/> of the file it lives in, its identifier <see cref="Range"/> (the LSP
+/// <c>location.range</c>), and the name of its containing declaration (<see cref="ContainerName"/> —
+/// a type's container is its context, a member's container is its type). Editor-agnostic; the LSP /
+/// WASM shells map it to an LSP <c>SymbolInformation</c>.
+/// </summary>
+public sealed record WorkspaceSymbol(
+    string Name,
+    SymbolKind Kind,
+    string Uri,
+    SourceSpan Range,
+    string? ContainerName);
+
+/// <summary>
 /// Editor-agnostic language services for <c>.koi</c>. <see cref="CompleteAt"/> is
 /// single-file and lexer-only (works on broken documents). <see cref="HoverAt"/> and
 /// <see cref="DefinitionAt"/> take a workspace document map (uri → source) plus the
@@ -639,6 +653,74 @@ public sealed class KoineLanguageService
         EventDecl or IntegrationEventDecl => SymbolKind.Struct,
         _ => SymbolKind.Class,
     };
+
+    /// <summary>
+    /// A flat, workspace-wide symbol search — the LSP <c>workspace/symbol</c> answer. Flattens
+    /// the <see cref="DocumentSymbols(string)"/> outline of every document, recording each symbol's
+    /// containing parent name (a type's container is its context, a member's container is its type),
+    /// then keeps only those whose name <paramref name="query"/>-subsequence-matches (case-insensitive,
+    /// like an IDE fuzzy filter). An empty <paramref name="query"/> returns every declaration.
+    /// </summary>
+    public IReadOnlyList<WorkspaceSymbol> WorkspaceSymbols(IReadOnlyDictionary<string, string> documents, string query)
+    {
+        var results = new List<WorkspaceSymbol>();
+        foreach (var (uri, source) in documents)
+        {
+            foreach (var top in DocumentSymbols(source))
+            {
+                FlattenSymbol(results, uri, top, container: null, query);
+            }
+        }
+
+        return results;
+    }
+
+    private static void FlattenSymbol(
+        List<WorkspaceSymbol> results,
+        string uri,
+        DocumentSymbol symbol,
+        string? container,
+        string query)
+    {
+        if (IsSubsequence(query, symbol.Name))
+        {
+            // Use the identifier span (selectionRange) as the location; fall back to the full range.
+            var range = symbol.SelectionRange.IsNone ? symbol.Range : symbol.SelectionRange;
+            results.Add(new WorkspaceSymbol(symbol.Name, symbol.Kind, uri, range, container));
+        }
+
+        foreach (var child in symbol.Children)
+        {
+            FlattenSymbol(results, uri, child, symbol.Name, query);
+        }
+    }
+
+    /// <summary>
+    /// Case-insensitive subsequence match: every character of <paramref name="query"/> appears in
+    /// <paramref name="text"/> in order (not necessarily contiguous). An empty query matches anything.
+    /// </summary>
+    private static bool IsSubsequence(string query, string text)
+    {
+        if (string.IsNullOrEmpty(query))
+        {
+            return true;
+        }
+
+        var qi = 0;
+        foreach (var c in text)
+        {
+            if (char.ToLowerInvariant(c) == char.ToLowerInvariant(query[qi]))
+            {
+                qi++;
+                if (qi == query.Length)
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
 
     /// <summary>
     /// Every reference to the name under the cursor, across the workspace (declaration

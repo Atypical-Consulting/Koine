@@ -348,6 +348,28 @@ public static partial class CompilerInterop
     }
 
     /// <summary>
+    /// A flat, workspace-wide symbol search (LSP <c>workspace/symbol</c>): every declaration across the
+    /// merged workspace whose name case-insensitively subsequence-matches <paramref name="query"/>
+    /// (an empty query returns all). Returns a JSON <c>SymbolInformation[]</c>. Parity with the stdio LSP.
+    /// </summary>
+    [JSExport]
+    public static string WorkspaceSymbols(string filesJson, string query)
+    {
+        try
+        {
+            var docs = DeserializeFiles(filesJson).ToDictionary(f => f.Uri, f => f.Text, StringComparer.Ordinal);
+            var symbols = LanguageService.WorkspaceSymbols(docs, query)
+                .Select(s => new WWorkspaceSymbol(s.Name, LspSymbolKind(s.Kind), s.Uri, SpanRange(s.Range), s.ContainerName))
+                .ToArray();
+            return JsonSerializer.Serialize(symbols, LangJson.Default.WWorkspaceSymbolArray);
+        }
+        catch
+        {
+            return "[]";
+        }
+    }
+
+    /// <summary>
     /// Canonical formatting edits for <paramref name="source"/>. Returns a single full-document
     /// <c>TextEdit</c> when formatting changes anything, or an empty array when it is already canonical.
     /// </summary>
@@ -819,6 +841,9 @@ public sealed record WSignatureHelp(WSignatureInfo[] Signatures, int ActiveSigna
 /// <summary>LSP DocumentSymbol (recursive).</summary>
 public sealed record WDocumentSymbol(string Name, int Kind, WRange Range, WRange SelectionRange, WDocumentSymbol[] Children);
 
+/// <summary>LSP SymbolInformation (flat, workspace-wide): name, kind, location, and container.</summary>
+public sealed record WWorkspaceSymbol(string Name, int Kind, string Uri, WRange Range, string? ContainerName);
+
 /// <summary>LSP TextEdit.</summary>
 public sealed record WTextEdit(WRange Range, string NewText);
 
@@ -861,6 +886,7 @@ public sealed record WSourceFileDto(string Uri, string Text);
 [JsonSerializable(typeof(WLocation[]))]
 [JsonSerializable(typeof(WSignatureHelp))]
 [JsonSerializable(typeof(WDocumentSymbol[]))]
+[JsonSerializable(typeof(WWorkspaceSymbol[]))]
 [JsonSerializable(typeof(WTextEdit[]))]
 [JsonSerializable(typeof(WPrepareRename))]
 [JsonSerializable(typeof(WWorkspaceEdit))]

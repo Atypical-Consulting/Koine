@@ -133,6 +133,17 @@ export interface DocumentSymbol {
   children?: DocumentSymbol[];
 }
 
+// Standard LSP SymbolInformation (flat, workspace-wide): the `workspace/symbol` result.
+// `kind` is the SymbolKind number (same scheme as DocumentSymbol). `containerName` is the
+// name of the enclosing declaration (a type's context, or a member's type).
+export interface WorkspaceSymbol {
+  name: string;
+  kind: number;
+  uri: string;
+  range: Range;
+  containerName?: string;
+}
+
 // Standard LSP TextEdit: replace `range` with `newText`.
 export interface TextEdit {
   range: Range;
