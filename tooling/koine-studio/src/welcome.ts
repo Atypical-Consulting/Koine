@@ -305,16 +305,24 @@ export function createWelcome(cb: WelcomeCallbacks, templates: readonly Template
     // Past a handful of recents, offer a free-text filter (name or full path). The query is
     // closure-scoped so it persists across the input-driven re-renders.
     if (all.length > FILTER_THRESHOLD) {
+      const filterId = `koi-welcome-recent-filter-${Math.random().toString(36).slice(2, 8)}`;
+
+      const filterLabel = document.createElement('label');
+      filterLabel.className = 'koi-sr-only';
+      filterLabel.htmlFor = filterId;
+      filterLabel.textContent = 'Filter recent folders';
+
       const filter = document.createElement('input');
       filter.type = 'search';
+      filter.id = filterId;
       filter.className = 'koi-welcome-recent-filter';
       filter.placeholder = 'Filter recent folders…';
-      filter.setAttribute('aria-label', 'Filter recent folders');
       filter.value = recentQuery;
       filter.addEventListener('input', () => {
         recentQuery = filter.value;
         renderRecent();
       });
+      recent.appendChild(filterLabel);
       recent.appendChild(filter);
     }
 

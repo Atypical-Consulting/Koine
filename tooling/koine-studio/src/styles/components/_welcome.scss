@@ -424,6 +424,14 @@
   opacity: 1;
 }
 
+/* Reveal an individual action button the moment it takes keyboard focus,
+   independent of row :focus-within — a keyboard user tabbing in must see it. */
+.koi-welcome-recent-pin:focus-visible,
+.koi-welcome-recent-copy:focus-visible,
+.koi-welcome-recent-remove:focus-visible {
+  opacity: 1;
+}
+
 /* Pinned: keep the star visible and accented even when not hovering. */
 .koi-welcome-recent-item.is-pinned .koi-welcome-recent-pin {
   opacity: 1;
@@ -457,6 +465,7 @@
   cursor: pointer;
 
   &:hover { color: var(--koi-fg); text-decoration: underline; }
+  &:focus-visible { outline: 2px solid var(--koi-accent); outline-offset: 1px; }
 }
 
 .koi-welcome-recent-item-name {
