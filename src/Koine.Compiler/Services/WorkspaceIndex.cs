@@ -130,8 +130,17 @@ public sealed class WorkspaceIndex
     /// is a single-file role check, not cross-file resolution — so a cross-file <c>TypeRef</c> (which
     /// is not a declaration name and cannot be classified) is conservatively KEPT, preserving
     /// cross-file type rename. It prevents the corruption where renaming a type <c>Status</c> also
-    /// rewrote a same-named enum member or field. Member-access selectors (the <c>total</c> in
-    /// <c>order.total</c>) need receiver-type inference we do not have here and are out of scope.</para>
+    /// rewrote a same-named enum member or field.</para>
+    ///
+    /// <para>Member-access selectors DO participate. For a member target (the <c>amount</c> in
+    /// <c>total.amount</c>) the binder types the receiver and interns the selector's
+    /// <see cref="MemberSymbol"/>, so <see cref="IdentityReferences"/> reaches it by symbol identity (the
+    /// receiver's resolved type must own the target member). For an enum-member target the qualified
+    /// selector (the <c>Cancelled</c> in <c>RefundStatus.Cancelled</c>) binds to the interned
+    /// <see cref="EnumMemberSymbol"/>, so <see cref="EnumMemberReferences"/> reaches it via
+    /// <see cref="SemanticModel.ReferencedSymbolAt"/> and rewrites it while leaving a sibling enum's
+    /// same-named bare member untouched. A selector whose receiver the binder cannot type stays unbound
+    /// and is simply not rewritten.</para>
     /// </summary>
     public IReadOnlyList<Reference> FindReferences(string activeUri, string name, int? offset = null, string? enclosingType = null)
     {
@@ -172,6 +181,57 @@ public sealed class WorkspaceIndex
         }
 
         return refs;
+    }
+
+    /// <summary>
+    /// True when renaming the symbol under the cursor in <paramref name="activeUri"/> to
+    /// <paramref name="newName"/> would COLLIDE with an existing declaration in the SAME namespace —
+    /// so the rename must be rejected. The check is keyed by the target's KIND, never by bare name, so
+    /// an unrelated same-named declaration in a different namespace does NOT block the rename:
+    /// <list type="bullet">
+    /// <item><b>Type / spec / ID</b> (the type namespace): collides only with an existing
+    /// type/spec/ID of <paramref name="newName"/> anywhere in the workspace — a same-named enum
+    /// member or field never blocks it.</item>
+    /// <item><b>Enum member:</b> collides only with a sibling member of the SAME owning enum — a
+    /// same-named member in a different enum, or a same-named type, never blocks it.</item>
+    /// <item><b>Member (field):</b> collides only with another member of the SAME owning type.</item>
+    /// <item><b>Parameter / anything else:</b> never gated here (local scope; out of scope).</item>
+    /// </list>
+    /// Returns <c>false</c> when the cursor is not on a renameable symbol (the caller's other guards
+    /// already handle that).
+    /// </summary>
+    public bool WouldCollide(string activeUri, string name, int? offset, string? enclosingType, string newName)
+    {
+        if (ResolveTarget(activeUri, name, offset, enclosingType) is not { } target)
+        {
+            return false;
+        }
+
+        switch (target)
+        {
+            // Type namespace: a declared type, a spec, or an ID value object all share one namespace.
+            // Block only when newName already names one of those somewhere in the workspace.
+            case TypeSymbol or SpecSymbol or IdValueObjectSymbol:
+                return _byUri.Values.Any(sema =>
+                    sema.GetSymbol(newName) is TypeSymbol or SpecSymbol or IdValueObjectSymbol);
+
+            // Enum member: block only when the SAME owning enum already declares newName, looked up
+            // within the model that OWNS the target (the active document) — so a same-simple-name
+            // enum in a different R13.2 context cannot drive the collision decision.
+            case EnumMemberSymbol enumMember:
+                return _byUri.TryGetValue(activeUri, out SemanticModel? enumOwner)
+                    && enumOwner.Index.EnumsDeclaring(newName).Contains(enumMember.EnumName);
+
+            // Field: block only when the SAME owning type already declares a member newName, looked
+            // up within the model that OWNS the target (the active document) — so a same-simple-name
+            // type in a different context cannot drive the collision decision.
+            case MemberSymbol member:
+                return _byUri.TryGetValue(activeUri, out SemanticModel? memberOwner)
+                    && memberOwner.Index.TryGetMemberType(member.OwnerType, newName, out _);
+
+            default:
+                return false; // parameters / locals: not gated
+        }
     }
 
     /// <summary>
@@ -303,9 +363,11 @@ public sealed class WorkspaceIndex
     /// text matches and which resolves (in its own document, by position) to an enum member of the
     /// same owning enum (compared by <see cref="Symbol.DeclSpan"/>). This keeps a rename of
     /// <c>Phase.Active</c> from touching an unrelated <c>State.Active</c>. The declaration token
-    /// resolves via <see cref="SemanticModel.DeclaredSymbolAt"/>; in-expression references via
-    /// <see cref="SemanticModel.DefinitionAt"/>. (Member-access selectors like <c>Phase.Active</c>
-    /// need receiver typing we lack and are out of scope — see the class remarks.)
+    /// resolves via <see cref="SemanticModel.DeclaredSymbolAt"/>; bare in-expression references via
+    /// <see cref="SemanticModel.DefinitionAt"/>; and a qualified <c>Phase.Active</c> selector via
+    /// <see cref="SemanticModel.ReferencedSymbolAt"/> (the binder interns the selector's enum-member
+    /// symbol). The same <see cref="Symbol.DeclSpan"/> equality used for the bare case keeps a
+    /// sibling enum's same-named member from being rewritten.
     /// </summary>
     private IReadOnlyList<Reference> EnumMemberReferences(EnumMemberSymbol target)
     {
@@ -325,7 +387,7 @@ public sealed class WorkspaceIndex
                 }
 
                 var off = tok.StartIndex;
-                Symbol? resolved = sema.DeclaredSymbolAt(off) ?? sema.DefinitionAt(off);
+                Symbol? resolved = sema.DeclaredSymbolAt(off) ?? sema.DefinitionAt(off) ?? sema.ReferencedSymbolAt(off);
                 if (resolved is EnumMemberSymbol em && em.DeclSpan == target.DeclSpan)
                 {
                     refs.Add(ToReference(uri, tok));

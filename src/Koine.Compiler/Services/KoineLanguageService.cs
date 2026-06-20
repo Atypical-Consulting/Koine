@@ -1,3 +1,4 @@
+using Antlr4.Runtime;
 using Koine.Compiler.Ast;
 using Koine.Compiler.Grammar;
 
@@ -6,8 +7,25 @@ namespace Koine.Compiler.Services;
 /// <summary>The kind of a completion item; the LSP shell maps these to LSP numbers.</summary>
 public enum CompletionItemKind { Keyword, Class, Enum, EnumMember, Field, Property, Method }
 
-/// <summary>A single completion candidate, free of any LSP/JSON concepts.</summary>
-public sealed record CompletionItem(string Label, CompletionItemKind Kind, string? Detail, string? Documentation);
+/// <summary>
+/// A single completion candidate, free of any LSP/JSON concepts. The trailing fields are
+/// optional and additive so the many <c>new CompletionItem(label, kind, detail, doc)</c> call
+/// sites keep compiling unchanged: <see cref="InsertText"/>/<see cref="InsertTextFormat"/> carry a
+/// snippet body (format 2 = snippet, 1/<c>null</c> = plaintext); <see cref="CommitCharacters"/>
+/// commit the item when typed; <see cref="SortText"/> orders the list (prefix matches before
+/// non-prefix subsequence matches); <see cref="Data"/> is an opaque round-trip token for an LSP
+/// <c>completionItem/resolve</c>.
+/// </summary>
+public sealed record CompletionItem(
+    string Label,
+    CompletionItemKind Kind,
+    string? Detail,
+    string? Documentation,
+    string? InsertText = null,
+    int? InsertTextFormat = null,
+    IReadOnlyList<string>? CommitCharacters = null,
+    string? SortText = null,
+    string? Data = null);
 
 /// <summary>A hover card: rendered markdown plus the located token's 1-based start.</summary>
 public sealed record HoverResult(string Markdown);
@@ -30,6 +48,26 @@ public sealed record TextEditModel(SourceSpan Range, string NewText);
 /// </summary>
 public sealed record CodeActionEdit(string Title, string Kind, IReadOnlyList<TextEditModel> Edits);
 
+/// <summary>One parameter of a signature, with its display <see cref="Label"/> (e.g. <c>a: Decimal</c>).</summary>
+public sealed record ParameterInfo(string Label);
+
+/// <summary>
+/// One callable signature for signature help: a full <see cref="Label"/> (e.g.
+/// <c>place(a: Decimal, b: Decimal)</c>) and its ordered <see cref="Parameters"/>. Editor-agnostic.
+/// </summary>
+public sealed record SignatureInfo(string Label, IReadOnlyList<ParameterInfo> Parameters);
+
+/// <summary>
+/// A signature-help answer: the resolved <see cref="Signatures"/> (always one for Koine, which
+/// has no overloads), the <see cref="ActiveSignature"/> index, and the <see cref="ActiveParameter"/>
+/// the cursor sits on (the count of top-level commas between the call's <c>(</c> and the cursor).
+/// Editor-agnostic; the LSP/WASM shells map it to an LSP SignatureHelp.
+/// </summary>
+public sealed record SignatureHelp(
+    IReadOnlyList<SignatureInfo> Signatures,
+    int ActiveSignature,
+    int ActiveParameter);
+
 /// <summary>The kind of a document symbol; the LSP shell maps these to LSP SymbolKind numbers.</summary>
 public enum SymbolKind { Namespace, Class, Enum, EnumMember, Field, Method, Constructor, Interface, Struct }
 
@@ -45,6 +83,49 @@ public sealed record DocumentSymbol(
     SourceSpan Range,
     SourceSpan SelectionRange,
     IReadOnlyList<DocumentSymbol> Children);
+
+/// <summary>
+/// One flat workspace-wide symbol: a declaration's <see cref="Name"/> and <see cref="Kind"/>,
+/// the <see cref="Uri"/> of the file it lives in, its identifier <see cref="Range"/> (the LSP
+/// <c>location.range</c>), and the name of its containing declaration (<see cref="ContainerName"/> —
+/// a type's container is its context, a member's container is its type). Editor-agnostic; the LSP /
+/// WASM shells map it to an LSP <c>SymbolInformation</c>.
+/// </summary>
+public sealed record WorkspaceSymbol(
+    string Name,
+    SymbolKind Kind,
+    string Uri,
+    SourceSpan Range,
+    string? ContainerName);
+
+/// <summary>
+/// One collapsible region: the <see cref="SourceSpan"/> of a multi-line block declaration
+/// (context, type, service, aggregate, entity, enum, …). The span is 1-based and end-EXCLUSIVE;
+/// the LSP/WASM shells convert it to a 0-based <c>{ startLine, endLine }</c> fold. Editor-agnostic.
+/// </summary>
+public sealed record FoldingRange(SourceSpan Range);
+
+/// <summary>
+/// One link in an LSP selection-range chain: the <see cref="Range"/> the editor expands to,
+/// and the <see cref="Parent"/> range it grows into next (a strictly larger enclosing node),
+/// innermost first. The span is 1-based and end-EXCLUSIVE. Editor-agnostic; the LSP/WASM shells
+/// map the chain to nested <c>{ range, parent? }</c> objects.
+/// </summary>
+public sealed record SelectionRange(SourceSpan Range, SelectionRange? Parent);
+
+/// <summary>
+/// One editor code lens: the <see cref="Range"/> it annotates (a declaration's identifier
+/// <c>NameSpan</c>, 1-based end-EXCLUSIVE), the declaration <see cref="Name"/> and the
+/// <see cref="Uri"/> of the file it lives in, plus the resolved <see cref="Title"/> — the
+/// reference-count label (<c>"N references"</c>, references-from-elsewhere = total references
+/// minus the declaration itself). The title may be filled lazily over an LSP
+/// <c>codeLens/resolve</c> round-trip, so it is nullable. Editor-agnostic.
+/// </summary>
+public sealed record CodeLens(
+    string Name,
+    string Uri,
+    SourceSpan Range,
+    string? Title);
 
 /// <summary>
 /// Editor-agnostic language services for <c>.koi</c>. <see cref="CompleteAt"/> is
@@ -93,21 +174,25 @@ public sealed class KoineLanguageService
         }
 
         var (model, _) = _compiler.Parse(source);
-        var index = model is null ? null : new ModelIndex(model);
 
         // Member access (`receiver.`) almost always sits in a doc that doesn't parse yet —
-        // the dangling '.' is a syntax error. Repair it by inserting a placeholder member
-        // name at the cursor and re-parsing, so the receiver's type can still be resolved.
-        if (index is null && ctx.PrecedingToken?.Type == KoineLexer.DOT)
+        // the dangling '.' is a syntax error. Even when the whole doc DID parse, a syntax error
+        // ELSEWHERE can leave the model partial. Repair the dangling '.' by inserting a
+        // placeholder member name at the cursor and re-parsing, so the receiver's type still
+        // binds; prefer the repaired model (it recovers the most declarations).
+        if (ctx.PrecedingToken?.Type == KoineLexer.DOT)
         {
             var (repaired, _) = _compiler.Parse(InsertPlaceholder(source, line, character));
             if (repaired is not null)
             {
-                index = new ModelIndex(repaired);
+                model = repaired;
             }
         }
 
-        var items = CandidatesFor(ctx, index);
+        var semantic = model is null ? null : new SemanticModel(model);
+        var index = semantic?.Index;
+
+        var items = CandidatesFor(ctx, semantic, index, source, line, character);
         return Filter(items, ctx.Partial);
     }
 
@@ -130,7 +215,8 @@ public sealed class KoineLanguageService
         return string.Join('\n', lines);
     }
 
-    private IReadOnlyList<CompletionItem> CandidatesFor(TokenContext ctx, ModelIndex? index)
+    private IReadOnlyList<CompletionItem> CandidatesFor(
+        TokenContext ctx, SemanticModel? semantic, ModelIndex? index, string source, int line, int character)
     {
         var trigger = ctx.PrecedingToken?.Type;
 
@@ -153,7 +239,7 @@ public sealed class KoineLanguageService
         // name, or a declared type name); a multi-hop chain `a.b.c` resolves left-to-right.
         if (trigger == KoineLexer.DOT)
         {
-            return DotCandidates(ctx, index);
+            return DotCandidates(ctx, semantic, index, source, line, character);
         }
 
         // Enum value position: after '=' (a field/param default). Resolve the
@@ -170,7 +256,7 @@ public sealed class KoineLanguageService
             || trigger == KoineLexer.LBRACE
             || trigger == KoineLexer.RBRACE)
         {
-            return Keywords(StartersFor(ctx.EnclosingKeyword));
+            return Starters(StartersFor(ctx.EnclosingKeyword));
         }
 
         // Expression-operand position inside a fielded type body (e.g. `invariant
@@ -187,13 +273,17 @@ public sealed class KoineLanguageService
     }
 
     /// <summary>
-    /// Members offered after <c>receiver.</c>. The receiver is the token immediately
-    /// before the '.' (<see cref="TokenContext.TokenBeforePreceding"/>): a field in the
-    /// enclosing fielded type (offer that field type's members), a declared enum type
-    /// (offer its members), or any declared value/entity type (offer its members). Returns
-    /// nothing when nothing resolves — never guesses.
+    /// Members offered after <c>receiver.</c>. The receiver immediately before the '.' may be a
+    /// single token or a multi-hop chain (<c>order.line.</c>). Resolution is binder-first:
+    /// the receiver chain is reconstructed as an <see cref="Expr"/> and typed through
+    /// <see cref="SemanticModel.GetTypeInfo"/> against a <see cref="TypeScope"/> of the enclosing
+    /// type's members (R13.2 context-scoped), so it survives a placeholder-repaired broken document
+    /// AND multi-hops. When the binder cannot determine the receiver type, it falls back to the flat
+    /// <see cref="ModelIndex"/> single-hop resolution (enum type / declared type / enclosing field),
+    /// so existing behaviour never regresses. Returns nothing when nothing resolves — never guesses.
     /// </summary>
-    private IReadOnlyList<CompletionItem> DotCandidates(TokenContext ctx, ModelIndex? index)
+    private IReadOnlyList<CompletionItem> DotCandidates(
+        TokenContext ctx, SemanticModel? semantic, ModelIndex? index, string source, int line, int character)
     {
         if (index is null)
         {
@@ -206,7 +296,7 @@ public sealed class KoineLanguageService
             return [];
         }
 
-        // 1. `EnumType.` -> its members.
+        // 1. `EnumType.` -> its members (a static enum reference, not a value).
         if (index.IsEnumType(receiver) && index.TryGetDecl(receiver, out var ed) && ed is EnumDecl en)
         {
             return en.Members
@@ -214,13 +304,22 @@ public sealed class KoineLanguageService
                 .ToList();
         }
 
-        // 2. `Type.` where the receiver is itself a declared value/entity type name.
+        // 2. Binder route: reconstruct the receiver chain (`a.b.c`) up to the trailing '.', type it
+        //    through the SemanticModel, and offer the resolved type's members. This handles the
+        //    multi-hop and broken-doc cases the flat ModelIndex can't.
+        if (semantic is not null
+            && BinderReceiverMembers(ctx, semantic, source, line, character) is { Count: > 0 } bound)
+        {
+            return bound;
+        }
+
+        // 3. Fallback — `Type.` where the receiver is itself a declared value/entity type name.
         if (index.IsKnownType(receiver) && MembersOf(index, receiver) is { Count: > 0 } directMembers)
         {
             return directMembers;
         }
 
-        // 3. `field.` where the receiver is a field of the enclosing fielded type:
+        // 4. Fallback — `field.` where the receiver is a field of the enclosing fielded type:
         //    resolve the field's declared type and offer ITS members.
         if (ctx.EnclosingTypeName is { } scopeType
             && index.TryGetMemberType(scopeType, receiver, out var fieldType)
@@ -231,6 +330,118 @@ public sealed class KoineLanguageService
 
         return [];
     }
+
+    /// <summary>
+    /// The members of the type the receiver chain (everything up to the trailing '.') resolves to,
+    /// via the binder. Builds the chain from the default-channel tokens immediately before the '.',
+    /// constructs an <see cref="Expr"/> (an <see cref="IdentifierExpr"/> root threaded through
+    /// <see cref="MemberAccessExpr"/> hops), and types it in a <see cref="TypeScope"/> of the
+    /// enclosing fielded type's members, resolving from that type's bounded context (R13.2). Returns
+    /// an empty list when there is no enclosing type, the chain doesn't reconstruct, or the receiver
+    /// types to <see cref="ErrorType"/>.
+    /// </summary>
+    private static IReadOnlyList<CompletionItem> BinderReceiverMembers(
+        TokenContext ctx, SemanticModel semantic, string source, int line, int character)
+    {
+        if (ctx.EnclosingTypeName is not { } scopeType
+            || semantic.Index.TryGetDecl(scopeType, out var scopeDecl) is false)
+        {
+            return [];
+        }
+
+        var members = MembersOfDecl(scopeDecl);
+        if (members is null)
+        {
+            return [];
+        }
+
+        var chain = ReceiverChainBeforeDot(source, line, character);
+        if (chain.Count == 0)
+        {
+            return [];
+        }
+
+        Expr expr = new IdentifierExpr(chain[0]);
+        for (var i = 1; i < chain.Count; i++)
+        {
+            expr = new MemberAccessExpr(expr, chain[i]);
+        }
+
+        var scope = TypeScope.FromMembers(members, semantic.Index);
+        var context = ContextOf(semantic, scopeType);
+        var type = semantic.GetTypeInfo(expr, scope, context);
+        if (type.IsError || type.Name is not { } typeName)
+        {
+            return [];
+        }
+
+        return BinderMembersOf(semantic, typeName);
+    }
+
+    /// <summary>
+    /// The default-channel identifier tokens forming the receiver chain immediately before the
+    /// trailing '.' at the cursor (e.g. <c>order . line .</c> -> <c>["order","line"]</c>). Walks the
+    /// lexer tokens back from the '.' nearest the cursor, alternating <c>IDENT . IDENT . …</c>;
+    /// stops at the first non-identifier/non-dot boundary. Empty when no identifier precedes the '.'.
+    /// </summary>
+    private static IReadOnlyList<string> ReceiverChainBeforeDot(string source, int line, int character)
+    {
+        var cursorOffset = OffsetOf(source, line, character);
+        var tokens = DefaultChannelTokensBefore(source, cursorOffset);
+
+        // The token immediately before the cursor must be the trailing '.'.
+        if (tokens.Count == 0 || tokens[^1].Type != KoineLexer.DOT)
+        {
+            return [];
+        }
+
+        var chain = new List<string>();
+        var expectIdentifier = true; // moving backwards: '.' then IDENT then '.' then IDENT …
+        for (var i = tokens.Count - 2; i >= 0; i--) // skip the trailing '.'
+        {
+            var t = tokens[i];
+            if (expectIdentifier)
+            {
+                if (!IsWordToken(t))
+                {
+                    break;
+                }
+
+                chain.Add(t.Text);
+                expectIdentifier = false;
+            }
+            else
+            {
+                if (t.Type != KoineLexer.DOT)
+                {
+                    break;
+                }
+
+                expectIdentifier = true;
+            }
+        }
+
+        chain.Reverse(); // collected right-to-left
+        return chain;
+    }
+
+    /// <summary>The fields of a value/entity declaration usable as an in-scope name set, else null.</summary>
+    private static IReadOnlyList<Member>? MembersOfDecl(TypeDecl decl) => decl switch
+    {
+        ValueObjectDecl v => v.Members,
+        EntityDecl e => e.Members,
+        _ => null,
+    };
+
+    /// <summary>The bounded context that declares <paramref name="typeName"/> (for R13.2 scoping), or null.</summary>
+    private static string? ContextOf(SemanticModel semantic, string typeName) =>
+        // The canonical accessor flattens aggregate-nested types (which the old hand-rolled
+        // Contexts→Types loop missed); first-match-wins is preserved via FirstOrDefault.
+        semantic.Index.DeclaringContextsOf(typeName).FirstOrDefault();
+
+    /// <summary>The member completions of the type the binder resolved the receiver to.</summary>
+    private static IReadOnlyList<CompletionItem> BinderMembersOf(SemanticModel semantic, string typeName) =>
+        MembersOf(semantic.Index, typeName);
 
     /// <summary>The member completions (name + type detail) of a value/entity type, or an empty list.</summary>
     private static IReadOnlyList<CompletionItem> MembersOf(ModelIndex index, string typeName) =>
@@ -362,6 +573,41 @@ public sealed class KoineLanguageService
     private static IReadOnlyList<CompletionItem> Keywords(string[] names) =>
         names.Select(n => new CompletionItem(n, CompletionItemKind.Keyword, "keyword", null)).ToList();
 
+    /// <summary>
+    /// Declaration-start completions: each starter keyword as a SNIPPET (LSP
+    /// <c>insertTextFormat = 2</c>) that scaffolds its idiomatic body with tab-stop placeholders
+    /// (e.g. <c>entity ${1:Name} {\n\t$0\n}</c>), so accepting it lays down a ready-to-fill block.
+    /// Keywords with no block body (e.g. <c>import</c>) fall back to a plain identifier snippet.
+    /// </summary>
+    private static IReadOnlyList<CompletionItem> Starters(string[] names) =>
+        names.Select(n => new CompletionItem(
+            n, CompletionItemKind.Keyword, "keyword", null,
+            InsertText: SnippetFor(n),
+            InsertTextFormat: 2)).ToList();
+
+    /// <summary>The snippet body for a declaration starter keyword (LSP snippet syntax).</summary>
+    private static string SnippetFor(string keyword) => keyword switch
+    {
+        "context" or "module" => keyword + " ${1:Name} {\n\t$0\n}",
+        "value" or "quantity" or "enum" or "event" or "service" or "policy" or "readmodel" or "aggregate" =>
+            keyword + " ${1:Name} {\n\t$0\n}",
+        "entity" => "entity ${1:Name} identified by ${2:Id} {\n\t$0\n}",
+        "spec" => "spec ${1:Name} on ${2:Type} = $0",
+        "query" => "query ${1:Name} { $0 }",
+        "import" => "import ${1:Type} from ${2:Context}",
+        "contextmap" => "contextmap {\n\t$0\n}",
+        "invariant" => "invariant $0",
+        "command" => "command ${1:Name}($2) { $0 }",
+        "create" => "create ${1:Name}($2) { $0 }",
+        "states" => "states ${1:Field} {\n\t$0\n}",
+        "operation" => "operation ${1:Name}($2): ${3:Result}",
+        "usecase" => "usecase ${1:Name}($2): ${3:Result}",
+        "operations" => "operations {\n\t$0\n}",
+        "find" => "find ${1:Name}($2): ${3:Result}",
+        "repository" => "repository {\n\t$0\n}",
+        _ => keyword + " $0",
+    };
+
     private static IReadOnlyList<CompletionItem> Filter(IReadOnlyList<CompletionItem> items, string partial)
     {
         if (partial.Length == 0)
@@ -369,7 +615,23 @@ public sealed class KoineLanguageService
             return items;
         }
 
-        var matched = items.Where(i => i.Label.StartsWith(partial, StringComparison.Ordinal)).ToList();
+        // SUBSEQUENCE match (like an IDE fuzzy filter): every character of `partial` appears in the
+        // label in order, not necessarily contiguous. A prefix match outranks a non-prefix
+        // subsequence match via SortText ("0"+label before "1"+label), so the editor lists the
+        // tightest matches first while still surfacing fuzzy hits.
+        var matched = new List<CompletionItem>();
+        foreach (var item in items)
+        {
+            if (!IsSubsequence(partial, item.Label))
+            {
+                continue;
+            }
+
+            var isPrefix = item.Label.StartsWith(partial, StringComparison.OrdinalIgnoreCase);
+            var sort = (isPrefix ? "0" : "1") + item.Label;
+            matched.Add(item with { SortText = sort });
+        }
+
         return matched; // empty list when nothing matches, by design
     }
 
@@ -491,11 +753,16 @@ public sealed class KoineLanguageService
     public IReadOnlyList<DocumentSymbol> DocumentSymbols(string source)
     {
         var (model, _) = _compiler.Parse(source);
-        if (model is null)
-        {
-            return [];
-        }
+        return model is null ? [] : DocumentSymbols(model);
+    }
 
+    /// <summary>
+    /// The hierarchical symbol outline of an already-parsed model. Lets callers that hold a warm
+    /// <see cref="KoineCompilation"/> snapshot (e.g. <see cref="CodeLenses(KoineCompilation,string)"/>)
+    /// reuse the memoized model instead of re-parsing the source.
+    /// </summary>
+    private static IReadOnlyList<DocumentSymbol> DocumentSymbols(KoineModel model)
+    {
         var contexts = new List<DocumentSymbol>();
         foreach (var ctx in model.Contexts)
         {
@@ -521,6 +788,181 @@ public sealed class KoineLanguageService
             contexts.Add(new DocumentSymbol(ctx.Name, SymbolKind.Namespace, ctx.Span, ctx.NameSpan, children));
         }
         return contexts;
+    }
+
+    /// <summary>
+    /// The collapsible regions of one document — one <see cref="FoldingRange"/> per multi-line
+    /// block declaration (context, type, service, member-bearing entity, enum, aggregate, …).
+    /// Derived from the <see cref="DocumentSymbols(string)"/> outline: any symbol whose full
+    /// <see cref="DocumentSymbol.Range"/> covers more than one line is foldable. Returns an empty
+    /// list when the document does not parse.
+    /// </summary>
+    public IReadOnlyList<FoldingRange> FoldingRanges(string source)
+    {
+        var folds = new List<FoldingRange>();
+        foreach (var top in DocumentSymbols(source))
+        {
+            CollectFolds(folds, top);
+        }
+
+        return folds;
+    }
+
+    private static void CollectFolds(List<FoldingRange> folds, DocumentSymbol symbol)
+    {
+        var range = symbol.Range;
+        // A "multi-line block node" is a positioned node whose declaration spans >1 source line.
+        if (!range.IsNone && range.EndLine > range.Line)
+        {
+            folds.Add(new FoldingRange(range));
+        }
+
+        foreach (var child in symbol.Children)
+        {
+            CollectFolds(folds, child);
+        }
+    }
+
+    /// <summary>
+    /// The selection-range chain at a 0-based LSP <paramref name="line"/>/<paramref name="character"/>:
+    /// the innermost positioned node under the cursor, then each enclosing ancestor with a real span,
+    /// linked innermost-first (each <see cref="SelectionRange.Parent"/> strictly contains its child).
+    /// Returns <c>null</c> when the document does not parse or no node sits under the cursor.
+    /// </summary>
+    public SelectionRange? SelectionRangeAt(string source, int line, int character)
+    {
+        var (model, _) = _compiler.Parse(source);
+        if (model is null)
+        {
+            return null;
+        }
+
+        var semantic = new SemanticModel(model);
+        var offset = OffsetOf(source, line, character);
+
+        // Gather every positioned node whose span contains the offset. The SyntaxGraph parent
+        // chain alone can skip intermediate declarations (e.g. an entity is not the graph-parent of
+        // its members), so we also fold in the DocumentSymbols outline — which nests
+        // member ⊂ type ⊂ context by span — and rank the union by containment (innermost first).
+        var (pl, pc) = OffsetToLineColumn(source, offset);
+        var spans = new List<SourceSpan>();
+
+        void Consider(SourceSpan span)
+        {
+            if (!span.IsNone && Contains(span, pl, pc))
+            {
+                spans.Add(span);
+            }
+        }
+
+        if (semantic.NodeAt(offset) is { } node)
+        {
+            foreach (var n in semantic.AncestorsAndSelf(node))
+            {
+                Consider(n.Span);
+            }
+        }
+
+        foreach (var top in DocumentSymbols(source))
+        {
+            CollectContainingSymbolSpans(top, pl, pc, spans);
+        }
+
+        if (spans.Count == 0)
+        {
+            return null;
+        }
+
+        // Innermost-first: smaller spans before the larger spans that contain them. De-duplicate so
+        // the same declaration does not appear twice (graph + outline), then chain so each parent
+        // strictly contains its child.
+        spans.Sort((a, b) => SpanSize(a).CompareTo(SpanSize(b)));
+
+        SelectionRange? chain = null;
+        var ordered = new List<SourceSpan>();
+        foreach (var span in spans)
+        {
+            if (ordered.Count == 0 || StrictlyContains(span, ordered[^1]))
+            {
+                ordered.Add(span);
+            }
+        }
+
+        for (var i = ordered.Count - 1; i >= 0; i--)
+        {
+            chain = new SelectionRange(ordered[i], chain);
+        }
+
+        return chain;
+    }
+
+    private static void CollectContainingSymbolSpans(DocumentSymbol symbol, int line, int column, List<SourceSpan> spans)
+    {
+        if (!symbol.Range.IsNone && Contains(symbol.Range, line, column))
+        {
+            spans.Add(symbol.Range);
+        }
+
+        if (!symbol.SelectionRange.IsNone && Contains(symbol.SelectionRange, line, column))
+        {
+            spans.Add(symbol.SelectionRange);
+        }
+
+        foreach (var child in symbol.Children)
+        {
+            CollectContainingSymbolSpans(child, line, column, spans);
+        }
+    }
+
+    /// <summary>True when the 1-based <paramref name="line"/>/<paramref name="column"/> point falls
+    /// inside <paramref name="span"/> (end-EXCLUSIVE, matching <see cref="SourceSpan"/>).</summary>
+    private static bool Contains(SourceSpan span, int line, int column)
+    {
+        var afterStart = line > span.Line || (line == span.Line && column >= span.Column);
+        var beforeEnd = line < span.EndLine || (line == span.EndLine && column < span.EndColumn);
+        return afterStart && beforeEnd;
+    }
+
+    /// <summary>A monotone size proxy for a span (line-weighted) used only to order nested spans.</summary>
+    private static long SpanSize(SourceSpan span) =>
+        ((long)(span.EndLine - span.Line) << 20) + (span.EndColumn - span.Column);
+
+    /// <summary>The 1-based line/column of a 0-based absolute <paramref name="offset"/> in <paramref name="source"/>.</summary>
+    private static (int Line, int Column) OffsetToLineColumn(string source, int offset)
+    {
+        var line = 1;
+        var column = 1;
+        var end = Math.Min(offset, source.Length);
+        for (var i = 0; i < end; i++)
+        {
+            if (source[i] == '\n')
+            {
+                line++;
+                column = 1;
+            }
+            else
+            {
+                column++;
+            }
+        }
+
+        return (line, column);
+    }
+
+    /// <summary>
+    /// True when <paramref name="outer"/> contains <paramref name="inner"/> and is strictly larger on
+    /// at least one bound (so the two are not the same range). Bounds are 1-based, end-EXCLUSIVE.
+    /// </summary>
+    private static bool StrictlyContains(SourceSpan outer, SourceSpan inner)
+    {
+        var startsBeforeOrEqual =
+            outer.Line < inner.Line || (outer.Line == inner.Line && outer.Column <= inner.Column);
+        var endsAfterOrEqual =
+            outer.EndLine > inner.EndLine || (outer.EndLine == inner.EndLine && outer.EndColumn >= inner.EndColumn);
+        var strict =
+            outer.Line < inner.Line || outer.Column < inner.Column
+            || outer.EndLine > inner.EndLine || outer.EndColumn > inner.EndColumn;
+        return startsBeforeOrEqual && endsAfterOrEqual && strict;
     }
 
     private static DocumentSymbol SymbolForType(TypeDecl t)
@@ -620,6 +1062,74 @@ public sealed class KoineLanguageService
     };
 
     /// <summary>
+    /// A flat, workspace-wide symbol search — the LSP <c>workspace/symbol</c> answer. Flattens
+    /// the <see cref="DocumentSymbols(string)"/> outline of every document, recording each symbol's
+    /// containing parent name (a type's container is its context, a member's container is its type),
+    /// then keeps only those whose name <paramref name="query"/>-subsequence-matches (case-insensitive,
+    /// like an IDE fuzzy filter). An empty <paramref name="query"/> returns every declaration.
+    /// </summary>
+    public IReadOnlyList<WorkspaceSymbol> WorkspaceSymbols(IReadOnlyDictionary<string, string> documents, string query)
+    {
+        var results = new List<WorkspaceSymbol>();
+        foreach (var (uri, source) in documents)
+        {
+            foreach (var top in DocumentSymbols(source))
+            {
+                FlattenSymbol(results, uri, top, container: null, query);
+            }
+        }
+
+        return results;
+    }
+
+    private static void FlattenSymbol(
+        List<WorkspaceSymbol> results,
+        string uri,
+        DocumentSymbol symbol,
+        string? container,
+        string query)
+    {
+        if (IsSubsequence(query, symbol.Name))
+        {
+            // Use the identifier span (selectionRange) as the location; fall back to the full range.
+            var range = symbol.SelectionRange.IsNone ? symbol.Range : symbol.SelectionRange;
+            results.Add(new WorkspaceSymbol(symbol.Name, symbol.Kind, uri, range, container));
+        }
+
+        foreach (var child in symbol.Children)
+        {
+            FlattenSymbol(results, uri, child, symbol.Name, query);
+        }
+    }
+
+    /// <summary>
+    /// Case-insensitive subsequence match: every character of <paramref name="query"/> appears in
+    /// <paramref name="text"/> in order (not necessarily contiguous). An empty query matches anything.
+    /// </summary>
+    private static bool IsSubsequence(string query, string text)
+    {
+        if (string.IsNullOrEmpty(query))
+        {
+            return true;
+        }
+
+        var qi = 0;
+        foreach (var c in text)
+        {
+            if (char.ToLowerInvariant(c) == char.ToLowerInvariant(query[qi]))
+            {
+                qi++;
+                if (qi == query.Length)
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
     /// Every reference to the name under the cursor, across the workspace (declaration
     /// included). Empty when the cursor is not on a renameable type/enum-member/spec name.
     /// </summary>
@@ -647,6 +1157,59 @@ public sealed class KoineLanguageService
 
         var offset = OffsetOf(source, line, character);
         return compilation.WorkspaceIndex.FindReferences(activeUri, name, offset, ctx.EnclosingTypeName);
+    }
+
+    /// <summary>
+    /// The code lenses of the active document — one per top-level declaration (type / service /
+    /// spec) in its outline, annotated with a reference-count label. The count is
+    /// references-from-elsewhere: <see cref="WorkspaceIndex.FindReferences"/> includes the
+    /// declaration's own name occurrence, so the label is <c>total - 1</c> (clamped at 0). Each
+    /// lens sits on the declaration's identifier <c>NameSpan</c> (its <c>SelectionRange</c>).
+    /// Returns an empty list when the active document is absent or does not parse.
+    /// </summary>
+    public IReadOnlyList<CodeLens> CodeLenses(IReadOnlyDictionary<string, string> documents, string activeUri) =>
+        CodeLenses(ToCompilation(documents), activeUri);
+
+    /// <summary>
+    /// Overload of <see cref="CodeLenses(IReadOnlyDictionary{string,string},string)"/> that uses a
+    /// held <see cref="KoineCompilation"/> snapshot, avoiding re-parses when the caller holds and
+    /// reuses the same compilation across multiple requests.
+    /// </summary>
+    public IReadOnlyList<CodeLens> CodeLenses(KoineCompilation compilation, string activeUri)
+    {
+        if (!compilation.Documents.TryGetValue(activeUri, out var source))
+        {
+            return [];
+        }
+
+        // Reuse the warm snapshot's memoized per-file model rather than re-parsing the source.
+        var perFile = compilation.SemanticModelFor(activeUri)?.Model;
+        var outline = perFile is null ? DocumentSymbols(source) : DocumentSymbols(perFile);
+
+        var lenses = new List<CodeLens>();
+        foreach (var top in outline)
+        {
+            // Top-level declarations live one level under the context node; the context itself
+            // carries no reference lens. Members are not lensed (they are file-/type-scoped).
+            foreach (var decl in top.Children)
+            {
+                var nameSpan = decl.SelectionRange.IsNone ? decl.Range : decl.SelectionRange;
+                if (nameSpan.IsNone)
+                {
+                    continue;
+                }
+
+                // Offset of the declaration's name so FindReferences scopes to the right symbol.
+                // SelectionRange is 1-based; OffsetOf takes 0-based LSP line/character.
+                var nameOffset = OffsetOf(source, nameSpan.Line - 1, nameSpan.Column - 1);
+                var total = compilation.WorkspaceIndex.FindReferences(activeUri, decl.Name, nameOffset).Count;
+                var n = Math.Max(0, total - 1); // subtract the declaration's own occurrence
+                var title = $"{n} reference{(n == 1 ? "" : "s")}";
+                lenses.Add(new CodeLens(decl.Name, activeUri, nameSpan, title));
+            }
+        }
+
+        return lenses;
     }
 
     /// <summary>
@@ -682,6 +1245,15 @@ public sealed class KoineLanguageService
         }
 
         var offset = OffsetOf(source, line, character);
+
+        // Reject a rename that would collide with an existing declaration in the SAME namespace
+        // (e.g. type Order -> an existing type Customer). The check is kind-scoped, so a same-named
+        // declaration in a DIFFERENT namespace (an enum member named like a type) does not block it.
+        if (compilation.WorkspaceIndex.WouldCollide(activeUri, name, offset, ctx.EnclosingTypeName, newName))
+        {
+            return null;
+        }
+
         var refs = compilation.WorkspaceIndex.FindReferences(activeUri, name, offset, ctx.EnclosingTypeName);
         return refs.Count == 0 ? null : refs;
     }
@@ -764,5 +1336,195 @@ public sealed class KoineLanguageService
         }
 
         return RefactorService.RefactorsFor(_compiler, source, startOffset, endOffset);
+    }
+
+    /// <summary>
+    /// Signature help for the call enclosing the cursor. Walks back from the cursor to the nearest
+    /// UNCLOSED <c>(</c>, resolves the identifier immediately before it to a command/factory on an
+    /// entity, or an operation/use-case on a service, and reports that declaration's parameter list
+    /// plus the active parameter (the count of top-level commas between the <c>(</c> and the cursor).
+    /// Returns null when the document is not open, the cursor is in a string/regex, there is no
+    /// enclosing open call, or the callee does not resolve to a parameterized declaration.
+    /// </summary>
+    public SignatureHelp? SignatureHelpAt(IReadOnlyDictionary<string, string> documents, string activeUri, int line, int character) =>
+        SignatureHelpAt(ToCompilation(documents), activeUri, line, character);
+
+    /// <summary>
+    /// Overload of <see cref="SignatureHelpAt(IReadOnlyDictionary{string,string},string,int,int)"/>
+    /// that uses a held <see cref="KoineCompilation"/> snapshot, avoiding re-parses when the caller
+    /// holds and reuses the same compilation across multiple requests. The callee parameter list is
+    /// resolved from the snapshot's memoized model rather than a fresh parse; the lexer-only cursor
+    /// scan still re-lexes the active source (it needs the raw token stream to the cursor).
+    /// </summary>
+    public SignatureHelp? SignatureHelpAt(KoineCompilation compilation, string activeUri, int line, int character)
+    {
+        if (!compilation.Documents.TryGetValue(activeUri, out var source))
+        {
+            return null;
+        }
+
+        var ctx = TokenLocator.Locate(source, line, character);
+        if (ctx.InsideStringOrRegex)
+        {
+            return null;
+        }
+
+        // Lex the document and keep the default-channel tokens up to the cursor offset.
+        var cursorOffset = OffsetOf(source, line, character);
+        var tokens = DefaultChannelTokensBefore(source, cursorOffset);
+
+        // Walk back to the nearest unclosed '(' (balancing nested parens), counting the
+        // top-level commas seen between that '(' and the cursor — that count is the active parameter.
+        var depth = 0;
+        var activeParameter = 0;
+        var openIndex = -1;
+        for (var i = tokens.Count - 1; i >= 0; i--)
+        {
+            var type = tokens[i].Type;
+            if (type == KoineLexer.RPAREN)
+            {
+                depth++;
+            }
+            else if (type == KoineLexer.LPAREN)
+            {
+                if (depth == 0)
+                {
+                    openIndex = i;
+                    break;
+                }
+
+                depth--;
+            }
+            else if (type == KoineLexer.COMMA && depth == 0)
+            {
+                activeParameter++;
+            }
+        }
+
+        if (openIndex <= 0)
+        {
+            return null;
+        }
+
+        // The callee is the identifier immediately before the '('.
+        var callee = tokens[openIndex - 1];
+        if (!IsWordToken(callee))
+        {
+            return null;
+        }
+
+        // Resolve the callee against the snapshot's memoized model (the active file's, falling back
+        // to the merged whole-workspace model) instead of re-parsing the source on every keystroke.
+        var model = compilation.SemanticModelFor(activeUri)?.Model ?? compilation.Model;
+        var index = new ModelIndex(model);
+        var parameters = ResolveCalleeParameters(index, callee.Text);
+        if (parameters is null)
+        {
+            return null;
+        }
+
+        var paramInfos = parameters
+            .Select(p => new ParameterInfo($"{p.Name}: {RenderType(p.Type)}"))
+            .ToList();
+        var label = $"{callee.Text}({string.Join(", ", paramInfos.Select(p => p.Label))})";
+        // Clamp the active parameter: overshooting the last param (e.g. an extra trailing comma)
+        // must still highlight the last parameter rather than index out of range.
+        var active = paramInfos.Count == 0 ? 0 : Math.Min(activeParameter, paramInfos.Count - 1);
+        return new SignatureHelp([new SignatureInfo(label, paramInfos)], 0, active);
+    }
+
+    /// <summary>
+    /// Resolves a callee name to the parameter list of the entity command/factory or service
+    /// operation/use-case that declares it, using the same enumeration shape as
+    /// <see cref="SemanticTokenProvider"/>. Returns null when no parameterized declaration matches.
+    /// </summary>
+    private static IReadOnlyList<Param>? ResolveCalleeParameters(ModelIndex index, string callee)
+    {
+        foreach (var t in index.AllTypes())
+        {
+            if (t is EntityDecl e)
+            {
+                foreach (var c in e.Commands)
+                {
+                    if (c.Name == callee)
+                    {
+                        return c.Parameters;
+                    }
+                }
+
+                foreach (var f in e.Factories)
+                {
+                    if (f.Name == callee)
+                    {
+                        return f.Parameters;
+                    }
+                }
+            }
+        }
+
+        foreach (var ctx in index.Model.Contexts)
+        {
+            foreach (var svc in ctx.Services)
+            {
+                foreach (var op in svc.Operations)
+                {
+                    if (op.Name == callee)
+                    {
+                        return op.Parameters;
+                    }
+                }
+
+                foreach (var uc in svc.UseCases)
+                {
+                    if (uc.Name == callee)
+                    {
+                        return uc.Parameters;
+                    }
+                }
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// The default-channel tokens whose start offset is strictly before <paramref name="cursorOffset"/>.
+    /// Lexer-only (tolerant of broken documents), matching <see cref="TokenLocator"/>'s approach.
+    /// </summary>
+    private static List<IToken> DefaultChannelTokensBefore(string source, int cursorOffset)
+    {
+        var lexer = new KoineLexer(new AntlrInputStream(source));
+        lexer.RemoveErrorListeners();
+        var stream = new CommonTokenStream(lexer);
+        stream.Fill();
+
+        var result = new List<IToken>();
+        foreach (IToken t in stream.GetTokens())
+        {
+            if (t.Type == TokenConstants.EOF || t.Channel != TokenConstants.DefaultChannel)
+            {
+                continue;
+            }
+
+            if (t.StartIndex >= cursorOffset)
+            {
+                break;
+            }
+
+            result.Add(t);
+        }
+
+        return result;
+    }
+
+    private static bool IsWordToken(IToken t)
+    {
+        if (t.Type == KoineLexer.Identifier)
+        {
+            return true;
+        }
+
+        var s = t.Text;
+        return !string.IsNullOrEmpty(s) && (char.IsLetter(s[0]) || s[0] == '_');
     }
 }

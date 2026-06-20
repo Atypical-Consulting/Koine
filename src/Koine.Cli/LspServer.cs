@@ -155,13 +155,26 @@ internal sealed class LspServer
                                     ["textDocumentSync"] = 2, // Incremental
                                     ["completionProvider"] = new Dictionary<string, object?>
                                     {
-                                        ["resolveProvider"] = false,
+                                        ["resolveProvider"] = true,
                                         ["triggerCharacters"] = new[] { ":", "." },
+                                        ["allCommitCharacters"] = new[] { ".", "(" },
+                                    },
+                                    ["signatureHelpProvider"] = new Dictionary<string, object?>
+                                    {
+                                        ["triggerCharacters"] = new[] { "(", "," },
+                                        ["retriggerCharacters"] = new[] { "," },
                                     },
                                     ["hoverProvider"] = true,
                                     ["definitionProvider"] = true,
                                     ["documentFormattingProvider"] = true,
                                     ["documentSymbolProvider"] = true,
+                                    ["workspaceSymbolProvider"] = true,
+                                    ["foldingRangeProvider"] = true,
+                                    ["selectionRangeProvider"] = true,
+                                    ["codeLensProvider"] = new Dictionary<string, object?>
+                                    {
+                                        ["resolveProvider"] = true,
+                                    },
                                     ["referencesProvider"] = true,
                                     ["renameProvider"] = new Dictionary<string, object?>
                                     {
@@ -259,6 +272,27 @@ internal sealed class LspServer
 
                             break;
 
+                        case "completionItem/resolve":
+                            // resolveProvider is true, so this MUST exist. Our completion items carry
+                            // their detail/documentation/snippet eagerly, so resolve is a pass-through:
+                            // echo the item back unchanged (the client merges it into the shown item).
+                            if (root.TryGetProperty("id", out _))
+                            {
+                                Respond(root, root.TryGetProperty("params", out var resolveItem)
+                                    ? (object?)resolveItem.Clone()
+                                    : null);
+                            }
+
+                            break;
+
+                        case "textDocument/signatureHelp":
+                            if (root.TryGetProperty("id", out _))
+                            {
+                                Respond(root, SignatureHelpResultJson(root));
+                            }
+
+                            break;
+
                         case "textDocument/hover":
                             if (root.TryGetProperty("id", out _))
                             {
@@ -287,6 +321,46 @@ internal sealed class LspServer
                             if (root.TryGetProperty("id", out _))
                             {
                                 Respond(root, DocumentSymbolResultJson(root));
+                            }
+
+                            break;
+
+                        case "workspace/symbol":
+                            if (root.TryGetProperty("id", out _))
+                            {
+                                Respond(root, WorkspaceSymbolResultJson(root));
+                            }
+
+                            break;
+
+                        case "textDocument/foldingRange":
+                            if (root.TryGetProperty("id", out _))
+                            {
+                                Respond(root, FoldingRangeResultJson(root));
+                            }
+
+                            break;
+
+                        case "textDocument/selectionRange":
+                            if (root.TryGetProperty("id", out _))
+                            {
+                                Respond(root, SelectionRangeResultJson(root));
+                            }
+
+                            break;
+
+                        case "textDocument/codeLens":
+                            if (root.TryGetProperty("id", out _))
+                            {
+                                Respond(root, CodeLensResultJson(root));
+                            }
+
+                            break;
+
+                        case "codeLens/resolve":
+                            if (root.TryGetProperty("id", out _))
+                            {
+                                Respond(root, CodeLensResolveJson(root));
                             }
 
                             break;
@@ -433,16 +507,76 @@ internal sealed class LspServer
         }
 
         var items = _ls.CompleteAt(text, line, ch)
-            .Select(i => (object)new Dictionary<string, object?>
+            .Select(i =>
             {
-                ["label"] = i.Label,
-                ["kind"] = LspKind(i.Kind),
-                ["detail"] = i.Detail,
-                ["documentation"] = i.Documentation,
+                var item = new Dictionary<string, object?>
+                {
+                    ["label"] = i.Label,
+                    ["kind"] = LspKind(i.Kind),
+                    ["detail"] = i.Detail,
+                    ["documentation"] = i.Documentation,
+                };
+                if (i.InsertText is not null)
+                {
+                    item["insertText"] = i.InsertText;
+                }
+
+                if (i.InsertTextFormat is { } fmt)
+                {
+                    item["insertTextFormat"] = fmt; // 1 = plaintext, 2 = snippet
+                }
+
+                if (i.CommitCharacters is { Count: > 0 } commit)
+                {
+                    item["commitCharacters"] = commit.ToArray();
+                }
+
+                if (i.SortText is not null)
+                {
+                    item["sortText"] = i.SortText;
+                }
+
+                if (i.Data is not null)
+                {
+                    item["data"] = i.Data;
+                }
+
+                return (object)item;
             })
             .ToArray();
 
         return new Dictionary<string, object?> { ["isIncomplete"] = false, ["items"] = items };
+    }
+
+    private object? SignatureHelpResultJson(JsonElement root)
+    {
+        if (!TryGetUri(root, out var uri) || !TryGetPosition(root, out var line, out var ch))
+        {
+            return null;
+        }
+
+        var help = _ls.SignatureHelpAt(_compilation, uri, line, ch);
+        if (help is null)
+        {
+            return null;
+        }
+
+        var signatures = help.Signatures
+            .Select(s => (object)new Dictionary<string, object?>
+            {
+                ["label"] = s.Label,
+                ["parameters"] = s.Parameters
+                    .Select(p => (object)new Dictionary<string, object?> { ["label"] = p.Label })
+                    .ToArray(),
+            })
+            .ToArray();
+
+        return new Dictionary<string, object?>
+        {
+            ["signatures"] = signatures,
+            ["activeSignature"] = help.ActiveSignature,
+            ["activeParameter"] = help.ActiveParameter,
+        };
     }
 
     private object? HoverResultJson(JsonElement root)
@@ -568,6 +702,145 @@ internal sealed class LspServer
             ["selectionRange"] = SpanRange(selection),
             ["children"] = s.Children.Select(ToLspSymbol).ToArray(),
         };
+    }
+
+    // ---- Workspace symbols ------------------------------------------------
+
+    private object? WorkspaceSymbolResultJson(JsonElement root)
+    {
+        var query = root.TryGetProperty("params", out var p)
+            && p.TryGetProperty("query", out var q)
+            && q.ValueKind == JsonValueKind.String
+                ? q.GetString() ?? ""
+                : "";
+
+        // Search the merged view: on-disk workspace files overlaid by open/edited docs.
+        return _ls.WorkspaceSymbols(Workspace(), query)
+            .Select(s => (object)new Dictionary<string, object?>
+            {
+                ["name"] = s.Name,
+                ["kind"] = LspSymbolKind(s.Kind),
+                ["location"] = new Dictionary<string, object?>
+                {
+                    ["uri"] = s.Uri,
+                    ["range"] = SpanRange(s.Range),
+                },
+                ["containerName"] = s.ContainerName,
+            })
+            .ToArray();
+    }
+
+    // ---- Folding & selection ranges ---------------------------------------
+
+    private object? FoldingRangeResultJson(JsonElement root)
+    {
+        if (!TryGetUri(root, out var uri) || !_docs.TryGetValue(uri, out var text))
+        {
+            return null;
+        }
+
+        // LSP foldingRange: 0-based startLine/endLine, both inclusive. The block's last line is
+        // (Span.EndLine - 1) (1-based, end-EXCLUSIVE) → -1 → 0-based, then clamp to the start line.
+        return _ls.FoldingRanges(text)
+            .Select(f =>
+            {
+                var startLine = Math.Max(0, f.Range.Line - 1);
+                var endLine = Math.Max(startLine, f.Range.EndLine - 1);
+                return (object)new Dictionary<string, object?>
+                {
+                    ["startLine"] = startLine,
+                    ["endLine"] = endLine,
+                };
+            })
+            .ToArray();
+    }
+
+    private object? SelectionRangeResultJson(JsonElement root)
+    {
+        if (!TryGetUri(root, out var uri) || !_docs.TryGetValue(uri, out var text)
+            || !root.TryGetProperty("params", out var p)
+            || !p.TryGetProperty("positions", out var positions)
+            || positions.ValueKind != JsonValueKind.Array)
+        {
+            return null;
+        }
+
+        // One selection-range chain per requested position, in parallel order.
+        var results = new List<object>();
+        foreach (var pos in positions.EnumerateArray())
+        {
+            var line = pos.TryGetProperty("line", out var l) ? l.GetInt32() : 0;
+            var ch = pos.TryGetProperty("character", out var c) ? c.GetInt32() : 0;
+            var chain = _ls.SelectionRangeAt(text, line, ch);
+            results.Add(ToLspSelectionRange(chain));
+        }
+
+        return results.ToArray();
+    }
+
+    private static object ToLspSelectionRange(SelectionRange? chain)
+    {
+        // A null chain still needs a (degenerate) selection range per the parallel-array contract;
+        // collapse it to an empty range at the document start.
+        if (chain is null)
+        {
+            return new Dictionary<string, object?>
+            {
+                ["range"] = SpanRange(SourceSpan.None),
+            };
+        }
+
+        var node = new Dictionary<string, object?>
+        {
+            ["range"] = SpanRange(chain.Range),
+        };
+        if (chain.Parent is not null)
+        {
+            node["parent"] = ToLspSelectionRange(chain.Parent);
+        }
+
+        return node;
+    }
+
+    // ---- Code lens --------------------------------------------------------
+
+    private object? CodeLensResultJson(JsonElement root)
+    {
+        if (!TryGetUri(root, out var uri) || !_docs.ContainsKey(uri))
+        {
+            return null;
+        }
+
+        // The service resolves the reference-count title eagerly, so each lens already carries a
+        // command. codeLens/resolve is still advertised (resolveProvider = true) and remains a
+        // pass-through, so a client may request lenses then resolve each without a second compile.
+        return _ls.CodeLenses(_compilation, uri)
+            .Select(ToLspCodeLens)
+            .ToArray();
+    }
+
+    private static object ToLspCodeLens(CodeLens lens) => new Dictionary<string, object?>
+    {
+        ["range"] = SpanRange(lens.Range),
+        ["command"] = lens.Title is null
+            ? null
+            : new Dictionary<string, object?>
+            {
+                ["title"] = lens.Title,
+                ["command"] = "",
+            },
+    };
+
+    private object? CodeLensResolveJson(JsonElement root)
+    {
+        // Titles are computed eagerly on textDocument/codeLens, so resolve is a pass-through: echo
+        // the lens back. If a client sent an unresolved lens (no command), there is nothing to fill.
+        if (!root.TryGetProperty("params", out var lens) || lens.ValueKind != JsonValueKind.Object)
+        {
+            return null;
+        }
+
+        return JsonSerializer.Deserialize<object?>(lens.GetRawText());
     }
 
     /// <summary>Maps a service <see cref="SymbolKind"/> to its LSP SymbolKind number.</summary>
