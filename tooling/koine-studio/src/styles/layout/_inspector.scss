@@ -38,7 +38,7 @@
       right: 10px;
       bottom: -1px;
       height: 2px;
-      border-radius: 2px;
+      border-radius: var(--koi-radius-2xs);
       background: var(--koi-accent-grad);
       transform: scaleX(0);
       transition: transform var(--koi-dur-slow) ease;

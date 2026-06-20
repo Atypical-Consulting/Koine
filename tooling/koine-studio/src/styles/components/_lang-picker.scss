@@ -70,7 +70,7 @@
   font-size: var(--koi-text-xs-plus);
   letter-spacing: 0.2px;
   padding: var(--koi-space-1) 11px var(--koi-space-1) var(--koi-space-2-25);
-  border-radius: 999px;
+  border-radius: var(--koi-radius-pill);
   border: 1px solid var(--koi-line);
   background: color-mix(in srgb, var(--koi-paper) 50%, transparent);
   color: var(--koi-muted);
@@ -80,7 +80,7 @@
   content: '';
   width: 7px;
   height: 7px;
-  border-radius: 999px;
+  border-radius: var(--koi-radius-pill);
   background: currentColor;
   box-shadow: 0 0 0 0 currentColor;
 }
@@ -116,7 +116,7 @@
   font-size: var(--koi-text-xs-plus);
   letter-spacing: 0.2px;
   padding: var(--koi-space-1) 11px;
-  border-radius: 999px;
+  border-radius: var(--koi-radius-pill);
   cursor: pointer;
   color: var(--koi-hl-number);
   border: 1px solid color-mix(in srgb, var(--koi-hl-number) 45%, var(--koi-line));
@@ -132,7 +132,7 @@
   content: '';
   width: 7px;
   height: 7px;
-  border-radius: 999px;
+  border-radius: var(--koi-radius-pill);
   background: var(--koi-hl-number);
 }
 

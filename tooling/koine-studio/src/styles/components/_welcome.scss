@@ -50,7 +50,7 @@
   max-width: 520px;
   background: var(--koi-paper-2);
   border: 1px solid var(--koi-line);
-  border-radius: 10px;
+  border-radius: var(--koi-radius-lg);
   box-shadow: 0 18px 50px rgba(0, 0, 0, 0.45);
   padding: 36px 36px 30px;
   text-align: center;
@@ -97,7 +97,7 @@
   background: var(--koi-surface);
   color: var(--koi-fg);
   border: 1px solid var(--koi-line);
-  border-radius: 6px;
+  border-radius: var(--koi-radius-sm);
   padding: var(--koi-space-2-75) var(--koi-space-3-5);
   font-family: var(--koi-font-body);
   font-size: var(--koi-text-lg);
@@ -142,7 +142,7 @@
   background: transparent;
   color: var(--koi-fg);
   border: 1px solid transparent;
-  border-radius: 6px;
+  border-radius: var(--koi-radius-sm);
   padding: var(--koi-space-1-75) var(--koi-space-2-5);
   font-family: var(--koi-font-mono);
   font-size: var(--koi-text-sm);

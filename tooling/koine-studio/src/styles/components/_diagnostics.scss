@@ -117,7 +117,7 @@ body.resizing #diag-resizer {
   flex: 0 0 auto;
   width: 7px;
   height: 7px;
-  border-radius: 999px;
+  border-radius: var(--koi-radius-pill);
   background: currentColor;
 }
 

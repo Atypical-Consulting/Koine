@@ -19,7 +19,7 @@
   max-width: 520px;
   background: var(--koi-paper-2);
   border: 1px solid var(--koi-line);
-  border-radius: 10px;
+  border-radius: var(--koi-radius-lg);
   box-shadow: 0 18px 50px rgba(0, 0, 0, 0.5);
   overflow: hidden;
 }
@@ -57,7 +57,7 @@
   background: transparent;
   color: var(--koi-fg);
   border: 1px solid transparent;
-  border-radius: 6px;
+  border-radius: var(--koi-radius-sm);
   padding: var(--koi-space-2) var(--koi-space-2-75);
   cursor: pointer;
   font-family: var(--koi-font-body);

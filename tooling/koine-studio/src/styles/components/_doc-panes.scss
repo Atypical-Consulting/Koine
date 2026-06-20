@@ -64,14 +64,14 @@
     font-size: 0.82em;
     background: var(--koi-surface);
     border: 1px solid var(--koi-line);
-    border-radius: 4px;
+    border-radius: var(--koi-radius-xs);
     padding: var(--koi-space-px) var(--koi-space-1-25);
   }
 
   pre {
     background: var(--koi-paper);
     border: 1px solid var(--koi-line);
-    border-radius: 6px;
+    border-radius: var(--koi-radius-sm);
     padding: var(--koi-space-2-5) var(--koi-space-3);
     overflow-x: auto;
 

@@ -88,7 +88,7 @@
   gap: var(--koi-space-2-5);
   padding: var(--koi-space-3) var(--koi-space-3-5);
   border: 1px solid var(--koi-line);
-  border-radius: 8px;
+  border-radius: var(--koi-radius);
   background: var(--koi-surface);
   cursor: pointer;
 }
@@ -181,7 +181,7 @@
   background: var(--koi-surface);
   color: var(--koi-fg);
   border: 1px solid var(--koi-line);
-  border-radius: 6px;
+  border-radius: var(--koi-radius-sm);
   padding: 9px 11px;
   font-family: var(--koi-font-mono);
   font-size: var(--koi-text-lg);
@@ -239,7 +239,7 @@
 .koi-wizard-banner {
   margin: 0;
   padding: 9px var(--koi-space-3);
-  border-radius: 6px;
+  border-radius: var(--koi-radius-sm);
   border: 1px solid var(--koi-line);
   background: var(--koi-surface);
   color: var(--koi-fg);
@@ -276,7 +276,7 @@
   background: var(--koi-surface);
   color: var(--koi-fg);
   border: 1px solid var(--koi-line);
-  border-radius: 6px;
+  border-radius: var(--koi-radius-sm);
   padding: var(--koi-space-2) var(--koi-space-4);
   font-family: var(--koi-font-body);
   font-size: var(--koi-text-md);

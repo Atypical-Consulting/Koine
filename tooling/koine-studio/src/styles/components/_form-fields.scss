@@ -10,7 +10,7 @@
   background: var(--koi-surface);
   color: var(--koi-fg);
   border: 1px solid var(--koi-line);
-  border-radius: 6px;
+  border-radius: var(--koi-radius-sm);
   padding: var(--koi-space-1-5) var(--koi-space-2-5);
   font-family: var(--koi-font-body);
   font-size: var(--koi-text-base-plus);

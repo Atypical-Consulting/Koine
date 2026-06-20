@@ -46,7 +46,7 @@
   flex: 0 0 auto;
   margin-left: auto;
   font-size: 0.66rem;
-  border-radius: 999px;
+  border-radius: var(--koi-radius-pill);
   padding: 0 var(--koi-space-1-5);
   line-height: 1.5;
 }

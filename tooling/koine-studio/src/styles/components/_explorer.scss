@@ -208,7 +208,7 @@
 .explorer-hl {
   background: color-mix(in srgb, var(--koi-accent) 30%, transparent);
   color: inherit;
-  border-radius: 2px;
+  border-radius: var(--koi-radius-2xs);
 }
 
 /* Per-row "…" action button — revealed on hover/focus, but always reachable by keyboard. */

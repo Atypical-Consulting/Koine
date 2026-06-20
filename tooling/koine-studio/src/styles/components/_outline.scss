@@ -21,7 +21,7 @@
   border: none;
   color: var(--koi-fg);
   padding: var(--koi-space-0-75) var(--koi-space-1-5);
-  border-radius: 4px;
+  border-radius: var(--koi-radius-xs);
   cursor: pointer;
   font-family: var(--koi-font-body);
   font-size: var(--koi-text-base-plus);
@@ -40,7 +40,7 @@
   color: var(--koi-accent);
   background: color-mix(in srgb, var(--koi-accent) 12%, transparent);
   border: 1px solid color-mix(in srgb, var(--koi-accent) 30%, var(--koi-line));
-  border-radius: 4px;
+  border-radius: var(--koi-radius-xs);
   padding: 0 var(--koi-space-1-25);
   min-width: 38px;
   text-align: center;

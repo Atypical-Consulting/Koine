@@ -30,7 +30,7 @@
 
 .koi-gloss-bar {
   height: 6px;
-  border-radius: 999px;
+  border-radius: var(--koi-radius-pill);
   background: color-mix(in srgb, var(--koi-fg) 12%, transparent);
   overflow: hidden;
   margin-bottom: 1rem;
@@ -56,7 +56,7 @@
 
 .koi-gloss-entry {
   padding: 0.5rem 0.6rem;
-  border-radius: 8px;
+  border-radius: var(--koi-radius);
   border: 1px solid color-mix(in srgb, var(--koi-fg) 10%, transparent);
   margin-bottom: 0.45rem;
   background: color-mix(in srgb, var(--koi-surface) 60%, transparent);
@@ -88,7 +88,7 @@
   letter-spacing: 0.05em;
   color: var(--koi-muted);
   padding: 0.05rem 0.4rem;
-  border-radius: 999px;
+  border-radius: var(--koi-radius-pill);
   background: color-mix(in srgb, var(--koi-fg) 9%, transparent);
 }
 
@@ -119,7 +119,7 @@
   background: none;
   border: 1px solid color-mix(in srgb, var(--koi-accent) 35%, transparent);
   color: var(--koi-accent);
-  border-radius: 6px;
+  border-radius: var(--koi-radius-sm);
   padding: 0.15rem 0.55rem;
   font-size: var(--koi-text-sm);
   cursor: pointer;
@@ -138,7 +138,7 @@
   color: var(--koi-fg);
   background: var(--koi-surface);
   border: 1px solid color-mix(in srgb, var(--koi-accent) 40%, transparent);
-  border-radius: 6px;
+  border-radius: var(--koi-radius-sm);
   padding: 0.4rem 0.5rem;
 }
 
@@ -152,7 +152,7 @@
 .koi-gloss-cancel {
   font: inherit;
   font-size: var(--koi-text-sm);
-  border-radius: 6px;
+  border-radius: var(--koi-radius-sm);
   padding: 0.2rem 0.6rem;
   cursor: pointer;
   border: 1px solid transparent;

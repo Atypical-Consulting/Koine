@@ -5,8 +5,14 @@
   --koi-font-display: "Archivo Variable", "Hanken Grotesk Variable", system-ui, sans-serif;
 
   /* geometry + depth */
+  /* corner-radius scale (ascending: 2xs 2 · xs 4 · sm 6 · base 8 · lg 10 · pill).
+     The base/-sm pair pre-dates the scale and is kept in source order. */
+  --koi-radius-2xs: 2px;
+  --koi-radius-xs: 4px;
   --koi-radius: 8px;
   --koi-radius-sm: 6px;
+  --koi-radius-lg: 10px;
+  --koi-radius-pill: 999px;
   --koi-shadow: 0 18px 50px rgba(3, 7, 14, 0.5);
   --koi-accent-grad: linear-gradient(135deg, var(--koi-accent), var(--koi-cyan));
 
