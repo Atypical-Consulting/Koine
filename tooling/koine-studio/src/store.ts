@@ -333,6 +333,11 @@ export function getRecentFolders(): RecentFolder[] {
   }
 }
 
+/** Cap, sort, and persist a recent-folders list (the single write path for all mutations). */
+function persistRecents(items: RecentFolder[]): void {
+  writeRaw(RECENT_KEY, JSON.stringify(capRecents(items)));
+}
+
 /**
  * Record a folder as most-recently used: upsert (move to front, preserving any prior pinned
  * state), cap, persist. Empty paths are ignored.
@@ -342,8 +347,17 @@ export function pushRecentFolder(path: string): void {
   const existing = getRecentFolders();
   const prior = existing.find((r) => r.path === path);
   const rest = existing.filter((r) => r.path !== path);
-  const next = capRecents([{ path, openedAt: Date.now(), pinned: prior?.pinned ?? false }, ...rest]);
-  writeRaw(RECENT_KEY, JSON.stringify(next));
+  persistRecents([{ path, openedAt: Date.now(), pinned: prior?.pinned ?? false }, ...rest]);
+}
+
+/** Drop a single recent folder by path. */
+export function removeRecentFolder(path: string): void {
+  persistRecents(getRecentFolders().filter((r) => r.path !== path));
+}
+
+/** Pin or unpin a recent folder by path so it floats above (or rejoins) the unpinned entries. */
+export function pinRecentFolder(path: string, pinned: boolean): void {
+  persistRecents(getRecentFolders().map((r) => (r.path === path ? { ...r, pinned } : r)));
 }
 
 /** Forget all recent folders. */
