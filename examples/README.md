@@ -12,7 +12,7 @@ Open any template folder in Koine Studio or point the CLI at it:
 # Generate C# from the billing starter:
 dotnet run --project ../src/Koine.Cli -- build ../templates/starters/billing/billing.koi --target csharp --out /tmp/billing
 
-# Or compile all starters as one workspace:
+# Or point at the folder — directory mode compiles every .koi inside as one model:
 dotnet run --project ../src/Koine.Cli -- build ../templates/starters/billing --target csharp --out /tmp/billing
 ```
 

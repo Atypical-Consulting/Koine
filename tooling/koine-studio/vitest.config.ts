@@ -11,6 +11,9 @@ export default defineConfig({
       // scripts tests run in Node — no DOM needed
       ['scripts/**', 'node'],
     ],
+    // Generate the git-ignored src/templates.generated.ts before any test imports it. Covers every
+    // vitest entry point (vitest run / test:watch / bare vitest), which npm pre-hooks alone do not.
+    globalSetup: ['./scripts/vitest-global-setup.mjs'],
     // happy-dom 20 has no Web Storage; the setup installs an in-memory localStorage shim.
     setupFiles: ['./src/test-setup.ts'],
   },

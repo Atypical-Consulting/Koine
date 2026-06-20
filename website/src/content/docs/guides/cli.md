@@ -42,7 +42,7 @@ koine build templates/pizzeria --out demo/Pizzeria.Domain/Generated
 ```
 
 :::tip
-Real projects always point `build` at a directory. The pizzeria demo's MSBuild target runs `koine build templates/pizzeria --target csharp --out Generated` so the six contexts and their `contextmap` compile as a unit. See [Installation](/Koine/start/installation/) for wiring `build` into a `.csproj`.
+Real projects always point `build` at a directory. The pizzeria demo's MSBuild target runs `koine build templates/pizzeria --target csharp --out Generated` so all its contexts and their `contextmap` compile as a unit. See [Installation](/Koine/start/installation/) for wiring `build` into a `.csproj`.
 :::
 
 ## `koine build`

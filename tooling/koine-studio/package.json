@@ -10,7 +10,6 @@
     "dev:web": "cross-env NODE_OPTIONS=--max-http-header-size=65536 vite --mode web",
     "predev:web": "node scripts/generate-templates.mjs && node scripts/build-wasm.mjs",
     "test": "vitest run",
-    "pretest": "node scripts/generate-templates.mjs",
     "test:watch": "vitest",
     "build": "tsc && vite build",
     "prebuild": "node scripts/generate-templates.mjs",

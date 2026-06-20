@@ -23,12 +23,12 @@ public class WarmModelTests
     private static string RepoRoot()
     {
         var dir = new DirectoryInfo(AppContext.BaseDirectory);
-        while (dir is not null && !Directory.Exists(Path.Combine(dir.FullName, "examples")))
+        while (dir is not null && !File.Exists(Path.Combine(dir.FullName, "Koine.slnx")))
         {
             dir = dir.Parent;
         }
 
-        dir.ShouldNotBeNull("Could not locate the repo root (no 'examples/' ancestor found).");
+        dir.ShouldNotBeNull("Could not locate the repo root (no 'Koine.slnx' ancestor found).");
         return dir!.FullName;
     }
 

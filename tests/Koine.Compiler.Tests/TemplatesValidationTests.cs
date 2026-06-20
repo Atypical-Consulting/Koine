@@ -121,6 +121,19 @@ public class TemplatesValidationTests
         NonEmptyStringArray(root, "tags", folderName);
         NonEmptyStringArray(root, "contexts", folderName);
         NonEmptyStringArray(root, "teaches", folderName);
+
+        // --- no unknown properties (mirrors the schema's additionalProperties: false) -
+        string[] knownFields =
+        [
+            "id", "name", "tagline", "description", "difficulty",
+            "tags", "contexts", "coreAggregate", "entryFile", "teaches", "icon",
+        ];
+        foreach (var property in root.EnumerateObject())
+        {
+            knownFields.ShouldContain(
+                property.Name,
+                $"template '{folderName}' manifest has an unknown property '{property.Name}' (the schema forbids additionalProperties)");
+        }
     }
 
     private static string RequiredString(JsonElement obj, string property, string folderName)

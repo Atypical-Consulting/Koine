@@ -3,7 +3,7 @@
 Koine is a DSL for Domain-Driven Design. You write a bounded context's ubiquitous language in
 `.koi` files; the compiler emits idiomatic, self-contained C#. The reference below is a compact
 cheatsheet. For canonical, compilable syntax, also call `koine_examples` (`billing` for a small
-single-context model; `shop-*` for a six-context domain). Validate everything with `koine_validate`.
+single-context model; `pizzeria-*` for a multi-context domain). Validate everything with `koine_validate`.
 
 Topics you can request via `koine_reference("<topic>")`:
 `overview`, `types`, `value`, `entity`, `aggregate`, `enum`, `quantity`, `range`, `expressions`,
