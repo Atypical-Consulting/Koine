@@ -6,7 +6,10 @@ import {
   KoineLsp,
   type CheckResult,
   type ContextMapResult,
+  type DiagramNode,
+  type DocsResult,
   type GlossaryEntry,
+  type GlossaryModel,
   type Location,
   type LspDiagnostic,
   type Range,
@@ -35,6 +38,7 @@ import { NODE_NAVIGATE_EVENT, type DiagramNodeNavigateDetail } from './diagrams-
 import { renderGlossary, type GlossaryHandlers } from './glossary';
 import { createSelectionBus } from './selection';
 import { renderModelOutline, type ModelOutlineHandlers } from './modelOutline';
+import { buildInspectorElement, renderInspector, type InspectorElement, type InspectorHandlers } from './inspector';
 import { createAssistantPanel, type AssistantPanel, type AssistantContext, type DomainIndex } from './aiPanel';
 import { clearModelHash, readModelFromHash, workspaceShareUrlOrNull } from './share';
 import { dirtyCount, handleBeforeUnload, saveAllDirtyBuffers, titleWithDirty } from './dirty';
@@ -1039,20 +1043,91 @@ export function init(): void {
   }
 
   // The Model tab is the DDD-aware workspace (#142): a construct-grouped, per-context navigator with
-  // per-context counts over the WHOLE model, sourced from the workspace-merged `glossaryModel`.
-  // Selecting a node drives the element inspector via the shared selection bus (see Task 3 wiring).
+  // per-context counts over the WHOLE model (top), and the read-only element inspector (bottom). Both
+  // are driven by the shared selection bus — clicking a node in the outline OR a diagram selects the
+  // same element and refreshes the inspector.
   const modelOutlineHandlers: ModelOutlineHandlers = {
     onSelect: (entry) => selection.set({ qualifiedName: entry.qualifiedName, context: entry.context }),
     goto: (line, col) => editor.goto(line, col),
     onOpenContextMap: () => selectView('contextmap'),
     onOpenGlossary: () => selectView('glossary'),
   };
+  const inspectorHandlers: InspectorHandlers = {
+    onGoto: (range) => editor.gotoRange(range.start, range.end),
+  };
+
+  // The joined model index (#142): the workspace-merged glossary (the complete type inventory, the
+  // outline backbone) joined with the richest matching `DiagramNode` (stereotype + member rows, the
+  // inspector source). `byQn` is keyed by the glossary qualified name — the canonical selection key;
+  // `qnByCtxName` maps a diagram node's `context.simpleName` back to that canonical key (diagram nodes
+  // are named `context.name`, not the glossary's `context.aggregate.name`). Cached, invalidated on edit.
+  interface ModelIndex {
+    glossary: GlossaryModel;
+    byQn: Map<string, { entry: GlossaryEntry; node?: DiagramNode }>;
+    qnByCtxName: Map<string, string>;
+  }
+  let modelIndex: ModelIndex | null = null;
+  let inspectorHost: HTMLElement | null = null;
+
+  /** A node is "richer" the more class-body rows + stereotype it carries (prefer the aggregate node). */
+  function nodeRichness(node: DiagramNode): number {
+    return (node.members?.length ?? 0) + (node.stereotype ? 1 : 0);
+  }
+
+  function buildModelIndex(glossary: GlossaryModel, docs: DocsResult): ModelIndex {
+    // Merge every diagram node by its `context.simpleName`, keeping the richest (the aggregate class
+    // node beats the bare state/box node of the same name).
+    const nodesByCtxName = new Map<string, DiagramNode>();
+    for (const file of docs.files) {
+      for (const diagram of file.diagrams) {
+        for (const node of diagram.graph.nodes) {
+          const existing = nodesByCtxName.get(node.qualifiedName);
+          if (!existing || nodeRichness(node) > nodeRichness(existing)) {
+            nodesByCtxName.set(node.qualifiedName, node);
+          }
+        }
+      }
+    }
+    const byQn = new Map<string, { entry: GlossaryEntry; node?: DiagramNode }>();
+    const qnByCtxName = new Map<string, string>();
+    for (const entry of glossary.entries) {
+      if (entry.kind === 'context') continue;
+      const ctxName = `${entry.context}.${entry.name}`;
+      byQn.set(entry.qualifiedName, { entry, node: nodesByCtxName.get(ctxName) });
+      if (!qnByCtxName.has(ctxName)) qnByCtxName.set(ctxName, entry.qualifiedName);
+    }
+    return { glossary, byQn, qnByCtxName };
+  }
+
+  /** Build (or reuse) the joined model index. `livingDocs` is best-effort — a glossary-only index still works. */
+  async function ensureModelIndex(): Promise<ModelIndex> {
+    if (modelIndex) return modelIndex;
+    const [glossary, docs] = await Promise.all([
+      lsp.glossaryModel(),
+      lsp.livingDocs().catch(() => ({ files: [] }) as DocsResult),
+    ]);
+    modelIndex = buildModelIndex(glossary, docs);
+    return modelIndex;
+  }
+
+  // Project the current selection through the index into an inspector element and (re)render it into
+  // the model workspace's inspector host. No host (Model tab not opened yet) or no index → no-op.
+  function renderSelectedInspector(): void {
+    if (!inspectorHost) return;
+    const sel = selection.get();
+    let element: InspectorElement | null = null;
+    if (sel && modelIndex) {
+      const hit = modelIndex.byQn.get(sel.qualifiedName);
+      if (hit) element = buildInspectorElement(hit.entry, hit.node);
+    }
+    inspectorHost.replaceChildren(renderInspector(element, inspectorHandlers));
+  }
 
   async function loadModel(): Promise<void> {
     docMessage(modelView, 'Loading model…');
     try {
-      const glossary = await lsp.glossaryModel();
-      if (!glossary.entries.length) {
+      const index = await ensureModelIndex();
+      if (!index.glossary.entries.length) {
         docMessage(modelView, 'No elements yet — declare some types, or fix syntax errors to populate the model.');
         docViewsLoaded.model = true;
         return;
@@ -1060,13 +1135,21 @@ export function init(): void {
       modelView.innerHTML = '';
       const workspace = document.createElement('div');
       workspace.className = 'koi-model-workspace';
-      workspace.appendChild(renderModelOutline(glossary, modelOutlineHandlers));
+      workspace.appendChild(renderModelOutline(index.glossary, modelOutlineHandlers));
+      inspectorHost = document.createElement('div');
+      inspectorHost.className = 'koi-model-inspector';
+      workspace.appendChild(inspectorHost);
       modelView.appendChild(workspace);
+      renderSelectedInspector();
       docViewsLoaded.model = true;
     } catch (e) {
       docMessage(modelView, 'Model request failed: ' + String(e), 'error');
     }
   }
+
+  // The inspector tracks the selection bus for the app's lifetime (a diagram click can select an
+  // element while the Model tab is closed; opening it then shows the right inspector immediately).
+  selection.subscribe(() => renderSelectedInspector());
 
   async function loadContextMap(): Promise<void> {
     docMessage(contextMapView, 'Loading context map…');
@@ -1147,13 +1230,18 @@ export function init(): void {
 
   diagramsView.addEventListener(NODE_NAVIGATE_EVENT, (e) => {
     const detail = (e as CustomEvent<DiagramNodeNavigateDetail>).detail;
-    if (!detail) return;
-    // Clicking a diagram node both jumps to its declaration AND selects it, so the element
-    // inspector (issue #142) populates from the same gesture. The context is the qualified name's
-    // first dotted segment (the convention `glossaryModel` follows).
-    selection.set({ qualifiedName: detail.qualifiedName, context: detail.qualifiedName.split('.')[0] });
-    void navigateToDiagramNode(detail);
+    if (detail) void selectFromDiagram(detail);
   });
+
+  // Clicking a diagram node both jumps to its declaration AND selects it, so the element inspector
+  // (#142) populates from the same gesture. A diagram node is named `context.simpleName`; map it back
+  // to the canonical glossary qualified name (the selection key) through the index when it's reachable.
+  async function selectFromDiagram(detail: DiagramNodeNavigateDetail): Promise<void> {
+    const index = await ensureModelIndex().catch(() => null);
+    const qualifiedName = index?.qnByCtxName.get(detail.qualifiedName) ?? detail.qualifiedName;
+    selection.set({ qualifiedName, context: qualifiedName.split('.')[0] });
+    await navigateToDiagramNode(detail);
+  }
 
   function ensureLoaded(view: RightView): void {
     if (view === 'preview' && !docViewsLoaded.preview) void loadPreview();
@@ -1172,6 +1260,7 @@ export function init(): void {
     docViewsLoaded.diagrams = false;
     docViewsLoaded.contextmap = false;
     docViewsLoaded.outline = false;
+    modelIndex = null; // the joined glossary+diagram index (#142) is rebuilt on the next Model load
     cachedDomainIndex = null; // the assistant's domain index is derived from the same model
   }
 
