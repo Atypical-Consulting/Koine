@@ -1,6 +1,11 @@
 /* --- file tree (directory-mode workspace) --- */
+/* Width is driven by --koi-filetree-w (set on #split by the drag resizer and inherited here),
+   defaulting to 240px before the first drag. Keying the pane off the resizer's own variable is
+   what makes it resizable — a hard-coded width would override the resizer and it would silently
+   do nothing. When hidden (scratch mode) the pane is display:none, so its auto grid track
+   collapses to 0 and leaves no empty gap. */
 #filetree {
-  width: 240px;
+  width: var(--koi-filetree-w, 240px);
   display: flex;
   flex-direction: column;
   background: var(--koi-paper-2);
