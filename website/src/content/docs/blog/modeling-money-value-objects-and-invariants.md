@@ -176,5 +176,5 @@ those rules cheap — one `invariant` line — and turns them into guard clauses
 
 From here, [value objects in the reference](/Koine/reference/value-objects/) covers quantities (a
 `Decimal` plus a unit, with unit-checked arithmetic), `Range<T>` intervals, and more derived-field
-patterns. Or open the [Playground](/Koine/playground/?example=values), tweak the `Money` invariant, and
+patterns. Or open [Koine Studio](/Koine/studio/), tweak the `Money` invariant, and
 watch the guard clause change as you type.

@@ -147,7 +147,7 @@ an `IEmitter` that walks that model and writes text. So a new target inherits al
 correctness work for free — it only has to answer "what does *this* construct look like in *my*
 language?"
 
-That discipline is also why the [Playground](/Koine/playground/) can show C#, TypeScript, and a
+That discipline is also why [Koine Studio](/Koine/studio/) can show C#, TypeScript, and a
 glossary side by side from one model: it's the same compile, three emitters. C# is the most complete
 target today; TypeScript is emitting now, **Python** (Phase 1: tactical core — value objects,
 smart enums, identity entities, events, and repository protocols, all dependency-free and
@@ -157,5 +157,5 @@ the [roadmap](/Koine/guides/roadmap/). When it
 arrives, your existing `.koi` models compile to it without a single edit — because they never
 described C# in the first place.
 
-Want to see it live? Open the [Ordering example](/Koine/playground/?example=ordering) and flip the
+Want to see it live? Open [Koine Studio](/Koine/studio/) and flip the
 target dropdown between C# and TypeScript — same model, recompiled on the spot.

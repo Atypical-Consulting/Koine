@@ -6,8 +6,7 @@ description: "The templates/ directory — Koine's single, CI-validated source o
 Koine ships a set of **example domains** as *templates*. The
 [`templates/`](https://github.com/Atypical-Consulting/Koine/tree/main/templates) directory is the
 **single, CI-validated source of truth** for every example: the demo project, [Koine
-Studio](/Koine/guides/koine-studio/)'s template gallery, and the
-[Playground](/Koine/playground/) sample picker all read from it. There is no second copy to drift.
+Studio](/Koine/guides/koine-studio/)'s template gallery, and the website's inline playground all read from it. There is no second copy to drift.
 
 ## What a template is
 

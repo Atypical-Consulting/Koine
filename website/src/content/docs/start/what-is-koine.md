@@ -7,7 +7,7 @@ Koine is a target-agnostic compiler for **Domain-Driven Design**. You describe t
 
 The model is written once and stays free of any host-language concepts. **This release emits C#**, with **TypeScript**, **Python 3.11+**, and **PHP 8.1** emitters also shipping today (all Phase 1: tactical core), and a Rust emitter on the roadmap — the parser and semantic model are kept strictly target-agnostic so a new backend is a new emitter, not a rewrite.
 
-<a class="koi-try" href="/Koine/playground/">Try Koine now — the compiler runs in your browser</a>
+<a class="koi-try" href="/Koine/studio/">Try Koine now — the compiler runs in your browser</a>
 
 ## The problem
 
