@@ -33,6 +33,7 @@ import { formatChord } from './platform';
 import { renderDiagrams } from './diagrams';
 import { NODE_NAVIGATE_EVENT, type DiagramNodeNavigateDetail } from './diagrams-svg';
 import { renderGlossary, type GlossaryHandlers } from './glossary';
+import { createSelectionBus } from './selection';
 import { createAssistantPanel, type AssistantPanel, type AssistantContext, type DomainIndex } from './aiPanel';
 import { clearModelHash, readModelFromHash, workspaceShareUrlOrNull } from './share';
 import { dirtyCount, handleBeforeUnload, saveAllDirtyBuffers, titleWithDirty } from './dirty';
@@ -901,6 +902,11 @@ export function init(): void {
 
   // --- tabbed inspector (preview / glossary / context map) ------------------
 
+  // The shared "selected element" bus (issue #142): the spine that keeps the model outline, the
+  // diagram, and the element inspector in sync. Clicking a node in the outline OR the diagram sets
+  // the same selection; the inspector + outline cross-highlight subscribe to it.
+  const selection = createSelectionBus();
+
   const glossaryView = el('view-glossary');
   const diagramsView = el('view-diagrams');
   const contextMapView = el('view-contextmap');
@@ -1107,7 +1113,12 @@ export function init(): void {
 
   diagramsView.addEventListener(NODE_NAVIGATE_EVENT, (e) => {
     const detail = (e as CustomEvent<DiagramNodeNavigateDetail>).detail;
-    if (detail) void navigateToDiagramNode(detail);
+    if (!detail) return;
+    // Clicking a diagram node both jumps to its declaration AND selects it, so the element
+    // inspector (issue #142) populates from the same gesture. The context is the qualified name's
+    // first dotted segment (the convention `glossaryModel` follows).
+    selection.set({ qualifiedName: detail.qualifiedName, context: detail.qualifiedName.split('.')[0] });
+    void navigateToDiagramNode(detail);
   });
 
   function ensureLoaded(view: RightView): void {
