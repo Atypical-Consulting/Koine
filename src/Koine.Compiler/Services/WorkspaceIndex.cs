@@ -25,21 +25,36 @@ public sealed class WorkspaceIndex
     private readonly Dictionary<string, SemanticModel> _byUri = new(StringComparer.Ordinal);
     private readonly IReadOnlyDictionary<string, string> _documents;
 
-    public WorkspaceIndex(IReadOnlyDictionary<string, string> documents)
+    /// <summary>
+    /// Primary constructor: builds a thin query layer over a held <see cref="KoineCompilation"/>
+    /// snapshot. No re-parse is triggered — each file's <see cref="SemanticModel"/> is already
+    /// memoized in the snapshot and is simply reused here. Repeated calls with the SAME held
+    /// compilation are therefore zero-parse and zero-rebind.
+    /// </summary>
+    public WorkspaceIndex(KoineCompilation compilation)
     {
-        // Re-parses every document eagerly. A fresh semantic model is built per hover/definition
-        // request today — fine at human (on-demand) speed; TODO: cache per (uri, content)
-        // if this is ever wired to a per-keystroke feature.
-        _documents = documents;
-        var compiler = new KoineCompiler();
-        foreach (var (uri, text) in documents)
+        _documents = compilation.Documents;
+        foreach (var uri in compilation.Uris)
         {
-            (KoineModel? model, _) = compiler.Parse(text);
+            var model = compilation.SemanticModelFor(uri);
             if (model is not null)
             {
-                _byUri[uri] = new SemanticModel(model); // a file that fails to parse is simply absent
+                _byUri[uri] = model;
             }
         }
+    }
+
+    /// <summary>
+    /// Compatibility constructor: delegates to <see cref="WorkspaceIndex(KoineCompilation)"/> by
+    /// creating a fresh <see cref="KoineCompilation"/> from the provided document map. Behavior is
+    /// identical to the original implementation — a full parse per call — preserving backward
+    /// compatibility for <c>KoineLanguageService</c>'s documents-based overloads, the WASM path,
+    /// and <c>WorkspaceIndexTests</c>.
+    /// </summary>
+    public WorkspaceIndex(IReadOnlyDictionary<string, string> documents)
+        : this(KoineCompilation.Create(
+            documents.Select(kv => new SourceFile(kv.Key, kv.Value)).ToList()))
+    {
     }
 
     /// <summary>
