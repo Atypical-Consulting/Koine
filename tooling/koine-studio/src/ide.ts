@@ -949,6 +949,58 @@ export function init(): void {
     outline: false,
   };
 
+  // The assistant's domain index is another model-derived view (built from the same context-map +
+  // glossary the views above use), so it's cached the same way: `null` = stale/unbuilt, `{ value }` =
+  // built (value undefined for a scratch/empty model). invalidateDocViews() clears it on any model
+  // change, so a chat about an unedited model reuses it instead of re-running the LSP recompiles.
+  let cachedDomainIndex: { value: DomainIndex | undefined } | null = null;
+
+  // Build the assistant's domain index from the COMPILED workspace (contexts/aggregates/relations +
+  // glossary coverage), best-effort: any failing LSP endpoint just drops the index — this never
+  // throws, so the chat stays usable even when the LSP is down. Returns undefined for a scratch/empty
+  // model so the system prompt stays clean. Cached by getContext (see cachedDomainIndex).
+  async function buildDomainIndex(): Promise<DomainIndex | undefined> {
+    try {
+      const [contextMap, glossaryModel] = await Promise.all([
+        lsp.contextMap().catch(() => null),
+        lsp.glossaryModel().catch(() => null),
+      ]);
+      const contexts = contextMap?.contexts ?? [];
+      if (!contexts.length) return undefined;
+
+      const entries = glossaryModel?.entries ?? [];
+      // The aggregate root isn't exposed directly: derive it from the nested entities. Koine's
+      // `aggregate X root X` convention means the root entity usually shares the aggregate's name;
+      // else, if there's exactly one nested entity, use it; otherwise leave it blank.
+      const aggregates = entries
+        .filter((e) => e.kind === 'aggregate')
+        .map((agg) => {
+          const nested = entries.filter(
+            (e) => e.kind === 'entity' && e.qualifiedName.startsWith(agg.qualifiedName + '.'),
+          );
+          const root =
+            nested.find((e) => e.name === agg.name)?.name ?? (nested.length === 1 ? nested[0].name : '');
+          return { name: agg.name, root };
+        });
+
+      return {
+        contexts,
+        aggregates,
+        relations: (contextMap?.relations ?? []).map((r) => ({
+          upstream: r.upstream,
+          downstream: r.downstream,
+          kind: r.kind,
+        })),
+        glossaryCoverage: {
+          documented: entries.filter((e) => e.doc != null).length,
+          total: entries.length,
+        },
+      };
+    } catch {
+      return undefined;
+    }
+  }
+
   function docMessage(view: HTMLElement, text: string, kind: 'muted' | 'error' = 'muted'): void {
     view.innerHTML = `<p class="${kind === 'error' ? 'doc-error' : 'muted'}">${text}</p>`;
   }
@@ -1055,6 +1107,7 @@ export function init(): void {
     docViewsLoaded.diagrams = false;
     docViewsLoaded.contextmap = false;
     docViewsLoaded.outline = false;
+    cachedDomainIndex = null; // the assistant's domain index is derived from the same model
   }
 
   // An edit makes any cached doc view (preview/glossary/context-map/outline) stale. Mark them
@@ -1972,51 +2025,14 @@ export function init(): void {
           source: editor.getDoc(),
           diagnostics,
         };
-        // Ground the assistant in the COMPILED domain structure (contexts/aggregates/relations +
-        // glossary coverage), built best-effort from the LSP. Any failing endpoint just drops the
-        // index — getContext never throws, so the chat stays usable even when the LSP is down.
-        try {
-          const [contextMap, glossaryModel] = await Promise.all([
-            lsp.contextMap().catch(() => null),
-            lsp.glossaryModel().catch(() => null),
-          ]);
-          const contexts = contextMap?.contexts ?? [];
-          // Scratch/empty models contribute nothing — keep the system prompt clean.
-          if (!contexts.length) return base;
-
-          const entries = glossaryModel?.entries ?? [];
-          // The aggregate root isn't exposed directly: derive it from the nested entities. Koine's
-          // `aggregate X root X` convention means the root entity usually shares the aggregate's name;
-          // else, if there's exactly one nested entity, use it; otherwise leave it blank.
-          const aggregates = entries
-            .filter((e) => e.kind === 'aggregate')
-            .map((agg) => {
-              const nested = entries.filter(
-                (e) => e.kind === 'entity' && e.qualifiedName.startsWith(agg.qualifiedName + '.'),
-              );
-              const root =
-                nested.find((e) => e.name === agg.name)?.name ??
-                (nested.length === 1 ? nested[0].name : '');
-              return { name: agg.name, root };
-            });
-
-          const domainIndex: DomainIndex = {
-            contexts,
-            aggregates,
-            relations: (contextMap?.relations ?? []).map((r) => ({
-              upstream: r.upstream,
-              downstream: r.downstream,
-              kind: r.kind,
-            })),
-            glossaryCoverage: {
-              documented: entries.filter((e) => e.doc != null).length,
-              total: entries.length,
-            },
-          };
-          return { ...base, domainIndex };
-        } catch {
-          return base;
+        // The file/diagnostics snapshot above is cheap and per-call; the domain index is the expensive
+        // part (two LSP recompiles), so build it once and reuse until the model changes (see
+        // cachedDomainIndex / invalidateDocViews) rather than rebuilding it on every send.
+        if (cachedDomainIndex === null) {
+          cachedDomainIndex = { value: await buildDomainIndex() };
         }
+        const domainIndex = cachedDomainIndex.value;
+        return domainIndex ? { ...base, domainIndex } : base;
       },
       getSelection: () => {
         const sel = editor.view.state.selection.main;
