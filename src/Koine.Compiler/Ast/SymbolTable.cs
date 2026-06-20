@@ -26,6 +26,7 @@ internal sealed class SymbolTable
     private readonly Dictionary<EnumMember, EnumMemberSymbol> _enumMembers = new(ReferenceEqualityComparer.Instance);
     private readonly Dictionary<SpecDecl, SpecSymbol> _specs = new(ReferenceEqualityComparer.Instance);
     private readonly Dictionary<ContextNode, ContextSymbol> _contexts = new(ReferenceEqualityComparer.Instance);
+    private readonly Dictionary<Param, ParameterSymbol> _parameters = new(ReferenceEqualityComparer.Instance);
 
     // The bounded context that declares each type, for containment + (context, name) disambiguation.
     private readonly Dictionary<TypeDecl, ContextSymbol> _typeContext = new(ReferenceEqualityComparer.Instance);
@@ -68,6 +69,40 @@ internal sealed class SymbolTable
             foreach (TypeDecl t in ctx.AllTypeDecls())
             {
                 InternType(t, ctxSym);
+            }
+        }
+
+        // 2b. Behavior parameters. Container = the behavior's owning TypeSymbol; the parameter also joins
+        //     that type's downward Members list. Covers the behaviors that hang off an interned TypeSymbol:
+        //     entity commands/factories, aggregate-repository finders, and query criteria. Service
+        //     operations have NO owning TypeSymbol (a ServiceDecl is not a TypeDecl), so their parameters
+        //     are intentionally not interned here.
+        foreach ((TypeDecl decl, TypeSymbol typeSym) in _types)
+        {
+            switch (decl)
+            {
+                case EntityDecl e:
+                    foreach (CommandDecl c in e.Commands)
+                    {
+                        InternParams(c.Parameters, typeSym);
+                    }
+
+                    foreach (FactoryDecl f in e.Factories)
+                    {
+                        InternParams(f.Parameters, typeSym);
+                    }
+
+                    break;
+                case AggregateDecl { Repository: { } repo }:
+                    foreach (FinderDecl find in repo.Finders)
+                    {
+                        InternParams(find.Parameters, typeSym);
+                    }
+
+                    break;
+                case QueryDecl q:
+                    InternParams(q.Criteria, typeSym);
+                    break;
             }
         }
 
@@ -177,6 +212,20 @@ internal sealed class SymbolTable
         }
     }
 
+    private void InternParams(IReadOnlyList<Param> parameters, TypeSymbol owner)
+    {
+        foreach (Param p in parameters)
+        {
+            if (!_parameters.ContainsKey(p))
+            {
+                SourceSpan span = !p.NameSpan.IsNone ? p.NameSpan : p.Span;
+                var sym = new ParameterSymbol(p.Name, span, p) { ContainingSymbol = owner };
+                _parameters[p] = sym;
+                _typeMemberLists[owner].Add(sym);
+            }
+        }
+    }
+
     private void InternSpec(SpecDecl spec, Symbol container)
     {
         if (!_specs.ContainsKey(spec))
@@ -197,6 +246,7 @@ internal sealed class SymbolTable
         EnumMember em => _enumMembers.TryGetValue(em, out EnumMemberSymbol? s) ? s : null,
         SpecDecl sp => _specs.TryGetValue(sp, out SpecSymbol? s) ? s : null,
         ContextNode c => _contexts.TryGetValue(c, out ContextSymbol? s) ? s : null,
+        Param p => _parameters.TryGetValue(p, out ParameterSymbol? s) ? s : null,
         _ => null
     };
 
@@ -204,6 +254,7 @@ internal sealed class SymbolTable
     public MemberSymbol? MemberSymbolOf(Member m) => _members.TryGetValue(m, out MemberSymbol? s) ? s : null;
     public EnumMemberSymbol? EnumMemberSymbolOf(EnumMember m) => _enumMembers.TryGetValue(m, out EnumMemberSymbol? s) ? s : null;
     public ContextSymbol? ContextOfType(TypeDecl decl) => _typeContext.TryGetValue(decl, out ContextSymbol? s) ? s : null;
+    public ParameterSymbol? ParameterSymbolOf(Param p) => _parameters.TryGetValue(p, out ParameterSymbol? s) ? s : null;
     public ContextSymbol? ContextByName(string name) => _contextsByName.TryGetValue(name, out ContextSymbol? s) ? s : null;
 
     // ------------------------------------------------------------------------

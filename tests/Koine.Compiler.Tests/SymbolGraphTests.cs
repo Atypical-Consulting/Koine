@@ -68,4 +68,40 @@ public class SymbolGraphTests
         var set = new HashSet<Symbol>(cmp) { money };
         set.Contains(money).ShouldBeTrue();
     }
+
+    // ----------------------------------------------------------------------
+    // C2 — interned behavior parameters.
+    // ----------------------------------------------------------------------
+
+    private const string CommandSrc = """
+        context C {
+          entity E identified by EId {
+            n: Int
+            command setN(v: Int) {
+              requires v > 0 "positive"
+              n -> v
+            }
+          }
+        }
+        """;
+
+    [Fact]
+    public void SymbolTable_InternsCommandParameters()
+    {
+        var sema = Build(CommandSrc);
+
+        Param vParam = Descendants(sema).OfType<Param>().Single(p => p.Name == "v");
+        var sym = sema.GetDeclaredSymbol(vParam).ShouldBeOfType<ParameterSymbol>();
+
+        sym.Name.ShouldBe("v");
+        sym.Kind.ShouldBe(Ast.SymbolKind.Parameter);
+        sym.ContainingType.ShouldNotBeNull();
+        sym.ContainingType!.Name.ShouldBe("E");
+
+        // The interned symbol is stable, and the entity's downward Members now include it.
+        sema.GetDeclaredSymbol(vParam).ShouldBeSameAs(sym);
+        sema.GetDeclaredSymbol(Descendants(sema).OfType<EntityDecl>().Single())
+            .ShouldBeOfType<TypeSymbol>()
+            .Members.ShouldContain(sym);
+    }
 }
