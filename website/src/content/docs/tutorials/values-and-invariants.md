@@ -7,7 +7,7 @@ This is part 1 of a hands-on tutorial that builds up to the [Shop demo](https://
 
 By the end you will be able to declare fields with defaults, compute **derived fields** from other fields, and guard correctness with the three kinds of **invariant** Koine supports.
 
-<a class="koi-try" href="/Koine/playground/?example=values">Follow along in the Playground</a>
+<a class="koi-try" href="/Koine/studio/">Follow along in Koine Studio</a>
 
 ## A first value object
 
