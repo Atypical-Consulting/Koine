@@ -1,0 +1,56 @@
+﻿{
+  "Target": "csharp",
+  "Total": 8,
+  "Covered": 8,
+  "IsComplete": true,
+  "Items": [
+    {
+      "Kind": "aggregate",
+      "Name": "Order",
+      "Context": "Billing",
+      "State": "Covered"
+    },
+    {
+      "Kind": "entity",
+      "Name": "Customer",
+      "Context": "Billing",
+      "State": "Covered"
+    },
+    {
+      "Kind": "entity",
+      "Name": "Order",
+      "Context": "Billing",
+      "State": "Covered"
+    },
+    {
+      "Kind": "enum",
+      "Name": "Currency",
+      "Context": "Billing",
+      "State": "Covered"
+    },
+    {
+      "Kind": "enum",
+      "Name": "OrderStatus",
+      "Context": "Billing",
+      "State": "Covered"
+    },
+    {
+      "Kind": "value",
+      "Name": "Email",
+      "Context": "Billing",
+      "State": "Covered"
+    },
+    {
+      "Kind": "value",
+      "Name": "Money",
+      "Context": "Billing",
+      "State": "Covered"
+    },
+    {
+      "Kind": "value",
+      "Name": "OrderLine",
+      "Context": "Billing",
+      "State": "Covered"
+    }
+  ]
+}

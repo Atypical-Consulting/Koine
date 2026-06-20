@@ -49,6 +49,12 @@ internal static class Program
                 .WithExample("build", "./model", "--target", "php", "--out", "generated_php")
                 .WithExample("build", "./model", "--target", "glossary", "--out", "docs");
 
+            config.AddCommand<CoverageCommand>("coverage")
+                .WithDescription("Report which declared types a target emits (non-zero exit on gaps).")
+                .WithExample("coverage", "domain.koi")
+                .WithExample("coverage", "domain.koi", "--json")
+                .WithExample("coverage", "./model", "--target", "typescript");
+
             config.AddCommand<WatchCommand>("watch")
                 .WithDescription("Rebuild on every .koi change until Ctrl+C.")
                 .WithExample("watch", "domain.koi", "--out", "generated")

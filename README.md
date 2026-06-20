@@ -392,6 +392,17 @@ emitters = ./build/Acme.GoEmitter.dll
   server with **Claude Desktop** in one step. Full tool list + the HTTP recipe in the
   [MCP guide](https://atypical-consulting.github.io/Koine/guides/mcp-server/).
 
+### Koine in the AI workflow
+
+In spec-driven development, Koine is the **deterministic implementation step**. An AI agent authors a
+small `.koi` model (over the MCP server above) and a human reviews *that model* — not thousands of
+lines of generated code. From there, `koine build` compiles the reviewed spec to idiomatic C# with no
+AI in the loop, so the implementation is a milliseconds-long, zero-token compile instead of a
+generate-test-fix loop. Completeness isn't hoped-for: the compiler emits every declared type, and
+`koine coverage` proves *declared == emitted* (exiting non-zero if anything is missing, so it doubles
+as a CI gate). See the
+[Model-as-spec guide](https://atypical-consulting.github.io/Koine/guides/model-as-spec/).
+
 ## Tech stack
 
 - .NET 10, C#

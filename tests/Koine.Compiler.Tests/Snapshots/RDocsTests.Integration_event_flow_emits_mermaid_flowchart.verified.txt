@@ -14,6 +14,14 @@
 
 _Published by this context._
 
+## Coverage
+
+| Kind | Covered | Total |
+| --- | --- | --- |
+| integrationEvent | 1 | 1 |
+
+_All declared constructs are documented._ ✅
+
 // ==== docs/Payments.md ====
 # Payments
 

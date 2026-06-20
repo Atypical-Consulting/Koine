@@ -157,6 +157,7 @@ export default defineConfig({
 						{ label: 'Koine Studio', slug: 'guides/koine-studio' },
 						{ label: 'Local LLM in the Assistant', slug: 'guides/assistant-local-llm' },
 						{ label: 'MCP server', slug: 'guides/mcp-server' },
+						{ label: 'Model as spec', slug: 'guides/model-as-spec' },
 						{ label: 'Roadmap', slug: 'guides/roadmap' },
 					],
 				},
