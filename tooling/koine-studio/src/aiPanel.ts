@@ -7,12 +7,26 @@
 // shows a prompt to add one rather than calling the API.
 import { runAssistant, type AiProvider, type ChatMessage } from './ai';
 import { renderMarkdown } from './editor';
+import { loadChat, saveChat, clearChat } from './store';
+
+/**
+ * The compiled domain structure (contexts/aggregates/relations + glossary coverage), so reviews and
+ * answers see the real shape of the model, not just the current file. Built best-effort from the LSP.
+ */
+export interface DomainIndex {
+  contexts: string[]; // bounded-context names
+  aggregates: { name: string; root: string }[]; // aggregate → its root entity
+  relations: { upstream: string; downstream: string; kind: string }[];
+  glossaryCoverage: { documented: number; total: number };
+}
 
 /** A snapshot of what's on screen, fed to the model as grounding context on every turn. */
 export interface AssistantContext {
   fileName: string;
   source: string;
   diagnostics: { line: number; col: number; severity: 'error' | 'warning'; message: string }[];
+  /** The compiled domain structure, when the host could build one (absent for scratch/empty models). */
+  domainIndex?: DomainIndex;
 }
 
 export interface AssistantPanelOptions {
@@ -25,12 +39,19 @@ export interface AssistantPanelOptions {
   getApiKey: () => string;
   /** The model id to use (provider-appropriate defaults handled in ai.ts). */
   getModel: () => string;
-  /** The current editor model + diagnostics, captured fresh on each send. */
-  getContext: () => AssistantContext;
+  /** The current editor model + diagnostics, captured fresh on each send (may be async). */
+  getContext: () => AssistantContext | Promise<AssistantContext>;
+  /** The current editor selection (the construct to explain), or null when there's nothing useful. */
+  getSelection: () => { text: string } | null;
   /** Replace the active editor document with a generated model. */
   onApplyModel: (source: string) => void;
   /** Open Preferences (so the user can add their API key). */
   onOpenPrefs: () => void;
+  /**
+   * The per-workspace storage key for the conversation (the folder identity, or the literal
+   * 'scratch' in scratch mode), so each opened folder keeps its own transcript across reloads.
+   */
+  getWorkspaceKey: () => string;
   /**
    * Execute a Koine compiler tool (validate/compile/format) by name with JSON args, for the
    * assistant's tool loop (OpenAI-compatible path). Omitted when the host can't run tools, in which
@@ -48,6 +69,17 @@ export interface AssistantPanelOptions {
 export interface AssistantPanel {
   /** Move keyboard focus into the prompt input. */
   focusInput(): void;
+  /**
+   * Re-point the panel at the current workspace's conversation when the folder changed: reload the
+   * transcript from storage and rebuild the bubbles. A no-op when the workspace key is unchanged, so
+   * the host can call it on every tab show without recreating the panel.
+   */
+  syncWorkspace(): void;
+  /**
+   * Explain the current construct (the editor selection, or the whole model when there's none) in
+   * plain language — an explanatory turn that does NOT offer to apply anything. For the command palette.
+   */
+  explainSelection(): void;
 }
 
 // A concise Koine primer so the model emits valid `.koi`. Mirrors README's construct table.
@@ -72,8 +104,31 @@ Koine essentials:
 When you write or revise a model, output the COMPLETE model in a single \`\`\`koine fenced code block so the
 user can apply it in one click. Keep prose tight and DDD-focused.`;
 
-/** Build the per-turn system prompt: the primer plus the live model + diagnostics. */
-function buildSystem(ctx: AssistantContext): string {
+/**
+ * A compact, terse summary of the compiled domain structure for the system prompt. Omits any line
+ * whose list is empty; renders an aggregate as `name → root` when `root` is non-empty and differs
+ * from `name`, else just `name`. Returns '' for a fully-empty index so nothing is injected.
+ */
+export function formatDomainIndex(idx: DomainIndex): string {
+  const lines: string[] = [];
+  if (idx.contexts.length) lines.push(`- Contexts: ${idx.contexts.join(', ')}`);
+  if (idx.aggregates.length) {
+    const aggs = idx.aggregates.map((a) => (a.root && a.root !== a.name ? `${a.name} → ${a.root}` : a.name));
+    lines.push(`- Aggregates: ${aggs.join(', ')}`);
+  }
+  if (idx.relations.length) {
+    const rels = idx.relations.map((r) => `${r.upstream} → ${r.downstream} (${r.kind})`);
+    lines.push(`- Relations: ${rels.join(', ')}`);
+  }
+  if (idx.glossaryCoverage.total > 0) {
+    lines.push(`- Glossary: ${idx.glossaryCoverage.documented}/${idx.glossaryCoverage.total} documented`);
+  }
+  if (!lines.length) return '';
+  return ['Compiled domain structure:', ...lines].join('\n');
+}
+
+/** Build the per-turn system prompt: the primer plus the live model + diagnostics (+ domain index). */
+export function buildSystem(ctx: AssistantContext): string {
   const parts = [KOINE_PRIMER, ''];
   parts.push(`Current file: ${ctx.fileName}`);
   parts.push('Current model source:', '```koine', ctx.source.trimEnd(), '```', '');
@@ -85,7 +140,38 @@ function buildSystem(ctx: AssistantContext): string {
   } else {
     parts.push('Current diagnostics: none (the model compiles).');
   }
+  // Append the compiled domain structure after the diagnostics, separated by a blank line, only when
+  // the host built an index that renders to a non-empty summary.
+  if (ctx.domainIndex) {
+    const domain = formatDomainIndex(ctx.domainIndex);
+    if (domain) parts.push('', domain);
+  }
   return parts.join('\n');
+}
+
+/**
+ * Build the "Explain this construct" prompt: an EXPLANATORY (never generative) ask aimed at a domain
+ * expert who doesn't code. Explains the selected construct when `selectionText` is non-blank, else the
+ * whole `fileSource` — the wording adapts so a selection vs whole-model scope reads naturally.
+ */
+export function buildExplainPrompt(selectionText: string | null, fileSource: string): string {
+  const sel = selectionText?.trim() ? selectionText : null;
+  const code = sel ?? fileSource;
+  const scope = sel
+    ? 'Explain this selected Koine construct'
+    : 'Explain this Koine model';
+  return [
+    `${scope} in PLAIN LANGUAGE, for a domain expert who doesn't code. Describe what it`,
+    'represents in the domain, the business rules/invariants it enforces, and how the pieces relate —',
+    'in terms a non-programmer understands.',
+    '',
+    'This is explanation only: do NOT output code, and do NOT propose or write a revised model. No',
+    'code blocks, no Koine syntax in your answer — prose only.',
+    '',
+    '```koine',
+    code,
+    '```',
+  ].join('\n');
 }
 
 /**
@@ -101,7 +187,10 @@ function extractKoine(markdown: string): string | null {
 }
 
 export function createAssistantPanel(opts: AssistantPanelOptions): AssistantPanel {
-  const messages: ChatMessage[] = [];
+  // The transcript for the workspace this panel is currently pointed at. Restored from storage on
+  // mount and re-pointed by syncWorkspace() when the folder changes; loadedKey tracks which one.
+  let messages: ChatMessage[] = loadChat(opts.getWorkspaceKey());
+  let loadedKey = opts.getWorkspaceKey();
   let aborter: AbortController | null = null;
 
   opts.container.classList.add('koi-assistant');
@@ -171,10 +260,49 @@ export function createAssistantPanel(opts: AssistantPanelOptions): AssistantPane
     b.textContent = action.label;
     b.addEventListener('click', () => {
       if (busy()) return;
-      void send(action.build(opts.getContext()));
+      // Await getContext once and reuse it for both the action prompt and the system prompt.
+      void (async () => {
+        const ctx = await opts.getContext();
+        await send(action.build(ctx), ctx);
+      })();
     });
     quick.appendChild(b);
   }
+
+  // "Explain this construct": an EXPLANATORY turn for a non-coding domain expert — explains the
+  // selection (or whole model) in plain language, with the Apply affordance suppressed (offerApply
+  // false) since the reply is prose, not a model to apply. Reuses the resolved context for both prompts.
+  async function runExplain(): Promise<void> {
+    if (busy()) return;
+    const sel = opts.getSelection();
+    const ctx = await opts.getContext();
+    await send(buildExplainPrompt(sel?.text ?? null, ctx.source), ctx, { offerApply: false });
+  }
+
+  const explainBtn = document.createElement('button');
+  explainBtn.type = 'button';
+  explainBtn.className = 'koi-assistant-action';
+  explainBtn.textContent = 'Explain this construct';
+  explainBtn.addEventListener('click', () => {
+    if (busy()) return;
+    void runExplain();
+  });
+  quick.appendChild(explainBtn);
+
+  // Forget this workspace's conversation: empty the in-memory history, reset the transcript to the
+  // empty state, and drop the stored blob. Refused while a request is in flight so it can't race the
+  // streaming reply (which would re-persist the half-finished turn after the clear).
+  const clearBtn = document.createElement('button');
+  clearBtn.type = 'button';
+  clearBtn.className = 'koi-assistant-clear';
+  clearBtn.textContent = 'Clear conversation';
+  clearBtn.addEventListener('click', () => {
+    if (busy()) return;
+    messages = [];
+    rebuildTranscript();
+    clearChat(opts.getWorkspaceKey());
+  });
+  quick.appendChild(clearBtn);
 
   function busy(): boolean {
     return aborter !== null;
@@ -212,7 +340,43 @@ export function createAssistantPanel(opts: AssistantPanelOptions): AssistantPane
     bubble.appendChild(apply);
   }
 
-  async function send(text: string): Promise<void> {
+  // Render a finished assistant reply into a bubble: the markdown body, plus the "Apply to editor"
+  // affordance unless this turn opted out (an explanatory turn whose reply must not be applied).
+  // Shared by the live success path and transcript replay so the two never drift.
+  function renderAssistantReply(bubble: HTMLElement, content: string, offerApply: boolean): void {
+    bubble.innerHTML = `<div class="koi-md">${renderMarkdown(content)}</div>`;
+    if (offerApply) maybeOfferApply(bubble, content);
+  }
+
+  // Render one stored turn into a bubble: user text verbatim, assistant markdown with the apply
+  // affordance honoring the turn's persisted opt-out (so a replayed Explain reply stays apply-free).
+  // Shared by mount and syncWorkspace replay.
+  function replayMessage(m: ChatMessage): void {
+    const bubble = addBubble(m.role);
+    if (m.role === 'assistant') {
+      renderAssistantReply(bubble, m.content, m.offerApply !== false);
+    } else {
+      bubble.textContent = m.content;
+    }
+  }
+
+  // Clear the transcript DOM back to the empty state (intro only), then replay the in-memory history.
+  // Used on mount and whenever syncWorkspace swaps to another workspace's conversation.
+  function rebuildTranscript(): void {
+    transcript.innerHTML = '';
+    transcript.appendChild(intro);
+    for (const m of messages) replayMessage(m);
+  }
+
+  // Restore the current workspace's conversation on first paint.
+  rebuildTranscript();
+
+  async function send(
+    text: string,
+    ctxOverride?: AssistantContext,
+    sendOpts?: { offerApply?: boolean },
+  ): Promise<void> {
+    const offerApply = sendOpts?.offerApply ?? true;
     const prompt = text.trim();
     if (!prompt || busy()) return;
 
@@ -261,16 +425,32 @@ export function createAssistantPanel(opts: AssistantPanelOptions): AssistantPane
       transcript.scrollTop = transcript.scrollHeight;
     };
 
+    // Acquire the busy lock synchronously — BEFORE the first await — so a second rapid send (Enter
+    // twice, or Enter then a quick action) can't slip past the busy() guard while getContext, now
+    // async, is in flight. Capture the workspace key now too, so a folder switch mid-stream can't
+    // persist this turn under the wrong workspace.
     aborter = new AbortController();
     setBusy(true);
+    const workspaceKey = opts.getWorkspaceKey();
+    // Commit a finished assistant turn to history + storage under the captured key, carrying the apply
+    // opt-out so a replay of an explanatory turn stays apply-free.
+    const commitAssistantTurn = (content: string): void => {
+      const turn: ChatMessage = { role: 'assistant', content };
+      if (!offerApply) turn.offerApply = false;
+      messages.push(turn);
+      saveChat(workspaceKey, messages);
+    };
     let full = '';
     try {
+      // Fetch the grounding context ONCE (a quick-action caller passes the one it already resolved, so
+      // getContext — which may hit the LSP to build the domain index — isn't run twice).
+      const ctx = ctxOverride ?? (await opts.getContext());
       full = await runAssistant({
         provider,
         baseUrl,
         apiKey,
         model: opts.getModel(),
-        system: buildSystem(opts.getContext()),
+        system: buildSystem(ctx),
         messages,
         signal: aborter.signal,
         onText: (delta) => {
@@ -283,22 +463,21 @@ export function createAssistantPanel(opts: AssistantPanelOptions): AssistantPane
         runCompilerTool: opts.getUseTools() ? opts.runCompilerTool : undefined,
         onToolCall: addToolStatus,
       });
-      messages.push({ role: 'assistant', content: full });
-      replyBubble.innerHTML = `<div class="koi-md">${renderMarkdown(full)}</div>`;
-      maybeOfferApply(replyBubble, full);
+      commitAssistantTurn(full);
+      renderAssistantReply(replyBubble, full, offerApply);
     } catch (e) {
       // Keep the stored history in lock-step with the transcript on both failure paths.
       const aborted = aborter?.signal.aborted ?? false;
       if (aborted && full.trim()) {
         // Stopped mid-stream with usable output: commit the (user, partial-assistant) pair so the
         // visible reply and the history agree, and still offer to apply a generated model.
-        messages.push({ role: 'assistant', content: full });
+        commitAssistantTurn(full);
         replyBubble.innerHTML = `<div class="koi-md">${renderMarkdown(full)}</div>`;
         const note = document.createElement('div');
         note.className = 'koi-assistant-stopped';
         note.textContent = 'Stopped.';
         replyBubble.appendChild(note);
-        maybeOfferApply(replyBubble, full);
+        if (offerApply) maybeOfferApply(replyBubble, full);
       } else {
         // Aborted with nothing, or a real error: roll the whole turn back from BOTH history and
         // transcript (no dangling user turn or orphaned tool lines), and restore the prompt to retry.
@@ -330,6 +509,16 @@ export function createAssistantPanel(opts: AssistantPanelOptions): AssistantPane
   return {
     focusInput() {
       input.focus();
+    },
+    syncWorkspace() {
+      const key = opts.getWorkspaceKey();
+      if (key === loadedKey) return;
+      loadedKey = key;
+      messages = loadChat(key);
+      rebuildTranscript();
+    },
+    explainSelection() {
+      void runExplain();
     },
   };
 }
