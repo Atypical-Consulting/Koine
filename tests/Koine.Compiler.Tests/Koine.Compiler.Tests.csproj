@@ -31,6 +31,9 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\Koine.Compiler\Koine.Compiler.csproj" />
     <ProjectReference Include="..\..\src\Koine.Cli\Koine.Cli.csproj" />
+    <!-- Referenced so the unified-emitter test can read Koine.Mcp's EmitterFactory.Targets and
+         prove the CLI and MCP target lists no longer drift (issue #69, Task 5). -->
+    <ProjectReference Include="..\..\src\Koine.Mcp\Koine.Mcp.csproj" />
   </ItemGroup>
 
   <ItemGroup>

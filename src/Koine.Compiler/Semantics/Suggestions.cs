@@ -11,9 +11,18 @@ internal static class Suggestions
 
     /// <summary>
     /// Returns <c> — did you mean 'X'?</c> for the nearest candidate within the
-    /// distance threshold, or an empty string when none qualifies.
+    /// distance threshold, or an empty string when none qualifies. The wrapped prose for a
+    /// diagnostic message; <see cref="Best"/> exposes the same bare candidate for tooling.
     /// </summary>
-    public static string For(string target, IEnumerable<string> candidates)
+    public static string For(string target, IEnumerable<string> candidates) =>
+        Best(target, candidates) is { } best ? $" — did you mean '{best}'?" : string.Empty;
+
+    /// <summary>
+    /// The nearest in-scope candidate to <paramref name="target"/> within the distance threshold,
+    /// or <c>null</c> when none qualifies — the bare suggestion, free of the prose wrapper, for the
+    /// structured <c>Diagnostic.Suggestion</c> and the code-fix providers.
+    /// </summary>
+    public static string? Best(string target, IEnumerable<string> candidates)
     {
         string? best = null;
         var bestDistance = int.MaxValue;
@@ -33,9 +42,7 @@ internal static class Suggestions
             }
         }
 
-        return best is not null && bestDistance <= MaxDistance
-            ? $" — did you mean '{best}'?"
-            : string.Empty;
+        return best is not null && bestDistance <= MaxDistance ? best : null;
     }
 
     private static int Levenshtein(string a, string b)

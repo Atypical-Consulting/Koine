@@ -64,8 +64,10 @@ internal sealed class ExpressionChecker
                     }
                     else
                     {
+                        var fieldCandidates = scope.Names.Concat(_enumMembers).Concat(_specNames).ToList();
                         Report(DiagnosticCodes.UnknownField,
-                            $"unknown field '{id.Name}'{Suggestions.For(id.Name, scope.Names.Concat(_enumMembers).Concat(_specNames))}", id);
+                            $"unknown field '{id.Name}'{Suggestions.For(id.Name, fieldCandidates)}", id,
+                            Suggestions.Best(id.Name, fieldCandidates));
                     }
                 }
                 break;
@@ -783,4 +785,16 @@ internal sealed class ExpressionChecker
 
     private void Report(string code, string message, KoineNode node) =>
         _diagnostics.Add(Diagnostic.FromSpan(code, message, node.Span));
+
+    /// <summary>
+    /// Reports a diagnostic that also carries a structured <paramref name="suggestion"/> — the bare
+    /// candidate name a "Change to 'X'" code fix replaces <paramref name="node"/>'s span with. Used
+    /// for "did you mean" diagnostics whose span is exactly the mistyped identifier, so the suggested
+    /// name is available structurally (not scraped from the message prose).
+    /// </summary>
+    private void Report(string code, string message, KoineNode node, string? suggestion)
+    {
+        Diagnostic diagnostic = Diagnostic.FromSpan(code, message, node.Span);
+        _diagnostics.Add(suggestion is { Length: > 0 } ? diagnostic with { Suggestion = suggestion } : diagnostic);
+    }
 }

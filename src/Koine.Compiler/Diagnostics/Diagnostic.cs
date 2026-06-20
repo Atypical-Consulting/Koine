@@ -2,7 +2,7 @@ using Koine.Compiler.Ast;
 
 namespace Koine.Compiler.Diagnostics;
 
-public enum DiagnosticSeverity { Error, Warning }
+public enum DiagnosticSeverity { Error, Warning, Info, Hidden }
 
 /// <summary>
 /// A compiler diagnostic with a stable <see cref="Code"/> (e.g. <c>KOI0201</c>) and a
@@ -36,6 +36,18 @@ public sealed record Diagnostic(
 
     /// <summary>The originating source file, when known (multi-file builds).</summary>
     public string? File => Span.File;
+
+    /// <summary>
+    /// An optional, human-readable fix hint shown alongside the message (e.g. a "did you mean"
+    /// suggestion). Null when the diagnostic carries no actionable suggestion.
+    /// </summary>
+    public string? Suggestion { get; init; }
+
+    /// <summary>
+    /// Optional, immutable structured metadata for tooling (e.g. the LSP) to consume — for example
+    /// a suggested replacement identifier keyed by name. Empty/absent by default.
+    /// </summary>
+    public IReadOnlyDictionary<string, string>? Properties { get; init; }
 
     /// <summary>
     /// Builds an error from a node's full <see cref="SourceSpan"/>, carrying the span's end so

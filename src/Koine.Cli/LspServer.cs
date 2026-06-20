@@ -21,6 +21,7 @@ internal sealed class LspServer
 {
     private readonly KoineCompiler _compiler = new();
     private readonly KoineLanguageService _ls = new();
+    private readonly Koine.Compiler.CodeFixes.CodeFixService _codeFixes = new();
 
     /// <summary>
     /// Parses the workspace but treats a syntax error as "no usable model" for the output-producing
@@ -944,10 +945,11 @@ internal sealed class LspServer
     // ---- Code actions -----------------------------------------------------
 
     /// <summary>
-    /// Builds the code actions for the request: diagnostic-driven "did you mean 'X'?" quickfixes
-    /// (from the context's diagnostics) plus selection-driven refactors over the request's
-    /// <c>params.range</c> (e.g. <c>refactor.extract</c> from <see cref="KoineLanguageService.RefactorsAt"/>).
-    /// Each refactor carries an inline WorkspaceEdit; the quickfix behavior is unchanged.
+    /// Builds the code actions for the request from the unified <see cref="Koine.Compiler.CodeFixes.CodeFixService"/>:
+    /// diagnostic-driven quick fixes (from the context's diagnostics, e.g. "Change to 'X'") plus
+    /// selection-driven refactors over the request's <c>params.range</c> (e.g. <c>refactor.extract</c>).
+    /// Each fix carries an inline WorkspaceEdit. Quick-fix replacements come from the diagnostic's
+    /// structured <c>data.suggestion</c> (round-tripped from publishDiagnostics) — never the message prose.
     /// </summary>
     private object? CodeActionResultJson(JsonElement root)
     {
@@ -964,80 +966,138 @@ internal sealed class LspServer
         // When absent, all applicable actions are offered (unchanged behavior).
         var only = ReadOnlyKinds(p);
 
-        // 1. Diagnostic quickfixes (unchanged behavior, now gated by context.only).
-        if (KindAllowed("quickfix", only)
+        // The document the request targets (open doc preferred; fall back to the merged workspace).
+        var source = _docs.TryGetValue(uri, out var open) ? open
+            : Workspace().TryGetValue(uri, out var ws) ? ws
+            : null;
+        var (model, _) = source is null ? (null, null) : _compiler.Parse(source);
+
+        // 1. Diagnostic quick fixes — reconstruct a Diagnostic from each client diagnostic (code + span
+        //    + structured suggestion) and run the keyed providers. No prose scraping.
+        if (source is not null
             && p.TryGetProperty("context", out var context)
             && context.TryGetProperty("diagnostics", out var diags)
             && diags.ValueKind == JsonValueKind.Array)
         {
             foreach (var d in diags.EnumerateArray())
             {
-                if (!d.TryGetProperty("message", out var msgEl) || msgEl.ValueKind != JsonValueKind.String)
+                if (TryReadClientDiagnostic(d) is not { } diagnostic)
                 {
                     continue;
                 }
 
-                var suggestion = ExtractSuggestion(msgEl.GetString()!);
-                if (suggestion is null || !d.TryGetProperty("range", out var range))
+                foreach (var fix in _codeFixes.FixesForDiagnostic(source, model, diagnostic))
                 {
-                    continue;
-                }
-
-                actions.Add(new Dictionary<string, object?>
-                {
-                    ["title"] = $"Change to '{suggestion}'",
-                    ["kind"] = "quickfix",
-                    ["diagnostics"] = new[] { (object)d.Clone() },
-                    ["edit"] = new Dictionary<string, object?>
+                    if (!KindAllowed(fix.Kind, only))
                     {
-                        ["changes"] = new Dictionary<string, object?>
-                        {
-                            [uri] = new[]
-                            {
-                                (object)new Dictionary<string, object?>
-                                {
-                                    ["range"] = range.Clone(),
-                                    ["newText"] = suggestion,
-                                },
-                            },
-                        },
-                    },
-                });
+                        continue;
+                    }
+
+                    actions.Add(ToCodeAction(uri, fix, attachedDiagnostic: d));
+                }
             }
         }
 
         // 2. Selection-driven refactors over params.range (each gated by context.only on its kind).
-        if (TryGetRange(p, out var sl, out var sc, out var el, out var ec))
+        if (source is not null && model is not null && TryGetRange(p, out var sl, out var sc, out var el, out var ec))
         {
-            foreach (var refactor in _ls.RefactorsAt(Workspace(), uri, sl, sc, el, ec))
+            var (startOffset, endOffset) = SelectionOffsets(source, sl, sc, el, ec);
+            foreach (var fix in _codeFixes.RefactorsForSelection(source, model, startOffset, endOffset))
             {
-                if (!KindAllowed(refactor.Kind, only))
+                if (!KindAllowed(fix.Kind, only))
                 {
                     continue;
                 }
 
-                actions.Add(new Dictionary<string, object?>
-                {
-                    ["title"] = refactor.Title,
-                    ["kind"] = refactor.Kind,
-                    ["edit"] = new Dictionary<string, object?>
-                    {
-                        ["changes"] = new Dictionary<string, object?>
-                        {
-                            [uri] = refactor.Edits
-                                .Select(e => (object)new Dictionary<string, object?>
-                                {
-                                    ["range"] = SpanRange(e.Range),
-                                    ["newText"] = e.NewText,
-                                })
-                                .ToArray(),
-                        },
-                    },
-                });
+                actions.Add(ToCodeAction(uri, fix, attachedDiagnostic: null));
             }
         }
 
         return actions;
+    }
+
+    /// <summary>Serializes a <see cref="Koine.Compiler.CodeFixes.CodeFix"/> to an LSP CodeAction with an inline WorkspaceEdit.</summary>
+    private static Dictionary<string, object?> ToCodeAction(string uri, Koine.Compiler.CodeFixes.CodeFix fix, JsonElement? attachedDiagnostic)
+    {
+        var action = new Dictionary<string, object?>
+        {
+            ["title"] = fix.Title,
+            ["kind"] = fix.Kind,
+            ["edit"] = new Dictionary<string, object?>
+            {
+                ["changes"] = new Dictionary<string, object?>
+                {
+                    [uri] = fix.Edits
+                        .Select(e => (object)new Dictionary<string, object?>
+                        {
+                            ["range"] = SpanRange(e.Range),
+                            ["newText"] = e.NewText,
+                        })
+                        .ToArray(),
+                },
+            },
+        };
+
+        // Quick fixes echo back the diagnostic they resolve (so the editor clears the squiggle).
+        if (attachedDiagnostic is { } d)
+        {
+            action["diagnostics"] = new[] { (object)d.Clone() };
+        }
+
+        return action;
+    }
+
+    /// <summary>
+    /// Reconstructs an in-process <see cref="Diagnostic"/> from one client-sent LSP diagnostic JSON:
+    /// the <c>code</c>, a 1-based end-exclusive span from the 0-based <c>range</c>, and the structured
+    /// <c>data.suggestion</c> (when present). Returns <c>null</c> when the diagnostic lacks a code/range.
+    /// </summary>
+    private static Diagnostic? TryReadClientDiagnostic(JsonElement d)
+    {
+        if (!d.TryGetProperty("code", out var codeEl) || codeEl.ValueKind != JsonValueKind.String
+            || !d.TryGetProperty("range", out var range)
+            || !TryReadRange(range, out var sl, out var sc, out var el, out var ec))
+        {
+            return null;
+        }
+
+        // 0-based LSP range -> 1-based end-exclusive SourceSpan (mirrors SpanRange's inverse).
+        var span = new SourceSpan(sl + 1, sc + 1, el + 1, ec + 1, 0, 0);
+        var diagnostic = new Diagnostic(DiagnosticSeverity.Error, codeEl.GetString()!, Message: string.Empty, span);
+
+        if (d.TryGetProperty("data", out var data)
+            && data.ValueKind == JsonValueKind.Object
+            && data.TryGetProperty("suggestion", out var s)
+            && s.ValueKind == JsonValueKind.String)
+        {
+            diagnostic = diagnostic with { Suggestion = s.GetString() };
+        }
+
+        return diagnostic;
+    }
+
+    private static bool TryReadRange(JsonElement range, out int startLine, out int startChar, out int endLine, out int endChar)
+    {
+        startLine = startChar = endLine = endChar = 0;
+        return range.TryGetProperty("start", out var start)
+            && range.TryGetProperty("end", out var end)
+            && start.TryGetProperty("line", out var sl) && sl.TryGetInt32(out startLine)
+            && start.TryGetProperty("character", out var sc) && sc.TryGetInt32(out startChar)
+            && end.TryGetProperty("line", out var el) && el.TryGetInt32(out endLine)
+            && end.TryGetProperty("character", out var ec) && ec.TryGetInt32(out endChar);
+    }
+
+    /// <summary>
+    /// Maps a 0-based LSP selection range to absolute character offsets <c>[start, end)</c> over the
+    /// source, reusing <see cref="KoineLanguageService.OffsetOf"/> (the same line/character→offset
+    /// mapping the rest of the language services use, which clamps a column at the line break) so the
+    /// CLI and the WASM host agree on identical selections.
+    /// </summary>
+    private static (int Start, int End) SelectionOffsets(string source, int sl, int sc, int el, int ec)
+    {
+        var start = KoineLanguageService.OffsetOf(source, sl, sc);
+        var end = KoineLanguageService.OffsetOf(source, el, ec);
+        return end < start ? (end, start) : (start, end);
     }
 
     /// <summary>
@@ -1503,21 +1563,6 @@ internal sealed class LspServer
         ["changes"] = Array.Empty<object>(),
     };
 
-    /// <summary>Extracts <c>X</c> from a Suggestions-style message ending in <c>… — did you mean 'X'?</c>.</summary>
-    internal static string? ExtractSuggestion(string message)
-    {
-        const string marker = "did you mean '";
-        var i = message.IndexOf(marker, StringComparison.Ordinal);
-        if (i < 0)
-        {
-            return null;
-        }
-
-        var start = i + marker.Length;
-        var end = message.IndexOf('\'', start);
-        return end > start ? message[start..end] : null;
-    }
-
     /// <summary>Maps a service completion kind to its LSP CompletionItemKind number.</summary>
     private static int LspKind(CompletionItemKind kind) => kind switch
     {
@@ -1597,7 +1642,7 @@ internal sealed class LspServer
     private static Dictionary<string, object?> ToLspDiagnostic(Diagnostic d, string[] lines)
     {
         var (startLine, startChar, endLine, endChar) = ToRange(d, lines);
-        return new Dictionary<string, object?>
+        var dto = new Dictionary<string, object?>
         {
             ["range"] = new Dictionary<string, object?>
             {
@@ -1609,6 +1654,15 @@ internal sealed class LspServer
             ["source"] = "koine",
             ["message"] = d.Message,
         };
+
+        // Carry the structured suggestion in the LSP diagnostic's opaque `data` so it round-trips back
+        // on a textDocument/codeAction request — the quick-fix provider reads it (never the prose).
+        if (d.Suggestion is { Length: > 0 } suggestion)
+        {
+            dto["data"] = new Dictionary<string, object?> { ["suggestion"] = suggestion };
+        }
+
+        return dto;
     }
 
     /// <summary>

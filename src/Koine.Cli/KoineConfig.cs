@@ -31,7 +31,10 @@ internal sealed record KoineConfig(
     string? OutDir,
     string? Baseline = null,
     IReadOnlyDictionary<string, TargetOptions>? Targets = null,
-    IReadOnlyDictionary<string, string>? Severity = null)
+    IReadOnlyDictionary<string, string>? Severity = null,
+    IReadOnlyDictionary<string, string>? DiagnosticSeverity = null,
+    IReadOnlyList<string>? Analyzers = null,
+    IReadOnlyList<string>? Emitters = null)
 {
     public static readonly KoineConfig Empty = new(null, null);
 
@@ -49,6 +52,12 @@ internal sealed record KoineConfig(
         string? baseline = null;
         var targets = new Dictionary<string, TargetBuilder>(StringComparer.Ordinal);
         var severity = new Dictionary<string, string>(StringComparer.Ordinal);
+        // Case-insensitive: diagnostic codes are conventionally upper-case (KOI0311), but a user who
+        // writes `diagnostics.koi0311 = error` should not be silently ignored — and the in-source
+        // `// koine:disable` directive already matches codes case-insensitively, so match here too.
+        var diagnosticSeverity = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        List<string>? analyzers = null;
+        List<string>? emitters = null;
 
         foreach (var raw in text.Split('\n'))
         {
@@ -82,6 +91,30 @@ internal sealed record KoineConfig(
                 case "baseline":
                     baseline = value;
                     break;
+                case "analyzers":
+                    // External semantic-analyzer plugin assemblies (issue #69): a comma-separated list
+                    // of assembly paths, each loaded by AnalyzerLoader. Empty entries are dropped.
+                    analyzers = value
+                        .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                        .ToList();
+                    if (analyzers.Count == 0)
+                    {
+                        analyzers = null;
+                    }
+
+                    break;
+                case "emitters":
+                    // External emitter-provider plugin assemblies (issue #69): a comma-separated list
+                    // of assembly paths, each loaded by EmitterLoader. Empty entries are dropped.
+                    emitters = value
+                        .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                        .ToList();
+                    if (emitters.Count == 0)
+                    {
+                        emitters = null;
+                    }
+
+                    break;
                 default:
                     // `targets.<name>.<rest>` (R16.1) and `check.severity.<CODE>` (issue #73);
                     // any other unknown key is ignored, keeping the file forward-compatible.
@@ -97,6 +130,17 @@ internal sealed record KoineConfig(
                             severity[code] = value;
                         }
                     }
+                    else if (key.StartsWith("diagnostics.", StringComparison.Ordinal))
+                    {
+                        // `diagnostics.<CODE> = none|hidden|info|warning|error` — the build-time
+                        // severity remap/suppression (issue #69), parallel to `check.severity.`
+                        // which governs only the model-versioning `check` command.
+                        var code = key["diagnostics.".Length..];
+                        if (code.Length > 0)
+                        {
+                            diagnosticSeverity[code] = value;
+                        }
+                    }
 
                     break;
             }
@@ -106,7 +150,8 @@ internal sealed record KoineConfig(
             ? null
             : targets.ToDictionary(kv => kv.Key, kv => kv.Value.Build(), StringComparer.Ordinal);
         IReadOnlyDictionary<string, string>? severityMap = severity.Count == 0 ? null : severity;
-        return new KoineConfig(target, outDir, baseline, built, severityMap);
+        IReadOnlyDictionary<string, string>? diagnosticSeverityMap = diagnosticSeverity.Count == 0 ? null : diagnosticSeverity;
+        return new KoineConfig(target, outDir, baseline, built, severityMap, diagnosticSeverityMap, analyzers, emitters);
     }
 
     /// <summary>

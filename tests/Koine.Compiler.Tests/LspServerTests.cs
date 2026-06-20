@@ -544,7 +544,9 @@ public class LspServerTests
     [Fact]
     public void CodeAction_surfaces_a_did_you_mean_quickfix()
     {
-        // A synthetic diagnostic carrying a "did you mean 'String'?" message yields a quickfix.
+        // A diagnostic carrying the STRUCTURED suggestion (data.suggestion) — exactly as the server
+        // round-trips it through publishDiagnostics — yields a "Change to 'String'" quickfix. The
+        // replacement comes from data.suggestion, NOT the message prose (the message is irrelevant).
         var diag = new object[]
         {
             new
@@ -553,6 +555,7 @@ public class LspServerTests
                 severity = 1,
                 code = "KOI0101",
                 message = "unknown type 'Strng' — did you mean 'String'?",
+                data = new { suggestion = "String" },
             },
         };
         var doc = "context C {\n  value V { x: Strng }\n}\n";
@@ -674,10 +677,39 @@ public class LspServerTests
     }
 
     [Fact]
-    public void ExtractSuggestion_parses_the_did_you_mean_marker()
+    public void CodeAction_quickfix_ignores_the_message_prose_and_reads_the_structured_suggestion()
     {
-        LspServer.ExtractSuggestion("unknown type 'Strng' — did you mean 'String'?").ShouldBe("String");
-        LspServer.ExtractSuggestion("unknown type 'Strng'").ShouldBeNull();
+        // Proof the prose is no longer scraped: a BLANK message with only data.suggestion still yields
+        // the correct fix, and a diagnostic carrying no data.suggestion yields no quickfix even though
+        // its message contains the legacy "did you mean" marker.
+        var withData = new object[]
+        {
+            new
+            {
+                range = new { start = new { line = 1, character = 15 }, end = new { line = 1, character = 19 } },
+                severity = 1,
+                code = "KOI0101",
+                message = "",
+                data = new { suggestion = "String" },
+            },
+        };
+        var doc = "context C {\n  value V { x: Strng }\n}\n";
+        var withDataOutput = RunSession(Initialize(), DidOpen("file:///t.koi", doc), CodeAction("file:///t.koi", withData));
+        withDataOutput.ShouldContain("\"title\":\"Change to 'String'\"");
+        withDataOutput.ShouldContain("\"newText\":\"String\"");
+
+        var proseOnly = new object[]
+        {
+            new
+            {
+                range = new { start = new { line = 1, character = 15 }, end = new { line = 1, character = 19 } },
+                severity = 1,
+                code = "KOI0101",
+                message = "unknown type 'Strng' — did you mean 'String'?",
+            },
+        };
+        var proseOutput = RunSession(Initialize(), DidOpen("file:///t.koi", doc), CodeAction("file:///t.koi", proseOnly));
+        proseOutput.ShouldNotContain("\"title\":\"Change to");
     }
 
     // ---- Custom koine/* requests ----

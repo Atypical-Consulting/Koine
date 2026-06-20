@@ -1,0 +1,23 @@
+namespace Koine.Compiler.Emit;
+
+/// <summary>
+/// Target-agnostic, host-neutral emit configuration handed to an <see cref="IEmitterProvider"/>
+/// (issue #69, Task 5). It is the compiler-level subset of the CLI's per-target options that the
+/// emitters actually consume — output directory is a build concern and stays in the CLI. Each
+/// provider maps this neutral bag to its own emitter's option type internally.
+///
+/// <para><see cref="NamespaceMap"/> remaps a bounded context's emitted
+/// namespace/package (e.g. <c>Catalog → Acme.Catalog</c>). <see cref="InstantMode"/> and
+/// <see cref="Layout"/> are forward keys consumed by emitters as they gain support; absent keys
+/// are <c>null</c>/empty. <see cref="Empty"/> applies no configuration, so a provider given it
+/// produces output byte-identical to a parameterless emitter.</para>
+/// </summary>
+public sealed record EmitterOptions(
+    IReadOnlyDictionary<string, string> NamespaceMap,
+    string? InstantMode = null,
+    string? Layout = null)
+{
+    /// <summary>An options bag with no remapping and all defaults — the parameterless path.</summary>
+    public static readonly EmitterOptions Empty =
+        new(new Dictionary<string, string>(StringComparer.Ordinal));
+}

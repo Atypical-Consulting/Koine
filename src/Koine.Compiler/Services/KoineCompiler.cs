@@ -28,6 +28,31 @@ public sealed record CompileResult(
 public sealed class KoineCompiler
 {
     /// <summary>
+    /// External semantic analyzers (issue #69) appended after the built-ins on every validation pass.
+    /// Empty by default, so behavior is identical to today; the CLI loads these from the
+    /// <c>analyzers</c> config key via <see cref="Semantics.AnalyzerLoader"/>.
+    /// </summary>
+    private readonly IReadOnlyList<IModelAnalyzer>? _externalAnalyzers;
+
+    /// <summary>Creates a compiler that runs only the built-in analyzers (today's behavior).</summary>
+    public KoineCompiler()
+        : this(externalAnalyzers: null)
+    {
+    }
+
+    /// <summary>
+    /// Creates a compiler that, during semantic validation, runs the supplied external analyzers
+    /// (issue #69) after the built-in ones. A null/empty list is identical to the default constructor.
+    /// </summary>
+    public KoineCompiler(IReadOnlyList<IModelAnalyzer>? externalAnalyzers)
+    {
+        _externalAnalyzers = externalAnalyzers;
+    }
+
+    /// <summary>A validator wired with this compiler's external analyzers (built-ins always run first).</summary>
+    private SemanticValidator CreateValidator() => new(_externalAnalyzers);
+
+    /// <summary>
     /// Lexes, parses, and builds the model for a single source. Returns syntax diagnostics only.
     /// Parsing is error-tolerant (R-resilience): even when the source has a syntax error, a
     /// <em>partial</em> model is built from ANTLR's recovered tree (so the valid declarations are
@@ -67,7 +92,7 @@ public sealed class KoineCompiler
     public IReadOnlyList<Diagnostic> Diagnose(string source, string? file = null)
     {
         var (model, syntax) = Parse(source, file);
-        var semantic = new SemanticValidator().Validate(new SemanticModel(model!));
+        var semantic = CreateValidator().Validate(new SemanticModel(model!));
         return Combine(syntax, semantic);
     }
 
@@ -83,7 +108,7 @@ public sealed class KoineCompiler
     /// <summary>Validates an already-built workspace snapshot (no re-parse) and returns all diagnostics.</summary>
     public IReadOnlyList<Diagnostic> DiagnoseWorkspace(KoineCompilation compilation)
     {
-        var semantic = new SemanticValidator().Validate(compilation.SemanticModel);
+        var semantic = CreateValidator().Validate(compilation.SemanticModel);
         return Combine(compilation.SyntaxDiagnostics, semantic);
     }
 
@@ -108,10 +133,28 @@ public sealed class KoineCompiler
 
     /// <summary>Runs the full pipeline for a single source through the given emitter.</summary>
     public CompileResult Compile(string source, IEmitter emitter) =>
-        Compile(new[] { new SourceFile("<source>", source) }, emitter);
+        Compile(source, emitter, DiagnosticFilterOptions.None);
+
+    /// <summary>
+    /// Runs the full pipeline for a single source, applying the diagnostic remap/suppression
+    /// <paramref name="filterOptions"/> (config severity overrides + warnings-as-errors) plus any
+    /// in-source <c># koine:disable</c> directives before <c>CompileResult.Success</c> is computed.
+    /// </summary>
+    public CompileResult Compile(string source, IEmitter emitter, DiagnosticFilterOptions filterOptions) =>
+        Compile(new[] { new SourceFile("<source>", source) }, emitter, filterOptions);
 
     /// <summary>Runs the full pipeline over one or more sources through the given emitter.</summary>
-    public CompileResult Compile(IReadOnlyList<SourceFile> files, IEmitter emitter)
+    public CompileResult Compile(IReadOnlyList<SourceFile> files, IEmitter emitter) =>
+        Compile(files, emitter, DiagnosticFilterOptions.None);
+
+    /// <summary>
+    /// Runs the full pipeline over one or more sources, applying the diagnostic remap/suppression
+    /// <paramref name="filterOptions"/> (config severity overrides + warnings-as-errors) plus any
+    /// in-source <c># koine:disable</c> directives so the returned <see cref="CompileResult.Diagnostics"/>
+    /// are the effective (remapped) set and <see cref="CompileResult.Success"/> is computed from them.
+    /// With <see cref="DiagnosticFilterOptions.None"/> (the default) behaviour is unchanged.
+    /// </summary>
+    public CompileResult Compile(IReadOnlyList<SourceFile> files, IEmitter emitter, DiagnosticFilterOptions filterOptions)
     {
         var comp = KoineCompilation.Create(files);
 
@@ -122,19 +165,38 @@ public sealed class KoineCompiler
         // false because the syntax error is a DiagnosticSeverity.Error.
         if (comp.SyntaxDiagnostics.Any(d => d.Severity == DiagnosticSeverity.Error))
         {
-            return new CompileResult(comp.Model, comp.SyntaxDiagnostics, Array.Empty<EmittedFile>());
+            return new CompileResult(comp.Model, Filter(comp.SyntaxDiagnostics, filterOptions, files), Array.Empty<EmittedFile>());
         }
 
         // Reuse the snapshot's single shared SemanticModel — build resolution once, reuse for
         // both validation and emission.
-        var semantic = new SemanticValidator().Validate(comp.SemanticModel);
-        var diagnostics = Combine(comp.SyntaxDiagnostics, semantic);
-        if (semantic.Any(d => d.Severity == DiagnosticSeverity.Error))
+        var semantic = CreateValidator().Validate(comp.SemanticModel);
+        var diagnostics = Filter(Combine(comp.SyntaxDiagnostics, semantic), filterOptions, files);
+
+        // Success is computed from the *filtered* diagnostics (a config-promoted/warnings-as-errors
+        // Error now blocks emit; a suppressed/dropped warning no longer does).
+        if (diagnostics.Any(d => d.Severity == DiagnosticSeverity.Error))
         {
             return new CompileResult(comp.Model, diagnostics, Array.Empty<EmittedFile>());
         }
 
         var emitted = emitter.Emit(comp.Model, comp.SemanticModel);
         return new CompileResult(comp.Model, diagnostics, emitted);
+    }
+
+    /// <summary>
+    /// Applies the diagnostic filter (no-op for <see cref="DiagnosticFilterOptions.None"/> with no
+    /// <c># koine:disable</c> directives), passing the source texts so the filter can scan them.
+    /// </summary>
+    private static IReadOnlyList<Diagnostic> Filter(
+        IReadOnlyList<Diagnostic> diagnostics, DiagnosticFilterOptions filterOptions, IReadOnlyList<SourceFile> files)
+    {
+        var sources = new (string?, string)[files.Count];
+        for (var i = 0; i < files.Count; i++)
+        {
+            sources[i] = (files[i].Path, files[i].Source);
+        }
+
+        return DiagnosticFilter.Apply(diagnostics, filterOptions, sources);
     }
 }

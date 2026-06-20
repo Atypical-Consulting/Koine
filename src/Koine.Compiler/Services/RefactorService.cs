@@ -1,18 +1,21 @@
 using System.Text;
 using Koine.Compiler.Ast;
+using Koine.Compiler.CodeFixes;
 
 namespace Koine.Compiler.Services;
 
 /// <summary>
-/// Computes selection-driven refactors (LSP code actions) over a single document, mirroring how
+/// Computes selection-driven refactors over a single document, mirroring how
 /// <see cref="KoineLanguageService.DefinitionAt"/> resolves navigation. Each refactor is returned
-/// as an editor-agnostic <see cref="CodeActionEdit"/> (title + kind + the text edits that apply it);
-/// the LSP shell turns it into a CodeAction carrying an inline WorkspaceEdit.
+/// as an editor-agnostic <see cref="CodeFix"/> (title + kind + the text edits that apply it); the
+/// host shell turns it into a CodeAction carrying an inline WorkspaceEdit. This is the engine behind
+/// the selection-driven <c>ICodeFixProvider</c>s (see
+/// <see cref="Koine.Compiler.CodeFixes.Providers.ExtractValueObjectCodeFixProvider"/>).
 ///
-/// <para>v1 ships a single refactor — <b>extract value object</b> — but the entry point
-/// (<see cref="KoineLanguageService.RefactorsAt"/>) is shaped to accumulate future refactors at a
-/// position: each computes its own edits and is offered only when the selection actually lands on
-/// an applicable construct (the no-noise contract the rest of the language services follow).</para>
+/// <para>v1 ships a single refactor — <b>extract value object</b> — but the entry point is shaped to
+/// accumulate future refactors at a position: each computes its own edits and is offered only when the
+/// selection actually lands on an applicable construct (the no-noise contract the rest of the language
+/// services follow).</para>
 /// </summary>
 internal sealed class RefactorService
 {
@@ -27,19 +30,13 @@ internal sealed class RefactorService
 
     /// <summary>
     /// The refactors available for the selection <c>[startOffset, endOffset)</c> over
-    /// <paramref name="source"/> (0-based absolute offsets). Returns an empty list when the document
-    /// does not parse or no refactor applies at the selection.
+    /// <paramref name="source"/> (0-based absolute offsets), using an already-parsed
+    /// <paramref name="model"/>. Returns an empty list when no refactor applies at the selection.
     /// </summary>
-    public static IReadOnlyList<CodeActionEdit> RefactorsFor(KoineCompiler compiler, string source, int startOffset, int endOffset)
+    public static IReadOnlyList<CodeFix> RefactorsFor(string source, KoineModel model, int startOffset, int endOffset)
     {
-        var (model, _) = compiler.Parse(source);
-        if (model is null)
-        {
-            return [];
-        }
-
         var service = new RefactorService(source, model);
-        var actions = new List<CodeActionEdit>();
+        var actions = new List<CodeFix>();
         if (service.TryExtractValueObject(startOffset, endOffset) is { } extract)
         {
             actions.Add(extract);
@@ -57,7 +54,7 @@ internal sealed class RefactorService
     /// are deliberate placeholder names the user renames afterward. Returns <c>null</c> when the
     /// selection does not land on extractable fields.
     /// </summary>
-    private CodeActionEdit? TryExtractValueObject(int startOffset, int endOffset)
+    private CodeFix? TryExtractValueObject(int startOffset, int endOffset)
     {
         foreach (TypeDecl type in EnumerateTypes(_model))
         {
@@ -136,7 +133,7 @@ internal sealed class RefactorService
         return hit;
     }
 
-    private CodeActionEdit BuildExtract(TypeDecl type, IReadOnlyList<Member> selected)
+    private CodeFix BuildExtract(TypeDecl type, IReadOnlyList<Member> selected)
     {
         // Indentation of the enclosing type declaration (its 1-based start column minus one).
         var typeIndent = new string(' ', Math.Max(0, type.Span.Column - 1));
@@ -170,16 +167,18 @@ internal sealed class RefactorService
         var insertOffset = LeadingTriviaStart(type);
         var (insertLine, insertCol) = LineColumnOf(insertOffset);
         SourceSpan insertAt = PointSpan(insertLine, insertCol, insertOffset);
-        var insert = new TextEditModel(insertAt, sb.ToString());
+        var insert = new CodeFixEdit(insertAt, sb.ToString());
 
         // (2) Replace the SAME combined range (leading trivia included) with one placeholder field,
         // so nothing in the moved range is left behind or duplicated.
         SourceSpan combined = RangeSpan(moveStart, moveEnd);
-        var replace = new TextEditModel(combined, $"{fieldName}: {voName}");
+        var replace = new CodeFixEdit(combined, $"{fieldName}: {voName}");
 
-        return new CodeActionEdit(
+        return new CodeFix(
             $"Extract value object (rename '{voName}' / '{fieldName}' afterwards)",
             "refactor.extract",
+            // A one-off, position-specific refactor: not part of a fix-all batch.
+            EquivalenceKey: null,
             [insert, replace]);
     }
 
