@@ -58,9 +58,12 @@ describe('formatDomainIndex', () => {
     expect(out).toContain('Sales');
     expect(out).toContain('Shipping');
     // aggregate with a root that differs only when non-empty/differing → here equal, so just the name;
-    // and an aggregate with an empty root renders as just its name.
+    // and an aggregate with an empty root renders as just its name. Pin the suppression branch: an
+    // equal root must NOT render as `Order → Order`, nor an empty root as `Cart → `.
     expect(out).toContain('Order');
     expect(out).toContain('Cart');
+    expect(out).not.toContain('Order → Order');
+    expect(out).not.toContain('Cart →');
     // relations
     expect(out).toContain('Sales');
     expect(out).toContain('customer-supplier');
@@ -194,5 +197,20 @@ describe('explain action (panel integration)', () => {
     await settle();
 
     expect(container.querySelector('.koi-assistant-apply')).not.toBeNull();
+  });
+
+  test('a persisted explain turn replays without Apply (suppression survives reload)', async () => {
+    const c1 = document.createElement('div');
+    const panel = createAssistantPanel(makeOpts(c1));
+    panel.explainSelection();
+    await settle();
+
+    // A fresh panel pointed at the SAME workspace key replays the stored explain turn. Even though
+    // the persisted reply carries a ```koine block, the apply opt-out was stored with the turn, so
+    // the replayed bubble must stay apply-free (the live suppression survives the reload).
+    const c2 = document.createElement('div');
+    createAssistantPanel(makeOpts(c2));
+    expect(c2.querySelector('.koi-msg-assistant .koi-md')).not.toBeNull(); // the turn replayed
+    expect(c2.querySelector('.koi-assistant-apply')).toBeNull(); // …without Apply
   });
 });

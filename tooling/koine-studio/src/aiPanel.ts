@@ -340,13 +340,21 @@ export function createAssistantPanel(opts: AssistantPanelOptions): AssistantPane
     bubble.appendChild(apply);
   }
 
-  // Render one stored turn into a bubble: user text verbatim, assistant markdown rendered with the
-  // same "Apply to editor" affordance live replies get. Shared by mount and syncWorkspace replay.
+  // Render a finished assistant reply into a bubble: the markdown body, plus the "Apply to editor"
+  // affordance unless this turn opted out (an explanatory turn whose reply must not be applied).
+  // Shared by the live success path and transcript replay so the two never drift.
+  function renderAssistantReply(bubble: HTMLElement, content: string, offerApply: boolean): void {
+    bubble.innerHTML = `<div class="koi-md">${renderMarkdown(content)}</div>`;
+    if (offerApply) maybeOfferApply(bubble, content);
+  }
+
+  // Render one stored turn into a bubble: user text verbatim, assistant markdown with the apply
+  // affordance honoring the turn's persisted opt-out (so a replayed Explain reply stays apply-free).
+  // Shared by mount and syncWorkspace replay.
   function replayMessage(m: ChatMessage): void {
     const bubble = addBubble(m.role);
     if (m.role === 'assistant') {
-      bubble.innerHTML = `<div class="koi-md">${renderMarkdown(m.content)}</div>`;
-      maybeOfferApply(bubble, m.content);
+      renderAssistantReply(bubble, m.content, m.offerApply !== false);
     } else {
       bubble.textContent = m.content;
     }
@@ -417,14 +425,26 @@ export function createAssistantPanel(opts: AssistantPanelOptions): AssistantPane
       transcript.scrollTop = transcript.scrollHeight;
     };
 
-    // Fetch the grounding context ONCE (a quick-action caller passes the one it already resolved, so
-    // getContext — which may hit the LSP to build the domain index — isn't run twice).
-    const ctx = ctxOverride ?? (await opts.getContext());
-
+    // Acquire the busy lock synchronously — BEFORE the first await — so a second rapid send (Enter
+    // twice, or Enter then a quick action) can't slip past the busy() guard while getContext, now
+    // async, is in flight. Capture the workspace key now too, so a folder switch mid-stream can't
+    // persist this turn under the wrong workspace.
     aborter = new AbortController();
     setBusy(true);
+    const workspaceKey = opts.getWorkspaceKey();
+    // Commit a finished assistant turn to history + storage under the captured key, carrying the apply
+    // opt-out so a replay of an explanatory turn stays apply-free.
+    const commitAssistantTurn = (content: string): void => {
+      const turn: ChatMessage = { role: 'assistant', content };
+      if (!offerApply) turn.offerApply = false;
+      messages.push(turn);
+      saveChat(workspaceKey, messages);
+    };
     let full = '';
     try {
+      // Fetch the grounding context ONCE (a quick-action caller passes the one it already resolved, so
+      // getContext — which may hit the LSP to build the domain index — isn't run twice).
+      const ctx = ctxOverride ?? (await opts.getContext());
       full = await runAssistant({
         provider,
         baseUrl,
@@ -443,18 +463,15 @@ export function createAssistantPanel(opts: AssistantPanelOptions): AssistantPane
         runCompilerTool: opts.getUseTools() ? opts.runCompilerTool : undefined,
         onToolCall: addToolStatus,
       });
-      messages.push({ role: 'assistant', content: full });
-      saveChat(opts.getWorkspaceKey(), messages);
-      replyBubble.innerHTML = `<div class="koi-md">${renderMarkdown(full)}</div>`;
-      if (offerApply) maybeOfferApply(replyBubble, full);
+      commitAssistantTurn(full);
+      renderAssistantReply(replyBubble, full, offerApply);
     } catch (e) {
       // Keep the stored history in lock-step with the transcript on both failure paths.
       const aborted = aborter?.signal.aborted ?? false;
       if (aborted && full.trim()) {
         // Stopped mid-stream with usable output: commit the (user, partial-assistant) pair so the
         // visible reply and the history agree, and still offer to apply a generated model.
-        messages.push({ role: 'assistant', content: full });
-        saveChat(opts.getWorkspaceKey(), messages);
+        commitAssistantTurn(full);
         replyBubble.innerHTML = `<div class="koi-md">${renderMarkdown(full)}</div>`;
         const note = document.createElement('div');
         note.className = 'koi-assistant-stopped';

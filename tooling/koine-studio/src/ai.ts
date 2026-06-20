@@ -20,6 +20,12 @@ import { KOINE_TOOL_DEFS, KOINE_TOOLS, summarizeForChip, toAnthropicTool } from 
 export interface ChatMessage {
   role: 'user' | 'assistant';
   content: string;
+  /**
+   * Transcript-only metadata (stripped before the turn is sent to a provider): false on an
+   * explanatory assistant turn whose reply must NOT offer "Apply to editor", so the suppression
+   * survives a reload/replay. Absent ⇒ apply is offered as usual.
+   */
+  offerApply?: boolean;
 }
 
 /** Most tool round-trips the agentic loop will run before forcing a final text answer. */
@@ -100,7 +106,6 @@ async function runAnthropic(req: AssistantRequest): Promise<string> {
   const exec = req.runCompilerTool;
   const messages: MessageParam[] = req.messages.map((m) => ({ role: m.role, content: m.content }));
 
-  let anyText = false;
   for (let round = 0; round <= MAX_TOOL_ROUNDS; round++) {
     // Offer tools until the last allowed round, where we drop them so the model must answer in text.
     const offerTools = exec && round < MAX_TOOL_ROUNDS;
@@ -123,14 +128,15 @@ async function runAnthropic(req: AssistantRequest): Promise<string> {
     let roundText = '';
     stream.on('text', (delta) => {
       roundText += delta;
-      if (delta) anyText = true;
       req.onText(delta);
     });
     const final = await stream.finalMessage();
 
     // A safety-classifier refusal resolves normally (HTTP 200) with stop_reason 'refusal' and no
-    // text — surface it as an error so the UI shows a message instead of a blank reply.
-    if (final.stop_reason === 'refusal' && !anyText) {
+    // usable text — surface it as an error so the UI shows a message instead of a blank reply. Test
+    // this round's own (trimmed) text: a refusal can land on a later round after a tool preamble, and
+    // an earlier round's text must not mask it.
+    if (final.stop_reason === 'refusal' && !roundText.trim()) {
       throw new Error('The model declined to respond to this request.');
     }
 

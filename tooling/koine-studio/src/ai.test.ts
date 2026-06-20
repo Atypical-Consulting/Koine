@@ -292,4 +292,17 @@ describe('runAnthropic — agentic tool loop', () => {
     const toolResult = userTurn?.content.find((b) => b.type === 'tool_result');
     expect(toolResult?.content).toContain('wasm boom');
   });
+
+  test('a refusal on a LATER round is not masked by an earlier round’s preamble text', async () => {
+    // Round 0 streams a "thinking" preamble and asks for a tool; round 1 is refused with no text.
+    // The earlier preamble must NOT mask the refusal (regression: a cross-round text flag would).
+    const queue = [
+      anthropicStream({ textDeltas: ['Let me check that. '], finalMessage: A_TOOLCALL }),
+      anthropicStream({ finalMessage: { role: 'assistant', stop_reason: 'refusal', content: [] } }),
+    ];
+    h.streamImpl = () => queue.shift();
+    await expect(
+      runAssistant(anthropicReq({ runCompilerTool: () => Promise.resolve('ok: true — no diagnostics.') })),
+    ).rejects.toThrow('The model declined to respond to this request.');
+  });
 });
