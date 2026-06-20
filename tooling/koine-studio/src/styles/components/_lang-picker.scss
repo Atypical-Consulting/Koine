@@ -104,3 +104,43 @@
   border-color: color-mix(in srgb, var(--koi-error) 40%, var(--koi-line));
   background: color-mix(in srgb, var(--koi-error) 9%, transparent);
 }
+
+/* Global unsaved-work indicator: a clickable amber pill that appears beside #status when any open
+   file has unsaved changes, and triggers Save-all. Reuses the warning hue (--koi-hl-number) so it
+   reads as "attention", consistent with the diagnostics warn colour. */
+.unsaved-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--koi-font-mono);
+  font-size: 0.74rem;
+  letter-spacing: 0.2px;
+  padding: 4px 11px;
+  border-radius: 999px;
+  cursor: pointer;
+  color: var(--koi-hl-number);
+  border: 1px solid color-mix(in srgb, var(--koi-hl-number) 45%, var(--koi-line));
+  background: color-mix(in srgb, var(--koi-hl-number) 12%, transparent);
+}
+
+/* The element carries the `hidden` attribute when clean; honour it over the inline-flex above. */
+.unsaved-indicator[hidden] {
+  display: none;
+}
+
+.unsaved-indicator::before {
+  content: '';
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: var(--koi-hl-number);
+}
+
+.unsaved-indicator:hover {
+  background: color-mix(in srgb, var(--koi-hl-number) 20%, transparent);
+}
+
+.unsaved-indicator:focus-visible {
+  outline: 2px solid var(--koi-accent);
+  outline-offset: 2px;
+}
