@@ -118,12 +118,20 @@ public sealed partial class TypeScriptEmitter
         WriteDoc(sb, $"Projects {sourceType} to {name}.", "");
         sb.Append("export function ").Append(name).Append("Projection(src: ").Append(sourceType)
           .Append("): ").Append(name).Append(" {\n");
-        sb.Append(Indent).Append("return {\n");
-        foreach (var (_, prop, rhs) in fields)
+        if (RefOnly)
         {
-            sb.Append(Indent).Append(Indent).Append(prop).Append(": ").Append(rhs).Append(",\n");
+            sb.Append(Indent).Append(RefStubStatement).Append('\n');
         }
-        sb.Append(Indent).Append("};\n");
+        else
+        {
+            sb.Append(Indent).Append("return {\n");
+            foreach (var (_, prop, rhs) in fields)
+            {
+                sb.Append(Indent).Append(Indent).Append(prop).Append(": ").Append(rhs).Append(",\n");
+            }
+            sb.Append(Indent).Append("};\n");
+        }
+
         sb.Append("}\n");
 
         return new EmittedFile(

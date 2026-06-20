@@ -51,17 +51,23 @@ public sealed partial class TypeScriptEmitter
 
             first = false;
 
-            IReadOnlyList<Member> members = SpecTargetMembers(context, spec.TargetType, index);
-            var translator = new TypeScriptExpressionTranslator(
-                index, members, emit.EnumMemberToType, typeMapper, context, memberReceiver: "target");
-            var body = translator.Translate(spec.Condition, TypeScriptExpressionTranslator.NameMode.Property);
-
             var targetType = TypeScriptNaming.ToPascalCase(spec.TargetType);
             var fn = "is" + TypeScriptNaming.ToPascalCase(spec.Name);
 
             WriteDoc(sb, spec.Doc, "");
             sb.Append("export function ").Append(fn).Append("(target: ").Append(targetType)
               .Append("): boolean {\n");
+            if (RefOnly)
+            {
+                sb.Append(Indent).Append(RefStubStatement).Append('\n');
+                sb.Append("}\n");
+                continue;
+            }
+
+            IReadOnlyList<Member> members = SpecTargetMembers(context, spec.TargetType, index);
+            var translator = new TypeScriptExpressionTranslator(
+                index, members, emit.EnumMemberToType, typeMapper, context, memberReceiver: "target");
+            var body = translator.Translate(spec.Condition, TypeScriptExpressionTranslator.NameMode.Property);
             sb.Append(Indent).Append("return ").Append(body).Append(";\n");
             sb.Append("}\n");
         }
@@ -137,6 +143,12 @@ public sealed partial class TypeScriptEmitter
             {
                 sb.Append(Indent).Append("abstract ").Append(method).Append('(').Append(paramList)
                   .Append("): ").Append(ret).Append(";\n");
+            }
+            else if (RefOnly)
+            {
+                sb.Append(Indent).Append(method).Append('(').Append(paramList).Append("): ").Append(ret).Append(" {\n");
+                sb.Append(Indent).Append(Indent).Append(RefStubStatement).Append('\n');
+                sb.Append(Indent).Append("}\n");
             }
             else
             {

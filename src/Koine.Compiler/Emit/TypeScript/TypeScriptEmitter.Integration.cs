@@ -41,20 +41,28 @@ public sealed partial class TypeScriptEmitter
         foreach (Member m in ctorMembers)
         {
             WriteDoc(sb, m.Doc, Indent);
-            sb.Append(Indent).Append("readonly ").Append(TypeScriptNaming.ToCamelCase(m.Name)).Append(": ")
+            sb.Append(Indent).Append("readonly ").Append(TypeScriptNaming.ToCamelCase(m.Name)).Append(FieldBang).Append(": ")
               .Append(typeMapper.Map(m.Type)).Append(";\n");
         }
-        sb.Append(Indent).Append("readonly occurredOn: Instant;\n\n");
+        sb.Append(Indent).Append("readonly occurredOn").Append(FieldBang).Append(": Instant;\n\n");
 
         var ordered = OrderCtorParams(ctorMembers).ToList();
         sb.Append(Indent).Append("constructor(");
         sb.Append(string.Join(", ", ordered.Select(m => $"{TypeScriptNaming.ToCamelCase(m.Name)}: {typeMapper.Map(m.Type)}")));
         sb.Append(ordered.Count > 0 ? ", " : "").Append("occurredOn: Instant = Instant.now()) {\n");
-        foreach (Member m in ctorMembers)
+        if (RefOnly)
         {
-            WriteAssignment(sb, m);
+            sb.Append(Indent).Append(Indent).Append(RefStubStatement).Append('\n');
         }
-        sb.Append(Indent).Append(Indent).Append("this.occurredOn = occurredOn;\n");
+        else
+        {
+            foreach (Member m in ctorMembers)
+            {
+                WriteAssignment(sb, m);
+            }
+            sb.Append(Indent).Append(Indent).Append("this.occurredOn = occurredOn;\n");
+        }
+
         sb.Append(Indent).Append("}\n");
         sb.Append("}\n");
 

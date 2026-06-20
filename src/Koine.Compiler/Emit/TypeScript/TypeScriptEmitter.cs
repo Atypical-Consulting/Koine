@@ -60,6 +60,39 @@ public sealed partial class TypeScriptEmitter : IEmitter
 
     private const string Indent = "  ";
 
+    /// <summary>
+    /// True when reference-only emit is requested (<see cref="TsEmitterOptions.ReferenceOnly"/>):
+    /// every executable body (constructor/method/getter/operation/factory) is replaced with a
+    /// <c>throw new Error('reference-only');</c> stub while all signatures, classes, interfaces and
+    /// fields stay intact. Off by default, so the full emit path is byte-identical to the historical
+    /// TypeScript output.
+    /// </summary>
+    private bool RefOnly => _options.ReferenceOnly;
+
+    /// <summary>The canonical reference-only body stub for a TypeScript method/getter/operation.</summary>
+    private const string RefStubStatement = "throw new Error('reference-only');";
+
+    /// <summary>
+    /// Writes a complete reference-only member: the given <paramref name="signature"/> (already minus
+    /// the body, e.g. <c>multiply(factor: number): Money</c>) followed by a single-statement
+    /// <see cref="RefStubStatement"/> body. The signature is indented one level; the body two.
+    /// </summary>
+    private static void WriteRefStubMethod(StringBuilder sb, string signature)
+    {
+        sb.Append('\n');
+        sb.Append(Indent).Append(signature).Append(" {\n");
+        sb.Append(Indent).Append(Indent).Append(RefStubStatement).Append('\n');
+        sb.Append(Indent).Append("}\n");
+    }
+
+    /// <summary>
+    /// The definite-assignment assertion (<c>!</c>) appended to a class field name in reference-only
+    /// emit, where the constructor body is stubbed and never assigns the field — without it TypeScript
+    /// <c>strict</c> (<c>strictPropertyInitialization</c>) would reject the un-initialized field. Empty
+    /// on the full-emit path, so output stays byte-identical.
+    /// </summary>
+    private string FieldBang => RefOnly ? "!" : "";
+
     public IReadOnlyList<EmittedFile> Emit(KoineModel model) => Emit(model, null);
 
     public IReadOnlyList<EmittedFile> Emit(KoineModel model, SemanticModel? semantic)

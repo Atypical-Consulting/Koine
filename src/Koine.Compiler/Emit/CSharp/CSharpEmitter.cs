@@ -30,6 +30,53 @@ public sealed partial class CSharpEmitter : IEmitter
     /// <summary>An emitter configured with R16.1 options (namespace remapping, Instant handling).</summary>
     internal CSharpEmitter(CSharpEmitterOptions options) => _options = options;
 
+    /// <summary>
+    /// True when reference-only emit is requested (<see cref="CSharpEmitterOptions.ReferenceOnly"/>):
+    /// every executable body is replaced with a <c>throw null!;</c> reference-assembly stub while all
+    /// signatures, declarations, interfaces and attributes stay intact. Off by default, so the full
+    /// emit path is byte-identical to the historical output.
+    /// </summary>
+    private bool RefOnly => _options.ReferenceOnly;
+
+    /// <summary>
+    /// Writes the canonical reference-assembly stub for a <em>block-bodied</em> member: the opening
+    /// brace has already been written by the caller (so a stamped signature stays unchanged); this
+    /// emits <c>throw null!;</c> indented one level past <paramref name="indentLevel"/> braces, then
+    /// the closing brace. Used by every block-bodied ctor/method/operator when <see cref="RefOnly"/>.
+    /// </summary>
+    private static void WriteRefStubBlockBody(StringBuilder sb, int indentLevel = 1)
+    {
+        for (var i = 0; i < indentLevel + 1; i++)
+        {
+            sb.Append(Indent);
+        }
+
+        sb.Append("throw null!;\n");
+        for (var i = 0; i < indentLevel; i++)
+        {
+            sb.Append(Indent);
+        }
+
+        sb.Append("}\n");
+    }
+
+    /// <summary>
+    /// Writes the canonical reference-assembly stub for an <em>expression-bodied</em> member:
+    /// <c>=&gt; throw null!;</c>, indented <paramref name="indentLevel"/> levels (the caller has
+    /// already written the signature line up to and including its trailing newline). Used by every
+    /// <c>=&gt; …;</c> member (derived properties, specs, services, projections, simple operators)
+    /// when <see cref="RefOnly"/>.
+    /// </summary>
+    private static void WriteRefStubExpressionBody(StringBuilder sb, int indentLevel = 2)
+    {
+        for (var i = 0; i < indentLevel; i++)
+        {
+            sb.Append(Indent);
+        }
+
+        sb.Append("=> throw null!;\n");
+    }
+
     public IReadOnlyList<EmittedFile> Emit(KoineModel model) => Emit(model, null);
 
     public IReadOnlyList<EmittedFile> Emit(KoineModel model, SemanticModel? semantic)
@@ -491,12 +538,18 @@ public sealed partial class CSharpEmitter : IEmitter
         foreach (Member m in derived)
         {
             var csType = typeMapper.Map(m.Type);
-            var body = translator.TranslateTopLevel(m.Initializer!, CSharpExpressionTranslator.NameMode.Property, EnumExpected(m, index));
             sb.Append('\n');
             WriteXmlDoc(sb, m.Doc, Indent);
             WriteObsolete(sb, m.Deprecated, Indent);
             sb.Append(Indent).Append("public ").Append(csType).Append(' ')
               .Append(CSharpNaming.ToPascalCase(m.Name)).Append('\n');
+            if (RefOnly)
+            {
+                WriteRefStubExpressionBody(sb);
+                continue;
+            }
+
+            var body = translator.TranslateTopLevel(m.Initializer!, CSharpExpressionTranslator.NameMode.Property, EnumExpected(m, index));
             sb.Append(Indent).Append(Indent).Append("=> ").Append(body).Append(";\n");
         }
 
@@ -550,12 +603,18 @@ public sealed partial class CSharpEmitter : IEmitter
         foreach (Member m in derived)
         {
             var csType = typeMapper.Map(m.Type);
-            var body = translator.TranslateTopLevel(m.Initializer!, CSharpExpressionTranslator.NameMode.Property, EnumExpected(m, index));
             sb.Append('\n');
             WriteXmlDoc(sb, m.Doc, Indent);
             WriteObsolete(sb, m.Deprecated, Indent);
             sb.Append(Indent).Append("public ").Append(csType).Append(' ')
               .Append(CSharpNaming.ToPascalCase(m.Name)).Append('\n');
+            if (RefOnly)
+            {
+                WriteRefStubExpressionBody(sb);
+                continue;
+            }
+
+            var body = translator.TranslateTopLevel(m.Initializer!, CSharpExpressionTranslator.NameMode.Property, EnumExpected(m, index));
             sb.Append(Indent).Append(Indent).Append("=> ").Append(body).Append(";\n");
         }
 
@@ -651,6 +710,12 @@ public sealed partial class CSharpEmitter : IEmitter
         sb.Append(")\n");
         sb.Append(Indent).Append("{\n");
 
+        if (RefOnly)
+        {
+            WriteRefStubBlockBody(sb);
+            return;
+        }
+
         WriteEnumDefaultCoalesce(sb, ctorMembers, translator, index);
         WriteInvariantGuards(sb, typeName, invariants, translator);
         if (invariants.Count > 0 && ctorMembers.Count > 0)
@@ -702,6 +767,12 @@ public sealed partial class CSharpEmitter : IEmitter
         sb.Append(")\n");
         sb.Append(Indent).Append("{\n");
 
+        if (RefOnly)
+        {
+            WriteRefStubBlockBody(sb);
+            return;
+        }
+
         WriteEnumDefaultCoalesce(sb, storedFields, translator, index);
         WriteInvariantGuards(sb, typeName, invariants, translator);
         if (invariants.Count > 0 && storedFields.Count > 0)
@@ -742,6 +813,12 @@ public sealed partial class CSharpEmitter : IEmitter
         sb.Append(")\n");
         sb.Append(Indent).Append("{\n");
 
+        if (RefOnly)
+        {
+            WriteRefStubBlockBody(sb);
+            return;
+        }
+
         WriteEnumDefaultCoalesce(sb, ctorMembers, translator, index);
 
         sb.Append(Indent).Append(Indent).Append("Id = id;\n");
@@ -773,6 +850,12 @@ public sealed partial class CSharpEmitter : IEmitter
         sb.Append(Indent).Append("/// <summary>Validates every invariant; run after construction and each state change.</summary>\n");
         sb.Append(Indent).Append("private void CheckInvariants()\n");
         sb.Append(Indent).Append("{\n");
+        if (RefOnly)
+        {
+            WriteRefStubBlockBody(sb);
+            return;
+        }
+
         WriteInvariantGuards(sb, entity.Name, entity.Invariants, translator,
             CSharpExpressionTranslator.NameMode.Property);
         sb.Append(Indent).Append("}\n");
@@ -1183,6 +1266,12 @@ public sealed partial class CSharpEmitter : IEmitter
           .Append('(').Append(paramList).Append(")\n");
         sb.Append(Indent).Append("{\n");
 
+        if (RefOnly)
+        {
+            WriteRefStubBlockBody(sb);
+            return;
+        }
+
         // Command parameters are locals inside the body (members render as properties).
         foreach (Param p in cmd.Parameters)
         {
@@ -1410,6 +1499,12 @@ public sealed partial class CSharpEmitter : IEmitter
           .Append(CSharpNaming.ToPascalCase(factory.Name))
           .Append('(').Append(paramList).Append(")\n");
         sb.Append(Indent).Append("{\n");
+
+        if (RefOnly)
+        {
+            WriteRefStubBlockBody(sb);
+            return;
+        }
 
         // Factory scope: the synthetic `id` and the factory's parameters are locals
         // (entity members are not in scope — the aggregate does not exist yet).

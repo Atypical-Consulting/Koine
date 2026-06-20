@@ -74,11 +74,6 @@ public sealed partial class CSharpEmitter
         var usesLinq = false;
         foreach (SpecDecl spec in specs)
         {
-            IReadOnlyList<Member> members = SpecTargetMembers(spec.TargetType, index, ContextOf(ns));
-            var translator = new CSharpExpressionTranslator(
-                index, members, enumMemberToType, SpecBodiesFor(spec.TargetType, index), memberReceiver: "x", context: ContextOf(ns), options: _options);
-            var body = translator.TranslateTopLevel(spec.Condition, CSharpExpressionTranslator.NameMode.Property);
-
             if (!first)
             {
                 sb.Append('\n');
@@ -88,6 +83,16 @@ public sealed partial class CSharpEmitter
             WriteXmlDoc(sb, spec.Doc, Indent);
             sb.Append(Indent).Append("public static bool ").Append(CSharpNaming.ToPascalCase(spec.Name))
               .Append("(this ").Append(spec.TargetType).Append(" x)\n");
+            if (RefOnly)
+            {
+                WriteRefStubExpressionBody(sb);
+                continue;
+            }
+
+            IReadOnlyList<Member> members = SpecTargetMembers(spec.TargetType, index, ContextOf(ns));
+            var translator = new CSharpExpressionTranslator(
+                index, members, enumMemberToType, SpecBodiesFor(spec.TargetType, index), memberReceiver: "x", context: ContextOf(ns), options: _options);
+            var body = translator.TranslateTopLevel(spec.Condition, CSharpExpressionTranslator.NameMode.Property);
             sb.Append(Indent).Append(Indent).Append("=> ").Append(body).Append(";\n");
             usesLinq |= ExprUsesLinq(spec.Condition);
         }
@@ -136,6 +141,12 @@ public sealed partial class CSharpEmitter
             {
                 sb.Append(Indent).Append("public abstract ").Append(ret).Append(' ')
                   .Append(method).Append('(').Append(paramList).Append(");\n");
+            }
+            else if (RefOnly)
+            {
+                sb.Append(Indent).Append("public ").Append(ret).Append(' ')
+                  .Append(method).Append('(').Append(paramList).Append(")\n");
+                WriteRefStubExpressionBody(sb);
             }
             else
             {

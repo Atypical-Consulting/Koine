@@ -32,7 +32,7 @@ public sealed partial class TypeScriptEmitter
         foreach (Member m in ctorMembers)
         {
             WriteDoc(sb, m.Doc, Indent);
-            sb.Append(Indent).Append("readonly ").Append(TypeScriptNaming.ToCamelCase(m.Name)).Append(": ")
+            sb.Append(Indent).Append("readonly ").Append(TypeScriptNaming.ToCamelCase(m.Name)).Append(FieldBang).Append(": ")
               .Append(typeMapper.Map(m.Type)).Append(";\n");
         }
         sb.Append('\n');
@@ -46,8 +46,16 @@ public sealed partial class TypeScriptEmitter
             WriteDoc(sb, m.Doc, Indent);
             sb.Append(Indent).Append("get ").Append(TypeScriptNaming.ToCamelCase(m.Name)).Append("(): ")
               .Append(typeMapper.Map(m.Type)).Append(" {\n");
-            sb.Append(Indent).Append(Indent).Append("return ")
-              .Append(translator.Translate(m.Initializer!, EnumExpected(m, emit.Index))).Append(";\n");
+            if (RefOnly)
+            {
+                sb.Append(Indent).Append(Indent).Append(RefStubStatement).Append('\n');
+            }
+            else
+            {
+                sb.Append(Indent).Append(Indent).Append("return ")
+                  .Append(translator.Translate(m.Initializer!, EnumExpected(m, emit.Index))).Append(";\n");
+            }
+
             sb.Append(Indent).Append("}\n");
         }
 
@@ -85,6 +93,13 @@ public sealed partial class TypeScriptEmitter
         sb.Append(string.Join(", ", ordered.Select(m => FormatParam(m, typeMapper, translator))));
         sb.Append(") {\n");
         sb.Append(Indent).Append(Indent).Append("super();\n");
+
+        if (RefOnly)
+        {
+            sb.Append(Indent).Append(Indent).Append(RefStubStatement).Append('\n');
+            sb.Append(Indent).Append("}\n");
+            return;
+        }
 
         // A value object's invariants run in the constructor, where members are still the bare
         // parameters (not yet `this.` fields) — Parameter mode.
@@ -156,6 +171,12 @@ public sealed partial class TypeScriptEmitter
 
     private void WriteEqualityComponents(StringBuilder sb, IReadOnlyList<Member> members)
     {
+        if (RefOnly)
+        {
+            WriteRefStubMethod(sb, "protected equalityComponents(): readonly unknown[]");
+            return;
+        }
+
         sb.Append('\n');
         sb.Append(Indent).Append("protected equalityComponents(): readonly unknown[] {\n");
         sb.Append(Indent).Append(Indent).Append("return [");
@@ -171,6 +192,12 @@ public sealed partial class TypeScriptEmitter
     /// </summary>
     private void WriteScalarOp(StringBuilder sb, ValueObjectDecl vo, string name, IReadOnlyList<Member> ctorMembers)
     {
+        if (RefOnly)
+        {
+            WriteRefStubMethod(sb, $"multiply(factor: number): {name}");
+            return;
+        }
+
         var numeric = new HashSet<string>(ctorMembers.Where(m => m.Type.Name is "Int" or "Decimal").Select(m => m.Name), StringComparer.Ordinal);
         var ordered = OrderCtorParams(ctorMembers).ToList();
 
@@ -198,6 +225,12 @@ public sealed partial class TypeScriptEmitter
     /// <summary>A value object's additive <c>add</c> method (for <c>sum</c> folds): adds numeric fields, carries the rest.</summary>
     private void WriteAdditiveOp(StringBuilder sb, ValueObjectDecl vo, string name, IReadOnlyList<Member> ctorMembers, TypeScriptTypeMapper typeMapper)
     {
+        if (RefOnly)
+        {
+            WriteRefStubMethod(sb, $"add(other: {name}): {name}");
+            return;
+        }
+
         var numeric = new HashSet<string>(ctorMembers.Where(m => m.Type.Name is "Int" or "Decimal").Select(m => m.Name), StringComparer.Ordinal);
         var ordered = OrderCtorParams(ctorMembers).ToList();
 
@@ -228,6 +261,15 @@ public sealed partial class TypeScriptEmitter
         {
             return;
         }
+
+        if (RefOnly)
+        {
+            WriteRefStubMethod(sb, $"add(other: {name}): {name}");
+            WriteRefStubMethod(sb, $"subtract(other: {name}): {name}");
+            WriteRefStubMethod(sb, $"multiply(factor: number): {name}");
+            return;
+        }
+
         var amt = TypeScriptNaming.ToCamelCase(amount.Name);
         var u = TypeScriptNaming.ToCamelCase(unit.Name);
         var ordered = OrderCtorParams(ctorMembers).ToList();
@@ -277,12 +319,12 @@ public sealed partial class TypeScriptEmitter
         sb.Append("export class ").Append(name).Append(" {\n");
 
         // Identity, then member fields. A mutated field is not `readonly`.
-        sb.Append(Indent).Append("readonly id: ").Append(idName).Append(";\n");
+        sb.Append(Indent).Append("readonly id").Append(FieldBang).Append(": ").Append(idName).Append(";\n");
         foreach (Member m in ctorMembers)
         {
             WriteDoc(sb, m.Doc, Indent);
             sb.Append(Indent).Append(mutated.Contains(m.Name) ? "" : "readonly ")
-              .Append(TypeScriptNaming.ToCamelCase(m.Name)).Append(": ").Append(typeMapper.Map(m.Type)).Append(";\n");
+              .Append(TypeScriptNaming.ToCamelCase(m.Name)).Append(FieldBang).Append(": ").Append(typeMapper.Map(m.Type)).Append(";\n");
         }
         sb.Append('\n');
 
@@ -295,24 +337,39 @@ public sealed partial class TypeScriptEmitter
             sb.Append(", ").Append(FormatParam(m, typeMapper, translator));
         }
         sb.Append(") {\n");
-        sb.Append(Indent).Append(Indent).Append("this.id = id;\n");
-        foreach (Member m in ctorMembers)
+        if (RefOnly)
         {
-            WriteAssignment(sb, m);
+            sb.Append(Indent).Append(Indent).Append(RefStubStatement).Append('\n');
+            sb.Append(Indent).Append("}\n");
         }
-        if (entity.Invariants.Count > 0)
+        else
         {
-            sb.Append(Indent).Append(Indent).Append("this.checkInvariants();\n");
+            sb.Append(Indent).Append(Indent).Append("this.id = id;\n");
+            foreach (Member m in ctorMembers)
+            {
+                WriteAssignment(sb, m);
+            }
+            if (entity.Invariants.Count > 0)
+            {
+                sb.Append(Indent).Append(Indent).Append("this.checkInvariants();\n");
+            }
+            sb.Append(Indent).Append("}\n");
         }
-        sb.Append(Indent).Append("}\n");
 
         // Shared invariant check.
         if (entity.Invariants.Count > 0)
         {
-            sb.Append('\n');
-            sb.Append(Indent).Append("private checkInvariants(): void {\n");
-            WriteInvariantGuards(sb, name, entity.Invariants, translator, TypeScriptExpressionTranslator.NameMode.Property);
-            sb.Append(Indent).Append("}\n");
+            if (RefOnly)
+            {
+                WriteRefStubMethod(sb, "private checkInvariants(): void");
+            }
+            else
+            {
+                sb.Append('\n');
+                sb.Append(Indent).Append("private checkInvariants(): void {\n");
+                WriteInvariantGuards(sb, name, entity.Invariants, translator, TypeScriptExpressionTranslator.NameMode.Property);
+                sb.Append(Indent).Append("}\n");
+            }
         }
 
         // Derived members.
@@ -322,7 +379,15 @@ public sealed partial class TypeScriptEmitter
             WriteDoc(sb, m.Doc, Indent);
             sb.Append(Indent).Append("get ").Append(TypeScriptNaming.ToCamelCase(m.Name)).Append("(): ")
               .Append(typeMapper.Map(m.Type)).Append(" {\n");
-            sb.Append(Indent).Append(Indent).Append("return ").Append(translator.Translate(m.Initializer!, EnumExpected(m, emit.Index))).Append(";\n");
+            if (RefOnly)
+            {
+                sb.Append(Indent).Append(Indent).Append(RefStubStatement).Append('\n');
+            }
+            else
+            {
+                sb.Append(Indent).Append(Indent).Append("return ").Append(translator.Translate(m.Initializer!, EnumExpected(m, emit.Index))).Append(";\n");
+            }
+
             sb.Append(Indent).Append("}\n");
         }
 
@@ -333,12 +398,20 @@ public sealed partial class TypeScriptEmitter
         {
             sb.Append('\n');
             sb.Append(Indent).Append("private readonly _domainEvents: DomainEvent[] = [];\n");
-            sb.Append(Indent).Append("get domainEvents(): readonly DomainEvent[] {\n");
-            sb.Append(Indent).Append(Indent).Append("return this._domainEvents;\n");
-            sb.Append(Indent).Append("}\n");
-            sb.Append(Indent).Append("clearDomainEvents(): void {\n");
-            sb.Append(Indent).Append(Indent).Append("this._domainEvents.length = 0;\n");
-            sb.Append(Indent).Append("}\n");
+            if (RefOnly)
+            {
+                WriteRefStubMethod(sb, "get domainEvents(): readonly DomainEvent[]");
+                WriteRefStubMethod(sb, "clearDomainEvents(): void");
+            }
+            else
+            {
+                sb.Append(Indent).Append("get domainEvents(): readonly DomainEvent[] {\n");
+                sb.Append(Indent).Append(Indent).Append("return this._domainEvents;\n");
+                sb.Append(Indent).Append("}\n");
+                sb.Append(Indent).Append("clearDomainEvents(): void {\n");
+                sb.Append(Indent).Append(Indent).Append("this._domainEvents.length = 0;\n");
+                sb.Append(Indent).Append("}\n");
+            }
         }
 
         // Commands.
@@ -354,10 +427,17 @@ public sealed partial class TypeScriptEmitter
         }
 
         // Identity equality.
-        sb.Append('\n');
-        sb.Append(Indent).Append("equals(other: ").Append(name).Append(" | undefined): boolean {\n");
-        sb.Append(Indent).Append(Indent).Append("return other !== undefined && this.id.equals(other.id);\n");
-        sb.Append(Indent).Append("}\n");
+        if (RefOnly)
+        {
+            WriteRefStubMethod(sb, $"equals(other: {name} | undefined): boolean");
+        }
+        else
+        {
+            sb.Append('\n');
+            sb.Append(Indent).Append("equals(other: ").Append(name).Append(" | undefined): boolean {\n");
+            sb.Append(Indent).Append(Indent).Append("return other !== undefined && this.id.equals(other.id);\n");
+            sb.Append(Indent).Append("}\n");
+        }
 
         sb.Append("}\n");
 
@@ -376,6 +456,13 @@ public sealed partial class TypeScriptEmitter
         sb.Append('\n');
         WriteDoc(sb, cmd.Doc, Indent);
         sb.Append(Indent).Append(name).Append('(').Append(paramList).Append("): ").Append(returnType).Append(" {\n");
+
+        if (RefOnly)
+        {
+            sb.Append(Indent).Append(Indent).Append(RefStubStatement).Append('\n');
+            sb.Append(Indent).Append("}\n");
+            return;
+        }
 
         foreach (Param p in cmd.Parameters)
         {
@@ -454,6 +541,13 @@ public sealed partial class TypeScriptEmitter
         sb.Append('\n');
         WriteDoc(sb, factory.Doc, Indent);
         sb.Append(Indent).Append("static ").Append(methodName).Append('(').Append(paramList).Append("): ").Append(name).Append(" {\n");
+
+        if (RefOnly)
+        {
+            sb.Append(Indent).Append(Indent).Append(RefStubStatement).Append('\n');
+            sb.Append(Indent).Append("}\n");
+            return;
+        }
 
         translator.PushLocal("id", new TypeRef(entity.IdentityName));
         foreach (Param p in factory.Parameters)
@@ -551,7 +645,29 @@ public sealed partial class TypeScriptEmitter
 
         // The branded primitive: cannot be confused with a plain primitive.
         sb.Append("export class ").Append(idName).Append(" extends ValueObject {\n");
-        sb.Append(Indent).Append("readonly value: ").Append(backingType).Append(";\n\n");
+        sb.Append(Indent).Append("readonly value").Append(FieldBang).Append(": ").Append(backingType).Append(";\n\n");
+
+        if (RefOnly)
+        {
+            sb.Append(Indent).Append("constructor(value: ").Append(backingType).Append(") {\n");
+            sb.Append(Indent).Append(Indent).Append("super();\n");
+            sb.Append(Indent).Append(Indent).Append(RefStubStatement).Append('\n');
+            sb.Append(Indent).Append("}\n\n");
+            sb.Append(Indent).Append("protected equalityComponents(): readonly unknown[] {\n");
+            sb.Append(Indent).Append(Indent).Append(RefStubStatement).Append('\n');
+            sb.Append(Indent).Append("}\n");
+            sb.Append("}\n\n");
+
+            if (strategy == IdentityStrategy.Guid)
+            {
+                sb.Append("/** Generates a fresh ").Append(idName).Append(" (a random UUID). */\n");
+                sb.Append("export function ").Append(idName).Append("New(): ").Append(idName).Append(" {\n");
+                sb.Append(Indent).Append(RefStubStatement).Append('\n');
+                sb.Append("}\n");
+            }
+
+            return new EmittedFile(PathFor(ns, KindFolder.ValueObjects, idName), Assemble(emit, ns, KindFolder.ValueObjects, sb.ToString()));
+        }
 
         sb.Append(Indent).Append("constructor(value: ").Append(backingType).Append(") {\n");
         sb.Append(Indent).Append(Indent).Append("super();\n");
@@ -599,20 +715,28 @@ public sealed partial class TypeScriptEmitter
         foreach (Member m in ctorMembers)
         {
             WriteDoc(sb, m.Doc, Indent);
-            sb.Append(Indent).Append("readonly ").Append(TypeScriptNaming.ToCamelCase(m.Name)).Append(": ")
+            sb.Append(Indent).Append("readonly ").Append(TypeScriptNaming.ToCamelCase(m.Name)).Append(FieldBang).Append(": ")
               .Append(typeMapper.Map(m.Type)).Append(";\n");
         }
-        sb.Append(Indent).Append("readonly occurredOn: Instant;\n\n");
+        sb.Append(Indent).Append("readonly occurredOn").Append(FieldBang).Append(": Instant;\n\n");
 
         var ordered = OrderCtorParams(ctorMembers).ToList();
         sb.Append(Indent).Append("constructor(");
         sb.Append(string.Join(", ", ordered.Select(m => $"{TypeScriptNaming.ToCamelCase(m.Name)}: {typeMapper.Map(m.Type)}")));
         sb.Append(ordered.Count > 0 ? ", " : "").Append("occurredOn: Instant = Instant.now()) {\n");
-        foreach (Member m in ctorMembers)
+        if (RefOnly)
         {
-            WriteAssignment(sb, m);
+            sb.Append(Indent).Append(Indent).Append(RefStubStatement).Append('\n');
         }
-        sb.Append(Indent).Append(Indent).Append("this.occurredOn = occurredOn;\n");
+        else
+        {
+            foreach (Member m in ctorMembers)
+            {
+                WriteAssignment(sb, m);
+            }
+            sb.Append(Indent).Append(Indent).Append("this.occurredOn = occurredOn;\n");
+        }
+
         sb.Append(Indent).Append("}\n");
         sb.Append("}\n");
 
