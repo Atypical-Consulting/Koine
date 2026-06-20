@@ -95,7 +95,7 @@ on the roadmap.
 ## Try it without installing anything
 
 The whole compiler runs in your browser as a WebAssembly module. Open the
-[Playground](/Koine/playground/), edit the model, and watch it recompile to C# the moment you stop
+[Koine Studio](/Koine/studio/), edit the model, and watch it recompile to C# the moment you stop
 typing — no install, no server.
 
 When you're ready to go deeper, [What is Koine?](/Koine/start/what-is-koine/) walks through the

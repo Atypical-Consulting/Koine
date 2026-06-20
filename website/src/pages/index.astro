@@ -1,8 +1,15 @@
 ---
 import BlueprintLayout from '../layouts/BlueprintLayout.astro';
 import Playground from '../components/Playground.astro';
+import { sampleById } from '../playground/samples';
+import { encodeCode } from '../playground/encode';
 
 const base = import.meta.env.BASE_URL.replace(/\/$/, '');
+
+const ordering = sampleById('ordering');
+const orderingStudioHref = ordering
+  ? `${base}/studio/#model=${encodeCode(ordering.code)}`
+  : `${base}/studio/`;
 
 const features = [
   { r: 'R1–R2', title: 'Expressions & shapes', body: 'Conditionals, string ops, collection lambdas, optionals, sets & maps.' },
@@ -51,7 +58,7 @@ const pillars = [
           in a small, readable DSL — Koine generates the idiomatic, boilerplate-heavy C# for you.
         </p>
         <div class="cta">
-          <a class="btn btn--primary" href={`${base}/playground/`}>Try the Playground ▸</a>
+          <a class="btn btn--primary" href={`${base}/studio/`}>Open Koine Studio ▸</a>
           <a class="btn" href={`${base}/start/what-is-koine/`}>Get started</a>
         </div>
         <p class="hero__note">No install. The compiler runs in your browser.</p>
@@ -93,7 +100,7 @@ const pillars = [
       <p>Edit the model. It compiles in your browser the moment you stop typing.</p>
     </div>
     <div class="live">
-      <Playground embedded />
+      <Playground />
     </div>
     <p class="band__more">
       Want the full IDE — glossary, context map, hover docs, and go-to-definition, all in the browser?
@@ -146,10 +153,10 @@ const pillars = [
         <p>
           The parser and semantic model are strictly target-agnostic. Koine emits idiomatic
           <strong>C#</strong>, <strong>TypeScript</strong>, and <strong>Python</strong> today — flip
-          the target in the Playground and watch the same model recompile. Rust is on the
+          the target in Studio and watch the same model recompile. Rust is on the
           <a href={`${base}/guides/roadmap/`}>roadmap</a>.
         </p>
-        <a class="btn btn--primary" href={`${base}/playground/?example=ordering`}>Open the Ordering example ▸</a>
+        <a class="btn btn--primary" href={orderingStudioHref}>Explore the Ordering model in Studio ▸</a>
       </div>
       <div class="teaser__targets">
         <span class="tgt tgt--on">.koi</span>

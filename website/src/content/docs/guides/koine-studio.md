@@ -16,7 +16,7 @@ so the whole IDE runs client-side. No download, no .NET SDK.
   WebAssembly module (`src/Koine.Wasm`) and called directly from the page, so parsing, validation,
   and emit all happen client-side. This is what you get at
   **[atypical-consulting.github.io/Koine/studio/](/Koine/studio/)**, and it shares the WASM bundle
-  with the [Playground](/Koine/playground/).
+  with the inline playground on the [home page](/Koine/).
 - **Desktop edition** — a [Tauri v2](https://tauri.app/) app (a Rust host wrapping the same web
   frontend) that spawns the Koine language server (`koine lsp`) as a child process and talks to it
   over JSON-RPC. Build it from `tooling/koine-studio/` — see [Run it (desktop)](#run-it-desktop).

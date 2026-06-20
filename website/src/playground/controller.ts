@@ -1,12 +1,12 @@
 // Client controller for the Playground IDE. Wires the CodeMirror editor to the wasm compiler
-// and drives the full ergonomic surface: live diagnostics, compile-on-change + ⌘⏎ run, target
+// and drives the landing-page taste: live diagnostics, compile-on-change + ⌘⏎ run, target
 // switching (C#/TS/Python/glossary) with syntax-highlighted output, a grouped file tree, copy +
-// download-as-zip, a resizable split, a mobile editor/output toggle, localStorage persistence,
-// and ?example=/?code= deep-linking + Share.
+// download-as-zip, a mobile editor/output toggle, and the "Open in Studio" handoff.
 import { createKoineEditor, createOutputView, type KoineEditor, type OutputView, type OutputLang } from './editor';
 import { compile, preloadCompiler, type CompileResult, type Target } from './koine';
-import { SAMPLES, DEFAULT_SAMPLE, sampleById } from './samples';
+import { DEFAULT_SAMPLE } from './samples';
 import { makeZip, downloadBlob } from './zip';
+import { encodeCode } from './encode';
 
 const TARGET_LANG: Record<Target, OutputLang> = {
   csharp: 'csharp',
@@ -15,55 +15,6 @@ const TARGET_LANG: Record<Target, OutputLang> = {
   php: 'plain',
   glossary: 'plain',
 };
-const LS ={ buffer: 'koine-pg-buffer', target: 'koine-pg-target', split: 'koine-pg-split' };
-
-function encodeCode(code: string): string {
-  const bytes = new TextEncoder().encode(code);
-  let bin = '';
-  for (const b of bytes) bin += String.fromCharCode(b);
-  return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-}
-function decodeCode(param: string): string {
-  const b64 = param.replace(/-/g, '+').replace(/_/g, '/');
-  return new TextDecoder().decode(Uint8Array.from(atob(b64), (c) => c.charCodeAt(0)));
-}
-
-function readLS(key: string): string | null {
-  try {
-    return localStorage.getItem(key);
-  } catch {
-    return null;
-  }
-}
-function writeLS(key: string, val: string) {
-  try {
-    localStorage.setItem(key, val);
-  } catch {
-    /* private mode / quota — non-fatal */
-  }
-}
-
-function initialSource(embedded: boolean): { code: string; sampleId: string } {
-  if (embedded) return { code: DEFAULT_SAMPLE.code, sampleId: DEFAULT_SAMPLE.id };
-
-  const params = new URLSearchParams(location.search);
-  const codeParam = params.get('code');
-  if (codeParam) {
-    try {
-      return { code: decodeCode(codeParam), sampleId: '' };
-    } catch {
-      /* fall through */
-    }
-  }
-  const sample = sampleById(params.get('example'));
-  if (sample) return { code: sample.code, sampleId: sample.id };
-
-  const saved = readLS(LS.buffer);
-  if (saved) return { code: saved, sampleId: '' };
-
-  return { code: DEFAULT_SAMPLE.code, sampleId: DEFAULT_SAMPLE.id };
-}
-
 /** Pick the most interesting file to show first: skip runtime + config boilerplate. */
 function defaultFileIndex(result: CompileResult): number {
   const isBoilerplate = (p: string) =>
@@ -76,7 +27,6 @@ function defaultFileIndex(result: CompileResult): number {
 }
 
 export function mountPlayground(root: HTMLElement): void {
-  const embedded = root.dataset.embedded === 'true';
   const $ = <T extends HTMLElement>(sel: string) => root.querySelector(sel) as T | null;
 
   const editorHost = $('.koi-editor')!;
@@ -84,25 +34,15 @@ export function mountPlayground(root: HTMLElement): void {
   const statusEl = $('.koi-status')!;
   const diagEl = $('.koi-diagnostics')!;
   const filePick = $<HTMLSelectElement>('.koi-filepick');
-  const sampleSel = $<HTMLSelectElement>('.koi-sample');
-  const shareBtn = $<HTMLButtonElement>('.koi-share');
   const copyBtn = $<HTMLButtonElement>('.koi-copy');
   const downloadBtn = $<HTMLButtonElement>('.koi-download');
-  const resetBtn = $<HTMLButtonElement>('.koi-reset');
-  const openLink = $<HTMLAnchorElement>('.koi-open');
   const studioLink = $<HTMLAnchorElement>('.koi-studio');
-  const resizer = $('.koi-resizer');
   const targetBtns = Array.from(root.querySelectorAll<HTMLButtonElement>('.koi-targets button'));
   const mobileBtns = Array.from(root.querySelectorAll<HTMLButtonElement>('.koi-mobile-tabs button'));
 
   let target: Target = 'csharp';
-  if (!embedded) {
-    const savedTarget = readLS(LS.target) as Target | null;
-    if (savedTarget && savedTarget in TARGET_LANG) target = savedTarget;
-  }
   const cache = new Map<Target, CompileResult>();
   let activeFile = 0;
-  let currentSampleId = '';
   let editor: KoineEditor;
   const output: OutputView = createOutputView(viewHost);
 
@@ -214,20 +154,16 @@ export function mountPlayground(root: HTMLElement): void {
     }
   }
 
-  function onDocChanged(doc: string) {
+  function onDocChanged() {
     cache.clear();
-    currentSampleId = '';
-    if (sampleSel) sampleSel.value = '';
-    if (!embedded) writeLS(LS.buffer, doc);
     run();
   }
 
   // --- build editor ---
-  const init = initialSource(embedded);
-  currentSampleId = init.sampleId;
+  const initialDoc = DEFAULT_SAMPLE.code;
   editor = createKoineEditor({
     parent: editorHost,
-    doc: init.code,
+    doc: initialDoc,
     onChange: onDocChanged,
     lintSource: async (src) => {
       try {
@@ -239,31 +175,6 @@ export function mountPlayground(root: HTMLElement): void {
       }
     },
   });
-
-  // --- samples dropdown (full page only) ---
-  if (sampleSel && !embedded) {
-    const blank = document.createElement('option');
-    blank.value = '';
-    blank.textContent = init.sampleId ? '— samples —' : '(custom)';
-    sampleSel.appendChild(blank);
-    for (const s of SAMPLES) {
-      const opt = document.createElement('option');
-      opt.value = s.id;
-      opt.textContent = s.label;
-      sampleSel.appendChild(opt);
-    }
-    sampleSel.value = init.sampleId;
-    sampleSel.onchange = () => {
-      const s = sampleById(sampleSel.value);
-      if (!s) return;
-      cache.clear();
-      currentSampleId = s.id;
-      activeFile = 0;
-      editor.setDoc(s.code);
-      writeLS(LS.buffer, s.code);
-      run(true);
-    };
-  }
 
   // --- file picker ---
   if (filePick) {
@@ -280,7 +191,6 @@ export function mountPlayground(root: HTMLElement): void {
     btn.onclick = () => {
       target = (btn.dataset.target as Target) ?? 'csharp';
       activeFile = 0;
-      if (!embedded) writeLS(LS.target, target);
       targetBtns.forEach((b) => {
         const on = b === btn;
         b.classList.toggle('is-active', on);
@@ -316,53 +226,13 @@ export function mountPlayground(root: HTMLElement): void {
     };
   }
 
-  // --- reset to the current sample ---
-  if (resetBtn) {
-    resetBtn.onclick = () => {
-      const s = sampleById(currentSampleId) ?? DEFAULT_SAMPLE;
-      cache.clear();
-      activeFile = 0;
-      currentSampleId = s.id;
-      editor.setDoc(s.code);
-      if (sampleSel) sampleSel.value = s.id;
-      writeLS(LS.buffer, s.code);
-      run(true);
-    };
-  }
-
-  // --- share ---
-  if (shareBtn && !embedded) {
-    shareBtn.onclick = async () => {
-      const url = new URL(location.href);
-      url.searchParams.delete('example');
-      url.searchParams.set('code', encodeCode(editor.getDoc()));
-      history.replaceState(null, '', url.toString());
-      try {
-        await navigator.clipboard.writeText(url.toString());
-        flash(shareBtn, 'link copied!');
-      } catch {
-        /* URL still updated */
-      }
-    };
-  }
-
-  // --- embedded "open full playground" carries the current code ---
-  if (openLink && embedded) {
-    const base = (import.meta.env.BASE_URL ?? '/').replace(/\/$/, '');
-    const update = () => {
-      openLink.href = `${base}/playground/?code=${encodeCode(editor.getDoc())}`;
-    };
-    update();
-    editorHost.addEventListener('keyup', update);
-  }
-
-  // --- "open in Studio" carries the current model into the full web IDE (full page only) ---
+  // --- "open in Studio" carries the current model into the full web IDE ---
   // Studio reads `#model=<urlsafe-base64-utf8>` on boot (tooling/koine-studio/src/share.ts), which is
   // exactly what encodeCode produces — so the user's model opens in Studio, not a blank seed. Refresh
   // the href just before either activation path fires (pointerdown for mouse, focus for keyboard
-  // tab-in before Enter) so it reflects the latest doc no matter how it changed — typing, sample
-  // switch, or reset — without re-encoding the whole document on every keystroke.
-  if (studioLink && !embedded) {
+  // tab-in before Enter) so it reflects the latest doc no matter how it changed — without
+  // re-encoding the whole document on every keystroke.
+  if (studioLink) {
     const base = (import.meta.env.BASE_URL ?? '/').replace(/\/$/, '');
     const update = () => {
       studioLink.href = `${base}/studio/#model=${encodeCode(editor.getDoc())}`;
@@ -379,36 +249,6 @@ export function mountPlayground(root: HTMLElement): void {
       root.dataset.view = v;
       mobileBtns.forEach((b) => b.classList.toggle('is-active', b === btn));
     };
-  }
-
-  // --- resizable split (full page, desktop) ---
-  if (resizer && !embedded) {
-    const savedSplit = readLS(LS.split);
-    if (savedSplit) root.style.setProperty('--koi-editor-w', savedSplit);
-    let dragging = false;
-    const body = $('.koi-ide__body')!;
-    const onMove = (e: PointerEvent) => {
-      if (!dragging) return;
-      const rect = body.getBoundingClientRect();
-      const pct = ((e.clientX - rect.left) / rect.width) * 100;
-      const clamped = Math.min(80, Math.max(20, pct));
-      const val = `${clamped.toFixed(1)}%`;
-      root.style.setProperty('--koi-editor-w', val);
-      writeLS(LS.split, val);
-    };
-    resizer.addEventListener('pointerdown', (e) => {
-      dragging = true;
-      (e.target as HTMLElement).setPointerCapture((e as PointerEvent).pointerId);
-      document.body.style.cursor = 'col-resize';
-      document.body.style.userSelect = 'none';
-    });
-    resizer.addEventListener('pointermove', onMove as EventListener);
-    resizer.addEventListener('pointerup', (e) => {
-      dragging = false;
-      (e.target as HTMLElement).releasePointerCapture((e as PointerEvent).pointerId);
-      document.body.style.cursor = '';
-      document.body.style.userSelect = '';
-    });
   }
 
   // Kick off the runtime download and first compile (landing on a meaningful file).

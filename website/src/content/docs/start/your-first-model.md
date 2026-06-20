@@ -8,7 +8,7 @@ No DDD theory yet — just the shortest path from a domain idea to compiling cod
 
 If you haven't installed the compiler, do that first: [Installation](/Koine/start/installation/).
 
-<a class="koi-try" href="/Koine/playground/?example=billing">Prefer to try it now? Open the Playground</a>
+<a class="koi-try" href="/Koine/studio/">Prefer to try it now? Open Koine Studio</a>
 
 ## Write `hello.koi`
 
