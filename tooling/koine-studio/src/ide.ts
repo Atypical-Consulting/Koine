@@ -1645,6 +1645,9 @@ export function init(): void {
       runCompilerTool: platform.runCompilerTool
         ? (name, argsJson) => platform.runCompilerTool!(name, argsJson)
         : undefined,
+      // Opt-in: advertising tools makes local servers (LM Studio) buffer instead of stream, so the
+      // tools are only offered when the user enables them in Settings → Assistant.
+      getUseTools: () => loadSettings().aiAgenticTools,
     });
     return assistant;
   }
