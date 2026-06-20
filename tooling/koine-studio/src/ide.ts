@@ -33,7 +33,7 @@ import { renderDiagrams } from './diagrams';
 import { renderGlossary, type GlossaryHandlers } from './glossary';
 import { createAssistantPanel, type AssistantPanel } from './aiPanel';
 import { buildShareUrl, clearModelHash, readModelFromHash } from './share';
-import { dirtyBuffers, dirtyCount, handleBeforeUnload, saveAllDirtyBuffers, titleWithDirty } from './dirty';
+import { dirtyCount, handleBeforeUnload, saveAllDirtyBuffers, titleWithDirty } from './dirty';
 import { createConfirmDialog } from './overlay';
 
 // --- workspace fs contract ---------------------------------------------------
@@ -344,8 +344,13 @@ export function init(): void {
   const baseTitle = document.title;
   const unsavedEl = el('unsaved-indicator') as HTMLButtonElement;
   unsavedEl.addEventListener('click', () => void saveAllDirty());
+  // The indicator is refreshed from every renderTree(); cache the last count so an unchanged dirty
+  // total (the common case — most renders don't change it) skips the title/DOM writes.
+  let lastDirtyCount = -1;
   function refreshDirtyIndicator(): void {
     const n = dirtyCount(buffers);
+    if (n === lastDirtyCount) return;
+    lastDirtyCount = n;
     document.title = titleWithDirty(baseTitle, n);
     if (n > 0) {
       unsavedEl.textContent = `${n} unsaved`;
@@ -1501,7 +1506,7 @@ export function init(): void {
         lsp.changeDoc(activeUri, active.text);
       }
 
-      if (dirtyBuffers(buffers).length === 0) {
+      if (dirtyCount(buffers) === 0) {
         // Nothing flagged dirty. In scratch mode the single buffer is path-less and never marked
         // dirty (it auto-persists to localStorage), so fall back to the normal save-as when it
         // holds real content; in folder mode with nothing dirty this is a neutral no-op.
