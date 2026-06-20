@@ -5,3 +5,14 @@
 * {
   box-sizing: border-box;
 }
+
+/* Text selection in the app chrome (glossary, diagnostics, dialogs, panels…) otherwise falls back
+   to the browser's default ::selection, whose colour ignores the theme and can wash out text on the
+   dark surfaces. Tint it with the accent and pin the foreground so selected text keeps a legible
+   contrast in both themes. The CodeMirror editor and the emitted-code preview paint their own
+   selection layer (see sharedTheme in editor.ts) and suppress native ::selection, so this rule only
+   affects the surrounding UI. */
+::selection {
+  background: color-mix(in srgb, var(--koi-accent) 35%, transparent);
+  color: var(--koi-fg);
+}
