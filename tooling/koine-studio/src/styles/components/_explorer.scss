@@ -15,8 +15,8 @@
 .explorer-filter-row {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 6px 8px 4px;
+  gap: var(--koi-space-1-5);
+  padding: var(--koi-space-1-5) var(--koi-space-2) var(--koi-space-1);
 }
 
 /* Type-to-filter field — the index of contexts. */
@@ -27,9 +27,9 @@
   color: var(--koi-fg);
   border: 1px solid var(--koi-line);
   border-radius: var(--koi-radius-sm);
-  padding: 3px 8px;
+  padding: var(--koi-space-0-75) var(--koi-space-2);
   font-family: var(--koi-font-mono);
-  font-size: 0.74rem;
+  font-size: var(--koi-text-xs-plus);
 }
 
 .explorer-filter::placeholder {
@@ -54,8 +54,8 @@
   flex: 0 0 auto;
   display: flex;
   align-items: center;
-  gap: 4px;
-  padding: 0 8px 5px;
+  gap: var(--koi-space-1);
+  padding: 0 var(--koi-space-2) var(--koi-space-1-25);
 }
 
 /* Pushes the fold actions (Collapse/Expand all) to the right, create actions stay left. */
@@ -74,7 +74,7 @@
   border-radius: var(--koi-radius-sm);
   color: var(--koi-muted);
   cursor: pointer;
-  font-size: 0.86rem;
+  font-size: var(--koi-text-md);
   line-height: 1;
 }
 
@@ -106,7 +106,7 @@
 
 .explorer-tree {
   flex: 1 1 auto;
-  padding: 4px 0;
+  padding: var(--koi-space-1) 0;
   overflow-y: auto;
 }
 
@@ -118,13 +118,13 @@
 .explorer-row {
   display: flex;
   align-items: center;
-  gap: 5px;
+  gap: var(--koi-space-1-25);
   /* --depth is the 0-based nesting level; each level adds a fixed indent. */
-  padding: 3px 12px 3px calc(12px + var(--depth, 0) * 14px);
+  padding: var(--koi-space-0-75) var(--koi-space-3) var(--koi-space-0-75) calc(12px + var(--depth, 0) * 14px);
   cursor: pointer;
   color: var(--koi-fg);
   font-family: var(--koi-font-mono);
-  font-size: 0.78rem;
+  font-size: var(--koi-text-sm);
 }
 
 .explorer-row:hover {
@@ -219,9 +219,9 @@
   border: none;
   color: var(--koi-muted);
   cursor: pointer;
-  font-size: 0.82rem;
+  font-size: var(--koi-text-base);
   line-height: 1;
-  padding: 0 2px;
+  padding: 0 var(--koi-space-0-5);
   opacity: 0;
 }
 
@@ -238,7 +238,7 @@
 /* A badge sits just before the "…" button rather than being pushed to the far right by .tree-badge's
    own margin-left:auto (the .explorer-more button already claims the auto margin). */
 .explorer-row .tree-badge {
-  margin-left: 4px;
+  margin-left: var(--koi-space-1);
 }
 
 /* Inline rename / inline-create input — replaces the .explorer-name label (or seeds a new row). */
@@ -249,9 +249,9 @@
   color: var(--koi-fg);
   border: 1px solid var(--koi-accent);
   border-radius: var(--koi-radius-sm);
-  padding: 1px 5px;
+  padding: var(--koi-space-px) var(--koi-space-1-25);
   font-family: var(--koi-font-mono);
-  font-size: 0.78rem;
+  font-size: var(--koi-text-sm);
   outline: none;
 }
 
@@ -265,12 +265,12 @@
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 8px;
-  padding: 22px 16px;
+  gap: var(--koi-space-2);
+  padding: 22px var(--koi-space-4);
   text-align: center;
   color: var(--koi-muted);
   font-family: var(--koi-font-body);
-  font-size: 0.8rem;
+  font-size: var(--koi-text-sm-plus);
 }
 
 .explorer-empty-line {
@@ -283,9 +283,9 @@
   border-radius: var(--koi-radius-sm);
   color: var(--koi-fg);
   cursor: pointer;
-  padding: 4px 12px;
+  padding: var(--koi-space-1) var(--koi-space-3);
   font-family: var(--koi-font-mono);
-  font-size: 0.74rem;
+  font-size: var(--koi-text-xs-plus);
 }
 
 .explorer-empty-action:hover {

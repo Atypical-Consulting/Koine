@@ -6,14 +6,14 @@
 .doc-error {
   color: var(--koi-error);
   font-family: var(--koi-font-mono);
-  font-size: 0.8rem;
+  font-size: var(--koi-text-sm-plus);
   white-space: pre-wrap;
 }
 
 .koi-md {
   color: var(--koi-fg);
   font-family: var(--koi-font-body);
-  font-size: 0.86rem;
+  font-size: var(--koi-text-md);
   line-height: 1.6;
 
   h1,
@@ -65,21 +65,21 @@
     background: var(--koi-surface);
     border: 1px solid var(--koi-line);
     border-radius: 4px;
-    padding: 1px 5px;
+    padding: var(--koi-space-px) var(--koi-space-1-25);
   }
 
   pre {
     background: var(--koi-paper);
     border: 1px solid var(--koi-line);
     border-radius: 6px;
-    padding: 10px 12px;
+    padding: var(--koi-space-2-5) var(--koi-space-3);
     overflow-x: auto;
 
     code {
       background: none;
       border: none;
       padding: 0;
-      font-size: 0.8rem;
+      font-size: var(--koi-text-sm-plus);
     }
   }
 
@@ -87,13 +87,13 @@
     border-collapse: collapse;
     width: 100%;
     margin: 0.6em 0;
-    font-size: 0.8rem;
+    font-size: var(--koi-text-sm-plus);
   }
 
   th,
   td {
     border: 1px solid var(--koi-line);
-    padding: 6px 9px;
+    padding: var(--koi-space-1-5) var(--koi-space-2-25);
     text-align: left;
     vertical-align: top;
   }
@@ -122,13 +122,13 @@
   color: var(--koi-ink-soft);
   border: 1px solid var(--koi-line);
   border-radius: var(--koi-radius-sm);
-  padding: 4px 11px;
+  padding: var(--koi-space-1) var(--koi-space-2-75);
   font-family: var(--koi-font-body);
-  font-size: 0.74rem;
+  font-size: var(--koi-text-xs-plus);
   font-weight: 500;
   cursor: pointer;
   backdrop-filter: blur(6px);
-  transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease, opacity 0.15s ease;
+  transition: background var(--koi-dur-fast) ease, color var(--koi-dur-fast) ease, border-color var(--koi-dur-fast) ease, opacity var(--koi-dur-mid) ease;
 
   &:hover:not(:disabled) {
     background: var(--koi-surface);

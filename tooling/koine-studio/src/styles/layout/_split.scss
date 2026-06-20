@@ -52,7 +52,7 @@
   padding: 0;
   align-self: stretch;
   position: relative;
-  transition: background 0.12s ease;
+  transition: background var(--koi-dur-fast) ease;
 }
 
 /* Horizontal variant: a full-width handle that resizes the panel above/below it. */

@@ -10,21 +10,21 @@
 .lang-run {
   border-top-right-radius: 0;
   border-bottom-right-radius: 0;
-  padding-right: 9px;
+  padding-right: var(--koi-space-2-25);
 }
 
 .lang-caret {
   border-top-left-radius: 0;
   border-bottom-left-radius: 0;
-  padding-left: 7px;
-  padding-right: 8px;
+  padding-left: var(--koi-space-1-75);
+  padding-right: var(--koi-space-2);
   border-left: 1px solid color-mix(in srgb, var(--koi-accent) 22%, transparent);
 }
 
 .lang-caret-ico {
   width: 13px;
   height: 13px;
-  transition: transform 0.15s ease;
+  transition: transform var(--koi-dur-mid) ease;
 }
 
 .lang-caret[aria-expanded="true"] .lang-caret-ico {

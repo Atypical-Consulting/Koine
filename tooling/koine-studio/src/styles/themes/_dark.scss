@@ -42,6 +42,44 @@
   /* ink on a filled --koi-error surface — a dark ink reads on the dark theme's light coral */
   --koi-on-error: #2a0a0a;
 
+  /* spacing scale — value-equivalent tokens for padding / margin / gap. Theme-independent;
+     a future density mode can rescale the whole UI by overriding these in one place. Rare
+     one-off values (13/20/22/24/30/36px) intentionally stay raw literals. */
+  --koi-space-px: 1px;
+  --koi-space-0-5: 2px;
+  --koi-space-0-75: 3px;
+  --koi-space-1: 4px;
+  --koi-space-1-25: 5px;
+  --koi-space-1-5: 6px;
+  --koi-space-1-75: 7px;
+  --koi-space-2: 8px;
+  --koi-space-2-25: 9px;
+  --koi-space-2-5: 10px;
+  --koi-space-2-75: 11px;
+  --koi-space-3: 12px;
+  --koi-space-3-5: 14px;
+  --koi-space-4: 16px;
+  --koi-space-4-5: 18px;
+
+  /* font-size scale — value-equivalent tokens for the frequent rem sizes. Theme-independent;
+     a future text-scaling preference can override these in one place. Rare sizes stay raw. */
+  --koi-text-2xs: 0.7rem;
+  --koi-text-xs: 0.72rem;
+  --koi-text-xs-plus: 0.74rem;
+  --koi-text-sm: 0.78rem;
+  --koi-text-sm-plus: 0.8rem;
+  --koi-text-base: 0.82rem;
+  --koi-text-base-plus: 0.84rem;
+  --koi-text-md: 0.86rem;
+  --koi-text-lg: 0.9rem;
+
+  /* motion scale — value-equivalent tokens for the frequent transition/animation durations.
+     Theme-independent; a future reduced-motion mode can zero these in one place. */
+  --koi-dur-fast: 0.12s;
+  --koi-dur-base: 0.14s;
+  --koi-dur-mid: 0.15s;
+  --koi-dur-slow: 0.18s;
+
   /* syntax highlighting */
   --koi-hl-keyword: #c98cff;
   --koi-hl-type: #5ad1ff;

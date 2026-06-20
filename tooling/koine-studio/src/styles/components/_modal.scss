@@ -29,8 +29,8 @@
 .koi-modal-header {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 14px 18px;
+  gap: var(--koi-space-3);
+  padding: var(--koi-space-3-5) var(--koi-space-4-5);
   border-bottom: 1px solid var(--koi-line);
 }
 
@@ -60,16 +60,16 @@
 }
 
 .koi-modal-body {
-  padding: 18px;
+  padding: var(--koi-space-4-5);
   overflow-y: auto;
 }
 
 .koi-modal-footer {
-  padding: 12px 18px;
+  padding: var(--koi-space-3) var(--koi-space-4-5);
   border-top: 1px solid var(--koi-line);
   display: flex;
   justify-content: flex-end;
-  gap: 8px;
+  gap: var(--koi-space-2);
 }
 
 .koi-modal-footer:empty {

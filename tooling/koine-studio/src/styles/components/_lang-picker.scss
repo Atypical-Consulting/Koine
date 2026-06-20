@@ -10,7 +10,7 @@
 .lang-menu-item {
   display: flex;
   align-items: center;
-  gap: 9px;
+  gap: var(--koi-space-2-25);
   width: 100%;
   text-align: left;
   background: transparent;
@@ -18,9 +18,9 @@
   border-radius: var(--koi-radius-sm);
   color: var(--koi-fg);
   cursor: pointer;
-  padding: 7px 10px;
+  padding: var(--koi-space-1-75) var(--koi-space-2-5);
   font-family: var(--koi-font-body);
-  font-size: 0.82rem;
+  font-size: var(--koi-text-base);
 }
 
 .lang-menu-item:hover,
@@ -37,7 +37,7 @@
 .lang-menu-item .lang-hint {
   color: var(--koi-ink-soft);
   font-family: var(--koi-font-mono);
-  font-size: 0.72rem;
+  font-size: var(--koi-text-xs);
 }
 
 .lang-menu-item .lang-check {
@@ -59,17 +59,17 @@
 .toolbar-right {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--koi-space-2);
 }
 
 #status {
   display: inline-flex;
   align-items: center;
-  gap: 7px;
+  gap: var(--koi-space-1-75);
   font-family: var(--koi-font-mono);
-  font-size: 0.74rem;
+  font-size: var(--koi-text-xs-plus);
   letter-spacing: 0.2px;
-  padding: 4px 11px 4px 9px;
+  padding: var(--koi-space-1) 11px var(--koi-space-1) var(--koi-space-2-25);
   border-radius: 999px;
   border: 1px solid var(--koi-line);
   background: color-mix(in srgb, var(--koi-paper) 50%, transparent);
@@ -111,11 +111,11 @@
 .unsaved-indicator {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--koi-space-1-5);
   font-family: var(--koi-font-mono);
-  font-size: 0.74rem;
+  font-size: var(--koi-text-xs-plus);
   letter-spacing: 0.2px;
-  padding: 4px 11px;
+  padding: var(--koi-space-1) 11px;
   border-radius: 999px;
   cursor: pointer;
   color: var(--koi-hl-number);

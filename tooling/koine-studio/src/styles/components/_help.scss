@@ -2,7 +2,7 @@
 .koi-help-table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 0.86rem;
+  font-size: var(--koi-text-md);
 }
 
 .koi-help-table tr {
@@ -14,7 +14,7 @@
 }
 
 .koi-help-table td {
-  padding: 9px 6px;
+  padding: var(--koi-space-2-25) var(--koi-space-1-5);
   vertical-align: middle;
   color: var(--koi-fg);
 }
@@ -27,14 +27,14 @@
 .koi-kbd {
   display: inline-block;
   font-family: var(--koi-font-mono);
-  font-size: 0.74rem;
+  font-size: var(--koi-text-xs-plus);
   color: var(--koi-ink-soft);
   background: var(--koi-surface);
   border: 1px solid var(--koi-line);
   border-bottom-width: 2px;
   border-radius: 5px;
-  padding: 2px 7px;
-  margin-right: 4px;
+  padding: var(--koi-space-0-5) var(--koi-space-1-75);
+  margin-right: var(--koi-space-1);
   min-width: 18px;
   text-align: center;
 }

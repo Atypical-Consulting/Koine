@@ -16,9 +16,9 @@
   border-radius: var(--koi-radius-sm);
   color: var(--koi-fg);
   cursor: pointer;
-  padding: 6px 10px;
+  padding: var(--koi-space-1-5) var(--koi-space-2-5);
   font-family: var(--koi-font-body);
-  font-size: 0.82rem;
+  font-size: var(--koi-text-base);
 }
 
 .explorer-menu-item:hover,

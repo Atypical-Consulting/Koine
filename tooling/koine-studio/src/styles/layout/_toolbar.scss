@@ -6,8 +6,8 @@
 #toolbar {
   display: flex;
   align-items: center;
-  gap: 18px;
-  padding: 11px 16px;
+  gap: var(--koi-space-4-5);
+  padding: var(--koi-space-2-75) var(--koi-space-4);
   background: linear-gradient(180deg, var(--koi-paper-2), color-mix(in srgb, var(--koi-paper-2) 80%, var(--koi-paper)));
   border-bottom: 1px solid var(--koi-line);
   flex: 0 0 auto;
@@ -29,16 +29,16 @@
 .toolbar-actions {
   display: flex;
   align-items: center;
-  gap: 8px;
-  margin: 0 auto 0 4px;
+  gap: var(--koi-space-2);
+  margin: 0 auto 0 var(--koi-space-1);
 }
 
 /* A segmented cluster of related buttons. */
 .tb-group {
   display: flex;
   align-items: center;
-  gap: 2px;
-  padding: 2px;
+  gap: var(--koi-space-0-5);
+  padding: var(--koi-space-0-5);
   background: color-mix(in srgb, var(--koi-paper) 55%, transparent);
   border: 1px solid var(--koi-line);
   border-radius: var(--koi-radius-sm);
@@ -93,19 +93,19 @@
 .brand {
   display: flex;
   align-items: center;
-  gap: 11px;
+  gap: var(--koi-space-2-75);
   color: var(--koi-fg);
   flex: 0 0 auto;
   border: 0;
   background: transparent;
   margin: 0;
-  padding: 4px 6px;
+  padding: var(--koi-space-1) var(--koi-space-1-5);
   margin-left: -6px; /* keep the logo flush-left despite the hover-target padding */
   border-radius: var(--koi-radius-sm);
   cursor: pointer;
   font: inherit;
   text-align: left;
-  transition: background 0.15s ease;
+  transition: background var(--koi-dur-mid) ease;
 
   &:hover {
     background: var(--koi-surface);
@@ -134,7 +134,7 @@
   display: flex;
   flex-direction: column;
   line-height: 1;
-  gap: 2px;
+  gap: var(--koi-space-0-5);
 }
 
 .brand-name {
@@ -156,19 +156,19 @@
 
 .palette-hint {
   font-family: var(--koi-font-mono);
-  font-size: 0.72rem;
+  font-size: var(--koi-text-xs);
   color: var(--koi-muted);
   background: transparent;
   border: 1px solid var(--koi-line);
   border-bottom-width: 2px;
   border-radius: 5px;
-  padding: 2px 7px;
+  padding: var(--koi-space-0-5) var(--koi-space-1-75);
   cursor: pointer;
   user-select: none;
   transition:
-    color 0.12s ease,
-    border-color 0.12s ease,
-    background 0.12s ease;
+    color var(--koi-dur-fast) ease,
+    border-color var(--koi-dur-fast) ease,
+    background var(--koi-dur-fast) ease;
 
   &:hover {
     color: var(--koi-fg);
@@ -198,7 +198,7 @@
   font-style: normal;
   line-height: 1;
   cursor: pointer;
-  transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+  transition: background var(--koi-dur-fast) ease, color var(--koi-dur-fast) ease, border-color var(--koi-dur-fast) ease;
 
   &:hover {
     background: var(--koi-surface);

@@ -14,13 +14,13 @@
 
 #filetree-header {
   flex: 0 0 auto;
-  padding: 9px 12px;
+  padding: var(--koi-space-2-25) var(--koi-space-3);
   border-bottom: 1px solid var(--koi-line);
 }
 
 #filetree-title {
   font-family: var(--koi-font-mono);
-  font-size: 0.72rem;
+  font-size: var(--koi-text-xs);
   text-transform: uppercase;
   letter-spacing: 0.4px;
   color: var(--koi-muted);
@@ -39,7 +39,7 @@
    per-file dirty dot and the error/warning badge). The old flat-tree row styles were removed. */
 .tree-dirty {
   color: var(--koi-accent);
-  margin-left: 3px;
+  margin-left: var(--koi-space-0-75);
 }
 
 .tree-badge {
@@ -47,7 +47,7 @@
   margin-left: auto;
   font-size: 0.66rem;
   border-radius: 999px;
-  padding: 0 6px;
+  padding: 0 var(--koi-space-1-5);
   line-height: 1.5;
 }
 

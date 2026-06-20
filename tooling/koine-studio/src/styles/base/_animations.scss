@@ -1,7 +1,7 @@
 /* Modal + palette entrances. */
 .koi-modal,
 .koi-palette {
-  animation: koi-rise 0.18s ease both;
+  animation: koi-rise var(--koi-dur-slow) ease both;
 }
 
 /* --- a single orchestrated reveal of the shell on first paint --- */
@@ -45,10 +45,10 @@
   animation: koi-rise 0.4s ease 0.1s both;
 }
 #editor-pane {
-  animation: koi-fade 0.5s ease 0.12s both;
+  animation: koi-fade 0.5s ease var(--koi-dur-fast) both;
 }
 #right {
-  animation: koi-fade 0.5s ease 0.18s both;
+  animation: koi-fade 0.5s ease var(--koi-dur-slow) both;
 }
 
 /* Respect users who prefer less motion: collapse every animation/transition. The same rules apply

@@ -1,6 +1,6 @@
 /* --- about dialog (the app colophon) --- */
 .koi-about-logo {
-  margin-bottom: 14px;
+  margin-bottom: var(--koi-space-3-5);
 }
 
 .koi-about-wordmark {
@@ -22,10 +22,10 @@
 .koi-about-chip {
   display: block;
   width: fit-content;
-  margin: 9px auto 0;
-  padding: 2px 9px;
+  margin: var(--koi-space-2-25) auto 0;
+  padding: var(--koi-space-0-5) var(--koi-space-2-25);
   font-family: var(--koi-font-mono);
-  font-size: 0.74rem;
+  font-size: var(--koi-text-xs-plus);
   letter-spacing: 0.02em;
   color: var(--koi-accent);
   background: color-mix(in srgb, var(--koi-accent) 12%, transparent);
@@ -38,16 +38,16 @@
 }
 
 .koi-about-tagline {
-  font-size: 0.86rem;
+  font-size: var(--koi-text-md);
   color: var(--koi-muted);
   text-align: center;
-  margin: 12px 0 0;
+  margin: var(--koi-space-3) 0 0;
 }
 
 .koi-about-links {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 10px;
+  gap: var(--koi-space-2-5);
   margin: 22px 0 0;
 }
 
@@ -55,14 +55,14 @@
   position: relative;
   display: flex;
   align-items: center;
-  gap: 11px;
-  padding: 11px 12px;
+  gap: var(--koi-space-2-75);
+  padding: var(--koi-space-2-75) var(--koi-space-3);
   text-decoration: none;
   background: var(--koi-surface);
   border: 1px solid var(--koi-line);
   border-radius: var(--koi-radius-sm);
   overflow: hidden;
-  transition: transform 0.12s ease, border-color 0.12s ease;
+  transition: transform var(--koi-dur-fast) ease, border-color var(--koi-dur-fast) ease;
 }
 
 /* A gradient hairline on the leading edge, echoing the monogram. Revealed on hover/focus. */
@@ -73,7 +73,7 @@
   width: 2px;
   background: var(--koi-accent-grad);
   opacity: 0;
-  transition: opacity 0.12s ease;
+  transition: opacity var(--koi-dur-fast) ease;
 }
 
 .koi-about-link:hover {
@@ -95,7 +95,7 @@
   flex: 0 0 auto;
   display: flex;
   color: var(--koi-ink-soft);
-  transition: color 0.12s ease;
+  transition: color var(--koi-dur-fast) ease;
 }
 
 .koi-about-link:hover .koi-about-link-icon {
@@ -111,7 +111,7 @@
 .koi-about-link-text {
   display: flex;
   flex-direction: column;
-  gap: 1px;
+  gap: var(--koi-space-px);
   min-width: 0;
 }
 
@@ -122,16 +122,16 @@
 }
 
 .koi-about-link-hint {
-  font-size: 0.74rem;
+  font-size: var(--koi-text-xs-plus);
   color: var(--koi-muted);
 }
 
 .koi-about-credit {
-  margin: 18px 0 2px;
-  padding-top: 14px;
+  margin: 18px 0 var(--koi-space-0-5);
+  padding-top: var(--koi-space-3-5);
   border-top: 1px solid var(--koi-line);
   text-align: center;
-  font-size: 0.8rem;
+  font-size: var(--koi-text-sm-plus);
   line-height: 1.5;
   color: var(--koi-muted);
 }

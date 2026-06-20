@@ -8,23 +8,23 @@
   border: 1px solid var(--koi-line);
   border-radius: var(--koi-radius);
   box-shadow: 0 14px 40px rgba(0, 0, 0, 0.4);
-  padding: 4px;
+  padding: var(--koi-space-1);
   outline: none;
 }
 .koi-action-row {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
-  gap: 12px;
+  gap: var(--koi-space-3);
   width: 100%;
   text-align: left;
   background: transparent;
   border: none;
   border-radius: var(--koi-radius-sm);
-  padding: 7px 10px;
+  padding: var(--koi-space-1-75) var(--koi-space-2-5);
   color: var(--koi-fg);
   font-family: var(--koi-font-body);
-  font-size: 0.82rem;
+  font-size: var(--koi-text-base);
   cursor: pointer;
 }
 .koi-action-row[aria-selected='true'] {
@@ -39,33 +39,33 @@
 .koi-action-detail {
   flex: 0 0 auto;
   font-family: var(--koi-font-mono);
-  font-size: 0.7rem;
+  font-size: var(--koi-text-2xs);
   opacity: 0.7;
 }
 .koi-action-empty {
-  padding: 8px 10px;
+  padding: var(--koi-space-2) var(--koi-space-2-5);
   color: var(--koi-muted);
   font-family: var(--koi-font-body);
-  font-size: 0.8rem;
+  font-size: var(--koi-text-sm-plus);
 }
 .koi-rename {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--koi-space-2);
   background: var(--koi-paper-2);
   border: 1px solid var(--koi-accent);
   border-radius: var(--koi-radius-sm);
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
-  padding: 5px 7px;
+  padding: var(--koi-space-1-25) var(--koi-space-1-75);
 }
 .koi-rename-input {
   background: var(--koi-surface);
   color: var(--koi-fg);
   border: 1px solid var(--koi-line);
   border-radius: var(--koi-radius-sm);
-  padding: 4px 8px;
+  padding: var(--koi-space-1) var(--koi-space-2);
   font-family: var(--koi-font-mono);
-  font-size: 0.82rem;
+  font-size: var(--koi-text-base);
   min-width: 160px;
 }
 .koi-rename-input:focus-visible {
@@ -75,6 +75,6 @@
 .koi-rename-hint {
   color: var(--koi-muted);
   font-family: var(--koi-font-body);
-  font-size: 0.7rem;
+  font-size: var(--koi-text-2xs);
   white-space: nowrap;
 }
