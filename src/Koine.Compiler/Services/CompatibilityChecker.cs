@@ -73,23 +73,31 @@ public sealed class CompatibilityChecker
         var removed = baseline.Fields.Where(f => !currentByName.ContainsKey(f.Name)).ToList();
         var added = current.Fields.Where(f => !baselineByName.ContainsKey(f.Name)).ToList();
 
-        // A removed field paired with an added field of identical shape and optionality reads as a
-        // RENAME — one clearer diagnostic instead of an unrelated remove + add. Only on records: enum
-        // values carry no shape, so pairing two of them would mistake an unrelated remove/add for a
-        // rename (removing EUR while adding GBP is not a rename).
+        // A removed field paired UNAMBIGUOUSLY with an added field of identical shape and optionality
+        // reads as a RENAME — one clearer diagnostic instead of an unrelated remove + add. Only when
+        // exactly one removed and one added field share a shape: with several same-shape candidates we
+        // cannot tell which is the rename, so we fall back to plain remove/add rather than guess (and
+        // risk mis-attributing the rename or mislabeling a genuine new required field). Enum values
+        // carry no shape, so they never pair (removing EUR while adding GBP is not a rename).
         var consumedAdded = new HashSet<string>(StringComparer.Ordinal);
         if (!baseline.IsEnum)
         {
-            foreach (var bf in removed.ToList())
+            var removedByShape = removed.Where(f => f.Type is not null).GroupBy(ShapeKey).ToList();
+            foreach (var group in removedByShape)
             {
-                var match = added.FirstOrDefault(cf => !consumedAdded.Contains(cf.Name) && SameShape(bf, cf));
-                if (match is not null)
+                var removedSameShape = group.ToList();
+                var addedSameShape = added.Where(f => f.Type is not null && ShapeKey(f) == group.Key).ToList();
+                if (removedSameShape.Count != 1 || addedSameShape.Count != 1)
                 {
-                    consumedAdded.Add(match.Name);
-                    removed.Remove(bf);
-                    changes.Add(Breaking(DiagnosticCodes.PublishedMemberRenamed,
-                        $"{Member(baseline, bf.Name)} appears renamed to '{match.Name}'."));
+                    continue; // ambiguous (or no) match — not a confident rename
                 }
+
+                var bf = removedSameShape[0];
+                var cf = addedSameShape[0];
+                consumedAdded.Add(cf.Name);
+                removed.Remove(bf);
+                changes.Add(Breaking(DiagnosticCodes.PublishedMemberRenamed,
+                    $"{Member(baseline, bf.Name)} appears renamed to '{cf.Name}'."));
             }
         }
 
@@ -142,21 +150,20 @@ public sealed class CompatibilityChecker
             }
         }
 
-        // An integration event is a wire contract: any breaking payload change (a field removed,
-        // retyped, or a required field added) also reports an event-shape change (KOI1517) — a single
-        // event-level signal a tool can gate on, distinct from the per-field codes. A pure rename
-        // (KOI1515) or a purely additive change does not break the shape.
+        // An integration event is a wire contract: ANY breaking payload change — a field removed,
+        // retyped, required-added, OR renamed — also reports an event-shape change (KOI1517), a single
+        // event-level signal a tool can gate on, distinct from the per-field codes. A purely additive
+        // change does not break the shape, so only breaking per-field changes trigger it.
         if (baseline.Kind == IntegrationEventKind
-            && changes.Skip(startIndex).Any(c => c.Impact == CompatibilityImpact.Breaking && c.Code != DiagnosticCodes.PublishedMemberRenamed))
+            && changes.Skip(startIndex).Any(c => c.Impact == CompatibilityImpact.Breaking))
         {
             changes.Add(Breaking(DiagnosticCodes.PublishedEventShapeChanged,
                 $"Published integration event '{baseline.Name}' changed its payload shape."));
         }
     }
 
-    /// <summary>Two fields have the same contract shape (type, ignoring nullability) and optionality — a rename candidate.</summary>
-    private static bool SameShape(PublishedField a, PublishedField b) =>
-        a.Type is not null && b.Type is not null && Shape(a.Type) == Shape(b.Type) && a.IsOptional == b.IsOptional;
+    /// <summary>A field's contract shape key (type ignoring nullability, plus optionality) for unambiguous rename pairing.</summary>
+    private static string ShapeKey(PublishedField f) => $"{Shape(f.Type!)}|{f.IsOptional}";
 
     // ------------------------------------------------------------------------
     // Published-surface extraction

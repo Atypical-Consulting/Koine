@@ -332,21 +332,21 @@ public class CliProgramTests
     [Fact]
     public void Check_SeverityConfig_DowngradesRenameToNonBreaking()
     {
+        // An open-host value object: renaming its field is a published-surface rename (KOI1515) with no
+        // event-shape coupling, so the severity override is the only thing that can clear the gate.
         const string baselineSrc = """
             context Sales {
-              integration event OrderPlaced {
-                orderId: OrderId
-                total:   Decimal
-              }
+              value Money { total: Decimal }
             }
+            context Shipping { }
+            contextmap { Sales -> Shipping : open-host }
             """;
         const string currentSrc = """
             context Sales {
-              integration event OrderPlaced {
-                orderId: OrderId
-                amount:  Decimal
-              }
+              value Money { amount: Decimal }
             }
+            context Shipping { }
+            contextmap { Sales -> Shipping : open-host }
             """;
         var (_, baseDir) = TempModel(baselineSrc, "baseline.koi");
         var (currentFile, _) = TempModel(currentSrc, "current.koi");

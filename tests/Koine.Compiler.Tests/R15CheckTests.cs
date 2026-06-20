@@ -306,8 +306,32 @@ public class R15CheckTests
               }
             }
             """);
-        AssertSingleBreaking(report, DiagnosticCodes.PublishedMemberRenamed);
-        report.Changes.ShouldHaveSingleItem(); // exactly one change — the rename subsumes remove + add
+        // The rename is reported as ONE rename, subsuming the remove + add: neither a field-removed nor
+        // a required-field-added change appears. (An integration event also carries the KOI1517
+        // event-shape summary, so this is not asserted as the sole change.)
+        AssertBreakingIncludes(report, DiagnosticCodes.PublishedMemberRenamed);
+        report.Changes.ShouldNotContain(c => c.Code == DiagnosticCodes.PublishedFieldRemoved);
+        report.Changes.ShouldNotContain(c => c.Code == DiagnosticCodes.PublishedRequiredFieldAdded);
+    }
+
+    [Fact]
+    public void Compat_AmbiguousSameShape_IsNotReportedAsRename()
+    {
+        // Baseline's `total: Decimal` is removed while TWO same-shape fields (tax, fee) are added.
+        // The pairing is ambiguous, so it must NOT be guessed as a rename — report remove + adds.
+        var report = Check(Baseline, """
+            context Sales {
+              integration event OrderPlaced {
+                orderId: OrderId
+                note:    String?
+                tax:     Decimal
+                fee:     Decimal
+              }
+            }
+            """);
+        report.Changes.ShouldNotContain(c => c.Code == DiagnosticCodes.PublishedMemberRenamed);
+        report.Changes.ShouldContain(c => c.Code == DiagnosticCodes.PublishedFieldRemoved);      // total removed
+        report.Changes.ShouldContain(c => c.Code == DiagnosticCodes.PublishedRequiredFieldAdded); // tax / fee added
     }
 
     [Fact]

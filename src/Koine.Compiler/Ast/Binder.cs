@@ -207,24 +207,23 @@ internal sealed class Binder : KoineSyntaxVisitor
     /// </summary>
     private TypeScope BuildReceiverScope()
     {
-        var names = new List<KeyValuePair<string, KoineType>>();
-        if (_enclosingTypeName is not null && _index.TryGetDecl(_enclosingTypeName, out TypeDecl decl))
-        {
-            foreach (Member m in FieldedMembers(decl))
-            {
-                names.Add(new KeyValuePair<string, KoineType>(m.Name, KoineType.From(m.Type, _index)));
-            }
-        }
+        IReadOnlyList<Member> members =
+            _enclosingTypeName is not null && _index.TryGetDecl(_enclosingTypeName, out TypeDecl decl)
+                ? FieldedMembers(decl)
+                : Array.Empty<Member>();
 
+        // Reuse the shared scope builders rather than open-coding KoineType.From over each name, so
+        // receiver inference stays in lockstep with the rest of the compiler's scope construction.
+        TypeScope scope = TypeScope.FromMembers(members, _index);
         foreach ((string name, Symbol sym) in _locals)
         {
             if (sym is ParameterSymbol p)
             {
-                names.Add(new KeyValuePair<string, KoineType>(name, KoineType.From(p.Declaration.Type, _index)));
+                scope = scope.WithRef(name, p.Declaration.Type, _index);
             }
         }
 
-        return new TypeScope(names);
+        return scope;
     }
 
     private static IReadOnlyList<Member> FieldedMembers(TypeDecl decl) => decl switch
