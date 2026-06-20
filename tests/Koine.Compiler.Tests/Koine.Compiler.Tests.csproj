@@ -34,6 +34,8 @@
     <!-- Referenced so the unified-emitter test can read Koine.Mcp's EmitterFactory.Targets and
          prove the CLI and MCP target lists no longer drift (issue #69, Task 5). -->
     <ProjectReference Include="..\..\src\Koine.Mcp\Koine.Mcp.csproj" />
+    <!-- Referenced so the diagram-wire parity test can call the real WASM JSExport (issue #93, Task 2). -->
+    <ProjectReference Include="..\..\src\Koine.Wasm\Koine.Wasm.csproj" />
   </ItemGroup>
 
   <ItemGroup>

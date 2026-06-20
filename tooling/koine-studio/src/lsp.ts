@@ -220,9 +220,56 @@ export interface PrepareRenameResult {
 export interface DocsFile {
   path: string;
   contents: string;
+  diagrams: Diagram[]; // the structured graphs riding alongside this file's Mermaid (issue #93); [] if none
 }
 export interface DocsResult {
   files: DocsFile[];
+}
+
+// --- structured diagram graphs (issue #93) -----------------------------------
+// Each Mermaid diagram in a DocsFile is accompanied by a source-aware Diagram: a graph of nodes
+// (which carry a qualifiedName + raw 1-based sourceSpan for jump-to-source) and the edges between
+// them. Field names mirror the C# DTOs (LSP dict keys + WASM W* records) verbatim.
+
+/** A raw, 1-based source span (NOT a 0-based LSP range). End line/column are end-exclusive. */
+export interface SourceSpan {
+  file: string | null; // the source .koi uri the node was declared in
+  line: number; // 1-based start line
+  column: number; // 1-based start column
+  endLine: number; // 1-based, end-exclusive
+  endColumn: number; // 1-based, end-exclusive
+  offset: number; // 0-based absolute character offset of the first character
+  length: number; // character length
+}
+
+/** One graph node: an aggregate, value object, state, context, integration event, … */
+export interface DiagramNode {
+  id: string; // stable identifier, unique within the owning graph
+  label: string; // display text shown on the diagram
+  kind: string; // styling category, e.g. 'aggregate-root' | 'value-object' | 'state' | 'context' | …
+  qualifiedName: string; // dotted stable name, e.g. 'Ordering.Order'
+  sourceSpan: SourceSpan | null; // null only when the node truly has no position
+}
+
+/** A directed edge between two node ids in the same graph. */
+export interface DiagramEdge {
+  from: string; // source node id
+  to: string; // target node id
+  label: string | null; // optional edge label (transition guard, relation kind, publish/subscribe verb)
+}
+
+/** The structured graph behind one diagram. */
+export interface DiagramGraph {
+  nodes: DiagramNode[];
+  edges: DiagramEdge[];
+}
+
+/** One diagram: the rendered Mermaid plus the structured graph that drives an interactive renderer. */
+export interface Diagram {
+  caption: string; // the heading the diagram appears under
+  kind: string; // diagram family: 'statemachine' | 'aggregate' | 'contextmap' | 'integration-events'
+  mermaid: string; // the exact Mermaid snippet embedded in the file's Markdown
+  graph: DiagramGraph;
 }
 
 interface JsonRpcMessage {
