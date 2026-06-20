@@ -168,6 +168,9 @@ public static class DiagnosticCodes
     public const string PublishedFieldTypeChanged = "KOI1512";
     public const string PublishedFieldNowRequired = "KOI1513";
     public const string PublishedRequiredFieldAdded = "KOI1514";
+    public const string PublishedMemberRenamed = "KOI1515";
+    public const string PublishedEnumMemberRemoved = "KOI1516";
+    public const string PublishedEventShapeChanged = "KOI1517";
 
     /// <summary>Every code with a one-line description. Tested for uniqueness/coverage.</summary>
     public static readonly IReadOnlyDictionary<string, string> Catalogue = new Dictionary<string, string>
@@ -201,6 +204,9 @@ public static class DiagnosticCodes
         [InvertedBound] = "A field's inclusive bounds are inverted: the lower bound exceeds the upper bound.",
         [BoundOutsideConstraint] = "A field's constant default lies outside the range its invariants require.",
         [UnsatisfiableInvariantPair] = "Two bounds on the same field cannot both hold; their intersection is empty.",
+        [PublishedMemberRenamed] = "A published field was renamed (a same-shape field removed and re-added under a new name).",
+        [PublishedEnumMemberRemoved] = "A value was removed from a published enum.",
+        [PublishedEventShapeChanged] = "A published integration event's payload shape changed (a field added, removed, or retyped).",
         [OptionalAssignedToNonOptional] = "An optional value was assigned to a non-optional field.",
         [OptionalDereference] = "An optional value may be null at the point it is used.",
         [PresenceOnNonOptional] = "A presence check was applied to a non-optional value.",

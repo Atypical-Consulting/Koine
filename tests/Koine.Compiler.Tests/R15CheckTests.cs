@@ -260,7 +260,8 @@ public class R15CheckTests
               Sales <-> Billing : shared-kernel { Currency }
             }
             """);
-        AssertSingleBreaking(report, DiagnosticCodes.PublishedFieldRemoved);
+        // Enum-value removal carries its own code (KOI1516), distinct from a record field removal.
+        AssertSingleBreaking(report, DiagnosticCodes.PublishedEnumMemberRemoved);
     }
 
     [Fact]
@@ -277,5 +278,41 @@ public class R15CheckTests
             """);
         report.HasBreakingChanges.ShouldBeFalse();
         report.Changes.ShouldContain(c => c.Message.Contains("GBP"));
+    }
+
+    // ---- issue #73, thread A: rename / enum-removal / event-shape detection ----
+
+    [Fact]
+    public void Compat_DetectsRename()
+    {
+        // `total: Decimal` renamed to `amount: Decimal` — a single rename, not a remove + add.
+        var report = Check(Baseline, """
+            context Sales {
+              integration event OrderPlaced {
+                orderId: OrderId
+                amount:  Decimal
+                note:    String?
+              }
+            }
+            """);
+        AssertSingleBreaking(report, DiagnosticCodes.PublishedMemberRenamed);
+        report.Changes.ShouldHaveSingleItem(); // exactly one change — the rename subsumes remove + add
+    }
+
+    [Fact]
+    public void Compat_EnumMemberRemoval_DistinctCode()
+    {
+        var report = Check(SharedEnum, """
+            context Sales {
+              enum Currency { EUR }
+            }
+            context Billing { }
+            contextmap {
+              Sales <-> Billing : shared-kernel { Currency }
+            }
+            """);
+        // Enum-value removal is its own code, NOT the record-field PublishedFieldRemoved.
+        AssertSingleBreaking(report, DiagnosticCodes.PublishedEnumMemberRemoved);
+        report.Changes.ShouldNotContain(c => c.Code == DiagnosticCodes.PublishedFieldRemoved);
     }
 }

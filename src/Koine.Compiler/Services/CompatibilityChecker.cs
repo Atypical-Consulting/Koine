@@ -68,14 +68,43 @@ public sealed class CompatibilityChecker
         var currentByName = current.Fields.ToDictionary(f => f.Name, StringComparer.Ordinal);
         var baselineByName = baseline.Fields.ToDictionary(f => f.Name, StringComparer.Ordinal);
 
+        var removed = baseline.Fields.Where(f => !currentByName.ContainsKey(f.Name)).ToList();
+        var added = current.Fields.Where(f => !baselineByName.ContainsKey(f.Name)).ToList();
+
+        // A removed field paired with an added field of identical shape and optionality reads as a
+        // RENAME — one clearer diagnostic instead of an unrelated remove + add. Only on records: enum
+        // values carry no shape, so pairing two of them would mistake an unrelated remove/add for a
+        // rename (removing EUR while adding GBP is not a rename).
+        var consumedAdded = new HashSet<string>(StringComparer.Ordinal);
+        if (!baseline.IsEnum)
+        {
+            foreach (var bf in removed.ToList())
+            {
+                var match = added.FirstOrDefault(cf => !consumedAdded.Contains(cf.Name) && SameShape(bf, cf));
+                if (match is not null)
+                {
+                    consumedAdded.Add(match.Name);
+                    removed.Remove(bf);
+                    changes.Add(Breaking(DiagnosticCodes.PublishedMemberRenamed,
+                        $"{Member(baseline, bf.Name)} appears renamed to '{match.Name}'."));
+                }
+            }
+        }
+
+        // Removing a value from a published enum, or a field from a published record, breaks consumers
+        // that reference it — distinct codes so a tool can treat the two differently.
+        foreach (var bf in removed)
+        {
+            changes.Add(Breaking(
+                baseline.IsEnum ? DiagnosticCodes.PublishedEnumMemberRemoved : DiagnosticCodes.PublishedFieldRemoved,
+                $"{Member(baseline, bf.Name)} was removed."));
+        }
+
+        // Fields present in both: a type change or an optionality tightening is breaking.
         foreach (var bf in baseline.Fields)
         {
             if (!currentByName.TryGetValue(bf.Name, out var cf))
             {
-                // Removing a value from a published enum, or a field from a published record,
-                // breaks consumers that reference it.
-                changes.Add(Breaking(DiagnosticCodes.PublishedFieldRemoved,
-                    $"{Member(baseline, bf.Name)} was removed."));
                 continue;
             }
 
@@ -91,15 +120,15 @@ public sealed class CompatibilityChecker
             }
         }
 
-        foreach (var cf in current.Fields)
+        // Added fields not consumed by a rename: a new enum value or optional field is additive; a new
+        // required field breaks producers/consumers that build the contract.
+        foreach (var cf in added)
         {
-            if (baselineByName.ContainsKey(cf.Name))
+            if (consumedAdded.Contains(cf.Name))
             {
                 continue;
             }
 
-            // A new enum value or a new optional field is additive; a new required field
-            // breaks producers/consumers that build the contract.
             if (current.IsEnum || cf.IsOptional)
             {
                 changes.Add(NonBreaking($"{Member(current, cf.Name)} was added."));
@@ -111,6 +140,10 @@ public sealed class CompatibilityChecker
             }
         }
     }
+
+    /// <summary>Two fields have the same contract shape (type, ignoring nullability) and optionality — a rename candidate.</summary>
+    private static bool SameShape(PublishedField a, PublishedField b) =>
+        a.Type is not null && b.Type is not null && Shape(a.Type) == Shape(b.Type) && a.IsOptional == b.IsOptional;
 
     // ------------------------------------------------------------------------
     // Published-surface extraction
