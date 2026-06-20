@@ -156,7 +156,7 @@ public sealed partial class TypeScriptEmitter
                 continue;
             }
             TsTypeLocation chosen = candidates.FirstOrDefault(c => c.Context == thisContext, candidates[0]);
-            imports[symbol] = RelativeImport(folder, chosen.ModulePath);
+            imports[symbol] = ImportSpecifier(folder, chosen.ModulePath);
         }
 
         // Group imports by module so a module imported for several symbols emits one statement.
@@ -261,6 +261,21 @@ public sealed partial class TypeScriptEmitter
     private static readonly Regex DeclRegex = new(
         @"export (?:class|interface|const|type|function) ([A-Za-z_][A-Za-z0-9_]*)",
         RegexOptions.Compiled);
+
+    /// <summary>
+    /// The ESM import specifier for a sibling user-type module. When a <see cref="TsEmitterOptions.ModuleMap"/>
+    /// rewrites the target's context head (the C# <c>NamespaceMap</c> analogue), the remapped path is
+    /// emitted verbatim as a bare specifier (e.g. <c>@acme/billing/value-objects/Money</c>); otherwise a
+    /// relative specifier is computed from <paramref name="fromFolder"/>. With an empty map the result is
+    /// byte-identical to the historical relative import.
+    /// </summary>
+    private string ImportSpecifier(string fromFolder, string toModule)
+    {
+        var remapped = _options.RemapModulePath(toModule);
+        return ReferenceEquals(remapped, toModule) || remapped == toModule
+            ? RelativeImport(fromFolder, toModule)
+            : remapped;
+    }
 
     /// <summary>A relative ESM import specifier from <paramref name="fromFolder"/> to <paramref name="toModule"/>.</summary>
     private static string RelativeImport(string fromFolder, string toModule)

@@ -63,18 +63,25 @@ internal sealed class TypeScriptEmitterProvider : IEmitterProvider
     public IEmitter Create(EmitterOptions options) => new TypeScriptEmitter(ToTsOptions(options));
 
     /// <summary>
-    /// Maps the neutral <see cref="EmitterOptions"/> to <see cref="TsEmitterOptions"/>. Only
-    /// <see cref="EmitterOptions.EmitSourceMaps"/> is consumed today; with it off the result equals
-    /// <see cref="TsEmitterOptions.Default"/>, so an unconfigured target emits byte-identical output.
+    /// Maps the neutral <see cref="EmitterOptions"/> to <see cref="TsEmitterOptions"/>, mirroring
+    /// <see cref="CSharpEmitterProvider"/>. The shared <see cref="EmitterOptions.NamespaceMap"/> is
+    /// reused as the TS module-path remap (keys are PascalCase context names, matching the module-path
+    /// heads the emitter computes); <see cref="EmitterOptions.EmitSourceMaps"/> turns on the source-map
+    /// sidecars. An empty bag maps to <see cref="TsEmitterOptions.Empty"/>, so an unconfigured target
+    /// emits byte-identical output.
     /// </summary>
     private static TsEmitterOptions ToTsOptions(EmitterOptions options)
     {
-        if (!options.EmitSourceMaps)
+        if (options.NamespaceMap.Count == 0 && !options.EmitSourceMaps)
         {
-            return TsEmitterOptions.Default;
+            return TsEmitterOptions.Empty;
         }
 
-        return new TsEmitterOptions { EmitSourceMaps = options.EmitSourceMaps };
+        return new TsEmitterOptions
+        {
+            EmitSourceMaps = options.EmitSourceMaps,
+            ModuleMap = options.NamespaceMap,
+        };
     }
 }
 
