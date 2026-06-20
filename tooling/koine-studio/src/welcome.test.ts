@@ -317,6 +317,36 @@ describe('welcome recent rows', () => {
   });
 });
 
+describe('welcome recent management', () => {
+  beforeEach(() => {
+    localStorage.clear();
+    document.body.innerHTML = '';
+    vi.stubGlobal('confirm', () => true);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  test('shows a filter only when the list is long, and filters by text', () => {
+    const many = Array.from({ length: 10 }, (_, i) => `/proj/folder-${i}`);
+    localStorage.setItem(KEY, JSON.stringify(many));
+    createWelcome(makeCallbacks()).show();
+    const filter = document.querySelector('.koi-welcome-recent-filter') as HTMLInputElement;
+    expect(filter).not.toBeNull();
+    filter.value = 'folder-3';
+    filter.dispatchEvent(new Event('input'));
+    expect(document.querySelectorAll('.koi-welcome-recent-item').length).toBe(1);
+  });
+
+  test('clear-all empties the list', () => {
+    localStorage.setItem(KEY, JSON.stringify(['/a', '/b']));
+    createWelcome(makeCallbacks()).show();
+    (document.querySelector('.koi-welcome-recent-clear') as HTMLElement).click();
+    expect(document.querySelector('.koi-welcome-empty')).not.toBeNull();
+  });
+});
+
 // The search input is debounced; tests enable fake timers and flush the debounce window.
 function setSearch(root: HTMLElement, value: string): void {
   vi.useFakeTimers();

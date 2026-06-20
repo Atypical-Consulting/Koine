@@ -4,7 +4,7 @@
 // (the ubiquitous language) that Koine turns into idiomatic code — rather than describing it in prose.
 // The recent list is rebuilt from store.getRecentFolders() on every show() so it always reflects the
 // latest history.
-import { getRecentFolders, removeRecentFolder, pinRecentFolder } from './store';
+import { getRecentFolders, removeRecentFolder, pinRecentFolder, clearRecentFolders } from './store';
 import { LOGO_SVG } from './logo';
 import { registerOverlay } from './overlay';
 import { TEMPLATES, type Template } from './templates';
@@ -32,6 +32,9 @@ function baseName(path: string): string {
 
 /** Canonical difficulty ordering — starters first, advanced last. Drives grouping and chip order. */
 export const DIFFICULTY_ORDER: Template['difficulty'][] = ['starter', 'beginner', 'intermediate', 'advanced'];
+
+/** Recents past this count gain a free-text filter input above the list. */
+const FILTER_THRESHOLD = 8;
 
 /** The active gallery filters. Any field left undefined/empty is treated as "no constraint". */
 export interface TemplateFilter {
@@ -125,6 +128,9 @@ function makeAction(opts: {
  */
 export function createWelcome(cb: WelcomeCallbacks, templates: readonly Template[] = TEMPLATES): WelcomeHandle {
   let shown = false;
+  // Live recent-folders filter query — closure-scoped so it survives renderRecent() re-renders but
+  // resets per welcome instance (two welcome handles never share a query).
+  let recentQuery = '';
 
   const root = document.createElement('div');
   root.className = 'koi-welcome';
@@ -285,14 +291,35 @@ export function createWelcome(cb: WelcomeCallbacks, templates: readonly Template
     heading.textContent = 'Recent';
     recent.appendChild(heading);
 
-    const folders = getRecentFolders();
-    if (!folders.length) {
+    const all = getRecentFolders();
+    if (!all.length) {
       const empty = document.createElement('p');
       empty.className = 'koi-welcome-empty';
       empty.textContent = 'Folders you open will show up here.';
       recent.appendChild(empty);
       return;
     }
+
+    // Past a handful of recents, offer a free-text filter (name or full path). The query is
+    // closure-scoped so it persists across the input-driven re-renders.
+    if (all.length > FILTER_THRESHOLD) {
+      const filter = document.createElement('input');
+      filter.type = 'search';
+      filter.className = 'koi-welcome-recent-filter';
+      filter.placeholder = 'Filter recent folders…';
+      filter.setAttribute('aria-label', 'Filter recent folders');
+      filter.value = recentQuery;
+      filter.addEventListener('input', () => {
+        recentQuery = filter.value;
+        renderRecent();
+      });
+      recent.appendChild(filter);
+    }
+
+    const q = recentQuery.trim().toLowerCase();
+    const folders = q
+      ? all.filter((r) => r.path.toLowerCase().includes(q) || baseName(r.path).toLowerCase().includes(q))
+      : all;
 
     const list = document.createElement('div');
     list.className = 'koi-welcome-recent-list';
@@ -358,6 +385,19 @@ export function createWelcome(cb: WelcomeCallbacks, templates: readonly Template
       list.appendChild(item);
     }
     recent.appendChild(list);
+
+    // Clear-all sits below the list whenever there's any history (independent of an active filter).
+    const clear = document.createElement('button');
+    clear.type = 'button';
+    clear.className = 'koi-welcome-recent-clear';
+    clear.textContent = 'Clear recent folders';
+    clear.addEventListener('click', () => {
+      if (!confirm('Clear all recent folders?')) return;
+      clearRecentFolders();
+      recentQuery = '';
+      renderRecent();
+    });
+    recent.appendChild(clear);
   }
 
   // --- example gallery: search + difficulty-grouped cards -------------------
