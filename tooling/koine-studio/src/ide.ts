@@ -283,12 +283,12 @@ export function init(): void {
   // workspace. A single model seeds the editor's initial doc directly; a workspace is imported after
   // the language server is up (see the lsp.start callback) so its didOpen resolves cross-file refs.
   const shared = readModelFromHash();
-  const singleShared = shared?.kind === 'single' ? shared.text : null;
-  // Session restore: if the user has unsaved scratch work from a previous visit, open that instead
-  // of the seed (and skip the welcome screen — see the boot section). Folder workspaces are not
-  // restored; they live on disk and are re-opened explicitly.
-  const restoredScratch = loadScratch();
-  const initialDoc = singleShared ?? restoredScratch ?? SEED;
+  // One-time migration of the legacy single-file scratch buffer (pre-workspace Studio) into the
+  // default workspace's model.koi. Read+clear here so it is applied at most once.
+  const legacyScratch = loadScratch();
+  if (legacyScratch !== null) clearScratch();
+  // First paint before the workspace opens; openFolderPath replaces it with the active file's text.
+  const initialDoc = (shared?.kind === 'single' ? shared.text : null) ?? legacyScratch ?? SEED;
 
   const editor = createKoineEditor({
     parent: el('editor-pane'),
@@ -308,8 +308,6 @@ export function init(): void {
       }
       lsp.changeDoc(activeUri, doc);
       onDocEdited();
-      // Persist the scratch buffer (debounced) so a reload restores it.
-      if (!folderMode && activeUri === SCRATCH_URI) scheduleScratchSave(doc);
       // Re-render the tree only when the active file's dirty dot just appeared (cheap path).
       if (folderMode && becameDirty) renderTree();
     },
@@ -458,16 +456,6 @@ export function init(): void {
     diagCounts: (token) => diagCounts(pathToFileUri(token)),
   });
   treeBodyEl.appendChild(explorer.el);
-
-  // Seed the scratch buffer up front so onChange/diagnostics have somewhere to land.
-  buffers.set(SCRATCH_URI, {
-    uri: SCRATCH_URI,
-    path: null,
-    relPath: 'model.koi',
-    name: 'model.koi',
-    text: initialDoc,
-    dirty: false,
-  });
 
   // Debounced persistence of the scratch buffer. The seed is treated as "no saved state" so the
   // welcome screen still appears on a fresh reload; any real edit is restored next time.
@@ -1389,7 +1377,7 @@ export function init(): void {
   // Load + open every .koi file under `folder` as one workspace. Shared by the toolbar
   // button (which picks a folder first) and the welcome screen's recent-folder items
   // (which pass a known path directly).
-  async function openFolderPath(folder: string): Promise<void> {
+  async function openFolderPath(folder: string, opts: { recent?: boolean } = {}): Promise<void> {
     welcome.hide();
     let files: KoiFile[];
     try {
@@ -1460,11 +1448,36 @@ export function init(): void {
     editor.setDoc(first.text);
     treeTitleEl.textContent = platform.folderName(folder);
     showFileTreeChrome();
-    pushRecentFolder(folder);
+    if (opts.recent ?? true) pushRecentFolder(folder);
     invalidateDocViews();
     // Fetch the full explorer tree (dirs + .koi) and render it; falls back silently on failure.
     await refreshEntries();
     ensureLoaded(activeView);
+  }
+
+  // Boot/empty-state: open the host's persistent default workspace (creating + seeding it the first
+  // time), then surface the welcome overlay only when it is pristine (a single untouched SEED model).
+  async function openDefaultWorkspaceFlow(seed: string): Promise<void> {
+    const token = await platform.defaultWorkspace(seed);
+    if (!token) {
+      setStatus("couldn't initialize a workspace", 'error');
+      output.setContent('// Koine Studio needs OPFS (a modern browser) to store your model.', 'plain');
+      return;
+    }
+    await openFolderPath(token, { recent: false });
+    const only = buffers.size === 1 ? Array.from(buffers.values())[0] : null;
+    if (only && only.text === SEED) welcome.show();
+  }
+
+  // Open one shared model as a transient 1-file workspace (non-destructive: it does not touch the
+  // user's default workspace). The hash is cleared by the caller so a reload returns home.
+  async function openWorkspaceWith1File(text: string): Promise<void> {
+    const token = await platform.materializeWorkspace('shared', [{ relPath: 'model.koi', contents: text }]);
+    if (!token) {
+      setStatus('could not open shared model', 'error');
+      return;
+    }
+    await openFolderPath(token, { recent: false });
   }
 
   // True when the command palette or a modal dialog (prefs/help/about) is open, so global
@@ -2277,21 +2290,6 @@ export function init(): void {
     }
   });
 
-  // Welcome screen on boot: shown only on a fresh start (no restored scratch, no shared link).
-  // A single-string shared model is persisted as the scratch buffer and the hash is cleared so a
-  // reload resumes into it cleanly. A workspace share does NOT seed scratch — the import below
-  // (run once the server is up) replaces the workspace, and the hash is cleared after it lands.
-  // Otherwise, unsaved work from a previous visit resumes straight in. The first edit, New scratch,
-  // Open folder, or opening a recent folder all hide the welcome.
-  if (shared?.kind === 'single') {
-    saveScratch(shared.text);
-    clearModelHash();
-  } else if (shared?.kind === 'workspace') {
-    // Leave clearModelHash() for after importSharedWorkspace lands (in the lsp.start callback).
-  } else if (restoredScratch === null) {
-    welcome.show();
-  }
-
   // Boot: attach listeners (inside start) before messages flow, then open the doc.
   setStatus('connecting…', 'connecting');
   lsp.onServerRestart(() => {
@@ -2302,12 +2300,9 @@ export function init(): void {
   lsp
     .start()
     .then(async () => {
-      // Scratch mode on startup: open the single seed doc at SCRATCH_URI.
-      lsp.openDoc(SCRATCH_URI, editor.getDoc());
-      // A workspace share imports once the server is up so its didOpen resolves cross-file refs.
-      // Isolated in its own try/finally: an import failure must NOT masquerade as a connection
-      // failure (the server connected fine), and the hash is cleared either way so a reload doesn't
-      // re-trigger a failing import and trap the user on a broken boot.
+      // The workspace opens once the server is up so each file's didOpen resolves cross-file refs.
+      // Isolated try/finally per branch: an open failure must not masquerade as a connection failure,
+      // and any model hash is cleared so a reload doesn't re-trigger a failing import.
       if (shared?.kind === 'workspace') {
         try {
           await importSharedWorkspace(shared.files, shared.active);
@@ -2317,6 +2312,17 @@ export function init(): void {
         } finally {
           clearModelHash();
         }
+      } else if (shared?.kind === 'single') {
+        try {
+          await openWorkspaceWith1File(shared.text);
+        } catch (e) {
+          console.error('opening shared model failed:', e);
+          setStatus('could not open shared model', 'error');
+        } finally {
+          clearModelHash();
+        }
+      } else {
+        await openDefaultWorkspaceFlow(legacyScratch ?? SEED);
       }
     })
     .catch((e) => {
