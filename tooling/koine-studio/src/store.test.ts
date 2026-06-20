@@ -1,4 +1,4 @@
-import { describe, expect, test, beforeEach } from 'vitest';
+import { describe, expect, it, test, beforeEach } from 'vitest';
 import {
   loadSettings,
   saveSettings,
@@ -13,6 +13,7 @@ import {
   CHAT_HISTORY_CAP,
   peekLegacyScratch,
   clearLegacyScratch,
+  getRecentFolders,
 } from './store';
 import type { ChatMessage } from './ai';
 
@@ -169,6 +170,34 @@ describe('Assistant conversation persistence', () => {
     expect(loadSettings().aiApiKey).toBe('sk-must-not-leak');
     // The chat lives under its own namespaced key.
     expect(loadChat('scratch')).toEqual([{ role: 'user', content: 'chat content' }]);
+  });
+});
+
+const KEY = 'koine.studio.recentFolders';
+
+describe('recent folders migration', () => {
+  beforeEach(() => localStorage.clear());
+
+  it('upgrades a legacy string[] to RecentFolder[] preserving order', () => {
+    localStorage.setItem(KEY, JSON.stringify(['/a/one', '/b/two']));
+    const got = getRecentFolders();
+    expect(got.map((r) => r.path)).toEqual(['/a/one', '/b/two']);
+    expect(got[0]).toMatchObject({ path: '/a/one', pinned: false });
+    expect(typeof got[0].openedAt).toBe('number');
+  });
+
+  it('sorts pinned entries above unpinned, then by openedAt desc', () => {
+    localStorage.setItem(KEY, JSON.stringify([
+      { path: '/old', openedAt: 1 },
+      { path: '/new', openedAt: 9 },
+      { path: '/pin', openedAt: 2, pinned: true },
+    ]));
+    expect(getRecentFolders().map((r) => r.path)).toEqual(['/pin', '/new', '/old']);
+  });
+
+  it('returns [] for malformed JSON', () => {
+    localStorage.setItem(KEY, '{not json');
+    expect(getRecentFolders()).toEqual([]);
   });
 });
 

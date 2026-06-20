@@ -296,7 +296,8 @@ export function createWelcome(cb: WelcomeCallbacks, templates: readonly Template
 
     const list = document.createElement('div');
     list.className = 'koi-welcome-recent-list';
-    for (const path of folders) {
+    for (const entry of folders) {
+      const path = entry.path;
       const item = document.createElement('button');
       item.type = 'button';
       item.className = 'koi-welcome-recent-item';
