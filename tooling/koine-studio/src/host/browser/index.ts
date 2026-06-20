@@ -52,6 +52,10 @@ export class BrowserPlatform implements Platform {
     return fs.materializeWorkspace(name, files);
   }
 
+  defaultWorkspace(seed: string): Promise<string | null> {
+    return fs.openDefaultWorkspace(seed);
+  }
+
   folderName(token: string): string {
     return fs.folderName(token);
   }

@@ -111,11 +111,18 @@ export interface Platform {
   /**
    * Materialize a set of in-memory files into a real, openable workspace folder and return its
    * token (then opened via the normal folder-mode path, so the explorer + file mutations all
-   * work). Used by the multi-file starter examples. Optional: a host that can't back a synthetic
-   * workspace omits it, and the caller falls back to opening the example as a single scratch
-   * buffer. `name` is a stable per-example slug; `files` carry forward-slashed relPaths.
+   * work). Used by the multi-file starter examples. `name` is a stable per-example slug; `files`
+   * carry forward-slashed relPaths.
    */
-  materializeWorkspace?(name: string, files: { relPath: string; contents: string }[]): Promise<string | null>;
+  materializeWorkspace(name: string, files: { relPath: string; contents: string }[]): Promise<string | null>;
+
+  /**
+   * Open (or first-time create + seed) the host's persistent default workspace — the single-model
+   * workspace Studio boots into when no folder/share is opened. Seeds one `model.koi` with `seed`
+   * only on first creation; never clobbers existing files. Returns its token (opened via the normal
+   * folder-mode path), or null when the host can't back one (e.g. no OPFS in the browser).
+   */
+  defaultWorkspace(seed: string): Promise<string | null>;
 
   /** A human-readable display name for a folder token (the last path segment). */
   folderName(token: string): string;

@@ -194,6 +194,42 @@ export async function materializeWorkspace(
   return token;
 }
 
+// The persistent default workspace: a fixed OPFS directory, opened (not wiped) on every boot so the
+// user's single model survives a reload. Replaces the old localStorage scratch buffer. The token is a
+// reserved sentinel (parentheses can't appear in a real picked-folder name) so it never collides.
+const DEFAULT_WS_DIR = 'default-workspace';
+const DEFAULT_WS_TOKEN = '(default)';
+
+async function hasAnyKoi(dir: FsDirHandle): Promise<boolean> {
+  for await (const entry of dir.values()) {
+    if (entry.kind === 'file' && entry.name.toLowerCase().endsWith('.koi')) return true;
+    if (entry.kind === 'directory' && !SKIP_DIRS.has(entry.name) && (await hasAnyKoi(entry))) return true;
+  }
+  return false;
+}
+
+/**
+ * Open the persistent default OPFS workspace, creating + seeding `model.koi` with `seed` the first
+ * time (i.e. when it holds no `.koi` yet). Registers it like any opened folder so the explorer + file
+ * mutations reuse the folder-mode path. Returns its token, or null when OPFS is unavailable.
+ */
+export async function openDefaultWorkspace(seed: string): Promise<string | null> {
+  const rootPromise = opfsRoot();
+  if (!rootPromise) return null;
+  const root = await rootPromise;
+  const dir = await root.getDirectoryHandle(DEFAULT_WS_DIR, { create: true });
+  if (!(await hasAnyKoi(dir))) {
+    const handle = await dir.getFileHandle('model.koi', { create: true });
+    const writable = await handle.createWritable();
+    await writable.write(seed);
+    await writable.close();
+  }
+  folders.set(DEFAULT_WS_TOKEN, dir);
+  folderNames.set(DEFAULT_WS_TOKEN, 'Untitled');
+  dirHandles.set(DEFAULT_WS_TOKEN, dir);
+  return DEFAULT_WS_TOKEN;
+}
+
 // --- read / write -------------------------------------------------------------
 
 export async function readTextFile(path: string): Promise<string> {
