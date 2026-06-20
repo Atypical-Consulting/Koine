@@ -72,10 +72,6 @@ export class BrowserPlatform implements Platform {
     return fs.writeTextFile(path, contents);
   }
 
-  pickSavePath(defaultName: string): Promise<string | null> {
-    return fs.pickSavePath(defaultName);
-  }
-
   async saveZip(defaultName: string, data: Uint8Array): Promise<boolean> {
     // A browser download is fire-and-forget — there is no cancel signal, so it always "succeeds".
     fs.downloadBytes(defaultName, data, 'application/zip');

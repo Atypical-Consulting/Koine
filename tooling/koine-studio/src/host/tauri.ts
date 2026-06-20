@@ -166,14 +166,6 @@ export class TauriPlatform implements Platform {
     return invoke('write_text_file', { path, contents }) as Promise<void>;
   }
 
-  pickSavePath(defaultName: string): Promise<string | null> {
-    return saveDialog({
-      title: 'Save model',
-      defaultPath: defaultName,
-      filters: [{ name: 'Koine model', extensions: ['koi'] }],
-    });
-  }
-
   // Save generated-project bytes: prompt for a destination, then write the raw zip via the Rust
   // `write_bytes` command (the text-only `write_text_file` would corrupt binary). Bytes cross the
   // IPC boundary as a JSON number array — fine for the small archives Koine emits. Returns false

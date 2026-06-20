@@ -251,26 +251,6 @@ export async function writeTextFile(path: string, contents: string): Promise<voi
   await writable.close();
 }
 
-export async function pickSavePath(defaultName: string): Promise<string | null> {
-  if (!fsWin.showSaveFilePicker) {
-    // No save picker (e.g. Firefox/Safari): return the name as a download-only token. There is no
-    // handle for it, so writeTextFile will download the file — the File-System-Access fallback.
-    return defaultName;
-  }
-  let handle: FsFileHandle;
-  try {
-    handle = await fsWin.showSaveFilePicker({
-      suggestedName: defaultName,
-      types: [{ description: 'Koine model', accept: { 'text/plain': ['.koi'] } }],
-    });
-  } catch {
-    return null; // user dismissed the picker
-  }
-  const token = handle.name || defaultName;
-  fileHandles.set(token, handle);
-  return token;
-}
-
 export async function readFolderSources(token: string): Promise<SourceDoc[]> {
   const files = await listKoiFiles(token);
   const out: SourceDoc[] = [];

@@ -136,9 +136,6 @@ export interface Platform {
   /** Write UTF-8 text to a file token, creating/replacing it. */
   writeTextFile(path: string, contents: string): Promise<void>;
 
-  /** Prompt for a destination to save a new scratch file. Resolves to its token, or null. */
-  pickSavePath(defaultName: string): Promise<string | null>;
-
   /**
    * Save binary bytes (a generated-project `.zip`) to a host-chosen destination: a browser
    * download in the web host, or a native save dialog + write on the desktop. `defaultName` is the
