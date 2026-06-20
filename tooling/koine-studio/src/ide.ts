@@ -36,6 +36,7 @@ import { renderGlossary, type GlossaryHandlers } from './glossary';
 import { createAssistantPanel, type AssistantPanel } from './aiPanel';
 import { buildShareUrl, clearModelHash, readModelFromHash, workspaceShareUrlOrNull } from './share';
 import { dirtyCount, handleBeforeUnload, saveAllDirtyBuffers, titleWithDirty } from './dirty';
+import { clashingRelPaths, isDirtyTrackable } from './sharedWorkspace';
 import { createConfirmDialog } from './overlay';
 
 // --- workspace fs contract ---------------------------------------------------
@@ -299,7 +300,9 @@ export function init(): void {
       const buf = buffers.get(activeUri);
       let becameDirty = false;
       if (buf) {
-        if (buf.path != null && !buf.dirty && buf.text !== doc) becameDirty = true;
+        // Real files and in-memory shared buffers are dirty-tracked; the scratch buffer (path-null but
+        // auto-persisted to localStorage) is deliberately never marked dirty.
+        if (isDirtyTrackable(buf, isInMemoryWorkspace()) && !buf.dirty && buf.text !== doc) becameDirty = true;
         buf.text = doc;
         if (becameDirty) buf.dirty = true;
       }
@@ -396,6 +399,14 @@ export function init(): void {
   // the open .koi `buffers` remain the compiled workspace. Mutations refresh both.
   let folderRootToken: string | null = null;
   let entriesCache: FsEntry[] = [];
+
+  // True when the workspace is the in-memory shared import (folder mode with no host folder behind it):
+  // every buffer is a path-null synthetic, so edits are at risk and "save" means materializing the whole
+  // workspace to a real folder. Real folder mode has a non-null folderRootToken; scratch mode is not
+  // folderMode — so this is the one mode where path-null buffers must still be dirty-tracked.
+  function isInMemoryWorkspace(): boolean {
+    return folderMode && folderRootToken == null;
+  }
 
   const treeEl = el<HTMLElement>('filetree');
   const treeBodyEl = el<HTMLElement>('filetree-body');
@@ -1456,8 +1467,10 @@ export function init(): void {
       buf.text = editor.getDoc();
       lsp.changeDoc(activeUri, buf.text);
       if (!buf.path) {
-        // Scratch mode with no backing file: prompt for a target path (save-as), then write.
-        await saveScratchAs(buf);
+        // No backing file. The in-memory shared workspace persists by materializing the WHOLE workspace
+        // to a folder (a per-buffer save-as would be incoherent); scratch keeps its single-file save-as.
+        if (isInMemoryWorkspace()) await saveSharedWorkspaceToFolder();
+        else await saveScratchAs(buf);
         return;
       }
       try {
@@ -1516,6 +1529,67 @@ export function init(): void {
     clearScratch(); // the scratch is now a real file — don't also restore it as scratch on reload
   }
 
+  // Persist the in-memory shared workspace to a real folder. The fallback import has no host folder
+  // behind it (folderRootToken null, every buffer path-null), so its edits can only be kept by writing
+  // the whole workspace out: pick a folder, write each buffer into it, then re-open it through the
+  // normal folder-mode path so the files become disk-backed (real paths, per-file save, the explorer
+  // tree). When the host can't pick a folder (a non-Chromium browser), there is nowhere to write — steer
+  // the user to the .koi source .zip export, which works everywhere; the unsaved-work guards have already
+  // warned, so no edit is silently lost.
+  async function saveSharedWorkspaceToFolder(): Promise<void> {
+    if (!platform.canOpenFolders) {
+      setStatus('Saving to a folder needs a Chromium-based browser — export a .koi source zip instead', 'error');
+      setTimeout(() => updateStatus(diagnosticsByUri.get(activeUri) ?? []), 2500);
+      return;
+    }
+    // Flush the active editor text into its buffer so the written copy includes the latest edit.
+    const active = buffers.get(activeUri);
+    if (active) {
+      active.text = editor.getDoc();
+      lsp.changeDoc(activeUri, active.text);
+    }
+    // Snapshot the workspace BEFORE the async picker and before openFolderPath tears the in-memory
+    // buffers down; remember the active file so we can re-focus it after the re-open.
+    const snapshot = Array.from(buffers.values()).map((b) => ({ relPath: b.relPath, text: b.text }));
+    const activeRel = active?.relPath;
+
+    let folder: string | null;
+    try {
+      folder = await platform.pickFolder('Save shared workspace to a folder');
+    } catch (e) {
+      setStatus('could not open folder picker', 'error');
+      console.error('pickFolder failed:', e);
+      return;
+    }
+    if (!folder) return; // cancelled
+
+    // Never clobber: if the folder already holds any of these files, write nothing and surface the clash.
+    try {
+      const existing = await platform.listKoiFiles(folder);
+      const clashes = clashingRelPaths(snapshot.map((f) => f.relPath), existing.map((f) => f.relPath));
+      if (clashes.length) {
+        setStatus(`Folder already contains ${clashes[0]} — choose an empty folder`, 'error');
+        return;
+      }
+      for (const f of snapshot) {
+        await platform.createFile(folder, f.relPath, f.text);
+      }
+    } catch (e) {
+      setStatus('could not save workspace to folder', 'error');
+      console.error('saving shared workspace failed:', e);
+      return;
+    }
+
+    // Re-open the now-on-disk folder as a normal workspace, then restore the active file selection.
+    await openFolderPath(folder);
+    if (activeRel) {
+      const target = Array.from(buffers.values()).find((b) => b.relPath === activeRel);
+      if (target) activateFile(target.uri);
+    }
+    setStatus(`Saved workspace to ${platform.folderName(folder)}`, 'green');
+    setTimeout(() => updateStatus(diagnosticsByUri.get(activeUri) ?? []), 1500);
+  }
+
   // Save EVERY dirty buffer (Mod+Alt+S / "Save all"), so editing several files and then closing
   // can't silently drop the ones you didn't individually Mod-S. Mirrors saveActive's format+write
   // but across the whole workspace: the active buffer is formatted + synced from the editor first
@@ -1538,6 +1612,14 @@ export function init(): void {
       if (active) {
         active.text = editor.getDoc();
         lsp.changeDoc(activeUri, active.text);
+      }
+
+      // The in-memory shared workspace has no per-file backing — "save all" means materializing the
+      // whole workspace to a folder in one action, not a save-as dialog per buffer.
+      if (isInMemoryWorkspace()) {
+        if (dirtyCount(buffers) > 0) await saveSharedWorkspaceToFolder();
+        else setStatus('No unsaved changes', 'green');
+        return;
       }
 
       if (dirtyCount(buffers) === 0) {
@@ -1633,11 +1715,14 @@ export function init(): void {
   async function confirmReplaceWork(title: string, confirmLabel: string): Promise<boolean> {
     if (!hasUnsavedWork()) return true;
     const save = formatChord('mod+S');
+    const message = isInMemoryWorkspace()
+      ? `This shared workspace lives only in memory. Save it to a folder with ${save} first to keep your changes.`
+      : folderMode
+        ? `Files with unsaved changes will lose them. Save with ${save} first to keep them.`
+        : `Your current model has unsaved changes that will be lost. Save it with ${save} first to keep it.`;
     return confirmDialog.ask({
       title,
-      message: folderMode
-        ? `Files with unsaved changes will lose them. Save with ${save} first to keep them.`
-        : `Your current model has unsaved changes that will be lost. Save it with ${save} first to keep it.`,
+      message,
       confirmLabel,
       danger: true,
     });
@@ -1840,9 +1925,11 @@ export function init(): void {
     if (!anyDirty()) return true;
     return confirmDialog.ask({
       title: 'Close Koine Studio?',
-      message: folderMode
-        ? `Files with unsaved changes will lose them. Save with ${formatChord('mod+Alt+S')} first to keep them.`
-        : 'Your current model has unsaved changes that will be lost.',
+      message: isInMemoryWorkspace()
+        ? `This shared workspace lives only in memory. Save it to a folder with ${formatChord('mod+S')} first to keep your changes.`
+        : folderMode
+          ? `Files with unsaved changes will lose them. Save with ${formatChord('mod+Alt+S')} first to keep them.`
+          : 'Your current model has unsaved changes that will be lost.',
       confirmLabel: 'Close & discard',
       danger: true,
     });
