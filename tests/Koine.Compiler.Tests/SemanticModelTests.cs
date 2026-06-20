@@ -56,7 +56,7 @@ public class SemanticModelTests
     public void GetSymbol_resolves_an_id_value_object_to_its_owning_entity()
     {
         var sym = Build().GetSymbol("OrderId").ShouldBeOfType<IdValueObjectSymbol>();
-        sym.Owner.Name.ShouldBe("Order");
+        sym.Owner.ShouldNotBeNull().Name.ShouldBe("Order");
     }
 
     [Fact]
