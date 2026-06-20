@@ -28,11 +28,13 @@ import { initSplitResizer, initEdgeResizer } from './resize';
 import { createHelpOverlay, type ShortcutRow } from './help';
 import { createAboutDialog } from './about';
 import { createGenerateProject } from './generateProjectWizard';
+import { sanitizeProjectName } from './generateProject';
+import { buildSourceZip } from './sourceZip';
 import { formatChord } from './platform';
 import { renderDiagrams } from './diagrams';
 import { renderGlossary, type GlossaryHandlers } from './glossary';
 import { createAssistantPanel, type AssistantPanel } from './aiPanel';
-import { buildShareUrl, clearModelHash, readModelFromHash } from './share';
+import { buildShareUrl, clearModelHash, readModelFromHash, workspaceShareUrlOrNull } from './share';
 import { dirtyCount, handleBeforeUnload, saveAllDirtyBuffers, titleWithDirty } from './dirty';
 import { createConfirmDialog } from './overlay';
 
@@ -69,6 +71,17 @@ function pathToFileUri(path: string): string {
     .map((s) => (s.length ? encodeURIComponent(s) : ''))
     .join('/');
   return 'file://' + encoded;
+}
+
+/**
+ * Whether a relPath from an (untrusted) share link is safe to materialize to disk or key a buffer
+ * by. Rejects an absolute path, a backslash separator, an empty segment (covers leading/trailing/
+ * double slashes), and any `..` traversal SEGMENT — but not a substring `..` (a legitimate
+ * `My..Context.koi` is fine), mirroring the buildSourceZip/buildProjectZip guard.
+ */
+function isSafeShareRelPath(relPath: string): boolean {
+  if (relPath === '' || relPath.includes('\\')) return false;
+  return relPath.split('/').every((s) => s !== '' && s !== '..');
 }
 
 // Seed model — examples/billing.koi, inlined (the renderer has no fs access).
@@ -265,12 +278,16 @@ export function init(): void {
 
   // A model carried in the URL hash (a shared playground link) takes precedence over both the seed
   // and any restored scratch, so opening a link always lands on the shared model.
-  const sharedModel = readModelFromHash();
+  // A shared link is a discriminated SharePayload: a single-string model (legacy) or a multi-file
+  // workspace. A single model seeds the editor's initial doc directly; a workspace is imported after
+  // the language server is up (see the lsp.start callback) so its didOpen resolves cross-file refs.
+  const shared = readModelFromHash();
+  const singleShared = shared?.kind === 'single' ? shared.text : null;
   // Session restore: if the user has unsaved scratch work from a previous visit, open that instead
   // of the seed (and skip the welcome screen — see the boot section). Folder workspaces are not
   // restored; they live on disk and are re-opened explicitly.
   const restoredScratch = loadScratch();
-  const initialDoc = sharedModel ?? restoredScratch ?? SEED;
+  const initialDoc = singleShared ?? restoredScratch ?? SEED;
 
   const editor = createKoineEditor({
     parent: el('editor-pane'),
@@ -1286,6 +1303,21 @@ export function init(): void {
     await openFolderPath(folder);
   }
 
+  // Open a set of file records as workspace buffers in one pass. Each record becomes an open
+  // buffer keyed by its file:// uri and a corresponding LSP didOpen, so cross-file refs resolve.
+  // On-disk files carry their absolute `path`; in-memory shared files pass `path: null` and get a
+  // synthetic-but-stable uri under a reserved `/__shared__/` root — kept distinct from SCRATCH_URI
+  // (`file:///model.koi`) so a shared file literally named `model.koi` doesn't collide with the
+  // scratch buffer. The single seam shared by folder-open and shared-import — neither sets dirty,
+  // neither activates (callers pick the active buffer).
+  function populateBuffers(records: { path: string | null; relPath: string; name: string; text: string }[]): void {
+    for (const rec of records) {
+      const uri = rec.path != null ? pathToFileUri(rec.path) : pathToFileUri('/__shared__/' + rec.relPath);
+      buffers.set(uri, { uri, path: rec.path, relPath: rec.relPath, name: rec.name, text: rec.text, dirty: false });
+      lsp.openDoc(uri, rec.text);
+    }
+  }
+
   // Load + open every .koi file under `folder` as one workspace. Shared by the toolbar
   // button (which picks a folder first) and the welcome screen's recent-folder items
   // (which pass a known path directly).
@@ -1318,7 +1350,10 @@ export function init(): void {
       diagnosticsByUri.clear();
     }
 
-    // Read + open every file as one workspace (cross-file refs resolve via didOpen).
+    // Read + open every file as one workspace (cross-file refs resolve via didOpen). Read text
+    // from disk first (skipping unreadable files), then hand the successful records to the shared
+    // populateBuffers seam so folder-open and shared-import open files through one path.
+    const records: { path: string | null; relPath: string; name: string; text: string }[] = [];
     for (const f of files) {
       let text: string;
       try {
@@ -1327,10 +1362,9 @@ export function init(): void {
         console.error('readTextFile failed for', f.path, e);
         continue;
       }
-      const uri = pathToFileUri(f.path);
-      buffers.set(uri, { uri, path: f.path, relPath: f.relPath, name: f.name, text, dirty: false });
-      lsp.openDoc(uri, text);
+      records.push({ path: f.path, relPath: f.relPath, name: f.name, text });
     }
+    populateBuffers(records);
 
     // Every read failed after a non-empty listing (files deleted / permissions revoked
     // between list and read). The scratch doc was already closed above, so don't leave the
@@ -1668,6 +1702,95 @@ export function init(): void {
     openScratchWith(example.source);
   }
 
+  // Import a multi-file workspace carried in a share link. Mirrors openExample's materialize→open
+  // path: when the host can back a synthetic workspace, the files are materialized into a real
+  // openable token and opened in full folder mode (explorer + compiling preview). When it can't, the
+  // files become an in-memory multi-buffer workspace (all open + compiling, the active one shown).
+  // Runs from the lsp.start callback so the server is up and the resulting didOpens resolve refs.
+  async function importSharedWorkspace(
+    files: { relPath: string; text: string }[],
+    active?: string
+  ): Promise<void> {
+    // A share link is untrusted input. Drop any file whose relPath could escape the workspace root
+    // before it reaches platform.materializeWorkspace (which writes to disk) or a synthetic buffer
+    // uri — defense in depth against a malicious `..`/absolute path in the payload.
+    const safeFiles = files.filter((f) => isSafeShareRelPath(f.relPath));
+    // Nothing (safe) to import — fall through to the restored scratch / SEED that already booted.
+    if (safeFiles.length === 0) return;
+
+    // Primary path: materialize a real workspace and open it in folder mode (mirrors openExample).
+    if (platform.materializeWorkspace) {
+      try {
+        const token = await platform.materializeWorkspace(
+          'shared-workspace',
+          safeFiles.map((f) => ({ relPath: f.relPath, contents: f.text }))
+        );
+        if (token) {
+          await openFolderPath(token);
+          // openFolderPath activates the first file by relPath; honour the share's `active` when set
+          // and it maps to an open buffer.
+          if (active) {
+            const target = Array.from(buffers.values()).find((b) => b.relPath === active);
+            if (target) activateFile(target.uri);
+          }
+          return;
+        }
+      } catch (e) {
+        console.error('Importing shared workspace failed; falling back to in-memory buffers:', e);
+      }
+    }
+
+    // Fallback path: materializeWorkspace is absent or returned null. Build an in-memory multi-buffer
+    // workspace. There is no host folder behind it, so folderRootToken stays null and the explorer
+    // tree can't render host rows — the buffers are still all open + compiling and reachable via the
+    // command palette's "Go to File", and the active one is shown.
+    lsp.closeDoc(SCRATCH_URI);
+    buffers.delete(SCRATCH_URI);
+    diagnosticsByUri.delete(SCRATCH_URI);
+
+    populateBuffers(
+      safeFiles.map((f) => ({
+        path: null,
+        relPath: f.relPath,
+        name: f.relPath.split('/').pop() ?? f.relPath,
+        text: f.text,
+      }))
+    );
+
+    // Shouldn't happen (files is non-empty), but if nothing populated, re-establish scratch and bail
+    // so the app is never left with no active buffer.
+    if (buffers.size === 0) {
+      const text = editor.getDoc();
+      buffers.set(SCRATCH_URI, { uri: SCRATCH_URI, path: null, relPath: 'model.koi', name: 'model.koi', text, dirty: false });
+      lsp.openDoc(SCRATCH_URI, text);
+      activeUri = SCRATCH_URI;
+      lsp.setActive(SCRATCH_URI);
+      folderMode = false;
+      folderRootToken = null;
+      entriesCache = [];
+      hideFileTreeChrome();
+      return;
+    }
+
+    folderMode = true;
+    folderRootToken = null; // in-memory: no host token, so refreshEntries/renderTree skip host rows
+    entriesCache = [];
+    // Pick the active buffer: the shared `active` if it maps to a buffer, else the first by relPath.
+    const sorted = Array.from(buffers.values()).sort((a, b) => a.relPath.localeCompare(b.relPath));
+    const activeBuffer = (active ? sorted.find((b) => b.relPath === active) : undefined) ?? sorted[0];
+    activeUri = activeBuffer.uri;
+    lsp.setActive(activeUri);
+    editor.setDoc(activeBuffer.text);
+    // Show the file-tree chrome (the rail + toggle). renderTree() is a no-op while folderRootToken is
+    // null, so the explorer renders no host rows — guarded so the null token never throws.
+    treeTitleEl.textContent = 'shared-workspace';
+    showFileTreeChrome();
+    renderTree();
+    welcome.hide();
+    invalidateDocViews();
+    ensureLoaded(activeView);
+  }
+
   // Reopen the start screen ("home"). Non-destructive: it's an overlay over the current model, so
   // showing it loses nothing — only its actions navigate. Wired to the brand logo and the palette.
   function goHome(): void {
@@ -1779,13 +1902,52 @@ export function init(): void {
   // Copy a shareable playground link (the current model encoded in the URL hash) to the clipboard,
   // flashing a transient confirmation in the status pill. After the flash, re-derive the pill from
   // the CURRENT diagnostics rather than restoring a snapshot (which could clobber a fresh push).
+  //
+  // Folder mode shares the WHOLE workspace (every open buffer) under a versioned envelope, with the
+  // active file flagged so the recipient lands on it; scratch mode keeps the legacy single-string
+  // link. A workspace that overflows the URL-length cap is not copied as a broken link — instead we
+  // steer the user to the `.koi` source zip export (see the over-cap toast below).
   async function copyShareLink(): Promise<void> {
     try {
-      await navigator.clipboard.writeText(buildShareUrl(editor.getDoc()));
+      if (folderMode) {
+        const files = Array.from(buffers.values()).map((b) => ({ relPath: b.relPath, text: b.text }));
+        const activeRelPath = buffers.get(activeUri)?.relPath;
+        const url = workspaceShareUrlOrNull(files, activeRelPath);
+        if (url === null) {
+          setStatus('Workspace too large to share as a link — export a .koi source zip instead', 'error');
+          setTimeout(() => updateStatus(diagnosticsByUri.get(activeUri) ?? []), 1500);
+          return;
+        }
+        await navigator.clipboard.writeText(url);
+      } else {
+        await navigator.clipboard.writeText(buildShareUrl(editor.getDoc()));
+      }
       setStatus('link copied ✓', 'green');
       setTimeout(() => updateStatus(diagnosticsByUri.get(activeUri) ?? []), 1500);
     } catch (e) {
       console.error('copy share link failed:', e);
+    }
+  }
+
+  // Bundle every open `.koi` document into a zip and hand it to the host's saveZip seam (Blob
+  // download in the browser, native picker on desktop). Folder mode names the archive after the
+  // opened folder; scratch mode falls back to `KoineSource`. The whole bundle is DOM-free in
+  // sourceZip.ts so it can be unit-tested in isolation.
+  async function exportSourceZip(): Promise<void> {
+    try {
+      const files = Array.from(buffers.values()).map((b) => ({ relPath: b.relPath, text: b.text }));
+      const root = sanitizeProjectName(
+        folderMode && folderRootToken ? platform.folderName(folderRootToken) : 'KoineSource',
+      );
+      const bytes = await buildSourceZip(files, { root });
+      const saved = await platform.saveZip(`${root}.zip`, bytes);
+      if (saved === true) {
+        setStatus('source exported ✓', 'green');
+        setTimeout(() => updateStatus(diagnosticsByUri.get(activeUri) ?? []), 1500);
+      }
+    } catch (e) {
+      setStatus('export failed', 'error');
+      console.error('export source zip failed:', e);
     }
   }
 
@@ -1872,6 +2034,7 @@ export function init(): void {
       { id: 'share', title: 'Copy shareable link', group: 'File', run: () => void copyShareLink() },
       { id: 'check', title: 'Check against baseline…', group: 'File', run: () => void runCheck() },
       { id: 'generate-project', title: 'Generate project…', group: 'File', run: () => generateProject.open() },
+      { id: 'export-source-zip', title: 'Export .koi source (.zip)', group: 'File', run: () => void exportSourceZip() },
       { id: 'toggle-theme', title: 'Toggle theme', group: 'View', run: () => toggleTheme() },
       { id: 'prefs', title: 'Settings…', hint: 'mod+,', group: 'View', run: () => prefs.open() },
       { id: 'help', title: 'Keyboard shortcuts', hint: 'F1', group: 'Help', run: () => help.open() },
@@ -1888,7 +2051,7 @@ export function init(): void {
     // fuzzy quick-open (type part of a path to jump). The palette re-reads this on each open.
     if (folderMode) {
       for (const buf of Array.from(buffers.values())
-        .filter((b) => b.path != null)
+        .filter((b) => b.uri !== SCRATCH_URI)
         .sort((a, b) => a.relPath.localeCompare(b.relPath))) {
         cmds.push({ id: 'goto:' + buf.uri, title: buf.relPath, group: 'Go to File', run: () => activateFile(buf.uri) });
       }
@@ -1947,12 +2110,16 @@ export function init(): void {
   });
 
   // Welcome screen on boot: shown only on a fresh start (no restored scratch, no shared link).
-  // A shared-link model is persisted as the scratch buffer and the hash is cleared so a reload
-  // resumes into it cleanly. Otherwise, unsaved work from a previous visit resumes straight in.
-  // The first edit, New scratch, Open folder, or opening a recent folder all hide the welcome.
-  if (sharedModel !== null) {
-    saveScratch(sharedModel);
+  // A single-string shared model is persisted as the scratch buffer and the hash is cleared so a
+  // reload resumes into it cleanly. A workspace share does NOT seed scratch — the import below
+  // (run once the server is up) replaces the workspace, and the hash is cleared after it lands.
+  // Otherwise, unsaved work from a previous visit resumes straight in. The first edit, New scratch,
+  // Open folder, or opening a recent folder all hide the welcome.
+  if (shared?.kind === 'single') {
+    saveScratch(shared.text);
     clearModelHash();
+  } else if (shared?.kind === 'workspace') {
+    // Leave clearModelHash() for after importSharedWorkspace lands (in the lsp.start callback).
   } else if (restoredScratch === null) {
     welcome.show();
   }
@@ -1966,9 +2133,23 @@ export function init(): void {
   });
   lsp
     .start()
-    .then(() => {
+    .then(async () => {
       // Scratch mode on startup: open the single seed doc at SCRATCH_URI.
       lsp.openDoc(SCRATCH_URI, editor.getDoc());
+      // A workspace share imports once the server is up so its didOpen resolves cross-file refs.
+      // Isolated in its own try/finally: an import failure must NOT masquerade as a connection
+      // failure (the server connected fine), and the hash is cleared either way so a reload doesn't
+      // re-trigger a failing import and trap the user on a broken boot.
+      if (shared?.kind === 'workspace') {
+        try {
+          await importSharedWorkspace(shared.files, shared.active);
+        } catch (e) {
+          console.error('importing shared workspace failed:', e);
+          setStatus('could not open shared workspace', 'error');
+        } finally {
+          clearModelHash();
+        }
+      }
     })
     .catch((e) => {
       setStatus('connection failed', 'error');

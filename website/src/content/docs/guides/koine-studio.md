@@ -72,6 +72,13 @@ Koine Studio surfaces the **enriched** language server, the same one the VS Code
 - **Context map** — the bounded contexts and their relationships.
 - **Hover & navigation** — type/member hover cards and go-to-definition, served by the same LSP that
   powers the editors.
+- **Shareable links** — _Copy shareable link_ encodes your work into the URL fragment (it never leaves
+  the browser) so a teammate who opens the link lands on the same model. In a folder workspace the link
+  now carries the **whole workspace** — every open file, with the active file flagged — not just one
+  buffer. Old single-file links still open, so links shared before this change keep working.
+- **Export `.koi` source** — _Export .koi source (.zip)_ bundles every open `.koi` file into a zip. A
+  very large workspace can overflow a URL, so when _Copy shareable link_ would produce an oversized
+  link Studio declines to copy a broken one and steers you to this export instead.
 
 :::note
 Studio is an MVP. The feature set above is what the shared language server provides and what the app
