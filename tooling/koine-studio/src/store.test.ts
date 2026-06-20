@@ -1,4 +1,4 @@
-import { describe, expect, test, beforeEach } from 'vitest';
+import { describe, expect, it, test, beforeEach } from 'vitest';
 import {
   loadSettings,
   saveSettings,
@@ -13,6 +13,11 @@ import {
   CHAT_HISTORY_CAP,
   peekLegacyScratch,
   clearLegacyScratch,
+  getRecentFolders,
+  pushRecentFolder,
+  removeRecentFolder,
+  pinRecentFolder,
+  clearRecentFolders,
 } from './store';
 import type { ChatMessage } from './ai';
 
@@ -169,6 +174,68 @@ describe('Assistant conversation persistence', () => {
     expect(loadSettings().aiApiKey).toBe('sk-must-not-leak');
     // The chat lives under its own namespaced key.
     expect(loadChat('scratch')).toEqual([{ role: 'user', content: 'chat content' }]);
+  });
+});
+
+const KEY = 'koine.studio.recentFolders';
+
+describe('recent folders migration', () => {
+  beforeEach(() => localStorage.clear());
+
+  it('upgrades a legacy string[] to RecentFolder[] preserving order', () => {
+    localStorage.setItem(KEY, JSON.stringify(['/a/one', '/b/two']));
+    const got = getRecentFolders();
+    expect(got.map((r) => r.path)).toEqual(['/a/one', '/b/two']);
+    expect(got[0]).toMatchObject({ path: '/a/one', pinned: false });
+    expect(typeof got[0].openedAt).toBe('number');
+  });
+
+  it('sorts pinned entries above unpinned, then by openedAt desc', () => {
+    localStorage.setItem(KEY, JSON.stringify([
+      { path: '/old', openedAt: 1 },
+      { path: '/new', openedAt: 9 },
+      { path: '/pin', openedAt: 2, pinned: true },
+    ]));
+    expect(getRecentFolders().map((r) => r.path)).toEqual(['/pin', '/new', '/old']);
+  });
+
+  it('returns [] for malformed JSON', () => {
+    localStorage.setItem(KEY, '{not json');
+    expect(getRecentFolders()).toEqual([]);
+  });
+});
+
+describe('recent folders mutations', () => {
+  beforeEach(() => localStorage.clear());
+
+  it('push upserts and moves an existing path to the front', () => {
+    pushRecentFolder('/a'); pushRecentFolder('/b'); pushRecentFolder('/a');
+    expect(getRecentFolders().map((r) => r.path)).toEqual(['/a', '/b']);
+  });
+
+  it('push preserves an entry pinned state on re-open', () => {
+    pushRecentFolder('/a');
+    pinRecentFolder('/a', true);
+    pushRecentFolder('/a');
+    expect(getRecentFolders()[0]).toMatchObject({ path: '/a', pinned: true });
+  });
+
+  it('remove drops a single entry', () => {
+    pushRecentFolder('/a'); pushRecentFolder('/b');
+    removeRecentFolder('/a');
+    expect(getRecentFolders().map((r) => r.path)).toEqual(['/b']);
+  });
+
+  it('pin floats an entry above more-recent unpinned ones', () => {
+    pushRecentFolder('/a'); pushRecentFolder('/b'); // b newer
+    pinRecentFolder('/a', true);
+    expect(getRecentFolders().map((r) => r.path)).toEqual(['/a', '/b']);
+  });
+
+  it('clear removes everything including pinned', () => {
+    pushRecentFolder('/a'); pinRecentFolder('/a', true);
+    clearRecentFolders();
+    expect(getRecentFolders()).toEqual([]);
   });
 });
 
