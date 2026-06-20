@@ -48,6 +48,7 @@ public sealed partial class TypeScriptEmitter
         public const string Events = "events";
         public const string Repositories = "repositories";
         public const string Services = "services";
+        public const string Specifications = "specifications";
         public const string ReadModels = "read-models";
         public const string Queries = "queries";
     }

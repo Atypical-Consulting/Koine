@@ -101,11 +101,25 @@ public sealed partial class TypeScriptEmitter : IEmitter
                 files.Add(EmitIdType(emit, idName, ctx.Name, IdentityStrategy.Guid, null));
             }
 
-            // Application-service boundaries (R12.2): one I<Name> interface per service that
-            // declares use cases (mirrors the C# dispatch). The service emits into the context's
-            // base namespace; pure-operation domain services are out of scope for the TS backend.
+            // R10 behavioral declarations: reusable specifications (gathered from the context and
+            // its aggregates, mirroring the C# dispatch) emit as one <Context>Specifications module.
+            var contextSpecs = ctx.Specs
+                .Concat(ctx.Types.OfType<AggregateDecl>().SelectMany(a => a.Specs))
+                .ToList();
+            if (contextSpecs.Count > 0)
+            {
+                files.Add(EmitSpecifications(emit, contextSpecs, ctx.Name, typeMapper));
+            }
+
+            // Services: a stateless domain-service class for pure operations (R10.2) and/or an
+            // I<Name> application-service interface for use cases (R12.2) — mirrors the C# dispatch.
             foreach (ServiceDecl svc in ctx.Services)
             {
+                if (svc.Operations.Count > 0)
+                {
+                    files.Add(EmitService(emit, svc, ctx.Name, typeMapper));
+                }
+
                 if (svc.UseCases.Count > 0)
                 {
                     files.Add(EmitApplicationService(emit, svc, ctx.Name, typeMapper));

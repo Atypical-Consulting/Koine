@@ -159,12 +159,85 @@ public class CrossEmitterConformanceTests
         }
         """;
 
+    /// <summary>
+    /// A reusable specification (R10.1) and a stateless domain service (R10.2), exercising the
+    /// behavioral layer's runtime: the <c>large</c> spec is a boolean predicate over an order's
+    /// subtotal, and the service's pure <c>net</c> operation computes <c>subtotal - discount</c>.
+    /// Both backends must agree — the spec must return the SAME truth value and the operation the SAME
+    /// computed number for the same order. These are the R10 parity cases (the only behavioral CQRS
+    /// counterpart not yet covered cross-emitter).
+    /// </summary>
+    private const string BehaviorModel = """
+        context Pricing {
+          value Order {
+            subtotal: Int
+            discount: Int
+            invariant subtotal >= 0 "a subtotal cannot be negative"
+          }
+
+          spec large on Order = subtotal >= 100
+
+          service PricingService {
+            operation net(order: Order): Int = order.subtotal - order.discount
+          }
+        }
+        """;
+
     public static IEnumerable<object[]> Corpus()
     {
         yield return ["Money invariant", MoneyModel, MoneyScenarios()];
         yield return ["Order command + event", OrderModel, OrderScenarios()];
         yield return ["Quote result + emit hoist (prefix-safe)", QuoteModel, QuoteScenarios()];
         yield return ["Read-model projection mapper", ReadModelModel, ReadModelScenarios()];
+        yield return ["Specification + domain service", BehaviorModel, BehaviorScenarios()];
+    }
+
+    /// <summary>
+    /// The <c>large</c> spec and the <c>net</c> domain-service operation. An order of subtotal 150
+    /// satisfies <c>large</c>; one of subtotal 50 does not — both backends must agree on the predicate.
+    /// The service's <c>net</c> must compute <c>subtotal - discount</c> identically. A scenario is
+    /// ACCEPTED only when the backend's spec/operation outcome matches the asserted expectation, so an
+    /// accept means C# and TS computed the SAME behavioral result.
+    /// </summary>
+    private static IReadOnlyList<Scenario> BehaviorScenarios()
+    {
+        const string tsImports =
+            "import { Order } from './Pricing/value-objects/Order';\n" +
+            "import { isLarge } from './Pricing/specifications/PricingSpecifications';\n" +
+            "import { PricingService } from './Pricing/services/PricingService';";
+
+        return
+        [
+            // Specification: subtotal 150 is large.
+            new("large(subtotal=150) is true", Accept: true,
+                Cs: "{ var o = new Pricing.Order(150, 10); " +
+                    "if (!Pricing.PricingSpecifications.Large(o)) throw new System.Exception(\"expected large\"); }",
+                Ts: "{ const o = new Order(150, 10); " +
+                    "if (!isLarge(o)) throw new Error('expected large'); }",
+                TsImports: tsImports,
+                CsIsStatement: true,
+                TsIsStatement: true),
+
+            // Specification: subtotal 50 is NOT large (assert the false branch agrees).
+            new("large(subtotal=50) is false", Accept: true,
+                Cs: "{ var o = new Pricing.Order(50, 10); " +
+                    "if (Pricing.PricingSpecifications.Large(o)) throw new System.Exception(\"expected not large\"); }",
+                Ts: "{ const o = new Order(50, 10); " +
+                    "if (isLarge(o)) throw new Error('expected not large'); }",
+                TsImports: tsImports,
+                CsIsStatement: true,
+                TsIsStatement: true),
+
+            // Domain service: net = subtotal - discount = 150 - 10 = 140 in both targets.
+            new("net(order) computes subtotal - discount = 140", Accept: true,
+                Cs: "{ var o = new Pricing.Order(150, 10); " +
+                    "if (new Pricing.PricingService().Net(o) != 140) throw new System.Exception(\"wrong net\"); }",
+                Ts: "{ const o = new Order(150, 10); " +
+                    "if (new PricingService().net(o) !== 140) throw new Error('wrong net'); }",
+                TsImports: tsImports,
+                CsIsStatement: true,
+                TsIsStatement: true),
+        ];
     }
 
     /// <summary>
