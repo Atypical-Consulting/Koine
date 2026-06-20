@@ -198,6 +198,19 @@ _Published by this context._
 
 - `CancelOrder(order: OrderId)`
 
+## Coverage
+
+| Kind | Covered | Total |
+| --- | --- | --- |
+| aggregate | 1 | 1 |
+| entity | 1 | 1 |
+| enum | 3 | 3 |
+| event | 2 | 2 |
+| integrationEvent | 1 | 1 |
+| value | 2 | 2 |
+
+_All declared constructs are documented._ ✅
+
 // ==== docs/index.md ====
 # Domain Documentation
 

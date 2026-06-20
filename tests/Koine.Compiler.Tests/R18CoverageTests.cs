@@ -1,6 +1,7 @@
 using Koine.Compiler.Ast;
 using Koine.Compiler.Emit;
 using Koine.Compiler.Emit.CSharp;
+using Koine.Compiler.Emit.Docs;
 using Koine.Compiler.Services;
 
 namespace Koine.Compiler.Tests;
@@ -60,5 +61,19 @@ public class R18CoverageTests
 
         var empty = ModelCoverage.Compute(result.Model!, Array.Empty<EmittedFile>(), "csharp");
         (empty.IsComplete ? 0 : 1).ShouldBe(1);
+    }
+
+    /// <summary>
+    /// The docs target appends a "## Coverage" section per context — a per-kind covered/total table
+    /// reusing the analyzer. Snapshotting the Billing docs output keeps that rendered shape reviewed.
+    /// </summary>
+    [Fact]
+    public Task Docs_target_appends_a_coverage_section_for_billing()
+    {
+        var result = new KoineCompiler().Compile(TestSupport.BillingFixture, new DocsEmitter());
+
+        result.Files.ShouldContain(f => f.Contents.Contains("## Coverage", StringComparison.Ordinal));
+
+        return Verify(TestSupport.Render(result.Files)).UseDirectory("Snapshots");
     }
 }
