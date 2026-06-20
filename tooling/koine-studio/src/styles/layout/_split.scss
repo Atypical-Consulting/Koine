@@ -1,8 +1,9 @@
 /* --- split body --- */
-/* Five tracks: file tree (width --koi-filetree-w, defaults to auto), its 6px drag rail
-   (--koi-filetree-rail, 0 in scratch mode so no stray handle shows), editor (1fr), the
-   editor/inspector 6px resizer, and the inspector whose width is driven by --koi-inspector-w
-   (defaults to 1fr until the user drags). */
+/* Five tracks: file tree (auto — it sizes to the pane, whose width is --koi-filetree-w; the
+   track stays auto so it collapses to 0 when the pane is hidden in scratch mode, leaving no gap),
+   its 6px drag rail (--koi-filetree-rail, 0 in scratch mode so no stray handle shows), editor
+   (1fr), the editor/inspector 6px resizer, and the inspector whose width is driven by
+   --koi-inspector-w (defaults to 1fr until the user drags). */
 #split {
   flex: 1 1 auto;
   display: grid;
