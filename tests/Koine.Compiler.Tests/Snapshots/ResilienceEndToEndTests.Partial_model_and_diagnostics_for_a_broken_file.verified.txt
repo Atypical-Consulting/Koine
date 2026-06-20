@@ -1,0 +1,9 @@
+﻿context Billing
+  ValueObjectDecl Money { amount: Decimal, whre: amount }
+  ValueObjectDecl Email { address: String }
+  error '<missing ':'>' missing=True
+  error '>=' missing=False
+  error '0' missing=False
+---- diagnostics ----
+KOI0001 Error
+KOI0001 Error

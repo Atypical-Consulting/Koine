@@ -30,50 +30,49 @@ public sealed record CompileResult(
 /// </summary>
 public sealed class KoineCompiler
 {
-    /// <summary>Lexes, parses, and builds the model for a single source. Returns syntax diagnostics only.</summary>
+    /// <summary>
+    /// Lexes, parses, and builds the model for a single source. Returns syntax diagnostics only.
+    /// Parsing is error-tolerant (R-resilience): even when the source has a syntax error, a
+    /// <em>partial</em> model is built from ANTLR's recovered tree (so the valid declarations are
+    /// still available) and returned alongside the syntax diagnostics, instead of a null model.
+    /// </summary>
     public (KoineModel? Model, IReadOnlyList<Diagnostic> Diagnostics) Parse(string source, string? file = null)
     {
         var (contexts, relations, diagnostics) = ParseUnit(source, file);
-        if (contexts is null)
-        {
-            return (null, diagnostics);
-        }
-
         return (Merge(contexts, relations), diagnostics);
     }
 
     /// <summary>
     /// Parses and merges many sources into a single model (R13.1). Every file is parsed;
-    /// all syntax diagnostics (each naming its own file) are collected. If any file has a
-    /// syntax error, no model is produced.
+    /// all syntax diagnostics (each naming its own file) are collected. Parsing is
+    /// error-tolerant: good files contribute full contexts, broken files contribute the
+    /// partial contexts recovered from their tree (plus their syntax diagnostics). The merged
+    /// model is always returned (never blanked by one broken file), so a workspace with a typo
+    /// in one file still surfaces the other files' declarations.
     /// </summary>
     public (KoineModel? Model, IReadOnlyList<Diagnostic> Diagnostics) Parse(IReadOnlyList<SourceFile> files)
     {
         var diagnostics = new List<Diagnostic>();
         var contexts = new List<ContextNode>();
         var relations = new List<ContextRelation>();
-        var anyFailed = false;
 
         foreach (var f in files)
         {
             var (parsed, parsedRelations, diags) = ParseUnit(f.Source, f.Path);
             diagnostics.AddRange(diags);
-            if (parsed is null)
-            {
-                anyFailed = true;
-            }
-            else
-            {
-                contexts.AddRange(parsed);
-                relations.AddRange(parsedRelations);
-            }
+            contexts.AddRange(parsed);
+            relations.AddRange(parsedRelations);
         }
 
-        return anyFailed ? (null, diagnostics) : (Merge(contexts, relations), diagnostics);
+        return (Merge(contexts, relations), diagnostics);
     }
 
-    /// <summary>Parses one source unit into its raw (unmerged) contexts and context-map relations, or null on a syntax error.</summary>
-    private static (IReadOnlyList<ContextNode>? Contexts, IReadOnlyList<ContextRelation> Relations, IReadOnlyList<Diagnostic> Diagnostics) ParseUnit(string source, string? file)
+    /// <summary>
+    /// Parses one source unit into its raw (unmerged) contexts and context-map relations.
+    /// Always returns the contexts built from the (possibly recovered) parse tree — even when
+    /// <c>listener.HasErrors</c> — so a syntax error yields a partial model rather than nothing.
+    /// </summary>
+    private static (IReadOnlyList<ContextNode> Contexts, IReadOnlyList<ContextRelation> Relations, IReadOnlyList<Diagnostic> Diagnostics) ParseUnit(string source, string? file)
     {
         var input = new AntlrInputStream(source);
         var listener = new SyntaxErrorListener(file);
@@ -109,14 +108,14 @@ public sealed class KoineCompiler
             tree = parser.program();
         }
 
-        if (listener.HasErrors)
-        {
-            return (null, Array.Empty<ContextRelation>(), listener.Errors);
-        }
-
+        // Build the model from the (possibly recovered) tree regardless of syntax errors. The LL
+        // re-parse path uses DefaultErrorStrategy, which recovers and always yields a tree; the
+        // builder harvests skipped/missing tokens into ContextNode.Errors and keeps every valid
+        // declaration it managed to parse. We return that partial model together with whatever
+        // syntax diagnostics the listener collected (empty when the input was clean).
         var model = new KoineModelBuilderVisitor(tokens, file).BuildModel(tree);
         var relations = model.ContextMap?.Relations ?? Array.Empty<ContextRelation>();
-        return (model.Contexts, relations, Array.Empty<Diagnostic>());
+        return (model.Contexts, relations, listener.Errors);
     }
 
     /// <summary>
@@ -160,18 +159,17 @@ public sealed class KoineCompiler
     }
 
     /// <summary>
-    /// Parses and validates without emitting, returning all diagnostics (syntax errors if
-    /// parsing fails, otherwise semantic diagnostics). Used by editors (the LSP server).
+    /// Parses and validates without emitting, returning all diagnostics. Parsing is now
+    /// error-tolerant, so even a source with a syntax error yields a partial model: the semantic
+    /// validator runs over the valid parts and its diagnostics are combined with the syntax
+    /// diagnostics (the syntax errors are never dropped). Used by editors (the LSP server), which
+    /// can therefore answer semantic features over the valid parts of a broken file.
     /// </summary>
     public IReadOnlyList<Diagnostic> Diagnose(string source, string? file = null)
     {
         var (model, syntax) = Parse(source, file);
-        if (model is null)
-        {
-            return syntax;
-        }
-
-        return new SemanticValidator().Validate(new SemanticModel(model));
+        var semantic = new SemanticValidator().Validate(new SemanticModel(model!));
+        return Combine(syntax, semantic);
     }
 
     /// <summary>
@@ -183,12 +181,27 @@ public sealed class KoineCompiler
     public IReadOnlyList<Diagnostic> DiagnoseWorkspace(IReadOnlyList<SourceFile> files)
     {
         var (model, syntax) = Parse(files);
-        if (model is null)
+        var semantic = new SemanticValidator().Validate(new SemanticModel(model!));
+        return Combine(syntax, semantic);
+    }
+
+    /// <summary>Concatenates syntax then semantic diagnostics (syntax errors are never dropped).</summary>
+    private static IReadOnlyList<Diagnostic> Combine(IReadOnlyList<Diagnostic> syntax, IReadOnlyList<Diagnostic> semantic)
+    {
+        if (syntax.Count == 0)
+        {
+            return semantic;
+        }
+
+        if (semantic.Count == 0)
         {
             return syntax;
         }
 
-        return new SemanticValidator().Validate(new SemanticModel(model));
+        var combined = new List<Diagnostic>(syntax.Count + semantic.Count);
+        combined.AddRange(syntax);
+        combined.AddRange(semantic);
+        return combined;
     }
 
     /// <summary>Runs the full pipeline for a single source through the given emitter.</summary>
@@ -199,20 +212,27 @@ public sealed class KoineCompiler
     public CompileResult Compile(IReadOnlyList<SourceFile> files, IEmitter emitter)
     {
         var (model, syntax) = Parse(files);
-        if (model is null)
+
+        // Parsing is now error-tolerant and returns a partial model even for broken input, but the
+        // emit path must NOT regress: syntax diagnostics are always carried forward, and broken
+        // input never emits. If there is any syntax error, bail before semantic validation/emission
+        // (the partial model is intentionally never emitted) — CompileResult.Success then stays
+        // false because the syntax error is a DiagnosticSeverity.Error.
+        if (syntax.Any(d => d.Severity == DiagnosticSeverity.Error))
         {
-            return new CompileResult(null, syntax, Array.Empty<EmittedFile>());
+            return new CompileResult(model, syntax, Array.Empty<EmittedFile>());
         }
 
         // Build the shared resolution once and reuse it for both validation and emission.
-        var semanticModel = new SemanticModel(model);
+        var semanticModel = new SemanticModel(model!);
         var semantic = new SemanticValidator().Validate(semanticModel);
+        var diagnostics = Combine(syntax, semantic);
         if (semantic.Any(d => d.Severity == DiagnosticSeverity.Error))
         {
-            return new CompileResult(model, semantic, Array.Empty<EmittedFile>());
+            return new CompileResult(model, diagnostics, Array.Empty<EmittedFile>());
         }
 
-        var emitted = emitter.Emit(model, semanticModel);
-        return new CompileResult(model, semantic, emitted);
+        var emitted = emitter.Emit(model!, semanticModel);
+        return new CompileResult(model, diagnostics, emitted);
     }
 }

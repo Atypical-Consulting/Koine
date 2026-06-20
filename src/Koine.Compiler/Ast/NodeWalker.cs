@@ -28,6 +28,21 @@ internal static class NodeWalker
         }
     }
 
+    /// <summary>
+    /// The child nodes to use when reconstructing source text from the tree (<see
+    /// cref="KoineNode.ToFullString"/> / <see cref="Koine.Compiler.Formatting.AstPrinter"/>): real
+    /// syntax children in source order (ascending <see cref="SourceSpan.Offset"/>), EXCLUDING
+    /// error-recovery markers. <see cref="ErrorNode"/> markers are a side-channel (e.g. <see
+    /// cref="ContextNode.Errors"/>) whose offsets overlap the recovered real children, so emitting
+    /// them inline would double-count and interleave stray fragments. Synthesized children with no
+    /// position (<see cref="SourceSpan.None"/>) sort stably to the end, preserving their reflection
+    /// order.
+    /// </summary>
+    internal static IEnumerable<KoineNode> ReconstructionChildren(KoineNode node) =>
+        ChildNodes(node)
+            .Where(c => c is not ErrorNode)
+            .OrderBy(c => c.Span.IsNone ? int.MaxValue : c.Span.Offset);
+
     internal static IEnumerable<KoineNode> ChildNodes(KoineNode node)
     {
         foreach (PropertyInfo prop in PropertiesFor(node.GetType()))

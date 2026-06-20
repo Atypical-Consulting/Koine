@@ -45,6 +45,14 @@ internal sealed class ExpressionChecker
         switch (expr)
         {
             case IdentifierExpr id:
+                // Resilient syntax: an empty-named identifier is the placeholder the builder fills
+                // in for an expression the parser couldn't recover; reporting "unknown field ''"
+                // would be a spurious cascade off an already-diagnosed syntax error.
+                if (SemanticValidator.IsPlaceholder(id.Name))
+                {
+                    break;
+                }
+
                 if (!scope.Contains(id.Name) && !_enumMembers.Contains(id.Name) && !BuiltinOps.IsNullaryValueOp(id.Name)
                     && !_specNames.Contains(id.Name))
                 {

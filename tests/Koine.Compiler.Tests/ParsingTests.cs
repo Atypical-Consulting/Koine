@@ -24,7 +24,9 @@ public class ParsingTests
 
         var (model, diagnostics) = new KoineCompiler().Parse(source);
 
-        model.ShouldBeNull();
+        // Parsing is error-tolerant: a partial model is returned (never null), but the syntax
+        // error is still reported with its line/column.
+        model.ShouldNotBeNull();
         diagnostics.ShouldNotBeEmpty();
         var first = diagnostics[0];
         first.Severity.ShouldBe(DiagnosticSeverity.Error);
@@ -75,7 +77,8 @@ public class ParsingTests
 
         var (model, diagnostics) = new KoineCompiler().Parse(source);
 
-        model.ShouldBeNull();
+        // Error-tolerant parsing returns a partial model, but the tailored KOI0002 still fires.
+        model.ShouldNotBeNull();
         var first = diagnostics[0];
         first.Code.ShouldBe(DiagnosticCodes.ReservedWordInDeclarationName);
         first.Message.ShouldContain("'from' is a Koine keyword");
@@ -102,7 +105,8 @@ public class ParsingTests
 
         var (model, diagnostics) = new KoineCompiler().Parse(source);
 
-        model.ShouldBeNull();
+        // Error-tolerant parsing returns a partial model, but the fully-reserved KOI0002 still fires.
+        model.ShouldNotBeNull();
         var first = diagnostics[0];
         first.Code.ShouldBe(DiagnosticCodes.ReservedWordInDeclarationName);
         first.Message.ShouldContain("fully reserved");

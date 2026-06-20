@@ -1,3 +1,5 @@
+using System.Text;
+
 namespace Koine.Compiler.Ast;
 
 // ============================================================================
@@ -42,7 +44,80 @@ public abstract record KoineNode
     /// default; populated by the parser. Target-agnostic.
     /// </summary>
     public IReadOnlyList<SyntaxTrivia> TrailingTrivia { get; init; } = [];
+
+    /// <summary>
+    /// <c>true</c> for an ANTLR-inserted phantom token — a node the parser synthesized during
+    /// error recovery that has no backing source text. Default <c>false</c>. Target-agnostic:
+    /// merely flags that the node is missing from the original source, carrying no target concept.
+    /// </summary>
+    public bool IsMissing { get; init; }
+
+    /// <summary>
+    /// The verbatim source text of a leaf token, when this node directly wraps one; <c>null</c>
+    /// for non-leaf nodes (the default). Used later for tree-driven, lossless reconstruction of
+    /// the original source. Target-agnostic.
+    /// </summary>
+    public string? LeafText { get; init; }
+
+    /// <summary>
+    /// Reconstructs this node's source text <b>from the tree</b> (Roslyn-style), with no access to
+    /// the original source string: emits its <see cref="LeadingTrivia"/>, then its own text, then
+    /// its <see cref="TrailingTrivia"/>. A leaf node's own text is its <see cref="LeafText"/>; a
+    /// composite node's is the concatenation of its child nodes' <see cref="ToFullString"/> taken in
+    /// source order (ascending <see cref="SourceSpan.Offset"/>).
+    /// <para>
+    /// This is the leaf-text-first fidelity step: it reconstructs verbatim for leaf nodes
+    /// (identifiers, literals — which carry <see cref="LeafText"/>) and for composite nodes whose
+    /// children fully tile their text. Koine has no <c>SyntaxToken</c> layer, so structural keywords
+    /// and punctuation (<c>value</c>, <c>{</c>, <c>:</c>, operators) are not nodes and are absent
+    /// from a pure tree walk; a composite node interspersed with such tokens therefore still needs
+    /// the original source for a byte-perfect render — that is the documented <c>SyntaxToken</c>
+    /// escalation, and is why <see cref="Koine.Compiler.Formatting.AstPrinter"/> keeps a source-slice
+    /// fallback. Target-agnostic.
+    /// </para>
+    /// </summary>
+    public string ToFullString()
+    {
+        var sb = new StringBuilder();
+        AppendFullString(sb);
+        return sb.ToString();
+    }
+
+    private void AppendFullString(StringBuilder sb)
+    {
+        foreach (SyntaxTrivia t in LeadingTrivia)
+        {
+            sb.Append(t.Text);
+        }
+
+        if (LeafText is not null)
+        {
+            sb.Append(LeafText);
+        }
+        else
+        {
+            // Compose composite nodes from their reconstruction children in source order (error
+            // markers excluded, ordering centralized in NodeWalker).
+            foreach (KoineNode child in NodeWalker.ReconstructionChildren(this))
+            {
+                child.AppendFullString(sb);
+            }
+        }
+
+        foreach (SyntaxTrivia t in TrailingTrivia)
+        {
+            sb.Append(t.Text);
+        }
+    }
 }
+
+/// <summary>
+/// A target-agnostic error marker wrapping the verbatim text of a skipped or unexpected token
+/// produced during parser error recovery (resilient syntax). Carries no target concept — it is a
+/// pure source artifact so the model can index and reconstruct around malformed input. It still
+/// carries a <see cref="KoineNode.Span"/> via the base, pointing at the offending text.
+/// </summary>
+public sealed record ErrorNode(string Text) : KoineNode;
 
 /// <summary>
 /// Root of the model: the set of bounded contexts in a compilation, plus the optional
@@ -118,6 +193,15 @@ public sealed record ContextNode(
     /// annotations and surfaces in the glossary.
     /// </summary>
     public int? Version { get; init; }
+
+    /// <summary>
+    /// Error markers harvested from the ANTLR error-recovery tree for this context: one
+    /// <see cref="ErrorNode"/> per skipped/unexpected token and per ANTLR-synthesized missing
+    /// token (resilient syntax). Empty when the context parsed cleanly. Init-only so the
+    /// positional constructor and existing call sites are unchanged; <see cref="NodeWalker"/>
+    /// enumerates it automatically. Target-agnostic: pure source artifacts, no target concept.
+    /// </summary>
+    public IReadOnlyList<ErrorNode> Errors { get; init; } = [];
 }
 
 /// <summary>A context's declaration that it publishes an integration event (R14.3).</summary>
