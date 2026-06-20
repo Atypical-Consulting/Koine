@@ -125,6 +125,13 @@ public sealed partial class TypeScriptEmitter : IEmitter
                     files.Add(EmitApplicationService(emit, svc, ctx.Name, typeMapper));
                 }
             }
+
+            // R10.3 cross-aggregate policies: one handler-seam module per `policy` (deterministic
+            // declaration order), mirroring the C# emitter's per-context policy dispatch.
+            foreach (PolicyDecl policy in ctx.Policies)
+            {
+                files.Add(EmitPolicy(emit, policy, ctx.Name, typeMapper));
+            }
         }
 
         // 3. Source maps (gated): attach the per-module declaration segments to the module's
