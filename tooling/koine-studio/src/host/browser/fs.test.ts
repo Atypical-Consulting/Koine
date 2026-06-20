@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import {
   __setFolderForTest,
   __resetFsForTest,
@@ -348,6 +348,13 @@ describe('default workspace (OPFS)', () => {
       getDirectory: async () => root as never,
     };
   }
+
+  // Restore navigator.storage after each test so the no-OPFS case (which deletes it) can't leak
+  // into later tests sharing this JS environment.
+  const originalStorage = (navigator as unknown as { storage?: unknown }).storage;
+  afterEach(() => {
+    (navigator as unknown as { storage?: unknown }).storage = originalStorage;
+  });
 
   it('seeds model.koi on first open and preserves edits on reopen', async () => {
     __resetFsForTest();
