@@ -100,6 +100,17 @@ public sealed partial class TypeScriptEmitter : IEmitter
             {
                 files.Add(EmitIdType(emit, idName, ctx.Name, IdentityStrategy.Guid, null));
             }
+
+            // Application-service boundaries (R12.2): one I<Name> interface per service that
+            // declares use cases (mirrors the C# dispatch). The service emits into the context's
+            // base namespace; pure-operation domain services are out of scope for the TS backend.
+            foreach (ServiceDecl svc in ctx.Services)
+            {
+                if (svc.UseCases.Count > 0)
+                {
+                    files.Add(EmitApplicationService(emit, svc, ctx.Name, typeMapper));
+                }
+            }
         }
 
         // 3. Source maps (gated): attach the per-module declaration segments to the module's
@@ -151,6 +162,12 @@ public sealed partial class TypeScriptEmitter : IEmitter
                 break;
             case EventDecl ev:
                 files.Add(EmitEvent(emit, ev, ns, typeMapper));
+                break;
+            case ReadModelDecl rm:
+                files.Add(EmitReadModel(emit, rm, ns, typeMapper));
+                break;
+            case QueryDecl q:
+                files.Add(EmitQuery(emit, q, ns, typeMapper));
                 break;
             case AggregateDecl agg:
                 EntityDecl? aggRoot = agg.RootEntity();

@@ -126,11 +126,83 @@ public class CrossEmitterConformanceTests
         }
         """;
 
+    /// <summary>
+    /// A read model (R12.3) projected from an entity, exercising the CQRS application layer's runtime
+    /// behavior: the projection mapper copies direct fields (<c>id</c>, <c>status</c>) and computes a
+    /// derived field (<c>lineCount = lines.count</c>). Both backends must produce the SAME projected
+    /// value — the read-model parity case. The service/use-case interface and the query DTO are
+    /// interface-only (no runtime behavior) so they are locked by the snapshot + tsc-compile alone;
+    /// the projection mapper is the one CQRS construct that CAN be behaviorally exercised, so it is.
+    /// </summary>
+    private const string ReadModelModel = """
+        context Sales {
+          enum OrderStatus { Draft, Placed }
+
+          value OrderLine {
+            sku:      String
+            quantity: Int
+            invariant quantity >= 1 "a line needs at least one unit"
+          }
+
+          aggregate Order root Order {
+            entity Order identified by OrderId {
+              lines:  List<OrderLine>
+              status: OrderStatus = Draft
+            }
+          }
+
+          readmodel OrderSummary from Order {
+            id
+            status
+            lineCount: Int = lines.count
+          }
+        }
+        """;
+
     public static IEnumerable<object[]> Corpus()
     {
         yield return ["Money invariant", MoneyModel, MoneyScenarios()];
         yield return ["Order command + event", OrderModel, OrderScenarios()];
         yield return ["Quote result + emit hoist (prefix-safe)", QuoteModel, QuoteScenarios()];
+        yield return ["Read-model projection mapper", ReadModelModel, ReadModelScenarios()];
+    }
+
+    /// <summary>
+    /// Project an Order with two lines to an OrderSummary; the derived <c>lineCount</c> must be 2 in
+    /// both targets, and the direct <c>status</c> must round-trip. A wrong projection (e.g. mapping
+    /// the wrong field or miscounting) is REJECTED — so accept means both backends projected the same
+    /// values from the same Order.
+    /// </summary>
+    private static IReadOnlyList<Scenario> ReadModelScenarios()
+    {
+        const string tsImports =
+            "import { Order } from './Sales/Order';\n" +
+            "import { OrderIdNew } from './Sales/value-objects/OrderId';\n" +
+            "import { OrderLine } from './Sales/value-objects/OrderLine';\n" +
+            "import { OrderStatus } from './Sales/enums/OrderStatus';\n" +
+            "import { OrderSummaryProjection } from './Sales/read-models/OrderSummary';";
+
+        return
+        [
+            new("projection computes lineCount=2 and carries status", Accept: true,
+                Cs: "{ var id = Sales.OrderId.New(); " +
+                    "var lines = new System.Collections.Generic.List<Sales.OrderLine> { new Sales.OrderLine(\"a\", 1), new Sales.OrderLine(\"b\", 3) }; " +
+                    "var o = new Sales.Order(id, lines); " +
+                    "var rm = Sales.OrderSummaryProjection.ToOrderSummary(o); " +
+                    "if (rm.LineCount != 2) throw new System.Exception(\"wrong count\"); " +
+                    "if (rm.Status != Sales.OrderStatus.Draft) throw new System.Exception(\"wrong status\"); " +
+                    "if (!rm.Id.Equals(id)) throw new System.Exception(\"wrong id\"); }",
+                Ts: "{ const id = OrderIdNew(); " +
+                    "const lines = [new OrderLine('a', 1), new OrderLine('b', 3)]; " +
+                    "const o = new Order(id, lines); " +
+                    "const rm = OrderSummaryProjection(o); " +
+                    "if (rm.lineCount !== 2) throw new Error('wrong count'); " +
+                    "if (rm.status !== OrderStatus.Draft) throw new Error('wrong status'); " +
+                    "if (!rm.id.equals(id)) throw new Error('wrong id'); }",
+                TsImports: tsImports,
+                CsIsStatement: true,
+                TsIsStatement: true),
+        ];
     }
 
     /// <summary>Money(amount): accepted iff amount &gt;= 0.</summary>

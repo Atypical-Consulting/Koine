@@ -47,6 +47,9 @@ public sealed partial class TypeScriptEmitter
         public const string Enums = "enums";
         public const string Events = "events";
         public const string Repositories = "repositories";
+        public const string Services = "services";
+        public const string ReadModels = "read-models";
+        public const string Queries = "queries";
     }
 
     private static string FolderFor(string ns) => ns.Replace('.', '/');
