@@ -32,7 +32,7 @@ no effect on parsing or semantics.)
 ## 3.3 Comments
 
 ```ebnf
-DocComment   : '///' ~[/\r\n] ~[\r\n]* ;   // documentation comment
+DocComment   : '///' ( ~[/\r\n] ~[\r\n]* )? ;   // documentation comment
 LineComment  : '//'  ~[\r\n]* ;            // ordinary comment
 BlockComment : '/*'  .*? '*/' ;            // ordinary comment
 ```
