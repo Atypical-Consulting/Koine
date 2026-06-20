@@ -33,7 +33,7 @@ import { renderDiagrams } from './diagrams';
 import { renderGlossary, type GlossaryHandlers } from './glossary';
 import { createAssistantPanel, type AssistantPanel } from './aiPanel';
 import { buildShareUrl, clearModelHash, readModelFromHash } from './share';
-import { dirtyBuffers, dirtyCount, saveAllDirtyBuffers, titleWithDirty } from './dirty';
+import { dirtyBuffers, dirtyCount, handleBeforeUnload, saveAllDirtyBuffers, titleWithDirty } from './dirty';
 import { createConfirmDialog } from './overlay';
 
 // --- workspace fs contract ---------------------------------------------------
@@ -1386,6 +1386,16 @@ export function init(): void {
       void saveActive();
     }
   });
+
+  // Guard against closing/reloading with unsaved work: when any open buffer is dirty, the browser
+  // shows its native "Leave site?" prompt. Folder-mode dirty buffers live only in memory, so without
+  // this a tab close silently drops them. (The scratch buffer auto-persists to localStorage and is
+  // never marked dirty, so a clean scratch session closes without a prompt.) On the desktop host this
+  // covers reloads; the window-close confirm is wired separately in the Tauri host.
+  function anyDirty(): boolean {
+    return dirtyCount(buffers) > 0;
+  }
+  window.addEventListener('beforeunload', (e) => handleBeforeUnload(e, anyDirty));
 
   let saveQueued = false;
   async function saveActive(): Promise<void> {
