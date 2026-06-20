@@ -1047,9 +1047,13 @@ public sealed class SemanticValidator
         // NotExported); skip the global unknown-type check here to avoid a double report.
         if (type.Qualifier is null && !index.IsKnownType(type.Name))
         {
+            // Keep the message prose EXACTLY as-is (snapshots depend on it); additionally surface the
+            // bare candidate as the structured Suggestion the code-fix providers read (no prose scraping).
+            var best = Suggestions.Best(type.Name, index.CandidateTypeNames);
             diagnostics.Add(Diagnostic.Error(DiagnosticCodes.UnknownType,
                 $"unknown type '{type.Name}'{Suggestions.For(type.Name, index.CandidateTypeNames)}",
-                type.Span));
+                type.Span) with
+            { Suggestion = best });
         }
 
         // Generic arity: List/Set/Range take one type argument; Map takes two.
