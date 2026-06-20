@@ -30,7 +30,13 @@ public sealed partial class DocsEmitter
         WriteStandaloneTypes(sb, ctx);
         WriteBehavioralNarrative(sb, ctx);
 
-        if (!HasRenderableContent(ctx))
+        if (HasRenderableContent(ctx))
+        {
+            // A coverage accounting of which declared constructs the page above documents. Computed
+            // against the narrative built so far, so it is appended LAST and stays deterministic.
+            WriteCoverageSection(sb, ctx);
+        }
+        else
         {
             // A context with no types or behavioral declarations would otherwise be a heading-only
             // page; leave a note so the generated doc reads intentionally, not truncated.

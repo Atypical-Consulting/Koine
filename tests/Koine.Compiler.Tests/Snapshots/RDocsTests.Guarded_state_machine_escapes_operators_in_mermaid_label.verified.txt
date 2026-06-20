@@ -50,6 +50,16 @@ stateDiagram-v2
 
 Values: Draft, Submitted, Done
 
+## Coverage
+
+| Kind | Covered | Total |
+| --- | --- | --- |
+| aggregate | 1 | 1 |
+| entity | 1 | 1 |
+| enum | 1 | 1 |
+
+_All declared constructs are documented._ ✅
+
 // ==== docs/index.md ====
 # Domain Documentation
 

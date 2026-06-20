@@ -13,6 +13,15 @@
 
 Values: EUR, USD
 
+## Coverage
+
+| Kind | Covered | Total |
+| --- | --- | --- |
+| enum | 1 | 1 |
+| value | 1 | 1 |
+
+_All declared constructs are documented._ ✅
+
 // ==== docs/Customers.md ====
 # Customers
 
@@ -24,6 +33,14 @@ Values: EUR, USD
 | --- | --- | --- |
 | ref | `String` |  |
 
+## Coverage
+
+| Kind | Covered | Total |
+| --- | --- | --- |
+| value | 1 | 1 |
+
+_All declared constructs are documented._ ✅
+
 // ==== docs/Legacy.md ====
 # Legacy
 
@@ -34,6 +51,14 @@ Values: EUR, USD
 | Field | Type | Description |
 | --- | --- | --- |
 | code | `String` |  |
+
+## Coverage
+
+| Kind | Covered | Total |
+| --- | --- | --- |
+| value | 1 | 1 |
+
+_All declared constructs are documented._ ✅
 
 // ==== docs/Ordering.md ====
 # Ordering
@@ -50,6 +75,15 @@ Values: EUR, USD
 
 Values: EUR, USD
 
+## Coverage
+
+| Kind | Covered | Total |
+| --- | --- | --- |
+| enum | 1 | 1 |
+| value | 1 | 1 |
+
+_All declared constructs are documented._ ✅
+
 // ==== docs/Payments.md ====
 # Payments
 
@@ -61,6 +95,14 @@ Values: EUR, USD
 | --- | --- | --- |
 | n | `Int` |  |
 
+## Coverage
+
+| Kind | Covered | Total |
+| --- | --- | --- |
+| value | 1 | 1 |
+
+_All declared constructs are documented._ ✅
+
 // ==== docs/Shipping.md ====
 # Shipping
 
@@ -71,6 +113,14 @@ Values: EUR, USD
 | Field | Type | Description |
 | --- | --- | --- |
 | n | `Int` |  |
+
+## Coverage
+
+| Kind | Covered | Total |
+| --- | --- | --- |
+| value | 1 | 1 |
+
+_All declared constructs are documented._ ✅
 
 // ==== docs/context-map.md ====
 # Context Map
