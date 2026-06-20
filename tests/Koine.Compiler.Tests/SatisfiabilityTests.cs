@@ -2,6 +2,7 @@ using System.Globalization;
 using Koine.Compiler.Ast;
 using Koine.Compiler.Ast.Bound;
 using Koine.Compiler.Diagnostics;
+using Koine.Compiler.Emit.CSharp;
 using Koine.Compiler.Semantics;
 using Koine.Compiler.Services;
 
@@ -56,6 +57,14 @@ public class SatisfiabilityTests
     private static IReadOnlyList<Diagnostic> Diagnose(string source) =>
         new KoineCompiler().Diagnose(source);
 
+    private static readonly string[] SatisfiabilityCodes =
+    {
+        DiagnosticCodes.ContradictoryInvariant,
+        DiagnosticCodes.InvertedBound,
+        DiagnosticCodes.BoundOutsideConstraint,
+        DiagnosticCodes.UnsatisfiableInvariantPair,
+    };
+
     [Fact]
     public void Satisfiability_FlagsInvertedBound()
     {
@@ -80,13 +89,37 @@ public class SatisfiabilityTests
         // A perfectly normal bounded range must NOT trip any satisfiability diagnostic.
         var diags = Diagnose("context C { value Score { points: Int  invariant points >= 0 && points <= 100 } }");
 
-        var satisfiabilityCodes = new[]
-        {
-            DiagnosticCodes.InvertedBound,
-            DiagnosticCodes.UnsatisfiableInvariantPair,
-            DiagnosticCodes.ContradictoryInvariant,
-            DiagnosticCodes.BoundOutsideConstraint,
-        };
-        diags.ShouldNotContain(d => satisfiabilityCodes.Contains(d.Code));
+        diags.ShouldNotContain(d => SatisfiabilityCodes.Contains(d.Code));
+    }
+
+    // ----------------------------------------------------------------------
+    // B3 — guard: exhaustiveness stays codegen's job, not the analyzer's.
+    // ----------------------------------------------------------------------
+
+    [Fact]
+    public void SmartEnumMatch_RemainsCompileEnforced()
+    {
+        const string src = """
+            context Shop {
+              enum OrderStatus { Draft, Placed, Shipped, Cancelled }
+            }
+            """;
+
+        // 1. Match<TResult> still emits exactly one delegate per member — exhaustiveness is a
+        //    compile-time guarantee of the GENERATED code (adding a member breaks every call site),
+        //    deliberately NOT something the satisfiability analyzer re-implements.
+        var result = new KoineCompiler().Compile(src, new CSharpEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+        var (asm, errors) = TestSupport.Compile(result.Files);
+        (asm is not null).ShouldBeTrue("generated C# failed to compile:\n" + string.Join("\n", errors));
+
+        var status = asm!.GetType("Shop.OrderStatus")!;
+        var match = status.GetMethod("Match")!;
+        match.IsGenericMethodDefinition.ShouldBeTrue();
+        match.GetParameters().Select(p => p.Name).ShouldBe(new[] { "draft", "placed", "shipped", "cancelled" });
+
+        // 2. The satisfiability checker emits NO exhaustiveness diagnostic — that boundary is owned by
+        //    codegen above, so a smart enum produces none of the KOI031x satisfiability codes.
+        new KoineCompiler().Diagnose(src).ShouldNotContain(d => SatisfiabilityCodes.Contains(d.Code));
     }
 }
