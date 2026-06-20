@@ -78,7 +78,7 @@ export const DEFAULT_SETTINGS: Settings = {
 const SETTINGS_KEY = 'koine.studio.settings';
 const RECENT_KEY = 'koine.studio.recentFolders';
 const SCRATCH_KEY = 'koine.studio.scratch';
-const RECENT_CAP = 8;
+const RECENT_CAP = 25;
 
 // The assistant transcript is namespaced per workspace under its own key prefix (distinct from
 // settings/scratch/recentFolders), so each opened folder keeps its own conversation.
@@ -271,30 +271,93 @@ export async function clearApiKey(): Promise<void> {
 
 // --- recent folders ----------------------------------------------------------
 
+export interface RecentFolder {
+  path: string;
+  openedAt: number;
+  pinned?: boolean;
+}
+
+/** Pinned first (by openedAt desc), then unpinned by openedAt desc. */
+function sortRecents(items: RecentFolder[]): RecentFolder[] {
+  return [...items].sort((a, b) => {
+    if (!!a.pinned !== !!b.pinned) return a.pinned ? -1 : 1;
+    return b.openedAt - a.openedAt;
+  });
+}
+
+/** Cap unpinned entries but never evict a pinned one. */
+function capRecents(items: RecentFolder[]): RecentFolder[] {
+  const pinned = items.filter((r) => r.pinned);
+  const unpinned = items.filter((r) => !r.pinned).slice(0, Math.max(0, RECENT_CAP - pinned.length));
+  return sortRecents([...pinned, ...unpinned]);
+}
+
 /**
- * The recent-folders list, most-recent first. Filters to non-empty strings and caps
- * the length so a hand-edited or stale key can't return junk.
+ * The recent-folders list, sorted pinned-first then most-recent. Reads both the structured
+ * {@link RecentFolder}[] shape and the legacy `string[]` shape (each legacy entry gets a
+ * synthetic, order-preserving openedAt), de-duplicates by path, and caps the length so a
+ * hand-edited or stale key can't return junk.
  */
-export function getRecentFolders(): string[] {
+export function getRecentFolders(): RecentFolder[] {
   const raw = readRaw(RECENT_KEY);
   if (raw === null) return [];
   try {
     const parsed = JSON.parse(raw) as unknown;
     if (!Array.isArray(parsed)) return [];
-    return parsed.filter((p): p is string => typeof p === 'string' && p.length > 0).slice(0, RECENT_CAP);
+    const seen = new Set<string>();
+    const entries: RecentFolder[] = [];
+    // Legacy string[] entries get a synthetic, order-preserving openedAt.
+    let legacyClock = parsed.length;
+    for (const item of parsed) {
+      let entry: RecentFolder | null = null;
+      if (typeof item === 'string' && item.length > 0) {
+        entry = { path: item, openedAt: legacyClock--, pinned: false };
+      } else if (item && typeof item === 'object' && typeof (item as RecentFolder).path === 'string') {
+        const r = item as RecentFolder;
+        if (r.path.length > 0) {
+          entry = {
+            path: r.path,
+            openedAt: typeof r.openedAt === 'number' ? r.openedAt : 0,
+            pinned: !!r.pinned,
+          };
+        }
+      }
+      if (entry && !seen.has(entry.path)) {
+        seen.add(entry.path);
+        entries.push(entry);
+      }
+    }
+    return capRecents(entries);
   } catch {
     return [];
   }
 }
 
+/** Cap, sort, and persist a recent-folders list (the single write path for all mutations). */
+function persistRecents(items: RecentFolder[]): void {
+  writeRaw(RECENT_KEY, JSON.stringify(capRecents(items)));
+}
+
 /**
- * Record a folder as most-recently used: de-duplicate (move to front), cap at 8, persist.
- * Empty paths are ignored.
+ * Record a folder as most-recently used: upsert (move to front, preserving any prior pinned
+ * state), cap, persist. Empty paths are ignored.
  */
 export function pushRecentFolder(path: string): void {
   if (typeof path !== 'string' || path.length === 0) return;
-  const next = [path, ...getRecentFolders().filter((p) => p !== path)].slice(0, RECENT_CAP);
-  writeRaw(RECENT_KEY, JSON.stringify(next));
+  const existing = getRecentFolders();
+  const prior = existing.find((r) => r.path === path);
+  const rest = existing.filter((r) => r.path !== path);
+  persistRecents([{ path, openedAt: Date.now(), pinned: prior?.pinned ?? false }, ...rest]);
+}
+
+/** Drop a single recent folder by path. */
+export function removeRecentFolder(path: string): void {
+  persistRecents(getRecentFolders().filter((r) => r.path !== path));
+}
+
+/** Pin or unpin a recent folder by path so it floats above (or rejoins) the unpinned entries. */
+export function pinRecentFolder(path: string, pinned: boolean): void {
+  persistRecents(getRecentFolders().map((r) => (r.path === path ? { ...r, pinned } : r)));
 }
 
 /** Forget all recent folders. */

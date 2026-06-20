@@ -284,6 +284,77 @@ describe('welcome start actions ↔ gallery', () => {
   });
 });
 
+const KEY = 'koine.studio.recentFolders';
+
+describe('welcome recent rows', () => {
+  beforeEach(() => {
+    localStorage.clear();
+    document.body.innerHTML = '';
+  });
+
+  test('renders one row per recent with open/remove/pin controls', () => {
+    localStorage.setItem(KEY, JSON.stringify(['/a/one', '/b/two']));
+    createWelcome(makeCallbacks()).show();
+    expect(document.querySelectorAll('.koi-welcome-recent-item').length).toBe(2);
+    expect(document.querySelector('.koi-welcome-recent-remove')).not.toBeNull();
+    expect(document.querySelector('.koi-welcome-recent-pin')).not.toBeNull();
+  });
+
+  test('open control invokes onOpenRecent with the path', () => {
+    localStorage.setItem(KEY, JSON.stringify(['/a/one']));
+    const cb = makeCallbacks();
+    createWelcome(cb).show();
+    (document.querySelector('.koi-welcome-recent-open') as HTMLElement).click();
+    expect(cb.onOpenRecent).toHaveBeenCalledWith('/a/one');
+  });
+
+  test('remove deletes the row and updates storage', () => {
+    localStorage.setItem(KEY, JSON.stringify(['/a/one', '/b/two']));
+    createWelcome(makeCallbacks()).show();
+    (document.querySelector('.koi-welcome-recent-remove') as HTMLElement).click();
+    expect(document.querySelectorAll('.koi-welcome-recent-item').length).toBe(1);
+    expect(JSON.parse(localStorage.getItem(KEY)!).length).toBe(1);
+  });
+
+  test('keeps recent rows inside the scroll list wrapper', () => {
+    localStorage.setItem(KEY, JSON.stringify(['/a', '/b']));
+    createWelcome(makeCallbacks()).show();
+    const list = document.querySelector('.koi-welcome-recent-list');
+    expect(list).not.toBeNull();
+    expect(list!.querySelectorAll('.koi-welcome-recent-item').length).toBe(2);
+  });
+});
+
+describe('welcome recent management', () => {
+  beforeEach(() => {
+    localStorage.clear();
+    document.body.innerHTML = '';
+    vi.stubGlobal('confirm', () => true);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  test('shows a filter only when the list is long, and filters by text', () => {
+    const many = Array.from({ length: 10 }, (_, i) => `/proj/folder-${i}`);
+    localStorage.setItem(KEY, JSON.stringify(many));
+    createWelcome(makeCallbacks()).show();
+    const filter = document.querySelector('.koi-welcome-recent-filter') as HTMLInputElement;
+    expect(filter).not.toBeNull();
+    filter.value = 'folder-3';
+    filter.dispatchEvent(new Event('input'));
+    expect(document.querySelectorAll('.koi-welcome-recent-item').length).toBe(1);
+  });
+
+  test('clear-all empties the list', () => {
+    localStorage.setItem(KEY, JSON.stringify(['/a', '/b']));
+    createWelcome(makeCallbacks()).show();
+    (document.querySelector('.koi-welcome-recent-clear') as HTMLElement).click();
+    expect(document.querySelector('.koi-welcome-empty')).not.toBeNull();
+  });
+});
+
 // The search input is debounced; tests enable fake timers and flush the debounce window.
 function setSearch(root: HTMLElement, value: string): void {
   vi.useFakeTimers();
