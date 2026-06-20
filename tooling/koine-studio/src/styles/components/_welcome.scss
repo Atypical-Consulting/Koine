@@ -1,41 +1,119 @@
-/* --- welcome / empty-state overlay (above #app, below modals) --- */
+/* --- welcome / start console (above #app, below modals) ---
+   A full-bleed start page: a wordmark bar, a two-column hero (the live `.koi` artifact + the
+   get-to-work rail), then the searchable example gallery. Everything derives from the --koi-* tokens
+   so light/dark adapt for free; the editor's own syntax hues colour the hero snippet. */
 .koi-welcome {
   position: fixed;
   inset: 0;
   z-index: var(--koi-z-overlay);
   display: flex;
-  align-items: center;
-  justify-content: center;
+  overflow-y: auto;
   background: var(--koi-paper);
-  padding: 24px;
+  padding: clamp(12px, 3vw, 32px);
 
   &[hidden] {
     display: none;
   }
 }
 
-/* Top-right dismiss on the start screen — a visible way back to the editor (Esc was the only
-   exit before, which is invisible now that the screen is a deliberate destination). */
+/* margin:auto centers the console when it fits and lets it scroll from the top when it doesn't —
+   robust in flex without the top-clipping that grid/place-content can cause. */
+.koi-welcome-card {
+  position: relative;
+  margin: auto;
+  width: 100%;
+  max-width: 1040px;
+  background: var(--koi-paper-2);
+  border: 1px solid var(--koi-line);
+  border-radius: var(--koi-radius-lg);
+  box-shadow: var(--koi-shadow);
+  padding: clamp(20px, 3vw, 34px) clamp(20px, 3.4vw, 40px) clamp(22px, 3vw, 34px);
+  overflow: hidden; /* clips the gradient cap to the rounded corners */
+  animation: koi-rise 0.45s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+
+  /* A 3px brand-gradient cap ties the console to the monogram — the one piece of chrome decoration,
+     replacing the old blueprint-grid + glow. */
+  &::before {
+    content: '';
+    position: absolute;
+    inset: 0 0 auto 0;
+    height: 3px;
+    background: var(--koi-accent-grad);
+  }
+}
+
+/* --- top bar -------------------------------------------------------------- */
+.koi-welcome-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--koi-space-3);
+  margin-bottom: clamp(20px, 3vw, 32px);
+}
+
+.koi-welcome-brand {
+  display: flex;
+  align-items: center;
+  gap: var(--koi-space-2-75);
+  color: var(--koi-fg);
+}
+
+.koi-welcome-logo {
+  display: inline-flex;
+
+  svg {
+    height: 34px;
+    width: 34px;
+    display: block;
+    border-radius: 9px;
+    box-shadow: 0 6px 18px color-mix(in srgb, var(--koi-accent) 34%, transparent);
+  }
+}
+
+.koi-welcome-wordmark {
+  display: flex;
+  flex-direction: column;
+  line-height: 1;
+  gap: var(--koi-space-0-75);
+}
+
+.koi-welcome-wordmark-name {
+  font-family: var(--koi-font-display);
+  font-size: 1.18rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--koi-fg);
+}
+
+.koi-welcome-wordmark-kicker {
+  font-family: var(--koi-font-mono);
+  font-size: 0.6rem;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.28em;
+  color: var(--koi-muted);
+}
+
+/* Dismiss back to the editor. */
 .koi-welcome-close {
-  position: absolute;
-  top: 12px;
-  right: 12px;
+  flex: none;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
-  border: 0;
+  width: 30px;
+  height: 30px;
+  border: 1px solid transparent;
   border-radius: var(--koi-radius-sm);
   background: transparent;
   color: var(--koi-muted);
   font-size: 0.85rem;
   line-height: 1;
   cursor: pointer;
-  transition: background var(--koi-dur-mid) ease, color var(--koi-dur-mid) ease;
+  transition: background var(--koi-dur-mid) ease, color var(--koi-dur-mid) ease, border-color var(--koi-dur-mid) ease;
 
   &:hover {
     background: var(--koi-surface);
+    border-color: var(--koi-line);
     color: var(--koi-fg);
   }
 
@@ -45,41 +123,149 @@
   }
 }
 
-.koi-welcome-card {
-  width: 100%;
-  max-width: 520px;
-  background: var(--koi-paper-2);
-  border: 1px solid var(--koi-line);
-  border-radius: var(--koi-radius-lg);
-  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.45);
-  padding: 36px 36px 30px;
-  text-align: center;
+/* --- hero: thesis (left) + launch rail (right) ---------------------------- */
+.koi-welcome-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1.18fr) minmax(0, 0.82fr);
+  gap: clamp(24px, 4vw, 56px);
+  align-items: start;
 }
 
-.koi-welcome-logo {
+.koi-welcome-lede {
+  min-width: 0;
+}
+
+.koi-welcome-eyebrow {
+  margin: 0 0 var(--koi-space-3);
+  font-family: var(--koi-font-mono);
+  font-size: 0.7rem;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.22em;
+  color: var(--koi-muted);
+}
+
+.koi-welcome-statement {
+  margin: 0 0 clamp(18px, 2.4vw, 26px);
+  font-family: var(--koi-font-display);
+  font-weight: 800;
+  font-size: clamp(1.7rem, 1rem + 2.2vw, 2.5rem);
+  line-height: 1.04;
+  letter-spacing: -0.025em;
+  color: var(--koi-fg);
+}
+
+/* The brand word, painted with the accent→cyan gradient (used once, on one word). */
+.koi-welcome-grad {
+  background: var(--koi-accent-grad);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+/* The signature: a real `.koi` snippet framed as an inset editor pane. */
+.koi-welcome-snippet {
+  margin: 0;
+  border: 1px solid var(--koi-line);
+  border-radius: var(--koi-radius);
+  background: var(--koi-paper);
+  overflow: hidden;
+}
+
+.koi-welcome-snippet-bar {
   display: flex;
   align-items: center;
-  justify-content: center;
-  color: var(--koi-fg);
-  margin-bottom: var(--koi-space-4-5);
-  min-height: 48px;
+  justify-content: space-between;
+  gap: var(--koi-space-2);
+  padding: var(--koi-space-2) var(--koi-space-3);
+  border-bottom: 1px solid var(--koi-line);
+  font-family: var(--koi-font-mono);
+  font-size: var(--koi-text-2xs);
+}
 
-  svg {
-    height: 48px;
-    width: auto;
+.koi-welcome-snippet-file {
+  color: var(--koi-ink-soft);
+}
+
+.koi-welcome-snippet-kind {
+  text-transform: uppercase;
+  letter-spacing: 0.16em;
+  color: var(--koi-muted);
+}
+
+.koi-welcome-snippet-code {
+  margin: 0;
+  padding: var(--koi-space-3-5) var(--koi-space-4);
+  overflow-x: auto;
+  font-family: var(--koi-font-mono);
+  font-size: 0.82rem;
+  line-height: 1.75;
+  color: var(--koi-fg);
+  tab-size: 2;
+
+  code {
+    font: inherit;
+    white-space: pre;
   }
 }
 
-.koi-welcome-title {
-  margin: 0 0 var(--koi-space-1-5);
-  font-size: 1.4rem;
-  font-weight: 600;
-  color: var(--koi-fg);
+/* Syntax tokens reuse the editor palette so the snippet reads as genuine Koine. */
+.koi-syn-kw {
+  color: var(--koi-hl-keyword);
+}
+.koi-syn-type {
+  color: var(--koi-hl-type);
+}
+.koi-syn-str {
+  color: var(--koi-hl-string);
+}
+.koi-syn-num {
+  color: var(--koi-hl-number);
+}
+.koi-syn-punct {
+  color: var(--koi-hl-punct);
+}
+.koi-syn-id {
+  color: var(--koi-ink-soft);
 }
 
-.koi-welcome-tagline {
-  margin: 0 0 24px;
-  font-size: var(--koi-text-lg);
+.koi-welcome-snippet-emit {
+  display: flex;
+  align-items: center;
+  gap: var(--koi-space-2);
+  margin: 0;
+  padding: var(--koi-space-2-5) var(--koi-space-4);
+  border-top: 1px solid var(--koi-line);
+  font-family: var(--koi-font-body);
+  font-size: var(--koi-text-xs);
+  color: var(--koi-muted);
+}
+
+/* The destination-language mark (C#) — same hue the toolbar uses for the C# target. */
+.koi-welcome-emit-dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  background: var(--lang-csharp);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--lang-csharp) 22%, transparent);
+}
+
+/* --- launch rail: actions + recent --------------------------------------- */
+.koi-welcome-launch {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: clamp(18px, 2.4vw, 26px);
+}
+
+.koi-welcome-rail-title {
+  margin: 0 0 var(--koi-space-2-5);
+  font-family: var(--koi-font-mono);
+  font-size: var(--koi-text-2xs);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
   color: var(--koi-muted);
 }
 
@@ -87,31 +273,37 @@
   display: flex;
   flex-direction: column;
   gap: var(--koi-space-2-5);
-  margin-bottom: var(--koi-space-2);
 }
 
 .koi-welcome-action {
-  display: block;
+  display: flex;
+  align-items: center;
+  gap: var(--koi-space-3);
   width: 100%;
-  text-align: center;
+  text-align: left;
   background: var(--koi-surface);
   color: var(--koi-fg);
   border: 1px solid var(--koi-line);
-  border-radius: var(--koi-radius-sm);
+  border-radius: var(--koi-radius);
   padding: var(--koi-space-2-75) var(--koi-space-3-5);
   font-family: var(--koi-font-body);
-  font-size: var(--koi-text-lg);
   cursor: pointer;
+  transition: transform var(--koi-dur-fast) ease, border-color var(--koi-dur-fast) ease, background var(--koi-dur-fast) ease;
 
   &:hover {
     border-color: var(--koi-accent);
+    transform: translateY(-1px);
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--koi-accent);
+    outline-offset: 2px;
   }
 
   &.primary {
     background: var(--koi-accent);
     color: var(--koi-on-accent);
     border-color: var(--koi-accent);
-    font-weight: 600;
 
     &:hover {
       background: color-mix(in srgb, var(--koi-accent) 88%, #fff);
@@ -119,20 +311,57 @@
   }
 }
 
-.koi-welcome-recent {
-  margin-top: 22px;
-  text-align: left;
-  border-top: 1px solid var(--koi-line);
-  padding-top: 16px;
+.koi-welcome-action-icon {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: var(--koi-radius-sm);
+  background: color-mix(in srgb, var(--koi-fg) 7%, transparent);
+
+  svg {
+    width: 16px;
+    height: 16px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.6;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+
+  .koi-welcome-action.primary & {
+    background: color-mix(in srgb, var(--koi-on-accent) 16%, transparent);
+  }
 }
 
-.koi-welcome-recent-title {
-  font-family: var(--koi-font-mono);
-  font-size: var(--koi-text-2xs);
-  text-transform: uppercase;
-  letter-spacing: 0.4px;
+.koi-welcome-action-text {
+  display: flex;
+  flex-direction: column;
+  gap: var(--koi-space-0-5);
+  min-width: 0;
+}
+
+.koi-welcome-action-label {
+  font-size: var(--koi-text-lg);
+  font-weight: 600;
+}
+
+.koi-welcome-action-desc {
+  font-size: var(--koi-text-xs);
   color: var(--koi-muted);
-  margin: 0 0 var(--koi-space-2);
+
+  .koi-welcome-action.primary & {
+    color: color-mix(in srgb, var(--koi-on-accent) 72%, transparent);
+  }
+}
+
+/* --- recent folders ------------------------------------------------------- */
+.koi-welcome-recent-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--koi-space-1);
 }
 
 .koi-welcome-recent-item {
@@ -144,106 +373,73 @@
   border: 1px solid transparent;
   border-radius: var(--koi-radius-sm);
   padding: var(--koi-space-1-75) var(--koi-space-2-5);
-  font-family: var(--koi-font-mono);
-  font-size: var(--koi-text-sm);
   cursor: pointer;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  transition: background var(--koi-dur-fast) ease, border-color var(--koi-dur-fast) ease;
 
   &:hover {
     background: var(--koi-surface);
     border-color: var(--koi-line);
   }
+
+  &:focus-visible {
+    outline: 2px solid var(--koi-accent);
+    outline-offset: 1px;
+  }
 }
 
 .koi-welcome-recent-item-name {
   display: block;
+  font-family: var(--koi-font-body);
+  font-size: var(--koi-text-sm-plus);
   color: var(--koi-fg);
 }
 
 .koi-welcome-recent-item-path {
   display: block;
-  color: var(--koi-muted);
+  font-family: var(--koi-font-mono);
   font-size: var(--koi-text-2xs);
+  color: var(--koi-muted);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
 .koi-welcome-empty {
+  margin: 0;
   color: var(--koi-muted);
   font-size: var(--koi-text-sm-plus);
   font-style: italic;
 }
 
-/* Welcome screen atmosphere: a faint blueprint grid fading into a soft accent glow. */
-.koi-welcome {
-  overflow: hidden;
-
-  &::before {
-    content: '';
-    position: absolute;
-    inset: 0;
-    background-image:
-      linear-gradient(var(--koi-line) 1px, transparent 1px),
-      linear-gradient(90deg, var(--koi-line) 1px, transparent 1px);
-    background-size: 32px 32px;
-    opacity: 0.28;
-    -webkit-mask-image: radial-gradient(circle at 50% 42%, #000 0%, transparent 72%);
-    mask-image: radial-gradient(circle at 50% 42%, #000 0%, transparent 72%);
-  }
-
-  &::after {
-    content: '';
-    position: absolute;
-    width: 640px;
-    height: 640px;
-    left: 50%;
-    top: 38%;
-    transform: translate(-50%, -50%);
-    background: radial-gradient(circle, color-mix(in srgb, var(--koi-accent) 20%, transparent) 0%, transparent 60%);
-    filter: blur(22px);
-    pointer-events: none;
-  }
-}
-
-.koi-welcome-card {
-  position: relative;
-  z-index: var(--koi-z-base);
-  animation: koi-rise 0.45s cubic-bezier(0.2, 0.7, 0.2, 1) both;
-}
-
-.koi-welcome-logo {
-  svg {
-    border-radius: 14px;
-    box-shadow: 0 10px 30px color-mix(in srgb, var(--koi-accent) 38%, transparent);
-  }
-}
-
-.koi-welcome-title {
-  font-family: var(--koi-font-display);
-  font-weight: 800;
-  letter-spacing: -0.02em;
-}
-
-.koi-welcome-action {
-  transition: transform var(--koi-dur-fast) ease, border-color var(--koi-dur-fast) ease, background var(--koi-dur-fast) ease;
-
-  &:hover {
-    transform: translateY(-1px);
-  }
-}
-
-/* --- welcome example gallery (searchable / filterable / grouped) --- */
+/* --- example gallery (full width, below the hero) ------------------------- */
 .koi-welcome-gallery {
-  margin-top: 22px;
-  text-align: left;
+  margin-top: clamp(24px, 3.4vw, 38px);
+  padding-top: clamp(20px, 2.6vw, 28px);
+  border-top: 1px solid var(--koi-line);
 }
 
-/* Labelled search box (the <label> is visually hidden via .koi-sr-only). */
+.koi-welcome-gallery-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--koi-space-3);
+  flex-wrap: wrap;
+}
+
+.koi-welcome-section-title {
+  margin: 0;
+  font-family: var(--koi-font-display);
+  font-size: 1.05rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--koi-fg);
+}
+
 .koi-welcome-search {
-  margin-top: 8px;
+  flex: 0 1 260px;
 }
 
 .koi-welcome-search-input {
@@ -253,9 +449,9 @@
   color: var(--koi-fg);
   border: 1px solid var(--koi-line);
   border-radius: var(--koi-radius-sm);
-  padding: 8px 11px;
+  padding: var(--koi-space-2) var(--koi-space-2-75);
   font-family: var(--koi-font-body);
-  font-size: 0.82rem;
+  font-size: var(--koi-text-base);
 
   &::placeholder {
     color: var(--koi-muted);
@@ -272,36 +468,36 @@
 .koi-welcome-filters {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  margin-top: 10px;
+  gap: var(--koi-space-1-5);
+  margin-top: var(--koi-space-3);
 }
 
 .koi-welcome-chip-row {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 5px;
+  gap: var(--koi-space-1-25);
 }
 
 .koi-welcome-chip-label {
   font-family: var(--koi-font-mono);
   font-size: 0.65rem;
   text-transform: uppercase;
-  letter-spacing: 0.4px;
+  letter-spacing: 0.16em;
   color: var(--koi-muted);
-  margin-right: 2px;
+  margin-right: var(--koi-space-0-5);
 }
 
 .koi-welcome-chip {
   background: var(--koi-surface);
   color: var(--koi-ink-soft);
   border: 1px solid var(--koi-line);
-  border-radius: 999px;
-  padding: 3px 10px;
+  border-radius: var(--koi-radius-pill);
+  padding: var(--koi-space-0-75) var(--koi-space-2-5);
   font-family: var(--koi-font-body);
-  font-size: 0.72rem;
+  font-size: var(--koi-text-xs);
   cursor: pointer;
-  transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+  transition: background var(--koi-dur-fast) ease, color var(--koi-dur-fast) ease, border-color var(--koi-dur-fast) ease;
 
   &:hover {
     border-color: var(--koi-accent);
@@ -323,45 +519,45 @@
 
 /* Difficulty group: an uppercase heading over a card grid. */
 .koi-welcome-gallery-body {
-  margin-top: 12px;
+  margin-top: clamp(14px, 2vw, 20px);
 }
 
 .koi-welcome-group + .koi-welcome-group {
-  margin-top: 16px;
+  margin-top: clamp(16px, 2.2vw, 22px);
 }
 
 .koi-welcome-group-title {
-  margin: 0 0 8px;
+  margin: 0 0 var(--koi-space-2);
   font-family: var(--koi-font-mono);
   font-size: 0.7rem;
   font-weight: 600;
   text-transform: capitalize;
-  letter-spacing: 0.4px;
+  letter-spacing: 0.12em;
   color: var(--koi-muted);
 }
 
 .koi-welcome-gallery-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: var(--koi-space-2);
-  margin-top: var(--koi-space-2);
+  grid-template-columns: repeat(auto-fill, minmax(216px, 1fr));
+  gap: var(--koi-space-2-5);
 }
 
 .koi-welcome-example {
   display: flex;
   flex-direction: column;
-  gap: var(--koi-space-0-75);
+  gap: var(--koi-space-1-25);
   text-align: left;
   background: var(--koi-surface);
   border: 1px solid var(--koi-line);
-  border-radius: var(--koi-radius-sm);
-  padding: var(--koi-space-2-25) var(--koi-space-2-75);
+  border-radius: var(--koi-radius);
+  padding: var(--koi-space-3) var(--koi-space-3-5);
   cursor: pointer;
-  transition: border-color var(--koi-dur-fast) ease, transform var(--koi-dur-fast) ease;
+  transition: border-color var(--koi-dur-fast) ease, transform var(--koi-dur-fast) ease, box-shadow var(--koi-dur-fast) ease;
 
   &:hover {
     border-color: var(--koi-accent);
-    transform: translateY(-1px);
+    transform: translateY(-2px);
+    box-shadow: 0 10px 24px color-mix(in srgb, var(--koi-accent) 12%, transparent);
   }
 
   &:focus-visible {
@@ -374,11 +570,11 @@
 .koi-welcome-example-head {
   display: flex;
   align-items: center;
-  gap: 7px;
+  gap: var(--koi-space-2);
 }
 
 .koi-welcome-example-icon {
-  font-size: 1rem;
+  font-size: 1.05rem;
   line-height: 1;
   flex: none;
 }
@@ -386,7 +582,7 @@
 .koi-welcome-example-name {
   font-family: var(--koi-font-body);
   font-weight: 600;
-  font-size: var(--koi-text-base);
+  font-size: var(--koi-text-md);
   color: var(--koi-fg);
 }
 
@@ -394,24 +590,24 @@
   font-family: var(--koi-font-body);
   font-size: var(--koi-text-xs);
   color: var(--koi-muted);
-  line-height: 1.4;
+  line-height: 1.45;
 }
 
 /* Difficulty + tag badges along the card footer. */
 .koi-welcome-badges {
   display: flex;
   flex-wrap: wrap;
-  gap: 4px;
-  margin-top: 1px;
+  gap: var(--koi-space-1);
+  margin-top: var(--koi-space-0-5);
 }
 
 .koi-welcome-badge {
   font-family: var(--koi-font-mono);
   font-size: 0.6rem;
   text-transform: uppercase;
-  letter-spacing: 0.3px;
-  padding: 2px 6px;
-  border-radius: 999px;
+  letter-spacing: 0.08em;
+  padding: var(--koi-space-0-5) var(--koi-space-1-5);
+  border-radius: var(--koi-radius-pill);
   border: 1px solid var(--koi-line);
   color: var(--koi-muted);
   white-space: nowrap;
@@ -428,8 +624,20 @@
 
 /* No-match empty state — announced via role=status / aria-live=polite in the DOM. */
 .koi-welcome-gallery-empty {
-  margin: 4px 0 0;
+  margin: var(--koi-space-1) 0 0;
   color: var(--koi-muted);
-  font-size: 0.8rem;
+  font-size: var(--koi-text-sm-plus);
   font-style: italic;
+}
+
+/* --- responsive: collapse the hero to one column, then tighten chrome ----- */
+@media (max-width: 760px) {
+  .koi-welcome-hero {
+    grid-template-columns: 1fr;
+    gap: clamp(20px, 5vw, 28px);
+  }
+
+  .koi-welcome-search {
+    flex-basis: 100%;
+  }
 }
