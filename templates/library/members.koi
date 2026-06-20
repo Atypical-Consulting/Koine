@@ -1,0 +1,158 @@
+/// Members bounded context — the people who borrow from the library. A `Member` holds the
+/// borrower's card, their borrowing status, and the running fine balance that overdue
+/// returns accrue. It watches the Loans context for fines and adds them to the account,
+/// suspending a member whose unpaid balance grows too large. Kept in its own context so
+/// "who may borrow and what they owe" evolves independently of the lending mechanics.
+context Members version 1 {
+
+  /// The borrowing status of a member. Drives the `states status { … }` machine on the
+  /// entity, so only the declared transitions are legal at runtime.
+  enum MembershipStatus { Active, Suspended, Closed }
+
+  /// The tier of membership, which sets the borrowing limit. A plain enum used for policy.
+  enum MembershipTier { Standard, Student, Staff }
+
+  /// A contact email — a first-class value object validated by shape (R1.2).
+  value Email {
+    address:    String
+    normalized: String = address.trim.lower
+    invariant address.trim.length > 0                         "an email cannot be blank"
+    invariant address matches /^[^@\s]+@[^@\s]+\.[^@\s]+$/    "not a valid email address"
+  }
+
+  /// The member's name on the card. A small value object so a name is typed.
+  value MemberName {
+    first: String
+    last:  String
+    // Derived (computed, get-only): the full name for display.
+    full:  String = first.trim + " " + last.trim
+    invariant first.trim.length > 0   "a member needs a first name"
+    invariant last.trim.length > 0    "a member needs a last name"
+  }
+
+  // R14.3 — react to fines created on overdue returns (authorized by the
+  // `Loans -> Members : customer-supplier` relation in context-map.koi). The host
+  // implements the IHandleFineCreated seam to add the charge to the borrower's balance.
+  subscribes Loans.FineCreated
+
+  /// The member aggregate — one borrower account. Being an aggregate root it gains an
+  /// `IMemberRepository` and joins the context UoW; the repository block adds
+  /// intention-revealing finders (R11.3).
+  aggregate Membership root Member {
+
+    repository {
+      operations: getById, add, update
+      find byEmail(email: Email): Member
+      find suspended(): List<Member>
+    }
+
+    /// Raised inside the aggregate when a member joins by the factory (R6/R8).
+    event MemberEnrolled {
+      member: MemberId
+      tier:   MembershipTier
+    }
+
+    /// Raised when a member is suspended for an unpaid balance (R6).
+    event MemberSuspended {
+      member:      MemberId
+      balanceCents: Int
+    }
+
+    entity Member identified by MemberId {
+      name:   MemberName
+      email:  Email
+      tier:   MembershipTier   = Standard
+      status: MembershipStatus = Active
+      // The running unpaid fine balance, in minor units (cents). Driven by FineCreated.
+      balanceCents: Int        = 0
+      // How many copies the member currently has out — capped by the tier limit.
+      onLoanCount:  Int        = 0
+
+      // Derived (computed, get-only) read helpers (R1.1).
+      isActive:    Bool   = status == Active
+      isSuspended: Bool   = status == Suspended
+      displayName: String = name.full
+      // The borrowing cap for the tier: staff get more, students fewer.
+      loanLimit:   Int    = if tier == Staff then 20 else if tier == Student then 10 else 5
+      // Whether the member is allowed to take out another loan right now.
+      canBorrow:   Bool   = status == Active && balanceCents < 1000 && onLoanCount < loanLimit
+
+      // --- Invariants (R4) --------------------------------------------------------
+      invariant balanceCents >= 0   "a fine balance cannot be negative"
+      invariant onLoanCount >= 0    "the on-loan count cannot be negative"
+      // A suspended member must actually owe money (the suspension trigger).
+      invariant balanceCents > 0 when status == Suspended
+        "a suspended member must have an outstanding balance"
+
+      // The membership lifecycle (R7): active, suspendable for unpaid fines and
+      // reinstatable once paid, and closed (terminal).
+      states status {
+        Active    -> Suspended, Closed
+        Suspended -> Active, Closed
+        Closed
+      }
+
+      /// Add an overdue fine to the member's balance (R5). Driven by the FineCreated
+      /// subscription; the amount is in cents to match the loan's published fine.
+      command chargeFine(amountCents: Int) {
+        requires status != Closed   "a closed member cannot be fined"
+        balanceCents -> balanceCents + amountCents
+      }
+
+      /// Record a payment against the member's balance (R5).
+      command payFine(amountCents: Int) {
+        requires amountCents > 0       "a payment must be positive"
+        requires amountCents <= balanceCents   "cannot pay more than is owed"
+        balanceCents -> balanceCents - amountCents
+      }
+
+      /// Suspend a member whose unpaid balance is too high (R5/R6).
+      command suspend {
+        requires status == Active      "only an active member can be suspended"
+        requires balanceCents > 0      "a member with no balance cannot be suspended"
+        status -> Suspended
+        emit MemberSuspended(member: id, balanceCents: balanceCents)
+      }
+
+      /// Reinstate a suspended member once their balance is cleared (R5).
+      command reinstate {
+        requires status == Suspended   "only a suspended member can be reinstated"
+        requires balanceCents == 0     "the member must clear their balance first"
+        status -> Active
+      }
+
+      /// Close a member account (R5).
+      command close {
+        requires status != Closed   "the member is already closed"
+        status -> Closed
+      }
+
+      /// R8 — enrol a new member.
+      create enrol(name: MemberName, email: Email, tier: MembershipTier) {
+        emit MemberEnrolled(member: id, tier: tier)
+      }
+    }
+  }
+
+  /// R10.1 — a named, reusable specification over Member, emitted as a static predicate
+  /// (MembersSpecifications.IsEligibleToBorrow): an active member under their limit and fine cap.
+  spec IsEligibleToBorrow on Member = status == Active && balanceCents < 1000 && onLoanCount < loanLimit
+
+  /// R12.2 — the application service interface (IMemberService).
+  service MemberService {
+    usecase EnrolMember(name: MemberName, email: Email, tier: MembershipTier): MemberId
+    usecase PayFine(member: MemberId, amountCents: Int)
+    usecase SuspendMember(member: MemberId)
+  }
+
+  /// R12.3 — a flat read model for a members list.
+  readmodel MemberCard from Member {
+    id
+    displayName: String = name.full
+    status
+    balanceCents
+  }
+
+  /// R12.4 — a query DTO over the members list.
+  query MembersByStatus(status: MembershipStatus): List<MemberCard>
+}

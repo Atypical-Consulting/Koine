@@ -37,7 +37,7 @@ Rider reads TextMate bundles directly — no plugin or build step needed.
 2. Click **+** and select the `tooling/koine-textmate` folder.
 3. Click **OK** / **Apply**.
 
-Open any `.koi` file (for example `demo/Shop.Domain/Models/catalog.koi`) and it lights up.
+Open any `.koi` file (for example `templates/pizzeria/menu.koi`) and it lights up.
 
 :::note
 If `.koi` files aren't recognized automatically, map the extension under **Settings → Editor → File

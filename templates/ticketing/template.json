@@ -1,0 +1,21 @@
+{
+  "id": "ticketing",
+  "name": "Ticketing",
+  "tagline": "A help-desk workflow with a ticket lifecycle and a cross-context SLA policy.",
+  "description": "A two-context support domain. TicketManagement models a Ticket aggregate whose lifecycle is an explicit state machine (Open → Assigned/Escalated/Resolved → Closed → Reopened), guarded by invariants such as 'a resolved ticket must have a resolution', 'a closed ticket cannot be reassigned', and 'an urgent ticket requires a justification'. Commands assign/escalate/resolve/close advance the machine and emit domain events. A separate SLA context tracks each ticket's response deadline and publishes a SlaBreached integration event when a promise is broken; the context map wires the two together with a single bidirectional customer-supplier relationship that authorizes both subscriptions.",
+  "difficulty": "intermediate",
+  "tags": ["state-machine", "workflow", "policy"],
+  "contexts": ["TicketManagement", "SLA"],
+  "coreAggregate": "Ticket",
+  "entryFile": "ticketing.koi",
+  "teaches": [
+    "state machines for an entity lifecycle",
+    "conditional invariants with when",
+    "commands that guard and emit events",
+    "factory creation with create",
+    "integration events across bounded contexts",
+    "context maps with a bidirectional customer-supplier relationship",
+    "repositories with intention-revealing finders"
+  ],
+  "icon": "🎫"
+}

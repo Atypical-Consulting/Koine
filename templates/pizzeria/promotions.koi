@@ -1,0 +1,53 @@
+/// Promotions bounded context — the deals and discounts the pizzeria runs. It owns
+/// the rule that anchors this context: a discount can lower an order's total, but it
+/// can never drive that total below zero. The rule is enforced as an invariant on a
+/// `Discount` value object, exposed as a reusable spec, and computed by a pure
+/// domain operation.
+context Promotions version 1 {
+
+  /// The kind of deal a coupon represents. A plain enum used for reporting.
+  enum DealKind { Percentage, FixedAmount, FreeDelivery }
+
+  /// A coupon code a customer can apply. A first-class value object so a coupon is
+  /// never a bare string, validated by shape (R1.2).
+  value Coupon {
+    code:       String
+    normalized: String = code.trim.upper
+    invariant code.trim.length > 0                  "a coupon code cannot be blank"
+    invariant code matches /^[A-Z0-9]{4,12}$/        "a coupon must look like PIZZA10"
+  }
+
+  /// A discount applied to an order total. THE rule of this context: the discounted
+  /// total can never be negative — a deal can take the total to exactly zero (a free
+  /// pizza) but no further. Both the gross total and the discount are non-negative,
+  /// and the invariant proves the result stays non-negative too.
+  value Discount {
+    kind:           DealKind
+    /// The order total before the discount is applied. Never negative.
+    orderTotal:     Decimal
+    /// How much money the discount takes off. Never negative.
+    amountOff:      Decimal
+    // Derived (computed, get-only): the total the customer actually pays.
+    discountedTotal: Decimal = orderTotal - amountOff
+
+    invariant orderTotal >= 0   "the order total cannot be negative"
+    invariant amountOff >= 0    "a discount cannot be negative"
+    // The anchoring rule: a discount cannot drive the order total below zero.
+    invariant amountOff <= orderTotal
+      "a discount cannot drive the order total negative"
+  }
+
+  // R10.1 — a named, reusable specification over Discount, emitted as a static
+  // predicate (PromotionsSpecifications.IsFreeOrder): the deal made the order free.
+  spec IsFreeOrder on Discount = discountedTotal == 0
+
+  /// R10.2 — a domain service with pure operations (expression bodies). `cap` clamps
+  /// a requested discount so it can never exceed the order total (the safe way to
+  /// build a `Discount`); `rate` gives the percentage rate for a deal kind.
+  service DiscountService {
+    operation cap(orderTotal: Decimal, requested: Decimal): Decimal =
+      if requested > orderTotal then orderTotal else requested
+    operation rate(kind: DealKind): Decimal =
+      if kind == Percentage then 0.10 else 0.0
+  }
+}

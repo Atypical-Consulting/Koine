@@ -17,22 +17,22 @@ to end.
 - **One file per declared type**, named after the type. A `value Email` produces `Customers/Email.cs`,
   an `entity Customer` produces `Customers/Customer.cs`, and so on.
 - **One `Koine/Runtime/` folder** at the root holding the shared marker types (see below).
-- A [`module`](/Koine/reference/multi-file-imports-modules/) nests one level deeper: types in `module Kernel` under context
-  `Catalog` land in `Catalog/Kernel/` and `namespace Catalog.Kernel`.
+- A [`module`](/Koine/reference/multi-file-imports-modules/) nests one level deeper: types in `module Line` under context
+  `Kitchen` land in `Kitchen/Line/` and `namespace Kitchen.Line`.
 
-For the demo Shop domain that looks like this:
+For the demo pizzeria domain that looks like this:
 
 ```
 Generated/
 ├── Koine/Runtime/          # shared markers (emitted only when used)
-├── Customers/
-│   ├── Email.cs
-│   ├── Customer.cs
-│   ├── CustomerId.cs
+├── Menu/
+│   ├── Pizza.cs
+│   ├── Topping.cs
+│   ├── PizzaCode.cs
 │   └── ...
-├── Catalog/
-│   ├── Product.cs
-│   ├── Sku.cs
+├── Kitchen/
+│   ├── Line/
+│   │   └── KitchenTicket.cs
 │   └── ...
 └── Ordering/
     ├── Order.cs

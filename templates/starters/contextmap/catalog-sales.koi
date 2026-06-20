@@ -1,0 +1,16 @@
+context Catalog {
+  entity Product identified by ProductId {
+    sku:  String
+    name: String
+  }
+}
+
+context Sales {
+  value OrderRef {
+    value: String
+  }
+}
+
+contextmap {
+  Catalog -> Sales : conformist
+}

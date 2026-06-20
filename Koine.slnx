@@ -24,7 +24,7 @@
     <Project Path="benchmarks/Koine.Compiler.Benchmarks/Koine.Compiler.Benchmarks.csproj" />
   </Folder>
   <Folder Name="/demo/">
-    <Project Path="demo/Shop.Domain/Shop.Domain.csproj" />
+    <Project Path="demo/Pizzeria.Domain/Pizzeria.Domain.csproj" />
   </Folder>
   <Folder Name="/_docs/">
     <File Path="BRIEF.md" />

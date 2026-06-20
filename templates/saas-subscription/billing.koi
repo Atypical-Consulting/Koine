@@ -1,0 +1,184 @@
+/// Billing bounded context — charging a tenant for their subscription and keeping the
+/// invoice ledger. It is downstream of a third-party payment provider whose model we do
+/// NOT control, so it shields itself with an anti-corruption layer (R14.2): the raw
+/// provider charge result is translated into our own clean `ChargeReceipt` (the acl block
+/// lives in context-map.koi). Two aggregates — Invoicing and Ledger — exercise a multi-
+/// aggregate context with a cross-aggregate policy.
+///
+/// Naming note: the root entity is `Invoice`, deliberately NOT `Billing`. A C# type must
+/// not share its enclosing namespace's name, and this context emits into a `Billing`
+/// namespace; an entity called `Billing` would collide with it.
+context Billing version 1 {
+
+  // R14.3 — react to activated subscriptions (authorized by `Subscription -> Billing :
+  // open-host` in context-map.koi). The host implements the IHandleSubscriptionActivated
+  // seam to raise the first invoice for the new paying plan.
+  subscribes Subscription.SubscriptionActivated
+
+  /// The lifecycle of an invoice. Drives the `states status { … }` machine below.
+  enum InvoiceStatus { Draft, Issued, Paid, Failed, Voided }
+
+  /// A monetary amount. `currency` is a primitive String to match whatever the payment
+  /// provider hands back — Billing keeps money loose at the gateway boundary.
+  value Money {
+    amount:   Decimal
+    currency: String
+    invariant amount >= 0   "an amount cannot be negative"
+  }
+
+  // R14.2 — the destination type the anti-corruption layer translates the provider's raw
+  // charge result into (see the `acl { … }` block in context-map.koi). Billing code only
+  // ever sees this clean type, never the provider's shape.
+  value ChargeReceipt {
+    reference: String
+    amount:    Decimal
+    invariant amount >= 0   "a receipt amount cannot be negative"
+  }
+
+  /// Announced when the payment provider declines a recurring charge (R14.3). This is the
+  /// gateway-level failure fact; Subscription subscribes to it to suspend the plan and
+  /// re-publish its own subscription-level PaymentFailed (see context-map.koi).
+  integration event PaymentDeclined {
+    invoice: InvoiceId
+    tenant:  TenantId
+    attempt: Int
+    declinedAt: Instant
+  }
+
+  publishes PaymentDeclined
+
+  /// Recorded when an invoice is paid. Triggers the ledger-posting policy.
+  event InvoicePaid {
+    invoice: InvoiceId
+    amount:  Decimal
+  }
+
+  /// The invoice aggregate — one bill against a subscription.
+  aggregate Invoicing root Invoice {
+
+    repository {
+      operations: getById, add, update
+      find byTenant(tenant: TenantId): List<Invoice>
+      find unpaid(): List<Invoice>
+    }
+
+    /// Raised when an invoice is issued by the factory (R6/R8).
+    event InvoiceIssued {
+      invoice: InvoiceId
+      tenant:  TenantId
+      amount:  Decimal
+    }
+
+    /// Raised when an invoice payment fails (R6). The cross-context announcement is the
+    /// `PaymentDeclined` integration event.
+    event InvoiceFailed {
+      invoice: InvoiceId
+      attempt: Int
+    }
+
+    entity Invoice identified by InvoiceId {
+      tenant:   TenantId
+      subscription: SubscriptionId
+      amount:   Money
+      status:   InvoiceStatus = Draft
+      attempts: Int           = 0
+
+      // Derived read helpers (R1.1).
+      isPaid:   Bool = status == Paid
+      isFailed: Bool = status == Failed
+
+      invariant amount.amount >= 0   "an invoice amount cannot be negative"
+      // A paid invoice must carry a positive amount (a zero charge is never "paid").
+      invariant amount.amount > 0 when status == Paid
+        "a paid invoice must have a positive amount"
+
+      // The invoice lifecycle (R7): drafted, issued, then paid — or failed (retryable)
+      // — and voided if written off.
+      states status {
+        Draft  -> Issued, Voided
+        Issued -> Paid, Failed, Voided
+        Failed -> Issued, Voided
+        Paid
+        Voided
+      }
+
+      /// Issue a drafted invoice for collection (R5).
+      command issue {
+        requires status == Draft   "only a draft invoice can be issued"
+        status -> Issued
+      }
+
+      /// Mark an issued invoice as paid against a translated provider receipt (R5/R6).
+      /// The ledger-posting policy reacts to the emitted InvoicePaid event.
+      command settle(receipt: ChargeReceipt) {
+        requires status == Issued   "only an issued invoice can be settled"
+        status -> Paid
+        emit InvoicePaid(invoice: id, amount: receipt.amount)
+      }
+
+      /// Record a failed collection attempt (R5/R6). The cross-context announcement is
+      /// `PaymentDeclined`, which Subscription reacts to.
+      command decline(attempt: Int) {
+        requires status == Issued   "only an issued invoice can be declined"
+        status   -> Failed
+        attempts -> attempt
+        emit InvoiceFailed(invoice: id, attempt: attempt)
+      }
+
+      /// R8 — issue an invoice for a subscription's charge.
+      create raise(tenant: TenantId, subscription: SubscriptionId, amount: Money) {
+        requires amount.amount > 0   "cannot raise a zero-value invoice"
+        emit InvoiceIssued(invoice: id, tenant: tenant, amount: amount.amount)
+      }
+    }
+  }
+
+  /// A second aggregate — the revenue ledger. Two aggregates in one context means the
+  /// generated IUnitOfWork exposes both repositories (R12.1).
+  aggregate Books root LedgerEntry {
+    entity LedgerEntry identified by LedgerEntryId {
+      invoice: InvoiceId
+      balance: Decimal
+
+      /// Post an amount to the ledger entry (R5).
+      command post(amount: Decimal) {
+        balance -> amount
+      }
+    }
+  }
+
+  /// R10.3 — a policy reacting to a domain event across aggregates: when an invoice is
+  /// paid, post it to the ledger. Koine emits the handler seam (the imperative call is
+  /// documented, not generated).
+  policy PostRevenue when InvoicePaid then Books.post(amount: amount)
+
+  /// R12.2 — the application service interface (IBillingService).
+  service BillingService {
+    usecase RaiseInvoice(tenant: TenantId, subscription: SubscriptionId, amount: Money): InvoiceId
+    usecase SettleInvoice(invoice: InvoiceId, receipt: ChargeReceipt)
+  }
+
+  /// R12.3 — a flat read model for an accounts-receivable board.
+  readmodel InvoiceLine from Invoice {
+    id
+    tenant
+    status
+  }
+
+  /// R12.4 — a query DTO over the read model.
+  query InvoicesByStatus(status: InvoiceStatus): List<InvoiceLine>
+}
+
+/// PaymentGateway bounded context — the external payment provider whose model we do not
+/// control. Billing never references this directly; it goes through the generated
+/// anti-corruption translator interface (see the acl block in context-map.koi).
+context PaymentGateway version 1 {
+
+  /// The raw charge result the third-party provider returns. Billing shields itself from
+  /// this shape with its anti-corruption layer.
+  value ProviderCharge {
+    rawId:       String
+    chargedCents: Int
+    invariant chargedCents >= 0   "a charged amount cannot be negative"
+  }
+}

@@ -23,23 +23,23 @@ public class WarmModelTests
     private static string RepoRoot()
     {
         var dir = new DirectoryInfo(AppContext.BaseDirectory);
-        while (dir is not null && !Directory.Exists(Path.Combine(dir.FullName, "examples")))
+        while (dir is not null && !File.Exists(Path.Combine(dir.FullName, "Koine.slnx")))
         {
             dir = dir.Parent;
         }
 
-        dir.ShouldNotBeNull("Could not locate the repo root (no 'examples/' ancestor found).");
+        dir.ShouldNotBeNull("Could not locate the repo root (no 'Koine.slnx' ancestor found).");
         return dir!.FullName;
     }
 
     /// <summary>
-    /// Loads all <c>.koi</c> files from <c>demo/Shop.Domain/Models/</c> as a list of
+    /// Loads all <c>.koi</c> files from <c>templates/pizzeria/</c> as a list of
     /// <see cref="SourceFile"/>s in the order returned by the file system.
     /// </summary>
-    private static IReadOnlyList<SourceFile> LoadShopFiles()
+    private static IReadOnlyList<SourceFile> LoadPizzeriaFiles()
     {
-        var modelsDir = Path.Combine(RepoRoot(), "demo", "Shop.Domain", "Models");
-        Directory.Exists(modelsDir).ShouldBeTrue($"Shop demo models directory not found: {modelsDir}");
+        var modelsDir = Path.Combine(RepoRoot(), "templates", "pizzeria");
+        Directory.Exists(modelsDir).ShouldBeTrue($"Pizzeria template directory not found: {modelsDir}");
 
         return Directory.EnumerateFiles(modelsDir, "*.koi", SearchOption.TopDirectoryOnly)
             .OrderBy(p => p, StringComparer.Ordinal)
@@ -48,12 +48,12 @@ public class WarmModelTests
     }
 
     /// <summary>
-    /// Loads the billing example (<c>examples/billing.koi</c>) as a single-file compilation.
+    /// Loads the billing starter (<c>templates/starters/billing/billing.koi</c>) as a single-file compilation.
     /// </summary>
     private static SourceFile BillingFile()
     {
-        var path = Path.Combine(RepoRoot(), "examples", "billing.koi");
-        File.Exists(path).ShouldBeTrue($"Billing example not found: {path}");
+        var path = Path.Combine(RepoRoot(), "templates", "starters", "billing", "billing.koi");
+        File.Exists(path).ShouldBeTrue($"Billing starter not found: {path}");
         return new SourceFile(path, File.ReadAllText(path));
     }
 
@@ -62,9 +62,9 @@ public class WarmModelTests
     // -------------------------------------------------------------------------
 
     [Fact]
-    public void BehaviorParity_ShopDemo_ContextNamesMatchKoineCompiler()
+    public void BehaviorParity_PizzeriaTemplate_ContextNamesMatchKoineCompiler()
     {
-        var files = LoadShopFiles();
+        var files = LoadPizzeriaFiles();
         var comp = KoineCompilation.Create(files);
 
         var (legacyModel, _) = new KoineCompiler().Parse(files);
@@ -78,9 +78,9 @@ public class WarmModelTests
     }
 
     [Fact]
-    public void BehaviorParity_ShopDemo_TypeCountsMatchKoineCompiler()
+    public void BehaviorParity_PizzeriaTemplate_TypeCountsMatchKoineCompiler()
     {
-        var files = LoadShopFiles();
+        var files = LoadPizzeriaFiles();
         var comp = KoineCompilation.Create(files);
 
         var (legacyModel, _) = new KoineCompiler().Parse(files);
@@ -95,9 +95,9 @@ public class WarmModelTests
     }
 
     [Fact]
-    public void BehaviorParity_ShopDemo_SyntaxDiagnosticsMatchKoineCompiler()
+    public void BehaviorParity_PizzeriaTemplate_SyntaxDiagnosticsMatchKoineCompiler()
     {
-        var files = LoadShopFiles();
+        var files = LoadPizzeriaFiles();
         var comp = KoineCompilation.Create(files);
 
         var (_, legacyDiags) = new KoineCompiler().Parse(files);
@@ -147,7 +147,7 @@ public class WarmModelTests
     [Fact]
     public void Fingerprint_SameContent_EqualFingerprints()
     {
-        var files = LoadShopFiles();
+        var files = LoadPizzeriaFiles();
 
         var comp1 = KoineCompilation.Create(files);
         var comp2 = KoineCompilation.Create(files);
@@ -158,7 +158,7 @@ public class WarmModelTests
     [Fact]
     public void Fingerprint_DifferentContent_DifferentFingerprints()
     {
-        var files = LoadShopFiles().ToList();
+        var files = LoadPizzeriaFiles().ToList();
         var comp1 = KoineCompilation.Create(files);
 
         // Change the source of the first file.
@@ -172,7 +172,7 @@ public class WarmModelTests
     [Fact]
     public void Fingerprint_IsOrderIndependent()
     {
-        var files = LoadShopFiles().ToList();
+        var files = LoadPizzeriaFiles().ToList();
 
         var comp1 = KoineCompilation.Create(files);
 
@@ -190,7 +190,7 @@ public class WarmModelTests
     [Fact]
     public void WithDocument_SameText_ReturnsSameInstance()
     {
-        var files = LoadShopFiles().ToList();
+        var files = LoadPizzeriaFiles().ToList();
         var parseCount = 0;
 
         KoineCompilation Create(IReadOnlyList<SourceFile> f) =>
@@ -213,7 +213,7 @@ public class WarmModelTests
     [Fact]
     public void WithDocument_SameText_ZeroReParses()
     {
-        var files = LoadShopFiles().ToList();
+        var files = LoadPizzeriaFiles().ToList();
         var counter = 0;
 
         Func<SourceFile, ParsedUnit> countingParser = sf =>
@@ -241,7 +241,7 @@ public class WarmModelTests
     [Fact]
     public void WithDocument_ChangedText_ReparseExactlyOneFile()
     {
-        var files = LoadShopFiles().ToList();
+        var files = LoadPizzeriaFiles().ToList();
         files.Count.ShouldBeGreaterThan(1, "Need more than one file for this test");
 
         var counter = 0;
@@ -301,7 +301,7 @@ public class WarmModelTests
     [Fact]
     public void WithoutDocument_AbsentUri_ReturnsSameInstance()
     {
-        var files = LoadShopFiles().ToList();
+        var files = LoadPizzeriaFiles().ToList();
         var comp = KoineCompilation.Create(files);
 
         var same = comp.WithoutDocument("file:///nonexistent.koi");
@@ -335,10 +335,13 @@ public class WarmModelTests
     [Fact]
     public void WithoutDocument_PresentUri_ReturnsNewInstance()
     {
-        var files = LoadShopFiles().ToList();
+        var files = LoadPizzeriaFiles().ToList();
         var comp = KoineCompilation.Create(files);
 
-        var without = comp.WithoutDocument(files[0].Path);
+        // Remove a file that actually declares a context (not the context-map.koi file,
+        // which is a top-level `contextmap` and contributes no context to the merged model).
+        var contextFile = files.First(f => f.Path.EndsWith("ordering.koi", StringComparison.Ordinal));
+        var without = comp.WithoutDocument(contextFile.Path);
 
         ReferenceEquals(comp, without).ShouldBeFalse();
         without.Model.Contexts.Count.ShouldBeLessThan(comp.Model.Contexts.Count,
@@ -352,7 +355,7 @@ public class WarmModelTests
     [Fact]
     public void Documents_ContainsOriginalSourceTexts()
     {
-        var files = LoadShopFiles().ToList();
+        var files = LoadPizzeriaFiles().ToList();
         var comp = KoineCompilation.Create(files);
 
         foreach (var f in files)
@@ -392,7 +395,7 @@ public class WarmModelTests
     [Fact]
     public void SemanticModel_IsNonNull()
     {
-        var files = LoadShopFiles();
+        var files = LoadPizzeriaFiles();
         var comp = KoineCompilation.Create(files);
 
         comp.SemanticModel.ShouldNotBeNull();

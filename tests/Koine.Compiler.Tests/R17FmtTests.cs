@@ -14,7 +14,7 @@ public class R17FmtTests
     public static IEnumerable<object[]> AllFixtures()
     {
         var root = RepoRoot();
-        foreach (var dir in new[] { "examples", "demo" })
+        foreach (var dir in new[] { "examples", "demo", "templates" })
         {
             foreach (var f in Directory.EnumerateFiles(Path.Combine(root, dir), "*.koi", SearchOption.AllDirectories))
             {

@@ -16,7 +16,7 @@ record those relationships — it *enforces* them and *drives emission* from the
 Point the compiler at a **directory** and every `.koi` under it compiles as a **single model**:
 
 ```bash
-koine build demo/Shop.Domain/Models --out Generated
+koine build ./models --out Generated
 ```
 
 The CLI recurses for `*.koi` (in a deterministic order) and merges them before checking anything.

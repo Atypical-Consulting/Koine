@@ -1,0 +1,35 @@
+// The strategic view (R14.1) — how the library's bounded contexts relate. A context map
+// is a top-level declaration (a sibling of `context`, not nested in one). In directory mode
+// every .koi file compiles as one model, so this map can name the contexts declared in the
+// other files and authorize their event flow.
+//
+// A context map allows only ONE relation per unordered context pair, so a two-way
+// relationship is modelled with `<->`. Only open-host, published-language and
+// customer-supplier relations AUTHORIZE a downstream `subscribes`, so every cross-context
+// event flow below is wired with one of those (a `partnership` is symmetric coordination
+// but does not by itself authorize a subscription).
+contextmap {
+
+  // Customer–supplier: Catalog (upstream) owns the abstract `Book` title; Inventory
+  // (downstream) references it by `BookId` for every physical `BookCopy` it shelves. This
+  // is the Book-vs-BookCopy split made strategic — one title, many copies, two contexts.
+  Catalog  -> Inventory     : customer-supplier
+
+  // Customer–supplier: Reservations (downstream) holds against a `Book` title supplied by
+  // Catalog — a reservation is on the work, never on a specific copy.
+  Catalog  -> Reservations  : customer-supplier
+
+  // Customer-supplier: Loans (supplier) publishes its lending facts
+  // (BookBorrowed, Returned, LoanRenewed, FineCreated) and Members (customer) consumes them.
+  // The `Loans -> Members` relation authorizes Members' `subscribes Loans.FineCreated`
+  // (without it the subscription would be rejected).
+  Loans    -> Members       : customer-supplier
+
+  // Customer–supplier, bidirectional: Loans and Reservations are partners in the
+  // lend/return/hold dance. Loans publishes `Returned` so Reservations can promote the next
+  // waiting hold, and Reservations publishes `ReservationPlaced` so Loans can block renewal
+  // of a current loan of the same title. A single bidirectional customer-supplier relation
+  // authorizes the subscriptions in BOTH directions (a context map allows only one relation
+  // per pair, so the round-trip is modelled as `<->`).
+  Loans   <-> Reservations  : customer-supplier
+}

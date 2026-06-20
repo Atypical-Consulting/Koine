@@ -40,8 +40,8 @@ dotnet test                 # run all tests (~500)
 dotnet test --filter "FullyQualifiedName~R9ValueObjectTests"   # a single test class
 
 # Run the CLI
-dotnet run --project src/Koine.Cli -- build examples/billing.koi --target csharp --out ./generated
-dotnet run --project src/Koine.Cli -- build examples/billing.koi    # parse + validate only, no output
+dotnet run --project src/Koine.Cli -- build templates/starters/billing/billing.koi --target csharp --out ./generated
+dotnet run --project src/Koine.Cli -- build templates/starters/billing/billing.koi    # parse + validate only, no output
 dotnet run --project src/Koine.Cli -- --version
 ```
 
@@ -106,13 +106,32 @@ files named per release (`R1ExpressionTests.cs` … `R17ToolingTests.cs`) plus f
   workspace house standard. Verify `await Verify(...)` snapshots and the Roslyn compile/execute meta-test
   are **not** assertions — leave them exactly as-is.
 
-## The demo (`demo/Shop.Domain`)
+## Templates (`templates/`)
+
+`templates/` is the **single validated source of truth** for Koine's example domains (issue #101). A
+*template* is a folder holding one or more `.koi` files plus a `template.json` manifest. The manifest is
+validated against [`templates/template.schema.json`](templates/template.schema.json) and carries: `id`
+(must equal the folder name), `name`, `tagline`, `description`, `difficulty` (∈
+`starter`/`beginner`/`intermediate`/`advanced`), `tags[]`, `contexts[]`, `coreAggregate`, `entryFile`
+(must be a `.koi` file in the folder), `teaches[]`, and `icon`. The families today: single-file
+**starters** (`starters/{billing,ordering,contextmap,values}`) and full domains
+(`ticketing`, `pizzeria` (six contexts + an external Gateway), `saas-subscription`, `library`).
+
+`TemplatesValidationTests` (in `tests/Koine.Compiler.Tests/`) compiles every template green and
+validates each manifest against the schema — so a passing `dotnet test` proves all templates compile
+and are well-described. The templates feed three consumers: the C# demo (below), Koine Studio's
+template gallery, and the website playground (both via a build-time-generated manifest).
+
+## The demo (`demo/Pizzeria.Domain`)
 
 A real .NET project that regenerates and compiles the generated C# as part of its own build: an MSBuild
-`KoineGenerate` target shells out to the CLI (`build Models/ --target csharp --out Generated/
---glossary glossary.md`) before `CoreCompile`. So `dotnet build demo/Shop.Domain` is an end-to-end
-check that the CLI + emitter produce compiling code for a six-context Shop domain. `Generated/` is wiped
-each build and excluded from the default compile glob; `glossary.md` is committed documentation.
+`KoineGenerate` target shells out to the CLI (`build <KoineModelsDir> --target csharp --out Generated/
+--glossary glossary.md`) before `CoreCompile`. `KoineModelsDir` points at `templates/pizzeria` — the
+demo compiles the pizzeria **template in place** rather than a local `Models/` copy, so building the
+demo is what proves that template emits compiling C# end-to-end. So `dotnet build demo/Pizzeria.Domain`
+is an end-to-end check that the CLI + emitter produce compiling code for a six-context pizzeria domain.
+`Generated/` is wiped each build and excluded from the default compile glob; `glossary.md` is committed
+documentation.
 
 ## When adding language features
 

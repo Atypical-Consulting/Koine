@@ -1,0 +1,37 @@
+{
+  "id": "pizzeria",
+  "name": "Pizzeria",
+  "tagline": "A six-context pizza shop: menu, ordering, kitchen, delivery, payment and promotions.",
+  "description": "The flagship realistic Koine domain. Six bounded contexts model a working pizzeria end to end. Menu is the upstream catalogue of pizzas, sizes and toppings, owning the shared-kernel Currency and rich Money/Topping value objects. Ordering is the heart of the template: an Order aggregate priced from its OrderLine line items, with an explicit lifecycle state machine, place/cancel commands, and an OrderPlaced integration event that Kitchen, Delivery and Payment all subscribe to. Kitchen runs each order through a ticket workflow (queued → prepping → baking → ready → served), Delivery enforces that a delivery order must carry an address, Payment shields itself from a third-party card gateway with an anti-corruption layer that translates the raw gateway result into a clean PaymentReceipt and posts captures to a ledger via a cross-aggregate policy, and Promotions enforces that a discount can never drive an order total negative. The context map wires the six contexts together with every relationship kind — shared-kernel, conformist, customer-supplier, partnership, open-host, and anti-corruption-layer.",
+  "difficulty": "intermediate",
+  "tags": [
+    "aggregate",
+    "state-machine",
+    "value-objects",
+    "pricing",
+    "anti-corruption-layer",
+    "context-map",
+    "integration-events",
+    "policy",
+    "ddd"
+  ],
+  "contexts": ["Menu", "Ordering", "Kitchen", "Delivery", "Payment", "Promotions"],
+  "coreAggregate": "Order",
+  "entryFile": "ordering.koi",
+  "teaches": [
+    "modelling a non-trivial domain across six bounded contexts",
+    "an aggregate priced from its line items with derived/computed fields",
+    "entity lifecycle state machines guarded by invariants",
+    "commands that guard with requires and emit domain events",
+    "factory creation with create",
+    "integration events published to and subscribed by other contexts",
+    "an anti-corruption layer translating a third-party model",
+    "a cross-aggregate policy reacting to a domain event",
+    "natural-key identity, versioned aggregates, and repositories with finders",
+    "value objects, quantities with unit-checked arithmetic, and invariants",
+    "named specifications and pure domain operations",
+    "modules, @since contract versioning, read models and queries",
+    "a context map exercising every strategic relationship kind"
+  ],
+  "icon": "🍕"
+}

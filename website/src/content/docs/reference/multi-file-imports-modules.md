@@ -291,11 +291,13 @@ context Shipping version 1 {
 }
 ```
 
-This compiles only as part of the full demo directory, because it references `OrderId`
-(from `Ordering`), `Weight` (from `Catalog`), and `PostalAddress` (from `Customers`) — all
-sibling `.koi` files in `demo/Shop.Domain/Models/`. That's exactly the point of directory
+This compiles only as part of a full multi-context directory, because it references `OrderId`
+(from `Ordering`), `Weight` (from `Catalog`), and `PostalAddress` (from `Customers`) — each a
+sibling `.koi` file compiled in the same directory pass. That's exactly the point of directory
 mode: each context stays in its own file, and Koine resolves the cross-context references
-when it merges them into one model.
+when it merges them into one model. (For a real, compiling example, see the
+[`templates/pizzeria`](https://github.com/Atypical-Consulting/Koine/tree/main/templates/pizzeria)
+template, where `Kitchen` imports `Menu`'s `Topping`.)
 
 ## See also
 

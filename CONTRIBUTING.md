@@ -28,7 +28,7 @@ dotnet test       # run the full suite (~670 tests)
 dotnet test --filter "FullyQualifiedName~R9ValueObjectTests"
 
 # Try the CLI
-dotnet run --project src/Koine.Cli -- build examples/billing.koi --target csharp --out ./generated
+dotnet run --project src/Koine.Cli -- build templates/starters/billing/billing.koi --target csharp --out ./generated
 ```
 
 A **green build proves the domain**: the emitted C# is snapshot-tested *and* compiled/executed in-memory

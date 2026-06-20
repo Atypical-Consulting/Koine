@@ -1,0 +1,81 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://koine.dev/templates/template.schema.json",
+  "title": "Koine template manifest",
+  "description": "Metadata for a Koine example-domain template. One template.json sits next to the template's .koi source files. The template id must equal its folder name, and entryFile must name a .koi file present in the folder.",
+  "type": "object",
+  "required": [
+    "id",
+    "name",
+    "tagline",
+    "description",
+    "difficulty",
+    "tags",
+    "contexts",
+    "coreAggregate",
+    "entryFile",
+    "teaches",
+    "icon"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Stable identifier for the template. MUST equal the template's folder name."
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Human-readable display name (e.g. \"Billing\")."
+    },
+    "tagline": {
+      "type": "string",
+      "minLength": 1,
+      "description": "One-line summary shown in template listings."
+    },
+    "description": {
+      "type": "string",
+      "minLength": 1,
+      "description": "A paragraph describing what the template models and demonstrates."
+    },
+    "difficulty": {
+      "type": "string",
+      "enum": ["starter", "beginner", "intermediate", "advanced"],
+      "description": "Relative complexity, used to order and badge templates."
+    },
+    "tags": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "type": "string", "minLength": 1 },
+      "description": "Free-form keywords for search and filtering."
+    },
+    "contexts": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "type": "string", "minLength": 1 },
+      "description": "Names of the bounded contexts the template defines."
+    },
+    "coreAggregate": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The headline aggregate that anchors the template."
+    },
+    "entryFile": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The primary .koi file to open first. MUST name a file present in the template folder."
+    },
+    "teaches": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "type": "string", "minLength": 1 },
+      "description": "The Koine concepts or DDD patterns a learner picks up from this template."
+    },
+    "icon": {
+      "type": "string",
+      "minLength": 1,
+      "description": "An icon identifier (e.g. an emoji or icon name) for the template card."
+    }
+  }
+}

@@ -1,0 +1,134 @@
+/// Payment bounded context — charging the customer for an order and keeping the
+/// books. It is downstream of a third-party card gateway whose model we do NOT
+/// control, so it shields itself with an anti-corruption layer (R14.2): the raw
+/// gateway result is translated into our own `PaymentReceipt` (the acl block lives
+/// in context-map.koi). Two aggregates — Billing and Ledger — exercise a multi-
+/// aggregate context with a cross-aggregate policy.
+///
+/// Naming note: the root entity is `Charge`, deliberately NOT `Payment`. A C# type
+/// must not share its enclosing namespace's name, and this context emits into a
+/// `Payment` namespace; an entity called `Payment` would collide with it, exactly
+/// as the demo avoided by pairing a `Payments` context with a `Payment` entity.
+context Payment version 1 {
+
+  // R14.3 — react to placed orders (authorized by `Ordering -> Payment : open-host`
+  // in context-map.koi). Emits an IHandleOrderPlaced seam the biller implements to
+  // authorize a charge for the new order.
+  subscribes Ordering.OrderPlaced
+
+  enum PaymentMethod { Card, Cash, Voucher }
+  enum ChargeStatus { Authorized, Captured, Refunded, Failed }
+
+  /// A monetary amount. `currency` is intentionally a primitive String, not the
+  /// shared-kernel `Currency` enum: Payment is downstream of the shared kernel and
+  /// does not import Currency (see context-map.koi), so it keeps money's currency
+  /// loose to match whatever the gateway hands back.
+  value Money {
+    amount:   Decimal
+    currency: String
+    invariant amount >= 0   "an amount cannot be negative"
+  }
+
+  // R14.2 — the destination type the anti-corruption layer translates the gateway's
+  // raw result into (see the `acl { … }` block in context-map.koi). Payment code
+  // only ever sees this clean type, never the gateway's shape.
+  value PaymentReceipt {
+    reference: String
+    amount:    Decimal
+    invariant amount >= 0   "a receipt amount cannot be negative"
+  }
+
+  /// Recorded when a charge is captured. Triggers the ledger-posting policy.
+  event ChargeCaptured {
+    charge:         ChargeId
+    capturedAmount: Decimal
+  }
+
+  /// The charge aggregate — one charge against an order.
+  aggregate Billing root Charge {
+
+    repository {
+      operations: getById, add, update
+      find byOrder(order: OrderId): List<Charge>
+    }
+
+    /// Raised when a charge is authorized by the factory (R6/R8).
+    event ChargeAuthorized {
+      charge: ChargeId
+      order:  OrderId
+    }
+
+    entity Charge identified by ChargeId {
+      order:   OrderId
+      amount:  Money
+      method:  PaymentMethod
+      status:  ChargeStatus = Authorized
+
+      // Derived read helper (R1.1).
+      isSettled: Bool = status == Captured
+
+      states status {
+        Authorized -> Captured, Failed
+        Captured   -> Refunded
+        Refunded
+        Failed
+      }
+
+      /// Capture an authorized charge (R5/R6). The ledger-posting policy reacts.
+      command capture {
+        requires status == Authorized   "only an authorized charge can be captured"
+        status -> Captured
+        emit ChargeCaptured(charge: id, capturedAmount: amount.amount)
+      }
+
+      /// Refund a captured charge (R5).
+      command refund {
+        requires status == Captured   "only a captured charge can be refunded"
+        status -> Refunded
+      }
+
+      /// R8 — authorize a charge for an order.
+      create authorize(order: OrderId, amount: Money, method: PaymentMethod) {
+        emit ChargeAuthorized(charge: id, order: order)
+      }
+    }
+  }
+
+  /// A second aggregate — the revenue ledger. Two aggregates in one context means
+  /// the generated IUnitOfWork exposes both repositories (R12.1).
+  aggregate Books root LedgerEntry {
+    entity LedgerEntry identified by LedgerEntryId {
+      charge:  ChargeId
+      balance: Decimal
+
+      /// Post an amount to the ledger entry (R5).
+      command record(amount: Decimal) {
+        balance -> amount
+      }
+    }
+  }
+
+  /// R10.3 — a policy reacting to a domain event across aggregates: when a charge is
+  /// captured, post it to the ledger. Koine emits the handler seam (the imperative
+  /// call is documented, not generated).
+  policy PostToLedger when ChargeCaptured then Books.record(amount: capturedAmount)
+
+  /// R12.2 — the application service interface (IPaymentService).
+  service PaymentService {
+    usecase AuthorizeCharge(order: OrderId, amount: Money, method: PaymentMethod): ChargeId
+    usecase CaptureCharge(charge: ChargeId)
+  }
+}
+
+/// Gateway bounded context — the external card processor whose model we do not
+/// control. Payment never references this directly; it goes through the generated
+/// anti-corruption translator interface (see the acl block in context-map.koi).
+context Gateway version 1 {
+
+  /// The raw result the third-party gateway returns. Payment shields itself from
+  /// this shape with its anti-corruption layer.
+  value GatewayResult {
+    rawReference: String
+    rawAmount:    Decimal
+  }
+}

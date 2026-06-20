@@ -8,7 +8,7 @@ capability. The compiler ships the **full tactical and strategic toolkit (R1–R
 **R16 multi-target emitters** (TypeScript and Python Phase 1), and the
 **R17 editor tooling** — the TextMate grammar, the `koine lsp` language server, and the
 `fmt`/`init`/`watch` commands. Every construct described in the reference is implemented, tested,
-and demonstrated in the [Shop demo](https://github.com/Atypical-Consulting/Koine/tree/main/demo).
+and demonstrated in the [pizzeria demo](https://github.com/Atypical-Consulting/Koine/tree/main/demo).
 
 This page is the honest status report — what you can rely on now, and what is still ahead.
 
@@ -84,9 +84,9 @@ context Sales version 3 {
 ```
 
 For the complete, copy-pasteable showcase, browse the
-[Shop demo `.koi` files](https://github.com/Atypical-Consulting/Koine/tree/main/demo/Shop.Domain/Models)
-and the [emitted C#](https://github.com/Atypical-Consulting/Koine/tree/main/demo/Shop.Domain/Generated)
-right next to them.
+[pizzeria template `.koi` files](https://github.com/Atypical-Consulting/Koine/tree/main/templates/pizzeria)
+and the [emitted C#](https://github.com/Atypical-Consulting/Koine/tree/main/demo/Pizzeria.Domain/Generated)
+the demo produces from them.
 
 ## Shipped: R16 — Multi-target emitters (partial)
 

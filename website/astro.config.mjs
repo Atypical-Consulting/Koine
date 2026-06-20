@@ -124,21 +124,24 @@ export default defineConfig({
 						{ label: 'Multi-file, imports & modules', slug: 'reference/multi-file-imports-modules' },
 						{ label: 'Context maps & integration', slug: 'reference/context-maps-integration' },
 						{ label: 'Versioning & evolution', slug: 'reference/versioning' },
+						{ label: 'Templates', slug: 'reference/templates' },
 					],
 				},
 				{
-					// Living documentation generated from the Shop demo model by
-					// scripts/build-docs.mjs (the `docs` emitter). Regenerated on every build;
-					// the pages live under src/content/docs/reference/domain/ (gitignored).
+					// Living documentation generated from the Pizzeria template
+					// (templates/pizzeria) by scripts/build-docs.mjs (the `docs` emitter).
+					// Regenerated on every build; the pages live under
+					// src/content/docs/reference/domain/ (gitignored).
 					label: 'Domain reference (generated)',
 					items: [
 						{ label: 'Overview', slug: 'reference/domain' },
-						{ label: 'Catalog', slug: 'reference/domain/catalog' },
-						{ label: 'Customers', slug: 'reference/domain/customers' },
+						{ label: 'Menu', slug: 'reference/domain/menu' },
 						{ label: 'Ordering', slug: 'reference/domain/ordering' },
-						{ label: 'Payments', slug: 'reference/domain/payments' },
-						{ label: 'Shipping', slug: 'reference/domain/shipping' },
-						{ label: 'Legacy', slug: 'reference/domain/legacy' },
+						{ label: 'Kitchen', slug: 'reference/domain/kitchen' },
+						{ label: 'Delivery', slug: 'reference/domain/delivery' },
+						{ label: 'Payment', slug: 'reference/domain/payment' },
+						{ label: 'Promotions', slug: 'reference/domain/promotions' },
+						{ label: 'Gateway', slug: 'reference/domain/gateway' },
 						{ label: 'Context map', slug: 'reference/domain/context-map' },
 						{ label: 'Integration events', slug: 'reference/domain/integration-events' },
 					],

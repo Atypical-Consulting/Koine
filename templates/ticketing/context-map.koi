@@ -1,0 +1,13 @@
+// The strategic view (R14.1) — how the two bounded contexts relate. A context map
+// is a top-level declaration (a sibling of `context`, not nested in one). In
+// directory mode every .koi file compiles as one model, so this map can name the
+// contexts declared in ticketing.koi and sla.koi, and authorize their event flow.
+//
+// The two contexts are partners in a feedback loop: TicketManagement publishes
+// TicketOpened so SLA can start a deadline clock, and SLA publishes SlaBreached so
+// TicketManagement can escalate when a promise is broken. A single *bidirectional*
+// customer-supplier relation authorizes subscriptions in BOTH directions (a context
+// map allows only one relation per pair, so the round-trip is modelled as `<->`).
+contextmap {
+  TicketManagement <-> SLA : customer-supplier
+}

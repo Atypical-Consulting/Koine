@@ -1,0 +1,138 @@
+/// Delivery bounded context — getting a delivery order to the customer's door. It
+/// owns the `Address` value object (supplied downstream to nobody else here, but a
+/// customer-supplier candidate) and enforces the rule that anchors this context: a
+/// delivery order must carry a delivery address.
+context Delivery version 1 {
+
+  // R14.3 — react to placed orders (authorized by `Ordering -> Delivery : open-host`
+  // in context-map.koi). Emits an IHandleOrderPlaced seam the dispatcher implements
+  // to create a delivery for a delivery-fulfilment order.
+  subscribes Ordering.OrderPlaced
+
+  /// How a delivery is doing. Drives the `states status { … }` machine below.
+  enum DeliveryStatus { Scheduled, PickedUp, EnRoute, Delivered, Failed }
+
+  /// A street address a pizza can be delivered to. A first-class value object so a
+  /// delivery destination is never a bare string, validated by shape and normalized
+  /// via string ops (R1.2). Owned here and supplied to partners (see context-map).
+  value Address {
+    street:     String
+    city:       String
+    postalCode: String
+    country:    String
+    // Derived string composition + a normalized one-line form.
+    formatted:  String = street + ", " + city + " " + postalCode
+    invariant street.trim.length > 0                "a delivery needs a street"
+    invariant city.trim.length > 0                  "a delivery needs a city"
+    invariant postalCode matches /^[0-9A-Za-z -]{3,10}$/   "invalid postal code"
+  }
+
+  /// A driver assigned to a delivery. A small value object so an assignee is typed.
+  value Courier {
+    name:  String
+    phone: String
+    invariant name.trim.length > 0   "a courier needs a name"
+  }
+
+  /// The delivery aggregate: one record per delivery order. Being an aggregate root
+  /// it gains an `IDeliveryRepository` and joins the context UoW; the repository
+  /// block adds intention-revealing finders (R11.3).
+  aggregate Dispatch root Delivery {
+
+    repository {
+      operations: getById, add, update
+      find enRoute(): List<Delivery>
+      find byCourier(courier: Courier): List<Delivery>
+    }
+
+    /// Raised inside the aggregate when a delivery is scheduled by the factory (R6/R8).
+    event DeliveryScheduled {
+      delivery: DeliveryId
+      order:    OrderId
+    }
+
+    /// Raised when a delivery is completed (R6).
+    event DeliveryCompleted {
+      delivery: DeliveryId
+    }
+
+    entity Delivery identified by DeliveryId {
+      order:       OrderId
+      // The destination is REQUIRED for a delivery order — this is the rule that
+      // anchors this context. Modelled as a non-optional field plus a content
+      // invariant so an empty/blank address is rejected too.
+      destination: Address
+      courier:     Courier?
+      status:      DeliveryStatus = Scheduled
+
+      // Derived (computed, get-only) read helpers (R1.1 / R2.1).
+      assigned:    Bool = courier.isPresent
+      isDelivered: Bool = status == Delivered
+
+      // --- The anchoring invariant: a delivery order requires an address --------
+      // A non-blank street guarantees the destination is a real, present address;
+      // combined with the non-optional `destination` field, a delivery can never be
+      // created without somewhere to go.
+      invariant destination.street.trim.length > 0
+        "a delivery order requires a delivery address"
+      // A delivery that has actually left must have a courier carrying it.
+      invariant courier.isPresent when status == EnRoute
+        "a delivery en route must have a courier"
+
+      // The delivery lifecycle (R7): scheduled, picked up, en route, delivered —
+      // or failed if it could not be completed.
+      states status {
+        Scheduled -> PickedUp, Failed
+        PickedUp  -> EnRoute, Failed
+        EnRoute   -> Delivered, Failed
+        Delivered
+        Failed
+      }
+
+      /// Assign a courier and have them collect the order (R5).
+      command pickUp(by: Courier) {
+        requires status == Scheduled   "only a scheduled delivery can be picked up"
+        courier -> by
+        status  -> PickedUp
+      }
+
+      /// Send a picked-up delivery on its way (R5).
+      command depart {
+        requires status == PickedUp   "only a picked-up delivery can depart"
+        requires courier.isPresent    "a delivery cannot depart without a courier"
+        status -> EnRoute
+      }
+
+      /// Mark a delivery as completed at the door (R5/R6).
+      command complete {
+        requires status == EnRoute   "only an en-route delivery can be completed"
+        status -> Delivered
+        emit DeliveryCompleted(delivery: id)
+      }
+
+      /// R8 — schedule a delivery for a placed delivery order. The same-named
+      /// parameters auto-bind the required fields; `status` defaults to Scheduled.
+      create schedule(order: OrderId, destination: Address) {
+        requires destination.street.trim.length > 0   "a delivery order requires a delivery address"
+        emit DeliveryScheduled(delivery: id, order: order)
+      }
+    }
+  }
+
+  /// R12.2 — the application service interface (IDeliveryService).
+  service DeliveryService {
+    usecase ScheduleDelivery(order: OrderId, destination: Address): DeliveryId
+    usecase CompleteDelivery(delivery: DeliveryId)
+  }
+
+  /// R12.3 — a flat read model for the dispatch board.
+  readmodel DeliveryTicket from Delivery {
+    id
+    order
+    status
+    destination
+  }
+
+  /// R12.4 — a query DTO over the dispatch board.
+  query DeliveriesByStatus(status: DeliveryStatus): List<DeliveryTicket>
+}

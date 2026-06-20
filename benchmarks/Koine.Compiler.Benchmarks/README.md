@@ -14,10 +14,10 @@ Three pipeline stages, each run against two inputs (`[Params]`):
 | `Diagnose` | parse + semantic validation             |
 | `Compile`  | full pipeline incl. C# emit *(baseline)* |
 
-| Corpus    | Input                                                            |
-|-----------|-----------------------------------------------------------------|
-| `Billing` | `examples/billing.koi` — single small file (~0.8 KB)            |
-| `Shop`    | `demo/Shop.Domain/Models/*.koi` — 7 files (~17 KB), one model   |
+| Corpus     | Input                                                            |
+|------------|-----------------------------------------------------------------|
+| `Billing`  | `templates/starters/billing/billing.koi` — single small file (~0.8 KB) |
+| `Pizzeria` | `templates/pizzeria/*.koi` — 8 files, one model                  |
 
 `[MemoryDiagnoser]` also reports allocations — a common silent regression source. The corpus files are
 copied next to the binary at build time (see the `.csproj`) and read from `corpus/` at runtime, so the
