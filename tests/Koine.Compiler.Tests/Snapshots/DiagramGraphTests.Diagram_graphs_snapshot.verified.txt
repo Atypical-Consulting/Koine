@@ -1,0 +1,39 @@
+﻿==== docs/Ordering.md ====
+-- diagram: Order [aggregate]
+  nodes:
+    Order | aggregate-root | Ordering.Order | "Order" @ 25:12-25:17
+    OrderSubmitted | event | Ordering.OrderSubmitted | "OrderSubmitted" @ 17:11-17:25
+    OrderLine | value-object | Ordering.OrderLine | "OrderLine" @ 19:11-19:20
+  edges:
+    Order -> OrderSubmitted
+    Order -> OrderLine
+-- diagram: Order [statemachine]
+  nodes:
+    Draft | state | Ordering.Order.Draft | "Draft" @ 30:14-30:20
+    Submitted | state | Ordering.Order.Submitted | "Submitted" @ 30:14-30:20
+    Cancelled | state | Ordering.Order.Cancelled | "Cancelled" @ 30:14-30:20
+    Paid | state | Ordering.Order.Paid | "Paid" @ 30:14-30:20
+    Shipped | state | Ordering.Order.Shipped | "Shipped" @ 30:14-30:20
+  edges:
+    Draft -> Submitted
+    Draft -> Cancelled
+    Submitted -> Paid
+    Submitted -> Cancelled
+    Paid -> Shipped
+    Paid -> Cancelled
+==== docs/context-map.md ====
+-- diagram: Context Map [contextmap]
+  nodes:
+    Ordering | context | Ordering | "Ordering" @ 53:3-53:35
+    Shipping | context | Shipping | "Shipping" @ 53:3-53:35
+  edges:
+    Ordering -> Shipping : Open Host
+==== docs/integration-events.md ====
+-- diagram: Integration Events [integration-events]
+  nodes:
+    evt_Ordering_OrderPlaced | integration-event | Ordering.OrderPlaced | "Ordering.OrderPlaced" @ 9:21-9:32
+    Ordering | context | Ordering | "Ordering" @ 1:9-1:17
+    Shipping | context | Shipping | "Shipping" @ 47:9-47:17
+  edges:
+    Ordering -> evt_Ordering_OrderPlaced : publishes
+    evt_Ordering_OrderPlaced -> Shipping : consumed by
