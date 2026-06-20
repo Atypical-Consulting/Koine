@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using Koine.Compiler.Ast;
 using Koine.Compiler.Diagnostics;
+using Koine.Compiler.Emit.CSharp;
 using Koine.Compiler.Services;
 
 namespace Koine.Compiler.Tests;
@@ -374,5 +375,47 @@ public class WarmModelTests
         comp.SemanticModel.ShouldNotBeNull();
         ReferenceEquals(comp.SemanticModel.Model, comp.Model).ShouldBeTrue(
             "SemanticModel.Model must be the same instance as KoineCompilation.Model");
+    }
+
+    // -------------------------------------------------------------------------
+    // 8. Task-3 parity: KoineCompiler rerouted through KoineCompilation
+    // -------------------------------------------------------------------------
+
+    /// <summary>
+    /// Guards the null-file trap: when <see cref="KoineCompiler.Parse(string, string?)"/> is called
+    /// with <c>file: null</c> (the default), every diagnostic it returns must have a null
+    /// <see cref="Diagnostic.File"/> — no fabricated path must be substituted.
+    /// </summary>
+    [Fact]
+    public void Parse_NullFile_DiagnosticsHaveNullFile()
+    {
+        // A source with a deliberate syntax error so at least one diagnostic is produced.
+        const string badSource = "context Broken { value X { MISSING_COLON String } }";
+
+        var compiler = new KoineCompiler();
+        var (_, diagnostics) = compiler.Parse(badSource, file: null);
+
+        diagnostics.ShouldNotBeEmpty("Expected at least one syntax diagnostic from the broken source");
+        foreach (var diag in diagnostics)
+        {
+            diag.File.ShouldBeNull(
+                $"Diagnostic '{diag.Message}' must carry a null File when Parse is called with file: null");
+        }
+    }
+
+    /// <summary>
+    /// End-to-end smoke test: the rerouted <see cref="KoineCompiler.Compile(string, Emit.IEmitter)"/>
+    /// must still succeed on the billing example and produce a non-empty set of emitted files.
+    /// </summary>
+    [Fact]
+    public void Compile_BillingExample_SucceedsWithNonEmptyFiles()
+    {
+        var billingSource = TestSupport.BillingFixture;
+        var result = new KoineCompiler().Compile(billingSource, new CSharpEmitter());
+
+        result.Success.ShouldBeTrue(
+            "Billing example must compile successfully after Task-3 rerouting: " +
+            string.Join("; ", result.Diagnostics.Select(d => d.ToString())));
+        result.Files.ShouldNotBeEmpty("Compile must emit at least one C# file for the billing example");
     }
 }

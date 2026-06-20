@@ -223,10 +223,19 @@ public sealed class KoineCompilation
     /// same two-stage SLL→LL ANTLR strategy as <see cref="KoineCompiler"/>.
     /// Always returns a (possibly partial) unit even when the source has syntax errors.
     /// </summary>
-    internal static ParsedUnit ParseUnit(SourceFile file)
+    internal static ParsedUnit ParseUnit(SourceFile file) => ParseUnit(file.Source, file.Path);
+
+    /// <summary>
+    /// Parses a source string with an optional file path (may be <c>null</c>) into a
+    /// <see cref="ParsedUnit"/>. This overload preserves the null-file stamp used by the single-doc
+    /// <see cref="KoineCompiler.Parse(string, string?)"/> and
+    /// <see cref="KoineCompiler.Diagnose(string, string?)"/> paths so diagnostics carry a null
+    /// <c>File</c> when no path is supplied — do NOT substitute a fabricated path here.
+    /// </summary>
+    internal static ParsedUnit ParseUnit(string source, string? file)
     {
-        var hash = ComputeHash(file.Source);
-        var (contexts, relations, diagnostics) = ParseSource(file.Source, file.Path);
+        var hash = ComputeHash(source);
+        var (contexts, relations, diagnostics) = ParseSource(source, file);
         return new ParsedUnit(hash, contexts, relations, diagnostics);
     }
 
