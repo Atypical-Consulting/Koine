@@ -1,7 +1,9 @@
-// Welcome / empty-state overlay for Koine Studio. Self-mounts a full-cover screen to
-// document.body once (sits above #app, below modals) offering the first actions: start a
-// scratch model, open a folder, or reopen a recent folder. The recent list is rebuilt from
-// store.getRecentFolders() on every show() so it always reflects the latest history.
+// Welcome / start console for Koine Studio. Self-mounts a full-cover screen to document.body once
+// (sits above #app, below modals) and offers the first actions: start a new model, open a folder, or
+// reopen a recent one. The hero shows the product's thesis as a live artifact — a real `.koi` snippet
+// (the ubiquitous language) that Koine turns into idiomatic code — rather than describing it in prose.
+// The recent list is rebuilt from store.getRecentFolders() on every show() so it always reflects the
+// latest history.
 import { getRecentFolders } from './store';
 import { LOGO_SVG } from './logo';
 import { registerOverlay } from './overlay';
@@ -68,9 +70,58 @@ function collectTags(templates: readonly Template[]): string[] {
   return [...seen];
 }
 
+// The hero artifact: the canonical Money value object, lifted verbatim from the billing starter
+// (templates/starters/billing). Syntax-coloured with the editor's own token hues (--koi-hl-*) so the
+// snippet reads as real Koine, not a marketing mock. Content is fully static — no user input — so an
+// innerHTML template is safe here and far more legible than building each <span> imperatively.
+const HERO_SNIPPET = `<span class="koi-syn-kw">value</span> <span class="koi-syn-type">Money</span> <span class="koi-syn-punct">{</span>
+  <span class="koi-syn-id">amount</span><span class="koi-syn-punct">:</span>   <span class="koi-syn-type">Decimal</span>
+  <span class="koi-syn-id">currency</span><span class="koi-syn-punct">:</span> <span class="koi-syn-type">Currency</span>
+  <span class="koi-syn-kw">invariant</span> <span class="koi-syn-id">amount</span> <span class="koi-syn-punct">&gt;=</span> <span class="koi-syn-num">0</span>   <span class="koi-syn-str">"a monetary amount cannot be negative"</span>
+<span class="koi-syn-punct">}</span>`;
+
+/** Plus / folder marks reused from the toolbar's New / Open buttons so the start actions read as the
+ *  same controls a user meets later in the chrome (one vocabulary, learned once). */
+const ICON_NEW = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3.4v9.2M3.4 8h9.2"/></svg>';
+const ICON_OPEN =
+  '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.2 4.3c0-.7.5-1.3 1.2-1.3h2.9l1.3 1.6h4.9c.7 0 1.3.6 1.3 1.3v6c0 .7-.6 1.2-1.3 1.2H3.4c-.7 0-1.2-.5-1.2-1.2z"/></svg>';
+
+/** Build a start action as a button with an icon, a label and a one-line description. */
+function makeAction(opts: {
+  icon: string;
+  label: string;
+  desc: string;
+  primary?: boolean;
+  onClick: () => void;
+}): HTMLButtonElement {
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = opts.primary ? 'koi-welcome-action primary' : 'koi-welcome-action';
+  btn.setAttribute('aria-label', opts.label);
+
+  const icon = document.createElement('span');
+  icon.className = 'koi-welcome-action-icon';
+  icon.setAttribute('aria-hidden', 'true');
+  icon.innerHTML = opts.icon;
+
+  const text = document.createElement('span');
+  text.className = 'koi-welcome-action-text';
+  const label = document.createElement('span');
+  label.className = 'koi-welcome-action-label';
+  label.textContent = opts.label;
+  const desc = document.createElement('span');
+  desc.className = 'koi-welcome-action-desc';
+  desc.textContent = opts.desc;
+  text.append(label, desc);
+
+  btn.append(icon, text);
+  btn.addEventListener('click', opts.onClick);
+  return btn;
+}
+
 /**
- * Build the welcome overlay (once) and return show/hide controls. On show() the recent
- * list is rebuilt from getRecentFolders(); any action invokes its callback then hides.
+ * Build the welcome console (once) and return show/hide controls. On show() the recent list is rebuilt
+ * from getRecentFolders(); any action invokes its callback then hides.
  */
 export function createWelcome(cb: WelcomeCallbacks, templates: readonly Template[] = TEMPLATES): WelcomeHandle {
   let shown = false;
@@ -78,8 +129,8 @@ export function createWelcome(cb: WelcomeCallbacks, templates: readonly Template
   const root = document.createElement('div');
   root.className = 'koi-welcome';
   root.hidden = true;
-  // Clicking the dimmed area outside the card returns to the editor — mirrors the modal
-  // backdrop convention now that the start screen is reachable on demand (logo / palette).
+  // Clicking the dimmed area outside the console returns to the editor — mirrors the modal backdrop
+  // convention now that the start screen is reachable on demand (logo / palette).
   root.addEventListener('mousedown', (e) => {
     if (e.target === root) hide();
   });
@@ -88,8 +139,31 @@ export function createWelcome(cb: WelcomeCallbacks, templates: readonly Template
   card.className = 'koi-welcome-card';
   root.appendChild(card);
 
-  // Dismiss back to the current editor. Invisible Esc was the only exit before; now that "home"
-  // is a deliberate destination, the way back has to be visible.
+  // --- top bar: wordmark (left) + dismiss (right) ---------------------------
+  const bar = document.createElement('div');
+  bar.className = 'koi-welcome-bar';
+  card.appendChild(bar);
+
+  const brand = document.createElement('div');
+  brand.className = 'koi-welcome-brand';
+  const logo = document.createElement('span');
+  logo.className = 'koi-welcome-logo';
+  logo.setAttribute('aria-hidden', 'true');
+  logo.innerHTML = LOGO_SVG; // inline SVG (currentColor wordmark) themes with the surrounding text
+  const wordmark = document.createElement('span');
+  wordmark.className = 'koi-welcome-wordmark';
+  const wordName = document.createElement('span');
+  wordName.className = 'koi-welcome-wordmark-name';
+  wordName.textContent = 'Koine';
+  const wordKicker = document.createElement('span');
+  wordKicker.className = 'koi-welcome-wordmark-kicker';
+  wordKicker.textContent = 'Studio';
+  wordmark.append(wordName, wordKicker);
+  brand.append(logo, wordmark);
+  bar.appendChild(brand);
+
+  // Visible way back to the editor (Esc was the only exit before, which is invisible now that the
+  // screen is a deliberate destination).
   const closeBtn = document.createElement('button');
   closeBtn.type = 'button';
   closeBtn.className = 'koi-welcome-close';
@@ -97,51 +171,147 @@ export function createWelcome(cb: WelcomeCallbacks, templates: readonly Template
   closeBtn.title = 'Back to editor';
   closeBtn.textContent = '✕';
   closeBtn.addEventListener('click', () => hide());
-  card.appendChild(closeBtn);
+  bar.appendChild(closeBtn);
 
-  // Logo container — the inline SVG (currentColor wordmark) themes with the surrounding text.
-  const logo = document.createElement('div');
-  logo.className = 'koi-welcome-logo';
-  logo.innerHTML = LOGO_SVG;
-  card.appendChild(logo);
+  // --- hero: the thesis (left) + get-to-work rail (right) -------------------
+  const hero = document.createElement('section');
+  hero.className = 'koi-welcome-hero';
+  card.appendChild(hero);
 
-  const title = document.createElement('h1');
-  title.className = 'koi-welcome-title';
-  title.textContent = 'Koine Studio';
-  card.appendChild(title);
+  // Left: eyebrow + editorial statement + the live snippet (the signature).
+  const lede = document.createElement('div');
+  lede.className = 'koi-welcome-lede';
 
-  const tagline = document.createElement('p');
-  tagline.className = 'koi-welcome-tagline';
-  tagline.textContent = 'A studio for the Koine DDD language.';
-  card.appendChild(tagline);
+  const eyebrow = document.createElement('p');
+  eyebrow.className = 'koi-welcome-eyebrow';
+  eyebrow.textContent = 'The language of your domain';
 
-  // Primary actions.
+  const statement = document.createElement('h1');
+  statement.className = 'koi-welcome-statement';
+  // The brand word carries the gradient; the rest stays monochrome so the snippet keeps the spotlight.
+  statement.innerHTML = 'Describe the domain.<br><span class="koi-welcome-grad">Koine</span> writes the code.';
+
+  const figure = document.createElement('figure');
+  figure.className = 'koi-welcome-snippet';
+
+  const snipBar = document.createElement('figcaption');
+  snipBar.className = 'koi-welcome-snippet-bar';
+  const snipFile = document.createElement('span');
+  snipFile.className = 'koi-welcome-snippet-file';
+  snipFile.textContent = 'billing.koi';
+  const snipKind = document.createElement('span');
+  snipKind.className = 'koi-welcome-snippet-kind';
+  snipKind.textContent = 'value object';
+  snipBar.append(snipFile, snipKind);
+
+  const pre = document.createElement('pre');
+  pre.className = 'koi-welcome-snippet-code';
+  pre.setAttribute('aria-label', 'A Koine value object: Money, with a non-negative invariant');
+  const code = document.createElement('code');
+  code.innerHTML = HERO_SNIPPET;
+  pre.appendChild(code);
+
+  const emit = document.createElement('p');
+  emit.className = 'koi-welcome-snippet-emit';
+  const emitDot = document.createElement('span');
+  emitDot.className = 'koi-welcome-emit-dot';
+  emitDot.setAttribute('aria-hidden', 'true');
+  const emitText = document.createElement('span');
+  emitText.textContent = 'Emits idiomatic C# — value object, guards, equality.';
+  emit.append(emitDot, emitText);
+
+  figure.append(snipBar, pre, emit);
+  lede.append(eyebrow, statement, figure);
+  hero.appendChild(lede);
+
+  // Right: the launch rail — primary actions, then recent folders.
+  const launch = document.createElement('div');
+  launch.className = 'koi-welcome-launch';
+
+  const launchTitle = document.createElement('h2');
+  launchTitle.className = 'koi-welcome-rail-title';
+  launchTitle.textContent = 'Start';
+  launch.appendChild(launchTitle);
+
   const actions = document.createElement('div');
   actions.className = 'koi-welcome-actions';
-  card.appendChild(actions);
+  actions.appendChild(
+    makeAction({
+      icon: ICON_NEW,
+      label: 'New model',
+      desc: 'Begin with an empty context',
+      primary: true,
+      onClick: () => {
+        hide();
+        cb.onNewModel();
+      },
+    }),
+  );
+  actions.appendChild(
+    makeAction({
+      icon: ICON_OPEN,
+      label: 'Open folder…',
+      desc: 'Work on an existing workspace',
+      onClick: () => {
+        hide();
+        cb.onOpenFolder();
+      },
+    }),
+  );
+  launch.appendChild(actions);
 
-  const newBtn = document.createElement('button');
-  newBtn.type = 'button';
-  newBtn.className = 'koi-welcome-action primary';
-  newBtn.textContent = 'New model';
-  newBtn.addEventListener('click', () => {
-    hide();
-    cb.onNewModel();
-  });
-  actions.appendChild(newBtn);
+  // Recent folders — populated on each show().
+  const recent = document.createElement('div');
+  recent.className = 'koi-welcome-recent';
+  launch.appendChild(recent);
+  hero.appendChild(launch);
 
-  const openBtn = document.createElement('button');
-  openBtn.type = 'button';
-  openBtn.className = 'koi-welcome-action';
-  openBtn.textContent = 'Open folder…';
-  openBtn.addEventListener('click', () => {
-    hide();
-    cb.onOpenFolder();
-  });
-  actions.appendChild(openBtn);
+  function renderRecent(): void {
+    recent.innerHTML = '';
 
-  // Example gallery — a searchable, filterable, difficulty-grouped catalogue that scales from a
-  // handful of starters to ~100 templates. The card-click still opens its template (preserved).
+    const heading = document.createElement('h2');
+    heading.className = 'koi-welcome-rail-title';
+    heading.textContent = 'Recent';
+    recent.appendChild(heading);
+
+    const folders = getRecentFolders();
+    if (!folders.length) {
+      const empty = document.createElement('p');
+      empty.className = 'koi-welcome-empty';
+      empty.textContent = 'Folders you open will show up here.';
+      recent.appendChild(empty);
+      return;
+    }
+
+    const list = document.createElement('div');
+    list.className = 'koi-welcome-recent-list';
+    for (const path of folders) {
+      const item = document.createElement('button');
+      item.type = 'button';
+      item.className = 'koi-welcome-recent-item';
+      item.title = path; // full path on hover
+
+      const name = document.createElement('span');
+      name.className = 'koi-welcome-recent-item-name';
+      name.textContent = baseName(path);
+      item.appendChild(name);
+
+      const full = document.createElement('span');
+      full.className = 'koi-welcome-recent-item-path';
+      full.textContent = path;
+      item.appendChild(full);
+
+      item.addEventListener('click', () => {
+        hide();
+        cb.onOpenRecent(path);
+      });
+      list.appendChild(item);
+    }
+    recent.appendChild(list);
+  }
+
+  // --- example gallery: searchable, filterable, difficulty-grouped ----------
+  // Scales from a handful of starters to ~100 templates. The card-click opens its template.
   const uid = `koi-welcome-${Math.random().toString(36).slice(2, 8)}`;
   const allTags = collectTags(templates);
 
@@ -156,11 +326,15 @@ export function createWelcome(cb: WelcomeCallbacks, templates: readonly Template
   gallery.className = 'koi-welcome-gallery';
   gallery.setAttribute('aria-label', 'Example templates');
 
+  // Gallery header row: title (left) + search (right) on wide screens, stacked on narrow.
+  const galleryHead = document.createElement('div');
+  galleryHead.className = 'koi-welcome-gallery-head';
+
   const galleryTitle = document.createElement('h2');
-  galleryTitle.className = 'koi-welcome-recent-title';
+  galleryTitle.className = 'koi-welcome-section-title';
   galleryTitle.id = `${uid}-title`;
   galleryTitle.textContent = 'Start from an example';
-  gallery.appendChild(galleryTitle);
+  galleryHead.appendChild(galleryTitle);
 
   // --- labelled, debounced search box ---------------------------------------
   const searchWrap = document.createElement('div');
@@ -196,7 +370,8 @@ export function createWelcome(cb: WelcomeCallbacks, templates: readonly Template
     }
   });
   searchWrap.append(searchLabel, searchInput);
-  gallery.appendChild(searchWrap);
+  galleryHead.appendChild(searchWrap);
+  gallery.appendChild(galleryHead);
 
   // --- filter chips: difficulty, then the union of tags ---------------------
   function makeChip(kind: 'difficulty' | 'tag', value: string, label: string): HTMLButtonElement {
@@ -351,54 +526,8 @@ export function createWelcome(cb: WelcomeCallbacks, templates: readonly Template
   renderGallery();
   card.appendChild(gallery);
 
-  // Recent folders — populated on each show().
-  const recent = document.createElement('div');
-  recent.className = 'koi-welcome-recent';
-  card.appendChild(recent);
-
-  function renderRecent(): void {
-    recent.innerHTML = '';
-
-    const heading = document.createElement('div');
-    heading.className = 'koi-welcome-recent-title';
-    heading.textContent = 'Recent folders';
-    recent.appendChild(heading);
-
-    const folders = getRecentFolders();
-    if (!folders.length) {
-      const empty = document.createElement('p');
-      empty.className = 'koi-welcome-empty';
-      empty.textContent = 'No recent folders yet.';
-      recent.appendChild(empty);
-      return;
-    }
-
-    for (const path of folders) {
-      const item = document.createElement('button');
-      item.type = 'button';
-      item.className = 'koi-welcome-recent-item';
-      item.title = path; // full path on hover
-
-      const name = document.createElement('span');
-      name.className = 'koi-welcome-recent-item-name';
-      name.textContent = baseName(path);
-      item.appendChild(name);
-
-      const full = document.createElement('span');
-      full.className = 'koi-welcome-recent-item-path';
-      full.textContent = path;
-      item.appendChild(full);
-
-      item.addEventListener('click', () => {
-        hide();
-        cb.onOpenRecent(path);
-      });
-      recent.appendChild(item);
-    }
-  }
-
   // Registered with the shared overlay stack while shown, so Esc dismisses the welcome screen
-  // (revealing the seeded scratch editor behind it) and layered overlays close top-first.
+  // (revealing the seeded editor behind it) and layered overlays close top-first.
   let unregister: (() => void) | null = null;
 
   function show(): void {
@@ -407,7 +536,10 @@ export function createWelcome(cb: WelcomeCallbacks, templates: readonly Template
     root.hidden = false;
     shown = true;
     unregister = registerOverlay(hide);
-    newBtn.focus();
+    // Focus the start console so Esc/Tab land here, but don't yank focus to a control — the snippet is
+    // the first thing to read. The console is programmatically focusable via tabindex in the SCSS-less
+    // DOM; fall back to the New action if the host expects an immediate control focus.
+    (card.querySelector<HTMLElement>('.koi-welcome-action.primary') ?? card).focus();
   }
 
   function hide(): void {
