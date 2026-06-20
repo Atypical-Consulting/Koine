@@ -1,5 +1,7 @@
 using System.Globalization;
+using System.Net;
 using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Hosting.Server;
 using Microsoft.AspNetCore.Hosting.Server.Features;
 using Microsoft.Extensions.DependencyInjection;
@@ -19,10 +21,14 @@ namespace Koine.Mcp;
 /// host works whether launched as <c>koine-mcp --http</c> or hosted by the CLI as
 /// <c>koine mcp --http</c>); only the transport differs from <see cref="StdioHost"/>.</para>
 ///
-/// <para>Binds to <b>loopback only</b> by default, which keeps the surface local; CORS is permissive
-/// so browser-based MCP clients can connect. The resolved endpoint is printed to <b>stderr</b> as
-/// <c>[koine-mcp] http://HOST:PORT/mcp</c> so a launcher (Koine Studio's Tauri shell) can scrape it,
-/// and stdout is left clean to match the stdio host.</para>
+/// <para>Binds to <b>loopback only</b> by default, which keeps the surface local. On a loopback bind
+/// the server defends itself against DNS-rebinding and drive-by cross-origin attacks: CORS only
+/// allows loopback origins and a Host-header guard rejects requests whose <c>Host</c> resolves to a
+/// non-loopback name. Binding to a non-loopback/wildcard host is an explicit opt-in into remote
+/// exposure — CORS opens up but a stderr warning is printed, since the server is unauthenticated. The
+/// resolved endpoint is printed to <b>stderr</b> as <c>[koine-mcp] http://HOST:PORT/mcp</c> so a
+/// launcher (Koine Studio's Tauri shell) can scrape it, and stdout is left clean to match the stdio
+/// host.</para>
 /// </summary>
 public static class HttpHost
 {
@@ -36,12 +42,40 @@ public static class HttpHost
     internal const string EndpointLogPrefix = "[koine-mcp] ";
 
     /// <summary>
+    /// Maximum accepted request body size (16 MiB) — generous for <c>.koi</c> text, but a hard cap so
+    /// a hostile or buggy client can't exhaust memory by streaming an unbounded body.
+    /// </summary>
+    internal const long MaxRequestBodyBytes = 16L * 1024 * 1024;
+
+    /// <summary>
     /// Builds the host, binds it (default <c>127.0.0.1:0</c> — an OS-assigned port), announces the
     /// resolved <c>/mcp</c> URL on stderr, and serves until shutdown (Ctrl+C / SIGTERM).
     /// </summary>
     public static async Task RunAsync(string[] args)
     {
         var (host, port) = ParseEndpoint(args);
+        await RunAsync(host, port);
+    }
+
+    /// <summary>
+    /// Builds the host bound to <paramref name="host"/>:<paramref name="port"/>, announces the
+    /// resolved <c>/mcp</c> URL on stderr, and serves until shutdown (Ctrl+C / SIGTERM). Rejects an
+    /// out-of-range port and warns (but proceeds) on a non-loopback bind.
+    /// </summary>
+    internal static async Task RunAsync(string host, int port)
+    {
+        if (!IsValidPort(port))
+        {
+            Console.Error.WriteLine(EndpointLogPrefix + $"error: port must be 0-65535 (got {port})");
+            return;
+        }
+
+        if (!IsLoopbackHost(host))
+        {
+            Console.Error.WriteLine(EndpointLogPrefix
+                + "warning: binding to a non-loopback address exposes the unauthenticated MCP server to the network");
+        }
+
         var app = Build(host, port);
 
         await app.StartAsync();
@@ -65,6 +99,9 @@ public static class HttpHost
         builder.Logging.AddConsole(options =>
             options.LogToStandardErrorThreshold = LogLevel.Trace);
 
+        // Cap the request body so a hostile/buggy client can't exhaust memory with an unbounded body.
+        builder.WebHost.ConfigureKestrel(o => o.Limits.MaxRequestBodySize = MaxRequestBodyBytes);
+
         var mcpAssembly = typeof(HttpHost).Assembly;
         builder.Services
             .AddMcpServer()
@@ -72,14 +109,28 @@ public static class HttpHost
             .WithToolsFromAssembly(mcpAssembly)
             .WithResourcesFromAssembly(mcpAssembly);
 
-        // The bind is loopback-only, so exposure is local; allow any local MCP client (including
-        // browser-based ones) to call it, and expose the Streamable-HTTP session header so a browser
-        // client can read it back across the CORS boundary.
-        builder.Services.AddCors(options => options.AddDefaultPolicy(policy => policy
-            .AllowAnyOrigin()
-            .AllowAnyHeader()
-            .AllowAnyMethod()
-            .WithExposedHeaders("Mcp-Session-Id")));
+        // A loopback bind is only reachable from this machine, but a website the user visits can still
+        // drive it from their browser (a DNS-rebinding / drive-by cross-origin attack). So on a
+        // loopback bind, restrict CORS to loopback origins (no-Origin, non-browser clients are
+        // unaffected) and add a Host-header guard below. A non-loopback/wildcard bind is an explicit
+        // opt-in into remote use, so we honour the operator's intent and allow any origin.
+        var loopbackOnly = IsLoopbackHost(host);
+        builder.Services.AddCors(options => options.AddDefaultPolicy(policy =>
+        {
+            if (loopbackOnly)
+            {
+                policy.SetIsOriginAllowed(IsLoopbackOrigin);
+            }
+            else
+            {
+                policy.AllowAnyOrigin();
+            }
+
+            policy
+                .AllowAnyHeader()
+                .AllowAnyMethod()
+                .WithExposedHeaders("Mcp-Session-Id");
+        }));
 
         var app = builder.Build();
 
@@ -88,9 +139,57 @@ public static class HttpHost
         app.Urls.Add($"http://{host}:{port}");
 
         app.UseCors();
+
+        // Anti-DNS-rebinding guard: on a loopback bind, reject any request whose Host header doesn't
+        // resolve to loopback. ctx.Request.Host.Host strips the port. Requests from the MCP client
+        // (Host=127.0.0.1) pass; a rebound attacker domain (Host=evil.example) is refused.
+        if (loopbackOnly)
+        {
+            app.Use(async (ctx, next) =>
+            {
+                if (!IsLoopbackHost(ctx.Request.Host.Host))
+                {
+                    ctx.Response.StatusCode = 403;
+                    return;
+                }
+
+                await next();
+            });
+        }
+
         app.MapMcp(McpPath);
         return app;
     }
+
+    /// <summary>True when <paramref name="port"/> is a bindable TCP port (0 = OS-assigned, else 1-65535).</summary>
+    internal static bool IsValidPort(int port) => port is >= 0 and <= 65535;
+
+    /// <summary>
+    /// True when <paramref name="host"/> names the loopback interface: the DNS name <c>localhost</c>,
+    /// or any address in the IPv4 loopback block <c>127.0.0.0/8</c> (e.g. <c>127.0.0.1</c>,
+    /// <c>127.0.0.2</c>), or IPv6 <c>::1</c> (with or without brackets). Classifying by the actual IP
+    /// — via <see cref="IPAddress.IsLoopback"/> — rather than a literal allowlist means the security
+    /// defences can't fail <i>open</i> on a non-<c>.1</c> loopback bind. A wildcard bind
+    /// (<c>0.0.0.0</c>, <c>::</c>) or any routable address is <b>not</b> loopback.
+    /// </summary>
+    internal static bool IsLoopbackHost(string host)
+    {
+        if (string.IsNullOrWhiteSpace(host))
+        {
+            return false;
+        }
+
+        var normalized = host.Trim().Trim('[', ']');
+        return normalized.Equals("localhost", StringComparison.OrdinalIgnoreCase)
+            || (IPAddress.TryParse(normalized, out var ip) && IPAddress.IsLoopback(ip));
+    }
+
+    /// <summary>
+    /// True when <paramref name="origin"/> is a well-formed URL whose host is loopback (see
+    /// <see cref="IsLoopbackHost"/>). A malformed origin is rejected.
+    /// </summary>
+    internal static bool IsLoopbackOrigin(string origin) =>
+        Uri.TryCreate(origin, UriKind.Absolute, out var uri) && IsLoopbackHost(uri.Host);
 
     /// <summary>The resolved <c>http://HOST:PORT/mcp</c> URL of a started host (real port if bound with 0).</summary>
     internal static string McpUrl(WebApplication app) => BaseUrl(app).TrimEnd('/') + McpPath;

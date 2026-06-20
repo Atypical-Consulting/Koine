@@ -51,6 +51,9 @@ public sealed class EmitterRegistry
     /// <summary>The supported target names, built-ins first then externals, in display order.</summary>
     public IReadOnlyList<string> SupportedTargets { get; }
 
+    /// <summary>A comma-separated list of <see cref="SupportedTargets"/>, for help and error messages.</summary>
+    public string SupportedList => string.Join(", ", SupportedTargets);
+
     /// <summary>True when <paramref name="target"/> resolves to a provider (case-insensitive).</summary>
     public bool IsSupported(string target) => _byTarget.ContainsKey(target);
 

@@ -22,6 +22,11 @@ public static class CompileTool
         [Description("Output target: csharp (default), typescript, python, glossary, or docs.")]
         string target = "csharp")
     {
+        if (!ToolGuards.TryValidateFiles(files, out var guardErrors))
+        {
+            return CompilationResult.Failed(guardErrors);
+        }
+
         if (!EmitterFactory.TryCreate(target, out var emitter, out var error))
         {
             return CompilationResult.Failed(error!);

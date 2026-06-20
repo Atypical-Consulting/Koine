@@ -22,9 +22,17 @@ public static class FormatTool
         [Description("The .koi source text to format.")]
         string source)
     {
-        // The formatter cannot fix syntax; surface parse errors instead of silently echoing the input.
-        // Parsing is error-tolerant and returns a partial model even for broken input, so a null
-        // check alone no longer detects a syntax error — gate on diagnostic severity instead.
+        if (!ToolGuards.TryValidateSource(source, out var sizeErr))
+        {
+            return new FormattingResult(source ?? string.Empty, Changed: false, new[] { sizeErr! });
+        }
+
+        // The formatter only LEXES the source (it strips lexer error listeners and re-emits tokens);
+        // it does not parse, and so cannot surface syntax diagnostics itself. We therefore parse here
+        // purely as a gate: if the source has syntax errors we return them and leave the text untouched
+        // rather than formatting partially-valid input. Parsing is error-tolerant and returns a partial
+        // model even for broken input, so a null check alone no longer detects a syntax error — gate on
+        // diagnostic severity instead. (The later Format() call lexes the source independently.)
         var (model, diagnostics) = new KoineCompiler().Parse(source);
         if (model is null || diagnostics.Any(d => d.Severity == DiagnosticSeverity.Error))
         {

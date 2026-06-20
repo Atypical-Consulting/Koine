@@ -27,6 +27,6 @@ public static class ReferenceTool
         }
 
         return KnowledgeStore.ReferenceSection(topic)
-            ?? $"Unknown topic '{topic}'. Available topics: {string.Join(", ", KnowledgeStore.ReferenceTopics)}.";
+            ?? KnowledgeStore.UnknownTopicMessage(topic);
     }
 }

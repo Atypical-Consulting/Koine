@@ -33,12 +33,19 @@ internal static class KnowledgeStore
     /// <c>null</c> when the topic is unknown. Sections are delimited by
     /// <c>&lt;!-- topic: slug --&gt;</c> markers in <c>reference.md</c>.
     /// </summary>
-    public static string? ReferenceSection(string topic)
+    public static string? ReferenceSection(string topic) => ReferenceSection(ReferenceMarkdown, topic);
+
+    /// <summary>
+    /// Returns the section for <paramref name="topic"/> (case-insensitive) scanned from the given
+    /// <paramref name="markdown"/>, or <c>null</c> when the topic is unknown <em>or</em> its captured
+    /// body is empty. Sections are delimited by <c>&lt;!-- topic: slug --&gt;</c> markers.
+    /// </summary>
+    internal static string? ReferenceSection(string markdown, string topic)
     {
         var capturing = false;
         var sb = new StringBuilder();
 
-        foreach (var line in SplitLines(ReferenceMarkdown))
+        foreach (var line in SplitLines(markdown))
         {
             var marker = TopicOf(line);
             if (marker is not null)
@@ -62,8 +69,26 @@ internal static class KnowledgeStore
             }
         }
 
-        return capturing ? sb.ToString().Trim() : null;
+        if (!capturing)
+        {
+            return null;
+        }
+
+        var body = sb.ToString().Trim();
+        return body.Length == 0 ? null : body;
     }
+
+    /// <summary>Message for an unknown reference topic, listing the available topics.</summary>
+    public static string UnknownTopicMessage(string topic) =>
+        $"Unknown topic '{topic}'. Available topics: {string.Join(", ", ReferenceTopics)}.";
+
+    /// <summary>Message for an unknown example name, listing the available examples.</summary>
+    public static string UnknownExampleMessage(string name) =>
+        $"Unknown example '{name}'. Available examples: {string.Join(", ", Examples.Keys)}.";
+
+    /// <summary>The no-name listing of available examples and how to fetch one.</summary>
+    public static string ExamplesListing() =>
+        $"Available examples: {string.Join(", ", Examples.Keys)}. Call koine_examples with a name to get its source.";
 
     private static ImmutableSortedDictionary<string, string> LoadExamples()
     {

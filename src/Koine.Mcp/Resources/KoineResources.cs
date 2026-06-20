@@ -19,14 +19,12 @@ public static class KoineResources
     [Description("A single section of the Koine language reference, selected by topic slug.")]
     public static string ReferenceTopic(string topic) =>
         KnowledgeStore.ReferenceSection(topic)
-            ?? throw new McpException(
-                $"Unknown reference topic '{topic}'. Available: {string.Join(", ", KnowledgeStore.ReferenceTopics)}.");
+            ?? throw new McpException(KnowledgeStore.UnknownTopicMessage(topic));
 
     [McpServerResource(UriTemplate = "koine://examples/{name}", Name = "Koine example model", MimeType = "text/plain")]
     [Description("A real, compilable Koine example model, selected by name.")]
     public static string Example(string name) =>
         KnowledgeStore.Examples.TryGetValue(name, out var source)
             ? source
-            : throw new McpException(
-                $"Unknown example '{name}'. Available: {string.Join(", ", KnowledgeStore.Examples.Keys)}.");
+            : throw new McpException(KnowledgeStore.UnknownExampleMessage(name));
 }
