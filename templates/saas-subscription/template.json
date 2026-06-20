@@ -1,0 +1,41 @@
+{
+  "id": "saas-subscription",
+  "name": "SaaS Subscription",
+  "tagline": "Multi-tenant subscriptions with trials, metered quotas, dunning and a payment-provider ACL.",
+  "description": "A realistic multi-tenant SaaS billing platform across four bounded contexts plus an external payment-provider stub. Tenant is the upstream organisation identity every subscription is scoped to. Subscription is the heart of the template: the headline aggregate runs an explicit lifecycle state machine (trial → active → suspended → cancelled), carries the quota/overage value object that anchors a metered plan, enforces 'one active subscription per tenant' (via an activeForTenant finder the application service checks) and 'an active subscription must be on a paid plan', and publishes the platform's published language — TrialStarted, SubscriptionActivated, PlanChanged, PaymentFailed and SubscriptionCancelled. Billing raises invoices for activated subscriptions, posts paid revenue to a ledger through a cross-aggregate policy, and shields itself from a third-party payment provider with an anti-corruption layer that translates the provider's raw charge into a clean ChargeReceipt; its PaymentDeclined event feeds back into Subscription to drive dunning. Entitlements provisions, degrades and revokes each tenant's feature set and seat allowance as the subscription lifecycle unfolds. The context map wires the four contexts with customer-supplier, a bidirectional dunning loop, open-host published events and an anti-corruption layer.",
+  "difficulty": "advanced",
+  "tags": [
+    "saas",
+    "subscriptions",
+    "multi-tenant",
+    "state-machine",
+    "metering",
+    "quota",
+    "dunning",
+    "anti-corruption-layer",
+    "integration-events",
+    "policy",
+    "context-map",
+    "ddd"
+  ],
+  "contexts": ["Tenant", "Subscription", "Billing", "Entitlements"],
+  "coreAggregate": "Subscription",
+  "entryFile": "subscription.koi",
+  "teaches": [
+    "modelling a multi-tenant SaaS across four bounded contexts",
+    "an aggregate lifecycle state machine: trial -> active -> suspended -> cancelled",
+    "quota and overage as a value object with derived, non-negative-by-construction fields",
+    "the 'one active subscription per tenant' rule via an intention-revealing finder",
+    "conditional invariants with when (an active plan must be paid; a cancellation must be timestamped)",
+    "commands that guard with requires, mutate state and emit domain events",
+    "factory-only creation with create",
+    "integration events as a published language across contexts",
+    "a bidirectional customer-supplier dunning loop between Subscription and Billing",
+    "an anti-corruption layer translating a third-party payment provider's model",
+    "a cross-aggregate policy posting paid revenue to a ledger",
+    "named specifications and pure domain operations (overage pricing, dunning decisions)",
+    "versioned aggregates, repositories with finders, read models and queries",
+    "a context map exercising customer-supplier, open-host and anti-corruption-layer relationships"
+  ],
+  "icon": "🔁"
+}

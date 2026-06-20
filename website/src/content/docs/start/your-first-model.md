@@ -246,6 +246,6 @@ not in your service layer.
 - **[Reading the generated C#](/Koine/start/reading-the-output/)** — a guided tour of the
   output: namespaces, the runtime, equality, and how each construct maps to code.
 - **[Values & invariants](/Koine/tutorials/values-and-invariants/)** — the first tutorial,
-  building a real Shop domain one construct at a time.
+  building a real domain one construct at a time.
 - **[Language reference](/Koine/reference/value-objects/)** — every construct, formally, with
   the exact C# it emits.

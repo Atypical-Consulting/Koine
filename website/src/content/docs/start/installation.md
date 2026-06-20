@@ -89,21 +89,21 @@ Usage:
 
 ## Build your first model
 
-The repository ships a tiny `examples/billing.koi` model. Just *checking* that a model parses and
+The repository ships a starter model at `templates/starters/billing/billing.koi`. Just *checking* that a model parses and
 validates — no output written — is the fastest round-trip:
 
 ```bash
-dotnet run --project src/Koine.Cli -- build examples/billing.koi
+dotnet run --project src/Koine.Cli -- build templates/starters/billing/billing.koi
 ```
 
 ```text
-OK: examples/billing.koi parsed and validated
+OK: templates/starters/billing/billing.koi parsed and validated
 ```
 
 To actually emit C#, add `--target csharp` and an `--out` directory:
 
 ```bash
-dotnet run --project src/Koine.Cli -- build examples/billing.koi --target csharp --out ./generated
+dotnet run --project src/Koine.Cli -- build templates/starters/billing/billing.koi --target csharp --out ./generated
 ```
 
 ```text

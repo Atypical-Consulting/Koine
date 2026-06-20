@@ -5,13 +5,14 @@ description: "Every shipped Koine construct mapped to its .koi syntax, what it e
 
 This is the everything-at-a-glance page: every construct Koine ships through epic **R15** — plus the
 **R17 developer tooling** — the short `.koi` syntax for it, the C# (or Markdown) it emits, and a pointer into the canonical
-[Shop demo](https://github.com/Atypical-Consulting/Koine/tree/main/demo). Tables are grouped by epic.
-Each family links to its reference page for the full story.
+[pizzeria demo](https://github.com/Atypical-Consulting/Koine/tree/main/demo) (which compiles the
+[`templates/pizzeria`](https://github.com/Atypical-Consulting/Koine/tree/main/templates/pizzeria)
+template). Tables are grouped by epic. Each family links to its reference page for the full story.
 
 :::tip
-Everything in the demo's `Models/*.koi` exercises **every row below**. The fastest way to learn a
+Everything in `templates/pizzeria/*.koi` exercises **every row below**. The fastest way to learn a
 construct is to grep its demo location and read the surrounding `.koi`, then look at the matching file
-under `demo/Shop.Domain/Generated/`.
+under `demo/Pizzeria.Domain/Generated/`.
 :::
 
 ## Tactical building blocks (v0 + R1)
@@ -23,17 +24,17 @@ The core DDD vocabulary: types, fields, invariants, and the expression language.
 
 | Construct | `.koi` syntax (short) | Emits | Demo location |
 |---|---|---|---|
-| Value object | `value Price { amount: Decimal }` | `sealed record` with get-only props, validating ctor, value equality | `Sku`, `Price`, `Money`, `Email`, `PostalAddress` |
-| Entity + id | `entity Product identified by ProductCode { … }` | `sealed class` with identity-only equality + a generated id value object | `Product`, `Customer`, `Order`, `Shipment`, `Payment` |
-| Aggregate root | `aggregate Order root Order { entity Order … }` | nested types in the context namespace; root implements `IAggregateRoot`; an `I<Root>Repository` is emitted | `Order`, `Shipment`, `Payment`, `Ledger`, `ProductCatalog` |
+| Value object | `value Price { amount: Decimal }` | `sealed record` with get-only props, validating ctor, value equality | `Money`, `Topping`, `Address`, `Coupon`, `Discount` |
+| Entity + id | `entity Product identified by ProductCode { … }` | `sealed class` with identity-only equality + a generated id value object | `Pizza`, `Order`, `KitchenTicket`, `Delivery`, `Charge` |
+| Aggregate root | `aggregate Order root Order { entity Order … }` | nested types in the context namespace; root implements `IAggregateRoot`; an `I<Root>Repository` is emitted | `Order`, `Catalog` (root `Pizza`), `Dispatch` (root `Delivery`), `Billing` (root `Charge`), `Books` (root `LedgerEntry`), `Kitchen.Line.KitchenTicket` |
 | Typed field | `name: Type` | a typed property + ctor parameter | every type |
-| Defaulted field | `status: OrderStatus = Draft` | a ctor parameter with a default value | `Order.status` |
+| Defaulted field | `status: OrderStatus = Draft` | a ctor parameter with a default value | `Order.status`, `KitchenTicket.stage` |
 | Derived field | `lineTotal: Money = price * quantity` | a get-only **computed** property (not in the ctor) | `OrderLine.lineTotal`, `Order.total` |
-| Range invariant | `invariant amount >= 0 "…"` | a ctor guard that throws `DomainInvariantViolationException` | `Price.amount >= 0`, `OrderLine.quantity >= 1` |
-| Regex invariant | `invariant code matches /…/ "…"` | a `Regex.IsMatch` guard | `Sku.code`, `Email.raw` |
+| Range invariant | `invariant amount >= 0 "…"` | a ctor guard that throws `DomainInvariantViolationException` | `Money.amount >= 0`, `OrderLine.quantity >= 1` |
+| Regex invariant | `invariant code matches /…/ "…"` | a `Regex.IsMatch` guard | `Coupon.code`, `Address.postalCode` |
 | Conditional invariant | `invariant status == Draft when lines.isEmpty` | `if (cond && !body) throw` | `Order` draft rule |
-| Conditional expression | `if cond then a else b` | a C# ternary | `OrderLine.payable`, `Customer.freeShipping` |
-| String ops | `code.trim.upper`, `a + b` | `.Trim()`, `.ToUpperInvariant()`, string concat | `Sku.normalized`, `Email.normalized`, `PostalAddress.formatted` |
+| Conditional expression | `if cond then a else b` | a C# ternary | `OrderLine.payable` |
+| String ops | `code.trim.upper`, `a + b` | `.Trim()`, `.ToUpperInvariant()`, string concat | `Coupon.normalized`, `Address.formatted` |
 | Collection ops + lambdas | `lines.sum(l => l.lineTotal)`, `.count`, `.all`, `.distinctBy` | LINQ (`.Sum`, `.Count`, `.All`, `.DistinctBy`); pulls `using System.Linq;` | `Order.total`, `Order` invariants |
 | Multiple contexts → namespaces | `context Catalog { … }` | one C# namespace + folder per context | all six contexts |
 
@@ -43,10 +44,10 @@ See [value objects](/Koine/reference/value-objects/) and [contexts and types](/K
 
 | Construct | `.koi` syntax (short) | Emits | Demo location |
 |---|---|---|---|
-| Optional field | `description: String?` | a nullable property; supports `??` and `.isPresent` | `Product.description`/`sale`, `Customer.nickname`/`phone` |
-| Set | `tags: Set<String>` | `IReadOnlySet<T>` (de-duplicated in the ctor) | `Product.tags`, `Customer.segments` |
-| Doc comment | `/// summary text` | a C# XML `<summary>` on the member/type | `ordering.koi`, `shipping.koi`, `payments.koi` |
-| Glossary | `koine build … --glossary shop.md` | a Markdown glossary grouped by context (each heading shows its `version`) then type | the `--glossary` flag |
+| Optional field | `description: String?` | a nullable property; supports `??` and `.isPresent` | `Pizza.description`/`kcal`, `KitchenTicket.startedAt` |
+| Set | `tags: Set<String>` | `IReadOnlySet<T>` (de-duplicated in the ctor) | `Pizza.toppings` |
+| Doc comment | `/// summary text` | a C# XML `<summary>` on the member/type | `ordering.koi`, `menu.koi`, `payment.koi` |
+| Glossary | `koine build … --glossary pizzeria.md` | a Markdown glossary grouped by context (each heading shows its `version`) then type | the `--glossary` flag |
 
 ## Commands, events & state (R5–R7)
 
@@ -54,10 +55,10 @@ See [commands, events & state](/Koine/reference/commands-events-state/).
 
 | Construct | `.koi` syntax (short) | Emits | Demo location |
 |---|---|---|---|
-| Command | `command submit() { requires …; status -> Placed; emit … }` | a mutating method that checks `requires`, applies `field -> value` transitions, re-checks invariants | `Order.submit/cancel`, `Shipment.dispatch`, `Payment.capture/refund` |
+| Command | `command submit() { requires …; status -> Placed; emit … }` | a mutating method that checks `requires`, applies `field -> value` transitions, re-checks invariants | `Order.place/cancel`, `Delivery.pickUp/depart/complete`, `Charge.capture/refund` |
 | Command returning a value | `command cancel(): OrderId { …; result id }` | a typed method (`public <T> Name(…)`) that returns the `result` expression as its terminal statement (the create-and-return-id idiom) | — |
-| Domain event | `event OrderSubmitted { … }` + `emit OrderSubmitted(…)` | a record recorded into the root's `DomainEvents` collection | `OrderSubmitted`, `OrderOpened`, `ShipmentScheduled`, `PaymentAuthorized` |
-| State machine | `states { Draft -> Placed; … }` | runtime-checked legal transitions; illegal transition throws | `Order`, `Shipment`, `Payment` lifecycles |
+| Domain event | `event OrderSubmitted { … }` + `emit OrderSubmitted(…)` | a record recorded into the root's `DomainEvents` collection | `OrderOpened`, `OrderPlacedInternally`, `DeliveryScheduled`, `ChargeAuthorized` |
+| State machine | `states { Draft -> Placed; … }` | runtime-checked legal transitions; illegal transition throws | `Order`, `Delivery`, `Charge`, `KitchenTicket` lifecycles |
 
 :::caution
 `->` (the single state-effect arrow: transition, state rule, **and** factory init below) is one atomic
@@ -71,7 +72,7 @@ The aggregate's only public construction path. See [factories](/Koine/reference/
 
 | Construct | `.koi` syntax (short) | Emits | Demo location |
 |---|---|---|---|
-| Named factory | `create open(customer: CustomerId, …) { … }` | `public static <Entity> Open(…)`: generate id, check `requires`, construct with named ctor args, emit, return | `Order.open`, `Shipment.schedule`, `Payment.authorize` |
+| Named factory | `create open(customer: CustomerId, …) { … }` | `public static <Entity> Open(…)`: generate id, check `requires`, construct with named ctor args, emit, return | `Order.open`, `Delivery.schedule`, `Charge.authorize` |
 | Field init | `total -> lines.sum(l => l.price)` | a named ctor argument `total: <expr>` | factory bodies |
 | Auto-bind | `create open(customer: CustomerId, …)` (param name = field) | binds the matching field without an explicit `->` | `Order.open` |
 | Creation event | `emit OrderOpened(orderId: id, …)` | records the event into `DomainEvents` after construction | factory bodies |
@@ -91,8 +92,8 @@ See [enums](/Koine/reference/enums/) and [value objects](/Koine/reference/value-
 |---|---|---|---|
 | Smart enum | `enum OrderStatus { Draft, Placed, Shipped }` | `sealed class` with static instances, `Name`/`Value`, `All`, `FromName`/`FromValue`, value equality, `==`/`!=` | every `enum` |
 | Enum with associated data | `enum Currency(symbol: String, decimals: Int) { EUR("€", 2) }` | each signature field becomes a get-only PascalCase property | `Currency(symbol, decimals)` |
-| Quantity | `quantity Weight { amount: Decimal  unit: MassUnit }` | a value object with unit-checked `+`/`-` (throws on mixed units) and scalar `*`/`/` that preserve the unit | `Weight` |
-| `Range<T>` | `window: Range<Instant>` | the runtime `Koine/Runtime/Range.cs` (`Contains`, `Overlaps`, start≤end guard); element must be `Int`, `Decimal`, or `Instant` | `SalePeriod.window` |
+| Quantity | `quantity Weight { amount: Decimal  unit: MassUnit }` | a value object with unit-checked `+`/`-` (throws on mixed units) and scalar `*`/`/` that preserve the unit | `Portion` |
+| `Range<T>` | `window: Range<Instant>` | the runtime `Koine/Runtime/Range.cs` (`Contains`, `Overlaps`, start≤end guard); element must be `Int`, `Decimal`, or `Instant` | `HappyHour.window` |
 
 ## Specifications, services & policies (R10)
 
@@ -100,10 +101,10 @@ See [specs, services & policies](/Koine/reference/specs-services-policies/).
 
 | Construct | `.koi` syntax (short) | Emits | Demo location |
 |---|---|---|---|
-| Specification | `spec IsVip on Customer = …` | an extension-method predicate `bool IsVip(this Customer x)` in `<Context>Specifications.cs`; call as `customer.IsVip()`; reusable in invariants | `Customers.IsVip` |
-| Domain service (pure) | `service LoyaltyService { operation discountRate(…): Decimal = … }` | a `sealed class` with one expression-bodied method per operation | `Customers.LoyaltyService` |
+| Specification | `spec IsVip on Customer = …` | an extension-method predicate `bool IsVip(this Customer x)` in `<Context>Specifications.cs`; call as `customer.IsVip()`; reusable in invariants | `Promotions.IsFreeOrder` (on `Discount`) |
+| Domain service (pure) | `service LoyaltyService { operation discountRate(…): Decimal = … }` | a `sealed class` with one expression-bodied method per operation | `Promotions.DiscountService` |
 | Domain service (seam) | `service Calc { operation run(a: Int): Int }` | an `abstract class` with abstract method seams | (any bodyless operation) |
-| Policy | `policy PostToLedger when PaymentAuthorized then Ledger.post(…)` | `IPostToLedgerPolicy` + an abstract `PostToLedgerPolicy` seam (the reaction is a doc sketch, not executed code) | `Payments.PostToLedger` |
+| Policy | `policy PostToLedger when ChargeCaptured then Books.record(…)` | `IPostToLedgerPolicy` + an abstract `PostToLedgerPolicy` seam (the reaction is a doc sketch, not executed code) | `Payment.PostToLedger` |
 
 ## Identity, repositories & concurrency (R11)
 
@@ -113,7 +114,7 @@ See [repositories & concurrency](/Koine/reference/repositories-concurrency/) and
 | Construct | `.koi` syntax (short) | Emits | Demo location |
 |---|---|---|---|
 | Guid identity (default) | `identified by OrderId` | a Guid-backed id value object with a `New()` generator | most aggregates |
-| Natural key | `identified by ProductCode as natural(String)` | a `String`/`Int`-backed id, value equality, **no** `New()`; blanks rejected | `Product` (`ProductCode`) |
+| Natural key | `identified by ProductCode as natural(String)` | a `String`/`Int`-backed id, value equality, **no** `New()`; blanks rejected | `Pizza` (`PizzaCode`) |
 | Sequence identity | `identified by InvoiceNo as sequence` | a `long`-backed id, no `New()` (the store assigns it) | sequence ids |
 | Repository interface | (any aggregate root) | `I<Root>Repository` with `GetByIdAsync`/`AddAsync`/`UpdateAsync`/`RemoveAsync` | every aggregate |
 | Repository operations + finders | `repository { operations: add, getById  find byCustomer(…): List<Order> }` | tunes the mutating set; `find` → async `…Async` (list → `IReadOnlyList<>`, single → `Root?`) | `Ordering`: `byCustomer`, `mostRecent` |
@@ -132,10 +133,10 @@ See [application layer & CQRS](/Koine/reference/application-cqrs/) and the
 
 | Construct | `.koi` syntax (short) | Emits | Demo location |
 |---|---|---|---|
-| Unit of Work | (≥1 aggregate in a context) | `<Context>/IUnitOfWork.cs` with one `I<Root>Repository` property per aggregate (pluralized) + `SaveChangesAsync` | `Payments.IUnitOfWork` (Payment + Ledger), Catalog, Ordering |
+| Unit of Work | (≥1 aggregate in a context) | `<Context>/IUnitOfWork.cs` with one `I<Root>Repository` property per aggregate (pluralized) + `SaveChangesAsync` | `Payment.IUnitOfWork` (Billing + Books), Menu, Ordering |
 | Application service | `service OrderingService { usecase PlaceOrder(…): OrderId }` | `IOrderingService` with one async method per use case (`Task`/`Task<T>`; `List<T>` params → `IReadOnlyList<T>`) | `Ordering.IOrderingService` |
-| Read model + projection | `readmodel OrderSummary from Order { id  customer  lineCount: Int = lines.count }` | a `sealed record` + a static `ToOrderSummary(this Order src)` projection mapper | `Catalog.ProductCard`, `Ordering.OrderSummary` |
-| Query object | `query OrdersByStatus(status: OrderStatus): List<OrderSummary>` | a query DTO `record` + the shared `Koine.Runtime.IQueryHandler<TQuery, TResult>` | `ProductsByAvailability`, `ProductByCode`, `OrdersByStatus` |
+| Read model + projection | `readmodel OrderSummary from Order { id  customer  lineCount: Int = lines.count }` | a `sealed record` + a static `ToOrderSummary(this Order src)` projection mapper | `Menu.MenuItem`, `Ordering.OrderSummary` |
+| Query object | `query OrdersByStatus(status: OrderStatus): List<OrderSummary>` | a query DTO `record` + the shared `Koine.Runtime.IQueryHandler<TQuery, TResult>` | `PizzasBySize`, `PizzaByCode`, `OrdersByStatus` |
 
 :::note
 A query's result type is required and must be a read model (or `List<readmodel>`). `IQueryHandler<TQuery, TResult>`
@@ -149,11 +150,11 @@ See [multi-file, imports & modules](/Koine/reference/multi-file-imports-modules/
 
 | Construct | `.koi` syntax (short) | Emits | Demo location |
 |---|---|---|---|
-| Directory compilation | `koine build Models/ …` | every `*.koi` under the directory merges into one model | the whole `Models/` folder |
-| Named import | `import Customers.{ PostalAddress }` | a precise `using Customers;`; names usable unqualified | `Shipping` imports `Customers.{ PostalAddress }` |
-| Wildcard import | `import Customers.*` | resolves all exported names from the context | (companion form) |
-| Qualified reference | `address: Customers.PostalAddress` | a fully-qualified C# type, no `using` added | cross-context refs |
-| Module | `module Fulfillment { … }` | a `<Context>.<Module>` sub-namespace + sub-folder | `Shipping.Fulfillment` |
+| Directory compilation | `koine build templates/pizzeria/ …` | every `*.koi` under the directory merges into one model | the whole `templates/pizzeria` folder |
+| Named import | `import Menu.{ Topping }` | a precise `using Menu;`; names usable unqualified | `Kitchen` imports `Menu.{ Topping }` |
+| Wildcard import | `import Menu.*` | resolves all exported names from the context | (companion form) |
+| Qualified reference | `address: Menu.Topping` | a fully-qualified C# type, no `using` added | cross-context refs |
+| Module | `module Line { … }` | a `<Context>.<Module>` sub-namespace + sub-folder | `Kitchen.Line` |
 
 ## Context maps & integration events (R14)
 
@@ -163,13 +164,13 @@ See [context maps & integration events](/Koine/reference/context-maps-integratio
 
 | Construct | `.koi` syntax (short) | Emits | Demo location |
 |---|---|---|---|
-| Context map | `contextmap { Catalog -> Shipping : conformist }` | no type by itself; validates and permits cross-context references | `context-map.koi` (7 relationships) |
-| Relation roles | `partnership`, `shared-kernel`, `customer-supplier`, `conformist`, `anti-corruption-layer`, `open-host`, `published-language` | each role gates references/subscriptions differently | the seven map relations |
-| Shared kernel | `Catalog <-> Ordering : shared-kernel { Currency }` | the shared type emitted **once** into `Catalog__Ordering/Kernel/`; partners get a precise `using` | `Currency` |
-| Anti-corruption layer | `Legacy -> Payments : anti-corruption-layer` + `acl { Legacy.GatewayResult -> Payments.PaymentReceipt }` | a translator interface `ILegacyToPaymentsTranslator` in the downstream context | `Legacy -> Payments` |
-| Integration event | `integration event OrderPlaced { … }` | a `sealed record : IIntegrationEvent`; the marker is emitted once | `Ordering.OrderPlaced` |
-| Publish | `publishes OrderPlaced` | marks the event as a published surface; authorizes subscribers | `Ordering` |
-| Subscribe | `subscribes Ordering.OrderPlaced` | an `IHandleOrderPlaced` handler interface with the fully-qualified event type | `Shipping`, `Payments` |
+| Context map | `contextmap { Menu -> Kitchen : conformist }` | no type by itself; validates and permits cross-context references | `context-map.koi` (8 relationships) |
+| Relation roles | `partnership`, `shared-kernel`, `customer-supplier`, `conformist`, `anti-corruption-layer`, `open-host`, `published-language` | each role gates references/subscriptions differently | the map relations |
+| Shared kernel | `Menu <-> Ordering : shared-kernel { Currency }` | the shared type emitted **once** into `Menu__Ordering/Kernel/`; partners get a precise `using` | `Currency` |
+| Anti-corruption layer | `Gateway -> Payment : anti-corruption-layer` + `acl { Gateway.GatewayResult -> Payment.PaymentReceipt }` | a translator interface `IGatewayToPaymentTranslator` in the downstream context | `Gateway -> Payment` |
+| Integration event | `integration event OrderPlaced { … }` | a `sealed record : IIntegrationEvent`; the marker is emitted once | `Ordering.OrderPlaced`, `Kitchen.TicketReady` |
+| Publish | `publishes OrderPlaced` | marks the event as a published surface; authorizes subscribers | `Ordering`, `Kitchen` |
+| Subscribe | `subscribes Ordering.OrderPlaced` | an `IHandleOrderPlaced` handler interface with the fully-qualified event type | `Kitchen`, `Delivery`, `Payment` |
 
 :::caution
 A `subscribes` needs an authorizing relation in the map: `open-host` or `customer-supplier` from publisher to
@@ -185,8 +186,8 @@ See [model versioning](/Koine/reference/versioning/) and the
 
 | Construct | `.koi` syntax (short) | Emits | Demo location |
 |---|---|---|---|
-| Context version | `context Catalog version 2 { … }` | metadata only (glossary heading + `@since` ceiling check); byte-identical C# | `Catalog version 2` |
-| `@since(n)` | `@since(2) barcode: String?` | no C#; surfaces in the glossary as `since v2`; warns (KOI1501) if above the context version | `Product.barcode @since(2)` |
+| Context version | `context Catalog version 2 { … }` | metadata only (glossary heading + `@since` ceiling check); byte-identical C# | `Menu version 2` |
+| `@since(n)` | `@since(2) barcode: String?` | no C#; surfaces in the glossary as `since v2`; warns (KOI1501) if above the context version | `Pizza.kcal @since(2)` |
 | `@deprecated("reason")` | `@deprecated("use amount") legacyAmount: Decimal` | `[Obsolete("reason")]` on the property/class + `using System;` | deprecation markers |
 | Backward-compat check | `koine check v2 --baseline v1` | compares **published** surfaces; exits non-zero on breaking changes | `examples/versioning/` |
 

@@ -8,6 +8,8 @@ public/koine-wasm/
 public/studio/
 # generated social-share card (produced by scripts/og-image.mjs)
 public/og.png
+# generated playground sample manifest (produced by scripts/build-samples.mjs)
+src/playground/samples/samples.generated.ts
 # generated living-documentation (produced by scripts/build-docs.mjs)
 .koine-docs/
 src/content/docs/reference/domain/

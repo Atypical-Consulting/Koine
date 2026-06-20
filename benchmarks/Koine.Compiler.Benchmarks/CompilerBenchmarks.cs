@@ -10,9 +10,9 @@ public enum Corpus
     /// <summary>A single small file — the lexer/parser/emit baseline (~0.8 KB).</summary>
     Billing,
 
-    /// <summary>The full multi-file Shop domain (7 files, ~17 KB) compiled as one model,
+    /// <summary>The full multi-file Pizzeria domain (8 files) compiled as one model,
     /// so cross-file context maps and integration events resolve — a realistic workload.</summary>
-    Shop,
+    Pizzeria,
 }
 
 /// <summary>
@@ -29,7 +29,7 @@ public class CompilerBenchmarks
     private readonly KoineCompiler _compiler = new();
     private IReadOnlyList<SourceFile> _sources = [];
 
-    [Params(Corpus.Billing, Corpus.Shop)]
+    [Params(Corpus.Billing, Corpus.Pizzeria)]
     public Corpus Input { get; set; }
 
     [GlobalSetup]
@@ -39,8 +39,8 @@ public class CompilerBenchmarks
         _sources = Input switch
         {
             Corpus.Billing => [ReadSource(Path.Combine(corpus, "billing.koi"))],
-            Corpus.Shop => Directory
-                .EnumerateFiles(Path.Combine(corpus, "shop"), "*.koi")
+            Corpus.Pizzeria => Directory
+                .EnumerateFiles(Path.Combine(corpus, "pizzeria"), "*.koi")
                 .OrderBy(p => p, StringComparer.Ordinal)
                 .Select(ReadSource)
                 .ToList(),

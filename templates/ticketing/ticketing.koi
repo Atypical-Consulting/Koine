@@ -1,0 +1,199 @@
+/// Ticket Management bounded context — the help-desk workflow at the heart of the
+/// template. A `Ticket` is the headline aggregate; its lifecycle is driven by an
+/// explicit state machine (R7), guarded by invariants (R4), advanced by commands
+/// (R5) that record domain events (R6), and opened by a factory (R8).
+context TicketManagement version 1 {
+
+  /// How urgent a ticket is. `Urgent` carries the strongest service-level promise
+  /// and — per the invariant below — must be justified when first raised.
+  enum Priority { Low, Normal, High, Urgent }
+
+  /// The category of a ticket, used for routing and reporting.
+  enum Category { Bug, Question, Incident, FeatureRequest }
+
+  /// The lifecycle state of a ticket. Drives the `states status { … }` machine on
+  /// the entity, so only the transitions declared there are legal at runtime.
+  enum TicketStatus { Open, Assigned, Escalated, Resolved, Closed, Reopened }
+
+  /// A human agent's handle. A first-class value object so an "assignee" is never
+  /// just a bare string floating through the model.
+  value AgentId {
+    value: String
+    invariant value.trim.length > 0   "an agent id cannot be blank"
+  }
+
+  /// What was done to put the ticket to rest. A resolution is required before a
+  /// ticket may be marked `Resolved` (see the invariant on the entity).
+  value Resolution {
+    summary:    String
+    resolvedBy: AgentId
+    invariant summary.trim.length >= 10   "a resolution must explain what was done"
+  }
+
+  /// Announced to the rest of the system when a ticket is raised (R14.3). An
+  /// integration event is a *published language* — its fields stay primitive
+  /// (ids/scalars/enums), never leaking internal value objects. SLA subscribes to
+  /// it to start a deadline clock for the new ticket.
+  integration event TicketOpened {
+    ticketId: TicketId
+    priority: Priority
+    category: Category
+    openedAt: Instant
+  }
+
+  publishes TicketOpened
+
+  // R14.3 — react to SLA breaches (authorized by the bidirectional
+  // `TicketManagement <-> SLA : customer-supplier` relation in context-map.koi).
+  // Emits an IHandleSlaBreached seam the help desk implements to auto-escalate.
+  subscribes SLA.SlaBreached
+
+  /// The ticket aggregate. Being an aggregate root it gains an `ITicketRepository`
+  /// and joins the context's generated `IUnitOfWork` (R11/R12); the `repository`
+  /// block tunes the mutating set and adds intention-revealing finders (R11.3).
+  aggregate Ticket root Ticket {
+
+    repository {
+      operations: getById, add, update
+      find byAssignee(assignee: AgentId): List<Ticket>
+      find openByPriority(priority: Priority): List<Ticket>
+    }
+
+    /// Raised inside the aggregate when a ticket is opened by the factory (R6/R8).
+    /// The cross-context announcement is the `TicketOpened` integration event,
+    /// published separately; this domain event stays in the ticketing world.
+    event TicketRaised {
+      ticketId: TicketId
+      priority: Priority
+    }
+
+    /// Raised when a ticket is assigned to an agent (R6).
+    event TicketAssigned {
+      ticketId: TicketId
+      assignee: AgentId
+    }
+
+    /// Raised when a ticket is escalated, carrying the justification so downstream
+    /// handlers (paging, SLA tightening) can act on it.
+    event TicketEscalated {
+      ticketId:      TicketId
+      justification: String
+    }
+
+    /// Raised when a ticket is resolved (R6).
+    event TicketResolved {
+      ticketId:   TicketId
+      resolvedBy: AgentId
+    }
+
+    /// Raised when a ticket is closed (R6).
+    event TicketClosed {
+      ticketId: TicketId
+    }
+
+    /// The ticket a requester opens — the consistency boundary of this aggregate.
+    entity Ticket identified by TicketId {
+      subject:       String
+      category:      Category
+      priority:      Priority    = Normal
+      status:        TicketStatus = Open
+
+      // Optional fields (R2.1): set only once the ticket reaches the relevant
+      // state. Presence checks drive the lifecycle invariants below.
+      assignee:      AgentId?
+      justification: String?
+      resolution:    Resolution?
+
+      // Derived (computed, get-only) read helpers (R1.1 / R2.1).
+      isUrgent:      Bool = priority == Urgent
+      isAssigned:    Bool = assignee.isPresent
+      isClosed:      Bool = status == Closed
+
+      // --- Lifecycle invariants (R4) ---------------------------------------
+      // A subject is always required.
+      invariant subject.trim.length > 0   "a ticket needs a subject"
+      // An urgent ticket must justify its urgency when it is raised.
+      invariant justification.isPresent when priority == Urgent
+        "an urgent ticket requires a justification"
+      // A resolved ticket must carry a resolution.
+      invariant resolution.isPresent when status == Resolved
+        "a resolved ticket must have a resolution"
+      // A closed ticket cannot be reassigned: once closed it has no assignee.
+      invariant !assignee.isPresent when status == Closed
+        "a closed ticket cannot be reassigned"
+
+      // The ticket's legal lifecycle (R7): only these transitions are permitted.
+      states status {
+        Open      -> Assigned, Escalated, Resolved
+        Assigned  -> Escalated, Resolved
+        Escalated -> Assigned, Resolved
+        Resolved  -> Closed, Reopened
+        Closed    -> Reopened
+        Reopened  -> Assigned, Escalated, Resolved
+      }
+
+      /// Assign (or reassign) the ticket to an agent and record it (R5/R6).
+      command assign(agent: AgentId) {
+        requires status != Closed   "a closed ticket cannot be reassigned"
+        assignee -> agent
+        status   -> Assigned
+        emit TicketAssigned(ticketId: id, assignee: agent)
+      }
+
+      /// Escalate the ticket, tightening its SLA. The justification explains why.
+      command escalate(reason: String) {
+        requires status != Closed   "a closed ticket cannot be escalated"
+        justification -> reason
+        status        -> Escalated
+        emit TicketEscalated(ticketId: id, justification: reason)
+      }
+
+      /// Resolve the ticket, attaching the resolution that the invariant demands.
+      command resolve(outcome: Resolution) {
+        requires status != Closed   "a closed ticket cannot be resolved"
+        resolution -> outcome
+        status     -> Resolved
+        emit TicketResolved(ticketId: id, resolvedBy: outcome.resolvedBy)
+      }
+
+      /// Close a resolved ticket, dropping the assignee so it cannot be reassigned.
+      command close {
+        requires status == Resolved   "only a resolved ticket can be closed"
+        status -> Closed
+        emit TicketClosed(ticketId: id)
+      }
+
+      /// R8 — factory-only creation: open a ticket for a requester. The presence of
+      /// a `create` makes the all-args constructor private, so callers must go
+      /// through `Ticket.Open(...)`. The optional `justification` lets a caller open
+      /// an `Urgent` ticket while satisfying the "urgent requires a justification"
+      /// invariant; a non-urgent ticket may leave it null.
+      create open(subject: String, category: Category, priority: Priority, justification: String?) {
+        requires subject.trim.length > 0   "a ticket needs a subject"
+        justification -> justification
+        emit TicketRaised(ticketId: id, priority: priority)
+      }
+    }
+  }
+
+  /// R12.2 — the application/use-case service interface (ITicketService). Each use
+  /// case maps to one async method; a context with aggregates also gets a UoW.
+  service TicketService {
+    usecase OpenTicket(subject: String, category: Category, priority: Priority): TicketId
+    usecase AssignTicket(ticket: TicketId, agent: AgentId)
+    usecase ResolveTicket(ticket: TicketId, outcome: Resolution)
+  }
+
+  /// R12.3 — a flat read model + projection mapper for queue/board views.
+  readmodel TicketSummary from Ticket {
+    id
+    subject
+    category
+    priority
+    status
+  }
+
+  /// R12.4 — query DTOs over the read model.
+  query TicketsByStatus(status: TicketStatus): List<TicketSummary>
+  query TicketsByPriority(priority: Priority): List<TicketSummary>
+}

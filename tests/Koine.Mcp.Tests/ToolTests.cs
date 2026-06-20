@@ -224,13 +224,13 @@ public sealed class ToolTests
         var listing = ExamplesTool.Examples();
 
         listing.ShouldContain("billing");
-        listing.ShouldContain("shop-ordering");
+        listing.ShouldContain("pizzeria-ordering");
     }
 
     [Fact]
     public void Examples_returns_named_source()
     {
-        var source = ExamplesTool.Examples("shop-ordering");
+        var source = ExamplesTool.Examples("pizzeria-ordering");
 
         source.ShouldContain("context Ordering");
     }
@@ -245,9 +245,9 @@ public sealed class ToolTests
     }
 
     [Fact]
-    public void Every_embedded_example_compiles_or_validates_cleanly_as_part_of_the_shop_model()
+    public void Every_embedded_example_compiles_or_validates_cleanly_as_part_of_the_pizzeria_model()
     {
-        // The example models are linked from the repo's real examples/demo. Validating the
+        // The example models are linked from the repo's real templates/demo. Validating the
         // standalone `billing` example proves the embedded knowledge is real, compilable Koine.
         var result = ValidateTool.Validate(Files(Billing, "billing.koi"));
         result.Ok.ShouldBeTrue();

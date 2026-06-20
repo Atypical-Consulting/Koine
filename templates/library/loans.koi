@@ -1,0 +1,241 @@
+/// Loans bounded context — the heart of the template. A `Loan` is the headline aggregate:
+/// it ties a borrowing `Member` to a physical `BookCopy`, runs an explicit lifecycle state
+/// machine, and carries the rules that anchor a lending library — a copy cannot be loaned
+/// twice, a loan with a waiting reservation cannot be renewed, and an overdue return
+/// accrues a fine. It publishes the lending facts (BookBorrowed, Returned, LoanRenewed,
+/// FineCreated) the rest of the library reacts to.
+context Loans version 1 {
+
+  /// The lifecycle state of a loan. Drives the `states status { … }` machine on the entity,
+  /// so only the transitions declared there are legal at runtime.
+  enum LoanStatus { Active, Returned, Overdue, Lost }
+
+  /// A money amount for fines. Never negative. `currency` is a primitive ISO string.
+  value Money {
+    amount:   Decimal
+    currency: String
+    invariant amount >= 0   "an amount cannot be negative"
+  }
+
+  /// The loan period and overdue calculation for a single loan, as a value object so the
+  /// fine maths is co-located and proven non-negative. The host feeds `daysOverdue` in as
+  /// the clock ticks; the fine is derived from it at a fixed daily rate.
+  value LoanTerm {
+    /// How many days the copy may be kept.
+    loanDays:    Int
+    /// How many days past the due date the copy is (0 while not yet overdue).
+    daysOverdue: Int
+    /// The fine charged per overdue day, in minor units (cents).
+    dailyRate:   Int
+    // Derived (computed, get-only): the accrued fine in cents, non-negative by
+    // construction — clamped so a not-yet-overdue loan owes nothing (R1.1).
+    fineCents:   Int  = if daysOverdue > 0 then daysOverdue * dailyRate else 0
+    isOverdue:   Bool = daysOverdue > 0
+
+    invariant loanDays > 0       "a loan period must be positive"
+    invariant daysOverdue >= 0   "days overdue cannot be negative"
+    invariant dailyRate >= 0     "a daily fine rate cannot be negative"
+    // The anchoring rule: an accrued fine is never negative.
+    invariant fineCents >= 0     "an accrued fine can never be negative"
+  }
+
+  /// Announced when a copy is borrowed (R14.3). An integration event is a *published
+  /// language* — its fields stay primitive (ids/scalars/enums), never leaking internal
+  /// value objects. Inventory reacts to flip the copy to OnLoan; Reservations reacts to
+  /// fulfil a waiting hold.
+  integration event BookBorrowed {
+    loan:     LoanId
+    copy:     BookCopyId
+    member:   MemberId
+    borrowedAt: Instant
+  }
+
+  /// Announced when a copy is returned (R14.3). Inventory shelves the copy; Reservations
+  /// may promote the next hold in the queue.
+  integration event Returned {
+    loan:       LoanId
+    copy:       BookCopyId
+    returnedAt: Instant
+  }
+
+  /// Announced when a loan is renewed for another period (R14.3).
+  integration event LoanRenewed {
+    loan:     LoanId
+    renewals: Int
+    renewedAt: Instant
+  }
+
+  /// Announced when an overdue return creates a fine (R14.3). Members subscribes to it to
+  /// add the charge to the borrower's account.
+  integration event FineCreated {
+    loan:      LoanId
+    member:    MemberId
+    amountCents: Int
+    createdAt: Instant
+  }
+
+  publishes BookBorrowed
+  publishes Returned
+  publishes LoanRenewed
+  publishes FineCreated
+
+  // R14.3 — react to reservations placed against a title (authorized by the bidirectional
+  // `Loans <-> Reservations : customer-supplier` relation in context-map.koi). The host
+  // implements the IHandleReservationPlaced seam to mark a loan as having a waiting hold,
+  // which the renew command then refuses.
+  subscribes Reservations.ReservationPlaced
+
+  /// The loan aggregate — the consistency boundary that owns one borrowing of one copy.
+  /// `versioned` adds an optimistic-concurrency token (R11.4); the repository block tunes
+  /// the mutating set and adds intention-revealing finders (R11.3).
+  aggregate Lending root Loan versioned {
+
+    repository {
+      operations: getById, add, update
+      find byMember(member: MemberId): List<Loan>
+      // The finder behind "a copy cannot be loaned twice": the application service checks
+      // there is no active loan for the copy before opening a new one.
+      find activeForCopy(copy: BookCopyId): Loan
+      find overdue(): List<Loan>
+    }
+
+    /// Raised inside the aggregate when a loan is opened by the factory (R6/R8).
+    event LoanOpened {
+      loan:   LoanId
+      copy:   BookCopyId
+      member: MemberId
+    }
+
+    /// Raised inside the aggregate when a loan is renewed (R6). The cross-context
+    /// announcement is the `LoanRenewed` integration event, published separately; this
+    /// domain event stays in the lending world.
+    event LoanRenewedInternally {
+      loan:     LoanId
+      renewals: Int
+    }
+
+    /// Raised when an overdue loan accrues a fine (R6). The cross-context announcement is
+    /// the `FineCreated` integration event.
+    event FineAccrued {
+      loan:        LoanId
+      amountCents: Int
+    }
+
+    entity Loan identified by LoanId {
+      copy:     BookCopyId
+      member:   MemberId
+      term:     LoanTerm
+      status:   LoanStatus = Active
+      renewals: Int        = 0
+      // Set by the ReservationPlaced subscription when another member is waiting on this
+      // copy's title; the renew command refuses while it is true.
+      hasReservation: Bool = false
+      returnedAt: Instant?
+
+      // Derived (computed, get-only) read helpers (R1.1 / R2.1).
+      isActive:    Bool = status == Active
+      isReturned:  Bool = status == Returned
+      isOverdue:   Bool = status == Overdue
+      fineCents:   Int  = term.fineCents
+      // Whether this loan may still be renewed: active, no waiting hold, under the limit.
+      renewable:   Bool = status == Active && !hasReservation && renewals < 3
+
+      // --- The anchoring invariants (R4) ------------------------------------------
+      // A returned loan must record when it came back.
+      invariant returnedAt.isPresent when status == Returned
+        "a returned loan must record its return time"
+      // Renewals are capped — the "renew blocked if a reservation exists" rule is enforced
+      // in the renew command's guard, but the cap is a standing invariant.
+      invariant renewals <= 3   "a loan cannot be renewed more than three times"
+      invariant renewals >= 0   "a renewal count cannot be negative"
+
+      // The loan lifecycle (R7): active, possibly slipping to overdue, then returned — or
+      // written off as lost. Returned and Lost are terminal.
+      states status {
+        Active   -> Returned, Overdue, Lost
+        Overdue  -> Returned, Lost
+        Returned
+        Lost
+      }
+
+      /// Renew the loan for another period (R5/R6). THE rule of this context: a renewal is
+      /// refused while another member is waiting on the title (a reservation exists).
+      command renew {
+        requires status == Active        "only an active loan can be renewed"
+        requires !hasReservation         "cannot renew: another member has reserved this title"
+        requires renewals < 3            "this loan has reached its renewal limit"
+        renewals -> renewals + 1
+        emit LoanRenewedInternally(loan: id, renewals: renewals)
+      }
+
+      /// Flag the loan as overdue when the due date passes (R5).
+      command markOverdue {
+        requires status == Active   "only an active loan can become overdue"
+        status -> Overdue
+      }
+
+      /// Record that the loan accrued a fine for being overdue (R5/R6). The cross-context
+      /// announcement is `FineCreated`, which Members reacts to.
+      command accrueFine(updatedTerm: LoanTerm) {
+        requires status == Overdue   "only an overdue loan accrues a fine"
+        term -> updatedTerm
+        emit FineAccrued(loan: id, amountCents: updatedTerm.fineCents)
+      }
+
+      /// Return the copy, stamping the time the invariant demands (R5).
+      command returnCopy {
+        requires status != Returned   "the copy is already returned"
+        requires status != Lost       "a lost copy cannot be returned"
+        status     -> Returned
+        returnedAt -> now
+      }
+
+      /// Mark the loaned copy as lost (R5).
+      command markLost {
+        requires status != Returned   "a returned copy cannot be marked lost"
+        status -> Lost
+      }
+
+      /// R8 — factory-only creation: open a loan of a copy to a member. The "a copy cannot
+      /// be loaned twice" rule is enforced by the application service via `activeForCopy`
+      /// (and by Inventory's `checkOut` guard) before this factory runs.
+      create open(copy: BookCopyId, member: MemberId, term: LoanTerm) {
+        emit LoanOpened(loan: id, copy: copy, member: member)
+      }
+    }
+  }
+
+  /// R10.1 — named, reusable specifications over Loan, emitted as static predicates
+  /// (LoansSpecifications.IsRenewable / IsOverdue).
+  spec IsRenewable on Loan = status == Active && !hasReservation && renewals < 3
+  spec IsFined on Loan = term.fineCents > 0
+
+  /// R10.2 — a domain service with pure operations (expression bodies). `fineFor` prices a
+  /// number of overdue days at a daily rate; `withinLimit` checks the renewal cap.
+  service FinePolicy {
+    operation fineFor(daysOverdue: Int, dailyRate: Int): Int =
+      if daysOverdue > 0 then daysOverdue * dailyRate else 0
+    operation withinLimit(renewals: Int): Bool = renewals < 3
+  }
+
+  /// R12.2 — the application/use-case service interface (ILoanService). The "a copy cannot
+  /// be loaned twice" rule lives here: BorrowCopy must check `activeForCopy` is empty
+  /// before opening a new loan.
+  service LoanService {
+    usecase BorrowCopy(copy: BookCopyId, member: MemberId, term: LoanTerm): LoanId
+    usecase RenewLoan(loan: LoanId)
+    usecase ReturnCopy(loan: LoanId)
+  }
+
+  /// R12.3 — a flat read model + projection mapper for a circulation desk.
+  readmodel LoanRow from Loan {
+    id
+    copy
+    member
+    status
+  }
+
+  /// R12.4 — query DTOs over the read model.
+  query LoansByStatus(status: LoanStatus): List<LoanRow>
+  query LoansByMember(member: MemberId): List<LoanRow>
+}

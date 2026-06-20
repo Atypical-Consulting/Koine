@@ -1,8 +1,8 @@
-// The Playground's built-in sample models. Each .koi file is imported as a raw string
-// (Vite `?raw`) and is verified to compile (see the CLI check in the build pipeline).
-import billing from './billing.koi?raw';
-import ordering from './ordering.koi?raw';
-import values from './values.koi?raw';
+// The Playground's built-in sample models. Sourced from the shared `templates/` manifest
+// (the single validated source of truth, issue #101) via the generated module produced by
+// scripts/build-samples.mjs on predev/prebuild. Only single-file templates are included
+// because the playground editor compiles exactly one .koi source string at a time.
+import { GENERATED_SAMPLES } from './samples.generated';
 
 export interface Sample {
   id: string;
@@ -11,26 +11,7 @@ export interface Sample {
   code: string;
 }
 
-export const SAMPLES: Sample[] = [
-  {
-    id: 'billing',
-    label: 'Billing — the 5-minute tour',
-    blurb: 'Value object + invariant, regex-validated email, smart enum, entity & aggregate.',
-    code: billing,
-  },
-  {
-    id: 'ordering',
-    label: 'Ordering — behavior',
-    blurb: 'Commands, domain events, a state machine, and a factory.',
-    code: ordering,
-  },
-  {
-    id: 'values',
-    label: 'Value objects & invariants',
-    blurb: 'Smart enums with data, quantities, ranges, derived fields.',
-    code: values,
-  },
-];
+export const SAMPLES: Sample[] = GENERATED_SAMPLES;
 
 export const DEFAULT_SAMPLE = SAMPLES[0];
 

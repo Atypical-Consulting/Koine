@@ -1,0 +1,136 @@
+/// Inventory bounded context — the *physical* holdings of the library. Where Catalog owns
+/// the abstract `Book` (the title), Inventory owns the `BookCopy`: a single, shelvable,
+/// barcoded, loanable item. ONE Book may have MANY BookCopies — that one-title-many-copies
+/// split is the identity lesson of this template. A copy has its own identity (a barcode),
+/// its own shelf location, and its own physical lifecycle (available → on loan → returned,
+/// or lost / withdrawn).
+context Inventory version 1 {
+
+  /// The physical condition of a copy. A plain enum used for weeding decisions.
+  enum Condition { New, Good, Worn, Damaged }
+
+  /// The shelf state of a copy. Drives the `states status { … }` machine on the entity, so
+  /// only the declared transitions are legal at runtime. NOTE: that a copy is `OnLoan` is
+  /// the inventory-side reflection of a Loan in the Loans context — the "a copy cannot be
+  /// loaned twice" rule is enforced there, against this `Available` state.
+  enum CopyStatus { Available, OnLoan, Lost, Withdrawn }
+
+  /// A copy's barcode — its physical identity, distinct from the title's ISBN. A
+  /// first-class value object validated by shape (R1.2).
+  value Barcode {
+    code: String
+    invariant code matches /^[0-9]{8,14}$/   "a barcode must be 8-14 digits"
+  }
+
+  /// Where the copy lives on the shelves. A small value object so a location is structured.
+  value ShelfLocation {
+    section: String
+    shelf:   String
+    // Derived (computed, get-only): a one-line call sign for the spine label.
+    callSign: String = section + "-" + shelf
+    invariant section.trim.length > 0   "a copy needs a section"
+    invariant shelf.trim.length > 0     "a copy needs a shelf"
+  }
+
+  /// The BookCopy aggregate — a single physical item. It references the Catalog `Book` it
+  /// is a copy of by id, NOT by embedding it: the title lives in Catalog, the copy lives
+  /// here. Being an aggregate root it gains an `IBookCopyRepository` and joins the context
+  /// UoW; the repository block adds intention-revealing finders (R11.3).
+  aggregate Holdings root BookCopy {
+
+    repository {
+      operations: getById, add, update
+      // The finder behind shelf availability: which copies of a title can be lent.
+      find availableForBook(book: BookId): List<BookCopy>
+      find byBarcode(barcode: Barcode): BookCopy
+    }
+
+    /// Raised inside the aggregate when a copy is acquired by the factory (R6/R8).
+    event CopyAcquired {
+      copy: BookCopyId
+      book: BookId
+    }
+
+    /// Raised when a copy is marked lost or withdrawn and leaves circulation (R6).
+    event CopyRetired {
+      copy:   BookCopyId
+      reason: String
+    }
+
+    entity BookCopy identified by BookCopyId {
+      // The title this is a copy of — a reference into the Catalog context by id.
+      book:     BookId
+      barcode:  Barcode
+      location: ShelfLocation
+      condition: Condition = Good
+      status:   CopyStatus = Available
+
+      // Derived (computed, get-only) read helpers (R1.1).
+      isAvailable: Bool   = status == Available
+      isOnLoan:    Bool   = status == OnLoan
+      inCirculation: Bool = status != Lost && status != Withdrawn
+      callSign:    String = location.callSign
+
+      invariant barcode.code.trim.length > 0   "a copy needs a barcode"
+
+      // The copy's physical lifecycle (R7): on the shelf, out on loan and back, or out of
+      // circulation (lost / withdrawn are terminal).
+      states status {
+        Available -> OnLoan, Lost, Withdrawn
+        OnLoan    -> Available, Lost
+        Lost
+        Withdrawn
+      }
+
+      /// Mark the copy as checked out (R5). Called when a Loan is opened against it; the
+      /// "cannot be loaned twice" guard is the `requires status == Available` here, which
+      /// the Loans context relies on.
+      command checkOut {
+        requires status == Available   "only an available copy can be loaned"
+        status -> OnLoan
+      }
+
+      /// Shelve a returned copy back to Available (R5).
+      command shelve {
+        requires status == OnLoan   "only a copy on loan can be returned to the shelf"
+        status -> Available
+      }
+
+      /// Mark the copy as lost (R5/R6).
+      command markLost {
+        requires status != Withdrawn   "a withdrawn copy cannot be marked lost"
+        status -> Lost
+        emit CopyRetired(copy: id, reason: "lost")
+      }
+
+      /// Withdraw a copy from circulation — e.g. when it is too damaged to lend (R5/R6).
+      command withdraw {
+        requires status == Available   "only an available copy can be withdrawn"
+        status -> Withdrawn
+        emit CopyRetired(copy: id, reason: "withdrawn")
+      }
+
+      /// R8 — acquire a new physical copy of a catalogued title.
+      create acquire(book: BookId, barcode: Barcode, location: ShelfLocation, condition: Condition) {
+        emit CopyAcquired(copy: id, book: book)
+      }
+    }
+  }
+
+  /// R12.2 — the application service interface (IInventoryService).
+  service InventoryService {
+    usecase AcquireCopy(book: BookId, barcode: Barcode, location: ShelfLocation, condition: Condition): BookCopyId
+    usecase WithdrawCopy(copy: BookCopyId)
+  }
+
+  /// R12.3 — a flat read model for a holdings list, distinguishing copies from titles.
+  readmodel CopyRow from BookCopy {
+    id
+    book
+    status
+    callSign: String = location.callSign
+  }
+
+  /// R12.4 — a query DTO over the holdings.
+  query CopiesByStatus(status: CopyStatus): List<CopyRow>
+}

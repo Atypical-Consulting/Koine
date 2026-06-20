@@ -11,10 +11,11 @@ public static class ExamplesTool
     [Description("""
         Get real, compilable Koine (.koi) example models to learn the syntax and idioms. Call with no
         name to list the available examples; pass a name to get that file's full source. Includes a
-        small single-context example ("billing") and a six-context Shop domain ("shop-catalog",
-        "shop-ordering", "shop-customers", "shop-payments", "shop-shipping", "shop-context-map",
-        "shop-legacy") that together exercise commands, events, state machines, factories,
-        repositories, services, read models, queries, integration events, and context maps.
+        small single-context example ("billing") and a six-context Pizzeria domain ("pizzeria-menu",
+        "pizzeria-ordering", "pizzeria-kitchen", "pizzeria-delivery", "pizzeria-payment",
+        "pizzeria-promotions", "pizzeria-context-map") that together exercise commands, events,
+        state machines, factories, repositories, services, read models, queries, integration
+        events, and context maps.
         """)]
     public static string Examples(
         [Description("Optional example name. Omit to list all available example names.")]

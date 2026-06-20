@@ -1,0 +1,46 @@
+// The strategic view (R14.1) — how the pizzeria's bounded contexts relate. A context
+// map is a top-level declaration (a sibling of `context`, not nested in one). In
+// directory mode every .koi file compiles as one model, so this map can name the
+// contexts declared in the other files and authorize their event flow.
+//
+// A context map allows only one relation per pair, so a two-way relationship is
+// modelled with `<->`. Every relationship KIND the demo used is reproduced here
+// where it fits the pizzeria: shared-kernel, conformist, customer-supplier,
+// partnership, open-host, and anti-corruption-layer.
+contextmap {
+
+  // R14.2 — shared kernel: Menu and Ordering jointly own the `Currency` enum (with
+  // its symbol/decimals associated data). It is emitted once into a dedicated kernel
+  // namespace shared by both, so a price in Menu and a total in Ordering speak the
+  // same currency without translation.
+  Menu      <-> Ordering : shared-kernel { Currency }
+
+  // Conformist: Kitchen conforms to Menu's published language (it cooks what the
+  // menu defines) and takes the upstream model as-is — no translation layer.
+  Menu       -> Kitchen  : conformist
+
+  // Open-host service / published language: Ordering publishes `OrderPlaced`; these
+  // open-host relations authorize the downstream subscriptions in Kitchen, Delivery
+  // and Payment (without one of these, the `subscribes Ordering.OrderPlaced` lines
+  // would be rejected).
+  Ordering   -> Kitchen  : open-host
+  Ordering   -> Delivery : open-host
+  Ordering   -> Payment  : open-host
+
+  // Customer–supplier: Promotions (upstream) supplies the discount rules that
+  // Ordering (downstream) applies to an order total; the two teams negotiate the
+  // deal catalogue, but Ordering depends on Promotions, not the other way around.
+  Promotions -> Ordering : customer-supplier
+
+  // Partnership: Kitchen and Delivery coordinate the hand-off of a finished pizza —
+  // neither owns the other, they succeed or fail together on fulfilling an order.
+  Kitchen   <-> Delivery : partnership
+
+  // Anti-corruption layer: Payment translates the external card Gateway's model into
+  // its own. The acl block emits an IGatewayToPaymentTranslator interface in Payment
+  // mapping the gateway's raw result onto our clean PaymentReceipt.
+  Gateway    -> Payment  : anti-corruption-layer
+    acl {
+      Gateway.GatewayResult -> Payment.PaymentReceipt
+    }
+}

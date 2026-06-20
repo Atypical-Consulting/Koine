@@ -1,0 +1,162 @@
+/// Reservations bounded context — holds placed on a title that has no available copy. A
+/// member reserves a `Book` (the title, not a specific copy); when a copy is returned the
+/// reservation is promoted to Ready, and the member has a fixed window to collect it before
+/// the hold expires. This context owns the rules that anchor a waiting list: a reservation
+/// expires if not collected in time, and it publishes `ReservationPlaced` so a current loan
+/// of the title can be blocked from renewal.
+context Reservations version 1 {
+
+  /// The lifecycle state of a reservation. Drives the `states status { … }` machine on the
+  /// entity, so only the declared transitions are legal at runtime.
+  enum ReservationStatus { Waiting, Ready, Fulfilled, Expired, Cancelled }
+
+  /// The collection window for a ready reservation, as a value object so the expiry maths
+  /// is co-located. The host feeds `hoursWaited` in once the hold is ready; the reservation
+  /// expires when the window elapses.
+  value HoldWindow {
+    /// How many hours the member has to collect once the hold is ready.
+    windowHours: Int
+    /// How many hours have elapsed since the hold became ready (0 while still waiting).
+    hoursWaited: Int
+    // Derived (computed, get-only): hours left before the hold lapses, clamped at zero so
+    // it never goes negative (R1.1).
+    remaining:  Int  = if windowHours > hoursWaited then windowHours - hoursWaited else 0
+    // Whether the collection window has elapsed — THE expiry rule of this context.
+    isExpired:  Bool = hoursWaited >= windowHours
+
+    invariant windowHours > 0    "a hold window must be a positive number of hours"
+    invariant hoursWaited >= 0   "hours waited cannot be negative"
+  }
+
+  /// Announced when a reservation is placed on a title (R14.3). An integration event is a
+  /// *published language* — its fields stay primitive. Loans subscribes to it to block
+  /// renewal of any current loan of the same title.
+  integration event ReservationPlaced {
+    reservation: ReservationId
+    book:        BookId
+    member:      MemberId
+    placedAt:    Instant
+  }
+
+  publishes ReservationPlaced
+
+  // R14.3 — react to copies coming back into stock (authorized by the bidirectional
+  // `Loans <-> Reservations : customer-supplier` relation in context-map.koi). The host
+  // implements the IHandleReturned seam to promote the next waiting reservation to Ready.
+  subscribes Loans.Returned
+
+  /// The reservation aggregate — one hold by one member on one title. Being an aggregate
+  /// root it gains an `IReservationRepository` and joins the context UoW; the repository
+  /// block adds intention-revealing finders (R11.3).
+  aggregate Holds root Reservation {
+
+    repository {
+      operations: getById, add, update
+      // The waiting list for a title, in placement order, drives promotion on return.
+      find waitingForBook(book: BookId): List<Reservation>
+      find byMember(member: MemberId): List<Reservation>
+    }
+
+    /// Raised inside the aggregate when a hold is placed by the factory (R6/R8). The
+    /// cross-context announcement is the `ReservationPlaced` integration event.
+    event HoldPlaced {
+      reservation: ReservationId
+      book:        BookId
+    }
+
+    /// Raised when a ready hold lapses uncollected (R6).
+    event HoldExpired {
+      reservation: ReservationId
+    }
+
+    entity Reservation identified by ReservationId {
+      // The title reserved — a reference into the Catalog context by id. A reservation is
+      // against the WORK, not a specific copy; that is why it lives apart from a Loan.
+      book:    BookId
+      member:  MemberId
+      window:  HoldWindow
+      status:  ReservationStatus = Waiting
+      readyAt: Instant?
+
+      // Derived (computed, get-only) read helpers (R1.1 / R2.1).
+      isWaiting:  Bool = status == Waiting
+      isReady:    Bool = status == Ready
+      isExpired:  Bool = status == Expired
+      // Whether the collection window has run out (drives the expire command's guard).
+      windowElapsed: Bool = window.isExpired
+      remaining:  Int  = window.remaining
+
+      // --- The anchoring expiry invariant (R4) ------------------------------------
+      // A ready reservation must record when it became collectable (its window starts).
+      invariant readyAt.isPresent when status == Ready
+        "a ready reservation must record when it became collectable"
+
+      // The reservation lifecycle (R7): a member waits in the queue, the hold becomes Ready
+      // when a copy returns, then it is Fulfilled (collected), Expired (window lapsed) or
+      // Cancelled. The last three are terminal.
+      states status {
+        Waiting -> Ready, Cancelled
+        Ready   -> Fulfilled, Expired, Cancelled
+        Fulfilled
+        Expired
+        Cancelled
+      }
+
+      /// Promote a waiting hold to Ready when a copy of the title returns (R5).
+      command makeReady {
+        requires status == Waiting   "only a waiting reservation can be made ready"
+        status  -> Ready
+        readyAt -> now
+      }
+
+      /// Fulfil a ready hold when the member collects the copy (R5).
+      command fulfil {
+        requires status == Ready   "only a ready reservation can be fulfilled"
+        status -> Fulfilled
+      }
+
+      /// Expire a ready hold the member did not collect in time (R5/R6). THE expiry rule:
+      /// the collection window must actually have elapsed.
+      command expire {
+        requires status == Ready          "only a ready reservation can expire"
+        requires window.isExpired         "the collection window has not yet elapsed"
+        status -> Expired
+        emit HoldExpired(reservation: id)
+      }
+
+      /// Cancel a hold the member no longer wants (R5).
+      command cancel {
+        requires status == Waiting || status == Ready
+          "only a waiting or ready reservation can be cancelled"
+        status -> Cancelled
+      }
+
+      /// R8 — place a hold on a title for a member.
+      create place(book: BookId, member: MemberId, window: HoldWindow) {
+        emit HoldPlaced(reservation: id, book: book)
+      }
+    }
+  }
+
+  /// R10.1 — a named, reusable specification over Reservation, emitted as a static
+  /// predicate (ReservationsSpecifications.IsCollectable): a ready, unexpired hold.
+  spec IsCollectable on Reservation = status == Ready && !window.isExpired
+
+  /// R12.2 — the application service interface (IReservationService).
+  service ReservationService {
+    usecase PlaceReservation(book: BookId, member: MemberId, window: HoldWindow): ReservationId
+    usecase FulfilReservation(reservation: ReservationId)
+    usecase ExpireReservation(reservation: ReservationId)
+  }
+
+  /// R12.3 — a flat read model for a holds queue view.
+  readmodel HoldRow from Reservation {
+    id
+    book
+    member
+    status
+  }
+
+  /// R12.4 — a query DTO over the holds queue.
+  query ReservationsByStatus(status: ReservationStatus): List<HoldRow>
+}

@@ -1,5 +1,5 @@
-// Generates Koine's "living documentation" (Mermaid-in-Markdown) from the Shop demo
-// model and syncs it into the Starlight content collection at
+// Generates Koine's "living documentation" (Mermaid-in-Markdown) from the Pizzeria
+// template and syncs it into the Starlight content collection at
 // website/src/content/docs/reference/domain/ so the docs site renders it.
 //
 // Run via `npm run build:docs`; invoked automatically by predev/prebuild alongside
@@ -32,8 +32,9 @@ const here = dirname(fileURLToPath(import.meta.url));
 const websiteDir = resolve(here, '..');
 const repoRoot = resolve(websiteDir, '..');
 
-// The model compiled into living docs. The Shop demo is the canonical six-context model.
-const model = join(repoRoot, 'demo', 'Shop.Domain', 'Models');
+// The model compiled into living docs. The Pizzeria template is the canonical
+// six-context model (templates/pizzeria — the single validated source of truth).
+const model = join(repoRoot, 'templates', 'pizzeria');
 // Scratch directory for the raw emitter output (outside the content tree).
 const tmpOut = join(websiteDir, '.koine-docs');
 // Where Starlight reads the synced pages from. Mirrored in astro.config.mjs sidebar.

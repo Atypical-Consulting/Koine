@@ -1,0 +1,21 @@
+{
+  "id": "values",
+  "name": "Value Objects & Invariants",
+  "tagline": "Smart enums with data, quantities, ranges, and derived fields.",
+  "description": "A focused Catalog context that showcases Koine's value-modelling toolkit: smart enums whose members carry associated data, regex- and string-op-validated value objects, a unit-checked quantity, an interval Range, uniqueness sets, optional and derived fields, and natural-key identity. The most concentrated tour of value objects and invariants.",
+  "difficulty": "starter",
+  "tags": ["value-objects", "invariants", "smart-enum", "quantity", "starter"],
+  "contexts": ["Catalog"],
+  "coreAggregate": "Product",
+  "entryFile": "values.koi",
+  "teaches": [
+    "smart enums whose members carry associated data",
+    "value objects with regex and string-operation invariants",
+    "unit-checked quantities",
+    "interval ranges (Range<Instant>)",
+    "uniqueness sets and optional fields",
+    "derived (computed) fields",
+    "natural-key entity identity"
+  ],
+  "icon": "🧱"
+}

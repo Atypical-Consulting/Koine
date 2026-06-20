@@ -1,0 +1,25 @@
+context Ordering {
+
+  aggregate Order root Order {
+
+    enum OrderStatus { Draft, Placed, Shipped, Cancelled }
+
+    value OrderLine {
+      product:   ProductId
+      quantity:  Int
+      unitPrice: Decimal
+      subtotal:  Decimal = unitPrice * quantity
+    }
+
+    entity Order identified by OrderId {
+      lines:  List<OrderLine>
+      status: OrderStatus = Draft
+
+      states status {
+        Draft   -> Placed
+        Placed  -> Shipped
+        Placed  -> Cancelled
+      }
+    }
+  }
+}

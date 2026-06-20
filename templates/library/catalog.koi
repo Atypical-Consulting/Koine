@@ -1,0 +1,78 @@
+/// Catalog bounded context — the bibliographic record of every title the library holds.
+/// This context owns the `Book`: the abstract *title* (an ISBN, an author, a subject), of
+/// which the library may own many physical copies. The Book-versus-BookCopy distinction is
+/// the identity lesson of this template — a `Book` is the work, a `BookCopy` (in Inventory)
+/// is a shelvable, loanable thing. Catalog is the upstream that publishes the title
+/// language Inventory, Loans and Reservations all reference.
+context Catalog version 1 {
+
+  /// The broad subject a title is shelved under. A plain enum used for browsing.
+  enum Subject { Fiction, Science, History, Children, Reference, Poetry }
+
+  /// An International Standard Book Number — a first-class value object so a title key is
+  /// never a bare string, validated by shape and normalized via string ops (R1.2). It is
+  /// the *natural* identity of a Book.
+  value Isbn {
+    code:       String
+    normalized: String = code.trim.upper
+    invariant code.trim.length > 0                       "an ISBN cannot be blank"
+    invariant code matches /^[0-9Xx-]{10,17}$/           "not a valid ISBN"
+  }
+
+  /// The author of a title. A small value object so an author is typed, not a loose string.
+  value Author {
+    name: String
+    invariant name.trim.length > 0   "an author needs a name"
+  }
+
+  /// The Book aggregate — the abstract *title*, NOT a physical item. Its identity is a
+  /// natural string key (`BookId as natural(String)`, no client-side New()); being an
+  /// aggregate root it gains an `IBookRepository` and joins the context's generated
+  /// `IUnitOfWork`. The physical, loanable copies live in the Inventory context as
+  /// `BookCopy` — that split is the whole point of this template.
+  aggregate Bibliography root Book {
+
+    repository {
+      operations: getById, add, update
+      find bySubject(subject: Subject): List<Book>
+      find byAuthor(author: Author): List<Book>
+    }
+
+    /// Raised inside the aggregate when a title is catalogued by the factory (R6/R8).
+    event BookCatalogued {
+      book:    BookId
+      isbn:    String
+      subject: Subject
+    }
+
+    entity Book identified by BookId as natural(String) {
+      isbn:        Isbn
+      title:       String
+      author:      Author
+      subject:     Subject
+      // Optional fields (R2.1) and a uniqueness Set of keywords (R2.2).
+      synopsis:    String?
+      keywords:    Set<String>
+      publishedYear: Int?
+
+      // Derived (computed, get-only) read helpers (R1.1 / R2.1).
+      displayTitle: String = title.trim
+      hasSynopsis:  Bool   = synopsis.isPresent
+      isReference:  Bool   = subject == Reference
+
+      invariant title.trim.length > 0   "a book needs a title"
+      invariant isbn.code.trim.length > 0   "a book needs an ISBN"
+    }
+  }
+
+  /// R12.3 — a flat read model + projection mapper for a catalogue search list.
+  readmodel CatalogEntry from Book {
+    id
+    title
+    subject
+  }
+
+  /// R12.4 — query DTOs handled through the shared IQueryHandler<TQuery,TResult>.
+  query BooksBySubject(subject: Subject): List<CatalogEntry>
+  query BookById(book: BookId): CatalogEntry
+}
