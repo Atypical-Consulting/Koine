@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using Koine.Compiler.Diagnostics;
 using Koine.Compiler.Services;
 using ModelContextProtocol.Server;
 
@@ -22,7 +23,22 @@ public static class ValidateTool
         [Description("The .koi files to validate. Provide a single entry for a one-file model.")]
         KoineFile[] files)
     {
-        var diagnostics = new KoineCompiler().DiagnoseWorkspace(KoineFile.ToSources(files));
-        return ValidationResult.From(diagnostics);
+        if (!ToolGuards.TryValidateFiles(files, out var guardErrors))
+        {
+            return new ValidationResult(false, guardErrors.Count, 0, guardErrors);
+        }
+
+        var sources = KoineFile.ToSources(files);
+        var diagnostics = new KoineCompiler().DiagnoseWorkspace(sources);
+
+        // Mirror koine_compile: apply the diagnostic filter so in-source `# koine:disable CODE`
+        // directives suppress the same diagnostics here. DiagnosticFilterOptions.None carries no
+        // overrides and no warnings-as-errors, so the only effect is honoring those directives —
+        // keeping validate and compile in agreement about what is suppressed.
+        var filtered = DiagnosticFilter.Apply(
+            diagnostics,
+            DiagnosticFilterOptions.None,
+            sources.Select(s => ((string?)s.Path, s.Source)).ToList());
+        return ValidationResult.From(filtered);
     }
 }

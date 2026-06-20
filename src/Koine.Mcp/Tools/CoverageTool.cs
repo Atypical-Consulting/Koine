@@ -30,6 +30,15 @@ public static class CoverageTool
         [Description("Output target: csharp (default), typescript, python, glossary, or docs.")]
         string target = "csharp")
     {
+        // Same transport-level input guard as koine_validate/koine_compile: reject empty/duplicate/
+        // null/oversized file inputs before the compiler runs. Coverage surfaces no diagnostics, so a
+        // guard failure degrades to an empty report — matching how a bad target / unparseable model
+        // already report (every type Missing / nothing covered).
+        if (!ToolGuards.TryValidateFiles(files, out _))
+        {
+            return new CoverageReport(target, Array.Empty<CoverageItem>());
+        }
+
         if (!EmitterFactory.TryCreate(target, out var emitter, out _))
         {
             return new CoverageReport(target, Array.Empty<CoverageItem>());

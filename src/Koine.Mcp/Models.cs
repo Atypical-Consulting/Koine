@@ -54,7 +54,7 @@ public sealed record ValidationResult(
         return new ValidationResult(
             Ok: errors == 0,
             ErrorCount: errors,
-            WarningCount: diagnostics.Count - errors,
+            WarningCount: diagnostics.Count(d => d.Severity == DiagnosticSeverity.Warning),
             Diagnostics: DiagnosticInfo.From(diagnostics));
     }
 }
@@ -78,13 +78,21 @@ public sealed record CompilationResult(
         Diagnostics: new[] { new DiagnosticInfo("error", "KOIMCP000", message, null, 0, 0, 0, 0) },
         Files: Array.Empty<EmittedFileInfo>());
 
+    /// <summary>A self-inflicted failure carrying one or more pre-built error diagnostics (e.g. input-guard failures).</summary>
+    internal static CompilationResult Failed(IReadOnlyList<DiagnosticInfo> errors) => new(
+        Success: false,
+        ErrorCount: errors.Count,
+        WarningCount: 0,
+        Diagnostics: errors,
+        Files: Array.Empty<EmittedFileInfo>());
+
     internal static CompilationResult From(CompileResult result)
     {
         var errors = result.Diagnostics.Count(d => d.Severity == DiagnosticSeverity.Error);
         return new CompilationResult(
             Success: result.Success,
             ErrorCount: errors,
-            WarningCount: result.Diagnostics.Count - errors,
+            WarningCount: result.Diagnostics.Count(d => d.Severity == DiagnosticSeverity.Warning),
             Diagnostics: DiagnosticInfo.From(result.Diagnostics),
             Files: result.Files.Select(f => new EmittedFileInfo(f.RelativePath, f.Contents)).ToList());
     }

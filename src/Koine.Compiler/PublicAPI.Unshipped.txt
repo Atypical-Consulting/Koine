@@ -46,6 +46,7 @@ Koine.Compiler.Emit.Docs.DiagramNode.Span.init -> void
 Koine.Compiler.Emit.Docs.DiagramNode.Stereotype.get -> string?
 Koine.Compiler.Emit.Docs.DiagramNode.Stereotype.init -> void
 Koine.Compiler.Emit.Docs.DocsEmitter.EmitDiagrams(Koine.Compiler.Ast.KoineModel! model) -> System.Collections.Generic.IReadOnlyDictionary<string!, System.Collections.Generic.IReadOnlyList<Koine.Compiler.Emit.Docs.DiagramDescriptor!>!>!
+Koine.Compiler.Emit.EmitterRegistry.SupportedList.get -> string!
 Koine.Compiler.Ast.CoverageItem
 Koine.Compiler.Ast.CoverageItem.Context.get -> string!
 Koine.Compiler.Ast.CoverageItem.Context.init -> void

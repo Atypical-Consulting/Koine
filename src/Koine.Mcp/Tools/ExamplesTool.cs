@@ -23,12 +23,11 @@ public static class ExamplesTool
     {
         if (string.IsNullOrWhiteSpace(name))
         {
-            return "Available examples: " + string.Join(", ", KnowledgeStore.Examples.Keys) +
-                   ". Call koine_examples with a name to get its source.";
+            return KnowledgeStore.ExamplesListing();
         }
 
         return KnowledgeStore.Examples.TryGetValue(name, out var source)
             ? source
-            : $"Unknown example '{name}'. Available: {string.Join(", ", KnowledgeStore.Examples.Keys)}.";
+            : KnowledgeStore.UnknownExampleMessage(name);
     }
 }
