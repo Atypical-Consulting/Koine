@@ -7,8 +7,25 @@ namespace Koine.Compiler.Services;
 /// <summary>The kind of a completion item; the LSP shell maps these to LSP numbers.</summary>
 public enum CompletionItemKind { Keyword, Class, Enum, EnumMember, Field, Property, Method }
 
-/// <summary>A single completion candidate, free of any LSP/JSON concepts.</summary>
-public sealed record CompletionItem(string Label, CompletionItemKind Kind, string? Detail, string? Documentation);
+/// <summary>
+/// A single completion candidate, free of any LSP/JSON concepts. The trailing fields are
+/// optional and additive so the many <c>new CompletionItem(label, kind, detail, doc)</c> call
+/// sites keep compiling unchanged: <see cref="InsertText"/>/<see cref="InsertTextFormat"/> carry a
+/// snippet body (format 2 = snippet, 1/<c>null</c> = plaintext); <see cref="CommitCharacters"/>
+/// commit the item when typed; <see cref="SortText"/> orders the list (prefix matches before
+/// non-prefix subsequence matches); <see cref="Data"/> is an opaque round-trip token for an LSP
+/// <c>completionItem/resolve</c>.
+/// </summary>
+public sealed record CompletionItem(
+    string Label,
+    CompletionItemKind Kind,
+    string? Detail,
+    string? Documentation,
+    string? InsertText = null,
+    int? InsertTextFormat = null,
+    IReadOnlyList<string>? CommitCharacters = null,
+    string? SortText = null,
+    string? Data = null);
 
 /// <summary>A hover card: rendered markdown plus the located token's 1-based start.</summary>
 public sealed record HoverResult(string Markdown);
@@ -157,21 +174,25 @@ public sealed class KoineLanguageService
         }
 
         var (model, _) = _compiler.Parse(source);
-        var index = model is null ? null : new ModelIndex(model);
 
         // Member access (`receiver.`) almost always sits in a doc that doesn't parse yet —
-        // the dangling '.' is a syntax error. Repair it by inserting a placeholder member
-        // name at the cursor and re-parsing, so the receiver's type can still be resolved.
-        if (index is null && ctx.PrecedingToken?.Type == KoineLexer.DOT)
+        // the dangling '.' is a syntax error. Even when the whole doc DID parse, a syntax error
+        // ELSEWHERE can leave the model partial. Repair the dangling '.' by inserting a
+        // placeholder member name at the cursor and re-parsing, so the receiver's type still
+        // binds; prefer the repaired model (it recovers the most declarations).
+        if (ctx.PrecedingToken?.Type == KoineLexer.DOT)
         {
             var (repaired, _) = _compiler.Parse(InsertPlaceholder(source, line, character));
             if (repaired is not null)
             {
-                index = new ModelIndex(repaired);
+                model = repaired;
             }
         }
 
-        var items = CandidatesFor(ctx, index);
+        var semantic = model is null ? null : new SemanticModel(model);
+        var index = semantic?.Index;
+
+        var items = CandidatesFor(ctx, semantic, index, source, line, character);
         return Filter(items, ctx.Partial);
     }
 
@@ -194,7 +215,8 @@ public sealed class KoineLanguageService
         return string.Join('\n', lines);
     }
 
-    private IReadOnlyList<CompletionItem> CandidatesFor(TokenContext ctx, ModelIndex? index)
+    private IReadOnlyList<CompletionItem> CandidatesFor(
+        TokenContext ctx, SemanticModel? semantic, ModelIndex? index, string source, int line, int character)
     {
         var trigger = ctx.PrecedingToken?.Type;
 
@@ -217,7 +239,7 @@ public sealed class KoineLanguageService
         // name, or a declared type name); a multi-hop chain `a.b.c` resolves left-to-right.
         if (trigger == KoineLexer.DOT)
         {
-            return DotCandidates(ctx, index);
+            return DotCandidates(ctx, semantic, index, source, line, character);
         }
 
         // Enum value position: after '=' (a field/param default). Resolve the
@@ -234,7 +256,7 @@ public sealed class KoineLanguageService
             || trigger == KoineLexer.LBRACE
             || trigger == KoineLexer.RBRACE)
         {
-            return Keywords(StartersFor(ctx.EnclosingKeyword));
+            return Starters(StartersFor(ctx.EnclosingKeyword));
         }
 
         // Expression-operand position inside a fielded type body (e.g. `invariant
@@ -251,13 +273,17 @@ public sealed class KoineLanguageService
     }
 
     /// <summary>
-    /// Members offered after <c>receiver.</c>. The receiver is the token immediately
-    /// before the '.' (<see cref="TokenContext.TokenBeforePreceding"/>): a field in the
-    /// enclosing fielded type (offer that field type's members), a declared enum type
-    /// (offer its members), or any declared value/entity type (offer its members). Returns
-    /// nothing when nothing resolves — never guesses.
+    /// Members offered after <c>receiver.</c>. The receiver immediately before the '.' may be a
+    /// single token or a multi-hop chain (<c>order.line.</c>). Resolution is binder-first:
+    /// the receiver chain is reconstructed as an <see cref="Expr"/> and typed through
+    /// <see cref="SemanticModel.GetTypeInfo"/> against a <see cref="TypeScope"/> of the enclosing
+    /// type's members (R13.2 context-scoped), so it survives a placeholder-repaired broken document
+    /// AND multi-hops. When the binder cannot determine the receiver type, it falls back to the flat
+    /// <see cref="ModelIndex"/> single-hop resolution (enum type / declared type / enclosing field),
+    /// so existing behaviour never regresses. Returns nothing when nothing resolves — never guesses.
     /// </summary>
-    private IReadOnlyList<CompletionItem> DotCandidates(TokenContext ctx, ModelIndex? index)
+    private IReadOnlyList<CompletionItem> DotCandidates(
+        TokenContext ctx, SemanticModel? semantic, ModelIndex? index, string source, int line, int character)
     {
         if (index is null)
         {
@@ -270,7 +296,7 @@ public sealed class KoineLanguageService
             return [];
         }
 
-        // 1. `EnumType.` -> its members.
+        // 1. `EnumType.` -> its members (a static enum reference, not a value).
         if (index.IsEnumType(receiver) && index.TryGetDecl(receiver, out var ed) && ed is EnumDecl en)
         {
             return en.Members
@@ -278,13 +304,22 @@ public sealed class KoineLanguageService
                 .ToList();
         }
 
-        // 2. `Type.` where the receiver is itself a declared value/entity type name.
+        // 2. Binder route: reconstruct the receiver chain (`a.b.c`) up to the trailing '.', type it
+        //    through the SemanticModel, and offer the resolved type's members. This handles the
+        //    multi-hop and broken-doc cases the flat ModelIndex can't.
+        if (semantic is not null
+            && BinderReceiverMembers(ctx, semantic, source, line, character) is { Count: > 0 } bound)
+        {
+            return bound;
+        }
+
+        // 3. Fallback — `Type.` where the receiver is itself a declared value/entity type name.
         if (index.IsKnownType(receiver) && MembersOf(index, receiver) is { Count: > 0 } directMembers)
         {
             return directMembers;
         }
 
-        // 3. `field.` where the receiver is a field of the enclosing fielded type:
+        // 4. Fallback — `field.` where the receiver is a field of the enclosing fielded type:
         //    resolve the field's declared type and offer ITS members.
         if (ctx.EnclosingTypeName is { } scopeType
             && index.TryGetMemberType(scopeType, receiver, out var fieldType)
@@ -295,6 +330,129 @@ public sealed class KoineLanguageService
 
         return [];
     }
+
+    /// <summary>
+    /// The members of the type the receiver chain (everything up to the trailing '.') resolves to,
+    /// via the binder. Builds the chain from the default-channel tokens immediately before the '.',
+    /// constructs an <see cref="Expr"/> (an <see cref="IdentifierExpr"/> root threaded through
+    /// <see cref="MemberAccessExpr"/> hops), and types it in a <see cref="TypeScope"/> of the
+    /// enclosing fielded type's members, resolving from that type's bounded context (R13.2). Returns
+    /// an empty list when there is no enclosing type, the chain doesn't reconstruct, or the receiver
+    /// types to <see cref="ErrorType"/>.
+    /// </summary>
+    private static IReadOnlyList<CompletionItem> BinderReceiverMembers(
+        TokenContext ctx, SemanticModel semantic, string source, int line, int character)
+    {
+        if (ctx.EnclosingTypeName is not { } scopeType
+            || semantic.Index.TryGetDecl(scopeType, out var scopeDecl) is false)
+        {
+            return [];
+        }
+
+        var members = MembersOfDecl(scopeDecl);
+        if (members is null)
+        {
+            return [];
+        }
+
+        var chain = ReceiverChainBeforeDot(source, line, character);
+        if (chain.Count == 0)
+        {
+            return [];
+        }
+
+        Expr expr = new IdentifierExpr(chain[0]);
+        for (var i = 1; i < chain.Count; i++)
+        {
+            expr = new MemberAccessExpr(expr, chain[i]);
+        }
+
+        var scope = TypeScope.FromMembers(members, semantic.Index);
+        var context = ContextOf(semantic, scopeType);
+        var type = semantic.GetTypeInfo(expr, scope, context);
+        if (type.IsError || type.Name is not { } typeName)
+        {
+            return [];
+        }
+
+        return BinderMembersOf(semantic, typeName);
+    }
+
+    /// <summary>
+    /// The default-channel identifier tokens forming the receiver chain immediately before the
+    /// trailing '.' at the cursor (e.g. <c>order . line .</c> -> <c>["order","line"]</c>). Walks the
+    /// lexer tokens back from the '.' nearest the cursor, alternating <c>IDENT . IDENT . …</c>;
+    /// stops at the first non-identifier/non-dot boundary. Empty when no identifier precedes the '.'.
+    /// </summary>
+    private static IReadOnlyList<string> ReceiverChainBeforeDot(string source, int line, int character)
+    {
+        var cursorOffset = OffsetOf(source, line, character);
+        var tokens = DefaultChannelTokensBefore(source, cursorOffset);
+
+        // The token immediately before the cursor must be the trailing '.'.
+        if (tokens.Count == 0 || tokens[^1].Type != KoineLexer.DOT)
+        {
+            return [];
+        }
+
+        var chain = new List<string>();
+        var expectIdentifier = true; // moving backwards: '.' then IDENT then '.' then IDENT …
+        for (var i = tokens.Count - 2; i >= 0; i--) // skip the trailing '.'
+        {
+            var t = tokens[i];
+            if (expectIdentifier)
+            {
+                if (!IsWordToken(t))
+                {
+                    break;
+                }
+
+                chain.Add(t.Text);
+                expectIdentifier = false;
+            }
+            else
+            {
+                if (t.Type != KoineLexer.DOT)
+                {
+                    break;
+                }
+
+                expectIdentifier = true;
+            }
+        }
+
+        chain.Reverse(); // collected right-to-left
+        return chain;
+    }
+
+    /// <summary>The fields of a value/entity declaration usable as an in-scope name set, else null.</summary>
+    private static IReadOnlyList<Member>? MembersOfDecl(TypeDecl decl) => decl switch
+    {
+        ValueObjectDecl v => v.Members,
+        EntityDecl e => e.Members,
+        _ => null,
+    };
+
+    /// <summary>The bounded context that declares <paramref name="typeName"/> (for R13.2 scoping), or null.</summary>
+    private static string? ContextOf(SemanticModel semantic, string typeName)
+    {
+        foreach (var ctx in semantic.Model.Contexts)
+        {
+            foreach (var t in ctx.Types)
+            {
+                if (t.Name == typeName)
+                {
+                    return ctx.Name;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>The member completions of the type the binder resolved the receiver to.</summary>
+    private static IReadOnlyList<CompletionItem> BinderMembersOf(SemanticModel semantic, string typeName) =>
+        MembersOf(semantic.Index, typeName);
 
     /// <summary>The member completions (name + type detail) of a value/entity type, or an empty list.</summary>
     private static IReadOnlyList<CompletionItem> MembersOf(ModelIndex index, string typeName) =>
@@ -426,6 +584,41 @@ public sealed class KoineLanguageService
     private static IReadOnlyList<CompletionItem> Keywords(string[] names) =>
         names.Select(n => new CompletionItem(n, CompletionItemKind.Keyword, "keyword", null)).ToList();
 
+    /// <summary>
+    /// Declaration-start completions: each starter keyword as a SNIPPET (LSP
+    /// <c>insertTextFormat = 2</c>) that scaffolds its idiomatic body with tab-stop placeholders
+    /// (e.g. <c>entity ${1:Name} {\n\t$0\n}</c>), so accepting it lays down a ready-to-fill block.
+    /// Keywords with no block body (e.g. <c>import</c>) fall back to a plain identifier snippet.
+    /// </summary>
+    private static IReadOnlyList<CompletionItem> Starters(string[] names) =>
+        names.Select(n => new CompletionItem(
+            n, CompletionItemKind.Keyword, "keyword", null,
+            InsertText: SnippetFor(n),
+            InsertTextFormat: 2)).ToList();
+
+    /// <summary>The snippet body for a declaration starter keyword (LSP snippet syntax).</summary>
+    private static string SnippetFor(string keyword) => keyword switch
+    {
+        "context" or "module" => keyword + " ${1:Name} {\n\t$0\n}",
+        "value" or "quantity" or "enum" or "event" or "service" or "policy" or "readmodel" or "aggregate" =>
+            keyword + " ${1:Name} {\n\t$0\n}",
+        "entity" => "entity ${1:Name} identified by ${2:Id} {\n\t$0\n}",
+        "spec" => "spec ${1:Name} on ${2:Type} = $0",
+        "query" => "query ${1:Name} { $0 }",
+        "import" => "import ${1:Type} from ${2:Context}",
+        "contextmap" => "contextmap {\n\t$0\n}",
+        "invariant" => "invariant $0",
+        "command" => "command ${1:Name}($2) { $0 }",
+        "create" => "create ${1:Name}($2) { $0 }",
+        "states" => "states ${1:Field} {\n\t$0\n}",
+        "operation" => "operation ${1:Name}($2): ${3:Result}",
+        "usecase" => "usecase ${1:Name}($2): ${3:Result}",
+        "operations" => "operations {\n\t$0\n}",
+        "find" => "find ${1:Name}($2): ${3:Result}",
+        "repository" => "repository {\n\t$0\n}",
+        _ => keyword + " $0",
+    };
+
     private static IReadOnlyList<CompletionItem> Filter(IReadOnlyList<CompletionItem> items, string partial)
     {
         if (partial.Length == 0)
@@ -433,8 +626,51 @@ public sealed class KoineLanguageService
             return items;
         }
 
-        var matched = items.Where(i => i.Label.StartsWith(partial, StringComparison.Ordinal)).ToList();
+        // SUBSEQUENCE match (like an IDE fuzzy filter): every character of `partial` appears in the
+        // label in order, not necessarily contiguous. A prefix match outranks a non-prefix
+        // subsequence match via SortText ("0"+label before "1"+label), so the editor lists the
+        // tightest matches first while still surfacing fuzzy hits.
+        var matched = new List<CompletionItem>();
+        foreach (var item in items)
+        {
+            if (!SubsequenceMatches(partial, item.Label))
+            {
+                continue;
+            }
+
+            var isPrefix = item.Label.StartsWith(partial, StringComparison.OrdinalIgnoreCase);
+            var sort = (isPrefix ? "0" : "1") + item.Label;
+            matched.Add(item with { SortText = sort });
+        }
+
         return matched; // empty list when nothing matches, by design
+    }
+
+    /// <summary>
+    /// Case-insensitive subsequence match: every character of <paramref name="query"/> appears in
+    /// <paramref name="text"/> in order (not necessarily contiguous). An empty query matches anything.
+    /// </summary>
+    private static bool SubsequenceMatches(string query, string text)
+    {
+        if (query.Length == 0)
+        {
+            return true;
+        }
+
+        var qi = 0;
+        foreach (var c in text)
+        {
+            if (char.ToLowerInvariant(c) == char.ToLowerInvariant(query[qi]))
+            {
+                qi++;
+                if (qi == query.Length)
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
     }
 
     /// <summary>The identifier-like token text under the cursor, or null (whitespace, string, regex).</summary>

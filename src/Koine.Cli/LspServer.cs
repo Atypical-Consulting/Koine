@@ -155,8 +155,9 @@ internal sealed class LspServer
                                     ["textDocumentSync"] = 2, // Incremental
                                     ["completionProvider"] = new Dictionary<string, object?>
                                     {
-                                        ["resolveProvider"] = false,
+                                        ["resolveProvider"] = true,
                                         ["triggerCharacters"] = new[] { ":", "." },
+                                        ["allCommitCharacters"] = new[] { ".", "(", " " },
                                     },
                                     ["signatureHelpProvider"] = new Dictionary<string, object?>
                                     {
@@ -267,6 +268,19 @@ internal sealed class LspServer
                             if (root.TryGetProperty("id", out _))
                             {
                                 Respond(root, CompletionResult(root));
+                            }
+
+                            break;
+
+                        case "completionItem/resolve":
+                            // resolveProvider is true, so this MUST exist. Our completion items carry
+                            // their detail/documentation/snippet eagerly, so resolve is a pass-through:
+                            // echo the item back unchanged (the client merges it into the shown item).
+                            if (root.TryGetProperty("id", out _))
+                            {
+                                Respond(root, root.TryGetProperty("params", out var resolveItem)
+                                    ? (object?)resolveItem.Clone()
+                                    : null);
                             }
 
                             break;
@@ -493,12 +507,41 @@ internal sealed class LspServer
         }
 
         var items = _ls.CompleteAt(text, line, ch)
-            .Select(i => (object)new Dictionary<string, object?>
+            .Select(i =>
             {
-                ["label"] = i.Label,
-                ["kind"] = LspKind(i.Kind),
-                ["detail"] = i.Detail,
-                ["documentation"] = i.Documentation,
+                var item = new Dictionary<string, object?>
+                {
+                    ["label"] = i.Label,
+                    ["kind"] = LspKind(i.Kind),
+                    ["detail"] = i.Detail,
+                    ["documentation"] = i.Documentation,
+                };
+                if (i.InsertText is not null)
+                {
+                    item["insertText"] = i.InsertText;
+                }
+
+                if (i.InsertTextFormat is { } fmt)
+                {
+                    item["insertTextFormat"] = fmt; // 1 = plaintext, 2 = snippet
+                }
+
+                if (i.CommitCharacters is { Count: > 0 } commit)
+                {
+                    item["commitCharacters"] = commit.ToArray();
+                }
+
+                if (i.SortText is not null)
+                {
+                    item["sortText"] = i.SortText;
+                }
+
+                if (i.Data is not null)
+                {
+                    item["data"] = i.Data;
+                }
+
+                return (object)item;
             })
             .ToArray();
 

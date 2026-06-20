@@ -95,6 +95,14 @@ export interface CompletionItem {
   kind?: number;
   detail?: string | null;
   documentation?: string | null;
+  // Snippet support: insertText is the body, insertTextFormat 2 = snippet (1/undefined = plaintext).
+  insertText?: string | null;
+  insertTextFormat?: number | null;
+  // Characters that commit this item when typed; sortText orders the list (prefix < subsequence);
+  // data is an opaque round-trip token for completionItem/resolve.
+  commitCharacters?: string[] | null;
+  sortText?: string | null;
+  data?: string | null;
 }
 export interface CompletionList {
   isIncomplete: boolean;

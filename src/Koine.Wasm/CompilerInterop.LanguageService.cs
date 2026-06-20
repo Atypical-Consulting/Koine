@@ -270,7 +270,10 @@ public static partial class CompilerInterop
             }
 
             var items = LanguageService.CompleteAt(text, line, character)
-                .Select(i => new WCompletionItem(i.Label, LspCompletionKind(i.Kind), i.Detail, i.Documentation))
+                .Select(i => new WCompletionItem(
+                    i.Label, LspCompletionKind(i.Kind), i.Detail, i.Documentation,
+                    i.InsertText, i.InsertTextFormat,
+                    i.CommitCharacters?.ToArray(), i.SortText, i.Data))
                 .ToArray();
             return SerializeCompletions(new WCompletionList(false, items));
         }
@@ -904,8 +907,22 @@ public sealed record WMarkupContent(string Kind, string Value);
 /// <summary>LSP Hover.</summary>
 public sealed record WHoverResult(WMarkupContent Contents);
 
-/// <summary>LSP CompletionItem (kind is the numeric LSP <c>CompletionItemKind</c>).</summary>
-public sealed record WCompletionItem(string Label, int Kind, string? Detail, string? Documentation);
+/// <summary>
+/// LSP CompletionItem (kind is the numeric LSP <c>CompletionItemKind</c>). The trailing fields are
+/// optional/additive so the serialized shape stays backward-compatible: <c>InsertText</c> +
+/// <c>InsertTextFormat</c> (2 = snippet) carry a snippet body; <c>CommitCharacters</c>,
+/// <c>SortText</c> and <c>Data</c> mirror the editor-agnostic <c>CompletionItem</c>.
+/// </summary>
+public sealed record WCompletionItem(
+    string Label,
+    int Kind,
+    string? Detail,
+    string? Documentation,
+    string? InsertText = null,
+    int? InsertTextFormat = null,
+    string[]? CommitCharacters = null,
+    string? SortText = null,
+    string? Data = null);
 
 /// <summary>LSP CompletionList.</summary>
 public sealed record WCompletionList(bool IsIncomplete, WCompletionItem[] Items);
