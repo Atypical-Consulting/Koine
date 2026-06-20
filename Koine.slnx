@@ -19,6 +19,7 @@
     <Project Path="tests/Koine.Compiler.PublicApiConsumer/Koine.Compiler.PublicApiConsumer.csproj" />
     <Project Path="tests/Koine.Compiler.Tests/Koine.Compiler.Tests.csproj" />
     <Project Path="tests/Koine.Mcp.Tests/Koine.Mcp.Tests.csproj" />
+    <Project Path="tests/Koine.Wasm.Tests/Koine.Wasm.Tests.csproj" />
   </Folder>
   <Folder Name="/benchmarks/">
     <Project Path="benchmarks/Koine.Compiler.Benchmarks/Koine.Compiler.Benchmarks.csproj" />

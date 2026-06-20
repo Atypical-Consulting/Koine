@@ -3,7 +3,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using Koine.Cli;
 
-namespace Koine.Compiler.Tests;
+namespace Koine.Wasm.Tests;
 
 /// <summary>
 /// Dual-backend wire parity for the structured diagram graphs (issue #93, task 2). The same

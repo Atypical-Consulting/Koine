@@ -1,5 +1,14 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
+  <!--
+    Isolated home for tests that must call the in-browser WASM JSExport surface
+    (Koine.Wasm.CompilerInterop). Referencing Koine.Wasm pulls in the browser-wasm RID, which
+    needs the `wasm-tools` workload to build — so these tests live in their own project rather
+    than in Koine.Compiler.Tests. That keeps the Studio CI job's lightweight "headless LSP tests"
+    step (which builds Koine.Compiler.Tests without the wasm workload) buildable. This project is
+    built/run only by the full-solution `dotnet test Koine.slnx` (CI's build-and-test job, which
+    installs the wasm workloads), exactly like Koine.Wasm itself.
+  -->
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
@@ -12,10 +21,8 @@
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageReference>
-    <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="5.3.0" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.6.0" />
     <PackageReference Include="Shouldly" Version="4.3.0" />
-    <PackageReference Include="Verify.XunitV3" Version="31.20.0" />
     <PackageReference Include="xunit.v3" Version="3.2.2" />
     <PackageReference Include="xunit.runner.visualstudio" Version="3.1.5">
       <PrivateAssets>all</PrivateAssets>
@@ -29,15 +36,10 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\src\Koine.Compiler\Koine.Compiler.csproj" />
+    <!-- Koine.Cli brings the internal LspServer (via InternalsVisibleTo) and transitively
+         Koine.Compiler; Koine.Wasm brings the JSExport CompilerInterop the parity test drives. -->
     <ProjectReference Include="..\..\src\Koine.Cli\Koine.Cli.csproj" />
-    <!-- Referenced so the unified-emitter test can read Koine.Mcp's EmitterFactory.Targets and
-         prove the CLI and MCP target lists no longer drift (issue #69, Task 5). -->
-    <ProjectReference Include="..\..\src\Koine.Mcp\Koine.Mcp.csproj" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <None Include="..\..\examples\billing.koi" Link="billing.koi" CopyToOutputDirectory="PreserveNewest" />
+    <ProjectReference Include="..\..\src\Koine.Wasm\Koine.Wasm.csproj" />
   </ItemGroup>
 
 </Project>
