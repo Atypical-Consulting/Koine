@@ -4,7 +4,7 @@
 // (the ubiquitous language) that Koine turns into idiomatic code — rather than describing it in prose.
 // The recent list is rebuilt from store.getRecentFolders() on every show() so it always reflects the
 // latest history.
-import { getRecentFolders } from './store';
+import { getRecentFolders, removeRecentFolder, pinRecentFolder } from './store';
 import { LOGO_SVG } from './logo';
 import { registerOverlay } from './overlay';
 import { TEMPLATES, type Template } from './templates';
@@ -298,25 +298,63 @@ export function createWelcome(cb: WelcomeCallbacks, templates: readonly Template
     list.className = 'koi-welcome-recent-list';
     for (const entry of folders) {
       const path = entry.path;
-      const item = document.createElement('button');
-      item.type = 'button';
+      const item = document.createElement('div');
       item.className = 'koi-welcome-recent-item';
-      item.title = path; // full path on hover
+      if (entry.pinned) item.classList.add('is-pinned');
 
+      const open = document.createElement('button');
+      open.type = 'button';
+      open.className = 'koi-welcome-recent-open';
+      open.title = path; // full path on hover
       const name = document.createElement('span');
       name.className = 'koi-welcome-recent-item-name';
       name.textContent = baseName(path);
-      item.appendChild(name);
-
       const full = document.createElement('span');
       full.className = 'koi-welcome-recent-item-path';
       full.textContent = path;
-      item.appendChild(full);
-
-      item.addEventListener('click', () => {
+      open.append(name, full);
+      open.addEventListener('click', () => {
         hide();
         cb.onOpenRecent(path);
       });
+      item.appendChild(open);
+
+      const pin = document.createElement('button');
+      pin.type = 'button';
+      pin.className = 'koi-welcome-recent-pin';
+      pin.setAttribute('aria-pressed', String(!!entry.pinned));
+      pin.setAttribute('aria-label', `${entry.pinned ? 'Unpin' : 'Pin'} ${baseName(path)}`);
+      pin.title = entry.pinned ? 'Unpin' : 'Pin';
+      pin.textContent = '★';
+      pin.addEventListener('click', () => {
+        pinRecentFolder(path, !entry.pinned);
+        renderRecent();
+      });
+      item.appendChild(pin);
+
+      const copy = document.createElement('button');
+      copy.type = 'button';
+      copy.className = 'koi-welcome-recent-copy';
+      copy.setAttribute('aria-label', `Copy path of ${baseName(path)}`);
+      copy.title = 'Copy path';
+      copy.textContent = '⧉';
+      copy.addEventListener('click', () => {
+        void navigator.clipboard?.writeText(path).catch(() => {});
+      });
+      item.appendChild(copy);
+
+      const remove = document.createElement('button');
+      remove.type = 'button';
+      remove.className = 'koi-welcome-recent-remove';
+      remove.setAttribute('aria-label', `Remove ${baseName(path)} from recent folders`);
+      remove.title = 'Remove from recent folders';
+      remove.textContent = '✕';
+      remove.addEventListener('click', () => {
+        removeRecentFolder(path);
+        renderRecent();
+      });
+      item.appendChild(remove);
+
       list.appendChild(item);
     }
     recent.appendChild(list);

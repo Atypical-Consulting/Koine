@@ -284,6 +284,39 @@ describe('welcome start actions ↔ gallery', () => {
   });
 });
 
+const KEY = 'koine.studio.recentFolders';
+
+describe('welcome recent rows', () => {
+  beforeEach(() => {
+    localStorage.clear();
+    document.body.innerHTML = '';
+  });
+
+  test('renders one row per recent with open/remove/pin controls', () => {
+    localStorage.setItem(KEY, JSON.stringify(['/a/one', '/b/two']));
+    createWelcome(makeCallbacks()).show();
+    expect(document.querySelectorAll('.koi-welcome-recent-item').length).toBe(2);
+    expect(document.querySelector('.koi-welcome-recent-remove')).not.toBeNull();
+    expect(document.querySelector('.koi-welcome-recent-pin')).not.toBeNull();
+  });
+
+  test('open control invokes onOpenRecent with the path', () => {
+    localStorage.setItem(KEY, JSON.stringify(['/a/one']));
+    const cb = makeCallbacks();
+    createWelcome(cb).show();
+    (document.querySelector('.koi-welcome-recent-open') as HTMLElement).click();
+    expect(cb.onOpenRecent).toHaveBeenCalledWith('/a/one');
+  });
+
+  test('remove deletes the row and updates storage', () => {
+    localStorage.setItem(KEY, JSON.stringify(['/a/one', '/b/two']));
+    createWelcome(makeCallbacks()).show();
+    (document.querySelector('.koi-welcome-recent-remove') as HTMLElement).click();
+    expect(document.querySelectorAll('.koi-welcome-recent-item').length).toBe(1);
+    expect(JSON.parse(localStorage.getItem(KEY)!).length).toBe(1);
+  });
+});
+
 // The search input is debounced; tests enable fake timers and flush the debounce window.
 function setSearch(root: HTMLElement, value: string): void {
   vi.useFakeTimers();
