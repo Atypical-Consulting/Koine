@@ -1,1 +1,48 @@
 #nullable enable
+Koine.Compiler.Emit.Docs.DiagramDescriptor
+Koine.Compiler.Emit.Docs.DiagramDescriptor.Caption.get -> string!
+Koine.Compiler.Emit.Docs.DiagramDescriptor.Caption.init -> void
+Koine.Compiler.Emit.Docs.DiagramDescriptor.DiagramDescriptor(string! Caption, string! Kind, string! Mermaid, Koine.Compiler.Emit.Docs.DiagramGraph! Graph) -> void
+Koine.Compiler.Emit.Docs.DiagramDescriptor.Graph.get -> Koine.Compiler.Emit.Docs.DiagramGraph!
+Koine.Compiler.Emit.Docs.DiagramDescriptor.Graph.init -> void
+Koine.Compiler.Emit.Docs.DiagramDescriptor.Kind.get -> string!
+Koine.Compiler.Emit.Docs.DiagramDescriptor.Kind.init -> void
+Koine.Compiler.Emit.Docs.DiagramDescriptor.Mermaid.get -> string!
+Koine.Compiler.Emit.Docs.DiagramDescriptor.Mermaid.init -> void
+Koine.Compiler.Emit.Docs.DiagramEdge
+Koine.Compiler.Emit.Docs.DiagramEdge.DiagramEdge(string! From, string! To, string? Label) -> void
+Koine.Compiler.Emit.Docs.DiagramEdge.From.get -> string!
+Koine.Compiler.Emit.Docs.DiagramEdge.From.init -> void
+Koine.Compiler.Emit.Docs.DiagramEdge.Label.get -> string?
+Koine.Compiler.Emit.Docs.DiagramEdge.Label.init -> void
+Koine.Compiler.Emit.Docs.DiagramEdge.To.get -> string!
+Koine.Compiler.Emit.Docs.DiagramEdge.To.init -> void
+Koine.Compiler.Emit.Docs.DiagramGraph
+Koine.Compiler.Emit.Docs.DiagramGraph.DiagramGraph(System.Collections.Generic.IReadOnlyList<Koine.Compiler.Emit.Docs.DiagramNode!>! Nodes, System.Collections.Generic.IReadOnlyList<Koine.Compiler.Emit.Docs.DiagramEdge!>! Edges) -> void
+Koine.Compiler.Emit.Docs.DiagramGraph.Edges.get -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Emit.Docs.DiagramEdge!>!
+Koine.Compiler.Emit.Docs.DiagramGraph.Edges.init -> void
+Koine.Compiler.Emit.Docs.DiagramGraph.Nodes.get -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Emit.Docs.DiagramNode!>!
+Koine.Compiler.Emit.Docs.DiagramGraph.Nodes.init -> void
+Koine.Compiler.Emit.Docs.DiagramMember
+Koine.Compiler.Emit.Docs.DiagramMember.DiagramMember(string! Text, string! Kind) -> void
+Koine.Compiler.Emit.Docs.DiagramMember.Kind.get -> string!
+Koine.Compiler.Emit.Docs.DiagramMember.Kind.init -> void
+Koine.Compiler.Emit.Docs.DiagramMember.Text.get -> string!
+Koine.Compiler.Emit.Docs.DiagramMember.Text.init -> void
+Koine.Compiler.Emit.Docs.DiagramNode
+Koine.Compiler.Emit.Docs.DiagramNode.DiagramNode(string! Id, string! Label, string! Kind, string! QualifiedName, Koine.Compiler.Ast.SourceSpan? Span, string? Stereotype = null, System.Collections.Generic.IReadOnlyList<Koine.Compiler.Emit.Docs.DiagramMember!>? Members = null) -> void
+Koine.Compiler.Emit.Docs.DiagramNode.Id.get -> string!
+Koine.Compiler.Emit.Docs.DiagramNode.Id.init -> void
+Koine.Compiler.Emit.Docs.DiagramNode.Kind.get -> string!
+Koine.Compiler.Emit.Docs.DiagramNode.Kind.init -> void
+Koine.Compiler.Emit.Docs.DiagramNode.Label.get -> string!
+Koine.Compiler.Emit.Docs.DiagramNode.Label.init -> void
+Koine.Compiler.Emit.Docs.DiagramNode.Members.get -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Emit.Docs.DiagramMember!>?
+Koine.Compiler.Emit.Docs.DiagramNode.Members.init -> void
+Koine.Compiler.Emit.Docs.DiagramNode.QualifiedName.get -> string!
+Koine.Compiler.Emit.Docs.DiagramNode.QualifiedName.init -> void
+Koine.Compiler.Emit.Docs.DiagramNode.Span.get -> Koine.Compiler.Ast.SourceSpan?
+Koine.Compiler.Emit.Docs.DiagramNode.Span.init -> void
+Koine.Compiler.Emit.Docs.DiagramNode.Stereotype.get -> string?
+Koine.Compiler.Emit.Docs.DiagramNode.Stereotype.init -> void
+Koine.Compiler.Emit.Docs.DocsEmitter.EmitDiagrams(Koine.Compiler.Ast.KoineModel! model) -> System.Collections.Generic.IReadOnlyDictionary<string!, System.Collections.Generic.IReadOnlyList<Koine.Compiler.Emit.Docs.DiagramDescriptor!>!>!
