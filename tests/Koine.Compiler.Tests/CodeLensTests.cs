@@ -75,7 +75,13 @@ public class CodeLensTests
             .SelectMany(c => c.Children)
             .Single(s => s.Name == "Money");
 
+        // The lens range is the declaration's name span. Compare by position; the lens is computed
+        // from the warm snapshot's per-file model (which carries the source File on its spans) while
+        // the raw DocumentSymbols(src) parse does not, so the incidental File field is ignored here.
         var money = lenses.Single(l => l.Name == "Money");
-        money.Range.ShouldBe(moneySymbol.SelectionRange);
+        money.Range.Line.ShouldBe(moneySymbol.SelectionRange.Line);
+        money.Range.Column.ShouldBe(moneySymbol.SelectionRange.Column);
+        money.Range.EndLine.ShouldBe(moneySymbol.SelectionRange.EndLine);
+        money.Range.EndColumn.ShouldBe(moneySymbol.SelectionRange.EndColumn);
     }
 }

@@ -601,6 +601,20 @@ export class KoineLsp {
     });
   }
 
+  /** Signature help for the call enclosing a 0-based position. Resolves to null when there is none. */
+  signatureHelp(line: number, character: number): Promise<SignatureHelp | null> {
+    return this.request<SignatureHelp | null>('textDocument/signatureHelp', {
+      textDocument: { uri: this.activeUri },
+      position: { line, character },
+    });
+  }
+
+  /** Workspace-wide symbol search (subsequence-matches `query`). Resolves to [] when nothing matches. */
+  async workspaceSymbols(query: string): Promise<WorkspaceSymbol[]> {
+    const res = await this.request<WorkspaceSymbol[] | null>('workspace/symbol', { query });
+    return res ?? [];
+  }
+
   /** Document outline as a DocumentSymbol tree. Resolves to [] when the server returns null. */
   async documentSymbols(): Promise<DocumentSymbol[]> {
     const res = await this.request<DocumentSymbol[] | null>('textDocument/documentSymbol', {

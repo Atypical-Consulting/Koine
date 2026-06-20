@@ -120,6 +120,12 @@ export class WasmLspTransport implements LspTransport {
       case 'textDocument/definition':
         return [result(JSON.parse(api.Definition(this.filesJson(), uri ?? '', pos?.line ?? 0, pos?.character ?? 0)))];
 
+      case 'textDocument/signatureHelp':
+        return [result(JSON.parse(api.SignatureHelp(this.filesJson(), uri ?? '', pos?.line ?? 0, pos?.character ?? 0)))];
+
+      case 'workspace/symbol':
+        return [result(JSON.parse(api.WorkspaceSymbols(this.filesJson(), msg.params?.query ?? '')))];
+
       case 'textDocument/documentSymbol':
         return [result(JSON.parse(api.DocumentSymbols(this.docs.get(uri ?? '') ?? '')))];
 

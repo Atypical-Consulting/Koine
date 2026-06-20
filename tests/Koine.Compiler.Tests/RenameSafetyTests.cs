@@ -78,6 +78,32 @@ public class RenameSafetyTests
     }
 
     [Fact]
+    public void Rename_of_an_enum_member_rewrites_a_qualified_selector_but_not_a_sibling_member()
+    {
+        // Renaming the `Cancelled` member of `RefundStatus` must rewrite both its declaration AND the
+        // qualified `RefundStatus.Cancelled` selector in an expression — while a sibling enum's bare
+        // `Cancelled` member must NOT be touched.
+        var src =
+            "context C {\n" +
+            "  enum RefundStatus { Cancelled, Done }\n" +
+            "  enum OtherStatus { Cancelled, Open }\n" +
+            "  value Refund {\n" +
+            "    status: RefundStatus\n" +
+            "    isCancelled: Bool = status == RefundStatus.Cancelled\n" +
+            "  }\n" +
+            "}\n";
+        // Cursor on the `Cancelled` member declaration in RefundStatus (line index 1).
+        var col = src.Split('\n')[1].IndexOf("Cancelled", StringComparison.Ordinal) + 1;
+        var edits = Svc.RenameAt(Doc(src), U, line: 1, character: col, newName: "Voided");
+        edits.ShouldNotBeNull();
+        edits.ShouldContain(r => r.Line == 2); // RefundStatus.Cancelled declaration
+        // The qualified selector `RefundStatus.Cancelled` on line 6 (1-based).
+        var selector = src.Split('\n')[5].IndexOf(".Cancelled", StringComparison.Ordinal) + 1; // 0-based col of 'C'
+        edits.ShouldContain(r => r.Line == 6 && r.StartColumn == selector);
+        edits.ShouldNotContain(r => r.Line == 3); // sibling OtherStatus.Cancelled untouched
+    }
+
+    [Fact]
     public void Rename_of_an_enum_member_stays_scoped_to_its_owning_enum()
     {
         // No-regression mirror: renaming Phase.Active must NOT cross into a sibling State.Active.

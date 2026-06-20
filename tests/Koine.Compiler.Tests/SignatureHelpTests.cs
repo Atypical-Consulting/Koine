@@ -59,6 +59,35 @@ public class SignatureHelpTests
     }
 
     [Fact]
+    public void Active_parameter_is_clamped_to_the_last_index_when_overshooting()
+    {
+        // `place` declares 2 params (a, b). Typing a third argument's comma — `place(a, b, c` —
+        // yields a raw comma count of 2, which would index out of range. It must clamp to the last
+        // parameter index (1) so the editor still highlights a valid parameter.
+        var src =
+            "context C {\n" +
+            "  aggregate A root E {\n" +
+            "    entity E identified by EId {\n" +
+            "      qty: Decimal\n" +
+            "      create place(a: Decimal, b: Decimal) {\n" +
+            "        qty <- place(a, b, c\n" +
+            "      }\n" +
+            "    }\n" +
+            "  }\n" +
+            "}\n";
+        var line = 5;
+        var lineText = src.Replace("\r\n", "\n").Split('\n')[line];
+        // Cursor at end of `place(a, b, c` (after the two top-level commas).
+        var ch = lineText.IndexOf("place(a, b, c", StringComparison.Ordinal) + "place(a, b, c".Length;
+
+        var help = Svc.SignatureHelpAt(Doc(src), U, line, ch);
+
+        help.ShouldNotBeNull();
+        help.Signatures[0].Parameters.Count.ShouldBe(2);
+        help.ActiveParameter.ShouldBe(1); // clamped to last index, not 2
+    }
+
+    [Fact]
     public void Unresolved_callee_returns_null()
     {
         var src =

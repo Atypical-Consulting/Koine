@@ -434,21 +434,10 @@ public sealed class KoineLanguageService
     };
 
     /// <summary>The bounded context that declares <paramref name="typeName"/> (for R13.2 scoping), or null.</summary>
-    private static string? ContextOf(SemanticModel semantic, string typeName)
-    {
-        foreach (var ctx in semantic.Model.Contexts)
-        {
-            foreach (var t in ctx.Types)
-            {
-                if (t.Name == typeName)
-                {
-                    return ctx.Name;
-                }
-            }
-        }
-
-        return null;
-    }
+    private static string? ContextOf(SemanticModel semantic, string typeName) =>
+        // The canonical accessor flattens aggregate-nested types (which the old hand-rolled
+        // Contexts→Types loop missed); first-match-wins is preserved via FirstOrDefault.
+        semantic.Index.DeclaringContextsOf(typeName).FirstOrDefault();
 
     /// <summary>The member completions of the type the binder resolved the receiver to.</summary>
     private static IReadOnlyList<CompletionItem> BinderMembersOf(SemanticModel semantic, string typeName) =>
@@ -633,7 +622,7 @@ public sealed class KoineLanguageService
         var matched = new List<CompletionItem>();
         foreach (var item in items)
         {
-            if (!SubsequenceMatches(partial, item.Label))
+            if (!IsSubsequence(partial, item.Label))
             {
                 continue;
             }
@@ -644,33 +633,6 @@ public sealed class KoineLanguageService
         }
 
         return matched; // empty list when nothing matches, by design
-    }
-
-    /// <summary>
-    /// Case-insensitive subsequence match: every character of <paramref name="query"/> appears in
-    /// <paramref name="text"/> in order (not necessarily contiguous). An empty query matches anything.
-    /// </summary>
-    private static bool SubsequenceMatches(string query, string text)
-    {
-        if (query.Length == 0)
-        {
-            return true;
-        }
-
-        var qi = 0;
-        foreach (var c in text)
-        {
-            if (char.ToLowerInvariant(c) == char.ToLowerInvariant(query[qi]))
-            {
-                qi++;
-                if (qi == query.Length)
-                {
-                    return true;
-                }
-            }
-        }
-
-        return false;
     }
 
     /// <summary>The identifier-like token text under the cursor, or null (whitespace, string, regex).</summary>
@@ -791,11 +753,16 @@ public sealed class KoineLanguageService
     public IReadOnlyList<DocumentSymbol> DocumentSymbols(string source)
     {
         var (model, _) = _compiler.Parse(source);
-        if (model is null)
-        {
-            return [];
-        }
+        return model is null ? [] : DocumentSymbols(model);
+    }
 
+    /// <summary>
+    /// The hierarchical symbol outline of an already-parsed model. Lets callers that hold a warm
+    /// <see cref="KoineCompilation"/> snapshot (e.g. <see cref="CodeLenses(KoineCompilation,string)"/>)
+    /// reuse the memoized model instead of re-parsing the source.
+    /// </summary>
+    private static IReadOnlyList<DocumentSymbol> DocumentSymbols(KoineModel model)
+    {
         var contexts = new List<DocumentSymbol>();
         foreach (var ctx in model.Contexts)
         {
@@ -1215,8 +1182,12 @@ public sealed class KoineLanguageService
             return [];
         }
 
+        // Reuse the warm snapshot's memoized per-file model rather than re-parsing the source.
+        var perFile = compilation.SemanticModelFor(activeUri)?.Model;
+        var outline = perFile is null ? DocumentSymbols(source) : DocumentSymbols(perFile);
+
         var lenses = new List<CodeLens>();
-        foreach (var top in DocumentSymbols(source))
+        foreach (var top in outline)
         {
             // Top-level declarations live one level under the context node; the context itself
             // carries no reference lens. Members are not lensed (they are file-/type-scoped).
@@ -1375,9 +1346,19 @@ public sealed class KoineLanguageService
     /// Returns null when the document is not open, the cursor is in a string/regex, there is no
     /// enclosing open call, or the callee does not resolve to a parameterized declaration.
     /// </summary>
-    public SignatureHelp? SignatureHelpAt(IReadOnlyDictionary<string, string> documents, string activeUri, int line, int character)
+    public SignatureHelp? SignatureHelpAt(IReadOnlyDictionary<string, string> documents, string activeUri, int line, int character) =>
+        SignatureHelpAt(ToCompilation(documents), activeUri, line, character);
+
+    /// <summary>
+    /// Overload of <see cref="SignatureHelpAt(IReadOnlyDictionary{string,string},string,int,int)"/>
+    /// that uses a held <see cref="KoineCompilation"/> snapshot, avoiding re-parses when the caller
+    /// holds and reuses the same compilation across multiple requests. The callee parameter list is
+    /// resolved from the snapshot's memoized model rather than a fresh parse; the lexer-only cursor
+    /// scan still re-lexes the active source (it needs the raw token stream to the cursor).
+    /// </summary>
+    public SignatureHelp? SignatureHelpAt(KoineCompilation compilation, string activeUri, int line, int character)
     {
-        if (!documents.TryGetValue(activeUri, out var source))
+        if (!compilation.Documents.TryGetValue(activeUri, out var source))
         {
             return null;
         }
@@ -1432,12 +1413,9 @@ public sealed class KoineLanguageService
             return null;
         }
 
-        var (model, _) = _compiler.Parse(source);
-        if (model is null)
-        {
-            return null;
-        }
-
+        // Resolve the callee against the snapshot's memoized model (the active file's, falling back
+        // to the merged whole-workspace model) instead of re-parsing the source on every keystroke.
+        var model = compilation.SemanticModelFor(activeUri)?.Model ?? compilation.Model;
         var index = new ModelIndex(model);
         var parameters = ResolveCalleeParameters(index, callee.Text);
         if (parameters is null)
@@ -1449,7 +1427,10 @@ public sealed class KoineLanguageService
             .Select(p => new ParameterInfo($"{p.Name}: {RenderType(p.Type)}"))
             .ToList();
         var label = $"{callee.Text}({string.Join(", ", paramInfos.Select(p => p.Label))})";
-        return new SignatureHelp([new SignatureInfo(label, paramInfos)], 0, activeParameter);
+        // Clamp the active parameter: overshooting the last param (e.g. an extra trailing comma)
+        // must still highlight the last parameter rather than index out of range.
+        var active = paramInfos.Count == 0 ? 0 : Math.Min(activeParameter, paramInfos.Count - 1);
+        return new SignatureHelp([new SignatureInfo(label, paramInfos)], 0, active);
     }
 
     /// <summary>

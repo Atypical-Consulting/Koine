@@ -157,7 +157,7 @@ internal sealed class LspServer
                                     {
                                         ["resolveProvider"] = true,
                                         ["triggerCharacters"] = new[] { ":", "." },
-                                        ["allCommitCharacters"] = new[] { ".", "(", " " },
+                                        ["allCommitCharacters"] = new[] { ".", "(" },
                                     },
                                     ["signatureHelpProvider"] = new Dictionary<string, object?>
                                     {
@@ -555,7 +555,7 @@ internal sealed class LspServer
             return null;
         }
 
-        var help = _ls.SignatureHelpAt(_docs, uri, line, ch);
+        var help = _ls.SignatureHelpAt(_compilation, uri, line, ch);
         if (help is null)
         {
             return null;

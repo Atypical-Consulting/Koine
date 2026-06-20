@@ -132,11 +132,15 @@ public sealed class WorkspaceIndex
     /// cross-file type rename. It prevents the corruption where renaming a type <c>Status</c> also
     /// rewrote a same-named enum member or field.</para>
     ///
-    /// <para>Member-access selectors (the <c>amount</c> in <c>total.amount</c>) DO participate when the
-    /// target is a member: the binder types the receiver and interns the selector's <see cref="MemberSymbol"/>,
-    /// so <see cref="IdentityReferences"/> reaches it by symbol identity (the receiver's resolved type
-    /// must own the target member). A selector whose receiver the binder cannot type stays unbound and
-    /// is simply not rewritten.</para>
+    /// <para>Member-access selectors DO participate. For a member target (the <c>amount</c> in
+    /// <c>total.amount</c>) the binder types the receiver and interns the selector's
+    /// <see cref="MemberSymbol"/>, so <see cref="IdentityReferences"/> reaches it by symbol identity (the
+    /// receiver's resolved type must own the target member). For an enum-member target the qualified
+    /// selector (the <c>Cancelled</c> in <c>RefundStatus.Cancelled</c>) binds to the interned
+    /// <see cref="EnumMemberSymbol"/>, so <see cref="EnumMemberReferences"/> reaches it via
+    /// <see cref="SemanticModel.ReferencedSymbolAt"/> and rewrites it while leaving a sibling enum's
+    /// same-named bare member untouched. A selector whose receiver the binder cannot type stays unbound
+    /// and is simply not rewritten.</para>
     /// </summary>
     public IReadOnlyList<Reference> FindReferences(string activeUri, string name, int? offset = null, string? enclosingType = null)
     {
@@ -211,15 +215,19 @@ public sealed class WorkspaceIndex
                 return _byUri.Values.Any(sema =>
                     sema.GetSymbol(newName) is TypeSymbol or SpecSymbol or IdValueObjectSymbol);
 
-            // Enum member: block only when the SAME owning enum already declares newName.
+            // Enum member: block only when the SAME owning enum already declares newName, looked up
+            // within the model that OWNS the target (the active document) — so a same-simple-name
+            // enum in a different R13.2 context cannot drive the collision decision.
             case EnumMemberSymbol enumMember:
-                return _byUri.Values.Any(sema =>
-                    sema.Index.EnumsDeclaring(newName).Contains(enumMember.EnumName));
+                return _byUri.TryGetValue(activeUri, out SemanticModel? enumOwner)
+                    && enumOwner.Index.EnumsDeclaring(newName).Contains(enumMember.EnumName);
 
-            // Field: block only when the SAME owning type already declares a member newName.
+            // Field: block only when the SAME owning type already declares a member newName, looked
+            // up within the model that OWNS the target (the active document) — so a same-simple-name
+            // type in a different context cannot drive the collision decision.
             case MemberSymbol member:
-                return _byUri.Values.Any(sema =>
-                    sema.Index.TryGetMemberType(member.OwnerType, newName, out _));
+                return _byUri.TryGetValue(activeUri, out SemanticModel? memberOwner)
+                    && memberOwner.Index.TryGetMemberType(member.OwnerType, newName, out _);
 
             default:
                 return false; // parameters / locals: not gated
@@ -355,9 +363,11 @@ public sealed class WorkspaceIndex
     /// text matches and which resolves (in its own document, by position) to an enum member of the
     /// same owning enum (compared by <see cref="Symbol.DeclSpan"/>). This keeps a rename of
     /// <c>Phase.Active</c> from touching an unrelated <c>State.Active</c>. The declaration token
-    /// resolves via <see cref="SemanticModel.DeclaredSymbolAt"/>; in-expression references via
-    /// <see cref="SemanticModel.DefinitionAt"/>. (Member-access selectors like <c>Phase.Active</c>
-    /// need receiver typing we lack and are out of scope — see the class remarks.)
+    /// resolves via <see cref="SemanticModel.DeclaredSymbolAt"/>; bare in-expression references via
+    /// <see cref="SemanticModel.DefinitionAt"/>; and a qualified <c>Phase.Active</c> selector via
+    /// <see cref="SemanticModel.ReferencedSymbolAt"/> (the binder interns the selector's enum-member
+    /// symbol). The same <see cref="Symbol.DeclSpan"/> equality used for the bare case keeps a
+    /// sibling enum's same-named member from being rewritten.
     /// </summary>
     private IReadOnlyList<Reference> EnumMemberReferences(EnumMemberSymbol target)
     {
@@ -377,7 +387,7 @@ public sealed class WorkspaceIndex
                 }
 
                 var off = tok.StartIndex;
-                Symbol? resolved = sema.DeclaredSymbolAt(off) ?? sema.DefinitionAt(off);
+                Symbol? resolved = sema.DeclaredSymbolAt(off) ?? sema.DefinitionAt(off) ?? sema.ReferencedSymbolAt(off);
                 if (resolved is EnumMemberSymbol em && em.DeclSpan == target.DeclSpan)
                 {
                     refs.Add(ToReference(uri, tok));

@@ -24,6 +24,10 @@ export interface KoineWasmApi {
   Completions(filesJson: string, activeUri: string, line: number, character: number): string;
   /** Go-to-definition at a 0-based position → JSON Location or `null`. */
   Definition(filesJson: string, activeUri: string, line: number, character: number): string;
+  /** Signature help at a 0-based position → JSON SignatureHelp or `null`. */
+  SignatureHelp(filesJson: string, activeUri: string, line: number, character: number): string;
+  /** Workspace-wide symbol search → JSON SymbolInformation[] (subsequence-matches `query`). */
+  WorkspaceSymbols(filesJson: string, query: string): string;
   /** Single-file document outline → JSON DocumentSymbol[]. */
   DocumentSymbols(source: string): string;
   /** Collapsible regions of a single file → JSON FoldingRange[] (`{startLine,endLine}`). */
@@ -72,6 +76,8 @@ const KOINE_WASM_EXPORTS: ReadonlySet<string> = new Set<keyof KoineWasmApi>([
   'Hover',
   'Completions',
   'Definition',
+  'SignatureHelp',
+  'WorkspaceSymbols',
   'DocumentSymbols',
   'FoldingRanges',
   'SelectionRanges',
