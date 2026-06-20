@@ -24,6 +24,18 @@ public interface IEmitter
     /// <summary>The target identifier, e.g. <c>"csharp"</c>.</summary>
     string TargetName { get; }
 
+    /// <summary>
+    /// A stable fingerprint of everything about THIS emitter that affects emitted bytes — its type
+    /// plus every option that changes output (source maps, reference-only, namespace/module remaps,
+    /// instant mode, …). It feeds <see cref="Services.KoineCompiler"/>'s content-addressed emit cache:
+    /// two emitters that would produce different bytes for the same model MUST yield different
+    /// discriminators, so toggling any output-affecting option busts the cache. The default is the
+    /// concrete type name (correct for emitters with no output-affecting options); the C# and
+    /// TypeScript backends override it to encode their options. Must be deterministic across runs
+    /// (no <c>GetHashCode</c>/random/timestamps).
+    /// </summary>
+    string CacheDiscriminator => GetType().FullName!;
+
     /// <summary>Emits source files for the whole model.</summary>
     IReadOnlyList<EmittedFile> Emit(KoineModel model);
 

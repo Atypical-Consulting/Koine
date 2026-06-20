@@ -1,4 +1,7 @@
 #nullable enable
+Koine.Compiler.Emit.CSharp.CSharpEmitter.CacheDiscriminator.get -> string!
+Koine.Compiler.Emit.IEmitter.CacheDiscriminator.get -> string!
+Koine.Compiler.Emit.TypeScript.TypeScriptEmitter.CacheDiscriminator.get -> string!
 Koine.Compiler.Emit.EmitterOptions.EmitSourceMaps.get -> bool
 Koine.Compiler.Emit.EmitterOptions.EmitSourceMaps.init -> void
 Koine.Compiler.Emit.EmitterOptions.ReferenceOnly.get -> bool

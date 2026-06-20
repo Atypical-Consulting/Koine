@@ -41,6 +41,30 @@ public sealed partial class TypeScriptEmitter : IEmitter
     public string TargetName => "typescript";
 
     /// <summary>
+    /// Encodes every TypeScript option that changes emitted bytes (source maps, reference-only, and the
+    /// sorted module remap pairs) into the cache fingerprint, so toggling any of them busts
+    /// <see cref="Services.KoineCompiler"/>'s emit cache. The module pairs are ordered so equal maps
+    /// always produce the same string regardless of insertion order.
+    /// </summary>
+    public string CacheDiscriminator
+    {
+        get
+        {
+            var map = string.Join(
+                ",",
+                _options.ModuleMap
+                    .OrderBy(kv => kv.Key, StringComparer.Ordinal)
+                    .Select(kv => kv.Key + "=" + kv.Value));
+            return string.Join(
+                "|",
+                GetType().FullName,
+                "sourceMaps=" + _options.EmitSourceMaps,
+                "refOnly=" + _options.ReferenceOnly,
+                "modules=" + map);
+        }
+    }
+
+    /// <summary>
     /// The shipped <c>tsconfig.json</c>: a modern target/lib (so Set/Map/iterables/Array.find
     /// resolve), <c>strict</c>, and <c>noEmit</c> — type-check only, matching the conformance harness.
     /// </summary>

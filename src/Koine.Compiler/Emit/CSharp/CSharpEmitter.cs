@@ -31,6 +31,31 @@ public sealed partial class CSharpEmitter : IEmitter
     internal CSharpEmitter(CSharpEmitterOptions options) => _options = options;
 
     /// <summary>
+    /// Encodes every C# option that changes emitted bytes (instant mode, source maps, reference-only,
+    /// and the sorted namespace remap pairs) into the cache fingerprint, so toggling any of them busts
+    /// <see cref="Services.KoineCompiler"/>'s emit cache. The namespace pairs are ordered so equal maps
+    /// always produce the same string regardless of insertion order.
+    /// </summary>
+    public string CacheDiscriminator
+    {
+        get
+        {
+            var map = string.Join(
+                ",",
+                _options.NamespaceMap
+                    .OrderBy(kv => kv.Key, StringComparer.Ordinal)
+                    .Select(kv => kv.Key + "=" + kv.Value));
+            return string.Join(
+                "|",
+                GetType().FullName,
+                "instant=" + _options.InstantMode,
+                "sourceMaps=" + _options.EmitSourceMaps,
+                "refOnly=" + _options.ReferenceOnly,
+                "ns=" + map);
+        }
+    }
+
+    /// <summary>
     /// True when reference-only emit is requested (<see cref="CSharpEmitterOptions.ReferenceOnly"/>):
     /// every executable body is replaced with a <c>throw null!;</c> reference-assembly stub while all
     /// signatures, declarations, interfaces and attributes stay intact. Off by default, so the full
