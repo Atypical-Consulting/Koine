@@ -18,7 +18,7 @@ import { getPlatform, type FsEntry, type KoiFile } from './host';
 import { createExplorer } from './explorer';
 import { koineMark } from './logo';
 import { currentTheme, initTheme, onThemeChange, toggleTheme } from './theme';
-import { clearScratch, initSecrets, loadScratch, loadSettings, pushRecentFolder, saveScratch, type Settings } from './store';
+import { clearScratch, initSecrets, loadScratch, loadSettings, pushRecentFolder, type Settings } from './store';
 import { createWelcome } from './welcome';
 import { type Example } from './examples';
 import { createCommandPalette, type Command } from './palette';
@@ -457,17 +457,6 @@ export function init(): void {
   });
   treeBodyEl.appendChild(explorer.el);
 
-  // Debounced persistence of the scratch buffer. The seed is treated as "no saved state" so the
-  // welcome screen still appears on a fresh reload; any real edit is restored next time.
-  let scratchSaveTimer: ReturnType<typeof setTimeout> | undefined;
-  function scheduleScratchSave(text: string): void {
-    clearTimeout(scratchSaveTimer);
-    scratchSaveTimer = setTimeout(() => {
-      if (text === SEED) clearScratch();
-      else saveScratch(text);
-    }, 400);
-  }
-
   function setStatus(text: string, kind: 'connecting' | 'green' | 'error'): void {
     statusEl.textContent = text;
     statusEl.dataset.kind = kind;
@@ -804,8 +793,8 @@ export function init(): void {
       invalidateDocViews();
       return;
     }
-    // Empty workspace: leave folder mode and reset to a fresh scratch buffer.
-    newScratch();
+    // Empty workspace: reset to a fresh blank model.
+    void newModel();
   }
 
   // Open any .koi file present in the folder but not yet buffered (used after creating/duplicating
@@ -1609,55 +1598,32 @@ export function init(): void {
     }
   }
 
-  // --- new scratch model ----------------------------------------------------
-  // Reset to a single untouched scratch buffer holding the BLANK stub (an empty context — NOT the
-  // Billing SEED). In folder mode this tears the folder workspace down (closes every open doc) and
-  // re-establishes scratch. This is the raw reset with no confirmation; user-initiated New goes
-  // through requestNewScratch() (below), which guards unsaved work first.
-  function newScratch(): void {
-    clearScratch(); // forget any restored scratch; New starts from the blank stub
-    if (folderMode) {
-      for (const uri of Array.from(buffers.keys())) lsp.closeDoc(uri);
-      buffers.clear();
-      diagnosticsByUri.clear();
-      folderMode = false;
-      folderRootToken = null;
-      entriesCache = [];
-      explorer.render([], '');
-      hideFileTreeChrome();
-      treeTitleEl.textContent = 'Scratch';
-    } else {
-      // Reuse the existing scratch buffer; drop any stale diagnostics.
-      diagnosticsByUri.delete(SCRATCH_URI);
+  // --- new model ----------------------------------------------------
+  // Reset the default workspace to a single untouched BLANK model: empty it on disk, recreate
+  // model.koi, close every open doc, and reopen. The raw reset with no confirmation; user-initiated
+  // New goes through requestNewModel() (below), which guards unsaved work first.
+  async function newModel(): Promise<void> {
+    const token = await platform.defaultWorkspace(BLANK);
+    if (!token) {
+      setStatus("couldn't initialize a workspace", 'error');
+      return;
     }
-    buffers.set(SCRATCH_URI, {
-      uri: SCRATCH_URI,
-      path: null,
-      relPath: 'model.koi',
-      name: 'model.koi',
-      text: BLANK,
-      dirty: false,
-    });
-    activeUri = SCRATCH_URI;
-    lsp.setActive(SCRATCH_URI);
-    // Ensure the server has a fresh scratch doc, then load the blank stub into the editor.
-    lsp.openDoc(SCRATCH_URI, BLANK);
-    editor.setDoc(BLANK);
-    // Clear the editor gutter / strip / status pill so a previously-active file's diagnostics don't
-    // linger until the server publishes fresh scratch diagnostics (mirrors activateFile/Fallback).
-    setEditorDiagnostics(editor.view, []);
-    renderStrip([]);
-    updateStatus([]);
-    invalidateDocViews();
-    renderTree();
-    ensureLoaded(activeView);
+    try {
+      for (const entry of await platform.listEntries(token)) await platform.deleteEntry(entry.token);
+      await platform.createFile(token, 'model.koi', BLANK);
+    } catch (e) {
+      console.error('resetting the default workspace failed:', e);
+    }
+    for (const uri of Array.from(buffers.keys())) lsp.closeDoc(uri);
+    buffers.clear();
+    diagnosticsByUri.clear();
+    await openFolderPath(token, { recent: false }); // activates model.koi (= BLANK) and renders the tree
     welcome.hide();
   }
 
   // Does the workspace hold unsaved work that New would destroy? In scratch mode, anything other
-  // than an empty buffer / the seed backdrop / the blank stub counts (mirrors scheduleScratchSave's
-  // "is this the untouched seed?" test). In folder mode, files live on disk, so only a dirty open
-  // buffer is at risk.
+  // than an empty buffer / the seed backdrop / the blank stub counts. In folder mode, files live
+  // on disk, so only a dirty open buffer is at risk.
   function hasUnsavedWork(): boolean {
     if (folderMode) return Array.from(buffers.values()).some((b) => b.dirty);
     const text = editor.getDoc();
@@ -1684,151 +1650,56 @@ export function init(): void {
   }
 
   // User-initiated New (button, ⌘N, palette, welcome). Confirms before discarding unsaved work;
-  // proceeds straight to a fresh stub when there's nothing to lose.
-  async function requestNewScratch(): Promise<void> {
-    if (await confirmReplaceWork('Start a new model?', 'Discard & start new')) newScratch();
-  }
-
-  // Open `source` as a fresh scratch model (used by the example gallery and shared links). Tears
-  // down a folder workspace if one is open, then seeds a single scratch buffer with the source.
-  function openScratchWith(source: string): void {
-    if (folderMode) {
-      for (const uri of Array.from(buffers.keys())) lsp.closeDoc(uri);
-      buffers.clear();
-      diagnosticsByUri.clear();
-      folderMode = false;
-      hideFileTreeChrome();
-      treeTitleEl.textContent = 'Scratch';
-    } else {
-      diagnosticsByUri.delete(SCRATCH_URI);
-    }
-    buffers.set(SCRATCH_URI, {
-      uri: SCRATCH_URI,
-      path: null,
-      relPath: 'model.koi',
-      name: 'model.koi',
-      text: source,
-      dirty: false,
-    });
-    activeUri = SCRATCH_URI;
-    lsp.setActive(SCRATCH_URI);
-    lsp.openDoc(SCRATCH_URI, source);
-    editor.setDoc(source);
-    invalidateDocViews();
-    renderTree();
-    ensureLoaded(activeView);
-    welcome.hide();
-    if (source === SEED) clearScratch();
-    else scheduleScratchSave(source);
+  // proceeds straight to a fresh blank model when there's nothing to lose.
+  async function requestNewModel(): Promise<void> {
+    if (await confirmReplaceWork('Start a new model?', 'Discard & start new')) await newModel();
   }
 
   // --- overlays + polish surfaces -------------------------------------------
 
-  // Open a starter example: a multi-file example materializes a real workspace (folder mode → the
-  // explorer); a single-file one — or any host that can't back a synthetic workspace — opens as a
-  // scratch buffer.
+  // Open a starter example as a real workspace: multi-file examples materialize all their files; a
+  // single-source example materializes a 1-file workspace. Both reuse the folder-mode path.
   async function openExample(example: Example): Promise<void> {
-    if (example.files?.length && platform.materializeWorkspace) {
-      try {
-        const token = await platform.materializeWorkspace(example.id, example.files);
-        if (token) {
-          await openFolderPath(token);
-          return;
-        }
-      } catch (e) {
-        console.error('Opening example workspace failed; falling back to scratch:', e);
-      }
-    }
-    openScratchWith(example.source);
-  }
-
-  // Import a multi-file workspace carried in a share link. Mirrors openExample's materialize→open
-  // path: when the host can back a synthetic workspace, the files are materialized into a real
-  // openable token and opened in full folder mode (explorer + compiling preview). When it can't, the
-  // files become an in-memory multi-buffer workspace (all open + compiling, the active one shown).
-  // Runs from the lsp.start callback so the server is up and the resulting didOpens resolve refs.
-  async function importSharedWorkspace(
-    files: { relPath: string; text: string }[],
-    active?: string
-  ): Promise<void> {
-    // A share link is untrusted input. Drop any file whose relPath could escape the workspace root
-    // before it reaches platform.materializeWorkspace (which writes to disk) or a synthetic buffer
-    // uri — defense in depth against a malicious `..`/absolute path in the payload.
-    const safeFiles = files.filter((f) => isSafeShareRelPath(f.relPath));
-    // Nothing (safe) to import — fall through to the restored scratch / SEED that already booted.
-    if (safeFiles.length === 0) return;
-
-    // Primary path: materialize a real workspace and open it in folder mode (mirrors openExample).
-    if (platform.materializeWorkspace) {
-      try {
-        const token = await platform.materializeWorkspace(
-          'shared-workspace',
-          safeFiles.map((f) => ({ relPath: f.relPath, contents: f.text }))
-        );
-        if (token) {
-          await openFolderPath(token);
-          // openFolderPath activates the first file by relPath; honour the share's `active` when set
-          // and it maps to an open buffer.
-          if (active) {
-            const target = Array.from(buffers.values()).find((b) => b.relPath === active);
-            if (target) activateFile(target.uri);
-          }
-          return;
-        }
-      } catch (e) {
-        console.error('Importing shared workspace failed; falling back to in-memory buffers:', e);
-      }
-    }
-
-    // Fallback path: materializeWorkspace is absent or returned null. Build an in-memory multi-buffer
-    // workspace. There is no host folder behind it, so folderRootToken stays null and the explorer
-    // tree can't render host rows — the buffers are still all open + compiling and reachable via the
-    // command palette's "Go to File", and the active one is shown.
-    lsp.closeDoc(SCRATCH_URI);
-    buffers.delete(SCRATCH_URI);
-    diagnosticsByUri.delete(SCRATCH_URI);
-
-    populateBuffers(
-      safeFiles.map((f) => ({
-        path: null,
-        relPath: f.relPath,
-        name: f.relPath.split('/').pop() ?? f.relPath,
-        text: f.text,
-      }))
-    );
-
-    // Shouldn't happen (files is non-empty), but if nothing populated, re-establish scratch and bail
-    // so the app is never left with no active buffer.
-    if (buffers.size === 0) {
-      const text = editor.getDoc();
-      buffers.set(SCRATCH_URI, { uri: SCRATCH_URI, path: null, relPath: 'model.koi', name: 'model.koi', text, dirty: false });
-      lsp.openDoc(SCRATCH_URI, text);
-      activeUri = SCRATCH_URI;
-      lsp.setActive(SCRATCH_URI);
-      folderMode = false;
-      folderRootToken = null;
-      entriesCache = [];
-      hideFileTreeChrome();
+    const files = example.files?.length
+      ? example.files
+      : [{ relPath: 'model.koi', contents: example.source }];
+    const token = await platform.materializeWorkspace(example.id, files);
+    if (!token) {
+      setStatus('could not open example', 'error');
       return;
     }
+    await openFolderPath(token, { recent: false });
+  }
 
-    folderMode = true;
-    folderRootToken = null; // in-memory: no host token, so refreshEntries/renderTree skip host rows
-    entriesCache = [];
-    // Pick the active buffer: the shared `active` if it maps to a buffer, else the first by relPath.
-    const sorted = Array.from(buffers.values()).sort((a, b) => a.relPath.localeCompare(b.relPath));
-    const activeBuffer = (active ? sorted.find((b) => b.relPath === active) : undefined) ?? sorted[0];
-    activeUri = activeBuffer.uri;
-    lsp.setActive(activeUri);
-    editor.setDoc(activeBuffer.text);
-    // Show the file-tree chrome (the rail + toggle). renderTree() is a no-op while folderRootToken is
-    // null, so the explorer renders no host rows — guarded so the null token never throws.
-    treeTitleEl.textContent = 'shared-workspace';
-    showFileTreeChrome();
-    renderTree();
-    welcome.hide();
-    invalidateDocViews();
-    ensureLoaded(activeView);
+  // Import a multi-file workspace carried in a share link. Materializes a real workspace and opens
+  // it in folder mode (mirrors openExample). Runs from the lsp.start callback so the server is up
+  // and the resulting didOpens resolve cross-file refs.
+  async function importSharedWorkspace(
+    files: { relPath: string; text: string }[],
+    active?: string,
+  ): Promise<void> {
+    // A share link is untrusted input. Drop any file whose relPath could escape the workspace root
+    // before it reaches platform.materializeWorkspace (which writes to disk) — defense in depth
+    // against a malicious `..`/absolute path in the payload.
+    const safeFiles = files.filter((f) => isSafeShareRelPath(f.relPath));
+    // Nothing (safe) to import — fall through to the default workspace that already booted.
+    if (safeFiles.length === 0) return;
+
+    // Materialize a real workspace and open it in folder mode (mirrors openExample).
+    const token = await platform.materializeWorkspace(
+      'shared-workspace',
+      safeFiles.map((f) => ({ relPath: f.relPath, contents: f.text })),
+    );
+    if (!token) {
+      setStatus('could not open shared workspace', 'error');
+      return;
+    }
+    await openFolderPath(token, { recent: false });
+    // openFolderPath activates the first file by relPath; honour the share's `active` when present.
+    if (active) {
+      const target = Array.from(buffers.values()).find((b) => b.relPath === active);
+      if (target) activateFile(target.uri);
+    }
   }
 
   // Reopen the start screen ("home"). Non-destructive: it's an overlay over the current model, so
@@ -1845,7 +1716,7 @@ export function init(): void {
   }
 
   const welcome = createWelcome({
-    onNewScratch: () => void requestNewScratch(),
+    onNewScratch: () => void requestNewModel(),
     onOpenFolder: () => void leaveHomeFor('Open a folder?', () => openFolder()),
     onOpenRecent: (path) => void leaveHomeFor('Open this folder?', () => openFolderPath(path)),
     onOpenExample: (example) => void leaveHomeFor('Open this example?', () => openExample(example)),
@@ -2066,7 +1937,7 @@ export function init(): void {
     hintEl.addEventListener('click', () => palette.toggle());
   }
   el<HTMLButtonElement>('btn-home').addEventListener('click', () => goHome());
-  el<HTMLButtonElement>('btn-new').addEventListener('click', () => void requestNewScratch());
+  el<HTMLButtonElement>('btn-new').addEventListener('click', () => void requestNewModel());
   el<HTMLButtonElement>('btn-generate-project').addEventListener('click', () => generateProject.open());
   el<HTMLButtonElement>('btn-theme').addEventListener('click', () => toggleTheme());
   el<HTMLButtonElement>('btn-prefs').addEventListener('click', () => prefs.open());
@@ -2094,7 +1965,7 @@ export function init(): void {
       { id: 'format', title: 'Format document', hint: 'mod+S', group: 'Edit', run: () => void formatActive() },
       { id: 'home', title: 'Go to start screen', group: 'File', run: () => goHome() },
       { id: 'open-folder', title: 'Open folder…', hint: 'mod+Shift+O', group: 'File', run: () => void openFolder() },
-      { id: 'new-scratch', title: 'New scratch model', hint: 'mod+N', group: 'File', run: () => void requestNewScratch() },
+      { id: 'new-scratch', title: 'New scratch model', hint: 'mod+N', group: 'File', run: () => void requestNewModel() },
       { id: 'save-all', title: 'Save all', hint: 'mod+Alt+S', group: 'File', run: () => void saveAllDirty() },
       { id: 'share', title: 'Copy shareable link', group: 'File', run: () => void copyShareLink() },
       { id: 'check', title: 'Check against baseline…', group: 'File', run: () => void runCheck() },
@@ -2147,7 +2018,7 @@ export function init(): void {
       void openFolder();
     } else if (mod && !e.shiftKey && (e.key === 'n' || e.key === 'N')) {
       e.preventDefault();
-      void requestNewScratch();
+      void requestNewModel();
     } else if (mod && e.key === '1') {
       e.preventDefault();
       void preview('csharp');
