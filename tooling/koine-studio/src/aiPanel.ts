@@ -41,6 +41,8 @@ export interface AssistantPanelOptions {
   getModel: () => string;
   /** The current editor model + diagnostics, captured fresh on each send (may be async). */
   getContext: () => AssistantContext | Promise<AssistantContext>;
+  /** The current editor selection (the construct to explain), or null when there's nothing useful. */
+  getSelection: () => { text: string } | null;
   /** Replace the active editor document with a generated model. */
   onApplyModel: (source: string) => void;
   /** Open Preferences (so the user can add their API key). */
@@ -73,6 +75,11 @@ export interface AssistantPanel {
    * the host can call it on every tab show without recreating the panel.
    */
   syncWorkspace(): void;
+  /**
+   * Explain the current construct (the editor selection, or the whole model when there's none) in
+   * plain language — an explanatory turn that does NOT offer to apply anything. For the command palette.
+   */
+  explainSelection(): void;
 }
 
 // A concise Koine primer so the model emits valid `.koi`. Mirrors README's construct table.
@@ -140,6 +147,31 @@ export function buildSystem(ctx: AssistantContext): string {
     if (domain) parts.push('', domain);
   }
   return parts.join('\n');
+}
+
+/**
+ * Build the "Explain this construct" prompt: an EXPLANATORY (never generative) ask aimed at a domain
+ * expert who doesn't code. Explains the selected construct when `selectionText` is non-blank, else the
+ * whole `fileSource` — the wording adapts so a selection vs whole-model scope reads naturally.
+ */
+export function buildExplainPrompt(selectionText: string | null, fileSource: string): string {
+  const sel = selectionText?.trim() ? selectionText : null;
+  const code = sel ?? fileSource;
+  const scope = sel
+    ? 'Explain this selected Koine construct'
+    : 'Explain this Koine model';
+  return [
+    `${scope} in PLAIN LANGUAGE, for a domain expert who doesn't code. Describe what it`,
+    'represents in the domain, the business rules/invariants it enforces, and how the pieces relate —',
+    'in terms a non-programmer understands.',
+    '',
+    'This is explanation only: do NOT output code, and do NOT propose or write a revised model. No',
+    'code blocks, no Koine syntax in your answer — prose only.',
+    '',
+    '```koine',
+    code,
+    '```',
+  ].join('\n');
 }
 
 /**
@@ -237,6 +269,26 @@ export function createAssistantPanel(opts: AssistantPanelOptions): AssistantPane
     quick.appendChild(b);
   }
 
+  // "Explain this construct": an EXPLANATORY turn for a non-coding domain expert — explains the
+  // selection (or whole model) in plain language, with the Apply affordance suppressed (offerApply
+  // false) since the reply is prose, not a model to apply. Reuses the resolved context for both prompts.
+  async function runExplain(): Promise<void> {
+    if (busy()) return;
+    const sel = opts.getSelection();
+    const ctx = await opts.getContext();
+    await send(buildExplainPrompt(sel?.text ?? null, ctx.source), ctx, { offerApply: false });
+  }
+
+  const explainBtn = document.createElement('button');
+  explainBtn.type = 'button';
+  explainBtn.className = 'koi-assistant-action';
+  explainBtn.textContent = 'Explain this construct';
+  explainBtn.addEventListener('click', () => {
+    if (busy()) return;
+    void runExplain();
+  });
+  quick.appendChild(explainBtn);
+
   // Forget this workspace's conversation: empty the in-memory history, reset the transcript to the
   // empty state, and drop the stored blob. Refused while a request is in flight so it can't race the
   // streaming reply (which would re-persist the half-finished turn after the clear).
@@ -311,7 +363,12 @@ export function createAssistantPanel(opts: AssistantPanelOptions): AssistantPane
   // Restore the current workspace's conversation on first paint.
   rebuildTranscript();
 
-  async function send(text: string, ctxOverride?: AssistantContext): Promise<void> {
+  async function send(
+    text: string,
+    ctxOverride?: AssistantContext,
+    sendOpts?: { offerApply?: boolean },
+  ): Promise<void> {
+    const offerApply = sendOpts?.offerApply ?? true;
     const prompt = text.trim();
     if (!prompt || busy()) return;
 
@@ -389,7 +446,7 @@ export function createAssistantPanel(opts: AssistantPanelOptions): AssistantPane
       messages.push({ role: 'assistant', content: full });
       saveChat(opts.getWorkspaceKey(), messages);
       replyBubble.innerHTML = `<div class="koi-md">${renderMarkdown(full)}</div>`;
-      maybeOfferApply(replyBubble, full);
+      if (offerApply) maybeOfferApply(replyBubble, full);
     } catch (e) {
       // Keep the stored history in lock-step with the transcript on both failure paths.
       const aborted = aborter?.signal.aborted ?? false;
@@ -403,7 +460,7 @@ export function createAssistantPanel(opts: AssistantPanelOptions): AssistantPane
         note.className = 'koi-assistant-stopped';
         note.textContent = 'Stopped.';
         replyBubble.appendChild(note);
-        maybeOfferApply(replyBubble, full);
+        if (offerApply) maybeOfferApply(replyBubble, full);
       } else {
         // Aborted with nothing, or a real error: roll the whole turn back from BOTH history and
         // transcript (no dangling user turn or orphaned tool lines), and restore the prompt to retry.
@@ -442,6 +499,9 @@ export function createAssistantPanel(opts: AssistantPanelOptions): AssistantPane
       loadedKey = key;
       messages = loadChat(key);
       rebuildTranscript();
+    },
+    explainSelection() {
+      void runExplain();
     },
   };
 }

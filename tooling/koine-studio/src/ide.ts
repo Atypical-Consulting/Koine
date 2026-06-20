@@ -2018,6 +2018,13 @@ export function init(): void {
           return base;
         }
       },
+      getSelection: () => {
+        const sel = editor.view.state.selection.main;
+        if (!sel.empty) return { text: editor.view.state.sliceDoc(sel.from, sel.to) };
+        // No selection: fall back to the (non-blank) line under the cursor; null → panel uses whole file.
+        const line = editor.view.state.doc.lineAt(sel.head);
+        return line.text.trim() ? { text: line.text } : null;
+      },
       onApplyModel: (source) => replaceActiveDoc(source),
       onOpenPrefs: () => prefs.open(),
       // Per-workspace conversation key: each opened folder keeps its own transcript; scratch mode
@@ -2189,6 +2196,7 @@ export function init(): void {
       { id: 'view-contextmap', title: 'Show Context Map', group: 'Inspector', run: () => selectView('contextmap') },
       { id: 'view-outline', title: 'Show Outline', group: 'Inspector', run: () => selectView('outline') },
       { id: 'view-assistant', title: 'Show Assistant', group: 'Inspector', run: () => selectView('assistant') },
+      { id: 'assistant-explain', title: 'Explain this construct', group: 'Inspector', run: () => { selectView('assistant'); ensureAssistant().explainSelection(); } },
     ];
 
     // In folder mode, surface every open file as a "Go to File" entry so the palette doubles as a
