@@ -9,8 +9,8 @@
   flex: 0 0 auto;
   display: flex;
   align-items: center;
-  gap: 2px;
-  padding: 0 10px;
+  gap: var(--koi-space-0-5);
+  padding: 0 var(--koi-space-2-5);
   background: var(--koi-paper-2);
   border-bottom: 1px solid var(--koi-line);
   overflow-x: auto;
@@ -21,12 +21,12 @@
     background: transparent;
     color: var(--koi-muted);
     border: none;
-    padding: 11px 12px 12px;
+    padding: var(--koi-space-2-75) var(--koi-space-3) var(--koi-space-3);
     font-family: var(--koi-font-body);
-    font-size: 0.8rem;
+    font-size: var(--koi-text-sm-plus);
     font-weight: 500;
     cursor: pointer;
-    transition: color 0.14s ease;
+    transition: color var(--koi-dur-base) ease;
     flex: 0 0 auto;
     white-space: nowrap;
 
@@ -38,10 +38,10 @@
       right: 10px;
       bottom: -1px;
       height: 2px;
-      border-radius: 2px;
+      border-radius: var(--koi-radius-2xs);
       background: var(--koi-accent-grad);
       transform: scaleX(0);
-      transition: transform 0.18s ease;
+      transition: transform var(--koi-dur-slow) ease;
     }
 
     &:hover {
@@ -67,10 +67,10 @@
   border-radius: var(--koi-radius-sm);
   width: 28px;
   height: 26px;
-  font-size: 0.9rem;
+  font-size: var(--koi-text-lg);
   line-height: 1;
   cursor: pointer;
-  transition: color 0.12s ease, transform 0.3s ease, background 0.12s ease;
+  transition: color var(--koi-dur-fast) ease, transform 0.3s ease, background var(--koi-dur-fast) ease;
 
   &:hover {
     color: var(--koi-fg);
@@ -93,7 +93,7 @@
 
 .doc-view {
   overflow-y: auto;
-  padding: 16px 20px;
+  padding: var(--koi-space-4) 20px;
 }
 
 .cm-editor {

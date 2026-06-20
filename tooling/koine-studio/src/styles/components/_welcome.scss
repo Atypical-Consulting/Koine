@@ -2,7 +2,7 @@
 .koi-welcome {
   position: fixed;
   inset: 0;
-  z-index: 50;
+  z-index: var(--koi-z-overlay);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -32,7 +32,7 @@
   font-size: 0.85rem;
   line-height: 1;
   cursor: pointer;
-  transition: background 0.15s ease, color 0.15s ease;
+  transition: background var(--koi-dur-mid) ease, color var(--koi-dur-mid) ease;
 
   &:hover {
     background: var(--koi-surface);
@@ -50,7 +50,7 @@
   max-width: 520px;
   background: var(--koi-paper-2);
   border: 1px solid var(--koi-line);
-  border-radius: 10px;
+  border-radius: var(--koi-radius-lg);
   box-shadow: 0 18px 50px rgba(0, 0, 0, 0.45);
   padding: 36px 36px 30px;
   text-align: center;
@@ -61,7 +61,7 @@
   align-items: center;
   justify-content: center;
   color: var(--koi-fg);
-  margin-bottom: 18px;
+  margin-bottom: var(--koi-space-4-5);
   min-height: 48px;
 
   svg {
@@ -71,7 +71,7 @@
 }
 
 .koi-welcome-title {
-  margin: 0 0 6px;
+  margin: 0 0 var(--koi-space-1-5);
   font-size: 1.4rem;
   font-weight: 600;
   color: var(--koi-fg);
@@ -79,15 +79,15 @@
 
 .koi-welcome-tagline {
   margin: 0 0 24px;
-  font-size: 0.9rem;
+  font-size: var(--koi-text-lg);
   color: var(--koi-muted);
 }
 
 .koi-welcome-actions {
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  margin-bottom: 8px;
+  gap: var(--koi-space-2-5);
+  margin-bottom: var(--koi-space-2);
 }
 
 .koi-welcome-action {
@@ -97,10 +97,10 @@
   background: var(--koi-surface);
   color: var(--koi-fg);
   border: 1px solid var(--koi-line);
-  border-radius: 6px;
-  padding: 11px 14px;
+  border-radius: var(--koi-radius-sm);
+  padding: var(--koi-space-2-75) var(--koi-space-3-5);
   font-family: var(--koi-font-body);
-  font-size: 0.9rem;
+  font-size: var(--koi-text-lg);
   cursor: pointer;
 
   &:hover {
@@ -128,11 +128,11 @@
 
 .koi-welcome-recent-title {
   font-family: var(--koi-font-mono);
-  font-size: 0.7rem;
+  font-size: var(--koi-text-2xs);
   text-transform: uppercase;
   letter-spacing: 0.4px;
   color: var(--koi-muted);
-  margin: 0 0 8px;
+  margin: 0 0 var(--koi-space-2);
 }
 
 .koi-welcome-recent-item {
@@ -142,10 +142,10 @@
   background: transparent;
   color: var(--koi-fg);
   border: 1px solid transparent;
-  border-radius: 6px;
-  padding: 7px 10px;
+  border-radius: var(--koi-radius-sm);
+  padding: var(--koi-space-1-75) var(--koi-space-2-5);
   font-family: var(--koi-font-mono);
-  font-size: 0.78rem;
+  font-size: var(--koi-text-sm);
   cursor: pointer;
   white-space: nowrap;
   overflow: hidden;
@@ -165,7 +165,7 @@
 .koi-welcome-recent-item-path {
   display: block;
   color: var(--koi-muted);
-  font-size: 0.7rem;
+  font-size: var(--koi-text-2xs);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -173,7 +173,7 @@
 
 .koi-welcome-empty {
   color: var(--koi-muted);
-  font-size: 0.8rem;
+  font-size: var(--koi-text-sm-plus);
   font-style: italic;
 }
 
@@ -210,7 +210,7 @@
 
 .koi-welcome-card {
   position: relative;
-  z-index: 1;
+  z-index: var(--koi-z-base);
   animation: koi-rise 0.45s cubic-bezier(0.2, 0.7, 0.2, 1) both;
 }
 
@@ -228,7 +228,7 @@
 }
 
 .koi-welcome-action {
-  transition: transform 0.12s ease, border-color 0.12s ease, background 0.12s ease;
+  transition: transform var(--koi-dur-fast) ease, border-color var(--koi-dur-fast) ease, background var(--koi-dur-fast) ease;
 
   &:hover {
     transform: translateY(-1px);
@@ -244,21 +244,21 @@
 .koi-welcome-gallery-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 8px;
-  margin-top: 8px;
+  gap: var(--koi-space-2);
+  margin-top: var(--koi-space-2);
 }
 
 .koi-welcome-example {
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: var(--koi-space-0-75);
   text-align: left;
   background: var(--koi-surface);
   border: 1px solid var(--koi-line);
   border-radius: var(--koi-radius-sm);
-  padding: 9px 11px;
+  padding: var(--koi-space-2-25) var(--koi-space-2-75);
   cursor: pointer;
-  transition: border-color 0.12s ease, transform 0.12s ease;
+  transition: border-color var(--koi-dur-fast) ease, transform var(--koi-dur-fast) ease;
 
   &:hover {
     border-color: var(--koi-accent);
@@ -269,13 +269,13 @@
 .koi-welcome-example-name {
   font-family: var(--koi-font-body);
   font-weight: 600;
-  font-size: 0.82rem;
+  font-size: var(--koi-text-base);
   color: var(--koi-fg);
 }
 
 .koi-welcome-example-blurb {
   font-family: var(--koi-font-body);
-  font-size: 0.72rem;
+  font-size: var(--koi-text-xs);
   color: var(--koi-muted);
   line-height: 1.4;
 }

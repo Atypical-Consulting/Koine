@@ -2,7 +2,7 @@
 .koi-wizard {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: var(--koi-space-4);
   min-width: 380px;
   max-width: 460px;
 }
@@ -11,7 +11,7 @@
 .koi-wizard-steps {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--koi-space-2);
   margin: 0;
   padding: 0;
   list-style: none;
@@ -22,8 +22,8 @@
   flex: 1 1 0;
   display: flex;
   align-items: center;
-  gap: 8px;
-  font-size: 0.74rem;
+  gap: var(--koi-space-2);
+  font-size: var(--koi-text-xs-plus);
   color: var(--koi-muted);
   white-space: nowrap;
 }
@@ -40,7 +40,7 @@
   border-radius: 50%;
   border: 1px solid var(--koi-line);
   background: var(--koi-surface);
-  font-size: 0.72rem;
+  font-size: var(--koi-text-xs);
   font-variant-numeric: tabular-nums;
 }
 
@@ -79,16 +79,16 @@
 .koi-wizard-options {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: var(--koi-space-2-5);
 }
 
 .koi-wizard-option {
   display: flex;
   align-items: flex-start;
-  gap: 10px;
-  padding: 12px 14px;
+  gap: var(--koi-space-2-5);
+  padding: var(--koi-space-3) var(--koi-space-3-5);
   border: 1px solid var(--koi-line);
-  border-radius: 8px;
+  border-radius: var(--koi-radius);
   background: var(--koi-surface);
   cursor: pointer;
 }
@@ -103,14 +103,14 @@
 }
 
 .koi-wizard-option input {
-  margin-top: 2px;
+  margin-top: var(--koi-space-0-5);
   accent-color: var(--koi-accent);
 }
 
 .koi-wizard-option-text {
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: var(--koi-space-0-75);
 }
 
 .koi-wizard-option-title {
@@ -120,7 +120,7 @@
 }
 
 .koi-wizard-option-blurb {
-  font-size: 0.8rem;
+  font-size: var(--koi-text-sm-plus);
   color: var(--koi-muted);
 }
 
@@ -128,14 +128,14 @@
 .koi-wizard-checks {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: var(--koi-space-1);
 }
 
 .koi-wizard-check {
   display: flex;
   align-items: flex-start;
-  gap: 10px;
-  padding: 10px 2px;
+  gap: var(--koi-space-2-5);
+  padding: var(--koi-space-2-5) var(--koi-space-0-5);
   border-bottom: 1px solid var(--koi-line);
   cursor: pointer;
 }
@@ -145,7 +145,7 @@
 }
 
 .koi-wizard-check input {
-  margin-top: 2px;
+  margin-top: var(--koi-space-0-5);
 }
 
 .koi-wizard-check input:disabled {
@@ -155,7 +155,7 @@
 .koi-wizard-check-text {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: var(--koi-space-0-5);
 }
 
 .koi-wizard-check-label {
@@ -164,7 +164,7 @@
 }
 
 .koi-wizard-check-hint {
-  font-size: 0.78rem;
+  font-size: var(--koi-text-sm);
   color: var(--koi-muted);
 }
 
@@ -172,7 +172,7 @@
 .koi-wizard-name {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: var(--koi-space-2);
 }
 
 .koi-input {
@@ -181,10 +181,10 @@
   background: var(--koi-surface);
   color: var(--koi-fg);
   border: 1px solid var(--koi-line);
-  border-radius: 6px;
+  border-radius: var(--koi-radius-sm);
   padding: 9px 11px;
   font-family: var(--koi-font-mono);
-  font-size: 0.9rem;
+  font-size: var(--koi-text-lg);
 }
 
 .koi-input:hover,
@@ -195,13 +195,13 @@
 
 .koi-wizard-hint {
   margin: 0;
-  font-size: 0.8rem;
+  font-size: var(--koi-text-sm-plus);
   color: var(--koi-muted);
 }
 
 .koi-wizard-invalid {
   margin: 0;
-  font-size: 0.8rem;
+  font-size: var(--koi-text-sm-plus);
   color: var(--koi-error);
 }
 
@@ -209,16 +209,16 @@
 .koi-wizard-generate {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: var(--koi-space-0-5);
 }
 
 .koi-wizard-summary-row {
   display: flex;
   justify-content: space-between;
-  gap: 14px;
-  padding: 9px 2px;
+  gap: var(--koi-space-3-5);
+  padding: 9px var(--koi-space-0-5);
   border-bottom: 1px solid var(--koi-line);
-  font-size: 0.86rem;
+  font-size: var(--koi-text-md);
 }
 
 .koi-wizard-summary-row:last-child {
@@ -238,12 +238,12 @@
 /* Status / progress / error / success live region above the wizard content. */
 .koi-wizard-banner {
   margin: 0;
-  padding: 9px 12px;
-  border-radius: 6px;
+  padding: 9px var(--koi-space-3);
+  border-radius: var(--koi-radius-sm);
   border: 1px solid var(--koi-line);
   background: var(--koi-surface);
   color: var(--koi-fg);
-  font-size: 0.84rem;
+  font-size: var(--koi-text-base-plus);
 }
 
 .koi-wizard-banner.error {
@@ -269,17 +269,17 @@
 .koi-wizard-footer {
   display: flex;
   justify-content: space-between;
-  gap: 8px;
+  gap: var(--koi-space-2);
 }
 
 .koi-wizard-btn {
   background: var(--koi-surface);
   color: var(--koi-fg);
   border: 1px solid var(--koi-line);
-  border-radius: 6px;
-  padding: 8px 16px;
+  border-radius: var(--koi-radius-sm);
+  padding: var(--koi-space-2) var(--koi-space-4);
   font-family: var(--koi-font-body);
-  font-size: 0.86rem;
+  font-size: var(--koi-text-md);
   cursor: pointer;
 }
 

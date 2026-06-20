@@ -6,25 +6,25 @@
 }
 
 .outline-list .outline-list {
-  margin-left: 14px;
+  margin-left: var(--koi-space-3-5);
   border-left: 1px solid var(--koi-line);
-  padding-left: 6px;
+  padding-left: var(--koi-space-1-5);
 }
 
 .outline-row {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--koi-space-2);
   width: 100%;
   text-align: left;
   background: transparent;
   border: none;
   color: var(--koi-fg);
-  padding: 3px 6px;
-  border-radius: 4px;
+  padding: var(--koi-space-0-75) var(--koi-space-1-5);
+  border-radius: var(--koi-radius-xs);
   cursor: pointer;
   font-family: var(--koi-font-body);
-  font-size: 0.84rem;
+  font-size: var(--koi-text-base-plus);
 }
 
 .outline-row:hover {
@@ -40,8 +40,8 @@
   color: var(--koi-accent);
   background: color-mix(in srgb, var(--koi-accent) 12%, transparent);
   border: 1px solid color-mix(in srgb, var(--koi-accent) 30%, var(--koi-line));
-  border-radius: 4px;
-  padding: 0 5px;
+  border-radius: var(--koi-radius-xs);
+  padding: 0 var(--koi-space-1-25);
   min-width: 38px;
   text-align: center;
 }

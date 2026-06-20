@@ -2,7 +2,7 @@
 .koi-modal-backdrop {
   position: fixed;
   inset: 0;
-  z-index: 100;
+  z-index: var(--koi-z-modal);
   background: rgba(8, 11, 18, 0.55);
   display: flex;
   align-items: center;
@@ -19,7 +19,7 @@
   max-width: 520px;
   background: var(--koi-paper-2);
   border: 1px solid var(--koi-line);
-  border-radius: 10px;
+  border-radius: var(--koi-radius-lg);
   box-shadow: 0 18px 50px rgba(0, 0, 0, 0.5);
   display: flex;
   flex-direction: column;
@@ -29,8 +29,8 @@
 .koi-modal-header {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 14px 18px;
+  gap: var(--koi-space-3);
+  padding: var(--koi-space-3-5) var(--koi-space-4-5);
   border-bottom: 1px solid var(--koi-line);
 }
 
@@ -46,7 +46,7 @@
   background: transparent;
   color: var(--koi-muted);
   border: 1px solid transparent;
-  border-radius: 6px;
+  border-radius: var(--koi-radius-sm);
   width: 28px;
   height: 28px;
   font-size: 1.05rem;
@@ -60,16 +60,16 @@
 }
 
 .koi-modal-body {
-  padding: 18px;
+  padding: var(--koi-space-4-5);
   overflow-y: auto;
 }
 
 .koi-modal-footer {
-  padding: 12px 18px;
+  padding: var(--koi-space-3) var(--koi-space-4-5);
   border-top: 1px solid var(--koi-line);
   display: flex;
   justify-content: flex-end;
-  gap: 8px;
+  gap: var(--koi-space-2);
 }
 
 .koi-modal-footer:empty {

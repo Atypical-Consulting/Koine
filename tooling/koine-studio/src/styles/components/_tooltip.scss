@@ -1,11 +1,11 @@
 /* --- hover tooltip --- */
 .cm-tooltip .koi-hover {
   max-width: 420px;
-  padding: 8px 11px;
+  padding: var(--koi-space-2) 11px;
 }
 
 .koi-hover.koi-md {
-  font-size: 0.8rem;
+  font-size: var(--koi-text-sm-plus);
   line-height: 1.5;
 }
 

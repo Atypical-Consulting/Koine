@@ -13,23 +13,23 @@
   flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
-  padding: 16px 18px;
+  padding: var(--koi-space-4) var(--koi-space-4-5);
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: var(--koi-space-3);
 }
 .koi-assistant-intro {
   color: var(--koi-muted);
   font-family: var(--koi-font-body);
-  font-size: 0.84rem;
+  font-size: var(--koi-text-base-plus);
   line-height: 1.55;
 }
 .koi-msg {
   max-width: 92%;
-  padding: 9px 12px;
+  padding: var(--koi-space-2-25) var(--koi-space-3);
   border-radius: var(--koi-radius);
   font-family: var(--koi-font-body);
-  font-size: 0.84rem;
+  font-size: var(--koi-text-base-plus);
   line-height: 1.55;
   white-space: pre-wrap;
   word-break: break-word;
@@ -58,34 +58,34 @@
   color: var(--koi-error);
 }
 .koi-assistant-stopped {
-  margin-top: 6px;
+  margin-top: var(--koi-space-1-5);
   color: var(--koi-muted);
   font-family: var(--koi-font-body);
-  font-size: 0.72rem;
+  font-size: var(--koi-text-xs);
 }
 /* One muted line per koine tool the assistant invoked, shown above its final reply. */
 .koi-assistant-tool {
-  margin: 2px 0;
-  padding-left: 18px;
+  margin: var(--koi-space-0-5) 0;
+  padding-left: var(--koi-space-4-5);
   color: var(--koi-muted);
   font-family: var(--koi-font-mono, monospace);
-  font-size: 0.72rem;
+  font-size: var(--koi-text-xs);
   white-space: pre-wrap;
   word-break: break-word;
 }
 .koi-assistant-tool::before {
   content: '\1F527'; /* 🔧 */
   margin-left: -18px;
-  margin-right: 6px;
+  margin-right: var(--koi-space-1-5);
 }
 .koi-assistant-apply,
 .koi-link-btn {
-  margin-top: 8px;
+  margin-top: var(--koi-space-2);
   background: var(--koi-surface);
   color: var(--koi-fg);
   border: 1px solid var(--koi-line);
   border-radius: var(--koi-radius-sm);
-  padding: 5px 10px;
+  padding: var(--koi-space-1-25) var(--koi-space-2-5);
   font-family: var(--koi-font-body);
   font-size: 0.76rem;
   cursor: pointer;
@@ -101,23 +101,23 @@
 .koi-assistant-controls {
   flex: 0 0 auto;
   border-top: 1px solid var(--koi-line);
-  padding: 10px 12px 12px;
+  padding: var(--koi-space-2-5) var(--koi-space-3) var(--koi-space-3);
   background: var(--koi-paper-2);
 }
 .koi-assistant-quick {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
-  margin-bottom: 8px;
+  gap: var(--koi-space-1-5);
+  margin-bottom: var(--koi-space-2);
 }
 .koi-assistant-action {
   background: var(--koi-surface);
   color: var(--koi-fg);
   border: 1px solid var(--koi-line);
-  border-radius: 999px;
-  padding: 4px 11px;
+  border-radius: var(--koi-radius-pill);
+  padding: var(--koi-space-1) var(--koi-space-2-75);
   font-family: var(--koi-font-body);
-  font-size: 0.74rem;
+  font-size: var(--koi-text-xs-plus);
   cursor: pointer;
 }
 .koi-assistant-action:hover:not(:disabled) {
@@ -131,7 +131,7 @@
 .koi-assistant-inputrow {
   display: flex;
   align-items: flex-end;
-  gap: 8px;
+  gap: var(--koi-space-2);
 }
 .koi-assistant-input {
   flex: 1 1 auto;
@@ -140,9 +140,9 @@
   color: var(--koi-fg);
   border: 1px solid var(--koi-line);
   border-radius: var(--koi-radius-sm);
-  padding: 8px 10px;
+  padding: var(--koi-space-2) var(--koi-space-2-5);
   font-family: var(--koi-font-body);
-  font-size: 0.82rem;
+  font-size: var(--koi-text-base);
   line-height: 1.5;
 }
 .koi-assistant-input:focus-visible {
@@ -154,9 +154,9 @@
   flex: 0 0 auto;
   border: 1px solid var(--koi-line);
   border-radius: var(--koi-radius-sm);
-  padding: 8px 14px;
+  padding: var(--koi-space-2) var(--koi-space-3-5);
   font-family: var(--koi-font-body);
-  font-size: 0.8rem;
+  font-size: var(--koi-text-sm-plus);
   cursor: pointer;
 }
 .koi-assistant-send {

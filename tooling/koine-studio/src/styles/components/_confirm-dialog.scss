@@ -4,7 +4,7 @@
 .koi-confirm-msg {
   margin: 0;
   font-family: var(--koi-font-body);
-  font-size: 0.82rem;
+  font-size: var(--koi-text-base);
   color: var(--koi-muted);
   line-height: 1.45;
 }
@@ -16,9 +16,9 @@
   border-radius: var(--koi-radius-sm);
   color: var(--koi-fg);
   cursor: pointer;
-  padding: 5px 14px;
+  padding: var(--koi-space-1-25) var(--koi-space-3-5);
   font-family: var(--koi-font-body);
-  font-size: 0.82rem;
+  font-size: var(--koi-text-base);
 }
 
 .explorer-confirm-btn:hover,

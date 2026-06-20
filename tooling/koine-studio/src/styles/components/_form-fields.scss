@@ -10,10 +10,10 @@
   background: var(--koi-surface);
   color: var(--koi-fg);
   border: 1px solid var(--koi-line);
-  border-radius: 6px;
-  padding: 6px 10px;
+  border-radius: var(--koi-radius-sm);
+  padding: var(--koi-space-1-5) var(--koi-space-2-5);
   font-family: var(--koi-font-body);
-  font-size: 0.84rem;
+  font-size: var(--koi-text-base-plus);
   cursor: pointer;
 }
 
@@ -45,9 +45,9 @@
   color: var(--koi-fg);
   border: 1px solid var(--koi-line);
   border-radius: var(--koi-radius-sm);
-  padding: 6px 9px;
+  padding: var(--koi-space-1-5) var(--koi-space-2-25);
   font-family: var(--koi-font-mono);
-  font-size: 0.8rem;
+  font-size: var(--koi-text-sm-plus);
 
   &:hover,
   &:focus-visible {
