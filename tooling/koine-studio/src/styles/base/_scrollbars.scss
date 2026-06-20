@@ -25,7 +25,7 @@
   }
   &::-webkit-scrollbar-thumb {
     background: var(--koi-scrollbar-thumb);
-    border-radius: 999px;
+    border-radius: var(--koi-radius-pill);
     border: 2px solid transparent; /* inset padding so the thumb reads as a slim pill */
     background-clip: padding-box;
     &:hover {

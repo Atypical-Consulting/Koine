@@ -5,10 +5,30 @@
   --koi-font-display: "Archivo Variable", "Hanken Grotesk Variable", system-ui, sans-serif;
 
   /* geometry + depth */
+  /* corner-radius scale (ascending: 2xs 2 · xs 4 · sm 6 · base 8 · lg 10 · pill).
+     The base/-sm pair pre-dates the scale and is kept in source order. */
+  --koi-radius-2xs: 2px;
+  --koi-radius-xs: 4px;
   --koi-radius: 8px;
   --koi-radius-sm: 6px;
+  --koi-radius-lg: 10px;
+  --koi-radius-pill: 999px;
   --koi-shadow: 0 18px 50px rgba(3, 7, 14, 0.5);
   --koi-accent-grad: linear-gradient(135deg, var(--koi-accent), var(--koi-cyan));
+
+  /* z-index layering scale — the single source of truth for stacking order. Theme-independent.
+     Tiers are ordered ascending by value; each in-use tier keeps the exact literal it replaces so
+     compiled output is unchanged. Tiers above --koi-z-popover are RESERVED headroom for future
+     overlay features (tooltips, toasts, drag ghosts) and are unused today. */
+  --koi-z-base: 1;       /* in-context decorations: inline markers, resizer handles, ::before glows */
+  --koi-z-sticky: 2;     /* sticky chrome that pins within the layout (the toolbar bar) */
+  --koi-z-raised: 3;     /* content floating over its own pane (the copy-code button) */
+  --koi-z-overlay: 50;   /* full-screen app overlay below modals (the welcome / start screen) */
+  --koi-z-modal: 100;    /* centered dialogs + their backdrops (command palette, modals) */
+  --koi-z-popover: 120;  /* transient menus anchored to a trigger (language picker, context menu) */
+  --koi-z-tooltip: 200;  /* reserved: hover tooltips above popovers */
+  --koi-z-toast: 300;    /* reserved: transient notifications / snackbars */
+  --koi-z-drag: 400;     /* reserved: drag ghosts / drop overlays, always on top */
 
   /* destination-language identity — real brand hues, shared across themes */
   --lang-csharp: #a179dc;
@@ -41,6 +61,44 @@
   --koi-error: #ff6b6b;
   /* ink on a filled --koi-error surface — a dark ink reads on the dark theme's light coral */
   --koi-on-error: #2a0a0a;
+
+  /* spacing scale — value-equivalent tokens for padding / margin / gap. Theme-independent;
+     a future density mode can rescale the whole UI by overriding these in one place. Rare
+     one-off values (13/20/22/24/30/36px) intentionally stay raw literals. */
+  --koi-space-px: 1px;
+  --koi-space-0-5: 2px;
+  --koi-space-0-75: 3px;
+  --koi-space-1: 4px;
+  --koi-space-1-25: 5px;
+  --koi-space-1-5: 6px;
+  --koi-space-1-75: 7px;
+  --koi-space-2: 8px;
+  --koi-space-2-25: 9px;
+  --koi-space-2-5: 10px;
+  --koi-space-2-75: 11px;
+  --koi-space-3: 12px;
+  --koi-space-3-5: 14px;
+  --koi-space-4: 16px;
+  --koi-space-4-5: 18px;
+
+  /* font-size scale — value-equivalent tokens for the frequent rem sizes. Theme-independent;
+     a future text-scaling preference can override these in one place. Rare sizes stay raw. */
+  --koi-text-2xs: 0.7rem;
+  --koi-text-xs: 0.72rem;
+  --koi-text-xs-plus: 0.74rem;
+  --koi-text-sm: 0.78rem;
+  --koi-text-sm-plus: 0.8rem;
+  --koi-text-base: 0.82rem;
+  --koi-text-base-plus: 0.84rem;
+  --koi-text-md: 0.86rem;
+  --koi-text-lg: 0.9rem;
+
+  /* motion scale — value-equivalent tokens for the frequent transition/animation durations.
+     Theme-independent; a future reduced-motion mode can zero these in one place. */
+  --koi-dur-fast: 0.12s;
+  --koi-dur-base: 0.14s;
+  --koi-dur-mid: 0.15s;
+  --koi-dur-slow: 0.18s;
 
   /* syntax highlighting */
   --koi-hl-keyword: #c98cff;

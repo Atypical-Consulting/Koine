@@ -5,7 +5,7 @@
   position: fixed;
   list-style: none;
   margin: 0;
-  padding: 4px;
+  padding: var(--koi-space-1);
   background: var(--koi-paper-2);
   border: 1px solid var(--koi-line);
   border-radius: var(--koi-radius-sm);
@@ -17,17 +17,17 @@
 @mixin ghost-button {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--koi-space-1-5);
   background: transparent;
   color: var(--koi-ink-soft);
   border: 1px solid transparent;
   border-radius: 5px;
-  padding: 5px 11px;
+  padding: var(--koi-space-1-25) var(--koi-space-2-75);
   font-family: var(--koi-font-body);
-  font-size: 0.82rem;
+  font-size: var(--koi-text-base);
   font-weight: 500;
   cursor: pointer;
-  transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+  transition: background var(--koi-dur-fast) ease, color var(--koi-dur-fast) ease, border-color var(--koi-dur-fast) ease;
 
   &:hover:not(:disabled) {
     background: var(--koi-surface);

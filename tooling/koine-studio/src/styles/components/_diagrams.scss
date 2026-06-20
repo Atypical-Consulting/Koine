@@ -7,7 +7,7 @@
 .koi-diagram-page {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: var(--koi-space-3);
 }
 .koi-diagram-title {
   font-family: var(--koi-font-display);
@@ -16,7 +16,7 @@
   letter-spacing: -0.01em;
   color: var(--koi-fg);
   margin: 0;
-  padding-bottom: 6px;
+  padding-bottom: var(--koi-space-1-5);
   border-bottom: 1px solid var(--koi-line);
 }
 .koi-diagram {
@@ -24,13 +24,13 @@
   background: var(--koi-paper-2);
   border: 1px solid var(--koi-line);
   border-radius: var(--koi-radius);
-  padding: 12px;
+  padding: var(--koi-space-3);
 }
 .koi-diagram-caption {
   color: var(--koi-muted);
   font-family: var(--koi-font-body);
-  font-size: 0.78rem;
-  margin-bottom: 8px;
+  font-size: var(--koi-text-sm);
+  margin-bottom: var(--koi-space-2);
 }
 .koi-diagram-surface {
   overflow-x: auto;
@@ -41,11 +41,11 @@
 }
 .koi-diagram-fallback {
   font-family: var(--koi-font-mono);
-  font-size: 0.74rem;
+  font-size: var(--koi-text-xs-plus);
   white-space: pre-wrap;
   color: var(--koi-fg);
   background: var(--koi-surface);
   border-radius: var(--koi-radius-sm);
-  padding: 8px;
+  padding: var(--koi-space-2);
   overflow-x: auto;
 }
