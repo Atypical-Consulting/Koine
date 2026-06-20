@@ -3,11 +3,40 @@ title: "Value objects"
 description: "Immutable value types: structural equality, validating constructors, derived fields."
 ---
 
+## 5.1 General
+
 A **value object** is a small immutable type defined entirely by its data — two of them are equal when
 their fields are equal, not when they are the same instance. In Koine you declare one with the `value`
 keyword; the compiler emits a `sealed class` deriving the `ValueObject` runtime base, with get-only
 properties, a validating constructor, and structural equality. You never write `Equals`, `GetHashCode`,
 or a copy constructor by hand.
+
+## 5.2 Syntax
+
+A value object is declared with the `value` keyword (a `quantity` — [§5.5](#55-quantities) — shares
+the same body grammar):
+
+```ebnf
+value_declaration
+    : 'value' Identifier '{' member* invariant* '}'
+    ;
+
+member
+    : Identifier ':' type_ref ( '=' expression )?   // '= expression' makes it a derived field
+    ;
+
+invariant
+    : 'invariant' expression StringLiteral?         // the string is the failure message
+    ;
+
+type_ref
+    : Identifier ( '<' type_ref ( ',' type_ref )? '>' )? '?'?   // T, List<T>, Map<K,V>, T?
+    ;
+```
+
+A `member` with an `= expression` initialiser that references sibling fields is a **derived field**
+([§5.3](#53-semantics)); without it, the member is a constructor parameter. The expression grammar is
+specified in [Expressions (§9)](/Koine/reference/expressions/).
 
 ```koine
 value Price {
@@ -17,7 +46,7 @@ value Price {
 }
 ```
 
-## What you get
+## 5.3 Semantics
 
 Every `value X { … }` produces a class with four guarantees:
 
@@ -28,44 +57,13 @@ Every `value X { … }` produces a class with four guarantees:
 | Structural equality | Equality (and `==` / `!=` / `GetHashCode`) compares the declared fields, in order |
 | Sealed | The class is `sealed` — value objects are not meant to be subclassed |
 
-Here is the C# Koine emits for the `Price` above:
-
-```csharp
-public sealed class Price : ValueObject
-{
-    public decimal Amount { get; }
-    public Currency Currency { get; }
-
-    public Price(decimal amount, Currency currency)
-    {
-        if (!(amount >= 0))
-            throw new DomainInvariantViolationException(
-                type: nameof(Price),
-                rule: "a price cannot be negative");
-
-        Amount = amount;
-        Currency = currency;
-    }
-
-    protected override IEnumerable<object?> GetEqualityComponents()
-    {
-        yield return Amount;
-        yield return Currency;
-    }
-}
-```
-
-The base `ValueObject` (in `Koine.Runtime`) implements `Equals`, `GetHashCode`, and the `==` / `!=`
-operators once for every value object, comparing the sequence returned by `GetEqualityComponents()`. Your
-generated type only contributes the ordered list of components.
-
 :::note
 A value object is constructed positionally and validated eagerly. If an invariant fails, the constructor
 throws — there is no half-built `Price` with a negative amount. This is the core promise of the type:
 **if you hold an instance, it is valid.**
 :::
 
-## Validating constructors
+### Validating constructors
 
 Every `invariant` you declare becomes a guard at the top of the constructor, in declaration order, each
 throwing `DomainInvariantViolationException(type, rule)` with your message as the `rule`. Invariants can
@@ -99,10 +97,10 @@ public Sku(string code)
 }
 ```
 
-See [Invariants](/Koine/reference/invariants/) for the full guard expression grammar and how the same
+See [Invariants (§10)](/Koine/reference/invariants/) for the full guard expression grammar and how the same
 `invariant` syntax applies to entities and quantities.
 
-## Derived (computed) fields
+### Derived (computed) fields
 
 A field written `name: Type = expr` where `expr` references sibling fields is a **derived field**. It is
 *not* a constructor parameter and *not* part of equality — it is emitted as a get-only computed property:
@@ -140,7 +138,7 @@ equality. `lineTotal` and `payable` recompute from them, so two `OrderLine`s wit
 always equal regardless of derived values.
 :::
 
-## Defensive copies of collections
+### Defensive copies of collections
 
 When a value object field is a `List<T>` or `Set<T>`, the constructor takes a defensive copy and exposes
 it as a read-only view (`IReadOnlyList<T>` / `IReadOnlySet<T>`). A caller cannot mutate your value object
@@ -148,9 +146,42 @@ by holding onto the collection they passed in. Collection fields participate in 
 ordered for `List<T>`, order-insensitive for `Set<T>` — via the runtime's `Ordered(...)` / `Unordered(...)`
 helpers on the `ValueObject` base.
 
-See the [type mapping](/Koine/reference/contexts-and-types/) for the full list of how Koine types lower to C#.
+See the [Contexts & types (§4)](/Koine/reference/contexts-and-types/) for the full list of how Koine types lower to C#.
 
-## Scalar arithmetic operators
+## 5.4 Translation to C#
+
+Here is the C# Koine emits for the `Price` above:
+
+```csharp
+public sealed class Price : ValueObject
+{
+    public decimal Amount { get; }
+    public Currency Currency { get; }
+
+    public Price(decimal amount, Currency currency)
+    {
+        if (!(amount >= 0))
+            throw new DomainInvariantViolationException(
+                type: nameof(Price),
+                rule: "a price cannot be negative");
+
+        Amount = amount;
+        Currency = currency;
+    }
+
+    protected override IEnumerable<object?> GetEqualityComponents()
+    {
+        yield return Amount;
+        yield return Currency;
+    }
+}
+```
+
+The base `ValueObject` (in `Koine.Runtime`) implements `Equals`, `GetHashCode`, and the `==` / `!=`
+operators once for every value object, comparing the sequence returned by `GetEqualityComponents()`. Your
+generated type only contributes the ordered list of components.
+
+### 5.4.1 Scalar arithmetic operators
 
 A value object with a numeric field can be multiplied (or otherwise combined) by a scalar, and Koine
 generates the corresponding operator — but **only for the operations your model actually uses**. The
@@ -185,7 +216,7 @@ it somewhere in a `.koi` derived field or command so the emitter generates it. T
 every possible overload.
 :::
 
-### Quantities: unit-checked arithmetic
+## 5.5 Quantities
 
 A `quantity` is a value object with a `Decimal` amount and an enum unit that emits *unit-checked* `+` / `-`
 operators — adding grams to kilograms throws. It also gets scalar `*` / `/` by `Int` and `Decimal`,
@@ -210,7 +241,7 @@ public static Weight operator +(Weight left, Weight right)
 }
 ```
 
-## A complete example
+## 5.6 Example
 
 The full `Catalog` context below declares three value objects (`Sku`, `Price`, `SalePeriod`), a
 `quantity` (`Weight`), and the enums they depend on. It is copy-pasteable and compiles with
@@ -259,17 +290,17 @@ context Catalog version 2 {
 
 ## How value objects relate to entities
 
-The key distinction: **value objects have no identity**. An [entity](/Koine/reference/entities-and-identity/) is
+The key distinction: **value objects have no identity**. An [entity (§6)](/Koine/reference/entities-and-identity/) is
 identified by an id and two entities with identical fields are still different things; two value objects
 with identical fields *are the same value*. Use a value object for a measurement, a money amount, an
 address, a code — anything you'd happily replace wholesale rather than mutate.
 
 Identity types themselves (`ProductId`, `OrderId`, …) are generated value objects too — small records
-wrapping a `Guid` (or a natural key). See [entities & identity](/Koine/reference/entities-and-identity/) for the strategies.
+wrapping a `Guid` (or a natural key). See [Entities & identity (§6)](/Koine/reference/entities-and-identity/) for the strategies.
 
 ## See also
 
-- [Invariants](/Koine/reference/invariants/) — the guard expression grammar shared across value objects, entities, and quantities.
-- [Entities & identity](/Koine/reference/entities-and-identity/) — identity-bearing types and how they differ from value objects.
-- [Contexts & types](/Koine/reference/contexts-and-types/) — how Koine field types lower to C#.
-- [Expressions](/Koine/reference/expressions/) — the expression grammar used in derived fields and invariants.
+- [Invariants (§10)](/Koine/reference/invariants/) — the guard expression grammar shared across value objects, entities, and quantities.
+- [Entities & identity (§6)](/Koine/reference/entities-and-identity/) — identity-bearing types and how they differ from value objects.
+- [Contexts & types (§4)](/Koine/reference/contexts-and-types/) — how Koine field types lower to C#.
+- [Expressions (§9)](/Koine/reference/expressions/) — the expression grammar used in derived fields and invariants.
