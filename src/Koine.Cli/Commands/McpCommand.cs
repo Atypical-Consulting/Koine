@@ -1,5 +1,4 @@
 using System.ComponentModel;
-using System.Globalization;
 using Koine.Mcp;
 using Spectre.Console.Cli;
 
@@ -41,22 +40,17 @@ internal sealed class McpCommand : AsyncCommand<McpCommand.Settings>
             return 0;
         }
 
-        // Rebuild the flag vector HttpHost.ParseEndpoint understands so the endpoint parsing has a
-        // single home (shared with the koine-mcp tool). A zero/omitted port stays OS-assigned.
-        var args = new List<string> { "--http" };
-        if (settings.Port != 0)
+        // Reject an out-of-range port here so the CLI signals failure (exit 1) with a clear message
+        // instead of letting Kestrel crash on the bind.
+        if (!HttpHost.IsValidPort(settings.Port))
         {
-            args.Add("--port");
-            args.Add(settings.Port.ToString(CultureInfo.InvariantCulture));
+            await Console.Error.WriteLineAsync($"error: port must be 0-65535 (got {settings.Port})");
+            return 1;
         }
 
-        if (!string.IsNullOrWhiteSpace(settings.Host))
-        {
-            args.Add("--host");
-            args.Add(settings.Host);
-        }
-
-        await HttpHost.RunAsync(args.ToArray());
+        // Delegate straight to the shared host with the parsed settings — no string[] round-trip.
+        var host = string.IsNullOrWhiteSpace(settings.Host) ? HttpHost.DefaultHost : settings.Host;
+        await HttpHost.RunAsync(host, settings.Port);
         return 0;
     }
 }

@@ -21,7 +21,7 @@ internal static class EmitterRegistry
     public static IReadOnlyList<string> SupportedTargets => BuiltIn.SupportedTargets;
 
     /// <summary>A comma-separated list of <see cref="SupportedTargets"/>, for messages.</summary>
-    public static string SupportedList => string.Join(", ", SupportedTargets);
+    public static string SupportedList => BuiltIn.SupportedList;
 
     public static bool IsSupported(string target) => BuiltIn.IsSupported(target);
 

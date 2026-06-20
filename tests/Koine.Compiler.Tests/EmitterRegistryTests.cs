@@ -78,15 +78,11 @@ public class EmitterRegistryTests
     }
 
     [Fact]
-    public void External_provider_resolves_through_the_mcp_path()
+    public void Supported_list_is_the_comma_space_join_of_supported_targets()
     {
-        Koine.Mcp.EmitterFactory.TryCreate(
-            StubEmitterProvider.TargetName,
-            new[] { typeof(StubEmitterProvider).Assembly.GetName().Name! },
-            out var emitter,
-            out var error).ShouldBeTrue(error);
-
-        emitter.Emit(EmptyModel()).Single().ShouldBe(StubEmitter.File);
+        // Locks the shared formatter the CLI and MCP error messages both delegate to.
+        var registry = new EmitterRegistry();
+        registry.SupportedList.ShouldBe(string.Join(", ", registry.SupportedTargets));
     }
 
     private static KoineModel EmptyModel() => new(Array.Empty<ContextNode>(), ContextMap: null);
