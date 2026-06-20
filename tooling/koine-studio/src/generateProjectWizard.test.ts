@@ -41,6 +41,22 @@ async function clickNext(): Promise<void> {
 function saveZipCalls(deps: GenerateProjectDeps): unknown[][] {
   return (deps.saveZip as ReturnType<typeof vi.fn>).mock.calls;
 }
+// Poll a real condition across flushes instead of guessing a fixed tick count.
+async function waitFor(pred: () => boolean): Promise<void> {
+  for (let i = 0; i < 100; i++) {
+    if (pred()) return;
+    await flush();
+  }
+  throw new Error('waitFor: condition was not met within the flush budget');
+}
+// Click Generate and wait until the flow actually reaches saveZip. The generate path builds a real
+// archive (JSZip.generateAsync schedules its work across several macrotasks) and, with the glossary
+// option, awaits an extra fetch first — a fixed flush count races that, so poll for the real signal.
+async function clickGenerate(deps: GenerateProjectDeps): Promise<void> {
+  primary().click();
+  await waitFor(() => saveZipCalls(deps).length > 0);
+  await settle();
+}
 function checkRowByText(re: RegExp): HTMLInputElement {
   const row = Array.from(document.querySelectorAll('.koi-wizard-check')).find((r) => re.test(r.textContent ?? ''));
   return row!.querySelector<HTMLInputElement>('input')!;
@@ -93,7 +109,7 @@ describe('generate-project wizard', () => {
 
     // Step 2 (Name) → Step 3 (Generate) → generate.
     await clickNext();
-    await clickNext();
+    await clickGenerate(deps);
 
     expect(deps.saveZip).toHaveBeenCalledTimes(1);
     const [name, bytes] = saveZipCalls(deps)[0];
@@ -117,7 +133,7 @@ describe('generate-project wizard', () => {
 
     await clickNext(); // → Name
     await clickNext(); // → Generate
-    await clickNext(); // generate
+    await clickGenerate(deps); // generate
 
     expect(deps.glossary).toHaveBeenCalledTimes(1);
     const [, bytes] = saveZipCalls(deps)[0];
@@ -138,7 +154,7 @@ describe('generate-project wizard', () => {
     glossaryCheck.dispatchEvent(new Event('change'));
     await clickNext(); // → Name
     await clickNext(); // → Generate
-    await clickNext(); // generate
+    await clickGenerate(deps); // generate
 
     expect(deps.saveZip).toHaveBeenCalledTimes(1);
     const [, bytes] = saveZipCalls(deps)[0];
@@ -170,7 +186,7 @@ describe('generate-project wizard', () => {
 
     await clickNext(); // → Name
     await clickNext(); // → Generate
-    await clickNext(); // generate
+    await clickGenerate(deps); // generate
 
     const [, bytes] = saveZipCalls(deps)[0];
     const zip = await JSZip.loadAsync(bytes as Uint8Array);
@@ -237,7 +253,7 @@ describe('generate-project wizard', () => {
     await clickNext();
     await clickNext();
     await clickNext();
-    await clickNext(); // generate → save cancelled
+    await clickGenerate(deps); // generate → save cancelled
 
     expect(deps.saveZip).toHaveBeenCalledTimes(1);
     expect(primary().textContent).toBe('Generate'); // not relabelled to 'Close'
@@ -255,7 +271,7 @@ describe('generate-project wizard', () => {
     await clickNext();
     await clickNext();
     await clickNext();
-    await clickNext(); // generate → save throws
+    await clickGenerate(deps); // generate → save throws
 
     expect(deps.saveZip).toHaveBeenCalledTimes(1);
     expect(primary().textContent).toBe('Generate');
@@ -269,7 +285,7 @@ describe('generate-project wizard', () => {
     await clickNext();
     await clickNext();
     await clickNext();
-    await clickNext(); // generate succeeds
+    await clickGenerate(deps); // generate succeeds
 
     expect(deps.saveZip).toHaveBeenCalledTimes(1);
     expect(primary().textContent).toBe('Close');
