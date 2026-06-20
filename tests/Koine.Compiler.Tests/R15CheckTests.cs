@@ -36,6 +36,17 @@ public class R15CheckTests
         change.Code.ShouldBe(code);
     }
 
+    /// <summary>
+    /// Asserts a breaking change with <paramref name="code"/> is present. Used for integration-event
+    /// payload changes, which now ALSO carry an event-level <see cref="DiagnosticCodes.PublishedEventShapeChanged"/>
+    /// summary (issue #73, A2) alongside the per-field code.
+    /// </summary>
+    private static void AssertBreakingIncludes(CompatibilityReport report, string code)
+    {
+        report.HasBreakingChanges.ShouldBeTrue();
+        report.Changes.ShouldContain(c => c.Impact == CompatibilityImpact.Breaking && c.Code == code);
+    }
+
     // ---- breaking changes --------------------------------------------------
 
     [Fact]
@@ -57,7 +68,7 @@ public class R15CheckTests
               }
             }
             """);
-        AssertSingleBreaking(report, DiagnosticCodes.PublishedFieldRemoved);
+        AssertBreakingIncludes(report, DiagnosticCodes.PublishedFieldRemoved);
         report.Changes[0].Message.ShouldContain("total");
     }
 
@@ -73,7 +84,7 @@ public class R15CheckTests
               }
             }
             """);
-        AssertSingleBreaking(report, DiagnosticCodes.PublishedFieldTypeChanged);
+        AssertBreakingIncludes(report, DiagnosticCodes.PublishedFieldTypeChanged);
     }
 
     [Fact]
@@ -88,7 +99,7 @@ public class R15CheckTests
               }
             }
             """);
-        AssertSingleBreaking(report, DiagnosticCodes.PublishedFieldNowRequired);
+        AssertBreakingIncludes(report, DiagnosticCodes.PublishedFieldNowRequired);
     }
 
     [Fact]
@@ -104,7 +115,7 @@ public class R15CheckTests
               }
             }
             """);
-        AssertSingleBreaking(report, DiagnosticCodes.PublishedRequiredFieldAdded);
+        AssertBreakingIncludes(report, DiagnosticCodes.PublishedRequiredFieldAdded);
     }
 
     // ---- additive (non-breaking) -------------------------------------------
@@ -260,7 +271,8 @@ public class R15CheckTests
               Sales <-> Billing : shared-kernel { Currency }
             }
             """);
-        AssertSingleBreaking(report, DiagnosticCodes.PublishedFieldRemoved);
+        // Enum-value removal carries its own code (KOI1516), distinct from a record field removal.
+        AssertSingleBreaking(report, DiagnosticCodes.PublishedEnumMemberRemoved);
     }
 
     [Fact]
@@ -277,5 +289,83 @@ public class R15CheckTests
             """);
         report.HasBreakingChanges.ShouldBeFalse();
         report.Changes.ShouldContain(c => c.Message.Contains("GBP"));
+    }
+
+    // ---- issue #73, thread A: rename / enum-removal / event-shape detection ----
+
+    [Fact]
+    public void Compat_DetectsRename()
+    {
+        // `total: Decimal` renamed to `amount: Decimal` — a single rename, not a remove + add.
+        var report = Check(Baseline, """
+            context Sales {
+              integration event OrderPlaced {
+                orderId: OrderId
+                amount:  Decimal
+                note:    String?
+              }
+            }
+            """);
+        // The rename is reported as ONE rename, subsuming the remove + add: neither a field-removed nor
+        // a required-field-added change appears. (An integration event also carries the KOI1517
+        // event-shape summary, so this is not asserted as the sole change.)
+        AssertBreakingIncludes(report, DiagnosticCodes.PublishedMemberRenamed);
+        report.Changes.ShouldNotContain(c => c.Code == DiagnosticCodes.PublishedFieldRemoved);
+        report.Changes.ShouldNotContain(c => c.Code == DiagnosticCodes.PublishedRequiredFieldAdded);
+    }
+
+    [Fact]
+    public void Compat_AmbiguousSameShape_IsNotReportedAsRename()
+    {
+        // Baseline's `total: Decimal` is removed while TWO same-shape fields (tax, fee) are added.
+        // The pairing is ambiguous, so it must NOT be guessed as a rename — report remove + adds.
+        var report = Check(Baseline, """
+            context Sales {
+              integration event OrderPlaced {
+                orderId: OrderId
+                note:    String?
+                tax:     Decimal
+                fee:     Decimal
+              }
+            }
+            """);
+        report.Changes.ShouldNotContain(c => c.Code == DiagnosticCodes.PublishedMemberRenamed);
+        report.Changes.ShouldContain(c => c.Code == DiagnosticCodes.PublishedFieldRemoved);      // total removed
+        report.Changes.ShouldContain(c => c.Code == DiagnosticCodes.PublishedRequiredFieldAdded); // tax / fee added
+    }
+
+    [Fact]
+    public void Compat_EnumMemberRemoval_DistinctCode()
+    {
+        var report = Check(SharedEnum, """
+            context Sales {
+              enum Currency { EUR }
+            }
+            context Billing { }
+            contextmap {
+              Sales <-> Billing : shared-kernel { Currency }
+            }
+            """);
+        // Enum-value removal is its own code, NOT the record-field PublishedFieldRemoved.
+        AssertSingleBreaking(report, DiagnosticCodes.PublishedEnumMemberRemoved);
+        report.Changes.ShouldNotContain(c => c.Code == DiagnosticCodes.PublishedFieldRemoved);
+    }
+
+    [Fact]
+    public void Compat_IntegrationEventPayloadChange_IsBreaking()
+    {
+        // Retyping a payload field changes the event's wire shape: the per-field code AND an
+        // event-level KOI1517 shape-change summary, both breaking.
+        var report = Check(Baseline, """
+            context Sales {
+              integration event OrderPlaced {
+                orderId: OrderId
+                total:   Int
+                note:    String?
+              }
+            }
+            """);
+        AssertBreakingIncludes(report, DiagnosticCodes.PublishedEventShapeChanged);
+        report.Changes.ShouldContain(c => c.Code == DiagnosticCodes.PublishedEventShapeChanged && c.Message.Contains("OrderPlaced"));
     }
 }

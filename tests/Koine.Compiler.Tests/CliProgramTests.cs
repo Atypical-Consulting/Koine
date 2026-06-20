@@ -326,4 +326,38 @@ public class CliProgramTests
 
         (builds >= 3).ShouldBeTrue();
     }
+
+    // ---- check: per-rule severity config (issue #73, A3) -------------------
+
+    [Fact]
+    public void Check_SeverityConfig_DowngradesRenameToNonBreaking()
+    {
+        // An open-host value object: renaming its field is a published-surface rename (KOI1515) with no
+        // event-shape coupling, so the severity override is the only thing that can clear the gate.
+        const string baselineSrc = """
+            context Sales {
+              value Money { total: Decimal }
+            }
+            context Shipping { }
+            contextmap { Sales -> Shipping : open-host }
+            """;
+        const string currentSrc = """
+            context Sales {
+              value Money { amount: Decimal }
+            }
+            context Shipping { }
+            contextmap { Sales -> Shipping : open-host }
+            """;
+        var (_, baseDir) = TempModel(baselineSrc, "baseline.koi");
+        var (currentFile, _) = TempModel(currentSrc, "current.koi");
+
+        // Renaming a published field (KOI1515) is breaking by default → non-zero exit.
+        var (code1, _, _) = Run("check", currentFile, "--baseline", baseDir);
+        code1.ShouldBe(1);
+
+        // A koine.config that downgrades the rename to NonBreaking clears the gate → exit 0.
+        var (configFile, _) = TempModel("check.severity.KOI1515 = NonBreaking\n", "koine.config");
+        var (code2, _, _) = Run("check", currentFile, "--baseline", baseDir, "--config", configFile);
+        code2.ShouldBe(0);
+    }
 }

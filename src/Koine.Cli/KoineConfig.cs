@@ -30,7 +30,8 @@ internal sealed record KoineConfig(
     string? Target,
     string? OutDir,
     string? Baseline = null,
-    IReadOnlyDictionary<string, TargetOptions>? Targets = null)
+    IReadOnlyDictionary<string, TargetOptions>? Targets = null,
+    IReadOnlyDictionary<string, string>? Severity = null)
 {
     public static readonly KoineConfig Empty = new(null, null);
 
@@ -47,6 +48,7 @@ internal sealed record KoineConfig(
         string? outDir = null;
         string? baseline = null;
         var targets = new Dictionary<string, TargetBuilder>(StringComparer.Ordinal);
+        var severity = new Dictionary<string, string>(StringComparer.Ordinal);
 
         foreach (var raw in text.Split('\n'))
         {
@@ -81,10 +83,19 @@ internal sealed record KoineConfig(
                     baseline = value;
                     break;
                 default:
-                    // `targets.<name>.<rest>` (R16.1); any other unknown key is ignored.
+                    // `targets.<name>.<rest>` (R16.1) and `check.severity.<CODE>` (issue #73);
+                    // any other unknown key is ignored, keeping the file forward-compatible.
                     if (key.StartsWith("targets.", StringComparison.Ordinal))
                     {
                         ApplyTargetKey(targets, key, value);
+                    }
+                    else if (key.StartsWith("check.severity.", StringComparison.Ordinal))
+                    {
+                        var code = key["check.severity.".Length..];
+                        if (code.Length > 0)
+                        {
+                            severity[code] = value;
+                        }
                     }
 
                     break;
@@ -94,7 +105,8 @@ internal sealed record KoineConfig(
         IReadOnlyDictionary<string, TargetOptions>? built = targets.Count == 0
             ? null
             : targets.ToDictionary(kv => kv.Key, kv => kv.Value.Build(), StringComparer.Ordinal);
-        return new KoineConfig(target, outDir, baseline, built);
+        IReadOnlyDictionary<string, string>? severityMap = severity.Count == 0 ? null : severity;
+        return new KoineConfig(target, outDir, baseline, built, severityMap);
     }
 
     /// <summary>

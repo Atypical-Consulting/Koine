@@ -41,6 +41,12 @@ public static class DiagnosticCodes
     // ---- Determinism / value rules (KOI0300–0399) -------------------------
     public const string NowAsStoredDefault = "KOI0301";
 
+    // ---- Invariant satisfiability (KOI0310–0319) --------------------------
+    public const string ContradictoryInvariant = "KOI0310";
+    public const string InvertedBound = "KOI0311";
+    public const string BoundOutsideConstraint = "KOI0312";
+    public const string UnsatisfiableInvariantPair = "KOI0313";
+
     // ---- Optionality (KOI0400–0499) ---------------------------------------
     public const string OptionalAssignedToNonOptional = "KOI0401";
     public const string OptionalDereference = "KOI0402";
@@ -162,6 +168,9 @@ public static class DiagnosticCodes
     public const string PublishedFieldTypeChanged = "KOI1512";
     public const string PublishedFieldNowRequired = "KOI1513";
     public const string PublishedRequiredFieldAdded = "KOI1514";
+    public const string PublishedMemberRenamed = "KOI1515";
+    public const string PublishedEnumMemberRemoved = "KOI1516";
+    public const string PublishedEventShapeChanged = "KOI1517";
 
     /// <summary>Every code with a one-line description. Tested for uniqueness/coverage.</summary>
     public static readonly IReadOnlyDictionary<string, string> Catalogue = new Dictionary<string, string>
@@ -191,6 +200,13 @@ public static class DiagnosticCodes
         [AmbiguousEnumMember] = "A bare enum member belongs to more than one enum; qualify it.",
         [DuplicateLetBinding] = "A let binding name is declared more than once in the same let.",
         [NowAsStoredDefault] = "'now' cannot be used as a stored (constructor) default.",
+        [ContradictoryInvariant] = "An invariant condition is a constant that can never hold (always false).",
+        [InvertedBound] = "A field's inclusive bounds are inverted: the lower bound exceeds the upper bound.",
+        [BoundOutsideConstraint] = "A field's constant default lies outside the range its invariants require.",
+        [UnsatisfiableInvariantPair] = "Two bounds on the same field cannot both hold; their intersection is empty.",
+        [PublishedMemberRenamed] = "A published field was renamed (a same-shape field removed and re-added under a new name).",
+        [PublishedEnumMemberRemoved] = "A value was removed from a published enum.",
+        [PublishedEventShapeChanged] = "A published integration event's payload shape changed (a field added, removed, or retyped).",
         [OptionalAssignedToNonOptional] = "An optional value was assigned to a non-optional field.",
         [OptionalDereference] = "An optional value may be null at the point it is used.",
         [PresenceOnNonOptional] = "A presence check was applied to a non-optional value.",
