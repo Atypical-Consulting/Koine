@@ -48,12 +48,12 @@ public class WarmModelTests
     }
 
     /// <summary>
-    /// Loads the billing example (<c>examples/billing.koi</c>) as a single-file compilation.
+    /// Loads the billing starter (<c>templates/starters/billing/billing.koi</c>) as a single-file compilation.
     /// </summary>
     private static SourceFile BillingFile()
     {
-        var path = Path.Combine(RepoRoot(), "examples", "billing.koi");
-        File.Exists(path).ShouldBeTrue($"Billing example not found: {path}");
+        var path = Path.Combine(RepoRoot(), "templates", "starters", "billing", "billing.koi");
+        File.Exists(path).ShouldBeTrue($"Billing starter not found: {path}");
         return new SourceFile(path, File.ReadAllText(path));
     }
 

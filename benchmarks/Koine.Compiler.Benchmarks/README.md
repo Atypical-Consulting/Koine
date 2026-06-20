@@ -16,7 +16,7 @@ Three pipeline stages, each run against two inputs (`[Params]`):
 
 | Corpus    | Input                                                            |
 |-----------|-----------------------------------------------------------------|
-| `Billing` | `examples/billing.koi` — single small file (~0.8 KB)            |
+| `Billing` | `templates/starters/billing/billing.koi` — single small file (~0.8 KB) |
 | `Shop`    | `demo/Shop.Domain/Models/*.koi` — 7 files (~17 KB), one model   |
 
 `[MemoryDiagnoser]` also reports allocations — a common silent regression source. The corpus files are

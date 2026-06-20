@@ -76,7 +76,7 @@
       <LogicalName>koine.examples.shop-shipping.koi</LogicalName>
       <Link>Models\shipping.koi</Link>
     </EmbeddedResource>
-    <EmbeddedResource Include="..\..\examples\billing.koi">
+    <EmbeddedResource Include="..\..\templates\starters\billing\billing.koi">
       <LogicalName>koine.examples.billing.koi</LogicalName>
       <Link>Models\billing.koi</Link>
     </EmbeddedResource>

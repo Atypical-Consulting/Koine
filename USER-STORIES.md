@@ -877,7 +877,7 @@ _BRIEF §8 lists LSP/editor tooling as a v0 non-goal, but it is squarely in scop
 **Acceptance criteria**
 - A TextMate grammar highlights keywords, types, identifiers, numbers, strings, regex literals, and comments, with distinct scopes for primitive vs user-defined types
 - Packaged for both a minimal VS Code extension and a Rider/IntelliJ TextMate bundle
-- Highlighting is verified on examples/billing.koi including the regex invariant and the `when` guard
+- Highlighting is verified on templates/starters/billing/billing.koi including the regex invariant and the `when` guard
 
 ### R17.2 Language Server Protocol implementation  ·  🟡 Medium
 ✅ **Delivered** — *As a Domain Developer, I want an LSP server for Koine, so that I get inline diagnostics, hover, completion, and go-to-definition while editing .koi files.*

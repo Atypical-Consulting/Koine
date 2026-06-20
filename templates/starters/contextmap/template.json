@@ -1,0 +1,20 @@
+{
+  "id": "contextmap",
+  "name": "Strategic context map",
+  "tagline": "Two bounded contexts and the relationship between them.",
+  "description": "A minimal strategic model: a Catalog context (products) and a Sales context (order references) connected by a conformist relationship in a context map. This template introduces multi-context modeling and the strategic design view of how bounded contexts relate.",
+  "difficulty": "starter",
+  "tags": ["context-map", "strategic-design", "multi-context", "starter"],
+  "contexts": ["Catalog", "Sales"],
+  "coreAggregate": "Product",
+  "entryFile": "catalog-sales.koi",
+  "teaches": [
+    "bounded contexts",
+    "entities with identity",
+    "value objects",
+    "context maps",
+    "conformist relationships",
+    "strategic DDD"
+  ],
+  "icon": "🗺️"
+}

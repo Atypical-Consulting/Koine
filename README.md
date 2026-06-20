@@ -141,22 +141,22 @@ Requires **.NET 10**.
 ./scripts/build/build.sh         # or: dotnet build && dotnet test
 
 # Compile a domain model to C#
-dotnet run --project src/Koine.Cli -- build examples/billing.koi --target csharp --out ./generated
+dotnet run --project src/Koine.Cli -- build templates/starters/billing/billing.koi --target csharp --out ./generated
 
 # Emit to TypeScript instead
-dotnet run --project src/Koine.Cli -- build examples/billing.koi --target typescript --out ./generated
+dotnet run --project src/Koine.Cli -- build templates/starters/billing/billing.koi --target typescript --out ./generated
 
 # Or to Python (Phase 1: tactical core — value objects, smart enums, entities, events, repositories)
-dotnet run --project src/Koine.Cli -- build examples/billing.koi --target python --out ./generated_py
+dotnet run --project src/Koine.Cli -- build templates/starters/billing/billing.koi --target python --out ./generated_py
 
 # Or to PHP 8.1 (Phase 1: tactical core — value objects, smart enums, entities, events, repositories)
-dotnet run --project src/Koine.Cli -- build examples/billing.koi --target php --out ./generated_php
+dotnet run --project src/Koine.Cli -- build templates/starters/billing/billing.koi --target php --out ./generated_php
 
 # Generate living documentation (Markdown + Mermaid state/class/context-map diagrams)
-dotnet run --project src/Koine.Cli -- build examples/billing.koi --target docs --out ./docs
+dotnet run --project src/Koine.Cli -- build templates/starters/billing/billing.koi --target docs --out ./docs
 
 # Just check a model parses & validates (no output)
-dotnet run --project src/Koine.Cli -- build examples/billing.koi
+dotnet run --project src/Koine.Cli -- build templates/starters/billing/billing.koi
 
 # Version
 dotnet run --project src/Koine.Cli -- --version

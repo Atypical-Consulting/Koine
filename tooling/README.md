@@ -43,7 +43,7 @@ Rider reads TextMate bundles directly — no plugin or build step needed.
 2. Click **+** and select the `tooling/koine-textmate` folder.
 3. Click **OK** / **Apply**.
 
-Open any `.koi` file (e.g. `examples/billing.koi` or `demo/Shop.Domain/Models/*.koi`) and it is
+Open any `.koi` file (e.g. `templates/starters/billing/billing.koi` or `demo/Shop.Domain/Models/*.koi`) and it is
 highlighted. The colors follow your active color scheme via standard TextMate scopes
 (`keyword.control`, `storage.type`, `entity.name.type`, `support.type`, `string.quoted`,
 `string.regexp`, `comment`, `constant.numeric`, `keyword.operator`).

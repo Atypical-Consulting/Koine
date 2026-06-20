@@ -40,8 +40,8 @@ dotnet test                 # run all tests (~500)
 dotnet test --filter "FullyQualifiedName~R9ValueObjectTests"   # a single test class
 
 # Run the CLI
-dotnet run --project src/Koine.Cli -- build examples/billing.koi --target csharp --out ./generated
-dotnet run --project src/Koine.Cli -- build examples/billing.koi    # parse + validate only, no output
+dotnet run --project src/Koine.Cli -- build templates/starters/billing/billing.koi --target csharp --out ./generated
+dotnet run --project src/Koine.Cli -- build templates/starters/billing/billing.koi    # parse + validate only, no output
 dotnet run --project src/Koine.Cli -- --version
 ```
 

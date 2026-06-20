@@ -83,7 +83,7 @@ function isSafeShareRelPath(relPath: string): boolean {
   return relPath.split('/').every((s) => s !== '' && s !== '..');
 }
 
-// Seed model — examples/billing.koi, inlined (the renderer has no fs access).
+// Seed model — templates/starters/billing/billing.koi, inlined (the renderer has no fs access).
 const SEED = `context Billing {
 
   value Money {

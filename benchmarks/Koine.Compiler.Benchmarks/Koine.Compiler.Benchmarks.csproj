@@ -20,7 +20,7 @@
   <!-- Copy a representative .koi corpus next to the binary so benchmarks can read real
        inputs at runtime (resolved via AppContext.BaseDirectory/corpus). -->
   <ItemGroup>
-    <None Include="..\..\examples\billing.koi" Link="corpus\billing.koi"
+    <None Include="..\..\templates\starters\billing\billing.koi" Link="corpus\billing.koi"
           CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\..\demo\Shop.Domain\Models\*.koi" Link="corpus\shop\%(Filename)%(Extension)"
           CopyToOutputDirectory="PreserveNewest" />

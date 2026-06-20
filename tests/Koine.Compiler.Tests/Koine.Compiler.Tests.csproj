@@ -37,7 +37,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <None Include="..\..\examples\billing.koi" Link="billing.koi" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\templates\starters\billing\billing.koi" Link="billing.koi" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

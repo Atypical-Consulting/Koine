@@ -1,0 +1,20 @@
+{
+  "id": "ordering",
+  "name": "Order lifecycle",
+  "tagline": "An aggregate with a state machine — renders as a diagram.",
+  "description": "A single Ordering context that models an Order aggregate with a status state machine (Draft → Placed → Shipped or Cancelled). Order lines have a computed subtotal. This template shows how a state machine drives an aggregate's lifecycle and how computed fields derive from collections.",
+  "difficulty": "starter",
+  "tags": ["ordering", "state-machine", "aggregates", "starter"],
+  "contexts": ["Ordering"],
+  "coreAggregate": "Order",
+  "entryFile": "ordering.koi",
+  "teaches": [
+    "aggregates and aggregate roots",
+    "enums",
+    "value objects with computed fields",
+    "entities with identity",
+    "state machines (states block)",
+    "state transitions"
+  ],
+  "icon": "📦"
+}
