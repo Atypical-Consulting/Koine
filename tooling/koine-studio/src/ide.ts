@@ -28,6 +28,8 @@ import { initSplitResizer, initEdgeResizer } from './resize';
 import { createHelpOverlay, type ShortcutRow } from './help';
 import { createAboutDialog } from './about';
 import { createGenerateProject } from './generateProjectWizard';
+import { sanitizeProjectName } from './generateProject';
+import { buildSourceZip } from './sourceZip';
 import { formatChord } from './platform';
 import { renderDiagrams } from './diagrams';
 import { renderGlossary, type GlossaryHandlers } from './glossary';
@@ -1793,6 +1795,28 @@ export function init(): void {
     }
   }
 
+  // Bundle every open `.koi` document into a zip and hand it to the host's saveZip seam (Blob
+  // download in the browser, native picker on desktop). Folder mode names the archive after the
+  // opened folder; scratch mode falls back to `KoineSource`. The whole bundle is DOM-free in
+  // sourceZip.ts so it can be unit-tested in isolation.
+  async function exportSourceZip(): Promise<void> {
+    try {
+      const files = Array.from(buffers.values()).map((b) => ({ relPath: b.relPath, text: b.text }));
+      const root = sanitizeProjectName(
+        folderMode && folderRootToken ? platform.folderName(folderRootToken) : 'KoineSource',
+      );
+      const bytes = await buildSourceZip(files, { root });
+      const saved = await platform.saveZip(`${root}.zip`, bytes);
+      if (saved === true) {
+        setStatus('source exported ✓', 'green');
+        setTimeout(() => updateStatus(diagnosticsByUri.get(activeUri) ?? []), 1500);
+      }
+    } catch (e) {
+      setStatus('export failed', 'error');
+      console.error('export source zip failed:', e);
+    }
+  }
+
   initSplitResizer({ split: el('split'), handle: el('split-resizer') });
 
   // File-tree width (left rail) — only draggable when the rail track is shown (folder mode).
@@ -1876,6 +1900,7 @@ export function init(): void {
       { id: 'share', title: 'Copy shareable link', group: 'File', run: () => void copyShareLink() },
       { id: 'check', title: 'Check against baseline…', group: 'File', run: () => void runCheck() },
       { id: 'generate-project', title: 'Generate project…', group: 'File', run: () => generateProject.open() },
+      { id: 'export-source-zip', title: 'Export .koi source (.zip)', group: 'File', run: () => void exportSourceZip() },
       { id: 'toggle-theme', title: 'Toggle theme', group: 'View', run: () => toggleTheme() },
       { id: 'prefs', title: 'Settings…', hint: 'mod+,', group: 'View', run: () => prefs.open() },
       { id: 'help', title: 'Keyboard shortcuts', hint: 'F1', group: 'Help', run: () => help.open() },
