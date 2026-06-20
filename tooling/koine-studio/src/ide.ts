@@ -1536,15 +1536,8 @@ export function init(): void {
       if (!buf) return;
       buf.text = editor.getDoc();
       lsp.changeDoc(activeUri, buf.text);
-      if (!buf.path) {
-        // No backing file. The in-memory shared workspace persists by materializing the WHOLE workspace
-        // to a folder (a per-buffer save-as would be incoherent); scratch keeps its single-file save-as.
-        if (isInMemoryWorkspace()) await saveSharedWorkspaceToFolder();
-        else await saveScratchAs(buf);
-        return;
-      }
       try {
-        await platform.writeTextFile(buf.path, buf.text);
+        await platform.writeTextFile(buf.path as string, buf.text);
         buf.dirty = false;
         lsp.didSave();
         renderTree();
@@ -1555,109 +1548,6 @@ export function init(): void {
     } finally {
       saveQueued = false;
     }
-  }
-
-  // Save-as for an unsaved scratch buffer: pick a destination, write it, then promote the
-  // buffer to a real file (path/name/relPath set, clean) and surface it in the tree.
-  async function saveScratchAs(buf: Buffer): Promise<void> {
-    let target: string | null;
-    try {
-      target = await platform.pickSavePath('model.koi');
-    } catch (e) {
-      setStatus('could not open save dialog', 'error');
-      console.error('save dialog failed:', e);
-      return;
-    }
-    if (!target) return; // cancelled
-    try {
-      await platform.writeTextFile(target, buf.text);
-    } catch (e) {
-      setStatus('save failed', 'error');
-      console.error('writeTextFile failed:', e);
-      return;
-    }
-    // Re-key the buffer + LSP doc from the scratch uri to the real file uri so the
-    // "non-null path ⇒ keyed by pathToFileUri(path)" invariant holds. On the desktop the token is
-    // an absolute path, so this matches openFolderPath and a later folder-open of the same file
-    // reuses this buffer. In the browser the token is only the file's base name (the File System
-    // Access API exposes no path), so a folder-opened copy of the same file is keyed differently
-    // and is a distinct buffer — acceptable, just not de-duplicated.
-    const name = target.split(/[\\/]/).filter(Boolean).pop() ?? target;
-    const newUri = pathToFileUri(target);
-    lsp.closeDoc(buf.uri);
-    buffers.delete(buf.uri);
-    diagnosticsByUri.delete(buf.uri);
-    buf.uri = newUri;
-    buf.path = target;
-    buf.name = name;
-    buf.relPath = name;
-    buf.dirty = false;
-    buffers.set(newUri, buf);
-    activeUri = newUri;
-    lsp.openDoc(newUri, buf.text);
-    lsp.setActive(newUri);
-    clearScratch(); // the scratch is now a real file — don't also restore it as scratch on reload
-  }
-
-  // Persist the in-memory shared workspace to a real folder. The fallback import has no host folder
-  // behind it (folderRootToken null, every buffer path-null), so its edits can only be kept by writing
-  // the whole workspace out: pick a folder, write each buffer into it, then re-open it through the
-  // normal folder-mode path so the files become disk-backed (real paths, per-file save, the explorer
-  // tree). When the host can't pick a folder (a non-Chromium browser), there is nowhere to write — steer
-  // the user to the .koi source .zip export, which works everywhere; the unsaved-work guards have already
-  // warned, so no edit is silently lost.
-  async function saveSharedWorkspaceToFolder(): Promise<void> {
-    if (!platform.canOpenFolders) {
-      setStatus('Saving to a folder needs a Chromium-based browser — export a .koi source zip instead', 'error');
-      setTimeout(() => updateStatus(diagnosticsByUri.get(activeUri) ?? []), 2500);
-      return;
-    }
-    // Flush the active editor text into its buffer so the written copy includes the latest edit.
-    const active = buffers.get(activeUri);
-    if (active) {
-      active.text = editor.getDoc();
-      lsp.changeDoc(activeUri, active.text);
-    }
-    // Snapshot the workspace BEFORE the async picker and before openFolderPath tears the in-memory
-    // buffers down; remember the active file so we can re-focus it after the re-open.
-    const snapshot = Array.from(buffers.values()).map((b) => ({ relPath: b.relPath, text: b.text }));
-    const activeRel = active?.relPath;
-
-    let folder: string | null;
-    try {
-      folder = await platform.pickFolder('Save shared workspace to a folder');
-    } catch (e) {
-      setStatus('could not open folder picker', 'error');
-      console.error('pickFolder failed:', e);
-      return;
-    }
-    if (!folder) return; // cancelled
-
-    // Never clobber: if the folder already holds any of these files, write nothing and surface the clash.
-    try {
-      const existing = await platform.listKoiFiles(folder);
-      const clashes = clashingRelPaths(snapshot.map((f) => f.relPath), existing.map((f) => f.relPath));
-      if (clashes.length) {
-        setStatus(`Folder already contains ${clashes[0]} — choose an empty folder`, 'error');
-        return;
-      }
-      for (const f of snapshot) {
-        await platform.createFile(folder, f.relPath, f.text);
-      }
-    } catch (e) {
-      setStatus('could not save workspace to folder', 'error');
-      console.error('saving shared workspace failed:', e);
-      return;
-    }
-
-    // Re-open the now-on-disk folder as a normal workspace, then restore the active file selection.
-    await openFolderPath(folder);
-    if (activeRel) {
-      const target = Array.from(buffers.values()).find((b) => b.relPath === activeRel);
-      if (target) activateFile(target.uri);
-    }
-    setStatus(`Saved workspace to ${platform.folderName(folder)}`, 'green');
-    setTimeout(() => updateStatus(diagnosticsByUri.get(activeUri) ?? []), 1500);
   }
 
   // Save EVERY dirty buffer (Mod+Alt+S / "Save all"), so editing several files and then closing
@@ -1693,18 +1583,13 @@ export function init(): void {
       }
 
       if (dirtyCount(buffers) === 0) {
-        // Nothing flagged dirty. In scratch mode the single buffer is path-less and never marked
-        // dirty (it auto-persists to localStorage), so fall back to the normal save-as when it
-        // holds real content; in folder mode with nothing dirty this is a neutral no-op.
-        if (active && active.path == null && hasUnsavedWork()) await saveScratchAs(active);
-        else setStatus('No unsaved changes', 'green');
+        setStatus('No unsaved changes', 'green');
         return;
       }
 
       let failures = 0;
-      const saved = await saveAllDirtyBuffers(buffers, {
-        write: (buf) => platform.writeTextFile(buf.path as string, buf.text),
-        saveScratch: (buf) => saveScratchAs(buf),
+      const saved = await saveAllDirtyBuffers(buffers as Map<string, Buffer & { path: string }>, {
+        write: (buf) => platform.writeTextFile(buf.path, buf.text),
         onError: (buf, err) => {
           failures++;
           console.error('writeTextFile failed for', buf.path, err);
