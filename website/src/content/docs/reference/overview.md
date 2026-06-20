@@ -1,11 +1,20 @@
 ---
-title: "Language reference overview"
-description: "A map of every Koine construct and where to read about it."
+title: "About this specification"
+description: "What this specification covers, how to read it, and a map of every Koine construct."
 ---
 
 This section is the precise, construct-by-construct specification of the Koine language. If the [Start here](/Koine/start/what-is-koine/) and [Tutorials](/Koine/tutorials/values-and-invariants/) sections teach you *how to think* in Koine, the reference tells you *exactly* what each keyword does and what C# it emits.
 
 Every page is grounded in the compiler's tests and the [Shop demo](https://github.com/Atypical-Consulting/Koine/tree/main/demo), so the snippets compile and the emitted shapes are real.
+
+## How to read this specification
+
+Each construct chapter follows a fixed **General → Syntax → Semantics → Translation** structure, uses
+EBNF for grammar, and cites sections with the `§` glyph. The full set of conventions — grammar
+notation, numbering, callouts, and diagnostics — is described in
+[Notation & conventions (§2)](/Koine/reference/notation/). The token-level rules (comments,
+identifiers, keywords, literals, operators) live in
+[Lexical structure (§3)](/Koine/reference/lexical-structure/).
 
 ## How the language is shaped
 
@@ -68,55 +77,11 @@ Koine has a small set of built-in primitives that map straight to C#:
 
 `List<T>`, `Set<T>`, `Map<K,V>`, and `Range<T>` are the four built-in generic type constructors. *Orderable* types (`Int`, `Decimal`, `Instant`) are the ones allowed in relational comparisons and as `Range<T>` element types — `String` is **not** orderable. See [Value objects](/Koine/reference/value-objects/) and [Expressions](/Koine/reference/expressions/) for the details.
 
-## Reserved words and the soft-keyword rule
+## Tokens, keywords, and operators
 
-Koine deliberately keeps very few words off-limits, so that domain vocabulary almost never collides with the language.
-
-### Soft keywords — usable as field names
-
-Most Koine keywords are **soft**: outside their declaration position they are ordinary identifiers, so you can name a field after one. This includes (among others):
-
-`context`, `module`, `value`, `quantity`, `entity`, `aggregate`, `enum`, `event`, `command`, `create`, `requires`, `emit`, `spec`, `service`, `operation`, `policy`, `usecase`, `readmodel`, `query`, `repository`, `find`, `operations`, `import`, `publishes`, `subscribes`, `integration`, `acl`, `by`, `root`, `versioned`, `as`, `natural`, `sequence`, `guid`, `from`, `on`, `when`, `then`, `if`, `version`, `since`, `deprecated`.
-
-So all of these parse cleanly as plain fields:
-
-```koine
-context Inventory {
-  value Tag {
-    quantity:   Int
-    version:    Int
-    since:      Int
-    deprecated: String
-  }
-}
-```
-
-The **declaration keywords** (`value`, `entity`, `enum`, …) may additionally be used as type names and inside expressions.
-
-:::caution[Two words stay reserved]
-`invariant` and `matches` are **fully reserved** — you cannot use them as field names. (`matches` switches the lexer into regex mode, and `invariant` opens a guard.)
-:::
-
-### Reserved type names
-
-The four built-in generic constructors cannot be reused as your own type names. Declaring a `value`, `entity`, `enum`, `quantity`, or `module` called `List`, `Set`, `Map`, or `Range` is an error (`KOI0908`, `ReservedTypeName`).
-
-### Annotations are not keywords
-
-An annotation is `@` followed by an ordinary identifier, so `@since` and `@deprecated` only carry meaning in annotation position. Only `@since(n)` (with an integer argument) and `@deprecated("reason")` (with a string argument) are recognized; any other `@name` parses but is silently ignored. See [Versioning & evolution](/Koine/reference/versioning/).
-
-## A note on operator spacing
-
-Two multi-character operators are single, atomic tokens and must be written without internal spaces:
-
-| Token | Meaning | Used in |
-|-------|---------|---------|
-| `->` | state effect (field init / state transition / directed relation) | [factories](/Koine/reference/factories/) (`total -> lines.sum(…)`), [commands & state](/Koine/reference/commands-events-state/), [context maps](/Koine/reference/context-maps-integration/) |
-| `<->` | bidirectional relation | [context maps](/Koine/reference/context-maps-integration/) (`A <-> B : partnership`) |
-
-Koine has exactly two assignment-like arrows: `=` is the declaration default, and `->` is the state effect
-(factory init **and** command transition — the enclosing `create {}` vs `command {}` block disambiguates them).
-Because of maximal munch, write `status -> Submitted`, not `status - > Submitted`.
+The lexical layer — comments, identifiers, the reserved (`invariant`, `matches`) vs soft keyword
+rule, reserved type names, literals, and the atomic `->` / `<->` operators — is specified in
+[Lexical structure (§3)](/Koine/reference/lexical-structure/).
 
 ## Where to next
 
