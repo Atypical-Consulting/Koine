@@ -104,4 +104,49 @@ public class SymbolGraphTests
             .ShouldBeOfType<TypeSymbol>()
             .Members.ShouldContain(sym);
     }
+
+    // ----------------------------------------------------------------------
+    // C3 — member-access selector binding + parameter references.
+    // ----------------------------------------------------------------------
+
+    [Fact]
+    public void Binder_BindsMemberAccessSelector()
+    {
+        const string src = """
+            context Sales {
+              value Money { amount: Decimal }
+              entity Order identified by OrderId {
+                total: Money
+                invariant total.amount > 0
+              }
+            }
+            """;
+        var sema = Build(src);
+
+        // `total.amount` — the selector binds to the interned member of Money, not ErrorSymbol.
+        MemberAccessExpr access = Descendants(sema).OfType<MemberAccessExpr>().Single(m => m.MemberName == "amount");
+        var sym = sema.GetSymbolInfo(access).ShouldBeOfType<MemberSymbol>();
+        sym.Name.ShouldBe("amount");
+        sym.OwnerType.ShouldBe("Money");
+        // It is the SAME interned symbol as the member's declaration.
+        Member amountDecl = Descendants(sema).OfType<Member>().Single(m => m.Name == "amount");
+        sema.GetSymbolInfo(access).ShouldBeSameAs(sema.GetDeclaredSymbol(amountDecl));
+    }
+
+    [Fact]
+    public void Binder_BindsCommandParameterReference()
+    {
+        var sema = Build(CommandSrc);
+
+        // `v` occurs in `requires v > 0` and `n -> v`; every reference binds to the interned parameter.
+        Param vParam = Descendants(sema).OfType<Param>().Single(p => p.Name == "v");
+        Symbol declared = sema.GetDeclaredSymbol(vParam).ShouldBeOfType<ParameterSymbol>();
+
+        var vRefs = Descendants(sema).OfType<IdentifierExpr>().Where(i => i.Name == "v").ToList();
+        vRefs.Count.ShouldBeGreaterThanOrEqualTo(1);
+        foreach (IdentifierExpr r in vRefs)
+        {
+            sema.GetSymbolInfo(r).ShouldBeSameAs(declared);
+        }
+    }
 }

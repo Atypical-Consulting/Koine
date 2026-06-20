@@ -253,6 +253,18 @@ internal sealed class SymbolTable
     public TypeSymbol? TypeOf(TypeDecl decl) => _types.TryGetValue(decl, out TypeSymbol? s) ? s : null;
     public MemberSymbol? MemberSymbolOf(Member m) => _members.TryGetValue(m, out MemberSymbol? s) ? s : null;
     public EnumMemberSymbol? EnumMemberSymbolOf(EnumMember m) => _enumMembers.TryGetValue(m, out EnumMemberSymbol? s) ? s : null;
+
+    /// <summary>The interned member symbol for <paramref name="memberName"/> of enum <paramref name="enumName"/>, else <c>null</c>.</summary>
+    public EnumMemberSymbol? EnumMemberIn(string enumName, string memberName)
+    {
+        if (_index.TryGetDecl(enumName, out TypeDecl decl) && decl is EnumDecl e)
+        {
+            EnumMember? m = e.Members.FirstOrDefault(x => string.Equals(x.Name, memberName, StringComparison.Ordinal));
+            return m is not null ? EnumMemberSymbolOf(m) : null;
+        }
+
+        return null;
+    }
     public ContextSymbol? ContextOfType(TypeDecl decl) => _typeContext.TryGetValue(decl, out ContextSymbol? s) ? s : null;
     public ParameterSymbol? ParameterSymbolOf(Param p) => _parameters.TryGetValue(p, out ParameterSymbol? s) ? s : null;
     public ContextSymbol? ContextByName(string name) => _contextsByName.TryGetValue(name, out ContextSymbol? s) ? s : null;
