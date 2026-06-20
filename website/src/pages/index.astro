@@ -1,11 +1,10 @@
 ---
 import BlueprintLayout from '../layouts/BlueprintLayout.astro';
 import Playground from '../components/Playground.astro';
-
-const base = import.meta.env.BASE_URL.replace(/\/$/, '');
-
 import { sampleById } from '../playground/samples';
 import { encodeCode } from '../playground/encode';
+
+const base = import.meta.env.BASE_URL.replace(/\/$/, '');
 
 const ordering = sampleById('ordering');
 const orderingStudioHref = ordering

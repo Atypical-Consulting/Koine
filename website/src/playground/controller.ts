@@ -226,12 +226,12 @@ export function mountPlayground(root: HTMLElement): void {
     };
   }
 
-  // --- "open in Studio" carries the current model into the full web IDE (full page only) ---
+  // --- "open in Studio" carries the current model into the full web IDE ---
   // Studio reads `#model=<urlsafe-base64-utf8>` on boot (tooling/koine-studio/src/share.ts), which is
   // exactly what encodeCode produces — so the user's model opens in Studio, not a blank seed. Refresh
   // the href just before either activation path fires (pointerdown for mouse, focus for keyboard
-  // tab-in before Enter) so it reflects the latest doc no matter how it changed — typing, sample
-  // switch, or reset — without re-encoding the whole document on every keystroke.
+  // tab-in before Enter) so it reflects the latest doc no matter how it changed — without
+  // re-encoding the whole document on every keystroke.
   if (studioLink) {
     const base = (import.meta.env.BASE_URL ?? '/').replace(/\/$/, '');
     const update = () => {
