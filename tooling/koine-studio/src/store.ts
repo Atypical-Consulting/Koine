@@ -9,6 +9,7 @@
 // to disk in the clear.
 
 import { loadSecret, saveSecret } from './secrets';
+import type { ChatMessage } from './ai';
 
 // --- settings model ----------------------------------------------------------
 
@@ -78,6 +79,12 @@ const SETTINGS_KEY = 'koine.studio.settings';
 const RECENT_KEY = 'koine.studio.recentFolders';
 const SCRATCH_KEY = 'koine.studio.scratch';
 const RECENT_CAP = 8;
+
+// The assistant transcript is namespaced per workspace under its own key prefix (distinct from
+// settings/scratch/recentFolders), so each opened folder keeps its own conversation.
+const CHAT_KEY_PREFIX = 'koine.studio.chat.';
+/** Max assistant messages kept per workspace; older turns are dropped so a long chat can't grow unbounded. */
+export const CHAT_HISTORY_CAP = 100;
 
 /** The secret kept out of the plaintext blob and in the encrypted store; also its key name there. */
 const API_KEY_SECRET = 'aiApiKey';
@@ -313,6 +320,47 @@ export function saveScratch(text: string): void {
 export function clearScratch(): void {
   try {
     localStorage.removeItem(SCRATCH_KEY);
+  } catch {
+    // storage unavailable — nothing to clear
+  }
+}
+
+// --- assistant conversation (per workspace) ----------------------------------
+// Each workspace (folder, or the literal 'scratch') keeps its own transcript under CHAT_KEY_PREFIX,
+// so a reload restores the conversation and switching folders swaps to that folder's history.
+
+/** A well-formed transcript entry: a valid role and a string content. */
+function isChatMessage(v: unknown): v is ChatMessage {
+  if (v === null || typeof v !== 'object') return false;
+  const m = v as Record<string, unknown>;
+  return (m.role === 'user' || m.role === 'assistant') && typeof m.content === 'string';
+}
+
+/**
+ * The stored transcript for a workspace key, most-recent last. Filters to well-formed entries and
+ * caps the length, so an absent/malformed/non-array key (or a hand-edited one) can only return [].
+ */
+export function loadChat(key: string): ChatMessage[] {
+  const raw = readRaw(CHAT_KEY_PREFIX + key);
+  if (raw === null) return [];
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter(isChatMessage).slice(-CHAT_HISTORY_CAP);
+  } catch {
+    return [];
+  }
+}
+
+/** Persist a workspace transcript (best-effort), keeping only the last CHAT_HISTORY_CAP messages. */
+export function saveChat(key: string, msgs: ChatMessage[]): void {
+  writeRaw(CHAT_KEY_PREFIX + key, JSON.stringify(msgs.slice(-CHAT_HISTORY_CAP)));
+}
+
+/** Forget a workspace's stored transcript (e.g. the user clears the conversation). */
+export function clearChat(key: string): void {
+  try {
+    localStorage.removeItem(CHAT_KEY_PREFIX + key);
   } catch {
     // storage unavailable — nothing to clear
   }

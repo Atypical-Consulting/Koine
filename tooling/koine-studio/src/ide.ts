@@ -33,7 +33,7 @@ import { buildSourceZip } from './sourceZip';
 import { formatChord } from './platform';
 import { renderDiagrams } from './diagrams';
 import { renderGlossary, type GlossaryHandlers } from './glossary';
-import { createAssistantPanel, type AssistantPanel } from './aiPanel';
+import { createAssistantPanel, type AssistantPanel, type AssistantContext, type DomainIndex } from './aiPanel';
 import { buildShareUrl, clearModelHash, readModelFromHash, workspaceShareUrlOrNull } from './share';
 import { dirtyCount, handleBeforeUnload, saveAllDirtyBuffers, titleWithDirty } from './dirty';
 import { clashingRelPaths, isDirtyTrackable } from './sharedWorkspace';
@@ -949,6 +949,58 @@ export function init(): void {
     outline: false,
   };
 
+  // The assistant's domain index is another model-derived view (built from the same context-map +
+  // glossary the views above use), so it's cached the same way: `null` = stale/unbuilt, `{ value }` =
+  // built (value undefined for a scratch/empty model). invalidateDocViews() clears it on any model
+  // change, so a chat about an unedited model reuses it instead of re-running the LSP recompiles.
+  let cachedDomainIndex: { value: DomainIndex | undefined } | null = null;
+
+  // Build the assistant's domain index from the COMPILED workspace (contexts/aggregates/relations +
+  // glossary coverage), best-effort: any failing LSP endpoint just drops the index — this never
+  // throws, so the chat stays usable even when the LSP is down. Returns undefined for a scratch/empty
+  // model so the system prompt stays clean. Cached by getContext (see cachedDomainIndex).
+  async function buildDomainIndex(): Promise<DomainIndex | undefined> {
+    try {
+      const [contextMap, glossaryModel] = await Promise.all([
+        lsp.contextMap().catch(() => null),
+        lsp.glossaryModel().catch(() => null),
+      ]);
+      const contexts = contextMap?.contexts ?? [];
+      if (!contexts.length) return undefined;
+
+      const entries = glossaryModel?.entries ?? [];
+      // The aggregate root isn't exposed directly: derive it from the nested entities. Koine's
+      // `aggregate X root X` convention means the root entity usually shares the aggregate's name;
+      // else, if there's exactly one nested entity, use it; otherwise leave it blank.
+      const aggregates = entries
+        .filter((e) => e.kind === 'aggregate')
+        .map((agg) => {
+          const nested = entries.filter(
+            (e) => e.kind === 'entity' && e.qualifiedName.startsWith(agg.qualifiedName + '.'),
+          );
+          const root =
+            nested.find((e) => e.name === agg.name)?.name ?? (nested.length === 1 ? nested[0].name : '');
+          return { name: agg.name, root };
+        });
+
+      return {
+        contexts,
+        aggregates,
+        relations: (contextMap?.relations ?? []).map((r) => ({
+          upstream: r.upstream,
+          downstream: r.downstream,
+          kind: r.kind,
+        })),
+        glossaryCoverage: {
+          documented: entries.filter((e) => e.doc != null).length,
+          total: entries.length,
+        },
+      };
+    } catch {
+      return undefined;
+    }
+  }
+
   function docMessage(view: HTMLElement, text: string, kind: 'muted' | 'error' = 'muted'): void {
     view.innerHTML = `<p class="${kind === 'error' ? 'doc-error' : 'muted'}">${text}</p>`;
   }
@@ -1055,6 +1107,7 @@ export function init(): void {
     docViewsLoaded.diagrams = false;
     docViewsLoaded.contextmap = false;
     docViewsLoaded.outline = false;
+    cachedDomainIndex = null; // the assistant's domain index is derived from the same model
   }
 
   // An edit makes any cached doc view (preview/glossary/context-map/outline) stale. Mark them
@@ -1079,7 +1132,11 @@ export function init(): void {
       viewEls[key].hidden = key !== view;
     }
     if (view === 'assistant') {
-      ensureAssistant().focusInput();
+      // Re-pointing to the current folder's conversation BEFORE focus, so switching folders and
+      // re-opening this tab swaps to that folder's history (the single choke point for the swap).
+      const a = ensureAssistant();
+      a.syncWorkspace();
+      a.focusInput();
       return;
     }
     ensureLoaded(view);
@@ -1956,17 +2013,40 @@ export function init(): void {
         const s = loadSettings();
         return s.aiProvider === 'openai' ? s.aiModelOpenai : s.aiModel;
       },
-      getContext: () => {
+      getContext: async () => {
         const diagnostics = (diagnosticsByUri.get(activeUri) ?? []).map((d) => ({
           line: d.range.start.line + 1,
           col: d.range.start.character + 1,
           severity: (d.severity === 2 ? 'warning' : 'error') as 'warning' | 'error',
           message: d.message,
         }));
-        return { fileName: buffers.get(activeUri)?.name ?? 'model.koi', source: editor.getDoc(), diagnostics };
+        const base: AssistantContext = {
+          fileName: buffers.get(activeUri)?.name ?? 'model.koi',
+          source: editor.getDoc(),
+          diagnostics,
+        };
+        // The file/diagnostics snapshot above is cheap and per-call; the domain index is the expensive
+        // part (two LSP recompiles), so build it once and reuse until the model changes (see
+        // cachedDomainIndex / invalidateDocViews) rather than rebuilding it on every send.
+        if (cachedDomainIndex === null) {
+          cachedDomainIndex = { value: await buildDomainIndex() };
+        }
+        const domainIndex = cachedDomainIndex.value;
+        return domainIndex ? { ...base, domainIndex } : base;
+      },
+      getSelection: () => {
+        const sel = editor.view.state.selection.main;
+        if (!sel.empty) return { text: editor.view.state.sliceDoc(sel.from, sel.to) };
+        // No selection: fall back to the (non-blank) line under the cursor; null → panel uses whole file.
+        const line = editor.view.state.doc.lineAt(sel.head);
+        return line.text.trim() ? { text: line.text } : null;
       },
       onApplyModel: (source) => replaceActiveDoc(source),
       onOpenPrefs: () => prefs.open(),
+      // Per-workspace conversation key: each opened folder keeps its own transcript; scratch mode
+      // (no host folder behind it) uses the literal 'scratch'. selectView calls syncWorkspace on tab
+      // show so re-opening the Assistant after a folder switch loads that folder's history.
+      getWorkspaceKey: () => folderRootToken ?? 'scratch',
       // Let the assistant call koine tools (validate/compile/format), executed by the host: in-WASM in
       // the browser, via the `koine mcp --http` sidecar on the desktop.
       runCompilerTool: platform.runCompilerTool
@@ -2132,6 +2212,7 @@ export function init(): void {
       { id: 'view-contextmap', title: 'Show Context Map', group: 'Inspector', run: () => selectView('contextmap') },
       { id: 'view-outline', title: 'Show Outline', group: 'Inspector', run: () => selectView('outline') },
       { id: 'view-assistant', title: 'Show Assistant', group: 'Inspector', run: () => selectView('assistant') },
+      { id: 'assistant-explain', title: 'Explain this construct', group: 'Inspector', run: () => { selectView('assistant'); ensureAssistant().explainSelection(); } },
     ];
 
     // In folder mode, surface every open file as a "Go to File" entry so the palette doubles as a
