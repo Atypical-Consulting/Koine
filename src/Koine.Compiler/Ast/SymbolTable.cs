@@ -26,9 +26,15 @@ internal sealed class SymbolTable
     private readonly Dictionary<EnumMember, EnumMemberSymbol> _enumMembers = new(ReferenceEqualityComparer.Instance);
     private readonly Dictionary<SpecDecl, SpecSymbol> _specs = new(ReferenceEqualityComparer.Instance);
     private readonly Dictionary<ContextNode, ContextSymbol> _contexts = new(ReferenceEqualityComparer.Instance);
+    private readonly Dictionary<Param, ParameterSymbol> _parameters = new(ReferenceEqualityComparer.Instance);
 
     // The bounded context that declares each type, for containment + (context, name) disambiguation.
     private readonly Dictionary<TypeDecl, ContextSymbol> _typeContext = new(ReferenceEqualityComparer.Instance);
+
+    // The mutable downward-navigation lists held by each interned symbol (same instance as the symbol's
+    // init-set IReadOnlyList view): filled as members/types/parameters intern. Keyed by interned identity.
+    private readonly Dictionary<ContextSymbol, List<TypeSymbol>> _contextTypeLists = new(ReferenceEqualityComparer.Instance);
+    private readonly Dictionary<TypeSymbol, List<Symbol>> _typeMemberLists = new(ReferenceEqualityComparer.Instance);
 
     // Name-keyed views that REPRODUCE the legacy GetSymbol decisions, but hand back interned symbols.
     private readonly Dictionary<string, ContextSymbol> _contextsByName = new(StringComparer.Ordinal);
@@ -39,11 +45,16 @@ internal sealed class SymbolTable
         _model = model;
         _index = index;
 
-        // 1. Contexts (top-level containers; ContainingSymbol = null).
+        // 1. Contexts (top-level containers; ContainingSymbol = null). Each context's downward Types
+        //    list is an init-set List instance we keep a reference to and fill in step 2 as its types
+        //    intern — the same shared-list pattern ContainingSymbol cannot use (a container is built
+        //    before the things it contains).
         foreach (ContextNode ctx in model.Contexts)
         {
-            var ctxSym = new ContextSymbol(ctx.Name, ctx.Span, ctx);
+            var ctxTypes = new List<TypeSymbol>();
+            var ctxSym = new ContextSymbol(ctx.Name, ctx.Span, ctx) { Types = ctxTypes };
             _contexts[ctx] = ctxSym;
+            _contextTypeLists[ctxSym] = ctxTypes;
             // First declaration of a name wins the name-view (rare duplicate contexts are a validator concern).
             if (!_contextsByName.ContainsKey(ctx.Name))
             {
@@ -58,6 +69,40 @@ internal sealed class SymbolTable
             foreach (TypeDecl t in ctx.AllTypeDecls())
             {
                 InternType(t, ctxSym);
+            }
+        }
+
+        // 2b. Behavior parameters. Container = the behavior's owning TypeSymbol; the parameter also joins
+        //     that type's downward Members list. Covers the behaviors that hang off an interned TypeSymbol:
+        //     entity commands/factories, aggregate-repository finders, and query criteria. Service
+        //     operations have NO owning TypeSymbol (a ServiceDecl is not a TypeDecl), so their parameters
+        //     are intentionally not interned here.
+        foreach ((TypeDecl decl, TypeSymbol typeSym) in _types)
+        {
+            switch (decl)
+            {
+                case EntityDecl e:
+                    foreach (CommandDecl c in e.Commands)
+                    {
+                        InternParams(c.Parameters, typeSym);
+                    }
+
+                    foreach (FactoryDecl f in e.Factories)
+                    {
+                        InternParams(f.Parameters, typeSym);
+                    }
+
+                    break;
+                case AggregateDecl { Repository: { } repo }:
+                    foreach (FinderDecl find in repo.Finders)
+                    {
+                        InternParams(find.Parameters, typeSym);
+                    }
+
+                    break;
+                case QueryDecl q:
+                    InternParams(q.Criteria, typeSym);
+                    break;
             }
         }
 
@@ -115,30 +160,38 @@ internal sealed class SymbolTable
             return;
         }
 
-        var typeSym = new TypeSymbol(t.Name, t.NameSpan, _index.Classify(t.Name), t) { ContainingSymbol = ctxSym };
+        // The downward Members list is the same List instance the symbol's init-set IReadOnlyList view
+        // exposes; we fill it below as members intern (the type symbol must exist first to be each
+        // member's container, so the list can only be populated after construction).
+        var memberList = new List<Symbol>();
+        var typeSym = new TypeSymbol(t.Name, t.NameSpan, _index.Classify(t.Name), t) { ContainingSymbol = ctxSym, Members = memberList };
         _types[t] = typeSym;
         _typeContext[t] = ctxSym;
+        _typeMemberLists[typeSym] = memberList;
+        _contextTypeLists[ctxSym].Add(typeSym);
 
         switch (t)
         {
             case ValueObjectDecl v:
-                InternMembers(v.Members, typeSym);
+                InternMembers(v.Members, typeSym, memberList);
                 break;
             case EntityDecl e:
-                InternMembers(e.Members, typeSym);
+                InternMembers(e.Members, typeSym, memberList);
                 break;
             case EventDecl ev:
-                InternMembers(ev.Members, typeSym);
+                InternMembers(ev.Members, typeSym, memberList);
                 break;
             case IntegrationEventDecl ie:
-                InternMembers(ie.Members, typeSym);
+                InternMembers(ie.Members, typeSym, memberList);
                 break;
             case EnumDecl en:
                 foreach (EnumMember m in en.Members)
                 {
                     if (!_enumMembers.ContainsKey(m))
                     {
-                        _enumMembers[m] = new EnumMemberSymbol(m.Name, m.NameSpan, en.Name, m) { ContainingSymbol = typeSym };
+                        var sym = new EnumMemberSymbol(m.Name, m.NameSpan, en.Name, m) { ContainingSymbol = typeSym };
+                        _enumMembers[m] = sym;
+                        memberList.Add(sym);
                     }
                 }
 
@@ -146,13 +199,29 @@ internal sealed class SymbolTable
         }
     }
 
-    private void InternMembers(IReadOnlyList<Member> members, TypeSymbol owner)
+    private void InternMembers(IReadOnlyList<Member> members, TypeSymbol owner, List<Symbol> collected)
     {
         foreach (Member m in members)
         {
             if (!_members.ContainsKey(m))
             {
-                _members[m] = new MemberSymbol(m.Name, m.NameSpan, owner.Name, m) { ContainingSymbol = owner };
+                var sym = new MemberSymbol(m.Name, m.NameSpan, owner.Name, m) { ContainingSymbol = owner };
+                _members[m] = sym;
+                collected.Add(sym);
+            }
+        }
+    }
+
+    private void InternParams(IReadOnlyList<Param> parameters, TypeSymbol owner)
+    {
+        foreach (Param p in parameters)
+        {
+            if (!_parameters.ContainsKey(p))
+            {
+                SourceSpan span = !p.NameSpan.IsNone ? p.NameSpan : p.Span;
+                var sym = new ParameterSymbol(p.Name, span, p) { ContainingSymbol = owner };
+                _parameters[p] = sym;
+                _typeMemberLists[owner].Add(sym);
             }
         }
     }
@@ -177,13 +246,27 @@ internal sealed class SymbolTable
         EnumMember em => _enumMembers.TryGetValue(em, out EnumMemberSymbol? s) ? s : null,
         SpecDecl sp => _specs.TryGetValue(sp, out SpecSymbol? s) ? s : null,
         ContextNode c => _contexts.TryGetValue(c, out ContextSymbol? s) ? s : null,
+        Param p => _parameters.TryGetValue(p, out ParameterSymbol? s) ? s : null,
         _ => null
     };
 
     public TypeSymbol? TypeOf(TypeDecl decl) => _types.TryGetValue(decl, out TypeSymbol? s) ? s : null;
     public MemberSymbol? MemberSymbolOf(Member m) => _members.TryGetValue(m, out MemberSymbol? s) ? s : null;
     public EnumMemberSymbol? EnumMemberSymbolOf(EnumMember m) => _enumMembers.TryGetValue(m, out EnumMemberSymbol? s) ? s : null;
+
+    /// <summary>The interned member symbol for <paramref name="memberName"/> of enum <paramref name="enumName"/>, else <c>null</c>.</summary>
+    public EnumMemberSymbol? EnumMemberIn(string enumName, string memberName)
+    {
+        if (_index.TryGetDecl(enumName, out TypeDecl decl) && decl is EnumDecl e)
+        {
+            EnumMember? m = e.Members.FirstOrDefault(x => string.Equals(x.Name, memberName, StringComparison.Ordinal));
+            return m is not null ? EnumMemberSymbolOf(m) : null;
+        }
+
+        return null;
+    }
     public ContextSymbol? ContextOfType(TypeDecl decl) => _typeContext.TryGetValue(decl, out ContextSymbol? s) ? s : null;
+    public ParameterSymbol? ParameterSymbolOf(Param p) => _parameters.TryGetValue(p, out ParameterSymbol? s) ? s : null;
     public ContextSymbol? ContextByName(string name) => _contextsByName.TryGetValue(name, out ContextSymbol? s) ? s : null;
 
     // ------------------------------------------------------------------------

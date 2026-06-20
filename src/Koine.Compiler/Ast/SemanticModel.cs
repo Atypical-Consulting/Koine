@@ -159,6 +159,9 @@ public sealed class SemanticModel
             // An enum member resolves precisely to its owning enum, even when a same-named type exists.
             case EnumMember em when EnclosingEnumNameAt(offset) is { }:
                 return Symbols.EnumMemberSymbolOf(em);
+            // A behavior parameter's own name (command/factory/finder/query) resolves to its interned symbol.
+            case Param p:
+                return Symbols.ParameterSymbolOf(p);
             // Type / spec declarations resolve through the name path (they are globally unique).
             case TypeDecl t:
                 return GetSymbol(t.Name);
@@ -241,6 +244,23 @@ public sealed class SemanticModel
         }
 
         return GetSymbol(name, enclosingType);
+    }
+
+    /// <summary>
+    /// The interned symbol a <em>reference</em> at the 0-based absolute <paramref name="offset"/> binds
+    /// to, read from the binding table (so it resolves member-access selectors and behavior-parameter
+    /// references that the name-based <see cref="DefinitionAt"/> cannot). <c>null</c> when the offset is
+    /// not on a bound reference. The identity entry point find-references uses to enumerate by symbol.
+    /// </summary>
+    public Symbol? ReferencedSymbolAt(int offset)
+    {
+        if (NodeAt(offset) is not { } node)
+        {
+            return null;
+        }
+
+        Symbol s = GetSymbolInfo(node);
+        return ReferenceEquals(s, ErrorSymbol.Instance) ? null : s;
     }
 
     public Symbol? GetSymbol(string name)

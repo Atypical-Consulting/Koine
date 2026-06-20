@@ -34,28 +34,25 @@ internal sealed class CheckCommand : Command<CheckSettings>
     {
         var current = settings.Path;
 
-        // A koine.config (explicit --config, or discovered beside the input) may supply the
-        // default baseline, for symmetry with build/watch — an explicit --baseline wins.
-        var baseline = settings.Baseline;
-        if (baseline is null)
+        // A koine.config (explicit --config, or discovered beside the input) supplies the default
+        // baseline (for symmetry with build/watch — an explicit --baseline wins) AND the per-rule
+        // severity policy (issue #73): `check.severity.<CODE> = Breaking|NonBreaking|Ignored`.
+        KoineConfig config;
+        if (settings.Config is not null)
         {
-            KoineConfig config;
-            if (settings.Config is not null)
+            if (!File.Exists(settings.Config))
             {
-                if (!File.Exists(settings.Config))
-                {
-                    return CliError.Runtime($"config not found: {settings.Config}");
-                }
-
-                config = KoineConfig.Parse(File.ReadAllText(settings.Config));
-            }
-            else
-            {
-                config = KoineConfig.Discover(current);
+                return CliError.Runtime($"config not found: {settings.Config}");
             }
 
-            baseline = config.Baseline;
+            config = KoineConfig.Parse(File.ReadAllText(settings.Config));
         }
+        else
+        {
+            config = KoineConfig.Discover(current);
+        }
+
+        var baseline = settings.Baseline ?? config.Baseline;
 
         if (baseline is null)
         {
@@ -71,8 +68,9 @@ internal sealed class CheckCommand : Command<CheckSettings>
         }
 
         var report = new CompatibilityChecker().Check(baselineModel, currentModel);
+        var changes = ApplySeverity(report.Changes, config.Severity);
 
-        foreach (var change in report.Changes)
+        foreach (var change in changes)
         {
             if (change.Impact == CompatibilityImpact.Breaking)
             {
@@ -84,15 +82,56 @@ internal sealed class CheckCommand : Command<CheckSettings>
             }
         }
 
-        if (report.HasBreakingChanges)
+        var breakingCount = changes.Count(c => c.Impact == CompatibilityImpact.Breaking);
+        if (breakingCount > 0)
         {
-            var count = report.Changes.Count(c => c.Impact == CompatibilityImpact.Breaking);
-            Console.Error.WriteLine($"error: {count} breaking change(s) to published surfaces");
+            Console.Error.WriteLine($"error: {breakingCount} breaking change(s) to published surfaces");
             return 1;
         }
 
         Console.WriteLine("OK: no breaking changes to published surfaces");
         return 0;
+    }
+
+    /// <summary>
+    /// Applies the per-rule severity policy (issue #73): a change whose <see cref="CompatibilityChange.Code"/>
+    /// maps to <c>Ignored</c> is dropped from the report, <c>NonBreaking</c> is downgraded (so it no longer
+    /// trips the gate), and <c>Breaking</c> is upgraded. Codes with no override keep their default impact.
+    /// </summary>
+    private static IReadOnlyList<CompatibilityChange> ApplySeverity(
+        IReadOnlyList<CompatibilityChange> changes, IReadOnlyDictionary<string, string>? severity)
+    {
+        if (severity is null || severity.Count == 0)
+        {
+            return changes;
+        }
+
+        var result = new List<CompatibilityChange>(changes.Count);
+        foreach (var change in changes)
+        {
+            if (!severity.TryGetValue(change.Code, out var level))
+            {
+                result.Add(change);
+                continue;
+            }
+
+            switch (level.Trim().ToLowerInvariant())
+            {
+                case "ignored":
+                    break; // dropped from the report
+                case "nonbreaking":
+                    result.Add(change with { Impact = CompatibilityImpact.NonBreaking });
+                    break;
+                case "breaking":
+                    result.Add(change with { Impact = CompatibilityImpact.Breaking });
+                    break;
+                default:
+                    result.Add(change); // unrecognized level: leave the change unchanged
+                    break;
+            }
+        }
+
+        return result;
     }
 
     /// <summary>Reads and parses a model from a path, reporting any syntax errors against <paramref name="label"/>.</summary>

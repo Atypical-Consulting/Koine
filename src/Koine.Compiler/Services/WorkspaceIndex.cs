@@ -141,12 +141,12 @@ public sealed class WorkspaceIndex
             return Array.Empty<Reference>();
         }
 
-        // A member is file- and type-scoped; everything else (type / enum member / spec / ID) is a
-        // flat, globally-unique name, so a token-text match across the workspace is faithful — minus
-        // same-named declaration names from a different namespace (handled below).
-        if (target is MemberSymbol member)
+        // A member or a behavior parameter is file-scoped and now carries interned identity plus
+        // binding-table references (member-access selectors and parameter uses included), so it is
+        // resolved precisely by symbol identity rather than the former token-text heuristic.
+        if (target is MemberSymbol or ParameterSymbol)
         {
-            return MemberReferences(activeUri, member);
+            return IdentityReferences(activeUri, target);
         }
 
         // An enum member shares the same name across unrelated enums (Phase.Active vs State.Active),
@@ -245,6 +245,13 @@ public sealed class WorkspaceIndex
             {
                 return byName;
             }
+
+            // A bound reference the name path cannot classify — a member-access selector or a behavior
+            // parameter use — still names a renameable symbol (read from the binding table by position).
+            if (offset is { } refOff && active.ReferencedSymbolAt(refOff) is { } byReference)
+            {
+                return byReference;
+            }
         }
 
         // Fall back to the workspace-wide gate: a token whose declaration lives in another file
@@ -255,12 +262,15 @@ public sealed class WorkspaceIndex
     }
 
     /// <summary>
-    /// References to a field <paramref name="member"/>, confined to the file that declares it:
-    /// the declaration's own name plus every identifier token that resolves (in that file, with
-    /// its own enclosing-type scope) to the SAME member declaration. Cross-file is impossible —
-    /// a member only exists within its declaring type's file.
+    /// References to a file-scoped symbol (a field <see cref="MemberSymbol"/> or a behavior
+    /// <see cref="ParameterSymbol"/>), resolved by interned identity rather than token-text heuristics:
+    /// the declaration's own name plus every identifier token that, in the declaring file, binds to the
+    /// SAME symbol — including member-access selectors (<c>total.amount</c>) and parameter uses, which
+    /// the former <see cref="SemanticModel.DefinitionAt"/>-only path could not reach. The reverse lookup
+    /// is keyed by <see cref="SymbolEqualityComparer"/> (interning makes that identity). Cross-file is
+    /// impossible — a member/parameter only exists within its declaring type's/behavior's file.
     /// </summary>
-    private IReadOnlyList<Reference> MemberReferences(string activeUri, MemberSymbol member)
+    private IReadOnlyList<Reference> IdentityReferences(string activeUri, Symbol target)
     {
         if (!_documents.TryGetValue(activeUri, out var text) || !_byUri.TryGetValue(activeUri, out SemanticModel? sema))
         {
@@ -270,20 +280,16 @@ public sealed class WorkspaceIndex
         var refs = new List<Reference>();
         foreach (IToken tok in IdentifierTokens(text))
         {
-            if (!string.Equals(tok.Text, member.Name, StringComparison.Ordinal))
+            if (!string.Equals(tok.Text, target.Name, StringComparison.Ordinal))
             {
                 continue;
             }
 
-            var tokOffset = tok.StartIndex;
-
-            // The declaration's own name is always a reference (the DefinitionAt path resolves
-            // expression references, not the declaration token itself).
-            var isDecl = tokOffset >= member.DeclSpan.Offset
-                && tokOffset < member.DeclSpan.Offset + member.DeclSpan.Length;
-            if (isDecl || sema.DefinitionAt(tokOffset) is MemberSymbol m
-                && string.Equals(m.OwnerType, member.OwnerType, StringComparison.Ordinal)
-                && m.DeclSpan == member.DeclSpan)
+            int off = tok.StartIndex;
+            // The declaration's own name (DeclaredSymbolAt) or a bound reference (ReferencedSymbolAt),
+            // kept only when it is the SAME interned symbol as the target.
+            Symbol? resolved = sema.DeclaredSymbolAt(off) ?? sema.ReferencedSymbolAt(off);
+            if (resolved is not null && SymbolEqualityComparer.Default.Equals(resolved, target))
             {
                 refs.Add(ToReference(activeUri, tok));
             }

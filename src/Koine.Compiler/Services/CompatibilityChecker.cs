@@ -30,6 +30,7 @@ public sealed record CompatibilityReport(IReadOnlyList<CompatibilityChange> Chan
 public sealed class CompatibilityChecker
 {
     private const string AdditiveLabel = "additive";
+    private const string IntegrationEventKind = "integration event";
 
     /// <summary>Diffs the two models' published surfaces and returns every change.</summary>
     public CompatibilityReport Check(KoineModel baseline, KoineModel current)
@@ -65,17 +66,55 @@ public sealed class CompatibilityChecker
 
     private static void DiffFields(PublishedType baseline, PublishedType current, List<CompatibilityChange> changes)
     {
+        int startIndex = changes.Count;
         var currentByName = current.Fields.ToDictionary(f => f.Name, StringComparer.Ordinal);
         var baselineByName = baseline.Fields.ToDictionary(f => f.Name, StringComparer.Ordinal);
 
+        var removed = baseline.Fields.Where(f => !currentByName.ContainsKey(f.Name)).ToList();
+        var added = current.Fields.Where(f => !baselineByName.ContainsKey(f.Name)).ToList();
+
+        // A removed field paired UNAMBIGUOUSLY with an added field of identical shape and optionality
+        // reads as a RENAME — one clearer diagnostic instead of an unrelated remove + add. Only when
+        // exactly one removed and one added field share a shape: with several same-shape candidates we
+        // cannot tell which is the rename, so we fall back to plain remove/add rather than guess (and
+        // risk mis-attributing the rename or mislabeling a genuine new required field). Enum values
+        // carry no shape, so they never pair (removing EUR while adding GBP is not a rename).
+        var consumedAdded = new HashSet<string>(StringComparer.Ordinal);
+        if (!baseline.IsEnum)
+        {
+            var removedByShape = removed.Where(f => f.Type is not null).GroupBy(ShapeKey).ToList();
+            foreach (var group in removedByShape)
+            {
+                var removedSameShape = group.ToList();
+                var addedSameShape = added.Where(f => f.Type is not null && ShapeKey(f) == group.Key).ToList();
+                if (removedSameShape.Count != 1 || addedSameShape.Count != 1)
+                {
+                    continue; // ambiguous (or no) match — not a confident rename
+                }
+
+                var bf = removedSameShape[0];
+                var cf = addedSameShape[0];
+                consumedAdded.Add(cf.Name);
+                removed.Remove(bf);
+                changes.Add(Breaking(DiagnosticCodes.PublishedMemberRenamed,
+                    $"{Member(baseline, bf.Name)} appears renamed to '{cf.Name}'."));
+            }
+        }
+
+        // Removing a value from a published enum, or a field from a published record, breaks consumers
+        // that reference it — distinct codes so a tool can treat the two differently.
+        foreach (var bf in removed)
+        {
+            changes.Add(Breaking(
+                baseline.IsEnum ? DiagnosticCodes.PublishedEnumMemberRemoved : DiagnosticCodes.PublishedFieldRemoved,
+                $"{Member(baseline, bf.Name)} was removed."));
+        }
+
+        // Fields present in both: a type change or an optionality tightening is breaking.
         foreach (var bf in baseline.Fields)
         {
             if (!currentByName.TryGetValue(bf.Name, out var cf))
             {
-                // Removing a value from a published enum, or a field from a published record,
-                // breaks consumers that reference it.
-                changes.Add(Breaking(DiagnosticCodes.PublishedFieldRemoved,
-                    $"{Member(baseline, bf.Name)} was removed."));
                 continue;
             }
 
@@ -91,15 +130,15 @@ public sealed class CompatibilityChecker
             }
         }
 
-        foreach (var cf in current.Fields)
+        // Added fields not consumed by a rename: a new enum value or optional field is additive; a new
+        // required field breaks producers/consumers that build the contract.
+        foreach (var cf in added)
         {
-            if (baselineByName.ContainsKey(cf.Name))
+            if (consumedAdded.Contains(cf.Name))
             {
                 continue;
             }
 
-            // A new enum value or a new optional field is additive; a new required field
-            // breaks producers/consumers that build the contract.
             if (current.IsEnum || cf.IsOptional)
             {
                 changes.Add(NonBreaking($"{Member(current, cf.Name)} was added."));
@@ -110,7 +149,21 @@ public sealed class CompatibilityChecker
                     $"Required {Member(current, cf.Name)} was added."));
             }
         }
+
+        // An integration event is a wire contract: ANY breaking payload change — a field removed,
+        // retyped, required-added, OR renamed — also reports an event-shape change (KOI1517), a single
+        // event-level signal a tool can gate on, distinct from the per-field codes. A purely additive
+        // change does not break the shape, so only breaking per-field changes trigger it.
+        if (baseline.Kind == IntegrationEventKind
+            && changes.Skip(startIndex).Any(c => c.Impact == CompatibilityImpact.Breaking))
+        {
+            changes.Add(Breaking(DiagnosticCodes.PublishedEventShapeChanged,
+                $"Published integration event '{baseline.Name}' changed its payload shape."));
+        }
     }
+
+    /// <summary>A field's contract shape key (type ignoring nullability, plus optionality) for unambiguous rename pairing.</summary>
+    private static string ShapeKey(PublishedField f) => $"{Shape(f.Type!)}|{f.IsOptional}";
 
     // ------------------------------------------------------------------------
     // Published-surface extraction
@@ -155,7 +208,7 @@ public sealed class CompatibilityChecker
             {
                 if (type is IntegrationEventDecl)
                 {
-                    result[$"{ctx.Name}.{type.Name}"] = PublishedType.From("integration event", type);
+                    result[$"{ctx.Name}.{type.Name}"] = PublishedType.From(IntegrationEventKind, type);
                 }
                 else if (sharedNames.Contains(type.Name))
                 {

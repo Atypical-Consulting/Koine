@@ -127,6 +127,29 @@ internal sealed class Binder : KoineSyntaxVisitor
         _locals.RemoveRange(mark, _locals.Count - mark);
     }
 
+    // Behavior parameters are in scope for that behavior's body (requires/transitions/result/finder
+    // expressions), so an identifier reference to a parameter resolves to its interned ParameterSymbol
+    // (interned in the SymbolTable for command/factory/finder/query). Mirrors the let/lambda scoping.
+    public override void VisitCommandDecl(CommandDecl node) => WithParams(node.Parameters, () => base.VisitCommandDecl(node));
+    public override void VisitFactoryDecl(FactoryDecl node) => WithParams(node.Parameters, () => base.VisitFactoryDecl(node));
+    public override void VisitFinderDecl(FinderDecl node) => WithParams(node.Parameters, () => base.VisitFinderDecl(node));
+    public override void VisitQueryDecl(QueryDecl node) => WithParams(node.Criteria, () => base.VisitQueryDecl(node));
+
+    private void WithParams(IReadOnlyList<Param> parameters, Action walk)
+    {
+        int mark = _locals.Count;
+        foreach (Param p in parameters)
+        {
+            if (_symbols.ParameterSymbolOf(p) is { } ps)
+            {
+                _locals.Add((p.Name, ps));
+            }
+        }
+
+        walk();
+        _locals.RemoveRange(mark, _locals.Count - mark);
+    }
+
     // ---- Reference-bearing overrides -------------------------------------------
 
     public override void VisitIdentifierExpr(IdentifierExpr node)
@@ -144,6 +167,73 @@ internal sealed class Binder : KoineSyntaxVisitor
 
         base.VisitTypeRef(node); // descend into Element/Value type arguments
     }
+
+    public override void VisitMemberAccessExpr(MemberAccessExpr node)
+    {
+        base.VisitMemberAccessExpr(node); // bind the receiver (and descend) first
+        if (ResolveMemberAccessSelector(node) is { } selector)
+        {
+            _bindings.Bind(node, selector);
+        }
+    }
+
+    /// <summary>
+    /// Resolves a member-access selector (the <c>amount</c> in <c>total.amount</c>) to its interned
+    /// symbol. Qualified enum references (<c>Phase.Active</c>) resolve to the enum member; otherwise the
+    /// receiver's type is inferred (reusing <see cref="TypeResolver"/> over the lexical scope) and the
+    /// selector resolves to that type's interned field. Best-effort: a non-field selector (a built-in op
+    /// like <c>length</c>) or an undeterminable receiver leaves the node unbound (→ <see cref="ErrorSymbol"/>).
+    /// </summary>
+    private Symbol? ResolveMemberAccessSelector(MemberAccessExpr node)
+    {
+        if (node.Target is IdentifierExpr id && _index.IsEnumType(id.Name))
+        {
+            return _symbols.EnumMemberIn(id.Name, node.MemberName);
+        }
+
+        KoineType receiver = new TypeResolver(_index, _enclosingContextName).TypeOf(node.Target, BuildReceiverScope());
+        if (receiver.IsError || receiver.Name is null)
+        {
+            return null;
+        }
+
+        return _symbols.MemberOf(receiver.Name, node.MemberName);
+    }
+
+    /// <summary>
+    /// A best-effort lexical type scope for receiver inference: the enclosing type's fields plus the
+    /// in-scope behavior parameters. Let/lambda locals (whose types need inference) are omitted — an
+    /// unresolved receiver simply leaves the selector unbound.
+    /// </summary>
+    private TypeScope BuildReceiverScope()
+    {
+        IReadOnlyList<Member> members =
+            _enclosingTypeName is not null && _index.TryGetDecl(_enclosingTypeName, out TypeDecl decl)
+                ? FieldedMembers(decl)
+                : Array.Empty<Member>();
+
+        // Reuse the shared scope builders rather than open-coding KoineType.From over each name, so
+        // receiver inference stays in lockstep with the rest of the compiler's scope construction.
+        TypeScope scope = TypeScope.FromMembers(members, _index);
+        foreach ((string name, Symbol sym) in _locals)
+        {
+            if (sym is ParameterSymbol p)
+            {
+                scope = scope.WithRef(name, p.Declaration.Type, _index);
+            }
+        }
+
+        return scope;
+    }
+
+    private static IReadOnlyList<Member> FieldedMembers(TypeDecl decl) => decl switch
+    {
+        ValueObjectDecl v => v.Members,
+        EntityDecl e => e.Members,
+        EventDecl ev => ev.Members,
+        IntegrationEventDecl ie => ie.Members,
+        _ => Array.Empty<Member>()
+    };
 
     // ---- Resolution (reproduces the existing string paths) ---------------------
 

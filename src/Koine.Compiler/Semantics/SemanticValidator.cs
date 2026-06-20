@@ -53,6 +53,10 @@ public sealed class SemanticValidator
             IntegrationEventValidator.Validate(ctx, index, model.ContextMap is not null, diagnostics);
         }
 
+        // DSL-native invariant satisfiability (issue #73): a whole-model pass over the lowered bound IR,
+        // reusing the shared SemanticModel so its bound artifact is built once.
+        SatisfiabilityChecker.Validate(semantic, diagnostics);
+
         return diagnostics;
     }
 
