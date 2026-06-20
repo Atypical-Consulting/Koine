@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { dirtyBuffers, dirtyCount, saveAllDirtyBuffers } from './dirty';
+import { dirtyBuffers, dirtyCount, saveAllDirtyBuffers, titleWithDirty } from './dirty';
 
 interface FakeBuffer {
   path: string | null;
@@ -99,5 +99,21 @@ describe('saveAllDirtyBuffers', () => {
     expect(c.dirty).toBe(false);
     expect(bad.dirty).toBe(true); // still dirty after the failure
     expect(errored).toEqual(['/bad']);
+  });
+});
+
+describe('titleWithDirty', () => {
+  test('prefixes a bullet when there are unsaved files', () => {
+    expect(titleWithDirty('Koine Studio', 1)).toBe('• Koine Studio');
+    expect(titleWithDirty('Koine Studio', 3)).toBe('• Koine Studio');
+  });
+
+  test('returns the base title unchanged when nothing is unsaved', () => {
+    expect(titleWithDirty('Koine Studio', 0)).toBe('Koine Studio');
+  });
+
+  test('does not double-prefix an already-marked title', () => {
+    expect(titleWithDirty('• Koine Studio', 2)).toBe('• Koine Studio');
+    expect(titleWithDirty('• Koine Studio', 0)).toBe('Koine Studio');
   });
 });

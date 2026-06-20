@@ -25,6 +25,15 @@ export function dirtyCount(buffers: Map<string, DirtyLike>): number {
   return n;
 }
 
+/**
+ * The document title for `count` unsaved files: a `• ` prefix signals unsaved work, like a native
+ * editor's modified-title dot. Idempotent — never double-prefixes an already-marked base.
+ */
+export function titleWithDirty(base: string, count: number): string {
+  const clean = base.replace(/^• /, '');
+  return count > 0 ? `• ${clean}` : clean;
+}
+
 /** The side effects `saveAllDirtyBuffers` delegates to, so the iteration itself stays pure. */
 export interface SaveAllDeps<T extends SaveableBuffer> {
   /** Persist a path-bearing buffer; may reject (e.g. the disk write fails). */

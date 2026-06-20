@@ -33,7 +33,7 @@ import { renderDiagrams } from './diagrams';
 import { renderGlossary, type GlossaryHandlers } from './glossary';
 import { createAssistantPanel, type AssistantPanel } from './aiPanel';
 import { buildShareUrl, clearModelHash, readModelFromHash } from './share';
-import { dirtyBuffers, saveAllDirtyBuffers } from './dirty';
+import { dirtyBuffers, dirtyCount, saveAllDirtyBuffers, titleWithDirty } from './dirty';
 import { createConfirmDialog } from './overlay';
 
 // --- workspace fs contract ---------------------------------------------------
@@ -338,6 +338,24 @@ export function init(): void {
   const diagBodyEl = el('diag-body');
   const diagCountEl = el('diag-count');
 
+  // Global unsaved-work surfacing: the document title gains a `•` and a clickable "N unsaved" pill
+  // appears beside the status whenever any open buffer is dirty. baseTitle is captured once, clean.
+  const baseTitle = document.title;
+  const unsavedEl = el('unsaved-indicator') as HTMLButtonElement;
+  unsavedEl.addEventListener('click', () => void saveAllDirty());
+  function refreshDirtyIndicator(): void {
+    const n = dirtyCount(buffers);
+    document.title = titleWithDirty(baseTitle, n);
+    if (n > 0) {
+      unsavedEl.textContent = `${n} unsaved`;
+      unsavedEl.setAttribute('aria-label', `Save ${n} unsaved file${n === 1 ? '' : 's'}`);
+      unsavedEl.hidden = false;
+    } else {
+      unsavedEl.textContent = '';
+      unsavedEl.hidden = true;
+    }
+  }
+
   const lsp = new KoineLsp(platform.createLspTransport());
 
   // --- workspace model ------------------------------------------------------
@@ -514,6 +532,10 @@ export function init(): void {
   // diagnostics, active file) — the explorer reads those per row via the callbacks. A no-op outside
   // folder mode (the tree is hidden then).
   function renderTree(): void {
+    // Sync the global unsaved indicator on every tree render — this is the common path for every
+    // dirty transition (edit, save, save-all, cross-file rename, workspace swap), and it runs even
+    // in scratch mode (where the early return below skips the file tree) so the pill always clears.
+    refreshDirtyIndicator();
     if (!folderMode || folderRootToken == null) return;
     explorer.render(entriesCache, folderRootToken);
   }
