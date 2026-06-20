@@ -1508,7 +1508,11 @@ internal sealed class LspServer
         ["edges"] = g.Edges.Select(MapEdge).ToArray(),
     };
 
-    /// <summary>Maps a <see cref="Koine.Compiler.Emit.Docs.DiagramNode"/> (its span stays raw 1-based).</summary>
+    /// <summary>
+    /// Maps a <see cref="Koine.Compiler.Emit.Docs.DiagramNode"/> (its span stays raw 1-based). Class nodes
+    /// (aggregate/value object/enum/event/entity) carry a <c>stereotype</c> + UML <c>members</c>; the
+    /// state/context/integration nodes carry <c>null</c>/<c>[]</c> for both and stay simple boxes.
+    /// </summary>
     private static Dictionary<string, object?> MapNode(Koine.Compiler.Emit.Docs.DiagramNode n) => new()
     {
         ["id"] = n.Id,
@@ -1516,6 +1520,15 @@ internal sealed class LspServer
         ["kind"] = n.Kind,
         ["qualifiedName"] = n.QualifiedName,
         ["sourceSpan"] = MapSourceSpan(n.Span),
+        ["stereotype"] = n.Stereotype,
+        ["members"] = (n.Members ?? []).Select(MapMember).ToArray(),
+    };
+
+    /// <summary>Maps a <see cref="Koine.Compiler.Emit.Docs.DiagramMember"/> to its <c>{ text, kind }</c> wire dict.</summary>
+    private static Dictionary<string, object?> MapMember(Koine.Compiler.Emit.Docs.DiagramMember m) => new()
+    {
+        ["text"] = m.Text,
+        ["kind"] = m.Kind,
     };
 
     /// <summary>Maps a <see cref="Koine.Compiler.Emit.Docs.DiagramEdge"/> (<c>label</c> may be null).</summary>

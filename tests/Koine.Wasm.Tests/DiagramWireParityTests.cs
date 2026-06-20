@@ -137,6 +137,43 @@ public class DiagramWireParityTests
         }
     }
 
+    [Fact]
+    public void Both_backends_carry_stereotype_and_members_on_the_aggregate_class_node()
+    {
+        // The enriched class boxes (issue #93 follow-up): the aggregate-root node carries a non-null
+        // camelCase "stereotype" and a non-empty "members" array of { text, kind } on BOTH backends.
+        foreach (var files in new[] { LspDocsFiles(), WasmDocsFiles() })
+        {
+            var root = AllNodes(files).First(n => (string?)n["kind"] == "aggregate-root");
+
+            ((string?)root["stereotype"]).ShouldBe("aggregate root");
+
+            var members = root["members"]!.AsArray();
+            members.Count.ShouldBeGreaterThan(0, "the class node must carry UML member rows");
+            foreach (var member in members)
+            {
+                ((string?)member!["text"]).ShouldNotBeNullOrEmpty();
+                ((string?)member!["kind"]).ShouldNotBeNullOrEmpty();
+            }
+
+            // The identity row is always present and reads source-like.
+            members.Select(m => (string?)m!["text"]).ShouldContain("id: OrderId");
+        }
+    }
+
+    [Fact]
+    public void Both_backends_keep_non_class_nodes_as_simple_boxes()
+    {
+        // State/context/integration nodes stay simple boxes: null stereotype + empty members, identically
+        // serialized on both wires (the canonical-equality test already covers value parity).
+        foreach (var files in new[] { LspDocsFiles(), WasmDocsFiles() })
+        {
+            var state = AllNodes(files).First(n => (string?)n["kind"] == "state");
+            state["stereotype"].ShouldBeNull();
+            state["members"]!.AsArray().Count.ShouldBe(0);
+        }
+    }
+
     // ---- backend drivers ------------------------------------------------------
 
     /// <summary>Drives the real stdio LSP wire (<c>koine/docs</c>) and returns the <c>result.files</c> array.</summary>

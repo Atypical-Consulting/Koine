@@ -242,6 +242,12 @@ export interface SourceSpan {
   length: number; // character length
 }
 
+/** One UML class-body row: a pre-formatted text and which compartment it belongs to. */
+export interface DiagramMember {
+  text: string; // pre-formatted row, e.g. 'id: OrderId', 'submit()', or an enum value 'Draft'
+  kind: string; // compartment: 'field' (attributes incl. id/version) | 'method' | 'value' (enum members)
+}
+
 /** One graph node: an aggregate, value object, state, context, integration event, … */
 export interface DiagramNode {
   id: string; // stable identifier, unique within the owning graph
@@ -249,6 +255,8 @@ export interface DiagramNode {
   kind: string; // styling category, e.g. 'aggregate-root' | 'value-object' | 'state' | 'context' | …
   qualifiedName: string; // dotted stable name, e.g. 'Ordering.Order'
   sourceSpan: SourceSpan | null; // null only when the node truly has no position
+  stereotype: string | null; // UML stereotype w/o guillemets (class nodes only), e.g. 'aggregate root'
+  members: DiagramMember[]; // UML class-body rows (class nodes only); [] for simple boxes
 }
 
 /** A directed edge between two node ids in the same graph. */

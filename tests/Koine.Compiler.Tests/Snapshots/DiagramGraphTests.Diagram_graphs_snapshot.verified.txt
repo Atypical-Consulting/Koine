@@ -1,9 +1,18 @@
 ﻿==== docs/Ordering.md ====
 -- diagram: Order [aggregate]
   nodes:
-    Order | aggregate-root | Ordering.Order | "Order" @ 25:12-25:17
-    OrderSubmitted | event | Ordering.OrderSubmitted | "OrderSubmitted" @ 17:11-17:25
-    OrderLine | value-object | Ordering.OrderLine | "OrderLine" @ 19:11-19:20
+    Order | aggregate-root | Ordering.Order | "Order" | «aggregate root» @ 25:12-25:17
+      • [field] id: OrderId
+      • [field] customer: CustomerId
+      • [field] lines: List<OrderLine>
+      • [field] status: OrderStatus
+      • [method] submit()
+    OrderSubmitted | event | Ordering.OrderSubmitted | "OrderSubmitted" | «event» @ 17:11-17:25
+      • [field] orderId: OrderId
+    OrderLine | value-object | Ordering.OrderLine | "OrderLine" | «value object» @ 19:11-19:20
+      • [field] product: ProductId
+      • [field] quantity: Int
+      • [field] unitPrice: Money
   edges:
     Order -> OrderSubmitted
     Order -> OrderLine

@@ -172,7 +172,9 @@ public sealed partial class DocsEmitter
 
         var nodes = new List<DiagramNode>
         {
-            new(root.Name, root.Name, "aggregate-root", $"{ctx.Name}.{root.Name}", PreferName(root, agg))
+            new(root.Name, root.Name, "aggregate-root", $"{ctx.Name}.{root.Name}", PreferName(root, agg),
+                Stereotype: "aggregate root",
+                Members: ClassMembers(root, agg))
         };
         var edges = new List<DiagramEdge>();
 
@@ -192,7 +194,9 @@ public sealed partial class DocsEmitter
 
             nodes.Add(new DiagramNode(
                 nested.Name, nested.Name, kind,
-                $"{ctx.Name}.{nested.Name}", PreferName(nested, agg)));
+                $"{ctx.Name}.{nested.Name}", PreferName(nested, agg),
+                Stereotype: NestedStereotype(nested),
+                Members: ClassMembers(nested)));
             edges.Add(new DiagramEdge(root.Name, nested.Name, null));
         }
 
@@ -214,6 +218,37 @@ public sealed partial class DocsEmitter
         EntityDecl => "entity",
         _ => null
     };
+
+    /// <summary>
+    /// The structured display rows for a class node, walked through the SHARED <see cref="ClassRows"/>
+    /// helper (same order + same skip-derived rule as the Mermaid emitter) and formatted with the
+    /// readable <see cref="KoineType"/> (source-like, NOT Mermaid's tilde notation): fields as
+    /// <c>"{name}: {type}"</c>, methods as <c>"{name}({params})[: {ret}]"</c> with params <c>"{name}: {type}"</c>,
+    /// and enum values as the bare member name.
+    /// </summary>
+    private static IReadOnlyList<DiagramMember> ClassMembers(TypeDecl type, AggregateDecl? owningAggregate = null) =>
+        ClassRows(type, owningAggregate).Select(FormatMember).ToArray();
+
+    /// <summary>Formats one shared <see cref="ClassRow"/> into its <see cref="DiagramMember"/> wire row.</summary>
+    private static DiagramMember FormatMember(ClassRow row) => row.Kind switch
+    {
+        ClassRowKind.Field => new DiagramMember($"{row.Name}: {RowType(row)}", "field"),
+        ClassRowKind.Method => new DiagramMember(FormatMethod(row), "method"),
+        ClassRowKind.Value => new DiagramMember(row.Name, "value"),
+        _ => new DiagramMember(row.Name, "field")
+    };
+
+    /// <summary>The readable type text for a field row: the synthetic primitive name, else <see cref="KoineType"/>.</summary>
+    private static string RowType(ClassRow row) =>
+        row.PrimitiveType ?? (row.Type is { } t ? KoineType(t) : string.Empty);
+
+    /// <summary>Formats a method row as <c>name(p1: T1, p2: T2): Ret</c> (the return suffix is dropped when void).</summary>
+    private static string FormatMethod(ClassRow row)
+    {
+        var ps = string.Join(", ", (row.Parameters ?? []).Select(p => $"{p.Name}: {KoineType(p.Type)}"));
+        var head = $"{row.Name}({ps})";
+        return row.ReturnType is { } ret ? $"{head}: {KoineType(ret)}" : head;
+    }
 
     // ---- context map --------------------------------------------------------
 

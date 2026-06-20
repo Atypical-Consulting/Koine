@@ -6,9 +6,19 @@
 import { afterEach, describe, expect, test } from 'vitest';
 import { createSvgRenderer, NODE_NAVIGATE_EVENT, type DiagramNodeNavigateDetail } from './diagrams-svg';
 import { createMermaidRenderer, mermaidDiagramsFor, stripMermaidFence } from './diagrams';
-import type { DocsFile, Diagram } from './lsp';
+import type { DocsFile, Diagram, DiagramNode } from './lsp';
 
 const EMPTY_STATE = 'No diagrams yet';
+
+/** Build a DiagramNode with the simple-box defaults (no stereotype/members) unless overridden. */
+function mkNode(over: Partial<DiagramNode> & Pick<DiagramNode, 'id' | 'label' | 'kind' | 'qualifiedName'>): DiagramNode {
+  return {
+    sourceSpan: null,
+    stereotype: null,
+    members: [],
+    ...over,
+  };
+}
 
 afterEach(() => {
   document.body.innerHTML = '';
@@ -45,7 +55,7 @@ describe('createSvgRenderer', () => {
       file([
         diagram({
           nodes: [
-            {
+            mkNode({
               id: 'order',
               label: 'Order',
               kind: 'aggregate-root',
@@ -59,14 +69,14 @@ describe('createSvgRenderer', () => {
                 offset: 20,
                 length: 5,
               },
-            },
-            {
+            }),
+            mkNode({
               id: 'money',
               label: 'Money',
               kind: 'value-object',
               qualifiedName: 'Ordering.Money',
               sourceSpan: null,
-            },
+            }),
           ],
           edges: [{ from: 'order', to: 'money', label: 'total' }],
         }),
@@ -97,7 +107,7 @@ describe('createSvgRenderer', () => {
       file([
         diagram({
           nodes: [
-            {
+            mkNode({
               id: 'order',
               label: 'Order',
               kind: 'aggregate-root',
@@ -111,7 +121,7 @@ describe('createSvgRenderer', () => {
                 offset: 20,
                 length: 5,
               },
-            },
+            }),
           ],
           edges: [],
         }),
@@ -137,13 +147,13 @@ describe('createSvgRenderer', () => {
       file([
         diagram({
           nodes: [
-            {
+            mkNode({
               id: 'money',
               label: 'Money',
               kind: 'value-object',
               qualifiedName: 'Ordering.Money',
               sourceSpan: null,
-            },
+            }),
           ],
           edges: [],
         }),
@@ -169,8 +179,8 @@ describe('createSvgRenderer', () => {
       file([
         diagram({
           nodes: [
-            { id: 'a', label: 'A', kind: 'state', qualifiedName: 'Ord.A', sourceSpan: null },
-            { id: 'b', label: 'B', kind: 'state', qualifiedName: 'Ord.B', sourceSpan: null },
+            mkNode({ id: 'a', label: 'A', kind: 'state', qualifiedName: 'Ord.A' }),
+            mkNode({ id: 'b', label: 'B', kind: 'state', qualifiedName: 'Ord.B' }),
           ],
           edges: [{ from: 'a', to: 'b', label: 'go' }],
         }),
@@ -273,7 +283,7 @@ describe('createSvgRenderer', () => {
     const files: DocsFile[] = [
       file([
         diagram({
-          nodes: [{ id: 'a', label: 'A', kind: 'state', qualifiedName: 'Ord.A', sourceSpan: null }],
+          nodes: [mkNode({ id: 'a', label: 'A', kind: 'state', qualifiedName: 'Ord.A' })],
           edges: [],
         }),
       ]),
@@ -284,6 +294,154 @@ describe('createSvgRenderer', () => {
     await createSvgRenderer().render(container, files, 'light', () => false);
     expect(container.querySelector('#sentinel')).not.toBeNull();
     expect(container.querySelector('svg')).toBeNull();
+  });
+});
+
+describe('UML class boxes (issue #93 enrichment)', () => {
+  // A node carrying a stereotype + members renders a compartmented class box: the «stereotype» header,
+  // a divider, one row element per attribute, then (when methods exist) another divider + method rows.
+  test('renders the stereotype, a divider, and one row per member for a class node', async () => {
+    const files: DocsFile[] = [
+      file([
+        diagram({
+          nodes: [
+            mkNode({
+              id: 'order',
+              label: 'Order',
+              kind: 'aggregate-root',
+              qualifiedName: 'Ordering.Order',
+              stereotype: 'aggregate root',
+              members: [
+                { text: 'id: OrderId', kind: 'field' },
+                { text: 'customer: CustomerId', kind: 'field' },
+                { text: 'submit()', kind: 'method' },
+              ],
+            }),
+          ],
+          edges: [],
+        }),
+      ]),
+    ];
+
+    const container = ROOT();
+    await createSvgRenderer().render(container, files, 'light', () => true);
+
+    const node = container.querySelector('.koi-svg-node[data-qname="Ordering.Order"]')!;
+    expect(node).not.toBeNull();
+
+    // The «stereotype» header text is shown.
+    const stereo = node.querySelector('.koi-svg-class-stereotype');
+    expect(stereo).not.toBeNull();
+    expect(stereo!.textContent).toBe('«aggregate root»');
+
+    // Two dividers (header→attributes, attributes→methods) since the node has methods.
+    expect(node.querySelectorAll('.koi-svg-class-divider').length).toBe(2);
+
+    // One row element per member (3), each carrying the formatted text.
+    const rows = [...node.querySelectorAll('.koi-svg-class-row')].map((r) => r.textContent);
+    expect(rows).toEqual(['id: OrderId', 'customer: CustomerId', 'submit()']);
+
+    // The bold class title is still the node label.
+    expect(node.querySelector('.koi-svg-class-title')!.textContent).toBe('Order');
+  });
+
+  test('a class node with no methods draws only the single (header) divider', async () => {
+    const files: DocsFile[] = [
+      file([
+        diagram({
+          nodes: [
+            mkNode({
+              id: 'status',
+              label: 'OrderStatus',
+              kind: 'enum',
+              qualifiedName: 'Ordering.OrderStatus',
+              stereotype: 'enumeration',
+              members: [
+                { text: 'Draft', kind: 'value' },
+                { text: 'Submitted', kind: 'value' },
+              ],
+            }),
+          ],
+          edges: [],
+        }),
+      ]),
+    ];
+
+    const container = ROOT();
+    await createSvgRenderer().render(container, files, 'light', () => true);
+
+    const node = container.querySelector('.koi-svg-node[data-qname="Ordering.OrderStatus"]')!;
+    // Only the header divider — no method compartment.
+    expect(node.querySelectorAll('.koi-svg-class-divider').length).toBe(1);
+    const rows = [...node.querySelectorAll('.koi-svg-class-row')].map((r) => r.textContent);
+    expect(rows).toEqual(['Draft', 'Submitted']);
+  });
+
+  test('a member-less node still renders the simple centered box (no compartments)', async () => {
+    const files: DocsFile[] = [
+      file([
+        diagram({
+          nodes: [
+            mkNode({ id: 's', label: 'Draft', kind: 'state', qualifiedName: 'Ordering.Order.Draft' }),
+          ],
+          edges: [],
+        }),
+      ]),
+    ];
+
+    const container = ROOT();
+    await createSvgRenderer().render(container, files, 'light', () => true);
+
+    const node = container.querySelector('.koi-svg-node[data-qname="Ordering.Order.Draft"]')!;
+    expect(node).not.toBeNull();
+    // No class-box artifacts — the simple box has a single centered label and no dividers/rows.
+    expect(node.querySelector('.koi-svg-class-box')).toBeNull();
+    expect(node.querySelector('.koi-svg-class-divider')).toBeNull();
+    expect(node.querySelectorAll('.koi-svg-class-row').length).toBe(0);
+    expect(node.querySelector('.koi-svg-node-label')!.textContent).toBe('Draft');
+  });
+
+  test('a spanned class node still navigates on click (the whole box stays clickable)', async () => {
+    const files: DocsFile[] = [
+      file([
+        diagram({
+          nodes: [
+            mkNode({
+              id: 'order',
+              label: 'Order',
+              kind: 'aggregate-root',
+              qualifiedName: 'Ordering.Order',
+              stereotype: 'aggregate root',
+              members: [{ text: 'id: OrderId', kind: 'field' }],
+              sourceSpan: {
+                file: 'file:///ordering.koi',
+                line: 3,
+                column: 5,
+                endLine: 7,
+                endColumn: 10,
+                offset: 20,
+                length: 5,
+              },
+            }),
+          ],
+          edges: [],
+        }),
+      ]),
+    ];
+
+    const container = ROOT();
+    await createSvgRenderer().render(container, files, 'light', () => true);
+
+    const events: DiagramNodeNavigateDetail[] = [];
+    container.addEventListener(NODE_NAVIGATE_EVENT, (e) => {
+      events.push((e as CustomEvent<DiagramNodeNavigateDetail>).detail);
+    });
+
+    const node = container.querySelector<SVGGElement>('.koi-svg-node[data-qname="Ordering.Order"]')!;
+    node.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+
+    expect(events).toHaveLength(1);
+    expect(events[0].qualifiedName).toBe('Ordering.Order');
   });
 });
 
@@ -350,7 +508,7 @@ describe('node navigation event (Task 4)', () => {
       file([
         diagram({
           nodes: [
-            {
+            mkNode({
               id: 'order',
               label: 'Order',
               kind: 'aggregate-root',
@@ -364,7 +522,7 @@ describe('node navigation event (Task 4)', () => {
                 offset: 20,
                 length: 5,
               },
-            },
+            }),
           ],
           edges: [],
         }),
@@ -400,13 +558,13 @@ describe('node navigation event (Task 4)', () => {
       file([
         diagram({
           nodes: [
-            {
+            mkNode({
               id: 'money',
               label: 'Money',
               kind: 'value-object',
               qualifiedName: 'Ordering.Money',
               sourceSpan: null,
-            },
+            }),
           ],
           edges: [],
         }),
@@ -435,7 +593,7 @@ describe('node navigation event (Task 4)', () => {
       file([
         diagram({
           nodes: [
-            {
+            mkNode({
               id: 'order',
               label: 'Order',
               kind: 'aggregate-root',
@@ -449,7 +607,7 @@ describe('node navigation event (Task 4)', () => {
                 offset: 20,
                 length: 5,
               },
-            },
+            }),
           ],
           edges: [],
         }),

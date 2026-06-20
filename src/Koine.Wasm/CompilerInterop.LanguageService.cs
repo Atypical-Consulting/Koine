@@ -698,7 +698,11 @@ public static partial class CompilerInterop
         new(g.Nodes.Select(MapNode).ToArray(), g.Edges.Select(MapEdge).ToArray());
 
     private static WDiagramNode MapNode(Koine.Compiler.Emit.Docs.DiagramNode n) =>
-        new(n.Id, n.Label, n.Kind, n.QualifiedName, MapSourceSpan(n.Span));
+        new(n.Id, n.Label, n.Kind, n.QualifiedName, MapSourceSpan(n.Span),
+            n.Stereotype, (n.Members ?? []).Select(MapMember).ToArray());
+
+    private static WDiagramMember MapMember(Koine.Compiler.Emit.Docs.DiagramMember m) =>
+        new(m.Text, m.Kind);
 
     private static WDiagramEdge MapEdge(Koine.Compiler.Emit.Docs.DiagramEdge e) =>
         new(e.From, e.To, e.Label);
@@ -1023,9 +1027,15 @@ public sealed record WDiagramGraph(WDiagramNode[] Nodes, WDiagramEdge[] Edges);
 /// One graph node. The property is named <see cref="SourceSpan"/> (not <c>Span</c>) so the source-gen
 /// CamelCase policy yields the wire key <c>"sourceSpan"</c>, matching the LSP/TS contract. The span is
 /// the raw 1-based source coordinate (Task 4 converts to 0-based when navigating); null only when the
-/// node truly has none.
+/// node truly has none. Class nodes carry a <see cref="Stereotype"/> (without guillemets) and UML
+/// <see cref="Members"/>; non-class nodes (state/context/integration) carry <c>null</c>/<c>[]</c>.
 /// </summary>
-public sealed record WDiagramNode(string Id, string Label, string Kind, string QualifiedName, WSourceSpan? SourceSpan);
+public sealed record WDiagramNode(
+    string Id, string Label, string Kind, string QualifiedName, WSourceSpan? SourceSpan,
+    string? Stereotype, WDiagramMember[] Members);
+
+/// <summary>One UML class-body row: a pre-formatted <see cref="Text"/> and its <see cref="Kind"/> (<c>field</c>/<c>method</c>/<c>value</c>).</summary>
+public sealed record WDiagramMember(string Text, string Kind);
 
 /// <summary>One directed edge: node ids <see cref="From"/>→<see cref="To"/> with an optional <see cref="Label"/>.</summary>
 public sealed record WDiagramEdge(string From, string To, string? Label);
@@ -1077,6 +1087,7 @@ public sealed record WSourceFileDto(string Uri, string Text);
 [JsonSerializable(typeof(WDiagram))]
 [JsonSerializable(typeof(WDiagramGraph))]
 [JsonSerializable(typeof(WDiagramNode))]
+[JsonSerializable(typeof(WDiagramMember))]
 [JsonSerializable(typeof(WDiagramEdge))]
 [JsonSerializable(typeof(WSourceSpan))]
 [JsonSerializable(typeof(WInDiagnostic[]))]

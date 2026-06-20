@@ -74,17 +74,55 @@
   pointer-events: none; /* clicks land on the group, not the text (Task 4 reads the group's data-*) */
 }
 
-/* per-kind accents — aggregate roots / contexts get the accent treatment, the rest read as neutral */
-.koi-svg-node[data-kind='aggregate-root'] .koi-svg-node-box,
-.koi-svg-node[data-kind='aggregate'] .koi-svg-node-box,
-.koi-svg-node[data-kind='context'] .koi-svg-node-box {
+/* UML class boxes (issue #93): a compartmented box — «stereotype» + bold title header, a divider, the
+   left-aligned attribute rows, then (when present) a divider + the method rows. The class box itself is
+   neutral (paper) so the rows read clearly; per-kind accents below only restyle the SINGLE-line boxes. */
+.koi-svg-class-box {
+  fill: var(--koi-paper-2);
+  stroke: var(--koi-line);
+}
+.koi-svg-class-stereotype {
+  fill: var(--koi-muted);
+  font-size: 10px;
+  font-style: italic;
+  pointer-events: none;
+}
+.koi-svg-class-title {
+  font-size: 13px;
+  font-weight: 700;
+}
+.koi-svg-class-divider {
+  stroke: var(--koi-line);
+  stroke-width: 1;
+}
+.koi-svg-class-row {
+  fill: var(--koi-fg);
+  font-family: var(--koi-font-mono);
+  font-size: 12px;
+  pointer-events: none; /* clicks fall through to the group so the whole class box stays navigable */
+}
+
+/* per-kind accents — aggregate roots / contexts get the accent treatment on their SINGLE-line boxes
+   (`:not(.koi-svg-class-box)`); a compartmented class box stays neutral-paper so its member rows stay
+   legible, and instead distinguishes the root via the accent-tinted title below. */
+.koi-svg-node[data-kind='aggregate-root'] .koi-svg-node-box:not(.koi-svg-class-box),
+.koi-svg-node[data-kind='aggregate'] .koi-svg-node-box:not(.koi-svg-class-box),
+.koi-svg-node[data-kind='context'] .koi-svg-node-box:not(.koi-svg-class-box) {
   fill: var(--koi-accent);
   stroke: var(--koi-accent);
 }
-.koi-svg-node[data-kind='aggregate-root'] .koi-svg-node-label,
-.koi-svg-node[data-kind='aggregate'] .koi-svg-node-label,
-.koi-svg-node[data-kind='context'] .koi-svg-node-label {
+.koi-svg-node[data-kind='aggregate-root'] .koi-svg-node-label:not(.koi-svg-class-title),
+.koi-svg-node[data-kind='aggregate'] .koi-svg-node-label:not(.koi-svg-class-title),
+.koi-svg-node[data-kind='context'] .koi-svg-node-label:not(.koi-svg-class-title) {
   fill: var(--koi-on-accent);
+}
+/* the aggregate-root class box reads as the boundary owner: accent border + accent-tinted title. */
+.koi-svg-node[data-kind='aggregate-root'] .koi-svg-class-box {
+  stroke: var(--koi-accent);
+  stroke-width: 2;
+}
+.koi-svg-node[data-kind='aggregate-root'] .koi-svg-class-title {
+  fill: var(--koi-accent);
 }
 .koi-svg-node[data-kind='initial'] .koi-svg-node-box,
 .koi-svg-node[data-kind='final'] .koi-svg-node-box {

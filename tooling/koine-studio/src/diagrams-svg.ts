@@ -12,7 +12,7 @@
 // non-bundled build spawns a Web Worker from a blob: URL, which CSP forbids).
 import type { DiagramRenderer } from './diagrams';
 import { createMermaidRenderer } from './diagrams';
-import type { Diagram, DiagramGraph, DiagramNode, DocsFile, SourceSpan } from './lsp';
+import type { Diagram, DiagramGraph, DiagramMember, DiagramNode, DocsFile, SourceSpan } from './lsp';
 // Type-only import (erased at build time) of elkjs' own API surface, so our layout graph type-checks
 // against the real `ELK.layout` signature. The *value* is dynamically imported from the bundled build.
 import type { ELK, ElkNode, ElkExtendedEdge } from 'elkjs/lib/elk-api';
@@ -58,17 +58,64 @@ async function getElk(): Promise<ElkConstructor> {
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
 
-// Node box sizing. Width grows with the label so long names don't overflow; ELK only needs the box
-// dimensions, it places everything else.
+// Node box sizing. Width grows with the widest row so long names/members don't overflow; ELK only needs
+// the box dimensions, it places everything else.
 const NODE_HEIGHT = 40;
 const NODE_PADDING_X = 28;
-const CHAR_WIDTH = 8.2; // rough advance for the label font at the size used below
+const CHAR_WIDTH = 8.2; // rough advance for the label font (13px) at the size used below
+const MEMBER_CHAR_WIDTH = 7; // rough advance for the smaller (12px) monospace-ish member rows
 const MIN_NODE_WIDTH = 72;
 const EDGE_LABEL_HEIGHT = 16;
 const SVG_PADDING = 12;
 
+// UML class-box compartments (issue #93 follow-up). A class node draws a header (stereotype + bold
+// label), then an attribute compartment, then — when present — a method compartment, each row a line.
+const HEADER_HEIGHT = 44; // stereotype line + bold label, with breathing room
+const ROW_HEIGHT = 18; // one attribute / method / value row
+const COMPARTMENT_PAD_Y = 6; // vertical padding inside each compartment
+const CLASS_PADDING_X = 16; // horizontal text inset inside a class box
+const MIN_CLASS_WIDTH = 120;
+
+/** A class node carries a stereotype + member rows; a simple node renders as a single centered box. */
+function isClassNode(node: DiagramNode): boolean {
+  return node.stereotype != null || (node.members?.length ?? 0) > 0;
+}
+
 function nodeWidth(label: string): number {
   return Math.max(MIN_NODE_WIDTH, Math.round(label.length * CHAR_WIDTH) + NODE_PADDING_X);
+}
+
+/** Partition a class node's members into the attribute (field/value) and method compartments, in order. */
+function partitionMembers(members: DiagramMember[]): { attributes: DiagramMember[]; methods: DiagramMember[] } {
+  const attributes = members.filter((m) => m.kind === 'field' || m.kind === 'value');
+  const methods = members.filter((m) => m.kind === 'method');
+  return { attributes, methods };
+}
+
+/** A class box's size: width from the widest of (stereotype, label, every row); height from the row count. */
+function classNodeSize(node: DiagramNode): { width: number; height: number } {
+  const members = node.members ?? [];
+  const { attributes, methods } = partitionMembers(members);
+
+  // Widest content: the bold label (13px), the «stereotype» line, and each member row (12px).
+  const labelW = node.label.length * CHAR_WIDTH;
+  const stereoText = node.stereotype ? `«${node.stereotype}»` : '';
+  const stereoW = stereoText.length * MEMBER_CHAR_WIDTH;
+  const rowW = members.reduce((max, m) => Math.max(max, m.text.length * MEMBER_CHAR_WIDTH), 0);
+  const width = Math.max(MIN_CLASS_WIDTH, Math.ceil(Math.max(labelW, stereoW, rowW)) + CLASS_PADDING_X * 2);
+
+  // Header + attribute compartment (+ its padding) + method compartment (+ its padding) when methods exist.
+  let height = HEADER_HEIGHT;
+  height += attributes.length * ROW_HEIGHT + (attributes.length > 0 ? COMPARTMENT_PAD_Y * 2 : COMPARTMENT_PAD_Y);
+  if (methods.length > 0) {
+    height += methods.length * ROW_HEIGHT + COMPARTMENT_PAD_Y * 2;
+  }
+  return { width, height: Math.ceil(height) };
+}
+
+/** The pre-layout box size for any node (a UML class box, or the simple single-line box). */
+function nodeSize(node: DiagramNode): { width: number; height: number } {
+  return isClassNode(node) ? classNodeSize(node) : { width: nodeWidth(node.label), height: NODE_HEIGHT };
 }
 
 /** The page title: the docs file's first level-1 heading, else a humanised file name. */
@@ -116,6 +163,107 @@ function tagNode(g: SVGGElement, node: DiagramNode): void {
   }
 }
 
+/** Draw a simple single-line node: a rounded rect with a centered, bold label (the non-class default). */
+function drawSimpleBox(g: SVGGElement, node: DiagramNode, w: number, h: number): void {
+  const rect = svgEl('rect');
+  rect.setAttribute('class', 'koi-svg-node-box');
+  rect.setAttribute('width', String(w));
+  rect.setAttribute('height', String(h));
+  rect.setAttribute('rx', '7');
+  rect.setAttribute('ry', '7');
+  g.appendChild(rect);
+
+  const text = svgEl('text');
+  text.setAttribute('class', 'koi-svg-node-label');
+  text.setAttribute('x', String(w / 2));
+  text.setAttribute('y', String(h / 2));
+  text.setAttribute('text-anchor', 'middle');
+  text.setAttribute('dominant-baseline', 'central');
+  text.textContent = node.label;
+  g.appendChild(text);
+}
+
+/**
+ * Draw a UML-style compartmented class box: a header (the «stereotype» above the bold label), a divider,
+ * the left-aligned attribute rows (fields + enum values), and — when methods exist — another divider and
+ * the method rows. The whole `<g>` stays clickable (Task 4): the rows have `pointer-events: none` so a
+ * click on any of them still lands on the group and dispatches the navigate event.
+ */
+function drawClassBox(g: SVGGElement, node: DiagramNode, w: number, h: number): void {
+  const members = node.members ?? [];
+  const { attributes, methods } = partitionMembers(members);
+
+  const rect = svgEl('rect');
+  rect.setAttribute('class', 'koi-svg-node-box koi-svg-class-box');
+  rect.setAttribute('width', String(w));
+  rect.setAttribute('height', String(h));
+  rect.setAttribute('rx', '7');
+  rect.setAttribute('ry', '7');
+  g.appendChild(rect);
+
+  // Header: the stereotype (smaller, italic) over the bold label, both centered.
+  if (node.stereotype) {
+    const stereo = svgEl('text');
+    stereo.setAttribute('class', 'koi-svg-class-stereotype');
+    stereo.setAttribute('x', String(w / 2));
+    stereo.setAttribute('y', '16');
+    stereo.setAttribute('text-anchor', 'middle');
+    stereo.textContent = `«${node.stereotype}»`;
+    g.appendChild(stereo);
+  }
+
+  const title = svgEl('text');
+  title.setAttribute('class', 'koi-svg-node-label koi-svg-class-title');
+  title.setAttribute('x', String(w / 2));
+  title.setAttribute('y', node.stereotype ? '34' : '26');
+  title.setAttribute('text-anchor', 'middle');
+  title.textContent = node.label;
+  g.appendChild(title);
+
+  // Divider under the header, then the attribute rows. Enum-only classes have no methods → just one body.
+  let y = HEADER_HEIGHT;
+  divider(g, w, y);
+  y += COMPARTMENT_PAD_Y + ROW_HEIGHT * 0.75;
+  for (const m of attributes) {
+    appendRow(g, m.text, y, w);
+    y += ROW_HEIGHT;
+  }
+  if (attributes.length > 0) {
+    y += COMPARTMENT_PAD_Y - ROW_HEIGHT * 0.75;
+  }
+
+  // A second divider + the method compartment, only when there are methods.
+  if (methods.length > 0) {
+    divider(g, w, y);
+    y += COMPARTMENT_PAD_Y + ROW_HEIGHT * 0.75;
+    for (const m of methods) {
+      appendRow(g, m.text, y, w);
+      y += ROW_HEIGHT;
+    }
+  }
+}
+
+/** A full-width horizontal divider line between two class compartments. */
+function divider(g: SVGGElement, w: number, y: number): void {
+  const line = svgEl('line');
+  line.setAttribute('class', 'koi-svg-class-divider');
+  line.setAttribute('x1', '0');
+  line.setAttribute('x2', String(w));
+  line.setAttribute('y1', String(y));
+  line.setAttribute('y2', String(y));
+  g.appendChild(line);
+}
+
+/** One left-aligned member row inside a compartment. */
+function appendRow(g: SVGGElement, text: string, y: number, _w: number): void {
+  const row = svgEl('text');
+  row.setAttribute('class', 'koi-svg-class-row');
+  row.setAttribute('x', String(CLASS_PADDING_X));
+  row.setAttribute('y', String(y));
+  row.textContent = text;
+  g.appendChild(row);
+}
+
 function polylinePath(points: { x: number; y: number }[]): string {
   if (!points.length) return '';
   const [head, ...rest] = points;
@@ -142,11 +290,10 @@ async function drawGraph(graph: DiagramGraph, Elk: ElkConstructor): Promise<SVGS
       'elk.layered.spacing.nodeNodeBetweenLayers': '56',
       'elk.spacing.edgeNode': '20',
     },
-    children: graph.nodes.map((n) => ({
-      id: n.id,
-      width: nodeWidth(n.label),
-      height: NODE_HEIGHT,
-    })),
+    children: graph.nodes.map((n) => {
+      const { width, height } = nodeSize(n);
+      return { id: n.id, width, height };
+    }),
     edges: layoutEdges,
   };
 
@@ -226,22 +373,11 @@ async function drawGraph(graph: DiagramGraph, Elk: ElkConstructor): Promise<SVGS
     g.setAttribute('transform', `translate(${x}, ${y})`);
     tagNode(g, node);
 
-    const rect = svgEl('rect');
-    rect.setAttribute('class', 'koi-svg-node-box');
-    rect.setAttribute('width', String(w));
-    rect.setAttribute('height', String(h));
-    rect.setAttribute('rx', '7');
-    rect.setAttribute('ry', '7');
-    g.appendChild(rect);
-
-    const text = svgEl('text');
-    text.setAttribute('class', 'koi-svg-node-label');
-    text.setAttribute('x', String(w / 2));
-    text.setAttribute('y', String(h / 2));
-    text.setAttribute('text-anchor', 'middle');
-    text.setAttribute('dominant-baseline', 'central');
-    text.textContent = node.label;
-    g.appendChild(text);
+    if (isClassNode(node)) {
+      drawClassBox(g, node, w, h);
+    } else {
+      drawSimpleBox(g, node, w, h);
+    }
 
     nodeLayer.appendChild(g);
   }

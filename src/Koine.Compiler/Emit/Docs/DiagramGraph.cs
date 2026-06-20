@@ -16,7 +16,29 @@ namespace Koine.Compiler.Emit.Docs;
 /// The most precise source span for the construct, or <c>null</c> only when none exists. The emitter
 /// never leaves this null: when a node has no own position it falls back to the owning declaration.
 /// </param>
-public sealed record DiagramNode(string Id, string Label, string Kind, string QualifiedName, SourceSpan? Span);
+/// <param name="Stereotype">
+/// The UML stereotype for a class node WITHOUT guillemets (e.g. <c>"aggregate root"</c>,
+/// <c>"value object"</c>, <c>"quantity"</c>, <c>"enumeration"</c>, <c>"event"</c>, <c>"entity"</c>);
+/// <c>null</c> for non-class nodes (state, context, integration-event flow), which stay simple boxes.
+/// </param>
+/// <param name="Members">
+/// The ordered display rows for a class node (attributes, methods, enum values), or <c>null</c>/empty
+/// for non-class nodes. Mirrors the Mermaid class body content (same skip-derived rule, same order).
+/// </param>
+public sealed record DiagramNode(
+    string Id, string Label, string Kind, string QualifiedName, SourceSpan? Span,
+    string? Stereotype = null,
+    IReadOnlyList<DiagramMember>? Members = null);
+
+/// <summary>
+/// One display row inside a class node's body: a formatted <see cref="Text"/> string and its
+/// <see cref="Kind"/> compartment — <c>"field"</c> (attributes, incl. id/version), <c>"method"</c>
+/// (commands/factories), or <c>"value"</c> (enum members). The renderer draws attributes and values in
+/// the first compartment and methods (when present) in a second one beneath a divider.
+/// </summary>
+/// <param name="Text">The pre-formatted row text (e.g. <c>id: OrderId</c>, <c>submit()</c>, <c>Draft</c>).</param>
+/// <param name="Kind">The compartment: <c>"field"</c>, <c>"method"</c>, or <c>"value"</c>.</param>
+public sealed record DiagramMember(string Text, string Kind);
 
 /// <summary>
 /// A directed edge between two <see cref="DiagramNode"/>s. <see cref="From"/> and <see cref="To"/> are

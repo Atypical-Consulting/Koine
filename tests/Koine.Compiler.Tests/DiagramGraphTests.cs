@@ -175,6 +175,84 @@ public class DiagramGraphTests
     }
 
     [Fact]
+    public void Aggregate_root_node_carries_stereotype_and_member_rows_for_id_and_fields()
+    {
+        DiagramGraph aggregate = AggregateGraph();
+
+        DiagramNode rootNode = aggregate.Nodes
+            .Where(n => n.Kind == "aggregate-root")
+            .ToList()
+            .ShouldHaveSingleItem();
+
+        rootNode.Stereotype.ShouldBe("aggregate root");
+        rootNode.Members.ShouldNotBeNull();
+        rootNode.Members!.ShouldNotBeEmpty();
+
+        // The synthetic identity row plus every declared concrete field reads source-like.
+        var fields = rootNode.Members!.Where(m => m.Kind == "field").Select(m => m.Text).ToList();
+        fields.ShouldContain("id: OrderId");
+        fields.ShouldContain("customer: CustomerId");
+        fields.ShouldContain("lines: List<OrderLine>");
+        fields.ShouldContain("status: OrderStatus");
+
+        // The command surfaces as a method row (commands/factories live in the method compartment).
+        rootNode.Members!.ShouldContain(m => m.Kind == "method" && m.Text.StartsWith("submit("));
+    }
+
+    [Fact]
+    public void Enum_node_carries_its_values_as_value_members()
+    {
+        // A nested enum (declared inside the aggregate) is drawn in the aggregate class diagram; the
+        // shared fixture's OrderStatus is context-level, so use a model whose enum is aggregate-nested.
+        const string source = """
+            context Catalog {
+              aggregate Product root Product {
+                enum Availability { InStock, Backordered, Discontinued }
+
+                entity Product identified by ProductId {
+                  availability: Availability = InStock
+                }
+              }
+            }
+            """;
+
+        var (model, diagnostics) = new KoineCompiler().Parse(new[] { new SourceFile("catalog.koi", source) });
+        diagnostics.ShouldBeEmpty();
+
+        DiagramGraph aggregate = new DocsEmitter().EmitDiagrams(model!)["docs/Catalog.md"]
+            .First(d => d.Kind == "aggregate").Graph;
+
+        DiagramNode enumNode = aggregate.Nodes.First(n => n.Kind == "enum");
+        enumNode.Stereotype.ShouldBe("enumeration");
+        enumNode.Members.ShouldNotBeNull();
+
+        var values = enumNode.Members!.Where(m => m.Kind == "value").Select(m => m.Text).ToList();
+        values.ShouldBe(new[] { "InStock", "Backordered", "Discontinued" });
+    }
+
+    [Fact]
+    public void State_and_context_nodes_stay_simple_boxes_without_members()
+    {
+        foreach (var (_, descriptors) in Descriptors())
+        {
+            foreach (DiagramDescriptor descriptor in descriptors.Where(d => d.Kind != "aggregate"))
+            {
+                foreach (DiagramNode node in descriptor.Graph.Nodes)
+                {
+                    node.Stereotype.ShouldBeNull(
+                        $"{descriptor.Kind} node {node.Id} should stay a simple box (no stereotype)");
+                    (node.Members ?? []).ShouldBeEmpty(
+                        $"{descriptor.Kind} node {node.Id} should stay a simple box (no members)");
+                }
+            }
+        }
+    }
+
+    /// <summary>The single aggregate diagram's graph from the fixture.</summary>
+    private static DiagramGraph AggregateGraph() =>
+        Descriptors()["docs/Ordering.md"].First(d => d.Kind == "aggregate").Graph;
+
+    [Fact]
     public Task Diagram_graphs_snapshot()
     {
         var (model, _) = new KoineCompiler().Parse(new[] { new SourceFile("ordering.koi", Fixture) });
@@ -201,10 +279,21 @@ public class DiagramGraphTests
                     sb.Append("    ").Append(node.Id)
                       .Append(" | ").Append(node.Kind)
                       .Append(" | ").Append(node.QualifiedName)
-                      .Append(" | \"").Append(node.Label).Append('"')
-                      .Append(" @ ").Append(span.Line).Append(':').Append(span.Column)
+                      .Append(" | \"").Append(node.Label).Append('"');
+                    if (node.Stereotype is not null)
+                    {
+                        sb.Append(" | «").Append(node.Stereotype).Append('»');
+                    }
+
+                    sb.Append(" @ ").Append(span.Line).Append(':').Append(span.Column)
                       .Append('-').Append(span.EndLine).Append(':').Append(span.EndColumn)
                       .Append('\n');
+
+                    foreach (DiagramMember member in node.Members ?? [])
+                    {
+                        sb.Append("      • [").Append(member.Kind).Append("] ")
+                          .Append(member.Text).Append('\n');
+                    }
                 }
 
                 sb.Append("  edges:\n");
