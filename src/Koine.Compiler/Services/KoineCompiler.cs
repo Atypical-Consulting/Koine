@@ -28,6 +28,31 @@ public sealed record CompileResult(
 public sealed class KoineCompiler
 {
     /// <summary>
+    /// External semantic analyzers (issue #69) appended after the built-ins on every validation pass.
+    /// Empty by default, so behavior is identical to today; the CLI loads these from the
+    /// <c>analyzers</c> config key via <see cref="Semantics.AnalyzerLoader"/>.
+    /// </summary>
+    private readonly IReadOnlyList<IModelAnalyzer>? _externalAnalyzers;
+
+    /// <summary>Creates a compiler that runs only the built-in analyzers (today's behavior).</summary>
+    public KoineCompiler()
+        : this(externalAnalyzers: null)
+    {
+    }
+
+    /// <summary>
+    /// Creates a compiler that, during semantic validation, runs the supplied external analyzers
+    /// (issue #69) after the built-in ones. A null/empty list is identical to the default constructor.
+    /// </summary>
+    public KoineCompiler(IReadOnlyList<IModelAnalyzer>? externalAnalyzers)
+    {
+        _externalAnalyzers = externalAnalyzers;
+    }
+
+    /// <summary>A validator wired with this compiler's external analyzers (built-ins always run first).</summary>
+    private SemanticValidator CreateValidator() => new(_externalAnalyzers);
+
+    /// <summary>
     /// Lexes, parses, and builds the model for a single source. Returns syntax diagnostics only.
     /// Parsing is error-tolerant (R-resilience): even when the source has a syntax error, a
     /// <em>partial</em> model is built from ANTLR's recovered tree (so the valid declarations are
@@ -67,7 +92,7 @@ public sealed class KoineCompiler
     public IReadOnlyList<Diagnostic> Diagnose(string source, string? file = null)
     {
         var (model, syntax) = Parse(source, file);
-        var semantic = new SemanticValidator().Validate(new SemanticModel(model!));
+        var semantic = CreateValidator().Validate(new SemanticModel(model!));
         return Combine(syntax, semantic);
     }
 
@@ -83,7 +108,7 @@ public sealed class KoineCompiler
     /// <summary>Validates an already-built workspace snapshot (no re-parse) and returns all diagnostics.</summary>
     public IReadOnlyList<Diagnostic> DiagnoseWorkspace(KoineCompilation compilation)
     {
-        var semantic = new SemanticValidator().Validate(compilation.SemanticModel);
+        var semantic = CreateValidator().Validate(compilation.SemanticModel);
         return Combine(compilation.SyntaxDiagnostics, semantic);
     }
 
@@ -145,7 +170,7 @@ public sealed class KoineCompiler
 
         // Reuse the snapshot's single shared SemanticModel — build resolution once, reuse for
         // both validation and emission.
-        var semantic = new SemanticValidator().Validate(comp.SemanticModel);
+        var semantic = CreateValidator().Validate(comp.SemanticModel);
         var diagnostics = Filter(Combine(comp.SyntaxDiagnostics, semantic), filterOptions, files);
 
         // Success is computed from the *filtered* diagnostics (a config-promoted/warnings-as-errors

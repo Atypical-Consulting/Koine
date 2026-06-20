@@ -13,4 +13,5 @@ internal readonly record struct BuildPlan(
     string? DocsDir,
     TargetOptions Options,
     IReadOnlyDictionary<string, string>? DiagnosticSeverity = null,
-    bool WarningsAsErrors = false);
+    bool WarningsAsErrors = false,
+    IReadOnlyList<string>? Analyzers = null);

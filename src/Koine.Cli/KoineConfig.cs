@@ -32,7 +32,8 @@ internal sealed record KoineConfig(
     string? Baseline = null,
     IReadOnlyDictionary<string, TargetOptions>? Targets = null,
     IReadOnlyDictionary<string, string>? Severity = null,
-    IReadOnlyDictionary<string, string>? DiagnosticSeverity = null)
+    IReadOnlyDictionary<string, string>? DiagnosticSeverity = null,
+    IReadOnlyList<string>? Analyzers = null)
 {
     public static readonly KoineConfig Empty = new(null, null);
 
@@ -51,6 +52,7 @@ internal sealed record KoineConfig(
         var targets = new Dictionary<string, TargetBuilder>(StringComparer.Ordinal);
         var severity = new Dictionary<string, string>(StringComparer.Ordinal);
         var diagnosticSeverity = new Dictionary<string, string>(StringComparer.Ordinal);
+        List<string>? analyzers = null;
 
         foreach (var raw in text.Split('\n'))
         {
@@ -83,6 +85,18 @@ internal sealed record KoineConfig(
                     break;
                 case "baseline":
                     baseline = value;
+                    break;
+                case "analyzers":
+                    // External semantic-analyzer plugin assemblies (issue #69): a comma-separated list
+                    // of assembly paths, each loaded by AnalyzerLoader. Empty entries are dropped.
+                    analyzers = value
+                        .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                        .ToList();
+                    if (analyzers.Count == 0)
+                    {
+                        analyzers = null;
+                    }
+
                     break;
                 default:
                     // `targets.<name>.<rest>` (R16.1) and `check.severity.<CODE>` (issue #73);
@@ -120,7 +134,7 @@ internal sealed record KoineConfig(
             : targets.ToDictionary(kv => kv.Key, kv => kv.Value.Build(), StringComparer.Ordinal);
         IReadOnlyDictionary<string, string>? severityMap = severity.Count == 0 ? null : severity;
         IReadOnlyDictionary<string, string>? diagnosticSeverityMap = diagnosticSeverity.Count == 0 ? null : diagnosticSeverity;
-        return new KoineConfig(target, outDir, baseline, built, severityMap, diagnosticSeverityMap);
+        return new KoineConfig(target, outDir, baseline, built, severityMap, diagnosticSeverityMap, analyzers);
     }
 
     /// <summary>
