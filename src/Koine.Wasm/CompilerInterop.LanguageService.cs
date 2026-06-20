@@ -270,13 +270,47 @@ public static partial class CompilerInterop
             }
 
             var items = LanguageService.CompleteAt(text, line, character)
-                .Select(i => new WCompletionItem(i.Label, LspCompletionKind(i.Kind), i.Detail, i.Documentation))
+                .Select(i => new WCompletionItem(
+                    i.Label, LspCompletionKind(i.Kind), i.Detail, i.Documentation,
+                    i.InsertText, i.InsertTextFormat,
+                    i.CommitCharacters?.ToArray(), i.SortText, i.Data))
                 .ToArray();
             return SerializeCompletions(new WCompletionList(false, items));
         }
         catch
         {
             return SerializeCompletions(new WCompletionList(false, []));
+        }
+    }
+
+    /// <summary>
+    /// Signature help at a 0-based position in <paramref name="activeUri"/>. Mirrors the desktop LSP's
+    /// <c>textDocument/signatureHelp</c>: returns an LSP <c>SignatureHelp</c>
+    /// (<c>{ signatures, activeSignature, activeParameter }</c>) or the JSON literal <c>null</c>.
+    /// </summary>
+    [JSExport]
+    public static string SignatureHelp(string filesJson, string activeUri, int line, int character)
+    {
+        try
+        {
+            var docs = DeserializeFiles(filesJson).ToDictionary(f => f.Uri, f => f.Text, StringComparer.Ordinal);
+            var help = LanguageService.SignatureHelpAt(docs, activeUri, line, character);
+            if (help is null)
+            {
+                return "null";
+            }
+
+            var signatures = help.Signatures
+                .Select(s => new WSignatureInfo(
+                    s.Label,
+                    s.Parameters.Select(p => new WParameterInfo(p.Label)).ToArray()))
+                .ToArray();
+            var dto = new WSignatureHelp(signatures, help.ActiveSignature, help.ActiveParameter);
+            return JsonSerializer.Serialize(dto, LangJson.Default.WSignatureHelp);
+        }
+        catch
+        {
+            return "null";
         }
     }
 
@@ -309,6 +343,98 @@ public static partial class CompilerInterop
         {
             var symbols = LanguageService.DocumentSymbols(source).Select(ToLspSymbol).ToArray();
             return JsonSerializer.Serialize(symbols, LangJson.Default.WDocumentSymbolArray);
+        }
+        catch
+        {
+            return "[]";
+        }
+    }
+
+    /// <summary>
+    /// A flat, workspace-wide symbol search (LSP <c>workspace/symbol</c>): every declaration across the
+    /// merged workspace whose name case-insensitively subsequence-matches <paramref name="query"/>
+    /// (an empty query returns all). Returns a JSON <c>SymbolInformation[]</c>. Parity with the stdio LSP.
+    /// </summary>
+    [JSExport]
+    public static string WorkspaceSymbols(string filesJson, string query)
+    {
+        try
+        {
+            var docs = DeserializeFiles(filesJson).ToDictionary(f => f.Uri, f => f.Text, StringComparer.Ordinal);
+            var symbols = LanguageService.WorkspaceSymbols(docs, query)
+                .Select(s => new WWorkspaceSymbol(s.Name, LspSymbolKind(s.Kind), s.Uri, SpanRange(s.Range), s.ContainerName))
+                .ToArray();
+            return JsonSerializer.Serialize(symbols, LangJson.Default.WWorkspaceSymbolArray);
+        }
+        catch
+        {
+            return "[]";
+        }
+    }
+
+    /// <summary>
+    /// The collapsible regions of <paramref name="source"/> (LSP <c>textDocument/foldingRange</c>):
+    /// one <c>{ startLine, endLine }</c> (0-based, both inclusive) per multi-line block declaration.
+    /// Returns a JSON <c>FoldingRange[]</c>. Parity with the stdio LSP.
+    /// </summary>
+    [JSExport]
+    public static string FoldingRanges(string source)
+    {
+        try
+        {
+            var folds = LanguageService.FoldingRanges(source)
+                .Select(f => new WFoldingRange(
+                    Math.Max(0, f.Range.Line - 1),
+                    Math.Max(Math.Max(0, f.Range.Line - 1), f.Range.EndLine - 1)))
+                .ToArray();
+            return JsonSerializer.Serialize(folds, LangJson.Default.WFoldingRangeArray);
+        }
+        catch
+        {
+            return "[]";
+        }
+    }
+
+    /// <summary>
+    /// The selection-range chains for a set of positions (LSP <c>textDocument/selectionRange</c>):
+    /// <paramref name="positionsJson"/> is a JSON array of <c>{ line, character }</c> (0-based), and
+    /// the result is a parallel JSON array of nested <c>{ range, parent? }</c> chains. Parity with the
+    /// stdio LSP.
+    /// </summary>
+    [JSExport]
+    public static string SelectionRanges(string source, string positionsJson)
+    {
+        try
+        {
+            var positions = JsonSerializer.Deserialize(positionsJson, LangJson.Default.WInPositionArray) ?? [];
+            var chains = positions
+                .Select(p => ToLspSelectionRange(LanguageService.SelectionRangeAt(source, p.Line, p.Character)))
+                .ToArray();
+            return JsonSerializer.Serialize(chains, LangJson.Default.WSelectionRangeArray);
+        }
+        catch
+        {
+            return "[]";
+        }
+    }
+
+    /// <summary>
+    /// The code lenses of the active document (LSP <c>textDocument/codeLens</c>): one per top-level
+    /// declaration, annotated with a <c>"N references"</c> reference-count title. <paramref name="filesJson"/>
+    /// is the merged workspace (so cross-file references resolve) and <paramref name="activeUri"/> the
+    /// document to lens. The title is computed eagerly. Returns a JSON <c>CodeLens[]</c>. Parity with
+    /// the stdio LSP.
+    /// </summary>
+    [JSExport]
+    public static string CodeLenses(string filesJson, string activeUri)
+    {
+        try
+        {
+            var docs = DeserializeFiles(filesJson).ToDictionary(f => f.Uri, f => f.Text, StringComparer.Ordinal);
+            var lenses = LanguageService.CodeLenses(docs, activeUri)
+                .Select(l => new WCodeLens(SpanRange(l.Range), l.Title))
+                .ToArray();
+            return JsonSerializer.Serialize(lenses, LangJson.Default.WCodeLensArray);
         }
         catch
         {
@@ -648,6 +774,20 @@ public static partial class CompilerInterop
             s.Children.Select(ToLspSymbol).ToArray());
     }
 
+    private static WSelectionRange ToLspSelectionRange(SelectionRange? chain)
+    {
+        // A null chain still yields a degenerate selection range (empty range at doc start) so the
+        // result array stays parallel to the requested positions.
+        if (chain is null)
+        {
+            return new WSelectionRange(SpanRange(SourceSpan.None), null);
+        }
+
+        return new WSelectionRange(
+            SpanRange(chain.Range),
+            chain.Parent is null ? null : ToLspSelectionRange(chain.Parent));
+    }
+
     private static int LspSymbolKind(SymbolKind kind) => kind switch
     {
         SymbolKind.Namespace => 3,
@@ -767,8 +907,22 @@ public sealed record WMarkupContent(string Kind, string Value);
 /// <summary>LSP Hover.</summary>
 public sealed record WHoverResult(WMarkupContent Contents);
 
-/// <summary>LSP CompletionItem (kind is the numeric LSP <c>CompletionItemKind</c>).</summary>
-public sealed record WCompletionItem(string Label, int Kind, string? Detail, string? Documentation);
+/// <summary>
+/// LSP CompletionItem (kind is the numeric LSP <c>CompletionItemKind</c>). The trailing fields are
+/// optional/additive so the serialized shape stays backward-compatible: <c>InsertText</c> +
+/// <c>InsertTextFormat</c> (2 = snippet) carry a snippet body; <c>CommitCharacters</c>,
+/// <c>SortText</c> and <c>Data</c> mirror the editor-agnostic <c>CompletionItem</c>.
+/// </summary>
+public sealed record WCompletionItem(
+    string Label,
+    int Kind,
+    string? Detail,
+    string? Documentation,
+    string? InsertText = null,
+    int? InsertTextFormat = null,
+    string[]? CommitCharacters = null,
+    string? SortText = null,
+    string? Data = null);
 
 /// <summary>LSP CompletionList.</summary>
 public sealed record WCompletionList(bool IsIncomplete, WCompletionItem[] Items);
@@ -776,8 +930,32 @@ public sealed record WCompletionList(bool IsIncomplete, WCompletionItem[] Items)
 /// <summary>LSP Location.</summary>
 public sealed record WLocation(string Uri, WRange Range);
 
+/// <summary>LSP ParameterInformation: the parameter's display label.</summary>
+public sealed record WParameterInfo(string Label);
+
+/// <summary>LSP SignatureInformation: a callable's full label plus its parameters.</summary>
+public sealed record WSignatureInfo(string Label, WParameterInfo[] Parameters);
+
+/// <summary>LSP SignatureHelp: the resolved signatures plus the active signature/parameter indices.</summary>
+public sealed record WSignatureHelp(WSignatureInfo[] Signatures, int ActiveSignature, int ActiveParameter);
+
 /// <summary>LSP DocumentSymbol (recursive).</summary>
 public sealed record WDocumentSymbol(string Name, int Kind, WRange Range, WRange SelectionRange, WDocumentSymbol[] Children);
+
+/// <summary>LSP SymbolInformation (flat, workspace-wide): name, kind, location, and container.</summary>
+public sealed record WWorkspaceSymbol(string Name, int Kind, string Uri, WRange Range, string? ContainerName);
+
+/// <summary>LSP FoldingRange: a 0-based, both-inclusive collapsible line span.</summary>
+public sealed record WFoldingRange(int StartLine, int EndLine);
+
+/// <summary>LSP SelectionRange (recursive): a range plus the enclosing parent range it grows into.</summary>
+public sealed record WSelectionRange(WRange Range, WSelectionRange? Parent);
+
+/// <summary>LSP CodeLens: a range plus its resolved reference-count title (computed eagerly here).</summary>
+public sealed record WCodeLens(WRange Range, string? Title);
+
+/// <summary>Input shape: one requested position for selection ranges (0-based LSP coordinates).</summary>
+public sealed record WInPosition(int Line, int Character);
 
 /// <summary>LSP TextEdit.</summary>
 public sealed record WTextEdit(WRange Range, string NewText);
@@ -819,7 +997,13 @@ public sealed record WSourceFileDto(string Uri, string Text);
 [JsonSerializable(typeof(WCompletionList))]
 [JsonSerializable(typeof(WLocation))]
 [JsonSerializable(typeof(WLocation[]))]
+[JsonSerializable(typeof(WSignatureHelp))]
 [JsonSerializable(typeof(WDocumentSymbol[]))]
+[JsonSerializable(typeof(WWorkspaceSymbol[]))]
+[JsonSerializable(typeof(WFoldingRange[]))]
+[JsonSerializable(typeof(WSelectionRange[]))]
+[JsonSerializable(typeof(WCodeLens[]))]
+[JsonSerializable(typeof(WInPosition[]))]
 [JsonSerializable(typeof(WTextEdit[]))]
 [JsonSerializable(typeof(WPrepareRename))]
 [JsonSerializable(typeof(WWorkspaceEdit))]

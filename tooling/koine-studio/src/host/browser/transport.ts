@@ -120,8 +120,43 @@ export class WasmLspTransport implements LspTransport {
       case 'textDocument/definition':
         return [result(JSON.parse(api.Definition(this.filesJson(), uri ?? '', pos?.line ?? 0, pos?.character ?? 0)))];
 
+      case 'textDocument/signatureHelp':
+        return [result(JSON.parse(api.SignatureHelp(this.filesJson(), uri ?? '', pos?.line ?? 0, pos?.character ?? 0)))];
+
+      case 'workspace/symbol':
+        return [result(JSON.parse(api.WorkspaceSymbols(this.filesJson(), msg.params?.query ?? '')))];
+
       case 'textDocument/documentSymbol':
         return [result(JSON.parse(api.DocumentSymbols(this.docs.get(uri ?? '') ?? '')))];
+
+      case 'textDocument/foldingRange':
+        return [result(JSON.parse(api.FoldingRanges(this.docs.get(uri ?? '') ?? '')))];
+
+      case 'textDocument/selectionRange': {
+        const positions = JSON.stringify(msg.params?.positions ?? []);
+        return [result(JSON.parse(api.SelectionRanges(this.docs.get(uri ?? '') ?? '', positions)))];
+      }
+
+      case 'textDocument/codeLens': {
+        // The WASM export returns `{range, title}`; reshape to the LSP CodeLens `{range, command}`
+        // so the browser host matches the stdio LSP contract the studio client consumes.
+        const lenses = JSON.parse(api.CodeLenses(this.filesJson(), uri ?? '')) as Array<{
+          range: unknown;
+          title: string | null;
+        }>;
+        return [
+          result(
+            lenses.map((l) => ({
+              range: l.range,
+              command: l.title == null ? undefined : { title: l.title, command: '' },
+            })),
+          ),
+        ];
+      }
+
+      case 'codeLens/resolve':
+        // Titles are computed eagerly on textDocument/codeLens, so resolve is a pass-through.
+        return [result(msg.params ?? null)];
 
       case 'textDocument/formatting':
         return [result(JSON.parse(api.Format(this.docs.get(uri ?? '') ?? '')))];

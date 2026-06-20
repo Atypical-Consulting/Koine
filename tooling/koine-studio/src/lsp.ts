@@ -95,6 +95,14 @@ export interface CompletionItem {
   kind?: number;
   detail?: string | null;
   documentation?: string | null;
+  // Snippet support: insertText is the body, insertTextFormat 2 = snippet (1/undefined = plaintext).
+  insertText?: string | null;
+  insertTextFormat?: number | null;
+  // Characters that commit this item when typed; sortText orders the list (prefix < subsequence);
+  // data is an opaque round-trip token for completionItem/resolve.
+  commitCharacters?: string[] | null;
+  sortText?: string | null;
+  data?: string | null;
 }
 export interface CompletionList {
   isIncomplete: boolean;
@@ -108,6 +116,21 @@ export interface Location {
   range: Range;
 }
 
+// Standard LSP signature help (mirrors WASM WSignatureHelp / the desktop LSP). Koine has
+// no overloads, so `signatures` always holds exactly one entry.
+export interface ParameterInformation {
+  label: string;
+}
+export interface SignatureInformation {
+  label: string;
+  parameters: ParameterInformation[];
+}
+export interface SignatureHelp {
+  signatures: SignatureInformation[];
+  activeSignature: number;
+  activeParameter: number;
+}
+
 // Standard LSP DocumentSymbol tree. `kind` is the SymbolKind number (e.g. 5=Class,
 // 10=Enum, 22=EnumMember, 8=Field, 6=Method, 23=Struct, 13=Variable, 3=Namespace).
 export interface DocumentSymbol {
@@ -116,6 +139,41 @@ export interface DocumentSymbol {
   range: Range;
   selectionRange: Range;
   children?: DocumentSymbol[];
+}
+
+// Standard LSP SymbolInformation (flat, workspace-wide): the `workspace/symbol` result.
+// `kind` is the SymbolKind number (same scheme as DocumentSymbol). `containerName` is the
+// name of the enclosing declaration (a type's context, or a member's type).
+export interface WorkspaceSymbol {
+  name: string;
+  kind: number;
+  uri: string;
+  range: Range;
+  containerName?: string;
+}
+
+// Standard LSP FoldingRange: a collapsible region. `startLine`/`endLine` are 0-based and both
+// inclusive (the `textDocument/foldingRange` result), one per multi-line block declaration.
+export interface FoldingRange {
+  startLine: number;
+  endLine: number;
+}
+
+// Standard LSP SelectionRange (recursive): the range the editor expands to, plus the enclosing
+// `parent` range it grows into next (the `textDocument/selectionRange` result, one chain per
+// requested position, innermost first).
+export interface SelectionRange {
+  range: Range;
+  parent?: SelectionRange;
+}
+
+// Standard LSP CodeLens: an annotation pinned to `range` (a declaration's identifier span) whose
+// `command.title` is the reference-count label (`"N references"`, references-from-elsewhere). The
+// server fills the title eagerly, so `command` is present on the `textDocument/codeLens` result and
+// `codeLens/resolve` is a pass-through.
+export interface CodeLens {
+  range: Range;
+  command?: { title: string; command: string };
 }
 
 // Standard LSP TextEdit: replace `range` with `newText`.
@@ -543,9 +601,54 @@ export class KoineLsp {
     });
   }
 
+  /** Signature help for the call enclosing a 0-based position. Resolves to null when there is none. */
+  signatureHelp(line: number, character: number): Promise<SignatureHelp | null> {
+    return this.request<SignatureHelp | null>('textDocument/signatureHelp', {
+      textDocument: { uri: this.activeUri },
+      position: { line, character },
+    });
+  }
+
+  /** Workspace-wide symbol search (subsequence-matches `query`). Resolves to [] when nothing matches. */
+  async workspaceSymbols(query: string): Promise<WorkspaceSymbol[]> {
+    const res = await this.request<WorkspaceSymbol[] | null>('workspace/symbol', { query });
+    return res ?? [];
+  }
+
   /** Document outline as a DocumentSymbol tree. Resolves to [] when the server returns null. */
   async documentSymbols(): Promise<DocumentSymbol[]> {
     const res = await this.request<DocumentSymbol[] | null>('textDocument/documentSymbol', {
+      textDocument: { uri: this.activeUri },
+    });
+    return res ?? [];
+  }
+
+  /** Collapsible regions of the active document. Resolves to [] when the server returns null. */
+  async foldingRanges(): Promise<FoldingRange[]> {
+    const res = await this.request<FoldingRange[] | null>('textDocument/foldingRange', {
+      textDocument: { uri: this.activeUri },
+    });
+    return res ?? [];
+  }
+
+  /**
+   * Selection-range chains for a set of 0-based positions. Returns one chain per requested position,
+   * in parallel order (innermost first, each `parent` strictly enclosing its child).
+   */
+  async selectionRanges(positions: Position[]): Promise<SelectionRange[]> {
+    const res = await this.request<SelectionRange[] | null>('textDocument/selectionRange', {
+      textDocument: { uri: this.activeUri },
+      positions,
+    });
+    return res ?? [];
+  }
+
+  /**
+   * Code lenses of the active document — one per top-level declaration, annotated with a
+   * `"N references"` reference-count label. Resolves to [] when the server returns null.
+   */
+  async codeLenses(): Promise<CodeLens[]> {
+    const res = await this.request<CodeLens[] | null>('textDocument/codeLens', {
       textDocument: { uri: this.activeUri },
     });
     return res ?? [];
