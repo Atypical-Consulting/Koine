@@ -33,7 +33,7 @@ import { buildSourceZip } from './sourceZip';
 import { formatChord } from './platform';
 import { renderDiagrams } from './diagrams';
 import { renderGlossary, type GlossaryHandlers } from './glossary';
-import { createAssistantPanel, type AssistantPanel } from './aiPanel';
+import { createAssistantPanel, type AssistantPanel, type AssistantContext, type DomainIndex } from './aiPanel';
 import { buildShareUrl, clearModelHash, readModelFromHash, workspaceShareUrlOrNull } from './share';
 import { dirtyCount, handleBeforeUnload, saveAllDirtyBuffers, titleWithDirty } from './dirty';
 import { clashingRelPaths, isDirtyTrackable } from './sharedWorkspace';
@@ -1956,14 +1956,63 @@ export function init(): void {
         const s = loadSettings();
         return s.aiProvider === 'openai' ? s.aiModelOpenai : s.aiModel;
       },
-      getContext: () => {
+      getContext: async () => {
         const diagnostics = (diagnosticsByUri.get(activeUri) ?? []).map((d) => ({
           line: d.range.start.line + 1,
           col: d.range.start.character + 1,
           severity: (d.severity === 2 ? 'warning' : 'error') as 'warning' | 'error',
           message: d.message,
         }));
-        return { fileName: buffers.get(activeUri)?.name ?? 'model.koi', source: editor.getDoc(), diagnostics };
+        const base: AssistantContext = {
+          fileName: buffers.get(activeUri)?.name ?? 'model.koi',
+          source: editor.getDoc(),
+          diagnostics,
+        };
+        // Ground the assistant in the COMPILED domain structure (contexts/aggregates/relations +
+        // glossary coverage), built best-effort from the LSP. Any failing endpoint just drops the
+        // index — getContext never throws, so the chat stays usable even when the LSP is down.
+        try {
+          const [contextMap, glossaryModel] = await Promise.all([
+            lsp.contextMap().catch(() => null),
+            lsp.glossaryModel().catch(() => null),
+          ]);
+          const contexts = contextMap?.contexts ?? [];
+          // Scratch/empty models contribute nothing — keep the system prompt clean.
+          if (!contexts.length) return base;
+
+          const entries = glossaryModel?.entries ?? [];
+          // The aggregate root isn't exposed directly: derive it from the nested entities. Koine's
+          // `aggregate X root X` convention means the root entity usually shares the aggregate's name;
+          // else, if there's exactly one nested entity, use it; otherwise leave it blank.
+          const aggregates = entries
+            .filter((e) => e.kind === 'aggregate')
+            .map((agg) => {
+              const nested = entries.filter(
+                (e) => e.kind === 'entity' && e.qualifiedName.startsWith(agg.qualifiedName + '.'),
+              );
+              const root =
+                nested.find((e) => e.name === agg.name)?.name ??
+                (nested.length === 1 ? nested[0].name : '');
+              return { name: agg.name, root };
+            });
+
+          const domainIndex: DomainIndex = {
+            contexts,
+            aggregates,
+            relations: (contextMap?.relations ?? []).map((r) => ({
+              upstream: r.upstream,
+              downstream: r.downstream,
+              kind: r.kind,
+            })),
+            glossaryCoverage: {
+              documented: entries.filter((e) => e.doc != null).length,
+              total: entries.length,
+            },
+          };
+          return { ...base, domainIndex };
+        } catch {
+          return base;
+        }
       },
       onApplyModel: (source) => replaceActiveDoc(source),
       onOpenPrefs: () => prefs.open(),

@@ -8,11 +8,24 @@
 import { runAssistant, type AiProvider, type ChatMessage } from './ai';
 import { renderMarkdown } from './editor';
 
+/**
+ * The compiled domain structure (contexts/aggregates/relations + glossary coverage), so reviews and
+ * answers see the real shape of the model, not just the current file. Built best-effort from the LSP.
+ */
+export interface DomainIndex {
+  contexts: string[]; // bounded-context names
+  aggregates: { name: string; root: string }[]; // aggregate → its root entity
+  relations: { upstream: string; downstream: string; kind: string }[];
+  glossaryCoverage: { documented: number; total: number };
+}
+
 /** A snapshot of what's on screen, fed to the model as grounding context on every turn. */
 export interface AssistantContext {
   fileName: string;
   source: string;
   diagnostics: { line: number; col: number; severity: 'error' | 'warning'; message: string }[];
+  /** The compiled domain structure, when the host could build one (absent for scratch/empty models). */
+  domainIndex?: DomainIndex;
 }
 
 export interface AssistantPanelOptions {
@@ -25,8 +38,8 @@ export interface AssistantPanelOptions {
   getApiKey: () => string;
   /** The model id to use (provider-appropriate defaults handled in ai.ts). */
   getModel: () => string;
-  /** The current editor model + diagnostics, captured fresh on each send. */
-  getContext: () => AssistantContext;
+  /** The current editor model + diagnostics, captured fresh on each send (may be async). */
+  getContext: () => AssistantContext | Promise<AssistantContext>;
   /** Replace the active editor document with a generated model. */
   onApplyModel: (source: string) => void;
   /** Open Preferences (so the user can add their API key). */
@@ -72,8 +85,31 @@ Koine essentials:
 When you write or revise a model, output the COMPLETE model in a single \`\`\`koine fenced code block so the
 user can apply it in one click. Keep prose tight and DDD-focused.`;
 
-/** Build the per-turn system prompt: the primer plus the live model + diagnostics. */
-function buildSystem(ctx: AssistantContext): string {
+/**
+ * A compact, terse summary of the compiled domain structure for the system prompt. Omits any line
+ * whose list is empty; renders an aggregate as `name → root` when `root` is non-empty and differs
+ * from `name`, else just `name`. Returns '' for a fully-empty index so nothing is injected.
+ */
+export function formatDomainIndex(idx: DomainIndex): string {
+  const lines: string[] = [];
+  if (idx.contexts.length) lines.push(`- Contexts: ${idx.contexts.join(', ')}`);
+  if (idx.aggregates.length) {
+    const aggs = idx.aggregates.map((a) => (a.root && a.root !== a.name ? `${a.name} → ${a.root}` : a.name));
+    lines.push(`- Aggregates: ${aggs.join(', ')}`);
+  }
+  if (idx.relations.length) {
+    const rels = idx.relations.map((r) => `${r.upstream} → ${r.downstream} (${r.kind})`);
+    lines.push(`- Relations: ${rels.join(', ')}`);
+  }
+  if (idx.glossaryCoverage.total > 0) {
+    lines.push(`- Glossary: ${idx.glossaryCoverage.documented}/${idx.glossaryCoverage.total} documented`);
+  }
+  if (!lines.length) return '';
+  return ['Compiled domain structure:', ...lines].join('\n');
+}
+
+/** Build the per-turn system prompt: the primer plus the live model + diagnostics (+ domain index). */
+export function buildSystem(ctx: AssistantContext): string {
   const parts = [KOINE_PRIMER, ''];
   parts.push(`Current file: ${ctx.fileName}`);
   parts.push('Current model source:', '```koine', ctx.source.trimEnd(), '```', '');
@@ -84,6 +120,12 @@ function buildSystem(ctx: AssistantContext): string {
     }
   } else {
     parts.push('Current diagnostics: none (the model compiles).');
+  }
+  // Append the compiled domain structure after the diagnostics, separated by a blank line, only when
+  // the host built an index that renders to a non-empty summary.
+  if (ctx.domainIndex) {
+    const domain = formatDomainIndex(ctx.domainIndex);
+    if (domain) parts.push('', domain);
   }
   return parts.join('\n');
 }
@@ -171,7 +213,11 @@ export function createAssistantPanel(opts: AssistantPanelOptions): AssistantPane
     b.textContent = action.label;
     b.addEventListener('click', () => {
       if (busy()) return;
-      void send(action.build(opts.getContext()));
+      // Await getContext once and reuse it for both the action prompt and the system prompt.
+      void (async () => {
+        const ctx = await opts.getContext();
+        await send(action.build(ctx), ctx);
+      })();
     });
     quick.appendChild(b);
   }
@@ -212,7 +258,7 @@ export function createAssistantPanel(opts: AssistantPanelOptions): AssistantPane
     bubble.appendChild(apply);
   }
 
-  async function send(text: string): Promise<void> {
+  async function send(text: string, ctxOverride?: AssistantContext): Promise<void> {
     const prompt = text.trim();
     if (!prompt || busy()) return;
 
@@ -261,6 +307,10 @@ export function createAssistantPanel(opts: AssistantPanelOptions): AssistantPane
       transcript.scrollTop = transcript.scrollHeight;
     };
 
+    // Fetch the grounding context ONCE (a quick-action caller passes the one it already resolved, so
+    // getContext — which may hit the LSP to build the domain index — isn't run twice).
+    const ctx = ctxOverride ?? (await opts.getContext());
+
     aborter = new AbortController();
     setBusy(true);
     let full = '';
@@ -270,7 +320,7 @@ export function createAssistantPanel(opts: AssistantPanelOptions): AssistantPane
         baseUrl,
         apiKey,
         model: opts.getModel(),
-        system: buildSystem(opts.getContext()),
+        system: buildSystem(ctx),
         messages,
         signal: aborter.signal,
         onText: (delta) => {
