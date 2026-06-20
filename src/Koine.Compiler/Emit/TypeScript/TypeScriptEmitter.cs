@@ -20,6 +20,24 @@ namespace Koine.Compiler.Emit.TypeScript;
 /// </summary>
 public sealed partial class TypeScriptEmitter : IEmitter
 {
+    private readonly TsEmitterOptions _options;
+
+    /// <summary>The unconfigured emitter: source maps off, byte-identical to the historical output.</summary>
+    public TypeScriptEmitter()
+        : this(TsEmitterOptions.Default)
+    {
+    }
+
+    /// <summary>
+    /// Constructs the emitter with explicit <paramref name="options"/> (production-grade emit). The
+    /// default-options path (and the parameterless ctor that defers to it) emits byte-for-byte
+    /// identical TypeScript to the historical emitter.
+    /// </summary>
+    internal TypeScriptEmitter(TsEmitterOptions options)
+    {
+        _options = options;
+    }
+
     public string TargetName => "typescript";
 
     /// <summary>
@@ -84,7 +102,35 @@ public sealed partial class TypeScriptEmitter : IEmitter
             }
         }
 
+        // 3. Source maps (gated): attach the per-module declaration segments to the module's
+        // EmittedFile and emit a Source Map v3 sidecar alongside it. No-op when the flag is off
+        // (SourceMaps stays empty), so the default path is byte-identical.
+        if (emit.SourceMaps.Count > 0)
+        {
+            AttachSourceMaps(files, emit.SourceMaps);
+        }
+
         return files;
+    }
+
+    /// <summary>
+    /// Materializes the pending Source Map v3 sidecars: for each emitted module that produced a map,
+    /// stamps the declaration <see cref="SourceMapSegment"/>s onto the module's <see cref="EmittedFile"/>
+    /// and appends a sibling <c>&lt;module&gt;.ts.map</c> file holding the v3 JSON.
+    /// </summary>
+    private static void AttachSourceMaps(List<EmittedFile> files, IReadOnlyList<PendingSourceMap> pending)
+    {
+        foreach (PendingSourceMap map in pending)
+        {
+            var index = files.FindIndex(f => string.Equals(f.RelativePath, map.ModulePath, StringComparison.Ordinal));
+            if (index >= 0)
+            {
+                files[index] = files[index] with { SourceMap = map.Segments };
+            }
+
+            var json = SourceMapV3.Build(map.FileName, map.SourceName, map.Mappings);
+            files.Add(new EmittedFile(map.SidecarPath, json));
+        }
     }
 
     private void EmitType(
@@ -198,7 +244,7 @@ public sealed partial class TypeScriptEmitter : IEmitter
         sb.Append("}\n");
         return new EmittedFile(
             PathFor(ns, KindFolder.Repositories, iface),
-            Assemble(emit, ns, KindFolder.Repositories, sb.ToString()));
+            Assemble(emit, ns, KindFolder.Repositories, sb.ToString(), iface, agg.Span));
     }
 
     // ----------------------------------------------------------------------
@@ -320,6 +366,6 @@ public sealed partial class TypeScriptEmitter : IEmitter
         sb.Append(Indent).Append(name).Append("Match(self, cases);\n");
         sb.Append("}\n");
 
-        return new EmittedFile(PathFor(ns, KindFolder.Enums, name), Assemble(emit, ns, KindFolder.Enums, sb.ToString()));
+        return new EmittedFile(PathFor(ns, KindFolder.Enums, name), Assemble(emit, ns, KindFolder.Enums, sb.ToString(), name, @enum.Span));
     }
 }

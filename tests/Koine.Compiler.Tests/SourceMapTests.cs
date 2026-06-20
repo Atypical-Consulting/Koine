@@ -1,5 +1,7 @@
+using System.Text.Json;
 using Koine.Compiler.Emit;
 using Koine.Compiler.Emit.CSharp;
+using Koine.Compiler.Emit.TypeScript;
 using Koine.Compiler.Services;
 
 namespace Koine.Compiler.Tests;
@@ -81,6 +83,65 @@ public class SourceMapTests
         foreach (var f in defaultOff)
         {
             f.Contents.ShouldNotContain("#line ");
+            f.SourceMap.ShouldBeNull();
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // TypeScript backend (Task 4): a Source Map v3 sidecar + sourceMappingURL,
+    // gated on TsEmitterOptions.EmitSourceMaps. Off path stays byte-identical.
+    // ------------------------------------------------------------------
+
+    private static IReadOnlyList<EmittedFile> EmitTs(TsEmitterOptions options)
+    {
+        var result = new KoineCompiler().Compile(
+            new[] { new SourceFile("values.koi", ValueObjectFixture) },
+            new TypeScriptEmitter(options));
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+        return result.Files;
+    }
+
+    private static EmittedFile MoneyTsFile(IReadOnlyList<EmittedFile> files) =>
+        files.Single(f => f.RelativePath.EndsWith("Money.ts", StringComparison.Ordinal));
+
+    [Fact]
+    public void Ts_EmitSourceMaps_writes_a_v3_sidecar_and_sourceMappingURL()
+    {
+        var files = EmitTs(new TsEmitterOptions { EmitSourceMaps = true });
+        var money = MoneyTsFile(files);
+
+        // The module ends with a sourceMappingURL comment pointing at the sidecar.
+        money.Contents.TrimEnd().ShouldEndWith("//# sourceMappingURL=Money.ts.map");
+
+        // A sidecar *.map file exists alongside the module.
+        var sidecar = files.SingleOrDefault(f =>
+            f.RelativePath.EndsWith("Money.ts.map", StringComparison.Ordinal));
+        sidecar.ShouldNotBeNull();
+
+        // It parses as a Source Map v3 object with version 3 and a non-empty mappings.
+        using var doc = JsonDocument.Parse(sidecar.Contents);
+        JsonElement root = doc.RootElement;
+        root.GetProperty("version").GetInt32().ShouldBe(3);
+        root.GetProperty("file").GetString().ShouldBe("Money.ts");
+        root.GetProperty("sources").EnumerateArray().Select(e => e.GetString())
+            .ShouldContain("values.koi");
+        root.GetProperty("mappings").GetString().ShouldNotBeNullOrEmpty();
+    }
+
+    [Fact]
+    public void Ts_default_options_are_byte_identical_to_the_default_emitter()
+    {
+        var defaultOff = EmitTs(new TsEmitterOptions());
+        var unconfigured = new KoineCompiler().Compile(
+            new[] { new SourceFile("values.koi", ValueObjectFixture) },
+            new TypeScriptEmitter()).Files;
+
+        TestSupport.Render(defaultOff).ShouldBe(TestSupport.Render(unconfigured));
+
+        foreach (var f in defaultOff)
+        {
+            f.Contents.ShouldNotContain("//# sourceMappingURL=");
+            f.RelativePath.ShouldNotEndWith(".map");
             f.SourceMap.ShouldBeNull();
         }
     }

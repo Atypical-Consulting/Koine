@@ -73,7 +73,7 @@ public sealed partial class TypeScriptEmitter
         WriteEqualityComponents(sb, ctorMembers);
         sb.Append("}\n");
 
-        return new EmittedFile(PathFor(ns, KindFolder.ValueObjects, name), Assemble(emit, ns, KindFolder.ValueObjects, sb.ToString()));
+        return new EmittedFile(PathFor(ns, KindFolder.ValueObjects, name), Assemble(emit, ns, KindFolder.ValueObjects, sb.ToString(), name, vo.Span));
     }
 
     private void WriteConstructor(
@@ -362,7 +362,7 @@ public sealed partial class TypeScriptEmitter
         sb.Append("}\n");
 
         return new EmittedFile(PathFor(ns, isRoot ? KindFolder.Root : KindFolder.Entities, name),
-            Assemble(emit, ns, isRoot ? KindFolder.Root : KindFolder.Entities, sb.ToString()));
+            Assemble(emit, ns, isRoot ? KindFolder.Root : KindFolder.Entities, sb.ToString(), name, entity.Span));
     }
 
     private void WriteCommand(StringBuilder sb, EntityDecl entity, CommandDecl cmd, TypeScriptExpressionTranslator translator, TypeScriptTypeMapper typeMapper, ModelIndex index)
@@ -616,7 +616,7 @@ public sealed partial class TypeScriptEmitter
         sb.Append(Indent).Append("}\n");
         sb.Append("}\n");
 
-        return new EmittedFile(PathFor(ns, KindFolder.Events, name), Assemble(emit, ns, KindFolder.Events, sb.ToString()));
+        return new EmittedFile(PathFor(ns, KindFolder.Events, name), Assemble(emit, ns, KindFolder.Events, sb.ToString(), name, ev.Span));
     }
 
     // ----------------------------------------------------------------------
