@@ -30,4 +30,35 @@ public class R18CoverageTests
         report.IsComplete.ShouldBeFalse();
         report.Items.ShouldContain(i => i.State == CoverageState.Missing);
     }
+
+    /// <summary>
+    /// The stable JSON the <c>koine coverage --json</c> command prints: every billing construct
+    /// with its <c>State</c>, plus the <c>Target</c>/<c>Total</c>/<c>Covered</c>/<c>IsComplete</c>
+    /// rollups. Reviewing this snapshot is the review of what the CLI reports.
+    /// </summary>
+    [Fact]
+    public Task ToJson_renders_a_stable_coverage_report_for_billing()
+    {
+        var result = new KoineCompiler().Compile(TestSupport.BillingFixture, new CSharpEmitter());
+        var report = ModelCoverage.Compute(result.Model!, result.Files, "csharp");
+
+        return Verify(ModelCoverage.ToJson(report)).UseDirectory("Snapshots");
+    }
+
+    /// <summary>
+    /// The exit-code contract the <c>coverage</c> command maps onto: a complete report exits 0,
+    /// while a report with any <see cref="CoverageState.Missing"/> type (here: nothing emitted)
+    /// exits 1. This is process-free — it asserts the same expression the command returns.
+    /// </summary>
+    [Fact]
+    public void IsComplete_maps_to_the_command_exit_code()
+    {
+        var result = new KoineCompiler().Compile(TestSupport.BillingFixture, new CSharpEmitter());
+
+        var full = ModelCoverage.Compute(result.Model!, result.Files, "csharp");
+        (full.IsComplete ? 0 : 1).ShouldBe(0);
+
+        var empty = ModelCoverage.Compute(result.Model!, Array.Empty<EmittedFile>(), "csharp");
+        (empty.IsComplete ? 0 : 1).ShouldBe(1);
+    }
 }
