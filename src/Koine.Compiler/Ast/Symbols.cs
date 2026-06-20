@@ -68,6 +68,16 @@ public sealed class TypeSymbol : Symbol
         Declaration = declaration;
     }
 
+    /// <summary>
+    /// Downward navigation: the symbols this type declares — its fields (<see cref="MemberSymbol"/>)
+    /// or enum members (<see cref="EnumMemberSymbol"/>) in declaration order, plus the behavior
+    /// <see cref="ParameterSymbol"/>s interned for it. The inverse of a member's
+    /// <see cref="Symbol.ContainingSymbol"/>; populated by the <see cref="SymbolTable"/> builder (an
+    /// <c>init</c>-only list, source-compatible like <see cref="Symbol.ContainingSymbol"/>). Empty for
+    /// types with no members.
+    /// </summary>
+    public IReadOnlyList<Symbol> Members { get; init; } = Array.Empty<Symbol>();
+
     public override SymbolKind Kind => SymbolKind.Type;
 }
 
@@ -87,6 +97,9 @@ public sealed class MemberSymbol : Symbol
         OwnerType = ownerType;
         Member = member;
     }
+
+    /// <summary>The declaring type symbol — the typed view of <see cref="Symbol.ContainingSymbol"/>.</summary>
+    public TypeSymbol? ContainingType => ContainingSymbol as TypeSymbol;
 
     public override SymbolKind Kind => SymbolKind.Member;
 }
@@ -167,6 +180,13 @@ public sealed class ContextSymbol : Symbol
         Declaration = declaration;
     }
 
+    /// <summary>
+    /// Downward navigation: the <see cref="TypeSymbol"/>s declared in this bounded context (the inverse
+    /// of a type's <see cref="Symbol.ContainingSymbol"/>). Populated by the <see cref="SymbolTable"/>
+    /// builder (an <c>init</c>-only list, source-compatible like <see cref="Symbol.ContainingSymbol"/>).
+    /// </summary>
+    public IReadOnlyList<TypeSymbol> Types { get; init; } = Array.Empty<TypeSymbol>();
+
     public override SymbolKind Kind => SymbolKind.Context;
 }
 
@@ -180,6 +200,9 @@ public sealed class ParameterSymbol : Symbol
     {
         Declaration = declaration;
     }
+
+    /// <summary>The behavior's owning type symbol — the typed view of <see cref="Symbol.ContainingSymbol"/>.</summary>
+    public TypeSymbol? ContainingType => ContainingSymbol as TypeSymbol;
 
     public override SymbolKind Kind => SymbolKind.Parameter;
 }
@@ -210,6 +233,27 @@ public sealed class LambdaParameterSymbol : Symbol
     }
 
     public override SymbolKind Kind => SymbolKind.LambdaParameter;
+}
+
+/// <summary>
+/// Identity equality over interned <see cref="Symbol"/>s. Because the <see cref="SymbolTable"/> interns
+/// exactly one instance per declaration, reference identity <em>is</em> symbol identity — so this keys
+/// the binder's reverse reference index (<c>Symbol → references</c>) without depending on any structural
+/// equality the <see cref="Symbol"/> hierarchy never defines. Mirrors Roslyn's <c>SymbolEqualityComparer</c>.
+/// TARGET-AGNOSTIC.
+/// </summary>
+public sealed class SymbolEqualityComparer : IEqualityComparer<Symbol>
+{
+    /// <summary>The shared identity comparer.</summary>
+    public static readonly SymbolEqualityComparer Default = new();
+
+    private SymbolEqualityComparer()
+    {
+    }
+
+    public bool Equals(Symbol? x, Symbol? y) => ReferenceEquals(x, y);
+
+    public int GetHashCode(Symbol obj) => System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(obj);
 }
 
 /// <summary>
