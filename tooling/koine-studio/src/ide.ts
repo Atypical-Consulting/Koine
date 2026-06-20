@@ -225,6 +225,7 @@ function helpRows(): ShortcutRow[] {
   return [
     { keys: 'mod+K', description: 'Command palette' },
     { keys: 'mod+S', description: 'Save / format the active model' },
+    { keys: 'mod+Alt+S', description: 'Save all unsaved files' },
     { keys: 'mod+Shift+O', description: 'Open a folder of models' },
     { keys: 'mod+N', description: 'New scratch model' },
     { keys: 'mod+1', description: 'Preview C#' },
