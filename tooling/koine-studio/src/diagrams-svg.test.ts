@@ -4,7 +4,7 @@
 // without re-querying. Layout coordinates are NOT asserted (layout-lib-dependent); we assert
 // structure, the node DOM contract, and the per-diagram fallback robustness only.
 import { afterEach, describe, expect, test } from 'vitest';
-import { createSvgRenderer } from './diagrams-svg';
+import { createSvgRenderer, NODE_NAVIGATE_EVENT, type DiagramNodeNavigateDetail } from './diagrams-svg';
 import { createMermaidRenderer, mermaidDiagramsFor, stripMermaidFence } from './diagrams';
 import type { DocsFile, Diagram } from './lsp';
 
@@ -339,5 +339,137 @@ describe('mermaid source from the structured field', () => {
     expect(out).toHaveLength(1);
     expect(out[0].code).toBe('flowchart TD\n  P --> Q');
     expect(out[0].caption).toBe('Legacy');
+  });
+});
+
+describe('node navigation event (Task 4)', () => {
+  // A spanned node, when clicked, fires exactly one bubbling NODE_NAVIGATE_EVENT carrying the raw
+  // 1-based span (straight off the data-attrs). A null-span node is inert — clicking it fires nothing.
+  test('clicking a spanned node fires NODE_NAVIGATE_EVENT with the raw 1-based detail', async () => {
+    const files: DocsFile[] = [
+      file([
+        diagram({
+          nodes: [
+            {
+              id: 'order',
+              label: 'Order',
+              kind: 'aggregate-root',
+              qualifiedName: 'Ordering.Order',
+              sourceSpan: {
+                file: 'file:///ordering.koi',
+                line: 3,
+                column: 5,
+                endLine: 7,
+                endColumn: 10,
+                offset: 20,
+                length: 5,
+              },
+            },
+          ],
+          edges: [],
+        }),
+      ]),
+    ];
+
+    const container = ROOT();
+    await createSvgRenderer().render(container, files, 'light', () => true);
+
+    const events: DiagramNodeNavigateDetail[] = [];
+    container.addEventListener(NODE_NAVIGATE_EVENT, (e) => {
+      events.push((e as CustomEvent<DiagramNodeNavigateDetail>).detail);
+    });
+
+    const node = container.querySelector<SVGGElement>('.koi-svg-node[data-qname="Ordering.Order"]')!;
+    expect(node).not.toBeNull();
+    node.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+
+    // Exactly one event, bubbling up to the container.
+    expect(events).toHaveLength(1);
+    expect(events[0]).toEqual({
+      qualifiedName: 'Ordering.Order',
+      file: 'file:///ordering.koi',
+      line: 3,
+      column: 5,
+      endLine: 7,
+      endColumn: 10,
+    });
+  });
+
+  test('a node with sourceSpan: null is inert — clicking it fires nothing', async () => {
+    const files: DocsFile[] = [
+      file([
+        diagram({
+          nodes: [
+            {
+              id: 'money',
+              label: 'Money',
+              kind: 'value-object',
+              qualifiedName: 'Ordering.Money',
+              sourceSpan: null,
+            },
+          ],
+          edges: [],
+        }),
+      ]),
+    ];
+
+    const container = ROOT();
+    await createSvgRenderer().render(container, files, 'light', () => true);
+
+    let fired = 0;
+    container.addEventListener(NODE_NAVIGATE_EVENT, () => {
+      fired += 1;
+    });
+
+    const node = container.querySelector<SVGGElement>('.koi-svg-node[data-qname="Ordering.Money"]')!;
+    expect(node).not.toBeNull();
+    node.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+
+    expect(fired).toBe(0);
+  });
+
+  test('a span with a null file still navigates by qname but carries file: null', async () => {
+    // The compiler can emit a span whose `file` is absent (no data-file attr) while line/column are
+    // present. The node is still clickable; the detail's `file` is null so ide.ts can no-op safely.
+    const files: DocsFile[] = [
+      file([
+        diagram({
+          nodes: [
+            {
+              id: 'order',
+              label: 'Order',
+              kind: 'aggregate-root',
+              qualifiedName: 'Ordering.Order',
+              sourceSpan: {
+                file: null,
+                line: 3,
+                column: 5,
+                endLine: 7,
+                endColumn: 10,
+                offset: 20,
+                length: 5,
+              },
+            },
+          ],
+          edges: [],
+        }),
+      ]),
+    ];
+
+    const container = ROOT();
+    await createSvgRenderer().render(container, files, 'light', () => true);
+
+    const events: DiagramNodeNavigateDetail[] = [];
+    container.addEventListener(NODE_NAVIGATE_EVENT, (e) => {
+      events.push((e as CustomEvent<DiagramNodeNavigateDetail>).detail);
+    });
+
+    const node = container.querySelector<SVGGElement>('.koi-svg-node[data-qname="Ordering.Order"]')!;
+    expect(node).not.toBeNull();
+    node.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+
+    expect(events).toHaveLength(1);
+    expect(events[0].file).toBeNull();
+    expect(events[0].line).toBe(3);
   });
 });

@@ -19,6 +19,28 @@ import type { ELK, ElkNode, ElkExtendedEdge } from 'elkjs/lib/elk-api';
 
 type ElkConstructor = new () => ELK;
 
+/**
+ * The bubbling `CustomEvent` a node group dispatches when clicked (issue #93, Task 4). `ide.ts`
+ * listens for it ONCE on the diagrams container (delegated) and jumps the editor caret to the node's
+ * `.koi` declaration. Only nodes that carry a source span (i.e. have a `data-line`) dispatch it;
+ * span-less nodes stay inert.
+ */
+export const NODE_NAVIGATE_EVENT = 'koi-diagram-node-click';
+
+/**
+ * The `detail` of a {@link NODE_NAVIGATE_EVENT}: the node's qualified name plus its RAW 1-based source
+ * span, read straight off the node's data-attributes (no conversion here — `ide.ts` converts to a
+ * 0-based LSP position). `file` is the `data-file` `file://` uri, or `null` when the span had no file.
+ */
+export interface DiagramNodeNavigateDetail {
+  qualifiedName: string;
+  file: string | null;
+  line: number;
+  column: number;
+  endLine: number;
+  endColumn: number;
+}
+
 let elkPromise: Promise<ElkConstructor> | null = null;
 
 /** Boot elkjs once (cached). The bundled build runs in-thread (no Worker) so it survives Tauri CSP. */
@@ -66,13 +88,31 @@ function tagNode(g: SVGGElement, node: DiagramNode): void {
   g.setAttribute('data-qname', node.qualifiedName);
   if (node.kind) g.setAttribute('data-kind', node.kind);
   const span: SourceSpan | null = node.sourceSpan;
-  // A node with no position gets NO span attributes — Task 4 treats it as non-interactive.
+  // A node with no position gets NO span attributes AND no click handler — it stays inert.
   if (span) {
     if (span.file != null) g.setAttribute('data-file', span.file);
     g.setAttribute('data-line', String(span.line));
     g.setAttribute('data-column', String(span.column));
     g.setAttribute('data-end-line', String(span.endLine));
     g.setAttribute('data-end-column', String(span.endColumn));
+
+    // Spanned nodes are navigable: dispatch a bubbling event carrying the RAW 1-based span so a
+    // single delegated listener on the container (ide.ts) can jump to the `.koi` declaration. The
+    // detail mirrors the data-attrs exactly — no coordinate conversion happens here.
+    g.addEventListener('click', () => {
+      const detail: DiagramNodeNavigateDetail = {
+        qualifiedName: node.qualifiedName,
+        file: span.file,
+        line: span.line,
+        column: span.column,
+        endLine: span.endLine,
+        endColumn: span.endColumn,
+      };
+      g.dispatchEvent(new CustomEvent<DiagramNodeNavigateDetail>(NODE_NAVIGATE_EVENT, {
+        bubbles: true,
+        detail,
+      }));
+    });
   }
 }
 
