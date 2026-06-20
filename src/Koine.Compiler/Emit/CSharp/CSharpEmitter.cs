@@ -1769,12 +1769,17 @@ public sealed partial class CSharpEmitter : IEmitter
         // declaration's `.koi` origin, then `#line default` so generated-only trailing lines aren't
         // misattributed, and record the body's generated line range as one segment.
         var sourceFile = declSpan.File ?? ns;
+        // `#line` takes a C# string literal, so backslashes and quotes in the path must be escaped or
+        // a Windows path (e.g. C:\models\x.koi) or a quoted path would produce uncompilable output.
+        var sourceLiteral = sourceFile.Replace("\\", "\\\\", StringComparison.Ordinal)
+            .Replace("\"", "\\\"", StringComparison.Ordinal);
 
-        // The body begins on the next physical line. Count newlines already in the builder; the
-        // `#line` directive itself occupies one line, so the body's first line is +2 (1-based).
+        // `CountLines` already returns the 1-based line the builder cursor is on (newlines + 1), i.e.
+        // the line the `#line` directive itself is written on; the body therefore begins on the very
+        // next line.
         var linesBefore = CountLines(sb);
-        sb.Append("#line ").Append(declSpan.Line).Append(" \"").Append(sourceFile).Append("\"\n");
-        var generatedStart = linesBefore + 2; // line after the directive (1-based)
+        sb.Append("#line ").Append(declSpan.Line).Append(" \"").Append(sourceLiteral).Append("\"\n");
+        var generatedStart = linesBefore + 1; // line after the directive (1-based)
 
         sb.Append(body);
         // Body line count: a body always ends with a trailing newline, so its rendered lines are the

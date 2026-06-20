@@ -180,8 +180,10 @@ public sealed partial class TypeScriptEmitter
 
         // The declaration body begins on the line right after the import block (the blank-line
         // separator counts as a line, so the body's first physical line is the builder's current
-        // line count + 1, 1-based). Captured before the body is appended.
-        var bodyStartLine = CountNewlines(sb) + 1;
+        // line count + 1, 1-based). Captured before the body is appended — but only when source maps
+        // are on, so the default path skips the full-builder newline scan.
+        var emitMaps = _options.EmitSourceMaps && name is not null && !declSpan.IsNone;
+        var bodyStartLine = emitMaps ? CountNewlines(sb) + 1 : 0;
 
         sb.Append(body);
         if (!body.EndsWith('\n'))
@@ -197,7 +199,8 @@ public sealed partial class TypeScriptEmitter
 
         // Source maps on: append the sourceMappingURL comment and register a declaration-granularity
         // sidecar (one segment, the body's first generated line → the declaration's `.koi` origin).
-        var sourceFile = declSpan.File ?? ns;
+        // Source Map v3 `sources` are forward-slash URLs, so normalize OS separators (Windows paths).
+        var sourceFile = (declSpan.File ?? ns).Replace('\\', '/');
         var mapName = name + ".ts.map";
         sb.Append("//# sourceMappingURL=").Append(mapName).Append('\n');
 

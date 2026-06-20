@@ -195,8 +195,12 @@ public sealed partial class CSharpEmitter
             : Array.Empty<Member>();
         var translator = new CSharpExpressionTranslator(index, eventMembers, enumMemberToType, memberReceiver: "e", context: ContextOf(ns), options: _options);
         PolicyReaction r = policy.Reaction;
+        // Reference-only emit must not leak business logic: the translated argument expressions are
+        // elided to `…`, keeping only the command's parameter-name contract in the doc sketch.
         var argText = string.Join(", ", r.Args.Select(a =>
-            $"{a.Parameter}: {translator.TranslateTopLevel(a.Value, CSharpExpressionTranslator.NameMode.Property)}"));
+            _options.ReferenceOnly
+                ? $"{a.Parameter}: …"
+                : $"{a.Parameter}: {translator.TranslateTopLevel(a.Value, CSharpExpressionTranslator.NameMode.Property)}"));
         var sketch = $"{r.TargetType}.{r.CommandName}({argText})";
 
         var sb = new StringBuilder();

@@ -60,6 +60,42 @@ public class SourceMapTests
     }
 
     [Fact]
+    public void EmitSourceMaps_segment_starts_on_the_line_after_the_directive()
+    {
+        // Regression: the segment's generated start line must be exactly the physical line where the
+        // body begins — i.e. the line immediately after the `#line` directive (not one past it).
+        var files = Emit(CSharpEmitterOptions.Empty with { EmitSourceMaps = true });
+        var money = MoneyFile(files);
+
+        var lines = money.Contents.Split('\n');
+        var directiveIndex = Array.FindIndex(
+            lines, l => l.StartsWith("#line ", StringComparison.Ordinal) && l.Contains("values.koi", StringComparison.Ordinal));
+        directiveIndex.ShouldBeGreaterThanOrEqualTo(0);
+
+        // 1-based: the directive is on line (directiveIndex + 1); the body starts on the next line.
+        var expectedStart = directiveIndex + 2;
+        money.SourceMap!.Single().GeneratedStartLine.ShouldBe(expectedStart);
+    }
+
+    [Fact]
+    public void EmitSourceMaps_escapes_backslashes_and_quotes_in_the_line_path()
+    {
+        // A Windows-style path (backslashes) must be escaped so the `#line` string literal stays
+        // valid C#; the raw unescaped separators must not appear in the directive.
+        var result = new KoineCompiler().Compile(
+            new[] { new SourceFile(@"models\sub\values.koi", ValueObjectFixture) },
+            new CSharpEmitter(CSharpEmitterOptions.Empty with { EmitSourceMaps = true }));
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+        var money = MoneyFile(result.Files);
+
+        money.Contents.ShouldContain(@"#line ");
+        money.Contents.ShouldContain(@"models\\sub\\values.koi");   // escaped
+        // The emitted C# (with the escaped path) still compiles.
+        var (assembly, errors) = TestSupport.Compile(result.Files);
+        assembly.ShouldNotBeNull(string.Join("\n", errors));
+    }
+
+    [Fact]
     public void EmitSourceMaps_output_still_roslyn_compiles()
     {
         var files = Emit(CSharpEmitterOptions.Empty with { EmitSourceMaps = true });

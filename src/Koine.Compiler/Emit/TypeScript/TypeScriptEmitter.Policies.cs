@@ -48,9 +48,14 @@ public sealed partial class TypeScriptEmitter
             index, eventMembers, emit.EnumMemberToType, typeMapper, context, memberReceiver: "event");
 
         PolicyReaction r = policy.Reaction;
+        // Reference-only emit must not leak business logic: the translated argument expressions are
+        // elided to `…` (the doc sketch keeps only the parameter-name contract) and the reactionArgs
+        // body becomes the standard stub below.
         var mapped = r.Args
             .Select(a => (Param: TypeScriptNaming.ToCamelCase(a.Parameter),
-                          Value: translator.Translate(a.Value, TypeScriptExpressionTranslator.NameMode.Property)))
+                          Value: RefOnly
+                              ? "…"
+                              : translator.Translate(a.Value, TypeScriptExpressionTranslator.NameMode.Property)))
             .ToList();
 
         var argSketch = string.Join(", ", mapped.Select(m => $"{m.Param}: {m.Value}"));
@@ -78,7 +83,11 @@ public sealed partial class TypeScriptEmitter
         sb.Append(Indent).Append("/** The ").Append(TypeScriptNaming.ToCamelCase(r.CommandName))
           .Append(" arguments mapped from the triggering ").Append(policy.EventName).Append(". */\n");
         sb.Append(Indent).Append("protected reactionArgs(event: ").Append(eventType).Append(") {\n");
-        if (mapped.Count == 0)
+        if (RefOnly)
+        {
+            sb.Append(Indent).Append(Indent).Append(RefStubStatement).Append('\n');
+        }
+        else if (mapped.Count == 0)
         {
             sb.Append(Indent).Append(Indent).Append("return {};\n");
         }
