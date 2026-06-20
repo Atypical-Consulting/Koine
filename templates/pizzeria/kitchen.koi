@@ -31,8 +31,8 @@ context Kitchen version 1 {
 
   publishes TicketReady
 
-  // R13.3 — a module groups the line aggregate into a Kitchen.Line sub-namespace
-  // and sub-folder, mirroring Shop's `module Fulfillment`.
+  // R13.3 — a module groups the kitchen-line aggregate into a Kitchen.Line
+  // sub-namespace and sub-folder, keeping "the line" as its own slice of Kitchen.
   module Line {
 
     /// The kitchen-ticket aggregate: one ticket per order on the line. Being an

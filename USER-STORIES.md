@@ -902,6 +902,7 @@ _BRIEF §8 lists LSP/editor tooling as a v0 non-goal, but it is squarely in scop
 ## Notes
 
 - **R17.1 (TextMate grammar)** is already implemented — see [`tooling/koine-textmate`](tooling/) and the Rider/VS Code import steps in [`tooling/README.md`](tooling/README.md).
-- The [`demo/`](demo/) project exercises the full v0 surface across three bounded contexts and is the natural place to validate new stories end-to-end.
+- Example domains live in [`templates/`](templates/) — the single, CI-validated source of truth (issue #101). Each template is a folder of `.koi` files plus a `template.json` manifest (validated against [`templates/template.schema.json`](templates/template.schema.json)); `TemplatesValidationTests` compiles every template green, and the set powers the demo, Koine Studio's gallery, and the website playground.
+- The [`demo/`](demo/) project (`Pizzeria.Domain`) compiles the [`templates/pizzeria`](templates/pizzeria) template in place — six bounded contexts plus an external Gateway — exercising the full shipped surface, and is the natural place to validate new stories end-to-end.
 - Sequencing rationale: **R1–R4** sharpen the existing surface (expressions, optionality, diagnostics, docs) at low risk; **R5–R10** add the missing tactical behaviour (commands, events, lifecycle, factories, richer value objects, specifications/services/policies); **R11–R12** add the persistence & application abstractions; **R13–R15** unlock multi-file and strategic design; **R16–R17** prove target-agnosticism (TypeScript/Rust) and round out developer experience.
 

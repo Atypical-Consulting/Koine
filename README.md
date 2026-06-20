@@ -412,12 +412,55 @@ construct to the C# it emits.
 **Next up:** a **Rust** emitter (errors as `Result<T,E>` rather than exceptions) to further prove the
 semantic model is truly target-agnostic. The full roadmap lives in [`USER-STORIES.md`](USER-STORIES.md).
 
+## Templates
+
+[`templates/`](templates/) is the **single, CI-validated source of truth** for Koine's example domains.
+A *template* is a folder holding one or more `.koi` files plus a [`template.json`](templates/template.schema.json)
+manifest describing it. Every template is compiled green and every manifest is schema-validated on each
+build (`TemplatesValidationTests`), and the same set powers three places: the [demo](#demo) (below),
+Koine Studio's **template gallery**, and the [Playground](https://atypical-consulting.github.io/Koine/playground/)
+sample picker.
+
+Templates come in four difficulty levels — **starter**, **beginner**, **intermediate**, **advanced** (the schema reserves all four; `beginner` is unused so far):
+
+| Template | Difficulty | What it models |
+|----------|-----------|----------------|
+| [`starters/billing`](templates/starters/billing) | starter | Money, orders, and invariants — the canonical Koine starter |
+| [`starters/ordering`](templates/starters/ordering) | starter | An aggregate with a state machine — renders as a diagram |
+| [`starters/contextmap`](templates/starters/contextmap) | starter | Two bounded contexts and the relationship between them |
+| [`starters/values`](templates/starters/values) | starter | Smart enums with data, quantities, ranges, and derived fields |
+| [`ticketing`](templates/ticketing) | intermediate | A help-desk workflow with a ticket lifecycle and a cross-context SLA policy |
+| [`pizzeria`](templates/pizzeria) | intermediate | A six-context pizza shop (menu, ordering, kitchen, delivery, payment, promotions) + an external Gateway |
+| [`library`](templates/library) | intermediate | A lending library across five contexts — Book vs BookCopy, loans, reservations, fines |
+| [`saas-subscription`](templates/saas-subscription) | advanced | Multi-tenant subscriptions with trials, metered quotas, dunning, and a payment-provider ACL |
+
+### The `template.json` manifest
+
+Each template folder carries a `template.json` validated against
+[`templates/template.schema.json`](templates/template.schema.json):
+
+| Field | Meaning |
+|-------|---------|
+| `id` | Stable identifier — **must equal the folder name** |
+| `name` | Human-readable display name |
+| `tagline` | One-line summary shown in listings |
+| `description` | A paragraph describing what the template models |
+| `difficulty` | `starter` · `beginner` · `intermediate` · `advanced` — used to order and badge templates |
+| `tags` | Free-form keywords for search and filtering |
+| `contexts` | The bounded contexts the template defines |
+| `coreAggregate` | The headline aggregate that anchors the template |
+| `entryFile` | The primary `.koi` file to open first — **must name a file in the folder** |
+| `teaches` | The Koine concepts / DDD patterns a learner picks up |
+| `icon` | An icon identifier (emoji or icon name) for the template card |
+
 ## Demo
 
-[`demo/`](demo/) models a Shop domain across **six bounded contexts** tied together by a context map,
-and consumes the generated C# from a real .NET project (`dotnet build demo/Shop.Domain` regenerates
-and compiles it). Between the `.koi` models and `Samples.cs` it exercises **the full shipped feature
-set** — see [`demo/README.md`](demo/README.md) for the feature-to-location map.
+[`demo/`](demo/) consumes the generated C# from a real .NET project. It compiles straight from the
+**[`templates/pizzeria`](templates/pizzeria)** template — a pizzeria domain across **six bounded contexts**
+(plus an external card Gateway) tied together by a context map — so `dotnet build demo/Pizzeria.Domain`
+regenerates and compiles it, which makes building the demo the end-to-end proof that the pizzeria
+template emits compiling, runnable C#. Between the `.koi` template and `Samples.cs` it exercises **the
+full shipped feature set** — see [`demo/README.md`](demo/README.md) for the feature-to-location map.
 
 ## Contributing
 

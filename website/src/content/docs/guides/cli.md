@@ -35,14 +35,14 @@ Every subcommand that takes a model accepts either a single `.koi` file or a **d
 
 ```bash
 # one file
-koine build demo/Shop.Domain/Models/catalog.koi
+koine build templates/pizzeria/menu.koi
 
 # the whole context map, compiled together
-koine build demo/Shop.Domain/Models --out demo/Shop.Domain/Generated
+koine build templates/pizzeria --out demo/Pizzeria.Domain/Generated
 ```
 
 :::tip
-Real projects always point `build` at a directory. The Shop demo's MSBuild target runs `koine build Models --target csharp --out Generated` so the six contexts and their `contextmap` compile as a unit. See [Installation](/Koine/start/installation/) for wiring `build` into a `.csproj`.
+Real projects always point `build` at a directory. The pizzeria demo's MSBuild target runs `koine build templates/pizzeria --target csharp --out Generated` so the six contexts and their `contextmap` compile as a unit. See [Installation](/Koine/start/installation/) for wiring `build` into a `.csproj`.
 :::
 
 ## `koine build`
@@ -64,8 +64,8 @@ Parses and validates the model, then — if you ask for output — emits files.
 With no `--out`, `build` parses, validates, and reports diagnostics — but writes nothing. It's the fastest way to check a model is well-formed:
 
 ```bash
-koine build demo/Shop.Domain/Models
-# OK: demo/Shop.Domain/Models parsed and validated
+koine build templates/pizzeria
+# OK: templates/pizzeria parsed and validated
 ```
 
 Exit code is `0` when the model is valid, `1` when there is any error diagnostic.
@@ -75,11 +75,11 @@ Exit code is `0` when the model is valid, `1` when there is any error diagnostic
 Point `--out` at a directory to write the generated C#:
 
 ```bash
-koine build demo/Shop.Domain/Models --out demo/Shop.Domain/Generated
-# wrote 71 files to demo/Shop.Domain/Generated
+koine build templates/pizzeria --out demo/Pizzeria.Domain/Generated
+# wrote 91 files to demo/Pizzeria.Domain/Generated
 ```
 
-The emitter lays types out by context into namespace-mirroring folders (`Catalog/`, `Ordering/Order.cs`, …). Before writing, `build` **deletes the top-level folders it owns** under `--out` and regenerates them, so a type you renamed or removed never leaves a stale orphan behind. It only touches the namespace roots it produced this run — hand-written files elsewhere in the directory are left alone.
+The emitter lays types out by context into namespace-mirroring folders (`Menu/`, `Ordering/Order.cs`, …). Before writing, `build` **deletes the top-level folders it owns** under `--out` and regenerates them, so a type you renamed or removed never leaves a stale orphan behind. It only touches the namespace roots it produced this run — hand-written files elsewhere in the directory are left alone.
 
 :::caution
 `--out` is destructive *within the folders Koine generates*. Point it at a dedicated output directory (the demo uses `Generated/`, git-ignored), never at a folder that also holds files you wrote by hand.
@@ -90,9 +90,9 @@ The emitter lays types out by context into namespace-mirroring folders (`Catalog
 There are two ways to get a Markdown glossary. The `--glossary` flag writes one to a named file **independently** of `--target`/`--out`, so you can emit C# *and* a glossary in a single run:
 
 ```bash
-koine build demo/Shop.Domain/Models --out Generated --glossary shop.glossary.md
-# wrote glossary to shop.glossary.md
-# wrote 71 files to Generated
+koine build templates/pizzeria --out Generated --glossary pizzeria.glossary.md
+# wrote glossary to pizzeria.glossary.md
+# wrote 91 files to Generated
 ```
 
 Alternatively, `--target glossary` makes the glossary the primary output (paired with `--out`). Either way the glossary is grouped by context (each heading shows its `version`), then by type, listing fields, derived fields, and business rules.
@@ -125,8 +125,8 @@ A structured `targets.<name> = { … }` block (per-target namespace maps, `insta
 Canonically formats `.koi` source. The formatter is a deterministic, **idempotent** token-stream reprinter: running it twice produces the same bytes as running it once. Point it at a file or a directory (every `.koi` underneath is formatted).
 
 ```bash
-koine fmt demo/Shop.Domain/Models
-# formatted demo/Shop.Domain/Models/catalog.koi
+koine fmt templates/pizzeria
+# formatted templates/pizzeria/menu.koi
 # formatted 1 of 7 file(s)
 ```
 
@@ -178,8 +178,8 @@ Without `--force`, `init` will not clobber your work: if any scaffold file alrea
 Like `build`, but it stays running and **re-emits on every change**. It watches the input's directory (recursively) for `*.koi` edits, debounces a burst of saves, and runs a fresh build for each batch — fast feedback while you model. It accepts the same flags as `build` (`--target`, `--out`, `--config`); `--out` makes it re-emit C# on save, while omitting it gives you continuous validation.
 
 ```bash
-koine watch demo/Shop.Domain/Models --out demo/Shop.Domain/Generated
-# watching demo/Shop.Domain/Models for *.koi changes — press Ctrl+C to stop
+koine watch templates/pizzeria --out demo/Pizzeria.Domain/Generated
+# watching templates/pizzeria for *.koi changes — press Ctrl+C to stop
 ```
 
 Press **Ctrl+C** to stop; `watch` unwinds cleanly and exits `0`. Like `build`, `--target`/`--out` fall back to a discovered (or `--config`) `koine.config` when omitted.
@@ -272,8 +272,8 @@ file:line:col: severity KOIxxxx: message
 For example, a typo'd type name:
 
 ```bash
-koine build demo/Shop.Domain/Models
-# catalog.koi:14:18: error KOI0101: unknown type 'Currancy' — did you mean 'Currency'?
+koine build templates/pizzeria
+# menu.koi:14:18: error KOI0101: unknown type 'Currancy' — did you mean 'Currency'?
 ```
 
 Three things make these diagnostics worth reading:
