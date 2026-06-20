@@ -47,3 +47,30 @@ Koine.Compiler.Emit.Docs.DiagramNode.Stereotype.get -> string?
 Koine.Compiler.Emit.Docs.DiagramNode.Stereotype.init -> void
 Koine.Compiler.Emit.Docs.DocsEmitter.EmitDiagrams(Koine.Compiler.Ast.KoineModel! model) -> System.Collections.Generic.IReadOnlyDictionary<string!, System.Collections.Generic.IReadOnlyList<Koine.Compiler.Emit.Docs.DiagramDescriptor!>!>!
 Koine.Compiler.Emit.EmitterRegistry.SupportedList.get -> string!
+Koine.Compiler.Ast.CoverageItem
+Koine.Compiler.Ast.CoverageItem.Context.get -> string!
+Koine.Compiler.Ast.CoverageItem.Context.init -> void
+Koine.Compiler.Ast.CoverageItem.CoverageItem(string! Kind, string! Name, string! Context, Koine.Compiler.Ast.CoverageState State) -> void
+Koine.Compiler.Ast.CoverageItem.Kind.get -> string!
+Koine.Compiler.Ast.CoverageItem.Kind.init -> void
+Koine.Compiler.Ast.CoverageItem.Name.get -> string!
+Koine.Compiler.Ast.CoverageItem.Name.init -> void
+Koine.Compiler.Ast.CoverageItem.State.get -> Koine.Compiler.Ast.CoverageState
+Koine.Compiler.Ast.CoverageItem.State.init -> void
+Koine.Compiler.Ast.CoverageReport
+Koine.Compiler.Ast.CoverageReport.Covered.get -> int
+Koine.Compiler.Ast.CoverageReport.CoverageReport(string! Target, System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.CoverageItem!>! Items) -> void
+Koine.Compiler.Ast.CoverageReport.IsComplete.get -> bool
+Koine.Compiler.Ast.CoverageReport.Items.get -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.CoverageItem!>!
+Koine.Compiler.Ast.CoverageReport.Items.init -> void
+Koine.Compiler.Ast.CoverageReport.Target.get -> string!
+Koine.Compiler.Ast.CoverageReport.Target.init -> void
+Koine.Compiler.Ast.CoverageReport.Total.get -> int
+Koine.Compiler.Ast.CoverageState
+Koine.Compiler.Ast.CoverageState.Covered = 0 -> Koine.Compiler.Ast.CoverageState
+Koine.Compiler.Ast.CoverageState.Missing = 2 -> Koine.Compiler.Ast.CoverageState
+Koine.Compiler.Ast.CoverageState.Partial = 1 -> Koine.Compiler.Ast.CoverageState
+Koine.Compiler.Ast.ModelCoverage
+static Koine.Compiler.Ast.ModelCoverage.Compute(Koine.Compiler.Ast.KoineModel! model, System.Collections.Generic.IReadOnlyList<Koine.Compiler.Emit.EmittedFile!>! emitted, string! target) -> Koine.Compiler.Ast.CoverageReport!
+static Koine.Compiler.Ast.ModelCoverage.RenderText(Koine.Compiler.Ast.CoverageReport! report) -> string!
+static Koine.Compiler.Ast.ModelCoverage.ToJson(Koine.Compiler.Ast.CoverageReport! report) -> string!

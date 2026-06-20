@@ -29,7 +29,7 @@ public class AstPurityTests
         {
             foreach (Type referenced in ReferencedTypes(t))
             {
-                if (IsEmitType(referenced))
+                if (IsEmitType(referenced) && !IsSanctionedReference(referenced))
                 {
                     violations.Add($"{t.FullName} references {referenced.FullName}");
                 }
@@ -52,6 +52,15 @@ public class AstPurityTests
 
     private static bool IsEmitType(Type t) =>
         (t.Namespace ?? string.Empty).StartsWith(EmitNamespace, StringComparison.Ordinal);
+
+    /// <summary>
+    /// The one emitter type the AST is allowed to name: <see cref="Koine.Compiler.Emit.EmittedFile"/>.
+    /// It is itself TARGET-AGNOSTIC — a (path, contents) pair with no C#/TypeScript concept — and is the
+    /// currency the model-coverage analyzer (<see cref="Koine.Compiler.Ast.ModelCoverage"/>) reads to
+    /// decide which declared types a target emitted. The guard still forbids every other emitter type.
+    /// </summary>
+    private static bool IsSanctionedReference(Type t) =>
+        t == typeof(Koine.Compiler.Emit.EmittedFile);
 
     /// <summary>Every type a declaration touches: base, interfaces, field/property/method signatures, and their generic args.</summary>
     private static IEnumerable<Type> ReferencedTypes(Type t)

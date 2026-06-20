@@ -8,7 +8,7 @@ single-context model; `pizzeria-*` for a multi-context domain). Validate everyth
 Topics you can request via `koine_reference("<topic>")`:
 `overview`, `types`, `value`, `entity`, `aggregate`, `enum`, `quantity`, `range`, `expressions`,
 `invariants`, `command`, `event`, `state`, `factory`, `repository`, `service`, `readmodel`, `query`,
-`spec`, `policy`, `integration-event`, `module`, `import`, `context-map`, `versioning`.
+`spec`, `policy`, `integration-event`, `module`, `import`, `context-map`, `versioning`, `coverage`.
 
 <!-- topic: overview -->
 ## Overview & file shape
@@ -446,3 +446,13 @@ context Catalog version 2 {
   }
 }
 ```
+
+<!-- topic: coverage -->
+## Coverage (`koine_coverage`)
+
+`koine_coverage(files, target)` reports which of a model's declared types the chosen `target`
+actually emits — a quick way to confirm a target covers your whole model, or to spot what a
+not-yet-complete emitter (e.g. an in-progress `typescript`) still skips. Each declared
+value/entity/aggregate/enum/event/integration-event/read-model/query is matched against the
+generated output and reported as `Covered` or `Missing`; the report carries `Total`/`Covered`
+rollups and an `IsComplete` flag (true when nothing is `Missing`).

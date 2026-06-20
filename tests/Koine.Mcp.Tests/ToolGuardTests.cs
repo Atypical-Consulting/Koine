@@ -149,4 +149,23 @@ public sealed class ToolGuardTests
         compileDisabled.Diagnostics.ShouldNotContain(d => d.Code == "KOI0311");
         validateDisabled.Diagnostics.Count.ShouldBe(compileDisabled.Diagnostics.Count);
     }
+
+    // ---- koine_coverage shares the same input guard (no NRE / silent file drop) ----
+
+    [Fact]
+    public void Coverage_with_invalid_input_returns_an_empty_report_without_crashing()
+    {
+        // Without the guard a null source NREs in the compile path (finding 7) and duplicate paths
+        // silently drop a file (finding 3). Coverage surfaces no diagnostics, so the guard degrades
+        // both to an empty report rather than throwing or miscounting.
+        var nullSource = CoverageTool.Coverage(new[] { new KoineFile("a.koi", null!) });
+        nullSource.Items.ShouldBeEmpty();
+
+        var duplicate = CoverageTool.Coverage(new[]
+        {
+            new KoineFile("dup.koi", "context A { enum Color { Red } }"),
+            new KoineFile("dup.koi", "context B { enum Shade { Dark } }"),
+        });
+        duplicate.Items.ShouldBeEmpty();
+    }
 }
