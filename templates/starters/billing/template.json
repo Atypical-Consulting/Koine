@@ -1,0 +1,20 @@
+{
+  "id": "billing",
+  "name": "Billing",
+  "tagline": "Money, orders, and invariants — the canonical Koine starter.",
+  "description": "A small billing context that models value objects with invariants (Money, Email), an entity (Customer), and an Order aggregate with a status state and computed order lines. It is the gentlest end-to-end tour of Koine's core building blocks.",
+  "difficulty": "starter",
+  "tags": ["billing", "orders", "money", "starter"],
+  "contexts": ["Billing"],
+  "coreAggregate": "Order",
+  "entryFile": "billing.koi",
+  "teaches": [
+    "value objects with invariants",
+    "enums",
+    "entities with identity",
+    "aggregates and aggregate roots",
+    "computed fields",
+    "regex (matches) invariants"
+  ],
+  "icon": "💳"
+}
