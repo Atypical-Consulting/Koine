@@ -35,7 +35,7 @@ const SAMPLE: Template[] = [
 
 function makeCallbacks(): WelcomeCallbacks {
   return {
-    onNewScratch: vi.fn(),
+    onNewModel: vi.fn(),
     onOpenFolder: vi.fn(),
     onOpenRecent: vi.fn(),
     onOpenExample: vi.fn(),
