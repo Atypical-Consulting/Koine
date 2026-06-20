@@ -53,9 +53,12 @@ public class R3DiagnosticsTests
             "  value B { : Int }\n" + // missing name
             "  value D { y Int }\n" + // missing colon
             "}\n";
+        // Diagnose is now error-tolerant: it reports every syntax error in one pass AND runs the
+        // semantic validator over the recovered partial model (so unrelated semantic diagnostics may
+        // also appear). The contract under test is that all three syntax errors surface together.
         var diags = Diagnose(src);
-        (diags.Count >= 3).ShouldBeTrue($"expected ≥3 syntax errors, got {diags.Count}");
-        diags.ShouldAllBe(d => d.Code == DiagnosticCodes.SyntaxError);
+        var syntaxErrors = diags.Where(d => d.Code == DiagnosticCodes.SyntaxError).ToList();
+        (syntaxErrors.Count >= 3).ShouldBeTrue($"expected ≥3 syntax errors, got {syntaxErrors.Count}");
     }
 
     // ---- R3.3 did-you-mean -------------------------------------------------

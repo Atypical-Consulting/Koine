@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using Koine.Cli.Infrastructure;
 using Koine.Compiler.Ast;
+using Koine.Compiler.Diagnostics;
 using Koine.Compiler.Services;
 using Spectre.Console.Cli;
 
@@ -105,7 +106,10 @@ internal sealed class CheckCommand : Command<CheckSettings>
         }
 
         var (parsed, diagnostics) = compiler.Parse(sources);
-        if (parsed is null)
+        // Parsing is now error-tolerant and returns a partial model even for broken input, so a
+        // null check alone no longer detects a failed parse: a syntax error must still fail the
+        // compatibility check rather than feed a half-recovered model into the comparison.
+        if (parsed is null || diagnostics.Any(d => d.Severity == DiagnosticSeverity.Error))
         {
             DiagnosticPrinter.Print(diagnostics, sources, path);
             Console.Error.WriteLine($"error: {label} model failed to parse");

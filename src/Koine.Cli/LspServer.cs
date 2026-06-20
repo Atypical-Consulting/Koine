@@ -21,6 +21,20 @@ internal sealed class LspServer
 {
     private readonly KoineCompiler _compiler = new();
     private readonly KoineLanguageService _ls = new();
+
+    /// <summary>
+    /// Parses the workspace but treats a syntax error as "no usable model" for the output-producing
+    /// endpoints (glossary, docs, set-doc, compatibility check). The compiler core is now
+    /// error-tolerant and returns a partial model even for broken input, but these endpoints emit
+    /// derived artifacts and must keep their original contract: broken input yields no output.
+    /// </summary>
+    private (Koine.Compiler.Ast.KoineModel? Model, IReadOnlyList<Diagnostic> Diagnostics) ParseUsable(IReadOnlyList<SourceFile> sources)
+    {
+        var (model, diagnostics) = _compiler.Parse(sources);
+        var usable = diagnostics.Any(d => d.Severity == DiagnosticSeverity.Error) ? null : model;
+        return (usable, diagnostics);
+    }
+
     private readonly SemanticTokenProvider _semanticTokens = new();
     private readonly Dictionary<string, string> _docs = new(StringComparer.Ordinal);
 
@@ -943,7 +957,7 @@ internal sealed class LspServer
     private object? GlossaryResultJson(JsonElement root)
     {
         var sources = Workspace().Select(kv => new SourceFile(kv.Key, kv.Value)).ToList();
-        var (model, _) = _compiler.Parse(sources);
+        var (model, _) = ParseUsable(sources);
         if (model is null)
         {
             return new Dictionary<string, object?> { ["markdown"] = "" };
@@ -968,7 +982,10 @@ internal sealed class LspServer
         }
 
         var sources = Workspace().Select(kv => new SourceFile(kv.Key, kv.Value)).ToList();
-        var (model, _) = _compiler.Parse(sources);
+        // ParseUsable (not raw Parse) so broken input yields the empty map, matching the other
+        // output-producing endpoints: error-tolerant parsing now returns a partial model, which we
+        // must not surface as a half-recovered context map.
+        var (model, _) = ParseUsable(sources);
         if (model is null)
         {
             return EmptyContextMap();
@@ -1000,7 +1017,7 @@ internal sealed class LspServer
         }
 
         var sources = Workspace().Select(kv => new SourceFile(kv.Key, kv.Value)).ToList();
-        var (model, _) = _compiler.Parse(sources);
+        var (model, _) = ParseUsable(sources);
         if (model is null)
         {
             return new Dictionary<string, object?> { ["entries"] = Array.Empty<object>() };
@@ -1043,7 +1060,7 @@ internal sealed class LspServer
             : string.Empty;
 
         var sources = Workspace().Select(kv => new SourceFile(kv.Key, kv.Value)).ToList();
-        var (model, _) = _compiler.Parse(sources);
+        var (model, _) = ParseUsable(sources);
         if (model is null)
         {
             return new Dictionary<string, object?> { ["uri"] = null, ["edits"] = Array.Empty<object>() };
@@ -1094,7 +1111,7 @@ internal sealed class LspServer
     private object? DocsResultJson()
     {
         var sources = Workspace().Select(kv => new SourceFile(kv.Key, kv.Value)).ToList();
-        var (model, _) = _compiler.Parse(sources);
+        var (model, _) = ParseUsable(sources);
         if (model is null)
         {
             return new Dictionary<string, object?> { ["files"] = Array.Empty<object>() };
@@ -1154,7 +1171,7 @@ internal sealed class LspServer
         }
 
         // 4. Parse the baseline model.
-        var (baselineModel, baselineDiags) = _compiler.Parse(baselineSources);
+        var (baselineModel, baselineDiags) = ParseUsable(baselineSources);
         if (baselineModel is null)
         {
             return ErrorResult("baseline failed to parse: " + string.Join("; ", baselineDiags.Select(d => d.Message)));
@@ -1162,7 +1179,7 @@ internal sealed class LspServer
 
         // 5. Build the current model from the merged workspace.
         var sources = Workspace().Select(kv => new SourceFile(kv.Key, kv.Value)).ToList();
-        var (currentModel, currentDiags) = _compiler.Parse(sources);
+        var (currentModel, currentDiags) = ParseUsable(sources);
         if (currentModel is null)
         {
             return ErrorResult("current model failed to parse: " + string.Join("; ", currentDiags.Select(d => d.Message)));

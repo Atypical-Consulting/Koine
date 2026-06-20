@@ -114,15 +114,71 @@ public sealed class KoineModelBuilderVisitor : KoineParserBaseVisitor<object?>
             : (int?)null;
 
         return new ContextNode(
-            ctx.Identifier().GetText(), types, specs, services, policies, imports, moduleNames, publishes, subscribes)
+            NameOf(ctx.Identifier()), types, specs, services, policies, imports, moduleNames, publishes, subscribes)
         {
             Span = SpanOf(ctx),
             NameSpan = SpanOf(ctx.Identifier()),
             Doc = DocFor(ctx),
             LeadingTrivia = LeadingTriviaFor(ctx),
             TrailingTrivia = TrailingTriviaFor(ctx),
-            Version = version
+            Version = version,
+            Errors = HarvestErrors(ctx)
         };
+    }
+
+    /// <summary>
+    /// Walks the ANTLR error-recovery subtree under a context and surfaces every recovery point
+    /// as a target-agnostic <see cref="ErrorNode"/> marker, instead of silently dropping it
+    /// (resilient syntax). Two cases are collected:
+    /// <list type="bullet">
+    /// <item>each <see cref="IErrorNode"/> terminal for a skipped/unexpected token → a marker over
+    /// that token's source range;</item>
+    /// <item>each ANTLR-synthesized <b>missing</b> token (single-token insertion during recovery,
+    /// detected by its zero/negative geometry — <c>StartIndex &gt; StopIndex</c>) → a marker with
+    /// <see cref="KoineNode.IsMissing"/> set and a zero-length span at the insertion point.</item>
+    /// </list>
+    /// </summary>
+    private IReadOnlyList<ErrorNode> HarvestErrors(IParseTree node)
+    {
+        var errors = new List<ErrorNode>();
+        CollectErrors(node, errors);
+        return errors.Count == 0 ? [] : errors;
+    }
+
+    private void CollectErrors(IParseTree node, List<ErrorNode> sink)
+    {
+        if (node is IErrorNode errorNode)
+        {
+            IToken token = errorNode.Symbol;
+
+            // An ANTLR-inserted phantom token (single-token insertion) has no backing source text.
+            // ANTLR renders such a token's Text as the synthesized "<missing '...'>" form (and gives
+            // it zero/negative geometry, StartIndex > StopIndex). A genuinely skipped or unexpected
+            // token carries its real source text and geometry. Detect the phantom by either signal.
+            var missing = token.StartIndex > token.StopIndex
+                || (token.Text is { } txt && txt.StartsWith("<missing", StringComparison.Ordinal));
+            if (missing)
+            {
+                // Zero-length point span at the insertion point; the phantom occupies no source.
+                var point = TokenGeometry.SpanOf(token, _file) with { Length = 0, EndLine = token.Line, EndColumn = token.Column + 1 };
+                sink.Add(new ErrorNode(token.Text ?? string.Empty) { Span = point, IsMissing = true });
+            }
+            else
+            {
+                sink.Add(new ErrorNode(token.Text ?? string.Empty)
+                {
+                    Span = TokenGeometry.SpanOf(token, _file),
+                    LeafText = token.Text
+                });
+            }
+
+            return;
+        }
+
+        for (var i = 0; i < node.ChildCount; i++)
+        {
+            CollectErrors(node.GetChild(i), sink);
+        }
     }
 
     /// <summary>
@@ -243,7 +299,7 @@ public sealed class KoineModelBuilderVisitor : KoineParserBaseVisitor<object?>
         KoineParser.ModuleDeclContext ctx, IReadOnlyList<string> parentPath,
         List<TypeDecl> types, List<string> moduleNames)
     {
-        var name = ctx.Identifier().GetText();
+        var name = NameOf(ctx.Identifier());
         moduleNames.Add(name);
         var path = parentPath.Append(name).ToList();
 
@@ -272,7 +328,7 @@ public sealed class KoineModelBuilderVisitor : KoineParserBaseVisitor<object?>
     };
 
     private SpecDecl BuildSpec(KoineParser.SpecDeclContext ctx) =>
-        new(ctx.Identifier().GetText(), ctx.typeName().GetText(), BuildExpression(ctx.expression()))
+        new(NameOf(ctx.Identifier()), ctx.typeName().GetText(), BuildExpression(ctx.expression()))
         {
             Span = SpanOf(ctx),
             NameSpan = SpanOf(ctx.Identifier()),
@@ -296,7 +352,7 @@ public sealed class KoineModelBuilderVisitor : KoineParserBaseVisitor<object?>
                 useCases.Add(BuildUseCase(uc));
             }
         }
-        return new ServiceDecl(ctx.Identifier().GetText(), operations, useCases)
+        return new ServiceDecl(NameOf(ctx.Identifier()), operations, useCases)
         {
             Span = SpanOf(ctx),
             NameSpan = SpanOf(ctx.Identifier()),
@@ -312,7 +368,7 @@ public sealed class KoineModelBuilderVisitor : KoineParserBaseVisitor<object?>
             ? Map(pl.param(), BuildParam)
             : new List<Param>();
         TypeRef? returnType = ctx.typeRef() is { } tr ? BuildTypeRef(tr) : null;
-        return new UseCaseDecl(ctx.Identifier().GetText(), parameters, returnType)
+        return new UseCaseDecl(NameOf(ctx.Identifier()), parameters, returnType)
         {
             Span = SpanOf(ctx),
             NameSpan = SpanOf(ctx.Identifier()),
@@ -334,7 +390,7 @@ public sealed class KoineModelBuilderVisitor : KoineParserBaseVisitor<object?>
                 NameSpan = SpanOf(f.softName())
             };
         }).ToList();
-        return new ReadModelDecl(ctx.Identifier().GetText(), ctx.typeName().GetText(), fields)
+        return new ReadModelDecl(NameOf(ctx.Identifier()), ctx.typeName().GetText(), fields)
         {
             Span = SpanOf(ctx),
             NameSpan = SpanOf(ctx.Identifier()),
@@ -349,7 +405,7 @@ public sealed class KoineModelBuilderVisitor : KoineParserBaseVisitor<object?>
         List<Param> criteria = ctx.paramList() is { } pl
             ? Map(pl.param(), BuildParam)
             : new List<Param>();
-        return new QueryDecl(ctx.Identifier().GetText(), criteria, BuildTypeRef(ctx.typeRef()))
+        return new QueryDecl(NameOf(ctx.Identifier()), criteria, BuildTypeRef(ctx.typeRef()))
         {
             Span = SpanOf(ctx),
             NameSpan = SpanOf(ctx.Identifier()),
@@ -365,7 +421,7 @@ public sealed class KoineModelBuilderVisitor : KoineParserBaseVisitor<object?>
             ? Map(pl.param(), BuildParam)
             : new List<Param>();
         Expr? body = ctx.expression() is { } e ? BuildExpression(e) : null;
-        return new OperationDecl(ctx.Identifier().GetText(), parameters, BuildTypeRef(ctx.typeRef()), body)
+        return new OperationDecl(NameOf(ctx.Identifier()), parameters, BuildTypeRef(ctx.typeRef()), body)
         {
             Span = SpanOf(ctx),
             NameSpan = SpanOf(ctx.Identifier()),
@@ -459,7 +515,7 @@ public sealed class KoineModelBuilderVisitor : KoineParserBaseVisitor<object?>
         var invariants = Map(ctx.invariant(), BuildInvariant);
         var (since, deprecated) = ReadAnnotations(ctx.annotation());
 
-        return new ValueObjectDecl(ctx.Identifier().GetText(), members, invariants)
+        return new ValueObjectDecl(NameOf(ctx.Identifier()), members, invariants)
         {
             Span = SpanOf(ctx),
             NameSpan = SpanOf(ctx.Identifier()),
@@ -477,7 +533,7 @@ public sealed class KoineModelBuilderVisitor : KoineParserBaseVisitor<object?>
         var invariants = Map(ctx.invariant(), BuildInvariant);
         var (since, deprecated) = ReadAnnotations(ctx.annotation());
 
-        return new ValueObjectDecl(ctx.Identifier().GetText(), members, invariants, IsQuantity: true)
+        return new ValueObjectDecl(NameOf(ctx.Identifier()), members, invariants, IsQuantity: true)
         {
             Span = SpanOf(ctx),
             NameSpan = SpanOf(ctx.Identifier()),
@@ -555,7 +611,7 @@ public sealed class KoineModelBuilderVisitor : KoineParserBaseVisitor<object?>
         var body = Map(ctx.commandStmt(), BuildCommandStmt);
         TypeRef? returnType = ctx.typeRef() is { } tr ? BuildTypeRef(tr) : null;
 
-        return new CommandDecl(ctx.Identifier().GetText(), parameters, body, returnType)
+        return new CommandDecl(NameOf(ctx.Identifier()), parameters, body, returnType)
         {
             Span = SpanOf(ctx),
             NameSpan = SpanOf(ctx.Identifier()),
@@ -575,7 +631,7 @@ public sealed class KoineModelBuilderVisitor : KoineParserBaseVisitor<object?>
             : new List<Param>();
         var body = Map(ctx.factoryStmt(), BuildFactoryStmt);
 
-        return new FactoryDecl(ctx.Identifier().GetText(), parameters, body)
+        return new FactoryDecl(NameOf(ctx.Identifier()), parameters, body)
         {
             Span = SpanOf(ctx),
             NameSpan = SpanOf(ctx.Identifier()),
@@ -597,18 +653,36 @@ public sealed class KoineModelBuilderVisitor : KoineParserBaseVisitor<object?>
 
         if (ctx.emitClause() is { } emit)
         {
-            List<EmitArg> args = emit.emitArgList() is { } al
-                ? al.emitArg().Select(a =>
-                    new EmitArg(a.softName().GetText(), BuildExpression(a.expression())) { Span = SpanOf(a) }).ToList()
-                : new List<EmitArg>();
-            return new EmitClause(emit.Identifier().GetText(), args) { Span = SpanOf(emit) };
+            return BuildEmitClause(emit);
         }
 
         KoineParser.InitializationContext? init = ctx.initialization();
-        return new Initialization(init.softName().GetText(), BuildExpression(init.expression()))
+        if (init is null)
+        {
+            // Recovered (error) parse with no matched alternative: yield an empty placeholder
+            // initialization rather than throwing. The syntax error is reported elsewhere.
+            return new Initialization(string.Empty, new IdentifierExpr(string.Empty)) { Span = SpanOf(ctx) };
+        }
+
+        return new Initialization(init.softName()?.GetText() ?? string.Empty, BuildExpression(init.expression()))
         {
             Span = SpanOf(init)
         };
+    }
+
+    /// <summary>
+    /// Builds an <see cref="EmitClause"/> from <c>emit Event(field: value, ...)</c>, shared by the
+    /// factory and command statement bodies. Tolerates a recovered (error) parse where the event
+    /// name or an argument's field name is a missing/absent token by yielding an empty name rather
+    /// than throwing — the syntax error itself is reported by the parser's error listener.
+    /// </summary>
+    private EmitClause BuildEmitClause(KoineParser.EmitClauseContext emit)
+    {
+        List<EmitArg> args = emit.emitArgList() is { } al
+            ? al.emitArg().Select(a =>
+                new EmitArg(a.softName()?.GetText() ?? string.Empty, BuildExpression(a.expression())) { Span = SpanOf(a) }).ToList()
+            : new List<EmitArg>();
+        return new EmitClause(NameOf(emit.Identifier()), args) { Span = SpanOf(emit) };
     }
 
     private CommandStmt BuildCommandStmt(KoineParser.CommandStmtContext ctx)
@@ -623,11 +697,7 @@ public sealed class KoineModelBuilderVisitor : KoineParserBaseVisitor<object?>
 
         if (ctx.emitClause() is { } emit)
         {
-            List<EmitArg> args = emit.emitArgList() is { } al
-                ? al.emitArg().Select(a =>
-                    new EmitArg(a.softName().GetText(), BuildExpression(a.expression())) { Span = SpanOf(a) }).ToList()
-                : new List<EmitArg>();
-            return new EmitClause(emit.Identifier().GetText(), args) { Span = SpanOf(emit) };
+            return BuildEmitClause(emit);
         }
 
         if (ctx.resultClause() is { } res)
@@ -694,7 +764,7 @@ public sealed class KoineModelBuilderVisitor : KoineParserBaseVisitor<object?>
         List<Param> parameters = ctx.paramList() is { } pl
             ? Map(pl.param(), BuildParam)
             : new List<Param>();
-        return new FinderDecl(ctx.Identifier().GetText(), parameters, BuildTypeRef(ctx.typeRef()))
+        return new FinderDecl(NameOf(ctx.Identifier()), parameters, BuildTypeRef(ctx.typeRef()))
         {
             Span = SpanOf(ctx),
             NameSpan = SpanOf(ctx.Identifier())
@@ -715,7 +785,7 @@ public sealed class KoineModelBuilderVisitor : KoineParserBaseVisitor<object?>
             .ToList();
 
         var (since, deprecated) = ReadAnnotations(ctx.annotation());
-        return new EnumDecl(ctx.Identifier().GetText(), members, signature)
+        return new EnumDecl(NameOf(ctx.Identifier()), members, signature)
         {
             Span = SpanOf(ctx),
             NameSpan = SpanOf(ctx.Identifier()),
@@ -731,7 +801,7 @@ public sealed class KoineModelBuilderVisitor : KoineParserBaseVisitor<object?>
     {
         var members = Map(ctx.member(), BuildMember);
         var (since, deprecated) = ReadAnnotations(ctx.annotation());
-        return new EventDecl(ctx.Identifier().GetText(), members)
+        return new EventDecl(NameOf(ctx.Identifier()), members)
         {
             Span = SpanOf(ctx),
             NameSpan = SpanOf(ctx.Identifier()),
@@ -747,7 +817,7 @@ public sealed class KoineModelBuilderVisitor : KoineParserBaseVisitor<object?>
     {
         var members = Map(ctx.member(), BuildMember);
         var (since, deprecated) = ReadAnnotations(ctx.annotation());
-        return new IntegrationEventDecl(ctx.Identifier().GetText(), members)
+        return new IntegrationEventDecl(NameOf(ctx.Identifier()), members)
         {
             Span = SpanOf(ctx),
             NameSpan = SpanOf(ctx.Identifier()),
@@ -935,18 +1005,28 @@ public sealed class KoineModelBuilderVisitor : KoineParserBaseVisitor<object?>
         return body.StartsWith(' ') ? body[1..].TrimEnd() : body.TrimEnd();
     }
 
-    private TypeRef BuildTypeRef(KoineParser.TypeRefContext ctx)
+    private TypeRef BuildTypeRef(KoineParser.TypeRefContext? ctx)
     {
+        // On a recovered (error) parse a required type reference can be absent entirely; yield a
+        // placeholder empty-named TypeRef rather than throwing. The syntax error is reported elsewhere.
+        if (ctx is null)
+        {
+            return new TypeRef(string.Empty, null, null, false, null);
+        }
+
         KoineParser.TypeRefContext[]? args = ctx.typeRef();
         TypeRef? element = args.Length > 0 ? BuildTypeRef(args[0]) : null;
         TypeRef? value = args.Length > 1 ? BuildTypeRef(args[1]) : null;
         var isOptional = ctx.QUESTION() is not null;
 
         // `(typeName DOT)? typeName`: a leading qualifier names the owning context (R13.2).
+        // On a recovered (error) parse the type name can be missing entirely; tolerate a
+        // zero-length `typeName` array (the syntax error is already reported elsewhere) by
+        // falling back to an empty name rather than indexing past the end.
         KoineParser.TypeNameContext[]? names = ctx.typeName();
         var hasQualifier = names.Length == 2;
         var qualifier = hasQualifier ? names[0].GetText() : null;
-        var name = names[hasQualifier ? 1 : 0].GetText();
+        var name = names.Length == 0 ? string.Empty : names[hasQualifier ? 1 : 0].GetText();
 
         return new TypeRef(name, element, value, isOptional, qualifier) { Span = SpanOf(ctx) };
     }
@@ -971,8 +1051,10 @@ public sealed class KoineModelBuilderVisitor : KoineParserBaseVisitor<object?>
     // Expressions
     // ------------------------------------------------------------------------
 
-    private Expr BuildExpression(KoineParser.ExpressionContext ctx) =>
-        BuildLet(ctx.letExpr());
+    private Expr BuildExpression(KoineParser.ExpressionContext? ctx) =>
+        // On a recovered (error) parse a required expression can be absent; yield a placeholder
+        // empty identifier rather than throwing. The syntax error is reported elsewhere.
+        ctx is null ? new IdentifierExpr(string.Empty) : BuildLet(ctx.letExpr());
 
     private Expr BuildLet(KoineParser.LetExprContext ctx)
     {
@@ -1099,7 +1181,9 @@ public sealed class KoineModelBuilderVisitor : KoineParserBaseVisitor<object?>
             return target;
         }
 
-        var pattern = StripSlashes(ctx.Regex().GetText());
+        // On a recovered (error) parse the regex literal can be absent (e.g. an unterminated
+        // `matches /ab`); fall back to an empty pattern rather than throwing.
+        var pattern = ctx.Regex() is { } regex ? StripSlashes(regex.GetText()) : string.Empty;
         return new MatchExpr(target, pattern) { Span = SpanOf(ctx) };
     }
 
@@ -1207,7 +1291,13 @@ public sealed class KoineModelBuilderVisitor : KoineParserBaseVisitor<object?>
 
         if (ctx.exprName() is { } identifier)
         {
-            return new IdentifierExpr(identifier.GetText()) { Span = SpanOf(ctx) };
+            return new IdentifierExpr(identifier.GetText())
+            {
+                Span = SpanOf(ctx),
+                LeafText = identifier.GetText(),
+                LeadingTrivia = LeadingTriviaFor(ctx),
+                TrailingTrivia = TrailingTriviaFor(ctx)
+            };
         }
 
         // Parenthesized expression.
@@ -1216,24 +1306,26 @@ public sealed class KoineModelBuilderVisitor : KoineParserBaseVisitor<object?>
 
     private Expr BuildLiteral(KoineParser.LiteralContext ctx)
     {
-        if (ctx.IntLiteral() is { } intLit)
+        // Decide the kind + typed value once: Int/Decimal/Bool keep their verbatim spelling; a string
+        // literal carries the inner content unescaped, with no surrounding quotes.
+        (LiteralKind kind, string value) = ctx switch
         {
-            return new LiteralExpr(LiteralKind.Int, intLit.GetText()) { Span = SpanOf(ctx) };
-        }
+            _ when ctx.IntLiteral() is { } intLit => (LiteralKind.Int, intLit.GetText()),
+            _ when ctx.DecimalLiteral() is { } decLit => (LiteralKind.Decimal, decLit.GetText()),
+            _ when ctx.BoolLiteral() is { } boolLit => (LiteralKind.Bool, boolLit.GetText()),
+            _ => (LiteralKind.String, UnescapeString(StripQuotes(ctx.StringLiteral().GetText()))),
+        };
 
-        if (ctx.DecimalLiteral() is { } decLit)
+        // Verbatim source spelling of the literal (incl. quotes/escapes for strings) is kept as the
+        // leaf node's LeafText, so it can reconstruct its own text tree-driven via ToFullString();
+        // the typed LiteralExpr.Text above keeps the parsed/unescaped value, distinct from leaf text.
+        return new LiteralExpr(kind, value)
         {
-            return new LiteralExpr(LiteralKind.Decimal, decLit.GetText()) { Span = SpanOf(ctx) };
-        }
-
-        if (ctx.BoolLiteral() is { } boolLit)
-        {
-            return new LiteralExpr(LiteralKind.Bool, boolLit.GetText()) { Span = SpanOf(ctx) };
-        }
-
-        // String literal: inner content, unescaped, no surrounding quotes.
-        var text = UnescapeString(StripQuotes(ctx.StringLiteral().GetText()));
-        return new LiteralExpr(LiteralKind.String, text) { Span = SpanOf(ctx) };
+            Span = SpanOf(ctx),
+            LeafText = ctx.GetText(),
+            LeadingTrivia = LeadingTriviaFor(ctx),
+            TrailingTrivia = TrailingTriviaFor(ctx),
+        };
     }
 
     // ------------------------------------------------------------------------
@@ -1251,8 +1343,20 @@ public sealed class KoineModelBuilderVisitor : KoineParserBaseVisitor<object?>
     /// <summary>The single-token span of a name terminal (used for <see cref="KoineNode.NameSpan"/>).</summary>
     private SourceSpan SpanOf(IToken token) => TokenGeometry.SpanOf(token, _file);
 
-    /// <summary>The single-token span of a name terminal node (used for <see cref="KoineNode.NameSpan"/>).</summary>
-    private SourceSpan SpanOf(ITerminalNode node) => TokenGeometry.SpanOf(node.Symbol, _file);
+    /// <summary>
+    /// The single-token span of a name terminal node (used for <see cref="KoineNode.NameSpan"/>).
+    /// Tolerates a <c>null</c> node — on a recovered (error) parse a required name terminal may be
+    /// absent — by returning an empty span at the start of the file rather than throwing.
+    /// </summary>
+    private SourceSpan SpanOf(ITerminalNode? node) =>
+        node is null ? new SourceSpan(1, 1, _file) : TokenGeometry.SpanOf(node.Symbol, _file);
+
+    /// <summary>
+    /// The text of a name terminal, tolerating a <c>null</c> node from a recovered (error) parse:
+    /// a missing required name yields the empty string instead of a <see cref="NullReferenceException"/>.
+    /// The syntax error itself is reported separately by the parser's error listener.
+    /// </summary>
+    private static string NameOf(ITerminalNode? node) => node?.GetText() ?? string.Empty;
 
     /// <summary>
     /// Picks the n-th binary operator (0-based) among a rule's child terminals,

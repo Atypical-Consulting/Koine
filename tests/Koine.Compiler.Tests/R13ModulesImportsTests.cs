@@ -55,7 +55,10 @@ public class R13ModulesImportsTests
             new SourceFile("good.koi", "context A {\n  value V { n: Int }\n}\n"),
             new SourceFile("bad.koi", "context B {\n  value W { n: !!! }\n}\n"),
         });
-        model.ShouldBeNull();
+        // Error-tolerant parsing no longer blanks the workspace: the good file's context still
+        // surfaces in the partial model, while the syntax error is stamped with its own file.
+        model.ShouldNotBeNull();
+        model.Contexts.ShouldContain(c => c.Name == "A");
         diags.ShouldContain(d => d.Code == DiagnosticCodes.SyntaxError && d.File == "bad.koi");
         diags.ShouldNotContain(d => d.File == "good.koi");
     }

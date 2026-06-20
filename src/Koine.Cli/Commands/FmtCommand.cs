@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using Koine.Cli.Infrastructure;
+using Koine.Compiler.Diagnostics;
 using Koine.Compiler.Formatting;
 using Koine.Compiler.Services;
 using Spectre.Console.Cli;
@@ -36,9 +37,11 @@ internal sealed class FmtCommand : Command<FmtSettings>
         foreach (var source in sources)
         {
             // fmt only adjusts whitespace; it cannot fix syntax. Report files that fail to
-            // parse (with a file:line message) and leave them untouched.
-            var (model, diagnostics) = compiler.Parse(source.Source, source.Path);
-            if (model is null)
+            // parse (with a file:line message) and leave them untouched. Parsing is now
+            // error-tolerant and returns a partial model even for broken input, so check the
+            // diagnostics for a syntax error rather than a null model.
+            var (_, diagnostics) = compiler.Parse(source.Source, source.Path);
+            if (diagnostics.Any(d => d.Severity == DiagnosticSeverity.Error))
             {
                 unparseable++;
                 DiagnosticPrinter.PrintErrors(diagnostics, new[] { source }, source.Path);

@@ -186,10 +186,15 @@ public class KoineLanguageServiceTests
     }
 
     [Fact]
-    public void Hover_returns_null_on_a_broken_document()
+    public void Hover_works_over_the_valid_parts_of_a_broken_document()
     {
+        // Error-tolerant parsing now yields a partial model, so the LSP answers semantic features
+        // over the declarations it could recover — hover over "Money" still resolves even though the
+        // trailing member type is missing.
         var src = "context C {\n  value Money { amount: ";
-        Svc.HoverAt(Doc(src), U, line: 1, character: 9).ShouldBeNull(); // over "Money", parse fails
+        var hover = Svc.HoverAt(Doc(src), U, line: 1, character: 9); // over "Money"
+        hover.ShouldNotBeNull();
+        hover.Markdown.ShouldContain("Money");
     }
 
     [Fact]
@@ -378,11 +383,13 @@ public class KoineLanguageServiceTests
     }
 
     [Fact]
-    public void Member_access_on_broken_document_offers_nothing()
+    public void Member_access_on_broken_document_offers_the_recovered_members()
     {
+        // Error-tolerant parsing recovers the well-formed `Money` value object, so member-access
+        // completion after `Money.` still offers its members even though the file is unterminated.
         var src = "context C {\n  value Money { amount: Decimal }\n  value Line { total: Money. ";
         var items = Complete(src, line: 2, ch: 28);
-        items.ShouldBeEmpty();
+        items.ShouldContain(i => i.Label == "amount");
     }
 
     // ---- Document symbols -------------------------------------------------
@@ -410,9 +417,14 @@ public class KoineLanguageServiceTests
     }
 
     [Fact]
-    public void DocumentSymbols_on_broken_document_is_empty()
+    public void DocumentSymbols_on_broken_document_returns_the_recovered_outline()
     {
-        Svc.DocumentSymbols("context C {\n  value V { x: ").ShouldBeEmpty();
+        // Error-tolerant parsing yields a partial model, so the document outline still surfaces the
+        // recovered context even though the file is unterminated (the LSP outline degrades gracefully).
+        var symbols = Svc.DocumentSymbols("context C {\n  value V { x: ");
+        var ctx = symbols.ShouldHaveSingleItem();
+        ctx.Name.ShouldBe("C");
+        ctx.Kind.ShouldBe(SymbolKind.Namespace);
     }
 
     // ---- Find references --------------------------------------------------
