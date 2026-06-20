@@ -1,0 +1,144 @@
+/// SLA bounded context — the service-level promise the help desk makes for each
+/// ticket. It watches the tickets raised by TicketManagement, tracks each one's
+/// response deadline, and announces a breach when the clock runs out. Kept in its
+/// own context so the policy of "how fast must we answer" evolves independently of
+/// the ticket workflow itself.
+context SLA version 1 {
+
+  // R14.3 — react to tickets raised by the ticketing context. Authorized by the
+  // bidirectional `TicketManagement <-> SLA : customer-supplier` relation in
+  // context-map.koi; emits an IHandleTicketOpened seam the host implements to
+  // start an SLA clock.
+  subscribes TicketManagement.TicketOpened
+
+  /// How a tracked SLA is doing. Drives the `states phase { … }` machine below.
+  enum SlaState { OnTrack, AtRisk, Breached, Met }
+
+  /// The agreed maximum response time for a priority band, in whole minutes. A
+  /// value object so a deadline window is never a bare, unit-less integer.
+  value ResponseTarget {
+    minutes: Int
+    invariant minutes > 0   "a response target must be a positive number of minutes"
+  }
+
+  /// Announced to the rest of the system when a ticket misses its SLA (R14.3). As a
+  /// *published language* its fields stay primitive — an id, the elapsed minutes,
+  /// and the moment of breach — so subscribers never depend on SLA internals.
+  integration event SlaBreached {
+    ticketId:      TicketId
+    targetMinutes: Int
+    breachedAt:    Instant
+  }
+
+  publishes SlaBreached
+
+  /// The SLA-tracking aggregate: one record per ticket under watch. Being an
+  /// aggregate root it gains an `ISlaTrackerRepository` and joins the context UoW.
+  aggregate SlaTracker root SlaTracker {
+
+    repository {
+      operations: getById, add, update
+      find atRisk(): List<SlaTracker>
+    }
+
+    /// Raised inside the aggregate when an SLA clock is first started for a ticket
+    /// (R6/R8) — the factory's domain event, distinct from later tightening.
+    event SlaStarted {
+      ticketId:      TicketId
+      targetMinutes: Int
+    }
+
+    /// Raised inside the aggregate when a tracked ticket misses its SLA (R6). The
+    /// cross-context announcement is the `SlaBreached` integration event, published
+    /// separately; this domain event stays in the SLA world.
+    event SlaBreachRecorded {
+      ticketId: TicketId
+    }
+
+    /// Raised when a tracked ticket is escalated to a tighter response target.
+    event SlaTightened {
+      ticketId:  TicketId
+      newTarget: Int
+    }
+
+    entity SlaTracker identified by SlaTrackerId {
+      ticket:    TicketId
+      target:    ResponseTarget
+      phase:     SlaState = OnTrack
+
+      // How many minutes of the target have elapsed so far. The host feeds this in
+      // as the clock ticks; the breach calculation is derived from it (R1.1).
+      elapsed:   Int      = 0
+
+      // --- Derived breach calculation (R1.1) --------------------------------
+      // The deadline budget, surfaced for read models and dashboards.
+      budget:    Int  = target.minutes
+      // How long is left before the promise is broken (may go negative).
+      remaining: Int  = target.minutes - elapsed
+      // Whether the promise has been broken.
+      isBreached: Bool = elapsed >= target.minutes
+      // The 80%-consumed warning band that flips the tracker to AtRisk.
+      isAtRisk:   Bool = elapsed * 5 >= target.minutes * 4
+
+      invariant elapsed >= 0   "elapsed time cannot be negative"
+
+      // The SLA lifecycle (R7): a tracker is OnTrack, may slip to AtRisk, and then
+      // either is Met (answered in time) or Breached (ran out of clock).
+      states phase {
+        OnTrack  -> AtRisk, Met, Breached
+        AtRisk   -> Breached, Met
+        Breached
+        Met
+      }
+
+      /// Move the tracker into its warning band as the deadline approaches.
+      command flagAtRisk {
+        requires phase == OnTrack   "only an on-track SLA can be flagged at risk"
+        phase -> AtRisk
+      }
+
+      /// Record that the ticket missed its SLA (R5/R6). The cross-context
+      /// `SlaBreached` integration event is the published announcement of this fact.
+      command breach {
+        requires phase != Met       "a met SLA cannot be breached"
+        phase -> Breached
+        emit SlaBreachRecorded(ticketId: ticket)
+      }
+
+      /// Record that the ticket was answered within its SLA.
+      command meet {
+        requires phase != Breached  "a breached SLA cannot be met"
+        phase -> Met
+      }
+
+      /// Tighten the response target when a ticket is escalated (R5/R6).
+      command tighten(newTarget: ResponseTarget) {
+        requires phase != Met       "a met SLA cannot be tightened"
+        target -> newTarget
+        emit SlaTightened(ticketId: ticket, newTarget: newTarget.minutes)
+      }
+
+      /// R8 — start tracking the SLA for a freshly opened ticket.
+      create start(ticket: TicketId, target: ResponseTarget) {
+        emit SlaStarted(ticketId: ticket, targetMinutes: target.minutes)
+      }
+    }
+  }
+
+  /// R12.2 — the application service interface (ISlaService).
+  service SlaService {
+    usecase StartTracking(ticket: TicketId, target: ResponseTarget): SlaTrackerId
+    usecase RecordBreach(tracker: SlaTrackerId)
+  }
+
+  /// R12.3 — a flat read model for an SLA dashboard.
+  readmodel SlaSnapshot from SlaTracker {
+    id
+    ticket
+    phase
+    remaining: Int = target.minutes - elapsed
+  }
+
+  /// R12.4 — a query DTO over the snapshot.
+  query TrackersByPhase(phase: SlaState): List<SlaSnapshot>
+}
