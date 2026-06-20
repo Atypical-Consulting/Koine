@@ -265,7 +265,11 @@ export function init(): void {
 
   // A model carried in the URL hash (a shared playground link) takes precedence over both the seed
   // and any restored scratch, so opening a link always lands on the shared model.
-  const sharedModel = readModelFromHash();
+  // Task-1 shim: readModelFromHash now returns a discriminated SharePayload; Task 4 will consume the
+  // workspace case. For now, collapse it to the legacy single-string view so existing boot logic is
+  // unchanged — only single-string links import (workspace links fall through to scratch/seed).
+  const shared = readModelFromHash();
+  const sharedModel = shared?.kind === 'single' ? shared.text : null;
   // Session restore: if the user has unsaved scratch work from a previous visit, open that instead
   // of the seed (and skip the welcome screen — see the boot section). Folder workspaces are not
   // restored; they live on disk and are re-opened explicitly.
