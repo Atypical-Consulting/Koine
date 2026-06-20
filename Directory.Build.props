@@ -2,7 +2,7 @@
 
   <!-- Shared properties for every project in the repo. -->
   <!-- Note: TreatWarningsAsErrors is intentionally NOT set — the generated demo
-       code (demo/Shop.Domain) may emit warnings and must still build. -->
+       code (demo/Pizzeria.Domain) may emit warnings and must still build. -->
 
   <PropertyGroup>
     <Nullable>enable</Nullable>

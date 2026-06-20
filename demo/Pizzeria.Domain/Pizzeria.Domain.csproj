@@ -9,7 +9,10 @@
     <Nullable>enable</Nullable>
     <KoineCliProject>$(MSBuildProjectDirectory)/../../src/Koine.Cli/Koine.Cli.csproj</KoineCliProject>
     <KoineCliDll>$(MSBuildProjectDirectory)/../../src/Koine.Cli/bin/$(Configuration)/net10.0/Koine.Cli.dll</KoineCliDll>
-    <KoineModelsDir>$(MSBuildProjectDirectory)/Models</KoineModelsDir>
+    <!-- The demo compiles FROM the pizzeria TEMPLATE in place (templates/pizzeria),
+         so building this project proves that template emits compiling, runnable C#
+         end-to-end. The template — not a local Models/ copy — is the source of truth. -->
+    <KoineModelsDir>$(MSBuildProjectDirectory)/../../templates/pizzeria</KoineModelsDir>
     <KoineGeneratedDir>$(MSBuildProjectDirectory)/Generated</KoineGeneratedDir>
     <!-- Ubiquitous-language glossary, emitted alongside the C# at build time.
          Lives at the project root (not Generated/, which is wiped and excluded
@@ -41,9 +44,10 @@
     <Message Importance="high" Text="Koine: generating C# from $(KoineModelsDir) (directory mode — one model, imports resolve across files); glossary -> $(KoineGlossaryFile)" />
     <RemoveDir Directories="$(KoineGeneratedDir)" />
     <!--
-      Directory mode: the whole Models/ folder compiles as ONE model so cross-context
-      imports, the context map, and integration events resolve across files (R13/R14).
-      The glossary flag emits the ubiquitous-language glossary in the same run as the C#.
+      Directory mode: the whole templates/pizzeria folder compiles as ONE model so
+      cross-context imports, the context map, and integration events resolve across
+      files (R13/R14). The glossary flag emits the ubiquitous-language glossary in the
+      same run as the C#.
     -->
     <Exec Command="dotnet &quot;$(KoineCliDll)&quot; build &quot;$(KoineModelsDir)&quot; --target csharp --out &quot;$(KoineGeneratedDir)&quot; --glossary &quot;$(KoineGlossaryFile)&quot;" />
 

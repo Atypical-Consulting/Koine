@@ -22,7 +22,7 @@
   <ItemGroup>
     <None Include="..\..\templates\starters\billing\billing.koi" Link="corpus\billing.koi"
           CopyToOutputDirectory="PreserveNewest" />
-    <None Include="..\..\demo\Shop.Domain\Models\*.koi" Link="corpus\shop\%(Filename)%(Extension)"
+    <None Include="..\..\templates\pizzeria\*.koi" Link="corpus\pizzeria\%(Filename)%(Extension)"
           CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 

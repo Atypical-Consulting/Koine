@@ -22,7 +22,7 @@ internal static class KnowledgeStore
     /// <summary>The full Koine language reference (Markdown).</summary>
     public static string ReferenceMarkdown { get; } = ReadResource(ReferenceResource);
 
-    /// <summary>Example name (e.g. <c>billing</c>, <c>shop-ordering</c>) → its <c>.koi</c> source.</summary>
+    /// <summary>Example name (e.g. <c>billing</c>, <c>pizzeria-ordering</c>) → its <c>.koi</c> source.</summary>
     public static ImmutableSortedDictionary<string, string> Examples { get; } = LoadExamples();
 
     /// <summary>The topic slugs defined in the reference, in document order.</summary>

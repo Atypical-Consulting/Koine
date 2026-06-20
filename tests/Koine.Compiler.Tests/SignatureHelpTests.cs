@@ -11,7 +11,7 @@ public class SignatureHelpTests
         new Dictionary<string, string> { [U] = src };
 
     // An entity factory exposes a typed parameter list, matching the real grammar
-    // (see demo/Shop.Domain/Models/payments.koi: `create authorize(order: OrderId, ...)`).
+    // (see templates/pizzeria/payment.koi: `create authorize(order: OrderId, ...)`).
     private const string Src =
         "context C {\n" +
         "  aggregate A root E {\n" +
