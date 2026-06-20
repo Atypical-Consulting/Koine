@@ -63,6 +63,28 @@ export function buildWorkspaceShareUrl(
   return `${origin}${pathname}${search}#${HASH_KEY}=${encoded}`;
 }
 
+/**
+ * Largest `#model=<base64>` fragment we will hand out as a share link. A base64 workspace payload
+ * grows ~4/3 with the source, and browsers / proxies / clipboards start truncating or rejecting very
+ * long URLs — so past this cap we refuse to copy a silently-broken link and steer the user to the
+ * `.koi` source zip export instead. Tunable; measured against the whole `#model=…` fragment.
+ */
+export const MAX_SHARE_HASH_LEN = 8000;
+
+/**
+ * Build a workspace share URL, but only when its `#model=…` fragment fits within
+ * {@link MAX_SHARE_HASH_LEN}; otherwise null. A null result means the workspace is too large to ride
+ * in a URL — the caller should offer the `.koi` source zip export rather than copy a broken link.
+ */
+export function workspaceShareUrlOrNull(
+  files: { relPath: string; text: string }[],
+  active?: string
+): string | null {
+  const url = buildWorkspaceShareUrl(files, active);
+  const fragment = url.slice(url.indexOf('#'));
+  return fragment.length <= MAX_SHARE_HASH_LEN ? url : null;
+}
+
 /** True when `value` is a workspace envelope: an object with a `files[]` of `{relPath, text}`. */
 function isWorkspaceShape(value: unknown): value is WorkspaceShare {
   if (typeof value !== 'object' || value === null) return false;
