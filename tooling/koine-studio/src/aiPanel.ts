@@ -37,6 +37,12 @@ export interface AssistantPanelOptions {
    * case the assistant stays plain chat.
    */
   runCompilerTool?: (name: string, argsJson: string) => Promise<string>;
+  /**
+   * Whether to advertise the compiler tools to the model. Off keeps replies streaming — local
+   * servers (LM Studio / Ollama) buffer the whole completion when tools are present. When false we
+   * withhold `runCompilerTool` so ai.ts runs a plain single-round streaming chat.
+   */
+  getUseTools: () => boolean;
 }
 
 export interface AssistantPanel {
@@ -272,7 +278,9 @@ export function createAssistantPanel(opts: AssistantPanelOptions): AssistantPane
           replyBubble.textContent = full;
           transcript.scrollTop = transcript.scrollHeight;
         },
-        runCompilerTool: opts.runCompilerTool,
+        // Withhold the tools when the user hasn't opted into the agentic loop, so the model gets a
+        // plain streaming request (no `tools` ⇒ local servers stream instead of buffering).
+        runCompilerTool: opts.getUseTools() ? opts.runCompilerTool : undefined,
         onToolCall: addToolStatus,
       });
       messages.push({ role: 'assistant', content: full });

@@ -335,10 +335,20 @@ export function createPreferences(cb: PrefsCallbacks): PrefsHandle {
   aiModelInput.spellcheck = false;
   aiModelInput.placeholder = 'claude-opus-4-8';
 
+  const aiAgenticTools = toggle('Compiler tools', (on) => commit({ aiAgenticTools: on }));
+
   const baseUrlRow = row('Base URL', 'Endpoint for the OpenAI-compatible provider.', aiBaseUrlInput);
+  const agenticToolsRow = row(
+    'Compiler tools',
+    'Let the model validate, compile and format your model mid-chat. Off keeps replies streaming — some local servers (LM Studio) stop streaming when tools are offered.',
+    aiAgenticTools.el,
+  );
   function syncProviderFields(): void {
-    baseUrlRow.hidden = aiProviderSelect.value !== 'openai';
-    aiModelInput.placeholder = aiProviderSelect.value === 'openai' ? 'gpt-4o  ·  qwen2.5-coder  ·  …' : 'claude-opus-4-8';
+    const isOpenai = aiProviderSelect.value === 'openai';
+    baseUrlRow.hidden = !isOpenai;
+    // The Anthropic path doesn't use the compiler tools, so the toggle only applies to OpenAI-compatible.
+    agenticToolsRow.hidden = !isOpenai;
+    aiModelInput.placeholder = isOpenai ? 'gpt-4o  ·  qwen2.5-coder  ·  …' : 'claude-opus-4-8';
   }
 
   aiProviderSelect.addEventListener('change', () => {
@@ -369,6 +379,7 @@ export function createPreferences(cb: PrefsCallbacks): PrefsHandle {
     baseUrlRow,
     row('API key', 'Encrypted in this browser and never leaves this device — sent only to the provider you choose.', aiKeyInput),
     row('Model', 'The model id the assistant requests.', aiModelInput),
+    agenticToolsRow,
     presets,
   );
 
@@ -718,6 +729,7 @@ export function createPreferences(cb: PrefsCallbacks): PrefsHandle {
     aiBaseUrlInput.value = s.aiBaseUrl;
     aiKeyInput.value = s.aiApiKey;
     aiModelInput.value = s.aiProvider === 'openai' ? s.aiModelOpenai : s.aiModel;
+    aiAgenticTools.set(s.aiAgenticTools);
     traceSelect.value = s.lspTrace;
     mcpEnableToggle.set(s.mcpEnabled);
     mcpClientSelect.value = s.mcpClient;
