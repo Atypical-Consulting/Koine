@@ -149,4 +149,47 @@ public class SymbolGraphTests
             sema.GetSymbolInfo(r).ShouldBeSameAs(declared);
         }
     }
+
+    // ----------------------------------------------------------------------
+    // C4 — identity-based reverse reference index.
+    // ----------------------------------------------------------------------
+
+    [Fact]
+    public void FindReferences_AcrossMemberChain()
+    {
+        // Lines (1-based): 1 `context`, 2 `value Money { amount }`, 4 `total: Money`, 5 `invariant total.amount`.
+        const string src = """
+            context Sales {
+              value Money { amount: Decimal }
+              entity Order identified by OrderId {
+                total: Money
+                invariant total.amount > 0
+              }
+            }
+            """;
+        var index = new WorkspaceIndex(new Dictionary<string, string> { ["m.koi"] = src });
+
+        // Cursor on the `amount` field declaration in Money.
+        int declOffset = src.IndexOf("amount: Decimal", StringComparison.Ordinal);
+        IReadOnlyList<Reference> refs = index.FindReferences("m.koi", "amount", declOffset);
+
+        var lines = refs.Select(r => r.Line).ToHashSet();
+        lines.ShouldContain(2);  // the declaration itself
+        lines.ShouldContain(5);  // the `total.amount` member-access selector — the case the old code could not reach
+    }
+
+    [Fact]
+    public void FindReferences_Parameter()
+    {
+        // Lines: 4 `command setN(v: Int)`, 5 `requires v > 0`, 6 `n -> v`.
+        var index = new WorkspaceIndex(new Dictionary<string, string> { ["c.koi"] = CommandSrc });
+
+        int declOffset = CommandSrc.IndexOf("v: Int", StringComparison.Ordinal);
+        IReadOnlyList<Reference> refs = index.FindReferences("c.koi", "v", declOffset);
+
+        var lines = refs.Select(r => r.Line).ToHashSet();
+        lines.ShouldContain(5);  // `requires v > 0`
+        lines.ShouldContain(6);  // `n -> v`
+        refs.Count.ShouldBeGreaterThanOrEqualTo(2);
+    }
 }
