@@ -46,6 +46,34 @@ That panel (`src/prefs.ts`, data-driven off `src/mcp.ts`) is where the user wire
 The web build can't host a server, so it passes `mcpHostable: false`: the toggle is disabled and the
 endpoint/test rows hide, but the recipes still render (pointing at the `koine mcp --http` CLI).
 
+## AI assistant
+
+The **Assistant** inspector tab (`src/aiPanel.ts`, client in `src/ai.ts`) is a domain copilot: it
+streams replies from the configured provider — **Anthropic** (Claude, the default) or any
+**OpenAI-compatible** endpoint (OpenAI / Ollama / LM Studio / Groq / …, selected by base URL) — each
+with the user's *own* key, or no key for a local server. Both SDKs are dynamically imported, so they
+stay out of the main bundle until the assistant is used. Everything below works identically in both
+hosts (browser/WASM and the Tauri desktop build).
+
+- **Compiler tool-use on both providers.** When enabled (Settings → Assistant → *agentic tools*), the
+  model can call the koine tools — `koine_validate` / `koine_compile` / `koine_format` — inside a
+  bounded agentic loop, so it drafts a model, validates it, and fixes it before answering. The tool
+  definitions are provider-neutral (`src/assistantTools.ts`) and adapted to each API; the tools run
+  in-process (in-WASM in the browser, via the `koine mcp --http` sidecar on desktop). Tool-use is now
+  available on the **default Anthropic** path too, not just the OpenAI-compatible one. (It is opt-in
+  because many local servers buffer the whole reply instead of streaming when tools are advertised.)
+- **Domain-grounded answers.** The system prompt carries a compact **domain index** built from the
+  compiled model (bounded contexts, aggregates → roots, context-map relations, and glossary
+  documentation coverage), so reviews and questions see the *real* structure of the workspace, not
+  just the current file. Built best-effort from the LSP; absent for an empty/scratch model.
+- **Persisted conversations, per workspace.** Each opened folder keeps its own transcript
+  (`koine.studio.chat.<folder>`; scratch mode uses `scratch`), so a reload restores the conversation
+  and switching folders swaps to that folder's history. A **Clear conversation** button forgets it.
+- **Explain this construct.** A quick action (and the *Explain this construct* command-palette entry)
+  asks for a plain-language explanation of the current selection — or the whole model when nothing is
+  selected — aimed at a domain expert who doesn't code. It is explanatory, not generative: the reply
+  deliberately omits the *Apply to editor* affordance.
+
 ## Run
 
 Pick one of the two ways to provide the language server.

@@ -128,6 +128,27 @@
   opacity: 0.5;
   cursor: default;
 }
+// "Clear conversation" — a secondary, destructive action. Pushed to the end of the quick row and
+// styled muted/ghost so it reads as subordinate to the suggestion pills next to it.
+.koi-assistant-clear {
+  margin-left: auto;
+  background: transparent;
+  color: var(--koi-muted);
+  border: 1px solid transparent;
+  border-radius: var(--koi-radius-pill);
+  padding: var(--koi-space-1) var(--koi-space-2-75);
+  font-family: var(--koi-font-body);
+  font-size: var(--koi-text-xs-plus);
+  cursor: pointer;
+}
+.koi-assistant-clear:hover:not(:disabled) {
+  color: var(--koi-fg);
+  border-color: var(--koi-line);
+}
+.koi-assistant-clear:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
 .koi-assistant-inputrow {
   display: flex;
   align-items: flex-end;
