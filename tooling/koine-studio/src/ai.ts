@@ -11,9 +11,10 @@
 // hence `dangerouslyAllowBrowser` — the key is the user's own, on their own machine, in a local
 // developer tool, not a shared server key.
 import type AnthropicSdk from '@anthropic-ai/sdk';
+import type { MessageParam, Tool, ToolResultBlockParam } from '@anthropic-ai/sdk/resources/messages';
 import type OpenAiSdk from 'openai';
 import type { ChatCompletionMessageParam } from 'openai/resources/chat/completions';
-import { KOINE_TOOLS, summarizeForChip } from './assistantTools';
+import { KOINE_TOOL_DEFS, KOINE_TOOLS, summarizeForChip, toAnthropicTool } from './assistantTools';
 
 /** A turn in the assistant transcript. */
 export interface ChatMessage {
@@ -71,8 +72,8 @@ export interface AssistantRequest {
   signal?: AbortSignal;
   /**
    * Execute a Koine compiler tool (validate/compile/format) by name with JSON args, resolving its
-   * result as a string. When present (OpenAI-compatible path only), the assistant advertises the
-   * koine tools and runs an agentic loop so the model can call them; absent → plain chat.
+   * result as a string. When present, the assistant advertises the koine tools and runs an agentic
+   * loop (both providers) so the model can call them; absent → plain chat.
    */
   runCompilerTool?: (name: string, argsJson: string) => Promise<string>;
   /** Notified each time the model invokes a tool, for transcript visibility (name + short status). */
@@ -87,34 +88,76 @@ export function runAssistant(req: AssistantRequest): Promise<string> {
   return req.provider === 'openai' ? runOpenAiCompatible(req) : runAnthropic(req);
 }
 
-/** Anthropic Messages API path: top-level system prompt + adaptive thinking + streaming. */
+/**
+ * Anthropic Messages API path: top-level system prompt + adaptive thinking + streaming, with the same
+ * bounded agentic tool loop as the OpenAI path. Intermediate tool turns stay LOCAL to this function —
+ * only the terminating round's text is returned, so the caller's transcript stays clean.
+ */
 async function runAnthropic(req: AssistantRequest): Promise<string> {
   const Anthropic = await loadAnthropic();
   const client = new Anthropic({ apiKey: req.apiKey, dangerouslyAllowBrowser: true });
 
-  const stream = client.messages.stream(
-    {
-      model: req.model || DEFAULT_AI_MODEL,
-      max_tokens: 8192,
-      thinking: { type: 'adaptive' },
-      system: req.system,
-      messages: req.messages.map((m) => ({ role: m.role, content: m.content })),
-    },
-    { signal: req.signal },
-  );
+  const exec = req.runCompilerTool;
+  const messages: MessageParam[] = req.messages.map((m) => ({ role: m.role, content: m.content }));
 
-  let full = '';
-  stream.on('text', (delta) => {
-    full += delta;
-    req.onText(delta);
-  });
-  const final = await stream.finalMessage();
-  // A safety-classifier refusal resolves normally (HTTP 200) with stop_reason 'refusal' and no
-  // text — surface it as an error so the UI shows a message instead of a blank reply.
-  if (final.stop_reason === 'refusal' && !full.trim()) {
-    throw new Error('The model declined to respond to this request.');
+  let anyText = false;
+  for (let round = 0; round <= MAX_TOOL_ROUNDS; round++) {
+    // Offer tools until the last allowed round, where we drop them so the model must answer in text.
+    const offerTools = exec && round < MAX_TOOL_ROUNDS;
+    const stream = client.messages.stream(
+      {
+        model: req.model || DEFAULT_AI_MODEL,
+        max_tokens: 8192,
+        thinking: { type: 'adaptive' },
+        system: req.system,
+        messages,
+        // Anthropic's `{name, description, input_schema}` tool shape. The cast bridges the neutral
+        // `object` schema to the SDK's `Tool.InputSchema`, same as the OpenAI adapter's boundary cast.
+        ...(offerTools ? { tools: KOINE_TOOL_DEFS.map(toAnthropicTool) as Tool[] } : {}),
+      },
+      { signal: req.signal },
+    );
+
+    // This round's text. A tool-call round's text is a "thinking" preamble: it never enters history,
+    // and only the terminating round's text is returned below.
+    let roundText = '';
+    stream.on('text', (delta) => {
+      roundText += delta;
+      if (delta) anyText = true;
+      req.onText(delta);
+    });
+    const final = await stream.finalMessage();
+
+    // A safety-classifier refusal resolves normally (HTTP 200) with stop_reason 'refusal' and no
+    // text — surface it as an error so the UI shows a message instead of a blank reply.
+    if (final.stop_reason === 'refusal' && !anyText) {
+      throw new Error('The model declined to respond to this request.');
+    }
+
+    // No tool request (or no executor / final round) → this round's text IS the answer.
+    if (final.stop_reason !== 'tool_use' || !exec || round === MAX_TOOL_ROUNDS) {
+      return roundText;
+    }
+
+    // Echo the assistant turn back verbatim — the API requires its thinking/text/tool_use blocks
+    // returned unchanged before the matching tool_result turn.
+    messages.push({ role: 'assistant', content: final.content });
+    const toolResults: ToolResultBlockParam[] = [];
+    for (const block of final.content) {
+      if (block.type !== 'tool_use') continue;
+      let result: string;
+      try {
+        result = await exec(block.name, JSON.stringify(block.input));
+      } catch (e) {
+        // A failed tool is recoverable: hand the error back as the result so the model can adapt.
+        result = `Error: ${e instanceof Error ? e.message : String(e)}`;
+      }
+      req.onToolCall?.(block.name, summarizeForChip(block.name, result));
+      toolResults.push({ type: 'tool_result', tool_use_id: block.id, content: result });
+    }
+    messages.push({ role: 'user', content: toolResults });
   }
-  return full;
+  return '';
 }
 
 /**

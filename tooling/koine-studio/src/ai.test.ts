@@ -3,10 +3,21 @@ import { runAssistant, MAX_TOOL_ROUNDS, type AssistantRequest } from './ai';
 
 // Mock the dynamically-imported OpenAI SDK: `new OpenAI()` exposes chat.completions.create, which we
 // route to a per-test implementation so we can feed canned streamed chunks and inspect the params.
-const h = vi.hoisted(() => ({ createImpl: null as null | ((params: unknown, opts: unknown) => unknown) }));
+// The Anthropic SDK is mocked the same way: `new Anthropic()` exposes messages.stream, routed to a
+// per-test `streamImpl` that returns a canned stream object (see anthropicStream below).
+const h = vi.hoisted(() => ({
+  createImpl: null as null | ((params: unknown, opts: unknown) => unknown),
+  streamImpl: null as null | ((params: unknown, opts: unknown) => unknown),
+}));
 vi.mock('openai', () => ({
   default: class {
     chat = { completions: { create: (params: unknown, opts: unknown) => h.createImpl!(params, opts) } };
+    constructor(_opts: unknown) {}
+  },
+}));
+vi.mock('@anthropic-ai/sdk', () => ({
+  default: class {
+    messages = { stream: (params: unknown, opts: unknown) => h.streamImpl!(params, opts) };
     constructor(_opts: unknown) {}
   },
 }));
@@ -34,6 +45,32 @@ const TOOLCALL = [
   { choices: [{ delta: {}, finish_reason: 'tool_calls' }] },
 ];
 
+// A canned Anthropic stream: text callbacks fire synchronously on `.on('text', …)` registration (the
+// real code registers the listener before awaiting finalMessage, so by-the-time semantics match).
+function anthropicStream(spec: { textDeltas?: string[]; finalMessage: unknown }) {
+  return {
+    on(event: string, cb: (delta: string) => void) {
+      if (event === 'text') for (const d of spec.textDeltas ?? []) cb(d);
+      return this;
+    },
+    finalMessage() {
+      return Promise.resolve(spec.finalMessage);
+    },
+  };
+}
+
+// Round 0: the model asks to run koine_validate. Round 1: the answer (Anthropic equivalents of the
+// OpenAI TOOLCALL/TEXT fixtures above).
+const A_TOOLCALL = {
+  role: 'assistant',
+  stop_reason: 'tool_use',
+  content: [{ type: 'tool_use', id: 'tu_1', name: 'koine_validate', input: { source: 'context X {}' } }],
+};
+const A_TEXT = {
+  textDeltas: ['All ', 'good ✓'],
+  finalMessage: { role: 'assistant', stop_reason: 'end_turn', content: [{ type: 'text', text: 'All good ✓' }] },
+};
+
 function baseReq(over: Partial<AssistantRequest> = {}): AssistantRequest {
   return {
     provider: 'openai',
@@ -47,8 +84,13 @@ function baseReq(over: Partial<AssistantRequest> = {}): AssistantRequest {
   };
 }
 
+function anthropicReq(over: Partial<AssistantRequest> = {}): AssistantRequest {
+  return baseReq({ provider: 'anthropic', apiKey: 'sk-test', baseUrl: undefined, model: undefined, ...over });
+}
+
 beforeEach(() => {
   h.createImpl = null;
+  h.streamImpl = null;
 });
 
 describe('runOpenAiCompatible — plain chat (no executor)', () => {
@@ -170,5 +212,84 @@ describe('runOpenAiCompatible — agentic tool loop', () => {
     const second = sentTo[1] as { role: string; content?: string }[];
     const toolMsg = second.find((m) => m.role === 'tool');
     expect(toolMsg?.content).toContain('wasm boom');
+  });
+});
+
+describe('runAnthropic — agentic tool loop', () => {
+  test('advertises Anthropic tools, runs koine_validate once, fires onToolCall, returns only the final text', async () => {
+    const params: Record<string, unknown>[] = [];
+    const queue = [anthropicStream({ finalMessage: A_TOOLCALL }), anthropicStream(A_TEXT)];
+    h.streamImpl = (p) => {
+      params.push(p as Record<string, unknown>);
+      return queue.shift();
+    };
+    const calls: { name: string; args: string }[] = [];
+    const chips: string[] = [];
+    const out = await runAssistant(
+      anthropicReq({
+        runCompilerTool: (name, args) => {
+          calls.push({ name, args });
+          return Promise.resolve('ok: true — no diagnostics.');
+        },
+        onToolCall: (name) => chips.push(name),
+      }),
+    );
+
+    // Round 0 advertises tools in the Anthropic `input_schema` shape (not OpenAI's `parameters`).
+    const tools = params[0].tools as { name: string; input_schema?: unknown; parameters?: unknown }[];
+    expect(Array.isArray(tools)).toBe(true);
+    expect(tools[0].input_schema).toBeTruthy();
+    expect(tools[0].parameters).toBeUndefined();
+
+    // The tool ran once with the JSON-stringified input; the chip fired; the answer is only round 1's text.
+    expect(calls).toEqual([{ name: 'koine_validate', args: '{"source":"context X {}"}' }]);
+    expect(chips).toEqual(['koine_validate']);
+    expect(out).toBe('All good ✓');
+  });
+
+  test('no executor → no tools advertised, plain chat returns the text; a refusal with no text throws', async () => {
+    const params: Record<string, unknown>[] = [];
+    h.streamImpl = (p) => {
+      params.push(p as Record<string, unknown>);
+      return anthropicStream(A_TEXT);
+    };
+    let streamed = '';
+    const out = await runAssistant(anthropicReq({ onText: (d) => (streamed += d) }));
+    expect(out).toBe('All good ✓');
+    expect(streamed).toBe('All good ✓');
+    expect(params).toHaveLength(1);
+    expect(params[0].tools).toBeUndefined();
+
+    // A safety-classifier refusal with no text surfaces as an error.
+    h.streamImpl = () =>
+      anthropicStream({ finalMessage: { role: 'assistant', stop_reason: 'refusal', content: [] } });
+    await expect(runAssistant(anthropicReq())).rejects.toThrow('The model declined to respond to this request.');
+  });
+
+  test('caps tool rounds at MAX_TOOL_ROUNDS; a thrown executor is fed back as a tool_result', async () => {
+    // The model never stops asking for tools, and the executor always throws.
+    const sentTo: unknown[] = [];
+    h.streamImpl = (p) => {
+      sentTo.push((p as { messages: unknown }).messages);
+      return anthropicStream({ finalMessage: A_TOOLCALL });
+    };
+    let n = 0;
+    const out = await runAssistant(
+      anthropicReq({
+        runCompilerTool: () => {
+          n++;
+          return Promise.reject(new Error('wasm boom'));
+        },
+      }),
+    );
+    // Tools dropped on the final round → exactly MAX_TOOL_ROUNDS executions, no crash.
+    expect(n).toBe(MAX_TOOL_ROUNDS);
+    expect(typeof out).toBe('string');
+
+    // The user turn pushed after round 0 carries a tool_result whose content includes the error text.
+    const second = sentTo[1] as { role: string; content: { type: string; content?: string }[] }[];
+    const userTurn = second.find((m) => m.role === 'user' && Array.isArray(m.content));
+    const toolResult = userTurn?.content.find((b) => b.type === 'tool_result');
+    expect(toolResult?.content).toContain('wasm boom');
   });
 });
