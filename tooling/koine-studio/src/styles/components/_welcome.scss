@@ -16,20 +16,29 @@
   }
 }
 
-/* margin:auto centers the console when it fits and lets it scroll from the top when it doesn't —
-   robust in flex without the top-clipping that grid/place-content can cause. */
+/* margin:auto centers the card; a FIXED height keeps the modal the same size across both views (console
+   ↔ gallery) and across tab switches — the inner regions scroll instead of the box resizing. */
 .koi-welcome-card {
   position: relative;
   margin: auto;
+  display: flex;
+  flex-direction: column;
   width: 100%;
   max-width: 1040px;
+  height: min(620px, calc(100dvh - 48px));
   background: var(--koi-paper-2);
   border: 1px solid var(--koi-line);
   border-radius: var(--koi-radius-lg);
   box-shadow: var(--koi-shadow);
   padding: clamp(20px, 3vw, 34px) clamp(20px, 3.4vw, 40px) clamp(22px, 3vw, 34px);
-  overflow: hidden; /* clips the gradient cap to the rounded corners */
+  overflow: hidden; /* clips the gradient cap to the rounded corners; inner regions own the scroll */
   animation: koi-rise 0.45s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+
+  /* display:flex (above) would otherwise beat the UA [hidden] rule, leaving the inactive card visible —
+     restore it so console/gallery still swap one-at-a-time. */
+  &[hidden] {
+    display: none;
+  }
 
   /* A 3px brand-gradient cap ties the console to the monogram — the one piece of chrome decoration,
      replacing the old blueprint-grid + glow. */
@@ -129,6 +138,11 @@
   grid-template-columns: minmax(0, 1.18fr) minmax(0, 0.82fr);
   gap: clamp(24px, 4vw, 56px);
   align-items: start;
+  /* Fill the fixed card and scroll internally if the content (e.g. a long recent list, or a narrow
+     viewport) outgrows it, so the card itself never resizes. */
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
 }
 
 .koi-welcome-lede {
@@ -464,43 +478,45 @@
   }
 }
 
-/* Filter chip rows: a small label, then a wrapping run of toggle chips. */
-.koi-welcome-filters {
+/* Level tabs (left) + the panel they drive (right). The tab rail is the only level navigation — one
+   quiet component, each tab carrying a live count. */
+.koi-welcome-gallery-main {
+  display: flex;
+  align-items: flex-start;
+  gap: clamp(20px, 3vw, 36px);
+  margin-top: clamp(20px, 2.6vw, 28px);
+  flex: 1;
+  min-height: 0;
+}
+
+.koi-welcome-tablist {
   display: flex;
   flex-direction: column;
-  gap: var(--koi-space-1-5);
-  margin-top: var(--koi-space-3);
+  gap: var(--koi-space-0-5);
+  flex: none;
+  width: clamp(140px, 18vw, 184px);
 }
 
-.koi-welcome-chip-row {
+/* A sidebar tab: name left, count right, a 2px accent rail marking the active one. */
+.koi-welcome-tab {
   display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--koi-space-1-25);
-}
-
-.koi-welcome-chip-label {
-  font-family: var(--koi-font-mono);
-  font-size: 0.65rem;
-  text-transform: uppercase;
-  letter-spacing: 0.16em;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--koi-space-2);
+  width: 100%;
+  text-align: left;
+  background: transparent;
   color: var(--koi-muted);
-  margin-right: var(--koi-space-0-5);
-}
-
-.koi-welcome-chip {
-  background: var(--koi-surface);
-  color: var(--koi-ink-soft);
-  border: 1px solid var(--koi-line);
-  border-radius: var(--koi-radius-pill);
-  padding: var(--koi-space-0-75) var(--koi-space-2-5);
+  border: 1px solid transparent;
+  border-left: 2px solid transparent;
+  border-radius: var(--koi-radius);
+  padding: var(--koi-space-2) var(--koi-space-2-75);
   font-family: var(--koi-font-body);
-  font-size: var(--koi-text-xs);
   cursor: pointer;
   transition: background var(--koi-dur-fast) ease, color var(--koi-dur-fast) ease, border-color var(--koi-dur-fast) ease;
 
   &:hover {
-    border-color: var(--koi-accent);
+    background: var(--koi-surface);
     color: var(--koi-fg);
   }
 
@@ -509,47 +525,67 @@
     outline-offset: 1px;
   }
 
-  &[aria-pressed='true'] {
-    background: var(--koi-accent);
-    color: var(--koi-on-accent);
-    border-color: var(--koi-accent);
-    font-weight: 600;
+  &[aria-selected='true'] {
+    background: color-mix(in srgb, var(--koi-accent) 12%, transparent);
+    border-left-color: var(--koi-accent);
+    color: var(--koi-fg);
+  }
+
+  /* A level the current search has emptied — dimmed and inert, not a dead end to click. */
+  &.is-empty {
+    opacity: 0.4;
+    pointer-events: none;
   }
 }
 
-/* Difficulty group: an uppercase heading over a card grid. */
-.koi-welcome-gallery-body {
-  margin-top: clamp(14px, 2vw, 20px);
-}
-
-.koi-welcome-group + .koi-welcome-group {
-  margin-top: clamp(16px, 2.2vw, 22px);
-}
-
-.koi-welcome-group-title {
-  margin: 0 0 var(--koi-space-2);
-  font-family: var(--koi-font-mono);
-  font-size: 0.7rem;
+.koi-welcome-tab-label {
+  font-size: var(--koi-text-sm-plus);
   font-weight: 600;
   text-transform: capitalize;
-  letter-spacing: 0.12em;
-  color: var(--koi-muted);
+}
+
+.koi-welcome-tab-count {
+  font-family: var(--koi-font-mono);
+  font-size: var(--koi-text-2xs);
+  color: color-mix(in srgb, var(--koi-muted) 80%, transparent);
+
+  .koi-welcome-tab[aria-selected='true'] & {
+    color: var(--koi-accent);
+  }
+}
+
+.koi-welcome-tabpanel {
+  flex: 1;
+  min-width: 0;
+  /* The one scroll region: cards scroll here when a level has more than fits, so changing tabs never
+     resizes the card. A little side padding keeps the card hover-lift from clipping at the edges. */
+  min-height: 0;
+  overflow-y: auto;
+  padding: 2px;
+  margin: -2px;
+
+  /* Programmatically focusable; the cards carry the visible focus, so no ring on the panel itself. */
+  &:focus-visible {
+    outline: none;
+  }
 }
 
 .koi-welcome-gallery-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(216px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
   gap: var(--koi-space-2-5);
 }
 
+/* The card is a row: icon tile, the name + tagline beside it, and an open chevron that brightens on
+   hover/focus. Quiet by default, lifting on hover — one accent, no badge clutter. */
 .koi-welcome-example {
   display: flex;
-  flex-direction: column;
-  gap: var(--koi-space-1-25);
+  align-items: center;
+  gap: var(--koi-space-3);
   text-align: left;
   background: var(--koi-surface);
   border: 1px solid var(--koi-line);
-  border-radius: var(--koi-radius);
+  border-radius: var(--koi-radius-lg);
   padding: var(--koi-space-3) var(--koi-space-3-5);
   cursor: pointer;
   transition: border-color var(--koi-dur-fast) ease, transform var(--koi-dur-fast) ease, box-shadow var(--koi-dur-fast) ease;
@@ -557,7 +593,7 @@
   &:hover {
     border-color: var(--koi-accent);
     transform: translateY(-2px);
-    box-shadow: 0 10px 24px color-mix(in srgb, var(--koi-accent) 12%, transparent);
+    box-shadow: 0 12px 28px color-mix(in srgb, var(--koi-accent) 14%, transparent);
   }
 
   &:focus-visible {
@@ -567,59 +603,74 @@
   }
 }
 
-.koi-welcome-example-head {
-  display: flex;
+/* The emoji set in a soft rounded app-tile, so it reads as an artifact rather than loose text. */
+.koi-welcome-example-icon {
+  display: inline-flex;
   align-items: center;
-  gap: var(--koi-space-2);
+  justify-content: center;
+  flex: none;
+  width: 42px;
+  height: 42px;
+  border-radius: var(--koi-radius);
+  background: color-mix(in srgb, var(--koi-fg) 6%, transparent);
+  border: 1px solid var(--koi-line);
+  font-size: 1.3rem;
+  line-height: 1;
 }
 
-.koi-welcome-example-icon {
-  font-size: 1.05rem;
-  line-height: 1;
-  flex: none;
+.koi-welcome-example-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--koi-space-0-75);
+  min-width: 0;
+  flex: 1;
 }
 
 .koi-welcome-example-name {
-  font-family: var(--koi-font-body);
-  font-weight: 600;
+  font-family: var(--koi-font-display);
+  font-weight: 700;
   font-size: var(--koi-text-md);
+  letter-spacing: -0.01em;
   color: var(--koi-fg);
 }
 
+/* Two-line tagline — clamped so rows keep an even height regardless of copy length. */
 .koi-welcome-example-blurb {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
   font-family: var(--koi-font-body);
-  font-size: var(--koi-text-xs);
+  font-size: var(--koi-text-sm-plus);
   color: var(--koi-muted);
   line-height: 1.45;
 }
 
-/* Difficulty + tag badges along the card footer. */
-.koi-welcome-badges {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--koi-space-1);
-  margin-top: var(--koi-space-0-5);
-}
-
-.koi-welcome-badge {
-  font-family: var(--koi-font-mono);
-  font-size: 0.6rem;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  padding: var(--koi-space-0-5) var(--koi-space-1-5);
-  border-radius: var(--koi-radius-pill);
-  border: 1px solid var(--koi-line);
+/* The open affordance: hidden until the card is hovered/focused, then slides in and takes the accent. */
+.koi-welcome-example-arrow {
+  display: inline-flex;
+  flex: none;
   color: var(--koi-muted);
-  white-space: nowrap;
+  opacity: 0;
+  transform: translateX(-4px);
+  transition: opacity var(--koi-dur-fast) ease, transform var(--koi-dur-fast) ease, color var(--koi-dur-fast) ease;
+
+  svg {
+    width: 16px;
+    height: 16px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.7;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
 }
 
-.koi-welcome-badge--diff {
-  border-color: color-mix(in srgb, var(--koi-accent) 45%, var(--koi-line));
-  color: color-mix(in srgb, var(--koi-accent) 75%, var(--koi-fg));
-}
-
-.koi-welcome-badge--tag {
-  background: var(--koi-paper);
+.koi-welcome-example:hover .koi-welcome-example-arrow,
+.koi-welcome-example:focus-visible .koi-welcome-example-arrow {
+  opacity: 1;
+  transform: translateX(0);
+  color: var(--koi-accent);
 }
 
 /* No-match empty state — announced via role=status / aria-live=polite in the DOM. */
@@ -628,6 +679,99 @@
   color: var(--koi-muted);
   font-size: var(--koi-text-sm-plus);
   font-style: italic;
+}
+
+/* --- gallery view: the catalogue as its own swapped-in card --------------- */
+/* Reached from the console's "Start from an example" action. In standalone mode the gallery is the top
+   of its own card, so it sheds the divider + top inset it wore when it sat below the hero. */
+.koi-gallery-card .koi-welcome-gallery {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: none;
+  /* Fill the fixed card: a static head, then a main region that flexes and scrolls internally. */
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+/* Tighten the bar→lede gap: the titled lede provides the breathing room below. */
+.koi-gallery-bar {
+  margin-bottom: clamp(16px, 2.2vw, 24px);
+}
+
+/* Back-to-console affordance: an arrow + label, quiet until hovered/focused (mirrors the close button). */
+.koi-welcome-back {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--koi-space-1-5);
+  background: transparent;
+  color: var(--koi-muted);
+  border: 1px solid transparent;
+  border-radius: var(--koi-radius-sm);
+  padding: var(--koi-space-1-25) var(--koi-space-2);
+  font-family: var(--koi-font-body);
+  font-size: var(--koi-text-sm-plus);
+  cursor: pointer;
+  transition: background var(--koi-dur-fast) ease, color var(--koi-dur-fast) ease, border-color var(--koi-dur-fast) ease;
+
+  &:hover {
+    background: var(--koi-surface);
+    border-color: var(--koi-line);
+    color: var(--koi-fg);
+  }
+
+  &:hover .koi-welcome-back-icon {
+    transform: translateX(-2px); /* the arrow nudges back, reinforcing "return" */
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--koi-accent);
+    outline-offset: 1px;
+  }
+}
+
+.koi-welcome-back-icon {
+  display: inline-flex;
+  transition: transform var(--koi-dur-fast) ease;
+
+  svg {
+    width: 15px;
+    height: 15px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.7;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+}
+
+/* The gallery head's titled lede echoes the hero rhythm (eyebrow → statement → subline) so the two
+   views read as one product. Bottom-align the search so it sits on the subline. */
+.koi-gallery-card .koi-welcome-gallery-head {
+  align-items: flex-end;
+}
+
+.koi-welcome-gallery-lede {
+  min-width: 0;
+}
+
+.koi-welcome-gallery-lede .koi-welcome-eyebrow {
+  margin-bottom: var(--koi-space-1-5);
+}
+
+.koi-gallery-card .koi-welcome-section-title {
+  font-size: clamp(1.4rem, 1rem + 1vw, 1.7rem);
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  line-height: 1.05;
+}
+
+.koi-welcome-gallery-sub {
+  margin: var(--koi-space-1-5) 0 0;
+  font-family: var(--koi-font-body);
+  font-size: var(--koi-text-sm-plus);
+  color: var(--koi-muted);
 }
 
 /* --- responsive: collapse the hero to one column, then tighten chrome ----- */
@@ -639,5 +783,36 @@
 
   .koi-welcome-search {
     flex-basis: 100%;
+  }
+
+  /* Stack the gallery lede over the search again. */
+  .koi-gallery-card .koi-welcome-gallery-head {
+    align-items: stretch;
+  }
+
+  /* The level tabs move above the panel as a wrapping row of chips. */
+  .koi-welcome-gallery-main {
+    flex-direction: column;
+    gap: var(--koi-space-3);
+  }
+
+  .koi-welcome-tablist {
+    width: 100%;
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: var(--koi-space-1-5);
+  }
+
+  .koi-welcome-tab {
+    flex: 0 0 auto;
+    width: auto;
+    border: 1px solid var(--koi-line);
+    border-left-width: 1px;
+    border-radius: var(--koi-radius-pill);
+    padding: var(--koi-space-1-5) var(--koi-space-2-75);
+
+    &[aria-selected='true'] {
+      border-color: var(--koi-accent);
+    }
   }
 }

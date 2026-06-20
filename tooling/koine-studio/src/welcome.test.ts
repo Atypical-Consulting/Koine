@@ -48,6 +48,16 @@ function cardNames(root: HTMLElement): string[] {
   );
 }
 
+/** The level tab whose data-level matches. */
+function tabFor(root: HTMLElement, level: string): HTMLButtonElement {
+  return Array.from(root.querySelectorAll<HTMLButtonElement>('.koi-welcome-tab')).find((t) => t.dataset.level === level)!;
+}
+
+/** The live count shown on a level tab. */
+function tabCount(root: HTMLElement, level: string): string | null | undefined {
+  return tabFor(root, level).querySelector('.koi-welcome-tab-count')?.textContent;
+}
+
 describe('filterTemplates (pure)', () => {
   test('no filters returns every template', () => {
     expect(filterTemplates(SAMPLE, {}).map((t) => t.id)).toEqual(['billing', 'ordering', 'library', 'saas']);
@@ -89,15 +99,15 @@ describe('welcome gallery', () => {
     document.body.innerHTML = '';
   });
 
-  test('renders one card per template and opens the template on click', () => {
+  test("renders the active level's cards and opens a template on click", () => {
     const cb = makeCallbacks();
     const handle = createWelcome(cb, SAMPLE);
     handle.show();
     const root = document.querySelector<HTMLElement>('.koi-welcome')!;
 
-    expect(cardNames(root).sort()).toEqual(['Billing', 'Library', 'Ordering', 'SaaS Subscription']);
+    // The first present level (Starter) is active by default; only its cards are in the panel.
+    expect(cardNames(root).sort()).toEqual(['Billing', 'Ordering']);
 
-    // Card click still opens its template, then dismisses the screen (preserved behavior).
     const billing = Array.from(root.querySelectorAll<HTMLElement>('.koi-welcome-example')).find(
       (b) => b.querySelector('.koi-welcome-example-name')?.textContent === 'Billing',
     )!;
@@ -106,7 +116,7 @@ describe('welcome gallery', () => {
     expect(handle.visible).toBe(false);
   });
 
-  test('cards are <button>s with an aria-label of name + tagline and difficulty/tag badges', () => {
+  test('the title sits beside the icon, with a tagline and an open chevron — no badges', () => {
     const cb = makeCallbacks();
     const handle = createWelcome(cb, SAMPLE);
     handle.show();
@@ -118,76 +128,78 @@ describe('welcome gallery', () => {
     expect(billing.tagName).toBe('BUTTON');
     expect(billing.getAttribute('aria-label')).toContain('Billing');
     expect(billing.getAttribute('aria-label')).toContain('Money and orders');
-    const badges = Array.from(billing.querySelectorAll('.koi-welcome-badge')).map((b) => b.textContent);
-    expect(badges).toContain('starter');
-    expect(badges).toContain('money');
+    // Icon, then the body (name + tagline), then the chevron — the title is beside the icon.
+    expect(Array.from(billing.children).map((c) => c.className)).toEqual([
+      'koi-welcome-example-icon',
+      'koi-welcome-example-body',
+      'koi-welcome-example-arrow',
+    ]);
+    expect(billing.querySelector('.koi-welcome-example-body .koi-welcome-example-name')?.textContent).toBe('Billing');
+    expect(billing.querySelector('.koi-welcome-example-blurb')?.textContent).toBe('Money and orders');
+    expect(billing.querySelector('.koi-welcome-badge')).toBeNull();
   });
 
-  test('groups by difficulty with starters first', () => {
+  test('draws a vertical tab per present level, each with a live count', () => {
     const cb = makeCallbacks();
-    const handle = createWelcome(cb, SAMPLE);
-    handle.show();
+    createWelcome(cb, SAMPLE).show();
     const root = document.querySelector<HTMLElement>('.koi-welcome')!;
 
-    const headings = Array.from(root.querySelectorAll<HTMLElement>('.koi-welcome-group-title')).map((h) =>
-      (h.textContent ?? '').toLowerCase(),
-    );
-    // Only difficulties that have at least one matching template appear, in canonical order.
-    expect(headings).toEqual(['starter', 'intermediate', 'advanced']);
+    const list = root.querySelector('.koi-welcome-tablist')!;
+    expect(list.getAttribute('role')).toBe('tablist');
+    expect(list.getAttribute('aria-orientation')).toBe('vertical');
+
+    const tabs = Array.from(root.querySelectorAll<HTMLButtonElement>('.koi-welcome-tab'));
+    expect(tabs.map((t) => t.dataset.level)).toEqual(['starter', 'intermediate', 'advanced']);
+    expect(tabs.every((t) => t.getAttribute('role') === 'tab')).toBe(true);
+    expect(tabs.map((t) => t.querySelector('.koi-welcome-tab-count')?.textContent)).toEqual(['2', '1', '1']);
+    expect(tabFor(root, 'starter').getAttribute('aria-selected')).toBe('true');
   });
 
-  test('the search input filters the rendered cards', () => {
+  test('selecting a level tab swaps the panel to that level', () => {
     const cb = makeCallbacks();
-    const handle = createWelcome(cb, SAMPLE);
-    handle.show();
+    createWelcome(cb, SAMPLE).show();
     const root = document.querySelector<HTMLElement>('.koi-welcome')!;
 
-    const search = root.querySelector<HTMLInputElement>('input[type="search"]')!;
-    expect(search).not.toBeNull();
-    // labelled search box
-    const label = root.querySelector<HTMLLabelElement>('label[for="' + search.id + '"]');
-    expect(label).not.toBeNull();
+    tabFor(root, 'intermediate').click();
+    expect(cardNames(root)).toEqual(['Library']);
+    expect(tabFor(root, 'intermediate').getAttribute('aria-selected')).toBe('true');
+    expect(tabFor(root, 'starter').getAttribute('aria-selected')).toBe('false');
 
-    setSearch(root, 'state-machine');
-    expect(cardNames(root).sort()).toEqual(['Library', 'Ordering']);
-  });
-
-  test('a difficulty chip toggles the filter and reflects aria-pressed', () => {
-    const cb = makeCallbacks();
-    const handle = createWelcome(cb, SAMPLE);
-    handle.show();
-    const root = document.querySelector<HTMLElement>('.koi-welcome')!;
-
-    const chip = Array.from(root.querySelectorAll<HTMLButtonElement>('.koi-welcome-chip')).find(
-      (b) => b.dataset.kind === 'difficulty' && b.dataset.value === 'advanced',
-    )!;
-    expect(chip.getAttribute('aria-pressed')).toBe('false');
-    chip.click();
-    expect(chip.getAttribute('aria-pressed')).toBe('true');
+    tabFor(root, 'advanced').click();
     expect(cardNames(root)).toEqual(['SaaS Subscription']);
-
-    chip.click(); // toggle off restores all
-    expect(chip.getAttribute('aria-pressed')).toBe('false');
-    expect(cardNames(root).length).toBe(SAMPLE.length);
   });
 
-  test('a tag chip exists for the union of tags and filters by it', () => {
+  test('exposes no filter chips — search + level tabs are the only controls', () => {
     const cb = makeCallbacks();
-    const handle = createWelcome(cb, SAMPLE);
-    handle.show();
+    createWelcome(cb, SAMPLE).show();
+    const root = document.querySelector<HTMLElement>('.koi-welcome')!;
+    expect(root.querySelector('.koi-welcome-chip')).toBeNull();
+    expect(root.querySelector('.koi-welcome-filters')).toBeNull();
+    expect(root.querySelector('input[type="search"]')).not.toBeNull();
+  });
+
+  test('search narrows the active level and updates the tab counts (matching tags too)', () => {
+    const cb = makeCallbacks();
+    createWelcome(cb, SAMPLE).show();
     const root = document.querySelector<HTMLElement>('.koi-welcome')!;
 
-    const tagChips = Array.from(root.querySelectorAll<HTMLButtonElement>('.koi-welcome-chip[data-kind="tag"]')).map(
-      (b) => b.dataset.value,
-    );
-    // union of all tags across SAMPLE
-    expect(new Set(tagChips)).toEqual(new Set(['money', 'orders', 'state-machine', 'ddd', 'saas']));
+    setSearch(root, 'state-machine'); // a tag: ordering (starter) + library (intermediate)
+    expect(cardNames(root)).toEqual(['Ordering']); // active level stays Starter
+    expect(tabCount(root, 'starter')).toBe('1');
+    expect(tabCount(root, 'intermediate')).toBe('1');
+    expect(tabCount(root, 'advanced')).toBe('0');
+  });
 
-    const dddChip = Array.from(root.querySelectorAll<HTMLButtonElement>('.koi-welcome-chip')).find(
-      (b) => b.dataset.kind === 'tag' && b.dataset.value === 'ddd',
-    )!;
-    dddChip.click();
-    expect(cardNames(root).sort()).toEqual(['Library', 'SaaS Subscription']);
+  test('when a search empties the active level, the panel jumps to the first level with matches', () => {
+    const cb = makeCallbacks();
+    createWelcome(cb, SAMPLE).show();
+    const root = document.querySelector<HTMLElement>('.koi-welcome')!;
+
+    setSearch(root, 'ddd'); // a tag on library (intermediate) + saas (advanced); no starter match
+    expect(tabCount(root, 'starter')).toBe('0');
+    expect(tabFor(root, 'starter').classList.contains('is-empty')).toBe(true);
+    expect(tabFor(root, 'intermediate').getAttribute('aria-selected')).toBe('true');
+    expect(cardNames(root)).toEqual(['Library']);
   });
 
   test('shows an empty-state message when nothing matches', () => {
@@ -203,6 +215,72 @@ describe('welcome gallery', () => {
     expect(empty!.textContent?.toLowerCase()).toContain('no');
     // Empty state is announced for assistive tech.
     expect(empty!.getAttribute('aria-live')).toBe('polite');
+  });
+});
+
+describe('welcome start actions ↔ gallery', () => {
+  beforeEach(() => {
+    document.body.innerHTML = '';
+  });
+
+  /** The start action whose label matches `label`, e.g. "Start from an example". */
+  function action(root: HTMLElement, label: string): HTMLButtonElement {
+    return Array.from(root.querySelectorAll<HTMLButtonElement>('button.koi-welcome-action')).find(
+      (b) => b.querySelector('.koi-welcome-action-label')?.textContent === label,
+    )!;
+  }
+
+  const consoleCard = (root: HTMLElement) => root.querySelector<HTMLElement>('.koi-welcome-card:not(.koi-gallery-card)')!;
+  const galleryCard = (root: HTMLElement) => root.querySelector<HTMLElement>('.koi-gallery-card')!;
+
+  test('opens on the console with the gallery hidden behind a "Start from an example" action', () => {
+    const cb = makeCallbacks();
+    createWelcome(cb, SAMPLE).show();
+    const root = document.querySelector<HTMLElement>('.koi-welcome')!;
+
+    expect(consoleCard(root).hidden).toBe(false);
+    expect(galleryCard(root).hidden).toBe(true);
+    expect(action(root, 'Start from an example')).toBeTruthy();
+  });
+
+  test('the action swaps in the gallery; "Back to start" swaps back', () => {
+    const cb = makeCallbacks();
+    createWelcome(cb, SAMPLE).show();
+    const root = document.querySelector<HTMLElement>('.koi-welcome')!;
+
+    action(root, 'Start from an example').click();
+    expect(consoleCard(root).hidden).toBe(true);
+    expect(galleryCard(root).hidden).toBe(false);
+
+    root.querySelector<HTMLButtonElement>('.koi-welcome-back')!.click();
+    expect(consoleCard(root).hidden).toBe(false);
+    expect(galleryCard(root).hidden).toBe(true);
+  });
+
+  test('opening the gallery does not leave the welcome screen (no callback, still visible)', () => {
+    const cb = makeCallbacks();
+    const handle = createWelcome(cb, SAMPLE);
+    handle.show();
+    const root = document.querySelector<HTMLElement>('.koi-welcome')!;
+
+    action(root, 'Start from an example').click();
+    expect(handle.visible).toBe(true);
+    expect(cb.onNewModel).not.toHaveBeenCalled();
+    expect(cb.onOpenFolder).not.toHaveBeenCalled();
+  });
+
+  test('re-showing after the gallery was open returns to the console', () => {
+    const cb = makeCallbacks();
+    const handle = createWelcome(cb, SAMPLE);
+    handle.show();
+    const root = document.querySelector<HTMLElement>('.koi-welcome')!;
+
+    action(root, 'Start from an example').click();
+    handle.hide();
+    handle.show();
+
+    expect(consoleCard(root).hidden).toBe(false);
+    expect(galleryCard(root).hidden).toBe(true);
   });
 });
 
