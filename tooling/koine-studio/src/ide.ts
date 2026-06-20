@@ -31,6 +31,7 @@ import { sanitizeProjectName } from './generateProject';
 import { buildSourceZip } from './sourceZip';
 import { formatChord } from './platform';
 import { renderDiagrams } from './diagrams';
+import { NODE_NAVIGATE_EVENT, type DiagramNodeNavigateDetail } from './diagrams-svg';
 import { renderGlossary, type GlossaryHandlers } from './glossary';
 import { createAssistantPanel, type AssistantPanel, type AssistantContext, type DomainIndex } from './aiPanel';
 import { clearModelHash, readModelFromHash, workspaceShareUrlOrNull } from './share';
@@ -70,6 +71,31 @@ function pathToFileUri(path: string): string {
     .map((s) => (s.length ? encodeURIComponent(s) : ''))
     .join('/');
   return 'file://' + encoded;
+}
+
+/**
+ * Best-effort inverse of {@link pathToFileUri}: turn a `file://` uri back into an absolute path
+ * token suitable for `platform.readTextFile`/`ensureBuffer`. Returns null for a non-`file://` uri.
+ * A Windows drive uri ('file:///C:/a/b') yields 'C:/a/b'; a POSIX uri ('file:///a/b') yields '/a/b'.
+ * Used only on the cold "file not yet open" navigation path — when the file is already an open
+ * buffer the uri matches a `buffers` key directly and this is never reached.
+ */
+function fileUriToPath(uri: string): string | null {
+  if (!uri.startsWith('file://')) return null;
+  let rest = uri.slice('file://'.length);
+  // Strip an authority/empty-host segment: 'file:///a' -> '/a' leaves a leading '/'.
+  if (rest.startsWith('/')) {
+    // keep the leading slash for POSIX; a Windows drive ('/C:/…') sheds it below.
+  }
+  let decoded: string;
+  try {
+    decoded = decodeURIComponent(rest);
+  } catch {
+    decoded = rest;
+  }
+  // Windows: '/C:/a/b' -> 'C:/a/b'.
+  if (/^\/[A-Za-z]:\//.test(decoded)) return decoded.slice(1);
+  return decoded;
 }
 
 /**
@@ -1045,6 +1071,44 @@ export function init(): void {
       if (seq === diagramsSeq) docMessage(diagramsView, 'Diagrams request failed: ' + String(e), 'error');
     }
   }
+
+  // Jump-to-source from a diagram node (issue #93, Task 4). The SVG renderer draws each navigable node
+  // as a `<g>` that dispatches a bubbling NODE_NAVIGATE_EVENT carrying its RAW 1-based source span. We
+  // attach ONE delegated listener on the diagrams container (not per render, not per node) and move the
+  // editor caret to that construct's `.koi` declaration, opening the owning file first if it isn't open.
+  async function navigateToDiagramNode(detail: DiagramNodeNavigateDetail): Promise<void> {
+    const uri = detail.file;
+    // No source file on the span → nothing to navigate to (read-only, so just no-op).
+    if (!uri) return;
+    // Defensive: a malformed/zero span must not jump to a bogus place. Valid 1-based coords are ≥ 1.
+    if (!(detail.line >= 1 && detail.column >= 1 && detail.endLine >= 1 && detail.endColumn >= 1)) return;
+
+    // Open the owning file if it isn't an open buffer yet. The span's `file` is the same `file://` uri
+    // the buffers are keyed by (the compiler is fed buffers by uri), so the common folder-mode path is
+    // "already open". If it's closed, derive a path token and open it; if that fails, no-op rather than
+    // jumping in the wrong file.
+    if (!buffers.has(uri)) {
+      const token = fileUriToPath(uri);
+      if (token == null) return;
+      const opened = await ensureBuffer(token);
+      if (opened == null || opened !== uri) return;
+    }
+
+    // Convert the RAW 1-based span to a 0-based LSP Location (start.character = column - 1, end likewise).
+    const location: Location = {
+      uri,
+      range: {
+        start: { line: detail.line - 1, character: detail.column - 1 },
+        end: { line: detail.endLine - 1, character: detail.endColumn - 1 },
+      },
+    };
+    navigateToDefinition(location);
+  }
+
+  diagramsView.addEventListener(NODE_NAVIGATE_EVENT, (e) => {
+    const detail = (e as CustomEvent<DiagramNodeNavigateDetail>).detail;
+    if (detail) void navigateToDiagramNode(detail);
+  });
 
   function ensureLoaded(view: RightView): void {
     if (view === 'preview' && !docViewsLoaded.preview) void loadPreview();

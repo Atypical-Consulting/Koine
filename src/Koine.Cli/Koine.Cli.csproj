@@ -16,6 +16,8 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="Koine.Compiler.Tests" />
+    <!-- The WASM-parity test (tests/Koine.Wasm.Tests) drives the internal LspServer (issue #93). -->
+    <InternalsVisibleTo Include="Koine.Wasm.Tests" />
   </ItemGroup>
 
   <PropertyGroup>

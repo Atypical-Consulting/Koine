@@ -667,8 +667,15 @@ public static partial class CompilerInterop
                 return JsonSerializer.Serialize(new WDocsResult([]), LangJson.Default.WDocsResult);
             }
 
-            var files = new Koine.Compiler.Emit.Docs.DocsEmitter().Emit(model)
-                .Select(f => new WEmitFile(f.RelativePath, f.Contents))
+            var emitter = new Koine.Compiler.Emit.Docs.DocsEmitter();
+            var diagramsByFile = emitter.EmitDiagrams(model);
+            var files = emitter.Emit(model)
+                .Select(f => new WDocsFile(
+                    f.RelativePath,
+                    f.Contents,
+                    diagramsByFile.TryGetValue(f.RelativePath, out var diagrams)
+                        ? diagrams.Select(MapDiagram).ToArray()
+                        : []))
                 .ToArray();
             return JsonSerializer.Serialize(new WDocsResult(files), LangJson.Default.WDocsResult);
         }
@@ -677,6 +684,32 @@ public static partial class CompilerInterop
             return JsonSerializer.Serialize(new WDocsResult([]), LangJson.Default.WDocsResult);
         }
     }
+
+    // ---- diagram-graph mapping (issue #93) -----------------------------------
+    // Mirrors LspServer.MapDiagram et al.: the W* DTOs serialize (source-gen CamelCase) to a wire
+    // shape field-for-field identical to the LSP backend's hand-written dict keys. The parity test
+    // guards that the two stay in lock-step.
+
+    /// <summary>Maps a compiler <see cref="Koine.Compiler.Emit.Docs.DiagramDescriptor"/> to the wire <see cref="WDiagram"/>.</summary>
+    private static WDiagram MapDiagram(Koine.Compiler.Emit.Docs.DiagramDescriptor d) =>
+        new(d.Caption, d.Kind, d.Mermaid, MapGraph(d.Graph));
+
+    private static WDiagramGraph MapGraph(Koine.Compiler.Emit.Docs.DiagramGraph g) =>
+        new(g.Nodes.Select(MapNode).ToArray(), g.Edges.Select(MapEdge).ToArray());
+
+    private static WDiagramNode MapNode(Koine.Compiler.Emit.Docs.DiagramNode n) =>
+        new(n.Id, n.Label, n.Kind, n.QualifiedName, MapSourceSpan(n.Span),
+            n.Stereotype, (n.Members ?? []).Select(MapMember).ToArray());
+
+    private static WDiagramMember MapMember(Koine.Compiler.Emit.Docs.DiagramMember m) =>
+        new(m.Text, m.Kind);
+
+    private static WDiagramEdge MapEdge(Koine.Compiler.Emit.Docs.DiagramEdge e) =>
+        new(e.From, e.To, e.Label);
+
+    /// <summary>Maps the raw 1-based <see cref="SourceSpan"/> straight through (null when the node has none).</summary>
+    private static WSourceSpan? MapSourceSpan(SourceSpan? span) =>
+        span is { } s ? new WSourceSpan(s.File, s.Line, s.Column, s.EndLine, s.EndColumn, s.Offset, s.Length) : null;
 
     // ---- mapping helpers (mirror LspServer.cs) --------------------------------
 
@@ -969,8 +1002,49 @@ public sealed record WWorkspaceEdit(Dictionary<string, WTextEdit[]> Changes);
 /// <summary>LSP CodeAction with an inline workspace edit (quickfix or refactor).</summary>
 public sealed record WCodeAction(string Title, string Kind, WWorkspaceEdit Edit);
 
-/// <summary>Living-documentation files (Mermaid-in-Markdown) for the merged workspace.</summary>
-public sealed record WDocsResult(WEmitFile[] Files);
+/// <summary>
+/// Living-documentation files (Mermaid-in-Markdown) for the merged workspace, each carrying its
+/// structured diagram graphs (issue #93). Distinct from <see cref="WEmitFile"/> — which the
+/// emit-preview path shares — so the docs payload can grow a <c>diagrams</c> array without
+/// polluting that contract.
+/// </summary>
+public sealed record WDocsResult(WDocsFile[] Files);
+
+/// <summary>
+/// One living-documentation file: its <see cref="Path"/>/<see cref="Contents"/> plus the structured
+/// <see cref="Diagrams"/> that ride alongside the Mermaid in its Markdown. <see cref="Diagrams"/> is
+/// empty for a file that draws no diagram. Wire shape mirrors the LSP backend + <c>lsp.ts</c>.
+/// </summary>
+public sealed record WDocsFile(string Path, string Contents, WDiagram[] Diagrams);
+
+/// <summary>One diagram: its rendered Mermaid plus the source-aware <see cref="Graph"/> behind it.</summary>
+public sealed record WDiagram(string Caption, string Kind, string Mermaid, WDiagramGraph Graph);
+
+/// <summary>The structured graph of a diagram: its nodes and the directed edges between them.</summary>
+public sealed record WDiagramGraph(WDiagramNode[] Nodes, WDiagramEdge[] Edges);
+
+/// <summary>
+/// One graph node. The property is named <see cref="SourceSpan"/> (not <c>Span</c>) so the source-gen
+/// CamelCase policy yields the wire key <c>"sourceSpan"</c>, matching the LSP/TS contract. The span is
+/// the raw 1-based source coordinate (Task 4 converts to 0-based when navigating); null only when the
+/// node truly has none. Class nodes carry a <see cref="Stereotype"/> (without guillemets) and UML
+/// <see cref="Members"/>; non-class nodes (state/context/integration) carry <c>null</c>/<c>[]</c>.
+/// </summary>
+public sealed record WDiagramNode(
+    string Id, string Label, string Kind, string QualifiedName, WSourceSpan? SourceSpan,
+    string? Stereotype, WDiagramMember[] Members);
+
+/// <summary>One UML class-body row: a pre-formatted <see cref="Text"/> and its <see cref="Kind"/> (<c>field</c>/<c>method</c>/<c>value</c>).</summary>
+public sealed record WDiagramMember(string Text, string Kind);
+
+/// <summary>One directed edge: node ids <see cref="From"/>→<see cref="To"/> with an optional <see cref="Label"/>.</summary>
+public sealed record WDiagramEdge(string From, string To, string? Label);
+
+/// <summary>
+/// A raw 1-based source span (NOT the 0-based LSP range): the diagram graph keeps source coordinates so
+/// the Studio can jump to source. End line/column are end-exclusive; <see cref="File"/> is the source uri.
+/// </summary>
+public sealed record WSourceSpan(string? File, int Line, int Column, int EndLine, int EndColumn, int Offset, int Length);
 
 /// <summary>Input shape: one of the client's active-file diagnostics (only range + message are read).</summary>
 public sealed record WInDiagnostic(WRange Range, string Message);
@@ -1009,6 +1083,13 @@ public sealed record WSourceFileDto(string Uri, string Text);
 [JsonSerializable(typeof(WWorkspaceEdit))]
 [JsonSerializable(typeof(WCodeAction[]))]
 [JsonSerializable(typeof(WDocsResult))]
+[JsonSerializable(typeof(WDocsFile))]
+[JsonSerializable(typeof(WDiagram))]
+[JsonSerializable(typeof(WDiagramGraph))]
+[JsonSerializable(typeof(WDiagramNode))]
+[JsonSerializable(typeof(WDiagramMember))]
+[JsonSerializable(typeof(WDiagramEdge))]
+[JsonSerializable(typeof(WSourceSpan))]
 [JsonSerializable(typeof(WInDiagnostic[]))]
 [JsonSerializable(typeof(WCheckResult))]
 internal sealed partial class LangJson : JsonSerializerContext;

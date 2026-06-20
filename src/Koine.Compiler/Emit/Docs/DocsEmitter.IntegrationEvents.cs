@@ -75,6 +75,21 @@ public sealed partial class DocsEmitter
             }
         }
 
+        EmitIntegrationFlowchartBody(sb, model, byKey, subscribers);
+
+        sb.Append("```\n");
+    }
+
+    /// <summary>
+    /// Emits just the flowchart body (no fences) — shared between the Markdown emitter and the
+    /// structured-graph builder so both render byte-identical Mermaid.
+    /// </summary>
+    private static void EmitIntegrationFlowchartBody(
+        StringBuilder sb,
+        KoineModel model,
+        SortedDictionary<string, (ContextNode Ctx, IntegrationEventDecl Event)> byKey,
+        SortedDictionary<string, SortedSet<string>> subscribers)
+    {
         foreach (var (key, value) in byKey)
         {
             var publisher = value.Ctx.Name;
@@ -100,8 +115,6 @@ public sealed partial class DocsEmitter
                 }
             }
         }
-
-        sb.Append("```\n");
     }
 
     /// <summary>A Mermaid-safe node id for an event key (dots are not valid in a bare id).</summary>

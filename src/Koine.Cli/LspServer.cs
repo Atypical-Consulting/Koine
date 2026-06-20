@@ -1470,14 +1470,97 @@ internal sealed class LspServer
             return new Dictionary<string, object?> { ["files"] = Array.Empty<object>() };
         }
 
-        var files = new Koine.Compiler.Emit.Docs.DocsEmitter().Emit(model)
+        var emitter = new Koine.Compiler.Emit.Docs.DocsEmitter();
+        var diagramsByFile = emitter.EmitDiagrams(model);
+        var files = emitter.Emit(model)
             .Select(f => (object)new Dictionary<string, object?>
             {
                 ["path"] = f.RelativePath,
                 ["contents"] = f.Contents,
+                // NEW (issue #93): the structured diagram graphs for this file, in the same shape
+                // the WASM backend serializes (camelCase keys, raw 1-based sourceSpan). [] when none.
+                ["diagrams"] = diagramsByFile.TryGetValue(f.RelativePath, out var diagrams)
+                    ? diagrams.Select(MapDiagram).ToArray()
+                    : Array.Empty<object>(),
             })
             .ToArray();
         return new Dictionary<string, object?> { ["files"] = files };
+    }
+
+    // ---- diagram-graph mapping (issue #93) -----------------------------------
+    // Hand-written camelCase keys: the LSP SerializerOptions carries NO naming policy, so dictionary
+    // keys serialize verbatim. These MUST match the WASM W* DTOs (source-gen CamelCase) and the
+    // lsp.ts interfaces field-for-field; the parity test guards that they do.
+
+    /// <summary>Maps one <see cref="Koine.Compiler.Emit.Docs.DiagramDescriptor"/> to its wire dict.</summary>
+    internal static Dictionary<string, object?> MapDiagram(Koine.Compiler.Emit.Docs.DiagramDescriptor d) => new()
+    {
+        ["caption"] = d.Caption,
+        ["kind"] = d.Kind,
+        ["mermaid"] = d.Mermaid,
+        ["graph"] = MapGraph(d.Graph),
+    };
+
+    /// <summary>Maps a <see cref="Koine.Compiler.Emit.Docs.DiagramGraph"/> to its <c>{ nodes, edges }</c> wire dict.</summary>
+    private static Dictionary<string, object?> MapGraph(Koine.Compiler.Emit.Docs.DiagramGraph g) => new()
+    {
+        ["nodes"] = g.Nodes.Select(MapNode).ToArray(),
+        ["edges"] = g.Edges.Select(MapEdge).ToArray(),
+    };
+
+    /// <summary>
+    /// Maps a <see cref="Koine.Compiler.Emit.Docs.DiagramNode"/> (its span stays raw 1-based). Class nodes
+    /// (aggregate/value object/enum/event/entity) carry a <c>stereotype</c> + UML <c>members</c>; the
+    /// state/context/integration nodes carry <c>null</c>/<c>[]</c> for both and stay simple boxes.
+    /// </summary>
+    private static Dictionary<string, object?> MapNode(Koine.Compiler.Emit.Docs.DiagramNode n) => new()
+    {
+        ["id"] = n.Id,
+        ["label"] = n.Label,
+        ["kind"] = n.Kind,
+        ["qualifiedName"] = n.QualifiedName,
+        ["sourceSpan"] = MapSourceSpan(n.Span),
+        ["stereotype"] = n.Stereotype,
+        ["members"] = (n.Members ?? []).Select(MapMember).ToArray(),
+    };
+
+    /// <summary>Maps a <see cref="Koine.Compiler.Emit.Docs.DiagramMember"/> to its <c>{ text, kind }</c> wire dict.</summary>
+    private static Dictionary<string, object?> MapMember(Koine.Compiler.Emit.Docs.DiagramMember m) => new()
+    {
+        ["text"] = m.Text,
+        ["kind"] = m.Kind,
+    };
+
+    /// <summary>Maps a <see cref="Koine.Compiler.Emit.Docs.DiagramEdge"/> (<c>label</c> may be null).</summary>
+    private static Dictionary<string, object?> MapEdge(Koine.Compiler.Emit.Docs.DiagramEdge e) => new()
+    {
+        ["from"] = e.From,
+        ["to"] = e.To,
+        ["label"] = e.Label,
+    };
+
+    /// <summary>
+    /// Maps the raw, 1-based <see cref="SourceSpan"/> straight through (NOT the 0-based LSP range:
+    /// the diagram graph keeps source coordinates so Task 4 can convert when navigating). Null when
+    /// the node carries no span.
+    /// </summary>
+    private static Dictionary<string, object?>? MapSourceSpan(SourceSpan? span)
+    {
+        if (span is not { } s)
+        {
+            return null;
+        }
+
+        return new Dictionary<string, object?>
+        {
+            ["file"] = s.File,
+            ["line"] = s.Line,
+            ["column"] = s.Column,
+            ["endLine"] = s.EndLine,
+            ["endColumn"] = s.EndColumn,
+            ["offset"] = s.Offset,
+            ["length"] = s.Length,
+        };
     }
 
     /// <summary>
