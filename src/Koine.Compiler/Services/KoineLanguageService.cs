@@ -668,7 +668,7 @@ public sealed class KoineLanguageService
     /// <c>StartIndex</c> (which counts every character of the raw stream, including <c>\r</c>).
     /// Out-of-range positions clamp to the end of the document.
     /// </summary>
-    internal static int OffsetOf(string source, int line, int character)
+    public static int OffsetOf(string source, int line, int character)
     {
         var offset = 0;
         var currentLine = 0;

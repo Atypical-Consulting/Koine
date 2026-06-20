@@ -149,6 +149,7 @@ export default defineConfig({
 						{ label: 'Feature catalogue (R1–R17)', slug: 'guides/feature-catalogue' },
 						{ label: 'CLI reference', slug: 'guides/cli' },
 						{ label: 'Architecture', slug: 'guides/architecture' },
+						{ label: 'Koine as a platform', slug: 'guides/platform' },
 						{ label: 'Editor tooling', slug: 'guides/editor-tooling' },
 						{ label: 'Koine Studio', slug: 'guides/koine-studio' },
 						{ label: 'Local LLM in the Assistant', slug: 'guides/assistant-local-llm' },

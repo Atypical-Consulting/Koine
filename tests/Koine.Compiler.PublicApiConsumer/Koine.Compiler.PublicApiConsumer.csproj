@@ -1,0 +1,37 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Public-API consumer proof (issue #69, Task 6). This project references Koine.Compiler with NO
+       InternalsVisibleTo, so it sees ONLY the frozen public surface. If it compiles and its test
+       passes, the public platform API (compile a model, run an external analyzer, resolve an emitter
+       through EmitterRegistry, read EmittedFile) is sufficient for a real consumer. We use a
+       ProjectReference rather than a built .nupkg: lacking the IVT it still only sees public members,
+       which is the equivalent proof and keeps the check in-repo with no pack/restore round-trip. -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.6.0" />
+    <PackageReference Include="Shouldly" Version="4.3.0" />
+    <PackageReference Include="xunit.v3" Version="3.2.2" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="3.1.5">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+    <Using Include="Shouldly" />
+  </ItemGroup>
+
+  <!-- Deliberately a plain ProjectReference: no InternalsVisibleTo grant exists for this assembly,
+       so only Koine.Compiler's public API is visible here. -->
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Koine.Compiler\Koine.Compiler.csproj" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,1584 @@
+#nullable enable
+Koine.Compiler.Ast.AclMapping
+Koine.Compiler.Ast.AclMapping.AclMapping(string! UpstreamContext, string! UpstreamType, string! LocalContext, string! LocalType) -> void
+Koine.Compiler.Ast.AclMapping.LocalContext.get -> string!
+Koine.Compiler.Ast.AclMapping.LocalContext.init -> void
+Koine.Compiler.Ast.AclMapping.LocalType.get -> string!
+Koine.Compiler.Ast.AclMapping.LocalType.init -> void
+Koine.Compiler.Ast.AclMapping.UpstreamContext.get -> string!
+Koine.Compiler.Ast.AclMapping.UpstreamContext.init -> void
+Koine.Compiler.Ast.AclMapping.UpstreamType.get -> string!
+Koine.Compiler.Ast.AclMapping.UpstreamType.init -> void
+Koine.Compiler.Ast.AggregateDecl
+Koine.Compiler.Ast.AggregateDecl.AggregateDecl(string! Name, string! RootName, System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.TypeDecl!>! Types, System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.SpecDecl!>! Specs, bool IsVersioned = false, Koine.Compiler.Ast.RepositoryDecl? Repository = null) -> void
+Koine.Compiler.Ast.AggregateDecl.IsVersioned.get -> bool
+Koine.Compiler.Ast.AggregateDecl.IsVersioned.init -> void
+Koine.Compiler.Ast.AggregateDecl.Repository.get -> Koine.Compiler.Ast.RepositoryDecl?
+Koine.Compiler.Ast.AggregateDecl.Repository.init -> void
+Koine.Compiler.Ast.AggregateDecl.RootName.get -> string!
+Koine.Compiler.Ast.AggregateDecl.RootName.init -> void
+Koine.Compiler.Ast.AggregateDecl.Specs.get -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.SpecDecl!>!
+Koine.Compiler.Ast.AggregateDecl.Specs.init -> void
+Koine.Compiler.Ast.AggregateDecl.Types.get -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.TypeDecl!>!
+Koine.Compiler.Ast.AggregateDecl.Types.init -> void
+Koine.Compiler.Ast.AstExtensions
+Koine.Compiler.Ast.BinaryExpr
+Koine.Compiler.Ast.BinaryExpr.BinaryExpr(Koine.Compiler.Ast.BinaryOp Op, Koine.Compiler.Ast.Expr! Left, Koine.Compiler.Ast.Expr! Right) -> void
+Koine.Compiler.Ast.BinaryExpr.Left.get -> Koine.Compiler.Ast.Expr!
+Koine.Compiler.Ast.BinaryExpr.Left.init -> void
+Koine.Compiler.Ast.BinaryExpr.Op.get -> Koine.Compiler.Ast.BinaryOp
+Koine.Compiler.Ast.BinaryExpr.Op.init -> void
+Koine.Compiler.Ast.BinaryExpr.Right.get -> Koine.Compiler.Ast.Expr!
+Koine.Compiler.Ast.BinaryExpr.Right.init -> void
+Koine.Compiler.Ast.BinaryOp
+Koine.Compiler.Ast.BinaryOp.Add = 8 -> Koine.Compiler.Ast.BinaryOp
+Koine.Compiler.Ast.BinaryOp.And = 1 -> Koine.Compiler.Ast.BinaryOp
+Koine.Compiler.Ast.BinaryOp.Div = 11 -> Koine.Compiler.Ast.BinaryOp
+Koine.Compiler.Ast.BinaryOp.Eq = 2 -> Koine.Compiler.Ast.BinaryOp
+Koine.Compiler.Ast.BinaryOp.Ge = 7 -> Koine.Compiler.Ast.BinaryOp
+Koine.Compiler.Ast.BinaryOp.Gt = 6 -> Koine.Compiler.Ast.BinaryOp
+Koine.Compiler.Ast.BinaryOp.Le = 5 -> Koine.Compiler.Ast.BinaryOp
+Koine.Compiler.Ast.BinaryOp.Lt = 4 -> Koine.Compiler.Ast.BinaryOp
+Koine.Compiler.Ast.BinaryOp.Mul = 10 -> Koine.Compiler.Ast.BinaryOp
+Koine.Compiler.Ast.BinaryOp.Neq = 3 -> Koine.Compiler.Ast.BinaryOp
+Koine.Compiler.Ast.BinaryOp.Or = 0 -> Koine.Compiler.Ast.BinaryOp
+Koine.Compiler.Ast.BinaryOp.Sub = 9 -> Koine.Compiler.Ast.BinaryOp
+Koine.Compiler.Ast.Bound.BoundBinary
+Koine.Compiler.Ast.Bound.BoundBinary.BoundBinary(Koine.Compiler.Ast.BinaryOp Op, Koine.Compiler.Ast.Bound.BoundExpression! Left, Koine.Compiler.Ast.Bound.BoundExpression! Right) -> void
+Koine.Compiler.Ast.Bound.BoundBinary.Left.get -> Koine.Compiler.Ast.Bound.BoundExpression!
+Koine.Compiler.Ast.Bound.BoundBinary.Left.init -> void
+Koine.Compiler.Ast.Bound.BoundBinary.Op.get -> Koine.Compiler.Ast.BinaryOp
+Koine.Compiler.Ast.Bound.BoundBinary.Op.init -> void
+Koine.Compiler.Ast.Bound.BoundBinary.Right.get -> Koine.Compiler.Ast.Bound.BoundExpression!
+Koine.Compiler.Ast.Bound.BoundBinary.Right.init -> void
+Koine.Compiler.Ast.Bound.BoundCall
+Koine.Compiler.Ast.Bound.BoundCall.Args.get -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.Bound.BoundExpression!>!
+Koine.Compiler.Ast.Bound.BoundCall.Args.init -> void
+Koine.Compiler.Ast.Bound.BoundCall.BoundCall(Koine.Compiler.Ast.Bound.BoundExpression! Receiver, string! Method, System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.Bound.BoundExpression!>! Args) -> void
+Koine.Compiler.Ast.Bound.BoundCall.Method.get -> string!
+Koine.Compiler.Ast.Bound.BoundCall.Method.init -> void
+Koine.Compiler.Ast.Bound.BoundCall.Receiver.get -> Koine.Compiler.Ast.Bound.BoundExpression!
+Koine.Compiler.Ast.Bound.BoundCall.Receiver.init -> void
+Koine.Compiler.Ast.Bound.BoundCoalesce
+Koine.Compiler.Ast.Bound.BoundCoalesce.BoundCoalesce(Koine.Compiler.Ast.Bound.BoundExpression! Left, Koine.Compiler.Ast.Bound.BoundExpression! Right) -> void
+Koine.Compiler.Ast.Bound.BoundCoalesce.Left.get -> Koine.Compiler.Ast.Bound.BoundExpression!
+Koine.Compiler.Ast.Bound.BoundCoalesce.Left.init -> void
+Koine.Compiler.Ast.Bound.BoundCoalesce.Right.get -> Koine.Compiler.Ast.Bound.BoundExpression!
+Koine.Compiler.Ast.Bound.BoundCoalesce.Right.init -> void
+Koine.Compiler.Ast.Bound.BoundConditional
+Koine.Compiler.Ast.Bound.BoundConditional.BoundConditional(Koine.Compiler.Ast.Bound.BoundExpression! Condition, Koine.Compiler.Ast.Bound.BoundExpression! Then, Koine.Compiler.Ast.Bound.BoundExpression! Else) -> void
+Koine.Compiler.Ast.Bound.BoundConditional.Condition.get -> Koine.Compiler.Ast.Bound.BoundExpression!
+Koine.Compiler.Ast.Bound.BoundConditional.Condition.init -> void
+Koine.Compiler.Ast.Bound.BoundConditional.Else.get -> Koine.Compiler.Ast.Bound.BoundExpression!
+Koine.Compiler.Ast.Bound.BoundConditional.Else.init -> void
+Koine.Compiler.Ast.Bound.BoundConditional.Then.get -> Koine.Compiler.Ast.Bound.BoundExpression!
+Koine.Compiler.Ast.Bound.BoundConditional.Then.init -> void
+Koine.Compiler.Ast.Bound.BoundExpression
+Koine.Compiler.Ast.Bound.BoundExpression.Type.get -> Koine.Compiler.Ast.KoineType!
+Koine.Compiler.Ast.Bound.BoundExpression.Type.init -> void
+Koine.Compiler.Ast.Bound.BoundField
+Koine.Compiler.Ast.Bound.BoundField.BoundField(string! Name, Koine.Compiler.Ast.Bound.FieldKind Kind, Koine.Compiler.Ast.Bound.DefaultKind DefaultKind, Koine.Compiler.Ast.Bound.CollectionShape CollectionShape, Koine.Compiler.Ast.Bound.BoundExpression? DerivedInitializer) -> void
+Koine.Compiler.Ast.Bound.BoundField.CollectionShape.get -> Koine.Compiler.Ast.Bound.CollectionShape
+Koine.Compiler.Ast.Bound.BoundField.CollectionShape.init -> void
+Koine.Compiler.Ast.Bound.BoundField.DefaultKind.get -> Koine.Compiler.Ast.Bound.DefaultKind
+Koine.Compiler.Ast.Bound.BoundField.DefaultKind.init -> void
+Koine.Compiler.Ast.Bound.BoundField.DerivedInitializer.get -> Koine.Compiler.Ast.Bound.BoundExpression?
+Koine.Compiler.Ast.Bound.BoundField.DerivedInitializer.init -> void
+Koine.Compiler.Ast.Bound.BoundField.Kind.get -> Koine.Compiler.Ast.Bound.FieldKind
+Koine.Compiler.Ast.Bound.BoundField.Kind.init -> void
+Koine.Compiler.Ast.Bound.BoundField.Name.get -> string!
+Koine.Compiler.Ast.Bound.BoundField.Name.init -> void
+Koine.Compiler.Ast.Bound.BoundField.Type.get -> Koine.Compiler.Ast.KoineType!
+Koine.Compiler.Ast.Bound.BoundField.Type.init -> void
+Koine.Compiler.Ast.Bound.BoundGuard
+Koine.Compiler.Ast.Bound.BoundGuard.Body.get -> Koine.Compiler.Ast.Bound.BoundExpression!
+Koine.Compiler.Ast.Bound.BoundGuard.Body.init -> void
+Koine.Compiler.Ast.Bound.BoundGuard.BoundGuard(Koine.Compiler.Ast.Bound.BoundExpression! Body, Koine.Compiler.Ast.Bound.BoundExpression! Condition) -> void
+Koine.Compiler.Ast.Bound.BoundGuard.Condition.get -> Koine.Compiler.Ast.Bound.BoundExpression!
+Koine.Compiler.Ast.Bound.BoundGuard.Condition.init -> void
+Koine.Compiler.Ast.Bound.BoundInvariant
+Koine.Compiler.Ast.Bound.BoundInvariant.BoundInvariant(Koine.Compiler.Ast.Bound.BoundExpression! Condition, string! Message) -> void
+Koine.Compiler.Ast.Bound.BoundInvariant.Condition.get -> Koine.Compiler.Ast.Bound.BoundExpression!
+Koine.Compiler.Ast.Bound.BoundInvariant.Condition.init -> void
+Koine.Compiler.Ast.Bound.BoundInvariant.Message.get -> string!
+Koine.Compiler.Ast.Bound.BoundInvariant.Message.init -> void
+Koine.Compiler.Ast.Bound.BoundLambda
+Koine.Compiler.Ast.Bound.BoundLambda.Body.get -> Koine.Compiler.Ast.Bound.BoundExpression!
+Koine.Compiler.Ast.Bound.BoundLambda.Body.init -> void
+Koine.Compiler.Ast.Bound.BoundLambda.BoundLambda(string! Parameter, Koine.Compiler.Ast.Bound.BoundExpression! Body) -> void
+Koine.Compiler.Ast.Bound.BoundLambda.Parameter.get -> string!
+Koine.Compiler.Ast.Bound.BoundLambda.Parameter.init -> void
+Koine.Compiler.Ast.Bound.BoundLet
+Koine.Compiler.Ast.Bound.BoundLet.Bindings.get -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.Bound.BoundLetBinding!>!
+Koine.Compiler.Ast.Bound.BoundLet.Bindings.init -> void
+Koine.Compiler.Ast.Bound.BoundLet.Body.get -> Koine.Compiler.Ast.Bound.BoundExpression!
+Koine.Compiler.Ast.Bound.BoundLet.Body.init -> void
+Koine.Compiler.Ast.Bound.BoundLet.BoundLet(System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.Bound.BoundLetBinding!>! Bindings, Koine.Compiler.Ast.Bound.BoundExpression! Body) -> void
+Koine.Compiler.Ast.Bound.BoundLetBinding
+Koine.Compiler.Ast.Bound.BoundLetBinding.BoundLetBinding(string! Name, Koine.Compiler.Ast.Bound.BoundExpression! Value) -> void
+Koine.Compiler.Ast.Bound.BoundLetBinding.Name.get -> string!
+Koine.Compiler.Ast.Bound.BoundLetBinding.Name.init -> void
+Koine.Compiler.Ast.Bound.BoundLetBinding.Value.get -> Koine.Compiler.Ast.Bound.BoundExpression!
+Koine.Compiler.Ast.Bound.BoundLetBinding.Value.init -> void
+Koine.Compiler.Ast.Bound.BoundLiteral
+Koine.Compiler.Ast.Bound.BoundLiteral.BoundLiteral(Koine.Compiler.Ast.LiteralKind Kind, string! Text) -> void
+Koine.Compiler.Ast.Bound.BoundLiteral.Kind.get -> Koine.Compiler.Ast.LiteralKind
+Koine.Compiler.Ast.Bound.BoundLiteral.Kind.init -> void
+Koine.Compiler.Ast.Bound.BoundLiteral.Text.get -> string!
+Koine.Compiler.Ast.Bound.BoundLiteral.Text.init -> void
+Koine.Compiler.Ast.Bound.BoundMatch
+Koine.Compiler.Ast.Bound.BoundMatch.BoundMatch(Koine.Compiler.Ast.Bound.BoundExpression! Target, string! Pattern) -> void
+Koine.Compiler.Ast.Bound.BoundMatch.Pattern.get -> string!
+Koine.Compiler.Ast.Bound.BoundMatch.Pattern.init -> void
+Koine.Compiler.Ast.Bound.BoundMatch.Target.get -> Koine.Compiler.Ast.Bound.BoundExpression!
+Koine.Compiler.Ast.Bound.BoundMatch.Target.init -> void
+Koine.Compiler.Ast.Bound.BoundMemberAccess
+Koine.Compiler.Ast.Bound.BoundMemberAccess.BoundMemberAccess(Koine.Compiler.Ast.Bound.BoundExpression! Receiver, string! MemberName, Koine.Compiler.Ast.Symbol! Member) -> void
+Koine.Compiler.Ast.Bound.BoundMemberAccess.Member.get -> Koine.Compiler.Ast.Symbol!
+Koine.Compiler.Ast.Bound.BoundMemberAccess.Member.init -> void
+Koine.Compiler.Ast.Bound.BoundMemberAccess.MemberName.get -> string!
+Koine.Compiler.Ast.Bound.BoundMemberAccess.MemberName.init -> void
+Koine.Compiler.Ast.Bound.BoundMemberAccess.Receiver.get -> Koine.Compiler.Ast.Bound.BoundExpression!
+Koine.Compiler.Ast.Bound.BoundMemberAccess.Receiver.init -> void
+Koine.Compiler.Ast.Bound.BoundNode
+Koine.Compiler.Ast.Bound.BoundNode.Syntax.get -> Koine.Compiler.Ast.KoineNode!
+Koine.Compiler.Ast.Bound.BoundNode.Syntax.init -> void
+Koine.Compiler.Ast.Bound.BoundReference
+Koine.Compiler.Ast.Bound.BoundReference.BoundReference(Koine.Compiler.Ast.Symbol! Symbol) -> void
+Koine.Compiler.Ast.Bound.BoundReference.Symbol.get -> Koine.Compiler.Ast.Symbol!
+Koine.Compiler.Ast.Bound.BoundReference.Symbol.init -> void
+Koine.Compiler.Ast.Bound.BoundUnary
+Koine.Compiler.Ast.Bound.BoundUnary.BoundUnary(Koine.Compiler.Ast.UnaryOp Op, Koine.Compiler.Ast.Bound.BoundExpression! Operand) -> void
+Koine.Compiler.Ast.Bound.BoundUnary.Op.get -> Koine.Compiler.Ast.UnaryOp
+Koine.Compiler.Ast.Bound.BoundUnary.Op.init -> void
+Koine.Compiler.Ast.Bound.BoundUnary.Operand.get -> Koine.Compiler.Ast.Bound.BoundExpression!
+Koine.Compiler.Ast.Bound.BoundUnary.Operand.init -> void
+Koine.Compiler.Ast.Bound.BoundValueObject
+Koine.Compiler.Ast.Bound.BoundValueObject.BoundValueObject(System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.Bound.BoundField!>! Fields, System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.Bound.BoundInvariant!>! Invariants) -> void
+Koine.Compiler.Ast.Bound.BoundValueObject.CtorParams.get -> System.Collections.Generic.IEnumerable<Koine.Compiler.Ast.Bound.BoundField!>!
+Koine.Compiler.Ast.Bound.BoundValueObject.DerivedFields.get -> System.Collections.Generic.IEnumerable<Koine.Compiler.Ast.Bound.BoundField!>!
+Koine.Compiler.Ast.Bound.BoundValueObject.Fields.get -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.Bound.BoundField!>!
+Koine.Compiler.Ast.Bound.BoundValueObject.Fields.init -> void
+Koine.Compiler.Ast.Bound.BoundValueObject.Invariants.get -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.Bound.BoundInvariant!>!
+Koine.Compiler.Ast.Bound.BoundValueObject.Invariants.init -> void
+Koine.Compiler.Ast.Bound.BoundValueObject.StoredFields.get -> System.Collections.Generic.IEnumerable<Koine.Compiler.Ast.Bound.BoundField!>!
+Koine.Compiler.Ast.Bound.CollectionShape
+Koine.Compiler.Ast.Bound.CollectionShape.List = 1 -> Koine.Compiler.Ast.Bound.CollectionShape
+Koine.Compiler.Ast.Bound.CollectionShape.Map = 3 -> Koine.Compiler.Ast.Bound.CollectionShape
+Koine.Compiler.Ast.Bound.CollectionShape.None = 0 -> Koine.Compiler.Ast.Bound.CollectionShape
+Koine.Compiler.Ast.Bound.CollectionShape.Set = 2 -> Koine.Compiler.Ast.Bound.CollectionShape
+Koine.Compiler.Ast.Bound.DefaultKind
+Koine.Compiler.Ast.Bound.DefaultKind.ConstantDefault = 1 -> Koine.Compiler.Ast.Bound.DefaultKind
+Koine.Compiler.Ast.Bound.DefaultKind.EnumDefault = 2 -> Koine.Compiler.Ast.Bound.DefaultKind
+Koine.Compiler.Ast.Bound.DefaultKind.None = 0 -> Koine.Compiler.Ast.Bound.DefaultKind
+Koine.Compiler.Ast.Bound.DefaultKind.OptionalNull = 3 -> Koine.Compiler.Ast.Bound.DefaultKind
+Koine.Compiler.Ast.Bound.FieldKind
+Koine.Compiler.Ast.Bound.FieldKind.CtorParam = 0 -> Koine.Compiler.Ast.Bound.FieldKind
+Koine.Compiler.Ast.Bound.FieldKind.Derived = 1 -> Koine.Compiler.Ast.Bound.FieldKind
+Koine.Compiler.Ast.BuiltinOps
+Koine.Compiler.Ast.CallExpr
+Koine.Compiler.Ast.CallExpr.Args.get -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.Expr!>!
+Koine.Compiler.Ast.CallExpr.Args.init -> void
+Koine.Compiler.Ast.CallExpr.CallExpr(Koine.Compiler.Ast.Expr! Target, string! Method, System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.Expr!>! Args) -> void
+Koine.Compiler.Ast.CallExpr.Method.get -> string!
+Koine.Compiler.Ast.CallExpr.Method.init -> void
+Koine.Compiler.Ast.CallExpr.Target.get -> Koine.Compiler.Ast.Expr!
+Koine.Compiler.Ast.CallExpr.Target.init -> void
+Koine.Compiler.Ast.CoalesceExpr
+Koine.Compiler.Ast.CoalesceExpr.CoalesceExpr(Koine.Compiler.Ast.Expr! Left, Koine.Compiler.Ast.Expr! Right) -> void
+Koine.Compiler.Ast.CoalesceExpr.Left.get -> Koine.Compiler.Ast.Expr!
+Koine.Compiler.Ast.CoalesceExpr.Left.init -> void
+Koine.Compiler.Ast.CoalesceExpr.Right.get -> Koine.Compiler.Ast.Expr!
+Koine.Compiler.Ast.CoalesceExpr.Right.init -> void
+Koine.Compiler.Ast.CollectionType
+Koine.Compiler.Ast.CollectionType.CollectionType(Koine.Compiler.Ast.TypeKind kind, Koine.Compiler.Ast.KoineType! element, Koine.Compiler.Ast.KoineType? value = null, bool optional = false) -> void
+Koine.Compiler.Ast.CommandDecl
+Koine.Compiler.Ast.CommandDecl.Body.get -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.CommandStmt!>!
+Koine.Compiler.Ast.CommandDecl.Body.init -> void
+Koine.Compiler.Ast.CommandDecl.CommandDecl(string! Name, System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.Param!>! Parameters, System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.CommandStmt!>! Body, Koine.Compiler.Ast.TypeRef? ReturnType = null) -> void
+Koine.Compiler.Ast.CommandDecl.Name.get -> string!
+Koine.Compiler.Ast.CommandDecl.Name.init -> void
+Koine.Compiler.Ast.CommandDecl.Parameters.get -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.Param!>!
+Koine.Compiler.Ast.CommandDecl.Parameters.init -> void
+Koine.Compiler.Ast.CommandDecl.ReturnType.get -> Koine.Compiler.Ast.TypeRef?
+Koine.Compiler.Ast.CommandDecl.ReturnType.init -> void
+Koine.Compiler.Ast.CommandStmt
+Koine.Compiler.Ast.ConditionalExpr
+Koine.Compiler.Ast.ConditionalExpr.Condition.get -> Koine.Compiler.Ast.Expr!
+Koine.Compiler.Ast.ConditionalExpr.Condition.init -> void
+Koine.Compiler.Ast.ConditionalExpr.ConditionalExpr(Koine.Compiler.Ast.Expr! Condition, Koine.Compiler.Ast.Expr! Then, Koine.Compiler.Ast.Expr! Else) -> void
+Koine.Compiler.Ast.ConditionalExpr.Else.get -> Koine.Compiler.Ast.Expr!
+Koine.Compiler.Ast.ConditionalExpr.Else.init -> void
+Koine.Compiler.Ast.ConditionalExpr.Then.get -> Koine.Compiler.Ast.Expr!
+Koine.Compiler.Ast.ConditionalExpr.Then.init -> void
+Koine.Compiler.Ast.ContextMapNode
+Koine.Compiler.Ast.ContextMapNode.ContextMapNode(System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.ContextRelation!>! Relations) -> void
+Koine.Compiler.Ast.ContextMapNode.Relations.get -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.ContextRelation!>!
+Koine.Compiler.Ast.ContextMapNode.Relations.init -> void
+Koine.Compiler.Ast.ContextNode
+Koine.Compiler.Ast.ContextNode.ContextNode(string! Name, System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.TypeDecl!>! Types, System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.SpecDecl!>! Specs, System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.ServiceDecl!>! Services, System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.PolicyDecl!>! Policies, System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.ImportDecl!>! Imports, System.Collections.Generic.IReadOnlyList<string!>! ModuleNames, System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.PublishDecl!>! Publishes, System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.SubscribeDecl!>! Subscribes) -> void
+Koine.Compiler.Ast.ContextNode.Errors.get -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.ErrorNode!>!
+Koine.Compiler.Ast.ContextNode.Errors.init -> void
+Koine.Compiler.Ast.ContextNode.Imports.get -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.ImportDecl!>!
+Koine.Compiler.Ast.ContextNode.Imports.init -> void
+Koine.Compiler.Ast.ContextNode.ModuleNames.get -> System.Collections.Generic.IReadOnlyList<string!>!
+Koine.Compiler.Ast.ContextNode.ModuleNames.init -> void
+Koine.Compiler.Ast.ContextNode.Name.get -> string!
+Koine.Compiler.Ast.ContextNode.Name.init -> void
+Koine.Compiler.Ast.ContextNode.Policies.get -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.PolicyDecl!>!
+Koine.Compiler.Ast.ContextNode.Policies.init -> void
+Koine.Compiler.Ast.ContextNode.Publishes.get -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.PublishDecl!>!
+Koine.Compiler.Ast.ContextNode.Publishes.init -> void
+Koine.Compiler.Ast.ContextNode.Services.get -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.ServiceDecl!>!
+Koine.Compiler.Ast.ContextNode.Services.init -> void
+Koine.Compiler.Ast.ContextNode.Specs.get -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.SpecDecl!>!
+Koine.Compiler.Ast.ContextNode.Specs.init -> void
+Koine.Compiler.Ast.ContextNode.Subscribes.get -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.SubscribeDecl!>!
+Koine.Compiler.Ast.ContextNode.Subscribes.init -> void
+Koine.Compiler.Ast.ContextNode.Types.get -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.TypeDecl!>!
+Koine.Compiler.Ast.ContextNode.Types.init -> void
+Koine.Compiler.Ast.ContextNode.Version.get -> int?
+Koine.Compiler.Ast.ContextNode.Version.init -> void
+Koine.Compiler.Ast.ContextRelation
+Koine.Compiler.Ast.ContextRelation.AclMappings.get -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.AclMapping!>!
+Koine.Compiler.Ast.ContextRelation.AclMappings.init -> void
+Koine.Compiler.Ast.ContextRelation.ContextRelation(string! Upstream, string! Downstream, Koine.Compiler.Ast.ContextRelationKind Kind, bool IsBidirectional, System.Collections.Generic.IReadOnlyList<string!>! SharedTypes, System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.AclMapping!>! AclMappings) -> void
+Koine.Compiler.Ast.ContextRelation.Downstream.get -> string!
+Koine.Compiler.Ast.ContextRelation.Downstream.init -> void
+Koine.Compiler.Ast.ContextRelation.IsBidirectional.get -> bool
+Koine.Compiler.Ast.ContextRelation.IsBidirectional.init -> void
+Koine.Compiler.Ast.ContextRelation.Kind.get -> Koine.Compiler.Ast.ContextRelationKind
+Koine.Compiler.Ast.ContextRelation.Kind.init -> void
+Koine.Compiler.Ast.ContextRelation.SharedTypes.get -> System.Collections.Generic.IReadOnlyList<string!>!
+Koine.Compiler.Ast.ContextRelation.SharedTypes.init -> void
+Koine.Compiler.Ast.ContextRelation.Upstream.get -> string!
+Koine.Compiler.Ast.ContextRelation.Upstream.init -> void
+Koine.Compiler.Ast.ContextRelationKind
+Koine.Compiler.Ast.ContextRelationKind.AntiCorruptionLayer = 4 -> Koine.Compiler.Ast.ContextRelationKind
+Koine.Compiler.Ast.ContextRelationKind.Conformist = 3 -> Koine.Compiler.Ast.ContextRelationKind
+Koine.Compiler.Ast.ContextRelationKind.CustomerSupplier = 2 -> Koine.Compiler.Ast.ContextRelationKind
+Koine.Compiler.Ast.ContextRelationKind.OpenHost = 5 -> Koine.Compiler.Ast.ContextRelationKind
+Koine.Compiler.Ast.ContextRelationKind.Partnership = 0 -> Koine.Compiler.Ast.ContextRelationKind
+Koine.Compiler.Ast.ContextRelationKind.PublishedLanguage = 6 -> Koine.Compiler.Ast.ContextRelationKind
+Koine.Compiler.Ast.ContextRelationKind.SharedKernel = 1 -> Koine.Compiler.Ast.ContextRelationKind
+Koine.Compiler.Ast.ContextSymbol
+Koine.Compiler.Ast.ContextSymbol.ContextSymbol(string! name, Koine.Compiler.Ast.SourceSpan declSpan, Koine.Compiler.Ast.ContextNode! declaration) -> void
+Koine.Compiler.Ast.ContextSymbol.Declaration.get -> Koine.Compiler.Ast.ContextNode!
+Koine.Compiler.Ast.ContextSymbol.Types.get -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.TypeSymbol!>!
+Koine.Compiler.Ast.ContextSymbol.Types.init -> void
+Koine.Compiler.Ast.EmitArg
+Koine.Compiler.Ast.EmitArg.EmitArg(string! Field, Koine.Compiler.Ast.Expr! Value) -> void
+Koine.Compiler.Ast.EmitArg.Field.get -> string!
+Koine.Compiler.Ast.EmitArg.Field.init -> void
+Koine.Compiler.Ast.EmitArg.Value.get -> Koine.Compiler.Ast.Expr!
+Koine.Compiler.Ast.EmitArg.Value.init -> void
+Koine.Compiler.Ast.EmitClause
+Koine.Compiler.Ast.EmitClause.Args.get -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.EmitArg!>!
+Koine.Compiler.Ast.EmitClause.Args.init -> void
+Koine.Compiler.Ast.EmitClause.EmitClause(string! EventName, System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.EmitArg!>! Args) -> void
+Koine.Compiler.Ast.EmitClause.EventName.get -> string!
+Koine.Compiler.Ast.EmitClause.EventName.init -> void
+Koine.Compiler.Ast.EntityDecl
+Koine.Compiler.Ast.EntityDecl.Commands.get -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.CommandDecl!>!
+Koine.Compiler.Ast.EntityDecl.Commands.init -> void
+Koine.Compiler.Ast.EntityDecl.EntityDecl(string! Name, string! IdentityName, System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.Member!>! Members, System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.Invariant!>! Invariants, System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.CommandDecl!>! Commands, System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.StatesDecl!>! States, System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.FactoryDecl!>! Factories, Koine.Compiler.Ast.IdentityStrategy IdStrategy = Koine.Compiler.Ast.IdentityStrategy.Guid, string? IdBackingType = null) -> void
+Koine.Compiler.Ast.EntityDecl.Factories.get -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.FactoryDecl!>!
+Koine.Compiler.Ast.EntityDecl.Factories.init -> void
+Koine.Compiler.Ast.EntityDecl.IdBackingType.get -> string?
+Koine.Compiler.Ast.EntityDecl.IdBackingType.init -> void
+Koine.Compiler.Ast.EntityDecl.IdStrategy.get -> Koine.Compiler.Ast.IdentityStrategy
+Koine.Compiler.Ast.EntityDecl.IdStrategy.init -> void
+Koine.Compiler.Ast.EntityDecl.IdentityName.get -> string!
+Koine.Compiler.Ast.EntityDecl.IdentityName.init -> void
+Koine.Compiler.Ast.EntityDecl.Invariants.get -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.Invariant!>!
+Koine.Compiler.Ast.EntityDecl.Invariants.init -> void
+Koine.Compiler.Ast.EntityDecl.Members.get -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.Member!>!
+Koine.Compiler.Ast.EntityDecl.Members.init -> void
+Koine.Compiler.Ast.EntityDecl.States.get -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.StatesDecl!>!
+Koine.Compiler.Ast.EntityDecl.States.init -> void
+Koine.Compiler.Ast.EnumDecl
+Koine.Compiler.Ast.EnumDecl.EnumDecl(string! Name, System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.EnumMember!>! Members, System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.Param!>! Signature) -> void
+Koine.Compiler.Ast.EnumDecl.HasAssociatedData.get -> bool
+Koine.Compiler.Ast.EnumDecl.MemberNames.get -> System.Collections.Generic.IReadOnlyList<string!>!
+Koine.Compiler.Ast.EnumDecl.Members.get -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.EnumMember!>!
+Koine.Compiler.Ast.EnumDecl.Members.init -> void
+Koine.Compiler.Ast.EnumDecl.Signature.get -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.Param!>!
+Koine.Compiler.Ast.EnumDecl.Signature.init -> void
+Koine.Compiler.Ast.EnumMember
+Koine.Compiler.Ast.EnumMember.Args.get -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.Expr!>!
+Koine.Compiler.Ast.EnumMember.Args.init -> void
+Koine.Compiler.Ast.EnumMember.EnumMember(string! Name, System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.Expr!>! Args) -> void
+Koine.Compiler.Ast.EnumMember.Name.get -> string!
+Koine.Compiler.Ast.EnumMember.Name.init -> void
+Koine.Compiler.Ast.EnumMemberSymbol
+Koine.Compiler.Ast.EnumMemberSymbol.EnumMemberSymbol(string! name, Koine.Compiler.Ast.SourceSpan declSpan, string! enumName, Koine.Compiler.Ast.EnumMember! member) -> void
+Koine.Compiler.Ast.EnumMemberSymbol.EnumName.get -> string!
+Koine.Compiler.Ast.EnumMemberSymbol.Member.get -> Koine.Compiler.Ast.EnumMember!
+Koine.Compiler.Ast.ErrorNode
+Koine.Compiler.Ast.ErrorNode.ErrorNode(string! Text) -> void
+Koine.Compiler.Ast.ErrorNode.Text.get -> string!
+Koine.Compiler.Ast.ErrorNode.Text.init -> void
+Koine.Compiler.Ast.ErrorSymbol
+Koine.Compiler.Ast.ErrorType
+Koine.Compiler.Ast.EventDecl
+Koine.Compiler.Ast.EventDecl.EventDecl(string! Name, System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.Member!>! Members) -> void
+Koine.Compiler.Ast.EventDecl.Members.get -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.Member!>!
+Koine.Compiler.Ast.EventDecl.Members.init -> void
+Koine.Compiler.Ast.Expr
+Koine.Compiler.Ast.ExprVisitor<T>
+Koine.Compiler.Ast.ExprVisitor<T>.ExprVisitor() -> void
+Koine.Compiler.Ast.ExprVisitor<T>.Visit(Koine.Compiler.Ast.Expr! e) -> T
+Koine.Compiler.Ast.ExprWalker
+Koine.Compiler.Ast.ExprWalker.ExprWalker() -> void
+Koine.Compiler.Ast.FactoryDecl
+Koine.Compiler.Ast.FactoryDecl.Body.get -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.CommandStmt!>!
+Koine.Compiler.Ast.FactoryDecl.Body.init -> void
+Koine.Compiler.Ast.FactoryDecl.FactoryDecl(string! Name, System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.Param!>! Parameters, System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.CommandStmt!>! Body) -> void
+Koine.Compiler.Ast.FactoryDecl.Name.get -> string!
+Koine.Compiler.Ast.FactoryDecl.Name.init -> void
+Koine.Compiler.Ast.FactoryDecl.Parameters.get -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.Param!>!
+Koine.Compiler.Ast.FactoryDecl.Parameters.init -> void
+Koine.Compiler.Ast.FinderDecl
+Koine.Compiler.Ast.FinderDecl.FinderDecl(string! Name, System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.Param!>! Parameters, Koine.Compiler.Ast.TypeRef! ResultType) -> void
+Koine.Compiler.Ast.FinderDecl.Name.get -> string!
+Koine.Compiler.Ast.FinderDecl.Name.init -> void
+Koine.Compiler.Ast.FinderDecl.Parameters.get -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.Param!>!
+Koine.Compiler.Ast.FinderDecl.Parameters.init -> void
+Koine.Compiler.Ast.FinderDecl.ResultType.get -> Koine.Compiler.Ast.TypeRef!
+Koine.Compiler.Ast.FinderDecl.ResultType.init -> void
+Koine.Compiler.Ast.GuardExpr
+Koine.Compiler.Ast.GuardExpr.Body.get -> Koine.Compiler.Ast.Expr!
+Koine.Compiler.Ast.GuardExpr.Body.init -> void
+Koine.Compiler.Ast.GuardExpr.Condition.get -> Koine.Compiler.Ast.Expr!
+Koine.Compiler.Ast.GuardExpr.Condition.init -> void
+Koine.Compiler.Ast.GuardExpr.GuardExpr(Koine.Compiler.Ast.Expr! Body, Koine.Compiler.Ast.Expr! Condition) -> void
+Koine.Compiler.Ast.IdValueObjectSymbol
+Koine.Compiler.Ast.IdValueObjectSymbol.IdValueObjectSymbol(string! name, Koine.Compiler.Ast.SourceSpan declSpan, Koine.Compiler.Ast.EntityDecl! owner) -> void
+Koine.Compiler.Ast.IdValueObjectSymbol.Owner.get -> Koine.Compiler.Ast.EntityDecl?
+Koine.Compiler.Ast.IdentifierExpr
+Koine.Compiler.Ast.IdentifierExpr.IdentifierExpr(string! Name) -> void
+Koine.Compiler.Ast.IdentifierExpr.Name.get -> string!
+Koine.Compiler.Ast.IdentifierExpr.Name.init -> void
+Koine.Compiler.Ast.IdentityStrategy
+Koine.Compiler.Ast.IdentityStrategy.Guid = 0 -> Koine.Compiler.Ast.IdentityStrategy
+Koine.Compiler.Ast.IdentityStrategy.Natural = 2 -> Koine.Compiler.Ast.IdentityStrategy
+Koine.Compiler.Ast.IdentityStrategy.Sequence = 1 -> Koine.Compiler.Ast.IdentityStrategy
+Koine.Compiler.Ast.ImportDecl
+Koine.Compiler.Ast.ImportDecl.Context.get -> string!
+Koine.Compiler.Ast.ImportDecl.Context.init -> void
+Koine.Compiler.Ast.ImportDecl.ImportDecl(string! Context, System.Collections.Generic.IReadOnlyList<string!>! Names, bool IsWildcard) -> void
+Koine.Compiler.Ast.ImportDecl.IsWildcard.get -> bool
+Koine.Compiler.Ast.ImportDecl.IsWildcard.init -> void
+Koine.Compiler.Ast.ImportDecl.Names.get -> System.Collections.Generic.IReadOnlyList<string!>!
+Koine.Compiler.Ast.ImportDecl.Names.init -> void
+Koine.Compiler.Ast.Initialization
+Koine.Compiler.Ast.Initialization.Field.get -> string!
+Koine.Compiler.Ast.Initialization.Field.init -> void
+Koine.Compiler.Ast.Initialization.Initialization(string! Field, Koine.Compiler.Ast.Expr! Value) -> void
+Koine.Compiler.Ast.Initialization.Value.get -> Koine.Compiler.Ast.Expr!
+Koine.Compiler.Ast.Initialization.Value.init -> void
+Koine.Compiler.Ast.IntegrationEventDecl
+Koine.Compiler.Ast.IntegrationEventDecl.IntegrationEventDecl(string! Name, System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.Member!>! Members) -> void
+Koine.Compiler.Ast.IntegrationEventDecl.Members.get -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.Member!>!
+Koine.Compiler.Ast.IntegrationEventDecl.Members.init -> void
+Koine.Compiler.Ast.Invariant
+Koine.Compiler.Ast.Invariant.Condition.get -> Koine.Compiler.Ast.Expr!
+Koine.Compiler.Ast.Invariant.Condition.init -> void
+Koine.Compiler.Ast.Invariant.Invariant(Koine.Compiler.Ast.Expr! Condition, string? Message) -> void
+Koine.Compiler.Ast.Invariant.Message.get -> string?
+Koine.Compiler.Ast.Invariant.Message.init -> void
+Koine.Compiler.Ast.KoineModel
+Koine.Compiler.Ast.KoineModel.ContextMap.get -> Koine.Compiler.Ast.ContextMapNode?
+Koine.Compiler.Ast.KoineModel.ContextMap.init -> void
+Koine.Compiler.Ast.KoineModel.Contexts.get -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.ContextNode!>!
+Koine.Compiler.Ast.KoineModel.Contexts.init -> void
+Koine.Compiler.Ast.KoineModel.KoineModel(System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.ContextNode!>! Contexts, Koine.Compiler.Ast.ContextMapNode? ContextMap = null) -> void
+Koine.Compiler.Ast.KoineNode
+Koine.Compiler.Ast.KoineNode.Doc.get -> string?
+Koine.Compiler.Ast.KoineNode.Doc.init -> void
+Koine.Compiler.Ast.KoineNode.IsMissing.get -> bool
+Koine.Compiler.Ast.KoineNode.IsMissing.init -> void
+Koine.Compiler.Ast.KoineNode.LeadingTrivia.get -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.SyntaxTrivia>!
+Koine.Compiler.Ast.KoineNode.LeadingTrivia.init -> void
+Koine.Compiler.Ast.KoineNode.LeafText.get -> string?
+Koine.Compiler.Ast.KoineNode.LeafText.init -> void
+Koine.Compiler.Ast.KoineNode.NameSpan.get -> Koine.Compiler.Ast.SourceSpan
+Koine.Compiler.Ast.KoineNode.NameSpan.init -> void
+Koine.Compiler.Ast.KoineNode.Span.get -> Koine.Compiler.Ast.SourceSpan
+Koine.Compiler.Ast.KoineNode.Span.init -> void
+Koine.Compiler.Ast.KoineNode.ToFullString() -> string!
+Koine.Compiler.Ast.KoineNode.TrailingTrivia.get -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.SyntaxTrivia>!
+Koine.Compiler.Ast.KoineNode.TrailingTrivia.init -> void
+Koine.Compiler.Ast.KoineType
+Koine.Compiler.Ast.KoineType.IsError.get -> bool
+Koine.Compiler.Ast.KoineType.IsNumeric.get -> bool
+Koine.Compiler.Ast.KoineType.IsUserType.get -> bool
+Koine.Compiler.Ast.KoineType.IsValueLike.get -> bool
+Koine.Compiler.Ast.KoineType.KoineType() -> void
+Koine.Compiler.Ast.KoineType.SequenceElement.get -> Koine.Compiler.Ast.KoineType?
+Koine.Compiler.Ast.KoineType.ToTypeRef() -> Koine.Compiler.Ast.TypeRef?
+Koine.Compiler.Ast.LambdaExpr
+Koine.Compiler.Ast.LambdaExpr.Body.get -> Koine.Compiler.Ast.Expr!
+Koine.Compiler.Ast.LambdaExpr.Body.init -> void
+Koine.Compiler.Ast.LambdaExpr.LambdaExpr(string! Parameter, Koine.Compiler.Ast.Expr! Body) -> void
+Koine.Compiler.Ast.LambdaExpr.Parameter.get -> string!
+Koine.Compiler.Ast.LambdaExpr.Parameter.init -> void
+Koine.Compiler.Ast.LambdaParameterSymbol
+Koine.Compiler.Ast.LambdaParameterSymbol.Declaration.get -> Koine.Compiler.Ast.LambdaExpr!
+Koine.Compiler.Ast.LambdaParameterSymbol.LambdaParameterSymbol(string! name, Koine.Compiler.Ast.SourceSpan declSpan, Koine.Compiler.Ast.LambdaExpr! declaration) -> void
+Koine.Compiler.Ast.LetBinding
+Koine.Compiler.Ast.LetBinding.LetBinding(string! Name, Koine.Compiler.Ast.Expr! Value) -> void
+Koine.Compiler.Ast.LetBinding.Name.get -> string!
+Koine.Compiler.Ast.LetBinding.Name.init -> void
+Koine.Compiler.Ast.LetBinding.Value.get -> Koine.Compiler.Ast.Expr!
+Koine.Compiler.Ast.LetBinding.Value.init -> void
+Koine.Compiler.Ast.LetExpr
+Koine.Compiler.Ast.LetExpr.Bindings.get -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.LetBinding!>!
+Koine.Compiler.Ast.LetExpr.Bindings.init -> void
+Koine.Compiler.Ast.LetExpr.Body.get -> Koine.Compiler.Ast.Expr!
+Koine.Compiler.Ast.LetExpr.Body.init -> void
+Koine.Compiler.Ast.LetExpr.LetExpr(System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.LetBinding!>! Bindings, Koine.Compiler.Ast.Expr! Body) -> void
+Koine.Compiler.Ast.LiteralExpr
+Koine.Compiler.Ast.LiteralExpr.Kind.get -> Koine.Compiler.Ast.LiteralKind
+Koine.Compiler.Ast.LiteralExpr.Kind.init -> void
+Koine.Compiler.Ast.LiteralExpr.LiteralExpr(Koine.Compiler.Ast.LiteralKind Kind, string! Text) -> void
+Koine.Compiler.Ast.LiteralExpr.Text.get -> string!
+Koine.Compiler.Ast.LiteralExpr.Text.init -> void
+Koine.Compiler.Ast.LiteralKind
+Koine.Compiler.Ast.LiteralKind.Bool = 3 -> Koine.Compiler.Ast.LiteralKind
+Koine.Compiler.Ast.LiteralKind.Decimal = 1 -> Koine.Compiler.Ast.LiteralKind
+Koine.Compiler.Ast.LiteralKind.Int = 0 -> Koine.Compiler.Ast.LiteralKind
+Koine.Compiler.Ast.LiteralKind.String = 2 -> Koine.Compiler.Ast.LiteralKind
+Koine.Compiler.Ast.LocalSymbol
+Koine.Compiler.Ast.LocalSymbol.Declaration.get -> Koine.Compiler.Ast.LetBinding!
+Koine.Compiler.Ast.LocalSymbol.LocalSymbol(string! name, Koine.Compiler.Ast.SourceSpan declSpan, Koine.Compiler.Ast.LetBinding! declaration) -> void
+Koine.Compiler.Ast.MatchExpr
+Koine.Compiler.Ast.MatchExpr.MatchExpr(Koine.Compiler.Ast.Expr! Target, string! Pattern) -> void
+Koine.Compiler.Ast.MatchExpr.Pattern.get -> string!
+Koine.Compiler.Ast.MatchExpr.Pattern.init -> void
+Koine.Compiler.Ast.MatchExpr.Target.get -> Koine.Compiler.Ast.Expr!
+Koine.Compiler.Ast.MatchExpr.Target.init -> void
+Koine.Compiler.Ast.Member
+Koine.Compiler.Ast.Member.Deprecated.get -> string?
+Koine.Compiler.Ast.Member.Deprecated.init -> void
+Koine.Compiler.Ast.Member.Initializer.get -> Koine.Compiler.Ast.Expr?
+Koine.Compiler.Ast.Member.Initializer.init -> void
+Koine.Compiler.Ast.Member.Member(string! Name, Koine.Compiler.Ast.TypeRef! Type, Koine.Compiler.Ast.Expr? Initializer) -> void
+Koine.Compiler.Ast.Member.Name.get -> string!
+Koine.Compiler.Ast.Member.Name.init -> void
+Koine.Compiler.Ast.Member.Since.get -> int?
+Koine.Compiler.Ast.Member.Since.init -> void
+Koine.Compiler.Ast.Member.Type.get -> Koine.Compiler.Ast.TypeRef!
+Koine.Compiler.Ast.Member.Type.init -> void
+Koine.Compiler.Ast.MemberAccessExpr
+Koine.Compiler.Ast.MemberAccessExpr.MemberAccessExpr(Koine.Compiler.Ast.Expr! Target, string! MemberName) -> void
+Koine.Compiler.Ast.MemberAccessExpr.MemberName.get -> string!
+Koine.Compiler.Ast.MemberAccessExpr.MemberName.init -> void
+Koine.Compiler.Ast.MemberAccessExpr.Target.get -> Koine.Compiler.Ast.Expr!
+Koine.Compiler.Ast.MemberAccessExpr.Target.init -> void
+Koine.Compiler.Ast.MemberAnalysis
+Koine.Compiler.Ast.MemberSymbol
+Koine.Compiler.Ast.MemberSymbol.ContainingType.get -> Koine.Compiler.Ast.TypeSymbol?
+Koine.Compiler.Ast.MemberSymbol.Member.get -> Koine.Compiler.Ast.Member!
+Koine.Compiler.Ast.MemberSymbol.MemberSymbol(string! name, Koine.Compiler.Ast.SourceSpan declSpan, string! ownerType, Koine.Compiler.Ast.Member! member) -> void
+Koine.Compiler.Ast.MemberSymbol.OwnerType.get -> string!
+Koine.Compiler.Ast.ModelIndex
+Koine.Compiler.Ast.ModelIndex.AllSpecs() -> System.Collections.Generic.IEnumerable<Koine.Compiler.Ast.SpecDecl!>!
+Koine.Compiler.Ast.ModelIndex.AllTypes() -> System.Collections.Generic.IEnumerable<Koine.Compiler.Ast.TypeDecl!>!
+Koine.Compiler.Ast.ModelIndex.ArePartners(string! a, string! b) -> bool
+Koine.Compiler.Ast.ModelIndex.CandidateTypeNames.get -> System.Collections.Generic.IEnumerable<string!>!
+Koine.Compiler.Ast.ModelIndex.Classify(string! typeName) -> Koine.Compiler.Ast.TypeKind
+Koine.Compiler.Ast.ModelIndex.DeclaresType(string! context, string! typeName) -> bool
+Koine.Compiler.Ast.ModelIndex.DeclaringContextsOf(string! typeName) -> System.Collections.Generic.IReadOnlyList<string!>!
+Koine.Compiler.Ast.ModelIndex.EnumMemberToType.get -> System.Collections.Generic.IReadOnlyDictionary<string!, string!>!
+Koine.Compiler.Ast.ModelIndex.EnumsDeclaring(string! member) -> System.Collections.Generic.IReadOnlyList<string!>!
+Koine.Compiler.Ast.ModelIndex.HasAclRelation(string! upstream, string! downstream) -> bool
+Koine.Compiler.Ast.ModelIndex.IdTypeNames.get -> System.Collections.Generic.IReadOnlyCollection<string!>!
+Koine.Compiler.Ast.ModelIndex.ImportOwnersOf(string! fromContext, string! name) -> System.Collections.Generic.IReadOnlyList<string!>!
+Koine.Compiler.Ast.ModelIndex.IsAnySpec(string! name) -> bool
+Koine.Compiler.Ast.ModelIndex.IsContext(string! name) -> bool
+Koine.Compiler.Ast.ModelIndex.IsEnumType(string! name) -> bool
+Koine.Compiler.Ast.ModelIndex.IsIntegrationEventIn(string! context, string! typeName) -> bool
+Koine.Compiler.Ast.ModelIndex.IsKernelNamespace(string! ns) -> bool
+Koine.Compiler.Ast.ModelIndex.IsKernelVisibleFrom(string! context, string! name) -> bool
+Koine.Compiler.Ast.ModelIndex.IsKnownType(string! typeName) -> bool
+Koine.Compiler.Ast.ModelIndex.IsSharedKernelType(string! name) -> bool
+Koine.Compiler.Ast.ModelIndex.KernelNamespaceOfType(string! name) -> string?
+Koine.Compiler.Ast.ModelIndex.KernelOwnerOfType(string! name) -> string?
+Koine.Compiler.Ast.ModelIndex.KernelVisibleTypeNamespaces(string! kernelNs) -> System.Collections.Generic.IReadOnlyDictionary<string!, string!>!
+Koine.Compiler.Ast.ModelIndex.MapPermitsReference(string! fromContext, string! upstream) -> bool
+Koine.Compiler.Ast.ModelIndex.MaySubscribe(string! publisher, string! subscriber) -> bool
+Koine.Compiler.Ast.ModelIndex.MemberNames(string! typeName) -> System.Collections.Generic.IEnumerable<string!>!
+Koine.Compiler.Ast.ModelIndex.Model.get -> Koine.Compiler.Ast.KoineModel!
+Koine.Compiler.Ast.ModelIndex.ModelIndex(Koine.Compiler.Ast.KoineModel! model) -> void
+Koine.Compiler.Ast.ModelIndex.NamespaceOfTypeIn(string! context, string! typeName) -> string?
+Koine.Compiler.Ast.ModelIndex.PublishesEvent(string! context, string! eventName) -> bool
+Koine.Compiler.Ast.ModelIndex.RefKind
+Koine.Compiler.Ast.ModelIndex.RefKind.Ambiguous = 2 -> Koine.Compiler.Ast.ModelIndex.RefKind
+Koine.Compiler.Ast.ModelIndex.RefKind.NotExported = 4 -> Koine.Compiler.Ast.ModelIndex.RefKind
+Koine.Compiler.Ast.ModelIndex.RefKind.Resolved = 0 -> Koine.Compiler.Ast.ModelIndex.RefKind
+Koine.Compiler.Ast.ModelIndex.RefKind.UnimportedCrossContext = 1 -> Koine.Compiler.Ast.ModelIndex.RefKind
+Koine.Compiler.Ast.ModelIndex.RefKind.Unknown = 5 -> Koine.Compiler.Ast.ModelIndex.RefKind
+Koine.Compiler.Ast.ModelIndex.RefKind.UnknownContext = 3 -> Koine.Compiler.Ast.ModelIndex.RefKind
+Koine.Compiler.Ast.ModelIndex.RefResolution
+Koine.Compiler.Ast.ModelIndex.RefResolution.Candidates.get -> System.Collections.Generic.IReadOnlyList<string!>!
+Koine.Compiler.Ast.ModelIndex.RefResolution.Candidates.init -> void
+Koine.Compiler.Ast.ModelIndex.RefResolution.Kind.get -> Koine.Compiler.Ast.ModelIndex.RefKind
+Koine.Compiler.Ast.ModelIndex.RefResolution.Kind.init -> void
+Koine.Compiler.Ast.ModelIndex.RefResolution.RefResolution() -> void
+Koine.Compiler.Ast.ModelIndex.RefResolution.RefResolution(Koine.Compiler.Ast.ModelIndex.RefKind Kind, System.Collections.Generic.IReadOnlyList<string!>! Candidates) -> void
+Koine.Compiler.Ast.ModelIndex.RelationFor(string! downstream, string! upstream) -> Koine.Compiler.Ast.ContextRelation?
+Koine.Compiler.Ast.ModelIndex.Relations.get -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.ContextRelation!>!
+Koine.Compiler.Ast.ModelIndex.ResolveReference(string! fromContext, Koine.Compiler.Ast.TypeRef! tr) -> Koine.Compiler.Ast.ModelIndex.RefResolution
+Koine.Compiler.Ast.ModelIndex.SpecsFor(string! targetType) -> System.Collections.Generic.IReadOnlyDictionary<string!, Koine.Compiler.Ast.SpecDecl!>!
+Koine.Compiler.Ast.ModelIndex.TryGetDecl(string! typeName, out Koine.Compiler.Ast.TypeDecl! decl) -> bool
+Koine.Compiler.Ast.ModelIndex.TryGetDeclIn(string! context, string! typeName, out Koine.Compiler.Ast.TypeDecl! decl) -> bool
+Koine.Compiler.Ast.ModelIndex.TryGetMemberType(string! typeName, string! memberName, out Koine.Compiler.Ast.TypeRef! type) -> bool
+Koine.Compiler.Ast.ModelIndex.TryGetMemberType(string? context, string! typeName, string! memberName, out Koine.Compiler.Ast.TypeRef! type) -> bool
+Koine.Compiler.Ast.ModelIndex.TryGetSpec(string! targetType, string! name, out Koine.Compiler.Ast.SpecDecl! spec) -> bool
+Koine.Compiler.Ast.ModelIndex.VisibleTypeNamespaces(string! context) -> System.Collections.Generic.IReadOnlyDictionary<string!, string!>!
+Koine.Compiler.Ast.NamedType
+Koine.Compiler.Ast.NamedType.NamedType(string! name, Koine.Compiler.Ast.TypeKind kind, bool optional = false, string? qualifier = null) -> void
+Koine.Compiler.Ast.OperationDecl
+Koine.Compiler.Ast.OperationDecl.Body.get -> Koine.Compiler.Ast.Expr?
+Koine.Compiler.Ast.OperationDecl.Body.init -> void
+Koine.Compiler.Ast.OperationDecl.Name.get -> string!
+Koine.Compiler.Ast.OperationDecl.Name.init -> void
+Koine.Compiler.Ast.OperationDecl.OperationDecl(string! Name, System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.Param!>! Parameters, Koine.Compiler.Ast.TypeRef! ReturnType, Koine.Compiler.Ast.Expr? Body) -> void
+Koine.Compiler.Ast.OperationDecl.Parameters.get -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.Param!>!
+Koine.Compiler.Ast.OperationDecl.Parameters.init -> void
+Koine.Compiler.Ast.OperationDecl.ReturnType.get -> Koine.Compiler.Ast.TypeRef!
+Koine.Compiler.Ast.OperationDecl.ReturnType.init -> void
+Koine.Compiler.Ast.Param
+Koine.Compiler.Ast.Param.Name.get -> string!
+Koine.Compiler.Ast.Param.Name.init -> void
+Koine.Compiler.Ast.Param.Param(string! Name, Koine.Compiler.Ast.TypeRef! Type) -> void
+Koine.Compiler.Ast.Param.Type.get -> Koine.Compiler.Ast.TypeRef!
+Koine.Compiler.Ast.Param.Type.init -> void
+Koine.Compiler.Ast.ParameterSymbol
+Koine.Compiler.Ast.ParameterSymbol.ContainingType.get -> Koine.Compiler.Ast.TypeSymbol?
+Koine.Compiler.Ast.ParameterSymbol.Declaration.get -> Koine.Compiler.Ast.Param!
+Koine.Compiler.Ast.ParameterSymbol.ParameterSymbol(string! name, Koine.Compiler.Ast.SourceSpan declSpan, Koine.Compiler.Ast.Param! declaration) -> void
+Koine.Compiler.Ast.PolicyArg
+Koine.Compiler.Ast.PolicyArg.Parameter.get -> string!
+Koine.Compiler.Ast.PolicyArg.Parameter.init -> void
+Koine.Compiler.Ast.PolicyArg.PolicyArg(string! Parameter, Koine.Compiler.Ast.Expr! Value) -> void
+Koine.Compiler.Ast.PolicyArg.Value.get -> Koine.Compiler.Ast.Expr!
+Koine.Compiler.Ast.PolicyArg.Value.init -> void
+Koine.Compiler.Ast.PolicyDecl
+Koine.Compiler.Ast.PolicyDecl.EventName.get -> string!
+Koine.Compiler.Ast.PolicyDecl.EventName.init -> void
+Koine.Compiler.Ast.PolicyDecl.Name.get -> string!
+Koine.Compiler.Ast.PolicyDecl.Name.init -> void
+Koine.Compiler.Ast.PolicyDecl.PolicyDecl(string! Name, string! EventName, Koine.Compiler.Ast.PolicyReaction! Reaction) -> void
+Koine.Compiler.Ast.PolicyDecl.Reaction.get -> Koine.Compiler.Ast.PolicyReaction!
+Koine.Compiler.Ast.PolicyDecl.Reaction.init -> void
+Koine.Compiler.Ast.PolicyReaction
+Koine.Compiler.Ast.PolicyReaction.Args.get -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.PolicyArg!>!
+Koine.Compiler.Ast.PolicyReaction.Args.init -> void
+Koine.Compiler.Ast.PolicyReaction.CommandName.get -> string!
+Koine.Compiler.Ast.PolicyReaction.CommandName.init -> void
+Koine.Compiler.Ast.PolicyReaction.PolicyReaction(string! TargetType, string! CommandName, System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.PolicyArg!>! Args) -> void
+Koine.Compiler.Ast.PolicyReaction.TargetType.get -> string!
+Koine.Compiler.Ast.PolicyReaction.TargetType.init -> void
+Koine.Compiler.Ast.PrimitiveType
+Koine.Compiler.Ast.PrimitiveType.PrimitiveType(string! name, bool optional = false) -> void
+Koine.Compiler.Ast.PublishDecl
+Koine.Compiler.Ast.PublishDecl.EventName.get -> string!
+Koine.Compiler.Ast.PublishDecl.EventName.init -> void
+Koine.Compiler.Ast.PublishDecl.PublishDecl(string! EventName) -> void
+Koine.Compiler.Ast.QueryDecl
+Koine.Compiler.Ast.QueryDecl.Criteria.get -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.Param!>!
+Koine.Compiler.Ast.QueryDecl.Criteria.init -> void
+Koine.Compiler.Ast.QueryDecl.QueryDecl(string! Name, System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.Param!>! Criteria, Koine.Compiler.Ast.TypeRef! ResultType) -> void
+Koine.Compiler.Ast.QueryDecl.ResultType.get -> Koine.Compiler.Ast.TypeRef!
+Koine.Compiler.Ast.QueryDecl.ResultType.init -> void
+Koine.Compiler.Ast.ReadModelDecl
+Koine.Compiler.Ast.ReadModelDecl.Fields.get -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.ReadModelField!>!
+Koine.Compiler.Ast.ReadModelDecl.Fields.init -> void
+Koine.Compiler.Ast.ReadModelDecl.ReadModelDecl(string! Name, string! SourceType, System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.ReadModelField!>! Fields) -> void
+Koine.Compiler.Ast.ReadModelDecl.SourceType.get -> string!
+Koine.Compiler.Ast.ReadModelDecl.SourceType.init -> void
+Koine.Compiler.Ast.ReadModelField
+Koine.Compiler.Ast.ReadModelField.Name.get -> string!
+Koine.Compiler.Ast.ReadModelField.Name.init -> void
+Koine.Compiler.Ast.ReadModelField.Projection.get -> Koine.Compiler.Ast.Expr?
+Koine.Compiler.Ast.ReadModelField.Projection.init -> void
+Koine.Compiler.Ast.ReadModelField.ReadModelField(string! Name, Koine.Compiler.Ast.TypeRef? Type, Koine.Compiler.Ast.Expr? Projection) -> void
+Koine.Compiler.Ast.ReadModelField.Type.get -> Koine.Compiler.Ast.TypeRef?
+Koine.Compiler.Ast.ReadModelField.Type.init -> void
+Koine.Compiler.Ast.RepositoryDecl
+Koine.Compiler.Ast.RepositoryDecl.Finders.get -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.FinderDecl!>!
+Koine.Compiler.Ast.RepositoryDecl.Finders.init -> void
+Koine.Compiler.Ast.RepositoryDecl.Operations.get -> System.Collections.Generic.IReadOnlyList<string!>?
+Koine.Compiler.Ast.RepositoryDecl.Operations.init -> void
+Koine.Compiler.Ast.RepositoryDecl.RepositoryDecl(System.Collections.Generic.IReadOnlyList<string!>? Operations, System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.FinderDecl!>! Finders) -> void
+Koine.Compiler.Ast.RequiresClause
+Koine.Compiler.Ast.RequiresClause.Condition.get -> Koine.Compiler.Ast.Expr!
+Koine.Compiler.Ast.RequiresClause.Condition.init -> void
+Koine.Compiler.Ast.RequiresClause.Message.get -> string?
+Koine.Compiler.Ast.RequiresClause.Message.init -> void
+Koine.Compiler.Ast.RequiresClause.RequiresClause(Koine.Compiler.Ast.Expr! Condition, string? Message) -> void
+Koine.Compiler.Ast.ResultClause
+Koine.Compiler.Ast.ResultClause.ResultClause(Koine.Compiler.Ast.Expr! Value) -> void
+Koine.Compiler.Ast.ResultClause.Value.get -> Koine.Compiler.Ast.Expr!
+Koine.Compiler.Ast.ResultClause.Value.init -> void
+Koine.Compiler.Ast.SemanticModel
+Koine.Compiler.Ast.SemanticModel.Ancestors(Koine.Compiler.Ast.KoineNode! node) -> System.Collections.Generic.IEnumerable<Koine.Compiler.Ast.KoineNode!>!
+Koine.Compiler.Ast.SemanticModel.AncestorsAndSelf(Koine.Compiler.Ast.KoineNode! node) -> System.Collections.Generic.IEnumerable<Koine.Compiler.Ast.KoineNode!>!
+Koine.Compiler.Ast.SemanticModel.ChildNodes(Koine.Compiler.Ast.KoineNode! node) -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.KoineNode!>!
+Koine.Compiler.Ast.SemanticModel.DeclarationNameAt(int offset) -> Koine.Compiler.Ast.KoineNode?
+Koine.Compiler.Ast.SemanticModel.DeclaredSymbolAt(int offset) -> Koine.Compiler.Ast.Symbol?
+Koine.Compiler.Ast.SemanticModel.DefinitionAt(int offset) -> Koine.Compiler.Ast.Symbol?
+Koine.Compiler.Ast.SemanticModel.FirstAncestorOrSelf<T>(Koine.Compiler.Ast.KoineNode! node) -> T?
+Koine.Compiler.Ast.SemanticModel.GetDeclaredSymbol(Koine.Compiler.Ast.KoineNode! declaration) -> Koine.Compiler.Ast.Symbol?
+Koine.Compiler.Ast.SemanticModel.GetSymbol(string! name) -> Koine.Compiler.Ast.Symbol?
+Koine.Compiler.Ast.SemanticModel.GetSymbol(string! name, string? enclosingType) -> Koine.Compiler.Ast.Symbol?
+Koine.Compiler.Ast.SemanticModel.GetSymbolInfo(Koine.Compiler.Ast.KoineNode! node) -> Koine.Compiler.Ast.Symbol!
+Koine.Compiler.Ast.SemanticModel.GetTypeInfo(Koine.Compiler.Ast.Expr! expr, Koine.Compiler.Ast.TypeScope! scope, string? context = null) -> Koine.Compiler.Ast.KoineType!
+Koine.Compiler.Ast.SemanticModel.Index.get -> Koine.Compiler.Ast.ModelIndex!
+Koine.Compiler.Ast.SemanticModel.Model.get -> Koine.Compiler.Ast.KoineModel!
+Koine.Compiler.Ast.SemanticModel.NodeAt(int offset) -> Koine.Compiler.Ast.KoineNode?
+Koine.Compiler.Ast.SemanticModel.Parent(Koine.Compiler.Ast.KoineNode! node) -> Koine.Compiler.Ast.KoineNode?
+Koine.Compiler.Ast.SemanticModel.ReferencedSymbolAt(int offset) -> Koine.Compiler.Ast.Symbol?
+Koine.Compiler.Ast.SemanticModel.ResolverFor(string? context = null) -> Koine.Compiler.Ast.TypeResolver!
+Koine.Compiler.Ast.SemanticModel.SemanticModel(Koine.Compiler.Ast.KoineModel! model) -> void
+Koine.Compiler.Ast.ServiceDecl
+Koine.Compiler.Ast.ServiceDecl.Name.get -> string!
+Koine.Compiler.Ast.ServiceDecl.Name.init -> void
+Koine.Compiler.Ast.ServiceDecl.Operations.get -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.OperationDecl!>!
+Koine.Compiler.Ast.ServiceDecl.Operations.init -> void
+Koine.Compiler.Ast.ServiceDecl.ServiceDecl(string! Name, System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.OperationDecl!>! Operations, System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.UseCaseDecl!>! UseCases) -> void
+Koine.Compiler.Ast.ServiceDecl.UseCases.get -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.UseCaseDecl!>!
+Koine.Compiler.Ast.ServiceDecl.UseCases.init -> void
+Koine.Compiler.Ast.SourceSpan
+Koine.Compiler.Ast.SourceSpan.Column.get -> int
+Koine.Compiler.Ast.SourceSpan.Column.init -> void
+Koine.Compiler.Ast.SourceSpan.EndColumn.get -> int
+Koine.Compiler.Ast.SourceSpan.EndColumn.init -> void
+Koine.Compiler.Ast.SourceSpan.EndLine.get -> int
+Koine.Compiler.Ast.SourceSpan.EndLine.init -> void
+Koine.Compiler.Ast.SourceSpan.File.get -> string?
+Koine.Compiler.Ast.SourceSpan.File.init -> void
+Koine.Compiler.Ast.SourceSpan.IsNone.get -> bool
+Koine.Compiler.Ast.SourceSpan.Length.get -> int
+Koine.Compiler.Ast.SourceSpan.Length.init -> void
+Koine.Compiler.Ast.SourceSpan.Line.get -> int
+Koine.Compiler.Ast.SourceSpan.Line.init -> void
+Koine.Compiler.Ast.SourceSpan.Offset.get -> int
+Koine.Compiler.Ast.SourceSpan.Offset.init -> void
+Koine.Compiler.Ast.SourceSpan.SourceSpan() -> void
+Koine.Compiler.Ast.SourceSpan.SourceSpan(int Line, int Column, int EndLine, int EndColumn, int Offset, int Length, string? File = null) -> void
+Koine.Compiler.Ast.SourceSpan.SourceSpan(int line, int column, string? file = null) -> void
+Koine.Compiler.Ast.SpecDecl
+Koine.Compiler.Ast.SpecDecl.Condition.get -> Koine.Compiler.Ast.Expr!
+Koine.Compiler.Ast.SpecDecl.Condition.init -> void
+Koine.Compiler.Ast.SpecDecl.Name.get -> string!
+Koine.Compiler.Ast.SpecDecl.Name.init -> void
+Koine.Compiler.Ast.SpecDecl.SpecDecl(string! Name, string! TargetType, Koine.Compiler.Ast.Expr! Condition) -> void
+Koine.Compiler.Ast.SpecDecl.TargetType.get -> string!
+Koine.Compiler.Ast.SpecDecl.TargetType.init -> void
+Koine.Compiler.Ast.SpecSymbol
+Koine.Compiler.Ast.SpecSymbol.Declaration.get -> Koine.Compiler.Ast.SpecDecl!
+Koine.Compiler.Ast.SpecSymbol.SpecSymbol(string! name, Koine.Compiler.Ast.SourceSpan declSpan, Koine.Compiler.Ast.SpecDecl! declaration) -> void
+Koine.Compiler.Ast.SpecSymbol.TargetType.get -> string!
+Koine.Compiler.Ast.StateRule
+Koine.Compiler.Ast.StateRule.From.get -> string!
+Koine.Compiler.Ast.StateRule.From.init -> void
+Koine.Compiler.Ast.StateRule.Guard.get -> Koine.Compiler.Ast.Expr?
+Koine.Compiler.Ast.StateRule.Guard.init -> void
+Koine.Compiler.Ast.StateRule.StateRule(string! From, System.Collections.Generic.IReadOnlyList<string!>! To, Koine.Compiler.Ast.Expr? Guard) -> void
+Koine.Compiler.Ast.StateRule.To.get -> System.Collections.Generic.IReadOnlyList<string!>!
+Koine.Compiler.Ast.StateRule.To.init -> void
+Koine.Compiler.Ast.StatesDecl
+Koine.Compiler.Ast.StatesDecl.Field.get -> string!
+Koine.Compiler.Ast.StatesDecl.Field.init -> void
+Koine.Compiler.Ast.StatesDecl.Rules.get -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.StateRule!>!
+Koine.Compiler.Ast.StatesDecl.Rules.init -> void
+Koine.Compiler.Ast.StatesDecl.StatesDecl(string! Field, System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.StateRule!>! Rules) -> void
+Koine.Compiler.Ast.SubscribeDecl
+Koine.Compiler.Ast.SubscribeDecl.Context.get -> string!
+Koine.Compiler.Ast.SubscribeDecl.Context.init -> void
+Koine.Compiler.Ast.SubscribeDecl.EventName.get -> string!
+Koine.Compiler.Ast.SubscribeDecl.EventName.init -> void
+Koine.Compiler.Ast.SubscribeDecl.SubscribeDecl(string! Context, string! EventName) -> void
+Koine.Compiler.Ast.Symbol
+Koine.Compiler.Ast.Symbol.ContainingSymbol.get -> Koine.Compiler.Ast.Symbol?
+Koine.Compiler.Ast.Symbol.ContainingSymbol.init -> void
+Koine.Compiler.Ast.Symbol.DeclSpan.get -> Koine.Compiler.Ast.SourceSpan
+Koine.Compiler.Ast.Symbol.Doc.get -> string?
+Koine.Compiler.Ast.Symbol.Name.get -> string!
+Koine.Compiler.Ast.Symbol.Symbol(string! name, Koine.Compiler.Ast.SourceSpan declSpan, string? doc) -> void
+Koine.Compiler.Ast.SymbolEqualityComparer
+Koine.Compiler.Ast.SymbolEqualityComparer.Equals(Koine.Compiler.Ast.Symbol? x, Koine.Compiler.Ast.Symbol? y) -> bool
+Koine.Compiler.Ast.SymbolEqualityComparer.GetHashCode(Koine.Compiler.Ast.Symbol! obj) -> int
+Koine.Compiler.Ast.SymbolKind
+Koine.Compiler.Ast.SymbolKind.Context = 5 -> Koine.Compiler.Ast.SymbolKind
+Koine.Compiler.Ast.SymbolKind.EnumMember = 2 -> Koine.Compiler.Ast.SymbolKind
+Koine.Compiler.Ast.SymbolKind.Error = 9 -> Koine.Compiler.Ast.SymbolKind
+Koine.Compiler.Ast.SymbolKind.IdValueObject = 4 -> Koine.Compiler.Ast.SymbolKind
+Koine.Compiler.Ast.SymbolKind.LambdaParameter = 8 -> Koine.Compiler.Ast.SymbolKind
+Koine.Compiler.Ast.SymbolKind.Local = 7 -> Koine.Compiler.Ast.SymbolKind
+Koine.Compiler.Ast.SymbolKind.Member = 1 -> Koine.Compiler.Ast.SymbolKind
+Koine.Compiler.Ast.SymbolKind.Parameter = 6 -> Koine.Compiler.Ast.SymbolKind
+Koine.Compiler.Ast.SymbolKind.Spec = 3 -> Koine.Compiler.Ast.SymbolKind
+Koine.Compiler.Ast.SymbolKind.Type = 0 -> Koine.Compiler.Ast.SymbolKind
+Koine.Compiler.Ast.SyntaxTrivia
+Koine.Compiler.Ast.SyntaxTrivia.Kind.get -> Koine.Compiler.Ast.SyntaxTriviaKind
+Koine.Compiler.Ast.SyntaxTrivia.Kind.init -> void
+Koine.Compiler.Ast.SyntaxTrivia.Span.get -> Koine.Compiler.Ast.SourceSpan
+Koine.Compiler.Ast.SyntaxTrivia.Span.init -> void
+Koine.Compiler.Ast.SyntaxTrivia.SyntaxTrivia() -> void
+Koine.Compiler.Ast.SyntaxTrivia.SyntaxTrivia(Koine.Compiler.Ast.SyntaxTriviaKind Kind, string! Text, Koine.Compiler.Ast.SourceSpan Span) -> void
+Koine.Compiler.Ast.SyntaxTrivia.Text.get -> string!
+Koine.Compiler.Ast.SyntaxTrivia.Text.init -> void
+Koine.Compiler.Ast.SyntaxTriviaKind
+Koine.Compiler.Ast.SyntaxTriviaKind.BlankLine = 1 -> Koine.Compiler.Ast.SyntaxTriviaKind
+Koine.Compiler.Ast.SyntaxTriviaKind.BlockComment = 3 -> Koine.Compiler.Ast.SyntaxTriviaKind
+Koine.Compiler.Ast.SyntaxTriviaKind.Doc = 4 -> Koine.Compiler.Ast.SyntaxTriviaKind
+Koine.Compiler.Ast.SyntaxTriviaKind.LineComment = 2 -> Koine.Compiler.Ast.SyntaxTriviaKind
+Koine.Compiler.Ast.SyntaxTriviaKind.Whitespace = 0 -> Koine.Compiler.Ast.SyntaxTriviaKind
+Koine.Compiler.Ast.Transition
+Koine.Compiler.Ast.Transition.Field.get -> string!
+Koine.Compiler.Ast.Transition.Field.init -> void
+Koine.Compiler.Ast.Transition.Transition(string! Field, Koine.Compiler.Ast.Expr! Value) -> void
+Koine.Compiler.Ast.Transition.Value.get -> Koine.Compiler.Ast.Expr!
+Koine.Compiler.Ast.Transition.Value.init -> void
+Koine.Compiler.Ast.TypeDecl
+Koine.Compiler.Ast.TypeDecl.Deprecated.get -> string?
+Koine.Compiler.Ast.TypeDecl.Deprecated.init -> void
+Koine.Compiler.Ast.TypeDecl.ModulePath.get -> System.Collections.Generic.IReadOnlyList<string!>!
+Koine.Compiler.Ast.TypeDecl.ModulePath.init -> void
+Koine.Compiler.Ast.TypeDecl.Name.get -> string!
+Koine.Compiler.Ast.TypeDecl.Name.init -> void
+Koine.Compiler.Ast.TypeDecl.Since.get -> int?
+Koine.Compiler.Ast.TypeDecl.Since.init -> void
+Koine.Compiler.Ast.TypeDecl.TypeDecl(string! Name) -> void
+Koine.Compiler.Ast.TypeKind
+Koine.Compiler.Ast.TypeKind.Aggregate = 7 -> Koine.Compiler.Ast.TypeKind
+Koine.Compiler.Ast.TypeKind.Entity = 6 -> Koine.Compiler.Ast.TypeKind
+Koine.Compiler.Ast.TypeKind.Enum = 8 -> Koine.Compiler.Ast.TypeKind
+Koine.Compiler.Ast.TypeKind.Event = 9 -> Koine.Compiler.Ast.TypeKind
+Koine.Compiler.Ast.TypeKind.IdValueObject = 13 -> Koine.Compiler.Ast.TypeKind
+Koine.Compiler.Ast.TypeKind.IntegrationEvent = 12 -> Koine.Compiler.Ast.TypeKind
+Koine.Compiler.Ast.TypeKind.List = 1 -> Koine.Compiler.Ast.TypeKind
+Koine.Compiler.Ast.TypeKind.Map = 3 -> Koine.Compiler.Ast.TypeKind
+Koine.Compiler.Ast.TypeKind.Primitive = 0 -> Koine.Compiler.Ast.TypeKind
+Koine.Compiler.Ast.TypeKind.Query = 11 -> Koine.Compiler.Ast.TypeKind
+Koine.Compiler.Ast.TypeKind.Range = 4 -> Koine.Compiler.Ast.TypeKind
+Koine.Compiler.Ast.TypeKind.ReadModel = 10 -> Koine.Compiler.Ast.TypeKind
+Koine.Compiler.Ast.TypeKind.Set = 2 -> Koine.Compiler.Ast.TypeKind
+Koine.Compiler.Ast.TypeKind.Unknown = 14 -> Koine.Compiler.Ast.TypeKind
+Koine.Compiler.Ast.TypeKind.Value = 5 -> Koine.Compiler.Ast.TypeKind
+Koine.Compiler.Ast.TypeRef
+Koine.Compiler.Ast.TypeRef.Element.get -> Koine.Compiler.Ast.TypeRef?
+Koine.Compiler.Ast.TypeRef.Element.init -> void
+Koine.Compiler.Ast.TypeRef.IsOptional.get -> bool
+Koine.Compiler.Ast.TypeRef.IsOptional.init -> void
+Koine.Compiler.Ast.TypeRef.Name.get -> string!
+Koine.Compiler.Ast.TypeRef.Name.init -> void
+Koine.Compiler.Ast.TypeRef.Qualifier.get -> string?
+Koine.Compiler.Ast.TypeRef.Qualifier.init -> void
+Koine.Compiler.Ast.TypeRef.TypeRef(string! Name, Koine.Compiler.Ast.TypeRef? Element = null, Koine.Compiler.Ast.TypeRef? Value = null, bool IsOptional = false, string? Qualifier = null) -> void
+Koine.Compiler.Ast.TypeRef.Value.get -> Koine.Compiler.Ast.TypeRef?
+Koine.Compiler.Ast.TypeRef.Value.init -> void
+Koine.Compiler.Ast.TypeResolver
+Koine.Compiler.Ast.TypeResolver.Context.get -> string?
+Koine.Compiler.Ast.TypeResolver.Infer(Koine.Compiler.Ast.Expr! expr, Koine.Compiler.Ast.TypeScope! scope) -> Koine.Compiler.Ast.TypeRef?
+Koine.Compiler.Ast.TypeResolver.IsUserType(Koine.Compiler.Ast.TypeRef? t) -> bool
+Koine.Compiler.Ast.TypeResolver.IsValueLike(Koine.Compiler.Ast.TypeRef? t) -> bool
+Koine.Compiler.Ast.TypeResolver.TypeOf(Koine.Compiler.Ast.Expr! expr, Koine.Compiler.Ast.TypeScope! scope) -> Koine.Compiler.Ast.KoineType!
+Koine.Compiler.Ast.TypeResolver.TypeResolver(Koine.Compiler.Ast.ModelIndex! index, string? context = null) -> void
+Koine.Compiler.Ast.TypeScope
+Koine.Compiler.Ast.TypeScope.Contains(string! name) -> bool
+Koine.Compiler.Ast.TypeScope.Names.get -> System.Collections.Generic.IEnumerable<string!>!
+Koine.Compiler.Ast.TypeScope.TryGet(string! name, out Koine.Compiler.Ast.KoineType! type) -> bool
+Koine.Compiler.Ast.TypeScope.TypeScope(System.Collections.Generic.IEnumerable<System.Collections.Generic.KeyValuePair<string!, Koine.Compiler.Ast.KoineType!>>! names) -> void
+Koine.Compiler.Ast.TypeScope.With(string! name, Koine.Compiler.Ast.KoineType! type) -> Koine.Compiler.Ast.TypeScope!
+Koine.Compiler.Ast.TypeScope.WithRef(string! name, Koine.Compiler.Ast.TypeRef! type, Koine.Compiler.Ast.ModelIndex! index) -> Koine.Compiler.Ast.TypeScope!
+Koine.Compiler.Ast.TypeSymbol
+Koine.Compiler.Ast.TypeSymbol.Declaration.get -> Koine.Compiler.Ast.TypeDecl!
+Koine.Compiler.Ast.TypeSymbol.Members.get -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.Symbol!>!
+Koine.Compiler.Ast.TypeSymbol.Members.init -> void
+Koine.Compiler.Ast.TypeSymbol.TypeKind.get -> Koine.Compiler.Ast.TypeKind
+Koine.Compiler.Ast.TypeSymbol.TypeSymbol(string! name, Koine.Compiler.Ast.SourceSpan declSpan, Koine.Compiler.Ast.TypeKind typeKind, Koine.Compiler.Ast.TypeDecl! declaration) -> void
+Koine.Compiler.Ast.UnaryExpr
+Koine.Compiler.Ast.UnaryExpr.Op.get -> Koine.Compiler.Ast.UnaryOp
+Koine.Compiler.Ast.UnaryExpr.Op.init -> void
+Koine.Compiler.Ast.UnaryExpr.Operand.get -> Koine.Compiler.Ast.Expr!
+Koine.Compiler.Ast.UnaryExpr.Operand.init -> void
+Koine.Compiler.Ast.UnaryExpr.UnaryExpr(Koine.Compiler.Ast.UnaryOp Op, Koine.Compiler.Ast.Expr! Operand) -> void
+Koine.Compiler.Ast.UnaryOp
+Koine.Compiler.Ast.UnaryOp.Negate = 1 -> Koine.Compiler.Ast.UnaryOp
+Koine.Compiler.Ast.UnaryOp.Not = 0 -> Koine.Compiler.Ast.UnaryOp
+Koine.Compiler.Ast.UseCaseDecl
+Koine.Compiler.Ast.UseCaseDecl.Name.get -> string!
+Koine.Compiler.Ast.UseCaseDecl.Name.init -> void
+Koine.Compiler.Ast.UseCaseDecl.Parameters.get -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.Param!>!
+Koine.Compiler.Ast.UseCaseDecl.Parameters.init -> void
+Koine.Compiler.Ast.UseCaseDecl.ReturnType.get -> Koine.Compiler.Ast.TypeRef?
+Koine.Compiler.Ast.UseCaseDecl.ReturnType.init -> void
+Koine.Compiler.Ast.UseCaseDecl.UseCaseDecl(string! Name, System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.Param!>! Parameters, Koine.Compiler.Ast.TypeRef? ReturnType) -> void
+Koine.Compiler.Ast.ValueObjectDecl
+Koine.Compiler.Ast.ValueObjectDecl.Invariants.get -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.Invariant!>!
+Koine.Compiler.Ast.ValueObjectDecl.Invariants.init -> void
+Koine.Compiler.Ast.ValueObjectDecl.IsQuantity.get -> bool
+Koine.Compiler.Ast.ValueObjectDecl.IsQuantity.init -> void
+Koine.Compiler.Ast.ValueObjectDecl.Members.get -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.Member!>!
+Koine.Compiler.Ast.ValueObjectDecl.Members.init -> void
+Koine.Compiler.Ast.ValueObjectDecl.ValueObjectDecl(string! Name, System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.Member!>! Members, System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.Invariant!>! Invariants, bool IsQuantity = false) -> void
+Koine.Compiler.CodeFixes.CodeFix
+Koine.Compiler.CodeFixes.CodeFix.CodeFix(string! Title, string! Kind, string? EquivalenceKey, System.Collections.Generic.IReadOnlyList<Koine.Compiler.CodeFixes.CodeFixEdit!>! Edits) -> void
+Koine.Compiler.CodeFixes.CodeFix.Edits.get -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.CodeFixes.CodeFixEdit!>!
+Koine.Compiler.CodeFixes.CodeFix.Edits.init -> void
+Koine.Compiler.CodeFixes.CodeFix.EquivalenceKey.get -> string?
+Koine.Compiler.CodeFixes.CodeFix.EquivalenceKey.init -> void
+Koine.Compiler.CodeFixes.CodeFix.Kind.get -> string!
+Koine.Compiler.CodeFixes.CodeFix.Kind.init -> void
+Koine.Compiler.CodeFixes.CodeFix.Title.get -> string!
+Koine.Compiler.CodeFixes.CodeFix.Title.init -> void
+Koine.Compiler.CodeFixes.CodeFixContext
+Koine.Compiler.CodeFixes.CodeFixContext.CodeFixContext(Koine.Compiler.Services.KoineCompiler! compiler, string! sourceText, Koine.Compiler.Ast.KoineModel? model, Koine.Compiler.Diagnostics.Diagnostic? diagnostic, Koine.Compiler.CodeFixes.SelectionRange? selection) -> void
+Koine.Compiler.CodeFixes.CodeFixContext.Compiler.get -> Koine.Compiler.Services.KoineCompiler!
+Koine.Compiler.CodeFixes.CodeFixContext.Diagnostic.get -> Koine.Compiler.Diagnostics.Diagnostic?
+Koine.Compiler.CodeFixes.CodeFixContext.Model.get -> Koine.Compiler.Ast.KoineModel?
+Koine.Compiler.CodeFixes.CodeFixContext.Selection.get -> Koine.Compiler.CodeFixes.SelectionRange?
+Koine.Compiler.CodeFixes.CodeFixContext.SourceText.get -> string!
+Koine.Compiler.CodeFixes.CodeFixEdit
+Koine.Compiler.CodeFixes.CodeFixEdit.CodeFixEdit(Koine.Compiler.Ast.SourceSpan Range, string! NewText) -> void
+Koine.Compiler.CodeFixes.CodeFixEdit.NewText.get -> string!
+Koine.Compiler.CodeFixes.CodeFixEdit.NewText.init -> void
+Koine.Compiler.CodeFixes.CodeFixEdit.Range.get -> Koine.Compiler.Ast.SourceSpan
+Koine.Compiler.CodeFixes.CodeFixEdit.Range.init -> void
+Koine.Compiler.CodeFixes.CodeFixService
+Koine.Compiler.CodeFixes.CodeFixService.CodeFixService() -> void
+Koine.Compiler.CodeFixes.CodeFixService.CodeFixService(System.Collections.Generic.IReadOnlyList<Koine.Compiler.CodeFixes.ICodeFixProvider!>! providers) -> void
+Koine.Compiler.CodeFixes.CodeFixService.FixAll(string! sourceText, Koine.Compiler.Ast.KoineModel? model, System.Collections.Generic.IEnumerable<Koine.Compiler.Diagnostics.Diagnostic!>! diagnostics) -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.CodeFixes.CodeFix!>!
+Koine.Compiler.CodeFixes.CodeFixService.FixesForDiagnostic(string! sourceText, Koine.Compiler.Ast.KoineModel? model, Koine.Compiler.Diagnostics.Diagnostic! diagnostic) -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.CodeFixes.CodeFix!>!
+Koine.Compiler.CodeFixes.CodeFixService.RefactorsForSelection(string! sourceText, Koine.Compiler.Ast.KoineModel! model, int startOffset, int endOffset) -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.CodeFixes.CodeFix!>!
+Koine.Compiler.CodeFixes.ICodeFixProvider
+Koine.Compiler.CodeFixes.ICodeFixProvider.FixableDiagnosticCodes.get -> System.Collections.Generic.IReadOnlyCollection<string!>!
+Koine.Compiler.CodeFixes.ICodeFixProvider.GetFixes(Koine.Compiler.CodeFixes.CodeFixContext! context) -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.CodeFixes.CodeFix!>!
+Koine.Compiler.CodeFixes.Providers.ChangeToSuggestionCodeFixProvider
+Koine.Compiler.CodeFixes.Providers.ChangeToSuggestionCodeFixProvider.ChangeToSuggestionCodeFixProvider() -> void
+Koine.Compiler.CodeFixes.Providers.ChangeToSuggestionCodeFixProvider.FixableDiagnosticCodes.get -> System.Collections.Generic.IReadOnlyCollection<string!>!
+Koine.Compiler.CodeFixes.Providers.ChangeToSuggestionCodeFixProvider.GetFixes(Koine.Compiler.CodeFixes.CodeFixContext! context) -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.CodeFixes.CodeFix!>!
+Koine.Compiler.CodeFixes.Providers.ExtractValueObjectCodeFixProvider
+Koine.Compiler.CodeFixes.Providers.ExtractValueObjectCodeFixProvider.ExtractValueObjectCodeFixProvider() -> void
+Koine.Compiler.CodeFixes.Providers.ExtractValueObjectCodeFixProvider.FixableDiagnosticCodes.get -> System.Collections.Generic.IReadOnlyCollection<string!>!
+Koine.Compiler.CodeFixes.Providers.ExtractValueObjectCodeFixProvider.GetFixes(Koine.Compiler.CodeFixes.CodeFixContext! context) -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.CodeFixes.CodeFix!>!
+Koine.Compiler.CodeFixes.SelectionRange
+Koine.Compiler.CodeFixes.SelectionRange.EndOffset.get -> int
+Koine.Compiler.CodeFixes.SelectionRange.EndOffset.init -> void
+Koine.Compiler.CodeFixes.SelectionRange.SelectionRange(int StartOffset, int EndOffset) -> void
+Koine.Compiler.CodeFixes.SelectionRange.StartOffset.get -> int
+Koine.Compiler.CodeFixes.SelectionRange.StartOffset.init -> void
+Koine.Compiler.Diagnostics.Diagnostic
+Koine.Compiler.Diagnostics.Diagnostic.Code.get -> string!
+Koine.Compiler.Diagnostics.Diagnostic.Code.init -> void
+Koine.Compiler.Diagnostics.Diagnostic.Column.get -> int
+Koine.Compiler.Diagnostics.Diagnostic.Diagnostic(Koine.Compiler.Diagnostics.DiagnosticSeverity Severity, string! Code, string! Message, Koine.Compiler.Ast.SourceSpan Span) -> void
+Koine.Compiler.Diagnostics.Diagnostic.EndColumn.get -> int
+Koine.Compiler.Diagnostics.Diagnostic.EndColumn.init -> void
+Koine.Compiler.Diagnostics.Diagnostic.EndLine.get -> int
+Koine.Compiler.Diagnostics.Diagnostic.EndLine.init -> void
+Koine.Compiler.Diagnostics.Diagnostic.File.get -> string?
+Koine.Compiler.Diagnostics.Diagnostic.HasEnd.get -> bool
+Koine.Compiler.Diagnostics.Diagnostic.Line.get -> int
+Koine.Compiler.Diagnostics.Diagnostic.Message.get -> string!
+Koine.Compiler.Diagnostics.Diagnostic.Message.init -> void
+Koine.Compiler.Diagnostics.Diagnostic.Properties.get -> System.Collections.Generic.IReadOnlyDictionary<string!, string!>?
+Koine.Compiler.Diagnostics.Diagnostic.Properties.init -> void
+Koine.Compiler.Diagnostics.Diagnostic.Severity.get -> Koine.Compiler.Diagnostics.DiagnosticSeverity
+Koine.Compiler.Diagnostics.Diagnostic.Severity.init -> void
+Koine.Compiler.Diagnostics.Diagnostic.Span.get -> Koine.Compiler.Ast.SourceSpan
+Koine.Compiler.Diagnostics.Diagnostic.Span.init -> void
+Koine.Compiler.Diagnostics.Diagnostic.Suggestion.get -> string?
+Koine.Compiler.Diagnostics.Diagnostic.Suggestion.init -> void
+Koine.Compiler.Diagnostics.DiagnosticCategory
+Koine.Compiler.Diagnostics.DiagnosticCategory.Commands = 6 -> Koine.Compiler.Diagnostics.DiagnosticCategory
+Koine.Compiler.Diagnostics.DiagnosticCategory.ContextMaps = 17 -> Koine.Compiler.Diagnostics.DiagnosticCategory
+Koine.Compiler.Diagnostics.DiagnosticCategory.Cqrs = 15 -> Koine.Compiler.Diagnostics.DiagnosticCategory
+Koine.Compiler.Diagnostics.DiagnosticCategory.Declarations = 1 -> Koine.Compiler.Diagnostics.DiagnosticCategory
+Koine.Compiler.Diagnostics.DiagnosticCategory.Determinism = 3 -> Koine.Compiler.Diagnostics.DiagnosticCategory
+Koine.Compiler.Diagnostics.DiagnosticCategory.Events = 7 -> Koine.Compiler.Diagnostics.DiagnosticCategory
+Koine.Compiler.Diagnostics.DiagnosticCategory.Expressions = 2 -> Koine.Compiler.Diagnostics.DiagnosticCategory
+Koine.Compiler.Diagnostics.DiagnosticCategory.Factories = 9 -> Koine.Compiler.Diagnostics.DiagnosticCategory
+Koine.Compiler.Diagnostics.DiagnosticCategory.Identity = 14 -> Koine.Compiler.Diagnostics.DiagnosticCategory
+Koine.Compiler.Diagnostics.DiagnosticCategory.Invariants = 4 -> Koine.Compiler.Diagnostics.DiagnosticCategory
+Koine.Compiler.Diagnostics.DiagnosticCategory.MultiFile = 16 -> Koine.Compiler.Diagnostics.DiagnosticCategory
+Koine.Compiler.Diagnostics.DiagnosticCategory.Optionality = 5 -> Koine.Compiler.Diagnostics.DiagnosticCategory
+Koine.Compiler.Diagnostics.DiagnosticCategory.Policies = 13 -> Koine.Compiler.Diagnostics.DiagnosticCategory
+Koine.Compiler.Diagnostics.DiagnosticCategory.Services = 12 -> Koine.Compiler.Diagnostics.DiagnosticCategory
+Koine.Compiler.Diagnostics.DiagnosticCategory.Specs = 11 -> Koine.Compiler.Diagnostics.DiagnosticCategory
+Koine.Compiler.Diagnostics.DiagnosticCategory.StateMachines = 8 -> Koine.Compiler.Diagnostics.DiagnosticCategory
+Koine.Compiler.Diagnostics.DiagnosticCategory.Syntax = 0 -> Koine.Compiler.Diagnostics.DiagnosticCategory
+Koine.Compiler.Diagnostics.DiagnosticCategory.ValueObjects = 10 -> Koine.Compiler.Diagnostics.DiagnosticCategory
+Koine.Compiler.Diagnostics.DiagnosticCategory.Versioning = 18 -> Koine.Compiler.Diagnostics.DiagnosticCategory
+Koine.Compiler.Diagnostics.DiagnosticCodes
+Koine.Compiler.Diagnostics.DiagnosticDescriptor
+Koine.Compiler.Diagnostics.DiagnosticDescriptor.Category.get -> Koine.Compiler.Diagnostics.DiagnosticCategory
+Koine.Compiler.Diagnostics.DiagnosticDescriptor.Category.init -> void
+Koine.Compiler.Diagnostics.DiagnosticDescriptor.DefaultSeverity.get -> Koine.Compiler.Diagnostics.DiagnosticSeverity
+Koine.Compiler.Diagnostics.DiagnosticDescriptor.DefaultSeverity.init -> void
+Koine.Compiler.Diagnostics.DiagnosticDescriptor.DiagnosticDescriptor(string! Id, string! Title, string! MessageFormat, Koine.Compiler.Diagnostics.DiagnosticCategory Category, Koine.Compiler.Diagnostics.DiagnosticSeverity DefaultSeverity) -> void
+Koine.Compiler.Diagnostics.DiagnosticDescriptor.Id.get -> string!
+Koine.Compiler.Diagnostics.DiagnosticDescriptor.Id.init -> void
+Koine.Compiler.Diagnostics.DiagnosticDescriptor.MessageFormat.get -> string!
+Koine.Compiler.Diagnostics.DiagnosticDescriptor.MessageFormat.init -> void
+Koine.Compiler.Diagnostics.DiagnosticDescriptor.Title.get -> string!
+Koine.Compiler.Diagnostics.DiagnosticDescriptor.Title.init -> void
+Koine.Compiler.Diagnostics.DiagnosticFilter
+Koine.Compiler.Diagnostics.DiagnosticFilterOptions
+Koine.Compiler.Diagnostics.DiagnosticFilterOptions.DiagnosticFilterOptions(System.Collections.Generic.IReadOnlyDictionary<string!, string!>? SeverityOverrides = null, bool WarningsAsErrors = false) -> void
+Koine.Compiler.Diagnostics.DiagnosticFilterOptions.IsNoop.get -> bool
+Koine.Compiler.Diagnostics.DiagnosticFilterOptions.SeverityOverrides.get -> System.Collections.Generic.IReadOnlyDictionary<string!, string!>?
+Koine.Compiler.Diagnostics.DiagnosticFilterOptions.SeverityOverrides.init -> void
+Koine.Compiler.Diagnostics.DiagnosticFilterOptions.WarningsAsErrors.get -> bool
+Koine.Compiler.Diagnostics.DiagnosticFilterOptions.WarningsAsErrors.init -> void
+Koine.Compiler.Diagnostics.DiagnosticSeverity
+Koine.Compiler.Diagnostics.DiagnosticSeverity.Error = 0 -> Koine.Compiler.Diagnostics.DiagnosticSeverity
+Koine.Compiler.Diagnostics.DiagnosticSeverity.Hidden = 3 -> Koine.Compiler.Diagnostics.DiagnosticSeverity
+Koine.Compiler.Diagnostics.DiagnosticSeverity.Info = 2 -> Koine.Compiler.Diagnostics.DiagnosticSeverity
+Koine.Compiler.Diagnostics.DiagnosticSeverity.Warning = 1 -> Koine.Compiler.Diagnostics.DiagnosticSeverity
+Koine.Compiler.Emit.CSharp.CSharpEmitter
+Koine.Compiler.Emit.CSharp.CSharpEmitter.CSharpEmitter() -> void
+Koine.Compiler.Emit.CSharp.CSharpEmitter.Emit(Koine.Compiler.Ast.KoineModel! model) -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Emit.EmittedFile!>!
+Koine.Compiler.Emit.CSharp.CSharpEmitter.Emit(Koine.Compiler.Ast.KoineModel! model, Koine.Compiler.Ast.SemanticModel? semantic) -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Emit.EmittedFile!>!
+Koine.Compiler.Emit.CSharp.CSharpEmitter.TargetName.get -> string!
+Koine.Compiler.Emit.Docs.DocsEmitter
+Koine.Compiler.Emit.Docs.DocsEmitter.DocsEmitter() -> void
+Koine.Compiler.Emit.Docs.DocsEmitter.Emit(Koine.Compiler.Ast.KoineModel! model) -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Emit.EmittedFile!>!
+Koine.Compiler.Emit.Docs.DocsEmitter.TargetName.get -> string!
+Koine.Compiler.Emit.EmittedFile
+Koine.Compiler.Emit.EmittedFile.Contents.get -> string!
+Koine.Compiler.Emit.EmittedFile.Contents.init -> void
+Koine.Compiler.Emit.EmittedFile.EmittedFile(string! RelativePath, string! Contents) -> void
+Koine.Compiler.Emit.EmittedFile.RelativePath.get -> string!
+Koine.Compiler.Emit.EmittedFile.RelativePath.init -> void
+Koine.Compiler.Emit.EmitterLoader
+Koine.Compiler.Emit.EmitterOptions
+Koine.Compiler.Emit.EmitterOptions.EmitterOptions(System.Collections.Generic.IReadOnlyDictionary<string!, string!>! NamespaceMap, string? InstantMode = null, string? Layout = null) -> void
+Koine.Compiler.Emit.EmitterOptions.InstantMode.get -> string?
+Koine.Compiler.Emit.EmitterOptions.InstantMode.init -> void
+Koine.Compiler.Emit.EmitterOptions.Layout.get -> string?
+Koine.Compiler.Emit.EmitterOptions.Layout.init -> void
+Koine.Compiler.Emit.EmitterOptions.NamespaceMap.get -> System.Collections.Generic.IReadOnlyDictionary<string!, string!>!
+Koine.Compiler.Emit.EmitterOptions.NamespaceMap.init -> void
+Koine.Compiler.Emit.EmitterRegistry
+Koine.Compiler.Emit.EmitterRegistry.EmitterRegistry() -> void
+Koine.Compiler.Emit.EmitterRegistry.EmitterRegistry(System.Collections.Generic.IEnumerable<Koine.Compiler.Emit.IEmitterProvider!>? externalProviders) -> void
+Koine.Compiler.Emit.EmitterRegistry.IsSupported(string! target) -> bool
+Koine.Compiler.Emit.EmitterRegistry.SupportedTargets.get -> System.Collections.Generic.IReadOnlyList<string!>!
+Koine.Compiler.Emit.EmitterRegistry.TryCreate(string! target, Koine.Compiler.Emit.EmitterOptions! options, out Koine.Compiler.Emit.IEmitter! emitter) -> bool
+Koine.Compiler.Emit.Glossary.GlossaryEmitter
+Koine.Compiler.Emit.Glossary.GlossaryEmitter.Emit(Koine.Compiler.Ast.KoineModel! model) -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Emit.EmittedFile!>!
+Koine.Compiler.Emit.Glossary.GlossaryEmitter.GlossaryEmitter() -> void
+Koine.Compiler.Emit.Glossary.GlossaryEmitter.TargetName.get -> string!
+Koine.Compiler.Emit.Glossary.GlossaryEntry
+Koine.Compiler.Emit.Glossary.GlossaryEntry.Context.get -> string!
+Koine.Compiler.Emit.Glossary.GlossaryEntry.Context.init -> void
+Koine.Compiler.Emit.Glossary.GlossaryEntry.Doc.get -> string?
+Koine.Compiler.Emit.Glossary.GlossaryEntry.Doc.init -> void
+Koine.Compiler.Emit.Glossary.GlossaryEntry.GlossaryEntry(string! Id, string! Name, string! Kind, string! Context, string! QualifiedName, string? Doc, Koine.Compiler.Ast.SourceSpan NameSpan) -> void
+Koine.Compiler.Emit.Glossary.GlossaryEntry.Id.get -> string!
+Koine.Compiler.Emit.Glossary.GlossaryEntry.Id.init -> void
+Koine.Compiler.Emit.Glossary.GlossaryEntry.Kind.get -> string!
+Koine.Compiler.Emit.Glossary.GlossaryEntry.Kind.init -> void
+Koine.Compiler.Emit.Glossary.GlossaryEntry.Name.get -> string!
+Koine.Compiler.Emit.Glossary.GlossaryEntry.Name.init -> void
+Koine.Compiler.Emit.Glossary.GlossaryEntry.NameSpan.get -> Koine.Compiler.Ast.SourceSpan
+Koine.Compiler.Emit.Glossary.GlossaryEntry.NameSpan.init -> void
+Koine.Compiler.Emit.Glossary.GlossaryEntry.QualifiedName.get -> string!
+Koine.Compiler.Emit.Glossary.GlossaryEntry.QualifiedName.init -> void
+Koine.Compiler.Emit.Glossary.GlossaryModel
+Koine.Compiler.Emit.Glossary.GlossaryModel.Entries.get -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Emit.Glossary.GlossaryEntry!>!
+Koine.Compiler.Emit.Glossary.GlossaryModel.Entries.init -> void
+Koine.Compiler.Emit.Glossary.GlossaryModel.GlossaryModel(System.Collections.Generic.IReadOnlyList<Koine.Compiler.Emit.Glossary.GlossaryEntry!>! Entries) -> void
+Koine.Compiler.Emit.Glossary.GlossaryModelBuilder
+Koine.Compiler.Emit.IEmitter
+Koine.Compiler.Emit.IEmitter.Emit(Koine.Compiler.Ast.KoineModel! model) -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Emit.EmittedFile!>!
+Koine.Compiler.Emit.IEmitter.Emit(Koine.Compiler.Ast.KoineModel! model, Koine.Compiler.Ast.SemanticModel? semantic) -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Emit.EmittedFile!>!
+Koine.Compiler.Emit.IEmitter.TargetName.get -> string!
+Koine.Compiler.Emit.IEmitterProvider
+Koine.Compiler.Emit.IEmitterProvider.Create(Koine.Compiler.Emit.EmitterOptions! options) -> Koine.Compiler.Emit.IEmitter!
+Koine.Compiler.Emit.IEmitterProvider.Target.get -> string!
+Koine.Compiler.Emit.Php.PhpEmitter
+Koine.Compiler.Emit.Php.PhpEmitter.Emit(Koine.Compiler.Ast.KoineModel! model) -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Emit.EmittedFile!>!
+Koine.Compiler.Emit.Php.PhpEmitter.Emit(Koine.Compiler.Ast.KoineModel! model, Koine.Compiler.Ast.SemanticModel? semantic) -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Emit.EmittedFile!>!
+Koine.Compiler.Emit.Php.PhpEmitter.PhpEmitter() -> void
+Koine.Compiler.Emit.Php.PhpEmitter.TargetName.get -> string!
+Koine.Compiler.Emit.Python.PythonEmitter
+Koine.Compiler.Emit.Python.PythonEmitter.Emit(Koine.Compiler.Ast.KoineModel! model) -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Emit.EmittedFile!>!
+Koine.Compiler.Emit.Python.PythonEmitter.Emit(Koine.Compiler.Ast.KoineModel! model, Koine.Compiler.Ast.SemanticModel? semantic) -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Emit.EmittedFile!>!
+Koine.Compiler.Emit.Python.PythonEmitter.PythonEmitter() -> void
+Koine.Compiler.Emit.Python.PythonEmitter.TargetName.get -> string!
+Koine.Compiler.Emit.TypeScript.TypeScriptEmitter
+Koine.Compiler.Emit.TypeScript.TypeScriptEmitter.Emit(Koine.Compiler.Ast.KoineModel! model) -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Emit.EmittedFile!>!
+Koine.Compiler.Emit.TypeScript.TypeScriptEmitter.Emit(Koine.Compiler.Ast.KoineModel! model, Koine.Compiler.Ast.SemanticModel? semantic) -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Emit.EmittedFile!>!
+Koine.Compiler.Emit.TypeScript.TypeScriptEmitter.TargetName.get -> string!
+Koine.Compiler.Emit.TypeScript.TypeScriptEmitter.TypeScriptEmitter() -> void
+Koine.Compiler.Formatting.AstPrinter
+Koine.Compiler.Formatting.AstPrinter.AstPrinter() -> void
+Koine.Compiler.Formatting.AstPrinter.AstPrinter(string! source) -> void
+Koine.Compiler.Formatting.AstPrinter.Print(Koine.Compiler.Ast.KoineNode! node) -> string!
+Koine.Compiler.Formatting.FormatResult
+Koine.Compiler.Formatting.FormatResult.Changed.get -> bool
+Koine.Compiler.Formatting.FormatResult.Changed.init -> void
+Koine.Compiler.Formatting.FormatResult.FormatResult(string! Text, bool Changed) -> void
+Koine.Compiler.Formatting.FormatResult.Text.get -> string!
+Koine.Compiler.Formatting.FormatResult.Text.init -> void
+Koine.Compiler.Formatting.KoineFormatter
+Koine.Compiler.Formatting.KoineFormatter.Format(string! source) -> Koine.Compiler.Formatting.FormatResult!
+Koine.Compiler.Formatting.KoineFormatter.KoineFormatter() -> void
+Koine.Compiler.Parsing.KoineModelBuilderVisitor
+Koine.Compiler.Parsing.KoineModelBuilderVisitor.BuildModel(Koine.Compiler.Grammar.KoineParser.ProgramContext! context) -> Koine.Compiler.Ast.KoineModel!
+Koine.Compiler.Parsing.KoineModelBuilderVisitor.KoineModelBuilderVisitor(Antlr4.Runtime.CommonTokenStream? tokens = null, string? file = null) -> void
+Koine.Compiler.Parsing.SyntaxErrorListener
+Koine.Compiler.Parsing.SyntaxErrorListener.Errors.get -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Diagnostics.Diagnostic!>!
+Koine.Compiler.Parsing.SyntaxErrorListener.HasErrors.get -> bool
+Koine.Compiler.Parsing.SyntaxErrorListener.SyntaxError(System.IO.TextWriter! output, Antlr4.Runtime.IRecognizer! recognizer, Antlr4.Runtime.IToken! offendingSymbol, int line, int charPositionInLine, string! msg, Antlr4.Runtime.RecognitionException! e) -> void
+Koine.Compiler.Parsing.SyntaxErrorListener.SyntaxError(System.IO.TextWriter! output, Antlr4.Runtime.IRecognizer! recognizer, int offendingSymbol, int line, int charPositionInLine, string! msg, Antlr4.Runtime.RecognitionException! e) -> void
+Koine.Compiler.Parsing.SyntaxErrorListener.SyntaxErrorListener(string? file = null) -> void
+Koine.Compiler.Parsing.TokenGeometry
+Koine.Compiler.Semantics.AnalyzerContext
+Koine.Compiler.Semantics.AnalyzerContext.EnumMembers.get -> System.Collections.Generic.IReadOnlySet<string!>!
+Koine.Compiler.Semantics.AnalyzerContext.Index.get -> Koine.Compiler.Ast.ModelIndex!
+Koine.Compiler.Semantics.AnalyzerContext.Model.get -> Koine.Compiler.Ast.KoineModel!
+Koine.Compiler.Semantics.AnalyzerContext.Report(Koine.Compiler.Diagnostics.Diagnostic! diagnostic) -> void
+Koine.Compiler.Semantics.AnalyzerContext.ResolverFor(string? context) -> Koine.Compiler.Ast.TypeResolver!
+Koine.Compiler.Semantics.AnalyzerContext.Semantic.get -> Koine.Compiler.Ast.SemanticModel!
+Koine.Compiler.Semantics.AnalyzerLoader
+Koine.Compiler.Semantics.IModelAnalyzer
+Koine.Compiler.Semantics.IModelAnalyzer.Analyze(Koine.Compiler.Semantics.AnalyzerContext! context) -> void
+Koine.Compiler.Semantics.IModelAnalyzer.Id.get -> string!
+Koine.Compiler.Semantics.SemanticValidator
+Koine.Compiler.Semantics.SemanticValidator.SemanticValidator() -> void
+Koine.Compiler.Semantics.SemanticValidator.SemanticValidator(System.Collections.Generic.IReadOnlyList<Koine.Compiler.Semantics.IModelAnalyzer!>? externalAnalyzers) -> void
+Koine.Compiler.Semantics.SemanticValidator.Validate(Koine.Compiler.Ast.KoineModel! model) -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Diagnostics.Diagnostic!>!
+Koine.Compiler.Semantics.SemanticValidator.Validate(Koine.Compiler.Ast.SemanticModel! semantic) -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Diagnostics.Diagnostic!>!
+Koine.Compiler.Services.CodeActionEdit
+Koine.Compiler.Services.CodeActionEdit.CodeActionEdit(string! Title, string! Kind, System.Collections.Generic.IReadOnlyList<Koine.Compiler.Services.TextEditModel!>! Edits) -> void
+Koine.Compiler.Services.CodeActionEdit.Edits.get -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Services.TextEditModel!>!
+Koine.Compiler.Services.CodeActionEdit.Edits.init -> void
+Koine.Compiler.Services.CodeActionEdit.Kind.get -> string!
+Koine.Compiler.Services.CodeActionEdit.Kind.init -> void
+Koine.Compiler.Services.CodeActionEdit.Title.get -> string!
+Koine.Compiler.Services.CodeActionEdit.Title.init -> void
+Koine.Compiler.Services.CodeLens
+Koine.Compiler.Services.CodeLens.CodeLens(string! Name, string! Uri, Koine.Compiler.Ast.SourceSpan Range, string? Title) -> void
+Koine.Compiler.Services.CodeLens.Name.get -> string!
+Koine.Compiler.Services.CodeLens.Name.init -> void
+Koine.Compiler.Services.CodeLens.Range.get -> Koine.Compiler.Ast.SourceSpan
+Koine.Compiler.Services.CodeLens.Range.init -> void
+Koine.Compiler.Services.CodeLens.Title.get -> string?
+Koine.Compiler.Services.CodeLens.Title.init -> void
+Koine.Compiler.Services.CodeLens.Uri.get -> string!
+Koine.Compiler.Services.CodeLens.Uri.init -> void
+Koine.Compiler.Services.CompatibilityChange
+Koine.Compiler.Services.CompatibilityChange.Code.get -> string!
+Koine.Compiler.Services.CompatibilityChange.Code.init -> void
+Koine.Compiler.Services.CompatibilityChange.CompatibilityChange(Koine.Compiler.Services.CompatibilityImpact Impact, string! Code, string! Message) -> void
+Koine.Compiler.Services.CompatibilityChange.Impact.get -> Koine.Compiler.Services.CompatibilityImpact
+Koine.Compiler.Services.CompatibilityChange.Impact.init -> void
+Koine.Compiler.Services.CompatibilityChange.Message.get -> string!
+Koine.Compiler.Services.CompatibilityChange.Message.init -> void
+Koine.Compiler.Services.CompatibilityChecker
+Koine.Compiler.Services.CompatibilityChecker.Check(Koine.Compiler.Ast.KoineModel! baseline, Koine.Compiler.Ast.KoineModel! current) -> Koine.Compiler.Services.CompatibilityReport!
+Koine.Compiler.Services.CompatibilityChecker.CompatibilityChecker() -> void
+Koine.Compiler.Services.CompatibilityImpact
+Koine.Compiler.Services.CompatibilityImpact.Breaking = 0 -> Koine.Compiler.Services.CompatibilityImpact
+Koine.Compiler.Services.CompatibilityImpact.NonBreaking = 1 -> Koine.Compiler.Services.CompatibilityImpact
+Koine.Compiler.Services.CompatibilityReport
+Koine.Compiler.Services.CompatibilityReport.Changes.get -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Services.CompatibilityChange!>!
+Koine.Compiler.Services.CompatibilityReport.Changes.init -> void
+Koine.Compiler.Services.CompatibilityReport.CompatibilityReport(System.Collections.Generic.IReadOnlyList<Koine.Compiler.Services.CompatibilityChange!>! Changes) -> void
+Koine.Compiler.Services.CompatibilityReport.HasBreakingChanges.get -> bool
+Koine.Compiler.Services.CompileResult
+Koine.Compiler.Services.CompileResult.CompileResult(Koine.Compiler.Ast.KoineModel? Model, System.Collections.Generic.IReadOnlyList<Koine.Compiler.Diagnostics.Diagnostic!>! Diagnostics, System.Collections.Generic.IReadOnlyList<Koine.Compiler.Emit.EmittedFile!>! Files) -> void
+Koine.Compiler.Services.CompileResult.Diagnostics.get -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Diagnostics.Diagnostic!>!
+Koine.Compiler.Services.CompileResult.Diagnostics.init -> void
+Koine.Compiler.Services.CompileResult.Files.get -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Emit.EmittedFile!>!
+Koine.Compiler.Services.CompileResult.Files.init -> void
+Koine.Compiler.Services.CompileResult.Model.get -> Koine.Compiler.Ast.KoineModel?
+Koine.Compiler.Services.CompileResult.Model.init -> void
+Koine.Compiler.Services.CompileResult.Success.get -> bool
+Koine.Compiler.Services.CompletionItem
+Koine.Compiler.Services.CompletionItem.CommitCharacters.get -> System.Collections.Generic.IReadOnlyList<string!>?
+Koine.Compiler.Services.CompletionItem.CommitCharacters.init -> void
+Koine.Compiler.Services.CompletionItem.CompletionItem(string! Label, Koine.Compiler.Services.CompletionItemKind Kind, string? Detail, string? Documentation, string? InsertText = null, int? InsertTextFormat = null, System.Collections.Generic.IReadOnlyList<string!>? CommitCharacters = null, string? SortText = null, string? Data = null) -> void
+Koine.Compiler.Services.CompletionItem.Data.get -> string?
+Koine.Compiler.Services.CompletionItem.Data.init -> void
+Koine.Compiler.Services.CompletionItem.Detail.get -> string?
+Koine.Compiler.Services.CompletionItem.Detail.init -> void
+Koine.Compiler.Services.CompletionItem.Documentation.get -> string?
+Koine.Compiler.Services.CompletionItem.Documentation.init -> void
+Koine.Compiler.Services.CompletionItem.InsertText.get -> string?
+Koine.Compiler.Services.CompletionItem.InsertText.init -> void
+Koine.Compiler.Services.CompletionItem.InsertTextFormat.get -> int?
+Koine.Compiler.Services.CompletionItem.InsertTextFormat.init -> void
+Koine.Compiler.Services.CompletionItem.Kind.get -> Koine.Compiler.Services.CompletionItemKind
+Koine.Compiler.Services.CompletionItem.Kind.init -> void
+Koine.Compiler.Services.CompletionItem.Label.get -> string!
+Koine.Compiler.Services.CompletionItem.Label.init -> void
+Koine.Compiler.Services.CompletionItem.SortText.get -> string?
+Koine.Compiler.Services.CompletionItem.SortText.init -> void
+Koine.Compiler.Services.CompletionItemKind
+Koine.Compiler.Services.CompletionItemKind.Class = 1 -> Koine.Compiler.Services.CompletionItemKind
+Koine.Compiler.Services.CompletionItemKind.Enum = 2 -> Koine.Compiler.Services.CompletionItemKind
+Koine.Compiler.Services.CompletionItemKind.EnumMember = 3 -> Koine.Compiler.Services.CompletionItemKind
+Koine.Compiler.Services.CompletionItemKind.Field = 4 -> Koine.Compiler.Services.CompletionItemKind
+Koine.Compiler.Services.CompletionItemKind.Keyword = 0 -> Koine.Compiler.Services.CompletionItemKind
+Koine.Compiler.Services.CompletionItemKind.Method = 6 -> Koine.Compiler.Services.CompletionItemKind
+Koine.Compiler.Services.CompletionItemKind.Property = 5 -> Koine.Compiler.Services.CompletionItemKind
+Koine.Compiler.Services.DeclLocation
+Koine.Compiler.Services.DeclLocation.DeclLocation(string! Uri, Koine.Compiler.Ast.SourceSpan Span) -> void
+Koine.Compiler.Services.DeclLocation.Span.get -> Koine.Compiler.Ast.SourceSpan
+Koine.Compiler.Services.DeclLocation.Span.init -> void
+Koine.Compiler.Services.DeclLocation.Uri.get -> string!
+Koine.Compiler.Services.DeclLocation.Uri.init -> void
+Koine.Compiler.Services.DefinitionResult
+Koine.Compiler.Services.DefinitionResult.DefinitionResult(string! Uri, Koine.Compiler.Ast.SourceSpan Target) -> void
+Koine.Compiler.Services.DefinitionResult.Target.get -> Koine.Compiler.Ast.SourceSpan
+Koine.Compiler.Services.DefinitionResult.Target.init -> void
+Koine.Compiler.Services.DefinitionResult.Uri.get -> string!
+Koine.Compiler.Services.DefinitionResult.Uri.init -> void
+Koine.Compiler.Services.DocEditResult
+Koine.Compiler.Services.DocEditResult.DocEditResult(string? Uri, System.Collections.Generic.IReadOnlyList<Koine.Compiler.Services.DocTextEdit!>! Edits) -> void
+Koine.Compiler.Services.DocEditResult.Edits.get -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Services.DocTextEdit!>!
+Koine.Compiler.Services.DocEditResult.Edits.init -> void
+Koine.Compiler.Services.DocEditResult.Uri.get -> string?
+Koine.Compiler.Services.DocEditResult.Uri.init -> void
+Koine.Compiler.Services.DocTextEdit
+Koine.Compiler.Services.DocTextEdit.DocTextEdit(Koine.Compiler.Ast.SourceSpan Range, string! NewText) -> void
+Koine.Compiler.Services.DocTextEdit.NewText.get -> string!
+Koine.Compiler.Services.DocTextEdit.NewText.init -> void
+Koine.Compiler.Services.DocTextEdit.Range.get -> Koine.Compiler.Ast.SourceSpan
+Koine.Compiler.Services.DocTextEdit.Range.init -> void
+Koine.Compiler.Services.DocumentSymbol
+Koine.Compiler.Services.DocumentSymbol.Children.get -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Services.DocumentSymbol!>!
+Koine.Compiler.Services.DocumentSymbol.Children.init -> void
+Koine.Compiler.Services.DocumentSymbol.DocumentSymbol(string! Name, Koine.Compiler.Services.SymbolKind Kind, Koine.Compiler.Ast.SourceSpan Range, Koine.Compiler.Ast.SourceSpan SelectionRange, System.Collections.Generic.IReadOnlyList<Koine.Compiler.Services.DocumentSymbol!>! Children) -> void
+Koine.Compiler.Services.DocumentSymbol.Kind.get -> Koine.Compiler.Services.SymbolKind
+Koine.Compiler.Services.DocumentSymbol.Kind.init -> void
+Koine.Compiler.Services.DocumentSymbol.Name.get -> string!
+Koine.Compiler.Services.DocumentSymbol.Name.init -> void
+Koine.Compiler.Services.DocumentSymbol.Range.get -> Koine.Compiler.Ast.SourceSpan
+Koine.Compiler.Services.DocumentSymbol.Range.init -> void
+Koine.Compiler.Services.DocumentSymbol.SelectionRange.get -> Koine.Compiler.Ast.SourceSpan
+Koine.Compiler.Services.DocumentSymbol.SelectionRange.init -> void
+Koine.Compiler.Services.FoldingRange
+Koine.Compiler.Services.FoldingRange.FoldingRange(Koine.Compiler.Ast.SourceSpan Range) -> void
+Koine.Compiler.Services.FoldingRange.Range.get -> Koine.Compiler.Ast.SourceSpan
+Koine.Compiler.Services.FoldingRange.Range.init -> void
+Koine.Compiler.Services.HoverResult
+Koine.Compiler.Services.HoverResult.HoverResult(string! Markdown) -> void
+Koine.Compiler.Services.HoverResult.Markdown.get -> string!
+Koine.Compiler.Services.HoverResult.Markdown.init -> void
+Koine.Compiler.Services.KoineCompilation
+Koine.Compiler.Services.KoineCompilation.Documents.get -> System.Collections.Generic.IReadOnlyDictionary<string!, string!>!
+Koine.Compiler.Services.KoineCompilation.Fingerprint.get -> string!
+Koine.Compiler.Services.KoineCompilation.Model.get -> Koine.Compiler.Ast.KoineModel!
+Koine.Compiler.Services.KoineCompilation.SemanticModel.get -> Koine.Compiler.Ast.SemanticModel!
+Koine.Compiler.Services.KoineCompilation.SemanticModelFor(string! uri) -> Koine.Compiler.Ast.SemanticModel?
+Koine.Compiler.Services.KoineCompilation.SyntaxDiagnostics.get -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Diagnostics.Diagnostic!>!
+Koine.Compiler.Services.KoineCompilation.Uris.get -> System.Collections.Generic.IReadOnlyCollection<string!>!
+Koine.Compiler.Services.KoineCompilation.WithDocument(string! uri, string! text) -> Koine.Compiler.Services.KoineCompilation!
+Koine.Compiler.Services.KoineCompilation.WithoutDocument(string! uri) -> Koine.Compiler.Services.KoineCompilation!
+Koine.Compiler.Services.KoineCompilation.WorkspaceIndex.get -> Koine.Compiler.Services.WorkspaceIndex!
+Koine.Compiler.Services.KoineCompiler
+Koine.Compiler.Services.KoineCompiler.Compile(System.Collections.Generic.IReadOnlyList<Koine.Compiler.Services.SourceFile>! files, Koine.Compiler.Emit.IEmitter! emitter) -> Koine.Compiler.Services.CompileResult!
+Koine.Compiler.Services.KoineCompiler.Compile(System.Collections.Generic.IReadOnlyList<Koine.Compiler.Services.SourceFile>! files, Koine.Compiler.Emit.IEmitter! emitter, Koine.Compiler.Diagnostics.DiagnosticFilterOptions! filterOptions) -> Koine.Compiler.Services.CompileResult!
+Koine.Compiler.Services.KoineCompiler.Compile(string! source, Koine.Compiler.Emit.IEmitter! emitter) -> Koine.Compiler.Services.CompileResult!
+Koine.Compiler.Services.KoineCompiler.Compile(string! source, Koine.Compiler.Emit.IEmitter! emitter, Koine.Compiler.Diagnostics.DiagnosticFilterOptions! filterOptions) -> Koine.Compiler.Services.CompileResult!
+Koine.Compiler.Services.KoineCompiler.Diagnose(string! source, string? file = null) -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Diagnostics.Diagnostic!>!
+Koine.Compiler.Services.KoineCompiler.DiagnoseWorkspace(Koine.Compiler.Services.KoineCompilation! compilation) -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Diagnostics.Diagnostic!>!
+Koine.Compiler.Services.KoineCompiler.DiagnoseWorkspace(System.Collections.Generic.IReadOnlyList<Koine.Compiler.Services.SourceFile>! files) -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Diagnostics.Diagnostic!>!
+Koine.Compiler.Services.KoineCompiler.KoineCompiler() -> void
+Koine.Compiler.Services.KoineCompiler.KoineCompiler(System.Collections.Generic.IReadOnlyList<Koine.Compiler.Semantics.IModelAnalyzer!>? externalAnalyzers) -> void
+Koine.Compiler.Services.KoineCompiler.Parse(System.Collections.Generic.IReadOnlyList<Koine.Compiler.Services.SourceFile>! files) -> (Koine.Compiler.Ast.KoineModel? Model, System.Collections.Generic.IReadOnlyList<Koine.Compiler.Diagnostics.Diagnostic!>! Diagnostics)
+Koine.Compiler.Services.KoineCompiler.Parse(string! source, string? file = null) -> (Koine.Compiler.Ast.KoineModel? Model, System.Collections.Generic.IReadOnlyList<Koine.Compiler.Diagnostics.Diagnostic!>! Diagnostics)
+Koine.Compiler.Services.KoineLanguageService
+Koine.Compiler.Services.KoineLanguageService.CodeLenses(Koine.Compiler.Services.KoineCompilation! compilation, string! activeUri) -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Services.CodeLens!>!
+Koine.Compiler.Services.KoineLanguageService.CodeLenses(System.Collections.Generic.IReadOnlyDictionary<string!, string!>! documents, string! activeUri) -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Services.CodeLens!>!
+Koine.Compiler.Services.KoineLanguageService.CompleteAt(string! source, int line, int character) -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Services.CompletionItem!>!
+Koine.Compiler.Services.KoineLanguageService.DefinitionAt(Koine.Compiler.Services.KoineCompilation! compilation, string! activeUri, int line, int character) -> Koine.Compiler.Services.DefinitionResult?
+Koine.Compiler.Services.KoineLanguageService.DefinitionAt(System.Collections.Generic.IReadOnlyDictionary<string!, string!>! documents, string! activeUri, int line, int character) -> Koine.Compiler.Services.DefinitionResult?
+Koine.Compiler.Services.KoineLanguageService.DocumentSymbols(string! source) -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Services.DocumentSymbol!>!
+Koine.Compiler.Services.KoineLanguageService.FoldingRanges(string! source) -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Services.FoldingRange!>!
+Koine.Compiler.Services.KoineLanguageService.HoverAt(Koine.Compiler.Services.KoineCompilation! compilation, string! activeUri, int line, int character) -> Koine.Compiler.Services.HoverResult?
+Koine.Compiler.Services.KoineLanguageService.HoverAt(System.Collections.Generic.IReadOnlyDictionary<string!, string!>! documents, string! activeUri, int line, int character) -> Koine.Compiler.Services.HoverResult?
+Koine.Compiler.Services.KoineLanguageService.KoineLanguageService() -> void
+Koine.Compiler.Services.KoineLanguageService.KoineLanguageService(Koine.Compiler.Services.KoineCompiler! compiler) -> void
+Koine.Compiler.Services.KoineLanguageService.NameAt(Koine.Compiler.Services.KoineCompilation! compilation, string! activeUri, int line, int character) -> string?
+Koine.Compiler.Services.KoineLanguageService.NameAt(System.Collections.Generic.IReadOnlyDictionary<string!, string!>! documents, string! activeUri, int line, int character) -> string?
+Koine.Compiler.Services.KoineLanguageService.PrepareRenameAt(Koine.Compiler.Services.KoineCompilation! compilation, string! activeUri, int line, int character) -> Koine.Compiler.Services.Reference?
+Koine.Compiler.Services.KoineLanguageService.PrepareRenameAt(System.Collections.Generic.IReadOnlyDictionary<string!, string!>! documents, string! activeUri, int line, int character) -> Koine.Compiler.Services.Reference?
+Koine.Compiler.Services.KoineLanguageService.RefactorsAt(System.Collections.Generic.IReadOnlyDictionary<string!, string!>! documents, string! activeUri, int startLine, int startChar, int endLine, int endChar) -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Services.CodeActionEdit!>!
+Koine.Compiler.Services.KoineLanguageService.ReferencesAt(Koine.Compiler.Services.KoineCompilation! compilation, string! activeUri, int line, int character) -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Services.Reference!>!
+Koine.Compiler.Services.KoineLanguageService.ReferencesAt(System.Collections.Generic.IReadOnlyDictionary<string!, string!>! documents, string! activeUri, int line, int character) -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Services.Reference!>!
+Koine.Compiler.Services.KoineLanguageService.RenameAt(Koine.Compiler.Services.KoineCompilation! compilation, string! activeUri, int line, int character, string! newName) -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Services.Reference!>?
+Koine.Compiler.Services.KoineLanguageService.RenameAt(System.Collections.Generic.IReadOnlyDictionary<string!, string!>! documents, string! activeUri, int line, int character, string! newName) -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Services.Reference!>?
+Koine.Compiler.Services.KoineLanguageService.SelectionRangeAt(string! source, int line, int character) -> Koine.Compiler.Services.SelectionRange?
+Koine.Compiler.Services.KoineLanguageService.SignatureHelpAt(Koine.Compiler.Services.KoineCompilation! compilation, string! activeUri, int line, int character) -> Koine.Compiler.Services.SignatureHelp?
+Koine.Compiler.Services.KoineLanguageService.SignatureHelpAt(System.Collections.Generic.IReadOnlyDictionary<string!, string!>! documents, string! activeUri, int line, int character) -> Koine.Compiler.Services.SignatureHelp?
+Koine.Compiler.Services.KoineLanguageService.WorkspaceSymbols(System.Collections.Generic.IReadOnlyDictionary<string!, string!>! documents, string! query) -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Services.WorkspaceSymbol!>!
+Koine.Compiler.Services.ParameterInfo
+Koine.Compiler.Services.ParameterInfo.Label.get -> string!
+Koine.Compiler.Services.ParameterInfo.Label.init -> void
+Koine.Compiler.Services.ParameterInfo.ParameterInfo(string! Label) -> void
+Koine.Compiler.Services.Reference
+Koine.Compiler.Services.Reference.EndColumn.get -> int
+Koine.Compiler.Services.Reference.EndColumn.init -> void
+Koine.Compiler.Services.Reference.Line.get -> int
+Koine.Compiler.Services.Reference.Line.init -> void
+Koine.Compiler.Services.Reference.Reference(string! Uri, int Line, int StartColumn, int EndColumn) -> void
+Koine.Compiler.Services.Reference.StartColumn.get -> int
+Koine.Compiler.Services.Reference.StartColumn.init -> void
+Koine.Compiler.Services.Reference.Uri.get -> string!
+Koine.Compiler.Services.Reference.Uri.init -> void
+Koine.Compiler.Services.SelectionRange
+Koine.Compiler.Services.SelectionRange.Parent.get -> Koine.Compiler.Services.SelectionRange?
+Koine.Compiler.Services.SelectionRange.Parent.init -> void
+Koine.Compiler.Services.SelectionRange.Range.get -> Koine.Compiler.Ast.SourceSpan
+Koine.Compiler.Services.SelectionRange.Range.init -> void
+Koine.Compiler.Services.SelectionRange.SelectionRange(Koine.Compiler.Ast.SourceSpan Range, Koine.Compiler.Services.SelectionRange? Parent) -> void
+Koine.Compiler.Services.SemanticToken
+Koine.Compiler.Services.SemanticToken.Length.get -> int
+Koine.Compiler.Services.SemanticToken.Length.init -> void
+Koine.Compiler.Services.SemanticToken.Line.get -> int
+Koine.Compiler.Services.SemanticToken.Line.init -> void
+Koine.Compiler.Services.SemanticToken.Modifiers.get -> int
+Koine.Compiler.Services.SemanticToken.Modifiers.init -> void
+Koine.Compiler.Services.SemanticToken.SemanticToken() -> void
+Koine.Compiler.Services.SemanticToken.SemanticToken(int Line, int StartChar, int Length, Koine.Compiler.Services.SemanticTokenType Type, int Modifiers) -> void
+Koine.Compiler.Services.SemanticToken.StartChar.get -> int
+Koine.Compiler.Services.SemanticToken.StartChar.init -> void
+Koine.Compiler.Services.SemanticToken.Type.get -> Koine.Compiler.Services.SemanticTokenType
+Koine.Compiler.Services.SemanticToken.Type.init -> void
+Koine.Compiler.Services.SemanticTokenModifier
+Koine.Compiler.Services.SemanticTokenModifier.Declaration = 0 -> Koine.Compiler.Services.SemanticTokenModifier
+Koine.Compiler.Services.SemanticTokenProvider
+Koine.Compiler.Services.SemanticTokenProvider.SemanticTokenProvider() -> void
+Koine.Compiler.Services.SemanticTokenProvider.SemanticTokenProvider(Koine.Compiler.Services.KoineCompiler! compiler) -> void
+Koine.Compiler.Services.SemanticTokenProvider.Tokenize(string! source) -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Services.SemanticToken>!
+Koine.Compiler.Services.SemanticTokenType
+Koine.Compiler.Services.SemanticTokenType.Enum = 1 -> Koine.Compiler.Services.SemanticTokenType
+Koine.Compiler.Services.SemanticTokenType.EnumMember = 2 -> Koine.Compiler.Services.SemanticTokenType
+Koine.Compiler.Services.SemanticTokenType.Keyword = 4 -> Koine.Compiler.Services.SemanticTokenType
+Koine.Compiler.Services.SemanticTokenType.Parameter = 5 -> Koine.Compiler.Services.SemanticTokenType
+Koine.Compiler.Services.SemanticTokenType.Property = 3 -> Koine.Compiler.Services.SemanticTokenType
+Koine.Compiler.Services.SemanticTokenType.Type = 0 -> Koine.Compiler.Services.SemanticTokenType
+Koine.Compiler.Services.SetDocEditor
+Koine.Compiler.Services.SignatureHelp
+Koine.Compiler.Services.SignatureHelp.ActiveParameter.get -> int
+Koine.Compiler.Services.SignatureHelp.ActiveParameter.init -> void
+Koine.Compiler.Services.SignatureHelp.ActiveSignature.get -> int
+Koine.Compiler.Services.SignatureHelp.ActiveSignature.init -> void
+Koine.Compiler.Services.SignatureHelp.SignatureHelp(System.Collections.Generic.IReadOnlyList<Koine.Compiler.Services.SignatureInfo!>! Signatures, int ActiveSignature, int ActiveParameter) -> void
+Koine.Compiler.Services.SignatureHelp.Signatures.get -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Services.SignatureInfo!>!
+Koine.Compiler.Services.SignatureHelp.Signatures.init -> void
+Koine.Compiler.Services.SignatureInfo
+Koine.Compiler.Services.SignatureInfo.Label.get -> string!
+Koine.Compiler.Services.SignatureInfo.Label.init -> void
+Koine.Compiler.Services.SignatureInfo.Parameters.get -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Services.ParameterInfo!>!
+Koine.Compiler.Services.SignatureInfo.Parameters.init -> void
+Koine.Compiler.Services.SignatureInfo.SignatureInfo(string! Label, System.Collections.Generic.IReadOnlyList<Koine.Compiler.Services.ParameterInfo!>! Parameters) -> void
+Koine.Compiler.Services.SourceFile
+Koine.Compiler.Services.SourceFile.Path.get -> string!
+Koine.Compiler.Services.SourceFile.Path.init -> void
+Koine.Compiler.Services.SourceFile.Source.get -> string!
+Koine.Compiler.Services.SourceFile.Source.init -> void
+Koine.Compiler.Services.SourceFile.SourceFile() -> void
+Koine.Compiler.Services.SourceFile.SourceFile(string! Path, string! Source) -> void
+Koine.Compiler.Services.SymbolKind
+Koine.Compiler.Services.SymbolKind.Class = 1 -> Koine.Compiler.Services.SymbolKind
+Koine.Compiler.Services.SymbolKind.Constructor = 6 -> Koine.Compiler.Services.SymbolKind
+Koine.Compiler.Services.SymbolKind.Enum = 2 -> Koine.Compiler.Services.SymbolKind
+Koine.Compiler.Services.SymbolKind.EnumMember = 3 -> Koine.Compiler.Services.SymbolKind
+Koine.Compiler.Services.SymbolKind.Field = 4 -> Koine.Compiler.Services.SymbolKind
+Koine.Compiler.Services.SymbolKind.Interface = 7 -> Koine.Compiler.Services.SymbolKind
+Koine.Compiler.Services.SymbolKind.Method = 5 -> Koine.Compiler.Services.SymbolKind
+Koine.Compiler.Services.SymbolKind.Namespace = 0 -> Koine.Compiler.Services.SymbolKind
+Koine.Compiler.Services.SymbolKind.Struct = 8 -> Koine.Compiler.Services.SymbolKind
+Koine.Compiler.Services.TextEditModel
+Koine.Compiler.Services.TextEditModel.NewText.get -> string!
+Koine.Compiler.Services.TextEditModel.NewText.init -> void
+Koine.Compiler.Services.TextEditModel.Range.get -> Koine.Compiler.Ast.SourceSpan
+Koine.Compiler.Services.TextEditModel.Range.init -> void
+Koine.Compiler.Services.TextEditModel.TextEditModel(Koine.Compiler.Ast.SourceSpan Range, string! NewText) -> void
+Koine.Compiler.Services.WorkspaceIndex
+Koine.Compiler.Services.WorkspaceIndex.FindReferences(string! activeUri, string! name, int? offset = null, string? enclosingType = null) -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Services.Reference!>!
+Koine.Compiler.Services.WorkspaceIndex.IsRenameableName(string! activeUri, string! name) -> bool
+Koine.Compiler.Services.WorkspaceIndex.ResolveDefinition(string! activeUri, string! name, string? enclosingType = null, int? offset = null) -> Koine.Compiler.Services.DeclLocation?
+Koine.Compiler.Services.WorkspaceIndex.ResolveHover(string! activeUri, string! name, string? enclosingType = null) -> string?
+Koine.Compiler.Services.WorkspaceIndex.WorkspaceIndex(Koine.Compiler.Services.KoineCompilation! compilation) -> void
+Koine.Compiler.Services.WorkspaceIndex.WorkspaceIndex(System.Collections.Generic.IReadOnlyDictionary<string!, string!>! documents) -> void
+Koine.Compiler.Services.WorkspaceIndex.WouldCollide(string! activeUri, string! name, int? offset, string? enclosingType, string! newName) -> bool
+Koine.Compiler.Services.WorkspaceSymbol
+Koine.Compiler.Services.WorkspaceSymbol.ContainerName.get -> string?
+Koine.Compiler.Services.WorkspaceSymbol.ContainerName.init -> void
+Koine.Compiler.Services.WorkspaceSymbol.Kind.get -> Koine.Compiler.Services.SymbolKind
+Koine.Compiler.Services.WorkspaceSymbol.Kind.init -> void
+Koine.Compiler.Services.WorkspaceSymbol.Name.get -> string!
+Koine.Compiler.Services.WorkspaceSymbol.Name.init -> void
+Koine.Compiler.Services.WorkspaceSymbol.Range.get -> Koine.Compiler.Ast.SourceSpan
+Koine.Compiler.Services.WorkspaceSymbol.Range.init -> void
+Koine.Compiler.Services.WorkspaceSymbol.Uri.get -> string!
+Koine.Compiler.Services.WorkspaceSymbol.Uri.init -> void
+Koine.Compiler.Services.WorkspaceSymbol.WorkspaceSymbol(string! Name, Koine.Compiler.Services.SymbolKind Kind, string! Uri, Koine.Compiler.Ast.SourceSpan Range, string? ContainerName) -> void
+abstract Koine.Compiler.Ast.ExprVisitor<T>.VisitBinary(Koine.Compiler.Ast.BinaryExpr! n) -> T
+abstract Koine.Compiler.Ast.ExprVisitor<T>.VisitCall(Koine.Compiler.Ast.CallExpr! n) -> T
+abstract Koine.Compiler.Ast.ExprVisitor<T>.VisitCoalesce(Koine.Compiler.Ast.CoalesceExpr! n) -> T
+abstract Koine.Compiler.Ast.ExprVisitor<T>.VisitConditional(Koine.Compiler.Ast.ConditionalExpr! n) -> T
+abstract Koine.Compiler.Ast.ExprVisitor<T>.VisitGuard(Koine.Compiler.Ast.GuardExpr! n) -> T
+abstract Koine.Compiler.Ast.ExprVisitor<T>.VisitIdentifier(Koine.Compiler.Ast.IdentifierExpr! n) -> T
+abstract Koine.Compiler.Ast.ExprVisitor<T>.VisitLambda(Koine.Compiler.Ast.LambdaExpr! n) -> T
+abstract Koine.Compiler.Ast.ExprVisitor<T>.VisitLet(Koine.Compiler.Ast.LetExpr! n) -> T
+abstract Koine.Compiler.Ast.ExprVisitor<T>.VisitLiteral(Koine.Compiler.Ast.LiteralExpr! n) -> T
+abstract Koine.Compiler.Ast.ExprVisitor<T>.VisitMatch(Koine.Compiler.Ast.MatchExpr! n) -> T
+abstract Koine.Compiler.Ast.ExprVisitor<T>.VisitMemberAccess(Koine.Compiler.Ast.MemberAccessExpr! n) -> T
+abstract Koine.Compiler.Ast.ExprVisitor<T>.VisitUnary(Koine.Compiler.Ast.UnaryExpr! n) -> T
+abstract Koine.Compiler.Ast.KoineType.IsOptional.get -> bool
+abstract Koine.Compiler.Ast.KoineType.Kind.get -> Koine.Compiler.Ast.TypeKind
+abstract Koine.Compiler.Ast.KoineType.WithOptional(bool optional) -> Koine.Compiler.Ast.KoineType!
+abstract Koine.Compiler.Ast.Symbol.Kind.get -> Koine.Compiler.Ast.SymbolKind
+const Koine.Compiler.Ast.ModelIndex.ListTypeName = "List" -> string!
+const Koine.Compiler.Ast.ModelIndex.MapTypeName = "Map" -> string!
+const Koine.Compiler.Ast.ModelIndex.RangeTypeName = "Range" -> string!
+const Koine.Compiler.Ast.ModelIndex.SetTypeName = "Set" -> string!
+const Koine.Compiler.Diagnostics.DiagnosticCodes.AclDirectUpstreamReference = "KOI1404" -> string!
+const Koine.Compiler.Diagnostics.DiagnosticCodes.AclMappingType = "KOI1408" -> string!
+const Koine.Compiler.Diagnostics.DiagnosticCodes.AclOnNonAclRole = "KOI1407" -> string!
+const Koine.Compiler.Diagnostics.DiagnosticCodes.AggregateSelector = "KOI0212" -> string!
+const Koine.Compiler.Diagnostics.DiagnosticCodes.AmbiguousEnumMember = "KOI0213" -> string!
+const Koine.Compiler.Diagnostics.DiagnosticCodes.AmbiguousReference = "KOI1304" -> string!
+const Koine.Compiler.Diagnostics.DiagnosticCodes.AnnotationVersionAboveContext = "KOI1501" -> string!
+const Koine.Compiler.Diagnostics.DiagnosticCodes.BoundOutsideConstraint = "KOI0312" -> string!
+const Koine.Compiler.Diagnostics.DiagnosticCodes.CollectionOperationOnNonCollection = "KOI0207" -> string!
+const Koine.Compiler.Diagnostics.DiagnosticCodes.CommandNameCollision = "KOI0505" -> string!
+const Koine.Compiler.Diagnostics.DiagnosticCodes.CommandResultMismatch = "KOI0508" -> string!
+const Koine.Compiler.Diagnostics.DiagnosticCodes.ContextMapUnknownContext = "KOI1401" -> string!
+const Koine.Compiler.Diagnostics.DiagnosticCodes.ContradictoryInvariant = "KOI0310" -> string!
+const Koine.Compiler.Diagnostics.DiagnosticCodes.DuplicateCommand = "KOI0503" -> string!
+const Koine.Compiler.Diagnostics.DiagnosticCodes.DuplicateContextRelation = "KOI1402" -> string!
+const Koine.Compiler.Diagnostics.DiagnosticCodes.DuplicateEnumMember = "KOI0104" -> string!
+const Koine.Compiler.Diagnostics.DiagnosticCodes.DuplicateFactory = "KOI0801" -> string!
+const Koine.Compiler.Diagnostics.DiagnosticCodes.DuplicateFinder = "KOI1104" -> string!
+const Koine.Compiler.Diagnostics.DiagnosticCodes.DuplicateInitialization = "KOI0805" -> string!
+const Koine.Compiler.Diagnostics.DiagnosticCodes.DuplicateLetBinding = "KOI0214" -> string!
+const Koine.Compiler.Diagnostics.DiagnosticCodes.DuplicateMember = "KOI0103" -> string!
+const Koine.Compiler.Diagnostics.DiagnosticCodes.DuplicateOperation = "KOI1021" -> string!
+const Koine.Compiler.Diagnostics.DiagnosticCodes.DuplicateParameter = "KOI0504" -> string!
+const Koine.Compiler.Diagnostics.DiagnosticCodes.DuplicatePolicy = "KOI1035" -> string!
+const Koine.Compiler.Diagnostics.DiagnosticCodes.DuplicatePublish = "KOI1411" -> string!
+const Koine.Compiler.Diagnostics.DiagnosticCodes.DuplicateReadModelField = "KOI1205" -> string!
+const Koine.Compiler.Diagnostics.DiagnosticCodes.DuplicateService = "KOI1022" -> string!
+const Koine.Compiler.Diagnostics.DiagnosticCodes.DuplicateSpec = "KOI1005" -> string!
+const Koine.Compiler.Diagnostics.DiagnosticCodes.DuplicateStatesBlock = "KOI0704" -> string!
+const Koine.Compiler.Diagnostics.DiagnosticCodes.DuplicateSubscribe = "KOI1415" -> string!
+const Koine.Compiler.Diagnostics.DiagnosticCodes.DuplicateType = "KOI0102" -> string!
+const Koine.Compiler.Diagnostics.DiagnosticCodes.DuplicateUseCase = "KOI1201" -> string!
+const Koine.Compiler.Diagnostics.DiagnosticCodes.EmitOutsideRoot = "KOI0604" -> string!
+const Koine.Compiler.Diagnostics.DiagnosticCodes.EmitPayloadMismatch = "KOI0602" -> string!
+const Koine.Compiler.Diagnostics.DiagnosticCodes.EnumAssociatedFieldType = "KOI0909" -> string!
+const Koine.Compiler.Diagnostics.DiagnosticCodes.EnumMemberArgType = "KOI0902" -> string!
+const Koine.Compiler.Diagnostics.DiagnosticCodes.EnumMemberArity = "KOI0901" -> string!
+const Koine.Compiler.Diagnostics.DiagnosticCodes.EnumMemberCamelCaseCollision = "KOI0911" -> string!
+const Koine.Compiler.Diagnostics.DiagnosticCodes.EnumReservedAssociatedField = "KOI0903" -> string!
+const Koine.Compiler.Diagnostics.DiagnosticCodes.FactoryNameCollision = "KOI0802" -> string!
+const Koine.Compiler.Diagnostics.DiagnosticCodes.FinderNameCollision = "KOI1106" -> string!
+const Koine.Compiler.Diagnostics.DiagnosticCodes.FinderResultType = "KOI1103" -> string!
+const Koine.Compiler.Diagnostics.DiagnosticCodes.GenericArity = "KOI0107" -> string!
+const Koine.Compiler.Diagnostics.DiagnosticCodes.IncomparableTypes = "KOI0210" -> string!
+const Koine.Compiler.Diagnostics.DiagnosticCodes.IncompatibleConditionalBranches = "KOI0209" -> string!
+const Koine.Compiler.Diagnostics.DiagnosticCodes.InitializationTypeMismatch = "KOI0804" -> string!
+const Koine.Compiler.Diagnostics.DiagnosticCodes.IntegrationEventLeaksInternals = "KOI1409" -> string!
+const Koine.Compiler.Diagnostics.DiagnosticCodes.InvalidInitializationTarget = "KOI0803" -> string!
+const Koine.Compiler.Diagnostics.DiagnosticCodes.InvalidStatesBinding = "KOI0701" -> string!
+const Koine.Compiler.Diagnostics.DiagnosticCodes.InvalidTransitionTarget = "KOI0501" -> string!
+const Koine.Compiler.Diagnostics.DiagnosticCodes.InvertedBound = "KOI0311" -> string!
+const Koine.Compiler.Diagnostics.DiagnosticCodes.MissingCommandResult = "KOI0507" -> string!
+const Koine.Compiler.Diagnostics.DiagnosticCodes.ModuleNameCollision = "KOI1305" -> string!
+const Koine.Compiler.Diagnostics.DiagnosticCodes.NaturalIdBackingType = "KOI1101" -> string!
+const Koine.Compiler.Diagnostics.DiagnosticCodes.NotExported = "KOI1302" -> string!
+const Koine.Compiler.Diagnostics.DiagnosticCodes.NowAsStoredDefault = "KOI0301" -> string!
+const Koine.Compiler.Diagnostics.DiagnosticCodes.OperationArgument = "KOI0208" -> string!
+const Koine.Compiler.Diagnostics.DiagnosticCodes.OptionalAssignedToNonOptional = "KOI0401" -> string!
+const Koine.Compiler.Diagnostics.DiagnosticCodes.OptionalDereference = "KOI0402" -> string!
+const Koine.Compiler.Diagnostics.DiagnosticCodes.PolicyArgMismatch = "KOI1033" -> string!
+const Koine.Compiler.Diagnostics.DiagnosticCodes.PolicyArgType = "KOI1034" -> string!
+const Koine.Compiler.Diagnostics.DiagnosticCodes.PolicyUnknownCommand = "KOI1032" -> string!
+const Koine.Compiler.Diagnostics.DiagnosticCodes.PolicyUnknownEvent = "KOI1030" -> string!
+const Koine.Compiler.Diagnostics.DiagnosticCodes.PolicyUnknownTarget = "KOI1031" -> string!
+const Koine.Compiler.Diagnostics.DiagnosticCodes.PresenceOnNonOptional = "KOI0403" -> string!
+const Koine.Compiler.Diagnostics.DiagnosticCodes.PublishedEnumMemberRemoved = "KOI1516" -> string!
+const Koine.Compiler.Diagnostics.DiagnosticCodes.PublishedEventShapeChanged = "KOI1517" -> string!
+const Koine.Compiler.Diagnostics.DiagnosticCodes.PublishedFieldNowRequired = "KOI1513" -> string!
+const Koine.Compiler.Diagnostics.DiagnosticCodes.PublishedFieldRemoved = "KOI1511" -> string!
+const Koine.Compiler.Diagnostics.DiagnosticCodes.PublishedFieldTypeChanged = "KOI1512" -> string!
+const Koine.Compiler.Diagnostics.DiagnosticCodes.PublishedMemberRenamed = "KOI1515" -> string!
+const Koine.Compiler.Diagnostics.DiagnosticCodes.PublishedRequiredFieldAdded = "KOI1514" -> string!
+const Koine.Compiler.Diagnostics.DiagnosticCodes.PublishedTypeRemoved = "KOI1510" -> string!
+const Koine.Compiler.Diagnostics.DiagnosticCodes.QuantityAmountCardinality = "KOI0905" -> string!
+const Koine.Compiler.Diagnostics.DiagnosticCodes.QuantityMemberNotAllowed = "KOI0906" -> string!
+const Koine.Compiler.Diagnostics.DiagnosticCodes.QuantityUnitCardinality = "KOI0904" -> string!
+const Koine.Compiler.Diagnostics.DiagnosticCodes.QueryResultNotReadModel = "KOI1206" -> string!
+const Koine.Compiler.Diagnostics.DiagnosticCodes.RangeNotOrderable = "KOI0907" -> string!
+const Koine.Compiler.Diagnostics.DiagnosticCodes.ReadModelFieldTypeMismatch = "KOI1204" -> string!
+const Koine.Compiler.Diagnostics.DiagnosticCodes.ReadModelUnknownField = "KOI1203" -> string!
+const Koine.Compiler.Diagnostics.DiagnosticCodes.ReadModelUnknownSource = "KOI1202" -> string!
+const Koine.Compiler.Diagnostics.DiagnosticCodes.RelationalOnNonOrderable = "KOI0211" -> string!
+const Koine.Compiler.Diagnostics.DiagnosticCodes.ReservedEnumMember = "KOI0910" -> string!
+const Koine.Compiler.Diagnostics.DiagnosticCodes.ReservedEventField = "KOI0603" -> string!
+const Koine.Compiler.Diagnostics.DiagnosticCodes.ReservedFactoryParameter = "KOI0807" -> string!
+const Koine.Compiler.Diagnostics.DiagnosticCodes.ReservedFinderParameter = "KOI1107" -> string!
+const Koine.Compiler.Diagnostics.DiagnosticCodes.ReservedGeneratedMember = "KOI0108" -> string!
+const Koine.Compiler.Diagnostics.DiagnosticCodes.ReservedRecordMember = "KOI1207" -> string!
+const Koine.Compiler.Diagnostics.DiagnosticCodes.ReservedTypeName = "KOI0908" -> string!
+const Koine.Compiler.Diagnostics.DiagnosticCodes.ReservedVersionMember = "KOI1105" -> string!
+const Koine.Compiler.Diagnostics.DiagnosticCodes.ReservedWordInDeclarationName = "KOI0002" -> string!
+const Koine.Compiler.Diagnostics.DiagnosticCodes.ResultWithoutReturnType = "KOI0506" -> string!
+const Koine.Compiler.Diagnostics.DiagnosticCodes.SelfRelation = "KOI1403" -> string!
+const Koine.Compiler.Diagnostics.DiagnosticCodes.ServiceReturnMismatch = "KOI1020" -> string!
+const Koine.Compiler.Diagnostics.DiagnosticCodes.SharedKernelNotShareable = "KOI1418" -> string!
+const Koine.Compiler.Diagnostics.DiagnosticCodes.SharedKernelTypeConflict = "KOI1416" -> string!
+const Koine.Compiler.Diagnostics.DiagnosticCodes.SharedTypesOnNonKernel = "KOI1405" -> string!
+const Koine.Compiler.Diagnostics.DiagnosticCodes.SpecCycle = "KOI1003" -> string!
+const Koine.Compiler.Diagnostics.DiagnosticCodes.SpecNotBoolean = "KOI1004" -> string!
+const Koine.Compiler.Diagnostics.DiagnosticCodes.SpecTargetMismatch = "KOI1002" -> string!
+const Koine.Compiler.Diagnostics.DiagnosticCodes.SpecUnknownTarget = "KOI1001" -> string!
+const Koine.Compiler.Diagnostics.DiagnosticCodes.StringOperationOnNonString = "KOI0206" -> string!
+const Koine.Compiler.Diagnostics.DiagnosticCodes.SubscribeHandlerNameCollision = "KOI1417" -> string!
+const Koine.Compiler.Diagnostics.DiagnosticCodes.SubscribeNoRelation = "KOI1414" -> string!
+const Koine.Compiler.Diagnostics.DiagnosticCodes.SubscribeNotPublished = "KOI1413" -> string!
+const Koine.Compiler.Diagnostics.DiagnosticCodes.SubscribeUnknownContext = "KOI1412" -> string!
+const Koine.Compiler.Diagnostics.DiagnosticCodes.SyntaxError = "KOI0001" -> string!
+const Koine.Compiler.Diagnostics.DiagnosticCodes.TransitionTypeMismatch = "KOI0502" -> string!
+const Koine.Compiler.Diagnostics.DiagnosticCodes.UnimportedReference = "KOI1303" -> string!
+const Koine.Compiler.Diagnostics.DiagnosticCodes.UninitializedFactoryField = "KOI0806" -> string!
+const Koine.Compiler.Diagnostics.DiagnosticCodes.UnknownAggregateRoot = "KOI0105" -> string!
+const Koine.Compiler.Diagnostics.DiagnosticCodes.UnknownCollectionOperation = "KOI0204" -> string!
+const Koine.Compiler.Diagnostics.DiagnosticCodes.UnknownContext = "KOI1301" -> string!
+const Koine.Compiler.Diagnostics.DiagnosticCodes.UnknownEnumMemberForType = "KOI0106" -> string!
+const Koine.Compiler.Diagnostics.DiagnosticCodes.UnknownEvent = "KOI0601" -> string!
+const Koine.Compiler.Diagnostics.DiagnosticCodes.UnknownField = "KOI0201" -> string!
+const Koine.Compiler.Diagnostics.DiagnosticCodes.UnknownMember = "KOI0202" -> string!
+const Koine.Compiler.Diagnostics.DiagnosticCodes.UnknownOperation = "KOI0205" -> string!
+const Koine.Compiler.Diagnostics.DiagnosticCodes.UnknownPublishedEvent = "KOI1410" -> string!
+const Koine.Compiler.Diagnostics.DiagnosticCodes.UnknownRepositoryOperation = "KOI1102" -> string!
+const Koine.Compiler.Diagnostics.DiagnosticCodes.UnknownSharedKernelType = "KOI1406" -> string!
+const Koine.Compiler.Diagnostics.DiagnosticCodes.UnknownState = "KOI0702" -> string!
+const Koine.Compiler.Diagnostics.DiagnosticCodes.UnknownStringOperation = "KOI0203" -> string!
+const Koine.Compiler.Diagnostics.DiagnosticCodes.UnknownType = "KOI0101" -> string!
+const Koine.Compiler.Diagnostics.DiagnosticCodes.UnreachableTransition = "KOI0703" -> string!
+const Koine.Compiler.Diagnostics.DiagnosticCodes.UnsatisfiableInvariantPair = "KOI0313" -> string!
+const Koine.Compiler.Emit.Glossary.GlossaryEmitter.FileName = "glossary.md" -> string!
+override Koine.Compiler.Ast.CollectionType.Element.get -> Koine.Compiler.Ast.KoineType?
+override Koine.Compiler.Ast.CollectionType.IsOptional.get -> bool
+override Koine.Compiler.Ast.CollectionType.Kind.get -> Koine.Compiler.Ast.TypeKind
+override Koine.Compiler.Ast.CollectionType.Value.get -> Koine.Compiler.Ast.KoineType?
+override Koine.Compiler.Ast.CollectionType.WithOptional(bool optional) -> Koine.Compiler.Ast.KoineType!
+override Koine.Compiler.Ast.ContextSymbol.Kind.get -> Koine.Compiler.Ast.SymbolKind
+override Koine.Compiler.Ast.EnumMemberSymbol.Kind.get -> Koine.Compiler.Ast.SymbolKind
+override Koine.Compiler.Ast.ErrorSymbol.Kind.get -> Koine.Compiler.Ast.SymbolKind
+override Koine.Compiler.Ast.ErrorType.IsOptional.get -> bool
+override Koine.Compiler.Ast.ErrorType.Kind.get -> Koine.Compiler.Ast.TypeKind
+override Koine.Compiler.Ast.ErrorType.WithOptional(bool optional) -> Koine.Compiler.Ast.KoineType!
+override Koine.Compiler.Ast.IdValueObjectSymbol.Kind.get -> Koine.Compiler.Ast.SymbolKind
+override Koine.Compiler.Ast.LambdaParameterSymbol.Kind.get -> Koine.Compiler.Ast.SymbolKind
+override Koine.Compiler.Ast.LocalSymbol.Kind.get -> Koine.Compiler.Ast.SymbolKind
+override Koine.Compiler.Ast.MemberSymbol.Kind.get -> Koine.Compiler.Ast.SymbolKind
+override Koine.Compiler.Ast.NamedType.IsOptional.get -> bool
+override Koine.Compiler.Ast.NamedType.Kind.get -> Koine.Compiler.Ast.TypeKind
+override Koine.Compiler.Ast.NamedType.Name.get -> string?
+override Koine.Compiler.Ast.NamedType.Qualifier.get -> string?
+override Koine.Compiler.Ast.NamedType.WithOptional(bool optional) -> Koine.Compiler.Ast.KoineType!
+override Koine.Compiler.Ast.ParameterSymbol.Kind.get -> Koine.Compiler.Ast.SymbolKind
+override Koine.Compiler.Ast.PrimitiveType.IsOptional.get -> bool
+override Koine.Compiler.Ast.PrimitiveType.Kind.get -> Koine.Compiler.Ast.TypeKind
+override Koine.Compiler.Ast.PrimitiveType.Name.get -> string?
+override Koine.Compiler.Ast.PrimitiveType.WithOptional(bool optional) -> Koine.Compiler.Ast.KoineType!
+override Koine.Compiler.Ast.SpecSymbol.Kind.get -> Koine.Compiler.Ast.SymbolKind
+override Koine.Compiler.Ast.TypeSymbol.Kind.get -> Koine.Compiler.Ast.SymbolKind
+override Koine.Compiler.Diagnostics.Diagnostic.ToString() -> string!
+static Koine.Compiler.Ast.AstExtensions.AllEntities(this Koine.Compiler.Ast.ContextNode! ctx) -> System.Collections.Generic.IEnumerable<Koine.Compiler.Ast.EntityDecl!>!
+static Koine.Compiler.Ast.AstExtensions.AllTypeDecls(this Koine.Compiler.Ast.ContextNode! ctx) -> System.Collections.Generic.IEnumerable<Koine.Compiler.Ast.TypeDecl!>!
+static Koine.Compiler.Ast.AstExtensions.RootEntity(this Koine.Compiler.Ast.AggregateDecl! agg) -> Koine.Compiler.Ast.EntityDecl?
+static Koine.Compiler.Ast.BuiltinOps.IsCallOp(string! name) -> bool
+static Koine.Compiler.Ast.BuiltinOps.IsMemberOp(string! name) -> bool
+static Koine.Compiler.Ast.BuiltinOps.IsNullaryValueOp(string! name) -> bool
+static Koine.Compiler.Ast.BuiltinOps.IsOrderable(string! typeName) -> bool
+static Koine.Compiler.Ast.BuiltinOps.TakesLambda(string! name) -> bool
+static Koine.Compiler.Ast.KoineType.From(Koine.Compiler.Ast.TypeRef? tr, Koine.Compiler.Ast.ModelIndex! index) -> Koine.Compiler.Ast.KoineType!
+static Koine.Compiler.Ast.MemberAnalysis.AutoBinds(Koine.Compiler.Ast.Param! param, Koine.Compiler.Ast.Member! member) -> bool
+static Koine.Compiler.Ast.MemberAnalysis.IsAssignable(Koine.Compiler.Ast.TypeRef! value, Koine.Compiler.Ast.TypeRef! target) -> bool
+static Koine.Compiler.Ast.MemberAnalysis.IsDerived(Koine.Compiler.Ast.Member! member, System.Collections.Generic.IEnumerable<string!>! siblingMemberNames) -> bool
+static Koine.Compiler.Ast.MemberAnalysis.ReferencedIdentifiers(Koine.Compiler.Ast.Expr! expr) -> System.Collections.Generic.IEnumerable<string!>!
+static Koine.Compiler.Ast.MemberAnalysis.TypeShapeEquals(Koine.Compiler.Ast.TypeRef! a, Koine.Compiler.Ast.TypeRef! b) -> bool
+static Koine.Compiler.Ast.ModelIndex.AllTypeRefsIn(Koine.Compiler.Ast.ContextNode! ctx) -> System.Collections.Generic.IEnumerable<Koine.Compiler.Ast.TypeRef!>!
+static Koine.Compiler.Ast.ModelIndex.IsIdConvention(string! name) -> bool
+static Koine.Compiler.Ast.ModelIndex.KernelNamespaceOf(string! a, string! b) -> string!
+static Koine.Compiler.Ast.ModelIndex.NamespaceOf(string! context, System.Collections.Generic.IReadOnlyList<string!>! modulePath) -> string!
+static Koine.Compiler.Ast.TypeResolver.ElementOf(Koine.Compiler.Ast.TypeRef? type) -> Koine.Compiler.Ast.TypeRef?
+static Koine.Compiler.Ast.TypeResolver.IsNumeric(Koine.Compiler.Ast.TypeRef? t) -> bool
+static Koine.Compiler.Ast.TypeScope.FromMembers(System.Collections.Generic.IEnumerable<Koine.Compiler.Ast.Member!>! members, Koine.Compiler.Ast.ModelIndex! index) -> Koine.Compiler.Ast.TypeScope!
+static Koine.Compiler.Ast.TypeScope.FromParams(System.Collections.Generic.IEnumerable<Koine.Compiler.Ast.Param!>! parameters, Koine.Compiler.Ast.ModelIndex! index) -> Koine.Compiler.Ast.TypeScope!
+static Koine.Compiler.Ast.TypeScope.FromRefPairs(System.Collections.Generic.IEnumerable<System.Collections.Generic.KeyValuePair<string!, Koine.Compiler.Ast.TypeRef!>>! pairs, Koine.Compiler.Ast.ModelIndex! index) -> Koine.Compiler.Ast.TypeScope!
+static Koine.Compiler.CodeFixes.CodeFixService.DefaultProviders() -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.CodeFixes.ICodeFixProvider!>!
+static Koine.Compiler.Diagnostics.Diagnostic.Error(string! code, string! message, Koine.Compiler.Ast.SourceSpan span) -> Koine.Compiler.Diagnostics.Diagnostic!
+static Koine.Compiler.Diagnostics.Diagnostic.Error(string! code, string! message, int line, int column) -> Koine.Compiler.Diagnostics.Diagnostic!
+static Koine.Compiler.Diagnostics.Diagnostic.FromSpan(Koine.Compiler.Diagnostics.DiagnosticSeverity severity, string! code, string! message, Koine.Compiler.Ast.SourceSpan span) -> Koine.Compiler.Diagnostics.Diagnostic!
+static Koine.Compiler.Diagnostics.Diagnostic.FromSpan(string! code, string! message, Koine.Compiler.Ast.SourceSpan span) -> Koine.Compiler.Diagnostics.Diagnostic!
+static Koine.Compiler.Diagnostics.Diagnostic.Warning(string! code, string! message, Koine.Compiler.Ast.SourceSpan span) -> Koine.Compiler.Diagnostics.Diagnostic!
+static Koine.Compiler.Diagnostics.Diagnostic.Warning(string! code, string! message, int line, int column) -> Koine.Compiler.Diagnostics.Diagnostic!
+static Koine.Compiler.Diagnostics.DiagnosticFilter.Apply(System.Collections.Generic.IReadOnlyList<Koine.Compiler.Diagnostics.Diagnostic!>! diagnostics, Koine.Compiler.Diagnostics.DiagnosticFilterOptions! options, System.Collections.Generic.IReadOnlyList<(string? File, string! Source)>! sources) -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Diagnostics.Diagnostic!>!
+static Koine.Compiler.Diagnostics.DiagnosticFilter.Apply(System.Collections.Generic.IReadOnlyList<Koine.Compiler.Diagnostics.Diagnostic!>! diagnostics, Koine.Compiler.Diagnostics.DiagnosticFilterOptions! options, string! source, string? file = null) -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Diagnostics.Diagnostic!>!
+static Koine.Compiler.Emit.EmitterLoader.Load(System.Collections.Generic.IReadOnlyList<string!>? assemblyPaths) -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Emit.IEmitterProvider!>!
+static Koine.Compiler.Emit.Glossary.GlossaryModelBuilder.Build(Koine.Compiler.Ast.KoineModel! model) -> Koine.Compiler.Emit.Glossary.GlossaryModel!
+static Koine.Compiler.Parsing.TokenGeometry.EndLineOf(Antlr4.Runtime.IToken! token) -> int
+static Koine.Compiler.Parsing.TokenGeometry.NewlineCount(string? text) -> int
+static Koine.Compiler.Parsing.TokenGeometry.SpanOf(Antlr4.Runtime.IToken! start, Antlr4.Runtime.IToken! stop, string? file) -> Koine.Compiler.Ast.SourceSpan
+static Koine.Compiler.Parsing.TokenGeometry.SpanOf(Antlr4.Runtime.IToken! token, string? file) -> Koine.Compiler.Ast.SourceSpan
+static Koine.Compiler.Semantics.AnalyzerLoader.Load(System.Collections.Generic.IReadOnlyList<string!>? assemblyPaths) -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Semantics.IModelAnalyzer!>!
+static Koine.Compiler.Semantics.SemanticValidator.RootIdentifier(Koine.Compiler.Ast.Expr! expr) -> Koine.Compiler.Ast.IdentifierExpr?
+static Koine.Compiler.Services.KoineCompilation.Create(System.Collections.Generic.IReadOnlyList<Koine.Compiler.Services.SourceFile>! files) -> Koine.Compiler.Services.KoineCompilation!
+static Koine.Compiler.Services.KoineLanguageService.OffsetOf(string! source, int line, int character) -> int
+static Koine.Compiler.Services.SemanticTokenProvider.Encode(System.Collections.Generic.IReadOnlyList<Koine.Compiler.Services.SemanticToken>! tokens) -> System.Collections.Generic.IReadOnlyList<int>!
+static Koine.Compiler.Services.SetDocEditor.Build(Koine.Compiler.Ast.KoineModel! model, System.Collections.Generic.IReadOnlyList<Koine.Compiler.Services.SourceFile>! files, string! id, string! description) -> Koine.Compiler.Services.DocEditResult!
+static Koine.Compiler.Services.WorkspaceIndex.IsValidIdentifier(string! name) -> bool
+static readonly Koine.Compiler.Ast.BuiltinOps.CollectionAggregateOps -> System.Collections.Generic.IReadOnlySet<string!>!
+static readonly Koine.Compiler.Ast.BuiltinOps.CollectionElementCallOps -> System.Collections.Generic.IReadOnlySet<string!>!
+static readonly Koine.Compiler.Ast.BuiltinOps.CollectionMemberOps -> System.Collections.Generic.IReadOnlySet<string!>!
+static readonly Koine.Compiler.Ast.BuiltinOps.CollectionPredicateOps -> System.Collections.Generic.IReadOnlySet<string!>!
+static readonly Koine.Compiler.Ast.BuiltinOps.NullaryValueOps -> System.Collections.Generic.IReadOnlyDictionary<string!, string!>!
+static readonly Koine.Compiler.Ast.BuiltinOps.OptionalMemberOps -> System.Collections.Generic.IReadOnlySet<string!>!
+static readonly Koine.Compiler.Ast.BuiltinOps.StringCallOps -> System.Collections.Generic.IReadOnlySet<string!>!
+static readonly Koine.Compiler.Ast.BuiltinOps.StringMemberOps -> System.Collections.Generic.IReadOnlySet<string!>!
+static readonly Koine.Compiler.Ast.ErrorSymbol.Instance -> Koine.Compiler.Ast.ErrorSymbol!
+static readonly Koine.Compiler.Ast.ErrorType.Instance -> Koine.Compiler.Ast.ErrorType!
+static readonly Koine.Compiler.Ast.ModelIndex.Primitives -> System.Collections.Generic.IReadOnlySet<string!>!
+static readonly Koine.Compiler.Ast.SourceSpan.None -> Koine.Compiler.Ast.SourceSpan
+static readonly Koine.Compiler.Ast.SymbolEqualityComparer.Default -> Koine.Compiler.Ast.SymbolEqualityComparer!
+static readonly Koine.Compiler.Diagnostics.DiagnosticCodes.Catalogue -> System.Collections.Generic.IReadOnlyDictionary<string!, Koine.Compiler.Diagnostics.DiagnosticDescriptor!>!
+static readonly Koine.Compiler.Diagnostics.DiagnosticFilterOptions.None -> Koine.Compiler.Diagnostics.DiagnosticFilterOptions!
+static readonly Koine.Compiler.Emit.EmitterOptions.Empty -> Koine.Compiler.Emit.EmitterOptions!
+static readonly Koine.Compiler.Services.SemanticTokenProvider.TokenModifierNames -> System.Collections.Generic.IReadOnlyList<string!>!
+static readonly Koine.Compiler.Services.SemanticTokenProvider.TokenTypeNames -> System.Collections.Generic.IReadOnlyList<string!>!
+virtual Koine.Compiler.Ast.ExprWalker.Visit(Koine.Compiler.Ast.Expr! e) -> void
+virtual Koine.Compiler.Ast.ExprWalker.VisitBinary(Koine.Compiler.Ast.BinaryExpr! n) -> void
+virtual Koine.Compiler.Ast.ExprWalker.VisitCall(Koine.Compiler.Ast.CallExpr! n) -> void
+virtual Koine.Compiler.Ast.ExprWalker.VisitCoalesce(Koine.Compiler.Ast.CoalesceExpr! n) -> void
+virtual Koine.Compiler.Ast.ExprWalker.VisitConditional(Koine.Compiler.Ast.ConditionalExpr! n) -> void
+virtual Koine.Compiler.Ast.ExprWalker.VisitGuard(Koine.Compiler.Ast.GuardExpr! n) -> void
+virtual Koine.Compiler.Ast.ExprWalker.VisitIdentifier(Koine.Compiler.Ast.IdentifierExpr! n) -> void
+virtual Koine.Compiler.Ast.ExprWalker.VisitLambda(Koine.Compiler.Ast.LambdaExpr! n) -> void
+virtual Koine.Compiler.Ast.ExprWalker.VisitLet(Koine.Compiler.Ast.LetExpr! n) -> void
+virtual Koine.Compiler.Ast.ExprWalker.VisitLiteral(Koine.Compiler.Ast.LiteralExpr! n) -> void
+virtual Koine.Compiler.Ast.ExprWalker.VisitMatch(Koine.Compiler.Ast.MatchExpr! n) -> void
+virtual Koine.Compiler.Ast.ExprWalker.VisitMemberAccess(Koine.Compiler.Ast.MemberAccessExpr! n) -> void
+virtual Koine.Compiler.Ast.ExprWalker.VisitUnary(Koine.Compiler.Ast.UnaryExpr! n) -> void
+virtual Koine.Compiler.Ast.KoineType.Element.get -> Koine.Compiler.Ast.KoineType?
+virtual Koine.Compiler.Ast.KoineType.Name.get -> string?
+virtual Koine.Compiler.Ast.KoineType.Qualifier.get -> string?
+virtual Koine.Compiler.Ast.KoineType.Value.get -> Koine.Compiler.Ast.KoineType?
