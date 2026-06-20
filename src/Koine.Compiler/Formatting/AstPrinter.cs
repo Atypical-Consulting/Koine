@@ -81,9 +81,9 @@ public sealed class AstPrinter
         else
         {
             // No usable source (synthesized/mutated subtree, or a span outside the source):
-            // reconstruct from the tree by recursing children in source order.
-            foreach (KoineNode child in NodeWalker.ChildNodes(node)
-                .OrderBy(c => c.Span.IsNone ? int.MaxValue : c.Span.Offset))
+            // reconstruct from the tree by recursing children in source order (error markers
+            // excluded, ordering centralized in NodeWalker — shared with KoineNode.ToFullString).
+            foreach (KoineNode child in NodeWalker.ReconstructionChildren(node))
             {
                 Append(sb, child);
             }

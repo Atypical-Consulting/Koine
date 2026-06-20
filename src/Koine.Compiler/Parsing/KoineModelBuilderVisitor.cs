@@ -653,11 +653,7 @@ public sealed class KoineModelBuilderVisitor : KoineParserBaseVisitor<object?>
 
         if (ctx.emitClause() is { } emit)
         {
-            List<EmitArg> args = emit.emitArgList() is { } al
-                ? al.emitArg().Select(a =>
-                    new EmitArg(a.softName().GetText(), BuildExpression(a.expression())) { Span = SpanOf(a) }).ToList()
-                : new List<EmitArg>();
-            return new EmitClause(emit.Identifier().GetText(), args) { Span = SpanOf(emit) };
+            return BuildEmitClause(emit);
         }
 
         KoineParser.InitializationContext? init = ctx.initialization();
@@ -674,6 +670,21 @@ public sealed class KoineModelBuilderVisitor : KoineParserBaseVisitor<object?>
         };
     }
 
+    /// <summary>
+    /// Builds an <see cref="EmitClause"/> from <c>emit Event(field: value, ...)</c>, shared by the
+    /// factory and command statement bodies. Tolerates a recovered (error) parse where the event
+    /// name or an argument's field name is a missing/absent token by yielding an empty name rather
+    /// than throwing — the syntax error itself is reported by the parser's error listener.
+    /// </summary>
+    private EmitClause BuildEmitClause(KoineParser.EmitClauseContext emit)
+    {
+        List<EmitArg> args = emit.emitArgList() is { } al
+            ? al.emitArg().Select(a =>
+                new EmitArg(a.softName()?.GetText() ?? string.Empty, BuildExpression(a.expression())) { Span = SpanOf(a) }).ToList()
+            : new List<EmitArg>();
+        return new EmitClause(NameOf(emit.Identifier()), args) { Span = SpanOf(emit) };
+    }
+
     private CommandStmt BuildCommandStmt(KoineParser.CommandStmtContext ctx)
     {
         if (ctx.requiresClause() is { } req)
@@ -686,11 +697,7 @@ public sealed class KoineModelBuilderVisitor : KoineParserBaseVisitor<object?>
 
         if (ctx.emitClause() is { } emit)
         {
-            List<EmitArg> args = emit.emitArgList() is { } al
-                ? al.emitArg().Select(a =>
-                    new EmitArg(a.softName().GetText(), BuildExpression(a.expression())) { Span = SpanOf(a) }).ToList()
-                : new List<EmitArg>();
-            return new EmitClause(emit.Identifier().GetText(), args) { Span = SpanOf(emit) };
+            return BuildEmitClause(emit);
         }
 
         if (ctx.resultClause() is { } res)
@@ -1299,42 +1306,25 @@ public sealed class KoineModelBuilderVisitor : KoineParserBaseVisitor<object?>
 
     private Expr BuildLiteral(KoineParser.LiteralContext ctx)
     {
-        // Verbatim source spelling of the literal (incl. quotes/escapes for strings), so the leaf
-        // node can reconstruct its own text tree-driven via ToFullString(); the model's typed
-        // LiteralExpr.Text keeps the parsed/unescaped value, distinct from this raw leaf text.
-        var leafText = ctx.GetText();
-        IReadOnlyList<SyntaxTrivia> leading = LeadingTriviaFor(ctx);
-        IReadOnlyList<SyntaxTrivia> trailing = TrailingTriviaFor(ctx);
-
-        if (ctx.IntLiteral() is { } intLit)
+        // Decide the kind + typed value once: Int/Decimal/Bool keep their verbatim spelling; a string
+        // literal carries the inner content unescaped, with no surrounding quotes.
+        (LiteralKind kind, string value) = ctx switch
         {
-            return new LiteralExpr(LiteralKind.Int, intLit.GetText())
-            {
-                Span = SpanOf(ctx), LeafText = leafText, LeadingTrivia = leading, TrailingTrivia = trailing
-            };
-        }
+            _ when ctx.IntLiteral() is { } intLit => (LiteralKind.Int, intLit.GetText()),
+            _ when ctx.DecimalLiteral() is { } decLit => (LiteralKind.Decimal, decLit.GetText()),
+            _ when ctx.BoolLiteral() is { } boolLit => (LiteralKind.Bool, boolLit.GetText()),
+            _ => (LiteralKind.String, UnescapeString(StripQuotes(ctx.StringLiteral().GetText()))),
+        };
 
-        if (ctx.DecimalLiteral() is { } decLit)
+        // Verbatim source spelling of the literal (incl. quotes/escapes for strings) is kept as the
+        // leaf node's LeafText, so it can reconstruct its own text tree-driven via ToFullString();
+        // the typed LiteralExpr.Text above keeps the parsed/unescaped value, distinct from leaf text.
+        return new LiteralExpr(kind, value)
         {
-            return new LiteralExpr(LiteralKind.Decimal, decLit.GetText())
-            {
-                Span = SpanOf(ctx), LeafText = leafText, LeadingTrivia = leading, TrailingTrivia = trailing
-            };
-        }
-
-        if (ctx.BoolLiteral() is { } boolLit)
-        {
-            return new LiteralExpr(LiteralKind.Bool, boolLit.GetText())
-            {
-                Span = SpanOf(ctx), LeafText = leafText, LeadingTrivia = leading, TrailingTrivia = trailing
-            };
-        }
-
-        // String literal: inner content, unescaped, no surrounding quotes.
-        var text = UnescapeString(StripQuotes(ctx.StringLiteral().GetText()));
-        return new LiteralExpr(LiteralKind.String, text)
-        {
-            Span = SpanOf(ctx), LeafText = leafText, LeadingTrivia = leading, TrailingTrivia = trailing
+            Span = SpanOf(ctx),
+            LeafText = ctx.GetText(),
+            LeadingTrivia = LeadingTriviaFor(ctx),
+            TrailingTrivia = TrailingTriviaFor(ctx),
         };
     }
 

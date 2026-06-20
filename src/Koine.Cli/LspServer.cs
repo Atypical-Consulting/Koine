@@ -982,7 +982,10 @@ internal sealed class LspServer
         }
 
         var sources = Workspace().Select(kv => new SourceFile(kv.Key, kv.Value)).ToList();
-        var (model, _) = _compiler.Parse(sources);
+        // ParseUsable (not raw Parse) so broken input yields the empty map, matching the other
+        // output-producing endpoints: error-tolerant parsing now returns a partial model, which we
+        // must not surface as a half-recovered context map.
+        var (model, _) = ParseUsable(sources);
         if (model is null)
         {
             return EmptyContextMap();

@@ -46,6 +46,22 @@ public class ResilienceEndToEndTests
     }
 
     [Fact]
+    public void ToFullString_of_a_recovered_context_does_not_interleave_error_marker_fragments()
+    {
+        var (model, _) = new KoineCompiler().Parse(BrokenSource);
+        ContextNode recovered = model!.Contexts.Single();
+
+        // The skipped tokens of the typo (`>=`, `0`) live in the ContextNode.Errors side-channel —
+        // they must NOT be emitted inline by the tree-driven ToFullString (their offsets overlap the
+        // recovered child declarations, so interleaving them would produce stray fragments).
+        recovered.Errors.ShouldNotBeEmpty();
+        recovered.Errors.ShouldContain(e => e.Text == ">=");
+
+        var reconstructed = recovered.ToFullString();
+        reconstructed.ShouldNotContain(">=");
+    }
+
+    [Fact]
     public void Valid_subtree_of_a_partially_recovered_model_still_emits_compiling_csharp()
     {
         var (model, _) = new KoineCompiler().Parse(BrokenSource);

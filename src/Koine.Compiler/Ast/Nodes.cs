@@ -96,11 +96,9 @@ public abstract record KoineNode
         }
         else
         {
-            // Compose composite nodes from their children in source order. ChildNodes is
-            // reflection-driven and not ordered, so sort by offset; spans with no position
-            // (synthesized nodes) sort stably to the end.
-            foreach (KoineNode child in NodeWalker.ChildNodes(this)
-                .OrderBy(c => c.Span.IsNone ? int.MaxValue : c.Span.Offset))
+            // Compose composite nodes from their reconstruction children in source order (error
+            // markers excluded, ordering centralized in NodeWalker).
+            foreach (KoineNode child in NodeWalker.ReconstructionChildren(this))
             {
                 child.AppendFullString(sb);
             }
