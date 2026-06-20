@@ -34,7 +34,7 @@ import { formatChord } from './platform';
 import { renderDiagrams } from './diagrams';
 import { renderGlossary, type GlossaryHandlers } from './glossary';
 import { createAssistantPanel, type AssistantPanel } from './aiPanel';
-import { buildShareUrl, clearModelHash, readModelFromHash } from './share';
+import { buildShareUrl, clearModelHash, readModelFromHash, workspaceShareUrlOrNull } from './share';
 import { dirtyCount, handleBeforeUnload, saveAllDirtyBuffers, titleWithDirty } from './dirty';
 import { createConfirmDialog } from './overlay';
 
@@ -1885,9 +1885,26 @@ export function init(): void {
   // Copy a shareable playground link (the current model encoded in the URL hash) to the clipboard,
   // flashing a transient confirmation in the status pill. After the flash, re-derive the pill from
   // the CURRENT diagnostics rather than restoring a snapshot (which could clobber a fresh push).
+  //
+  // Folder mode shares the WHOLE workspace (every open buffer) under a versioned envelope, with the
+  // active file flagged so the recipient lands on it; scratch mode keeps the legacy single-string
+  // link. A workspace that overflows the URL-length cap is not copied as a broken link — instead we
+  // steer the user to the `.koi` source zip export (see the over-cap toast below).
   async function copyShareLink(): Promise<void> {
     try {
-      await navigator.clipboard.writeText(buildShareUrl(editor.getDoc()));
+      if (folderMode) {
+        const files = Array.from(buffers.values()).map((b) => ({ relPath: b.relPath, text: b.text }));
+        const activeRelPath = buffers.get(activeUri)?.relPath;
+        const url = workspaceShareUrlOrNull(files, activeRelPath);
+        if (url === null) {
+          setStatus('Workspace too large to share as a link — export a .koi source zip instead', 'error');
+          setTimeout(() => updateStatus(diagnosticsByUri.get(activeUri) ?? []), 1500);
+          return;
+        }
+        await navigator.clipboard.writeText(url);
+      } else {
+        await navigator.clipboard.writeText(buildShareUrl(editor.getDoc()));
+      }
       setStatus('link copied ✓', 'green');
       setTimeout(() => updateStatus(diagnosticsByUri.get(activeUri) ?? []), 1500);
     } catch (e) {
@@ -2017,7 +2034,7 @@ export function init(): void {
     // fuzzy quick-open (type part of a path to jump). The palette re-reads this on each open.
     if (folderMode) {
       for (const buf of Array.from(buffers.values())
-        .filter((b) => b.path != null)
+        .filter((b) => b.uri !== SCRATCH_URI)
         .sort((a, b) => a.relPath.localeCompare(b.relPath))) {
         cmds.push({ id: 'goto:' + buf.uri, title: buf.relPath, group: 'Go to File', run: () => activateFile(buf.uri) });
       }
