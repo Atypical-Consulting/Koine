@@ -30,6 +30,8 @@ export interface KoineWasmApi {
   FoldingRanges(source: string): string;
   /** Selection-range chains for a set of 0-based positions → JSON SelectionRange[] (parallel). */
   SelectionRanges(source: string, positionsJson: string): string;
+  /** Code lenses of the active document → JSON CodeLens[] (`{range, title}`, reference counts). */
+  CodeLenses(filesJson: string, activeUri: string): string;
   /** Canonical formatting edits → JSON TextEdit[]. */
   Format(source: string): string;
   /** Compatibility of current vs baseline workspace → JSON CheckResult. */
@@ -73,6 +75,7 @@ const KOINE_WASM_EXPORTS: ReadonlySet<string> = new Set<keyof KoineWasmApi>([
   'DocumentSymbols',
   'FoldingRanges',
   'SelectionRanges',
+  'CodeLenses',
   'Format',
   'Check',
   'References',

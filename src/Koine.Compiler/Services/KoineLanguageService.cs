@@ -97,6 +97,20 @@ public sealed record FoldingRange(SourceSpan Range);
 public sealed record SelectionRange(SourceSpan Range, SelectionRange? Parent);
 
 /// <summary>
+/// One editor code lens: the <see cref="Range"/> it annotates (a declaration's identifier
+/// <c>NameSpan</c>, 1-based end-EXCLUSIVE), the declaration <see cref="Name"/> and the
+/// <see cref="Uri"/> of the file it lives in, plus the resolved <see cref="Title"/> — the
+/// reference-count label (<c>"N references"</c>, references-from-elsewhere = total references
+/// minus the declaration itself). The title may be filled lazily over an LSP
+/// <c>codeLens/resolve</c> round-trip, so it is nullable. Editor-agnostic.
+/// </summary>
+public sealed record CodeLens(
+    string Name,
+    string Uri,
+    SourceSpan Range,
+    string? Title);
+
+/// <summary>
 /// Editor-agnostic language services for <c>.koi</c>. <see cref="CompleteAt"/> is
 /// single-file and lexer-only (works on broken documents). <see cref="HoverAt"/> and
 /// <see cref="DefinitionAt"/> take a workspace document map (uri → source) plus the
@@ -940,6 +954,55 @@ public sealed class KoineLanguageService
 
         var offset = OffsetOf(source, line, character);
         return compilation.WorkspaceIndex.FindReferences(activeUri, name, offset, ctx.EnclosingTypeName);
+    }
+
+    /// <summary>
+    /// The code lenses of the active document — one per top-level declaration (type / service /
+    /// spec) in its outline, annotated with a reference-count label. The count is
+    /// references-from-elsewhere: <see cref="WorkspaceIndex.FindReferences"/> includes the
+    /// declaration's own name occurrence, so the label is <c>total - 1</c> (clamped at 0). Each
+    /// lens sits on the declaration's identifier <c>NameSpan</c> (its <c>SelectionRange</c>).
+    /// Returns an empty list when the active document is absent or does not parse.
+    /// </summary>
+    public IReadOnlyList<CodeLens> CodeLenses(IReadOnlyDictionary<string, string> documents, string activeUri) =>
+        CodeLenses(ToCompilation(documents), activeUri);
+
+    /// <summary>
+    /// Overload of <see cref="CodeLenses(IReadOnlyDictionary{string,string},string)"/> that uses a
+    /// held <see cref="KoineCompilation"/> snapshot, avoiding re-parses when the caller holds and
+    /// reuses the same compilation across multiple requests.
+    /// </summary>
+    public IReadOnlyList<CodeLens> CodeLenses(KoineCompilation compilation, string activeUri)
+    {
+        if (!compilation.Documents.TryGetValue(activeUri, out var source))
+        {
+            return [];
+        }
+
+        var lenses = new List<CodeLens>();
+        foreach (var top in DocumentSymbols(source))
+        {
+            // Top-level declarations live one level under the context node; the context itself
+            // carries no reference lens. Members are not lensed (they are file-/type-scoped).
+            foreach (var decl in top.Children)
+            {
+                var nameSpan = decl.SelectionRange.IsNone ? decl.Range : decl.SelectionRange;
+                if (nameSpan.IsNone)
+                {
+                    continue;
+                }
+
+                // Offset of the declaration's name so FindReferences scopes to the right symbol.
+                // SelectionRange is 1-based; OffsetOf takes 0-based LSP line/character.
+                var nameOffset = OffsetOf(source, nameSpan.Line - 1, nameSpan.Column - 1);
+                var total = compilation.WorkspaceIndex.FindReferences(activeUri, decl.Name, nameOffset).Count;
+                var n = Math.Max(0, total - 1); // subtract the declaration's own occurrence
+                var title = $"{n} reference{(n == 1 ? "" : "s")}";
+                lenses.Add(new CodeLens(decl.Name, activeUri, nameSpan, title));
+            }
+        }
+
+        return lenses;
     }
 
     /// <summary>

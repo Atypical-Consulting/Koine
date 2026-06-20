@@ -159,6 +159,15 @@ export interface SelectionRange {
   parent?: SelectionRange;
 }
 
+// Standard LSP CodeLens: an annotation pinned to `range` (a declaration's identifier span) whose
+// `command.title` is the reference-count label (`"N references"`, references-from-elsewhere). The
+// server fills the title eagerly, so `command` is present on the `textDocument/codeLens` result and
+// `codeLens/resolve` is a pass-through.
+export interface CodeLens {
+  range: Range;
+  command?: { title: string; command: string };
+}
+
 // Standard LSP TextEdit: replace `range` with `newText`.
 export interface TextEdit {
   range: Range;
@@ -608,6 +617,17 @@ export class KoineLsp {
     const res = await this.request<SelectionRange[] | null>('textDocument/selectionRange', {
       textDocument: { uri: this.activeUri },
       positions,
+    });
+    return res ?? [];
+  }
+
+  /**
+   * Code lenses of the active document — one per top-level declaration, annotated with a
+   * `"N references"` reference-count label. Resolves to [] when the server returns null.
+   */
+  async codeLenses(): Promise<CodeLens[]> {
+    const res = await this.request<CodeLens[] | null>('textDocument/codeLens', {
+      textDocument: { uri: this.activeUri },
     });
     return res ?? [];
   }

@@ -170,6 +170,10 @@ internal sealed class LspServer
                                     ["workspaceSymbolProvider"] = true,
                                     ["foldingRangeProvider"] = true,
                                     ["selectionRangeProvider"] = true,
+                                    ["codeLensProvider"] = new Dictionary<string, object?>
+                                    {
+                                        ["resolveProvider"] = true,
+                                    },
                                     ["referencesProvider"] = true,
                                     ["renameProvider"] = new Dictionary<string, object?>
                                     {
@@ -327,6 +331,22 @@ internal sealed class LspServer
                             if (root.TryGetProperty("id", out _))
                             {
                                 Respond(root, SelectionRangeResultJson(root));
+                            }
+
+                            break;
+
+                        case "textDocument/codeLens":
+                            if (root.TryGetProperty("id", out _))
+                            {
+                                Respond(root, CodeLensResultJson(root));
+                            }
+
+                            break;
+
+                        case "codeLens/resolve":
+                            if (root.TryGetProperty("id", out _))
+                            {
+                                Respond(root, CodeLensResolveJson(root));
                             }
 
                             break;
@@ -737,6 +757,47 @@ internal sealed class LspServer
         }
 
         return node;
+    }
+
+    // ---- Code lens --------------------------------------------------------
+
+    private object? CodeLensResultJson(JsonElement root)
+    {
+        if (!TryGetUri(root, out var uri) || !_docs.ContainsKey(uri))
+        {
+            return null;
+        }
+
+        // The service resolves the reference-count title eagerly, so each lens already carries a
+        // command. codeLens/resolve is still advertised (resolveProvider = true) and remains a
+        // pass-through, so a client may request lenses then resolve each without a second compile.
+        return _ls.CodeLenses(_compilation, uri)
+            .Select(ToLspCodeLens)
+            .ToArray();
+    }
+
+    private static object ToLspCodeLens(CodeLens lens) => new Dictionary<string, object?>
+    {
+        ["range"] = SpanRange(lens.Range),
+        ["command"] = lens.Title is null
+            ? null
+            : new Dictionary<string, object?>
+            {
+                ["title"] = lens.Title,
+                ["command"] = "",
+            },
+    };
+
+    private object? CodeLensResolveJson(JsonElement root)
+    {
+        // Titles are computed eagerly on textDocument/codeLens, so resolve is a pass-through: echo
+        // the lens back. If a client sent an unresolved lens (no command), there is nothing to fill.
+        if (!root.TryGetProperty("params", out var lens) || lens.ValueKind != JsonValueKind.Object)
+        {
+            return null;
+        }
+
+        return JsonSerializer.Deserialize<object?>(lens.GetRawText());
     }
 
     /// <summary>Maps a service <see cref="SymbolKind"/> to its LSP SymbolKind number.</summary>

@@ -416,6 +416,30 @@ public static partial class CompilerInterop
     }
 
     /// <summary>
+    /// The code lenses of the active document (LSP <c>textDocument/codeLens</c>): one per top-level
+    /// declaration, annotated with a <c>"N references"</c> reference-count title. <paramref name="filesJson"/>
+    /// is the merged workspace (so cross-file references resolve) and <paramref name="activeUri"/> the
+    /// document to lens. The title is computed eagerly. Returns a JSON <c>CodeLens[]</c>. Parity with
+    /// the stdio LSP.
+    /// </summary>
+    [JSExport]
+    public static string CodeLenses(string filesJson, string activeUri)
+    {
+        try
+        {
+            var docs = DeserializeFiles(filesJson).ToDictionary(f => f.Uri, f => f.Text, StringComparer.Ordinal);
+            var lenses = LanguageService.CodeLenses(docs, activeUri)
+                .Select(l => new WCodeLens(SpanRange(l.Range), l.Title))
+                .ToArray();
+            return JsonSerializer.Serialize(lenses, LangJson.Default.WCodeLensArray);
+        }
+        catch
+        {
+            return "[]";
+        }
+    }
+
+    /// <summary>
     /// Canonical formatting edits for <paramref name="source"/>. Returns a single full-document
     /// <c>TextEdit</c> when formatting changes anything, or an empty array when it is already canonical.
     /// </summary>
@@ -910,6 +934,9 @@ public sealed record WFoldingRange(int StartLine, int EndLine);
 /// <summary>LSP SelectionRange (recursive): a range plus the enclosing parent range it grows into.</summary>
 public sealed record WSelectionRange(WRange Range, WSelectionRange? Parent);
 
+/// <summary>LSP CodeLens: a range plus its resolved reference-count title (computed eagerly here).</summary>
+public sealed record WCodeLens(WRange Range, string? Title);
+
 /// <summary>Input shape: one requested position for selection ranges (0-based LSP coordinates).</summary>
 public sealed record WInPosition(int Line, int Character);
 
@@ -958,6 +985,7 @@ public sealed record WSourceFileDto(string Uri, string Text);
 [JsonSerializable(typeof(WWorkspaceSymbol[]))]
 [JsonSerializable(typeof(WFoldingRange[]))]
 [JsonSerializable(typeof(WSelectionRange[]))]
+[JsonSerializable(typeof(WCodeLens[]))]
 [JsonSerializable(typeof(WInPosition[]))]
 [JsonSerializable(typeof(WTextEdit[]))]
 [JsonSerializable(typeof(WPrepareRename))]
