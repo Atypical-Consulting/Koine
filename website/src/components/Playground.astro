@@ -1,17 +1,11 @@
 ---
 // The Koine Playground IDE: a CodeMirror editor wired to the in-browser wasm compiler with a
-// syntax-highlighted output viewer. Used full-page on /playground and "embedded" on the landing.
-// All controls render unconditionally and are toggled by [data-embedded] via CSS (Astro
-// miscompiles sibling markup interleaved with {cond && <jsx>} expressions, so we avoid those).
-interface Props {
-  embedded?: boolean;
-}
-const { embedded = false } = Astro.props;
+// syntax-highlighted output viewer. Embedded on the landing page as a first-contact taste; its
+// toolbar hands the current model off to the full Koine Studio IDE.
 ---
 
-<div class="koi-ide" data-embedded={String(embedded)} data-view="editor">
+<div class="koi-ide" data-view="editor">
   <div class="koi-ide__bar">
-    <select class="koi-sample" aria-label="Choose a sample model"></select>
     <div class="koi-targets" role="tablist" aria-label="Output target">
       <button data-target="csharp" class="is-active" type="button" role="tab">C#</button>
       <button data-target="typescript" type="button" role="tab">TypeScript</button>
@@ -25,12 +19,9 @@ const { embedded = false } = Astro.props;
     </div>
     <span class="koi-status" data-kind="busy">loading compiler...</span>
     <div class="koi-bar-right">
-      <button class="koi-reset" type="button" title="Reset to the sample">Reset</button>
       <button class="koi-copy" type="button" title="Copy the current file">Copy</button>
       <button class="koi-download" type="button" title="Download all files as a .zip">Download</button>
-      <button class="koi-share" type="button" title="Copy a shareable link">Share</button>
       <a class="koi-studio" href="#" target="_blank" rel="noopener" title="Open this model in the full Koine Studio IDE">Open in Studio &#9656;</a>
-      <a class="koi-open" href="#">Open full Playground &#9656;</a>
     </div>
   </div>
 
@@ -42,8 +33,6 @@ const { embedded = false } = Astro.props;
       </div>
       <div class="koi-editor"></div>
     </div>
-
-    <div class="koi-resizer" role="separator" aria-orientation="vertical" title="Drag to resize"></div>
 
     <div class="koi-pane koi-pane--output">
       <div class="koi-pane__label">
@@ -87,17 +76,6 @@ const { embedded = false } = Astro.props;
     font-family: var(--koi-font-mono);
     font-size: 0.8rem;
     flex-wrap: wrap;
-  }
-
-  .koi-sample {
-    font-family: var(--koi-font-body);
-    font-size: 0.82rem;
-    padding: 0.32rem 0.5rem;
-    border: 1px solid var(--koi-line);
-    border-radius: var(--koi-radius-sm);
-    background: var(--koi-surface);
-    color: var(--koi-fg);
-    max-width: 15rem;
   }
 
   .koi-targets {
@@ -196,7 +174,6 @@ const { embedded = false } = Astro.props;
     align-items: center;
   }
   .koi-bar-right button,
-  .koi-open,
   .koi-studio {
     font: 600 0.76rem/1 var(--koi-font-mono);
     padding: 0.36rem 0.62rem;
@@ -209,7 +186,6 @@ const { embedded = false } = Astro.props;
     transition: background 0.12s, color 0.12s, border-color 0.12s, transform 0.1s;
   }
   .koi-bar-right button:hover:not(:disabled),
-  .koi-open:hover,
   .koi-studio:hover {
     color: var(--koi-fg);
     border-color: var(--koi-accent);
@@ -223,14 +199,10 @@ const { embedded = false } = Astro.props;
     color: var(--koi-on-accent);
     border-color: var(--koi-accent);
   }
-  .koi-share,
-  .koi-open,
   .koi-studio {
     border-color: var(--koi-accent) !important;
     color: var(--koi-accent) !important;
   }
-  .koi-share:hover,
-  .koi-open:hover,
   .koi-studio:hover {
     background: var(--koi-accent);
     color: var(--koi-on-accent) !important;
@@ -249,29 +221,11 @@ const { embedded = false } = Astro.props;
     min-height: 0;
   }
   .koi-pane--editor {
-    flex: 0 0 var(--koi-editor-w, 50%);
+    flex: 0 0 50%;
   }
   .koi-pane--output {
     flex: 1;
     border-left: 1px solid var(--koi-line);
-  }
-  .koi-resizer {
-    flex: 0 0 7px;
-    cursor: col-resize;
-    background:
-      linear-gradient(var(--koi-line), var(--koi-line)) center / 1px 100% no-repeat;
-    position: relative;
-    touch-action: none;
-  }
-  .koi-resizer::after {
-    content: '';
-    position: absolute;
-    inset: 0;
-    background: transparent;
-    transition: background 0.12s;
-  }
-  .koi-resizer:hover::after {
-    background: color-mix(in srgb, var(--koi-accent) 18%, transparent);
   }
 
   .koi-pane__label {
@@ -389,22 +343,6 @@ const { embedded = false } = Astro.props;
     color: var(--koi-fg);
   }
 
-  /* Embedded (landing) — compact: hide the sample picker, Share, and the resizer, but keep
-     the file tree so all generated files are browsable. */
-  .koi-ide[data-embedded='true'] .koi-sample,
-  .koi-ide[data-embedded='true'] .koi-reset,
-  .koi-ide[data-embedded='true'] .koi-share,
-  .koi-ide[data-embedded='true'] .koi-studio,
-  .koi-ide[data-embedded='true'] .koi-resizer {
-    display: none;
-  }
-  .koi-ide[data-embedded='true'] .koi-pane--editor {
-    flex: 0 0 50%;
-  }
-  .koi-ide[data-embedded='false'] .koi-open {
-    display: none;
-  }
-
   /* Mobile: stack to a single pane toggled by the Model/Output tabs. */
   @media (max-width: 760px) {
     .koi-ide__body {
@@ -414,9 +352,6 @@ const { embedded = false } = Astro.props;
     .koi-pane--output {
       flex: 1 1 auto !important;
       border-left: 0;
-    }
-    .koi-resizer {
-      display: none;
     }
     .koi-mobile-tabs {
       display: inline-flex;
