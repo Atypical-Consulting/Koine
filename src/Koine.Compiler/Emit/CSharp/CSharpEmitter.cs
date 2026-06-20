@@ -385,7 +385,8 @@ public sealed partial class CSharpEmitter : IEmitter
 
         sb.Append("}\n");
 
-        return new EmittedFile(PathFor(emit, ns, KindFolder.Enums, $"{name}.cs"), Assemble(emit, ns, sb.ToString(), usesLinq: true));
+        var contents = Assemble(emit, ns, sb.ToString(), usesLinq: true, @enum.Span, out var sourceMap);
+        return new EmittedFile(PathFor(emit, ns, KindFolder.Enums, $"{name}.cs"), contents, sourceMap);
     }
 
     // ----------------------------------------------------------------------
@@ -500,8 +501,8 @@ public sealed partial class CSharpEmitter : IEmitter
         }
 
         sb.Append("}\n");
-        return new EmittedFile(PathFor(emit, ns, KindFolder.Events, $"{ev.Name}.cs"),
-            Assemble(emit, ns, sb.ToString(), UsesLinq(ev.Members, Array.Empty<Invariant>())));
+        var contents = Assemble(emit, ns, sb.ToString(), UsesLinq(ev.Members, Array.Empty<Invariant>()), ev.Span, out var sourceMap);
+        return new EmittedFile(PathFor(emit, ns, KindFolder.Events, $"{ev.Name}.cs"), contents, sourceMap);
     }
 
     /// <summary>
@@ -559,8 +560,8 @@ public sealed partial class CSharpEmitter : IEmitter
         }
 
         sb.Append("}\n");
-        return new EmittedFile(PathFor(emit, ns, KindFolder.IntegrationEvents, $"{ev.Name}.cs"),
-            Assemble(emit, ns, sb.ToString(), UsesLinq(ev.Members, Array.Empty<Invariant>())));
+        var contents = Assemble(emit, ns, sb.ToString(), UsesLinq(ev.Members, Array.Empty<Invariant>()), ev.Span, out var sourceMap);
+        return new EmittedFile(PathFor(emit, ns, KindFolder.IntegrationEvents, $"{ev.Name}.cs"), contents, sourceMap);
     }
 
     /// <summary>
@@ -1573,7 +1574,23 @@ public sealed partial class CSharpEmitter : IEmitter
     /// carry no unused imports. LINQ is passed in because <c>.Count</c> (a property)
     /// and <c>.Count()</c> (a LINQ call) are not distinguishable by a token scan.
     /// </summary>
-    private string Assemble(EmitContext emit, string ns, string body, bool usesLinq)
+    private string Assemble(EmitContext emit, string ns, string body, bool usesLinq) =>
+        Assemble(emit, ns, body, usesLinq, declSpan: SourceSpan.None, out _);
+
+    /// <summary>
+    /// <see cref="Assemble(EmitContext, string, string, bool)"/> with optional source-map output.
+    /// When <see cref="CSharpEmitterOptions.EmitSourceMaps"/> is on AND <paramref name="declSpan"/>
+    /// is a real source range, a <c>#line N "&lt;file&gt;"</c> directive is stamped immediately
+    /// before the declaration body (so debuggers/stack traces attribute the body to its <c>.koi</c>
+    /// origin), a <c>#line default</c> resumes generated-line numbering afterwards, and a single
+    /// <see cref="SourceMapSegment"/> mapping the body's generated line range → <paramref name="declSpan"/>
+    /// is returned via <paramref name="sourceMap"/>. Otherwise (the default) no directives are emitted
+    /// and <paramref name="sourceMap"/> is <c>null</c>, so output is byte-identical to the historical
+    /// emitter — the flag-off path never touches the builder.
+    /// </summary>
+    private string Assemble(
+        EmitContext emit, string ns, string body, bool usesLinq,
+        SourceSpan declSpan, out IReadOnlyList<SourceMapSegment>? sourceMap)
     {
         // Usings are derived from data — a UsingCollector that maps runtime/BCL markers and
         // cross-namespace user-type references to their namespaces — rather than a fixed block,
@@ -1618,8 +1635,71 @@ public sealed partial class CSharpEmitter : IEmitter
         }
 
         sb.Append("namespace ").Append(emittedNs).Append(";\n\n");
+
+        // Source maps are off by default: the flag-off path appends the body verbatim and reports
+        // no map, so emitted text stays byte-for-byte identical to the historical emitter.
+        if (!emit.Options.EmitSourceMaps || declSpan.IsNone)
+        {
+            sb.Append(body);
+            sourceMap = null;
+            return sb.ToString();
+        }
+
+        // Source maps on: stamp a `#line` directive pointing the body's generated lines at the
+        // declaration's `.koi` origin, then `#line default` so generated-only trailing lines aren't
+        // misattributed, and record the body's generated line range as one segment.
+        var sourceFile = declSpan.File ?? ns;
+
+        // The body begins on the next physical line. Count newlines already in the builder; the
+        // `#line` directive itself occupies one line, so the body's first line is +2 (1-based).
+        var linesBefore = CountLines(sb);
+        sb.Append("#line ").Append(declSpan.Line).Append(" \"").Append(sourceFile).Append("\"\n");
+        var generatedStart = linesBefore + 2; // line after the directive (1-based)
+
         sb.Append(body);
+        // Body line count: a body always ends with a trailing newline, so its rendered lines are the
+        // newline count (the empty piece after the final '\n' is the next line, not part of the body).
+        var bodyLines = CountNewlines(body);
+        var generatedEnd = generatedStart + Math.Max(0, bodyLines - 1);
+
+        sb.Append("#line default\n");
+
+        sourceMap = new[]
+        {
+            new SourceMapSegment(generatedStart, generatedEnd, sourceFile, declSpan),
+        };
         return sb.ToString();
+    }
+
+    /// <summary>1-based count of the line the builder is currently on (number of newlines + 1).</summary>
+    private static int CountLines(StringBuilder sb) => CountNewlinesIn(sb) + 1;
+
+    private static int CountNewlinesIn(StringBuilder sb)
+    {
+        var count = 0;
+        for (var i = 0; i < sb.Length; i++)
+        {
+            if (sb[i] == '\n')
+            {
+                count++;
+            }
+        }
+
+        return count;
+    }
+
+    private static int CountNewlines(string s)
+    {
+        var count = 0;
+        foreach (var c in s)
+        {
+            if (c == '\n')
+            {
+                count++;
+            }
+        }
+
+        return count;
     }
 
     /// <summary>

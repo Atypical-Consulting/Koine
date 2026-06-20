@@ -162,8 +162,9 @@ public sealed partial class CSharpEmitter
 
         sb.Append("}\n");
 
-        return new EmittedFile(PathFor(emit, ns, isRoot ? KindFolder.Root : KindFolder.Entities, $"{entity.Name}.cs"),
-            Assemble(emit, ns, sb.ToString(), EntityUsesLinq(entity) || SpecBodiesUseLinq(entity.Name, index)));
+        var contents = Assemble(emit, ns, sb.ToString(),
+            EntityUsesLinq(entity) || SpecBodiesUseLinq(entity.Name, index), entity.Span, out var sourceMap);
+        return new EmittedFile(PathFor(emit, ns, isRoot ? KindFolder.Root : KindFolder.Entities, $"{entity.Name}.cs"), contents, sourceMap);
     }
 
     /// <summary>

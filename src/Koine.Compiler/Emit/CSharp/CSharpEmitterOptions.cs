@@ -25,7 +25,8 @@ internal enum CSharpInstantMode
 /// </summary>
 internal sealed record CSharpEmitterOptions(
     IReadOnlyDictionary<string, string> NamespaceMap,
-    CSharpInstantMode InstantMode = CSharpInstantMode.DateTimeOffset)
+    CSharpInstantMode InstantMode = CSharpInstantMode.DateTimeOffset,
+    bool EmitSourceMaps = false)
 {
     public static readonly CSharpEmitterOptions Empty =
         new(new Dictionary<string, string>(StringComparer.Ordinal));
