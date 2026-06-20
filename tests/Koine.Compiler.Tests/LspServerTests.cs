@@ -59,10 +59,10 @@ public class LspServerTests
     }
 
     [Fact]
-    public void Initialize_advertises_full_text_sync()
+    public void Initialize_advertises_incremental_sync()
     {
         var output = RunSession(Initialize());
-        output.ShouldContain("\"textDocumentSync\":1");
+        output.ShouldContain("\"textDocumentSync\":2");
         output.ShouldContain("\"name\":\"koine\"");
     }
 
@@ -1250,6 +1250,95 @@ public class LspServerTests
         output.ShouldContain("\"koineCheck\":true");
         // Additive — existing capabilities unchanged.
         output.ShouldContain("\"hoverProvider\":true");
-        output.ShouldContain("\"textDocumentSync\":1");
+        output.ShouldContain("\"textDocumentSync\":2");
+    }
+
+    // ---- Incremental sync tests -------------------------------------------
+
+    private static byte[] DidChangeIncremental(string uri, int startLine, int startChar, int endLine, int endChar, string newText) =>
+        Frame(JsonSerializer.Serialize(new
+        {
+            jsonrpc = "2.0",
+            method = "textDocument/didChange",
+            @params = new
+            {
+                textDocument = new { uri, version = 2 },
+                contentChanges = new[]
+                {
+                    new
+                    {
+                        range = new
+                        {
+                            start = new { line = startLine, character = startChar },
+                            end = new { line = endLine, character = endChar },
+                        },
+                        text = newText,
+                    },
+                },
+            },
+        }));
+
+    [Fact]
+    public void IncrementalChange_produces_same_diagnostics_as_full_open()
+    {
+        // Open a valid doc, then apply an incremental change that introduces an error.
+        // The result must equal opening the invalid version directly (full open).
+        const string t0 = "context C {\n  value V { x: String }\n}\n";
+        // Change "String" (line 1, chars 15..21) to "Nope"
+        var incrementalOutput = RunSession(
+            Initialize(),
+            DidOpen("file:///t.koi", t0),
+            DidChangeIncremental("file:///t.koi", 1, 15, 1, 21, "Nope"));
+
+        // Full-open equivalent: open the already-broken version directly.
+        const string t1 = "context C {\n  value V { x: Nope }\n}\n";
+        var fullOutput = RunSession(
+            Initialize(),
+            DidOpen("file:///t.koi", t1));
+
+        // Both must produce the same unknown-type diagnostic.
+        incrementalOutput.ShouldContain("unknown type 'Nope'");
+        fullOutput.ShouldContain("unknown type 'Nope'");
+    }
+
+    [Fact]
+    public void IncrementalChange_fix_clears_diagnostics()
+    {
+        // Open an invalid doc, then incrementally fix it; final diagnostics must be empty.
+        const string broken = "context C {\n  value V { x: Nope }\n}\n";
+        // Change "Nope" (line 1, chars 15..19) back to "String"
+        var output = RunSession(
+            Initialize(),
+            DidOpen("file:///t.koi", broken),
+            DidChangeIncremental("file:///t.koi", 1, 15, 1, 19, "String"));
+
+        // After the fix, the last publishDiagnostics for this uri should have no errors.
+        output.ShouldContain("unknown type 'Nope'");    // published after didOpen
+        output.ShouldContain("\"diagnostics\":[]");      // published after incremental fix
+    }
+
+    [Fact]
+    public void DidClose_clears_diagnostics_for_uri()
+    {
+        // Open an invalid doc (diagnostics published), then close it.
+        // A publishDiagnostics with an empty array must be sent for that uri.
+        const string badDoc = "context C {\n  value V { x: Nope }\n}\n";
+        var output = RunSession(
+            Initialize(),
+            DidOpen("file:///close-test.koi", badDoc),
+            Frame(JsonSerializer.Serialize(new
+            {
+                jsonrpc = "2.0",
+                method = "textDocument/didClose",
+                @params = new { textDocument = new { uri = "file:///close-test.koi" } },
+            })));
+
+        // The file had errors after open.
+        output.ShouldContain("unknown type 'Nope'");
+
+        // After close, a publishDiagnostics with empty array must appear for the same uri.
+        // Check both the uri and the empty-array clearing notification are present.
+        output.ShouldContain("file:///close-test.koi");
+        output.ShouldContain("\"diagnostics\":[]");
     }
 }

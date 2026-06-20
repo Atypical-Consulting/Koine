@@ -78,10 +78,13 @@ public sealed class KoineCompiler
     /// Used by the LSP server to publish per-file diagnostics over the merged workspace.
     /// </summary>
     public IReadOnlyList<Diagnostic> DiagnoseWorkspace(IReadOnlyList<SourceFile> files)
+        => DiagnoseWorkspace(KoineCompilation.Create(files));
+
+    /// <summary>Validates an already-built workspace snapshot (no re-parse) and returns all diagnostics.</summary>
+    public IReadOnlyList<Diagnostic> DiagnoseWorkspace(KoineCompilation compilation)
     {
-        var comp = KoineCompilation.Create(files);
-        var semantic = new SemanticValidator().Validate(comp.SemanticModel);
-        return Combine(comp.SyntaxDiagnostics, semantic);
+        var semantic = new SemanticValidator().Validate(compilation.SemanticModel);
+        return Combine(compilation.SyntaxDiagnostics, semantic);
     }
 
     /// <summary>Concatenates syntax then semantic diagnostics (syntax errors are never dropped).</summary>
