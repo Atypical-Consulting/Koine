@@ -1,4 +1,16 @@
 #nullable enable
+Koine.Compiler.Emit.EmittedFile.SourceMap.get -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Emit.SourceMapSegment!>?
+Koine.Compiler.Emit.EmittedFile.SourceMap.init -> void
+Koine.Compiler.Emit.SourceMapSegment
+Koine.Compiler.Emit.SourceMapSegment.GeneratedEndLine.get -> int
+Koine.Compiler.Emit.SourceMapSegment.GeneratedEndLine.init -> void
+Koine.Compiler.Emit.SourceMapSegment.GeneratedStartLine.get -> int
+Koine.Compiler.Emit.SourceMapSegment.GeneratedStartLine.init -> void
+Koine.Compiler.Emit.SourceMapSegment.Source.get -> Koine.Compiler.Ast.SourceSpan
+Koine.Compiler.Emit.SourceMapSegment.Source.init -> void
+Koine.Compiler.Emit.SourceMapSegment.SourceFile.get -> string!
+Koine.Compiler.Emit.SourceMapSegment.SourceFile.init -> void
+Koine.Compiler.Emit.SourceMapSegment.SourceMapSegment(int GeneratedStartLine, int GeneratedEndLine, string! SourceFile, Koine.Compiler.Ast.SourceSpan Source) -> void
 Koine.Compiler.Emit.Docs.DiagramDescriptor
 Koine.Compiler.Emit.Docs.DiagramDescriptor.Caption.get -> string!
 Koine.Compiler.Emit.Docs.DiagramDescriptor.Caption.init -> void

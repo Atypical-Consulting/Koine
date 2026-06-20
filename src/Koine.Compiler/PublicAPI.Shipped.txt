@@ -952,7 +952,7 @@ Koine.Compiler.Emit.Docs.DocsEmitter.TargetName.get -> string!
 Koine.Compiler.Emit.EmittedFile
 Koine.Compiler.Emit.EmittedFile.Contents.get -> string!
 Koine.Compiler.Emit.EmittedFile.Contents.init -> void
-Koine.Compiler.Emit.EmittedFile.EmittedFile(string! RelativePath, string! Contents) -> void
+Koine.Compiler.Emit.EmittedFile.EmittedFile(string! RelativePath, string! Contents, System.Collections.Generic.IReadOnlyList<Koine.Compiler.Emit.SourceMapSegment!>? SourceMap = null) -> void
 Koine.Compiler.Emit.EmittedFile.RelativePath.get -> string!
 Koine.Compiler.Emit.EmittedFile.RelativePath.init -> void
 Koine.Compiler.Emit.EmitterLoader
