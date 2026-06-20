@@ -108,10 +108,28 @@ public sealed class KoineCompiler
 
     /// <summary>Runs the full pipeline for a single source through the given emitter.</summary>
     public CompileResult Compile(string source, IEmitter emitter) =>
-        Compile(new[] { new SourceFile("<source>", source) }, emitter);
+        Compile(source, emitter, DiagnosticFilterOptions.None);
+
+    /// <summary>
+    /// Runs the full pipeline for a single source, applying the diagnostic remap/suppression
+    /// <paramref name="filterOptions"/> (config severity overrides + warnings-as-errors) plus any
+    /// in-source <c># koine:disable</c> directives before <c>CompileResult.Success</c> is computed.
+    /// </summary>
+    public CompileResult Compile(string source, IEmitter emitter, DiagnosticFilterOptions filterOptions) =>
+        Compile(new[] { new SourceFile("<source>", source) }, emitter, filterOptions);
 
     /// <summary>Runs the full pipeline over one or more sources through the given emitter.</summary>
-    public CompileResult Compile(IReadOnlyList<SourceFile> files, IEmitter emitter)
+    public CompileResult Compile(IReadOnlyList<SourceFile> files, IEmitter emitter) =>
+        Compile(files, emitter, DiagnosticFilterOptions.None);
+
+    /// <summary>
+    /// Runs the full pipeline over one or more sources, applying the diagnostic remap/suppression
+    /// <paramref name="filterOptions"/> (config severity overrides + warnings-as-errors) plus any
+    /// in-source <c># koine:disable</c> directives so the returned <see cref="CompileResult.Diagnostics"/>
+    /// are the effective (remapped) set and <see cref="CompileResult.Success"/> is computed from them.
+    /// With <see cref="DiagnosticFilterOptions.None"/> (the default) behaviour is unchanged.
+    /// </summary>
+    public CompileResult Compile(IReadOnlyList<SourceFile> files, IEmitter emitter, DiagnosticFilterOptions filterOptions)
     {
         var comp = KoineCompilation.Create(files);
 
@@ -122,19 +140,38 @@ public sealed class KoineCompiler
         // false because the syntax error is a DiagnosticSeverity.Error.
         if (comp.SyntaxDiagnostics.Any(d => d.Severity == DiagnosticSeverity.Error))
         {
-            return new CompileResult(comp.Model, comp.SyntaxDiagnostics, Array.Empty<EmittedFile>());
+            return new CompileResult(comp.Model, Filter(comp.SyntaxDiagnostics, filterOptions, files), Array.Empty<EmittedFile>());
         }
 
         // Reuse the snapshot's single shared SemanticModel — build resolution once, reuse for
         // both validation and emission.
         var semantic = new SemanticValidator().Validate(comp.SemanticModel);
-        var diagnostics = Combine(comp.SyntaxDiagnostics, semantic);
-        if (semantic.Any(d => d.Severity == DiagnosticSeverity.Error))
+        var diagnostics = Filter(Combine(comp.SyntaxDiagnostics, semantic), filterOptions, files);
+
+        // Success is computed from the *filtered* diagnostics (a config-promoted/warnings-as-errors
+        // Error now blocks emit; a suppressed/dropped warning no longer does).
+        if (diagnostics.Any(d => d.Severity == DiagnosticSeverity.Error))
         {
             return new CompileResult(comp.Model, diagnostics, Array.Empty<EmittedFile>());
         }
 
         var emitted = emitter.Emit(comp.Model, comp.SemanticModel);
         return new CompileResult(comp.Model, diagnostics, emitted);
+    }
+
+    /// <summary>
+    /// Applies the diagnostic filter (no-op for <see cref="DiagnosticFilterOptions.None"/> with no
+    /// <c># koine:disable</c> directives), passing the source texts so the filter can scan them.
+    /// </summary>
+    private static IReadOnlyList<Diagnostic> Filter(
+        IReadOnlyList<Diagnostic> diagnostics, DiagnosticFilterOptions filterOptions, IReadOnlyList<SourceFile> files)
+    {
+        var sources = new (string?, string)[files.Count];
+        for (var i = 0; i < files.Count; i++)
+        {
+            sources[i] = (files[i].Path, files[i].Source);
+        }
+
+        return DiagnosticFilter.Apply(diagnostics, filterOptions, sources);
     }
 }

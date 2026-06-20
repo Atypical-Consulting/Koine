@@ -31,7 +31,8 @@ internal sealed record KoineConfig(
     string? OutDir,
     string? Baseline = null,
     IReadOnlyDictionary<string, TargetOptions>? Targets = null,
-    IReadOnlyDictionary<string, string>? Severity = null)
+    IReadOnlyDictionary<string, string>? Severity = null,
+    IReadOnlyDictionary<string, string>? DiagnosticSeverity = null)
 {
     public static readonly KoineConfig Empty = new(null, null);
 
@@ -49,6 +50,7 @@ internal sealed record KoineConfig(
         string? baseline = null;
         var targets = new Dictionary<string, TargetBuilder>(StringComparer.Ordinal);
         var severity = new Dictionary<string, string>(StringComparer.Ordinal);
+        var diagnosticSeverity = new Dictionary<string, string>(StringComparer.Ordinal);
 
         foreach (var raw in text.Split('\n'))
         {
@@ -97,6 +99,17 @@ internal sealed record KoineConfig(
                             severity[code] = value;
                         }
                     }
+                    else if (key.StartsWith("diagnostics.", StringComparison.Ordinal))
+                    {
+                        // `diagnostics.<CODE> = none|hidden|info|warning|error` — the build-time
+                        // severity remap/suppression (issue #69), parallel to `check.severity.`
+                        // which governs only the model-versioning `check` command.
+                        var code = key["diagnostics.".Length..];
+                        if (code.Length > 0)
+                        {
+                            diagnosticSeverity[code] = value;
+                        }
+                    }
 
                     break;
             }
@@ -106,7 +119,8 @@ internal sealed record KoineConfig(
             ? null
             : targets.ToDictionary(kv => kv.Key, kv => kv.Value.Build(), StringComparer.Ordinal);
         IReadOnlyDictionary<string, string>? severityMap = severity.Count == 0 ? null : severity;
-        return new KoineConfig(target, outDir, baseline, built, severityMap);
+        IReadOnlyDictionary<string, string>? diagnosticSeverityMap = diagnosticSeverity.Count == 0 ? null : diagnosticSeverity;
+        return new KoineConfig(target, outDir, baseline, built, severityMap, diagnosticSeverityMap);
     }
 
     /// <summary>

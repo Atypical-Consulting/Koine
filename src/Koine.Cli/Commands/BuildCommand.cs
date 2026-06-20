@@ -34,6 +34,10 @@ internal class BuildSettings : CommandSettings
     [Description("Read defaults (target/out) from this koine.config instead of discovering one.")]
     public string? Config { get; init; }
 
+    [CommandOption("--warnings-as-errors")]
+    [Description("Promote every warning to an error (after any diagnostics.<CODE> config override).")]
+    public bool WarningsAsErrors { get; init; }
+
     /// <summary>
     /// Resolves the flags against a <c>koine.config</c> (explicit <c>--config</c>, or one
     /// discovered beside the input): an explicit flag wins, then <c>targets.&lt;t&gt;.out</c>,
@@ -64,7 +68,9 @@ internal class BuildSettings : CommandSettings
         var resolvedTarget = Target ?? config.Target ?? "csharp";
         var targetOptions = config.OptionsFor(resolvedTarget);
         var resolvedOut = Out ?? targetOptions.OutDir ?? config.OutDir;
-        plan = new BuildPlan(Path, resolvedTarget, resolvedOut, Glossary, Docs, targetOptions);
+        plan = new BuildPlan(
+            Path, resolvedTarget, resolvedOut, Glossary, Docs, targetOptions,
+            config.DiagnosticSeverity, WarningsAsErrors);
         return true;
     }
 }
@@ -100,7 +106,8 @@ internal sealed class BuildCommand : Command<BuildSettings>
         }
 
         var compiler = new KoineCompiler();
-        var result = compiler.Compile(sources, emitter);
+        var filterOptions = new Koine.Compiler.Diagnostics.DiagnosticFilterOptions(r.DiagnosticSeverity, r.WarningsAsErrors);
+        var result = compiler.Compile(sources, emitter, filterOptions);
 
         // Diagnostics print plain (MSBuild/Roslyn-parseable) when redirected, pretty in a terminal.
         if (DiagnosticPrinter.Print(result.Diagnostics, sources, r.File))
