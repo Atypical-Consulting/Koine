@@ -27,60 +27,81 @@ const SOURCE_PROP = {
   description: 'The complete Koine (.koi) model source.',
 } as const;
 
-/** The OpenAI `tools` array. Single-file `source` arg (the host wraps it into the compiler's
- *  multi-file envelope). Descriptions mirror the MCP tool `[Description]` strings. */
-export const KOINE_TOOLS: ChatCompletionFunctionTool[] = [
+/** A provider-neutral tool definition. `inputSchema` is a JSON Schema object; the adapters below
+ *  re-shape it into the OpenAI (`parameters`) / Anthropic (`input_schema`) envelopes verbatim. */
+export interface NeutralTool {
+  name: string;
+  description: string;
+  inputSchema: object;
+}
+
+/** The koine tools, target- and provider-agnostic. Single-file `source` arg (the host wraps it into
+ *  the compiler's multi-file envelope). Descriptions mirror the MCP tool `[Description]` strings. */
+export const KOINE_TOOL_DEFS: NeutralTool[] = [
   {
-    type: 'function',
-    function: {
-      name: 'koine_validate',
-      description:
-        'Validate Koine (.koi) source and return diagnostics (errors and warnings with line:column). ' +
-        'Use this to check a model you are drafting; keep fixing the source and re-validating until it reports ok.',
-      parameters: {
-        type: 'object',
-        additionalProperties: false,
-        properties: { source: SOURCE_PROP },
-        required: ['source'],
-      },
+    name: 'koine_validate',
+    description:
+      'Validate Koine (.koi) source and return diagnostics (errors and warnings with line:column). ' +
+      'Use this to check a model you are drafting; keep fixing the source and re-validating until it reports ok.',
+    inputSchema: {
+      type: 'object',
+      additionalProperties: false,
+      properties: { source: SOURCE_PROP },
+      required: ['source'],
     },
   },
   {
-    type: 'function',
-    function: {
-      name: 'koine_compile',
-      description:
-        'Compile Koine (.koi) source to a target language and return the generated files (or compile errors). ' +
-        'Use this to inspect the emitted code for a model.',
-      parameters: {
-        type: 'object',
-        additionalProperties: false,
-        properties: {
-          source: SOURCE_PROP,
-          target: {
-            type: 'string',
-            enum: [...COMPILE_TARGETS],
-            description: 'The target language to emit. Defaults to csharp.',
-          },
+    name: 'koine_compile',
+    description:
+      'Compile Koine (.koi) source to a target language and return the generated files (or compile errors). ' +
+      'Use this to inspect the emitted code for a model.',
+    inputSchema: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        source: SOURCE_PROP,
+        target: {
+          type: 'string',
+          enum: [...COMPILE_TARGETS],
+          description: 'The target language to emit. Defaults to csharp.',
         },
-        required: ['source'],
       },
+      required: ['source'],
     },
   },
   {
-    type: 'function',
-    function: {
-      name: 'koine_format',
-      description: 'Return the canonically-formatted version of Koine (.koi) source.',
-      parameters: {
-        type: 'object',
-        additionalProperties: false,
-        properties: { source: SOURCE_PROP },
-        required: ['source'],
-      },
+    name: 'koine_format',
+    description: 'Return the canonically-formatted version of Koine (.koi) source.',
+    inputSchema: {
+      type: 'object',
+      additionalProperties: false,
+      properties: { source: SOURCE_PROP },
+      required: ['source'],
     },
   },
 ];
+
+/** Adapt a neutral def to an OpenAI function tool (`parameters` carries the JSON Schema). The cast
+ *  bridges the neutral `object` schema to OpenAI's `FunctionParameters` (an indexed record). */
+export function toOpenAiTool(t: NeutralTool): ChatCompletionFunctionTool {
+  return {
+    type: 'function',
+    function: {
+      name: t.name,
+      description: t.description,
+      parameters: t.inputSchema as Record<string, unknown>,
+    },
+  };
+}
+
+/** Adapt a neutral def to an Anthropic tool (`input_schema` carries the JSON Schema). The schema is
+ *  passed through by reference — Anthropic's `input_schema` is the same JSON Schema, no rewrite. */
+export function toAnthropicTool(t: NeutralTool): { name: string; description: string; input_schema: object } {
+  return { name: t.name, description: t.description, input_schema: t.inputSchema };
+}
+
+/** The OpenAI `tools` array, derived from the neutral defs. */
+export const KOINE_TOOLS: ChatCompletionFunctionTool[] = KOINE_TOOL_DEFS.map(toOpenAiTool);
 
 // --- Koine.Wasm JSON shapes (camelCase, see src/Koine.Wasm/CompilerInterop.LanguageService.cs) -----
 
