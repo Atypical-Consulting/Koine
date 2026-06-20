@@ -1703,6 +1703,21 @@ export function init(): void {
   const about = createAboutDialog();
   // Guards the user-initiated New command against silently discarding unsaved work.
   const confirmDialog = createConfirmDialog();
+
+  // Desktop window-close guard (Tauri only): mirror the web beforeunload — confirm before closing
+  // the window when any buffer is dirty. The browser host omits onCloseRequested (its beforeunload
+  // guard already covers tab close / reload), so this is a no-op there.
+  void platform.onCloseRequested?.(async () => {
+    if (!anyDirty()) return true;
+    return confirmDialog.ask({
+      title: 'Close Koine Studio?',
+      message: folderMode
+        ? `Files with unsaved changes will lose them. Save with ${formatChord('mod+Alt+S')} first to keep them.`
+        : 'Your current model has unsaved changes that will be lost.',
+      confirmLabel: 'Close & discard',
+      danger: true,
+    });
+  });
   // Generate Project wizard: compiles the active model, then bundles the emitted files into a
   // downloadable archive. I/O is injected so the wizard stays decoupled from the LSP/host wiring.
   const generateProject = createGenerateProject({

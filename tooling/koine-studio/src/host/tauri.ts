@@ -5,6 +5,7 @@
 // dialog plugin. Folder/file tokens are absolute filesystem paths.
 import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
+import { getCurrentWindow } from '@tauri-apps/api/window';
 import { open as openDialog, save as saveDialog } from '@tauri-apps/plugin-dialog';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import type { FsEntry, KoiFile, LspTransport, Platform, SourceDoc } from './types';
@@ -207,6 +208,17 @@ export class TauriPlatform implements Platform {
       destFolder: destFolderToken,
       newRelPath,
       copy: copy ?? false,
+    });
+  }
+
+  // Intercept the native window-close button. `onCloseRequested` awaits this handler and then
+  // destroys the window UNLESS preventDefault() was called — so an async confirm dialog works:
+  // we cancel the close only when `decide()` says not to proceed. (window.destroy bypasses the
+  // close-requested event, so confirming doesn't loop back through this handler.)
+  async onCloseRequested(decide: () => Promise<boolean>): Promise<void> {
+    const win = getCurrentWindow();
+    await win.onCloseRequested(async (event) => {
+      if (!(await decide())) event.preventDefault();
     });
   }
 }

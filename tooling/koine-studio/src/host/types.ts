@@ -147,6 +147,14 @@ export interface Platform {
    */
   readFolderSources(token: string): Promise<SourceDoc[]>;
 
+  /**
+   * Register a guard for the desktop window's close button. `decide` runs when the user tries to
+   * close the window and resolves whether the close should proceed (e.g. true once unsaved work is
+   * saved, or the user confirms discarding it). Desktop-only — the browser host omits it and relies
+   * on the `beforeunload` guard instead.
+   */
+  onCloseRequested?(decide: () => Promise<boolean>): Promise<void>;
+
   // --- workspace file management (explorer tree + mutations) ------------------
   // All operations are addressed by opaque tokens; the UI never parses a token. `relPath` is
   // forward-slashed and relative to the opened folder. Mutating ops return the NEW token of the
