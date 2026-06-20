@@ -1,0 +1,36 @@
+// The strategic view (R14.1) — how the SaaS platform's bounded contexts relate. A context
+// map is a top-level declaration (a sibling of `context`, not nested in one). In directory
+// mode every .koi file compiles as one model, so this map can name the contexts declared in
+// the other files and authorize their event flow.
+//
+// A context map allows only ONE relation per unordered context pair, so a two-way
+// relationship is modelled with `<->`. Each relationship KIND is used where it fits the
+// platform: customer-supplier, open-host, and anti-corruption-layer.
+contextmap {
+
+  // Customer–supplier: the Tenant context (upstream) supplies the organisation identity
+  // that Subscription (downstream) scopes every subscription to. Subscription depends on
+  // Tenant, not the other way around.
+  Tenant       -> Subscription  : customer-supplier
+
+  // Open-host service / published language: Subscription publishes its lifecycle events
+  // (TrialStarted, SubscriptionActivated, PlanChanged, SubscriptionCancelled). This
+  // open-host relation authorizes the four downstream subscriptions in Entitlements
+  // (without it, the `subscribes Subscription.*` lines would be rejected).
+  Subscription -> Entitlements  : open-host
+
+  // Customer–supplier, bidirectional: Subscription and Billing are partners in the dunning
+  // loop. Subscription publishes SubscriptionActivated so Billing can raise the first
+  // invoice, and Billing publishes PaymentDeclined so Subscription can suspend the plan.
+  // A single bidirectional relation authorizes subscriptions in BOTH directions (a context
+  // map allows only one relation per pair, so the round-trip is modelled as `<->`).
+  Subscription <-> Billing      : customer-supplier
+
+  // Anti-corruption layer: Billing translates the external PaymentGateway's model into its
+  // own. The acl block emits an IPaymentGatewayToBillingTranslator interface in Billing
+  // mapping the provider's raw charge onto our clean ChargeReceipt.
+  PaymentGateway -> Billing     : anti-corruption-layer
+    acl {
+      PaymentGateway.ProviderCharge -> Billing.ChargeReceipt
+    }
+}

@@ -1,0 +1,40 @@
+{
+  "id": "library",
+  "name": "Library",
+  "tagline": "A lending library across five contexts — the Book-vs-BookCopy distinction, loans, reservations and fines.",
+  "description": "A realistic public-library domain across five bounded contexts whose centrepiece is the identity distinction every catalogue faces: a Book is the abstract title (an ISBN, an author, a subject) while a BookCopy is a single physical, barcoded, shelvable item — one title, many copies, two contexts. Catalog owns the Book; Inventory owns the BookCopy and its shelf lifecycle. Loans is the heart of the template: the headline Loan aggregate ties a member to a copy, runs a lifecycle state machine, and enforces the rules that anchor a lending library — a copy cannot be loaned twice (an activeForCopy finder plus Inventory's checkOut guard), a loan cannot be renewed while another member has a reservation on the title, and an overdue return accrues a non-negative fine derived in a LoanTerm value object; it publishes BookBorrowed, Returned, LoanRenewed and FineCreated. Reservations models a waiting list with an expiry rule (a ready hold lapses if not collected in its window) and publishes ReservationPlaced, which Loans subscribes to in order to block renewals. Members tracks each borrower's status and running fine balance, subscribing to FineCreated and suspending anyone who owes too much. The context map wires the five contexts with customer-supplier relations (including a bidirectional Loans-Reservations loop) and open-host published events.",
+  "difficulty": "intermediate",
+  "tags": [
+    "library",
+    "loans",
+    "reservations",
+    "fines",
+    "identity",
+    "aggregate",
+    "state-machine",
+    "value-objects",
+    "integration-events",
+    "context-map",
+    "ddd"
+  ],
+  "contexts": ["Catalog", "Inventory", "Loans", "Reservations", "Members"],
+  "coreAggregate": "Loan",
+  "entryFile": "loans.koi",
+  "teaches": [
+    "the Book-vs-BookCopy identity distinction: one abstract title, many physical copies, two contexts",
+    "natural-key identity for a catalogue title and a separate id for each copy",
+    "an aggregate (Loan) that references other contexts' entities by id, never by embedding",
+    "entity lifecycle state machines for loans, copies, reservations and memberships",
+    "'a copy cannot be loaned twice' via an intention-revealing finder and a guard",
+    "'renew blocked while a reservation exists' as a command guard fed by a subscription",
+    "reservation expiry modelled as a derived rule on a hold-window value object",
+    "fines as a non-negative-by-construction value object and a domain-service policy",
+    "commands that guard with requires, mutate state and emit domain events",
+    "factory-only creation with create",
+    "integration events as a published language across contexts",
+    "a bidirectional customer-supplier loop between Loans and Reservations",
+    "versioned aggregates, repositories with finders, read models and queries",
+    "a context map exercising customer-supplier and open-host relationships"
+  ],
+  "icon": "📚"
+}

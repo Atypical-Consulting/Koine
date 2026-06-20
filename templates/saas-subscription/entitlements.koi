@@ -1,0 +1,139 @@
+/// Entitlements bounded context — what a tenant is actually allowed to do given their
+/// plan. It watches the subscription lifecycle and provisions (or revokes) the feature
+/// set and seat allowance for each tenant. Kept in its own context so "which features a
+/// tier unlocks" evolves independently of "how a subscription is billed".
+context Entitlements version 1 {
+
+  /// The state of a tenant's entitlement grant. Drives the `states status { … }` machine.
+  enum GrantStatus { Provisioning, Granted, Degraded, Revoked }
+
+  /// The named capabilities a plan can unlock. A plain enum used for feature gating.
+  enum Feature { Sso, ApiAccess, AdvancedReports, PrioritySupport, AuditLog }
+
+  /// A seat allowance — how many members a tenant may invite. A value object so a seat
+  /// count is never a bare, meaning-free integer.
+  value SeatAllowance {
+    seats: Int
+    used:  Int
+    // Derived (computed, get-only): remaining seats, clamped so it never goes negative.
+    remaining: Int  = if seats > used then seats - used else 0
+    isFull:    Bool = used >= seats
+    invariant seats >= 0          "a seat allowance cannot be negative"
+    invariant used >= 0           "used seats cannot be negative"
+    invariant used <= seats       "cannot use more seats than allowed"
+  }
+
+  // R14.3 — react to the subscription lifecycle (authorized by the open-host relations
+  // `Subscription -> Entitlements` in context-map.koi). Each seam lets the host provision,
+  // re-provision or revoke a tenant's entitlements as their plan changes.
+  subscribes Subscription.TrialStarted
+  subscribes Subscription.SubscriptionActivated
+  subscribes Subscription.PlanChanged
+  subscribes Subscription.SubscriptionCancelled
+
+  /// The entitlement-grant aggregate: one record per tenant capturing what they may use.
+  /// Being an aggregate root it gains an `IEntitlementGrantRepository` and joins the
+  /// context UoW; the repository block adds intention-revealing finders (R11.3).
+  aggregate Provisioning root EntitlementGrant {
+
+    repository {
+      operations: getById, add, update
+      find byTenant(tenant: TenantId): EntitlementGrant
+      find granted(): List<EntitlementGrant>
+    }
+
+    /// Raised inside the aggregate when a grant is provisioned by the factory (R6/R8).
+    event GrantProvisioned {
+      grant:  EntitlementGrantId
+      tenant: TenantId
+    }
+
+    /// Raised when a grant's feature set changes after a plan change (R6).
+    event GrantReprovisioned {
+      grant:    EntitlementGrantId
+      features: Int
+    }
+
+    /// Raised when a grant is revoked after a cancellation (R6).
+    event GrantRevoked {
+      grant: EntitlementGrantId
+    }
+
+    entity EntitlementGrant identified by EntitlementGrantId {
+      tenant:   TenantId
+      features: Set<Feature>
+      seats:    SeatAllowance
+      status:   GrantStatus = Provisioning
+
+      // Derived read helpers (R1.1).
+      isGranted:  Bool = status == Granted
+      isDegraded: Bool = status == Degraded
+      seatCount:  Int  = seats.seats
+
+      invariant seats.seats >= 0   "a seat allowance cannot be negative"
+
+      // The grant lifecycle (R7): provisioned, granted, degraded when a plan downgrades
+      // or payment slips, and revoked on cancellation (terminal).
+      states status {
+        Provisioning -> Granted, Revoked
+        Granted      -> Degraded, Revoked
+        Degraded     -> Granted, Revoked
+        Revoked
+      }
+
+      /// Activate a provisioned grant, opening up the tenant's features (R5/R6).
+      command grant {
+        requires status == Provisioning   "only a provisioning grant can be granted"
+        status -> Granted
+        emit GrantReprovisioned(grant: id, features: features.count)
+      }
+
+      /// Re-provision the feature set and seat allowance after a plan change (R5/R6).
+      command reprovision(newFeatures: Set<Feature>, newSeats: SeatAllowance) {
+        requires status != Revoked   "a revoked grant cannot be re-provisioned"
+        features -> newFeatures
+        seats    -> newSeats
+        emit GrantReprovisioned(grant: id, features: newFeatures.count)
+      }
+
+      /// Degrade a granted tenant to the free feature set when payment slips (R5).
+      command degrade {
+        requires status == Granted   "only a granted entitlement can be degraded"
+        status -> Degraded
+      }
+
+      /// Revoke all entitlements when the subscription is cancelled (R5/R6).
+      command revoke {
+        requires status != Revoked   "the grant is already revoked"
+        status -> Revoked
+        emit GrantRevoked(grant: id)
+      }
+
+      /// R8 — provision a fresh grant for a tenant starting a trial.
+      create provision(tenant: TenantId, features: Set<Feature>, seats: SeatAllowance) {
+        emit GrantProvisioned(grant: id, tenant: tenant)
+      }
+    }
+  }
+
+  /// R10.1 — a named, reusable specification over EntitlementGrant, emitted as a static
+  /// predicate (EntitlementsSpecifications.IsAtSeatLimit): the tenant has used every seat.
+  spec IsAtSeatLimit on EntitlementGrant = seats.used >= seats.seats
+
+  /// R12.2 — the application service interface (IEntitlementsService).
+  service EntitlementsService {
+    usecase ProvisionGrant(tenant: TenantId, features: Set<Feature>, seats: SeatAllowance): EntitlementGrantId
+    usecase RevokeGrant(grant: EntitlementGrantId)
+  }
+
+  /// R12.3 — a flat read model for an admin entitlements view.
+  readmodel GrantSummary from EntitlementGrant {
+    id
+    tenant
+    status
+    seatCount: Int = seats.seats
+  }
+
+  /// R12.4 — a query DTO over the read model.
+  query GrantsByStatus(status: GrantStatus): List<GrantSummary>
+}

@@ -1,0 +1,131 @@
+/// Tenant bounded context — the customer organisation that owns a subscription. In a
+/// multi-tenant SaaS the Tenant is the upstream identity the rest of the platform hangs
+/// off: a subscription, its billing, and its feature entitlements are all scoped to one
+/// tenant. Kept in its own context so "who the customer is" evolves independently of
+/// "what plan they are on".
+context Tenant version 1 {
+
+  /// The lifecycle of a tenant account. Drives the `states status { … }` machine on the
+  /// entity, so only the declared transitions are legal at runtime.
+  enum TenantStatus { Onboarding, Active, Locked, Closed }
+
+  /// A contact email address — a first-class value object so an address is never a bare,
+  /// unvalidated string floating through the model (R1.2 string ops + regex shape).
+  value Email {
+    address:    String
+    normalized: String = address.trim.lower
+    invariant address.trim.length > 0                         "an email cannot be blank"
+    invariant address matches /^[^@\s]+@[^@\s]+\.[^@\s]+$/    "not a valid email address"
+  }
+
+  /// The publicly visible name of a tenant's workspace, used in URLs and the UI. A small
+  /// value object so a slug carries its own shape rule.
+  value Workspace {
+    slug:        String
+    displayName: String
+    invariant slug matches /^[a-z][a-z0-9-]{2,38}$/   "a workspace slug must be 3-39 lowercase chars"
+    invariant displayName.trim.length > 0             "a workspace needs a display name"
+  }
+
+  /// The tenant aggregate — one organisation on the platform. Being an aggregate root it
+  /// gains an `ITenantRepository` and joins the context's generated `IUnitOfWork`; the
+  /// repository block tunes the mutating set and adds intention-revealing finders (R11.3).
+  aggregate Account root Tenant {
+
+    repository {
+      operations: getById, add, update
+      find bySlug(workspace: Workspace): Tenant
+      find activeAccounts(): List<Tenant>
+    }
+
+    /// Raised inside the aggregate when a tenant is registered by the factory (R6/R8).
+    event TenantRegistered {
+      tenant:    TenantId
+      workspace: String
+    }
+
+    /// Raised when a tenant account is activated after onboarding completes (R6).
+    event TenantActivated {
+      tenant: TenantId
+    }
+
+    /// Raised when a tenant account is locked for non-payment or abuse (R6).
+    event TenantLocked {
+      tenant: TenantId
+      reason: String
+    }
+
+    entity Tenant identified by TenantId {
+      workspace:   Workspace
+      billingEmail: Email
+      status:      TenantStatus = Onboarding
+
+      // Derived (computed, get-only) read helpers (R1.1).
+      isActive:  Bool   = status == Active
+      isLocked:  Bool   = status == Locked
+      slug:      String = workspace.slug
+
+      invariant workspace.slug.trim.length > 0   "a tenant needs a workspace"
+
+      // The tenant lifecycle (R7): onboarding to active, lockable for non-payment, and
+      // ultimately closed. A closed account is terminal.
+      states status {
+        Onboarding -> Active, Closed
+        Active     -> Locked, Closed
+        Locked     -> Active, Closed
+        Closed
+      }
+
+      /// Activate a tenant once onboarding is complete (R5/R6).
+      command activate {
+        requires status == Onboarding   "only an onboarding tenant can be activated"
+        status -> Active
+        emit TenantActivated(tenant: id)
+      }
+
+      /// Lock an active tenant — typically driven by a billing failure policy (R5/R6).
+      command lock(reason: String) {
+        requires status == Active   "only an active tenant can be locked"
+        status -> Locked
+        emit TenantLocked(tenant: id, reason: reason)
+      }
+
+      /// Restore a locked tenant once payment is recovered (R5).
+      command unlock {
+        requires status == Locked   "only a locked tenant can be unlocked"
+        status -> Active
+      }
+
+      /// Close a tenant account permanently (R5).
+      command close {
+        requires status != Closed   "the tenant is already closed"
+        status -> Closed
+      }
+
+      /// R8 — factory-only creation: register a new tenant. The presence of any `create`
+      /// makes the all-args constructor private, so callers must go through
+      /// `Tenant.Register(...)`.
+      create register(workspace: Workspace, billingEmail: Email) {
+        requires workspace.slug.trim.length > 0   "a tenant needs a workspace"
+        emit TenantRegistered(tenant: id, workspace: workspace.slug)
+      }
+    }
+  }
+
+  /// R12.2 — the application/use-case service interface (ITenantService).
+  service TenantService {
+    usecase RegisterTenant(workspace: Workspace, billingEmail: Email): TenantId
+    usecase ActivateTenant(tenant: TenantId)
+    usecase LockTenant(tenant: TenantId, reason: String)
+  }
+
+  /// R12.3 — a flat read model + projection mapper for an account list.
+  readmodel TenantSummary from Tenant {
+    id
+    slug
+    status
+  }
+
+  /// R12.4 — a query DTO over the read model.
+  query TenantsByStatus(status: TenantStatus): List<TenantSummary>
+}

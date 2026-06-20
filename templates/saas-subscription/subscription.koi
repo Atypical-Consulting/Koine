@@ -1,0 +1,286 @@
+/// Subscription bounded context — the heart of the template. The `Subscription`
+/// aggregate is the headline aggregate: its lifecycle is an explicit state machine
+/// (trial → active → suspended → cancelled), it carries the quota/overage invariants
+/// that anchor a metered SaaS plan, and it publishes integration events the rest of the
+/// platform reacts to. Plan changes, payment failures and cancellations all flow from
+/// here.
+context Subscription version 1 {
+
+  /// The billing cadence of a plan. A plain enum used for renewal scheduling.
+  enum BillingCycle { Monthly, Annual }
+
+  /// The named plan tiers on offer. Drives entitlement and price selection elsewhere.
+  enum PlanTier { Free, Starter, Pro, Enterprise }
+
+  /// The lifecycle state of a subscription. Drives the `states status { … }` machine on
+  /// the entity, so only the transitions declared there are legal at runtime.
+  enum SubscriptionStatus { Trialing, Active, Suspended, Cancelled }
+
+  /// A monetary amount. Never negative. `currency` is a primitive ISO string here —
+  /// Subscription is downstream of no shared kernel, so it keeps money loose to match
+  /// whatever the upstream catalogue priced the plan in.
+  value Money {
+    amount:   Decimal
+    currency: String
+    invariant amount >= 0   "an amount cannot be negative"
+  }
+
+  /// The plan a subscription is on: its tier, recurring price and the metered allowance
+  /// it grants. A first-class value object so a "plan" is never a loose bag of fields.
+  value Plan {
+    tier:           PlanTier
+    cycle:          BillingCycle
+    price:          Money
+    /// The included allowance for the metered resource (e.g. API calls or seats).
+    includedQuota:  Int
+    /// What each unit over the included quota costs.
+    overageRate:    Money
+    // Derived (computed, get-only): whether this is a paid plan (R1.1).
+    isPaid:         Bool = price.amount > 0
+    invariant includedQuota >= 0   "an included quota cannot be negative"
+  }
+
+  /// Metered usage recorded against a subscription in the current billing period. THE
+  /// quota/overage value object of this context: it derives the billable overage from
+  /// the consumed amount versus the plan's allowance, and proves the overage can never
+  /// go negative.
+  value UsageMeter {
+    /// The plan's included allowance for this period.
+    includedQuota: Int
+    /// How much of the metered resource has been consumed this period.
+    consumed:      Int
+    // Derived (computed, get-only): units over the allowance — clamped at zero so it can
+    // never go negative (R1.1, conditional expression).
+    overage:       Int  = if consumed > includedQuota then consumed - includedQuota else 0
+    // Whether the subscriber has exceeded the included allowance.
+    overQuota:     Bool = consumed > includedQuota
+    // How much headroom is left before overage kicks in (may be zero, never negative).
+    remaining:     Int  = if includedQuota > consumed then includedQuota - consumed else 0
+
+    invariant includedQuota >= 0   "an included quota cannot be negative"
+    invariant consumed >= 0        "consumed usage cannot be negative"
+    // The anchoring rule: derived overage is always non-negative by construction.
+    invariant overage >= 0         "overage can never be negative"
+  }
+
+  /// Announced when a tenant starts a free trial (R14.3). An integration event is a
+  /// *published language* — its fields stay primitive (ids/scalars/enums), never leaking
+  /// internal value objects. Entitlements subscribes to provision trial features.
+  integration event TrialStarted {
+    subscription: SubscriptionId
+    tenant:       TenantId
+    tier:         PlanTier
+    startedAt:    Instant
+  }
+
+  /// Announced when a subscription becomes a paying, active plan (R14.3). Entitlements
+  /// and Billing both react to it.
+  integration event SubscriptionActivated {
+    subscription: SubscriptionId
+    tenant:       TenantId
+    tier:         PlanTier
+    activatedAt:  Instant
+  }
+
+  /// Announced when a subscriber moves to a different plan (R14.3). Entitlements
+  /// re-provisions features and Billing re-prices the next invoice.
+  integration event PlanChanged {
+    subscription: SubscriptionId
+    tenant:       TenantId
+    fromTier:     PlanTier
+    toTier:       PlanTier
+    changedAt:    Instant
+  }
+
+  /// Announced when a recurring payment for a subscription fails (R14.3). Billing is the
+  /// publisher of the *gateway* failure (see billing.koi); this is the subscription-level
+  /// fact other contexts react to — Tenant may lock the account, Entitlements may degrade.
+  integration event PaymentFailed {
+    subscription: SubscriptionId
+    tenant:       TenantId
+    attempt:      Int
+    failedAt:     Instant
+  }
+
+  /// Announced when a subscription is cancelled (R14.3). Entitlements revokes paid
+  /// features at period end; Billing stops further charges.
+  integration event SubscriptionCancelled {
+    subscription: SubscriptionId
+    tenant:       TenantId
+    cancelledAt:  Instant
+  }
+
+  publishes TrialStarted
+  publishes SubscriptionActivated
+  publishes PlanChanged
+  publishes PaymentFailed
+  publishes SubscriptionCancelled
+
+  // R14.3 — react to gateway payment failures raised by Billing (authorized by the
+  // `Billing -> Subscription : customer-supplier` relation in context-map.koi). The host
+  // implements the IHandlePaymentDeclined seam to suspend the subscription and re-publish
+  // the subscription-level PaymentFailed fact.
+  subscribes Billing.PaymentDeclined
+
+  /// The subscription aggregate — the consistency boundary that owns plan, status and
+  /// usage. `versioned` adds an optimistic-concurrency token (R11.4); the repository
+  /// block tunes the mutating set and adds intention-revealing finders (R11.3).
+  aggregate Subscription root Subscription versioned {
+
+    repository {
+      operations: getById, add, update
+      find byTenant(tenant: TenantId): List<Subscription>
+      // Intention-revealing finder backing the "one active subscription per tenant"
+      // invariant — the application service queries this before activating a new one.
+      find activeForTenant(tenant: TenantId): Subscription
+      find dueForRenewal(): List<Subscription>
+    }
+
+    /// Raised inside the aggregate when a subscription is opened on a trial (R6/R8).
+    event SubscriptionOpened {
+      subscription: SubscriptionId
+      tenant:       TenantId
+      tier:         PlanTier
+    }
+
+    /// Raised when a subscription is suspended for non-payment (R6).
+    event SubscriptionSuspended {
+      subscription: SubscriptionId
+      attempt:      Int
+    }
+
+    /// Raised when usage is recorded that crosses the included allowance (R6). The
+    /// billing context reacts to bill the overage.
+    event OverageIncurred {
+      subscription: SubscriptionId
+      overageUnits: Int
+    }
+
+    /// The subscription a tenant holds — the consistency boundary of this aggregate.
+    entity Subscription identified by SubscriptionId {
+      tenant:        TenantId
+      plan:          Plan
+      status:        SubscriptionStatus = Trialing
+      usage:         UsageMeter
+      // The number of consecutive failed payment attempts. Drives suspension.
+      failedAttempts: Int      = 0
+      activatedAt:   Instant?
+      cancelledAt:   Instant?
+
+      // Derived (computed, get-only) read helpers (R1.1 / R2.1).
+      tier:        PlanTier = plan.tier
+      isTrialing:  Bool = status == Trialing
+      isActive:    Bool = status == Active
+      isCancelled: Bool = status == Cancelled
+      // Surface the quota position for dashboards (R1.1, navigating into the meter).
+      overage:     Int  = usage.overage
+      overQuota:   Bool = usage.overQuota
+
+      // --- The anchoring quota/overage invariants (R4) ----------------------------
+      // Consumed usage and the included quota are always non-negative.
+      invariant usage.consumed >= 0      "consumed usage cannot be negative"
+      invariant plan.includedQuota >= 0  "an included quota cannot be negative"
+      // An active, paid subscription must be on a paid plan (a Free tier trials only).
+      invariant plan.isPaid when status == Active
+        "an active subscription must be on a paid plan"
+      // A cancelled subscription must record when it was cancelled.
+      invariant cancelledAt.isPresent when status == Cancelled
+        "a cancelled subscription must record its cancellation time"
+
+      // The subscription lifecycle (R7): the trial → active → suspended → cancelled
+      // path the brief calls for. A trial can convert or lapse; an active plan can be
+      // suspended for non-payment and recovered; cancellation is terminal.
+      states status {
+        Trialing  -> Active, Cancelled
+        Active    -> Suspended, Cancelled
+        Suspended -> Active, Cancelled
+        Cancelled
+      }
+
+      /// Convert a trial (or recover a suspension) into an active, paying plan,
+      /// stamping the time (R5/R6). The cross-context announcement is
+      /// `SubscriptionActivated`.
+      command activate {
+        requires status == Trialing || status == Suspended
+          "only a trialing or suspended subscription can be activated"
+        requires plan.isPaid   "cannot activate onto a free plan"
+        status         -> Active
+        activatedAt    -> now
+        failedAttempts -> 0
+      }
+
+      /// Move a subscriber to a different plan (R5). The "one active subscription per
+      /// tenant" rule is enforced by the application service via `activeForTenant`; the
+      /// cross-context announcement is `PlanChanged`.
+      command changePlan(newPlan: Plan) {
+        requires status != Cancelled   "a cancelled subscription cannot change plan"
+        plan -> newPlan
+      }
+
+      /// Record metered usage for the period (R5/R6). When consumption crosses the
+      /// included allowance the aggregate raises `OverageIncurred` so Billing can bill it.
+      command recordUsage(meter: UsageMeter) {
+        requires status != Cancelled   "a cancelled subscription does not accrue usage"
+        usage -> meter
+        emit OverageIncurred(subscription: id, overageUnits: meter.overage)
+      }
+
+      /// Suspend an active subscription after a failed payment (R5/R6), tracking the
+      /// attempt count that drives downstream retries and eventual cancellation.
+      command suspend(attempt: Int) {
+        requires status == Active   "only an active subscription can be suspended"
+        status         -> Suspended
+        failedAttempts -> attempt
+        emit SubscriptionSuspended(subscription: id, attempt: attempt)
+      }
+
+      /// Cancel a subscription, stamping the time the invariant demands (R5).
+      command cancel {
+        requires status != Cancelled   "the subscription is already cancelled"
+        status      -> Cancelled
+        cancelledAt -> now
+      }
+
+      /// R8 — factory-only creation: open a subscription on a trial for a tenant. The
+      /// presence of any `create` makes the all-args constructor private, so callers must
+      /// go through `Subscription.StartTrial(...)`.
+      create startTrial(tenant: TenantId, plan: Plan, usage: UsageMeter) {
+        emit SubscriptionOpened(subscription: id, tenant: tenant, tier: plan.tier)
+      }
+    }
+  }
+
+  /// R10.1 — a named, reusable specification over Subscription, emitted as a static
+  /// predicate (SubscriptionSpecifications.IsOverQuota): the subscriber is over allowance.
+  spec IsOverQuota on Subscription = usage.consumed > plan.includedQuota
+
+  /// R10.2 — a domain service with pure operations (expression bodies). `overageCharge`
+  /// prices a number of overage units at the plan's rate; `shouldCancel` decides whether
+  /// repeated failures have exhausted the dunning retries.
+  service DunningService {
+    operation overageCharge(units: Int, rate: Decimal): Decimal = units * rate
+    operation shouldCancel(attempts: Int): Bool = attempts >= 3
+  }
+
+  /// R12.2 — the application/use-case service interface (ISubscriptionService). The
+  /// "one active subscription per tenant" rule lives here: ActivateSubscription must
+  /// check `activeForTenant` before flipping a new subscription to Active.
+  service SubscriptionService {
+    usecase StartTrial(tenant: TenantId, plan: Plan): SubscriptionId
+    usecase ActivateSubscription(subscription: SubscriptionId)
+    usecase ChangePlan(subscription: SubscriptionId, newPlan: Plan)
+    usecase CancelSubscription(subscription: SubscriptionId)
+  }
+
+  /// R12.3 — a flat read model + projection mapper for a subscriptions board.
+  readmodel SubscriptionSummary from Subscription {
+    id
+    tenant
+    tier
+    status
+  }
+
+  /// R12.4 — query DTOs over the read model.
+  query SubscriptionsByStatus(status: SubscriptionStatus): List<SubscriptionSummary>
+  query SubscriptionsByTier(tier: PlanTier): List<SubscriptionSummary>
+}
