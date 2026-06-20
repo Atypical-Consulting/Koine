@@ -32,10 +32,9 @@ import { buildSourceZip } from './sourceZip';
 import { formatChord } from './platform';
 import { renderDiagrams } from './diagrams';
 import { renderGlossary, type GlossaryHandlers } from './glossary';
-import { createAssistantPanel, type AssistantPanel } from './aiPanel';
+import { createAssistantPanel, type AssistantPanel, type AssistantContext, type DomainIndex } from './aiPanel';
 import { clearModelHash, readModelFromHash, workspaceShareUrlOrNull } from './share';
 import { dirtyCount, handleBeforeUnload, saveAllDirtyBuffers, titleWithDirty } from './dirty';
-import { clashingRelPaths, isDirtyTrackable } from './sharedWorkspace';
 import { createConfirmDialog } from './overlay';
 
 // --- workspace fs contract ---------------------------------------------------
@@ -393,14 +392,6 @@ export function init(): void {
   // the open .koi `buffers` remain the compiled workspace. Mutations refresh both.
   let folderRootToken: string = '';
   let entriesCache: FsEntry[] = [];
-
-  // True when the workspace is the in-memory shared import (folder mode with no host folder behind it):
-  // every buffer is a path-null synthetic, so edits are at risk and "save" means materializing the whole
-  // workspace to a real folder. Real folder mode has a non-null folderRootToken; scratch mode is not
-  // folderMode — so this is the one mode where path-null buffers must still be dirty-tracked.
-  function isInMemoryWorkspace(): boolean {
-    return folderMode && folderRootToken == null;
-  }
 
   const treeEl = el<HTMLElement>('filetree');
   const treeBodyEl = el<HTMLElement>('filetree-body');
@@ -1530,14 +1521,6 @@ export function init(): void {
         lsp.changeDoc(activeUri, active.text);
       }
 
-      // The in-memory shared workspace has no per-file backing — "save all" means materializing the
-      // whole workspace to a folder in one action, not a save-as dialog per buffer.
-      if (isInMemoryWorkspace()) {
-        if (dirtyCount(buffers) > 0) await saveSharedWorkspaceToFolder();
-        else setStatus('No unsaved changes', 'green');
-        return;
-      }
-
       if (dirtyCount(buffers) === 0) {
         setStatus('No unsaved changes', 'green');
         return;
@@ -1601,11 +1584,6 @@ export function init(): void {
   async function confirmReplaceWork(title: string, confirmLabel: string): Promise<boolean> {
     if (!hasUnsavedWork()) return true;
     const save = formatChord('mod+S');
-    const message = isInMemoryWorkspace()
-      ? `This shared workspace lives only in memory. Save it to a folder with ${save} first to keep your changes.`
-      : folderMode
-        ? `Files with unsaved changes will lose them. Save with ${save} first to keep them.`
-        : `Your current model has unsaved changes that will be lost. Save it with ${save} first to keep it.`;
     return confirmDialog.ask({
       title,
       message: `Files with unsaved changes will lose them. Save with ${save} first to keep them.`,
