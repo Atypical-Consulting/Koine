@@ -158,6 +158,11 @@ internal sealed class LspServer
                                         ["resolveProvider"] = false,
                                         ["triggerCharacters"] = new[] { ":", "." },
                                     },
+                                    ["signatureHelpProvider"] = new Dictionary<string, object?>
+                                    {
+                                        ["triggerCharacters"] = new[] { "(", "," },
+                                        ["retriggerCharacters"] = new[] { "," },
+                                    },
                                     ["hoverProvider"] = true,
                                     ["definitionProvider"] = true,
                                     ["documentFormattingProvider"] = true,
@@ -255,6 +260,14 @@ internal sealed class LspServer
                             if (root.TryGetProperty("id", out _))
                             {
                                 Respond(root, CompletionResult(root));
+                            }
+
+                            break;
+
+                        case "textDocument/signatureHelp":
+                            if (root.TryGetProperty("id", out _))
+                            {
+                                Respond(root, SignatureHelpResultJson(root));
                             }
 
                             break;
@@ -443,6 +456,37 @@ internal sealed class LspServer
             .ToArray();
 
         return new Dictionary<string, object?> { ["isIncomplete"] = false, ["items"] = items };
+    }
+
+    private object? SignatureHelpResultJson(JsonElement root)
+    {
+        if (!TryGetUri(root, out var uri) || !TryGetPosition(root, out var line, out var ch))
+        {
+            return null;
+        }
+
+        var help = _ls.SignatureHelpAt(_docs, uri, line, ch);
+        if (help is null)
+        {
+            return null;
+        }
+
+        var signatures = help.Signatures
+            .Select(s => (object)new Dictionary<string, object?>
+            {
+                ["label"] = s.Label,
+                ["parameters"] = s.Parameters
+                    .Select(p => (object)new Dictionary<string, object?> { ["label"] = p.Label })
+                    .ToArray(),
+            })
+            .ToArray();
+
+        return new Dictionary<string, object?>
+        {
+            ["signatures"] = signatures,
+            ["activeSignature"] = help.ActiveSignature,
+            ["activeParameter"] = help.ActiveParameter,
+        };
     }
 
     private object? HoverResultJson(JsonElement root)

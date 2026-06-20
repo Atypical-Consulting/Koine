@@ -108,6 +108,21 @@ export interface Location {
   range: Range;
 }
 
+// Standard LSP signature help (mirrors WASM WSignatureHelp / the desktop LSP). Koine has
+// no overloads, so `signatures` always holds exactly one entry.
+export interface ParameterInformation {
+  label: string;
+}
+export interface SignatureInformation {
+  label: string;
+  parameters: ParameterInformation[];
+}
+export interface SignatureHelp {
+  signatures: SignatureInformation[];
+  activeSignature: number;
+  activeParameter: number;
+}
+
 // Standard LSP DocumentSymbol tree. `kind` is the SymbolKind number (e.g. 5=Class,
 // 10=Enum, 22=EnumMember, 8=Field, 6=Method, 23=Struct, 13=Variable, 3=Namespace).
 export interface DocumentSymbol {

@@ -1,3 +1,4 @@
+using Antlr4.Runtime;
 using Koine.Compiler.Ast;
 using Koine.Compiler.Grammar;
 
@@ -29,6 +30,26 @@ public sealed record TextEditModel(SourceSpan Range, string NewText);
 /// the LSP shell maps it to a CodeAction with an inline WorkspaceEdit.
 /// </summary>
 public sealed record CodeActionEdit(string Title, string Kind, IReadOnlyList<TextEditModel> Edits);
+
+/// <summary>One parameter of a signature, with its display <see cref="Label"/> (e.g. <c>a: Decimal</c>).</summary>
+public sealed record ParameterInfo(string Label);
+
+/// <summary>
+/// One callable signature for signature help: a full <see cref="Label"/> (e.g.
+/// <c>place(a: Decimal, b: Decimal)</c>) and its ordered <see cref="Parameters"/>. Editor-agnostic.
+/// </summary>
+public sealed record SignatureInfo(string Label, IReadOnlyList<ParameterInfo> Parameters);
+
+/// <summary>
+/// A signature-help answer: the resolved <see cref="Signatures"/> (always one for Koine, which
+/// has no overloads), the <see cref="ActiveSignature"/> index, and the <see cref="ActiveParameter"/>
+/// the cursor sits on (the count of top-level commas between the call's <c>(</c> and the cursor).
+/// Editor-agnostic; the LSP/WASM shells map it to an LSP SignatureHelp.
+/// </summary>
+public sealed record SignatureHelp(
+    IReadOnlyList<SignatureInfo> Signatures,
+    int ActiveSignature,
+    int ActiveParameter);
 
 /// <summary>The kind of a document symbol; the LSP shell maps these to LSP SymbolKind numbers.</summary>
 public enum SymbolKind { Namespace, Class, Enum, EnumMember, Field, Method, Constructor, Interface, Struct }
@@ -764,5 +785,185 @@ public sealed class KoineLanguageService
         }
 
         return RefactorService.RefactorsFor(_compiler, source, startOffset, endOffset);
+    }
+
+    /// <summary>
+    /// Signature help for the call enclosing the cursor. Walks back from the cursor to the nearest
+    /// UNCLOSED <c>(</c>, resolves the identifier immediately before it to a command/factory on an
+    /// entity, or an operation/use-case on a service, and reports that declaration's parameter list
+    /// plus the active parameter (the count of top-level commas between the <c>(</c> and the cursor).
+    /// Returns null when the document is not open, the cursor is in a string/regex, there is no
+    /// enclosing open call, or the callee does not resolve to a parameterized declaration.
+    /// </summary>
+    public SignatureHelp? SignatureHelpAt(IReadOnlyDictionary<string, string> documents, string activeUri, int line, int character)
+    {
+        if (!documents.TryGetValue(activeUri, out var source))
+        {
+            return null;
+        }
+
+        var ctx = TokenLocator.Locate(source, line, character);
+        if (ctx.InsideStringOrRegex)
+        {
+            return null;
+        }
+
+        // Lex the document and keep the default-channel tokens up to the cursor offset.
+        var cursorOffset = OffsetOf(source, line, character);
+        var tokens = DefaultChannelTokensBefore(source, cursorOffset);
+
+        // Walk back to the nearest unclosed '(' (balancing nested parens), counting the
+        // top-level commas seen between that '(' and the cursor — that count is the active parameter.
+        var depth = 0;
+        var activeParameter = 0;
+        var openIndex = -1;
+        for (var i = tokens.Count - 1; i >= 0; i--)
+        {
+            var type = tokens[i].Type;
+            if (type == KoineLexer.RPAREN)
+            {
+                depth++;
+            }
+            else if (type == KoineLexer.LPAREN)
+            {
+                if (depth == 0)
+                {
+                    openIndex = i;
+                    break;
+                }
+
+                depth--;
+            }
+            else if (type == KoineLexer.COMMA && depth == 0)
+            {
+                activeParameter++;
+            }
+        }
+
+        if (openIndex <= 0)
+        {
+            return null;
+        }
+
+        // The callee is the identifier immediately before the '('.
+        var callee = tokens[openIndex - 1];
+        if (!IsWordToken(callee))
+        {
+            return null;
+        }
+
+        var (model, _) = _compiler.Parse(source);
+        if (model is null)
+        {
+            return null;
+        }
+
+        var index = new ModelIndex(model);
+        var parameters = ResolveCalleeParameters(index, callee.Text);
+        if (parameters is null)
+        {
+            return null;
+        }
+
+        var paramInfos = parameters
+            .Select(p => new ParameterInfo($"{p.Name}: {RenderType(p.Type)}"))
+            .ToList();
+        var label = $"{callee.Text}({string.Join(", ", paramInfos.Select(p => p.Label))})";
+        return new SignatureHelp([new SignatureInfo(label, paramInfos)], 0, activeParameter);
+    }
+
+    /// <summary>
+    /// Resolves a callee name to the parameter list of the entity command/factory or service
+    /// operation/use-case that declares it, using the same enumeration shape as
+    /// <see cref="SemanticTokenProvider"/>. Returns null when no parameterized declaration matches.
+    /// </summary>
+    private static IReadOnlyList<Param>? ResolveCalleeParameters(ModelIndex index, string callee)
+    {
+        foreach (var t in index.AllTypes())
+        {
+            if (t is EntityDecl e)
+            {
+                foreach (var c in e.Commands)
+                {
+                    if (c.Name == callee)
+                    {
+                        return c.Parameters;
+                    }
+                }
+
+                foreach (var f in e.Factories)
+                {
+                    if (f.Name == callee)
+                    {
+                        return f.Parameters;
+                    }
+                }
+            }
+        }
+
+        foreach (var ctx in index.Model.Contexts)
+        {
+            foreach (var svc in ctx.Services)
+            {
+                foreach (var op in svc.Operations)
+                {
+                    if (op.Name == callee)
+                    {
+                        return op.Parameters;
+                    }
+                }
+
+                foreach (var uc in svc.UseCases)
+                {
+                    if (uc.Name == callee)
+                    {
+                        return uc.Parameters;
+                    }
+                }
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// The default-channel tokens whose start offset is strictly before <paramref name="cursorOffset"/>.
+    /// Lexer-only (tolerant of broken documents), matching <see cref="TokenLocator"/>'s approach.
+    /// </summary>
+    private static List<IToken> DefaultChannelTokensBefore(string source, int cursorOffset)
+    {
+        var lexer = new KoineLexer(new AntlrInputStream(source));
+        lexer.RemoveErrorListeners();
+        var stream = new CommonTokenStream(lexer);
+        stream.Fill();
+
+        var result = new List<IToken>();
+        foreach (IToken t in stream.GetTokens())
+        {
+            if (t.Type == TokenConstants.EOF || t.Channel != TokenConstants.DefaultChannel)
+            {
+                continue;
+            }
+
+            if (t.StartIndex >= cursorOffset)
+            {
+                break;
+            }
+
+            result.Add(t);
+        }
+
+        return result;
+    }
+
+    private static bool IsWordToken(IToken t)
+    {
+        if (t.Type == KoineLexer.Identifier)
+        {
+            return true;
+        }
+
+        var s = t.Text;
+        return !string.IsNullOrEmpty(s) && (char.IsLetter(s[0]) || s[0] == '_');
     }
 }

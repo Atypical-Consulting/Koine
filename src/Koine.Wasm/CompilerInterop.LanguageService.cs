@@ -281,6 +281,37 @@ public static partial class CompilerInterop
     }
 
     /// <summary>
+    /// Signature help at a 0-based position in <paramref name="activeUri"/>. Mirrors the desktop LSP's
+    /// <c>textDocument/signatureHelp</c>: returns an LSP <c>SignatureHelp</c>
+    /// (<c>{ signatures, activeSignature, activeParameter }</c>) or the JSON literal <c>null</c>.
+    /// </summary>
+    [JSExport]
+    public static string SignatureHelp(string filesJson, string activeUri, int line, int character)
+    {
+        try
+        {
+            var docs = DeserializeFiles(filesJson).ToDictionary(f => f.Uri, f => f.Text, StringComparer.Ordinal);
+            var help = LanguageService.SignatureHelpAt(docs, activeUri, line, character);
+            if (help is null)
+            {
+                return "null";
+            }
+
+            var signatures = help.Signatures
+                .Select(s => new WSignatureInfo(
+                    s.Label,
+                    s.Parameters.Select(p => new WParameterInfo(p.Label)).ToArray()))
+                .ToArray();
+            var dto = new WSignatureHelp(signatures, help.ActiveSignature, help.ActiveParameter);
+            return JsonSerializer.Serialize(dto, LangJson.Default.WSignatureHelp);
+        }
+        catch
+        {
+            return "null";
+        }
+    }
+
+    /// <summary>
     /// Go-to-definition at a 0-based position in <paramref name="activeUri"/>. Returns an LSP
     /// <c>Location</c> (<c>{ uri, range }</c>) — possibly in another file — or the JSON literal
     /// <c>null</c>.
@@ -776,6 +807,15 @@ public sealed record WCompletionList(bool IsIncomplete, WCompletionItem[] Items)
 /// <summary>LSP Location.</summary>
 public sealed record WLocation(string Uri, WRange Range);
 
+/// <summary>LSP ParameterInformation: the parameter's display label.</summary>
+public sealed record WParameterInfo(string Label);
+
+/// <summary>LSP SignatureInformation: a callable's full label plus its parameters.</summary>
+public sealed record WSignatureInfo(string Label, WParameterInfo[] Parameters);
+
+/// <summary>LSP SignatureHelp: the resolved signatures plus the active signature/parameter indices.</summary>
+public sealed record WSignatureHelp(WSignatureInfo[] Signatures, int ActiveSignature, int ActiveParameter);
+
 /// <summary>LSP DocumentSymbol (recursive).</summary>
 public sealed record WDocumentSymbol(string Name, int Kind, WRange Range, WRange SelectionRange, WDocumentSymbol[] Children);
 
@@ -819,6 +859,7 @@ public sealed record WSourceFileDto(string Uri, string Text);
 [JsonSerializable(typeof(WCompletionList))]
 [JsonSerializable(typeof(WLocation))]
 [JsonSerializable(typeof(WLocation[]))]
+[JsonSerializable(typeof(WSignatureHelp))]
 [JsonSerializable(typeof(WDocumentSymbol[]))]
 [JsonSerializable(typeof(WTextEdit[]))]
 [JsonSerializable(typeof(WPrepareRename))]
