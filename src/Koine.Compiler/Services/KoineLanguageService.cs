@@ -386,6 +386,21 @@ public sealed class KoineLanguageService
     }
 
     /// <summary>
+    /// Overload of <see cref="NameAt(IReadOnlyDictionary{string,string},string,int,int)"/> that
+    /// reads the active document's source text from a held <see cref="KoineCompilation"/> snapshot.
+    /// </summary>
+    public string? NameAt(KoineCompilation compilation, string activeUri, int line, int character)
+    {
+        if (!compilation.Documents.TryGetValue(activeUri, out var source))
+        {
+            return null;
+        }
+
+        var ctx = TokenLocator.Locate(source, line, character);
+        return ctx.InsideStringOrRegex ? null : ctx.CurrentToken?.Text;
+    }
+
+    /// <summary>
     /// The 0-based absolute character offset of an LSP 0-based <paramref name="line"/>/
     /// <paramref name="character"/> in <paramref name="source"/>, matching ANTLR's
     /// <c>StartIndex</c> (which counts every character of the raw stream, including <c>\r</c>).
@@ -416,9 +431,17 @@ public sealed class KoineLanguageService
         return offset;
     }
 
-    public HoverResult? HoverAt(IReadOnlyDictionary<string, string> documents, string activeUri, int line, int character)
+    public HoverResult? HoverAt(IReadOnlyDictionary<string, string> documents, string activeUri, int line, int character) =>
+        HoverAt(ToCompilation(documents), activeUri, line, character);
+
+    /// <summary>
+    /// Overload of <see cref="HoverAt(IReadOnlyDictionary{string,string},string,int,int)"/> that
+    /// uses a held <see cref="KoineCompilation"/> snapshot, avoiding re-parses when the caller
+    /// holds and reuses the same compilation across multiple requests.
+    /// </summary>
+    public HoverResult? HoverAt(KoineCompilation compilation, string activeUri, int line, int character)
     {
-        if (!documents.TryGetValue(activeUri, out var source))
+        if (!compilation.Documents.TryGetValue(activeUri, out var source))
         {
             return null;
         }
@@ -430,13 +453,21 @@ public sealed class KoineLanguageService
             return null;
         }
 
-        var markdown = new WorkspaceIndex(documents).ResolveHover(activeUri, name, ctx.EnclosingTypeName);
+        var markdown = new WorkspaceIndex(compilation).ResolveHover(activeUri, name, ctx.EnclosingTypeName);
         return markdown is null ? null : new HoverResult(markdown);
     }
 
-    public DefinitionResult? DefinitionAt(IReadOnlyDictionary<string, string> documents, string activeUri, int line, int character)
+    public DefinitionResult? DefinitionAt(IReadOnlyDictionary<string, string> documents, string activeUri, int line, int character) =>
+        DefinitionAt(ToCompilation(documents), activeUri, line, character);
+
+    /// <summary>
+    /// Overload of <see cref="DefinitionAt(IReadOnlyDictionary{string,string},string,int,int)"/> that
+    /// uses a held <see cref="KoineCompilation"/> snapshot, avoiding re-parses when the caller
+    /// holds and reuses the same compilation across multiple requests.
+    /// </summary>
+    public DefinitionResult? DefinitionAt(KoineCompilation compilation, string activeUri, int line, int character)
     {
-        if (!documents.TryGetValue(activeUri, out var source))
+        if (!compilation.Documents.TryGetValue(activeUri, out var source))
         {
             return null;
         }
@@ -449,7 +480,7 @@ public sealed class KoineLanguageService
         }
 
         var offset = OffsetOf(source, line, character);
-        var loc = new WorkspaceIndex(documents).ResolveDefinition(activeUri, name, ctx.EnclosingTypeName, offset);
+        var loc = new WorkspaceIndex(compilation).ResolveDefinition(activeUri, name, ctx.EnclosingTypeName, offset);
         return loc is null ? null : new DefinitionResult(loc.Uri, loc.Span);
     }
 
@@ -592,9 +623,17 @@ public sealed class KoineLanguageService
     /// Every reference to the name under the cursor, across the workspace (declaration
     /// included). Empty when the cursor is not on a renameable type/enum-member/spec name.
     /// </summary>
-    public IReadOnlyList<Reference> ReferencesAt(IReadOnlyDictionary<string, string> documents, string activeUri, int line, int character)
+    public IReadOnlyList<Reference> ReferencesAt(IReadOnlyDictionary<string, string> documents, string activeUri, int line, int character) =>
+        ReferencesAt(ToCompilation(documents), activeUri, line, character);
+
+    /// <summary>
+    /// Overload of <see cref="ReferencesAt(IReadOnlyDictionary{string,string},string,int,int)"/> that
+    /// uses a held <see cref="KoineCompilation"/> snapshot, avoiding re-parses when the caller
+    /// holds and reuses the same compilation across multiple requests.
+    /// </summary>
+    public IReadOnlyList<Reference> ReferencesAt(KoineCompilation compilation, string activeUri, int line, int character)
     {
-        if (!documents.TryGetValue(activeUri, out var source))
+        if (!compilation.Documents.TryGetValue(activeUri, out var source))
         {
             return [];
         }
@@ -607,7 +646,7 @@ public sealed class KoineLanguageService
         }
 
         var offset = OffsetOf(source, line, character);
-        return new WorkspaceIndex(documents).FindReferences(activeUri, name, offset, ctx.EnclosingTypeName);
+        return new WorkspaceIndex(compilation).FindReferences(activeUri, name, offset, ctx.EnclosingTypeName);
     }
 
     /// <summary>
@@ -615,14 +654,22 @@ public sealed class KoineLanguageService
     /// every reference across the workspace. Returns null when the cursor is not on a
     /// renameable name, the new name is not a valid identifier, or it is unchanged.
     /// </summary>
-    public IReadOnlyList<Reference>? RenameAt(IReadOnlyDictionary<string, string> documents, string activeUri, int line, int character, string newName)
+    public IReadOnlyList<Reference>? RenameAt(IReadOnlyDictionary<string, string> documents, string activeUri, int line, int character, string newName) =>
+        RenameAt(ToCompilation(documents), activeUri, line, character, newName);
+
+    /// <summary>
+    /// Overload of <see cref="RenameAt(IReadOnlyDictionary{string,string},string,int,int,string)"/> that
+    /// uses a held <see cref="KoineCompilation"/> snapshot, avoiding re-parses when the caller
+    /// holds and reuses the same compilation across multiple requests.
+    /// </summary>
+    public IReadOnlyList<Reference>? RenameAt(KoineCompilation compilation, string activeUri, int line, int character, string newName)
     {
         if (!WorkspaceIndex.IsValidIdentifier(newName))
         {
             return null;
         }
 
-        if (!documents.TryGetValue(activeUri, out var source))
+        if (!compilation.Documents.TryGetValue(activeUri, out var source))
         {
             return null;
         }
@@ -635,7 +682,7 @@ public sealed class KoineLanguageService
         }
 
         var offset = OffsetOf(source, line, character);
-        var refs = new WorkspaceIndex(documents).FindReferences(activeUri, name, offset, ctx.EnclosingTypeName);
+        var refs = new WorkspaceIndex(compilation).FindReferences(activeUri, name, offset, ctx.EnclosingTypeName);
         return refs.Count == 0 ? null : refs;
     }
 
@@ -647,9 +694,17 @@ public sealed class KoineLanguageService
     /// <see cref="RenameAt"/>). The returned range covers only the identifier under the cursor, so the
     /// editor pre-selects the right text.
     /// </summary>
-    public Reference? PrepareRenameAt(IReadOnlyDictionary<string, string> documents, string activeUri, int line, int character)
+    public Reference? PrepareRenameAt(IReadOnlyDictionary<string, string> documents, string activeUri, int line, int character) =>
+        PrepareRenameAt(ToCompilation(documents), activeUri, line, character);
+
+    /// <summary>
+    /// Overload of <see cref="PrepareRenameAt(IReadOnlyDictionary{string,string},string,int,int)"/> that
+    /// uses a held <see cref="KoineCompilation"/> snapshot, avoiding re-parses when the caller
+    /// holds and reuses the same compilation across multiple requests.
+    /// </summary>
+    public Reference? PrepareRenameAt(KoineCompilation compilation, string activeUri, int line, int character)
     {
-        if (!documents.TryGetValue(activeUri, out var source))
+        if (!compilation.Documents.TryGetValue(activeUri, out var source))
         {
             return null;
         }
@@ -665,7 +720,7 @@ public sealed class KoineLanguageService
         // Only offer a rename range where a rename would actually produce edits: resolve the
         // symbol under the cursor exactly as RenameAt does (offset + enclosing-type scope).
         var offset = OffsetOf(source, line, character);
-        var refs = new WorkspaceIndex(documents).FindReferences(activeUri, name, offset, ctx.EnclosingTypeName);
+        var refs = new WorkspaceIndex(compilation).FindReferences(activeUri, name, offset, ctx.EnclosingTypeName);
         if (refs.Count == 0)
         {
             return null;
@@ -674,6 +729,16 @@ public sealed class KoineLanguageService
         // The range is the identifier token under the cursor (current.Line is 1-based; columns 0-based).
         return new Reference(activeUri, current.Line, current.Column, current.Column + name.Length);
     }
+
+    /// <summary>
+    /// Converts a <c>uri → source</c> document map to a <see cref="KoineCompilation"/> for
+    /// the delegation path of the existing documents-based overloads. This is a fresh (non-cached)
+    /// compilation per call, which preserves today's behavior for the WASM/CLI callers that pass a
+    /// fresh documents map on every request.
+    /// </summary>
+    private static KoineCompilation ToCompilation(IReadOnlyDictionary<string, string> documents) =>
+        KoineCompilation.Create(
+            documents.Select(kv => new SourceFile(kv.Key, kv.Value)).ToList());
 
     /// <summary>
     /// The refactors offered for the selection in the active document, spanning the 0-based LSP

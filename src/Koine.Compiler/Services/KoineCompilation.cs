@@ -63,6 +63,14 @@ public sealed class KoineCompilation
     private readonly Lazy<SemanticModel> _semanticModel;
     private readonly Lazy<IReadOnlyList<Diagnostic>> _syntaxDiagnostics;
 
+    /// <summary>
+    /// Per-file memoized <see cref="SemanticModel"/>s: keyed by uri, each wrapping only that
+    /// file's contexts/relations (mirrors the per-file model <see cref="WorkspaceIndex"/> used to
+    /// build via <c>new SemanticModel(compiler.Parse(text).Model)</c>). Built lazily on first
+    /// access; thread-safe via <see cref="LazyThreadSafetyMode.ExecutionAndPublication"/>.
+    /// </summary>
+    private readonly ImmutableDictionary<string, Lazy<SemanticModel>> _perFileModels;
+
     // -------------------------------------------------------------------------
     // Private constructor (used by all factory paths)
     // -------------------------------------------------------------------------
@@ -81,6 +89,18 @@ public sealed class KoineCompilation
         _model = new Lazy<KoineModel>(BuildModel, LazyThreadSafetyMode.ExecutionAndPublication);
         _semanticModel = new Lazy<SemanticModel>(() => new SemanticModel(Model), LazyThreadSafetyMode.ExecutionAndPublication);
         _syntaxDiagnostics = new Lazy<IReadOnlyList<Diagnostic>>(BuildDiagnostics, LazyThreadSafetyMode.ExecutionAndPublication);
+
+        // Build the per-file Lazy<SemanticModel> map eagerly (only the Lazy wrappers, not the
+        // SemanticModels themselves — those are built on demand, without calling the parser).
+        var perFileBuilder = ImmutableDictionary.CreateBuilder<string, Lazy<SemanticModel>>(StringComparer.Ordinal);
+        foreach (var uri in order)
+        {
+            var unit = units[uri]; // captured by value in the closure
+            perFileBuilder[uri] = new Lazy<SemanticModel>(
+                () => new SemanticModel(Merge(unit.Contexts, unit.Relations)),
+                LazyThreadSafetyMode.ExecutionAndPublication);
+        }
+        _perFileModels = perFileBuilder.ToImmutable();
     }
 
     // -------------------------------------------------------------------------
@@ -193,6 +213,20 @@ public sealed class KoineCompilation
     /// Original source text per uri, for identifier-token scans (Task 4).
     /// </summary>
     public IReadOnlyDictionary<string, string> Documents => _texts;
+
+    /// <summary>
+    /// The memoized single-file <see cref="SemanticModel"/> for one uri (a Merge of just that
+    /// file's contexts/relations), mirroring what <see cref="WorkspaceIndex"/> built per document.
+    /// Thread-safe + cached — repeated requests over a held snapshot reuse the same instance.
+    /// Returns <c>null</c> for an unknown uri.
+    /// </summary>
+    public SemanticModel? SemanticModelFor(string uri) =>
+        _perFileModels.TryGetValue(uri, out var lazy) ? lazy.Value : null;
+
+    /// <summary>
+    /// The uris of all documents in this snapshot, in first-seen insertion order.
+    /// </summary>
+    public IReadOnlyCollection<string> Uris => _order;
 
     /// <summary>
     /// A content fingerprint that is ORDER-INDEPENDENT over the set of (uri, contentHash) pairs.
