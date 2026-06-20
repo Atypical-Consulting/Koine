@@ -133,6 +133,14 @@ public sealed partial class TypeScriptEmitter : IEmitter
                 files.Add(EmitPolicy(emit, policy, ctx.Name, typeMapper));
             }
 
+            // Integration-event subscriber handler seams (R14.3, TS parity): one IHandle<Event>
+            // interface per subscription, in deterministic declaration order. Mirrors the C#
+            // emitter's per-context Subscribes dispatch; no handler for events only published.
+            foreach (SubscribeDecl sub in ctx.Subscribes)
+            {
+                files.Add(EmitIntegrationEventHandler(emit, sub, ctx.Name));
+            }
+
             // The context's Unit of Work (R12.1, TS parity): a transactional seam over its
             // aggregate repositories. Emitted only when the context has aggregates whose root is
             // an entity (only those produce a repository to expose). Mirrors the C# dispatch.
@@ -208,6 +216,9 @@ public sealed partial class TypeScriptEmitter : IEmitter
                 break;
             case EventDecl ev:
                 files.Add(EmitEvent(emit, ev, ns, typeMapper));
+                break;
+            case IntegrationEventDecl ie:
+                files.Add(EmitIntegrationEvent(emit, ie, ns, typeMapper));
                 break;
             case ReadModelDecl rm:
                 files.Add(EmitReadModel(emit, rm, ns, typeMapper));

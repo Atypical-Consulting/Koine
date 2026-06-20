@@ -47,6 +47,7 @@ public sealed partial class TypeScriptEmitter
         public const string ValueObjects = "value-objects";
         public const string Enums = "enums";
         public const string Events = "events";
+        public const string IntegrationEvents = "integration-events";
         public const string Repositories = "repositories";
         public const string Services = "services";
         public const string Specifications = "specifications";
@@ -369,6 +370,9 @@ public sealed partial class TypeScriptEmitter
                 break;
             case EventDecl ev:
                 Add(locations, context, ev.Name, ns, KindFolder.Events);
+                break;
+            case IntegrationEventDecl ie:
+                Add(locations, context, ie.Name, ns, KindFolder.IntegrationEvents);
                 break;
         }
     }
