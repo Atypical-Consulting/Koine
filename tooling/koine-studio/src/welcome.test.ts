@@ -315,6 +315,14 @@ describe('welcome recent rows', () => {
     expect(document.querySelectorAll('.koi-welcome-recent-item').length).toBe(1);
     expect(JSON.parse(localStorage.getItem(KEY)!).length).toBe(1);
   });
+
+  test('keeps recent rows inside the scroll list wrapper', () => {
+    localStorage.setItem(KEY, JSON.stringify(['/a', '/b']));
+    createWelcome(makeCallbacks()).show();
+    const list = document.querySelector('.koi-welcome-recent-list');
+    expect(list).not.toBeNull();
+    expect(list!.querySelectorAll('.koi-welcome-recent-item').length).toBe(2);
+  });
 });
 
 describe('welcome recent management', () => {
