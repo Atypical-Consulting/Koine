@@ -61,100 +61,196 @@ public sealed partial class DocsEmitter
     {
         sb.Append("    class ").Append(root.Name).Append(" {\n");
         sb.Append("        <<aggregate root>>\n");
-        if (agg.IsVersioned)
-        {
-            sb.Append("        +int version\n");
-        }
-
-        sb.Append("        +").Append(root.IdentityName).Append(" id\n");
-
-        var names = new HashSet<string>(root.Members.Select(m => m.Name), StringComparer.Ordinal);
-        foreach (Member m in root.Members)
-        {
-            if (MemberAnalysis.IsDerived(m, names))
-            {
-                continue;
-            }
-
-            sb.Append("        +").Append(MermaidType(m.Type)).Append(' ').Append(m.Name).Append('\n');
-        }
-
-        foreach (FactoryDecl factory in root.Factories)
-        {
-            sb.Append("        +").Append(factory.Name).Append('(')
-              .Append(MermaidParams(factory.Parameters)).Append(") ").Append(root.Name).Append('\n');
-        }
-
-        foreach (CommandDecl cmd in root.Commands)
-        {
-            sb.Append("        +").Append(cmd.Name).Append('(').Append(MermaidParams(cmd.Parameters)).Append(')');
-            if (cmd.ReturnType is not null)
-            {
-                sb.Append(' ').Append(MermaidType(cmd.ReturnType));
-            }
-
-            sb.Append('\n');
-        }
-
+        EmitClassRows(sb, ClassRows(root, agg));
         sb.Append("    }\n");
     }
 
     /// <summary>Emits a nested type's class declaration with the appropriate stereotype.</summary>
     private static void EmitNestedClass(StringBuilder sb, TypeDecl nested)
     {
-        switch (nested)
+        var stereotype = NestedStereotype(nested);
+        if (stereotype is null)
         {
+            // Integration events and nested aggregates are not part of the structure diagram.
+            return;
+        }
+
+        sb.Append("    class ").Append(nested.Name).Append(" {\n");
+        sb.Append("        <<").Append(stereotype).Append(">>\n");
+        EmitClassRows(sb, ClassRows(nested));
+        sb.Append("    }\n");
+    }
+
+    /// <summary>The stereotype (without guillemets) a nested type draws with, or null when it is not drawn.</summary>
+    private static string? NestedStereotype(TypeDecl nested) => nested switch
+    {
+        ValueObjectDecl vo => vo.IsQuantity ? "quantity" : "value object",
+        EnumDecl => "enumeration",
+        EventDecl => "event",
+        EntityDecl => "entity",
+        _ => null
+    };
+
+    /// <summary>Emits the shared class rows into a Mermaid class body (tilde generics, <c>+</c> prefix for attributes/methods).</summary>
+    private static void EmitClassRows(StringBuilder sb, IEnumerable<ClassRow> rows)
+    {
+        foreach (ClassRow row in rows)
+        {
+            switch (row.Kind)
+            {
+                case ClassRowKind.Field:
+                    sb.Append("        +").Append(MermaidRowType(row)).Append(' ').Append(row.Name).Append('\n');
+                    break;
+
+                case ClassRowKind.Method:
+                    sb.Append("        +").Append(row.Name).Append('(')
+                      .Append(MermaidParams(row.Parameters ?? [])).Append(')');
+                    if (row.ReturnType is not null)
+                    {
+                        sb.Append(' ').Append(MermaidType(row.ReturnType));
+                    }
+
+                    sb.Append('\n');
+                    break;
+
+                case ClassRowKind.Value:
+                    sb.Append("        ").Append(row.Name).Append('\n');
+                    break;
+            }
+        }
+    }
+
+    /// <summary>The Mermaid type text for a field row (the synthetic primitive name, else the tilde-generic type).</summary>
+    private static string MermaidRowType(ClassRow row) =>
+        row.PrimitiveType ?? (row.Type is { } t ? MermaidType(t) : string.Empty);
+
+    // ---- shared class-body model (Mermaid + structured graph consume the same rows) ----
+
+    /// <summary>
+    /// The compartment a <see cref="ClassRow"/> belongs to: an attribute (<c>field</c>, incl. the
+    /// synthetic version/id rows), an operation (<c>method</c>, a factory or command), or an enum
+    /// value (<c>value</c>). Mirrors the <see cref="DiagramMember"/> kinds so the graph builder maps
+    /// 1:1; the renderer draws attributes/values above the divider and methods below it.
+    /// </summary>
+    internal enum ClassRowKind
+    {
+        Field,
+        Method,
+        Value
+    }
+
+    /// <summary>
+    /// One target-neutral row of a class body, walked once by <see cref="ClassRows"/> and formatted two
+    /// ways: the Mermaid emitter renders types with <see cref="MermaidType"/> (tilde generics), the
+    /// structured-graph builder with <see cref="KoineType"/> (readable, source-like). A field carries a
+    /// <see cref="Type"/> (null for the synthetic <c>version</c> row, which is a primitive name); a method
+    /// carries <see cref="Parameters"/> and an optional <see cref="ReturnType"/>; a value is just a name.
+    /// </summary>
+    /// <param name="Name">The member/operation name, or the enum value name.</param>
+    /// <param name="Kind">Which compartment the row belongs to.</param>
+    /// <param name="Type">The field type, or <c>null</c> for a method/value/primitive-typed row.</param>
+    /// <param name="PrimitiveType">A bare primitive type name (the synthetic <c>version</c>: <c>"int"</c>); else null.</param>
+    /// <param name="Parameters">A method's parameters (empty for non-methods).</param>
+    /// <param name="ReturnType">A method's return type, or <c>null</c> for a void method/non-method.</param>
+    internal sealed record ClassRow(
+        string Name,
+        ClassRowKind Kind,
+        TypeRef? Type = null,
+        string? PrimitiveType = null,
+        IReadOnlyList<Param>? Parameters = null,
+        TypeRef? ReturnType = null);
+
+    /// <summary>
+    /// The ordered rows of a class body — the SINGLE source of truth the Mermaid emitter and the
+    /// structured-graph builder both walk, so they never drift. The order mirrors
+    /// <see cref="EmitRootClass"/>/<see cref="EmitNestedClass"/>: for a root, version (when versioned),
+    /// id, concrete fields, factories, then commands; for a value object/event, its concrete fields; for
+    /// an enum, its member values; for an entity, id then concrete fields. Derived members are skipped
+    /// via the same <see cref="MemberAnalysis.IsDerived"/> rule. Returns an empty sequence for a type the
+    /// structure diagram does not draw (integration events, nested aggregates).
+    /// </summary>
+    internal static IEnumerable<ClassRow> ClassRows(TypeDecl type, AggregateDecl? owningAggregate = null)
+    {
+        switch (type)
+        {
+            case EntityDecl entity when owningAggregate is not null && entity.Name == owningAggregate.RootName:
+                if (owningAggregate.IsVersioned)
+                {
+                    yield return new ClassRow("version", ClassRowKind.Field, PrimitiveType: "int");
+                }
+
+                yield return new ClassRow("id", ClassRowKind.Field, Type: new TypeRef(entity.IdentityName));
+                foreach (ClassRow row in FieldRows(entity.Members))
+                {
+                    yield return row;
+                }
+
+                foreach (FactoryDecl factory in entity.Factories)
+                {
+                    yield return new ClassRow(
+                        factory.Name, ClassRowKind.Method,
+                        Parameters: factory.Parameters,
+                        ReturnType: new TypeRef(entity.Name));
+                }
+
+                foreach (CommandDecl cmd in entity.Commands)
+                {
+                    yield return new ClassRow(
+                        cmd.Name, ClassRowKind.Method,
+                        Parameters: cmd.Parameters,
+                        ReturnType: cmd.ReturnType);
+                }
+
+                break;
+
             case ValueObjectDecl vo:
-                sb.Append("    class ").Append(vo.Name).Append(" {\n");
-                sb.Append("        <<").Append(vo.IsQuantity ? "quantity" : "value object").Append(">>\n");
-                EmitFieldLines(sb, vo.Members);
-                sb.Append("    }\n");
+                foreach (ClassRow row in FieldRows(vo.Members))
+                {
+                    yield return row;
+                }
+
                 break;
 
             case EnumDecl en:
-                sb.Append("    class ").Append(en.Name).Append(" {\n");
-                sb.Append("        <<enumeration>>\n");
                 foreach (EnumMember member in en.Members)
                 {
-                    sb.Append("        ").Append(member.Name).Append('\n');
+                    yield return new ClassRow(member.Name, ClassRowKind.Value);
                 }
 
-                sb.Append("    }\n");
                 break;
 
             case EventDecl ev:
-                sb.Append("    class ").Append(ev.Name).Append(" {\n");
-                sb.Append("        <<event>>\n");
-                EmitFieldLines(sb, ev.Members);
-                sb.Append("    }\n");
+                foreach (ClassRow row in FieldRows(ev.Members))
+                {
+                    yield return row;
+                }
+
                 break;
 
             case EntityDecl ent:
-                sb.Append("    class ").Append(ent.Name).Append(" {\n");
-                sb.Append("        <<entity>>\n");
-                sb.Append("        +").Append(ent.IdentityName).Append(" id\n");
-                EmitFieldLines(sb, ent.Members);
-                sb.Append("    }\n");
+                yield return new ClassRow("id", ClassRowKind.Field, Type: new TypeRef(ent.IdentityName));
+                foreach (ClassRow row in FieldRows(ent.Members))
+                {
+                    yield return row;
+                }
+
                 break;
 
-            // Integration events and nested aggregates are not part of the structure diagram.
             default:
                 break;
         }
     }
 
-    /// <summary>Emits concrete (non-derived) field lines for a nested class body.</summary>
-    private static void EmitFieldLines(StringBuilder sb, IReadOnlyList<Member> members)
+    /// <summary>The concrete (non-derived) field rows of a member list, in declaration order.</summary>
+    private static IEnumerable<ClassRow> FieldRows(IReadOnlyList<Member> members)
     {
         var names = new HashSet<string>(members.Select(m => m.Name), StringComparer.Ordinal);
         foreach (Member m in members)
         {
-            if (MemberAnalysis.IsDerived(m, names))
+            if (!MemberAnalysis.IsDerived(m, names))
             {
-                continue;
+                yield return new ClassRow(m.Name, ClassRowKind.Field, Type: m.Type);
             }
-
-            sb.Append("        +").Append(MermaidType(m.Type)).Append(' ').Append(m.Name).Append('\n');
         }
     }
 

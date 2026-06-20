@@ -1,0 +1,45 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Isolated home for tests that must call the in-browser WASM JSExport surface
+    (Koine.Wasm.CompilerInterop). Referencing Koine.Wasm pulls in the browser-wasm RID, which
+    needs the `wasm-tools` workload to build — so these tests live in their own project rather
+    than in Koine.Compiler.Tests. That keeps the Studio CI job's lightweight "headless LSP tests"
+    step (which builds Koine.Compiler.Tests without the wasm workload) buildable. This project is
+    built/run only by the full-solution `dotnet test Koine.slnx` (CI's build-and-test job, which
+    installs the wasm workloads), exactly like Koine.Wasm itself.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="coverlet.collector" Version="10.0.1">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.6.0" />
+    <PackageReference Include="Shouldly" Version="4.3.0" />
+    <PackageReference Include="xunit.v3" Version="3.2.2" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="3.1.5">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+    <Using Include="Shouldly" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Koine.Cli brings the internal LspServer (via InternalsVisibleTo) and transitively
+         Koine.Compiler; Koine.Wasm brings the JSExport CompilerInterop the parity test drives. -->
+    <ProjectReference Include="..\..\src\Koine.Cli\Koine.Cli.csproj" />
+    <ProjectReference Include="..\..\src\Koine.Wasm\Koine.Wasm.csproj" />
+  </ItemGroup>
+
+</Project>
