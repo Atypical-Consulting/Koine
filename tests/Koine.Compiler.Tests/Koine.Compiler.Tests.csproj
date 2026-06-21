@@ -17,7 +17,7 @@
          app's TRUSTED_PLATFORM_ASSEMBLIES) can type-check the generated opt-in layers: the Application
          layer's handlers/validators/DI/MediatR code (issue #129) and the EF Core Infrastructure layer
          (issue #128). The package DLLs are copied to the test output and thus appear in TPA. -->
-    <PackageReference Include="FluentValidation" Version="11.11.0" />
+    <PackageReference Include="FluentValidation" Version="11.12.0" />
     <PackageReference Include="MediatR" Version="12.4.1" />
     <PackageReference Include="Microsoft.EntityFrameworkCore" Version="10.0.9" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.9" />
