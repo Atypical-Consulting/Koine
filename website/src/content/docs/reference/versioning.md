@@ -3,6 +3,8 @@ title: "Versioning & evolution"
 description: "Version-stamp contexts, annotate evolution, and check compatibility."
 ---
 
+## 18.1 General
+
 A bounded context is a contract. The moment another team subscribes to your integration
 events or shares one of your kernel types, every change you make can quietly break them.
 Koine makes that contract explicit: you stamp a context with a **version**, annotate when
@@ -13,38 +15,51 @@ This is epic R15. None of it changes your runtime behaviour — `version` and `@
 pure metadata that surface in the [glossary](/Koine/guides/cli/) and drive
 diagnostics; only `@deprecated` emits anything to C# (an `[Obsolete]` attribute).
 
-## Version-stamp a context
+## 18.2 Syntax
 
-Add an optional `version <Int>` clause between the context name and its `{`:
+Two grammar constructs carry versioning and evolution metadata: the optional `version`
+clause on a context declaration, and the `annotation` prefix that may appear on any type or
+field declaration.
 
-```koine
-context Catalog version 2 {
-  enum Currency(symbol: String, decimals: Int) {
-    EUR("€", 2)
-    USD("$", 2)
-  }
-}
+```ebnf
+context_decl
+    : 'context' Identifier ( 'version' IntLiteral )? '{' context_member* '}'
+    ;
+
+annotation
+    : AT Identifier ( '(' ( IntLiteral | StringLiteral ) ')' )?
+    ;
+
+type_decl
+    : value_decl | quantity_decl | entity_decl | aggregate_decl
+    | enum_decl | event_decl | integration_event_decl
+    ;
+
+value_declaration
+    : annotation* 'value' Identifier '{' member* '}'
+    ;
+
+member
+    : annotation* Identifier ':' type_ref ( '=' expression )?
+    ;
 ```
 
-The literal is a bare integer (no parens). Omit the clause entirely for an unversioned
-context. The version does **not** leak into the generated C# — `Catalog/Currency.cs` is
-byte-for-byte identical whether or not you stamp a version. It only:
+The `version` clause is an optional `'version' IntLiteral` between the context name and its
+opening brace. The integer is a bare, non-negative literal with no parentheses. Omitting the
+clause leaves the context unversioned.
 
-- becomes the glossary heading (`## Catalog — version 2`), and
-- sets the ceiling for the `@since` check below.
+An `annotation` is a `@` sign followed by a bare identifier, with an optional single
+argument in parentheses: an integer for `@since`, a string for `@deprecated`. Unknown
+annotation names are silently ignored; only `since` and `deprecated` are acted on by the
+compiler. Because `AT` (`@`) is the annotation prefix, `since` and `deprecated` are not
+reserved as keywords — they may appear freely as field names.
 
-:::note
-`version` (the context clause) is distinct from `versioned` (the
-[optimistic-concurrency marker](/Koine/reference/aggregates/) on an aggregate root). They
-are different keywords; the lexer never confuses them.
-:::
-
-## Annotate evolution
-
-### `@since(n)` — when a member or type arrived
-
-`@since(n)` records the context version in which a declaration first appeared. It prefixes
-the field name, or the declaration keyword for a whole type:
+`type_decl` is a bare dispatcher — it carries no `annotation*` of its own. Each individual
+declaration rule (shown above for `value_declaration`; the same pattern applies to
+`quantity_decl`, `entity_decl`, `aggregate_decl`, `enum_decl`, `event_decl`, and
+`integration_event_decl`) begins with its own leading `annotation*` before the declaration
+keyword. Likewise, a `member` rule carries its own leading `annotation*` before the field
+name. This is where `@since` and `@deprecated` actually attach.
 
 ```koine
 context Catalog version 2 {
@@ -60,14 +75,28 @@ context Catalog version 2 {
 }
 ```
 
-`@since` emits **no** C# attribute. It sets the declaration's `Since` metadata, which the
-glossary renders as a suffix on the member or type:
+## 18.3 Semantics
 
-| Member | Type | |
-| --- | --- | --- |
-| barcode | `String?` | _(since v2)_ |
+### 18.3.1 Version stamp
 
-#### The `@since` ceiling check (KOI1501)
+The `version IntLiteral` clause sets the context's declared version. The version:
+
+- becomes the glossary heading (`## Catalog — version 2`), and
+- sets the ceiling for the `@since` ceiling check ([§18.3.2](#1832-since-ceiling-check-koi1501)).
+
+The version does **not** leak into the generated C#. `Catalog/Currency.cs` is byte-for-byte
+identical whether or not you stamp a version.
+
+:::note
+`version` (the context clause) is distinct from `versioned` (the
+[optimistic-concurrency marker](/Koine/reference/aggregates/) on an aggregate root). They
+are different keywords; the lexer never confuses them.
+:::
+
+### 18.3.2 `@since` ceiling check (KOI1501)
+
+`@since(n)` records the context version in which a declaration first appeared. It may prefix
+a field name or the declaration keyword for a whole type.
 
 A `@since(n)` whose `n` is **greater than** the context's declared `version` is almost
 always a typo — you are claiming a member arrived in a version that does not exist yet.
@@ -96,7 +125,30 @@ ceiling to exceed. Stamp the context with a `version` to switch the check on, an
 `@since(n)` at or below it to stay clean.
 :::
 
-### `@deprecated("reason")` — mark something obsolete
+### 18.3.3 `@deprecated` semantics
+
+`@deprecated("reason")` marks a field or type as obsolete. The reason argument is a string
+literal. Unlike `@since`, `@deprecated` is not a pure-metadata annotation — it reaches the
+emitter and produces a C# `[Obsolete]` attribute (see [§18.4](#184-translation-to-c)).
+
+`@deprecated` works on every published shape too — including
+[integration-event (§17)](/Koine/reference/context-maps-integration/) fields.
+
+### 18.3.4 Annotation ignorance rule
+
+`version`, `since`, and `deprecated` are **not** reserved — only `@` + identifier forms an
+annotation, so `value Tag { version: Int  since: Int  deprecated: String }` is a perfectly
+valid record with three ordinary fields. Annotation names other than `since`/`deprecated`
+(and arg types other than the expected `Int`/`String`) are silently ignored.
+
+## 18.4 Translation to C#
+
+`@since(n)` emits **no** C# attribute. It sets the declaration's `Since` metadata, which the
+glossary renders as a suffix on the member or type:
+
+| Member | Type | |
+| --- | --- | --- |
+| barcode | `String?` | _(since v2)_ |
 
 `@deprecated` is the one annotation that reaches C#. It prefixes a field or a type and
 renders as `[Obsolete]`:
@@ -126,8 +178,9 @@ public sealed class OldMoney { /* ... */ }
 
 The compiler injects `using System;` into any file that gains an `[Obsolete]`, and
 C#-escapes quotes in the reason. A model with no `@deprecated` annotations gets neither the
-attribute nor the extra using. `@deprecated` works on every published shape too —
-including [integration-event](/Koine/reference/context-maps-integration/) fields:
+attribute nor the extra using.
+
+`@deprecated` works on integration-event fields too:
 
 ```koine
 context Sales {
@@ -140,14 +193,9 @@ context Sales {
 }
 ```
 
-:::note
-`version`, `since`, and `deprecated` are **not** reserved — only `@` + identifier forms an
-annotation, so `value Tag { version: Int  since: Int  deprecated: String }` is a perfectly
-valid record with three ordinary fields. Annotation names other than `since`/`deprecated`
-(and arg types other than the expected `Int`/`String`) are silently ignored.
-:::
+## 18.5 Backward-compatibility checking
 
-## Check backward compatibility against a baseline
+### 18.5.1 Overview
 
 Annotations document intent; `koine check` enforces it. Point it at your current model and
 a previously published baseline directory, and it diffs the two models' **published
@@ -164,10 +212,10 @@ Both arguments may be a single `.koi` file or a directory (a directory compiles 
 | Published surface | How it becomes published |
 | --- | --- |
 | Integration events | `publishes <Name>` + `integration event <Name> { … }` |
-| Shared-kernel types | a `shared-kernel { T … }` relation in the [context map](/Koine/reference/context-maps-integration/) |
+| Shared-kernel types | a `shared-kernel { T … }` relation in the [context map (§17)](/Koine/reference/context-maps-integration/) |
 | Open-host value objects | an `open-host` / `published-language` relation where the context is upstream |
 
-### Breaking vs non-breaking
+### 18.5.2 Breaking vs non-breaking changes
 
 The diff classifies each change. A breaking change carries a KOI code and fails the build;
 additive changes are reported as informational and pass.
@@ -195,7 +243,7 @@ single rename rather than a separate remove + add. An **integration event** is a
 any breaking payload change additionally reports an event-level shape-change summary (KOI1517)
 alongside the per-field code.
 
-### Per-rule severity (`koine.config`)
+### 18.5.3 Per-rule severity (`koine.config`)
 
 The default verdicts above are a policy, not a law. A `koine.config` can override the impact of any
 code with a `check.severity.<CODE>` key — `Breaking`, `NonBreaking`, or `Ignored`:
@@ -209,7 +257,7 @@ check.severity.KOI1512 = Ignored       # drop type-change reports entirely
 `NonBreaking` downgrades a change so it no longer trips the exit code; `Ignored` drops it from the
 report altogether; `Breaking` (re)promotes one. Codes with no override keep their default verdict.
 
-### A worked example
+### 18.5.4 A worked example
 
 Take a v1 baseline that publishes an order-placed contract:
 
@@ -260,11 +308,11 @@ Wire `koine check <model> --baseline <last-release>` into CI. Keep the previous 
 pipeline with an exact, line-addressable KOI code.
 :::
 
-### Publishing a surface via the context map
+### 18.5.5 Publishing a surface via the context map
 
 A field change is only breaking if the type is actually published. An integration event
 declared with `publishes` is published by definition. To put a **value object** under the
-same scrutiny, give it a published relation in the [context map](/Koine/reference/context-maps-integration/):
+same scrutiny, give it a published relation in the [context map (§17)](/Koine/reference/context-maps-integration/):
 
 ```koine
 context Sales {
@@ -287,8 +335,10 @@ open-host) are single atomic tokens — never split them as `< - >`. The hyphen 
 `shared-kernel` and `open-host` is literal, part of the role name, not subtraction.
 :::
 
-## Related pages
+## See also
 
-- [Context maps & integration events](/Koine/reference/context-maps-integration/) — the published surfaces: integration events, shared-kernel, and open-host relations.
+- [Context maps & integration events (§17)](/Koine/reference/context-maps-integration/) — the published surfaces: integration events, shared-kernel, and open-host relations.
+- [Aggregates (§7)](/Koine/reference/aggregates/) — the `versioned` keyword for optimistic concurrency on an aggregate root, which is distinct from the context `version` clause.
+- [Contexts & types (§4)](/Koine/reference/contexts-and-types/) — context declarations and their members.
 - [Evolving a model](/Koine/tutorials/evolving-a-model/) — a step-by-step walkthrough of versioning a context and running the baseline check.
 - [CLI reference](/Koine/guides/cli/) — full `koine build` and `koine check` flags, plus the `--glossary` output where `version`, `@since`, and `@deprecated` surface for humans.
