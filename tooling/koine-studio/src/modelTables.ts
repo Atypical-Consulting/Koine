@@ -179,6 +179,7 @@ function renderTable<T extends { span: SourceSpan | null }>(
   rows: T[],
   columns: Column<T>[],
   emptyText: string,
+  rowLabel: (row: T) => string,
   handlers: TableHandlers,
 ): HTMLElement {
   if (!rows.length) {
@@ -217,7 +218,7 @@ function renderTable<T extends { span: SourceSpan | null }>(
   table.appendChild(tbody);
 
   function renderBody(view: T[]): void {
-    tbody.replaceChildren(...view.map((row) => buildRow(row, columns, handlers)));
+    tbody.replaceChildren(...view.map((row) => buildRow(row, columns, rowLabel, handlers)));
   }
 
   function sortByColumn(i: number): void {
@@ -241,6 +242,7 @@ function renderTable<T extends { span: SourceSpan | null }>(
 function buildRow<T extends { span: SourceSpan | null }>(
   row: T,
   columns: Column<T>[],
+  rowLabel: (row: T) => string,
   handlers: TableHandlers,
 ): HTMLTableRowElement {
   const tr = document.createElement('tr');
@@ -255,7 +257,11 @@ function buildRow<T extends { span: SourceSpan | null }>(
     const span = row.span;
     tr.classList.add('koi-row-link');
     tr.tabIndex = 0;
-    tr.title = 'Jump to source';
+    // A focusable <tr> keeps the table semantics (cells stay real cells, so `role="button"` is out); the
+    // aria-label gives screen-reader users a name + the jump-to-source affordance the bare row would lack.
+    const label = `Jump to source: ${rowLabel(row)}`;
+    tr.title = label;
+    tr.setAttribute('aria-label', label);
     tr.addEventListener('click', () => handlers.goto(span));
     tr.addEventListener('keydown', (e) => {
       if (e.key === 'Enter' || e.key === ' ') {
@@ -283,6 +289,7 @@ export function renderEventsTable(rows: EventRow[], handlers: TableHandlers): HT
       { header: 'When', get: (r) => r.when || EM_DASH },
     ],
     'No events yet — add a domain or integration event to your model.',
+    (r) => r.name,
     handlers,
   );
 }
@@ -298,6 +305,7 @@ export function renderRelationshipsTable(rows: RelationRow[], handlers: TableHan
       { header: 'Contexts', get: (r) => r.contexts.join(' → ') },
     ],
     'No relationships yet — add an aggregate or a context map to your model.',
+    (r) => `${r.source} ${r.relation} ${r.target}`,
     handlers,
   );
 }

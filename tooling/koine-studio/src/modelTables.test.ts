@@ -233,6 +233,12 @@ describe('renderEventsTable', () => {
     expect(goto).toHaveBeenCalledWith(rows[0].span);
   });
 
+  test('navigable rows carry an aria-label naming the jump-to-source action', () => {
+    const el = renderEventsTable(rows, { goto: () => {} });
+    const row = el.querySelectorAll('tbody tr')[0] as HTMLElement;
+    expect(row.getAttribute('aria-label')).toBe('Jump to source: OrderPlaced');
+  });
+
   test('empty input renders an empty-state element (no table rows)', () => {
     const el = renderEventsTable([], { goto: () => {} });
     expect(el.querySelector('tbody tr')).toBeNull();

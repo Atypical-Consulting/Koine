@@ -1212,7 +1212,7 @@ export function init(): void {
   // "already open"), then moves the caret. No-ops on a missing file or a malformed/zero span rather than
   // jumping somewhere bogus — both call sites are read-only navigation.
   async function gotoSourceSpan(
-    span: { file: string | null; line: number; column: number; endLine: number; endColumn: number },
+    span: Pick<SourceSpan, 'file' | 'line' | 'column' | 'endLine' | 'endColumn'>,
   ): Promise<void> {
     const uri = span.file;
     if (!uri) return;
@@ -2119,48 +2119,53 @@ export function init(): void {
     if (tab === 'relationships' && !bottomLoaded.relationships) void loadRelationshipsPanel();
   }
 
-  // Each loader is guarded by a monotonic token so a slow fetch superseded by an edit/refresh can't
-  // clobber a newer render. An empty/erroring model degrades to the renderer's own empty-state (parse
-  // errors → no diagrams → "No events/relationships yet"), mirroring the diagnostics empty note.
-  let eventsSeq = 0;
+  // Each loader is guarded by a per-panel monotonic token so a slow fetch superseded by an edit/refresh
+  // can't clobber a newer render — AND can't mark the panel loaded with stale data: invalidation bumps
+  // the token (below), so a superseded in-flight load fails its `seq !== bottomSeq` check before setting
+  // `bottomLoaded`, leaving the panel due for a fresh reload. An empty/erroring model degrades to the
+  // renderer's own empty-state (parse errors → no diagrams → "No events/relationships yet").
+  const bottomSeq = { events: 0, relationships: 0 };
   async function loadEventsPanel(): Promise<void> {
-    const seq = ++eventsSeq;
+    const seq = ++bottomSeq.events;
     docMessage(eventsPanel, 'Loading events…');
     try {
       const graph = await bottomGraph();
-      if (seq !== eventsSeq) return;
+      if (seq !== bottomSeq.events) return;
       eventsPanel.replaceChildren(renderEventsTable(extractEvents(graph), bottomTableHandlers));
       bottomLoaded.events = true;
     } catch (e) {
-      if (seq === eventsSeq) docMessage(eventsPanel, 'Events request failed: ' + String(e), 'error');
+      if (seq === bottomSeq.events) docMessage(eventsPanel, 'Events request failed: ' + String(e), 'error');
     }
   }
 
-  let relationshipsSeq = 0;
   async function loadRelationshipsPanel(): Promise<void> {
-    const seq = ++relationshipsSeq;
+    const seq = ++bottomSeq.relationships;
     docMessage(relationshipsPanel, 'Loading relationships…');
     try {
       const [graph, ctxMap] = await Promise.all([
         bottomGraph(),
         lsp.contextMap().catch(() => ({ contexts: [], relations: [] }) as ContextMapResult),
       ]);
-      if (seq !== relationshipsSeq) return;
+      if (seq !== bottomSeq.relationships) return;
       relationshipsPanel.replaceChildren(
         renderRelationshipsTable(extractRelationships(graph, ctxMap), bottomTableHandlers),
       );
       bottomLoaded.relationships = true;
     } catch (e) {
-      if (seq === relationshipsSeq) {
+      if (seq === bottomSeq.relationships) {
         docMessage(relationshipsPanel, 'Relationships request failed: ' + String(e), 'error');
       }
     }
   }
 
-  // Mark the Events/Relationships tables stale (called from invalidateDocViews on any model change). If
-  // one is on screen and expanded, live-refresh it (debounced) so it tracks edits like the inspector;
-  // Problems is refreshed by the diagnostics push, and a collapsed panel reloads when next expanded.
+  // Mark the Events/Relationships tables stale (called from invalidateDocViews on any model change). The
+  // token bump invalidates any in-flight load so a fetch that started against the old model can neither
+  // render nor mark the panel loaded. If one is on screen and expanded, live-refresh it (debounced) so it
+  // tracks edits like the inspector; Problems is refreshed by the diagnostics push, and a collapsed panel
+  // reloads when next expanded.
   function invalidateBottomPanels(): void {
+    bottomSeq.events++;
+    bottomSeq.relationships++;
     bottomLoaded.events = false;
     bottomLoaded.relationships = false;
     if (activeBottomTab === 'problems' || diagEl.classList.contains('collapsed')) return;
