@@ -125,6 +125,13 @@ public sealed partial class PythonEmitter : IEmitter
                 EmitServiceFiles(emit, files, svc, ctx.Name, typeMapper);
             }
 
+            // Policies (R10.3): an event→command reactor lives on `ContextNode.Policies` (not in
+            // `Types`), so iterate it separately. Each emits a `Protocol` seam the consumer wires.
+            foreach (PolicyDecl policy in ctx.Policies)
+            {
+                files.Add(EmitPolicy(emit, policy, ctx.Name, typeMapper));
+            }
+
             // ID types referenced but not owned by an entity in this context (e.g. a foreign *Id):
             // materialize a standalone branded-guid identity at the context package root so a
             // cross-context reference resolves to a real module. Deterministic (sorted).
@@ -134,7 +141,21 @@ public sealed partial class PythonEmitter : IEmitter
             }
         }
 
-        // 3. An `__init__.py` for every package directory implied by the emitted module paths, so the
+        // 3. Anti-corruption-layer translator seams (R14.2): one per ACL relation carrying a mapping
+        //    block, emitted into the downstream context. Cross-context refs resolve to qualified
+        //    imports via the shared type-location table.
+        if (model.ContextMap is { } map)
+        {
+            foreach (ContextRelation r in map.Relations)
+            {
+                if (r.Kind == ContextRelationKind.AntiCorruptionLayer && r.AclMappings.Count > 0)
+                {
+                    files.Add(EmitAclTranslator(emit, r));
+                }
+            }
+        }
+
+        // 4. An `__init__.py` for every package directory implied by the emitted module paths, so the
         //    tree imports cleanly and mypy treats each directory as a package.
         EmitPackageInits(files);
 
@@ -180,6 +201,15 @@ public sealed partial class PythonEmitter : IEmitter
                 break;
             case IntegrationEventDecl iev:
                 files.Add(EmitEvent(emit, iev.Name, iev.Doc, iev.Members, ns, typeMapper));
+                break;
+            // A read model emits a flat frozen-dataclass DTO + a pure `to_<name>(src)` projection
+            // (R12.3); a query emits a DTO + a `QueryHandler` Protocol seam (R12.4). Both are
+            // context-level TypeDecls routed here.
+            case ReadModelDecl rm:
+                files.Add(EmitReadModel(emit, rm, ns, typeMapper));
+                break;
+            case QueryDecl q:
+                files.Add(EmitQuery(emit, q, ns, typeMapper));
                 break;
             // An aggregate emits each nested type (the root at the context package root, the rest in
             // their kind folders) followed by the root's persistence-ignorant repository Protocol.

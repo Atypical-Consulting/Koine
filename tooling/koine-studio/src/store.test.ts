@@ -17,6 +17,8 @@ import {
   saveWorkspaceMode,
   loadDiagramZoom,
   saveDiagramZoom,
+  loadActiveContext,
+  saveActiveContext,
   getRecentFolders,
   pushRecentFolder,
   removeRecentFolder,
@@ -307,5 +309,28 @@ describe('diagram zoom persistence (#145)', () => {
   test('coerces a hand-edited/malformed stored value back to null', () => {
     localStorage.setItem('koine.studio.diagramZoom.bad', 'not-a-number');
     expect(loadDiagramZoom('bad')).toBeNull();
+  });
+});
+
+describe('active context persistence (#146)', () => {
+  beforeEach(() => localStorage.clear());
+
+  test('returns null for a workspace with no stored scope', () => {
+    expect(loadActiveContext('scratch')).toBeNull();
+  });
+
+  test('round-trips a saved scope per workspace key', () => {
+    saveActiveContext('scratch', 'Sales');
+    expect(loadActiveContext('scratch')).toBe('Sales');
+    saveActiveContext('scratch', 'all'); // a later save overwrites the prior one
+    expect(loadActiveContext('scratch')).toBe('all');
+  });
+
+  test('keeps each workspace’s scope independent', () => {
+    saveActiveContext('/work/billing', 'Billing');
+    saveActiveContext('/work/pizzeria', 'Kitchen');
+    expect(loadActiveContext('/work/billing')).toBe('Billing');
+    expect(loadActiveContext('/work/pizzeria')).toBe('Kitchen');
+    expect(loadActiveContext('scratch')).toBeNull();
   });
 });

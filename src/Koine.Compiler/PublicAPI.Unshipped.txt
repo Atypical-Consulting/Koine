@@ -3,11 +3,25 @@ Koine.Compiler.Emit.CSharp.CSharpEmitter.CacheDiscriminator.get -> string!
 Koine.Compiler.Emit.IEmitter.CacheDiscriminator.get -> string!
 Koine.Compiler.Emit.Php.PhpEmitter.CacheDiscriminator.get -> string!
 Koine.Compiler.Emit.Python.PythonEmitter.CacheDiscriminator.get -> string!
+Koine.Compiler.Emit.Rust.RustEmitter
+Koine.Compiler.Emit.Rust.RustEmitter.CacheDiscriminator.get -> string!
+Koine.Compiler.Emit.Rust.RustEmitter.Emit(Koine.Compiler.Ast.KoineModel! model) -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Emit.EmittedFile!>!
+Koine.Compiler.Emit.Rust.RustEmitter.Emit(Koine.Compiler.Ast.KoineModel! model, Koine.Compiler.Ast.SemanticModel? semantic) -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Emit.EmittedFile!>!
+Koine.Compiler.Emit.Rust.RustEmitter.RustEmitter() -> void
+Koine.Compiler.Emit.Rust.RustEmitter.TargetName.get -> string!
 Koine.Compiler.Emit.TypeScript.TypeScriptEmitter.CacheDiscriminator.get -> string!
 Koine.Compiler.Emit.EmitterOptions.EmitSourceMaps.get -> bool
 Koine.Compiler.Emit.EmitterOptions.EmitSourceMaps.init -> void
 Koine.Compiler.Emit.EmitterOptions.ReferenceOnly.get -> bool
 Koine.Compiler.Emit.EmitterOptions.ReferenceOnly.init -> void
+*REMOVED*Koine.Compiler.Emit.EmitterOptions.EmitterOptions(System.Collections.Generic.IReadOnlyDictionary<string!, string!>! NamespaceMap, string? InstantMode = null, string? Layout = null, bool EmitSourceMaps = false, bool ReferenceOnly = false) -> void
+Koine.Compiler.Emit.EmitterOptions.EmitterOptions(System.Collections.Generic.IReadOnlyDictionary<string!, string!>! NamespaceMap, string? InstantMode = null, string? Layout = null, bool EmitSourceMaps = false, bool ReferenceOnly = false, System.Collections.Generic.IReadOnlyList<string!>? Layers = null, bool ApplicationMediatr = false, string? ApplicationMapping = null) -> void
+Koine.Compiler.Emit.EmitterOptions.Layers.get -> System.Collections.Generic.IReadOnlyList<string!>?
+Koine.Compiler.Emit.EmitterOptions.Layers.init -> void
+Koine.Compiler.Emit.EmitterOptions.ApplicationMediatr.get -> bool
+Koine.Compiler.Emit.EmitterOptions.ApplicationMediatr.init -> void
+Koine.Compiler.Emit.EmitterOptions.ApplicationMapping.get -> string?
+Koine.Compiler.Emit.EmitterOptions.ApplicationMapping.init -> void
 Koine.Compiler.Emit.EmittedFile.SourceMap.get -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Emit.SourceMapSegment!>?
 Koine.Compiler.Emit.EmittedFile.SourceMap.init -> void
 Koine.Compiler.Emit.SourceMapSegment
@@ -95,3 +109,63 @@ Koine.Compiler.Ast.ModelCoverage
 static Koine.Compiler.Ast.ModelCoverage.Compute(Koine.Compiler.Ast.KoineModel! model, System.Collections.Generic.IReadOnlyList<Koine.Compiler.Emit.EmittedFile!>! emitted, string! target) -> Koine.Compiler.Ast.CoverageReport!
 static Koine.Compiler.Ast.ModelCoverage.RenderText(Koine.Compiler.Ast.CoverageReport! report) -> string!
 static Koine.Compiler.Ast.ModelCoverage.ToJson(Koine.Compiler.Ast.CoverageReport! report) -> string!
+Koine.Compiler.Services.ModelNode
+Koine.Compiler.Services.ModelNode.ModelNode(string! Kind, string! QualifiedName, string! Title, System.Collections.Generic.IReadOnlyList<Koine.Compiler.Services.ModelMember!>! Members, System.Collections.Generic.IReadOnlyList<Koine.Compiler.Services.ModelNode!>! Children) -> void
+Koine.Compiler.Services.ModelNode.Kind.get -> string!
+Koine.Compiler.Services.ModelNode.Kind.init -> void
+Koine.Compiler.Services.ModelNode.QualifiedName.get -> string!
+Koine.Compiler.Services.ModelNode.QualifiedName.init -> void
+Koine.Compiler.Services.ModelNode.Title.get -> string!
+Koine.Compiler.Services.ModelNode.Title.init -> void
+Koine.Compiler.Services.ModelNode.Members.get -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Services.ModelMember!>!
+Koine.Compiler.Services.ModelNode.Members.init -> void
+Koine.Compiler.Services.ModelNode.Children.get -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Services.ModelNode!>!
+Koine.Compiler.Services.ModelNode.Children.init -> void
+Koine.Compiler.Services.ModelMember
+Koine.Compiler.Services.ModelMember.ModelMember(string! Kind, string! Name, string? Type, string? Value) -> void
+Koine.Compiler.Services.ModelMember.Kind.get -> string!
+Koine.Compiler.Services.ModelMember.Kind.init -> void
+Koine.Compiler.Services.ModelMember.Name.get -> string!
+Koine.Compiler.Services.ModelMember.Name.init -> void
+Koine.Compiler.Services.ModelMember.Type.get -> string?
+Koine.Compiler.Services.ModelMember.Type.init -> void
+Koine.Compiler.Services.ModelMember.Value.get -> string?
+Koine.Compiler.Services.ModelMember.Value.init -> void
+Koine.Compiler.Services.ModelRoundTripService
+const Koine.Compiler.Services.ModelRoundTripService.ContextMapQualifiedName = "$contextMap" -> string!
+static Koine.Compiler.Services.ModelRoundTripService.ModelToJson(Koine.Compiler.Ast.KoineModel! model, string? qualifiedName = null) -> Koine.Compiler.Services.ModelNode!
+static Koine.Compiler.Services.ModelRoundTripService.MembersOf(Koine.Compiler.Ast.KoineModel! model, string! qualifiedName) -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Services.ModelMember!>!
+static Koine.Compiler.Services.ModelRoundTripService.EmitKoine(System.Collections.Generic.IReadOnlyList<Koine.Compiler.Services.SourceFile>! files, Koine.Compiler.Services.StructuredEdit! edit) -> Koine.Compiler.Services.EmitResult!
+static Koine.Compiler.Services.ModelRoundTripService.ApplyEdit(System.Collections.Generic.IReadOnlyList<Koine.Compiler.Services.SourceFile>! files, Koine.Compiler.Services.StructuredEdit! edit) -> Koine.Compiler.Services.ModelEditResult!
+Koine.Compiler.Services.StructuredEdit
+Koine.Compiler.Services.StructuredEdit.StructuredEdit(string! Kind, string! Target, string? Name = null, string? Type = null, string? Value = null) -> void
+Koine.Compiler.Services.StructuredEdit.Kind.get -> string!
+Koine.Compiler.Services.StructuredEdit.Kind.init -> void
+Koine.Compiler.Services.StructuredEdit.Target.get -> string!
+Koine.Compiler.Services.StructuredEdit.Target.init -> void
+Koine.Compiler.Services.StructuredEdit.Name.get -> string?
+Koine.Compiler.Services.StructuredEdit.Name.init -> void
+Koine.Compiler.Services.StructuredEdit.Type.get -> string?
+Koine.Compiler.Services.StructuredEdit.Type.init -> void
+Koine.Compiler.Services.StructuredEdit.Value.get -> string?
+Koine.Compiler.Services.StructuredEdit.Value.init -> void
+Koine.Compiler.Services.StructuredEditKind
+const Koine.Compiler.Services.StructuredEditKind.RenameMember = "renameMember" -> string!
+const Koine.Compiler.Services.StructuredEditKind.AddField = "addField" -> string!
+const Koine.Compiler.Services.StructuredEditKind.RemoveMember = "removeMember" -> string!
+const Koine.Compiler.Services.StructuredEditKind.ChangeFieldType = "changeFieldType" -> string!
+const Koine.Compiler.Services.StructuredEditKind.AddTransition = "addTransition" -> string!
+Koine.Compiler.Services.EmitResult
+Koine.Compiler.Services.EmitResult.EmitResult(string? Koine, System.Collections.Generic.IReadOnlyList<Koine.Compiler.Diagnostics.Diagnostic!>! Diagnostics) -> void
+Koine.Compiler.Services.EmitResult.Koine.get -> string?
+Koine.Compiler.Services.EmitResult.Koine.init -> void
+Koine.Compiler.Services.EmitResult.Diagnostics.get -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Diagnostics.Diagnostic!>!
+Koine.Compiler.Services.EmitResult.Diagnostics.init -> void
+Koine.Compiler.Services.ModelEditResult
+Koine.Compiler.Services.ModelEditResult.ModelEditResult(string? Uri, System.Collections.Generic.IReadOnlyList<Koine.Compiler.Services.TextEditModel!>! Edits, System.Collections.Generic.IReadOnlyList<Koine.Compiler.Diagnostics.Diagnostic!>! Diagnostics) -> void
+Koine.Compiler.Services.ModelEditResult.Uri.get -> string?
+Koine.Compiler.Services.ModelEditResult.Uri.init -> void
+Koine.Compiler.Services.ModelEditResult.Edits.get -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Services.TextEditModel!>!
+Koine.Compiler.Services.ModelEditResult.Edits.init -> void
+Koine.Compiler.Services.ModelEditResult.Diagnostics.get -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Diagnostics.Diagnostic!>!
+Koine.Compiler.Services.ModelEditResult.Diagnostics.init -> void

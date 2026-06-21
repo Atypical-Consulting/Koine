@@ -11,6 +11,7 @@ namespace Koine.Compiler.Tests;
 /// Spectre to <em>stdout</em>; the CLI's own runtime errors (missing input, unsupported target)
 /// stay plain on <em>stderr</em>.
 /// </summary>
+[Collection(CliConsoleCollection.Name)]
 public class CliProgramTests
 {
     /// <summary>Runs the CLI with <paramref name="args"/>, capturing stdout/stderr and the exit code.</summary>
@@ -234,10 +235,10 @@ public class CliProgramTests
         var (path, dir) = TempModel(Program.ScaffoldModel);
         try
         {
-            var (code, _, stderr) = Run("build", path, "--target", "rust");
+            var (code, _, stderr) = Run("build", path, "--target", "ruby");
 
             code.ShouldBe(1);
-            stderr.ShouldContain("unsupported target 'rust'");
+            stderr.ShouldContain("unsupported target 'ruby'");
             stderr.ShouldContain("csharp");        // lists the supported targets
             stderr.ShouldNotContain("USAGE");
         }

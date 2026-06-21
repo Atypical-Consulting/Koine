@@ -3,6 +3,7 @@ using Koine.Compiler.Emit.Docs;
 using Koine.Compiler.Emit.Glossary;
 using Koine.Compiler.Emit.Php;
 using Koine.Compiler.Emit.Python;
+using Koine.Compiler.Emit.Rust;
 using Koine.Compiler.Emit.TypeScript;
 
 namespace Koine.Compiler.Emit;
@@ -22,6 +23,7 @@ internal static class BuiltInEmitterProviders
         new TypeScriptEmitterProvider(),
         new PythonEmitterProvider(),
         new PhpEmitterProvider(),
+        new RustEmitterProvider(),
         new GlossaryEmitterProvider(),
         new DocsEmitterProvider(),
     };
@@ -43,7 +45,9 @@ internal sealed class CSharpEmitterProvider : IEmitterProvider
     /// </summary>
     private static CSharpEmitterOptions ToCSharpOptions(EmitterOptions options)
     {
-        if (options.NamespaceMap.Count == 0 && options.InstantMode is null && !options.EmitSourceMaps && !options.ReferenceOnly)
+        if (options.NamespaceMap.Count == 0 && options.InstantMode is null && !options.EmitSourceMaps
+            && !options.ReferenceOnly && options.Layers is null
+            && !options.ApplicationMediatr && options.ApplicationMapping is null)
         {
             return CSharpEmitterOptions.Empty;
         }
@@ -51,7 +55,41 @@ internal sealed class CSharpEmitterProvider : IEmitterProvider
         var instant = string.Equals(options.InstantMode, "nodaTime", StringComparison.OrdinalIgnoreCase)
             ? CSharpInstantMode.NodaTime
             : CSharpInstantMode.DateTimeOffset;
-        return new CSharpEmitterOptions(options.NamespaceMap, instant, options.EmitSourceMaps, options.ReferenceOnly);
+        var mapping = string.Equals(options.ApplicationMapping, "mapperly", StringComparison.OrdinalIgnoreCase)
+            ? CSharpMappingMode.Mapperly
+            : CSharpMappingMode.Plain;
+        return new CSharpEmitterOptions(
+            options.NamespaceMap, instant, options.EmitSourceMaps, options.ReferenceOnly,
+            ParseLayers(options.Layers), options.ApplicationMediatr, mapping);
+    }
+
+    /// <summary>
+    /// Parses the comma-separated <c>layers</c> selector into a layer set. <c>null</c> (the default)
+    /// maps to <c>null</c> ⇒ Domain-only. Both opt-in layers imply <c>domain</c>: <c>application</c>
+    /// (issue #129) and <c>infrastructure</c> (issue #128, the EF Core realization of the contracts).
+    /// Names are case-insensitive; unknown names are dropped here (the CLI rejects them up front).
+    /// </summary>
+    private static IReadOnlySet<CSharpLayer>? ParseLayers(string? layers)
+    {
+        if (layers is null)
+        {
+            return null;
+        }
+
+        var set = new HashSet<CSharpLayer> { CSharpLayer.Domain };
+        foreach (var name in layers.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            if (string.Equals(name, "application", StringComparison.OrdinalIgnoreCase))
+            {
+                set.Add(CSharpLayer.Application);
+            }
+            else if (string.Equals(name, "infrastructure", StringComparison.OrdinalIgnoreCase))
+            {
+                set.Add(CSharpLayer.Infrastructure);
+            }
+        }
+
+        return set;
     }
 }
 
@@ -144,6 +182,36 @@ internal sealed class PhpEmitterProvider : IEmitterProvider
         }
 
         return new PhpEmitterOptions(options.NamespaceMap);
+    }
+}
+
+/// <summary>Provider for the Rust backend. Maps the neutral options to <see cref="RustEmitterOptions"/>.</summary>
+internal sealed class RustEmitterProvider : IEmitterProvider
+{
+    public string Target => "rust";
+
+    public IEmitter Create(EmitterOptions options) => new RustEmitter(ToRustOptions(options));
+
+    /// <summary>
+    /// Maps the neutral <see cref="EmitterOptions"/> to <see cref="RustEmitterOptions"/>. The shared
+    /// namespace map is reused as the Rust module remap; context keys are <c>snake_case</c>d to match
+    /// the module heads the emitter computes (<c>Billing → billing</c>). An empty bag maps to
+    /// <see cref="RustEmitterOptions.Empty"/>, so unconfigured targets emit byte-identical output.
+    /// </summary>
+    private static RustEmitterOptions ToRustOptions(EmitterOptions options)
+    {
+        if (options.NamespaceMap.Count == 0)
+        {
+            return RustEmitterOptions.Empty;
+        }
+
+        var moduleMap = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var (context, module) in options.NamespaceMap)
+        {
+            moduleMap[RustNaming.ToSnakeCase(context)] = module;
+        }
+
+        return new RustEmitterOptions(moduleMap);
     }
 }
 

@@ -19,7 +19,7 @@ Want to try the compiler without installing anything? The <a class="koi-try" hre
 
 ```bash
 koine --version
-koine build <file.koi|dir> [--target csharp|typescript|python|php|glossary|docs] [--out <dir>] [--glossary <file.md>] [--config <file>]
+koine build <file.koi|dir> [--target csharp|typescript|python|php|rust|glossary|docs] [--out <dir>] [--glossary <file.md>] [--config <file>]
 koine watch <file.koi|dir> [--target …] [--out …] [--config <file>]   # rebuild on every change
 koine fmt   <file.koi|dir> [--check]            # canonically format .koi (--check: verify only)
 koine init  [dir] [--force]                    # scaffold a starter project
@@ -52,8 +52,12 @@ Parses and validates the model, then — if you ask for output — emits files.
 | Flag | Default | What it does |
 |------|---------|--------------|
 | *(positional)* | — | The `.koi` file or directory to compile. Required. |
-| `--target` | `csharp` | The emitter: `csharp`, `typescript`, `python`, `php`, `glossary`, or `docs`. |
+| `--target` | `csharp` | The emitter: `csharp`, `typescript`, `python`, `php`, `rust`, `glossary`, or `docs`. |
+| `--layers <list>` | `domain` | (C# only) Comma-separated layers to emit: `domain` (the model + application contracts) and/or `infrastructure` (a runnable EF Core realization — `DbContext`, repositories, unit of work, outbox, DI). `infrastructure` implies `domain`. See [C# infrastructure layer](#c-infrastructure-layer---layers). |
 | `--out <dir>` | *(none)* | Write the emitted files under this directory. Omit to only validate. |
+| `--layers <list>` | `domain` | Comma-separated output layers (`domain`, `application`). `application` implies `domain`. C# only. See [the Application layer](#the-c-application-layer). |
+| `--app-mediatr` | *(off)* | Application layer: emit the MediatR request/handler shape + validation/transaction pipeline behaviors instead of plain handlers. |
+| `--app-mapping <mode>` | `plain` | Application layer: DTO/read-model mapping strategy — `plain` (hand-rolled) or `mapperly` (reserved). |
 | `--glossary <file.md>` | *(none)* | Also write a Markdown ubiquitous-language glossary to this file. |
 | `--config <file>` | *(discovered)* | Read build defaults from this `koine.config` instead of the discovered one. See [`koine.config`](#koineconfig). |
 
@@ -85,6 +89,54 @@ The emitter lays types out by context into namespace-mirroring folders (`Menu/`,
 `--out` is destructive *within the folders Koine generates*. Point it at a dedicated output directory (the demo uses `Generated/`, git-ignored), never at a folder that also holds files you wrote by hand.
 :::
 
+### The C# Application layer
+
+By default the C# target emits the application **contracts** only — `IUnitOfWork`, the `I<Service>`
+use-case interfaces, read-model projections, query objects and `IQueryHandler<,>` — with no
+implementations. Add `application` to `--layers` to also emit the layer that fills them in:
+
+```bash
+koine build templates/pizzeria --target csharp --layers domain,application --out Generated
+```
+
+Per aggregate **command** and **factory** it emits a request `record`, a handler that loads the
+aggregate via its `IUnitOfWork` repository, invokes the behavior and calls `SaveChangesAsync`, and a
+**FluentValidation** validator whose rules are rendered from the same invariants the domain enforces.
+Per **query** it emits a concrete `IQueryHandler<,>` (a single result keyed by the root's identity
+loads + projects via the `To<ReadModel>` mapper). It also emits an
+`Add<Context>Application(this IServiceCollection)` DI extension registering them all.
+
+Plain handlers (no runtime dependency beyond FluentValidation) are the default. Two opt-in
+sub-options:
+
+- `--app-mediatr` — emit the **MediatR** shape (`IRequest`/`IRequest<T>`, `IRequestHandler<,>`, and
+  validation + transaction `IPipelineBehavior<,>`s) instead of plain handlers.
+- `--app-mapping plain|mapperly` — mapping strategy (`mapperly` reserved for source-generated mapping).
+
+With the layer **off** (the default), the emitted C# is byte-identical to before. Koine `usecase`
+declarations carry no binding to a specific aggregate behavior, so the generated `I<Service>`
+implementation throws `NotImplementedException` until wired — the generated command/factory handlers
+are the real entry points. The sub-options can also be set in `koine.config`
+(`targets.csharp.layers`, `targets.csharp.application.mediatr`, `targets.csharp.application.mapping`).
+
+### C# infrastructure layer (`--layers`)
+
+By default the C# target emits the **domain layer**: value objects, entities, aggregates, smart enums, events, and the *persistence-ignorant* application contracts (`IRepository`, `IUnitOfWork`). Add `--layers domain,infrastructure` to also emit a runnable **EF Core** realization of those contracts, regenerated from the model on every build:
+
+```bash
+koine build templates/pizzeria --out Generated --layers domain,infrastructure
+```
+
+Per bounded context, the infrastructure layer adds (under an `Infrastructure/` folder):
+
+- a `<Context>DbContext : DbContext` with one `DbSet` per aggregate root;
+- an `IEntityTypeConfiguration<Root>` per aggregate — value objects → owned types (`OwnsOne`/`OwnsMany`), the `versioned` token → `IsRowVersion()`, smart enums → `HasConversion` value converters, strongly-typed IDs → key converters;
+- a concrete `<Root>Repository : I<Root>Repository` and a `UnitOfWork : IUnitOfWork`;
+- a transactional `OutboxMessage` table + an `IntegrationEventDispatcher` (only when the context publishes an integration event);
+- an `Add<Context>Infrastructure(this IServiceCollection, Action<DbContextOptionsBuilder>)` DI extension — you supply the database provider, so the emitter stays provider-agnostic.
+
+`--layers domain` (or omitting the flag) keeps the output **byte-identical** to before. EF Core is the only backend in v1.
+
 ### Emit a glossary
 
 There are two ways to get a Markdown glossary. The `--glossary` flag writes one to a named file **independently** of `--target`/`--out`, so you can emit C# *and* a glossary in a single run:
@@ -114,7 +166,7 @@ out = generated
 
 The first one found wins; if none is found, no defaults are applied. A flag on the command line always overrides the config.
 
-**Keys read today.** Only two flat keys are honoured: `target` (`csharp`, `typescript`, `python`, `php`, `glossary`, or `docs`) and `out` (the output directory). Every other key is **silently ignored**, which keeps the file forward-compatible — older tooling tolerates a newer config.
+**Keys read today.** The flat keys `target` (`csharp`, `typescript`, `python`, `php`, `rust`, `glossary`, or `docs`) and `out` (the output directory) are honoured, plus the per-target key `targets.csharp.layers` (e.g. `domain,infrastructure`) — the config equivalent of [`--layers`](#c-infrastructure-layer---layers), overridden by an explicit `--layers` flag. Every other key is **silently ignored**, which keeps the file forward-compatible — older tooling tolerates a newer config.
 
 :::note[`targets.*` is reserved for R16]
 A structured `targets.<name> = { … }` block (per-target namespace maps, `instantMode`, output layout) is sketched in the scaffolded config but **not yet implemented** — it is reserved for [R16](/Koine/guides/roadmap/#r16--multi-target-emitters) and ignored today. `koine init` writes a commented example of it for forward reference.

@@ -50,7 +50,7 @@ public class KoineConfigTests
     public void Unknown_target_yields_empty_options()
     {
         var cfg = KoineConfig.Parse("target = csharp\n");
-        var opts = cfg.OptionsFor("rust");
+        var opts = cfg.OptionsFor("ruby");
         opts.ShouldBeSameAs(TargetOptions.Empty);
         opts.OutDir.ShouldBeNull();
         opts.NamespaceMap.ShouldBeEmpty();

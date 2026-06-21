@@ -1,11 +1,12 @@
 ---
 title: "Roadmap"
-description: "What Koine ships today (R1–R17: full DDD toolkit, TypeScript, Python Phase 1, and editor tooling) and what comes next."
+description: "What Koine ships today (R1–R17: full DDD toolkit, TypeScript, Python, and editor tooling) and what comes next."
 ---
 
 Koine is built as a sequence of **epics** (R1–R17), each a cohesive slice of Domain-Driven Design
 capability. The compiler ships the **full tactical and strategic toolkit (R1–R15)**, the
-**R16 multi-target emitters** (TypeScript and Python Phase 1), and the
+**R16 multi-target emitters** (TypeScript and Python — the latter now covering the full
+tactical-and-strategic construct set), and the
 **R17 editor tooling** — the TextMate grammar, the `koine lsp` language server, and the
 `fmt`/`init`/`watch` commands. Every construct described in the reference is implemented, tested,
 and demonstrated in the [pizzeria demo](https://github.com/Atypical-Consulting/Koine/tree/main/demo).
@@ -90,8 +91,8 @@ the demo produces from them.
 
 ## Shipped: R16 — Multi-target emitters (partial)
 
-R16 is the capstone that proves the `IEmitter` seam is genuinely target-agnostic. Three of four
-stories are delivered; Rust remains on the roadmap.
+R16 is the capstone that proves the `IEmitter` seam is genuinely target-agnostic. All four emitter
+stories — C#, TypeScript, Python, PHP, and Rust — are delivered.
 
 - **R16.1 — C# emitter configuration.** ✅ **Delivered** — a `koine.config` options object to remap
   contexts to concrete namespaces, choose the `Instant` mapping (`DateTimeOffset` default or NodaTime),
@@ -99,18 +100,24 @@ stories are delivered; Rust remains on the roadmap.
 - **R16.2 — TypeScript emitter.** ✅ **Delivered** — `koine build model.koi --target typescript`
   producing idiomatic TypeScript: value objects, identity-equal entities, smart enums as typed
   `const` objects, `*Id` branded primitives. Output passes `tsc --noEmit --strict`.
-- **R16.3 — Python emitter (Phase 1: tactical core).** ✅ **Delivered** — `koine build model.koi
-  --target python` producing dependency-free Python 3.11+ from the tactical core:
+- **R16.3 — Python emitter (tactical core + strategic/CQRS layer).** ✅ **Delivered** — `koine build
+  model.koi --target python` producing dependency-free Python 3.11+ across the full construct set:
   - `@dataclass(frozen=True)` value objects with invariant checks
   - `enum.Enum` smart enums (including data-carrying enums with associated fields)
   - Identity-equal entities with `Guid`/natural/sequence ID strategies
   - Frozen-dataclass domain events
   - `typing.Protocol` repository and service interfaces
+  - **Phase 2 (strategic/CQRS layer):** read models (frozen-dataclass DTO + a pure `to_m(src)`
+    projection), queries (DTO + a `QueryHandler` `Protocol` seam), policies (event→command reactor
+    `Protocol`), state-machine reachability guards inside command methods, and context-map/ACL
+    translator `Protocol`s with qualified cross-context imports.
   - Output is `mypy --strict`-clean and passes `ast.parse` syntax checking.
-  - *Phase 2 (CQRS/strategic layer: read models, queries, policies, state machines, context maps)
-    is not yet emitted in Python — document those as C#/TypeScript only.*
-- **R16.4 — Rust emitter.** Not yet implemented. Invariants will surface as `Result<T, DomainError>`
-  rather than panics — the strongest test of the seam. Fixture must pass `cargo check`.
+- **R16.4 — Rust emitter.** ✅ **Delivered** (Phase 1: tactical core) — `--target rust` emits an
+  idiomatic crate: value objects as structs with smart constructors returning `Result<_, DomainError>`
+  (never panics), smart enums as exhaustively-matched Rust `enum`s, entities/aggregates with
+  invariant-checked behaviors, events as a `Vec`-friendly `DomainEvent` enum, and repositories as
+  `trait`s. Depends only on `rust_decimal` (money) and `regex` (`matches`); a `cargo check` meta-test
+  proves the emitted crate compiles.
 - **R16.5 — Conformance harness.** ✅ **Delivered** — a suite that runs every fixture through each
   registered emitter and compiles the output (Roslyn for C#, `tsc` for TS, `mypy` for Python), plus an
   `AstPurityTests` guard that fails the build if anything under `Ast/` references a target-specific concept.

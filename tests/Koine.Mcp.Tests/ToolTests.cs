@@ -92,7 +92,7 @@ public sealed class ToolTests
     [Fact]
     public void Compile_unknown_target_fails_gracefully()
     {
-        var result = CompileTool.Compile(Files(Billing), "rust");
+        var result = CompileTool.Compile(Files(Billing), "ruby");
 
         result.Success.ShouldBeFalse();
         result.Files.ShouldBeEmpty();

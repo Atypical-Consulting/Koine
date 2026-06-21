@@ -41,6 +41,10 @@ public sealed partial class PythonEmitter
         public const string Enums = "enums";
         public const string Events = "events";
         public const string Repositories = "repositories";
+        public const string ReadModels = "read_models";
+        public const string Queries = "queries";
+        public const string Policies = "policies";
+        public const string Abstractions = "abstractions";
     }
 
     /// <summary>
@@ -134,7 +138,16 @@ public sealed partial class PythonEmitter
     /// once-emitted <c>koine_runtime</c>, then local cross-type modules (absolute imports rooted at the
     /// output dir, never relative, never the module's own symbols).
     /// </summary>
-    private string Assemble(PyEmitContext emit, string ns, string kindFolder, string body, string declaredName)
+    /// <param name="symbolContext">
+    /// Optional per-symbol context override for cross-type import resolution. By default a symbol that
+    /// exists in several contexts resolves to THIS module's context; an ACL translator instead needs
+    /// each mapped type resolved against the context it was DECLARED in (a downstream type whose name
+    /// collides with an upstream type must not silently shadow the upstream one). Maps the exported
+    /// symbol name to the context whose copy should be imported.
+    /// </param>
+    private string Assemble(
+        PyEmitContext emit, string ns, string kindFolder, string body, string declaredName,
+        IReadOnlyDictionary<string, string>? symbolContext = null)
     {
         // Scan a CODE-ONLY view: strip docstrings, then `#` comments, so prose never drives imports.
         var codeView = StripDocsAndComments(body);
@@ -267,7 +280,10 @@ public sealed partial class PythonEmitter
             {
                 continue;
             }
-            PyTypeLocation chosen = candidates.FirstOrDefault(c => c.Context == thisContext, candidates[0]);
+            // Prefer the symbol's declared-in context when one is supplied (ACL), else this module's
+            // context — falling back to the first candidate when neither has a copy.
+            var preferred = symbolContext is not null && symbolContext.TryGetValue(symbol, out var pc) ? pc : thisContext;
+            PyTypeLocation chosen = candidates.FirstOrDefault(c => c.Context == preferred, candidates[0]);
             imports[symbol] = chosen.ModuleDotted;
         }
 
@@ -393,6 +409,15 @@ public sealed partial class PythonEmitter
                 break;
             case IntegrationEventDecl iev:
                 Add(locations, context, iev.Name, ns, KindFolder.Events);
+                break;
+            // A read model's DTO is referenced by its queries' handler Protocols (and other
+            // contexts); register it so the cross-module import resolves to read_models/.
+            case ReadModelDecl rm:
+                Add(locations, context, rm.Name, ns, KindFolder.ReadModels);
+                break;
+            // A query DTO may be referenced cross-module; register it in queries/.
+            case QueryDecl q:
+                Add(locations, context, q.Name, ns, KindFolder.Queries);
                 break;
         }
     }

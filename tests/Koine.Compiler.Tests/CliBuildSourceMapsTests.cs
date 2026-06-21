@@ -9,6 +9,7 @@ namespace Koine.Compiler.Tests;
 /// <c>EmitterOptions</c> → each backend's option type. With the flag off, the emitted artifacts must
 /// be byte-identical to a plain build (no <c>#line</c>, no <c>*.map</c> sidecar).
 /// </summary>
+[Collection(CliConsoleCollection.Name)]
 public class CliBuildSourceMapsTests
 {
     /// <summary>Runs the CLI with <paramref name="args"/>, capturing stdout/stderr and the exit code.</summary>

@@ -776,6 +776,114 @@ public class LspServerTests
             @params = new { textDocument = new { uri }, id, text },
         }));
 
+    private static byte[] Model(string uri, string? qualifiedName = null) =>
+        Frame(JsonSerializer.Serialize(new
+        {
+            jsonrpc = "2.0",
+            id = 32,
+            method = "koine/model",
+            @params = new { textDocument = new { uri }, qualifiedName },
+        }));
+
+    private static byte[] ModelMembers(string uri, string qualifiedName) =>
+        Frame(JsonSerializer.Serialize(new
+        {
+            jsonrpc = "2.0",
+            id = 33,
+            method = "koine/modelMembers",
+            @params = new { textDocument = new { uri }, qualifiedName },
+        }));
+
+    private static byte[] EmitKoine(string uri, object edit) =>
+        Frame(JsonSerializer.Serialize(new
+        {
+            jsonrpc = "2.0",
+            id = 34,
+            method = "koine/emitKoine",
+            @params = new { textDocument = new { uri }, edit },
+        }));
+
+    private static byte[] ApplyModelEdit(string uri, object edit) =>
+        Frame(JsonSerializer.Serialize(new
+        {
+            jsonrpc = "2.0",
+            id = 35,
+            method = "koine/applyModelEdit",
+            @params = new { textDocument = new { uri }, edit },
+        }));
+
+    // ---- koine/model* (round-trip seam, #91) ----
+
+    private const string ModelDoc = "context C {\n  value Money { amount: Decimal }\n  enum Currency { EUR, USD }\n}\n";
+
+    [Fact]
+    public void Model_returns_the_structured_tree()
+    {
+        var output = RunSession(Initialize(), DidOpen("file:///t.koi", ModelDoc), Model("file:///t.koi"));
+
+        output.ShouldContain("\"kind\":\"model\"");
+        output.ShouldContain("\"qualifiedName\":\"C.Money\"");
+        output.ShouldContain("\"kind\":\"value\"");
+        output.ShouldContain("\"id\":32");
+    }
+
+    [Fact]
+    public void Model_scoped_by_qualified_name_returns_the_subtree()
+    {
+        var output = RunSession(Initialize(), DidOpen("file:///t.koi", ModelDoc), Model("file:///t.koi", "C.Money"));
+
+        output.ShouldContain("\"qualifiedName\":\"C.Money\"");
+        output.ShouldContain("\"name\":\"amount\"");
+        output.ShouldNotContain("\"qualifiedName\":\"C.Currency\"");
+    }
+
+    [Fact]
+    public void ModelMembers_lists_a_nodes_children()
+    {
+        var output = RunSession(
+            Initialize(), DidOpen("file:///t.koi", ModelDoc), ModelMembers("file:///t.koi", "C.Currency"));
+
+        output.ShouldContain("\"members\":[");
+        output.ShouldContain("\"name\":\"EUR\"");
+        output.ShouldContain("\"name\":\"USD\"");
+        output.ShouldContain("\"id\":33");
+    }
+
+    [Fact]
+    public void EmitKoine_returns_canonical_koi_for_a_legal_edit()
+    {
+        var edit = new { kind = "addField", target = "C.Money", name = "tax", type = "Decimal" };
+        var output = RunSession(Initialize(), DidOpen("file:///t.koi", ModelDoc), EmitKoine("file:///t.koi", edit));
+
+        output.ShouldContain("\"koine\":");
+        output.ShouldContain("tax: Decimal");
+        output.ShouldContain("\"diagnostics\":[]");
+        output.ShouldContain("\"id\":34");
+    }
+
+    [Fact]
+    public void EmitKoine_returns_diagnostics_for_an_illegal_edit()
+    {
+        var edit = new { kind = "changeFieldType", target = "C.Money.amount", type = "Nope" };
+        var output = RunSession(Initialize(), DidOpen("file:///t.koi", ModelDoc), EmitKoine("file:///t.koi", edit));
+
+        output.ShouldContain("\"koine\":null");
+        output.ShouldContain("KOI0101");   // unknown type
+    }
+
+    [Fact]
+    public void ApplyModelEdit_returns_a_scoped_text_edit()
+    {
+        var edit = new { kind = "addField", target = "C.Money", name = "tax", type = "Decimal" };
+        var output = RunSession(Initialize(), DidOpen("file:///t.koi", ModelDoc), ApplyModelEdit("file:///t.koi", edit));
+
+        output.ShouldContain("\"uri\":\"file:///t.koi\"");
+        output.ShouldContain("\"edits\":[");
+        output.ShouldNotContain("\"edits\":[]");
+        output.ShouldContain("\"newText\":");
+        output.ShouldContain("\"id\":35");
+    }
+
     // ---- koine/glossaryModel ----
 
     [Fact]
@@ -902,9 +1010,9 @@ public class LspServerTests
         var output = RunSession(
             Initialize(),
             DidOpen("file:///t.koi", doc),
-            EmitPreview("file:///t.koi", "rust"));
+            EmitPreview("file:///t.koi", "ruby"));
 
-        output.ShouldContain("unknown target 'rust'");
+        output.ShouldContain("unknown target 'ruby'");
         output.ShouldContain("\"files\":[]");
         output.ShouldNotContain("-32601"); // a normal result, not a JSON-RPC error
         output.ShouldContain("\"id\":30");     // response correlated to the request id
