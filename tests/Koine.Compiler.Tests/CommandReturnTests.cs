@@ -82,7 +82,7 @@ public class CommandReturnTests
         var (asm, errors) = TestSupport.Compile(result.Files);
         (asm is not null).ShouldBeTrue("generated C# failed to compile:\n" + string.Join("\n", errors));
         var orderCs = result.Files.Single(f => f.RelativePath == "Sales/Order.cs").Contents;
-        return (asm!, orderCs);
+        return (asm, orderCs);
     }
 
     // ---- parsing -----------------------------------------------------------

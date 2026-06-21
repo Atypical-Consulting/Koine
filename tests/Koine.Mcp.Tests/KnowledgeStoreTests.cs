@@ -1,5 +1,3 @@
-using Koine.Mcp;
-
 namespace Koine.Mcp.Tests;
 
 /// <summary>

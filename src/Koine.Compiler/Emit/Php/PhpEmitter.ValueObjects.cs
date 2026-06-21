@@ -1,6 +1,5 @@
 using System.Text;
 using Koine.Compiler.Ast;
-using Koine.Compiler.Emit.CSharp;
 
 namespace Koine.Compiler.Emit.Php;
 
@@ -30,8 +29,7 @@ public sealed partial class PhpEmitter
         var translator = new PhpExpressionTranslator(
             emit.Index,
             vo.Members,
-            emit.EnumMemberToType,
-            typeMapper);
+            emit.EnumMemberToType);
 
         var sb = new StringBuilder();
 
@@ -41,7 +39,7 @@ public sealed partial class PhpEmitter
         sb.Append("{\n");
 
         // Constructor with promoted readonly properties.
-        WriteConstructor(sb, name, fields, derived, vo.Invariants, translator, typeMapper);
+        WriteConstructor(sb, name, fields, vo.Invariants, translator, typeMapper);
 
         // Derived (computed) members as public getter methods.
         foreach (Member m in derived)
@@ -59,26 +57,26 @@ public sealed partial class PhpEmitter
 
         // Structural equals method.
         sb.Append('\n');
-        WriteEquals(sb, name, fields);
+        WriteEquals(sb, fields);
 
         // Quantity-specific arithmetic methods.
         if (vo.IsQuantity)
         {
-            WriteQuantityOps(sb, vo, name, fields, emit.Index);
+            WriteQuantityOps(sb, name, fields);
         }
         else
         {
             // Demand-driven scalar multiply (only when the model actually uses it).
-            if (emit.ScalarNeeds.TryGetValue(vo.Name, out IReadOnlySet<string>? scalars)
+            if (emit.ScalarNeeds.ContainsKey(vo.Name)
                 && fields.Any(m => m.Type.Name is "Int" or "Decimal"))
             {
-                WriteScalarOp(sb, name, fields, scalars);
+                WriteScalarOp(sb, fields);
             }
 
             // Demand-driven additive (only when the model sums this VO).
             if (emit.AdditiveNeeds.Contains(vo.Name))
             {
-                WriteAdditiveOp(sb, name, fields);
+                WriteAdditiveOp(sb, fields);
             }
         }
 
@@ -97,7 +95,6 @@ public sealed partial class PhpEmitter
         StringBuilder sb,
         string className,
         IReadOnlyList<Member> fields,
-        IReadOnlyList<Member> derived,
         IReadOnlyList<Invariant> invariants,
         PhpExpressionTranslator translator,
         PhpTypeMapper typeMapper)
@@ -173,7 +170,7 @@ public sealed partial class PhpEmitter
     // Equals
     // -------------------------------------------------------------------------
 
-    private static void WriteEquals(StringBuilder sb, string className, IReadOnlyList<Member> fields)
+    private static void WriteEquals(StringBuilder sb, IReadOnlyList<Member> fields)
     {
         sb.Append(Indent).Append("public function equals(self $other): bool\n");
         sb.Append(Indent).Append("{\n");
@@ -217,8 +214,8 @@ public sealed partial class PhpEmitter
     /// <c>multipliedBy()</c>/<c>dividedBy()</c> on a quantity value object.
     /// </summary>
     private static void WriteQuantityOps(
-        StringBuilder sb, ValueObjectDecl vo, string name,
-        IReadOnlyList<Member> fields, ModelIndex index)
+        StringBuilder sb, string name,
+        IReadOnlyList<Member> fields)
     {
         Member? amount = fields.FirstOrDefault(m => m.Type.Name == "Decimal" && !m.Type.IsOptional);
         Member? unit = fields.FirstOrDefault(m => !ReferenceEquals(m, amount) && !m.Type.IsOptional);
@@ -276,8 +273,8 @@ public sealed partial class PhpEmitter
     // -------------------------------------------------------------------------
 
     private static void WriteScalarOp(
-        StringBuilder sb, string name,
-        IReadOnlyList<Member> fields, IReadOnlySet<string> scalars)
+        StringBuilder sb,
+        IReadOnlyList<Member> fields)
     {
         var numeric = new HashSet<string>(
             fields.Where(m => m.Type.Name is "Int" or "Decimal").Select(m => m.Name),
@@ -322,7 +319,7 @@ public sealed partial class PhpEmitter
     // Demand-driven additive (non-quantity value objects, used in sum() folds)
     // -------------------------------------------------------------------------
 
-    private static void WriteAdditiveOp(StringBuilder sb, string name, IReadOnlyList<Member> fields)
+    private static void WriteAdditiveOp(StringBuilder sb, IReadOnlyList<Member> fields)
     {
         var numeric = new HashSet<string>(
             fields.Where(m => m.Type.Name is "Int" or "Decimal").Select(m => m.Name),

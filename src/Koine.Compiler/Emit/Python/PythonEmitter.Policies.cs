@@ -61,6 +61,6 @@ public sealed partial class PythonEmitter
 
         return new EmittedFile(
             PathFor(ns, KindFolder.Policies, policy.Name),
-            Assemble(emit, ns, KindFolder.Policies, sb.ToString(), policyType));
+            Assemble(emit, ns, sb.ToString(), policyType));
     }
 }

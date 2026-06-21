@@ -235,9 +235,6 @@ public sealed partial class DocsEmitter
                 }
 
                 break;
-
-            default:
-                break;
         }
     }
 

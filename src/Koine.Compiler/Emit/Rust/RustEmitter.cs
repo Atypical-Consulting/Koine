@@ -112,7 +112,7 @@ public sealed partial class RustEmitter : IEmitter
         {
             case EnumDecl @enum:
                 body.Append('\n');
-                EmitEnum(body, emit, @enum);
+                EmitEnum(body, @enum);
                 break;
             case ValueObjectDecl vo:
                 body.Append('\n');
@@ -123,19 +123,19 @@ public sealed partial class RustEmitter : IEmitter
                 {
                     EmitType(emit, body, nested, context);
                 }
-                EmitAggregateExtras(emit, body, agg, context);
+                EmitAggregateExtras(emit, body, agg);
                 break;
             case EntityDecl entity:
                 body.Append('\n');
-                EmitEntity(body, emit, entity, context, isAggregateRoot: false, versioned: false);
+                EmitEntity(body, emit, entity, context);
                 break;
             case EventDecl ev:
                 body.Append('\n');
-                EmitEvent(body, emit, ev.Name, ev.Doc, ev.Members, context);
+                EmitEvent(body, emit, ev.Name, ev.Doc, ev.Members);
                 break;
             case IntegrationEventDecl iev:
                 body.Append('\n');
-                EmitEvent(body, emit, iev.Name, iev.Doc, iev.Members, context);
+                EmitEvent(body, emit, iev.Name, iev.Doc, iev.Members);
                 break;
         }
     }

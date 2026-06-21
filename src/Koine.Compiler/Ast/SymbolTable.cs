@@ -15,7 +15,6 @@ namespace Koine.Compiler.Ast;
 /// </summary>
 internal sealed class SymbolTable
 {
-    private readonly KoineModel _model;
     private readonly ModelIndex _index;
 
     // All node/record keys use BCL ReferenceEqualityComparer.Instance — Member/TypeDecl/EnumMember/
@@ -42,7 +41,6 @@ internal sealed class SymbolTable
 
     public SymbolTable(KoineModel model, ModelIndex index)
     {
-        _model = model;
         _index = index;
 
         // 1. Contexts (top-level containers; ContainingSymbol = null). Each context's downward Types

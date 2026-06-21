@@ -1,5 +1,4 @@
 using Koine.Cli;
-using Koine.Cli.Infrastructure;
 using Koine.Compiler.Emit;
 using Koine.Compiler.Services;
 
@@ -31,7 +30,7 @@ public class PythonPackageMapTests
     private static IReadOnlyList<EmittedFile> EmitPythonWithConfig(string config)
     {
         var options = KoineConfig.Parse(config).OptionsFor("python");
-        Koine.Cli.Infrastructure.EmitterRegistry.TryCreate("python", options, out var emitter).ShouldBeTrue();
+        Cli.Infrastructure.EmitterRegistry.TryCreate("python", options, out var emitter).ShouldBeTrue();
         var result = new KoineCompiler().Compile(Fixture, emitter);
         result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
         return result.Files;

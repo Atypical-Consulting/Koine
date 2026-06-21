@@ -39,7 +39,6 @@ internal sealed class PhpExpressionTranslator
 
     private readonly ModelIndex _index;
     private readonly TypeResolver _resolver;
-    private readonly PhpTypeMapper _typeMapper;
     private readonly TypeScope _scope;
     private readonly ISet<string> _memberNames;
     private readonly IReadOnlyDictionary<string, string> _enumMemberToType;
@@ -55,12 +54,10 @@ internal sealed class PhpExpressionTranslator
         ModelIndex index,
         IReadOnlyList<Member> members,
         IReadOnlyDictionary<string, string> enumMemberToType,
-        PhpTypeMapper typeMapper,
         string? context = null)
     {
         _index = index;
         _resolver = new TypeResolver(index, context);
-        _typeMapper = typeMapper;
         _scope = TypeScope.FromMembers(members, index);
         _memberNames = new HashSet<string>(members.Select(m => m.Name), StringComparer.Ordinal);
         _enumMemberToType = enumMemberToType;
@@ -320,7 +317,7 @@ internal sealed class PhpExpressionTranslator
 
         if (IsArithmeticValueObject(left) || IsArithmeticValueObject(right))
         {
-            WriteValueObjectBinary(bin, left, right, sb, parenthesize);
+            WriteValueObjectBinary(bin, left, sb, parenthesize);
             return true;
         }
 
@@ -387,7 +384,7 @@ internal sealed class PhpExpressionTranslator
     /// underlying <c>amount</c> accessor (no comparison method is generated on the VO).
     /// </summary>
     private void WriteValueObjectBinary(
-        BinaryExpr bin, TypeRef? left, TypeRef? right, StringBuilder sb, bool parenthesize)
+        BinaryExpr bin, TypeRef? left, StringBuilder sb, bool parenthesize)
     {
         bool leftIsVo = IsArithmeticValueObject(left);
         Expr vo = leftIsVo ? bin.Left : bin.Right;

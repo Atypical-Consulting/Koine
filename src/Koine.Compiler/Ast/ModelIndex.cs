@@ -168,7 +168,7 @@ public sealed class ModelIndex
                     continue;
                 }
 
-                IEnumerable<string> names = imp.IsWildcard ? theirTypes.Keys : (IEnumerable<string>)imp.Names;
+                IEnumerable<string> names = imp.IsWildcard ? theirTypes.Keys : imp.Names;
                 foreach (var name in names)
                 {
                     if (!theirTypes.ContainsKey(name))

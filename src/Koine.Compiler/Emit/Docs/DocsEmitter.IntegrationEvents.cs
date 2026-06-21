@@ -75,7 +75,7 @@ public sealed partial class DocsEmitter
             }
         }
 
-        EmitIntegrationFlowchartBody(sb, model, byKey, subscribers);
+        EmitIntegrationFlowchartBody(sb, byKey, subscribers);
 
         sb.Append("```\n");
     }
@@ -86,7 +86,6 @@ public sealed partial class DocsEmitter
     /// </summary>
     private static void EmitIntegrationFlowchartBody(
         StringBuilder sb,
-        KoineModel model,
         SortedDictionary<string, (ContextNode Ctx, IntegrationEventDecl Event)> byKey,
         SortedDictionary<string, SortedSet<string>> subscribers)
     {

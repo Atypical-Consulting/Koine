@@ -21,7 +21,7 @@ internal sealed class LspServer
 {
     private readonly KoineCompiler _compiler = new();
     private readonly KoineLanguageService _ls = new();
-    private readonly Koine.Compiler.CodeFixes.CodeFixService _codeFixes = new();
+    private readonly Compiler.CodeFixes.CodeFixService _codeFixes = new();
 
     /// <summary>
     /// Parses the workspace but treats a syntax error as "no usable model" for the output-producing
@@ -29,7 +29,7 @@ internal sealed class LspServer
     /// error-tolerant and returns a partial model even for broken input, but these endpoints emit
     /// derived artifacts and must keep their original contract: broken input yields no output.
     /// </summary>
-    private (Koine.Compiler.Ast.KoineModel? Model, IReadOnlyList<Diagnostic> Diagnostics) ParseUsable(IReadOnlyList<SourceFile> sources)
+    private (Compiler.Ast.KoineModel? Model, IReadOnlyList<Diagnostic> Diagnostics) ParseUsable(IReadOnlyList<SourceFile> sources)
     {
         var (model, diagnostics) = _compiler.Parse(sources);
         var usable = diagnostics.Any(d => d.Severity == DiagnosticSeverity.Error) ? null : model;
@@ -281,7 +281,7 @@ internal sealed class LspServer
                             if (root.TryGetProperty("id", out _))
                             {
                                 Respond(root, root.TryGetProperty("params", out var resolveItem)
-                                    ? (object?)resolveItem.Clone()
+                                    ? resolveItem.Clone()
                                     : null);
                             }
 
@@ -419,7 +419,7 @@ internal sealed class LspServer
                         case "koine/glossary":
                             if (root.TryGetProperty("id", out _))
                             {
-                                Respond(root, GlossaryResultJson(root));
+                                Respond(root, GlossaryResultJson());
                             }
 
                             break;
@@ -740,7 +740,7 @@ internal sealed class LspServer
 
     // ---- Workspace symbols ------------------------------------------------
 
-    private object? WorkspaceSymbolResultJson(JsonElement root)
+    private object WorkspaceSymbolResultJson(JsonElement root)
     {
         var query = root.TryGetProperty("params", out var p)
             && p.TryGetProperty("query", out var q)
@@ -984,7 +984,7 @@ internal sealed class LspServer
     /// Each fix carries an inline WorkspaceEdit. Quick-fix replacements come from the diagnostic's
     /// structured <c>data.suggestion</c> (round-tripped from publishDiagnostics) — never the message prose.
     /// </summary>
-    private object? CodeActionResultJson(JsonElement root)
+    private object CodeActionResultJson(JsonElement root)
     {
         if (!TryGetUri(root, out var uri) || !root.TryGetProperty("params", out var p))
         {
@@ -1050,7 +1050,7 @@ internal sealed class LspServer
     }
 
     /// <summary>Serializes a <see cref="Koine.Compiler.CodeFixes.CodeFix"/> to an LSP CodeAction with an inline WorkspaceEdit.</summary>
-    private static Dictionary<string, object?> ToCodeAction(string uri, Koine.Compiler.CodeFixes.CodeFix fix, JsonElement? attachedDiagnostic)
+    private static Dictionary<string, object?> ToCodeAction(string uri, Compiler.CodeFixes.CodeFix fix, JsonElement? attachedDiagnostic)
     {
         var action = new Dictionary<string, object?>
         {
@@ -1211,7 +1211,7 @@ internal sealed class LspServer
     /// non-parsing document yields an empty stream (graceful degradation — the regex grammar
     /// stays in charge of highlighting).
     /// </summary>
-    private object? SemanticTokensResultJson(JsonElement root)
+    private object SemanticTokensResultJson(JsonElement root)
     {
         if (!TryGetUri(root, out var uri) || !_docs.TryGetValue(uri, out var text))
         {
@@ -1235,7 +1235,7 @@ internal sealed class LspServer
     /// <see cref="ToLspDiagnostic"/> shape plus a per-item <c>uri</c> so a multi-file preview is
     /// unambiguous; on any model error the emitter produces no files and <c>files</c> is empty.
     /// </summary>
-    private object? EmitPreviewResultJson(JsonElement root)
+    private object EmitPreviewResultJson(JsonElement root)
     {
         // 1. Effective target: default "csharp" when absent/empty/non-string.
         var target = "csharp";
@@ -1312,7 +1312,7 @@ internal sealed class LspServer
             ["target"] = target,
             ["files"] = files,
             ["diagnostics"] = items,
-            ["error"] = (object?)null,
+            ["error"] = null,
         };
     }
 
@@ -1341,7 +1341,7 @@ internal sealed class LspServer
     /// The request is workspace-scoped; the <c>uri</c> is a conventional anchor only. A null model
     /// (any file has a syntax error) degrades to <c>{ "markdown": "" }</c> rather than throwing.
     /// </summary>
-    private object? GlossaryResultJson(JsonElement root)
+    private object GlossaryResultJson()
     {
         var sources = Workspace().Select(kv => new SourceFile(kv.Key, kv.Value)).ToList();
         var (model, _) = ParseUsable(sources);
@@ -1350,7 +1350,7 @@ internal sealed class LspServer
             return new Dictionary<string, object?> { ["markdown"] = "" };
         }
 
-        var markdown = new Koine.Compiler.Emit.Glossary.GlossaryEmitter().Emit(model)[0].Contents;
+        var markdown = new Compiler.Emit.Glossary.GlossaryEmitter().Emit(model)[0].Contents;
         return new Dictionary<string, object?> { ["markdown"] = markdown };
     }
 
@@ -1361,7 +1361,7 @@ internal sealed class LspServer
     /// request or a null model yields the empty DTO <c>{ contexts:[], relations:[] }</c>; a valid
     /// model with no context map yields populated <c>contexts</c> and empty <c>relations</c>.
     /// </summary>
-    private object? ContextMapResultJson(JsonElement root)
+    private object ContextMapResultJson(JsonElement root)
     {
         if (!TryGetUri(root, out _))
         {
@@ -1396,7 +1396,7 @@ internal sealed class LspServer
     /// and the name's source range. Workspace-scoped; the <c>uri</c> only validates well-formedness.
     /// A malformed request or a null model yields <c>{ entries: [] }</c>.
     /// </summary>
-    private object? GlossaryModelResultJson(JsonElement root)
+    private object GlossaryModelResultJson(JsonElement root)
     {
         if (!TryGetUri(root, out _))
         {
@@ -1410,7 +1410,7 @@ internal sealed class LspServer
             return new Dictionary<string, object?> { ["entries"] = Array.Empty<object>() };
         }
 
-        var entries = Koine.Compiler.Emit.Glossary.GlossaryModelBuilder.Build(model).Entries
+        var entries = Compiler.Emit.Glossary.GlossaryModelBuilder.Build(model).Entries
             .Select(e => (object)new Dictionary<string, object?>
             {
                 ["id"] = e.Id,
@@ -1432,7 +1432,7 @@ internal sealed class LspServer
     /// when supplied — that Studio's visual editors drive forms/canvases from. A null model yields the
     /// empty <c>model</c> root.
     /// </summary>
-    private object? ModelResultJson(JsonElement root)
+    private object ModelResultJson(JsonElement root)
     {
         var sources = Workspace().Select(kv => new SourceFile(kv.Key, kv.Value)).ToList();
         var (model, _) = ParseUsable(sources);
@@ -1449,7 +1449,7 @@ internal sealed class LspServer
     /// entity's fields, an enum's members, a state machine's transitions, the context map's relations.
     /// A null model or unresolved name yields <c>{ members: [] }</c>.
     /// </summary>
-    private object? ModelMembersResultJson(JsonElement root)
+    private object ModelMembersResultJson(JsonElement root)
     {
         var sources = Workspace().Select(kv => new SourceFile(kv.Key, kv.Value)).ToList();
         var (model, _) = ParseUsable(sources);
@@ -1464,7 +1464,7 @@ internal sealed class LspServer
     /// for the affected declaration (#91), or the rejecting diagnostics. A malformed request yields
     /// <c>{ koine: null, diagnostics: [] }</c>.
     /// </summary>
-    private object? EmitKoineResultJson(JsonElement root)
+    private object EmitKoineResultJson(JsonElement root)
     {
         if (!TryGetEdit(root, out StructuredEdit edit))
         {
@@ -1485,7 +1485,7 @@ internal sealed class LspServer
     /// <c>{ uri, edits, diagnostics }</c> — the owning file, the whole-declaration <c>TextEdit</c>,
     /// and any rejecting diagnostics. A malformed request yields the empty patch.
     /// </summary>
-    private object? ApplyModelEditResultJson(JsonElement root)
+    private object ApplyModelEditResultJson(JsonElement root)
     {
         if (!TryGetEdit(root, out StructuredEdit edit))
         {
@@ -1573,7 +1573,7 @@ internal sealed class LspServer
     /// the localized <c>TextEdit</c>s (insert/replace/clear of the <c>///</c> block). An unknown id or
     /// null model yields <c>{ uri: null, edits: [] }</c>.
     /// </summary>
-    private object? SetDocResultJson(JsonElement root)
+    private object SetDocResultJson(JsonElement root)
     {
         if (!root.TryGetProperty("params", out var p)
             || !p.TryGetProperty("id", out var idEl)
@@ -1612,7 +1612,7 @@ internal sealed class LspServer
         ["relations"] = Array.Empty<object>(),
     };
 
-    private static object MapRelation(Koine.Compiler.Ast.ContextRelation r) => new Dictionary<string, object?>
+    private static object MapRelation(Compiler.Ast.ContextRelation r) => new Dictionary<string, object?>
     {
         ["upstream"] = r.Upstream,
         ["downstream"] = r.Downstream,
@@ -1622,7 +1622,7 @@ internal sealed class LspServer
         ["acl"] = r.AclMappings.Select(MapAcl).ToArray(),
     };
 
-    private static object MapAcl(Koine.Compiler.Ast.AclMapping a) => new Dictionary<string, object?>
+    private static object MapAcl(Compiler.Ast.AclMapping a) => new Dictionary<string, object?>
     {
         ["upstreamContext"] = a.UpstreamContext,
         ["upstreamType"] = a.UpstreamType,
@@ -1636,7 +1636,7 @@ internal sealed class LspServer
     /// <c>koine build … --target docs</c>. A null model (any file has a syntax error) degrades to
     /// <c>{ "files": [] }</c> rather than throwing. Returns <c>{ files: [{ path, contents }] }</c>.
     /// </summary>
-    private object? DocsResultJson()
+    private object DocsResultJson()
     {
         var sources = Workspace().Select(kv => new SourceFile(kv.Key, kv.Value)).ToList();
         var (model, _) = ParseUsable(sources);
@@ -1645,7 +1645,7 @@ internal sealed class LspServer
             return new Dictionary<string, object?> { ["files"] = Array.Empty<object>() };
         }
 
-        var emitter = new Koine.Compiler.Emit.Docs.DocsEmitter();
+        var emitter = new Compiler.Emit.Docs.DocsEmitter();
         var diagramsByFile = emitter.EmitDiagrams(model);
         var files = emitter.Emit(model)
             .Select(f => (object)new Dictionary<string, object?>
@@ -1668,7 +1668,7 @@ internal sealed class LspServer
     // lsp.ts interfaces field-for-field; the parity test guards that they do.
 
     /// <summary>Maps one <see cref="Koine.Compiler.Emit.Docs.DiagramDescriptor"/> to its wire dict.</summary>
-    internal static Dictionary<string, object?> MapDiagram(Koine.Compiler.Emit.Docs.DiagramDescriptor d) => new()
+    internal static Dictionary<string, object?> MapDiagram(Compiler.Emit.Docs.DiagramDescriptor d) => new()
     {
         ["caption"] = d.Caption,
         ["kind"] = d.Kind,
@@ -1677,7 +1677,7 @@ internal sealed class LspServer
     };
 
     /// <summary>Maps a <see cref="Koine.Compiler.Emit.Docs.DiagramGraph"/> to its <c>{ nodes, edges }</c> wire dict.</summary>
-    private static Dictionary<string, object?> MapGraph(Koine.Compiler.Emit.Docs.DiagramGraph g) => new()
+    private static Dictionary<string, object?> MapGraph(Compiler.Emit.Docs.DiagramGraph g) => new()
     {
         ["nodes"] = g.Nodes.Select(MapNode).ToArray(),
         ["edges"] = g.Edges.Select(MapEdge).ToArray(),
@@ -1688,7 +1688,7 @@ internal sealed class LspServer
     /// (aggregate/value object/enum/event/entity) carry a <c>stereotype</c> + UML <c>members</c>; the
     /// state/context/integration nodes carry <c>null</c>/<c>[]</c> for both and stay simple boxes.
     /// </summary>
-    private static Dictionary<string, object?> MapNode(Koine.Compiler.Emit.Docs.DiagramNode n) => new()
+    private static Dictionary<string, object?> MapNode(Compiler.Emit.Docs.DiagramNode n) => new()
     {
         ["id"] = n.Id,
         ["label"] = n.Label,
@@ -1700,14 +1700,14 @@ internal sealed class LspServer
     };
 
     /// <summary>Maps a <see cref="Koine.Compiler.Emit.Docs.DiagramMember"/> to its <c>{ text, kind }</c> wire dict.</summary>
-    private static Dictionary<string, object?> MapMember(Koine.Compiler.Emit.Docs.DiagramMember m) => new()
+    private static Dictionary<string, object?> MapMember(Compiler.Emit.Docs.DiagramMember m) => new()
     {
         ["text"] = m.Text,
         ["kind"] = m.Kind,
     };
 
     /// <summary>Maps a <see cref="Koine.Compiler.Emit.Docs.DiagramEdge"/> (<c>label</c> may be null).</summary>
-    private static Dictionary<string, object?> MapEdge(Koine.Compiler.Emit.Docs.DiagramEdge e) => new()
+    private static Dictionary<string, object?> MapEdge(Compiler.Emit.Docs.DiagramEdge e) => new()
     {
         ["from"] = e.From,
         ["to"] = e.To,
@@ -1748,7 +1748,7 @@ internal sealed class LspServer
     /// parse) returns a normal result object carrying an <c>error</c> string — never a JSON-RPC
     /// error and never a throw — so the client always renders a payload.
     /// </summary>
-    private object? CheckResultJson(JsonElement root)
+    private object CheckResultJson(JsonElement root)
     {
         // 1. Read the baseline param.
         if (!root.TryGetProperty("params", out var p)
@@ -1853,14 +1853,6 @@ internal sealed class LspServer
     }
 
     // ---- Diagnostics ------------------------------------------------------
-
-    private void PublishDiagnostics(string uri, string text)
-    {
-        var diags = _compiler.Diagnose(text);
-        var lines = SplitLines(text);
-        var items = diags.Select(d => (object)ToLspDiagnostic(d, lines)).ToArray();
-        PublishDiagnostics(uri, items);
-    }
 
     /// <summary>
     /// Diagnoses the held warm-compilation snapshot and publishes diagnostics per file, so

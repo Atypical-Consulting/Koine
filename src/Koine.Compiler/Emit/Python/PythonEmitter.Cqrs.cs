@@ -94,7 +94,7 @@ public sealed partial class PythonEmitter
 
         return new EmittedFile(
             PathFor(ns, KindFolder.ReadModels, rm.Name),
-            Assemble(emit, ns, KindFolder.ReadModels, sb.ToString(), name));
+            Assemble(emit, ns, sb.ToString(), name));
     }
 
     // ----------------------------------------------------------------------
@@ -140,7 +140,7 @@ public sealed partial class PythonEmitter
 
         return new EmittedFile(
             PathFor(ns, KindFolder.Queries, q.Name),
-            Assemble(emit, ns, KindFolder.Queries, sb.ToString(), name));
+            Assemble(emit, ns, sb.ToString(), name));
     }
 
     /// <summary>

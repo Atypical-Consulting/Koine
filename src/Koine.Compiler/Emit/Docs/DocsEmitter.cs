@@ -106,8 +106,6 @@ public sealed partial class DocsEmitter : IEmitter
 
     private static string Tag(TypeDecl t) => MarkdownDoc.Tag(t);
 
-    private static string Tag(int? since, string? deprecated) => MarkdownDoc.Tag(since, deprecated);
-
     private static void WriteFields(StringBuilder sb, IReadOnlyList<Member> members) =>
         MarkdownDoc.WriteFields(sb, members);
 

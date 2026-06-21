@@ -1,5 +1,4 @@
 using Koine.Compiler.Ast;
-using Koine.Compiler.Diagnostics;
 using Koine.Compiler.Emit.CSharp;
 using Koine.Compiler.Semantics;
 using Koine.Compiler.Services;
@@ -21,7 +20,7 @@ public class SyntaxVisitorTests
         var (model, diagnostics) = new KoineCompiler().Parse(src);
         diagnostics.ShouldBeEmpty();
         model.ShouldNotBeNull();
-        return model!;
+        return model;
     }
 
     // A small but slot-shape-complete corpus: required/optional/list children, IReadOnlyList<string>

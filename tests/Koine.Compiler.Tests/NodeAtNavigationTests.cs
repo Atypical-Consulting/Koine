@@ -16,7 +16,7 @@ public class NodeAtNavigationTests
         var (model, diagnostics) = new KoineCompiler().Parse(src);
         diagnostics.ShouldBeEmpty();
         model.ShouldNotBeNull();
-        return new SemanticModel(model!);
+        return new SemanticModel(model);
     }
 
     private const string Src =

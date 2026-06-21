@@ -18,7 +18,7 @@ namespace Koine.Compiler.Emit.CSharp;
 /// </summary>
 public sealed partial class CSharpEmitter
 {
-    /// <summary>The EF Core namespace a <see cref="DbContext"/> file needs.</summary>
+    /// <summary>The EF Core namespace a <c>DbContext</c> file needs.</summary>
     private static readonly string[] DbContextUsings = { "Microsoft.EntityFrameworkCore" };
 
     /// <summary>The EF Core namespaces an <c>IEntityTypeConfiguration</c> file needs.</summary>

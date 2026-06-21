@@ -236,7 +236,7 @@ public sealed partial class CSharpEmitter : IEmitter
                 .ToList();
             if (contextSpecs.Count > 0)
             {
-                files.Add(EmitSpecifications(emit, ctx.Name, contextSpecs, index, typeMapper, enumMemberToType));
+                files.Add(EmitSpecifications(emit, ctx.Name, contextSpecs, index, enumMemberToType));
             }
 
             foreach (ServiceDecl svc in ctx.Services)
@@ -540,7 +540,7 @@ public sealed partial class CSharpEmitter : IEmitter
     /// <summary>
     /// True when the model emits at least one value object: an explicit
     /// <c>value</c> type, or an entity (whose strongly-typed ID is a value object).
-    /// Gates emission of the <see cref="ValueObject"/> base class.
+    /// Gates emission of the <c>ValueObject</c> base class.
     /// </summary>
     private static bool NeedsValueObjects(KoineModel model) =>
         model.Contexts.SelectMany(c => c.AllTypeDecls()).Any(t => t is ValueObjectDecl or EntityDecl);
@@ -586,7 +586,7 @@ public sealed partial class CSharpEmitter : IEmitter
         sb.Append(Indent).Append("public DateTimeOffset OccurredOn { get; init; } = DateTimeOffset.UtcNow;\n");
 
         sb.Append('\n');
-        WriteConstructor(sb, ev.Name, ctorMembers, Array.Empty<Ast.Bound.BoundInvariant>(), memberNames, translator, typeMapper, enumMemberToType, index);
+        WriteConstructor(sb, ev.Name, ctorMembers, Array.Empty<BoundInvariant>(), translator, typeMapper, index);
 
         foreach (Member m in derived)
         {
@@ -651,7 +651,7 @@ public sealed partial class CSharpEmitter : IEmitter
         sb.Append(Indent).Append("public DateTimeOffset OccurredOn { get; init; } = DateTimeOffset.UtcNow;\n");
 
         sb.Append('\n');
-        WriteConstructor(sb, ev.Name, ctorMembers, Array.Empty<Ast.Bound.BoundInvariant>(), memberNames, translator, typeMapper, enumMemberToType, index);
+        WriteConstructor(sb, ev.Name, ctorMembers, Array.Empty<BoundInvariant>(), translator, typeMapper, index);
 
         foreach (Member m in derived)
         {
@@ -740,11 +740,9 @@ public sealed partial class CSharpEmitter : IEmitter
         StringBuilder sb,
         string typeName,
         IReadOnlyList<Member> ctorMembers,
-        IReadOnlyList<Ast.Bound.BoundInvariant> invariants,
-        ISet<string> memberNames,
+        IReadOnlyList<BoundInvariant> invariants,
         CSharpExpressionTranslator translator,
         CSharpTypeMapper typeMapper,
-        IReadOnlyDictionary<string, string> enumMemberToType,
         ModelIndex index)
     {
         sb.Append(Indent).Append("public ").Append(typeName).Append('(');
@@ -845,10 +843,8 @@ public sealed partial class CSharpEmitter : IEmitter
         StringBuilder sb,
         EntityDecl entity,
         IReadOnlyList<Member> ctorMembers,
-        ISet<string> memberNames,
         CSharpExpressionTranslator translator,
         CSharpTypeMapper typeMapper,
-        IReadOnlyDictionary<string, string> enumMemberToType,
         ModelIndex index)
     {
         // When the entity declares a factory, construction is funneled through it:
@@ -1021,7 +1017,7 @@ public sealed partial class CSharpEmitter : IEmitter
             }
 
             sb.Append(Indent).Append(Indent).Append(CSharpNaming.ToCamelCase(m.Name))
-              .Append(" ??= ").Append(EnumDefaultValue(m, translator, index)).Append(";\n");
+              .Append(" ??= ").Append(EnumDefaultValue(m, translator)).Append(";\n");
             any = true;
         }
         if (any)
@@ -1047,7 +1043,7 @@ public sealed partial class CSharpEmitter : IEmitter
             }
 
             sb.Append(Indent).Append(Indent).Append(CSharpNaming.ToCamelCase(f.Name))
-              .Append(" ??= ").Append(EnumDefaultValue((Member)f.Syntax, translator, index)).Append(";\n");
+              .Append(" ??= ").Append(EnumDefaultValue((Member)f.Syntax, translator)).Append(";\n");
             any = true;
         }
         if (any)
@@ -1057,7 +1053,7 @@ public sealed partial class CSharpEmitter : IEmitter
     }
 
     /// <summary>The qualified C# default value for an enum-typed defaulted member.</summary>
-    private static string EnumDefaultValue(Member m, CSharpExpressionTranslator translator, ModelIndex index) =>
+    private static string EnumDefaultValue(Member m, CSharpExpressionTranslator translator) =>
         m.Initializer is IdentifierExpr enumDefault
             ? $"{m.Type.Name}.{CSharpNaming.EscapeIdentifier(enumDefault.Name)}"
             : translator.Translate(m.Initializer!, CSharpExpressionTranslator.NameMode.Property, m.Type.Name);
@@ -1197,12 +1193,12 @@ public sealed partial class CSharpEmitter : IEmitter
     private void WriteInvariantGuards(
         StringBuilder sb,
         string typeName,
-        IReadOnlyList<Ast.Bound.BoundInvariant> invariants,
+        IReadOnlyList<BoundInvariant> invariants,
         CSharpExpressionTranslator translator,
         CSharpExpressionTranslator.NameMode mode = CSharpExpressionTranslator.NameMode.Parameter)
     {
         var first = true;
-        foreach (Ast.Bound.BoundInvariant inv in invariants)
+        foreach (BoundInvariant inv in invariants)
         {
             if (!first)
             {
@@ -1225,7 +1221,7 @@ public sealed partial class CSharpEmitter : IEmitter
     private void WriteGuard(
         StringBuilder sb,
         string typeName,
-        Ast.Bound.BoundInvariant invariant,
+        BoundInvariant invariant,
         CSharpExpressionTranslator translator,
         CSharpExpressionTranslator.NameMode mode)
     {
@@ -1538,7 +1534,6 @@ public sealed partial class CSharpEmitter : IEmitter
         EntityDecl entity,
         FactoryDecl factory,
         IReadOnlyList<Member> ctorMembers,
-        ISet<string> memberNames,
         CSharpExpressionTranslator translator,
         CSharpTypeMapper typeMapper,
         ModelIndex index)
@@ -1708,7 +1703,7 @@ public sealed partial class CSharpEmitter : IEmitter
     /// VO-invariant slice now produces; the still-syntactic entity-invariant / command-<c>requires</c>
     /// paths call it directly here.
     /// </summary>
-    private static string SynthesizeMessage(Expr condition) => Ast.Bound.Lowerer.SourceText(condition);
+    private static string SynthesizeMessage(Expr condition) => Lowerer.SourceText(condition);
 
     // ----------------------------------------------------------------------
     // File header (using block + namespace)

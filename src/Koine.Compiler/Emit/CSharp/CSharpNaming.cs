@@ -1,6 +1,5 @@
 using System.Collections.Concurrent;
 using System.Collections.Frozen;
-using System.Text;
 
 namespace Koine.Compiler.Emit.CSharp;
 

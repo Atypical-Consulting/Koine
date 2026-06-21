@@ -175,7 +175,7 @@ public sealed partial class CSharpEmitter
 
     /// <summary>
     /// Emits the <c>GetEqualityComponents()</c> override that drives the
-    /// <see cref="ValueObject"/> base's structural equality: each non-derived field,
+    /// <c>ValueObject</c> base's structural equality: each non-derived field,
     /// in declaration order.
     /// </summary>
     private void WriteEqualityComponents(StringBuilder sb, IReadOnlyList<BoundField> members)

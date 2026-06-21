@@ -397,7 +397,7 @@ public sealed partial class PythonEmitter
             }
             else if (m.Initializer is not null)
             {
-                args.Add($"{field}={translator.Translate(m.Initializer, NameModeForDefault(m), m.Type.Name)}");
+                args.Add($"{field}={translator.Translate(m.Initializer, NameModeForDefault(), m.Type.Name)}");
             }
             else if (m.Type.IsOptional)
             {
@@ -547,6 +547,6 @@ public sealed partial class PythonEmitter
 
         return new EmittedFile(
             PathFor(ns, KindFolder.Events, rawName),
-            Assemble(emit, ns, KindFolder.Events, sb.ToString(), name));
+            Assemble(emit, ns, sb.ToString(), name));
     }
 }

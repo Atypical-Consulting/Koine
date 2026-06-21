@@ -19,7 +19,7 @@ public enum SymbolKind
 /// <summary>
 /// A resolved declaration that a name refers to — the navigation/hover target for editor tooling.
 /// Carries the declaration's <see cref="DeclSpan"/> (for go-to-definition) and its doc comment.
-/// Produced by <see cref="SemanticModel.GetSymbol"/>, the single resolution path the LSP services
+/// Produced by <see cref="SemanticModel.GetSymbol(string)"/>, the single resolution path the LSP services
 /// share (replacing per-service string matching).
 /// </summary>
 public abstract class Symbol

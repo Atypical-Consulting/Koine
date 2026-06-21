@@ -1,6 +1,4 @@
 using System.Net;
-using Koine.Mcp;
-using Microsoft.AspNetCore.Builder;
 
 namespace Koine.Mcp.Tests;
 
@@ -26,8 +24,10 @@ public sealed class HttpHostSecurityTests
             var endpoint = HttpHost.McpUrl(app); // http://127.0.0.1:<port>/mcp
             using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(10) };
 
-            using var forged = new HttpRequestMessage(HttpMethod.Get, endpoint);
-            forged.Headers.Host = "evil.example";
+            using var forged = new HttpRequestMessage(HttpMethod.Get, endpoint)
+            {
+                Headers = { Host = "evil.example" },
+            };
             var response = await http.SendAsync(forged, TestContext.Current.CancellationToken);
 
             response.StatusCode.ShouldBe(HttpStatusCode.Forbidden);

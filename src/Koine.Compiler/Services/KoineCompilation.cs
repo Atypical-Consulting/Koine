@@ -1,7 +1,6 @@
 using System.Collections.Immutable;
 using System.Security.Cryptography;
 using System.Text;
-using System.Threading;
 using Antlr4.Runtime;
 using Antlr4.Runtime.Atn;
 using Antlr4.Runtime.Misc;
@@ -125,7 +124,7 @@ public sealed class KoineCompilation
 
     /// <summary>
     /// Internal factory that accepts an injectable <paramref name="parser"/> so tests can
-    /// count re-parses by wrapping <see cref="ParseUnit"/>.
+    /// count re-parses by wrapping <see cref="ParseUnit(SourceFile)"/>.
     /// </summary>
     internal static KoineCompilation Create(IReadOnlyList<SourceFile> files, Func<SourceFile, ParsedUnit> parser)
     {

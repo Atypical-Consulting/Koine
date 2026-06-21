@@ -86,7 +86,7 @@ public sealed partial class PythonEmitter
         // non-typechecking) operator.
         if (vo.IsQuantity)
         {
-            WriteQuantityOps(sb, vo, name, ordered, emit.Index);
+            WriteQuantityOps(sb, name, ordered);
         }
         else
         {
@@ -103,7 +103,7 @@ public sealed partial class PythonEmitter
 
         return new EmittedFile(
             PathFor(ns, KindFolder.ValueObjects, vo.Name),
-            Assemble(emit, ns, KindFolder.ValueObjects, sb.ToString(), name));
+            Assemble(emit, ns, sb.ToString(), name));
     }
 
     /// <summary>Emits one invariant guard inside <c>__post_init__</c> (self.<i>field</i> reads).</summary>
@@ -171,7 +171,7 @@ public sealed partial class PythonEmitter
     /// amount by a <c>Decimal</c>/<c>int</c> scalar, carrying the unit. The amount is the (required)
     /// <c>Decimal</c> field; the unit is the other (required) field.
     /// </summary>
-    private void WriteQuantityOps(StringBuilder sb, ValueObjectDecl vo, string name, IReadOnlyList<Member> fields, ModelIndex index)
+    private void WriteQuantityOps(StringBuilder sb, string name, IReadOnlyList<Member> fields)
     {
         Member? amount = fields.FirstOrDefault(m => m.Type.Name == "Decimal" && !m.Type.IsOptional);
         Member? unit = fields.FirstOrDefault(m => !ReferenceEquals(m, amount) && !m.Type.IsOptional);
@@ -285,6 +285,8 @@ public sealed partial class PythonEmitter
     /// collection types already map to immutable <c>tuple</c>/<c>frozenset</c> values, and a constant
     /// initializer for one would be an immutable literal.
     /// </summary>
+    /// <param name="m">The stored field whose dataclass default is being computed.</param>
+    /// <param name="translator">Renders the constant initializer expression to Python source.</param>
     /// <param name="index">
     /// The model index used to resolve the field's declared type so that an enum-member default is
     /// always qualified with the <em>correct</em> enum class — not the first owner found in a global
@@ -298,7 +300,7 @@ public sealed partial class PythonEmitter
             // Pass the field's own declared enum type as the hint so an ambiguous member name (one
             // that exists in multiple enums) resolves to the correct owner rather than the first
             // match the translator finds in the global enum-member → type map.
-            return translator.Translate(m.Initializer, NameModeForDefault(m), EnumExpected(m, index));
+            return translator.Translate(m.Initializer, NameModeForDefault(), EnumExpected(m, index));
         }
         if (m.Type.IsOptional)
         {
@@ -308,7 +310,7 @@ public sealed partial class PythonEmitter
     }
 
     /// <summary>A default initializer is a constant; it never reads <c>self</c>, so it renders in Parameter mode.</summary>
-    private static PythonExpressionTranslator.NameMode NameModeForDefault(Member m) =>
+    private static PythonExpressionTranslator.NameMode NameModeForDefault() =>
         PythonExpressionTranslator.NameMode.Parameter;
 
     private static string? EnumExpected(Member m, ModelIndex index) =>

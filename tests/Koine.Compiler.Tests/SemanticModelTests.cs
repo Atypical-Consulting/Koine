@@ -4,7 +4,7 @@ using Koine.Compiler.Services;
 namespace Koine.Compiler.Tests;
 
 /// <summary>
-/// The <see cref="SemanticModel"/> resolution façade: <see cref="SemanticModel.GetSymbol"/> is the
+/// The <see cref="SemanticModel"/> resolution façade: <see cref="SemanticModel.GetSymbol(string)"/> is the
 /// single path the editor services share for go-to-definition / hover / rename.
 /// </summary>
 public class SemanticModelTests
@@ -23,7 +23,7 @@ public class SemanticModelTests
         var (model, diagnostics) = new KoineCompiler().Parse(Src);
         diagnostics.ShouldBeEmpty();
         model.ShouldNotBeNull();
-        return new SemanticModel(model!);
+        return new SemanticModel(model);
     }
 
     [Fact]

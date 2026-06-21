@@ -19,7 +19,7 @@ public class BoundIrLoweringTests
         var (model, diagnostics) = new KoineCompiler().Parse(src);
         diagnostics.ShouldBeEmpty();
         model.ShouldNotBeNull();
-        return new SemanticModel(model!);
+        return new SemanticModel(model);
     }
 
     private static IEnumerable<ValueObjectDecl> ValueObjects(SemanticModel sema) =>

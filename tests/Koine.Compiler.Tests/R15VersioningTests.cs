@@ -1,4 +1,3 @@
-using System.Reflection;
 using Koine.Compiler.Diagnostics;
 using Koine.Compiler.Emit.CSharp;
 using Koine.Compiler.Emit.Glossary;
@@ -11,13 +10,13 @@ public class R15VersioningTests
 {
     private static IReadOnlyList<Diagnostic> Diagnose(string source) => new KoineCompiler().Diagnose(source);
 
-    private static (Assembly Asm, IReadOnlyList<Emit.EmittedFile> Files) Build(string source)
+    private static IReadOnlyList<Emit.EmittedFile> Build(string source)
     {
         var result = new KoineCompiler().Compile(source, new CSharpEmitter());
         result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
         var (asm, errors) = TestSupport.Compile(result.Files);
         (asm is not null).ShouldBeTrue("generated C# failed to compile:\n" + string.Join("\n", errors));
-        return (asm!, result.Files);
+        return result.Files;
     }
 
     private static string FileContents(IEnumerable<Emit.EmittedFile> files, string path) =>
@@ -35,7 +34,7 @@ public class R15VersioningTests
     [Fact]
     public void Context_version_clause_parses_and_compiles()
     {
-        var (_, files) = Build("""
+        var files = Build("""
             context Sales version 3 {
               value Money { amount: Decimal }
             }
@@ -74,7 +73,7 @@ public class R15VersioningTests
     [Fact]
     public void Deprecated_field_emits_Obsolete_on_the_property()
     {
-        var (_, files) = Build("""
+        var files = Build("""
             context Sales {
               value Money {
                 amount: Decimal
@@ -90,7 +89,7 @@ public class R15VersioningTests
     [Fact]
     public void Deprecated_type_emits_Obsolete_on_the_class()
     {
-        var (_, files) = Build("""
+        var files = Build("""
             context Sales {
               @deprecated("use Money") value OldMoney { amount: Decimal }
             }
@@ -101,7 +100,7 @@ public class R15VersioningTests
     [Fact]
     public void Deprecated_integration_event_field_emits_Obsolete()
     {
-        var (_, files) = Build("""
+        var files = Build("""
             context Sales {
               publishes OrderPlaced
               integration event OrderPlaced {
@@ -117,7 +116,7 @@ public class R15VersioningTests
     [Fact]
     public void A_deprecation_reason_with_quotes_is_escaped_for_csharp()
     {
-        var (_, files) = Build("""
+        var files = Build("""
             context Sales {
               value Money {
                 amount: Decimal
@@ -131,7 +130,7 @@ public class R15VersioningTests
     [Fact]
     public void A_model_without_annotations_does_not_gain_Obsolete_or_an_extra_System_using()
     {
-        var (_, files) = Build("""
+        var files = Build("""
             context Sales {
               value Money { amount: Decimal }
             }

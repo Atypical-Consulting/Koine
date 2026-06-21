@@ -34,7 +34,7 @@ public class RefactorServiceTests
         var (model, diagnostics) = new KoineCompiler().Parse(src);
         diagnostics.ShouldBeEmpty();
         model.ShouldNotBeNull();
-        return model!;
+        return model;
     }
 
     [Fact]

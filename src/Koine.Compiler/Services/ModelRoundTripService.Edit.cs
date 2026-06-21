@@ -113,7 +113,7 @@ public static partial class ModelRoundTripService
         }
 
         // Clean bar: slice the affected declaration back out of the edited source, verbatim.
-        SourceSpan editedSpan = edited.Model is null ? SourceSpan.None : DeclSpan(edited.Model, decl);
+        SourceSpan editedSpan = DeclSpan(edited.Model, decl);
         if (editedSpan.IsNone)
         {
             return new EditComputation(decl.Uri, decl.OriginalSpan, null, []);

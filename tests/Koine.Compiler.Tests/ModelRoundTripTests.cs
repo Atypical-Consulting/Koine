@@ -181,7 +181,7 @@ public class ModelRoundTripTests
         EmitResult result = ModelRoundTripService.EmitKoine(Files(Sample), edit);
 
         result.Koine.ShouldBeNull();
-        result.Diagnostics.ShouldContain(d => d.Code == Koine.Compiler.Diagnostics.DiagnosticCodes.UnknownType);
+        result.Diagnostics.ShouldContain(d => d.Code == DiagnosticCodes.UnknownType);
     }
 
     [Fact]

@@ -19,7 +19,7 @@ namespace Koine.Compiler.Services;
 ///   entity's fields, an enum's members, a state machine's transitions) with kinds + current values,
 ///   so an editor builds a form without re-parsing.</description></item>
 ///   <item><description><see cref="EmitKoine"/> — apply a structured edit, <b>validate</b> the
-///   resulting model (reuse <see cref="SemanticValidator"/>), and on success re-emit the canonical
+///   resulting model (reuse <see cref="Semantics.SemanticValidator"/>), and on success re-emit the canonical
 ///   <c>.koi</c> for just the affected declaration via <see cref="Formatting.AstPrinter"/>. An illegal
 ///   edit returns the <c>KOIxxxx</c> diagnostics instead of broken <c>.koi</c>.</description></item>
 ///   <item><description><see cref="ApplyEdit"/> — return a span-minimal
@@ -29,7 +29,7 @@ namespace Koine.Compiler.Services;
 /// </list>
 ///
 /// <para>Purely target-agnostic: it composes <see cref="Formatting.AstPrinter"/>,
-/// <see cref="SemanticValidator"/>, and the parser, leaks no C# concept into <c>Ast/</c>, and lives in
+/// <see cref="Semantics.SemanticValidator"/>, and the parser, leaks no C# concept into <c>Ast/</c>, and lives in
 /// <c>Services/</c> beside the other editor backends.</para>
 /// </summary>
 public static partial class ModelRoundTripService

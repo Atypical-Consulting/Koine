@@ -13,7 +13,7 @@ namespace Koine.Compiler.Emit.Rust;
 /// </summary>
 public sealed partial class RustEmitter
 {
-    private void EmitEntity(StringBuilder body, RustEmitContext emit, EntityDecl entity, string context, bool isAggregateRoot, bool versioned)
+    private void EmitEntity(StringBuilder body, RustEmitContext emit, EntityDecl entity, string context)
     {
         var typeMapper = new RustTypeMapper(emit.Index);
 

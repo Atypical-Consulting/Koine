@@ -22,7 +22,7 @@ public class LetBindingTests
         var (model, diagnostics) = new KoineCompiler().Parse(source);
         diagnostics.ShouldBeEmpty();
         model.ShouldNotBeNull();
-        var vo = model!.Contexts[0].Types.OfType<ValueObjectDecl>().Single(t => t.Name == typeName);
+        var vo = model.Contexts[0].Types.OfType<ValueObjectDecl>().Single(t => t.Name == typeName);
         return vo.Members.Single(m => m.Name == memberName);
     }
 
@@ -202,7 +202,7 @@ public class LetBindingTests
 
         var (asm, errors) = TestSupport.Compile(result.Files);
         (asm is not null).ShouldBeTrue("generated C# failed to compile:\n" + string.Join("\n", errors));
-        return asm!;
+        return asm;
     }
 
     [Fact]

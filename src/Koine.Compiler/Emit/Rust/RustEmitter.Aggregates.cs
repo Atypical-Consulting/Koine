@@ -17,7 +17,7 @@ public sealed partial class RustEmitter
     private static readonly IReadOnlyList<string> DefaultRepositoryOps =
         new[] { "getById", "add", "update", "remove" };
 
-    private void EmitAggregateExtras(RustEmitContext emit, StringBuilder body, AggregateDecl agg, string context)
+    private void EmitAggregateExtras(RustEmitContext emit, StringBuilder body, AggregateDecl agg)
     {
         EntityDecl? root = agg.RootEntity();
         if (root is null)

@@ -26,16 +26,15 @@ internal sealed class WatchCommand : Command<WatchSettings>
         // Watch the input's directory (or the directory itself), filtered to .koi files.
         var watchDir = Directory.Exists(plan.File)
             ? plan.File
-            : System.IO.Path.GetDirectoryName(System.IO.Path.GetFullPath(plan.File)) ?? ".";
+            : Path.GetDirectoryName(Path.GetFullPath(plan.File)) ?? ".";
 
         using var watcher = new FileSystemWatcher(watchDir, "*.koi")
         {
             IncludeSubdirectories = true,
             NotifyFilter = NotifyFilters.LastWrite | NotifyFilters.FileName | NotifyFilters.Size,
+            // Give the OS a roomy buffer so bursts of saves are less likely to overflow.
+            InternalBufferSize = 64 * 1024,
         };
-
-        // Give the OS a roomy buffer so bursts of saves are less likely to overflow.
-        watcher.InternalBufferSize = 64 * 1024;
 
         var changes = new BlockingCollection<object>();
         void Bump()
@@ -50,22 +49,30 @@ internal sealed class WatchCommand : Command<WatchSettings>
         watcher.EnableRaisingEvents = true;
 
         using var cts = new CancellationTokenSource();
-        Console.CancelKeyPress += (_, e) =>
+        ConsoleCancelEventHandler onCancel = (_, e) =>
         {
             e.Cancel = true;            // let the loop unwind cleanly instead of killing the process
             cts.Cancel();
             changes.CompleteAdding();
         };
-
-        Console.WriteLine($"watching {watchDir} for *.koi changes — press Ctrl+C to stop");
-        var session = new WatchSession(
-            () => BuildCommand.BuildOnce(plan) == 0,
-            Console.Out,
-            TimeSpan.FromMilliseconds(250),
-            // A safety-net full rebuild every minute, in case any change event was dropped.
-            fullRebuildInterval: TimeSpan.FromMinutes(1),
-            beforeBuild: settings.Clear ? () => Console.Clear() : null);
-        session.Run(changes, cts.Token);
-        return 0;
+        Console.CancelKeyPress += onCancel;
+        try
+        {
+            Console.WriteLine($"watching {watchDir} for *.koi changes — press Ctrl+C to stop");
+            var session = new WatchSession(
+                () => BuildCommand.BuildOnce(plan) == 0,
+                Console.Out,
+                TimeSpan.FromMilliseconds(250),
+                // A safety-net full rebuild every minute, in case any change event was dropped.
+                fullRebuildInterval: TimeSpan.FromMinutes(1),
+                beforeBuild: settings.Clear ? () => Console.Clear() : null);
+            session.Run(changes, cts.Token);
+            return 0;
+        }
+        finally
+        {
+            // Unsubscribe before `cts` is disposed so a late Ctrl+C can't touch a disposed source.
+            Console.CancelKeyPress -= onCancel;
+        }
     }
 }

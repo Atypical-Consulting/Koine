@@ -3,7 +3,7 @@ using Koine.Compiler.Ast;
 namespace Koine.Compiler.Emit.CSharp;
 
 /// <summary>
-/// The immutable, per-<see cref="CSharpEmitter.Emit"/> state that every emit method
+/// The immutable, per-<see cref="CSharpEmitter.Emit(KoineModel)"/> state that every emit method
 /// reads but none mutates. Threading this record (rather than mutating instance fields)
 /// keeps the emitter reentrant/stateless: a single <see cref="CSharpEmitter"/> can emit
 /// many models concurrently with no shared mutable state.

@@ -1,4 +1,3 @@
-using Koine.Runtime;
 using Kernel = Menu__Ordering.Kernel;
 
 namespace Pizzeria.Domain;

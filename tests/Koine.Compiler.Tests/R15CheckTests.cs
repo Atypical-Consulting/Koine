@@ -11,7 +11,7 @@ public class R15CheckTests
     {
         var (model, diagnostics) = new KoineCompiler().Parse(source);
         (model is not null).ShouldBeTrue(string.Join("\n", diagnostics.Select(d => d.ToString())));
-        return model!;
+        return model;
     }
 
     private static CompatibilityReport Check(string baseline, string current) =>

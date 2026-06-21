@@ -25,7 +25,10 @@ internal static class ToolGuards
     /// </summary>
     internal static bool TryValidateFiles(KoineFile[] files, out IReadOnlyList<DiagnosticInfo> errors)
     {
-        // (1) no files at all — nothing to validate/compile.
+        // (1) no files at all — nothing to validate/compile. `files` is non-null per the nullable
+        // annotation, but it is bound from deserialized MCP tool arguments where a JSON `null` can
+        // still arrive at runtime, so the guard stays.
+        // ReSharper disable once ConditionIsAlwaysTrueOrFalseAccordingToNullableAPIContract
         if (files is null || files.Length == 0)
         {
             errors = new[] { Error("KOIMCP001", "no .koi files were provided") };
@@ -45,6 +48,9 @@ internal static class ToolGuards
         foreach (var file in files)
         {
             // (3) each entry must be a real file with a non-empty path and a (possibly empty) source.
+            // `file` / `file.Source` are non-null per the annotations, but they are deserialized from
+            // MCP tool arguments where a JSON `null` element or member can still arrive at runtime.
+            // ReSharper disable once ConditionIsAlwaysTrueOrFalseAccordingToNullableAPIContract
             if (file is null || string.IsNullOrWhiteSpace(file.Path) || file.Source is null)
             {
                 list.Add(Error("KOIMCP002", "each file needs a non-empty path and a (possibly empty) source", file?.Path));
@@ -77,6 +83,9 @@ internal static class ToolGuards
     /// </summary>
     internal static bool TryValidateSource(string source, out DiagnosticInfo? error)
     {
+        // `source` is non-null per the annotation, but it is bound from a deserialized MCP tool
+        // argument where a JSON `null` can still arrive at runtime, so the guard stays.
+        // ReSharper disable once ConditionIsAlwaysTrueOrFalseAccordingToNullableAPIContract
         if (source is null)
         {
             error = Error("KOIMCP002", "source must not be null");

@@ -1,5 +1,3 @@
-using System.Collections.Concurrent;
-using Koine.Compiler.Ast;
 using Koine.Compiler.Diagnostics;
 using Koine.Compiler.Emit.CSharp;
 using Koine.Compiler.Services;
@@ -29,7 +27,7 @@ public class WarmModelTests
         }
 
         dir.ShouldNotBeNull("Could not locate the repo root (no 'Koine.slnx' ancestor found).");
-        return dir!.FullName;
+        return dir.FullName;
     }
 
     /// <summary>

@@ -78,7 +78,7 @@ public class DiagramGraphTests
         diagnostics.ShouldBeEmpty();
         model.ShouldNotBeNull();
 
-        var byFile = new DocsEmitter().EmitDiagrams(model!);
+        var byFile = new DocsEmitter().EmitDiagrams(model);
         byFile.ShouldNotBeEmpty();
         return byFile;
     }

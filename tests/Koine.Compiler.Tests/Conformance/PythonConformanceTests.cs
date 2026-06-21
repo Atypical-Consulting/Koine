@@ -435,7 +435,7 @@ public class PythonConformanceTests
     {
         EmittedFile? file = files.FirstOrDefault(f => f.RelativePath == relativePath);
         (file is not null).ShouldBeTrue($"expected an emitted file at '{relativePath}'");
-        return file!.Contents;
+        return file.Contents;
     }
 
     /// <summary>

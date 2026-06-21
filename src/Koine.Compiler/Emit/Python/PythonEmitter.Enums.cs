@@ -148,7 +148,7 @@ public sealed partial class PythonEmitter
 
         return new EmittedFile(
             PathFor(ns, KindFolder.Enums, @enum.Name),
-            Assemble(emit, ns, KindFolder.Enums, sb.ToString(), name));
+            Assemble(emit, ns, sb.ToString(), name));
     }
 
     /// <summary>The exhaustive, value-returning <c>match</c> (mirrors C# <c>Match&lt;TResult&gt;</c>).</summary>

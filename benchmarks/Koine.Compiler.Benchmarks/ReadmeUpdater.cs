@@ -17,7 +17,7 @@ internal static class ReadmeUpdater
         // Collect the github report(s) BDN just wrote next to each summary's results.
         var reports = summaries
             .Select(s => s.ResultsDirectoryPath)
-            .Where(d => d is not null && Directory.Exists(d))
+            .Where(Directory.Exists)
             .Distinct()
             .SelectMany(d => Directory.EnumerateFiles(d, "*-report-github.md"))
             .Distinct()

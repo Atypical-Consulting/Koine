@@ -59,6 +59,6 @@ public sealed partial class PythonEmitter
 
         return new EmittedFile(
             PathFor(ns, KindFolder.Abstractions, className),
-            Assemble(emit, ns, KindFolder.Abstractions, sb.ToString(), className, symbolContext));
+            Assemble(emit, ns, sb.ToString(), className, symbolContext));
     }
 }

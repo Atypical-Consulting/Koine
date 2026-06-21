@@ -96,7 +96,7 @@ public sealed partial class CSharpEmitter
 
         // Constructor: identity param first, then members.
         sb.Append('\n');
-        WriteEntityConstructor(sb, entity, ctorMembers, memberNames, translator, typeMapper, enumMemberToType, index);
+        WriteEntityConstructor(sb, entity, ctorMembers, translator, typeMapper, index);
 
         // Shared invariant-checking method (DRY: called by the constructor and each command).
         if (entity.Invariants.Count > 0)
@@ -153,7 +153,7 @@ public sealed partial class CSharpEmitter
         // Factories: intention-revealing creation through validated static methods.
         foreach (var factory in entity.Factories)
         {
-            WriteFactory(sb, entity, factory, ctorMembers, memberNames, translator, typeMapper, index);
+            WriteFactory(sb, entity, factory, ctorMembers, translator, typeMapper, index);
         }
 
         // Identity-based equality.

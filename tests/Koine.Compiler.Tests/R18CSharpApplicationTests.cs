@@ -14,10 +14,6 @@ namespace Koine.Compiler.Tests;
 /// </summary>
 public class R18CSharpApplicationTests
 {
-    private readonly ITestOutputHelper _output;
-
-    public R18CSharpApplicationTests(ITestOutputHelper output) => _output = output;
-
     /// <summary>
     /// A read/write fixture exercising the whole Application surface: a value object with an
     /// invariant, an aggregate whose root entity carries a command (precondition + transition +

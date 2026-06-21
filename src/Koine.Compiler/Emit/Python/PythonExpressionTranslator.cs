@@ -46,7 +46,6 @@ internal sealed class PythonExpressionTranslator
 
     private readonly ModelIndex _index;
     private readonly TypeResolver _resolver;
-    private readonly PythonTypeMapper _typeMapper;
     private readonly TypeScope _scope;
     private readonly ISet<string> _memberNames;
     private readonly IReadOnlyDictionary<string, string> _enumMemberToType;
@@ -66,13 +65,16 @@ internal sealed class PythonExpressionTranslator
         ModelIndex index,
         IReadOnlyList<Member> members,
         IReadOnlyDictionary<string, string> enumMemberToType,
+        // Accepted for constructor parity with the TypeScript/Rust expression translators (whose
+        // type-driven lowering needs it); the Python translator uses native operators, so it does
+        // not retain the mapper.
         PythonTypeMapper typeMapper,
         string? context = null,
         string memberReceiver = "self")
     {
+        _ = typeMapper;
         _index = index;
         _resolver = new TypeResolver(index, context);
-        _typeMapper = typeMapper;
         _scope = TypeScope.FromMembers(members, index);
         _memberNames = new HashSet<string>(members.Select(m => m.Name), StringComparer.Ordinal);
         _enumMemberToType = enumMemberToType;

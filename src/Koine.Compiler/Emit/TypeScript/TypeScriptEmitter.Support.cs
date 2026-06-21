@@ -96,7 +96,7 @@ public sealed partial class TypeScriptEmitter
     /// relative path computed from this file's folder.
     /// </summary>
     private string Assemble(TsEmitContext emit, string ns, string kindFolder, string body) =>
-        Assemble(emit, ns, kindFolder, body, name: null, declSpan: Ast.SourceSpan.None);
+        Assemble(emit, ns, kindFolder, body, name: null, declSpan: SourceSpan.None);
 
     /// <summary>
     /// <see cref="Assemble(TsEmitContext, string, string, string)"/> with optional Source Map v3
@@ -108,7 +108,7 @@ public sealed partial class TypeScriptEmitter
     /// loop to materialize. With the flag off (the default) the returned text is byte-for-byte
     /// identical to the historical emitter — no comment, no sidecar.
     /// </summary>
-    private string Assemble(TsEmitContext emit, string ns, string kindFolder, string body, string? name, Ast.SourceSpan declSpan)
+    private string Assemble(TsEmitContext emit, string ns, string kindFolder, string body, string? name, SourceSpan declSpan)
     {
         var folder = kindFolder.Length == 0 ? FolderFor(ns) : $"{FolderFor(ns)}/{kindFolder}";
         var present = new HashSet<string>(StringComparer.Ordinal);

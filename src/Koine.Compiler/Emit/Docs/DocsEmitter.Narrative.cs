@@ -90,7 +90,7 @@ public sealed partial class DocsEmitter
             // Lifecycle: state machine diagram, commands, factories, invariants.
             if (root is not null)
             {
-                WriteEntityLifecycle(sb, ctx, root);
+                WriteEntityLifecycle(sb, root);
             }
 
             if (agg.Specs.Count > 0)
@@ -162,7 +162,7 @@ public sealed partial class DocsEmitter
     }
 
     /// <summary>Writes the lifecycle: state-machine diagram (if any), commands, factories, invariants.</summary>
-    private static void WriteEntityLifecycle(StringBuilder sb, ContextNode ctx, EntityDecl entity)
+    private static void WriteEntityLifecycle(StringBuilder sb, EntityDecl entity)
     {
         if (entity.States.Count > 0)
         {
@@ -311,7 +311,7 @@ public sealed partial class DocsEmitter
 
                 // A standalone (non-aggregate) entity still carries behavior: render its full lifecycle
                 // (state machine, commands, factories, invariants) the same way an aggregate root does.
-                WriteEntityLifecycle(sb, ctx, e);
+                WriteEntityLifecycle(sb, e);
             }
         }
 

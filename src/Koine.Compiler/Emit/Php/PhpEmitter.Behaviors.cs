@@ -361,12 +361,12 @@ public sealed partial class PhpEmitter
         if (inv.Condition is GuardExpr guard)
         {
             var guardStr = translator.Translate(guard.Condition, mode);
-            var bodyNeg = translator.TranslateNegated(guard.Body, mode);
+            var bodyNeg = translator.TranslateNegated(guard.Body);
             test = guardStr + " && " + bodyNeg;
         }
         else
         {
-            test = translator.TranslateNegated(inv.Condition, mode);
+            test = translator.TranslateNegated(inv.Condition);
         }
 
         sb.Append(Indent).Append(Indent).Append("if (").Append(test).Append(") {\n");
@@ -398,12 +398,12 @@ public sealed partial class PhpEmitter
         if (req.Condition is GuardExpr guard)
         {
             var guardStr = translator.Translate(guard.Condition, PhpExpressionTranslator.NameMode.Property);
-            var bodyNeg = translator.TranslateNegated(guard.Body, PhpExpressionTranslator.NameMode.Property);
+            var bodyNeg = translator.TranslateNegated(guard.Body);
             test = guardStr + " && " + bodyNeg;
         }
         else
         {
-            test = translator.TranslateNegated(req.Condition, PhpExpressionTranslator.NameMode.Property);
+            test = translator.TranslateNegated(req.Condition);
         }
 
         sb.Append(indent).Append("if (").Append(test).Append(") {\n");
@@ -473,7 +473,7 @@ public sealed partial class PhpEmitter
         var memberNames = new HashSet<string>(members.Select(m => m.Name), StringComparer.Ordinal);
         var fields = members.Where(m => !MemberAnalysis.IsDerived(m, memberNames)).ToList();
 
-        var translator = new PhpExpressionTranslator(emit.Index, members, emit.EnumMemberToType, typeMapper);
+        var translator = new PhpExpressionTranslator(emit.Index, members, emit.EnumMemberToType);
 
         var sb = new StringBuilder();
         WriteDoc(sb, doc, "");

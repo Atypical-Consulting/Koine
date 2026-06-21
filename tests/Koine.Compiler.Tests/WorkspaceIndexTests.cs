@@ -26,7 +26,7 @@ public class WorkspaceIndexTests
         var idx = Index(("file:///ordering.koi", Ordering), ("file:///catalog.koi", Catalog));
         var def = idx.ResolveDefinition("file:///ordering.koi", "ProductId");
         def.ShouldNotBeNull();
-        def!.Uri.ShouldBe("file:///catalog.koi");
+        def.Uri.ShouldBe("file:///catalog.koi");
         def.Span.Line.ShouldBe(3); // line of `entity Product` in Catalog
     }
 
@@ -37,7 +37,7 @@ public class WorkspaceIndexTests
         var idx = Index(("file:///a.koi", a), ("file:///catalog.koi", Catalog));
         var def = idx.ResolveDefinition("file:///a.koi", "Currency");
         def.ShouldNotBeNull();
-        def!.Uri.ShouldBe("file:///catalog.koi");
+        def.Uri.ShouldBe("file:///catalog.koi");
     }
 
     [Fact]
@@ -47,7 +47,7 @@ public class WorkspaceIndexTests
         var idx = Index(("file:///local.koi", local), ("file:///catalog.koi", Catalog));
         var def = idx.ResolveDefinition("file:///local.koi", "Currency");
         def.ShouldNotBeNull();
-        def!.Uri.ShouldBe("file:///local.koi"); // local wins
+        def.Uri.ShouldBe("file:///local.koi"); // local wins
     }
 
     [Fact]
@@ -67,7 +67,7 @@ public class WorkspaceIndexTests
         var idx = Index(("file:///a.koi", active), ("file:///catalog.koi", Catalog));
         var def = idx.ResolveDefinition("file:///a.koi", "EUR"); // a Currency member in Catalog
         def.ShouldNotBeNull();
-        def!.Uri.ShouldBe("file:///catalog.koi");
+        def.Uri.ShouldBe("file:///catalog.koi");
         def.Span.Line.ShouldBe(2); // line of `enum Currency { EUR, USD }`
     }
 
@@ -85,7 +85,7 @@ public class WorkspaceIndexTests
         var idx = Index(("file:///broken.koi", broken), ("file:///catalog.koi", Catalog));
         var def = idx.ResolveDefinition("file:///broken.koi", "Product");
         def.ShouldNotBeNull(); // resolves into catalog despite broken active file
-        def!.Uri.ShouldBe("file:///catalog.koi");
+        def.Uri.ShouldBe("file:///catalog.koi");
     }
 
     [Fact]
@@ -95,7 +95,7 @@ public class WorkspaceIndexTests
         var idx = Index(("file:///a.koi", a), ("file:///catalog.koi", Catalog));
         var md = idx.ResolveHover("file:///a.koi", "Currency");
         md.ShouldNotBeNull();
-        md!.ShouldContain("Currency");
+        md.ShouldContain("Currency");
         md.ShouldContain("Enum");
     }
 
@@ -105,7 +105,7 @@ public class WorkspaceIndexTests
         var idx = Index(("file:///ordering.koi", Ordering), ("file:///catalog.koi", Catalog));
         var md = idx.ResolveHover("file:///ordering.koi", "ProductId");
         md.ShouldNotBeNull();
-        md!.ShouldContain("Product"); // names the owning entity
+        md.ShouldContain("Product"); // names the owning entity
     }
 
     [Fact]
@@ -114,7 +114,7 @@ public class WorkspaceIndexTests
         var idx = Index(("file:///a.koi", "context A { value V { x: Int } }\n"));
         var md = idx.ResolveHover("file:///a.koi", "Decimal");
         md.ShouldNotBeNull();
-        md!.ShouldContain("Primitive");
+        md.ShouldContain("Primitive");
     }
 
     [Fact]
@@ -142,6 +142,6 @@ public class WorkspaceIndexTests
         var idx = Index(("file:///a.koi", active), ("file:///s.koi", specFile));
         var md = idx.ResolveHover("file:///a.koi", "Positive");
         md.ShouldNotBeNull();
-        md!.ShouldContain("spec on Money");
+        md.ShouldContain("spec on Money");
     }
 }

@@ -4,7 +4,7 @@ using Koine.Compiler.Services;
 namespace Koine.Compiler.Tests;
 
 /// <summary>
-/// Full source ranges (#4): every node's <see cref="SourceSpan.Span"/> now covers the whole
+/// Full source ranges (#4): every node's <c>Span</c> now covers the whole
 /// construct (keyword → end) with a 0-based <see cref="SourceSpan.Offset"/> + char
 /// <see cref="SourceSpan.Length"/>, and every named declaration carries a
 /// <see cref="KoineNode.NameSpan"/> over just its identifier. Multi-line constructs report a
@@ -17,7 +17,7 @@ public class SourceRangeTests
         var (model, diagnostics) = new KoineCompiler().Parse(src);
         diagnostics.ShouldBeEmpty();
         model.ShouldNotBeNull();
-        return model!;
+        return model;
     }
 
     [Fact]
