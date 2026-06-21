@@ -39,6 +39,80 @@
   max-width: 100%;
   height: auto;
 }
+
+/* --- interactive canvas (issue #145): pan / zoom / fit + minimap ---
+   The drawn SVG is wrapped in a fixed-size, overflow-clipped viewport whose `viewBox` is mutated for
+   pan/zoom (crisp at any scale — vector, not a CSS bitmap scale). `touch-action: none` hands pointer
+   gestures to our pan/pinch handlers instead of the browser's scroll/zoom. */
+.koi-canvas {
+  position: relative;
+  width: 100%;
+  height: clamp(280px, 52vh, 560px);
+  overflow: hidden;
+  background: var(--koi-paper);
+  border: 1px solid var(--koi-line);
+  border-radius: var(--koi-radius-sm);
+  touch-action: none;
+  cursor: grab;
+}
+.koi-canvas--panning {
+  cursor: grabbing;
+}
+.koi-diagram-surface .koi-canvas svg,
+.koi-canvas > svg.koi-svg-diagram {
+  display: block;
+  width: 100%;
+  height: 100%;
+  max-width: none;
+}
+
+/* zoom control bar — floats over the top-right of the canvas */
+.koi-canvas-controls {
+  position: absolute;
+  top: var(--koi-space-1-5);
+  right: var(--koi-space-1-5);
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: var(--koi-space-0-5);
+  padding: var(--koi-space-0-5);
+  background: var(--koi-surface);
+  border: 1px solid var(--koi-line);
+  border-radius: var(--koi-radius-pill);
+  box-shadow: var(--koi-shadow);
+}
+.koi-canvas-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  font-size: var(--koi-text-sm);
+  line-height: 1;
+  color: var(--koi-fg);
+  background: transparent;
+  border: none;
+  border-radius: var(--koi-radius-pill);
+  cursor: pointer;
+}
+.koi-canvas-btn:hover {
+  background: var(--koi-paper-2);
+  color: var(--koi-accent);
+}
+.koi-canvas-btn:focus-visible {
+  outline: 2px solid var(--koi-accent);
+  outline-offset: 1px;
+}
+.koi-canvas-zoom-pct {
+  min-width: 3.2em;
+  text-align: center;
+  font-family: var(--koi-font-mono);
+  font-size: var(--koi-text-xs);
+  font-variant-numeric: tabular-nums;
+  color: var(--koi-muted);
+  user-select: none;
+}
 .koi-diagram-fallback {
   font-family: var(--koi-font-mono);
   font-size: var(--koi-text-xs-plus);

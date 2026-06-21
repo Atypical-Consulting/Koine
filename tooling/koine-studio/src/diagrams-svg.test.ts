@@ -297,6 +297,119 @@ describe('createSvgRenderer', () => {
   });
 });
 
+describe('interactive canvas — zoom / pan / fit (issue #145)', () => {
+  /** A one-node diagram is enough to exercise the canvas chrome; layout coords are not asserted. */
+  function oneNodeFile(): DocsFile[] {
+    return [
+      file([
+        diagram({
+          nodes: [mkNode({ id: 'a', label: 'Order', kind: 'aggregate-root', qualifiedName: 'Ord.Order' })],
+          edges: [],
+        }),
+      ]),
+    ];
+  }
+
+  /** Parse the integer percent off the zoom readout (e.g. "120%" → 120). */
+  function pctOf(container: HTMLElement): number {
+    const text = container.querySelector('.koi-canvas-zoom-pct')!.textContent ?? '';
+    return parseInt(text, 10);
+  }
+
+  const viewBoxNumbers = (svg: SVGSVGElement) =>
+    (svg.getAttribute('viewBox') ?? '').split(/\s+/).map(Number);
+
+  test('wraps the drawn SVG in an interactive .koi-canvas with a − / % / + / fit control bar', async () => {
+    const container = ROOT();
+    await createSvgRenderer().render(container, oneNodeFile(), 'light', () => true);
+
+    const canvas = container.querySelector('.koi-canvas');
+    expect(canvas).not.toBeNull();
+    // The drawn SVG lives inside the canvas (not loose in the surface).
+    expect(canvas!.querySelector('svg.koi-svg-diagram')).not.toBeNull();
+
+    // The control bar exposes the four named controls.
+    expect(container.querySelector('.koi-canvas-btn[aria-label="Zoom in"]')).not.toBeNull();
+    expect(container.querySelector('.koi-canvas-btn[aria-label="Zoom out"]')).not.toBeNull();
+    expect(container.querySelector('.koi-canvas-btn[aria-label="Fit to screen"]')).not.toBeNull();
+    expect(container.querySelector('.koi-canvas-zoom-pct')).not.toBeNull();
+    expect(pctOf(container)).toBeGreaterThan(0);
+  });
+
+  test('applies a finite 4-value viewBox to the canvas SVG (driven by the fit transform)', async () => {
+    const container = ROOT();
+    await createSvgRenderer().render(container, oneNodeFile(), 'light', () => true);
+
+    const svg = container.querySelector<SVGSVGElement>('.koi-canvas svg')!;
+    const nums = viewBoxNumbers(svg);
+    expect(nums).toHaveLength(4);
+    expect(nums.every(Number.isFinite)).toBe(true);
+    // A fit window is non-degenerate.
+    expect(nums[2]).toBeGreaterThan(0);
+    expect(nums[3]).toBeGreaterThan(0);
+    // The svg fills its canvas so the viewBox (not the intrinsic size) governs what's shown.
+    expect(svg.getAttribute('width')).toBe('100%');
+    expect(svg.getAttribute('height')).toBe('100%');
+  });
+
+  test('zoom-in raises the percent and shrinks the viewBox; zoom-out lowers it; fit restores it', async () => {
+    const container = ROOT();
+    await createSvgRenderer().render(container, oneNodeFile(), 'light', () => true);
+
+    const svg = container.querySelector<SVGSVGElement>('.koi-canvas svg')!;
+    const zoomIn = container.querySelector<HTMLButtonElement>('.koi-canvas-btn[aria-label="Zoom in"]')!;
+    const zoomOut = container.querySelector<HTMLButtonElement>('.koi-canvas-btn[aria-label="Zoom out"]')!;
+    const fitBtn = container.querySelector<HTMLButtonElement>('.koi-canvas-btn[aria-label="Fit to screen"]')!;
+
+    const startPct = pctOf(container);
+    const startW = viewBoxNumbers(svg)[2];
+
+    zoomIn.click();
+    expect(pctOf(container)).toBeGreaterThan(startPct);
+    expect(viewBoxNumbers(svg)[2]).toBeLessThan(startW); // smaller window = magnified
+
+    fitBtn.click();
+    expect(pctOf(container)).toBe(startPct);
+    expect(viewBoxNumbers(svg)[2]).toBeCloseTo(startW, 6);
+
+    zoomOut.click();
+    expect(pctOf(container)).toBeLessThan(startPct);
+    expect(viewBoxNumbers(svg)[2]).toBeGreaterThan(startW);
+  });
+
+  test('the node stays inside the canvas and still navigates on click (pan never swallows it)', async () => {
+    const files: DocsFile[] = [
+      file([
+        diagram({
+          nodes: [
+            mkNode({
+              id: 'order',
+              label: 'Order',
+              kind: 'aggregate-root',
+              qualifiedName: 'Ordering.Order',
+              sourceSpan: { file: 'file:///ordering.koi', line: 3, column: 5, endLine: 7, endColumn: 10, offset: 20, length: 5 },
+            }),
+          ],
+          edges: [],
+        }),
+      ]),
+    ];
+
+    const container = ROOT();
+    await createSvgRenderer().render(container, files, 'light', () => true);
+
+    const node = container.querySelector<SVGGElement>('.koi-canvas .koi-svg-node[data-qname="Ordering.Order"]')!;
+    expect(node).not.toBeNull();
+
+    const events: DiagramNodeNavigateDetail[] = [];
+    container.addEventListener(NODE_NAVIGATE_EVENT, (e) => events.push((e as CustomEvent<DiagramNodeNavigateDetail>).detail));
+    node.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+
+    expect(events).toHaveLength(1);
+    expect(events[0].qualifiedName).toBe('Ordering.Order');
+  });
+});
+
 describe('UML class boxes (issue #93 enrichment)', () => {
   // A node carrying a stereotype + members renders a compartmented class box: the «stereotype» header,
   // a divider, one row element per attribute, then (when methods exist) another divider + method rows.
