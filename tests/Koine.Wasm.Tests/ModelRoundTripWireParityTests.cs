@@ -38,10 +38,10 @@ public class ModelRoundTripWireParityTests
     // The CompilerInterop JSExports are [SupportedOSPlatform("browser")] for the JS-interop boundary,
     // but their bodies have no JS interop — safe to call off-browser in a parity test (CA1416 suppressed).
 #pragma warning disable CA1416
-    private static string WasmModel(string? qn) => Koine.Wasm.CompilerInterop.Model(FilesJson(), qn);
-    private static string WasmModelMembers(string qn) => Koine.Wasm.CompilerInterop.ModelMembers(FilesJson(), qn);
-    private static string WasmEmitKoine(string editJson) => Koine.Wasm.CompilerInterop.EmitKoine(FilesJson(), editJson);
-    private static string WasmApplyModelEdit(string editJson) => Koine.Wasm.CompilerInterop.ApplyModelEdit(FilesJson(), editJson);
+    private static string WasmModel(string? qn) => CompilerInterop.Model(FilesJson(), qn);
+    private static string WasmModelMembers(string qn) => CompilerInterop.ModelMembers(FilesJson(), qn);
+    private static string WasmEmitKoine(string editJson) => CompilerInterop.EmitKoine(FilesJson(), editJson);
+    private static string WasmApplyModelEdit(string editJson) => CompilerInterop.ApplyModelEdit(FilesJson(), editJson);
 #pragma warning restore CA1416
 
     [Fact]
@@ -115,17 +115,17 @@ public class ModelRoundTripWireParityTests
     // ---- LSP driving + canonicalization ----------------------------------
 
     private static JsonNode LspModel(string? qualifiedName) =>
-        LspResult("koine/model", qualifiedName is null ? new { } : (object)new { qualifiedName });
+        LspResult("koine/model", qualifiedName is null ? new { } : new { qualifiedName });
 
     private static JsonNode LspResult(string method, object extraParams)
     {
-        var paramsObj = MergeParams(method, extraParams);
+        var paramsObj = MergeParams(extraParams);
         var request = Frame(JsonSerializer.Serialize(new { jsonrpc = "2.0", id = 99, method, @params = paramsObj }));
         var output = RunSession(Initialize(), DidOpen("file:///t.koi", Fixture), request);
         return ResultForId(output, 99)!;
     }
 
-    private static JsonObject MergeParams(string method, object extra)
+    private static JsonObject MergeParams(object extra)
     {
         var obj = JsonSerializer.SerializeToNode(extra)!.AsObject();
         obj["textDocument"] = new JsonObject { ["uri"] = "file:///t.koi" };
@@ -198,7 +198,7 @@ public class ModelRoundTripWireParityTests
         foreach (var body in Frames(output))
         {
             var node = JsonNode.Parse(body);
-            if (node?["id"]?.GetValue<int>() == id && node["result"] is JsonNode result)
+            if (node?["id"]?.GetValue<int>() == id && node["result"] is { } result)
             {
                 return result.AsObject();
             }

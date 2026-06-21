@@ -1,4 +1,3 @@
-using Koine.Mcp;
 using Microsoft.AspNetCore.Builder;
 using ModelContextProtocol.Client;
 using ModelContextProtocol.Protocol;
@@ -72,7 +71,7 @@ public sealed class HttpTransportTests : IAsyncLifetime
 
         (result.IsError ?? false).ShouldBeFalse();
         var text = result.Content.OfType<TextContentBlock>().First().Text;
-        text.ShouldContain("\"ok\"", Case.Insensitive);
+        text.ShouldContain("\"ok\"");
     }
 
     [Fact]

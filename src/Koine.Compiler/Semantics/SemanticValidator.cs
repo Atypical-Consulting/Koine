@@ -575,7 +575,7 @@ public sealed class SemanticValidator
     /// class always generates (e.g. an entity's <c>id</c> field becoming a second
     /// <c>Id</c> property, CS0102; a value object's <c>equals</c> field shadowing
     /// <c>ValueObject.Equals</c>). The conditional <c>Version</c> token is covered by
-    /// <see cref="ValidateVersioning"/>.
+    /// <see cref="EntityBehaviorValidator.ValidateVersioning(AggregateDecl, List{Diagnostic})"/>.
     /// </summary>
     private static void ReportGeneratedMemberCollisions(
         IReadOnlyList<Member> members, IReadOnlySet<string> generated, string kind, List<Diagnostic> diagnostics)

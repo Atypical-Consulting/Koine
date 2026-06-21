@@ -172,7 +172,7 @@ public sealed partial class CSharpEmitter
             Assemble(emit, ns, sb.ToString(), usesLinq: false)));
 
         registrations.Add(new AppRegistration("handler", MediatrHandlerService(requestType, plainResult), handlerType));
-        EmitValidator(emit, files, registrations, ns, requestType, cmd.Parameters, cmd.Body, index, typeMapper, enumMemberToType);
+        EmitValidator(emit, files, registrations, ns, requestType, cmd.Parameters, cmd.Body, index, enumMemberToType);
     }
 
     private void EmitFactoryHandler(
@@ -216,7 +216,7 @@ public sealed partial class CSharpEmitter
             Assemble(emit, ns, sb.ToString(), usesLinq: false)));
 
         registrations.Add(new AppRegistration("handler", MediatrHandlerService(requestType, root.Name), handlerType));
-        EmitValidator(emit, files, registrations, ns, requestType, factory.Parameters, factory.Body, index, typeMapper, enumMemberToType);
+        EmitValidator(emit, files, registrations, ns, requestType, factory.Parameters, factory.Body, index, enumMemberToType);
     }
 
     /// <summary>
@@ -316,7 +316,6 @@ public sealed partial class CSharpEmitter
         IReadOnlyList<Param> parameters,
         IReadOnlyList<CommandStmt> body,
         ModelIndex index,
-        CSharpTypeMapper typeMapper,
         IReadOnlyDictionary<string, string> enumMemberToType)
     {
         var validatorType = requestType + "Validator";

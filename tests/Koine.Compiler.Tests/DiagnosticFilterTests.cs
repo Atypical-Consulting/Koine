@@ -17,13 +17,6 @@ public class DiagnosticFilterTests
     private const string InvertedBoundModel =
         "context C {\n  value Temp { celsius: Int  invariant celsius >= 100 && celsius <= 0 }\n}\n";
 
-    // Two value objects, each on its own line, each raising one KOI0311 Warning (for isolation tests).
-    private const string TwoWarningsModel =
-        "context C {\n" +
-        "  value Temp { celsius: Int  invariant celsius >= 100 && celsius <= 0 }\n" +
-        "  value Heat { kelvin: Int  invariant kelvin >= 100 && kelvin <= 0 }\n" +
-        "}\n";
-
     private const string Warn = DiagnosticCodes.InvertedBound; // KOI0311, a Warning.
 
     private static CompileResult Compile(string source, DiagnosticFilterOptions options) =>

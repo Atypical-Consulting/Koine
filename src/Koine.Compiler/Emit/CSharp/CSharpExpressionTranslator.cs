@@ -199,10 +199,13 @@ internal sealed class CSharpExpressionTranslator
     // binding name (`__sum0`, `__sum1`, …), so sibling folds in one expression never collide.
     private int _sumCounter;
 
+    /// <param name="index">The model index, used to classify/resolve type references.</param>
     /// <param name="members">The members of the type being emitted.</param>
     /// <param name="enumMemberToType">Map from an enum member name to its owning enum type name.</param>
     /// <param name="specBodies">Spec name -&gt; body, for inlining spec references (R10.1).</param>
     /// <param name="memberReceiver">When set, members render as <c>receiver.Member</c>.</param>
+    /// <param name="context">The bounded context (namespace) the expression is resolved within.</param>
+    /// <param name="options">The configured C# emitter options.</param>
     public CSharpExpressionTranslator(
         ModelIndex index,
         IReadOnlyList<Member> members,

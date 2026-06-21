@@ -1,4 +1,3 @@
-using System.Threading;
 using Koine.Compiler.Ast.Bound;
 
 namespace Koine.Compiler.Ast;

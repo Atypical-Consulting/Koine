@@ -49,9 +49,9 @@ internal sealed class CoverageCommand : Command<CoverageSettings>
             return exitCode;
         }
 
-        var externalAnalyzers = Koine.Compiler.Semantics.AnalyzerLoader.Load(config.Analyzers);
+        var externalAnalyzers = Compiler.Semantics.AnalyzerLoader.Load(config.Analyzers);
         var compiler = new KoineCompiler(externalAnalyzers);
-        var filterOptions = new Koine.Compiler.Diagnostics.DiagnosticFilterOptions(config.DiagnosticSeverity, WarningsAsErrors: false);
+        var filterOptions = new Compiler.Diagnostics.DiagnosticFilterOptions(config.DiagnosticSeverity, WarningsAsErrors: false);
         var result = compiler.Compile(sources, emitter, filterOptions);
 
         if (DiagnosticPrinter.Print(result.Diagnostics, sources, settings.Path) || result.Model is null)

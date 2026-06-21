@@ -15,8 +15,8 @@ Koine.Compiler.Emit.EmitterOptions.EmitSourceMaps.init -> void
 Koine.Compiler.Emit.EmitterOptions.ReferenceOnly.get -> bool
 Koine.Compiler.Emit.EmitterOptions.ReferenceOnly.init -> void
 *REMOVED*Koine.Compiler.Emit.EmitterOptions.EmitterOptions(System.Collections.Generic.IReadOnlyDictionary<string!, string!>! NamespaceMap, string? InstantMode = null, string? Layout = null, bool EmitSourceMaps = false, bool ReferenceOnly = false) -> void
-Koine.Compiler.Emit.EmitterOptions.EmitterOptions(System.Collections.Generic.IReadOnlyDictionary<string!, string!>! NamespaceMap, string? InstantMode = null, string? Layout = null, bool EmitSourceMaps = false, bool ReferenceOnly = false, System.Collections.Generic.IReadOnlyList<string!>? Layers = null, bool ApplicationMediatr = false, string? ApplicationMapping = null) -> void
-Koine.Compiler.Emit.EmitterOptions.Layers.get -> System.Collections.Generic.IReadOnlyList<string!>?
+Koine.Compiler.Emit.EmitterOptions.EmitterOptions(System.Collections.Generic.IReadOnlyDictionary<string!, string!>! NamespaceMap, string? InstantMode = null, string? Layout = null, bool EmitSourceMaps = false, bool ReferenceOnly = false, string? Layers = null, bool ApplicationMediatr = false, string? ApplicationMapping = null) -> void
+Koine.Compiler.Emit.EmitterOptions.Layers.get -> string?
 Koine.Compiler.Emit.EmitterOptions.Layers.init -> void
 Koine.Compiler.Emit.EmitterOptions.ApplicationMediatr.get -> bool
 Koine.Compiler.Emit.EmitterOptions.ApplicationMediatr.init -> void

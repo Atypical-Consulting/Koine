@@ -1,4 +1,3 @@
-using System.Reflection;
 using Koine.Compiler.Diagnostics;
 using Koine.Compiler.Emit.CSharp;
 using Koine.Compiler.Services;
@@ -26,7 +25,7 @@ public class SmartEnumApiTests
         result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
         var (asm, errors) = TestSupport.Compile(result.Files);
         (asm is not null).ShouldBeTrue("generated C# failed to compile:\n" + string.Join("\n", errors));
-        return asm!.GetType("Shop.OrderStatus")!;
+        return asm.GetType("Shop.OrderStatus")!;
     }
 
     // ======================================================================
@@ -164,7 +163,7 @@ public class SmartEnumApiTests
         result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
         var (asm, errors) = TestSupport.Compile(result.Files);
         (asm is not null).ShouldBeTrue("generated C# failed to compile:\n" + string.Join("\n", errors));
-        return asm!.GetType(fqn)!;
+        return asm.GetType(fqn)!;
     }
 
     [Fact]

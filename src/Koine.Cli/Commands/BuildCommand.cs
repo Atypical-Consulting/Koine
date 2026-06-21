@@ -207,9 +207,9 @@ internal sealed class BuildCommand : Command<BuildSettings>
 
         // External semantic analyzers from the `analyzers` config key (issue #69), loaded once and
         // appended after the built-ins. No key → zero externals → behavior identical to before.
-        var externalAnalyzers = Koine.Compiler.Semantics.AnalyzerLoader.Load(r.Analyzers);
+        var externalAnalyzers = Compiler.Semantics.AnalyzerLoader.Load(r.Analyzers);
         var compiler = new KoineCompiler(externalAnalyzers);
-        var filterOptions = new Koine.Compiler.Diagnostics.DiagnosticFilterOptions(r.DiagnosticSeverity, r.WarningsAsErrors);
+        var filterOptions = new Compiler.Diagnostics.DiagnosticFilterOptions(r.DiagnosticSeverity, r.WarningsAsErrors);
         var result = compiler.Compile(sources, emitter, filterOptions);
 
         // Diagnostics print plain (MSBuild/Roslyn-parseable) when redirected, pretty in a terminal.
@@ -223,7 +223,7 @@ internal sealed class BuildCommand : Command<BuildSettings>
         if (r.GlossaryFile is not null && result.Model is not null)
         {
             var glossary = new GlossaryEmitter().Emit(result.Model)[0];
-            var dir = System.IO.Path.GetDirectoryName(r.GlossaryFile);
+            var dir = Path.GetDirectoryName(r.GlossaryFile);
             if (!string.IsNullOrEmpty(dir))
             {
                 Directory.CreateDirectory(dir);

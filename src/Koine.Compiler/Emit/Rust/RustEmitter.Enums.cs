@@ -12,7 +12,7 @@ namespace Koine.Compiler.Emit.Rust;
 /// </summary>
 public sealed partial class RustEmitter
 {
-    private void EmitEnum(StringBuilder sb, RustEmitContext emit, EnumDecl @enum)
+    private void EmitEnum(StringBuilder sb, EnumDecl @enum)
     {
         var name = RustNaming.ToPascalCase(@enum.Name);
 
@@ -37,7 +37,7 @@ public sealed partial class RustEmitter
         for (var i = 0; i < @enum.Signature.Count; i++)
         {
             Param field = @enum.Signature[i];
-            var (returnType, _) = EnumDataReturn(field.Type);
+            var returnType = EnumDataReturn(field.Type);
             if (i > 0)
             {
                 sb.Append('\n');
@@ -58,13 +58,13 @@ public sealed partial class RustEmitter
     }
 
     /// <summary>The accessor return type for a smart-enum associated-data field (a <c>'static</c> borrow for strings).</summary>
-    private static (string ReturnType, bool ByRef) EnumDataReturn(TypeRef type) => type.Name switch
+    private static string EnumDataReturn(TypeRef type) => type.Name switch
     {
-        "String" => ("&'static str", true),
-        "Int" => ("i64", false),
-        "Bool" => ("bool", false),
-        "Decimal" => ("Decimal", false),
-        _ => ("i64", false),
+        "String" => "&'static str",
+        "Int" => "i64",
+        "Bool" => "bool",
+        "Decimal" => "Decimal",
+        _ => "i64",
     };
 
     /// <summary>The literal value for a smart-enum associated-data field of a given variant.</summary>

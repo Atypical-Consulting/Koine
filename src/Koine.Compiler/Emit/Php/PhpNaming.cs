@@ -42,8 +42,7 @@ internal static class PhpNaming
         // Compile-time constants (cannot be used as identifiers)
         "null", "true", "false",
         // Type keywords (reserved as type declarations in PHP 8+)
-        "string", "int", "float", "bool", "void", "iterable", "mixed",
-        "never", "object", "callable",
+        "string", "int", "float", "bool", "void", "iterable",
     };
 
     /// <summary>

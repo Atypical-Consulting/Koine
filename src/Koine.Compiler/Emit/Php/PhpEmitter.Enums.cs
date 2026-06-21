@@ -22,7 +22,7 @@ namespace Koine.Compiler.Emit.Php;
 /// </list>
 /// Every enum carries the smart-enum surface that mirrors C#/TS/Python:
 /// <list type="bullet">
-///   <item><c>fromName(string $name): self</c> — raises <see cref="\ValueError"/> on miss.</item>
+///   <item><c>fromName(string $name): self</c> — raises <c>\ValueError</c> on miss.</item>
 ///   <item><c>tryFromName(string $name): ?self</c> — returns null on miss.</item>
 ///   <item><c>fromValue(int $value): self</c> — thin alias for the built-in <c>from()</c>.</item>
 ///   <item><c>tryFromValue(int $value): ?self</c> — thin alias for <c>tryFrom()</c>.</item>
@@ -30,7 +30,7 @@ namespace Koine.Compiler.Emit.Php;
 ///     Exhaustive <c>match_</c> (value-returning, escaped because <c>match</c> is a PHP reserved
 ///     word) and <c>switch_</c> (side-effecting): one
 ///     zero-arg callable per member, dispatched via <c>match($this)</c>, throwing
-///     <see cref="\Koine\Runtime\DomainInvariantViolationException"/> on an unhandled member.
+///     <c>\Koine\Runtime\DomainInvariantViolationException</c> on an unhandled member.
 ///   </item>
 /// </list>
 /// </summary>
@@ -46,8 +46,7 @@ public sealed partial class PhpEmitter
         var translator = new PhpExpressionTranslator(
             emit.Index,
             Array.Empty<Member>(),
-            emit.EnumMemberToType,
-            typeMapper);
+            emit.EnumMemberToType);
 
         // PHP enum case names: UPPER_SNAKE, so they align with the expression translator's
         // PhpNaming.ConstName references (e.g. `OrderStatus::CANCELLED`).
@@ -159,7 +158,7 @@ public sealed partial class PhpEmitter
     {
         sb.Append('\n');
         // Build the parameter list: one Closure per member in camelCase.
-        var paramNames = members.Select((m, i) =>
+        var paramNames = members.Select(m =>
             "$" + PhpNaming.EscapeIdentifier(PhpNaming.MethodName(m.Name))).ToList();
         var paramList = string.Join(", ", paramNames.Select(p => "\\Closure " + p));
         sb.Append(Indent).Append("/** Dispatch to the handler for this member; throws if unhandled. */\n");
@@ -181,7 +180,7 @@ public sealed partial class PhpEmitter
 
     /// <summary>
     /// Emits the exhaustive side-effecting <c>switch_</c> method (named <c>switch_</c> because
-    /// <c>switch</c> is a PHP reserved word): one zero-arg <see cref="\Closure"/> per member,
+    /// <c>switch</c> is a PHP reserved word): one zero-arg <c>\Closure</c> per member,
     /// dispatched via <c>match($this)</c>.
     /// </summary>
     private static void WriteEnumSwitch(

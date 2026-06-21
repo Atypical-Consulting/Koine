@@ -41,7 +41,7 @@ public sealed partial class PhpEmitter
         PhpTypeMapper typeMapper)
     {
         // 1. Emit the branded identity value object.
-        files.Add(EmitIdType(emit, entity.IdentityName, contextName, entity.IdStrategy, entity.IdBackingType));
+        files.Add(EmitIdType(entity.IdentityName, contextName, entity.IdStrategy, entity.IdBackingType));
 
         // 2. Emit the entity class itself.
         files.Add(EmitEntityClass(emit, entity, contextName, typeMapper));
@@ -69,8 +69,7 @@ public sealed partial class PhpEmitter
         var translator = new PhpExpressionTranslator(
             emit.Index,
             scopeMembers,
-            emit.EnumMemberToType,
-            typeMapper);
+            emit.EnumMemberToType);
 
         var sb = new StringBuilder();
 
@@ -243,7 +242,6 @@ public sealed partial class PhpEmitter
     /// </list>
     /// </summary>
     private EmittedFile EmitIdType(
-        PhpEmitContext emit,
         string idRaw,
         string contextName,
         IdentityStrategy strategy,

@@ -442,7 +442,7 @@ public class CrossEmitterConformanceTests
         var (asm, errors) = TestSupport.Compile(files);
         (asm is not null).ShouldBeTrue("generated C# (with driver) failed to compile:\n" + string.Join("\n", errors));
 
-        MethodInfo run = asm!.GetType("__Conformance.Driver")!.GetMethod("Run", BindingFlags.Public | BindingFlags.Static)!;
+        MethodInfo run = asm.GetType("__Conformance.Driver")!.GetMethod("Run", BindingFlags.Public | BindingFlags.Static)!;
         return (bool[])run.Invoke(null, null)!;
     }
 

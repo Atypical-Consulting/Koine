@@ -82,7 +82,7 @@ internal static class EmitterRegistry
             return BuiltIn.TryCreate(target, emitterOptions, out emitter);
         }
 
-        var registry = new CompilerEmitterRegistry(Koine.Compiler.Emit.EmitterLoader.Load(emitterAssemblies));
+        var registry = new CompilerEmitterRegistry(Compiler.Emit.EmitterLoader.Load(emitterAssemblies));
         return registry.TryCreate(target, emitterOptions, out emitter);
     }
 

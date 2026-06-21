@@ -380,7 +380,6 @@ internal sealed class TypeScriptExpressionTranslator
 
         TypeScope scope = EffectiveScope();
         TypeRef? left = _resolver.Infer(bin.Left, scope);
-        TypeRef? right = _resolver.Infer(bin.Right, scope);
         var leftDecimal = left?.Name == "Decimal";
         var leftValue = _resolver.IsValueLike(left);
 

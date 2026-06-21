@@ -153,7 +153,7 @@ public class DiagramWireParityTests
             foreach (var member in members)
             {
                 ((string?)member!["text"]).ShouldNotBeNullOrEmpty();
-                ((string?)member!["kind"]).ShouldNotBeNullOrEmpty();
+                ((string?)member["kind"]).ShouldNotBeNullOrEmpty();
             }
 
             // The identity row is always present and reads source-like.
@@ -194,7 +194,7 @@ public class DiagramWireParityTests
     private static JsonArray WasmDocsFiles()
     {
         var filesJson = JsonSerializer.Serialize(new[] { new { uri = Uri, text = Fixture } });
-        var json = Koine.Wasm.CompilerInterop.Docs(filesJson);
+        var json = CompilerInterop.Docs(filesJson);
         return JsonNode.Parse(json)!["files"]!.AsArray();
     }
 #pragma warning restore CA1416

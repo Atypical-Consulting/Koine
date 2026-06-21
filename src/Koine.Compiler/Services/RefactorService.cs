@@ -6,7 +6,7 @@ namespace Koine.Compiler.Services;
 
 /// <summary>
 /// Computes selection-driven refactors over a single document, mirroring how
-/// <see cref="KoineLanguageService.DefinitionAt"/> resolves navigation. Each refactor is returned
+/// <see cref="KoineLanguageService.DefinitionAt(KoineCompilation, string, int, int)"/> resolves navigation. Each refactor is returned
 /// as an editor-agnostic <see cref="CodeFix"/> (title + kind + the text edits that apply it); the
 /// host shell turns it into a CodeAction carrying an inline WorkspaceEdit. This is the engine behind
 /// the selection-driven <c>ICodeFixProvider</c>s (see

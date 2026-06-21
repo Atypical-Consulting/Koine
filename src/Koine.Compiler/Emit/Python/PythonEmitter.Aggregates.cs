@@ -112,7 +112,7 @@ public sealed partial class PythonEmitter
 
         return new EmittedFile(
             PathFor(ns, KindFolder.Repositories, protocol),
-            Assemble(emit, ns, KindFolder.Repositories, sb.ToString(), protocol));
+            Assemble(emit, ns, sb.ToString(), protocol));
     }
 
     // ----------------------------------------------------------------------
@@ -205,7 +205,7 @@ public sealed partial class PythonEmitter
 
         return new EmittedFile(
             PathFor(context, KindFolder.Root, svc.Name),
-            Assemble(emit, context, KindFolder.Root, sb.ToString(), name));
+            Assemble(emit, context, sb.ToString(), name));
     }
 
     /// <summary>
@@ -244,6 +244,6 @@ public sealed partial class PythonEmitter
 
         return new EmittedFile(
             PathFor(context, KindFolder.Root, svc.Name),
-            Assemble(emit, context, KindFolder.Root, sb.ToString(), name));
+            Assemble(emit, context, sb.ToString(), name));
     }
 }

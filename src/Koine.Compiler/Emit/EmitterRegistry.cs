@@ -13,7 +13,6 @@ namespace Koine.Compiler.Emit;
 /// </summary>
 public sealed class EmitterRegistry
 {
-    private readonly IReadOnlyList<IEmitterProvider> _providers;
     private readonly IReadOnlyDictionary<string, IEmitterProvider> _byTarget;
 
     /// <summary>A registry of just the built-in providers.</summary>
@@ -43,7 +42,6 @@ public sealed class EmitterRegistry
             }
         }
 
-        _providers = providers;
         _byTarget = byTarget;
         SupportedTargets = targets;
     }

@@ -4,7 +4,9 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using Koine.Compiler.Ast;
 using Koine.Compiler.Diagnostics;
+using Koine.Compiler.Emit;
 using Koine.Compiler.Emit.CSharp;
+using Koine.Compiler.Emit.Docs;
 using Koine.Compiler.Emit.Glossary;
 using Koine.Compiler.Emit.Php;
 using Koine.Compiler.Emit.Python;
@@ -25,7 +27,7 @@ namespace Koine.Wasm;
 /// and the method returns a JSON payload shaped exactly like the corresponding LSP response so the
 /// TypeScript client (<c>tooling/koine-studio/src/lsp.ts</c>) can consume it unchanged.
 ///
-/// <para>This mirrors a subset of <see cref="Koine.Cli"/>'s <c>LspServer</c> handlers — the nine
+/// <para>This mirrors a subset of <c>Koine.Cli</c>'s <c>LspServer</c> handlers — the nine
 /// requests Koine Studio actually uses — reusing the same <see cref="KoineCompiler"/>,
 /// <see cref="KoineLanguageService"/>, <see cref="KoineFormatter"/>, emitters and
 /// <see cref="CompatibilityChecker"/>. The LSP <c>koine.config</c>-driven per-target options are
@@ -107,7 +109,7 @@ public static partial class CompilerInterop
             var byUri = files.ToDictionary(f => f.Uri, f => f.Text, StringComparer.Ordinal);
             var sources = files.Select(f => new SourceFile(f.Uri, f.Text)).ToList();
 
-            Koine.Compiler.Emit.IEmitter emitter =
+            IEmitter emitter =
                 string.Equals(target, "typescript", StringComparison.OrdinalIgnoreCase) ? new TypeScriptEmitter()
                 : string.Equals(target, "python", StringComparison.OrdinalIgnoreCase) ? new PythonEmitter()
                 : string.Equals(target, "php", StringComparison.OrdinalIgnoreCase) ? new PhpEmitter()
@@ -795,7 +797,7 @@ public static partial class CompilerInterop
                 return JsonSerializer.Serialize(new WDocsResult([]), LangJson.Default.WDocsResult);
             }
 
-            var emitter = new Koine.Compiler.Emit.Docs.DocsEmitter();
+            var emitter = new DocsEmitter();
             var diagramsByFile = emitter.EmitDiagrams(model);
             var files = emitter.Emit(model)
                 .Select(f => new WDocsFile(
@@ -818,21 +820,21 @@ public static partial class CompilerInterop
     // shape field-for-field identical to the LSP backend's hand-written dict keys. The parity test
     // guards that the two stay in lock-step.
 
-    /// <summary>Maps a compiler <see cref="Koine.Compiler.Emit.Docs.DiagramDescriptor"/> to the wire <see cref="WDiagram"/>.</summary>
-    private static WDiagram MapDiagram(Koine.Compiler.Emit.Docs.DiagramDescriptor d) =>
+    /// <summary>Maps a compiler <see cref="DiagramDescriptor"/> to the wire <see cref="WDiagram"/>.</summary>
+    private static WDiagram MapDiagram(DiagramDescriptor d) =>
         new(d.Caption, d.Kind, d.Mermaid, MapGraph(d.Graph));
 
-    private static WDiagramGraph MapGraph(Koine.Compiler.Emit.Docs.DiagramGraph g) =>
+    private static WDiagramGraph MapGraph(DiagramGraph g) =>
         new(g.Nodes.Select(MapNode).ToArray(), g.Edges.Select(MapEdge).ToArray());
 
-    private static WDiagramNode MapNode(Koine.Compiler.Emit.Docs.DiagramNode n) =>
+    private static WDiagramNode MapNode(DiagramNode n) =>
         new(n.Id, n.Label, n.Kind, n.QualifiedName, MapSourceSpan(n.Span),
             n.Stereotype, (n.Members ?? []).Select(MapMember).ToArray());
 
-    private static WDiagramMember MapMember(Koine.Compiler.Emit.Docs.DiagramMember m) =>
+    private static WDiagramMember MapMember(DiagramMember m) =>
         new(m.Text, m.Kind);
 
-    private static WDiagramEdge MapEdge(Koine.Compiler.Emit.Docs.DiagramEdge e) =>
+    private static WDiagramEdge MapEdge(DiagramEdge e) =>
         new(e.From, e.To, e.Label, e.Cardinality);
 
     /// <summary>Maps the raw 1-based <see cref="SourceSpan"/> straight through (null when the node has none).</summary>

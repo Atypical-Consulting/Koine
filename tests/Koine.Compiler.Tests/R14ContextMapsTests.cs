@@ -15,7 +15,7 @@ public class R14ContextMapsTests
         var (model, diags) = new KoineCompiler().Parse(source);
         model.ShouldNotBeNull();
         diags.ShouldNotContain(d => d.Code == DiagnosticCodes.SyntaxError);
-        return model!;
+        return model;
     }
 
     // Two declared contexts to relate (so relations don't trip the unknown-context check).
@@ -84,7 +84,7 @@ public class R14ContextMapsTests
             new SourceFile("m2.koi", "contextmap { B -> A : open-host }\n"),
         });
         model.ShouldNotBeNull();
-        model!.ContextMap!.Relations.Count.ShouldBe(2);
+        model.ContextMap!.Relations.Count.ShouldBe(2);
     }
 
     // ---- validation --------------------------------------------------------

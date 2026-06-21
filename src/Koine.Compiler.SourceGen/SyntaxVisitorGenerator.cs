@@ -1,6 +1,4 @@
-using System.Collections.Generic;
 using System.Collections.Immutable;
-using System.Linq;
 using System.Text;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.Text;
@@ -176,7 +174,7 @@ public sealed class SyntaxVisitorGenerator : IIncrementalGenerator
 
                 if (Classify(prop.Type, koineNode) is { } slot)
                 {
-                    level.Add(new SlotInfo(prop.Name, slot.Kind, slot.ElementTypeName, slot.SlotTypeName));
+                    level.Add(new SlotInfo(prop.Name, slot.Kind, slot.SlotTypeName));
                 }
             }
 
@@ -199,21 +197,20 @@ public sealed class SyntaxVisitorGenerator : IIncrementalGenerator
         return ordered.ToImmutableArray();
     }
 
-    private static (SlotKind Kind, string? ElementTypeName, string SlotTypeName)? Classify(ITypeSymbol type, INamedTypeSymbol koineNode)
+    private static (SlotKind Kind, string SlotTypeName)? Classify(ITypeSymbol type, INamedTypeSymbol koineNode)
     {
         // Single child (required / optional). A nullable reference type T? has NullableAnnotation.Annotated.
         if (type is INamedTypeSymbol named && IsKoineNode(named, koineNode))
         {
             bool optional = type.NullableAnnotation == NullableAnnotation.Annotated;
             string slotType = named.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
-            return (optional ? SlotKind.SingleOptional : SlotKind.SingleRequired, null, slotType);
+            return (optional ? SlotKind.SingleOptional : SlotKind.SingleRequired, slotType);
         }
 
         // List child: IReadOnlyList<U> / IEnumerable<U> with U : KoineNode (and U not string/SyntaxTrivia).
         if (ListElementType(type) is { } element && element is INamedTypeSymbol elementNamed && IsKoineNode(elementNamed, koineNode))
         {
-            string elementType = elementNamed.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
-            return (SlotKind.List, elementType, type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat));
+            return (SlotKind.List, type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat));
         }
 
         return null;
@@ -553,18 +550,16 @@ public sealed class SyntaxVisitorGenerator : IIncrementalGenerator
 
     private sealed class SlotInfo
     {
-        public SlotInfo(string name, SlotKind kind, string? elementTypeName, string slotTypeName)
+        public SlotInfo(string name, SlotKind kind, string slotTypeName)
         {
             Name = name;
             Kind = kind;
-            ElementTypeName = elementTypeName;
             SlotTypeName = slotTypeName;
             Local = "_" + char.ToLowerInvariant(name[0]) + name.Substring(1);
         }
 
         public string Name { get; }
         public SlotKind Kind { get; }
-        public string? ElementTypeName { get; }
 
         /// <summary>The fully-qualified declared slot type (single: the node type; list: the IReadOnlyList type).</summary>
         public string SlotTypeName { get; }

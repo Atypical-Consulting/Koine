@@ -27,10 +27,10 @@ public class EmitterRegistryTests
     {
         // No drift: both registries equal the unified list (and so equal each other). The MCP
         // list, in particular, now includes `php` — the historical gap this task closes.
-        Koine.Cli.Infrastructure.EmitterRegistry.SupportedTargets.ShouldBe(UnifiedTargets);
-        Koine.Mcp.EmitterFactory.Targets.ShouldBe(UnifiedTargets);
+        Cli.Infrastructure.EmitterRegistry.SupportedTargets.ShouldBe(UnifiedTargets);
+        Mcp.EmitterFactory.Targets.ShouldBe(UnifiedTargets);
 
-        Koine.Mcp.EmitterFactory.Targets.ShouldContain("php");
+        Mcp.EmitterFactory.Targets.ShouldContain("php");
     }
 
     [Fact]
@@ -68,9 +68,9 @@ public class EmitterRegistryTests
     [Fact]
     public void External_provider_resolves_through_the_cli_path()
     {
-        Koine.Cli.Infrastructure.EmitterRegistry.TryCreate(
+        Cli.Infrastructure.EmitterRegistry.TryCreate(
             StubEmitterProvider.TargetName,
-            Koine.Cli.TargetOptions.Empty,
+            Cli.TargetOptions.Empty,
             new[] { typeof(StubEmitterProvider).Assembly.GetName().Name! },
             out var emitter).ShouldBeTrue();
 

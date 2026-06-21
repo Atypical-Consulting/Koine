@@ -17,7 +17,7 @@ public class AstPrinterRoundTripTests
         var (model, diagnostics) = new KoineCompiler().Parse(src);
         diagnostics.ShouldBeEmpty();
         model.ShouldNotBeNull();
-        model!.Contexts.ShouldHaveSingleItem();
+        model.Contexts.ShouldHaveSingleItem();
         return model.Contexts[0];
     }
 
@@ -113,7 +113,7 @@ public class AstPrinterRoundTripTests
         var (model, diagnostics) = new KoineCompiler().Parse(src);
         diagnostics.ShouldBeEmpty();
         model.ShouldNotBeNull();
-        model!.Contexts.Count.ShouldBe(2);
+        model.Contexts.Count.ShouldBe(2);
 
         var printer = new AstPrinter(src);
         var printed = string.Concat(model.Contexts.Select(printer.Print));

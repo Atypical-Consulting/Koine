@@ -21,8 +21,8 @@ public class CodeFixProviderTests
     {
         var (model, parseDiags) = Compiler.Parse(src);
         model.ShouldNotBeNull();
-        var diags = parseDiags.Concat(new SemanticValidator().Validate(model!)).ToList();
-        return (model!, diags);
+        var diags = parseDiags.Concat(new SemanticValidator().Validate(model)).ToList();
+        return (model, diags);
     }
 
     [Fact]

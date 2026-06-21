@@ -60,7 +60,7 @@ public class AstPurityTests
     /// decide which declared types a target emitted. The guard still forbids every other emitter type.
     /// </summary>
     private static bool IsSanctionedReference(Type t) =>
-        t == typeof(Koine.Compiler.Emit.EmittedFile);
+        t == typeof(Emit.EmittedFile);
 
     /// <summary>Every type a declaration touches: base, interfaces, field/property/method signatures, and their generic args.</summary>
     private static IEnumerable<Type> ReferencedTypes(Type t)
@@ -144,6 +144,6 @@ public class AstPurityTests
     /// <summary>A deliberate negative fixture for <see cref="Guard_detects_an_emitter_reference"/> — NOT in the Ast namespace.</summary>
     private sealed class EmitReferencingProbe
     {
-        public Koine.Compiler.Emit.EmittedFile? Leak { get; init; }
+        public Emit.EmittedFile? Leak { get; init; }
     }
 }

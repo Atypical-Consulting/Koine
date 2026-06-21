@@ -163,6 +163,6 @@ public class R17FmtTests
         }
 
         dir.ShouldNotBeNull();
-        return dir!.FullName;
+        return dir.FullName;
     }
 }

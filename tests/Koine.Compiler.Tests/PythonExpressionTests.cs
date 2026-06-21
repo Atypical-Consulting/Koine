@@ -1,4 +1,3 @@
-using System.Linq;
 using Koine.Compiler.Ast;
 using Koine.Compiler.Emit.Python;
 using Koine.Compiler.Services;
@@ -38,7 +37,7 @@ public class PythonExpressionTests
         }
         """;
 
-    private static (PythonExpressionTranslator translator, IReadOnlyList<Member> members) Make()
+    private static PythonExpressionTranslator Make()
     {
         var result = new KoineCompiler().Compile(Source, new PythonEmitter());
         result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
@@ -55,12 +54,12 @@ public class PythonExpressionTests
         var typeMapper = new PythonTypeMapper(index);
         var translator = new PythonExpressionTranslator(
             index, order.Members, index.EnumMemberToType, typeMapper, context: "Shop");
-        return (translator, order.Members);
+        return translator;
     }
 
     private static string Translate(Expr expr)
     {
-        var (t, _) = Make();
+        var t = Make();
         return t.Translate(expr);
     }
 
@@ -109,7 +108,7 @@ public class PythonExpressionTests
     [Fact]
     public void Comparison_member_in_parameter_mode_is_bare()
     {
-        var (t, _) = Make();
+        var t = Make();
         var expr = new BinaryExpr(BinaryOp.Ge, Id("quantity"), Int("1"));
         t.Translate(expr, PythonExpressionTranslator.NameMode.Parameter).ShouldBe("(quantity >= 1)");
     }
@@ -340,7 +339,7 @@ public class PythonExpressionTests
     [Fact]
     public void TranslateNegated_flips_comparison()
     {
-        var (t, _) = Make();
+        var t = Make();
         var expr = new BinaryExpr(BinaryOp.Ge, Id("quantity"), Int("1"));
         t.TranslateNegated(expr).ShouldBe("self.quantity < 1");
     }
@@ -348,7 +347,7 @@ public class PythonExpressionTests
     [Fact]
     public void TranslateNegated_peels_not()
     {
-        var (t, _) = Make();
+        var t = Make();
         var expr = new UnaryExpr(UnaryOp.Not, Id("a"));
         t.TranslateNegated(expr).ShouldBe("a");
     }
@@ -356,7 +355,7 @@ public class PythonExpressionTests
     [Fact]
     public void TranslateNegated_wraps_other_expressions()
     {
-        var (t, _) = Make();
+        var t = Make();
         var expr = Member("lines", "isEmpty");
         t.TranslateNegated(expr).ShouldBe("not (len(self.lines) == 0)");
     }

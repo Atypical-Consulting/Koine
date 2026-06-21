@@ -61,7 +61,7 @@ public class ResilienceBuilderTests
         // ANTLR inserted a phantom `:` (single-token insertion) — surfaced as a zero-length, IsMissing marker.
         ErrorNode? missing = errors.FirstOrDefault(e => e.IsMissing);
         missing.ShouldNotBeNull();
-        missing!.Span.Length.ShouldBe(0);
+        missing.Span.Length.ShouldBe(0);
         missing.Text.ShouldContain("missing");
     }
 

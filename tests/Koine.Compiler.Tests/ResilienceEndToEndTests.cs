@@ -81,7 +81,7 @@ public class ResilienceEndToEndTests
 
         errors.ShouldBeEmpty();
         assembly.ShouldNotBeNull();
-        assembly!.GetType("Billing.Email").ShouldNotBeNull();
+        assembly.GetType("Billing.Email").ShouldNotBeNull();
     }
 
     /// <summary>Renders a stable, reviewable textual summary of a recovered partial model + its diagnostics.</summary>

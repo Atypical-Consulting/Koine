@@ -12,8 +12,8 @@ namespace Koine.Compiler.Tests;
 [Collection(CliConsoleCollection.Name)]
 public class CliBuildSourceMapsTests
 {
-    /// <summary>Runs the CLI with <paramref name="args"/>, capturing stdout/stderr and the exit code.</summary>
-    private static (int Code, string Out, string Err) Run(params string[] args)
+    /// <summary>Runs the CLI with <paramref name="args"/>, suppressing stdout/stderr and returning the exit code.</summary>
+    private static int Run(params string[] args)
     {
         var prevOut = Console.Out;
         var prevErr = Console.Error;
@@ -23,8 +23,7 @@ public class CliBuildSourceMapsTests
         {
             Console.SetOut(sout);
             Console.SetError(serr);
-            var code = Program.Run(args);
-            return (code, sout.ToString(), serr.ToString());
+            return Program.Run(args);
         }
         finally
         {
@@ -53,7 +52,7 @@ public class CliBuildSourceMapsTests
         {
             var outDir = Path.Combine(dir, "generated");
 
-            var (code, _, _) = Run("build", src, "--target", "csharp", "--out", outDir, "--source-maps");
+            var code = Run("build", src, "--target", "csharp", "--out", outDir, "--source-maps");
 
             code.ShouldBe(0);
             var anyLineDirective = CsFiles(outDir).Any(f => File.ReadAllText(f).Contains("#line"));
@@ -70,7 +69,7 @@ public class CliBuildSourceMapsTests
         {
             var outDir = Path.Combine(dir, "generated");
 
-            var (code, _, _) = Run("build", src, "--target", "csharp", "--out", outDir);
+            var code = Run("build", src, "--target", "csharp", "--out", outDir);
 
             code.ShouldBe(0);
             var anyLineDirective = CsFiles(outDir).Any(f => File.ReadAllText(f).Contains("#line"));
@@ -87,7 +86,7 @@ public class CliBuildSourceMapsTests
         {
             var outDir = Path.Combine(dir, "generated");
 
-            var (code, _, _) = Run("build", src, "--target", "typescript", "--out", outDir, "--source-maps");
+            var code = Run("build", src, "--target", "typescript", "--out", outDir, "--source-maps");
 
             code.ShouldBe(0);
             Directory.EnumerateFiles(outDir, "*.map", SearchOption.AllDirectories).Any().ShouldBeTrue();
@@ -103,7 +102,7 @@ public class CliBuildSourceMapsTests
         {
             var outDir = Path.Combine(dir, "generated");
 
-            var (code, _, _) = Run("build", src, "--target", "typescript", "--out", outDir);
+            var code = Run("build", src, "--target", "typescript", "--out", outDir);
 
             code.ShouldBe(0);
             Directory.EnumerateFiles(outDir, "*.ts", SearchOption.AllDirectories).Any().ShouldBeTrue();

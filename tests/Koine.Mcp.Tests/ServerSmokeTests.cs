@@ -79,6 +79,6 @@ public sealed class ServerSmokeTests
 
         (result.IsError ?? false).ShouldBeFalse();
         var text = result.Content.OfType<TextContentBlock>().First().Text;
-        text.ShouldContain("\"ok\"", Case.Insensitive);
+        text.ShouldContain("\"ok\"");
     }
 }

@@ -15,7 +15,7 @@ public class SyntaxGraphTests
         var (model, diagnostics) = new KoineCompiler().Parse(src);
         diagnostics.ShouldBeEmpty();
         model.ShouldNotBeNull();
-        return model!;
+        return model;
     }
 
     private const string Src =
@@ -103,7 +103,7 @@ public class SyntaxGraphTests
         // spec targets by name but does not lexically nest.
         var spec = graph.FirstAncestorOrSelf<SpecDecl>(id);
         spec.ShouldNotBeNull();
-        spec!.Name.ShouldBe("Positive");
+        spec.Name.ShouldBe("Positive");
     }
 
     [Fact]

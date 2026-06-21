@@ -131,7 +131,7 @@ public static class EmitterLoader
     /// <summary>
     /// The assembly simple name a path/name refers to: the file name, with only a real assembly
     /// extension (<c>.dll</c>/<c>.exe</c>) stripped. A bare name like <c>Acme.Emitters</c> is returned
-    /// unchanged — <see cref="Path.GetFileNameWithoutExtension"/> would wrongly drop a dotted suffix.
+    /// unchanged — <see cref="System.IO.Path.GetFileNameWithoutExtension(string)"/> would wrongly drop a dotted suffix.
     /// </summary>
     private static string SimpleName(string path)
     {

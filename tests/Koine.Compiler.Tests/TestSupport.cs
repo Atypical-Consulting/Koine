@@ -123,11 +123,15 @@ public static class TestSupport
             return TypeScriptCheck.Skipped;
         }
 
+        // Materialize once: the source is enumerated several times below (write loop, tsconfig
+        // probe, file-list build), so guard against re-enumerating a lazy IEnumerable.
+        var fileList = files.ToList();
+
         string root = Path.Combine(Path.GetTempPath(), "koine-tsc-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(root);
         try
         {
-            foreach (EmittedFile f in files)
+            foreach (EmittedFile f in fileList)
             {
                 string path = Path.Combine(root, f.RelativePath);
                 Directory.CreateDirectory(Path.GetDirectoryName(path)!);
@@ -151,7 +155,7 @@ public static class TestSupport
             // When the emitter shipped a tsconfig.json, type-check via `tsc -p .` so the test
             // validates EXACTLY the configuration users get (target/lib/strict all live there).
             // Otherwise (hand-authored fixtures with no tsconfig) pass the flags + file list.
-            var hasTsconfig = files.Any(f => string.Equals(f.RelativePath, "tsconfig.json", StringComparison.OrdinalIgnoreCase));
+            var hasTsconfig = fileList.Any(f => string.Equals(f.RelativePath, "tsconfig.json", StringComparison.OrdinalIgnoreCase));
             if (hasTsconfig)
             {
                 psi.ArgumentList.Add("-p");
@@ -167,7 +171,7 @@ public static class TestSupport
                 psi.ArgumentList.Add("ESNext");
                 psi.ArgumentList.Add("--moduleResolution");
                 psi.ArgumentList.Add("bundler");
-                foreach (EmittedFile f in files.Where(f => f.RelativePath.EndsWith(".ts", StringComparison.OrdinalIgnoreCase)))
+                foreach (EmittedFile f in fileList.Where(f => f.RelativePath.EndsWith(".ts", StringComparison.OrdinalIgnoreCase)))
                 {
                     psi.ArgumentList.Add(f.RelativePath);
                 }

@@ -1,6 +1,5 @@
 using Koine.Compiler.Ast;
 using Koine.Compiler.Diagnostics;
-using Koine.Mcp;
 using Koine.Mcp.Tools;
 
 namespace Koine.Mcp.Tests;

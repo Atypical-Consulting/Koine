@@ -18,7 +18,7 @@ namespace Koine.Compiler.Emit.Rust;
 /// </summary>
 public sealed partial class RustEmitter
 {
-    private void EmitEvent(StringBuilder body, RustEmitContext emit, string name, string? doc, IReadOnlyList<Member> members, string context)
+    private void EmitEvent(StringBuilder body, RustEmitContext emit, string name, string? doc, IReadOnlyList<Member> members)
     {
         var typeMapper = new RustTypeMapper(emit.Index);
         var typeName = RustNaming.ToPascalCase(name);

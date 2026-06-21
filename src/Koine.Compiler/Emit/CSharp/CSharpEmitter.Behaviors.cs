@@ -63,7 +63,6 @@ public sealed partial class CSharpEmitter
         string ns,
         IReadOnlyList<SpecDecl> specs,
         ModelIndex index,
-        CSharpTypeMapper typeMapper,
         IReadOnlyDictionary<string, string> enumMemberToType)
     {
         var sb = new StringBuilder();

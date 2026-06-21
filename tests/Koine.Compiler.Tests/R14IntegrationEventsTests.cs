@@ -16,7 +16,7 @@ public class R14IntegrationEventsTests
         result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
         var (asm, errors) = TestSupport.Compile(result.Files);
         (asm is not null).ShouldBeTrue("generated C# failed to compile:\n" + string.Join("\n", errors));
-        return (asm!, result.Files);
+        return (asm, result.Files);
     }
 
     private static (Assembly Asm, IReadOnlyList<Emit.EmittedFile> Files) Build(string source) =>

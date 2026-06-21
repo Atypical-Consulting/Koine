@@ -53,7 +53,7 @@ public sealed partial class CSharpEmitter
         }
 
         // The aggregate root's repository contract (R11.2/R11.3).
-        if (EmitRepository(emit, agg, ns, index, typeMapper) is { } repo)
+        if (EmitRepository(emit, agg, ns, typeMapper) is { } repo)
         {
             files.Add(repo);
         }
@@ -74,7 +74,7 @@ public sealed partial class CSharpEmitter
     /// root's ID value object. Returns <c>null</c> if the root cannot be resolved
     /// (already a validation error).
     /// </summary>
-    private EmittedFile? EmitRepository(EmitContext emit, AggregateDecl agg, string ns, ModelIndex index, CSharpTypeMapper typeMapper)
+    private EmittedFile? EmitRepository(EmitContext emit, AggregateDecl agg, string ns, CSharpTypeMapper typeMapper)
     {
         EntityDecl? root = agg.RootEntity();
         if (root is null)

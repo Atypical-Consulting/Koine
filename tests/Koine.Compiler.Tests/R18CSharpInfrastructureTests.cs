@@ -116,7 +116,7 @@ public class R18CSharpInfrastructureTests
         var settings = new BuildSettings { Path = "x.koi", Layers = "domain,bogus" };
         settings.TryResolve(out _, out var error).ShouldBeFalse();
         error.ShouldNotBeNull();
-        error!.ShouldContain("bogus");
+        error.ShouldContain("bogus");
     }
 
     [Fact]

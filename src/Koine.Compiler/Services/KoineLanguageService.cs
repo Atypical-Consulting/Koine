@@ -129,8 +129,8 @@ public sealed record CodeLens(
 
 /// <summary>
 /// Editor-agnostic language services for <c>.koi</c>. <see cref="CompleteAt"/> is
-/// single-file and lexer-only (works on broken documents). <see cref="HoverAt"/> and
-/// <see cref="DefinitionAt"/> take a workspace document map (uri → source) plus the
+/// single-file and lexer-only (works on broken documents). <see cref="HoverAt(IReadOnlyDictionary{string,string},string,int,int)"/> and
+/// <see cref="DefinitionAt(IReadOnlyDictionary{string,string},string,int,int)"/> take a workspace document map (uri → source) plus the
 /// active URI and resolve declarations across files via <see cref="WorkspaceIndex"/>,
 /// returning null when nothing resolves.
 /// </summary>
@@ -553,8 +553,6 @@ public sealed class KoineLanguageService
     private static CompletionItemKind KindOf(TypeKind kind) => kind switch
     {
         TypeKind.Enum => CompletionItemKind.Enum,
-        TypeKind.Value or TypeKind.Entity or TypeKind.Aggregate or TypeKind.Event
-            or TypeKind.IdValueObject => CompletionItemKind.Class,
         _ => CompletionItemKind.Class,
     };
 
@@ -569,9 +567,6 @@ public sealed class KoineLanguageService
         "entity" => EntityStarters,
         _ => [],
     };
-
-    private static IReadOnlyList<CompletionItem> Keywords(string[] names) =>
-        names.Select(n => new CompletionItem(n, CompletionItemKind.Keyword, "keyword", null)).ToList();
 
     /// <summary>
     /// Declaration-start completions: each starter keyword as a SNIPPET (LSP
@@ -1262,8 +1257,8 @@ public sealed class KoineLanguageService
     /// The editable identifier range under the cursor — the LSP <c>prepareRename</c> answer.
     /// Returns the declaration/use occurrence at the cursor (a single-token <see cref="Reference"/>)
     /// when a rename would be valid there, or null when the cursor is inside a string/regex, not on a
-    /// word token, or not on a renameable name (guarding exactly like <see cref="NameAt"/> /
-    /// <see cref="RenameAt"/>). The returned range covers only the identifier under the cursor, so the
+    /// word token, or not on a renameable name (guarding exactly like <see cref="NameAt(KoineCompilation, string, int, int)"/> /
+    /// <see cref="RenameAt(KoineCompilation, string, int, int, string)"/>). The returned range covers only the identifier under the cursor, so the
     /// editor pre-selects the right text.
     /// </summary>
     public Reference? PrepareRenameAt(IReadOnlyDictionary<string, string> documents, string activeUri, int line, int character) =>

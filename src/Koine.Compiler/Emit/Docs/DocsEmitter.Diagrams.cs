@@ -419,7 +419,7 @@ public sealed partial class DocsEmitter
         }
 
         var mermaid = new StringBuilder("```mermaid\nflowchart LR\n");
-        EmitIntegrationFlowchartBody(mermaid, model, byKey, subscribers);
+        EmitIntegrationFlowchartBody(mermaid, byKey, subscribers);
         mermaid.Append("```");
 
         return new DiagramDescriptor(

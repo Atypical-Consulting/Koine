@@ -35,7 +35,7 @@ public class InExpressionNavigationTests
     {
         var def = Svc.DefinitionAt(Doc(Src), U, line: 3, character: 16); // over "amount" in the invariant
         def.ShouldNotBeNull();
-        def!.Target.Line.ShouldBe(3); // 1-based line of "amount: Decimal"
+        def.Target.Line.ShouldBe(3); // 1-based line of "amount: Decimal"
     }
 
     [Fact]
@@ -43,7 +43,7 @@ public class InExpressionNavigationTests
     {
         var hover = Svc.HoverAt(Doc(Src), U, line: 3, character: 16); // over "amount" in the invariant
         hover.ShouldNotBeNull();
-        hover!.Markdown.ShouldContain("field of Money");
+        hover.Markdown.ShouldContain("field of Money");
         hover.Markdown.ShouldContain("Decimal");
     }
 }

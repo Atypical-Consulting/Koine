@@ -33,7 +33,7 @@ public sealed class KoineModelBuilderVisitor : KoineParserBaseVisitor<object?>
         var contexts = members
             .Select(m => m.contextDecl())
             .Where(c => c is not null)
-            .Select(BuildContext!)
+            .Select(BuildContext)
             .ToList();
 
         // Relations from every contextmap block in this unit, concatenated (R14.1).
@@ -1011,7 +1011,7 @@ public sealed class KoineModelBuilderVisitor : KoineParserBaseVisitor<object?>
         // placeholder empty-named TypeRef rather than throwing. The syntax error is reported elsewhere.
         if (ctx is null)
         {
-            return new TypeRef(string.Empty, null, null, false, null);
+            return new TypeRef(string.Empty);
         }
 
         KoineParser.TypeRefContext[]? args = ctx.typeRef();
@@ -1246,7 +1246,7 @@ public sealed class KoineModelBuilderVisitor : KoineParserBaseVisitor<object?>
             i += 2;
 
             if (i < children.Count
-                && children[i] is Antlr4.Runtime.Tree.ITerminalNode lp
+                && children[i] is ITerminalNode lp
                 && lp.Symbol.Type == KoineLexer.LPAREN)
             {
                 i++; // consume '('
@@ -1367,7 +1367,7 @@ public sealed class KoineModelBuilderVisitor : KoineParserBaseVisitor<object?>
         var seen = 0;
         for (var i = 0; i < ctx.ChildCount; i++)
         {
-            if (ctx.GetChild(i) is Antlr4.Runtime.Tree.ITerminalNode terminal
+            if (ctx.GetChild(i) is ITerminalNode terminal
                 && TryMapOperator(terminal.GetText(), out BinaryOp op))
             {
                 if (seen == index)

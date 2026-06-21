@@ -113,7 +113,7 @@ public class SatisfiabilityTests
         var (asm, errors) = TestSupport.Compile(result.Files);
         (asm is not null).ShouldBeTrue("generated C# failed to compile:\n" + string.Join("\n", errors));
 
-        var status = asm!.GetType("Shop.OrderStatus")!;
+        var status = asm.GetType("Shop.OrderStatus")!;
         var match = status.GetMethod("Match")!;
         match.IsGenericMethodDefinition.ShouldBeTrue();
         match.GetParameters().Select(p => p.Name).ShouldBe(new[] { "draft", "placed", "shipped", "cancelled" });

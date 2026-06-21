@@ -1,4 +1,3 @@
-using System.Linq;
 using Koine.Compiler.Ast;
 using Koine.Compiler.Emit.Php;
 using Koine.Compiler.Services;
@@ -46,7 +45,7 @@ public class PhpExpressionTests
         }
         """;
 
-    private static (PhpExpressionTranslator translator, IReadOnlyList<Member> members) Make()
+    private static PhpExpressionTranslator Make()
     {
         var result = new KoineCompiler().Compile(Source, new PhpEmitter());
         result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
@@ -60,15 +59,14 @@ public class PhpExpressionTests
             .OfType<ValueObjectDecl>()
             .First(v => v.Name == "Order");
 
-        var typeMapper = new PhpTypeMapper(index);
         var translator = new PhpExpressionTranslator(
-            index, order.Members, index.EnumMemberToType, typeMapper, context: "Shop");
-        return (translator, order.Members);
+            index, order.Members, index.EnumMemberToType, context: "Shop");
+        return translator;
     }
 
     private static string Translate(Expr expr)
     {
-        var (t, _) = Make();
+        var t = Make();
         return t.Translate(expr);
     }
 
@@ -118,7 +116,7 @@ public class PhpExpressionTests
     [Fact]
     public void Comparison_member_in_parameter_mode_is_dollar_var()
     {
-        var (t, _) = Make();
+        var t = Make();
         var expr = new BinaryExpr(BinaryOp.Ge, Id("quantity"), Int("1"));
         t.Translate(expr, PhpExpressionTranslator.NameMode.Parameter).ShouldBe("($quantity >= 1)");
     }
@@ -196,7 +194,7 @@ public class PhpExpressionTests
     public void Decimal_negated_comparison_flips_via_compareTo()
     {
         // The invariant-guard path: `price >= 0` negated must still use compareTo, not `<`.
-        var (t, _) = Make();
+        var t = Make();
         var expr = new BinaryExpr(BinaryOp.Ge, Id("price"), Int("0"));
         t.TranslateNegated(expr).ShouldBe("$this->price->compareTo(new \\Koine\\Runtime\\Decimal('0')) < 0");
     }
@@ -520,7 +518,7 @@ public class PhpExpressionTests
     [Fact]
     public void TranslateNegated_flips_comparison()
     {
-        var (t, _) = Make();
+        var t = Make();
         var expr = new BinaryExpr(BinaryOp.Ge, Id("quantity"), Int("1"));
         t.TranslateNegated(expr).ShouldBe("$this->quantity < 1");
     }
@@ -528,7 +526,7 @@ public class PhpExpressionTests
     [Fact]
     public void TranslateNegated_peels_not()
     {
-        var (t, _) = Make();
+        var t = Make();
         var expr = new UnaryExpr(UnaryOp.Not, Id("a"));
         t.TranslateNegated(expr).ShouldBe("$a");
     }
@@ -536,7 +534,7 @@ public class PhpExpressionTests
     [Fact]
     public void TranslateNegated_wraps_other_expressions()
     {
-        var (t, _) = Make();
+        var t = Make();
         var expr = Member("lines", "isEmpty");
         t.TranslateNegated(expr).ShouldBe("!(count($this->lines) === 0)");
     }

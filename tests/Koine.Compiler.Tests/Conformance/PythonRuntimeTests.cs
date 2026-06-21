@@ -1,4 +1,3 @@
-using System.Linq;
 using Koine.Compiler.Emit;
 using Koine.Compiler.Emit.Python;
 using Koine.Compiler.Services;
@@ -31,7 +30,7 @@ public class PythonRuntimeTests
 
         EmittedFile? runtime = Find(result.Files, "koine_runtime.py");
         runtime.ShouldNotBeNull();
-        runtime!.Contents.ShouldContain("class DomainInvariantViolationError");
+        runtime.Contents.ShouldContain("class DomainInvariantViolationError");
         runtime.Contents.ShouldContain("class ConcurrencyConflictError");
         runtime.Contents.ShouldContain("class Range");
 

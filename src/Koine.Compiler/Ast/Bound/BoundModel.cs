@@ -60,7 +60,7 @@ internal sealed class BoundModel
                 // Mirror the emitter's namespace derivation so the resolution context (R13.2) matches.
                 string ns = index.KernelNamespaceOfType(vo.Name)
                             ?? ModelIndex.NamespaceOf(ctx.Name, vo.ModulePath);
-                string? context = ContextOf(ns);
+                string context = ContextOf(ns);
 
                 var lowerer = new Lowerer(model, TypeScope.FromMembers(vo.Members, index), context);
                 byVo[vo] = lowerer.LowerValueObject(vo);

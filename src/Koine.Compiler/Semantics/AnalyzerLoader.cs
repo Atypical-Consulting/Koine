@@ -130,7 +130,7 @@ public static class AnalyzerLoader
     /// <summary>
     /// The assembly simple name a path/name refers to: the file name, with only a real assembly
     /// extension (<c>.dll</c>/<c>.exe</c>) stripped. A bare name like <c>Koine.Compiler.Tests</c> is
-    /// returned unchanged — <see cref="Path.GetFileNameWithoutExtension"/> would wrongly drop its
+    /// returned unchanged — <see cref="System.IO.Path.GetFileNameWithoutExtension(string)"/> would wrongly drop its
     /// <c>.Tests</c> suffix as if it were an extension.
     /// </summary>
     private static string SimpleName(string path)

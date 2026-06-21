@@ -1,7 +1,6 @@
 using System.Text;
 using System.Text.RegularExpressions;
 using Koine.Compiler.Ast;
-using Koine.Compiler.Emit.CSharp;
 
 namespace Koine.Compiler.Emit.Python;
 
@@ -138,6 +137,10 @@ public sealed partial class PythonEmitter
     /// once-emitted <c>koine_runtime</c>, then local cross-type modules (absolute imports rooted at the
     /// output dir, never relative, never the module's own symbols).
     /// </summary>
+    /// <param name="emit">The per-emit context carrying the type-location map used to resolve cross-type imports.</param>
+    /// <param name="ns">The declaring namespace, used to determine THIS module's context for import resolution.</param>
+    /// <param name="body">The rendered module body the imports are derived from and prepended to.</param>
+    /// <param name="declaredName">The symbol this module declares, excluded from its own cross-type imports.</param>
     /// <param name="symbolContext">
     /// Optional per-symbol context override for cross-type import resolution. By default a symbol that
     /// exists in several contexts resolves to THIS module's context; an ACL translator instead needs
@@ -146,7 +149,7 @@ public sealed partial class PythonEmitter
     /// symbol name to the context whose copy should be imported.
     /// </param>
     private string Assemble(
-        PyEmitContext emit, string ns, string kindFolder, string body, string declaredName,
+        PyEmitContext emit, string ns, string body, string declaredName,
         IReadOnlyDictionary<string, string>? symbolContext = null)
     {
         // Scan a CODE-ONLY view: strip docstrings, then `#` comments, so prose never drives imports.

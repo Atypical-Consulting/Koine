@@ -47,7 +47,7 @@ public class ReconstructionChildrenTests
         var (model, diagnostics) = new KoineCompiler().Parse(src);
         diagnostics.ShouldBeEmpty();
         model.ShouldNotBeNull();
-        return model!;
+        return model;
     }
 
     /// <summary>Replicates the LL + DefaultErrorStrategy recovery parse so the tree carries ErrorNodes.</summary>

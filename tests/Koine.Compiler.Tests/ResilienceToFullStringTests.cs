@@ -1,4 +1,3 @@
-using System.Linq;
 using Koine.Compiler.Ast;
 using Koine.Compiler.Services;
 
