@@ -15,6 +15,21 @@ internal enum CSharpInstantMode
 }
 
 /// <summary>
+/// How the opt-in Application layer (issue #129) maps DTOs ↔ commands and aggregates ↔ read models.
+/// <see cref="Plain"/> emits hand-rolled mapper code (the default, zero third-party deps);
+/// <see cref="Mapperly"/> is a reserved forward value for source-generated mapping (treated as
+/// <see cref="Plain"/> until the Mapperly emission lands).
+/// </summary>
+internal enum CSharpMappingMode
+{
+    /// <summary>Hand-rolled mapping code, no third-party dependency (the default).</summary>
+    Plain,
+
+    /// <summary>Reserved: Mapperly source-generated mapping (not yet emitted; behaves as <see cref="Plain"/>).</summary>
+    Mapperly,
+}
+
+/// <summary>
 /// Per-emit configuration for the C# backend (R16.1), mapped from the CLI's
 /// <c>targets.csharp.*</c> block. <see cref="NamespaceMap"/> remaps a bounded context's
 /// emitted namespace (e.g. <c>Catalog → Acme.Catalog</c>): the mapped value replaces the
@@ -30,12 +45,21 @@ internal enum CSharpInstantMode
 /// <c>throw null!;</c> reference stub — no invariant checks, no field mutation, no business
 /// expressions. The default (<c>false</c>) is the historical full emit, byte-identical to the
 /// unconfigured emitter.
+/// <para><see cref="EmitApplication"/> turns on the opt-in Application layer (issue #129):
+/// concrete command/factory handlers, FluentValidation validators, query handlers and the DI
+/// extension, emitted alongside the domain output. <see cref="ApplicationMediatr"/> selects the
+/// MediatR request/handler shape (default plain handlers); <see cref="Mapping"/> selects the
+/// DTO/read-model mapping strategy. All three default off / plain, so an unconfigured emit stays
+/// byte-identical to the historical output.</para>
 /// </remarks>
 internal sealed record CSharpEmitterOptions(
     IReadOnlyDictionary<string, string> NamespaceMap,
     CSharpInstantMode InstantMode = CSharpInstantMode.DateTimeOffset,
     bool EmitSourceMaps = false,
-    bool ReferenceOnly = false)
+    bool ReferenceOnly = false,
+    bool EmitApplication = false,
+    bool ApplicationMediatr = false,
+    CSharpMappingMode Mapping = CSharpMappingMode.Plain)
 {
     public static readonly CSharpEmitterOptions Empty =
         new(new Dictionary<string, string>(StringComparer.Ordinal));

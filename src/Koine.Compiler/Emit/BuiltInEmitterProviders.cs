@@ -43,7 +43,14 @@ internal sealed class CSharpEmitterProvider : IEmitterProvider
     /// </summary>
     private static CSharpEmitterOptions ToCSharpOptions(EmitterOptions options)
     {
-        if (options.NamespaceMap.Count == 0 && options.InstantMode is null && !options.EmitSourceMaps && !options.ReferenceOnly)
+        // The Application layer (issue #129) is on only when `application` is among the selected
+        // layers (case-insensitive); it implies `domain`. With it off and no other configuration,
+        // the C# output is byte-identical to the unconfigured emitter.
+        var emitApplication = options.Layers is { } layers
+            && layers.Any(l => string.Equals(l, "application", StringComparison.OrdinalIgnoreCase));
+
+        if (options.NamespaceMap.Count == 0 && options.InstantMode is null
+            && !options.EmitSourceMaps && !options.ReferenceOnly && !emitApplication)
         {
             return CSharpEmitterOptions.Empty;
         }
@@ -51,7 +58,12 @@ internal sealed class CSharpEmitterProvider : IEmitterProvider
         var instant = string.Equals(options.InstantMode, "nodaTime", StringComparison.OrdinalIgnoreCase)
             ? CSharpInstantMode.NodaTime
             : CSharpInstantMode.DateTimeOffset;
-        return new CSharpEmitterOptions(options.NamespaceMap, instant, options.EmitSourceMaps, options.ReferenceOnly);
+        var mapping = string.Equals(options.ApplicationMapping, "mapperly", StringComparison.OrdinalIgnoreCase)
+            ? CSharpMappingMode.Mapperly
+            : CSharpMappingMode.Plain;
+        return new CSharpEmitterOptions(
+            options.NamespaceMap, instant, options.EmitSourceMaps, options.ReferenceOnly,
+            emitApplication, options.ApplicationMediatr, mapping);
     }
 }
 

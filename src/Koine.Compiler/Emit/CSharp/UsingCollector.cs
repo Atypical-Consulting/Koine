@@ -63,6 +63,13 @@ internal sealed class UsingCollector
     }
 
     /// <summary>
+    /// Adds an explicit namespace the body needs but that the marker/user-type scans cannot derive —
+    /// e.g. the third-party imports the opt-in Application layer references (FluentValidation, MediatR,
+    /// Microsoft.Extensions.DependencyInjection; issue #129). De-duplicated and sorted with the rest.
+    /// </summary>
+    public void AddNamespace(string ns) => Add(ns);
+
+    /// <summary>
     /// Adds every namespace whose runtime/BCL markers appear in <paramref name="body"/>.
     /// <paramref name="usesLinq"/> is passed in (not scanned) because <c>.Count</c> (a
     /// property) and <c>.Count()</c> (a LINQ call) are indistinguishable by a token scan.

@@ -51,6 +51,9 @@ public sealed partial class CSharpEmitter : IEmitter
                 "instant=" + _options.InstantMode,
                 "sourceMaps=" + _options.EmitSourceMaps,
                 "refOnly=" + _options.ReferenceOnly,
+                "app=" + _options.EmitApplication,
+                "mediatr=" + _options.ApplicationMediatr,
+                "mapping=" + _options.Mapping,
                 "ns=" + map);
         }
     }
@@ -279,6 +282,17 @@ public sealed partial class CSharpEmitter : IEmitter
                 {
                     files.Add(EmitAclTranslator(emit, r, index));
                 }
+            }
+        }
+
+        // 7. The opt-in Application layer (issue #129): concrete handlers, validators, query
+        //    handlers and the DI extension that implement the contracts emitted above. Gated on
+        //    the `application` layer; off by default, so non-application output is unchanged.
+        if (_options.EmitApplication)
+        {
+            foreach (ContextNode ctx in model.Contexts)
+            {
+                EmitApplicationLayer(emit, files, ctx, index, typeMapper, enumMemberToType);
             }
         }
 
@@ -1698,6 +1712,14 @@ public sealed partial class CSharpEmitter : IEmitter
         Assemble(emit, ns, body, usesLinq, declSpan: SourceSpan.None, out _);
 
     /// <summary>
+    /// <see cref="Assemble(EmitContext, string, string, bool)"/> with explicit extra <c>using</c>s for
+    /// the opt-in Application layer's third-party imports (issue #129). Source maps are not emitted for
+    /// generated application orchestration (it has no single <c>.koi</c> origin span).
+    /// </summary>
+    private string Assemble(EmitContext emit, string ns, string body, bool usesLinq, IReadOnlyList<string> extraUsings) =>
+        Assemble(emit, ns, body, usesLinq, declSpan: SourceSpan.None, out _, extraUsings);
+
+    /// <summary>
     /// <see cref="Assemble(EmitContext, string, string, bool)"/> with optional source-map output.
     /// When <see cref="CSharpEmitterOptions.EmitSourceMaps"/> is on AND <paramref name="declSpan"/>
     /// is a real source range, a <c>#line N "&lt;file&gt;"</c> directive is stamped immediately
@@ -1710,13 +1732,25 @@ public sealed partial class CSharpEmitter : IEmitter
     /// </summary>
     private string Assemble(
         EmitContext emit, string ns, string body, bool usesLinq,
-        SourceSpan declSpan, out IReadOnlyList<SourceMapSegment>? sourceMap)
+        SourceSpan declSpan, out IReadOnlyList<SourceMapSegment>? sourceMap,
+        IReadOnlyList<string>? extraUsings = null)
     {
         // Usings are derived from data — a UsingCollector that maps runtime/BCL markers and
         // cross-namespace user-type references to their namespaces — rather than a fixed block,
         // so files carry no unused imports.
         var collector = new UsingCollector();
         collector.CollectRuntimeNamespaces(ns, body, usesLinq);
+
+        // The opt-in Application layer references third-party namespaces (FluentValidation, MediatR,
+        // Microsoft.Extensions.DependencyInjection) the marker scan can't derive; callers pass them
+        // explicitly. Always null on the default paths, so non-application output stays byte-identical.
+        if (extraUsings is not null)
+        {
+            foreach (var u in extraUsings)
+            {
+                collector.AddNamespace(u);
+            }
+        }
 
         // Cross-namespace user-type references (other contexts via imports, and other
         // modules of the same context) emit unqualified, so a precise `using` is added for
@@ -1976,6 +2010,7 @@ public sealed partial class CSharpEmitter : IEmitter
         public const string Policies = "Policies";
         public const string Repositories = "Repositories";
         public const string Abstractions = "Abstractions";
+        public const string Application = "Application";
     }
 
     /// <summary>The bounded context owning a namespace (its first segment); the resolution scope for R13.2.</summary>

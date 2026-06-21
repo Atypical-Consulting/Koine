@@ -46,6 +46,18 @@ internal class BuildSettings : CommandSettings
     [Description("Emit a reference-assembly-style contract surface: all type/member signatures, interfaces and contracts, with implementation bodies stripped to stubs.")]
     public bool ReferenceOnly { get; init; }
 
+    [CommandOption("--layers <LAYERS>")]
+    [Description("Comma-separated output layers to emit (e.g. domain,application). 'application' implies 'domain'. Omit for the default domain-only output.")]
+    public string? Layers { get; init; }
+
+    [CommandOption("--app-mediatr")]
+    [Description("Application layer: emit the MediatR request/handler shape with validation + transaction pipeline behaviors (default: plain handlers).")]
+    public bool AppMediatr { get; init; }
+
+    [CommandOption("--app-mapping <MODE>")]
+    [Description("Application layer: DTO/read-model mapping strategy, plain (default) or mapperly.")]
+    public string? AppMapping { get; init; }
+
     /// <summary>
     /// Resolves the flags against a <c>koine.config</c> (explicit <c>--config</c>, or one
     /// discovered beside the input): an explicit flag wins, then <c>targets.&lt;t&gt;.out</c>,
@@ -76,6 +88,17 @@ internal class BuildSettings : CommandSettings
         var resolvedTarget = Target ?? config.Target ?? "csharp";
         var targetOptions = config.OptionsFor(resolvedTarget);
         var resolvedOut = Out ?? targetOptions.OutDir ?? config.OutDir;
+
+        // Merge the Application-layer flags (issue #129) over any config block: an explicit
+        // CLI flag wins, otherwise the config value (then the default). `application` implies
+        // `domain`, handled where the emitter consumes the layer list.
+        targetOptions = targetOptions with
+        {
+            Layers = KoineConfig.ParseLayers(Layers) ?? targetOptions.Layers,
+            ApplicationMediatr = AppMediatr || targetOptions.ApplicationMediatr,
+            ApplicationMapping = AppMapping ?? targetOptions.ApplicationMapping,
+        };
+
         plan = new BuildPlan(
             Path, resolvedTarget, resolvedOut, Glossary, Docs, targetOptions,
             config.DiagnosticSeverity, WarningsAsErrors, config.Analyzers, config.Emitters, SourceMaps, ReferenceOnly);

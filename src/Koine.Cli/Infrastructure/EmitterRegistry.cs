@@ -95,11 +95,16 @@ internal static class EmitterRegistry
     /// </summary>
     private static EmitterOptions ToEmitterOptions(TargetOptions options, bool emitSourceMaps = false, bool referenceOnly = false)
     {
-        if (options.NamespaceMap.Count == 0 && options.InstantMode is null && options.Layout is null && !emitSourceMaps && !referenceOnly)
+        var hasLayers = options.Layers is { Count: > 0 };
+        if (options.NamespaceMap.Count == 0 && options.InstantMode is null && options.Layout is null
+            && !emitSourceMaps && !referenceOnly
+            && !hasLayers && !options.ApplicationMediatr && options.ApplicationMapping is null)
         {
             return EmitterOptions.Empty;
         }
 
-        return new EmitterOptions(options.NamespaceMap, options.InstantMode, options.Layout, emitSourceMaps, referenceOnly);
+        return new EmitterOptions(
+            options.NamespaceMap, options.InstantMode, options.Layout, emitSourceMaps, referenceOnly,
+            options.Layers, options.ApplicationMediatr, options.ApplicationMapping);
     }
 }

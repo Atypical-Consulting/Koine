@@ -13,7 +13,11 @@ namespace Koine.Compiler.Emit;
 /// <c>#line</c> directives, TypeScript <c>*.ts.map</c> sidecars); it defaults to <c>false</c> so
 /// the unconfigured emitter is byte-identical. <see cref="ReferenceOnly"/> emits a declaration-only
 /// contract surface (all signatures/interfaces, bodies stripped to reference stubs); it defaults to
-/// <c>false</c> so the unconfigured emitter is byte-identical. <see cref="Empty"/> applies no
+/// <c>false</c> so the unconfigured emitter is byte-identical. <see cref="Layers"/> selects which
+/// composable output layers to emit (e.g. <c>domain</c>, <c>application</c>; issue #129);
+/// <c>null</c>/empty means the default domain-only output. <see cref="ApplicationMediatr"/> and
+/// <see cref="ApplicationMapping"/> are the C# Application-layer sub-options (MediatR request shape;
+/// <c>plain</c>|<c>mapperly</c> mapping). <see cref="Empty"/> applies no
 /// configuration, so a provider given it produces output byte-identical to a parameterless emitter.</para>
 /// </summary>
 public sealed record EmitterOptions(
@@ -21,7 +25,10 @@ public sealed record EmitterOptions(
     string? InstantMode = null,
     string? Layout = null,
     bool EmitSourceMaps = false,
-    bool ReferenceOnly = false)
+    bool ReferenceOnly = false,
+    IReadOnlyList<string>? Layers = null,
+    bool ApplicationMediatr = false,
+    string? ApplicationMapping = null)
 {
     /// <summary>An options bag with no remapping and all defaults — the parameterless path.</summary>
     public static readonly EmitterOptions Empty =
