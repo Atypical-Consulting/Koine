@@ -539,6 +539,15 @@ class Order:
         self.__post_init__()
         self._domain_events.append(OrderPlaced(order_id=self.id, line_count=len(self.lines)))
 
+    def cancel(self) -> None:
+        """Cancel an order from any non-terminal state — a multi-source transition, so a
+        reachability guard is emitted (no single `requires` covers it).
+        """
+        if self.status != OrderStatus.DRAFT and self.status != OrderStatus.PLACED:
+            raise DomainInvariantViolationError("Order", "illegal transition of status to Cancelled")
+        self.status = OrderStatus.CANCELLED
+        self.__post_init__()
+
     @classmethod
     def for_customer(cls, customer: CustomerId, lines: tuple[OrderLine, ...]) -> Order:
         id = OrderId.new()

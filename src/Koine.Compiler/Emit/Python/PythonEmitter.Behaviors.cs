@@ -128,11 +128,30 @@ public sealed partial class PythonEmitter
             WriteRequiresGuard(sb, entityName, req, translator, Indent + Indent);
         }
 
-        // 2. State transitions: direct field reassignment (the entity is NOT frozen).
+        // Positive renderings of the preconditions, used to suppress a state-machine reachability
+        // guard that would merely restate one of them (the C# `requiresConds` suppression).
+        var requiresConds = new HashSet<string>(
+            requires.Select(r => translator.Translate(r.Condition, PythonExpressionTranslator.NameMode.Property)),
+            StringComparer.Ordinal);
+
+        // 2. State transitions: direct field reassignment (the entity is NOT frozen). When a state
+        //    machine governs the field, a reachability guard precedes the assignment (mirroring the
+        //    C# `WriteStateMachineGuard`) — unless it would just restate a precondition.
         foreach (Transition tr in transitions)
         {
             var expectedEnum = memberTypes.TryGetValue(tr.Field, out TypeRef? ft) && index.Classify(ft.Name) == TypeKind.Enum
                 ? ft.Name : null;
+
+            // A single-source guard that merely restates a precondition is suppressed. The top-level
+            // translator wraps a comparison in parens (`(self.status == OrderStatus.DRAFT)`), so wrap
+            // the bare positive the same way before comparing against the rendered preconditions.
+            if (expectedEnum is not null
+                && BuildStateMachineConditions(entity, tr, expectedEnum, translator, index, cmd.Parameters) is { } conds
+                && !(conds.Count == 1 && requiresConds.Contains("(" + conds[0].Positive + ")")))
+            {
+                WriteStateMachineGuard(sb, entityName, conds, tr.Field, ((IdentifierExpr)tr.Value).Name);
+            }
+
             var value = translator.Translate(tr.Value, PythonExpressionTranslator.NameMode.Property, expectedEnum);
             sb.Append(Indent).Append(Indent).Append("self.")
               .Append(PythonNaming.EscapeIdentifier(PythonNaming.ToSnakeCase(tr.Field)))
@@ -171,6 +190,86 @@ public sealed partial class PythonEmitter
         {
             sb.Append(Indent).Append(Indent).Append("return ").Append(resultExpr).Append('\n');
         }
+    }
+
+    // ----------------------------------------------------------------------
+    // State-machine reachability guards (R7), ported from the C# emitter
+    // ----------------------------------------------------------------------
+
+    /// <summary>One legal source of a transition: its positive reachability check and the negation.</summary>
+    private readonly record struct PyStateSource(string Positive, string Negated);
+
+    /// <summary>
+    /// Builds the reachability conditions for a state-machine-governed transition with a literal
+    /// target: the set of legal source states (each optionally guarded) the current state must be one
+    /// of. Returns <c>null</c> when the field has no state machine or the target is dynamic
+    /// (non-literal) — the Python analogue of the C# <c>BuildStateMachineConditions</c>. Command
+    /// parameters are popped while a per-rule guard is translated so a same-named parameter cannot
+    /// shadow the persisted member it must read.
+    /// </summary>
+    private static List<PyStateSource>? BuildStateMachineConditions(
+        EntityDecl entity, Transition tr, string enumType,
+        PythonExpressionTranslator translator, ModelIndex index, IReadOnlyList<Param> commandParams)
+    {
+        StatesDecl? states = entity.States.FirstOrDefault(s => s.Field == tr.Field);
+        if (states is null || tr.Value is not IdentifierExpr stateRef
+            || !index.EnumsDeclaring(stateRef.Name).Contains(enumType))
+        {
+            return null; // no state machine, or a dynamic (non-literal) target
+        }
+
+        var sources = states.Rules.Where(r => r.To.Contains(stateRef.Name)).ToList();
+        if (sources.Count == 0)
+        {
+            return null; // unreachable target — already a semantic error (KOI0703)
+        }
+
+        var prop = "self." + PythonNaming.EscapeIdentifier(PythonNaming.ToSnakeCase(tr.Field));
+        var enumName = PythonNaming.ToPascalCase(enumType);
+
+        foreach (Param p in commandParams)
+        {
+            translator.PopLocal(p.Name);
+        }
+
+        var conditions = sources.Select(r =>
+        {
+            var fromMember = PythonNaming.ToUpperSnake(r.From);
+            var srcEq = $"{prop} == {enumName}.{fromMember}";
+            if (r.Guard is null)
+            {
+                // A bare source: its negation is the simple `!=` (no wrapping needed).
+                return new PyStateSource(srcEq, $"{prop} != {enumName}.{fromMember}");
+            }
+
+            // A guarded source: keep the guard parenthesized so an `or` guard binds below the `and`
+            // joining the source check.
+            var guard = translator.Translate(r.Guard, PythonExpressionTranslator.NameMode.Property);
+            var positive = $"{srcEq} and ({guard})";
+            return new PyStateSource(positive, $"not ({positive})");
+        }).ToList();
+
+        foreach (Param p in commandParams)
+        {
+            translator.PushLocal(p.Name, p.Type);
+        }
+
+        return conditions;
+    }
+
+    /// <summary>
+    /// Emits a reachability guard from prebuilt source conditions: the transition is illegal unless
+    /// the current state is one of the legal sources. The test is the De Morgan negation
+    /// (<c>not a and not b</c>) so it reads as a plain "is none of these", raising
+    /// <c>DomainInvariantViolationError</c> — the Python analogue of the C# <c>WriteStateMachineGuard</c>.
+    /// </summary>
+    private static void WriteStateMachineGuard(
+        StringBuilder sb, string entityName, IReadOnlyList<PyStateSource> conditions, string field, string targetState)
+    {
+        var test = string.Join(" and ", conditions.Select(c => c.Negated));
+        sb.Append(Indent).Append(Indent).Append("if ").Append(test).Append(":\n");
+        sb.Append(Indent).Append(Indent).Append(Indent).Append("raise DomainInvariantViolationError(\"")
+          .Append(entityName).Append("\", \"illegal transition of ").Append(field).Append(" to ").Append(targetState).Append("\")\n");
     }
 
     // ----------------------------------------------------------------------

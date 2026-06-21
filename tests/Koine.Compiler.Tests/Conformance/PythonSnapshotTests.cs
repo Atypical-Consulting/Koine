@@ -93,10 +93,22 @@ public class PythonSnapshotTests
 
               invariant !lines.isEmpty "an order must have at least one line"
 
+              states status {
+                Draft  -> Placed, Cancelled
+                Placed -> Cancelled
+                Cancelled
+              }
+
               command place {
                 requires status == Draft "only a draft order can be placed"
                 status -> Placed
                 emit OrderPlaced(orderId: id, lineCount: lines.count)
+              }
+
+              /// Cancel an order from any non-terminal state — a multi-source transition, so a
+              /// reachability guard is emitted (no single `requires` covers it).
+              command cancel {
+                status -> Cancelled
               }
 
               create forCustomer(customer: CustomerId, lines: List<OrderLine>) {
