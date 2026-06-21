@@ -131,9 +131,9 @@ function nodeWidth(label: string): number {
   return Math.max(MIN_NODE_WIDTH, Math.round(label.length * CHAR_WIDTH) + NODE_PADDING_X);
 }
 
-/** Partition a class node's members into the attribute (field/value) and method compartments, in order. */
+/** Partition a class node's members into the attribute (field/value/computed) and method compartments, in order. */
 function partitionMembers(members: DiagramMember[]): { attributes: DiagramMember[]; methods: DiagramMember[] } {
-  const attributes = members.filter((m) => m.kind === 'field' || m.kind === 'value');
+  const attributes = members.filter((m) => m.kind === 'field' || m.kind === 'value' || m.kind === 'computed');
   const methods = members.filter((m) => m.kind === 'method');
   return { attributes, methods };
 }
@@ -316,7 +316,7 @@ function drawClassBox(g: SVGGElement, node: DiagramNode, w: number, h: number): 
   divider(g, w, y);
   y += COMPARTMENT_PAD_Y + ROW_HEIGHT * 0.75;
   for (const m of attributes) {
-    appendRow(g, m.text, y, w);
+    appendRow(g, m, y, w);
     y += ROW_HEIGHT;
   }
   if (attributes.length > 0) {
@@ -328,7 +328,7 @@ function drawClassBox(g: SVGGElement, node: DiagramNode, w: number, h: number): 
     divider(g, w, y);
     y += COMPARTMENT_PAD_Y + ROW_HEIGHT * 0.75;
     for (const m of methods) {
-      appendRow(g, m.text, y, w);
+      appendRow(g, m, y, w);
       y += ROW_HEIGHT;
     }
   }
@@ -345,13 +345,16 @@ function divider(g: SVGGElement, w: number, y: number): void {
   g.appendChild(line);
 }
 
-/** One left-aligned member row inside a compartment. */
-function appendRow(g: SVGGElement, text: string, y: number, _w: number): void {
+/** One left-aligned member row inside a compartment; computed members render italic. */
+function appendRow(g: SVGGElement, member: DiagramMember, y: number, _w: number): void {
   const row = svgEl('text');
-  row.setAttribute('class', 'koi-svg-class-row');
+  row.setAttribute(
+    'class',
+    member.kind === 'computed' ? 'koi-svg-class-row koi-svg-class-row-computed' : 'koi-svg-class-row',
+  );
   row.setAttribute('x', String(CLASS_PADDING_X));
   row.setAttribute('y', String(y));
-  row.textContent = text;
+  row.textContent = member.text;
   g.appendChild(row);
 }
 
