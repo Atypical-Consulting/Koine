@@ -3,17 +3,19 @@ title: "Expressions"
 description: "The pure expression sublanguage used in derived fields, invariants and bodies."
 ---
 
+## 9.1 General
+
 Koine has one small, pure expression language. It is the same language everywhere a value or
-condition is expected: in [derived fields](/Koine/reference/value-objects/), [invariants](/Koine/reference/invariants/),
-command and factory bodies, [specs and service operations](/Koine/reference/specs-services-policies/),
-and [read-model projections](/Koine/reference/application-cqrs/).
+condition is expected: in [derived fields](/Koine/reference/value-objects/) (§5), [invariants](/Koine/reference/invariants/) (§10),
+command and factory bodies, [specs and service operations](/Koine/reference/specs-services-policies/) (§13),
+and [read-model projections](/Koine/reference/application-cqrs/) (§15).
 
 "Pure" is the whole point: no statements, no assignments, no loops, no I/O, no `null` literal. An expression
 is a value computed from a field, a parameter, a literal, and a fixed set of operators and built-in operations.
 Everything below translates to idiomatic C# — a derived field becomes a get-only computed property, an
 invariant becomes a constructor guard.
 
-## Where expressions are allowed
+### 9.1.1 Where expressions are allowed
 
 | Position | Form | Example |
 |----------|------|---------|
@@ -26,7 +28,66 @@ invariant becomes a constructor guard.
 | Read-model field | `name: Type = expr` | `lineCount: Int = lines.count` |
 | Factory init / command transition | `field -> expr` | `total -> lines.sum(l => l.price)` |
 
-## Literals and identifiers
+## 9.2 Syntax
+
+```ebnf
+expression   : let_expr ;
+
+let_expr     : 'let' let_binding ( ',' let_binding )* 'in' let_expr   // let x = e, y = e in body
+             | guard_expr ;
+let_binding  : Identifier '=' expression ;
+
+guard_expr   : cond_expr ( 'when' cond_expr )? ;                      // expr when cond
+
+cond_expr    : 'if' cond_expr 'then' cond_expr 'else' cond_expr       // if c then a else b
+             | coalesce_expr ;
+
+coalesce_expr      : or_expr ( '??' or_expr )* ;
+or_expr            : and_expr ( '||' and_expr )* ;
+and_expr           : equality_expr ( '&&' equality_expr )* ;
+equality_expr      : relational_expr ( ( '==' | '!=' ) relational_expr )* ;
+relational_expr    : match_expr ( ( '<' | '<=' | '>' | '>=' ) match_expr )* ;
+match_expr         : additive_expr ( 'matches' Regex )? ;             // raw matches /.../
+additive_expr      : multiplicative_expr ( ( '+' | '-' ) multiplicative_expr )* ;
+multiplicative_expr: unary_expr ( ( '*' | '/' ) unary_expr )* ;
+unary_expr         : ( '!' | '-' ) unary_expr | postfix_expr ;
+postfix_expr       : primary ( '.' Identifier ( '(' arg_list? ')' )? )* ;
+
+arg_list   : argument ( ',' argument )* ;
+argument   : lambda | expression ;
+lambda     : Identifier '=>' expression ;                            // l => l.quantity > 0
+
+primary    : literal | Identifier | '(' expression ')' ;
+literal    : DecimalLiteral | IntLiteral | StringLiteral | BoolLiteral ;
+```
+
+The `let … in` form binds intermediate names within an expression and nests anywhere a value is
+expected:
+
+```koine
+total: Money = let net = lines.sum(l => l.payable) in net * taxRate
+```
+
+Operators bind from **lowest** precedence (top) to **highest** (bottom):
+
+| Precedence | Form | Operators | Associativity |
+| --- | --- | --- | --- |
+| 1 (lowest) | binding | `let … in …` | — |
+| 2 | guard | `expr when cond` | non-associative |
+| 3 | conditional | `if … then … else …` | right (nests in `else`) |
+| 4 | coalesce | `??` | left |
+| 5 | logical or | `\|\|` | left |
+| 6 | logical and | `&&` | left |
+| 7 | equality | `==` `!=` | left |
+| 8 | relational | `<` `<=` `>` `>=` | left |
+| 9 | match | `matches /…/` | non-associative (infix) |
+| 10 | additive | `+` `-` | left |
+| 11 | multiplicative | `*` `/` | left |
+| 12 | unary | prefix `!` `-` | right |
+| 13 | postfix | `.member`, `.op(args)` | left |
+| 14 (highest) | primary | literal, name, `( … )` | — |
+
+### 9.2.1 Literals and identifiers
 
 The atoms of every expression:
 
@@ -42,30 +103,7 @@ isAvailable: Bool = availability == InStock
 
 Here `availability` is a field and `InStock` is a bare member of its enum — both are identifiers.
 
-## Arithmetic and comparison
-
-Arithmetic `+ - * /` and comparison `== != < <= > >=` work as you expect. Arithmetic over a value object
-uses that object's generated operators (so `unitPrice * quantity` multiplies `Money` by a scalar).
-
-```koine
-value OrderLine {
-  product:   ProductId
-  quantity:  Int
-  unitPrice: Money
-  lineTotal: Money = unitPrice * quantity
-  invariant quantity >= 1   "an order line needs at least one unit"
-}
-```
-
-Comparison is type-checked. Relational operators (`< <= > >=`) require **orderable** operands — exactly
-`Int`, `Decimal`, and `Instant`. `String` is not orderable; compare strings with `==`/`!=` only.
-
-:::note
-`+` is overloaded: between numbers it adds, between strings it concatenates. `street + ", " + city`
-produces a `String`; `amount + tax` over two `Money` value objects uses Money's `+` operator.
-:::
-
-## Logical operators
+## 9.3 Logical operators
 
 Boolean logic uses `&&` (and), `||` (or), and prefix `!` (not).
 
@@ -77,7 +115,47 @@ spec IsLargeOrder on Order = lines.count > 10 || total.amount > 1000
 requires !lines.isEmpty   "cannot submit an empty order"
 ```
 
-## Conditionals
+## 9.4 Arithmetic
+
+Arithmetic `+ - * /` works as you expect. Arithmetic over a value object uses that object's generated
+operators (so `unitPrice * quantity` multiplies `Money` by a scalar).
+
+```koine
+value OrderLine {
+  product:   ProductId
+  quantity:  Int
+  unitPrice: Money
+  lineTotal: Money = unitPrice * quantity
+  invariant quantity >= 1   "an order line needs at least one unit"
+}
+```
+
+:::note
+`+` is overloaded: between numbers it adds, between strings it concatenates. `street + ", " + city`
+produces a `String`; `amount + tax` over two `Money` value objects uses Money's `+` operator.
+:::
+
+## 9.5 Comparison
+
+Comparison operators `== != < <= > >=` are type-checked. Relational operators (`< <= > >=`) require
+**orderable** operands — exactly `Int`, `Decimal`, and `Instant`. `String` is not orderable; compare
+strings with `==`/`!=` only.
+
+`Instant` fields (emitted as `DateTimeOffset`) compare with the full relational set `< <= > >= == !=`.
+Comparing an `Instant` against a non-`Instant` is a type error.
+
+```koine
+value DateRange {
+  startsAt: Instant
+  endsAt:   Instant
+  invariant startsAt <= endsAt   "start must precede end"
+}
+```
+
+The built-in `now` is recognized in command bodies (e.g. `submittedAt -> now`) but is **rejected as a stored
+default** (`field: Instant = now`) so generated models stay deterministic.
+
+## 9.6 Conditionals
 
 `if cond then a else b` is an expression (a ternary), not a statement — it always yields a value, so both
 branches are required and must have compatible types.
@@ -99,34 +177,34 @@ operation discountRate(tier: LoyaltyTier): Decimal =
   if tier == Gold then 0.10 else if tier == Silver then 0.05 else 0.0
 ```
 
-## String operations
+## 9.7 Guards
 
-String operations are written as member access on a `String` receiver. They chain left to right.
-
-| Koine | Meaning | Emitted C# |
-|-------|---------|------------|
-| `s.length` | character count | `s.Length` |
-| `s.trim` | strip surrounding whitespace | `s.Trim()` |
-| `s.upper` | upper-case | `s.ToUpperInvariant()` |
-| `s.lower` | lower-case | `s.ToLowerInvariant()` |
+A boolean expression may be qualified with a `when` guard, written `body when condition`. The guard is
+how a conditional invariant reads: the `body` is only required to hold *when* the `condition` is true.
 
 ```koine
-value Sku {
-  code:       String
-  normalized: String = code.trim.upper
-  invariant code.trim.length > 0   "a SKU cannot be blank"
+invariant status == Draft when lines.isEmpty   "an empty order must stay in Draft"
+```
+
+`when` sits just above the conditional expression in precedence ([§9.2](#92-syntax)) and is
+non-associative — a single optional guard per expression.
+
+## 9.8 Pattern matching
+
+For shape constraints beyond equality, use the regex form `field matches /pattern/` in an invariant.
+`matches` is a non-associative postfix operator at precedence 9 ([§9.2](#92-syntax)), applied to any
+`String` expression.
+
+```koine
+value Iban {
+  code: String
+  invariant code matches /^[A-Z]{2}[0-9]{2}[A-Z0-9]+$/   "must look like an IBAN"
 }
 ```
 
-`code.trim.upper` chains, emitting `Code.Trim().ToUpperInvariant()`; the invariant
-`code.trim.length > 0` becomes a constructor guard `if (!(code.Trim().Length > 0)) throw …`.
+See [Invariants (§10)](/Koine/reference/invariants/) for the full `matches` and `when` guard coverage.
 
-:::tip
-For shape constraints beyond these ops, use the regex form `field matches /pattern/` in an invariant —
-see [Invariants](/Koine/reference/invariants/).
-:::
-
-## Collection operations
+## 9.9 Collection operations
 
 Collection operations apply to a `List<T>` field. The element type `T` is in scope inside a lambda written
 `param => expr`, with the element's members resolvable (`l => l.quantity`).
@@ -164,23 +242,29 @@ public int LineCount => Lines.Count;
 no duplicate keys, emitting a count comparison rather than returning a deduplicated list.
 :::
 
-## Instant comparison
+### 9.9.1 String operations
 
-`Instant` fields (emitted as `DateTimeOffset`) compare with the full relational set `< <= > >= == !=`.
-Comparing an `Instant` against a non-`Instant` is a type error.
+String operations are written as member access on a `String` receiver. They chain left to right.
+
+| Koine | Meaning | Emitted C# |
+|-------|---------|------------|
+| `s.length` | character count | `s.Length` |
+| `s.trim` | strip surrounding whitespace | `s.Trim()` |
+| `s.upper` | upper-case | `s.ToUpperInvariant()` |
+| `s.lower` | lower-case | `s.ToLowerInvariant()` |
 
 ```koine
-value DateRange {
-  startsAt: Instant
-  endsAt:   Instant
-  invariant startsAt <= endsAt   "start must precede end"
+value Sku {
+  code:       String
+  normalized: String = code.trim.upper
+  invariant code.trim.length > 0   "a SKU cannot be blank"
 }
 ```
 
-The built-in `now` is recognized in command bodies (e.g. `submittedAt -> now`) but is **rejected as a stored
-default** (`field: Instant = now`) so generated models stay deterministic.
+`code.trim.upper` chains, emitting `Code.Trim().ToUpperInvariant()`; the invariant
+`code.trim.length > 0` becomes a constructor guard `if (!(code.Trim().Length > 0)) throw …`.
 
-## Optionality
+## 9.10 Optionality
 
 Mark a field optional with a trailing `?` (`String?`, `Instant?`). Optional fields default to absent and are
 excluded from non-null construction guards. Three expression forms work with optionals:
@@ -211,31 +295,25 @@ There is no `null` literal in Koine — you never write `null`. Absence is expre
 field unset; you reach for it with `??`, `.isPresent`, and `.isNone`.
 :::
 
-## Operator spacing: `->` and `<->` are atomic tokens
+## 9.11 Translation to C#
 
-The state-effect arrow `->` (factory field init **and** command/state transition) and the context-map
-operator `<->` are **single, indivisible tokens**. Keep their characters adjacent — never split them with a
-space.
+Every expression form has a direct C# rendering shown inline in the sections above. In summary:
 
-```koine
-total -> lines.sum(l => l.price)   // correct: -> is one token (factory init)
-status -> Submitted                // correct: -> is one token (command transition)
-```
-
-Writing `status - > …` would lex as a unary minus followed by a comparison `>`, not a state effect. The
-lambda arrow `=>` is likewise atomic. Everywhere else, spacing is free.
-
-:::tip[Two arrows, not three]
-Koine has exactly two assignment-like arrows. `=` is the **declaration default** (`status: OrderStatus = Draft`),
-and `->` is the **state effect** — it sets a field's value, whether that is a factory's initial value (`n -> v`
-in a [factory](/Koine/reference/factories/)) or a command's transition (`status -> Submitted` in a
-[command](/Koine/reference/commands-events-state/)). The enclosing `create {}` vs `command {}` block, not the
-arrow, tells you which one you are reading. (A former third arrow, `<-` for factory init, has been merged into `->`.)
-:::
+- **Derived fields** (`name: Type = expr`) → get-only computed properties (`public T Name => …;`).
+- **Invariants** (`invariant expr "msg"`) → constructor guards (`if (!(…)) throw new ArgumentException("msg")`).
+- **Guarded invariants** (`invariant body when cond`) → guards wrapped with the condition (`if (cond && !(body)) throw …`).
+- **`let … in`** bindings → local variables or inlined expressions in the emitted property body.
+- **`if … then … else …`** → parenthesized C# ternary (`(cond ? a : b)`).
+- **`??`** → C# null-coalescing operator (`(a ?? b)`).
+- **`.isPresent` / `.isNone`** → `field is not null` / `field is null`.
+- **Collection ops** → LINQ (`All`, `Any`, `Sum`, `Select`, `Aggregate`, `Count`, `Distinct`).
+- **String ops** → `Trim()`, `ToUpperInvariant()`, `ToLowerInvariant()`, `Length`.
+- **Atomic token note** — `->` and `<->` are single, indivisible tokens; see [§3.7](/Koine/reference/lexical-structure/#37-operators-and-punctuators) for the atomic-token rule.
 
 ## See also
 
-- [Value objects](/Koine/reference/value-objects/) — derived fields use expressions.
-- [Invariants](/Koine/reference/invariants/) — boolean expressions plus `matches` and `when` guards.
-- [Commands, events & state](/Koine/reference/commands-events-state/) and [Factories](/Koine/reference/factories/) — bodies use `requires`, `->`, and `emit`.
-- [Specs, services & policies](/Koine/reference/specs-services-policies/) — named expression bodies.
+- [Value objects (§5)](/Koine/reference/value-objects/) — derived fields use expressions.
+- [Invariants (§10)](/Koine/reference/invariants/) — boolean expressions plus `matches` and `when` guards.
+- [Commands, events & state machines (§11)](/Koine/reference/commands-events-state/) and [Factories (§12)](/Koine/reference/factories/) — bodies use `requires`, `->`, and `emit`.
+- [Specifications, services & policies (§13)](/Koine/reference/specs-services-policies/) — named expression bodies.
+- [Application layer & CQRS (§15)](/Koine/reference/application-cqrs/) — read-model projections use expressions.
