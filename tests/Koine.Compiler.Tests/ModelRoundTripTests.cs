@@ -194,6 +194,45 @@ public class ModelRoundTripTests
     }
 
     [Fact]
+    public void EmitKoine_remove_field_on_its_own_line_drops_just_that_line()
+    {
+        const string src = "context C {\n  value V {\n    a: Int\n    b: Int\n  }\n}\n";
+        EmitResult result = ModelRoundTripService.EmitKoine(Files(src), new StructuredEdit(StructuredEditKind.RemoveMember, "C.V.a"));
+
+        result.Diagnostics.ShouldBeEmpty();
+        result.Koine!.ShouldNotContain("a: Int");
+        result.Koine!.ShouldContain("b: Int");
+    }
+
+    [Fact]
+    public void EmitKoine_remove_field_on_a_single_line_declaration_keeps_the_declaration()
+    {
+        // Regression: a member sharing its line with the braces must not take the whole declaration
+        // (or the opening brace) down with it.
+        const string src = "context C {\n  value Point { x: Int y: Int }\n}\n";
+        EmitResult result = ModelRoundTripService.EmitKoine(Files(src), new StructuredEdit(StructuredEditKind.RemoveMember, "C.Point.x"));
+
+        result.Diagnostics.ShouldBeEmpty();
+        result.Koine!.ShouldContain("value Point");
+        result.Koine!.ShouldContain("y: Int");
+        result.Koine!.ShouldNotContain("x: Int");
+    }
+
+    [Fact]
+    public void EmitKoine_add_field_keeps_a_trailing_comment_with_its_own_field()
+    {
+        const string src = "context C {\n  value Money {\n    amount: Decimal // the amount\n  }\n}\n";
+        EmitResult result = ModelRoundTripService.EmitKoine(Files(src), new StructuredEdit(StructuredEditKind.AddField, "C.Money", Name: "tax", Type: "Decimal"));
+
+        result.Diagnostics.ShouldBeEmpty();
+        result.Koine!.ShouldContain("// the amount");
+        result.Koine!.ShouldContain("tax: Decimal");
+        // The comment stays with `amount` (before the new field), not stolen onto `tax`.
+        result.Koine!.IndexOf("// the amount", StringComparison.Ordinal)
+            .ShouldBeLessThan(result.Koine!.IndexOf("tax: Decimal", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void EmitKoine_add_transition_emits_the_rule()
     {
         var edit = new StructuredEdit(

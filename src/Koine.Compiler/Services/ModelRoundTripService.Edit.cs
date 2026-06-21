@@ -10,9 +10,15 @@ namespace Koine.Compiler.Services;
 /// <see cref="TextEditModel"/> patch). The engine is deliberately compiler-driven, never a
 /// string-mangling shortcut: it computes the structural change as a precise text edit over the owning
 /// file (using the model's source spans), <b>re-parses and re-validates</b> the whole workspace, and
-/// only on a clean bar slices the affected declaration back out via <see cref="AstPrinter"/> — so an
+/// only on a clean bar takes the affected declaration's text from the re-parsed edited source — so an
 /// illegal edit comes back as <c>KOIxxxx</c> diagnostics, never broken <c>.koi</c>, and a legal edit
 /// preserves the surrounding formatting and comments verbatim.
+///
+/// <para>The re-emit is a verbatim slice of the declaration's span out of the edited source (not a
+/// re-print through <see cref="AstPrinter"/>): the edit already lives in that source, so slicing both
+/// reflects it and keeps the emitted text byte-aligned with the <see cref="TextEditModel"/> range
+/// <see cref="ApplyEdit"/> returns — re-printing would re-attach the declaration's leading doc/trivia
+/// and desync that range.</para>
 /// </summary>
 public static partial class ModelRoundTripService
 {
@@ -55,6 +61,21 @@ public static partial class ModelRoundTripService
 
     private static EditComputation Compute(IReadOnlyList<SourceFile> files, StructuredEdit edit)
     {
+        // Defensive: an unexpected throw (e.g. a malformed span) becomes a clean no-op rather than
+        // bubbling out — so the desktop LSP never drops a response (which would hang the client) and
+        // both backends fail symmetrically (the WASM JSExports catch identically).
+        try
+        {
+            return ComputeCore(files, edit);
+        }
+        catch
+        {
+            return new EditComputation(null, SourceSpan.None, null, []);
+        }
+    }
+
+    private static EditComputation ComputeCore(IReadOnlyList<SourceFile> files, StructuredEdit edit)
+    {
         var compiler = new KoineCompiler();
         var (model, parseDiags) = compiler.Parse(files);
         var parseErrors = parseDiags.Where(IsError).ToList();
@@ -79,19 +100,20 @@ public static partial class ModelRoundTripService
 
         var editedText = originalText[..op.Start] + op.Replacement + originalText[(op.Start + op.Length)..];
 
-        // Re-parse + re-validate the whole workspace with the edited file swapped in.
+        // Compile the edited workspace ONCE (swap the edited file in), validate it, and reuse the very
+        // same snapshot's model to re-resolve the declaration span — no second parse.
         var editedFiles = files
             .Select(f => string.Equals(f.Path, op.Uri, StringComparison.Ordinal) ? new SourceFile(f.Path, editedText) : f)
             .ToList();
-        var validationErrors = compiler.DiagnoseWorkspace(editedFiles).Where(IsError).ToList();
+        KoineCompilation edited = KoineCompilation.Create(editedFiles);
+        var validationErrors = compiler.DiagnoseWorkspace(edited).Where(IsError).ToList();
         if (validationErrors.Count > 0)
         {
             return new EditComputation(decl.Uri, decl.OriginalSpan, null, validationErrors);
         }
 
         // Clean bar: slice the affected declaration back out of the edited source, verbatim.
-        var (newModel, _) = compiler.Parse(editedFiles);
-        SourceSpan editedSpan = newModel is null ? SourceSpan.None : DeclSpan(newModel, decl);
+        SourceSpan editedSpan = edited.Model is null ? SourceSpan.None : DeclSpan(edited.Model, decl);
         if (editedSpan.IsNone)
         {
             return new EditComputation(decl.Uri, decl.OriginalSpan, null, []);
@@ -215,13 +237,22 @@ public static partial class ModelRoundTripService
         }
 
         var line = $"{edit.Name}: {edit.Type}";
-        if (members.Count > 0 && members[^1].Span is { IsNone: false } last && members[0].Span is { IsNone: false } first)
+        var nl = NewlineOf(source);
+        if (members.Count > 0 && members[^1].Span is { IsNone: false } last)
         {
-            // Insert a new field right after the last existing member's content (before any closing
-            // brace, so it stays inside the body even for a single-line declaration), sharing the
-            // first member's indentation.
-            var indent = new string(' ', Math.Max(0, first.Column - 1));
-            op = new TextOp(type.Span.File, last.Offset + last.Length, 0, "\n" + indent + line);
+            if (StartsOwnLine(source, last.Offset, out var anchorLineStart))
+            {
+                // The last member starts its own line: append a new line AFTER its whole physical line
+                // (past any trailing comment), reusing that line's exact leading indentation.
+                var indent = source[anchorLineStart..last.Offset];
+                op = new TextOp(type.Span.File, EndOfLine(source, last.Offset + last.Length), 0, nl + indent + line);
+                return true;
+            }
+
+            // The last member shares its line with the braces/siblings (a single-line declaration):
+            // insert right after its content, before the closing brace, indented one body level in.
+            var inlineIndent = new string(' ', Math.Max(0, type.Span.Column - 1) + 2);
+            op = new TextOp(type.Span.File, last.Offset + last.Length, 0, nl + inlineIndent + line);
             return true;
         }
 
@@ -234,7 +265,7 @@ public static partial class ModelRoundTripService
 
         var bodyIndent = new string(' ', Math.Max(0, type.Span.Column - 1) + 2);
         var closeIndent = new string(' ', Math.Max(0, type.Span.Column - 1));
-        op = new TextOp(type.Span.File, brace + 1, 0, "\n" + bodyIndent + line + "\n" + closeIndent);
+        op = new TextOp(type.Span.File, brace + 1, 0, nl + bodyIndent + line + nl + closeIndent);
         return true;
     }
 
@@ -253,14 +284,41 @@ public static partial class ModelRoundTripService
         }
 
         SourceSpan span = hit.Member.Span;
-        var lineStart = StartOfLine(source, span.Offset);
-        var lineEnd = EndOfLine(source, span.Offset + span.Length);
-        if (lineEnd < source.Length && source[lineEnd] == '\n')
+        var end = span.Offset + span.Length;
+        if (StartsOwnLine(source, span.Offset, out var lineStart))
         {
-            lineEnd++;   // swallow the trailing newline so no blank line is left behind.
+            // The member starts its own line: delete the whole line (incl any trailing comment) and
+            // its line break, leaving no blank line behind.
+            var lineEnd = EndOfLine(source, end);
+            if (lineEnd < source.Length && source[lineEnd] == '\r')
+            {
+                lineEnd++;
+            }
+
+            if (lineEnd < source.Length && source[lineEnd] == '\n')
+            {
+                lineEnd++;
+            }
+
+            op = new TextOp(span.File, lineStart, lineEnd - lineStart, string.Empty);
+            return true;
         }
 
-        op = new TextOp(hit.Member.Span.File, lineStart, lineEnd - lineStart, string.Empty);
+        // The member shares its line with the braces/siblings (a single-line declaration): delete only
+        // the member span plus its surrounding inline whitespace, keeping every structural token (the
+        // braces, other members) intact rather than wiping the whole line.
+        while (end < source.Length && (source[end] == ' ' || source[end] == '\t'))
+        {
+            end++;
+        }
+
+        var start = span.Offset;
+        while (start > lineStart && (source[start - 1] == ' ' || source[start - 1] == '\t'))
+        {
+            start--;
+        }
+
+        op = new TextOp(span.File, start, end - start, string.Empty);
         return true;
     }
 
@@ -281,11 +339,13 @@ public static partial class ModelRoundTripService
         }
 
         var rule = $"{edit.Name} -> {edit.Type}";
-        if (states.Rules.Count > 0 && states.Rules[0].Span is { IsNone: false } firstRule
-            && states.Rules[^1].Span is { IsNone: false } lastRule)
+        var nl = NewlineOf(source);
+        if (states.Rules.Count > 0 && states.Rules[^1].Span is { IsNone: false } lastRule
+            && StartsOwnLine(source, lastRule.Offset, out var ruleLineStart))
         {
-            var indent = new string(' ', Math.Max(0, firstRule.Column - 1));
-            op = new TextOp(states.Span.File, lastRule.Offset + lastRule.Length, 0, "\n" + indent + rule);
+            // Append a new rule after the last rule's whole line, reusing its exact indentation.
+            var indent = source[ruleLineStart..lastRule.Offset];
+            op = new TextOp(states.Span.File, EndOfLine(source, lastRule.Offset + lastRule.Length), 0, nl + indent + rule);
             return true;
         }
 
@@ -297,7 +357,7 @@ public static partial class ModelRoundTripService
 
         var bodyIndent = new string(' ', Math.Max(0, states.Span.Column - 1) + 2);
         var closeIndent = new string(' ', Math.Max(0, states.Span.Column - 1));
-        op = new TextOp(states.Span.File, brace + 1, 0, "\n" + bodyIndent + rule + "\n" + closeIndent);
+        op = new TextOp(states.Span.File, brace + 1, 0, nl + bodyIndent + rule + nl + closeIndent);
         return true;
     }
 
@@ -412,6 +472,29 @@ public static partial class ModelRoundTripService
         span.IsNone || span.Offset < 0 || span.Offset + span.Length > text.Length
             ? string.Empty
             : text.Substring(span.Offset, span.Length);
+
+    /// <summary>The line break used by <paramref name="text"/> (CRLF when present, else LF), so inserted lines match.</summary>
+    private static string NewlineOf(string text) =>
+        text.Contains("\r\n", StringComparison.Ordinal) ? "\r\n" : "\n";
+
+    /// <summary>
+    /// True when everything from the start of the line up to <paramref name="offset"/> is whitespace —
+    /// i.e. the token at <paramref name="offset"/> begins its own line (as opposed to sharing the line
+    /// with braces or sibling members, the single-line-declaration case).
+    /// </summary>
+    private static bool StartsOwnLine(string text, int offset, out int lineStart)
+    {
+        lineStart = StartOfLine(text, offset);
+        for (var i = lineStart; i < offset && i < text.Length; i++)
+        {
+            if (text[i] != ' ' && text[i] != '\t')
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
 
     /// <summary>The offset of the first character of the line containing <paramref name="offset"/>.</summary>
     private static int StartOfLine(string text, int offset)

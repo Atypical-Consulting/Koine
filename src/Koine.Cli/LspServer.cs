@@ -1553,8 +1553,8 @@ internal sealed class LspServer
         if (!root.TryGetProperty("params", out var p)
             || !p.TryGetProperty("edit", out var e)
             || e.ValueKind != JsonValueKind.Object
-            || EditString(e, "kind") is not { } kind
-            || EditString(e, "target") is not { } target)
+            || EditString(e, "kind") is not { Length: > 0 } kind
+            || EditString(e, "target") is not { Length: > 0 } target)
         {
             return false;
         }
