@@ -6,9 +6,11 @@ description: >-
   already carries an implementation plan (a `**🛠️ Implementation plan**` comment with a `### Task N`
   / `- [ ]` checklist) and the user wants it BUILT: it spins up a git worktree, opens a DRAFT pull
   request, then loops task-by-task — implement → commit → tick that task's checkbox on the live issue
-  — until every box is checked, then runs the `code-review` skill, applies the fixes, runs the
-  formatter, and flips the PR from draft to ready. ALWAYS reach for it when the user wants to
-  implement, build, code, execute, ship, finish, knock out, work through, resume, or "pick up" a
+  — until every box is checked, then runs the `code-review` skill, applies the fixes, merges the latest
+  `main` into the branch and resolves any conflicts so the PR stays mergeable, runs the formatter, and
+  flips the PR from draft to ready. ALWAYS reach for it when the user wants to implement, build, code,
+  execute, ship, finish, knock out, work through, rebase/sync a branch, fix a PR that conflicts with
+  `main`, resume, or "pick up" a
   GitHub issue or its plan — e.g. "implement issue 47", "knock out the tasks on issue 71", "execute
   the plan on this issue and mark the PR ready", "build the feature from issue #X and open a PR", or a
   bare issue link with "go build it." Does NOT apply to CREATING, filing, or planning a new issue
@@ -47,10 +49,15 @@ blocker you cannot reasonably work past:
 - A task's tests cannot be made green after a real, honest effort — don't fake green, don't
   `git commit` over a red bar, and don't tick a checkbox for work that doesn't pass. Stop and report
   the wall you hit with the failing output.
+- A merge conflict you cannot resolve with confidence — both `main` and your branch rewrote the *same
+  logic*, and choosing a side would silently drop a sibling PR's work. The mechanical conflicts
+  (version, `CHANGELOG`, snapshots, lockfiles) have known-correct resolutions (Step 8) — handle those
+  yourself; stop only for the genuinely ambiguous ones, and show both sides.
 
 Never mark a checkbox, commit, or flip the PR to ready on the strength of an assumption. Those three
 acts are claims that work is *done* — back them with evidence (tests run, output seen), per
-`superpowers:verification-before-completion`.
+`superpowers:verification-before-completion`. A resolved merge is the same kind of claim: re-build and
+re-test on the merged tree before you trust it — a clean *textual* merge is not a clean *semantic* one.
 
 ## Checklist
 
@@ -65,9 +72,11 @@ in the plan.
 6. **Loop until every task is checked** — implement the next unchecked task → verify green → commit
    → tick that task's checkboxes on the issue → push.
 7. **Code review** — run the `code-review` skill, apply + commit the fixes, push.
-8. **Verify, format, then mark ready** — build/tests green AND `dotnet format --verify-no-changes`
-   clean (commit any fixes), then `gh pr ready`.
-9. **Report** — PR URL, what shipped, anything you assumed or deferred.
+8. **Sync with `main`** — merge the latest `origin/main` into the branch and resolve any conflicts so
+   the PR merges clean (Koine hot-spots: version, `CHANGELOG`, snapshots, lockfiles — see reference).
+9. **Verify, format, then mark ready** — build/tests green on the merged tree AND
+   `dotnet format --verify-no-changes` clean (commit any fixes), then `gh pr ready`.
+10. **Report** — PR URL, what shipped, anything you assumed or deferred.
 
 Resume-safe: re-running mid-flight is fine. A task is "done" when **all** its step checkboxes read
 `- [x]`; start at the first task that isn't. Reuse an existing worktree/branch/PR for the issue
@@ -223,10 +232,54 @@ git push
 
 If the review is clean, say so and skip the fix commit.
 
-## Step 8 — Verify, format, then mark ready
+## Step 8 — Sync with `main` and resolve conflicts
 
-Marking a PR ready says "this is done." Earn it: build and tests green, **and the same gates CI
-runs** clean — a PR that goes red in CI the moment it's opened wasn't ready.
+Several issues are usually in flight at once, and `main` moves while this PR sits in draft. Mark it
+ready against a stale base and it merges with conflicts — or won't merge at all. So before the final
+gate, pull the latest `main` into the branch, resolve anything that collides, *then* re-verify on the
+merged tree.
+
+The project **squash-merges** PRs (see the `(#NNN)` commits on `main`), so the branch's own history is
+collapsed at merge time — which makes a **merge** of `main` into the branch the right tool here, not a
+rebase: it resolves each conflict once, needs no force-push, and the throwaway merge commit disappears
+when the PR squashes.
+
+```bash
+git fetch origin main
+git -c user.email=phmatray@gmail.com -c user.name="Philippe Matray" merge origin/main
+```
+
+- **"Already up to date" / clean merge** → nothing collided; go to Step 9.
+- **Conflicts** → resolve them favoring *both sides' intent* — a parallel PR's work is as real as yours.
+  Most Koine conflicts are mechanical with a known-correct fix; `references/github-mechanics.md` §7 has
+  the hot-spot table (`Directory.Build.props` version, `CHANGELOG.md`, `README`/`USER-STORIES`, Verify
+  snapshots, `package-lock.json`, emitter partials, test files). Two rules keep you from silent damage:
+  - **Regenerate derived files; don't hand-merge them.** Verify `*.verified.txt` snapshots and
+    `package-lock.json` must not be merged line-by-line — take one side to clear the conflict, then
+    regenerate (re-run the affected tests and accept the fresh snapshot; `npm install` to rebuild the
+    lockfile). A hand-stitched snapshot or lockfile will simply be wrong.
+  - **A textual merge is not a semantic merge.** Don't trust a resolved merge until it builds and
+    passes — `main` may have renamed a symbol your branch still calls. Step 9 is the proof.
+
+Finish the merge with the project identity once it builds, then push:
+
+```bash
+git add -A
+git -c user.email=phmatray@gmail.com -c user.name="Philippe Matray" commit --no-edit   # completes the merge
+git push
+```
+
+If a conflict is genuinely ambiguous — both sides rewrote the same logic and you can't tell which wins —
+stop and surface it with both sides shown (Autonomy contract) rather than guessing and dropping work.
+And note the race: if another PR merges *after* you sync but before this one lands, you may have to run
+this step again — it's cheap, and a re-sync right before merge is the surest way to a clean integration.
+
+---
+
+## Step 9 — Verify, format, then mark ready
+
+Marking a PR ready says "this is done." Earn it: build and tests green **on the just-merged tree**, and
+**the same gates CI runs** clean — a PR that goes red in CI the moment it's opened wasn't ready.
 
 **1. Build + tests.**
 
@@ -264,12 +317,13 @@ git -c user.email=phmatray@gmail.com -c user.name="Philippe Matray" \
 gh pr ready <pr-number>
 ```
 
-## Step 9 — Report
+## Step 10 — Report
 
 Short and concrete:
 - PR URL and its now-**ready** status; the issue it closes.
 - One line per task shipped (and confirmation every checkbox is ticked).
 - Code-review outcome — what you fixed, what you consciously dismissed and why.
+- Merge sync — whether `main` merged clean or which conflicts you resolved (and how).
 - Anything you assumed, deferred, or couldn't verify (e.g. full suite skipped for missing wasm
   workloads). Keep the detail in the PR/issue; the report just points there.
 
@@ -294,3 +348,10 @@ Short and concrete:
 - **Don't widen the blast radius.** Implement the plan, not your own ideas. If you spot adjacent work
   worth doing, note it in the report (or as a follow-up issue via `create-issue`) — don't smuggle it
   into this PR.
+- **Merge clean, or don't merge.** Issues run in parallel here, so `main` almost always moves under a
+  draft PR. A ready PR that conflicts with `main` (or goes red once `main` advances) stalls everyone.
+  Merge the latest `main` into the branch right before the ready-flip and resolve the collisions —
+  *regenerate* derived files (snapshots, lockfiles) rather than hand-merging them, take the **higher**
+  version, **union** additive files (docs, tests, `CHANGELOG`), and re-verify. The mechanical 90% have
+  known-correct fixes (see `references/github-mechanics.md` §7); only the rare both-sides-rewrote-the-
+  same-logic case deserves a human.
