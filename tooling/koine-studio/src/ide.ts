@@ -64,6 +64,7 @@ import { renderGlossary, type GlossaryHandlers } from './glossary';
 import {
   ALL_CONTEXTS,
   createActiveContextBus,
+  fileContextFollow,
   isAllContexts,
   listContexts,
   scopeDocsFiles,
@@ -202,6 +203,10 @@ const BLANK = `context NewModel {
 
 }
 `;
+
+// LSP SymbolKind for a namespace — the kind the language service tags each top-level `context`
+// document symbol with (see lsp.ts DocumentSymbol). Used to read a file's bounded context(s).
+const SYMBOL_KIND_NAMESPACE = 3;
 
 function el<T extends HTMLElement>(id: string): T {
   const node = document.getElementById(id);
@@ -894,6 +899,31 @@ export function init(): void {
     updateStatus(diags);
     invalidateDocViews();
     renderTree();
+    void followActiveFileContext();
+  }
+
+  // When the active .koi file changes, follow the bounded-context switcher to that file's context so
+  // the top bar — and every scoped surface (outline / diagram / counts / tables) — reflects the file
+  // you're now editing: the file-explorer counterpart of the selection-follow below. The file's
+  // primary context is its first top-level document symbol (the LSP emits one Namespace symbol per
+  // `context`). View-only (applyScope persist=false), like the selection-follow: navigating between
+  // files shouldn't overwrite the user's deliberately chosen, persisted scope, so a reload restores
+  // it. A response for a file the user has already switched away from is dropped (so rapid file
+  // switching can't strand the scope on a stale file), and a file with no determinable context
+  // (empty/unparseable → no symbols, or its context already active) leaves the scope untouched.
+  async function followActiveFileContext(): Promise<void> {
+    const uri = activeUri;
+    let contexts: string[];
+    try {
+      const symbols = await lsp.documentSymbols();
+      // Top-level document symbols are the file's `context` declarations (SymbolKind 3 = Namespace).
+      contexts = symbols.filter((s) => s.kind === SYMBOL_KIND_NAMESPACE).map((s) => s.name);
+    } catch {
+      return;
+    }
+    if (activeUri !== uri) return; // the user switched files while the symbols were in flight
+    const next = fileContextFollow(contexts, activeContext.get());
+    if (next !== undefined) applyScope(next, false);
   }
 
   // Cross-file go-to-definition: if the resolved Location is a different OPEN file, activate it
