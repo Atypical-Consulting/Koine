@@ -91,6 +91,13 @@ public sealed partial class RustEmitter : IEmitter
             EmitType(emit, body, type, ctx.Name);
         }
 
+        // Foreign *Id types referenced but not owned by a local entity: materialize a branded newtype
+        // so the references resolve (e.g. billing's `ProductId`, used but with no `Product` entity).
+        foreach (var idName in OrderedUnownedIds(ctx, emit.Index))
+        {
+            EmitUnownedIdType(body, idName);
+        }
+
         var moduleDoc = $"//! The `{ctx.Name}` bounded context.";
         return new EmittedFile($"src/{ModuleNameFor(ctx.Name)}.rs", Assemble(body.ToString(), moduleDoc));
     }

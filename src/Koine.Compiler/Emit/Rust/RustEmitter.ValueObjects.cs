@@ -104,11 +104,11 @@ public sealed partial class RustEmitter
         sb.Append(Indent).Append("}\n");
     }
 
-    /// <summary>Emits one invariant guard: <c>if !(cond) { return Err(...) }</c> (Parameter mode).</summary>
-    internal void WriteInvariantGuard(StringBuilder sb, string typeName, Invariant inv, RustExpressionTranslator translator, string indent)
+    /// <summary>Emits one invariant guard: <c>if !(cond) { return Err(...) }</c> in the given name mode.</summary>
+    internal void WriteInvariantGuard(
+        StringBuilder sb, string typeName, Invariant inv, RustExpressionTranslator translator, string indent,
+        RustExpressionTranslator.NameMode mode = RustExpressionTranslator.NameMode.Parameter)
     {
-        const RustExpressionTranslator.NameMode mode = RustExpressionTranslator.NameMode.Parameter;
-
         string test;
         if (inv.Condition is GuardExpr guard)
         {
@@ -183,7 +183,8 @@ public sealed partial class RustEmitter
     private void WriteDerived(StringBuilder sb, Member m, RustExpressionTranslator translator, RustTypeMapper typeMapper)
     {
         var field = RustNaming.Field(m.Name);
-        var body = translator.Translate(m.Initializer!, RustExpressionTranslator.NameMode.Property, EnumExpectedRef(m, typeMapper));
+        var body = RustExpressionTranslator.StripOuterParens(
+            translator.Translate(m.Initializer!, RustExpressionTranslator.NameMode.Property, EnumExpectedRef(m, typeMapper)));
 
         // A String-typed derived member whose body yields a borrowed &str (e.g. `name.trim`) must be
         // owned; a bare non-Copy field read must be cloned out of `&self`.

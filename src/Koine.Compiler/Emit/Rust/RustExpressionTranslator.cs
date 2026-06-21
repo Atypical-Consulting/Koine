@@ -555,7 +555,7 @@ internal sealed class RustExpressionTranslator
     }
 
     /// <summary>Drops one fully-enclosing parenthesis pair from <paramref name="s"/>, if present.</summary>
-    private static string StripOuterParens(string s)
+    internal static string StripOuterParens(string s)
     {
         if (s.Length < 2 || s[0] != '(' || s[^1] != ')')
         {

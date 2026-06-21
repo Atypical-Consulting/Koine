@@ -126,4 +126,60 @@ public class RustSnapshotTests
 
         check.Ok.ShouldBeTrue(string.Join("\n", check.Errors));
     }
+
+    /// <summary>
+    /// An entity with a defaulted enum field, an invariant, and mutating commands (preconditions +
+    /// state transitions). Exercises the identity-equality entity shape and the command behaviors.
+    /// </summary>
+    private const string EntityFixture = """
+        context Shop {
+          enum Status { Active, Suspended }
+          entity Account identified by AccountId {
+            balance: Int
+            status:  Status = Active
+            invariant balance >= 0 "balance cannot go negative"
+            command deposit(amount: Int) {
+              requires status == Active "account must be active"
+              requires amount > 0 "deposit must be positive"
+              balance -> balance + amount
+            }
+            command withdraw(amount: Int) {
+              requires status == Active "account must be active"
+              balance -> balance - amount
+            }
+            command suspend {
+              status -> Suspended
+            }
+          }
+        }
+        """;
+
+    [Fact]
+    public Task Rust_entities_emit_expected_rust()
+    {
+        var result = new KoineCompiler().Compile(EntityFixture, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var shop = result.Files.Single(f => f.RelativePath.EndsWith("shop.rs", StringComparison.Ordinal)).Contents;
+        shop.ShouldContain("pub fn deposit(&mut self, amount: i64) -> Result<(), DomainError>");
+        shop.ShouldContain("impl PartialEq for Account");   // identity equality
+
+        return Verify(TestSupport.Render(result.Files)).UseDirectory("Snapshots");
+    }
+
+    [Fact]
+    public void Rust_entities_compile()
+    {
+        var result = new KoineCompiler().Compile(EntityFixture, new RustEmitter());
+        result.Success.ShouldBeTrue();
+
+        var check = TestSupport.CompileRust(result.Files);
+        if (!check.ToolchainAvailable)
+        {
+            _output.WriteLine(NoToolchainNotice);
+            return;
+        }
+
+        check.Ok.ShouldBeTrue(string.Join("\n", check.Errors));
+    }
 }
