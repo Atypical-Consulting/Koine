@@ -320,7 +320,8 @@ public sealed partial class CSharpEmitter
         IReadOnlyDictionary<string, string> enumMemberToType)
     {
         var validatorType = requestType + "Validator";
-        var context = ns;  // the namespace's first segment is the bounded-context name
+        // The application layer emits into the base context namespace, so it is the bounded context.
+        var context = ns;
         var rules = new StringBuilder();
 
         // (a) Re-encode each value-object parameter's invariants as RuleFor(x => x.Param).Must(p => ...).
