@@ -55,6 +55,24 @@
   touch-action: none;
   cursor: grab;
 }
+
+/* The single unified diagram (the visual editor) fills its pane 100% — no fixed-height card. */
+.koi-diagrams-single {
+  height: 100%;
+  min-height: 0;
+  gap: 0;
+}
+.koi-diagrams-single .koi-diagram-surface {
+  flex: 1 1 auto;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+.koi-diagrams-single .koi-canvas {
+  height: 100%;
+  border: none;
+  border-radius: 0;
+}
 .koi-canvas--panning {
   cursor: grabbing;
 }
@@ -266,6 +284,22 @@ $ddd-kinds: (
 .koi-svg-node[data-line]:hover .koi-svg-node-box {
   stroke: var(--koi-accent);
   stroke-width: 2;
+}
+
+/* context containers — a big rounded block that holds a bounded context's elements. Subtle so the
+   nodes and edges read on top. */
+.koi-svg-context-box {
+  fill: color-mix(in srgb, var(--koi-fg) 3%, transparent);
+  stroke: var(--koi-line);
+  stroke-width: 1.5;
+}
+.koi-svg-context-label {
+  fill: var(--koi-muted);
+  font-family: var(--koi-font-body);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
 }
 
 /* edges */

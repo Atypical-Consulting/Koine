@@ -11,7 +11,6 @@
 // code-splits out of the main bundle (same discipline as Mermaid) and dodges Tauri's strict CSP (the
 // non-bundled build spawns a Web Worker from a blob: URL, which CSP forbids).
 import type { DiagramRenderer } from './diagrams';
-import { createMermaidRenderer } from './diagrams';
 import { mergeGraphsForView } from './modelTables';
 import { centerOn, clampScale, fit, panBy, viewAtScale, zoomAt, zoomPercent, type Size, type ViewBox } from './canvasView';
 import { loadDiagramZoom, saveDiagramZoom } from './store';
@@ -362,39 +361,112 @@ function polylinePath(points: { x: number; y: number }[]): string {
   return `M ${head.x} ${head.y} ` + rest.map((p) => `L ${p.x} ${p.y}`).join(' ');
 }
 
+/** The bounded context of a `Context.Name` qualified name (prefix before the first dot), or '' if none. */
+function contextOf(qualifiedName: string): string {
+  const dot = qualifiedName.indexOf('.');
+  return dot < 0 ? '' : qualifiedName.slice(0, dot);
+}
+
+function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 /**
- * Lay out one structured graph with ELK and draw it into a fresh `<svg>`. Throws on layout failure so
- * the caller can fall back to Mermaid for just that diagram.
+ * The multiplicity a composition edge should carry, derived from the source node's member that
+ * references the target type: a collection (`List<X>`, `X[]`, `Set<X>`, …) → '1..*', an optional `X?` →
+ * '0..1', a plain `X` → '1'. Returns null when no member references the target (the edge stays unlabelled).
+ */
+function compositionCardinality(source: DiagramNode | undefined, target: DiagramNode | undefined): string | null {
+  if (!source || !target) return null;
+  const ref = new RegExp(`\\b${escapeRegExp(target.label)}\\b`);
+  for (const m of source.members ?? []) {
+    if (m.kind !== 'field') continue;
+    const colon = m.text.indexOf(':');
+    const type = (colon >= 0 ? m.text.slice(colon + 1) : m.text).trim();
+    if (!ref.test(type)) continue;
+    if (/(^|\W)(List|Set|Collection|IReadOnlyList|IReadOnlyCollection|IEnumerable|Array)\s*</.test(type) || /\[\s*\]/.test(type)) {
+      return '1..*';
+    }
+    if (/\?\s*$/.test(type)) return '0..1';
+    return '1';
+  }
+  return null;
+}
+
+/**
+ * Lay out one structured graph with ELK and draw it into a fresh `<svg>`. Throws on layout failure so the
+ * caller can surface an error. Nodes are grouped by bounded context: each context becomes a big
+ * container holding its elements (a compound ELK layout), context-less nodes (e.g. state-machine states)
+ * lay out at the root, composition edges carry a derived cardinality, and the whole hierarchy is drawn
+ * recursively (context boxes behind, then edges, then nodes).
  */
 async function drawGraph(graph: DiagramGraph, Elk: ElkConstructor): Promise<SVGSVGElement> {
-  const layoutEdges: ElkExtendedEdge[] = graph.edges.map((e, i) => ({
-    id: `e${i}`,
-    sources: [e.from],
-    targets: [e.to],
-    labels: e.label ? [{ text: e.label, width: e.label.length * 6.2, height: EDGE_LABEL_HEIGHT }] : undefined,
-  }));
+  const byId = new Map<string, DiagramNode>(graph.nodes.map((n) => [n.id, n]));
+
+  // Edge labels: keep an explicit label (a state-machine guard, a relation kind); otherwise derive the
+  // composition cardinality from the source's member that references the target.
+  const layoutEdges: ElkExtendedEdge[] = graph.edges.map((e, i) => {
+    const text = e.label ?? compositionCardinality(byId.get(e.from), byId.get(e.to));
+    return {
+      id: `e${i}`,
+      sources: [e.from],
+      targets: [e.to],
+      labels: text ? [{ text, width: text.length * 6.2, height: EDGE_LABEL_HEIGHT }] : undefined,
+    };
+  });
+
+  // Group nodes by bounded context → one container per context (a compound layout). Context-less nodes
+  // lay out directly under the root.
+  const CONTEXT_HEADER = 34;
+  const CONTEXT_PAD = 16;
+  const groups = new Map<string, DiagramNode[]>();
+  for (const n of graph.nodes) {
+    const ctx = contextOf(n.qualifiedName);
+    const arr = groups.get(ctx);
+    if (arr) arr.push(n);
+    else groups.set(ctx, [n]);
+  }
+  const rootChildren: ElkNode[] = [];
+  for (const [ctx, nodes] of groups) {
+    const kids: ElkNode[] = nodes.map((n) => {
+      const { width, height } = nodeSize(n);
+      return { id: n.id, width, height };
+    });
+    if (ctx === '') {
+      rootChildren.push(...kids);
+    } else {
+      rootChildren.push({
+        id: `ctx:${ctx}`,
+        layoutOptions: {
+          'elk.padding': `[top=${CONTEXT_HEADER},left=${CONTEXT_PAD},bottom=${CONTEXT_PAD},right=${CONTEXT_PAD}]`,
+          'elk.spacing.nodeNode': '26',
+          'elk.layered.spacing.nodeNodeBetweenLayers': '52',
+        },
+        children: kids,
+      });
+    }
+  }
+
   const layoutGraph: ElkNode = {
     id: 'root',
     layoutOptions: {
       'elk.algorithm': 'layered',
       'elk.direction': 'RIGHT',
-      'elk.spacing.nodeNode': '28',
-      'elk.layered.spacing.nodeNodeBetweenLayers': '56',
+      'elk.hierarchyHandling': 'INCLUDE_CHILDREN',
+      'elk.spacing.nodeNode': '44',
+      'elk.layered.spacing.nodeNodeBetweenLayers': '60',
       'elk.spacing.edgeNode': '20',
+      'elk.padding': `[top=${SVG_PADDING},left=${SVG_PADDING},bottom=${SVG_PADDING},right=${SVG_PADDING}]`,
     },
-    children: graph.nodes.map((n) => {
-      const { width, height } = nodeSize(n);
-      return { id: n.id, width, height };
-    }),
+    children: rootChildren,
     edges: layoutEdges,
   };
 
   const elk = new Elk();
   const laid = await elk.layout(layoutGraph);
 
-  const byId = new Map<string, DiagramNode>(graph.nodes.map((n) => [n.id, n]));
-  const width = Math.max(1, Math.ceil(laid.width ?? 0) + SVG_PADDING * 2);
-  const height = Math.max(1, Math.ceil(laid.height ?? 0) + SVG_PADDING * 2);
+  const width = Math.max(1, Math.ceil(laid.width ?? 0));
+  const height = Math.max(1, Math.ceil(laid.height ?? 0));
 
   const svg = svgEl('svg');
   svg.setAttribute('class', 'koi-svg-diagram');
@@ -420,69 +492,89 @@ async function drawGraph(graph: DiagramGraph, Elk: ElkConstructor): Promise<SVGS
   defs.appendChild(marker);
   svg.appendChild(defs);
 
-  // Edges first so nodes paint on top of the lines.
+  // Three layers: context boxes (behind) · edges · nodes (in front).
+  const contextLayer = svgEl('g');
+  contextLayer.setAttribute('class', 'koi-svg-contexts');
   const edgeLayer = svgEl('g');
   edgeLayer.setAttribute('class', 'koi-svg-edges');
-  for (const e of laid.edges ?? []) {
-    const g = svgEl('g');
-    g.setAttribute('class', 'koi-svg-edge');
-
-    const section = e.sections?.[0];
-    const points = section
-      ? [section.startPoint, ...(section.bendPoints ?? []), section.endPoint]
-      : [];
-    const path = svgEl('path');
-    path.setAttribute('class', 'koi-svg-edge-line');
-    path.setAttribute('d', points.length ? offsetPath(points) : '');
-    path.setAttribute('marker-end', 'url(#koi-svg-arrow)');
-    g.appendChild(path);
-
-    const label = e.labels?.[0];
-    if (label?.text != null && label.x != null && label.y != null) {
-      const t = svgEl('text');
-      t.setAttribute('class', 'koi-svg-edge-label');
-      t.setAttribute('x', String(label.x + SVG_PADDING));
-      t.setAttribute('y', String(label.y + SVG_PADDING + EDGE_LABEL_HEIGHT * 0.5));
-      t.textContent = label.text;
-      g.appendChild(t);
-    }
-    edgeLayer.appendChild(g);
-  }
-  svg.appendChild(edgeLayer);
-
   const nodeLayer = svgEl('g');
   nodeLayer.setAttribute('class', 'koi-svg-nodes');
-  for (const ln of laid.children ?? []) {
-    const node = byId.get(ln.id);
-    if (!node) continue;
-    const x = (ln.x ?? 0) + SVG_PADDING;
-    const y = (ln.y ?? 0) + SVG_PADDING;
-    const w = ln.width ?? MIN_NODE_WIDTH;
-    const h = ln.height ?? NODE_HEIGHT;
 
-    const g = svgEl('g');
-    g.setAttribute('class', 'koi-svg-node');
-    g.setAttribute('transform', `translate(${x}, ${y})`);
-    tagNode(g, node);
-
-    if (isClassNode(node)) {
-      drawClassBox(g, node, w, h);
-    } else {
-      drawSimpleBox(g, node, w, h);
+  // Walk the laid hierarchy, accumulating absolute offsets (a child's coords are parent-relative, and a
+  // container's edges sit in the container's own coordinate space).
+  const drawLevel = (parent: ElkNode, ox: number, oy: number): void => {
+    for (const e of parent.edges ?? []) {
+      const section = e.sections?.[0];
+      if (!section) continue;
+      const pts = [section.startPoint, ...(section.bendPoints ?? []), section.endPoint].map((p) => ({
+        x: p.x + ox,
+        y: p.y + oy,
+      }));
+      const g = svgEl('g');
+      g.setAttribute('class', 'koi-svg-edge');
+      const path = svgEl('path');
+      path.setAttribute('class', 'koi-svg-edge-line');
+      path.setAttribute('d', polylinePath(pts));
+      path.setAttribute('marker-end', 'url(#koi-svg-arrow)');
+      g.appendChild(path);
+      const label = e.labels?.[0];
+      if (label?.text != null && label.x != null && label.y != null) {
+        const t = svgEl('text');
+        t.setAttribute('class', 'koi-svg-edge-label');
+        t.setAttribute('x', String(label.x + ox));
+        t.setAttribute('y', String(label.y + oy + EDGE_LABEL_HEIGHT * 0.5));
+        t.textContent = label.text;
+        g.appendChild(t);
+      }
+      edgeLayer.appendChild(g);
     }
 
-    nodeLayer.appendChild(g);
-  }
+    for (const child of parent.children ?? []) {
+      const ax = ox + (child.x ?? 0);
+      const ay = oy + (child.y ?? 0);
+      if (child.id.startsWith('ctx:')) {
+        const cg = svgEl('g');
+        cg.setAttribute('class', 'koi-svg-context');
+        cg.setAttribute('transform', `translate(${ax}, ${ay})`);
+        const rect = svgEl('rect');
+        rect.setAttribute('class', 'koi-svg-context-box');
+        rect.setAttribute('width', String(child.width ?? 0));
+        rect.setAttribute('height', String(child.height ?? 0));
+        rect.setAttribute('rx', '12');
+        cg.appendChild(rect);
+        const label = svgEl('text');
+        label.setAttribute('class', 'koi-svg-context-label');
+        label.setAttribute('x', String(CONTEXT_PAD));
+        label.setAttribute('y', '22');
+        label.textContent = child.id.slice('ctx:'.length);
+        cg.appendChild(label);
+        contextLayer.appendChild(cg);
+        drawLevel(child, ax, ay);
+      } else {
+        const node = byId.get(child.id);
+        if (!node) continue;
+        const w = child.width ?? MIN_NODE_WIDTH;
+        const h = child.height ?? NODE_HEIGHT;
+        const g = svgEl('g');
+        g.setAttribute('class', 'koi-svg-node');
+        g.setAttribute('transform', `translate(${ax}, ${ay})`);
+        tagNode(g, node);
+        if (isClassNode(node)) drawClassBox(g, node, w, h);
+        else drawSimpleBox(g, node, w, h);
+        nodeLayer.appendChild(g);
+      }
+    }
+  };
+  drawLevel(laid, 0, 0);
+
+  svg.appendChild(contextLayer);
+  svg.appendChild(edgeLayer);
   svg.appendChild(nodeLayer);
 
   return svg;
 }
 
 /** Shift an ELK polyline (root-relative) by the SVG padding offset. */
-function offsetPath(points: { x: number; y: number }[]): string {
-  return polylinePath(points.map((p) => ({ x: p.x + SVG_PADDING, y: p.y + SVG_PADDING })));
-}
-
 /**
  * Tear an interactive canvas down: disconnect its ResizeObserver and drop its listeners so a detached
  * canvas (and the minimap closure it retains) can be garbage-collected on the next render. The renderer
@@ -913,15 +1005,14 @@ function buildMinimap(
  * Mermaid renderer's behaviour exactly.
  */
 export function createSvgRenderer(): DiagramRenderer {
-  // The Mermaid renderer is the per-diagram fallback (bad graph / layout failure / empty graph).
-  const fallback = createMermaidRenderer();
-
   // Disposers for the canvases currently committed to the DOM. The renderer is cached across renders
   // (diagrams.ts), so these survive between calls; we tear them down when this render replaces them.
   let activeDisposers: CanvasDispose[] = [];
 
   return {
-    async render(container, files, theme, isCurrent = () => true): Promise<void> {
+    // `theme` is part of the renderer seam but unused here — the SVG nodes are themed entirely via CSS
+    // custom properties, so a theme flip restyles the live DOM without a re-render.
+    async render(container, files, _theme, isCurrent = () => true): Promise<void> {
       // Disposers for the canvases built in THIS render (committed only if we're still current).
       const disposers: CanvasDispose[] = [];
 
@@ -935,9 +1026,6 @@ export function createSvgRenderer(): DiagramRenderer {
         .filter((g): g is DiagramGraph => !!g && g.nodes.length > 0);
 
       if (!graphs.length) {
-        // No structured graph to merge. If diagrams exist at all (mermaid-only / empty graphs), let the
-        // per-diagram Mermaid renderer handle them; otherwise show the empty-state note.
-        if (renderable.length) return fallback.render(container, files, theme, isCurrent);
         if (isCurrent()) {
           container.innerHTML =
             '<p class="muted">No diagrams yet — add an aggregate, a state machine, or a context map to your model.</p>';
@@ -969,15 +1057,7 @@ export function createSvgRenderer(): DiagramRenderer {
         // in canvasView.ts; the elkjs layout and node click-to-source stay untouched.
         disposers.push(mountInteractiveCanvas(surface, svg, 'koi-domain-diagram'));
       } catch (e) {
-        // Layout/draw failed for the merged graph → fall back to the per-diagram Mermaid renderer so the
-        // canvas never blanks (it builds its own page/figure shell into our surface).
-        surface.replaceChildren();
-        const scratch = document.createElement('div');
-        await fallback.render(scratch, files, theme, () => true);
-        surface.replaceChildren(...Array.from(scratch.childNodes));
-        if (!surface.childNodes.length) {
-          surface.innerHTML = `<p class="doc-error">Could not lay out the diagram: ${escapeHtml(String(e))}</p>`;
-        }
+        surface.innerHTML = `<p class="doc-error">Could not lay out the diagram: ${escapeHtml(String(e))}</p>`;
       }
 
       // A newer render may have started while we awaited ELK/Mermaid (theme flip / edit / refresh) — drop
