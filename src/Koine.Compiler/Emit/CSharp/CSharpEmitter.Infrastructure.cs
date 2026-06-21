@@ -62,7 +62,10 @@ public sealed partial class CSharpEmitter
             foreach (AggregateDecl agg in aggregates)
             {
                 files.Add(EmitEntityConfiguration(emit, ctx.Name, agg, index));
+                files.Add(EmitRepositoryImpl(emit, ctx.Name, agg, typeMapper));
             }
+
+            files.Add(EmitUnitOfWorkImpl(emit, ctx.Name, aggregates));
         }
     }
 

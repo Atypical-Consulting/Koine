@@ -22,6 +22,10 @@ public class R18CSharpInfrastructureTests
           enum OrderStatus { Pending, Paid, Shipped }
           value Money { amount: Decimal  currency: String }
           aggregate Order root Order versioned {
+            repository {
+              find byStatus(status: OrderStatus): List<Order>
+              find mostRecent(status: OrderStatus): Order
+            }
             entity Order identified by OrderId {
               total: Money
               status: OrderStatus
@@ -202,6 +206,62 @@ public class R18CSharpInfrastructureTests
         conv.Contents.ShouldContain("public static class SalesValueConverters");
         conv.Contents.ShouldContain("public static readonly ValueConverter<OrderStatus, string> OrderStatusConverter =");
         conv.Contents.ShouldContain("new(v => v.Name, v => OrderStatus.FromName(v));");
+    }
+
+    // ----------------------------------------------------------------------
+    // Concrete repositories + UnitOfWork (Task 4)
+    // ----------------------------------------------------------------------
+
+    [Fact]
+    public void Repository_implements_crud_and_finders_over_the_dbcontext()
+    {
+        var files = Emit(Infrastructure);
+        var repo = File(files, "Sales/Infrastructure/OrderRepository.cs");
+
+        repo.Contents.ShouldContain("public sealed class OrderRepository : IOrderRepository");
+        repo.Contents.ShouldContain("private readonly SalesDbContext _context;");
+        repo.Contents.ShouldContain("public async Task<Order?> GetByIdAsync(OrderId id, CancellationToken ct = default)");
+        repo.Contents.ShouldContain("=> await _context.Orders.FindAsync(new object?[] { id }, ct);");
+        repo.Contents.ShouldContain("public async Task AddAsync(Order aggregate, CancellationToken ct = default)");
+        repo.Contents.ShouldContain("_context.Orders.Update(aggregate);");
+        repo.Contents.ShouldContain("_context.Orders.Remove(aggregate);");
+        // List finder → convention Where + ToListAsync; single finder → FirstOrDefaultAsync.
+        repo.Contents.ShouldContain("public async Task<IReadOnlyList<Order>> ByStatusAsync(OrderStatus status, CancellationToken ct = default)");
+        repo.Contents.ShouldContain("=> await _context.Orders.Where(x => x.Status == status).ToListAsync(ct);");
+        repo.Contents.ShouldContain("=> _context.Orders.FirstOrDefaultAsync(x => x.Status == status, ct);");
+    }
+
+    [Fact]
+    public void Unit_of_work_exposes_a_repository_per_aggregate_and_saves()
+    {
+        var files = Emit(Infrastructure);
+        var uow = File(files, "Sales/Infrastructure/UnitOfWork.cs");
+
+        uow.Contents.ShouldContain("public sealed class UnitOfWork : IUnitOfWork");
+        uow.Contents.ShouldContain("public IOrderRepository Orders { get; }");
+        uow.Contents.ShouldContain("public async Task<int> SaveChangesAsync(CancellationToken ct = default)");
+        // Versioned context maps EF's concurrency failure to the runtime exception.
+        uow.Contents.ShouldContain("catch (DbUpdateConcurrencyException ex)");
+        uow.Contents.ShouldContain("throw new ConcurrencyConflictException(entry.Metadata.DisplayName(), expected, actual);");
+    }
+
+    [Fact]
+    public void Unversioned_context_has_a_plain_save_with_no_concurrency_handling()
+    {
+        const string unversioned = """
+            context Catalog {
+              value Sku { code: String }
+              aggregate Product root Product {
+                entity Product identified by ProductId { sku: Sku }
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(unversioned, new CSharpEmitter(Infrastructure));
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+        var uow = File(result.Files, "Catalog/Infrastructure/UnitOfWork.cs");
+
+        uow.Contents.ShouldContain("=> _context.SaveChangesAsync(ct);");
+        uow.Contents.ShouldNotContain("DbUpdateConcurrencyException");
     }
 
     [Fact]
