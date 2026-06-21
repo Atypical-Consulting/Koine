@@ -7,7 +7,7 @@ namespace Koine.Compiler.Emit.Docs;
 /// Aggregate slice of <see cref="DocsEmitter"/>: a Mermaid <c>classDiagram</c> showing the root entity
 /// (stereotyped <c>&lt;&lt;aggregate root&gt;&gt;</c>) with its concrete fields and command/factory methods,
 /// each nested type as a composition, and the repository finders/operations as a reference list beneath.
-/// Derived (computed) members are omitted for clarity; declaration order is preserved.
+/// Derived (computed) members are shown with UML derived-attribute notation (<c>/name</c>); declaration order is preserved.
 /// </summary>
 public sealed partial class DocsEmitter
 {

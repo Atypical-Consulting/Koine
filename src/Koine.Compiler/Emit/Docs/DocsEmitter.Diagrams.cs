@@ -251,7 +251,7 @@ public sealed partial class DocsEmitter
 
     /// <summary>
     /// The structured display rows for a class node, walked through the SHARED <see cref="ClassRows"/>
-    /// helper (same order + same skip-derived rule as the Mermaid emitter) and formatted with the
+    /// helper (same order + same classify-derived rule as the Mermaid emitter) and formatted with the
     /// readable <see cref="KoineType"/> (source-like, NOT Mermaid's tilde notation): fields as
     /// <c>"{name}: {type}"</c>, methods as <c>"{name}({params})[: {ret}]"</c> with params <c>"{name}: {type}"</c>,
     /// and enum values as the bare member name.
