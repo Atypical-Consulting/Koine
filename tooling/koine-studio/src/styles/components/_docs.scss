@@ -1,0 +1,212 @@
+/* --- ADR & Notes documentation surface (#147) --------------------------------------------------
+   The Docs view: a list of architecture decision records (with a status badge) and notes, with
+   inline raw-Markdown editors. Shares the glossary's row/editor vocabulary so the two doc surfaces
+   feel of a piece. */
+.koi-docs {
+  padding: 0.5rem 0.75rem 1.25rem;
+}
+
+.koi-docs-readonly {
+  margin: 0 0 0.9rem;
+  padding: 0.5rem 0.6rem;
+  border-radius: var(--koi-radius);
+  border: 1px dashed color-mix(in srgb, var(--koi-fg) 22%, transparent);
+  color: var(--koi-muted);
+  font-size: var(--koi-text-base-plus);
+}
+
+.koi-docs-group {
+  margin-bottom: 1.25rem;
+}
+
+.koi-docs-group-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.5rem;
+
+  > h3 {
+    margin: 0;
+    font-size: var(--koi-text-base);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--koi-muted);
+  }
+}
+
+.koi-docs-empty {
+  margin: 0.2rem 0 0;
+  color: var(--koi-muted);
+  font-style: italic;
+  font-size: var(--koi-text-base-plus);
+}
+
+.koi-docs-item {
+  padding: 0.5rem 0.6rem;
+  border-radius: var(--koi-radius);
+  border: 1px solid color-mix(in srgb, var(--koi-fg) 10%, transparent);
+  margin-bottom: 0.45rem;
+  background: color-mix(in srgb, var(--koi-surface) 60%, transparent);
+}
+
+.koi-docs-item-head {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.koi-docs-name {
+  flex: 1;
+  text-align: left;
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  font-weight: 600;
+  color: var(--koi-accent);
+  cursor: pointer;
+
+  &:hover {
+    text-decoration: underline;
+  }
+}
+
+/* ADR lifecycle badge. The base is a neutral pill; each status tints it. */
+.koi-docs-badge {
+  flex: none;
+  font-size: var(--koi-text-2xs);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 0.05rem 0.45rem;
+  border-radius: var(--koi-radius-pill);
+  color: var(--koi-fg);
+  background: color-mix(in srgb, var(--koi-fg) 9%, transparent);
+
+  &.is-proposed {
+    color: var(--koi-accent);
+    background: color-mix(in srgb, var(--koi-accent) 16%, transparent);
+  }
+
+  &.is-accepted {
+    color: var(--koi-ok, #16a34a);
+    background: color-mix(in srgb, var(--koi-ok, #16a34a) 18%, transparent);
+  }
+
+  &.is-superseded,
+  &.is-deprecated {
+    color: var(--koi-muted);
+    background: color-mix(in srgb, var(--koi-fg) 12%, transparent);
+    text-decoration: line-through;
+  }
+
+  &.is-rejected {
+    color: var(--koi-err, #dc2626);
+    background: color-mix(in srgb, var(--koi-err, #dc2626) 16%, transparent);
+  }
+}
+
+.koi-docs-detail {
+  margin-top: 0.55rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid color-mix(in srgb, var(--koi-fg) 10%, transparent);
+}
+
+.koi-docs-section {
+  margin-bottom: 0.6rem;
+
+  > h4 {
+    margin: 0 0 0.15rem;
+    font-size: var(--koi-text-2xs);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--koi-muted);
+  }
+}
+
+.koi-docs-prose {
+  margin: 0;
+  color: var(--koi-fg);
+  font-size: var(--koi-text-md);
+  line-height: 1.45;
+  white-space: pre-wrap; /* preserve the Markdown's paragraph/line breaks in the read view */
+}
+
+.koi-docs-input {
+  width: 100%;
+  resize: vertical;
+  font-family: var(--koi-font-mono, monospace);
+  font-size: var(--koi-text-md);
+  color: var(--koi-fg);
+  background: var(--koi-surface);
+  border: 1px solid color-mix(in srgb, var(--koi-accent) 40%, transparent);
+  border-radius: var(--koi-radius-sm);
+  padding: 0.45rem 0.55rem;
+}
+
+.koi-docs-new {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  margin-bottom: 0.6rem;
+}
+
+.koi-docs-new-input {
+  flex: 1;
+  font: inherit;
+  font-size: var(--koi-text-md);
+  color: var(--koi-fg);
+  background: var(--koi-surface);
+  border: 1px solid color-mix(in srgb, var(--koi-accent) 40%, transparent);
+  border-radius: var(--koi-radius-sm);
+  padding: 0.3rem 0.5rem;
+}
+
+.koi-docs-actions {
+  display: flex;
+  gap: 0.35rem;
+  margin-top: 0.45rem;
+}
+
+.koi-docs-edit,
+.koi-docs-new-btn {
+  flex: none;
+  background: none;
+  border: 1px solid color-mix(in srgb, var(--koi-accent) 35%, transparent);
+  color: var(--koi-accent);
+  border-radius: var(--koi-radius-sm);
+  padding: 0.15rem 0.55rem;
+  font: inherit;
+  font-size: var(--koi-text-sm);
+  cursor: pointer;
+
+  &:hover {
+    background: color-mix(in srgb, var(--koi-accent) 14%, transparent);
+  }
+
+  &:disabled {
+    opacity: 0.5;
+    cursor: default;
+  }
+}
+
+.koi-docs-save,
+.koi-docs-cancel {
+  font: inherit;
+  font-size: var(--koi-text-sm);
+  border-radius: var(--koi-radius-sm);
+  padding: 0.2rem 0.6rem;
+  cursor: pointer;
+  border: 1px solid transparent;
+}
+
+.koi-docs-save {
+  background: var(--koi-accent);
+  color: #fff;
+}
+
+.koi-docs-cancel {
+  background: none;
+  border-color: color-mix(in srgb, var(--koi-fg) 20%, transparent);
+  color: var(--koi-muted);
+}
