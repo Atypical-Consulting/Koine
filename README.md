@@ -191,6 +191,12 @@ The infrastructure is **regenerated from the model on every build**, so it can n
 from the ubiquitous language. The provider (SQL Server, Postgres, …) is supplied by the caller through
 the `Action<DbContextOptionsBuilder>`, so the emitter stays provider-agnostic. EF Core only in v1.
 
+> **Known limitation (v1):** a value-object **collection** (`list of <ValueObject>`) is mapped with EF
+> Core `OwnsMany`, but Koine exposes such collections as a read-only `IReadOnlyList<T>`. Depending on the
+> EF Core version, materializing an owned collection into a read-only navigation may need a mutable
+> backing field — review the generated `OwnsMany` mapping for aggregates that carry value-object
+> collections. Scalar (`String`/`Int`/…) collections are left to EF Core's primitive-collection convention.
+
 Other CLI commands: `check` (model-versioning compatibility against a `--baseline`), `fmt` (canonical
 formatter), `init` (scaffold a project), `watch` (rebuild on change), and `lsp` (language server over
 stdio). See the [CLI reference](https://atypical-consulting.github.io/Koine/guides/cli/).

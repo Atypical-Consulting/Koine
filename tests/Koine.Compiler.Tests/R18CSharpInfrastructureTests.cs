@@ -195,7 +195,7 @@ public class R18CSharpInfrastructureTests
         cfg.Contents.ShouldContain("public sealed class OrderConfiguration : IEntityTypeConfiguration<Order>");
         cfg.Contents.ShouldContain("builder.HasKey(x => x.Id);");
         cfg.Contents.ShouldContain(".HasConversion(id => id.Value, value => new OrderId(value));");
-        cfg.Contents.ShouldContain("builder.Property(x => x.Version).IsRowVersion();");
+        cfg.Contents.ShouldContain("builder.Property(x => x.Version).IsConcurrencyToken();");
         // Value object → owned type.
         cfg.Contents.ShouldContain("builder.OwnsOne(x => x.Total,");
         // Smart enum → shared value converter.
@@ -375,7 +375,7 @@ public class R18CSharpInfrastructureTests
 
         var cfg = File(files, "Catalog/Infrastructure/ProductConfiguration.cs").Contents;
         cfg.ShouldContain("builder.HasKey(x => x.Id);");
-        cfg.ShouldContain("builder.Property(x => x.Version).IsRowVersion();");
+        cfg.ShouldContain("builder.Property(x => x.Version).IsConcurrencyToken();");
         cfg.ShouldNotContain("OwnsOne");
         TestSupport.Compile(files).Assembly.ShouldNotBeNull();
     }
@@ -392,6 +392,64 @@ public class R18CSharpInfrastructureTests
             """);
 
         files.ShouldNotContain(f => f.RelativePath.Contains("/Infrastructure/", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Nested_same_named_value_objects_do_not_shadow_owned_builder_parameters()
+    {
+        // A value object nested under a same-named member must not produce two owned-builder lambdas
+        // with the same parameter name (CS0136). The depth-suffixed name keeps them distinct.
+        // The member `location` repeats at two nesting levels (Address.location → Geo.location),
+        // so the owned-builder lambda parameters would collide without the depth suffix.
+        var files = EmitInfra("""
+            context T {
+              value Geo { lat: Decimal }
+              value Address { location: Geo }
+              aggregate A root A { entity A identified by AId { location: Address } }
+            }
+            """);
+
+        var cfg = File(files, "T/Infrastructure/AConfiguration.cs").Contents;
+        cfg.ShouldContain("builder.OwnsOne(x => x.Location, location =>");
+        cfg.ShouldContain("location.OwnsOne(x => x.Location, location2 =>"); // distinct inner parameter
+        var (asm, errors) = TestSupport.Compile(files);
+        asm.ShouldNotBeNull(string.Join("\n", errors));
+    }
+
+    [Fact]
+    public void Sequence_identity_key_is_marked_value_generated()
+    {
+        // A store-assigned sequence key must be ValueGeneratedOnAdd so EF lets the DB produce it.
+        var files = EmitInfra("""
+            context Billing {
+              aggregate Invoice root Invoice {
+                entity Invoice identified by InvoiceId as sequence { amount: Decimal }
+              }
+            }
+            """);
+
+        var cfg = File(files, "Billing/Infrastructure/InvoiceConfiguration.cs").Contents;
+        cfg.ShouldContain(".HasConversion(id => id.Value, value => new InvoiceId(value))");
+        cfg.ShouldContain(".ValueGeneratedOnAdd();");
+        TestSupport.Compile(files).Assembly.ShouldNotBeNull();
+    }
+
+    [Fact]
+    public void List_of_enum_does_not_produce_a_dead_value_converter()
+    {
+        // A smart enum used ONLY as a List<Enum> element is emitted as a primitive collection (no
+        // HasConversion), so no converter should be generated for it.
+        var files = EmitInfra("""
+            context Docs {
+              enum Tag { Draft, Final }
+              aggregate Doc root Doc { entity Doc identified by DocId { tags: List<Tag> } }
+            }
+            """);
+
+        // No converter holder at all (the only enum is list-only and therefore unmapped).
+        files.ShouldNotContain(f => f.RelativePath == "Docs/Infrastructure/DocsValueConverters.cs");
+        File(files, "Docs/Infrastructure/DocConfiguration.cs").Contents
+            .ShouldNotContain("Converter");
     }
 
     [Fact]

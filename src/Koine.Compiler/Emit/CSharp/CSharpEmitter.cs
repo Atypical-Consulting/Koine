@@ -45,9 +45,11 @@ public sealed partial class CSharpEmitter : IEmitter
                 _options.NamespaceMap
                     .OrderBy(kv => kv.Key, StringComparer.Ordinal)
                     .Select(kv => kv.Key + "=" + kv.Value));
+            // Lower-cased so an explicit `--layers domain` produces the same discriminator as the
+            // unconfigured default (which is the canonical lower-case "domain") for byte-identical output.
             var layers = _options.Layers is null
                 ? "domain"
-                : string.Join(",", _options.Layers.Select(l => l.ToString()).OrderBy(l => l, StringComparer.Ordinal));
+                : string.Join(",", _options.Layers.Select(l => l.ToString().ToLowerInvariant()).OrderBy(l => l, StringComparer.Ordinal));
             return string.Join(
                 "|",
                 GetType().FullName,

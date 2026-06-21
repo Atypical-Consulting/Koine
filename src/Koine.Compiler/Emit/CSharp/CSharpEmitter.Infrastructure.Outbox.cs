@@ -104,10 +104,14 @@ public sealed partial class CSharpEmitter
         sb.Append(Indent).Append(Indent).Append("foreach (var message in pending)\n");
         sb.Append(Indent).Append(Indent).Append("{\n");
         sb.Append(Indent).Append(Indent).Append(Indent).Append("var integrationEvent = message.Deserialize();\n");
-        sb.Append(Indent).Append(Indent).Append(Indent).Append("if (integrationEvent is not null)\n");
+        // Only mark a message processed once it was actually delivered. A message whose type can no
+        // longer be resolved (Deserialize returns null) is LEFT pending rather than silently dropped,
+        // so it stays visible for investigation instead of being lost.
+        sb.Append(Indent).Append(Indent).Append(Indent).Append("if (integrationEvent is null)\n");
         sb.Append(Indent).Append(Indent).Append(Indent).Append("{\n");
-        sb.Append(Indent).Append(Indent).Append(Indent).Append(Indent).Append("await _handler.HandleAsync(integrationEvent, ct);\n");
+        sb.Append(Indent).Append(Indent).Append(Indent).Append(Indent).Append("continue;\n");
         sb.Append(Indent).Append(Indent).Append(Indent).Append("}\n\n");
+        sb.Append(Indent).Append(Indent).Append(Indent).Append("await _handler.HandleAsync(integrationEvent, ct);\n");
         sb.Append(Indent).Append(Indent).Append(Indent).Append("message.ProcessedOn = DateTimeOffset.UtcNow;\n");
         sb.Append(Indent).Append(Indent).Append("}\n\n");
         sb.Append(Indent).Append(Indent).Append("await _context.SaveChangesAsync(ct);\n");

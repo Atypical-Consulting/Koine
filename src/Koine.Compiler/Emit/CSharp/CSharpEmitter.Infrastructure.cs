@@ -197,8 +197,8 @@ public sealed partial class CSharpEmitter
 
     /// <summary>
     /// Emits <c>&lt;Root&gt;Configuration : IEntityTypeConfiguration&lt;Root&gt;</c>: the key + a
-    /// strongly-typed-ID value converter, the concurrency token as <c>IsRowVersion()</c> (versioned
-    /// roots only), value-object members as owned types (<c>OwnsOne</c> / <c>OwnsMany</c>, nested →
+    /// strongly-typed-ID value converter, the concurrency token as <c>IsConcurrencyToken()</c>
+    /// (versioned roots only), value-object members as owned types (<c>OwnsOne</c> / <c>OwnsMany</c>, nested →
     /// nested <c>OwnsOne</c>), smart-enum members via the shared <c>ValueConverter</c>, and foreign
     /// strongly-typed IDs as scalar converters. Plain primitives map by EF convention (no config).
     /// </summary>
@@ -220,16 +220,26 @@ public sealed partial class CSharpEmitter
         sb.Append(Indent).Append("{\n");
 
         // Identity: the aggregate's key, with a converter between the strongly-typed ID and its
-        // backing primitive (the ID value object exposes Value and a single-arg constructor).
+        // backing primitive (the ID value object exposes Value and a single-arg constructor). A
+        // store-assigned `sequence` key is additionally marked value-generated so EF lets the
+        // database produce it (the ID value object has no client-side New()).
         sb.Append(Indent).Append(Indent).Append("builder.HasKey(x => x.Id);\n");
         sb.Append(Indent).Append(Indent).Append("builder.Property(x => x.Id)\n");
         sb.Append(Indent).Append(Indent).Append(Indent)
-          .Append(".HasConversion(id => id.Value, value => new ").Append(idType).Append("(value));\n");
+          .Append(".HasConversion(id => id.Value, value => new ").Append(idType).Append("(value))");
+        if (root.IdStrategy == IdentityStrategy.Sequence)
+        {
+            sb.Append('\n').Append(Indent).Append(Indent).Append(Indent).Append(".ValueGeneratedOnAdd()");
+        }
 
-        // Optimistic-concurrency token (versioned aggregate root only).
+        sb.Append(";\n");
+
+        // Optimistic-concurrency token (versioned aggregate root only). Koine emits `int Version`, so
+        // the EF mapping is IsConcurrencyToken() (an int compared on UPDATE) — NOT IsRowVersion(),
+        // which requires a byte[]/rowversion column and would be an invalid model for an int property.
         if (agg.IsVersioned)
         {
-            sb.Append(Indent).Append(Indent).Append("builder.Property(x => x.Version).IsRowVersion();\n");
+            sb.Append(Indent).Append(Indent).Append("builder.Property(x => x.Version).IsConcurrencyToken();\n");
         }
 
         foreach (Member m in persisted)
@@ -260,7 +270,7 @@ public sealed partial class CSharpEmitter
             var elem = type.Element?.Name;
             if (elem is not null && index.Classify(elem) == TypeKind.Value)
             {
-                WriteOwned(sb, context, builderVar, "OwnsMany", prop, elem, index, indentLevel);
+                WriteOwned(sb, context, builderVar, "OwnsMany", prop, elem, index, indentLevel, depth: 1);
             }
             else
             {
@@ -281,7 +291,7 @@ public sealed partial class CSharpEmitter
         switch (index.Classify(type.Name))
         {
             case TypeKind.Value:
-                WriteOwned(sb, context, builderVar, "OwnsOne", prop, type.Name, index, indentLevel);
+                WriteOwned(sb, context, builderVar, "OwnsOne", prop, type.Name, index, indentLevel, depth: 1);
                 break;
             case TypeKind.Enum:
                 AppendIndent(sb, indentLevel).Append(builderVar).Append(".Property(x => x.").Append(prop)
@@ -307,9 +317,9 @@ public sealed partial class CSharpEmitter
     /// smart enums → conversions). An owned value object with only primitive members emits explicit
     /// <c>Property</c> lines for visibility; the mapping compiles even when the value object is empty.
     /// </summary>
-    private void WriteOwned(StringBuilder sb, string context, string builderVar, string ownsMethod, string prop, string voTypeName, ModelIndex index, int indentLevel)
+    private void WriteOwned(StringBuilder sb, string context, string builderVar, string ownsMethod, string prop, string voTypeName, ModelIndex index, int indentLevel, int depth)
     {
-        var owned = OwnedBuilderName(prop);
+        var owned = OwnedBuilderName(prop, depth);
         AppendIndent(sb, indentLevel).Append(builderVar).Append('.').Append(ownsMethod)
           .Append("(x => x.").Append(prop).Append(", ").Append(owned).Append(" =>\n");
         AppendIndent(sb, indentLevel).Append("{\n");
@@ -319,7 +329,7 @@ public sealed partial class CSharpEmitter
             var voMemberNames = new HashSet<string>(vo.Members.Select(mm => mm.Name), StringComparer.Ordinal);
             foreach (Member vm in vo.Members.Where(mm => !MemberAnalysis.IsDerived(mm, voMemberNames)))
             {
-                WriteOwnedMemberMapping(sb, context, owned, vm, index, indentLevel + 1);
+                WriteOwnedMemberMapping(sb, context, owned, vm, index, indentLevel + 1, depth);
             }
         }
 
@@ -331,7 +341,7 @@ public sealed partial class CSharpEmitter
     /// the same rules as the root; a plain primitive emits an explicit <c>Property</c> call so the
     /// owned shape is visible in the generated configuration.
     /// </summary>
-    private void WriteOwnedMemberMapping(StringBuilder sb, string context, string ownedVar, Member m, ModelIndex index, int indentLevel)
+    private void WriteOwnedMemberMapping(StringBuilder sb, string context, string ownedVar, Member m, ModelIndex index, int indentLevel, int depth)
     {
         var prop = CSharpNaming.ToPascalCase(m.Name);
         TypeRef type = m.Type;
@@ -341,7 +351,7 @@ public sealed partial class CSharpEmitter
             var elem = type.Element?.Name;
             if (CSharpTypeMapper.IsList(type) && elem is not null && index.Classify(elem) == TypeKind.Value)
             {
-                WriteOwned(sb, context, ownedVar, "OwnsMany", prop, elem, index, indentLevel);
+                WriteOwned(sb, context, ownedVar, "OwnsMany", prop, elem, index, indentLevel, depth + 1);
             }
             else
             {
@@ -355,7 +365,7 @@ public sealed partial class CSharpEmitter
         switch (index.Classify(type.Name))
         {
             case TypeKind.Value:
-                WriteOwned(sb, context, ownedVar, "OwnsOne", prop, type.Name, index, indentLevel);
+                WriteOwned(sb, context, ownedVar, "OwnsOne", prop, type.Name, index, indentLevel, depth + 1);
                 break;
             case TypeKind.Enum:
                 AppendIndent(sb, indentLevel).Append(ownedVar).Append(".Property(x => x.").Append(prop)
@@ -435,7 +445,8 @@ public sealed partial class CSharpEmitter
             foreach (Member m in members.Where(mm => !MemberAnalysis.IsDerived(mm, names)))
             {
                 TypeRef type = m.Type;
-                var typeName = CSharpTypeMapper.IsList(type) ? type.Element?.Name : type.Name;
+                var isList = CSharpTypeMapper.IsList(type);
+                var typeName = isList ? type.Element?.Name : type.Name;
                 if (typeName is null)
                 {
                     continue;
@@ -443,7 +454,10 @@ public sealed partial class CSharpEmitter
 
                 switch (index.Classify(typeName))
                 {
-                    case TypeKind.Enum:
+                    // A *scalar* smart-enum member is mapped via HasConversion, so it needs a converter.
+                    // A List<Enum> is emitted as a primitive collection (no HasConversion), so collecting
+                    // its element would produce a dead, never-referenced converter — skip it.
+                    case TypeKind.Enum when !isList:
                         if (seen.Add(typeName))
                         {
                             ordered.Add(typeName);
@@ -451,6 +465,8 @@ public sealed partial class CSharpEmitter
 
                         break;
                     case TypeKind.Value:
+                        // Both a scalar value object (OwnsOne) and a value-object collection (OwnsMany)
+                        // recurse, so enums inside them ARE mapped and DO need converters.
                         if (index.TryGetDeclIn(context, typeName, out TypeDecl decl) && decl is ValueObjectDecl vo)
                         {
                             Walk(vo.Members);
@@ -469,11 +485,21 @@ public sealed partial class CSharpEmitter
         return ordered;
     }
 
-    /// <summary>The owned-builder lambda parameter for a property — its camelCase, never colliding with the <c>x</c> selector.</summary>
-    private static string OwnedBuilderName(string prop)
+    /// <summary>
+    /// The owned-builder lambda parameter for a property at nesting <paramref name="depth"/>. Its
+    /// camelCase (never the <c>x</c> selector); beyond the first owned level the depth is appended so a
+    /// value object nested under a same-named member can't shadow its enclosing builder parameter
+    /// (CS0136). The first level keeps the clean, unsuffixed name.
+    /// </summary>
+    private static string OwnedBuilderName(string prop, int depth)
     {
         var name = CSharpNaming.ToCamelCase(prop);
-        return name == "x" ? "owned" : name;
+        if (name == "x")
+        {
+            name = "owned";
+        }
+
+        return depth <= 1 ? name : name + depth;
     }
 
     /// <summary>Appends <paramref name="indentLevel"/> indents to the builder and returns it for chaining.</summary>
