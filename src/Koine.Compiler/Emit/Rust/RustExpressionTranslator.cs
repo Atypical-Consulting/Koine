@@ -266,7 +266,11 @@ internal sealed class RustExpressionTranslator
             pushed.Add(b.Name);
         }
 
-        Write(let.Body, sb, coerceTo);
+        // The block's return value needs no outer parentheses (rustc warns on them), so render the
+        // body to a buffer and drop one fully-enclosing pair.
+        var bodyBuf = new StringBuilder();
+        Write(let.Body, bodyBuf, coerceTo);
+        sb.Append(StripOuterParens(bodyBuf.ToString()));
         sb.Append(" }");
 
         for (var i = pushed.Count - 1; i >= 0; i--)
@@ -473,7 +477,9 @@ internal sealed class RustExpressionTranslator
         TypeRef? element = TypeResolver.ElementOf(_resolver.Infer(call.Target, EffectiveScope()));
         var wasPresent = _locals.Contains(lambda.Parameter);
         PushLocal(lambda.Parameter, element);
-        Write(lambda.Body, sb, null);
+        var bodyBuf = new StringBuilder();
+        Write(lambda.Body, bodyBuf, null);
+        sb.Append(StripOuterParens(bodyBuf.ToString()));
         if (!wasPresent)
         {
             PopLocal(lambda.Parameter);
@@ -546,6 +552,34 @@ internal sealed class RustExpressionTranslator
                 sb.Append('"').Append(EscapeString(lit.Text)).Append('"');
                 break;
         }
+    }
+
+    /// <summary>Drops one fully-enclosing parenthesis pair from <paramref name="s"/>, if present.</summary>
+    private static string StripOuterParens(string s)
+    {
+        if (s.Length < 2 || s[0] != '(' || s[^1] != ')')
+        {
+            return s;
+        }
+
+        var depth = 0;
+        for (var i = 0; i < s.Length; i++)
+        {
+            if (s[i] == '(')
+            {
+                depth++;
+            }
+            else if (s[i] == ')')
+            {
+                depth--;
+                if (depth == 0 && i != s.Length - 1)
+                {
+                    return s;
+                }
+            }
+        }
+
+        return s[1..^1];
     }
 
     private TypeRef Decimal() => new("Decimal");
