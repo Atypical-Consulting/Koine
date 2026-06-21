@@ -28,13 +28,11 @@ internal sealed class WatchCommand : Command<WatchSettings>
             ? plan.File
             : Path.GetDirectoryName(Path.GetFullPath(plan.File)) ?? ".";
 
-        using var watcher = new FileSystemWatcher(watchDir, "*.koi")
-        {
-            IncludeSubdirectories = true,
-            NotifyFilter = NotifyFilters.LastWrite | NotifyFilters.FileName | NotifyFilters.Size,
-            // Give the OS a roomy buffer so bursts of saves are less likely to overflow.
-            InternalBufferSize = 64 * 1024,
-        };
+        using var watcher = new FileSystemWatcher(watchDir, "*.koi");
+        watcher.IncludeSubdirectories = true;
+        watcher.NotifyFilter = NotifyFilters.LastWrite | NotifyFilters.FileName | NotifyFilters.Size;
+        // Give the OS a roomy buffer so bursts of saves are less likely to overflow.
+        watcher.InternalBufferSize = 64 * 1024;
 
         var changes = new BlockingCollection<object>();
         void Bump()
@@ -52,6 +50,9 @@ internal sealed class WatchCommand : Command<WatchSettings>
         ConsoleCancelEventHandler onCancel = (_, e) =>
         {
             e.Cancel = true;            // let the loop unwind cleanly instead of killing the process
+            // onCancel is unsubscribed in the finally before `cts` is disposed, so this can't touch a
+            // disposed source — the "captured variable disposed in outer scope" hint is a false positive.
+            // ReSharper disable once AccessToDisposedClosure
             cts.Cancel();
             changes.CompleteAdding();
         };

@@ -35,7 +35,6 @@ public sealed partial class PhpEmitter
     /// cannot be resolved.
     /// </summary>
     private EmittedFile? EmitRepository(
-        PhpEmitContext emit,
         AggregateDecl agg,
         EntityDecl? root,
         string contextName,

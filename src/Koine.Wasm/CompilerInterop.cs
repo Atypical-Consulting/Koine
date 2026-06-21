@@ -59,8 +59,7 @@ public static partial class CompilerInterop
         {
             // `target` is non-null per the annotation, but it is marshalled across the JS-interop
             // boundary where a JS `null`/`undefined` can still arrive at runtime, so the fallback stays.
-            // ReSharper disable once ConstantNullCoalescingCondition
-            IEmitter emitter = (target ?? "csharp").ToLowerInvariant() switch
+            IEmitter emitter = (string.IsNullOrEmpty(target) ? "csharp" : target).ToLowerInvariant() switch
             {
                 "typescript" or "ts" => new TypeScriptEmitter(),
                 "python" or "py" => new PythonEmitter(),
@@ -82,10 +81,9 @@ public static partial class CompilerInterop
         catch (Exception ex)
         {
             // Same as above: `target` can be a marshalled-in JS null at runtime.
-            // ReSharper disable once ConstantNullCoalescingCondition
             var dto = new CompileResultDto(
                 Ok: false,
-                Target: target ?? "csharp",
+                Target: string.IsNullOrEmpty(target) ? "csharp" : target,
                 Diagnostics: [CrashDiagnostic(ex)],
                 Files: []);
             return JsonSerializer.Serialize(dto, InteropJson.Default.CompileResultDto);

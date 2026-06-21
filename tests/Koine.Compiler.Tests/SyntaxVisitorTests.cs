@@ -137,7 +137,7 @@ public class SyntaxVisitorTests
             _replacement = replacement;
         }
 
-        public override KoineNode? VisitLiteralExpr(LiteralExpr node) =>
+        public override KoineNode VisitLiteralExpr(LiteralExpr node) =>
             ReferenceEquals(node, _target) ? _replacement : node;
     }
 
@@ -205,7 +205,7 @@ public class SyntaxVisitorTests
             _replacement = replacement;
         }
 
-        public override KoineNode? VisitMember(Member node) =>
+        public override KoineNode VisitMember(Member node) =>
             ReferenceEquals(node, _target) ? _replacement : node;
     }
 
@@ -281,7 +281,7 @@ public class SyntaxVisitorTests
     // Returns a non-Expr (a TypeRef) where a required Expr slot is expected — the generated cast throws.
     private sealed class WrongTypeRewriter : KoineSyntaxRewriter
     {
-        public override KoineNode? VisitIdentifierExpr(IdentifierExpr node) => new TypeRef("NotAnExpr");
+        public override KoineNode VisitIdentifierExpr(IdentifierExpr node) => new TypeRef("NotAnExpr");
     }
 
     [Fact]

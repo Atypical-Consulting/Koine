@@ -824,7 +824,7 @@ public sealed partial class CSharpEmitter : IEmitter
             return;
         }
 
-        WriteEnumDefaultCoalesce(sb, storedFields, translator, index);
+        WriteEnumDefaultCoalesce(sb, storedFields, translator);
         WriteInvariantGuards(sb, typeName, invariants, translator);
         if (invariants.Count > 0 && storedFields.Count > 0)
         {
@@ -1032,7 +1032,7 @@ public sealed partial class CSharpEmitter : IEmitter
     /// re-classifying the member type. Byte-identical to the <see cref="Member"/> overload.
     /// </summary>
     private void WriteEnumDefaultCoalesce(StringBuilder sb, IReadOnlyList<BoundField> storedFields,
-        CSharpExpressionTranslator translator, ModelIndex index)
+        CSharpExpressionTranslator translator)
     {
         var any = false;
         foreach (BoundField f in storedFields)

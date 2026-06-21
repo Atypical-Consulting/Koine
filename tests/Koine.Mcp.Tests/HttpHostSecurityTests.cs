@@ -11,6 +11,9 @@ namespace Koine.Mcp.Tests;
 /// </summary>
 public sealed class HttpHostSecurityTests
 {
+    // A single long-lived client (the recommended pattern) for the one end-to-end probe below.
+    private static readonly HttpClient Http = new() { Timeout = TimeSpan.FromSeconds(10) };
+
     [Fact]
     public async Task Loopback_bind_refuses_a_forged_non_loopback_Host_header()
     {
@@ -22,13 +25,9 @@ public sealed class HttpHostSecurityTests
         try
         {
             var endpoint = HttpHost.McpUrl(app); // http://127.0.0.1:<port>/mcp
-            using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(10) };
-
-            using var forged = new HttpRequestMessage(HttpMethod.Get, endpoint)
-            {
-                Headers = { Host = "evil.example" },
-            };
-            var response = await http.SendAsync(forged, TestContext.Current.CancellationToken);
+            using var forged = new HttpRequestMessage(HttpMethod.Get, endpoint);
+            forged.Headers.Host = "evil.example";
+            var response = await Http.SendAsync(forged, TestContext.Current.CancellationToken);
 
             response.StatusCode.ShouldBe(HttpStatusCode.Forbidden);
         }

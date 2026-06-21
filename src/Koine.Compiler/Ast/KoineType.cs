@@ -118,7 +118,7 @@ public sealed class PrimitiveType : KoineType
 
     public override TypeKind Kind => TypeKind.Primitive;
     public override bool IsOptional => _optional;
-    public override string? Name => _name;
+    public override string Name => _name;
     public override KoineType WithOptional(bool optional) => new PrimitiveType(_name, optional);
 }
 

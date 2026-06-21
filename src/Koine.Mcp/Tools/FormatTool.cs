@@ -26,9 +26,8 @@ public static class FormatTool
         {
             // We only reach here when the guard rejected the input — which includes the null-source
             // case (the argument is deserialized from an MCP tool call, so a JSON `null` can arrive
-            // despite the non-null annotation). Keep the fallback for that runtime reality.
-            // ReSharper disable once ConstantNullCoalescingCondition
-            return new FormattingResult(source ?? string.Empty, Changed: false, new[] { sizeErr! });
+            // despite the non-null annotation). `IsNullOrEmpty` absorbs that runtime null.
+            return new FormattingResult(string.IsNullOrEmpty(source) ? string.Empty : source, Changed: false, new[] { sizeErr! });
         }
 
         // The formatter only LEXES the source (it strips lexer error listeners and re-emits tokens);

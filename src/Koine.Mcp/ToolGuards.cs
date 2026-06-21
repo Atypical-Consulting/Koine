@@ -49,13 +49,15 @@ internal static class ToolGuards
         {
             // (3) each entry must be a real file with a non-empty path and a (possibly empty) source.
             // `file` / `file.Source` are non-null per the annotations, but they are deserialized from
-            // MCP tool arguments where a JSON `null` element or member can still arrive at runtime.
-            // ReSharper disable once ConditionIsAlwaysTrueOrFalseAccordingToNullableAPIContract
+            // MCP tool arguments where a JSON `null` element or member can still arrive at runtime — so
+            // both null checks stay (the block disable covers both always-false-per-annotation hits).
+            // ReSharper disable ConditionIsAlwaysTrueOrFalseAccordingToNullableAPIContract
             if (file is null || string.IsNullOrWhiteSpace(file.Path) || file.Source is null)
             {
                 list.Add(Error("KOIMCP002", "each file needs a non-empty path and a (possibly empty) source", file?.Path));
                 continue;
             }
+            // ReSharper restore ConditionIsAlwaysTrueOrFalseAccordingToNullableAPIContract
 
             // (4) paths must be unique — a duplicate would silently shadow an earlier file.
             if (!seenPaths.Add(file.Path))

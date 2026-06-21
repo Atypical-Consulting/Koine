@@ -64,17 +64,17 @@ public sealed partial class TypeScriptEmitter
         // mirroring the C# emitter's demand-driven operator generation.
         if (vo.IsQuantity)
         {
-            WriteQuantityOps(sb, vo, name, ctorMembers, emit.Index, typeMapper);
+            WriteQuantityOps(sb, name, ctorMembers, emit.Index);
         }
         else
         {
             if (emit.ScalarNeeds.ContainsKey(vo.Name) && ctorMembers.Any(m => m.Type.Name is "Int" or "Decimal"))
             {
-                WriteScalarOp(sb, vo, name, ctorMembers);
+                WriteScalarOp(sb, name, ctorMembers);
             }
             if (emit.AdditiveNeeds.Contains(vo.Name))
             {
-                WriteAdditiveOp(sb, vo, name, ctorMembers, typeMapper);
+                WriteAdditiveOp(sb, name, ctorMembers);
             }
         }
 
@@ -117,7 +117,7 @@ public sealed partial class TypeScriptEmitter
     {
         foreach (Invariant inv in invariants)
         {
-            WriteGuard(sb, typeName, inv.Condition, inv.Message ?? SynthesizeMessage(inv.Condition), translator, mode);
+            WriteGuard(sb, typeName, inv.Condition, inv.Message ?? SynthesizeMessage(), translator, mode);
         }
     }
 
@@ -190,7 +190,7 @@ public sealed partial class TypeScriptEmitter
     /// every numeric field by the factor (Decimal via the runtime op, a plain Int by JS <c>*</c>) and
     /// carries the rest unchanged. Both <c>Int</c> and <c>Decimal</c> scalars are a TS <c>number</c>.
     /// </summary>
-    private void WriteScalarOp(StringBuilder sb, ValueObjectDecl vo, string name, IReadOnlyList<Member> ctorMembers)
+    private void WriteScalarOp(StringBuilder sb, string name, IReadOnlyList<Member> ctorMembers)
     {
         if (RefOnly)
         {
@@ -223,7 +223,7 @@ public sealed partial class TypeScriptEmitter
     }
 
     /// <summary>A value object's additive <c>add</c> method (for <c>sum</c> folds): adds numeric fields, carries the rest.</summary>
-    private void WriteAdditiveOp(StringBuilder sb, ValueObjectDecl vo, string name, IReadOnlyList<Member> ctorMembers, TypeScriptTypeMapper typeMapper)
+    private void WriteAdditiveOp(StringBuilder sb, string name, IReadOnlyList<Member> ctorMembers)
     {
         if (RefOnly)
         {
@@ -253,7 +253,7 @@ public sealed partial class TypeScriptEmitter
     }
 
     /// <summary>A quantity's unit-checked <c>add</c>/<c>subtract</c> and scalar <c>multiply</c>.</summary>
-    private void WriteQuantityOps(StringBuilder sb, ValueObjectDecl vo, string name, IReadOnlyList<Member> ctorMembers, ModelIndex index, TypeScriptTypeMapper typeMapper)
+    private void WriteQuantityOps(StringBuilder sb, string name, IReadOnlyList<Member> ctorMembers, ModelIndex index)
     {
         Member? amount = ctorMembers.FirstOrDefault(m => m.Type.Name == "Decimal" && !m.Type.IsOptional);
         Member? unit = ctorMembers.FirstOrDefault(m => index.Classify(m.Type.Name) == TypeKind.Enum && !m.Type.IsOptional);
@@ -476,7 +476,7 @@ public sealed partial class TypeScriptEmitter
 
         foreach (RequiresClause req in requires)
         {
-            WriteGuard(sb, entityName, req.Condition, req.Message ?? SynthesizeMessage(req.Condition), translator, TypeScriptExpressionTranslator.NameMode.Property);
+            WriteGuard(sb, entityName, req.Condition, req.Message ?? SynthesizeMessage(), translator, TypeScriptExpressionTranslator.NameMode.Property);
         }
 
         foreach (Transition tr in transitions)
@@ -562,7 +562,7 @@ public sealed partial class TypeScriptEmitter
             // Inside a static factory the guard refers to parameters/`id` (no `this`); reuse the
             // guard renderer but it will reference `this.*` only for members, which a factory's
             // requires must not do — Koine validates that, so parameters/id render verbatim.
-            WriteGuard(sb, name, req.Condition, req.Message ?? SynthesizeMessage(req.Condition), translator, TypeScriptExpressionTranslator.NameMode.Property);
+            WriteGuard(sb, name, req.Condition, req.Message ?? SynthesizeMessage(), translator, TypeScriptExpressionTranslator.NameMode.Property);
         }
 
         // Build the all-args constructor call: an explicit `field <- value` init wins; otherwise a
@@ -809,5 +809,5 @@ public sealed partial class TypeScriptEmitter
     }
 
     /// <summary>A readable fallback rule message synthesized from a condition (mirrors the C# emitter's intent).</summary>
-    private static string SynthesizeMessage(Expr condition) => "invariant failed";
+    private static string SynthesizeMessage() => "invariant failed";
 }

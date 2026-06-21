@@ -181,13 +181,6 @@ public static class Consumers
             "IGatewayToPaymentTranslator maps a gateway GatewayResult into a PaymentReceipt");
     }
 
-    private static void Require(bool condition, string what)
-    {
-        if (!condition)
-        {
-            throw new Exception($"DEMO ASSERTION FAILED: {what}");
-        }
-
-        Console.WriteLine($"  ok  {what}");
-    }
+    private static void Require(bool condition, string what) =>
+        Console.WriteLine(condition ? $"  ok  {what}" : throw new Exception($"DEMO ASSERTION FAILED: {what}"));
 }
