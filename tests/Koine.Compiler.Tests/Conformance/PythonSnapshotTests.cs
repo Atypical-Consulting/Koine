@@ -110,6 +110,16 @@ public class PythonSnapshotTests
               find mostRecent(customer: CustomerId): Order
             }
           }
+
+          /// A flat projection of an order for a summary board (R12.3): direct fields copy the
+          /// source, the derived `lineCount` translates its projection rooted at the source.
+          readmodel OrderSummary from Order {
+            id
+            customer
+            status
+            total
+            lineCount: Int = lines.count
+          }
         }
         """;
 

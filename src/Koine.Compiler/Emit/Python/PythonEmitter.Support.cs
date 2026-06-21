@@ -41,6 +41,10 @@ public sealed partial class PythonEmitter
         public const string Enums = "enums";
         public const string Events = "events";
         public const string Repositories = "repositories";
+        public const string ReadModels = "read_models";
+        public const string Queries = "queries";
+        public const string Policies = "policies";
+        public const string Abstractions = "abstractions";
     }
 
     /// <summary>
@@ -393,6 +397,15 @@ public sealed partial class PythonEmitter
                 break;
             case IntegrationEventDecl iev:
                 Add(locations, context, iev.Name, ns, KindFolder.Events);
+                break;
+            // A read model's DTO is referenced by its queries' handler Protocols (and other
+            // contexts); register it so the cross-module import resolves to read_models/.
+            case ReadModelDecl rm:
+                Add(locations, context, rm.Name, ns, KindFolder.ReadModels);
+                break;
+            // A query DTO may be referenced cross-module; register it in queries/.
+            case QueryDecl q:
+                Add(locations, context, q.Name, ns, KindFolder.Queries);
                 break;
         }
     }

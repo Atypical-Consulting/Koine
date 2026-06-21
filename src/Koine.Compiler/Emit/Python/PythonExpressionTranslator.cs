@@ -58,12 +58,17 @@ internal sealed class PythonExpressionTranslator
     // enum member where a comparison hint does not reach.
     private string? _expectedEnum;
 
+    // The receiver a `NameMode.Property` member renders against — `self` inside an entity body,
+    // or a supplied parameter name (e.g. `src`) for a read-model projection rooted at the source.
+    private readonly string _memberReceiver;
+
     public PythonExpressionTranslator(
         ModelIndex index,
         IReadOnlyList<Member> members,
         IReadOnlyDictionary<string, string> enumMemberToType,
         PythonTypeMapper typeMapper,
-        string? context = null)
+        string? context = null,
+        string memberReceiver = "self")
     {
         _index = index;
         _resolver = new TypeResolver(index, context);
@@ -71,6 +76,7 @@ internal sealed class PythonExpressionTranslator
         _scope = TypeScope.FromMembers(members, index);
         _memberNames = new HashSet<string>(members.Select(m => m.Name), StringComparer.Ordinal);
         _enumMemberToType = enumMemberToType;
+        _memberReceiver = memberReceiver;
     }
 
     public void PushLocal(string name, TypeRef? type = null)
@@ -391,7 +397,7 @@ internal sealed class PythonExpressionTranslator
         {
             if (_mode == NameMode.Property)
             {
-                sb.Append("self.");
+                sb.Append(_memberReceiver).Append('.');
             }
             sb.Append(PythonNaming.EscapeIdentifier(PythonNaming.ToSnakeCase(name)));
             return;

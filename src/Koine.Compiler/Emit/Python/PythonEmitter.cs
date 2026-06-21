@@ -181,6 +181,12 @@ public sealed partial class PythonEmitter : IEmitter
             case IntegrationEventDecl iev:
                 files.Add(EmitEvent(emit, iev.Name, iev.Doc, iev.Members, ns, typeMapper));
                 break;
+            // A read model emits a flat frozen-dataclass DTO + a pure `to_<name>(src)` projection
+            // (R12.3); a query emits a DTO + a `QueryHandler` Protocol seam (R12.4). Both are
+            // context-level TypeDecls routed here.
+            case ReadModelDecl rm:
+                files.Add(EmitReadModel(emit, rm, ns, typeMapper));
+                break;
             // An aggregate emits each nested type (the root at the context package root, the rest in
             // their kind folders) followed by the root's persistence-ignorant repository Protocol.
             case AggregateDecl agg:
