@@ -63,6 +63,13 @@ internal sealed class UsingCollector
     }
 
     /// <summary>
+    /// Adds a namespace the caller knows the file requires unconditionally — used by the
+    /// Infrastructure layer (issue #128) to inject the EF Core / DI namespaces, whose presence cannot
+    /// be inferred from a body-token scan. Deduped like every other add; sorted by the final ordering.
+    /// </summary>
+    public void Require(string ns) => Add(ns);
+
+    /// <summary>
     /// Adds every namespace whose runtime/BCL markers appear in <paramref name="body"/>.
     /// <paramref name="usesLinq"/> is passed in (not scanned) because <c>.Count</c> (a
     /// property) and <c>.Count()</c> (a LINQ call) are indistinguishable by a token scan.

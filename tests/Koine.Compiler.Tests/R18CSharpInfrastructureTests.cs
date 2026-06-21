@@ -153,4 +153,62 @@ public class R18CSharpInfrastructureTests
         var (asm, errors) = TestSupport.Compile(new[] { new EmittedFile("Probe.cs", snippet) });
         asm.ShouldNotBeNull(string.Join("\n", errors));
     }
+
+    // ----------------------------------------------------------------------
+    // DbContext + entity configurations (Task 3)
+    // ----------------------------------------------------------------------
+
+    private static readonly CSharpEmitterOptions Infrastructure = new(
+        new Dictionary<string, string>(StringComparer.Ordinal),
+        Layers: new HashSet<CSharpLayer> { CSharpLayer.Domain, CSharpLayer.Infrastructure });
+
+    private static EmittedFile File(IReadOnlyList<EmittedFile> files, string suffix) =>
+        files.Single(f => f.RelativePath.EndsWith(suffix, StringComparison.Ordinal));
+
+    [Fact]
+    public void Infrastructure_emits_a_dbcontext_with_a_dbset_per_aggregate()
+    {
+        var files = Emit(Infrastructure);
+        var db = File(files, "Sales/Infrastructure/SalesDbContext.cs");
+
+        db.Contents.ShouldContain("public class SalesDbContext : DbContext");
+        db.Contents.ShouldContain("public DbSet<Order> Orders => Set<Order>();");
+        db.Contents.ShouldContain("modelBuilder.ApplyConfiguration(new OrderConfiguration());");
+        db.Contents.ShouldContain("using Microsoft.EntityFrameworkCore;");
+    }
+
+    [Fact]
+    public void Entity_configuration_maps_key_owned_type_rowversion_and_enum()
+    {
+        var files = Emit(Infrastructure);
+        var cfg = File(files, "Sales/Infrastructure/OrderConfiguration.cs");
+
+        cfg.Contents.ShouldContain("public sealed class OrderConfiguration : IEntityTypeConfiguration<Order>");
+        cfg.Contents.ShouldContain("builder.HasKey(x => x.Id);");
+        cfg.Contents.ShouldContain(".HasConversion(id => id.Value, value => new OrderId(value));");
+        cfg.Contents.ShouldContain("builder.Property(x => x.Version).IsRowVersion();");
+        // Value object → owned type.
+        cfg.Contents.ShouldContain("builder.OwnsOne(x => x.Total,");
+        // Smart enum → shared value converter.
+        cfg.Contents.ShouldContain("builder.Property(x => x.Status).HasConversion(SalesValueConverters.OrderStatusConverter);");
+    }
+
+    [Fact]
+    public void Infrastructure_emits_a_shared_value_converter_per_smart_enum()
+    {
+        var files = Emit(Infrastructure);
+        var conv = File(files, "Sales/Infrastructure/SalesValueConverters.cs");
+
+        conv.Contents.ShouldContain("public static class SalesValueConverters");
+        conv.Contents.ShouldContain("public static readonly ValueConverter<OrderStatus, string> OrderStatusConverter =");
+        conv.Contents.ShouldContain("new(v => v.Name, v => OrderStatus.FromName(v));");
+    }
+
+    [Fact]
+    public void The_generated_infrastructure_layer_compiles()
+    {
+        var files = Emit(Infrastructure);
+        var (asm, errors) = TestSupport.Compile(files);
+        asm.ShouldNotBeNull(string.Join("\n", errors));
+    }
 }
