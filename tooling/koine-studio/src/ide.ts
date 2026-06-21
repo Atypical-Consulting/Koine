@@ -1078,6 +1078,7 @@ export function init(): void {
       } else {
         outlineView.innerHTML = '';
         outlineView.appendChild(renderModelOutline(model, outlineHandlers));
+        applySelectionHighlight();
       }
       docViewsLoaded.outline = true;
     } catch (e) {
@@ -1144,9 +1145,21 @@ export function init(): void {
     }
   }
 
-  // Keep the inspector in step with the selection while it is the visible tab.
+  // Cross-highlight: mark the selected element in both the outline and the diagram (best-effort, by
+  // qualified name). Re-applied after either view re-renders so the highlight survives a refresh.
+  function applySelectionHighlight(): void {
+    const q = selectionBus.get()?.qualifiedName ?? null;
+    for (const container of [outlineView, diagramsView]) {
+      for (const node of container.querySelectorAll<HTMLElement>('[data-qname]')) {
+        node.classList.toggle('koi-selected', q != null && node.getAttribute('data-qname') === q);
+      }
+    }
+  }
+
+  // Keep the inspector + cross-highlight in step with the selection while the relevant tab is visible.
   selectionBus.subscribe(() => {
     if (activeView === 'inspector') void loadInspector();
+    applySelectionHighlight();
   });
 
   // Live domain diagrams: fetch the DocsEmitter output (Mermaid-in-Markdown) and render it.
@@ -1160,7 +1173,10 @@ export function init(): void {
       const res = await lsp.livingDocs();
       if (seq !== diagramsSeq) return;
       await renderDiagrams(diagramsView, res.files, currentTheme(), () => seq === diagramsSeq);
-      if (seq === diagramsSeq) docViewsLoaded.diagrams = true;
+      if (seq === diagramsSeq) {
+        docViewsLoaded.diagrams = true;
+        applySelectionHighlight();
+      }
     } catch (e) {
       if (seq === diagramsSeq) docMessage(diagramsView, 'Diagrams request failed: ' + String(e), 'error');
     }

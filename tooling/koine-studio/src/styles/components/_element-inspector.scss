@@ -1,0 +1,73 @@
+/* --- element inspector (#142): read-only details for the selected domain element --- */
+.koi-inspector {
+  display: flex;
+  flex-direction: column;
+  gap: var(--koi-space-3);
+  padding: var(--koi-space-2);
+}
+
+.koi-inspector-empty {
+  padding: var(--koi-space-2);
+}
+
+.koi-inspector-head {
+  display: flex;
+  align-items: center;
+  gap: var(--koi-space-2);
+  flex-wrap: wrap;
+}
+
+.koi-inspector-name {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  color: var(--koi-fg);
+  font-family: var(--koi-font-body);
+  font-weight: 600;
+  font-size: var(--koi-text-lg, var(--koi-text-base-plus));
+  padding: 0;
+}
+
+.koi-inspector-name:hover:not(:disabled) {
+  text-decoration: underline;
+}
+
+.koi-inspector-name:disabled {
+  cursor: default;
+}
+
+.koi-inspector-stereotype {
+  font-family: var(--koi-font-mono);
+  font-size: 0.66rem;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  color: var(--koi-accent);
+  background: color-mix(in srgb, var(--koi-accent) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--koi-accent) 30%, var(--koi-line));
+  border-radius: var(--koi-radius-xs);
+  padding: 0 var(--koi-space-1-25);
+}
+
+.koi-inspector-section h4 {
+  margin: 0 0 var(--koi-space-1) 0;
+  font-family: var(--koi-font-mono);
+  font-size: 0.66rem;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  color: var(--koi-fg-muted, var(--koi-accent));
+}
+
+.koi-inspector-section ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--koi-space-0-75);
+}
+
+.koi-inspector-section li {
+  font-family: var(--koi-font-mono);
+  font-size: var(--koi-text-base-plus);
+  color: var(--koi-fg);
+}

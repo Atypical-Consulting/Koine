@@ -49,3 +49,81 @@
 .outline-name {
   font-family: var(--koi-font-mono);
 }
+
+/* --- model outline (#142): construct-grouped, model-wide navigator --- */
+.koi-outline {
+  display: flex;
+  flex-direction: column;
+  gap: var(--koi-space-2);
+}
+
+.koi-outline-empty {
+  padding: var(--koi-space-2);
+}
+
+.koi-outline-ctx-head {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  color: var(--koi-fg);
+  font-family: var(--koi-font-body);
+  font-weight: 600;
+  font-size: var(--koi-text-base-plus);
+  padding: var(--koi-space-0-75) var(--koi-space-1-5);
+  border-radius: var(--koi-radius-xs);
+}
+
+.koi-outline-ctx-head:hover:not(:disabled) {
+  background: var(--koi-surface);
+}
+
+.koi-outline-ctx-head:disabled {
+  cursor: default;
+}
+
+.koi-outline-construct {
+  margin-left: var(--koi-space-2);
+}
+
+.koi-outline-construct-head {
+  display: block;
+  font-family: var(--koi-font-mono);
+  font-size: 0.66rem;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  color: var(--koi-fg-muted, var(--koi-accent));
+  padding: var(--koi-space-0-75) var(--koi-space-1-5);
+}
+
+.koi-outline-leaf {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  color: var(--koi-fg);
+  font-family: var(--koi-font-mono);
+  font-size: var(--koi-text-base-plus);
+  padding: var(--koi-space-0-75) var(--koi-space-1-5);
+  margin-left: var(--koi-space-2);
+  border-radius: var(--koi-radius-xs);
+}
+
+.koi-outline-leaf:hover {
+  background: var(--koi-surface);
+}
+
+/* Shared cross-highlight (#142): the selected element in the outline and the diagram. */
+.koi-outline-leaf.koi-selected {
+  background: color-mix(in srgb, var(--koi-accent) 18%, transparent);
+  box-shadow: inset 2px 0 0 var(--koi-accent);
+}
+
+.koi-svg-node.koi-selected .koi-svg-node-box {
+  stroke: var(--koi-accent);
+  stroke-width: 2.5px;
+}
