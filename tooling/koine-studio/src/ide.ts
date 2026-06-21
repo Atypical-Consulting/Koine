@@ -6,10 +6,8 @@ import {
   KoineLsp,
   type CheckResult,
   type ContextMapResult,
-  type DiagramNode,
   type DocsResult,
   type GlossaryEntry,
-  type GlossaryModel,
   type Location,
   type LspDiagnostic,
   type Range,
@@ -39,6 +37,7 @@ import { renderGlossary, type GlossaryHandlers } from './glossary';
 import { createSelectionBus } from './selection';
 import { renderModelOutline, type ModelOutlineHandlers } from './modelOutline';
 import { buildInspectorElement, renderInspector, type InspectorElement, type InspectorHandlers } from './inspector';
+import { buildModelIndex, lookupElement, type ModelIndex } from './modelIndex';
 import { createAssistantPanel, type AssistantPanel, type AssistantContext, type DomainIndex } from './aiPanel';
 import { clearModelHash, readModelFromHash, workspaceShareUrlOrNull } from './share';
 import { dirtyCount, handleBeforeUnload, saveAllDirtyBuffers, titleWithDirty } from './dirty';
@@ -1056,93 +1055,62 @@ export function init(): void {
     onGoto: (range) => editor.gotoRange(range.start, range.end),
   };
 
-  // The joined model index (#142): the workspace-merged glossary (the complete type inventory, the
-  // outline backbone) joined with the richest matching `DiagramNode` (stereotype + member rows, the
-  // inspector source). `byQn` is keyed by the glossary qualified name — the canonical selection key;
-  // `qnByCtxName` maps a diagram node's `context.simpleName` back to that canonical key (diagram nodes
-  // are named `context.name`, not the glossary's `context.aggregate.name`). Cached, invalidated on edit.
-  interface ModelIndex {
-    glossary: GlossaryModel;
-    byQn: Map<string, { entry: GlossaryEntry; node?: DiagramNode }>;
-    qnByCtxName: Map<string, string>;
-  }
+  // The joined model index (#142, see modelIndex.ts): the workspace-merged glossary joined with the
+  // richest matching `DiagramNode`. Cached and invalidated on edit; `indexPromise` de-dups concurrent
+  // builders (the Model tab opening AND a diagram click can both request it before the fetch resolves).
+  // `inspectorHost` is the live DOM node the inspector renders into — null whenever the Model view is
+  // showing a message instead of the workspace, so a selection render never targets a detached node.
   let modelIndex: ModelIndex | null = null;
+  let indexPromise: Promise<ModelIndex> | null = null;
   let inspectorHost: HTMLElement | null = null;
 
-  /** A node is "richer" the more class-body rows + stereotype it carries (prefer the aggregate node). */
-  function nodeRichness(node: DiagramNode): number {
-    return (node.members?.length ?? 0) + (node.stereotype ? 1 : 0);
-  }
-
-  function buildModelIndex(glossary: GlossaryModel, docs: DocsResult): ModelIndex {
-    // Merge every diagram node by its `context.simpleName`, keeping the richest (the aggregate class
-    // node beats the bare state/box node of the same name).
-    const nodesByCtxName = new Map<string, DiagramNode>();
-    for (const file of docs.files) {
-      for (const diagram of file.diagrams) {
-        for (const node of diagram.graph.nodes) {
-          const existing = nodesByCtxName.get(node.qualifiedName);
-          if (!existing || nodeRichness(node) > nodeRichness(existing)) {
-            nodesByCtxName.set(node.qualifiedName, node);
-          }
-        }
-      }
-    }
-    const byQn = new Map<string, { entry: GlossaryEntry; node?: DiagramNode }>();
-    const qnByCtxName = new Map<string, string>();
-    for (const entry of glossary.entries) {
-      if (entry.kind === 'context') continue;
-      const ctxName = `${entry.context}.${entry.name}`;
-      byQn.set(entry.qualifiedName, { entry, node: nodesByCtxName.get(ctxName) });
-      if (!qnByCtxName.has(ctxName)) qnByCtxName.set(ctxName, entry.qualifiedName);
-    }
-    return { glossary, byQn, qnByCtxName };
-  }
-
   /** Build (or reuse) the joined model index. `livingDocs` is best-effort — a glossary-only index still works. */
-  async function ensureModelIndex(): Promise<ModelIndex> {
-    if (modelIndex) return modelIndex;
-    const [glossary, docs] = await Promise.all([
+  function ensureModelIndex(): Promise<ModelIndex> {
+    if (modelIndex) return Promise.resolve(modelIndex);
+    indexPromise ??= Promise.all([
       lsp.glossaryModel(),
       lsp.livingDocs().catch(() => ({ files: [] }) as DocsResult),
-    ]);
-    modelIndex = buildModelIndex(glossary, docs);
-    return modelIndex;
+    ])
+      .then(([glossary, docs]) => (modelIndex = buildModelIndex(glossary, docs)))
+      .finally(() => {
+        indexPromise = null;
+      });
+    return indexPromise;
   }
 
   // Cross-highlight (#142, Task 4): mark the outline leaf — and the diagram node, best-effort — that
-  // matches the current selection, so selecting in one surface lights up the other. The outline keys
-  // on the canonical glossary qualified name; the SVG nodes key on `context.simpleName`, so map the
-  // selected element back through its glossary entry.
+  // matches the current selection, so selecting in one surface lights up the other. `lookupElement`
+  // resolves either key form to the canonical glossary qualified name (the outline leaves' key); the
+  // SVG nodes key on `context.simpleName`, derived from the resolved element.
   function applySelectionHighlight(): void {
     const sel = selection.get();
+    const hit = sel && modelIndex ? lookupElement(modelIndex, sel.qualifiedName) : null;
+    const canonicalQn = hit?.canonicalQn ?? sel?.qualifiedName ?? null;
     for (const leaf of Array.from(modelView.querySelectorAll<HTMLElement>('.koi-model-leaf'))) {
-      leaf.classList.toggle('is-selected', !!sel && leaf.dataset.qname === sel.qualifiedName);
+      leaf.classList.toggle('is-selected', canonicalQn != null && leaf.dataset.qname === canonicalQn);
     }
-    let ctxName: string | null = null;
-    if (sel && modelIndex) {
-      const hit = modelIndex.byQn.get(sel.qualifiedName);
-      if (hit) ctxName = `${hit.entry.context}.${hit.entry.name}`;
-    }
+    const ctxName = hit ? `${hit.element.entry.context}.${hit.element.entry.name}` : null;
     for (const node of Array.from(diagramsView.querySelectorAll<HTMLElement>('.koi-svg-node'))) {
       node.classList.toggle('is-selected', ctxName != null && node.dataset.qname === ctxName);
     }
   }
 
   // Project the current selection through the index into an inspector element and (re)render it into
-  // the model workspace's inspector host. No host (Model tab not opened yet) or no index → no-op.
+  // the model workspace's inspector host. No host (Model tab not showing the workspace) or no index → no-op.
   function renderSelectedInspector(): void {
     if (!inspectorHost) return;
     const sel = selection.get();
-    let element: InspectorElement | null = null;
-    if (sel && modelIndex) {
-      const hit = modelIndex.byQn.get(sel.qualifiedName);
-      if (hit) element = buildInspectorElement(hit.entry, hit.node);
-    }
+    const hit = sel && modelIndex ? lookupElement(modelIndex, sel.qualifiedName) : null;
+    const element: InspectorElement | null = hit
+      ? buildInspectorElement(hit.element.entry, hit.element.node)
+      : null;
     inspectorHost.replaceChildren(renderInspector(element, inspectorHandlers));
   }
 
   async function loadModel(): Promise<void> {
+    // A message replaces the workspace, so the previous inspector host (if any) is now detached —
+    // drop the reference up front so a concurrent selection render can't target an orphaned node.
+    inspectorHost = null;
     docMessage(modelView, 'Loading model…');
     try {
       const index = await ensureModelIndex();
@@ -1283,7 +1251,12 @@ export function init(): void {
     docViewsLoaded.diagrams = false;
     docViewsLoaded.contextmap = false;
     docViewsLoaded.outline = false;
-    modelIndex = null; // the joined glossary+diagram index (#142) is rebuilt on the next Model load
+    // The joined glossary+diagram index (#142) and its in-flight builder are stale — drop both so the
+    // next Model load rebuilds against the current model. The inspector host belongs to the about-to-be
+    // -replaced workspace DOM; null it so a selection render in the gap can't target a detached node.
+    modelIndex = null;
+    indexPromise = null;
+    inspectorHost = null;
     cachedDomainIndex = null; // the assistant's domain index is derived from the same model
   }
 

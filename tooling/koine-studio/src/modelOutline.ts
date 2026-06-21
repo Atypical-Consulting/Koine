@@ -9,6 +9,7 @@
 // it is NOT the outline backbone because its aggregate diagrams only enumerate nested types, so a
 // top-level value object would be missed — the glossary lists them all.
 import type { GlossaryEntry, GlossaryModel } from './lsp';
+import { groupByContext } from './glossary';
 
 /**
  * The DDD construct buckets, in the display order the navigator renders them. Each maps the glossary
@@ -63,44 +64,39 @@ export interface ModelOutlineHandlers {
  * empty construct buckets are dropped. Within a bucket, entries keep declaration order.
  */
 export function groupByConstruct(model: GlossaryModel): ContextGroup[] {
-  const groups: ContextGroup[] = [];
-  const byContext = new Map<string, ContextGroup>();
-
-  for (const e of model.entries) {
-    let group = byContext.get(e.context);
-    if (!group) {
-      group = { context: e.context, contextEntry: null, constructs: [] };
-      byContext.set(e.context, group);
-      groups.push(group);
-    }
-    if (e.kind === 'context') {
-      group.contextEntry ??= e;
-      continue;
-    }
-    const label = LABEL_OF_KIND.get(e.kind) ?? 'Types';
-    let bucket = group.constructs.find((c) => c.label === label);
-    if (!bucket) {
-      bucket = { label, entries: [] };
-      group.constructs.push(bucket);
-    }
-    bucket.entries.push(e);
-  }
-
-  // Re-order each context's buckets into the canonical construct order (input order is declaration
-  // order, which need not match the display order).
   const order = new Map(CONSTRUCTS.map((c, i) => [c.label, i] as const));
-  for (const group of groups) {
-    group.constructs.sort((a, b) => (order.get(a.label) ?? 0) - (order.get(b.label) ?? 0));
-  }
-  return groups;
+  // Reuse the glossary's proven context grouping (first-seen context + entry order) so the Model and
+  // Glossary tabs always present the same contexts in the same order; then bucket each by construct.
+  return groupByContext(model.entries).map((g) => {
+    let contextEntry: GlossaryEntry | null = null;
+    const constructs: ConstructGroup[] = [];
+    for (const e of g.entries) {
+      if (e.kind === 'context') {
+        contextEntry ??= e;
+        continue;
+      }
+      const label = LABEL_OF_KIND.get(e.kind) ?? 'Types';
+      let bucket = constructs.find((c) => c.label === label);
+      if (!bucket) {
+        bucket = { label, entries: [] };
+        constructs.push(bucket);
+      }
+      bucket.entries.push(e);
+    }
+    // Re-order buckets into the canonical construct order (declaration order need not match display).
+    constructs.sort((a, b) => (order.get(a.label) ?? 0) - (order.get(b.label) ?? 0));
+    return { context: g.context, contextEntry, constructs };
+  });
+}
+
+/** The construct tallies of a single context group — the one source for both the counts strip and {@link countsByContext}. */
+export function countsForGroup(group: ContextGroup): ConstructCount[] {
+  return group.constructs.map((c) => ({ label: c.label, count: c.entries.length }));
 }
 
 /** Per-context construct tallies, derived from {@link groupByConstruct} (only present buckets). */
 export function countsByContext(model: GlossaryModel): { context: string; counts: ConstructCount[] }[] {
-  return groupByConstruct(model).map((g) => ({
-    context: g.context,
-    counts: g.constructs.map((c) => ({ label: c.label, count: c.entries.length })),
-  }));
+  return groupByConstruct(model).map((g) => ({ context: g.context, counts: countsForGroup(g) }));
 }
 
 /** A small count badge, e.g. `Aggregates 1`, used in both the counts strip and construct headers. */
@@ -156,11 +152,11 @@ function renderContext(group: ContextGroup, handlers: ModelOutlineHandlers): HTM
   }
   section.appendChild(header);
 
-  // Compact per-context counts strip.
+  // Compact per-context counts strip (shares countsForGroup with countsByContext — one tally source).
   const counts = document.createElement('div');
   counts.className = 'koi-model-counts';
-  for (const c of group.constructs) {
-    counts.appendChild(countBadge('koi-model-count', c.label, c.entries.length));
+  for (const c of countsForGroup(group)) {
+    counts.appendChild(countBadge('koi-model-count', c.label, c.count));
   }
   section.appendChild(counts);
 
