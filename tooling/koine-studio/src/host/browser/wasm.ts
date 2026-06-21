@@ -14,6 +14,14 @@ export interface KoineWasmApi {
   Glossary(filesJson: string): string;
   /** Structured glossary for the merged workspace → JSON `{entries}`. */
   GlossaryModel(filesJson: string): string;
+  /** Structured model graph (whole tree, or the subtree at `qname`) → JSON ModelNode (#91). */
+  Model(filesJson: string, qname: string | null): string;
+  /** Editable children of the node at `qname` → JSON `{members}` (#91). */
+  ModelMembers(filesJson: string, qname: string): string;
+  /** Apply a structured edit → JSON `{koine, diagnostics}` (#91). */
+  EmitKoine(filesJson: string, editJson: string): string;
+  /** Apply a structured edit → JSON `{uri, edits, diagnostics}` (#91). */
+  ApplyModelEdit(filesJson: string, editJson: string): string;
   /** Strategic context map → JSON `{contexts, relations}`. */
   ContextMap(filesJson: string): string;
   /** Set a declaration's doc comment by id → JSON `{uri, edits:[TextEdit]}`. */
