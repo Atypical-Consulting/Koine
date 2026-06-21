@@ -32,6 +32,7 @@ import { buildSourceZip } from './sourceZip';
 import { formatChord } from './platform';
 import { renderDiagrams } from './diagrams';
 import { NODE_NAVIGATE_EVENT, type DiagramNodeNavigateDetail } from './diagrams-svg';
+import { createSelectionBus } from './selection';
 import { renderGlossary, type GlossaryHandlers } from './glossary';
 import { createAssistantPanel, type AssistantPanel, type AssistantContext, type DomainIndex } from './aiPanel';
 import { clearModelHash, readModelFromHash, workspaceShareUrlOrNull } from './share';
@@ -918,6 +919,9 @@ export function init(): void {
     check: checkView,
   };
   let activeView: RightView = 'preview';
+  // The shared selected-element bus (#142): set when a node is clicked in the diagram or the model
+  // outline, consumed by the element inspector and cross-highlighting.
+  const selectionBus = createSelectionBus();
   // Track which doc-based views need a (re)fetch — invalidated on every edit so a tab
   // switch always shows data for the current model rather than a stale render. The check
   // view (on-demand via the Check button) and the assistant (interactive) are excluded.
@@ -1107,7 +1111,23 @@ export function init(): void {
 
   diagramsView.addEventListener(NODE_NAVIGATE_EVENT, (e) => {
     const detail = (e as CustomEvent<DiagramNodeNavigateDetail>).detail;
-    if (detail) void navigateToDiagramNode(detail);
+    if (!detail) return;
+    // A diagram click is also a selection: feed the inspector before jumping to source. The navigate
+    // detail carries the raw 1-based span coords (no offset/length), enough for the inspector + goto.
+    selectionBus.set({
+      qualifiedName: detail.qualifiedName,
+      context: detail.qualifiedName.split('.')[0] ?? detail.qualifiedName,
+      span: {
+        file: detail.file,
+        line: detail.line,
+        column: detail.column,
+        endLine: detail.endLine,
+        endColumn: detail.endColumn,
+        offset: 0,
+        length: 0,
+      },
+    });
+    void navigateToDiagramNode(detail);
   });
 
   function ensureLoaded(view: RightView): void {
