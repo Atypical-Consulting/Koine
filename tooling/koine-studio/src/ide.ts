@@ -1110,10 +1110,15 @@ export function init(): void {
     },
   };
   let nodeIndex: Map<string, DiagramNode> | null = null;
+  // Monotonic token so a livingDocs() fetch that an edit superseded mid-flight doesn't install a stale
+  // graph (invalidateDocViews bumps it). Mirrors the diagramsSeq guard.
+  let nodeIndexSeq = 0;
 
-  async function ensureNodeIndex(): Promise<Map<string, DiagramNode>> {
-    if (!nodeIndex) nodeIndex = buildNodeIndex(await lsp.livingDocs());
-    return nodeIndex;
+  async function ensureNodeIndex(): Promise<void> {
+    if (nodeIndex) return;
+    const seq = ++nodeIndexSeq;
+    const built = buildNodeIndex(await lsp.livingDocs());
+    if (seq === nodeIndexSeq) nodeIndex = built;
   }
 
   /** A header-only node for a selection that has no diagram graph node (e.g. a top-level value object). */
@@ -1253,6 +1258,7 @@ export function init(): void {
     docViewsLoaded.contextmap = false;
     docViewsLoaded.outline = false;
     nodeIndex = null; // the inspector's node index is derived from the same model
+    nodeIndexSeq++; // discard any livingDocs() fetch still in flight for the inspector
     cachedDomainIndex = null; // the assistant's domain index is derived from the same model
   }
 

@@ -43,7 +43,6 @@ import { lintGutter, setDiagnostics, type Diagnostic as CmDiagnostic } from '@co
 import type {
   CodeAction,
   CompletionItem,
-  DocumentSymbol,
   HoverResult,
   Location,
   LspDiagnostic,
@@ -825,58 +824,6 @@ export function createKoineEditor(opts: KoineEditorOptions): KoineEditor {
   return editorHandle;
 }
 
-// --- document outline rendering ---------------------------------------------
-
-// Map common SymbolKind numbers to a short label badge shown before each row.
-const SYMBOL_KIND_LABEL: Record<number, string> = {
-  3: 'ctx', // Namespace / context
-  5: 'class',
-  6: 'method',
-  8: 'field',
-  10: 'enum',
-  13: 'val', // Variable
-  22: 'case', // EnumMember
-  23: 'value', // Struct / value object
-};
-
-/**
- * Render a DocumentSymbol[] tree into nested <ul>/<button> rows. Clicking a row calls
- * `goto(line, col)` with the 1-based position of the symbol's selectionRange (falling
- * back to its range) start.
- */
-export function renderSymbolTree(
-  symbols: DocumentSymbol[],
-  goto: (line: number, col: number) => void,
-): HTMLElement {
-  const build = (nodes: DocumentSymbol[]): HTMLUListElement => {
-    const ul = document.createElement('ul');
-    ul.className = 'outline-list';
-    for (const sym of nodes) {
-      const li = document.createElement('li');
-      const row = document.createElement('button');
-      row.type = 'button';
-      row.className = 'outline-row';
-      const kind = SYMBOL_KIND_LABEL[sym.kind];
-      if (kind) {
-        const badge = document.createElement('span');
-        badge.className = 'outline-kind';
-        badge.textContent = kind;
-        row.appendChild(badge);
-      }
-      const name = document.createElement('span');
-      name.className = 'outline-name';
-      name.textContent = sym.name;
-      row.appendChild(name);
-      const target = sym.selectionRange ?? sym.range;
-      row.addEventListener('click', () => goto(target.start.line + 1, target.start.character + 1));
-      li.appendChild(row);
-      if (sym.children && sym.children.length) li.appendChild(build(sym.children));
-      ul.appendChild(li);
-    }
-    return ul;
-  };
-  return build(symbols);
-}
 
 // --- read-only output viewer ------------------------------------------------
 

@@ -1,55 +1,3 @@
-/* --- outline (document symbol tree) --- */
-.outline-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-}
-
-.outline-list .outline-list {
-  margin-left: var(--koi-space-3-5);
-  border-left: 1px solid var(--koi-line);
-  padding-left: var(--koi-space-1-5);
-}
-
-.outline-row {
-  display: flex;
-  align-items: center;
-  gap: var(--koi-space-2);
-  width: 100%;
-  text-align: left;
-  background: transparent;
-  border: none;
-  color: var(--koi-fg);
-  padding: var(--koi-space-0-75) var(--koi-space-1-5);
-  border-radius: var(--koi-radius-xs);
-  cursor: pointer;
-  font-family: var(--koi-font-body);
-  font-size: var(--koi-text-base-plus);
-}
-
-.outline-row:hover {
-  background: var(--koi-surface);
-}
-
-.outline-kind {
-  flex: 0 0 auto;
-  font-family: var(--koi-font-mono);
-  font-size: 0.66rem;
-  text-transform: uppercase;
-  letter-spacing: 0.3px;
-  color: var(--koi-accent);
-  background: color-mix(in srgb, var(--koi-accent) 12%, transparent);
-  border: 1px solid color-mix(in srgb, var(--koi-accent) 30%, var(--koi-line));
-  border-radius: var(--koi-radius-xs);
-  padding: 0 var(--koi-space-1-25);
-  min-width: 38px;
-  text-align: center;
-}
-
-.outline-name {
-  font-family: var(--koi-font-mono);
-}
-
 /* --- model outline (#142): construct-grouped, model-wide navigator --- */
 .koi-outline {
   display: flex;
@@ -118,7 +66,8 @@
 }
 
 /* Shared cross-highlight (#142): the selected element in the outline and the diagram. */
-.koi-outline-leaf.koi-selected {
+.koi-outline-leaf.koi-selected,
+.koi-outline-ctx-head.koi-selected {
   background: color-mix(in srgb, var(--koi-accent) 18%, transparent);
   box-shadow: inset 2px 0 0 var(--koi-accent);
 }

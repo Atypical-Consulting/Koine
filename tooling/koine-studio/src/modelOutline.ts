@@ -4,6 +4,7 @@
 // once, in declaration order, with its context, kind, and a name range for jump-to-source. Pure DOM
 // builders + pure grouping helpers, mirroring `glossary.ts` so they unit-test under happy-dom.
 import type { GlossaryEntry, GlossaryModel, Range } from './lsp';
+import { groupByContext } from './glossary';
 
 export interface OutlineHandlers {
   /** Select an element (drives the inspector + cross-highlighting). */
@@ -52,33 +53,15 @@ export interface ContextGroup {
 
 /**
  * Group entries by owning context (declaration order preserved), then by construct within each
- * context (in {@link CONSTRUCTS} order). The synthetic `context` entries are dropped — they name the
- * group, they are not leaves — and empty construct buckets are omitted.
+ * context (in {@link CONSTRUCTS} order). Reuses {@link groupByContext} from the glossary for the
+ * context bucketing; the synthetic `context` entries are dropped here — they name the group, they are
+ * not leaves — and empty construct buckets are omitted.
  */
 export function groupByConstruct(entries: GlossaryEntry[]): ContextGroup[] {
-  const groups: ContextGroup[] = [];
-  const byContext = new Map<string, GlossaryEntry[]>();
-  for (const e of entries) {
-    if (e.kind === 'context') {
-      if (!byContext.has(e.context)) {
-        byContext.set(e.context, []);
-        groups.push({ context: e.context, constructs: [] });
-      }
-      continue;
-    }
-    let list = byContext.get(e.context);
-    if (!list) {
-      list = [];
-      byContext.set(e.context, list);
-      groups.push({ context: e.context, constructs: [] });
-    }
-    list.push(e);
-  }
-
-  for (const group of groups) {
-    const members = byContext.get(group.context) ?? [];
+  return groupByContext(entries).map((group) => {
     const byLabel = new Map<string, ConstructGroup>();
-    for (const e of members) {
+    for (const e of group.entries) {
+      if (e.kind === 'context') continue;
       const label = labelFor(e.kind);
       let cg = byLabel.get(label);
       if (!cg) {
@@ -87,9 +70,9 @@ export function groupByConstruct(entries: GlossaryEntry[]): ContextGroup[] {
       }
       cg.entries.push(e);
     }
-    group.constructs = Array.from(byLabel.values()).sort((a, b) => labelOrder(a.label) - labelOrder(b.label));
-  }
-  return groups;
+    const constructs = Array.from(byLabel.values()).sort((a, b) => labelOrder(a.label) - labelOrder(b.label));
+    return { context: group.context, constructs };
+  });
 }
 
 export interface ContextCounts {
@@ -135,6 +118,7 @@ export function renderModelOutline(model: GlossaryModel, handlers: OutlineHandle
     const ctxEntry = contextEntries.get(group.context);
     if (ctxEntry) {
       header.title = 'Go to context';
+      header.setAttribute('data-qname', ctxEntry.qualifiedName);
       header.addEventListener('click', () => {
         handlers.onSelect(ctxEntry);
         handlers.onGoto(ctxEntry.nameRange);
