@@ -1,7 +1,7 @@
 // Koine Studio app composition: wires the .koi editor, the live LSP diagnostics,
 // the status line, the diagnostics strip, and the tabbed inspector (emitted preview,
 // glossary, and context map).
-import { createKoineEditor, createOutputView, renderMarkdown, renderSymbolTree, setEditorDiagnostics } from './editor';
+import { createKoineEditor, createOutputView, renderMarkdown, setEditorDiagnostics } from './editor';
 import {
   KoineLsp,
   type CheckResult,
@@ -35,7 +35,7 @@ import {
 import { createWelcome } from './welcome';
 import { type Template } from './templates';
 import { createCommandPalette, type Command } from './palette';
-import { DEFAULT_MODE_ID, MODES, defaultViewForMode, isValidModeId, modeForView, viewsForMode, type RightView } from './modes';
+import { DEFAULT_MODE_ID, MODES, isValidModeId } from './modes';
 import { createPreferences } from './prefs';
 import { applyAppearance } from './appearance';
 import { initSplitResizer, initEdgeResizer } from './resize';
@@ -75,7 +75,7 @@ import {
   type ContextScope,
 } from './activeContext';
 import { createSelectionBus } from './selection';
-import { renderModelOutline, type ModelOutlineHandlers } from './modelOutline';
+import { renderModelOutline, renderOverviewCounts, type ModelOutlineHandlers } from './modelOutline';
 import { buildInspectorElement, renderInspector, type InspectorElement, type InspectorHandlers } from './inspector';
 import { buildModelIndex, lookupElement, type ModelIndex } from './modelIndex';
 import { createAssistantPanel, type AssistantPanel, type AssistantContext, type DomainIndex } from './aiPanel';
@@ -427,6 +427,14 @@ export function init(): void {
   const diagBodyEl = el('diag-body');
   const diagCountEl = el('diag-count');
 
+  // Bottom status-bar fields — a pure projection of existing state (no new data sources). #status stays
+  // in the toolbar; #sb-connection mirrors its kind here. #sb-context is written by the context switcher,
+  // #sb-validity by the diagnostics strip, and #sb-version once at boot from the build-time define.
+  const sbConnEl = el('sb-connection');
+  const sbContextEl = el('sb-context');
+  const sbValidityEl = el('sb-validity');
+  el('sb-version').textContent = `v${__APP_VERSION__}`;
+
   // Bottom-panel (Problems / Events / Relationships, issue #144) state + refs live here — beside the
   // diagnostics refs and initialised before any model invalidation can fire — so `invalidateBottomPanels`
   // (called from `invalidateDocViews`) never touches a not-yet-initialised binding. The tab wiring and
@@ -434,9 +442,11 @@ export function init(): void {
   const diagEl = el('diagnostics');
   const eventsPanel = el('panel-events');
   const relationshipsPanel = el('panel-relationships');
-  type BottomTab = 'problems' | 'events' | 'relationships';
+  // The context map moved from a right-panel tab into the bottom strip's "Context Map" tab (mockup).
+  const contextMapView = el('panel-contextmap');
+  type BottomTab = 'problems' | 'events' | 'relationships' | 'contextmap';
   let activeBottomTab: BottomTab = 'problems';
-  const bottomLoaded = { events: false, relationships: false };
+  const bottomLoaded = { events: false, relationships: false, contextmap: false };
   let bottomPanelDebounce: ReturnType<typeof setTimeout> | undefined;
 
   // Global unsaved-work surfacing: the document title gains a `•` and a clickable "N unsaved" pill
@@ -478,32 +488,33 @@ export function init(): void {
   let folderRootToken: string = '';
   let entriesCache: FsEntry[] = [];
 
-  const treeEl = el<HTMLElement>('filetree');
   const treeBodyEl = el<HTMLElement>('filetree-body');
   const treeTitleEl = el<HTMLElement>('filetree-title');
   const treeBtn = el<HTMLButtonElement>('btn-files');
+  const filesSect = el<HTMLElement>('rail-files');
   const splitEl = el<HTMLElement>('split');
 
-  // File-tree chrome (the left rail + its toolbar toggle). Visibility is a persisted user choice;
-  // the rail track widens to 6px only when the tree is showing.
+  // Open/collapse a left-sidebar section, keeping its header's aria-expanded — and, for the Files
+  // section, the toolbar toggle's aria-pressed — in step. The single source of truth for section state.
+  function setRailSectionOpen(sect: HTMLElement, open: boolean): void {
+    sect.dataset.open = open ? 'true' : 'false';
+    sect.querySelector('.rail-sect-head')?.setAttribute('aria-expanded', String(open));
+    if (sect.id === 'rail-files') treeBtn.setAttribute('aria-pressed', String(open));
+  }
+
+  // The Files section of the single left sidebar is collapsible; #btn-files and the section header both
+  // toggle it, and the choice is persisted. (The file tree no longer has its own column — it's one
+  // section of the unified rail.)
   const FILETREE_VIS_KEY = 'koine.studio.filetree';
   function applyFileTreeVisibility(visible: boolean): void {
-    treeEl.hidden = !visible;
-    treeBtn.setAttribute('aria-pressed', String(visible));
-    // Collapse the tree's grid tracks to 0 when hidden. The width track is driven by
-    // --koi-filetree-w, which the rail resizer pins to a fixed px (and restores from
-    // localStorage on init) — so the track won't auto-collapse just because the pane is
-    // display:none. The class overrides the template; --koi-filetree-w is left intact so the
-    // user's width returns when the tree is shown again.
-    splitEl.classList.toggle('is-filetree-hidden', !visible);
-    splitEl.style.setProperty('--koi-filetree-rail', visible ? '6px' : '0px');
+    setRailSectionOpen(filesSect, visible);
   }
   function showFileTreeChrome(): void {
     treeBtn.hidden = false;
     applyFileTreeVisibility((localStorage.getItem(FILETREE_VIS_KEY) ?? '1') !== '0');
   }
   function toggleFileTree(): void {
-    const visible = Boolean(treeEl.hidden); // currently hidden → reveal
+    const visible = filesSect.dataset.open === 'false'; // currently collapsed → expand
     applyFileTreeVisibility(visible);
     try {
       localStorage.setItem(FILETREE_VIS_KEY, visible ? '1' : '0');
@@ -531,11 +542,22 @@ export function init(): void {
   function setStatus(text: string, kind: 'connecting' | 'green' | 'error'): void {
     statusEl.textContent = text;
     statusEl.dataset.kind = kind;
+    // Mirror the connection state into the status bar as a stable label (the toolbar pill keeps the
+    // live text). "Locale" reflects that the model is compiled in-process, not against a remote server.
+    sbConnEl.textContent = kind === 'connecting' ? 'Connecting…' : kind === 'error' ? 'Offline' : 'Local';
   }
 
   function renderStrip(diags: LspDiagnostic[]): void {
     const errors = diags.filter((d) => d.severity === 1 || d.severity == null).length;
     const warnings = diags.filter((d) => d.severity === 2).length;
+    // Status-bar validity: a plain-language read of the same error count that feeds #diag-count.
+    if (errors) {
+      sbValidityEl.textContent = errors === 1 ? '1 error' : `${errors} errors`;
+      sbValidityEl.dataset.kind = 'error';
+    } else {
+      sbValidityEl.textContent = 'No errors';
+      sbValidityEl.dataset.kind = 'ok';
+    }
     if (!errors && !warnings) {
       diagCountEl.textContent = 'clean';
       diagCountEl.dataset.kind = 'clean';
@@ -996,32 +1018,26 @@ export function init(): void {
   // the same selection; the inspector + outline cross-highlight subscribe to it.
   const selection = createSelectionBus();
 
-  const modelView = el('view-model');
+  // Left-rail hosts (always visible, repainted together from the model): the Explorer construct
+  // tree and the Overview per-context counts.
+  const explorerBody = el('rail-explorer-body');
+  const overviewBody = el('rail-overview-body');
+  // The Documentation center tab's two sub-views: Glossary (the ubiquitous language) and Docs (the
+  // ADR & Notes surface, #174).
   const glossaryView = el('view-glossary');
   const docsView = el('view-docs');
-  const diagramsView = el('view-diagrams');
-  const contextMapView = el('view-contextmap');
-  const outlineView = el('view-outline');
+  // Center hosts: the diagram canvas (Visual) and the code editor's companion sub-views.
+  const diagramsView = el('center-visual');
   const assistantView = el('view-assistant');
   const checkView = el('view-check');
-  const tabs = Array.from(document.querySelectorAll<HTMLButtonElement>('#tabs .tab'));
-  const viewEls: Record<RightView, HTMLElement> = {
-    preview: el('view-preview'),
-    model: modelView,
-    glossary: glossaryView,
-    docs: docsView,
-    diagrams: diagramsView,
-    contextmap: contextMapView,
-    outline: outlineView,
-    assistant: assistantView,
-    check: checkView,
-  };
-  // Active workspace mode (#143): a header-level grouping of the views above. Restore the persisted
-  // mode, defaulting to Domain when it's absent or invalid; the initial active view is that mode's
-  // default, surfaced by the boot chrome (showView, below).
+  // Right-rail host: the element inspector (Properties). Fixed — never torn down on a model reload.
+  const inspectorHost = el('inspector-host');
+
+  // Active workspace mode (#143): the toolbar's Domain/Code/Docs buttons, repointed as region-focus
+  // shortcuts now that each view has a fixed home (Domain → Visual, Code → Code,
+  // Docs → the Documentation tab). Restore the persisted mode, defaulting to Domain when absent/invalid.
   const restoredMode = loadWorkspaceMode();
   let activeMode: string = restoredMode && isValidModeId(restoredMode) ? restoredMode : DEFAULT_MODE_ID;
-  let activeView: RightView = defaultViewForMode(activeMode);
   // The switcher buttons (Domain / Code / Docs) are built from the MODES data — a new mode is one
   // array entry, not new markup — and carry data-mode for the click handler.
   const modeButtons = MODES.map((mode) => {
@@ -1074,6 +1090,7 @@ export function init(): void {
     const scope = activeContext.get();
     if (contextSelect.value !== scope) contextSelect.value = scope;
     contextReadout.textContent = `Current context: ${scopeLabel(scope)}`;
+    sbContextEl.textContent = `Context: ${scopeLabel(scope)}`;
   }
 
   // The single choke point for every scope change (the <select>, a restored value's validation, and
@@ -1148,21 +1165,22 @@ export function init(): void {
   function rerenderScopedSurfaces(): void {
     docViewsLoaded.model = false;
     docViewsLoaded.diagrams = false;
-    if (activeView === 'model') void loadModel();
-    else if (activeView === 'diagrams') void loadDiagrams();
-    invalidateBottomPanels(); // the Events/Relationships tables are graph-derived too
+    // The left-rail Explorer + Overview are always visible, so re-scope them immediately.
+    void loadModel();
+    // The diagram only re-scopes when the visual center is showing it.
+    if (activeCenter === 'visual') void loadDiagrams();
+    invalidateBottomPanels(); // the Events/Relationships/Context Map tables are graph-derived too
   }
 
-  // Track which doc-based views need a (re)fetch — invalidated on every edit so a tab
-  // switch always shows data for the current model rather than a stale render. The check
-  // view (on-demand via the Check button) and the assistant (interactive) are excluded.
-  const docViewsLoaded: Record<'preview' | 'model' | 'glossary' | 'diagrams' | 'contextmap' | 'outline', boolean> = {
+  // Track which lazily-loaded surfaces need a (re)fetch — invalidated on every edit so a switch
+  // always shows data for the current model rather than a stale render. The check view (on-demand via
+  // the Check button) and the assistant (interactive) are excluded. The Explorer/Overview
+  // (model) and Documentation (glossary) are always visible, so they repaint on every edit.
+  const docViewsLoaded: Record<'preview' | 'model' | 'glossary' | 'diagrams', boolean> = {
     preview: false,
     model: false,
     glossary: false,
     diagrams: false,
-    contextmap: false,
-    outline: false,
   };
 
   // The assistant's domain index is another model-derived view (built from the same context-map +
@@ -1271,12 +1289,17 @@ export function init(): void {
     }
   }
 
-  // The Docs tab is the ADR & Notes documentation surface (#147): plain-Markdown architecture
-  // decision records (`docs/adr/NNNN-*.md`) and notes (`docs/notes/*.md`) in the opened workspace,
-  // read and written through docsStore over the host fs. Unlike the model-derived views above it is
-  // folder-derived (not invalidated by `.koi` edits): it reloads when the workspace folder changes
-  // (openFolderPath flips docsLoaded) and after any create/save in the panel. In no-folder mode the
-  // store reports canWrite=false and the panel renders a read-only empty state.
+  // The DDD-aware workspace (#142): the left rail's Explorer (a construct-grouped, per-context
+  // navigator) + Overview (per-context counts) and the right rail's read-only element inspector
+  // (Properties). All are driven by the shared selection bus — clicking a node in the Explorer OR a
+  // diagram selects the same element and refreshes the inspector.
+
+  // The Docs sub-tab of the Documentation center tab is the ADR & Notes documentation surface (#174):
+  // plain-Markdown architecture decision records (`docs/adr/NNNN-*.md`) and notes (`docs/notes/*.md`)
+  // in the opened workspace, read and written through docsStore over the host fs. Unlike the
+  // model-derived views it is folder-derived (not invalidated by `.koi` edits): it reloads when the
+  // workspace folder changes (openFolderPath flips docsLoaded) and after any create/save in the panel.
+  // In no-folder mode the store reports canWrite=false and the panel renders a read-only empty state.
   let docsLoaded = false;
   async function loadDocs(): Promise<void> {
     const store = createDocsStore(platform, folderRootToken);
@@ -1308,28 +1331,49 @@ export function init(): void {
     }
   }
 
-  // The Model tab is the DDD-aware workspace (#142): a construct-grouped, per-context navigator with
-  // per-context counts over the WHOLE model (top), and the read-only element inspector (bottom). Both
-  // are driven by the shared selection bus — clicking a node in the outline OR a diagram selects the
-  // same element and refreshes the inspector.
   const modelOutlineHandlers: ModelOutlineHandlers = {
     onSelect: (entry) => selection.set({ qualifiedName: entry.qualifiedName, context: entry.context }),
     goto: (line, col) => editor.goto(line, col),
-    onOpenContextMap: () => selectView('contextmap'),
-    onOpenGlossary: () => selectView('glossary'),
+    onOpenContextMap: () => selectBottomTab('contextmap'),
+    onOpenGlossary: () => focusDocs(),
   };
   const inspectorHandlers: InspectorHandlers = {
     onGoto: (range) => editor.gotoRange(range.start, range.end),
+    onRename: (element, newName) => void renameElement(element, newName),
+    onSaveDescription: (element, text) => void saveInspectorDescription(element, text),
   };
+
+  // Rename the selected element from the Properties panel, reusing the LSP rename refactor (the same
+  // seam the editor's F2 uses): resolve the workspace edit at the element's name position, then apply it.
+  async function renameElement(element: InspectorElement, newName: string): Promise<void> {
+    try {
+      const edit = await lsp.rename(element.nameRange.start.line, element.nameRange.start.character, newName);
+      if (edit) applyWorkspaceEdit(edit);
+    } catch (e) {
+      setStatus('Rename failed: ' + String(e), 'error');
+    }
+  }
+
+  // Persist the selected element's description from the Properties panel, reusing the glossary's setDoc
+  // seam (writes a `///` doc comment). The applied edit fires onChange → the surfaces refresh.
+  async function saveInspectorDescription(element: InspectorElement, text: string): Promise<void> {
+    try {
+      const result = await lsp.setDoc(element.id, text);
+      if (!result.edits.length) return;
+      if (result.uri && result.uri !== activeUri && buffers.has(result.uri)) activateFile(result.uri);
+      editor.applyEdits(result.edits);
+    } catch (e) {
+      setStatus('Saving description failed: ' + String(e), 'error');
+    }
+  }
 
   // The joined model index (#142, see modelIndex.ts): the workspace-merged glossary joined with the
   // richest matching `DiagramNode`. Cached and invalidated on edit; `indexPromise` de-dups concurrent
-  // builders (the Model tab opening AND a diagram click can both request it before the fetch resolves).
-  // `inspectorHost` is the live DOM node the inspector renders into — null whenever the Model view is
-  // showing a message instead of the workspace, so a selection render never targets a detached node.
+  // builders (a model reload AND a diagram click can both request it before the fetch resolves). The
+  // inspector host (`inspectorHost`, above) is a fixed right-rail node, so a selection render always
+  // has a live target — no detach/null dance.
   let modelIndex: ModelIndex | null = null;
   let indexPromise: Promise<ModelIndex> | null = null;
-  let inspectorHost: HTMLElement | null = null;
 
   /** Build (or reuse) the joined model index. `livingDocs` is best-effort — a glossary-only index still works. */
   function ensureModelIndex(): Promise<ModelIndex> {
@@ -1353,7 +1397,7 @@ export function init(): void {
     const sel = selection.get();
     const hit = sel && modelIndex ? lookupElement(modelIndex, sel.qualifiedName) : null;
     const canonicalQn = hit?.canonicalQn ?? sel?.qualifiedName ?? null;
-    for (const leaf of Array.from(modelView.querySelectorAll<HTMLElement>('.koi-model-leaf'))) {
+    for (const leaf of Array.from(explorerBody.querySelectorAll<HTMLElement>('.koi-model-leaf'))) {
       leaf.classList.toggle('is-selected', canonicalQn != null && leaf.dataset.qname === canonicalQn);
     }
     const ctxName = hit ? `${hit.element.entry.context}.${hit.element.entry.name}` : null;
@@ -1365,9 +1409,8 @@ export function init(): void {
   }
 
   // Project the current selection through the index into an inspector element and (re)render it into
-  // the model workspace's inspector host. No host (Model tab not showing the workspace) or no index → no-op.
+  // the right-rail Properties host. No index / no selection → the inspector's own empty state.
   function renderSelectedInspector(): void {
-    if (!inspectorHost) return;
     const sel = selection.get();
     const hit = sel && modelIndex ? lookupElement(modelIndex, sel.qualifiedName) : null;
     const element: InspectorElement | null = hit
@@ -1376,39 +1419,35 @@ export function init(): void {
     inspectorHost.replaceChildren(renderInspector(element, inspectorHandlers));
   }
 
+  // Repaint the always-visible left rail: the Explorer construct tree + the Overview counts,
+  // both scoped to the active bounded context (#146). The inspector resolves any selection against the
+  // whole model, so only the navigator + counts are narrowed.
   async function loadModel(): Promise<void> {
-    // A message replaces the workspace, so the previous inspector host (if any) is now detached —
-    // drop the reference up front so a concurrent selection render can't target an orphaned node.
-    inspectorHost = null;
-    docMessage(modelView, 'Loading model…');
+    docMessage(explorerBody, 'Loading model…');
     try {
       const index = await ensureModelIndex();
-      // Scope the outline + per-context counts to the active context (#146). The index itself is the
-      // whole model (the inspector still resolves any selection); only the navigator is narrowed.
       const scopedGlossary = scopeGlossaryModel(index.glossary, activeContext.get());
       if (!scopedGlossary.entries.length) {
         docMessage(
-          modelView,
+          explorerBody,
           index.glossary.entries.length
             ? 'No elements in this context — switch to “All contexts” to see the whole model.'
             : 'No elements yet — declare some types, or fix syntax errors to populate the model.',
         );
+        overviewBody.replaceChildren();
+        renderSelectedInspector();
         docViewsLoaded.model = true;
         return;
       }
-      modelView.innerHTML = '';
-      const workspace = document.createElement('div');
-      workspace.className = 'koi-model-workspace';
-      workspace.appendChild(renderModelOutline(scopedGlossary, modelOutlineHandlers));
-      inspectorHost = document.createElement('div');
-      inspectorHost.className = 'koi-model-inspector';
-      workspace.appendChild(inspectorHost);
-      modelView.appendChild(workspace);
+      // Explorer = the construct tree with its inline counts suppressed; the dedicated Overview
+      // section owns the tallies (renderOverviewCounts), so the two never double up.
+      explorerBody.replaceChildren(renderModelOutline(scopedGlossary, modelOutlineHandlers, { counts: false }));
+      overviewBody.replaceChildren(renderOverviewCounts(scopedGlossary));
       renderSelectedInspector();
       applySelectionHighlight();
       docViewsLoaded.model = true;
     } catch (e) {
-      docMessage(modelView, 'Model request failed: ' + String(e), 'error');
+      docMessage(explorerBody, 'Model request failed: ' + String(e), 'error');
     }
   }
 
@@ -1430,33 +1469,6 @@ export function init(): void {
     renderSelectedInspector();
     applySelectionHighlight();
   });
-
-  async function loadContextMap(): Promise<void> {
-    docMessage(contextMapView, 'Loading context map…');
-    try {
-      const res = await lsp.contextMap();
-      contextMapView.innerHTML = `<div class="koi-md">${renderContextMapHtml(res)}</div>`;
-      docViewsLoaded.contextmap = true;
-    } catch (e) {
-      docMessage(contextMapView, 'Context map request failed: ' + String(e), 'error');
-    }
-  }
-
-  async function loadOutline(): Promise<void> {
-    docMessage(outlineView, 'Loading outline…');
-    try {
-      const symbols = await lsp.documentSymbols();
-      if (!symbols.length) {
-        docMessage(outlineView, 'No symbols (the model may have syntax errors).');
-      } else {
-        outlineView.innerHTML = '';
-        outlineView.appendChild(renderSymbolTree(symbols, (line, col) => editor.goto(line, col)));
-      }
-      docViewsLoaded.outline = true;
-    } catch (e) {
-      docMessage(outlineView, 'Outline request failed: ' + String(e), 'error');
-    }
-  }
 
   // Live domain diagrams: fetch the DocsEmitter output (Mermaid-in-Markdown) and render it.
   // Marked loaded only on success so a transient failure re-fetches on the next visit. A monotonic
@@ -1570,116 +1582,193 @@ export function init(): void {
     await navigateToDiagramNode(detail);
   }
 
-  function ensureLoaded(view: RightView): void {
-    if (view === 'preview' && !docViewsLoaded.preview) void loadPreview();
-    if (view === 'model' && !docViewsLoaded.model) void loadModel();
-    if (view === 'glossary' && !docViewsLoaded.glossary) void loadGlossary();
-    if (view === 'docs' && !docsLoaded) void loadDocs();
-    if (view === 'diagrams' && !docViewsLoaded.diagrams) void loadDiagrams();
-    if (view === 'contextmap' && !docViewsLoaded.contextmap) void loadContextMap();
-    if (view === 'outline' && !docViewsLoaded.outline) void loadOutline();
+  // --- center (Visual / Code / Documentation) + right rail + region focus ----
+
+  // The center column toggles between the visual diagram canvas, the technical code view (sub-tabs:
+  // editor / emitted preview / compatibility check / assistant) and the Documentation view (sub-tabs:
+  // Glossary / Docs — the ADR & Notes panel).
+  type CenterView = 'visual' | 'technical' | 'docs';
+  type TechView = 'editor' | 'preview' | 'check' | 'assistant';
+  type DocsView = 'glossary' | 'adr';
+  // The restored mode picks the initial center so the highlighted Domain/Code/Docs button and the
+  // shown center tab agree on boot (Domain → Visual, Code → Code, Docs → Documentation).
+  const centerForMode = (mode: string): CenterView => (mode === 'code' ? 'technical' : mode === 'docs' ? 'docs' : 'visual');
+  let activeCenter: CenterView = centerForMode(activeMode);
+  let activeTech: TechView = 'editor';
+  let activeDocs: DocsView = 'glossary';
+
+  const centerVisualEl = el('center-visual');
+  const centerTechnicalEl = el('center-technical');
+  const centerDocsEl = el('center-docs');
+  const editorPaneEl = el('editor-pane');
+  const previewEl = el('view-preview');
+  const centerTabs = Array.from(document.querySelectorAll<HTMLButtonElement>('.center-tab'));
+  const techTabs = Array.from(document.querySelectorAll<HTMLButtonElement>('.tech-tab'));
+  const docsTabs = Array.from(document.querySelectorAll<HTMLButtonElement>('.docs-tab'));
+
+  // Pure chrome: surface the active center panel + its technical sub-view and mark the tabs. No data
+  // fetch, so the boot frame can land before the workspace document is open.
+  function applyCenterChrome(): void {
+    centerVisualEl.hidden = activeCenter !== 'visual';
+    centerTechnicalEl.hidden = activeCenter !== 'technical';
+    centerDocsEl.hidden = activeCenter !== 'docs';
+    // The bottom strip (Problems/Events/Relationships/Context Map) sits under the canvas/editor — it
+    // serves both Visual and Code, but not Documentation.
+    diagEl.hidden = activeCenter === 'docs';
+    for (const t of centerTabs) t.setAttribute('aria-selected', String(t.dataset.center === activeCenter));
+    const techVisible = activeCenter === 'technical';
+    editorPaneEl.hidden = !(techVisible && activeTech === 'editor');
+    previewEl.hidden = !(techVisible && activeTech === 'preview');
+    checkView.hidden = !(techVisible && activeTech === 'check');
+    assistantView.hidden = !(techVisible && activeTech === 'assistant');
+    for (const t of techTabs) t.setAttribute('aria-selected', String(t.dataset.tech === activeTech));
+    // Documentation sub-views: Glossary (the ubiquitous language) vs the ADR/Notes Docs panel.
+    const docsVisible = activeCenter === 'docs';
+    glossaryView.hidden = !(docsVisible && activeDocs === 'glossary');
+    docsView.hidden = !(docsVisible && activeDocs === 'adr');
+    for (const t of docsTabs) t.setAttribute('aria-selected', String(t.dataset.docs === activeDocs));
+    // CodeMirror measures lazily; revealing it from display:none leaves stale geometry until the next
+    // layout tick, so force a re-measure whenever the editor becomes visible.
+    if (!editorPaneEl.hidden) editor.view.requestMeasure();
   }
 
-  // Mark the cached doc views stale (e.g. after an edit or a file switch).
+  function selectCenter(view: CenterView): void {
+    activeCenter = view;
+    applyCenterChrome();
+    if (view === 'visual' && !docViewsLoaded.diagrams) void loadDiagrams();
+    else if (view === 'technical') ensureTechLoaded();
+    else if (view === 'docs') ensureDocsLoaded();
+  }
+
+  // Lazy-load the active Documentation sub-view: the glossary is model-derived, the Docs (ADR/Notes)
+  // panel is folder-derived.
+  function ensureDocsLoaded(): void {
+    if (activeCenter !== 'docs') return;
+    if (activeDocs === 'glossary' && !docViewsLoaded.glossary) void loadGlossary();
+    else if (activeDocs === 'adr' && !docsLoaded) void loadDocs();
+  }
+
+  function selectDocsTab(view: DocsView): void {
+    activeDocs = view;
+    activeCenter = 'docs';
+    applyCenterChrome();
+    ensureDocsLoaded();
+  }
+
+  function selectTech(view: TechView): void {
+    activeTech = view;
+    activeCenter = 'technical';
+    applyCenterChrome();
+    ensureTechLoaded();
+  }
+
+  // Lazy-load the active technical sub-view: the emitted preview is the only model-derived one; the
+  // editor is live, the check is on-demand, and the assistant is interactive (it re-points to the
+  // current folder's conversation before focus, the single choke point for that swap).
+  function ensureTechLoaded(): void {
+    if (activeCenter !== 'technical') return;
+    if (activeTech === 'preview' && !docViewsLoaded.preview) void loadPreview();
+    else if (activeTech === 'assistant') {
+      const a = ensureAssistant();
+      a.syncWorkspace();
+      a.focusInput();
+    }
+  }
+
+  // Surface the Documentation center tab (the "Docs" mode focus and the Explorer's "Ubiquitous
+  // Language" shortcut both route here).
+  function focusDocs(): void {
+    selectDocsTab('glossary');
+  }
+
+  // Repaint the always-visible left rail (Explorer + Overview + the right-rail Properties inspector) +
+  // whatever the center is currently showing.
+  function refreshActiveSurfaces(): void {
+    void loadModel();
+    if (activeCenter === 'visual') void loadDiagrams();
+    // The glossary is model-derived (refresh on edit); the ADR/Notes Docs panel is folder-derived, so
+    // an edit never invalidates it — it reloads on folder change / its own create/save.
+    else if (activeCenter === 'docs' && activeDocs === 'glossary') void loadGlossary();
+    else if (activeCenter === 'technical') ensureTechLoaded();
+  }
+
+  // Mark the cached, model-derived surfaces stale (e.g. after an edit or a file switch).
   function invalidateDocViews(): void {
     docViewsLoaded.preview = false;
     docViewsLoaded.model = false;
     docViewsLoaded.glossary = false;
     docViewsLoaded.diagrams = false;
-    docViewsLoaded.contextmap = false;
-    docViewsLoaded.outline = false;
     // The joined glossary+diagram index (#142) and its in-flight builder are stale — drop both so the
-    // next Model load rebuilds against the current model. The inspector host belongs to the about-to-be
-    // -replaced workspace DOM; null it so a selection render in the gap can't target a detached node.
+    // next model load rebuilds against the current model.
     modelIndex = null;
     indexPromise = null;
-    inspectorHost = null;
     cachedDomainIndex = null; // the assistant's domain index is derived from the same model
-    invalidateBottomPanels(); // the Events/Relationships tables are model-derived too
+    invalidateBottomPanels(); // the Events/Relationships/Context Map tables are model-derived too
   }
 
-  // An edit makes any cached doc view (preview/glossary/context-map/outline) stale. Mark them
-  // dirty; if one is on screen, refresh it (debounced) so it tracks the model without a manual
-  // click — this is what makes the emitted preview live. Check (on-demand) and the interactive
-  // assistant opt out.
+  // An edit makes the model-derived surfaces stale. Mark them dirty and (debounced) repaint the live
+  // ones — the always-visible left rail plus the active center view — so they track the model without a
+  // manual refresh. This is what makes the emitted preview + the diagram live.
   let editDebounce: ReturnType<typeof setTimeout> | undefined;
   function onDocEdited(): void {
     invalidateDocViews();
     // The set of contexts can change as the model is edited (a context added / renamed / removed), so
     // keep the switcher's options in step — debounced, and regardless of which view is active.
-    const onCheckOrAssistant = activeView === 'check' || activeView === 'assistant';
     clearTimeout(editDebounce);
     editDebounce = setTimeout(() => {
       void refreshContextList();
-      if (!onCheckOrAssistant) ensureLoaded(activeView);
+      refreshActiveSurfaces();
     }, 350);
   }
 
-  // Reflect a mode on the chrome — highlight its switcher button and filter the tab strip to its
-  // views — WITHOUT choosing a view. Idempotent, and it never calls selectView, so selectView (which
-  // calls it through showView) can't recurse. Assistant/Check stay reachable from any mode via the
-  // toolbar Check button and the command palette, so filtering them out of a strip never traps them.
-  function applyMode(id: string): void {
-    // Persist only on a real change: applyMode runs on every view selection (tab click, palette,
-    // shortcut), so an unconditional write would churn localStorage on same-mode navigation. The
-    // chrome below still repaints each call — cheap, idempotent, and it paints the initial boot frame
-    // (where id already equals the restored activeMode, so the guarded write is correctly skipped).
+  // The toolbar's Domain/Code/Docs buttons (#143) are kept as region-focus shortcuts now that every
+  // view has a fixed home. Highlight the active button + persist the choice (only on a real change, so
+  // re-selecting the same mode doesn't churn localStorage).
+  function applyModeChrome(id: string): void {
     if (id !== activeMode) saveWorkspaceMode(id);
     activeMode = id;
-    const views = viewsForMode(id);
     for (const btn of modeButtons) btn.setAttribute('aria-selected', String(btn.dataset.mode === id));
-    for (const tab of tabs) tab.hidden = !views.includes(tab.dataset.view as RightView);
   }
 
-  // The pure-DOM half of selectView: surface a view's panel + mark its tab, and keep the header mode
-  // in step (a direct view jump implies its owning mode). No data fetch — split out so the boot
-  // chrome can land on the default view before the workspace document is open.
-  function showView(view: RightView): void {
-    activeView = view;
-    applyMode(modeForView(view));
-    for (const tab of tabs) tab.setAttribute('aria-selected', String(tab.dataset.view === view));
-    for (const key of Object.keys(viewEls) as RightView[]) viewEls[key].hidden = key !== view;
-  }
-
-  // Enter a mode from the header switcher: land on its default view, which (via showView → applyMode)
-  // also highlights the button and filters the tabs. Re-clicking the active mode re-homes its default.
+  // Enter a mode from the header switcher: focus its region. Domain → the visual canvas, Code → the
+  // technical code view, Docs → the Documentation rail (the center is left as-is for Docs).
   function selectMode(id: string): void {
-    selectView(defaultViewForMode(id));
+    applyModeChrome(id);
+    if (id === 'code') selectCenter('technical');
+    else if (id === 'docs') focusDocs();
+    else selectCenter('visual');
   }
 
-  function selectView(view: RightView): void {
-    showView(view);
-    if (view === 'assistant') {
-      // Re-pointing to the current folder's conversation BEFORE focus, so switching folders and
-      // re-opening this tab swaps to that folder's history (the single choke point for the swap).
-      const a = ensureAssistant();
-      a.syncWorkspace();
-      a.focusInput();
-      return;
-    }
-    ensureLoaded(view);
+  for (const t of centerTabs) {
+    t.addEventListener('click', () => selectCenter(t.dataset.center as CenterView));
+  }
+  for (const t of techTabs) {
+    t.addEventListener('click', () => selectTech(t.dataset.tech as TechView));
+  }
+  for (const t of docsTabs) {
+    t.addEventListener('click', () => selectDocsTab(t.dataset.docs as DocsView));
   }
 
-  for (const tab of tabs) {
-    tab.addEventListener('click', () => selectView(tab.dataset.view as RightView));
+  // Right rail: Properties (the inspector) / Rules / Notes. Rules/Notes are placeholder panels for
+  // now — the tab chrome matches the mockup while the inspector stays read-only.
+  const rightTabs = Array.from(document.querySelectorAll<HTMLButtonElement>('.rtab'));
+  const rightViews: Record<string, HTMLElement> = {
+    props: inspectorHost,
+    rules: el('rview-rules'),
+    notes: el('rview-notes'),
+  };
+  function selectRightView(view: string): void {
+    for (const t of rightTabs) t.setAttribute('aria-selected', String(t.dataset.rview === view));
+    for (const [key, node] of Object.entries(rightViews)) node.hidden = key !== view;
+  }
+  for (const t of rightTabs) {
+    t.addEventListener('click', () => selectRightView(t.dataset.rview as string));
   }
 
-  // Boot the header into the default workspace mode: filter the tab strip, highlight the switcher, and
-  // surface the mode's default view. No fetch here — the boot flow's ensureLoaded(activeView) loads it
-  // once the workspace document is open. (Task 3 restores the persisted mode over this default.)
-  showView(activeView);
-
-  // Refresh re-fetches the active doc view (check is driven by the Check… toolbar button, which
-  // re-prompts for a baseline; the assistant is interactive).
-  el<HTMLButtonElement>('btn-refresh').addEventListener('click', () => {
-    if (activeView === 'preview') void loadPreview();
-    else if (activeView === 'model') void loadModel();
-    else if (activeView === 'glossary') void loadGlossary();
-    else if (activeView === 'docs') void loadDocs();
-    else if (activeView === 'diagrams') void loadDiagrams();
-    else if (activeView === 'contextmap') void loadContextMap();
-    else if (activeView === 'outline') void loadOutline();
-  });
+  // Boot the center chrome into the restored mode (no fetch — the boot flow's refreshActiveSurfaces
+  // loads everything once the workspace document is open).
+  applyModeChrome(activeMode);
+  applyCenterChrome();
 
   // Check… — pick a baseline folder and diff the current buffer against it. Needs Stream F's
   // Rust dialog plugin + capability to function at runtime; the build does not depend on it.
@@ -1688,7 +1777,7 @@ export function init(): void {
   async function runCheck(): Promise<void> {
     if (!platform.canOpenFolders) {
       docMessage(checkView, 'Selecting a baseline folder needs a Chromium-based browser.', 'error');
-      selectView('check');
+      selectTech('check');
       return;
     }
     let folder: string | null;
@@ -1696,11 +1785,11 @@ export function init(): void {
       folder = await platform.pickFolder('Select baseline model folder');
     } catch (e) {
       docMessage(checkView, 'Could not open the folder picker: ' + String(e), 'error');
-      selectView('check');
+      selectTech('check');
       return;
     }
     if (!folder) return; // cancelled — abort silently
-    selectView('check');
+    selectTech('check');
     docMessage(checkView, 'Checking against baseline…');
     try {
       // The browser has no server-side filesystem: read the baseline sources here and pass them to
@@ -1865,7 +1954,7 @@ export function init(): void {
   function preview(target: PreviewTarget): void {
     setTarget(target);
     docViewsLoaded.preview = false;
-    selectView('preview');
+    selectTech('preview');
   }
 
   runBtn.addEventListener('click', () => void preview(currentTarget));
@@ -1976,7 +2065,7 @@ export function init(): void {
     void refreshContextList();
     // Fetch the full explorer tree (dirs + .koi) and render it; falls back silently on failure.
     await refreshEntries();
-    ensureLoaded(activeView);
+    refreshActiveSurfaces();
   }
 
   // Boot/empty-state: open the host's persistent default workspace (creating + seeding it the first
@@ -2350,7 +2439,7 @@ export function init(): void {
   // the toolbar toggle, the command palette, and Preferences — all route through setTheme).
   onThemeChange(() => {
     docViewsLoaded.diagrams = false;
-    if (activeView === 'diagrams') void loadDiagrams();
+    if (activeCenter === 'visual') void loadDiagrams();
   });
 
   // Copy a shareable playground link (the current model encoded in the URL hash) to the clipboard,
@@ -2398,27 +2487,36 @@ export function init(): void {
   }
 
   initSplitResizer({ split: el('split'), handle: el('split-resizer') });
-
-  // File-tree width (left rail) — only draggable when the rail track is shown (folder mode).
-  initEdgeResizer({
-    target: splitEl,
-    handle: el('filetree-resizer'),
-    cssVar: '--koi-filetree-w',
-    anchor: 'left',
-    storageKey: 'koine.studio.filetreeWidth',
-    min: 150,
-    max: (w) => w * 0.5,
-  });
   treeBtn.addEventListener('click', () => toggleFileTree());
 
-  // Bottom panel — draggable height (anchored to the app's bottom edge) + collapse toggle + the
-  // Problems / Events / Relationships tabs (issue #144). `diagEl` and the panel refs/state are declared
-  // up top (beside the diagnostics refs); this block adds the resizer, the collapse toggle, the tab
-  // switching, and the lazy Events/Relationships data loaders.
+  // Left sidebar width — the single rail (Files / Explorer / Overview / Documentation).
+  initEdgeResizer({
+    target: splitEl,
+    handle: el('leftrail-resizer'),
+    cssVar: '--koi-leftrail-w',
+    anchor: 'left',
+    storageKey: 'koine.studio.leftrailWidth',
+    min: 200,
+    max: (w) => w * 0.5,
+  });
+
+  // Left-sidebar section disclosure: clicking a header collapses/expands its body (routed through
+  // setRailSectionOpen so the Files section's toolbar toggle stays in step).
+  for (const head of Array.from(document.querySelectorAll<HTMLButtonElement>('.rail-sect-head'))) {
+    head.addEventListener('click', () => {
+      const sect = head.closest<HTMLElement>('.rail-sect');
+      if (sect) setRailSectionOpen(sect, sect.dataset.open === 'false');
+    });
+  }
+
+  // Bottom panel — draggable height (anchored to the center's bottom edge, since the strip lives inside
+  // #center now) + collapse toggle + the Problems / Events / Relationships / Context Map tabs (issue
+  // #144). `diagEl` and the panel refs/state are declared up top; this block adds the resizer, the
+  // collapse toggle, the tab switching, and the lazy data loaders.
   initEdgeResizer({
     target: diagEl,
     handle: el('diag-resizer'),
-    container: el('app'),
+    container: el('center'),
     cssVar: '--koi-diag-h',
     anchor: 'bottom',
     storageKey: 'koine.studio.diagHeight',
@@ -2452,6 +2550,7 @@ export function init(): void {
     diagBodyEl.hidden = tab !== 'problems';
     eventsPanel.hidden = tab !== 'events';
     relationshipsPanel.hidden = tab !== 'relationships';
+    contextMapView.hidden = tab !== 'contextmap';
     diagCountEl.hidden = tab !== 'problems';
     if (diagEl.classList.contains('collapsed')) applyDiagCollapsed(false);
     ensureBottomLoaded(tab);
@@ -2477,6 +2576,23 @@ export function init(): void {
   function ensureBottomLoaded(tab: BottomTab): void {
     if (tab === 'events' && !bottomLoaded.events) void loadEventsPanel();
     if (tab === 'relationships' && !bottomLoaded.relationships) void loadRelationshipsPanel();
+    if (tab === 'contextmap' && !bottomLoaded.contextmap) void loadContextMapPanel();
+  }
+
+  // The "Context Map" tab: the strategic context map (moved here from a right-panel tab). A simple
+  // monotonic guard mirrors the Events/Relationships loaders so a superseded fetch can't clobber a
+  // newer render or mark the panel loaded with stale data.
+  async function loadContextMapPanel(): Promise<void> {
+    const seq = ++bottomSeq.contextmap;
+    docMessage(contextMapView, 'Loading context map…');
+    try {
+      const res = await lsp.contextMap();
+      if (seq !== bottomSeq.contextmap) return;
+      contextMapView.innerHTML = `<div class="koi-md">${renderContextMapHtml(res)}</div>`;
+      bottomLoaded.contextmap = true;
+    } catch (e) {
+      if (seq === bottomSeq.contextmap) docMessage(contextMapView, 'Context map request failed: ' + String(e), 'error');
+    }
   }
 
   // Each loader is guarded by a per-panel monotonic token so a slow fetch superseded by an edit/refresh
@@ -2484,7 +2600,7 @@ export function init(): void {
   // the token (below), so a superseded in-flight load fails its `seq !== bottomSeq` check before setting
   // `bottomLoaded`, leaving the panel due for a fresh reload. An empty/erroring model degrades to the
   // renderer's own empty-state (parse errors → no diagrams → "No events/relationships yet").
-  const bottomSeq = { events: 0, relationships: 0 };
+  const bottomSeq = { events: 0, relationships: 0, contextmap: 0 };
   async function loadEventsPanel(): Promise<void> {
     const seq = ++bottomSeq.events;
     docMessage(eventsPanel, 'Loading events…');
@@ -2533,8 +2649,10 @@ export function init(): void {
   function invalidateBottomPanels(): void {
     bottomSeq.events++;
     bottomSeq.relationships++;
+    bottomSeq.contextmap++;
     bottomLoaded.events = false;
     bottomLoaded.relationships = false;
+    bottomLoaded.contextmap = false;
     if (activeBottomTab === 'problems' || diagEl.classList.contains('collapsed')) return;
     clearTimeout(bottomPanelDebounce);
     bottomPanelDebounce = setTimeout(() => ensureBottomLoaded(activeBottomTab), 350);
@@ -2585,14 +2703,14 @@ export function init(): void {
       { id: 'prefs', title: 'Settings…', hint: 'mod+,', group: 'View', run: () => prefs.open() },
       { id: 'help', title: 'Keyboard shortcuts', hint: 'F1', group: 'Help', run: () => help.open() },
       { id: 'about', title: 'About Koine Studio', group: 'Help', run: () => about.open() },
-      { id: 'view-preview', title: 'Show Emitted Preview', group: 'Inspector', run: () => selectView('preview') },
-      { id: 'view-glossary', title: 'Show Glossary', group: 'Inspector', run: () => selectView('glossary') },
-      { id: 'view-docs', title: 'Show Docs (ADRs & Notes)', group: 'Inspector', run: () => selectView('docs') },
-      { id: 'view-diagrams', title: 'Show Diagrams', group: 'Inspector', run: () => selectView('diagrams') },
-      { id: 'view-contextmap', title: 'Show Context Map', group: 'Inspector', run: () => selectView('contextmap') },
-      { id: 'view-outline', title: 'Show Outline', group: 'Inspector', run: () => selectView('outline') },
-      { id: 'view-assistant', title: 'Show Assistant', group: 'Inspector', run: () => selectView('assistant') },
-      { id: 'assistant-explain', title: 'Explain this construct', group: 'Inspector', run: () => { selectView('assistant'); ensureAssistant().explainSelection(); } },
+      { id: 'view-preview', title: 'Show Emitted Preview', group: 'Workspace', run: () => selectTech('preview') },
+      { id: 'view-glossary', title: 'Show Glossary', group: 'Workspace', run: () => selectDocsTab('glossary') },
+      { id: 'view-docs', title: 'Show Docs (ADRs & Notes)', group: 'Workspace', run: () => selectDocsTab('adr') },
+      { id: 'view-diagrams', title: 'Show Visual Editor', group: 'Workspace', run: () => selectCenter('visual') },
+      { id: 'view-contextmap', title: 'Show Context Map', group: 'Workspace', run: () => selectBottomTab('contextmap') },
+      { id: 'view-check', title: 'Show Compatibility Check', group: 'Workspace', run: () => selectTech('check') },
+      { id: 'view-assistant', title: 'Show Assistant', group: 'Workspace', run: () => selectTech('assistant') },
+      { id: 'assistant-explain', title: 'Explain this construct', group: 'Workspace', run: () => { selectTech('assistant'); ensureAssistant().explainSelection(); } },
     ];
 
     // Top-level workspace modes (#143): mirror the per-view "Show …" entries so modes are reachable
@@ -2662,7 +2780,7 @@ export function init(): void {
   lsp.onServerRestart(() => {
     // Fresh sidecar is back in sync; refresh whatever doc view is showing.
     invalidateDocViews();
-    ensureLoaded(activeView);
+    refreshActiveSurfaces();
   });
   lsp
     .start()

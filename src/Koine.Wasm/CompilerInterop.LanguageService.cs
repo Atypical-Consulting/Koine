@@ -833,7 +833,7 @@ public static partial class CompilerInterop
         new(m.Text, m.Kind);
 
     private static WDiagramEdge MapEdge(Koine.Compiler.Emit.Docs.DiagramEdge e) =>
-        new(e.From, e.To, e.Label);
+        new(e.From, e.To, e.Label, e.Cardinality);
 
     /// <summary>Maps the raw 1-based <see cref="SourceSpan"/> straight through (null when the node has none).</summary>
     private static WSourceSpan? MapSourceSpan(SourceSpan? span) =>
@@ -1187,8 +1187,9 @@ public sealed record WDiagramNode(
 /// <summary>One UML class-body row: a pre-formatted <see cref="Text"/> and its <see cref="Kind"/> (<c>field</c>/<c>method</c>/<c>value</c>).</summary>
 public sealed record WDiagramMember(string Text, string Kind);
 
-/// <summary>One directed edge: node ids <see cref="From"/>→<see cref="To"/> with an optional <see cref="Label"/>.</summary>
-public sealed record WDiagramEdge(string From, string To, string? Label);
+/// <summary>One directed edge: node ids <see cref="From"/>→<see cref="To"/> with an optional <see cref="Label"/>
+/// and an optional composition <see cref="Cardinality"/> (target-end multiplicity, e.g. "1", "0..1", "*").</summary>
+public sealed record WDiagramEdge(string From, string To, string? Label, string? Cardinality = null);
 
 /// <summary>
 /// A raw 1-based source span (NOT the 0-based LSP range): the diagram graph keeps source coordinates so

@@ -1,43 +1,8 @@
-/* --- file tree (directory-mode workspace) --- */
-/* Width is driven by --koi-filetree-w (set on #split by the drag resizer and inherited here),
-   defaulting to 240px before the first drag. Keying the pane off the resizer's own variable is
-   what makes it resizable — a hard-coded width would override the resizer and it would silently
-   do nothing. When hidden (scratch mode) the pane is display:none, so its auto grid track
-   collapses to 0 and leaves no empty gap. */
-#filetree {
-  width: var(--koi-filetree-w, 240px);
-  display: flex;
-  flex-direction: column;
-  background: var(--koi-paper-2);
-  border-right: 1px solid var(--koi-line);
-  overflow: hidden;
-}
-
-#filetree[hidden] {
-  display: none;
-}
-
-#filetree-header {
-  flex: 0 0 auto;
-  padding: var(--koi-space-2-25) var(--koi-space-3);
-  border-bottom: 1px solid var(--koi-line);
-}
-
-#filetree-title {
-  font-family: var(--koi-font-mono);
-  font-size: var(--koi-text-xs);
-  text-transform: uppercase;
-  letter-spacing: 0.4px;
-  color: var(--koi-muted);
-}
-
-/* The explorer mount point — a flex column so the .explorer fills it and its tree scrolls. */
+/* --- file tree (workspace files) ---
+   The tree is the "Files" section of the single left sidebar (see _leftrail.scss); the rail owns the
+   scroll, so the mount point just lets the explorer flow. */
 #filetree-body {
-  flex: 1 1 auto;
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-  overflow: hidden;
+  display: block;
 }
 
 /* .tree-dirty + .tree-badge* are shared with the explorer (explorer.ts reuses these classes for the

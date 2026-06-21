@@ -15,6 +15,7 @@
 // Runtime tokens stay CSS custom properties (--koi-*), never SCSS $variables,
 // so data-theme switching and the CodeMirror theme keep working at runtime.
 
+@use './abstracts/ddd';
 @use './themes/dark';
 @use './themes/light';
 @use './base/typography';
@@ -23,6 +24,9 @@
 @use './components/lang-split-button';
 @use './components/lang-picker';
 @use './layout/split';
+@use './layout/leftrail';
+@use './components/center';
+@use './components/statusbar';
 @use './components/file-tree';
 @use './components/explorer';
 @use './components/confirm-dialog';

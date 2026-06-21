@@ -14,6 +14,7 @@ afterEach(() => {
 const range: Range = { start: { line: 4, character: 2 }, end: { line: 4, character: 9 } };
 
 const fullElement: InspectorElement = {
+  id: 'Sales.Order',
   name: 'Order',
   qualifiedName: 'Sales.Order',
   context: 'Sales',
@@ -49,9 +50,42 @@ describe('renderInspector', () => {
     expect(el.querySelector('.koi-inspector-stereotype')!.textContent).toBe('aggregate');
   });
 
-  test('renders the description', () => {
+  test('renders the description in an editable textarea', () => {
     const el = renderInspector(fullElement, noop);
-    expect(el.querySelector('.koi-inspector-desc')!.textContent).toContain('A customer order.');
+    const desc = el.querySelector<HTMLTextAreaElement>('.koi-inspector-desc')!;
+    expect(desc.tagName).toBe('TEXTAREA');
+    expect(desc.value).toBe('A customer order.');
+  });
+
+  test('renders an editable Name field seeded with the element name', () => {
+    const el = renderInspector(fullElement, noop);
+    const name = el.querySelector<HTMLInputElement>('.koi-inspector-input')!;
+    expect(name.value).toBe('Order');
+  });
+
+  test('committing a changed name calls onRename; an unchanged/blank name does not', () => {
+    const onRename = vi.fn();
+    const el = renderInspector(fullElement, { onGoto: () => {}, onRename });
+    document.body.appendChild(el);
+    const name = el.querySelector<HTMLInputElement>('.koi-inspector-input')!;
+    name.value = 'PurchaseOrder';
+    name.dispatchEvent(new Event('blur'));
+    expect(onRename).toHaveBeenCalledWith(fullElement, 'PurchaseOrder');
+
+    onRename.mockClear();
+    name.value = 'Order'; // back to the original
+    name.dispatchEvent(new Event('blur'));
+    expect(onRename).not.toHaveBeenCalled();
+  });
+
+  test('editing the description calls onSaveDescription on blur', () => {
+    const onSaveDescription = vi.fn();
+    const el = renderInspector(fullElement, { onGoto: () => {}, onSaveDescription });
+    document.body.appendChild(el);
+    const desc = el.querySelector<HTMLTextAreaElement>('.koi-inspector-desc')!;
+    desc.value = 'An order placed by a customer.';
+    desc.dispatchEvent(new Event('blur'));
+    expect(onSaveDescription).toHaveBeenCalledWith(fullElement, 'An order placed by a customer.');
   });
 
   test('lists every property, behavior, invariant, published event, and the repository', () => {

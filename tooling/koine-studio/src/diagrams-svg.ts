@@ -11,10 +11,10 @@
 // code-splits out of the main bundle (same discipline as Mermaid) and dodges Tauri's strict CSP (the
 // non-bundled build spawns a Web Worker from a blob: URL, which CSP forbids).
 import type { DiagramRenderer } from './diagrams';
-import { createMermaidRenderer } from './diagrams';
+import { mergeGraphsForView } from './modelTables';
 import { centerOn, clampScale, fit, panBy, viewAtScale, zoomAt, zoomPercent, type Size, type ViewBox } from './canvasView';
 import { loadDiagramZoom, saveDiagramZoom } from './store';
-import type { Diagram, DiagramGraph, DiagramMember, DiagramNode, DocsFile, SourceSpan } from './lsp';
+import type { DiagramGraph, DiagramMember, DiagramNode, SourceSpan } from './lsp';
 // Type-only import (erased at build time) of elkjs' own API surface, so our layout graph type-checks
 // against the real `ELK.layout` signature. The *value* is dynamically imported from the bundled build.
 import type { ELK, ElkNode, ElkExtendedEdge } from 'elkjs/lib/elk-api';
@@ -162,14 +162,6 @@ function classNodeSize(node: DiagramNode): { width: number; height: number } {
 /** The pre-layout box size for any node (a UML class box, or the simple single-line box). */
 function nodeSize(node: DiagramNode): { width: number; height: number } {
   return isClassNode(node) ? classNodeSize(node) : { width: nodeWidth(node.label), height: NODE_HEIGHT };
-}
-
-/** The page title: the docs file's first level-1 heading, else a humanised file name. */
-function pageTitle(file: DocsFile): string {
-  const h1 = file.contents.match(/^#\s+(.*)$/m);
-  if (h1) return h1[1].trim();
-  const name = file.path.split('/').pop() ?? file.path;
-  return name.replace(/\.md$/, '');
 }
 
 function svgEl<K extends keyof SVGElementTagNameMap>(tag: K): SVGElementTagNameMap[K] {
@@ -369,39 +361,86 @@ function polylinePath(points: { x: number; y: number }[]): string {
   return `M ${head.x} ${head.y} ` + rest.map((p) => `L ${p.x} ${p.y}`).join(' ');
 }
 
+/** The bounded context of a `Context.Name` qualified name (prefix before the first dot), or '' if none. */
+function contextOf(qualifiedName: string): string {
+  const dot = qualifiedName.indexOf('.');
+  return dot < 0 ? '' : qualifiedName.slice(0, dot);
+}
+
 /**
- * Lay out one structured graph with ELK and draw it into a fresh `<svg>`. Throws on layout failure so
- * the caller can fall back to Mermaid for just that diagram.
+ * Lay out one structured graph with ELK and draw it into a fresh `<svg>`. Throws on layout failure so the
+ * caller can surface an error. Nodes are grouped by bounded context: each context becomes a big
+ * container holding its elements (a compound ELK layout), context-less nodes (e.g. state-machine states)
+ * lay out at the root, composition edges carry a derived cardinality, and the whole hierarchy is drawn
+ * recursively (context boxes behind, then edges, then nodes).
  */
 async function drawGraph(graph: DiagramGraph, Elk: ElkConstructor): Promise<SVGSVGElement> {
-  const layoutEdges: ElkExtendedEdge[] = graph.edges.map((e, i) => ({
-    id: `e${i}`,
-    sources: [e.from],
-    targets: [e.to],
-    labels: e.label ? [{ text: e.label, width: e.label.length * 6.2, height: EDGE_LABEL_HEIGHT }] : undefined,
-  }));
+  const byId = new Map<string, DiagramNode>(graph.nodes.map((n) => [n.id, n]));
+
+  // Edge labels: keep an explicit label (a state-machine guard, a relation kind); otherwise show the
+  // composition cardinality the COMPILER derived from the Koine field type (DiagramEdge.cardinality).
+  const layoutEdges: ElkExtendedEdge[] = graph.edges.map((e, i) => {
+    const text = e.label ?? e.cardinality ?? null;
+    return {
+      id: `e${i}`,
+      sources: [e.from],
+      targets: [e.to],
+      labels: text ? [{ text, width: text.length * 6.2, height: EDGE_LABEL_HEIGHT }] : undefined,
+    };
+  });
+
+  // Group nodes by bounded context → one container per context (a compound layout). Context-less nodes
+  // lay out directly under the root.
+  const CONTEXT_HEADER = 34;
+  const CONTEXT_PAD = 16;
+  const groups = new Map<string, DiagramNode[]>();
+  for (const n of graph.nodes) {
+    const ctx = contextOf(n.qualifiedName);
+    const arr = groups.get(ctx);
+    if (arr) arr.push(n);
+    else groups.set(ctx, [n]);
+  }
+  const rootChildren: ElkNode[] = [];
+  for (const [ctx, nodes] of groups) {
+    const kids: ElkNode[] = nodes.map((n) => {
+      const { width, height } = nodeSize(n);
+      return { id: n.id, width, height };
+    });
+    if (ctx === '') {
+      rootChildren.push(...kids);
+    } else {
+      rootChildren.push({
+        id: `ctx:${ctx}`,
+        layoutOptions: {
+          'elk.padding': `[top=${CONTEXT_HEADER},left=${CONTEXT_PAD},bottom=${CONTEXT_PAD},right=${CONTEXT_PAD}]`,
+          'elk.spacing.nodeNode': '26',
+          'elk.layered.spacing.nodeNodeBetweenLayers': '52',
+        },
+        children: kids,
+      });
+    }
+  }
+
   const layoutGraph: ElkNode = {
     id: 'root',
     layoutOptions: {
       'elk.algorithm': 'layered',
       'elk.direction': 'RIGHT',
-      'elk.spacing.nodeNode': '28',
-      'elk.layered.spacing.nodeNodeBetweenLayers': '56',
+      'elk.hierarchyHandling': 'INCLUDE_CHILDREN',
+      'elk.spacing.nodeNode': '44',
+      'elk.layered.spacing.nodeNodeBetweenLayers': '60',
       'elk.spacing.edgeNode': '20',
+      'elk.padding': `[top=${SVG_PADDING},left=${SVG_PADDING},bottom=${SVG_PADDING},right=${SVG_PADDING}]`,
     },
-    children: graph.nodes.map((n) => {
-      const { width, height } = nodeSize(n);
-      return { id: n.id, width, height };
-    }),
+    children: rootChildren,
     edges: layoutEdges,
   };
 
   const elk = new Elk();
   const laid = await elk.layout(layoutGraph);
 
-  const byId = new Map<string, DiagramNode>(graph.nodes.map((n) => [n.id, n]));
-  const width = Math.max(1, Math.ceil(laid.width ?? 0) + SVG_PADDING * 2);
-  const height = Math.max(1, Math.ceil(laid.height ?? 0) + SVG_PADDING * 2);
+  const width = Math.max(1, Math.ceil(laid.width ?? 0));
+  const height = Math.max(1, Math.ceil(laid.height ?? 0));
 
   const svg = svgEl('svg');
   svg.setAttribute('class', 'koi-svg-diagram');
@@ -427,69 +466,89 @@ async function drawGraph(graph: DiagramGraph, Elk: ElkConstructor): Promise<SVGS
   defs.appendChild(marker);
   svg.appendChild(defs);
 
-  // Edges first so nodes paint on top of the lines.
+  // Three layers: context boxes (behind) · edges · nodes (in front).
+  const contextLayer = svgEl('g');
+  contextLayer.setAttribute('class', 'koi-svg-contexts');
   const edgeLayer = svgEl('g');
   edgeLayer.setAttribute('class', 'koi-svg-edges');
-  for (const e of laid.edges ?? []) {
-    const g = svgEl('g');
-    g.setAttribute('class', 'koi-svg-edge');
-
-    const section = e.sections?.[0];
-    const points = section
-      ? [section.startPoint, ...(section.bendPoints ?? []), section.endPoint]
-      : [];
-    const path = svgEl('path');
-    path.setAttribute('class', 'koi-svg-edge-line');
-    path.setAttribute('d', points.length ? offsetPath(points) : '');
-    path.setAttribute('marker-end', 'url(#koi-svg-arrow)');
-    g.appendChild(path);
-
-    const label = e.labels?.[0];
-    if (label?.text != null && label.x != null && label.y != null) {
-      const t = svgEl('text');
-      t.setAttribute('class', 'koi-svg-edge-label');
-      t.setAttribute('x', String(label.x + SVG_PADDING));
-      t.setAttribute('y', String(label.y + SVG_PADDING + EDGE_LABEL_HEIGHT * 0.5));
-      t.textContent = label.text;
-      g.appendChild(t);
-    }
-    edgeLayer.appendChild(g);
-  }
-  svg.appendChild(edgeLayer);
-
   const nodeLayer = svgEl('g');
   nodeLayer.setAttribute('class', 'koi-svg-nodes');
-  for (const ln of laid.children ?? []) {
-    const node = byId.get(ln.id);
-    if (!node) continue;
-    const x = (ln.x ?? 0) + SVG_PADDING;
-    const y = (ln.y ?? 0) + SVG_PADDING;
-    const w = ln.width ?? MIN_NODE_WIDTH;
-    const h = ln.height ?? NODE_HEIGHT;
 
-    const g = svgEl('g');
-    g.setAttribute('class', 'koi-svg-node');
-    g.setAttribute('transform', `translate(${x}, ${y})`);
-    tagNode(g, node);
-
-    if (isClassNode(node)) {
-      drawClassBox(g, node, w, h);
-    } else {
-      drawSimpleBox(g, node, w, h);
+  // Walk the laid hierarchy, accumulating absolute offsets (a child's coords are parent-relative, and a
+  // container's edges sit in the container's own coordinate space).
+  const drawLevel = (parent: ElkNode, ox: number, oy: number): void => {
+    for (const e of parent.edges ?? []) {
+      const section = e.sections?.[0];
+      if (!section) continue;
+      const pts = [section.startPoint, ...(section.bendPoints ?? []), section.endPoint].map((p) => ({
+        x: p.x + ox,
+        y: p.y + oy,
+      }));
+      const g = svgEl('g');
+      g.setAttribute('class', 'koi-svg-edge');
+      const path = svgEl('path');
+      path.setAttribute('class', 'koi-svg-edge-line');
+      path.setAttribute('d', polylinePath(pts));
+      path.setAttribute('marker-end', 'url(#koi-svg-arrow)');
+      g.appendChild(path);
+      const label = e.labels?.[0];
+      if (label?.text != null && label.x != null && label.y != null) {
+        const t = svgEl('text');
+        t.setAttribute('class', 'koi-svg-edge-label');
+        t.setAttribute('x', String(label.x + ox));
+        t.setAttribute('y', String(label.y + oy + EDGE_LABEL_HEIGHT * 0.5));
+        t.textContent = label.text;
+        g.appendChild(t);
+      }
+      edgeLayer.appendChild(g);
     }
 
-    nodeLayer.appendChild(g);
-  }
+    for (const child of parent.children ?? []) {
+      const ax = ox + (child.x ?? 0);
+      const ay = oy + (child.y ?? 0);
+      if (child.id.startsWith('ctx:')) {
+        const cg = svgEl('g');
+        cg.setAttribute('class', 'koi-svg-context');
+        cg.setAttribute('transform', `translate(${ax}, ${ay})`);
+        const rect = svgEl('rect');
+        rect.setAttribute('class', 'koi-svg-context-box');
+        rect.setAttribute('width', String(child.width ?? 0));
+        rect.setAttribute('height', String(child.height ?? 0));
+        rect.setAttribute('rx', '12');
+        cg.appendChild(rect);
+        const label = svgEl('text');
+        label.setAttribute('class', 'koi-svg-context-label');
+        label.setAttribute('x', String(CONTEXT_PAD));
+        label.setAttribute('y', '22');
+        label.textContent = child.id.slice('ctx:'.length);
+        cg.appendChild(label);
+        contextLayer.appendChild(cg);
+        drawLevel(child, ax, ay);
+      } else {
+        const node = byId.get(child.id);
+        if (!node) continue;
+        const w = child.width ?? MIN_NODE_WIDTH;
+        const h = child.height ?? NODE_HEIGHT;
+        const g = svgEl('g');
+        g.setAttribute('class', 'koi-svg-node');
+        g.setAttribute('transform', `translate(${ax}, ${ay})`);
+        tagNode(g, node);
+        if (isClassNode(node)) drawClassBox(g, node, w, h);
+        else drawSimpleBox(g, node, w, h);
+        nodeLayer.appendChild(g);
+      }
+    }
+  };
+  drawLevel(laid, 0, 0);
+
+  svg.appendChild(contextLayer);
+  svg.appendChild(edgeLayer);
   svg.appendChild(nodeLayer);
 
   return svg;
 }
 
 /** Shift an ELK polyline (root-relative) by the SVG padding offset. */
-function offsetPath(points: { x: number; y: number }[]): string {
-  return polylinePath(points.map((p) => ({ x: p.x + SVG_PADDING, y: p.y + SVG_PADDING })));
-}
-
 /**
  * Tear an interactive canvas down: disconnect its ResizeObserver and drop its listeners so a detached
  * canvas (and the minimap closure it retains) can be garbage-collected on the next render. The renderer
@@ -920,23 +979,27 @@ function buildMinimap(
  * Mermaid renderer's behaviour exactly.
  */
 export function createSvgRenderer(): DiagramRenderer {
-  // The Mermaid renderer is the per-diagram fallback (bad graph / layout failure / empty graph).
-  const fallback = createMermaidRenderer();
-
   // Disposers for the canvases currently committed to the DOM. The renderer is cached across renders
   // (diagrams.ts), so these survive between calls; we tear them down when this render replaces them.
   let activeDisposers: CanvasDispose[] = [];
 
   return {
-    async render(container, files, theme, isCurrent = () => true): Promise<void> {
+    // `theme` is part of the renderer seam but unused here — the SVG nodes are themed entirely via CSS
+    // custom properties, so a theme flip restyles the live DOM without a re-render.
+    async render(container, files, _theme, isCurrent = () => true): Promise<void> {
       // Disposers for the canvases built in THIS render (committed only if we're still current).
       const disposers: CanvasDispose[] = [];
-      let ordinal = 0; // a stable per-render index so each diagram's persisted zoom keys uniquely
-      const pages = files
-        .map((f) => ({ title: pageTitle(f), diagrams: f.diagrams ?? [] }))
-        .filter((p) => p.diagrams.length > 0);
 
-      if (!pages.length) {
+      // ONE big diagram: fuse every structured graph across the (already context-scoped) files into a
+      // single deduped graph, so the visual editor shows the whole domain on one canvas instead of many
+      // small per-aggregate figures. The strategic context map lives in its own bottom tab, so it's
+      // excluded here to keep this canvas a pure domain model.
+      const renderable = files.flatMap((f) => f.diagrams ?? []).filter((d) => d.kind !== 'contextmap');
+      const graphs = renderable
+        .map((d) => d.graph)
+        .filter((g): g is DiagramGraph => !!g && g.nodes.length > 0);
+
+      if (!graphs.length) {
         if (isCurrent()) {
           container.innerHTML =
             '<p class="muted">No diagrams yet — add an aggregate, a state machine, or a context map to your model.</p>';
@@ -955,89 +1018,20 @@ export function createSvgRenderer(): DiagramRenderer {
       }
 
       const root = document.createElement('div');
-      root.className = 'koi-diagrams';
+      root.className = 'koi-diagrams koi-diagrams-single';
 
-      // Diagrams that need the Mermaid fallback are collected and rendered in one pass at the end (the
-      // Mermaid renderer takes a DocsFile[], so we wrap each failed diagram as a single-diagram file).
-      const fallbackTargets: { mount: HTMLElement; diagram: Diagram; title: string }[] = [];
+      const surface = document.createElement('div');
+      surface.className = 'koi-diagram-surface';
+      root.appendChild(surface);
 
-      for (const page of pages) {
-        const section = document.createElement('section');
-        section.className = 'koi-diagram-page';
-
-        const h = document.createElement('h2');
-        h.className = 'koi-diagram-title';
-        h.textContent = page.title;
-        section.appendChild(h);
-
-        for (const diagram of page.diagrams) {
-          // Consume one ordinal per diagram (drawn OR fallback) so a diagram's persist key stays stable
-          // across renders and is unique even when title+caption collide (e.g. an aggregate and its
-          // same-named root entity both render on the same page).
-          const persistKey = `${page.title} / ${diagram.caption} #${ordinal}`;
-          ordinal += 1;
-
-          const card = document.createElement('figure');
-          card.className = 'koi-diagram';
-
-          if (diagram.caption && diagram.caption !== page.title) {
-            const cap = document.createElement('figcaption');
-            cap.className = 'koi-diagram-caption';
-            cap.textContent = diagram.caption;
-            card.appendChild(cap);
-          }
-
-          const surface = document.createElement('div');
-          surface.className = 'koi-diagram-surface';
-
-          const graph = diagram.graph;
-          if (!graph || graph.nodes.length === 0) {
-            // No structured nodes to draw → hand this one to Mermaid.
-            fallbackTargets.push({ mount: surface, diagram, title: page.title });
-          } else {
-            try {
-              const svg = await drawGraph(graph, Elk);
-              // Layer the interactive canvas (pan/zoom/fit + minimap) over the drawn SVG. Pure geometry
-              // lives in canvasView.ts; the elkjs layout and node click-to-source stay untouched. Track
-              // the disposer so the observer is torn down when this canvas is later replaced.
-              disposers.push(mountInteractiveCanvas(surface, svg, persistKey));
-            } catch {
-              // Layout/draw failed for this graph → fall back to Mermaid for this diagram only.
-              surface.replaceChildren();
-              fallbackTargets.push({ mount: surface, diagram, title: page.title });
-            }
-          }
-
-          card.appendChild(surface);
-          section.appendChild(card);
-        }
-
-        root.appendChild(section);
-      }
-
-      // Render any fallbacks through the real Mermaid renderer. The Mermaid renderer (now sourcing from
-      // the structured `file.diagrams`) builds its own page/figure shell, so we render into a detached
-      // scratch element and lift just the rendered `.koi-diagram-surface` content into our own surface —
-      // avoiding a nested `.koi-diagrams` shell inside an already-built figure. The diagram's own caption
-      // is used as the synthetic page title so the Mermaid renderer doesn't add a duplicate figcaption.
-      for (const { mount, diagram } of fallbackTargets) {
-        const oneFile: DocsFile = {
-          path: `${diagram.caption || 'diagram'}.md`,
-          contents: `# ${diagram.caption || 'diagram'}\n`,
-          diagrams: [diagram],
-        };
-        const scratch = document.createElement('div');
-        // The scratch mount is detached, so the isCurrent() guard there is always-true; our top-level
-        // isCurrent() guard below still decides whether the whole tree reaches the page.
-        await fallback.render(scratch, [oneFile], theme, () => true);
-        const inner = scratch.querySelector('.koi-diagram-surface');
-        if (inner) {
-          mount.replaceChildren(...Array.from(inner.childNodes));
-        } else {
-          // No surface (e.g. the Mermaid renderer's empty-state note) — keep whatever it produced so the
-          // diagram never silently blanks.
-          mount.replaceChildren(...Array.from(scratch.childNodes));
-        }
+      const merged = mergeGraphsForView(graphs);
+      try {
+        const svg = await drawGraph(merged, Elk);
+        // Layer the interactive canvas (pan/zoom/fit + minimap) over the drawn SVG. Pure geometry lives
+        // in canvasView.ts; the elkjs layout and node click-to-source stay untouched.
+        disposers.push(mountInteractiveCanvas(surface, svg, 'koi-domain-diagram'));
+      } catch (e) {
+        surface.innerHTML = `<p class="doc-error">Could not lay out the diagram: ${escapeHtml(String(e))}</p>`;
       }
 
       // A newer render may have started while we awaited ELK/Mermaid (theme flip / edit / refresh) — drop

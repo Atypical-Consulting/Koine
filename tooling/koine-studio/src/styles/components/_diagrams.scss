@@ -55,6 +55,24 @@
   touch-action: none;
   cursor: grab;
 }
+
+/* The single unified diagram (the visual editor) fills its pane 100% — no fixed-height card. */
+.koi-diagrams-single {
+  height: 100%;
+  min-height: 0;
+  gap: 0;
+}
+.koi-diagrams-single .koi-diagram-surface {
+  flex: 1 1 auto;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+.koi-diagrams-single .koi-canvas {
+  height: 100%;
+  border: none;
+  border-radius: 0;
+}
 .koi-canvas--panning {
   cursor: grabbing;
 }
@@ -213,32 +231,49 @@
   pointer-events: none; /* clicks fall through to the group so the whole class box stays navigable */
 }
 
-/* per-kind accents — aggregate roots / contexts get the accent treatment on their SINGLE-line boxes
-   (`:not(.koi-svg-class-box)`); a compartmented class box stays neutral-paper so its member rows stay
-   legible, and instead distinguishes the root via the accent-tinted title below. */
-.koi-svg-node[data-kind='aggregate-root'] .koi-svg-node-box:not(.koi-svg-class-box),
-.koi-svg-node[data-kind='aggregate'] .koi-svg-node-box:not(.koi-svg-class-box),
-.koi-svg-node[data-kind='context'] .koi-svg-node-box:not(.koi-svg-class-box) {
-  fill: var(--koi-accent);
-  stroke: var(--koi-accent);
+/* per-DDD-concept accents — colour comes from the shared palette (--koi-ddd-*, defined in
+   abstracts/_ddd.scss) so the diagram nodes and the Explorer icons always agree. A compartmented class
+   node keeps a neutral body (member rows stay legible) and is distinguished by a coloured border +
+   coloured title; a simple single-line box is tinted + bordered in the same colour. */
+$ddd-kinds: (
+  'aggregate-root': var(--koi-ddd-aggregate),
+  'aggregate': var(--koi-ddd-aggregate),
+  'entity': var(--koi-ddd-entity),
+  'value': var(--koi-ddd-value),
+  'value-object': var(--koi-ddd-value),
+  'enum': var(--koi-ddd-enum),
+  'event': var(--koi-ddd-event),
+  'integration-event': var(--koi-ddd-integration-event),
+  'service': var(--koi-ddd-service),
+  'repository': var(--koi-ddd-repository),
+);
+
+@each $kind, $color in $ddd-kinds {
+  .koi-svg-node[data-kind='#{$kind}'] .koi-svg-class-box {
+    stroke: #{$color};
+    stroke-width: 2;
+  }
+  .koi-svg-node[data-kind='#{$kind}'] .koi-svg-class-title {
+    fill: #{$color};
+  }
+  .koi-svg-node[data-kind='#{$kind}'] .koi-svg-node-box:not(.koi-svg-class-box) {
+    fill: color-mix(in srgb, #{$color} 20%, var(--koi-surface));
+    stroke: #{$color};
+  }
 }
-.koi-svg-node[data-kind='aggregate-root'] .koi-svg-node-label:not(.koi-svg-class-title),
-.koi-svg-node[data-kind='aggregate'] .koi-svg-node-label:not(.koi-svg-class-title),
-.koi-svg-node[data-kind='context'] .koi-svg-node-label:not(.koi-svg-class-title) {
-  fill: var(--koi-on-accent);
-}
-/* the aggregate-root class box reads as the boundary owner: accent border + accent-tinted title. */
-.koi-svg-node[data-kind='aggregate-root'] .koi-svg-class-box {
-  stroke: var(--koi-accent);
-  stroke-width: 2;
-}
-.koi-svg-node[data-kind='aggregate-root'] .koi-svg-class-title {
-  fill: var(--koi-accent);
-}
+
+/* state-machine pseudo-states stay neutral; context boxes keep the brand accent. */
 .koi-svg-node[data-kind='initial'] .koi-svg-node-box,
 .koi-svg-node[data-kind='final'] .koi-svg-node-box {
   fill: var(--koi-paper-2);
   stroke: var(--koi-muted);
+}
+.koi-svg-node[data-kind='context'] .koi-svg-node-box:not(.koi-svg-class-box) {
+  fill: var(--koi-accent);
+  stroke: var(--koi-accent);
+}
+.koi-svg-node[data-kind='context'] .koi-svg-node-label:not(.koi-svg-class-title) {
+  fill: var(--koi-on-accent);
 }
 
 /* a node with a known source span is clickable (Task 4 wires the navigation) — show the affordance.
@@ -249,6 +284,22 @@
 .koi-svg-node[data-line]:hover .koi-svg-node-box {
   stroke: var(--koi-accent);
   stroke-width: 2;
+}
+
+/* context containers — a big rounded block that holds a bounded context's elements. Subtle so the
+   nodes and edges read on top. */
+.koi-svg-context-box {
+  fill: color-mix(in srgb, var(--koi-fg) 3%, transparent);
+  stroke: var(--koi-line);
+  stroke-width: 1.5;
+}
+.koi-svg-context-label {
+  fill: var(--koi-muted);
+  font-family: var(--koi-font-body);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
 }
 
 /* edges */

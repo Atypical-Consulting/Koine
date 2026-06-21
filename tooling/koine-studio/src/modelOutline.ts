@@ -118,24 +118,64 @@ function gotoTarget(entry: GlossaryEntry): [line: number, col: number] {
   return [entry.nameRange.start.line + 1, entry.nameRange.start.character + 1];
 }
 
+/** Presentation options for {@link renderModelOutline}. Defaults preserve the original single-pane look. */
+export interface ModelOutlineOptions {
+  /** Render the compact per-context counts strip inside each context (default `true`). The left-rail
+   * "Explorateur" passes `false` because the dedicated "Vue d'ensemble" section ({@link renderOverviewCounts})
+   * owns the tallies there — so the two sections don't double up. */
+  counts?: boolean;
+  /** Append the bottom Context Map / Ubiquitous Language nav buttons (default `true`). */
+  nav?: boolean;
+}
+
 /**
  * Build the model-outline navigator: a per-context counts strip, then construct-grouped leaves, then
  * the top-level Context Map + Ubiquitous Language entries. Clicking a leaf selects the element and
  * jumps to its declaration.
  */
-export function renderModelOutline(model: GlossaryModel, handlers: ModelOutlineHandlers): HTMLElement {
+export function renderModelOutline(
+  model: GlossaryModel,
+  handlers: ModelOutlineHandlers,
+  opts: ModelOutlineOptions = {},
+): HTMLElement {
+  const showCounts = opts.counts ?? true;
+  const showNav = opts.nav ?? true;
   const root = document.createElement('div');
   root.className = 'koi-model';
 
   for (const group of groupByConstruct(model)) {
-    root.appendChild(renderContext(group, handlers));
+    root.appendChild(renderContext(group, handlers, showCounts));
   }
 
-  root.appendChild(renderNav(handlers));
+  if (showNav) root.appendChild(renderNav(handlers));
   return root;
 }
 
-function renderContext(group: ContextGroup, handlers: ModelOutlineHandlers): HTMLElement {
+/**
+ * The model-wide "Vue d'ensemble" overview: each bounded context with its construct tallies. Shares the
+ * one tally source ({@link countsByContext} → {@link countsForGroup}) with the navigator's inline strip,
+ * so the left rail's Explorateur and Vue d'ensemble can never disagree on a count.
+ */
+export function renderOverviewCounts(model: GlossaryModel): HTMLElement {
+  const root = document.createElement('div');
+  root.className = 'koi-overview';
+  for (const { context, counts } of countsByContext(model)) {
+    const section = document.createElement('section');
+    section.className = 'koi-overview-ctx';
+    const head = document.createElement('h4');
+    head.className = 'koi-overview-ctx-name';
+    head.textContent = context;
+    section.appendChild(head);
+    const strip = document.createElement('div');
+    strip.className = 'koi-overview-counts';
+    for (const c of counts) strip.appendChild(countBadge('koi-overview-count', c.label, c.count));
+    section.appendChild(strip);
+    root.appendChild(section);
+  }
+  return root;
+}
+
+function renderContext(group: ContextGroup, handlers: ModelOutlineHandlers, showCounts: boolean): HTMLElement {
   const section = document.createElement('section');
   section.className = 'koi-model-ctx';
 
@@ -153,12 +193,15 @@ function renderContext(group: ContextGroup, handlers: ModelOutlineHandlers): HTM
   section.appendChild(header);
 
   // Compact per-context counts strip (shares countsForGroup with countsByContext — one tally source).
-  const counts = document.createElement('div');
-  counts.className = 'koi-model-counts';
-  for (const c of countsForGroup(group)) {
-    counts.appendChild(countBadge('koi-model-count', c.label, c.count));
+  // Suppressed in the left rail, where the dedicated "Vue d'ensemble" section owns the tallies.
+  if (showCounts) {
+    const counts = document.createElement('div');
+    counts.className = 'koi-model-counts';
+    for (const c of countsForGroup(group)) {
+      counts.appendChild(countBadge('koi-model-count', c.label, c.count));
+    }
+    section.appendChild(counts);
   }
-  section.appendChild(counts);
 
   for (const construct of group.constructs) {
     section.appendChild(renderConstruct(construct, handlers));
@@ -166,13 +209,39 @@ function renderContext(group: ContextGroup, handlers: ModelOutlineHandlers): HTM
   return section;
 }
 
+/** The icon slug for a construct label — a stable key for the shape/colour each DDD concept gets in the
+ * Explorer (e.g. Entities → a green square, Value Objects → a blue lozenge). See `_model.scss`. */
+const CONSTRUCT_SLUG: Record<string, string> = {
+  Aggregates: 'aggregate',
+  Entities: 'entity',
+  'Value Objects': 'value',
+  Enumerations: 'enum',
+  'Domain Events': 'event',
+  'Integration Events': 'integration-event',
+  Types: 'type',
+};
+
+export function constructSlug(label: string): string {
+  return CONSTRUCT_SLUG[label] ?? 'type';
+}
+
+/** A small shape-coded icon for a DDD construct; the shape + colour live in CSS keyed by `data-construct`. */
+function constructIcon(slug: string): HTMLElement {
+  const icon = document.createElement('span');
+  icon.className = 'koi-model-icon';
+  icon.dataset.construct = slug;
+  icon.setAttribute('aria-hidden', 'true');
+  return icon;
+}
+
 function renderConstruct(construct: ConstructGroup, handlers: ModelOutlineHandlers): HTMLElement {
   const wrap = document.createElement('div');
   wrap.className = 'koi-model-construct';
+  const slug = constructSlug(construct.label);
 
   const head = document.createElement('h4');
   head.className = 'koi-model-construct-name';
-  head.append(construct.label, ' ', countSuffix(construct.entries.length));
+  head.append(constructIcon(slug), construct.label, ' ', countSuffix(construct.entries.length));
   wrap.appendChild(head);
 
   const list = document.createElement('ul');
@@ -183,7 +252,8 @@ function renderConstruct(construct: ConstructGroup, handlers: ModelOutlineHandle
     leaf.type = 'button';
     leaf.className = 'koi-model-leaf';
     leaf.dataset.qname = entry.qualifiedName;
-    leaf.textContent = entry.name;
+    // Icon first, then the name as a text node — keeps leaf.textContent === entry.name.
+    leaf.append(constructIcon(slug), entry.name);
     leaf.addEventListener('click', () => {
       handlers.onSelect(entry);
       handlers.goto(...gotoTarget(entry));

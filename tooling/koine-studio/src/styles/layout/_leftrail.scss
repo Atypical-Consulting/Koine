@@ -1,0 +1,136 @@
+/* --- left sidebar: Files / Explorer / Overview / Documentation ---
+   One column, ONE scroll bar. The rail itself is the scroll container; the four collapsible sections
+   size to their content and never scroll on their own (the file tree's internal scroll is neutralised
+   below too), so the whole sidebar moves under a single scroll bar. */
+#leftrail {
+  display: flex;
+  flex-direction: column;
+  background: var(--koi-paper-2);
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+.rail-sect {
+  display: flex;
+  flex-direction: column;
+  flex: 0 0 auto;
+  border-bottom: 1px solid var(--koi-line);
+}
+
+/* The Files section header pairs the disclosure with a workspace-name meta label. */
+.rail-sect-head-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--koi-space-2);
+  padding-right: var(--koi-space-3);
+
+  .rail-sect-head {
+    flex: 1 1 auto;
+  }
+}
+
+.rail-sect-head {
+  display: flex;
+  align-items: center;
+  gap: var(--koi-space-1-5);
+  width: 100%;
+  padding: var(--koi-space-2) var(--koi-space-3);
+  background: transparent;
+  border: none;
+  color: var(--koi-muted);
+  font-family: var(--koi-font-body);
+  font-size: var(--koi-text-xs);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  text-align: left;
+  cursor: pointer;
+  transition: color var(--koi-dur-fast) ease;
+
+  /* Disclosure caret — rotates when the section is collapsed. */
+  &::before {
+    content: '▾';
+    font-size: 0.8em;
+    line-height: 1;
+    transition: transform var(--koi-dur-fast) ease;
+  }
+  &:hover {
+    color: var(--koi-fg);
+  }
+}
+
+/* The Files section's workspace-name label (folder name, or "Scratch"). */
+.rail-sect-meta {
+  flex: 0 0 auto;
+  max-width: 45%;
+  font-family: var(--koi-font-mono);
+  font-size: var(--koi-text-2xs);
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  color: var(--koi-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.rail-sect[data-open='false'] {
+  .rail-sect-head::before {
+    transform: rotate(-90deg);
+  }
+  .rail-sect-body {
+    display: none;
+  }
+}
+
+.rail-sect-body {
+  padding: var(--koi-space-1) var(--koi-space-2) var(--koi-space-3);
+}
+
+/* Fold the file tree into the Files section: it must NOT scroll on its own — the rail owns the only
+   scroll bar — so flatten the explorer's flex/overflow and let its rows extend the rail's height. */
+#rail-files .rail-sect-body {
+  padding: 0;
+}
+#leftrail .explorer,
+#leftrail .explorer-tree {
+  flex: 0 0 auto;
+  overflow: visible;
+}
+
+/* The "Overview" section: per-context construct tallies (renderOverviewCounts). */
+.koi-overview-ctx + .koi-overview-ctx {
+  margin-top: var(--koi-space-2-5);
+}
+.koi-overview-ctx-name {
+  margin: 0 0 var(--koi-space-1-5);
+  font-size: var(--koi-text-xs);
+  font-weight: 600;
+  color: var(--koi-fg);
+}
+.koi-overview-counts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--koi-space-1) var(--koi-space-1-5);
+}
+.koi-overview-count {
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--koi-space-0-75);
+  padding: var(--koi-space-0-5) var(--koi-space-1-5);
+  border: 1px solid var(--koi-line);
+  border-radius: var(--koi-radius-pill);
+  background: var(--koi-paper);
+  font-size: var(--koi-text-2xs);
+  color: var(--koi-muted);
+  transition: border-color var(--koi-dur-fast) ease, color var(--koi-dur-fast) ease;
+
+  .koi-model-count-num {
+    font-weight: 600;
+    color: var(--koi-fg);
+  }
+  &:hover {
+    border-color: color-mix(in srgb, var(--koi-accent) 45%, var(--koi-line));
+    color: var(--koi-fg);
+  }
+}
