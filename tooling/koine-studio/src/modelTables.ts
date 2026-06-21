@@ -145,3 +145,120 @@ export function extractRelationships(graph: DiagramGraph, contextMap: ContextMap
 
   return rows;
 }
+
+// --- renderers (Task 2) ------------------------------------------------------
+// Pure DOM, decoupled from the editor via a `goto(span)` handler — the same jump-to-source contract the
+// diagram uses (issue #93), so a row click lands on the construct's `.koi` declaration in any file. A row
+// is rendered as a real `<table>` (the issue asks for a scannable/sortable table) whose data rows are
+// focusable + keyboard-operable (Enter/Space) when they carry a span; spanless rows (strategic relations)
+// render plain. Styles live in `styles/components/_diagnostics.scss` (the bottom panel they share).
+
+/** The editor side-effects a table needs: jump the caret to a construct's declaration span. */
+export interface TableHandlers {
+  goto(span: SourceSpan): void;
+}
+
+/** A table column: its header text, the cell text for a row, and an optional per-cell class. */
+interface Column<T> {
+  header: string;
+  get(row: T): string;
+  cellClass?(row: T): string | undefined;
+}
+
+const EM_DASH = '—';
+
+/**
+ * Build a `<table>` of `rows` with `columns`, or — when `rows` is empty — a single empty-state element
+ * carrying `emptyText` (mirrors the diagnostics strip's empty note). Each data row that carries a
+ * `span` becomes click- and keyboard-navigable via `handlers.goto`; rows without a span render plain.
+ */
+function renderTable<T extends { span: SourceSpan | null }>(
+  rows: T[],
+  columns: Column<T>[],
+  emptyText: string,
+  handlers: TableHandlers,
+): HTMLElement {
+  if (!rows.length) {
+    const empty = document.createElement('p');
+    empty.className = 'koi-table-empty';
+    empty.textContent = emptyText;
+    return empty;
+  }
+
+  const table = document.createElement('table');
+  table.className = 'koi-table';
+
+  const thead = document.createElement('thead');
+  const headRow = document.createElement('tr');
+  for (const col of columns) {
+    const th = document.createElement('th');
+    th.scope = 'col';
+    th.textContent = col.header;
+    headRow.appendChild(th);
+  }
+  thead.appendChild(headRow);
+  table.appendChild(thead);
+
+  const tbody = document.createElement('tbody');
+  for (const row of rows) {
+    const tr = document.createElement('tr');
+    for (const col of columns) {
+      const td = document.createElement('td');
+      td.textContent = col.get(row);
+      const cls = col.cellClass?.(row);
+      if (cls) td.className = cls;
+      tr.appendChild(td);
+    }
+    if (row.span) {
+      const span = row.span;
+      tr.classList.add('koi-row-link');
+      tr.tabIndex = 0;
+      tr.title = 'Jump to source';
+      tr.addEventListener('click', () => handlers.goto(span));
+      tr.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          handlers.goto(span);
+        }
+      });
+    }
+    tbody.appendChild(tr);
+  }
+  table.appendChild(tbody);
+  return table;
+}
+
+/** The Events table: Event · Type · Published By · Bounded Context · When (issue #144). */
+export function renderEventsTable(rows: EventRow[], handlers: TableHandlers): HTMLElement {
+  return renderTable<EventRow>(
+    rows,
+    [
+      { header: 'Event', get: (r) => r.name },
+      {
+        header: 'Type',
+        get: (r) => (r.type === 'integration' ? 'Integration' : 'Domain'),
+        cellClass: (r) => `koi-evt-type koi-evt-${r.type}`,
+      },
+      { header: 'Published By', get: (r) => r.publishedBy },
+      { header: 'Bounded Context', get: (r) => r.context },
+      { header: 'When', get: (r) => r.when || EM_DASH },
+    ],
+    'No events yet — add a domain or integration event to your model.',
+    handlers,
+  );
+}
+
+/** The Relationships table: Source · Relation · Target · Contexts (issue #144). */
+export function renderRelationshipsTable(rows: RelationRow[], handlers: TableHandlers): HTMLElement {
+  return renderTable<RelationRow>(
+    rows,
+    [
+      { header: 'Source', get: (r) => r.source },
+      { header: 'Relation', get: (r) => r.relation, cellClass: () => 'koi-rel-kind' },
+      { header: 'Target', get: (r) => r.target },
+      { header: 'Contexts', get: (r) => r.contexts.join(' → ') },
+    ],
+    'No relationships yet — add an aggregate or a context map to your model.',
+    handlers,
+  );
+}

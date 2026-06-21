@@ -3,6 +3,8 @@ import {
   extractEvents,
   extractRelationships,
   mergeDiagramGraphs,
+  renderEventsTable,
+  renderRelationshipsTable,
   type EventRow,
   type RelationRow,
 } from './modelTables';
@@ -196,13 +198,86 @@ describe('mergeDiagramGraphs', () => {
   });
 });
 
-// Renderer suites (Task 2) — declared here so the renderers are designed against these row shapes.
-describe('renderers (placeholder until Task 2)', () => {
-  test('row shapes are stable', () => {
-    const e: EventRow = { name: 'X', type: 'domain', publishedBy: 'A', context: 'C', when: '', span: null };
-    const r: RelationRow = { source: 'A', relation: 'contains', target: 'B', contexts: ['C'], span: null };
-    expect(e.name).toBe('X');
-    expect(r.relation).toBe('contains');
-    expect(vi.fn()).toBeTypeOf('function');
+describe('renderEventsTable', () => {
+  const rows: EventRow[] = [
+    { name: 'OrderPlaced', type: 'domain', publishedBy: 'Order', context: 'Sales', when: '', span: span(12) },
+    { name: 'OrderShipped', type: 'integration', publishedBy: 'Sales', context: 'Sales', when: '', span: span(20) },
+  ];
+
+  test('renders a header row and one body row per event, with the spec’s columns', () => {
+    const el = renderEventsTable(rows, { goto: () => {} });
+    const headers = Array.from(el.querySelectorAll('thead th')).map((th) => th.textContent);
+    expect(headers).toEqual(['Event', 'Type', 'Published By', 'Bounded Context', 'When']);
+    expect(el.querySelectorAll('tbody tr')).toHaveLength(2);
+    const firstRow = Array.from(el.querySelectorAll('tbody tr')[0].querySelectorAll('td')).map((td) => td.textContent);
+    expect(firstRow).toEqual(['OrderPlaced', 'Domain', 'Order', 'Sales', '—']); // empty `when` shows an em dash
+    const second = Array.from(el.querySelectorAll('tbody tr')[1].querySelectorAll('td')).map((td) => td.textContent);
+    expect(second).toEqual(['OrderShipped', 'Integration', 'Sales', 'Sales', '—']);
+  });
+
+  test('a row click invokes goto with the row’s span', () => {
+    const goto = vi.fn();
+    const el = renderEventsTable(rows, { goto });
+    document.body.appendChild(el);
+    (el.querySelectorAll('tbody tr')[1] as HTMLElement).click();
+    expect(goto).toHaveBeenCalledWith(rows[1].span);
+  });
+
+  test('Enter on a focused row invokes goto (keyboard access)', () => {
+    const goto = vi.fn();
+    const el = renderEventsTable(rows, { goto });
+    document.body.appendChild(el);
+    const row = el.querySelectorAll('tbody tr')[0] as HTMLElement;
+    expect(row.tabIndex).toBe(0);
+    row.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    expect(goto).toHaveBeenCalledWith(rows[0].span);
+  });
+
+  test('empty input renders an empty-state element (no table rows)', () => {
+    const el = renderEventsTable([], { goto: () => {} });
+    expect(el.querySelector('tbody tr')).toBeNull();
+    expect(el.classList.contains('koi-table-empty')).toBe(true);
+  });
+});
+
+describe('renderRelationshipsTable', () => {
+  const rows: RelationRow[] = [
+    { source: 'Order', relation: 'contains', target: 'OrderItem', contexts: ['Sales'], span: span(8) },
+    { source: 'Sales', relation: 'Customer/Supplier', target: 'Shipping', contexts: ['Sales', 'Shipping'], span: null },
+  ];
+
+  test('renders a header row and one body row per relation, with the spec’s columns', () => {
+    const el = renderRelationshipsTable(rows, { goto: () => {} });
+    const headers = Array.from(el.querySelectorAll('thead th')).map((th) => th.textContent);
+    expect(headers).toEqual(['Source', 'Relation', 'Target', 'Contexts']);
+    expect(el.querySelectorAll('tbody tr')).toHaveLength(2);
+    const structural = Array.from(el.querySelectorAll('tbody tr')[0].querySelectorAll('td')).map((td) => td.textContent);
+    expect(structural).toEqual(['Order', 'contains', 'OrderItem', 'Sales']);
+    const strategic = Array.from(el.querySelectorAll('tbody tr')[1].querySelectorAll('td')).map((td) => td.textContent);
+    expect(strategic).toEqual(['Sales', 'Customer/Supplier', 'Shipping', 'Sales → Shipping']);
+  });
+
+  test('a structural row (with a span) is click-to-source', () => {
+    const goto = vi.fn();
+    const el = renderRelationshipsTable(rows, { goto });
+    document.body.appendChild(el);
+    (el.querySelectorAll('tbody tr')[0] as HTMLElement).click();
+    expect(goto).toHaveBeenCalledWith(rows[0].span);
+  });
+
+  test('a strategic row (no span) is not clickable', () => {
+    const goto = vi.fn();
+    const el = renderRelationshipsTable(rows, { goto });
+    document.body.appendChild(el);
+    const tr = el.querySelectorAll('tbody tr')[1] as HTMLElement;
+    expect(tr.classList.contains('koi-row-link')).toBe(false);
+    tr.click();
+    expect(goto).not.toHaveBeenCalled();
+  });
+
+  test('empty input renders an empty-state element', () => {
+    const el = renderRelationshipsTable([], { goto: () => {} });
+    expect(el.querySelector('tbody tr')).toBeNull();
+    expect(el.classList.contains('koi-table-empty')).toBe(true);
   });
 });
