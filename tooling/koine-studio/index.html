@@ -140,14 +140,22 @@
         </section>
       </main>
 
-      <footer id="diagnostics" aria-label="Diagnostics">
+      <footer id="diagnostics" aria-label="Problems, events and relationships">
         <div class="koi-resizer koi-resizer-y" id="diag-resizer" aria-hidden="true"></div>
-        <button type="button" id="diag-header" aria-expanded="true" aria-controls="diag-body">
-          <svg class="diag-chevron" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 6.5 8 10 12 6.5" /></svg>
-          <span class="diag-title">Diagnostics</span>
+        <div id="diag-header">
+          <button type="button" id="diag-collapse" class="diag-collapse" aria-expanded="true" aria-controls="diag-body panel-events panel-relationships" aria-label="Collapse panel">
+            <svg class="diag-chevron" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 6.5 8 10 12 6.5" /></svg>
+          </button>
+          <div class="diag-tabs" role="tablist" aria-label="Bottom panel">
+            <button type="button" class="diag-tab" id="tab-problems" role="tab" data-panel="problems" aria-selected="true" aria-controls="diag-body">Problems</button>
+            <button type="button" class="diag-tab" id="tab-events" role="tab" data-panel="events" aria-selected="false" aria-controls="panel-events">Events</button>
+            <button type="button" class="diag-tab" id="tab-relationships" role="tab" data-panel="relationships" aria-selected="false" aria-controls="panel-relationships">Relationships</button>
+          </div>
           <span id="diag-count" class="diag-count"></span>
-        </button>
-        <div id="diag-body"></div>
+        </div>
+        <div id="diag-body" class="diag-panel" role="tabpanel" aria-labelledby="tab-problems"></div>
+        <div id="panel-events" class="diag-panel" role="tabpanel" aria-labelledby="tab-events" hidden></div>
+        <div id="panel-relationships" class="diag-panel" role="tabpanel" aria-labelledby="tab-relationships" hidden></div>
       </footer>
     </div>
   </body>

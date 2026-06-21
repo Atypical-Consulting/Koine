@@ -238,6 +238,34 @@ describe('renderEventsTable', () => {
     expect(el.querySelector('tbody tr')).toBeNull();
     expect(el.classList.contains('koi-table-empty')).toBe(true);
   });
+
+  test('clicking a column header sorts rows by that column, toggling direction', () => {
+    const unsorted: EventRow[] = [
+      { name: 'Shipped', type: 'integration', publishedBy: 'Sales', context: 'Sales', when: '', span: span(20) },
+      { name: 'Placed', type: 'domain', publishedBy: 'Order', context: 'Sales', when: '', span: span(12) },
+    ];
+    const el = renderEventsTable(unsorted, { goto: () => {} });
+    document.body.appendChild(el);
+    const eventHeader = el.querySelectorAll('thead th')[0];
+    const names = () => Array.from(el.querySelectorAll('tbody tr')).map((r) => r.querySelector('td')!.textContent);
+
+    eventHeader.querySelector('button')!.click(); // ascending
+    expect(names()).toEqual(['Placed', 'Shipped']);
+    expect(eventHeader.getAttribute('aria-sort')).toBe('ascending');
+
+    eventHeader.querySelector('button')!.click(); // descending
+    expect(names()).toEqual(['Shipped', 'Placed']);
+    expect(eventHeader.getAttribute('aria-sort')).toBe('descending');
+  });
+
+  test('sorting preserves click-to-source on the re-ordered rows', () => {
+    const goto = vi.fn();
+    const el = renderEventsTable(rows, { goto });
+    document.body.appendChild(el);
+    el.querySelectorAll('thead th')[0].querySelector('button')!.click();
+    (el.querySelectorAll('tbody tr')[0] as HTMLElement).click();
+    expect(goto).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe('renderRelationshipsTable', () => {

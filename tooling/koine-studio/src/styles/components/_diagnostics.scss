@@ -26,29 +26,39 @@ body.resizing #diag-resizer {
   background: var(--koi-accent);
 }
 
+/* The header is a layout row (collapse toggle · tablist · count). Its typographic context — uppercase,
+   tracked, small — is inherited by the tabs (.diag-tab { font: inherit; … }). */
 #diag-header {
   flex: 0 0 auto;
   display: flex;
   align-items: center;
   gap: var(--koi-space-2);
   width: 100%;
-  background: transparent;
-  border: none;
   color: var(--koi-muted);
   padding: var(--koi-space-1-5) var(--koi-space-3);
-  cursor: pointer;
   font-family: inherit;
   font-size: 0.66rem;
   text-transform: uppercase;
   letter-spacing: 0.16em;
   text-align: left;
 }
-#diag-header:hover {
+
+.diag-collapse {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  background: transparent;
+  border: none;
+  color: inherit;
+  padding: 0;
+  cursor: pointer;
+}
+.diag-collapse:hover {
   color: var(--koi-fg);
 }
-#diag-header:focus-visible {
+.diag-collapse:focus-visible {
   outline: 2px solid var(--koi-accent);
-  outline-offset: -2px;
+  outline-offset: 2px;
 }
 
 .diag-chevron {
@@ -80,18 +90,12 @@ body.resizing #diag-resizer {
   color: var(--koi-hl-string);
 }
 
+/* The Problems panel is also a `.diag-panel` (shared box below); it keeps its vertical list-of-rows
+   layout, whereas Events/Relationships render a table. */
 #diag-body {
-  flex: 1 1 auto;
-  height: var(--koi-diag-h, 150px);
-  max-height: 50vh;
-  overflow-y: auto;
-  padding: 0 var(--koi-space-3) 7px;
   display: flex;
   flex-direction: column;
   gap: var(--koi-space-px);
-}
-#diagnostics.collapsed #diag-body {
-  display: none;
 }
 #diagnostics.collapsed #diag-resizer {
   display: none;
@@ -180,13 +184,18 @@ body.resizing #diag-resizer {
   outline-offset: -2px;
 }
 
-/* The Events / Relationships panels sit beside #diag-body and share its scroll/height behaviour. */
+/* All three bottom panels (Problems / Events / Relationships) share one draggable-height scroll box. */
 .diag-panel {
   flex: 1 1 auto;
   height: var(--koi-diag-h, 150px);
   max-height: 50vh;
   overflow: auto;
   padding: 0 var(--koi-space-3) 7px;
+}
+/* The inactive panels carry the `hidden` attribute; this id-scoped rule beats #diag-body's id-level
+   `display: flex` so the Problems panel actually hides when another tab is active. */
+#diagnostics .diag-panel[hidden] {
+  display: none;
 }
 #diagnostics.collapsed .diag-panel {
   display: none;
@@ -206,14 +215,46 @@ body.resizing #diag-resizer {
   z-index: var(--koi-z-base);
   background: var(--koi-paper-2);
   text-align: left;
-  font-weight: 600;
+  border-bottom: 1px solid var(--koi-line);
+  white-space: nowrap;
+  padding: 0; /* the sort button carries the padding so the whole header cell is clickable */
+}
+/* Each header is a sort button: clicking it orders the table by that column (aria-sort reflects state). */
+.koi-th-sort {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--koi-space-1);
+  width: 100%;
+  background: transparent;
+  border: none;
   color: var(--koi-muted);
+  font: inherit;
+  font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.08em;
   font-size: 0.66rem;
+  text-align: left;
   padding: var(--koi-space-1) 7px;
-  border-bottom: 1px solid var(--koi-line);
-  white-space: nowrap;
+  cursor: pointer;
+}
+.koi-th-sort:hover {
+  color: var(--koi-fg);
+}
+.koi-th-sort:focus-visible {
+  outline: 2px solid var(--koi-accent);
+  outline-offset: -2px;
+}
+/* Direction caret on the active sort column (the inactive columns show none). */
+.koi-th-sort::after {
+  content: '';
+  color: var(--koi-accent);
+  font-size: 0.6em;
+}
+th[aria-sort='ascending'] .koi-th-sort::after {
+  content: '▲';
+}
+th[aria-sort='descending'] .koi-th-sort::after {
+  content: '▼';
 }
 .koi-table td {
   padding: var(--koi-space-1) 7px;

@@ -11,6 +11,7 @@ import {
   type Location,
   type LspDiagnostic,
   type Range,
+  type SourceSpan,
   type TextEdit,
   type WorkspaceEdit,
 } from './lsp';
@@ -33,6 +34,13 @@ import { buildSourceZip } from './sourceZip';
 import { formatChord } from './platform';
 import { renderDiagrams } from './diagrams';
 import { NODE_NAVIGATE_EVENT, type DiagramNodeNavigateDetail } from './diagrams-svg';
+import {
+  extractEvents,
+  extractRelationships,
+  mergeDiagramGraphs,
+  renderEventsTable,
+  renderRelationshipsTable,
+} from './modelTables';
 import { renderGlossary, type GlossaryHandlers } from './glossary';
 import { createSelectionBus } from './selection';
 import { renderModelOutline, type ModelOutlineHandlers } from './modelOutline';
@@ -384,6 +392,18 @@ export function init(): void {
   const statusEl = el('status');
   const diagBodyEl = el('diag-body');
   const diagCountEl = el('diag-count');
+
+  // Bottom-panel (Problems / Events / Relationships, issue #144) state + refs live here — beside the
+  // diagnostics refs and initialised before any model invalidation can fire — so `invalidateBottomPanels`
+  // (called from `invalidateDocViews`) never touches a not-yet-initialised binding. The tab wiring and
+  // the Events/Relationships data loaders are set up further down, with the strip.
+  const diagEl = el('diagnostics');
+  const eventsPanel = el('panel-events');
+  const relationshipsPanel = el('panel-relationships');
+  type BottomTab = 'problems' | 'events' | 'relationships';
+  let activeBottomTab: BottomTab = 'problems';
+  const bottomLoaded = { events: false, relationships: false };
+  let bottomPanelDebounce: ReturnType<typeof setTimeout> | undefined;
 
   // Global unsaved-work surfacing: the document title gains a `•` and a clickable "N unsaved" pill
   // appears beside the status whenever any open buffer is dirty. baseTitle is captured once, clean.
@@ -1186,21 +1206,18 @@ export function init(): void {
     }
   }
 
-  // Jump-to-source from a diagram node (issue #93, Task 4). The SVG renderer draws each navigable node
-  // as a `<g>` that dispatches a bubbling NODE_NAVIGATE_EVENT carrying its RAW 1-based source span. We
-  // attach ONE delegated listener on the diagrams container (not per render, not per node) and move the
-  // editor caret to that construct's `.koi` declaration, opening the owning file first if it isn't open.
-  async function navigateToDiagramNode(detail: DiagramNodeNavigateDetail): Promise<void> {
-    const uri = detail.file;
-    // No source file on the span → nothing to navigate to (read-only, so just no-op).
+  // Jump-to-source for a RAW 1-based source span: the shared core of diagram-node navigation (issue #93)
+  // and the bottom-panel tables' row click (issue #144). Opens the owning file if it isn't an open buffer
+  // yet (the span's `file` is the same `file://` uri buffers are keyed by, so folder-mode is usually
+  // "already open"), then moves the caret. No-ops on a missing file or a malformed/zero span rather than
+  // jumping somewhere bogus — both call sites are read-only navigation.
+  async function gotoSourceSpan(
+    span: { file: string | null; line: number; column: number; endLine: number; endColumn: number },
+  ): Promise<void> {
+    const uri = span.file;
     if (!uri) return;
-    // Defensive: a malformed/zero span must not jump to a bogus place. Valid 1-based coords are ≥ 1.
-    if (!(detail.line >= 1 && detail.column >= 1 && detail.endLine >= 1 && detail.endColumn >= 1)) return;
+    if (!(span.line >= 1 && span.column >= 1 && span.endLine >= 1 && span.endColumn >= 1)) return;
 
-    // Open the owning file if it isn't an open buffer yet. The span's `file` is the same `file://` uri
-    // the buffers are keyed by (the compiler is fed buffers by uri), so the common folder-mode path is
-    // "already open". If it's closed, derive a path token and open it; if that fails, no-op rather than
-    // jumping in the wrong file.
     if (!buffers.has(uri)) {
       const token = fileUriToPath(uri);
       if (token == null) return;
@@ -1212,11 +1229,18 @@ export function init(): void {
     const location: Location = {
       uri,
       range: {
-        start: { line: detail.line - 1, character: detail.column - 1 },
-        end: { line: detail.endLine - 1, character: detail.endColumn - 1 },
+        start: { line: span.line - 1, character: span.column - 1 },
+        end: { line: span.endLine - 1, character: span.endColumn - 1 },
       },
     };
     navigateToDefinition(location);
+  }
+
+  // Jump-to-source from a diagram node: the SVG renderer draws each navigable node as a `<g>` that
+  // dispatches a bubbling NODE_NAVIGATE_EVENT carrying its RAW 1-based source span; one delegated
+  // listener on the diagrams container (below) routes it here.
+  async function navigateToDiagramNode(detail: DiagramNodeNavigateDetail): Promise<void> {
+    await gotoSourceSpan(detail);
   }
 
   diagramsView.addEventListener(NODE_NAVIGATE_EVENT, (e) => {
@@ -1258,6 +1282,7 @@ export function init(): void {
     indexPromise = null;
     inspectorHost = null;
     cachedDomainIndex = null; // the assistant's domain index is derived from the same model
+    invalidateBottomPanels(); // the Events/Relationships tables are model-derived too
   }
 
   // An edit makes any cached doc view (preview/glossary/context-map/outline) stale. Mark them
@@ -2029,9 +2054,10 @@ export function init(): void {
   });
   treeBtn.addEventListener('click', () => toggleFileTree());
 
-  // Diagnostics strip — draggable height (anchored to the app's bottom edge) + collapse toggle.
-  const diagEl = el('diagnostics');
-  const diagHeader = el('diag-header');
+  // Bottom panel — draggable height (anchored to the app's bottom edge) + collapse toggle + the
+  // Problems / Events / Relationships tabs (issue #144). `diagEl` and the panel refs/state are declared
+  // up top (beside the diagnostics refs); this block adds the resizer, the collapse toggle, the tab
+  // switching, and the lazy Events/Relationships data loaders.
   initEdgeResizer({
     target: diagEl,
     handle: el('diag-resizer'),
@@ -2042,13 +2068,14 @@ export function init(): void {
     min: 80,
     max: (h) => h * 0.5,
   });
+  const diagCollapse = el('diag-collapse');
   const DIAG_COLLAPSED_KEY = 'koine.studio.diagCollapsed';
   function applyDiagCollapsed(collapsed: boolean): void {
     diagEl.classList.toggle('collapsed', collapsed);
-    diagHeader.setAttribute('aria-expanded', String(!collapsed));
+    diagCollapse.setAttribute('aria-expanded', String(!collapsed));
   }
   applyDiagCollapsed((localStorage.getItem(DIAG_COLLAPSED_KEY) ?? '0') === '1');
-  diagHeader.addEventListener('click', () => {
+  diagCollapse.addEventListener('click', () => {
     const collapsed = !diagEl.classList.contains('collapsed');
     applyDiagCollapsed(collapsed);
     try {
@@ -2056,7 +2083,90 @@ export function init(): void {
     } catch {
       // ignore — no persistence available
     }
+    if (!collapsed) ensureBottomLoaded(activeBottomTab); // expanding → fill the active table if stale
   });
+
+  // Tab switching: only the active panel body is shown; the count pill belongs to Problems. The first
+  // time Events/Relationships is shown it loads lazily; clicking a tab also expands a collapsed panel.
+  const bottomTabs = Array.from(document.querySelectorAll<HTMLButtonElement>('.diag-tab'));
+  function selectBottomTab(tab: BottomTab): void {
+    activeBottomTab = tab;
+    for (const t of bottomTabs) t.setAttribute('aria-selected', String(t.dataset.panel === tab));
+    diagBodyEl.hidden = tab !== 'problems';
+    eventsPanel.hidden = tab !== 'events';
+    relationshipsPanel.hidden = tab !== 'relationships';
+    diagCountEl.hidden = tab !== 'problems';
+    if (diagEl.classList.contains('collapsed')) applyDiagCollapsed(false);
+    ensureBottomLoaded(tab);
+  }
+  for (const t of bottomTabs) {
+    t.addEventListener('click', () => selectBottomTab(t.dataset.panel as BottomTab));
+  }
+
+  // Row click → jump to the construct's `.koi` declaration, via the same span navigation the diagram uses.
+  const bottomTableHandlers = { goto: (span: SourceSpan) => void gotoSourceSpan(span) };
+
+  // The merged DiagramGraph projection behind both tables: every per-diagram graph from livingDocs fused
+  // into one (node ids disambiguated) so the extractors see all aggregates + the integration-event flow
+  // at once. It's the SAME source the diagram renders from, so the tables and the diagram never drift.
+  async function bottomGraph() {
+    const docs = await lsp.livingDocs();
+    return mergeDiagramGraphs(docs.files.flatMap((f) => f.diagrams.map((d) => d.graph)));
+  }
+
+  function ensureBottomLoaded(tab: BottomTab): void {
+    if (tab === 'events' && !bottomLoaded.events) void loadEventsPanel();
+    if (tab === 'relationships' && !bottomLoaded.relationships) void loadRelationshipsPanel();
+  }
+
+  // Each loader is guarded by a monotonic token so a slow fetch superseded by an edit/refresh can't
+  // clobber a newer render. An empty/erroring model degrades to the renderer's own empty-state (parse
+  // errors → no diagrams → "No events/relationships yet"), mirroring the diagnostics empty note.
+  let eventsSeq = 0;
+  async function loadEventsPanel(): Promise<void> {
+    const seq = ++eventsSeq;
+    docMessage(eventsPanel, 'Loading events…');
+    try {
+      const graph = await bottomGraph();
+      if (seq !== eventsSeq) return;
+      eventsPanel.replaceChildren(renderEventsTable(extractEvents(graph), bottomTableHandlers));
+      bottomLoaded.events = true;
+    } catch (e) {
+      if (seq === eventsSeq) docMessage(eventsPanel, 'Events request failed: ' + String(e), 'error');
+    }
+  }
+
+  let relationshipsSeq = 0;
+  async function loadRelationshipsPanel(): Promise<void> {
+    const seq = ++relationshipsSeq;
+    docMessage(relationshipsPanel, 'Loading relationships…');
+    try {
+      const [graph, ctxMap] = await Promise.all([
+        bottomGraph(),
+        lsp.contextMap().catch(() => ({ contexts: [], relations: [] }) as ContextMapResult),
+      ]);
+      if (seq !== relationshipsSeq) return;
+      relationshipsPanel.replaceChildren(
+        renderRelationshipsTable(extractRelationships(graph, ctxMap), bottomTableHandlers),
+      );
+      bottomLoaded.relationships = true;
+    } catch (e) {
+      if (seq === relationshipsSeq) {
+        docMessage(relationshipsPanel, 'Relationships request failed: ' + String(e), 'error');
+      }
+    }
+  }
+
+  // Mark the Events/Relationships tables stale (called from invalidateDocViews on any model change). If
+  // one is on screen and expanded, live-refresh it (debounced) so it tracks edits like the inspector;
+  // Problems is refreshed by the diagnostics push, and a collapsed panel reloads when next expanded.
+  function invalidateBottomPanels(): void {
+    bottomLoaded.events = false;
+    bottomLoaded.relationships = false;
+    if (activeBottomTab === 'problems' || diagEl.classList.contains('collapsed')) return;
+    clearTimeout(bottomPanelDebounce);
+    bottomPanelDebounce = setTimeout(() => ensureBottomLoaded(activeBottomTab), 350);
+  }
 
   // Toolbar buttons unique to this phase.
   const hintEl = document.querySelector('.palette-hint');

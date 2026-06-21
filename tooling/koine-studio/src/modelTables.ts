@@ -171,6 +171,9 @@ const EM_DASH = '—';
  * Build a `<table>` of `rows` with `columns`, or — when `rows` is empty — a single empty-state element
  * carrying `emptyText` (mirrors the diagnostics strip's empty note). Each data row that carries a
  * `span` becomes click- and keyboard-navigable via `handlers.goto`; rows without a span render plain.
+ * Column headers are sort buttons: clicking one orders the body by that column (numeric-aware,
+ * case-insensitive) and toggles ascending/descending, reflected via `aria-sort` (the issue asks for a
+ * *sortable* table). Sorting only re-orders the display; the original `rows` order is the unsorted base.
  */
 function renderTable<T extends { span: SourceSpan | null }>(
   rows: T[],
@@ -190,42 +193,78 @@ function renderTable<T extends { span: SourceSpan | null }>(
 
   const thead = document.createElement('thead');
   const headRow = document.createElement('tr');
-  for (const col of columns) {
+  const ths: HTMLTableCellElement[] = [];
+  let sortCol = -1;
+  let sortDir: 1 | -1 = 1;
+
+  columns.forEach((col, i) => {
     const th = document.createElement('th');
     th.scope = 'col';
-    th.textContent = col.header;
+    th.setAttribute('aria-sort', 'none');
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'koi-th-sort';
+    button.textContent = col.header;
+    button.addEventListener('click', () => sortByColumn(i));
+    th.appendChild(button);
     headRow.appendChild(th);
-  }
+    ths.push(th);
+  });
   thead.appendChild(headRow);
   table.appendChild(thead);
 
   const tbody = document.createElement('tbody');
-  for (const row of rows) {
-    const tr = document.createElement('tr');
-    for (const col of columns) {
-      const td = document.createElement('td');
-      td.textContent = col.get(row);
-      const cls = col.cellClass?.(row);
-      if (cls) td.className = cls;
-      tr.appendChild(td);
-    }
-    if (row.span) {
-      const span = row.span;
-      tr.classList.add('koi-row-link');
-      tr.tabIndex = 0;
-      tr.title = 'Jump to source';
-      tr.addEventListener('click', () => handlers.goto(span));
-      tr.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter' || e.key === ' ') {
-          e.preventDefault();
-          handlers.goto(span);
-        }
-      });
-    }
-    tbody.appendChild(tr);
-  }
   table.appendChild(tbody);
+
+  function renderBody(view: T[]): void {
+    tbody.replaceChildren(...view.map((row) => buildRow(row, columns, handlers)));
+  }
+
+  function sortByColumn(i: number): void {
+    sortDir = sortCol === i && sortDir === 1 ? -1 : 1;
+    sortCol = i;
+    const get = columns[i].get;
+    const view = rows
+      .slice()
+      .sort((a, b) => sortDir * get(a).localeCompare(get(b), undefined, { numeric: true, sensitivity: 'base' }));
+    ths.forEach((th, j) =>
+      th.setAttribute('aria-sort', j === i ? (sortDir === 1 ? 'ascending' : 'descending') : 'none'),
+    );
+    renderBody(view);
+  }
+
+  renderBody(rows);
   return table;
+}
+
+/** One body row: the column cells, made click/keyboard-navigable via `handlers.goto` when it has a span. */
+function buildRow<T extends { span: SourceSpan | null }>(
+  row: T,
+  columns: Column<T>[],
+  handlers: TableHandlers,
+): HTMLTableRowElement {
+  const tr = document.createElement('tr');
+  for (const col of columns) {
+    const td = document.createElement('td');
+    td.textContent = col.get(row);
+    const cls = col.cellClass?.(row);
+    if (cls) td.className = cls;
+    tr.appendChild(td);
+  }
+  if (row.span) {
+    const span = row.span;
+    tr.classList.add('koi-row-link');
+    tr.tabIndex = 0;
+    tr.title = 'Jump to source';
+    tr.addEventListener('click', () => handlers.goto(span));
+    tr.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        handlers.goto(span);
+      }
+    });
+  }
+  return tr;
 }
 
 /** The Events table: Event · Type · Published By · Bounded Context · When (issue #144). */
