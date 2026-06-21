@@ -1304,8 +1304,12 @@ export function init(): void {
   // calls it through showView) can't recurse. Assistant/Check stay reachable from any mode via the
   // toolbar Check button and the command palette, so filtering them out of a strip never traps them.
   function applyMode(id: string): void {
+    // Persist only on a real change: applyMode runs on every view selection (tab click, palette,
+    // shortcut), so an unconditional write would churn localStorage on same-mode navigation. The
+    // chrome below still repaints each call — cheap, idempotent, and it paints the initial boot frame
+    // (where id already equals the restored activeMode, so the guarded write is correctly skipped).
+    if (id !== activeMode) saveWorkspaceMode(id);
     activeMode = id;
-    saveWorkspaceMode(id); // persist here — the one choke point every mode change flows through
     const views = viewsForMode(id);
     for (const btn of modeButtons) btn.setAttribute('aria-selected', String(btn.dataset.mode === id));
     for (const tab of tabs) tab.hidden = !views.includes(tab.dataset.view as RightView);
