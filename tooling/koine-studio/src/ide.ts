@@ -1020,7 +1020,7 @@ export function init(): void {
   // tree, the Overview per-context counts, and the Documentation glossary.
   const explorerBody = el('rail-explorer-body');
   const overviewBody = el('rail-overview-body');
-  const glossaryView = el('rail-docs-body');
+  const glossaryView = el('center-docs');
   // Center hosts: the diagram canvas (Visual) and the code editor's companion sub-views.
   const diagramsView = el('center-visual');
   const assistantView = el('view-assistant');
@@ -1289,7 +1289,33 @@ export function init(): void {
   };
   const inspectorHandlers: InspectorHandlers = {
     onGoto: (range) => editor.gotoRange(range.start, range.end),
+    onRename: (element, newName) => void renameElement(element, newName),
+    onSaveDescription: (element, text) => void saveInspectorDescription(element, text),
   };
+
+  // Rename the selected element from the Properties panel, reusing the LSP rename refactor (the same
+  // seam the editor's F2 uses): resolve the workspace edit at the element's name position, then apply it.
+  async function renameElement(element: InspectorElement, newName: string): Promise<void> {
+    try {
+      const edit = await lsp.rename(element.nameRange.start.line, element.nameRange.start.character, newName);
+      if (edit) applyWorkspaceEdit(edit);
+    } catch (e) {
+      setStatus('Rename failed: ' + String(e), 'error');
+    }
+  }
+
+  // Persist the selected element's description from the Properties panel, reusing the glossary's setDoc
+  // seam (writes a `///` doc comment). The applied edit fires onChange → the surfaces refresh.
+  async function saveInspectorDescription(element: InspectorElement, text: string): Promise<void> {
+    try {
+      const result = await lsp.setDoc(element.id, text);
+      if (!result.edits.length) return;
+      if (result.uri && result.uri !== activeUri && buffers.has(result.uri)) activateFile(result.uri);
+      editor.applyEdits(result.edits);
+    } catch (e) {
+      setStatus('Saving description failed: ' + String(e), 'error');
+    }
+  }
 
   // The joined model index (#142, see modelIndex.ts): the workspace-merged glossary joined with the
   // richest matching `DiagramNode`. Cached and invalidated on edit; `indexPromise` de-dups concurrent
@@ -1510,13 +1536,17 @@ export function init(): void {
 
   // The center column toggles between the visual diagram canvas and the technical code view; the
   // technical view in turn has sub-tabs (editor / emitted preview / compatibility check / assistant).
-  type CenterView = 'visual' | 'technical';
+  type CenterView = 'visual' | 'technical' | 'docs';
   type TechView = 'editor' | 'preview' | 'check' | 'assistant';
-  let activeCenter: CenterView = activeMode === 'code' ? 'technical' : 'visual';
+  // The restored mode picks the initial center so the highlighted Domain/Code/Docs button and the
+  // shown center tab agree on boot (Domain → Visual, Code → Code, Docs → Documentation).
+  const centerForMode = (mode: string): CenterView => (mode === 'code' ? 'technical' : mode === 'docs' ? 'docs' : 'visual');
+  let activeCenter: CenterView = centerForMode(activeMode);
   let activeTech: TechView = 'editor';
 
   const centerVisualEl = el('center-visual');
   const centerTechnicalEl = el('center-technical');
+  const centerDocsEl = el('center-docs');
   const editorPaneEl = el('editor-pane');
   const previewEl = el('view-preview');
   const centerTabs = Array.from(document.querySelectorAll<HTMLButtonElement>('.center-tab'));
@@ -1527,6 +1557,10 @@ export function init(): void {
   function applyCenterChrome(): void {
     centerVisualEl.hidden = activeCenter !== 'visual';
     centerTechnicalEl.hidden = activeCenter !== 'technical';
+    centerDocsEl.hidden = activeCenter !== 'docs';
+    // The bottom strip (Problems/Events/Relationships/Context Map) sits under the canvas/editor — it
+    // serves both Visual and Code, but not Documentation.
+    diagEl.hidden = activeCenter === 'docs';
     for (const t of centerTabs) t.setAttribute('aria-selected', String(t.dataset.center === activeCenter));
     const techVisible = activeCenter === 'technical';
     editorPaneEl.hidden = !(techVisible && activeTech === 'editor');
@@ -1544,6 +1578,7 @@ export function init(): void {
     applyCenterChrome();
     if (view === 'visual' && !docViewsLoaded.diagrams) void loadDiagrams();
     else if (view === 'technical') ensureTechLoaded();
+    else if (view === 'docs' && !docViewsLoaded.glossary) void loadGlossary();
   }
 
   function selectTech(view: TechView): void {
@@ -1566,20 +1601,18 @@ export function init(): void {
     }
   }
 
-  // Open + scroll the left-rail Documentation section into view (the "Docs" mode focus and the
-  // Explorer's "Ubiquitous Language" shortcut both route here).
+  // Surface the Documentation center tab (the "Docs" mode focus and the Explorer's "Ubiquitous
+  // Language" shortcut both route here).
   function focusDocs(): void {
-    const sect = el('rail-docs');
-    sect.dataset.open = 'true';
-    sect.querySelector<HTMLButtonElement>('.rail-sect-head')?.setAttribute('aria-expanded', 'true');
-    sect.scrollIntoView({ block: 'nearest' });
+    selectCenter('docs');
   }
 
-  // Repaint the always-visible surfaces (the left rail) + whatever the center is currently showing.
+  // Repaint the always-visible left rail (Explorer + Overview + the right-rail Properties inspector) +
+  // whatever the center is currently showing.
   function refreshActiveSurfaces(): void {
-    void loadModel(); // Explorer + Overview (+ the right-rail Properties inspector)
-    void loadGlossary(); // Documentation
+    void loadModel();
     if (activeCenter === 'visual') void loadDiagrams();
+    else if (activeCenter === 'docs') void loadGlossary();
     else ensureTechLoaded();
   }
 
@@ -2394,14 +2427,14 @@ export function init(): void {
     });
   }
 
-  // Bottom panel — draggable height (anchored to the app's bottom edge) + collapse toggle + the
-  // Problems / Events / Relationships tabs (issue #144). `diagEl` and the panel refs/state are declared
-  // up top (beside the diagnostics refs); this block adds the resizer, the collapse toggle, the tab
-  // switching, and the lazy Events/Relationships data loaders.
+  // Bottom panel — draggable height (anchored to the center's bottom edge, since the strip lives inside
+  // #center now) + collapse toggle + the Problems / Events / Relationships / Context Map tabs (issue
+  // #144). `diagEl` and the panel refs/state are declared up top; this block adds the resizer, the
+  // collapse toggle, the tab switching, and the lazy data loaders.
   initEdgeResizer({
     target: diagEl,
     handle: el('diag-resizer'),
-    container: el('app'),
+    container: el('center'),
     cssVar: '--koi-diag-h',
     anchor: 'bottom',
     storageKey: 'koine.studio.diagHeight',

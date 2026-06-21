@@ -101,10 +101,9 @@
 
       <main id="split">
         <!-- One left sidebar, one scroll bar: Files (the workspace tree), Explorer (the DDD
-             construct/context tree, renderModelOutline), Overview (per-context counts,
-             renderOverviewCounts) and Documentation (the glossary, renderGlossary). The sections are
-             collapsible and the whole rail is the single scroll container — section bodies don't
-             scroll on their own. -->
+             construct/context tree, renderModelOutline) and Overview (per-context counts,
+             renderOverviewCounts). The sections are collapsible and the whole rail is the single scroll
+             container — section bodies don't scroll on their own. -->
         <aside id="leftrail" class="pane" aria-label="Workspace">
           <section class="rail-sect" id="rail-files" data-open="true">
             <div class="rail-sect-head-row">
@@ -121,20 +120,19 @@
             <button type="button" class="rail-sect-head" aria-expanded="true" aria-controls="rail-overview-body">Overview</button>
             <div class="rail-sect-body" id="rail-overview-body"></div>
           </section>
-          <section class="rail-sect" id="rail-docs" data-open="true">
-            <button type="button" class="rail-sect-head" aria-expanded="true" aria-controls="rail-docs-body">Documentation</button>
-            <div class="rail-sect-body" id="rail-docs-body"></div>
-          </section>
         </aside>
         <div class="koi-resizer" id="leftrail-resizer" aria-hidden="true"></div>
 
-        <!-- Center: a Visual (the domain diagram) / Code (the editor plus the generated code, the
-             compatibility check and the assistant) toggle. The editor mounts into #editor-pane and the
-             diagram into #center-visual; both ids are preserved so their render call sites are unchanged. -->
+        <!-- Center: Visual (the diagram) / Code (the editor plus the generated code, the compatibility
+             check and the assistant) / Documentation (the glossary, renderGlossary). The bottom strip
+             (Problems / Events / Relationships / Context Map) lives INSIDE the center, under the canvas
+             or editor, so it serves both Visual and Code (and is hidden on Documentation); Properties and
+             the left sidebar therefore span full height. -->
         <section id="center" class="pane" aria-label="Editor">
           <div id="center-tabs" role="tablist" aria-label="Editor view">
             <button type="button" class="center-tab" id="center-tab-visual" role="tab" data-center="visual" aria-selected="true">Visual</button>
             <button type="button" class="center-tab" id="center-tab-technical" role="tab" data-center="technical" aria-selected="false">Code</button>
+            <button type="button" class="center-tab" id="center-tab-docs" role="tab" data-center="docs" aria-selected="false">Documentation</button>
           </div>
           <div id="center-body">
             <section id="center-visual" class="center-host" role="tabpanel" aria-label="Visual"></section>
@@ -152,7 +150,28 @@
                 <div id="view-assistant" class="tech-view" role="tabpanel" hidden></div>
               </div>
             </section>
+            <section id="center-docs" class="center-host doc-view" role="tabpanel" aria-label="Documentation" hidden></section>
           </div>
+
+          <footer id="diagnostics" aria-label="Problems, events, relationships and the context map">
+            <div class="koi-resizer koi-resizer-y" id="diag-resizer" aria-hidden="true"></div>
+            <div id="diag-header">
+              <button type="button" id="diag-collapse" class="diag-collapse" aria-expanded="true" aria-controls="diag-body panel-events panel-relationships panel-contextmap" aria-label="Collapse panel">
+                <svg class="diag-chevron" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 6.5 8 10 12 6.5" /></svg>
+              </button>
+              <div class="diag-tabs" role="tablist" aria-label="Bottom panel">
+                <button type="button" class="diag-tab" id="tab-problems" role="tab" data-panel="problems" aria-selected="true" aria-controls="diag-body">Problems</button>
+                <button type="button" class="diag-tab" id="tab-events" role="tab" data-panel="events" aria-selected="false" aria-controls="panel-events">Events</button>
+                <button type="button" class="diag-tab" id="tab-relationships" role="tab" data-panel="relationships" aria-selected="false" aria-controls="panel-relationships">Relationships</button>
+                <button type="button" class="diag-tab" id="tab-contextmap" role="tab" data-panel="contextmap" aria-selected="false" aria-controls="panel-contextmap">Context Map</button>
+              </div>
+              <span id="diag-count" class="diag-count"></span>
+            </div>
+            <div id="diag-body" class="diag-panel" role="tabpanel" aria-labelledby="tab-problems"></div>
+            <div id="panel-events" class="diag-panel" role="tabpanel" aria-labelledby="tab-events" hidden></div>
+            <div id="panel-relationships" class="diag-panel" role="tabpanel" aria-labelledby="tab-relationships" hidden></div>
+            <div id="panel-contextmap" class="diag-panel doc-view" role="tabpanel" aria-labelledby="tab-contextmap" hidden></div>
+          </footer>
         </section>
         <div class="koi-resizer" id="split-resizer" aria-hidden="true"></div>
 
@@ -171,26 +190,6 @@
           </div>
         </aside>
       </main>
-
-      <footer id="diagnostics" aria-label="Problems, events, relationships and the context map">
-        <div class="koi-resizer koi-resizer-y" id="diag-resizer" aria-hidden="true"></div>
-        <div id="diag-header">
-          <button type="button" id="diag-collapse" class="diag-collapse" aria-expanded="true" aria-controls="diag-body panel-events panel-relationships panel-contextmap" aria-label="Collapse panel">
-            <svg class="diag-chevron" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 6.5 8 10 12 6.5" /></svg>
-          </button>
-          <div class="diag-tabs" role="tablist" aria-label="Bottom panel">
-            <button type="button" class="diag-tab" id="tab-problems" role="tab" data-panel="problems" aria-selected="true" aria-controls="diag-body">Problems</button>
-            <button type="button" class="diag-tab" id="tab-events" role="tab" data-panel="events" aria-selected="false" aria-controls="panel-events">Events</button>
-            <button type="button" class="diag-tab" id="tab-relationships" role="tab" data-panel="relationships" aria-selected="false" aria-controls="panel-relationships">Relationships</button>
-            <button type="button" class="diag-tab" id="tab-contextmap" role="tab" data-panel="contextmap" aria-selected="false" aria-controls="panel-contextmap">Context Map</button>
-          </div>
-          <span id="diag-count" class="diag-count"></span>
-        </div>
-        <div id="diag-body" class="diag-panel" role="tabpanel" aria-labelledby="tab-problems"></div>
-        <div id="panel-events" class="diag-panel" role="tabpanel" aria-labelledby="tab-events" hidden></div>
-        <div id="panel-relationships" class="diag-panel" role="tabpanel" aria-labelledby="tab-relationships" hidden></div>
-        <div id="panel-contextmap" class="diag-panel doc-view" role="tabpanel" aria-labelledby="tab-contextmap" hidden></div>
-      </footer>
 
       <!-- Bottom status bar: a pure projection of existing state (active context, model validity,
            connection, version). #status stays in the toolbar; #sb-connection mirrors it here. -->

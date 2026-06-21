@@ -209,13 +209,39 @@ function renderContext(group: ContextGroup, handlers: ModelOutlineHandlers, show
   return section;
 }
 
+/** The icon slug for a construct label — a stable key for the shape/colour each DDD concept gets in the
+ * Explorer (e.g. Entities → a green square, Value Objects → a blue lozenge). See `_model.scss`. */
+const CONSTRUCT_SLUG: Record<string, string> = {
+  Aggregates: 'aggregate',
+  Entities: 'entity',
+  'Value Objects': 'value',
+  Enumerations: 'enum',
+  'Domain Events': 'event',
+  'Integration Events': 'integration-event',
+  Types: 'type',
+};
+
+export function constructSlug(label: string): string {
+  return CONSTRUCT_SLUG[label] ?? 'type';
+}
+
+/** A small shape-coded icon for a DDD construct; the shape + colour live in CSS keyed by `data-construct`. */
+function constructIcon(slug: string): HTMLElement {
+  const icon = document.createElement('span');
+  icon.className = 'koi-model-icon';
+  icon.dataset.construct = slug;
+  icon.setAttribute('aria-hidden', 'true');
+  return icon;
+}
+
 function renderConstruct(construct: ConstructGroup, handlers: ModelOutlineHandlers): HTMLElement {
   const wrap = document.createElement('div');
   wrap.className = 'koi-model-construct';
+  const slug = constructSlug(construct.label);
 
   const head = document.createElement('h4');
   head.className = 'koi-model-construct-name';
-  head.append(construct.label, ' ', countSuffix(construct.entries.length));
+  head.append(constructIcon(slug), construct.label, ' ', countSuffix(construct.entries.length));
   wrap.appendChild(head);
 
   const list = document.createElement('ul');
@@ -226,7 +252,8 @@ function renderConstruct(construct: ConstructGroup, handlers: ModelOutlineHandle
     leaf.type = 'button';
     leaf.className = 'koi-model-leaf';
     leaf.dataset.qname = entry.qualifiedName;
-    leaf.textContent = entry.name;
+    // Icon first, then the name as a text node — keeps leaf.textContent === entry.name.
+    leaf.append(constructIcon(slug), entry.name);
     leaf.addEventListener('click', () => {
       handlers.onSelect(entry);
       handlers.goto(...gotoTarget(entry));

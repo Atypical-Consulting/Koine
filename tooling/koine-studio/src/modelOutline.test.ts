@@ -122,6 +122,16 @@ describe('renderModelOutline', () => {
     expect(leaves).not.toContain('Sales'); // context header is not a leaf
   });
 
+  test('each leaf and construct header carries a DDD-concept icon keyed by construct', () => {
+    const el = renderModelOutline(model, noop);
+    const orderLeaf = el.querySelector<HTMLElement>('.koi-model-leaf[data-qname="Sales.Order"]')!;
+    expect(orderLeaf.querySelector('.koi-model-icon')!.getAttribute('data-construct')).toBe('aggregate');
+    const moneyLeaf = el.querySelector<HTMLElement>('.koi-model-leaf[data-qname="Sales.Money"]')!;
+    expect(moneyLeaf.querySelector('.koi-model-icon')!.getAttribute('data-construct')).toBe('value');
+    // The icon is decorative — it must not change the leaf's text.
+    expect(orderLeaf.textContent).toBe('Order');
+  });
+
   test('each leaf carries its qualified name for cross-highlight', () => {
     const el = renderModelOutline(model, noop);
     const order = el.querySelector<HTMLElement>('.koi-model-leaf[data-qname="Sales.Order"]');

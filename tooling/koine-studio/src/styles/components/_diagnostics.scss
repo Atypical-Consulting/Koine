@@ -13,6 +13,11 @@
   font-size: 0.76rem;
 }
 
+/* Hidden on the Documentation center tab (the display:flex above outranks the UA [hidden] rule). */
+#diagnostics[hidden] {
+  display: none;
+}
+
 #diag-resizer {
   position: absolute;
   top: -3px;

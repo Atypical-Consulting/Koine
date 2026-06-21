@@ -14,6 +14,8 @@ import type { DiagramNode, GlossaryEntry, Range } from './lsp';
 
 /** The flat, render-ready projection of a selected element (decoupled from the wire DTOs). */
 export interface InspectorElement {
+  /** The glossary entry id — the key for persisting a description via `setDoc`. */
+  id: string;
   name: string;
   qualifiedName: string;
   context: string;
@@ -42,6 +44,10 @@ export interface InspectorElement {
 export interface InspectorHandlers {
   /** Jump the editor to the element's declaration. */
   onGoto(range: Range): void;
+  /** Commit a new name for the element (a rename across the workspace). Optional — read-only without it. */
+  onRename?(element: InspectorElement, newName: string): void;
+  /** Persist the element's description as a `///` doc comment. Optional — read-only without it. */
+  onSaveDescription?(element: InspectorElement, text: string): void;
 }
 
 /**
@@ -53,6 +59,7 @@ export interface InspectorHandlers {
 export function buildInspectorElement(entry: GlossaryEntry, node: DiagramNode | undefined): InspectorElement {
   const members = node?.members ?? [];
   return {
+    id: entry.id,
     name: entry.name,
     qualifiedName: entry.qualifiedName,
     context: entry.context,
@@ -82,12 +89,7 @@ export function renderInspector(element: InspectorElement | null, handlers: Insp
 
   root.dataset.qname = element.qualifiedName;
   root.appendChild(renderHeader(element, handlers));
-
-  const desc = document.createElement('p');
-  const hasDesc = element.description != null && element.description.trim().length > 0;
-  desc.className = hasDesc ? 'koi-inspector-desc' : 'koi-inspector-desc koi-inspector-nodesc';
-  desc.textContent = hasDesc ? element.description!.trim() : 'No description.';
-  root.appendChild(desc);
+  root.appendChild(renderGeneral(element, handlers));
 
   appendList(root, 'Properties', element.properties);
   appendList(root, 'Behaviors', element.behaviors);
@@ -123,6 +125,81 @@ function renderHeader(element: InspectorElement, handlers: InspectorHandlers): H
   header.appendChild(qualified);
 
   return header;
+}
+
+/**
+ * The "General" compartment: the element's editable Name (commits a rename), its read-only Type
+ * (stereotype), and an editable Description (persisted as a `///` doc comment). Editing is wired only
+ * when the matching handler is supplied; without it the controls still render but no-op on commit.
+ */
+function renderGeneral(element: InspectorElement, handlers: InspectorHandlers): HTMLElement {
+  const section = document.createElement('section');
+  section.className = 'koi-inspector-section koi-inspector-general';
+
+  const h = document.createElement('h5');
+  h.className = 'koi-inspector-section-title';
+  h.textContent = 'General';
+  section.appendChild(h);
+
+  // Name — commits a rename on Enter / blur when changed; Esc reverts.
+  const nameInput = document.createElement('input');
+  nameInput.type = 'text';
+  nameInput.className = 'koi-inspector-input';
+  nameInput.value = element.name;
+  nameInput.spellcheck = false;
+  nameInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      nameInput.blur();
+    } else if (e.key === 'Escape') {
+      nameInput.value = element.name;
+      nameInput.blur();
+    }
+  });
+  nameInput.addEventListener('blur', () => {
+    const next = nameInput.value.trim();
+    if (next && next !== element.name) handlers.onRename?.(element, next);
+    else nameInput.value = element.name;
+  });
+  section.appendChild(field('Name', nameInput));
+
+  // Type — read-only (the stereotype, or the construct kind as a fallback).
+  const type = document.createElement('div');
+  type.className = 'koi-inspector-field-value';
+  type.textContent = element.stereotype ?? element.kind;
+  section.appendChild(field('Type', type));
+
+  // Description — persists a `///` doc comment on blur when changed.
+  const desc = document.createElement('textarea');
+  desc.className = 'koi-inspector-textarea koi-inspector-desc';
+  desc.value = element.description ?? '';
+  desc.rows = 3;
+  desc.placeholder = 'Add a description…';
+  desc.addEventListener('blur', () => {
+    const next = desc.value.trim();
+    if (next !== (element.description ?? '').trim()) handlers.onSaveDescription?.(element, next);
+  });
+  section.appendChild(field('Description', desc));
+
+  return section;
+}
+
+/** A labelled field row. Form controls get a matching id/name + the label's `for`, so they are
+ * explicitly associated (and screen-reader / DevTools-clean), not only wrapped. */
+function field(label: string, control: HTMLElement): HTMLElement {
+  const row = document.createElement('label');
+  row.className = 'koi-inspector-field';
+  const text = document.createElement('span');
+  text.className = 'koi-inspector-field-label';
+  text.textContent = label;
+  if (control instanceof HTMLInputElement || control instanceof HTMLTextAreaElement) {
+    const slug = `koi-insp-${label.toLowerCase().replace(/\s+/g, '-')}`;
+    control.id = slug;
+    control.name = slug;
+    row.htmlFor = slug;
+  }
+  row.append(text, control);
+  return row;
 }
 
 /** Append a titled compartment listing `items`; a no-op when `items` is empty. */

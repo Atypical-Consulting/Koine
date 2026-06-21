@@ -87,7 +87,9 @@
 }
 
 .koi-model-leaf {
-  display: block;
+  display: flex;
+  align-items: center;
+  gap: var(--koi-space-1-5);
   width: 100%;
   text-align: left;
   background: transparent;
@@ -108,6 +110,56 @@
     background: color-mix(in srgb, var(--koi-accent) 16%, transparent);
     color: var(--koi-accent);
   }
+}
+
+/* --- per-DDD-concept icons (shape + colour) -----------------------------------------------------
+   One icon per construct, in the Explorer leaves and construct headers, so each concept is scannable
+   at a glance: Aggregates (violet rounded square), Entities (green square), Value Objects (blue
+   lozenge), Enumerations (amber circle), Domain Events (pink circle), Integration Events (teal ring),
+   Types (grey square). Colour is the primary signal; shape reinforces it. */
+.koi-model-icon {
+  flex: 0 0 auto;
+  width: 10px;
+  height: 10px;
+  box-sizing: border-box;
+  border-radius: 2px;
+  background: var(--koi-muted);
+}
+.koi-model-construct-name .koi-model-icon {
+  width: 11px;
+  height: 11px;
+}
+.koi-model-icon[data-construct='aggregate'] {
+  border-radius: 3px;
+  background: #a78bfa;
+}
+.koi-model-icon[data-construct='entity'] {
+  border-radius: 2px;
+  background: #34d399;
+}
+.koi-model-icon[data-construct='value'] {
+  width: 9px;
+  height: 9px;
+  border-radius: 2px;
+  background: #60a5fa;
+  transform: rotate(45deg);
+}
+.koi-model-icon[data-construct='enum'] {
+  border-radius: 50%;
+  background: #fbbf24;
+}
+.koi-model-icon[data-construct='event'] {
+  border-radius: 50%;
+  background: #f472b6;
+}
+.koi-model-icon[data-construct='integration-event'] {
+  border-radius: 50%;
+  background: transparent;
+  border: 2px solid #2dd4bf;
+}
+.koi-model-icon[data-construct='type'] {
+  border-radius: 2px;
+  background: #94a3b8;
 }
 
 .koi-model-navs {
@@ -201,16 +253,60 @@
   font-size: var(--koi-text-2xs);
 }
 
-.koi-inspector-desc {
-  margin: 0 0 0.6rem;
+/* General compartment: labelled, editable fields (Name input, Type, Description textarea). */
+.koi-inspector-general {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.koi-inspector-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.koi-inspector-field-label {
+  font-size: var(--koi-text-2xs);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--koi-muted);
+}
+
+.koi-inspector-field-value {
+  font-family: var(--koi-font-mono);
+  font-size: var(--koi-text-base-plus);
   color: var(--koi-fg);
-  font-size: var(--koi-text-md);
+}
+
+.koi-inspector-input,
+.koi-inspector-textarea {
+  width: 100%;
+  box-sizing: border-box;
+  background: var(--koi-paper);
+  color: var(--koi-fg);
+  border: 1px solid var(--koi-line);
+  border-radius: var(--koi-radius-sm);
+  padding: var(--koi-space-1) var(--koi-space-2);
+  font-family: var(--koi-font-mono);
+  font-size: var(--koi-text-base-plus);
+  transition: border-color var(--koi-dur-fast) ease, box-shadow var(--koi-dur-fast) ease;
+
+  &:focus-visible {
+    outline: none;
+    border-color: var(--koi-accent);
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--koi-accent) 26%, transparent);
+  }
+}
+
+.koi-inspector-textarea {
+  resize: vertical;
+  min-height: 2.4rem;
   line-height: 1.4;
 }
 
-.koi-inspector-nodesc {
+.koi-inspector-textarea::placeholder {
   color: var(--koi-muted);
-  font-style: italic;
 }
 
 .koi-inspector-section {
