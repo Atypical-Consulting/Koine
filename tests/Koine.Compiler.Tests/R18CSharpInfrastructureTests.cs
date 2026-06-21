@@ -311,6 +311,36 @@ public class R18CSharpInfrastructureTests
             .ShouldNotContain("Enqueue");
     }
 
+    // ----------------------------------------------------------------------
+    // DI registration extension (Task 6)
+    // ----------------------------------------------------------------------
+
+    [Fact]
+    public void Di_extension_registers_dbcontext_repositories_uow_and_dispatcher()
+    {
+        var files = Emit(Infrastructure);
+        var di = File(files, "Sales/Infrastructure/SalesServiceCollectionExtensions.cs").Contents;
+
+        di.ShouldContain("public static class SalesServiceCollectionExtensions");
+        di.ShouldContain("public static IServiceCollection AddSalesInfrastructure(this IServiceCollection services, Action<DbContextOptionsBuilder> configureDbContext)");
+        di.ShouldContain("services.AddDbContext<SalesDbContext>(configureDbContext);");
+        di.ShouldContain("services.AddScoped<IOrderRepository, OrderRepository>();");
+        di.ShouldContain("services.AddScoped<IUnitOfWork, UnitOfWork>();");
+        di.ShouldContain("services.AddScoped<IntegrationEventDispatcher>();");
+        di.ShouldContain("return services;");
+    }
+
+    [Fact]
+    public void Di_extension_for_a_non_publishing_context_omits_the_dispatcher()
+    {
+        var files = Emit(Infrastructure);
+        var di = File(files, "Shipping/Infrastructure/ShippingServiceCollectionExtensions.cs").Contents;
+
+        di.ShouldContain("services.AddDbContext<ShippingDbContext>(configureDbContext);");
+        di.ShouldContain("services.AddScoped<IShipmentRepository, ShipmentRepository>();");
+        di.ShouldNotContain("IntegrationEventDispatcher");
+    }
+
     [Fact]
     public void The_generated_infrastructure_layer_compiles()
     {

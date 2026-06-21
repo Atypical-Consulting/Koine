@@ -77,7 +77,61 @@ public sealed partial class CSharpEmitter
                 files.Add(EmitIntegrationEventHandlerSeam(emit, ctx.Name));
                 files.Add(EmitIntegrationEventDispatcher(emit, ctx.Name));
             }
+
+            files.Add(EmitServiceCollectionExtension(emit, ctx.Name, aggregates, publishesEvents));
         }
+    }
+
+    // ----------------------------------------------------------------------
+    // DI registration
+    // ----------------------------------------------------------------------
+
+    /// <summary>The EF Core + DI namespaces the registration extension needs (plus System for <c>Action</c>).</summary>
+    private static readonly string[] DiExtensionUsings =
+    {
+        "System",
+        "Microsoft.EntityFrameworkCore",
+        "Microsoft.Extensions.DependencyInjection",
+    };
+
+    /// <summary>
+    /// Emits <c>Add&lt;Context&gt;Infrastructure(this IServiceCollection, Action&lt;DbContextOptionsBuilder&gt;)</c>:
+    /// registers the <c>DbContext</c> (the caller supplies the provider via the options action, so the
+    /// emitter stays provider-agnostic), each <c>I&lt;Root&gt;Repository → &lt;Root&gt;Repository</c>, the
+    /// <c>IUnitOfWork → UnitOfWork</c>, and — for a publishing context — the dispatcher.
+    /// </summary>
+    private EmittedFile EmitServiceCollectionExtension(EmitContext emit, string context, IReadOnlyList<AggregateDecl> aggregates, bool publishesEvents)
+    {
+        var className = context + "ServiceCollectionExtensions";
+        var dbContext = context + "DbContext";
+        var sb = new StringBuilder();
+
+        WriteXmlDoc(sb, $"Registers the {context} infrastructure (DbContext, repositories, unit of work, dispatcher).", "");
+        sb.Append("public static class ").Append(className).Append("\n{\n");
+        sb.Append(Indent).Append("public static IServiceCollection Add").Append(context)
+          .Append("Infrastructure(this IServiceCollection services, Action<DbContextOptionsBuilder> configureDbContext)\n");
+        sb.Append(Indent).Append("{\n");
+        sb.Append(Indent).Append(Indent).Append("services.AddDbContext<").Append(dbContext).Append(">(configureDbContext);\n");
+        foreach (AggregateDecl agg in aggregates)
+        {
+            var root = agg.RootName;
+            sb.Append(Indent).Append(Indent).Append("services.AddScoped<I").Append(root).Append("Repository, ")
+              .Append(root).Append("Repository>();\n");
+        }
+
+        sb.Append(Indent).Append(Indent).Append("services.AddScoped<IUnitOfWork, UnitOfWork>();\n");
+        if (publishesEvents)
+        {
+            sb.Append(Indent).Append(Indent).Append("services.AddScoped<IntegrationEventDispatcher>();\n");
+        }
+
+        sb.Append(Indent).Append(Indent).Append("return services;\n");
+        sb.Append(Indent).Append("}\n");
+        sb.Append("}\n");
+
+        return new EmittedFile(
+            PathFor(emit, context, KindFolder.Infrastructure, $"{className}.cs"),
+            Assemble(emit, context, sb.ToString(), usesLinq: false, DiExtensionUsings));
     }
 
     // ----------------------------------------------------------------------
