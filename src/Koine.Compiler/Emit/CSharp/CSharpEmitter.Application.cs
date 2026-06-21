@@ -125,8 +125,17 @@ public sealed partial class CSharpEmitter
         // command becomes a Unit-returning request so it always uses the two-arg IRequestHandler<,>.
         var plainResult = cmd.ReturnType is { } rt ? typeMapper.Map(rt) : null;
 
-        // Request: the aggregate identity to load, then the command's parameters.
-        var fields = new List<(string Type, string Prop)> { (root.IdentityName, "Id") };
+        // Request: the aggregate identity to load, then the command's parameters. The identity
+        // property is normally "Id", but a command parameter named `id` (allowed for commands, only
+        // factories reserve it) would PascalCase to a colliding "Id" — so pick a non-colliding name.
+        var paramProps = cmd.Parameters.Select(p => CSharpNaming.ToPascalCase(p.Name)).ToHashSet(StringComparer.Ordinal);
+        var idProp = "Id";
+        while (paramProps.Contains(idProp))
+        {
+            idProp = "Aggregate" + idProp;
+        }
+
+        var fields = new List<(string Type, string Prop)> { (root.IdentityName, idProp) };
         fields.AddRange(cmd.Parameters.Select(p => (typeMapper.Map(p.Type), CSharpNaming.ToPascalCase(p.Name))));
         var args = string.Join(", ", cmd.Parameters.Select(p => "request." + CSharpNaming.ToPascalCase(p.Name)));
 
@@ -139,9 +148,9 @@ public sealed partial class CSharpEmitter
         sb.Append(Indent).Append(HandlerSignature(requestType, plainResult)).Append('\n');
         sb.Append(Indent).Append("{\n");
         sb.Append(Indent).Append(Indent).Append("var aggregate = await _unitOfWork.").Append(plural)
-          .Append(".GetByIdAsync(request.Id, ").Append(CtArg()).Append(")\n");
+          .Append(".GetByIdAsync(request.").Append(idProp).Append(", ").Append(CtArg()).Append(")\n");
         sb.Append(Indent).Append(Indent).Append(Indent)
-          .Append("?? throw new InvalidOperationException($\"").Append(root.Name).Append(" '{request.Id}' was not found.\");\n");
+          .Append("?? throw new InvalidOperationException($\"").Append(root.Name).Append(" '{request.").Append(idProp).Append("}' was not found.\");\n");
 
         if (plainResult is null)
         {
@@ -219,7 +228,7 @@ public sealed partial class CSharpEmitter
         var paramList = string.Join(", ", fields.Select(f => $"{f.Type} {f.Prop}"));
         var name = requestType.EndsWith("Request", StringComparison.Ordinal) ? requestType[..^"Request".Length] : requestType;
         var sb = new StringBuilder();
-        sb.Append("/// <summary>Application request for ").Append(name).Append(".</summary>\n");
+        WriteXmlDoc(sb, $"Application request for {name}.", "");
         sb.Append("public sealed record ").Append(requestType).Append('(').Append(paramList).Append(')');
         if (_options.ApplicationMediatr)
         {
@@ -311,7 +320,7 @@ public sealed partial class CSharpEmitter
         IReadOnlyDictionary<string, string> enumMemberToType)
     {
         var validatorType = requestType + "Validator";
-        var context = ns;
+        var context = ns;  // the namespace's first segment is the bounded-context name
         var rules = new StringBuilder();
 
         // (a) Re-encode each value-object parameter's invariants as RuleFor(x => x.Param).Must(p => ...).
@@ -395,70 +404,15 @@ public sealed partial class CSharpEmitter
         return false;
     }
 
-    /// <summary>True when every free identifier in <paramref name="expr"/> is one of <paramref name="allowed"/> (and there is at least one).</summary>
+    /// <summary>
+    /// True when every free identifier in <paramref name="expr"/> is one of <paramref name="allowed"/>
+    /// (and there is at least one). Reuses the shared target-agnostic free-identifier walker so the
+    /// scoping rules (lambda/let bindings) and node coverage stay in step with the grammar.
+    /// </summary>
     private static bool ReferencesOnly(Expr expr, ISet<string> allowed)
     {
-        var free = new HashSet<string>(StringComparer.Ordinal);
-        CollectFreeIdentifiers(expr, new HashSet<string>(StringComparer.Ordinal), free);
+        var free = MemberAnalysis.ReferencedIdentifiers(expr).ToHashSet(StringComparer.Ordinal);
         return free.Count > 0 && free.All(allowed.Contains);
-    }
-
-    private static void CollectFreeIdentifiers(Expr expr, HashSet<string> bound, HashSet<string> free)
-    {
-        switch (expr)
-        {
-            case IdentifierExpr id when !bound.Contains(id.Name):
-                free.Add(id.Name);
-                break;
-            case MemberAccessExpr m:
-                CollectFreeIdentifiers(m.Target, bound, free);
-                break;
-            case CallExpr c:
-                CollectFreeIdentifiers(c.Target, bound, free);
-                foreach (Expr a in c.Args)
-                {
-                    CollectFreeIdentifiers(a, bound, free);
-                }
-
-                break;
-            case LambdaExpr l:
-                var inner = new HashSet<string>(bound, StringComparer.Ordinal) { l.Parameter };
-                CollectFreeIdentifiers(l.Body, inner, free);
-                break;
-            case BinaryExpr b:
-                CollectFreeIdentifiers(b.Left, bound, free);
-                CollectFreeIdentifiers(b.Right, bound, free);
-                break;
-            case UnaryExpr u:
-                CollectFreeIdentifiers(u.Operand, bound, free);
-                break;
-            case MatchExpr ma:
-                CollectFreeIdentifiers(ma.Target, bound, free);
-                break;
-            case GuardExpr g:
-                CollectFreeIdentifiers(g.Body, bound, free);
-                CollectFreeIdentifiers(g.Condition, bound, free);
-                break;
-            case ConditionalExpr co:
-                CollectFreeIdentifiers(co.Condition, bound, free);
-                CollectFreeIdentifiers(co.Then, bound, free);
-                CollectFreeIdentifiers(co.Else, bound, free);
-                break;
-            case CoalesceExpr cl:
-                CollectFreeIdentifiers(cl.Left, bound, free);
-                CollectFreeIdentifiers(cl.Right, bound, free);
-                break;
-            case LetExpr let:
-                var letBound = new HashSet<string>(bound, StringComparer.Ordinal);
-                foreach (LetBinding binding in let.Bindings)
-                {
-                    CollectFreeIdentifiers(binding.Value, letBound, free);
-                    letBound.Add(binding.Name);
-                }
-
-                CollectFreeIdentifiers(let.Body, letBound, free);
-                break;
-        }
     }
 
     // ----------------------------------------------------------------------
@@ -535,7 +489,7 @@ public sealed partial class CSharpEmitter
 
         sb.Append("}\n");
         files.Add(new EmittedFile(PathFor(emit, ns, KindFolder.Application, $"{handlerType}.cs"),
-            Assemble(emit, ns, sb.ToString(), usesLinq: false, Array.Empty<string>())));
+            Assemble(emit, ns, sb.ToString(), usesLinq: false)));
 
         registrations.Add(new AppRegistration("query", service, handlerType));
     }
@@ -585,7 +539,7 @@ public sealed partial class CSharpEmitter
 
         sb.Append("}\n");
         files.Add(new EmittedFile(PathFor(emit, ns, KindFolder.Application, $"{implType}.cs"),
-            Assemble(emit, ns, sb.ToString(), usesLinq: false, Array.Empty<string>())));
+            Assemble(emit, ns, sb.ToString(), usesLinq: false)));
 
         registrations.Add(new AppRegistration("service", iface, implType));
     }
@@ -617,7 +571,7 @@ public sealed partial class CSharpEmitter
         sb.Append(Indent).Append("}\n");
         sb.Append("}\n");
         return new EmittedFile(PathFor(emit, ns, KindFolder.Application, "ValidationBehavior.cs"),
-            Assemble(emit, ns, sb.ToString(), usesLinq: false, Array.Empty<string>()));
+            Assemble(emit, ns, sb.ToString(), usesLinq: false));
     }
 
     private EmittedFile EmitTransactionBehavior(EmitContext emit, string ns, bool hasUnitOfWork)
@@ -646,7 +600,7 @@ public sealed partial class CSharpEmitter
 
         sb.Append("}\n");
         return new EmittedFile(PathFor(emit, ns, KindFolder.Application, "TransactionBehavior.cs"),
-            Assemble(emit, ns, sb.ToString(), usesLinq: false, Array.Empty<string>()));
+            Assemble(emit, ns, sb.ToString(), usesLinq: false));
     }
 
     // ----------------------------------------------------------------------

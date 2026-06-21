@@ -366,6 +366,34 @@ public class R18CSharpApplicationTests
     }
 
     [Fact]
+    public void Command_parameter_named_id_does_not_collide_with_the_identity_property()
+    {
+        // A command param named `id` (allowed for commands) must not produce a duplicate `Id`
+        // record property; the synthetic identity property takes a non-colliding name instead.
+        const string src = """
+            context Sales {
+              aggregate Order root Order {
+                entity Order identified by OrderId {
+                  name: String
+                  command annotate(id: String) {
+                    requires id != ""   "id must not be blank"
+                  }
+                }
+              }
+            }
+            """;
+        var files = Emit(AppOn, src);
+        var request = File(files, "Application/OrderAnnotateRequest.cs");
+        request.Contents.ShouldContain("OrderId AggregateId");
+        request.Contents.ShouldContain("string Id");
+        File(files, "Application/OrderAnnotateHandler.cs").Contents
+            .ShouldContain("GetByIdAsync(request.AggregateId,");
+        // The whole model (domain + application) still Roslyn-compiles.
+        var (assembly, errors) = TestSupport.Compile(files);
+        assembly.ShouldNotBeNull(string.Join("\n", errors));
+    }
+
+    [Fact]
     public void Repository_without_getById_skips_command_handlers()
     {
         const string src = """
