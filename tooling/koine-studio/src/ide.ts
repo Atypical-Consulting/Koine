@@ -1030,19 +1030,25 @@ export function init(): void {
   }
 
   // The single choke point for every scope change (the <select>, a restored value's validation, and
-  // Task 3's select-outside-scope path all route through here): update the bus, persist it for this
-  // workspace, sync the control, and re-render the scoped surfaces.
-  function setActiveContext(scope: ContextScope): void {
+  // Task 3's select-outside-scope path all route through here): update the bus, optionally persist it
+  // for this workspace, sync the control, and re-render the scoped surfaces. `persist` is the user's
+  // intent flag — only a deliberate switcher choice persists; non-deliberate changes (following a
+  // selection, or falling back off a vanished context) are view-only so they never overwrite the
+  // user's last explicit choice in storage.
+  function applyScope(scope: ContextScope, persist: boolean): void {
     activeContext.set(scope);
-    saveActiveContext(contextWorkspaceKey(), scope);
+    if (persist) saveActiveContext(contextWorkspaceKey(), scope);
     syncContextSwitcherUi();
     rerenderScopedSurfaces();
   }
 
+  /** A deliberate scope change from the switcher — persisted so a reload restores it. */
+  function setActiveContext(scope: ContextScope): void {
+    applyScope(scope, true);
+  }
+
   // Rebuild the switcher's options from the current model's contexts ("All contexts" first, then each
-  // context). Hidden when the model has no contexts (empty/scratch). If the active scope no longer
-  // names a real context (renamed/removed), fall back to "All contexts" so the surfaces never stay
-  // stuck on a vanished context.
+  // context). Hidden when the model has no contexts (empty/scratch).
   function setContextOptions(contexts: string[]): void {
     contextSwitcher.hidden = contexts.length === 0;
     const options = [ALL_CONTEXTS, ...contexts];
@@ -1054,8 +1060,14 @@ export function init(): void {
         return opt;
       }),
     );
-    if (!options.includes(activeContext.get())) {
-      setActiveContext(ALL_CONTEXTS); // the stored/active context is gone — unscope
+    // Fall back to "All contexts" ONLY when we positively know the model's contexts (a non-empty list)
+    // and the active scope isn't among them — a genuine rename/removal. An EMPTY list is a transient or
+    // cold state (the LSP still warming up right after open, or a momentarily-unparseable model mid-edit),
+    // so preserve the scope rather than clobber it. The fallback is view-only (not persisted), so the
+    // user's last explicit choice survives in storage and a reload restores it once the context is back.
+    const scope = activeContext.get();
+    if (contexts.length > 0 && !isAllContexts(scope) && !contexts.includes(scope)) {
+      applyScope(ALL_CONTEXTS, false);
     } else {
       syncContextSwitcherUi();
     }
@@ -1313,12 +1325,14 @@ export function init(): void {
     // Jump-to-source works across scope (the editor navigation is scope-independent), but a selection
     // landing OUTSIDE the active context would otherwise leave the scoped surfaces showing a different
     // context than the inspector. Follow it: switch the scope to the selected element's context so the
-    // outline/diagram/counts stay coherent with what's being inspected (#146). In-scope selections and
-    // the unscoped ("All contexts") view leave the scope untouched. setActiveContext re-renders the
-    // scoped surfaces, which also calls renderSelectedInspector()/applySelectionHighlight() for the
-    // Model tab — the explicit calls below cover the cross-highlight when another view is active.
+    // outline/diagram/counts stay coherent with what's being inspected (#146). This follow is view-only
+    // (applyScope with persist=false) — a read-only inspect shouldn't overwrite the user's deliberately
+    // chosen, persisted scope, so a reload returns to that choice. In-scope selections and the unscoped
+    // ("All contexts") view leave the scope untouched. applyScope re-renders the scoped surfaces, which
+    // also refreshes the inspector/cross-highlight for the Model tab — the explicit calls below cover the
+    // cross-highlight when another view is active.
     if (sel && !isAllContexts(activeContext.get()) && sel.context !== activeContext.get()) {
-      setActiveContext(sel.context);
+      applyScope(sel.context, false);
     }
     renderSelectedInspector();
     applySelectionHighlight();
