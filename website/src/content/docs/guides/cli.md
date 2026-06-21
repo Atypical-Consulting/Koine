@@ -53,6 +53,7 @@ Parses and validates the model, then — if you ask for output — emits files.
 |------|---------|--------------|
 | *(positional)* | — | The `.koi` file or directory to compile. Required. |
 | `--target` | `csharp` | The emitter: `csharp`, `typescript`, `python`, `php`, `glossary`, or `docs`. |
+| `--layers <list>` | `domain` | (C# only) Comma-separated layers to emit: `domain` (the model + application contracts) and/or `infrastructure` (a runnable EF Core realization — `DbContext`, repositories, unit of work, outbox, DI). `infrastructure` implies `domain`. See [C# infrastructure layer](#c-infrastructure-layer---layers). |
 | `--out <dir>` | *(none)* | Write the emitted files under this directory. Omit to only validate. |
 | `--glossary <file.md>` | *(none)* | Also write a Markdown ubiquitous-language glossary to this file. |
 | `--config <file>` | *(discovered)* | Read build defaults from this `koine.config` instead of the discovered one. See [`koine.config`](#koineconfig). |
@@ -85,6 +86,24 @@ The emitter lays types out by context into namespace-mirroring folders (`Menu/`,
 `--out` is destructive *within the folders Koine generates*. Point it at a dedicated output directory (the demo uses `Generated/`, git-ignored), never at a folder that also holds files you wrote by hand.
 :::
 
+### C# infrastructure layer (`--layers`)
+
+By default the C# target emits the **domain layer**: value objects, entities, aggregates, smart enums, events, and the *persistence-ignorant* application contracts (`IRepository`, `IUnitOfWork`). Add `--layers domain,infrastructure` to also emit a runnable **EF Core** realization of those contracts, regenerated from the model on every build:
+
+```bash
+koine build templates/pizzeria --out Generated --layers domain,infrastructure
+```
+
+Per bounded context, the infrastructure layer adds (under an `Infrastructure/` folder):
+
+- a `<Context>DbContext : DbContext` with one `DbSet` per aggregate root;
+- an `IEntityTypeConfiguration<Root>` per aggregate — value objects → owned types (`OwnsOne`/`OwnsMany`), the `versioned` token → `IsRowVersion()`, smart enums → `HasConversion` value converters, strongly-typed IDs → key converters;
+- a concrete `<Root>Repository : I<Root>Repository` and a `UnitOfWork : IUnitOfWork`;
+- a transactional `OutboxMessage` table + an `IntegrationEventDispatcher` (only when the context publishes an integration event);
+- an `Add<Context>Infrastructure(this IServiceCollection, Action<DbContextOptionsBuilder>)` DI extension — you supply the database provider, so the emitter stays provider-agnostic.
+
+`--layers domain` (or omitting the flag) keeps the output **byte-identical** to before. EF Core is the only backend in v1.
+
 ### Emit a glossary
 
 There are two ways to get a Markdown glossary. The `--glossary` flag writes one to a named file **independently** of `--target`/`--out`, so you can emit C# *and* a glossary in a single run:
@@ -114,7 +133,7 @@ out = generated
 
 The first one found wins; if none is found, no defaults are applied. A flag on the command line always overrides the config.
 
-**Keys read today.** Only two flat keys are honoured: `target` (`csharp`, `typescript`, `python`, `php`, `glossary`, or `docs`) and `out` (the output directory). Every other key is **silently ignored**, which keeps the file forward-compatible — older tooling tolerates a newer config.
+**Keys read today.** The flat keys `target` (`csharp`, `typescript`, `python`, `php`, `glossary`, or `docs`) and `out` (the output directory) are honoured, plus the per-target key `targets.csharp.layers` (e.g. `domain,infrastructure`) — the config equivalent of [`--layers`](#c-infrastructure-layer---layers), overridden by an explicit `--layers` flag. Every other key is **silently ignored**, which keeps the file forward-compatible — older tooling tolerates a newer config.
 
 :::note[`targets.*` is reserved for R16]
 A structured `targets.<name> = { … }` block (per-target namespace maps, `instantMode`, output layout) is sketched in the scaffolded config but **not yet implemented** — it is reserved for [R16](/Koine/guides/roadmap/#r16--multi-target-emitters) and ignored today. `koine init` writes a commented example of it for forward reference.
