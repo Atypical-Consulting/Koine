@@ -263,6 +263,7 @@ public sealed partial class DocsEmitter
     private static DiagramMember FormatMember(ClassRow row) => row.Kind switch
     {
         ClassRowKind.Field => new DiagramMember($"{row.Name}: {RowType(row)}", "field"),
+        ClassRowKind.Computed => new DiagramMember($"{row.Name}: {RowType(row)}", "computed"),
         ClassRowKind.Method => new DiagramMember(FormatMethod(row), "method"),
         ClassRowKind.Value => new DiagramMember(row.Name, "value"),
         _ => new DiagramMember(row.Name, "field")

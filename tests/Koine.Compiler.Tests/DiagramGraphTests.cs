@@ -231,6 +231,41 @@ public class DiagramGraphTests
     }
 
     [Fact]
+    public void Derived_member_surfaces_as_a_computed_member_distinct_from_fields()
+    {
+        const string source = """
+            context Sales {
+              aggregate Cart root Cart {
+                value Line {
+                  quantity: Int
+                  unitPrice: Int
+                  subtotal: Int = quantity * unitPrice
+                }
+
+                entity Cart identified by CartId {
+                  lines: List<Line>
+                }
+              }
+            }
+            """;
+        var (model, diagnostics) = new KoineCompiler().Parse(new[] { new SourceFile("sales.koi", source) });
+        diagnostics.ShouldBeEmpty();
+
+        DiagramDescriptor aggregate = new DocsEmitter().EmitDiagrams(model!)["docs/Sales.md"]
+            .First(d => d.Kind == "aggregate");
+
+        DiagramNode line = aggregate.Graph.Nodes.First(n => n.Kind == "value-object" && n.Label == "Line");
+
+        // The derived field is present, classified "computed", with source-like text — and it is
+        // NOT also reported as a plain field.
+        line.Members!.ShouldContain(m => m.Kind == "computed" && m.Text == "subtotal: Int");
+        line.Members!.ShouldNotContain(m => m.Kind == "field" && m.Text.StartsWith("subtotal"));
+
+        // Mermaid uses UML derived-attribute notation: a leading '/' on the name.
+        aggregate.Mermaid.ShouldContain("/subtotal");
+    }
+
+    [Fact]
     public void State_and_context_nodes_stay_simple_boxes_without_members()
     {
         foreach (var (_, descriptors) in Descriptors())
