@@ -3,14 +3,53 @@ title: "Enums"
 description: "Smart enums and enum members carrying associated data."
 ---
 
+## 8.1 General
+
 A Koine `enum` is not a plain integer. It compiles to a **smart enum**: a `sealed class` with
 named static instances, value equality, and a small reflection-free API for looking members up by
 name or ordinal. You get the ergonomics of `switch` over a closed set without the footguns of a
 C# `enum` (no out-of-range integers, no silent casts).
 
-## Declaring an enum
+Enums occupy their own declaration slot inside a `context` (alongside value objects, entities, and
+aggregates — see [Contexts & types (§4)](/Koine/reference/contexts-and-types/)). They are the natural
+companion to [Value objects (§5)](/Koine/reference/value-objects/) (quantities pair a `Decimal` amount
+with an enum unit) and to the state-machine construct described in
+[Commands, events & state machines (§11)](/Koine/reference/commands-events-state/) (`states` blocks
+turn an enum field into a guarded lifecycle).
 
-The bare form lists the members:
+## 8.2 Syntax
+
+An enum declaration names the type, an optional data signature, and one or more members:
+
+```ebnf
+enum_decl
+    : annotation* 'enum' Identifier ( '(' param_list? ')' )? '{' enum_member ( ','? enum_member )* ','? '}'
+    ;
+
+enum_member
+    : Identifier ( '(' ( expression ( ',' expression )* )? ')' )?
+    ;
+
+param_list
+    : param ( ',' param )*
+    ;
+
+param
+    : Identifier ':' type_ref
+    ;
+```
+
+- `Identifier` after `'enum'` is the type name (`OrderStatus`, `Currency`, …).
+- The optional `'(' param_list? ')'` is the **signature** — a parenthesized list of typed fields
+  that each member must supply as an argument list. Omit it for a bare (data-free) enum.
+- `enum_member` names each variant. When the enum has a signature, each member appends a matching
+  argument list `'(' expression* ')'`. Argument expressions are [Expressions (§9)](/Koine/reference/expressions/)
+  literals; only primitive literals are permitted (see [§8.5.1](#851-rules-for-associated-data)).
+- Members are separated by whitespace or optional commas; a trailing comma is allowed.
+- Annotations (`@since`, `@deprecated`) from [Versioning (§18)](/Koine/reference/versioning/) may
+  precede the `'enum'` keyword.
+
+The bare form:
 
 ```koine
 context Ordering {
@@ -18,9 +57,71 @@ context Ordering {
 }
 ```
 
-Members are separated by commas. Whitespace separation works too, and a trailing comma is allowed.
+The associated-data form (covered in detail in [§8.5](#85-members-with-associated-data)):
 
-That declaration emits a self-contained class:
+```koine
+context Catalog {
+  enum Currency(symbol: String, decimals: Int) {
+    EUR("€", 2)
+    USD("$", 2)
+    GBP("£", 2)
+  }
+}
+```
+
+## 8.3 Semantics
+
+Every `enum X { … }` produces a **closed set** of named instances. The rules that govern the
+declaration are:
+
+- **At least one member is required.** An empty body is a parse error.
+- **Member names are unique within the enum.** Duplicate identifiers raise `KOI0911`.
+- **Two members may not differ only by leading-character case** (e.g. `Foo` and `foo`), because
+  both would collapse to the same `Match`/`Switch` delegate parameter (`KOI0911`).
+- **Signature arity is uniform.** All members must supply exactly as many arguments as the
+  signature declares (see [§8.5.1](#851-rules-for-associated-data), `KOI0901`).
+
+### 8.3.1 Generated API
+
+Every enum emits the following fixed surface:
+
+| Member | Meaning |
+| --- | --- |
+| static instances | one `public static readonly` field per member (`OrderStatus.Draft`, …) |
+| `Name` | the member identifier as a string (`"Draft"`) |
+| `Value` | the 0-based ordinal, in declaration order |
+| `All` | an `IReadOnlyList<T>` of every member, in declaration order |
+| `FromName(string)` | look up by name; throws `ArgumentOutOfRangeException` if unknown |
+| `FromValue(int)` | look up by ordinal; throws `ArgumentOutOfRangeException` if unknown |
+| `TryFromName(string, out T)` | non-throwing name lookup; returns `false` (and `null`) if unknown |
+| `TryFromValue(int, out T)` | non-throwing ordinal lookup; returns `false` (and `null`) if unknown |
+| `Match<TResult>(…)` | exhaustive: one `Func<TResult>` per member, returns the matched arm's result |
+| `Switch(…)` | exhaustive: one `Action` per member, runs the matched arm |
+| `Equals` / `GetHashCode` | value equality on `Value` |
+| `==` / `!=` | null-safe operators delegating to `Equals` |
+
+:::note
+The constructor is `private`. Members are created once as static fields, so there is exactly one
+instance per value — reference equality and value equality coincide, and `==` is safe to use.
+:::
+
+### 8.3.2 Name reservation
+
+Because the members in [§8.3.1](#831-generated-api) are generated on every enum, two naming rules
+apply to **all** enums:
+
+- A **member** may not be named after a generated member — `Name`, `Value`, `All`, `FromName`,
+  `FromValue`, `TryFromName`, `TryFromValue`, `Match`, `Switch`, `ToString`, `Equals`, `GetHashCode`
+  (`KOI0910`).
+- **Signature field names** are case-insensitively reserved against the same list. A field named
+  `value: Int` is rejected (`KOI0903`).
+
+## 8.4 Translation to C#
+
+### 8.4.1 Bare enum
+
+A bare `enum OrderStatus { Draft, Submitted, Paid, Shipped, Cancelled }` emits a self-contained
+sealed class:
 
 ```csharp
 public sealed class OrderStatus : IEquatable<OrderStatus>
@@ -59,29 +160,7 @@ public sealed class OrderStatus : IEquatable<OrderStatus>
 }
 ```
 
-### What you can rely on
-
-| Member | Meaning |
-| --- | --- |
-| static instances | one `public static readonly` field per member (`OrderStatus.Draft`, …) |
-| `Name` | the member identifier as a string (`"Draft"`) |
-| `Value` | the 0-based ordinal, in declaration order |
-| `All` | an `IReadOnlyList<T>` of every member, in declaration order |
-| `FromName(string)` | look up by name; throws `ArgumentOutOfRangeException` if unknown |
-| `FromValue(int)` | look up by ordinal; throws `ArgumentOutOfRangeException` if unknown |
-| `TryFromName(string, out T)` | non-throwing name lookup; returns `false` (and `null`) if unknown |
-| `TryFromValue(int, out T)` | non-throwing ordinal lookup; returns `false` (and `null`) if unknown |
-| `Match<TResult>(…)` | exhaustive: one `Func<TResult>` per member, returns the matched arm's result |
-| `Switch(…)` | exhaustive: one `Action` per member, runs the matched arm |
-| `Equals` / `GetHashCode` | value equality on `Value` |
-| `==` / `!=` | null-safe operators delegating to `Equals` |
-
-:::note
-The constructor is `private`. Members are created once as static fields, so there is exactly one
-instance per value — reference equality and value equality coincide, and `==` is safe to use.
-:::
-
-## Parsing at a boundary: `TryFromName` / `TryFromValue`
+### 8.4.2 Parsing at a boundary: `TryFromName` / `TryFromValue`
 
 `FromName`/`FromValue` throw when the name or ordinal is unknown — correct for trusted internal
 calls. But an enum is exactly the type you parse at a boundary: rehydrating from a database, mapping
@@ -99,7 +178,7 @@ else
 On a miss they return `false` and set the `out` to `null`; on a hit they return `true` and bind the
 member. They ignore any associated-data signature, exactly like `FromName`/`FromValue`.
 
-## Exhaustive matching: `Match` / `Switch`
+### 8.4.3 Exhaustive matching: `Match` / `Switch`
 
 Because each member is a `static readonly` instance rather than a compile-time constant, smart-enum
 members cannot appear as C# `case` labels. Instead, every enum emits an exhaustive `Match` (returns a
@@ -128,17 +207,7 @@ are the camelCased member names (`OrderStatus.Draft` → `draft`).
 Both are **total** over the closed set: there is exactly one arm per member and every instance
 carries an in-range ordinal, so a match always hits an arm — you never write a fallback.
 
-:::caution
-Because these members are generated on every enum, two member-name rules apply to **all** enums:
-
-- A member may not be named after a generated member — `Name`, `Value`, `All`, `FromName`,
-  `FromValue`, `TryFromName`, `TryFromValue`, `Match`, `Switch`, `ToString`, `Equals`, `GetHashCode`
-  (`KOI0910`).
-- Two members may not differ only by the case of their leading character (e.g. `Foo` and `foo`),
-  since both would collapse to the same `Match`/`Switch` parameter (`KOI0911`).
-:::
-
-## Members with associated data
+## 8.5 Members with associated data
 
 An enum can carry data alongside each member. Give the enum a **signature** — a parenthesized list
 of typed fields — then supply a matching argument list for each member (R9.1):
@@ -179,7 +248,7 @@ Now `Currency.EUR.Symbol` is `"€"` and `Currency.GBP.Decimals` is `2` — no l
 Member arguments may be separated by whitespace or optional commas; both `EUR("€", 2)` and
 `EUR("€" 2)` parse.
 
-### Rules for associated data
+### 8.5.1 Rules for associated data
 
 The compiler enforces a few constraints so the emitted class is always well-formed:
 
@@ -210,7 +279,7 @@ A bare enum and an enum with associated data are different shapes. A bare `enum 
 members genuinely carry data.
 :::
 
-## Scoped (type-directed) member resolution
+## 8.6 Scoped member resolution
 
 When you compare against an enum-typed field, you can write the member **bare** — without qualifying
 it by the enum name. Koine resolves the bare member against the type of the field or operand (R3.5).
@@ -251,7 +320,7 @@ Enum defaults read the same way: `status: OrderStatus = Draft` uses the bare mem
 field's declared type pins the enum.
 :::
 
-## Enums as defaults and lifecycle states
+## 8.7 Enum defaults and lifecycle states
 
 An enum-typed field can take a default member (`status: OrderStatus = Draft`). Because a smart-enum
 instance is a static field rather than a compile-time constant, the emitted constructor parameter is
@@ -259,10 +328,10 @@ nullable and coalesced to the member — you never see this in your `.koi`, but 
 default works for reference types.
 
 Enum-typed fields are also the natural subject of a `states` block, which restricts the legal
-transitions between members. See [commands, events & state machines](/Koine/reference/commands-events-state/)
+transitions between members. See [Commands, events & state machines (§11)](/Koine/reference/commands-events-state/)
 for how a `states status { … }` block turns an enum into a guarded state machine.
 
-## A complete example
+## 8.8 Example
 
 ```koine
 context Catalog {
@@ -287,7 +356,8 @@ smart enum), and a `Catalog.Price` value object whose `currency` field is the sm
 
 ## See also
 
-- [Value objects](/Koine/reference/value-objects/) — quantities pair a `Decimal` amount with an enum unit.
-- [Commands, events & state machines](/Koine/reference/commands-events-state/) — `states` blocks turn an enum into a guarded lifecycle.
-- [Contexts & types](/Koine/reference/contexts-and-types/) — where enums live and how types reference each other.
-- [Overview](/Koine/reference/overview/) — the full construct and type-mapping tables.
+- [Value objects (§5)](/Koine/reference/value-objects/) — quantities pair a `Decimal` amount with an enum unit.
+- [Commands, events & state machines (§11)](/Koine/reference/commands-events-state/) — `states` blocks turn an enum into a guarded lifecycle.
+- [Contexts & types (§4)](/Koine/reference/contexts-and-types/) — where enums live and how types reference each other.
+- [Expressions (§9)](/Koine/reference/expressions/) — the expression grammar used in member arguments and scoped resolution.
+- [Overview (§1)](/Koine/reference/overview/) — the full construct and type-mapping tables.
