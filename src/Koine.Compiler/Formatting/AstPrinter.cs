@@ -13,7 +13,7 @@ namespace Koine.Compiler.Formatting;
 /// <para><b>Tree-driven reconstruction (#B).</b> The printer composes a node's body <b>from the
 /// tree</b>, mirroring <see cref="KoineNode.ToFullString"/>: a leaf node emits its verbatim
 /// <see cref="KoineNode.LeafText"/>; a composite node recurses into its child nodes (via
-/// <see cref="NodeWalker.ChildNodes"/>, reflection-driven and grammar-agnostic) in source order.
+/// <see cref="ReconstructionWalker.Children"/>, source-generated and grammar-agnostic) in source order.
 /// Because Koine has no <c>SyntaxToken</c> layer — structural keywords/punctuation (<c>value</c>,
 /// <c>{</c>, <c>:</c>, operators) are not nodes — a composite node interspersed with such tokens
 /// cannot be byte-reconstructed from the tree alone. For those, when the original source is in hand,
@@ -82,8 +82,9 @@ public sealed class AstPrinter
         {
             // No usable source (synthesized/mutated subtree, or a span outside the source):
             // reconstruct from the tree by recursing children in source order (error markers
-            // excluded, ordering centralized in NodeWalker — shared with KoineNode.ToFullString).
-            foreach (KoineNode child in NodeWalker.ReconstructionChildren(node))
+            // excluded, ordering centralized in ReconstructionWalker — shared with
+            // KoineNode.ToFullString).
+            foreach (KoineNode child in ReconstructionWalker.Children(node))
             {
                 Append(sb, child);
             }
