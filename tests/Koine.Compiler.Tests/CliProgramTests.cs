@@ -234,10 +234,10 @@ public class CliProgramTests
         var (path, dir) = TempModel(Program.ScaffoldModel);
         try
         {
-            var (code, _, stderr) = Run("build", path, "--target", "rust");
+            var (code, _, stderr) = Run("build", path, "--target", "ruby");
 
             code.ShouldBe(1);
-            stderr.ShouldContain("unsupported target 'rust'");
+            stderr.ShouldContain("unsupported target 'ruby'");
             stderr.ShouldContain("csharp");        // lists the supported targets
             stderr.ShouldNotContain("USAGE");
         }

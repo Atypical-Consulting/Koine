@@ -1010,9 +1010,9 @@ public class LspServerTests
         var output = RunSession(
             Initialize(),
             DidOpen("file:///t.koi", doc),
-            EmitPreview("file:///t.koi", "rust"));
+            EmitPreview("file:///t.koi", "ruby"));
 
-        output.ShouldContain("unknown target 'rust'");
+        output.ShouldContain("unknown target 'ruby'");
         output.ShouldContain("\"files\":[]");
         output.ShouldNotContain("-32601"); // a normal result, not a JSON-RPC error
         output.ShouldContain("\"id\":30");     // response correlated to the request id

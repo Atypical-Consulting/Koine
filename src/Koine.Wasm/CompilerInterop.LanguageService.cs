@@ -8,6 +8,7 @@ using Koine.Compiler.Emit.CSharp;
 using Koine.Compiler.Emit.Glossary;
 using Koine.Compiler.Emit.Php;
 using Koine.Compiler.Emit.Python;
+using Koine.Compiler.Emit.Rust;
 using Koine.Compiler.Emit.TypeScript;
 using Koine.Compiler.Formatting;
 using Koine.Compiler.Services;
@@ -95,10 +96,11 @@ public static partial class CompilerInterop
             if (!string.Equals(target, "csharp", StringComparison.OrdinalIgnoreCase)
                 && !string.Equals(target, "typescript", StringComparison.OrdinalIgnoreCase)
                 && !string.Equals(target, "python", StringComparison.OrdinalIgnoreCase)
-                && !string.Equals(target, "php", StringComparison.OrdinalIgnoreCase))
+                && !string.Equals(target, "php", StringComparison.OrdinalIgnoreCase)
+                && !string.Equals(target, "rust", StringComparison.OrdinalIgnoreCase))
             {
                 return SerializeEmit(new WEmitPreviewResult(
-                    target, [], [], $"unknown target '{target}'; expected 'csharp', 'typescript', 'python', or 'php'"));
+                    target, [], [], $"unknown target '{target}'; expected 'csharp', 'typescript', 'python', 'php', or 'rust'"));
             }
 
             var files = DeserializeFiles(filesJson);
@@ -109,6 +111,7 @@ public static partial class CompilerInterop
                 string.Equals(target, "typescript", StringComparison.OrdinalIgnoreCase) ? new TypeScriptEmitter()
                 : string.Equals(target, "python", StringComparison.OrdinalIgnoreCase) ? new PythonEmitter()
                 : string.Equals(target, "php", StringComparison.OrdinalIgnoreCase) ? new PhpEmitter()
+                : string.Equals(target, "rust", StringComparison.OrdinalIgnoreCase) ? new RustEmitter()
                 : new CSharpEmitter();
 
             var result = Compiler.Compile(sources, emitter);

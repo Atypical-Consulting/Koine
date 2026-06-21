@@ -91,8 +91,8 @@ the demo produces from them.
 
 ## Shipped: R16 — Multi-target emitters (partial)
 
-R16 is the capstone that proves the `IEmitter` seam is genuinely target-agnostic. Three of four
-stories are delivered; Rust remains on the roadmap.
+R16 is the capstone that proves the `IEmitter` seam is genuinely target-agnostic. All four emitter
+stories — C#, TypeScript, Python, PHP, and Rust — are delivered.
 
 - **R16.1 — C# emitter configuration.** ✅ **Delivered** — a `koine.config` options object to remap
   contexts to concrete namespaces, choose the `Instant` mapping (`DateTimeOffset` default or NodaTime),
@@ -112,8 +112,12 @@ stories are delivered; Rust remains on the roadmap.
     `Protocol`), state-machine reachability guards inside command methods, and context-map/ACL
     translator `Protocol`s with qualified cross-context imports.
   - Output is `mypy --strict`-clean and passes `ast.parse` syntax checking.
-- **R16.4 — Rust emitter.** Not yet implemented. Invariants will surface as `Result<T, DomainError>`
-  rather than panics — the strongest test of the seam. Fixture must pass `cargo check`.
+- **R16.4 — Rust emitter.** ✅ **Delivered** (Phase 1: tactical core) — `--target rust` emits an
+  idiomatic crate: value objects as structs with smart constructors returning `Result<_, DomainError>`
+  (never panics), smart enums as exhaustively-matched Rust `enum`s, entities/aggregates with
+  invariant-checked behaviors, events as a `Vec`-friendly `DomainEvent` enum, and repositories as
+  `trait`s. Depends only on `rust_decimal` (money) and `regex` (`matches`); a `cargo check` meta-test
+  proves the emitted crate compiles.
 - **R16.5 — Conformance harness.** ✅ **Delivered** — a suite that runs every fixture through each
   registered emitter and compiles the output (Roslyn for C#, `tsc` for TS, `mypy` for Python), plus an
   `AstPurityTests` guard that fails the build if anything under `Ast/` references a target-specific concept.

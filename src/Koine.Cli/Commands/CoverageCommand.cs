@@ -14,7 +14,7 @@ internal sealed class CoverageSettings : CommandSettings
     public string Path { get; init; } = "";
 
     [CommandOption("--target <TARGET>")]
-    [Description("Output target to measure coverage against: csharp (default), typescript, python, php.")]
+    [Description("Output target to measure coverage against: csharp (default), typescript, python, php, rust.")]
     public string? Target { get; init; }
 
     [CommandOption("--json")]
