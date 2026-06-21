@@ -54,6 +54,9 @@ Parses and validates the model, then — if you ask for output — emits files.
 | *(positional)* | — | The `.koi` file or directory to compile. Required. |
 | `--target` | `csharp` | The emitter: `csharp`, `typescript`, `python`, `php`, `glossary`, or `docs`. |
 | `--out <dir>` | *(none)* | Write the emitted files under this directory. Omit to only validate. |
+| `--layers <list>` | `domain` | Comma-separated output layers (`domain`, `application`). `application` implies `domain`. C# only. See [the Application layer](#the-c-application-layer). |
+| `--app-mediatr` | *(off)* | Application layer: emit the MediatR request/handler shape + validation/transaction pipeline behaviors instead of plain handlers. |
+| `--app-mapping <mode>` | `plain` | Application layer: DTO/read-model mapping strategy — `plain` (hand-rolled) or `mapperly` (reserved). |
 | `--glossary <file.md>` | *(none)* | Also write a Markdown ubiquitous-language glossary to this file. |
 | `--config <file>` | *(discovered)* | Read build defaults from this `koine.config` instead of the discovered one. See [`koine.config`](#koineconfig). |
 
@@ -84,6 +87,36 @@ The emitter lays types out by context into namespace-mirroring folders (`Menu/`,
 :::caution
 `--out` is destructive *within the folders Koine generates*. Point it at a dedicated output directory (the demo uses `Generated/`, git-ignored), never at a folder that also holds files you wrote by hand.
 :::
+
+### The C# Application layer
+
+By default the C# target emits the application **contracts** only — `IUnitOfWork`, the `I<Service>`
+use-case interfaces, read-model projections, query objects and `IQueryHandler<,>` — with no
+implementations. Add `application` to `--layers` to also emit the layer that fills them in:
+
+```bash
+koine build templates/pizzeria --target csharp --layers domain,application --out Generated
+```
+
+Per aggregate **command** and **factory** it emits a request `record`, a handler that loads the
+aggregate via its `IUnitOfWork` repository, invokes the behavior and calls `SaveChangesAsync`, and a
+**FluentValidation** validator whose rules are rendered from the same invariants the domain enforces.
+Per **query** it emits a concrete `IQueryHandler<,>` (a single result keyed by the root's identity
+loads + projects via the `To<ReadModel>` mapper). It also emits an
+`Add<Context>Application(this IServiceCollection)` DI extension registering them all.
+
+Plain handlers (no runtime dependency beyond FluentValidation) are the default. Two opt-in
+sub-options:
+
+- `--app-mediatr` — emit the **MediatR** shape (`IRequest`/`IRequest<T>`, `IRequestHandler<,>`, and
+  validation + transaction `IPipelineBehavior<,>`s) instead of plain handlers.
+- `--app-mapping plain|mapperly` — mapping strategy (`mapperly` reserved for source-generated mapping).
+
+With the layer **off** (the default), the emitted C# is byte-identical to before. Koine `usecase`
+declarations carry no binding to a specific aggregate behavior, so the generated `I<Service>`
+implementation throws `NotImplementedException` until wired — the generated command/factory handlers
+are the real entry points. The sub-options can also be set in `koine.config`
+(`targets.csharp.layers`, `targets.csharp.application.mediatr`, `targets.csharp.application.mapping`).
 
 ### Emit a glossary
 

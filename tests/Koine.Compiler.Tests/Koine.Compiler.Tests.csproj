@@ -18,7 +18,7 @@
          in TRUSTED_PLATFORM_ASSEMBLIES for TestSupport.Compile to resolve them. -->
     <PackageReference Include="FluentValidation" Version="11.11.0" />
     <PackageReference Include="MediatR" Version="12.4.1" />
-    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="9.0.0" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.7" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.6.0" />
     <PackageReference Include="Shouldly" Version="4.3.0" />
     <PackageReference Include="Verify.XunitV3" Version="31.20.0" />
