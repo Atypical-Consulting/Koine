@@ -8,3 +8,8 @@ Generated/
 *.received.*
 .DS_Store
 BenchmarkDotNet.Artifacts/
+
+# Node tooling — a stray root npm invocation can drop these at the repo root (the real Node projects
+# live under tooling/ and website/ with their own ignores). Anchored so subproject lockfiles are kept.
+/node_modules/
+/package-lock.json

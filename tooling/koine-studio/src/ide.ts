@@ -6,6 +6,7 @@ import {
   KoineLsp,
   type CheckResult,
   type ContextMapResult,
+  type DocsResult,
   type GlossaryEntry,
   type Location,
   type LspDiagnostic,
@@ -33,6 +34,10 @@ import { formatChord } from './platform';
 import { renderDiagrams } from './diagrams';
 import { NODE_NAVIGATE_EVENT, type DiagramNodeNavigateDetail } from './diagrams-svg';
 import { renderGlossary, type GlossaryHandlers } from './glossary';
+import { createSelectionBus } from './selection';
+import { renderModelOutline, type ModelOutlineHandlers } from './modelOutline';
+import { buildInspectorElement, renderInspector, type InspectorElement, type InspectorHandlers } from './inspector';
+import { buildModelIndex, lookupElement, type ModelIndex } from './modelIndex';
 import { createAssistantPanel, type AssistantPanel, type AssistantContext, type DomainIndex } from './aiPanel';
 import { clearModelHash, readModelFromHash, workspaceShareUrlOrNull } from './share';
 import { dirtyCount, handleBeforeUnload, saveAllDirtyBuffers, titleWithDirty } from './dirty';
@@ -255,7 +260,7 @@ function diagnosticsInRange(diags: LspDiagnostic[], range: Range): LspDiagnostic
   return diags.filter((d) => lte(d.range.start, range.end) && lte(range.start, d.range.end));
 }
 
-type RightView = 'preview' | 'glossary' | 'diagrams' | 'contextmap' | 'outline' | 'assistant' | 'check';
+type RightView = 'preview' | 'model' | 'glossary' | 'diagrams' | 'contextmap' | 'outline' | 'assistant' | 'check';
 
 // Keyboard shortcuts shown in the help overlay; mirrors the global keydown handler and the
 // palette command hints. 'mod' renders as a keycap as-is (Cmd on mac / Ctrl elsewhere).
@@ -901,6 +906,12 @@ export function init(): void {
 
   // --- tabbed inspector (preview / glossary / context map) ------------------
 
+  // The shared "selected element" bus (issue #142): the spine that keeps the model outline, the
+  // diagram, and the element inspector in sync. Clicking a node in the outline OR the diagram sets
+  // the same selection; the inspector + outline cross-highlight subscribe to it.
+  const selection = createSelectionBus();
+
+  const modelView = el('view-model');
   const glossaryView = el('view-glossary');
   const diagramsView = el('view-diagrams');
   const contextMapView = el('view-contextmap');
@@ -910,6 +921,7 @@ export function init(): void {
   const tabs = Array.from(document.querySelectorAll<HTMLButtonElement>('#tabs .tab'));
   const viewEls: Record<RightView, HTMLElement> = {
     preview: el('view-preview'),
+    model: modelView,
     glossary: glossaryView,
     diagrams: diagramsView,
     contextmap: contextMapView,
@@ -921,8 +933,9 @@ export function init(): void {
   // Track which doc-based views need a (re)fetch — invalidated on every edit so a tab
   // switch always shows data for the current model rather than a stale render. The check
   // view (on-demand via the Check button) and the assistant (interactive) are excluded.
-  const docViewsLoaded: Record<'preview' | 'glossary' | 'diagrams' | 'contextmap' | 'outline', boolean> = {
+  const docViewsLoaded: Record<'preview' | 'model' | 'glossary' | 'diagrams' | 'contextmap' | 'outline', boolean> = {
     preview: false,
+    model: false,
     glossary: false,
     diagrams: false,
     contextmap: false,
@@ -1028,6 +1041,107 @@ export function init(): void {
     }
   }
 
+  // The Model tab is the DDD-aware workspace (#142): a construct-grouped, per-context navigator with
+  // per-context counts over the WHOLE model (top), and the read-only element inspector (bottom). Both
+  // are driven by the shared selection bus — clicking a node in the outline OR a diagram selects the
+  // same element and refreshes the inspector.
+  const modelOutlineHandlers: ModelOutlineHandlers = {
+    onSelect: (entry) => selection.set({ qualifiedName: entry.qualifiedName, context: entry.context }),
+    goto: (line, col) => editor.goto(line, col),
+    onOpenContextMap: () => selectView('contextmap'),
+    onOpenGlossary: () => selectView('glossary'),
+  };
+  const inspectorHandlers: InspectorHandlers = {
+    onGoto: (range) => editor.gotoRange(range.start, range.end),
+  };
+
+  // The joined model index (#142, see modelIndex.ts): the workspace-merged glossary joined with the
+  // richest matching `DiagramNode`. Cached and invalidated on edit; `indexPromise` de-dups concurrent
+  // builders (the Model tab opening AND a diagram click can both request it before the fetch resolves).
+  // `inspectorHost` is the live DOM node the inspector renders into — null whenever the Model view is
+  // showing a message instead of the workspace, so a selection render never targets a detached node.
+  let modelIndex: ModelIndex | null = null;
+  let indexPromise: Promise<ModelIndex> | null = null;
+  let inspectorHost: HTMLElement | null = null;
+
+  /** Build (or reuse) the joined model index. `livingDocs` is best-effort — a glossary-only index still works. */
+  function ensureModelIndex(): Promise<ModelIndex> {
+    if (modelIndex) return Promise.resolve(modelIndex);
+    indexPromise ??= Promise.all([
+      lsp.glossaryModel(),
+      lsp.livingDocs().catch(() => ({ files: [] }) as DocsResult),
+    ])
+      .then(([glossary, docs]) => (modelIndex = buildModelIndex(glossary, docs)))
+      .finally(() => {
+        indexPromise = null;
+      });
+    return indexPromise;
+  }
+
+  // Cross-highlight (#142, Task 4): mark the outline leaf — and the diagram node, best-effort — that
+  // matches the current selection, so selecting in one surface lights up the other. `lookupElement`
+  // resolves either key form to the canonical glossary qualified name (the outline leaves' key); the
+  // SVG nodes key on `context.simpleName`, derived from the resolved element.
+  function applySelectionHighlight(): void {
+    const sel = selection.get();
+    const hit = sel && modelIndex ? lookupElement(modelIndex, sel.qualifiedName) : null;
+    const canonicalQn = hit?.canonicalQn ?? sel?.qualifiedName ?? null;
+    for (const leaf of Array.from(modelView.querySelectorAll<HTMLElement>('.koi-model-leaf'))) {
+      leaf.classList.toggle('is-selected', canonicalQn != null && leaf.dataset.qname === canonicalQn);
+    }
+    const ctxName = hit ? `${hit.element.entry.context}.${hit.element.entry.name}` : null;
+    for (const node of Array.from(diagramsView.querySelectorAll<HTMLElement>('.koi-svg-node'))) {
+      node.classList.toggle('is-selected', ctxName != null && node.dataset.qname === ctxName);
+    }
+  }
+
+  // Project the current selection through the index into an inspector element and (re)render it into
+  // the model workspace's inspector host. No host (Model tab not showing the workspace) or no index → no-op.
+  function renderSelectedInspector(): void {
+    if (!inspectorHost) return;
+    const sel = selection.get();
+    const hit = sel && modelIndex ? lookupElement(modelIndex, sel.qualifiedName) : null;
+    const element: InspectorElement | null = hit
+      ? buildInspectorElement(hit.element.entry, hit.element.node)
+      : null;
+    inspectorHost.replaceChildren(renderInspector(element, inspectorHandlers));
+  }
+
+  async function loadModel(): Promise<void> {
+    // A message replaces the workspace, so the previous inspector host (if any) is now detached —
+    // drop the reference up front so a concurrent selection render can't target an orphaned node.
+    inspectorHost = null;
+    docMessage(modelView, 'Loading model…');
+    try {
+      const index = await ensureModelIndex();
+      if (!index.glossary.entries.length) {
+        docMessage(modelView, 'No elements yet — declare some types, or fix syntax errors to populate the model.');
+        docViewsLoaded.model = true;
+        return;
+      }
+      modelView.innerHTML = '';
+      const workspace = document.createElement('div');
+      workspace.className = 'koi-model-workspace';
+      workspace.appendChild(renderModelOutline(index.glossary, modelOutlineHandlers));
+      inspectorHost = document.createElement('div');
+      inspectorHost.className = 'koi-model-inspector';
+      workspace.appendChild(inspectorHost);
+      modelView.appendChild(workspace);
+      renderSelectedInspector();
+      applySelectionHighlight();
+      docViewsLoaded.model = true;
+    } catch (e) {
+      docMessage(modelView, 'Model request failed: ' + String(e), 'error');
+    }
+  }
+
+  // The inspector + cross-highlight track the selection bus for the app's lifetime (a diagram click
+  // can select an element while the Model tab is closed; opening it then shows the right inspector).
+  selection.subscribe(() => {
+    renderSelectedInspector();
+    applySelectionHighlight();
+  });
+
   async function loadContextMap(): Promise<void> {
     docMessage(contextMapView, 'Loading context map…');
     try {
@@ -1107,11 +1221,22 @@ export function init(): void {
 
   diagramsView.addEventListener(NODE_NAVIGATE_EVENT, (e) => {
     const detail = (e as CustomEvent<DiagramNodeNavigateDetail>).detail;
-    if (detail) void navigateToDiagramNode(detail);
+    if (detail) void selectFromDiagram(detail);
   });
+
+  // Clicking a diagram node both jumps to its declaration AND selects it, so the element inspector
+  // (#142) populates from the same gesture. A diagram node is named `context.simpleName`; map it back
+  // to the canonical glossary qualified name (the selection key) through the index when it's reachable.
+  async function selectFromDiagram(detail: DiagramNodeNavigateDetail): Promise<void> {
+    const index = await ensureModelIndex().catch(() => null);
+    const qualifiedName = index?.qnByCtxName.get(detail.qualifiedName) ?? detail.qualifiedName;
+    selection.set({ qualifiedName, context: qualifiedName.split('.')[0] });
+    await navigateToDiagramNode(detail);
+  }
 
   function ensureLoaded(view: RightView): void {
     if (view === 'preview' && !docViewsLoaded.preview) void loadPreview();
+    if (view === 'model' && !docViewsLoaded.model) void loadModel();
     if (view === 'glossary' && !docViewsLoaded.glossary) void loadGlossary();
     if (view === 'diagrams' && !docViewsLoaded.diagrams) void loadDiagrams();
     if (view === 'contextmap' && !docViewsLoaded.contextmap) void loadContextMap();
@@ -1121,10 +1246,17 @@ export function init(): void {
   // Mark the cached doc views stale (e.g. after an edit or a file switch).
   function invalidateDocViews(): void {
     docViewsLoaded.preview = false;
+    docViewsLoaded.model = false;
     docViewsLoaded.glossary = false;
     docViewsLoaded.diagrams = false;
     docViewsLoaded.contextmap = false;
     docViewsLoaded.outline = false;
+    // The joined glossary+diagram index (#142) and its in-flight builder are stale — drop both so the
+    // next Model load rebuilds against the current model. The inspector host belongs to the about-to-be
+    // -replaced workspace DOM; null it so a selection render in the gap can't target a detached node.
+    modelIndex = null;
+    indexPromise = null;
+    inspectorHost = null;
     cachedDomainIndex = null; // the assistant's domain index is derived from the same model
   }
 
@@ -1168,6 +1300,7 @@ export function init(): void {
   // re-prompts for a baseline; the assistant is interactive).
   el<HTMLButtonElement>('btn-refresh').addEventListener('click', () => {
     if (activeView === 'preview') void loadPreview();
+    else if (activeView === 'model') void loadModel();
     else if (activeView === 'glossary') void loadGlossary();
     else if (activeView === 'diagrams') void loadDiagrams();
     else if (activeView === 'contextmap') void loadContextMap();
