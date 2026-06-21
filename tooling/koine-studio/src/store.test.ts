@@ -13,6 +13,8 @@ import {
   CHAT_HISTORY_CAP,
   peekLegacyScratch,
   clearLegacyScratch,
+  loadWorkspaceMode,
+  saveWorkspaceMode,
   getRecentFolders,
   pushRecentFolder,
   removeRecentFolder,
@@ -254,5 +256,20 @@ describe('legacy scratch migration helpers', () => {
     clearLegacyScratch();
     expect(peekLegacyScratch()).toBeNull();
     expect(localStorage.getItem('koine.studio.scratch')).toBeNull();
+  });
+});
+
+describe('workspace mode persistence (#143)', () => {
+  beforeEach(() => localStorage.clear());
+
+  test('returns null when no mode has been stored', () => {
+    expect(loadWorkspaceMode()).toBeNull();
+  });
+
+  test('round-trips a saved mode through the store helper', () => {
+    saveWorkspaceMode('docs');
+    expect(loadWorkspaceMode()).toBe('docs');
+    saveWorkspaceMode('code'); // a later save overwrites the prior one
+    expect(loadWorkspaceMode()).toBe('code');
   });
 });
