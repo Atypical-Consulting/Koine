@@ -133,6 +133,14 @@ public sealed partial class CSharpEmitter
         sb.Append("public static class ").Append(rm.Name).Append("Projection\n{\n");
         sb.Append(Indent).Append("public static ").Append(rm.Name).Append(" To").Append(rm.Name)
           .Append("(this ").Append(rm.SourceType).Append(" src)\n");
+        if (RefOnly)
+        {
+            // The projection body is stubbed, so no LINQ is referenced (the record itself never uses it).
+            WriteRefStubExpressionBody(sb);
+            sb.Append("}\n");
+            return new EmittedFile(PathFor(emit, ns, KindFolder.ReadModels, $"{rm.Name}.cs"), Assemble(emit, ns, sb.ToString(), usesLinq: false));
+        }
+
         sb.Append(Indent).Append(Indent).Append("=> new ").Append(rm.Name).Append('(');
         for (var i = 0; i < fields.Count; i++)
         {

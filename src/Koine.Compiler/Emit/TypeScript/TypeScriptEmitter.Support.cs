@@ -18,7 +18,15 @@ public sealed partial class TypeScriptEmitter
         IReadOnlyDictionary<string, IReadOnlySet<string>> ScalarNeeds,
         IReadOnlyList<string> ContextNames,
         IReadOnlyList<TsTypeLocation> TypeLocations,
-        IReadOnlyDictionary<string, string> EnumMemberToType);
+        IReadOnlyDictionary<string, string> EnumMemberToType)
+    {
+        /// <summary>
+        /// Pending Source Map v3 sidecars accumulated during emit when
+        /// <see cref="TsEmitterOptions.EmitSourceMaps"/> is on; materialized into sidecar
+        /// <see cref="EmittedFile"/>s by the top-level loop. Empty (and untouched) on the off path.
+        /// </summary>
+        public List<PendingSourceMap> SourceMaps { get; } = new();
+    }
 
     /// <summary>
     /// Where an emitted user type lives: the import module path (no extension), the primary export
@@ -34,11 +42,18 @@ public sealed partial class TypeScriptEmitter
     private static class KindFolder
     {
         public const string Root = "";
+        public const string Abstractions = "abstractions";
         public const string Entities = "entities";
         public const string ValueObjects = "value-objects";
         public const string Enums = "enums";
         public const string Events = "events";
+        public const string IntegrationEvents = "integration-events";
         public const string Repositories = "repositories";
+        public const string Services = "services";
+        public const string Specifications = "specifications";
+        public const string Policies = "policies";
+        public const string ReadModels = "read-models";
+        public const string Queries = "queries";
     }
 
     private static string FolderFor(string ns) => ns.Replace('.', '/');
@@ -80,7 +95,20 @@ public sealed partial class TypeScriptEmitter
     /// the once-emitted <c>runtime</c> module; sibling user types import from their own module via a
     /// relative path computed from this file's folder.
     /// </summary>
-    private string Assemble(TsEmitContext emit, string ns, string kindFolder, string body)
+    private string Assemble(TsEmitContext emit, string ns, string kindFolder, string body) =>
+        Assemble(emit, ns, kindFolder, body, name: null, declSpan: Ast.SourceSpan.None);
+
+    /// <summary>
+    /// <see cref="Assemble(TsEmitContext, string, string, string)"/> with optional Source Map v3
+    /// output (production-grade emit, Task 4). When <see cref="TsEmitterOptions.EmitSourceMaps"/> is
+    /// on AND <paramref name="declSpan"/> is a real range AND <paramref name="name"/> is supplied, the
+    /// module gains a trailing <c>//# sourceMappingURL=&lt;module&gt;.ts.map</c> comment, and a pending
+    /// sidecar mapping the declaration's first generated line back to its <c>.koi</c> origin is
+    /// registered on <paramref name="emit"/> for the top-level <see cref="Emit(KoineModel, SemanticModel?)"/>
+    /// loop to materialize. With the flag off (the default) the returned text is byte-for-byte
+    /// identical to the historical emitter — no comment, no sidecar.
+    /// </summary>
+    private string Assemble(TsEmitContext emit, string ns, string kindFolder, string body, string? name, Ast.SourceSpan declSpan)
     {
         var folder = kindFolder.Length == 0 ? FolderFor(ns) : $"{FolderFor(ns)}/{kindFolder}";
         var present = new HashSet<string>(StringComparer.Ordinal);
@@ -135,7 +163,7 @@ public sealed partial class TypeScriptEmitter
                 continue;
             }
             TsTypeLocation chosen = candidates.FirstOrDefault(c => c.Context == thisContext, candidates[0]);
-            imports[symbol] = RelativeImport(folder, chosen.ModulePath);
+            imports[symbol] = ImportSpecifier(folder, chosen.ModulePath);
         }
 
         // Group imports by module so a module imported for several symbols emits one statement.
@@ -150,18 +178,114 @@ public sealed partial class TypeScriptEmitter
             sb.Append('\n');
         }
 
+        // The declaration body begins on the line right after the import block (the blank-line
+        // separator counts as a line, so the body's first physical line is the builder's current
+        // line count + 1, 1-based). Captured before the body is appended — but only when source maps
+        // are on, so the default path skips the full-builder newline scan.
+        var emitMaps = _options.EmitSourceMaps && name is not null && !declSpan.IsNone;
+        var bodyStartLine = emitMaps ? CountNewlines(sb) + 1 : 0;
+
         sb.Append(body);
         if (!body.EndsWith('\n'))
         {
             sb.Append('\n');
         }
+
+        // Source maps off (default): byte-identical to the historical emitter.
+        if (!_options.EmitSourceMaps || name is null || declSpan.IsNone)
+        {
+            return sb.ToString();
+        }
+
+        // Source maps on: append the sourceMappingURL comment and register a declaration-granularity
+        // sidecar (one segment, the body's first generated line → the declaration's `.koi` origin).
+        // Source Map v3 `sources` are forward-slash URLs, so normalize OS separators (Windows paths).
+        var sourceFile = (declSpan.File ?? ns).Replace('\\', '/');
+        var mapName = name + ".ts.map";
+        sb.Append("//# sourceMappingURL=").Append(mapName).Append('\n');
+
+        var bodyLines = CountNewlines(body);
+        var generatedEnd = bodyStartLine + Math.Max(0, bodyLines - 1);
+        var segment = new SourceMapSegment(bodyStartLine, generatedEnd, sourceFile, declSpan);
+        var mapping = new SourceMapV3.Mapping(
+            bodyStartLine,
+            GeneratedColumn: 0,
+            SourceLine: Math.Max(0, declSpan.Line - 1),
+            SourceColumn: Math.Max(0, declSpan.Column - 1));
+
+        var modulePath = PathFor(ns, kindFolder, name); // "<folder>/<name>.ts"
+        emit.SourceMaps.Add(new PendingSourceMap(
+            modulePath,
+            modulePath + ".map",
+            name + ".ts",
+            sourceFile,
+            new[] { segment },
+            new[] { mapping }));
+
         return sb.ToString();
     }
+
+    /// <summary>Number of newline characters currently in the builder (so the current 1-based line is this + 1).</summary>
+    private static int CountNewlines(StringBuilder sb)
+    {
+        var count = 0;
+        for (var i = 0; i < sb.Length; i++)
+        {
+            if (sb[i] == '\n')
+            {
+                count++;
+            }
+        }
+        return count;
+    }
+
+    /// <summary>Number of newline characters in <paramref name="text"/>.</summary>
+    private static int CountNewlines(string text)
+    {
+        var count = 0;
+        foreach (var ch in text)
+        {
+            if (ch == '\n')
+            {
+                count++;
+            }
+        }
+        return count;
+    }
+
+    /// <summary>
+    /// A source map awaiting materialization once the module's <see cref="EmittedFile"/> is in the
+    /// list: the module's relative path, the sidecar path, the v3 <c>file</c>/<c>source</c> names,
+    /// the declaration-granularity <see cref="SourceMapSegment"/>s carried on the module's
+    /// <see cref="EmittedFile"/>, and the VLQ mappings that build the sidecar JSON.
+    /// </summary>
+    internal sealed record PendingSourceMap(
+        string ModulePath,
+        string SidecarPath,
+        string FileName,
+        string SourceName,
+        IReadOnlyList<SourceMapSegment> Segments,
+        IReadOnlyList<SourceMapV3.Mapping> Mappings);
 
     /// <summary>Matches the names this file exports, so it never imports its own symbols.</summary>
     private static readonly Regex DeclRegex = new(
         @"export (?:class|interface|const|type|function) ([A-Za-z_][A-Za-z0-9_]*)",
         RegexOptions.Compiled);
+
+    /// <summary>
+    /// The ESM import specifier for a sibling user-type module. When a <see cref="TsEmitterOptions.ModuleMap"/>
+    /// rewrites the target's context head (the C# <c>NamespaceMap</c> analogue), the remapped path is
+    /// emitted verbatim as a bare specifier (e.g. <c>@acme/billing/value-objects/Money</c>); otherwise a
+    /// relative specifier is computed from <paramref name="fromFolder"/>. With an empty map the result is
+    /// byte-identical to the historical relative import.
+    /// </summary>
+    private string ImportSpecifier(string fromFolder, string toModule)
+    {
+        var remapped = _options.RemapModulePath(toModule);
+        return ReferenceEquals(remapped, toModule) || remapped == toModule
+            ? RelativeImport(fromFolder, toModule)
+            : remapped;
+    }
 
     /// <summary>A relative ESM import specifier from <paramref name="fromFolder"/> to <paramref name="toModule"/>.</summary>
     private static string RelativeImport(string fromFolder, string toModule)
@@ -249,6 +373,9 @@ public sealed partial class TypeScriptEmitter
                 break;
             case EventDecl ev:
                 Add(locations, context, ev.Name, ns, KindFolder.Events);
+                break;
+            case IntegrationEventDecl ie:
+                Add(locations, context, ie.Name, ns, KindFolder.IntegrationEvents);
                 break;
         }
     }

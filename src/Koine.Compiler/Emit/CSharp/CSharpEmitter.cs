@@ -30,6 +30,78 @@ public sealed partial class CSharpEmitter : IEmitter
     /// <summary>An emitter configured with R16.1 options (namespace remapping, Instant handling).</summary>
     internal CSharpEmitter(CSharpEmitterOptions options) => _options = options;
 
+    /// <summary>
+    /// Encodes every C# option that changes emitted bytes (instant mode, source maps, reference-only,
+    /// and the sorted namespace remap pairs) into the cache fingerprint, so toggling any of them busts
+    /// <see cref="Services.KoineCompiler"/>'s emit cache. The namespace pairs are ordered so equal maps
+    /// always produce the same string regardless of insertion order.
+    /// </summary>
+    public string CacheDiscriminator
+    {
+        get
+        {
+            var map = string.Join(
+                ",",
+                _options.NamespaceMap
+                    .OrderBy(kv => kv.Key, StringComparer.Ordinal)
+                    .Select(kv => kv.Key + "=" + kv.Value));
+            return string.Join(
+                "|",
+                GetType().FullName,
+                "instant=" + _options.InstantMode,
+                "sourceMaps=" + _options.EmitSourceMaps,
+                "refOnly=" + _options.ReferenceOnly,
+                "ns=" + map);
+        }
+    }
+
+    /// <summary>
+    /// True when reference-only emit is requested (<see cref="CSharpEmitterOptions.ReferenceOnly"/>):
+    /// every executable body is replaced with a <c>throw null!;</c> reference-assembly stub while all
+    /// signatures, declarations, interfaces and attributes stay intact. Off by default, so the full
+    /// emit path is byte-identical to the historical output.
+    /// </summary>
+    private bool RefOnly => _options.ReferenceOnly;
+
+    /// <summary>
+    /// Writes the canonical reference-assembly stub for a <em>block-bodied</em> member: the opening
+    /// brace has already been written by the caller (so a stamped signature stays unchanged); this
+    /// emits <c>throw null!;</c> indented one level past <paramref name="indentLevel"/> braces, then
+    /// the closing brace. Used by every block-bodied ctor/method/operator when <see cref="RefOnly"/>.
+    /// </summary>
+    private static void WriteRefStubBlockBody(StringBuilder sb, int indentLevel = 1)
+    {
+        for (var i = 0; i < indentLevel + 1; i++)
+        {
+            sb.Append(Indent);
+        }
+
+        sb.Append("throw null!;\n");
+        for (var i = 0; i < indentLevel; i++)
+        {
+            sb.Append(Indent);
+        }
+
+        sb.Append("}\n");
+    }
+
+    /// <summary>
+    /// Writes the canonical reference-assembly stub for an <em>expression-bodied</em> member:
+    /// <c>=&gt; throw null!;</c>, indented <paramref name="indentLevel"/> levels (the caller has
+    /// already written the signature line up to and including its trailing newline). Used by every
+    /// <c>=&gt; …;</c> member (derived properties, specs, services, projections, simple operators)
+    /// when <see cref="RefOnly"/>.
+    /// </summary>
+    private static void WriteRefStubExpressionBody(StringBuilder sb, int indentLevel = 2)
+    {
+        for (var i = 0; i < indentLevel; i++)
+        {
+            sb.Append(Indent);
+        }
+
+        sb.Append("=> throw null!;\n");
+    }
+
     public IReadOnlyList<EmittedFile> Emit(KoineModel model) => Emit(model, null);
 
     public IReadOnlyList<EmittedFile> Emit(KoineModel model, SemanticModel? semantic)
@@ -385,7 +457,8 @@ public sealed partial class CSharpEmitter : IEmitter
 
         sb.Append("}\n");
 
-        return new EmittedFile(PathFor(emit, ns, KindFolder.Enums, $"{name}.cs"), Assemble(emit, ns, sb.ToString(), usesLinq: true));
+        var contents = Assemble(emit, ns, sb.ToString(), usesLinq: true, @enum.Span, out var sourceMap);
+        return new EmittedFile(PathFor(emit, ns, KindFolder.Enums, $"{name}.cs"), contents, sourceMap);
     }
 
     // ----------------------------------------------------------------------
@@ -490,18 +563,24 @@ public sealed partial class CSharpEmitter : IEmitter
         foreach (Member m in derived)
         {
             var csType = typeMapper.Map(m.Type);
-            var body = translator.TranslateTopLevel(m.Initializer!, CSharpExpressionTranslator.NameMode.Property, EnumExpected(m, index));
             sb.Append('\n');
             WriteXmlDoc(sb, m.Doc, Indent);
             WriteObsolete(sb, m.Deprecated, Indent);
             sb.Append(Indent).Append("public ").Append(csType).Append(' ')
               .Append(CSharpNaming.ToPascalCase(m.Name)).Append('\n');
+            if (RefOnly)
+            {
+                WriteRefStubExpressionBody(sb);
+                continue;
+            }
+
+            var body = translator.TranslateTopLevel(m.Initializer!, CSharpExpressionTranslator.NameMode.Property, EnumExpected(m, index));
             sb.Append(Indent).Append(Indent).Append("=> ").Append(body).Append(";\n");
         }
 
         sb.Append("}\n");
-        return new EmittedFile(PathFor(emit, ns, KindFolder.Events, $"{ev.Name}.cs"),
-            Assemble(emit, ns, sb.ToString(), UsesLinq(ev.Members, Array.Empty<Invariant>())));
+        var contents = Assemble(emit, ns, sb.ToString(), UsesLinq(ev.Members, Array.Empty<Invariant>()), ev.Span, out var sourceMap);
+        return new EmittedFile(PathFor(emit, ns, KindFolder.Events, $"{ev.Name}.cs"), contents, sourceMap);
     }
 
     /// <summary>
@@ -549,18 +628,24 @@ public sealed partial class CSharpEmitter : IEmitter
         foreach (Member m in derived)
         {
             var csType = typeMapper.Map(m.Type);
-            var body = translator.TranslateTopLevel(m.Initializer!, CSharpExpressionTranslator.NameMode.Property, EnumExpected(m, index));
             sb.Append('\n');
             WriteXmlDoc(sb, m.Doc, Indent);
             WriteObsolete(sb, m.Deprecated, Indent);
             sb.Append(Indent).Append("public ").Append(csType).Append(' ')
               .Append(CSharpNaming.ToPascalCase(m.Name)).Append('\n');
+            if (RefOnly)
+            {
+                WriteRefStubExpressionBody(sb);
+                continue;
+            }
+
+            var body = translator.TranslateTopLevel(m.Initializer!, CSharpExpressionTranslator.NameMode.Property, EnumExpected(m, index));
             sb.Append(Indent).Append(Indent).Append("=> ").Append(body).Append(";\n");
         }
 
         sb.Append("}\n");
-        return new EmittedFile(PathFor(emit, ns, KindFolder.IntegrationEvents, $"{ev.Name}.cs"),
-            Assemble(emit, ns, sb.ToString(), UsesLinq(ev.Members, Array.Empty<Invariant>())));
+        var contents = Assemble(emit, ns, sb.ToString(), UsesLinq(ev.Members, Array.Empty<Invariant>()), ev.Span, out var sourceMap);
+        return new EmittedFile(PathFor(emit, ns, KindFolder.IntegrationEvents, $"{ev.Name}.cs"), contents, sourceMap);
     }
 
     /// <summary>
@@ -650,6 +735,12 @@ public sealed partial class CSharpEmitter : IEmitter
         sb.Append(")\n");
         sb.Append(Indent).Append("{\n");
 
+        if (RefOnly)
+        {
+            WriteRefStubBlockBody(sb);
+            return;
+        }
+
         WriteEnumDefaultCoalesce(sb, ctorMembers, translator, index);
         WriteInvariantGuards(sb, typeName, invariants, translator);
         if (invariants.Count > 0 && ctorMembers.Count > 0)
@@ -701,6 +792,12 @@ public sealed partial class CSharpEmitter : IEmitter
         sb.Append(")\n");
         sb.Append(Indent).Append("{\n");
 
+        if (RefOnly)
+        {
+            WriteRefStubBlockBody(sb);
+            return;
+        }
+
         WriteEnumDefaultCoalesce(sb, storedFields, translator, index);
         WriteInvariantGuards(sb, typeName, invariants, translator);
         if (invariants.Count > 0 && storedFields.Count > 0)
@@ -741,6 +838,12 @@ public sealed partial class CSharpEmitter : IEmitter
         sb.Append(")\n");
         sb.Append(Indent).Append("{\n");
 
+        if (RefOnly)
+        {
+            WriteRefStubBlockBody(sb);
+            return;
+        }
+
         WriteEnumDefaultCoalesce(sb, ctorMembers, translator, index);
 
         sb.Append(Indent).Append(Indent).Append("Id = id;\n");
@@ -772,6 +875,12 @@ public sealed partial class CSharpEmitter : IEmitter
         sb.Append(Indent).Append("/// <summary>Validates every invariant; run after construction and each state change.</summary>\n");
         sb.Append(Indent).Append("private void CheckInvariants()\n");
         sb.Append(Indent).Append("{\n");
+        if (RefOnly)
+        {
+            WriteRefStubBlockBody(sb);
+            return;
+        }
+
         WriteInvariantGuards(sb, entity.Name, entity.Invariants, translator,
             CSharpExpressionTranslator.NameMode.Property);
         sb.Append(Indent).Append("}\n");
@@ -1182,6 +1291,12 @@ public sealed partial class CSharpEmitter : IEmitter
           .Append('(').Append(paramList).Append(")\n");
         sb.Append(Indent).Append("{\n");
 
+        if (RefOnly)
+        {
+            WriteRefStubBlockBody(sb);
+            return;
+        }
+
         // Command parameters are locals inside the body (members render as properties).
         foreach (Param p in cmd.Parameters)
         {
@@ -1410,6 +1525,12 @@ public sealed partial class CSharpEmitter : IEmitter
           .Append('(').Append(paramList).Append(")\n");
         sb.Append(Indent).Append("{\n");
 
+        if (RefOnly)
+        {
+            WriteRefStubBlockBody(sb);
+            return;
+        }
+
         // Factory scope: the synthetic `id` and the factory's parameters are locals
         // (entity members are not in scope — the aggregate does not exist yet).
         translator.PushLocal("id", new TypeRef(entity.IdentityName));
@@ -1573,7 +1694,23 @@ public sealed partial class CSharpEmitter : IEmitter
     /// carry no unused imports. LINQ is passed in because <c>.Count</c> (a property)
     /// and <c>.Count()</c> (a LINQ call) are not distinguishable by a token scan.
     /// </summary>
-    private string Assemble(EmitContext emit, string ns, string body, bool usesLinq)
+    private string Assemble(EmitContext emit, string ns, string body, bool usesLinq) =>
+        Assemble(emit, ns, body, usesLinq, declSpan: SourceSpan.None, out _);
+
+    /// <summary>
+    /// <see cref="Assemble(EmitContext, string, string, bool)"/> with optional source-map output.
+    /// When <see cref="CSharpEmitterOptions.EmitSourceMaps"/> is on AND <paramref name="declSpan"/>
+    /// is a real source range, a <c>#line N "&lt;file&gt;"</c> directive is stamped immediately
+    /// before the declaration body (so debuggers/stack traces attribute the body to its <c>.koi</c>
+    /// origin), a <c>#line default</c> resumes generated-line numbering afterwards, and a single
+    /// <see cref="SourceMapSegment"/> mapping the body's generated line range → <paramref name="declSpan"/>
+    /// is returned via <paramref name="sourceMap"/>. Otherwise (the default) no directives are emitted
+    /// and <paramref name="sourceMap"/> is <c>null</c>, so output is byte-identical to the historical
+    /// emitter — the flag-off path never touches the builder.
+    /// </summary>
+    private string Assemble(
+        EmitContext emit, string ns, string body, bool usesLinq,
+        SourceSpan declSpan, out IReadOnlyList<SourceMapSegment>? sourceMap)
     {
         // Usings are derived from data — a UsingCollector that maps runtime/BCL markers and
         // cross-namespace user-type references to their namespaces — rather than a fixed block,
@@ -1618,8 +1755,76 @@ public sealed partial class CSharpEmitter : IEmitter
         }
 
         sb.Append("namespace ").Append(emittedNs).Append(";\n\n");
+
+        // Source maps are off by default: the flag-off path appends the body verbatim and reports
+        // no map, so emitted text stays byte-for-byte identical to the historical emitter.
+        if (!emit.Options.EmitSourceMaps || declSpan.IsNone)
+        {
+            sb.Append(body);
+            sourceMap = null;
+            return sb.ToString();
+        }
+
+        // Source maps on: stamp a `#line` directive pointing the body's generated lines at the
+        // declaration's `.koi` origin, then `#line default` so generated-only trailing lines aren't
+        // misattributed, and record the body's generated line range as one segment.
+        var sourceFile = declSpan.File ?? ns;
+        // `#line` takes a C# string literal, so backslashes and quotes in the path must be escaped or
+        // a Windows path (e.g. C:\models\x.koi) or a quoted path would produce uncompilable output.
+        var sourceLiteral = sourceFile.Replace("\\", "\\\\", StringComparison.Ordinal)
+            .Replace("\"", "\\\"", StringComparison.Ordinal);
+
+        // `CountLines` already returns the 1-based line the builder cursor is on (newlines + 1), i.e.
+        // the line the `#line` directive itself is written on; the body therefore begins on the very
+        // next line.
+        var linesBefore = CountLines(sb);
+        sb.Append("#line ").Append(declSpan.Line).Append(" \"").Append(sourceLiteral).Append("\"\n");
+        var generatedStart = linesBefore + 1; // line after the directive (1-based)
+
         sb.Append(body);
+        // Body line count: a body always ends with a trailing newline, so its rendered lines are the
+        // newline count (the empty piece after the final '\n' is the next line, not part of the body).
+        var bodyLines = CountNewlines(body);
+        var generatedEnd = generatedStart + Math.Max(0, bodyLines - 1);
+
+        sb.Append("#line default\n");
+
+        sourceMap = new[]
+        {
+            new SourceMapSegment(generatedStart, generatedEnd, sourceFile, declSpan),
+        };
         return sb.ToString();
+    }
+
+    /// <summary>1-based count of the line the builder is currently on (number of newlines + 1).</summary>
+    private static int CountLines(StringBuilder sb) => CountNewlinesIn(sb) + 1;
+
+    private static int CountNewlinesIn(StringBuilder sb)
+    {
+        var count = 0;
+        for (var i = 0; i < sb.Length; i++)
+        {
+            if (sb[i] == '\n')
+            {
+                count++;
+            }
+        }
+
+        return count;
+    }
+
+    private static int CountNewlines(string s)
+    {
+        var count = 0;
+        foreach (var c in s)
+        {
+            if (c == '\n')
+            {
+                count++;
+            }
+        }
+
+        return count;
     }
 
     /// <summary>

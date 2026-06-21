@@ -108,12 +108,18 @@ public sealed partial class CSharpEmitter
         foreach (var m in derived)
         {
             var csType = typeMapper.Map(m.Type);
-            var body = translator.TranslateTopLevel(m.Initializer!, CSharpExpressionTranslator.NameMode.Property, EnumExpected(m, index));
             sb.Append('\n');
             WriteXmlDoc(sb, m.Doc, Indent);
             WriteObsolete(sb, m.Deprecated, Indent);
             sb.Append(Indent).Append("public ").Append(csType).Append(' ')
               .Append(CSharpNaming.ToPascalCase(m.Name)).Append('\n');
+            if (RefOnly)
+            {
+                WriteRefStubExpressionBody(sb);
+                continue;
+            }
+
+            var body = translator.TranslateTopLevel(m.Initializer!, CSharpExpressionTranslator.NameMode.Property, EnumExpected(m, index));
             sb.Append(Indent).Append(Indent).Append("=> ").Append(body).Append(";\n");
         }
 
@@ -124,9 +130,18 @@ public sealed partial class CSharpEmitter
             sb.Append('\n');
             sb.Append(Indent).Append("private readonly List<IDomainEvent> _domainEvents = new();\n");
             sb.Append(Indent).Append("public IReadOnlyList<IDomainEvent> DomainEvents\n");
-            sb.Append(Indent).Append(Indent).Append("=> _domainEvents;\n");
-            sb.Append(Indent).Append("public void ClearDomainEvents()\n");
-            sb.Append(Indent).Append(Indent).Append("=> _domainEvents.Clear();\n");
+            if (RefOnly)
+            {
+                WriteRefStubExpressionBody(sb);
+                sb.Append(Indent).Append("public void ClearDomainEvents()\n");
+                WriteRefStubExpressionBody(sb);
+            }
+            else
+            {
+                sb.Append(Indent).Append(Indent).Append("=> _domainEvents;\n");
+                sb.Append(Indent).Append("public void ClearDomainEvents()\n");
+                sb.Append(Indent).Append(Indent).Append("=> _domainEvents.Clear();\n");
+            }
         }
 
         // Commands: intention-revealing state-changing methods.
@@ -145,25 +160,43 @@ public sealed partial class CSharpEmitter
         sb.Append('\n');
         sb.Append(Indent).Append("public bool Equals(").Append(entity.Name)
           .Append("? other)\n");
-        sb.Append(Indent).Append(Indent).Append("=> other is not null && Id.Equals(other.Id);\n");
-        sb.Append(Indent).Append("public override bool Equals(object? obj)\n");
-        sb.Append(Indent).Append(Indent).Append("=> Equals(obj as ")
-          .Append(entity.Name).Append(");\n");
-        sb.Append(Indent).Append("public override int GetHashCode()\n");
-        sb.Append(Indent).Append(Indent).Append("=> Id.GetHashCode();\n");
-        // Operators so `==`/`!=` compare by identity too (else they'd fall back to
-        // reference equality), matching enums and value objects.
-        sb.Append(Indent).Append("public static bool operator ==(").Append(entity.Name).Append("? left, ")
-          .Append(entity.Name).Append("? right)\n");
-        sb.Append(Indent).Append(Indent).Append("=> left is null ? right is null : left.Equals(right);\n");
-        sb.Append(Indent).Append("public static bool operator !=(").Append(entity.Name).Append("? left, ")
-          .Append(entity.Name).Append("? right)\n");
-        sb.Append(Indent).Append(Indent).Append("=> !(left == right);\n");
+        if (RefOnly)
+        {
+            WriteRefStubExpressionBody(sb);
+            sb.Append(Indent).Append("public override bool Equals(object? obj)\n");
+            WriteRefStubExpressionBody(sb);
+            sb.Append(Indent).Append("public override int GetHashCode()\n");
+            WriteRefStubExpressionBody(sb);
+            sb.Append(Indent).Append("public static bool operator ==(").Append(entity.Name).Append("? left, ")
+              .Append(entity.Name).Append("? right)\n");
+            WriteRefStubExpressionBody(sb);
+            sb.Append(Indent).Append("public static bool operator !=(").Append(entity.Name).Append("? left, ")
+              .Append(entity.Name).Append("? right)\n");
+            WriteRefStubExpressionBody(sb);
+        }
+        else
+        {
+            sb.Append(Indent).Append(Indent).Append("=> other is not null && Id.Equals(other.Id);\n");
+            sb.Append(Indent).Append("public override bool Equals(object? obj)\n");
+            sb.Append(Indent).Append(Indent).Append("=> Equals(obj as ")
+              .Append(entity.Name).Append(");\n");
+            sb.Append(Indent).Append("public override int GetHashCode()\n");
+            sb.Append(Indent).Append(Indent).Append("=> Id.GetHashCode();\n");
+            // Operators so `==`/`!=` compare by identity too (else they'd fall back to
+            // reference equality), matching enums and value objects.
+            sb.Append(Indent).Append("public static bool operator ==(").Append(entity.Name).Append("? left, ")
+              .Append(entity.Name).Append("? right)\n");
+            sb.Append(Indent).Append(Indent).Append("=> left is null ? right is null : left.Equals(right);\n");
+            sb.Append(Indent).Append("public static bool operator !=(").Append(entity.Name).Append("? left, ")
+              .Append(entity.Name).Append("? right)\n");
+            sb.Append(Indent).Append(Indent).Append("=> !(left == right);\n");
+        }
 
         sb.Append("}\n");
 
-        return new EmittedFile(PathFor(emit, ns, isRoot ? KindFolder.Root : KindFolder.Entities, $"{entity.Name}.cs"),
-            Assemble(emit, ns, sb.ToString(), EntityUsesLinq(entity) || SpecBodiesUseLinq(entity.Name, index)));
+        var contents = Assemble(emit, ns, sb.ToString(),
+            EntityUsesLinq(entity) || SpecBodiesUseLinq(entity.Name, index), entity.Span, out var sourceMap);
+        return new EmittedFile(PathFor(emit, ns, isRoot ? KindFolder.Root : KindFolder.Entities, $"{entity.Name}.cs"), contents, sourceMap);
     }
 
     /// <summary>
@@ -195,6 +228,27 @@ public sealed partial class CSharpEmitter
         sb.Append("public sealed class ").Append(idName).Append(" : ValueObject\n");
         sb.Append("{\n");
         sb.Append(Indent).Append("public ").Append(backingType).Append(" Value { get; }\n\n");
+
+        if (RefOnly)
+        {
+            sb.Append(Indent).Append("public ").Append(idName).Append('(').Append(backingType)
+              .Append(" value)\n");
+            sb.Append(Indent).Append("{\n");
+            WriteRefStubBlockBody(sb);
+            sb.Append('\n');
+            if (strategy == IdentityStrategy.Guid)
+            {
+                sb.Append(Indent).Append("public static ").Append(idName).Append(" New()\n");
+                WriteRefStubExpressionBody(sb);
+                sb.Append('\n');
+            }
+
+            sb.Append(Indent).Append("protected override IEnumerable<object?> GetEqualityComponents()\n");
+            sb.Append(Indent).Append("{\n");
+            WriteRefStubBlockBody(sb);
+            sb.Append("}\n");
+            return new EmittedFile(PathFor(emit, ns, KindFolder.ValueObjects, $"{idName}.cs"), Assemble(emit, ns, sb.ToString(), usesLinq: false));
+        }
 
         if (validates)
         {

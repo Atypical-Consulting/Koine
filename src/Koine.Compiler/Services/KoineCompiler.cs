@@ -1,3 +1,5 @@
+using System.Security.Cryptography;
+using System.Text;
 using Koine.Compiler.Ast;
 using Koine.Compiler.Diagnostics;
 using Koine.Compiler.Emit;
@@ -33,6 +35,20 @@ public sealed class KoineCompiler
     /// <c>analyzers</c> config key via <see cref="Semantics.AnalyzerLoader"/>.
     /// </summary>
     private readonly IReadOnlyList<IModelAnalyzer>? _externalAnalyzers;
+
+    /// <summary>
+    /// Content-addressed emit cache (issue #71, Task 9). Keyed on a SHA-256 of the input source
+    /// (path + text of every <see cref="SourceFile"/>, in order — the same source produces the same
+    /// bound model) mixed with the emitter's <see cref="IEmitter.CacheDiscriminator"/> (so any
+    /// output-affecting option toggle busts the entry). On a hit, the previously-emitted files are
+    /// returned verbatim, skipping <see cref="IEmitter.Emit(KoineModel, SemanticModel)"/> entirely;
+    /// the returned bytes are therefore byte-identical to a cold emit. The cache is instance-scoped:
+    /// the CLI builds a fresh <see cref="KoineCompiler"/> per run (no reuse), so this only ever helps
+    /// in-process repeat compiles (watch, the LSP/Studio host). Always on — the key fully discriminates
+    /// model and emitter, so a cache hit can only return what a cold emit would have produced.
+    /// </summary>
+    private readonly Dictionary<string, IReadOnlyList<EmittedFile>> _emitCache =
+        new(StringComparer.Ordinal);
 
     /// <summary>Creates a compiler that runs only the built-in analyzers (today's behavior).</summary>
     public KoineCompiler()
@@ -180,8 +196,47 @@ public sealed class KoineCompiler
             return new CompileResult(comp.Model, diagnostics, Array.Empty<EmittedFile>());
         }
 
-        var emitted = emitter.Emit(comp.Model, comp.SemanticModel);
+        var emitted = EmitCached(files, emitter, comp);
         return new CompileResult(comp.Model, diagnostics, emitted);
+    }
+
+    /// <summary>
+    /// Returns the emitted files for this (source set, emitter) pair, reusing a previously-emitted
+    /// result when the content address matches and otherwise running the emitter once and caching it.
+    /// The result is byte-identical to a cold emit either way; see <see cref="_emitCache"/>.
+    /// </summary>
+    private IReadOnlyList<EmittedFile> EmitCached(
+        IReadOnlyList<SourceFile> files, IEmitter emitter, KoineCompilation comp)
+    {
+        var key = ComputeCacheKey(files, emitter);
+        if (_emitCache.TryGetValue(key, out var cached))
+        {
+            return cached;
+        }
+
+        var emitted = emitter.Emit(comp.Model, comp.SemanticModel);
+        _emitCache[key] = emitted;
+        return emitted;
+    }
+
+    /// <summary>
+    /// Builds the content-addressed cache key: a SHA-256 over the emitter's
+    /// <see cref="IEmitter.CacheDiscriminator"/> followed by each source's path and text (with
+    /// explicit length-prefixed separators so distinct file boundaries can never collide). Uses a
+    /// stable cryptographic hash, never <c>string.GetHashCode</c> (which is not stable across runs).
+    /// </summary>
+    private static string ComputeCacheKey(IReadOnlyList<SourceFile> files, IEmitter emitter)
+    {
+        var sb = new StringBuilder();
+        sb.Append("emitter:").Append(emitter.CacheDiscriminator).Append(' ');
+        foreach (var file in files)
+        {
+            sb.Append("path:").Append(file.Path.Length).Append(':').Append(file.Path).Append(' ');
+            sb.Append("src:").Append(file.Source.Length).Append(':').Append(file.Source).Append(' ');
+        }
+
+        var hash = SHA256.HashData(Encoding.UTF8.GetBytes(sb.ToString()));
+        return Convert.ToHexStringLower(hash);
     }
 
     /// <summary>

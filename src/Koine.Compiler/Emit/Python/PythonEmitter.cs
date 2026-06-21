@@ -32,6 +32,29 @@ public sealed partial class PythonEmitter : IEmitter
 
     public string TargetName => "python";
 
+    /// <summary>
+    /// Encodes every Python option that changes emitted bytes (the dict-helper flag and the sorted
+    /// package remap pairs) so toggling any of them busts <see cref="Services.KoineCompiler"/>'s emit
+    /// cache. Without this override the default (type-name-only) discriminator would let two emits of
+    /// the same source under different <see cref="PythonEmitterOptions.PackageMap"/>s collide.
+    /// </summary>
+    public string CacheDiscriminator
+    {
+        get
+        {
+            var map = string.Join(
+                ",",
+                _options.PackageMap
+                    .OrderBy(kv => kv.Key, StringComparer.Ordinal)
+                    .Select(kv => kv.Key + "=" + kv.Value));
+            return string.Join(
+                "|",
+                GetType().FullName,
+                "dictHelpers=" + _options.EmitDictHelpers,
+                "packages=" + map);
+        }
+    }
+
     private const string Indent = "    ";
 
     /// <summary>

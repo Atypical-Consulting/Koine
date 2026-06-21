@@ -20,7 +20,49 @@ namespace Koine.Compiler.Emit.TypeScript;
 /// </summary>
 public sealed partial class TypeScriptEmitter : IEmitter
 {
+    private readonly TsEmitterOptions _options;
+
+    /// <summary>The unconfigured emitter: source maps off, byte-identical to the historical output.</summary>
+    public TypeScriptEmitter()
+        : this(TsEmitterOptions.Default)
+    {
+    }
+
+    /// <summary>
+    /// Constructs the emitter with explicit <paramref name="options"/> (production-grade emit). The
+    /// default-options path (and the parameterless ctor that defers to it) emits byte-for-byte
+    /// identical TypeScript to the historical emitter.
+    /// </summary>
+    internal TypeScriptEmitter(TsEmitterOptions options)
+    {
+        _options = options;
+    }
+
     public string TargetName => "typescript";
+
+    /// <summary>
+    /// Encodes every TypeScript option that changes emitted bytes (source maps, reference-only, and the
+    /// sorted module remap pairs) into the cache fingerprint, so toggling any of them busts
+    /// <see cref="Services.KoineCompiler"/>'s emit cache. The module pairs are ordered so equal maps
+    /// always produce the same string regardless of insertion order.
+    /// </summary>
+    public string CacheDiscriminator
+    {
+        get
+        {
+            var map = string.Join(
+                ",",
+                _options.ModuleMap
+                    .OrderBy(kv => kv.Key, StringComparer.Ordinal)
+                    .Select(kv => kv.Key + "=" + kv.Value));
+            return string.Join(
+                "|",
+                GetType().FullName,
+                "sourceMaps=" + _options.EmitSourceMaps,
+                "refOnly=" + _options.ReferenceOnly,
+                "modules=" + map);
+        }
+    }
 
     /// <summary>
     /// The shipped <c>tsconfig.json</c>: a modern target/lib (so Set/Map/iterables/Array.find
@@ -41,6 +83,39 @@ public sealed partial class TypeScriptEmitter : IEmitter
         "}\n";
 
     private const string Indent = "  ";
+
+    /// <summary>
+    /// True when reference-only emit is requested (<see cref="TsEmitterOptions.ReferenceOnly"/>):
+    /// every executable body (constructor/method/getter/operation/factory) is replaced with a
+    /// <c>throw new Error('reference-only');</c> stub while all signatures, classes, interfaces and
+    /// fields stay intact. Off by default, so the full emit path is byte-identical to the historical
+    /// TypeScript output.
+    /// </summary>
+    private bool RefOnly => _options.ReferenceOnly;
+
+    /// <summary>The canonical reference-only body stub for a TypeScript method/getter/operation.</summary>
+    private const string RefStubStatement = "throw new Error('reference-only');";
+
+    /// <summary>
+    /// Writes a complete reference-only member: the given <paramref name="signature"/> (already minus
+    /// the body, e.g. <c>multiply(factor: number): Money</c>) followed by a single-statement
+    /// <see cref="RefStubStatement"/> body. The signature is indented one level; the body two.
+    /// </summary>
+    private static void WriteRefStubMethod(StringBuilder sb, string signature)
+    {
+        sb.Append('\n');
+        sb.Append(Indent).Append(signature).Append(" {\n");
+        sb.Append(Indent).Append(Indent).Append(RefStubStatement).Append('\n');
+        sb.Append(Indent).Append("}\n");
+    }
+
+    /// <summary>
+    /// The definite-assignment assertion (<c>!</c>) appended to a class field name in reference-only
+    /// emit, where the constructor body is stubbed and never assigns the field — without it TypeScript
+    /// <c>strict</c> (<c>strictPropertyInitialization</c>) would reject the un-initialized field. Empty
+    /// on the full-emit path, so output stays byte-identical.
+    /// </summary>
+    private string FieldBang => RefOnly ? "!" : "";
 
     public IReadOnlyList<EmittedFile> Emit(KoineModel model) => Emit(model, null);
 
@@ -82,9 +157,102 @@ public sealed partial class TypeScriptEmitter : IEmitter
             {
                 files.Add(EmitIdType(emit, idName, ctx.Name, IdentityStrategy.Guid, null));
             }
+
+            // R10 behavioral declarations: reusable specifications (gathered from the context and
+            // its aggregates, mirroring the C# dispatch) emit as one <Context>Specifications module.
+            var contextSpecs = ctx.Specs
+                .Concat(ctx.Types.OfType<AggregateDecl>().SelectMany(a => a.Specs))
+                .ToList();
+            if (contextSpecs.Count > 0)
+            {
+                files.Add(EmitSpecifications(emit, contextSpecs, ctx.Name, typeMapper));
+            }
+
+            // Services: a stateless domain-service class for pure operations (R10.2) and/or an
+            // I<Name> application-service interface for use cases (R12.2) — mirrors the C# dispatch.
+            foreach (ServiceDecl svc in ctx.Services)
+            {
+                if (svc.Operations.Count > 0)
+                {
+                    files.Add(EmitService(emit, svc, ctx.Name, typeMapper));
+                }
+
+                if (svc.UseCases.Count > 0)
+                {
+                    files.Add(EmitApplicationService(emit, svc, ctx.Name, typeMapper));
+                }
+            }
+
+            // R10.3 cross-aggregate policies: one handler-seam module per `policy` (deterministic
+            // declaration order), mirroring the C# emitter's per-context policy dispatch.
+            foreach (PolicyDecl policy in ctx.Policies)
+            {
+                files.Add(EmitPolicy(emit, policy, ctx.Name, typeMapper));
+            }
+
+            // Integration-event subscriber handler seams (R14.3, TS parity): one IHandle<Event>
+            // interface per subscription, in deterministic declaration order. Mirrors the C#
+            // emitter's per-context Subscribes dispatch; no handler for events only published.
+            foreach (SubscribeDecl sub in ctx.Subscribes)
+            {
+                files.Add(EmitIntegrationEventHandler(emit, sub, ctx.Name));
+            }
+
+            // The context's Unit of Work (R12.1, TS parity): a transactional seam over its
+            // aggregate repositories. Emitted only when the context has aggregates whose root is
+            // an entity (only those produce a repository to expose). Mirrors the C# dispatch.
+            var aggregates = ctx.Types.OfType<AggregateDecl>()
+                .Where(a => a.RootEntity() is not null)
+                .ToList();
+            if (aggregates.Count > 0)
+            {
+                files.Add(EmitUnitOfWork(emit, ctx.Name, aggregates));
+            }
+        }
+
+        // 3. Anti-corruption-layer translator interfaces (R14.2, TS parity): one per ACL relation
+        //    that carries a mapping block. Emitted at MODEL level (after the per-context loop),
+        //    into the downstream context, mirroring the C# emitter's placement and order.
+        if (model.ContextMap is { } map)
+        {
+            foreach (ContextRelation r in map.Relations)
+            {
+                if (r.Kind == ContextRelationKind.AntiCorruptionLayer && r.AclMappings.Count > 0)
+                {
+                    files.Add(EmitAclTranslator(emit, r));
+                }
+            }
+        }
+
+        // 4. Source maps (gated): attach the per-module declaration segments to the module's
+        // EmittedFile and emit a Source Map v3 sidecar alongside it. No-op when the flag is off
+        // (SourceMaps stays empty), so the default path is byte-identical.
+        if (emit.SourceMaps.Count > 0)
+        {
+            AttachSourceMaps(files, emit.SourceMaps);
         }
 
         return files;
+    }
+
+    /// <summary>
+    /// Materializes the pending Source Map v3 sidecars: for each emitted module that produced a map,
+    /// stamps the declaration <see cref="SourceMapSegment"/>s onto the module's <see cref="EmittedFile"/>
+    /// and appends a sibling <c>&lt;module&gt;.ts.map</c> file holding the v3 JSON.
+    /// </summary>
+    private static void AttachSourceMaps(List<EmittedFile> files, IReadOnlyList<PendingSourceMap> pending)
+    {
+        foreach (PendingSourceMap map in pending)
+        {
+            var index = files.FindIndex(f => string.Equals(f.RelativePath, map.ModulePath, StringComparison.Ordinal));
+            if (index >= 0)
+            {
+                files[index] = files[index] with { SourceMap = map.Segments };
+            }
+
+            var json = SourceMapV3.Build(map.FileName, map.SourceName, map.Mappings);
+            files.Add(new EmittedFile(map.SidecarPath, json));
+        }
     }
 
     private void EmitType(
@@ -105,6 +273,15 @@ public sealed partial class TypeScriptEmitter : IEmitter
                 break;
             case EventDecl ev:
                 files.Add(EmitEvent(emit, ev, ns, typeMapper));
+                break;
+            case IntegrationEventDecl ie:
+                files.Add(EmitIntegrationEvent(emit, ie, ns, typeMapper));
+                break;
+            case ReadModelDecl rm:
+                files.Add(EmitReadModel(emit, rm, ns, typeMapper));
+                break;
+            case QueryDecl q:
+                files.Add(EmitQuery(emit, q, ns, typeMapper));
                 break;
             case AggregateDecl agg:
                 EntityDecl? aggRoot = agg.RootEntity();
@@ -198,7 +375,7 @@ public sealed partial class TypeScriptEmitter : IEmitter
         sb.Append("}\n");
         return new EmittedFile(
             PathFor(ns, KindFolder.Repositories, iface),
-            Assemble(emit, ns, KindFolder.Repositories, sb.ToString()));
+            Assemble(emit, ns, KindFolder.Repositories, sb.ToString(), iface, agg.Span));
     }
 
     // ----------------------------------------------------------------------
@@ -320,6 +497,6 @@ public sealed partial class TypeScriptEmitter : IEmitter
         sb.Append(Indent).Append(name).Append("Match(self, cases);\n");
         sb.Append("}\n");
 
-        return new EmittedFile(PathFor(ns, KindFolder.Enums, name), Assemble(emit, ns, KindFolder.Enums, sb.ToString()));
+        return new EmittedFile(PathFor(ns, KindFolder.Enums, name), Assemble(emit, ns, KindFolder.Enums, sb.ToString(), name, @enum.Span));
     }
 }

@@ -63,14 +63,20 @@ public sealed partial class CSharpEmitter
         {
             var m = (Member)f.Syntax;
             var csType = typeMapper.Map(m.Type);
-            // Render the derived body from its LOWERED bound initializer (Commit 6): resolved types come
-            // from the bound tree rather than being re-inferred by the translator.
-            var body = translator.TranslateTopLevelBound(f.DerivedInitializer!, CSharpExpressionTranslator.NameMode.Property, EnumExpected(m, index));
             sb.Append('\n');
             WriteXmlDoc(sb, m.Doc, Indent);
             WriteObsolete(sb, m.Deprecated, Indent);
             sb.Append(Indent).Append("public ").Append(csType).Append(' ')
               .Append(CSharpNaming.ToPascalCase(f.Name)).Append('\n');
+            if (RefOnly)
+            {
+                WriteRefStubExpressionBody(sb);
+                continue;
+            }
+
+            // Render the derived body from its LOWERED bound initializer (Commit 6): resolved types come
+            // from the bound tree rather than being re-inferred by the translator.
+            var body = translator.TranslateTopLevelBound(f.DerivedInitializer!, CSharpExpressionTranslator.NameMode.Property, EnumExpected(m, index));
             sb.Append(Indent).Append(Indent).Append("=> ").Append(body).Append(";\n");
         }
 
@@ -122,8 +128,10 @@ public sealed partial class CSharpEmitter
 
         sb.Append("}\n");
 
-        return new EmittedFile(PathFor(emit, ns, KindFolder.ValueObjects, $"{vo.Name}.cs"),
-            Assemble(emit, ns, sb.ToString(), UsesLinq(vo.Members, vo.Invariants) || SpecBodiesUseLinq(vo.Name, index)));
+        var contents = Assemble(emit, ns, sb.ToString(),
+            UsesLinq(vo.Members, vo.Invariants) || SpecBodiesUseLinq(vo.Name, index),
+            vo.Span, out var sourceMap);
+        return new EmittedFile(PathFor(emit, ns, KindFolder.ValueObjects, $"{vo.Name}.cs"), contents, sourceMap);
     }
 
     /// <summary>
@@ -134,6 +142,13 @@ public sealed partial class CSharpEmitter
     private void WriteValueObjectToString(StringBuilder sb, string typeName, IReadOnlyList<BoundField> members)
     {
         sb.Append('\n');
+        if (RefOnly)
+        {
+            sb.Append(Indent).Append("public override string ToString()\n");
+            WriteRefStubExpressionBody(sb);
+            return;
+        }
+
         if (members.Count == 0)
         {
             sb.Append(Indent).Append("public override string ToString()\n");
@@ -168,6 +183,12 @@ public sealed partial class CSharpEmitter
         sb.Append('\n');
         sb.Append(Indent).Append("protected override IEnumerable<object?> GetEqualityComponents()\n");
         sb.Append(Indent).Append("{\n");
+        if (RefOnly)
+        {
+            WriteRefStubBlockBody(sb);
+            return;
+        }
+
         if (members.Count == 0)
         {
             // No fields => no components; `yield break;` keeps this a valid iterator.
@@ -232,8 +253,14 @@ public sealed partial class CSharpEmitter
 
             sb.Append('\n').Append(Indent)
               .Append("public static ").Append(vo.Name).Append(" operator *(")
-              .Append(vo.Name).Append(" left, ").Append(scalar).Append(" right)\n")
-              .Append(Indent).Append(Indent).Append("=> new ")
+              .Append(vo.Name).Append(" left, ").Append(scalar).Append(" right)\n");
+            if (RefOnly)
+            {
+                WriteRefStubExpressionBody(sb);
+                continue;
+            }
+
+            sb.Append(Indent).Append(Indent).Append("=> new ")
               .Append(vo.Name).Append('(').Append(args).Append(");\n");
         }
     }
@@ -273,6 +300,12 @@ public sealed partial class CSharpEmitter
               .Append("public static ").Append(name).Append(" operator ").Append(op).Append('(')
               .Append(name).Append(" left, ").Append(name).Append(" right)\n");
             sb.Append(Indent).Append("{\n");
+            if (RefOnly)
+            {
+                WriteRefStubBlockBody(sb);
+                continue;
+            }
+
             sb.Append(Indent).Append(Indent).Append("if (left.").Append(unitProp)
               .Append(" != right.").Append(unitProp).Append(")\n");
             sb.Append(Indent).Append(Indent).Append("{\n");
@@ -293,8 +326,14 @@ public sealed partial class CSharpEmitter
             {
                 sb.Append('\n').Append(Indent)
                   .Append("public static ").Append(name).Append(" operator ").Append(op).Append('(')
-                  .Append(name).Append(" left, ").Append(scalar).Append(" right)\n")
-                  .Append(Indent).Append(Indent).Append("=> ")
+                  .Append(name).Append(" left, ").Append(scalar).Append(" right)\n");
+                if (RefOnly)
+                {
+                    WriteRefStubExpressionBody(sb);
+                    continue;
+                }
+
+                sb.Append(Indent).Append(Indent).Append("=> ")
                   .Append(Construct($"left.{amtProp} {op} right", $"left.{unitProp}")).Append(";\n");
             }
         }
@@ -334,6 +373,13 @@ public sealed partial class CSharpEmitter
         sb.Append('\n').Append(Indent)
           .Append("public static ").Append(vo.Name).Append(" operator +(")
           .Append(vo.Name).Append(" left, ").Append(vo.Name).Append(" right)");
+
+        if (RefOnly)
+        {
+            sb.Append('\n');
+            WriteRefStubExpressionBody(sb);
+            return;
+        }
 
         if (carried.Count == 0)
         {
