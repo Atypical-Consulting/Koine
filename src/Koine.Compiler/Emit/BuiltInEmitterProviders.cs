@@ -43,7 +43,7 @@ internal sealed class CSharpEmitterProvider : IEmitterProvider
     /// </summary>
     private static CSharpEmitterOptions ToCSharpOptions(EmitterOptions options)
     {
-        if (options.NamespaceMap.Count == 0 && options.InstantMode is null)
+        if (options.NamespaceMap.Count == 0 && options.InstantMode is null && !options.EmitSourceMaps && !options.ReferenceOnly)
         {
             return CSharpEmitterOptions.Empty;
         }
@@ -51,16 +51,39 @@ internal sealed class CSharpEmitterProvider : IEmitterProvider
         var instant = string.Equals(options.InstantMode, "nodaTime", StringComparison.OrdinalIgnoreCase)
             ? CSharpInstantMode.NodaTime
             : CSharpInstantMode.DateTimeOffset;
-        return new CSharpEmitterOptions(options.NamespaceMap, instant);
+        return new CSharpEmitterOptions(options.NamespaceMap, instant, options.EmitSourceMaps, options.ReferenceOnly);
     }
 }
 
-/// <summary>Provider for the TypeScript backend (no per-emit options today).</summary>
+/// <summary>Provider for the TypeScript backend. Maps the neutral options to <see cref="TsEmitterOptions"/>.</summary>
 internal sealed class TypeScriptEmitterProvider : IEmitterProvider
 {
     public string Target => "typescript";
 
-    public IEmitter Create(EmitterOptions options) => new TypeScriptEmitter();
+    public IEmitter Create(EmitterOptions options) => new TypeScriptEmitter(ToTsOptions(options));
+
+    /// <summary>
+    /// Maps the neutral <see cref="EmitterOptions"/> to <see cref="TsEmitterOptions"/>, mirroring
+    /// <see cref="CSharpEmitterProvider"/>. The shared <see cref="EmitterOptions.NamespaceMap"/> is
+    /// reused as the TS module-path remap (keys are PascalCase context names, matching the module-path
+    /// heads the emitter computes); <see cref="EmitterOptions.EmitSourceMaps"/> turns on the source-map
+    /// sidecars. An empty bag maps to <see cref="TsEmitterOptions.Empty"/>, so an unconfigured target
+    /// emits byte-identical output.
+    /// </summary>
+    private static TsEmitterOptions ToTsOptions(EmitterOptions options)
+    {
+        if (options.NamespaceMap.Count == 0 && !options.EmitSourceMaps && !options.ReferenceOnly)
+        {
+            return TsEmitterOptions.Empty;
+        }
+
+        return new TsEmitterOptions
+        {
+            EmitSourceMaps = options.EmitSourceMaps,
+            ModuleMap = options.NamespaceMap,
+            ReferenceOnly = options.ReferenceOnly,
+        };
+    }
 }
 
 /// <summary>Provider for the Python backend. Maps the neutral options to <see cref="PythonEmitterOptions"/>.</summary>

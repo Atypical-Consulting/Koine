@@ -38,6 +38,14 @@ internal class BuildSettings : CommandSettings
     [Description("Promote every warning to an error (after any diagnostics.<CODE> config override).")]
     public bool WarningsAsErrors { get; init; }
 
+    [CommandOption("--source-maps")]
+    [Description("Emit source-map debug info linking generated code back to the .koi source (C# #line directives; TypeScript *.ts.map sidecars).")]
+    public bool SourceMaps { get; init; }
+
+    [CommandOption("--reference-only")]
+    [Description("Emit a reference-assembly-style contract surface: all type/member signatures, interfaces and contracts, with implementation bodies stripped to stubs.")]
+    public bool ReferenceOnly { get; init; }
+
     /// <summary>
     /// Resolves the flags against a <c>koine.config</c> (explicit <c>--config</c>, or one
     /// discovered beside the input): an explicit flag wins, then <c>targets.&lt;t&gt;.out</c>,
@@ -70,7 +78,7 @@ internal class BuildSettings : CommandSettings
         var resolvedOut = Out ?? targetOptions.OutDir ?? config.OutDir;
         plan = new BuildPlan(
             Path, resolvedTarget, resolvedOut, Glossary, Docs, targetOptions,
-            config.DiagnosticSeverity, WarningsAsErrors, config.Analyzers, config.Emitters);
+            config.DiagnosticSeverity, WarningsAsErrors, config.Analyzers, config.Emitters, SourceMaps, ReferenceOnly);
         return true;
     }
 }
@@ -96,7 +104,7 @@ internal sealed class BuildCommand : Command<BuildSettings>
     {
         // External emitter providers from the `emitters` config key (issue #69) resolve alongside the
         // built-ins; no key → built-ins only → behavior identical to before.
-        if (!EmitterRegistry.TryCreate(r.Target, r.Options, r.Emitters, out var emitter))
+        if (!EmitterRegistry.TryCreate(r.Target, r.Options, r.Emitters, r.SourceMaps, r.ReferenceOnly, out var emitter))
         {
             return CliError.Runtime($"unsupported target '{r.Target}' (supported: {EmitterRegistry.SupportedList})");
         }

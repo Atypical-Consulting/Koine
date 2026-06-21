@@ -31,6 +31,25 @@ public sealed partial class PhpEmitter : IEmitter
     /// <inheritdoc/>
     public string TargetName => "php";
 
+    /// <summary>
+    /// Encodes the PHP option that changes emitted bytes (the sorted namespace remap pairs) so
+    /// toggling it busts <see cref="Services.KoineCompiler"/>'s emit cache. Without this override the
+    /// default (type-name-only) discriminator would let two emits of the same source under different
+    /// <see cref="PhpEmitterOptions.NamespaceMap"/>s collide.
+    /// </summary>
+    public string CacheDiscriminator
+    {
+        get
+        {
+            var map = string.Join(
+                ",",
+                _options.NamespaceMap
+                    .OrderBy(kv => kv.Key, StringComparer.Ordinal)
+                    .Select(kv => kv.Key + "=" + kv.Value));
+            return string.Join("|", GetType().FullName, "ns=" + map);
+        }
+    }
+
     /// <summary>Emits source files for the whole model.</summary>
     public IReadOnlyList<EmittedFile> Emit(KoineModel model) => Emit(model, null);
 

@@ -39,6 +39,11 @@ internal sealed class TypeScriptExpressionTranslator
     private readonly HashSet<string> _locals = new(StringComparer.Ordinal);
     private readonly Dictionary<string, TypeRef> _localTypes = new(StringComparer.Ordinal);
 
+    // When set, a member identifier renders as `receiver.<camelCase>` (e.g. a read-model projection
+    // whose members read off the `src` parameter), the TS analogue of the C# translator's
+    // memberReceiver. Overrides the `this.`/bare NameMode rendering for members.
+    private readonly string? _memberReceiver;
+
     // The enum type the whole expression is expected to produce; qualifies a bare shared
     // enum member where a comparison hint does not reach.
     private string? _expectedEnum;
@@ -50,7 +55,8 @@ internal sealed class TypeScriptExpressionTranslator
         IReadOnlyList<Member> members,
         IReadOnlyDictionary<string, string> enumMemberToType,
         TypeScriptTypeMapper typeMapper,
-        string? context = null)
+        string? context = null,
+        string? memberReceiver = null)
     {
         _index = index;
         _resolver = new TypeResolver(index, context);
@@ -58,6 +64,7 @@ internal sealed class TypeScriptExpressionTranslator
         _scope = TypeScope.FromMembers(members, index);
         _memberNames = new HashSet<string>(members.Select(m => m.Name), StringComparer.Ordinal);
         _enumMemberToType = enumMemberToType;
+        _memberReceiver = memberReceiver;
     }
 
     public void PushLocal(string name, TypeRef? type = null)
@@ -480,10 +487,17 @@ internal sealed class TypeScriptExpressionTranslator
             }
         }
 
-        // Member of the enclosing type: `this.<camelCase>` in a body, bare `<camelCase>` in a
-        // constructor/invariant (where the member is still the local parameter, not yet a field).
+        // Member of the enclosing type. A configured receiver (e.g. a read-model projection over
+        // `src`) makes every member a property access on it; otherwise `this.<camelCase>` in a body,
+        // bare `<camelCase>` in a constructor/invariant (where the member is still the local
+        // parameter, not yet a field).
         if (_memberNames.Contains(name))
         {
+            if (_memberReceiver is not null)
+            {
+                sb.Append(_memberReceiver).Append('.').Append(TypeScriptNaming.ToCamelCase(name));
+                return;
+            }
             if (_mode == NameMode.Property)
             {
                 sb.Append("this.");

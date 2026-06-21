@@ -1,3 +1,4 @@
+using System.Text;
 using Koine.Compiler.Emit;
 
 namespace Koine.Cli.Infrastructure;
@@ -6,8 +7,20 @@ namespace Koine.Cli.Infrastructure;
 /// Atomic file output for the emitters. Both methods write through a sibling temp path and
 /// swap, so a watching consumer never observes an empty or half-written file/folder.
 /// </summary>
+/// <remarks>
+/// Output is pinned to <b>UTF-8 with no byte-order mark</b> and <c>\n</c> (LF) line endings,
+/// independent of the host OS. Any <c>\r</c> carried in emitter content is normalized to
+/// <c>\n</c> before writing, so identical input always produces byte-identical files (stable
+/// diffs, hashing, and snapshots regardless of platform).
+/// </remarks>
 internal static class OutputWriter
 {
+    /// <summary>UTF-8 without a BOM. Shared so every write uses the exact same, deterministic encoding.</summary>
+    private static readonly UTF8Encoding Utf8NoBom = new(encoderShouldEmitUTF8Identifier: false);
+
+    /// <summary>Normalizes CRLF/CR line endings to LF so output stays byte-stable across platforms.</summary>
+    private static string NormalizeLineEndings(string contents)
+        => contents.Replace("\r\n", "\n").Replace('\r', '\n');
     /// <summary>
     /// Writes the emitted files into <paramref name="outDir"/> one owned top-level folder
     /// (namespace root) at a time, swapping each via a sibling temp directory. This avoids
@@ -42,7 +55,7 @@ internal static class OutputWriter
                         Directory.CreateDirectory(dir);
                     }
 
-                    File.WriteAllText(path, emitted.Contents);
+                    File.WriteAllText(path, NormalizeLineEndings(emitted.Contents), Utf8NoBom);
                     count++;
                 }
 
@@ -70,7 +83,7 @@ internal static class OutputWriter
     public static void WriteFileAtomic(string path, string contents)
     {
         var tmp = path + $".koine-tmp-{Guid.NewGuid():N}";
-        File.WriteAllText(tmp, contents);
+        File.WriteAllText(tmp, NormalizeLineEndings(contents), Utf8NoBom);
         if (File.Exists(path))
         {
             File.Delete(path);

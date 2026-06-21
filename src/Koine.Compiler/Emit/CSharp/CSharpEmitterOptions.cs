@@ -23,9 +23,19 @@ internal enum CSharpInstantMode
 /// references all stay consistent. <see cref="Empty"/> applies no remapping, so emitted
 /// output is byte-identical to the unconfigured emitter.
 /// </summary>
+/// <remarks>
+/// <see cref="ReferenceOnly"/> produces a reference-assembly-style contract surface: every type
+/// declaration, member signature, interface, attribute and using is preserved, but each executable
+/// body (constructor/method/operator/factory/accessor) is replaced with the canonical
+/// <c>throw null!;</c> reference stub — no invariant checks, no field mutation, no business
+/// expressions. The default (<c>false</c>) is the historical full emit, byte-identical to the
+/// unconfigured emitter.
+/// </remarks>
 internal sealed record CSharpEmitterOptions(
     IReadOnlyDictionary<string, string> NamespaceMap,
-    CSharpInstantMode InstantMode = CSharpInstantMode.DateTimeOffset)
+    CSharpInstantMode InstantMode = CSharpInstantMode.DateTimeOffset,
+    bool EmitSourceMaps = false,
+    bool ReferenceOnly = false)
 {
     public static readonly CSharpEmitterOptions Empty =
         new(new Dictionary<string, string>(StringComparer.Ordinal));
