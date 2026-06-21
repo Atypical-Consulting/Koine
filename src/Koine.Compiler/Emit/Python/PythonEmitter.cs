@@ -187,6 +187,9 @@ public sealed partial class PythonEmitter : IEmitter
             case ReadModelDecl rm:
                 files.Add(EmitReadModel(emit, rm, ns, typeMapper));
                 break;
+            case QueryDecl q:
+                files.Add(EmitQuery(emit, q, ns, typeMapper));
+                break;
             // An aggregate emits each nested type (the root at the context package root, the rest in
             // their kind folders) followed by the root's persistence-ignorant repository Protocol.
             case AggregateDecl agg:

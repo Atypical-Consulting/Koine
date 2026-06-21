@@ -120,6 +120,13 @@ public class PythonSnapshotTests
             total
             lineCount: Int = lines.count
           }
+
+          /// A query over the read model (R12.4): a list result handled through the generic
+          /// QueryHandler Protocol shipped in the runtime.
+          query FindOrders(customer: CustomerId, status: OrderStatus): List<OrderSummary>
+
+          /// A single-result query (cardinality `M`) returning one summary by its order id.
+          query OrderSummaryById(order: OrderId): OrderSummary
         }
         """;
 

@@ -97,6 +97,52 @@ public sealed partial class PythonEmitter
             Assemble(emit, ns, KindFolder.ReadModels, sb.ToString(), name));
     }
 
+    // ----------------------------------------------------------------------
+    // Queries — a frozen-dataclass DTO + a QueryHandler Protocol seam
+    // ----------------------------------------------------------------------
+
+    /// <summary>
+    /// Emits a query object (R12.4): a frozen-dataclass DTO carrying the criteria plus a
+    /// <c>&lt;Q&gt;Handler(QueryHandler[&lt;Q&gt;, &lt;Result&gt;], Protocol)</c> seam reusing the
+    /// generic <c>QueryHandler</c> <c>Protocol</c> already shipped in <see cref="PyRuntime"/> — the
+    /// Python analogue of the C# DTO handled via <c>IQueryHandler&lt;TQuery,TResult&gt;</c>. The result
+    /// type maps through the shared <see cref="PythonTypeMapper"/>, so a <c>List&lt;M&gt;</c> result
+    /// becomes <c>tuple[M, ...]</c> (the same immutable-sequence convention the repositories use), a
+    /// single <c>M</c> stays <c>M</c>, and an optional single result is <c>M | None</c>.
+    /// </summary>
+    private EmittedFile EmitQuery(PyEmitContext emit, QueryDecl q, string ns, PythonTypeMapper typeMapper)
+    {
+        var name = PythonNaming.ToPascalCase(q.Name);
+        var handlerName = name + "Handler";
+        var resultType = typeMapper.Map(q.ResultType);
+
+        var sb = new StringBuilder();
+        sb.Append("@dataclass(frozen=True)\n");
+        sb.Append("class ").Append(name).Append(":\n");
+        WriteDoc(sb, q.Doc ?? $"Query returning {resultType}; handled by {handlerName}.", Indent);
+        if (q.Criteria.Count == 0)
+        {
+            sb.Append(Indent).Append("pass\n");
+        }
+
+        foreach (Param p in q.Criteria)
+        {
+            sb.Append(Indent).Append(PythonNaming.EscapeIdentifier(PythonNaming.ToSnakeCase(p.Name)))
+              .Append(": ").Append(typeMapper.Map(p.Type)).Append('\n');
+        }
+
+        // The handler seam: a Protocol specializing the generic QueryHandler. Including `Protocol` in
+        // the bases keeps the specialization a structural protocol the consumer implements.
+        sb.Append('\n').Append('\n');
+        sb.Append("class ").Append(handlerName).Append('(')
+          .Append("QueryHandler[").Append(name).Append(", ").Append(resultType).Append("], Protocol):\n");
+        sb.Append(Indent).Append("\"\"\"Handles ").Append(name).Append(", returning ").Append(resultType).Append(".\"\"\"\n");
+
+        return new EmittedFile(
+            PathFor(ns, KindFolder.Queries, q.Name),
+            Assemble(emit, ns, KindFolder.Queries, sb.ToString(), name));
+    }
+
     /// <summary>
     /// The members a read model projects from. An entity adds the synthetic <c>id</c> (unless it
     /// already declares one), mirroring the C# <c>ReadModelSourceMembers</c>.
