@@ -30,7 +30,8 @@ sync, and the rules stay front and centre instead of drowning in boilerplate.
 The name evokes **Koine Greek**, the *common* language that became a lingua franca. The goal is to
 compile one domain model to many targets. **C# is the primary, most complete target**; a
 **TypeScript** emitter ships (`--target typescript`), a **Python** emitter ships (`--target python` →
-dependency-free Python 3.11+, `mypy --strict`-clean; Phase 1 covers the tactical core), a **PHP 8.1**
+dependency-free Python 3.11+, `mypy --strict`-clean; the tactical core *and* the strategic/CQRS layer
+— read models, queries, policies, state machines, context maps/ACL), a **PHP 8.1**
 emitter ships (`--target php` → dependency-free PHP 8.1, typed properties, readonly promoted properties; Phase 1
 covers the tactical core), a **docs** target emits living documentation (`--target docs` → Markdown +
 Mermaid diagrams) straight from the model, and the parser and semantic model are kept strictly
@@ -146,7 +147,7 @@ dotnet run --project src/Koine.Cli -- build templates/starters/billing/billing.k
 # Emit to TypeScript instead
 dotnet run --project src/Koine.Cli -- build templates/starters/billing/billing.koi --target typescript --out ./generated
 
-# Or to Python (Phase 1: tactical core — value objects, smart enums, entities, events, repositories)
+# Or to Python (tactical core + strategic/CQRS: read models, queries, policies, state machines, ACL)
 dotnet run --project src/Koine.Cli -- build templates/starters/billing/billing.koi --target python --out ./generated_py
 
 # Or to PHP 8.1 (Phase 1: tactical core — value objects, smart enums, entities, events, repositories)
@@ -250,7 +251,7 @@ Koine.slnx
 │   │   ├── Emit/           # IEmitter + EmittedFile
 │   │   │   ├── CSharp/     # CSharpEmitter (primary target)
 │   │   │   ├── TypeScript/ # TypeScriptEmitter
-│   │   │   ├── Python/     # PythonEmitter (Phase 1: tactical core)
+│   │   │   ├── Python/     # PythonEmitter (tactical core + strategic/CQRS layer)
 │   │   │   ├── Php/        # PhpEmitter (Phase 1: tactical core, PHP 8.1)
 │   │   │   ├── Glossary/   # ubiquitous-language glossary
 │   │   │   └── Docs/       # living documentation (Markdown + Mermaid diagrams)

@@ -5,7 +5,7 @@ description: "Why Koine exists and how the .koi to C# pipeline works at a glance
 
 Koine is a target-agnostic compiler for **Domain-Driven Design**. You describe the *ubiquitous language* of a bounded context once, in plain `.koi` files, and Koine generates the idiomatic, boilerplate-heavy tactical code for you: value objects, entities, aggregates, invariants, commands, events, repositories, and more.
 
-The model is written once and stays free of any host-language concepts. **This release emits C#**, with **TypeScript**, **Python 3.11+**, and **PHP 8.1** emitters also shipping today (all Phase 1: tactical core), and a Rust emitter on the roadmap — the parser and semantic model are kept strictly target-agnostic so a new backend is a new emitter, not a rewrite.
+The model is written once and stays free of any host-language concepts. **This release emits C#**, with **TypeScript**, **Python 3.11+** (now covering the full tactical core *and* the strategic/CQRS layer — read models, queries, policies, state machines, context maps/ACL), and **PHP 8.1** emitters also shipping today, and a Rust emitter on the roadmap — the parser and semantic model are kept strictly target-agnostic so a new backend is a new emitter, not a rewrite.
 
 <a class="koi-try" href="/Koine/studio/">Try Koine now — the compiler runs in your browser</a>
 
