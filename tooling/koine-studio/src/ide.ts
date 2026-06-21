@@ -3,10 +3,12 @@
 // glossary, and context map).
 import { createKoineEditor, createOutputView, renderMarkdown, setEditorDiagnostics } from './editor';
 import { renderModelOutline, type OutlineHandlers } from './modelOutline';
+import { buildNodeIndex, renderInspector, type InspectorHandlers } from './inspector';
 import {
   KoineLsp,
   type CheckResult,
   type ContextMapResult,
+  type DiagramNode,
   type GlossaryEntry,
   type Location,
   type LspDiagnostic,
@@ -257,7 +259,7 @@ function diagnosticsInRange(diags: LspDiagnostic[], range: Range): LspDiagnostic
   return diags.filter((d) => lte(d.range.start, range.end) && lte(range.start, d.range.end));
 }
 
-type RightView = 'preview' | 'glossary' | 'diagrams' | 'contextmap' | 'outline' | 'assistant' | 'check';
+type RightView = 'preview' | 'glossary' | 'diagrams' | 'contextmap' | 'outline' | 'inspector' | 'assistant' | 'check';
 
 // Keyboard shortcuts shown in the help overlay; mirrors the global keydown handler and the
 // palette command hints. 'mod' renders as a keycap as-is (Cmd on mac / Ctrl elsewhere).
@@ -907,6 +909,7 @@ export function init(): void {
   const diagramsView = el('view-diagrams');
   const contextMapView = el('view-contextmap');
   const outlineView = el('view-outline');
+  const inspectorView = el('view-inspector');
   const assistantView = el('view-assistant');
   const checkView = el('view-check');
   const tabs = Array.from(document.querySelectorAll<HTMLButtonElement>('#tabs .tab'));
@@ -916,6 +919,7 @@ export function init(): void {
     diagrams: diagramsView,
     contextmap: contextMapView,
     outline: outlineView,
+    inspector: inspectorView,
     assistant: assistantView,
     check: checkView,
   };
@@ -1081,6 +1085,70 @@ export function init(): void {
     }
   }
 
+  // --- element inspector (#142) ---------------------------------------------
+  // The inspector reads one DiagramNode (resolved from the living-docs graph by qualified name) for
+  // whatever the selection bus points at. The node index is cached like the other model-derived views
+  // and rebuilt on edit; a selection that resolves to no graph node still shows a header-only stub.
+  const inspectorHandlers: InspectorHandlers = {
+    onGoto: (span) => {
+      if (span.file) {
+        void navigateToDiagramNode({
+          qualifiedName: '',
+          file: span.file,
+          line: span.line,
+          column: span.column,
+          endLine: span.endLine,
+          endColumn: span.endColumn,
+        });
+      } else {
+        editor.gotoRange(
+          { line: span.line - 1, character: span.column - 1 },
+          { line: span.endLine - 1, character: span.endColumn - 1 },
+        );
+      }
+    },
+  };
+  let nodeIndex: Map<string, DiagramNode> | null = null;
+
+  async function ensureNodeIndex(): Promise<Map<string, DiagramNode>> {
+    if (!nodeIndex) nodeIndex = buildNodeIndex(await lsp.livingDocs());
+    return nodeIndex;
+  }
+
+  /** A header-only node for a selection that has no diagram graph node (e.g. a top-level value object). */
+  function stubNode(sel: { qualifiedName: string; span: DiagramNode['sourceSpan'] }): DiagramNode {
+    return {
+      id: sel.qualifiedName,
+      label: sel.qualifiedName.split('.').pop() ?? sel.qualifiedName,
+      kind: '',
+      qualifiedName: sel.qualifiedName,
+      sourceSpan: sel.span,
+      stereotype: null,
+      members: [],
+    };
+  }
+
+  function renderInspectorInto(): void {
+    const sel = selectionBus.get();
+    const node = sel ? (nodeIndex?.get(sel.qualifiedName) ?? stubNode(sel)) : null;
+    inspectorView.innerHTML = '';
+    inspectorView.appendChild(renderInspector(node, inspectorHandlers));
+  }
+
+  async function loadInspector(): Promise<void> {
+    try {
+      await ensureNodeIndex();
+      renderInspectorInto();
+    } catch (e) {
+      docMessage(inspectorView, 'Inspector request failed: ' + String(e), 'error');
+    }
+  }
+
+  // Keep the inspector in step with the selection while it is the visible tab.
+  selectionBus.subscribe(() => {
+    if (activeView === 'inspector') void loadInspector();
+  });
+
   // Live domain diagrams: fetch the DocsEmitter output (Mermaid-in-Markdown) and render it.
   // Marked loaded only on success so a transient failure re-fetches on the next visit. A monotonic
   // token drops the result of a render that a newer one (edit / theme flip / refresh) superseded.
@@ -1158,6 +1226,7 @@ export function init(): void {
     if (view === 'diagrams' && !docViewsLoaded.diagrams) void loadDiagrams();
     if (view === 'contextmap' && !docViewsLoaded.contextmap) void loadContextMap();
     if (view === 'outline' && !docViewsLoaded.outline) void loadOutline();
+    if (view === 'inspector') void loadInspector();
   }
 
   // Mark the cached doc views stale (e.g. after an edit or a file switch).
@@ -1167,6 +1236,7 @@ export function init(): void {
     docViewsLoaded.diagrams = false;
     docViewsLoaded.contextmap = false;
     docViewsLoaded.outline = false;
+    nodeIndex = null; // the inspector's node index is derived from the same model
     cachedDomainIndex = null; // the assistant's domain index is derived from the same model
   }
 
@@ -1214,6 +1284,7 @@ export function init(): void {
     else if (activeView === 'diagrams') void loadDiagrams();
     else if (activeView === 'contextmap') void loadContextMap();
     else if (activeView === 'outline') void loadOutline();
+    else if (activeView === 'inspector') void loadInspector();
   });
 
   // Check… — pick a baseline folder and diff the current buffer against it. Needs Stream F's
@@ -2017,6 +2088,7 @@ export function init(): void {
       { id: 'view-diagrams', title: 'Show Diagrams', group: 'Inspector', run: () => selectView('diagrams') },
       { id: 'view-contextmap', title: 'Show Context Map', group: 'Inspector', run: () => selectView('contextmap') },
       { id: 'view-outline', title: 'Show Outline', group: 'Inspector', run: () => selectView('outline') },
+      { id: 'view-inspector', title: 'Show Inspector', group: 'Inspector', run: () => selectView('inspector') },
       { id: 'view-assistant', title: 'Show Assistant', group: 'Inspector', run: () => selectView('assistant') },
       { id: 'assistant-explain', title: 'Explain this construct', group: 'Inspector', run: () => { selectView('assistant'); ensureAssistant().explainSelection(); } },
     ];
