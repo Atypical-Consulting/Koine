@@ -335,6 +335,101 @@ public class PythonConformanceTests
         types.Ok.ShouldBeTrue("emitted Python should type-check under mypy --strict:\n" + string.Join("\n", types.Errors));
     }
 
+    /// <summary>
+    /// An anti-corruption-layer relation carrying an <c>acl { … }</c> mapping block must emit a
+    /// translator <c>Protocol</c> seam into the DOWNSTREAM context (<c>billing/abstractions/</c>),
+    /// with one <c>translate_&lt;local&gt;(source: &lt;Upstream&gt;) -&gt; &lt;Local&gt;</c> per mapping —
+    /// the Python analogue of the C# <c>I&lt;Up&gt;To&lt;Down&gt;Translator</c> / TS interface. The
+    /// upstream types resolve to QUALIFIED cross-context imports (never a guessed relative path) via the
+    /// shared type-location table, and the whole tree type-checks under <c>mypy --strict</c>. Proves
+    /// Part D (context maps / ACL), which the single-context main fixture cannot exercise.
+    /// </summary>
+    [Fact]
+    public void Acl_relation_emits_qualified_translator_protocol_and_typechecks()
+    {
+        const string source = """
+            context Legacy {
+              /// The external provider's raw account shape.
+              value Account { reference: String }
+              /// The external provider's raw charge shape.
+              value Charge  { amount: Decimal }
+            }
+
+            context Billing {
+              /// Our clean customer model.
+              value Customer { name: String }
+              /// Our clean invoice model.
+              value Invoice  { total: Decimal }
+            }
+
+            contextmap {
+              Legacy -> Billing : anti-corruption-layer
+                acl {
+                  Legacy.Account -> Billing.Customer
+                  Legacy.Charge  -> Billing.Invoice
+                }
+            }
+            """;
+
+        var result = new KoineCompiler().Compile(source, new PythonEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var acl = FileText(result.Files, "billing/abstractions/legacy_to_billing_translator.py");
+        acl.ShouldContain("class LegacyToBillingTranslator(Protocol):");
+        // The upstream types resolve to qualified cross-context imports into Legacy's real modules.
+        acl.ShouldContain("from legacy.value_objects.account import Account");
+        acl.ShouldContain("from legacy.value_objects.charge import Charge");
+        // One translate method per mapping (upstream → local), named for BOTH types so several
+        // mappings sharing a source or target type stay distinct.
+        acl.ShouldContain("def translate_account_to_customer(self, source: Account) -> Customer: ...");
+        acl.ShouldContain("def translate_charge_to_invoice(self, source: Charge) -> Invoice: ...");
+
+        AssertStrictlyTypeChecks(result.Files);
+    }
+
+    /// <summary>
+    /// When the ACL's upstream and downstream contexts both declare a type of the SAME name, the
+    /// translator's mapped upstream parameter must import the UPSTREAM copy — resolved against the
+    /// mapping's declared context, not silently shadowed by the same-named downstream type (which the
+    /// generic this-module-context-preferring import resolution would otherwise pick). Regression for
+    /// the cross-context name-collision resolution.
+    /// </summary>
+    [Fact]
+    public void Acl_upstream_type_colliding_with_downstream_name_imports_the_upstream_copy()
+    {
+        const string source = """
+            context Provider {
+              /// The provider's money shape (cents).
+              value Money   { cents: Int }
+            }
+
+            context Ledger {
+              /// Our OWN money shape — same name, different bounded context.
+              value Money   { amount: Decimal }
+              /// A posted ledger entry.
+              value Entry   { note: String }
+            }
+
+            contextmap {
+              Provider -> Ledger : anti-corruption-layer
+                acl {
+                  Provider.Money -> Ledger.Entry
+                }
+            }
+            """;
+
+        var result = new KoineCompiler().Compile(source, new PythonEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var acl = FileText(result.Files, "ledger/abstractions/provider_to_ledger_translator.py");
+        acl.ShouldContain("def translate_money_to_entry(self, source: Money) -> Entry: ...");
+        // The upstream `Money` resolves to Provider's module, NOT Ledger's same-named copy.
+        acl.ShouldContain("from provider.value_objects.money import Money");
+        acl.ShouldNotContain("from ledger.value_objects.money import Money");
+
+        AssertStrictlyTypeChecks(result.Files);
+    }
+
     /// <summary>The full text of an emitted file, by relative path (fails the test if absent).</summary>
     private static string FileText(IReadOnlyList<EmittedFile> files, string relativePath)
     {
