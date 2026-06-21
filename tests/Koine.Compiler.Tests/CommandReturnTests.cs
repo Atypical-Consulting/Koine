@@ -18,7 +18,7 @@ public class CommandReturnTests
         context Sales {
           enum OrderStatus { Draft, Placed, Cancelled }
           event OrderCancelled { orderId: OrderId }
-          aggregate Order root Order {
+          aggregate Sales root Order {
             entity Order identified by OrderId {
               status: OrderStatus = Draft
 
@@ -38,7 +38,7 @@ public class CommandReturnTests
     private const string ComputedResultFixture = """
         context Sales {
           enum OrderStatus { Draft, Placed }
-          aggregate Order root Order {
+          aggregate Sales root Order {
             entity Order identified by OrderId {
               status: OrderStatus = Draft
               total: Int = 0
@@ -60,7 +60,7 @@ public class CommandReturnTests
     private const string PrefixCollisionFixture = """
         context Sales {
           event Quoted { amount: Int  rate: Int  doubled: Int }
-          aggregate Order root Order {
+          aggregate Sales root Order {
             entity Order identified by OrderId {
               tax:     Int = 0
               taxRate: Int = 0

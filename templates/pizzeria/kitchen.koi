@@ -38,7 +38,7 @@ context Kitchen version 1 {
     /// The kitchen-ticket aggregate: one ticket per order on the line. Being an
     /// aggregate root it gains an `IKitchenTicketRepository` and joins the context
     /// UoW; the repository block adds intention-revealing finders (R11.3).
-    aggregate KitchenTicket root KitchenTicket {
+    aggregate Cooking root KitchenTicket {
 
       repository {
         operations: getById, add, update

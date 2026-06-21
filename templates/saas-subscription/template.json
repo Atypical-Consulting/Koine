@@ -19,7 +19,7 @@
     "ddd"
   ],
   "contexts": ["Tenant", "Subscription", "Billing", "Entitlements"],
-  "coreAggregate": "Subscription",
+  "coreAggregate": "Subscriptions",
   "entryFile": "subscription.koi",
   "teaches": [
     "modelling a multi-tenant SaaS across four bounded contexts",

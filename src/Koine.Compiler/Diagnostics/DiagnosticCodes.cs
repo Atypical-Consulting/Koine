@@ -60,6 +60,7 @@ public static class DiagnosticCodes
     public const string UnknownEnumMemberForType = "KOI0106";
     public const string GenericArity = "KOI0107";
     public const string ReservedGeneratedMember = "KOI0108";
+    public const string AggregateNameMatchesRoot = "KOI0109";
 
     // ---- Expressions & references (KOI0200–0299) --------------------------
     public const string UnknownField = "KOI0201";
@@ -237,6 +238,7 @@ public static class DiagnosticCodes
             [UnknownEnumMemberForType] = D(UnknownEnumMemberForType, "An enum-typed default names a member not in that enum.", DiagnosticCategory.Declarations, DiagnosticSeverity.Error),
             [GenericArity] = D(GenericArity, "A collection type has the wrong number of type arguments.", DiagnosticCategory.Declarations, DiagnosticSeverity.Error),
             [ReservedGeneratedMember] = D(ReservedGeneratedMember, "A value-object/entity member collides with a generated member (Id, Equals, GetHashCode, GetEqualityComponents).", DiagnosticCategory.Declarations, DiagnosticSeverity.Error),
+            [AggregateNameMatchesRoot] = D(AggregateNameMatchesRoot, "An aggregate shares its name with its root entity; the boundary reads as more than its root when named distinctly.", DiagnosticCategory.Declarations, DiagnosticSeverity.Warning),
 
             // ---- Expressions & references ------------------------------------
             [UnknownField] = D(UnknownField, "An identifier resolves to no member, enum member, or built-in.", DiagnosticCategory.Expressions, DiagnosticSeverity.Error),

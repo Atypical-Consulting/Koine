@@ -12,13 +12,13 @@
       "children": [
         {
           "kind": "aggregate",
-          "qualifiedName": "Ordering.Order",
-          "title": "Order",
+          "qualifiedName": "Ordering.Sales",
+          "title": "Sales",
           "members": [],
           "children": [
             {
               "kind": "enum",
-              "qualifiedName": "Ordering.Order.OrderStatus",
+              "qualifiedName": "Ordering.Sales.OrderStatus",
               "title": "OrderStatus",
               "members": [
                 {
@@ -50,7 +50,7 @@
             },
             {
               "kind": "value",
-              "qualifiedName": "Ordering.Order.OrderLine",
+              "qualifiedName": "Ordering.Sales.OrderLine",
               "title": "OrderLine",
               "members": [
                 {
@@ -82,7 +82,7 @@
             },
             {
               "kind": "entity",
-              "qualifiedName": "Ordering.Order.Order",
+              "qualifiedName": "Ordering.Sales.Order",
               "title": "Order",
               "members": [
                 {
@@ -101,7 +101,7 @@
               "children": [
                 {
                   "kind": "states",
-                  "qualifiedName": "Ordering.Order.Order.states.status",
+                  "qualifiedName": "Ordering.Sales.Order.states.status",
                   "title": "status",
                   "members": [
                     {

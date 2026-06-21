@@ -6,7 +6,7 @@
   "difficulty": "intermediate",
   "tags": ["state-machine", "workflow", "policy"],
   "contexts": ["TicketManagement", "SLA"],
-  "coreAggregate": "Ticket",
+  "coreAggregate": "Helpdesk",
   "entryFile": "ticketing.koi",
   "teaches": [
     "state machines for an entity lifecycle",

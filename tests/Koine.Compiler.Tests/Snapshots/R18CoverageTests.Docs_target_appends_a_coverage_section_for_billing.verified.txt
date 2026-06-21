@@ -3,7 +3,7 @@
 
 ## Aggregates
 
-### Order
+### Sales
 
 **Root entity:** `Order` (identified by `OrderId`)
 

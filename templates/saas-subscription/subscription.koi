@@ -1,5 +1,5 @@
-/// Subscription bounded context — the heart of the template. The `Subscription`
-/// aggregate is the headline aggregate: its lifecycle is an explicit state machine
+/// Subscription bounded context — the heart of the template. The `Subscriptions`
+/// aggregate (root `Subscription`) is the headline aggregate: its lifecycle is an explicit state machine
 /// (trial → active → suspended → cancelled), it carries the quota/overage invariants
 /// that anchor a metered SaaS plan, and it publishes integration events the rest of the
 /// platform reacts to. Plan changes, payment failures and cancellations all flow from
@@ -125,7 +125,7 @@ context Subscription version 1 {
   /// The subscription aggregate — the consistency boundary that owns plan, status and
   /// usage. `versioned` adds an optimistic-concurrency token (R11.4); the repository
   /// block tunes the mutating set and adds intention-revealing finders (R11.3).
-  aggregate Subscription root Subscription versioned {
+  aggregate Subscriptions root Subscription versioned {
 
     repository {
       operations: getById, add, update

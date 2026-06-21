@@ -16,7 +16,7 @@
     "ddd"
   ],
   "contexts": ["Menu", "Ordering", "Kitchen", "Delivery", "Payment", "Promotions"],
-  "coreAggregate": "Order",
+  "coreAggregate": "Sales",
   "entryFile": "ordering.koi",
   "teaches": [
     "modelling a non-trivial domain across six bounded contexts",

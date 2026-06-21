@@ -64,8 +64,9 @@ public static class ModelCoverage
     /// <see cref="AstExtensions.AllTypeDecls(ContextNode)"/> so each type keeps its owning
     /// context), classifies each by its <see cref="TypeDecl"/> subtype, and marks it
     /// <see cref="CoverageState.Covered"/> when any emitted file's contents contain its name
-    /// (ordinal) — otherwise <see cref="CoverageState.Missing"/>. Items are returned in a
-    /// deterministic order: by context, then kind, then name (all ordinal).
+    /// (ordinal) — otherwise <see cref="CoverageState.Missing"/>. An aggregate boundary is not
+    /// emitted as a type, so it is matched on its ROOT entity's name instead of its own. Items are
+    /// returned in a deterministic order: by context, then kind, then name (all ordinal).
     /// </summary>
     public static CoverageReport Compute(KoineModel model, IReadOnlyList<EmittedFile> emitted, string target)
     {
@@ -80,7 +81,12 @@ public static class ModelCoverage
                     continue;
                 }
 
-                CoverageState state = emitted.Any(f => f.Contents.Contains(decl.Name, StringComparison.Ordinal))
+                // An aggregate boundary is not itself emitted as a type (it has no sub-namespace);
+                // it is realized when its ROOT entity is emitted. Match it on the root name so the
+                // recommended distinct-boundary shape (`aggregate Sales root Order`) is not spuriously
+                // reported as missing. All other kinds match on their own emitted name.
+                string emittedName = decl is AggregateDecl agg ? agg.RootName : decl.Name;
+                CoverageState state = emitted.Any(f => f.Contents.Contains(emittedName, StringComparison.Ordinal))
                     ? CoverageState.Covered
                     : CoverageState.Missing;
 

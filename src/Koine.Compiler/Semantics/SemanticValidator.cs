@@ -268,8 +268,10 @@ public sealed class SemanticValidator
     /// <summary>
     /// Reports duplicate emittable type names across the whole model (a duplicate
     /// silently shadows the first). Aggregate declarations are excluded: an
-    /// aggregate is a namespace/boundary, not an emitted type, and idiomatically
-    /// shares its name with its root entity (<c>aggregate Order root Order</c>).
+    /// aggregate is a namespace/boundary, not an emitted type, so it never collides
+    /// with a same-named root entity here. (Sharing that name is still a code smell —
+    /// the <see cref="DiagnosticCodes.AggregateNameMatchesRoot"/> warning, raised per
+    /// aggregate in <see cref="ValidateType"/>, flags it without making it an error.)
     /// </summary>
     internal static void ValidateUniqueTypeNames(KoineModel model, List<Diagnostic> diagnostics)
     {
@@ -356,6 +358,16 @@ public sealed class SemanticValidator
                 {
                     diagnostics.Add(Diagnostic.Error(DiagnosticCodes.UnknownAggregateRoot,
                         $"aggregate root '{agg.RootName}' must be an entity", agg.Span));
+                }
+                else if (string.Equals(agg.Name, agg.RootName, StringComparison.Ordinal))
+                {
+                    // The aggregate boundary and its root entity carry the same name: legal, but a
+                    // code smell. The boundary is a different concept from its root — a cluster the
+                    // root presides over — and reads as more than its root when named for the
+                    // activity it groups (e.g. `aggregate Sales root Order`). Warning, not error.
+                    diagnostics.Add(Diagnostic.Warning(DiagnosticCodes.AggregateNameMatchesRoot,
+                        $"aggregate '{agg.Name}' shares its name with its root entity; give the boundary a distinct name (e.g. the activity it groups) so it reads as more than its root",
+                        agg.Span));
                 }
 
                 foreach (TypeDecl nested in agg.Types)

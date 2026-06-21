@@ -34,7 +34,7 @@ context SLA version 1 {
 
   /// The SLA-tracking aggregate: one record per ticket under watch. Being an
   /// aggregate root it gains an `ISlaTrackerRepository` and joins the context UoW.
-  aggregate SlaTracker root SlaTracker {
+  aggregate SlaMonitoring root SlaTracker {
 
     repository {
       operations: getById, add, update
