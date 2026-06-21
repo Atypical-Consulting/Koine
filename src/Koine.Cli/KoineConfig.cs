@@ -12,7 +12,8 @@ internal sealed record TargetOptions(
     string? OutDir,
     IReadOnlyDictionary<string, string> NamespaceMap,
     string? InstantMode,
-    string? Layout)
+    string? Layout,
+    IReadOnlyList<string>? Layers = null)
 {
     public static readonly TargetOptions Empty =
         new(null, new Dictionary<string, string>(StringComparer.Ordinal), null, null);
@@ -190,6 +191,13 @@ internal sealed record KoineConfig(
             case "layout" when parts.Length == 3:
                 builder.Layout = value;
                 break;
+            case "layers" when parts.Length == 3:
+                // The opt-in C# layer selector (issue #128): a comma-separated list (e.g.
+                // `domain,infrastructure`). Validation/normalization happens at resolution time.
+                builder.Layers = value
+                    .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                    .ToList();
+                break;
             case "namespaces" when parts.Length == 4 && parts[3].Length > 0:
                 builder.NamespaceMap[parts[3]] = value;
                 break;
@@ -237,8 +245,9 @@ internal sealed record KoineConfig(
         public string? OutDir;
         public string? InstantMode;
         public string? Layout;
+        public List<string>? Layers;
         public readonly Dictionary<string, string> NamespaceMap = new(StringComparer.Ordinal);
 
-        public TargetOptions Build() => new(OutDir, NamespaceMap, InstantMode, Layout);
+        public TargetOptions Build() => new(OutDir, NamespaceMap, InstantMode, Layout, Layers);
     }
 }

@@ -45,12 +45,16 @@ public sealed partial class CSharpEmitter : IEmitter
                 _options.NamespaceMap
                     .OrderBy(kv => kv.Key, StringComparer.Ordinal)
                     .Select(kv => kv.Key + "=" + kv.Value));
+            var layers = _options.Layers is null
+                ? "domain"
+                : string.Join(",", _options.Layers.Select(l => l.ToString()).OrderBy(l => l, StringComparer.Ordinal));
             return string.Join(
                 "|",
                 GetType().FullName,
                 "instant=" + _options.InstantMode,
                 "sourceMaps=" + _options.EmitSourceMaps,
                 "refOnly=" + _options.ReferenceOnly,
+                "layers=" + layers,
                 "ns=" + map);
         }
     }
