@@ -476,6 +476,12 @@ export function init(): void {
   function applyFileTreeVisibility(visible: boolean): void {
     treeEl.hidden = !visible;
     treeBtn.setAttribute('aria-pressed', String(visible));
+    // Collapse the tree's grid tracks to 0 when hidden. The width track is driven by
+    // --koi-filetree-w, which the rail resizer pins to a fixed px (and restores from
+    // localStorage on init) — so the track won't auto-collapse just because the pane is
+    // display:none. The class overrides the template; --koi-filetree-w is left intact so the
+    // user's width returns when the tree is shown again.
+    splitEl.classList.toggle('is-filetree-hidden', !visible);
     splitEl.style.setProperty('--koi-filetree-rail', visible ? '6px' : '0px');
   }
   function showFileTreeChrome(): void {
