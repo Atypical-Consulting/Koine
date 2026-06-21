@@ -1110,6 +1110,25 @@ export function init(): void {
     return modelIndex;
   }
 
+  // Cross-highlight (#142, Task 4): mark the outline leaf — and the diagram node, best-effort — that
+  // matches the current selection, so selecting in one surface lights up the other. The outline keys
+  // on the canonical glossary qualified name; the SVG nodes key on `context.simpleName`, so map the
+  // selected element back through its glossary entry.
+  function applySelectionHighlight(): void {
+    const sel = selection.get();
+    for (const leaf of Array.from(modelView.querySelectorAll<HTMLElement>('.koi-model-leaf'))) {
+      leaf.classList.toggle('is-selected', !!sel && leaf.dataset.qname === sel.qualifiedName);
+    }
+    let ctxName: string | null = null;
+    if (sel && modelIndex) {
+      const hit = modelIndex.byQn.get(sel.qualifiedName);
+      if (hit) ctxName = `${hit.entry.context}.${hit.entry.name}`;
+    }
+    for (const node of Array.from(diagramsView.querySelectorAll<HTMLElement>('.koi-svg-node'))) {
+      node.classList.toggle('is-selected', ctxName != null && node.dataset.qname === ctxName);
+    }
+  }
+
   // Project the current selection through the index into an inspector element and (re)render it into
   // the model workspace's inspector host. No host (Model tab not opened yet) or no index → no-op.
   function renderSelectedInspector(): void {
@@ -1141,15 +1160,19 @@ export function init(): void {
       workspace.appendChild(inspectorHost);
       modelView.appendChild(workspace);
       renderSelectedInspector();
+      applySelectionHighlight();
       docViewsLoaded.model = true;
     } catch (e) {
       docMessage(modelView, 'Model request failed: ' + String(e), 'error');
     }
   }
 
-  // The inspector tracks the selection bus for the app's lifetime (a diagram click can select an
-  // element while the Model tab is closed; opening it then shows the right inspector immediately).
-  selection.subscribe(() => renderSelectedInspector());
+  // The inspector + cross-highlight track the selection bus for the app's lifetime (a diagram click
+  // can select an element while the Model tab is closed; opening it then shows the right inspector).
+  selection.subscribe(() => {
+    renderSelectedInspector();
+    applySelectionHighlight();
+  });
 
   async function loadContextMap(): Promise<void> {
     docMessage(contextMapView, 'Loading context map…');
