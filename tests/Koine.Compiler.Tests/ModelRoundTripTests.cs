@@ -137,6 +137,116 @@ public class ModelRoundTripTests
         return Verify(json).UseDirectory("Snapshots");
     }
 
+    // ---- Task 2: EmitKoine (structured edit → validated canonical .koi) ----
+
+    private static SourceFile[] Files(string src) => new[] { new SourceFile("t.koi", src) };
+
+    [Fact]
+    public void EmitKoine_is_idempotent_for_a_no_op_edit()
+    {
+        // Renaming a member to its own name is a no-op: the re-emitted declaration is the source one.
+        var edit = new StructuredEdit(StructuredEditKind.RenameMember, "Ordering.Money.amount", Name: "amount");
+        EmitResult result = ModelRoundTripService.EmitKoine(Files(Sample), edit);
+
+        result.Diagnostics.ShouldBeEmpty();
+        result.Koine!.ShouldBe("value Money { amount: Decimal }");
+    }
+
+    [Fact]
+    public void EmitKoine_add_field_emits_the_new_field()
+    {
+        var edit = new StructuredEdit(StructuredEditKind.AddField, "Ordering.Money", Name: "tax", Type: "Decimal");
+        EmitResult result = ModelRoundTripService.EmitKoine(Files(Sample), edit);
+
+        result.Diagnostics.ShouldBeEmpty();
+        result.Koine!.ShouldContain("tax: Decimal");
+        result.Koine!.ShouldContain("amount: Decimal");   // existing field preserved
+    }
+
+    [Fact]
+    public void EmitKoine_rename_emits_the_new_name()
+    {
+        var edit = new StructuredEdit(StructuredEditKind.RenameMember, "Ordering.Money.amount", Name: "value");
+        EmitResult result = ModelRoundTripService.EmitKoine(Files(Sample), edit);
+
+        result.Diagnostics.ShouldBeEmpty();
+        result.Koine!.ShouldContain("value: Decimal");
+    }
+
+    [Fact]
+    public void EmitKoine_illegal_type_change_returns_diagnostics_not_koine()
+    {
+        var edit = new StructuredEdit(StructuredEditKind.ChangeFieldType, "Ordering.Money.amount", Type: "Nope");
+        EmitResult result = ModelRoundTripService.EmitKoine(Files(Sample), edit);
+
+        result.Koine.ShouldBeNull();
+        result.Diagnostics.ShouldContain(d => d.Code == Koine.Compiler.Diagnostics.DiagnosticCodes.UnknownType);
+    }
+
+    [Fact]
+    public void EmitKoine_unresolved_target_is_a_no_op()
+    {
+        var edit = new StructuredEdit(StructuredEditKind.RenameMember, "Nope.Missing.field", Name: "x");
+        EmitResult result = ModelRoundTripService.EmitKoine(Files(Sample), edit);
+
+        result.Koine.ShouldBeNull();
+        result.Diagnostics.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public void EmitKoine_add_transition_emits_the_rule()
+    {
+        var edit = new StructuredEdit(
+            StructuredEditKind.AddTransition, "Ordering.Order.Order.states.status", Name: "Shipped", Type: "Placed");
+        EmitResult result = ModelRoundTripService.EmitKoine(Files(Sample), edit);
+
+        result.Diagnostics.ShouldBeEmpty();
+        result.Koine!.ShouldContain("Shipped -> Placed");
+    }
+
+    // ---- Task 3: ApplyEdit (scoped TextEditModel patch) -------------------
+
+    private static string Splice(string source, SourceSpan range, string replacement) =>
+        source[..range.Offset] + replacement + source[(range.Offset + range.Length)..];
+
+    [Fact]
+    public void ApplyEdit_returns_a_single_scoped_patch_over_just_the_declaration()
+    {
+        var edit = new StructuredEdit(StructuredEditKind.AddField, "Ordering.Money", Name: "tax", Type: "Decimal");
+        ModelEditResult result = ModelRoundTripService.ApplyEdit(Files(Sample), edit);
+
+        result.Uri.ShouldBe("t.koi");
+        result.Edits.Count.ShouldBe(1);
+
+        var patched = Splice(Sample, result.Edits[0].Range, result.Edits[0].NewText);
+        patched.ShouldContain("tax: Decimal");
+        // Everything outside the edited declaration is byte-stable.
+        patched.ShouldContain("enum OrderStatus { Draft, Placed, Shipped }");
+        patched.ShouldContain("integration event OrderPlaced");
+        // The patched buffer still compiles cleanly.
+        new KoineCompiler().Diagnose(patched).ShouldBeEmpty();
+    }
+
+    [Fact]
+    public void ApplyEdit_of_a_no_op_leaves_the_file_byte_stable()
+    {
+        var edit = new StructuredEdit(StructuredEditKind.RenameMember, "Ordering.Money.amount", Name: "amount");
+        ModelEditResult result = ModelRoundTripService.ApplyEdit(Files(Sample), edit);
+
+        result.Edits.Count.ShouldBe(1);
+        Splice(Sample, result.Edits[0].Range, result.Edits[0].NewText).ShouldBe(Sample);
+    }
+
+    [Fact]
+    public void ApplyEdit_illegal_edit_returns_no_patch_with_diagnostics()
+    {
+        var edit = new StructuredEdit(StructuredEditKind.ChangeFieldType, "Ordering.Money.amount", Type: "Nope");
+        ModelEditResult result = ModelRoundTripService.ApplyEdit(Files(Sample), edit);
+
+        result.Edits.ShouldBeEmpty();
+        result.Diagnostics.ShouldNotBeEmpty();
+    }
+
     private static IEnumerable<ModelNode> Flatten(ModelNode node)
     {
         yield return node;
