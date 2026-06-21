@@ -217,6 +217,14 @@ describe('mergeGraphsForView', () => {
     // Both 'OPEN' lack a dotted qualified name, so they don't collapse — they're namespaced per graph.
     expect(mergeGraphsForView([g1, g2]).nodes).toHaveLength(2);
   });
+
+  test('preserves the compiler-derived edge cardinality through the merge', () => {
+    const g: DiagramGraph = {
+      nodes: [node('A', 'A', 'aggregate-root', 'Sales.A'), node('B', 'B', 'value', 'Sales.B')],
+      edges: [{ from: 'A', to: 'B', label: null, cardinality: '*' }],
+    };
+    expect(mergeGraphsForView([g]).edges[0].cardinality).toBe('*');
+  });
 });
 
 describe('mergeDiagramGraphs extractor pipeline', () => {

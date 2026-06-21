@@ -197,7 +197,7 @@ public sealed partial class DocsEmitter
                 $"{ctx.Name}.{nested.Name}", PreferName(nested, agg),
                 Stereotype: NestedStereotype(nested),
                 Members: ClassMembers(nested)));
-            edges.Add(new DiagramEdge(root.Name, nested.Name, null));
+            edges.Add(new DiagramEdge(root.Name, nested.Name, null, CompositionCardinality(root, nested.Name)));
         }
 
         var mermaid = new StringBuilder();
@@ -208,6 +208,36 @@ public sealed partial class DocsEmitter
             Mermaid: ExtractMermaidBlock(mermaid.ToString()),
             Graph: new DiagramGraph(nodes, edges));
     }
+
+    /// <summary>
+    /// The target-end multiplicity of the composition from <paramref name="root"/> to the nested type
+    /// named <paramref name="nestedName"/>, derived from the Koine field that references it: a collection
+    /// field (<c>List&lt;X&gt;</c>, <c>Set&lt;X&gt;</c>, <c>Map&lt;K,X&gt;</c>) → <c>"*"</c>, an optional
+    /// field (<c>X?</c>) → <c>"0..1"</c>, a plain field → <c>"1"</c>; <c>null</c> when no field references it.
+    /// </summary>
+    private static string? CompositionCardinality(EntityDecl root, string nestedName)
+    {
+        foreach (Member m in root.Members)
+        {
+            if (string.Equals(m.Type.Name, nestedName, StringComparison.Ordinal))
+            {
+                return m.Type.IsOptional ? "0..1" : "1";
+            }
+
+            if (ReferencesAsTypeArgument(m.Type, nestedName))
+            {
+                return "*";
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>True when <paramref name="name"/> appears as a type argument (element/value) anywhere in
+    /// the generic tree of <paramref name="t"/> — i.e. the field is a collection/map OF that type.</summary>
+    private static bool ReferencesAsTypeArgument(TypeRef t, string name) =>
+        (t.Element is { } e && (string.Equals(e.Name, name, StringComparison.Ordinal) || ReferencesAsTypeArgument(e, name)))
+        || (t.Value is { } v && (string.Equals(v.Name, name, StringComparison.Ordinal) || ReferencesAsTypeArgument(v, name)));
 
     /// <summary>The node kind a nested type draws as, or <c>null</c> when it is not in the structure diagram.</summary>
     private static string? NestedKind(TypeDecl nested) => nested switch

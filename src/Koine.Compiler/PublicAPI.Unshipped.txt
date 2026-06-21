@@ -45,7 +45,9 @@ Koine.Compiler.Emit.Docs.DiagramDescriptor.Kind.init -> void
 Koine.Compiler.Emit.Docs.DiagramDescriptor.Mermaid.get -> string!
 Koine.Compiler.Emit.Docs.DiagramDescriptor.Mermaid.init -> void
 Koine.Compiler.Emit.Docs.DiagramEdge
-Koine.Compiler.Emit.Docs.DiagramEdge.DiagramEdge(string! From, string! To, string? Label) -> void
+Koine.Compiler.Emit.Docs.DiagramEdge.DiagramEdge(string! From, string! To, string? Label, string? Cardinality = null) -> void
+Koine.Compiler.Emit.Docs.DiagramEdge.Cardinality.get -> string?
+Koine.Compiler.Emit.Docs.DiagramEdge.Cardinality.init -> void
 Koine.Compiler.Emit.Docs.DiagramEdge.From.get -> string!
 Koine.Compiler.Emit.Docs.DiagramEdge.From.init -> void
 Koine.Compiler.Emit.Docs.DiagramEdge.Label.get -> string?

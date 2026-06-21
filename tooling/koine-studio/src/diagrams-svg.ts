@@ -367,32 +367,6 @@ function contextOf(qualifiedName: string): string {
   return dot < 0 ? '' : qualifiedName.slice(0, dot);
 }
 
-function escapeRegExp(s: string): string {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
-
-/**
- * The multiplicity a composition edge should carry, derived from the source node's member that
- * references the target type: a collection (`List<X>`, `X[]`, `Set<X>`, …) → '1..*', an optional `X?` →
- * '0..1', a plain `X` → '1'. Returns null when no member references the target (the edge stays unlabelled).
- */
-function compositionCardinality(source: DiagramNode | undefined, target: DiagramNode | undefined): string | null {
-  if (!source || !target) return null;
-  const ref = new RegExp(`\\b${escapeRegExp(target.label)}\\b`);
-  for (const m of source.members ?? []) {
-    if (m.kind !== 'field') continue;
-    const colon = m.text.indexOf(':');
-    const type = (colon >= 0 ? m.text.slice(colon + 1) : m.text).trim();
-    if (!ref.test(type)) continue;
-    if (/(^|\W)(List|Set|Collection|IReadOnlyList|IReadOnlyCollection|IEnumerable|Array)\s*</.test(type) || /\[\s*\]/.test(type)) {
-      return '1..*';
-    }
-    if (/\?\s*$/.test(type)) return '0..1';
-    return '1';
-  }
-  return null;
-}
-
 /**
  * Lay out one structured graph with ELK and draw it into a fresh `<svg>`. Throws on layout failure so the
  * caller can surface an error. Nodes are grouped by bounded context: each context becomes a big
@@ -403,10 +377,10 @@ function compositionCardinality(source: DiagramNode | undefined, target: Diagram
 async function drawGraph(graph: DiagramGraph, Elk: ElkConstructor): Promise<SVGSVGElement> {
   const byId = new Map<string, DiagramNode>(graph.nodes.map((n) => [n.id, n]));
 
-  // Edge labels: keep an explicit label (a state-machine guard, a relation kind); otherwise derive the
-  // composition cardinality from the source's member that references the target.
+  // Edge labels: keep an explicit label (a state-machine guard, a relation kind); otherwise show the
+  // composition cardinality the COMPILER derived from the Koine field type (DiagramEdge.cardinality).
   const layoutEdges: ElkExtendedEdge[] = graph.edges.map((e, i) => {
-    const text = e.label ?? compositionCardinality(byId.get(e.from), byId.get(e.to));
+    const text = e.label ?? e.cardinality ?? null;
     return {
       id: `e${i}`,
       sources: [e.from],
