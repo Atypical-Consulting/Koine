@@ -46,6 +46,10 @@ internal class BuildSettings : CommandSettings
     [Description("Emit a reference-assembly-style contract surface: all type/member signatures, interfaces and contracts, with implementation bodies stripped to stubs.")]
     public bool ReferenceOnly { get; init; }
 
+    [CommandOption("--layers <LAYERS>")]
+    [Description("Comma-separated C# layers to emit (issue #128): domain (default), infrastructure. infrastructure implies domain.")]
+    public string? Layers { get; init; }
+
     /// <summary>
     /// Resolves the flags against a <c>koine.config</c> (explicit <c>--config</c>, or one
     /// discovered beside the input): an explicit flag wins, then <c>targets.&lt;t&gt;.out</c>,
@@ -76,9 +80,69 @@ internal class BuildSettings : CommandSettings
         var resolvedTarget = Target ?? config.Target ?? "csharp";
         var targetOptions = config.OptionsFor(resolvedTarget);
         var resolvedOut = Out ?? targetOptions.OutDir ?? config.OutDir;
+
+        // The C# layer selector (issue #128): an explicit --layers wins over targets.<t>.layers
+        // (same precedence as --target/--out). Unknown names are a hard error; infrastructure
+        // always implies domain. Absent ⇒ null ⇒ Domain-only (byte-identical to today).
+        if (!TryResolveLayers(Layers, targetOptions.Layers, out var resolvedLayers, out error))
+        {
+            return false;
+        }
+
+        targetOptions = targetOptions with { Layers = resolvedLayers };
         plan = new BuildPlan(
             Path, resolvedTarget, resolvedOut, Glossary, Docs, targetOptions,
             config.DiagnosticSeverity, WarningsAsErrors, config.Analyzers, config.Emitters, SourceMaps, ReferenceOnly);
+        return true;
+    }
+
+    /// <summary>The C# layers a user may request (issue #128).</summary>
+    private static readonly IReadOnlySet<string> ValidLayers =
+        new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "domain", "infrastructure" };
+
+    /// <summary>
+    /// Resolves the layer selector: the explicit <c>--layers</c> flag wins over the config's
+    /// <c>targets.&lt;t&gt;.layers</c>. Each name must be a <see cref="ValidLayers"/> member
+    /// (case-insensitive) or it is a hard error; <c>infrastructure</c> always implies <c>domain</c>.
+    /// The result is normalized to the canonical lower-case names in stable order
+    /// (<c>domain</c> first), or <c>null</c> when no layers were requested anywhere (⇒ Domain-only).
+    /// </summary>
+    private static bool TryResolveLayers(string? flag, IReadOnlyList<string>? fromConfig, out IReadOnlyList<string>? resolved, out string? error)
+    {
+        resolved = null;
+        error = null;
+
+        IEnumerable<string>? requested = flag is not null
+            ? flag.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            : fromConfig;
+        if (requested is null)
+        {
+            return true; // nothing requested anywhere ⇒ Domain-only default
+        }
+
+        var wantsInfrastructure = false;
+        foreach (var name in requested)
+        {
+            if (!ValidLayers.Contains(name))
+            {
+                error = $"unknown layer '{name}' (valid layers: domain, infrastructure)";
+                return false;
+            }
+
+            if (string.Equals(name, "infrastructure", StringComparison.OrdinalIgnoreCase))
+            {
+                wantsInfrastructure = true;
+            }
+        }
+
+        // domain is always present (infrastructure implies it); list it first for stable output.
+        var layers = new List<string> { "domain" };
+        if (wantsInfrastructure)
+        {
+            layers.Add("infrastructure");
+        }
+
+        resolved = layers;
         return true;
     }
 }

@@ -236,6 +236,131 @@ public static partial class CompilerInterop
     }
 
     /// <summary>
+    /// Projects the structured model graph (#91) of the merged workspace to the stable
+    /// <c>ModelNode</c> tree — the whole tree, or the subtree at <paramref name="qualifiedName"/> when
+    /// supplied. A null/broken model yields the empty <c>model</c> root. Mirrors <c>koine/model</c>.
+    /// </summary>
+    [JSExport]
+    public static string Model(string filesJson, string? qualifiedName)
+    {
+        try
+        {
+            var sources = DeserializeFiles(filesJson).Select(f => new SourceFile(f.Uri, f.Text)).ToList();
+            var (model, diags) = Compiler.Parse(sources);
+            if (model is null || diags.Any(d => d.Severity == DiagnosticSeverity.Error))
+            {
+                return JsonSerializer.Serialize(EmptyModelNode, LangJson.Default.WModelNode);
+            }
+
+            WModelNode node = MapModelNode(ModelRoundTripService.ModelToJson(model, qualifiedName));
+            return JsonSerializer.Serialize(node, LangJson.Default.WModelNode);
+        }
+        catch
+        {
+            return JsonSerializer.Serialize(EmptyModelNode, LangJson.Default.WModelNode);
+        }
+    }
+
+    /// <summary>
+    /// Enumerates the editable children of the node at <paramref name="qualifiedName"/> (#91): a
+    /// value/entity's fields, an enum's members, a state machine's transitions, the context map's
+    /// relations. A null/broken model or unresolved name yields <c>{ members: [] }</c>.
+    /// </summary>
+    [JSExport]
+    public static string ModelMembers(string filesJson, string qualifiedName)
+    {
+        try
+        {
+            var sources = DeserializeFiles(filesJson).Select(f => new SourceFile(f.Uri, f.Text)).ToList();
+            var (model, diags) = Compiler.Parse(sources);
+            WModelMember[] members = model is null || diags.Any(d => d.Severity == DiagnosticSeverity.Error)
+                ? []
+                : ModelRoundTripService.MembersOf(model, qualifiedName).Select(MapModelMember).ToArray();
+            return JsonSerializer.Serialize(new WModelMembersResult(members), LangJson.Default.WModelMembersResult);
+        }
+        catch
+        {
+            return JsonSerializer.Serialize(new WModelMembersResult([]), LangJson.Default.WModelMembersResult);
+        }
+    }
+
+    /// <summary>
+    /// Applies the structured edit <paramref name="editJson"/> and returns the validated canonical
+    /// <c>.koi</c> for the affected declaration (#91), or the rejecting diagnostics. A malformed
+    /// edit yields <c>{ koine: null, diagnostics: [] }</c>. Mirrors <c>koine/emitKoine</c>.
+    /// </summary>
+    [JSExport]
+    public static string EmitKoine(string filesJson, string editJson)
+    {
+        try
+        {
+            var sources = DeserializeFiles(filesJson).Select(f => new SourceFile(f.Uri, f.Text)).ToList();
+            if (DeserializeEdit(editJson) is not { } edit)
+            {
+                return JsonSerializer.Serialize(new WEmitKoineResult(null, []), LangJson.Default.WEmitKoineResult);
+            }
+
+            EmitResult result = ModelRoundTripService.EmitKoine(sources, edit);
+            var dto = new WEmitKoineResult(result.Koine, result.Diagnostics.Select(MapRoundTripDiagnostic).ToArray());
+            return JsonSerializer.Serialize(dto, LangJson.Default.WEmitKoineResult);
+        }
+        catch
+        {
+            return JsonSerializer.Serialize(new WEmitKoineResult(null, []), LangJson.Default.WEmitKoineResult);
+        }
+    }
+
+    /// <summary>
+    /// Applies the structured edit <paramref name="editJson"/> and returns a span-minimal patch (#91):
+    /// <c>{ uri, edits, diagnostics }</c>. A malformed edit yields the empty patch. Mirrors
+    /// <c>koine/applyModelEdit</c>.
+    /// </summary>
+    [JSExport]
+    public static string ApplyModelEdit(string filesJson, string editJson)
+    {
+        try
+        {
+            var sources = DeserializeFiles(filesJson).Select(f => new SourceFile(f.Uri, f.Text)).ToList();
+            if (DeserializeEdit(editJson) is not { } edit)
+            {
+                return JsonSerializer.Serialize(new WApplyModelEditResult(null, [], []), LangJson.Default.WApplyModelEditResult);
+            }
+
+            ModelEditResult result = ModelRoundTripService.ApplyEdit(sources, edit);
+            var edits = result.Edits.Select(e => new WTextEdit(SpanRange(e.Range), e.NewText)).ToArray();
+            var dto = new WApplyModelEditResult(result.Uri, edits, result.Diagnostics.Select(MapRoundTripDiagnostic).ToArray());
+            return JsonSerializer.Serialize(dto, LangJson.Default.WApplyModelEditResult);
+        }
+        catch
+        {
+            return JsonSerializer.Serialize(new WApplyModelEditResult(null, [], []), LangJson.Default.WApplyModelEditResult);
+        }
+    }
+
+    private static readonly WModelNode EmptyModelNode = new("model", "", "", [], []);
+
+    private static WModelNode MapModelNode(ModelNode n) => new(
+        n.Kind, n.QualifiedName, n.Title,
+        n.Members.Select(MapModelMember).ToArray(),
+        n.Children.Select(MapModelNode).ToArray());
+
+    private static WModelMember MapModelMember(ModelMember m) => new(m.Kind, m.Name, m.Type, m.Value);
+
+    private static WRoundTripDiagnostic MapRoundTripDiagnostic(Diagnostic d) =>
+        new(d.Code, d.Message, SpanRange(d.Span), d.File);
+
+    private static StructuredEdit? DeserializeEdit(string editJson)
+    {
+        WStructuredEdit? dto = JsonSerializer.Deserialize(editJson, LangJson.Default.WStructuredEdit);
+        if (dto is null || string.IsNullOrEmpty(dto.Kind) || string.IsNullOrEmpty(dto.Target))
+        {
+            return null;
+        }
+
+        return new StructuredEdit(dto.Kind, dto.Target, dto.Name, dto.Type, dto.Value);
+    }
+
+    /// <summary>
     /// Hover at a 0-based position in <paramref name="activeUri"/>, resolved against the whole
     /// workspace. Returns an LSP <c>Hover</c> (<c>{ contents: { kind, value } }</c>) or the JSON
     /// literal <c>null</c> when there is nothing to show.
@@ -934,6 +1059,28 @@ public sealed record WGlossaryEntry(
 /// <summary>Structured ubiquitous-language glossary: entries in declaration order.</summary>
 public sealed record WGlossaryModel(WGlossaryEntry[] Entries);
 
+/// <summary>One editable leaf of a model node (#91; mirrors lsp.ts <c>ModelMember</c>).</summary>
+public sealed record WModelMember(string Kind, string Name, string? Type, string? Value);
+
+/// <summary>One node of the structured model graph (#91; recursive; mirrors lsp.ts <c>ModelNode</c>).</summary>
+public sealed record WModelNode(
+    string Kind, string QualifiedName, string Title, WModelMember[] Members, WModelNode[] Children);
+
+/// <summary>The editable children of a model node (#91).</summary>
+public sealed record WModelMembersResult(WModelMember[] Members);
+
+/// <summary>A structured edit against the model (#91; mirrors lsp.ts <c>StructuredEdit</c>).</summary>
+public sealed record WStructuredEdit(string Kind, string Target, string? Name, string? Type, string? Value);
+
+/// <summary>A round-trip diagnostic (#91): the rejecting <c>KOIxxxx</c> with its range and owning file.</summary>
+public sealed record WRoundTripDiagnostic(string Code, string Message, WRange Range, string? Uri);
+
+/// <summary>Result of an emit-koine request (#91): the canonical <c>.koi</c> or rejecting diagnostics.</summary>
+public sealed record WEmitKoineResult(string? Koine, WRoundTripDiagnostic[] Diagnostics);
+
+/// <summary>Result of an apply-model-edit request (#91): the owning file, the patch, any diagnostics.</summary>
+public sealed record WApplyModelEditResult(string? Uri, WTextEdit[] Edits, WRoundTripDiagnostic[] Diagnostics);
+
 /// <summary>Result of a set-doc request: the file the edits apply to, plus the doc-comment edits.</summary>
 public sealed record WSetDocResult(string? Uri, WTextEdit[] Edits);
 
@@ -1068,6 +1215,11 @@ public sealed record WSourceFileDto(string Uri, string Text);
 [JsonSerializable(typeof(WEmitPreviewResult))]
 [JsonSerializable(typeof(WGlossaryResult))]
 [JsonSerializable(typeof(WGlossaryModel))]
+[JsonSerializable(typeof(WModelNode))]
+[JsonSerializable(typeof(WModelMembersResult))]
+[JsonSerializable(typeof(WStructuredEdit))]
+[JsonSerializable(typeof(WEmitKoineResult))]
+[JsonSerializable(typeof(WApplyModelEditResult))]
 [JsonSerializable(typeof(WContextMapResult))]
 [JsonSerializable(typeof(WSetDocResult))]
 [JsonSerializable(typeof(WHoverResult))]

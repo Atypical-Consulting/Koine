@@ -45,7 +45,8 @@ internal sealed class CSharpEmitterProvider : IEmitterProvider
     /// </summary>
     private static CSharpEmitterOptions ToCSharpOptions(EmitterOptions options)
     {
-        if (options.NamespaceMap.Count == 0 && options.InstantMode is null && !options.EmitSourceMaps && !options.ReferenceOnly)
+        if (options.NamespaceMap.Count == 0 && options.InstantMode is null && !options.EmitSourceMaps
+            && !options.ReferenceOnly && options.Layers is null)
         {
             return CSharpEmitterOptions.Empty;
         }
@@ -53,7 +54,32 @@ internal sealed class CSharpEmitterProvider : IEmitterProvider
         var instant = string.Equals(options.InstantMode, "nodaTime", StringComparison.OrdinalIgnoreCase)
             ? CSharpInstantMode.NodaTime
             : CSharpInstantMode.DateTimeOffset;
-        return new CSharpEmitterOptions(options.NamespaceMap, instant, options.EmitSourceMaps, options.ReferenceOnly);
+        return new CSharpEmitterOptions(options.NamespaceMap, instant, options.EmitSourceMaps, options.ReferenceOnly, ParseLayers(options.Layers));
+    }
+
+    /// <summary>
+    /// Parses the comma-separated <c>layers</c> selector (issue #128) into a layer set. <c>null</c>
+    /// (the default) maps to <c>null</c> ⇒ Domain-only. <c>infrastructure</c> always implies
+    /// <c>domain</c> (you cannot emit the infrastructure without the contracts it realizes). Names are
+    /// case-insensitive; unknown names are dropped here (the CLI rejects them up front with an error).
+    /// </summary>
+    private static IReadOnlySet<CSharpLayer>? ParseLayers(string? layers)
+    {
+        if (layers is null)
+        {
+            return null;
+        }
+
+        var set = new HashSet<CSharpLayer> { CSharpLayer.Domain };
+        foreach (var name in layers.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            if (string.Equals(name, "infrastructure", StringComparison.OrdinalIgnoreCase))
+            {
+                set.Add(CSharpLayer.Infrastructure);
+            }
+        }
+
+        return set;
     }
 }
 

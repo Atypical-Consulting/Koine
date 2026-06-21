@@ -15,6 +15,25 @@ public static class TestSupport
     public static string BillingFixture =>
         File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "billing.koi"));
 
+    /// <summary>
+    /// Resolves a path relative to the repository root (the directory holding <c>Koine.slnx</c>),
+    /// found by walking up from the test assembly's location — never a hardcoded absolute path or a
+    /// CWD assumption, so it runs the same from any working directory or build layout.
+    /// </summary>
+    public static string RepoPath(string relative)
+    {
+        for (DirectoryInfo? dir = new(AppContext.BaseDirectory); dir is not null; dir = dir.Parent)
+        {
+            if (File.Exists(Path.Combine(dir.FullName, "Koine.slnx")))
+            {
+                return Path.Combine(dir.FullName, relative);
+            }
+        }
+
+        throw new DirectoryNotFoundException(
+            $"could not locate the repo root (a directory containing Koine.slnx) walking up from {AppContext.BaseDirectory}");
+    }
+
     /// <summary>Reads a generated smart-enum member (a public static readonly field) by name.</summary>
     public static object EnumValue(Type enumType, string name) =>
         enumType.GetField(name, BindingFlags.Public | BindingFlags.Static)!.GetValue(null)!;
