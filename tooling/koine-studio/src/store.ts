@@ -78,6 +78,7 @@ export const DEFAULT_SETTINGS: Settings = {
 const SETTINGS_KEY = 'koine.studio.settings';
 const RECENT_KEY = 'koine.studio.recentFolders';
 const SCRATCH_KEY = 'koine.studio.scratch';
+const WORKSPACE_MODE_KEY = 'koine.studio.workspaceMode';
 const RECENT_CAP = 25;
 
 // The assistant transcript is namespaced per workspace under its own key prefix (distinct from
@@ -387,6 +388,21 @@ export function clearLegacyScratch(): void {
   } catch {
     // storage unavailable — nothing to clear
   }
+}
+
+// --- workspace mode (#143) ---------------------------------------------------
+// The active top-level mode (Domain / Code / Docs) persists across reloads. It is stored as the bare
+// mode id under its own key; validation and the default live with the mode model (modes.ts), so this
+// layer just round-trips the raw string and stays free of any mode knowledge.
+
+/** The persisted workspace-mode id, or null when none is stored (or storage is unavailable). */
+export function loadWorkspaceMode(): string | null {
+  return readRaw(WORKSPACE_MODE_KEY);
+}
+
+/** Persist the active workspace-mode id (best-effort). */
+export function saveWorkspaceMode(id: string): void {
+  writeRaw(WORKSPACE_MODE_KEY, id);
 }
 
 // --- assistant conversation (per workspace) ----------------------------------
