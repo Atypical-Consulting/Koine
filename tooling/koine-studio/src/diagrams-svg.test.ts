@@ -89,7 +89,9 @@ describe('createSvgRenderer', () => {
     const svg = container.querySelector('svg');
     expect(svg).not.toBeNull();
 
-    const nodes = container.querySelectorAll('.koi-svg-node');
+    // Scope to the primary diagram SVG: the minimap (#145) clones the node layer as a decorative
+    // thumbnail, so an unscoped `.koi-svg-node` count would also pick up the inert clones.
+    const nodes = container.querySelectorAll('.koi-svg-diagram .koi-svg-node');
     expect(nodes.length).toBe(2);
 
     const qnames = [...nodes].map((n) => n.getAttribute('data-qname')).sort();
@@ -190,7 +192,8 @@ describe('createSvgRenderer', () => {
     const container = ROOT();
     await createSvgRenderer().render(container, files, 'light', () => true);
 
-    const edges = container.querySelectorAll('.koi-svg-edge');
+    // Scope to the primary diagram SVG (the minimap clones the edge layer too).
+    const edges = container.querySelectorAll('.koi-svg-diagram .koi-svg-edge');
     expect(edges.length).toBe(1);
   });
 
@@ -294,6 +297,208 @@ describe('createSvgRenderer', () => {
     await createSvgRenderer().render(container, files, 'light', () => false);
     expect(container.querySelector('#sentinel')).not.toBeNull();
     expect(container.querySelector('svg')).toBeNull();
+  });
+});
+
+describe('interactive canvas — zoom / pan / fit (issue #145)', () => {
+  /** A one-node diagram is enough to exercise the canvas chrome; layout coords are not asserted. */
+  function oneNodeFile(): DocsFile[] {
+    return [
+      file([
+        diagram({
+          nodes: [mkNode({ id: 'a', label: 'Order', kind: 'aggregate-root', qualifiedName: 'Ord.Order' })],
+          edges: [],
+        }),
+      ]),
+    ];
+  }
+
+  /** Parse the integer percent off the zoom readout (e.g. "120%" → 120). */
+  function pctOf(container: HTMLElement): number {
+    const text = container.querySelector('.koi-canvas-zoom-pct')!.textContent ?? '';
+    return parseInt(text, 10);
+  }
+
+  const viewBoxNumbers = (svg: SVGSVGElement) =>
+    (svg.getAttribute('viewBox') ?? '').split(/\s+/).map(Number);
+
+  test('wraps the drawn SVG in an interactive .koi-canvas with a − / % / + / fit control bar', async () => {
+    const container = ROOT();
+    await createSvgRenderer().render(container, oneNodeFile(), 'light', () => true);
+
+    const canvas = container.querySelector('.koi-canvas');
+    expect(canvas).not.toBeNull();
+    // The drawn SVG lives inside the canvas (not loose in the surface).
+    expect(canvas!.querySelector('svg.koi-svg-diagram')).not.toBeNull();
+
+    // The control bar exposes the four named controls.
+    expect(container.querySelector('.koi-canvas-btn[aria-label="Zoom in"]')).not.toBeNull();
+    expect(container.querySelector('.koi-canvas-btn[aria-label="Zoom out"]')).not.toBeNull();
+    expect(container.querySelector('.koi-canvas-btn[aria-label="Fit to screen"]')).not.toBeNull();
+    expect(container.querySelector('.koi-canvas-zoom-pct')).not.toBeNull();
+    expect(pctOf(container)).toBeGreaterThan(0);
+  });
+
+  test('applies a finite 4-value viewBox to the canvas SVG (driven by the fit transform)', async () => {
+    const container = ROOT();
+    await createSvgRenderer().render(container, oneNodeFile(), 'light', () => true);
+
+    const svg = container.querySelector<SVGSVGElement>('.koi-canvas svg')!;
+    const nums = viewBoxNumbers(svg);
+    expect(nums).toHaveLength(4);
+    expect(nums.every(Number.isFinite)).toBe(true);
+    // A fit window is non-degenerate.
+    expect(nums[2]).toBeGreaterThan(0);
+    expect(nums[3]).toBeGreaterThan(0);
+    // The svg fills its canvas so the viewBox (not the intrinsic size) governs what's shown.
+    expect(svg.getAttribute('width')).toBe('100%');
+    expect(svg.getAttribute('height')).toBe('100%');
+  });
+
+  test('zoom-in raises the percent and shrinks the viewBox; zoom-out lowers it; fit restores it', async () => {
+    const container = ROOT();
+    await createSvgRenderer().render(container, oneNodeFile(), 'light', () => true);
+
+    const svg = container.querySelector<SVGSVGElement>('.koi-canvas svg')!;
+    const zoomIn = container.querySelector<HTMLButtonElement>('.koi-canvas-btn[aria-label="Zoom in"]')!;
+    const zoomOut = container.querySelector<HTMLButtonElement>('.koi-canvas-btn[aria-label="Zoom out"]')!;
+    const fitBtn = container.querySelector<HTMLButtonElement>('.koi-canvas-btn[aria-label="Fit to screen"]')!;
+
+    const startPct = pctOf(container);
+    const startW = viewBoxNumbers(svg)[2];
+
+    zoomIn.click();
+    expect(pctOf(container)).toBeGreaterThan(startPct);
+    expect(viewBoxNumbers(svg)[2]).toBeLessThan(startW); // smaller window = magnified
+
+    fitBtn.click();
+    expect(pctOf(container)).toBe(startPct);
+    expect(viewBoxNumbers(svg)[2]).toBeCloseTo(startW, 6);
+
+    zoomOut.click();
+    expect(pctOf(container)).toBeLessThan(startPct);
+    expect(viewBoxNumbers(svg)[2]).toBeGreaterThan(startW);
+  });
+
+  test('renders a minimap thumbnail (reusing the graph content) with a window rectangle', async () => {
+    const files: DocsFile[] = [
+      file([
+        diagram({
+          nodes: [
+            mkNode({ id: 'a', label: 'Order', kind: 'aggregate-root', qualifiedName: 'Ord.Order' }),
+            mkNode({ id: 'b', label: 'Money', kind: 'value-object', qualifiedName: 'Ord.Money' }),
+          ],
+          edges: [{ from: 'a', to: 'b', label: 'total' }],
+        }),
+      ]),
+    ];
+
+    const container = ROOT();
+    await createSvgRenderer().render(container, files, 'light', () => true);
+
+    const minimap = container.querySelector('.koi-minimap');
+    expect(minimap).not.toBeNull();
+    // The thumbnail reuses the laid-out content — the nodes are cloned into it.
+    expect(minimap!.querySelectorAll('.koi-minimap-content .koi-svg-node').length).toBe(2);
+    // And it carries the viewport window rectangle.
+    expect(minimap!.querySelector('.koi-minimap-window')).not.toBeNull();
+  });
+
+  test('the minimap window rectangle is the clamped intersection of the canvas viewBox and content', async () => {
+    const container = ROOT();
+    await createSvgRenderer().render(container, oneNodeFile(), 'light', () => true);
+
+    const svg = container.querySelector<SVGSVGElement>('.koi-canvas > svg.koi-svg-diagram')!;
+    const mini = container.querySelector<SVGSVGElement>('.koi-minimap-svg')!;
+    const win = container.querySelector<SVGRectElement>('.koi-minimap-window')!;
+    // The minimap's own viewBox IS the content bounds — the window rect must stay clamped inside it.
+    const [cx, cy, cw, ch] = (mini.getAttribute('viewBox') ?? '').split(/\s+/).map(Number);
+
+    const expectClampedToView = () => {
+      const [vx, vy, vw, vh] = viewBoxNumbers(svg);
+      const ix1 = Math.max(vx, cx);
+      const iy1 = Math.max(vy, cy);
+      const ix2 = Math.min(vx + vw, cx + cw);
+      const iy2 = Math.min(vy + vh, cy + ch);
+      // The window rect = the visible (view ∩ content) region — tracks the view AND never overflows.
+      expect(Number(win.getAttribute('x'))).toBeCloseTo(ix1, 4);
+      expect(Number(win.getAttribute('y'))).toBeCloseTo(iy1, 4);
+      expect(Number(win.getAttribute('width'))).toBeCloseTo(Math.max(0, ix2 - ix1), 4);
+      expect(Number(win.getAttribute('height'))).toBeCloseTo(Math.max(0, iy2 - iy1), 4);
+      expect(Number(win.getAttribute('x'))).toBeGreaterThanOrEqual(cx - 1e-6);
+      expect(Number(win.getAttribute('width'))).toBeLessThanOrEqual(cw + 1e-6);
+    };
+
+    // Holds at the initial fit (window covers the whole content thumbnail) …
+    expectClampedToView();
+    // … and stays in sync (still clamped) after the canvas zooms.
+    container.querySelector<HTMLButtonElement>('.koi-canvas-btn[aria-label="Zoom in"]')!.click();
+    expectClampedToView();
+  });
+
+  test('a plain wheel leaves the list to scroll (no zoom); ctrl/⌘+wheel zooms', async () => {
+    const container = ROOT();
+    await createSvgRenderer().render(container, oneNodeFile(), 'light', () => true);
+    const canvas = container.querySelector<HTMLElement>('.koi-canvas')!;
+    const svg = container.querySelector<SVGSVGElement>('.koi-canvas > svg.koi-svg-diagram')!;
+
+    // A plain wheel must NOT zoom (and must not preventDefault) so the surrounding Diagrams list scrolls.
+    const widthBefore = viewBoxNumbers(svg)[2];
+    const plain = new WheelEvent('wheel', { deltaY: -120, bubbles: true, cancelable: true });
+    canvas.dispatchEvent(plain);
+    expect(plain.defaultPrevented).toBe(false);
+    expect(viewBoxNumbers(svg)[2]).toBe(widthBefore); // unchanged → no zoom
+
+    // ctrl+wheel (and trackpad pinch, which arrives the same way) zooms in — the viewBox window shrinks.
+    // happy-dom's WheelEvent ctor drops `ctrlKey`, so set it explicitly on the dispatched event.
+    const zoom = new WheelEvent('wheel', { deltaY: -120, bubbles: true, cancelable: true });
+    Object.defineProperty(zoom, 'ctrlKey', { value: true });
+    canvas.dispatchEvent(zoom);
+    expect(viewBoxNumbers(svg)[2]).toBeLessThan(widthBefore);
+  });
+
+  test('a pointerdown on the minimap does not throw and is not treated as a canvas pan', async () => {
+    const container = ROOT();
+    await createSvgRenderer().render(container, oneNodeFile(), 'light', () => true);
+
+    const canvas = container.querySelector<HTMLElement>('.koi-canvas')!;
+    const minimap = container.querySelector<HTMLElement>('.koi-minimap')!;
+
+    // Pressing on the minimap must not flip the canvas into its panning state.
+    minimap.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, clientX: 5, clientY: 5 }));
+    expect(canvas.classList.contains('koi-canvas--panning')).toBe(false);
+  });
+
+  test('the node stays inside the canvas and still navigates on click (pan never swallows it)', async () => {
+    const files: DocsFile[] = [
+      file([
+        diagram({
+          nodes: [
+            mkNode({
+              id: 'order',
+              label: 'Order',
+              kind: 'aggregate-root',
+              qualifiedName: 'Ordering.Order',
+              sourceSpan: { file: 'file:///ordering.koi', line: 3, column: 5, endLine: 7, endColumn: 10, offset: 20, length: 5 },
+            }),
+          ],
+          edges: [],
+        }),
+      ]),
+    ];
+
+    const container = ROOT();
+    await createSvgRenderer().render(container, files, 'light', () => true);
+
+    const node = container.querySelector<SVGGElement>('.koi-canvas .koi-svg-node[data-qname="Ordering.Order"]')!;
+    expect(node).not.toBeNull();
+
+    const events: DiagramNodeNavigateDetail[] = [];
+    container.addEventListener(NODE_NAVIGATE_EVENT, (e) => events.push((e as CustomEvent<DiagramNodeNavigateDetail>).detail));
+    node.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+
+    expect(events).toHaveLength(1);
+    expect(events[0].qualifiedName).toBe('Ordering.Order');
   });
 });
 

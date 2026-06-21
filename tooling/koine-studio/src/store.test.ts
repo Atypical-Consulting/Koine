@@ -15,6 +15,8 @@ import {
   clearLegacyScratch,
   loadWorkspaceMode,
   saveWorkspaceMode,
+  loadDiagramZoom,
+  saveDiagramZoom,
   loadActiveContext,
   saveActiveContext,
   getRecentFolders,
@@ -273,6 +275,40 @@ describe('workspace mode persistence (#143)', () => {
     expect(loadWorkspaceMode()).toBe('docs');
     saveWorkspaceMode('code'); // a later save overwrites the prior one
     expect(loadWorkspaceMode()).toBe('code');
+  });
+});
+
+describe('diagram zoom persistence (#145)', () => {
+  beforeEach(() => localStorage.clear());
+
+  test('returns null when no zoom has been stored for the key', () => {
+    expect(loadDiagramZoom('Ordering / Order aggregate')).toBeNull();
+  });
+
+  test('round-trips a saved zoom percent, namespaced per diagram key', () => {
+    saveDiagramZoom('Ordering / Order', 150);
+    saveDiagramZoom('Billing / Invoice', 75);
+    expect(loadDiagramZoom('Ordering / Order')).toBe(150);
+    expect(loadDiagramZoom('Billing / Invoice')).toBe(75);
+    saveDiagramZoom('Ordering / Order', 220); // a later save overwrites the prior one
+    expect(loadDiagramZoom('Ordering / Order')).toBe(220);
+  });
+
+  test('clamps an out-of-band zoom to the sane [10, 800] window on save', () => {
+    saveDiagramZoom('huge', 5000);
+    saveDiagramZoom('tiny', 1);
+    expect(loadDiagramZoom('huge')).toBe(800);
+    expect(loadDiagramZoom('tiny')).toBe(10);
+  });
+
+  test('rejects a non-finite percent rather than persisting garbage', () => {
+    saveDiagramZoom('nan', Number.NaN);
+    expect(loadDiagramZoom('nan')).toBeNull();
+  });
+
+  test('coerces a hand-edited/malformed stored value back to null', () => {
+    localStorage.setItem('koine.studio.diagramZoom.bad', 'not-a-number');
+    expect(loadDiagramZoom('bad')).toBeNull();
   });
 });
 
