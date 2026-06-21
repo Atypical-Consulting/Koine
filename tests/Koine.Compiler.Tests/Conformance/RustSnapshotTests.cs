@@ -240,4 +240,83 @@ public class RustSnapshotTests
 
         check.Ok.ShouldBeTrue(string.Join("\n", check.Errors));
     }
+
+    // ------------------------------------------------------------------
+    // End-to-end: the real billing starter template (value objects, a smart enum, entities, an
+    // aggregate with a nested enum/value/entity, a derived scalar-Mul member, a `when`-guarded
+    // invariant, and the default repository trait).
+    // ------------------------------------------------------------------
+
+    [Fact]
+    public Task Rust_billing_template_emits_expected_rust()
+    {
+        var result = new KoineCompiler().Compile(TestSupport.BillingFixture, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var billing = result.Files.Single(f => f.RelativePath.EndsWith("billing.rs", StringComparison.Ordinal)).Contents;
+        billing.ShouldContain("pub trait OrderRepository");
+        billing.ShouldContain("impl std::ops::Mul<i64> for Money");   // demand-driven scalar op
+        billing.ShouldContain("pub struct ProductId(String);");        // unowned id materialized
+
+        return Verify(TestSupport.Render(result.Files)).UseDirectory("Snapshots");
+    }
+
+    [Fact]
+    public void Rust_billing_template_compiles()
+    {
+        var result = new KoineCompiler().Compile(TestSupport.BillingFixture, new RustEmitter());
+        result.Success.ShouldBeTrue();
+
+        var check = TestSupport.CompileRust(result.Files);
+        if (!check.ToolchainAvailable)
+        {
+            _output.WriteLine(NoToolchainNotice);
+            return;
+        }
+
+        check.Ok.ShouldBeTrue(string.Join("\n", check.Errors));
+    }
+
+    /// <summary>Every starter template emits Rust that compiles (the real cross-construct proof).</summary>
+    [Theory]
+    [InlineData("starters/values/values.koi")]
+    [InlineData("starters/ordering/ordering.koi")]
+    [InlineData("starters/contextmap/catalog-sales.koi")]
+    public void Rust_starter_templates_compile(string relativePath)
+    {
+        if (FindTemplate(relativePath) is not { } source)
+        {
+            _output.WriteLine($"INCONCLUSIVE: template '{relativePath}' not found from the test assembly.");
+            return;
+        }
+
+        var result = new KoineCompiler().Compile(source, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var check = TestSupport.CompileRust(result.Files);
+        if (!check.ToolchainAvailable)
+        {
+            _output.WriteLine(NoToolchainNotice);
+            return;
+        }
+
+        check.Ok.ShouldBeTrue(string.Join("\n", check.Errors));
+    }
+
+    /// <summary>Reads a template under <c>templates/</c> by walking up to the repo root (the <c>.git</c> dir).</summary>
+    private static string? FindTemplate(string relativePath)
+    {
+        for (DirectoryInfo? dir = new(AppContext.BaseDirectory); dir is not null; dir = dir.Parent)
+        {
+            if (!Directory.Exists(Path.Combine(dir.FullName, ".git")) && !File.Exists(Path.Combine(dir.FullName, ".git")))
+            {
+                continue;
+            }
+
+            var candidate = Path.Combine(dir.FullName, "templates", relativePath.Replace('/', Path.DirectorySeparatorChar));
+            return File.Exists(candidate) ? File.ReadAllText(candidate) : null;
+        }
+
+        return null;
+    }
 }
