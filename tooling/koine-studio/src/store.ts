@@ -79,6 +79,8 @@ const SETTINGS_KEY = 'koine.studio.settings';
 const RECENT_KEY = 'koine.studio.recentFolders';
 const SCRATCH_KEY = 'koine.studio.scratch';
 const WORKSPACE_MODE_KEY = 'koine.studio.workspaceMode';
+// Per-workspace active context scope (#146): the folder's storage key is appended (see loadActiveContext).
+const ACTIVE_CONTEXT_KEY_PREFIX = 'koine.studio.activeContext.';
 const RECENT_CAP = 25;
 
 // The assistant transcript is namespaced per workspace under its own key prefix (distinct from
@@ -403,6 +405,23 @@ export function loadWorkspaceMode(): string | null {
 /** Persist the active workspace-mode id (best-effort). */
 export function saveWorkspaceMode(id: string): void {
   writeRaw(WORKSPACE_MODE_KEY, id);
+}
+
+// --- active bounded context (#146) -------------------------------------------
+// The active context scope (a context name, or the literal 'all') is persisted PER workspace — a
+// context like "Sales" only means anything within its own model — so each folder restores its own
+// scope, keyed by the workspace's storage key (the folder identity, or 'scratch'). Like the workspace
+// mode above, this layer just round-trips the raw string; the sentinel/default live with the model
+// (activeContext.ts), so the store stays free of any context knowledge.
+
+/** The persisted active-context scope for a workspace, or null when none is stored. */
+export function loadActiveContext(workspaceKey: string): string | null {
+  return readRaw(ACTIVE_CONTEXT_KEY_PREFIX + workspaceKey);
+}
+
+/** Persist the active-context scope for a workspace (best-effort). */
+export function saveActiveContext(workspaceKey: string, scope: string): void {
+  writeRaw(ACTIVE_CONTEXT_KEY_PREFIX + workspaceKey, scope);
 }
 
 // --- assistant conversation (per workspace) ----------------------------------

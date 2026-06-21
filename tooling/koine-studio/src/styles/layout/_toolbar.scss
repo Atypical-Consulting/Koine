@@ -271,3 +271,68 @@
     outline-offset: 1px;
   }
 }
+
+/* --- active bounded-context switcher (#146) --- */
+/* A header-level <select> that scopes the model-derived surfaces (outline, counts, diagram, inspector,
+   the bottom tables) to one bounded context. Sits beside the mode switcher and hides itself when the
+   model has no contexts. The aria-live readout doubles as the visible "Current context" status. */
+.context-switcher {
+  display: flex;
+  align-items: center;
+  gap: var(--koi-space-1-5);
+  flex: 0 1 auto;
+  min-width: 0;
+
+  &[hidden] {
+    display: none;
+  }
+}
+
+.context-switcher-label {
+  color: var(--koi-muted);
+  font-size: var(--koi-text-sm-plus);
+  font-weight: 500;
+  line-height: 1;
+  flex: 0 0 auto;
+}
+
+.context-select {
+  appearance: none;
+  max-width: 14rem;
+  background: color-mix(in srgb, var(--koi-paper) 55%, transparent);
+  color: var(--koi-fg);
+  border: 1px solid var(--koi-line);
+  border-radius: var(--koi-radius-sm);
+  padding: var(--koi-space-1) var(--koi-space-2);
+  font-family: var(--koi-font-body);
+  font-size: var(--koi-text-sm-plus);
+  line-height: 1.2;
+  cursor: pointer;
+  transition:
+    border-color var(--koi-dur-fast) ease,
+    background var(--koi-dur-fast) ease;
+
+  &:hover {
+    border-color: color-mix(in srgb, var(--koi-accent) 40%, var(--koi-line));
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--koi-accent);
+    outline-offset: 1px;
+  }
+}
+
+.context-readout {
+  color: var(--koi-muted);
+  font-size: var(--koi-text-sm);
+  line-height: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+
+  /* Collapse on tight toolbars — the <select> already shows the current scope, so the prose readout is
+     the first thing to go when horizontal space runs out. */
+  @media (max-width: 1100px) {
+    display: none;
+  }
+}
