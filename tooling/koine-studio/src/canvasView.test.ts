@@ -3,7 +3,7 @@
 // move/scale it without ever touching the DOM. The renderer (diagrams-svg.ts) owns the SVG and the
 // pointer plumbing; this module owns the geometry, so it can be reasoned about and tested in isolation.
 import { describe, expect, test } from 'vitest';
-import { zoomAt, panBy, centerOn, fit, zoomPercent, clampScale, type ViewBox } from './canvasView';
+import { zoomAt, panBy, centerOn, fit, viewAtScale, zoomPercent, clampScale, type ViewBox } from './canvasView';
 
 /** The on-screen fractional position of a content point within a viewBox (0..1 along each axis). */
 function frac(vb: ViewBox, cx: number, cy: number): { fx: number; fy: number } {
@@ -100,6 +100,41 @@ describe('fit', () => {
 
   test('a degenerate (zero-size) viewport falls back to the padded content box without dividing by zero', () => {
     const vb = fit({ x: 0, y: 0, w: 100, h: 50 }, { w: 0, h: 0 }, 5);
+    expect(Number.isFinite(vb.w)).toBe(true);
+    expect(Number.isFinite(vb.h)).toBe(true);
+    expect(vb.w).toBeGreaterThan(0);
+    expect(vb.h).toBeGreaterThan(0);
+  });
+});
+
+describe('viewAtScale', () => {
+  test('scale 1 (100%) makes the viewBox the viewport size, centered on the content', () => {
+    // 100% means one content unit per pixel: the window's size equals the viewport's pixel size, so
+    // zoomPercent reads exactly 100, and it's centered on the diagram regardless of the content size.
+    const content = { x: 10, y: 20, w: 300, h: 200 };
+    const viewport = { w: 800, h: 600 };
+    const vb = viewAtScale(content, viewport, 1);
+
+    expect(vb.w).toBeCloseTo(800, 10);
+    expect(vb.h).toBeCloseTo(600, 10);
+    expect(vb.x + vb.w / 2).toBeCloseTo(content.x + content.w / 2, 10);
+    expect(vb.y + vb.h / 2).toBeCloseTo(content.y + content.h / 2, 10);
+    expect(zoomPercent(vb, viewport)).toBe(100);
+  });
+
+  test('scale 2 (200%) halves the window so the content shows magnified, still centered', () => {
+    const content = { x: 0, y: 0, w: 400, h: 400 };
+    const viewport = { w: 800, h: 800 };
+    const vb = viewAtScale(content, viewport, 2);
+
+    expect(vb.w).toBeCloseTo(400, 10);
+    expect(vb.h).toBeCloseTo(400, 10);
+    expect(vb.x + vb.w / 2).toBeCloseTo(200, 10);
+    expect(zoomPercent(vb, viewport)).toBe(200);
+  });
+
+  test('a degenerate (zero-size) viewport falls back to the content size without dividing by zero', () => {
+    const vb = viewAtScale({ x: 0, y: 0, w: 100, h: 50 }, { w: 0, h: 0 }, 1);
     expect(Number.isFinite(vb.w)).toBe(true);
     expect(Number.isFinite(vb.h)).toBe(true);
     expect(vb.w).toBeGreaterThan(0);

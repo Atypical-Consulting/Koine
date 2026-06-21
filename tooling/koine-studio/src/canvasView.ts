@@ -83,6 +83,22 @@ export function fit(content: ViewBox, viewport: Size, padding: number): ViewBox 
 }
 
 /**
+ * The window centered on `content` at a fixed `scale` (viewport pixels per content unit), sized to the
+ * viewport so the rendered scale is uniform. `scale === 1` is the canvas's 100% default — one content
+ * unit per pixel, i.e. the diagram at true size — used as the initial view instead of {@link fit}. A
+ * degenerate (zero-size) viewport falls back to the content's own size so the math never divides by zero.
+ */
+export function viewAtScale(content: ViewBox, viewport: Size, scale: number): ViewBox {
+  const vw = viewport.w > 0 ? viewport.w : content.w;
+  const vh = viewport.h > 0 ? viewport.h : content.h;
+  const w = scale > 0 ? vw / scale : vw;
+  const h = scale > 0 ? vh / scale : vh;
+  const cx = content.x + content.w / 2;
+  const cy = content.y + content.h / 2;
+  return { x: cx - w / 2, y: cy - h / 2, w, h };
+}
+
+/**
  * The current zoom as a percentage, where 100% means one content unit maps to one viewport pixel along
  * the width (`vb.w === viewport.w`). Returned rounded to a whole percent for the on-screen readout.
  */
