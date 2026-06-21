@@ -15,6 +15,22 @@ internal enum CSharpInstantMode
 }
 
 /// <summary>
+/// A composable layer of the C# target (issue #128), selected via <c>--layers</c> /
+/// <c>targets.csharp.layers</c>. <see cref="Domain"/> (the Domain model + application contracts) is
+/// always emitted and is the default; <see cref="Infrastructure"/> additionally emits a runnable EF
+/// Core realization of those contracts (DbContext, entity configurations, repositories, unit of
+/// work, transactional outbox + dispatcher, and the DI registration extension).
+/// </summary>
+internal enum CSharpLayer
+{
+    /// <summary>The Domain model + application contracts — the historical, always-on output.</summary>
+    Domain,
+
+    /// <summary>The opt-in EF Core infrastructure realization of the Domain contracts.</summary>
+    Infrastructure,
+}
+
+/// <summary>
 /// Per-emit configuration for the C# backend (R16.1), mapped from the CLI's
 /// <c>targets.csharp.*</c> block. <see cref="NamespaceMap"/> remaps a bounded context's
 /// emitted namespace (e.g. <c>Catalog → Acme.Catalog</c>): the mapped value replaces the
@@ -35,10 +51,18 @@ internal sealed record CSharpEmitterOptions(
     IReadOnlyDictionary<string, string> NamespaceMap,
     CSharpInstantMode InstantMode = CSharpInstantMode.DateTimeOffset,
     bool EmitSourceMaps = false,
-    bool ReferenceOnly = false)
+    bool ReferenceOnly = false,
+    IReadOnlySet<CSharpLayer>? Layers = null)
 {
     public static readonly CSharpEmitterOptions Empty =
         new(new Dictionary<string, string>(StringComparer.Ordinal));
+
+    /// <summary>
+    /// True when the opt-in Infrastructure layer (issue #128) is requested. The Domain layer is
+    /// always emitted, so a null/empty <see cref="Layers"/> set means Domain-only — output
+    /// byte-identical to the historical emitter.
+    /// </summary>
+    public bool EmitsInfrastructure => Layers is not null && Layers.Contains(CSharpLayer.Infrastructure);
 
     /// <summary>
     /// Remaps a logical namespace (whose first segment is a bounded-context name) to its
