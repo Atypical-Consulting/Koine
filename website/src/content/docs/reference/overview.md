@@ -7,7 +7,7 @@ This section is the precise, construct-by-construct specification of the Koine l
 
 Every page is grounded in the compiler's tests and the [Shop demo](https://github.com/Atypical-Consulting/Koine/tree/main/demo), so the snippets compile and the emitted shapes are real.
 
-## How to read this specification
+## 1.1 How to read this specification
 
 Each construct chapter follows a fixed **General → Syntax → Semantics → Translation** structure, uses
 EBNF for grammar, and cites sections with the `§` glyph. The full set of conventions — grammar
@@ -16,7 +16,7 @@ notation, numbering, callouts, and diagnostics — is described in
 identifiers, keywords, literals, operators) live in
 [Lexical structure (§3)](/Koine/reference/lexical-structure/).
 
-## How the language is shaped
+## 1.2 How the language is shaped
 
 A `.koi` file declares one or more bounded `context`s. Inside a context you declare *types* (value objects, entities, aggregates, enums, quantities), the *behaviour* on those types (invariants, derived fields, commands, events, state machines, factories), the *strategic* pieces (specs, services, policies), and the *application* layer (repositories, use cases, read models, queries). At the top level — sibling to the contexts — a single `contextmap` wires the contexts together.
 
@@ -37,7 +37,7 @@ context Catalog {
 The pipeline is **strictly layered**: lexer/parser → target-agnostic semantic model → validator → emitter. Nothing before the emitter knows what C# is. **C# is the only emitter today**; TypeScript and Rust are on the [roadmap](/Koine/guides/roadmap/). Everything in this reference describes the language and its *current* C# emission — the model itself is portable.
 :::
 
-## The construct map
+## 1.3 The construct map
 
 Each construct family has its own reference page. Start here and follow the link for the one you need.
 
@@ -61,7 +61,7 @@ Each construct family has its own reference page. Start here and follow the link
 
 For a feature-by-feature tour mapped to the R1–R15 roadmap, see the [feature catalogue](/Koine/guides/feature-catalogue/). For the `koine build`/`koine check` flags, see the [CLI reference](/Koine/guides/cli/).
 
-## Primitive types
+## 1.4 Primitive types
 
 Koine has a small set of built-in primitives that map straight to C#:
 
@@ -75,16 +75,16 @@ Koine has a small set of built-in primitives that map straight to C#:
 | `List<T>` | `IReadOnlyList<T>` | defensively copied in constructors |
 | `<Name>Id` | generated ID value object | a `record` wrapping a `Guid` by default |
 
-`List<T>`, `Set<T>`, `Map<K,V>`, and `Range<T>` are the four built-in generic type constructors. *Orderable* types (`Int`, `Decimal`, `Instant`) are the ones allowed in relational comparisons and as `Range<T>` element types — `String` is **not** orderable. See [Value objects](/Koine/reference/value-objects/) and [Expressions](/Koine/reference/expressions/) for the details.
+`List<T>`, `Set<T>`, `Map<K,V>`, and `Range<T>` are the four built-in generic type constructors. *Orderable* types (`Int`, `Decimal`, `Instant`) are the ones allowed in relational comparisons and as `Range<T>` element types — `String` is **not** orderable. See [Value objects (§5)](/Koine/reference/value-objects/) and [Expressions (§9)](/Koine/reference/expressions/) for the details.
 
-## Tokens, keywords, and operators
+## 1.5 Tokens, keywords, and operators
 
 The lexical layer — comments, identifiers, the reserved (`invariant`, `matches`) vs soft keyword
 rule, reserved type names, literals, and the atomic `->` / `<->` operators — is specified in
 [Lexical structure (§3)](/Koine/reference/lexical-structure/).
 
-## Where to next
+## 1.6 Where to next
 
 - New to the language? Read in sidebar order, starting with [Contexts & types](/Koine/reference/contexts-and-types/).
-- Looking up one construct? Jump straight from [the construct map](#the-construct-map) above.
+- Looking up one construct? Jump straight from [the construct map](#13-the-construct-map) above.
 - Want to see it all wired together? Browse the [Shop demo](https://github.com/Atypical-Consulting/Koine/tree/main/demo) or the [feature catalogue](/Koine/guides/feature-catalogue/).

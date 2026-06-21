@@ -63,7 +63,7 @@ throws — there is no half-built `Price` with a negative amount. This is the co
 **if you hold an instance, it is valid.**
 :::
 
-### Validating constructors
+### 5.3.1 Validating constructors
 
 Every `invariant` you declare becomes a guard at the top of the constructor, in declaration order, each
 throwing `DomainInvariantViolationException(type, rule)` with your message as the `rule`. Invariants can
@@ -100,7 +100,7 @@ public Sku(string code)
 See [Invariants (§10)](/Koine/reference/invariants/) for the full guard expression grammar and how the same
 `invariant` syntax applies to entities and quantities.
 
-### Derived (computed) fields
+### 5.3.2 Derived (computed) fields
 
 A field written `name: Type = expr` where `expr` references sibling fields is a **derived field**. It is
 *not* a constructor parameter and *not* part of equality — it is emitted as a get-only computed property:
@@ -138,7 +138,7 @@ equality. `lineTotal` and `payable` recompute from them, so two `OrderLine`s wit
 always equal regardless of derived values.
 :::
 
-### Defensive copies of collections
+### 5.3.3 Defensive copies of collections
 
 When a value object field is a `List<T>` or `Set<T>`, the constructor takes a defensive copy and exposes
 it as a read-only view (`IReadOnlyList<T>` / `IReadOnlySet<T>`). A caller cannot mutate your value object
@@ -149,6 +149,8 @@ helpers on the `ValueObject` base.
 See [Contexts & types (§4)](/Koine/reference/contexts-and-types/) for the full list of how Koine types lower to C#.
 
 ## 5.4 Translation to C#
+
+Per-aspect emitted C# is shown inline in [§5.3](#53-semantics) above; this section gives the canonical emitted shape.
 
 Here is the C# Koine emits for the `Price` above:
 

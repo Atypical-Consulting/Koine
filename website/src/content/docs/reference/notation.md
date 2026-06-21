@@ -19,6 +19,8 @@ spine, so you can predict where any fact lives:
   the [diagnostics](#25-diagnostics) the compiler raises for ill-formed input.
 - **Translation to C#** — the C# the current emitter produces for the construct.
 
+Some chapters adapt this spine to their material — the expression language ([§9](/Koine/reference/expressions/)), for example, is organized per operator rather than as a single Translation section.
+
 This deliberately separates *what you write* (Syntax) from *what it means* (Semantics) and *what it
 becomes* (Translation). Koine's semantic model is target-agnostic; C# is the only shipped target
 today, so every "Translation" section describes the current C# emission, not the language itself.

@@ -15,7 +15,7 @@ is a value computed from a field, a parameter, a literal, and a fixed set of ope
 Everything below translates to idiomatic C# — a derived field becomes a get-only computed property, an
 invariant becomes a constructor guard.
 
-### Where expressions are allowed
+### 9.1.1 Where expressions are allowed
 
 | Position | Form | Example |
 |----------|------|---------|
@@ -80,14 +80,14 @@ Operators bind from **lowest** precedence (top) to **highest** (bottom):
 | 6 | logical and | `&&` | left |
 | 7 | equality | `==` `!=` | left |
 | 8 | relational | `<` `<=` `>` `>=` | left |
-| 9 | match | `matches /…/` | non-associative (postfix) |
+| 9 | match | `matches /…/` | non-associative (infix) |
 | 10 | additive | `+` `-` | left |
 | 11 | multiplicative | `*` `/` | left |
 | 12 | unary | prefix `!` `-` | right |
 | 13 | postfix | `.member`, `.op(args)` | left |
 | 14 (highest) | primary | literal, name, `( … )` | — |
 
-### Literals and identifiers
+### 9.2.1 Literals and identifiers
 
 The atoms of every expression:
 
