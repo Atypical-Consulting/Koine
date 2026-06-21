@@ -182,4 +182,62 @@ public class RustSnapshotTests
 
         check.Ok.ShouldBeTrue(string.Join("\n", check.Errors));
     }
+
+    /// <summary>
+    /// Smart enums (bare + with associated data) and events: each event emits as a public-field data
+    /// struct and all events collect into a single <c>DomainEvent</c> enum (the Vec-friendly shape).
+    /// </summary>
+    private const string EventFixture = """
+        context Sales {
+          enum Currency(symbol: String, decimals: Int) { EUR("€", 2) USD("$", 2) }
+          enum OrderStatus { Draft, Placed, Cancelled }
+          value Money {
+            amount:   Decimal
+            currency: Currency
+            invariant amount >= 0 "an amount cannot be negative"
+          }
+          /// Raised when a draft order is placed.
+          event OrderPlaced {
+            orderId:   OrderId
+            lineCount: Int
+            total:     Money
+          }
+          event OrderCancelled {
+            orderId: OrderId
+            reason:  String
+          }
+        }
+        """;
+
+    [Fact]
+    public Task Rust_events_and_enums_emit_expected_rust()
+    {
+        var result = new KoineCompiler().Compile(EventFixture, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var sales = result.Files.Single(f => f.RelativePath.EndsWith("sales.rs", StringComparison.Ordinal)).Contents;
+        sales.ShouldContain("pub enum DomainEvent {");
+        sales.ShouldContain("OrderPlaced(OrderPlaced)");
+        // Smart-enum accessors are exhaustive matches with no `_` catch-all.
+        sales.ShouldContain("Currency::Eur => \"€\"");
+        sales.ShouldNotContain("_ =>");
+
+        return Verify(TestSupport.Render(result.Files)).UseDirectory("Snapshots");
+    }
+
+    [Fact]
+    public void Rust_events_and_enums_compile()
+    {
+        var result = new KoineCompiler().Compile(EventFixture, new RustEmitter());
+        result.Success.ShouldBeTrue();
+
+        var check = TestSupport.CompileRust(result.Files);
+        if (!check.ToolchainAvailable)
+        {
+            _output.WriteLine(NoToolchainNotice);
+            return;
+        }
+
+        check.Ok.ShouldBeTrue(string.Join("\n", check.Errors));
+    }
 }

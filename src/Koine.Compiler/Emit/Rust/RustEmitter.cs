@@ -91,6 +91,9 @@ public sealed partial class RustEmitter : IEmitter
             EmitType(emit, body, type, ctx.Name);
         }
 
+        // The context-wide DomainEvent enum (empty when the context declares no events).
+        EmitDomainEventEnum(body, ctx);
+
         // Foreign *Id types referenced but not owned by a local entity: materialize a branded newtype
         // so the references resolve (e.g. billing's `ProductId`, used but with no `Product` entity).
         foreach (var idName in OrderedUnownedIds(ctx, emit.Index))
