@@ -59,6 +59,7 @@ import {
   createActiveContextBus,
   isAllContexts,
   listContexts,
+  scopeDocsFiles,
   scopeGlossaryModel,
   scopeGraph,
   type ContextScope,
@@ -1308,7 +1309,17 @@ export function init(): void {
 
   // The inspector + cross-highlight track the selection bus for the app's lifetime (a diagram click
   // can select an element while the Model tab is closed; opening it then shows the right inspector).
-  selection.subscribe(() => {
+  selection.subscribe((sel) => {
+    // Jump-to-source works across scope (the editor navigation is scope-independent), but a selection
+    // landing OUTSIDE the active context would otherwise leave the scoped surfaces showing a different
+    // context than the inspector. Follow it: switch the scope to the selected element's context so the
+    // outline/diagram/counts stay coherent with what's being inspected (#146). In-scope selections and
+    // the unscoped ("All contexts") view leave the scope untouched. setActiveContext re-renders the
+    // scoped surfaces, which also calls renderSelectedInspector()/applySelectionHighlight() for the
+    // Model tab — the explicit calls below cover the cross-highlight when another view is active.
+    if (sel && !isAllContexts(activeContext.get()) && sel.context !== activeContext.get()) {
+      setActiveContext(sel.context);
+    }
     renderSelectedInspector();
     applySelectionHighlight();
   });
@@ -1350,7 +1361,10 @@ export function init(): void {
     try {
       const res = await lsp.livingDocs();
       if (seq !== diagramsSeq) return;
-      await renderDiagrams(diagramsView, res.files, currentTheme(), () => seq === diagramsSeq);
+      // Scope the diagrams to the active bounded context (#146): each diagram's graph is narrowed and
+      // emptied diagrams/files drop out, so a context shows only its own diagrams. "All" is the identity.
+      const files = scopeDocsFiles(res.files, activeContext.get());
+      await renderDiagrams(diagramsView, files, currentTheme(), () => seq === diagramsSeq);
       if (seq === diagramsSeq) docViewsLoaded.diagrams = true;
     } catch (e) {
       if (seq === diagramsSeq) docMessage(diagramsView, 'Diagrams request failed: ' + String(e), 'error');
@@ -2341,8 +2355,15 @@ export function init(): void {
         lsp.contextMap().catch(() => ({ contexts: [], relations: [] }) as ContextMapResult),
       ]);
       if (seq !== bottomSeq.relationships) return;
+      // bottomGraph() already scoped the structural edges; narrow the strategic relations too (#146) so a
+      // scoped Relationships table keeps only the relations the active context takes part in (as upstream
+      // or downstream). "All contexts" keeps every relation.
+      const scope = activeContext.get();
+      const scopedCtxMap = isAllContexts(scope)
+        ? ctxMap
+        : { ...ctxMap, relations: ctxMap.relations.filter((r) => r.upstream === scope || r.downstream === scope) };
       relationshipsPanel.replaceChildren(
-        renderRelationshipsTable(extractRelationships(graph, ctxMap), bottomTableHandlers),
+        renderRelationshipsTable(extractRelationships(graph, scopedCtxMap), bottomTableHandlers),
       );
       bottomLoaded.relationships = true;
     } catch (e) {

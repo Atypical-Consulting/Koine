@@ -4,10 +4,11 @@ import {
   createActiveContextBus,
   isAllContexts,
   listContexts,
+  scopeDocsFiles,
   scopeGlossaryModel,
   scopeGraph,
 } from './activeContext';
-import type { ContextMapResult, DiagramGraph, DiagramNode, GlossaryEntry, GlossaryModel } from './lsp';
+import type { ContextMapResult, DiagramGraph, DiagramNode, DocsFile, GlossaryEntry, GlossaryModel } from './lsp';
 
 const node = (id: string, qualifiedName: string, kind = 'aggregate-root'): DiagramNode => ({
   id,
@@ -89,6 +90,50 @@ describe('scopeGraph', () => {
     scopeGraph(graph, 'Sales');
     expect(graph.nodes).toHaveLength(3);
     expect(graph.edges).toHaveLength(2);
+  });
+});
+
+describe('scopeDocsFiles', () => {
+  const diagram = (kind: string, g: DiagramGraph) => ({ caption: kind, kind, mermaid: '', graph: g });
+  const files: DocsFile[] = [
+    {
+      path: 'Sales.md',
+      contents: '# Sales',
+      diagrams: [diagram('aggregate', { nodes: [node('n1', 'Sales.Order')], edges: [] })],
+    },
+    {
+      path: 'Inventory.md',
+      contents: '# Inventory',
+      diagrams: [diagram('aggregate', { nodes: [node('n2', 'Inventory.Stock')], edges: [] })],
+    },
+  ];
+
+  test('keeps only files/diagrams with nodes in the active context', () => {
+    const scoped = scopeDocsFiles(files, 'Sales');
+    expect(scoped).toHaveLength(1);
+    expect(scoped[0].path).toBe('Sales.md');
+    expect(scoped[0].diagrams[0].graph.nodes.map((n) => n.qualifiedName)).toEqual(['Sales.Order']);
+  });
+
+  test('drops a diagram whose graph empties under the scope', () => {
+    const mixed: DocsFile[] = [
+      {
+        path: 'overview.md',
+        contents: '# Overview',
+        diagrams: [
+          diagram('aggregate', { nodes: [node('a', 'Sales.Order')], edges: [] }),
+          diagram('aggregate', { nodes: [node('b', 'Inventory.Stock')], edges: [] }),
+        ],
+      },
+    ];
+    const scoped = scopeDocsFiles(mixed, 'Sales');
+    expect(scoped).toHaveLength(1);
+    expect(scoped[0].diagrams).toHaveLength(1);
+    expect(scoped[0].diagrams[0].graph.nodes.map((n) => n.id)).toEqual(['a']);
+  });
+
+  test('ALL_CONTEXTS is the identity (same files)', () => {
+    expect(scopeDocsFiles(files, ALL_CONTEXTS)).toBe(files);
   });
 });
 

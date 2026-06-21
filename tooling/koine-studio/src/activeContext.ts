@@ -6,7 +6,7 @@
 //
 // Deliberately tiny and DOM-free so it unit-tests under happy-dom; the bus mirrors the selection bus
 // (selection.ts) so the switcher (ide.ts) and the surfaces subscribe to one source of truth.
-import type { ContextMapResult, DiagramGraph, GlossaryModel } from './lsp';
+import type { ContextMapResult, DiagramGraph, DocsFile, GlossaryModel } from './lsp';
 
 /** The sentinel scope meaning "don't narrow — show every context". A real context name never collides
  *  (Koine contexts are PascalCase identifiers), so this lowercase literal is safe as the unscoped marker. */
@@ -76,6 +76,24 @@ export function scopeGraph(graph: DiagramGraph, scope: ContextScope): DiagramGra
 export function scopeGlossaryModel(model: GlossaryModel, scope: ContextScope): GlossaryModel {
   if (isAllContexts(scope)) return model;
   return { entries: model.entries.filter((e) => e.context === scope) };
+}
+
+/**
+ * Narrow the living-docs files behind the Diagrams tab to a single bounded context: each diagram's
+ * structured graph is scoped (the renderer draws from `diagram.graph`), diagrams left with no nodes are
+ * dropped, and files left with no diagrams fall away — so a context with no diagram simply shows the
+ * empty state. {@link ALL_CONTEXTS} is the identity — the same files are returned untouched.
+ */
+export function scopeDocsFiles(files: DocsFile[], scope: ContextScope): DocsFile[] {
+  if (isAllContexts(scope)) return files;
+  return files
+    .map((f) => ({
+      ...f,
+      diagrams: f.diagrams
+        .map((d) => ({ ...d, graph: scopeGraph(d.graph, scope) }))
+        .filter((d) => d.graph.nodes.length > 0),
+    }))
+    .filter((f) => f.diagrams.length > 0);
 }
 
 /** A minimal observable holding the active scope; the switcher writes it, the surfaces subscribe. */
