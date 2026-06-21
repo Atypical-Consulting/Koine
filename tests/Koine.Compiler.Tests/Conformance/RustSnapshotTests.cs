@@ -241,6 +241,38 @@ public class RustSnapshotTests
         check.Ok.ShouldBeTrue(string.Join("\n", check.Errors));
     }
 
+    /// <summary>
+    /// Regression: a derived (computed) member is emitted as an accessor method, so a reference to it
+    /// from another expression must render as a call <c>self.x()</c>, not a field read <c>self.x</c>.
+    /// </summary>
+    [Fact]
+    public void Rust_derived_member_referencing_another_derived_member_calls_the_accessor()
+    {
+        const string model = """
+            context D {
+              value Line {
+                unitPrice:  Decimal
+                quantity:   Int
+                subtotal:   Decimal = unitPrice * quantity
+                discounted: Decimal = subtotal * unitPrice
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(model, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var d = result.Files.Single(f => f.RelativePath.EndsWith("d.rs", StringComparison.Ordinal)).Contents;
+        d.ShouldContain("self.subtotal() * self.unit_price");   // derived ref → method call
+
+        var check = TestSupport.CompileRust(result.Files);
+        if (!check.ToolchainAvailable)
+        {
+            _output.WriteLine(NoToolchainNotice);
+            return;
+        }
+        check.Ok.ShouldBeTrue(string.Join("\n", check.Errors));
+    }
+
     // ------------------------------------------------------------------
     // End-to-end: the real billing starter template (value objects, a smart enum, entities, an
     // aggregate with a nested enum/value/entity, a derived scalar-Mul member, a `when`-guarded

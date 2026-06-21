@@ -40,6 +40,7 @@ internal sealed class RustExpressionTranslator
 
     private readonly HashSet<string> _locals = new(StringComparer.Ordinal);
     private readonly Dictionary<string, TypeRef> _localTypes = new(StringComparer.Ordinal);
+    private readonly ISet<string> _derivedMembers;
 
     private string? _expectedEnum;
 
@@ -56,6 +57,11 @@ internal sealed class RustExpressionTranslator
         _scope = TypeScope.FromMembers(members, index);
         _memberNames = new HashSet<string>(members.Select(m => m.Name), StringComparer.Ordinal);
         _enumMemberToType = enumMemberToType;
+        // Derived (computed) members emit as accessor methods, not struct fields, so a reference to one
+        // in an instance body must render as a call `self.x()`, never a field read `self.x`.
+        _derivedMembers = new HashSet<string>(
+            members.Where(m => MemberAnalysis.IsDerived(m, _memberNames)).Select(m => m.Name),
+            StringComparer.Ordinal);
     }
 
     public void PushLocal(string name, TypeRef? type = null)
@@ -118,8 +124,10 @@ internal sealed class RustExpressionTranslator
                 break;
             case ConditionalExpr cond:
                 // `if <cond> { <then> } else { <else> }` — a Rust block-form conditional expression.
-                sb.Append("if ");
-                Write(cond.Condition, sb, null);
+                // The condition needs no outer parentheses (rustc warns on them).
+                var condBuf = new StringBuilder();
+                Write(cond.Condition, condBuf, null);
+                sb.Append("if ").Append(StripOuterParens(condBuf.ToString()));
                 sb.Append(" { ");
                 Write(cond.Then, sb, coerceTo);
                 sb.Append(" } else { ");
@@ -320,7 +328,12 @@ internal sealed class RustExpressionTranslator
             {
                 if (_mode == NameMode.Property)
                 {
+                    // A stored field reads directly; a derived member reads through its accessor method.
                     sb.Append("self.").Append(RustNaming.Field(name));
+                    if (_derivedMembers.Contains(name))
+                    {
+                        sb.Append("()");
+                    }
                 }
                 else
                 {

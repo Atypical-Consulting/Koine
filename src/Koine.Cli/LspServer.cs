@@ -1196,7 +1196,7 @@ internal sealed class LspServer
     /// Previews the emitter output for the merged workspace (directory semantics, matching the
     /// build) through the SAME registry/pipeline the CLI uses, so the returned files are
     /// byte-identical to <c>koine build</c>. The optional <c>params.target</c> selects the
-    /// emitter (<c>"csharp"</c> default, also <c>"typescript"</c>, <c>"python"</c>, and <c>"php"</c>); any other
+    /// emitter (<c>"csharp"</c> default, also <c>"typescript"</c>, <c>"python"</c>, <c>"php"</c>, and <c>"rust"</c>); any other
     /// target — including <c>glossary</c>/<c>docs</c>, which have dedicated requests — yields a structured error
     /// result (never a JSON-RPC error, never a throw). Diagnostics reuse the existing
     /// <see cref="ToLspDiagnostic"/> shape plus a per-item <c>uri</c> so a multi-file preview is
