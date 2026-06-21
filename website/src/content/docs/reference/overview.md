@@ -34,7 +34,7 @@ context Catalog {
 ```
 
 :::note[Target-agnostic by design]
-The pipeline is **strictly layered**: lexer/parser → target-agnostic semantic model → validator → emitter. Nothing before the emitter knows what C# is. **C# is the only emitter today**; TypeScript and Rust are on the [roadmap](/Koine/guides/roadmap/). Everything in this reference describes the language and its *current* C# emission — the model itself is portable.
+The pipeline is **strictly layered**: lexer/parser → target-agnostic semantic model → validator → emitter. Nothing before the emitter knows what C# is. Koine ships **C#, TypeScript, Python, and PHP** emitters today, with a **Rust** emitter on the [roadmap](/Koine/guides/roadmap/). This reference describes the language through its C# emission — but the model itself is portable across every target.
 :::
 
 ## 1.3 The construct map

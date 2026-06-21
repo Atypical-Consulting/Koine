@@ -112,9 +112,9 @@ That's a much stronger claim than a framework can make about the code you write 
 ## The part that matters most: leverage
 
 Keeping C# out of the semantic model isn't only architectural tidiness — it's what makes the output
-*portable*. The parser and semantic model don't know what C# is. The emitter does. Add a second
-emitter and the same model compiles to a second language for free: a TypeScript target is already in
-progress, and Rust is on the roadmap. A framework can't do that; its base classes *are* the target.
+*portable*. The parser and semantic model don't know what C# is. The emitter does. Add another
+emitter and the same model compiles to another language for free: TypeScript, Python, and PHP
+targets already ship, and Rust is on the roadmap. A framework can't do that; its base classes *are* the target.
 
 Generating code costs you a build step. In return you get output you own, output you can read, output
 that's been proven by execution, and a model that outlives any single target language. For the
