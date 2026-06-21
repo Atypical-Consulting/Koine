@@ -1219,14 +1219,15 @@ internal sealed class LspServer
         if (!string.Equals(target, "csharp", StringComparison.OrdinalIgnoreCase)
             && !string.Equals(target, "typescript", StringComparison.OrdinalIgnoreCase)
             && !string.Equals(target, "python", StringComparison.OrdinalIgnoreCase)
-            && !string.Equals(target, "php", StringComparison.OrdinalIgnoreCase))
+            && !string.Equals(target, "php", StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(target, "rust", StringComparison.OrdinalIgnoreCase))
         {
             return new Dictionary<string, object?>
             {
                 ["target"] = target,
                 ["files"] = Array.Empty<object>(),
                 ["diagnostics"] = Array.Empty<object>(),
-                ["error"] = $"unknown target '{target}'; expected 'csharp', 'typescript', 'python', or 'php'",
+                ["error"] = $"unknown target '{target}'; expected 'csharp', 'typescript', 'python', 'php', or 'rust'",
             };
         }
 
@@ -1244,7 +1245,7 @@ internal sealed class LspServer
                 ["target"] = target,
                 ["files"] = Array.Empty<object>(),
                 ["diagnostics"] = Array.Empty<object>(),
-                ["error"] = $"unknown target '{target}'; expected 'csharp', 'typescript', 'python', or 'php'",
+                ["error"] = $"unknown target '{target}'; expected 'csharp', 'typescript', 'python', 'php', or 'rust'",
             };
         }
 
