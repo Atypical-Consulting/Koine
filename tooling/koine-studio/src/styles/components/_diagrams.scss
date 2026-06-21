@@ -113,6 +113,37 @@
   color: var(--koi-muted);
   user-select: none;
 }
+
+/* minimap — a scaled thumbnail of the same graph in the bottom-right, with a window rect that tracks
+   the main viewBox. Click/drag inside it recenters the canvas. */
+.koi-minimap {
+  position: absolute;
+  bottom: var(--koi-space-1-5);
+  right: var(--koi-space-1-5);
+  z-index: 2;
+  padding: var(--koi-space-0-5);
+  background: color-mix(in srgb, var(--koi-surface) 88%, transparent);
+  border: 1px solid var(--koi-line);
+  border-radius: var(--koi-radius-sm);
+  box-shadow: var(--koi-shadow);
+  cursor: pointer;
+  touch-action: none;
+}
+.koi-minimap-svg {
+  display: block;
+}
+/* the thumbnail is a non-interactive picture; only the .koi-minimap container handles the recenter. */
+.koi-minimap-content {
+  pointer-events: none;
+  opacity: 0.85;
+}
+.koi-minimap-window {
+  fill: color-mix(in srgb, var(--koi-accent) 18%, transparent);
+  stroke: var(--koi-accent);
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke; /* a crisp 2px frame regardless of the thumbnail's scale */
+  pointer-events: none;
+}
 .koi-diagram-fallback {
   font-family: var(--koi-font-mono);
   font-size: var(--koi-text-xs-plus);

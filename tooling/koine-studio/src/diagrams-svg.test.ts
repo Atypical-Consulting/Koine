@@ -89,7 +89,9 @@ describe('createSvgRenderer', () => {
     const svg = container.querySelector('svg');
     expect(svg).not.toBeNull();
 
-    const nodes = container.querySelectorAll('.koi-svg-node');
+    // Scope to the primary diagram SVG: the minimap (#145) clones the node layer as a decorative
+    // thumbnail, so an unscoped `.koi-svg-node` count would also pick up the inert clones.
+    const nodes = container.querySelectorAll('.koi-svg-diagram .koi-svg-node');
     expect(nodes.length).toBe(2);
 
     const qnames = [...nodes].map((n) => n.getAttribute('data-qname')).sort();
@@ -190,7 +192,8 @@ describe('createSvgRenderer', () => {
     const container = ROOT();
     await createSvgRenderer().render(container, files, 'light', () => true);
 
-    const edges = container.querySelectorAll('.koi-svg-edge');
+    // Scope to the primary diagram SVG (the minimap clones the edge layer too).
+    const edges = container.querySelectorAll('.koi-svg-diagram .koi-svg-edge');
     expect(edges.length).toBe(1);
   });
 
@@ -375,6 +378,63 @@ describe('interactive canvas — zoom / pan / fit (issue #145)', () => {
     zoomOut.click();
     expect(pctOf(container)).toBeLessThan(startPct);
     expect(viewBoxNumbers(svg)[2]).toBeGreaterThan(startW);
+  });
+
+  test('renders a minimap thumbnail (reusing the graph content) with a window rectangle', async () => {
+    const files: DocsFile[] = [
+      file([
+        diagram({
+          nodes: [
+            mkNode({ id: 'a', label: 'Order', kind: 'aggregate-root', qualifiedName: 'Ord.Order' }),
+            mkNode({ id: 'b', label: 'Money', kind: 'value-object', qualifiedName: 'Ord.Money' }),
+          ],
+          edges: [{ from: 'a', to: 'b', label: 'total' }],
+        }),
+      ]),
+    ];
+
+    const container = ROOT();
+    await createSvgRenderer().render(container, files, 'light', () => true);
+
+    const minimap = container.querySelector('.koi-minimap');
+    expect(minimap).not.toBeNull();
+    // The thumbnail reuses the laid-out content — the nodes are cloned into it.
+    expect(minimap!.querySelectorAll('.koi-minimap-content .koi-svg-node').length).toBe(2);
+    // And it carries the viewport window rectangle.
+    expect(minimap!.querySelector('.koi-minimap-window')).not.toBeNull();
+  });
+
+  test('the minimap window rectangle mirrors the canvas viewBox and shrinks as you zoom in', async () => {
+    const container = ROOT();
+    await createSvgRenderer().render(container, oneNodeFile(), 'light', () => true);
+
+    const svg = container.querySelector<SVGSVGElement>('.koi-canvas > svg.koi-svg-diagram')!;
+    const win = container.querySelector<SVGRectElement>('.koi-minimap-window')!;
+
+    // The window rect equals the current viewBox (x, y, w, h) — one source of truth.
+    const [vx, vy, vw, vh] = viewBoxNumbers(svg);
+    expect(Number(win.getAttribute('x'))).toBeCloseTo(vx, 6);
+    expect(Number(win.getAttribute('y'))).toBeCloseTo(vy, 6);
+    expect(Number(win.getAttribute('width'))).toBeCloseTo(vw, 6);
+    expect(Number(win.getAttribute('height'))).toBeCloseTo(vh, 6);
+
+    // Zooming the main canvas in shrinks the window rect in lockstep (the minimap subscribes to changes).
+    const beforeW = Number(win.getAttribute('width'));
+    container.querySelector<HTMLButtonElement>('.koi-canvas-btn[aria-label="Zoom in"]')!.click();
+    expect(Number(win.getAttribute('width'))).toBeLessThan(beforeW);
+    expect(Number(win.getAttribute('width'))).toBeCloseTo(viewBoxNumbers(svg)[2], 6);
+  });
+
+  test('a pointerdown on the minimap does not throw and is not treated as a canvas pan', async () => {
+    const container = ROOT();
+    await createSvgRenderer().render(container, oneNodeFile(), 'light', () => true);
+
+    const canvas = container.querySelector<HTMLElement>('.koi-canvas')!;
+    const minimap = container.querySelector<HTMLElement>('.koi-minimap')!;
+
+    // Pressing on the minimap must not flip the canvas into its panning state.
+    minimap.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, clientX: 5, clientY: 5 }));
+    expect(canvas.classList.contains('koi-canvas--panning')).toBe(false);
   });
 
   test('the node stays inside the canvas and still navigates on click (pan never swallows it)', async () => {

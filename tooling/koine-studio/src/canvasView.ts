@@ -53,6 +53,14 @@ export function panBy(vb: ViewBox, dx: number, dy: number): ViewBox {
 }
 
 /**
+ * Recenter the window on a content point, leaving its size (zoom) unchanged. The minimap uses this to
+ * jump the main canvas to wherever the user clicks/drags inside the thumbnail.
+ */
+export function centerOn(vb: ViewBox, cx: number, cy: number): ViewBox {
+  return { x: cx - vb.w / 2, y: cy - vb.h / 2, w: vb.w, h: vb.h };
+}
+
+/**
  * The window that frames `content` inside `viewport` with `padding` content-units of margin on every
  * side, centered. The returned viewBox is grown to the viewport's aspect ratio so the rendered scale is
  * uniform (no axis is stretched) and the padded content is fully contained on both axes. A degenerate

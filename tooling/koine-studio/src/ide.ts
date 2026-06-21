@@ -1137,7 +1137,9 @@ export function init(): void {
       leaf.classList.toggle('is-selected', canonicalQn != null && leaf.dataset.qname === canonicalQn);
     }
     const ctxName = hit ? `${hit.element.entry.context}.${hit.element.entry.name}` : null;
-    for (const node of Array.from(diagramsView.querySelectorAll<HTMLElement>('.koi-svg-node'))) {
+    // Scope to the primary diagram SVG — the minimap (#145) clones the node layer as a decorative
+    // thumbnail, so an unscoped query would also (wrongly) highlight the clone.
+    for (const node of Array.from(diagramsView.querySelectorAll<HTMLElement>('.koi-svg-diagram .koi-svg-node'))) {
       node.classList.toggle('is-selected', ctxName != null && node.dataset.qname === ctxName);
     }
   }

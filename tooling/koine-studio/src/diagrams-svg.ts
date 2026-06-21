@@ -12,7 +12,8 @@
 // non-bundled build spawns a Web Worker from a blob: URL, which CSP forbids).
 import type { DiagramRenderer } from './diagrams';
 import { createMermaidRenderer } from './diagrams';
-import { clampScale, fit, panBy, zoomAt, zoomPercent, type Size, type ViewBox } from './canvasView';
+import { centerOn, clampScale, fit, panBy, zoomAt, zoomPercent, type Size, type ViewBox } from './canvasView';
+import { loadDiagramZoom, saveDiagramZoom } from './store';
 import type { Diagram, DiagramGraph, DiagramMember, DiagramNode, DocsFile, SourceSpan } from './lsp';
 // Type-only import (erased at build time) of elkjs' own API surface, so our layout graph type-checks
 // against the real `ELK.layout` signature. The *value* is dynamically imported from the bundled build.
@@ -77,6 +78,8 @@ const ZOOM_BUTTON_STEP = 1.2; // the +/- buttons multiply the zoom by this
 const WHEEL_ZOOM_BASE = 1.0016; // per-unit wheel delta → zoom factor (pow(base, -deltaY))
 const MIN_CANVAS_SCALE = 0.1; // never shrink below 10% (content unit : screen pixel)
 const MAX_CANVAS_SCALE = 8; // never magnify past 800%
+const MINIMAP_MAX_W = 180; // the minimap thumbnail is sized to fit within this box, keeping content aspect
+const MINIMAP_MAX_H = 140;
 
 // UML class-box compartments (issue #93 follow-up). A class node draws a header (stereotype + bold
 // label), then an attribute compartment, then — when present — a method compartment, each row a line.
@@ -469,10 +472,10 @@ function reframeToAspect(view: ViewBox, vp: Size): ViewBox {
  * cursor, and drag-to-pan on empty space. The layout (elkjs) and the per-node click-to-source navigation
  * are untouched — a pan never starts on a `.koi-svg-node`, so node clicks still reach their handler.
  *
- * Geometry is pure (canvasView.ts); this function is the DOM/pointer shell around it. It returns a
- * {@link CanvasController} the minimap (Task 3) layers onto without duplicating any of this plumbing.
+ * Geometry is pure (canvasView.ts); this function is the DOM/pointer shell around it. `persistKey`, when
+ * given, round-trips this diagram's last zoom through the store so reopening the tab restores it.
  */
-function mountInteractiveCanvas(surface: HTMLElement, svg: SVGSVGElement): CanvasController {
+function mountInteractiveCanvas(surface: HTMLElement, svg: SVGSVGElement, persistKey?: string): CanvasController {
   const contentBounds = readViewBox(svg);
 
   // The svg now fills its canvas; the viewBox we mutate decides what's shown. Matching the viewBox aspect
@@ -513,11 +516,20 @@ function mountInteractiveCanvas(surface: HTMLElement, svg: SVGSVGElement): Canva
   let view: ViewBox = fit(contentBounds, viewport(), CANVAS_FIT_PADDING);
   // Until the user zooms/pans, a resize re-fits; after, a resize only re-aspects (keeps their zoom).
   let userAdjusted = false;
+  // A persisted zoom can only be honoured once the canvas has a real pixel size (zoom % is relative to
+  // it), so it waits for the first ResizeObserver measurement rather than the (sizeless) mount.
+  const pendingRestorePct = persistKey ? loadDiagramZoom(persistKey) : null;
+  let initialized = false;
 
   function paint(): void {
     svg.setAttribute('viewBox', viewBoxAttr(view));
     pct.textContent = `${zoomPercent(view, viewport())}%`;
     for (const fn of listeners) fn(view);
+  }
+
+  /** Remember this diagram's current zoom % (best-effort) so a tab re-open restores it. */
+  function persist(): void {
+    if (persistKey) saveDiagramZoom(persistKey, zoomPercent(view, viewport()));
   }
 
   function setView(next: ViewBox): void {
@@ -530,6 +542,7 @@ function mountInteractiveCanvas(surface: HTMLElement, svg: SVGSVGElement): Canva
     view = fit(contentBounds, viewport(), CANVAS_FIT_PADDING);
     userAdjusted = false;
     paint();
+    persist();
   }
 
   /** Map a client (pixel) point to content coordinates within the current window. */
@@ -555,8 +568,23 @@ function mountInteractiveCanvas(surface: HTMLElement, svg: SVGSVGElement): Canva
     zoomBy(factor, view.x + view.w / 2, view.y + view.h / 2);
   }
 
-  zoomIn.addEventListener('click', () => zoomAboutCenter(ZOOM_BUTTON_STEP));
-  zoomOut.addEventListener('click', () => zoomAboutCenter(1 / ZOOM_BUTTON_STEP));
+  /** Restore a saved zoom % by zooming about the current center to reach that scale (clamped). */
+  function applyZoomPercent(percent: number): void {
+    const vp = viewport();
+    if (vp.w <= 0 || percent <= 0) return;
+    const currentScale = vp.w / view.w;
+    const targetScale = percent / 100;
+    zoomBy(targetScale / currentScale, view.x + view.w / 2, view.y + view.h / 2);
+  }
+
+  zoomIn.addEventListener('click', () => {
+    zoomAboutCenter(ZOOM_BUTTON_STEP);
+    persist();
+  });
+  zoomOut.addEventListener('click', () => {
+    zoomAboutCenter(1 / ZOOM_BUTTON_STEP);
+    persist();
+  });
   fitBtn.addEventListener('click', () => fitToScreen());
 
   // Wheel (and trackpad pinch, which arrives as ctrl+wheel) zoom, anchored at the cursor.
@@ -566,6 +594,7 @@ function mountInteractiveCanvas(surface: HTMLElement, svg: SVGSVGElement): Canva
       e.preventDefault();
       const anchor = toContent(e.clientX, e.clientY);
       zoomBy(Math.pow(WHEEL_ZOOM_BASE, -e.deltaY), anchor.x, anchor.y);
+      persist();
     },
     { passive: false },
   );
@@ -586,8 +615,12 @@ function mountInteractiveCanvas(surface: HTMLElement, svg: SVGSVGElement): Canva
   }
 
   canvas.addEventListener('pointerdown', (e: PointerEvent) => {
-    // Don't hijack a click on a navigable node — let it bubble to the navigate handler.
-    if ((e.target as Element | null)?.closest('.koi-svg-node')) return;
+    const target = e.target as Element | null;
+    // Don't hijack a click on a navigable node (let it reach the navigate handler) or on the overlay
+    // chrome — the control bar and the minimap own their own pointer behaviour.
+    if (target?.closest('.koi-svg-node') || target?.closest('.koi-canvas-controls') || target?.closest('.koi-minimap')) {
+      return;
+    }
     pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
     if (pointers.size === 1) {
       panLast = { x: e.clientX, y: e.clientY };
@@ -638,17 +671,29 @@ function mountInteractiveCanvas(surface: HTMLElement, svg: SVGSVGElement): Canva
     if (pointers.size === 0) {
       panLast = null;
       canvas.classList.remove('koi-canvas--panning');
+      persist(); // a pinch settles here; pan doesn't change zoom, so this is a no-op write after a drag
     }
   }
   canvas.addEventListener('pointerup', endPointer);
   canvas.addEventListener('pointercancel', endPointer);
 
+  // The minimap thumbnail (Task 3) lives in the same canvas; it reads the live window and recenters it.
+  buildMinimap(canvas, svg, contentBounds, () => view, (next) => setView(next), (fn) => listeners.push(fn));
+
   // Re-fit while the canvas is auto (e.g. it first gets a real size after mount); once the user has taken
-  // over, keep their zoom but re-aspect so the picture never distorts when the panel is resized.
+  // over, keep their zoom but re-aspect so the picture never distorts when the panel is resized. The very
+  // first real measurement also honours a persisted zoom (which needs the true pixel size to be exact).
   if (typeof ResizeObserver !== 'undefined') {
     const ro = new ResizeObserver(() => {
       const vp = viewport();
       if (vp.w <= 0 || vp.h <= 0) return;
+      if (!initialized) {
+        initialized = true;
+        view = fit(contentBounds, vp, CANVAS_FIT_PADDING);
+        paint();
+        if (pendingRestorePct != null) applyZoomPercent(pendingRestorePct);
+        return;
+      }
       view = userAdjusted ? reframeToAspect(view, vp) : fit(contentBounds, vp, CANVAS_FIT_PADDING);
       paint();
     });
@@ -667,6 +712,106 @@ function mountInteractiveCanvas(surface: HTMLElement, svg: SVGSVGElement): Canva
       listeners.push(fn);
     },
   };
+}
+
+/**
+ * Build the minimap overlay (issue #145, Task 3): a scaled-down thumbnail of the *same* laid-out graph
+ * with a window rectangle that tracks the main canvas's `viewBox`, and click/drag-to-recenter. It reuses
+ * the controller's view (read via `getView`, command via `setView`, subscribe via `onChange`) so there's
+ * one source of truth — the thumbnail can never drift from the main canvas.
+ */
+function buildMinimap(
+  canvas: HTMLElement,
+  svg: SVGSVGElement,
+  contentBounds: ViewBox,
+  getView: () => ViewBox,
+  setView: (v: ViewBox) => void,
+  onChange: (fn: (view: ViewBox) => void) => void,
+): void {
+  // Size the thumbnail to fit within the max box while keeping the diagram's aspect ratio (so the svg
+  // element aspect == its viewBox aspect → 'meet' never letterboxes → the click→content map is linear).
+  const aspect = contentBounds.h > 0 ? contentBounds.w / contentBounds.h : 1;
+  let mw = MINIMAP_MAX_W;
+  let mh = MINIMAP_MAX_W / aspect;
+  if (mh > MINIMAP_MAX_H) {
+    mh = MINIMAP_MAX_H;
+    mw = MINIMAP_MAX_H * aspect;
+  }
+
+  const mini = document.createElement('div');
+  mini.className = 'koi-minimap';
+  mini.setAttribute('aria-hidden', 'true'); // a decorative overview; the control bar is the keyboard path
+
+  const miniSvg = svgEl('svg');
+  miniSvg.setAttribute('class', 'koi-minimap-svg');
+  miniSvg.setAttribute('viewBox', viewBoxAttr(contentBounds));
+  miniSvg.setAttribute('width', String(Math.round(mw)));
+  miniSvg.setAttribute('height', String(Math.round(mh)));
+  miniSvg.setAttribute('preserveAspectRatio', 'xMidYMid meet');
+
+  // Reuse the laid-out content at thumbnail size: clone the edge + node layers (NOT <defs>, so there are
+  // no duplicate element ids). The clones are inert — cloneNode drops listeners and CSS makes the whole
+  // thumbnail click-through — so only the minimap's own recenter gesture drives it.
+  const content = svgEl('g');
+  content.setAttribute('class', 'koi-minimap-content');
+  for (const sel of ['.koi-svg-edges', '.koi-svg-nodes']) {
+    const layer = svg.querySelector(sel);
+    if (layer) content.appendChild(layer.cloneNode(true));
+  }
+  // The clones keep their visual classes (so the thumbnail looks like the diagram) but shed their
+  // *addressable* identity — no qname/span — so the minimap can never be mistaken for a real, navigable
+  // node by selection-highlight or jump-to-source queries (which scope to `.koi-svg-diagram` anyway).
+  for (const node of content.querySelectorAll('.koi-svg-node')) {
+    for (const attr of ['data-qname', 'data-file', 'data-line', 'data-column', 'data-end-line', 'data-end-column']) {
+      node.removeAttribute(attr);
+    }
+  }
+  miniSvg.appendChild(content);
+
+  const windowRect = svgEl('rect');
+  windowRect.setAttribute('class', 'koi-minimap-window');
+  miniSvg.appendChild(windowRect);
+
+  mini.appendChild(miniSvg);
+  canvas.appendChild(mini);
+
+  /** Mirror the main window onto the thumbnail rectangle (in content coordinates). */
+  function paintWindow(view: ViewBox): void {
+    windowRect.setAttribute('x', String(view.x));
+    windowRect.setAttribute('y', String(view.y));
+    windowRect.setAttribute('width', String(Math.max(0, view.w)));
+    windowRect.setAttribute('height', String(Math.max(0, view.h)));
+  }
+  onChange(paintWindow);
+  paintWindow(getView());
+
+  // Click / drag inside the thumbnail recenters the main canvas on that content point (zoom unchanged).
+  let dragging = false;
+  function recenterFrom(clientX: number, clientY: number): void {
+    const rect = miniSvg.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) return;
+    const cx = contentBounds.x + ((clientX - rect.left) / rect.width) * contentBounds.w;
+    const cy = contentBounds.y + ((clientY - rect.top) / rect.height) * contentBounds.h;
+    setView(centerOn(getView(), cx, cy));
+  }
+  mini.addEventListener('pointerdown', (e: PointerEvent) => {
+    e.stopPropagation(); // the canvas must not treat a minimap drag as a pan
+    dragging = true;
+    try {
+      mini.setPointerCapture?.(e.pointerId);
+    } catch {
+      // setPointerCapture unsupported (older/headless DOM) — recenter still works on subsequent moves.
+    }
+    recenterFrom(e.clientX, e.clientY);
+  });
+  mini.addEventListener('pointermove', (e: PointerEvent) => {
+    if (dragging) recenterFrom(e.clientX, e.clientY);
+  });
+  function endDrag(): void {
+    dragging = false;
+  }
+  mini.addEventListener('pointerup', endDrag);
+  mini.addEventListener('pointercancel', endDrag);
 }
 
 /**
@@ -741,8 +886,9 @@ export function createSvgRenderer(): DiagramRenderer {
             try {
               const svg = await drawGraph(graph, Elk);
               // Layer the interactive canvas (pan/zoom/fit + minimap) over the drawn SVG. Pure geometry
-              // lives in canvasView.ts; the elkjs layout and node click-to-source stay untouched.
-              mountInteractiveCanvas(surface, svg);
+              // lives in canvasView.ts; the elkjs layout and node click-to-source stay untouched. The
+              // page/caption pair keys this diagram's persisted zoom so a tab re-open restores it.
+              mountInteractiveCanvas(surface, svg, `${page.title} / ${diagram.caption}`);
             } catch {
               // Layout/draw failed for this graph → fall back to Mermaid for this diagram only.
               surface.replaceChildren();

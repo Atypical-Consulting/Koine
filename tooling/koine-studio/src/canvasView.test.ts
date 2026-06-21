@@ -3,7 +3,7 @@
 // move/scale it without ever touching the DOM. The renderer (diagrams-svg.ts) owns the SVG and the
 // pointer plumbing; this module owns the geometry, so it can be reasoned about and tested in isolation.
 import { describe, expect, test } from 'vitest';
-import { zoomAt, panBy, fit, zoomPercent, clampScale, type ViewBox } from './canvasView';
+import { zoomAt, panBy, centerOn, fit, zoomPercent, clampScale, type ViewBox } from './canvasView';
 
 /** The on-screen fractional position of a content point within a viewBox (0..1 along each axis). */
 function frac(vb: ViewBox, cx: number, cy: number): { fx: number; fy: number } {
@@ -55,6 +55,17 @@ describe('panBy', () => {
     const once = panBy({ x: 3, y: 4, w: 100, h: 100 }, 10, 20);
     const twice = panBy(once, -10, -20);
     expect(twice).toEqual({ x: 3, y: 4, w: 100, h: 100 });
+  });
+});
+
+describe('centerOn', () => {
+  test('moves the window center to the point, keeping its size', () => {
+    const vb: ViewBox = { x: 0, y: 0, w: 40, h: 20 };
+    const out = centerOn(vb, 100, 50);
+    expect(out.w).toBe(40);
+    expect(out.h).toBe(20);
+    expect(out.x + out.w / 2).toBeCloseTo(100, 10);
+    expect(out.y + out.h / 2).toBeCloseTo(50, 10);
   });
 });
 
