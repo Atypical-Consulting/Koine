@@ -13,7 +13,9 @@ internal sealed record TargetOptions(
     IReadOnlyDictionary<string, string> NamespaceMap,
     string? InstantMode,
     string? Layout,
-    IReadOnlyList<string>? Layers = null)
+    IReadOnlyList<string>? Layers = null,
+    bool ApplicationMediatr = false,
+    string? ApplicationMapping = null)
 {
     public static readonly TargetOptions Empty =
         new(null, new Dictionary<string, string>(StringComparer.Ordinal), null, null);
@@ -192,11 +194,15 @@ internal sealed record KoineConfig(
                 builder.Layout = value;
                 break;
             case "layers" when parts.Length == 3:
-                // The opt-in C# layer selector (issue #128): a comma-separated list (e.g.
-                // `domain,infrastructure`). Validation/normalization happens at resolution time.
-                builder.Layers = value
-                    .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-                    .ToList();
+                // Composable output layers: comma-separated, case-insensitive (e.g.
+                // `domain,application,infrastructure`; issues #128/#129). Parsed into a list at Build().
+                builder.Layers = value;
+                break;
+            case "application" when parts.Length == 4 && parts[3] == "mediatr":
+                builder.ApplicationMediatr = value;
+                break;
+            case "application" when parts.Length == 4 && parts[3] == "mapping":
+                builder.ApplicationMapping = value;
                 break;
             case "namespaces" when parts.Length == 4 && parts[3].Length > 0:
                 builder.NamespaceMap[parts[3]] = value;
@@ -245,9 +251,33 @@ internal sealed record KoineConfig(
         public string? OutDir;
         public string? InstantMode;
         public string? Layout;
-        public List<string>? Layers;
+        public string? Layers;
+        public string? ApplicationMediatr;
+        public string? ApplicationMapping;
         public readonly Dictionary<string, string> NamespaceMap = new(StringComparer.Ordinal);
 
-        public TargetOptions Build() => new(OutDir, NamespaceMap, InstantMode, Layout, Layers);
+        public TargetOptions Build() => new(
+            OutDir, NamespaceMap, InstantMode, Layout,
+            ParseLayers(Layers),
+            string.Equals(ApplicationMediatr, "true", StringComparison.OrdinalIgnoreCase),
+            ApplicationMapping);
+    }
+
+    /// <summary>
+    /// Splits a comma-separated <c>layers</c> value into a normalized list (trimmed, lower-cased,
+    /// empty entries dropped). <c>null</c>/blank → <c>null</c> (the default domain-only output).
+    /// </summary>
+    internal static IReadOnlyList<string>? ParseLayers(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return null;
+        }
+
+        var layers = value
+            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(l => l.ToLowerInvariant())
+            .ToList();
+        return layers.Count == 0 ? null : layers;
     }
 }

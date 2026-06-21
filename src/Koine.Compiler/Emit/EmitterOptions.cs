@@ -14,8 +14,10 @@ namespace Koine.Compiler.Emit;
 /// the unconfigured emitter is byte-identical. <see cref="ReferenceOnly"/> emits a declaration-only
 /// contract surface (all signatures/interfaces, bodies stripped to reference stubs); it defaults to
 /// <c>false</c> so the unconfigured emitter is byte-identical. <see cref="Layers"/> is a
-/// comma-separated layer selector (issue #128, e.g. <c>domain,infrastructure</c>) consumed by the C#
-/// emitter; <c>null</c> means the historical Domain-only output. <see cref="Empty"/> applies no
+/// comma-separated layer selector (e.g. <c>domain,application,infrastructure</c>) consumed by the C#
+/// emitter; <c>null</c> means the historical Domain-only output. <see cref="ApplicationMediatr"/> and
+/// <see cref="ApplicationMapping"/> are the C# Application-layer sub-options (issue #129: MediatR
+/// request shape; <c>plain</c>|<c>mapperly</c> mapping). <see cref="Empty"/> applies no
 /// configuration, so a provider given it produces output byte-identical to a parameterless emitter.</para>
 /// </summary>
 public sealed record EmitterOptions(
@@ -24,7 +26,9 @@ public sealed record EmitterOptions(
     string? Layout = null,
     bool EmitSourceMaps = false,
     bool ReferenceOnly = false,
-    string? Layers = null)
+    string? Layers = null,
+    bool ApplicationMediatr = false,
+    string? ApplicationMapping = null)
 {
     /// <summary>An options bag with no remapping and all defaults — the parameterless path.</summary>
     public static readonly EmitterOptions Empty =

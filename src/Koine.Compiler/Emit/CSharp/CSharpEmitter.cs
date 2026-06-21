@@ -57,6 +57,8 @@ public sealed partial class CSharpEmitter : IEmitter
                 "sourceMaps=" + _options.EmitSourceMaps,
                 "refOnly=" + _options.ReferenceOnly,
                 "layers=" + layers,
+                "mediatr=" + _options.ApplicationMediatr,
+                "mapping=" + _options.Mapping,
                 "ns=" + map);
         }
     }
@@ -288,7 +290,18 @@ public sealed partial class CSharpEmitter : IEmitter
             }
         }
 
-        // 7. The opt-in EF Core Infrastructure layer (issue #128): a runnable realization of the
+        // 7. The opt-in Application layer (issue #129): concrete handlers, validators, query
+        //    handlers and the DI extension that implement the contracts emitted above. Gated on
+        //    the `application` layer; off by default, so non-application output is unchanged.
+        if (_options.EmitApplication)
+        {
+            foreach (ContextNode ctx in model.Contexts)
+            {
+                EmitApplicationLayer(emit, files, ctx, index, typeMapper, enumMemberToType);
+            }
+        }
+
+        // 8. The opt-in EF Core Infrastructure layer (issue #128): a runnable realization of the
         //    contracts emitted above (DbContext, entity configurations, repositories, unit of work,
         //    transactional outbox + dispatcher, DI registration). Off by default, so the steps above
         //    are byte-identical to the historical emitter when the layer is not requested.
@@ -1713,12 +1726,13 @@ public sealed partial class CSharpEmitter : IEmitter
         Assemble(emit, ns, body, usesLinq, declSpan: SourceSpan.None, out _);
 
     /// <summary>
-    /// Infrastructure-layer assembly (issue #128): like <see cref="Assemble(EmitContext, string, string, bool)"/>
-    /// but injects <paramref name="requiredUsings"/> (the EF Core / DI namespaces a generated infrastructure
-    /// file needs, which a body-token scan cannot infer) alongside the auto-derived ones.
+    /// <see cref="Assemble(EmitContext, string, string, bool)"/> with explicit extra <c>using</c>s the
+    /// body's token scan cannot infer: the opt-in Application layer's third-party imports (issue #129:
+    /// FluentValidation, MediatR, DI) and the Infrastructure layer's EF Core / DI namespaces (issue #128).
+    /// Source maps are not emitted for generated orchestration (it has no single <c>.koi</c> origin span).
     /// </summary>
-    private string Assemble(EmitContext emit, string ns, string body, bool usesLinq, IEnumerable<string> requiredUsings) =>
-        Assemble(emit, ns, body, usesLinq, declSpan: SourceSpan.None, out _, requiredUsings);
+    private string Assemble(EmitContext emit, string ns, string body, bool usesLinq, IEnumerable<string> extraUsings) =>
+        Assemble(emit, ns, body, usesLinq, declSpan: SourceSpan.None, out _, extraUsings);
 
     /// <summary>
     /// <see cref="Assemble(EmitContext, string, string, bool)"/> with optional source-map output.
@@ -1734,13 +1748,25 @@ public sealed partial class CSharpEmitter : IEmitter
     private string Assemble(
         EmitContext emit, string ns, string body, bool usesLinq,
         SourceSpan declSpan, out IReadOnlyList<SourceMapSegment>? sourceMap,
-        IEnumerable<string>? requiredUsings = null)
+        IEnumerable<string>? extraUsings = null)
     {
         // Usings are derived from data — a UsingCollector that maps runtime/BCL markers and
         // cross-namespace user-type references to their namespaces — rather than a fixed block,
         // so files carry no unused imports.
         var collector = new UsingCollector();
         collector.CollectRuntimeNamespaces(ns, body, usesLinq);
+
+        // The opt-in Application (issue #129) and Infrastructure (issue #128) layers reference
+        // namespaces the marker scan can't derive — FluentValidation/MediatR/DI for application,
+        // EF Core/DI for infrastructure — so callers pass them explicitly. Always null on the default
+        // paths, so non-layered output stays byte-identical.
+        if (extraUsings is not null)
+        {
+            foreach (var u in extraUsings)
+            {
+                collector.AddNamespace(u);
+            }
+        }
 
         // Cross-namespace user-type references (other contexts via imports, and other
         // modules of the same context) emit unqualified, so a precise `using` is added for
@@ -1750,15 +1776,6 @@ public sealed partial class CSharpEmitter : IEmitter
         // (R16.1). Cross-context `using`s and the namespace declaration are computed against
         // the remapped form so a relocated context is referenced by its new namespace everywhere.
         var emittedNs = emit.RemapNamespace(ns);
-
-        // Infrastructure files (issue #128) carry EF Core / DI namespaces a token scan can't infer.
-        if (requiredUsings is not null)
-        {
-            foreach (var u in requiredUsings)
-            {
-                collector.Require(u);
-            }
-        }
 
         var context = ns.Split('.')[0];
         if (emit.ContextNames.Contains(context))
@@ -2009,6 +2026,9 @@ public sealed partial class CSharpEmitter : IEmitter
         public const string Policies = "Policies";
         public const string Repositories = "Repositories";
         public const string Abstractions = "Abstractions";
+
+        /// <summary>The opt-in Application layer (issue #129).</summary>
+        public const string Application = "Application";
 
         /// <summary>The opt-in EF Core infrastructure layer (issue #128).</summary>
         public const string Infrastructure = "Infrastructure";

@@ -163,6 +163,9 @@ dotnet run --project src/Koine.Cli -- build templates/starters/billing/billing.k
 # Or to Rust (Phase 1: tactical core — an idiomatic crate; `cargo build` proves it compiles)
 dotnet run --project src/Koine.Cli -- build templates/starters/billing/billing.koi --target rust --out ./generated_rs
 
+# Emit the opt-in C# Application layer alongside the domain (handlers, validators, query handlers, DI)
+dotnet run --project src/Koine.Cli -- build templates/starters/billing/billing.koi --target csharp --layers domain,application --out ./generated
+
 # Generate living documentation (Markdown + Mermaid state/class/context-map diagrams)
 dotnet run --project src/Koine.Cli -- build templates/starters/billing/billing.koi --target docs --out ./docs
 
@@ -208,6 +211,36 @@ the `Action<DbContextOptionsBuilder>`, so the emitter stays provider-agnostic. E
 Other CLI commands: `check` (model-versioning compatibility against a `--baseline`), `fmt` (canonical
 formatter), `init` (scaffold a project), `watch` (rebuild on change), and `lsp` (language server over
 stdio). See the [CLI reference](https://atypical-consulting.github.io/Koine/guides/cli/).
+
+### The C# Application layer (opt-in)
+
+By default `--target csharp` stops at the **application boundary**: it emits the *contracts* —
+`IUnitOfWork`, the `I<Service>` use-case interfaces, read-model projections, query objects and the
+`IQueryHandler<,>` runtime type — but no implementations. Pass `--layers domain,application` to also
+emit the **Application layer** that fills those in:
+
+| Construct | Emitted application code |
+|-----------|--------------------------|
+| aggregate **command** | a `<Entity><Command>Request` record + a handler that loads the aggregate via its `IUnitOfWork` repository, invokes the behavior, and `SaveChangesAsync`. |
+| aggregate **factory** | a `<Entity><Factory>Request` record + a handler that creates the aggregate, adds it via the repository, and commits. |
+| value-object / command **invariant** | a FluentValidation `AbstractValidator<TRequest>` rule (`RuleFor(...).Must(...).WithMessage(...)`) rendered from the same invariant the domain enforces — not re-derived by hand. |
+| **query** | a concrete `IQueryHandler<,>`; a single result keyed by the root's identity loads + projects via the `To<ReadModel>` mapper, other shapes throw until wired to your read store. |
+| **DI** | an `Add<Context>Application(this IServiceCollection)` extension registering every handler, validator and query handler. |
+
+Plain handlers (no third-party runtime dependency beyond FluentValidation) are the **default**.
+Two opt-in sub-options, also settable via `koine.config` (`targets.csharp.application.mediatr`,
+`targets.csharp.application.mapping`):
+
+- `--app-mediatr` — emit the **MediatR** shape instead: `IRequest`/`IRequest<T>` requests,
+  `IRequestHandler<,>` handlers, and validation + transaction `IPipelineBehavior<,>`s.
+- `--app-mapping plain|mapperly` — DTO/read-model mapping strategy (`plain` hand-rolled mappers by
+  default; `mapperly` is reserved for source-generated mapping).
+
+With the layer **off** (the default), the emitted C# is byte-identical to before. Koine `usecase`
+declarations carry no binding to a specific aggregate behavior, so the generated `I<Service>`
+implementation throws `NotImplementedException` until wired — the generated command/factory handlers
+are the real entry points. `MediatR`/`FluentValidation`/`Mapperly` are C#-emitter concerns and never
+leak into the target-agnostic model.
 
 ## The language
 

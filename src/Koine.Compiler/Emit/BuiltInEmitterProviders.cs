@@ -46,7 +46,8 @@ internal sealed class CSharpEmitterProvider : IEmitterProvider
     private static CSharpEmitterOptions ToCSharpOptions(EmitterOptions options)
     {
         if (options.NamespaceMap.Count == 0 && options.InstantMode is null && !options.EmitSourceMaps
-            && !options.ReferenceOnly && options.Layers is null)
+            && !options.ReferenceOnly && options.Layers is null
+            && !options.ApplicationMediatr && options.ApplicationMapping is null)
         {
             return CSharpEmitterOptions.Empty;
         }
@@ -54,14 +55,19 @@ internal sealed class CSharpEmitterProvider : IEmitterProvider
         var instant = string.Equals(options.InstantMode, "nodaTime", StringComparison.OrdinalIgnoreCase)
             ? CSharpInstantMode.NodaTime
             : CSharpInstantMode.DateTimeOffset;
-        return new CSharpEmitterOptions(options.NamespaceMap, instant, options.EmitSourceMaps, options.ReferenceOnly, ParseLayers(options.Layers));
+        var mapping = string.Equals(options.ApplicationMapping, "mapperly", StringComparison.OrdinalIgnoreCase)
+            ? CSharpMappingMode.Mapperly
+            : CSharpMappingMode.Plain;
+        return new CSharpEmitterOptions(
+            options.NamespaceMap, instant, options.EmitSourceMaps, options.ReferenceOnly,
+            ParseLayers(options.Layers), options.ApplicationMediatr, mapping);
     }
 
     /// <summary>
-    /// Parses the comma-separated <c>layers</c> selector (issue #128) into a layer set. <c>null</c>
-    /// (the default) maps to <c>null</c> ⇒ Domain-only. <c>infrastructure</c> always implies
-    /// <c>domain</c> (you cannot emit the infrastructure without the contracts it realizes). Names are
-    /// case-insensitive; unknown names are dropped here (the CLI rejects them up front with an error).
+    /// Parses the comma-separated <c>layers</c> selector into a layer set. <c>null</c> (the default)
+    /// maps to <c>null</c> ⇒ Domain-only. Both opt-in layers imply <c>domain</c>: <c>application</c>
+    /// (issue #129) and <c>infrastructure</c> (issue #128, the EF Core realization of the contracts).
+    /// Names are case-insensitive; unknown names are dropped here (the CLI rejects them up front).
     /// </summary>
     private static IReadOnlySet<CSharpLayer>? ParseLayers(string? layers)
     {
@@ -73,7 +79,11 @@ internal sealed class CSharpEmitterProvider : IEmitterProvider
         var set = new HashSet<CSharpLayer> { CSharpLayer.Domain };
         foreach (var name in layers.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
         {
-            if (string.Equals(name, "infrastructure", StringComparison.OrdinalIgnoreCase))
+            if (string.Equals(name, "application", StringComparison.OrdinalIgnoreCase))
+            {
+                set.Add(CSharpLayer.Application);
+            }
+            else if (string.Equals(name, "infrastructure", StringComparison.OrdinalIgnoreCase))
             {
                 set.Add(CSharpLayer.Infrastructure);
             }
