@@ -69,6 +69,61 @@ export interface GlossaryModel {
   entries: GlossaryEntry[];
 }
 
+// `koine/model*` (round-trip seam, #91): the structured model graph an editor drives forms/canvases
+// from. The contract is additive-only — new fields are appended, existing ones never repurposed.
+// A `ModelNode` is one declaration (the `model` root, a `context`, an aggregate/entity/value/enum/
+// event, a state machine, or the context map); a `ModelMember` is one editable leaf (a field, enum
+// member, transition, or relation).
+export interface ModelMember {
+  kind: string;
+  name: string;
+  type: string | null;
+  value: string | null;
+}
+export interface ModelNode {
+  kind: string;
+  qualifiedName: string;
+  title: string;
+  members: ModelMember[];
+  children: ModelNode[];
+}
+export interface ModelMembersResult {
+  members: ModelMember[];
+}
+
+// A scoped structural edit against the model. `kind` is one of: 'renameMember' | 'addField' |
+// 'removeMember' | 'changeFieldType' | 'addTransition'. `target` is the qualified name the edit
+// applies to; `name`/`type` carry the new name / field type / transition states per kind.
+export interface StructuredEdit {
+  kind: string;
+  target: string;
+  name?: string | null;
+  type?: string | null;
+  value?: string | null;
+}
+
+// A round-trip diagnostic: the rejecting KOIxxxx with its range and owning file.
+export interface ModelDiagnostic {
+  code: string;
+  message: string;
+  range: Range;
+  uri: string | null;
+}
+
+// `koine/emitKoine` result: the canonical `.koi` for the affected declaration (null when the edit
+// is illegal), plus any rejecting diagnostics.
+export interface EmitKoineResult {
+  koine: string | null;
+  diagnostics: ModelDiagnostic[];
+}
+
+// `koine/applyModelEdit` result: a span-minimal patch over just the touched declaration.
+export interface ModelEditResult {
+  uri: string | null;
+  edits: TextEdit[];
+  diagnostics: ModelDiagnostic[];
+}
+
 // `koine/setDoc` result: the file the edits apply to (null when the id is unknown) and the
 // localized TextEdits that insert/replace/clear the declaration's `///` block.
 export interface SetDocResult {
@@ -559,6 +614,41 @@ export class KoineLsp {
   glossaryModel(): Promise<GlossaryModel> {
     return this.request<GlossaryModel>('koine/glossaryModel', {
       textDocument: { uri: this.activeUri },
+    });
+  }
+
+  /**
+   * Structured model graph (#91) for the merged workspace — the whole tree, or the subtree at
+   * `qualifiedName` when given — that a visual editor builds forms/canvases from.
+   */
+  model(qualifiedName?: string): Promise<ModelNode> {
+    return this.request<ModelNode>('koine/model', {
+      textDocument: { uri: this.activeUri },
+      qualifiedName: qualifiedName ?? null,
+    });
+  }
+
+  /** The editable children (fields, enum members, transitions, relations) of a model node (#91). */
+  modelMembers(qualifiedName: string): Promise<ModelMembersResult> {
+    return this.request<ModelMembersResult>('koine/modelMembers', {
+      textDocument: { uri: this.activeUri },
+      qualifiedName,
+    });
+  }
+
+  /** Apply a structured edit and get back the validated canonical `.koi` (or diagnostics) (#91). */
+  emitKoine(edit: StructuredEdit): Promise<EmitKoineResult> {
+    return this.request<EmitKoineResult>('koine/emitKoine', {
+      textDocument: { uri: this.activeUri },
+      edit,
+    });
+  }
+
+  /** Apply a structured edit and get back a span-minimal `TextEdit` patch for the buffer (#91). */
+  applyModelEdit(edit: StructuredEdit): Promise<ModelEditResult> {
+    return this.request<ModelEditResult>('koine/applyModelEdit', {
+      textDocument: { uri: this.activeUri },
+      edit,
     });
   }
 
