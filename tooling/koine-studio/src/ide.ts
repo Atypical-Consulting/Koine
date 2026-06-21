@@ -31,6 +31,7 @@ import {
   saveActiveContext,
   saveWorkspaceMode,
   type Settings,
+  type PreviewTarget,
 } from './store';
 import { createWelcome } from './welcome';
 import { type Template } from './templates';
@@ -313,9 +314,6 @@ function helpRows(): ShortcutRow[] {
     { keys: 'mod+Alt+S', description: 'Save all unsaved files' },
     { keys: 'mod+Shift+O', description: 'Open a folder of models' },
     { keys: 'mod+N', description: 'New model' },
-    { keys: 'mod+1', description: 'Preview C#' },
-    { keys: 'mod+2', description: 'Preview TypeScript' },
-    { keys: 'mod+3', description: 'Preview Python' },
     { keys: 'F2', description: 'Rename symbol' },
     { keys: 'Shift+F12', description: 'Find all references' },
     { keys: 'mod+.', description: 'Quick fixes & refactors' },
@@ -1803,109 +1801,22 @@ export function init(): void {
     }
   }
 
-  // Destination-language split button: the main half previews the current target, the caret opens a
-  // picker. Previewing also surfaces the preview tab and adopts that target as the new "current".
-  type PreviewTarget = 'csharp' | 'typescript' | 'python' | 'php';
-  const LANGS: { id: PreviewTarget; label: string; name: string; hint: string }[] = [
-    { id: 'csharp', label: 'C#', name: 'C#', hint: '⌘1' },
-    { id: 'typescript', label: 'TS', name: 'TypeScript', hint: '⌘2' },
-    { id: 'python', label: 'Python', name: 'Python', hint: '⌘3' },
-    { id: 'php', label: 'PHP', name: 'PHP', hint: '⌘4' },
+  // Destination language for the emitted-code preview. The choice lives in Settings → Output
+  // (persisted); this keeps a live copy and labels the "Generated" sub-tab with the active language.
+  const LANGS: { id: PreviewTarget; name: string }[] = [
+    { id: 'csharp', name: 'C#' },
+    { id: 'typescript', name: 'TypeScript' },
+    { id: 'python', name: 'Python' },
+    { id: 'php', name: 'PHP' },
   ];
-  let currentTarget: PreviewTarget = 'csharp';
+  let currentTarget: PreviewTarget = settings.previewTarget;
 
-  const runBtn = el<HTMLButtonElement>('btn-preview-run');
-  const caretBtn = el<HTMLButtonElement>('btn-lang-menu');
-  const currentLabel = el<HTMLElement>('lang-current-label');
-  const currentDot = runBtn.querySelector<HTMLElement>('.lang-dot')!;
+  const previewTabEl = el<HTMLButtonElement>('tech-tab-preview');
 
   function setTarget(target: PreviewTarget): void {
     currentTarget = target;
     const meta = LANGS.find((l) => l.id === target)!;
-    currentLabel.textContent = meta.label;
-    currentDot.dataset.lang = target;
-    runBtn.title = `Preview ${meta.name} (${meta.hint})`;
-  }
-
-  // --- language picker popover (mirrors the explorer context menu) ------------
-  let langMenuEl: HTMLUListElement | null = null;
-
-  function openLangMenu(): void {
-    if (langMenuEl) {
-      closeLangMenu();
-      return;
-    }
-    const rect = (runBtn.parentElement as HTMLElement).getBoundingClientRect();
-    const menu = document.createElement('ul');
-    menu.className = 'lang-menu';
-    menu.setAttribute('role', 'menu');
-    menu.style.left = `${rect.left}px`;
-    menu.style.top = `${rect.bottom + 4}px`;
-    for (const lang of LANGS) {
-      const li = document.createElement('li');
-      li.setAttribute('role', 'none');
-      const btn = document.createElement('button');
-      btn.type = 'button';
-      btn.className = 'lang-menu-item';
-      btn.setAttribute('role', 'menuitemradio');
-      btn.setAttribute('aria-checked', String(lang.id === currentTarget));
-      btn.innerHTML =
-        `<span class="lang-dot" data-lang="${lang.id}" aria-hidden="true"></span>` +
-        `<span class="lang-name">${lang.name}</span>` +
-        `<span class="lang-hint">${lang.hint}</span>` +
-        '<svg class="lang-check" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8.4 6.4 12 13 4.4" /></svg>';
-      btn.addEventListener('click', () => {
-        closeLangMenu();
-        void preview(lang.id);
-      });
-      li.appendChild(btn);
-      menu.appendChild(li);
-    }
-    document.body.appendChild(menu);
-    langMenuEl = menu;
-    caretBtn.setAttribute('aria-expanded', 'true');
-    const items = Array.from(menu.querySelectorAll<HTMLElement>('.lang-menu-item'));
-    (items.find((b) => b.getAttribute('aria-checked') === 'true') ?? items[0])?.focus();
-    document.addEventListener('pointerdown', onLangDocPointer, true);
-    document.addEventListener('keydown', onLangKeydown, true);
-  }
-
-  function closeLangMenu(): void {
-    if (!langMenuEl) return;
-    langMenuEl.remove();
-    langMenuEl = null;
-    caretBtn.setAttribute('aria-expanded', 'false');
-    document.removeEventListener('pointerdown', onLangDocPointer, true);
-    document.removeEventListener('keydown', onLangKeydown, true);
-  }
-
-  function onLangDocPointer(ev: PointerEvent): void {
-    const t = ev.target as Node;
-    if (langMenuEl && !langMenuEl.contains(t) && !caretBtn.contains(t)) closeLangMenu();
-  }
-
-  function onLangKeydown(ev: KeyboardEvent): void {
-    if (!langMenuEl) return;
-    const items = Array.from(langMenuEl.querySelectorAll<HTMLElement>('.lang-menu-item'));
-    const active = document.activeElement as HTMLElement | null;
-    const i = active ? items.indexOf(active) : -1;
-    if (ev.key === 'Escape' || ev.key === 'Tab') {
-      ev.preventDefault();
-      closeLangMenu();
-      caretBtn.focus();
-    } else if (ev.key === 'ArrowDown') {
-      ev.preventDefault();
-      items[Math.min(items.length - 1, i + 1)]?.focus();
-    } else if (ev.key === 'ArrowUp') {
-      ev.preventDefault();
-      items[Math.max(0, i - 1)]?.focus();
-    } else if (ev.key === 'Home') {
-      ev.preventDefault();
-      items[0]?.focus();
-    } else if (ev.key === 'End') {
-      ev.preventDefault();
-      items[items.length - 1]?.focus();
-    }
+    previewTabEl.textContent = `Generated · ${meta.name}`;
   }
 
   // Emit the current target into the preview pane. Folded into the doc-view lifecycle (like the
@@ -1946,19 +1857,7 @@ export function init(): void {
     }
   }
 
-  // Explicit preview action (run button, language menu, ⌘1/2/3, palette): adopt the target, surface
-  // the preview tab, and force a re-emit even when it was already shown (e.g. for another target).
-  function preview(target: PreviewTarget): void {
-    setTarget(target);
-    docViewsLoaded.preview = false;
-    selectTech('preview');
-  }
-
-  runBtn.addEventListener('click', () => void preview(currentTarget));
-  caretBtn.addEventListener('click', (e) => {
-    e.stopPropagation();
-    openLangMenu();
-  });
+  // Label the "Generated" sub-tab with the persisted target on boot.
   setTarget(currentTarget);
 
   // --- open folder (directory-mode workspace) -------------------------------
@@ -2339,6 +2238,13 @@ export function init(): void {
       applyAppearance(s);
       editor.setLineWrap(s.wordWrap);
       output.setLineWrap(s.wordWrap);
+      // Destination language now lives in Settings → Output. Adopt a change to the live target and
+      // re-emit the Generated preview if it's the visible sub-view (else it reloads next open).
+      if (s.previewTarget !== currentTarget) {
+        setTarget(s.previewTarget);
+        docViewsLoaded.preview = false;
+        if (activeCenter === 'technical' && activeTech === 'preview') void loadPreview();
+      }
     },
     // Desktop hosts launch a `koine mcp --http` sidecar and return its loopback URL; the browser
     // returns null, so Settings hides the MCP affordance there.
@@ -2683,9 +2589,6 @@ export function init(): void {
   // palette, help overlay, and toolbar hint all show the same key.
   function getCommands(): Command[] {
     const cmds: Command[] = [
-      { id: 'preview-cs', title: 'Preview C#', hint: 'mod+1', group: 'Preview', run: () => void preview('csharp') },
-      { id: 'preview-ts', title: 'Preview TypeScript', hint: 'mod+2', group: 'Preview', run: () => void preview('typescript') },
-      { id: 'preview-py', title: 'Preview Python', hint: 'mod+3', group: 'Preview', run: () => void preview('python') },
       { id: 'format', title: 'Format document', hint: 'mod+S', group: 'Edit', run: () => void formatActive() },
       { id: 'home', title: 'Go to start screen', group: 'File', run: () => goHome() },
       { id: 'open-folder', title: 'Open folder…', hint: 'mod+Shift+O', group: 'File', run: () => void openFolder() },
@@ -2746,18 +2649,6 @@ export function init(): void {
     } else if (mod && !e.shiftKey && (e.key === 'n' || e.key === 'N')) {
       e.preventDefault();
       void requestNewModel();
-    } else if (mod && e.key === '1') {
-      e.preventDefault();
-      void preview('csharp');
-    } else if (mod && e.key === '2') {
-      e.preventDefault();
-      void preview('typescript');
-    } else if (mod && e.key === '3') {
-      e.preventDefault();
-      void preview('python');
-    } else if (mod && e.key === '4') {
-      e.preventDefault();
-      void preview('php');
     } else if (mod && e.key === ',') {
       e.preventDefault();
       prefs.open();
