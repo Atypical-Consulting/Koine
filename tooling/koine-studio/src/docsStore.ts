@@ -11,6 +11,7 @@ import type { FsEntry, Platform } from './host';
 import {
   type Adr,
   adrFilename,
+  adrSlug,
   adrTemplate,
   nextAdrNumber,
   parseAdr,
@@ -64,15 +65,6 @@ export interface DocsStore {
   createNote(title: string): Promise<NoteFile>;
 }
 
-/** A filesystem-safe slug for a note title (lowercase, non-alphanumeric → `-`). Empty → `note`. */
-function noteSlug(title: string): string {
-  const slug = title
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '');
-  return slug || 'note';
-}
-
 /** A readable title from a note filename: drop `.md`, turn separators into spaces, sentence-case it. */
 function noteTitleFromName(name: string): string {
   const base = name.replace(/\.md$/i, '').replace(/[-_]+/g, ' ').trim();
@@ -110,19 +102,21 @@ export function createDocsStore(platform: Platform, folderToken: string): DocsSt
   async function listAdrs(): Promise<AdrFile[]> {
     if (!canWrite) return [];
     const files = await listMarkdown(platform, folderToken, ADR_DIR);
-    const out: AdrFile[] = [];
-    for (const file of files) {
-      const number = parseAdrNumberFromFilename(file.name) ?? 0;
-      let adr: Adr;
-      try {
-        adr = parseAdr(await platform.readTextFile(file.token));
-      } catch {
-        // Unreadable file — keep it visible (title from filename) rather than dropping it silently.
-        adr = { number, title: file.name, status: 'proposed', context: '', decision: '', consequences: '' };
-      }
-      // The filename number is authoritative for ordering even if the body's heading drifted.
-      out.push({ token: file.token, name: file.name, number, adr: { ...adr, number } });
-    }
+    // The reads are independent, so fan them out rather than awaiting each in turn.
+    const out = await Promise.all(
+      files.map(async (file): Promise<AdrFile> => {
+        const number = parseAdrNumberFromFilename(file.name) ?? 0;
+        let adr: Adr;
+        try {
+          adr = parseAdr(await platform.readTextFile(file.token));
+        } catch {
+          // Unreadable file — keep it visible (title from filename) rather than dropping it silently.
+          adr = { number, title: file.name, status: 'proposed', context: '', decision: '', consequences: '' };
+        }
+        // The filename number is authoritative for ordering even if the body's heading drifted.
+        return { token: file.token, name: file.name, number, adr: { ...adr, number } };
+      }),
+    );
     out.sort((a, b) => (a.number !== b.number ? a.number - b.number : a.name.localeCompare(b.name)));
     return out;
   }
@@ -162,7 +156,7 @@ export function createDocsStore(platform: Platform, folderToken: string): DocsSt
   async function createNote(title: string): Promise<NoteFile> {
     requireWritable();
     const existing = new Set((await listMarkdown(platform, folderToken, NOTES_DIR)).map((f) => f.name.toLowerCase()));
-    const base = noteSlug(title);
+    const base = adrSlug(title, 'note');
     // Avoid clobbering an existing note: base.md, base-2.md, base-3.md, …
     let name = `${base}.md`;
     for (let n = 2; existing.has(name.toLowerCase()); n++) name = `${base}-${n}.md`;

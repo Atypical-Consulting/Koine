@@ -51,14 +51,22 @@ export function renderAdr(adr: Adr): string {
   );
 }
 
-/** Extract the trimmed body of a `## {heading}` section: from the heading to the next `## ` (or EOF). */
+/** The known ADR section headings (renderAdr emits exactly these, in this order). */
+const ADR_SECTIONS = ['Context', 'Decision', 'Consequences'] as const;
+
+/**
+ * Extract the trimmed body of a `## {heading}` section: from the heading to the next KNOWN ADR
+ * section heading (or EOF). Bounding on the known headings — rather than on any `## ` line —
+ * means a Markdown sub-heading or a fenced code block containing a `## …` line inside the prose
+ * no longer silently truncates the section (which previously lost that text on the next save).
+ */
 function section(md: string, heading: string): string {
   const headingRe = new RegExp(`^##\\s+${heading}\\s*$`, 'im');
-  const start = md.search(headingRe);
-  if (start < 0) return '';
-  const afterHeading = md.slice(start).replace(headingRe, '');
-  const next = afterHeading.search(/^##\s+/m);
-  return (next < 0 ? afterHeading : afterHeading.slice(0, next)).trim();
+  const m = headingRe.exec(md);
+  if (!m) return '';
+  const rest = md.slice(m.index + m[0].length);
+  const next = rest.search(new RegExp(`^##\\s+(?:${ADR_SECTIONS.join('|')})\\s*$`, 'im'));
+  return (next < 0 ? rest : rest.slice(0, next)).trim();
 }
 
 /**
@@ -94,13 +102,13 @@ export function parseAdr(md: string): Adr {
   };
 }
 
-/** A filesystem-safe slug for an ADR title (lowercase, non-alphanumeric → `-`). Empty → `untitled`. */
-export function adrSlug(title: string): string {
+/** A filesystem-safe slug for a title (lowercase, non-alphanumeric → `-`). Empty → `fallback`. */
+export function adrSlug(title: string, fallback = 'untitled'): string {
   const slug = title
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '');
-  return slug || 'untitled';
+  return slug || fallback;
 }
 
 /** The canonical `NNNN-slug.md` filename for an ADR (number zero-padded to four digits). */

@@ -1218,7 +1218,14 @@ export function init(): void {
   }
 
   function docMessage(view: HTMLElement, text: string, kind: 'muted' | 'error' = 'muted'): void {
-    view.innerHTML = `<p class="${kind === 'error' ? 'doc-error' : 'muted'}">${text}</p>`;
+    // Build the node with textContent rather than interpolating into innerHTML — `text` often carries
+    // an error string (String(e)) that can embed host paths or user-influenced file/folder names, so
+    // raw interpolation would be an HTML-injection sink.
+    view.innerHTML = '';
+    const p = document.createElement('p');
+    p.className = kind === 'error' ? 'doc-error' : 'muted';
+    p.textContent = text;
+    view.appendChild(p);
   }
 
   // The glossary tab is the ubiquitous-language editor (#67): it lists every concept across
@@ -1273,25 +1280,28 @@ export function init(): void {
   let docsLoaded = false;
   async function loadDocs(): Promise<void> {
     const store = createDocsStore(platform, folderRootToken);
-    // After a mutation, rebuild the whole panel from disk so the list, numbering, and badges refresh
-    // (mirrors the glossary's reload-on-save). Any error surfaces in the panel rather than throwing.
+    // Creating an ADR/note adds a row, so rebuild the panel from disk; an edit (save) is applied in
+    // place by the panel itself (it refreshes the row head + detail), so saves don't reload — which
+    // also keeps the open editor from collapsing.
     const reload = (): void => {
       docsLoaded = false;
       void loadDocs();
     };
-    const fail = (verb: string) => (e: unknown) => docMessage(docsView, `Could not ${verb}: ` + String(e), 'error');
+    // Surface a failure on the status line — NOT by overwriting the panel — so the ADR/Notes list and
+    // any in-progress editor survive a transient create/save error and the user can simply retry.
+    const fail = (verb: string) => (e: unknown) => setStatus(`Could not ${verb}: ${String(e)}`, 'error');
     const handlers: DocsPanelHandlers = {
       onCreateAdr: (title) => void store.createAdr(title).then(reload).catch(fail('create the ADR')),
-      onSaveAdr: (file, adr) => void store.saveAdr(file.token, adr).then(reload).catch(fail('save the ADR')),
+      onSaveAdr: (file, adr) => void store.saveAdr(file.token, adr).catch(fail('save the ADR')),
       onCreateNote: (title) => void store.createNote(title).then(reload).catch(fail('create the note')),
       onReadNote: (file) => store.readNote(file.token),
-      onSaveNote: (file, md) => void store.saveNote(file.token, md).then(reload).catch(fail('save the note')),
+      onSaveNote: (file, md) => void store.saveNote(file.token, md).catch(fail('save the note')),
     };
     docMessage(docsView, 'Loading docs…');
     try {
       const [adrs, notes] = await Promise.all([store.listAdrs(), store.listNotes()]);
       docsView.innerHTML = '';
-      docsView.appendChild(renderDocsPanel({ canWrite: store.canWrite, adrs, notes }, handlers));
+      docsView.appendChild(renderDocsPanel({ canWrite: store.canWrite, adrs, notes, renderMarkdown }, handlers));
       docsLoaded = true;
     } catch (e) {
       docMessage(docsView, 'Docs request failed: ' + String(e), 'error');

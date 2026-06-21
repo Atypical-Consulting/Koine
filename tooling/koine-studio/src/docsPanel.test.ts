@@ -27,7 +27,8 @@ function makeHandlers(): DocsPanelHandlers {
 }
 
 function mount(data: Partial<DocsPanelData>, handlers: DocsPanelHandlers): HTMLElement {
-  const full: DocsPanelData = { canWrite: true, adrs: [], notes: [], ...data };
+  // A trivial Markdown renderer for tests: wrap in a <p> so the read block has rendered HTML.
+  const full: DocsPanelData = { canWrite: true, adrs: [], notes: [], renderMarkdown: (md) => `<p>${md}</p>`, ...data };
   const el = renderDocsPanel(full, handlers);
   document.body.append(el);
   return el;
@@ -97,6 +98,10 @@ describe('docsPanel', () => {
     expect(adr.number).toBe(3); // filename wins over the body's 999
     expect(adr.title).toBe('New title');
     expect(adr.status).toBe('accepted');
+
+    // The row head refreshes in place (no host reload): the name + status badge track the edit.
+    expect(el.querySelector('.koi-docs-name')?.textContent).toBe('#3 · New title');
+    expect(el.querySelector('.koi-docs-badge')?.classList.contains('is-accepted')).toBe(true);
   });
 
   it('opens a note lazily and saves edited markdown', async () => {

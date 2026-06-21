@@ -124,12 +124,19 @@
   }
 }
 
+/* Rendered-Markdown read block (also carries .koi-md for the shared doc styling). Trim the outer
+   margins so a section's prose sits snugly under its label. */
 .koi-docs-prose {
-  margin: 0;
-  color: var(--koi-fg);
   font-size: var(--koi-text-md);
   line-height: 1.45;
-  white-space: pre-wrap; /* preserve the Markdown's paragraph/line breaks in the read view */
+
+  > :first-child {
+    margin-top: 0;
+  }
+
+  > :last-child {
+    margin-bottom: 0;
+  }
 }
 
 .koi-docs-input {

@@ -1,9 +1,10 @@
 // The ADR & Notes documentation surface (#147): pure DOM builders for the Docs view, decoupled from
 // the workspace fs via a `handlers` object so they unit-test cleanly under happy-dom (mirrors
-// glossary.ts). `ide.ts` supplies the handlers (create/save/read through docsStore); this module only
-// builds the DOM and wires clicks. ADRs render as a numbered list with a status badge and an
-// inline raw-Markdown editor; notes render lazily (their body is read on open).
-import { type Adr, type AdrStatus, ADR_STATUSES, parseAdr, renderAdr } from './adr';
+// glossary.ts). `ide.ts` supplies the handlers (create/save/read through docsStore) and a Markdown
+// renderer; this module only builds the DOM and wires clicks. ADRs render as a numbered list with a
+// status badge and an inline raw-Markdown editor; notes render lazily (their body is read on open).
+// Read views render Markdown (via the injected renderer) into the shared `.koi-md` styling.
+import { type Adr, type AdrStatus, parseAdr, renderAdr } from './adr';
 import type { AdrFile, NoteFile } from './docsStore';
 
 export interface DocsPanelData {
@@ -11,6 +12,8 @@ export interface DocsPanelData {
   canWrite: boolean;
   adrs: AdrFile[];
   notes: NoteFile[];
+  /** Render a Markdown string to a (sanitized) HTML string for the read views. */
+  renderMarkdown: (md: string) => string;
 }
 
 export interface DocsPanelHandlers {
@@ -41,6 +44,14 @@ function statusBadge(status: AdrStatus): HTMLElement {
   badge.className = `koi-docs-badge is-${status}`;
   badge.textContent = status;
   return badge;
+}
+
+/** A rendered-Markdown block: the injected renderer's HTML (already escaped) under the shared koi-md style. */
+function mdBlock(md: string, renderMarkdown: (md: string) => string): HTMLElement {
+  const block = document.createElement('div');
+  block.className = 'koi-md koi-docs-prose';
+  block.innerHTML = renderMarkdown(md.trim() || '—');
+  return block;
 }
 
 /** A reusable "type a title, Create / Cancel" inline row, hidden until its trigger reveals it. */
@@ -84,27 +95,38 @@ function inlineTitleInput(placeholder: string, onSubmit: (title: string) => void
   return row;
 }
 
-/** A labelled, pre-wrapped read block for one ADR section (Context / Decision / Consequences). */
-function readSection(label: string, body: string): HTMLElement {
+/** A labelled, rendered-Markdown read block for one ADR section (Context / Decision / Consequences). */
+function readSection(label: string, body: string, renderMarkdown: (md: string) => string): HTMLElement {
   const wrap = document.createElement('div');
   wrap.className = 'koi-docs-section';
   const h = document.createElement('h4');
   h.textContent = label;
-  const p = document.createElement('p');
-  p.className = 'koi-docs-prose';
-  p.textContent = body.trim() || '—';
-  wrap.append(h, p);
+  wrap.append(h, mdBlock(body, renderMarkdown));
   return wrap;
 }
 
-/** The expandable detail for one ADR: a read view of its sections, with an inline raw-Markdown editor. */
-function adrDetail(file: AdrFile, handlers: DocsPanelHandlers, canWrite: boolean): HTMLElement {
+/**
+ * The expandable detail for one ADR: a rendered-Markdown read view of its sections, with an inline
+ * raw-Markdown editor. On save it updates in place (and tells the row to refresh its head via
+ * `onSaved`) — the host does not reload the whole panel for an edit.
+ */
+function adrDetail(
+  file: AdrFile,
+  handlers: DocsPanelHandlers,
+  canWrite: boolean,
+  renderMarkdown: (md: string) => string,
+  onSaved: (adr: Adr) => void,
+): HTMLElement {
   const detail = document.createElement('div');
   detail.className = 'koi-docs-detail';
 
   const renderRead = (adr: Adr): void => {
     detail.innerHTML = '';
-    detail.append(readSection('Context', adr.context), readSection('Decision', adr.decision), readSection('Consequences', adr.consequences));
+    detail.append(
+      readSection('Context', adr.context, renderMarkdown),
+      readSection('Decision', adr.decision, renderMarkdown),
+      readSection('Consequences', adr.consequences, renderMarkdown),
+    );
     if (canWrite) {
       const edit = linkButton('koi-docs-edit', 'Edit');
       edit.setAttribute('aria-label', `Edit ADR ${adr.number}: ${adr.title}`);
@@ -126,6 +148,7 @@ function adrDetail(file: AdrFile, handlers: DocsPanelHandlers, canWrite: boolean
       // The number is owned by the filename, not the body — preserve it across an edit.
       const edited = { ...parseAdr(textarea.value), number: file.number };
       handlers.onSaveAdr(file, edited);
+      onSaved(edited); // refresh the row head (title + badge) without a full-panel reload
       renderRead(edited);
     });
     cancel.addEventListener('click', () => renderRead(adr));
@@ -140,8 +163,8 @@ function adrDetail(file: AdrFile, handlers: DocsPanelHandlers, canWrite: boolean
   return detail;
 }
 
-/** One ADR row: `#N · Title` (toggles the detail) + a status badge. */
-function adrRow(file: AdrFile, handlers: DocsPanelHandlers, canWrite: boolean): HTMLElement {
+/** One ADR row: `#N · Title` (toggles the detail) + a status badge; both refresh in place on save. */
+function adrRow(file: AdrFile, handlers: DocsPanelHandlers, canWrite: boolean, renderMarkdown: (md: string) => string): HTMLElement {
   const row = document.createElement('div');
   row.className = 'koi-docs-item';
   const head = document.createElement('div');
@@ -149,6 +172,18 @@ function adrRow(file: AdrFile, handlers: DocsPanelHandlers, canWrite: boolean): 
 
   const name = linkButton('koi-docs-name', `#${file.number} · ${file.adr.title}`);
   name.setAttribute('aria-expanded', 'false');
+  let badge = statusBadge(file.adr.status);
+
+  // After an in-place save, keep the row head (title + status badge) in step with the edited ADR so
+  // the panel stays accurate without the host reloading and collapsing the open detail.
+  const onSaved = (adr: Adr): void => {
+    file.adr = adr;
+    name.textContent = `#${file.number} · ${adr.title}`;
+    const fresh = statusBadge(adr.status);
+    badge.replaceWith(fresh);
+    badge = fresh;
+  };
+
   let detail: HTMLElement | null = null;
   name.addEventListener('click', () => {
     if (detail) {
@@ -157,18 +192,18 @@ function adrRow(file: AdrFile, handlers: DocsPanelHandlers, canWrite: boolean): 
       name.setAttribute('aria-expanded', 'false');
       return;
     }
-    detail = adrDetail(file, handlers, canWrite);
+    detail = adrDetail(file, handlers, canWrite, renderMarkdown, onSaved);
     row.append(detail);
     name.setAttribute('aria-expanded', 'true');
   });
 
-  head.append(name, statusBadge(file.adr.status));
+  head.append(name, badge);
   row.append(head);
   return row;
 }
 
-/** One note row: its title (toggles a lazily-read Markdown view + editor). */
-function noteRow(file: NoteFile, handlers: DocsPanelHandlers, canWrite: boolean): HTMLElement {
+/** One note row: its title (toggles a lazily-read, rendered-Markdown view + raw editor). */
+function noteRow(file: NoteFile, handlers: DocsPanelHandlers, canWrite: boolean, renderMarkdown: (md: string) => string): HTMLElement {
   const row = document.createElement('div');
   row.className = 'koi-docs-item';
   const head = document.createElement('div');
@@ -185,10 +220,7 @@ function noteRow(file: NoteFile, handlers: DocsPanelHandlers, canWrite: boolean)
 
   const renderRead = (host: HTMLElement, md: string): void => {
     host.innerHTML = '';
-    const pre = document.createElement('p');
-    pre.className = 'koi-docs-prose';
-    pre.textContent = md.trim() || '—';
-    host.append(pre);
+    host.append(mdBlock(md, renderMarkdown));
     if (canWrite) {
       const edit = linkButton('koi-docs-edit', 'Edit');
       edit.setAttribute('aria-label', `Edit note: ${file.title}`);
@@ -208,7 +240,7 @@ function noteRow(file: NoteFile, handlers: DocsPanelHandlers, canWrite: boolean)
     const cancel = linkButton('koi-docs-cancel', 'Cancel');
     save.addEventListener('click', () => {
       handlers.onSaveNote(file, textarea.value);
-      renderRead(host, textarea.value);
+      renderRead(host, textarea.value); // update in place; the host does not reload for an edit
     });
     cancel.addEventListener('click', () => renderRead(host, md));
     const actions = document.createElement('div');
@@ -315,7 +347,7 @@ export function renderDocsPanel(data: DocsPanelData, handlers: DocsPanelHandlers
       'Architecture decisions',
       'New ADR',
       data.canWrite,
-      data.adrs.map((f) => adrRow(f, handlers, data.canWrite)),
+      data.adrs.map((f) => adrRow(f, handlers, data.canWrite, data.renderMarkdown)),
       'No architecture decisions yet.',
       handlers.onCreateAdr,
       'ADR title (e.g. Use Markdown ADRs)',
@@ -324,7 +356,7 @@ export function renderDocsPanel(data: DocsPanelData, handlers: DocsPanelHandlers
       'Notes',
       'New note',
       data.canWrite,
-      data.notes.map((f) => noteRow(f, handlers, data.canWrite)),
+      data.notes.map((f) => noteRow(f, handlers, data.canWrite, data.renderMarkdown)),
       'No notes yet.',
       handlers.onCreateNote,
       'Note title',
@@ -333,6 +365,3 @@ export function renderDocsPanel(data: DocsPanelData, handlers: DocsPanelHandlers
 
   return root;
 }
-
-// Re-export the status list so callers (and tests) can reference the canonical set without a second import.
-export { ADR_STATUSES };

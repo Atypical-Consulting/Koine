@@ -517,9 +517,21 @@ fn list_dir(dir: String, rel_path: String) -> Result<Vec<FsEntry>, String> {
             .replace('\\', "/");
         let token = path.to_string_lossy().into_owned();
         if file_type.is_dir() {
-            dirs.push(FsEntry { token, name, rel_path: rel, kind: "dir", children: None });
+            dirs.push(FsEntry {
+                token,
+                name,
+                rel_path: rel,
+                kind: "dir",
+                children: None,
+            });
         } else if file_type.is_file() {
-            files.push(FsEntry { token, name, rel_path: rel, kind: "file", children: None });
+            files.push(FsEntry {
+                token,
+                name,
+                rel_path: rel,
+                kind: "file",
+                children: None,
+            });
         }
     }
 

@@ -85,6 +85,43 @@ describe('parseAdr leniency', () => {
     const adr = parseAdr('# 1. T\n\n- Status: whatever\n\n## Context\n\nc\n');
     expect(adr.status).toBe('proposed');
   });
+
+  it('does NOT truncate a section body at an embedded "## " sub-heading or code fence', () => {
+    const md = [
+      '# 1. Title',
+      '',
+      '- Status: accepted',
+      '',
+      '## Context',
+      '',
+      'Intro paragraph.',
+      '',
+      '### A subsection',
+      '',
+      '```md',
+      '## a heading inside a code fence',
+      '```',
+      '',
+      'Trailing paragraph.',
+      '',
+      '## Decision',
+      '',
+      'The decision.',
+      '',
+      '## Consequences',
+      '',
+      'The consequences.',
+      '',
+    ].join('\n');
+    const adr = parseAdr(md);
+    // The whole Context body survives — the embedded fenced "## a heading…" no longer cuts it short.
+    expect(adr.context).toContain('Intro paragraph.');
+    expect(adr.context).toContain('## a heading inside a code fence');
+    expect(adr.context).toContain('Trailing paragraph.');
+    // Decision/Consequences still split correctly on the real section headings.
+    expect(adr.decision).toBe('The decision.');
+    expect(adr.consequences).toBe('The consequences.');
+  });
 });
 
 describe('slug / filename helpers', () => {
