@@ -95,15 +95,20 @@ internal static class EmitterRegistry
     /// </summary>
     private static EmitterOptions ToEmitterOptions(TargetOptions options, bool emitSourceMaps = false, bool referenceOnly = false)
     {
+        var hasLayers = options.Layers is { Count: > 0 };
         if (options.NamespaceMap.Count == 0 && options.InstantMode is null && options.Layout is null
-            && !emitSourceMaps && !referenceOnly && options.Layers is null)
+            && !emitSourceMaps && !referenceOnly
+            && !hasLayers && !options.ApplicationMediatr && options.ApplicationMapping is null)
         {
             return EmitterOptions.Empty;
         }
 
-        // The layer selector (issue #128) is carried as a comma-separated string on the neutral bag,
-        // mirroring instantMode/layout; the C# provider parses it back into a layer set.
-        var layers = options.Layers is null ? null : string.Join(",", options.Layers);
-        return new EmitterOptions(options.NamespaceMap, options.InstantMode, options.Layout, emitSourceMaps, referenceOnly, layers);
+        // The layer selector (issues #128/#129) is carried as a comma-separated string on the neutral
+        // bag, mirroring instantMode/layout; the C# provider parses it back into a layer set. The
+        // Application sub-options (MediatR shape, mapping mode) ride alongside.
+        var layers = hasLayers ? string.Join(",", options.Layers!) : null;
+        return new EmitterOptions(
+            options.NamespaceMap, options.InstantMode, options.Layout, emitSourceMaps, referenceOnly,
+            layers, options.ApplicationMediatr, options.ApplicationMapping);
     }
 }
