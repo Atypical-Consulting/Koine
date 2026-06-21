@@ -171,6 +171,17 @@ export interface Platform {
    */
   listEntries(folderToken: string): Promise<FsEntry[]>;
 
+  /**
+   * The IMMEDIATE children (files AND directories, regardless of extension) of `relPath` under an
+   * opened folder — a flat, single-level listing for non-`.koi` workspace docs such as the ADR /
+   * Notes surface (`docs/adr/*.md`). The counterpart to {@link listEntries}, which is the recursive,
+   * `.koi`-only explorer tree. Children carry no `children` array (no recursion), and every listed
+   * file is registered so {@link readTextFile}/{@link writeTextFile} resolve its token afterwards.
+   * `relPath` is forward-slashed and relative to the opened folder. Rejects when the directory does
+   * not exist — callers (the docs store) treat that as an empty list / "no docs yet".
+   */
+  listDir(folderToken: string, relPath: string): Promise<FsEntry[]>;
+
   /** Create a file at `relPath` under the folder (creating intermediate dirs); returns its file token. */
   createFile(folderToken: string, relPath: string, contents?: string): Promise<string>;
 

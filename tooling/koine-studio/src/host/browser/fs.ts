@@ -351,6 +351,33 @@ export async function listEntries(folderToken: string): Promise<FsEntry[]> {
   return walkEntries(dir, '', folderToken);
 }
 
+/**
+ * List the immediate children (files AND directories, any extension) of `relPath` under an opened
+ * folder — the flat, single-level docs listing (see Platform.listDir). Unlike walkEntries it does
+ * not recurse and does not filter by extension, and it registers EVERY listed file handle (not just
+ * `.koi`) so a later readTextFile/writeTextFile on a returned token resolves without re-walking.
+ * Rejects when the directory does not exist (resolveDir throws), which the docs store treats as empty.
+ */
+export async function listDir(folderToken: string, relPath: string): Promise<FsEntry[]> {
+  const dir = await resolveDir(childToken(folderToken, relPath));
+  const out: FsEntry[] = [];
+  for await (const entry of dir.values()) {
+    const childRel = relPath ? `${relPath}/${entry.name}` : entry.name;
+    const token = `${folderToken}/${childRel}`;
+    if (entry.kind === 'directory') {
+      if (SKIP_DIRS.has(entry.name)) continue;
+      dirHandles.set(token, entry);
+      out.push({ token, name: entry.name, relPath: childRel, kind: 'dir' });
+    } else {
+      fileHandles.set(token, entry);
+      out.push({ token, name: entry.name, relPath: childRel, kind: 'file' });
+    }
+  }
+  // Folders first, then alphabetically by name within each kind (mirrors walkEntries / the backend).
+  out.sort((a, b) => (a.kind === b.kind ? a.name.localeCompare(b.name) : a.kind === 'dir' ? -1 : 1));
+  return out;
+}
+
 export async function createFile(folderToken: string, relPath: string, contents?: string): Promise<string> {
   assertRelPath(relPath);
   const segments = relPath.split('/');

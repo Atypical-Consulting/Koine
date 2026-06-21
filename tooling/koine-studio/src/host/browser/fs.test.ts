@@ -3,6 +3,7 @@ import {
   __setFolderForTest,
   __resetFsForTest,
   listEntries,
+  listDir,
   createFile,
   createFolder,
   deleteEntry,
@@ -339,6 +340,52 @@ describe('browser fs file management', () => {
     await expect(createFolder('workspace', '')).rejects.toThrow('invalid path');
     await expect(createFile('workspace', 'a//b.koi')).rejects.toThrow('invalid path');
     await expect(renameEntry('workspace/billing/order.koi', 'a/b.koi')).rejects.toThrow('invalid name');
+  });
+});
+
+describe('listDir (flat, any-extension docs listing)', () => {
+  beforeEach(() => {
+    __resetFsForTest();
+  });
+
+  /** A root holding a docs/adr folder with two markdown ADRs, a non-md file, and a subfolder. */
+  function docsRoot(): MockDir {
+    const root = new MockDir('workspace');
+    const docs = new MockDir('docs');
+    const adr = new MockDir('adr');
+    adr.entries.set('0002-second.md', new MockFile('0002-second.md', '# 2. Second'));
+    adr.entries.set('0001-first.md', new MockFile('0001-first.md', '# 1. First'));
+    adr.entries.set('README.txt', new MockFile('README.txt', 'not markdown, still listed'));
+    adr.entries.set('archive', new MockDir('archive'));
+    docs.entries.set('adr', adr);
+    root.entries.set('docs', docs);
+    return root;
+  }
+
+  it('lists immediate children of any extension, folders first then alpha', async () => {
+    __setFolderForTest('workspace', docsRoot() as never);
+    const entries = await listDir('workspace', 'docs/adr');
+
+    expect(entries.map((e) => e.name)).toEqual(['archive', '0001-first.md', '0002-second.md', 'README.txt']);
+    // Flat: no recursion, so no nested children arrays.
+    expect(entries.every((e) => e.children === undefined)).toBe(true);
+    expect(entries[0].kind).toBe('dir');
+    expect(entries[1].kind).toBe('file');
+    // rel_path is forward-slashed and rooted at the opened folder; token is `<folder>/<relPath>`.
+    expect(entries[1].relPath).toBe('docs/adr/0001-first.md');
+    expect(entries[1].token).toBe('workspace/docs/adr/0001-first.md');
+  });
+
+  it('registers listed files so a later readTextFile resolves them (the .koi walk would not)', async () => {
+    __setFolderForTest('workspace', docsRoot() as never);
+    await listDir('workspace', 'docs/adr');
+    // The markdown ADR is readable purely because listDir registered its handle.
+    expect(await readTextFile('workspace/docs/adr/0001-first.md')).toBe('# 1. First');
+  });
+
+  it('rejects when the directory does not exist (callers treat it as empty)', async () => {
+    __setFolderForTest('workspace', docsRoot() as never);
+    await expect(listDir('workspace', 'docs/nope')).rejects.toThrow();
   });
 });
 

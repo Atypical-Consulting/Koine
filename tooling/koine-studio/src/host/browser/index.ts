@@ -86,6 +86,10 @@ export class BrowserPlatform implements Platform {
     return fs.listEntries(folderToken);
   }
 
+  listDir(folderToken: string, relPath: string): Promise<FsEntry[]> {
+    return fs.listDir(folderToken, relPath);
+  }
+
   createFile(folderToken: string, relPath: string, contents?: string): Promise<string> {
     return fs.createFile(folderToken, relPath, contents);
   }
