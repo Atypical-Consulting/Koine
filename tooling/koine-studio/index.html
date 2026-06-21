@@ -61,6 +61,10 @@
           </button>
         </div>
 
+        <!-- Top-level workspace modes (#143). The Domain/Code/Docs buttons are injected from the MODES
+             data at startup (see ide.ts) so a new mode is one array entry, not new markup. -->
+        <nav id="mode-switcher" class="mode-switcher" role="tablist" aria-label="Workspace mode"></nav>
+
         <div class="toolbar-right">
           <button type="button" id="palette-hint" class="palette-hint" title="Command palette (⌘K)" aria-label="Open command palette">⌘K</button>
           <span class="tb-divider" aria-hidden="true"></span>

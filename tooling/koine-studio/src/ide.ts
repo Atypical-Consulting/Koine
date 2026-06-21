@@ -22,6 +22,7 @@ import { peekLegacyScratch, clearLegacyScratch, initSecrets, loadSettings, pushR
 import { createWelcome } from './welcome';
 import { type Template } from './templates';
 import { createCommandPalette, type Command } from './palette';
+import { DEFAULT_MODE_ID, MODES, defaultViewForMode, modeForView, viewsForMode, type RightView } from './modes';
 import { createPreferences } from './prefs';
 import { applyAppearance } from './appearance';
 import { initSplitResizer, initEdgeResizer } from './resize';
@@ -259,8 +260,6 @@ function diagnosticsInRange(diags: LspDiagnostic[], range: Range): LspDiagnostic
     a.line < b.line || (a.line === b.line && a.character <= b.character);
   return diags.filter((d) => lte(d.range.start, range.end) && lte(range.start, d.range.end));
 }
-
-type RightView = 'preview' | 'model' | 'glossary' | 'diagrams' | 'contextmap' | 'outline' | 'assistant' | 'check';
 
 // Keyboard shortcuts shown in the help overlay; mirrors the global keydown handler and the
 // palette command hints. 'mod' renders as a keycap as-is (Cmd on mac / Ctrl elsewhere).
@@ -929,7 +928,23 @@ export function init(): void {
     assistant: assistantView,
     check: checkView,
   };
-  let activeView: RightView = 'preview';
+  let activeView: RightView = defaultViewForMode(DEFAULT_MODE_ID);
+  // Active workspace mode (#143): a header-level grouping of the views above. The switcher buttons
+  // (Domain / Code / Docs) are built from the MODES data — a new mode is one array entry, not new
+  // markup — and carry data-mode for the click handler. Task 3 restores the persisted value on boot.
+  let activeMode: string = DEFAULT_MODE_ID;
+  const modeButtons = MODES.map((mode) => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'mode-btn';
+    btn.dataset.mode = mode.id;
+    btn.setAttribute('role', 'tab');
+    btn.setAttribute('aria-selected', String(mode.id === activeMode));
+    btn.textContent = mode.label;
+    btn.addEventListener('click', () => selectMode(mode.id));
+    return btn;
+  });
+  el('mode-switcher').append(...modeButtons);
   // Track which doc-based views need a (re)fetch — invalidated on every edit so a tab
   // switch always shows data for the current model rather than a stale render. The check
   // view (on-demand via the Check button) and the assistant (interactive) are excluded.
@@ -1272,15 +1287,35 @@ export function init(): void {
     editDebounce = setTimeout(() => ensureLoaded(activeView), 350);
   }
 
-  function selectView(view: RightView): void {
+  // Reflect a mode on the chrome — highlight its switcher button and filter the tab strip to its
+  // views — WITHOUT choosing a view. Idempotent, and it never calls selectView, so selectView (which
+  // calls it through showView) can't recurse. Assistant/Check stay reachable from any mode via the
+  // toolbar Check button and the command palette, so filtering them out of a strip never traps them.
+  function applyMode(id: string): void {
+    activeMode = id;
+    const views = viewsForMode(id);
+    for (const btn of modeButtons) btn.setAttribute('aria-selected', String(btn.dataset.mode === id));
+    for (const tab of tabs) tab.hidden = !views.includes(tab.dataset.view as RightView);
+  }
+
+  // The pure-DOM half of selectView: surface a view's panel + mark its tab, and keep the header mode
+  // in step (a direct view jump implies its owning mode). No data fetch — split out so the boot
+  // chrome can land on the default view before the workspace document is open.
+  function showView(view: RightView): void {
     activeView = view;
-    for (const tab of tabs) {
-      const isActive = tab.dataset.view === view;
-      tab.setAttribute('aria-selected', String(isActive));
-    }
-    for (const key of Object.keys(viewEls) as RightView[]) {
-      viewEls[key].hidden = key !== view;
-    }
+    applyMode(modeForView(view));
+    for (const tab of tabs) tab.setAttribute('aria-selected', String(tab.dataset.view === view));
+    for (const key of Object.keys(viewEls) as RightView[]) viewEls[key].hidden = key !== view;
+  }
+
+  // Enter a mode from the header switcher: land on its default view, which (via showView → applyMode)
+  // also highlights the button and filters the tabs. Re-clicking the active mode re-homes its default.
+  function selectMode(id: string): void {
+    selectView(defaultViewForMode(id));
+  }
+
+  function selectView(view: RightView): void {
+    showView(view);
     if (view === 'assistant') {
       // Re-pointing to the current folder's conversation BEFORE focus, so switching folders and
       // re-opening this tab swaps to that folder's history (the single choke point for the swap).
@@ -1295,6 +1330,11 @@ export function init(): void {
   for (const tab of tabs) {
     tab.addEventListener('click', () => selectView(tab.dataset.view as RightView));
   }
+
+  // Boot the header into the default workspace mode: filter the tab strip, highlight the switcher, and
+  // surface the mode's default view. No fetch here — the boot flow's ensureLoaded(activeView) loads it
+  // once the workspace document is open. (Task 3 restores the persisted mode over this default.)
+  showView(activeView);
 
   // Refresh re-fetches the active doc view (check is driven by the Check… toolbar button, which
   // re-prompts for a baseline; the assistant is interactive).
