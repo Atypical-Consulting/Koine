@@ -1,3 +1,4 @@
+using System.Text;
 using Koine.Compiler.Ast;
 
 namespace Koine.Compiler.Emit.Rust;
@@ -54,9 +55,78 @@ public sealed partial class RustEmitter : IEmitter
 
     public IReadOnlyList<EmittedFile> Emit(KoineModel model, SemanticModel? semantic)
     {
-        _ = semantic ?? new SemanticModel(model);
-        // Walking skeleton (Task 1): the construct emitters land in later tasks. Returns an empty
-        // file set so a `--target rust` build runs end-to-end without throwing.
-        return Array.Empty<EmittedFile>();
+        ModelIndex index = (semantic ?? new SemanticModel(model)).Index;
+        var emit = new RustEmitContext(
+            index,
+            BuildEnumMemberMap(model),
+            // Demand-driven operator emission (R9), shared with the C#/Python emitters so the targets
+            // stay semantically aligned: a value object only gets an additive `Add` where the model
+            // `sum`s it, or a scalar `Mul` where the model multiplies it by a scalar.
+            CSharp.OperatorNeedsAnalyzer.BuildAdditiveOperatorNeeds(model, index),
+            CSharp.OperatorNeedsAnalyzer.BuildScalarOperatorNeeds(model, index));
+
+        var files = new List<EmittedFile>
+        {
+            new("Cargo.toml", RustRuntime.CargoToml + "\n"),
+            new(RustRuntime.FileName, RustRuntime.Source + "\n"),
+            new("src/lib.rs", EmitLibRs(model)),
+        };
+
+        foreach (ContextNode ctx in model.Contexts)
+        {
+            files.Add(EmitContextModule(emit, ctx));
+        }
+
+        return files;
+    }
+
+    /// <summary>Emits one bounded context as a single Rust module file (all its types, flat).</summary>
+    private EmittedFile EmitContextModule(RustEmitContext emit, ContextNode ctx)
+    {
+        var body = new StringBuilder();
+        WriteDomainError(body);
+
+        foreach (TypeDecl type in ctx.Types)
+        {
+            EmitType(emit, body, type, ctx.Name);
+        }
+
+        var moduleDoc = $"//! The `{ctx.Name}` bounded context.";
+        return new EmittedFile($"src/{ModuleNameFor(ctx.Name)}.rs", Assemble(body.ToString(), moduleDoc));
+    }
+
+    /// <summary>Dispatches a single declaration to its construct emitter.</summary>
+    private void EmitType(RustEmitContext emit, StringBuilder body, TypeDecl type, string context)
+    {
+        switch (type)
+        {
+            case EnumDecl @enum:
+                body.Append('\n');
+                EmitEnum(body, emit, @enum);
+                break;
+            case ValueObjectDecl vo:
+                body.Append('\n');
+                EmitValueObject(body, emit, vo, context);
+                break;
+            case AggregateDecl agg:
+                foreach (TypeDecl nested in agg.Types)
+                {
+                    EmitType(emit, body, nested, context);
+                }
+                EmitAggregateExtras(emit, body, agg, context);
+                break;
+            case EntityDecl entity:
+                body.Append('\n');
+                EmitEntity(body, emit, entity, context, isAggregateRoot: false, versioned: false);
+                break;
+            case EventDecl ev:
+                body.Append('\n');
+                EmitEvent(body, emit, ev.Name, ev.Doc, ev.Members, context);
+                break;
+            case IntegrationEventDecl iev:
+                body.Append('\n');
+                EmitEvent(body, emit, iev.Name, iev.Doc, iev.Members, context);
+                break;
+        }
     }
 }

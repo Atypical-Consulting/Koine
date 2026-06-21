@@ -94,11 +94,10 @@ internal sealed class RustTypeMapper
 
         return type.Name switch
         {
+            // All smart enums emit as unit-variant Rust enums deriving `Copy` (associated data is
+            // exposed via accessor methods, never as payload), so every enum value is `Copy`.
             "Int" or "Bool" or "Decimal" or "Instant" => true,
-            _ => _index.Classify(type.Name) == TypeKind.Enum && IsDataFreeEnum(type.Name),
+            _ => _index.Classify(type.Name) == TypeKind.Enum,
         };
     }
-
-    private bool IsDataFreeEnum(string name) =>
-        _index.TryGetDecl(name, out TypeDecl decl) && decl is EnumDecl { HasAssociatedData: false };
 }

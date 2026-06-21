@@ -78,13 +78,14 @@ public class RustTypeMapperTests
     }
 
     [Fact]
-    public void Copy_is_true_for_scalars_and_data_free_enums_only()
+    public void Copy_is_true_for_scalars_and_all_enums()
     {
         var mapper = new RustTypeMapper(IndexWithEnums());
         mapper.IsCopy(new TypeRef("Int")).ShouldBeTrue();
         mapper.IsCopy(new TypeRef("Decimal")).ShouldBeTrue();
-        mapper.IsCopy(new TypeRef("Bare")).ShouldBeTrue();    // data-free enum is Copy
-        mapper.IsCopy(new TypeRef("Data")).ShouldBeFalse();   // enum with associated data is not
+        // Both enum kinds emit as unit-variant Rust enums deriving Copy (associated data via methods).
+        mapper.IsCopy(new TypeRef("Bare")).ShouldBeTrue();
+        mapper.IsCopy(new TypeRef("Data")).ShouldBeTrue();
         mapper.IsCopy(new TypeRef("String")).ShouldBeFalse();
         mapper.IsCopy(new TypeRef("Int", IsOptional: true)).ShouldBeFalse();
     }

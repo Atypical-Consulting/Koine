@@ -123,6 +123,28 @@ internal static class RustNaming
     public static string ToScreamingSnake(string name) => ToSnakeCase(name).ToUpperInvariant();
 
     /// <summary>
+    /// The Rust enum-variant name for a Koine enum member: <c>UpperCamelCase</c>, normalizing an
+    /// all-caps acronym member to title case so the variant is lint-clean (<c>EUR</c> → <c>Eur</c>,
+    /// <c>Draft</c> → <c>Draft</c>, <c>ORDER_PLACED</c> → <c>OrderPlaced</c>).
+    /// </summary>
+    public static string Variant(string name)
+    {
+        if (string.IsNullOrEmpty(name))
+        {
+            return name;
+        }
+
+        var hasLower = name.Any(char.IsLower);
+        var hasUnderscore = name.Contains('_');
+        if (!hasLower && !hasUnderscore)
+        {
+            return char.ToUpperInvariant(name[0]) + name[1..].ToLowerInvariant();
+        }
+
+        return ToPascalCase(name);
+    }
+
+    /// <summary>
     /// Returns a snake_case field/method/module name escaped as a Rust raw identifier (<c>r#type</c>)
     /// when it collides with a keyword, or with a trailing underscore for the few keywords that cannot
     /// be raw identifiers (<c>self</c> → <c>self_</c>). A non-keyword passes through unchanged.
