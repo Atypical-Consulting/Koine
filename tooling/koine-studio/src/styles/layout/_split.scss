@@ -13,6 +13,15 @@
   min-height: 0;
 }
 
+/* File tree toggled off: collapse its width + rail tracks to 0 so the editor reclaims the
+   space. This overrides --koi-filetree-w, which the rail resizer pins to a fixed px (and
+   restores from localStorage on init) — that fixed track would otherwise hold the now-empty
+   column open even though the pane itself is display:none. The var is left untouched, so the
+   user's width returns when the tree is shown again. */
+#split.is-filetree-hidden {
+  grid-template-columns: 0 0 1fr 6px var(--koi-inspector-w, 1fr);
+}
+
 /* Pin each pane to its track so a hidden filetree (scratch mode) just leaves tracks 1–2
    empty rather than letting the remaining items auto-place into the wrong columns
    (which would crush the inspector into a resizer track). */
