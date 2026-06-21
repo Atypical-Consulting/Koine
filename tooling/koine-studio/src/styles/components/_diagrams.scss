@@ -74,6 +74,12 @@
   pointer-events: none; /* clicks land on the group, not the text (Task 4 reads the group's data-*) */
 }
 
+/* Drag-to-edit (issue #93, Task 5): an editable node hints with a pointer cursor; double-click renames,
+   right-click deletes (both round-trip through the #91 model→.koi seam). Only present when editing is on. */
+.koi-svg-node-editable {
+  cursor: pointer;
+}
+
 /* UML class boxes (issue #93): a compartmented box — «stereotype» + bold title header, a divider, the
    left-aligned attribute rows, then (when present) a divider + the method rows. The class box itself is
    neutral (paper) so the rows read clearly; per-kind accents below only restyle the SINGLE-line boxes. */

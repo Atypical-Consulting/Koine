@@ -12,6 +12,7 @@ import {
   type LspDiagnostic,
   type Range,
   type SourceSpan,
+  type StructuredEdit,
   type TextEdit,
   type WorkspaceEdit,
 } from './lsp';
@@ -45,7 +46,13 @@ import { sanitizeProjectName } from './generateProject';
 import { buildSourceZip } from './sourceZip';
 import { formatChord } from './platform';
 import { renderDiagrams } from './diagrams';
-import { NODE_NAVIGATE_EVENT, type DiagramNodeNavigateDetail } from './diagrams-svg';
+import {
+  NODE_EDIT_EVENT,
+  NODE_NAVIGATE_EVENT,
+  setDiagramEditing,
+  type DiagramNodeEditDetail,
+  type DiagramNodeNavigateDetail,
+} from './diagrams-svg';
 import {
   extractEvents,
   extractRelationships,
@@ -1426,6 +1433,46 @@ export function init(): void {
     const detail = (e as CustomEvent<DiagramNodeNavigateDetail>).detail;
     if (detail) void selectFromDiagram(detail);
   });
+
+  // Drag-to-edit (issue #93, Task 5): a diagram node gesture (double-click = rename, right-click =
+  // delete) round-trips through the model→.koi seam (#91). Enabled now that the seam exists; the
+  // renderer keeps the gestures inert until this flips the switch, so the read-only tab is unchanged.
+  setDiagramEditing(true);
+  diagramsView.addEventListener(NODE_EDIT_EVENT, (e) => {
+    const detail = (e as CustomEvent<DiagramNodeEditDetail>).detail;
+    if (detail) void applyDiagramEdit(detail);
+  });
+
+  // Map a node gesture to a StructuredEdit, apply it through #91's round-trip, and patch the buffer.
+  // An edit that would break the model comes back as a KOIxxxx diagnostic (and no edits): surface it
+  // and roll back (nothing is applied), exactly as the spec requires.
+  async function applyDiagramEdit(detail: DiagramNodeEditDetail): Promise<void> {
+    const edit: StructuredEdit =
+      detail.action === 'rename'
+        ? { kind: 'renameMember', target: detail.qualifiedName, name: detail.newName }
+        : { kind: 'removeMember', target: detail.qualifiedName };
+
+    let result;
+    try {
+      result = await lsp.applyModelEdit(edit);
+    } catch {
+      setStatus('Diagram edit failed', 'error');
+      return;
+    }
+
+    // Any diagnostic is a rejection (#91 returns the KOIxxxx that blocked the edit, with no edits).
+    if (result.diagnostics.length > 0 || result.uri == null || result.edits.length === 0) {
+      const reason = result.diagnostics[0];
+      setStatus(reason ? `${reason.code}: ${reason.message}` : 'Edit rejected', 'error');
+      return; // rolled back — nothing is patched
+    }
+
+    applyWorkspaceEdit({ changes: { [result.uri]: result.edits } });
+    setStatus(
+      detail.action === 'rename' ? `Renamed ${detail.label} → ${detail.newName}` : `Deleted ${detail.label}`,
+      'green',
+    );
+  }
 
   // Clicking a diagram node both jumps to its declaration AND selects it, so the element inspector
   // (#142) populates from the same gesture. A diagram node is named `context.simpleName`; map it back

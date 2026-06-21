@@ -41,6 +41,38 @@ export interface DiagramNodeNavigateDetail {
   endColumn: number;
 }
 
+/**
+ * The bubbling `CustomEvent` a node dispatches for a drag-to-edit gesture (issue #93, Task 5):
+ * double-click = rename, right-click = delete. `ide.ts` listens once on the diagrams container, maps
+ * the detail to a `StructuredEdit`, and round-trips it through the model→`.koi` seam (#91). Inert
+ * unless {@link setDiagramEditing} has enabled editing AND the node is editable (a class-type node with
+ * a real span — never a context, and never a state for rename).
+ */
+export const NODE_EDIT_EVENT = 'koi-diagram-node-edit';
+
+/** The `detail` of a {@link NODE_EDIT_EVENT}: which node, which action, and (for rename) the new name. */
+export interface DiagramNodeEditDetail {
+  qualifiedName: string;
+  /** The gesture: rename the declaration, or delete it. */
+  action: 'rename' | 'delete';
+  /** The new identifier for a rename (omitted for a delete). */
+  newName?: string;
+  /** The node's display label (for status messages). */
+  label: string;
+}
+
+/**
+ * Whether diagram nodes accept drag-to-edit gestures (issue #93, Task 5). Off by default so the
+ * read-only Diagrams tab (Tasks 1–4) is byte-identical when editing is off; `ide.ts` flips it on once
+ * the model→`.koi` round-trip seam (#91) is reachable.
+ */
+let editingEnabled = false;
+
+/** Enable/disable drag-to-edit gestures on diagram nodes (issue #93, Task 5). */
+export function setDiagramEditing(enabled: boolean): void {
+  editingEnabled = enabled;
+}
+
 let elkPromise: Promise<ElkConstructor> | null = null;
 
 /** Boot elkjs once (cached). The bundled build runs in-thread (no Worker) so it survives Tauri CSP. */
@@ -159,6 +191,59 @@ function tagNode(g: SVGGElement, node: DiagramNode): void {
         bubbles: true,
         detail,
       }));
+    });
+
+    wireEditGestures(g, node);
+  }
+}
+
+/** A class-type node (entity/value/event/enum/integration event) — addressable by `Context.SimpleName`. */
+function isEditableKind(kind: string): boolean {
+  return kind !== '' && kind !== 'context' && kind !== 'state';
+}
+
+/**
+ * Attach the drag-to-edit gestures (issue #93, Task 5) to a navigable node: double-click renames,
+ * right-click (context menu) deletes. Gated at render time so the read-only tab (editing off) is
+ * byte-identical — no class, no listeners. Both gestures dispatch a bubbling {@link NODE_EDIT_EVENT}
+ * that `ide.ts` round-trips through the #91 seam. Rename is offered only for class-type nodes (not
+ * states); delete also for states. A node without a dotted qualified name (a context) is never editable.
+ */
+function wireEditGestures(g: SVGGElement, node: DiagramNode): void {
+  if (!editingEnabled) return;
+
+  const hasOwner = node.qualifiedName.includes('.');
+  const canRename = hasOwner && isEditableKind(node.kind);
+  const canDelete = hasOwner && node.kind !== 'context';
+  if (!canRename && !canDelete) return;
+
+  g.classList.add('koi-svg-node-editable');
+
+  if (canRename) {
+    g.addEventListener('dblclick', (e) => {
+      e.preventDefault();
+      const current = node.label;
+      const newName = window.prompt(`Rename ${current} to:`, current)?.trim();
+      if (!newName || newName === current) return;
+      g.dispatchEvent(
+        new CustomEvent<DiagramNodeEditDetail>(NODE_EDIT_EVENT, {
+          bubbles: true,
+          detail: { qualifiedName: node.qualifiedName, action: 'rename', newName, label: current },
+        }),
+      );
+    });
+  }
+
+  if (canDelete) {
+    g.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      if (!window.confirm(`Delete ${node.label}? This rewrites the .koi source.`)) return;
+      g.dispatchEvent(
+        new CustomEvent<DiagramNodeEditDetail>(NODE_EDIT_EVENT, {
+          bubbles: true,
+          detail: { qualifiedName: node.qualifiedName, action: 'delete', label: node.label },
+        }),
+      );
     });
   }
 }
