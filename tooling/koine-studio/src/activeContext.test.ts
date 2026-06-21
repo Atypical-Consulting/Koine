@@ -1,0 +1,155 @@
+import { describe, expect, test, vi } from 'vitest';
+import {
+  ALL_CONTEXTS,
+  createActiveContextBus,
+  isAllContexts,
+  listContexts,
+  scopeGlossaryModel,
+  scopeGraph,
+} from './activeContext';
+import type { ContextMapResult, DiagramGraph, DiagramNode, GlossaryEntry, GlossaryModel } from './lsp';
+
+const node = (id: string, qualifiedName: string, kind = 'aggregate-root'): DiagramNode => ({
+  id,
+  label: qualifiedName.includes('.') ? qualifiedName.slice(qualifiedName.indexOf('.') + 1) : qualifiedName,
+  kind,
+  qualifiedName,
+  sourceSpan: null,
+  stereotype: null,
+  members: [],
+});
+
+const edge = (from: string, to: string, label: string | null = null) => ({ from, to, label });
+
+// Two contexts: Sales (Order —contains→ OrderItem) and Inventory (Stock), plus a cross-context edge.
+const graph: DiagramGraph = {
+  nodes: [node('n1', 'Sales.Order'), node('n2', 'Sales.OrderItem', 'entity'), node('n3', 'Inventory.Stock')],
+  edges: [edge('n1', 'n2'), edge('n1', 'n3', 'references')],
+};
+
+const entry = (qualifiedName: string, kind = 'aggregate'): GlossaryEntry => ({
+  id: qualifiedName,
+  name: qualifiedName.slice(qualifiedName.indexOf('.') + 1),
+  kind,
+  context: qualifiedName.slice(0, qualifiedName.indexOf('.')),
+  qualifiedName,
+  doc: null,
+  nameRange: { start: { line: 0, character: 0 }, end: { line: 0, character: 0 } },
+});
+
+const model: GlossaryModel = {
+  entries: [entry('Sales.Order'), entry('Sales.OrderItem', 'entity'), entry('Inventory.Stock')],
+};
+
+describe('listContexts', () => {
+  test('returns each bounded context once, in first-seen order, from a graph', () => {
+    expect(listContexts(graph)).toEqual(['Sales', 'Inventory']);
+  });
+
+  test('de-duplicates contexts that appear on several nodes', () => {
+    const many: DiagramGraph = {
+      nodes: [node('a', 'Sales.Order'), node('b', 'Sales.OrderItem'), node('c', 'Sales.Customer')],
+      edges: [],
+    };
+    expect(listContexts(many)).toEqual(['Sales']);
+  });
+
+  test('reads the strategic list straight off a context map (de-duped, blanks dropped)', () => {
+    const ctxMap: ContextMapResult = { contexts: ['Sales', 'Inventory', 'Sales', ''], relations: [] };
+    expect(listContexts(ctxMap)).toEqual(['Sales', 'Inventory']);
+  });
+
+  test('derives contexts from a glossary model', () => {
+    expect(listContexts(model)).toEqual(['Sales', 'Inventory']);
+  });
+
+  test('a context node keyed by its bare name contributes that name', () => {
+    const ctxGraph: DiagramGraph = { nodes: [node('c1', 'Sales', 'context')], edges: [] };
+    expect(listContexts(ctxGraph)).toEqual(['Sales']);
+  });
+});
+
+describe('scopeGraph', () => {
+  test('keeps only the named context’s nodes and the edges between them', () => {
+    const scoped = scopeGraph(graph, 'Sales');
+    expect(scoped.nodes.map((n) => n.id)).toEqual(['n1', 'n2']);
+    // The cross-context edge n1->n3 is dropped because n3 (Inventory) was filtered out.
+    expect(scoped.edges).toEqual([edge('n1', 'n2')]);
+  });
+
+  test('ALL_CONTEXTS is the identity (same graph, unmodified)', () => {
+    expect(scopeGraph(graph, ALL_CONTEXTS)).toBe(graph);
+  });
+
+  test('an unknown context scopes to an empty graph', () => {
+    expect(scopeGraph(graph, 'Shipping')).toEqual({ nodes: [], edges: [] });
+  });
+
+  test('does not mutate the input graph', () => {
+    scopeGraph(graph, 'Sales');
+    expect(graph.nodes).toHaveLength(3);
+    expect(graph.edges).toHaveLength(2);
+  });
+});
+
+describe('scopeGlossaryModel', () => {
+  test('keeps only the named context’s entries', () => {
+    const scoped = scopeGlossaryModel(model, 'Sales');
+    expect(scoped.entries.map((e) => e.qualifiedName)).toEqual(['Sales.Order', 'Sales.OrderItem']);
+  });
+
+  test('ALL_CONTEXTS is the identity (same model)', () => {
+    expect(scopeGlossaryModel(model, ALL_CONTEXTS)).toBe(model);
+  });
+});
+
+describe('isAllContexts', () => {
+  test('is true only for the ALL_CONTEXTS sentinel', () => {
+    expect(isAllContexts(ALL_CONTEXTS)).toBe(true);
+    expect(isAllContexts('Sales')).toBe(false);
+  });
+});
+
+describe('createActiveContextBus', () => {
+  test('defaults to ALL_CONTEXTS; set then get round-trips', () => {
+    const bus = createActiveContextBus();
+    expect(bus.get()).toBe(ALL_CONTEXTS);
+    bus.set('Sales');
+    expect(bus.get()).toBe('Sales');
+  });
+
+  test('honours an explicit initial scope', () => {
+    expect(createActiveContextBus('Inventory').get()).toBe('Inventory');
+  });
+
+  test('subscribe fires on every real change with the new scope', () => {
+    const bus = createActiveContextBus();
+    const fn = vi.fn();
+    bus.subscribe(fn);
+    bus.set('Sales');
+    bus.set('Inventory');
+    expect(fn).toHaveBeenCalledTimes(2);
+    expect(fn).toHaveBeenNthCalledWith(1, 'Sales');
+    expect(fn).toHaveBeenNthCalledWith(2, 'Inventory');
+  });
+
+  test('setting the current value again is a no-op (no notification)', () => {
+    const bus = createActiveContextBus();
+    const fn = vi.fn();
+    bus.subscribe(fn);
+    bus.set(ALL_CONTEXTS);
+    bus.set('Sales');
+    bus.set('Sales');
+    expect(fn).toHaveBeenCalledTimes(1);
+  });
+
+  test('the unsubscribe handle stops further notifications', () => {
+    const bus = createActiveContextBus();
+    const fn = vi.fn();
+    const off = bus.subscribe(fn);
+    bus.set('Sales');
+    off();
+    bus.set('Inventory');
+    expect(fn).toHaveBeenCalledTimes(1);
+  });
+});
