@@ -26,29 +26,39 @@ body.resizing #diag-resizer {
   background: var(--koi-accent);
 }
 
+/* The header is a layout row (collapse toggle · tablist · count). Its typographic context — uppercase,
+   tracked, small — is inherited by the tabs (.diag-tab { font: inherit; … }). */
 #diag-header {
   flex: 0 0 auto;
   display: flex;
   align-items: center;
   gap: var(--koi-space-2);
   width: 100%;
-  background: transparent;
-  border: none;
   color: var(--koi-muted);
   padding: var(--koi-space-1-5) var(--koi-space-3);
-  cursor: pointer;
   font-family: inherit;
   font-size: 0.66rem;
   text-transform: uppercase;
   letter-spacing: 0.16em;
   text-align: left;
 }
-#diag-header:hover {
+
+.diag-collapse {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  background: transparent;
+  border: none;
+  color: inherit;
+  padding: 0;
+  cursor: pointer;
+}
+.diag-collapse:hover {
   color: var(--koi-fg);
 }
-#diag-header:focus-visible {
+.diag-collapse:focus-visible {
   outline: 2px solid var(--koi-accent);
-  outline-offset: -2px;
+  outline-offset: 2px;
 }
 
 .diag-chevron {
@@ -80,18 +90,12 @@ body.resizing #diag-resizer {
   color: var(--koi-hl-string);
 }
 
+/* The Problems panel is also a `.diag-panel` (shared box below); it keeps its vertical list-of-rows
+   layout, whereas Events/Relationships render a table. */
 #diag-body {
-  flex: 1 1 auto;
-  height: var(--koi-diag-h, 150px);
-  max-height: 50vh;
-  overflow-y: auto;
-  padding: 0 var(--koi-space-3) 7px;
   display: flex;
   flex-direction: column;
   gap: var(--koi-space-px);
-}
-#diagnostics.collapsed #diag-body {
-  display: none;
 }
 #diagnostics.collapsed #diag-resizer {
   display: none;
@@ -147,4 +151,159 @@ body.resizing #diag-resizer {
   content: '✓';
   font-style: normal;
   color: var(--koi-hl-string);
+}
+
+/* --- bottom-panel tabs (Problems / Events / Relationships, issue #144) ---
+   A compact tablist in the strip header; only the active panel body is shown. The tabs reuse the
+   header's muted/uppercase treatment so the strip reads as one control. */
+.diag-tabs {
+  display: flex;
+  align-items: stretch;
+  gap: var(--koi-space-1);
+}
+.diag-tab {
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--koi-muted);
+  padding: var(--koi-space-0-5) var(--koi-space-1);
+  cursor: pointer;
+  font: inherit;
+  text-transform: inherit;
+  letter-spacing: inherit;
+}
+.diag-tab:hover {
+  color: var(--koi-fg);
+}
+.diag-tab[aria-selected='true'] {
+  color: var(--koi-fg);
+  border-bottom-color: var(--koi-accent);
+}
+.diag-tab:focus-visible {
+  outline: 2px solid var(--koi-accent);
+  outline-offset: -2px;
+}
+
+/* All three bottom panels (Problems / Events / Relationships) share one draggable-height scroll box. */
+.diag-panel {
+  flex: 1 1 auto;
+  height: var(--koi-diag-h, 150px);
+  max-height: 50vh;
+  overflow: auto;
+  padding: 0 var(--koi-space-3) 7px;
+}
+/* The inactive panels carry the `hidden` attribute; this id-scoped rule beats #diag-body's id-level
+   `display: flex` so the Problems panel actually hides when another tab is active. */
+#diagnostics .diag-panel[hidden] {
+  display: none;
+}
+#diagnostics.collapsed .diag-panel {
+  display: none;
+}
+
+/* --- model tables (Events / Relationships) ---
+   A dense, scannable table consistent with the diagnostics list: muted sticky header, subtle row
+   separators, navigable rows that highlight on hover/focus. */
+.koi-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: inherit;
+}
+.koi-table th {
+  position: sticky;
+  top: 0;
+  z-index: var(--koi-z-base);
+  background: var(--koi-paper-2);
+  text-align: left;
+  border-bottom: 1px solid var(--koi-line);
+  white-space: nowrap;
+  padding: 0; /* the sort button carries the padding so the whole header cell is clickable */
+}
+/* Each header is a sort button: clicking it orders the table by that column (aria-sort reflects state). */
+.koi-th-sort {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--koi-space-1);
+  width: 100%;
+  background: transparent;
+  border: none;
+  color: var(--koi-muted);
+  font: inherit;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 0.66rem;
+  text-align: left;
+  padding: var(--koi-space-1) 7px;
+  cursor: pointer;
+}
+.koi-th-sort:hover {
+  color: var(--koi-fg);
+}
+.koi-th-sort:focus-visible {
+  outline: 2px solid var(--koi-accent);
+  outline-offset: -2px;
+}
+/* Direction caret on the active sort column (the inactive columns show none). */
+.koi-th-sort::after {
+  content: '';
+  color: var(--koi-accent);
+  font-size: 0.6em;
+}
+th[aria-sort='ascending'] .koi-th-sort::after {
+  content: '▲';
+}
+th[aria-sort='descending'] .koi-th-sort::after {
+  content: '▼';
+}
+.koi-table td {
+  padding: var(--koi-space-1) 7px;
+  border-bottom: 1px solid var(--koi-line);
+  color: var(--koi-ink-soft);
+  vertical-align: top;
+}
+.koi-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.koi-row-link {
+  cursor: pointer;
+}
+.koi-row-link:hover td {
+  background: var(--koi-surface);
+  color: var(--koi-fg);
+}
+.koi-row-link:focus-visible {
+  outline: 2px solid var(--koi-accent);
+  outline-offset: -2px;
+}
+
+/* Type badge: a small dot keys Domain vs Integration without relying on colour alone. */
+.koi-evt-type::before {
+  content: '';
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-right: var(--koi-space-1);
+  border-radius: var(--koi-radius-pill);
+  background: currentColor;
+  vertical-align: baseline;
+}
+.koi-evt-domain {
+  color: var(--koi-hl-type);
+}
+.koi-evt-integration {
+  color: var(--koi-hl-number);
+}
+.koi-rel-kind {
+  color: var(--koi-muted);
+}
+
+.koi-table-empty {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--koi-muted);
+  padding: var(--koi-space-2) 7px;
+  font-style: italic;
 }
