@@ -56,6 +56,10 @@ and
 [`KoineParser.g4`](https://github.com/Atypical-Consulting/Koine/blob/main/src/Koine.Compiler/Grammar/KoineParser.g4);
 where this specification simplifies a production for clarity, those files win.
 
+One simplification is pervasive: member, parameter, and type-name positions are written as `Identifier`,
+but in the grammar these positions also accept *soft keywords* ([§3.5.2](/Koine/reference/lexical-structure/#352-soft-keywords)) —
+so a field, parameter, or read-model column may legitimately be named `version`, `from`, or any other soft keyword.
+
 ## 2.3 Section numbering and cross-references
 
 Every chapter owns a **fixed chapter number** (shown in the sidebar as `5 · Value objects`). Section
