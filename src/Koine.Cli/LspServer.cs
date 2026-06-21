@@ -203,6 +203,7 @@ internal sealed class LspServer
                                         ["koineEmitPreview"] = true,
                                         ["koineGlossary"] = true,
                                         ["koineGlossaryModel"] = true,
+                                        ["koineModel"] = true,
                                         ["koineContextMap"] = true,
                                         ["koineSetDoc"] = true,
                                         ["koineDocs"] = true,
@@ -435,6 +436,38 @@ internal sealed class LspServer
                             if (root.TryGetProperty("id", out _))
                             {
                                 Respond(root, GlossaryModelResultJson(root));
+                            }
+
+                            break;
+
+                        case "koine/model":
+                            if (root.TryGetProperty("id", out _))
+                            {
+                                Respond(root, ModelResultJson(root));
+                            }
+
+                            break;
+
+                        case "koine/modelMembers":
+                            if (root.TryGetProperty("id", out _))
+                            {
+                                Respond(root, ModelMembersResultJson(root));
+                            }
+
+                            break;
+
+                        case "koine/emitKoine":
+                            if (root.TryGetProperty("id", out _))
+                            {
+                                Respond(root, EmitKoineResultJson(root));
+                            }
+
+                            break;
+
+                        case "koine/applyModelEdit":
+                            if (root.TryGetProperty("id", out _))
+                            {
+                                Respond(root, ApplyModelEditResultJson(root));
                             }
 
                             break;
@@ -1391,6 +1424,147 @@ internal sealed class LspServer
 
         return new Dictionary<string, object?> { ["entries"] = entries };
     }
+
+    /// <summary>
+    /// Projects the structured model graph (#91) of the merged workspace to the stable
+    /// <see cref="ModelNode"/> contract — the whole tree, or the subtree at <c>params.qualifiedName</c>
+    /// when supplied — that Studio's visual editors drive forms/canvases from. A null model yields the
+    /// empty <c>model</c> root.
+    /// </summary>
+    private object? ModelResultJson(JsonElement root)
+    {
+        var sources = Workspace().Select(kv => new SourceFile(kv.Key, kv.Value)).ToList();
+        var (model, _) = ParseUsable(sources);
+        if (model is null)
+        {
+            return ModelNodeJson(new ModelNode("model", "", "", [], []));
+        }
+
+        return ModelNodeJson(ModelRoundTripService.ModelToJson(model, TryGetStringParam(root, "qualifiedName")));
+    }
+
+    /// <summary>
+    /// Enumerates the editable children of the node at <c>params.qualifiedName</c> (#91): a value/
+    /// entity's fields, an enum's members, a state machine's transitions, the context map's relations.
+    /// A null model or unresolved name yields <c>{ members: [] }</c>.
+    /// </summary>
+    private object? ModelMembersResultJson(JsonElement root)
+    {
+        var sources = Workspace().Select(kv => new SourceFile(kv.Key, kv.Value)).ToList();
+        var (model, _) = ParseUsable(sources);
+        var members = model is null
+            ? Array.Empty<ModelMember>()
+            : ModelRoundTripService.MembersOf(model, TryGetStringParam(root, "qualifiedName") ?? "");
+        return new Dictionary<string, object?> { ["members"] = members.Select(m => (object)ModelMemberJson(m)).ToArray() };
+    }
+
+    /// <summary>
+    /// Applies the structured edit in <c>params.edit</c> and returns the validated canonical <c>.koi</c>
+    /// for the affected declaration (#91), or the rejecting diagnostics. A malformed request yields
+    /// <c>{ koine: null, diagnostics: [] }</c>.
+    /// </summary>
+    private object? EmitKoineResultJson(JsonElement root)
+    {
+        if (!TryGetEdit(root, out StructuredEdit edit))
+        {
+            return new Dictionary<string, object?> { ["koine"] = null, ["diagnostics"] = Array.Empty<object>() };
+        }
+
+        var sources = Workspace().Select(kv => new SourceFile(kv.Key, kv.Value)).ToList();
+        EmitResult result = ModelRoundTripService.EmitKoine(sources, edit);
+        return new Dictionary<string, object?>
+        {
+            ["koine"] = result.Koine,
+            ["diagnostics"] = DiagnosticsJson(result.Diagnostics),
+        };
+    }
+
+    /// <summary>
+    /// Applies the structured edit in <c>params.edit</c> and returns a span-minimal patch (#91):
+    /// <c>{ uri, edits, diagnostics }</c> — the owning file, the whole-declaration <c>TextEdit</c>,
+    /// and any rejecting diagnostics. A malformed request yields the empty patch.
+    /// </summary>
+    private object? ApplyModelEditResultJson(JsonElement root)
+    {
+        if (!TryGetEdit(root, out StructuredEdit edit))
+        {
+            return new Dictionary<string, object?>
+            {
+                ["uri"] = null,
+                ["edits"] = Array.Empty<object>(),
+                ["diagnostics"] = Array.Empty<object>(),
+            };
+        }
+
+        var sources = Workspace().Select(kv => new SourceFile(kv.Key, kv.Value)).ToList();
+        ModelEditResult result = ModelRoundTripService.ApplyEdit(sources, edit);
+        var edits = result.Edits
+            .Select(e => (object)new Dictionary<string, object?>
+            {
+                ["range"] = SpanRange(e.Range),
+                ["newText"] = e.NewText,
+            })
+            .ToArray();
+        return new Dictionary<string, object?>
+        {
+            ["uri"] = result.Uri,
+            ["edits"] = edits,
+            ["diagnostics"] = DiagnosticsJson(result.Diagnostics),
+        };
+    }
+
+    /// <summary>Serialises a <see cref="ModelNode"/> subtree to the wire shape (recursive, additive).</summary>
+    private static Dictionary<string, object?> ModelNodeJson(ModelNode n) => new()
+    {
+        ["kind"] = n.Kind,
+        ["qualifiedName"] = n.QualifiedName,
+        ["title"] = n.Title,
+        ["members"] = n.Members.Select(m => (object)ModelMemberJson(m)).ToArray(),
+        ["children"] = n.Children.Select(c => (object)ModelNodeJson(c)).ToArray(),
+    };
+
+    private static Dictionary<string, object?> ModelMemberJson(ModelMember m) => new()
+    {
+        ["kind"] = m.Kind,
+        ["name"] = m.Name,
+        ["type"] = m.Type,
+        ["value"] = m.Value,
+    };
+
+    /// <summary>Serialises round-trip diagnostics to a compact <c>{ code, message, range, uri }</c> shape.</summary>
+    private static object[] DiagnosticsJson(IReadOnlyList<Diagnostic> diagnostics) =>
+        diagnostics.Select(d => (object)new Dictionary<string, object?>
+        {
+            ["code"] = d.Code,
+            ["message"] = d.Message,
+            ["range"] = SpanRange(d.Span),
+            ["uri"] = d.File,
+        }).ToArray();
+
+    private static string? TryGetStringParam(JsonElement root, string name) =>
+        root.TryGetProperty("params", out var p) && p.TryGetProperty(name, out var el) && el.ValueKind == JsonValueKind.String
+            ? el.GetString()
+            : null;
+
+    /// <summary>Parses <c>params.edit</c> into a <see cref="StructuredEdit"/>; false when malformed.</summary>
+    private static bool TryGetEdit(JsonElement root, out StructuredEdit edit)
+    {
+        edit = null!;
+        if (!root.TryGetProperty("params", out var p)
+            || !p.TryGetProperty("edit", out var e)
+            || e.ValueKind != JsonValueKind.Object
+            || EditString(e, "kind") is not { } kind
+            || EditString(e, "target") is not { } target)
+        {
+            return false;
+        }
+
+        edit = new StructuredEdit(kind, target, EditString(e, "name"), EditString(e, "type"), EditString(e, "value"));
+        return true;
+    }
+
+    private static string? EditString(JsonElement obj, string name) =>
+        obj.TryGetProperty(name, out var el) && el.ValueKind == JsonValueKind.String ? el.GetString() : null;
 
     /// <summary>
     /// Computes the doc-comment edit for a glossary declaration addressed by <c>params.id</c>, setting
