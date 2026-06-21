@@ -162,7 +162,7 @@ public sealed partial class CSharpEmitter
     /// <c>SaveChangesAsync</c>. When the context has a versioned aggregate, a stale write is caught and
     /// rethrown as the runtime <c>ConcurrencyConflictException</c>.
     /// </summary>
-    private EmittedFile EmitUnitOfWorkImpl(EmitContext emit, string context, IReadOnlyList<AggregateDecl> aggregates)
+    private EmittedFile EmitUnitOfWorkImpl(EmitContext emit, string context, IReadOnlyList<AggregateDecl> aggregates, bool publishesEvents)
     {
         var dbContext = context + "DbContext";
         var hasVersioned = aggregates.Any(a => a.IsVersioned);
@@ -170,7 +170,15 @@ public sealed partial class CSharpEmitter
         var sb = new StringBuilder();
         WriteXmlDoc(sb, $"EF Core unit of work over the {dbContext}.", "");
         sb.Append("public sealed class UnitOfWork : IUnitOfWork\n{\n");
-        sb.Append(Indent).Append("private readonly ").Append(dbContext).Append(" _context;\n\n");
+        sb.Append(Indent).Append("private readonly ").Append(dbContext).Append(" _context;\n");
+        if (publishesEvents)
+        {
+            // Integration events enqueued before the save are written to the outbox in the SAME
+            // SaveChangesAsync as the aggregate change, so an event is never lost on commit.
+            sb.Append(Indent).Append("private readonly List<IIntegrationEvent> _outbox = new();\n");
+        }
+
+        sb.Append('\n');
 
         // Constructor: the DbContext plus a repository per aggregate (injected, so a test can swap them).
         sb.Append(Indent).Append("public UnitOfWork(").Append(dbContext).Append(" context");
@@ -198,45 +206,78 @@ public sealed partial class CSharpEmitter
         }
 
         sb.Append('\n');
-        if (hasVersioned)
+
+        // Outbox enqueue seam: integration events queued here are flushed inside SaveChangesAsync.
+        if (publishesEvents)
         {
-            WriteConcurrencyAwareSave(sb);
+            sb.Append(Indent).Append("public void Enqueue(IIntegrationEvent integrationEvent)\n");
+            sb.Append(Indent).Append(Indent).Append("=> _outbox.Add(integrationEvent);\n\n");
         }
-        else
-        {
-            sb.Append(Indent).Append("public Task<int> SaveChangesAsync(CancellationToken ct = default)\n");
-            sb.Append(Indent).Append(Indent).Append("=> _context.SaveChangesAsync(ct);\n");
-        }
+
+        WriteUnitOfWorkSave(sb, hasVersioned, publishesEvents);
 
         sb.Append("}\n");
 
-        var requiredUsings = hasVersioned ? VersionedUnitOfWorkUsings : Array.Empty<string>();
+        var requiredUsings = (hasVersioned, publishesEvents) switch
+        {
+            (true, _) => VersionedUnitOfWorkUsings, // EF Core + Koine.Runtime (ConcurrencyConflictException)
+            // A publishing-but-unversioned UoW references IIntegrationEvent — a runtime marker the
+            // using-collector already maps to Koine.Runtime — so no explicit using is needed.
+            _ => Array.Empty<string>(),
+        };
         return new EmittedFile(
             PathFor(emit, context, KindFolder.Infrastructure, "UnitOfWork.cs"),
             Assemble(emit, context, sb.ToString(), usesLinq: false, requiredUsings));
     }
 
     /// <summary>
-    /// Writes a <c>SaveChangesAsync</c> that maps EF Core's <c>DbUpdateConcurrencyException</c> to the
-    /// runtime <c>ConcurrencyConflictException</c>, reading the expected/actual <c>Version</c> from the
-    /// conflicting entry — the realization of the optimistic-concurrency token a versioned root carries.
+    /// Writes <c>SaveChangesAsync</c> across two independent axes: a publishing context first flushes
+    /// its pending integration events to the outbox (so they persist in the same transaction), and a
+    /// versioned context maps EF Core's <c>DbUpdateConcurrencyException</c> to the runtime
+    /// <c>ConcurrencyConflictException</c>. The flag-free case is a one-line passthrough.
     /// </summary>
-    private static void WriteConcurrencyAwareSave(StringBuilder sb)
+    private static void WriteUnitOfWorkSave(StringBuilder sb, bool hasVersioned, bool publishesEvents)
     {
+        // Simplest shape: no outbox flush and no concurrency mapping → a direct passthrough.
+        if (!hasVersioned && !publishesEvents)
+        {
+            sb.Append(Indent).Append("public Task<int> SaveChangesAsync(CancellationToken ct = default)\n");
+            sb.Append(Indent).Append(Indent).Append("=> _context.SaveChangesAsync(ct);\n");
+            return;
+        }
+
         sb.Append(Indent).Append("public async Task<int> SaveChangesAsync(CancellationToken ct = default)\n");
         sb.Append(Indent).Append("{\n");
-        sb.Append(Indent).Append(Indent).Append("try\n");
-        sb.Append(Indent).Append(Indent).Append("{\n");
-        sb.Append(Indent).Append(Indent).Append(Indent).Append("return await _context.SaveChangesAsync(ct);\n");
-        sb.Append(Indent).Append(Indent).Append("}\n");
-        sb.Append(Indent).Append(Indent).Append("catch (DbUpdateConcurrencyException ex)\n");
-        sb.Append(Indent).Append(Indent).Append("{\n");
-        sb.Append(Indent).Append(Indent).Append(Indent).Append("var entry = ex.Entries[0];\n");
-        sb.Append(Indent).Append(Indent).Append(Indent).Append("var expected = (int)(entry.Property(\"Version\").CurrentValue ?? 0);\n");
-        sb.Append(Indent).Append(Indent).Append(Indent).Append("var databaseValues = await entry.GetDatabaseValuesAsync(ct);\n");
-        sb.Append(Indent).Append(Indent).Append(Indent).Append("var actual = databaseValues is null ? 0 : (int)(databaseValues[\"Version\"] ?? 0);\n");
-        sb.Append(Indent).Append(Indent).Append(Indent).Append("throw new ConcurrencyConflictException(entry.Metadata.DisplayName(), expected, actual);\n");
-        sb.Append(Indent).Append(Indent).Append("}\n");
+
+        if (publishesEvents)
+        {
+            sb.Append(Indent).Append(Indent).Append("foreach (var integrationEvent in _outbox)\n");
+            sb.Append(Indent).Append(Indent).Append("{\n");
+            sb.Append(Indent).Append(Indent).Append(Indent).Append("_context.Set<OutboxMessage>().Add(OutboxMessage.From(integrationEvent));\n");
+            sb.Append(Indent).Append(Indent).Append("}\n\n");
+            sb.Append(Indent).Append(Indent).Append("_outbox.Clear();\n\n");
+        }
+
+        if (hasVersioned)
+        {
+            sb.Append(Indent).Append(Indent).Append("try\n");
+            sb.Append(Indent).Append(Indent).Append("{\n");
+            sb.Append(Indent).Append(Indent).Append(Indent).Append("return await _context.SaveChangesAsync(ct);\n");
+            sb.Append(Indent).Append(Indent).Append("}\n");
+            sb.Append(Indent).Append(Indent).Append("catch (DbUpdateConcurrencyException ex)\n");
+            sb.Append(Indent).Append(Indent).Append("{\n");
+            sb.Append(Indent).Append(Indent).Append(Indent).Append("var entry = ex.Entries[0];\n");
+            sb.Append(Indent).Append(Indent).Append(Indent).Append("var expected = (int)(entry.Property(\"Version\").CurrentValue ?? 0);\n");
+            sb.Append(Indent).Append(Indent).Append(Indent).Append("var databaseValues = await entry.GetDatabaseValuesAsync(ct);\n");
+            sb.Append(Indent).Append(Indent).Append(Indent).Append("var actual = databaseValues is null ? 0 : (int)(databaseValues[\"Version\"] ?? 0);\n");
+            sb.Append(Indent).Append(Indent).Append(Indent).Append("throw new ConcurrencyConflictException(entry.Metadata.DisplayName(), expected, actual);\n");
+            sb.Append(Indent).Append(Indent).Append("}\n");
+        }
+        else
+        {
+            sb.Append(Indent).Append(Indent).Append("return await _context.SaveChangesAsync(ct);\n");
+        }
+
         sb.Append(Indent).Append("}\n");
     }
 }

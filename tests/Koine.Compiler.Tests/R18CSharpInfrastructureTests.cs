@@ -36,6 +36,10 @@ public class R18CSharpInfrastructureTests
         }
         context Shipping {
           subscribes Sales.OrderPlaced
+          value Address { city: String }
+          aggregate Shipment root Shipment {
+            entity Shipment identified by ShipmentId { address: Address }
+          }
         }
         contextmap {
           Sales -> Shipping : open-host
@@ -262,6 +266,49 @@ public class R18CSharpInfrastructureTests
 
         uow.Contents.ShouldContain("=> _context.SaveChangesAsync(ct);");
         uow.Contents.ShouldNotContain("DbUpdateConcurrencyException");
+    }
+
+    // ----------------------------------------------------------------------
+    // Transactional outbox + dispatcher (Task 5)
+    // ----------------------------------------------------------------------
+
+    [Fact]
+    public void Publishing_context_emits_outbox_and_dispatcher()
+    {
+        var files = Emit(Infrastructure);
+
+        files.ShouldContain(f => f.RelativePath == "Sales/Infrastructure/OutboxMessage.cs");
+        files.ShouldContain(f => f.RelativePath == "Sales/Infrastructure/IntegrationEventDispatcher.cs");
+        files.ShouldContain(f => f.RelativePath == "Sales/Abstractions/IIntegrationEventHandler.cs");
+
+        // The DbContext gains the outbox table; the UnitOfWork gains the enqueue seam + flush.
+        File(files, "Sales/Infrastructure/SalesDbContext.cs").Contents
+            .ShouldContain("public DbSet<OutboxMessage> OutboxMessages => Set<OutboxMessage>();");
+        var uow = File(files, "Sales/Infrastructure/UnitOfWork.cs").Contents;
+        uow.ShouldContain("public void Enqueue(IIntegrationEvent integrationEvent)");
+        uow.ShouldContain("_context.Set<OutboxMessage>().Add(OutboxMessage.From(integrationEvent));");
+
+        // The dispatcher drains unprocessed rows and hands each to the delivery seam.
+        var dispatcher = File(files, "Sales/Infrastructure/IntegrationEventDispatcher.cs").Contents;
+        dispatcher.ShouldContain("public sealed class IntegrationEventDispatcher");
+        dispatcher.ShouldContain(".Where(m => m.ProcessedOn == null)");
+        dispatcher.ShouldContain("await _handler.HandleAsync(integrationEvent, ct);");
+    }
+
+    [Fact]
+    public void Subscribe_only_context_has_no_outbox_or_dispatcher()
+    {
+        var files = Emit(Infrastructure);
+
+        // Shipping has an aggregate (so it gets a DbContext + UoW) but only subscribes — no outbox.
+        files.ShouldContain(f => f.RelativePath == "Shipping/Infrastructure/ShippingDbContext.cs");
+        files.ShouldNotContain(f => f.RelativePath == "Shipping/Infrastructure/OutboxMessage.cs");
+        files.ShouldNotContain(f => f.RelativePath == "Shipping/Infrastructure/IntegrationEventDispatcher.cs");
+
+        File(files, "Shipping/Infrastructure/ShippingDbContext.cs").Contents
+            .ShouldNotContain("OutboxMessage");
+        File(files, "Shipping/Infrastructure/UnitOfWork.cs").Contents
+            .ShouldNotContain("Enqueue");
     }
 
     [Fact]

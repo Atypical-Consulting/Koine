@@ -49,7 +49,11 @@ public sealed partial class CSharpEmitter
                 continue;
             }
 
-            files.Add(EmitDbContext(emit, ctx.Name, aggregates));
+            // A context that publishes integration events gets a transactional outbox + dispatcher;
+            // a subscribe-only (or event-free) context does not.
+            var publishesEvents = ctx.Publishes.Count > 0;
+
+            files.Add(EmitDbContext(emit, ctx.Name, aggregates, publishesEvents));
 
             // One shared smart-enum converter holder per context (issue #128): a smart enum used by
             // several aggregates is converted once and referenced from each configuration.
@@ -65,7 +69,14 @@ public sealed partial class CSharpEmitter
                 files.Add(EmitRepositoryImpl(emit, ctx.Name, agg, typeMapper));
             }
 
-            files.Add(EmitUnitOfWorkImpl(emit, ctx.Name, aggregates));
+            files.Add(EmitUnitOfWorkImpl(emit, ctx.Name, aggregates, publishesEvents));
+
+            if (publishesEvents)
+            {
+                files.Add(EmitOutboxMessage(emit, ctx.Name));
+                files.Add(EmitIntegrationEventHandlerSeam(emit, ctx.Name));
+                files.Add(EmitIntegrationEventDispatcher(emit, ctx.Name));
+            }
         }
     }
 
@@ -78,7 +89,7 @@ public sealed partial class CSharpEmitter
     /// root (declaration order) and an <c>OnModelCreating</c> that applies each generated
     /// <c>IEntityTypeConfiguration</c>.
     /// </summary>
-    private EmittedFile EmitDbContext(EmitContext emit, string context, IReadOnlyList<AggregateDecl> aggregates)
+    private EmittedFile EmitDbContext(EmitContext emit, string context, IReadOnlyList<AggregateDecl> aggregates, bool publishesEvents)
     {
         var className = context + "DbContext";
         var sb = new StringBuilder();
@@ -98,6 +109,12 @@ public sealed partial class CSharpEmitter
               .Append(" => Set<").Append(root).Append(">();\n");
         }
 
+        // The transactional outbox table, when this context publishes integration events.
+        if (publishesEvents)
+        {
+            sb.Append(Indent).Append("public DbSet<OutboxMessage> OutboxMessages => Set<OutboxMessage>();\n");
+        }
+
         sb.Append('\n');
         sb.Append(Indent).Append("protected override void OnModelCreating(ModelBuilder modelBuilder)\n");
         sb.Append(Indent).Append("{\n");
@@ -105,6 +122,11 @@ public sealed partial class CSharpEmitter
         {
             var root = agg.RootEntity()!.Name;
             sb.Append(Indent).Append(Indent).Append("modelBuilder.ApplyConfiguration(new ").Append(root).Append("Configuration());\n");
+        }
+
+        if (publishesEvents)
+        {
+            sb.Append(Indent).Append(Indent).Append("modelBuilder.Entity<OutboxMessage>().HasKey(x => x.Id);\n");
         }
 
         sb.Append(Indent).Append("}\n");
