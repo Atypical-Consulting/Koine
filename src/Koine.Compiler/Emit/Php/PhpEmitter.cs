@@ -128,7 +128,7 @@ public sealed partial class PhpEmitter : IEmitter
                 }
                 // Emit the repository interface for the aggregate root.
                 var root = agg.Types.OfType<EntityDecl>().FirstOrDefault(e => e.Name == agg.RootName);
-                var repo = EmitRepository(emit, agg, root, contextName, typeMapper);
+                var repo = EmitRepository(agg, root, contextName, typeMapper);
                 if (repo is not null)
                 {
                     files.Add(repo);

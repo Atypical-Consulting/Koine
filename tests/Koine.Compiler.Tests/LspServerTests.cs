@@ -716,6 +716,9 @@ public class LspServerTests
 
     private static byte[] EmitPreview(string uri, string? target) =>
         Frame(JsonSerializer.Serialize(target is null
+            // The two ternary branches are distinct anonymous types, so the cast to object is required
+            // for type inference (CS0411 without it) — the "redundant cast" hint is a false positive.
+            // ReSharper disable once RedundantCast
             ? (object)new
             {
                 jsonrpc = "2.0",

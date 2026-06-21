@@ -9,15 +9,8 @@ using Pizzeria.Domain;
 // assertion or a thrown invariant) breaks the build's `dotnet run`, so green here means
 // the demo is correct end-to-end.
 
-static void Check(bool condition, string what)
-{
-    if (!condition)
-    {
-        throw new Exception($"DEMO ASSERTION FAILED: {what}");
-    }
-
-    Console.WriteLine($"  ok  {what}");
-}
+static void Check(bool condition, string what) =>
+    Console.WriteLine(condition ? $"  ok  {what}" : throw new Exception($"DEMO ASSERTION FAILED: {what}"));
 
 static void Throws<TException>(Action action, string what) where TException : Exception
 {

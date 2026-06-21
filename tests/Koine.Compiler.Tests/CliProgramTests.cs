@@ -313,6 +313,9 @@ public class CliProgramTests
                 builds++;
                 if (builds >= 3)
                 {
+                    // The build callback only runs during Run (below), before `cts` is disposed, so the
+                    // "captured variable disposed in outer scope" hint is a false positive here.
+                    // ReSharper disable once AccessToDisposedClosure
                     cts.Cancel();   // initial build + at least two interval-driven rebuilds
                 }
 

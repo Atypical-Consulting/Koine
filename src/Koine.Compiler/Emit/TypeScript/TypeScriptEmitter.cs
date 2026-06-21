@@ -206,7 +206,7 @@ public sealed partial class TypeScriptEmitter : IEmitter
                 .ToList();
             if (aggregates.Count > 0)
             {
-                files.Add(EmitUnitOfWork(emit, ctx.Name, aggregates));
+                files.Add(EmitUnitOfWork(ctx.Name, aggregates));
             }
         }
 

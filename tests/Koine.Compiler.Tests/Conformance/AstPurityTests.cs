@@ -47,6 +47,7 @@ public class AstPurityTests
     public void Guard_detects_an_emitter_reference()
     {
         Type probe = typeof(EmitReferencingProbe);
+        _ = new EmitReferencingProbe { Leak = null }.Leak;   // a live read/write of the emitter-typed member
         ReferencedTypes(probe).ShouldContain(t => IsEmitType(t));
     }
 

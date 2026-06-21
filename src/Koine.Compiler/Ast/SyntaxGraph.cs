@@ -39,7 +39,9 @@ internal sealed class SyntaxGraph
         _parent[node] = parent;
         // The generated child enumerator (Commit 2) replaces the reflection-based NodeWalker.ChildNodes
         // on the one production traversal. Fully qualified: 'ChildNodes' (the generated static facade)
-        // would otherwise collide with this type's own ChildNodes(node) instance method.
+        // would otherwise collide with this type's own ChildNodes(node) instance method — the qualifier
+        // is required (CS0119 without it), so the "redundant qualifier" hint is a false positive here.
+        // ReSharper disable once RedundantNameQualifier
         IReadOnlyList<KoineNode> children = Koine.Compiler.Ast.ChildNodes.Of(node).ToList();
         _children[node] = children;
 

@@ -18,7 +18,7 @@ public sealed partial class TypeScriptEmitter
     /// Lives in the context-root <c>abstractions/</c> folder, mirroring the C# emitter's
     /// <c>Abstractions</c> placement.
     /// </summary>
-    private EmittedFile EmitUnitOfWork(TsEmitContext emit, string contextName, IReadOnlyList<AggregateDecl> aggregates)
+    private EmittedFile EmitUnitOfWork(string contextName, IReadOnlyList<AggregateDecl> aggregates)
     {
         const string fileName = "IUnitOfWork";
         var ns = contextName;

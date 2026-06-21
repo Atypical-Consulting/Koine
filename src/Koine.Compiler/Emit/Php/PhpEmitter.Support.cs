@@ -37,8 +37,6 @@ public sealed partial class PhpEmitter
     /// <summary>DDD kind subfolders (mirrors the Python emitter's KindFolder).</summary>
     private static class KindFolder
     {
-        /// <summary>The context package root (no subfolder — e.g. domain services).</summary>
-        public const string Root = "";
         public const string ValueObjects = "ValueObjects";
         public const string Entities = "Entities";
         public const string Enums = "Enums";
