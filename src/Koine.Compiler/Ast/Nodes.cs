@@ -97,8 +97,9 @@ public abstract record KoineNode
         else
         {
             // Compose composite nodes from their reconstruction children in source order (error
-            // markers excluded, ordering centralized in NodeWalker).
-            foreach (KoineNode child in NodeWalker.ReconstructionChildren(this))
+            // markers excluded, ordering centralized in ReconstructionWalker — the source-generated,
+            // reflection-free child walk).
+            foreach (KoineNode child in ReconstructionWalker.Children(this))
             {
                 child.AppendFullString(sb);
             }

@@ -8,7 +8,14 @@ namespace Koine.Compiler.Ast;
 /// Enumerates the <see cref="KoineNode"/> descendants of a model subtree, reflecting over each
 /// node's public properties (a <see cref="KoineNode"/> or a sequence of them). Target-agnostic
 /// and grammar-agnostic: a new node kind is walked automatically without touching this code.
-/// Used by <see cref="SemanticModel.NodeAt"/> for the position→node map.
+/// <para>
+/// This reflection-based walk is the independent ORACLE the test suite cross-checks the
+/// source-generated child enumeration (<c>ChildNodes.Of</c> / <c>KoineSyntaxChildEnumerator</c>) and
+/// the production <see cref="ReconstructionWalker"/> against. The production paths no longer use it:
+/// the position→node map (<see cref="SyntaxGraph"/>, behind <see cref="SemanticModel.NodeAt"/>) and
+/// source reconstruction (<see cref="KoineNode.ToFullString"/> / <see
+/// cref="Koine.Compiler.Formatting.AstPrinter"/>) both run on the generated, reflection-free walk.
+/// </para>
 /// </summary>
 internal static class NodeWalker
 {
@@ -29,14 +36,14 @@ internal static class NodeWalker
     }
 
     /// <summary>
-    /// The child nodes to use when reconstructing source text from the tree (<see
-    /// cref="KoineNode.ToFullString"/> / <see cref="Koine.Compiler.Formatting.AstPrinter"/>): real
-    /// syntax children in source order (ascending <see cref="SourceSpan.Offset"/>), EXCLUDING
-    /// error-recovery markers. <see cref="ErrorNode"/> markers are a side-channel (e.g. <see
-    /// cref="ContextNode.Errors"/>) whose offsets overlap the recovered real children, so emitting
-    /// them inline would double-count and interleave stray fragments. Synthesized children with no
-    /// position (<see cref="SourceSpan.None"/>) sort stably to the end, preserving their reflection
-    /// order.
+    /// The reflection oracle for <see cref="ReconstructionWalker.Children"/>: the child nodes to use
+    /// when reconstructing source text from the tree — real syntax children in source order (ascending
+    /// <see cref="SourceSpan.Offset"/>), EXCLUDING error-recovery markers. <see cref="ErrorNode"/>
+    /// markers are a side-channel (e.g. <see cref="ContextNode.Errors"/>) whose offsets overlap the
+    /// recovered real children, so emitting them inline would double-count and interleave stray
+    /// fragments. Synthesized children with no position (<see cref="SourceSpan.None"/>) sort stably to
+    /// the end, preserving their reflection order. Production reconstruction uses the generated
+    /// <see cref="ReconstructionWalker"/>; this method exists so the test suite can prove the two agree.
     /// </summary>
     internal static IEnumerable<KoineNode> ReconstructionChildren(KoineNode node) =>
         ChildNodes(node)

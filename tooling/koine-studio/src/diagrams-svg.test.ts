@@ -355,7 +355,15 @@ describe('interactive canvas — zoom / pan / fit (issue #145)', () => {
     expect(svg.getAttribute('height')).toBe('100%');
   });
 
-  test('zoom-in raises the percent and shrinks the viewBox; zoom-out lowers it; fit restores it', async () => {
+  test('opens at 100% zoom by default (not fitted-to-screen)', async () => {
+    const container = ROOT();
+    await createSvgRenderer().render(container, oneNodeFile(), 'light', () => true);
+    // A freshly opened diagram starts at its natural 100% scale (one content unit per pixel), so the
+    // reader sees the diagram at true size rather than scaled to fill the panel.
+    expect(pctOf(container)).toBe(100);
+  });
+
+  test('zoom-in raises the percent and shrinks the viewBox; zoom-out lowers it; fit re-frames to fill', async () => {
     const container = ROOT();
     await createSvgRenderer().render(container, oneNodeFile(), 'light', () => true);
 
@@ -364,20 +372,20 @@ describe('interactive canvas — zoom / pan / fit (issue #145)', () => {
     const zoomOut = container.querySelector<HTMLButtonElement>('.koi-canvas-btn[aria-label="Zoom out"]')!;
     const fitBtn = container.querySelector<HTMLButtonElement>('.koi-canvas-btn[aria-label="Fit to screen"]')!;
 
-    const startPct = pctOf(container);
+    const startPct = pctOf(container); // the 100% default
     const startW = viewBoxNumbers(svg)[2];
 
     zoomIn.click();
     expect(pctOf(container)).toBeGreaterThan(startPct);
     expect(viewBoxNumbers(svg)[2]).toBeLessThan(startW); // smaller window = magnified
 
+    // Fit re-frames to the diagram bounds with margin — a distinct, wider window than the 100% default.
     fitBtn.click();
-    expect(pctOf(container)).toBe(startPct);
-    expect(viewBoxNumbers(svg)[2]).toBeCloseTo(startW, 6);
+    const fitW = viewBoxNumbers(svg)[2];
+    expect(fitW).toBeGreaterThan(startW); // padding around the content makes the fit window wider than 100%
 
     zoomOut.click();
-    expect(pctOf(container)).toBeLessThan(startPct);
-    expect(viewBoxNumbers(svg)[2]).toBeGreaterThan(startW);
+    expect(viewBoxNumbers(svg)[2]).toBeGreaterThan(fitW);
   });
 
   test('renders a minimap thumbnail (reusing the graph content) with a window rectangle', async () => {
