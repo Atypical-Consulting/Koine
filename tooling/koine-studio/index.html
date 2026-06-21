@@ -150,7 +150,19 @@
                 <div id="view-assistant" class="tech-view" role="tabpanel" hidden></div>
               </div>
             </section>
-            <section id="center-docs" class="center-host doc-view" role="tabpanel" aria-label="Documentation" hidden></section>
+            <!-- Documentation = Glossary (the ubiquitous language) + Decisions & Notes (the ADR/Notes
+                 surface from #174). Sub-tabs mirror the Code pane so the master-detail docs panel gets
+                 the center's full width. -->
+            <section id="center-docs" class="center-host" role="tabpanel" aria-label="Documentation" hidden>
+              <div id="docs-tabs" role="tablist" aria-label="Documentation view">
+                <button type="button" class="docs-tab" id="docs-tab-glossary" role="tab" data-docs="glossary" aria-selected="true">Glossary</button>
+                <button type="button" class="docs-tab" id="docs-tab-adr" role="tab" data-docs="adr" aria-selected="false">Decisions &amp; Notes</button>
+              </div>
+              <div id="docs-body">
+                <div id="view-glossary" class="tech-view doc-view" role="tabpanel"></div>
+                <div id="view-docs" class="tech-view doc-view" role="tabpanel" hidden></div>
+              </div>
+            </section>
           </div>
 
           <footer id="diagnostics" aria-label="Problems, events, relationships and the context map">

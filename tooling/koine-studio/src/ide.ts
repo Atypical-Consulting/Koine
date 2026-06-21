@@ -61,6 +61,8 @@ import {
   renderRelationshipsTable,
 } from './modelTables';
 import { renderGlossary, type GlossaryHandlers } from './glossary';
+import { createDocsStore } from './docsStore';
+import { renderDocsPanel, type DocsPanelHandlers } from './docsPanel';
 import {
   ALL_CONTEXTS,
   createActiveContextBus,
@@ -1017,10 +1019,13 @@ export function init(): void {
   const selection = createSelectionBus();
 
   // Left-rail hosts (always visible, repainted together from the model): the Explorer construct
-  // tree, the Overview per-context counts, and the Documentation glossary.
+  // tree and the Overview per-context counts.
   const explorerBody = el('rail-explorer-body');
   const overviewBody = el('rail-overview-body');
-  const glossaryView = el('center-docs');
+  // The Documentation center tab's two sub-views: Glossary (the ubiquitous language) and Docs (the
+  // ADR & Notes surface, #174).
+  const glossaryView = el('view-glossary');
+  const docsView = el('view-docs');
   // Center hosts: the diagram canvas (Visual) and the code editor's companion sub-views.
   const diagramsView = el('center-visual');
   const assistantView = el('view-assistant');
@@ -1030,7 +1035,7 @@ export function init(): void {
 
   // Active workspace mode (#143): the toolbar's Domain/Code/Docs buttons, repointed as region-focus
   // shortcuts now that each view has a fixed home (Domain → Visual, Code → Code,
-  // Docs → the Documentation rail). Restore the persisted mode, defaulting to Domain when absent/invalid.
+  // Docs → the Documentation tab). Restore the persisted mode, defaulting to Domain when absent/invalid.
   const restoredMode = loadWorkspaceMode();
   let activeMode: string = restoredMode && isValidModeId(restoredMode) ? restoredMode : DEFAULT_MODE_ID;
   // The switcher buttons (Domain / Code / Docs) are built from the MODES data — a new mode is one
@@ -1231,7 +1236,14 @@ export function init(): void {
   }
 
   function docMessage(view: HTMLElement, text: string, kind: 'muted' | 'error' = 'muted'): void {
-    view.innerHTML = `<p class="${kind === 'error' ? 'doc-error' : 'muted'}">${text}</p>`;
+    // Build the node with textContent rather than interpolating into innerHTML — `text` often carries
+    // an error string (String(e)) that can embed host paths or user-influenced file/folder names, so
+    // raw interpolation would be an HTML-injection sink.
+    view.innerHTML = '';
+    const p = document.createElement('p');
+    p.className = kind === 'error' ? 'doc-error' : 'muted';
+    p.textContent = text;
+    view.appendChild(p);
   }
 
   // The glossary tab is the ubiquitous-language editor (#67): it lists every concept across
@@ -1281,6 +1293,44 @@ export function init(): void {
   // navigator) + Overview (per-context counts) and the right rail's read-only element inspector
   // (Properties). All are driven by the shared selection bus — clicking a node in the Explorer OR a
   // diagram selects the same element and refreshes the inspector.
+
+  // The Docs sub-tab of the Documentation center tab is the ADR & Notes documentation surface (#174):
+  // plain-Markdown architecture decision records (`docs/adr/NNNN-*.md`) and notes (`docs/notes/*.md`)
+  // in the opened workspace, read and written through docsStore over the host fs. Unlike the
+  // model-derived views it is folder-derived (not invalidated by `.koi` edits): it reloads when the
+  // workspace folder changes (openFolderPath flips docsLoaded) and after any create/save in the panel.
+  // In no-folder mode the store reports canWrite=false and the panel renders a read-only empty state.
+  let docsLoaded = false;
+  async function loadDocs(): Promise<void> {
+    const store = createDocsStore(platform, folderRootToken);
+    // Creating an ADR/note adds a row, so rebuild the panel from disk; an edit (save) is applied in
+    // place by the panel itself (it refreshes the row head + detail), so saves don't reload — which
+    // also keeps the open editor from collapsing.
+    const reload = (): void => {
+      docsLoaded = false;
+      void loadDocs();
+    };
+    // Surface a failure on the status line — NOT by overwriting the panel — so the ADR/Notes list and
+    // any in-progress editor survive a transient create/save error and the user can simply retry.
+    const fail = (verb: string) => (e: unknown) => setStatus(`Could not ${verb}: ${String(e)}`, 'error');
+    const handlers: DocsPanelHandlers = {
+      onCreateAdr: (title) => void store.createAdr(title).then(reload).catch(fail('create the ADR')),
+      onSaveAdr: (file, adr) => void store.saveAdr(file.token, adr).catch(fail('save the ADR')),
+      onCreateNote: (title) => void store.createNote(title).then(reload).catch(fail('create the note')),
+      onReadNote: (file) => store.readNote(file.token),
+      onSaveNote: (file, md) => void store.saveNote(file.token, md).catch(fail('save the note')),
+    };
+    docMessage(docsView, 'Loading docs…');
+    try {
+      const [adrs, notes] = await Promise.all([store.listAdrs(), store.listNotes()]);
+      docsView.innerHTML = '';
+      docsView.appendChild(renderDocsPanel({ canWrite: store.canWrite, adrs, notes, renderMarkdown }, handlers));
+      docsLoaded = true;
+    } catch (e) {
+      docMessage(docsView, 'Docs request failed: ' + String(e), 'error');
+    }
+  }
+
   const modelOutlineHandlers: ModelOutlineHandlers = {
     onSelect: (entry) => selection.set({ qualifiedName: entry.qualifiedName, context: entry.context }),
     goto: (line, col) => editor.goto(line, col),
@@ -1532,17 +1582,20 @@ export function init(): void {
     await navigateToDiagramNode(detail);
   }
 
-  // --- center (Visual / Code) + right rail + region focus ----
+  // --- center (Visual / Code / Documentation) + right rail + region focus ----
 
-  // The center column toggles between the visual diagram canvas and the technical code view; the
-  // technical view in turn has sub-tabs (editor / emitted preview / compatibility check / assistant).
+  // The center column toggles between the visual diagram canvas, the technical code view (sub-tabs:
+  // editor / emitted preview / compatibility check / assistant) and the Documentation view (sub-tabs:
+  // Glossary / Docs — the ADR & Notes panel).
   type CenterView = 'visual' | 'technical' | 'docs';
   type TechView = 'editor' | 'preview' | 'check' | 'assistant';
+  type DocsView = 'glossary' | 'adr';
   // The restored mode picks the initial center so the highlighted Domain/Code/Docs button and the
   // shown center tab agree on boot (Domain → Visual, Code → Code, Docs → Documentation).
   const centerForMode = (mode: string): CenterView => (mode === 'code' ? 'technical' : mode === 'docs' ? 'docs' : 'visual');
   let activeCenter: CenterView = centerForMode(activeMode);
   let activeTech: TechView = 'editor';
+  let activeDocs: DocsView = 'glossary';
 
   const centerVisualEl = el('center-visual');
   const centerTechnicalEl = el('center-technical');
@@ -1551,6 +1604,7 @@ export function init(): void {
   const previewEl = el('view-preview');
   const centerTabs = Array.from(document.querySelectorAll<HTMLButtonElement>('.center-tab'));
   const techTabs = Array.from(document.querySelectorAll<HTMLButtonElement>('.tech-tab'));
+  const docsTabs = Array.from(document.querySelectorAll<HTMLButtonElement>('.docs-tab'));
 
   // Pure chrome: surface the active center panel + its technical sub-view and mark the tabs. No data
   // fetch, so the boot frame can land before the workspace document is open.
@@ -1568,6 +1622,11 @@ export function init(): void {
     checkView.hidden = !(techVisible && activeTech === 'check');
     assistantView.hidden = !(techVisible && activeTech === 'assistant');
     for (const t of techTabs) t.setAttribute('aria-selected', String(t.dataset.tech === activeTech));
+    // Documentation sub-views: Glossary (the ubiquitous language) vs the ADR/Notes Docs panel.
+    const docsVisible = activeCenter === 'docs';
+    glossaryView.hidden = !(docsVisible && activeDocs === 'glossary');
+    docsView.hidden = !(docsVisible && activeDocs === 'adr');
+    for (const t of docsTabs) t.setAttribute('aria-selected', String(t.dataset.docs === activeDocs));
     // CodeMirror measures lazily; revealing it from display:none leaves stale geometry until the next
     // layout tick, so force a re-measure whenever the editor becomes visible.
     if (!editorPaneEl.hidden) editor.view.requestMeasure();
@@ -1578,7 +1637,22 @@ export function init(): void {
     applyCenterChrome();
     if (view === 'visual' && !docViewsLoaded.diagrams) void loadDiagrams();
     else if (view === 'technical') ensureTechLoaded();
-    else if (view === 'docs' && !docViewsLoaded.glossary) void loadGlossary();
+    else if (view === 'docs') ensureDocsLoaded();
+  }
+
+  // Lazy-load the active Documentation sub-view: the glossary is model-derived, the Docs (ADR/Notes)
+  // panel is folder-derived.
+  function ensureDocsLoaded(): void {
+    if (activeCenter !== 'docs') return;
+    if (activeDocs === 'glossary' && !docViewsLoaded.glossary) void loadGlossary();
+    else if (activeDocs === 'adr' && !docsLoaded) void loadDocs();
+  }
+
+  function selectDocsTab(view: DocsView): void {
+    activeDocs = view;
+    activeCenter = 'docs';
+    applyCenterChrome();
+    ensureDocsLoaded();
   }
 
   function selectTech(view: TechView): void {
@@ -1604,7 +1678,7 @@ export function init(): void {
   // Surface the Documentation center tab (the "Docs" mode focus and the Explorer's "Ubiquitous
   // Language" shortcut both route here).
   function focusDocs(): void {
-    selectCenter('docs');
+    selectDocsTab('glossary');
   }
 
   // Repaint the always-visible left rail (Explorer + Overview + the right-rail Properties inspector) +
@@ -1612,8 +1686,10 @@ export function init(): void {
   function refreshActiveSurfaces(): void {
     void loadModel();
     if (activeCenter === 'visual') void loadDiagrams();
-    else if (activeCenter === 'docs') void loadGlossary();
-    else ensureTechLoaded();
+    // The glossary is model-derived (refresh on edit); the ADR/Notes Docs panel is folder-derived, so
+    // an edit never invalidates it — it reloads on folder change / its own create/save.
+    else if (activeCenter === 'docs' && activeDocs === 'glossary') void loadGlossary();
+    else if (activeCenter === 'technical') ensureTechLoaded();
   }
 
   // Mark the cached, model-derived surfaces stale (e.g. after an edit or a file switch).
@@ -1668,6 +1744,9 @@ export function init(): void {
   }
   for (const t of techTabs) {
     t.addEventListener('click', () => selectTech(t.dataset.tech as TechView));
+  }
+  for (const t of docsTabs) {
+    t.addEventListener('click', () => selectDocsTab(t.dataset.docs as DocsView));
   }
 
   // Right rail: Properties (the inspector) / Rules / Notes. Rules/Notes are placeholder panels for
@@ -1980,6 +2059,9 @@ export function init(): void {
     // initial ensureLoaded below is already scoped even before the dropdown finishes repainting.
     restoreActiveContext();
     invalidateDocViews();
+    // The Docs surface is folder-derived (its own `docs/adr`+`docs/notes`), so a folder switch must
+    // drop it too — unlike the model-derived views, an edit alone never invalidates it.
+    docsLoaded = false;
     void refreshContextList();
     // Fetch the full explorer tree (dirs + .koi) and render it; falls back silently on failure.
     await refreshEntries();
@@ -2622,7 +2704,8 @@ export function init(): void {
       { id: 'help', title: 'Keyboard shortcuts', hint: 'F1', group: 'Help', run: () => help.open() },
       { id: 'about', title: 'About Koine Studio', group: 'Help', run: () => about.open() },
       { id: 'view-preview', title: 'Show Emitted Preview', group: 'Workspace', run: () => selectTech('preview') },
-      { id: 'view-glossary', title: 'Show Documentation', group: 'Workspace', run: () => focusDocs() },
+      { id: 'view-glossary', title: 'Show Glossary', group: 'Workspace', run: () => selectDocsTab('glossary') },
+      { id: 'view-docs', title: 'Show Docs (ADRs & Notes)', group: 'Workspace', run: () => selectDocsTab('adr') },
       { id: 'view-diagrams', title: 'Show Visual Editor', group: 'Workspace', run: () => selectCenter('visual') },
       { id: 'view-contextmap', title: 'Show Context Map', group: 'Workspace', run: () => selectBottomTab('contextmap') },
       { id: 'view-check', title: 'Show Compatibility Check', group: 'Workspace', run: () => selectTech('check') },

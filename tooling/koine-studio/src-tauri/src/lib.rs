@@ -479,6 +479,69 @@ fn list_entries(dir: String) -> Result<Vec<FsEntry>, String> {
     build_entries(root, root)
 }
 
+/// List the IMMEDIATE children (files AND directories, regardless of extension) of `rel_path`
+/// under the opened `dir` folder. A flat, single-level listing for non-`.koi` workspace docs (the
+/// ADR/Notes surface, `docs/adr/*.md` etc.) — the counterpart to the recursive, `.koi`-only
+/// `list_entries` tree. `children` is always `None` (no recursion). `rel_path` is forward-slashed
+/// and relative to the opened folder, and is validated so it can never escape it. Sorted
+/// folders-first then by name; `Err` when the directory cannot be read (callers treat that as "no
+/// docs yet").
+#[tauri::command]
+fn list_dir(dir: String, rel_path: String) -> Result<Vec<FsEntry>, String> {
+    if !is_safe_relpath(&rel_path) {
+        return Err(format!("invalid path: {rel_path}"));
+    }
+    let root = std::path::Path::new(&dir);
+    let target = root.join(&rel_path);
+    let mut dirs: Vec<FsEntry> = Vec::new();
+    let mut files: Vec<FsEntry> = Vec::new();
+
+    let entries = std::fs::read_dir(&target)
+        .map_err(|e| format!("failed to read directory {}: {e}", target.display()))?;
+    for entry in entries {
+        let entry = entry.map_err(|e| e.to_string())?;
+        let path = entry.path();
+        let file_type = entry.file_type().map_err(|e| e.to_string())?;
+        if is_skipped_path(&path, root) {
+            continue;
+        }
+        let name = path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or_default()
+            .to_string();
+        let rel = path
+            .strip_prefix(root)
+            .unwrap_or(&path)
+            .to_string_lossy()
+            .replace('\\', "/");
+        let token = path.to_string_lossy().into_owned();
+        if file_type.is_dir() {
+            dirs.push(FsEntry {
+                token,
+                name,
+                rel_path: rel,
+                kind: "dir",
+                children: None,
+            });
+        } else if file_type.is_file() {
+            files.push(FsEntry {
+                token,
+                name,
+                rel_path: rel,
+                kind: "file",
+                children: None,
+            });
+        }
+    }
+
+    // Folders first, then files; alphabetical by name within each group.
+    dirs.sort_by(|a, b| a.name.cmp(&b.name));
+    files.sort_by(|a, b| a.name.cmp(&b.name));
+    dirs.append(&mut files);
+    Ok(dirs)
+}
+
 /// Create a file at `rel_path` under `folder`, creating intermediate dirs, and
 /// return its absolute path. Errors if the file already exists.
 #[tauri::command]
@@ -766,6 +829,7 @@ pub fn run() {
             write_text_file,
             write_bytes,
             list_entries,
+            list_dir,
             create_file,
             create_folder,
             rename_entry,
@@ -1043,6 +1107,41 @@ mod tests {
         assert_eq!(nested.name, "orders.KOI");
         assert_eq!(nested.rel_path, "contexts/orders.KOI");
         assert!(std::path::Path::new(&nested.token).is_absolute());
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn list_dir_lists_immediate_children_of_any_extension_folders_first() {
+        let root = std::env::temp_dir()
+            .join(format!("koine_studio_listdir_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let adr = root.join("docs").join("adr");
+        std::fs::create_dir_all(&adr).unwrap();
+        std::fs::create_dir_all(adr.join("archive")).unwrap();
+        std::fs::write(adr.join("0002-second.md"), "# 2. Second").unwrap();
+        std::fs::write(adr.join("0001-first.md"), "# 1. First").unwrap();
+        std::fs::write(adr.join("README.txt"), "not markdown, still listed").unwrap();
+
+        let entries = list_dir(root.to_string_lossy().into_owned(), "docs/adr".to_string()).unwrap();
+
+        // Flat, single-level listing: folder first (alpha), then files (alpha) — of ANY extension.
+        let names: Vec<&str> = entries.iter().map(|e| e.name.as_str()).collect();
+        assert_eq!(names, vec!["archive", "0001-first.md", "0002-second.md", "README.txt"]);
+
+        // No recursion: every node carries children: None (even the directory).
+        assert!(entries.iter().all(|e| e.children.is_none()));
+        assert_eq!(entries[0].kind, "dir");
+        assert_eq!(entries[1].kind, "file");
+
+        // rel_path is forward-slashed and rooted at the opened folder; token is absolute.
+        assert_eq!(entries[1].rel_path, "docs/adr/0001-first.md");
+        assert!(std::path::Path::new(&entries[1].token).is_absolute());
+
+        // A missing directory is an Err (the frontend treats it as "no docs yet").
+        assert!(list_dir(root.to_string_lossy().into_owned(), "docs/nope".to_string()).is_err());
+        // A traversal rel_path is rejected up front.
+        assert!(list_dir(root.to_string_lossy().into_owned(), "../escape".to_string()).is_err());
 
         let _ = std::fs::remove_dir_all(&root);
     }

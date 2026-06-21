@@ -204,6 +204,10 @@ export class TauriPlatform implements Platform {
     return invoke<FsEntry[]>('list_entries', { dir: folderToken });
   }
 
+  listDir(folderToken: string, relPath: string): Promise<FsEntry[]> {
+    return invoke<FsEntry[]>('list_dir', { dir: folderToken, relPath });
+  }
+
   createFile(folderToken: string, relPath: string, contents?: string): Promise<string> {
     return invoke<string>('create_file', { folder: folderToken, relPath, contents: contents ?? '' });
   }
