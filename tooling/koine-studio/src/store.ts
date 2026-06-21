@@ -83,6 +83,13 @@ const WORKSPACE_MODE_KEY = 'koine.studio.workspaceMode';
 const ACTIVE_CONTEXT_KEY_PREFIX = 'koine.studio.activeContext.';
 const RECENT_CAP = 25;
 
+// The diagram canvas (#145) remembers each diagram's last zoom level, keyed per-diagram under this
+// prefix, so reopening the Diagrams tab restores the zoom the user left it at.
+const DIAGRAM_ZOOM_KEY_PREFIX = 'koine.studio.diagramZoom.';
+/** Zoom percent is clamped to this sane band on save AND load, so a hand-edited key can't break layout. */
+const DIAGRAM_ZOOM_MIN = 10;
+const DIAGRAM_ZOOM_MAX = 800;
+
 // The assistant transcript is namespaced per workspace under its own key prefix (distinct from
 // settings/scratch/recentFolders), so each opened folder keeps its own conversation.
 const CHAT_KEY_PREFIX = 'koine.studio.chat.';
@@ -405,6 +412,31 @@ export function loadWorkspaceMode(): string | null {
 /** Persist the active workspace-mode id (best-effort). */
 export function saveWorkspaceMode(id: string): void {
   writeRaw(WORKSPACE_MODE_KEY, id);
+}
+
+// --- diagram canvas zoom (#145) ----------------------------------------------
+// Each diagram's last zoom *percent* is round-tripped under its own key so the interactive canvas can
+// restore it next time the Diagrams tab opens. Only the zoom is remembered (not the pan), matching the
+// plan: a tab re-open re-fits and re-centers but keeps the magnification the user chose. Values are
+// clamped on both read and write so a malformed/hand-edited key can never feed the layout a bad number.
+
+/** Clamp to the sane zoom band, or null when not a finite number. */
+function coerceZoom(v: number): number | null {
+  if (!Number.isFinite(v)) return null;
+  return Math.min(DIAGRAM_ZOOM_MAX, Math.max(DIAGRAM_ZOOM_MIN, v));
+}
+
+/** The persisted zoom percent for a diagram key, or null when none is stored (or it's malformed). */
+export function loadDiagramZoom(key: string): number | null {
+  const raw = readRaw(DIAGRAM_ZOOM_KEY_PREFIX + key);
+  return raw == null ? null : coerceZoom(Number(raw));
+}
+
+/** Persist a diagram's zoom percent (best-effort), clamped to the sane band. */
+export function saveDiagramZoom(key: string, percent: number): void {
+  const z = coerceZoom(percent);
+  if (z == null) return;
+  writeRaw(DIAGRAM_ZOOM_KEY_PREFIX + key, String(Math.round(z)));
 }
 
 // --- active bounded context (#146) -------------------------------------------
