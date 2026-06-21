@@ -1,6 +1,6 @@
-// Floating popover surface — chrome shared by .lang-menu, the explorer/context menus, and the
-// floating action menu (the source comments note these "mirror .explorer-menu"). Verbatim from
-// the original .lang-menu rule (minus its selector-specific z-index/min-width, which stay inline).
+// Floating popover surface — chrome shared by the explorer/context menus and the floating action
+// menu (these "mirror .explorer-menu"). Verbatim from the original popover rule (minus its
+// selector-specific z-index/min-width, which stay inline).
 @mixin popover-surface {
   position: fixed;
   list-style: none;

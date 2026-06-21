@@ -268,6 +268,20 @@
   outline-offset: 1px;
 }
 
+/* destination-language identity dot — the lead mark on each Output picker option. */
+.lang-dot {
+  width: 8px;
+  height: 8px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: var(--dot, var(--koi-accent));
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--dot, var(--koi-accent)) 22%, transparent);
+}
+
+@each $name, $hue in a.$languages {
+  .lang-dot[data-lang='#{$name}'] { --dot: #{$hue}; }
+}
+
 /* accent swatch picker */
 .koi-accent-row {
   display: inline-flex;

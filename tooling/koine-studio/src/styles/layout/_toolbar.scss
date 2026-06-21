@@ -33,6 +33,12 @@
   margin: 0 auto 0 var(--koi-space-1);
 }
 
+.toolbar-right {
+  display: flex;
+  align-items: center;
+  gap: var(--koi-space-2);
+}
+
 /* A segmented cluster of related buttons. */
 .tb-group {
   display: flex;
