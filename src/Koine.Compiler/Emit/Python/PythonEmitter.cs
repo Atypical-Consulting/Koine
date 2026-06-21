@@ -125,6 +125,13 @@ public sealed partial class PythonEmitter : IEmitter
                 EmitServiceFiles(emit, files, svc, ctx.Name, typeMapper);
             }
 
+            // Policies (R10.3): an event→command reactor lives on `ContextNode.Policies` (not in
+            // `Types`), so iterate it separately. Each emits a `Protocol` seam the consumer wires.
+            foreach (PolicyDecl policy in ctx.Policies)
+            {
+                files.Add(EmitPolicy(emit, policy, ctx.Name, typeMapper));
+            }
+
             // ID types referenced but not owned by an entity in this context (e.g. a foreign *Id):
             // materialize a standalone branded-guid identity at the context package root so a
             // cross-context reference resolves to a real module. Deterministic (sorted).

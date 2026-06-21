@@ -127,6 +127,24 @@ public class PythonSnapshotTests
 
           /// A single-result query (cardinality `M`) returning one summary by its order id.
           query OrderSummaryById(order: OrderId): OrderSummary
+
+          /// A second aggregate, the target of the cross-aggregate policy below.
+          aggregate Notification root Notification {
+            entity Notification identified by NotificationId {
+              orderRef:  OrderId
+              lineCount: Int = 0
+
+              /// Record a notification for a placed order.
+              command record(order: OrderId, lines: Int) {
+                orderRef  -> order
+                lineCount -> lines
+              }
+            }
+          }
+
+          /// A policy reacting across aggregates (R10.3): when an order is placed, record a
+          /// notification. Koine emits the reactor seam; the args are drawn from the event's fields.
+          policy NotifyOnPlaced when OrderPlaced then Notification.record(order: orderId, lines: lineCount)
         }
         """;
 
