@@ -173,6 +173,18 @@ export class WasmLspTransport implements LspTransport {
       case 'koine/glossaryModel':
         return [result(JSON.parse(api.GlossaryModel(this.filesJson())))];
 
+      case 'koine/model':
+        return [result(JSON.parse(api.Model(this.filesJson(), msg.params?.qualifiedName ?? null)))];
+
+      case 'koine/modelMembers':
+        return [result(JSON.parse(api.ModelMembers(this.filesJson(), msg.params?.qualifiedName ?? '')))];
+
+      case 'koine/emitKoine':
+        return [result(JSON.parse(api.EmitKoine(this.filesJson(), JSON.stringify(msg.params?.edit ?? {}))))];
+
+      case 'koine/applyModelEdit':
+        return [result(JSON.parse(api.ApplyModelEdit(this.filesJson(), JSON.stringify(msg.params?.edit ?? {}))))];
+
       case 'koine/setDoc':
         return [result(JSON.parse(api.SetDoc(this.filesJson(), msg.params?.id ?? '', msg.params?.text ?? '')))];
 
