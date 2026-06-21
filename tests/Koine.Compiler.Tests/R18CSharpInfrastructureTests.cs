@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using Koine.Cli;
 using Koine.Cli.Commands;
 using Koine.Compiler.Emit;
@@ -347,5 +348,74 @@ public class R18CSharpInfrastructureTests
         var files = Emit(Infrastructure);
         var (asm, errors) = TestSupport.Compile(files);
         asm.ShouldNotBeNull(string.Join("\n", errors));
+    }
+
+    // ----------------------------------------------------------------------
+    // Edge cases (Task 7)
+    // ----------------------------------------------------------------------
+
+    private static IReadOnlyList<EmittedFile> EmitInfra(string fixture)
+    {
+        var result = new KoineCompiler().Compile(fixture, new CSharpEmitter(Infrastructure));
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+        return result.Files;
+    }
+
+    [Fact]
+    public void Aggregate_with_no_value_object_fields_emits_a_minimal_configuration()
+    {
+        // Only a primitive field — no OwnsOne, just the key (+ Version), and it must still compile.
+        var files = EmitInfra("""
+            context Catalog {
+              aggregate Product root Product versioned {
+                entity Product identified by ProductId { name: String }
+              }
+            }
+            """);
+
+        var cfg = File(files, "Catalog/Infrastructure/ProductConfiguration.cs").Contents;
+        cfg.ShouldContain("builder.HasKey(x => x.Id);");
+        cfg.ShouldContain("builder.Property(x => x.Version).IsRowVersion();");
+        cfg.ShouldNotContain("OwnsOne");
+        TestSupport.Compile(files).Assembly.ShouldNotBeNull();
+    }
+
+    [Fact]
+    public void Context_with_no_aggregates_emits_no_infrastructure()
+    {
+        // A context of only value objects / enums has no aggregate root → no DbContext, no error.
+        var files = EmitInfra("""
+            context Reference {
+              enum Color { Red, Green }
+              value Label { text: String }
+            }
+            """);
+
+        files.ShouldNotContain(f => f.RelativePath.Contains("/Infrastructure/", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Smart_enum_used_by_multiple_aggregates_shares_one_converter()
+    {
+        var files = EmitInfra("""
+            context Sales {
+              enum Status { Open, Closed }
+              aggregate Order root Order {
+                entity Order identified by OrderId { status: Status }
+              }
+              aggregate Ticket root Ticket {
+                entity Ticket identified by TicketId { status: Status }
+              }
+            }
+            """);
+
+        var conv = File(files, "Sales/Infrastructure/SalesValueConverters.cs").Contents;
+        // Exactly one shared converter for the enum, referenced by both configurations.
+        Regex.Matches(conv, "StatusConverter =").Count.ShouldBe(1);
+        File(files, "Sales/Infrastructure/OrderConfiguration.cs").Contents
+            .ShouldContain("SalesValueConverters.StatusConverter");
+        File(files, "Sales/Infrastructure/TicketConfiguration.cs").Contents
+            .ShouldContain("SalesValueConverters.StatusConverter");
+        TestSupport.Compile(files).Assembly.ShouldNotBeNull();
     }
 }
