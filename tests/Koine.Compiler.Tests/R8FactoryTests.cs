@@ -13,7 +13,7 @@ public class R8FactoryTests
         context Sales {
           value OrderLine { product: ProductId  quantity: Int }
           enum OrderStatus { Draft, Placed, Shipped, Cancelled }
-          aggregate Order root Order {
+          aggregate Sales root Order {
             entity Order identified by OrderId {
               customer: CustomerId
               lines:    List<OrderLine>
@@ -287,7 +287,7 @@ public class R8FactoryTests
             context Sales {
               value OrderLine { product: ProductId  quantity: Int }
               enum OrderStatus { Draft, Placed }
-              aggregate Order root Order {
+              aggregate Sales root Order {
                 entity Order identified by OrderId {
                   customer: CustomerId
                   lines:    List<OrderLine>
@@ -331,7 +331,7 @@ public class R8FactoryTests
             context Sales {
               value Money  { amount: Decimal }
               value Line   { price: Money }
-              aggregate Cart root Cart {
+              aggregate Checkout root Cart {
                 entity Cart identified by CartId {
                   total: Money
                   create forLines(lines: List<Line>) {

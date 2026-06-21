@@ -6,7 +6,7 @@
   "difficulty": "starter",
   "tags": ["billing", "orders", "money", "starter"],
   "contexts": ["Billing"],
-  "coreAggregate": "Order",
+  "coreAggregate": "Sales",
   "entryFile": "billing.koi",
   "teaches": [
     "value objects with invariants",

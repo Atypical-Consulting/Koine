@@ -6,7 +6,7 @@
   "difficulty": "starter",
   "tags": ["ordering", "state-machine", "aggregates", "starter"],
   "contexts": ["Ordering"],
-  "coreAggregate": "Order",
+  "coreAggregate": "Sales",
   "entryFile": "ordering.koi",
   "teaches": [
     "aggregates and aggregate roots",

@@ -28,7 +28,7 @@ public class R12ApplicationTests
         context Sales {
           enum OrderStatus { Draft, Placed, Shipped }
           value OrderLine { product: ProductId  quantity: Int }
-          aggregate Order root Order {
+          aggregate Sales root Order {
             entity Order identified by OrderId {
               customer: CustomerId
               lines:    List<OrderLine>
@@ -89,10 +89,10 @@ public class R12ApplicationTests
     {
         const string src = """
             context Sales {
-              aggregate Order root Order {
+              aggregate Sales root Order {
                 entity Order identified by OrderId { customer: CustomerId }
               }
-              aggregate Shipment root Shipment {
+              aggregate Dispatch root Shipment {
                 entity Shipment identified by ShipmentId { order: OrderId }
               }
             }
@@ -183,7 +183,7 @@ public class R12ApplicationTests
         // R12.2 AC: a query-style use case (returns a read model) maps its result type.
         const string src = """
             context Sales {
-              aggregate Order root Order {
+              aggregate Sales root Order {
                 entity Order identified by OrderId { customer: CustomerId }
               }
               readmodel OrderSummary from Order { id  customer }
@@ -341,7 +341,7 @@ public class R12ApplicationTests
         const string src = """
             context C {
               value Line { quantity: Int }
-              aggregate Cart root Cart {
+              aggregate Checkout root Cart {
                 entity Cart identified by CartId { lines: List<Line> }
               }
               readmodel CartTotal from Cart { units: Int = lines.sum(l => l.quantity) }

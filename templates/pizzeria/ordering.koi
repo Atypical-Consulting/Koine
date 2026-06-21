@@ -1,6 +1,6 @@
 /// Ordering bounded context — taking and pricing a customer's pizza order. This is
-/// the heart of the template: the `Order` aggregate is the headline aggregate, its
-/// lifecycle is an explicit state machine (R7), it is priced from its line items
+/// the heart of the template: the `Sales` aggregate (root `Order`) is the headline
+/// aggregate, its lifecycle is an explicit state machine (R7), it is priced from its line items
 /// (R1), and it publishes `OrderPlaced` so Kitchen, Delivery and Payment can react.
 context Ordering version 1 {
 
@@ -37,7 +37,7 @@ context Ordering version 1 {
   /// The order aggregate. `versioned` adds an optimistic-concurrency token (R11.4);
   /// the `repository` block tunes the mutating set and adds intention-revealing
   /// finders (R11.3); being an aggregate it also joins the context `IUnitOfWork`.
-  aggregate Order root Order versioned {
+  aggregate Sales root Order versioned {
 
     repository {
       operations: getById, add, update

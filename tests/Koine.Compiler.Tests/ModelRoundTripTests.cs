@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Koine.Compiler.Ast;
+using Koine.Compiler.Diagnostics;
 using Koine.Compiler.Services;
 
 namespace Koine.Compiler.Tests;
@@ -262,8 +263,11 @@ public class ModelRoundTripTests
         // Everything outside the edited declaration is byte-stable.
         patched.ShouldContain("enum OrderStatus { Draft, Placed, Shipped }");
         patched.ShouldContain("integration event OrderPlaced");
-        // The patched buffer still compiles cleanly.
-        new KoineCompiler().Diagnose(patched).ShouldBeEmpty();
+        // The patched buffer still compiles cleanly. The sample's aggregate is named after its root
+        // (`aggregate Order root Order`), so it carries the orthogonal KOI0109 style warning — ignore
+        // that here; this test asserts the edit introduced no NEW diagnostics.
+        new KoineCompiler().Diagnose(patched)
+            .Where(d => d.Code != DiagnosticCodes.AggregateNameMatchesRoot).ShouldBeEmpty();
     }
 
     [Fact]

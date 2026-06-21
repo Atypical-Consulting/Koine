@@ -107,7 +107,7 @@ public class R11IdentityRepositoryTests
     private const string OrderAggregate = """
         context Sales {
           value OrderLine { product: ProductId  quantity: Int }
-          aggregate Order root Order {
+          aggregate Sales root Order {
             entity Order identified by OrderId {
               customer: CustomerId
               lines:    List<OrderLine>
@@ -142,7 +142,7 @@ public class R11IdentityRepositoryTests
         const string src = """
             context Sales {
               entity Customer identified by CustomerId { name: String }
-              aggregate Order root Order {
+              aggregate Sales root Order {
                 entity Order identified by OrderId { customer: CustomerId }
                 entity OrderLine identified by OrderLineId { quantity: Int }
               }
@@ -160,7 +160,7 @@ public class R11IdentityRepositoryTests
         const string src = """
             context Sales {
               value OrderLine { product: ProductId  quantity: Int }
-              aggregate Order root Order {
+              aggregate Sales root Order {
                 repository {
                   find byCustomer(customer: CustomerId): List<Order>
                   find mostRecent(customer: CustomerId): Order
@@ -219,7 +219,7 @@ public class R11IdentityRepositoryTests
     {
         const string src = """
             context Sales {
-              aggregate Order root Order {
+              aggregate Sales root Order {
                 repository { find byCustomer(customer: CustomerId): List<CustomerId> }
                 entity Order identified by OrderId { customer: CustomerId }
               }
@@ -234,7 +234,7 @@ public class R11IdentityRepositoryTests
         // `ct` collides with the generated `CancellationToken ct` trailing parameter.
         const string src = """
             context Sales {
-              aggregate Order root Order {
+              aggregate Sales root Order {
                 repository { find byCt(ct: CustomerId): Order }
                 entity Order identified by OrderId { customer: CustomerId }
               }
@@ -249,7 +249,7 @@ public class R11IdentityRepositoryTests
         // `find getById(...)` would emit a second GetByIdAsync alongside the built-in (CS0111).
         const string src = """
             context Sales {
-              aggregate Order root Order {
+              aggregate Sales root Order {
                 repository { find getById(id: OrderId): Order }
                 entity Order identified by OrderId { customer: CustomerId }
               }
@@ -263,7 +263,7 @@ public class R11IdentityRepositoryTests
     {
         const string src = """
             context Sales {
-              aggregate Order root Order {
+              aggregate Sales root Order {
                 repository { find f(x: CustomerId, x: CustomerId): Order }
                 entity Order identified by OrderId { customer: CustomerId }
               }
@@ -278,7 +278,7 @@ public class R11IdentityRepositoryTests
         // The synthetic `Version` token would clash with a member named `version` (CS0102).
         const string src = """
             context Sales {
-              aggregate Order root Order versioned {
+              aggregate Sales root Order versioned {
                 entity Order identified by OrderId { version: Int }
               }
             }
@@ -291,7 +291,7 @@ public class R11IdentityRepositoryTests
     {
         const string src = """
             context Sales {
-              aggregate Order root Order {
+              aggregate Sales root Order {
                 repository {
                   find byCustomer(customer: CustomerId): Order
                   find byCustomer(customer: CustomerId): Order
@@ -307,7 +307,7 @@ public class R11IdentityRepositoryTests
 
     private const string VersionedAggregate = """
         context Sales {
-          aggregate Order root Order versioned {
+          aggregate Sales root Order versioned {
             entity Order identified by OrderId { customer: CustomerId }
           }
         }

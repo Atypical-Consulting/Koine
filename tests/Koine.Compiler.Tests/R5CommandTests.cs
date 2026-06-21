@@ -12,7 +12,7 @@ public class R5CommandTests
         context Sales {
           enum OrderStatus { Draft, Placed, Shipped, Cancelled }
           value OrderLine { product: ProductId  quantity: Int }
-          aggregate Order root Order {
+          aggregate Sales root Order {
             entity Order identified by OrderId {
               status: OrderStatus = Draft
               lines:  List<OrderLine>

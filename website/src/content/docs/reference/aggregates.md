@@ -127,9 +127,13 @@ generated cross-references simple (no nested namespaces to qualify) and avoids a
 clash when the aggregate and its root share a name (as in `aggregate Order root Order`).
 
 :::tip
-You can give the aggregate and its root **different** names. The catalog demo uses
+Give the aggregate and its root **different** names. The catalog demo uses
 `aggregate ProductCatalog root Product { … }` — the aggregate is `ProductCatalog`, the root entity (and
 the type the repository is keyed on) is `Product`, so the contract emitted is `IProductRepository`.
+
+Naming the aggregate the same as its root (`aggregate Order root Order`) still compiles, but earns a
+code-smell warning (`KOI0109`): the boundary is a cluster the root presides over, so it reads as more
+than its root when named for the activity it groups.
 :::
 
 ## 7.4 Translation to C#

@@ -23,6 +23,25 @@ public class R18CoverageTests
     }
 
     [Fact]
+    public void Aggregate_with_a_distinct_boundary_name_is_covered_via_its_root()
+    {
+        // An aggregate boundary is never emitted as a C# type (it has no sub-namespace); it is
+        // realized when its ROOT entity is emitted. So coverage must match an aggregate on its root,
+        // not on the boundary name — otherwise the recommended distinct-boundary shape (e.g.
+        // `aggregate Sales root Order`) would always read as "missing".
+        const string src =
+            "context C {\n  aggregate Sales root Order {\n    entity Order identified by OrderId { x: Int }\n  }\n}\n";
+        var result = new KoineCompiler().Compile(src, new CSharpEmitter());
+
+        var report = ModelCoverage.Compute(result.Model!, result.Files, "csharp");
+
+        CoverageItem aggregate = report.Items.Single(i => i.Kind == "aggregate");
+        aggregate.Name.ShouldBe("Sales");
+        aggregate.State.ShouldBe(CoverageState.Covered);
+        report.IsComplete.ShouldBeTrue();
+    }
+
+    [Fact]
     public void Compute_marks_types_missing_when_nothing_emitted()
     {
         var result = new KoineCompiler().Compile(TestSupport.BillingFixture, new CSharpEmitter());

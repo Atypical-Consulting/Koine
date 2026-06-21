@@ -1,6 +1,6 @@
 context Ordering {
 
-  aggregate Order root Order {
+  aggregate Sales root Order {
 
     enum OrderStatus { Draft, Placed, Shipped, Cancelled }
 
