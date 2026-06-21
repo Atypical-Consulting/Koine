@@ -6,7 +6,7 @@
   "Items": [
     {
       "Kind": "aggregate",
-      "Name": "Order",
+      "Name": "Sales",
       "Context": "Billing",
       "State": "Covered"
     },

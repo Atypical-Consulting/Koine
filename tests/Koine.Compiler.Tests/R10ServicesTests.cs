@@ -184,7 +184,7 @@ public class R10ServicesTests
     private const string PolicySrc = """
         context Sales {
           event OrderPlaced { orderId: OrderId }
-          aggregate Inventory root Inventory {
+          aggregate Stock root Inventory {
             entity Inventory identified by InventoryId {
               reserved: Int
               command reserve(order: OrderId) { reserved -> 1 }
@@ -215,7 +215,7 @@ public class R10ServicesTests
     {
         const string src = """
             context Sales {
-              aggregate Inventory root Inventory {
+              aggregate Stock root Inventory {
                 entity Inventory identified by InventoryId { n: Int  command reserve(order: OrderId) { n -> 1 } }
               }
               policy P when Nope then Inventory.reserve(order: orderId)
@@ -230,7 +230,7 @@ public class R10ServicesTests
         const string src = """
             context Sales {
               event OrderPlaced { orderId: OrderId }
-              aggregate Inventory root Inventory {
+              aggregate Stock root Inventory {
                 entity Inventory identified by InventoryId { n: Int }
               }
               policy P when OrderPlaced then Inventory.bogus(order: orderId)
@@ -245,7 +245,7 @@ public class R10ServicesTests
         const string src = """
             context Sales {
               event OrderPlaced { orderId: OrderId }
-              aggregate Inventory root Inventory {
+              aggregate Stock root Inventory {
                 entity Inventory identified by InventoryId { n: Int  command reserve(order: OrderId) { n -> 1 } }
               }
               policy P when OrderPlaced then Inventory.reserve(wrong: orderId)
@@ -260,7 +260,7 @@ public class R10ServicesTests
         const string src = """
             context Sales {
               event OrderPlaced { orderId: OrderId }
-              aggregate Inventory root Inventory {
+              aggregate Stock root Inventory {
                 entity Inventory identified by InventoryId { n: Int  command reserve(order: OrderId) { n -> 1 } }
               }
               policy P when OrderPlaced then Inventory.reserve(order: orderId)

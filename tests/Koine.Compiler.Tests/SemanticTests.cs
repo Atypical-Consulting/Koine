@@ -114,11 +114,25 @@ public class SemanticTests
     }
 
     [Fact]
-    public void Aggregate_named_after_its_root_is_allowed()
+    public void Aggregate_sharing_its_name_with_its_root_is_a_warning_not_an_error()
     {
-        // `aggregate Order root Order` is idiomatic and must NOT be a duplicate-type error.
+        // `aggregate Order root Order` still compiles (it is NOT a duplicate-type error), but the
+        // boundary reading as nothing more than its root is a code smell: it earns a KOI0109 warning.
         const string src =
             "context C {\n  aggregate Order root Order {\n    entity Order identified by OrderId { x: Int }\n  }\n}\n";
+        var diags = Validate(src);
+        diags.ShouldContain(d => d.Code == DiagnosticCodes.AggregateNameMatchesRoot
+            && d.Severity == DiagnosticSeverity.Warning);
+        diags.ShouldNotContain(d => d.Severity == DiagnosticSeverity.Error);
+    }
+
+    [Fact]
+    public void Aggregate_with_a_distinct_boundary_name_has_no_warning()
+    {
+        // Naming the boundary after the activity it groups (Sales) rather than its root (Order)
+        // is the recommended shape and is completely clean.
+        const string src =
+            "context C {\n  aggregate Sales root Order {\n    entity Order identified by OrderId { x: Int }\n  }\n}\n";
         Validate(src).ShouldBeEmpty();
     }
 

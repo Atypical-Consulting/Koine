@@ -169,3 +169,4 @@ Koine.Compiler.Services.ModelEditResult.Edits.get -> System.Collections.Generic.
 Koine.Compiler.Services.ModelEditResult.Edits.init -> void
 Koine.Compiler.Services.ModelEditResult.Diagnostics.get -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Diagnostics.Diagnostic!>!
 Koine.Compiler.Services.ModelEditResult.Diagnostics.init -> void
+const Koine.Compiler.Diagnostics.DiagnosticCodes.AggregateNameMatchesRoot = "KOI0109" -> string!

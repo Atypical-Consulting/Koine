@@ -90,9 +90,11 @@ public sealed class Order : IAggregateRoot
 }
 ```
 
-:::tip
-Naming the aggregate **and** its root `Order` is idiomatic and reads well (`aggregate Order root Order`).
-The root just has to be an entity declared inside the aggregate block.
+:::note
+Naming the aggregate the same as its root (`aggregate Order root Order`) compiles, but Koine flags it
+with a code-smell warning (`KOI0109`). The boundary is a *cluster* the root presides over, not the root
+itself — it reads as more than its root when you name it for the activity it groups, e.g.
+`aggregate Sales root Order`. The root just has to be an entity declared inside the aggregate block.
 :::
 
 ## Child value objects: `OrderLine`

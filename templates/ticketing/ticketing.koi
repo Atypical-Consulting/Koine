@@ -1,5 +1,5 @@
 /// Ticket Management bounded context — the help-desk workflow at the heart of the
-/// template. A `Ticket` is the headline aggregate; its lifecycle is driven by an
+/// template. The `Helpdesk` aggregate (root `Ticket`) is the headline aggregate; its lifecycle is driven by an
 /// explicit state machine (R7), guarded by invariants (R4), advanced by commands
 /// (R5) that record domain events (R6), and opened by a factory (R8).
 context TicketManagement version 1 {
@@ -51,7 +51,7 @@ context TicketManagement version 1 {
   /// The ticket aggregate. Being an aggregate root it gains an `ITicketRepository`
   /// and joins the context's generated `IUnitOfWork` (R11/R12); the `repository`
   /// block tunes the mutating set and adds intention-revealing finders (R11.3).
-  aggregate Ticket root Ticket {
+  aggregate Helpdesk root Ticket {
 
     repository {
       operations: getById, add, update

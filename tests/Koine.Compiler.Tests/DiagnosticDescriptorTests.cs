@@ -32,6 +32,7 @@ public class DiagnosticDescriptorTests
         DiagnosticCodes.UninitializedFactoryField,     // EntityBehaviorValidator.cs:290
         DiagnosticCodes.AclDirectUpstreamReference,    // SemanticValidator.cs:226
         DiagnosticCodes.AnnotationVersionAboveContext, // SemanticValidator.cs:86,96
+        DiagnosticCodes.AggregateNameMatchesRoot,      // SemanticValidator.cs (AggregateDecl case)
     };
 
     [Fact]
