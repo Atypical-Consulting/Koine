@@ -223,3 +223,51 @@
     border-color: color-mix(in srgb, var(--koi-accent) 40%, transparent);
   }
 }
+
+/* --- workspace mode switcher (#143) --- */
+/* A header-level segmented control: top-level modes (Domain / Code / Docs) that group the right
+   inspector's views. Mirrors the .tb-group segmented surface; the active segment wears the accent. */
+.mode-switcher {
+  display: flex;
+  align-items: center;
+  gap: var(--koi-space-0-5);
+  padding: var(--koi-space-0-5);
+  background: color-mix(in srgb, var(--koi-paper) 55%, transparent);
+  border: 1px solid var(--koi-line);
+  border-radius: var(--koi-radius-sm);
+  flex: 0 0 auto;
+}
+
+.mode-btn {
+  appearance: none;
+  background: transparent;
+  color: var(--koi-muted);
+  border: 1px solid transparent;
+  border-radius: var(--koi-radius-xs);
+  padding: var(--koi-space-1-5) var(--koi-space-2-75);
+  font-family: var(--koi-font-body);
+  font-size: var(--koi-text-sm-plus);
+  font-weight: 500;
+  line-height: 1;
+  cursor: pointer;
+  transition:
+    color var(--koi-dur-fast) ease,
+    background var(--koi-dur-fast) ease,
+    border-color var(--koi-dur-fast) ease;
+
+  &:hover {
+    color: var(--koi-fg);
+  }
+
+  /* The active mode reads as the headline: accent text on a ghost-accent surface. */
+  &[aria-selected='true'] {
+    color: var(--koi-accent);
+    background: color-mix(in srgb, var(--koi-accent) 16%, transparent);
+    border-color: color-mix(in srgb, var(--koi-accent) 40%, transparent);
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--koi-accent);
+    outline-offset: 1px;
+  }
+}
