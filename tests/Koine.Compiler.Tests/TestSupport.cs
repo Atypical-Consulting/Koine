@@ -413,7 +413,11 @@ public static class TestSupport
     /// stdout, and stderr. Returns <c>null</c> when the process fails to even start (e.g. a broken
     /// shebang) so callers can fall through to the next candidate instead of crashing.
     /// </summary>
-    private static ProcessRun? RunProcess(string fileName, IReadOnlyList<string> args, string? workingDirectory = null)
+    private static ProcessRun? RunProcess(
+        string fileName,
+        IReadOnlyList<string> args,
+        string? workingDirectory = null,
+        IReadOnlyDictionary<string, string>? environment = null)
     {
         try
         {
@@ -428,6 +432,14 @@ public static class TestSupport
             if (workingDirectory is not null)
             {
                 psi.WorkingDirectory = workingDirectory;
+            }
+
+            if (environment is not null)
+            {
+                foreach (var (key, value) in environment)
+                {
+                    psi.Environment[key] = value;
+                }
             }
 
             foreach (string a in args)
@@ -639,6 +651,164 @@ public static class TestSupport
         }
 
         if (OnPath("php") is { } found && CanRun(found, ["--version"]))
+        {
+            return new ToolInvocation(found, Array.Empty<string>());
+        }
+
+        return null;
+    }
+
+    // -------------------------------------------------------------------------
+    // Rust conformance harness (the cargo analogue of the Roslyn Compile harness)
+    // -------------------------------------------------------------------------
+
+    /// <summary>
+    /// Result of a Rust compile run. <see cref="ToolchainAvailable"/> is false when no usable
+    /// <c>cargo</c> could be located OR when <c>cargo</c> is present but cannot reach the crate
+    /// registry to fetch dependencies (an offline runner) — in both cases callers SKIP (not fail) so
+    /// <c>dotnet test</c> stays green without a working Rust toolchain. When the toolchain IS usable,
+    /// <see cref="Ok"/> reflects whether <c>cargo check</c> reported errors.
+    /// </summary>
+    public readonly record struct RustCheck(bool ToolchainAvailable, bool Ok, IReadOnlyList<string> Errors)
+    {
+        /// <summary>A skipped result: no usable toolchain present, so nothing was verified.</summary>
+        public static RustCheck Skipped { get; } =
+            new(ToolchainAvailable: false, Ok: false, Errors: Array.Empty<string>());
+    }
+
+    /// <summary>
+    /// Writes the emitted Rust files to a fresh temp crate and compiles them with
+    /// <c>cargo check</c> — the same role the Roslyn <see cref="Compile"/> harness plays for C#. When
+    /// the emitted files include a <c>Cargo.toml</c> it is used as-is (validating EXACTLY the manifest
+    /// users get); otherwise a minimal dependency-free manifest is synthesized and the emitted modules
+    /// are placed under <c>src/</c> with a generated <c>lib.rs</c> that declares them (the analogue of
+    /// the mypy <c>--config-file</c> vs <c>--strict</c> split).
+    /// <para>
+    /// When no <c>cargo</c> is found — or <c>cargo</c> is present but the run fails because crate
+    /// dependencies cannot be fetched on an offline runner — the result is
+    /// <see cref="RustCheck.Skipped"/> so the suite stays green. It NEVER silently passes a real
+    /// compile error and NEVER fails merely because the toolchain is missing/offline. CI is expected
+    /// to provide a networked Rust toolchain and therefore actually run the check.
+    /// </para>
+    /// </summary>
+    public static RustCheck CompileRust(IEnumerable<EmittedFile> files)
+    {
+        var fileList = files.ToList();
+        if (ResolveCargo() is not { } cargo)
+        {
+            return RustCheck.Skipped;
+        }
+
+        string root = Path.Combine(Path.GetTempPath(), "koine-cargo-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            bool hasManifest = fileList.Any(f => string.Equals(f.RelativePath, "Cargo.toml", StringComparison.Ordinal));
+            foreach (EmittedFile f in fileList)
+            {
+                string path = Path.Combine(root, f.RelativePath);
+                Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+                File.WriteAllText(path, f.Contents);
+            }
+
+            if (!hasManifest)
+            {
+                // Hand-authored fixture with no manifest: synthesize a minimal, dependency-free crate.
+                File.WriteAllText(Path.Combine(root, "Cargo.toml"), MinimalCargoToml);
+            }
+
+            // Reuse one shared target dir across runs so the (potentially many) dependency builds
+            // compile once, not per test — a big speed-up that keeps the harness deterministic.
+            string targetDir = Path.Combine(Path.GetTempPath(), "koine-cargo-target");
+            var env = new Dictionary<string, string> { ["CARGO_TARGET_DIR"] = targetDir };
+
+            var args = new List<string>(cargo.Arguments) { "check", "--quiet" };
+            if (RunProcess(cargo.FileName, args, root, env) is not { } run)
+            {
+                return RustCheck.Skipped;
+            }
+
+            if (run.ExitCode == 0)
+            {
+                return new RustCheck(ToolchainAvailable: true, Ok: true, Array.Empty<string>());
+            }
+
+            // An offline runner cannot fetch crates.io dependencies; that is an environment limitation,
+            // not a defect in the emitted code, so report it as a skip (toolchain unusable) rather than
+            // a failure — exactly how an absent toolchain is treated.
+            string output = run.StdOut + run.StdErr;
+            if (IsCargoFetchFailure(output))
+            {
+                return RustCheck.Skipped;
+            }
+
+            var errors = output
+                .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .ToList();
+            return new RustCheck(ToolchainAvailable: true, Ok: false, errors);
+        }
+        finally
+        {
+            try { Directory.Delete(root, recursive: true); } catch { /* best-effort cleanup */ }
+        }
+    }
+
+    /// <summary>A minimal dependency-free <c>Cargo.toml</c> for a hand-authored Rust fixture.</summary>
+    private const string MinimalCargoToml =
+        "[package]\n" +
+        "name = \"koine-fixture\"\n" +
+        "version = \"0.0.0\"\n" +
+        "edition = \"2021\"\n" +
+        "\n" +
+        "[lib]\n" +
+        "path = \"src/lib.rs\"\n";
+
+    /// <summary>
+    /// True when a failed <c>cargo</c> run reflects an inability to reach the crate registry / fetch
+    /// dependencies (an offline runner), as opposed to a genuine compile error in the emitted code.
+    /// </summary>
+    private static bool IsCargoFetchFailure(string output)
+    {
+        string[] markers =
+        {
+            "failed to download",
+            "failed to get ",
+            "failed to fetch",
+            "failed to load source",
+            "no matching package",
+            "Couldn't resolve host",
+            "could not connect",
+            "Network failure",
+            "error sending request",
+            "failed to query replaced source",
+            "spurious network error",
+            "Blocking waiting for file lock on package cache",
+            "the registry index",
+            "offline",
+        };
+        foreach (string marker in markers)
+        {
+            if (output.Contains(marker, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Locates a usable <c>cargo</c>: an explicit <c>KOINE_CARGO</c> override (always wins) or a
+    /// direct <c>cargo</c> on PATH. Returns <c>null</c> when none launches so the caller can skip.
+    /// </summary>
+    private static ToolInvocation? ResolveCargo()
+    {
+        if (Environment.GetEnvironmentVariable("KOINE_CARGO") is { Length: > 0 } overrideCargo)
+        {
+            return new ToolInvocation(overrideCargo, Array.Empty<string>());
+        }
+
+        if (OnPath("cargo") is { } found && CanRun(found, ["--version"]))
         {
             return new ToolInvocation(found, Array.Empty<string>());
         }

@@ -1,0 +1,103 @@
+using Koine.Compiler.Ast;
+
+namespace Koine.Compiler.Emit.Rust;
+
+/// <summary>
+/// Maps Koine <see cref="TypeRef"/>s to their Rust type strings.
+/// <list type="bullet">
+///   <item><c>String</c> → <c>String</c></item>
+///   <item><c>Int</c> → <c>i64</c></item>
+///   <item><c>Bool</c> → <c>bool</c></item>
+///   <item><c>Decimal</c> → <c>Decimal</c> (<c>rust_decimal::Decimal</c>, money-safe)</item>
+///   <item><c>Instant</c> → <c>Instant</c> (a <c>std::time::SystemTime</c> alias from the runtime)</item>
+///   <item><c>List&lt;T&gt;</c> → <c>Vec&lt;T&gt;</c></item>
+///   <item><c>Set&lt;T&gt;</c> → <c>HashSet&lt;T&gt;</c></item>
+///   <item><c>Map&lt;K,V&gt;</c> → <c>HashMap&lt;K, V&gt;</c></item>
+///   <item><c>Range&lt;T&gt;</c> → <c>Range&lt;T&gt;</c> (the runtime interval type)</item>
+///   <item><c>T?</c> → <c>Option&lt;T&gt;</c></item>
+///   <item>All other named types (value/entity/aggregate/enum/ID) → their PascalCase name</item>
+/// </list>
+/// <para>
+/// The SHORT names (<c>Decimal</c>, <c>Instant</c>, <c>HashSet</c>, <c>HashMap</c>, <c>Range</c>)
+/// require the per-module <c>use</c> header the emitter assembles; <c>Vec</c>/<c>Option</c> are in the
+/// Rust prelude and need none.
+/// </para>
+/// </summary>
+internal sealed class RustTypeMapper
+{
+    private readonly ModelIndex _index;
+
+    public RustTypeMapper(ModelIndex index) => _index = index;
+
+    /// <summary>The Rust type string for a member's declared type (wrapping optionals in <c>Option</c>).</summary>
+    public string Map(TypeRef type)
+    {
+        var baseType = MapBase(type);
+        return type.IsOptional ? $"Option<{baseType}>" : baseType;
+    }
+
+    private string MapBase(TypeRef type)
+    {
+        switch (type.Name)
+        {
+            case "String":
+                return "String";
+            case "Int":
+                return "i64";
+            case "Bool":
+                return "bool";
+            case "Decimal":
+                return "Decimal";
+            case "Instant":
+                return "Instant";
+            case ModelIndex.ListTypeName:
+                return $"Vec<{MapArg(type.Element)}>";
+            case ModelIndex.SetTypeName:
+                return $"HashSet<{MapArg(type.Element)}>";
+            case ModelIndex.MapTypeName:
+                return $"HashMap<{MapArg(type.Element)}, {MapArg(type.Value)}>";
+            case ModelIndex.RangeTypeName:
+                return $"Range<{MapArg(type.Element)}>";
+            default:
+                // value / entity / aggregate / enum / ID / unknown types map to their Rust type name.
+                return RustNaming.ToPascalCase(type.Name);
+        }
+    }
+
+    /// <summary>Maps a type argument, defaulting to <c>String</c> for a missing/null arg.</summary>
+    private string MapArg(TypeRef? arg) => arg is not null ? Map(arg) : "String";
+
+    /// <summary>True when the member's type is a Koine <c>List&lt;T&gt;</c>.</summary>
+    public static bool IsList(TypeRef type) => type.Name == ModelIndex.ListTypeName;
+
+    /// <summary>True when the member's type is a Koine <c>Set&lt;T&gt;</c>.</summary>
+    public static bool IsSet(TypeRef type) => type.Name == ModelIndex.SetTypeName;
+
+    /// <summary>True when the member's type is a Koine <c>Map&lt;K,V&gt;</c>.</summary>
+    public static bool IsMap(TypeRef type) => type.Name == ModelIndex.MapTypeName;
+
+    /// <summary>True when the member's type classifies as a Koine smart enum.</summary>
+    public bool IsEnum(TypeRef type) => _index.Classify(type.Name) == TypeKind.Enum;
+
+    /// <summary>
+    /// True when a value of this type is <c>Copy</c> in the emitted Rust (so accessors and arguments
+    /// can pass it by value): the scalar primitives, <c>Instant</c> (SystemTime), <c>Decimal</c>, and
+    /// data-free smart enums. Anything that owns a heap allocation (<c>String</c>, collections) or may
+    /// transitively (other value/entity types) is NOT <c>Copy</c>.
+    /// </summary>
+    public bool IsCopy(TypeRef type)
+    {
+        if (type.IsOptional)
+        {
+            return false;
+        }
+
+        return type.Name switch
+        {
+            // All smart enums emit as unit-variant Rust enums deriving `Copy` (associated data is
+            // exposed via accessor methods, never as payload), so every enum value is `Copy`.
+            "Int" or "Bool" or "Decimal" or "Instant" => true,
+            _ => _index.Classify(type.Name) == TypeKind.Enum,
+        };
+    }
+}
