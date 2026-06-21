@@ -137,7 +137,7 @@ None of these choices live in the model. They live in their respective emitters.
   → ANTLR lexer/parser
   → semantic model        ← target-agnostic; knows nothing about C# or TS
   → semantic validator
-  → IEmitter              ← C#, TypeScript, glossary
+  → IEmitter              ← C#, TypeScript, Python, PHP, glossary
   → idiomatic source files
 ```
 
