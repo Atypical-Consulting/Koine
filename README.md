@@ -8,7 +8,7 @@
 [![Documentation](https://img.shields.io/badge/docs-koine-3245b8)](https://atypical-consulting.github.io/Koine/)
 [![.NET](https://img.shields.io/badge/.NET-10-512BD4)](https://dotnet.microsoft.com/)
 [![Tests](https://img.shields.io/badge/tests-950%2B%20passing-2ea44f)](tests/)
-![Target](https://img.shields.io/badge/emits-C%23%20%C2%B7%20TypeScript%20%C2%B7%20Python%20%C2%B7%20PHP%20%C2%B7%20docs-178600)
+![Target](https://img.shields.io/badge/emits-C%23%20%C2%B7%20TypeScript%20%C2%B7%20Python%20%C2%B7%20PHP%20%C2%B7%20Rust%20%C2%B7%20docs-178600)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 
 ## The problem
@@ -32,9 +32,13 @@ compile one domain model to many targets. **C# is the primary, most complete tar
 **TypeScript** emitter ships (`--target typescript`), a **Python** emitter ships (`--target python` →
 dependency-free Python 3.11+, `mypy --strict`-clean; Phase 1 covers the tactical core), a **PHP 8.1**
 emitter ships (`--target php` → dependency-free PHP 8.1, typed properties, readonly promoted properties; Phase 1
-covers the tactical core), a **docs** target emits living documentation (`--target docs` → Markdown +
-Mermaid diagrams) straight from the model, and the parser and semantic model are kept strictly
-target-agnostic so further emitters (e.g. Rust) can be added without touching them.
+covers the tactical core), a **Rust** emitter ships (`--target rust` → an idiomatic crate: value
+objects as structs with smart constructors returning `Result<_, DomainError>`, smart enums as Rust
+`enum`s matched exhaustively, entities/aggregates with invariant-checked behaviors, events as a
+`Vec`-friendly `DomainEvent` enum, and repositories as `trait`s; depends only on `rust_decimal` for
+money and `regex` for `matches`; Phase 1 covers the tactical core), a **docs** target emits living
+documentation (`--target docs` → Markdown + Mermaid diagrams) straight from the model, and the parser
+and semantic model are kept strictly target-agnostic so further emitters can be added without touching them.
 
 ## See it run — in your browser
 
@@ -152,6 +156,9 @@ dotnet run --project src/Koine.Cli -- build templates/starters/billing/billing.k
 # Or to PHP 8.1 (Phase 1: tactical core — value objects, smart enums, entities, events, repositories)
 dotnet run --project src/Koine.Cli -- build templates/starters/billing/billing.koi --target php --out ./generated_php
 
+# Or to Rust (Phase 1: tactical core — an idiomatic crate; `cargo build` proves it compiles)
+dotnet run --project src/Koine.Cli -- build templates/starters/billing/billing.koi --target rust --out ./generated_rs
+
 # Generate living documentation (Markdown + Mermaid state/class/context-map diagrams)
 dotnet run --project src/Koine.Cli -- build templates/starters/billing/billing.koi --target docs --out ./docs
 
@@ -236,7 +243,7 @@ The pipeline is strictly layered so backends are pluggable:
   → Lexer/Parser (ANTLR, generated from Grammar/KoineLexer.g4 + KoineParser.g4)
   → KoineModelBuilderVisitor → semantic model (Ast/, target-agnostic)
   → SemanticValidator (Semantics/) → diagnostics with line/column
-  → IEmitter (Emit/CSharp, Emit/TypeScript, Emit/Python, Emit/Php, …) → source files
+  → IEmitter (Emit/CSharp, Emit/TypeScript, Emit/Python, Emit/Php, Emit/Rust, …) → source files
 ```
 
 ```
@@ -252,6 +259,7 @@ Koine.slnx
 │   │   │   ├── TypeScript/ # TypeScriptEmitter
 │   │   │   ├── Python/     # PythonEmitter (Phase 1: tactical core)
 │   │   │   ├── Php/        # PhpEmitter (Phase 1: tactical core, PHP 8.1)
+│   │   │   ├── Rust/       # RustEmitter (Phase 1: tactical core)
 │   │   │   ├── Glossary/   # ubiquitous-language glossary
 │   │   │   └── Docs/       # living documentation (Markdown + Mermaid diagrams)
 │   │   ├── Diagnostics/    # Diagnostic
