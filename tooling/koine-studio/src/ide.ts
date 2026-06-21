@@ -1,7 +1,8 @@
 // Koine Studio app composition: wires the .koi editor, the live LSP diagnostics,
 // the status line, the diagnostics strip, and the tabbed inspector (emitted preview,
 // glossary, and context map).
-import { createKoineEditor, createOutputView, renderMarkdown, renderSymbolTree, setEditorDiagnostics } from './editor';
+import { createKoineEditor, createOutputView, renderMarkdown, setEditorDiagnostics } from './editor';
+import { renderModelOutline, type OutlineHandlers } from './modelOutline';
 import {
   KoineLsp,
   type CheckResult,
@@ -1043,15 +1044,36 @@ export function init(): void {
     }
   }
 
+  // The model outline (#142): construct-grouped, model-wide navigator sourced from the glossary model
+  // (every concept once, with its context + kind + name range). Selecting a leaf feeds the inspector
+  // via the selection bus and jumps the editor to the declaration.
+  const outlineHandlers: OutlineHandlers = {
+    onSelect: (entry) =>
+      selectionBus.set({
+        qualifiedName: entry.qualifiedName,
+        context: entry.context,
+        span: {
+          file: null,
+          line: entry.nameRange.start.line + 1,
+          column: entry.nameRange.start.character + 1,
+          endLine: entry.nameRange.end.line + 1,
+          endColumn: entry.nameRange.end.character + 1,
+          offset: 0,
+          length: 0,
+        },
+      }),
+    onGoto: (range) => editor.gotoRange(range.start, range.end),
+  };
+
   async function loadOutline(): Promise<void> {
     docMessage(outlineView, 'Loading outline…');
     try {
-      const symbols = await lsp.documentSymbols();
-      if (!symbols.length) {
-        docMessage(outlineView, 'No symbols (the model may have syntax errors).');
+      const model = await lsp.glossaryModel();
+      if (!model.entries.length) {
+        docMessage(outlineView, 'No model symbols (the model may be empty or have syntax errors).');
       } else {
         outlineView.innerHTML = '';
-        outlineView.appendChild(renderSymbolTree(symbols, (line, col) => editor.goto(line, col)));
+        outlineView.appendChild(renderModelOutline(model, outlineHandlers));
       }
       docViewsLoaded.outline = true;
     } catch (e) {
