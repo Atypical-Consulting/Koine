@@ -12,7 +12,7 @@
 // non-bundled build spawns a Web Worker from a blob: URL, which CSP forbids).
 import type { DiagramRenderer } from './diagrams';
 import { createMermaidRenderer } from './diagrams';
-import { centerOn, clampScale, fit, panBy, zoomAt, zoomPercent, type Size, type ViewBox } from './canvasView';
+import { centerOn, clampScale, fit, panBy, viewAtScale, zoomAt, zoomPercent, type Size, type ViewBox } from './canvasView';
 import { loadDiagramZoom, saveDiagramZoom } from './store';
 import type { Diagram, DiagramGraph, DiagramMember, DiagramNode, DocsFile, SourceSpan } from './lsp';
 // Type-only import (erased at build time) of elkjs' own API surface, so our layout graph type-checks
@@ -106,6 +106,7 @@ const SVG_PADDING = 12;
 // renderer-side knobs: how much margin a fit leaves, how hard the buttons/wheel zoom, and the scale
 // floor/ceiling so the picture can never invert or vanish.
 const CANVAS_FIT_PADDING = 24; // content-units of margin around the diagram when fitting
+const DEFAULT_CANVAS_SCALE = 1; // a freshly opened diagram starts at 100% (one content unit per pixel)
 const ZOOM_BUTTON_STEP = 1.2; // the +/- buttons multiply the zoom by this
 const WHEEL_ZOOM_BASE = 1.0016; // per-unit wheel delta → zoom factor (pow(base, -deltaY))
 const MIN_CANVAS_SCALE = 0.1; // never shrink below 10% (content unit : screen pixel)
@@ -594,9 +595,11 @@ function mountInteractiveCanvas(surface: HTMLElement, svg: SVGSVGElement, persis
   }
 
   refreshMetrics();
-  let view: ViewBox = fit(contentBounds, vp, CANVAS_FIT_PADDING);
-  // Until the user zooms/pans, a resize re-fits; after, a resize only re-aspects (keeps their zoom).
-  let userAdjusted = false;
+  let view: ViewBox = viewAtScale(contentBounds, vp, DEFAULT_CANVAS_SCALE);
+  // How a resize re-derives the view while the user hasn't manually zoomed/panned:
+  //   'default' → keep the 100% default, re-centered; 'fit' → keep the diagram fitted to the panel.
+  // Once the user zooms/pans (setView), the mode goes null and a resize only re-aspects (keeps their zoom).
+  let autoMode: 'default' | 'fit' | null = 'default';
   // A persisted zoom can only be honoured once the canvas has a real pixel size (zoom % is relative to
   // it), so it waits for the first ResizeObserver measurement rather than the (sizeless) mount.
   const pendingRestorePct = persistKey ? loadDiagramZoom(persistKey) : null;
@@ -615,13 +618,13 @@ function mountInteractiveCanvas(surface: HTMLElement, svg: SVGSVGElement, persis
 
   function setView(next: ViewBox): void {
     view = next;
-    userAdjusted = true;
+    autoMode = null;
     paint();
   }
 
   function fitToScreen(): void {
     view = fit(contentBounds, vp, CANVAS_FIT_PADDING);
-    userAdjusted = false;
+    autoMode = 'fit'; // a resize keeps tracking the fit until the user zooms/pans
     paint();
     persist();
   }
@@ -764,9 +767,10 @@ function mountInteractiveCanvas(surface: HTMLElement, svg: SVGSVGElement, persis
   // The minimap thumbnail (Task 3) lives in the same canvas; it reads the live window and recenters it.
   buildMinimap(canvas, svg, contentBounds, () => view, (next) => setView(next), (fn) => listeners.push(fn));
 
-  // Re-fit while the canvas is auto (e.g. it first gets a real size after mount); once the user has taken
-  // over, keep their zoom but re-aspect so the picture never distorts when the panel is resized. The very
-  // first real measurement also honours a persisted zoom (which needs the true pixel size to be exact).
+  // Re-derive the view on resize per the auto mode (re-center at 100% by default, or re-fit if the user
+  // hit "Fit to screen"); once they've zoomed/panned, keep their zoom but re-aspect so the picture never
+  // distorts. The very first real measurement also honours a persisted zoom (which needs the true pixel
+  // size to be exact) — it starts from the 100% default, then applies the saved percent on top.
   let ro: ResizeObserver | null = null;
   if (typeof ResizeObserver !== 'undefined') {
     ro = new ResizeObserver(() => {
@@ -774,12 +778,17 @@ function mountInteractiveCanvas(surface: HTMLElement, svg: SVGSVGElement, persis
       if (vp.w <= 0 || vp.h <= 0) return;
       if (!initialized) {
         initialized = true;
-        view = fit(contentBounds, vp, CANVAS_FIT_PADDING);
+        view = viewAtScale(contentBounds, vp, DEFAULT_CANVAS_SCALE);
         paint();
         if (pendingRestorePct != null) applyZoomPercent(pendingRestorePct);
         return;
       }
-      view = userAdjusted ? reframeToAspect(view, vp) : fit(contentBounds, vp, CANVAS_FIT_PADDING);
+      view =
+        autoMode === 'default'
+          ? viewAtScale(contentBounds, vp, DEFAULT_CANVAS_SCALE)
+          : autoMode === 'fit'
+            ? fit(contentBounds, vp, CANVAS_FIT_PADDING)
+            : reframeToAspect(view, vp);
       paint();
     });
     ro.observe(canvas);
