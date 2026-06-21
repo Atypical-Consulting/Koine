@@ -1,0 +1,110 @@
+/* --- left rail: Explorateur / Vue d'ensemble / Documentation ---
+   Three always-visible, collapsible sections stacked in the left column. The model navigator
+   (renderModelOutline), the per-context counts (renderOverviewCounts) and the glossary
+   (renderGlossary) mount into the section bodies; they are re-painted together from the model. */
+#leftrail {
+  display: flex;
+  flex-direction: column;
+  background: var(--koi-paper-2);
+  overflow: hidden;
+}
+
+.rail-sect {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-bottom: 1px solid var(--koi-line);
+
+  /* Explorateur + Documentation share the flexible space and scroll within themselves; Vue d'ensemble
+     sizes to its (small) counts content and never shrinks, so the tallies are always fully visible. */
+  &#rail-explorer,
+  &#rail-docs {
+    flex: 1 1 0;
+    min-height: 96px;
+  }
+  &#rail-overview {
+    flex: 0 0 auto;
+  }
+}
+
+.rail-sect-head {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: var(--koi-space-1-5);
+  width: 100%;
+  padding: var(--koi-space-2) var(--koi-space-3);
+  background: transparent;
+  border: none;
+  color: var(--koi-muted);
+  font-family: var(--koi-font-body);
+  font-size: var(--koi-text-xs);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  text-align: left;
+  cursor: pointer;
+  transition: color var(--koi-dur-fast) ease;
+
+  /* Disclosure caret — rotates when the section is collapsed. */
+  &::before {
+    content: '▾';
+    font-size: 0.8em;
+    line-height: 1;
+    transition: transform var(--koi-dur-fast) ease;
+  }
+  &:hover {
+    color: var(--koi-fg);
+  }
+}
+
+.rail-sect[data-open='false'] {
+  flex: 0 0 auto;
+
+  .rail-sect-head::before {
+    transform: rotate(-90deg);
+  }
+  .rail-sect-body {
+    display: none;
+  }
+}
+
+.rail-sect-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--koi-space-1) var(--koi-space-2) var(--koi-space-3);
+}
+
+/* The "Vue d'ensemble" overview: per-context construct tallies (renderOverviewCounts). */
+.koi-overview-ctx + .koi-overview-ctx {
+  margin-top: var(--koi-space-2-5);
+}
+.koi-overview-ctx-name {
+  margin: 0 0 var(--koi-space-1-5);
+  font-size: var(--koi-text-xs);
+  font-weight: 600;
+  color: var(--koi-fg);
+}
+.koi-overview-counts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--koi-space-1) var(--koi-space-1-5);
+}
+.koi-overview-count {
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--koi-space-0-75);
+  padding: var(--koi-space-0-5) var(--koi-space-1-5);
+  border: 1px solid var(--koi-line);
+  border-radius: var(--koi-radius-pill);
+  background: var(--koi-paper);
+  font-size: var(--koi-text-2xs);
+  color: var(--koi-muted);
+
+  .koi-model-count-num,
+  .koi-overview-count-num {
+    font-weight: 600;
+    color: var(--koi-fg);
+  }
+}

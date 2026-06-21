@@ -107,65 +107,101 @@
           <div id="filetree-body"></div>
         </aside>
         <div class="koi-resizer" id="filetree-resizer" aria-hidden="true"></div>
-        <section id="editor-pane" class="pane" aria-label="Editor"></section>
-        <div class="koi-resizer" id="split-resizer" aria-hidden="true"></div>
-        <section id="right" class="pane" aria-label="Inspector">
-          <div id="tabs" role="tablist" aria-label="Right panel views">
-            <button type="button" class="tab" id="tab-preview" role="tab" data-view="preview" aria-selected="true">
-              Emitted Preview
-            </button>
-            <button type="button" class="tab" id="tab-model" role="tab" data-view="model" aria-selected="false">
-              Model
-            </button>
-            <button type="button" class="tab" id="tab-glossary" role="tab" data-view="glossary" aria-selected="false">
-              Glossary
-            </button>
-            <button type="button" class="tab" id="tab-diagrams" role="tab" data-view="diagrams" aria-selected="false">
-              Diagrams
-            </button>
-            <button type="button" class="tab" id="tab-contextmap" role="tab" data-view="contextmap" aria-selected="false">
-              Context Map
-            </button>
-            <button type="button" class="tab" id="tab-outline" role="tab" data-view="outline" aria-selected="false">
-              Outline
-            </button>
-            <button type="button" class="tab" id="tab-assistant" role="tab" data-view="assistant" aria-selected="false">
-              Assistant
-            </button>
-            <button type="button" class="tab" id="tab-check" role="tab" data-view="check" aria-selected="false">
-              Check
-            </button>
-            <button type="button" id="btn-refresh" class="tab-refresh" title="Refresh this view">↻</button>
+
+        <!-- Left rail: the model-derived navigator in three stacked sections. Explorateur = the DDD
+             construct/context tree (renderModelOutline), Vue d'ensemble = per-context counts
+             (renderOverviewCounts), Documentation = the glossary (renderGlossary). All three are
+             always visible and re-painted together from the model — they are NOT mutually exclusive
+             tabs, so they live outside the old #right tab system. -->
+        <aside id="leftrail" class="pane" aria-label="Model navigator">
+          <section class="rail-sect" id="rail-explorer" data-open="true">
+            <button type="button" class="rail-sect-head" aria-expanded="true" aria-controls="rail-explorer-body">Explorateur</button>
+            <div class="rail-sect-body" id="rail-explorer-body"></div>
+          </section>
+          <section class="rail-sect" id="rail-overview" data-open="true">
+            <button type="button" class="rail-sect-head" aria-expanded="true" aria-controls="rail-overview-body">Vue d'ensemble</button>
+            <div class="rail-sect-body" id="rail-overview-body"></div>
+          </section>
+          <section class="rail-sect" id="rail-docs" data-open="true">
+            <button type="button" class="rail-sect-head" aria-expanded="true" aria-controls="rail-docs-body">Documentation</button>
+            <div class="rail-sect-body" id="rail-docs-body"></div>
+          </section>
+        </aside>
+        <div class="koi-resizer" id="leftrail-resizer" aria-hidden="true"></div>
+
+        <!-- Center: an "Éditeur visuel" (the domain diagram) / "Vue technique" (the code editor plus
+             the emitted preview, the compatibility check and the assistant) toggle. The editor mounts
+             into #editor-pane and the diagram into #center-visual; both ids are preserved so their
+             existing render call sites are unchanged. -->
+        <section id="center" class="pane" aria-label="Editor">
+          <div id="center-tabs" role="tablist" aria-label="Vue centrale">
+            <button type="button" class="center-tab" id="center-tab-visual" role="tab" data-center="visual" aria-selected="true">Éditeur visuel</button>
+            <button type="button" class="center-tab" id="center-tab-technical" role="tab" data-center="technical" aria-selected="false">Vue technique</button>
           </div>
-          <div id="views">
-            <div id="view-preview" class="view" role="tabpanel"></div>
-            <div id="view-model" class="view doc-view" role="tabpanel" hidden></div>
-            <div id="view-glossary" class="view doc-view" role="tabpanel" hidden></div>
-            <div id="view-diagrams" class="view doc-view" role="tabpanel" hidden></div>
-            <div id="view-contextmap" class="view doc-view" role="tabpanel" hidden></div>
-            <div id="view-outline" class="view doc-view" role="tabpanel" hidden></div>
-            <div id="view-assistant" class="view" role="tabpanel" hidden></div>
-            <div id="view-check" class="view doc-view" role="tabpanel" hidden></div>
+          <div id="center-body">
+            <section id="center-visual" class="center-host" role="tabpanel" aria-label="Éditeur visuel"></section>
+            <section id="center-technical" class="center-host" role="tabpanel" aria-label="Vue technique" hidden>
+              <div id="tech-tabs" role="tablist" aria-label="Vue technique">
+                <button type="button" class="tech-tab" id="tech-tab-editor" role="tab" data-tech="editor" aria-selected="true">Éditeur</button>
+                <button type="button" class="tech-tab" id="tech-tab-preview" role="tab" data-tech="preview" aria-selected="false">Code généré</button>
+                <button type="button" class="tech-tab" id="tech-tab-check" role="tab" data-tech="check" aria-selected="false">Compatibilité</button>
+                <button type="button" class="tech-tab" id="tech-tab-assistant" role="tab" data-tech="assistant" aria-selected="false">Assistant</button>
+              </div>
+              <div id="tech-body">
+                <section id="editor-pane" class="tech-view" aria-label="Editor"></section>
+                <div id="view-preview" class="tech-view" role="tabpanel" hidden></div>
+                <div id="view-check" class="tech-view doc-view" role="tabpanel" hidden></div>
+                <div id="view-assistant" class="tech-view" role="tabpanel" hidden></div>
+              </div>
+            </section>
           </div>
         </section>
+        <div class="koi-resizer" id="split-resizer" aria-hidden="true"></div>
+
+        <!-- Right rail: the element inspector, dedicated to "Propriétés". Règles/Notes are placeholder
+             tabs matching the mockup chrome — read-only "à venir" until a follow-up builds them. -->
+        <aside id="right" class="pane" aria-label="Propriétés">
+          <div id="right-tabs" role="tablist" aria-label="Propriétés">
+            <button type="button" class="rtab" id="rtab-props" role="tab" data-rview="props" aria-selected="true">Propriétés</button>
+            <button type="button" class="rtab" id="rtab-rules" role="tab" data-rview="rules" aria-selected="false">Règles</button>
+            <button type="button" class="rtab" id="rtab-notes" role="tab" data-rview="notes" aria-selected="false">Notes</button>
+          </div>
+          <div id="right-body">
+            <div id="inspector-host" class="rview" role="tabpanel"></div>
+            <div id="rview-rules" class="rview doc-view" role="tabpanel" hidden><p class="muted">À venir.</p></div>
+            <div id="rview-notes" class="rview doc-view" role="tabpanel" hidden><p class="muted">À venir.</p></div>
+          </div>
+        </aside>
       </main>
 
-      <footer id="diagnostics" aria-label="Problems, events and relationships">
+      <footer id="diagnostics" aria-label="Problems, events, relationships and decisions">
         <div class="koi-resizer koi-resizer-y" id="diag-resizer" aria-hidden="true"></div>
         <div id="diag-header">
-          <button type="button" id="diag-collapse" class="diag-collapse" aria-expanded="true" aria-controls="diag-body panel-events panel-relationships" aria-label="Collapse panel">
+          <button type="button" id="diag-collapse" class="diag-collapse" aria-expanded="true" aria-controls="diag-body panel-events panel-relationships panel-contextmap" aria-label="Collapse panel">
             <svg class="diag-chevron" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 6.5 8 10 12 6.5" /></svg>
           </button>
           <div class="diag-tabs" role="tablist" aria-label="Bottom panel">
             <button type="button" class="diag-tab" id="tab-problems" role="tab" data-panel="problems" aria-selected="true" aria-controls="diag-body">Problems</button>
-            <button type="button" class="diag-tab" id="tab-events" role="tab" data-panel="events" aria-selected="false" aria-controls="panel-events">Events</button>
-            <button type="button" class="diag-tab" id="tab-relationships" role="tab" data-panel="relationships" aria-selected="false" aria-controls="panel-relationships">Relationships</button>
+            <button type="button" class="diag-tab" id="tab-events" role="tab" data-panel="events" aria-selected="false" aria-controls="panel-events">Événements</button>
+            <button type="button" class="diag-tab" id="tab-relationships" role="tab" data-panel="relationships" aria-selected="false" aria-controls="panel-relationships">Règles</button>
+            <button type="button" class="diag-tab" id="tab-contextmap" role="tab" data-panel="contextmap" aria-selected="false" aria-controls="panel-contextmap">Décisions</button>
           </div>
           <span id="diag-count" class="diag-count"></span>
         </div>
         <div id="diag-body" class="diag-panel" role="tabpanel" aria-labelledby="tab-problems"></div>
         <div id="panel-events" class="diag-panel" role="tabpanel" aria-labelledby="tab-events" hidden></div>
         <div id="panel-relationships" class="diag-panel" role="tabpanel" aria-labelledby="tab-relationships" hidden></div>
+        <div id="panel-contextmap" class="diag-panel doc-view" role="tabpanel" aria-labelledby="tab-contextmap" hidden></div>
+      </footer>
+
+      <!-- Bottom status bar: a pure projection of existing state (active context, model validity,
+           connection, version). #status stays in the toolbar; #sb-connection mirrors it here. -->
+      <footer id="statusbar" aria-label="Statut du modèle">
+        <span class="sb-item" id="sb-context">Contexte actuel : —</span>
+        <span class="sb-item" id="sb-validity">Modèle valide</span>
+        <span class="sb-spacer"></span>
+        <span class="sb-item" id="sb-connection">Connexion…</span>
+        <span class="sb-item" id="sb-version"></span>
       </footer>
     </div>
   </body>

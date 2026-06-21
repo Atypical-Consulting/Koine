@@ -1,30 +1,33 @@
 /* --- split body --- */
-/* Five tracks: file tree (auto — it sizes to the pane, whose width is --koi-filetree-w; the
-   track stays auto so it collapses to 0 when the pane is hidden in scratch mode, leaving no gap),
-   its 6px drag rail (--koi-filetree-rail, 0 in scratch mode so no stray handle shows), editor
-   (1fr), the editor/inspector 6px resizer, and the inspector whose width is driven by
-   --koi-inspector-w (defaults to 1fr until the user drags). */
+/* Seven tracks (mockup 3-column shell): the OPFS file tree (auto — it sizes to the pane, whose
+   width is --koi-filetree-w; the track stays auto so it collapses to 0 when the pane is hidden in
+   scratch mode), its 6px drag rail (--koi-filetree-rail, 0 in scratch mode), the left model rail
+   (--koi-leftrail-w), its 6px resizer, the center (1fr), the center/inspector 6px resizer, and the
+   right inspector (--koi-inspector-w). */
 #split {
   flex: 1 1 auto;
   display: grid;
   grid-template-columns:
     var(--koi-filetree-w, auto) var(--koi-filetree-rail, 0px)
-    1fr 6px var(--koi-inspector-w, 1fr);
+    var(--koi-leftrail-w, 260px) 6px
+    1fr 6px var(--koi-inspector-w, 320px);
   min-height: 0;
 }
 
-/* File tree toggled off: collapse its width + rail tracks to 0 so the editor reclaims the
-   space. This overrides --koi-filetree-w, which the rail resizer pins to a fixed px (and
-   restores from localStorage on init) — that fixed track would otherwise hold the now-empty
-   column open even though the pane itself is display:none. The var is left untouched, so the
-   user's width returns when the tree is shown again. */
+/* File tree toggled off: collapse only its width + rail tracks to 0 so the left model rail and the
+   editor reclaim the space. This overrides --koi-filetree-w (which the rail resizer pins to a fixed
+   px and restores from localStorage) so the now-empty column doesn't stay open; the var is left
+   untouched, so the user's width returns when the tree is shown again. The left model rail is NOT
+   tied to file-tree visibility — it always shows the model. */
 #split.is-filetree-hidden {
-  grid-template-columns: 0 0 1fr 6px var(--koi-inspector-w, 1fr);
+  grid-template-columns:
+    0 0
+    var(--koi-leftrail-w, 260px) 6px
+    1fr 6px var(--koi-inspector-w, 320px);
 }
 
-/* Pin each pane to its track so a hidden filetree (scratch mode) just leaves tracks 1–2
-   empty rather than letting the remaining items auto-place into the wrong columns
-   (which would crush the inspector into a resizer track). */
+/* Pin each pane to its track so a hidden filetree (scratch mode) just leaves tracks 1–2 empty
+   rather than letting the remaining items auto-place into the wrong columns. */
 #filetree {
   grid-column: 1;
 }
@@ -33,14 +36,20 @@
   /* Fill the (0px-or-6px) rail track; hidden until a folder opens and sets --koi-filetree-rail. */
   width: 100%;
 }
-#editor-pane {
+#leftrail {
   grid-column: 3;
 }
-#split-resizer {
+#leftrail-resizer {
   grid-column: 4;
 }
-#right {
+#center {
   grid-column: 5;
+}
+#split-resizer {
+  grid-column: 6;
+}
+#right {
+  grid-column: 7;
 }
 
 .pane {
@@ -49,7 +58,10 @@
   overflow: hidden;
 }
 
-#editor-pane {
+#leftrail {
+  border-right: 1px solid var(--koi-line);
+}
+#center {
   border-right: 1px solid var(--koi-line);
 }
 

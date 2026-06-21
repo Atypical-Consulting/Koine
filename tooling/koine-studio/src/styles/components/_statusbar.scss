@@ -1,0 +1,33 @@
+/* --- bottom status bar ---
+   A thin projection of existing workspace state: active context, model validity, connection and
+   version. All values are written by ide.ts from state it already computes (no new data). */
+#statusbar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: var(--koi-space-2-5);
+  height: 26px;
+  padding: 0 var(--koi-space-3);
+  background: var(--koi-paper-2);
+  border-top: 1px solid var(--koi-line);
+  color: var(--koi-muted);
+  font-family: var(--koi-font-body);
+  font-size: var(--koi-text-2xs);
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.sb-item {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--koi-space-1);
+}
+
+.sb-spacer {
+  margin-left: auto;
+}
+
+/* Validity flips to the error colour when the model has diagnostics. */
+#sb-validity[data-kind='error'] {
+  color: var(--koi-error);
+}

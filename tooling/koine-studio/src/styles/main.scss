@@ -23,6 +23,9 @@
 @use './components/lang-split-button';
 @use './components/lang-picker';
 @use './layout/split';
+@use './layout/leftrail';
+@use './components/center';
+@use './components/statusbar';
 @use './components/file-tree';
 @use './components/explorer';
 @use './components/confirm-dialog';
