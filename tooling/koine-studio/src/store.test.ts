@@ -15,6 +15,8 @@ import {
   clearLegacyScratch,
   loadWorkspaceMode,
   saveWorkspaceMode,
+  loadActiveContext,
+  saveActiveContext,
   getRecentFolders,
   pushRecentFolder,
   removeRecentFolder,
@@ -271,5 +273,28 @@ describe('workspace mode persistence (#143)', () => {
     expect(loadWorkspaceMode()).toBe('docs');
     saveWorkspaceMode('code'); // a later save overwrites the prior one
     expect(loadWorkspaceMode()).toBe('code');
+  });
+});
+
+describe('active context persistence (#146)', () => {
+  beforeEach(() => localStorage.clear());
+
+  test('returns null for a workspace with no stored scope', () => {
+    expect(loadActiveContext('scratch')).toBeNull();
+  });
+
+  test('round-trips a saved scope per workspace key', () => {
+    saveActiveContext('scratch', 'Sales');
+    expect(loadActiveContext('scratch')).toBe('Sales');
+    saveActiveContext('scratch', 'all'); // a later save overwrites the prior one
+    expect(loadActiveContext('scratch')).toBe('all');
+  });
+
+  test('keeps each workspace’s scope independent', () => {
+    saveActiveContext('/work/billing', 'Billing');
+    saveActiveContext('/work/pizzeria', 'Kitchen');
+    expect(loadActiveContext('/work/billing')).toBe('Billing');
+    expect(loadActiveContext('/work/pizzeria')).toBe('Kitchen');
+    expect(loadActiveContext('scratch')).toBeNull();
   });
 });
