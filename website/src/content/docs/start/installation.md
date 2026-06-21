@@ -156,9 +156,10 @@ koine --version
 ```
 
 :::note[Feature status]
-Koine ships **R1–R15 plus the R17 developer tooling** (`koine fmt`, `init`, `watch`, and the `lsp`
-language server). The multi-target emitters of [R16](/Koine/guides/roadmap/#r16--multi-target-emitters)
-(TypeScript, Rust, C# emitter configuration) are still on the roadmap.
+Koine ships **R1–R15, the R16 multi-target emitters** (TypeScript, Python, and PHP alongside C#),
+**and the R17 developer tooling** (`koine fmt`, `init`, `watch`, and the `lsp` language server). A
+[Rust emitter](/Koine/guides/roadmap/#r16--multi-target-emitters) and structured per-target emitter
+configuration remain on the roadmap.
 :::
 
 ## Next steps
