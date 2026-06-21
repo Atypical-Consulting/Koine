@@ -84,13 +84,13 @@ Koine is strictly layered, and the parser and semantic model are kept **target-a
   → ANTLR lexer/parser
   → semantic model        (no C# concepts live here)
   → semantic validator    (diagnostics with line/column)
-  → emitter               (C# today; TypeScript in progress)
+  → emitter               (C#, TypeScript, Python, PHP)
   → idiomatic source files
 ```
 
 Because no C# concept leaks into the semantic model, adding a second target is "write another
-emitter," not "rewrite the compiler." C# ships today, a TypeScript emitter is in progress, and Rust is
-on the roadmap.
+emitter," not "rewrite the compiler." C# ships today, alongside TypeScript, Python, and PHP emitters,
+with Rust on the roadmap.
 
 ## Try it without installing anything
 

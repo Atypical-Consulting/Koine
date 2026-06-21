@@ -1,9 +1,9 @@
 ---
 title: "Architecture"
-description: "How the Koine compiler is layered, the design decisions behind the emitted C#, and where a second emitter plugs in."
+description: "How the Koine compiler is layered, the design decisions behind the emitted C#, and where a new emitter plugs in."
 ---
 
-Koine is built as a **strictly layered pipeline**. Each stage hands a richer artifact to the next and never reaches backwards: the parser doesn't know about semantics, the semantic model doesn't know about C#, and the emitter is the only place a target language exists. That discipline is the whole point — it's what lets a TypeScript or Rust backend slot in later without touching anything upstream.
+Koine is built as a **strictly layered pipeline**. Each stage hands a richer artifact to the next and never reaches backwards: the parser doesn't know about semantics, the semantic model doesn't know about C#, and the emitter is the only place a target language exists. That discipline is the whole point — it's what let the TypeScript, Python, and PHP backends slot in alongside C# without touching anything upstream, and what will let a Rust one follow.
 
 This page walks the pipeline stage by stage, explains the notable design decisions baked into the emitter, describes how the compiler is tested, and shows exactly where a new emitter would attach.
 
@@ -128,9 +128,9 @@ The compiler's correctness rests on two complementary kinds of test in `tests/Ko
 
 On top of these sit ordinary parsing and semantic unit tests that assert specific diagnostics (codes, messages, positions) for malformed models.
 
-## Where a second emitter plugs in
+## Where a new emitter plugs in
 
-Because every stage before emission is target-agnostic, adding a TypeScript, Python, or Rust backend is a **closed, additive change**:
+Because every stage before emission is target-agnostic, adding a backend is a **closed, additive change** — exactly how the TypeScript, Python, and PHP emitters were built, and how a Rust one will be:
 
 1. Write a new class implementing `IEmitter` — say `PythonEmitter` — with `TargetName => "python"` and an `Emit(KoineModel model)` that walks the same `Ast/` model and returns `EmittedFile`s.
 2. Register it in the CLI's `EmitterRegistry` (`src/Koine.Cli/Infrastructure/EmitterRegistry.cs`), next to `"csharp" => new CSharpEmitter()`.
@@ -147,4 +147,4 @@ A Rust emitter would likely model invariant failures as `Result<T, E>` instead o
 - [Reading the output](/Koine/start/reading-the-output/) — what the C# emitter actually produces, file by file.
 - [Language reference overview](/Koine/reference/overview/) — the construct-by-construct spec the model is built from.
 - [CLI reference](/Koine/guides/cli/) — the `koine build` / `koine check` flags that drive the pipeline.
-- [Roadmap](/Koine/guides/roadmap/) — the shipped TypeScript and Python emitters, and the planned Rust emitter.
+- [Roadmap](/Koine/guides/roadmap/) — the shipped TypeScript, Python, and PHP emitters, and the planned Rust emitter.

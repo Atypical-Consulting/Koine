@@ -8,9 +8,9 @@ subdirectory; the workspace-level `C:\repo\POC\CLAUDE.md` applies on top of it.
 Koine is a **domain-specific language for Domain-Driven Design**. You write a bounded context's
 ubiquitous language once in `.koi` files and the compiler emits idiomatic, self-contained C#
 (value objects, entities, aggregates, invariants, commands, events, state machines, repositories,
-the application/CQRS layer, context maps, etc.). C# is the only shipped target today; the parser and
-semantic model are kept strictly target-agnostic so further emitters (TypeScript, Rust) can be added
-without touching them — a TypeScript emitter is in progress (`Emit/TypeScript/`).
+the application/CQRS layer, context maps, etc.). C# is the primary, most complete target; TypeScript,
+Python, and PHP emitters also ship, and the parser and semantic model are kept strictly target-agnostic
+so a further emitter (e.g. Rust) is a new emitter, not a rewrite (`Emit/TypeScript/`, `Emit/Python/`, `Emit/Php/`).
 
 Read `README.md` for the language overview and the full construct table, and `USER-STORIES.md` for the
 roadmap (work is organized as releases **R1–R17**). The docs site source lives in `website/` (Astro
@@ -80,7 +80,7 @@ The whole thing is orchestrated by `Services/KoineCompiler.cs`.
   (`CSharpEmitter.ValueObjects.cs`, `.Entities.cs`, `.Aggregates.cs`, `.Behaviors.cs`, `.Cqrs.cs`,
   `.Runtime.cs`). Supporting pieces: `CSharpTypeMapper`, `CSharpNaming`, `CSharpExpressionTranslator`,
   `UsingCollector`, `OperatorNeedsAnalyzer`, `CSharpEmitterOptions`. `Emit/Glossary/` emits the
-  ubiquitous-language glossary; `Emit/TypeScript/` is the second emitter under development.
+  ubiquitous-language glossary; `Emit/TypeScript/`, `Emit/Python/`, and `Emit/Php/` are the additional language emitters.
 - **`Services/`** also hosts the editor/tooling backend reused by `koine lsp`: `WorkspaceIndex`,
   `KoineLanguageService`, `SemanticTokenProvider`, `TokenLocator`, `RefactorService`,
   `CompatibilityChecker`.
