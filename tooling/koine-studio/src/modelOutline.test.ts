@@ -3,6 +3,7 @@ import {
   countsByContext,
   groupByConstruct,
   renderModelOutline,
+  renderOverviewCounts,
   type ModelOutlineHandlers,
 } from './modelOutline';
 import type { GlossaryEntry, GlossaryModel, Range } from './lsp';
@@ -86,6 +87,21 @@ describe('countsByContext', () => {
   });
 });
 
+describe('renderOverviewCounts', () => {
+  test('renders a section per context with its construct tallies', () => {
+    const el = renderOverviewCounts(model);
+    const ctxNames = Array.from(el.querySelectorAll('.koi-overview-ctx-name')).map((n) => n.textContent);
+    expect(ctxNames).toEqual(['Sales', 'Inventory']);
+
+    const badges = Array.from(el.querySelectorAll('.koi-overview-count')).map((n) =>
+      n.textContent?.replace(/\s+/g, ' ').trim(),
+    );
+    expect(badges).toContain('Aggregates 1');
+    expect(badges).toContain('Value Objects 2');
+    expect(badges).toContain('Integration Events 1');
+  });
+});
+
 describe('renderModelOutline', () => {
   const noop: ModelOutlineHandlers = { onSelect: () => {}, goto: () => {} };
 
@@ -130,6 +146,18 @@ describe('renderModelOutline', () => {
     );
     expect(badges).toContain('Aggregates 1');
     expect(badges).toContain('Value Objects 2');
+  });
+
+  test('counts:false suppresses the inline strip (left-rail Explorateur)', () => {
+    const el = renderModelOutline(model, noop, { counts: false });
+    expect(el.querySelectorAll('.koi-model-count').length).toBe(0);
+    // The tree itself still renders.
+    expect(el.querySelectorAll('.koi-model-leaf').length).toBeGreaterThan(0);
+  });
+
+  test('nav:false drops the Context Map / Ubiquitous Language buttons', () => {
+    const el = renderModelOutline(model, noop, { nav: false });
+    expect(el.querySelectorAll('.koi-model-nav').length).toBe(0);
   });
 
   test('includes top-level Context Map and Ubiquitous Language entries', () => {
