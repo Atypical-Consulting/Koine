@@ -3,6 +3,7 @@ import {
   extractEvents,
   extractRelationships,
   mergeDiagramGraphs,
+  mergeGraphsForView,
   renderEventsTable,
   renderRelationshipsTable,
   type EventRow,
@@ -175,6 +176,50 @@ describe('mergeDiagramGraphs', () => {
     expect(byId.get(e2.to)!.label).toBe('Z2');
   });
 
+});
+
+describe('mergeGraphsForView', () => {
+  test('dedupes a node shared across diagrams (by qualified name), keeping the richest', () => {
+    // Order appears in its aggregate diagram (with members) AND as a bare node in a state machine.
+    const richOrder: DiagramNode = {
+      id: 'Order',
+      label: 'Order',
+      kind: 'aggregate-root',
+      qualifiedName: 'Sales.Order',
+      sourceSpan: null,
+      stereotype: 'aggregate root',
+      members: [{ text: 'id: OrderId', kind: 'field' }],
+    };
+    const aggregate: DiagramGraph = { nodes: [richOrder, node('S', 'OrderStatus', 'value', 'Sales.OrderStatus')], edges: [edge('Order', 'S')] };
+    const stateMachine: DiagramGraph = {
+      nodes: [node('Order', 'Order', 'aggregate-root', 'Sales.Order'), node('s1', 'PENDING', 'state', 'PENDING')],
+      edges: [edge('Order', 's1')],
+    };
+    const merged = mergeGraphsForView([aggregate, stateMachine]);
+    // Order collapses to ONE node (the rich one with members); OrderStatus + the state survive.
+    const orders = merged.nodes.filter((n) => n.qualifiedName === 'Sales.Order');
+    expect(orders).toHaveLength(1);
+    expect(orders[0].members).toHaveLength(1); // kept the richest representation
+    expect(merged.nodes).toHaveLength(3); // Order, OrderStatus, PENDING
+    // Edges remap to the surviving ids and stay resolvable; no duplicates / self-loops.
+    const ids = new Set(merged.nodes.map((n) => n.id));
+    for (const e of merged.edges) {
+      expect(ids.has(e.from)).toBe(true);
+      expect(ids.has(e.to)).toBe(true);
+      expect(e.from).not.toBe(e.to);
+    }
+    expect(merged.edges).toHaveLength(2); // Order→OrderStatus, Order→PENDING
+  });
+
+  test('keeps distinct context-less nodes (e.g. same-named states) separate', () => {
+    const g1: DiagramGraph = { nodes: [node('s', 'OPEN', 'state', 'OPEN')], edges: [] };
+    const g2: DiagramGraph = { nodes: [node('s', 'OPEN', 'state', 'OPEN')], edges: [] };
+    // Both 'OPEN' lack a dotted qualified name, so they don't collapse — they're namespaced per graph.
+    expect(mergeGraphsForView([g1, g2]).nodes).toHaveLength(2);
+  });
+});
+
+describe('mergeDiagramGraphs extractor pipeline', () => {
   test('a merged projection feeds the extractors end-to-end', () => {
     const aggregate: DiagramGraph = {
       nodes: [

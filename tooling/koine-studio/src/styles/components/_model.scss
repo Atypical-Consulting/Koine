@@ -131,35 +131,35 @@
 }
 .koi-model-icon[data-construct='aggregate'] {
   border-radius: 3px;
-  background: #a78bfa;
+  background: var(--koi-ddd-aggregate);
 }
 .koi-model-icon[data-construct='entity'] {
   border-radius: 2px;
-  background: #34d399;
+  background: var(--koi-ddd-entity);
 }
 .koi-model-icon[data-construct='value'] {
   width: 9px;
   height: 9px;
   border-radius: 2px;
-  background: #60a5fa;
+  background: var(--koi-ddd-value);
   transform: rotate(45deg);
 }
 .koi-model-icon[data-construct='enum'] {
   border-radius: 50%;
-  background: #fbbf24;
+  background: var(--koi-ddd-enum);
 }
 .koi-model-icon[data-construct='event'] {
   border-radius: 50%;
-  background: #f472b6;
+  background: var(--koi-ddd-event);
 }
 .koi-model-icon[data-construct='integration-event'] {
   border-radius: 50%;
   background: transparent;
-  border: 2px solid #2dd4bf;
+  border: 2px solid var(--koi-ddd-integration-event);
 }
 .koi-model-icon[data-construct='type'] {
   border-radius: 2px;
-  background: #94a3b8;
+  background: var(--koi-ddd-repository);
 }
 
 .koi-model-navs {

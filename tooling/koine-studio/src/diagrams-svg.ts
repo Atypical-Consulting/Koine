@@ -12,9 +12,10 @@
 // non-bundled build spawns a Web Worker from a blob: URL, which CSP forbids).
 import type { DiagramRenderer } from './diagrams';
 import { createMermaidRenderer } from './diagrams';
+import { mergeGraphsForView } from './modelTables';
 import { centerOn, clampScale, fit, panBy, viewAtScale, zoomAt, zoomPercent, type Size, type ViewBox } from './canvasView';
 import { loadDiagramZoom, saveDiagramZoom } from './store';
-import type { Diagram, DiagramGraph, DiagramMember, DiagramNode, DocsFile, SourceSpan } from './lsp';
+import type { DiagramGraph, DiagramMember, DiagramNode, SourceSpan } from './lsp';
 // Type-only import (erased at build time) of elkjs' own API surface, so our layout graph type-checks
 // against the real `ELK.layout` signature. The *value* is dynamically imported from the bundled build.
 import type { ELK, ElkNode, ElkExtendedEdge } from 'elkjs/lib/elk-api';
@@ -162,14 +163,6 @@ function classNodeSize(node: DiagramNode): { width: number; height: number } {
 /** The pre-layout box size for any node (a UML class box, or the simple single-line box). */
 function nodeSize(node: DiagramNode): { width: number; height: number } {
   return isClassNode(node) ? classNodeSize(node) : { width: nodeWidth(node.label), height: NODE_HEIGHT };
-}
-
-/** The page title: the docs file's first level-1 heading, else a humanised file name. */
-function pageTitle(file: DocsFile): string {
-  const h1 = file.contents.match(/^#\s+(.*)$/m);
-  if (h1) return h1[1].trim();
-  const name = file.path.split('/').pop() ?? file.path;
-  return name.replace(/\.md$/, '');
 }
 
 function svgEl<K extends keyof SVGElementTagNameMap>(tag: K): SVGElementTagNameMap[K] {
@@ -931,12 +924,20 @@ export function createSvgRenderer(): DiagramRenderer {
     async render(container, files, theme, isCurrent = () => true): Promise<void> {
       // Disposers for the canvases built in THIS render (committed only if we're still current).
       const disposers: CanvasDispose[] = [];
-      let ordinal = 0; // a stable per-render index so each diagram's persisted zoom keys uniquely
-      const pages = files
-        .map((f) => ({ title: pageTitle(f), diagrams: f.diagrams ?? [] }))
-        .filter((p) => p.diagrams.length > 0);
 
-      if (!pages.length) {
+      // ONE big diagram: fuse every structured graph across the (already context-scoped) files into a
+      // single deduped graph, so the visual editor shows the whole domain on one canvas instead of many
+      // small per-aggregate figures. The strategic context map lives in its own bottom tab, so it's
+      // excluded here to keep this canvas a pure domain model.
+      const renderable = files.flatMap((f) => f.diagrams ?? []).filter((d) => d.kind !== 'contextmap');
+      const graphs = renderable
+        .map((d) => d.graph)
+        .filter((g): g is DiagramGraph => !!g && g.nodes.length > 0);
+
+      if (!graphs.length) {
+        // No structured graph to merge. If diagrams exist at all (mermaid-only / empty graphs), let the
+        // per-diagram Mermaid renderer handle them; otherwise show the empty-state note.
+        if (renderable.length) return fallback.render(container, files, theme, isCurrent);
         if (isCurrent()) {
           container.innerHTML =
             '<p class="muted">No diagrams yet — add an aggregate, a state machine, or a context map to your model.</p>';
@@ -955,88 +956,27 @@ export function createSvgRenderer(): DiagramRenderer {
       }
 
       const root = document.createElement('div');
-      root.className = 'koi-diagrams';
+      root.className = 'koi-diagrams koi-diagrams-single';
 
-      // Diagrams that need the Mermaid fallback are collected and rendered in one pass at the end (the
-      // Mermaid renderer takes a DocsFile[], so we wrap each failed diagram as a single-diagram file).
-      const fallbackTargets: { mount: HTMLElement; diagram: Diagram; title: string }[] = [];
+      const surface = document.createElement('div');
+      surface.className = 'koi-diagram-surface';
+      root.appendChild(surface);
 
-      for (const page of pages) {
-        const section = document.createElement('section');
-        section.className = 'koi-diagram-page';
-
-        const h = document.createElement('h2');
-        h.className = 'koi-diagram-title';
-        h.textContent = page.title;
-        section.appendChild(h);
-
-        for (const diagram of page.diagrams) {
-          // Consume one ordinal per diagram (drawn OR fallback) so a diagram's persist key stays stable
-          // across renders and is unique even when title+caption collide (e.g. an aggregate and its
-          // same-named root entity both render on the same page).
-          const persistKey = `${page.title} / ${diagram.caption} #${ordinal}`;
-          ordinal += 1;
-
-          const card = document.createElement('figure');
-          card.className = 'koi-diagram';
-
-          if (diagram.caption && diagram.caption !== page.title) {
-            const cap = document.createElement('figcaption');
-            cap.className = 'koi-diagram-caption';
-            cap.textContent = diagram.caption;
-            card.appendChild(cap);
-          }
-
-          const surface = document.createElement('div');
-          surface.className = 'koi-diagram-surface';
-
-          const graph = diagram.graph;
-          if (!graph || graph.nodes.length === 0) {
-            // No structured nodes to draw → hand this one to Mermaid.
-            fallbackTargets.push({ mount: surface, diagram, title: page.title });
-          } else {
-            try {
-              const svg = await drawGraph(graph, Elk);
-              // Layer the interactive canvas (pan/zoom/fit + minimap) over the drawn SVG. Pure geometry
-              // lives in canvasView.ts; the elkjs layout and node click-to-source stay untouched. Track
-              // the disposer so the observer is torn down when this canvas is later replaced.
-              disposers.push(mountInteractiveCanvas(surface, svg, persistKey));
-            } catch {
-              // Layout/draw failed for this graph → fall back to Mermaid for this diagram only.
-              surface.replaceChildren();
-              fallbackTargets.push({ mount: surface, diagram, title: page.title });
-            }
-          }
-
-          card.appendChild(surface);
-          section.appendChild(card);
-        }
-
-        root.appendChild(section);
-      }
-
-      // Render any fallbacks through the real Mermaid renderer. The Mermaid renderer (now sourcing from
-      // the structured `file.diagrams`) builds its own page/figure shell, so we render into a detached
-      // scratch element and lift just the rendered `.koi-diagram-surface` content into our own surface —
-      // avoiding a nested `.koi-diagrams` shell inside an already-built figure. The diagram's own caption
-      // is used as the synthetic page title so the Mermaid renderer doesn't add a duplicate figcaption.
-      for (const { mount, diagram } of fallbackTargets) {
-        const oneFile: DocsFile = {
-          path: `${diagram.caption || 'diagram'}.md`,
-          contents: `# ${diagram.caption || 'diagram'}\n`,
-          diagrams: [diagram],
-        };
+      const merged = mergeGraphsForView(graphs);
+      try {
+        const svg = await drawGraph(merged, Elk);
+        // Layer the interactive canvas (pan/zoom/fit + minimap) over the drawn SVG. Pure geometry lives
+        // in canvasView.ts; the elkjs layout and node click-to-source stay untouched.
+        disposers.push(mountInteractiveCanvas(surface, svg, 'koi-domain-diagram'));
+      } catch (e) {
+        // Layout/draw failed for the merged graph → fall back to the per-diagram Mermaid renderer so the
+        // canvas never blanks (it builds its own page/figure shell into our surface).
+        surface.replaceChildren();
         const scratch = document.createElement('div');
-        // The scratch mount is detached, so the isCurrent() guard there is always-true; our top-level
-        // isCurrent() guard below still decides whether the whole tree reaches the page.
-        await fallback.render(scratch, [oneFile], theme, () => true);
-        const inner = scratch.querySelector('.koi-diagram-surface');
-        if (inner) {
-          mount.replaceChildren(...Array.from(inner.childNodes));
-        } else {
-          // No surface (e.g. the Mermaid renderer's empty-state note) — keep whatever it produced so the
-          // diagram never silently blanks.
-          mount.replaceChildren(...Array.from(scratch.childNodes));
+        await fallback.render(scratch, files, theme, () => true);
+        surface.replaceChildren(...Array.from(scratch.childNodes));
+        if (!surface.childNodes.length) {
+          surface.innerHTML = `<p class="doc-error">Could not lay out the diagram: ${escapeHtml(String(e))}</p>`;
         }
       }
 
