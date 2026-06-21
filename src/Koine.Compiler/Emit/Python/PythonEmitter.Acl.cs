@@ -19,10 +19,13 @@ public sealed partial class PythonEmitter
     /// <summary>
     /// Emits the anti-corruption-layer translator <c>Protocol</c> for one ACL relation:
     /// <c>class &lt;Up&gt;To&lt;Down&gt;Translator(Protocol)</c> in the downstream context's
-    /// <c>abstractions/</c> package, with one <c>translate_&lt;local&gt;</c> method per mapping.
-    /// Python (like TS) cannot overload, so each method is disambiguated by its local type name; the
-    /// type imports are resolved by the deterministic <see cref="Assemble"/> header from the symbols
-    /// the body references.
+    /// <c>abstractions/</c> package, with one <c>translate_&lt;upstream&gt;_to_&lt;local&gt;</c> method
+    /// per mapping. Python cannot overload, so each method name carries BOTH the upstream and local
+    /// type — guaranteeing distinct names even when several mappings share a source or target type
+    /// (where a local-only name would silently shadow one mapping). Each mapped type resolves to a
+    /// QUALIFIED import against the context it was declared in (via <paramref name="emit"/>'s location
+    /// table and an explicit per-symbol context hint), so an upstream type whose name collides with a
+    /// same-named downstream type is never silently swapped for the downstream copy.
     /// </summary>
     private EmittedFile EmitAclTranslator(PyEmitContext emit, ContextRelation r)
     {
@@ -31,16 +34,24 @@ public sealed partial class PythonEmitter
         var className = $"{upstream}To{downstream}Translator";
         var ns = r.Downstream;
 
+        // Each mapped type is resolved against the context it was declared in (upstream vs local),
+        // not this module's context — so a name collision across the two contexts can't mis-resolve.
+        var symbolContext = new Dictionary<string, string>(StringComparer.Ordinal);
+
         var sb = new StringBuilder();
         sb.Append("class ").Append(className).Append("(Protocol):\n");
         sb.Append(Indent).Append("\"\"\"Anti-corruption translator from upstream context ")
-          .Append(r.Upstream).Append(" into ").Append(r.Downstream).Append(".\"\"\"\n");
+          .Append(EscapeDoc(r.Upstream)).Append(" into ").Append(EscapeDoc(r.Downstream)).Append(".\"\"\"\n");
 
         foreach (AclMapping m in r.AclMappings)
         {
             var localType = PythonNaming.ToPascalCase(m.LocalType);
             var upstreamType = PythonNaming.ToPascalCase(m.UpstreamType);
-            var method = PythonNaming.EscapeIdentifier("translate_" + PythonNaming.ToSnakeCase(m.LocalType));
+            symbolContext[upstreamType] = m.UpstreamContext;
+            symbolContext[localType] = m.LocalContext;
+
+            var method = PythonNaming.EscapeIdentifier(
+                "translate_" + PythonNaming.ToSnakeCase(m.UpstreamType) + "_to_" + PythonNaming.ToSnakeCase(m.LocalType));
             sb.Append('\n');
             sb.Append(Indent).Append("def ").Append(method).Append("(self, source: ").Append(upstreamType)
               .Append(") -> ").Append(localType).Append(": ...\n");
@@ -48,6 +59,6 @@ public sealed partial class PythonEmitter
 
         return new EmittedFile(
             PathFor(ns, KindFolder.Abstractions, className),
-            Assemble(emit, ns, KindFolder.Abstractions, sb.ToString(), className));
+            Assemble(emit, ns, KindFolder.Abstractions, sb.ToString(), className, symbolContext));
     }
 }

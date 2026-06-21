@@ -129,9 +129,13 @@ public sealed partial class PythonEmitter
         }
 
         // Positive renderings of the preconditions, used to suppress a state-machine reachability
-        // guard that would merely restate one of them (the C# `requiresConds` suppression).
+        // guard that would merely restate one of them (the C# `requiresConds` suppression). The
+        // top-level translator wraps a comparison in parens; strip a balanced outer pair so the
+        // comparison is against the same bare form the source conditions are built in — robust to
+        // whether or how the translator parenthesizes.
         var requiresConds = new HashSet<string>(
-            requires.Select(r => translator.Translate(r.Condition, PythonExpressionTranslator.NameMode.Property)),
+            requires.Select(r => StripOuterParens(
+                translator.Translate(r.Condition, PythonExpressionTranslator.NameMode.Property))),
             StringComparer.Ordinal);
 
         // 2. State transitions: direct field reassignment (the entity is NOT frozen). When a state
@@ -142,12 +146,11 @@ public sealed partial class PythonEmitter
             var expectedEnum = memberTypes.TryGetValue(tr.Field, out TypeRef? ft) && index.Classify(ft.Name) == TypeKind.Enum
                 ? ft.Name : null;
 
-            // A single-source guard that merely restates a precondition is suppressed. The top-level
-            // translator wraps a comparison in parens (`(self.status == OrderStatus.DRAFT)`), so wrap
-            // the bare positive the same way before comparing against the rendered preconditions.
+            // A single-source guard that merely restates a precondition is suppressed; both sides are
+            // compared in the same bare (paren-stripped) form (see `requiresConds` above).
             if (expectedEnum is not null
                 && BuildStateMachineConditions(entity, tr, expectedEnum, translator, index, cmd.Parameters) is { } conds
-                && !(conds.Count == 1 && requiresConds.Contains("(" + conds[0].Positive + ")")))
+                && !(conds.Count == 1 && requiresConds.Contains(conds[0].Positive)))
             {
                 WriteStateMachineGuard(sb, entityName, conds, tr.Field, ((IdentifierExpr)tr.Value).Name);
             }
@@ -198,6 +201,40 @@ public sealed partial class PythonEmitter
 
     /// <summary>One legal source of a transition: its positive reachability check and the negation.</summary>
     private readonly record struct PyStateSource(string Positive, string Negated);
+
+    /// <summary>
+    /// Removes one balanced outer parenthesis pair if the whole string is wrapped in it
+    /// (<c>(a == b)</c> → <c>a == b</c>), leaving a string with unbalanced or no outer parens
+    /// untouched (<c>(a) and (b)</c> stays as-is). Used to compare a translator-rendered, top-level-
+    /// parenthesized precondition against a bare-built source condition.
+    /// </summary>
+    private static string StripOuterParens(string s)
+    {
+        if (s.Length < 2 || s[0] != '(' || s[^1] != ')')
+        {
+            return s;
+        }
+
+        var depth = 0;
+        for (var i = 0; i < s.Length; i++)
+        {
+            if (s[i] == '(')
+            {
+                depth++;
+            }
+            else if (s[i] == ')')
+            {
+                depth--;
+                // The opening paren closes before the end → the outer pair isn't a single wrapper.
+                if (depth == 0 && i != s.Length - 1)
+                {
+                    return s;
+                }
+            }
+        }
+
+        return s[1..^1];
+    }
 
     /// <summary>
     /// Builds the reachability conditions for a state-machine-governed transition with a literal

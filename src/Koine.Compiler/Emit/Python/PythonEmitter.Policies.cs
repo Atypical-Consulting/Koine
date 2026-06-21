@@ -43,15 +43,20 @@ public sealed partial class PythonEmitter
         var command = PythonNaming.EscapeIdentifier(PythonNaming.ToSnakeCase(r.CommandName));
         var sketch = $"{targetType}.{command}({argText})";
 
+        // The sketch and event name are interpolated into docstrings, so escape them the same way
+        // WriteDoc does (a backslash or `"""` run in a translated arg can't break the docstring).
+        var docSketch = EscapeDoc(sketch);
+        var docEvent = EscapeDoc(eventName);
+
         var sb = new StringBuilder();
         sb.Append("class ").Append(policyType).Append("(Protocol):\n");
-        sb.Append(Indent).Append("\"\"\"Policy seam: when ").Append(eventName).Append(" occurs, the intended reaction is\n");
-        sb.Append(Indent).Append(sketch).Append(". Koine does not generate the cross-aggregate call\n");
+        sb.Append(Indent).Append("\"\"\"Policy seam: when ").Append(docEvent).Append(" occurs, the intended reaction is\n");
+        sb.Append(Indent).Append(docSketch).Append(". Koine does not generate the cross-aggregate call\n");
         sb.Append(Indent).Append("(no imperative logic in the model); implement `react` to wire it.\"\"\"\n");
         sb.Append('\n');
         sb.Append(Indent).Append("def react(self, event: ").Append(eventName).Append(") -> None:\n");
-        sb.Append(Indent).Append(Indent).Append("\"\"\"React to a ").Append(eventName)
-          .Append(" event. Intended reaction: ").Append(sketch).Append(".\"\"\"\n");
+        sb.Append(Indent).Append(Indent).Append("\"\"\"React to a ").Append(docEvent)
+          .Append(" event. Intended reaction: ").Append(docSketch).Append(".\"\"\"\n");
         sb.Append(Indent).Append(Indent).Append("...\n");
 
         return new EmittedFile(
