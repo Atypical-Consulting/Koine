@@ -335,6 +335,57 @@ public class PythonConformanceTests
         types.Ok.ShouldBeTrue("emitted Python should type-check under mypy --strict:\n" + string.Join("\n", types.Errors));
     }
 
+    /// <summary>
+    /// An anti-corruption-layer relation carrying an <c>acl { … }</c> mapping block must emit a
+    /// translator <c>Protocol</c> seam into the DOWNSTREAM context (<c>billing/abstractions/</c>),
+    /// with one <c>translate_&lt;local&gt;(source: &lt;Upstream&gt;) -&gt; &lt;Local&gt;</c> per mapping —
+    /// the Python analogue of the C# <c>I&lt;Up&gt;To&lt;Down&gt;Translator</c> / TS interface. The
+    /// upstream types resolve to QUALIFIED cross-context imports (never a guessed relative path) via the
+    /// shared type-location table, and the whole tree type-checks under <c>mypy --strict</c>. Proves
+    /// Part D (context maps / ACL), which the single-context main fixture cannot exercise.
+    /// </summary>
+    [Fact]
+    public void Acl_relation_emits_qualified_translator_protocol_and_typechecks()
+    {
+        const string source = """
+            context Legacy {
+              /// The external provider's raw account shape.
+              value Account { reference: String }
+              /// The external provider's raw charge shape.
+              value Charge  { amount: Decimal }
+            }
+
+            context Billing {
+              /// Our clean customer model.
+              value Customer { name: String }
+              /// Our clean invoice model.
+              value Invoice  { total: Decimal }
+            }
+
+            contextmap {
+              Legacy -> Billing : anti-corruption-layer
+                acl {
+                  Legacy.Account -> Billing.Customer
+                  Legacy.Charge  -> Billing.Invoice
+                }
+            }
+            """;
+
+        var result = new KoineCompiler().Compile(source, new PythonEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var acl = FileText(result.Files, "billing/abstractions/legacy_to_billing_translator.py");
+        acl.ShouldContain("class LegacyToBillingTranslator(Protocol):");
+        // The upstream types resolve to qualified cross-context imports into Legacy's real modules.
+        acl.ShouldContain("from legacy.value_objects.account import Account");
+        acl.ShouldContain("from legacy.value_objects.charge import Charge");
+        // One translate method per mapping (upstream → local), disambiguated by the local type name.
+        acl.ShouldContain("def translate_customer(self, source: Account) -> Customer: ...");
+        acl.ShouldContain("def translate_invoice(self, source: Charge) -> Invoice: ...");
+
+        AssertStrictlyTypeChecks(result.Files);
+    }
+
     /// <summary>The full text of an emitted file, by relative path (fails the test if absent).</summary>
     private static string FileText(IReadOnlyList<EmittedFile> files, string relativePath)
     {

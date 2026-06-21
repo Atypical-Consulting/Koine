@@ -141,7 +141,21 @@ public sealed partial class PythonEmitter : IEmitter
             }
         }
 
-        // 3. An `__init__.py` for every package directory implied by the emitted module paths, so the
+        // 3. Anti-corruption-layer translator seams (R14.2): one per ACL relation carrying a mapping
+        //    block, emitted into the downstream context. Cross-context refs resolve to qualified
+        //    imports via the shared type-location table.
+        if (model.ContextMap is { } map)
+        {
+            foreach (ContextRelation r in map.Relations)
+            {
+                if (r.Kind == ContextRelationKind.AntiCorruptionLayer && r.AclMappings.Count > 0)
+                {
+                    files.Add(EmitAclTranslator(emit, r));
+                }
+            }
+        }
+
+        // 4. An `__init__.py` for every package directory implied by the emitted module paths, so the
         //    tree imports cleanly and mypy treats each directory as a package.
         EmitPackageInits(files);
 
