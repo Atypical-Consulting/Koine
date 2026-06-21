@@ -1,0 +1,135 @@
+﻿{
+  "kind": "model",
+  "qualifiedName": "",
+  "title": "",
+  "members": [],
+  "children": [
+    {
+      "kind": "context",
+      "qualifiedName": "Ordering",
+      "title": "Ordering",
+      "members": [],
+      "children": [
+        {
+          "kind": "aggregate",
+          "qualifiedName": "Ordering.Order",
+          "title": "Order",
+          "members": [],
+          "children": [
+            {
+              "kind": "enum",
+              "qualifiedName": "Ordering.Order.OrderStatus",
+              "title": "OrderStatus",
+              "members": [
+                {
+                  "kind": "enumMember",
+                  "name": "Draft",
+                  "type": null,
+                  "value": null
+                },
+                {
+                  "kind": "enumMember",
+                  "name": "Placed",
+                  "type": null,
+                  "value": null
+                },
+                {
+                  "kind": "enumMember",
+                  "name": "Shipped",
+                  "type": null,
+                  "value": null
+                },
+                {
+                  "kind": "enumMember",
+                  "name": "Cancelled",
+                  "type": null,
+                  "value": null
+                }
+              ],
+              "children": []
+            },
+            {
+              "kind": "value",
+              "qualifiedName": "Ordering.Order.OrderLine",
+              "title": "OrderLine",
+              "members": [
+                {
+                  "kind": "field",
+                  "name": "product",
+                  "type": "ProductId",
+                  "value": null
+                },
+                {
+                  "kind": "field",
+                  "name": "quantity",
+                  "type": "Int",
+                  "value": null
+                },
+                {
+                  "kind": "field",
+                  "name": "unitPrice",
+                  "type": "Decimal",
+                  "value": null
+                },
+                {
+                  "kind": "field",
+                  "name": "subtotal",
+                  "type": "Decimal",
+                  "value": "unitPrice * quantity"
+                }
+              ],
+              "children": []
+            },
+            {
+              "kind": "entity",
+              "qualifiedName": "Ordering.Order.Order",
+              "title": "Order",
+              "members": [
+                {
+                  "kind": "field",
+                  "name": "lines",
+                  "type": "List\u003COrderLine\u003E",
+                  "value": null
+                },
+                {
+                  "kind": "field",
+                  "name": "status",
+                  "type": "OrderStatus",
+                  "value": "Draft"
+                }
+              ],
+              "children": [
+                {
+                  "kind": "states",
+                  "qualifiedName": "Ordering.Order.Order.states.status",
+                  "title": "status",
+                  "members": [
+                    {
+                      "kind": "transition",
+                      "name": "Draft",
+                      "type": null,
+                      "value": "Placed"
+                    },
+                    {
+                      "kind": "transition",
+                      "name": "Placed",
+                      "type": null,
+                      "value": "Shipped"
+                    },
+                    {
+                      "kind": "transition",
+                      "name": "Placed",
+                      "type": null,
+                      "value": "Cancelled"
+                    }
+                  ],
+                  "children": []
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

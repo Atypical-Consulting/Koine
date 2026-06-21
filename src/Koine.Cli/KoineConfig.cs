@@ -194,8 +194,8 @@ internal sealed record KoineConfig(
                 builder.Layout = value;
                 break;
             case "layers" when parts.Length == 3:
-                // Composable output layers (issue #129): comma-separated, case-insensitive
-                // (e.g. `domain,application`). Parsed into a list at Build().
+                // Composable output layers: comma-separated, case-insensitive (e.g.
+                // `domain,application,infrastructure`; issues #128/#129). Parsed into a list at Build().
                 builder.Layers = value;
                 break;
             case "application" when parts.Length == 4 && parts[3] == "mediatr":

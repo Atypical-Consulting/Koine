@@ -103,8 +103,12 @@ internal static class EmitterRegistry
             return EmitterOptions.Empty;
         }
 
+        // The layer selector (issues #128/#129) is carried as a comma-separated string on the neutral
+        // bag, mirroring instantMode/layout; the C# provider parses it back into a layer set. The
+        // Application sub-options (MediatR shape, mapping mode) ride alongside.
+        var layers = hasLayers ? string.Join(",", options.Layers!) : null;
         return new EmitterOptions(
             options.NamespaceMap, options.InstantMode, options.Layout, emitSourceMaps, referenceOnly,
-            options.Layers, options.ApplicationMediatr, options.ApplicationMapping);
+            layers, options.ApplicationMediatr, options.ApplicationMapping);
     }
 }

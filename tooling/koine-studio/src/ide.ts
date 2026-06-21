@@ -23,9 +23,11 @@ import {
   peekLegacyScratch,
   clearLegacyScratch,
   initSecrets,
+  loadActiveContext,
   loadSettings,
   loadWorkspaceMode,
   pushRecentFolder,
+  saveActiveContext,
   saveWorkspaceMode,
   type Settings,
 } from './store';
@@ -52,6 +54,16 @@ import {
   renderRelationshipsTable,
 } from './modelTables';
 import { renderGlossary, type GlossaryHandlers } from './glossary';
+import {
+  ALL_CONTEXTS,
+  createActiveContextBus,
+  isAllContexts,
+  listContexts,
+  scopeDocsFiles,
+  scopeGlossaryModel,
+  scopeGraph,
+  type ContextScope,
+} from './activeContext';
 import { createSelectionBus } from './selection';
 import { renderModelOutline, type ModelOutlineHandlers } from './modelOutline';
 import { buildInspectorElement, renderInspector, type InspectorElement, type InspectorHandlers } from './inspector';
@@ -977,6 +989,123 @@ export function init(): void {
     return btn;
   });
   el('mode-switcher').append(...modeButtons);
+
+  // Active bounded-context switcher (#146): a header-level <select> that scopes the model-derived
+  // surfaces (outline, counts, the bottom Events/Relationships tables — and, via Task 3, the diagram
+  // and inspector) to ONE bounded context, with an "All contexts" option. Scope is a pure filter over
+  // existing data; the bus is the single source of truth the render paths read at paint time, so the
+  // compiler/LSP/model stay untouched. A native <select> is the switcher — it scales to any number of
+  // contexts, shows the current one, and is keyboard/screen-reader operable for free — paired with an
+  // aria-live "Current context: X" readout.
+  const activeContext = createActiveContextBus();
+  const contextSwitcher = el('context-switcher');
+  const contextLabel = document.createElement('span');
+  contextLabel.className = 'context-switcher-label';
+  contextLabel.id = 'context-switcher-label';
+  contextLabel.textContent = 'Context';
+  const contextSelect = document.createElement('select');
+  contextSelect.className = 'context-select';
+  contextSelect.setAttribute('aria-labelledby', 'context-switcher-label');
+  const contextReadout = document.createElement('span');
+  contextReadout.className = 'context-readout';
+  contextReadout.setAttribute('aria-live', 'polite');
+  contextSwitcher.append(contextLabel, contextSelect, contextReadout);
+  contextSelect.addEventListener('change', () => setActiveContext(contextSelect.value));
+
+  /** The per-workspace storage key for the active scope (folder identity, or 'scratch'). */
+  function contextWorkspaceKey(): string {
+    return folderRootToken || 'scratch';
+  }
+
+  /** The human label for a scope: the context name, or "All contexts" for the unscoped sentinel. */
+  function scopeLabel(scope: ContextScope): string {
+    return isAllContexts(scope) ? 'All contexts' : scope;
+  }
+
+  /** Mirror the active scope onto the control + readout (no persistence, no re-render). */
+  function syncContextSwitcherUi(): void {
+    const scope = activeContext.get();
+    if (contextSelect.value !== scope) contextSelect.value = scope;
+    contextReadout.textContent = `Current context: ${scopeLabel(scope)}`;
+  }
+
+  // The single choke point for every scope change (the <select>, a restored value's validation, and
+  // Task 3's select-outside-scope path all route through here): update the bus, optionally persist it
+  // for this workspace, sync the control, and re-render the scoped surfaces. `persist` is the user's
+  // intent flag — only a deliberate switcher choice persists; non-deliberate changes (following a
+  // selection, or falling back off a vanished context) are view-only so they never overwrite the
+  // user's last explicit choice in storage.
+  function applyScope(scope: ContextScope, persist: boolean): void {
+    activeContext.set(scope);
+    if (persist) saveActiveContext(contextWorkspaceKey(), scope);
+    syncContextSwitcherUi();
+    rerenderScopedSurfaces();
+  }
+
+  /** A deliberate scope change from the switcher — persisted so a reload restores it. */
+  function setActiveContext(scope: ContextScope): void {
+    applyScope(scope, true);
+  }
+
+  // Rebuild the switcher's options from the current model's contexts ("All contexts" first, then each
+  // context). Hidden when the model has no contexts (empty/scratch).
+  function setContextOptions(contexts: string[]): void {
+    contextSwitcher.hidden = contexts.length === 0;
+    const options = [ALL_CONTEXTS, ...contexts];
+    contextSelect.replaceChildren(
+      ...options.map((value) => {
+        const opt = document.createElement('option');
+        opt.value = value;
+        opt.textContent = scopeLabel(value);
+        return opt;
+      }),
+    );
+    // Fall back to "All contexts" ONLY when we positively know the model's contexts (a non-empty list)
+    // and the active scope isn't among them — a genuine rename/removal. An EMPTY list is a transient or
+    // cold state (the LSP still warming up right after open, or a momentarily-unparseable model mid-edit),
+    // so preserve the scope rather than clobber it. The fallback is view-only (not persisted), so the
+    // user's last explicit choice survives in storage and a reload restores it once the context is back.
+    const scope = activeContext.get();
+    if (contexts.length > 0 && !isAllContexts(scope) && !contexts.includes(scope)) {
+      applyScope(ALL_CONTEXTS, false);
+    } else {
+      syncContextSwitcherUi();
+    }
+  }
+
+  // Refresh the switcher's context list from the workspace model (best-effort; empties on failure).
+  // The glossary model lists every declared type with its owning context, so it's the most complete
+  // source for "every context that has anything in it".
+  async function refreshContextList(): Promise<void> {
+    try {
+      const model = await lsp.glossaryModel();
+      setContextOptions(listContexts(model));
+    } catch {
+      setContextOptions([]);
+    }
+  }
+
+  // Restore the persisted scope for the just-opened workspace, before the first scoped render. The
+  // control catches up when refreshContextList rebuilds the options (the bus value is what the render
+  // paths read, so the initial render is already scoped regardless of the dropdown's paint timing).
+  function restoreActiveContext(): void {
+    const stored = loadActiveContext(contextWorkspaceKey());
+    activeContext.set(stored && stored.length > 0 ? stored : ALL_CONTEXTS);
+    syncContextSwitcherUi();
+  }
+
+  // Re-render the scoped, model-derived surfaces after a scope change. Scope is applied at paint time
+  // from the bus and the model itself is unchanged (scope is a pure filter), so the cached model index
+  // is kept — only the visible surfaces repaint. The model/diagram doc caches are marked stale so a
+  // not-currently-visible one re-renders scoped on its next visit.
+  function rerenderScopedSurfaces(): void {
+    docViewsLoaded.model = false;
+    docViewsLoaded.diagrams = false;
+    if (activeView === 'model') void loadModel();
+    else if (activeView === 'diagrams') void loadDiagrams();
+    invalidateBottomPanels(); // the Events/Relationships tables are graph-derived too
+  }
+
   // Track which doc-based views need a (re)fetch — invalidated on every edit so a tab
   // switch always shows data for the current model rather than a stale render. The check
   // view (on-demand via the Check button) and the assistant (interactive) are excluded.
@@ -1161,15 +1290,23 @@ export function init(): void {
     docMessage(modelView, 'Loading model…');
     try {
       const index = await ensureModelIndex();
-      if (!index.glossary.entries.length) {
-        docMessage(modelView, 'No elements yet — declare some types, or fix syntax errors to populate the model.');
+      // Scope the outline + per-context counts to the active context (#146). The index itself is the
+      // whole model (the inspector still resolves any selection); only the navigator is narrowed.
+      const scopedGlossary = scopeGlossaryModel(index.glossary, activeContext.get());
+      if (!scopedGlossary.entries.length) {
+        docMessage(
+          modelView,
+          index.glossary.entries.length
+            ? 'No elements in this context — switch to “All contexts” to see the whole model.'
+            : 'No elements yet — declare some types, or fix syntax errors to populate the model.',
+        );
         docViewsLoaded.model = true;
         return;
       }
       modelView.innerHTML = '';
       const workspace = document.createElement('div');
       workspace.className = 'koi-model-workspace';
-      workspace.appendChild(renderModelOutline(index.glossary, modelOutlineHandlers));
+      workspace.appendChild(renderModelOutline(scopedGlossary, modelOutlineHandlers));
       inspectorHost = document.createElement('div');
       inspectorHost.className = 'koi-model-inspector';
       workspace.appendChild(inspectorHost);
@@ -1184,7 +1321,19 @@ export function init(): void {
 
   // The inspector + cross-highlight track the selection bus for the app's lifetime (a diagram click
   // can select an element while the Model tab is closed; opening it then shows the right inspector).
-  selection.subscribe(() => {
+  selection.subscribe((sel) => {
+    // Jump-to-source works across scope (the editor navigation is scope-independent), but a selection
+    // landing OUTSIDE the active context would otherwise leave the scoped surfaces showing a different
+    // context than the inspector. Follow it: switch the scope to the selected element's context so the
+    // outline/diagram/counts stay coherent with what's being inspected (#146). This follow is view-only
+    // (applyScope with persist=false) — a read-only inspect shouldn't overwrite the user's deliberately
+    // chosen, persisted scope, so a reload returns to that choice. In-scope selections and the unscoped
+    // ("All contexts") view leave the scope untouched. applyScope re-renders the scoped surfaces, which
+    // also refreshes the inspector/cross-highlight for the Model tab — the explicit calls below cover the
+    // cross-highlight when another view is active.
+    if (sel && !isAllContexts(activeContext.get()) && sel.context !== activeContext.get()) {
+      applyScope(sel.context, false);
+    }
     renderSelectedInspector();
     applySelectionHighlight();
   });
@@ -1226,7 +1375,10 @@ export function init(): void {
     try {
       const res = await lsp.livingDocs();
       if (seq !== diagramsSeq) return;
-      await renderDiagrams(diagramsView, res.files, currentTheme(), () => seq === diagramsSeq);
+      // Scope the diagrams to the active bounded context (#146): each diagram's graph is narrowed and
+      // emptied diagrams/files drop out, so a context shows only its own diagrams. "All" is the identity.
+      const files = scopeDocsFiles(res.files, activeContext.get());
+      await renderDiagrams(diagramsView, files, currentTheme(), () => seq === diagramsSeq);
       if (seq === diagramsSeq) docViewsLoaded.diagrams = true;
     } catch (e) {
       if (seq === diagramsSeq) docMessage(diagramsView, 'Diagrams request failed: ' + String(e), 'error');
@@ -1319,9 +1471,14 @@ export function init(): void {
   let editDebounce: ReturnType<typeof setTimeout> | undefined;
   function onDocEdited(): void {
     invalidateDocViews();
-    if (activeView === 'check' || activeView === 'assistant') return;
+    // The set of contexts can change as the model is edited (a context added / renamed / removed), so
+    // keep the switcher's options in step — debounced, and regardless of which view is active.
+    const onCheckOrAssistant = activeView === 'check' || activeView === 'assistant';
     clearTimeout(editDebounce);
-    editDebounce = setTimeout(() => ensureLoaded(activeView), 350);
+    editDebounce = setTimeout(() => {
+      void refreshContextList();
+      if (!onCheckOrAssistant) ensureLoaded(activeView);
+    }, 350);
   }
 
   // Reflect a mode on the chrome — highlight its switcher button and filter the tab strip to its
@@ -1673,7 +1830,12 @@ export function init(): void {
     treeTitleEl.textContent = platform.folderName(folder);
     showFileTreeChrome();
     if (opts.recent ?? true) pushRecentFolder(folder);
+    // Restore this workspace's bounded-context scope (#146) BEFORE the first scoped render, and
+    // refresh the switcher's options from the new model. The bus value drives the render paths, so the
+    // initial ensureLoaded below is already scoped even before the dropdown finishes repainting.
+    restoreActiveContext();
     invalidateDocViews();
+    void refreshContextList();
     // Fetch the full explorer tree (dirs + .koi) and render it; falls back silently on failure.
     await refreshEntries();
     ensureLoaded(activeView);
@@ -2166,9 +2328,12 @@ export function init(): void {
   // The merged DiagramGraph projection behind both tables: every per-diagram graph from livingDocs fused
   // into one (node ids disambiguated) so the extractors see all aggregates + the integration-event flow
   // at once. It's the SAME source the diagram renders from, so the tables and the diagram never drift.
+  // Narrowed to the active bounded context (#146) so the tables track the scope alongside every other
+  // model-derived surface; "All contexts" is the identity, so the unscoped view is unchanged.
   async function bottomGraph() {
     const docs = await lsp.livingDocs();
-    return mergeDiagramGraphs(docs.files.flatMap((f) => f.diagrams.map((d) => d.graph)));
+    const merged = mergeDiagramGraphs(docs.files.flatMap((f) => f.diagrams.map((d) => d.graph)));
+    return scopeGraph(merged, activeContext.get());
   }
 
   function ensureBottomLoaded(tab: BottomTab): void {
@@ -2204,8 +2369,15 @@ export function init(): void {
         lsp.contextMap().catch(() => ({ contexts: [], relations: [] }) as ContextMapResult),
       ]);
       if (seq !== bottomSeq.relationships) return;
+      // bottomGraph() already scoped the structural edges; narrow the strategic relations too (#146) so a
+      // scoped Relationships table keeps only the relations the active context takes part in (as upstream
+      // or downstream). "All contexts" keeps every relation.
+      const scope = activeContext.get();
+      const scopedCtxMap = isAllContexts(scope)
+        ? ctxMap
+        : { ...ctxMap, relations: ctxMap.relations.filter((r) => r.upstream === scope || r.downstream === scope) };
       relationshipsPanel.replaceChildren(
-        renderRelationshipsTable(extractRelationships(graph, ctxMap), bottomTableHandlers),
+        renderRelationshipsTable(extractRelationships(graph, scopedCtxMap), bottomTableHandlers),
       );
       bottomLoaded.relationships = true;
     } catch (e) {

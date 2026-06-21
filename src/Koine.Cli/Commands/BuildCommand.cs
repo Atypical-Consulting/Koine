@@ -15,7 +15,7 @@ internal class BuildSettings : CommandSettings
     public string Path { get; init; } = "";
 
     [CommandOption("--target <TARGET>")]
-    [Description("Output target: csharp (default), typescript, python, php, glossary, or docs.")]
+    [Description("Output target: csharp (default), typescript, python, php, rust, glossary, or docs.")]
     public string? Target { get; init; }
 
     [CommandOption("--out <DIR>")]
@@ -47,7 +47,7 @@ internal class BuildSettings : CommandSettings
     public bool ReferenceOnly { get; init; }
 
     [CommandOption("--layers <LAYERS>")]
-    [Description("Comma-separated output layers to emit (e.g. domain,application). 'application' implies 'domain'. Omit for the default domain-only output.")]
+    [Description("Comma-separated C# layers to emit (issues #128/#129): domain (default), application, infrastructure. Both opt-in layers imply domain. Omit for the default domain-only output.")]
     public string? Layers { get; init; }
 
     [CommandOption("--app-mediatr")]
@@ -89,12 +89,18 @@ internal class BuildSettings : CommandSettings
         var targetOptions = config.OptionsFor(resolvedTarget);
         var resolvedOut = Out ?? targetOptions.OutDir ?? config.OutDir;
 
-        // Merge the Application-layer flags (issue #129) over any config block: an explicit
-        // CLI flag wins, otherwise the config value (then the default). `application` implies
-        // `domain`, handled where the emitter consumes the layer list.
+        // The C# layer selector (issues #128/#129): an explicit --layers wins over targets.<t>.layers
+        // (same precedence as --target/--out). Unknown names are a hard error; both opt-in layers
+        // imply domain. Absent ⇒ null ⇒ Domain-only (byte-identical to today). The Application-layer
+        // sub-options merge over any config block: an explicit CLI flag wins, else the config value.
+        if (!TryResolveLayers(Layers, targetOptions.Layers, out var resolvedLayers, out error))
+        {
+            return false;
+        }
+
         targetOptions = targetOptions with
         {
-            Layers = KoineConfig.ParseLayers(Layers) ?? targetOptions.Layers,
+            Layers = resolvedLayers,
             ApplicationMediatr = AppMediatr || targetOptions.ApplicationMediatr,
             ApplicationMapping = AppMapping ?? targetOptions.ApplicationMapping,
         };
@@ -102,6 +108,67 @@ internal class BuildSettings : CommandSettings
         plan = new BuildPlan(
             Path, resolvedTarget, resolvedOut, Glossary, Docs, targetOptions,
             config.DiagnosticSeverity, WarningsAsErrors, config.Analyzers, config.Emitters, SourceMaps, ReferenceOnly);
+        return true;
+    }
+
+    /// <summary>The C# layers a user may request (issues #128/#129).</summary>
+    private static readonly IReadOnlySet<string> ValidLayers =
+        new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "domain", "application", "infrastructure" };
+
+    /// <summary>
+    /// Resolves the layer selector: the explicit <c>--layers</c> flag wins over the config's
+    /// <c>targets.&lt;t&gt;.layers</c>. Each name must be a <see cref="ValidLayers"/> member
+    /// (case-insensitive) or it is a hard error; both opt-in layers (<c>application</c>,
+    /// <c>infrastructure</c>) always imply <c>domain</c>. The result is normalized to the canonical
+    /// lower-case names in stable order (<c>domain</c> first), or <c>null</c> when no layers were
+    /// requested anywhere (⇒ Domain-only).
+    /// </summary>
+    private static bool TryResolveLayers(string? flag, IReadOnlyList<string>? fromConfig, out IReadOnlyList<string>? resolved, out string? error)
+    {
+        resolved = null;
+        error = null;
+
+        IEnumerable<string>? requested = flag is not null
+            ? flag.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            : fromConfig;
+        if (requested is null)
+        {
+            return true; // nothing requested anywhere ⇒ Domain-only default
+        }
+
+        var wantsApplication = false;
+        var wantsInfrastructure = false;
+        foreach (var name in requested)
+        {
+            if (!ValidLayers.Contains(name))
+            {
+                error = $"unknown layer '{name}' (valid layers: domain, application, infrastructure)";
+                return false;
+            }
+
+            if (string.Equals(name, "application", StringComparison.OrdinalIgnoreCase))
+            {
+                wantsApplication = true;
+            }
+            else if (string.Equals(name, "infrastructure", StringComparison.OrdinalIgnoreCase))
+            {
+                wantsInfrastructure = true;
+            }
+        }
+
+        // domain is always present (the opt-in layers imply it); list it first for stable output.
+        var layers = new List<string> { "domain" };
+        if (wantsApplication)
+        {
+            layers.Add("application");
+        }
+
+        if (wantsInfrastructure)
+        {
+            layers.Add("infrastructure");
+        }
+
+        resolved = layers;
         return true;
     }
 }

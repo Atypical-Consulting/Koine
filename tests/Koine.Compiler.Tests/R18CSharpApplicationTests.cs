@@ -98,7 +98,10 @@ public class R18CSharpApplicationTests
 
     /// <summary>The Application layer turned on, plain mode (the default sub-options).</summary>
     internal static CSharpEmitterOptions AppOn =>
-        CSharpEmitterOptions.Empty with { EmitApplication = true };
+        CSharpEmitterOptions.Empty with
+        {
+            Layers = new HashSet<CSharpLayer> { CSharpLayer.Domain, CSharpLayer.Application },
+        };
 
     internal static EmittedFile File(IReadOnlyList<EmittedFile> files, string suffix) =>
         files.Single(f => f.RelativePath.EndsWith(suffix, StringComparison.Ordinal));
@@ -155,11 +158,11 @@ public class R18CSharpApplicationTests
         // The neutral provider mapping: `application` among the layers turns the C# Application
         // layer on; `domain`-only (or no layers) keeps the byte-identical domain output.
         var domainOnly = new EmitterRegistry().TryCreate(
-            "csharp", new EmitterOptions(new Dictionary<string, string>(), Layers: new[] { "domain" }), out var d);
+            "csharp", new EmitterOptions(new Dictionary<string, string>(), Layers: "domain"), out var d);
         domainOnly.ShouldBeTrue();
 
         var withApp = new EmitterRegistry().TryCreate(
-            "csharp", new EmitterOptions(new Dictionary<string, string>(), Layers: new[] { "domain", "application" }), out _);
+            "csharp", new EmitterOptions(new Dictionary<string, string>(), Layers: "domain,application"), out _);
         withApp.ShouldBeTrue();
 
         // Domain-only must match the unconfigured emitter byte-for-byte.
