@@ -100,26 +100,25 @@
       </header>
 
       <main id="split">
-        <aside id="filetree" class="pane" aria-label="Workspace files" hidden>
-          <div id="filetree-header">
-            <span id="filetree-title">Scratch</span>
-          </div>
-          <div id="filetree-body"></div>
-        </aside>
-        <div class="koi-resizer" id="filetree-resizer" aria-hidden="true"></div>
-
-        <!-- Left rail: the model-derived navigator in three stacked sections. Explorateur = the DDD
-             construct/context tree (renderModelOutline), Vue d'ensemble = per-context counts
-             (renderOverviewCounts), Documentation = the glossary (renderGlossary). All three are
-             always visible and re-painted together from the model — they are NOT mutually exclusive
-             tabs, so they live outside the old #right tab system. -->
-        <aside id="leftrail" class="pane" aria-label="Model navigator">
+        <!-- One left sidebar, one scroll bar: Files (the workspace tree), Explorer (the DDD
+             construct/context tree, renderModelOutline), Overview (per-context counts,
+             renderOverviewCounts) and Documentation (the glossary, renderGlossary). The sections are
+             collapsible and the whole rail is the single scroll container — section bodies don't
+             scroll on their own. -->
+        <aside id="leftrail" class="pane" aria-label="Workspace">
+          <section class="rail-sect" id="rail-files" data-open="true">
+            <div class="rail-sect-head-row">
+              <button type="button" class="rail-sect-head" aria-expanded="true" aria-controls="filetree-body">Files</button>
+              <span id="filetree-title" class="rail-sect-meta">Scratch</span>
+            </div>
+            <div class="rail-sect-body" id="filetree-body"></div>
+          </section>
           <section class="rail-sect" id="rail-explorer" data-open="true">
-            <button type="button" class="rail-sect-head" aria-expanded="true" aria-controls="rail-explorer-body">Explorateur</button>
+            <button type="button" class="rail-sect-head" aria-expanded="true" aria-controls="rail-explorer-body">Explorer</button>
             <div class="rail-sect-body" id="rail-explorer-body"></div>
           </section>
           <section class="rail-sect" id="rail-overview" data-open="true">
-            <button type="button" class="rail-sect-head" aria-expanded="true" aria-controls="rail-overview-body">Vue d'ensemble</button>
+            <button type="button" class="rail-sect-head" aria-expanded="true" aria-controls="rail-overview-body">Overview</button>
             <div class="rail-sect-body" id="rail-overview-body"></div>
           </section>
           <section class="rail-sect" id="rail-docs" data-open="true">
@@ -129,22 +128,21 @@
         </aside>
         <div class="koi-resizer" id="leftrail-resizer" aria-hidden="true"></div>
 
-        <!-- Center: an "Éditeur visuel" (the domain diagram) / "Vue technique" (the code editor plus
-             the emitted preview, the compatibility check and the assistant) toggle. The editor mounts
-             into #editor-pane and the diagram into #center-visual; both ids are preserved so their
-             existing render call sites are unchanged. -->
+        <!-- Center: a Visual (the domain diagram) / Code (the editor plus the generated code, the
+             compatibility check and the assistant) toggle. The editor mounts into #editor-pane and the
+             diagram into #center-visual; both ids are preserved so their render call sites are unchanged. -->
         <section id="center" class="pane" aria-label="Editor">
-          <div id="center-tabs" role="tablist" aria-label="Vue centrale">
-            <button type="button" class="center-tab" id="center-tab-visual" role="tab" data-center="visual" aria-selected="true">Éditeur visuel</button>
-            <button type="button" class="center-tab" id="center-tab-technical" role="tab" data-center="technical" aria-selected="false">Vue technique</button>
+          <div id="center-tabs" role="tablist" aria-label="Editor view">
+            <button type="button" class="center-tab" id="center-tab-visual" role="tab" data-center="visual" aria-selected="true">Visual</button>
+            <button type="button" class="center-tab" id="center-tab-technical" role="tab" data-center="technical" aria-selected="false">Code</button>
           </div>
           <div id="center-body">
-            <section id="center-visual" class="center-host" role="tabpanel" aria-label="Éditeur visuel"></section>
-            <section id="center-technical" class="center-host" role="tabpanel" aria-label="Vue technique" hidden>
-              <div id="tech-tabs" role="tablist" aria-label="Vue technique">
-                <button type="button" class="tech-tab" id="tech-tab-editor" role="tab" data-tech="editor" aria-selected="true">Éditeur</button>
-                <button type="button" class="tech-tab" id="tech-tab-preview" role="tab" data-tech="preview" aria-selected="false">Code généré</button>
-                <button type="button" class="tech-tab" id="tech-tab-check" role="tab" data-tech="check" aria-selected="false">Compatibilité</button>
+            <section id="center-visual" class="center-host" role="tabpanel" aria-label="Visual"></section>
+            <section id="center-technical" class="center-host" role="tabpanel" aria-label="Code" hidden>
+              <div id="tech-tabs" role="tablist" aria-label="Code view">
+                <button type="button" class="tech-tab" id="tech-tab-editor" role="tab" data-tech="editor" aria-selected="true">Editor</button>
+                <button type="button" class="tech-tab" id="tech-tab-preview" role="tab" data-tech="preview" aria-selected="false">Generated</button>
+                <button type="button" class="tech-tab" id="tech-tab-check" role="tab" data-tech="check" aria-selected="false">Compatibility</button>
                 <button type="button" class="tech-tab" id="tech-tab-assistant" role="tab" data-tech="assistant" aria-selected="false">Assistant</button>
               </div>
               <div id="tech-body">
@@ -158,23 +156,23 @@
         </section>
         <div class="koi-resizer" id="split-resizer" aria-hidden="true"></div>
 
-        <!-- Right rail: the element inspector, dedicated to "Propriétés". Règles/Notes are placeholder
-             tabs matching the mockup chrome — read-only "à venir" until a follow-up builds them. -->
-        <aside id="right" class="pane" aria-label="Propriétés">
-          <div id="right-tabs" role="tablist" aria-label="Propriétés">
-            <button type="button" class="rtab" id="rtab-props" role="tab" data-rview="props" aria-selected="true">Propriétés</button>
-            <button type="button" class="rtab" id="rtab-rules" role="tab" data-rview="rules" aria-selected="false">Règles</button>
+        <!-- Right rail: the element inspector, dedicated to Properties. Rules/Notes are placeholder
+             tabs matching the mockup chrome — read-only until a follow-up builds them. -->
+        <aside id="right" class="pane" aria-label="Properties">
+          <div id="right-tabs" role="tablist" aria-label="Properties">
+            <button type="button" class="rtab" id="rtab-props" role="tab" data-rview="props" aria-selected="true">Properties</button>
+            <button type="button" class="rtab" id="rtab-rules" role="tab" data-rview="rules" aria-selected="false">Rules</button>
             <button type="button" class="rtab" id="rtab-notes" role="tab" data-rview="notes" aria-selected="false">Notes</button>
           </div>
           <div id="right-body">
             <div id="inspector-host" class="rview" role="tabpanel"></div>
-            <div id="rview-rules" class="rview doc-view" role="tabpanel" hidden><p class="muted">À venir.</p></div>
-            <div id="rview-notes" class="rview doc-view" role="tabpanel" hidden><p class="muted">À venir.</p></div>
+            <div id="rview-rules" class="rview doc-view" role="tabpanel" hidden><p class="muted">Coming soon.</p></div>
+            <div id="rview-notes" class="rview doc-view" role="tabpanel" hidden><p class="muted">Coming soon.</p></div>
           </div>
         </aside>
       </main>
 
-      <footer id="diagnostics" aria-label="Problems, events, relationships and decisions">
+      <footer id="diagnostics" aria-label="Problems, events, relationships and the context map">
         <div class="koi-resizer koi-resizer-y" id="diag-resizer" aria-hidden="true"></div>
         <div id="diag-header">
           <button type="button" id="diag-collapse" class="diag-collapse" aria-expanded="true" aria-controls="diag-body panel-events panel-relationships panel-contextmap" aria-label="Collapse panel">
@@ -182,9 +180,9 @@
           </button>
           <div class="diag-tabs" role="tablist" aria-label="Bottom panel">
             <button type="button" class="diag-tab" id="tab-problems" role="tab" data-panel="problems" aria-selected="true" aria-controls="diag-body">Problems</button>
-            <button type="button" class="diag-tab" id="tab-events" role="tab" data-panel="events" aria-selected="false" aria-controls="panel-events">Événements</button>
-            <button type="button" class="diag-tab" id="tab-relationships" role="tab" data-panel="relationships" aria-selected="false" aria-controls="panel-relationships">Règles</button>
-            <button type="button" class="diag-tab" id="tab-contextmap" role="tab" data-panel="contextmap" aria-selected="false" aria-controls="panel-contextmap">Décisions</button>
+            <button type="button" class="diag-tab" id="tab-events" role="tab" data-panel="events" aria-selected="false" aria-controls="panel-events">Events</button>
+            <button type="button" class="diag-tab" id="tab-relationships" role="tab" data-panel="relationships" aria-selected="false" aria-controls="panel-relationships">Relationships</button>
+            <button type="button" class="diag-tab" id="tab-contextmap" role="tab" data-panel="contextmap" aria-selected="false" aria-controls="panel-contextmap">Context Map</button>
           </div>
           <span id="diag-count" class="diag-count"></span>
         </div>
@@ -196,11 +194,11 @@
 
       <!-- Bottom status bar: a pure projection of existing state (active context, model validity,
            connection, version). #status stays in the toolbar; #sb-connection mirrors it here. -->
-      <footer id="statusbar" aria-label="Statut du modèle">
-        <span class="sb-item" id="sb-context">Contexte actuel : —</span>
-        <span class="sb-item" id="sb-validity">Modèle valide</span>
+      <footer id="statusbar" aria-label="Model status">
+        <span class="sb-item" id="sb-context">Context: —</span>
+        <span class="sb-item" id="sb-validity">No errors</span>
         <span class="sb-spacer"></span>
-        <span class="sb-item" id="sb-connection">Connexion…</span>
+        <span class="sb-item" id="sb-connection">Connecting…</span>
         <span class="sb-item" id="sb-version"></span>
       </footer>
     </div>

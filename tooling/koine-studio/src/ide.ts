@@ -440,7 +440,7 @@ export function init(): void {
   const diagEl = el('diagnostics');
   const eventsPanel = el('panel-events');
   const relationshipsPanel = el('panel-relationships');
-  // The context map moved from a right-panel tab into the bottom strip's "Décisions" tab (mockup).
+  // The context map moved from a right-panel tab into the bottom strip's "Context Map" tab (mockup).
   const contextMapView = el('panel-contextmap');
   type BottomTab = 'problems' | 'events' | 'relationships' | 'contextmap';
   let activeBottomTab: BottomTab = 'problems';
@@ -486,32 +486,33 @@ export function init(): void {
   let folderRootToken: string = '';
   let entriesCache: FsEntry[] = [];
 
-  const treeEl = el<HTMLElement>('filetree');
   const treeBodyEl = el<HTMLElement>('filetree-body');
   const treeTitleEl = el<HTMLElement>('filetree-title');
   const treeBtn = el<HTMLButtonElement>('btn-files');
+  const filesSect = el<HTMLElement>('rail-files');
   const splitEl = el<HTMLElement>('split');
 
-  // File-tree chrome (the left rail + its toolbar toggle). Visibility is a persisted user choice;
-  // the rail track widens to 6px only when the tree is showing.
+  // Open/collapse a left-sidebar section, keeping its header's aria-expanded — and, for the Files
+  // section, the toolbar toggle's aria-pressed — in step. The single source of truth for section state.
+  function setRailSectionOpen(sect: HTMLElement, open: boolean): void {
+    sect.dataset.open = open ? 'true' : 'false';
+    sect.querySelector('.rail-sect-head')?.setAttribute('aria-expanded', String(open));
+    if (sect.id === 'rail-files') treeBtn.setAttribute('aria-pressed', String(open));
+  }
+
+  // The Files section of the single left sidebar is collapsible; #btn-files and the section header both
+  // toggle it, and the choice is persisted. (The file tree no longer has its own column — it's one
+  // section of the unified rail.)
   const FILETREE_VIS_KEY = 'koine.studio.filetree';
   function applyFileTreeVisibility(visible: boolean): void {
-    treeEl.hidden = !visible;
-    treeBtn.setAttribute('aria-pressed', String(visible));
-    // Collapse the tree's grid tracks to 0 when hidden. The width track is driven by
-    // --koi-filetree-w, which the rail resizer pins to a fixed px (and restores from
-    // localStorage on init) — so the track won't auto-collapse just because the pane is
-    // display:none. The class overrides the template; --koi-filetree-w is left intact so the
-    // user's width returns when the tree is shown again.
-    splitEl.classList.toggle('is-filetree-hidden', !visible);
-    splitEl.style.setProperty('--koi-filetree-rail', visible ? '6px' : '0px');
+    setRailSectionOpen(filesSect, visible);
   }
   function showFileTreeChrome(): void {
     treeBtn.hidden = false;
     applyFileTreeVisibility((localStorage.getItem(FILETREE_VIS_KEY) ?? '1') !== '0');
   }
   function toggleFileTree(): void {
-    const visible = Boolean(treeEl.hidden); // currently hidden → reveal
+    const visible = filesSect.dataset.open === 'false'; // currently collapsed → expand
     applyFileTreeVisibility(visible);
     try {
       localStorage.setItem(FILETREE_VIS_KEY, visible ? '1' : '0');
@@ -541,7 +542,7 @@ export function init(): void {
     statusEl.dataset.kind = kind;
     // Mirror the connection state into the status bar as a stable label (the toolbar pill keeps the
     // live text). "Locale" reflects that the model is compiled in-process, not against a remote server.
-    sbConnEl.textContent = kind === 'connecting' ? 'Connexion…' : kind === 'error' ? 'Hors ligne' : 'Locale';
+    sbConnEl.textContent = kind === 'connecting' ? 'Connecting…' : kind === 'error' ? 'Offline' : 'Local';
   }
 
   function renderStrip(diags: LspDiagnostic[]): void {
@@ -549,10 +550,10 @@ export function init(): void {
     const warnings = diags.filter((d) => d.severity === 2).length;
     // Status-bar validity: a plain-language read of the same error count that feeds #diag-count.
     if (errors) {
-      sbValidityEl.textContent = errors === 1 ? '1 erreur' : `${errors} erreurs`;
+      sbValidityEl.textContent = errors === 1 ? '1 error' : `${errors} errors`;
       sbValidityEl.dataset.kind = 'error';
     } else {
-      sbValidityEl.textContent = 'Modèle valide · Aucune erreur';
+      sbValidityEl.textContent = 'No errors';
       sbValidityEl.dataset.kind = 'ok';
     }
     if (!errors && !warnings) {
@@ -1015,20 +1016,20 @@ export function init(): void {
   // the same selection; the inspector + outline cross-highlight subscribe to it.
   const selection = createSelectionBus();
 
-  // Left-rail hosts (always visible, repainted together from the model): the Explorateur construct
-  // tree, the Vue d'ensemble per-context counts, and the Documentation glossary.
+  // Left-rail hosts (always visible, repainted together from the model): the Explorer construct
+  // tree, the Overview per-context counts, and the Documentation glossary.
   const explorerBody = el('rail-explorer-body');
   const overviewBody = el('rail-overview-body');
   const glossaryView = el('rail-docs-body');
-  // Center hosts: the diagram canvas (Éditeur visuel) and the code editor's companion sub-views.
+  // Center hosts: the diagram canvas (Visual) and the code editor's companion sub-views.
   const diagramsView = el('center-visual');
   const assistantView = el('view-assistant');
   const checkView = el('view-check');
-  // Right-rail host: the element inspector (Propriétés). Fixed — never torn down on a model reload.
+  // Right-rail host: the element inspector (Properties). Fixed — never torn down on a model reload.
   const inspectorHost = el('inspector-host');
 
   // Active workspace mode (#143): the toolbar's Domain/Code/Docs buttons, repointed as region-focus
-  // shortcuts now that each view has a fixed home (Domain → Éditeur visuel, Code → Vue technique,
+  // shortcuts now that each view has a fixed home (Domain → Visual, Code → Code,
   // Docs → the Documentation rail). Restore the persisted mode, defaulting to Domain when absent/invalid.
   const restoredMode = loadWorkspaceMode();
   let activeMode: string = restoredMode && isValidModeId(restoredMode) ? restoredMode : DEFAULT_MODE_ID;
@@ -1084,7 +1085,7 @@ export function init(): void {
     const scope = activeContext.get();
     if (contextSelect.value !== scope) contextSelect.value = scope;
     contextReadout.textContent = `Current context: ${scopeLabel(scope)}`;
-    sbContextEl.textContent = `Contexte actuel : ${scopeLabel(scope)}`;
+    sbContextEl.textContent = `Context: ${scopeLabel(scope)}`;
   }
 
   // The single choke point for every scope change (the <select>, a restored value's validation, and
@@ -1159,16 +1160,16 @@ export function init(): void {
   function rerenderScopedSurfaces(): void {
     docViewsLoaded.model = false;
     docViewsLoaded.diagrams = false;
-    // The left-rail Explorateur + Vue d'ensemble are always visible, so re-scope them immediately.
+    // The left-rail Explorer + Overview are always visible, so re-scope them immediately.
     void loadModel();
     // The diagram only re-scopes when the visual center is showing it.
     if (activeCenter === 'visual') void loadDiagrams();
-    invalidateBottomPanels(); // the Events/Relationships/Décisions tables are graph-derived too
+    invalidateBottomPanels(); // the Events/Relationships/Context Map tables are graph-derived too
   }
 
   // Track which lazily-loaded surfaces need a (re)fetch — invalidated on every edit so a switch
   // always shows data for the current model rather than a stale render. The check view (on-demand via
-  // the Check button) and the assistant (interactive) are excluded. The Explorateur/Vue d'ensemble
+  // the Check button) and the assistant (interactive) are excluded. The Explorer/Overview
   // (model) and Documentation (glossary) are always visible, so they repaint on every edit.
   const docViewsLoaded: Record<'preview' | 'model' | 'glossary' | 'diagrams', boolean> = {
     preview: false,
@@ -1276,9 +1277,9 @@ export function init(): void {
     }
   }
 
-  // The DDD-aware workspace (#142): the left rail's Explorateur (a construct-grouped, per-context
-  // navigator) + Vue d'ensemble (per-context counts) and the right rail's read-only element inspector
-  // (Propriétés). All are driven by the shared selection bus — clicking a node in the Explorateur OR a
+  // The DDD-aware workspace (#142): the left rail's Explorer (a construct-grouped, per-context
+  // navigator) + Overview (per-context counts) and the right rail's read-only element inspector
+  // (Properties). All are driven by the shared selection bus — clicking a node in the Explorer OR a
   // diagram selects the same element and refreshes the inspector.
   const modelOutlineHandlers: ModelOutlineHandlers = {
     onSelect: (entry) => selection.set({ qualifiedName: entry.qualifiedName, context: entry.context }),
@@ -1332,7 +1333,7 @@ export function init(): void {
   }
 
   // Project the current selection through the index into an inspector element and (re)render it into
-  // the right-rail Propriétés host. No index / no selection → the inspector's own empty state.
+  // the right-rail Properties host. No index / no selection → the inspector's own empty state.
   function renderSelectedInspector(): void {
     const sel = selection.get();
     const hit = sel && modelIndex ? lookupElement(modelIndex, sel.qualifiedName) : null;
@@ -1342,7 +1343,7 @@ export function init(): void {
     inspectorHost.replaceChildren(renderInspector(element, inspectorHandlers));
   }
 
-  // Repaint the always-visible left rail: the Explorateur construct tree + the Vue d'ensemble counts,
+  // Repaint the always-visible left rail: the Explorer construct tree + the Overview counts,
   // both scoped to the active bounded context (#146). The inspector resolves any selection against the
   // whole model, so only the navigator + counts are narrowed.
   async function loadModel(): Promise<void> {
@@ -1362,7 +1363,7 @@ export function init(): void {
         docViewsLoaded.model = true;
         return;
       }
-      // Explorateur = the construct tree with its inline counts suppressed; the dedicated Vue d'ensemble
+      // Explorer = the construct tree with its inline counts suppressed; the dedicated Overview
       // section owns the tallies (renderOverviewCounts), so the two never double up.
       explorerBody.replaceChildren(renderModelOutline(scopedGlossary, modelOutlineHandlers, { counts: false }));
       overviewBody.replaceChildren(renderOverviewCounts(scopedGlossary));
@@ -1505,7 +1506,7 @@ export function init(): void {
     await navigateToDiagramNode(detail);
   }
 
-  // --- center (Éditeur visuel / Vue technique) + right rail + region focus ----
+  // --- center (Visual / Code) + right rail + region focus ----
 
   // The center column toggles between the visual diagram canvas and the technical code view; the
   // technical view in turn has sub-tabs (editor / emitted preview / compatibility check / assistant).
@@ -1566,7 +1567,7 @@ export function init(): void {
   }
 
   // Open + scroll the left-rail Documentation section into view (the "Docs" mode focus and the
-  // Explorateur's "Ubiquitous Language" shortcut both route here).
+  // Explorer's "Ubiquitous Language" shortcut both route here).
   function focusDocs(): void {
     const sect = el('rail-docs');
     sect.dataset.open = 'true';
@@ -1576,7 +1577,7 @@ export function init(): void {
 
   // Repaint the always-visible surfaces (the left rail) + whatever the center is currently showing.
   function refreshActiveSurfaces(): void {
-    void loadModel(); // Explorateur + Vue d'ensemble (+ the right-rail Propriétés inspector)
+    void loadModel(); // Explorer + Overview (+ the right-rail Properties inspector)
     void loadGlossary(); // Documentation
     if (activeCenter === 'visual') void loadDiagrams();
     else ensureTechLoaded();
@@ -1593,7 +1594,7 @@ export function init(): void {
     modelIndex = null;
     indexPromise = null;
     cachedDomainIndex = null; // the assistant's domain index is derived from the same model
-    invalidateBottomPanels(); // the Events/Relationships/Décisions tables are model-derived too
+    invalidateBottomPanels(); // the Events/Relationships/Context Map tables are model-derived too
   }
 
   // An edit makes the model-derived surfaces stale. Mark them dirty and (debounced) repaint the live
@@ -1636,7 +1637,7 @@ export function init(): void {
     t.addEventListener('click', () => selectTech(t.dataset.tech as TechView));
   }
 
-  // Right rail: Propriétés (the inspector) / Règles / Notes. Règles/Notes are placeholder panels for
+  // Right rail: Properties (the inspector) / Rules / Notes. Rules/Notes are placeholder panels for
   // now — the tab chrome matches the mockup while the inspector stays read-only.
   const rightTabs = Array.from(document.querySelectorAll<HTMLButtonElement>('.rtab'));
   const rightViews: Record<string, HTMLElement> = {
@@ -2371,24 +2372,12 @@ export function init(): void {
   }
 
   initSplitResizer({ split: el('split'), handle: el('split-resizer') });
-
-  // File-tree width — only draggable when the rail track is shown (folder mode).
-  initEdgeResizer({
-    target: splitEl,
-    handle: el('filetree-resizer'),
-    cssVar: '--koi-filetree-w',
-    anchor: 'left',
-    storageKey: 'koine.studio.filetreeWidth',
-    min: 150,
-    max: (w) => w * 0.5,
-  });
   treeBtn.addEventListener('click', () => toggleFileTree());
 
-  // Left model rail width — measured from the rail's own left edge (the file tree may sit to its left).
+  // Left sidebar width — the single rail (Files / Explorer / Overview / Documentation).
   initEdgeResizer({
     target: splitEl,
     handle: el('leftrail-resizer'),
-    container: el('leftrail'),
     cssVar: '--koi-leftrail-w',
     anchor: 'left',
     storageKey: 'koine.studio.leftrailWidth',
@@ -2396,14 +2385,12 @@ export function init(): void {
     max: (w) => w * 0.5,
   });
 
-  // Left-rail section disclosure: clicking a section header collapses/expands its body.
+  // Left-sidebar section disclosure: clicking a header collapses/expands its body (routed through
+  // setRailSectionOpen so the Files section's toolbar toggle stays in step).
   for (const head of Array.from(document.querySelectorAll<HTMLButtonElement>('.rail-sect-head'))) {
     head.addEventListener('click', () => {
       const sect = head.closest<HTMLElement>('.rail-sect');
-      if (!sect) return;
-      const open = sect.dataset.open !== 'false';
-      sect.dataset.open = open ? 'false' : 'true';
-      head.setAttribute('aria-expanded', String(!open));
+      if (sect) setRailSectionOpen(sect, sect.dataset.open === 'false');
     });
   }
 
@@ -2477,7 +2464,7 @@ export function init(): void {
     if (tab === 'contextmap' && !bottomLoaded.contextmap) void loadContextMapPanel();
   }
 
-  // The "Décisions" tab: the strategic context map (moved here from a right-panel tab). A simple
+  // The "Context Map" tab: the strategic context map (moved here from a right-panel tab). A simple
   // monotonic guard mirrors the Events/Relationships loaders so a superseded fetch can't clobber a
   // newer render or mark the panel loaded with stale data.
   async function loadContextMapPanel(): Promise<void> {

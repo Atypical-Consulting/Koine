@@ -1,55 +1,31 @@
 /* --- split body --- */
-/* Seven tracks (mockup 3-column shell): the OPFS file tree (auto — it sizes to the pane, whose
-   width is --koi-filetree-w; the track stays auto so it collapses to 0 when the pane is hidden in
-   scratch mode), its 6px drag rail (--koi-filetree-rail, 0 in scratch mode), the left model rail
-   (--koi-leftrail-w), its 6px resizer, the center (1fr), the center/inspector 6px resizer, and the
-   right inspector (--koi-inspector-w). */
+/* Five tracks (3-column shell): one left sidebar (--koi-leftrail-w, holds Files + Explorer + Overview
+   + Documentation), its 6px resizer, the center (1fr), the center/inspector 6px resizer, and the right
+   inspector (--koi-inspector-w). */
 #split {
   flex: 1 1 auto;
   display: grid;
   grid-template-columns:
-    var(--koi-filetree-w, auto) var(--koi-filetree-rail, 0px)
-    var(--koi-leftrail-w, 260px) 6px
+    var(--koi-leftrail-w, 280px) 6px
     1fr 6px var(--koi-inspector-w, 320px);
   min-height: 0;
 }
 
-/* File tree toggled off: collapse only its width + rail tracks to 0 so the left model rail and the
-   editor reclaim the space. This overrides --koi-filetree-w (which the rail resizer pins to a fixed
-   px and restores from localStorage) so the now-empty column doesn't stay open; the var is left
-   untouched, so the user's width returns when the tree is shown again. The left model rail is NOT
-   tied to file-tree visibility — it always shows the model. */
-#split.is-filetree-hidden {
-  grid-template-columns:
-    0 0
-    var(--koi-leftrail-w, 260px) 6px
-    1fr 6px var(--koi-inspector-w, 320px);
-}
-
-/* Pin each pane to its track so a hidden filetree (scratch mode) just leaves tracks 1–2 empty
-   rather than letting the remaining items auto-place into the wrong columns. */
-#filetree {
+/* Pin each pane to its track. */
+#leftrail {
   grid-column: 1;
 }
-#filetree-resizer {
-  grid-column: 2;
-  /* Fill the (0px-or-6px) rail track; hidden until a folder opens and sets --koi-filetree-rail. */
-  width: 100%;
-}
-#leftrail {
-  grid-column: 3;
-}
 #leftrail-resizer {
-  grid-column: 4;
+  grid-column: 2;
 }
 #center {
-  grid-column: 5;
+  grid-column: 3;
 }
 #split-resizer {
-  grid-column: 6;
+  grid-column: 4;
 }
 #right {
-  grid-column: 7;
+  grid-column: 5;
 }
 
 .pane {

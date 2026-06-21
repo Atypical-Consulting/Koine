@@ -1,34 +1,36 @@
-/* --- left rail: Explorateur / Vue d'ensemble / Documentation ---
-   Three always-visible, collapsible sections stacked in the left column. The model navigator
-   (renderModelOutline), the per-context counts (renderOverviewCounts) and the glossary
-   (renderGlossary) mount into the section bodies; they are re-painted together from the model. */
+/* --- left sidebar: Files / Explorer / Overview / Documentation ---
+   One column, ONE scroll bar. The rail itself is the scroll container; the four collapsible sections
+   size to their content and never scroll on their own (the file tree's internal scroll is neutralised
+   below too), so the whole sidebar moves under a single scroll bar. */
 #leftrail {
   display: flex;
   flex-direction: column;
   background: var(--koi-paper-2);
-  overflow: hidden;
+  overflow-y: auto;
+  overflow-x: hidden;
 }
 
 .rail-sect {
   display: flex;
   flex-direction: column;
-  min-height: 0;
+  flex: 0 0 auto;
   border-bottom: 1px solid var(--koi-line);
+}
 
-  /* Explorateur + Documentation share the flexible space and scroll within themselves; Vue d'ensemble
-     sizes to its (small) counts content and never shrinks, so the tallies are always fully visible. */
-  &#rail-explorer,
-  &#rail-docs {
-    flex: 1 1 0;
-    min-height: 96px;
-  }
-  &#rail-overview {
-    flex: 0 0 auto;
+/* The Files section header pairs the disclosure with a workspace-name meta label. */
+.rail-sect-head-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--koi-space-2);
+  padding-right: var(--koi-space-3);
+
+  .rail-sect-head {
+    flex: 1 1 auto;
   }
 }
 
 .rail-sect-head {
-  flex: 0 0 auto;
   display: flex;
   align-items: center;
   gap: var(--koi-space-1-5);
@@ -58,9 +60,21 @@
   }
 }
 
-.rail-sect[data-open='false'] {
+/* The Files section's workspace-name label (folder name, or "Scratch"). */
+.rail-sect-meta {
   flex: 0 0 auto;
+  max-width: 45%;
+  font-family: var(--koi-font-mono);
+  font-size: var(--koi-text-2xs);
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  color: var(--koi-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 
+.rail-sect[data-open='false'] {
   .rail-sect-head::before {
     transform: rotate(-90deg);
   }
@@ -70,13 +84,21 @@
 }
 
 .rail-sect-body {
-  flex: 1 1 auto;
-  min-height: 0;
-  overflow-y: auto;
   padding: var(--koi-space-1) var(--koi-space-2) var(--koi-space-3);
 }
 
-/* The "Vue d'ensemble" overview: per-context construct tallies (renderOverviewCounts). */
+/* Fold the file tree into the Files section: it must NOT scroll on its own — the rail owns the only
+   scroll bar — so flatten the explorer's flex/overflow and let its rows extend the rail's height. */
+#rail-files .rail-sect-body {
+  padding: 0;
+}
+#leftrail .explorer,
+#leftrail .explorer-tree {
+  flex: 0 0 auto;
+  overflow: visible;
+}
+
+/* The "Overview" section: per-context construct tallies (renderOverviewCounts). */
 .koi-overview-ctx + .koi-overview-ctx {
   margin-top: var(--koi-space-2-5);
 }
@@ -101,10 +123,14 @@
   background: var(--koi-paper);
   font-size: var(--koi-text-2xs);
   color: var(--koi-muted);
+  transition: border-color var(--koi-dur-fast) ease, color var(--koi-dur-fast) ease;
 
-  .koi-model-count-num,
-  .koi-overview-count-num {
+  .koi-model-count-num {
     font-weight: 600;
+    color: var(--koi-fg);
+  }
+  &:hover {
+    border-color: color-mix(in srgb, var(--koi-accent) 45%, var(--koi-line));
     color: var(--koi-fg);
   }
 }
