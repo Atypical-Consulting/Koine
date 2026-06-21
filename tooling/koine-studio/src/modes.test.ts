@@ -11,7 +11,7 @@ import {
 
 // The full RightView roster, mirrored here so "every view maps to a mode" is an INDEPENDENT check
 // against the type union (TS types are erased at runtime, so the test needs its own roster).
-const ALL_VIEWS: RightView[] = ['preview', 'model', 'glossary', 'diagrams', 'contextmap', 'outline', 'assistant', 'check'];
+const ALL_VIEWS: RightView[] = ['preview', 'model', 'glossary', 'docs', 'diagrams', 'contextmap', 'outline', 'assistant', 'check'];
 
 describe('workspace modes', () => {
   test('viewsForMode(domain) groups the model-exploration views', () => {
@@ -26,6 +26,11 @@ describe('workspace modes', () => {
 
   test('modeForView(glossary) is the Docs mode', () => {
     expect(modeForView('glossary')).toBe('docs');
+  });
+
+  test('the ADR/Notes docs view sits in the Docs mode, beside the glossary', () => {
+    expect(modeForView('docs')).toBe('docs');
+    expect(viewsForMode('docs')).toEqual(['glossary', 'docs', 'assistant']);
   });
 
   test('every RightView maps to at least one mode', () => {

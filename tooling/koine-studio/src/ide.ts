@@ -61,6 +61,8 @@ import {
   renderRelationshipsTable,
 } from './modelTables';
 import { renderGlossary, type GlossaryHandlers } from './glossary';
+import { createDocsStore } from './docsStore';
+import { renderDocsPanel, type DocsPanelHandlers } from './docsPanel';
 import {
   ALL_CONTEXTS,
   createActiveContextBus,
@@ -996,6 +998,7 @@ export function init(): void {
 
   const modelView = el('view-model');
   const glossaryView = el('view-glossary');
+  const docsView = el('view-docs');
   const diagramsView = el('view-diagrams');
   const contextMapView = el('view-contextmap');
   const outlineView = el('view-outline');
@@ -1006,6 +1009,7 @@ export function init(): void {
     preview: el('view-preview'),
     model: modelView,
     glossary: glossaryView,
+    docs: docsView,
     diagrams: diagramsView,
     contextmap: contextMapView,
     outline: outlineView,
@@ -1214,7 +1218,14 @@ export function init(): void {
   }
 
   function docMessage(view: HTMLElement, text: string, kind: 'muted' | 'error' = 'muted'): void {
-    view.innerHTML = `<p class="${kind === 'error' ? 'doc-error' : 'muted'}">${text}</p>`;
+    // Build the node with textContent rather than interpolating into innerHTML — `text` often carries
+    // an error string (String(e)) that can embed host paths or user-influenced file/folder names, so
+    // raw interpolation would be an HTML-injection sink.
+    view.innerHTML = '';
+    const p = document.createElement('p');
+    p.className = kind === 'error' ? 'doc-error' : 'muted';
+    p.textContent = text;
+    view.appendChild(p);
   }
 
   // The glossary tab is the ubiquitous-language editor (#67): it lists every concept across
@@ -1257,6 +1268,43 @@ export function init(): void {
       editor.applyEdits(result.edits);
     } catch (e) {
       docMessage(glossaryView, 'Saving description failed: ' + String(e), 'error');
+    }
+  }
+
+  // The Docs tab is the ADR & Notes documentation surface (#147): plain-Markdown architecture
+  // decision records (`docs/adr/NNNN-*.md`) and notes (`docs/notes/*.md`) in the opened workspace,
+  // read and written through docsStore over the host fs. Unlike the model-derived views above it is
+  // folder-derived (not invalidated by `.koi` edits): it reloads when the workspace folder changes
+  // (openFolderPath flips docsLoaded) and after any create/save in the panel. In no-folder mode the
+  // store reports canWrite=false and the panel renders a read-only empty state.
+  let docsLoaded = false;
+  async function loadDocs(): Promise<void> {
+    const store = createDocsStore(platform, folderRootToken);
+    // Creating an ADR/note adds a row, so rebuild the panel from disk; an edit (save) is applied in
+    // place by the panel itself (it refreshes the row head + detail), so saves don't reload — which
+    // also keeps the open editor from collapsing.
+    const reload = (): void => {
+      docsLoaded = false;
+      void loadDocs();
+    };
+    // Surface a failure on the status line — NOT by overwriting the panel — so the ADR/Notes list and
+    // any in-progress editor survive a transient create/save error and the user can simply retry.
+    const fail = (verb: string) => (e: unknown) => setStatus(`Could not ${verb}: ${String(e)}`, 'error');
+    const handlers: DocsPanelHandlers = {
+      onCreateAdr: (title) => void store.createAdr(title).then(reload).catch(fail('create the ADR')),
+      onSaveAdr: (file, adr) => void store.saveAdr(file.token, adr).catch(fail('save the ADR')),
+      onCreateNote: (title) => void store.createNote(title).then(reload).catch(fail('create the note')),
+      onReadNote: (file) => store.readNote(file.token),
+      onSaveNote: (file, md) => void store.saveNote(file.token, md).catch(fail('save the note')),
+    };
+    docMessage(docsView, 'Loading docs…');
+    try {
+      const [adrs, notes] = await Promise.all([store.listAdrs(), store.listNotes()]);
+      docsView.innerHTML = '';
+      docsView.appendChild(renderDocsPanel({ canWrite: store.canWrite, adrs, notes, renderMarkdown }, handlers));
+      docsLoaded = true;
+    } catch (e) {
+      docMessage(docsView, 'Docs request failed: ' + String(e), 'error');
     }
   }
 
@@ -1526,6 +1574,7 @@ export function init(): void {
     if (view === 'preview' && !docViewsLoaded.preview) void loadPreview();
     if (view === 'model' && !docViewsLoaded.model) void loadModel();
     if (view === 'glossary' && !docViewsLoaded.glossary) void loadGlossary();
+    if (view === 'docs' && !docsLoaded) void loadDocs();
     if (view === 'diagrams' && !docViewsLoaded.diagrams) void loadDiagrams();
     if (view === 'contextmap' && !docViewsLoaded.contextmap) void loadContextMap();
     if (view === 'outline' && !docViewsLoaded.outline) void loadOutline();
@@ -1626,6 +1675,7 @@ export function init(): void {
     if (activeView === 'preview') void loadPreview();
     else if (activeView === 'model') void loadModel();
     else if (activeView === 'glossary') void loadGlossary();
+    else if (activeView === 'docs') void loadDocs();
     else if (activeView === 'diagrams') void loadDiagrams();
     else if (activeView === 'contextmap') void loadContextMap();
     else if (activeView === 'outline') void loadOutline();
@@ -1920,6 +1970,9 @@ export function init(): void {
     // initial ensureLoaded below is already scoped even before the dropdown finishes repainting.
     restoreActiveContext();
     invalidateDocViews();
+    // The Docs surface is folder-derived (its own `docs/adr`+`docs/notes`), so a folder switch must
+    // drop it too — unlike the model-derived views, an edit alone never invalidates it.
+    docsLoaded = false;
     void refreshContextList();
     // Fetch the full explorer tree (dirs + .koi) and render it; falls back silently on failure.
     await refreshEntries();
@@ -2534,6 +2587,7 @@ export function init(): void {
       { id: 'about', title: 'About Koine Studio', group: 'Help', run: () => about.open() },
       { id: 'view-preview', title: 'Show Emitted Preview', group: 'Inspector', run: () => selectView('preview') },
       { id: 'view-glossary', title: 'Show Glossary', group: 'Inspector', run: () => selectView('glossary') },
+      { id: 'view-docs', title: 'Show Docs (ADRs & Notes)', group: 'Inspector', run: () => selectView('docs') },
       { id: 'view-diagrams', title: 'Show Diagrams', group: 'Inspector', run: () => selectView('diagrams') },
       { id: 'view-contextmap', title: 'Show Context Map', group: 'Inspector', run: () => selectView('contextmap') },
       { id: 'view-outline', title: 'Show Outline', group: 'Inspector', run: () => selectView('outline') },

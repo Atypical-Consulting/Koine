@@ -12,6 +12,7 @@ export type RightView =
   | 'preview'
   | 'model'
   | 'glossary'
+  | 'docs'
   | 'diagrams'
   | 'contextmap'
   | 'outline'
@@ -39,7 +40,7 @@ export interface WorkspaceMode {
 export const MODES: readonly WorkspaceMode[] = [
   { id: 'domain', label: 'Domain', views: ['outline', 'model', 'diagrams', 'contextmap'], defaultView: 'outline' },
   { id: 'code', label: 'Code', views: ['preview', 'check'], defaultView: 'preview' },
-  { id: 'docs', label: 'Docs', views: ['glossary', 'assistant'], defaultView: 'glossary' },
+  { id: 'docs', label: 'Docs', views: ['glossary', 'docs', 'assistant'], defaultView: 'glossary' },
 ];
 
 /** The mode shown on first run and whenever a persisted/restored id is absent or invalid. */
