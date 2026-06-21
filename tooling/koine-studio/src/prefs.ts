@@ -13,8 +13,10 @@ import {
   clearApiKey,
   whenSecretsReady,
   DEFAULT_SETTINGS,
+  PREVIEW_TARGETS,
   type Settings,
   type AccentName,
+  type PreviewTarget,
 } from './store';
 import { setTheme } from './theme';
 import { ACCENTS, ACCENT_ORDER } from './appearance';
@@ -71,6 +73,8 @@ const ICON = {
     '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6 2.6v4.2M10 2.6v4.2M4.4 6.8h7.2v1.4a3.6 3.6 0 0 1-3.6 3.6 3.6 3.6 0 0 1-3.6-3.6z"/><path d="M8 12v1.8"/></svg>',
   advanced:
     '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.6 4.6h10.8M2.6 8h10.8M2.6 11.4h10.8"/><circle cx="6" cy="4.6" r="1.7" fill="var(--koi-paper-2)"/><circle cx="10.4" cy="8" r="1.7" fill="var(--koi-paper-2)"/><circle cx="5" cy="11.4" r="1.7" fill="var(--koi-paper-2)"/></svg>',
+  output:
+    '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6.4 2.6c-1.2 0-1.7.6-1.7 1.8v1.6c0 .9-.3 1.3-1.1 1.4v1.2c.8.1 1.1.5 1.1 1.4v1.6c0 1.2.5 1.8 1.7 1.8M9.6 2.6c1.2 0 1.7.6 1.7 1.8v1.6c0 .9.3 1.3 1.1 1.4v1.2c-.8.1-1.1.5-1.1 1.4v1.6c0 1.2-.5 1.8-1.7 1.8"/></svg>',
 } as const;
 
 /**
@@ -205,6 +209,45 @@ export function createPreferences(cb: PrefsCallbacks): PrefsHandle {
     return { el: group, set };
   }
 
+  // The output-language picker: one dot+label button per target, single-selection radio group.
+  function langPicker(onSelect: (value: PreviewTarget) => void): { el: HTMLElement; set(value: PreviewTarget): void } {
+    const LABELS: Record<PreviewTarget, string> = {
+      csharp: 'C#',
+      typescript: 'TypeScript',
+      python: 'Python',
+      php: 'PHP',
+    };
+    const group = document.createElement('div');
+    group.className = 'koi-lang-picker';
+    group.setAttribute('role', 'radiogroup');
+    group.setAttribute('aria-label', 'Output language');
+    const buttons = PREVIEW_TARGETS.map((id) => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'koi-lang-opt';
+      b.setAttribute('role', 'radio');
+      b.setAttribute('aria-checked', 'false');
+      b.dataset.value = id;
+      const dot = document.createElement('span');
+      dot.className = 'lang-dot';
+      dot.dataset.lang = id;
+      dot.setAttribute('aria-hidden', 'true');
+      const label = document.createElement('span');
+      label.textContent = LABELS[id];
+      b.append(dot, label);
+      b.addEventListener('click', () => {
+        set(id);
+        onSelect(id);
+      });
+      group.appendChild(b);
+      return b;
+    });
+    const set = (value: PreviewTarget) => {
+      for (const b of buttons) b.setAttribute('aria-checked', String(b.dataset.value === value));
+    };
+    return { el: group, set };
+  }
+
   // A clamped numeric setting input. On commit it parses, restores the prior value for empty/blank
   // or non-numeric input (Number('') is 0, so the blank case must be caught explicitly), clamps into
   // [min, max], then writes the single field. The committed change re-applies appearance via onChange.
@@ -300,6 +343,15 @@ export function createPreferences(cb: PrefsCallbacks): PrefsHandle {
     row('Line height', 'Vertical spacing between lines.', lineHeightInput),
     row('Word wrap', 'Wrap long lines instead of scrolling sideways.', wordWrap.el),
     row('Format on save', 'Run the Koine formatter when you press save.', formatOnSave.el),
+  );
+
+  // --- Output ---------------------------------------------------------------
+
+  const outputLang = langPicker((target) => commit({ previewTarget: target }));
+
+  const outputPanel = panel(
+    'output',
+    row('Language', 'The language the Generated preview emits.', outputLang.el),
   );
 
   // --- Assistant (AI) -------------------------------------------------------
@@ -653,6 +705,7 @@ export function createPreferences(cb: PrefsCallbacks): PrefsHandle {
   const categories = [
     { id: 'appearance', label: 'Appearance', icon: ICON.appearance, panel: appearancePanel },
     { id: 'editor', label: 'Editor', icon: ICON.editor, panel: editorPanel },
+    { id: 'output', label: 'Output', icon: ICON.output, panel: outputPanel },
     { id: 'assistant', label: 'Assistant', icon: ICON.assistant, panel: assistantPanel },
     { id: 'mcp', label: 'MCP', icon: ICON.mcp, panel: mcpPanel },
     { id: 'advanced', label: 'Advanced', icon: ICON.advanced, panel: advancedPanel },
@@ -725,6 +778,7 @@ export function createPreferences(cb: PrefsCallbacks): PrefsHandle {
     lineHeightInput.value = String(s.lineHeight);
     wordWrap.set(s.wordWrap);
     formatOnSave.set(s.formatOnSave);
+    outputLang.set(s.previewTarget);
     aiProviderSelect.value = s.aiProvider;
     aiBaseUrlInput.value = s.aiBaseUrl;
     aiKeyInput.value = s.aiApiKey;

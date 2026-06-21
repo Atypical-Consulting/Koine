@@ -227,6 +227,47 @@
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.22);
 }
 
+/* output-language picker — segmented buttons, each with its language identity dot */
+.koi-lang-picker {
+  display: inline-flex;
+  gap: var(--koi-space-0-5);
+  padding: var(--koi-space-0-5);
+  border: 1px solid var(--koi-line);
+  border-radius: var(--koi-radius);
+  background: var(--koi-surface);
+}
+
+.koi-lang-opt {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--koi-space-1-5);
+  border: none;
+  border-radius: var(--koi-radius-sm);
+  background: transparent;
+  color: var(--koi-muted);
+  padding: var(--koi-space-1-25) var(--koi-space-2-5);
+  font-family: inherit;
+  font-size: var(--koi-text-base);
+  cursor: pointer;
+  transition: background var(--koi-dur-mid) ease, color var(--koi-dur-mid) ease;
+}
+
+.koi-lang-opt:hover {
+  color: var(--koi-fg);
+}
+
+.koi-lang-opt[aria-checked='true'] {
+  background: var(--koi-paper-2);
+  color: var(--koi-fg);
+  font-weight: 600;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.22);
+}
+
+.koi-lang-opt:focus-visible {
+  outline: 2px solid var(--koi-accent);
+  outline-offset: 1px;
+}
+
 /* accent swatch picker */
 .koi-accent-row {
   display: inline-flex;
