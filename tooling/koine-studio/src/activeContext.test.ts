@@ -2,6 +2,7 @@ import { describe, expect, test, vi } from 'vitest';
 import {
   ALL_CONTEXTS,
   createActiveContextBus,
+  fileContextFollow,
   isAllContexts,
   listContexts,
   scopeDocsFiles,
@@ -196,5 +197,25 @@ describe('createActiveContextBus', () => {
     off();
     bus.set('Inventory');
     expect(fn).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('fileContextFollow', () => {
+  test('follows the file’s first (primary) context', () => {
+    expect(fileContextFollow(['Sales'], ALL_CONTEXTS)).toBe('Sales');
+    expect(fileContextFollow(['Sales', 'Inventory'], 'Inventory')).toBe('Sales');
+  });
+
+  test('overrides "All contexts" — opening a file is navigation into it', () => {
+    expect(fileContextFollow(['Inventory'], ALL_CONTEXTS)).toBe('Inventory');
+  });
+
+  test('no-op when the file’s context already matches the active scope', () => {
+    expect(fileContextFollow(['Sales'], 'Sales')).toBeUndefined();
+  });
+
+  test('no-op when the file declares no context (empty/unparseable → no symbols)', () => {
+    expect(fileContextFollow([], 'Sales')).toBeUndefined();
+    expect(fileContextFollow([], ALL_CONTEXTS)).toBeUndefined();
   });
 });

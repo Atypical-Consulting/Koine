@@ -96,6 +96,22 @@ export function scopeDocsFiles(files: DocsFile[], scope: ContextScope): DocsFile
     .filter((f) => f.diagrams.length > 0);
 }
 
+/**
+ * The scope the context switcher should follow to when the active file changes — the file-explorer
+ * counterpart of the selection-follow. A `.koi` file names its bounded context(s) as its top-level
+ * document symbols (the language service emits one per `context`), so {@link fileContexts} is that
+ * list and its first entry is the file's primary context. Returns that context so the top bar tracks
+ * the file you opened — overriding {@link ALL_CONTEXTS}, since opening a file is navigation into it
+ * (unlike a read-only inspect, which leaves the overview intact). Returns undefined to leave the
+ * scope untouched: when the file declares no context (empty/unparseable → no symbols) or its primary
+ * context already matches the active scope (idempotent — no churn).
+ */
+export function fileContextFollow(fileContexts: readonly string[], scope: ContextScope): string | undefined {
+  const context = fileContexts[0];
+  if (!context || context === scope) return undefined;
+  return context;
+}
+
 /** A minimal observable holding the active scope; the switcher writes it, the surfaces subscribe. */
 export interface ActiveContextBus {
   /** The current scope (a context name, or {@link ALL_CONTEXTS}). */
