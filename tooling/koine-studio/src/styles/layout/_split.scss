@@ -1,39 +1,24 @@
 /* --- split body --- */
-/* Five tracks: file tree (auto — it sizes to the pane, whose width is --koi-filetree-w; the
-   track stays auto so it collapses to 0 when the pane is hidden in scratch mode, leaving no gap),
-   its 6px drag rail (--koi-filetree-rail, 0 in scratch mode so no stray handle shows), editor
-   (1fr), the editor/inspector 6px resizer, and the inspector whose width is driven by
-   --koi-inspector-w (defaults to 1fr until the user drags). */
+/* Five tracks (3-column shell): one left sidebar (--koi-leftrail-w, holds Files + Explorer + Overview
+   + Documentation), its 6px resizer, the center (1fr), the center/inspector 6px resizer, and the right
+   inspector (--koi-inspector-w). */
 #split {
   flex: 1 1 auto;
   display: grid;
   grid-template-columns:
-    var(--koi-filetree-w, auto) var(--koi-filetree-rail, 0px)
-    1fr 6px var(--koi-inspector-w, 1fr);
+    var(--koi-leftrail-w, 280px) 6px
+    1fr 6px var(--koi-inspector-w, 320px);
   min-height: 0;
 }
 
-/* File tree toggled off: collapse its width + rail tracks to 0 so the editor reclaims the
-   space. This overrides --koi-filetree-w, which the rail resizer pins to a fixed px (and
-   restores from localStorage on init) — that fixed track would otherwise hold the now-empty
-   column open even though the pane itself is display:none. The var is left untouched, so the
-   user's width returns when the tree is shown again. */
-#split.is-filetree-hidden {
-  grid-template-columns: 0 0 1fr 6px var(--koi-inspector-w, 1fr);
-}
-
-/* Pin each pane to its track so a hidden filetree (scratch mode) just leaves tracks 1–2
-   empty rather than letting the remaining items auto-place into the wrong columns
-   (which would crush the inspector into a resizer track). */
-#filetree {
+/* Pin each pane to its track. */
+#leftrail {
   grid-column: 1;
 }
-#filetree-resizer {
+#leftrail-resizer {
   grid-column: 2;
-  /* Fill the (0px-or-6px) rail track; hidden until a folder opens and sets --koi-filetree-rail. */
-  width: 100%;
 }
-#editor-pane {
+#center {
   grid-column: 3;
 }
 #split-resizer {
@@ -49,7 +34,10 @@
   overflow: hidden;
 }
 
-#editor-pane {
+#leftrail {
+  border-right: 1px solid var(--koi-line);
+}
+#center {
   border-right: 1px solid var(--koi-line);
 }
 

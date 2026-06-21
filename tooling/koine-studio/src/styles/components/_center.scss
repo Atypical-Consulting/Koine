@@ -1,0 +1,126 @@
+/* --- center: Éditeur visuel (diagram canvas) / Vue technique (code) ---
+   A two-tab center column. "Éditeur visuel" hosts the domain diagram (#center-visual); "Vue
+   technique" hosts the code editor plus the emitted preview, the compatibility check and the
+   assistant as sub-tabs (#tech-tabs). Mutually exclusive panels are toggled via the `hidden`
+   attribute — and because the flex/positioning rules below outrank the UA `[hidden]` rule, each
+   toggleable container restores `display: none` for its own `[hidden]` state. */
+#center {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--koi-paper);
+}
+
+#center-tabs,
+#tech-tabs,
+#docs-tabs {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: var(--koi-space-0-5);
+  padding: 0 var(--koi-space-2-5);
+  background: var(--koi-paper-2);
+  border-bottom: 1px solid var(--koi-line);
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+.center-tab,
+.tech-tab,
+.docs-tab {
+  position: relative;
+  flex: 0 0 auto;
+  background: transparent;
+  color: var(--koi-muted);
+  border: none;
+  padding: var(--koi-space-2-75) var(--koi-space-3) var(--koi-space-3);
+  font-family: var(--koi-font-body);
+  font-size: var(--koi-text-sm-plus);
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: color var(--koi-dur-base) ease;
+
+  /* Active tab: a gradient underline that grows from the center (matches the inspector tabs). */
+  &::after {
+    content: '';
+    position: absolute;
+    left: 10px;
+    right: 10px;
+    bottom: -1px;
+    height: 2px;
+    border-radius: var(--koi-radius-2xs);
+    background: var(--koi-accent-grad);
+    transform: scaleX(0);
+    transition: transform var(--koi-dur-slow) ease;
+  }
+  &:hover {
+    color: var(--koi-fg);
+  }
+  &[aria-selected='true'] {
+    color: var(--koi-fg);
+    &::after {
+      transform: scaleX(1);
+    }
+  }
+}
+
+.tech-tab,
+.docs-tab {
+  font-size: var(--koi-text-sm);
+  padding: var(--koi-space-2) var(--koi-space-2-5) var(--koi-space-2-25);
+}
+
+#center-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  position: relative;
+}
+
+.center-host {
+  position: absolute;
+  inset: 0;
+  min-height: 0;
+
+  &[hidden] {
+    display: none;
+  }
+}
+
+/* The technical + documentation panes stack a sub-tab strip above their sub-views. */
+#center-technical,
+#center-docs {
+  display: flex;
+  flex-direction: column;
+
+  &[hidden] {
+    display: none;
+  }
+}
+
+#center-visual {
+  overflow: hidden;
+}
+
+#tech-body,
+#docs-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  position: relative;
+}
+
+.tech-view {
+  position: absolute;
+  inset: 0;
+  min-height: 0;
+
+  &.doc-view {
+    overflow-y: auto;
+    padding: var(--koi-space-4) 20px;
+  }
+}
+
+/* CodeMirror fills its host (the editor pane and the emitted-preview output view both live here). */
+.cm-editor {
+  height: 100%;
+}

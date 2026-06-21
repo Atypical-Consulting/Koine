@@ -1,0 +1,14 @@
+/* --- DDD concept palette ---------------------------------------------------------------------------
+   One source of truth for the colour of each DDD concept, shared by the Explorer icons (_model.scss)
+   and the diagram nodes (_diagrams.scss) so the two never disagree. Saturated mid-tones that read on
+   both the light and dark themes. Tweak a value here and both surfaces update together. */
+:root {
+  --koi-ddd-aggregate: #8b87f5; /* indigo — the boundary owner */
+  --koi-ddd-entity: #34d399; /* green */
+  --koi-ddd-value: #5aa9f0; /* blue */
+  --koi-ddd-enum: #fbbf24; /* amber */
+  --koi-ddd-event: #f472b6; /* pink — domain events */
+  --koi-ddd-integration-event: #2dd4bf; /* teal — cross-context events */
+  --koi-ddd-service: #fb923c; /* orange — domain services */
+  --koi-ddd-repository: #94a3b8; /* slate — repositories / types */
+}

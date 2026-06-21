@@ -248,6 +248,39 @@ public class DiagramGraphTests
         }
     }
 
+    [Fact]
+    public void Composition_edges_carry_the_cardinality_derived_from_the_koine_field_type()
+    {
+        const string source = """
+            context Sales {
+              aggregate Order root Order {
+                value Money { amount: Decimal }
+                value OrderLine { product: ProductId quantity: Int }
+                value Address { street: String }
+
+                entity Order identified by OrderId {
+                  lines: List<OrderLine>
+                  total: Money
+                  shipTo: Address?
+                }
+              }
+            }
+            """;
+
+        var (model, diagnostics) = new KoineCompiler().Parse(new[] { new SourceFile("sales.koi", source) });
+        diagnostics.ShouldBeEmpty();
+        DiagramGraph aggregate = new DocsEmitter().EmitDiagrams(model!)["docs/Sales.md"]
+            .First(d => d.Kind == "aggregate").Graph;
+
+        string? CardinalityTo(string nodeId) =>
+            aggregate.Edges.First(e => e.From == "Order" && e.To == nodeId).Cardinality;
+
+        // The cardinality comes from the Koine field type, not a string heuristic on the diagram.
+        CardinalityTo("OrderLine").ShouldBe("*"); // lines: List<OrderLine> — a collection
+        CardinalityTo("Money").ShouldBe("1"); // total: Money — a required single reference
+        CardinalityTo("Address").ShouldBe("0..1"); // shipTo: Address? — an optional reference
+    }
+
     /// <summary>The single aggregate diagram's graph from the fixture.</summary>
     private static DiagramGraph AggregateGraph() =>
         Descriptors()["docs/Ordering.md"].First(d => d.Kind == "aggregate").Graph;

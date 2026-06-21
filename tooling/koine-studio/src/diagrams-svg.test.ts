@@ -5,7 +5,6 @@
 // structure, the node DOM contract, and the per-diagram fallback robustness only.
 import { afterEach, describe, expect, test } from 'vitest';
 import { createSvgRenderer, NODE_NAVIGATE_EVENT, type DiagramNodeNavigateDetail } from './diagrams-svg';
-import { createMermaidRenderer, mermaidDiagramsFor, stripMermaidFence } from './diagrams';
 import type { DocsFile, Diagram, DiagramNode } from './lsp';
 
 const EMPTY_STATE = 'No diagrams yet';
@@ -204,82 +203,30 @@ describe('createSvgRenderer', () => {
     expect(container.querySelector('svg')).toBeNull();
   });
 
-  test('a malformed/empty graph does not throw and does not blank the container', async () => {
-    // An edge that references node ids that do not exist, and an empty node list — the renderer must
-    // not throw and must still leave SOMETHING in the container (caption / fallback), never blank it.
+  test('a malformed/empty graph does not throw — it shows the empty-state note', async () => {
+    // An edge referencing non-existent ids and an empty node list: the only diagram has no drawable
+    // nodes, so the SVG renderer must not throw and shows the empty-state note (never blank). There is
+    // no Mermaid fallback — the structured graph is the single source.
     const files: DocsFile[] = [
-      file(
-        [
-          diagram(
-            {
-              nodes: [],
-              edges: [{ from: 'ghost', to: 'phantom', label: null }],
-            },
-            { caption: 'Broken', mermaid: 'not a valid mermaid graph @#$' },
-          ),
-        ],
-        { contents: '# Broken\n' },
-      ),
+      file([diagram({ nodes: [], edges: [{ from: 'ghost', to: 'phantom', label: null }] }, { caption: 'Broken' })]),
     ];
-
     const container = ROOT();
     await expect(createSvgRenderer().render(container, files, 'light', () => true)).resolves.toBeUndefined();
-    // Page title still rendered → container is not blank.
-    expect(container.textContent).toContain('Broken');
+    expect(container.textContent).toContain(EMPTY_STATE);
   });
 
-  test('an empty graph routes to the Mermaid fallback — NOT the empty-state note', async () => {
-    // Regression for the fallback-source bug: a diagram whose `graph` is empty (nodes: []) but which
-    // carries a valid `mermaid` string must be handed to the Mermaid renderer and actually rendered.
-    // Before the fix the synthetic fallback file had no ```mermaid fence in `contents`, so the Mermaid
-    // renderer found no pages and wrote "No diagrams yet…" into that diagram's surface instead.
+  test('the strategic context map is excluded from the unified diagram (it has its own tab)', async () => {
+    // A contextmap diagram alongside an aggregate: only the aggregate is drawn on the visual canvas.
     const files: DocsFile[] = [
       file([
-        diagram(
-          { nodes: [], edges: [] },
-          { caption: 'Ordering', mermaid: 'graph TD\n  A[Order] --> B[Money]' },
-        ),
+        diagram({ nodes: [mkNode({ id: 'Sales', label: 'Sales', kind: 'context', qualifiedName: 'Sales' })], edges: [] }, { kind: 'contextmap' }),
+        diagram({ nodes: [mkNode({ id: 'o', label: 'Order', kind: 'aggregate-root', qualifiedName: 'Sales.Order' })], edges: [] }, { kind: 'aggregate' }),
       ]),
     ];
-
     const container = ROOT();
     await createSvgRenderer().render(container, files, 'light', () => true);
-
-    // The figure/surface shell IS built (the diagram was found and routed to the Mermaid path)…
-    const surface = container.querySelector('.koi-diagram-surface');
-    expect(surface).not.toBeNull();
-    // …and the empty-state note is NOT shown anywhere in the tab.
-    expect(container.textContent).not.toContain(EMPTY_STATE);
-    // The fallback also must not nest a second `.koi-diagrams` shell inside the surface.
-    expect(surface!.querySelector('.koi-diagrams')).toBeNull();
-  });
-
-  test('the Mermaid renderer sources from structured file.diagrams (no fence needed in contents)', async () => {
-    // Direct coverage of the seam: given a file whose markdown `contents` has NO ```mermaid fence but
-    // whose structured `diagrams` is populated, the Mermaid renderer must render it (build the page
-    // shell) rather than fall through to the empty-state note. This is what makes the SVG renderer's
-    // fallback wrapper — which passes a fence-less synthetic file — work, and also feeds the
-    // DIAGRAM_RENDERER='mermaid' path from the same structured source.
-    const fenceless: DocsFile = {
-      path: 'Ordering.md',
-      contents: '# Ordering\n', // deliberately NO ```mermaid fence
-      diagrams: [
-        {
-          caption: 'Ordering',
-          kind: 'aggregate',
-          mermaid: 'graph TD\n  A[Order] --> B[Money]',
-          graph: { nodes: [], edges: [] },
-        },
-      ],
-    };
-
-    const container = ROOT();
-    await createMermaidRenderer().render(container, [fenceless], 'light', () => true);
-
-    expect(container.textContent).not.toContain(EMPTY_STATE);
-    // Page shell built from the structured diagram → the diagram was found, not skipped.
-    expect(container.querySelector('.koi-diagram-page')).not.toBeNull();
-    expect(container.querySelector('.koi-diagram-surface')).not.toBeNull();
+    expect(container.querySelector('.koi-svg-node[data-qname="Sales.Order"]')).not.toBeNull();
+    expect(container.querySelector('.koi-svg-node[data-kind="context"]')).toBeNull();
   });
 
   test('a superseded render (isCurrent() === false) does not write to the container', async () => {
@@ -655,61 +602,6 @@ describe('UML class boxes (issue #93 enrichment)', () => {
 
     expect(events).toHaveLength(1);
     expect(events[0].qualifiedName).toBe('Ordering.Order');
-  });
-});
-
-describe('mermaid source from the structured field', () => {
-  // The compiler emits `Diagram.mermaid` as the EXACT fenced block embedded in the Markdown
-  // (` ```mermaid\n…\n``` `), but `mermaid.render(id, code)` expects the raw inner source. Feeding the
-  // fenced block to mermaid.render throws a parse error → every Mermaid-path diagram (the
-  // DIAGRAM_RENDERER='mermaid' value AND the SVG renderer's per-diagram fallback) would render the
-  // `<pre>` error block in a real browser. happy-dom hides this (mermaid.render yields empty output),
-  // so we test the fence-stripping directly to give it teeth.
-  test('stripMermaidFence returns the inner source, fence markers removed', () => {
-    const fenced = '```mermaid\nflowchart LR\n  A --> B\n```';
-    const code = stripMermaidFence(fenced);
-    expect(code).toBe('flowchart LR\n  A --> B');
-    expect(code).not.toContain('```');
-    expect(code).toContain('flowchart LR');
-  });
-
-  test('stripMermaidFence passes through an already-unfenced string (trimmed)', () => {
-    expect(stripMermaidFence('flowchart LR\n  A --> B')).toBe('flowchart LR\n  A --> B');
-    expect(stripMermaidFence('  graph TD\n  X --> Y  \n')).toBe('graph TD\n  X --> Y');
-  });
-
-  test('mermaidDiagramsFor strips the fence off the structured mermaid (matches the regex path)', () => {
-    const f: DocsFile = {
-      path: 'Ordering.md',
-      contents: '# Ordering\n', // no fence in contents — only the structured diagrams carry mermaid
-      diagrams: [
-        {
-          caption: 'Ordering',
-          kind: 'aggregate',
-          mermaid: '```mermaid\nflowchart LR\n  A --> B\n```',
-          graph: { nodes: [], edges: [] },
-        },
-      ],
-    };
-    const out = mermaidDiagramsFor(f);
-    expect(out).toHaveLength(1);
-    expect(out[0].caption).toBe('Ordering');
-    // The code handed to mermaid.render must be the raw source — NOT the fenced block.
-    expect(out[0].code).toBe('flowchart LR\n  A --> B');
-    expect(out[0].code).not.toContain('```mermaid');
-    expect(out[0].code).not.toContain('```');
-  });
-
-  test('mermaidDiagramsFor falls back to extracting fences from contents when diagrams is empty', () => {
-    const f: DocsFile = {
-      path: 'Legacy.md',
-      contents: '## Legacy\n\n```mermaid\nflowchart TD\n  P --> Q\n```\n',
-      diagrams: [],
-    };
-    const out = mermaidDiagramsFor(f);
-    expect(out).toHaveLength(1);
-    expect(out[0].code).toBe('flowchart TD\n  P --> Q');
-    expect(out[0].caption).toBe('Legacy');
   });
 });
 

@@ -47,7 +47,13 @@ public sealed record DiagramMember(string Text, string Kind);
 /// <param name="From">The source node id.</param>
 /// <param name="To">The target node id.</param>
 /// <param name="Label">An optional edge label (transition guard, relation kind, publish/subscribe verb).</param>
-public sealed record DiagramEdge(string From, string To, string? Label);
+/// <param name="Cardinality">
+/// The target-end multiplicity of a composition, derived from the Koine field type that references the
+/// target: a collection (<c>List&lt;X&gt;</c>, <c>Set&lt;X&gt;</c>, <c>Map&lt;K,X&gt;</c>) → <c>"*"</c>,
+/// an optional (<c>X?</c>) → <c>"0..1"</c>, a plain reference → <c>"1"</c>; <c>null</c> when the edge is
+/// not a field-backed composition (state-machine transitions, context-map / integration-event edges).
+/// </param>
+public sealed record DiagramEdge(string From, string To, string? Label, string? Cardinality = null);
 
 /// <summary>
 /// The structured graph behind one diagram: its nodes and edges, in stable declaration order. The

@@ -319,6 +319,7 @@ export interface DiagramEdge {
   from: string; // source node id
   to: string; // target node id
   label: string | null; // optional edge label (transition guard, relation kind, publish/subscribe verb)
+  cardinality?: string | null; // composition target-end multiplicity, derived from the Koine field type ("1" | "0..1" | "*")
 }
 
 /** The structured graph behind one diagram. */

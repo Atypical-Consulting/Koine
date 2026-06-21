@@ -1,11 +1,13 @@
-/* --- right inspector (tabbed: preview / glossary / context map) --- */
+/* --- right inspector rail: Propriétés / Règles / Notes ---
+   The element inspector (renderInspector) is dedicated to "Propriétés"; Règles/Notes are placeholder
+   tabs that mirror the mockup chrome until a follow-up builds them. */
 #right {
   display: flex;
   flex-direction: column;
   background: var(--koi-paper-2);
 }
 
-#tabs {
+#right-tabs {
   flex: 0 0 auto;
   display: flex;
   align-items: center;
@@ -16,8 +18,9 @@
   overflow-x: auto;
   overflow-y: hidden;
 
-  .tab {
+  .rtab {
     position: relative;
+    flex: 0 0 auto;
     background: transparent;
     color: var(--koi-muted);
     border: none;
@@ -26,9 +29,8 @@
     font-size: var(--koi-text-sm-plus);
     font-weight: 500;
     cursor: pointer;
-    transition: color var(--koi-dur-base) ease;
-    flex: 0 0 auto;
     white-space: nowrap;
+    transition: color var(--koi-dur-base) ease;
 
     /* The active tab is marked by a gradient underline that grows from the center. */
     &::after {
@@ -58,44 +60,20 @@
   }
 }
 
-.tab-refresh {
-  margin-left: auto;
-  align-self: center;
-  background: transparent;
-  color: var(--koi-muted);
-  border: 1px solid transparent;
-  border-radius: var(--koi-radius-sm);
-  width: 28px;
-  height: 26px;
-  font-size: var(--koi-text-lg);
-  line-height: 1;
-  cursor: pointer;
-  transition: color var(--koi-dur-fast) ease, transform 0.3s ease, background var(--koi-dur-fast) ease;
-
-  &:hover {
-    color: var(--koi-fg);
-    background: var(--koi-surface);
-    transform: rotate(90deg);
-  }
-}
-
-#views {
+#right-body {
   flex: 1 1 auto;
   min-height: 0;
   position: relative;
 }
 
-.view {
+.rview {
   position: absolute;
   inset: 0;
   min-height: 0;
+  overflow-y: auto;
 }
 
 .doc-view {
   overflow-y: auto;
   padding: var(--koi-space-4) 20px;
-}
-
-.cm-editor {
-  height: 100%;
 }
