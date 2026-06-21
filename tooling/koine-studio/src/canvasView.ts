@@ -18,14 +18,6 @@ export interface ViewBox {
   h: number;
 }
 
-/** A content-space rectangle (e.g. the full laid-out diagram bounds). */
-export interface Bounds {
-  x: number;
-  y: number;
-  w: number;
-  h: number;
-}
-
 /** A pixel size (e.g. the canvas surface's client rect). */
 export interface Size {
   w: number;
@@ -64,9 +56,10 @@ export function centerOn(vb: ViewBox, cx: number, cy: number): ViewBox {
  * The window that frames `content` inside `viewport` with `padding` content-units of margin on every
  * side, centered. The returned viewBox is grown to the viewport's aspect ratio so the rendered scale is
  * uniform (no axis is stretched) and the padded content is fully contained on both axes. A degenerate
- * (zero-area) viewport falls back to a square aspect so the math never divides by zero.
+ * (zero-area) viewport falls back to a square aspect so the math never divides by zero. `content` is a
+ * {@link ViewBox} — the full laid-out diagram bounds — since the two share the `{x,y,w,h}` shape.
  */
-export function fit(content: Bounds, viewport: Size, padding: number): ViewBox {
+export function fit(content: ViewBox, viewport: Size, padding: number): ViewBox {
   // The padded content region we must contain.
   const pw = content.w + padding * 2;
   const ph = content.h + padding * 2;

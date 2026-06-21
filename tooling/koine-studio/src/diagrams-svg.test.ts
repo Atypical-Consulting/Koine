@@ -404,25 +404,57 @@ describe('interactive canvas — zoom / pan / fit (issue #145)', () => {
     expect(minimap!.querySelector('.koi-minimap-window')).not.toBeNull();
   });
 
-  test('the minimap window rectangle mirrors the canvas viewBox and shrinks as you zoom in', async () => {
+  test('the minimap window rectangle is the clamped intersection of the canvas viewBox and content', async () => {
     const container = ROOT();
     await createSvgRenderer().render(container, oneNodeFile(), 'light', () => true);
 
     const svg = container.querySelector<SVGSVGElement>('.koi-canvas > svg.koi-svg-diagram')!;
+    const mini = container.querySelector<SVGSVGElement>('.koi-minimap-svg')!;
     const win = container.querySelector<SVGRectElement>('.koi-minimap-window')!;
+    // The minimap's own viewBox IS the content bounds — the window rect must stay clamped inside it.
+    const [cx, cy, cw, ch] = (mini.getAttribute('viewBox') ?? '').split(/\s+/).map(Number);
 
-    // The window rect equals the current viewBox (x, y, w, h) — one source of truth.
-    const [vx, vy, vw, vh] = viewBoxNumbers(svg);
-    expect(Number(win.getAttribute('x'))).toBeCloseTo(vx, 6);
-    expect(Number(win.getAttribute('y'))).toBeCloseTo(vy, 6);
-    expect(Number(win.getAttribute('width'))).toBeCloseTo(vw, 6);
-    expect(Number(win.getAttribute('height'))).toBeCloseTo(vh, 6);
+    const expectClampedToView = () => {
+      const [vx, vy, vw, vh] = viewBoxNumbers(svg);
+      const ix1 = Math.max(vx, cx);
+      const iy1 = Math.max(vy, cy);
+      const ix2 = Math.min(vx + vw, cx + cw);
+      const iy2 = Math.min(vy + vh, cy + ch);
+      // The window rect = the visible (view ∩ content) region — tracks the view AND never overflows.
+      expect(Number(win.getAttribute('x'))).toBeCloseTo(ix1, 4);
+      expect(Number(win.getAttribute('y'))).toBeCloseTo(iy1, 4);
+      expect(Number(win.getAttribute('width'))).toBeCloseTo(Math.max(0, ix2 - ix1), 4);
+      expect(Number(win.getAttribute('height'))).toBeCloseTo(Math.max(0, iy2 - iy1), 4);
+      expect(Number(win.getAttribute('x'))).toBeGreaterThanOrEqual(cx - 1e-6);
+      expect(Number(win.getAttribute('width'))).toBeLessThanOrEqual(cw + 1e-6);
+    };
 
-    // Zooming the main canvas in shrinks the window rect in lockstep (the minimap subscribes to changes).
-    const beforeW = Number(win.getAttribute('width'));
+    // Holds at the initial fit (window covers the whole content thumbnail) …
+    expectClampedToView();
+    // … and stays in sync (still clamped) after the canvas zooms.
     container.querySelector<HTMLButtonElement>('.koi-canvas-btn[aria-label="Zoom in"]')!.click();
-    expect(Number(win.getAttribute('width'))).toBeLessThan(beforeW);
-    expect(Number(win.getAttribute('width'))).toBeCloseTo(viewBoxNumbers(svg)[2], 6);
+    expectClampedToView();
+  });
+
+  test('a plain wheel leaves the list to scroll (no zoom); ctrl/⌘+wheel zooms', async () => {
+    const container = ROOT();
+    await createSvgRenderer().render(container, oneNodeFile(), 'light', () => true);
+    const canvas = container.querySelector<HTMLElement>('.koi-canvas')!;
+    const svg = container.querySelector<SVGSVGElement>('.koi-canvas > svg.koi-svg-diagram')!;
+
+    // A plain wheel must NOT zoom (and must not preventDefault) so the surrounding Diagrams list scrolls.
+    const widthBefore = viewBoxNumbers(svg)[2];
+    const plain = new WheelEvent('wheel', { deltaY: -120, bubbles: true, cancelable: true });
+    canvas.dispatchEvent(plain);
+    expect(plain.defaultPrevented).toBe(false);
+    expect(viewBoxNumbers(svg)[2]).toBe(widthBefore); // unchanged → no zoom
+
+    // ctrl+wheel (and trackpad pinch, which arrives the same way) zooms in — the viewBox window shrinks.
+    // happy-dom's WheelEvent ctor drops `ctrlKey`, so set it explicitly on the dispatched event.
+    const zoom = new WheelEvent('wheel', { deltaY: -120, bubbles: true, cancelable: true });
+    Object.defineProperty(zoom, 'ctrlKey', { value: true });
+    canvas.dispatchEvent(zoom);
+    expect(viewBoxNumbers(svg)[2]).toBeLessThan(widthBefore);
   });
 
   test('a pointerdown on the minimap does not throw and is not treated as a canvas pan', async () => {
