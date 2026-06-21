@@ -490,27 +490,24 @@ export function init(): void {
 
   const treeBodyEl = el<HTMLElement>('filetree-body');
   const treeTitleEl = el<HTMLElement>('filetree-title');
-  const treeBtn = el<HTMLButtonElement>('btn-files');
   const filesSect = el<HTMLElement>('rail-files');
   const splitEl = el<HTMLElement>('split');
 
-  // Open/collapse a left-sidebar section, keeping its header's aria-expanded — and, for the Files
-  // section, the toolbar toggle's aria-pressed — in step. The single source of truth for section state.
+  // Open/collapse a left-sidebar section, keeping its header's aria-expanded in step. The single
+  // source of truth for section state.
   function setRailSectionOpen(sect: HTMLElement, open: boolean): void {
     sect.dataset.open = open ? 'true' : 'false';
     sect.querySelector('.rail-sect-head')?.setAttribute('aria-expanded', String(open));
-    if (sect.id === 'rail-files') treeBtn.setAttribute('aria-pressed', String(open));
   }
 
-  // The Files section of the single left sidebar is collapsible; #btn-files and the section header both
-  // toggle it, and the choice is persisted. (The file tree no longer has its own column — it's one
-  // section of the unified rail.)
+  // The Files section of the single left sidebar is collapsible; the section header (and ⌘B) toggle
+  // it, and the choice is persisted. (The file tree no longer has its own column — it's one section
+  // of the unified rail.)
   const FILETREE_VIS_KEY = 'koine.studio.filetree';
   function applyFileTreeVisibility(visible: boolean): void {
     setRailSectionOpen(filesSect, visible);
   }
   function showFileTreeChrome(): void {
-    treeBtn.hidden = false;
     applyFileTreeVisibility((localStorage.getItem(FILETREE_VIS_KEY) ?? '1') !== '0');
   }
   function toggleFileTree(): void {
@@ -2487,7 +2484,6 @@ export function init(): void {
   }
 
   initSplitResizer({ split: el('split'), handle: el('split-resizer') });
-  treeBtn.addEventListener('click', () => toggleFileTree());
 
   // Left sidebar width — the single rail (Files / Explorer / Overview / Documentation).
   initEdgeResizer({
@@ -2501,7 +2497,7 @@ export function init(): void {
   });
 
   // Left-sidebar section disclosure: clicking a header collapses/expands its body (routed through
-  // setRailSectionOpen so the Files section's toolbar toggle stays in step).
+  // setRailSectionOpen, the single source of truth for section state).
   for (const head of Array.from(document.querySelectorAll<HTMLButtonElement>('.rail-sect-head'))) {
     head.addEventListener('click', () => {
       const sect = head.closest<HTMLElement>('.rail-sect');
