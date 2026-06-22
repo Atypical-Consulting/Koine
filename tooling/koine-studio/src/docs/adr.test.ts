@@ -10,7 +10,7 @@ import {
   parseAdr,
   parseAdrNumberFromFilename,
   renderAdr,
-} from '@/adr';
+} from '@/docs/adr';
 
 function sampleAdr(): Adr {
   return {

@@ -44,8 +44,8 @@ import { renderDiagrams } from '@/diagrams';
 import { setDiagramPersistScope } from '@/diagrams-svg';
 import { mergeDiagramGraphs } from '@/modelTables';
 import { type GlossaryHandlers } from '@/glossary';
-import { createDocsStore } from '@/docsStore';
-import { renderAdrPanel, renderNotesPanel, type DocsPanelHandlers } from '@/docsPanel';
+import { createDocsStore } from '@/docs/docsStore';
+import { renderAdrPanel, renderNotesPanel, type DocsPanelHandlers } from '@/docs/docsPanel';
 import {
   ALL_CONTEXTS,
   fileContextFollow,
@@ -65,7 +65,7 @@ import { ModelOutlinePanel } from '@/panels/ModelOutlinePanel';
 import { EventsPanel } from '@/panels/EventsPanel';
 import { RelationshipsPanel } from '@/panels/RelationshipsPanel';
 import { GlossaryPanel } from '@/panels/GlossaryPanel';
-import { DocsPanelHost } from '@/panels/DocsPanelHost';
+import { DocsPanelHost } from '@/docs/DocsPanelHost';
 import { appStore } from '@/store/index';
 import { DEFAULT_CENTER, isValidCenter, type RightView } from '@/store/slices/uiChrome';
 import type { DomainIndex } from '@/aiPanel';

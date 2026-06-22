@@ -17,7 +17,7 @@ import {
   parseAdr,
   parseAdrNumberFromFilename,
   renderAdr,
-} from '@/adr';
+} from '@/docs/adr';
 
 /** Workspace-relative folders the docs surface owns. */
 export const ADR_DIR = 'docs/adr';
