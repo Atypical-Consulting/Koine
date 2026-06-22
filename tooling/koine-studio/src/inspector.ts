@@ -93,7 +93,7 @@ export function renderInspector(element: InspectorElement | null, handlers: Insp
   root.appendChild(renderHeader(element, handlers));
   root.appendChild(renderGeneral(element, handlers));
 
-  appendProperties(root, element.properties);
+  appendPropertyTable(root, 'Properties', element.properties);
   appendList(root, 'Behaviors', element.behaviors);
   appendList(root, 'Values', element.values);
   appendList(root, 'Invariants', element.invariants ?? []);
@@ -227,25 +227,52 @@ function appendList(root: HTMLElement, title: string, items: string[]): void {
   root.appendChild(section);
 }
 
-/** Append the Properties compartment; computed (derived) properties render italic. A no-op when empty. */
-function appendProperties(root: HTMLElement, items: { text: string; computed: boolean }[]): void {
+/**
+ * Append the Properties compartment as a two-column table (property name | type) so the type column
+ * aligns to a single left edge regardless of name length — easier to scan than colon-separated rows.
+ * Each item's `text` is pre-formatted as `name: Type`; the first colon splits the two columns (a
+ * colon-less item lands wholly in the name column). Computed (derived) properties render italic.
+ * A no-op when `items` is empty.
+ */
+function appendPropertyTable(
+  root: HTMLElement,
+  title: string,
+  items: { text: string; computed: boolean }[],
+): void {
   if (!items.length) return;
   const section = document.createElement('section');
   section.className = 'koi-inspector-section';
 
   const h = document.createElement('h5');
   h.className = 'koi-inspector-section-title';
-  h.textContent = 'Properties';
+  h.textContent = title;
   section.appendChild(h);
 
-  const ul = document.createElement('ul');
-  ul.className = 'koi-inspector-list';
+  const table = document.createElement('table');
+  table.className = 'koi-inspector-table';
+  const tbody = document.createElement('tbody');
   for (const item of items) {
-    const li = document.createElement('li');
-    li.className = item.computed ? 'koi-inspector-item koi-inspector-item-computed' : 'koi-inspector-item';
-    li.textContent = item.text;
-    ul.appendChild(li);
+    const idx = item.text.indexOf(':');
+    const name = idx === -1 ? item.text.trim() : item.text.slice(0, idx).trim();
+    const type = idx === -1 ? '' : item.text.slice(idx + 1).trim();
+
+    const row = document.createElement('tr');
+    row.className = item.computed ? 'koi-inspector-row koi-inspector-row-computed' : 'koi-inspector-row';
+
+    // The property name labels its row, so it is a row-scoped header (accessible + DevTools-clean).
+    const nameCell = document.createElement('th');
+    nameCell.scope = 'row';
+    nameCell.className = 'koi-inspector-prop-name';
+    nameCell.textContent = name;
+
+    const typeCell = document.createElement('td');
+    typeCell.className = 'koi-inspector-prop-type';
+    typeCell.textContent = type;
+
+    row.append(nameCell, typeCell);
+    tbody.appendChild(row);
   }
-  section.appendChild(ul);
+  table.appendChild(tbody);
+  section.appendChild(table);
   root.appendChild(section);
 }

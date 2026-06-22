@@ -24,6 +24,7 @@ import {
   removeRecentFolder,
   pinRecentFolder,
   clearRecentFolders,
+  PREVIEW_TARGETS,
 } from './store';
 import type { ChatMessage } from './ai';
 
@@ -326,11 +327,34 @@ describe('active context persistence (#146)', () => {
     expect(loadActiveContext('scratch')).toBe('all');
   });
 
-  test('keeps each workspace’s scope independent', () => {
+  test('keeps each workspace scope independent', () => {
     saveActiveContext('/work/billing', 'Billing');
     saveActiveContext('/work/pizzeria', 'Kitchen');
     expect(loadActiveContext('/work/billing')).toBe('Billing');
     expect(loadActiveContext('/work/pizzeria')).toBe('Kitchen');
     expect(loadActiveContext('scratch')).toBeNull();
+  });
+});
+
+describe('Output / previewTarget setting', () => {
+  beforeEach(() => localStorage.clear());
+
+  test('defaults to C#', () => {
+    expect(DEFAULT_SETTINGS.previewTarget).toBe('csharp');
+    expect(loadSettings().previewTarget).toBe('csharp');
+  });
+
+  test('round-trips a chosen target', () => {
+    saveSettings({ ...DEFAULT_SETTINGS, previewTarget: 'php' });
+    expect(loadSettings().previewTarget).toBe('php');
+  });
+
+  test('coerces a bogus stored target back to the default', () => {
+    saveSettings({ ...DEFAULT_SETTINGS, previewTarget: 'rust' as never });
+    expect(loadSettings().previewTarget).toBe('csharp');
+  });
+
+  test('PREVIEW_TARGETS lists the four supported languages in order', () => {
+    expect(PREVIEW_TARGETS).toEqual(['csharp', 'typescript', 'python', 'php']);
   });
 });

@@ -335,7 +335,36 @@
   padding: 0.1rem 0;
 }
 
-.koi-inspector-item-computed {
+/* Properties compartment rendered as an aligned two-column table (name | type). */
+.koi-inspector-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.koi-inspector-prop-name,
+.koi-inspector-prop-type {
+  font-family: var(--koi-font-mono);
+  font-size: var(--koi-text-base-plus);
+  font-weight: 400;
+  text-align: left;
+  vertical-align: baseline;
+  padding: 0.1rem 0;
+}
+
+.koi-inspector-prop-name {
+  /* Shrink to content (with the type column taking the rest) so every type aligns to one left edge. */
+  width: 1%;
+  white-space: nowrap;
+  padding-right: 0.75rem;
+  color: var(--koi-muted);
+}
+
+.koi-inspector-prop-type {
+  color: var(--koi-fg);
+}
+
+/* Computed (derived) properties render italic (font-style inherits into the row's cells). */
+.koi-inspector-row-computed {
   font-style: italic;
 }
 

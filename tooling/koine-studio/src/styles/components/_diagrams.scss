@@ -284,8 +284,12 @@ $ddd-kinds: (
 .koi-svg-node[data-line] {
   cursor: pointer;
 }
+/* Hover uses the neutral foreground, NOT the brand accent: every node already carries a meaningful
+   per-kind border colour (the $ddd-kinds map) and `context` nodes are accent-filled, so an accent
+   hover would erase the semantic colour and clash. --koi-fg reads as near-white on dark / near-black
+   on light — a theme-aware neutral cue in both. */
 .koi-svg-node[data-line]:hover .koi-svg-node-box {
-  stroke: var(--koi-accent);
+  stroke: var(--koi-fg);
   stroke-width: 2;
 }
 

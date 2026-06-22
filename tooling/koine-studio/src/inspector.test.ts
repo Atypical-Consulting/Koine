@@ -94,14 +94,39 @@ describe('renderInspector', () => {
   test('lists every property, behavior, invariant, published event, and the repository', () => {
     const el = renderInspector(fullElement, noop);
     const text = el.textContent ?? '';
-    for (const s of ['id: OrderId', 'total: Money', 'submit(): void', 'cancel(): void', 'total >= 0', 'OrderPlaced', 'OrderRepository']) {
+    for (const s of ['submit(): void', 'cancel(): void', 'total >= 0', 'OrderPlaced', 'OrderRepository']) {
       expect(text).toContain(s);
     }
+    // Properties render as a two-column table (name | type), not colon-joined list rows.
+    const rows = Array.from(el.querySelectorAll('.koi-inspector-table tr')).map((tr) =>
+      Array.from(tr.querySelectorAll('th, td')).map((c) => c.textContent),
+    );
+    expect(rows).toEqual([
+      ['id', 'OrderId'],
+      ['total', 'Money'],
+    ]);
     // Section headers are present for the populated compartments.
     const headers = Array.from(el.querySelectorAll('.koi-inspector-section-title')).map((n) => n.textContent);
     expect(headers).toEqual(
       expect.arrayContaining(['Properties', 'Behaviors', 'Invariants', 'Published Events', 'Repository']),
     );
+  });
+
+  test('renders properties as row-scoped table headers and keeps a colon-less name in the name column', () => {
+    const el = renderInspector(
+      {
+        ...fullElement,
+        properties: [
+          { text: 'id: OrderId', computed: false },
+          { text: 'archived', computed: false },
+        ],
+      },
+      noop,
+    );
+    const rows = Array.from(el.querySelectorAll<HTMLTableRowElement>('.koi-inspector-table tr'));
+    expect(rows.map((tr) => tr.querySelector('th')?.textContent)).toEqual(['id', 'archived']);
+    expect(rows.map((tr) => tr.querySelector('th')?.getAttribute('scope'))).toEqual(['row', 'row']);
+    expect(rows.map((tr) => tr.querySelector('td')?.textContent)).toEqual(['OrderId', '']);
   });
 
   test('omits empty compartments', () => {
@@ -204,8 +229,12 @@ describe('buildInspectorElement', () => {
     ]);
 
     const el = renderInspector(built, { onGoto: () => {} });
-    const computedItem = el.querySelector('.koi-inspector-item-computed');
-    expect(computedItem).not.toBeNull();
-    expect(computedItem!.textContent).toBe('subtotal: Int');
+    const rows = Array.from(el.querySelectorAll<HTMLTableRowElement>('.koi-inspector-table tr'));
+    const computedRows = rows.filter((tr) => tr.classList.contains('koi-inspector-row-computed'));
+    expect(computedRows.map((tr) => tr.querySelector('th')?.textContent)).toEqual(['subtotal']);
+    expect(computedRows[0].querySelector('td')?.textContent).toBe('Int');
+    // The plain field row is NOT marked computed.
+    const fieldRow = rows.find((tr) => tr.querySelector('th')?.textContent === 'quantity');
+    expect(fieldRow?.classList.contains('koi-inspector-row-computed')).toBe(false);
   });
 });
