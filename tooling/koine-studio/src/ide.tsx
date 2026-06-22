@@ -61,7 +61,7 @@ import {
   type DiagramNodeNavigateDetail,
   type EmptyConceptKind,
   type EmptyStatePickDetail,
-} from '@/diagrams-svg';
+} from '@/diagrams/diagrams-svg';
 import { isAllContexts } from '@/activeContext';
 import { appStore } from '@/store/index';
 import { badgeCounts, createDiagCountGate } from '@/diagnostics/diagCountGate';

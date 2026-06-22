@@ -10,10 +10,10 @@
 // Layout is delegated to elkjs' bundled, worker-less build, dynamically imported and cached so it
 // code-splits out of the main bundle (same discipline as Mermaid) and dodges Tauri's strict CSP (the
 // non-bundled build spawns a Web Worker from a blob: URL, which CSP forbids).
-import type { DiagramRenderer } from '@/diagrams';
+import type { DiagramRenderer } from '@/diagrams/diagrams';
 import { mergeGraphsForView } from '@/modelTables';
-import { centerOn, clampScale, fit, panBy, viewAtScale, zoomAt, zoomPercent, type Size, type ViewBox } from '@/canvasView';
-import { edgeRoute, truncateToWidth, type Rect } from '@/diagramLayout';
+import { centerOn, clampScale, fit, panBy, viewAtScale, zoomAt, zoomPercent, type Size, type ViewBox } from '@/diagrams/canvasView';
+import { edgeRoute, truncateToWidth, type Rect } from '@/diagrams/diagramLayout';
 import { clearDiagramPositions, loadDiagramPositions, loadDiagramZoom, saveDiagramPositions, saveDiagramZoom } from '@/store';
 import type { DiagramEdge, DiagramGraph, DiagramMember, DiagramNode, SourceSpan } from '@/lsp/lsp';
 // Type-only import (erased at build time) of elkjs' own API surface, so our layout graph type-checks

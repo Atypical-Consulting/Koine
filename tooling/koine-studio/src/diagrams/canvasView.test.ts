@@ -3,7 +3,7 @@
 // move/scale it without ever touching the DOM. The renderer (diagrams-svg.ts) owns the SVG and the
 // pointer plumbing; this module owns the geometry, so it can be reasoned about and tested in isolation.
 import { describe, expect, test } from 'vitest';
-import { zoomAt, panBy, centerOn, fit, viewAtScale, zoomPercent, clampScale, type ViewBox } from '@/canvasView';
+import { zoomAt, panBy, centerOn, fit, viewAtScale, zoomPercent, clampScale, type ViewBox } from '@/diagrams/canvasView';
 
 /** The on-screen fractional position of a content point within a viewBox (0..1 along each axis). */
 function frac(vb: ViewBox, cx: number, cy: number): { fx: number; fy: number } {

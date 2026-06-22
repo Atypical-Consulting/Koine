@@ -40,8 +40,8 @@ import type {
 } from '@/lsp/lsp';
 import type { Platform } from '@/host';
 import type { PreviewTarget } from '@/store';
-import { renderDiagrams } from '@/diagrams';
-import { setDiagramPersistScope } from '@/diagrams-svg';
+import { renderDiagrams } from '@/diagrams/diagrams';
+import { setDiagramPersistScope } from '@/diagrams/diagrams-svg';
 import { mergeDiagramGraphs } from '@/modelTables';
 import { type GlossaryHandlers } from '@/glossary';
 import { createDocsStore } from '@/docs/docsStore';
