@@ -9,7 +9,7 @@ import {
   canGenerate,
   defaultProjectName,
   isValidProjectName,
-} from '@/generateProject';
+} from '@/export/generateProject';
 
 type Target = 'csharp' | 'typescript' | 'python' | 'php';
 type StatusKind = 'info' | 'error' | 'success';

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import JSZip from 'jszip';
-import { buildSourceZip } from '@/sourceZip';
+import { buildSourceZip } from '@/export/sourceZip';
 
 describe('buildSourceZip', () => {
   it('bundles every .koi file under a single root folder, preserving relative paths', async () => {

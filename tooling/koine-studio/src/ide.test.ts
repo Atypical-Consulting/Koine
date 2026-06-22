@@ -10,7 +10,7 @@
 import { afterEach, beforeEach, describe, expect, vi, test } from 'vitest';
 import { EditorView } from '@codemirror/view';
 import type { FsEntry, KoiFile, LspTransport, Platform } from '@/host/types';
-import { buildShareUrl, buildWorkspaceShareUrl } from '@/share';
+import { buildShareUrl, buildWorkspaceShareUrl } from '@/export/share';
 
 // The studio reads `__APP_VERSION__` (a vite build-time define) once at boot for the status bar.
 // vitest does not define it, so stub it as a global before any init() runs — test scaffolding only,

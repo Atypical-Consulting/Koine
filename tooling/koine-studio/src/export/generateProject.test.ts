@@ -7,7 +7,7 @@ import {
   synthesizeCsproj,
   buildProjectZip,
   canGenerate,
-} from '@/generateProject';
+} from '@/export/generateProject';
 
 describe('sanitizeProjectName', () => {
   it('keeps a valid dotted identifier unchanged', () => {

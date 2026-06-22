@@ -5,7 +5,7 @@ import {
   MAX_SHARE_HASH_LEN,
   readModelFromHash,
   workspaceShareUrlOrNull
-} from '@/share';
+} from '@/export/share';
 
 // readModelFromHash reads window.location.hash; set it via jsdom and reset after each test.
 function setHash(hash: string): void {

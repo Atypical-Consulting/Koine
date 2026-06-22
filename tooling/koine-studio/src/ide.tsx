@@ -42,9 +42,9 @@ import { applyAppearance } from '@/appearance';
 import { initSplitResizer, initEdgeResizer } from '@/resize';
 import { createHelpOverlay } from '@/shared/help';
 import { createAboutDialog } from '@/about';
-import { createGenerateProject } from '@/generateProjectWizard';
-import { sanitizeProjectName } from '@/generateProject';
-import { buildSourceZip } from '@/sourceZip';
+import { createGenerateProject } from '@/export/generateProjectWizard';
+import { sanitizeProjectName } from '@/export/generateProject';
+import { buildSourceZip } from '@/export/sourceZip';
 import { formatChord } from '@/shared/platform';
 import {
   DIAGRAM_ADD_TYPE_EVENT,
@@ -69,7 +69,7 @@ import { type SelectedElement } from '@/selection';
 import { resolveInspectableQn } from '@/modelIndex';
 import { type InspectorElement } from '@/inspector';
 import { createAssistantPanel, type AssistantPanel, type AssistantContext } from '@/aiPanel';
-import { clearModelHash, readModelFromHash, workspaceShareUrlOrNull } from '@/share';
+import { clearModelHash, readModelFromHash, workspaceShareUrlOrNull } from '@/export/share';
 import { handleBeforeUnload } from '@/dirty';
 import { render } from 'preact';
 import { createHistoryController } from '@/historyController';

@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import JSZip from 'jszip';
-import { createGenerateProject, type GenerateProjectDeps, type GenerateProjectHandle } from '@/generateProjectWizard';
+import { createGenerateProject, type GenerateProjectDeps, type GenerateProjectHandle } from '@/export/generateProjectWizard';
 import type { EmitPreviewResult } from '@/lsp/lsp';
 
 // Flush queued microtasks + timers so the wizard's async steps (emitPreview, zip build) settle.
