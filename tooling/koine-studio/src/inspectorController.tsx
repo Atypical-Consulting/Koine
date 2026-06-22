@@ -64,6 +64,7 @@ import { EventsPanel } from './panels/EventsPanel';
 import { RelationshipsPanel } from './panels/RelationshipsPanel';
 import { GlossaryPanel } from './panels/GlossaryPanel';
 import { ChromeTabs } from './panels/ChromeTabs';
+import { DocsPanelHost } from './panels/DocsPanelHost';
 import { appStore } from './store/index';
 import type { DomainIndex } from './aiPanel';
 import { DEFAULT_MODE_ID, isValidModeId } from './modes';
@@ -592,11 +593,17 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
         .catch((e) => docMessage(glossaryView, 'Saving description failed: ' + String(e), 'error')),
   };
 
-  // --- ADR & Notes documentation surface (#174) ------------------------------
-  // Folder-derived (NOT invalidated by `.koi` edits): it reloads when the workspace folder changes
-  // (openFolderPath flips docsLoaded) and after any create/save in the panel.
+  // --- ADR & Notes documentation surface (#174, #193) -----------------------
+  // Folder-derived (NOT invalidated by `.koi` edits). The <DocsPanelHost> Preact host (mounted into
+  // view-docs at init) subscribes to the workspace slice's folderRootToken and re-runs `loadDocs(host)`
+  // ONLY when the folder changes — so a folder switch reloads the panel while edits leave it put. The
+  // mount node is captured here so the lazy first-load (ensureDocsLoaded on the ADR tab) and the in-panel
+  // create/save reloads can paint into the same node without re-fetching on unrelated edits.
+  let docsMount: HTMLElement | null = null;
   let docsLoaded = false;
-  async function loadDocs(): Promise<void> {
+  async function loadDocs(host?: HTMLElement): Promise<void> {
+    const target = host ?? docsMount;
+    if (!target) return; // the host hasn't mounted yet
     const store = createDocsStore(platform, deps.folderRootToken());
     const reload = (): void => {
       docsLoaded = false;
@@ -610,16 +617,34 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
       onReadNote: (file) => store.readNote(file.token),
       onSaveNote: (file, md) => void store.saveNote(file.token, md).catch(fail('save the note')),
     };
-    docMessage(docsView, 'Loading docs…');
+    docMessage(target, 'Loading docs…');
     try {
       const [adrs, notes] = await Promise.all([store.listAdrs(), store.listNotes()]);
-      docsView.innerHTML = '';
-      docsView.appendChild(renderDocsPanel({ canWrite: store.canWrite, adrs, notes, renderMarkdown }, handlers));
+      target.replaceChildren(renderDocsPanel({ canWrite: store.canWrite, adrs, notes, renderMarkdown }, handlers));
       docsLoaded = true;
     } catch (e) {
-      docMessage(docsView, 'Docs request failed: ' + String(e), 'error');
+      docMessage(target, 'Docs request failed: ' + String(e), 'error');
     }
   }
+
+  // Mount the folder-derived Docs host into view-docs. On mount it hands us the node (captured for the
+  // lazy first-load + in-panel reloads) WITHOUT fetching — the lazy ADR-tab path owns that first paint,
+  // matching the original behaviour and keeping the fetch off the construction frame (workspace isn't
+  // wired yet). A real folder-token change re-runs the fetch into the same node.
+  render(
+    <DocsPanelHost
+      store={appStore}
+      onMount={(host) => {
+        docsMount = host;
+      }}
+      load={(host) => {
+        docsMount = host;
+        docsLoaded = false;
+        void loadDocs(host);
+      }}
+    />,
+    docsView,
+  );
 
   // --- the DDD workspace (#142): outline / inspector / cross-highlight -------
   // A thin handle over the app store's `selection` slice (the single source of truth): the outline,

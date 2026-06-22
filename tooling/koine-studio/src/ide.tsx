@@ -65,7 +65,9 @@ import { type SelectedElement } from './selection';
 import { type InspectorElement } from './inspector';
 import { createAssistantPanel, type AssistantPanel, type AssistantContext } from './aiPanel';
 import { clearModelHash, readModelFromHash, workspaceShareUrlOrNull } from './share';
-import { dirtyCount, handleBeforeUnload, titleWithDirty } from './dirty';
+import { handleBeforeUnload } from './dirty';
+import { render } from 'preact';
+import { UnsavedIndicator } from './panels/UnsavedIndicator';
 import { createWorkspaceController, type WorkspaceController } from './workspaceController';
 import { createConfirmDialog } from './overlay';
 
@@ -189,25 +191,29 @@ export function init(): void {
 
   // Global unsaved-work surfacing: the document title gains a `•` and a clickable "N unsaved" pill
   // appears beside the status whenever any open buffer is dirty. baseTitle is captured once, clean.
+  // The pill is now the <UnsavedIndicator> Preact panel (#193) bound to the existing static button: it
+  // subscribes to the workspace slice's dirty count, sets the button's text/hidden/aria-label + the
+  // title bullet, and wires Save-all. So `refreshDirtyIndicator` here just projects the controller's
+  // live buffers Map into the slice on every dirty transition (edit, save, save-all, rename, swap) —
+  // the panel re-renders off the slice. (The button stays index.html's element, so the controller's
+  // `el(...)` lookups and the test's getElementById are untouched.)
   const baseTitle = document.title;
   const unsavedEl = el('unsaved-indicator') as HTMLButtonElement;
-  unsavedEl.addEventListener('click', () => void workspace.saveAllDirty());
-  // The indicator is refreshed from every renderTree(); cache the last count so an unchanged dirty
-  // total (the common case — most renders don't change it) skips the title/DOM writes.
-  let lastDirtyCount = -1;
+  // <UnsavedIndicator> renders no tree of its own (it governs the static button via effects), so it
+  // mounts into a throwaway holder rather than the button — keeping the reconciler off the button node.
+  const unsavedHost = document.createElement('div');
+  render(
+    <UnsavedIndicator
+      store={appStore}
+      host={unsavedEl}
+      baseTitle={baseTitle}
+      onSaveAll={() => void workspace.saveAllDirty()}
+    />,
+    unsavedHost,
+  );
   function refreshDirtyIndicator(): void {
-    const n = dirtyCount(workspace.buffers);
-    if (n === lastDirtyCount) return;
-    lastDirtyCount = n;
-    document.title = titleWithDirty(baseTitle, n);
-    if (n > 0) {
-      unsavedEl.textContent = `${n} unsaved`;
-      unsavedEl.setAttribute('aria-label', `Save ${n} unsaved file${n === 1 ? '' : 's'}`);
-      unsavedEl.hidden = false;
-    } else {
-      unsavedEl.textContent = '';
-      unsavedEl.hidden = true;
-    }
+    appStore.getState().setBuffers(Object.fromEntries(workspace.buffers));
+    appStore.getState().setActiveUri(workspace.activeUri());
   }
 
   const lsp = new KoineLsp(platform.createLspTransport());
@@ -638,6 +644,9 @@ export function init(): void {
     // the render paths, so the initial ensureLoaded is already scoped even before the dropdown
     // finishes repainting. The Docs surface is folder-derived, so a folder switch must drop it too.
     onFolderOpened: () => {
+      // Publish the new folder token into the workspace slice so the folder-derived <DocsPanelHost>
+      // reloads (it subscribes ONLY to folderRootToken, never to model edits — the #174 contract).
+      appStore.getState().setFolderRootToken(workspace.folderRootToken());
       controller.restoreActiveContext();
       controller.invalidateDocViews();
       controller.invalidateDocsPanel();
