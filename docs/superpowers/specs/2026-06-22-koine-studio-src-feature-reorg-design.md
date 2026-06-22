@@ -36,7 +36,7 @@ keep being found with no config change.
 
 | Folder | Logic modules | Panels folded in (from `panels/`) |
 |---|---|---|
-| `shell/` | ide, editorSession, inspectorController, workspaceController, historyController, ideUtils, dirty, resize | HistoryControls, UnsavedIndicator, StoreInspector |
+| `shell/` | ide, editorSession, inspectorController, workspaceController, historyController, ideUtils, dirty, resize, explorer | HistoryControls, UnsavedIndicator, StoreInspector |
 | `editor/` | editor, actions | — |
 | `lsp/` | lsp | — |
 | `ai/` | ai, aiPanel, assistantTools, secrets | — |
@@ -144,3 +144,12 @@ bundles. CI runs the same scripts.
 - **`index.html` entry path** → `main.ts` deliberately stays at `src/` root; `index.html` is untouched.
 - **`model/` is the largest folder** (13 modules + 6 panels) → acceptable as one coherent area; a
   later `model/glossary/` sub-split is possible but out of scope here.
+- **`templates.generated.ts`** (git-ignored, emitted to `src/templates.generated.ts` by
+  `scripts/generate-templates.mjs`) → leave the generated file at `src/` root and the generator
+  unchanged; `welcome/templates.ts` keeps re-exporting it via `@/templates.generated` (the exact-literal
+  move codemod remaps only `@/templates`, never `@/templates.generated`). Do not "fix" this to live
+  under `welcome/`.
+- **`store.ts` vs `store/` name shadow** → once `store.ts` is renamed, the bare specifier `@/store`
+  would silently re-resolve to the `store/` zustand index. The rename `git mv` and the
+  `@/store`→`@/settings/persistence` rewrite MUST land in the **same commit**, with a post-commit grep
+  asserting no bare `@/store` specifier literal remains. This is the single riskiest step.
