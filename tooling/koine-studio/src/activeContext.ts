@@ -4,8 +4,10 @@
 // filter, never a mutation — every helper here derives a narrowed projection from existing data
 // (`DiagramGraph` / `GlossaryModel` / `contextMap()`) and the compiler/LSP/`Ast/` stay untouched.
 //
-// Deliberately tiny and DOM-free so it unit-tests under happy-dom; the bus mirrors the selection bus
-// (selection.ts) so the switcher (ide.ts) and the surfaces subscribe to one source of truth.
+// Deliberately tiny and DOM-free so it unit-tests under happy-dom. The active scope itself lives in the
+// app store's `activeContext` slice (src/store/slices/activeContext.ts) — the single source of truth the
+// switcher (inspectorController) writes and every scoped surface reads; this file is now just the pure
+// scoping helpers + the ALL_CONTEXTS / ContextScope vocabulary they share.
 import type { ContextMapResult, DiagramGraph, DocsFile, GlossaryModel } from './lsp';
 
 /** The sentinel scope meaning "don't narrow — show every context". A real context name never collides
@@ -79,6 +81,19 @@ export function scopeGlossaryModel(model: GlossaryModel, scope: ContextScope): G
 }
 
 /**
+ * Narrow a {@link ContextMapResult} to a single bounded context by keeping only the relations that
+ * touch that context — i.e. it is the relation's `upstream` or `downstream` endpoint (the `contexts`
+ * list is left as-is). {@link ALL_CONTEXTS} is the identity — the same context map is returned untouched.
+ */
+export function scopeContextMap(contextMap: ContextMapResult, scope: ContextScope): ContextMapResult {
+  if (isAllContexts(scope)) return contextMap;
+  return {
+    ...contextMap,
+    relations: contextMap.relations.filter((r) => r.upstream === scope || r.downstream === scope),
+  };
+}
+
+/**
  * Narrow the living-docs files behind the Diagrams tab to a single bounded context: each diagram's
  * structured graph is scoped (the renderer draws from `diagram.graph`), diagrams left with no nodes are
  * dropped, and files left with no diagrams fall away — so a context with no diagram simply shows the
@@ -110,38 +125,4 @@ export function fileContextFollow(fileContexts: readonly string[], scope: Contex
   const context = fileContexts[0];
   if (!context || context === scope) return undefined;
   return context;
-}
-
-/** A minimal observable holding the active scope; the switcher writes it, the surfaces subscribe. */
-export interface ActiveContextBus {
-  /** The current scope (a context name, or {@link ALL_CONTEXTS}). */
-  get(): ContextScope;
-  /** Set the scope; notifies subscribers only on a real change (same value in = no churn). */
-  set(scope: ContextScope): void;
-  /** Subscribe to scope changes; returns an unsubscribe handle. */
-  subscribe(fn: (scope: ContextScope) => void): () => void;
-}
-
-/** Creates an independent active-context bus, defaulting to {@link ALL_CONTEXTS}. */
-export function createActiveContextBus(initial: ContextScope = ALL_CONTEXTS): ActiveContextBus {
-  let current: ContextScope = initial;
-  const subscribers = new Set<(scope: ContextScope) => void>();
-
-  return {
-    get: () => current,
-    set(scope) {
-      // Re-selecting the active scope is a no-op: the switcher repaints idempotently and an edit can
-      // re-assert the restored scope, so an unconditional notify would re-render the surfaces for nothing.
-      if (scope === current) return;
-      current = scope;
-      // Snapshot before iterating so a subscriber that unsubscribes mid-notify can't mutate the set.
-      for (const fn of [...subscribers]) fn(current);
-    },
-    subscribe(fn) {
-      subscribers.add(fn);
-      return () => {
-        subscribers.delete(fn);
-      };
-    },
-  };
 }

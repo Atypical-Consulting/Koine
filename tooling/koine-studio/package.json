@@ -41,10 +41,13 @@
     "elkjs": "^0.11.1",
     "jszip": "^3.10.1",
     "mermaid": "^11.4.0",
-    "openai": "^6.44.0"
+    "openai": "^6.44.0",
+    "preact": "^10.24.0",
+    "zustand": "^5.0.0"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2",
+    "@testing-library/preact": "^3.2.4",
     "cross-env": "^10.0.0",
     "fake-indexeddb": "^6.2.5",
     "happy-dom": "^20.10.6",

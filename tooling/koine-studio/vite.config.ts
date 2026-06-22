@@ -61,6 +61,17 @@ export default defineConfig(({ mode }) => {
   return {
     plugins: [templateManifestPlugin()],
 
+    // Alias React's runtime to Preact's compat layer so the `zustand` React hook (`useStore`) and
+    // any React-shaped deps resolve to Preact. Vanilla Zustand (`zustand/vanilla`) needs none of this;
+    // the alias only matters once Preact panels consume the store through the React entry point.
+    resolve: {
+      alias: {
+        react: "preact/compat",
+        "react-dom": "preact/compat",
+        "react/jsx-runtime": "preact/jsx-runtime",
+      },
+    },
+
     // Sub-path base for the deployed web build; '/' for local dev and the Tauri build.
     base: web ? studioBase || "/" : "/",
 
