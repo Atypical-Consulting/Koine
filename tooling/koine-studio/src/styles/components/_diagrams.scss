@@ -76,6 +76,13 @@
 .koi-canvas--panning {
   cursor: grabbing;
 }
+.koi-canvas--dragging {
+  cursor: grabbing;
+}
+/* authoring: nodes invite a drag-to-move (overrides the navigate pointer cursor while editing). */
+.koi-canvas--editing .koi-svg-node {
+  cursor: move;
+}
 .koi-diagram-surface .koi-canvas svg,
 .koi-canvas > svg.koi-svg-diagram {
   display: block;

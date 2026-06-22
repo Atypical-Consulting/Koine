@@ -48,9 +48,11 @@ import { buildSourceZip } from './sourceZip';
 import { formatChord } from './platform';
 import { renderDiagrams } from './diagrams';
 import {
+  DIAGRAM_RELAYOUT_EVENT,
   NODE_EDIT_EVENT,
   NODE_NAVIGATE_EVENT,
   setDiagramEditing,
+  setDiagramPersistScope,
   type DiagramNodeEditDetail,
   type DiagramNodeNavigateDetail,
 } from './diagrams-svg';
@@ -1478,6 +1480,8 @@ export function init(): void {
       // Scope the diagrams to the active bounded context (#146): each diagram's graph is narrowed and
       // emptied diagrams/files drop out, so a context shows only its own diagrams. "All" is the identity.
       const files = scopeDocsFiles(res.files, activeContext.get());
+      // Scope persisted node positions to this workspace so a folder restores its own manual layout.
+      setDiagramPersistScope(contextWorkspaceKey());
       await renderDiagrams(diagramsView, files, currentTheme(), () => seq === diagramsSeq);
       if (seq === diagramsSeq) docViewsLoaded.diagrams = true;
     } catch (e) {
@@ -1534,6 +1538,11 @@ export function init(): void {
   diagramsView.addEventListener(NODE_EDIT_EVENT, (e) => {
     const detail = (e as CustomEvent<DiagramNodeEditDetail>).detail;
     if (detail) void applyDiagramEdit(detail);
+  });
+
+  // Auto-arrange (authoring): the canvas cleared its saved positions; re-render so ELK lays it out fresh.
+  diagramsView.addEventListener(DIAGRAM_RELAYOUT_EVENT, () => {
+    void loadDiagrams();
   });
 
   // Map a node gesture to a StructuredEdit, apply it through #91's round-trip, and patch the buffer.

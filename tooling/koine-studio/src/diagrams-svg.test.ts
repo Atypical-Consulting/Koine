@@ -4,7 +4,15 @@
 // without re-querying. Layout coordinates are NOT asserted (layout-lib-dependent); we assert
 // structure, the node DOM contract, and the per-diagram fallback robustness only.
 import { afterEach, describe, expect, test } from 'vitest';
-import { createSvgRenderer, NODE_NAVIGATE_EVENT, type DiagramNodeNavigateDetail } from './diagrams-svg';
+import {
+  createSvgRenderer,
+  setDiagramEditing,
+  setDiagramPersistScope,
+  DIAGRAM_RELAYOUT_EVENT,
+  NODE_NAVIGATE_EVENT,
+  type DiagramNodeNavigateDetail,
+} from './diagrams-svg';
+import { loadDiagramPositions, saveDiagramPositions } from './store';
 import type { DocsFile, Diagram, DiagramNode } from './lsp';
 
 const EMPTY_STATE = 'No diagrams yet';
@@ -892,5 +900,111 @@ describe('edge markers + dual cardinalities (authoring overhaul, Phase 1)', () =
     expect(container.querySelectorAll('.koi-svg-diagram .koi-svg-edge-card').length).toBe(0);
     // The semantic label still renders mid-edge.
     expect(container.querySelector('.koi-svg-diagram .koi-svg-edge-label')!.textContent).toBe('go');
+  });
+});
+
+describe('persisted free positioning (authoring overhaul, Phase 2)', () => {
+  afterEach(() => {
+    setDiagramEditing(false);
+    setDiagramPersistScope('scratch');
+    localStorage.clear();
+  });
+
+  /** A two-node aggregate (Order ◇— OrderLine), used by the positioning tests. */
+  function twoNodeFiles(): DocsFile[] {
+    return [
+      file([
+        diagram({
+          nodes: [
+            mkNode({
+              id: 'order',
+              label: 'Order',
+              kind: 'aggregate-root',
+              qualifiedName: 'Ordering.Order',
+              sourceSpan: { file: 'file:///ordering.koi', line: 3, column: 5, endLine: 7, endColumn: 10, offset: 20, length: 5 },
+            }),
+            mkNode({ id: 'line', label: 'OrderLine', kind: 'value-object', qualifiedName: 'Ordering.OrderLine' }),
+          ],
+          edges: [{ from: 'order', to: 'line', label: null, cardinality: '*', sourceCardinality: '1', arrowKind: 'composition' }],
+        }),
+      ]),
+    ];
+  }
+
+  test('places nodes at their saved positions instead of re-flowing with elk (no snap-back)', async () => {
+    setDiagramPersistScope('ws-test');
+    saveDiagramPositions('ws-test:koi-domain-diagram', {
+      'Ordering.Order': { x: 500, y: 120 },
+      'Ordering.OrderLine': { x: 820, y: 360 },
+    });
+
+    const container = ROOT();
+    await createSvgRenderer().render(container, twoNodeFiles(), 'light', () => true);
+
+    const order = container.querySelector('.koi-svg-diagram .koi-svg-node[data-qname="Ordering.Order"]')!;
+    expect(order.getAttribute('transform')).toBe('translate(500, 120)');
+    const line = container.querySelector('.koi-svg-diagram .koi-svg-node[data-qname="Ordering.OrderLine"]')!;
+    expect(line.getAttribute('transform')).toBe('translate(820, 360)');
+  });
+
+  test('the auto-arrange button is present only when editing, and clears positions + emits a relayout', async () => {
+    setDiagramEditing(true);
+    setDiagramPersistScope('ws-arrange');
+    saveDiagramPositions('ws-arrange:koi-domain-diagram', { 'Ordering.Order': { x: 10, y: 10 } });
+
+    const container = ROOT();
+    let relayouts = 0;
+    container.addEventListener(DIAGRAM_RELAYOUT_EVENT, () => (relayouts += 1));
+    await createSvgRenderer().render(container, twoNodeFiles(), 'light', () => true);
+
+    const arrange = container.querySelector<HTMLButtonElement>('.koi-canvas-btn[aria-label="Auto-arrange layout"]');
+    expect(arrange).not.toBeNull();
+
+    arrange!.click();
+    expect(loadDiagramPositions('ws-arrange:koi-domain-diagram')).toEqual({});
+    expect(relayouts).toBe(1);
+  });
+
+  test('with editing OFF there is no auto-arrange button and nodes are not draggable', async () => {
+    setDiagramEditing(false);
+    const container = ROOT();
+    await createSvgRenderer().render(container, twoNodeFiles(), 'light', () => true);
+    expect(container.querySelector('.koi-canvas-btn[aria-label="Auto-arrange layout"]')).toBeNull();
+    expect(container.querySelector('.koi-canvas--editing')).toBeNull();
+  });
+
+  test('dragging a node moves it, persists every position, and swallows the would-be navigate click', async () => {
+    setDiagramEditing(true);
+    setDiagramPersistScope('ws-drag');
+
+    const container = ROOT();
+    await createSvgRenderer().render(container, twoNodeFiles(), 'light', () => true);
+
+    const canvas = container.querySelector<HTMLElement>('.koi-canvas')!;
+    const svg = container.querySelector<SVGSVGElement>('.koi-svg-diagram')!;
+    // happy-dom returns zero-size rects; give the canvas a real size so the pixel→content delta is non-zero.
+    Object.defineProperty(canvas, 'clientWidth', { value: 800, configurable: true });
+    Object.defineProperty(canvas, 'clientHeight', { value: 600, configurable: true });
+    svg.getBoundingClientRect = () =>
+      ({ left: 0, top: 0, width: 800, height: 600, right: 800, bottom: 600, x: 0, y: 0, toJSON() {} }) as DOMRect;
+
+    const node = container.querySelector<SVGGElement>('.koi-svg-node[data-qname="Ordering.Order"]')!;
+    const before = node.getAttribute('transform');
+
+    const navigated: DiagramNodeNavigateDetail[] = [];
+    container.addEventListener(NODE_NAVIGATE_EVENT, (e) => navigated.push((e as CustomEvent<DiagramNodeNavigateDetail>).detail));
+
+    node.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, clientX: 100, clientY: 100 }));
+    canvas.dispatchEvent(new MouseEvent('pointermove', { bubbles: true, clientX: 220, clientY: 180 }));
+    canvas.dispatchEvent(new MouseEvent('pointerup', { bubbles: true, clientX: 220, clientY: 180 }));
+
+    // The node moved…
+    expect(node.getAttribute('transform')).not.toBe(before);
+    // …the whole layout was snapshotted to storage (both nodes), so the next render won't re-flow…
+    const saved = loadDiagramPositions('ws-drag:koi-domain-diagram');
+    expect(Object.keys(saved).sort()).toEqual(['Ordering.Order', 'Ordering.OrderLine']);
+    // …and the click synthesized after the drag does NOT navigate.
+    node.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    expect(navigated).toHaveLength(0);
   });
 });
