@@ -387,15 +387,26 @@ git add -A && git -c user.email=phmatray@gmail.com -c user.name="Philippe Matray
 
 ### Task 10: `welcome/` — welcome, templates, about
 
-Note: `welcome/templates.ts` keeps `export { TEMPLATES } from '@/templates.generated'` — the generated file stays at `src/templates.generated.ts` and the map below does NOT remap `@/templates.generated` (different literal from `@/templates`). Do not touch the generator.
+Two `templates`-related references need care here (verified during Task 2):
+- `welcome/templates.ts` keeps `export { TEMPLATES } from '@/templates.generated'` — the **generated** file stays at `src/templates.generated.ts`, and the map below does NOT remap `@/templates.generated` (a different literal from `@/templates`). Leave it.
+- The generated `templates.generated.ts` itself contains `import type { Template } from '@/templates'` (the `Template` type lives in `templates.ts`, which moves here). That string is emitted by `scripts/generate-templates.mjs` line ~128 — a `.mjs` file OUTSIDE `src/`, so the move codemod does NOT touch it. You MUST hand-edit the generator to emit `@/welcome/templates`, or the regenerated file (and the `templates.test.ts:127` assertion, which the codemod updates to `@/welcome/templates`) will mismatch and `tsc` will fail to resolve `@/templates`.
 
-- [ ] **Move + remap + verify + commit**
+- [ ] **Move + remap + update generator + verify + commit**
 ```bash
 mkdir -p src/welcome
 git mv src/welcome.* src/templates.* src/about.* src/welcome/
 node scripts/move-specifiers.mjs '{"@/welcome":"@/welcome/welcome","@/templates":"@/welcome/templates","@/about":"@/welcome/about"}'
+```
+Then edit `scripts/generate-templates.mjs`: change the emitted import line from
+`"import type { Template } from '@/templates';\n\n"` to
+`"import type { Template } from '@/welcome/templates';\n\n"`.
+
+```bash
+# regenerate so the on-disk generated file matches, then verify
+node scripts/generate-templates.mjs
+grep -n "import type { Template }" src/templates.generated.ts   # expect: from '@/welcome/templates'
 npm test && npx tsc -p tsconfig.json
-git add -A && git -c user.email=phmatray@gmail.com -c user.name="Philippe Matray" commit -m "refactor(studio): move welcome/templates/about into src/welcome/"
+git add -A && git -c user.email=phmatray@gmail.com -c user.name="Philippe Matray" commit -m "refactor(studio): move welcome/templates/about into src/welcome/ (+ sync template generator)"
 ```
 
 After moving, confirm the generated re-export was left alone:
