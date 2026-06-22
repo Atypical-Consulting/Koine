@@ -23,4 +23,13 @@ describe('uiChrome slice', () => {
     expect(s.getState().bottom).toBe('events');
     expect(s.getState().right).toBe('notes');
   });
+
+  test('outlineFilter defaults to empty and is set independently (it survives panel remounts)', () => {
+    const s = make();
+    expect(s.getState().outlineFilter).toBe('');
+    s.getState().setOutlineFilter('Order');
+    expect(s.getState().outlineFilter).toBe('Order');
+    s.getState().setOutlineFilter('');
+    expect(s.getState().outlineFilter).toBe('');
+  });
 });

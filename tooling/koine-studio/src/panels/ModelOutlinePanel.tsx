@@ -3,7 +3,7 @@ import type { AppState } from '../store/index';
 import { useAppStore } from '../store/hooks';
 import type { GlossaryModel } from '../lsp';
 import { renderModelOutline, type ModelOutlineHandlers } from '../modelOutline';
-import { scopeGlossaryModel } from '../activeContext';
+import { filterGlossaryModel, scopeGlossaryModel } from '../activeContext';
 import { lookupElement, type ModelIndex } from '../modelIndex';
 
 // The left-rail Explorer construct tree as a Preact panel (#193, #146). It subscribes to TWO slices of
@@ -25,7 +25,12 @@ export function ModelOutlinePanel(props: {
   // Subscribe to exactly the two slices that drive this panel; an unrelated slice change leaves it alone.
   const scope = useAppStore(props.store, (s) => s.activeContext);
   const selection = useAppStore(props.store, (s) => s.selection);
-  const scoped = scopeGlossaryModel(props.model, scope);
+  // The type-to-filter query lives in the store (uiChrome.outlineFilter), NOT component-local state: the
+  // controller unmounts + remounts this panel on every model reload, so a local query would be wiped
+  // mid-task on each edit — the store-backed value survives the remount. It composes AFTER the context
+  // scope, so the box filters within the active bounded context.
+  const query = useAppStore(props.store, (s) => s.outlineFilter);
+  const scoped = filterGlossaryModel(scopeGlossaryModel(props.model, scope), query);
   // Match the deleted applySelectionHighlight exactly: resolve the selection to its canonical qn (a
   // diagram-node selection can carry a non-canonical key form) before comparing against leaf.dataset.qname
   // (which renderModelOutline sets to the canonical entry.qualifiedName). Without the index, fall back to
@@ -33,16 +38,26 @@ export function ModelOutlinePanel(props: {
   const hit = selection && props.index ? lookupElement(props.index, selection.qualifiedName) : null;
   const qn = hit?.canonicalQn ?? selection?.qualifiedName ?? null;
   return (
-    <div
-      class="koi-outline-mount"
-      ref={(host: HTMLElement | null) => {
-        if (!host) return;
-        host.replaceChildren(renderModelOutline(scoped, props.handlers, { counts: false }));
-        // Cross-highlight the selected leaf — the same is-selected toggle the controller applied.
-        for (const leaf of Array.from(host.querySelectorAll<HTMLElement>('.koi-model-leaf'))) {
-          leaf.classList.toggle('is-selected', qn != null && leaf.dataset.qname === qn);
-        }
-      }}
-    />
+    <div class="koi-outline">
+      <input
+        type="search"
+        class="koi-outline-filter"
+        placeholder="Filter constructs…"
+        aria-label="Filter model constructs by name"
+        value={query}
+        onInput={(e) => props.store.getState().setOutlineFilter((e.currentTarget as HTMLInputElement).value)}
+      />
+      <div
+        class="koi-outline-mount"
+        ref={(host: HTMLElement | null) => {
+          if (!host) return;
+          host.replaceChildren(renderModelOutline(scoped, props.handlers, { counts: false }));
+          // Cross-highlight the selected leaf — the same is-selected toggle the controller applied.
+          for (const leaf of Array.from(host.querySelectorAll<HTMLElement>('.koi-model-leaf'))) {
+            leaf.classList.toggle('is-selected', qn != null && leaf.dataset.qname === qn);
+          }
+        }}
+      />
+    </div>
   );
 }
