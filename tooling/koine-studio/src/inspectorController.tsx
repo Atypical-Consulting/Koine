@@ -556,7 +556,14 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     return cachedDomainIndex.value;
   }
 
+  // Write a status/empty/error message imperatively into a host that may currently hold a Preact tree
+  // (the model / glossary / Events / Relationships panels mount via render()). Unmounting any prior tree
+  // FIRST (render(null, view)) is load-bearing: a Preact-rendered host and a raw innerHTML write
+  // otherwise fight over the same node — so folding the unmount in here makes every docMessage call site
+  // safe by construction, and the explicit render(null, host) dance disappears from the loaders. It's a
+  // harmless no-op for hosts that never held a Preact tree (checkView / contextMapView / the docs host).
   function docMessage(view: HTMLElement, text: string, kind: 'muted' | 'error' = 'muted'): void {
+    render(null, view);
     // Build the node with textContent rather than interpolating into innerHTML — `text` often carries
     // an error string (String(e)) that can embed host paths or user-influenced file/folder names, so
     // raw interpolation would be an HTML-injection sink.
@@ -574,17 +581,15 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   // is the matching key — this is the glossary view): a token captured before the await is compared to
   // the slice's current one after, so an edit mid-fetch discards the superseded result and the panel is
   // marked loaded only for the token it fetched. The status/empty/error states write the host
-  // imperatively (docMessage), so unmount any prior Preact tree first (render(null, host)) — otherwise
-  // the reconciler and the imperative write fight over the same node (the prior-tasks hazard).
+  // imperatively via docMessage, which unmounts any prior Preact tree first — so the reconciler and the
+  // imperative write never fight over the same node (the prior-tasks hazard).
   async function loadGlossary(): Promise<void> {
     const token = appStore.getState().currentToken('glossary');
-    render(null, glossaryView);
     docMessage(glossaryView, 'Loading glossary…');
     try {
       const model = await lsp.glossaryModel();
       if (token !== appStore.getState().currentToken('glossary')) return; // superseded by an edit — discard
       if (!model.entries.length) {
-        render(null, glossaryView);
         docMessage(glossaryView, 'No concepts yet — declare some types, or fix syntax errors to populate the glossary.');
       } else {
         render(<GlossaryPanel store={appStore} model={model} handlers={glossaryHandlers} />, glossaryView);
@@ -592,7 +597,6 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
       appStore.getState().markLoaded('glossary', token);
     } catch (e) {
       if (token !== appStore.getState().currentToken('glossary')) return;
-      render(null, glossaryView);
       docMessage(glossaryView, 'Glossary request failed: ' + String(e), 'error');
     }
   }
@@ -761,16 +765,14 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     // Capture the 'model' stale-token before the await; markLoaded only takes if it's still current
     // after, so an edit mid-fetch leaves the surface stale for the next show (the slice discipline).
     const token = appStore.getState().currentToken('model');
-    // The status/empty/error states write the explorer host imperatively (docMessage), while the tree
-    // itself is a Preact panel mounted via render(). Unmount any prior Preact tree before an imperative
-    // write so the reconciler and replaceChildren never fight over the same node.
-    render(null, explorerBody);
+    // The status/empty/error states write the explorer host imperatively via docMessage (which unmounts
+    // any prior Preact tree first), while the tree itself is a Preact panel mounted via render() — so the
+    // reconciler and replaceChildren never fight over the same node.
     docMessage(explorerBody, 'Loading model…');
     try {
       const index = await ensureModelIndex();
       const scopedGlossary = scopeGlossaryModel(index.glossary, activeContext.get());
       if (!scopedGlossary.entries.length) {
-        render(null, explorerBody);
         docMessage(
           explorerBody,
           index.glossary.entries.length
@@ -799,7 +801,6 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
       applySelectionHighlight();
       appStore.getState().markLoaded('model', token);
     } catch (e) {
-      render(null, explorerBody);
       docMessage(explorerBody, 'Model request failed: ' + String(e), 'error');
     }
   }
@@ -1261,12 +1262,10 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   // and a scope change re-renders the table without a refetch. The fetch rides the docViews slice's own
   // per-tab token ('events' / 'relationships'): captured before the await, compared after (so an edit
   // mid-fetch discards the superseded result), and the panel is marked loaded only for the token it
-  // fetched. The loading/error states write the host imperatively (docMessage), so the prior Preact tree
-  // is unmounted first (render(null, host)) — otherwise the reconciler and the imperative write fight
-  // over the node.
+  // fetched. The loading/error states write the host imperatively via docMessage, which unmounts the
+  // prior Preact tree first — so the reconciler and the imperative write never fight over the node.
   async function loadEventsPanel(): Promise<void> {
     const token = appStore.getState().currentToken('events');
-    render(null, eventsPanel);
     docMessage(eventsPanel, 'Loading events…');
     try {
       const graph = await bottomGraph();
@@ -1275,14 +1274,12 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
       appStore.getState().markLoaded('events', token);
     } catch (e) {
       if (token !== appStore.getState().currentToken('events')) return;
-      render(null, eventsPanel);
       docMessage(eventsPanel, 'Events request failed: ' + String(e), 'error');
     }
   }
 
   async function loadRelationshipsPanel(): Promise<void> {
     const token = appStore.getState().currentToken('relationships');
-    render(null, relationshipsPanel);
     docMessage(relationshipsPanel, 'Loading relationships…');
     try {
       const [graph, ctxMap] = await Promise.all([
@@ -1297,7 +1294,6 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
       appStore.getState().markLoaded('relationships', token);
     } catch (e) {
       if (token !== appStore.getState().currentToken('relationships')) return;
-      render(null, relationshipsPanel);
       docMessage(relationshipsPanel, 'Relationships request failed: ' + String(e), 'error');
     }
   }
