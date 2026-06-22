@@ -22,6 +22,9 @@ import { pathToFileUri } from './ideUtils';
 import type { FsEntry, KoiFile, Platform } from './host';
 import type { TextEdit, WorkspaceEdit } from './lsp';
 
+/** Outcome of an openFolderPath attempt, so callers (recent-open recovery) can react to a failure. */
+export type OpenResult = { ok: true } | { ok: false; reason: 'unreadable' | 'empty' };
+
 /** A client-side open buffer keyed by its file:// uri. Structural match for dirty.ts's SaveableBuffer. */
 export interface Buffer {
   uri: string;
@@ -117,7 +120,7 @@ export interface WorkspaceController {
 
   // --- open paths ---
   /** Load + open every .koi under `folder` as one workspace; activate the first by relPath. */
-  openFolderPath(folder: string, opts?: { recent?: boolean }): Promise<void>;
+  openFolderPath(folder: string, opts?: { recent?: boolean }): Promise<OpenResult>;
   /**
    * Boot/empty-state: open (or seed) the host default workspace. Returns `opened` (false when the host
    * can't back one — ide.ts shows the OPFS-needed message) and `pristineSeed` (the single buffer when
@@ -362,19 +365,18 @@ export function createWorkspaceController(deps: WorkspaceControllerDeps): Worksp
   // Load + open every .koi file under `folder` as one workspace. Shared by the toolbar
   // button (which picks a folder first) and the welcome screen's recent-folder items
   // (which pass a known path directly).
-  async function openFolderPath(folder: string, opts: { recent?: boolean } = {}): Promise<void> {
-    deps.hideWelcome?.();
+  async function openFolderPath(folder: string, opts: { recent?: boolean } = {}): Promise<OpenResult> {
     let files: KoiFile[];
     try {
       files = await platform.listKoiFiles(folder);
     } catch (e) {
       deps.setStatus('could not read folder', 'error');
       console.error('listKoiFiles failed:', e);
-      return;
+      return { ok: false, reason: 'unreadable' };
     }
     if (!files.length) {
       deps.setStatus('no .koi files in folder', 'error');
-      return;
+      return { ok: false, reason: 'empty' };
     }
 
     // Re-opening a folder: close every previously open file first.
@@ -404,7 +406,7 @@ export function createWorkspaceController(deps: WorkspaceControllerDeps): Worksp
     // between list and read).
     if (buffers.size === 0) {
       deps.setStatus('could not read any files in folder', 'error');
-      return;
+      return { ok: false, reason: 'unreadable' };
     }
 
     folderRoot = folder;
@@ -413,6 +415,7 @@ export function createWorkspaceController(deps: WorkspaceControllerDeps): Worksp
     activeUriValue = first.uri;
     lsp.setActive(first.uri);
     editor.setDoc(first.text);
+    deps.hideWelcome?.(); // dismiss the start screen only now that the open has succeeded
     deps.setFolderTitle?.(platform.folderName(folder));
     deps.showFileTreeChrome?.();
     if (opts.recent ?? true) deps.pushRecentFolder?.(folder);
@@ -422,6 +425,7 @@ export function createWorkspaceController(deps: WorkspaceControllerDeps): Worksp
     deps.onFolderOpened(folder, { recent: opts.recent ?? true });
     // Fetch the full explorer tree (dirs + .koi) and render it; falls back silently on failure.
     await refreshEntries();
+    return { ok: true };
   }
 
   // Boot/empty-state: open the host's persistent default workspace (creating + seeding it the first

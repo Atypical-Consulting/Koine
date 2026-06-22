@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import {
   __setFolderForTest,
   __resetFsForTest,
+  __clearDbForTest,
   listEntries,
   listDir,
   createFile,
@@ -12,6 +13,9 @@ import {
   openDefaultWorkspace,
   readTextFile,
   writeTextFile,
+  saveProjectToRoot,
+  workspaceRootName,
+  pickWorkspaceRoot,
 } from './fs';
 
 // --- in-memory mock of the File System Access handle surface -----------------
@@ -424,5 +428,75 @@ describe('default workspace (OPFS)', () => {
     __resetFsForTest();
     delete (navigator as unknown as { storage?: unknown }).storage;
     expect(await openDefaultWorkspace('x')).toBeNull();
+  });
+});
+
+describe('saveProjectToRoot / workspace root', () => {
+  afterEach(async () => {
+    __resetFsForTest();
+    await __clearDbForTest();
+    delete (window as unknown as { showDirectoryPicker?: unknown }).showDirectoryPicker;
+  });
+
+  it('picks a root once, writes files under <root>/<name>/, and reuses the root', async () => {
+    const root = new MockDir('koine');
+    let pickCount = 0;
+    (window as unknown as { showDirectoryPicker: unknown }).showDirectoryPicker = async () => {
+      pickCount++;
+      return root as unknown;
+    };
+
+    const files = [
+      { relPath: 'a.koi', contents: 'context A {}' },
+      { relPath: 'sub/b.koi', contents: 'context B {}' },
+    ];
+    const token = await saveProjectToRoot('my-pizzeria', files);
+
+    expect(token).toBe('my-pizzeria');
+    const proj = root.entries.get('my-pizzeria') as MockDir;
+    expect((proj.entries.get('a.koi') as MockFile).contents).toBe('context A {}');
+    const sub = proj.entries.get('sub') as MockDir;
+    expect((sub.entries.get('b.koi') as MockFile).contents).toBe('context B {}');
+
+    await saveProjectToRoot('second', [{ relPath: 'c.koi', contents: '' }]);
+    expect(pickCount).toBe(1); // root remembered, not re-picked
+  });
+
+  it('rejects a name that already exists under the root and writes nothing new', async () => {
+    const root = new MockDir('koine');
+    root.entries.set('dup', new MockDir('dup'));
+    (window as unknown as { showDirectoryPicker: unknown }).showDirectoryPicker = async () => root as unknown;
+
+    await expect(saveProjectToRoot('dup', [{ relPath: 'a.koi', contents: 'x' }])).rejects.toThrow(/already exists/);
+    expect((root.entries.get('dup') as MockDir).entries.size).toBe(0);
+  });
+
+  it('returns null when the root picker is dismissed', async () => {
+    (window as unknown as { showDirectoryPicker: unknown }).showDirectoryPicker = async () => {
+      throw new DOMException('aborted', 'AbortError');
+    };
+    expect(await saveProjectToRoot('x', [{ relPath: 'a.koi', contents: '' }])).toBeNull();
+  });
+
+  it('reports the workspace root name once picked, null before', async () => {
+    expect(await workspaceRootName()).toBeNull();
+    const root = new MockDir('koine');
+    (window as unknown as { showDirectoryPicker: unknown }).showDirectoryPicker = async () => root as unknown;
+    await saveProjectToRoot('p', [{ relPath: 'a.koi', contents: '' }]);
+    expect(await workspaceRootName()).toBe('koine');
+  });
+
+  it('pickWorkspaceRoot re-prompts and updates the remembered root', async () => {
+    const first = new MockDir('koine');
+    const second = new MockDir('work');
+    let pick = 0;
+    (window as unknown as { showDirectoryPicker: unknown }).showDirectoryPicker = async () => {
+      pick++;
+      return (pick === 1 ? first : second) as unknown;
+    };
+    await saveProjectToRoot('p', [{ relPath: 'a.koi', contents: '' }]); // picks `first`
+    const name = await pickWorkspaceRoot(); // forces a re-pick → `second`
+    expect(name).toBe('work');
+    expect(await workspaceRootName()).toBe('work');
   });
 });

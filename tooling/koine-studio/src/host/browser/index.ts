@@ -12,6 +12,7 @@ declare const __APP_VERSION__: string;
 export class BrowserPlatform implements Platform {
   readonly kind = 'browser' as const;
   readonly canOpenFolders = fs.supported();
+  readonly canSaveProjects = fs.supported();
 
   createLspTransport(): LspTransport {
     return new WasmLspTransport();
@@ -46,6 +47,18 @@ export class BrowserPlatform implements Platform {
 
   pickFolder(title: string): Promise<string | null> {
     return fs.pickFolder(title);
+  }
+
+  saveProjectToRoot(name: string, files: { relPath: string; contents: string }[]): Promise<string | null> {
+    return fs.saveProjectToRoot(name, files);
+  }
+
+  workspaceRootName(): Promise<string | null> {
+    return fs.workspaceRootName();
+  }
+
+  pickWorkspaceRoot(): Promise<string | null> {
+    return fs.pickWorkspaceRoot();
   }
 
   materializeWorkspace(name: string, files: { relPath: string; contents: string }[]): Promise<string | null> {
