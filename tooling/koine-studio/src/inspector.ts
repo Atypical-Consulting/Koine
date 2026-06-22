@@ -48,6 +48,15 @@ export interface InspectorHandlers {
   onRename?(element: InspectorElement, newName: string): void;
   /** Persist the element's description as a `///` doc comment. Optional — read-only without it. */
   onSaveDescription?(element: InspectorElement, text: string): void;
+  // --- property editing (authoring) — each maps to a structured edit; absent ⇒ read-only Properties ---
+  /** Add a field to the element. */
+  onAddProperty?(element: InspectorElement, name: string, type: string): void;
+  /** Remove the element's field named `propName`. */
+  onRemoveProperty?(element: InspectorElement, propName: string): void;
+  /** Rename the element's field `oldName` → `newName`. */
+  onRenameProperty?(element: InspectorElement, oldName: string, newName: string): void;
+  /** Change the type of the element's field `propName` to `newType`. */
+  onChangeType?(element: InspectorElement, propName: string, newType: string): void;
 }
 
 /**
@@ -93,7 +102,7 @@ export function renderInspector(element: InspectorElement | null, handlers: Insp
   root.appendChild(renderHeader(element, handlers));
   root.appendChild(renderGeneral(element, handlers));
 
-  appendPropertyTable(root, 'Properties', element.properties);
+  appendPropertyTable(root, 'Properties', element.properties, element, handlers);
   appendList(root, 'Behaviors', element.behaviors);
   appendList(root, 'Values', element.values);
   appendList(root, 'Invariants', element.invariants ?? []);
@@ -229,17 +238,30 @@ function appendList(root: HTMLElement, title: string, items: string[]): void {
 
 /**
  * Append the Properties compartment as a two-column table (property name | type) so the type column
- * aligns to a single left edge regardless of name length — easier to scan than colon-separated rows.
- * Each item's `text` is pre-formatted as `name: Type`; the first colon splits the two columns (a
- * colon-less item lands wholly in the name column). Computed (derived) properties render italic.
- * A no-op when `items` is empty.
+ * aligns to a single left edge regardless of name length. Each item's `text` is pre-formatted as
+ * `name: Type`; the first colon splits the two columns. Computed (derived) properties render italic and
+ * stay read-only (they are expressions, not editable fields).
+ *
+ * When the editing handlers are supplied, each non-computed row becomes editable — its name and type
+ * commit a rename / change-type on blur, a delete button removes the field — and an "add property" row is
+ * appended. Without the handlers the rows render read-only (the original behaviour). The edits funnel
+ * through the same #91 round-trip the canvas uses, so the `.koi` source and this panel stay in step.
  */
 function appendPropertyTable(
   root: HTMLElement,
   title: string,
   items: { text: string; computed: boolean }[],
+  element: InspectorElement,
+  handlers: InspectorHandlers,
 ): void {
-  if (!items.length) return;
+  const editable = !!(
+    handlers.onRenameProperty ||
+    handlers.onChangeType ||
+    handlers.onRemoveProperty ||
+    handlers.onAddProperty
+  );
+  if (!items.length && !(editable && handlers.onAddProperty)) return;
+
   const section = document.createElement('section');
   section.className = 'koi-inspector-section';
 
@@ -255,24 +277,129 @@ function appendPropertyTable(
     const idx = item.text.indexOf(':');
     const name = idx === -1 ? item.text.trim() : item.text.slice(0, idx).trim();
     const type = idx === -1 ? '' : item.text.slice(idx + 1).trim();
-
-    const row = document.createElement('tr');
-    row.className = item.computed ? 'koi-inspector-row koi-inspector-row-computed' : 'koi-inspector-row';
-
-    // The property name labels its row, so it is a row-scoped header (accessible + DevTools-clean).
-    const nameCell = document.createElement('th');
-    nameCell.scope = 'row';
-    nameCell.className = 'koi-inspector-prop-name';
-    nameCell.textContent = name;
-
-    const typeCell = document.createElement('td');
-    typeCell.className = 'koi-inspector-prop-type';
-    typeCell.textContent = type;
-
-    row.append(nameCell, typeCell);
-    tbody.appendChild(row);
+    tbody.appendChild(
+      editable && !item.computed
+        ? editablePropertyRow(element, handlers, name, type)
+        : readonlyPropertyRow(name, type, item.computed),
+    );
   }
   table.appendChild(tbody);
   section.appendChild(table);
+
+  if (editable && handlers.onAddProperty) section.appendChild(addPropertyRow(element, handlers));
   root.appendChild(section);
+}
+
+/** A read-only property row: a `name` header cell + a `type` cell (computed rows render italic). */
+function readonlyPropertyRow(name: string, type: string, computed: boolean): HTMLTableRowElement {
+  const row = document.createElement('tr');
+  row.className = computed ? 'koi-inspector-row koi-inspector-row-computed' : 'koi-inspector-row';
+  // The property name labels its row, so it is a row-scoped header (accessible + DevTools-clean).
+  const nameCell = document.createElement('th');
+  nameCell.scope = 'row';
+  nameCell.className = 'koi-inspector-prop-name';
+  nameCell.textContent = name;
+  const typeCell = document.createElement('td');
+  typeCell.className = 'koi-inspector-prop-type';
+  typeCell.textContent = type;
+  row.append(nameCell, typeCell);
+  return row;
+}
+
+/** An editable property row: name + type inputs (commit a rename / change-type) and a delete button. */
+function editablePropertyRow(
+  element: InspectorElement,
+  handlers: InspectorHandlers,
+  name: string,
+  type: string,
+): HTMLTableRowElement {
+  const row = document.createElement('tr');
+  row.className = 'koi-inspector-row koi-inspector-row-editable';
+
+  const nameCell = document.createElement('th');
+  nameCell.scope = 'row';
+  nameCell.className = 'koi-inspector-prop-name';
+  const nameInput = propInput(name, `Name of property ${name}`);
+  nameInput.addEventListener('commit', () => {
+    const next = nameInput.value.trim();
+    if (next && next !== name) handlers.onRenameProperty?.(element, name, next);
+    else nameInput.value = name;
+  });
+  nameCell.appendChild(nameInput);
+
+  const typeCell = document.createElement('td');
+  typeCell.className = 'koi-inspector-prop-type';
+  const typeInput = propInput(type, `Type of property ${name}`);
+  typeInput.addEventListener('commit', () => {
+    const next = typeInput.value.trim();
+    if (next && next !== type) handlers.onChangeType?.(element, name, next);
+    else typeInput.value = type;
+  });
+  typeCell.appendChild(typeInput);
+
+  const actions = document.createElement('td');
+  actions.className = 'koi-inspector-prop-actions';
+  if (handlers.onRemoveProperty) {
+    const del = document.createElement('button');
+    del.type = 'button';
+    del.className = 'koi-inspector-prop-delete';
+    del.textContent = '×';
+    del.title = `Remove ${name}`;
+    del.setAttribute('aria-label', `Remove property ${name}`);
+    del.addEventListener('click', () => handlers.onRemoveProperty?.(element, name));
+    actions.appendChild(del);
+  }
+
+  row.append(nameCell, typeCell, actions);
+  return row;
+}
+
+/** The "add a property" row: a name + type field and an Add button that commits when both are filled. */
+function addPropertyRow(element: InspectorElement, handlers: InspectorHandlers): HTMLElement {
+  const wrap = document.createElement('div');
+  wrap.className = 'koi-inspector-add-prop';
+
+  const nameInput = propInput('', 'New property name');
+  nameInput.classList.add('koi-inspector-add-name');
+  nameInput.placeholder = 'name';
+  const typeInput = propInput('', 'New property type');
+  typeInput.classList.add('koi-inspector-add-type');
+  typeInput.placeholder = 'Type';
+
+  const add = document.createElement('button');
+  add.type = 'button';
+  add.className = 'koi-inspector-add-btn';
+  add.textContent = '+ Add property';
+  add.addEventListener('click', () => {
+    const name = nameInput.value.trim();
+    const type = typeInput.value.trim();
+    if (!name || !type) return;
+    handlers.onAddProperty?.(element, name, type);
+    nameInput.value = '';
+    typeInput.value = '';
+  });
+
+  wrap.append(nameInput, typeInput, add);
+  return wrap;
+}
+
+/** A small text input that fires a synthetic `commit` event on Enter/blur and reverts on Escape. */
+function propInput(value: string, ariaLabel: string): HTMLInputElement {
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.className = 'koi-inspector-prop-input';
+  input.value = value;
+  input.spellcheck = false;
+  input.setAttribute('aria-label', ariaLabel);
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      input.blur();
+    } else if (e.key === 'Escape') {
+      input.value = value;
+      input.blur();
+    }
+  });
+  input.addEventListener('blur', () => input.dispatchEvent(new CustomEvent('commit')));
+  return input;
 }

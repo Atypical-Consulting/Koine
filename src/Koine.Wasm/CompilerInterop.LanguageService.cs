@@ -835,7 +835,7 @@ public static partial class CompilerInterop
         new(m.Text, m.Kind);
 
     private static WDiagramEdge MapEdge(DiagramEdge e) =>
-        new(e.From, e.To, e.Label, e.Cardinality);
+        new(e.From, e.To, e.Label, e.Cardinality, e.SourceCardinality, e.ArrowKind, e.BackingMember);
 
     /// <summary>Maps the raw 1-based <see cref="SourceSpan"/> straight through (null when the node has none).</summary>
     private static WSourceSpan? MapSourceSpan(SourceSpan? span) =>
@@ -1189,9 +1189,13 @@ public sealed record WDiagramNode(
 /// <summary>One UML class-body row: a pre-formatted <see cref="Text"/> and its <see cref="Kind"/> (<c>field</c>/<c>method</c>/<c>value</c>).</summary>
 public sealed record WDiagramMember(string Text, string Kind);
 
-/// <summary>One directed edge: node ids <see cref="From"/>→<see cref="To"/> with an optional <see cref="Label"/>
-/// and an optional composition <see cref="Cardinality"/> (target-end multiplicity, e.g. "1", "0..1", "*").</summary>
-public sealed record WDiagramEdge(string From, string To, string? Label, string? Cardinality = null);
+/// <summary>One directed edge: node ids <see cref="From"/>→<see cref="To"/> with an optional <see cref="Label"/>,
+/// the composition target-end <see cref="Cardinality"/> and owner-end <see cref="SourceCardinality"/>
+/// (e.g. "1", "0..1", "*"), an <see cref="ArrowKind"/> styling hint (composition/association/transition/flow),
+/// and the <see cref="BackingMember"/> qualified field name a field-backed composition edge can be disconnected by.</summary>
+public sealed record WDiagramEdge(
+    string From, string To, string? Label, string? Cardinality = null,
+    string? SourceCardinality = null, string? ArrowKind = null, string? BackingMember = null);
 
 /// <summary>
 /// A raw 1-based source span (NOT the 0-based LSP range): the diagram graph keeps source coordinates so

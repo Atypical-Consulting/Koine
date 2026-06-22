@@ -76,6 +76,39 @@
 .koi-canvas--panning {
   cursor: grabbing;
 }
+.koi-canvas--dragging {
+  cursor: grabbing;
+}
+/* authoring: nodes invite a drag-to-move (overrides the navigate pointer cursor while editing). */
+.koi-canvas--editing .koi-svg-node {
+  cursor: move;
+}
+.koi-canvas--connecting {
+  cursor: crosshair;
+}
+
+/* authoring: a connection port on a node's right edge — drag from it to another node to add a field.
+   Hidden until the node is hovered (or a connection is in flight) so it stays out of the way. */
+.koi-svg-port {
+  fill: var(--koi-accent);
+  stroke: var(--koi-surface);
+  stroke-width: 1.5;
+  cursor: crosshair;
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+.koi-svg-node:hover .koi-svg-port,
+.koi-canvas--connecting .koi-svg-port {
+  opacity: 1;
+}
+/* the rubber-band line that follows the cursor while drawing a connection */
+.koi-svg-connecting {
+  fill: none;
+  stroke: var(--koi-accent);
+  stroke-width: 2;
+  stroke-dasharray: 4 3;
+  pointer-events: none;
+}
 .koi-diagram-surface .koi-canvas svg,
 .koi-canvas > svg.koi-svg-diagram {
   display: block;
@@ -318,6 +351,11 @@ $ddd-kinds: (
 .koi-svg-arrowhead {
   fill: var(--koi-line);
 }
+/* the filled composition diamond at the owner end of a composition edge */
+.koi-svg-diamond {
+  fill: var(--koi-line);
+  stroke: var(--koi-line);
+}
 .koi-svg-edge-label {
   fill: var(--koi-muted);
   font-size: 11px;
@@ -325,4 +363,18 @@ $ddd-kinds: (
   paint-order: stroke;
   stroke: var(--koi-paper-2);
   stroke-width: 3px; /* a halo so the label reads over the edge line beneath it */
+}
+/* per-end multiplicity labels (e.g. "1", "0..1", "*") pinned near each endpoint — smaller + mono so
+   they read as cardinalities, with the same halo so they stay legible over the line. */
+.koi-svg-edge-card {
+  fill: var(--koi-muted);
+  font-family: var(--koi-font-mono);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  text-anchor: middle;
+  dominant-baseline: central;
+  paint-order: stroke;
+  stroke: var(--koi-paper-2);
+  stroke-width: 3px;
+  pointer-events: none;
 }

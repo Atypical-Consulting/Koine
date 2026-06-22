@@ -17,6 +17,9 @@ import {
   saveWorkspaceMode,
   loadDiagramZoom,
   saveDiagramZoom,
+  loadDiagramPositions,
+  saveDiagramPositions,
+  clearDiagramPositions,
   loadActiveContext,
   saveActiveContext,
   getRecentFolders,
@@ -356,5 +359,47 @@ describe('Output / previewTarget setting', () => {
 
   test('PREVIEW_TARGETS lists the four supported languages in order', () => {
     expect(PREVIEW_TARGETS).toEqual(['csharp', 'typescript', 'python', 'php']);
+  });
+});
+
+describe('diagram node positions (authoring canvas)', () => {
+  beforeEach(() => localStorage.clear());
+
+  test('round-trips a positions map keyed by qualified name', () => {
+    const positions = { 'Ordering.Order': { x: 120, y: 40 }, 'Ordering.OrderLine': { x: 360, y: 220 } };
+    saveDiagramPositions('ws-a:koi-domain-diagram', positions);
+    expect(loadDiagramPositions('ws-a:koi-domain-diagram')).toEqual(positions);
+  });
+
+  test('an absent key loads as an empty map', () => {
+    expect(loadDiagramPositions('nope:koi-domain-diagram')).toEqual({});
+  });
+
+  test('malformed JSON / non-object / array loads as an empty map', () => {
+    localStorage.setItem('koine.studio.diagramPositions.bad', '{not json');
+    expect(loadDiagramPositions('bad')).toEqual({});
+    localStorage.setItem('koine.studio.diagramPositions.arr', '[1,2,3]');
+    expect(loadDiagramPositions('arr')).toEqual({});
+  });
+
+  test('drops entries with non-finite or missing coordinates, keeps the good ones', () => {
+    localStorage.setItem(
+      'koine.studio.diagramPositions.mixed',
+      JSON.stringify({ Good: { x: 1, y: 2 }, NaNx: { x: 'oops', y: 2 }, Partial: { x: 5 }, InfY: { x: 0, y: Infinity } }),
+    );
+    expect(loadDiagramPositions('mixed')).toEqual({ Good: { x: 1, y: 2 } });
+  });
+
+  test('positions are isolated per workspace+diagram key', () => {
+    saveDiagramPositions('ws-a:koi-domain-diagram', { 'A.B': { x: 1, y: 1 } });
+    saveDiagramPositions('ws-b:koi-domain-diagram', { 'A.B': { x: 9, y: 9 } });
+    expect(loadDiagramPositions('ws-a:koi-domain-diagram')).toEqual({ 'A.B': { x: 1, y: 1 } });
+    expect(loadDiagramPositions('ws-b:koi-domain-diagram')).toEqual({ 'A.B': { x: 9, y: 9 } });
+  });
+
+  test('clearDiagramPositions forgets a saved layout', () => {
+    saveDiagramPositions('ws:koi-domain-diagram', { 'A.B': { x: 1, y: 1 } });
+    clearDiagramPositions('ws:koi-domain-diagram');
+    expect(loadDiagramPositions('ws:koi-domain-diagram')).toEqual({});
   });
 });

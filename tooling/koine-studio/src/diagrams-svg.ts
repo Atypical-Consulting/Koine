@@ -13,8 +13,9 @@
 import type { DiagramRenderer } from './diagrams';
 import { mergeGraphsForView } from './modelTables';
 import { centerOn, clampScale, fit, panBy, viewAtScale, zoomAt, zoomPercent, type Size, type ViewBox } from './canvasView';
-import { loadDiagramZoom, saveDiagramZoom } from './store';
-import type { DiagramGraph, DiagramMember, DiagramNode, SourceSpan } from './lsp';
+import { edgeRoute, truncateToWidth, type Rect } from './diagramLayout';
+import { clearDiagramPositions, loadDiagramPositions, loadDiagramZoom, saveDiagramPositions, saveDiagramZoom } from './store';
+import type { DiagramEdge, DiagramGraph, DiagramMember, DiagramNode, SourceSpan } from './lsp';
 // Type-only import (erased at build time) of elkjs' own API surface, so our layout graph type-checks
 // against the real `ELK.layout` signature. The *value* is dynamically imported from the bundled build.
 import type { ELK, ElkNode, ElkExtendedEdge } from 'elkjs/lib/elk-api';
@@ -61,6 +62,10 @@ export interface DiagramNodeEditDetail {
   newName?: string;
   /** The node's display label (for status messages). */
   label: string;
+  /** The 1-based line of the declaration's name (a rename uses the editor's cross-file rename at this position). */
+  line?: number;
+  /** The 1-based column of the declaration's name. */
+  column?: number;
 }
 
 /**
@@ -74,6 +79,63 @@ let editingEnabled = false;
 export function setDiagramEditing(enabled: boolean): void {
   editingEnabled = enabled;
 }
+
+/**
+ * The per-workspace scope for persisted node positions (the authoring canvas). `ide.ts` sets it to the
+ * folder identity (or 'scratch') before each render so positions never bleed across projects — the
+ * mirror of how the active-context / chat stores are keyed by workspace.
+ */
+let persistScope = 'scratch';
+
+/** Set the workspace scope for persisted node positions (folder identity, or 'scratch'). */
+export function setDiagramPersistScope(scope: string): void {
+  persistScope = scope || 'scratch';
+}
+
+/** The storage key for the unified domain canvas's node positions, scoped to the active workspace. */
+function positionKey(): string {
+  return `${persistScope}:koi-domain-diagram`;
+}
+
+/**
+ * Bubbling event the canvas dispatches when the user resets the layout (the "Auto-arrange" button): the
+ * saved positions are cleared and `ide.ts` re-renders the diagram so ELK lays it out fresh.
+ */
+export const DIAGRAM_RELAYOUT_EVENT = 'koi-diagram-relayout';
+
+/**
+ * Bubbling event the canvas dispatches when the user drags from one node's port to another node to draw a
+ * relationship (authoring). `ide.ts` turns it into an `addField` structured edit — a field on the source
+ * whose type is the target — so the new composition round-trips into `.koi` (and re-draws as an edge).
+ */
+export const DIAGRAM_CONNECT_EVENT = 'koi-diagram-connect';
+
+/** The `detail` of a {@link DIAGRAM_CONNECT_EVENT}: the two endpoints' qualified names + display labels. */
+export interface DiagramConnectDetail {
+  sourceQualifiedName: string;
+  targetQualifiedName: string;
+  sourceLabel: string;
+  targetLabel: string;
+}
+
+/**
+ * Bubbling event the canvas dispatches when the user removes a field-backed relationship (right-click an
+ * edge). `ide.ts` turns it into a `removeMember` edit on the edge's backing field.
+ */
+export const DIAGRAM_DISCONNECT_EVENT = 'koi-diagram-disconnect';
+
+/** The `detail` of a {@link DIAGRAM_DISCONNECT_EVENT}: the backing field's qualified name + a label. */
+export interface DiagramDisconnectDetail {
+  backingMember: string;
+  label: string;
+}
+
+/**
+ * Bubbling event the canvas dispatches from its "add type" button (authoring). The canvas doesn't know
+ * the bounded contexts, so `ide.ts` resolves the target context (the active scope) + prompts for a name
+ * and turns it into an `addType` edit (a new value-object skeleton in that context).
+ */
+export const DIAGRAM_ADD_TYPE_EVENT = 'koi-diagram-add-type';
 
 let elkPromise: Promise<ElkConstructor> | null = null;
 
@@ -99,6 +161,10 @@ const NODE_PADDING_X = 28;
 const CHAR_WIDTH = 8.2; // rough advance for the label font (13px) at the size used below
 const MEMBER_CHAR_WIDTH = 7; // rough advance for the smaller (12px) monospace-ish member rows
 const MIN_NODE_WIDTH = 72;
+// A hard upper bound on a node's width: a long member row (a method with many params, a verbose type)
+// no longer stretches the box across the canvas — the row is ellipsized to fit and keeps its full text
+// in a hover `<title>`. Keeps every box a readable, n8n-like card instead of an unbounded banner.
+const MAX_NODE_WIDTH = 280;
 const EDGE_LABEL_HEIGHT = 16;
 const SVG_PADDING = 12;
 
@@ -128,7 +194,12 @@ function isClassNode(node: DiagramNode): boolean {
 }
 
 function nodeWidth(label: string): number {
-  return Math.max(MIN_NODE_WIDTH, Math.round(label.length * CHAR_WIDTH) + NODE_PADDING_X);
+  return clampWidth(Math.max(MIN_NODE_WIDTH, Math.round(label.length * CHAR_WIDTH) + NODE_PADDING_X));
+}
+
+/** Clamp any computed node width into [MIN_NODE_WIDTH, MAX_NODE_WIDTH] so a box never overflows the canvas. */
+function clampWidth(w: number): number {
+  return Math.max(MIN_NODE_WIDTH, Math.min(MAX_NODE_WIDTH, w));
 }
 
 /** Partition a class node's members into the attribute (field/value/computed) and method compartments, in order. */
@@ -148,7 +219,7 @@ function classNodeSize(node: DiagramNode): { width: number; height: number } {
   const stereoText = node.stereotype ? `«${node.stereotype}»` : '';
   const stereoW = stereoText.length * MEMBER_CHAR_WIDTH;
   const rowW = members.reduce((max, m) => Math.max(max, m.text.length * MEMBER_CHAR_WIDTH), 0);
-  const width = Math.max(MIN_CLASS_WIDTH, Math.ceil(Math.max(labelW, stereoW, rowW)) + CLASS_PADDING_X * 2);
+  const width = clampWidth(Math.max(MIN_CLASS_WIDTH, Math.ceil(Math.max(labelW, stereoW, rowW)) + CLASS_PADDING_X * 2));
 
   // Header + attribute compartment (+ its padding) + method compartment (+ its padding) when methods exist.
   let height = HEADER_HEIGHT;
@@ -166,6 +237,21 @@ function nodeSize(node: DiagramNode): { width: number; height: number } {
 
 function svgEl<K extends keyof SVGElementTagNameMap>(tag: K): SVGElementTagNameMap[K] {
   return document.createElementNS(SVG_NS, tag);
+}
+
+/**
+ * Set a `<text>` element's content to `full`, clipped to `maxPx` (at `charWidth` per glyph) so it can
+ * never overflow the node box; when it had to clip, attach a `<title>` child so the full text is one
+ * hover away. SVG `<text>` has no native ellipsis — this is the node's text-overflow behaviour.
+ */
+function setClippedText(text: SVGTextElement, full: string, maxPx: number, charWidth: number): void {
+  const shown = truncateToWidth(full, maxPx, charWidth);
+  text.textContent = shown;
+  if (shown !== full) {
+    const title = svgEl('title');
+    title.textContent = full;
+    text.appendChild(title);
+  }
 }
 
 /** Stamp a node's provenance onto its `<g>` so Task 4 can navigate by reading these attributes. */
@@ -234,7 +320,14 @@ function wireEditGestures(g: SVGGElement, node: DiagramNode): void {
       g.dispatchEvent(
         new CustomEvent<DiagramNodeEditDetail>(NODE_EDIT_EVENT, {
           bubbles: true,
-          detail: { qualifiedName: node.qualifiedName, action: 'rename', newName, label: current },
+          detail: {
+            qualifiedName: node.qualifiedName,
+            action: 'rename',
+            newName,
+            label: current,
+            line: node.sourceSpan?.line,
+            column: node.sourceSpan?.column,
+          },
         }),
       );
     });
@@ -270,7 +363,7 @@ function drawSimpleBox(g: SVGGElement, node: DiagramNode, w: number, h: number):
   text.setAttribute('y', String(h / 2));
   text.setAttribute('text-anchor', 'middle');
   text.setAttribute('dominant-baseline', 'central');
-  text.textContent = node.label;
+  setClippedText(text, node.label, w - NODE_PADDING_X, CHAR_WIDTH);
   g.appendChild(text);
 }
 
@@ -299,7 +392,7 @@ function drawClassBox(g: SVGGElement, node: DiagramNode, w: number, h: number): 
     stereo.setAttribute('x', String(w / 2));
     stereo.setAttribute('y', '16');
     stereo.setAttribute('text-anchor', 'middle');
-    stereo.textContent = `«${node.stereotype}»`;
+    setClippedText(stereo, `«${node.stereotype}»`, w - CLASS_PADDING_X * 2, MEMBER_CHAR_WIDTH);
     g.appendChild(stereo);
   }
 
@@ -308,7 +401,7 @@ function drawClassBox(g: SVGGElement, node: DiagramNode, w: number, h: number): 
   title.setAttribute('x', String(w / 2));
   title.setAttribute('y', node.stereotype ? '34' : '26');
   title.setAttribute('text-anchor', 'middle');
-  title.textContent = node.label;
+  setClippedText(title, node.label, w - CLASS_PADDING_X * 2, CHAR_WIDTH);
   g.appendChild(title);
 
   // Divider under the header, then the attribute rows. Enum-only classes have no methods → just one body.
@@ -345,8 +438,8 @@ function divider(g: SVGGElement, w: number, y: number): void {
   g.appendChild(line);
 }
 
-/** One left-aligned member row inside a compartment; computed members render italic. */
-function appendRow(g: SVGGElement, member: DiagramMember, y: number, _w: number): void {
+/** One left-aligned member row inside a compartment; computed members render italic, long rows ellipsize. */
+function appendRow(g: SVGGElement, member: DiagramMember, y: number, w: number): void {
   const row = svgEl('text');
   row.setAttribute(
     'class',
@@ -354,14 +447,8 @@ function appendRow(g: SVGGElement, member: DiagramMember, y: number, _w: number)
   );
   row.setAttribute('x', String(CLASS_PADDING_X));
   row.setAttribute('y', String(y));
-  row.textContent = member.text;
+  setClippedText(row, member.text, w - CLASS_PADDING_X * 2, MEMBER_CHAR_WIDTH);
   g.appendChild(row);
-}
-
-function polylinePath(points: { x: number; y: number }[]): string {
-  if (!points.length) return '';
-  const [head, ...rest] = points;
-  return `M ${head.x} ${head.y} ` + rest.map((p) => `L ${p.x} ${p.y}`).join(' ');
 }
 
 /** The bounded context of a `Context.Name` qualified name (prefix before the first dot), or '' if none. */
@@ -370,20 +457,64 @@ function contextOf(qualifiedName: string): string {
   return dot < 0 ? '' : qualifiedName.slice(0, dot);
 }
 
-/**
- * Lay out one structured graph with ELK and draw it into a fresh `<svg>`. Throws on layout failure so the
- * caller can surface an error. Nodes are grouped by bounded context: each context becomes a big
- * container holding its elements (a compound ELK layout), context-less nodes (e.g. state-machine states)
- * lay out at the root, composition edges carry a derived cardinality, and the whole hierarchy is drawn
- * recursively (context boxes behind, then edges, then nodes).
- */
-async function drawGraph(graph: DiagramGraph, Elk: ElkConstructor): Promise<SVGSVGElement> {
-  const byId = new Map<string, DiagramNode>(graph.nodes.map((n) => [n.id, n]));
+// --- scene model (authoring canvas) -----------------------------------------
+// drawGraph returns, alongside the <svg>, a small live model of what it drew: each node's DOM group +
+// current content-space rect, each edge's group + endpoints, each context container's group + box. The
+// drag handler mutates these in place (move a node → re-route its edges → resize its context) with no
+// re-layout, then persists the new positions.
 
-  // Edge labels: keep an explicit label (a state-machine guard, a relation kind); otherwise show the
-  // composition cardinality the COMPILER derived from the Koine field type (DiagramEdge.cardinality).
+/** A live node in the rendered scene: its DOM group + current content-space rect (mutated on drag). */
+interface SceneNode {
+  id: string;
+  qualifiedName: string;
+  label: string;
+  ctx: string;
+  group: SVGGElement;
+  rect: Rect;
+}
+/** A live edge: its DOM group plus the node ids it connects, so a drag can re-route it in place. */
+interface SceneEdge {
+  edge: DiagramEdge;
+  group: SVGGElement;
+  from: string;
+  to: string;
+}
+/** A live context container: its DOM group + box rect, plus the member node ids a drag resizes it around. */
+interface SceneContext {
+  group: SVGGElement;
+  box: SVGRectElement;
+  memberIds: string[];
+}
+/** Everything a drag handler needs to move a node and keep its edges + container in sync. */
+interface DiagramScene {
+  nodes: Map<string, SceneNode>;
+  edges: SceneEdge[];
+  contexts: Map<string, SceneContext>;
+}
+
+const CONTEXT_HEADER = 34; // a context container's top inset (room for its name label)
+const CONTEXT_PAD = 16; // a context container's left/right/bottom inset around its member nodes
+
+/** Group nodes by bounded context (the qualified-name prefix); '' for context-less nodes (root level). */
+function groupByContext(nodes: readonly DiagramNode[]): Map<string, DiagramNode[]> {
+  const groups = new Map<string, DiagramNode[]>();
+  for (const n of nodes) {
+    const ctx = contextOf(n.qualifiedName);
+    const arr = groups.get(ctx);
+    if (arr) arr.push(n);
+    else groups.set(ctx, [n]);
+  }
+  return groups;
+}
+
+/**
+ * Run ELK's compound (context-grouped) layout and return each node's ABSOLUTE rect — the initial,
+ * auto-arranged positions. Throws on layout failure so the caller can surface an error. Edges feed ELK
+ * only for spacing; we draw our own border-anchored routes, so ELK's routed sections are unused.
+ */
+async function elkBaseRects(graph: DiagramGraph, Elk: ElkConstructor): Promise<Map<string, Rect>> {
   const layoutEdges: ElkExtendedEdge[] = graph.edges.map((e, i) => {
-    const text = e.label ?? e.cardinality ?? null;
+    const text = e.label ?? null;
     return {
       id: `e${i}`,
       sources: [e.from],
@@ -392,19 +523,8 @@ async function drawGraph(graph: DiagramGraph, Elk: ElkConstructor): Promise<SVGS
     };
   });
 
-  // Group nodes by bounded context → one container per context (a compound layout). Context-less nodes
-  // lay out directly under the root.
-  const CONTEXT_HEADER = 34;
-  const CONTEXT_PAD = 16;
-  const groups = new Map<string, DiagramNode[]>();
-  for (const n of graph.nodes) {
-    const ctx = contextOf(n.qualifiedName);
-    const arr = groups.get(ctx);
-    if (arr) arr.push(n);
-    else groups.set(ctx, [n]);
-  }
   const rootChildren: ElkNode[] = [];
-  for (const [ctx, nodes] of groups) {
+  for (const [ctx, nodes] of groupByContext(graph.nodes)) {
     const kids: ElkNode[] = nodes.map((n) => {
       const { width, height } = nodeSize(n);
       return { id: n.id, width, height };
@@ -439,17 +559,82 @@ async function drawGraph(graph: DiagramGraph, Elk: ElkConstructor): Promise<SVGS
     edges: layoutEdges,
   };
 
-  const elk = new Elk();
-  const laid = await elk.layout(layoutGraph);
+  const laid = await new Elk().layout(layoutGraph);
+  const rects = new Map<string, Rect>();
+  const walk = (parent: ElkNode, ox: number, oy: number): void => {
+    for (const child of parent.children ?? []) {
+      const ax = ox + (child.x ?? 0);
+      const ay = oy + (child.y ?? 0);
+      if (child.id.startsWith('ctx:')) {
+        walk(child, ax, ay);
+      } else {
+        rects.set(child.id, { x: ax, y: ay, w: child.width ?? MIN_NODE_WIDTH, h: child.height ?? NODE_HEIGHT });
+      }
+    }
+  };
+  walk(laid, 0, 0);
+  return rects;
+}
 
-  const width = Math.max(1, Math.ceil(laid.width ?? 0));
-  const height = Math.max(1, Math.ceil(laid.height ?? 0));
+/** The bounding box of a context container around its member rects (name header on top, padding around). */
+function contextBoxFor(memberRects: readonly Rect[]): Rect | null {
+  if (memberRects.length === 0) return null;
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (const r of memberRects) {
+    minX = Math.min(minX, r.x);
+    minY = Math.min(minY, r.y);
+    maxX = Math.max(maxX, r.x + r.w);
+    maxY = Math.max(maxY, r.y + r.h);
+  }
+  return {
+    x: minX - CONTEXT_PAD,
+    y: minY - CONTEXT_HEADER,
+    w: maxX - minX + CONTEXT_PAD * 2,
+    h: maxY - minY + CONTEXT_HEADER + CONTEXT_PAD,
+  };
+}
+
+/** Re-place a context container's group + box from its members' current rects (after a node moves). */
+function applyContextBox(sc: SceneContext, nodes: Map<string, SceneNode>): void {
+  const memberRects = sc.memberIds.map((id) => nodes.get(id)?.rect).filter((r): r is Rect => !!r);
+  const box = contextBoxFor(memberRects);
+  if (!box) return;
+  sc.group.setAttribute('transform', `translate(${box.x}, ${box.y})`);
+  sc.box.setAttribute('width', String(box.w));
+  sc.box.setAttribute('height', String(box.h));
+}
+
+/**
+ * Lay out a structured graph and draw it into a fresh `<svg>`, returning the SVG plus a live
+ * {@link DiagramScene} the drag handler mutates. ELK gives the initial auto-arrangement; any node the
+ * user has manually positioned (`positions`, keyed by qualified name) overrides ELK, and each context
+ * container is sized to wrap its members wherever they end up. Edges are re-derived from the final node
+ * rects (border-anchored), never from ELK's routed sections.
+ */
+async function drawGraph(
+  graph: DiagramGraph,
+  Elk: ElkConstructor,
+  positions: Record<string, { x: number; y: number }>,
+): Promise<{ svg: SVGSVGElement; scene: DiagramScene }> {
+  // Base rects from ELK, then OVERRIDE every manually-positioned node with its saved spot (keeping ELK's
+  // computed size). A node ELK somehow dropped is parked at the origin so it still draws.
+  const rects = await elkBaseRects(graph, Elk);
+  for (const n of graph.nodes) {
+    const fallback = rects.get(n.id);
+    const { width, height } = nodeSize(n);
+    const saved = positions[n.qualifiedName];
+    if (saved) {
+      rects.set(n.id, { x: saved.x, y: saved.y, w: fallback?.w ?? width, h: fallback?.h ?? height });
+    } else if (!fallback) {
+      rects.set(n.id, { x: 0, y: 0, w: width, h: height });
+    }
+  }
 
   const svg = svgEl('svg');
   svg.setAttribute('class', 'koi-svg-diagram');
-  svg.setAttribute('viewBox', `0 0 ${width} ${height}`);
-  svg.setAttribute('width', String(width));
-  svg.setAttribute('height', String(height));
   svg.setAttribute('role', 'img');
 
   // Arrowhead marker, themed via CSS (currentColor / stroke from .koi-svg-edge).
@@ -467,6 +652,22 @@ async function drawGraph(graph: DiagramGraph, Elk: ElkConstructor): Promise<SVGS
   arrow.setAttribute('class', 'koi-svg-arrowhead');
   marker.appendChild(arrow);
   defs.appendChild(marker);
+
+  // Composition diamond, filled, drawn at the OWNER (source) end of a composition edge — the UML symbol
+  // that, paired with the target arrowhead, gives the "double-ended" treatment the plain arrow lacked.
+  const diamond = svgEl('marker');
+  diamond.setAttribute('id', 'koi-svg-diamond');
+  diamond.setAttribute('viewBox', '0 0 12 8');
+  diamond.setAttribute('refX', '6');
+  diamond.setAttribute('refY', '4');
+  diamond.setAttribute('markerWidth', '13');
+  diamond.setAttribute('markerHeight', '9');
+  diamond.setAttribute('orient', 'auto-start-reverse');
+  const diamondPath = svgEl('path');
+  diamondPath.setAttribute('d', 'M 0 4 L 6 0 L 12 4 L 6 8 z');
+  diamondPath.setAttribute('class', 'koi-svg-diamond');
+  diamond.appendChild(diamondPath);
+  defs.appendChild(diamond);
   svg.appendChild(defs);
 
   // Three layers: context boxes (behind) · edges · nodes (in front).
@@ -477,78 +678,165 @@ async function drawGraph(graph: DiagramGraph, Elk: ElkConstructor): Promise<SVGS
   const nodeLayer = svgEl('g');
   nodeLayer.setAttribute('class', 'koi-svg-nodes');
 
-  // Walk the laid hierarchy, accumulating absolute offsets (a child's coords are parent-relative, and a
-  // container's edges sit in the container's own coordinate space).
-  const drawLevel = (parent: ElkNode, ox: number, oy: number): void => {
-    for (const e of parent.edges ?? []) {
-      const section = e.sections?.[0];
-      if (!section) continue;
-      const pts = [section.startPoint, ...(section.bendPoints ?? []), section.endPoint].map((p) => ({
-        x: p.x + ox,
-        y: p.y + oy,
-      }));
-      const g = svgEl('g');
-      g.setAttribute('class', 'koi-svg-edge');
-      const path = svgEl('path');
-      path.setAttribute('class', 'koi-svg-edge-line');
-      path.setAttribute('d', polylinePath(pts));
-      path.setAttribute('marker-end', 'url(#koi-svg-arrow)');
-      g.appendChild(path);
-      const label = e.labels?.[0];
-      if (label?.text != null && label.x != null && label.y != null) {
-        const t = svgEl('text');
-        t.setAttribute('class', 'koi-svg-edge-label');
-        t.setAttribute('x', String(label.x + ox));
-        t.setAttribute('y', String(label.y + oy + EDGE_LABEL_HEIGHT * 0.5));
-        t.textContent = label.text;
-        g.appendChild(t);
-      }
-      edgeLayer.appendChild(g);
-    }
+  const scene: DiagramScene = { nodes: new Map(), edges: [], contexts: new Map() };
+  const boundRects: Rect[] = []; // everything drawn, for the content-bounds union below
 
-    for (const child of parent.children ?? []) {
-      const ax = ox + (child.x ?? 0);
-      const ay = oy + (child.y ?? 0);
-      if (child.id.startsWith('ctx:')) {
-        const cg = svgEl('g');
-        cg.setAttribute('class', 'koi-svg-context');
-        cg.setAttribute('transform', `translate(${ax}, ${ay})`);
-        const rect = svgEl('rect');
-        rect.setAttribute('class', 'koi-svg-context-box');
-        rect.setAttribute('width', String(child.width ?? 0));
-        rect.setAttribute('height', String(child.height ?? 0));
-        rect.setAttribute('rx', '12');
-        cg.appendChild(rect);
-        const label = svgEl('text');
-        label.setAttribute('class', 'koi-svg-context-label');
-        label.setAttribute('x', String(CONTEXT_PAD));
-        label.setAttribute('y', '22');
-        label.textContent = child.id.slice('ctx:'.length);
-        cg.appendChild(label);
-        contextLayer.appendChild(cg);
-        drawLevel(child, ax, ay);
-      } else {
-        const node = byId.get(child.id);
-        if (!node) continue;
-        const w = child.width ?? MIN_NODE_WIDTH;
-        const h = child.height ?? NODE_HEIGHT;
-        const g = svgEl('g');
-        g.setAttribute('class', 'koi-svg-node');
-        g.setAttribute('transform', `translate(${ax}, ${ay})`);
-        tagNode(g, node);
-        if (isClassNode(node)) drawClassBox(g, node, w, h);
-        else drawSimpleBox(g, node, w, h);
-        nodeLayer.appendChild(g);
-      }
+  // Context containers, each sized to wrap its members' FINAL rects (so a dragged node never escapes its
+  // box). Drawn behind the nodes; recorded in the scene so a drag can resize them live.
+  for (const [ctx, nodes] of groupByContext(graph.nodes)) {
+    if (ctx === '') continue;
+    const memberIds = nodes.map((n) => n.id);
+    const box = contextBoxFor(memberIds.map((id) => rects.get(id)).filter((r): r is Rect => !!r));
+    if (!box) continue;
+    boundRects.push(box);
+    const cg = svgEl('g');
+    cg.setAttribute('class', 'koi-svg-context');
+    cg.setAttribute('transform', `translate(${box.x}, ${box.y})`);
+    const rect = svgEl('rect');
+    rect.setAttribute('class', 'koi-svg-context-box');
+    rect.setAttribute('width', String(box.w));
+    rect.setAttribute('height', String(box.h));
+    rect.setAttribute('rx', '12');
+    cg.appendChild(rect);
+    const label = svgEl('text');
+    label.setAttribute('class', 'koi-svg-context-label');
+    label.setAttribute('x', String(CONTEXT_PAD));
+    label.setAttribute('y', '22');
+    label.textContent = ctx;
+    cg.appendChild(label);
+    contextLayer.appendChild(cg);
+    scene.contexts.set(ctx, { group: cg, box: rect, memberIds });
+  }
+
+  // Nodes, each at its final rect (ELK's auto-arrangement or a saved manual position).
+  for (const node of graph.nodes) {
+    const rect = rects.get(node.id);
+    if (!rect) continue;
+    boundRects.push(rect);
+    const g = svgEl('g');
+    g.setAttribute('class', 'koi-svg-node');
+    g.setAttribute('data-node-id', node.id);
+    g.setAttribute('transform', `translate(${rect.x}, ${rect.y})`);
+    tagNode(g, node);
+    if (isClassNode(node)) drawClassBox(g, node, rect.w, rect.h);
+    else drawSimpleBox(g, node, rect.w, rect.h);
+    // Authoring: a connection port on the node's right edge — drag from it to another node to add a field.
+    if (editingEnabled && node.qualifiedName.includes('.') && isEditableKind(node.kind)) {
+      const port = svgEl('circle');
+      port.setAttribute('class', 'koi-svg-port');
+      port.setAttribute('cx', String(rect.w));
+      port.setAttribute('cy', String(rect.h / 2));
+      port.setAttribute('r', '5');
+      g.appendChild(port);
     }
-  };
-  drawLevel(laid, 0, 0);
+    nodeLayer.appendChild(g);
+    scene.nodes.set(node.id, {
+      id: node.id,
+      qualifiedName: node.qualifiedName,
+      label: node.label,
+      ctx: contextOf(node.qualifiedName),
+      group: g,
+      rect,
+    });
+  }
+
+  // Edges, border-anchored between the final node rects, recorded so a drag can re-route them in place.
+  for (const edge of graph.edges) {
+    const src = rects.get(edge.from);
+    const dst = rects.get(edge.to);
+    if (!src || !dst) continue;
+    const g = drawEdge(edge, src, dst);
+    edgeLayer.appendChild(g);
+    scene.edges.push({ edge, group: g, from: edge.from, to: edge.to });
+  }
+
+  // The viewBox frames exactly what's drawn (node rects + context boxes) plus a margin — so nodes dragged
+  // beyond ELK's original extent stay in view and the minimap/fit math see the true content bounds.
+  const bounds = unionBounds(boundRects);
+  svg.setAttribute('viewBox', viewBoxAttr(bounds));
+  svg.setAttribute('width', String(Math.max(1, Math.ceil(bounds.w))));
+  svg.setAttribute('height', String(Math.max(1, Math.ceil(bounds.h))));
 
   svg.appendChild(contextLayer);
   svg.appendChild(edgeLayer);
   svg.appendChild(nodeLayer);
 
-  return svg;
+  return { svg, scene };
+}
+
+/** The union of all rects, expanded by the SVG margin — the diagram's content bounds. Empty → a unit box. */
+function unionBounds(rects: readonly Rect[]): ViewBox {
+  if (rects.length === 0) return { x: 0, y: 0, w: 1, h: 1 };
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (const r of rects) {
+    minX = Math.min(minX, r.x);
+    minY = Math.min(minY, r.y);
+    maxX = Math.max(maxX, r.x + r.w);
+    maxY = Math.max(maxY, r.y + r.h);
+  }
+  return {
+    x: minX - SVG_PADDING,
+    y: minY - SVG_PADDING,
+    w: maxX - minX + SVG_PADDING * 2,
+    h: maxY - minY + SVG_PADDING * 2,
+  };
+}
+
+/**
+ * Draw one edge as a border-anchored line (its endpoints sit ON the two node borders, via
+ * {@link edgeRoute}), with a marker pair chosen by the relationship kind and a multiplicity label at
+ * each end. A composition gets the UML treatment — a filled diamond at the owner (source) end and an
+ * open arrow at the part (target) end; every other relationship just points at its target.
+ */
+function drawEdge(edge: DiagramEdge, src: Rect, dst: Rect): SVGGElement {
+  const g = svgEl('g');
+  g.setAttribute('class', 'koi-svg-edge');
+  // A field-backed composition can be disconnected (right-click) — stamp the backing field so the canvas
+  // can map the edge to a `removeMember` edit without re-querying the model.
+  if (edge.backingMember) g.setAttribute('data-backing-member', edge.backingMember);
+  renderEdgeInto(g, edge, src, dst);
+  return g;
+}
+
+/** (Re)populate an edge group's children for the current `src`/`dst` rects — used on first draw and on
+ * every drag frame, so a moved node's connectors re-anchor without rebuilding the group. */
+function renderEdgeInto(g: SVGGElement, edge: DiagramEdge, src: Rect, dst: Rect): void {
+  g.replaceChildren();
+  const route = edgeRoute(src, dst);
+
+  const path = svgEl('path');
+  path.setAttribute('class', 'koi-svg-edge-line');
+  path.setAttribute('d', `M ${route.start.x} ${route.start.y} L ${route.end.x} ${route.end.y}`);
+  path.setAttribute('marker-end', 'url(#koi-svg-arrow)');
+  if (edge.arrowKind === 'composition') {
+    path.setAttribute('marker-start', 'url(#koi-svg-diamond)');
+  }
+  g.appendChild(path);
+
+  // The semantic label (a transition guard, a strategic relation kind, a publish/consume verb) sits mid-edge.
+  if (edge.label) {
+    g.appendChild(edgeText('koi-svg-edge-label', edge.label, route.mid.x, route.mid.y));
+  }
+  // Per-end multiplicities: the owner end (sourceCardinality) by `start`, the part end (cardinality) by `end`.
+  if (edge.sourceCardinality) {
+    g.appendChild(edgeText('koi-svg-edge-card', edge.sourceCardinality, route.sourceLabel.x, route.sourceLabel.y));
+  }
+  if (edge.cardinality) {
+    g.appendChild(edgeText('koi-svg-edge-card', edge.cardinality, route.targetLabel.x, route.targetLabel.y));
+  }
+}
+
+/** A small, halo-backed edge label (`<text>`) centered at a content point. */
+function edgeText(cls: string, text: string, x: number, y: number): SVGTextElement {
+  const t = svgEl('text');
+  t.setAttribute('class', cls);
+  t.setAttribute('x', String(x));
+  t.setAttribute('y', String(y));
+  t.textContent = text;
+  return t;
 }
 
 /** Shift an ELK polyline (root-relative) by the SVG padding offset. */
@@ -611,8 +899,38 @@ function reframeToAspect(view: ViewBox, vp: Size): ViewBox {
  * Geometry is pure (canvasView.ts); this function is the DOM/pointer shell around it. `persistKey`, when
  * given, round-trips this diagram's last zoom through the store so reopening the tab restores it.
  */
-function mountInteractiveCanvas(surface: HTMLElement, svg: SVGSVGElement, persistKey?: string): CanvasDispose {
+interface CanvasOptions {
+  /** localStorage key for this diagram's zoom (and the position-scope already baked into the caller's key). */
+  persistKey?: string;
+  /** The live scene, when the canvas is an authoring surface (enables node drag). */
+  scene?: DiagramScene;
+  /** Whether drag-to-move is on (mirrors the renderer's editing gate). */
+  editing?: boolean;
+  /** Persist the full set of node positions after a drag (keyed by qualified name). */
+  onPersistPositions?: (positions: Record<string, { x: number; y: number }>) => void;
+  /** Reset the layout to ELK's auto-arrangement (the control-bar button). */
+  onAutoArrange?: () => void;
+  /** Add a new type to the active context (the control-bar button). */
+  onAddType?: () => void;
+}
+
+function mountInteractiveCanvas(surface: HTMLElement, svg: SVGSVGElement, opts: CanvasOptions = {}): CanvasDispose {
+  const { persistKey, scene, editing = false, onPersistPositions, onAutoArrange, onAddType } = opts;
   const contentBounds = readViewBox(svg);
+
+  // node-id → its incident edges, so a drag can re-route just that node's connectors (not every edge).
+  const incident = new Map<string, SceneEdge[]>();
+  const addIncident = (id: string, se: SceneEdge): void => {
+    const arr = incident.get(id);
+    if (arr) arr.push(se);
+    else incident.set(id, [se]);
+  };
+  if (scene) {
+    for (const se of scene.edges) {
+      addIncident(se.from, se);
+      addIncident(se.to, se);
+    }
+  }
 
   // The svg now fills its canvas; the viewBox we mutate decides what's shown. Matching the viewBox aspect
   // to the viewport (fit/reframe/zoomAt all preserve it) means 'meet' never letterboxes, so the cursor →
@@ -622,7 +940,7 @@ function mountInteractiveCanvas(surface: HTMLElement, svg: SVGSVGElement, persis
   svg.setAttribute('preserveAspectRatio', 'xMidYMid meet');
 
   const canvas = document.createElement('div');
-  canvas.className = 'koi-canvas';
+  canvas.className = editing ? 'koi-canvas koi-canvas--editing' : 'koi-canvas';
 
   const controls = document.createElement('div');
   controls.className = 'koi-canvas-controls';
@@ -635,6 +953,17 @@ function mountInteractiveCanvas(surface: HTMLElement, svg: SVGSVGElement, persis
   const zoomIn = controlButton('+', 'Zoom in');
   const fitBtn = controlButton('⤢', 'Fit to screen'); // ⤢
   controls.append(zoomOut, pct, zoomIn, fitBtn);
+  // Authoring: "add a type" to the active context, and "reset layout" to ELK's auto-arrangement.
+  if (editing && onAddType) {
+    const addTypeBtn = controlButton('＋', 'Add a type');
+    addTypeBtn.addEventListener('click', () => onAddType());
+    controls.append(addTypeBtn);
+  }
+  if (editing && onAutoArrange) {
+    const arrangeBtn = controlButton('⟲', 'Auto-arrange layout');
+    arrangeBtn.addEventListener('click', () => onAutoArrange());
+    controls.append(arrangeBtn);
+  }
 
   canvas.append(svg, controls);
   surface.appendChild(canvas);
@@ -763,8 +1092,180 @@ function mountInteractiveCanvas(surface: HTMLElement, svg: SVGSVGElement, persis
     return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
   }
 
+  // --- node drag (authoring) -------------------------------------------------
+  // A press on a node moves it (and re-routes its edges + resizes its context) instead of panning. A
+  // press that DOESN'T move past the threshold stays a click → navigation; a real drag swallows that click.
+  const DRAG_THRESHOLD = 3; // px before a press becomes a drag
+  let dragNode: SceneNode | null = null;
+  let dragStart = { x: 0, y: 0 };
+  let dragOrigin = { x: 0, y: 0 };
+  let dragMoved = false;
+  let justDragged = false;
+
+  function beginNodeDrag(sn: SceneNode, e: PointerEvent): void {
+    dragNode = sn;
+    dragStart = { x: e.clientX, y: e.clientY };
+    dragOrigin = { x: sn.rect.x, y: sn.rect.y };
+    dragMoved = false;
+    canvas.classList.add('koi-canvas--dragging');
+    try {
+      canvas.setPointerCapture?.(e.pointerId);
+    } catch {
+      // setPointerCapture unsupported (headless DOM) — drag still works via canvas-level moves.
+    }
+  }
+
+  function moveNodeDrag(e: PointerEvent): void {
+    if (!dragNode || !scene) return;
+    if (!dragMoved && Math.hypot(e.clientX - dragStart.x, e.clientY - dragStart.y) < DRAG_THRESHOLD) return;
+    dragMoved = true;
+    const sx = svgRect.width > 0 ? view.w / svgRect.width : 0;
+    const sy = svgRect.height > 0 ? view.h / svgRect.height : 0;
+    dragNode.rect.x = dragOrigin.x + (e.clientX - dragStart.x) * sx;
+    dragNode.rect.y = dragOrigin.y + (e.clientY - dragStart.y) * sy;
+    dragNode.group.setAttribute('transform', `translate(${dragNode.rect.x}, ${dragNode.rect.y})`);
+    // Re-route the connectors touching this node, and grow/shrink its context box to keep wrapping it.
+    for (const se of incident.get(dragNode.id) ?? []) {
+      const from = scene.nodes.get(se.from)?.rect;
+      const to = scene.nodes.get(se.to)?.rect;
+      if (from && to) renderEdgeInto(se.group, se.edge, from, to);
+    }
+    const sc = scene.contexts.get(dragNode.ctx);
+    if (sc) applyContextBox(sc, scene.nodes);
+  }
+
+  function endNodeDrag(): void {
+    if (!dragNode || !scene) return;
+    if (dragMoved && onPersistPositions) {
+      // Snapshot EVERY node's position (not just the dragged one) so the whole layout becomes stable and
+      // manual — subsequent re-renders place all nodes from the saved map instead of re-flowing with ELK.
+      const positions: Record<string, { x: number; y: number }> = {};
+      for (const n of scene.nodes.values()) positions[n.qualifiedName] = { x: n.rect.x, y: n.rect.y };
+      onPersistPositions(positions);
+      justDragged = true; // swallow the click that follows so a drag doesn't also navigate
+    }
+    dragNode = null;
+    canvas.classList.remove('koi-canvas--dragging');
+  }
+
+  // Swallow the click synthesized after a real drag (capture phase, before the node's navigate handler).
+  canvas.addEventListener(
+    'click',
+    (e) => {
+      if (justDragged) {
+        justDragged = false;
+        e.stopImmediatePropagation();
+        e.preventDefault();
+      }
+    },
+    true,
+  );
+
+  // --- connect (authoring) ---------------------------------------------------
+  // Dragging from a node's port to another node draws a relationship: it dispatches a connect event that
+  // `ide.ts` turns into an `addField` edit (a field on the source typed as the target).
+  let connectFrom: SceneNode | null = null;
+  let connectLine: SVGLineElement | null = null;
+
+  /** The node whose rect contains content point `p` (excluding `excludeId`), or null. Half-open bounds
+   * (`[x, x+w)`) so a point on the seam between two edge-adjacent nodes binds to exactly one of them. */
+  function nodeAt(p: { x: number; y: number }, excludeId: string): SceneNode | null {
+    if (!scene) return null;
+    for (const n of scene.nodes.values()) {
+      if (n.id === excludeId) continue;
+      if (p.x >= n.rect.x && p.x < n.rect.x + n.rect.w && p.y >= n.rect.y && p.y < n.rect.y + n.rect.h) return n;
+    }
+    return null;
+  }
+
+  function beginConnect(sn: SceneNode, e: PointerEvent): void {
+    connectFrom = sn;
+    const x = sn.rect.x + sn.rect.w;
+    const y = sn.rect.y + sn.rect.h / 2;
+    connectLine = svgEl('line');
+    connectLine.setAttribute('class', 'koi-svg-connecting');
+    connectLine.setAttribute('x1', String(x));
+    connectLine.setAttribute('y1', String(y));
+    connectLine.setAttribute('x2', String(x));
+    connectLine.setAttribute('y2', String(y));
+    svg.appendChild(connectLine);
+    canvas.classList.add('koi-canvas--connecting');
+    try {
+      canvas.setPointerCapture?.(e.pointerId);
+    } catch {
+      // headless — connect still works via canvas-level moves.
+    }
+  }
+
+  function moveConnect(e: PointerEvent): void {
+    if (!connectLine) return;
+    const p = toContent(e.clientX, e.clientY);
+    connectLine.setAttribute('x2', String(p.x));
+    connectLine.setAttribute('y2', String(p.y));
+  }
+
+  function endConnect(e: PointerEvent): void {
+    if (!connectFrom) return;
+    const target = nodeAt(toContent(e.clientX, e.clientY), connectFrom.id);
+    if (target) {
+      canvas.dispatchEvent(
+        new CustomEvent<DiagramConnectDetail>(DIAGRAM_CONNECT_EVENT, {
+          bubbles: true,
+          detail: {
+            sourceQualifiedName: connectFrom.qualifiedName,
+            targetQualifiedName: target.qualifiedName,
+            sourceLabel: connectFrom.label,
+            targetLabel: target.label,
+          },
+        }),
+      );
+    }
+    connectLine?.remove();
+    connectLine = null;
+    connectFrom = null;
+    canvas.classList.remove('koi-canvas--connecting');
+  }
+
+  // Right-click a field-backed edge to disconnect it (remove the backing field).
+  canvas.addEventListener('contextmenu', (e: MouseEvent) => {
+    if (!editing) return;
+    const edgeEl = (e.target as Element | null)?.closest('.koi-svg-edge');
+    const backing = edgeEl?.getAttribute('data-backing-member');
+    if (edgeEl && backing) {
+      e.preventDefault();
+      canvas.dispatchEvent(
+        new CustomEvent<DiagramDisconnectDetail>(DIAGRAM_DISCONNECT_EVENT, {
+          bubbles: true,
+          detail: { backingMember: backing, label: backing.slice(backing.lastIndexOf('.') + 1) },
+        }),
+      );
+    }
+  });
+
   canvas.addEventListener('pointerdown', (e: PointerEvent) => {
     const target = e.target as Element | null;
+    // Authoring: a press on a node's PORT starts a connection; a press on the node body starts a DRAG.
+    if (editing && scene) {
+      const portEl = target?.closest('.koi-svg-port');
+      if (portEl) {
+        const ng = portEl.closest('.koi-svg-node') as SVGGElement | null;
+        const portId = ng?.getAttribute('data-node-id') ?? null;
+        const portNode = portId ? scene.nodes.get(portId) : undefined;
+        if (portNode) {
+          refreshMetrics();
+          beginConnect(portNode, e);
+          return;
+        }
+      }
+      const nodeGroup = target?.closest('.koi-svg-node') as SVGGElement | null;
+      const id = nodeGroup?.getAttribute('data-node-id') ?? null;
+      const sn = id ? scene.nodes.get(id) : undefined;
+      if (sn) {
+        refreshMetrics();
+        beginNodeDrag(sn, e);
+        return;
+      }
+    }
     // Don't hijack a click on a navigable node (let it reach the navigate handler) or on the overlay
     // chrome — the control bar and the minimap own their own pointer behaviour.
     if (target?.closest('.koi-svg-node') || target?.closest('.koi-canvas-controls') || target?.closest('.koi-minimap')) {
@@ -787,6 +1288,14 @@ function mountInteractiveCanvas(surface: HTMLElement, svg: SVGSVGElement, persis
   });
 
   canvas.addEventListener('pointermove', (e: PointerEvent) => {
+    if (connectFrom) {
+      moveConnect(e);
+      return;
+    }
+    if (dragNode) {
+      moveNodeDrag(e);
+      return;
+    }
     if (!pointers.has(e.pointerId)) return;
     pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
 
@@ -811,6 +1320,14 @@ function mountInteractiveCanvas(surface: HTMLElement, svg: SVGSVGElement, persis
   });
 
   function endPointer(e: PointerEvent): void {
+    if (connectFrom) {
+      endConnect(e);
+      return;
+    }
+    if (dragNode) {
+      endNodeDrag();
+      return;
+    }
     if (!pointers.delete(e.pointerId)) return;
     if (pointers.size < 2) pinchPrev = 0;
     if (pointers.size === 1) {
@@ -1028,11 +1545,24 @@ export function createSvgRenderer(): DiagramRenderer {
       root.appendChild(surface);
 
       const merged = mergeGraphsForView(graphs);
+      const key = positionKey();
       try {
-        const svg = await drawGraph(merged, Elk);
-        // Layer the interactive canvas (pan/zoom/fit + minimap) over the drawn SVG. Pure geometry lives
-        // in canvasView.ts; the elkjs layout and node click-to-source stay untouched.
-        disposers.push(mountInteractiveCanvas(surface, svg, 'koi-domain-diagram'));
+        // Draw with any saved manual positions applied; the canvas then layers pan/zoom/fit + minimap and
+        // (when editing) node drag over the result. Geometry stays pure (canvasView.ts / diagramLayout.ts).
+        const { svg, scene } = await drawGraph(merged, Elk, loadDiagramPositions(key));
+        disposers.push(
+          mountInteractiveCanvas(surface, svg, {
+            persistKey: 'koi-domain-diagram',
+            scene,
+            editing: editingEnabled,
+            onPersistPositions: (positions) => saveDiagramPositions(key, positions),
+            onAutoArrange: () => {
+              clearDiagramPositions(key);
+              surface.dispatchEvent(new CustomEvent(DIAGRAM_RELAYOUT_EVENT, { bubbles: true }));
+            },
+            onAddType: () => surface.dispatchEvent(new CustomEvent(DIAGRAM_ADD_TYPE_EVENT, { bubbles: true })),
+          }),
+        );
       } catch (e) {
         surface.innerHTML = `<p class="doc-error">Could not lay out the diagram: ${escapeHtml(String(e))}</p>`;
       }

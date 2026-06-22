@@ -125,8 +125,12 @@ public static partial class ModelRoundTripService
 
     // ---- Declaration resolution ------------------------------------------
 
-    /// <summary>The affected declaration: a <c>type</c> (value/entity/enum/event) or a state machine.</summary>
-    private readonly record struct DeclTarget(bool IsStates, string QualifiedName, string? Uri, SourceSpan OriginalSpan);
+    /// <summary>
+    /// The affected declaration the edit re-emits: a <c>type</c> (value/entity/enum/event), a state
+    /// machine, or — for add/remove-type — the owning <c>context</c> (the surviving declaration whose
+    /// re-sliced text reflects the added/removed type).
+    /// </summary>
+    private readonly record struct DeclTarget(bool IsStates, bool IsContext, string QualifiedName, string? Uri, SourceSpan OriginalSpan);
 
     private static bool TryResolveDeclaration(KoineModel model, StructuredEdit edit, out DeclTarget decl)
     {
@@ -138,25 +142,49 @@ public static partial class ModelRoundTripService
                 return false;
             }
 
-            decl = new DeclTarget(true, edit.Target, s.States.Span.File, s.States.Span);
+            decl = new DeclTarget(true, false, edit.Target, s.States.Span.File, s.States.Span);
+            return true;
+        }
+
+        // Add/remove a whole type: the affected declaration is the owning CONTEXT, which survives the
+        // edit and whose re-sliced text carries the change (for add, Target IS the context name).
+        if (edit.Kind is StructuredEditKind.AddType or StructuredEditKind.RemoveType)
+        {
+            var ctxName = edit.Kind == StructuredEditKind.AddType ? edit.Target : ContextOf(edit.Target);
+            if (edit.Kind == StructuredEditKind.RemoveType && FindEditType(model, edit.Target) is null)
+            {
+                return false; // can't remove a type that isn't there
+            }
+
+            if (FindContext(model, ctxName) is not { } ctx)
+            {
+                return false;
+            }
+
+            decl = new DeclTarget(false, true, ctx.Name, ctx.Span.File, ctx.Span);
             return true;
         }
 
         var typeQName = edit.Kind == StructuredEditKind.AddField ? edit.Target : StripLastSegment(edit.Target);
-        if (FindType(model, typeQName) is not { } type)
+        if (FindEditType(model, typeQName) is not { } type)
         {
             return false;
         }
 
-        decl = new DeclTarget(false, typeQName, type.Span.File, type.Span);
+        // Re-emit the matched declaration (an aggregate is re-emitted whole — its re-slice still captures
+        // a field added to / removed from its root entity). Store the resolved canonical qname so the
+        // post-edit re-slice (DeclSpan) finds it again without the diagram-form fallback.
+        decl = new DeclTarget(false, false, typeQName, type.Span.File, type.Span);
         return true;
     }
 
     /// <summary>Re-resolves the affected declaration's span in the (re-parsed) edited model.</summary>
     private static SourceSpan DeclSpan(KoineModel model, DeclTarget decl) =>
-        decl.IsStates
-            ? FindStates(model, decl.QualifiedName)?.States.Span ?? SourceSpan.None
-            : FindType(model, decl.QualifiedName)?.Span ?? SourceSpan.None;
+        decl.IsContext
+            ? FindContext(model, decl.QualifiedName)?.Span ?? SourceSpan.None
+            : decl.IsStates
+                ? FindStates(model, decl.QualifiedName)?.States.Span ?? SourceSpan.None
+                : FindEditType(model, decl.QualifiedName)?.Span ?? SourceSpan.None;
 
     // ---- Text-edit computation per edit kind -----------------------------
 
@@ -178,6 +206,10 @@ public static partial class ModelRoundTripService
                 return TryRemoveMember(model, files, edit, out op);
             case StructuredEditKind.AddTransition:
                 return TryAddTransition(model, files, edit, out op);
+            case StructuredEditKind.AddType:
+                return TryAddType(model, files, edit, out op);
+            case StructuredEditKind.RemoveType:
+                return TryRemoveType(model, files, edit, out op);
             default:
                 return false;
         }
@@ -224,12 +256,15 @@ public static partial class ModelRoundTripService
     private static bool TryAddField(KoineModel model, IReadOnlyList<SourceFile> files, StructuredEdit edit, out TextOp op)
     {
         op = default;
+        // The diagram addresses an aggregate root by the aggregate's qname; a field is added to its root
+        // entity (FieldOwner), and a nested type is addressed as "Context.SimpleName" (FindEditType).
         if (string.IsNullOrEmpty(edit.Name) || string.IsNullOrEmpty(edit.Type)
-            || FindType(model, edit.Target) is not { } type || FieldsOf(type) is not { } members)
+            || FindEditType(model, edit.Target) is not { } resolved || FieldsOf(FieldOwner(resolved)) is not { } members)
         {
             return false;
         }
 
+        var type = FieldOwner(resolved);
         var source = SourceOf(files, type.Span.File);
         if (source is null)
         {
@@ -361,20 +396,154 @@ public static partial class ModelRoundTripService
         return true;
     }
 
+    /// <summary>
+    /// Insert a minimal, valid <c>value</c>-object skeleton (one <c>String</c> field) into the
+    /// <paramref name="edit"/>.Target context — after its last top-level type, or into an empty body.
+    /// Re-validation rejects a duplicate / invalid name, so a broken model is never produced.
+    /// </summary>
+    private static bool TryAddType(KoineModel model, IReadOnlyList<SourceFile> files, StructuredEdit edit, out TextOp op)
+    {
+        op = default;
+        if (string.IsNullOrEmpty(edit.Name) || FindContext(model, edit.Target) is not { } ctx || ctx.Span.IsNone)
+        {
+            return false;
+        }
+
+        var source = SourceOf(files, ctx.Span.File);
+        if (source is null)
+        {
+            return false;
+        }
+
+        var nl = NewlineOf(source);
+        var typeIndent = new string(' ', Math.Max(0, ctx.Span.Column - 1) + 2);
+        // A value object with a single String field is the minimal valid type; the author refines it.
+        var skeleton = $"value {edit.Name} {{{nl}{typeIndent}  name: String{nl}{typeIndent}}}";
+
+        if (ctx.Types.Count > 0 && ctx.Types[^1].Span is { IsNone: false } last)
+        {
+            // After the last top-level type's whole physical block, with a blank line between.
+            op = new TextOp(ctx.Span.File, EndOfLine(source, last.Offset + last.Length), 0, nl + nl + typeIndent + skeleton);
+            return true;
+        }
+
+        // Empty context body: open it after the context's '{'.
+        var brace = source.IndexOf('{', ctx.Span.Offset);
+        if (brace < 0)
+        {
+            return false;
+        }
+
+        var closeIndent = new string(' ', Math.Max(0, ctx.Span.Column - 1));
+        op = new TextOp(ctx.Span.File, brace + 1, 0, nl + typeIndent + skeleton + nl + closeIndent);
+        return true;
+    }
+
+    /// <summary>
+    /// Delete a whole type declaration (its full span plus the line break behind it). Re-validation
+    /// rejects the edit when the type is still referenced, so the model never dangles.
+    /// </summary>
+    private static bool TryRemoveType(KoineModel model, IReadOnlyList<SourceFile> files, StructuredEdit edit, out TextOp op)
+    {
+        op = default;
+        if (FindEditType(model, edit.Target) is not { } type || type.Span.IsNone)
+        {
+            return false;
+        }
+
+        var source = SourceOf(files, type.Span.File);
+        if (source is null)
+        {
+            return false;
+        }
+
+        SourceSpan span = type.Span;
+        var end = span.Offset + span.Length;
+        if (StartsOwnLine(source, span.Offset, out var lineStart))
+        {
+            // Also delete the type's leading /// doc-comment lines, so they don't reattach to the next type.
+            lineStart = IncludeLeadingDocLines(source, lineStart);
+            var lineEnd = EndOfLine(source, end);
+            if (lineEnd < source.Length && source[lineEnd] == '\r')
+            {
+                lineEnd++;
+            }
+
+            if (lineEnd < source.Length && source[lineEnd] == '\n')
+            {
+                lineEnd++;
+            }
+
+            op = new TextOp(span.File, lineStart, lineEnd - lineStart, string.Empty);
+            return true;
+        }
+
+        op = new TextOp(span.File, span.Offset, end - span.Offset, string.Empty);
+        return true;
+    }
+
     // ---- Model lookups ----------------------------------------------------
 
     private static TypeDecl? FindType(KoineModel model, string qualifiedName) =>
         AllTypes(model).FirstOrDefault(t => string.Equals(t.QName, qualifiedName, StringComparison.Ordinal)).Type;
 
+    /// <summary>
+    /// Resolve a type for an EDIT, accepting the diagram's addressing as well as the canonical qname:
+    /// an exact <see cref="FindType"/> match, else — for a two-segment <c>"Context.SimpleName"</c> — the
+    /// first type in that context whose simple name matches. Diagram nodes drop the aggregate segment, so
+    /// a nested <c>OrderLine</c> is addressed as <c>"Ordering.OrderLine"</c>, not <c>"Ordering.Order.OrderLine"</c>.
+    /// </summary>
+    private static TypeDecl? FindEditType(KoineModel model, string qualifiedName)
+    {
+        if (FindType(model, qualifiedName) is { } exact)
+        {
+            return exact;
+        }
+
+        var dot = qualifiedName.IndexOf('.');
+        if (dot < 0 || qualifiedName.IndexOf('.', dot + 1) >= 0)
+        {
+            return null; // only "Context.SimpleName" gets the nested-type fallback
+        }
+
+        var ctx = qualifiedName[..dot];
+        var simple = qualifiedName[(dot + 1)..];
+        return AllTypes(model)
+            .Where(t => string.Equals(t.Type.Name, simple, StringComparison.Ordinal) && ContextOf(t.QName) == ctx)
+            .Select(t => t.Type)
+            .FirstOrDefault();
+    }
+
+    /// <summary>
+    /// The declaration that OWNS a type's fields: an aggregate's fields live on its root entity, so a
+    /// field edit addressed to an aggregate (the diagram's aggregate-root node) is redirected there.
+    /// Every other type owns its own fields.
+    /// </summary>
+    private static TypeDecl FieldOwner(TypeDecl type) =>
+        type is AggregateDecl agg && agg.RootEntity() is { } root ? root : type;
+
+    private static ContextNode? FindContext(KoineModel model, string name) =>
+        model.Contexts.FirstOrDefault(c => string.Equals(c.Name, name, StringComparison.Ordinal));
+
+    /// <summary>The bounded-context prefix of a qualified name (everything before the first dot).</summary>
+    private static string ContextOf(string qualifiedName)
+    {
+        var dot = qualifiedName.IndexOf('.');
+        return dot < 0 ? qualifiedName : qualifiedName[..dot];
+    }
+
     private static (TypeDecl Owner, Member Member)? FindMember(KoineModel model, string qualifiedName)
     {
         var ownerQName = StripLastSegment(qualifiedName);
         var memberName = LastSegment(qualifiedName);
-        if (FindType(model, ownerQName) is not { } type || FieldsOf(type) is not { } members)
+        // Resolve the owner the same way edits address it: a nested type by "Context.SimpleName", and an
+        // aggregate qname redirected to its root entity, which is where the composition field actually lives.
+        if (FindEditType(model, ownerQName) is not { } resolved || FieldsOf(FieldOwner(resolved)) is not { } members)
         {
             return null;
         }
 
+        var type = FieldOwner(resolved);
         Member? member = members.FirstOrDefault(m => string.Equals(m.Name, memberName, StringComparison.Ordinal));
         return member is null ? null : (type, member);
     }
@@ -506,6 +675,29 @@ public static partial class ModelRoundTripService
         }
 
         return i + 1;
+    }
+
+    /// <summary>
+    /// Extend a deletion's start backwards over the declaration's contiguous leading <c>///</c> doc-comment
+    /// lines, so removing a documented type doesn't leave its doc block orphaned onto the next declaration.
+    /// </summary>
+    private static int IncludeLeadingDocLines(string text, int lineStart)
+    {
+        var start = lineStart;
+        while (start > 0)
+        {
+            var prevLineStart = StartOfLine(text, start - 1);
+            if (text[prevLineStart..start].TrimStart().StartsWith("///", StringComparison.Ordinal))
+            {
+                start = prevLineStart;
+            }
+            else
+            {
+                break;
+            }
+        }
+
+        return start;
     }
 
     /// <summary>The offset just past the last non-newline character of the line containing <paramref name="offset"/>.</summary>

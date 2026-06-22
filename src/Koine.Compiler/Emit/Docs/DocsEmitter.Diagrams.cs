@@ -136,7 +136,7 @@ public sealed partial class DocsEmitter
                 foreach (string to in rule.To)
                 {
                     var toId = EnsureState(to);
-                    edges.Add(new DiagramEdge(fromId, toId, label));
+                    edges.Add(new DiagramEdge(fromId, toId, label, ArrowKind: "transition"));
                 }
             }
 
@@ -197,7 +197,13 @@ public sealed partial class DocsEmitter
                 $"{ctx.Name}.{nested.Name}", PreferName(nested, agg),
                 Stereotype: NestedStereotype(nested),
                 Members: ClassMembers(nested)));
-            edges.Add(new DiagramEdge(root.Name, nested.Name, null, CompositionCardinality(root, nested.Name)));
+            var backingField = CompositionBackingField(root, nested.Name);
+            edges.Add(new DiagramEdge(
+                root.Name, nested.Name, null,
+                CompositionCardinality(root, nested.Name),
+                SourceCardinality: "1",
+                ArrowKind: "composition",
+                BackingMember: backingField is null ? null : $"{ctx.Name}.{root.Name}.{backingField}"));
         }
 
         var mermaid = new StringBuilder();
@@ -227,6 +233,27 @@ public sealed partial class DocsEmitter
             if (ReferencesAsTypeArgument(m.Type, nestedName))
             {
                 return "*";
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// The name of the field on <paramref name="root"/> that references the nested type
+    /// <paramref name="nestedName"/> — directly (<c>total: Money</c>) or as a collection/map element
+    /// (<c>lines: List&lt;OrderLine&gt;</c>) — or <c>null</c> when none does. Lets a composition edge
+    /// carry the field that backs it, so a visual editor can disconnect the edge by removing that field.
+    /// Mirrors the scan order of <see cref="CompositionCardinality"/> (first matching field wins).
+    /// </summary>
+    private static string? CompositionBackingField(EntityDecl root, string nestedName)
+    {
+        foreach (Member m in root.Members)
+        {
+            if (string.Equals(m.Type.Name, nestedName, StringComparison.Ordinal)
+                || ReferencesAsTypeArgument(m.Type, nestedName))
+            {
+                return m.Name;
             }
         }
 
@@ -318,7 +345,7 @@ public sealed partial class DocsEmitter
         foreach (ContextRelation rel in map.Relations)
         {
             edges.Add(new DiagramEdge(
-                Sanitize(rel.Upstream), Sanitize(rel.Downstream), KindLabel(rel.Kind)));
+                Sanitize(rel.Upstream), Sanitize(rel.Downstream), KindLabel(rel.Kind), ArrowKind: "association"));
         }
 
         return new DiagramDescriptor(
@@ -406,7 +433,7 @@ public sealed partial class DocsEmitter
             if (value.Ctx.Publishes.Any(p => p.EventName == value.Event.Name))
             {
                 var publisherId = EnsureContext(value.Ctx.Name);
-                edges.Add(new DiagramEdge(publisherId, eventId, "publishes"));
+                edges.Add(new DiagramEdge(publisherId, eventId, "publishes", ArrowKind: "flow"));
             }
 
             if (subscribers.TryGetValue(key, out var subs))
@@ -414,7 +441,7 @@ public sealed partial class DocsEmitter
                 foreach (string sub in subs)
                 {
                     var subId = EnsureContext(sub);
-                    edges.Add(new DiagramEdge(eventId, subId, "consumed by"));
+                    edges.Add(new DiagramEdge(eventId, subId, "consumed by", ArrowKind: "flow"));
                 }
             }
         }
