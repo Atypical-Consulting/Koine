@@ -20,7 +20,7 @@ import { createInspectorController } from '@/inspectorController';
 import { getPlatform } from '@/host';
 import { createExplorer } from '@/explorer';
 import { koineMark } from '@/shared/logo';
-import { initTheme, onThemeChange, toggleTheme } from '@/theme';
+import { initTheme, onThemeChange, toggleTheme } from '@/settings/theme';
 import {
   peekLegacyScratch,
   clearLegacyScratch,
@@ -33,12 +33,12 @@ import {
   saveActiveContext,
   saveWorkspaceCenter,
   type Settings,
-} from '@/store';
+} from '@/settings/persistence';
 import { createWelcome } from '@/welcome/welcome';
 import { type Template } from '@/welcome/templates';
 import { createCommandPalette, type Command } from '@/shared/palette';
-import { createPreferences } from '@/prefs';
-import { applyAppearance } from '@/appearance';
+import { createPreferences } from '@/settings/prefs';
+import { applyAppearance } from '@/settings/appearance';
 import { initSplitResizer, initEdgeResizer } from '@/resize';
 import { createHelpOverlay } from '@/shared/help';
 import { createAboutDialog } from '@/welcome/about';

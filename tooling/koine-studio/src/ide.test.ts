@@ -43,8 +43,8 @@ const storeSeam = vi.hoisted(() => ({
   peekLegacyScratch: vi.fn<() => string | null>(),
   clearLegacyScratch: vi.fn<() => void>(),
 }));
-vi.mock('@/store', async () => {
-  const actual = await vi.importActual<typeof import('@/store')>('./store');
+vi.mock('@/settings/persistence', async () => {
+  const actual = await vi.importActual<typeof import('@/settings/persistence')>('./settings/persistence');
   // Default: delegate to the real implementation (so boot behaves exactly as in production unless a
   // test overrides a single call).
   storeSeam.peekLegacyScratch.mockImplementation(() => actual.peekLegacyScratch());

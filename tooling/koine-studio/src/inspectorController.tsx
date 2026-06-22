@@ -39,7 +39,7 @@ import type {
   StructuredEdit,
 } from '@/lsp/lsp';
 import type { Platform } from '@/host';
-import type { PreviewTarget } from '@/store';
+import type { PreviewTarget } from '@/settings/persistence';
 import { renderDiagrams } from '@/diagrams/diagrams';
 import { setDiagramPersistScope } from '@/diagrams/diagrams-svg';
 import { mergeDiagramGraphs } from '@/model/modelTables';
@@ -69,7 +69,7 @@ import { DocsPanelHost } from '@/docs/DocsPanelHost';
 import { appStore } from '@/store/index';
 import { DEFAULT_CENTER, isValidCenter, type RightView } from '@/store/slices/uiChrome';
 import type { DomainIndex } from '@/ai/aiPanel';
-import { currentTheme } from '@/theme';
+import { currentTheme } from '@/settings/theme';
 import { renderCheckMarkdown, renderContextMapHtml } from '@/ideUtils';
 
 // LSP SymbolKind for a namespace — the kind the language service tags each top-level `context`

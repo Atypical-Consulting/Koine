@@ -2,7 +2,7 @@
 // Koine's tools, and a tiny loopback probe the Settings panel runs to confirm the endpoint is live.
 // Pure + DOM-free so every piece is unit-tested; the only impure seam is the injected `fetchFn`.
 
-import type { McpClientId } from '@/store';
+import type { McpClientId } from '@/settings/persistence';
 
 /** The `mcp.json` entry pointing a client at Koine's HTTP MCP endpoint, pretty-printed (2-space). */
 export function mcpHttpSnippet(url: string): string {

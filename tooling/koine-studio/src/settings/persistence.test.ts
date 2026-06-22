@@ -28,7 +28,7 @@ import {
   pinRecentFolder,
   clearRecentFolders,
   PREVIEW_TARGETS,
-} from '@/store';
+} from '@/settings/persistence';
 import type { ChatMessage } from '@/ai/ai';
 
 describe('MCP settings', () => {

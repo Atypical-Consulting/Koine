@@ -7,7 +7,7 @@
 // shows a prompt to add one rather than calling the API.
 import { runAssistant, type AiProvider, type ChatMessage } from '@/ai/ai';
 import { renderMarkdown } from '@/editor/editor';
-import { loadChat, saveChat, clearChat } from '@/store';
+import { loadChat, saveChat, clearChat } from '@/settings/persistence';
 
 /**
  * The compiled domain structure (contexts/aggregates/relations + glossary coverage), so reviews and

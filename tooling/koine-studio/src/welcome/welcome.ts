@@ -6,7 +6,7 @@
 // can be opened, pinned (pinned entries float to the top and survive the cap), have its path copied, or
 // be removed; a search filter appears once the history grows past a threshold, a clear-all control
 // forgets everything, and the list scrolls within its own container so a long history never grows the card.
-import { getRecentFolders, removeRecentFolder, pinRecentFolder, clearRecentFolders } from '@/store';
+import { getRecentFolders, removeRecentFolder, pinRecentFolder, clearRecentFolders } from '@/settings/persistence';
 import { LOGO_SVG } from '@/shared/logo';
 import { registerOverlay } from '@/shared/overlay';
 import { TEMPLATES, type Template } from '@/welcome/templates';

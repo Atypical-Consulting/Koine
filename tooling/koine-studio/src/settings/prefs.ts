@@ -17,9 +17,9 @@ import {
   type Settings,
   type AccentName,
   type PreviewTarget,
-} from '@/store';
-import { setTheme } from '@/theme';
-import { ACCENTS, ACCENT_ORDER } from '@/appearance';
+} from '@/settings/persistence';
+import { setTheme } from '@/settings/theme';
+import { ACCENTS, ACCENT_ORDER } from '@/settings/appearance';
 import { createModal } from '@/shared/overlay';
 import { mcpJsonSnippet, MCP_CLIENTS, probeMcp } from '@/mcp/mcp';
 

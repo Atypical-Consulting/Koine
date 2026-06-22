@@ -14,7 +14,7 @@ import type { DiagramRenderer } from '@/diagrams/diagrams';
 import { mergeGraphsForView } from '@/model/modelTables';
 import { centerOn, clampScale, fit, panBy, viewAtScale, zoomAt, zoomPercent, type Size, type ViewBox } from '@/diagrams/canvasView';
 import { edgeRoute, truncateToWidth, type Rect } from '@/diagrams/diagramLayout';
-import { clearDiagramPositions, loadDiagramPositions, loadDiagramZoom, saveDiagramPositions, saveDiagramZoom } from '@/store';
+import { clearDiagramPositions, loadDiagramPositions, loadDiagramZoom, saveDiagramPositions, saveDiagramZoom } from '@/settings/persistence';
 import type { DiagramEdge, DiagramGraph, DiagramMember, DiagramNode, SourceSpan } from '@/lsp/lsp';
 // Type-only import (erased at build time) of elkjs' own API surface, so our layout graph type-checks
 // against the real `ELK.layout` signature. The *value* is dynamically imported from the bundled build.

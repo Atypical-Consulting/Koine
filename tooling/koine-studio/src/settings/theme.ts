@@ -4,7 +4,7 @@
 // re-themes the editor automatically — no CodeMirror reconfiguration. Persistence and the
 // canonical Settings type live in ./store; this module owns the DOM apply + a small
 // change-listener registry so other panels can react to theme flips.
-import { type ThemeName, loadSettings, patchSettings } from '@/store';
+import { type ThemeName, loadSettings, patchSettings } from '@/settings/persistence';
 
 // Listeners notified after every apply (toggle/set). Kept module-local; no DOM, no leaks.
 const listeners = new Set<(t: ThemeName) => void>();
