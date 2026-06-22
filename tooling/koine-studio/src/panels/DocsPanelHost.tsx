@@ -1,7 +1,7 @@
 import { useRef } from 'preact/hooks';
 import type { StoreApi } from 'zustand/vanilla';
-import type { AppState } from '../store/index';
-import { useAppStore } from '../store/hooks';
+import type { AppState } from '@/store/index';
+import { useAppStore } from '@/store/hooks';
 
 // A folder-derived Documentation page as a Preact host (#193, #174) — reused for both the Decisions
 // (ADR) and Notes pages. It subscribes ONLY to the `workspace` slice's `folderRootToken`, NOT to model

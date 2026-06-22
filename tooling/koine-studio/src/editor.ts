@@ -52,8 +52,8 @@ import type {
   Range as LspRange,
   TextEdit,
   WorkspaceEdit,
-} from './lsp';
-import { dismissFloating, showActionMenu, showRenameInput } from './actions';
+} from '@/lsp';
+import { dismissFloating, showActionMenu, showRenameInput } from '@/actions';
 
 // --- .koi token highlighter -------------------------------------------------
 

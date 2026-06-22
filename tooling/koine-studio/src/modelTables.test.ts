@@ -8,8 +8,8 @@ import {
   renderRelationshipsTable,
   type EventRow,
   type RelationRow,
-} from './modelTables';
-import type { ContextMapResult, DiagramEdge, DiagramGraph, DiagramNode, SourceSpan } from './lsp';
+} from '@/modelTables';
+import type { ContextMapResult, DiagramEdge, DiagramGraph, DiagramNode, SourceSpan } from '@/lsp';
 
 afterEach(() => {
   document.body.innerHTML = '';

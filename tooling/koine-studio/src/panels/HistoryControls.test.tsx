@@ -1,7 +1,7 @@
 import { describe, expect, test, vi } from 'vitest';
 import { act, fireEvent, render } from '@testing-library/preact';
-import { createAppStore } from '../store/index';
-import { HistoryControls } from './HistoryControls';
+import { createAppStore } from '@/store/index';
+import { HistoryControls } from '@/panels/HistoryControls';
 
 const undoBtn = (c: Element) => c.querySelector('[data-role="undo"]') as HTMLButtonElement;
 const redoBtn = (c: Element) => c.querySelector('[data-role="redo"]') as HTMLButtonElement;

@@ -1,9 +1,9 @@
 import type { StoreApi } from 'zustand/vanilla';
-import type { AppState } from '../store/index';
-import { useAppStore } from '../store/hooks';
-import type { ContextMapResult, DiagramGraph } from '../lsp';
-import { extractRelationships, renderRelationshipsTable, type TableHandlers } from '../modelTables';
-import { scopeContextMap, scopeGraph } from '../activeContext';
+import type { AppState } from '@/store/index';
+import { useAppStore } from '@/store/hooks';
+import type { ContextMapResult, DiagramGraph } from '@/lsp';
+import { extractRelationships, renderRelationshipsTable, type TableHandlers } from '@/modelTables';
+import { scopeContextMap, scopeGraph } from '@/activeContext';
 
 // The bottom-panel Relationships table as a Preact panel (#193, #144, #146). It subscribes to the
 // `activeContext` slice and narrows BOTH halves of the relationships view: the structural edges (via

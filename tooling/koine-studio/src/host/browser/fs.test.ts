@@ -16,7 +16,7 @@ import {
   saveProjectToRoot,
   workspaceRootName,
   pickWorkspaceRoot,
-} from './fs';
+} from '@/host/browser/fs';
 
 // --- in-memory mock of the File System Access handle surface -----------------
 // Mirrors only what fs.ts touches: values(), getFileHandle/getDirectoryHandle({create}),

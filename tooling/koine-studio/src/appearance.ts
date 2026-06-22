@@ -3,7 +3,7 @@
 // scattered through ide.ts) means startup and the Settings dialog drive the exact same code, so a
 // freshly loaded app and a live change can never diverge. Theme itself lives in ./theme; this
 // module owns the accent hue, the reduced-motion flag, and the editor type metrics.
-import { ACCENT_NAMES, type AccentName, type Settings } from './store';
+import { ACCENT_NAMES, type AccentName, type Settings } from '@/store';
 
 /** A selectable accent: the tokens it overrides, plus a label/swatch for the picker. */
 export interface AccentPreset {

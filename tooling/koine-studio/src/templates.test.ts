@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 // The generator's pure core lives in the .mjs alongside the script runner, so it can be driven
 // against a fixture here without writing src/templates.generated.ts.
-import { collectTemplates, renderManifest } from '../scripts/generate-templates.mjs';
+import { collectTemplates, renderManifest } from '@/../scripts/generate-templates.mjs';
 
 // A tiny fixture templates dir mirroring the real repo `templates/` layout: a nested starter group
 // (single-file) and a top-level multi-file family. We assert the generator resolves `source` from
@@ -124,7 +124,7 @@ describe('collectTemplates', () => {
     const templates = collectTemplates(fixtureDir);
     const ts = renderManifest(templates);
     expect(ts).toContain('export const TEMPLATES');
-    expect(ts).toContain("import type { Template } from './templates'");
+    expect(ts).toContain("import type { Template } from '@/templates'");
     // The generated module must be deterministic JSON-safe content.
     expect(ts).toContain('"id": "billing"');
   });

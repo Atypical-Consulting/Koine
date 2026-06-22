@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest';
-import { badgeCounts, createDiagCountGate } from './diagCountGate';
-import type { LspDiagnostic } from './lsp';
+import { badgeCounts, createDiagCountGate } from '@/diagCountGate';
+import type { LspDiagnostic } from '@/lsp';
 
 const at = (severity: number | undefined, message = 'x'): LspDiagnostic => ({
   range: { start: { line: 0, character: 0 }, end: { line: 0, character: 1 } },

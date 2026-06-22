@@ -28,8 +28,8 @@ import {
   pinRecentFolder,
   clearRecentFolders,
   PREVIEW_TARGETS,
-} from './store';
-import type { ChatMessage } from './ai';
+} from '@/store';
+import type { ChatMessage } from '@/ai';
 
 describe('MCP settings', () => {
   beforeEach(() => localStorage.clear());

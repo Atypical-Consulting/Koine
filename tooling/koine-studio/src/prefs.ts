@@ -17,11 +17,11 @@ import {
   type Settings,
   type AccentName,
   type PreviewTarget,
-} from './store';
-import { setTheme } from './theme';
-import { ACCENTS, ACCENT_ORDER } from './appearance';
-import { createModal } from './overlay';
-import { mcpJsonSnippet, MCP_CLIENTS, probeMcp } from './mcp';
+} from '@/store';
+import { setTheme } from '@/theme';
+import { ACCENTS, ACCENT_ORDER } from '@/appearance';
+import { createModal } from '@/overlay';
+import { mcpJsonSnippet, MCP_CLIENTS, probeMcp } from '@/mcp';
 
 export interface PrefsCallbacks {
   /** Fired after every committed change with the merged, persisted Settings. */

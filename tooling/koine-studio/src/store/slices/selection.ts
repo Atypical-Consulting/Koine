@@ -1,5 +1,5 @@
 import type { StoreApi } from 'zustand/vanilla';
-import type { SelectedElement } from '../../selection';
+import type { SelectedElement } from '@/selection';
 
 export interface SelectionSlice {
   /** The currently-selected domain element, or null. */

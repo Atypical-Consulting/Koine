@@ -2,14 +2,14 @@
 // project archive. It reuses the shared modal chrome (overlay.ts) and the pure bundling core
 // (generateProject.ts); all I/O is injected so the wizard stays decoupled from the LSP client and
 // the host. Flow: pick a target language → choose artifacts → name the project → generate + save.
-import { createModal } from './overlay';
-import type { EmitPreviewResult } from './lsp';
+import { createModal } from '@/overlay';
+import type { EmitPreviewResult } from '@/lsp';
 import {
   buildProjectZip,
   canGenerate,
   defaultProjectName,
   isValidProjectName,
-} from './generateProject';
+} from '@/generateProject';
 
 type Target = 'csharp' | 'typescript' | 'python' | 'php';
 type StatusKind = 'info' | 'error' | 'success';

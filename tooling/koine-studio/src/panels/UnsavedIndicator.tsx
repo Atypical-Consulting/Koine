@@ -1,7 +1,7 @@
 import { useEffect } from 'preact/hooks';
 import type { StoreApi } from 'zustand/vanilla';
-import type { AppState } from '../store/index';
-import { titleWithDirty } from '../dirty';
+import type { AppState } from '@/store/index';
+import { titleWithDirty } from '@/dirty';
 
 // The global unsaved-work indicator as a Preact panel (#193). It drives the existing static
 // `#unsaved-indicator` button: the "N unsaved" pill text, its hidden state + aria-label, and the

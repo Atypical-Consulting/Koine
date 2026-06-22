@@ -1,7 +1,7 @@
 import type { StoreApi } from 'zustand/vanilla';
 import { useStore } from 'zustand';
-import type { AppState } from '../store/index';
-import { diagnosticsSummary } from '../diagnosticsSummary';
+import type { AppState } from '@/store/index';
+import { diagnosticsSummary } from '@/diagnosticsSummary';
 
 // The workspace-wide problems rollup in the status bar (#193 follow-up). The status bar's #sb-validity
 // only ever describes the ACTIVE file; this badge reads the WHOLE diagnostics slice so a broken context

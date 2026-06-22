@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test, vi } from 'vitest';
-import { coverage, groupByContext, renderGlossary, type GlossaryHandlers } from './glossary';
-import type { GlossaryEntry, GlossaryModel, Range } from './lsp';
+import { coverage, groupByContext, renderGlossary, type GlossaryHandlers } from '@/glossary';
+import type { GlossaryEntry, GlossaryModel, Range } from '@/lsp';
 
 afterEach(() => {
   document.body.innerHTML = '';

@@ -5,9 +5,9 @@
 //
 // Needs a user-supplied Anthropic API key (set in Preferences, stored locally). With no key it
 // shows a prompt to add one rather than calling the API.
-import { runAssistant, type AiProvider, type ChatMessage } from './ai';
-import { renderMarkdown } from './editor';
-import { loadChat, saveChat, clearChat } from './store';
+import { runAssistant, type AiProvider, type ChatMessage } from '@/ai';
+import { renderMarkdown } from '@/editor';
+import { loadChat, saveChat, clearChat } from '@/store';
 
 /**
  * The compiled domain structure (contexts/aggregates/relations + glossary coverage), so reviews and

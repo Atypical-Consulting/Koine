@@ -1,11 +1,11 @@
 import { describe, expect, test, vi } from 'vitest';
 import { act, render } from '@testing-library/preact';
-import { createAppStore } from '../store/index';
-import { useAppStore } from '../store/hooks';
-import { PropertiesPanel } from './PropertiesPanel';
-import { buildModelIndex } from '../modelIndex';
-import type { DiagramNode, DocsFile, DocsResult, GlossaryEntry, GlossaryModel, Range } from '../lsp';
-import type { InspectorHandlers } from '../inspector';
+import { createAppStore } from '@/store/index';
+import { useAppStore } from '@/store/hooks';
+import { PropertiesPanel } from '@/panels/PropertiesPanel';
+import { buildModelIndex } from '@/modelIndex';
+import type { DiagramNode, DocsFile, DocsResult, GlossaryEntry, GlossaryModel, Range } from '@/lsp';
+import type { InspectorHandlers } from '@/inspector';
 
 const range: Range = { start: { line: 0, character: 0 }, end: { line: 0, character: 4 } };
 

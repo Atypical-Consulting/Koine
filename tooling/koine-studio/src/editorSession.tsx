@@ -15,11 +15,11 @@
 // status pill (#status), the header count badge (#diag-count), and the status-bar validity mirror
 // (#sb-validity) stay imperative here.
 import { render } from 'preact';
-import { createKoineEditor, setEditorDiagnostics, type KoineEditor } from './editor';
-import { diagnosticsInRange } from './ideUtils';
-import { appStore } from './store/index';
-import { diagnosticsSummary } from './diagnosticsSummary';
-import { DiagnosticsStripPanel } from './panels/DiagnosticsStripPanel';
+import { createKoineEditor, setEditorDiagnostics, type KoineEditor } from '@/editor';
+import { diagnosticsInRange } from '@/ideUtils';
+import { appStore } from '@/store/index';
+import { diagnosticsSummary } from '@/diagnosticsSummary';
+import { DiagnosticsStripPanel } from '@/panels/DiagnosticsStripPanel';
 import type {
   CodeAction,
   CompletionItem,
@@ -29,13 +29,13 @@ import type {
   PrepareRenameResult,
   Range,
   WorkspaceEdit,
-} from './lsp';
+} from '@/lsp';
 
 /** The status pill kinds — connecting (boot), green (model valid), error (diagnostics/connection). */
 export type StatusKind = 'connecting' | 'green' | 'error';
 
 /**
- * The slice of {@link import('./lsp').KoineLsp} the editor callback wall + diagnostics wiring needs.
+ * The slice of {@link import('@/lsp').KoineLsp} the editor callback wall + diagnostics wiring needs.
  * A structural interface (not the class) so tests can pass a spy. Methods mirror KoineLsp 1:1.
  */
 export interface EditorSessionLsp {

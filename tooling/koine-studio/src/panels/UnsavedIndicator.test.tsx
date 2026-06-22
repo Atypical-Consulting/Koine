@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, test, vi } from 'vitest';
 import { act, render } from '@testing-library/preact';
-import { createAppStore } from '../store/index';
-import { UnsavedIndicator } from './UnsavedIndicator';
-import type { Buffer } from '../workspaceController';
+import { createAppStore } from '@/store/index';
+import { UnsavedIndicator } from '@/panels/UnsavedIndicator';
+import type { Buffer } from '@/workspaceController';
 
 // Build the real 6-field Buffer (uri, path, relPath, name, text, dirty).
 const buf = (uri: string, dirty: boolean): Buffer => ({

@@ -13,8 +13,8 @@
 // renamed inline, moved by drag-and-drop, and deleted behind an in-pane confirm — the explorer does
 // the prompting; the actual fs work happens in the host via the ExplorerCallbacks. Dirty dot, active
 // state and the error/warning badge mirror ide.ts/renderTree so the visual language stays consistent.
-import type { FsEntry } from './host';
-import { createModal, type ModalHandle } from './overlay';
+import type { FsEntry } from '@/host';
+import { createModal, type ModalHandle } from '@/overlay';
 
 export interface ExplorerCallbacks {
   onOpenFile(fileToken: string): void;

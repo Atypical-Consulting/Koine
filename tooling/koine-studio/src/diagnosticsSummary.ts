@@ -1,4 +1,4 @@
-import type { LspDiagnostic } from './lsp';
+import type { LspDiagnostic } from '@/lsp';
 
 // The single home for classifying a diagnostics set and building its count strings (issue #193). Three
 // call sites used to duplicate this: DiagnosticsStripPanel's count text, editorSession.renderStrip's

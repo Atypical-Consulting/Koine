@@ -1,8 +1,8 @@
 import type { StoreApi } from 'zustand/vanilla';
-import type { AppState } from '../store/index';
-import { useAppStore } from '../store/hooks';
-import { renderInspector, buildInspectorElement, type InspectorElement, type InspectorHandlers } from '../inspector';
-import { lookupElement, type ModelIndex } from '../modelIndex';
+import type { AppState } from '@/store/index';
+import { useAppStore } from '@/store/hooks';
+import { renderInspector, buildInspectorElement, type InspectorElement, type InspectorHandlers } from '@/inspector';
+import { lookupElement, type ModelIndex } from '@/modelIndex';
 
 // The right-rail Properties inspector as a Preact panel (issue #142, the first migrated panel of #193).
 // It subscribes to the `selection` slice ONLY, so an unrelated slice change (e.g. a bottom-tab switch)

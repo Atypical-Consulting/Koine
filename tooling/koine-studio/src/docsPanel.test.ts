@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { parseAdr } from './adr';
-import type { AdrFile, NoteFile } from './docsStore';
-import { renderAdrPanel, renderNotesPanel, type DocsPanelData, type DocsPanelHandlers } from './docsPanel';
+import { parseAdr } from '@/adr';
+import type { AdrFile, NoteFile } from '@/docsStore';
+import { renderAdrPanel, renderNotesPanel, type DocsPanelData, type DocsPanelHandlers } from '@/docsPanel';
 
 function adrFile(number: number, title: string, status: 'proposed' | 'accepted' | 'superseded'): AdrFile {
   return {

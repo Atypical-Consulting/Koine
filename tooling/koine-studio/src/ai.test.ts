@@ -1,5 +1,5 @@
 import { describe, expect, test, vi, beforeEach } from 'vitest';
-import { runAssistant, MAX_TOOL_ROUNDS, type AssistantRequest } from './ai';
+import { runAssistant, MAX_TOOL_ROUNDS, type AssistantRequest } from '@/ai';
 
 // Mock the dynamically-imported OpenAI SDK: `new OpenAI()` exposes chat.completions.create, which we
 // route to a per-test implementation so we can feed canned streamed chunks and inspect the params.

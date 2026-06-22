@@ -14,7 +14,7 @@ import type AnthropicSdk from '@anthropic-ai/sdk';
 import type { ContentBlock, MessageParam, Tool, ToolResultBlockParam, ToolUseBlock } from '@anthropic-ai/sdk/resources/messages';
 import type OpenAiSdk from 'openai';
 import type { ChatCompletionMessageParam } from 'openai/resources/chat/completions';
-import { KOINE_TOOL_DEFS, KOINE_TOOLS, summarizeForChip, toAnthropicTool } from './assistantTools';
+import { KOINE_TOOL_DEFS, KOINE_TOOLS, summarizeForChip, toAnthropicTool } from '@/assistantTools';
 
 /** A turn in the assistant transcript. */
 export interface ChatMessage {

@@ -2,7 +2,7 @@
 // the outline backbone) joined with the richest matching `DiagramNode` (stereotype + class-body rows
 // — the inspector's source). Extracted from `ide.ts` so the non-trivial join — diagram nodes are
 // named `context.simpleName` while glossary entries are `context.aggregate.name` — is unit-tested.
-import type { DiagramNode, DocsResult, GlossaryEntry, GlossaryModel, ModelMember, ModelNode } from './lsp';
+import type { DiagramNode, DocsResult, GlossaryEntry, GlossaryModel, ModelMember, ModelNode } from '@/lsp';
 
 /** A glossary entry joined with its diagram node (absent when the element has no class diagram). */
 export interface ModelElement {

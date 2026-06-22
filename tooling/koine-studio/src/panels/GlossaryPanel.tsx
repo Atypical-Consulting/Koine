@@ -1,9 +1,9 @@
 import type { StoreApi } from 'zustand/vanilla';
-import type { AppState } from '../store/index';
-import { useAppStore } from '../store/hooks';
-import type { GlossaryModel } from '../lsp';
-import { renderGlossary, type GlossaryHandlers } from '../glossary';
-import { scopeGlossaryModel } from '../activeContext';
+import type { AppState } from '@/store/index';
+import { useAppStore } from '@/store/hooks';
+import type { GlossaryModel } from '@/lsp';
+import { renderGlossary, type GlossaryHandlers } from '@/glossary';
+import { scopeGlossaryModel } from '@/activeContext';
 
 // The ubiquitous-language glossary editor as a Preact panel (#193, #67, #146). It subscribes to the
 // `activeContext` slice and narrows the glossary model to that bounded context, so switching scope

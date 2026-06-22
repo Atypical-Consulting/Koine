@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import type { FsEntry, Platform } from './host';
-import { parseAdr } from './adr';
-import { ADR_DIR, NOTES_DIR, createDocsStore } from './docsStore';
+import type { FsEntry, Platform } from '@/host';
+import { parseAdr } from '@/adr';
+import { ADR_DIR, NOTES_DIR, createDocsStore } from '@/docsStore';
 
 // --- in-memory mock of the host file abstraction -----------------------------
 // Only the four methods docsStore touches are implemented (listDir / readTextFile / writeTextFile /

@@ -1,9 +1,9 @@
 import type { StoreApi } from 'zustand/vanilla';
-import type { AppState } from '../store/index';
-import { useAppStore } from '../store/hooks';
-import type { DiagramGraph } from '../lsp';
-import { extractEvents, renderEventsTable, type TableHandlers } from '../modelTables';
-import { scopeGraph } from '../activeContext';
+import type { AppState } from '@/store/index';
+import { useAppStore } from '@/store/hooks';
+import type { DiagramGraph } from '@/lsp';
+import { extractEvents, renderEventsTable, type TableHandlers } from '@/modelTables';
+import { scopeGraph } from '@/activeContext';
 
 // The bottom-panel Events table as a Preact panel (#193, #144, #146). It subscribes to the `activeContext`
 // slice and narrows the merged diagram graph to that bounded context before re-extracting the event rows,

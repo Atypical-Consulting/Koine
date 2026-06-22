@@ -20,9 +20,9 @@ import {
   type DiagramNodeEditDetail,
   type DiagramNodeNavigateDetail,
   type EmptyStatePickDetail,
-} from './diagrams-svg';
-import { loadDiagramPositions, saveDiagramPositions } from './store';
-import type { DocsFile, Diagram, DiagramNode } from './lsp';
+} from '@/diagrams-svg';
+import { loadDiagramPositions, saveDiagramPositions } from '@/store';
+import type { DocsFile, Diagram, DiagramNode } from '@/lsp';
 
 const EMPTY_STATE = 'No diagrams yet';
 

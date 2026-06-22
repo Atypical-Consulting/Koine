@@ -6,10 +6,10 @@
 // can be opened, pinned (pinned entries float to the top and survive the cap), have its path copied, or
 // be removed; a search filter appears once the history grows past a threshold, a clear-all control
 // forgets everything, and the list scrolls within its own container so a long history never grows the card.
-import { getRecentFolders, removeRecentFolder, pinRecentFolder, clearRecentFolders } from './store';
-import { LOGO_SVG } from './logo';
-import { registerOverlay } from './overlay';
-import { TEMPLATES, type Template } from './templates';
+import { getRecentFolders, removeRecentFolder, pinRecentFolder, clearRecentFolders } from '@/store';
+import { LOGO_SVG } from '@/logo';
+import { registerOverlay } from '@/overlay';
+import { TEMPLATES, type Template } from '@/templates';
 
 /** What the welcome actions delegate to; the host (ide.ts) performs the real work. */
 export interface WelcomeCallbacks {

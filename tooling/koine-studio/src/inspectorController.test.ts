@@ -12,7 +12,7 @@ import {
   type InspectorAssistant,
   type InspectorControllerDeps,
   type InspectorControllerLsp,
-} from './inspectorController';
+} from '@/inspectorController';
 import type {
   CheckResult,
   ContextMapResult,
@@ -22,7 +22,7 @@ import type {
   GlossaryEntry,
   GlossaryModel,
   SetDocResult,
-} from './lsp';
+} from '@/lsp';
 
 // --- DOM seed ----------------------------------------------------------------
 // The center / docs / bottom-strip / right-rail / left-rail / context-switcher subset of index.html the

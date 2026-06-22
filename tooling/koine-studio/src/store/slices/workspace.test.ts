@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'vitest';
 import { createStore } from 'zustand/vanilla';
-import { createWorkspaceSlice, type WorkspaceSlice } from './workspace';
-import type { Buffer } from '../../workspaceController';
+import { createWorkspaceSlice, type WorkspaceSlice } from '@/store/slices/workspace';
+import type { Buffer } from '@/workspaceController';
 
 const buf = (uri: string, dirty: boolean): Buffer =>
   ({ uri, path: uri, relPath: uri, name: uri, text: '', dirty });

@@ -17,10 +17,10 @@
 // editorSession.showDiagnostics + controller.invalidateDocViews/followActiveFileContext and the tree
 // render respectively. The accessors are only invoked at runtime, so ide.ts can pass
 // `() => workspace.activeUri()` thunks that resolve after this is constructed.
-import { dirtyCount, saveAllDirtyBuffers } from './dirty';
-import { pathToFileUri } from './ideUtils';
-import type { FsEntry, KoiFile, Platform } from './host';
-import type { TextEdit, WorkspaceEdit } from './lsp';
+import { dirtyCount, saveAllDirtyBuffers } from '@/dirty';
+import { pathToFileUri } from '@/ideUtils';
+import type { FsEntry, KoiFile, Platform } from '@/host';
+import type { TextEdit, WorkspaceEdit } from '@/lsp';
 
 /** Outcome of an openFolderPath attempt, so callers (recent-open recovery) can react to a failure. */
 export type OpenResult = { ok: true } | { ok: false; reason: 'unreadable' | 'empty' };
@@ -35,7 +35,7 @@ export interface Buffer {
   dirty: boolean;
 }
 
-/** The slice of {@link import('./lsp').KoineLsp} the workspace lifecycle drives (a spy in tests). */
+/** The slice of {@link import('@/lsp').KoineLsp} the workspace lifecycle drives (a spy in tests). */
 export interface WorkspaceLsp {
   openDoc(uri: string, text: string): void;
   closeDoc(uri: string): void;
@@ -47,14 +47,14 @@ export interface WorkspaceLsp {
   format(): Promise<TextEdit[]>;
 }
 
-/** The slice of the {@link import('./editor').KoineEditor} handle the workspace drives. */
+/** The slice of the {@link import('@/editor').KoineEditor} handle the workspace drives. */
 export interface WorkspaceEditor {
   getDoc(): string;
   setDoc(doc: string): void;
   applyEdits(edits: TextEdit[]): void;
 }
 
-/** The slice of the {@link import('./explorer').Explorer} the tree render calls. */
+/** The slice of the {@link import('@/explorer').Explorer} the tree render calls. */
 export interface WorkspaceExplorer {
   render(entries: FsEntry[], rootToken: string): void;
 }

@@ -9,21 +9,21 @@
 // to mirror index.html. No production behavior is changed — only test scaffolding.
 import { afterEach, beforeEach, describe, expect, vi, test } from 'vitest';
 import { EditorView } from '@codemirror/view';
-import type { FsEntry, KoiFile, LspTransport, Platform } from './host/types';
-import { buildShareUrl, buildWorkspaceShareUrl } from './share';
+import type { FsEntry, KoiFile, LspTransport, Platform } from '@/host/types';
+import { buildShareUrl, buildWorkspaceShareUrl } from '@/share';
 
 // The studio reads `__APP_VERSION__` (a vite build-time define) once at boot for the status bar.
 // vitest does not define it, so stub it as a global before any init() runs — test scaffolding only,
 // no production change.
 vi.stubGlobal('__APP_VERSION__', '0.0.0-test');
 
-// Drive boot through the existing getPlatform() seam: ide.ts imports getPlatform from './host', so we
+// Drive boot through the existing getPlatform() seam: ide.ts imports getPlatform from '@/host', so we
 // mock that module to return our in-memory fake. `fakePlatform.current` is swapped per test before
 // init() runs. We re-export the real ./host/types so the type-only re-exports ide.ts relies on
 // (FsEntry, KoiFile, …) still resolve.
 const fakePlatform = { current: null as unknown as Platform };
-vi.mock('./host', async () => {
-  const types = await vi.importActual<typeof import('./host/types')>('./host/types');
+vi.mock('@/host', async () => {
+  const types = await vi.importActual<typeof import('@/host/types')>('./host/types');
   return {
     ...types,
     getPlatform: () => fakePlatform.current,
@@ -43,8 +43,8 @@ const storeSeam = vi.hoisted(() => ({
   peekLegacyScratch: vi.fn<() => string | null>(),
   clearLegacyScratch: vi.fn<() => void>(),
 }));
-vi.mock('./store', async () => {
-  const actual = await vi.importActual<typeof import('./store')>('./store');
+vi.mock('@/store', async () => {
+  const actual = await vi.importActual<typeof import('@/store')>('./store');
   // Default: delegate to the real implementation (so boot behaves exactly as in production unless a
   // test overrides a single call).
   storeSeam.peekLegacyScratch.mockImplementation(() => actual.peekLegacyScratch());
@@ -395,7 +395,7 @@ async function boot(opts: { dom?: boolean; platform?: FakePlatform } = {}): Prom
 }> {
   if (opts.dom ?? true) seedIdeDom();
   const platform = opts.platform ?? installPlatform();
-  const { init } = await import('./ide');
+  const { init } = await import('@/ide');
 
   let beforeUnload: ((e: Event) => void) | null = null;
   const realAdd = window.addEventListener.bind(window);
@@ -479,7 +479,7 @@ afterEach(() => {
 describe('ide init() — scaffolding', () => {
   test('init() throws without a seeded DOM (the el() lookups must find their ids)', async () => {
     installPlatform();
-    const { init } = await import('./ide');
+    const { init } = await import('@/ide');
     expect(() => init()).toThrow();
   });
 

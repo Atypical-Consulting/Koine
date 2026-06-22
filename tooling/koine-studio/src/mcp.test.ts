@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest';
-import { mcpCall, mcpJsonSnippet, mcpStdioSnippet, MCP_CLIENTS, parseToolsList, probeMcp } from './mcp';
-import { BrowserPlatform } from './host/browser';
+import { mcpCall, mcpJsonSnippet, mcpStdioSnippet, MCP_CLIENTS, parseToolsList, probeMcp } from '@/mcp';
+import { BrowserPlatform } from '@/host/browser';
 
 describe('mcpJsonSnippet', () => {
   test('wraps the endpoint URL in the mcp.json a client pastes', () => {

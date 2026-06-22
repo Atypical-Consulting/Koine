@@ -1,6 +1,6 @@
 import type { StoreApi } from 'zustand/vanilla';
 import { useStore } from 'zustand';
-import type { AppState } from '../store/index';
+import type { AppState } from '@/store/index';
 
 // The top-bar Undo/Redo buttons. Subscribes to the history slice so the buttons enable/disable
 // reactively; clicks call into the imperative historyController through plain callbacks, so this panel

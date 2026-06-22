@@ -6,8 +6,8 @@ import {
   fileUriToPath,
   isSafeShareRelPath,
   diagnosticsInRange,
-} from './ideUtils';
-import type { LspDiagnostic, Range } from './lsp';
+} from '@/ideUtils';
+import type { LspDiagnostic, Range } from '@/lsp';
 
 // ---------------------------------------------------------------------------
 // pathToFileUri / fileUriToPath — round-trip tests

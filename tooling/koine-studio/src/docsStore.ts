@@ -7,7 +7,7 @@
 // `.koi`-only); reads/writes/creates reuse readTextFile/writeTextFile/createFile, which create the
 // `docs/adr` folder lazily on first write. The store is pure plumbing over the platform so it
 // unit-tests against a mocked host fs.
-import type { FsEntry, Platform } from './host';
+import type { FsEntry, Platform } from '@/host';
 import {
   type Adr,
   adrFilename,
@@ -17,7 +17,7 @@ import {
   parseAdr,
   parseAdrNumberFromFilename,
   renderAdr,
-} from './adr';
+} from '@/adr';
 
 /** Workspace-relative folders the docs surface owns. */
 export const ADR_DIR = 'docs/adr';

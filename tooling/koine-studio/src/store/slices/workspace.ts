@@ -1,5 +1,5 @@
 import type { StoreApi } from 'zustand/vanilla';
-import type { Buffer } from '../../workspaceController';
+import type { Buffer } from '@/workspaceController';
 
 export interface WorkspaceSlice {
   /** Every open buffer keyed by file:// uri (a read-projection of workspaceController's Map). */

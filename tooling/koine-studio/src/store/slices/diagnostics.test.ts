@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'vitest';
 import { createStore } from 'zustand/vanilla';
-import { createDiagnosticsSlice, type DiagnosticsSlice } from './diagnostics';
-import type { LspDiagnostic } from '../../lsp';
+import { createDiagnosticsSlice, type DiagnosticsSlice } from '@/store/slices/diagnostics';
+import type { LspDiagnostic } from '@/lsp';
 
 const diag = (msg: string): LspDiagnostic =>
   ({ range: { start: { line: 0, character: 0 }, end: { line: 0, character: 1 } }, message: msg, severity: 1 });

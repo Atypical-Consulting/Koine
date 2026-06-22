@@ -2,7 +2,7 @@
 // borders, per-end cardinality labels sit just inside each endpoint, and over-long member text clips to
 // a width with an ellipsis. All DOM-free, so they run as plain math (mirrors canvasView.test.ts).
 import { describe, expect, test } from 'vitest';
-import { anchorOnBorder, centerOf, edgeRoute, truncateToWidth, type Rect } from './diagramLayout';
+import { anchorOnBorder, centerOf, edgeRoute, truncateToWidth, type Rect } from '@/diagramLayout';
 
 const RECT: Rect = { x: 0, y: 0, w: 100, h: 50 }; // center (50, 25)
 

@@ -4,9 +4,9 @@
 // the project (GitHub, home, docs, blog), and a creator credit. The version is (re)fetched each time
 // the dialog opens; a failed fetch simply hides the chip. Project links are routed through
 // `platform.openExternal` so they open in the system browser on both the desktop and web hosts.
-import { getPlatform } from './host';
-import { createModal } from './overlay';
-import { koineMark } from './logo';
+import { getPlatform } from '@/host';
+import { createModal } from '@/overlay';
+import { koineMark } from '@/logo';
 
 export interface AboutHandle {
   open(): void;

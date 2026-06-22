@@ -9,8 +9,8 @@ import {
   scopeDocsFiles,
   scopeGlossaryModel,
   scopeGraph,
-} from './activeContext';
-import type { ContextMapResult, DiagramGraph, DiagramNode, DocsFile, GlossaryEntry, GlossaryModel } from './lsp';
+} from '@/activeContext';
+import type { ContextMapResult, DiagramGraph, DiagramNode, DocsFile, GlossaryEntry, GlossaryModel } from '@/lsp';
 
 const node = (id: string, qualifiedName: string, kind = 'aggregate-root'): DiagramNode => ({
   id,

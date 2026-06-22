@@ -10,7 +10,7 @@
 // Invariants / published events / repository are NOT on the wire today (they are not `DiagramNode`
 // members), so the element fields are optional and the panel renders those compartments only when a
 // future minimal emitter change populates them — the layout is forward-compatible.
-import type { DiagramNode, GlossaryEntry, ModelMember, Range } from './lsp';
+import type { DiagramNode, GlossaryEntry, ModelMember, Range } from '@/lsp';
 
 /** The flat, render-ready projection of a selected element (decoupled from the wire DTOs). */
 export interface InspectorElement {

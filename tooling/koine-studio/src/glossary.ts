@@ -1,7 +1,7 @@
 // The ubiquitous-language glossary editor (#67): pure DOM builders for the glossary tab, decoupled
 // from the LSP/editor wiring via a `handlers` object so they unit-test cleanly under happy-dom.
 // `ide.ts` supplies the handlers (jump-to-source via the editor, persist via koine/setDoc).
-import type { GlossaryEntry, GlossaryModel, Range } from './lsp';
+import type { GlossaryEntry, GlossaryModel, Range } from '@/lsp';
 
 export interface GlossaryHandlers {
   /** Jump the editor to a declaration's name range. */

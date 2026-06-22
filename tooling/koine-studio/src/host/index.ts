@@ -1,11 +1,11 @@
 // Selects the platform backend for the current host. Detection is by Tauri's injected globals;
 // anything else (a plain browser tab) gets the WASM-backed browser backend. The chosen platform
 // is cached so the whole app shares one instance.
-import type { Platform } from './types';
-import { TauriPlatform } from './tauri';
-import { BrowserPlatform } from './browser';
+import type { Platform } from '@/host/types';
+import { TauriPlatform } from '@/host/tauri';
+import { BrowserPlatform } from '@/host/browser';
 
-export type { FsEntry, KoiFile, LspTransport, Platform, SourceDoc } from './types';
+export type { FsEntry, KoiFile, LspTransport, Platform, SourceDoc } from '@/host/types';
 
 /** True when running inside the Tauri desktop shell (v2 injects `__TAURI_INTERNALS__`). */
 export function isTauri(): boolean {

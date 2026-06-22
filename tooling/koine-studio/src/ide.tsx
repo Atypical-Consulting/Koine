@@ -1,26 +1,26 @@
 // Koine Studio app composition: wires the .koi editor, the live LSP diagnostics,
 // the status line, the diagnostics strip, and the tabbed inspector (emitted preview,
 // glossary, and context map).
-import { createOutputView } from './editor';
+import { createOutputView } from '@/editor';
 import {
   KoineLsp,
   type GlossaryEntry,
   type Location,
   type SourceSpan,
   type StructuredEdit,
-} from './lsp';
+} from '@/lsp';
 import {
   fileUriToPath,
   helpRows,
   isSafeShareRelPath,
   pathToFileUri,
-} from './ideUtils';
-import { createEditorSession } from './editorSession';
-import { createInspectorController } from './inspectorController';
-import { getPlatform } from './host';
-import { createExplorer } from './explorer';
-import { koineMark } from './logo';
-import { initTheme, onThemeChange, toggleTheme } from './theme';
+} from '@/ideUtils';
+import { createEditorSession } from '@/editorSession';
+import { createInspectorController } from '@/inspectorController';
+import { getPlatform } from '@/host';
+import { createExplorer } from '@/explorer';
+import { koineMark } from '@/logo';
+import { initTheme, onThemeChange, toggleTheme } from '@/theme';
 import {
   peekLegacyScratch,
   clearLegacyScratch,
@@ -33,19 +33,19 @@ import {
   saveActiveContext,
   saveWorkspaceCenter,
   type Settings,
-} from './store';
-import { createWelcome } from './welcome';
-import { type Template } from './templates';
-import { createCommandPalette, type Command } from './palette';
-import { createPreferences } from './prefs';
-import { applyAppearance } from './appearance';
-import { initSplitResizer, initEdgeResizer } from './resize';
-import { createHelpOverlay } from './help';
-import { createAboutDialog } from './about';
-import { createGenerateProject } from './generateProjectWizard';
-import { sanitizeProjectName } from './generateProject';
-import { buildSourceZip } from './sourceZip';
-import { formatChord } from './platform';
+} from '@/store';
+import { createWelcome } from '@/welcome';
+import { type Template } from '@/templates';
+import { createCommandPalette, type Command } from '@/palette';
+import { createPreferences } from '@/prefs';
+import { applyAppearance } from '@/appearance';
+import { initSplitResizer, initEdgeResizer } from '@/resize';
+import { createHelpOverlay } from '@/help';
+import { createAboutDialog } from '@/about';
+import { createGenerateProject } from '@/generateProjectWizard';
+import { sanitizeProjectName } from '@/generateProject';
+import { buildSourceZip } from '@/sourceZip';
+import { formatChord } from '@/platform';
 import {
   DIAGRAM_ADD_TYPE_EVENT,
   DIAGRAM_CONNECT_EVENT,
@@ -61,24 +61,24 @@ import {
   type DiagramNodeNavigateDetail,
   type EmptyConceptKind,
   type EmptyStatePickDetail,
-} from './diagrams-svg';
-import { isAllContexts } from './activeContext';
-import { appStore } from './store/index';
-import { badgeCounts, createDiagCountGate } from './diagCountGate';
-import { type SelectedElement } from './selection';
-import { resolveInspectableQn } from './modelIndex';
-import { type InspectorElement } from './inspector';
-import { createAssistantPanel, type AssistantPanel, type AssistantContext } from './aiPanel';
-import { clearModelHash, readModelFromHash, workspaceShareUrlOrNull } from './share';
-import { handleBeforeUnload } from './dirty';
+} from '@/diagrams-svg';
+import { isAllContexts } from '@/activeContext';
+import { appStore } from '@/store/index';
+import { badgeCounts, createDiagCountGate } from '@/diagCountGate';
+import { type SelectedElement } from '@/selection';
+import { resolveInspectableQn } from '@/modelIndex';
+import { type InspectorElement } from '@/inspector';
+import { createAssistantPanel, type AssistantPanel, type AssistantContext } from '@/aiPanel';
+import { clearModelHash, readModelFromHash, workspaceShareUrlOrNull } from '@/share';
+import { handleBeforeUnload } from '@/dirty';
 import { render } from 'preact';
-import { createHistoryController } from './historyController';
-import { HistoryControls } from './panels/HistoryControls';
-import { UnsavedIndicator } from './panels/UnsavedIndicator';
-import { WorkspaceProblemsBadge } from './panels/WorkspaceProblemsBadge';
-import { StoreInspector } from './panels/StoreInspector';
-import { createWorkspaceController, type WorkspaceController } from './workspaceController';
-import { createConfirmDialog } from './overlay';
+import { createHistoryController } from '@/historyController';
+import { HistoryControls } from '@/panels/HistoryControls';
+import { UnsavedIndicator } from '@/panels/UnsavedIndicator';
+import { WorkspaceProblemsBadge } from '@/panels/WorkspaceProblemsBadge';
+import { StoreInspector } from '@/panels/StoreInspector';
+import { createWorkspaceController, type WorkspaceController } from '@/workspaceController';
+import { createConfirmDialog } from '@/overlay';
 
 // --- workspace fs contract ---------------------------------------------------
 // `KoiFile` (path / name / relPath) is provided by the host platform layer (src/host), whose

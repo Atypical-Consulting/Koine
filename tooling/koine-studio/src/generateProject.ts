@@ -3,7 +3,7 @@
 // the LSP transport, or the host — the wizard (generateProjectWizard.ts) supplies the emitted
 // files and a destination via the Platform.saveZip seam, and these helpers do the bundling.
 import JSZip from 'jszip';
-import type { EmitFile, EmitPreviewResult } from './lsp';
+import type { EmitFile, EmitPreviewResult } from '@/lsp';
 
 // A C#/namespace-friendly project identifier: a leading letter or underscore, then letters,
 // digits, underscores, or dots. Drives the zip root folder, the .csproj filename, and (for the

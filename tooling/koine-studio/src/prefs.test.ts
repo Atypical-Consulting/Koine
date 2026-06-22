@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { createPreferences, type PrefsCallbacks } from './prefs';
-import { DEFAULT_SETTINGS, loadSettings, saveSettings } from './store';
+import { createPreferences, type PrefsCallbacks } from '@/prefs';
+import { DEFAULT_SETTINGS, loadSettings, saveSettings } from '@/store';
 
 // Flush queued microtasks + timers so the panel's async steps (mcpEndpoint, mcpStop, probe) settle.
 const flush = () => new Promise((r) => setTimeout(r, 0));

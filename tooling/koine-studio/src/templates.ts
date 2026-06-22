@@ -53,4 +53,4 @@ export interface Template {
   files?: TemplateFile[];
 }
 
-export { TEMPLATES } from './templates.generated';
+export { TEMPLATES } from '@/templates.generated';

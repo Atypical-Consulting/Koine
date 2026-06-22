@@ -2,7 +2,7 @@
 // move via an injected LspTransport: the desktop transport brokers the `koine lsp` child over
 // Tauri IPC, the browser transport drives an in-process WASM-backed server. This class is
 // transport-agnostic — it only frames messages and tracks pending requests + open documents.
-import type { LspTransport } from './host/types';
+import type { LspTransport } from '@/host/types';
 
 // --- protocol types (mirror the server contract) ----------------------------
 

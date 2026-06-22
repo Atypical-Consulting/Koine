@@ -4,8 +4,8 @@
 // renderer; this module only builds the DOM and wires clicks. ADRs render as a numbered list with a
 // status badge and an inline raw-Markdown editor; notes render lazily (their body is read on open).
 // Read views render Markdown (via the injected renderer) into the shared `.koi-md` styling.
-import { type Adr, type AdrStatus, parseAdr, renderAdr } from './adr';
-import type { AdrFile, NoteFile } from './docsStore';
+import { type Adr, type AdrStatus, parseAdr, renderAdr } from '@/adr';
+import type { AdrFile, NoteFile } from '@/docsStore';
 
 export interface DocsPanelData {
   /** Whether the workspace can be written to — gates the create/edit affordances. */

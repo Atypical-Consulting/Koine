@@ -1,9 +1,9 @@
 import { describe, expect, test } from 'vitest';
 import { act, render } from '@testing-library/preact';
-import { createAppStore } from '../store/index';
-import { GlossaryPanel } from './GlossaryPanel';
-import type { GlossaryEntry, GlossaryModel, Range } from '../lsp';
-import type { GlossaryHandlers } from '../glossary';
+import { createAppStore } from '@/store/index';
+import { GlossaryPanel } from '@/panels/GlossaryPanel';
+import type { GlossaryEntry, GlossaryModel, Range } from '@/lsp';
+import type { GlossaryHandlers } from '@/glossary';
 
 const range: Range = { start: { line: 0, character: 0 }, end: { line: 0, character: 0 } };
 

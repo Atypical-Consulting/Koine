@@ -23,8 +23,8 @@
 // lifecycle). ide.ts wires those and calls the `select*` / `invalidate*` / `load*` methods + `init()`
 // from the palette, the toolbar buttons, and the boot ladder.
 import { render, type VNode } from 'preact';
-import { renderMarkdown } from './editor';
-import type { KoineEditor, OutputView } from './editor';
+import { renderMarkdown } from '@/editor';
+import type { KoineEditor, OutputView } from '@/editor';
 import type {
   CheckResult,
   ContextMapResult,
@@ -37,15 +37,15 @@ import type {
   SetDocResult,
   SourceSpan,
   StructuredEdit,
-} from './lsp';
-import type { Platform } from './host';
-import type { PreviewTarget } from './store';
-import { renderDiagrams } from './diagrams';
-import { setDiagramPersistScope } from './diagrams-svg';
-import { mergeDiagramGraphs } from './modelTables';
-import { type GlossaryHandlers } from './glossary';
-import { createDocsStore } from './docsStore';
-import { renderAdrPanel, renderNotesPanel, type DocsPanelHandlers } from './docsPanel';
+} from '@/lsp';
+import type { Platform } from '@/host';
+import type { PreviewTarget } from '@/store';
+import { renderDiagrams } from '@/diagrams';
+import { setDiagramPersistScope } from '@/diagrams-svg';
+import { mergeDiagramGraphs } from '@/modelTables';
+import { type GlossaryHandlers } from '@/glossary';
+import { createDocsStore } from '@/docsStore';
+import { renderAdrPanel, renderNotesPanel, type DocsPanelHandlers } from '@/docsPanel';
 import {
   ALL_CONTEXTS,
   fileContextFollow,
@@ -54,23 +54,23 @@ import {
   scopeDocsFiles,
   scopeGlossaryModel,
   type ContextScope,
-} from './activeContext';
-import type { SelectedElement } from './selection';
-import { renderOverviewCounts, type ModelOutlineHandlers } from './modelOutline';
-import { type InspectorElement, type InspectorHandlers } from './inspector';
-import { buildModelIndex, lookupElement, type ModelIndex } from './modelIndex';
-import { PropertiesPanel } from './panels/PropertiesPanel';
-import { ContextBreadcrumb } from './panels/ContextBreadcrumb';
-import { ModelOutlinePanel } from './panels/ModelOutlinePanel';
-import { EventsPanel } from './panels/EventsPanel';
-import { RelationshipsPanel } from './panels/RelationshipsPanel';
-import { GlossaryPanel } from './panels/GlossaryPanel';
-import { DocsPanelHost } from './panels/DocsPanelHost';
-import { appStore } from './store/index';
-import { DEFAULT_CENTER, isValidCenter, type RightView } from './store/slices/uiChrome';
-import type { DomainIndex } from './aiPanel';
-import { currentTheme } from './theme';
-import { renderCheckMarkdown, renderContextMapHtml } from './ideUtils';
+} from '@/activeContext';
+import type { SelectedElement } from '@/selection';
+import { renderOverviewCounts, type ModelOutlineHandlers } from '@/modelOutline';
+import { type InspectorElement, type InspectorHandlers } from '@/inspector';
+import { buildModelIndex, lookupElement, type ModelIndex } from '@/modelIndex';
+import { PropertiesPanel } from '@/panels/PropertiesPanel';
+import { ContextBreadcrumb } from '@/panels/ContextBreadcrumb';
+import { ModelOutlinePanel } from '@/panels/ModelOutlinePanel';
+import { EventsPanel } from '@/panels/EventsPanel';
+import { RelationshipsPanel } from '@/panels/RelationshipsPanel';
+import { GlossaryPanel } from '@/panels/GlossaryPanel';
+import { DocsPanelHost } from '@/panels/DocsPanelHost';
+import { appStore } from '@/store/index';
+import { DEFAULT_CENTER, isValidCenter, type RightView } from '@/store/slices/uiChrome';
+import type { DomainIndex } from '@/aiPanel';
+import { currentTheme } from '@/theme';
+import { renderCheckMarkdown, renderContextMapHtml } from '@/ideUtils';
 
 // LSP SymbolKind for a namespace — the kind the language service tags each top-level `context`
 // document symbol with. Used by followActiveFileContext to read a file's bounded context(s).
@@ -85,7 +85,7 @@ type DocsView = 'glossary' | 'adr' | 'notes';
 type BottomTab = 'problems' | 'events' | 'relationships' | 'contextmap';
 
 /**
- * The slice of {@link import('./lsp').KoineLsp} the loaders call (content requests only). A
+ * The slice of {@link import('@/lsp').KoineLsp} the loaders call (content requests only). A
  * structural interface (not the class) so tests can pass a spy; methods mirror KoineLsp 1:1.
  */
 export interface InspectorControllerLsp {

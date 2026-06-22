@@ -9,7 +9,7 @@ import {
   formatValidate,
   formatCompile,
   summarizeForChip,
-} from './assistantTools';
+} from '@/assistantTools';
 
 describe('KOINE_TOOLS definitions', () => {
   test('advertises exactly validate/compile/format as OpenAI function tools', () => {

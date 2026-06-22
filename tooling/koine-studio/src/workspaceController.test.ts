@@ -12,10 +12,10 @@
 // (showDiagnostics / dropDiagnostics / renameDiagnostics / clearDiagnostics) are spies — the
 // controller calls them but does not own the cache (it lives in editorSession).
 import { afterEach, beforeEach, describe, expect, it, test, vi } from 'vitest';
-import { createWorkspaceController, type WorkspaceControllerDeps } from './workspaceController';
-import { pathToFileUri } from './ideUtils';
-import type { FsEntry, KoiFile, Platform, SourceDoc } from './host/types';
-import type { TextEdit, WorkspaceEdit } from './lsp';
+import { createWorkspaceController, type WorkspaceControllerDeps } from '@/workspaceController';
+import { pathToFileUri } from '@/ideUtils';
+import type { FsEntry, KoiFile, Platform, SourceDoc } from '@/host/types';
+import type { TextEdit, WorkspaceEdit } from '@/lsp';
 
 // --- in-memory Platform ------------------------------------------------------
 // A browser-like host backed by a Map<relPath, contents> under a single workspace folder. Implements

@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest';
 import { render } from '@testing-library/preact';
-import { PreactSmoke } from './preactSmoke';
+import { PreactSmoke } from '@/preactSmoke';
 
 describe('PreactSmoke', () => {
   test('renders its label into the DOM', () => {

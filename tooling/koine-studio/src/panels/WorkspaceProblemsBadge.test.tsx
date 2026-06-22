@@ -1,8 +1,8 @@
 import { describe, expect, test } from 'vitest';
 import { act, render } from '@testing-library/preact';
-import { createAppStore } from '../store/index';
-import { WorkspaceProblemsBadge } from './WorkspaceProblemsBadge';
-import type { LspDiagnostic } from '../lsp';
+import { createAppStore } from '@/store/index';
+import { WorkspaceProblemsBadge } from '@/panels/WorkspaceProblemsBadge';
+import type { LspDiagnostic } from '@/lsp';
 
 const err = (msg: string): LspDiagnostic => ({
   range: { start: { line: 0, character: 0 }, end: { line: 0, character: 1 } },

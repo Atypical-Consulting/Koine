@@ -1,10 +1,10 @@
 import type { StoreApi } from 'zustand/vanilla';
-import type { AppState } from '../store/index';
-import { useAppStore } from '../store/hooks';
-import type { GlossaryModel } from '../lsp';
-import { renderModelOutline, type ModelOutlineHandlers } from '../modelOutline';
-import { filterGlossaryModel, scopeGlossaryModel } from '../activeContext';
-import { lookupElement, type ModelIndex } from '../modelIndex';
+import type { AppState } from '@/store/index';
+import { useAppStore } from '@/store/hooks';
+import type { GlossaryModel } from '@/lsp';
+import { renderModelOutline, type ModelOutlineHandlers } from '@/modelOutline';
+import { filterGlossaryModel, scopeGlossaryModel } from '@/activeContext';
+import { lookupElement, type ModelIndex } from '@/modelIndex';
 
 // The left-rail Explorer construct tree as a Preact panel (#193, #146). It subscribes to TWO slices of
 // the app store: `activeContext` (the bounded-context scope that narrows the tree) and `selection` (the

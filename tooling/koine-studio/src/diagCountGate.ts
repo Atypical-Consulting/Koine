@@ -1,4 +1,4 @@
-import type { LspDiagnostic } from './lsp';
+import type { LspDiagnostic } from '@/lsp';
 
 // A per-uri error/warning-count gate for the file-tree badges. The LSP republishes diagnostics for a
 // file on every keystroke, and ide.ts used to `renderTree()` on EVERY push — rebuilding the whole
