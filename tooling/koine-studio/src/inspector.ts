@@ -115,6 +115,9 @@ export function renderInspector(element: InspectorElement | null, handlers: Insp
   }
 
   root.dataset.qname = element.qualifiedName;
+  // Tag the panel with its DDD construct so the header echoes the diagram/Explorer colour language
+  // (the shared --koi-ddd-* palette): the same element reads the same across canvas, tree, and panel.
+  root.dataset.kind = constructKey(element.kind);
   root.appendChild(renderHeader(element, handlers));
   root.appendChild(renderGeneral(element, handlers));
 
@@ -126,6 +129,27 @@ export function renderInspector(element: InspectorElement | null, handlers: Insp
   if (element.repository) appendList(root, 'Repository', [element.repository]);
 
   return root;
+}
+
+/**
+ * Normalize a glossary construct kind to the key the shared DDD palette (`--koi-ddd-*`) and the
+ * Explorer icons use, so the inspector's accent matches them. Unknown kinds fall back to `type`.
+ */
+function constructKey(kind: string): string {
+  switch (kind) {
+    case 'aggregate':
+    case 'entity':
+    case 'enum':
+    case 'event':
+      return kind;
+    case 'value':
+    case 'quantity':
+      return 'value';
+    case 'integration event':
+      return 'integration-event';
+    default:
+      return 'type';
+  }
 }
 
 function renderHeader(element: InspectorElement, handlers: InspectorHandlers): HTMLElement {
@@ -200,7 +224,7 @@ function renderGeneral(element: InspectorElement, handlers: InspectorHandlers): 
   const desc = document.createElement('textarea');
   desc.className = 'koi-inspector-textarea koi-inspector-desc';
   desc.value = element.description ?? '';
-  desc.rows = 3;
+  desc.rows = 2;
   desc.placeholder = 'Add a description…';
   desc.addEventListener('blur', () => {
     const next = desc.value.trim();
