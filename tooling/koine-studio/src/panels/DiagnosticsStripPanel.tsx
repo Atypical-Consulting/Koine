@@ -11,6 +11,9 @@ import type { LspDiagnostic } from '../lsp';
 // row), so the observable output is identical — only the renderer moved. The editor gutter paint and the
 // status pill / #sb-validity mirror stay imperative in editorSession; this panel owns ONLY the strip.
 
+/** Stable empty reference so the active-uri selector yields an `===`-equal value when a file is clean. */
+const EMPTY_DIAGS: LspDiagnostic[] = [];
+
 /** The strip count summary + its data-kind, matching editorSession.renderStrip's #diag-count writes. */
 function countText(diags: LspDiagnostic[]): { count: string; kind: string } {
   const errors = diags.filter((d) => d.severity === 1 || d.severity == null).length;
@@ -27,9 +30,10 @@ export function DiagnosticsStripPanel(props: {
   activeUri: () => string;
   onGoto: (line: number, col: number) => void;
 }) {
-  // Subscribe to exactly the per-uri diagnostics cache; an unrelated slice change leaves the strip alone.
-  const byUri = useStore(props.store, (s) => s.diagnosticsByUri);
-  const diags = byUri[props.activeUri()] ?? [];
+  // Subscribe to the ACTIVE file's diagnostics only: a push for any other file changes a different map
+  // entry, so this selector returns the same array reference and the strip does not re-render (matching the
+  // old `if (uri === activeUri())` gate in editorSession.renderDiagnostics).
+  const diags = useStore(props.store, (s) => s.diagnosticsByUri[props.activeUri()]) ?? EMPTY_DIAGS;
   const { count, kind } = countText(diags);
   return (
     <div class="koi-diag-strip">

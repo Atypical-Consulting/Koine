@@ -4,6 +4,7 @@ import type { AppState } from '../store/index';
 import type { GlossaryModel } from '../lsp';
 import { renderModelOutline, type ModelOutlineHandlers } from '../modelOutline';
 import { scopeGlossaryModel } from '../activeContext';
+import { lookupElement, type ModelIndex } from '../modelIndex';
 
 // The left-rail Explorer construct tree as a Preact panel (#193, #146). It subscribes to TWO slices of
 // the app store: `activeContext` (the bounded-context scope that narrows the tree) and `selection` (the
@@ -18,12 +19,19 @@ export function ModelOutlinePanel(props: {
   store: StoreApi<AppState>;
   model: GlossaryModel;
   handlers: ModelOutlineHandlers;
+  /** The joined model index, used to canonicalize the selection's qn before matching a leaf. */
+  index?: ModelIndex | null;
 }) {
   // Subscribe to exactly the two slices that drive this panel; an unrelated slice change leaves it alone.
   const scope = useStore(props.store, (s) => s.activeContext);
   const selection = useStore(props.store, (s) => s.selection);
   const scoped = scopeGlossaryModel(props.model, scope);
-  const qn = selection?.qualifiedName ?? null;
+  // Match the deleted applySelectionHighlight exactly: resolve the selection to its canonical qn (a
+  // diagram-node selection can carry a non-canonical key form) before comparing against leaf.dataset.qname
+  // (which renderModelOutline sets to the canonical entry.qualifiedName). Without the index, fall back to
+  // the raw qn — the same `?? sel.qualifiedName` the controller used.
+  const hit = selection && props.index ? lookupElement(props.index, selection.qualifiedName) : null;
+  const qn = hit?.canonicalQn ?? selection?.qualifiedName ?? null;
   return (
     <div
       class="koi-outline-mount"

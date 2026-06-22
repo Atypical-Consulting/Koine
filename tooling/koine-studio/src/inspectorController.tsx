@@ -767,7 +767,12 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
       // its inline counts suppressed; the dedicated Overview section owns the tallies (renderOverviewCounts),
       // so the two never double up. The panel owns the leaf `is-selected` cross-highlight on its own.
       render(
-        <ModelOutlinePanel store={appStore} model={index.glossary} handlers={modelOutlineHandlers} />,
+        <ModelOutlinePanel
+          store={appStore}
+          model={index.glossary}
+          handlers={modelOutlineHandlers}
+          index={index}
+        />,
         explorerBody,
       );
       overviewBody.replaceChildren(renderOverviewCounts(scopedGlossary));
