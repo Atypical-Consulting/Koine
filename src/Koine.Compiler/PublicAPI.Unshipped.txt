@@ -45,13 +45,19 @@ Koine.Compiler.Emit.Docs.DiagramDescriptor.Kind.init -> void
 Koine.Compiler.Emit.Docs.DiagramDescriptor.Mermaid.get -> string!
 Koine.Compiler.Emit.Docs.DiagramDescriptor.Mermaid.init -> void
 Koine.Compiler.Emit.Docs.DiagramEdge
-Koine.Compiler.Emit.Docs.DiagramEdge.DiagramEdge(string! From, string! To, string? Label, string? Cardinality = null) -> void
+Koine.Compiler.Emit.Docs.DiagramEdge.DiagramEdge(string! From, string! To, string? Label, string? Cardinality = null, string? SourceCardinality = null, string? ArrowKind = null, string? BackingMember = null) -> void
+Koine.Compiler.Emit.Docs.DiagramEdge.ArrowKind.get -> string?
+Koine.Compiler.Emit.Docs.DiagramEdge.ArrowKind.init -> void
+Koine.Compiler.Emit.Docs.DiagramEdge.BackingMember.get -> string?
+Koine.Compiler.Emit.Docs.DiagramEdge.BackingMember.init -> void
 Koine.Compiler.Emit.Docs.DiagramEdge.Cardinality.get -> string?
 Koine.Compiler.Emit.Docs.DiagramEdge.Cardinality.init -> void
 Koine.Compiler.Emit.Docs.DiagramEdge.From.get -> string!
 Koine.Compiler.Emit.Docs.DiagramEdge.From.init -> void
 Koine.Compiler.Emit.Docs.DiagramEdge.Label.get -> string?
 Koine.Compiler.Emit.Docs.DiagramEdge.Label.init -> void
+Koine.Compiler.Emit.Docs.DiagramEdge.SourceCardinality.get -> string?
+Koine.Compiler.Emit.Docs.DiagramEdge.SourceCardinality.init -> void
 Koine.Compiler.Emit.Docs.DiagramEdge.To.get -> string!
 Koine.Compiler.Emit.Docs.DiagramEdge.To.init -> void
 Koine.Compiler.Emit.Docs.DiagramGraph
@@ -157,6 +163,8 @@ const Koine.Compiler.Services.StructuredEditKind.AddField = "addField" -> string
 const Koine.Compiler.Services.StructuredEditKind.RemoveMember = "removeMember" -> string!
 const Koine.Compiler.Services.StructuredEditKind.ChangeFieldType = "changeFieldType" -> string!
 const Koine.Compiler.Services.StructuredEditKind.AddTransition = "addTransition" -> string!
+const Koine.Compiler.Services.StructuredEditKind.AddType = "addType" -> string!
+const Koine.Compiler.Services.StructuredEditKind.RemoveType = "removeType" -> string!
 Koine.Compiler.Services.EmitResult
 Koine.Compiler.Services.EmitResult.EmitResult(string? Koine, System.Collections.Generic.IReadOnlyList<Koine.Compiler.Diagnostics.Diagnostic!>! Diagnostics) -> void
 Koine.Compiler.Services.EmitResult.Koine.get -> string?
