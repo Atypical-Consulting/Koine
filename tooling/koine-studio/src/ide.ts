@@ -1,21 +1,19 @@
 // Koine Studio app composition: wires the .koi editor, the live LSP diagnostics,
 // the status line, the diagnostics strip, and the tabbed inspector (emitted preview,
 // glossary, and context map).
-import { createKoineEditor, createOutputView, renderMarkdown, setEditorDiagnostics } from './editor';
+import { createOutputView, renderMarkdown } from './editor';
 import {
   KoineLsp,
   type ContextMapResult,
   type DocsResult,
   type GlossaryEntry,
   type Location,
-  type LspDiagnostic,
   type SourceSpan,
   type StructuredEdit,
   type TextEdit,
   type WorkspaceEdit,
 } from './lsp';
 import {
-  diagnosticsInRange,
   fileUriToPath,
   helpRows,
   isSafeShareRelPath,
@@ -23,6 +21,7 @@ import {
   renderCheckMarkdown,
   renderContextMapHtml,
 } from './ideUtils';
+import { createEditorSession } from './editorSession';
 import { getPlatform, type FsEntry, type KoiFile } from './host';
 import { createExplorer } from './explorer';
 import { koineMark } from './logo';
@@ -210,42 +209,6 @@ export function init(): void {
   // First paint before the workspace opens; openFolderPath replaces it with the active file's text.
   const initialDoc = (shared?.kind === 'single' ? shared.text : null) ?? legacyScratch ?? SEED;
 
-  const editor = createKoineEditor({
-    parent: el('editor-pane'),
-    doc: initialDoc,
-    lineWrap: settings.wordWrap,
-    onChange: (doc) => {
-      // First edit dismisses the welcome overlay (shown only on a pristine first-run workspace).
-      if (welcome.visible) welcome.hide();
-      const buf = buffers.get(activeUri);
-      let becameDirty = false;
-      if (buf) {
-        if (!buf.dirty && buf.text !== doc) becameDirty = true;
-        buf.text = doc;
-        if (becameDirty) buf.dirty = true;
-      }
-      lsp.changeDoc(activeUri, doc);
-      onDocEdited();
-      // Re-render the tree only when the active file's dirty dot just appeared (cheap path).
-      if (becameDirty) renderTree();
-    },
-    onHover: (line, character) => lsp.hover(line, character),
-    onCompletion: (line, character) => lsp.completion(line, character),
-    onDefinition: (line, character) => lsp.definition(line, character),
-    onNavigate: (loc) => navigateToDefinition(loc),
-    // Refactors + quick fixes (F2 rename, Shift-F12 references, Mod-. code actions). The editor
-    // owns the in-editor widgets; ide.ts resolves the data and applies the resulting edits.
-    onPrepareRename: (line, character) => lsp.prepareRename(line, character),
-    onRename: (line, character, newName) => lsp.rename(line, character, newName),
-    onReferences: (line, character) => lsp.references(line, character),
-    onNavigateLocation: (loc) => navigateToDefinition(loc),
-    uriLabel: (uri) => buffers.get(uri)?.relPath ?? (uri.split('/').pop() ?? uri),
-    onCodeActions: (range) => lsp.codeActions(range, diagnosticsInRange(diagnosticsByUri.get(activeUri) ?? [], range)),
-    onApplyWorkspaceEdit: (edit) => applyWorkspaceEdit(edit),
-    // Save (Cmd/Ctrl-S) is owned by ide.ts's window keydown handler below: it formats AND
-    // writes the active buffer to disk. We deliberately do NOT pass onFormat here so the
-    // editor's Mod-s keymap stays inert and there's exactly one save path.
-  });
   const output = createOutputView(el('view-preview'), settings.wordWrap);
 
   // A copy affordance overlaid on the emitted-preview pane (auto-hidden with the pane when another
@@ -324,17 +287,60 @@ export function init(): void {
 
   // --- workspace model ------------------------------------------------------
   // `buffers` holds every open document keyed by its file:// uri; `activeUri` is the one
-  // shown in the editor and targeted by all lsp requests. `diagnosticsByUri` keeps the
-  // latest pushed diagnostics per uri so switching files can re-render the active one and
-  // the tree can badge files with errors.
+  // shown in the editor and targeted by all lsp requests. The per-uri diagnostics cache lives
+  // inside `editorSession` now (read/mutated through its accessors); switching files re-renders
+  // the active one and the tree badges files with errors via those accessors.
   const buffers = new Map<string, Buffer>();
-  const diagnosticsByUri = new Map<string, LspDiagnostic[]>();
   let activeUri = '';
   // The opened-folder token and the last explorer tree fetched for it. The explorer is a *view*:
   // it renders this cached tree (re-reading dirty/diagnostics/active state via callbacks), while
   // the open .koi `buffers` remain the compiled workspace. Mutations refresh both.
   let folderRootToken: string = '';
   let entriesCache: FsEntry[] = [];
+
+  // The editor ↔ LSP + diagnostics wiring (issue #180, Task 3): owns the CodeMirror editor and its
+  // callback wall (hover/completion/definition/rename/references/code-actions → lsp.*), the per-uri
+  // diagnostics cache, the status pill + diagnostics strip, and the LSP publishDiagnostics/exit
+  // subscriptions. ide.ts keeps the buffer/dirty/tree side effects of an edit (wired through
+  // editorSession.onChange below) and the workspace/model concerns.
+  const editorSession = createEditorSession({
+    parent: el('editor-pane'),
+    doc: initialDoc,
+    lineWrap: settings.wordWrap,
+    lsp,
+    status: statusEl,
+    diagCount: diagCountEl,
+    diagBody: diagBodyEl,
+    sbConnection: sbConnEl,
+    sbValidity: sbValidityEl,
+    activeUri: () => activeUri,
+    uriLabel: (uri) => buffers.get(uri)?.relPath ?? (uri.split('/').pop() ?? uri),
+    onNavigate: (loc) => navigateToDefinition(loc),
+    onApplyWorkspaceEdit: (edit) => applyWorkspaceEdit(edit),
+    // Every diagnostics push re-renders the tree so non-active files can badge their error/warning
+    // counts (the active file's gutter/strip/status are repainted inside editorSession first).
+    onDiagnostics: () => renderTree(),
+  });
+  const editor = editorSession.editor;
+  const setStatus = editorSession.setStatus;
+
+  // The buffer/dirty/tree half of the editor's onChange (the editor↔LSP sync runs inside
+  // editorSession). Preserves the original effect order: welcome.hide → buffer text+dirty →
+  // onDocEdited → renderTree (only when the active file's dirty dot just appeared).
+  editorSession.onChange((doc) => {
+    // First edit dismisses the welcome overlay (shown only on a pristine first-run workspace).
+    if (welcome.visible) welcome.hide();
+    const buf = buffers.get(activeUri);
+    let becameDirty = false;
+    if (buf) {
+      if (!buf.dirty && buf.text !== doc) becameDirty = true;
+      buf.text = doc;
+      if (becameDirty) buf.dirty = true;
+    }
+    onDocEdited();
+    // Re-render the tree only when the active file's dirty dot just appeared (cheap path).
+    if (becameDirty) renderTree();
+  });
 
   const treeBodyEl = el<HTMLElement>('filetree-body');
   const treeTitleEl = el<HTMLElement>('filetree-title');
@@ -384,90 +390,10 @@ export function init(): void {
   });
   treeBodyEl.appendChild(explorer.el);
 
-  function setStatus(text: string, kind: 'connecting' | 'green' | 'error'): void {
-    statusEl.textContent = text;
-    statusEl.dataset.kind = kind;
-    // Mirror the connection state into the status bar as a stable label (the toolbar pill keeps the
-    // live text). "Locale" reflects that the model is compiled in-process, not against a remote server.
-    sbConnEl.textContent = kind === 'connecting' ? 'Connecting…' : kind === 'error' ? 'Offline' : 'Local';
-  }
-
-  function renderStrip(diags: LspDiagnostic[]): void {
-    const errors = diags.filter((d) => d.severity === 1 || d.severity == null).length;
-    const warnings = diags.filter((d) => d.severity === 2).length;
-    // Status-bar validity: a plain-language read of the same error count that feeds #diag-count.
-    if (errors) {
-      sbValidityEl.textContent = errors === 1 ? '1 error' : `${errors} errors`;
-      sbValidityEl.dataset.kind = 'error';
-    } else {
-      sbValidityEl.textContent = 'No errors';
-      sbValidityEl.dataset.kind = 'ok';
-    }
-    if (!errors && !warnings) {
-      diagCountEl.textContent = 'clean';
-      diagCountEl.dataset.kind = 'clean';
-    } else {
-      const parts: string[] = [];
-      if (errors) parts.push(`${errors} error${errors === 1 ? '' : 's'}`);
-      if (warnings) parts.push(`${warnings} warning${warnings === 1 ? '' : 's'}`);
-      diagCountEl.textContent = parts.join(' · ');
-      diagCountEl.dataset.kind = errors ? 'error' : 'warn';
-    }
-
-    diagBodyEl.innerHTML = '';
-    if (!diags.length) {
-      const span = document.createElement('span');
-      span.className = 'diag-empty';
-      span.textContent = 'No diagnostics.';
-      diagBodyEl.appendChild(span);
-      return;
-    }
-    for (const d of diags) {
-      const row = document.createElement('button');
-      row.type = 'button';
-      row.className = d.severity === 2 ? 'diag diag-warn' : 'diag diag-err';
-      const line = d.range.start.line + 1;
-      const col = d.range.start.character + 1;
-      const code = d.code != null ? `${d.code}: ` : '';
-      row.textContent = `${d.severity === 2 ? 'warn' : 'error'} ${line}:${col}  ${code}${d.message}`;
-      row.addEventListener('click', () => editor.goto(line, col));
-      diagBodyEl.appendChild(row);
-    }
-  }
-
-  function updateStatus(diags: LspDiagnostic[]): void {
-    const errors = diags.filter((d) => d.severity === 1 || d.severity == null).length;
-    const warnings = diags.filter((d) => d.severity === 2).length;
-    if (errors === 0 && warnings === 0) {
-      setStatus('green ✓', 'green');
-    } else {
-      const parts: string[] = [];
-      if (errors) parts.push(`${errors} error${errors === 1 ? '' : 's'}`);
-      if (warnings) parts.push(`${warnings} warning${warnings === 1 ? '' : 's'}`);
-      setStatus(parts.join(' / '), 'error');
-    }
-  }
-
-  // Diagnostics are pushed per-uri for every file in the workspace. Store them all; only the
-  // ACTIVE file's diagnostics drive the editor gutter, the strip, and the status pill. The
-  // tree is re-rendered so non-active files can badge their error/warning counts.
-  lsp.onPublishDiagnostics((uri, diags) => {
-    diagnosticsByUri.set(uri, diags);
-    if (uri === activeUri) {
-      setEditorDiagnostics(editor.view, diags);
-      renderStrip(diags);
-      updateStatus(diags);
-    }
-    renderTree();
-  });
-  lsp.onServerExit((code) => {
-    setStatus(`server exited (${code})`, 'error');
-  });
-
   // --- file tree ------------------------------------------------------------
 
   function diagCounts(uri: string): { errors: number; warnings: number } {
-    const diags = diagnosticsByUri.get(uri) ?? [];
+    const diags = editorSession.diagnosticsFor(uri);
     let errors = 0;
     let warnings = 0;
     for (const d of diags) {
@@ -583,7 +509,7 @@ export function init(): void {
         if (buf.uri === activeUri) activeRemoved = true;
         lsp.closeDoc(buf.uri);
         buffers.delete(buf.uri);
-        diagnosticsByUri.delete(buf.uri);
+        editorSession.dropDiagnostics(buf.uri);
       }
     }
     if (activeRemoved) activateFallback();
@@ -696,14 +622,14 @@ export function init(): void {
       const wasActive = buf.uri === activeUri;
       lsp.closeDoc(buf.uri);
       buffers.delete(buf.uri);
-      const diags = diagnosticsByUri.get(buf.uri);
-      diagnosticsByUri.delete(buf.uri);
+      // Move the cached diagnostics with the buffer (no repaint — the gutter re-renders when the
+      // active file's diagnostics are next shown / pushed), preserving the old re-key behavior.
+      editorSession.renameDiagnostics(buf.uri, newUri);
       buf.uri = newUri;
       buf.path = newPath;
       buf.relPath = relOfToken(newPath);
       buf.name = nameOf(newPath);
       buffers.set(newUri, buf);
-      if (diags) diagnosticsByUri.set(newUri, diags);
       lsp.openDoc(newUri, buf.text);
       if (wasActive) {
         activeUri = newUri;
@@ -721,10 +647,7 @@ export function init(): void {
       activeUri = next.uri;
       lsp.setActive(next.uri);
       editor.setDoc(next.text);
-      const diags = diagnosticsByUri.get(next.uri) ?? [];
-      setEditorDiagnostics(editor.view, diags);
-      renderStrip(diags);
-      updateStatus(diags);
+      editorSession.showDiagnostics(next.uri);
       invalidateDocViews();
       return;
     }
@@ -762,10 +685,7 @@ export function init(): void {
     activeUri = uri;
     lsp.setActive(uri);
     editor.setDoc(next.text);
-    const diags = diagnosticsByUri.get(uri) ?? [];
-    setEditorDiagnostics(editor.view, diags);
-    renderStrip(diags);
-    updateStatus(diags);
+    editorSession.showDiagnostics(uri);
     invalidateDocViews();
     renderTree();
     void followActiveFileContext();
@@ -1861,7 +1781,7 @@ export function init(): void {
       lsp.closeDoc(uri);
     }
     buffers.clear();
-    diagnosticsByUri.clear();
+    editorSession.clearDiagnostics();
 
     // Read + open every file as one workspace (cross-file refs resolve via didOpen). Read text
     // from disk first (skipping unreadable files), then hand the successful records to the shared
@@ -2076,7 +1996,7 @@ export function init(): void {
     }
     for (const uri of Array.from(buffers.keys())) lsp.closeDoc(uri);
     buffers.clear();
-    diagnosticsByUri.clear();
+    editorSession.clearDiagnostics();
     await openFolderPath(token, { recent: false }); // activates model.koi (= BLANK) and renders the tree
     welcome.hide();
   }
@@ -2238,7 +2158,7 @@ export function init(): void {
         return s.aiProvider === 'openai' ? s.aiModelOpenai : s.aiModel;
       },
       getContext: async () => {
-        const diagnostics = (diagnosticsByUri.get(activeUri) ?? []).map((d) => ({
+        const diagnostics = editorSession.diagnosticsFor(activeUri).map((d) => ({
           line: d.range.start.line + 1,
           col: d.range.start.character + 1,
           severity: (d.severity === 2 ? 'warning' : 'error') as 'warning' | 'error',
@@ -2304,12 +2224,12 @@ export function init(): void {
       const url = workspaceShareUrlOrNull(files, activeRelPath);
       if (url === null) {
         setStatus('Workspace too large to share as a link — export a .koi source zip instead', 'error');
-        setTimeout(() => updateStatus(diagnosticsByUri.get(activeUri) ?? []), 1500);
+        setTimeout(() => editorSession.updateStatus(editorSession.diagnosticsFor(activeUri)), 1500);
         return;
       }
       await navigator.clipboard.writeText(url);
       setStatus('link copied ✓', 'green');
-      setTimeout(() => updateStatus(diagnosticsByUri.get(activeUri) ?? []), 1500);
+      setTimeout(() => editorSession.updateStatus(editorSession.diagnosticsFor(activeUri)), 1500);
     } catch (e) {
       console.error('copy share link failed:', e);
     }
@@ -2326,7 +2246,7 @@ export function init(): void {
       const saved = await platform.saveZip(`${root}.zip`, bytes);
       if (saved === true) {
         setStatus('source exported ✓', 'green');
-        setTimeout(() => updateStatus(diagnosticsByUri.get(activeUri) ?? []), 1500);
+        setTimeout(() => editorSession.updateStatus(editorSession.diagnosticsFor(activeUri)), 1500);
       }
     } catch (e) {
       setStatus('export failed', 'error');
