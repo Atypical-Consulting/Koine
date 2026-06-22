@@ -68,7 +68,7 @@ import { GlossaryPanel } from '@/panels/GlossaryPanel';
 import { DocsPanelHost } from '@/docs/DocsPanelHost';
 import { appStore } from '@/store/index';
 import { DEFAULT_CENTER, isValidCenter, type RightView } from '@/store/slices/uiChrome';
-import type { DomainIndex } from '@/aiPanel';
+import type { DomainIndex } from '@/ai/aiPanel';
 import { currentTheme } from '@/theme';
 import { renderCheckMarkdown, renderContextMapHtml } from '@/ideUtils';
 

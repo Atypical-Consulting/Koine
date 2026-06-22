@@ -68,7 +68,7 @@ import { badgeCounts, createDiagCountGate } from '@/diagnostics/diagCountGate';
 import { type SelectedElement } from '@/selection';
 import { resolveInspectableQn } from '@/modelIndex';
 import { type InspectorElement } from '@/inspector';
-import { createAssistantPanel, type AssistantPanel, type AssistantContext } from '@/aiPanel';
+import { createAssistantPanel, type AssistantPanel, type AssistantContext } from '@/ai/aiPanel';
 import { clearModelHash, readModelFromHash, workspaceShareUrlOrNull } from '@/export/share';
 import { handleBeforeUnload } from '@/dirty';
 import { render } from 'preact';

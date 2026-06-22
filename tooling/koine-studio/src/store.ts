@@ -8,8 +8,8 @@
 // into an in-memory cache, so the synchronous Settings API can keep exposing it without leaking it
 // to disk in the clear.
 
-import { loadSecret, saveSecret } from '@/secrets';
-import type { ChatMessage } from '@/ai';
+import { loadSecret, saveSecret } from '@/ai/secrets';
+import type { ChatMessage } from '@/ai/ai';
 
 // --- settings model ----------------------------------------------------------
 

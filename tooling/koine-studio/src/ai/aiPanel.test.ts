@@ -7,12 +7,12 @@ import {
   type AssistantContext,
   type AssistantPanelOptions,
   type DomainIndex,
-} from '@/aiPanel';
+} from '@/ai/aiPanel';
 
 // Stream a fenced ```koine block as the reply so a generative turn would normally offer "Apply"; the
 // Explain path must suppress that affordance while still rendering the reply bubble.
-vi.mock('@/ai', async (orig) => ({
-  ...(await orig<typeof import('@/ai')>()),
+vi.mock('@/ai/ai', async (orig) => ({
+  ...(await orig<typeof import('@/ai/ai')>()),
   runAssistant: vi.fn(async (req: { onText: (t: string) => void }) => {
     const full = 'Here:\n```koine\ncontext X {}\n```';
     req.onText(full);

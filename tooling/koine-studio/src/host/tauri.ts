@@ -10,7 +10,7 @@ import { appDataDir, join } from '@tauri-apps/api/path';
 import { open as openDialog, save as saveDialog } from '@tauri-apps/plugin-dialog';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import type { FsEntry, KoiFile, LspTransport, Platform, SourceDoc } from '@/host/types';
-import { normalizeCompileTarget } from '@/assistantTools';
+import { normalizeCompileTarget } from '@/ai/assistantTools';
 import { mcpCall } from '@/mcp/mcp';
 
 /** LSP transport over Tauri IPC. Mirrors the wiring previously inlined in lsp.ts. */

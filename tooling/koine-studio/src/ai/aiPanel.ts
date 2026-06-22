@@ -5,7 +5,7 @@
 //
 // Needs a user-supplied Anthropic API key (set in Preferences, stored locally). With no key it
 // shows a prompt to add one rather than calling the API.
-import { runAssistant, type AiProvider, type ChatMessage } from '@/ai';
+import { runAssistant, type AiProvider, type ChatMessage } from '@/ai/ai';
 import { renderMarkdown } from '@/editor/editor';
 import { loadChat, saveChat, clearChat } from '@/store';
 

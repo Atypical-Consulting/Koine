@@ -2,7 +2,7 @@
 // call to the already-resident Koine.Wasm runtime and format the result for the model. This is the
 // browser half of Platform.runCompilerTool — the desktop half proxies to the `koine mcp --http`
 // sidecar instead (src/host/tauri.ts). The tool DEFINITIONS + pure formatters live in assistantTools.
-import { formatCompile, formatValidate, normalizeCompileTarget } from '@/assistantTools';
+import { formatCompile, formatValidate, normalizeCompileTarget } from '@/ai/assistantTools';
 import { loadWasmApi } from '@/host/browser/wasm';
 
 /** The single synthetic file URI the one-file tool `source` is wrapped into for the workspace APIs. */

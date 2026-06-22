@@ -1,5 +1,5 @@
 import { describe, expect, test, vi } from 'vitest';
-import { saveSecret, loadSecret } from '@/secrets';
+import { saveSecret, loadSecret } from '@/ai/secrets';
 
 describe('secret store', () => {
   test('round-trips an encrypted value', async () => {
