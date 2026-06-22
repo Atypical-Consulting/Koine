@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { badgeCounts, createDiagCountGate } from '@/diagCountGate';
+import { badgeCounts, createDiagCountGate } from '@/diagnostics/diagCountGate';
 import type { LspDiagnostic } from '@/lsp/lsp';
 
 const at = (severity: number | undefined, message = 'x'): LspDiagnostic => ({

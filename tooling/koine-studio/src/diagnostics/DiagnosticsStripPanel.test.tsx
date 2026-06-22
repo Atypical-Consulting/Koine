@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'vitest';
 import { act, render } from '@testing-library/preact';
 import { createAppStore } from '@/store/index';
-import { DiagnosticsStripPanel } from '@/panels/DiagnosticsStripPanel';
+import { DiagnosticsStripPanel } from '@/diagnostics/DiagnosticsStripPanel';
 import type { LspDiagnostic } from '@/lsp/lsp';
 
 // One error diagnostic on (0-based) line 2, column 3 → the strip renders it 1-based as "error 3:4".

@@ -18,8 +18,8 @@ import { render } from 'preact';
 import { createKoineEditor, setEditorDiagnostics, type KoineEditor } from '@/editor/editor';
 import { diagnosticsInRange } from '@/ideUtils';
 import { appStore } from '@/store/index';
-import { diagnosticsSummary } from '@/diagnosticsSummary';
-import { DiagnosticsStripPanel } from '@/panels/DiagnosticsStripPanel';
+import { diagnosticsSummary } from '@/diagnostics/diagnosticsSummary';
+import { DiagnosticsStripPanel } from '@/diagnostics/DiagnosticsStripPanel';
 import type {
   CodeAction,
   CompletionItem,

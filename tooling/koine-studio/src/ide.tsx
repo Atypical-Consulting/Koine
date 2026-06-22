@@ -64,7 +64,7 @@ import {
 } from '@/diagrams-svg';
 import { isAllContexts } from '@/activeContext';
 import { appStore } from '@/store/index';
-import { badgeCounts, createDiagCountGate } from '@/diagCountGate';
+import { badgeCounts, createDiagCountGate } from '@/diagnostics/diagCountGate';
 import { type SelectedElement } from '@/selection';
 import { resolveInspectableQn } from '@/modelIndex';
 import { type InspectorElement } from '@/inspector';
@@ -75,7 +75,7 @@ import { render } from 'preact';
 import { createHistoryController } from '@/historyController';
 import { HistoryControls } from '@/panels/HistoryControls';
 import { UnsavedIndicator } from '@/panels/UnsavedIndicator';
-import { WorkspaceProblemsBadge } from '@/panels/WorkspaceProblemsBadge';
+import { WorkspaceProblemsBadge } from '@/diagnostics/WorkspaceProblemsBadge';
 import { StoreInspector } from '@/panels/StoreInspector';
 import { createWorkspaceController, type WorkspaceController } from '@/workspaceController';
 import { createConfirmDialog } from '@/shared/overlay';

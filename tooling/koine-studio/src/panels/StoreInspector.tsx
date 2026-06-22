@@ -2,7 +2,7 @@ import type { ComponentChildren } from 'preact';
 import type { StoreApi } from 'zustand/vanilla';
 import { useStore } from 'zustand';
 import type { AppState } from '@/store/index';
-import { diagnosticsSummary } from '@/diagnosticsSummary';
+import { diagnosticsSummary } from '@/diagnostics/diagnosticsSummary';
 
 // A read-only live view of the app store — the single source of truth made visible (#193 follow-up).
 // It exists to diagnose the cross-panel-sync class of bug the Zustand refactor set out to kill: when a
