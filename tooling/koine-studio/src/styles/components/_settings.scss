@@ -14,7 +14,8 @@
 .koi-settings-layout {
   display: flex;
   align-items: stretch;
-  min-height: 360px;
+  /* The panels area owns a fixed height (below), so the dialog frame is one identical size on every
+     category — switching tabs never reflows the modal. The tallest panel (MCP) scrolls in place. */
 }
 
 /* category rail (tablist) */
@@ -96,10 +97,12 @@
   stroke-linejoin: round;
 }
 
-/* content panels */
+/* content panels — a fixed height keeps the dialog the same size on every tab; the active panel
+   scrolls within it when its content (MCP) is taller than the frame. */
 .koi-settings-panels {
   flex: 1 1 auto;
   min-width: 0;
+  height: 460px;
   padding: var(--koi-space-1-5) 20px var(--koi-space-4-5);
   overflow-y: auto;
 }
@@ -227,45 +230,121 @@
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.22);
 }
 
-/* output-language picker — segmented buttons, each with its language identity dot */
+/* Output: the language chooser lays out full-width (not as a narrow label/control row) so the four
+   targets read as cards with room for each language's file extension. */
+.koi-output-block {
+  display: flex;
+  flex-direction: column;
+  gap: var(--koi-space-3-5);
+  padding-top: var(--koi-space-2-5);
+}
+
+/* output-language picker — a 2×2 grid of selectable cards, each carrying its identity dot, name,
+   and the file extension that target emits. */
 .koi-lang-picker {
-  display: inline-flex;
-  gap: var(--koi-space-0-5);
-  padding: var(--koi-space-0-5);
-  border: 1px solid var(--koi-line);
-  border-radius: var(--koi-radius);
-  background: var(--koi-surface);
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: var(--koi-space-2-5);
 }
 
 .koi-lang-opt {
-  display: inline-flex;
+  display: flex;
   align-items: center;
-  gap: var(--koi-space-1-5);
-  border: none;
-  border-radius: var(--koi-radius-sm);
-  background: transparent;
+  gap: var(--koi-space-2-5);
+  border: 1px solid var(--koi-line);
+  border-radius: var(--koi-radius);
+  background: var(--koi-surface);
   color: var(--koi-muted);
-  padding: var(--koi-space-1-25) var(--koi-space-2-5);
+  padding: var(--koi-space-3) var(--koi-space-3-5);
   font-family: inherit;
-  font-size: var(--koi-text-base);
+  font-size: var(--koi-text-md);
+  text-align: left;
   cursor: pointer;
-  transition: background var(--koi-dur-mid) ease, color var(--koi-dur-mid) ease;
+  transition: border-color var(--koi-dur-mid) ease, background var(--koi-dur-mid) ease,
+    color var(--koi-dur-mid) ease;
 }
 
 .koi-lang-opt:hover {
+  border-color: color-mix(in srgb, var(--koi-accent) 45%, var(--koi-line));
   color: var(--koi-fg);
 }
 
 .koi-lang-opt[aria-checked='true'] {
-  background: var(--koi-paper-2);
+  border-color: var(--koi-accent);
+  background: color-mix(in srgb, var(--koi-accent) 12%, var(--koi-surface));
   color: var(--koi-fg);
   font-weight: 600;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.22);
+}
+
+.koi-lang-name {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* the file extension each target emits — a quiet mono caption trailing the card */
+.koi-lang-ext {
+  flex: 0 0 auto;
+  font-family: var(--koi-font-mono);
+  font-size: var(--koi-text-xs);
+  color: var(--koi-muted);
+}
+
+.koi-lang-opt[aria-checked='true'] .koi-lang-ext {
+  color: var(--koi-accent);
 }
 
 .koi-lang-opt:focus-visible {
   outline: 2px solid var(--koi-accent);
-  outline-offset: 1px;
+  outline-offset: 2px;
+}
+
+/* Editor type specimen: a live preview of a Koine snippet that reflects the font-size, line-height,
+   and word-wrap controls so the numeric inputs have something tangible to read against. */
+.koi-editor-specimen {
+  margin: 0 0 var(--koi-space-2-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--koi-space-1-5);
+}
+
+.koi-editor-specimen-label {
+  font-size: var(--koi-text-2xs);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--koi-muted);
+}
+
+.koi-editor-specimen-code {
+  margin: 0;
+  padding: var(--koi-space-2-5) var(--koi-space-3);
+  background: var(--koi-paper);
+  border: 1px solid var(--koi-line);
+  border-radius: var(--koi-radius-sm);
+  font-family: var(--koi-font-mono);
+  /* font-size + line-height are set inline from the live settings; these are the fallback before
+     the panel populates on open. */
+  font-size: 13.5px;
+  line-height: 1.6;
+  color: var(--koi-fg);
+  white-space: pre;
+  overflow-x: auto;
+}
+
+.koi-editor-specimen-code.is-wrapped {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* specimen syntax tokens, drawn from the editor's own highlight palette */
+.koi-editor-specimen-code .tk-c {
+  color: var(--koi-hl-comment);
+  font-style: italic;
+}
+.koi-editor-specimen-code .tk-k {
+  color: var(--koi-hl-keyword);
+}
+.koi-editor-specimen-code .tk-t {
+  color: var(--koi-hl-type);
 }
 
 /* destination-language identity dot — the lead mark on each Output picker option. */

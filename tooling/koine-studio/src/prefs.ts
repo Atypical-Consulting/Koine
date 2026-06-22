@@ -209,13 +209,21 @@ export function createPreferences(cb: PrefsCallbacks): PrefsHandle {
     return { el: group, set };
   }
 
-  // The output-language picker: one dot+label button per target, single-selection radio group.
+  // The output-language picker: a card per target (identity dot + name + the file extension it
+   // emits), laid out as a single-selection radio group.
   function langPicker(onSelect: (value: PreviewTarget) => void): { el: HTMLElement; set(value: PreviewTarget): void } {
     const LABELS: Record<PreviewTarget, string> = {
       csharp: 'C#',
       typescript: 'TypeScript',
       python: 'Python',
       php: 'PHP',
+    };
+    // The file extension each target emits — a concrete, recognizable cue on every card.
+    const EXTENSIONS: Record<PreviewTarget, string> = {
+      csharp: '.cs',
+      typescript: '.ts',
+      python: '.py',
+      php: '.php',
     };
     const group = document.createElement('div');
     group.className = 'koi-lang-picker';
@@ -233,8 +241,12 @@ export function createPreferences(cb: PrefsCallbacks): PrefsHandle {
       dot.dataset.lang = id;
       dot.setAttribute('aria-hidden', 'true');
       const label = document.createElement('span');
+      label.className = 'koi-lang-name';
       label.textContent = LABELS[id];
-      b.append(dot, label);
+      const ext = document.createElement('span');
+      ext.className = 'koi-lang-ext';
+      ext.textContent = EXTENSIONS[id];
+      b.append(dot, label, ext);
       b.addEventListener('click', () => {
         set(id);
         onSelect(id);
@@ -334,11 +346,53 @@ export function createPreferences(cb: PrefsCallbacks): PrefsHandle {
     (v) => commit({ lineHeight: v }),
   );
 
-  const wordWrap = toggle('Word wrap', (on) => commit({ wordWrap: on }));
+  // A live type specimen: a short Koine snippet that renders at the current font size, line height,
+  // and word-wrap so the numeric inputs above have something tangible to read against. It updates on
+  // every keystroke — visual only; the real editor re-skins through onChange like every other field.
+  const specimenCode = document.createElement('pre');
+  specimenCode.className = 'koi-editor-specimen-code';
+  specimenCode.setAttribute('aria-hidden', 'true');
+  specimenCode.innerHTML =
+    '<span class="tk-c">// A value object is immutable and compared by its fields</span>\n' +
+    '<span class="tk-k">value</span> <span class="tk-t">Money</span> {\n' +
+    '  amount: <span class="tk-t">Decimal</span>\n' +
+    '  currency: <span class="tk-t">Currency</span>\n' +
+    '}';
+
+  const specimenLabel = document.createElement('span');
+  specimenLabel.className = 'koi-editor-specimen-label';
+  specimenLabel.textContent = 'Preview';
+
+  const specimen = document.createElement('figure');
+  specimen.className = 'koi-editor-specimen';
+  specimen.append(specimenLabel, specimenCode);
+
+  // Read a metric input's current value, clamped into range, falling back to the persisted setting
+  // for an empty or non-numeric field so a mid-edit blank never blanks the preview.
+  function specimenMetric(input: HTMLInputElement, min: number, max: number, fallback: number): number {
+    const raw = Number(input.value.trim());
+    if (input.value.trim() === '' || !Number.isFinite(raw)) return fallback;
+    return Math.min(Math.max(raw, min), max);
+  }
+  function refreshSpecimen(): void {
+    const s = loadSettings();
+    specimenCode.style.fontSize = `${specimenMetric(fontInput, FONT_MIN, FONT_MAX, s.fontSize)}px`;
+    specimenCode.style.lineHeight = String(
+      specimenMetric(lineHeightInput, LINE_HEIGHT_MIN, LINE_HEIGHT_MAX, s.lineHeight),
+    );
+  }
+  fontInput.addEventListener('input', refreshSpecimen);
+  lineHeightInput.addEventListener('input', refreshSpecimen);
+
+  const wordWrap = toggle('Word wrap', (on) => {
+    commit({ wordWrap: on });
+    specimenCode.classList.toggle('is-wrapped', on); // the preview wraps / scrolls just like the editor
+  });
   const formatOnSave = toggle('Format on save', (on) => commit({ formatOnSave: on }));
 
   const editorPanel = panel(
     'editor',
+    specimen,
     row('Font size', 'Editor text size, in pixels.', fontInput),
     row('Line height', 'Vertical spacing between lines.', lineHeightInput),
     row('Word wrap', 'Wrap long lines instead of scrolling sideways.', wordWrap.el),
@@ -349,10 +403,24 @@ export function createPreferences(cb: PrefsCallbacks): PrefsHandle {
 
   const outputLang = langPicker((target) => commit({ previewTarget: target }));
 
-  const outputPanel = panel(
-    'output',
-    row('Language', 'The language the Generated preview emits.', outputLang.el),
-  );
+  // Output lays the picker out full-width under its own heading (not a narrow label/control row) so
+  // the four language cards have room to breathe and the caption can say what actually changes.
+  const outputText = document.createElement('div');
+  outputText.className = 'koi-set-text';
+  const outputLabel = document.createElement('span');
+  outputLabel.className = 'koi-set-label';
+  outputLabel.textContent = 'Output language';
+  const outputDesc = document.createElement('span');
+  outputDesc.className = 'koi-set-desc';
+  outputDesc.textContent =
+    'The language the Generated preview emits. Your .koi source stays the same — switch any time.';
+  outputText.append(outputLabel, outputDesc);
+
+  const outputBlock = document.createElement('div');
+  outputBlock.className = 'koi-output-block';
+  outputBlock.append(outputText, outputLang.el);
+
+  const outputPanel = panel('output', outputBlock);
 
   // --- Assistant (AI) -------------------------------------------------------
 
@@ -778,6 +846,8 @@ export function createPreferences(cb: PrefsCallbacks): PrefsHandle {
     lineHeightInput.value = String(s.lineHeight);
     wordWrap.set(s.wordWrap);
     formatOnSave.set(s.formatOnSave);
+    specimenCode.classList.toggle('is-wrapped', s.wordWrap);
+    refreshSpecimen();
     outputLang.set(s.previewTarget);
     aiProviderSelect.value = s.aiProvider;
     aiBaseUrlInput.value = s.aiBaseUrl;
