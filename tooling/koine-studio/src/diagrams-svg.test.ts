@@ -12,12 +12,14 @@ import {
   DIAGRAM_CONNECT_EVENT,
   DIAGRAM_DISCONNECT_EVENT,
   DIAGRAM_ADD_TYPE_EVENT,
+  EMPTY_STATE_PICK_EVENT,
   NODE_EDIT_EVENT,
   NODE_NAVIGATE_EVENT,
   type DiagramConnectDetail,
   type DiagramDisconnectDetail,
   type DiagramNodeEditDetail,
   type DiagramNodeNavigateDetail,
+  type EmptyStatePickDetail,
 } from './diagrams-svg';
 import { loadDiagramPositions, saveDiagramPositions } from './store';
 import type { DocsFile, Diagram, DiagramNode } from './lsp';
@@ -211,11 +213,26 @@ describe('createSvgRenderer', () => {
     expect(edges.length).toBe(1);
   });
 
-  test('shows the empty-state note when no file has a diagram', async () => {
+  test('shows the empty-canvas state (the three doorways) when no file has a diagram', async () => {
     const container = ROOT();
     await createSvgRenderer().render(container, [file([])], 'light', () => true);
+    // The inviting empty state, not a rendered diagram: no laid-out diagram SVG, but the three concept
+    // doorways are present (each a real button that seeds a starter), and the note thread is preserved.
     expect(container.textContent).toContain('No diagrams yet');
-    expect(container.querySelector('svg')).toBeNull();
+    expect(container.querySelector('.koi-svg-diagram')).toBeNull();
+    const tiles = container.querySelectorAll('.koi-concept-tile');
+    expect(tiles.length).toBe(3);
+    expect([...tiles].map((t) => (t as HTMLElement).dataset.kind)).toEqual(['aggregate', 'stateMachine', 'contextMap']);
+  });
+
+  test('a concept doorway dispatches a bubbling pick event with its kind', async () => {
+    const container = ROOT();
+    document.body.appendChild(container); // the event bubbles to the host (ide.ts) in the real app
+    await createSvgRenderer().render(container, [file([])], 'light', () => true);
+    const picks: string[] = [];
+    container.addEventListener(EMPTY_STATE_PICK_EVENT, (e) => picks.push((e as CustomEvent<EmptyStatePickDetail>).detail.kind));
+    container.querySelector<HTMLButtonElement>('.koi-concept-tile[data-kind="stateMachine"]')!.click();
+    expect(picks).toEqual(['stateMachine']);
   });
 
   test('a malformed/empty graph does not throw — it shows the empty-state note', async () => {
