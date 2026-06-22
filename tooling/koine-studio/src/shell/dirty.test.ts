@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { dirtyBuffers, dirtyCount, handleBeforeUnload, saveAllDirtyBuffers, titleWithDirty } from '@/dirty';
+import { dirtyBuffers, dirtyCount, handleBeforeUnload, saveAllDirtyBuffers, titleWithDirty } from '@/shell/dirty';
 
 interface FakeBuffer {
   path: string;

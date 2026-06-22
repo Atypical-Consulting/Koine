@@ -7,7 +7,7 @@
 // id surface init() builds), mirroring explorer.test.ts / inspector.test.ts spy + DOM-seed idioms.
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { act } from '@testing-library/preact';
-import { createEditorSession, type EditorSessionDeps } from '@/editorSession';
+import { createEditorSession, type EditorSessionDeps } from '@/shell/editorSession';
 import type { CodeAction, CompletionItem, HoverResult, Location, LspDiagnostic, Range } from '@/lsp/lsp';
 
 // --- DOM seed ----------------------------------------------------------------

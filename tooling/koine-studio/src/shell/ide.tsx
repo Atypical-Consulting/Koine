@@ -14,11 +14,11 @@ import {
   helpRows,
   isSafeShareRelPath,
   pathToFileUri,
-} from '@/ideUtils';
-import { createEditorSession } from '@/editorSession';
-import { createInspectorController } from '@/inspectorController';
+} from '@/shell/ideUtils';
+import { createEditorSession } from '@/shell/editorSession';
+import { createInspectorController } from '@/shell/inspectorController';
 import { getPlatform } from '@/host';
-import { createExplorer } from '@/explorer';
+import { createExplorer } from '@/shell/explorer';
 import { koineMark } from '@/shared/logo';
 import { initTheme, onThemeChange, toggleTheme } from '@/settings/theme';
 import {
@@ -39,7 +39,7 @@ import { type Template } from '@/welcome/templates';
 import { createCommandPalette, type Command } from '@/shared/palette';
 import { createPreferences } from '@/settings/prefs';
 import { applyAppearance } from '@/settings/appearance';
-import { initSplitResizer, initEdgeResizer } from '@/resize';
+import { initSplitResizer, initEdgeResizer } from '@/shell/resize';
 import { createHelpOverlay } from '@/shared/help';
 import { createAboutDialog } from '@/welcome/about';
 import { createGenerateProject } from '@/export/generateProjectWizard';
@@ -70,14 +70,14 @@ import { resolveInspectableQn } from '@/model/modelIndex';
 import { type InspectorElement } from '@/model/inspector';
 import { createAssistantPanel, type AssistantPanel, type AssistantContext } from '@/ai/aiPanel';
 import { clearModelHash, readModelFromHash, workspaceShareUrlOrNull } from '@/export/share';
-import { handleBeforeUnload } from '@/dirty';
+import { handleBeforeUnload } from '@/shell/dirty';
 import { render } from 'preact';
-import { createHistoryController } from '@/historyController';
-import { HistoryControls } from '@/panels/HistoryControls';
-import { UnsavedIndicator } from '@/panels/UnsavedIndicator';
+import { createHistoryController } from '@/shell/historyController';
+import { HistoryControls } from '@/shell/HistoryControls';
+import { UnsavedIndicator } from '@/shell/UnsavedIndicator';
 import { WorkspaceProblemsBadge } from '@/diagnostics/WorkspaceProblemsBadge';
-import { StoreInspector } from '@/panels/StoreInspector';
-import { createWorkspaceController, type WorkspaceController } from '@/workspaceController';
+import { StoreInspector } from '@/shell/StoreInspector';
+import { createWorkspaceController, type WorkspaceController } from '@/shell/workspaceController';
 import { createConfirmDialog } from '@/shared/overlay';
 
 // --- workspace fs contract ---------------------------------------------------

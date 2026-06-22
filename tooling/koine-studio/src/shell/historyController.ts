@@ -1,4 +1,4 @@
-import type { Buffer } from '@/workspaceController';
+import type { Buffer } from '@/shell/workspaceController';
 
 /** A point-in-time snapshot of every open buffer's text + dirty flag, plus which file was active. */
 export interface HistorySnapshot {

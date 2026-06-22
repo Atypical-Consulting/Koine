@@ -4,6 +4,6 @@ import '@fontsource-variable/archivo';
 import '@fontsource-variable/hanken-grotesk';
 import '@fontsource-variable/jetbrains-mono';
 import '@/styles/main.scss';
-import { init } from '@/ide';
+import { init } from '@/shell/ide';
 
 window.addEventListener('DOMContentLoaded', () => init());

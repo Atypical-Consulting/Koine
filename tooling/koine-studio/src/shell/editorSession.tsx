@@ -16,7 +16,7 @@
 // (#sb-validity) stay imperative here.
 import { render } from 'preact';
 import { createKoineEditor, setEditorDiagnostics, type KoineEditor } from '@/editor/editor';
-import { diagnosticsInRange } from '@/ideUtils';
+import { diagnosticsInRange } from '@/shell/ideUtils';
 import { appStore } from '@/store/index';
 import { diagnosticsSummary } from '@/diagnostics/diagnosticsSummary';
 import { DiagnosticsStripPanel } from '@/diagnostics/DiagnosticsStripPanel';

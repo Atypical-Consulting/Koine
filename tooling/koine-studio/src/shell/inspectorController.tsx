@@ -70,7 +70,7 @@ import { appStore } from '@/store/index';
 import { DEFAULT_CENTER, isValidCenter, type RightView } from '@/store/slices/uiChrome';
 import type { DomainIndex } from '@/ai/aiPanel';
 import { currentTheme } from '@/settings/theme';
-import { renderCheckMarkdown, renderContextMapHtml } from '@/ideUtils';
+import { renderCheckMarkdown, renderContextMapHtml } from '@/shell/ideUtils';
 
 // LSP SymbolKind for a namespace — the kind the language service tags each top-level `context`
 // document symbol with. Used by followActiveFileContext to read a file's bounded context(s).

@@ -12,7 +12,7 @@ import {
   type InspectorAssistant,
   type InspectorControllerDeps,
   type InspectorControllerLsp,
-} from '@/inspectorController';
+} from '@/shell/inspectorController';
 import type {
   CheckResult,
   ContextMapResult,

@@ -1,6 +1,6 @@
 import { describe, expect, test, vi } from 'vitest';
-import { createHistoryController, type HistoryController } from '@/historyController';
-import type { Buffer } from '@/workspaceController';
+import { createHistoryController, type HistoryController } from '@/shell/historyController';
+import type { Buffer } from '@/shell/workspaceController';
 
 const last = <T>(arr: T[]): T | undefined => arr[arr.length - 1];
 

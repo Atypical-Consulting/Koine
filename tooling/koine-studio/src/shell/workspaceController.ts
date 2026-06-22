@@ -17,8 +17,8 @@
 // editorSession.showDiagnostics + controller.invalidateDocViews/followActiveFileContext and the tree
 // render respectively. The accessors are only invoked at runtime, so ide.ts can pass
 // `() => workspace.activeUri()` thunks that resolve after this is constructed.
-import { dirtyCount, saveAllDirtyBuffers } from '@/dirty';
-import { pathToFileUri } from '@/ideUtils';
+import { dirtyCount, saveAllDirtyBuffers } from '@/shell/dirty';
+import { pathToFileUri } from '@/shell/ideUtils';
 import type { FsEntry, KoiFile, Platform } from '@/host';
 import type { TextEdit, WorkspaceEdit } from '@/lsp/lsp';
 
@@ -54,7 +54,7 @@ export interface WorkspaceEditor {
   applyEdits(edits: TextEdit[]): void;
 }
 
-/** The slice of the {@link import('@/explorer').Explorer} the tree render calls. */
+/** The slice of the {@link import('@/shell/explorer').Explorer} the tree render calls. */
 export interface WorkspaceExplorer {
   render(entries: FsEntry[], rootToken: string): void;
 }

@@ -4,7 +4,7 @@
 // jsdom per-file. (The browser fs tests stay on the happy-dom default.)
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import type { FsEntry } from '@/host';
-import { createExplorer, type ExplorerCallbacks } from '@/explorer';
+import { createExplorer, type ExplorerCallbacks } from '@/shell/explorer';
 
 // A small two-context tree: one folder with a nested .koi file plus a top-level .koi file.
 function sampleTree(): FsEntry[] {

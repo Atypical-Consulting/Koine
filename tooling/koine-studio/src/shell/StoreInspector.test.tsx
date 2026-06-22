@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'vitest';
 import { act, render } from '@testing-library/preact';
 import { createAppStore } from '@/store/index';
-import { StoreInspector } from '@/panels/StoreInspector';
+import { StoreInspector } from '@/shell/StoreInspector';
 import type { LspDiagnostic } from '@/lsp/lsp';
 
 const field = (c: Element, name: string) =>

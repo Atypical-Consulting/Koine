@@ -395,7 +395,7 @@ async function boot(opts: { dom?: boolean; platform?: FakePlatform } = {}): Prom
 }> {
   if (opts.dom ?? true) seedIdeDom();
   const platform = opts.platform ?? installPlatform();
-  const { init } = await import('@/ide');
+  const { init } = await import('@/shell/ide');
 
   let beforeUnload: ((e: Event) => void) | null = null;
   const realAdd = window.addEventListener.bind(window);
@@ -479,7 +479,7 @@ afterEach(() => {
 describe('ide init() — scaffolding', () => {
   test('init() throws without a seeded DOM (the el() lookups must find their ids)', async () => {
     installPlatform();
-    const { init } = await import('@/ide');
+    const { init } = await import('@/shell/ide');
     expect(() => init()).toThrow();
   });
 

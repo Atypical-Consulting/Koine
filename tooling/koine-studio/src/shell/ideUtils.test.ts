@@ -6,7 +6,7 @@ import {
   fileUriToPath,
   isSafeShareRelPath,
   diagnosticsInRange,
-} from '@/ideUtils';
+} from '@/shell/ideUtils';
 import type { LspDiagnostic, Range } from '@/lsp/lsp';
 
 // ---------------------------------------------------------------------------
