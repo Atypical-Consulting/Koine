@@ -64,10 +64,11 @@ import {
   type ContextScope,
 } from './activeContext';
 import { createSelectionBus, type SelectionBus } from './selection';
-import { renderModelOutline, renderOverviewCounts, type ModelOutlineHandlers } from './modelOutline';
+import { renderOverviewCounts, type ModelOutlineHandlers } from './modelOutline';
 import { type InspectorElement, type InspectorHandlers } from './inspector';
 import { buildModelIndex, lookupElement, type ModelIndex } from './modelIndex';
 import { PropertiesPanel } from './panels/PropertiesPanel';
+import { ModelOutlinePanel } from './panels/ModelOutlinePanel';
 import { appStore } from './store/index';
 import type { DomainIndex } from './aiPanel';
 import { DEFAULT_MODE_ID, MODES, isValidModeId } from './modes';
@@ -328,6 +329,10 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   // user's last explicit choice in storage.
   function applyScope(scope: ContextScope, persist: boolean): void {
     activeContext.set(scope);
+    // Mirror the scope into the app store so the Preact ModelOutlinePanel (which subscribes to the
+    // store's `activeContext` slice) re-renders the scoped tree; the controller's bus stays the
+    // authority every other render path reads.
+    appStore.getState().setActiveContext(scope);
     if (persist) deps.saveActiveContext(contextWorkspaceKey(), scope);
     syncContextSwitcherUi();
     rerenderScopedSurfaces();
@@ -381,7 +386,10 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   // paths read, so the initial render is already scoped regardless of the dropdown's paint timing).
   function restoreActiveContext(): void {
     const stored = deps.loadActiveContext(contextWorkspaceKey());
-    activeContext.set(stored && stored.length > 0 ? stored : ALL_CONTEXTS);
+    const scope = stored && stored.length > 0 ? stored : ALL_CONTEXTS;
+    activeContext.set(scope);
+    // Keep the app store's scope in sync with the bus so the ModelOutlinePanel's first paint is scoped.
+    appStore.getState().setActiveContext(scope);
     syncContextSwitcherUi();
   }
 
@@ -626,10 +634,8 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   function applySelectionHighlight(): void {
     const sel = selection.get();
     const hit = sel && modelIndex ? lookupElement(modelIndex, sel.qualifiedName) : null;
-    const canonicalQn = hit?.canonicalQn ?? sel?.qualifiedName ?? null;
-    for (const leaf of Array.from(explorerBody.querySelectorAll<HTMLElement>('.koi-model-leaf'))) {
-      leaf.classList.toggle('is-selected', canonicalQn != null && leaf.dataset.qname === canonicalQn);
-    }
+    // The outline leaves' `is-selected` cross-highlight is now owned by the Preact ModelOutlinePanel
+    // (it subscribes to the store's `selection` slice); this function only drives the SVG-node side.
     const ctxName = hit ? `${hit.element.entry.context}.${hit.element.entry.name}` : null;
     // Scope to the primary diagram SVG — the minimap (#145) clones the node layer as a decorative
     // thumbnail, so an unscoped query would also (wrongly) highlight the clone.
@@ -655,11 +661,16 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   // scoped to the active bounded context (#146). The inspector resolves any selection against the whole
   // model, so only the navigator + counts are narrowed.
   async function loadModel(): Promise<void> {
+    // The status/empty/error states write the explorer host imperatively (docMessage), while the tree
+    // itself is a Preact panel mounted via render(). Unmount any prior Preact tree before an imperative
+    // write so the reconciler and replaceChildren never fight over the same node.
+    render(null, explorerBody);
     docMessage(explorerBody, 'Loading model…');
     try {
       const index = await ensureModelIndex();
       const scopedGlossary = scopeGlossaryModel(index.glossary, activeContext.get());
       if (!scopedGlossary.entries.length) {
+        render(null, explorerBody);
         docMessage(
           explorerBody,
           index.glossary.entries.length
@@ -671,14 +682,19 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
         docViewsLoaded.model = true;
         return;
       }
-      // Explorer = the construct tree with its inline counts suppressed; the dedicated Overview section
-      // owns the tallies (renderOverviewCounts), so the two never double up.
-      explorerBody.replaceChildren(renderModelOutline(scopedGlossary, modelOutlineHandlers, { counts: false }));
+      // Explorer = the construct tree as a Preact panel scoped from the store's activeContext slice, with
+      // its inline counts suppressed; the dedicated Overview section owns the tallies (renderOverviewCounts),
+      // so the two never double up. The panel owns the leaf `is-selected` cross-highlight on its own.
+      render(
+        <ModelOutlinePanel store={appStore} model={index.glossary} handlers={modelOutlineHandlers} />,
+        explorerBody,
+      );
       overviewBody.replaceChildren(renderOverviewCounts(scopedGlossary));
       renderSelectedInspector();
       applySelectionHighlight();
       docViewsLoaded.model = true;
     } catch (e) {
+      render(null, explorerBody);
       docMessage(explorerBody, 'Model request failed: ' + String(e), 'error');
     }
   }
