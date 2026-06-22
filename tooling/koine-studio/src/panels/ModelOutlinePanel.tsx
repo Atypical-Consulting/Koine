@@ -51,7 +51,9 @@ export function ModelOutlinePanel(props: {
         class="koi-outline-mount"
         ref={(host: HTMLElement | null) => {
           if (!host) return;
-          host.replaceChildren(renderModelOutline(scoped, props.handlers, { counts: false }));
+          // nav:false — the Context Map / Ubiquitous Language shortcuts now live in the rail's own
+          // "Documentation" section, so the outline no longer tacks orphaned buttons onto its tail.
+          host.replaceChildren(renderModelOutline(scoped, props.handlers, { counts: false, nav: false }));
           // Cross-highlight the selected leaf — the same is-selected toggle the controller applied.
           for (const leaf of Array.from(host.querySelectorAll<HTMLElement>('.koi-model-leaf'))) {
             leaf.classList.toggle('is-selected', qn != null && leaf.dataset.qname === qn);
