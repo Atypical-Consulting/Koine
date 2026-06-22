@@ -66,6 +66,7 @@ export default defineConfig(({ mode }) => {
     // the alias only matters once Preact panels consume the store through the React entry point.
     resolve: {
       alias: {
+        "@": fileURLToPath(new URL("./src", import.meta.url)),
         react: "preact/compat",
         "react-dom": "preact/compat",
         "react/jsx-runtime": "preact/jsx-runtime",
