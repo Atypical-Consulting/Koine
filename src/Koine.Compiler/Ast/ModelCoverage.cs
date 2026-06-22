@@ -112,26 +112,12 @@ public static class ModelCoverage
     /// <summary>
     /// Serializes a report to stable, indented JSON: <c>Target</c>, the <c>Total</c>/<c>Covered</c>
     /// rollups, <c>IsComplete</c>, and the <c>Items</c> array. <see cref="CoverageState"/> is
-    /// rendered as its name (e.g. <c>"Covered"</c>) via <see cref="JsonStringEnumConverter"/>.
+    /// rendered as its name (e.g. <c>"Covered"</c>) by the source-generated <see cref="CoverageJson"/> context.
     /// </summary>
     public static string ToJson(CoverageReport report)
     {
-        var dto = new
-        {
-            report.Target,
-            report.Total,
-            report.Covered,
-            report.IsComplete,
-            report.Items
-        };
-
-        var options = new JsonSerializerOptions
-        {
-            WriteIndented = true,
-            Converters = { new JsonStringEnumConverter() }
-        };
-
-        return JsonSerializer.Serialize(dto, options);
+        var dto = new CoverageJsonDto(report.Target, report.Total, report.Covered, report.IsComplete, report.Items);
+        return JsonSerializer.Serialize(dto, CoverageJson.Default.CoverageJsonDto);
     }
 
     /// <summary>
@@ -197,3 +183,20 @@ public static class ModelCoverage
         _ => null
     };
 }
+
+/// <summary>
+/// The serialization shape for <see cref="ModelCoverage.ToJson"/>: the report's rollups plus its items.
+/// A concrete type (not an anonymous one) so the source-generated <see cref="CoverageJson"/> context can
+/// serialize it without reflection — keeps the trimmed WebAssembly build free of IL2026 warnings.
+/// </summary>
+internal sealed record CoverageJsonDto(
+    string Target, int Total, int Covered, bool IsComplete, IReadOnlyList<CoverageItem> Items);
+
+/// <summary>
+/// Source-generated JSON context for <see cref="CoverageJsonDto"/>. <see cref="CoverageState"/> is rendered
+/// as its name (e.g. <c>"Covered"</c>) and the output is indented, matching the previous reflection-based
+/// serialization byte-for-byte.
+/// </summary>
+[JsonSourceGenerationOptions(WriteIndented = true, UseStringEnumConverter = true)]
+[JsonSerializable(typeof(CoverageJsonDto))]
+internal sealed partial class CoverageJson : JsonSerializerContext;
