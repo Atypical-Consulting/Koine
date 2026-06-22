@@ -225,6 +225,30 @@ export function constructSlug(label: string): string {
   return CONSTRUCT_SLUG[label] ?? 'type';
 }
 
+/** The singular DDD-construct label for a glossary `kind` — for one element's type tooltip (e.g. `value`
+ * → "Value Object"), distinct from {@link CONSTRUCTS}' plural section headings ("Value Objects"). */
+const SINGULAR_LABEL_OF_KIND: Record<string, string> = {
+  aggregate: 'Aggregate',
+  entity: 'Entity',
+  value: 'Value Object',
+  quantity: 'Value Object',
+  enum: 'Enumeration',
+  event: 'Domain Event',
+  'integration event': 'Integration Event',
+  type: 'Type',
+};
+
+/**
+ * Resolve a glossary `kind` to its Explorer icon `slug` + singular type `label` — the single source the
+ * top-bar breadcrumb shares with the navigator, so the same DDD concept wears the same glyph in both.
+ */
+export function constructForKind(kind: string): { slug: string; label: string } {
+  return {
+    slug: constructSlug(LABEL_OF_KIND.get(kind) ?? 'Types'),
+    label: SINGULAR_LABEL_OF_KIND[kind] ?? 'Type',
+  };
+}
+
 /** A small shape-coded icon for a DDD construct; the shape + colour live in CSS keyed by `data-construct`. */
 function constructIcon(slug: string): HTMLElement {
   const icon = document.createElement('span');

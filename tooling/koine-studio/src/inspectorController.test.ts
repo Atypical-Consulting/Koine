@@ -29,7 +29,7 @@ import type {
 // controller looks up via el(...). Kept equivalent to ide.test.ts's APP_HTML.
 const APP_HTML = `
   <div id="app">
-    <div id="context-switcher" class="context-switcher" hidden></div>
+    <div id="breadcrumb-host" class="topbar-breadcrumb" hidden></div>
     <main id="split">
       <aside id="leftrail" class="pane">
         <div class="rail-sect-body" id="rail-explorer-body"></div>
@@ -499,17 +499,17 @@ describe('createInspectorController — Properties inspector tracks the selectio
 });
 
 describe('createInspectorController — bounded-context scope', () => {
-  test('refreshContextList populates the switcher options and reveals it', async () => {
+  test('refreshContextList populates the scope-path selector and reveals it', async () => {
     const lsp = makeLsp();
     const ctl = createInspectorController(makeDeps(lsp));
     ctl.init();
 
     await ctl.refreshContextList();
 
-    const select = document.querySelector<HTMLSelectElement>('#context-switcher select')!;
+    const select = document.querySelector<HTMLSelectElement>('#breadcrumb-host select')!;
     // "All contexts" sentinel + the one model context.
     expect(Array.from(select.options).map((o) => o.value)).toEqual(['all', 'Billing']);
-    expect(el('context-switcher').hidden).toBe(false);
+    expect(el('breadcrumb-host').hidden).toBe(false);
   });
 
   test('getCachedDomainIndex builds once then reuses until invalidateDocViews clears it', async () => {

@@ -73,7 +73,6 @@ import { handleBeforeUnload } from './dirty';
 import { render } from 'preact';
 import { UnsavedIndicator } from './panels/UnsavedIndicator';
 import { WorkspaceProblemsBadge } from './panels/WorkspaceProblemsBadge';
-import { ContextBreadcrumb } from './panels/ContextBreadcrumb';
 import { StoreInspector } from './panels/StoreInspector';
 import { createWorkspaceController, type WorkspaceController } from './workspaceController';
 import { createConfirmDialog } from './overlay';
@@ -297,10 +296,9 @@ export function init(): void {
   // diagnostics slice, so the LSP publish path keeps it current with no extra wiring.
   render(<WorkspaceProblemsBadge store={appStore} />, el('sb-problems-host'));
 
-  // Read-only "where am I" breadcrumb in the toolbar (active context › selected element). Subscribes to
-  // the activeContext + selection slices, so it tracks the switcher, the selection-follow and the
-  // active-file follow without any controller wiring.
-  render(<ContextBreadcrumb store={appStore} />, el('breadcrumb-host'));
+  // The top-bar "scope path" breadcrumb (the bounded-context selector + the selected element) is owned by
+  // the inspector controller — it holds the contexts list + model index the breadcrumb needs, and routes
+  // a scope pick through its persist-and-repaint choke point. It renders into #breadcrumb-host from init().
 
   // Dev-facing live store inspector (#193 follow-up): a read-only overlay of what the app store thinks
   // right now, toggled from the command palette. Its host is created lazily on first toggle and the
