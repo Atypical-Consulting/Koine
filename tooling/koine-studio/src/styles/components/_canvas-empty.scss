@@ -1,0 +1,235 @@
+/* --- the Domain Canvas empty state -----------------------------------------------------------------
+   What a modeller sees in the visual editor before the model has anything drawable (a brand-new BLANK
+   model, or a context with no aggregates/values yet). Replaces the old single muted <p>: the canvas
+   presents itself as honest blank vellum (a faint dot-grid — it IS a pan/zoom canvas) and offers the
+   three doorways into a Koine model as faithful miniature diagrams in the canvas's own node idiom,
+   colour-coded to the shared DDD palette (abstracts/_ddd.scss). Clicking a tile seeds a valid starter
+   (ide.tsx) so the canvas fills in place. Pure HTML/CSS — no ELK, no layout pass. */
+
+.koi-canvas-empty {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  /* The stage centres via `margin: auto` (below), not justify/align — so when it's taller than a short
+     or narrow pane it overflows symmetrically and stays fully scrollable (no clipped headline). */
+  overflow: auto;
+  /* The honest signature: an infinite-canvas dot-grid, faded toward the edges by a paper vignette so the
+     stage in the middle reads as the focus rather than a flat field of dots. */
+  background-color: var(--koi-paper);
+  background-image:
+    radial-gradient(circle at 50% 42%, transparent 38%, var(--koi-paper) 78%),
+    radial-gradient(circle, color-mix(in srgb, var(--koi-muted) 26%, transparent) 1px, transparent 1.4px);
+  background-size:
+    100% 100%,
+    23px 23px;
+  background-position:
+    center,
+    center;
+}
+
+.koi-canvas-empty__stage {
+  margin: auto; /* centres on both axes AND stays scrollable when it overflows a small pane */
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--koi-space-3);
+  max-width: 660px;
+  padding: var(--koi-space-4-5) var(--koi-space-4);
+  text-align: center;
+  animation: koi-rise 0.5s ease both;
+}
+
+/* Eyebrow: mono + tracked caps, the same register as the left rail's section labels, flanked by a short
+   rule so it reads as a canvas heading rather than body copy. */
+.koi-canvas-empty__eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--koi-space-2);
+  margin: 0;
+  font-family: var(--koi-font-mono);
+  font-size: var(--koi-text-2xs);
+  font-weight: 600;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--koi-muted);
+
+  &::before,
+  &::after {
+    content: '';
+    width: 26px;
+    height: 1px;
+    background: color-mix(in srgb, var(--koi-muted) 55%, transparent);
+  }
+}
+
+.koi-canvas-empty__title {
+  margin: 0;
+  font-family: var(--koi-font-display);
+  font-weight: 700;
+  font-size: 1.9rem;
+  line-height: 1.08;
+  letter-spacing: -0.02em;
+  color: var(--koi-fg);
+}
+
+.koi-canvas-empty__lead {
+  margin: 0;
+  max-width: 46ch;
+  font-family: var(--koi-font-body);
+  font-size: var(--koi-text-lg);
+  line-height: 1.55;
+  color: var(--koi-muted);
+}
+
+/* The three doorways. Wrap on narrow panes; each tile keeps a comfortable min so the glyph + copy stay
+   legible. */
+.koi-canvas-empty__tiles {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: var(--koi-space-3);
+  margin-top: var(--koi-space-2);
+}
+
+/* A concept tile: a real button styled as a card, accented by its DDD concept colour via --tile (set
+   inline per tile). The glyph inside is drawn in the canvas's node idiom so the tile previews exactly
+   what it creates. */
+.koi-concept-tile {
+  --tile: var(--koi-accent); /* overridden per tile */
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--koi-space-1-5);
+  width: 196px;
+  padding: var(--koi-space-3-5) var(--koi-space-3) var(--koi-space-3);
+  background: var(--koi-paper-2);
+  border: 1px solid var(--koi-line);
+  border-top: 2px solid color-mix(in srgb, var(--tile) 55%, var(--koi-line));
+  border-radius: var(--koi-radius-lg);
+  cursor: pointer;
+  text-align: center;
+  font-family: var(--koi-font-body);
+  transition:
+    transform var(--koi-dur-slow) ease,
+    border-color var(--koi-dur-slow) ease,
+    box-shadow var(--koi-dur-slow) ease,
+    background var(--koi-dur-slow) ease;
+
+  &:hover,
+  &:focus-visible {
+    transform: translateY(-3px);
+    border-color: var(--tile);
+    border-top-color: var(--tile);
+    background: color-mix(in srgb, var(--tile) 7%, var(--koi-paper-2));
+    box-shadow: 0 12px 30px color-mix(in srgb, var(--tile) 22%, transparent);
+  }
+  &:focus-visible {
+    outline: 2px solid var(--tile);
+    outline-offset: 2px;
+  }
+  &:active {
+    transform: translateY(-1px);
+  }
+}
+
+.koi-concept-tile__glyph {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 96px;
+  height: 56px;
+}
+.koi-concept-tile__glyph svg {
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+.koi-concept-tile__name {
+  font-family: var(--koi-font-display);
+  font-weight: 700;
+  font-size: var(--koi-text-lg);
+  letter-spacing: -0.01em;
+  color: var(--koi-fg);
+}
+
+.koi-concept-tile__desc {
+  font-size: var(--koi-text-xs-plus);
+  line-height: 1.45;
+  color: var(--koi-muted);
+}
+
+/* The shape's real Koine keyword — the bridge from picture to syntax. A faint mono pill. */
+.koi-concept-tile__kw {
+  margin-top: var(--koi-space-0-5);
+  padding: var(--koi-space-0-5) var(--koi-space-1-5);
+  font-family: var(--koi-font-mono);
+  font-size: var(--koi-text-2xs);
+  color: color-mix(in srgb, var(--tile) 85%, var(--koi-fg));
+  background: color-mix(in srgb, var(--tile) 13%, transparent);
+  border-radius: var(--koi-radius-pill);
+}
+
+.koi-canvas-empty__alt {
+  margin: var(--koi-space-1) 0 0;
+  font-family: var(--koi-font-body);
+  font-size: var(--koi-text-sm);
+  color: var(--koi-muted);
+
+  b {
+    font-weight: 600;
+    color: var(--koi-ink-soft);
+  }
+}
+
+/* --- the in-tile glyphs: miniatures of the real diagram nodes, themed off --tile ------------------- */
+.koi-glyph {
+  display: block;
+}
+/* class box (aggregate): tinted body, concept-coloured header bar + attribute rules */
+.koi-glyph__box {
+  fill: color-mix(in srgb, var(--tile) 12%, var(--koi-surface));
+  stroke: var(--tile);
+  stroke-width: 1.5;
+}
+.koi-glyph__head {
+  fill: var(--tile);
+}
+.koi-glyph__rule {
+  stroke: var(--tile);
+  stroke-width: 1.5;
+}
+.koi-glyph__row {
+  stroke: color-mix(in srgb, var(--tile) 60%, transparent);
+  stroke-width: 2;
+  stroke-linecap: round;
+}
+/* nested entity box inside the aggregate boundary */
+.koi-glyph__nested {
+  fill: var(--koi-paper-2);
+  stroke: var(--tile);
+  stroke-width: 1.5;
+}
+/* state-machine pills */
+.koi-glyph__state {
+  fill: color-mix(in srgb, var(--tile) 16%, var(--koi-surface));
+  stroke: var(--tile);
+  stroke-width: 1.5;
+}
+/* context-map containers */
+.koi-glyph__ctx {
+  fill: color-mix(in srgb, var(--tile) 9%, transparent);
+  stroke: var(--tile);
+  stroke-width: 1.5;
+}
+/* shared connectors (transitions + the context-map relationship) */
+.koi-glyph__edge {
+  fill: none;
+  stroke: var(--tile);
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.koi-glyph__arrow {
+  fill: var(--tile);
+}
