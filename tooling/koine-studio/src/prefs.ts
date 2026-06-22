@@ -21,7 +21,7 @@ import {
 import { setTheme } from '@/theme';
 import { ACCENTS, ACCENT_ORDER } from '@/appearance';
 import { createModal } from '@/shared/overlay';
-import { mcpJsonSnippet, MCP_CLIENTS, probeMcp } from '@/mcp';
+import { mcpJsonSnippet, MCP_CLIENTS, probeMcp } from '@/mcp/mcp';
 
 export interface PrefsCallbacks {
   /** Fired after every committed change with the merged, persisted Settings. */

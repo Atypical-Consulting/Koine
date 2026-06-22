@@ -11,7 +11,7 @@ import { open as openDialog, save as saveDialog } from '@tauri-apps/plugin-dialo
 import { openUrl } from '@tauri-apps/plugin-opener';
 import type { FsEntry, KoiFile, LspTransport, Platform, SourceDoc } from '@/host/types';
 import { normalizeCompileTarget } from '@/assistantTools';
-import { mcpCall } from '@/mcp';
+import { mcpCall } from '@/mcp/mcp';
 
 /** LSP transport over Tauri IPC. Mirrors the wiring previously inlined in lsp.ts. */
 class TauriLspTransport implements LspTransport {
