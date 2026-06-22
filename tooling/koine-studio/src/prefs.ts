@@ -20,7 +20,7 @@ import {
 } from '@/store';
 import { setTheme } from '@/theme';
 import { ACCENTS, ACCENT_ORDER } from '@/appearance';
-import { createModal } from '@/overlay';
+import { createModal } from '@/shared/overlay';
 import { mcpJsonSnippet, MCP_CLIENTS, probeMcp } from '@/mcp';
 
 export interface PrefsCallbacks {

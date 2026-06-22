@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "vitest";
-import { createModal } from "@/overlay";
+import { createModal } from "@/shared/overlay";
 
 // Each test builds a fresh modal mounted on document.body; clear it between tests so
 // stale backdrops/handlers don't leak across cases.

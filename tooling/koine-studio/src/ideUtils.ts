@@ -2,7 +2,7 @@
 // no side-effects, no DOM access, and no host-platform dependency — safe to import anywhere and
 // to test in a plain Node/vitest environment.
 import { type CheckResult, type ContextMapResult, type LspDiagnostic, type Range } from '@/lsp';
-import { type ShortcutRow } from '@/help';
+import { type ShortcutRow } from '@/shared/help';
 
 /**
  * Build a file:// uri from an absolute path. Each non-empty segment is percent-encoded.

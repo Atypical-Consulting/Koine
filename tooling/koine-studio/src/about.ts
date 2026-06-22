@@ -5,8 +5,8 @@
 // the dialog opens; a failed fetch simply hides the chip. Project links are routed through
 // `platform.openExternal` so they open in the system browser on both the desktop and web hosts.
 import { getPlatform } from '@/host';
-import { createModal } from '@/overlay';
-import { koineMark } from '@/logo';
+import { createModal } from '@/shared/overlay';
+import { koineMark } from '@/shared/logo';
 
 export interface AboutHandle {
   open(): void;

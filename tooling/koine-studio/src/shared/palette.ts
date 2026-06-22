@@ -4,7 +4,7 @@
 // Up/Down move (wrapping), Enter runs the selected command then closes. Esc is handled
 // centrally by the shared overlay stack (./overlay). The palette does NOT bind Cmd-K itself —
 // the app wires the global shortcut.
-import { registerOverlay } from '@/overlay';
+import { registerOverlay } from '@/shared/overlay';
 
 export interface Command {
   id: string;

@@ -19,7 +19,7 @@ import { createEditorSession } from '@/editorSession';
 import { createInspectorController } from '@/inspectorController';
 import { getPlatform } from '@/host';
 import { createExplorer } from '@/explorer';
-import { koineMark } from '@/logo';
+import { koineMark } from '@/shared/logo';
 import { initTheme, onThemeChange, toggleTheme } from '@/theme';
 import {
   peekLegacyScratch,
@@ -36,16 +36,16 @@ import {
 } from '@/store';
 import { createWelcome } from '@/welcome';
 import { type Template } from '@/templates';
-import { createCommandPalette, type Command } from '@/palette';
+import { createCommandPalette, type Command } from '@/shared/palette';
 import { createPreferences } from '@/prefs';
 import { applyAppearance } from '@/appearance';
 import { initSplitResizer, initEdgeResizer } from '@/resize';
-import { createHelpOverlay } from '@/help';
+import { createHelpOverlay } from '@/shared/help';
 import { createAboutDialog } from '@/about';
 import { createGenerateProject } from '@/generateProjectWizard';
 import { sanitizeProjectName } from '@/generateProject';
 import { buildSourceZip } from '@/sourceZip';
-import { formatChord } from '@/platform';
+import { formatChord } from '@/shared/platform';
 import {
   DIAGRAM_ADD_TYPE_EVENT,
   DIAGRAM_CONNECT_EVENT,
@@ -78,7 +78,7 @@ import { UnsavedIndicator } from '@/panels/UnsavedIndicator';
 import { WorkspaceProblemsBadge } from '@/panels/WorkspaceProblemsBadge';
 import { StoreInspector } from '@/panels/StoreInspector';
 import { createWorkspaceController, type WorkspaceController } from '@/workspaceController';
-import { createConfirmDialog } from '@/overlay';
+import { createConfirmDialog } from '@/shared/overlay';
 
 // --- workspace fs contract ---------------------------------------------------
 // `KoiFile` (path / name / relPath) is provided by the host platform layer (src/host), whose
