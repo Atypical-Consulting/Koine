@@ -6,7 +6,9 @@
 //
 // Deliberately tiny and DOM-free so it unit-tests under happy-dom; the bus mirrors the selection bus
 // (selection.ts) so the switcher (ide.ts) and the surfaces subscribe to one source of truth.
+import { createStore } from 'zustand/vanilla';
 import type { ContextMapResult, DiagramGraph, DocsFile, GlossaryModel } from './lsp';
+import { createActiveContextSlice, type ActiveContextSlice } from './store/slices/activeContext';
 
 /** The sentinel scope meaning "don't narrow — show every context". A real context name never collides
  *  (Koine contexts are PascalCase identifiers), so this lowercase literal is safe as the unscoped marker. */
@@ -122,26 +124,20 @@ export interface ActiveContextBus {
   subscribe(fn: (scope: ContextScope) => void): () => void;
 }
 
-/** Creates an independent active-context bus, defaulting to {@link ALL_CONTEXTS}. */
+/**
+ * Creates an independent active-context bus, defaulting to {@link ALL_CONTEXTS}, backed by a private
+ * Zustand store (transition adapter). The "same value in = no churn" contract lives in the slice's
+ * setActiveContext, so re-selecting the active scope never notifies the surfaces.
+ */
 export function createActiveContextBus(initial: ContextScope = ALL_CONTEXTS): ActiveContextBus {
-  let current: ContextScope = initial;
-  const subscribers = new Set<(scope: ContextScope) => void>();
-
+  const store = createStore<ActiveContextSlice>((set, get) => createActiveContextSlice(set, get));
+  if (initial !== ALL_CONTEXTS) store.getState().setActiveContext(initial);
   return {
-    get: () => current,
-    set(scope) {
-      // Re-selecting the active scope is a no-op: the switcher repaints idempotently and an edit can
-      // re-assert the restored scope, so an unconditional notify would re-render the surfaces for nothing.
-      if (scope === current) return;
-      current = scope;
-      // Snapshot before iterating so a subscriber that unsubscribes mid-notify can't mutate the set.
-      for (const fn of [...subscribers]) fn(current);
-    },
-    subscribe(fn) {
-      subscribers.add(fn);
-      return () => {
-        subscribers.delete(fn);
-      };
-    },
+    get: () => store.getState().activeContext,
+    set: (scope) => store.getState().setActiveContext(scope),
+    subscribe: (fn) =>
+      store.subscribe((s, prev) => {
+        if (s.activeContext !== prev.activeContext) fn(s.activeContext);
+      }),
   };
 }
