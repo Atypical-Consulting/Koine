@@ -3,16 +3,17 @@ import type { StoreApi } from 'zustand/vanilla';
 import type { AppState } from '../store/index';
 import { useAppStore } from '../store/hooks';
 
-// The ADR/Notes Documentation surface as a Preact host (#193, #174). It subscribes ONLY to the
-// `workspace` slice's `folderRootToken`, NOT to model edits — the panel is folder-derived (ADRs/notes
-// are Markdown under docs/), so it must reload when the workspace folder changes and stay put across
-// `.koi` edits, exactly the existing `invalidateDocsPanel` contract. On mount it hands the controller
-// the mount node (so the lazy first-load + in-panel create/save reloads can paint into it); thereafter
-// it asks the controller to reload ONLY when the folder token actually changes — never on a re-render
-// driven by an unrelated parent paint, and never on the initial empty-folder mount (the controller's
-// lazy tab-open path owns that first paint). The pure `renderDocsPanel` is reused untouched inside the
-// controller's `load`/`onMount`; this component only governs WHEN it reloads. Mounted through a
-// callback ref so the imperative renderer and the Preact reconciler never fight over the same node.
+// A folder-derived Documentation page as a Preact host (#193, #174) — reused for both the Decisions
+// (ADR) and Notes pages. It subscribes ONLY to the `workspace` slice's `folderRootToken`, NOT to model
+// edits — the pages are folder-derived (ADRs/notes are Markdown under docs/), so each must reload when
+// the workspace folder changes and stay put across `.koi` edits, exactly the `invalidateDocsPanel`
+// contract. On mount it hands the controller the mount node (so the lazy first-load + in-panel
+// create/save reloads can paint into it); thereafter it asks the controller to reload ONLY when the
+// folder token actually changes — never on a re-render driven by an unrelated parent paint, and never
+// on the initial empty-folder mount (the controller's lazy tab-open path owns that first paint). The
+// controller's `load`/`onMount` paint the pure `renderAdrPanel` / `renderNotesPanel` into the node;
+// this component only governs WHEN it reloads. Mounted through a callback ref so the imperative
+// renderer and the Preact reconciler never fight over the same node.
 export function DocsPanelHost(props: {
   store: StoreApi<AppState>;
   /** Hand the controller the mount node on first mount (capture only — no fetch). */

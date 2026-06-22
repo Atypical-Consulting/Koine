@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { parseAdr } from './adr';
 import type { AdrFile, NoteFile } from './docsStore';
-import { renderDocsPanel, type DocsPanelData, type DocsPanelHandlers } from './docsPanel';
+import { renderAdrPanel, renderNotesPanel, type DocsPanelData, type DocsPanelHandlers } from './docsPanel';
 
 function adrFile(number: number, title: string, status: 'proposed' | 'accepted' | 'superseded'): AdrFile {
   return {
@@ -26,10 +26,21 @@ function makeHandlers(): DocsPanelHandlers {
   };
 }
 
-function mount(data: Partial<DocsPanelData>, handlers: DocsPanelHandlers): HTMLElement {
+function full(data: Partial<DocsPanelData>): DocsPanelData {
   // A trivial Markdown renderer for tests: wrap in a <p> so the read block has rendered HTML.
-  const full: DocsPanelData = { canWrite: true, adrs: [], notes: [], renderMarkdown: (md) => `<p>${md}</p>`, ...data };
-  const el = renderDocsPanel(full, handlers);
+  return { canWrite: true, adrs: [], notes: [], renderMarkdown: (md) => `<p>${md}</p>`, ...data };
+}
+
+/** Mount the Decisions (ADR) page. */
+function mount(data: Partial<DocsPanelData>, handlers: DocsPanelHandlers): HTMLElement {
+  const el = renderAdrPanel(full(data), handlers);
+  document.body.append(el);
+  return el;
+}
+
+/** Mount the Notes page. */
+function mountNotes(data: Partial<DocsPanelData>, handlers: DocsPanelHandlers): HTMLElement {
+  const el = renderNotesPanel(full(data), handlers);
   document.body.append(el);
   return el;
 }
@@ -48,10 +59,16 @@ describe('docsPanel', () => {
     expect(badge.classList.contains('is-accepted')).toBe(true);
   });
 
-  it('shows empty states when there are no ADRs or notes', () => {
+  it('shows an empty state on the Decisions page when there are no ADRs', () => {
     const el = mount({}, makeHandlers());
     const empties = Array.from(el.querySelectorAll('.koi-docs-empty')).map((e) => e.textContent);
-    expect(empties).toEqual(['No architecture decisions yet.', 'No notes yet.']);
+    expect(empties).toEqual(['No architecture decisions yet.']);
+  });
+
+  it('shows an empty state on the Notes page when there are no notes', () => {
+    const el = mountNotes({}, makeHandlers());
+    const empties = Array.from(el.querySelectorAll('.koi-docs-empty')).map((e) => e.textContent);
+    expect(empties).toEqual(['No notes yet.']);
   });
 
   it('read-only mode shows a banner, no create buttons, and no Edit affordance', () => {
@@ -106,7 +123,7 @@ describe('docsPanel', () => {
 
   it('opens a note lazily and saves edited markdown', async () => {
     const handlers = makeHandlers();
-    const el = mount({ notes: [noteFile('release-process.md', 'Release process')] }, handlers);
+    const el = mountNotes({ notes: [noteFile('release-process.md', 'Release process')] }, handlers);
     (el.querySelector('.koi-docs-name') as HTMLButtonElement).click();
     expect(handlers.onReadNote).toHaveBeenCalledTimes(1);
 

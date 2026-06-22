@@ -34,6 +34,14 @@ const APP_HTML = `
       <aside id="leftrail" class="pane">
         <div class="rail-sect-body" id="rail-explorer-body"></div>
         <div class="rail-sect-body" id="rail-overview-body"></div>
+        <nav class="rail-sect-body" id="rail-docs-body" aria-label="Documentation">
+          <ul class="koi-doclinks">
+            <li><button type="button" class="koi-doclink" data-doclink="contextmap"><span class="koi-doclink-label">Context Map</span></button></li>
+            <li><button type="button" class="koi-doclink" data-doclink="glossary"><span class="koi-doclink-label">Ubiquitous Language</span></button></li>
+            <li><button type="button" class="koi-doclink" data-doclink="adr"><span class="koi-doclink-label">ADR</span></button></li>
+            <li><button type="button" class="koi-doclink" data-doclink="notes"><span class="koi-doclink-label">Notes</span></button></li>
+          </ul>
+        </nav>
       </aside>
       <section id="center" class="pane">
         <div id="center-tabs" role="tablist">
@@ -60,11 +68,13 @@ const APP_HTML = `
           <section id="center-docs" class="center-host" role="tabpanel" hidden>
             <div id="docs-tabs" role="tablist">
               <button type="button" class="docs-tab" id="docs-tab-glossary" role="tab" data-docs="glossary" aria-selected="true">Glossary</button>
-              <button type="button" class="docs-tab" id="docs-tab-adr" role="tab" data-docs="adr" aria-selected="false">Decisions &amp; Notes</button>
+              <button type="button" class="docs-tab" id="docs-tab-adr" role="tab" data-docs="adr" aria-selected="false">Decisions</button>
+              <button type="button" class="docs-tab" id="docs-tab-notes" role="tab" data-docs="notes" aria-selected="false">Notes</button>
             </div>
             <div id="docs-body">
               <div id="view-glossary" class="tech-view doc-view" role="tabpanel"></div>
               <div id="view-docs" class="tech-view doc-view" role="tabpanel" hidden></div>
+              <div id="view-notes" class="tech-view doc-view" role="tabpanel" hidden></div>
             </div>
           </section>
         </div>
@@ -176,7 +186,7 @@ function fakeOutput(): InspectorControllerDeps['output'] {
   return { setContent: vi.fn(), setLineWrap: vi.fn(), destroy: vi.fn() };
 }
 
-// A browser-like platform stub: only the bits runCheck / loadDocs touch (kind, canOpenFolders,
+// A browser-like platform stub: only the bits runCheck / loadAdr / loadNotes touch (kind, canOpenFolders,
 // pickFolder, readFolderSources, and the docsStore fs reads — which return empty here).
 function fakePlatform(over: Partial<Record<string, unknown>> = {}): InspectorControllerDeps['platform'] {
   return {
@@ -414,6 +424,26 @@ describe('createInspectorController — bottom strip lazy loading', () => {
     expect(lsp.contextMap).toHaveBeenCalledTimes(1);
     expect(el('panel-contextmap').hidden).toBe(false);
     expect(el('panel-contextmap').innerHTML).toContain('koi-md');
+  });
+
+  test('the rail Context Map link leaves Documentation so the otherwise-hidden strip shows the map', async () => {
+    const lsp = makeLsp();
+    const ctl = createInspectorController(makeDeps(lsp));
+    ctl.init();
+
+    // Land on the Documentation center, where the bottom strip (the Context Map's home) is hidden.
+    ctl.selectDocsTab('adr');
+    expect(el('diagnostics').hidden).toBe(true);
+
+    // Regression (#docs-rail): the rail's Context Map link must switch away from Documentation AND open
+    // the Context Map tab — otherwise it sets the bottom tab on a strip that stays hidden and the click
+    // appears to do nothing.
+    document.querySelector<HTMLButtonElement>('.koi-doclink[data-doclink="contextmap"]')!.click();
+    await flush();
+
+    expect(el('center-docs').hidden).toBe(true); // left Documentation…
+    expect(el('diagnostics').hidden).toBe(false); // …so the strip is visible…
+    expect(el('panel-contextmap').hidden).toBe(false); // …showing the Context Map.
   });
 });
 
