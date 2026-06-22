@@ -996,7 +996,7 @@ export function init(): void {
       });
       if (forget) {
         removeRecentFolder(path);
-        welcome.show(); // rebuild the recent list without the removed entry
+        welcome.refreshRecent(); // rebuild the list in place — welcome is already shown, so show() would no-op
       }
     }
   }

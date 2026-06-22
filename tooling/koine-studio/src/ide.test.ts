@@ -725,5 +725,15 @@ describe('ide init() — Recent open recovery', () => {
 
     // The welcome (start screen) must still be present — the user is never stranded.
     expect(document.querySelector('.koi-welcome-recent')).not.toBeNull();
+
+    // …AND the list must have rebuilt: the dead row is gone from the DOM, not just from storage.
+    // (Regression guard: welcome.show() early-returns when already shown, so the post-removal refresh
+    // must use refreshRecent() to re-render — otherwise the stale row lingers on screen.)
+    const remainingRows = Array.from(
+      document.querySelectorAll<HTMLElement>('.koi-welcome-recent-item-name'),
+    ).map((el) => el.textContent);
+    expect(remainingRows).not.toContain('ghost');
+    // It was the only recent, so the empty-state copy is now shown in its place.
+    expect(document.querySelector('.koi-welcome-empty')).not.toBeNull();
   });
 });
