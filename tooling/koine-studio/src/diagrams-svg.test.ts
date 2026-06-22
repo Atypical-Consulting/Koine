@@ -9,7 +9,11 @@ import {
   setDiagramEditing,
   setDiagramPersistScope,
   DIAGRAM_RELAYOUT_EVENT,
+  DIAGRAM_CONNECT_EVENT,
+  DIAGRAM_DISCONNECT_EVENT,
   NODE_NAVIGATE_EVENT,
+  type DiagramConnectDetail,
+  type DiagramDisconnectDetail,
   type DiagramNodeNavigateDetail,
 } from './diagrams-svg';
 import { loadDiagramPositions, saveDiagramPositions } from './store';
@@ -1006,5 +1010,125 @@ describe('persisted free positioning (authoring overhaul, Phase 2)', () => {
     // …and the click synthesized after the drag does NOT navigate.
     node.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     expect(navigated).toHaveLength(0);
+  });
+});
+
+describe('canvas authoring: connect & disconnect (Phase 3)', () => {
+  afterEach(() => {
+    setDiagramEditing(false);
+    setDiagramPersistScope('scratch');
+    localStorage.clear();
+  });
+
+  /** A 16x9 mocked-size canvas so pixel↔content maths is non-degenerate, plus a content→client mapper. */
+  function mockCanvasSize(container: HTMLElement): (cx: number, cy: number) => { clientX: number; clientY: number } {
+    const canvas = container.querySelector<HTMLElement>('.koi-canvas')!;
+    const svg = container.querySelector<SVGSVGElement>('.koi-svg-diagram')!;
+    Object.defineProperty(canvas, 'clientWidth', { value: 800, configurable: true });
+    Object.defineProperty(canvas, 'clientHeight', { value: 600, configurable: true });
+    svg.getBoundingClientRect = () =>
+      ({ left: 0, top: 0, width: 800, height: 600, right: 800, bottom: 600, x: 0, y: 0, toJSON() {} }) as DOMRect;
+    // Invert the live viewBox so a content point maps to the client coords that toContent() will undo.
+    return (cx, cy) => {
+      const [vx, vy, vw, vh] = (svg.getAttribute('viewBox') ?? '0 0 1 1').split(/\s+/).map(Number);
+      return { clientX: ((cx - vx) / vw) * 800, clientY: ((cy - vy) / vh) * 600 };
+    };
+  }
+
+  function aggregateFiles(): DocsFile[] {
+    return [
+      file([
+        diagram({
+          nodes: [
+            mkNode({
+              id: 'order',
+              label: 'Order',
+              kind: 'aggregate-root',
+              qualifiedName: 'Ordering.Order',
+              sourceSpan: { file: 'file:///o.koi', line: 3, column: 5, endLine: 4, endColumn: 9, offset: 20, length: 5 },
+            }),
+            mkNode({ id: 'line', label: 'OrderLine', kind: 'value-object', qualifiedName: 'Ordering.OrderLine' }),
+          ],
+          edges: [
+            {
+              from: 'order',
+              to: 'line',
+              label: null,
+              cardinality: '*',
+              sourceCardinality: '1',
+              arrowKind: 'composition',
+              backingMember: 'Ordering.Order.lines',
+            },
+          ],
+        }),
+      ]),
+    ];
+  }
+
+  test('nodes carry a connection port only while editing', async () => {
+    const container = ROOT();
+    setDiagramEditing(false);
+    await createSvgRenderer().render(container, aggregateFiles(), 'light', () => true);
+    expect(container.querySelector('.koi-svg-diagram .koi-svg-port')).toBeNull();
+
+    const container2 = ROOT();
+    setDiagramEditing(true);
+    await createSvgRenderer().render(container2, aggregateFiles(), 'light', () => true);
+    // The aggregate-root and the value-object are both field-owning types → both get a port.
+    expect(container2.querySelectorAll('.koi-svg-diagram .koi-svg-port').length).toBe(2);
+  });
+
+  test('dragging from a node port onto another node dispatches a connect event with both endpoints', async () => {
+    setDiagramEditing(true);
+    setDiagramPersistScope('ws-connect');
+    // Pin known positions so the drop target rect is deterministic.
+    saveDiagramPositions('ws-connect:koi-domain-diagram', {
+      'Ordering.Order': { x: 0, y: 0 },
+      'Ordering.OrderLine': { x: 420, y: 0 },
+    });
+
+    const container = ROOT();
+    await createSvgRenderer().render(container, aggregateFiles(), 'light', () => true);
+    const toClient = mockCanvasSize(container);
+
+    const connects: DiagramConnectDetail[] = [];
+    container.addEventListener(DIAGRAM_CONNECT_EVENT, (e) => connects.push((e as CustomEvent<DiagramConnectDetail>).detail));
+
+    const orderNode = container.querySelector<SVGGElement>('.koi-svg-node[data-qname="Ordering.Order"]')!;
+    const port = orderNode.querySelector<SVGCircleElement>('.koi-svg-port')!;
+
+    // Drop point: the centre of OrderLine's rendered box (x=420, plus half its width; y mid).
+    const lineBox = container.querySelector<SVGRectElement>('.koi-svg-node[data-qname="Ordering.OrderLine"] .koi-svg-node-box')!;
+    const w = Number(lineBox.getAttribute('width'));
+    const h = Number(lineBox.getAttribute('height'));
+    const drop = toClient(420 + w / 2, h / 2);
+
+    port.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, clientX: 0, clientY: 0 }));
+    const canvas = container.querySelector<HTMLElement>('.koi-canvas')!;
+    canvas.dispatchEvent(new MouseEvent('pointermove', { bubbles: true, clientX: drop.clientX, clientY: drop.clientY }));
+    canvas.dispatchEvent(new MouseEvent('pointerup', { bubbles: true, clientX: drop.clientX, clientY: drop.clientY }));
+
+    expect(connects).toHaveLength(1);
+    expect(connects[0].sourceQualifiedName).toBe('Ordering.Order');
+    expect(connects[0].targetQualifiedName).toBe('Ordering.OrderLine');
+  });
+
+  test('right-clicking a field-backed edge dispatches a disconnect event with the backing member', async () => {
+    setDiagramEditing(true);
+    const container = ROOT();
+    await createSvgRenderer().render(container, aggregateFiles(), 'light', () => true);
+
+    const disconnects: DiagramDisconnectDetail[] = [];
+    container.addEventListener(DIAGRAM_DISCONNECT_EVENT, (e) =>
+      disconnects.push((e as CustomEvent<DiagramDisconnectDetail>).detail),
+    );
+
+    const edgeLine = container.querySelector<SVGPathElement>('.koi-svg-diagram .koi-svg-edge[data-backing-member] .koi-svg-edge-line')!;
+    expect(edgeLine).not.toBeNull();
+    edgeLine.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+
+    expect(disconnects).toHaveLength(1);
+    expect(disconnects[0].backingMember).toBe('Ordering.Order.lines');
+    expect(disconnects[0].label).toBe('lines');
   });
 });

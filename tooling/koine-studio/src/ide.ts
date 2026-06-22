@@ -48,11 +48,15 @@ import { buildSourceZip } from './sourceZip';
 import { formatChord } from './platform';
 import { renderDiagrams } from './diagrams';
 import {
+  DIAGRAM_CONNECT_EVENT,
+  DIAGRAM_DISCONNECT_EVENT,
   DIAGRAM_RELAYOUT_EVENT,
   NODE_EDIT_EVENT,
   NODE_NAVIGATE_EVENT,
   setDiagramEditing,
   setDiagramPersistScope,
+  type DiagramConnectDetail,
+  type DiagramDisconnectDetail,
   type DiagramNodeEditDetail,
   type DiagramNodeNavigateDetail,
 } from './diagrams-svg';
@@ -1545,6 +1549,16 @@ export function init(): void {
     void loadDiagrams();
   });
 
+  // Connect / disconnect (authoring): drawing or removing a relationship round-trips into `.koi`.
+  diagramsView.addEventListener(DIAGRAM_CONNECT_EVENT, (e) => {
+    const detail = (e as CustomEvent<DiagramConnectDetail>).detail;
+    if (detail) void applyDiagramConnect(detail);
+  });
+  diagramsView.addEventListener(DIAGRAM_DISCONNECT_EVENT, (e) => {
+    const detail = (e as CustomEvent<DiagramDisconnectDetail>).detail;
+    if (detail) void applyDiagramDisconnect(detail);
+  });
+
   // Map a node gesture to a StructuredEdit, apply it through #91's round-trip, and patch the buffer.
   // An edit that would break the model comes back as a KOIxxxx diagnostic (and no edits): surface it
   // and roll back (nothing is applied), exactly as the spec requires.
@@ -1553,27 +1567,48 @@ export function init(): void {
       detail.action === 'rename'
         ? { kind: 'renameMember', target: detail.qualifiedName, name: detail.newName }
         : { kind: 'removeMember', target: detail.qualifiedName };
+    const msg = detail.action === 'rename' ? `Renamed ${detail.label} → ${detail.newName}` : `Deleted ${detail.label}`;
+    await applyStructuredEdit(edit, msg);
+  }
 
+  // The shared write path for every canvas authoring gesture: apply a StructuredEdit through #91's
+  // round-trip, patch the buffer on success (which fires onDocEdited → the diagram AND the inspector
+  // re-render in step), or surface the rejecting KOIxxxx and roll back. Returns whether it applied.
+  async function applyStructuredEdit(edit: StructuredEdit, successMsg: string): Promise<boolean> {
     let result;
     try {
       result = await lsp.applyModelEdit(edit);
     } catch {
       setStatus('Diagram edit failed', 'error');
-      return;
+      return false;
     }
-
-    // Any diagnostic is a rejection (#91 returns the KOIxxxx that blocked the edit, with no edits).
     if (result.diagnostics.length > 0 || result.uri == null || result.edits.length === 0) {
       const reason = result.diagnostics[0];
       setStatus(reason ? `${reason.code}: ${reason.message}` : 'Edit rejected', 'error');
-      return; // rolled back — nothing is patched
+      return false; // rolled back — nothing is patched
     }
-
     applyWorkspaceEdit({ changes: { [result.uri]: result.edits } });
-    setStatus(
-      detail.action === 'rename' ? `Renamed ${detail.label} → ${detail.newName}` : `Deleted ${detail.label}`,
-      'green',
+    setStatus(successMsg, 'green');
+    return true;
+  }
+
+  // Drawing a relationship on the canvas = adding a field on the source typed as the target. The default
+  // field name is the target's lower-cased simple name; the user can refine it (or cancel).
+  async function applyDiagramConnect(detail: DiagramConnectDetail): Promise<void> {
+    const targetSimple = detail.targetQualifiedName.slice(detail.targetQualifiedName.lastIndexOf('.') + 1);
+    const suggested = targetSimple.charAt(0).toLowerCase() + targetSimple.slice(1);
+    const fieldName = window.prompt(`Add a field on ${detail.sourceLabel} referencing ${detail.targetLabel}:`, suggested)?.trim();
+    if (!fieldName) return;
+    await applyStructuredEdit(
+      { kind: 'addField', target: detail.sourceQualifiedName, name: fieldName, type: targetSimple },
+      `Added ${fieldName}: ${targetSimple} to ${detail.sourceLabel}`,
     );
+  }
+
+  // Removing a relationship = removing the field that backs it.
+  async function applyDiagramDisconnect(detail: DiagramDisconnectDetail): Promise<void> {
+    if (!window.confirm(`Remove ${detail.label}? This rewrites the .koi source.`)) return;
+    await applyStructuredEdit({ kind: 'removeMember', target: detail.backingMember }, `Removed ${detail.label}`);
   }
 
   // Clicking a diagram node both jumps to its declaration AND selects it, so the element inspector

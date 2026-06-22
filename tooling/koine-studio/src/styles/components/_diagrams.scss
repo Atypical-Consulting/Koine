@@ -83,6 +83,32 @@
 .koi-canvas--editing .koi-svg-node {
   cursor: move;
 }
+.koi-canvas--connecting {
+  cursor: crosshair;
+}
+
+/* authoring: a connection port on a node's right edge — drag from it to another node to add a field.
+   Hidden until the node is hovered (or a connection is in flight) so it stays out of the way. */
+.koi-svg-port {
+  fill: var(--koi-accent);
+  stroke: var(--koi-surface);
+  stroke-width: 1.5;
+  cursor: crosshair;
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+.koi-svg-node:hover .koi-svg-port,
+.koi-canvas--connecting .koi-svg-port {
+  opacity: 1;
+}
+/* the rubber-band line that follows the cursor while drawing a connection */
+.koi-svg-connecting {
+  fill: none;
+  stroke: var(--koi-accent);
+  stroke-width: 2;
+  stroke-dasharray: 4 3;
+  pointer-events: none;
+}
 .koi-diagram-surface .koi-canvas svg,
 .koi-canvas > svg.koi-svg-diagram {
   display: block;

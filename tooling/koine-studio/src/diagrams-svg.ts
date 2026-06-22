@@ -99,6 +99,33 @@ function positionKey(): string {
  */
 export const DIAGRAM_RELAYOUT_EVENT = 'koi-diagram-relayout';
 
+/**
+ * Bubbling event the canvas dispatches when the user drags from one node's port to another node to draw a
+ * relationship (authoring). `ide.ts` turns it into an `addField` structured edit — a field on the source
+ * whose type is the target — so the new composition round-trips into `.koi` (and re-draws as an edge).
+ */
+export const DIAGRAM_CONNECT_EVENT = 'koi-diagram-connect';
+
+/** The `detail` of a {@link DIAGRAM_CONNECT_EVENT}: the two endpoints' qualified names + display labels. */
+export interface DiagramConnectDetail {
+  sourceQualifiedName: string;
+  targetQualifiedName: string;
+  sourceLabel: string;
+  targetLabel: string;
+}
+
+/**
+ * Bubbling event the canvas dispatches when the user removes a field-backed relationship (right-click an
+ * edge). `ide.ts` turns it into a `removeMember` edit on the edge's backing field.
+ */
+export const DIAGRAM_DISCONNECT_EVENT = 'koi-diagram-disconnect';
+
+/** The `detail` of a {@link DIAGRAM_DISCONNECT_EVENT}: the backing field's qualified name + a label. */
+export interface DiagramDisconnectDetail {
+  backingMember: string;
+  label: string;
+}
+
 let elkPromise: Promise<ElkConstructor> | null = null;
 
 /** Boot elkjs once (cached). The bundled build runs in-thread (no Worker) so it survives Tauri CSP. */
@@ -422,6 +449,7 @@ function contextOf(qualifiedName: string): string {
 interface SceneNode {
   id: string;
   qualifiedName: string;
+  label: string;
   ctx: string;
   group: SVGGElement;
   rect: Rect;
@@ -674,10 +702,20 @@ async function drawGraph(
     tagNode(g, node);
     if (isClassNode(node)) drawClassBox(g, node, rect.w, rect.h);
     else drawSimpleBox(g, node, rect.w, rect.h);
+    // Authoring: a connection port on the node's right edge — drag from it to another node to add a field.
+    if (editingEnabled && node.qualifiedName.includes('.') && isEditableKind(node.kind)) {
+      const port = svgEl('circle');
+      port.setAttribute('class', 'koi-svg-port');
+      port.setAttribute('cx', String(rect.w));
+      port.setAttribute('cy', String(rect.h / 2));
+      port.setAttribute('r', '5');
+      g.appendChild(port);
+    }
     nodeLayer.appendChild(g);
     scene.nodes.set(node.id, {
       id: node.id,
       qualifiedName: node.qualifiedName,
+      label: node.label,
       ctx: contextOf(node.qualifiedName),
       group: g,
       rect,
@@ -738,6 +776,9 @@ function unionBounds(rects: readonly Rect[]): ViewBox {
 function drawEdge(edge: DiagramEdge, src: Rect, dst: Rect): SVGGElement {
   const g = svgEl('g');
   g.setAttribute('class', 'koi-svg-edge');
+  // A field-backed composition can be disconnected (right-click) — stamp the backing field so the canvas
+  // can map the edge to a `removeMember` edit without re-querying the model.
+  if (edge.backingMember) g.setAttribute('data-backing-member', edge.backingMember);
   renderEdgeInto(g, edge, src, dst);
   return g;
 }
@@ -1095,10 +1136,101 @@ function mountInteractiveCanvas(surface: HTMLElement, svg: SVGSVGElement, opts: 
     true,
   );
 
+  // --- connect (authoring) ---------------------------------------------------
+  // Dragging from a node's port to another node draws a relationship: it dispatches a connect event that
+  // `ide.ts` turns into an `addField` edit (a field on the source typed as the target).
+  let connectFrom: SceneNode | null = null;
+  let connectLine: SVGLineElement | null = null;
+
+  /** The node whose rect contains content point `p` (excluding `excludeId`), or null. */
+  function nodeAt(p: { x: number; y: number }, excludeId: string): SceneNode | null {
+    if (!scene) return null;
+    for (const n of scene.nodes.values()) {
+      if (n.id === excludeId) continue;
+      if (p.x >= n.rect.x && p.x <= n.rect.x + n.rect.w && p.y >= n.rect.y && p.y <= n.rect.y + n.rect.h) return n;
+    }
+    return null;
+  }
+
+  function beginConnect(sn: SceneNode, e: PointerEvent): void {
+    connectFrom = sn;
+    const x = sn.rect.x + sn.rect.w;
+    const y = sn.rect.y + sn.rect.h / 2;
+    connectLine = svgEl('line');
+    connectLine.setAttribute('class', 'koi-svg-connecting');
+    connectLine.setAttribute('x1', String(x));
+    connectLine.setAttribute('y1', String(y));
+    connectLine.setAttribute('x2', String(x));
+    connectLine.setAttribute('y2', String(y));
+    svg.appendChild(connectLine);
+    canvas.classList.add('koi-canvas--connecting');
+    try {
+      canvas.setPointerCapture?.(e.pointerId);
+    } catch {
+      // headless — connect still works via canvas-level moves.
+    }
+  }
+
+  function moveConnect(e: PointerEvent): void {
+    if (!connectLine) return;
+    const p = toContent(e.clientX, e.clientY);
+    connectLine.setAttribute('x2', String(p.x));
+    connectLine.setAttribute('y2', String(p.y));
+  }
+
+  function endConnect(e: PointerEvent): void {
+    if (!connectFrom) return;
+    const target = nodeAt(toContent(e.clientX, e.clientY), connectFrom.id);
+    if (target) {
+      canvas.dispatchEvent(
+        new CustomEvent<DiagramConnectDetail>(DIAGRAM_CONNECT_EVENT, {
+          bubbles: true,
+          detail: {
+            sourceQualifiedName: connectFrom.qualifiedName,
+            targetQualifiedName: target.qualifiedName,
+            sourceLabel: connectFrom.label,
+            targetLabel: target.label,
+          },
+        }),
+      );
+    }
+    connectLine?.remove();
+    connectLine = null;
+    connectFrom = null;
+    canvas.classList.remove('koi-canvas--connecting');
+  }
+
+  // Right-click a field-backed edge to disconnect it (remove the backing field).
+  canvas.addEventListener('contextmenu', (e: MouseEvent) => {
+    if (!editing) return;
+    const edgeEl = (e.target as Element | null)?.closest('.koi-svg-edge');
+    const backing = edgeEl?.getAttribute('data-backing-member');
+    if (edgeEl && backing) {
+      e.preventDefault();
+      canvas.dispatchEvent(
+        new CustomEvent<DiagramDisconnectDetail>(DIAGRAM_DISCONNECT_EVENT, {
+          bubbles: true,
+          detail: { backingMember: backing, label: backing.slice(backing.lastIndexOf('.') + 1) },
+        }),
+      );
+    }
+  });
+
   canvas.addEventListener('pointerdown', (e: PointerEvent) => {
     const target = e.target as Element | null;
-    // Authoring: a press on a node starts a DRAG rather than a pan.
+    // Authoring: a press on a node's PORT starts a connection; a press on the node body starts a DRAG.
     if (editing && scene) {
+      const portEl = target?.closest('.koi-svg-port');
+      if (portEl) {
+        const ng = portEl.closest('.koi-svg-node') as SVGGElement | null;
+        const portId = ng?.getAttribute('data-node-id') ?? null;
+        const portNode = portId ? scene.nodes.get(portId) : undefined;
+        if (portNode) {
+          refreshMetrics();
+          beginConnect(portNode, e);
+          return;
+        }
+      }
       const nodeGroup = target?.closest('.koi-svg-node') as SVGGElement | null;
       const id = nodeGroup?.getAttribute('data-node-id') ?? null;
       const sn = id ? scene.nodes.get(id) : undefined;
@@ -1130,6 +1262,10 @@ function mountInteractiveCanvas(surface: HTMLElement, svg: SVGSVGElement, opts: 
   });
 
   canvas.addEventListener('pointermove', (e: PointerEvent) => {
+    if (connectFrom) {
+      moveConnect(e);
+      return;
+    }
     if (dragNode) {
       moveNodeDrag(e);
       return;
@@ -1158,6 +1294,10 @@ function mountInteractiveCanvas(surface: HTMLElement, svg: SVGSVGElement, opts: 
   });
 
   function endPointer(e: PointerEvent): void {
+    if (connectFrom) {
+      endConnect(e);
+      return;
+    }
     if (dragNode) {
       endNodeDrag();
       return;
