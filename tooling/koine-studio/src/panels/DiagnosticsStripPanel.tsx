@@ -1,6 +1,6 @@
 import type { StoreApi } from 'zustand/vanilla';
-import { useStore } from 'zustand';
 import type { AppState } from '../store/index';
+import { useAppStore } from '../store/hooks';
 import type { LspDiagnostic } from '../lsp';
 
 // The editor's diagnostics strip (#diag-count + #diag-body) as a Preact panel (#193). It subscribes to
@@ -33,7 +33,7 @@ export function DiagnosticsStripPanel(props: {
   // Subscribe to the ACTIVE file's diagnostics only: a push for any other file changes a different map
   // entry, so this selector returns the same array reference and the strip does not re-render (matching the
   // old `if (uri === activeUri())` gate in editorSession.renderDiagnostics).
-  const diags = useStore(props.store, (s) => s.diagnosticsByUri[props.activeUri()]) ?? EMPTY_DIAGS;
+  const diags = useAppStore(props.store, (s) => s.diagnosticsByUri[props.activeUri()]) ?? EMPTY_DIAGS;
   const { count, kind } = countText(diags);
   return (
     <div class="koi-diag-strip">

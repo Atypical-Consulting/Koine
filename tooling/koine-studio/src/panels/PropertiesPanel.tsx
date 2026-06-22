@@ -1,6 +1,6 @@
 import type { StoreApi } from 'zustand/vanilla';
-import { useStore } from 'zustand';
 import type { AppState } from '../store/index';
+import { useAppStore } from '../store/hooks';
 import { renderInspector, buildInspectorElement, type InspectorElement, type InspectorHandlers } from '../inspector';
 import { lookupElement, type ModelIndex } from '../modelIndex';
 
@@ -15,9 +15,9 @@ export function PropertiesPanel(props: {
   index: ModelIndex | null;
   handlers: InspectorHandlers;
 }) {
-  // Subscribe to exactly the selection slice. `useStore` with this selector re-renders the component
+  // Subscribe to exactly the selection slice. `useAppStore` with this selector re-renders the component
   // only when `selection` changes reference — a setBottom/setActiveContext call leaves it alone.
-  const selection = useStore(props.store, (s) => s.selection);
+  const selection = useAppStore(props.store, (s) => s.selection);
   const hit = selection && props.index ? lookupElement(props.index, selection.qualifiedName) : null;
   const element: InspectorElement | null = hit
     ? buildInspectorElement(hit.element.entry, hit.element.node)

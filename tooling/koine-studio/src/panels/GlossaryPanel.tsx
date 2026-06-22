@@ -1,6 +1,6 @@
 import type { StoreApi } from 'zustand/vanilla';
-import { useStore } from 'zustand';
 import type { AppState } from '../store/index';
+import { useAppStore } from '../store/hooks';
 import type { GlossaryModel } from '../lsp';
 import { renderGlossary, type GlossaryHandlers } from '../glossary';
 import { scopeGlossaryModel } from '../activeContext';
@@ -17,7 +17,7 @@ export function GlossaryPanel(props: {
   model: GlossaryModel;
   handlers: GlossaryHandlers;
 }) {
-  const scope = useStore(props.store, (s) => s.activeContext);
+  const scope = useAppStore(props.store, (s) => s.activeContext);
   const scoped = scopeGlossaryModel(props.model, scope);
   return (
     <div

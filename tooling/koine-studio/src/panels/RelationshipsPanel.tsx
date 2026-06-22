@@ -1,6 +1,6 @@
 import type { StoreApi } from 'zustand/vanilla';
-import { useStore } from 'zustand';
 import type { AppState } from '../store/index';
+import { useAppStore } from '../store/hooks';
 import type { ContextMapResult, DiagramGraph } from '../lsp';
 import { extractRelationships, renderRelationshipsTable, type TableHandlers } from '../modelTables';
 import { isAllContexts, scopeGraph } from '../activeContext';
@@ -20,7 +20,7 @@ export function RelationshipsPanel(props: {
   contextMap: ContextMapResult;
   handlers: TableHandlers;
 }) {
-  const scope = useStore(props.store, (s) => s.activeContext);
+  const scope = useAppStore(props.store, (s) => s.activeContext);
   const scopedGraph = scopeGraph(props.graph, scope);
   const scopedCtxMap = isAllContexts(scope)
     ? props.contextMap

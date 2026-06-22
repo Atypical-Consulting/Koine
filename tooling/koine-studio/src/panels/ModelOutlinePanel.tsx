@@ -1,6 +1,6 @@
 import type { StoreApi } from 'zustand/vanilla';
-import { useStore } from 'zustand';
 import type { AppState } from '../store/index';
+import { useAppStore } from '../store/hooks';
 import type { GlossaryModel } from '../lsp';
 import { renderModelOutline, type ModelOutlineHandlers } from '../modelOutline';
 import { scopeGlossaryModel } from '../activeContext';
@@ -23,8 +23,8 @@ export function ModelOutlinePanel(props: {
   index?: ModelIndex | null;
 }) {
   // Subscribe to exactly the two slices that drive this panel; an unrelated slice change leaves it alone.
-  const scope = useStore(props.store, (s) => s.activeContext);
-  const selection = useStore(props.store, (s) => s.selection);
+  const scope = useAppStore(props.store, (s) => s.activeContext);
+  const selection = useAppStore(props.store, (s) => s.selection);
   const scoped = scopeGlossaryModel(props.model, scope);
   // Match the deleted applySelectionHighlight exactly: resolve the selection to its canonical qn (a
   // diagram-node selection can carry a non-canonical key form) before comparing against leaf.dataset.qname

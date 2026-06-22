@@ -1,7 +1,7 @@
 import { useRef } from 'preact/hooks';
 import type { StoreApi } from 'zustand/vanilla';
-import { useStore } from 'zustand';
 import type { AppState } from '../store/index';
+import { useAppStore } from '../store/hooks';
 
 // The ADR/Notes Documentation surface as a Preact host (#193, #174). It subscribes ONLY to the
 // `workspace` slice's `folderRootToken`, NOT to model edits — the panel is folder-derived (ADRs/notes
@@ -21,7 +21,7 @@ export function DocsPanelHost(props: {
   load: (host: HTMLElement) => void;
 }) {
   const { store, onMount, load } = props;
-  const token = useStore(store, (s) => s.folderRootToken);
+  const token = useAppStore(store, (s) => s.folderRootToken);
   // The mount node, captured once. Folder reloads paint into the same node.
   const hostRef = useRef<HTMLElement | null>(null);
   // The token the node was last loaded for. `undefined` until the first mount, so the initial paint is

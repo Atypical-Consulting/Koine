@@ -1,6 +1,6 @@
 import type { StoreApi } from 'zustand/vanilla';
-import { useStore } from 'zustand';
 import type { AppState } from '../store/index';
+import { useAppStore } from '../store/hooks';
 import type { DiagramGraph } from '../lsp';
 import { extractEvents, renderEventsTable, type TableHandlers } from '../modelTables';
 import { scopeGraph } from '../activeContext';
@@ -17,7 +17,7 @@ export function EventsPanel(props: {
   graph: DiagramGraph;
   handlers: TableHandlers;
 }) {
-  const scope = useStore(props.store, (s) => s.activeContext);
+  const scope = useAppStore(props.store, (s) => s.activeContext);
   const rows = extractEvents(scopeGraph(props.graph, scope));
   return (
     <div
