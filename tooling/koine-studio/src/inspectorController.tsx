@@ -296,11 +296,15 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   // Code → technical, Docs → docs), with the tech/docs sub-views back at their landing tabs. setState is
   // used (not setMode) so the reset lands atomically in one notification, before any subscriber runs.
   appStore.setState({ mode: initialMode, center: centerForMode(initialMode), tech: 'editor', docs: 'glossary' });
-  // The docViews slice (#193) is now the single source of truth for which lazily-loaded, model-derived
-  // surfaces — the glossary + the bottom Events/Relationships/Context Map tables — are loaded vs stale.
-  // Reset it to fully-stale for this fresh workspace session so the first show of each fetches (matching
-  // the controller's old per-instance `bottomLoaded`/`docViewsLoaded.glossary` starting all-false);
-  // invalidate() flips every view to not-loaded and bumps its token, the clean boot state.
+  // The docViews slice (#193) is the single source of truth for which lazily-loaded, model-derived
+  // surfaces — the Generated preview, the left-rail model, the diagram, the glossary, and the bottom
+  // Events/Relationships/Context Map tables — are loaded vs stale; there are no longer any controller-
+  // local `loaded` flags duplicating it. Reset it to fully-stale for this fresh workspace session so the
+  // first show of each fetches: invalidate() flips every view to not-loaded and bumps its token.
+  // This reset is load-bearing because `appStore` is a module SINGLETON reused across controller
+  // instances (notably the test suite, which builds many controllers against the one store): without it,
+  // a prior instance that left a view `loaded` would make this instance skip its first fetch. It resets
+  // the singleton's surface-staleness between controller instances.
   appStore.getState().invalidate();
 
   // The switcher buttons (Domain / Code / Docs) are a Preact panel mounted into the existing
@@ -458,8 +462,14 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   // is kept — only the visible surfaces repaint. The model/diagram doc caches are marked stale so a
   // not-currently-visible one re-renders scoped on its next visit.
   function rerenderScopedSurfaces(): void {
-    docViewsLoaded.model = false;
-    docViewsLoaded.diagrams = false;
+    // A scope change is a pure re-filter, not a model edit: mark the SCOPE-derived surfaces stale so the
+    // not-currently-visible ones re-render scoped on their next visit, then repaint the live ones now.
+    // The Generated preview isn't scope-derived (it's target-derived), so it's deliberately left fresh —
+    // matching the old `docViewsLoaded.model/diagrams = false` + bottom-token bump that never touched it.
+    const inv = appStore.getState().invalidate;
+    inv('model');
+    inv('diagrams');
+    inv('glossary');
     // The left-rail Explorer + Overview are always visible, so re-scope them immediately.
     void loadModel();
     // The diagram only re-scopes when the visual center is showing it.
@@ -469,16 +479,15 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
 
   // --- doc-view cache + assistant domain index -------------------------------
 
-  // Track which lazily-loaded surfaces need a (re)fetch — invalidated on every edit so a switch always
-  // shows data for the current model rather than a stale render. The check view (on-demand via the
-  // Check button) and the assistant (interactive) are excluded. The Explorer/Overview (model) is always
-  // visible, so it repaints on every edit. The glossary (#193) and the bottom Events/Relationships tables
-  // moved to the docViews slice's stale-token discipline, so they're no longer tracked here.
-  const docViewsLoaded: Record<'preview' | 'model' | 'diagrams', boolean> = {
-    preview: false,
-    model: false,
-    diagrams: false,
-  };
+  // Which lazily-loaded, model-derived surfaces need a (re)fetch is owned ENTIRELY by the docViews
+  // slice (#193) — there is no controller-local `loaded` record any more. Every such surface (the
+  // Generated preview, the left-rail model, the diagram, the glossary, and the bottom
+  // Events/Relationships/Context Map tables) reads the slice's per-key {loaded, token}: a loader
+  // captures currentToken(key) before its await, compares after, and markLoaded(key, capturedToken)
+  // only takes when the token is still current. An edit's invalidate() bumps every key together, so a
+  // single call makes all surfaces stale at once. The check view (on-demand) and the assistant
+  // (interactive) are not model-derived, so they're excluded; the Explorer/Overview ('model') is always
+  // visible, so it repaints on every edit.
 
   // The assistant's domain index is another model-derived view (built from the same context-map +
   // glossary the views above use), so it's cached the same way: `null` = stale/unbuilt, `{ value }` =
@@ -742,6 +751,9 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   // scoped to the active bounded context (#146). The inspector resolves any selection against the whole
   // model, so only the navigator + counts are narrowed.
   async function loadModel(): Promise<void> {
+    // Capture the 'model' stale-token before the await; markLoaded only takes if it's still current
+    // after, so an edit mid-fetch leaves the surface stale for the next show (the slice discipline).
+    const token = appStore.getState().currentToken('model');
     // The status/empty/error states write the explorer host imperatively (docMessage), while the tree
     // itself is a Preact panel mounted via render(). Unmount any prior Preact tree before an imperative
     // write so the reconciler and replaceChildren never fight over the same node.
@@ -760,7 +772,7 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
         );
         overviewBody.replaceChildren();
         renderSelectedInspector();
-        docViewsLoaded.model = true;
+        appStore.getState().markLoaded('model', token);
         return;
       }
       // Explorer = the construct tree as a Preact panel scoped from the store's activeContext slice, with
@@ -778,7 +790,7 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
       overviewBody.replaceChildren(renderOverviewCounts(scopedGlossary));
       renderSelectedInspector();
       applySelectionHighlight();
-      docViewsLoaded.model = true;
+      appStore.getState().markLoaded('model', token);
     } catch (e) {
       render(null, explorerBody);
       docMessage(explorerBody, 'Model request failed: ' + String(e), 'error');
@@ -810,12 +822,15 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   });
 
   // --- live diagrams ---------------------------------------------------------
-  // Fetch the DocsEmitter output (Mermaid-in-Markdown) and render it. Marked loaded only on success so
-  // a transient failure re-fetches on the next visit. A monotonic token drops the result of a render
-  // that a newer one (edit / theme flip / refresh) superseded.
+  // Fetch the DocsEmitter output (Mermaid-in-Markdown) and render it. The loaded/stale GATE is the
+  // docViews slice's 'diagrams' key — markLoaded only takes if the captured token is still current. A
+  // local monotonic `diagramsSeq` is kept ALONGSIDE it because a theme flip / refresh re-renders the
+  // diagram WITHOUT bumping the slice token (those aren't model edits): the seq drops the result of a
+  // render a newer call superseded, and is the live cancellation predicate threaded into renderDiagrams.
   let diagramsSeq = 0;
   async function loadDiagrams(): Promise<void> {
     const seq = ++diagramsSeq;
+    const token = appStore.getState().currentToken('diagrams');
     docMessage(diagramsView, 'Rendering diagrams…');
     try {
       const res = await lsp.livingDocs();
@@ -826,7 +841,7 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
       // Scope persisted node positions to this workspace so a folder restores its own manual layout.
       setDiagramPersistScope(contextWorkspaceKey());
       await renderDiagrams(diagramsView, files, currentTheme(), () => seq === diagramsSeq);
-      if (seq === diagramsSeq) docViewsLoaded.diagrams = true;
+      if (seq === diagramsSeq) appStore.getState().markLoaded('diagrams', token);
     } catch (e) {
       if (seq === diagramsSeq) docMessage(diagramsView, 'Diagrams request failed: ' + String(e), 'error');
     }
@@ -842,7 +857,9 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   // cached diagram stale (so a not-visible one re-renders themed on its next visit) and re-render
   // immediately when the visual center is showing.
   function onThemeChanged(): void {
-    docViewsLoaded.diagrams = false;
+    // A theme flip re-themes ONLY the diagram (not a model edit), so mark just the 'diagrams' key stale —
+    // a single-key invalidate that leaves every other surface fresh.
+    appStore.getState().invalidate('diagrams');
     if (activeCenter() === 'visual') void loadDiagrams();
   }
 
@@ -898,7 +915,7 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   function selectCenter(view: CenterView): void {
     appStore.getState().setCenter(view);
     applyCenterChrome();
-    if (view === 'visual' && !docViewsLoaded.diagrams) void loadDiagrams();
+    if (view === 'visual' && appStore.getState().isStale('diagrams')) void loadDiagrams();
     else if (view === 'technical') ensureTechLoaded();
     else if (view === 'docs') ensureDocsLoaded();
   }
@@ -931,7 +948,7 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   // current folder's conversation before focus, the single choke point for that swap).
   function ensureTechLoaded(): void {
     if (activeCenter() !== 'technical') return;
-    if (activeTech() === 'preview' && !docViewsLoaded.preview) void loadPreview();
+    if (activeTech() === 'preview' && appStore.getState().isStale('preview')) void loadPreview();
     else if (activeTech() === 'assistant') {
       const a = deps.ensureAssistant();
       a.syncWorkspace();
@@ -956,11 +973,12 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     else if (activeCenter() === 'technical') ensureTechLoaded();
   }
 
-  // Mark the cached, model-derived surfaces stale (e.g. after an edit or a file switch).
+  // Mark the cached, model-derived surfaces stale (e.g. after an edit or a file switch). A model edit
+  // touches EVERY model-derived surface, so a single all-keys invalidate() bumps the preview / model /
+  // diagram / glossary tokens at once (the docViews slice is the single source of truth — #193);
+  // invalidateBottomPanels() then bumps the three bottom-table keys and live-refreshes the visible one.
   function invalidateDocViews(): void {
-    docViewsLoaded.preview = false;
-    docViewsLoaded.model = false;
-    docViewsLoaded.diagrams = false;
+    appStore.getState().invalidate();
     // The joined glossary+diagram index (#142) and its in-flight builder are stale — drop both so the
     // next model load rebuilds against the current model.
     modelIndex = null;
@@ -1073,13 +1091,16 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   }
 
   // Emit the current target into the preview pane. Folded into the doc-view lifecycle (like the
-  // glossary/diagrams tabs) so it loads on open and tracks edits live — no button press required. A
-  // monotonic token drops a stale emit that a newer edit or target switch has superseded; the prior
-  // output stays on screen across a refresh (only the very first load shows a placeholder) so live
-  // typing never flashes the pane empty.
+  // glossary/diagrams tabs) so it loads on open and tracks edits live — no button press required. The
+  // loaded/stale GATE is the docViews slice's 'preview' key (markLoaded only takes if the captured token
+  // is still current). A local monotonic `previewSeq` is kept ALONGSIDE it because a destination-language
+  // switch re-emits WITHOUT bumping the slice token: the seq drops a stale emit a newer call (edit or
+  // target switch) superseded. The prior output stays on screen across a refresh (only the very first
+  // load shows a placeholder) so live typing never flashes the pane empty.
   let previewSeq = 0;
   async function loadPreview(): Promise<void> {
     const seq = ++previewSeq;
+    const token = appStore.getState().currentToken('preview');
     if (!lastPreview) output.setContent('// generating preview…', 'plain');
     try {
       const res = await lsp.emitPreview(currentTarget);
@@ -1101,7 +1122,7 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
       output.setContent(content, lang);
       lastPreview = content;
       copyBtn.disabled = !copyable;
-      docViewsLoaded.preview = true;
+      appStore.getState().markLoaded('preview', token);
     } catch (e) {
       if (seq !== previewSeq) return;
       output.setContent('// preview request failed\n' + String(e), 'plain');
@@ -1115,22 +1136,22 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   function onPreviewTargetChanged(target: PreviewTarget): void {
     if (target === currentTarget) return;
     setTarget(target);
-    docViewsLoaded.preview = false;
+    // A destination-language switch re-emits ONLY the preview (not a model edit), so mark just the
+    // 'preview' key stale — a single-key invalidate that leaves every other surface fresh.
+    appStore.getState().invalidate('preview');
     if (activeCenter() === 'technical' && activeTech() === 'preview') void loadPreview();
   }
 
   // --- bottom panel (Problems / Events / Relationships / Context Map, #144) --
   // The Events/Relationships tables + the Context Map are model-derived bottom-strip views; their lazy
-  // fetch is now owned by the docViews slice's stale-token discipline under the 'diagrams' key (#193) —
-  // the bottom tables derive from the SAME merged DiagramGraph projection the diagram renders from
-  // (livingDocs), so 'diagrams' is the matching key, and the Context Map (a strategic projection of the
-  // same compiled model) is invalidated in the same step, so it rides the same key. This replaces the
-  // old per-panel `bottomSeq`/`bottomLoaded` token bookkeeping: a loader captures
-  // appStore.getState().currentToken('diagrams') before its await and compares after, discarding a
-  // result an edit superseded, and only marks loaded for the token it fetched. Events + Relationships are
-  // Preact panels that subscribe to `activeContext` and scope themselves, so a scope change re-renders
-  // them without a refetch; the loaders pass the UNSCOPED graph/context-map.
-  const BOTTOM_KEY = 'diagrams' as const;
+  // fetch is owned by the docViews slice's stale-token discipline, each under its OWN key — 'events',
+  // 'relationships', 'contextmap' (#193). A loader captures appStore.getState().currentToken(tab) before
+  // its await and compares after, discarding a result an edit superseded, and markLoaded(tab, token)
+  // only takes for the token it fetched. An edit's all-keys invalidate() bumps these three (along with
+  // every other surface), so the whole strip goes stale together on an edit — exactly the old shared-key
+  // behaviour, now without the controller-local `bottomLoadedToken` map distinguishing tabs. Events +
+  // Relationships are Preact panels that subscribe to `activeContext` and scope themselves, so a scope
+  // change re-renders them without a refetch; the loaders pass the UNSCOPED graph/context-map.
   let activeBottomTab: BottomTab = 'problems';
   let bottomPanelDebounce: ReturnType<typeof setTimeout> | undefined;
 
@@ -1194,41 +1215,29 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     return mergeDiagramGraphs(docs.files.flatMap((f) => f.diagrams.map((d) => d.graph)));
   }
 
-  // Per-tab lazy-load gate, expressed through the docViews slice's stale token rather than a private
-  // `bottomLoaded` boolean: a tab counts as loaded only while it was last loaded AT the current
-  // 'diagrams' token, so any invalidate() (an edit bumps the token) makes every bottom tab stale at once
-  // — exactly the old `bottomLoaded = false` reset — and a re-show without an edit reuses the render.
-  // The three tabs share one slice key (the bottom strip is one model-derived family, invalidated
-  // together), so this map distinguishes WHICH tab has been shown since the last invalidation.
-  const bottomLoadedToken: Record<'events' | 'relationships' | 'contextmap', number> = {
-    events: -1,
-    relationships: -1,
-    contextmap: -1,
-  };
-  function bottomStale(tab: 'events' | 'relationships' | 'contextmap'): boolean {
-    return bottomLoadedToken[tab] !== appStore.getState().currentToken(BOTTOM_KEY);
-  }
-
+  // Per-tab lazy-load gate, read straight off the docViews slice: each table has its own key, so
+  // isStale(tab) is the gate (true until a load marks that key loaded at the current token). An edit's
+  // all-keys invalidate() clears every key, so a re-show after an edit refetches; a re-show without one
+  // reuses the render.
   function ensureBottomLoaded(tab: BottomTab): void {
-    if (tab === 'events' && bottomStale('events')) void loadEventsPanel();
-    if (tab === 'relationships' && bottomStale('relationships')) void loadRelationshipsPanel();
-    if (tab === 'contextmap' && bottomStale('contextmap')) void loadContextMapPanel();
+    if (tab === 'events' && appStore.getState().isStale('events')) void loadEventsPanel();
+    if (tab === 'relationships' && appStore.getState().isStale('relationships')) void loadRelationshipsPanel();
+    if (tab === 'contextmap' && appStore.getState().isStale('contextmap')) void loadContextMapPanel();
   }
 
-  // The "Context Map" tab: the strategic context map. The docViews slice's 'diagrams' token guards the
+  // The "Context Map" tab: the strategic context map. The docViews slice's 'contextmap' token guards the
   // fetch — a token captured before the await is compared after, so a superseded fetch (an edit bumped
   // the token) can't clobber a newer render; markLoaded only takes for the token it fetched.
   async function loadContextMapPanel(): Promise<void> {
-    const token = appStore.getState().currentToken(BOTTOM_KEY);
+    const token = appStore.getState().currentToken('contextmap');
     docMessage(contextMapView, 'Loading context map…');
     try {
       const res = await lsp.contextMap();
-      if (token !== appStore.getState().currentToken(BOTTOM_KEY)) return;
+      if (token !== appStore.getState().currentToken('contextmap')) return;
       contextMapView.innerHTML = `<div class="koi-md">${renderContextMapHtml(res)}</div>`;
-      bottomLoadedToken.contextmap = token;
-      appStore.getState().markLoaded(BOTTOM_KEY, token);
+      appStore.getState().markLoaded('contextmap', token);
     } catch (e) {
-      if (token === appStore.getState().currentToken(BOTTOM_KEY)) {
+      if (token === appStore.getState().currentToken('contextmap')) {
         docMessage(contextMapView, 'Context map request failed: ' + String(e), 'error');
       }
     }
@@ -1236,30 +1245,30 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
 
   // Events + Relationships are Preact panels mounted into their hosts; each subscribes to the store's
   // `activeContext` slice and scopes itself, so the loaders pass the UNSCOPED merged graph / context map
-  // and a scope change re-renders the table without a refetch. The fetch rides the docViews slice's
-  // 'diagrams' token: captured before the await, compared after (so an edit mid-fetch discards the
-  // superseded result), and the panel is marked loaded only for the token it fetched. The loading/error
-  // states write the host imperatively (docMessage), so the prior Preact tree is unmounted first
-  // (render(null, host)) — otherwise the reconciler and the imperative write fight over the node.
+  // and a scope change re-renders the table without a refetch. The fetch rides the docViews slice's own
+  // per-tab token ('events' / 'relationships'): captured before the await, compared after (so an edit
+  // mid-fetch discards the superseded result), and the panel is marked loaded only for the token it
+  // fetched. The loading/error states write the host imperatively (docMessage), so the prior Preact tree
+  // is unmounted first (render(null, host)) — otherwise the reconciler and the imperative write fight
+  // over the node.
   async function loadEventsPanel(): Promise<void> {
-    const token = appStore.getState().currentToken(BOTTOM_KEY);
+    const token = appStore.getState().currentToken('events');
     render(null, eventsPanel);
     docMessage(eventsPanel, 'Loading events…');
     try {
       const graph = await bottomGraph();
-      if (token !== appStore.getState().currentToken(BOTTOM_KEY)) return;
+      if (token !== appStore.getState().currentToken('events')) return;
       render(<EventsPanel store={appStore} graph={graph} handlers={bottomTableHandlers} />, eventsPanel);
-      bottomLoadedToken.events = token;
-      appStore.getState().markLoaded(BOTTOM_KEY, token);
+      appStore.getState().markLoaded('events', token);
     } catch (e) {
-      if (token !== appStore.getState().currentToken(BOTTOM_KEY)) return;
+      if (token !== appStore.getState().currentToken('events')) return;
       render(null, eventsPanel);
       docMessage(eventsPanel, 'Events request failed: ' + String(e), 'error');
     }
   }
 
   async function loadRelationshipsPanel(): Promise<void> {
-    const token = appStore.getState().currentToken(BOTTOM_KEY);
+    const token = appStore.getState().currentToken('relationships');
     render(null, relationshipsPanel);
     docMessage(relationshipsPanel, 'Loading relationships…');
     try {
@@ -1267,28 +1276,30 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
         bottomGraph(),
         lsp.contextMap().catch(() => ({ contexts: [], relations: [] }) as ContextMapResult),
       ]);
-      if (token !== appStore.getState().currentToken(BOTTOM_KEY)) return;
+      if (token !== appStore.getState().currentToken('relationships')) return;
       render(
         <RelationshipsPanel store={appStore} graph={graph} contextMap={ctxMap} handlers={bottomTableHandlers} />,
         relationshipsPanel,
       );
-      bottomLoadedToken.relationships = token;
-      appStore.getState().markLoaded(BOTTOM_KEY, token);
+      appStore.getState().markLoaded('relationships', token);
     } catch (e) {
-      if (token !== appStore.getState().currentToken(BOTTOM_KEY)) return;
+      if (token !== appStore.getState().currentToken('relationships')) return;
       render(null, relationshipsPanel);
       docMessage(relationshipsPanel, 'Relationships request failed: ' + String(e), 'error');
     }
   }
 
   // Mark the Events/Relationships/Context Map tables stale (called from invalidateDocViews on any model
-  // change). The slice's invalidate() bumps the 'diagrams' token, which both invalidates any in-flight
-  // load (its captured token no longer matches) and makes every bottom tab stale (bottomStale compares to
-  // the new token). If one is on screen and expanded, live-refresh it (debounced) so it tracks edits like
-  // the inspector; Problems is refreshed by the diagnostics push, and a collapsed panel reloads when next
-  // expanded.
+  // change, and from a scope change). Each has its own docViews key now (#193): bumping a key's token
+  // both invalidates any in-flight load of that tab (its captured token no longer matches) and makes the
+  // tab stale for its next show (isStale reads the cleared `loaded`). If one is on screen and expanded,
+  // live-refresh it (debounced) so it tracks edits like the inspector; Problems is refreshed by the
+  // diagnostics push, and a collapsed panel reloads when next expanded.
   function invalidateBottomPanels(): void {
-    appStore.getState().invalidate();
+    const inv = appStore.getState().invalidate;
+    inv('events');
+    inv('relationships');
+    inv('contextmap');
     if (activeBottomTab === 'problems' || diagEl.classList.contains('collapsed')) return;
     clearTimeout(bottomPanelDebounce);
     bottomPanelDebounce = setTimeout(() => ensureBottomLoaded(activeBottomTab), 350);

@@ -1,6 +1,13 @@
 import type { StoreApi } from 'zustand/vanilla';
 
-export type DocViewKey = 'preview' | 'model' | 'glossary' | 'diagrams';
+export type DocViewKey =
+  | 'preview'
+  | 'model'
+  | 'glossary'
+  | 'diagrams'
+  | 'events'
+  | 'relationships'
+  | 'contextmap';
 export interface DocView {
   /** True once a fetch for the CURRENT token has rendered. */
   loaded: boolean;
@@ -13,12 +20,26 @@ export interface DocViewsSlice {
   isStale(key: DocViewKey): boolean;
   currentToken(key: DocViewKey): number;
   markLoaded(key: DocViewKey, token: number): void;
-  invalidate(): void;
+  /**
+   * Mark surfaces stale by bumping their token (and clearing `loaded`). With no argument: every key —
+   * the model-edit path, so all model-derived surfaces refetch on their next show. With a single key:
+   * just that surface — the targeted invalidations (a theme flip touches only the diagram; a
+   * destination-language switch touches only the preview) that must NOT make every other surface stale.
+   */
+  invalidate(key?: DocViewKey): void;
   /** Store-owned 350ms doc-edit debounce (moved out of inspectorController). */
   scheduleRefresh(fn: () => void): void;
 }
 
-const KEYS: DocViewKey[] = ['preview', 'model', 'glossary', 'diagrams'];
+const KEYS: DocViewKey[] = [
+  'preview',
+  'model',
+  'glossary',
+  'diagrams',
+  'events',
+  'relationships',
+  'contextmap',
+];
 const EDIT_DEBOUNCE_MS = 350;
 
 export function createDocViewsSlice(
@@ -39,8 +60,12 @@ export function createDocViewsSlice(
       if (token !== view.token) return; // superseded loader — discard
       set({ docViews: { ...get().docViews, [key]: { loaded: true, token: view.token } } });
     },
-    invalidate: () => {
+    invalidate: (key) => {
       const cur = get().docViews;
+      if (key !== undefined) {
+        set({ docViews: { ...cur, [key]: { loaded: false, token: cur[key].token + 1 } } });
+        return;
+      }
       const next = Object.fromEntries(
         KEYS.map((k) => [k, { loaded: false, token: cur[k].token + 1 }]),
       ) as Record<DocViewKey, DocView>;
