@@ -419,6 +419,59 @@ describe('createInspectorController — bottom strip lazy loading', () => {
   });
 });
 
+describe('createInspectorController — loading states clear on success', () => {
+  // Regression: docMessage writes a raw <p>Loading…</p> the Preact reconciler can't see, so a
+  // bare render(<Panel/>, host) used to APPEND the panel beside the loading line — both showed at
+  // once. Every Preact-panel host must replace its loading line, not stack on top of it.
+  test('loadModel replaces the "Loading model…" line — it does not stack beside the outline', async () => {
+    const lsp = makeLsp();
+    const ctl = createInspectorController(makeDeps(lsp));
+    ctl.init();
+
+    ctl.refreshActiveSurfaces(); // → loadModel paints the left-rail Explorer outline
+    await flush();
+
+    const explorer = el('rail-explorer-body');
+    expect(explorer.textContent).toContain('Money'); // the outline rendered
+    expect(explorer.textContent).not.toContain('Loading model'); // …without the loading line left behind
+  });
+
+  test('the glossary replaces its "Loading glossary…" line on success', async () => {
+    const lsp = makeLsp();
+    const ctl = createInspectorController(makeDeps(lsp));
+    ctl.init();
+
+    ctl.selectDocsTab('glossary');
+    await flush();
+
+    const glossary = el('view-glossary');
+    expect(glossary.textContent).toContain('Money'); // the glossary rendered
+    expect(glossary.textContent).not.toContain('Loading glossary');
+  });
+
+  test('the Events panel replaces its "Loading events…" line on success', async () => {
+    const lsp = makeLsp();
+    const ctl = createInspectorController(makeDeps(lsp));
+    ctl.init();
+
+    ctl.selectBottomTab('events');
+    await flush();
+
+    expect(el('panel-events').textContent).not.toContain('Loading events');
+  });
+
+  test('the Relationships panel replaces its "Loading relationships…" line on success', async () => {
+    const lsp = makeLsp();
+    const ctl = createInspectorController(makeDeps(lsp));
+    ctl.init();
+
+    ctl.selectBottomTab('relationships');
+    await flush();
+
+    expect(el('panel-relationships').textContent).not.toContain('Loading relationships');
+  });
+});
+
 describe('createInspectorController — Properties inspector tracks the selection bus', () => {
   test('selecting an element renders its Properties; the inspector host is non-empty', async () => {
     const lsp = makeLsp();

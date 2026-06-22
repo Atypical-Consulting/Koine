@@ -22,7 +22,7 @@
 // does not own — rename / structured-edit / save-description / span navigation / the assistant
 // lifecycle). ide.ts wires those and calls the `select*` / `invalidate*` / `load*` methods + `init()`
 // from the palette, the toolbar buttons, and the boot ladder.
-import { render } from 'preact';
+import { render, type VNode } from 'preact';
 import { renderMarkdown } from './editor';
 import type { KoineEditor, OutputView } from './editor';
 import type {
@@ -576,6 +576,19 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     view.appendChild(p);
   }
 
+  // The Preact counterpart to docMessage: paint a panel into a host that may currently hold the raw
+  // docMessage <p> (the 'Loading…' line is written via innerHTML, which the reconciler can't see). A
+  // bare render(vnode, host) would diff against Preact's OWN tree — already emptied by docMessage's
+  // render(null) — so it has no record of the raw <p> and APPENDS the panel beside it (the bug: the
+  // loading line and the loaded panel both showed at once). Dropping any prior Preact tree (render(null))
+  // AND any raw write (innerHTML = '') FIRST makes the fresh render replace the loading line, not stack
+  // on it — the symmetric inverse of docMessage's own render(null)+innerHTML dance.
+  function renderPanel(view: HTMLElement, vnode: VNode): void {
+    render(null, view);
+    view.innerHTML = '';
+    render(vnode, view);
+  }
+
   // --- glossary (the ubiquitous-language editor, #67) ------------------------
   // Now a Preact panel (#193): the GlossaryPanel subscribes to the store's `activeContext` slice and
   // re-scopes the model on its own, so a scope change re-renders the glossary without a refetch. The
@@ -594,7 +607,7 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
       if (!model.entries.length) {
         docMessage(glossaryView, 'No concepts yet — declare some types, or fix syntax errors to populate the glossary.');
       } else {
-        render(<GlossaryPanel store={appStore} model={model} handlers={glossaryHandlers} />, glossaryView);
+        renderPanel(glossaryView, <GlossaryPanel store={appStore} model={model} handlers={glossaryHandlers} />);
       }
       appStore.getState().markLoaded('glossary', token);
     } catch (e) {
@@ -772,9 +785,9 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     // Capture the 'model' stale-token before the await; markLoaded only takes if it's still current
     // after, so an edit mid-fetch leaves the surface stale for the next show (the slice discipline).
     const token = appStore.getState().currentToken('model');
-    // The status/empty/error states write the explorer host imperatively via docMessage (which unmounts
-    // any prior Preact tree first), while the tree itself is a Preact panel mounted via render() — so the
-    // reconciler and replaceChildren never fight over the same node.
+    // The status/empty/error states write the explorer host imperatively via docMessage; the tree itself
+    // is a Preact panel painted via renderPanel, which drops the loading line first so the outline
+    // replaces it rather than stacking beside it.
     docMessage(explorerBody, 'Loading model…');
     try {
       const index = await ensureModelIndex();
@@ -794,14 +807,14 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
       // Explorer = the construct tree as a Preact panel scoped from the store's activeContext slice, with
       // its inline counts suppressed; the dedicated Overview section owns the tallies (renderOverviewCounts),
       // so the two never double up. The panel owns the leaf `is-selected` cross-highlight on its own.
-      render(
+      renderPanel(
+        explorerBody,
         <ModelOutlinePanel
           store={appStore}
           model={index.glossary}
           handlers={modelOutlineHandlers}
           index={index}
         />,
-        explorerBody,
       );
       overviewBody.replaceChildren(renderOverviewCounts(scopedGlossary));
       renderSelectedInspector();
@@ -1282,7 +1295,7 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     try {
       const graph = await bottomGraph();
       if (token !== appStore.getState().currentToken('events')) return;
-      render(<EventsPanel store={appStore} graph={graph} handlers={bottomTableHandlers} />, eventsPanel);
+      renderPanel(eventsPanel, <EventsPanel store={appStore} graph={graph} handlers={bottomTableHandlers} />);
       appStore.getState().markLoaded('events', token);
     } catch (e) {
       if (token !== appStore.getState().currentToken('events')) return;
@@ -1299,9 +1312,9 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
         lsp.contextMap().catch(() => ({ contexts: [], relations: [] }) as ContextMapResult),
       ]);
       if (token !== appStore.getState().currentToken('relationships')) return;
-      render(
-        <RelationshipsPanel store={appStore} graph={graph} contextMap={ctxMap} handlers={bottomTableHandlers} />,
+      renderPanel(
         relationshipsPanel,
+        <RelationshipsPanel store={appStore} graph={graph} contextMap={ctxMap} handlers={bottomTableHandlers} />,
       );
       appStore.getState().markLoaded('relationships', token);
     } catch (e) {
