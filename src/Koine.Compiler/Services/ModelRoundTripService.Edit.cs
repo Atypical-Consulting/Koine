@@ -151,7 +151,7 @@ public static partial class ModelRoundTripService
         if (edit.Kind is StructuredEditKind.AddType or StructuredEditKind.RemoveType)
         {
             var ctxName = edit.Kind == StructuredEditKind.AddType ? edit.Target : ContextOf(edit.Target);
-            if (edit.Kind == StructuredEditKind.RemoveType && FindType(model, edit.Target) is null)
+            if (edit.Kind == StructuredEditKind.RemoveType && FindEditType(model, edit.Target) is null)
             {
                 return false; // can't remove a type that isn't there
             }
@@ -166,11 +166,14 @@ public static partial class ModelRoundTripService
         }
 
         var typeQName = edit.Kind == StructuredEditKind.AddField ? edit.Target : StripLastSegment(edit.Target);
-        if (FindType(model, typeQName) is not { } type)
+        if (FindEditType(model, typeQName) is not { } type)
         {
             return false;
         }
 
+        // Re-emit the matched declaration (an aggregate is re-emitted whole — its re-slice still captures
+        // a field added to / removed from its root entity). Store the resolved canonical qname so the
+        // post-edit re-slice (DeclSpan) finds it again without the diagram-form fallback.
         decl = new DeclTarget(false, false, typeQName, type.Span.File, type.Span);
         return true;
     }
@@ -181,7 +184,7 @@ public static partial class ModelRoundTripService
             ? FindContext(model, decl.QualifiedName)?.Span ?? SourceSpan.None
             : decl.IsStates
                 ? FindStates(model, decl.QualifiedName)?.States.Span ?? SourceSpan.None
-                : FindType(model, decl.QualifiedName)?.Span ?? SourceSpan.None;
+                : FindEditType(model, decl.QualifiedName)?.Span ?? SourceSpan.None;
 
     // ---- Text-edit computation per edit kind -----------------------------
 
@@ -253,12 +256,15 @@ public static partial class ModelRoundTripService
     private static bool TryAddField(KoineModel model, IReadOnlyList<SourceFile> files, StructuredEdit edit, out TextOp op)
     {
         op = default;
+        // The diagram addresses an aggregate root by the aggregate's qname; a field is added to its root
+        // entity (FieldOwner), and a nested type is addressed as "Context.SimpleName" (FindEditType).
         if (string.IsNullOrEmpty(edit.Name) || string.IsNullOrEmpty(edit.Type)
-            || FindType(model, edit.Target) is not { } type || FieldsOf(type) is not { } members)
+            || FindEditType(model, edit.Target) is not { } resolved || FieldsOf(FieldOwner(resolved)) is not { } members)
         {
             return false;
         }
 
+        var type = FieldOwner(resolved);
         var source = SourceOf(files, type.Span.File);
         if (source is null)
         {
@@ -440,7 +446,7 @@ public static partial class ModelRoundTripService
     private static bool TryRemoveType(KoineModel model, IReadOnlyList<SourceFile> files, StructuredEdit edit, out TextOp op)
     {
         op = default;
-        if (FindType(model, edit.Target) is not { } type || type.Span.IsNone)
+        if (FindEditType(model, edit.Target) is not { } type || type.Span.IsNone)
         {
             return false;
         }
@@ -455,6 +461,8 @@ public static partial class ModelRoundTripService
         var end = span.Offset + span.Length;
         if (StartsOwnLine(source, span.Offset, out var lineStart))
         {
+            // Also delete the type's leading /// doc-comment lines, so they don't reattach to the next type.
+            lineStart = IncludeLeadingDocLines(source, lineStart);
             var lineEnd = EndOfLine(source, end);
             if (lineEnd < source.Length && source[lineEnd] == '\r')
             {
@@ -479,6 +487,41 @@ public static partial class ModelRoundTripService
     private static TypeDecl? FindType(KoineModel model, string qualifiedName) =>
         AllTypes(model).FirstOrDefault(t => string.Equals(t.QName, qualifiedName, StringComparison.Ordinal)).Type;
 
+    /// <summary>
+    /// Resolve a type for an EDIT, accepting the diagram's addressing as well as the canonical qname:
+    /// an exact <see cref="FindType"/> match, else — for a two-segment <c>"Context.SimpleName"</c> — the
+    /// first type in that context whose simple name matches. Diagram nodes drop the aggregate segment, so
+    /// a nested <c>OrderLine</c> is addressed as <c>"Ordering.OrderLine"</c>, not <c>"Ordering.Order.OrderLine"</c>.
+    /// </summary>
+    private static TypeDecl? FindEditType(KoineModel model, string qualifiedName)
+    {
+        if (FindType(model, qualifiedName) is { } exact)
+        {
+            return exact;
+        }
+
+        var dot = qualifiedName.IndexOf('.');
+        if (dot < 0 || qualifiedName.IndexOf('.', dot + 1) >= 0)
+        {
+            return null; // only "Context.SimpleName" gets the nested-type fallback
+        }
+
+        var ctx = qualifiedName[..dot];
+        var simple = qualifiedName[(dot + 1)..];
+        return AllTypes(model)
+            .Where(t => string.Equals(t.Type.Name, simple, StringComparison.Ordinal) && ContextOf(t.QName) == ctx)
+            .Select(t => t.Type)
+            .FirstOrDefault();
+    }
+
+    /// <summary>
+    /// The declaration that OWNS a type's fields: an aggregate's fields live on its root entity, so a
+    /// field edit addressed to an aggregate (the diagram's aggregate-root node) is redirected there.
+    /// Every other type owns its own fields.
+    /// </summary>
+    private static TypeDecl FieldOwner(TypeDecl type) =>
+        type is AggregateDecl agg && agg.RootEntity() is { } root ? root : type;
+
     private static ContextNode? FindContext(KoineModel model, string name) =>
         model.Contexts.FirstOrDefault(c => string.Equals(c.Name, name, StringComparison.Ordinal));
 
@@ -493,11 +536,14 @@ public static partial class ModelRoundTripService
     {
         var ownerQName = StripLastSegment(qualifiedName);
         var memberName = LastSegment(qualifiedName);
-        if (FindType(model, ownerQName) is not { } type || FieldsOf(type) is not { } members)
+        // Resolve the owner the same way edits address it: a nested type by "Context.SimpleName", and an
+        // aggregate qname redirected to its root entity, which is where the composition field actually lives.
+        if (FindEditType(model, ownerQName) is not { } resolved || FieldsOf(FieldOwner(resolved)) is not { } members)
         {
             return null;
         }
 
+        var type = FieldOwner(resolved);
         Member? member = members.FirstOrDefault(m => string.Equals(m.Name, memberName, StringComparison.Ordinal));
         return member is null ? null : (type, member);
     }
@@ -629,6 +675,29 @@ public static partial class ModelRoundTripService
         }
 
         return i + 1;
+    }
+
+    /// <summary>
+    /// Extend a deletion's start backwards over the declaration's contiguous leading <c>///</c> doc-comment
+    /// lines, so removing a documented type doesn't leave its doc block orphaned onto the next declaration.
+    /// </summary>
+    private static int IncludeLeadingDocLines(string text, int lineStart)
+    {
+        var start = lineStart;
+        while (start > 0)
+        {
+            var prevLineStart = StartOfLine(text, start - 1);
+            if (text[prevLineStart..start].TrimStart().StartsWith("///", StringComparison.Ordinal))
+            {
+                start = prevLineStart;
+            }
+            else
+            {
+                break;
+            }
+        }
+
+        return start;
     }
 
     /// <summary>The offset just past the last non-newline character of the line containing <paramref name="offset"/>.</summary>

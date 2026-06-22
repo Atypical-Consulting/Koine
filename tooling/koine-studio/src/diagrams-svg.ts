@@ -1167,12 +1167,13 @@ function mountInteractiveCanvas(surface: HTMLElement, svg: SVGSVGElement, opts: 
   let connectFrom: SceneNode | null = null;
   let connectLine: SVGLineElement | null = null;
 
-  /** The node whose rect contains content point `p` (excluding `excludeId`), or null. */
+  /** The node whose rect contains content point `p` (excluding `excludeId`), or null. Half-open bounds
+   * (`[x, x+w)`) so a point on the seam between two edge-adjacent nodes binds to exactly one of them. */
   function nodeAt(p: { x: number; y: number }, excludeId: string): SceneNode | null {
     if (!scene) return null;
     for (const n of scene.nodes.values()) {
       if (n.id === excludeId) continue;
-      if (p.x >= n.rect.x && p.x <= n.rect.x + n.rect.w && p.y >= n.rect.y && p.y <= n.rect.y + n.rect.h) return n;
+      if (p.x >= n.rect.x && p.x < n.rect.x + n.rect.w && p.y >= n.rect.y && p.y < n.rect.y + n.rect.h) return n;
     }
     return null;
   }

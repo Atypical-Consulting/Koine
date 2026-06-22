@@ -378,6 +378,98 @@ public class ModelRoundTripTests
         diags.Where(d => d.Severity == DiagnosticSeverity.Error).ShouldBeEmpty();
     }
 
+    // ---- diagram-addressed field edits resolve aggregates + nested types --
+    // The Studio canvas addresses a node by its DIAGRAM qualified name: an aggregate root by the
+    // aggregate's qname (e.g. "Sales.Cart") and a nested type by "Context.SimpleName" (dropping the
+    // aggregate segment). These exercise that the edit pipeline resolves those forms to the right
+    // declaration — an aggregate's fields living on its root entity, a nested type by simple name.
+
+    private const string AggSample = """
+        context Sales {
+          value Money { amount: Decimal }
+
+          aggregate Cart root Cart {
+            value CartLine { sku: String }
+
+            entity Cart identified by CartId {
+              lines: List<CartLine>
+              total: Money
+              note:  String
+            }
+          }
+        }
+        """;
+
+    [Fact]
+    public void EmitKoine_add_field_to_an_aggregate_targets_its_root_entity()
+    {
+        // The diagram's aggregate-root node is addressed by the aggregate qname; the field must land on
+        // the root entity (where the aggregate's fields live), not be rejected.
+        var edit = new StructuredEdit(StructuredEditKind.AddField, "Sales.Cart", Name: "memo", Type: "String");
+        EmitResult result = ModelRoundTripService.EmitKoine(Files(AggSample), edit);
+
+        result.Diagnostics.ShouldBeEmpty();
+        result.Koine.ShouldNotBeNull();
+        result.Koine!.ShouldContain("memo: String");
+    }
+
+    [Fact]
+    public void EmitKoine_add_field_to_a_nested_type_addressed_by_its_diagram_name()
+    {
+        // The diagram addresses the nested CartLine as "Sales.CartLine" (no aggregate segment).
+        var edit = new StructuredEdit(StructuredEditKind.AddField, "Sales.CartLine", Name: "qty", Type: "Int");
+        EmitResult result = ModelRoundTripService.EmitKoine(Files(AggSample), edit);
+
+        result.Diagnostics.ShouldBeEmpty();
+        result.Koine.ShouldNotBeNull();
+        result.Koine!.ShouldContain("qty: Int");
+    }
+
+    [Fact]
+    public void EmitKoine_remove_member_resolves_an_aggregate_owner_to_its_root_entity()
+    {
+        // A composition edge's backingMember is "Sales.Cart.note"; its owner "Sales.Cart" is the
+        // aggregate, but the field lives on the root entity — the disconnect gesture relies on this.
+        var edit = new StructuredEdit(StructuredEditKind.RemoveMember, "Sales.Cart.note");
+        EmitResult result = ModelRoundTripService.EmitKoine(Files(AggSample), edit);
+
+        result.Diagnostics.ShouldBeEmpty();
+        result.Koine.ShouldNotBeNull();
+        result.Koine!.ShouldNotContain("note:");
+    }
+
+    [Fact]
+    public void EmitKoine_remove_type_addressed_by_its_diagram_name_drops_the_nested_type()
+    {
+        // Drop the only reference (`lines`) first so removal is legal, then remove the now-unreferenced
+        // nested CartLine by its DIAGRAM name "Sales.CartLine" (no aggregate segment).
+        ModelEditResult patch = ModelRoundTripService.ApplyEdit(
+            Files(AggSample), new StructuredEdit(StructuredEditKind.RemoveMember, "Sales.Cart.lines"));
+        patch.Edits.Count.ShouldBe(1);
+        var withoutLines = Splice(AggSample, patch.Edits[0].Range, patch.Edits[0].NewText);
+
+        EmitResult result = ModelRoundTripService.EmitKoine(
+            Files(withoutLines), new StructuredEdit(StructuredEditKind.RemoveType, "Sales.CartLine"));
+
+        result.Diagnostics.ShouldBeEmpty();
+        result.Koine.ShouldNotBeNull();
+        result.Koine!.ShouldNotContain("value CartLine");
+    }
+
+    [Fact]
+    public void EmitKoine_remove_type_also_removes_its_leading_doc_comment()
+    {
+        // Money carries a `/// A monetary amount.` line; removing the type must take the doc with it so it
+        // doesn't reattach to the following declaration.
+        var edit = new StructuredEdit(StructuredEditKind.RemoveType, "Ordering.Money");
+        EmitResult result = ModelRoundTripService.EmitKoine(Files(Sample), edit);
+
+        result.Diagnostics.ShouldBeEmpty();
+        result.Koine.ShouldNotBeNull();
+        result.Koine!.ShouldNotContain("value Money");
+        result.Koine!.ShouldNotContain("A monetary amount");
+    }
+
     private static IEnumerable<ModelNode> Flatten(ModelNode node)
     {
         yield return node;
