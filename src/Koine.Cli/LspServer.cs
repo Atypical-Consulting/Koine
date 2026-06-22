@@ -1713,6 +1713,9 @@ internal sealed class LspServer
         ["to"] = e.To,
         ["label"] = e.Label,
         ["cardinality"] = e.Cardinality,
+        ["sourceCardinality"] = e.SourceCardinality,
+        ["arrowKind"] = e.ArrowKind,
+        ["backingMember"] = e.BackingMember,
     };
 
     /// <summary>

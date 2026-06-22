@@ -771,3 +771,126 @@ describe('node navigation event (Task 4)', () => {
     expect(events[0].line).toBe(3);
   });
 });
+
+describe('node width cap + text truncation (authoring overhaul, Phase 1)', () => {
+  const MAX_NODE_WIDTH = 280; // mirrors the renderer's hard width cap
+
+  test('a node with a very long member clamps its width and ellipsizes the row (full text in a <title>)', async () => {
+    const longMember = 'placeAnExtremelyDetailedOrder(customer: CustomerId, lines: List<OrderLine>, coupon: CouponCode): OrderConfirmation';
+    const files: DocsFile[] = [
+      file([
+        diagram({
+          nodes: [
+            mkNode({
+              id: 'order',
+              label: 'Order',
+              kind: 'aggregate-root',
+              qualifiedName: 'Ordering.Order',
+              stereotype: 'aggregate root',
+              members: [{ text: longMember, kind: 'method' }],
+            }),
+          ],
+          edges: [],
+        }),
+      ]),
+    ];
+
+    const container = ROOT();
+    await createSvgRenderer().render(container, files, 'light', () => true);
+
+    const node = container.querySelector('.koi-svg-diagram .koi-svg-node[data-qname="Ordering.Order"]')!;
+    // The box never grows past the hard cap, however long the member is.
+    const box = node.querySelector('.koi-svg-class-box')!;
+    expect(Number(box.getAttribute('width'))).toBeLessThanOrEqual(MAX_NODE_WIDTH);
+
+    // The row's VISIBLE text (the first child node, before the appended <title>) is clipped with an ellipsis…
+    const row = node.querySelector('.koi-svg-class-row')!;
+    expect(row.childNodes[0].textContent!.endsWith('…')).toBe(true);
+    // …and the full text is preserved in a hover <title> so nothing is lost.
+    const title = row.querySelector('title');
+    expect(title).not.toBeNull();
+    expect(title!.textContent).toBe(longMember);
+  });
+
+  test('a short member row is NOT given a <title> (only truncated text gets one)', async () => {
+    const files: DocsFile[] = [
+      file([
+        diagram({
+          nodes: [
+            mkNode({
+              id: 'order',
+              label: 'Order',
+              kind: 'aggregate-root',
+              qualifiedName: 'Ordering.Order',
+              stereotype: 'aggregate root',
+              members: [{ text: 'id: OrderId', kind: 'field' }],
+            }),
+          ],
+          edges: [],
+        }),
+      ]),
+    ];
+
+    const container = ROOT();
+    await createSvgRenderer().render(container, files, 'light', () => true);
+
+    const row = container.querySelector('.koi-svg-diagram .koi-svg-class-row')!;
+    expect(row.textContent).toBe('id: OrderId');
+    expect(row.querySelector('title')).toBeNull();
+  });
+});
+
+describe('edge markers + dual cardinalities (authoring overhaul, Phase 1)', () => {
+  test('a composition edge draws a diamond at the source, an arrow at the target, and a label at each end', async () => {
+    const files: DocsFile[] = [
+      file([
+        diagram({
+          nodes: [
+            mkNode({ id: 'order', label: 'Order', kind: 'aggregate-root', qualifiedName: 'Ordering.Order' }),
+            mkNode({ id: 'line', label: 'OrderLine', kind: 'value-object', qualifiedName: 'Ordering.OrderLine' }),
+          ],
+          edges: [
+            { from: 'order', to: 'line', label: null, cardinality: '0..1', sourceCardinality: '1', arrowKind: 'composition' },
+          ],
+        }),
+      ]),
+    ];
+
+    const container = ROOT();
+    await createSvgRenderer().render(container, files, 'light', () => true);
+
+    // The marker pair: a diamond at the owner end, an arrow at the part end.
+    const line = container.querySelector('.koi-svg-diagram .koi-svg-edge .koi-svg-edge-line')!;
+    expect(line.getAttribute('marker-start')).toBe('url(#koi-svg-diamond)');
+    expect(line.getAttribute('marker-end')).toBe('url(#koi-svg-arrow)');
+    expect(container.querySelector('.koi-svg-diagram #koi-svg-diamond')).not.toBeNull();
+
+    // Both multiplicities are drawn — the owner end ("1") and the part end ("0..1").
+    const cards = [...container.querySelectorAll('.koi-svg-diagram .koi-svg-edge-card')].map((c) => c.textContent).sort();
+    expect(cards).toEqual(['0..1', '1']);
+  });
+
+  test('a plain edge (no arrowKind) has only a target arrow and no cardinality labels', async () => {
+    const files: DocsFile[] = [
+      file([
+        diagram({
+          nodes: [
+            mkNode({ id: 'a', label: 'A', kind: 'state', qualifiedName: 'Ord.A' }),
+            mkNode({ id: 'b', label: 'B', kind: 'state', qualifiedName: 'Ord.B' }),
+          ],
+          edges: [{ from: 'a', to: 'b', label: 'go' }],
+        }),
+      ]),
+    ];
+
+    const container = ROOT();
+    await createSvgRenderer().render(container, files, 'light', () => true);
+
+    const line = container.querySelector('.koi-svg-diagram .koi-svg-edge .koi-svg-edge-line')!;
+    expect(line.getAttribute('marker-end')).toBe('url(#koi-svg-arrow)');
+    expect(line.hasAttribute('marker-start')).toBe(false);
+    expect(container.querySelectorAll('.koi-svg-diagram .koi-svg-edge-card').length).toBe(0);
+    // The semantic label still renders mid-edge.
+    expect(container.querySelector('.koi-svg-diagram .koi-svg-edge-label')!.textContent).toBe('go');
+  });
+});

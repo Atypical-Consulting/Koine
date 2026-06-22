@@ -13,8 +13,9 @@
 import type { DiagramRenderer } from './diagrams';
 import { mergeGraphsForView } from './modelTables';
 import { centerOn, clampScale, fit, panBy, viewAtScale, zoomAt, zoomPercent, type Size, type ViewBox } from './canvasView';
+import { edgeRoute, truncateToWidth, type Rect } from './diagramLayout';
 import { loadDiagramZoom, saveDiagramZoom } from './store';
-import type { DiagramGraph, DiagramMember, DiagramNode, SourceSpan } from './lsp';
+import type { DiagramEdge, DiagramGraph, DiagramMember, DiagramNode, SourceSpan } from './lsp';
 // Type-only import (erased at build time) of elkjs' own API surface, so our layout graph type-checks
 // against the real `ELK.layout` signature. The *value* is dynamically imported from the bundled build.
 import type { ELK, ElkNode, ElkExtendedEdge } from 'elkjs/lib/elk-api';
@@ -99,6 +100,10 @@ const NODE_PADDING_X = 28;
 const CHAR_WIDTH = 8.2; // rough advance for the label font (13px) at the size used below
 const MEMBER_CHAR_WIDTH = 7; // rough advance for the smaller (12px) monospace-ish member rows
 const MIN_NODE_WIDTH = 72;
+// A hard upper bound on a node's width: a long member row (a method with many params, a verbose type)
+// no longer stretches the box across the canvas — the row is ellipsized to fit and keeps its full text
+// in a hover `<title>`. Keeps every box a readable, n8n-like card instead of an unbounded banner.
+const MAX_NODE_WIDTH = 280;
 const EDGE_LABEL_HEIGHT = 16;
 const SVG_PADDING = 12;
 
@@ -128,7 +133,12 @@ function isClassNode(node: DiagramNode): boolean {
 }
 
 function nodeWidth(label: string): number {
-  return Math.max(MIN_NODE_WIDTH, Math.round(label.length * CHAR_WIDTH) + NODE_PADDING_X);
+  return clampWidth(Math.max(MIN_NODE_WIDTH, Math.round(label.length * CHAR_WIDTH) + NODE_PADDING_X));
+}
+
+/** Clamp any computed node width into [MIN_NODE_WIDTH, MAX_NODE_WIDTH] so a box never overflows the canvas. */
+function clampWidth(w: number): number {
+  return Math.max(MIN_NODE_WIDTH, Math.min(MAX_NODE_WIDTH, w));
 }
 
 /** Partition a class node's members into the attribute (field/value/computed) and method compartments, in order. */
@@ -148,7 +158,7 @@ function classNodeSize(node: DiagramNode): { width: number; height: number } {
   const stereoText = node.stereotype ? `«${node.stereotype}»` : '';
   const stereoW = stereoText.length * MEMBER_CHAR_WIDTH;
   const rowW = members.reduce((max, m) => Math.max(max, m.text.length * MEMBER_CHAR_WIDTH), 0);
-  const width = Math.max(MIN_CLASS_WIDTH, Math.ceil(Math.max(labelW, stereoW, rowW)) + CLASS_PADDING_X * 2);
+  const width = clampWidth(Math.max(MIN_CLASS_WIDTH, Math.ceil(Math.max(labelW, stereoW, rowW)) + CLASS_PADDING_X * 2));
 
   // Header + attribute compartment (+ its padding) + method compartment (+ its padding) when methods exist.
   let height = HEADER_HEIGHT;
@@ -166,6 +176,21 @@ function nodeSize(node: DiagramNode): { width: number; height: number } {
 
 function svgEl<K extends keyof SVGElementTagNameMap>(tag: K): SVGElementTagNameMap[K] {
   return document.createElementNS(SVG_NS, tag);
+}
+
+/**
+ * Set a `<text>` element's content to `full`, clipped to `maxPx` (at `charWidth` per glyph) so it can
+ * never overflow the node box; when it had to clip, attach a `<title>` child so the full text is one
+ * hover away. SVG `<text>` has no native ellipsis — this is the node's text-overflow behaviour.
+ */
+function setClippedText(text: SVGTextElement, full: string, maxPx: number, charWidth: number): void {
+  const shown = truncateToWidth(full, maxPx, charWidth);
+  text.textContent = shown;
+  if (shown !== full) {
+    const title = svgEl('title');
+    title.textContent = full;
+    text.appendChild(title);
+  }
 }
 
 /** Stamp a node's provenance onto its `<g>` so Task 4 can navigate by reading these attributes. */
@@ -270,7 +295,7 @@ function drawSimpleBox(g: SVGGElement, node: DiagramNode, w: number, h: number):
   text.setAttribute('y', String(h / 2));
   text.setAttribute('text-anchor', 'middle');
   text.setAttribute('dominant-baseline', 'central');
-  text.textContent = node.label;
+  setClippedText(text, node.label, w - NODE_PADDING_X, CHAR_WIDTH);
   g.appendChild(text);
 }
 
@@ -299,7 +324,7 @@ function drawClassBox(g: SVGGElement, node: DiagramNode, w: number, h: number): 
     stereo.setAttribute('x', String(w / 2));
     stereo.setAttribute('y', '16');
     stereo.setAttribute('text-anchor', 'middle');
-    stereo.textContent = `«${node.stereotype}»`;
+    setClippedText(stereo, `«${node.stereotype}»`, w - CLASS_PADDING_X * 2, MEMBER_CHAR_WIDTH);
     g.appendChild(stereo);
   }
 
@@ -308,7 +333,7 @@ function drawClassBox(g: SVGGElement, node: DiagramNode, w: number, h: number): 
   title.setAttribute('x', String(w / 2));
   title.setAttribute('y', node.stereotype ? '34' : '26');
   title.setAttribute('text-anchor', 'middle');
-  title.textContent = node.label;
+  setClippedText(title, node.label, w - CLASS_PADDING_X * 2, CHAR_WIDTH);
   g.appendChild(title);
 
   // Divider under the header, then the attribute rows. Enum-only classes have no methods → just one body.
@@ -345,8 +370,8 @@ function divider(g: SVGGElement, w: number, y: number): void {
   g.appendChild(line);
 }
 
-/** One left-aligned member row inside a compartment; computed members render italic. */
-function appendRow(g: SVGGElement, member: DiagramMember, y: number, _w: number): void {
+/** One left-aligned member row inside a compartment; computed members render italic, long rows ellipsize. */
+function appendRow(g: SVGGElement, member: DiagramMember, y: number, w: number): void {
   const row = svgEl('text');
   row.setAttribute(
     'class',
@@ -354,14 +379,8 @@ function appendRow(g: SVGGElement, member: DiagramMember, y: number, _w: number)
   );
   row.setAttribute('x', String(CLASS_PADDING_X));
   row.setAttribute('y', String(y));
-  row.textContent = member.text;
+  setClippedText(row, member.text, w - CLASS_PADDING_X * 2, MEMBER_CHAR_WIDTH);
   g.appendChild(row);
-}
-
-function polylinePath(points: { x: number; y: number }[]): string {
-  if (!points.length) return '';
-  const [head, ...rest] = points;
-  return `M ${head.x} ${head.y} ` + rest.map((p) => `L ${p.x} ${p.y}`).join(' ');
 }
 
 /** The bounded context of a `Context.Name` qualified name (prefix before the first dot), or '' if none. */
@@ -380,10 +399,12 @@ function contextOf(qualifiedName: string): string {
 async function drawGraph(graph: DiagramGraph, Elk: ElkConstructor): Promise<SVGSVGElement> {
   const byId = new Map<string, DiagramNode>(graph.nodes.map((n) => [n.id, n]));
 
-  // Edge labels: keep an explicit label (a state-machine guard, a relation kind); otherwise show the
-  // composition cardinality the COMPILER derived from the Koine field type (DiagramEdge.cardinality).
+  // Edges feed ELK only for LAYOUT (it spaces connected nodes apart); we draw our own border-anchored
+  // routes afterwards, so ELK's routed sections are unused. A semantic label (a state-machine guard, a
+  // strategic relation kind) is still handed to ELK so it reserves room for it; the per-end cardinalities
+  // ride the endpoints we compute, not ELK's label slot.
   const layoutEdges: ElkExtendedEdge[] = graph.edges.map((e, i) => {
-    const text = e.label ?? e.cardinality ?? null;
+    const text = e.label ?? null;
     return {
       id: `e${i}`,
       sources: [e.from],
@@ -467,6 +488,22 @@ async function drawGraph(graph: DiagramGraph, Elk: ElkConstructor): Promise<SVGS
   arrow.setAttribute('class', 'koi-svg-arrowhead');
   marker.appendChild(arrow);
   defs.appendChild(marker);
+
+  // Composition diamond, filled, drawn at the OWNER (source) end of a composition edge — the UML symbol
+  // that, paired with the target arrowhead, gives the "double-ended" treatment the plain arrow lacked.
+  const diamond = svgEl('marker');
+  diamond.setAttribute('id', 'koi-svg-diamond');
+  diamond.setAttribute('viewBox', '0 0 12 8');
+  diamond.setAttribute('refX', '6');
+  diamond.setAttribute('refY', '4');
+  diamond.setAttribute('markerWidth', '13');
+  diamond.setAttribute('markerHeight', '9');
+  diamond.setAttribute('orient', 'auto-start-reverse');
+  const diamondPath = svgEl('path');
+  diamondPath.setAttribute('d', 'M 0 4 L 6 0 L 12 4 L 6 8 z');
+  diamondPath.setAttribute('class', 'koi-svg-diamond');
+  diamond.appendChild(diamondPath);
+  defs.appendChild(diamond);
   svg.appendChild(defs);
 
   // Three layers: context boxes (behind) · edges · nodes (in front).
@@ -477,35 +514,13 @@ async function drawGraph(graph: DiagramGraph, Elk: ElkConstructor): Promise<SVGS
   const nodeLayer = svgEl('g');
   nodeLayer.setAttribute('class', 'koi-svg-nodes');
 
-  // Walk the laid hierarchy, accumulating absolute offsets (a child's coords are parent-relative, and a
-  // container's edges sit in the container's own coordinate space).
+  // Pass 1: walk the laid hierarchy, accumulating absolute offsets (a child's coords are parent-relative,
+  // and a container shifts its children). Draw the context boxes + nodes, and record each node's ABSOLUTE
+  // rect — the edges are re-derived from those rects (Pass 2) rather than taken from ELK's routed
+  // sections, so every connector anchors exactly on a node's border (fixing the floating-endpoint bug)
+  // and the same routing keeps working under Phase 2's free positioning, where ELK no longer runs.
+  const rects = new Map<string, Rect>();
   const drawLevel = (parent: ElkNode, ox: number, oy: number): void => {
-    for (const e of parent.edges ?? []) {
-      const section = e.sections?.[0];
-      if (!section) continue;
-      const pts = [section.startPoint, ...(section.bendPoints ?? []), section.endPoint].map((p) => ({
-        x: p.x + ox,
-        y: p.y + oy,
-      }));
-      const g = svgEl('g');
-      g.setAttribute('class', 'koi-svg-edge');
-      const path = svgEl('path');
-      path.setAttribute('class', 'koi-svg-edge-line');
-      path.setAttribute('d', polylinePath(pts));
-      path.setAttribute('marker-end', 'url(#koi-svg-arrow)');
-      g.appendChild(path);
-      const label = e.labels?.[0];
-      if (label?.text != null && label.x != null && label.y != null) {
-        const t = svgEl('text');
-        t.setAttribute('class', 'koi-svg-edge-label');
-        t.setAttribute('x', String(label.x + ox));
-        t.setAttribute('y', String(label.y + oy + EDGE_LABEL_HEIGHT * 0.5));
-        t.textContent = label.text;
-        g.appendChild(t);
-      }
-      edgeLayer.appendChild(g);
-    }
-
     for (const child of parent.children ?? []) {
       const ax = ox + (child.x ?? 0);
       const ay = oy + (child.y ?? 0);
@@ -532,6 +547,7 @@ async function drawGraph(graph: DiagramGraph, Elk: ElkConstructor): Promise<SVGS
         if (!node) continue;
         const w = child.width ?? MIN_NODE_WIDTH;
         const h = child.height ?? NODE_HEIGHT;
+        rects.set(child.id, { x: ax, y: ay, w, h });
         const g = svgEl('g');
         g.setAttribute('class', 'koi-svg-node');
         g.setAttribute('transform', `translate(${ax}, ${ay})`);
@@ -544,11 +560,64 @@ async function drawGraph(graph: DiagramGraph, Elk: ElkConstructor): Promise<SVGS
   };
   drawLevel(laid, 0, 0);
 
+  // Pass 2: draw each graph edge between the recorded node rects — border-anchored, with a marker pair
+  // per relationship kind and a multiplicity label at each end.
+  for (const edge of graph.edges) {
+    const src = rects.get(edge.from);
+    const dst = rects.get(edge.to);
+    if (!src || !dst) continue;
+    edgeLayer.appendChild(drawEdge(edge, src, dst));
+  }
+
   svg.appendChild(contextLayer);
   svg.appendChild(edgeLayer);
   svg.appendChild(nodeLayer);
 
   return svg;
+}
+
+/**
+ * Draw one edge as a border-anchored line (its endpoints sit ON the two node borders, via
+ * {@link edgeRoute}), with a marker pair chosen by the relationship kind and a multiplicity label at
+ * each end. A composition gets the UML treatment — a filled diamond at the owner (source) end and an
+ * open arrow at the part (target) end; every other relationship just points at its target.
+ */
+function drawEdge(edge: DiagramEdge, src: Rect, dst: Rect): SVGGElement {
+  const route = edgeRoute(src, dst);
+  const g = svgEl('g');
+  g.setAttribute('class', 'koi-svg-edge');
+
+  const path = svgEl('path');
+  path.setAttribute('class', 'koi-svg-edge-line');
+  path.setAttribute('d', `M ${route.start.x} ${route.start.y} L ${route.end.x} ${route.end.y}`);
+  path.setAttribute('marker-end', 'url(#koi-svg-arrow)');
+  if (edge.arrowKind === 'composition') {
+    path.setAttribute('marker-start', 'url(#koi-svg-diamond)');
+  }
+  g.appendChild(path);
+
+  // The semantic label (a transition guard, a strategic relation kind, a publish/consume verb) sits mid-edge.
+  if (edge.label) {
+    g.appendChild(edgeText('koi-svg-edge-label', edge.label, route.mid.x, route.mid.y));
+  }
+  // Per-end multiplicities: the owner end (sourceCardinality) by `start`, the part end (cardinality) by `end`.
+  if (edge.sourceCardinality) {
+    g.appendChild(edgeText('koi-svg-edge-card', edge.sourceCardinality, route.sourceLabel.x, route.sourceLabel.y));
+  }
+  if (edge.cardinality) {
+    g.appendChild(edgeText('koi-svg-edge-card', edge.cardinality, route.targetLabel.x, route.targetLabel.y));
+  }
+  return g;
+}
+
+/** A small, halo-backed edge label (`<text>`) centered at a content point. */
+function edgeText(cls: string, text: string, x: number, y: number): SVGTextElement {
+  const t = svgEl('text');
+  t.setAttribute('class', cls);
+  t.setAttribute('x', String(x));
+  t.setAttribute('y', String(y));
+  t.textContent = text;
+  return t;
 }
 
 /** Shift an ELK polyline (root-relative) by the SVG padding offset. */
