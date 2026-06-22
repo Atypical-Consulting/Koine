@@ -91,7 +91,7 @@ export function renderInspector(element: InspectorElement | null, handlers: Insp
   root.appendChild(renderHeader(element, handlers));
   root.appendChild(renderGeneral(element, handlers));
 
-  appendList(root, 'Properties', element.properties);
+  appendPropertyTable(root, 'Properties', element.properties);
   appendList(root, 'Behaviors', element.behaviors);
   appendList(root, 'Values', element.values);
   appendList(root, 'Invariants', element.invariants ?? []);
@@ -222,5 +222,50 @@ function appendList(root: HTMLElement, title: string, items: string[]): void {
     ul.appendChild(li);
   }
   section.appendChild(ul);
+  root.appendChild(section);
+}
+
+/**
+ * Append the Properties compartment as a two-column table (property name | type) so the type column
+ * aligns to a single left edge regardless of name length — easier to scan than colon-separated rows.
+ * Each item arrives pre-formatted as `name: Type`; the first colon splits the two columns (a
+ * colon-less item lands wholly in the name column). A no-op when `items` is empty.
+ */
+function appendPropertyTable(root: HTMLElement, title: string, items: string[]): void {
+  if (!items.length) return;
+  const section = document.createElement('section');
+  section.className = 'koi-inspector-section';
+
+  const h = document.createElement('h5');
+  h.className = 'koi-inspector-section-title';
+  h.textContent = title;
+  section.appendChild(h);
+
+  const table = document.createElement('table');
+  table.className = 'koi-inspector-table';
+  const tbody = document.createElement('tbody');
+  for (const item of items) {
+    const idx = item.indexOf(':');
+    const name = idx === -1 ? item.trim() : item.slice(0, idx).trim();
+    const type = idx === -1 ? '' : item.slice(idx + 1).trim();
+
+    const row = document.createElement('tr');
+    row.className = 'koi-inspector-row';
+
+    // The property name labels its row, so it is a row-scoped header (accessible + DevTools-clean).
+    const nameCell = document.createElement('th');
+    nameCell.scope = 'row';
+    nameCell.className = 'koi-inspector-prop-name';
+    nameCell.textContent = name;
+
+    const typeCell = document.createElement('td');
+    typeCell.className = 'koi-inspector-prop-type';
+    typeCell.textContent = type;
+
+    row.append(nameCell, typeCell);
+    tbody.appendChild(row);
+  }
+  table.appendChild(tbody);
+  section.appendChild(table);
   root.appendChild(section);
 }
