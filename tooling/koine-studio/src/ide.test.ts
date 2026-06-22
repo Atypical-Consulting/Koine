@@ -110,6 +110,7 @@ const ROOT = 'mem://workspace';
 class FakePlatform implements Platform {
   readonly kind = 'browser' as const;
   readonly canOpenFolders = true;
+  readonly canSaveProjects = true;
   readonly transport = new FakeLspTransport();
 
   /** relPath (forward-slashed) -> UTF-8 contents. Tokens are `${ROOT}/${relPath}`. */
@@ -141,6 +142,12 @@ class FakePlatform implements Platform {
     // no-op in tests
   }
   pickFolder(): Promise<string | null> {
+    return Promise.resolve(null);
+  }
+  saveProjectToRoot(_name: string, _files: { relPath: string; contents: string }[]): Promise<string | null> {
+    return Promise.resolve(null);
+  }
+  workspaceRootName(): Promise<string | null> {
     return Promise.resolve(null);
   }
   materializeWorkspace(

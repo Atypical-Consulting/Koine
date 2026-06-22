@@ -109,6 +109,23 @@ export interface Platform {
   pickFolder(title: string): Promise<string | null>;
 
   /**
+   * Whether the host can save the current workspace as a real, reopenable on-disk project. True in
+   * the browser when the File System Access API is present; false on the Tauri desktop for now.
+   */
+  readonly canSaveProjects: boolean;
+
+  /**
+   * Write the given files as a named project under the host's workspace root (picked once and
+   * remembered), registering the new folder so it reopens like any opened folder. Returns the new
+   * folder token, null when the user dismisses the root picker, and throws `already exists` on a
+   * name collision. Browser-only today; the desktop stub returns null.
+   */
+  saveProjectToRoot(name: string, files: { relPath: string; contents: string }[]): Promise<string | null>;
+
+  /** The remembered workspace root's display name (for Settings), or null before one is picked. */
+  workspaceRootName(): Promise<string | null>;
+
+  /**
    * Materialize a set of in-memory files into a real, openable workspace folder and return its
    * token (then opened via the normal folder-mode path, so the explorer + file mutations all
    * work). Used by the multi-file starter examples. `name` is a stable per-example slug; `files`

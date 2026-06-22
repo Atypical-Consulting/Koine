@@ -32,6 +32,7 @@ function uriOf(relPath: string): string {
 class FakePlatform implements Platform {
   readonly kind = 'browser' as const;
   readonly canOpenFolders = true;
+  readonly canSaveProjects = true;
 
   /** relPath (forward-slashed) -> UTF-8 contents. */
   files = new Map<string, string>();
@@ -60,6 +61,12 @@ class FakePlatform implements Platform {
   }
   openExternal(): void {}
   pickFolder(): Promise<string | null> {
+    return Promise.resolve(null);
+  }
+  saveProjectToRoot(_name: string, _files: { relPath: string; contents: string }[]): Promise<string | null> {
+    return Promise.resolve(null);
+  }
+  workspaceRootName(): Promise<string | null> {
     return Promise.resolve(null);
   }
   materializeWorkspace(_name: string, files: { relPath: string; contents: string }[]): Promise<string | null> {
