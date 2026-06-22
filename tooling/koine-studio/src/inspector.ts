@@ -25,8 +25,8 @@ export interface InspectorElement {
   stereotype: string | null;
   /** The `///` doc description, or null when undocumented. */
   description: string | null;
-  /** Attribute rows, pre-formatted as `name: Type`. */
-  properties: string[];
+  /** Attribute rows (`name: Type`); `computed` marks a derived, get-only property. */
+  properties: { text: string; computed: boolean }[];
   /** Method rows, pre-formatted as `name(params): Ret`. */
   behaviors: string[];
   /** Enum value rows (the member names). */
@@ -66,7 +66,9 @@ export function buildInspectorElement(entry: GlossaryEntry, node: DiagramNode | 
     kind: entry.kind,
     stereotype: node?.stereotype ?? null,
     description: entry.doc,
-    properties: members.filter((m) => m.kind === 'field').map((m) => m.text),
+    properties: members
+      .filter((m) => m.kind === 'field' || m.kind === 'computed')
+      .map((m) => ({ text: m.text, computed: m.kind === 'computed' })),
     behaviors: members.filter((m) => m.kind === 'method').map((m) => m.text),
     values: members.filter((m) => m.kind === 'value').map((m) => m.text),
     nameRange: entry.nameRange,
@@ -91,7 +93,7 @@ export function renderInspector(element: InspectorElement | null, handlers: Insp
   root.appendChild(renderHeader(element, handlers));
   root.appendChild(renderGeneral(element, handlers));
 
-  appendList(root, 'Properties', element.properties);
+  appendProperties(root, element.properties);
   appendList(root, 'Behaviors', element.behaviors);
   appendList(root, 'Values', element.values);
   appendList(root, 'Invariants', element.invariants ?? []);
@@ -219,6 +221,29 @@ function appendList(root: HTMLElement, title: string, items: string[]): void {
     const li = document.createElement('li');
     li.className = 'koi-inspector-item';
     li.textContent = item;
+    ul.appendChild(li);
+  }
+  section.appendChild(ul);
+  root.appendChild(section);
+}
+
+/** Append the Properties compartment; computed (derived) properties render italic. A no-op when empty. */
+function appendProperties(root: HTMLElement, items: { text: string; computed: boolean }[]): void {
+  if (!items.length) return;
+  const section = document.createElement('section');
+  section.className = 'koi-inspector-section';
+
+  const h = document.createElement('h5');
+  h.className = 'koi-inspector-section-title';
+  h.textContent = 'Properties';
+  section.appendChild(h);
+
+  const ul = document.createElement('ul');
+  ul.className = 'koi-inspector-list';
+  for (const item of items) {
+    const li = document.createElement('li');
+    li.className = item.computed ? 'koi-inspector-item koi-inspector-item-computed' : 'koi-inspector-item';
+    li.textContent = item.text;
     ul.appendChild(li);
   }
   section.appendChild(ul);

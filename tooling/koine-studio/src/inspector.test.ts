@@ -21,7 +21,10 @@ const fullElement: InspectorElement = {
   kind: 'aggregate',
   stereotype: 'aggregate root',
   description: 'A customer order.',
-  properties: ['id: OrderId', 'total: Money'],
+  properties: [
+    { text: 'id: OrderId', computed: false },
+    { text: 'total: Money', computed: false },
+  ],
   behaviors: ['submit(): void', 'cancel(): void'],
   values: [],
   invariants: ['total >= 0'],
@@ -155,7 +158,10 @@ describe('buildInspectorElement', () => {
     const built = buildInspectorElement(entry, node);
     expect(built.stereotype).toBe('aggregate root');
     expect(built.description).toBe('A customer order.');
-    expect(built.properties).toEqual(['id: OrderId', 'total: Money']);
+    expect(built.properties).toEqual([
+      { text: 'id: OrderId', computed: false },
+      { text: 'total: Money', computed: false },
+    ]);
     expect(built.behaviors).toEqual(['submit(): void']);
   });
 
@@ -181,5 +187,25 @@ describe('buildInspectorElement', () => {
     };
     const built = buildInspectorElement(enumEntry, enumNode);
     expect(built.values).toEqual(['Draft', 'Placed']);
+  });
+
+  test('includes computed members in properties, flagged and rendered italic', () => {
+    const computedNode: DiagramNode = {
+      ...node,
+      members: [
+        { text: 'quantity: Int', kind: 'field' },
+        { text: 'subtotal: Int', kind: 'computed' },
+      ],
+    };
+    const built = buildInspectorElement(entry, computedNode);
+    expect(built.properties).toEqual([
+      { text: 'quantity: Int', computed: false },
+      { text: 'subtotal: Int', computed: true },
+    ]);
+
+    const el = renderInspector(built, { onGoto: () => {} });
+    const computedItem = el.querySelector('.koi-inspector-item-computed');
+    expect(computedItem).not.toBeNull();
+    expect(computedItem!.textContent).toBe('subtotal: Int');
   });
 });
