@@ -46,10 +46,6 @@
           </button>
         </div>
 
-        <!-- Top-level workspace modes (#143). The Domain/Code/Docs buttons are injected from the MODES
-             data at startup (see ide.ts) so a new mode is one array entry, not new markup. -->
-        <nav id="mode-switcher" class="mode-switcher" role="tablist" aria-label="Workspace mode"></nav>
-
         <!-- Active bounded-context switcher (#146): scopes the model-derived surfaces (outline, diagram,
              counts, inspector, Events/Relationships tables) to one context. The <select> + "Current
              context" readout are injected from the model at runtime (see ide.ts); hidden until a model

@@ -27,16 +27,15 @@ import {
   initSecrets,
   loadActiveContext,
   loadSettings,
-  loadWorkspaceMode,
+  loadWorkspaceCenter,
   pushRecentFolder,
   saveActiveContext,
-  saveWorkspaceMode,
+  saveWorkspaceCenter,
   type Settings,
 } from './store';
 import { createWelcome } from './welcome';
 import { type Template } from './templates';
 import { createCommandPalette, type Command } from './palette';
-import { MODES } from './modes';
 import { createPreferences } from './prefs';
 import { applyAppearance } from './appearance';
 import { initSplitResizer, initEdgeResizer } from './resize';
@@ -454,7 +453,7 @@ export function init(): void {
   }
 
   // --- inspector / center-view / tab subsystem (extracted, src/inspectorController.ts) -------------
-  // The mode switcher, center views (Visual / Code / Documentation), the bottom strip, the per-view
+  // The center views (Visual / Code / Documentation), the bottom strip, the per-view
   // lazy loaders, the bounded-context scope (#146), and the selection-driven Properties inspector
   // (#142) all live in the controller now. ide.ts keeps only the editor↔LSP/buffer/workspace wiring
   // and the diagram-authoring + inspector WRITE path (below), which the controller triggers through
@@ -468,8 +467,8 @@ export function init(): void {
     activeUri: () => workspace.activeUri(),
     folderRootToken: () => workspace.folderRootToken(),
     initialTarget: settings.previewTarget,
-    saveWorkspaceMode,
-    loadWorkspaceMode,
+    saveWorkspaceCenter,
+    loadWorkspaceCenter,
     saveActiveContext,
     loadActiveContext,
     setStatus,
@@ -1219,12 +1218,6 @@ export function init(): void {
       { id: 'view-assistant', title: 'Show Assistant', group: 'Workspace', run: () => controller.selectTech('assistant') },
       { id: 'assistant-explain', title: 'Explain this construct', group: 'Workspace', run: () => { controller.selectTech('assistant'); ensureAssistant().explainSelection(); } },
     ];
-
-    // Top-level workspace modes (#143): mirror the per-view "Show …" entries so modes are reachable
-    // from the palette too. Built from MODES, so a new mode gets its command for free.
-    for (const mode of MODES) {
-      cmds.push({ id: `mode-${mode.id}`, title: `Switch to ${mode.label}`, group: 'Workspace', run: () => controller.selectMode(mode.id) });
-    }
 
     // Surface every open file as a "Go to File" entry so the palette doubles as a
     // fuzzy quick-open (type part of a path to jump). The palette re-reads this on each open.

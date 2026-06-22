@@ -19,7 +19,7 @@ describe('StoreInspector', () => {
     const { container } = render(<StoreInspector store={store} />);
     expect(field(container, 'activeContext')).toBe('all');
     expect(field(container, 'selection')).toBe('—');
-    expect(field(container, 'mode')).toBe('domain');
+    expect(field(container, 'center')).toBe('visual');
     expect(field(container, 'dirty')).toBe('0');
   });
 

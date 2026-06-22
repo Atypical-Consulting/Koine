@@ -18,7 +18,6 @@ export function StoreInspector(props: { store: StoreApi<AppState> }) {
   const s = props.store;
   const selection = useStore(s, (st) => st.selection);
   const activeContext = useStore(s, (st) => st.activeContext);
-  const mode = useStore(s, (st) => st.mode);
   const center = useStore(s, (st) => st.center);
   const tech = useStore(s, (st) => st.tech);
   const docs = useStore(s, (st) => st.docs);
@@ -48,7 +47,6 @@ export function StoreInspector(props: { store: StoreApi<AppState> }) {
       <dl class="koi-store-inspector-grid">
         {row('Selection', 'selection', selection ? selection.qualifiedName : '—')}
         {row('Context', 'activeContext', activeContext)}
-        {row('Mode', 'mode', mode)}
         {row('Center', 'center', center)}
         {row('Tech', 'tech', tech)}
         {row('Docs', 'docs', docs)}

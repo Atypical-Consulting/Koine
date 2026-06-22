@@ -234,7 +234,6 @@ const APP_HTML = `
           </div>
           <button type="button" id="btn-check">Check</button>
         </div>
-        <nav id="mode-switcher" class="mode-switcher" role="tablist"></nav>
         <div id="context-switcher" class="context-switcher" hidden></div>
         <div id="breadcrumb-host" class="topbar-breadcrumb"></div>
         <div class="toolbar-right">
