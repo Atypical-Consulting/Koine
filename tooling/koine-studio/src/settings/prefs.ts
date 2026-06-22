@@ -1,7 +1,7 @@
 // Settings dialog for Koine Studio. Built on the shared createModal() chrome, but laid out as a
 // two-pane preference center: a vertical category rail (Appearance / Editor / Assistant / Advanced)
 // on the left, the active category's controls on the right. The set of persisted Settings is the
-// source of truth (./store); each control writes a single-field patch through patchSettings() and
+// source of truth (./persistence); each control writes a single-field patch through patchSettings() and
 // reports the merged Settings back via onChange. The app's onChange handler is the single place that
 // re-skins the studio (applyAppearance + editor soft-wrap), so flipping a control applies live there;
 // only Theme is applied here directly, through ./theme's setTheme (its own live-apply + listeners).

@@ -2,7 +2,7 @@
 // document.documentElement.dataset.theme ('dark' | 'light'). Because the CodeMirror
 // editor theme reads the same var() tokens as the page, flipping the dataset attribute
 // re-themes the editor automatically — no CodeMirror reconfiguration. Persistence and the
-// canonical Settings type live in ./store; this module owns the DOM apply + a small
+// canonical Settings type live in ./persistence; this module owns the DOM apply + a small
 // change-listener registry so other panels can react to theme flips.
 import { type ThemeName, loadSettings, patchSettings } from '@/settings/persistence';
 

@@ -37,8 +37,8 @@ vi.mock('@/host', async () => {
 // OPFS is unavailable or the open fails). We wrap exactly those two exports in vi.fn() that DELEGATE
 // to the real store implementation by default, so every other test (and every other store consumer
 // at boot) behaves identically to production; a test can drive a specific scenario per-call via
-// mockReturnValueOnce / mockImplementationOnce and assert on the spies. Everything else in ./store is
-// passed through untouched. (vi.hoisted so the spies exist before the hoisted vi.mock factory runs.)
+// mockReturnValueOnce / mockImplementationOnce and assert on the spies. Everything else in
+// @/settings/persistence is passed through untouched. (vi.hoisted so the spies exist before the hoisted vi.mock factory runs.)
 const storeSeam = vi.hoisted(() => ({
   peekLegacyScratch: vi.fn<() => string | null>(),
   clearLegacyScratch: vi.fn<() => void>(),
