@@ -2,6 +2,7 @@ import { describe, expect, test } from 'vitest';
 import {
   ALL_CONTEXTS,
   fileContextFollow,
+  filterGlossaryModel,
   isAllContexts,
   listContexts,
   scopeContextMap,
@@ -146,6 +147,44 @@ describe('scopeGlossaryModel', () => {
 
   test('ALL_CONTEXTS is the identity (same model)', () => {
     expect(scopeGlossaryModel(model, ALL_CONTEXTS)).toBe(model);
+  });
+});
+
+describe('filterGlossaryModel', () => {
+  test('a blank query is the identity (same model returned)', () => {
+    expect(filterGlossaryModel(model, '')).toBe(model);
+    expect(filterGlossaryModel(model, '   ')).toBe(model);
+  });
+
+  test('keeps entries whose name matches (case-insensitive substring), drops the rest', () => {
+    const names = (m: GlossaryModel) => m.entries.map((e) => e.name);
+    // "order" matches Order AND OrderItem, drops Stock.
+    expect(names(filterGlossaryModel(model, 'order'))).toEqual(['Order', 'OrderItem']);
+    // "item" matches only OrderItem.
+    expect(names(filterGlossaryModel(model, 'item'))).toEqual(['OrderItem']);
+    // no match → empty.
+    expect(names(filterGlossaryModel(model, 'zzz'))).toEqual([]);
+  });
+
+  test('keeps a context-header entry only when that context has a matching child', () => {
+    const ctx = (name: string): GlossaryEntry => ({
+      id: name,
+      name,
+      kind: 'context',
+      context: name,
+      qualifiedName: name,
+      doc: null,
+      nameRange: { start: { line: 0, character: 0 }, end: { line: 0, character: 0 } },
+    });
+    const withHeaders: GlossaryModel = {
+      entries: [ctx('Sales'), entry('Sales.Order'), ctx('Inventory'), entry('Inventory.Stock')],
+    };
+    // Filtering to "order": the Sales header survives (Sales.Order matches), the Inventory header and
+    // Stock both fall away — so a matching leaf keeps its section header and empty sections disappear.
+    expect(filterGlossaryModel(withHeaders, 'order').entries.map((e) => e.qualifiedName)).toEqual([
+      'Sales',
+      'Sales.Order',
+    ]);
   });
 });
 

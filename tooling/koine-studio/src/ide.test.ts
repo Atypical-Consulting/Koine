@@ -236,6 +236,7 @@ const APP_HTML = `
         </div>
         <nav id="mode-switcher" class="mode-switcher" role="tablist"></nav>
         <div id="context-switcher" class="context-switcher" hidden></div>
+        <div id="breadcrumb-host" class="topbar-breadcrumb"></div>
         <div class="toolbar-right">
           <button type="button" id="palette-hint" class="palette-hint">K</button>
           <button type="button" id="btn-theme" class="icon-btn">theme</button>
@@ -332,6 +333,7 @@ const APP_HTML = `
       <footer id="statusbar">
         <span class="sb-item" id="sb-context">Context: —</span>
         <span class="sb-item" id="sb-validity">No errors</span>
+        <span id="sb-problems-host"></span>
         <span class="sb-spacer"></span>
         <span class="sb-item" id="sb-connection">Connecting…</span>
         <span class="sb-item" id="sb-version"></span>

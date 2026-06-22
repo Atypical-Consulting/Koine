@@ -61,6 +61,7 @@ import {
 } from './diagrams-svg';
 import { isAllContexts } from './activeContext';
 import { appStore } from './store/index';
+import { badgeCounts, createDiagCountGate } from './diagCountGate';
 import { type SelectedElement } from './selection';
 import { type InspectorElement } from './inspector';
 import { createAssistantPanel, type AssistantPanel, type AssistantContext } from './aiPanel';
@@ -68,6 +69,9 @@ import { clearModelHash, readModelFromHash, workspaceShareUrlOrNull } from './sh
 import { handleBeforeUnload } from './dirty';
 import { render } from 'preact';
 import { UnsavedIndicator } from './panels/UnsavedIndicator';
+import { WorkspaceProblemsBadge } from './panels/WorkspaceProblemsBadge';
+import { ContextBreadcrumb } from './panels/ContextBreadcrumb';
+import { StoreInspector } from './panels/StoreInspector';
 import { createWorkspaceController, type WorkspaceController } from './workspaceController';
 import { createConfirmDialog } from './overlay';
 
@@ -216,6 +220,33 @@ export function init(): void {
     appStore.getState().setActiveUri(workspace.activeUri());
   }
 
+  // Workspace-wide problems rollup beside #sb-validity (which is active-file only): a status-bar badge
+  // summarising every file's diagnostics, hidden while the workspace is clean. Subscribes to the
+  // diagnostics slice, so the LSP publish path keeps it current with no extra wiring.
+  render(<WorkspaceProblemsBadge store={appStore} />, el('sb-problems-host'));
+
+  // Read-only "where am I" breadcrumb in the toolbar (active context › selected element). Subscribes to
+  // the activeContext + selection slices, so it tracks the switcher, the selection-follow and the
+  // active-file follow without any controller wiring.
+  render(<ContextBreadcrumb store={appStore} />, el('breadcrumb-host'));
+
+  // Dev-facing live store inspector (#193 follow-up): a read-only overlay of what the app store thinks
+  // right now, toggled from the command palette. Its host is created lazily on first toggle and the
+  // panel rendered once (it tracks the store thereafter); toggling just flips the host's hidden flag.
+  let storeInspectorHost: HTMLElement | null = null;
+  function toggleStoreInspector(): void {
+    if (!storeInspectorHost) {
+      // First invocation: create the host (visible by default) and render the panel once. Return here
+      // so we don't immediately flip it back to hidden — the first toggle SHOWS it.
+      storeInspectorHost = document.createElement('div');
+      storeInspectorHost.className = 'koi-store-inspector-overlay';
+      document.body.appendChild(storeInspectorHost);
+      render(<StoreInspector store={appStore} />, storeInspectorHost);
+      return;
+    }
+    storeInspectorHost.hidden = !storeInspectorHost.hidden;
+  }
+
   const lsp = new KoineLsp(platform.createLspTransport());
 
   // --- workspace model ------------------------------------------------------
@@ -232,6 +263,11 @@ export function init(): void {
   // diagnostics cache, the status pill + diagnostics strip, and the LSP publishDiagnostics/exit
   // subscriptions. ide.ts keeps the buffer/dirty/tree side effects of an edit (wired through
   // editorSession.onChange below) and the workspace/model concerns.
+  // Gate the diagnostics-driven tree rebuild: the LSP republishes a file's diagnostics on every
+  // keystroke, but the only diagnostics-driven tree output is each file's error/warning badge, so a
+  // push that leaves a file's counts unchanged would rebuild the explorer for an identical result.
+  const diagCountGate = createDiagCountGate();
+
   const editorSession = createEditorSession({
     parent: el('editor-pane'),
     doc: initialDoc,
@@ -246,9 +282,13 @@ export function init(): void {
     uriLabel: (uri) => workspace.buffers.get(uri)?.relPath ?? (uri.split('/').pop() ?? uri),
     onNavigate: (loc) => navigateToDefinition(loc),
     onApplyWorkspaceEdit: (edit) => workspace.applyWorkspaceEdit(edit),
-    // Every diagnostics push re-renders the tree so non-active files can badge their error/warning
-    // counts (the active file's gutter/strip/status are repainted inside editorSession first).
-    onDiagnostics: () => workspace.renderTree(),
+    // A diagnostics push re-renders the tree so non-active files can badge their error/warning counts
+    // (the active file's gutter/strip/status are repainted inside editorSession first). Skip the rebuild
+    // when the pushed file's counts are unchanged — the badge would be identical, so the keystroke-rate
+    // republish no longer churns the whole explorer.
+    onDiagnostics: (uri, diags) => {
+      if (diagCountGate.changed(uri, diags)) workspace.renderTree();
+    },
   });
   const editor = editorSession.editor;
   const setStatus = editorSession.setStatus;
@@ -317,14 +357,9 @@ export function init(): void {
   // --- file tree ------------------------------------------------------------
 
   function diagCounts(uri: string): { errors: number; warnings: number } {
-    const diags = editorSession.diagnosticsFor(uri);
-    let errors = 0;
-    let warnings = 0;
-    for (const d of diags) {
-      if (d.severity === 2) warnings++;
-      else errors++; // severity 1 or unset = error
-    }
-    return { errors, warnings };
+    // Shares badgeCounts with the diagnostics-count gate so the gate's "did the badge change?" decision
+    // and the badge actually rendered here can never disagree (severity 2 ⇒ warning, all else ⇒ error).
+    return badgeCounts(editorSession.diagnosticsFor(uri));
   }
 
   // Cross-file go-to-definition: if the resolved Location is a different OPEN file, activate it
@@ -635,9 +670,20 @@ export function init(): void {
     refreshDirtyIndicator,
     showDiagnostics: (uri) => editorSession.showDiagnostics(uri),
     invalidateDocViews: () => controller.invalidateDocViews(),
-    dropDiagnostics: (uri) => editorSession.dropDiagnostics(uri),
-    renameDiagnostics: (oldUri, newUri) => editorSession.renameDiagnostics(oldUri, newUri),
-    clearDiagnostics: () => editorSession.clearDiagnostics(),
+    // Keep the diag-count gate in step with the diagnostics slice: a file that reopens with the same
+    // counts after a clear/drop/rename must still re-badge, so forget its remembered counts here.
+    dropDiagnostics: (uri) => {
+      editorSession.dropDiagnostics(uri);
+      diagCountGate.forget(uri);
+    },
+    renameDiagnostics: (oldUri, newUri) => {
+      editorSession.renameDiagnostics(oldUri, newUri);
+      diagCountGate.forget(oldUri);
+    },
+    clearDiagnostics: () => {
+      editorSession.clearDiagnostics();
+      diagCountGate.reset();
+    },
     getFormatOnSave: () => settings.formatOnSave,
     // A folder finished opening: restore this workspace's bounded-context scope (#146) BEFORE the
     // first scoped render and refresh the switcher's options from the new model. The bus value drives
@@ -1069,6 +1115,7 @@ export function init(): void {
       { id: 'prefs', title: 'Settings…', hint: 'mod+,', group: 'View', run: () => prefs.open() },
       { id: 'help', title: 'Keyboard shortcuts', hint: 'F1', group: 'Help', run: () => help.open() },
       { id: 'about', title: 'About Koine Studio', group: 'Help', run: () => about.open() },
+      { id: 'toggle-store-inspector', title: 'Toggle store inspector (debug)', group: 'Help', run: () => toggleStoreInspector() },
       { id: 'view-preview', title: 'Show Emitted Preview', group: 'Workspace', run: () => controller.selectTech('preview') },
       { id: 'view-glossary', title: 'Show Glossary', group: 'Workspace', run: () => controller.selectDocsTab('glossary') },
       { id: 'view-docs', title: 'Show Docs (ADRs & Notes)', group: 'Workspace', run: () => controller.selectDocsTab('adr') },

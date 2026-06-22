@@ -3,6 +3,35 @@
   padding: 0.5rem 0.75rem 1rem;
 }
 
+/* Explorer outline = a type-to-filter box above the construct tree (the tree is rendered into
+   .koi-outline-mount by ModelOutlinePanel). The filter narrows leaves by name within the active scope. */
+.koi-outline {
+  display: flex;
+  flex-direction: column;
+}
+
+.koi-outline-filter {
+  margin: var(--koi-space-2) var(--koi-space-3) 0;
+  padding: var(--koi-space-1-25) var(--koi-space-2);
+  background: var(--koi-paper);
+  color: var(--koi-fg);
+  border: 1px solid var(--koi-line);
+  border-radius: var(--koi-radius-sm);
+  font-family: var(--koi-font-body);
+  font-size: var(--koi-text-xs);
+
+  &::placeholder {
+    color: var(--koi-muted);
+  }
+
+  /* Keep a clearly-visible focus ring for keyboard users (WCAG 2.4.7), matching the context <select>. */
+  &:focus-visible {
+    outline: 2px solid var(--koi-accent);
+    outline-offset: 1px;
+    border-color: var(--koi-accent);
+  }
+}
+
 .koi-model-ctx {
   margin-bottom: 1.1rem;
 }
@@ -442,4 +471,52 @@
 .koi-svg-node.is-selected .koi-svg-node-box {
   stroke: var(--koi-accent);
   stroke-width: 2.5;
+}
+
+/* --- dev store inspector overlay (#193 follow-up) ---------------------------------------------
+   A read-only live dump of the app store, toggled from the command palette. Pinned bottom-right so it
+   floats over the workspace without stealing layout; monospace, compact, label/value grid. */
+.koi-store-inspector-overlay {
+  position: fixed;
+  right: var(--koi-space-3);
+  bottom: 34px; /* clear the 26px status bar */
+  z-index: 60;
+  max-width: 22rem;
+  padding: var(--koi-space-2-5);
+  background: var(--koi-paper-2);
+  border: 1px solid var(--koi-line);
+  border-radius: var(--koi-radius-sm);
+  box-shadow: var(--koi-shadow);
+  color: var(--koi-fg);
+  font-family: var(--koi-font-mono);
+  font-size: var(--koi-text-2xs);
+
+  &[hidden] {
+    display: none;
+  }
+}
+
+.koi-store-inspector-title {
+  margin-bottom: var(--koi-space-2);
+  color: var(--koi-muted);
+  font-family: var(--koi-font-body);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.koi-store-inspector-grid {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: var(--koi-space-1) var(--koi-space-2-5);
+  margin: 0;
+
+  dt {
+    color: var(--koi-muted);
+  }
+
+  dd {
+    margin: 0;
+    overflow-wrap: anywhere;
+  }
 }
