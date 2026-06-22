@@ -238,3 +238,96 @@ describe('buildInspectorElement', () => {
     expect(fieldRow?.classList.contains('koi-inspector-row-computed')).toBe(false);
   });
 });
+
+describe('property editing (authoring)', () => {
+  const editableElement: InspectorElement = {
+    ...fullElement,
+    properties: [
+      { text: 'id: OrderId', computed: false },
+      { text: 'total: Money', computed: false },
+      { text: 'subtotal: Int', computed: true },
+    ],
+  };
+
+  function editingHandlers(): InspectorHandlers & Record<string, ReturnType<typeof vi.fn>> {
+    return {
+      onGoto: vi.fn(),
+      onAddProperty: vi.fn(),
+      onRemoveProperty: vi.fn(),
+      onRenameProperty: vi.fn(),
+      onChangeType: vi.fn(),
+    } as never;
+  }
+
+  test('non-computed rows become editable inputs; a computed row stays read-only', () => {
+    const el = renderInspector(editableElement, editingHandlers());
+    const editableRows = el.querySelectorAll('.koi-inspector-row-editable');
+    expect(editableRows.length).toBe(2); // id, total — NOT the computed subtotal
+    // The computed row carries no input (it is an expression, not an editable field).
+    const computed = el.querySelector('.koi-inspector-row-computed')!;
+    expect(computed.querySelector('input')).toBeNull();
+    expect(computed.querySelector('.koi-inspector-prop-name')!.textContent).toBe('subtotal');
+  });
+
+  test('committing a changed property name calls onRenameProperty with the old + new names', () => {
+    const h = editingHandlers();
+    const el = renderInspector(editableElement, h);
+    document.body.appendChild(el);
+    const firstRow = el.querySelector('.koi-inspector-row-editable')!;
+    const nameInput = firstRow.querySelector<HTMLInputElement>('.koi-inspector-prop-name input')!;
+    nameInput.value = 'identifier';
+    nameInput.dispatchEvent(new Event('blur'));
+    expect(h.onRenameProperty).toHaveBeenCalledWith(editableElement, 'id', 'identifier');
+  });
+
+  test('committing a changed property type calls onChangeType', () => {
+    const h = editingHandlers();
+    const el = renderInspector(editableElement, h);
+    document.body.appendChild(el);
+    const firstRow = el.querySelector('.koi-inspector-row-editable')!;
+    const typeInput = firstRow.querySelector<HTMLInputElement>('.koi-inspector-prop-type input')!;
+    typeInput.value = 'OrderNumber';
+    typeInput.dispatchEvent(new Event('blur'));
+    expect(h.onChangeType).toHaveBeenCalledWith(editableElement, 'id', 'OrderNumber');
+  });
+
+  test('an unchanged property input does not fire an edit', () => {
+    const h = editingHandlers();
+    const el = renderInspector(editableElement, h);
+    document.body.appendChild(el);
+    const nameInput = el.querySelector<HTMLInputElement>('.koi-inspector-row-editable .koi-inspector-prop-name input')!;
+    nameInput.dispatchEvent(new Event('blur')); // value untouched
+    expect(h.onRenameProperty).not.toHaveBeenCalled();
+  });
+
+  test('the delete button calls onRemoveProperty with the property name', () => {
+    const h = editingHandlers();
+    const el = renderInspector(editableElement, h);
+    const del = el.querySelector<HTMLButtonElement>('.koi-inspector-row-editable .koi-inspector-prop-delete')!;
+    del.click();
+    expect(h.onRemoveProperty).toHaveBeenCalledWith(editableElement, 'id');
+  });
+
+  test('the add-property row calls onAddProperty once both fields are filled (and ignores a blank one)', () => {
+    const h = editingHandlers();
+    const el = renderInspector(editableElement, h);
+    const name = el.querySelector<HTMLInputElement>('.koi-inspector-add-name')!;
+    const type = el.querySelector<HTMLInputElement>('.koi-inspector-add-type')!;
+    const add = el.querySelector<HTMLButtonElement>('.koi-inspector-add-btn')!;
+
+    add.click(); // both empty → no-op
+    expect(h.onAddProperty).not.toHaveBeenCalled();
+
+    name.value = 'quantity';
+    type.value = 'Int';
+    add.click();
+    expect(h.onAddProperty).toHaveBeenCalledWith(editableElement, 'quantity', 'Int');
+  });
+
+  test('with no editing handlers the Properties table stays read-only (no inputs, no add row)', () => {
+    const el = renderInspector(editableElement, { onGoto: () => {} });
+    expect(el.querySelector('.koi-inspector-row-editable')).toBeNull();
+    expect(el.querySelector('.koi-inspector-prop-input')).toBeNull();
+    expect(el.querySelector('.koi-inspector-add-prop')).toBeNull();
+  });
+});

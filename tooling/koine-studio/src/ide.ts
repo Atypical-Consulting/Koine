@@ -1342,6 +1342,28 @@ export function init(): void {
     onGoto: (range) => editor.gotoRange(range.start, range.end),
     onRename: (element, newName) => void renameElement(element, newName),
     onSaveDescription: (element, text) => void saveInspectorDescription(element, text),
+    // Property editing rides the same #91 round-trip the canvas uses (applyStructuredEdit), so editing a
+    // field here rewrites the `.koi` AND re-renders the diagram + this panel in step.
+    onAddProperty: (element, name, type) =>
+      void applyStructuredEdit(
+        { kind: 'addField', target: element.qualifiedName, name, type },
+        `Added ${name}: ${type} to ${element.name}`,
+      ),
+    onRemoveProperty: (element, propName) =>
+      void applyStructuredEdit(
+        { kind: 'removeMember', target: `${element.qualifiedName}.${propName}` },
+        `Removed ${propName} from ${element.name}`,
+      ),
+    onRenameProperty: (element, oldName, newName) =>
+      void applyStructuredEdit(
+        { kind: 'renameMember', target: `${element.qualifiedName}.${oldName}`, name: newName },
+        `Renamed ${oldName} → ${newName}`,
+      ),
+    onChangeType: (element, propName, newType) =>
+      void applyStructuredEdit(
+        { kind: 'changeFieldType', target: `${element.qualifiedName}.${propName}`, type: newType },
+        `Changed ${propName} to ${newType}`,
+      ),
   };
 
   // Rename the selected element from the Properties panel, reusing the LSP rename refactor (the same
