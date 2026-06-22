@@ -2,6 +2,8 @@ import { describe, expect, test, vi } from 'vitest';
 import { createHistoryController, type HistoryController } from './historyController';
 import type { Buffer } from './workspaceController';
 
+const last = <T>(arr: T[]): T | undefined => arr[arr.length - 1];
+
 function setup(opts: { maxDepth?: number; debounceMs?: number } = {}) {
   const buffers = new Map<string, Buffer>();
   const mk = (uri: string, text: string, dirty = false): Buffer =>
@@ -40,12 +42,12 @@ describe('historyController', () => {
     const h = setup();
     h.edit('a', 'A1');
     h.ctrl.noteEdit({ immediate: true });
-    expect(h.published.at(-1)).toEqual({ canUndo: true, canRedo: false });
+    expect(last(h.published)).toEqual({ canUndo: true, canRedo: false });
 
     h.ctrl.undo();
     expect(h.buffers.get('a')!.text).toBe('A0');
     expect(h.setDoc).toHaveBeenCalledWith('A0');
-    expect(h.published.at(-1)).toEqual({ canUndo: false, canRedo: true });
+    expect(last(h.published)).toEqual({ canUndo: false, canRedo: true });
   });
 
   test('redo re-applies the undone edit', () => {
@@ -55,7 +57,7 @@ describe('historyController', () => {
     h.ctrl.undo();
     h.ctrl.redo();
     expect(h.buffers.get('a')!.text).toBe('A1');
-    expect(h.published.at(-1)).toEqual({ canUndo: true, canRedo: false });
+    expect(last(h.published)).toEqual({ canUndo: true, canRedo: false });
   });
 
   test('a new edit after undo clears the redo future', () => {
@@ -65,7 +67,7 @@ describe('historyController', () => {
     h.ctrl.undo();
     h.edit('a', 'A2');
     h.ctrl.noteEdit({ immediate: true });
-    expect(h.published.at(-1)).toEqual({ canUndo: true, canRedo: false });
+    expect(last(h.published)).toEqual({ canUndo: true, canRedo: false });
     h.ctrl.redo(); // no future → no-op
     expect(h.buffers.get('a')!.text).toBe('A2');
   });
@@ -78,7 +80,7 @@ describe('historyController', () => {
       h.edit('a', 'A2'); h.ctrl.noteEdit();
       h.edit('a', 'A3'); h.ctrl.noteEdit();
       vi.advanceTimersByTime(5);
-      expect(h.published.at(-1)).toEqual({ canUndo: true, canRedo: false });
+      expect(last(h.published)).toEqual({ canUndo: true, canRedo: false });
       h.ctrl.undo();
       expect(h.buffers.get('a')!.text).toBe('A0'); // one step back to baseline, not A2/A1
     } finally {
@@ -113,6 +115,7 @@ describe('historyController', () => {
   test('a multi-file structured edit undoes every buffer in one step', () => {
     const h = setup();
     h.buffers.set('b', h.mk('b', 'B0'));
+    h.ctrl.reset(); // baseline now includes 'b' (mirrors a folder open, which resets history over all open buffers)
     h.edit('a', 'A1');
     h.edit('b', 'B1');
     h.ctrl.noteEdit({ immediate: true });
@@ -143,7 +146,7 @@ describe('historyController', () => {
     expect(reentered).toBe(1);
     h.ctrl.redo();                 // history not corrupted by the re-entrant edit
     expect(h.buffers.get('a')!.text).toBe('A1');
-    expect(h.published.at(-1)).toEqual({ canUndo: true, canRedo: false });
+    expect(last(h.published)).toEqual({ canUndo: true, canRedo: false });
   });
 
   test('reset clears the stacks and re-baselines on current buffers', () => {
@@ -151,7 +154,7 @@ describe('historyController', () => {
     h.edit('a', 'A1');
     h.ctrl.noteEdit({ immediate: true });
     h.ctrl.reset();
-    expect(h.published.at(-1)).toEqual({ canUndo: false, canRedo: false });
+    expect(last(h.published)).toEqual({ canUndo: false, canRedo: false });
     h.ctrl.undo(); // no-op after reset
     expect(h.buffers.get('a')!.text).toBe('A1');
   });
@@ -161,7 +164,7 @@ describe('historyController', () => {
     for (const t of ['A1', 'A2', 'A3']) { h.edit('a', t); h.ctrl.noteEdit({ immediate: true }); }
     h.ctrl.undo(); // A2
     h.ctrl.undo(); // A1 (A0 was dropped)
-    expect(h.published.at(-1)).toEqual({ canUndo: false, canRedo: true });
+    expect(last(h.published)).toEqual({ canUndo: false, canRedo: true });
     expect(h.buffers.get('a')!.text).toBe('A1');
   });
 });
