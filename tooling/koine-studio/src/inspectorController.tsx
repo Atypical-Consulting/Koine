@@ -23,8 +23,8 @@
 // lifecycle). ide.ts wires those and calls the `select*` / `invalidate*` / `load*` methods + `init()`
 // from the palette, the toolbar buttons, and the boot ladder.
 import { render, type VNode } from 'preact';
-import { renderMarkdown } from '@/editor';
-import type { KoineEditor, OutputView } from '@/editor';
+import { renderMarkdown } from '@/editor/editor';
+import type { KoineEditor, OutputView } from '@/editor/editor';
 import type {
   CheckResult,
   ContextMapResult,

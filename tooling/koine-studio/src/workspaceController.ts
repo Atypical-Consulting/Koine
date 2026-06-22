@@ -47,7 +47,7 @@ export interface WorkspaceLsp {
   format(): Promise<TextEdit[]>;
 }
 
-/** The slice of the {@link import('@/editor').KoineEditor} handle the workspace drives. */
+/** The slice of the {@link import('@/editor/editor').KoineEditor} handle the workspace drives. */
 export interface WorkspaceEditor {
   getDoc(): string;
   setDoc(doc: string): void;

@@ -1,7 +1,7 @@
 // Koine Studio app composition: wires the .koi editor, the live LSP diagnostics,
 // the status line, the diagnostics strip, and the tabbed inspector (emitted preview,
 // glossary, and context map).
-import { createOutputView } from '@/editor';
+import { createOutputView } from '@/editor/editor';
 import {
   KoineLsp,
   type GlossaryEntry,

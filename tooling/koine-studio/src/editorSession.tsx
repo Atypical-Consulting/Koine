@@ -15,7 +15,7 @@
 // status pill (#status), the header count badge (#diag-count), and the status-bar validity mirror
 // (#sb-validity) stay imperative here.
 import { render } from 'preact';
-import { createKoineEditor, setEditorDiagnostics, type KoineEditor } from '@/editor';
+import { createKoineEditor, setEditorDiagnostics, type KoineEditor } from '@/editor/editor';
 import { diagnosticsInRange } from '@/ideUtils';
 import { appStore } from '@/store/index';
 import { diagnosticsSummary } from '@/diagnosticsSummary';

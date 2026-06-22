@@ -53,7 +53,7 @@ import type {
   TextEdit,
   WorkspaceEdit,
 } from '@/lsp/lsp';
-import { dismissFloating, showActionMenu, showRenameInput } from '@/actions';
+import { dismissFloating, showActionMenu, showRenameInput } from '@/editor/actions';
 
 // --- .koi token highlighter -------------------------------------------------
 
