@@ -8,7 +8,7 @@
 // app store's `activeContext` slice (src/store/slices/activeContext.ts) — the single source of truth the
 // switcher (inspectorController) writes and every scoped surface reads; this file is now just the pure
 // scoping helpers + the ALL_CONTEXTS / ContextScope vocabulary they share.
-import type { ContextMapResult, DiagramGraph, DocsFile, GlossaryModel } from '@/lsp';
+import type { ContextMapResult, DiagramGraph, DocsFile, GlossaryModel } from '@/lsp/lsp';
 
 /** The sentinel scope meaning "don't narrow — show every context". A real context name never collides
  *  (Koine contexts are PascalCase identifiers), so this lowercase literal is safe as the unscoped marker. */

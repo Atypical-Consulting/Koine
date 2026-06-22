@@ -3,7 +3,7 @@
 // (generateProject.ts); all I/O is injected so the wizard stays decoupled from the LSP client and
 // the host. Flow: pick a target language → choose artifacts → name the project → generate + save.
 import { createModal } from '@/shared/overlay';
-import type { EmitPreviewResult } from '@/lsp';
+import type { EmitPreviewResult } from '@/lsp/lsp';
 import {
   buildProjectZip,
   canGenerate,

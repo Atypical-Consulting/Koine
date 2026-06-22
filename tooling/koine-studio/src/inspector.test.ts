@@ -5,7 +5,7 @@ import {
   type InspectorElement,
   type InspectorHandlers,
 } from '@/inspector';
-import type { DiagramNode, GlossaryEntry, ModelMember, Range } from '@/lsp';
+import type { DiagramNode, GlossaryEntry, ModelMember, Range } from '@/lsp/lsp';
 
 afterEach(() => {
   document.body.innerHTML = '';

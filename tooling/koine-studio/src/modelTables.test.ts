@@ -9,7 +9,7 @@ import {
   type EventRow,
   type RelationRow,
 } from '@/modelTables';
-import type { ContextMapResult, DiagramEdge, DiagramGraph, DiagramNode, SourceSpan } from '@/lsp';
+import type { ContextMapResult, DiagramEdge, DiagramGraph, DiagramNode, SourceSpan } from '@/lsp/lsp';
 
 afterEach(() => {
   document.body.innerHTML = '';

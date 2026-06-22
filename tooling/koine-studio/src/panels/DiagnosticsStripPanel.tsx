@@ -2,7 +2,7 @@ import type { StoreApi } from 'zustand/vanilla';
 import type { AppState } from '@/store/index';
 import { useAppStore } from '@/store/hooks';
 import { diagnosticsSummary } from '@/diagnosticsSummary';
-import type { LspDiagnostic } from '@/lsp';
+import type { LspDiagnostic } from '@/lsp/lsp';
 
 // The editor's diagnostics strip (#diag-count + #diag-body) as a Preact panel (#193). It subscribes to
 // the `diagnosticsByUri` slice and, via the injected `activeUri`, renders the ACTIVE file's diagnostics:

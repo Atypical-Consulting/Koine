@@ -6,7 +6,7 @@ import {
   renderOverviewCounts,
   type ModelOutlineHandlers,
 } from '@/modelOutline';
-import type { GlossaryEntry, GlossaryModel, Range } from '@/lsp';
+import type { GlossaryEntry, GlossaryModel, Range } from '@/lsp/lsp';
 
 afterEach(() => {
   document.body.innerHTML = '';

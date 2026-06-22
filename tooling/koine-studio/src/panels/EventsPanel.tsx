@@ -1,7 +1,7 @@
 import type { StoreApi } from 'zustand/vanilla';
 import type { AppState } from '@/store/index';
 import { useAppStore } from '@/store/hooks';
-import type { DiagramGraph } from '@/lsp';
+import type { DiagramGraph } from '@/lsp/lsp';
 import { extractEvents, renderEventsTable, type TableHandlers } from '@/modelTables';
 import { scopeGraph } from '@/activeContext';
 

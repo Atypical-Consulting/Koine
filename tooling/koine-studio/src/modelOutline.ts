@@ -8,7 +8,7 @@
 // and its `doc`. The richer-but-narrower `DiagramGraph` (members/stereotype) drives the *inspector*;
 // it is NOT the outline backbone because its aggregate diagrams only enumerate nested types, so a
 // top-level value object would be missed — the glossary lists them all.
-import type { GlossaryEntry, GlossaryModel } from '@/lsp';
+import type { GlossaryEntry, GlossaryModel } from '@/lsp/lsp';
 import { groupByContext } from '@/glossary';
 
 /**

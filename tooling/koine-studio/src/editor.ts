@@ -52,7 +52,7 @@ import type {
   Range as LspRange,
   TextEdit,
   WorkspaceEdit,
-} from '@/lsp';
+} from '@/lsp/lsp';
 import { dismissFloating, showActionMenu, showRenameInput } from '@/actions';
 
 // --- .koi token highlighter -------------------------------------------------

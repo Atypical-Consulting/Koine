@@ -8,7 +8,7 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { act } from '@testing-library/preact';
 import { createEditorSession, type EditorSessionDeps } from '@/editorSession';
-import type { CodeAction, CompletionItem, HoverResult, Location, LspDiagnostic, Range } from '@/lsp';
+import type { CodeAction, CompletionItem, HoverResult, Location, LspDiagnostic, Range } from '@/lsp/lsp';
 
 // --- DOM seed ----------------------------------------------------------------
 // Exactly the ids editorSession looks up via document.getElementById, inlined so a drift from

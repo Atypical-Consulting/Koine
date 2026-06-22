@@ -4,7 +4,7 @@ import { createAppStore } from '@/store/index';
 import { useAppStore } from '@/store/hooks';
 import { PropertiesPanel } from '@/panels/PropertiesPanel';
 import { buildModelIndex } from '@/modelIndex';
-import type { DiagramNode, DocsFile, DocsResult, GlossaryEntry, GlossaryModel, Range } from '@/lsp';
+import type { DiagramNode, DocsFile, DocsResult, GlossaryEntry, GlossaryModel, Range } from '@/lsp/lsp';
 import type { InspectorHandlers } from '@/inspector';
 
 const range: Range = { start: { line: 0, character: 0 }, end: { line: 0, character: 4 } };

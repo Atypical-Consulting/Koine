@@ -29,13 +29,13 @@ import type {
   PrepareRenameResult,
   Range,
   WorkspaceEdit,
-} from '@/lsp';
+} from '@/lsp/lsp';
 
 /** The status pill kinds — connecting (boot), green (model valid), error (diagnostics/connection). */
 export type StatusKind = 'connecting' | 'green' | 'error';
 
 /**
- * The slice of {@link import('@/lsp').KoineLsp} the editor callback wall + diagnostics wiring needs.
+ * The slice of {@link import('@/lsp/lsp').KoineLsp} the editor callback wall + diagnostics wiring needs.
  * A structural interface (not the class) so tests can pass a spy. Methods mirror KoineLsp 1:1.
  */
 export interface EditorSessionLsp {

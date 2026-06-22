@@ -3,7 +3,7 @@
 // renderer: the hand-rolled, addressable SVG renderer (src/diagrams-svg.ts) that consumes the graph and
 // draws real, queryable, interactive DOM. (There is deliberately no Mermaid fallback: the structured
 // graph is always sufficient, and a second rendering path would only be dead weight.)
-import type { DocsFile } from '@/lsp';
+import type { DocsFile } from '@/lsp/lsp';
 import { createSvgRenderer } from '@/diagrams-svg';
 
 /** The renderer seam: `ide.ts` renders diagrams through this stable signature. */

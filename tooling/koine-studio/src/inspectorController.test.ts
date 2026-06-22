@@ -22,7 +22,7 @@ import type {
   GlossaryEntry,
   GlossaryModel,
   SetDocResult,
-} from '@/lsp';
+} from '@/lsp/lsp';
 
 // --- DOM seed ----------------------------------------------------------------
 // The center / docs / bottom-strip / right-rail / left-rail / context-switcher subset of index.html the

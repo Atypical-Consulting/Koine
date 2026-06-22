@@ -15,7 +15,7 @@ import { afterEach, beforeEach, describe, expect, it, test, vi } from 'vitest';
 import { createWorkspaceController, type WorkspaceControllerDeps } from '@/workspaceController';
 import { pathToFileUri } from '@/ideUtils';
 import type { FsEntry, KoiFile, Platform, SourceDoc } from '@/host/types';
-import type { TextEdit, WorkspaceEdit } from '@/lsp';
+import type { TextEdit, WorkspaceEdit } from '@/lsp/lsp';
 
 // --- in-memory Platform ------------------------------------------------------
 // A browser-like host backed by a Map<relPath, contents> under a single workspace folder. Implements

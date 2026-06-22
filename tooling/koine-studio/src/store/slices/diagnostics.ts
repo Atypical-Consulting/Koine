@@ -1,5 +1,5 @@
 import type { StoreApi } from 'zustand/vanilla';
-import type { LspDiagnostic } from '@/lsp';
+import type { LspDiagnostic } from '@/lsp/lsp';
 
 export interface DiagnosticsSlice {
   /** Per-uri diagnostics cache (the workspace-wide latest push for every file). */

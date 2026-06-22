@@ -1,7 +1,7 @@
 // Pure helper functions extracted from ide.ts. These are module-scope stateless utilities with
 // no side-effects, no DOM access, and no host-platform dependency — safe to import anywhere and
 // to test in a plain Node/vitest environment.
-import { type CheckResult, type ContextMapResult, type LspDiagnostic, type Range } from '@/lsp';
+import { type CheckResult, type ContextMapResult, type LspDiagnostic, type Range } from '@/lsp/lsp';
 import { type ShortcutRow } from '@/shared/help';
 
 /**

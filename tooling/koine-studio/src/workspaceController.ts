@@ -20,7 +20,7 @@
 import { dirtyCount, saveAllDirtyBuffers } from '@/dirty';
 import { pathToFileUri } from '@/ideUtils';
 import type { FsEntry, KoiFile, Platform } from '@/host';
-import type { TextEdit, WorkspaceEdit } from '@/lsp';
+import type { TextEdit, WorkspaceEdit } from '@/lsp/lsp';
 
 /** Outcome of an openFolderPath attempt, so callers (recent-open recovery) can react to a failure. */
 export type OpenResult = { ok: true } | { ok: false; reason: 'unreadable' | 'empty' };
@@ -35,7 +35,7 @@ export interface Buffer {
   dirty: boolean;
 }
 
-/** The slice of {@link import('@/lsp').KoineLsp} the workspace lifecycle drives (a spy in tests). */
+/** The slice of {@link import('@/lsp/lsp').KoineLsp} the workspace lifecycle drives (a spy in tests). */
 export interface WorkspaceLsp {
   openDoc(uri: string, text: string): void;
   closeDoc(uri: string): void;

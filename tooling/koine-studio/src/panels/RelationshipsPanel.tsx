@@ -1,7 +1,7 @@
 import type { StoreApi } from 'zustand/vanilla';
 import type { AppState } from '@/store/index';
 import { useAppStore } from '@/store/hooks';
-import type { ContextMapResult, DiagramGraph } from '@/lsp';
+import type { ContextMapResult, DiagramGraph } from '@/lsp/lsp';
 import { extractRelationships, renderRelationshipsTable, type TableHandlers } from '@/modelTables';
 import { scopeContextMap, scopeGraph } from '@/activeContext';
 

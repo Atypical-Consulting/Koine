@@ -8,7 +8,7 @@ import {
   type Location,
   type SourceSpan,
   type StructuredEdit,
-} from '@/lsp';
+} from '@/lsp/lsp';
 import {
   fileUriToPath,
   helpRows,

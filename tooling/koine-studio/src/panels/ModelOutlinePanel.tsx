@@ -1,7 +1,7 @@
 import type { StoreApi } from 'zustand/vanilla';
 import type { AppState } from '@/store/index';
 import { useAppStore } from '@/store/hooks';
-import type { GlossaryModel } from '@/lsp';
+import type { GlossaryModel } from '@/lsp/lsp';
 import { renderModelOutline, type ModelOutlineHandlers } from '@/modelOutline';
 import { filterGlossaryModel, scopeGlossaryModel } from '@/activeContext';
 import { lookupElement, type ModelIndex } from '@/modelIndex';

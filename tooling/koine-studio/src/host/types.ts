@@ -40,7 +40,7 @@ export interface SourceDoc {
 }
 
 /**
- * Transport for the JSON-RPC language server. {@link import('@/lsp').KoineLsp} frames the
+ * Transport for the JSON-RPC language server. {@link import('@/lsp/lsp').KoineLsp} frames the
  * messages; the transport just moves the bytes and surfaces server→client messages. On the
  * desktop this brokers stdio to the `koine lsp` child; in the browser it drives an in-process
  * WASM-backed language server.

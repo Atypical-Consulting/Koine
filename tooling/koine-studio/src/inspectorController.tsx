@@ -37,7 +37,7 @@ import type {
   SetDocResult,
   SourceSpan,
   StructuredEdit,
-} from '@/lsp';
+} from '@/lsp/lsp';
 import type { Platform } from '@/host';
 import type { PreviewTarget } from '@/store';
 import { renderDiagrams } from '@/diagrams';
@@ -85,7 +85,7 @@ type DocsView = 'glossary' | 'adr' | 'notes';
 type BottomTab = 'problems' | 'events' | 'relationships' | 'contextmap';
 
 /**
- * The slice of {@link import('@/lsp').KoineLsp} the loaders call (content requests only). A
+ * The slice of {@link import('@/lsp/lsp').KoineLsp} the loaders call (content requests only). A
  * structural interface (not the class) so tests can pass a spy; methods mirror KoineLsp 1:1.
  */
 export interface InspectorControllerLsp {

@@ -2,7 +2,7 @@ import { describe, expect, test } from 'vitest';
 import { act, render } from '@testing-library/preact';
 import { createAppStore } from '@/store/index';
 import { RelationshipsPanel } from '@/panels/RelationshipsPanel';
-import type { ContextMapResult, DiagramEdge, DiagramGraph, DiagramNode, SourceSpan } from '@/lsp';
+import type { ContextMapResult, DiagramEdge, DiagramGraph, DiagramNode, SourceSpan } from '@/lsp/lsp';
 
 const span = (line: number): SourceSpan => ({
   file: 'file:///m.koi',
