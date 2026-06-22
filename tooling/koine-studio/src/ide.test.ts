@@ -144,12 +144,13 @@ class FakePlatform implements Platform {
   pickFolder(): Promise<string | null> {
     return Promise.resolve(null);
   }
-  saveProjectToRoot(_name: string, _files: { relPath: string; contents: string }[]): Promise<string | null> {
-    return Promise.resolve(null);
-  }
-  workspaceRootName(): Promise<string | null> {
-    return Promise.resolve(null);
-  }
+  saveProjectToRoot = vi.fn(async (name: string, files: { relPath: string; contents: string }[]): Promise<string | null> => {
+    // Seed the fake FS so the follow-up openFolderPath(token) reads the written files back.
+    this.files.clear();
+    for (const f of files) this.files.set(f.relPath, f.contents);
+    return name;
+  });
+  workspaceRootName = vi.fn(async (): Promise<string | null> => null);
   materializeWorkspace(
     name: string,
     files: { relPath: string; contents: string }[],
@@ -238,6 +239,7 @@ const APP_HTML = `
           </div>
           <div class="tb-group">
             <button type="button" id="btn-generate-project">Generate</button>
+            <button type="button" id="btn-save-project">Save to disk</button>
           </div>
           <button type="button" id="btn-check">Check</button>
         </div>
@@ -642,5 +644,40 @@ describe('ide init() — close/unload guard', () => {
     beforeUnload(dirty);
     expect(dirty.defaultPrevented).toBe(true);
     expect(dirty.returnValue).toBeTruthy();
+  });
+});
+
+describe('ide init() — Save to disk', () => {
+  test('Save to disk writes the open buffers as a named project', async () => {
+    await boot();
+    const saveSpy = (fakePlatform.current as FakePlatform).saveProjectToRoot;
+    vi.stubGlobal('prompt', vi.fn(() => 'my-pizzeria'));
+
+    (document.getElementById('btn-save-project') as HTMLButtonElement).click();
+    await settleBoot();
+
+    expect(saveSpy).toHaveBeenCalledTimes(1);
+    const [name, files] = saveSpy.mock.calls[0] as [string, { relPath: string; contents: string }[]];
+    expect(name).toBe('my-pizzeria');
+    expect(files.some((f) => f.relPath === 'model.koi')).toBe(true);
+  });
+
+  test('Save to disk does nothing when the name prompt is cancelled', async () => {
+    await boot();
+    const saveSpy = (fakePlatform.current as FakePlatform).saveProjectToRoot;
+    vi.stubGlobal('prompt', vi.fn(() => null));
+
+    (document.getElementById('btn-save-project') as HTMLButtonElement).click();
+    await settleBoot();
+
+    expect(saveSpy).not.toHaveBeenCalled();
+  });
+
+  test('Save to disk button is hidden when the host cannot save projects', async () => {
+    const p = installPlatform();
+    // Override the readonly property to simulate a host that cannot save projects.
+    (p as unknown as { canSaveProjects: boolean }).canSaveProjects = false;
+    await boot({ platform: p });
+    expect((document.getElementById('btn-save-project') as HTMLButtonElement).hidden).toBe(true);
   });
 });
