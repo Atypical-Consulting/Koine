@@ -81,6 +81,19 @@ export function scopeGlossaryModel(model: GlossaryModel, scope: ContextScope): G
 }
 
 /**
+ * Narrow a {@link ContextMapResult} to a single bounded context by keeping only the relations that
+ * touch that context — i.e. it is the relation's `upstream` or `downstream` endpoint (the `contexts`
+ * list is left as-is). {@link ALL_CONTEXTS} is the identity — the same context map is returned untouched.
+ */
+export function scopeContextMap(contextMap: ContextMapResult, scope: ContextScope): ContextMapResult {
+  if (isAllContexts(scope)) return contextMap;
+  return {
+    ...contextMap,
+    relations: contextMap.relations.filter((r) => r.upstream === scope || r.downstream === scope),
+  };
+}
+
+/**
  * Narrow the living-docs files behind the Diagrams tab to a single bounded context: each diagram's
  * structured graph is scoped (the renderer draws from `diagram.graph`), diagrams left with no nodes are
  * dropped, and files left with no diagrams fall away — so a context with no diagram simply shows the

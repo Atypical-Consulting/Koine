@@ -4,6 +4,7 @@ import {
   fileContextFollow,
   isAllContexts,
   listContexts,
+  scopeContextMap,
   scopeDocsFiles,
   scopeGlossaryModel,
   scopeGraph,
@@ -145,6 +146,27 @@ describe('scopeGlossaryModel', () => {
 
   test('ALL_CONTEXTS is the identity (same model)', () => {
     expect(scopeGlossaryModel(model, ALL_CONTEXTS)).toBe(model);
+  });
+});
+
+describe('scopeContextMap', () => {
+  const ctxMap: ContextMapResult = {
+    contexts: ['Sales', 'Inventory', 'Billing'],
+    relations: [
+      { upstream: 'Sales', downstream: 'Billing', kind: 'customer-supplier', bidirectional: false, sharedTypes: [], acl: [] },
+      { upstream: 'Inventory', downstream: 'Billing', kind: 'conformist', bidirectional: false, sharedTypes: [], acl: [] },
+    ],
+  };
+
+  test('keeps only relations touching the scope (as upstream or downstream)', () => {
+    const scoped = scopeContextMap(ctxMap, 'Sales');
+    expect(scoped.relations.map((r) => `${r.upstream}->${r.downstream}`)).toEqual(['Sales->Billing']);
+    expect(scoped.contexts).toEqual(ctxMap.contexts);
+    expect(scopeContextMap(ctxMap, 'Billing').relations).toHaveLength(2);
+  });
+
+  test('ALL_CONTEXTS is the identity (same context map)', () => {
+    expect(scopeContextMap(ctxMap, ALL_CONTEXTS)).toBe(ctxMap);
   });
 });
 

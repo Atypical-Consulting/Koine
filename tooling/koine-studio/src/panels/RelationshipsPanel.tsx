@@ -3,7 +3,7 @@ import type { AppState } from '../store/index';
 import { useAppStore } from '../store/hooks';
 import type { ContextMapResult, DiagramGraph } from '../lsp';
 import { extractRelationships, renderRelationshipsTable, type TableHandlers } from '../modelTables';
-import { isAllContexts, scopeGraph } from '../activeContext';
+import { scopeContextMap, scopeGraph } from '../activeContext';
 
 // The bottom-panel Relationships table as a Preact panel (#193, #144, #146). It subscribes to the
 // `activeContext` slice and narrows BOTH halves of the relationships view: the structural edges (via
@@ -22,12 +22,7 @@ export function RelationshipsPanel(props: {
 }) {
   const scope = useAppStore(props.store, (s) => s.activeContext);
   const scopedGraph = scopeGraph(props.graph, scope);
-  const scopedCtxMap = isAllContexts(scope)
-    ? props.contextMap
-    : {
-        ...props.contextMap,
-        relations: props.contextMap.relations.filter((r) => r.upstream === scope || r.downstream === scope),
-      };
+  const scopedCtxMap = scopeContextMap(props.contextMap, scope);
   const rows = extractRelationships(scopedGraph, scopedCtxMap);
   return (
     <div
