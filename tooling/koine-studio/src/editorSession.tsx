@@ -6,12 +6,20 @@
 // in ide.ts and is injected as deps or surfaced as a callback — this module is deliberately
 // agnostic of buffers, the file tree, and the host platform.
 //
-// The diagnosticsByUri cache lives HERE (it moved out of init()). Other controllers — notably
-// Task 5's workspaceController — read and mutate it through the accessors exposed below
-// (diagnosticsFor / showDiagnostics / dropDiagnostics / renameDiagnostics / clearDiagnostics) and
-// MUST NOT relocate the Map again.
+// The per-uri diagnostics cache now lives in the app store's `diagnostics` slice (issue #193): the
+// LSP publish path writes it via appStore.setDiagnostics and the accessors below
+// (diagnosticsFor / showDiagnostics / dropDiagnostics / renameDiagnostics / clearDiagnostics) delegate
+// to that single source of truth. Other controllers — notably workspaceController — keep reading and
+// mutating through these accessors. The diagnostics STRIP (#diag-body rows + its count) is rendered by
+// the Preact DiagnosticsStripPanel mounted below, which subscribes to the slice; the editor gutter, the
+// status pill (#status), the header count badge (#diag-count), and the status-bar validity mirror
+// (#sb-validity) stay imperative here.
+import { render } from 'preact';
 import { createKoineEditor, setEditorDiagnostics, type KoineEditor } from './editor';
 import { diagnosticsInRange } from './ideUtils';
+import { appStore } from './store/index';
+import { diagnosticsSummary } from './diagnosticsSummary';
+import { DiagnosticsStripPanel } from './panels/DiagnosticsStripPanel';
 import type {
   CodeAction,
   CompletionItem,
@@ -117,11 +125,12 @@ export interface EditorSession {
 export function createEditorSession(deps: EditorSessionDeps): EditorSession {
   const { lsp } = deps;
 
-  // The per-uri diagnostics cache. Holds the latest pushed diagnostics for every file in the
-  // workspace so switching files can re-render the active one and the tree can badge files with
-  // errors. Lives here (it moved out of init()); see the module header — Task 5 reads it via the
-  // accessors below rather than relocating it.
-  const diagnosticsByUri = new Map<string, LspDiagnostic[]>();
+  // The per-uri diagnostics cache is the app store's `diagnostics` slice (issue #193). Holds the latest
+  // pushed diagnostics for every file in the workspace so switching files can re-render the active one
+  // and the tree can badge files with errors. Reads/writes go through the slice via these helpers so the
+  // strip panel (which subscribes to the slice) stays in sync; the accessors exposed on the session
+  // delegate here. See the module header.
+  const diagFor = (uri: string): LspDiagnostic[] => appStore.getState().diagnosticsFor(uri);
 
   // The registered downstream onChange callback (ide.ts: welcome.hide / buffer+dirty / onDocEdited /
   // renderTree). The session's own onChange does the editor↔LSP sync, then invokes this.
@@ -134,7 +143,7 @@ export function createEditorSession(deps: EditorSessionDeps): EditorSession {
   // Scope a code-action request to the active file's diagnostics under the range (so the quickfix
   // menu offers fixes for THIS selection, not unrelated typos elsewhere in the file).
   const codeActions = (range: Range) =>
-    lsp.codeActions(range, diagnosticsInRange(diagnosticsByUri.get(deps.activeUri()) ?? [], range));
+    lsp.codeActions(range, diagnosticsInRange(diagFor(deps.activeUri()), range));
 
   const editor = createKoineEditor({
     parent: deps.parent,
@@ -175,9 +184,13 @@ export function createEditorSession(deps: EditorSessionDeps): EditorSession {
     deps.sbConnection.textContent = kind === 'connecting' ? 'Connecting…' : kind === 'error' ? 'Offline' : 'Local';
   }
 
+  // The strip ROWS + their count text now live in the DiagnosticsStripPanel (mounted into #diag-body
+  // below), which reads the diagnostics slice. This helper keeps the two imperative MIRRORS that ride
+  // alongside the strip: the bottom-panel header count badge (#diag-count) and the status-bar validity
+  // mirror (#sb-validity). Both summarise the active file's diagnostics with the exact strings used
+  // before the migration.
   function renderStrip(diags: LspDiagnostic[]): void {
-    const errors = diags.filter((d) => d.severity === 1 || d.severity == null).length;
-    const warnings = diags.filter((d) => d.severity === 2).length;
+    const { errors, kind, parts } = diagnosticsSummary(diags);
     // Status-bar validity: a plain-language read of the same error count that feeds #diag-count.
     if (errors) {
       deps.sbValidity.textContent = errors === 1 ? '1 error' : `${errors} errors`;
@@ -186,85 +199,82 @@ export function createEditorSession(deps: EditorSessionDeps): EditorSession {
       deps.sbValidity.textContent = 'No errors';
       deps.sbValidity.dataset.kind = 'ok';
     }
-    if (!errors && !warnings) {
+    if (kind === 'clean') {
       deps.diagCount.textContent = 'clean';
       deps.diagCount.dataset.kind = 'clean';
     } else {
-      const parts: string[] = [];
-      if (errors) parts.push(`${errors} error${errors === 1 ? '' : 's'}`);
-      if (warnings) parts.push(`${warnings} warning${warnings === 1 ? '' : 's'}`);
       deps.diagCount.textContent = parts.join(' · ');
-      deps.diagCount.dataset.kind = errors ? 'error' : 'warn';
-    }
-
-    deps.diagBody.innerHTML = '';
-    if (!diags.length) {
-      const span = document.createElement('span');
-      span.className = 'diag-empty';
-      span.textContent = 'No diagnostics.';
-      deps.diagBody.appendChild(span);
-      return;
-    }
-    for (const d of diags) {
-      const row = document.createElement('button');
-      row.type = 'button';
-      row.className = d.severity === 2 ? 'diag diag-warn' : 'diag diag-err';
-      const line = d.range.start.line + 1;
-      const col = d.range.start.character + 1;
-      const code = d.code != null ? `${d.code}: ` : '';
-      row.textContent = `${d.severity === 2 ? 'warn' : 'error'} ${line}:${col}  ${code}${d.message}`;
-      row.addEventListener('click', () => editor.goto(line, col));
-      deps.diagBody.appendChild(row);
+      deps.diagCount.dataset.kind = kind;
     }
   }
 
+  // Mount (and re-render) the diagnostics strip as a Preact panel into #diag-body. The panel reads the
+  // app store's diagnostics slice for the live activeUri, so it owns the strip rows + its own count text;
+  // the row click drives the same editor.goto the old imperative rows did. The panel self-subscribes to
+  // the slice, but paintActive also re-renders it synchronously on each active-file push — Preact's
+  // top-level render() reconciles into the same #diag-body node, so the host keeps its identity and the
+  // strip repaints immediately (the same synchronous behavior the old imperative renderStrip had). It is
+  // mounted lazily on the first paint (NOT at construction) because deps.activeUri() — read during the
+  // panel's render — may close over wiring (e.g. ide.ts's workspace) that isn't assigned yet here.
+  function renderStripPanel(): void {
+    render(
+      <DiagnosticsStripPanel
+        store={appStore}
+        activeUri={deps.activeUri}
+        onGoto={(line, col) => editor.goto(line, col)}
+      />,
+      deps.diagBody,
+    );
+  }
+
   function updateStatus(diags: LspDiagnostic[]): void {
-    const errors = diags.filter((d) => d.severity === 1 || d.severity == null).length;
-    const warnings = diags.filter((d) => d.severity === 2).length;
-    if (errors === 0 && warnings === 0) {
+    const { kind, parts } = diagnosticsSummary(diags);
+    if (kind === 'clean') {
       setStatus('green ✓', 'green');
     } else {
-      const parts: string[] = [];
-      if (errors) parts.push(`${errors} error${errors === 1 ? '' : 's'}`);
-      if (warnings) parts.push(`${warnings} warning${warnings === 1 ? '' : 's'}`);
+      // The status pill joins the SAME parts with ' / ' (not the strip's ' · ').
       setStatus(parts.join(' / '), 'error');
     }
   }
 
   // --- diagnostics cache + render --------------------------------------------
 
-  /** Repaint the editor gutter + strip + status from a diagnostics set (the active file). */
+  /**
+   * Repaint the editor gutter + the strip panel + the strip mirrors (#diag-count badge, #sb-validity) +
+   * the status pill from a diagnostics set (the active file). The strip ROWS are owned by the panel; the
+   * synchronous re-render here makes its repaint immediate (the slice was just written).
+   */
   function paintActive(diags: LspDiagnostic[]): void {
     setEditorDiagnostics(editor.view, diags);
+    renderStripPanel();
     renderStrip(diags);
     updateStatus(diags);
   }
 
   function renderDiagnostics(uri: string, diags: LspDiagnostic[]): void {
-    diagnosticsByUri.set(uri, diags);
+    // Write the slice first — the strip panel subscribes to it and re-renders the rows + its count.
+    appStore.getState().setDiagnostics(uri, diags);
     if (uri === deps.activeUri()) paintActive(diags);
   }
 
   function showDiagnostics(uri: string): void {
-    paintActive(diagnosticsByUri.get(uri) ?? []);
+    paintActive(diagFor(uri));
   }
 
   function diagnosticsFor(uri: string): LspDiagnostic[] {
-    return diagnosticsByUri.get(uri) ?? [];
+    return diagFor(uri);
   }
 
   function dropDiagnostics(uri: string): void {
-    diagnosticsByUri.delete(uri);
+    appStore.getState().dropDiagnostics(uri);
   }
 
   function renameDiagnostics(oldUri: string, newUri: string): void {
-    const diags = diagnosticsByUri.get(oldUri);
-    diagnosticsByUri.delete(oldUri);
-    if (diags) diagnosticsByUri.set(newUri, diags);
+    appStore.getState().renameDiagnostics(oldUri, newUri);
   }
 
   function clearDiagnostics(): void {
-    diagnosticsByUri.clear();
+    appStore.getState().clearDiagnostics();
   }
 
   // --- LSP subscriptions -----------------------------------------------------

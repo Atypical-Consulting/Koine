@@ -6,6 +6,7 @@
 // 0-based coordinates. The session is driven with an `lsp` stub and a small seeded DOM (the same
 // id surface init() builds), mirroring explorer.test.ts / inspector.test.ts spy + DOM-seed idioms.
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
+import { act } from '@testing-library/preact';
 import { createEditorSession, type EditorSessionDeps } from './editorSession';
 import type { CodeAction, CompletionItem, HoverResult, Location, LspDiagnostic, Range } from './lsp';
 
@@ -107,7 +108,9 @@ describe('createEditorSession — diagnostics for the active uri', () => {
     const lsp = makeLsp();
     const session = createEditorSession(makeDeps(lsp));
 
-    lsp.firePublish(ACTIVE, [err(0, 'no good'), warn(2, 'meh')]);
+    // The strip body is now a Preact panel reading the diagnostics slice; act() flushes its
+    // (async-batched) re-render so the rows are in the DOM before we assert.
+    act(() => lsp.firePublish(ACTIVE, [err(0, 'no good'), warn(2, 'meh')]));
 
     // Strip count summarises errors + warnings.
     expect(el('diag-count').textContent).toBe('1 error · 1 warning');
@@ -132,7 +135,8 @@ describe('createEditorSession — diagnostics for the active uri', () => {
     const lsp = makeLsp();
     createEditorSession(makeDeps(lsp));
 
-    lsp.firePublish(ACTIVE, []);
+    // act() flushes the strip panel's re-render so its empty-state span is in the DOM before we assert.
+    act(() => lsp.firePublish(ACTIVE, []));
 
     expect(el('diag-count').textContent).toBe('clean');
     expect(el('diag-count').dataset.kind).toBe('clean');

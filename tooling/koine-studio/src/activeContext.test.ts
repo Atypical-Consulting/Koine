@@ -1,10 +1,10 @@
-import { describe, expect, test, vi } from 'vitest';
+import { describe, expect, test } from 'vitest';
 import {
   ALL_CONTEXTS,
-  createActiveContextBus,
   fileContextFollow,
   isAllContexts,
   listContexts,
+  scopeContextMap,
   scopeDocsFiles,
   scopeGlossaryModel,
   scopeGraph,
@@ -149,54 +149,31 @@ describe('scopeGlossaryModel', () => {
   });
 });
 
+describe('scopeContextMap', () => {
+  const ctxMap: ContextMapResult = {
+    contexts: ['Sales', 'Inventory', 'Billing'],
+    relations: [
+      { upstream: 'Sales', downstream: 'Billing', kind: 'customer-supplier', bidirectional: false, sharedTypes: [], acl: [] },
+      { upstream: 'Inventory', downstream: 'Billing', kind: 'conformist', bidirectional: false, sharedTypes: [], acl: [] },
+    ],
+  };
+
+  test('keeps only relations touching the scope (as upstream or downstream)', () => {
+    const scoped = scopeContextMap(ctxMap, 'Sales');
+    expect(scoped.relations.map((r) => `${r.upstream}->${r.downstream}`)).toEqual(['Sales->Billing']);
+    expect(scoped.contexts).toEqual(ctxMap.contexts);
+    expect(scopeContextMap(ctxMap, 'Billing').relations).toHaveLength(2);
+  });
+
+  test('ALL_CONTEXTS is the identity (same context map)', () => {
+    expect(scopeContextMap(ctxMap, ALL_CONTEXTS)).toBe(ctxMap);
+  });
+});
+
 describe('isAllContexts', () => {
   test('is true only for the ALL_CONTEXTS sentinel', () => {
     expect(isAllContexts(ALL_CONTEXTS)).toBe(true);
     expect(isAllContexts('Sales')).toBe(false);
-  });
-});
-
-describe('createActiveContextBus', () => {
-  test('defaults to ALL_CONTEXTS; set then get round-trips', () => {
-    const bus = createActiveContextBus();
-    expect(bus.get()).toBe(ALL_CONTEXTS);
-    bus.set('Sales');
-    expect(bus.get()).toBe('Sales');
-  });
-
-  test('honours an explicit initial scope', () => {
-    expect(createActiveContextBus('Inventory').get()).toBe('Inventory');
-  });
-
-  test('subscribe fires on every real change with the new scope', () => {
-    const bus = createActiveContextBus();
-    const fn = vi.fn();
-    bus.subscribe(fn);
-    bus.set('Sales');
-    bus.set('Inventory');
-    expect(fn).toHaveBeenCalledTimes(2);
-    expect(fn).toHaveBeenNthCalledWith(1, 'Sales');
-    expect(fn).toHaveBeenNthCalledWith(2, 'Inventory');
-  });
-
-  test('setting the current value again is a no-op (no notification)', () => {
-    const bus = createActiveContextBus();
-    const fn = vi.fn();
-    bus.subscribe(fn);
-    bus.set(ALL_CONTEXTS);
-    bus.set('Sales');
-    bus.set('Sales');
-    expect(fn).toHaveBeenCalledTimes(1);
-  });
-
-  test('the unsubscribe handle stops further notifications', () => {
-    const bus = createActiveContextBus();
-    const fn = vi.fn();
-    const off = bus.subscribe(fn);
-    bus.set('Sales');
-    off();
-    bus.set('Inventory');
-    expect(fn).toHaveBeenCalledTimes(1);
   });
 });
 
