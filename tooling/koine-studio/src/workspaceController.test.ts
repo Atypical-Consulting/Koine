@@ -268,6 +268,19 @@ describe('createWorkspaceController — opening a folder', () => {
     expect(hideWelcome).not.toHaveBeenCalled();
   });
 
+  it('reports an empty folder and does NOT hide the welcome', async () => {
+    const hideWelcome = vi.fn();
+    const platform = new FakePlatform();
+    const trace: string[] = [];
+    const lsp = makeLsp(trace);
+    const editor = makeEditor(trace);
+    platform.listKoiFiles = vi.fn(async () => []);
+    const ws = createWorkspaceController(makeDeps(platform, lsp, editor, { hideWelcome }));
+    const result = await ws.openFolderPath(ROOT, { recent: false });
+    expect(result).toEqual({ ok: false, reason: 'empty' });
+    expect(hideWelcome).not.toHaveBeenCalled();
+  });
+
   test('openWorkspaceWith1File materializes a 1-file workspace and opens it', async () => {
     const platform = new FakePlatform();
     const trace: string[] = [];

@@ -275,6 +275,10 @@ export async function saveProjectToRoot(
   folders.set(token, projectDir);
   folderNames.set(token, name);
   dirHandles.set(token, projectDir);
+  // Registries are populated before the writes; a mid-loop createFile failure leaves a partial
+  // <root>/<name>/ dir on disk and a session-only token (no idbPut runs). By design there is no
+  // rollback — the caller reports the error and the user retries with a different name (collision
+  // then surfaces 'already exists'). See the spec's error-handling section.
   for (const f of files) await createFile(token, f.relPath, f.contents);
   await idbPut(token, projectDir);
   return token;
