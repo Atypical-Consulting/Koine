@@ -1,19 +1,24 @@
 import { describe, expect, test } from 'vitest';
 import { createStore } from 'zustand/vanilla';
-import { DEFAULT_MODE_ID } from '../../modes';
-import { createUiChromeSlice, type UiChromeSlice } from './uiChrome';
+import { createUiChromeSlice, DEFAULT_CENTER, isValidCenter, type UiChromeSlice } from './uiChrome';
 
 const make = () => createStore<UiChromeSlice>((set, get) => createUiChromeSlice(set, get));
 
 describe('uiChrome slice', () => {
-  test('setMode keeps center consistent and falls back on an invalid id', () => {
+  test('center defaults to Visual and setCenter switches it', () => {
     const s = make();
-    s.getState().setMode('code');
-    expect(s.getState().mode).toBe('code');
+    expect(s.getState().center).toBe(DEFAULT_CENTER);
+    expect(DEFAULT_CENTER).toBe('visual');
+    s.getState().setCenter('technical');
     expect(s.getState().center).toBe('technical');
-    s.getState().setMode('not-a-mode');
-    expect(s.getState().mode).toBe(DEFAULT_MODE_ID);
-    expect(s.getState().center).toBe('visual');
+  });
+
+  test('isValidCenter accepts real panes and rejects everything else', () => {
+    expect(isValidCenter('visual')).toBe(true);
+    expect(isValidCenter('technical')).toBe(true);
+    expect(isValidCenter('docs')).toBe(true);
+    expect(isValidCenter('domain')).toBe(false); // an old persisted mode id is not a center
+    expect(isValidCenter('')).toBe(false);
   });
 
   test('tab setters are independent', () => {

@@ -64,12 +64,10 @@ import { ModelOutlinePanel } from './panels/ModelOutlinePanel';
 import { EventsPanel } from './panels/EventsPanel';
 import { RelationshipsPanel } from './panels/RelationshipsPanel';
 import { GlossaryPanel } from './panels/GlossaryPanel';
-import { ChromeTabs } from './panels/ChromeTabs';
 import { DocsPanelHost } from './panels/DocsPanelHost';
 import { appStore } from './store/index';
-import { centerForMode, type RightView } from './store/slices/uiChrome';
+import { DEFAULT_CENTER, isValidCenter, type RightView } from './store/slices/uiChrome';
 import type { DomainIndex } from './aiPanel';
-import { DEFAULT_MODE_ID, isValidModeId } from './modes';
 import { currentTheme } from './theme';
 import { renderCheckMarkdown, renderContextMapHtml } from './ideUtils';
 
@@ -124,9 +122,9 @@ export interface InspectorControllerDeps {
   /** The destination language for the Generated preview on boot (Settings → Output). */
   initialTarget: PreviewTarget;
 
-  // --- store seams (persist/restore the per-workspace mode + scope) ---
-  saveWorkspaceMode(id: string): void;
-  loadWorkspaceMode(): string | null;
+  // --- store seams (persist/restore the per-workspace center pane + scope) ---
+  saveWorkspaceCenter(id: string): void;
+  loadWorkspaceCenter(): string | null;
   saveActiveContext(workspaceKey: string, scope: string): void;
   loadActiveContext(workspaceKey: string): string | null;
 
@@ -183,8 +181,7 @@ export interface InspectorController {
   /** The active bounded-context handle (#146) — read at paint time by every scoped surface. */
   readonly activeContext: ActiveContextHandle;
 
-  // Mode / view selection (palette commands + toolbar/tab clicks route here).
-  selectMode(id: string): void;
+  // View selection (palette commands + toolbar/tab clicks route here).
   selectCenter(view: CenterView): void;
   selectTech(view: TechView): void;
   selectDocsTab(view: DocsView): void;
@@ -282,23 +279,22 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   const relationshipsPanel = el('panel-relationships');
   const contextMapView = el('panel-contextmap');
 
-  // --- mode switcher (#143) --------------------------------------------------
-  // Restore the persisted mode, defaulting to Domain when absent/invalid.
-  const restoredMode = deps.loadWorkspaceMode();
-  const initialMode: string = restoredMode && isValidModeId(restoredMode) ? restoredMode : DEFAULT_MODE_ID;
-  // The chrome (mode + center / tech / docs tab states) is now owned by the uiChrome slice — the ONE
-  // source of truth for both the highlighted button AND the shown view, so they can never diverge
-  // (#193). Reset it to this controller's defaults: the restored mode drives `center` (Domain → visual,
-  // Code → technical, Docs → docs), with the tech/docs sub-views back at their landing tabs. setState is
-  // used (not setMode) so the reset lands atomically in one notification, before any subscriber runs.
+  // --- center pane restore ---------------------------------------------------
+  // Restore the persisted center pane, defaulting to Visual when absent/invalid.
+  const restoredCenter = deps.loadWorkspaceCenter();
+  const initialCenter: CenterView =
+    restoredCenter && isValidCenter(restoredCenter) ? restoredCenter : DEFAULT_CENTER;
+  // The chrome (center / tech / docs tab states) is owned by the uiChrome slice — the ONE source of
+  // truth for both the highlighted tab AND the shown view, so they can never diverge (#193). Reset it to
+  // this controller's defaults: the restored center, with the tech/docs sub-views back at their landing
+  // tabs. setState lands the reset atomically in one notification, before any subscriber runs.
   // `bottom`/`right` are reset to their landing tabs alongside the others: `appStore` is a module
   // SINGLETON reused across controller instances (notably the test suite), so without this reset a prior
   // instance that left `bottom`/`right` on a non-default tab would leak into this one — the same reason
   // the docViews invalidate() below resets surface-staleness. This restores the per-instance defaults the
   // old module-local `activeBottomTab = 'problems'` / right-rail `'props'` start gave for free.
   appStore.setState({
-    mode: initialMode,
-    center: centerForMode(initialMode),
+    center: initialCenter,
     tech: 'editor',
     docs: 'glossary',
     bottom: 'problems',
@@ -315,23 +311,15 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   // the singleton's surface-staleness between controller instances.
   appStore.getState().invalidate();
 
-  // The switcher buttons (Domain / Code / Docs) are a Preact panel mounted into the existing
-  // #mode-switcher host: each button's aria-selected derives from the slice `mode` and its click calls
-  // setMode, so the active button and the shown center come from the one value.
-  const modeSwitcherHost = el('mode-switcher');
-  render(<ChromeTabs store={appStore} />, modeSwitcherHost);
-  // On a real mode change: (1) repaint ChromeTabs synchronously — Preact's hook-driven re-render is
-  // batched/async, but the controller's contract (and callers asserting straight after selectMode) need
-  // the button highlight to land in the same tick the center does, so re-render() reconciles it now;
-  // (2) persist the choice, with a no-churn guard so re-selecting the same mode doesn't write storage
-  // (the old applyModeChrome contract).
-  let persistedMode = initialMode;
+  // Persist the active center pane across reloads: on a real center change, write it through, with a
+  // no-churn guard so re-selecting the same pane doesn't touch storage. The center tabs (Visual / Code /
+  // Documentation) are the only switcher now, so what they land on is what a reload restores.
+  let persistedCenter: CenterView = initialCenter;
   appStore.subscribe((s, prev) => {
-    if (s.mode === prev.mode) return;
-    render(<ChromeTabs store={appStore} />, modeSwitcherHost);
-    if (s.mode !== persistedMode) {
-      persistedMode = s.mode;
-      deps.saveWorkspaceMode(s.mode);
+    if (s.center === prev.center) return;
+    if (s.center !== persistedCenter) {
+      persistedCenter = s.center;
+      deps.saveWorkspaceCenter(s.center);
     }
   });
 
@@ -1030,19 +1018,6 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     }, 350);
   }
 
-  // Enter a mode from the header switcher: focus its region. Domain → the visual canvas, Code → the
-  // technical code view, Docs → the Documentation rail. Writing the mode through the slice's setMode is
-  // the single transition that highlights the button (ChromeTabs derives its aria from the slice) AND
-  // drives the center (setMode re-derives `center`); the persistence of a real change is handled by the
-  // slice subscriber wired at construction (a no-churn guard there means re-selecting the same mode
-  // doesn't write storage). The select* routing below fills in the sub-view + fires the lazy loaders.
-  function selectMode(id: string): void {
-    appStore.getState().setMode(id);
-    if (id === 'code') selectCenter('technical');
-    else if (id === 'docs') focusDocs();
-    else selectCenter('visual');
-  }
-
   for (const t of centerTabs) {
     t.addEventListener('click', () => selectCenter(t.dataset.center as CenterView));
   }
@@ -1340,11 +1315,11 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   }
 
   // --- boot ------------------------------------------------------------------
-  // Boot the center chrome into the restored mode (no fetch — ide.ts's boot ladder's
+  // Boot the center chrome into the restored center pane (no fetch — ide.ts's boot ladder's
   // refreshActiveSurfaces loads everything once the workspace document is open) + label the Generated
-  // sub-tab with the persisted target. The mode + center are already seeded in the slice at construction
-  // (setState above) and the mode buttons derive their highlight from it via ChromeTabs, so boot only
-  // paints the center chrome from that slice state.
+  // sub-tab with the persisted target. The center is already seeded in the slice at construction
+  // (setState above) and the center tabs derive their highlight from it, so boot only paints the center
+  // chrome from that slice state.
   function init(): void {
     applyCenterChrome();
     setTarget(currentTarget);
@@ -1353,7 +1328,6 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   return {
     selection,
     activeContext,
-    selectMode,
     selectCenter,
     selectTech,
     selectDocsTab,

@@ -25,11 +25,10 @@ import type {
 } from './lsp';
 
 // --- DOM seed ----------------------------------------------------------------
-// The center / docs / bottom-strip / right-rail / left-rail / mode-switcher / context-switcher subset
-// of index.html the controller looks up via el(...). Kept equivalent to ide.test.ts's APP_HTML.
+// The center / docs / bottom-strip / right-rail / left-rail / context-switcher subset of index.html the
+// controller looks up via el(...). Kept equivalent to ide.test.ts's APP_HTML.
 const APP_HTML = `
   <div id="app">
-    <nav id="mode-switcher" class="mode-switcher" role="tablist"></nav>
     <div id="context-switcher" class="context-switcher" hidden></div>
     <main id="split">
       <aside id="leftrail" class="pane">
@@ -205,8 +204,8 @@ function makeDeps(lsp: Lsp, over: Partial<InspectorControllerDeps> = {}): Inspec
     activeUri: () => 'file:///work/model.koi',
     folderRootToken: () => '',
     initialTarget: 'csharp',
-    saveWorkspaceMode: vi.fn(),
-    loadWorkspaceMode: vi.fn(() => null),
+    saveWorkspaceCenter: vi.fn(),
+    loadWorkspaceCenter: vi.fn(() => null),
     saveActiveContext: vi.fn(),
     loadActiveContext: vi.fn(() => null),
     setStatus: vi.fn(),
@@ -235,57 +234,56 @@ afterEach(() => {
   document.body.innerHTML = '';
 });
 
-describe('createInspectorController — mode switching', () => {
-  test('init() boots Domain (default) → the visual center is shown and its button marked', () => {
+describe('createInspectorController — center switching', () => {
+  test('init() boots Visual (default) → the visual center is shown, the others hidden', () => {
     const ctl = createInspectorController(makeDeps(makeLsp()));
     ctl.init();
 
     expect(el('center-visual').hidden).toBe(false);
     expect(el('center-technical').hidden).toBe(true);
     expect(el('center-docs').hidden).toBe(true);
-    const domainBtn = document.querySelector<HTMLElement>('.mode-btn[data-mode="domain"]')!;
-    expect(domainBtn.getAttribute('aria-selected')).toBe('true');
+    expect(el('center-tab-visual').getAttribute('aria-selected')).toBe('true');
   });
 
-  test('selectMode("code") surfaces the technical center + editor sub-view and marks the Code button', () => {
+  test('selectCenter("technical") surfaces the technical center + editor sub-view and marks the Code tab', () => {
     const ctl = createInspectorController(makeDeps(makeLsp()));
     ctl.init();
 
-    ctl.selectMode('code');
+    ctl.selectCenter('technical');
 
     expect(el('center-technical').hidden).toBe(false);
     expect(el('center-visual').hidden).toBe(true);
-    expect(el('editor-pane').hidden).toBe(false); // Code mode lands on the editor sub-tab
-    expect(document.querySelector('.mode-btn[data-mode="code"]')!.getAttribute('aria-selected')).toBe('true');
-    expect(document.querySelector('.mode-btn[data-mode="domain"]')!.getAttribute('aria-selected')).toBe('false');
+    expect(el('editor-pane').hidden).toBe(false); // the technical center lands on the editor sub-tab
+    expect(el('center-tab-technical').getAttribute('aria-selected')).toBe('true');
+    expect(el('center-tab-visual').getAttribute('aria-selected')).toBe('false');
   });
 
-  test('selectMode("docs") focuses the Documentation center on the Glossary sub-view', () => {
+  test('selectCenter("docs") surfaces the Documentation center on the Glossary sub-view', () => {
     const ctl = createInspectorController(makeDeps(makeLsp()));
     ctl.init();
 
-    ctl.selectMode('docs');
+    ctl.selectCenter('docs');
 
     expect(el('center-docs').hidden).toBe(false);
     expect(el('view-glossary').hidden).toBe(false);
     expect(el('view-docs').hidden).toBe(true);
-    expect(document.querySelector('.mode-btn[data-mode="docs"]')!.getAttribute('aria-selected')).toBe('true');
+    expect(el('center-tab-docs').getAttribute('aria-selected')).toBe('true');
   });
 
-  test('a real mode change persists via saveWorkspaceMode; re-selecting the same mode does not', () => {
-    const saveWorkspaceMode = vi.fn();
-    const ctl = createInspectorController(makeDeps(makeLsp(), { saveWorkspaceMode }));
+  test('a real center change persists via saveWorkspaceCenter; re-selecting the same center does not', () => {
+    const saveWorkspaceCenter = vi.fn();
+    const ctl = createInspectorController(makeDeps(makeLsp(), { saveWorkspaceCenter }));
     ctl.init();
 
-    ctl.selectMode('code');
-    expect(saveWorkspaceMode).toHaveBeenCalledWith('code');
-    saveWorkspaceMode.mockClear();
-    ctl.selectMode('code'); // same mode — no churn
-    expect(saveWorkspaceMode).not.toHaveBeenCalled();
+    ctl.selectCenter('technical');
+    expect(saveWorkspaceCenter).toHaveBeenCalledWith('technical');
+    saveWorkspaceCenter.mockClear();
+    ctl.selectCenter('technical'); // same center — no churn
+    expect(saveWorkspaceCenter).not.toHaveBeenCalled();
   });
 
-  test('a persisted mode restores the matching center on boot (Code → technical)', () => {
-    const ctl = createInspectorController(makeDeps(makeLsp(), { loadWorkspaceMode: () => 'code' }));
+  test('a persisted center restores it on boot (technical)', () => {
+    const ctl = createInspectorController(makeDeps(makeLsp(), { loadWorkspaceCenter: () => 'technical' }));
     ctl.init();
     expect(el('center-technical').hidden).toBe(false);
     expect(el('center-visual').hidden).toBe(true);
@@ -360,9 +358,9 @@ describe('createInspectorController — invalidation forces a refetch', () => {
     const lsp = makeLsp();
     const ctl = createInspectorController(makeDeps(lsp));
     ctl.init();
-    // Land on Code so the only live model-derived surface is the left rail (loadModel), keeping the
-    // assertion about the debounced refreshContextList clean.
-    ctl.selectMode('code');
+    // Land on the technical center so the only live model-derived surface is the left rail (loadModel),
+    // keeping the assertion about the debounced refreshContextList clean.
+    ctl.selectCenter('technical');
     lsp.glossaryModel.mockClear();
 
     ctl.onDocEdited();

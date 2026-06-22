@@ -13,8 +13,8 @@ import {
   CHAT_HISTORY_CAP,
   peekLegacyScratch,
   clearLegacyScratch,
-  loadWorkspaceMode,
-  saveWorkspaceMode,
+  loadWorkspaceCenter,
+  saveWorkspaceCenter,
   loadDiagramZoom,
   saveDiagramZoom,
   loadDiagramPositions,
@@ -267,18 +267,18 @@ describe('legacy scratch migration helpers', () => {
   });
 });
 
-describe('workspace mode persistence (#143)', () => {
+describe('workspace center-pane persistence', () => {
   beforeEach(() => localStorage.clear());
 
-  test('returns null when no mode has been stored', () => {
-    expect(loadWorkspaceMode()).toBeNull();
+  test('returns null when no center has been stored', () => {
+    expect(loadWorkspaceCenter()).toBeNull();
   });
 
-  test('round-trips a saved mode through the store helper', () => {
-    saveWorkspaceMode('docs');
-    expect(loadWorkspaceMode()).toBe('docs');
-    saveWorkspaceMode('code'); // a later save overwrites the prior one
-    expect(loadWorkspaceMode()).toBe('code');
+  test('round-trips a saved center through the store helper', () => {
+    saveWorkspaceCenter('docs');
+    expect(loadWorkspaceCenter()).toBe('docs');
+    saveWorkspaceCenter('technical'); // a later save overwrites the prior one
+    expect(loadWorkspaceCenter()).toBe('technical');
   });
 });
 
