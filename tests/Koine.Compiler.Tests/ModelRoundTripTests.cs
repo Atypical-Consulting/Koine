@@ -290,6 +290,94 @@ public class ModelRoundTripTests
         result.Diagnostics.ShouldNotBeEmpty();
     }
 
+    // ---- add / remove whole types (authoring: add / delete a node) --------
+
+    [Fact]
+    public void EmitKoine_add_type_emits_a_new_value_skeleton_in_the_context()
+    {
+        var edit = new StructuredEdit(StructuredEditKind.AddType, "Ordering", Name: "Discount");
+        EmitResult result = ModelRoundTripService.EmitKoine(Files(Sample), edit);
+
+        result.Diagnostics.ShouldBeEmpty();
+        result.Koine.ShouldNotBeNull();
+        result.Koine!.ShouldContain("value Discount");
+        result.Koine!.ShouldContain("name: String");
+        // The whole context is re-emitted, so the existing types survive alongside the new one.
+        result.Koine!.ShouldContain("value Money");
+    }
+
+    [Fact]
+    public void EmitKoine_add_type_with_a_duplicate_name_is_rejected()
+    {
+        var edit = new StructuredEdit(StructuredEditKind.AddType, "Ordering", Name: "Money");
+        EmitResult result = ModelRoundTripService.EmitKoine(Files(Sample), edit);
+
+        result.Koine.ShouldBeNull();
+        result.Diagnostics.ShouldNotBeEmpty();
+    }
+
+    [Fact]
+    public void EmitKoine_add_type_to_an_unknown_context_is_a_no_op()
+    {
+        var edit = new StructuredEdit(StructuredEditKind.AddType, "Nope", Name: "Foo");
+        EmitResult result = ModelRoundTripService.EmitKoine(Files(Sample), edit);
+
+        result.Koine.ShouldBeNull();
+    }
+
+    [Fact]
+    public void EmitKoine_remove_type_drops_an_unreferenced_type()
+    {
+        var edit = new StructuredEdit(StructuredEditKind.RemoveType, "Ordering.Money");
+        EmitResult result = ModelRoundTripService.EmitKoine(Files(Sample), edit);
+
+        result.Diagnostics.ShouldBeEmpty();
+        result.Koine.ShouldNotBeNull();
+        result.Koine!.ShouldNotContain("value Money");
+        // Other declarations stay.
+        result.Koine!.ShouldContain("enum OrderStatus");
+    }
+
+    [Fact]
+    public void EmitKoine_remove_a_referenced_type_is_rejected()
+    {
+        // OrderStatus is referenced by `status: OrderStatus`, so removing it must not yield a broken model.
+        var edit = new StructuredEdit(StructuredEditKind.RemoveType, "Ordering.OrderStatus");
+        EmitResult result = ModelRoundTripService.EmitKoine(Files(Sample), edit);
+
+        result.Koine.ShouldBeNull();
+        result.Diagnostics.ShouldNotBeEmpty();
+    }
+
+    [Fact]
+    public void ApplyEdit_add_type_returns_one_patch_that_yields_a_compiling_model()
+    {
+        var edit = new StructuredEdit(StructuredEditKind.AddType, "Ordering", Name: "Discount");
+        ModelEditResult result = ModelRoundTripService.ApplyEdit(Files(Sample), edit);
+
+        result.Edits.Count.ShouldBe(1);
+        result.Diagnostics.ShouldBeEmpty();
+
+        var edited = Splice(Sample, result.Edits[0].Range, result.Edits[0].NewText);
+        edited.ShouldContain("value Discount");
+        var (model, diags) = new KoineCompiler().Parse(new[] { new SourceFile("t.koi", edited) });
+        diags.Where(d => d.Severity == DiagnosticSeverity.Error).ShouldBeEmpty();
+        model.ShouldNotBeNull();
+    }
+
+    [Fact]
+    public void ApplyEdit_remove_type_yields_a_compiling_model_without_the_type()
+    {
+        var edit = new StructuredEdit(StructuredEditKind.RemoveType, "Ordering.Money");
+        ModelEditResult result = ModelRoundTripService.ApplyEdit(Files(Sample), edit);
+
+        result.Edits.Count.ShouldBe(1);
+        var edited = Splice(Sample, result.Edits[0].Range, result.Edits[0].NewText);
+        edited.ShouldNotContain("value Money");
+        var (_, diags) = new KoineCompiler().Parse(new[] { new SourceFile("t.koi", edited) });
+        diags.Where(d => d.Severity == DiagnosticSeverity.Error).ShouldBeEmpty();
+    }
+
     private static IEnumerable<ModelNode> Flatten(ModelNode node)
     {
         yield return node;

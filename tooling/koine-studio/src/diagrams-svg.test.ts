@@ -3,7 +3,7 @@
 // one `<g class="koi-svg-node">` per node, tagged with the node's provenance so Task 4 can navigate
 // without re-querying. Layout coordinates are NOT asserted (layout-lib-dependent); we assert
 // structure, the node DOM contract, and the per-diagram fallback robustness only.
-import { afterEach, describe, expect, test } from 'vitest';
+import { afterEach, describe, expect, test, vi } from 'vitest';
 import {
   createSvgRenderer,
   setDiagramEditing,
@@ -11,9 +11,12 @@ import {
   DIAGRAM_RELAYOUT_EVENT,
   DIAGRAM_CONNECT_EVENT,
   DIAGRAM_DISCONNECT_EVENT,
+  DIAGRAM_ADD_TYPE_EVENT,
+  NODE_EDIT_EVENT,
   NODE_NAVIGATE_EVENT,
   type DiagramConnectDetail,
   type DiagramDisconnectDetail,
+  type DiagramNodeEditDetail,
   type DiagramNodeNavigateDetail,
 } from './diagrams-svg';
 import { loadDiagramPositions, saveDiagramPositions } from './store';
@@ -1130,5 +1133,94 @@ describe('canvas authoring: connect & disconnect (Phase 3)', () => {
     expect(disconnects).toHaveLength(1);
     expect(disconnects[0].backingMember).toBe('Ordering.Order.lines');
     expect(disconnects[0].label).toBe('lines');
+  });
+});
+
+describe('canvas authoring: add & delete nodes (Phase 3)', () => {
+  afterEach(() => {
+    setDiagramEditing(false);
+    setDiagramPersistScope('scratch');
+    localStorage.clear();
+    vi.restoreAllMocks();
+  });
+
+  function oneTypeFiles(): DocsFile[] {
+    return [
+      file([
+        diagram({
+          nodes: [
+            mkNode({
+              id: 'order',
+              label: 'Order',
+              kind: 'aggregate-root',
+              qualifiedName: 'Ordering.Order',
+              stereotype: 'aggregate root',
+              members: [{ text: 'id: OrderId', kind: 'field' }],
+              sourceSpan: { file: 'file:///o.koi', line: 5, column: 3, endLine: 9, endColumn: 4, offset: 40, length: 60 },
+            }),
+          ],
+          edges: [],
+        }),
+      ]),
+    ];
+  }
+
+  test('the "Add a type" button shows only when editing and dispatches an add-type event', async () => {
+    setDiagramEditing(false);
+    const ro = ROOT();
+    await createSvgRenderer().render(ro, oneTypeFiles(), 'light', () => true);
+    expect(ro.querySelector('.koi-canvas-btn[aria-label="Add a type"]')).toBeNull();
+
+    setDiagramEditing(true);
+    const container = ROOT();
+    let added = 0;
+    container.addEventListener(DIAGRAM_ADD_TYPE_EVENT, () => (added += 1));
+    await createSvgRenderer().render(container, oneTypeFiles(), 'light', () => true);
+
+    const btn = container.querySelector<HTMLButtonElement>('.koi-canvas-btn[aria-label="Add a type"]')!;
+    expect(btn).not.toBeNull();
+    btn.click();
+    expect(added).toBe(1);
+  });
+
+  test('double-clicking a node carries the name span so ide.ts can do a cross-file rename', async () => {
+    setDiagramEditing(true);
+    window.prompt = vi.fn(() => 'PurchaseOrder') as typeof window.prompt;
+
+    const container = ROOT();
+    await createSvgRenderer().render(container, oneTypeFiles(), 'light', () => true);
+
+    const edits: DiagramNodeEditDetail[] = [];
+    container.addEventListener(NODE_EDIT_EVENT, (e) => edits.push((e as CustomEvent<DiagramNodeEditDetail>).detail));
+
+    const node = container.querySelector<SVGGElement>('.koi-svg-node[data-qname="Ordering.Order"]')!;
+    node.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
+
+    expect(edits).toHaveLength(1);
+    expect(edits[0]).toMatchObject({
+      qualifiedName: 'Ordering.Order',
+      action: 'rename',
+      newName: 'PurchaseOrder',
+      line: 5,
+      column: 3,
+    });
+  });
+
+  test('right-clicking a node dispatches a delete edit (ide.ts maps it to removeType)', async () => {
+    setDiagramEditing(true);
+    window.confirm = vi.fn(() => true) as typeof window.confirm;
+
+    const container = ROOT();
+    await createSvgRenderer().render(container, oneTypeFiles(), 'light', () => true);
+
+    const edits: DiagramNodeEditDetail[] = [];
+    container.addEventListener(NODE_EDIT_EVENT, (e) => edits.push((e as CustomEvent<DiagramNodeEditDetail>).detail));
+
+    const node = container.querySelector<SVGGElement>('.koi-svg-node[data-qname="Ordering.Order"]')!;
+    node.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+
+    expect(edits).toHaveLength(1);
+    expect(edits[0].action).toBe('delete');
+    expect(edits[0].qualifiedName).toBe('Ordering.Order');
   });
 });

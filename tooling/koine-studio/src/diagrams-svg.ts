@@ -62,6 +62,10 @@ export interface DiagramNodeEditDetail {
   newName?: string;
   /** The node's display label (for status messages). */
   label: string;
+  /** The 1-based line of the declaration's name (a rename uses the editor's cross-file rename at this position). */
+  line?: number;
+  /** The 1-based column of the declaration's name. */
+  column?: number;
 }
 
 /**
@@ -125,6 +129,13 @@ export interface DiagramDisconnectDetail {
   backingMember: string;
   label: string;
 }
+
+/**
+ * Bubbling event the canvas dispatches from its "add type" button (authoring). The canvas doesn't know
+ * the bounded contexts, so `ide.ts` resolves the target context (the active scope) + prompts for a name
+ * and turns it into an `addType` edit (a new value-object skeleton in that context).
+ */
+export const DIAGRAM_ADD_TYPE_EVENT = 'koi-diagram-add-type';
 
 let elkPromise: Promise<ElkConstructor> | null = null;
 
@@ -309,7 +320,14 @@ function wireEditGestures(g: SVGGElement, node: DiagramNode): void {
       g.dispatchEvent(
         new CustomEvent<DiagramNodeEditDetail>(NODE_EDIT_EVENT, {
           bubbles: true,
-          detail: { qualifiedName: node.qualifiedName, action: 'rename', newName, label: current },
+          detail: {
+            qualifiedName: node.qualifiedName,
+            action: 'rename',
+            newName,
+            label: current,
+            line: node.sourceSpan?.line,
+            column: node.sourceSpan?.column,
+          },
         }),
       );
     });
@@ -892,10 +910,12 @@ interface CanvasOptions {
   onPersistPositions?: (positions: Record<string, { x: number; y: number }>) => void;
   /** Reset the layout to ELK's auto-arrangement (the control-bar button). */
   onAutoArrange?: () => void;
+  /** Add a new type to the active context (the control-bar button). */
+  onAddType?: () => void;
 }
 
 function mountInteractiveCanvas(surface: HTMLElement, svg: SVGSVGElement, opts: CanvasOptions = {}): CanvasDispose {
-  const { persistKey, scene, editing = false, onPersistPositions, onAutoArrange } = opts;
+  const { persistKey, scene, editing = false, onPersistPositions, onAutoArrange, onAddType } = opts;
   const contentBounds = readViewBox(svg);
 
   // node-id → its incident edges, so a drag can re-route just that node's connectors (not every edge).
@@ -933,7 +953,12 @@ function mountInteractiveCanvas(surface: HTMLElement, svg: SVGSVGElement, opts: 
   const zoomIn = controlButton('+', 'Zoom in');
   const fitBtn = controlButton('⤢', 'Fit to screen'); // ⤢
   controls.append(zoomOut, pct, zoomIn, fitBtn);
-  // Authoring: a "reset layout" button drops saved positions and re-runs ELK's auto-arrangement.
+  // Authoring: "add a type" to the active context, and "reset layout" to ELK's auto-arrangement.
+  if (editing && onAddType) {
+    const addTypeBtn = controlButton('＋', 'Add a type');
+    addTypeBtn.addEventListener('click', () => onAddType());
+    controls.append(addTypeBtn);
+  }
   if (editing && onAutoArrange) {
     const arrangeBtn = controlButton('⟲', 'Auto-arrange layout');
     arrangeBtn.addEventListener('click', () => onAutoArrange());
@@ -1534,6 +1559,7 @@ export function createSvgRenderer(): DiagramRenderer {
               clearDiagramPositions(key);
               surface.dispatchEvent(new CustomEvent(DIAGRAM_RELAYOUT_EVENT, { bubbles: true }));
             },
+            onAddType: () => surface.dispatchEvent(new CustomEvent(DIAGRAM_ADD_TYPE_EVENT, { bubbles: true })),
           }),
         );
       } catch (e) {
