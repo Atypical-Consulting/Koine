@@ -82,11 +82,14 @@ cross-cutting concern under `store/`; feature folders consume it via `@/store`.
 
 Three config files, all in `tooling/koine-studio/`:
 
-1. `tsconfig.json` — under `compilerOptions`, add:
+1. `tsconfig.json` — under `compilerOptions`, add a `paths` mapping:
    ```jsonc
-   "baseUrl": ".",
-   "paths": { "@/*": ["src/*"] }
+   "paths": { "@/*": ["./src/*"] }
    ```
+   > Implementation note: the design originally called for a `"baseUrl": "."` anchor, but the
+   > project's TypeScript (6.x) treats `baseUrl` as a fatal deprecated option (TS5101). Under
+   > `moduleResolution: "bundler"` (which this config uses) `paths` resolves relative to the config
+   > directory with no `baseUrl` needed, so the shipped form omits `baseUrl` and uses `"./src/*"`.
 2. `vite.config.ts` — add to the existing `resolve.alias` (next to the preact aliases):
    ```ts
    "@": fileURLToPath(new URL("./src", import.meta.url))
