@@ -9,7 +9,7 @@
 // it is NOT the outline backbone because its aggregate diagrams only enumerate nested types, so a
 // top-level value object would be missed — the glossary lists them all.
 import type { GlossaryEntry, GlossaryModel } from '@/lsp/lsp';
-import { groupByContext } from '@/glossary';
+import { groupByContext } from '@/model/glossary';
 
 /**
  * The DDD construct buckets, in the display order the navigator renders them. Each maps the glossary

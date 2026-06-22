@@ -8,7 +8,7 @@ import {
   renderRelationshipsTable,
   type EventRow,
   type RelationRow,
-} from '@/modelTables';
+} from '@/model/modelTables';
 import type { ContextMapResult, DiagramEdge, DiagramGraph, DiagramNode, SourceSpan } from '@/lsp/lsp';
 
 afterEach(() => {

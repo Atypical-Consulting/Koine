@@ -1,9 +1,9 @@
 import { describe, expect, test } from 'vitest';
 import { act, fireEvent, render } from '@testing-library/preact';
 import { createAppStore } from '@/store/index';
-import { ModelOutlinePanel } from '@/panels/ModelOutlinePanel';
+import { ModelOutlinePanel } from '@/model/ModelOutlinePanel';
 import type { GlossaryEntry, GlossaryModel, Range } from '@/lsp/lsp';
-import type { ModelOutlineHandlers } from '@/modelOutline';
+import type { ModelOutlineHandlers } from '@/model/modelOutline';
 
 const range: Range = { start: { line: 0, character: 0 }, end: { line: 0, character: 0 } };
 

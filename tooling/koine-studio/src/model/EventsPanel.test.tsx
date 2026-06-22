@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'vitest';
 import { act, render } from '@testing-library/preact';
 import { createAppStore } from '@/store/index';
-import { EventsPanel } from '@/panels/EventsPanel';
+import { EventsPanel } from '@/model/EventsPanel';
 import type { DiagramEdge, DiagramGraph, DiagramNode, SourceSpan } from '@/lsp/lsp';
 
 const span = (line: number): SourceSpan => ({

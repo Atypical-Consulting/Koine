@@ -5,7 +5,7 @@ import {
   renderModelOutline,
   renderOverviewCounts,
   type ModelOutlineHandlers,
-} from '@/modelOutline';
+} from '@/model/modelOutline';
 import type { GlossaryEntry, GlossaryModel, Range } from '@/lsp/lsp';
 
 afterEach(() => {

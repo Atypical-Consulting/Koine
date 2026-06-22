@@ -1,9 +1,9 @@
 import type { StoreApi } from 'zustand/vanilla';
 import { useStore } from 'zustand';
 import type { AppState } from '@/store/index';
-import { ALL_CONTEXTS, isAllContexts, type ContextScope } from '@/activeContext';
-import { lookupElement, type ModelIndex } from '@/modelIndex';
-import { constructForKind } from '@/modelOutline';
+import { ALL_CONTEXTS, isAllContexts, type ContextScope } from '@/model/activeContext';
+import { lookupElement, type ModelIndex } from '@/model/modelIndex';
+import { constructForKind } from '@/model/modelOutline';
 
 export interface ContextBreadcrumbProps {
   store: StoreApi<AppState>;

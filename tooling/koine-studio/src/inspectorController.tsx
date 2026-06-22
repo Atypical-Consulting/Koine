@@ -42,8 +42,8 @@ import type { Platform } from '@/host';
 import type { PreviewTarget } from '@/store';
 import { renderDiagrams } from '@/diagrams/diagrams';
 import { setDiagramPersistScope } from '@/diagrams/diagrams-svg';
-import { mergeDiagramGraphs } from '@/modelTables';
-import { type GlossaryHandlers } from '@/glossary';
+import { mergeDiagramGraphs } from '@/model/modelTables';
+import { type GlossaryHandlers } from '@/model/glossary';
 import { createDocsStore } from '@/docs/docsStore';
 import { renderAdrPanel, renderNotesPanel, type DocsPanelHandlers } from '@/docs/docsPanel';
 import {
@@ -54,17 +54,17 @@ import {
   scopeDocsFiles,
   scopeGlossaryModel,
   type ContextScope,
-} from '@/activeContext';
-import type { SelectedElement } from '@/selection';
-import { renderOverviewCounts, type ModelOutlineHandlers } from '@/modelOutline';
-import { type InspectorElement, type InspectorHandlers } from '@/inspector';
-import { buildModelIndex, lookupElement, type ModelIndex } from '@/modelIndex';
-import { PropertiesPanel } from '@/panels/PropertiesPanel';
-import { ContextBreadcrumb } from '@/panels/ContextBreadcrumb';
-import { ModelOutlinePanel } from '@/panels/ModelOutlinePanel';
-import { EventsPanel } from '@/panels/EventsPanel';
-import { RelationshipsPanel } from '@/panels/RelationshipsPanel';
-import { GlossaryPanel } from '@/panels/GlossaryPanel';
+} from '@/model/activeContext';
+import type { SelectedElement } from '@/model/selection';
+import { renderOverviewCounts, type ModelOutlineHandlers } from '@/model/modelOutline';
+import { type InspectorElement, type InspectorHandlers } from '@/model/inspector';
+import { buildModelIndex, lookupElement, type ModelIndex } from '@/model/modelIndex';
+import { PropertiesPanel } from '@/model/PropertiesPanel';
+import { ContextBreadcrumb } from '@/model/ContextBreadcrumb';
+import { ModelOutlinePanel } from '@/model/ModelOutlinePanel';
+import { EventsPanel } from '@/model/EventsPanel';
+import { RelationshipsPanel } from '@/model/RelationshipsPanel';
+import { GlossaryPanel } from '@/model/GlossaryPanel';
 import { DocsPanelHost } from '@/docs/DocsPanelHost';
 import { appStore } from '@/store/index';
 import { DEFAULT_CENTER, isValidCenter, type RightView } from '@/store/slices/uiChrome';

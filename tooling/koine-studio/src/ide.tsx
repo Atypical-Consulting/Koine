@@ -62,12 +62,12 @@ import {
   type EmptyConceptKind,
   type EmptyStatePickDetail,
 } from '@/diagrams/diagrams-svg';
-import { isAllContexts } from '@/activeContext';
+import { isAllContexts } from '@/model/activeContext';
 import { appStore } from '@/store/index';
 import { badgeCounts, createDiagCountGate } from '@/diagnostics/diagCountGate';
-import { type SelectedElement } from '@/selection';
-import { resolveInspectableQn } from '@/modelIndex';
-import { type InspectorElement } from '@/inspector';
+import { type SelectedElement } from '@/model/selection';
+import { resolveInspectableQn } from '@/model/modelIndex';
+import { type InspectorElement } from '@/model/inspector';
 import { createAssistantPanel, type AssistantPanel, type AssistantContext } from '@/ai/aiPanel';
 import { clearModelHash, readModelFromHash, workspaceShareUrlOrNull } from '@/export/share';
 import { handleBeforeUnload } from '@/dirty';

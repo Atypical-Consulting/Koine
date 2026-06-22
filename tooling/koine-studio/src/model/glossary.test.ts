@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test, vi } from 'vitest';
-import { coverage, groupByContext, renderGlossary, type GlossaryHandlers } from '@/glossary';
+import { coverage, groupByContext, renderGlossary, type GlossaryHandlers } from '@/model/glossary';
 import type { GlossaryEntry, GlossaryModel, Range } from '@/lsp/lsp';
 
 afterEach(() => {
