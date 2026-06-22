@@ -1,3 +1,6 @@
+import { createStore } from 'zustand/vanilla';
+import { createSelectionSlice, type SelectionSlice } from './store/slices/selection';
+
 // The shared "selected element" bus (issue #142). It is the spine of the DDD-aware workspace: a
 // single source of truth for which domain element is selected, so the model outline, the diagram,
 // and the element inspector all stay in sync. Clicking a node in the outline OR a node in the
@@ -24,23 +27,15 @@ export interface SelectionBus {
   subscribe(fn: (element: SelectedElement | null) => void): () => void;
 }
 
-/** Creates an independent selection bus. */
+/** Creates an independent selection bus, backed by a private Zustand store (transition adapter). */
 export function createSelectionBus(): SelectionBus {
-  let current: SelectedElement | null = null;
-  const subscribers = new Set<(element: SelectedElement | null) => void>();
-
+  const store = createStore<SelectionSlice>((set, get) => createSelectionSlice(set, get));
   return {
-    get: () => current,
-    set(element) {
-      current = element;
-      // Snapshot before iterating so a subscriber that unsubscribes mid-notify can't mutate the set.
-      for (const fn of [...subscribers]) fn(current);
-    },
-    subscribe(fn) {
-      subscribers.add(fn);
-      return () => {
-        subscribers.delete(fn);
-      };
-    },
+    get: () => store.getState().selection,
+    set: (element) => store.getState().setSelection(element),
+    subscribe: (fn) =>
+      store.subscribe((s, prev) => {
+        if (s.selection !== prev.selection) fn(s.selection);
+      }),
   };
 }
