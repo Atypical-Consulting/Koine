@@ -342,3 +342,39 @@
     display: none;
   }
 }
+
+/* Read-only "where am I" breadcrumb (active context › selected element). Sits beside the context
+   switcher; like the readout it's the first thing to fold away on a tight toolbar. */
+.topbar-breadcrumb {
+  display: flex;
+  min-width: 0;
+
+  @media (max-width: 1100px) {
+    display: none;
+  }
+}
+
+.koi-breadcrumb {
+  display: flex;
+  align-items: center;
+  gap: var(--koi-space-1-5);
+  min-width: 0;
+  color: var(--koi-muted);
+  font-size: var(--koi-text-sm);
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.koi-crumb {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.koi-crumb-leaf {
+  color: var(--koi-fg);
+  font-weight: 500;
+}
+
+.koi-crumb-sep {
+  color: var(--koi-line);
+}

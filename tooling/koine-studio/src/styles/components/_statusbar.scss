@@ -32,6 +32,21 @@
   color: var(--koi-error);
 }
 
+/* The badge host is transparent to layout (display:contents) so it adds no status-bar gap while the
+   workspace is clean and the panel renders nothing — only the badge span itself becomes a flex item. */
+#sb-problems-host {
+  display: contents;
+}
+
+/* Workspace-wide problems rollup (every file, not just the active one). Shares the diagnostics
+   strip's error/warn hues so the two read consistently; absent entirely when the workspace is clean. */
+.koi-problems-badge[data-kind='error'] {
+  color: var(--koi-error);
+}
+.koi-problems-badge[data-kind='warn'] {
+  color: var(--koi-hl-number);
+}
+
 /* Toolbar connection-status pill (top-right of the toolbar). */
 #status {
   display: inline-flex;

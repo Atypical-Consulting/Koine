@@ -22,12 +22,17 @@ export interface UiChromeSlice {
   docs: DocsView;
   bottom: BottomTab;
   right: RightView;
+  /** The Explorer outline's type-to-filter query. Lives in the store (not panel-local state) because the
+   *  controller unmounts + remounts the outline panel on every model reload, which would otherwise wipe a
+   *  component-local query mid-task; here it survives the remount. */
+  outlineFilter: string;
   setMode(id: string): void;
   setCenter(v: CenterView): void;
   setTech(v: TechView): void;
   setDocs(v: DocsView): void;
   setBottom(t: BottomTab): void;
   setRight(v: RightView): void;
+  setOutlineFilter(q: string): void;
 }
 
 export function createUiChromeSlice(
@@ -41,6 +46,7 @@ export function createUiChromeSlice(
     docs: 'glossary',
     bottom: 'problems',
     right: 'props',
+    outlineFilter: '',
     setMode: (id) => {
       const mode = isValidModeId(id) ? id : DEFAULT_MODE_ID;
       set({ mode, center: centerForMode(mode) });
@@ -50,5 +56,6 @@ export function createUiChromeSlice(
     setDocs: (v) => set({ docs: v, center: 'docs' }),
     setBottom: (t) => set({ bottom: t }),
     setRight: (v) => set({ right: v }),
+    setOutlineFilter: (q) => set({ outlineFilter: q }),
   };
 }

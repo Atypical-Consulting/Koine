@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { act, render } from '@testing-library/preact';
+import { act, fireEvent, render } from '@testing-library/preact';
 import { createAppStore } from '../store/index';
 import { ModelOutlinePanel } from './ModelOutlinePanel';
 import type { GlossaryEntry, GlossaryModel, Range } from '../lsp';
@@ -37,6 +37,58 @@ describe('ModelOutlinePanel', () => {
     // the async-batched re-render before we assert) and drops the other context's leaf.
     act(() => store.getState().setActiveContext('Sales'));
     expect(container.textContent).toContain('Order');
+    expect(container.textContent).not.toContain('Stock');
+  });
+
+  test('a filter query narrows the visible leaves by name; clearing it restores them', () => {
+    const store = createAppStore();
+    const { container } = render(<ModelOutlinePanel store={store} model={model} handlers={handlers} />);
+
+    const input = container.querySelector<HTMLInputElement>('input.koi-outline-filter')!;
+    expect(input).not.toBeNull();
+
+    // Both contexts' leaves present before filtering.
+    expect(container.textContent).toContain('Order');
+    expect(container.textContent).toContain('Stock');
+
+    // Typing "Ord" keeps the matching leaf (Order) and drops the rest (Stock).
+    fireEvent.input(input, { target: { value: 'Ord' } });
+    expect(container.textContent).toContain('Order');
+    expect(container.textContent).not.toContain('Stock');
+
+    // Clearing the query restores the full tree.
+    fireEvent.input(input, { target: { value: '' } });
+    expect(container.textContent).toContain('Order');
+    expect(container.textContent).toContain('Stock');
+  });
+
+  test('the filter query is store-backed, so it survives a panel remount (model reload)', () => {
+    const store = createAppStore();
+    const first = render(<ModelOutlinePanel store={store} model={model} handlers={handlers} />);
+    fireEvent.input(first.container.querySelector<HTMLInputElement>('input.koi-outline-filter')!, {
+      target: { value: 'Ord' },
+    });
+    expect(first.container.textContent).not.toContain('Stock');
+    first.unmount();
+
+    // A fresh panel against the SAME store — exactly what the controller does on every loadModel — keeps
+    // the filter instead of resetting it (the local-useState version would have cleared here).
+    const second = render(<ModelOutlinePanel store={store} model={model} handlers={handlers} />);
+    expect(second.container.querySelector<HTMLInputElement>('input.koi-outline-filter')!.value).toBe('Ord');
+    expect(second.container.textContent).toContain('Order');
+    expect(second.container.textContent).not.toContain('Stock');
+  });
+
+  test('the filter composes with the active-context scope', () => {
+    const store = createAppStore();
+    const { container } = render(<ModelOutlinePanel store={store} model={model} handlers={handlers} />);
+    const input = container.querySelector<HTMLInputElement>('input.koi-outline-filter')!;
+
+    // Scope to Sales first (drops Stock), then a filter that matches nothing in Sales clears the tree.
+    act(() => store.getState().setActiveContext('Sales'));
+    expect(container.textContent).toContain('Order');
+    fireEvent.input(input, { target: { value: 'Stock' } });
+    expect(container.textContent).not.toContain('Order');
     expect(container.textContent).not.toContain('Stock');
   });
 

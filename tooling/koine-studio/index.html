@@ -56,6 +56,10 @@
              with at least one context is open. -->
         <div id="context-switcher" class="context-switcher" hidden></div>
 
+        <!-- Read-only "where am I" breadcrumb (active context › selected element). The
+             <ContextBreadcrumb> Preact panel renders its <nav> in here, driven by the store. -->
+        <div id="breadcrumb-host" class="topbar-breadcrumb"></div>
+
         <div class="toolbar-right">
           <button type="button" id="palette-hint" class="palette-hint" title="Command palette (⌘K)" aria-label="Open command palette">⌘K</button>
           <span class="tb-divider" aria-hidden="true"></span>
@@ -193,6 +197,9 @@
       <footer id="statusbar" aria-label="Model status">
         <span class="sb-item" id="sb-context">Context: —</span>
         <span class="sb-item" id="sb-validity">No errors</span>
+        <!-- Workspace-wide problems rollup (every file, not just the active one). Empty when clean;
+             the <WorkspaceProblemsBadge> Preact panel renders its sb-item span in here. -->
+        <span id="sb-problems-host"></span>
         <span class="sb-spacer"></span>
         <span class="sb-item" id="sb-connection">Connecting…</span>
         <span class="sb-item" id="sb-version"></span>

@@ -81,6 +81,27 @@ export function scopeGlossaryModel(model: GlossaryModel, scope: ContextScope): G
 }
 
 /**
+ * Narrow a {@link GlossaryModel} to the entries whose name matches a free-text query (case-insensitive
+ * substring) — the type-to-filter box over the Explorer outline. Context-header entries (`kind` of
+ * `context`) are kept only for contexts that still have a matching child, so a surviving leaf keeps its
+ * clickable section header and a context with no match disappears entirely (no empty headers). A blank
+ * query is the identity — the same model is returned, so the unfiltered tree renders untouched.
+ */
+export function filterGlossaryModel(model: GlossaryModel, query: string): GlossaryModel {
+  const q = query.trim().toLowerCase();
+  if (!q) return model;
+  const matches = (name: string): boolean => name.toLowerCase().includes(q);
+  const contextsWithMatch = new Set(
+    model.entries.filter((e) => e.kind !== 'context' && matches(e.name)).map((e) => e.context),
+  );
+  return {
+    entries: model.entries.filter((e) =>
+      e.kind === 'context' ? contextsWithMatch.has(e.context) : matches(e.name),
+    ),
+  };
+}
+
+/**
  * Narrow a {@link ContextMapResult} to a single bounded context by keeping only the relations that
  * touch that context — i.e. it is the relation's `upstream` or `downstream` endpoint (the `contexts`
  * list is left as-is). {@link ALL_CONTEXTS} is the identity — the same context map is returned untouched.
