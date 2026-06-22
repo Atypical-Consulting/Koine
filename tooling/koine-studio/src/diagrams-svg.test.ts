@@ -1031,6 +1031,50 @@ describe('persisted free positioning (authoring overhaul, Phase 2)', () => {
     node.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     expect(navigated).toHaveLength(0);
   });
+
+  // Regression (#200): a node press that stays a CLICK (no movement) must NOT capture the pointer. In a
+  // real browser, calling setPointerCapture on pointerdown makes Chrome retarget the following `click` to
+  // the capture target (the canvas) instead of the node — so the node's navigate/select click never fires
+  // and the Properties inspector stays blank. happy-dom doesn't model that retarget, so we assert the
+  // CAUSE: capture is deferred until an actual drag, and a no-move press still reaches the node's click.
+  test('a no-move node press does not capture the pointer, so the click still selects the node', async () => {
+    setDiagramEditing(true);
+    setDiagramPersistScope('ws-press');
+
+    const container = ROOT();
+    await createSvgRenderer().render(container, twoNodeFiles(), 'light', () => true);
+
+    const canvas = container.querySelector<HTMLElement>('.koi-canvas')!;
+    const svg = container.querySelector<SVGSVGElement>('.koi-svg-diagram')!;
+    Object.defineProperty(canvas, 'clientWidth', { value: 800, configurable: true });
+    Object.defineProperty(canvas, 'clientHeight', { value: 600, configurable: true });
+    svg.getBoundingClientRect = () =>
+      ({ left: 0, top: 0, width: 800, height: 600, right: 800, bottom: 600, x: 0, y: 0, toJSON() {} }) as DOMRect;
+
+    let captures = 0;
+    canvas.setPointerCapture = () => {
+      captures += 1;
+    };
+
+    const node = container.querySelector<SVGGElement>('.koi-svg-node[data-qname="Ordering.Order"]')!;
+    const navigated: DiagramNodeNavigateDetail[] = [];
+    container.addEventListener(NODE_NAVIGATE_EVENT, (e) => navigated.push((e as CustomEvent<DiagramNodeNavigateDetail>).detail));
+
+    // Press + release with no movement → a click. No capture is taken…
+    node.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, clientX: 100, clientY: 100 }));
+    canvas.dispatchEvent(new MouseEvent('pointerup', { bubbles: true, clientX: 100, clientY: 100 }));
+    expect(captures).toBe(0);
+    // …so the synthesized click reaches the node and navigates/selects it.
+    node.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    expect(navigated).toHaveLength(1);
+
+    // A press that moves past the drag threshold IS a drag → it captures the pointer so the gesture keeps
+    // tracking even if the cursor leaves the canvas.
+    node.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, clientX: 100, clientY: 100 }));
+    canvas.dispatchEvent(new MouseEvent('pointermove', { bubbles: true, clientX: 220, clientY: 180 }));
+    expect(captures).toBe(1);
+    canvas.dispatchEvent(new MouseEvent('pointerup', { bubbles: true, clientX: 220, clientY: 180 }));
+  });
 });
 
 describe('canvas authoring: connect & disconnect (Phase 3)', () => {

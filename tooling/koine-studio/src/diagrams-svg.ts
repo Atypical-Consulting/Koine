@@ -1125,18 +1125,28 @@ function mountInteractiveCanvas(surface: HTMLElement, svg: SVGSVGElement, opts: 
     dragStart = { x: e.clientX, y: e.clientY };
     dragOrigin = { x: sn.rect.x, y: sn.rect.y };
     dragMoved = false;
-    canvas.classList.add('koi-canvas--dragging');
-    try {
-      canvas.setPointerCapture?.(e.pointerId);
-    } catch {
-      // setPointerCapture unsupported (headless DOM) — drag still works via canvas-level moves.
-    }
+    // Pointer capture (and the drag cursor) is DEFERRED to the first real move (moveNodeDrag). Capturing
+    // here on a plain press makes the browser retarget the follow-up `click` to the capture target (the
+    // canvas) instead of the node, so the node's navigate/select click would never fire and the Properties
+    // inspector would stay blank. A press that never crosses DRAG_THRESHOLD stays a click and reaches the
+    // node; only an actual drag captures.
   }
 
   function moveNodeDrag(e: PointerEvent): void {
     if (!dragNode || !scene) return;
-    if (!dragMoved && Math.hypot(e.clientX - dragStart.x, e.clientY - dragStart.y) < DRAG_THRESHOLD) return;
-    dragMoved = true;
+    if (!dragMoved) {
+      if (Math.hypot(e.clientX - dragStart.x, e.clientY - dragStart.y) < DRAG_THRESHOLD) return;
+      // The press has become a real drag: show the drag cursor and capture the pointer now, so the gesture
+      // keeps tracking even if the cursor leaves the canvas. Deferred from beginNodeDrag (see there) so a
+      // plain click isn't turned into a capture that steals the node's click.
+      dragMoved = true;
+      canvas.classList.add('koi-canvas--dragging');
+      try {
+        canvas.setPointerCapture?.(e.pointerId);
+      } catch {
+        // setPointerCapture unsupported (headless DOM) — drag still works via canvas-level moves.
+      }
+    }
     const sx = svgRect.width > 0 ? view.w / svgRect.width : 0;
     const sy = svgRect.height > 0 ? view.h / svgRect.height : 0;
     dragNode.rect.x = dragOrigin.x + (e.clientX - dragStart.x) * sx;
