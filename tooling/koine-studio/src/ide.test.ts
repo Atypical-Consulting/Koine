@@ -234,8 +234,7 @@ const APP_HTML = `
           </div>
           <button type="button" id="btn-check">Check</button>
         </div>
-        <div id="context-switcher" class="context-switcher" hidden></div>
-        <div id="breadcrumb-host" class="topbar-breadcrumb"></div>
+        <div id="breadcrumb-host" class="topbar-breadcrumb" hidden></div>
         <div class="toolbar-right">
           <button type="button" id="palette-hint" class="palette-hint">K</button>
           <button type="button" id="btn-theme" class="icon-btn">theme</button>
