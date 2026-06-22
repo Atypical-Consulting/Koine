@@ -9,7 +9,7 @@
 import { getRecentFolders, removeRecentFolder, pinRecentFolder, clearRecentFolders } from '@/store';
 import { LOGO_SVG } from '@/shared/logo';
 import { registerOverlay } from '@/shared/overlay';
-import { TEMPLATES, type Template } from '@/templates';
+import { TEMPLATES, type Template } from '@/welcome/templates';
 
 /** What the welcome actions delegate to; the host (ide.ts) performs the real work. */
 export interface WelcomeCallbacks {

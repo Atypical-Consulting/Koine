@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
-import { createWelcome, filterTemplates, DIFFICULTY_ORDER, type WelcomeCallbacks } from '@/welcome';
-import type { Template } from '@/templates';
+import { createWelcome, filterTemplates, DIFFICULTY_ORDER, type WelcomeCallbacks } from '@/welcome/welcome';
+import type { Template } from '@/welcome/templates';
 
 // Each test mounts a fresh welcome overlay on document.body; clear it between tests so stale
 // roots/handlers don't leak across cases.

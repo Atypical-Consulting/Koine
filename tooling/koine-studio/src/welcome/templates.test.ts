@@ -97,7 +97,7 @@ describe('collectTemplates', () => {
 
   it('includes every .koi in the folder in files[], forward-slashed', () => {
     const pizzeria = collectTemplates(fixtureDir).find((t) => t.id === 'pizzeria')!;
-    const byPath = Object.fromEntries((pizzeria.files ?? []).map((f) => [f.relPath, f.contents]));
+    const byPath = Object.fromEntries((pizzeria.files ?? []).map((f: { relPath: string; contents: string }) => [f.relPath, f.contents]));
     expect(Object.keys(byPath).sort()).toEqual(['context-map.koi', 'menu.koi', 'ordering.koi']);
     expect(byPath['menu.koi']).toBe(PIZZA_MENU);
     expect(byPath['ordering.koi']).toBe(PIZZA_ORDERING);
@@ -124,7 +124,7 @@ describe('collectTemplates', () => {
     const templates = collectTemplates(fixtureDir);
     const ts = renderManifest(templates);
     expect(ts).toContain('export const TEMPLATES');
-    expect(ts).toContain("import type { Template } from '@/templates'");
+    expect(ts).toContain("import type { Template } from '@/welcome/templates'");
     // The generated module must be deterministic JSON-safe content.
     expect(ts).toContain('"id": "billing"');
   });

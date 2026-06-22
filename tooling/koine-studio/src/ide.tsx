@@ -34,14 +34,14 @@ import {
   saveWorkspaceCenter,
   type Settings,
 } from '@/store';
-import { createWelcome } from '@/welcome';
-import { type Template } from '@/templates';
+import { createWelcome } from '@/welcome/welcome';
+import { type Template } from '@/welcome/templates';
 import { createCommandPalette, type Command } from '@/shared/palette';
 import { createPreferences } from '@/prefs';
 import { applyAppearance } from '@/appearance';
 import { initSplitResizer, initEdgeResizer } from '@/resize';
 import { createHelpOverlay } from '@/shared/help';
-import { createAboutDialog } from '@/about';
+import { createAboutDialog } from '@/welcome/about';
 import { createGenerateProject } from '@/export/generateProjectWizard';
 import { sanitizeProjectName } from '@/export/generateProject';
 import { buildSourceZip } from '@/export/sourceZip';
