@@ -46,15 +46,13 @@
           </button>
         </div>
 
-        <!-- Active bounded-context switcher (#146): scopes the model-derived surfaces (outline, diagram,
-             counts, inspector, Events/Relationships tables) to one context. The <select> + "Current
-             context" readout are injected from the model at runtime (see ide.ts); hidden until a model
-             with at least one context is open. -->
-        <div id="context-switcher" class="context-switcher" hidden></div>
-
-        <!-- Read-only "where am I" breadcrumb (active context › selected element). The
-             <ContextBreadcrumb> Preact panel renders its <nav> in here, driven by the store. -->
-        <div id="breadcrumb-host" class="topbar-breadcrumb"></div>
+        <!-- The top-bar "scope path" (#146): one breadcrumb that doubles as the bounded-context selector.
+             Its first segment is a <select> dressed as a crumb (scopes the model-derived surfaces —
+             outline, diagram, counts, inspector, Events/Relationships tables — to one context); its
+             second is the selected element with its Explorer construct icon. The <ContextBreadcrumb>
+             Preact panel renders here (see inspectorController); hidden until a model with a context is
+             open. -->
+        <div id="breadcrumb-host" class="topbar-breadcrumb" hidden></div>
 
         <div class="toolbar-right">
           <button type="button" id="palette-hint" class="palette-hint" title="Command palette (⌘K)" aria-label="Open command palette">⌘K</button>

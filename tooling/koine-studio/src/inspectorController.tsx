@@ -60,6 +60,7 @@ import { renderOverviewCounts, type ModelOutlineHandlers } from './modelOutline'
 import { type InspectorElement, type InspectorHandlers } from './inspector';
 import { buildModelIndex, lookupElement, type ModelIndex } from './modelIndex';
 import { PropertiesPanel } from './panels/PropertiesPanel';
+import { ContextBreadcrumb } from './panels/ContextBreadcrumb';
 import { ModelOutlinePanel } from './panels/ModelOutlinePanel';
 import { EventsPanel } from './panels/EventsPanel';
 import { RelationshipsPanel } from './panels/RelationshipsPanel';
@@ -268,7 +269,9 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   const checkView = el('view-check');
   // Right-rail host: the element inspector (Properties). Fixed — never torn down on a model reload.
   const inspectorHost = el('inspector-host');
-  // Status-bar context mirror.
+  // Top-bar "scope path" host (the ContextBreadcrumb Preact panel — the scope selector + selected
+  // element) and its status-bar context mirror.
+  const breadcrumbHost = el('breadcrumb-host');
   const sbContextEl = el('sb-context');
 
   // Bottom-panel refs.
@@ -331,19 +334,28 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     get: () => appStore.getState().activeContext,
     set: (scope) => appStore.getState().setActiveContext(scope),
   };
-  const contextSwitcher = el('context-switcher');
-  const contextLabel = document.createElement('span');
-  contextLabel.className = 'context-switcher-label';
-  contextLabel.id = 'context-switcher-label';
-  contextLabel.textContent = 'Context';
-  const contextSelect = document.createElement('select');
-  contextSelect.className = 'context-select';
-  contextSelect.setAttribute('aria-labelledby', 'context-switcher-label');
-  const contextReadout = document.createElement('span');
-  contextReadout.className = 'context-readout';
-  contextReadout.setAttribute('aria-live', 'polite');
-  contextSwitcher.append(contextLabel, contextSelect, contextReadout);
-  contextSelect.addEventListener('change', () => setActiveContext(contextSelect.value));
+  // The model's bounded contexts (the scope selector's options after "All contexts"), kept here so the
+  // breadcrumb can be re-rendered whenever they change. Empty in a cold/scratch model → the host hides.
+  let contexts: string[] = [];
+
+  // Render (or re-render) the top-bar "scope path": the ContextBreadcrumb Preact panel. It subscribes to
+  // the activeContext + selection slices itself (so a scope/selection change repaints it without a call
+  // here), and takes the contexts list + model index as props — so a re-render is needed only when those
+  // change (setContextOptions / a model-index rebuild). Hidden while the model has no contexts. Picking a
+  // context routes through setActiveContext — the same persist-and-repaint choke point the old <select>
+  // used — so the scoped surfaces stay consistent.
+  function renderBreadcrumb(): void {
+    breadcrumbHost.hidden = contexts.length === 0;
+    render(
+      <ContextBreadcrumb
+        store={appStore}
+        contexts={contexts}
+        index={modelIndex}
+        onScopeChange={setActiveContext}
+      />,
+      breadcrumbHost,
+    );
+  }
 
   /** The per-workspace storage key for the active scope (folder identity, or 'scratch'). */
   function contextWorkspaceKey(): string {
@@ -355,12 +367,11 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     return isAllContexts(scope) ? 'All contexts' : scope;
   }
 
-  /** Mirror the active scope onto the control + readout (no persistence, no re-render). */
-  function syncContextSwitcherUi(): void {
-    const scope = activeContext.get();
-    if (contextSelect.value !== scope) contextSelect.value = scope;
-    contextReadout.textContent = `Current context: ${scopeLabel(scope)}`;
-    sbContextEl.textContent = `Context: ${scopeLabel(scope)}`;
+  /** Mirror the active scope onto the status-bar readout. The top-bar selector reflects the scope on its
+   *  own (the breadcrumb subscribes to the activeContext slice), so this only feeds the persistent
+   *  status-bar "Context: X" — the readout that used to sit (redundantly) in the toolbar. */
+  function syncContextStatusBar(): void {
+    sbContextEl.textContent = `Context: ${scopeLabel(activeContext.get())}`;
   }
 
   // The single choke point for every scope change (the <select>, a restored value's validation, and
@@ -375,7 +386,7 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     // subscribes to it and re-renders the scoped tree, and every other scoped render path reads it back.
     activeContext.set(scope);
     if (persist) deps.saveActiveContext(contextWorkspaceKey(), scope);
-    syncContextSwitcherUi();
+    syncContextStatusBar();
     rerenderScopedSurfaces();
   }
 
@@ -384,29 +395,22 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     applyScope(scope, true);
   }
 
-  // Rebuild the switcher's options from the current model's contexts ("All contexts" first, then each
-  // context). Hidden when the model has no contexts (empty/scratch).
-  function setContextOptions(contexts: string[]): void {
-    contextSwitcher.hidden = contexts.length === 0;
-    const options = [ALL_CONTEXTS, ...contexts];
-    contextSelect.replaceChildren(
-      ...options.map((value) => {
-        const opt = document.createElement('option');
-        opt.value = value;
-        opt.textContent = scopeLabel(value);
-        return opt;
-      }),
-    );
+  // Adopt the current model's contexts as the scope selector's options ("All contexts" is always first,
+  // rendered by the breadcrumb itself). Re-renders the breadcrumb (which hides itself when the list is
+  // empty — an empty/scratch model).
+  function setContextOptions(list: string[]): void {
+    contexts = list;
+    renderBreadcrumb();
     // Fall back to "All contexts" ONLY when we positively know the model's contexts (a non-empty list)
     // and the active scope isn't among them — a genuine rename/removal. An EMPTY list is a transient or
     // cold state (the LSP still warming up right after open, or a momentarily-unparseable model mid-edit),
     // so preserve the scope rather than clobber it. The fallback is view-only (not persisted), so the
     // user's last explicit choice survives in storage and a reload restores it once the context is back.
     const scope = activeContext.get();
-    if (contexts.length > 0 && !isAllContexts(scope) && !contexts.includes(scope)) {
+    if (list.length > 0 && !isAllContexts(scope) && !list.includes(scope)) {
       applyScope(ALL_CONTEXTS, false);
     } else {
-      syncContextSwitcherUi();
+      syncContextStatusBar();
     }
   }
 
@@ -430,7 +434,7 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     const scope = stored && stored.length > 0 ? stored : ALL_CONTEXTS;
     // Set the store's scope so the ModelOutlinePanel's first paint is already scoped.
     activeContext.set(scope);
-    syncContextSwitcherUi();
+    syncContextStatusBar();
   }
 
   // When the active .koi file changes, follow the bounded-context switcher to that file's context so
@@ -779,6 +783,9 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     docMessage(explorerBody, 'Loading model…');
     try {
       const index = await ensureModelIndex();
+      // The model index just (re)built — re-pass it to the breadcrumb so the selected element's type icon
+      // resolves (the panel tracks selection itself, but reads the construct off the index prop).
+      renderBreadcrumb();
       const scopedGlossary = scopeGlossaryModel(index.glossary, activeContext.get());
       if (!scopedGlossary.entries.length) {
         docMessage(
@@ -1323,6 +1330,10 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   function init(): void {
     applyCenterChrome();
     setTarget(currentTarget);
+    // Mount the top-bar scope path once at boot (hidden until refreshContextList finds a context). It
+    // tracks scope/selection via the store thereafter; setContextOptions + loadModel re-render it when
+    // the contexts list or model index changes.
+    renderBreadcrumb();
   }
 
   return {

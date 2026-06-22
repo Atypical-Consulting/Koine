@@ -230,15 +230,15 @@
   }
 }
 
-/* --- active bounded-context switcher (#146) --- */
-/* A header-level <select> that scopes the model-derived surfaces (outline, counts, diagram, inspector,
-   the bottom tables) to one bounded context. Hides itself when the model has no contexts. The
-   aria-live readout doubles as the visible "Current context" status. */
-.context-switcher {
+/* --- top-bar scope path (#146 / merged breadcrumb) ----------------------------------------------
+   One breadcrumb that doubles as the scope control. The FIRST segment is a <select> dressed as a crumb
+   (pick the active bounded context — scopes the outline, counts, diagram, inspector and bottom tables);
+   the SECOND is the selected element prefixed with its Explorer construct icon, so the top-bar "where
+   am I" speaks the same colour language as the left-rail navigator. Replaces the old label + <select> +
+   "Current context" readout trio — that persistent readout now lives only in the status bar. Hidden
+   (host) while the model has no contexts. */
+.topbar-breadcrumb {
   display: flex;
-  align-items: center;
-  gap: var(--koi-space-1-5);
-  flex: 0 1 auto;
   min-width: 0;
 
   &[hidden] {
@@ -246,32 +246,52 @@
   }
 }
 
-.context-switcher-label {
+.koi-breadcrumb {
+  display: flex;
+  align-items: center;
+  gap: var(--koi-space-1);
+  min-width: 0;
   color: var(--koi-muted);
-  font-size: var(--koi-text-sm-plus);
-  font-weight: 500;
+  font-size: var(--koi-text-sm);
   line-height: 1;
-  flex: 0 0 auto;
+  white-space: nowrap;
 }
 
-.context-select {
+/* The first crumb is a real <select> dressed as breadcrumb text: the native arrow is suppressed and a
+   custom chevron marks it as the one pickable segment of the path. */
+.koi-crumb-scope-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.koi-crumb-scope {
   appearance: none;
-  max-width: 14rem;
-  background: color-mix(in srgb, var(--koi-paper) 55%, transparent);
-  color: var(--koi-fg);
-  border: 1px solid var(--koi-line);
+  -webkit-appearance: none;
+  max-width: 13rem;
+  margin: 0;
+  /* Right padding leaves room for the absolutely-positioned chevron. */
+  padding: var(--koi-space-0-75) calc(var(--koi-space-4) - 1px) var(--koi-space-0-75) var(--koi-space-1-5);
+  border: 1px solid transparent;
   border-radius: var(--koi-radius-sm);
-  padding: var(--koi-space-1) var(--koi-space-2);
+  background: transparent;
+  color: var(--koi-muted);
   font-family: var(--koi-font-body);
-  font-size: var(--koi-text-sm-plus);
-  line-height: 1.2;
+  font-size: var(--koi-text-sm);
+  font-weight: 500;
+  line-height: 1;
+  text-overflow: ellipsis;
   cursor: pointer;
   transition:
-    border-color var(--koi-dur-fast) ease,
-    background var(--koi-dur-fast) ease;
+    color var(--koi-dur-fast) ease,
+    background var(--koi-dur-fast) ease,
+    border-color var(--koi-dur-fast) ease;
 
   &:hover {
-    border-color: color-mix(in srgb, var(--koi-accent) 40%, var(--koi-line));
+    background: color-mix(in srgb, var(--koi-paper) 55%, transparent);
+    border-color: var(--koi-line);
+    color: var(--koi-fg);
   }
 
   &:focus-visible {
@@ -280,41 +300,35 @@
   }
 }
 
-.context-readout {
-  color: var(--koi-muted);
-  font-size: var(--koi-text-sm);
-  line-height: 1;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-
-  /* Collapse on tight toolbars — the <select> already shows the current scope, so the prose readout is
-     the first thing to go when horizontal space runs out. */
-  @media (max-width: 1100px) {
-    display: none;
-  }
+/* Narrowed to one context → the crumb reads at full strength (you've focused); "All contexts" stays
+   muted, the unscoped default. */
+.koi-crumb-scope-wrap[data-scoped='true'] .koi-crumb-scope {
+  color: var(--koi-fg);
 }
 
-/* Read-only "where am I" breadcrumb (active context › selected element). Sits beside the context
-   switcher; like the readout it's the first thing to fold away on a tight toolbar. */
-.topbar-breadcrumb {
-  display: flex;
-  min-width: 0;
-
-  @media (max-width: 1100px) {
-    display: none;
-  }
+.koi-crumb-chevron {
+  position: absolute;
+  right: var(--koi-space-1-25);
+  width: 11px;
+  height: 11px;
+  pointer-events: none;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  color: var(--koi-muted);
+  opacity: 0.85;
+  transition: color var(--koi-dur-fast) ease;
 }
 
-.koi-breadcrumb {
-  display: flex;
-  align-items: center;
-  gap: var(--koi-space-1-5);
-  min-width: 0;
-  color: var(--koi-muted);
-  font-size: var(--koi-text-sm);
-  line-height: 1;
-  white-space: nowrap;
+.koi-crumb-scope-wrap:hover .koi-crumb-chevron {
+  color: var(--koi-fg);
+}
+
+.koi-crumb-sep {
+  flex: 0 0 auto;
+  color: var(--koi-line);
 }
 
 .koi-crumb {
@@ -322,11 +336,25 @@
   text-overflow: ellipsis;
 }
 
+/* The element crumb: its Explorer construct icon + the simple name — the deepest point of the path. The
+   .koi-model-icon shape/colour comes from _model.scss, so the glyph is identical to the navigator's. */
 .koi-crumb-leaf {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--koi-space-1-25);
   color: var(--koi-fg);
   font-weight: 500;
+
+  .koi-model-icon {
+    flex: 0 0 auto;
+  }
 }
 
-.koi-crumb-sep {
-  color: var(--koi-line);
+/* On a tight toolbar the element crumb folds away first — the scope selector stays, since it's now the
+   only way to change scope. */
+@media (max-width: 1040px) {
+  .koi-crumb-sep,
+  .koi-crumb-leaf {
+    display: none;
+  }
 }
