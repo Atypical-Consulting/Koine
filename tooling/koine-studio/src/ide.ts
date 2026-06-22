@@ -8,8 +8,6 @@ import {
   type Location,
   type SourceSpan,
   type StructuredEdit,
-  type TextEdit,
-  type WorkspaceEdit,
 } from './lsp';
 import {
   fileUriToPath,
@@ -19,7 +17,7 @@ import {
 } from './ideUtils';
 import { createEditorSession } from './editorSession';
 import { createInspectorController } from './inspectorController';
-import { getPlatform, type FsEntry, type KoiFile } from './host';
+import { getPlatform } from './host';
 import { createExplorer } from './explorer';
 import { koineMark } from './logo';
 import { initTheme, onThemeChange, toggleTheme } from './theme';
@@ -65,22 +63,16 @@ import { isAllContexts } from './activeContext';
 import { type InspectorElement } from './inspector';
 import { createAssistantPanel, type AssistantPanel, type AssistantContext } from './aiPanel';
 import { clearModelHash, readModelFromHash, workspaceShareUrlOrNull } from './share';
-import { dirtyCount, handleBeforeUnload, saveAllDirtyBuffers, titleWithDirty } from './dirty';
+import { dirtyCount, handleBeforeUnload, titleWithDirty } from './dirty';
+import { createWorkspaceController, type WorkspaceController } from './workspaceController';
 import { createConfirmDialog } from './overlay';
 
 // --- workspace fs contract ---------------------------------------------------
 // `KoiFile` (path / name / relPath) is provided by the host platform layer (src/host), whose
 // backends supply it from the native filesystem (desktop) or the File System Access API (browser).
-
-/** A client-side open buffer keyed by its file:// uri. */
-interface Buffer {
-  uri: string;
-  path: string;
-  relPath: string;
-  name: string;
-  text: string;
-  dirty: boolean;
-}
+// The `Buffer` interface + the whole buffers/open/save/dirty/mutation lifecycle live in
+// workspaceController.ts now (Task 5); ide.ts owns the surrounding chrome and the diagram/inspector
+// write path, reaching the workspace through the `workspace` handle constructed below.
 
 // Seed model — templates/starters/billing/billing.koi, inlined (the renderer has no fs access).
 const SEED = `context Billing {
@@ -197,12 +189,12 @@ export function init(): void {
   // appears beside the status whenever any open buffer is dirty. baseTitle is captured once, clean.
   const baseTitle = document.title;
   const unsavedEl = el('unsaved-indicator') as HTMLButtonElement;
-  unsavedEl.addEventListener('click', () => void saveAllDirty());
+  unsavedEl.addEventListener('click', () => void workspace.saveAllDirty());
   // The indicator is refreshed from every renderTree(); cache the last count so an unchanged dirty
   // total (the common case — most renders don't change it) skips the title/DOM writes.
   let lastDirtyCount = -1;
   function refreshDirtyIndicator(): void {
-    const n = dirtyCount(buffers);
+    const n = dirtyCount(workspace.buffers);
     if (n === lastDirtyCount) return;
     lastDirtyCount = n;
     document.title = titleWithDirty(baseTitle, n);
@@ -219,17 +211,13 @@ export function init(): void {
   const lsp = new KoineLsp(platform.createLspTransport());
 
   // --- workspace model ------------------------------------------------------
-  // `buffers` holds every open document keyed by its file:// uri; `activeUri` is the one
-  // shown in the editor and targeted by all lsp requests. The per-uri diagnostics cache lives
-  // inside `editorSession` now (read/mutated through its accessors); switching files re-renders
-  // the active one and the tree badges files with errors via those accessors.
-  const buffers = new Map<string, Buffer>();
-  let activeUri = '';
-  // The opened-folder token and the last explorer tree fetched for it. The explorer is a *view*:
-  // it renders this cached tree (re-reading dirty/diagnostics/active state via callbacks), while
-  // the open .koi `buffers` remain the compiled workspace. Mutations refresh both.
-  let folderRootToken: string = '';
-  let entriesCache: FsEntry[] = [];
+  // The buffers / activeUri / folderRootToken / entriesCache state and the whole open/save/dirty/
+  // mutation lifecycle live in `workspace` (workspaceController.ts, Task 5), constructed below.
+  // editorSession + the inspector controller are built FIRST and read activeUri/folderRootToken via
+  // `() => workspace.…()` thunks (only invoked at runtime, after construction), and they receive the
+  // workspace's effects through its onActiveChanged/onBuffersChanged seams — so neither module imports
+  // the other and there's no circular import. `workspace` is forward-declared here for those thunks.
+  let workspace: WorkspaceController;
 
   // The editor ↔ LSP + diagnostics wiring (issue #180, Task 3): owns the CodeMirror editor and its
   // callback wall (hover/completion/definition/rename/references/code-actions → lsp.*), the per-uri
@@ -246,33 +234,28 @@ export function init(): void {
     diagBody: diagBodyEl,
     sbConnection: sbConnEl,
     sbValidity: sbValidityEl,
-    activeUri: () => activeUri,
-    uriLabel: (uri) => buffers.get(uri)?.relPath ?? (uri.split('/').pop() ?? uri),
+    activeUri: () => workspace.activeUri(),
+    uriLabel: (uri) => workspace.buffers.get(uri)?.relPath ?? (uri.split('/').pop() ?? uri),
     onNavigate: (loc) => navigateToDefinition(loc),
-    onApplyWorkspaceEdit: (edit) => applyWorkspaceEdit(edit),
+    onApplyWorkspaceEdit: (edit) => workspace.applyWorkspaceEdit(edit),
     // Every diagnostics push re-renders the tree so non-active files can badge their error/warning
     // counts (the active file's gutter/strip/status are repainted inside editorSession first).
-    onDiagnostics: () => renderTree(),
+    onDiagnostics: () => workspace.renderTree(),
   });
   const editor = editorSession.editor;
   const setStatus = editorSession.setStatus;
 
   // The buffer/dirty/tree half of the editor's onChange (the editor↔LSP sync runs inside
-  // editorSession). Preserves the original effect order: welcome.hide → buffer text+dirty →
-  // onDocEdited → renderTree (only when the active file's dirty dot just appeared).
+  // editorSession; the buffer text+dirty update lives in workspace.syncActiveBuffer). Preserves the
+  // original effect order: welcome.hide → buffer text+dirty → onDocEdited → renderTree (only when the
+  // active file's dirty dot just appeared).
   editorSession.onChange((doc) => {
     // First edit dismisses the welcome overlay (shown only on a pristine first-run workspace).
     if (welcome.visible) welcome.hide();
-    const buf = buffers.get(activeUri);
-    let becameDirty = false;
-    if (buf) {
-      if (!buf.dirty && buf.text !== doc) becameDirty = true;
-      buf.text = doc;
-      if (becameDirty) buf.dirty = true;
-    }
+    const becameDirty = workspace.syncActiveBuffer(doc);
     controller.onDocEdited();
     // Re-render the tree only when the active file's dirty dot just appeared (cheap path).
-    if (becameDirty) renderTree();
+    if (becameDirty) workspace.renderTree();
   });
 
   const treeBodyEl = el<HTMLElement>('filetree-body');
@@ -310,15 +293,15 @@ export function init(): void {
   // The workspace file explorer. It deals in opaque fs tokens; ide.ts maps token ↔ file:// uri
   // (pathToFileUri) to keep `buffers`, `activeUri` and the LSP workspace coherent on every mutation.
   const explorer = createExplorer({
-    onOpenFile: (token) => void openFileToken(token),
-    onNewFile: (parentDirToken, name) => void handleNewFile(parentDirToken, name),
-    onNewFolder: (parentDirToken, name) => void handleNewFolder(parentDirToken, name),
-    onRename: (entry, newName) => void handleRename(entry, newName),
-    onDelete: (entry) => void handleDelete(entry),
-    onDuplicate: (entry) => void handleDuplicate(entry),
-    onMove: (entry, destDirToken) => void handleMove(entry, destDirToken),
-    isActive: (token) => pathToFileUri(token) === activeUri,
-    isDirty: (token) => buffers.get(pathToFileUri(token))?.dirty ?? false,
+    onOpenFile: (token) => void workspace.openFileToken(token),
+    onNewFile: (parentDirToken, name) => void workspace.handleNewFile(parentDirToken, name),
+    onNewFolder: (parentDirToken, name) => void workspace.handleNewFolder(parentDirToken, name),
+    onRename: (entry, newName) => void workspace.handleRename(entry, newName),
+    onDelete: (entry) => void workspace.handleDelete(entry),
+    onDuplicate: (entry) => void workspace.handleDuplicate(entry),
+    onMove: (entry, destDirToken) => void workspace.handleMove(entry, destDirToken),
+    isActive: (token) => pathToFileUri(token) === workspace.activeUri(),
+    isDirty: (token) => workspace.buffers.get(pathToFileUri(token))?.dirty ?? false,
     diagCounts: (token) => diagCounts(pathToFileUri(token)),
   });
   treeBodyEl.appendChild(explorer.el);
@@ -336,346 +319,15 @@ export function init(): void {
     return { errors, warnings };
   }
 
-  // Re-render the explorer from the cached entry tree. Cheap to call on any state change (dirty,
-  // diagnostics, active file) — the explorer reads those per row via the callbacks.
-  function renderTree(): void {
-    // Sync the global unsaved indicator on every tree render — this is the common path for every
-    // dirty transition (edit, save, save-all, cross-file rename, workspace swap).
-    refreshDirtyIndicator();
-    if (folderRootToken === '') return;
-    explorer.render(entriesCache, folderRootToken);
-  }
-
-  // --- workspace mutations (create / rename / delete / move) -----------------
-  // The explorer surfaces user intent as opaque tokens; these handlers do the host fs op, then keep
-  // `buffers` / `activeUri` / the LSP workspace coherent and refresh the tree. relPaths handed to
-  // the host are always relative to the opened folder (folderRootToken).
-
-  /** The folder-relative, forward-slashed path of a token under the opened folder ('' for the root). */
-  function relOfToken(token: string): string {
-    if (folderRootToken === '' || token === folderRootToken) return '';
-    // Require a real separator boundary after the root prefix so a sibling that merely shares the
-    // root as a string prefix (e.g. root `/work/app`, token `/work/app2/x`) isn't mis-sliced. Then
-    // strip the prefix + separator and normalise Windows '\' to '/'.
-    if (token.startsWith(folderRootToken + '/') || token.startsWith(folderRootToken + '\\')) {
-      return token.slice(folderRootToken.length + 1).replace(/\\/g, '/');
-    }
-    return token;
-  }
-
-  /** Re-read the folder's entry tree from the host and re-render the explorer. */
-  async function refreshEntries(): Promise<void> {
-    if (folderRootToken === '') return;
-    try {
-      entriesCache = await platform.listEntries(folderRootToken);
-    } catch (e) {
-      console.error('listEntries failed:', e);
-    }
-    renderTree();
-  }
-
-  /** Open a .koi file token as a buffer if it isn't open yet; returns its uri (or null on failure). */
-  async function ensureBuffer(token: string): Promise<string | null> {
-    const uri = pathToFileUri(token);
-    if (buffers.has(uri)) return uri;
-    let text: string;
-    try {
-      text = await platform.readTextFile(token);
-    } catch (e) {
-      console.error('readTextFile failed for', token, e);
-      return null;
-    }
-    buffers.set(uri, { uri, path: token, relPath: relOfToken(token), name: nameOf(token), text, dirty: false });
-    lsp.openDoc(uri, text);
-    return uri;
-  }
-
-  // Clicking a file row: open it (if needed) and make it the active editor buffer.
-  async function openFileToken(token: string): Promise<void> {
-    const uri = await ensureBuffer(token);
-    if (uri) activateFile(uri);
-  }
-
-  async function handleNewFile(parentDirToken: string, name: string): Promise<void> {
-    if (folderRootToken == null) return;
-    const parentRel = relOfToken(parentDirToken);
-    // The explorer only surfaces directories and .koi files, so default an extensionless name to
-    // `.koi` — otherwise the created file would be invisible (listEntries filters it out) and the
-    // user would think New File silently failed.
-    const fileName = name.includes('.') ? name : `${name}.koi`;
-    const relPath = parentRel ? `${parentRel}/${fileName}` : fileName;
-    try {
-      const token = await platform.createFile(folderRootToken, relPath, '');
-      await refreshEntries();
-      if (token.toLowerCase().endsWith('.koi')) await openFileToken(token);
-    } catch (e) {
-      setStatus('could not create file', 'error');
-      console.error('createFile failed:', e);
-    }
-  }
-
-  async function handleNewFolder(parentDirToken: string, name: string): Promise<void> {
-    if (folderRootToken == null) return;
-    const parentRel = relOfToken(parentDirToken);
-    const relPath = parentRel ? `${parentRel}/${name}` : name;
-    try {
-      await platform.createFolder(folderRootToken, relPath);
-      await refreshEntries();
-    } catch (e) {
-      setStatus('could not create folder', 'error');
-      console.error('createFolder failed:', e);
-    }
-  }
-
-  async function handleDelete(entry: FsEntry): Promise<void> {
-    try {
-      await platform.deleteEntry(entry.token);
-    } catch (e) {
-      setStatus('could not delete', 'error');
-      console.error('deleteEntry failed:', e);
-      return;
-    }
-    // Close every open buffer at or under the deleted token; re-point active if it was one of them.
-    let activeRemoved = false;
-    for (const buf of [...buffers.values()]) {
-      if (isUnder(buf.path, entry.token)) {
-        if (buf.uri === activeUri) activeRemoved = true;
-        lsp.closeDoc(buf.uri);
-        buffers.delete(buf.uri);
-        editorSession.dropDiagnostics(buf.uri);
-      }
-    }
-    if (activeRemoved) activateFallback();
-    await refreshEntries();
-  }
-
-  async function handleRename(entry: FsEntry, newName: string): Promise<void> {
-    let newToken: string;
-    try {
-      newToken = await platform.renameEntry(entry.token, newName);
-    } catch (e) {
-      setStatus('could not rename', 'error');
-      console.error('renameEntry failed:', e);
-      return;
-    }
-    rekeyBuffers(entry.token, newToken);
-    await refreshEntries();
-  }
-
-  async function handleDuplicate(entry: FsEntry): Promise<void> {
-    if (folderRootToken == null) return;
-    const parentRel = relOfToken(parentTokenOf(entry.token) ?? folderRootToken);
-    // Try "<base> copy", then "<base> copy 2", … until the host accepts a non-colliding name.
-    for (let i = 1; i <= 50; i++) {
-      const dupName = copyName(entry.name, i, entry.kind === 'file');
-      const relPath = parentRel ? `${parentRel}/${dupName}` : dupName;
-      try {
-        const token = await platform.moveEntry(entry.token, folderRootToken, relPath, true);
-        await refreshEntries();
-        if (entry.kind === 'file' && token.toLowerCase().endsWith('.koi')) await openFileToken(token);
-        else await syncOpenKoi(); // a duplicated folder may contain new .koi files
-        return;
-      } catch (e) {
-        // A collision means "try the next candidate name".
-        if (isAlreadyExists(e)) continue;
-        setStatus('could not duplicate', 'error');
-        console.error('duplicate failed:', e);
-        return;
-      }
-    }
-    // Every candidate name collided — don't fail silently.
-    setStatus('could not duplicate (too many copies)', 'error');
-  }
-
-  // Drag-and-drop move: reparent `entry` into `destDirToken` (the opened folder for root), keeping its
-  // name. The explorer already rejects no-op and into-own-subtree drops, so this just performs the host
-  // move and re-keys the open buffers / LSP workspace, mirroring rename.
-  async function handleMove(entry: FsEntry, destDirToken: string): Promise<void> {
-    if (folderRootToken == null) return;
-    const destRel = relOfToken(destDirToken);
-    const newRelPath = destRel ? `${destRel}/${entry.name}` : entry.name;
-    let newToken: string;
-    try {
-      newToken = await platform.moveEntry(entry.token, folderRootToken, newRelPath, false);
-    } catch (e) {
-      // A name clash at the destination is the common, recoverable case — surface it, don't overwrite.
-      if (isAlreadyExists(e)) {
-        setStatus(`“${entry.name}” already exists there`, 'error');
-      } else {
-        setStatus('could not move', 'error');
-        console.error('moveEntry failed:', e);
-      }
-      return;
-    }
-    rekeyBuffers(entry.token, newToken);
-    await refreshEntries();
-    if (entry.kind === 'dir') await syncOpenKoi(); // moved folder may carry .koi files to re-key
-  }
-
-  // --- mutation helpers ------------------------------------------------------
-
-  /** True if `path` is the token itself or lives under the `ancestor` directory token (any separator). */
-  function isUnder(path: string, ancestor: string): boolean {
-    return path === ancestor || path.startsWith(ancestor + '/') || path.startsWith(ancestor + '\\');
-  }
-
-  function nameOf(token: string): string {
-    return token.split(/[\\/]/).filter(Boolean).pop() ?? token;
-  }
-
-  function parentTokenOf(token: string): string | null {
-    const slash = Math.max(token.lastIndexOf('/'), token.lastIndexOf('\\'));
-    return slash >= 0 ? token.slice(0, slash) : null;
-  }
-
-  /**
-   * True when a host fs op failed because the destination name is taken. The desktop (Tauri) host
-   * rejects with a plain string and the browser with an Error, so match the message text (not the
-   * type) — shared by handleDuplicate (retry next name) and handleMove (surface the clash).
-   */
-  function isAlreadyExists(e: unknown): boolean {
-    return String(e instanceof Error ? e.message : e).includes('already exists');
-  }
-
-  /** "order.koi" → "order copy.koi" (i=1) / "order copy 2.koi" (i=2); dirs get no extension split. */
-  function copyName(name: string, i: number, isFile: boolean): string {
-    const suffix = i === 1 ? ' copy' : ` copy ${i}`;
-    const dot = isFile ? name.lastIndexOf('.') : -1;
-    if (dot > 0) return `${name.slice(0, dot)}${suffix}${name.slice(dot)}`;
-    return `${name}${suffix}`;
-  }
-
-  // Re-key every buffer at/under `oldToken` to its path under `newToken` (a file or folder rename/
-  // move), preserving each buffer's unsaved text + dirty flag and keeping the LSP workspace in sync.
-  function rekeyBuffers(oldToken: string, newToken: string): void {
-    for (const buf of [...buffers.values()]) {
-      if (!isUnder(buf.path, oldToken)) continue;
-      const newPath = newToken + buf.path.slice(oldToken.length);
-      const newUri = pathToFileUri(newPath);
-      const wasActive = buf.uri === activeUri;
-      lsp.closeDoc(buf.uri);
-      buffers.delete(buf.uri);
-      // Move the cached diagnostics with the buffer (no repaint — the gutter re-renders when the
-      // active file's diagnostics are next shown / pushed), preserving the old re-key behavior.
-      editorSession.renameDiagnostics(buf.uri, newUri);
-      buf.uri = newUri;
-      buf.path = newPath;
-      buf.relPath = relOfToken(newPath);
-      buf.name = nameOf(newPath);
-      buffers.set(newUri, buf);
-      lsp.openDoc(newUri, buf.text);
-      if (wasActive) {
-        activeUri = newUri;
-        lsp.setActive(newUri);
-      }
-    }
-  }
-
-  // After the active buffer is deleted, fall back to another open file, or open a new blank model
-  // when the workspace is now empty.
-  function activateFallback(): void {
-    const next = Array.from(buffers.values())
-      .sort((a, b) => a.relPath.localeCompare(b.relPath))[0];
-    if (next) {
-      activeUri = next.uri;
-      lsp.setActive(next.uri);
-      editor.setDoc(next.text);
-      editorSession.showDiagnostics(next.uri);
-      controller.invalidateDocViews();
-      return;
-    }
-    // Empty workspace: reset to a fresh blank model.
-    void newModel();
-  }
-
-  // Open any .koi file present in the folder but not yet buffered (used after creating/duplicating
-  // folders that may introduce new .koi files), so the compiled workspace stays complete.
-  async function syncOpenKoi(): Promise<void> {
-    if (folderRootToken === '') return;
-    let files: KoiFile[];
-    try {
-      files = await platform.listKoiFiles(folderRootToken);
-    } catch {
-      return;
-    }
-    for (const f of files) {
-      if (!buffers.has(pathToFileUri(f.path))) await ensureBuffer(f.path);
-    }
-  }
-
-  // Switch the editor + lsp to a different open buffer. Saves the current editor text back to
-  // the leaving buffer first (preserving unsaved edits), swaps the doc, points lsp at the new
-  // uri, re-renders diagnostics for it, and invalidates the doc views so they re-fetch.
-  function activateFile(uri: string): void {
-    if (uri === activeUri) return;
-    // Flush the leaving file's debounced edits to the server before switching: the shared change
-    // timer is re-armed for the new file on setDoc below, which would otherwise drop them.
-    lsp.flush();
-    const leaving = buffers.get(activeUri);
-    if (leaving) leaving.text = editor.getDoc();
-    const next = buffers.get(uri);
-    if (!next) return;
-    activeUri = uri;
-    lsp.setActive(uri);
-    editor.setDoc(next.text);
-    editorSession.showDiagnostics(uri);
-    controller.invalidateDocViews();
-    renderTree();
-    void controller.followActiveFileContext();
-  }
-
   // Cross-file go-to-definition: if the resolved Location is a different OPEN file, activate it
-  // before jumping; otherwise jump within the current file. Unknown uris are ignored.
+  // before jumping; otherwise jump within the current file. Unknown uris are ignored. (The buffers
+  // / open / activate lifecycle lives in workspaceController; this read-only navigation stays here
+  // because it pairs with the editor's gotoRange and the diagram/inspector write path below.)
   function navigateToDefinition(loc: Location): void {
-    if (loc.uri && loc.uri !== activeUri && buffers.has(loc.uri)) {
-      activateFile(loc.uri);
+    if (loc.uri && loc.uri !== workspace.activeUri() && workspace.buffers.has(loc.uri)) {
+      workspace.activateFile(loc.uri);
     }
     editor.gotoRange(loc.range.start, loc.range.end);
-  }
-
-  // Apply LSP TextEdits to a plain string (for non-active buffers in a cross-file rename). Edits
-  // are applied from the end backward so earlier edits don't shift the offsets of later ones.
-  function applyTextEditsToString(text: string, edits: TextEdit[]): string {
-    const lines = text.split('\n');
-    const offsetOf = (line: number, character: number): number => {
-      const ln = Math.min(Math.max(line, 0), lines.length - 1);
-      let offset = 0;
-      for (let i = 0; i < ln; i++) offset += lines[i].length + 1; // + the '\n'
-      return offset + Math.min(Math.max(character, 0), lines[ln].length);
-    };
-    const sorted = edits
-      .map((e) => ({
-        from: offsetOf(e.range.start.line, e.range.start.character),
-        to: offsetOf(e.range.end.line, e.range.end.character),
-        insert: e.newText,
-      }))
-      .sort((a, b) => b.from - a.from);
-    let result = text;
-    for (const edit of sorted) result = result.slice(0, edit.from) + edit.insert + result.slice(edit.to);
-    return result;
-  }
-
-  // Apply a rename/code-action WorkspaceEdit across open buffers. The active file is edited through
-  // the editor (so undo history + the onChange sync path fire); other OPEN files are patched in
-  // their stored text and pushed to the server immediately. Edits to non-open files are ignored.
-  function applyWorkspaceEdit(edit: WorkspaceEdit): void {
-    if (!edit?.changes) return;
-    let treeChanged = false;
-    for (const [uri, edits] of Object.entries(edit.changes)) {
-      if (!edits.length) continue;
-      if (uri === activeUri) {
-        editor.applyEdits(edits); // dispatch → onChange updates the buffer + lsp + doc views
-      } else {
-        const buf = buffers.get(uri);
-        if (!buf) continue;
-        buf.text = applyTextEditsToString(buf.text, edits);
-        buf.dirty = true;
-        lsp.syncDoc(uri, buf.text);
-        treeChanged = true;
-      }
-    }
-    if (treeChanged) renderTree();
-    controller.onDocEdited();
   }
 
   // Replace the active document's contents (used by the AI "Apply to editor" action). Setting the
@@ -697,8 +349,8 @@ export function init(): void {
     editor: { view: editor.view, goto: editor.goto, gotoRange: editor.gotoRange },
     output,
     platform,
-    activeUri: () => activeUri,
-    folderRootToken: () => folderRootToken,
+    activeUri: () => workspace.activeUri(),
+    folderRootToken: () => workspace.folderRootToken(),
     initialTarget: settings.previewTarget,
     saveWorkspaceMode,
     loadWorkspaceMode,
@@ -733,7 +385,7 @@ export function init(): void {
   async function saveDescription(entry: GlossaryEntry, text: string): Promise<void> {
     const result = await lsp.setDoc(entry.id, text);
     if (!result.edits.length) return;
-    if (result.uri && result.uri !== activeUri && buffers.has(result.uri)) activateFile(result.uri);
+    if (result.uri && result.uri !== workspace.activeUri() && workspace.buffers.has(result.uri)) workspace.activateFile(result.uri);
     editor.applyEdits(result.edits);
   }
 
@@ -742,7 +394,7 @@ export function init(): void {
   async function renameElement(element: InspectorElement, newName: string): Promise<void> {
     try {
       const edit = await lsp.rename(element.nameRange.start.line, element.nameRange.start.character, newName);
-      if (edit) applyWorkspaceEdit(edit);
+      if (edit) workspace.applyWorkspaceEdit(edit);
     } catch (e) {
       setStatus('Rename failed: ' + String(e), 'error');
     }
@@ -754,7 +406,7 @@ export function init(): void {
     try {
       const result = await lsp.setDoc(element.id, text);
       if (!result.edits.length) return;
-      if (result.uri && result.uri !== activeUri && buffers.has(result.uri)) activateFile(result.uri);
+      if (result.uri && result.uri !== workspace.activeUri() && workspace.buffers.has(result.uri)) workspace.activateFile(result.uri);
       editor.applyEdits(result.edits);
     } catch (e) {
       setStatus('Saving description failed: ' + String(e), 'error');
@@ -773,10 +425,10 @@ export function init(): void {
     if (!uri) return;
     if (!(span.line >= 1 && span.column >= 1 && span.endLine >= 1 && span.endColumn >= 1)) return;
 
-    if (!buffers.has(uri)) {
+    if (!workspace.buffers.has(uri)) {
       const token = fileUriToPath(uri);
       if (token == null) return;
-      const opened = await ensureBuffer(token);
+      const opened = await workspace.ensureBuffer(token);
       if (opened == null || opened !== uri) return;
     }
 
@@ -857,7 +509,7 @@ export function init(): void {
       setStatus('Rename rejected', 'error');
       return;
     }
-    applyWorkspaceEdit(edit);
+    workspace.applyWorkspaceEdit(edit);
     setStatus(`Renamed ${label} → ${newName}`, 'green');
   }
 
@@ -877,7 +529,7 @@ export function init(): void {
       setStatus(reason ? `${reason.code}: ${reason.message}` : 'Edit rejected', 'error');
       return false; // rolled back — nothing is patched
     }
-    applyWorkspaceEdit({ changes: { [result.uri]: result.edits } });
+    workspace.applyWorkspaceEdit({ changes: { [result.uri]: result.edits } });
     setStatus(successMsg, 'green');
     return true;
   }
@@ -950,118 +602,77 @@ export function init(): void {
       return;
     }
     if (!folder) return; // cancelled
-    await openFolderPath(folder);
+    await workspace.openFolderPath(folder);
   }
 
-  // Open a set of file records as workspace buffers in one pass. Each record becomes an open
-  // buffer keyed by its file:// uri and a corresponding LSP didOpen, so cross-file refs resolve.
-  // The single seam shared by folder-open and shared-import — neither sets dirty,
-  // neither activates (callers pick the active buffer).
-  function populateBuffers(records: { path: string; relPath: string; name: string; text: string }[]): void {
-    for (const rec of records) {
-      const uri = pathToFileUri(rec.path);
-      buffers.set(uri, { uri, path: rec.path, relPath: rec.relPath, name: rec.name, text: rec.text, dirty: false });
-      lsp.openDoc(uri, rec.text);
-    }
-  }
-
-  // Load + open every .koi file under `folder` as one workspace. Shared by the toolbar
-  // button (which picks a folder first) and the welcome screen's recent-folder items
-  // (which pass a known path directly).
-  async function openFolderPath(folder: string, opts: { recent?: boolean } = {}): Promise<void> {
-    welcome.hide();
-    let files: KoiFile[];
-    try {
-      files = await platform.listKoiFiles(folder);
-    } catch (e) {
-      setStatus('could not read folder', 'error');
-      console.error('listKoiFiles failed:', e);
-      return;
-    }
-    if (!files.length) {
-      setStatus('no .koi files in folder', 'error');
-      return;
-    }
-
-    // Re-opening a folder: close every previously open file first.
-    for (const uri of Array.from(buffers.keys())) {
-      lsp.closeDoc(uri);
-    }
-    buffers.clear();
-    editorSession.clearDiagnostics();
-
-    // Read + open every file as one workspace (cross-file refs resolve via didOpen). Read text
-    // from disk first (skipping unreadable files), then hand the successful records to the shared
-    // populateBuffers seam so folder-open and shared-import open files through one path.
-    const records: { path: string; relPath: string; name: string; text: string }[] = [];
-    for (const f of files) {
-      let text: string;
-      try {
-        text = await platform.readTextFile(f.path);
-      } catch (e) {
-        console.error('readTextFile failed for', f.path, e);
-        continue;
-      }
-      records.push({ path: f.path, relPath: f.relPath, name: f.name, text });
-    }
-    populateBuffers(records);
-
-    // Every read failed after a non-empty listing (files deleted / permissions revoked
-    // between list and read).
-    if (buffers.size === 0) {
-      setStatus('could not read any files in folder', 'error');
-      return;
-    }
-
-    folderRootToken = folder;
-    // Activate the first file (sorted by relPath) and show the tree.
-    const first = Array.from(buffers.values()).sort((a, b) => a.relPath.localeCompare(b.relPath))[0];
-    activeUri = first.uri;
-    lsp.setActive(first.uri);
-    editor.setDoc(first.text);
-    treeTitleEl.textContent = platform.folderName(folder);
-    showFileTreeChrome();
-    if (opts.recent ?? true) pushRecentFolder(folder);
-    // Restore this workspace's bounded-context scope (#146) BEFORE the first scoped render, and
-    // refresh the switcher's options from the new model. The bus value drives the render paths, so the
-    // initial ensureLoaded below is already scoped even before the dropdown finishes repainting.
-    controller.restoreActiveContext();
+  // The workspace lifecycle (buffers + open/save/dirty + file mutations, src/workspaceController.ts,
+  // Task 5). It OWNS buffers/activeUri/folderRootToken/entriesCache and reaches back into the editor /
+  // LSP / explorer / status / diagnostics-cache through these deps, while its own effects surface
+  // through the onActiveChanged / onBuffersChanged seams below — so it imports neither editorSession
+  // nor the inspector controller (no circular import), and they read its state through the thunks set
+  // up above. Constructed AFTER both so its onFolderOpened / onActiveChanged callbacks can drive them.
+  workspace = createWorkspaceController({
+    platform,
+    lsp,
+    editor,
+    explorer,
+    setStatus,
+    refreshDirtyIndicator,
+    showDiagnostics: (uri) => editorSession.showDiagnostics(uri),
+    invalidateDocViews: () => controller.invalidateDocViews(),
+    dropDiagnostics: (uri) => editorSession.dropDiagnostics(uri),
+    renameDiagnostics: (oldUri, newUri) => editorSession.renameDiagnostics(oldUri, newUri),
+    clearDiagnostics: () => editorSession.clearDiagnostics(),
+    getFormatOnSave: () => settings.formatOnSave,
+    // A folder finished opening: restore this workspace's bounded-context scope (#146) BEFORE the
+    // first scoped render and refresh the switcher's options from the new model. The bus value drives
+    // the render paths, so the initial ensureLoaded is already scoped even before the dropdown
+    // finishes repainting. The Docs surface is folder-derived, so a folder switch must drop it too.
+    onFolderOpened: () => {
+      controller.restoreActiveContext();
+      controller.invalidateDocViews();
+      controller.invalidateDocsPanel();
+      void controller.refreshContextList();
+      controller.refreshActiveSurfaces();
+    },
+    // The active buffer was deleted and the workspace is now empty: reset to a fresh blank model.
+    onWorkspaceEmptied: () => void newModel(),
+    pushRecentFolder,
+    setFolderTitle: (name) => {
+      treeTitleEl.textContent = name;
+    },
+    showFileTreeChrome,
+    hideWelcome: () => welcome.hide(),
+  });
+  // Switching files: repaint the active file's diagnostics, invalidate the doc views so they re-fetch,
+  // and follow the new file's bounded context. Preserves the exact effect order of the old activateFile.
+  workspace.onActiveChanged((uri) => {
+    editorSession.showDiagnostics(uri);
     controller.invalidateDocViews();
-    // The Docs surface is folder-derived (its own `docs/adr`+`docs/notes`), so a folder switch must
-    // drop it too — unlike the model-derived views, an edit alone never invalidates it.
-    controller.invalidateDocsPanel();
-    void controller.refreshContextList();
-    // Fetch the full explorer tree (dirs + .koi) and render it; falls back silently on failure.
-    await refreshEntries();
-    controller.refreshActiveSurfaces();
-  }
+    workspace.renderTree();
+    void controller.followActiveFileContext();
+  });
+  // Fired after a WorkspaceEdit was applied across the open buffers (the old applyWorkspaceEdit tail).
+  // The tree re-render for any patched non-active buffer already ran inside the workspace; ide.ts only
+  // reloads the model-derived doc surfaces here, exactly as before (which is unconditional — the active
+  // file's own edit path also reaches onDocEdited via the editor onChange).
+  workspace.onBuffersChanged(() => {
+    controller.onDocEdited();
+  });
 
-  // Boot/empty-state: open the host's persistent default workspace (creating + seeding it the first
-  // time), then surface the welcome overlay only when it is pristine (a single untouched SEED model).
+  // Boot/empty-state: open the host's persistent default workspace, then surface the welcome overlay
+  // only when it is pristine (a single untouched SEED model). The clearLegacyScratch + the OPFS-error
+  // output line are ide-specific, so they wrap workspace.openDefaultWorkspaceFlow here.
   async function openDefaultWorkspaceFlow(seed: string): Promise<void> {
-    const token = await platform.defaultWorkspace(seed);
-    if (!token) {
-      setStatus("couldn't initialize a workspace", 'error');
+    const { opened, pristineSeed } = await workspace.openDefaultWorkspaceFlow(seed);
+    if (!opened) {
       output.setContent('// Koine Studio needs OPFS (a modern browser) to store your model.', 'plain');
       return;
     }
-    // Token confirmed — the workspace is open. Clear the legacy scratch key now so the migration
-    // is non-destructive: content was never lost even if OPFS was unavailable on a prior load.
+    // Token confirmed — the workspace is open. Clear the legacy scratch key now so the migration is
+    // non-destructive: content was never lost even if OPFS was unavailable on a prior load.
     clearLegacyScratch();
-    await openFolderPath(token, { recent: false });
-    const only = buffers.size === 1 ? Array.from(buffers.values())[0] : null;
-    if (only && only.text === SEED) welcome.show();
-  }
-
-  // Open one shared model as a transient 1-file workspace (non-destructive: it does not touch the
-  // user's default workspace). The hash is cleared by the caller so a reload returns home.
-  async function openWorkspaceWith1File(text: string): Promise<void> {
-    const token = await platform.materializeWorkspace('shared', [{ relPath: 'model.koi', contents: text }]);
-    if (!token) {
-      setStatus('could not open shared model', 'error');
-      return;
-    }
-    await openFolderPath(token, { recent: false });
+    if (pristineSeed && pristineSeed.text === SEED) welcome.show();
   }
 
   // True when the command palette or a modal dialog (prefs/help/about) is open, so global
@@ -1075,7 +686,7 @@ export function init(): void {
   // The editor intercepts Cmd/Ctrl-S and calls onFormat; we additionally write the formatted
   // active buffer to disk. To run AFTER the format edits land, save is also wired here on the
   // window so it can read the post-format editor text. The editor's own format keymap already
-  // ran preventDefault, so this listener only persists.
+  // ran preventDefault, so this listener only persists. The save/dirty machinery lives in workspace.
   window.addEventListener('keydown', (e) => {
     const mod = e.metaKey || e.ctrlKey;
     if (!mod) return;
@@ -1084,11 +695,11 @@ export function init(): void {
     // into another glyph (e.g. 'ß'), so `e.key === 's'` would miss the chord.
     if (e.altKey && e.code === 'KeyS') {
       e.preventDefault();
-      void saveAllDirty();
+      void workspace.saveAllDirty();
     } else if (!e.altKey && (e.key === 's' || e.key === 'S')) {
       // Mod+S → save / format the active buffer (unchanged single-file behaviour).
       e.preventDefault();
-      void saveActive();
+      void workspace.saveActive();
     }
   });
 
@@ -1096,93 +707,7 @@ export function init(): void {
   // shows its native "Leave site?" prompt. Dirty buffers live only in memory, so without this a tab
   // close silently drops them. On the desktop host this covers reloads; the window-close confirm is
   // wired separately in the Tauri host.
-  function anyDirty(): boolean {
-    return dirtyCount(buffers) > 0;
-  }
-  window.addEventListener('beforeunload', (e) => handleBeforeUnload(e, anyDirty));
-
-  let saveQueued = false;
-  async function saveActive(): Promise<void> {
-    if (saveQueued) return;
-    saveQueued = true;
-    try {
-      // Format first (mirrors the editor's Mod-S) when format-on-save is enabled, then persist.
-      if (settings.formatOnSave) {
-        try {
-          const edits = await lsp.format();
-          editor.applyEdits(edits);
-        } catch (e) {
-          console.error('format on save failed:', e);
-        }
-      }
-      const buf = buffers.get(activeUri);
-      if (!buf) return;
-      buf.text = editor.getDoc();
-      lsp.changeDoc(activeUri, buf.text);
-      try {
-        await platform.writeTextFile(buf.path, buf.text);
-        buf.dirty = false;
-        lsp.didSave();
-        renderTree();
-      } catch (e) {
-        setStatus('save failed', 'error');
-        console.error('writeTextFile failed:', e);
-      }
-    } finally {
-      saveQueued = false;
-    }
-  }
-
-  // Save EVERY dirty buffer (Mod+Alt+S / "Save all"), so editing several files and then closing
-  // can't silently drop the ones you didn't individually Mod-S. Mirrors saveActive's format+write
-  // but across the whole workspace: the active buffer is formatted + synced from the editor first
-  // (the others already hold their edited text in memory), then each dirty buffer is written. A
-  // per-file write failure leaves that buffer dirty and reports it; the rest still save. The
-  // single-file Mod-S path (saveActive) is unchanged.
-  let saveAllQueued = false;
-  async function saveAllDirty(): Promise<void> {
-    if (saveAllQueued) return;
-    saveAllQueued = true;
-    try {
-      if (settings.formatOnSave) {
-        try {
-          editor.applyEdits(await lsp.format());
-        } catch (e) {
-          console.error('format on save failed:', e);
-        }
-      }
-      const active = buffers.get(activeUri);
-      if (active) {
-        active.text = editor.getDoc();
-        lsp.changeDoc(activeUri, active.text);
-      }
-
-      if (dirtyCount(buffers) === 0) {
-        setStatus('No unsaved changes', 'green');
-        return;
-      }
-
-      let failures = 0;
-      const saved = await saveAllDirtyBuffers(buffers, {
-        write: (buf) => platform.writeTextFile(buf.path, buf.text),
-        onError: (buf, err) => {
-          failures++;
-          console.error('writeTextFile failed for', buf.path, err);
-        },
-      });
-      if (saved > 0) {
-        lsp.didSave();
-        renderTree();
-      }
-      if (failures > 0) {
-        setStatus(`Save failed for ${failures} file${failures === 1 ? '' : 's'}`, 'error');
-      } else {
-        setStatus(`Saved ${saved} file${saved === 1 ? '' : 's'}`, 'green');
-      }
-    } finally {
-      saveAllQueued = false;
-    }
-  }
+  window.addEventListener('beforeunload', (e) => handleBeforeUnload(e, () => workspace.anyDirty()));
 
   // --- new model ----------------------------------------------------
   // Reset the default workspace to a single untouched BLANK model: empty it on disk, recreate
@@ -1201,17 +726,16 @@ export function init(): void {
       console.error('resetting the default workspace failed:', e);
       setStatus('could not reset the workspace', 'error');
     }
-    for (const uri of Array.from(buffers.keys())) lsp.closeDoc(uri);
-    buffers.clear();
-    editorSession.clearDiagnostics();
-    await openFolderPath(token, { recent: false }); // activates model.koi (= BLANK) and renders the tree
+    // openFolderPath closes the previously open docs, clears the buffers + diagnostics cache, then
+    // activates model.koi (= BLANK) and renders the tree — so no manual teardown is needed here.
+    await workspace.openFolderPath(token, { recent: false });
     welcome.hide();
   }
 
   // Does the workspace hold unsaved work that New would destroy? Files live on disk,
   // so only a dirty open buffer is at risk.
   function hasUnsavedWork(): boolean {
-    return Array.from(buffers.values()).some((b) => b.dirty);
+    return workspace.anyDirty();
   }
 
   // Confirm before an action that would replace the current model and lose unsaved work. Resolves
@@ -1247,7 +771,7 @@ export function init(): void {
       setStatus('could not open template', 'error');
       return;
     }
-    await openFolderPath(token, { recent: false });
+    await workspace.openFolderPath(token, { recent: false });
   }
 
   // Import a multi-file workspace carried in a share link. Materializes a real workspace and opens
@@ -1273,11 +797,11 @@ export function init(): void {
       setStatus('could not open shared workspace', 'error');
       return;
     }
-    await openFolderPath(token, { recent: false });
+    await workspace.openFolderPath(token, { recent: false });
     // openFolderPath activates the first file by relPath; honour the share's `active` when present.
     if (active) {
-      const target = Array.from(buffers.values()).find((b) => b.relPath === active);
-      if (target) activateFile(target.uri);
+      const target = Array.from(workspace.buffers.values()).find((b) => b.relPath === active);
+      if (target) workspace.activateFile(target.uri);
     }
   }
 
@@ -1297,7 +821,7 @@ export function init(): void {
   const welcome = createWelcome({
     onNewModel: () => void requestNewModel(),
     onOpenFolder: () => void leaveHomeFor('Open a folder?', () => openFolder()),
-    onOpenRecent: (path) => void leaveHomeFor('Open this folder?', () => openFolderPath(path)),
+    onOpenRecent: (path) => void leaveHomeFor('Open this folder?', () => workspace.openFolderPath(path)),
     onOpenExample: (template) => void leaveHomeFor('Open this template?', () => openExample(template)),
   });
 
@@ -1330,7 +854,7 @@ export function init(): void {
   // the window when any buffer is dirty. The browser host omits onCloseRequested (its beforeunload
   // guard already covers tab close / reload), so this is a no-op there.
   void platform.onCloseRequested?.(async () => {
-    if (!anyDirty()) return true;
+    if (!workspace.anyDirty()) return true;
     return confirmDialog.ask({
       title: 'Close Koine Studio?',
       message: `Files with unsaved changes will lose them. Save with ${formatChord('mod+Alt+S')} first to keep them.`,
@@ -1364,14 +888,14 @@ export function init(): void {
         return s.aiProvider === 'openai' ? s.aiModelOpenai : s.aiModel;
       },
       getContext: async () => {
-        const diagnostics = editorSession.diagnosticsFor(activeUri).map((d) => ({
+        const diagnostics = editorSession.diagnosticsFor(workspace.activeUri()).map((d) => ({
           line: d.range.start.line + 1,
           col: d.range.start.character + 1,
           severity: (d.severity === 2 ? 'warning' : 'error') as 'warning' | 'error',
           message: d.message,
         }));
         const base: AssistantContext = {
-          fileName: buffers.get(activeUri)?.name ?? 'model.koi',
+          fileName: workspace.buffers.get(workspace.activeUri())?.name ?? 'model.koi',
           source: editor.getDoc(),
           diagnostics,
         };
@@ -1393,7 +917,7 @@ export function init(): void {
       // Per-workspace conversation key: each opened folder keeps its own transcript; scratch mode
       // (no host folder behind it) uses the literal 'scratch'. selectView calls syncWorkspace on tab
       // show so re-opening the Assistant after a folder switch loads that folder's history.
-      getWorkspaceKey: () => folderRootToken ?? 'scratch',
+      getWorkspaceKey: () => workspace.folderRootToken() ?? 'scratch',
       // Let the assistant call koine tools (validate/compile/format), executed by the host: in-WASM in
       // the browser, via the `koine mcp --http` sidecar on the desktop.
       runCompilerTool: platform.runCompilerTool
@@ -1420,17 +944,17 @@ export function init(): void {
   // copied as a broken link — instead we steer the user to the `.koi` source zip export.
   async function copyShareLink(): Promise<void> {
     try {
-      const files = Array.from(buffers.values()).map((b) => ({ relPath: b.relPath, text: b.text }));
-      const activeRelPath = buffers.get(activeUri)?.relPath;
+      const files = Array.from(workspace.buffers.values()).map((b) => ({ relPath: b.relPath, text: b.text }));
+      const activeRelPath = workspace.buffers.get(workspace.activeUri())?.relPath;
       const url = workspaceShareUrlOrNull(files, activeRelPath);
       if (url === null) {
         setStatus('Workspace too large to share as a link — export a .koi source zip instead', 'error');
-        setTimeout(() => editorSession.updateStatus(editorSession.diagnosticsFor(activeUri)), 1500);
+        setTimeout(() => editorSession.updateStatus(editorSession.diagnosticsFor(workspace.activeUri())), 1500);
         return;
       }
       await navigator.clipboard.writeText(url);
       setStatus('link copied ✓', 'green');
-      setTimeout(() => editorSession.updateStatus(editorSession.diagnosticsFor(activeUri)), 1500);
+      setTimeout(() => editorSession.updateStatus(editorSession.diagnosticsFor(workspace.activeUri())), 1500);
     } catch (e) {
       console.error('copy share link failed:', e);
     }
@@ -1441,13 +965,13 @@ export function init(): void {
   // The whole bundle is DOM-free in sourceZip.ts so it can be unit-tested in isolation.
   async function exportSourceZip(): Promise<void> {
     try {
-      const files = Array.from(buffers.values()).map((b) => ({ relPath: b.relPath, text: b.text }));
-      const root = sanitizeProjectName(platform.folderName(folderRootToken));
+      const files = Array.from(workspace.buffers.values()).map((b) => ({ relPath: b.relPath, text: b.text }));
+      const root = sanitizeProjectName(platform.folderName(workspace.folderRootToken()));
       const bytes = await buildSourceZip(files, { root });
       const saved = await platform.saveZip(`${root}.zip`, bytes);
       if (saved === true) {
         setStatus('source exported ✓', 'green');
-        setTimeout(() => editorSession.updateStatus(editorSession.diagnosticsFor(activeUri)), 1500);
+        setTimeout(() => editorSession.updateStatus(editorSession.diagnosticsFor(workspace.activeUri())), 1500);
       }
     } catch (e) {
       setStatus('export failed', 'error');
@@ -1515,7 +1039,7 @@ export function init(): void {
       { id: 'home', title: 'Go to start screen', group: 'File', run: () => goHome() },
       { id: 'open-folder', title: 'Open folder…', hint: 'mod+Shift+O', group: 'File', run: () => void openFolder() },
       { id: 'new-model', title: 'New model', hint: 'mod+N', group: 'File', run: () => void requestNewModel() },
-      { id: 'save-all', title: 'Save all', hint: 'mod+Alt+S', group: 'File', run: () => void saveAllDirty() },
+      { id: 'save-all', title: 'Save all', hint: 'mod+Alt+S', group: 'File', run: () => void workspace.saveAllDirty() },
       { id: 'share', title: 'Copy shareable link', group: 'File', run: () => void copyShareLink() },
       { id: 'check', title: 'Check against baseline…', group: 'File', run: () => void controller.runCheck() },
       { id: 'generate-project', title: 'Generate project…', group: 'File', run: () => generateProject.open() },
@@ -1542,8 +1066,8 @@ export function init(): void {
 
     // Surface every open file as a "Go to File" entry so the palette doubles as a
     // fuzzy quick-open (type part of a path to jump). The palette re-reads this on each open.
-    for (const buf of Array.from(buffers.values()).sort((a, b) => a.relPath.localeCompare(b.relPath))) {
-      cmds.push({ id: 'goto:' + buf.uri, title: buf.relPath, group: 'Go to File', run: () => activateFile(buf.uri) });
+    for (const buf of Array.from(workspace.buffers.values()).sort((a, b) => a.relPath.localeCompare(b.relPath))) {
+      cmds.push({ id: 'goto:' + buf.uri, title: buf.relPath, group: 'Go to File', run: () => workspace.activateFile(buf.uri) });
     }
 
     return cmds.map((c) => (c.hint ? { ...c, hint: formatChord(c.hint) } : c));
@@ -1608,7 +1132,7 @@ export function init(): void {
         }
       } else if (shared?.kind === 'single') {
         try {
-          await openWorkspaceWith1File(shared.text);
+          await workspace.openWorkspaceWith1File(shared.text);
         } catch (e) {
           console.error('opening shared model failed:', e);
           setStatus('could not open shared model', 'error');
