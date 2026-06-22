@@ -10,8 +10,9 @@ export type RightView = 'props' | 'rules' | 'notes';
 // Maps a workspace mode id (modes.ts: 'domain' | 'code' | 'docs') to the center pane it lands on.
 // 'code' → the technical (emitted-code) pane, 'docs' → the docs pane, everything else (incl. the
 // default 'domain') → the visual editor. Folding this into one transition is what removes the
-// "mode button says X but the center shows Y" divergence.
-const centerForMode = (mode: string): CenterView =>
+// "mode button says X but the center shows Y" divergence. Exported so the controller can pick the
+// boot center from the restored mode without keeping a duplicate copy of this mapping (#193).
+export const centerForMode = (mode: string): CenterView =>
   mode === 'code' ? 'technical' : mode === 'docs' ? 'docs' : 'visual';
 
 export interface UiChromeSlice {

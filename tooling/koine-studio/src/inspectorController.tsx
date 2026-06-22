@@ -66,6 +66,7 @@ import { GlossaryPanel } from './panels/GlossaryPanel';
 import { ChromeTabs } from './panels/ChromeTabs';
 import { DocsPanelHost } from './panels/DocsPanelHost';
 import { appStore } from './store/index';
+import { centerForMode, type RightView } from './store/slices/uiChrome';
 import type { DomainIndex } from './aiPanel';
 import { DEFAULT_MODE_ID, isValidModeId } from './modes';
 import { currentTheme } from './theme';
@@ -82,13 +83,6 @@ type CenterView = 'visual' | 'technical' | 'docs';
 type TechView = 'editor' | 'preview' | 'check' | 'assistant';
 type DocsView = 'glossary' | 'adr';
 type BottomTab = 'problems' | 'events' | 'relationships' | 'contextmap';
-
-// Maps a workspace mode id to the center pane it lands on (Domain → visual, Code → technical, Docs →
-// docs). A hoisted function (not the slice's private copy) so the controller can pick the boot center
-// before the slice setters run; it matches the slice's own centerForMode exactly.
-function centerForMode(mode: string): CenterView {
-  return mode === 'code' ? 'technical' : mode === 'docs' ? 'docs' : 'visual';
-}
 
 /**
  * The slice of {@link import('./lsp').KoineLsp} the loaders call (content requests only). A
@@ -295,7 +289,19 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   // (#193). Reset it to this controller's defaults: the restored mode drives `center` (Domain → visual,
   // Code → technical, Docs → docs), with the tech/docs sub-views back at their landing tabs. setState is
   // used (not setMode) so the reset lands atomically in one notification, before any subscriber runs.
-  appStore.setState({ mode: initialMode, center: centerForMode(initialMode), tech: 'editor', docs: 'glossary' });
+  // `bottom`/`right` are reset to their landing tabs alongside the others: `appStore` is a module
+  // SINGLETON reused across controller instances (notably the test suite), so without this reset a prior
+  // instance that left `bottom`/`right` on a non-default tab would leak into this one — the same reason
+  // the docViews invalidate() below resets surface-staleness. This restores the per-instance defaults the
+  // old module-local `activeBottomTab = 'problems'` / right-rail `'props'` start gave for free.
+  appStore.setState({
+    mode: initialMode,
+    center: centerForMode(initialMode),
+    tech: 'editor',
+    docs: 'glossary',
+    bottom: 'problems',
+    right: 'props',
+  });
   // The docViews slice (#193) is the single source of truth for which lazily-loaded, model-derived
   // surfaces — the Generated preview, the left-rail model, the diagram, the glossary, and the bottom
   // Events/Relationships/Context Map tables — are loaded vs stale; there are no longer any controller-
@@ -368,8 +374,9 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   }
 
   // The single choke point for every scope change (the <select>, a restored value's validation, and
-  // the select-outside-scope path all route through here): update the bus, optionally persist it for
-  // this workspace, sync the control, and re-render the scoped surfaces. `persist` is the user's
+  // the select-outside-scope path all route through here): update the store's `activeContext` slice,
+  // optionally persist it for this workspace, sync the control, and re-render the scoped surfaces.
+  // `persist` is the user's
   // intent flag — only a deliberate switcher choice persists; non-deliberate changes (following a
   // selection, or falling back off a vanished context) are view-only so they never overwrite the
   // user's last explicit choice in storage.
@@ -426,7 +433,7 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   }
 
   // Restore the persisted scope for the just-opened workspace, before the first scoped render. The
-  // control catches up when refreshContextList rebuilds the options (the bus value is what the render
+  // control catches up when refreshContextList rebuilds the options (the slice value is what the render
   // paths read, so the initial render is already scoped regardless of the dropdown's paint timing).
   function restoreActiveContext(): void {
     const stored = deps.loadActiveContext(contextWorkspaceKey());
@@ -458,8 +465,8 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   }
 
   // Re-render the scoped, model-derived surfaces after a scope change. Scope is applied at paint time
-  // from the bus and the model itself is unchanged (scope is a pure filter), so the cached model index
-  // is kept — only the visible surfaces repaint. The model/diagram doc caches are marked stale so a
+  // from the `activeContext` slice and the model itself is unchanged (scope is a pure filter), so the
+  // cached model index is kept — only the visible surfaces repaint. The model/diagram doc caches are marked stale so a
   // not-currently-visible one re-renders scoped on its next visit.
   function rerenderScopedSurfaces(): void {
     // A scope change is a pure re-filter, not a model edit: mark the SCOPE-derived surfaces stale so the
@@ -738,7 +745,7 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   // the first migrated panel). The panel subscribes to the `selection` slice of the app store and
   // resolves it through the current model index, so it tracks selection on its own; the explicit
   // render(...) here repaints it synchronously when the index resolves (loadModel) or a selection lands
-  // (the bus subscriber below mirrors the bus into the store, then calls this). Preact's top-level
+  // (the store subscriber below calls this when the `selection` slice changes). Preact's top-level
   // render() reconciles into the same host node, so the host keeps its identity across repaints.
   function renderSelectedInspector(): void {
     render(
@@ -799,8 +806,8 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
 
   // The inspector + cross-highlight track the app store's `selection` slice for the app's lifetime (a
   // diagram click can select an element while the Model tab is closed; opening it then shows the right
-  // inspector). Subscribe to the whole store but act only when the `selection` field actually changes,
-  // matching the old bus's reference-change notify contract.
+  // inspector). Subscribe to the whole store but act only when the `selection` field actually changes
+  // reference — so an unrelated slice write (a setBottom / setActiveContext) doesn't trigger this.
   appStore.subscribe((state, prev) => {
     if (state.selection === prev.selection) return;
     const sel = state.selection;
@@ -1026,19 +1033,22 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   }
 
   // Right rail: Properties (the inspector) / Rules / Notes. Rules/Notes are placeholder panels for now —
-  // the tab chrome matches the mockup while the inspector stays read-only.
+  // the tab chrome matches the mockup while the inspector stays read-only. The active right view lives in
+  // the uiChrome slice (#193), like center/tech/docs: selectRightView writes it via setRight, so the slice
+  // owns that state rather than it being implicit in the DOM.
   const rightTabs = Array.from(document.querySelectorAll<HTMLButtonElement>('.rtab'));
-  const rightViews: Record<string, HTMLElement> = {
+  const rightViews: Record<RightView, HTMLElement> = {
     props: inspectorHost,
     rules: el('rview-rules'),
     notes: el('rview-notes'),
   };
-  function selectRightView(view: string): void {
+  function selectRightView(view: RightView): void {
+    appStore.getState().setRight(view);
     for (const t of rightTabs) t.setAttribute('aria-selected', String(t.dataset.rview === view));
     for (const [key, node] of Object.entries(rightViews)) node.hidden = key !== view;
   }
   for (const t of rightTabs) {
-    t.addEventListener('click', () => selectRightView(t.dataset.rview as string));
+    t.addEventListener('click', () => selectRightView(t.dataset.rview as RightView));
   }
 
   // --- compatibility check (on-demand) ---------------------------------------
@@ -1152,7 +1162,10 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   // behaviour, now without the controller-local `bottomLoadedToken` map distinguishing tabs. Events +
   // Relationships are Preact panels that subscribe to `activeContext` and scope themselves, so a scope
   // change re-renders them without a refetch; the loaders pass the UNSCOPED graph/context-map.
-  let activeBottomTab: BottomTab = 'problems';
+  // The active bottom tab lives in the uiChrome slice (#193) — read it through this accessor at use
+  // sites, matching how center/tech/docs already flow through the slice; selectBottomTab writes it via
+  // setBottom, so the slice genuinely owns that state.
+  const activeBottomTab = (): BottomTab => appStore.getState().bottom;
   let bottomPanelDebounce: ReturnType<typeof setTimeout> | undefined;
 
   deps.initEdgeResizer({
@@ -1180,14 +1193,14 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     } catch {
       // ignore — no persistence available
     }
-    if (!collapsed) ensureBottomLoaded(activeBottomTab); // expanding → fill the active table if stale
+    if (!collapsed) ensureBottomLoaded(activeBottomTab()); // expanding → fill the active table if stale
   });
 
   // Tab switching: only the active panel body is shown; the count pill belongs to Problems. The first
   // time Events/Relationships is shown it loads lazily; clicking a tab also expands a collapsed panel.
   const bottomTabs = Array.from(document.querySelectorAll<HTMLButtonElement>('.diag-tab'));
   function selectBottomTab(tab: BottomTab): void {
-    activeBottomTab = tab;
+    appStore.getState().setBottom(tab);
     for (const t of bottomTabs) t.setAttribute('aria-selected', String(t.dataset.panel === tab));
     diagBodyEl.hidden = tab !== 'problems';
     eventsPanel.hidden = tab !== 'events';
@@ -1300,9 +1313,9 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     inv('events');
     inv('relationships');
     inv('contextmap');
-    if (activeBottomTab === 'problems' || diagEl.classList.contains('collapsed')) return;
+    if (activeBottomTab() === 'problems' || diagEl.classList.contains('collapsed')) return;
     clearTimeout(bottomPanelDebounce);
-    bottomPanelDebounce = setTimeout(() => ensureBottomLoaded(activeBottomTab), 350);
+    bottomPanelDebounce = setTimeout(() => ensureBottomLoaded(activeBottomTab()), 350);
   }
 
   // --- boot ------------------------------------------------------------------
