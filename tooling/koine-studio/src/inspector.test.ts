@@ -5,7 +5,7 @@ import {
   type InspectorElement,
   type InspectorHandlers,
 } from './inspector';
-import type { DiagramNode, GlossaryEntry, Range } from './lsp';
+import type { DiagramNode, GlossaryEntry, ModelMember, Range } from './lsp';
 
 afterEach(() => {
   document.body.innerHTML = '';
@@ -196,6 +196,33 @@ describe('buildInspectorElement', () => {
     expect(built.stereotype).toBeNull();
     expect(built.properties).toEqual([]);
     expect(built.behaviors).toEqual([]);
+  });
+
+  test('falls back to the structured-model fields for a value object with no diagram node', () => {
+    // A value object that isn't drawn as a class node anywhere has no DiagramNode, so its fields live
+    // only in the structured model (#91). The inspector must still show them. A model field with an
+    // initializer (`value`) is a derived/computed member.
+    const moneyEntry: GlossaryEntry = { ...entry, name: 'Money', kind: 'value', qualifiedName: 'Sales.Money', doc: null };
+    const modelMembers: ModelMember[] = [
+      { kind: 'field', name: 'amount', type: 'Decimal', value: null },
+      { kind: 'field', name: 'currency', type: 'Currency', value: null },
+      { kind: 'field', name: 'display', type: 'String', value: 'amount + currency' },
+    ];
+    const built = buildInspectorElement(moneyEntry, undefined, modelMembers);
+    expect(built.properties).toEqual([
+      { text: 'amount: Decimal', computed: false },
+      { text: 'currency: Currency', computed: false },
+      { text: 'display: String', computed: true },
+    ]);
+  });
+
+  test('prefers the diagram node members over the structured model when both are present', () => {
+    const modelMembers: ModelMember[] = [{ kind: 'field', name: 'ignored', type: 'X', value: null }];
+    const built = buildInspectorElement(entry, node, modelMembers);
+    expect(built.properties).toEqual([
+      { text: 'id: OrderId', computed: false },
+      { text: 'total: Money', computed: false },
+    ]);
   });
 
   test('collects enum values into the values compartment', () => {

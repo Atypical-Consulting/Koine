@@ -2,12 +2,14 @@
 // the outline backbone) joined with the richest matching `DiagramNode` (stereotype + class-body rows
 // — the inspector's source). Extracted from `ide.ts` so the non-trivial join — diagram nodes are
 // named `context.simpleName` while glossary entries are `context.aggregate.name` — is unit-tested.
-import type { DiagramNode, DocsResult, GlossaryEntry, GlossaryModel } from './lsp';
+import type { DiagramNode, DocsResult, GlossaryEntry, GlossaryModel, ModelMember, ModelNode } from './lsp';
 
 /** A glossary entry joined with its diagram node (absent when the element has no class diagram). */
 export interface ModelElement {
   entry: GlossaryEntry;
   node?: DiagramNode;
+  /** The element's structured-model members (the #91 field source used when no class node is drawn). */
+  modelMembers?: ModelMember[];
 }
 
 export interface ModelIndex {
@@ -29,7 +31,7 @@ function nodeRichness(node: DiagramNode): number {
  * (the aggregate class node beats the bare state/box node of the same name), then joined to glossary
  * entries via the synthesized `context.name` key.
  */
-export function buildModelIndex(glossary: GlossaryModel, docs: DocsResult): ModelIndex {
+export function buildModelIndex(glossary: GlossaryModel, docs: DocsResult, model?: ModelNode): ModelIndex {
   const nodesByCtxName = new Map<string, DiagramNode>();
   for (const file of docs.files) {
     for (const diagram of file.diagrams) {
@@ -42,12 +44,25 @@ export function buildModelIndex(glossary: GlossaryModel, docs: DocsResult): Mode
     }
   }
 
+  // The structured-model members keyed by canonical qualified name (the same key as a glossary entry).
+  // This is the field source for elements with no class node — a value object drawn only as a reference.
+  const membersByQn = new Map<string, ModelMember[]>();
+  const walk = (n: ModelNode): void => {
+    if (n.qualifiedName && n.members.length) membersByQn.set(n.qualifiedName, n.members);
+    for (const child of n.children) walk(child);
+  };
+  if (model) walk(model);
+
   const byQn = new Map<string, ModelElement>();
   const qnByCtxName = new Map<string, string>();
   for (const entry of glossary.entries) {
     if (entry.kind === 'context') continue;
     const ctxName = `${entry.context}.${entry.name}`;
-    byQn.set(entry.qualifiedName, { entry, node: nodesByCtxName.get(ctxName) });
+    byQn.set(entry.qualifiedName, {
+      entry,
+      node: nodesByCtxName.get(ctxName),
+      modelMembers: membersByQn.get(entry.qualifiedName),
+    });
     if (!qnByCtxName.has(ctxName)) qnByCtxName.set(ctxName, entry.qualifiedName);
   }
   return { glossary, byQn, qnByCtxName };

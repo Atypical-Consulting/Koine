@@ -60,6 +60,42 @@ describe('buildModelIndex', () => {
     expect(index.qnByCtxName.get('Sales.Money')).toBe('Sales.Order.Money');
   });
 
+  test('attaches the structured-model members to each element by qualified name', () => {
+    // The model tree carries every element's fields regardless of diagramming; Money has no diagram
+    // node but its fields must still reach the index (so the inspector can show them).
+    const model = {
+      kind: 'model',
+      qualifiedName: '',
+      title: '',
+      members: [],
+      children: [
+        {
+          kind: 'context',
+          qualifiedName: 'Sales',
+          title: 'Sales',
+          members: [],
+          children: [
+            {
+              kind: 'value',
+              qualifiedName: 'Sales.Money',
+              title: 'Money',
+              members: [
+                { kind: 'field', name: 'amount', type: 'Decimal', value: null },
+                { kind: 'field', name: 'currency', type: 'Currency', value: null },
+              ],
+              children: [],
+            },
+          ],
+        },
+      ],
+    };
+    const index = buildModelIndex({ entries: [entry('Money', 'value', 'Sales')] }, docs(), model);
+    expect(index.byQn.get('Sales.Money')!.modelMembers).toEqual([
+      { kind: 'field', name: 'amount', type: 'Decimal', value: null },
+      { kind: 'field', name: 'currency', type: 'Currency', value: null },
+    ]);
+  });
+
   test('keeps the richest node when the same context.simpleName appears in several diagrams', () => {
     const lean = node('Sales.Order', null, []);
     const rich = node('Sales.Order', 'aggregate root', [{ text: 'id: OrderId', kind: 'field' }]);
