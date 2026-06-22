@@ -200,6 +200,72 @@ export async function materializeWorkspace(
 const DEFAULT_WS_DIR = 'default-workspace';
 const DEFAULT_WS_TOKEN = '(default)';
 
+// The picked-once workspace root: a single directory handle (e.g. ~/koine) under which "Save to disk"
+// writes named projects. Persisted in IndexedDB under a reserved key (parens can't appear in a real
+// picked-folder name, so it never collides with a folder-name token — same trick as DEFAULT_WS_TOKEN).
+const WORKSPACE_ROOT_KEY = '(workspace-root)';
+let workspaceRoot: FsDirHandle | null = null;
+
+/**
+ * Resolve the remembered workspace root: the in-memory handle, else the IndexedDB-persisted handle
+ * (re-granting permission under the calling click), else a one-time `showDirectoryPicker`. Returns
+ * null only when the user dismisses that picker (or the API is unavailable).
+ */
+async function resolveWorkspaceRoot(): Promise<FsDirHandle | null> {
+  if (workspaceRoot) return workspaceRoot;
+  const stored = await idbGet(WORKSPACE_ROOT_KEY);
+  if (stored) {
+    const granted = stored.queryPermission
+      ? (await stored.queryPermission({ mode: 'readwrite' })) === 'granted'
+      : false;
+    if (granted || !stored.requestPermission || (await stored.requestPermission({ mode: 'readwrite' })) === 'granted') {
+      workspaceRoot = stored;
+      return stored;
+    }
+    // Permission on the stored root was denied — fall through to let the user pick again.
+  }
+  if (!fsWin.showDirectoryPicker) return null;
+  let dir: FsDirHandle;
+  try {
+    dir = await fsWin.showDirectoryPicker({ mode: 'readwrite' });
+  } catch {
+    return null; // user dismissed the picker
+  }
+  workspaceRoot = dir;
+  await idbPut(WORKSPACE_ROOT_KEY, dir);
+  return dir;
+}
+
+/** The remembered workspace root's display name (for Settings), or null before one is picked. */
+export async function workspaceRootName(): Promise<string | null> {
+  const root = workspaceRoot ?? (await idbGet(WORKSPACE_ROOT_KEY));
+  return root ? root.name || null : null;
+}
+
+/**
+ * Create `<root>/<name>/`, write `files` into it, and register it exactly like a folder opened via
+ * the picker (token minted, handle persisted to IndexedDB) so it reopens through the normal
+ * resolveFolder path and shows up reopenable in Recent. Returns the new folder token, or null when
+ * the user dismissed the root picker. Throws `already exists` (writing nothing) on a name collision.
+ */
+export async function saveProjectToRoot(
+  name: string,
+  files: { relPath: string; contents: string }[],
+): Promise<string | null> {
+  assertName(name);
+  const root = await resolveWorkspaceRoot();
+  if (!root) return null;
+  if (await entryExists(root, name)) throw new Error('already exists: ' + name);
+  const projectDir = await root.getDirectoryHandle(name, { create: true });
+  const token = await uniqueToken(name);
+  folders.set(token, projectDir);
+  folderNames.set(token, name);
+  dirHandles.set(token, projectDir);
+  for (const f of files) await createFile(token, f.relPath, f.contents);
+  await idbPut(token, projectDir);
+  return token;
+}
+
 async function hasAnyKoi(dir: FsDirHandle): Promise<boolean> {
   for await (const entry of dir.values()) {
     if (entry.kind === 'file' && entry.name.toLowerCase().endsWith('.koi')) return true;
@@ -717,4 +783,20 @@ export function __resetFsForTest(): void {
   folderNames.clear();
   fileHandles.clear();
   dirHandles.clear();
+  workspaceRoot = null;
+}
+
+/** TEST ONLY: clear the IndexedDB store so persisted handles don't leak between tests. */
+export async function __clearDbForTest(): Promise<void> {
+  try {
+    const db = await openDb();
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(STORE, 'readwrite');
+      tx.objectStore(STORE).clear();
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  } catch {
+    // DB not available or error clearing
+  }
 }
