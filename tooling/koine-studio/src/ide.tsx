@@ -29,6 +29,7 @@ import {
   loadSettings,
   loadWorkspaceMode,
   pushRecentFolder,
+  removeRecentFolder,
   saveActiveContext,
   saveWorkspaceMode,
   type Settings,
@@ -979,10 +980,31 @@ export function init(): void {
     if (await confirmReplaceWork(title, 'Discard & open')) await action();
   }
 
+  // Open a folder from the Recent list, recovering gracefully when it's gone. The welcome's recent
+  // row hides the start screen on click, so on failure we re-show it (never strand the user) and, for
+  // a vanished folder/handle, offer to forget the entry.
+  async function openRecentFolder(path: string): Promise<void> {
+    const result = await workspace.openFolderPath(path);
+    if (result.ok) return;
+    welcome.show();
+    if (result.reason === 'unreadable') {
+      const forget = await confirmDialog.ask({
+        title: `"${platform.folderName(path)}" is no longer available`,
+        message: 'Its folder may have moved, been deleted, or had its permission revoked. Remove it from Recent?',
+        confirmLabel: 'Remove from Recent',
+        danger: true,
+      });
+      if (forget) {
+        removeRecentFolder(path);
+        welcome.show(); // rebuild the recent list without the removed entry
+      }
+    }
+  }
+
   const welcome = createWelcome({
     onNewModel: () => void requestNewModel(),
     onOpenFolder: () => void leaveHomeFor('Open a folder?', () => openFolder()),
-    onOpenRecent: (path) => void leaveHomeFor('Open this folder?', () => void workspace.openFolderPath(path)),
+    onOpenRecent: (path) => void leaveHomeFor('Open this folder?', () => openRecentFolder(path)),
     onOpenExample: (template) => void leaveHomeFor('Open this template?', () => openExample(template)),
   });
 

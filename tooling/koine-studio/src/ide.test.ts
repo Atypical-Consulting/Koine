@@ -681,3 +681,48 @@ describe('ide init() — Save to disk', () => {
     expect((document.getElementById('btn-save-project') as HTMLButtonElement).hidden).toBe(true);
   });
 });
+
+describe('ide init() — Recent open recovery', () => {
+  test('clicking a Recent whose folder is gone keeps the start screen up and offers removal', async () => {
+    // Seed one recent BEFORE boot so the welcome renders a row for it.
+    localStorage.setItem('koine.studio.recentFolders', JSON.stringify(['ghost']));
+
+    const p = installPlatform();
+    // Make listKoiFiles throw only for the dead recent path ('ghost'); the default workspace
+    // uses ROOT = 'mem://workspace' and must succeed as normal so the boot ladder completes and
+    // welcome.show() fires (pristine-seed check).
+    const realListKoiFiles = p.listKoiFiles.bind(p);
+    // Cast is required: FakePlatform omits the token arg but the real Platform interface has it.
+    (p as unknown as { listKoiFiles: (token: string) => Promise<KoiFile[]> }).listKoiFiles = vi.fn(
+      async (folder: string) => {
+        if (folder === 'ghost') throw new Error('this folder is no longer available — open it again');
+        return realListKoiFiles();
+      },
+    );
+
+    await boot({ platform: p });
+    // After a pristine-seed boot the welcome is shown; the recent list now has the 'ghost' row.
+    expect(document.querySelector('.koi-welcome-recent-open')).not.toBeNull();
+
+    // Click the dead recent row — welcome.ts's click handler calls hide() then onOpenRecent('ghost').
+    (document.querySelector('.koi-welcome-recent-open') as HTMLButtonElement).click();
+    // Drain: leaveHomeFor → confirmReplaceWork (no unsaved work → resolves immediately) →
+    // openRecentFolder → workspace.openFolderPath → listKoiFiles throws → { ok: false, reason: 'unreadable' }
+    // → welcome.show() re-shown → confirmDialog.ask() opens modal.
+    await settleBoot();
+
+    // The confirm modal must now be visible (asking "Remove from Recent?").
+    const okBtn = document.querySelector<HTMLButtonElement>('.koi-confirm-btn-danger');
+    expect(okBtn).not.toBeNull();
+
+    // Confirm removal — this resolves the confirmDialog.ask() promise with true.
+    okBtn!.click();
+    await settleBoot();
+
+    // The dead recent must be gone from localStorage.
+    expect(localStorage.getItem('koine.studio.recentFolders')).not.toContain('ghost');
+
+    // The welcome (start screen) must still be present — the user is never stranded.
+    expect(document.querySelector('.koi-welcome-recent')).not.toBeNull();
+  });
+});
