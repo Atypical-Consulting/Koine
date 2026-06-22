@@ -24,6 +24,8 @@ export interface WelcomeCallbacks {
 export interface WelcomeHandle {
   show(): void;
   hide(): void;
+  /** Rebuild the recent-folders list in place, whether or not the welcome is already shown. */
+  refreshRecent(): void;
   readonly visible: boolean;
 }
 
@@ -753,6 +755,10 @@ export function createWelcome(cb: WelcomeCallbacks, templates: readonly Template
   return {
     show,
     hide,
+    // Rebuild the recent list in place. Unlike show(), this runs even when already shown — so a caller
+    // that mutated the recents (e.g. after forgetting a dead entry) can refresh the list without the
+    // `if (shown) return` early-out swallowing the re-render.
+    refreshRecent: renderRecent,
     get visible() {
       return shown;
     },

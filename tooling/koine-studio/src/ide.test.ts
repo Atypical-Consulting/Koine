@@ -110,6 +110,7 @@ const ROOT = 'mem://workspace';
 class FakePlatform implements Platform {
   readonly kind = 'browser' as const;
   readonly canOpenFolders = true;
+  readonly canSaveProjects = true;
   readonly transport = new FakeLspTransport();
 
   /** relPath (forward-slashed) -> UTF-8 contents. Tokens are `${ROOT}/${relPath}`. */
@@ -143,6 +144,14 @@ class FakePlatform implements Platform {
   pickFolder(): Promise<string | null> {
     return Promise.resolve(null);
   }
+  saveProjectToRoot = vi.fn(async (name: string, files: { relPath: string; contents: string }[]): Promise<string | null> => {
+    // Seed the fake FS so the follow-up openFolderPath(token) reads the written files back.
+    this.files.clear();
+    for (const f of files) this.files.set(f.relPath, f.contents);
+    return name;
+  });
+  workspaceRootName = vi.fn(async (): Promise<string | null> => null);
+  pickWorkspaceRoot = vi.fn(async (): Promise<string | null> => null);
   materializeWorkspace(
     name: string,
     files: { relPath: string; contents: string }[],
@@ -232,6 +241,7 @@ const APP_HTML = `
           <div id="history-controls-host"></div>
           <div class="tb-group">
             <button type="button" id="btn-generate-project">Generate</button>
+            <button type="button" id="btn-save-project">Save to disk</button>
           </div>
           <button type="button" id="btn-check">Check</button>
         </div>
@@ -634,5 +644,95 @@ describe('ide init() — close/unload guard', () => {
     beforeUnload(dirty);
     expect(dirty.defaultPrevented).toBe(true);
     expect(dirty.returnValue).toBeTruthy();
+  });
+});
+
+describe('ide init() — Save to disk', () => {
+  test('Save to disk writes the open buffers as a named project', async () => {
+    await boot();
+    const saveSpy = (fakePlatform.current as FakePlatform).saveProjectToRoot;
+    vi.stubGlobal('prompt', vi.fn(() => 'my-pizzeria'));
+
+    (document.getElementById('btn-save-project') as HTMLButtonElement).click();
+    await settleBoot();
+
+    expect(saveSpy).toHaveBeenCalledTimes(1);
+    const [name, files] = saveSpy.mock.calls[0] as [string, { relPath: string; contents: string }[]];
+    expect(name).toBe('my-pizzeria');
+    expect(files.some((f) => f.relPath === 'model.koi')).toBe(true);
+  });
+
+  test('Save to disk does nothing when the name prompt is cancelled', async () => {
+    await boot();
+    const saveSpy = (fakePlatform.current as FakePlatform).saveProjectToRoot;
+    vi.stubGlobal('prompt', vi.fn(() => null));
+
+    (document.getElementById('btn-save-project') as HTMLButtonElement).click();
+    await settleBoot();
+
+    expect(saveSpy).not.toHaveBeenCalled();
+  });
+
+  test('Save to disk button is hidden when the host cannot save projects', async () => {
+    const p = installPlatform();
+    // Override the readonly property to simulate a host that cannot save projects.
+    (p as unknown as { canSaveProjects: boolean }).canSaveProjects = false;
+    await boot({ platform: p });
+    expect((document.getElementById('btn-save-project') as HTMLButtonElement).hidden).toBe(true);
+  });
+});
+
+describe('ide init() — Recent open recovery', () => {
+  test('clicking a Recent whose folder is gone keeps the start screen up and offers removal', async () => {
+    // Seed one recent BEFORE boot so the welcome renders a row for it.
+    localStorage.setItem('koine.studio.recentFolders', JSON.stringify(['ghost']));
+
+    const p = installPlatform();
+    // Make listKoiFiles throw only for the dead recent path ('ghost'); the default workspace
+    // uses ROOT = 'mem://workspace' and must succeed as normal so the boot ladder completes and
+    // welcome.show() fires (pristine-seed check).
+    const realListKoiFiles = p.listKoiFiles.bind(p);
+    // Cast is required: FakePlatform omits the token arg but the real Platform interface has it.
+    (p as unknown as { listKoiFiles: (token: string) => Promise<KoiFile[]> }).listKoiFiles = vi.fn(
+      async (folder: string) => {
+        if (folder === 'ghost') throw new Error('this folder is no longer available — open it again');
+        return realListKoiFiles();
+      },
+    );
+
+    await boot({ platform: p });
+    // After a pristine-seed boot the welcome is shown; the recent list now has the 'ghost' row.
+    expect(document.querySelector('.koi-welcome-recent-open')).not.toBeNull();
+
+    // Click the dead recent row — welcome.ts's click handler calls hide() then onOpenRecent('ghost').
+    (document.querySelector('.koi-welcome-recent-open') as HTMLButtonElement).click();
+    // Drain: leaveHomeFor → confirmReplaceWork (no unsaved work → resolves immediately) →
+    // openRecentFolder → workspace.openFolderPath → listKoiFiles throws → { ok: false, reason: 'unreadable' }
+    // → welcome.show() re-shown → confirmDialog.ask() opens modal.
+    await settleBoot();
+
+    // The confirm modal must now be visible (asking "Remove from Recent?").
+    const okBtn = document.querySelector<HTMLButtonElement>('.koi-confirm-btn-danger');
+    expect(okBtn).not.toBeNull();
+
+    // Confirm removal — this resolves the confirmDialog.ask() promise with true.
+    okBtn!.click();
+    await settleBoot();
+
+    // The dead recent must be gone from localStorage.
+    expect(localStorage.getItem('koine.studio.recentFolders')).not.toContain('ghost');
+
+    // The welcome (start screen) must still be present — the user is never stranded.
+    expect(document.querySelector('.koi-welcome-recent')).not.toBeNull();
+
+    // …AND the list must have rebuilt: the dead row is gone from the DOM, not just from storage.
+    // (Regression guard: welcome.show() early-returns when already shown, so the post-removal refresh
+    // must use refreshRecent() to re-render — otherwise the stale row lingers on screen.)
+    const remainingRows = Array.from(
+      document.querySelectorAll<HTMLElement>('.koi-welcome-recent-item-name'),
+    ).map((el) => el.textContent);
+    expect(remainingRows).not.toContain('ghost');
+    // It was the only recent, so the empty-state copy is now shown in its place.
+    expect(document.querySelector('.koi-welcome-empty')).not.toBeNull();
   });
 });

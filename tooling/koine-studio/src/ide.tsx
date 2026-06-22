@@ -29,6 +29,7 @@ import {
   loadSettings,
   loadWorkspaceCenter,
   pushRecentFolder,
+  removeRecentFolder,
   saveActiveContext,
   saveWorkspaceCenter,
   type Settings,
@@ -1025,10 +1026,31 @@ export function init(): void {
     if (await confirmReplaceWork(title, 'Discard & open')) await action();
   }
 
+  // Open a folder from the Recent list, recovering gracefully when it's gone. The welcome's recent
+  // row hides the start screen on click, so on failure we re-show it (never strand the user) and, for
+  // a vanished folder/handle, offer to forget the entry.
+  async function openRecentFolder(path: string): Promise<void> {
+    const result = await workspace.openFolderPath(path);
+    if (result.ok) return;
+    welcome.show();
+    if (result.reason === 'unreadable') {
+      const forget = await confirmDialog.ask({
+        title: `"${platform.folderName(path)}" is no longer available`,
+        message: 'Its folder may have moved, been deleted, or had its permission revoked. Remove it from Recent?',
+        confirmLabel: 'Remove from Recent',
+        danger: true,
+      });
+      if (forget) {
+        removeRecentFolder(path);
+        welcome.refreshRecent(); // rebuild the list in place — welcome is already shown, so show() would no-op
+      }
+    }
+  }
+
   const welcome = createWelcome({
     onNewModel: () => void requestNewModel(),
     onOpenFolder: () => void leaveHomeFor('Open a folder?', () => openFolder()),
-    onOpenRecent: (path) => void leaveHomeFor('Open this folder?', () => workspace.openFolderPath(path)),
+    onOpenRecent: (path) => void leaveHomeFor('Open this folder?', () => openRecentFolder(path)),
     onOpenExample: (template) => void leaveHomeFor('Open this template?', () => openExample(template)),
   });
 
@@ -1051,6 +1073,10 @@ export function init(): void {
     mcpStop: () => platform.mcpStop(),
     // Only the desktop shell can host the sidecar; the web build shows recipes but disables the toggle.
     mcpHostable: platform.kind === 'tauri',
+    // Workspace root: only the browser (File System Access API) can save projects to a root dir.
+    canSaveProjects: platform.canSaveProjects,
+    workspaceRootName: () => platform.workspaceRootName(),
+    pickWorkspaceRoot: () => platform.pickWorkspaceRoot(),
   });
   const help = createHelpOverlay(helpRows());
   const about = createAboutDialog();
@@ -1186,6 +1212,40 @@ export function init(): void {
     }
   }
 
+  // Save the current workspace as a real, reopenable on-disk project (browser host only). Promotes an
+  // ephemeral example/Untitled workspace into <root>/<name>/, registers it in Recent, and reopens it
+  // from disk so the workspace now IS that folder (further ⌘S writes there).
+  async function saveProjectToDisk(): Promise<void> {
+    if (!platform.canSaveProjects) return;
+    // Flush the active editor's debounced text into its buffer so the snapshot is current.
+    workspace.syncActiveBuffer(editor.getDoc());
+    const files = [...workspace.buffers.values()].map((b) => ({ relPath: b.relPath, contents: b.text }));
+    if (files.length === 0) {
+      setStatus('nothing to save', 'error');
+      return;
+    }
+    const suggested = workspace.folderRootToken() ? platform.folderName(workspace.folderRootToken()) : 'my-project';
+    for (;;) {
+      const name = window.prompt('Save project as:', suggested)?.trim();
+      if (!name) return; // cancelled / empty
+      try {
+        const token = await platform.saveProjectToRoot(name, files);
+        if (!token) return; // root picker dismissed
+        await workspace.openFolderPath(token, { recent: true });
+        setStatus('Project saved ✓', 'green');
+        return;
+      } catch (e) {
+        if (String(e instanceof Error ? e.message : e).includes('already exists')) {
+          window.alert(`A project named "${name}" already exists — choose another name.`);
+          continue; // re-prompt
+        }
+        setStatus('save to disk failed', 'error');
+        console.error('saveProjectToDisk failed:', e);
+        return;
+      }
+    }
+  }
+
   initSplitResizer({ split: el('split'), handle: el('split-resizer') });
 
   // Left sidebar width — the single rail (Files / Explorer / Overview / Documentation).
@@ -1222,6 +1282,9 @@ export function init(): void {
   el<HTMLButtonElement>('btn-home').addEventListener('click', () => goHome());
   el<HTMLButtonElement>('btn-new').addEventListener('click', () => void requestNewModel());
   el<HTMLButtonElement>('btn-generate-project').addEventListener('click', () => generateProject.open());
+  const saveProjectBtn = el<HTMLButtonElement>('btn-save-project');
+  saveProjectBtn.addEventListener('click', () => void saveProjectToDisk());
+  if (!platform.canSaveProjects) saveProjectBtn.hidden = true;
   el<HTMLButtonElement>('btn-theme').addEventListener('click', () => toggleTheme());
   el<HTMLButtonElement>('btn-prefs').addEventListener('click', () => prefs.open());
   el<HTMLButtonElement>('btn-about').addEventListener('click', () => about.open());
@@ -1253,6 +1316,9 @@ export function init(): void {
       { id: 'check', title: 'Check against baseline…', group: 'File', run: () => void controller.runCheck() },
       { id: 'generate-project', title: 'Generate project…', group: 'File', run: () => generateProject.open() },
       { id: 'export-source-zip', title: 'Export .koi source (.zip)', group: 'File', run: () => void exportSourceZip() },
+      ...(platform.canSaveProjects
+        ? [{ id: 'save-project-to-disk', title: 'Save to disk…', group: 'File', run: () => void saveProjectToDisk() } as Command]
+        : []),
       { id: 'toggle-theme', title: 'Toggle theme', group: 'View', run: () => toggleTheme() },
       { id: 'prefs', title: 'Settings…', hint: 'mod+,', group: 'View', run: () => prefs.open() },
       { id: 'help', title: 'Keyboard shortcuts', hint: 'F1', group: 'Help', run: () => help.open() },

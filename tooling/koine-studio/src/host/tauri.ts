@@ -66,6 +66,7 @@ class TauriLspTransport implements LspTransport {
 export class TauriPlatform implements Platform {
   readonly kind = 'tauri' as const;
   readonly canOpenFolders = true;
+  readonly canSaveProjects = false;
 
   createLspTransport(): LspTransport {
     return new TauriLspTransport();
@@ -123,6 +124,19 @@ export class TauriPlatform implements Platform {
   async pickFolder(title: string): Promise<string | null> {
     const picked = await openDialog({ directory: true, title });
     return Array.isArray(picked) ? picked[0] ?? null : picked;
+  }
+
+  // Browser-first: desktop keeps "Open folder…". A ~/koine-style root here is a follow-up.
+  saveProjectToRoot(_name: string, _files: { relPath: string; contents: string }[]): Promise<string | null> {
+    return Promise.resolve(null);
+  }
+
+  workspaceRootName(): Promise<string | null> {
+    return Promise.resolve(null);
+  }
+
+  pickWorkspaceRoot(): Promise<string | null> {
+    return Promise.resolve(null);
   }
 
   // Materialize a synthetic workspace under the app-data dir, fresh each open (mirrors the browser's
