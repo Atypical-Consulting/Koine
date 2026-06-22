@@ -3,8 +3,23 @@
 // one `<g class="koi-svg-node">` per node, tagged with the node's provenance so Task 4 can navigate
 // without re-querying. Layout coordinates are NOT asserted (layout-lib-dependent); we assert
 // structure, the node DOM contract, and the per-diagram fallback robustness only.
-import { afterEach, describe, expect, test } from 'vitest';
-import { createSvgRenderer, NODE_NAVIGATE_EVENT, type DiagramNodeNavigateDetail } from './diagrams-svg';
+import { afterEach, describe, expect, test, vi } from 'vitest';
+import {
+  createSvgRenderer,
+  setDiagramEditing,
+  setDiagramPersistScope,
+  DIAGRAM_RELAYOUT_EVENT,
+  DIAGRAM_CONNECT_EVENT,
+  DIAGRAM_DISCONNECT_EVENT,
+  DIAGRAM_ADD_TYPE_EVENT,
+  NODE_EDIT_EVENT,
+  NODE_NAVIGATE_EVENT,
+  type DiagramConnectDetail,
+  type DiagramDisconnectDetail,
+  type DiagramNodeEditDetail,
+  type DiagramNodeNavigateDetail,
+} from './diagrams-svg';
+import { loadDiagramPositions, saveDiagramPositions } from './store';
 import type { DocsFile, Diagram, DiagramNode } from './lsp';
 
 const EMPTY_STATE = 'No diagrams yet';
@@ -769,5 +784,443 @@ describe('node navigation event (Task 4)', () => {
     expect(events).toHaveLength(1);
     expect(events[0].file).toBeNull();
     expect(events[0].line).toBe(3);
+  });
+});
+
+describe('node width cap + text truncation (authoring overhaul, Phase 1)', () => {
+  const MAX_NODE_WIDTH = 280; // mirrors the renderer's hard width cap
+
+  test('a node with a very long member clamps its width and ellipsizes the row (full text in a <title>)', async () => {
+    const longMember = 'placeAnExtremelyDetailedOrder(customer: CustomerId, lines: List<OrderLine>, coupon: CouponCode): OrderConfirmation';
+    const files: DocsFile[] = [
+      file([
+        diagram({
+          nodes: [
+            mkNode({
+              id: 'order',
+              label: 'Order',
+              kind: 'aggregate-root',
+              qualifiedName: 'Ordering.Order',
+              stereotype: 'aggregate root',
+              members: [{ text: longMember, kind: 'method' }],
+            }),
+          ],
+          edges: [],
+        }),
+      ]),
+    ];
+
+    const container = ROOT();
+    await createSvgRenderer().render(container, files, 'light', () => true);
+
+    const node = container.querySelector('.koi-svg-diagram .koi-svg-node[data-qname="Ordering.Order"]')!;
+    // The box never grows past the hard cap, however long the member is.
+    const box = node.querySelector('.koi-svg-class-box')!;
+    expect(Number(box.getAttribute('width'))).toBeLessThanOrEqual(MAX_NODE_WIDTH);
+
+    // The row's VISIBLE text (the first child node, before the appended <title>) is clipped with an ellipsis…
+    const row = node.querySelector('.koi-svg-class-row')!;
+    expect(row.childNodes[0].textContent!.endsWith('…')).toBe(true);
+    // …and the full text is preserved in a hover <title> so nothing is lost.
+    const title = row.querySelector('title');
+    expect(title).not.toBeNull();
+    expect(title!.textContent).toBe(longMember);
+  });
+
+  test('a short member row is NOT given a <title> (only truncated text gets one)', async () => {
+    const files: DocsFile[] = [
+      file([
+        diagram({
+          nodes: [
+            mkNode({
+              id: 'order',
+              label: 'Order',
+              kind: 'aggregate-root',
+              qualifiedName: 'Ordering.Order',
+              stereotype: 'aggregate root',
+              members: [{ text: 'id: OrderId', kind: 'field' }],
+            }),
+          ],
+          edges: [],
+        }),
+      ]),
+    ];
+
+    const container = ROOT();
+    await createSvgRenderer().render(container, files, 'light', () => true);
+
+    const row = container.querySelector('.koi-svg-diagram .koi-svg-class-row')!;
+    expect(row.textContent).toBe('id: OrderId');
+    expect(row.querySelector('title')).toBeNull();
+  });
+});
+
+describe('edge markers + dual cardinalities (authoring overhaul, Phase 1)', () => {
+  test('a composition edge draws a diamond at the source, an arrow at the target, and a label at each end', async () => {
+    const files: DocsFile[] = [
+      file([
+        diagram({
+          nodes: [
+            mkNode({ id: 'order', label: 'Order', kind: 'aggregate-root', qualifiedName: 'Ordering.Order' }),
+            mkNode({ id: 'line', label: 'OrderLine', kind: 'value-object', qualifiedName: 'Ordering.OrderLine' }),
+          ],
+          edges: [
+            { from: 'order', to: 'line', label: null, cardinality: '0..1', sourceCardinality: '1', arrowKind: 'composition' },
+          ],
+        }),
+      ]),
+    ];
+
+    const container = ROOT();
+    await createSvgRenderer().render(container, files, 'light', () => true);
+
+    // The marker pair: a diamond at the owner end, an arrow at the part end.
+    const line = container.querySelector('.koi-svg-diagram .koi-svg-edge .koi-svg-edge-line')!;
+    expect(line.getAttribute('marker-start')).toBe('url(#koi-svg-diamond)');
+    expect(line.getAttribute('marker-end')).toBe('url(#koi-svg-arrow)');
+    expect(container.querySelector('.koi-svg-diagram #koi-svg-diamond')).not.toBeNull();
+
+    // Both multiplicities are drawn — the owner end ("1") and the part end ("0..1").
+    const cards = [...container.querySelectorAll('.koi-svg-diagram .koi-svg-edge-card')].map((c) => c.textContent).sort();
+    expect(cards).toEqual(['0..1', '1']);
+  });
+
+  test('a plain edge (no arrowKind) has only a target arrow and no cardinality labels', async () => {
+    const files: DocsFile[] = [
+      file([
+        diagram({
+          nodes: [
+            mkNode({ id: 'a', label: 'A', kind: 'state', qualifiedName: 'Ord.A' }),
+            mkNode({ id: 'b', label: 'B', kind: 'state', qualifiedName: 'Ord.B' }),
+          ],
+          edges: [{ from: 'a', to: 'b', label: 'go' }],
+        }),
+      ]),
+    ];
+
+    const container = ROOT();
+    await createSvgRenderer().render(container, files, 'light', () => true);
+
+    const line = container.querySelector('.koi-svg-diagram .koi-svg-edge .koi-svg-edge-line')!;
+    expect(line.getAttribute('marker-end')).toBe('url(#koi-svg-arrow)');
+    expect(line.hasAttribute('marker-start')).toBe(false);
+    expect(container.querySelectorAll('.koi-svg-diagram .koi-svg-edge-card').length).toBe(0);
+    // The semantic label still renders mid-edge.
+    expect(container.querySelector('.koi-svg-diagram .koi-svg-edge-label')!.textContent).toBe('go');
+  });
+});
+
+describe('persisted free positioning (authoring overhaul, Phase 2)', () => {
+  afterEach(() => {
+    setDiagramEditing(false);
+    setDiagramPersistScope('scratch');
+    localStorage.clear();
+  });
+
+  /** A two-node aggregate (Order ◇— OrderLine), used by the positioning tests. */
+  function twoNodeFiles(): DocsFile[] {
+    return [
+      file([
+        diagram({
+          nodes: [
+            mkNode({
+              id: 'order',
+              label: 'Order',
+              kind: 'aggregate-root',
+              qualifiedName: 'Ordering.Order',
+              sourceSpan: { file: 'file:///ordering.koi', line: 3, column: 5, endLine: 7, endColumn: 10, offset: 20, length: 5 },
+            }),
+            mkNode({ id: 'line', label: 'OrderLine', kind: 'value-object', qualifiedName: 'Ordering.OrderLine' }),
+          ],
+          edges: [{ from: 'order', to: 'line', label: null, cardinality: '*', sourceCardinality: '1', arrowKind: 'composition' }],
+        }),
+      ]),
+    ];
+  }
+
+  test('places nodes at their saved positions instead of re-flowing with elk (no snap-back)', async () => {
+    setDiagramPersistScope('ws-test');
+    saveDiagramPositions('ws-test:koi-domain-diagram', {
+      'Ordering.Order': { x: 500, y: 120 },
+      'Ordering.OrderLine': { x: 820, y: 360 },
+    });
+
+    const container = ROOT();
+    await createSvgRenderer().render(container, twoNodeFiles(), 'light', () => true);
+
+    const order = container.querySelector('.koi-svg-diagram .koi-svg-node[data-qname="Ordering.Order"]')!;
+    expect(order.getAttribute('transform')).toBe('translate(500, 120)');
+    const line = container.querySelector('.koi-svg-diagram .koi-svg-node[data-qname="Ordering.OrderLine"]')!;
+    expect(line.getAttribute('transform')).toBe('translate(820, 360)');
+  });
+
+  test('the auto-arrange button is present only when editing, and clears positions + emits a relayout', async () => {
+    setDiagramEditing(true);
+    setDiagramPersistScope('ws-arrange');
+    saveDiagramPositions('ws-arrange:koi-domain-diagram', { 'Ordering.Order': { x: 10, y: 10 } });
+
+    const container = ROOT();
+    let relayouts = 0;
+    container.addEventListener(DIAGRAM_RELAYOUT_EVENT, () => (relayouts += 1));
+    await createSvgRenderer().render(container, twoNodeFiles(), 'light', () => true);
+
+    const arrange = container.querySelector<HTMLButtonElement>('.koi-canvas-btn[aria-label="Auto-arrange layout"]');
+    expect(arrange).not.toBeNull();
+
+    arrange!.click();
+    expect(loadDiagramPositions('ws-arrange:koi-domain-diagram')).toEqual({});
+    expect(relayouts).toBe(1);
+  });
+
+  test('with editing OFF there is no auto-arrange button and nodes are not draggable', async () => {
+    setDiagramEditing(false);
+    const container = ROOT();
+    await createSvgRenderer().render(container, twoNodeFiles(), 'light', () => true);
+    expect(container.querySelector('.koi-canvas-btn[aria-label="Auto-arrange layout"]')).toBeNull();
+    expect(container.querySelector('.koi-canvas--editing')).toBeNull();
+  });
+
+  test('dragging a node moves it, persists every position, and swallows the would-be navigate click', async () => {
+    setDiagramEditing(true);
+    setDiagramPersistScope('ws-drag');
+
+    const container = ROOT();
+    await createSvgRenderer().render(container, twoNodeFiles(), 'light', () => true);
+
+    const canvas = container.querySelector<HTMLElement>('.koi-canvas')!;
+    const svg = container.querySelector<SVGSVGElement>('.koi-svg-diagram')!;
+    // happy-dom returns zero-size rects; give the canvas a real size so the pixel→content delta is non-zero.
+    Object.defineProperty(canvas, 'clientWidth', { value: 800, configurable: true });
+    Object.defineProperty(canvas, 'clientHeight', { value: 600, configurable: true });
+    svg.getBoundingClientRect = () =>
+      ({ left: 0, top: 0, width: 800, height: 600, right: 800, bottom: 600, x: 0, y: 0, toJSON() {} }) as DOMRect;
+
+    const node = container.querySelector<SVGGElement>('.koi-svg-node[data-qname="Ordering.Order"]')!;
+    const before = node.getAttribute('transform');
+
+    const navigated: DiagramNodeNavigateDetail[] = [];
+    container.addEventListener(NODE_NAVIGATE_EVENT, (e) => navigated.push((e as CustomEvent<DiagramNodeNavigateDetail>).detail));
+
+    node.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, clientX: 100, clientY: 100 }));
+    canvas.dispatchEvent(new MouseEvent('pointermove', { bubbles: true, clientX: 220, clientY: 180 }));
+    canvas.dispatchEvent(new MouseEvent('pointerup', { bubbles: true, clientX: 220, clientY: 180 }));
+
+    // The node moved…
+    expect(node.getAttribute('transform')).not.toBe(before);
+    // …the whole layout was snapshotted to storage (both nodes), so the next render won't re-flow…
+    const saved = loadDiagramPositions('ws-drag:koi-domain-diagram');
+    expect(Object.keys(saved).sort()).toEqual(['Ordering.Order', 'Ordering.OrderLine']);
+    // …and the click synthesized after the drag does NOT navigate.
+    node.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    expect(navigated).toHaveLength(0);
+  });
+});
+
+describe('canvas authoring: connect & disconnect (Phase 3)', () => {
+  afterEach(() => {
+    setDiagramEditing(false);
+    setDiagramPersistScope('scratch');
+    localStorage.clear();
+  });
+
+  /** A 16x9 mocked-size canvas so pixel↔content maths is non-degenerate, plus a content→client mapper. */
+  function mockCanvasSize(container: HTMLElement): (cx: number, cy: number) => { clientX: number; clientY: number } {
+    const canvas = container.querySelector<HTMLElement>('.koi-canvas')!;
+    const svg = container.querySelector<SVGSVGElement>('.koi-svg-diagram')!;
+    Object.defineProperty(canvas, 'clientWidth', { value: 800, configurable: true });
+    Object.defineProperty(canvas, 'clientHeight', { value: 600, configurable: true });
+    svg.getBoundingClientRect = () =>
+      ({ left: 0, top: 0, width: 800, height: 600, right: 800, bottom: 600, x: 0, y: 0, toJSON() {} }) as DOMRect;
+    // Invert the live viewBox so a content point maps to the client coords that toContent() will undo.
+    return (cx, cy) => {
+      const [vx, vy, vw, vh] = (svg.getAttribute('viewBox') ?? '0 0 1 1').split(/\s+/).map(Number);
+      return { clientX: ((cx - vx) / vw) * 800, clientY: ((cy - vy) / vh) * 600 };
+    };
+  }
+
+  function aggregateFiles(): DocsFile[] {
+    return [
+      file([
+        diagram({
+          nodes: [
+            mkNode({
+              id: 'order',
+              label: 'Order',
+              kind: 'aggregate-root',
+              qualifiedName: 'Ordering.Order',
+              sourceSpan: { file: 'file:///o.koi', line: 3, column: 5, endLine: 4, endColumn: 9, offset: 20, length: 5 },
+            }),
+            mkNode({ id: 'line', label: 'OrderLine', kind: 'value-object', qualifiedName: 'Ordering.OrderLine' }),
+          ],
+          edges: [
+            {
+              from: 'order',
+              to: 'line',
+              label: null,
+              cardinality: '*',
+              sourceCardinality: '1',
+              arrowKind: 'composition',
+              backingMember: 'Ordering.Order.lines',
+            },
+          ],
+        }),
+      ]),
+    ];
+  }
+
+  test('nodes carry a connection port only while editing', async () => {
+    const container = ROOT();
+    setDiagramEditing(false);
+    await createSvgRenderer().render(container, aggregateFiles(), 'light', () => true);
+    expect(container.querySelector('.koi-svg-diagram .koi-svg-port')).toBeNull();
+
+    const container2 = ROOT();
+    setDiagramEditing(true);
+    await createSvgRenderer().render(container2, aggregateFiles(), 'light', () => true);
+    // The aggregate-root and the value-object are both field-owning types → both get a port.
+    expect(container2.querySelectorAll('.koi-svg-diagram .koi-svg-port').length).toBe(2);
+  });
+
+  test('dragging from a node port onto another node dispatches a connect event with both endpoints', async () => {
+    setDiagramEditing(true);
+    setDiagramPersistScope('ws-connect');
+    // Pin known positions so the drop target rect is deterministic.
+    saveDiagramPositions('ws-connect:koi-domain-diagram', {
+      'Ordering.Order': { x: 0, y: 0 },
+      'Ordering.OrderLine': { x: 420, y: 0 },
+    });
+
+    const container = ROOT();
+    await createSvgRenderer().render(container, aggregateFiles(), 'light', () => true);
+    const toClient = mockCanvasSize(container);
+
+    const connects: DiagramConnectDetail[] = [];
+    container.addEventListener(DIAGRAM_CONNECT_EVENT, (e) => connects.push((e as CustomEvent<DiagramConnectDetail>).detail));
+
+    const orderNode = container.querySelector<SVGGElement>('.koi-svg-node[data-qname="Ordering.Order"]')!;
+    const port = orderNode.querySelector<SVGCircleElement>('.koi-svg-port')!;
+
+    // Drop point: the centre of OrderLine's rendered box (x=420, plus half its width; y mid).
+    const lineBox = container.querySelector<SVGRectElement>('.koi-svg-node[data-qname="Ordering.OrderLine"] .koi-svg-node-box')!;
+    const w = Number(lineBox.getAttribute('width'));
+    const h = Number(lineBox.getAttribute('height'));
+    const drop = toClient(420 + w / 2, h / 2);
+
+    port.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, clientX: 0, clientY: 0 }));
+    const canvas = container.querySelector<HTMLElement>('.koi-canvas')!;
+    canvas.dispatchEvent(new MouseEvent('pointermove', { bubbles: true, clientX: drop.clientX, clientY: drop.clientY }));
+    canvas.dispatchEvent(new MouseEvent('pointerup', { bubbles: true, clientX: drop.clientX, clientY: drop.clientY }));
+
+    expect(connects).toHaveLength(1);
+    expect(connects[0].sourceQualifiedName).toBe('Ordering.Order');
+    expect(connects[0].targetQualifiedName).toBe('Ordering.OrderLine');
+  });
+
+  test('right-clicking a field-backed edge dispatches a disconnect event with the backing member', async () => {
+    setDiagramEditing(true);
+    const container = ROOT();
+    await createSvgRenderer().render(container, aggregateFiles(), 'light', () => true);
+
+    const disconnects: DiagramDisconnectDetail[] = [];
+    container.addEventListener(DIAGRAM_DISCONNECT_EVENT, (e) =>
+      disconnects.push((e as CustomEvent<DiagramDisconnectDetail>).detail),
+    );
+
+    const edgeLine = container.querySelector<SVGPathElement>('.koi-svg-diagram .koi-svg-edge[data-backing-member] .koi-svg-edge-line')!;
+    expect(edgeLine).not.toBeNull();
+    edgeLine.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+
+    expect(disconnects).toHaveLength(1);
+    expect(disconnects[0].backingMember).toBe('Ordering.Order.lines');
+    expect(disconnects[0].label).toBe('lines');
+  });
+});
+
+describe('canvas authoring: add & delete nodes (Phase 3)', () => {
+  afterEach(() => {
+    setDiagramEditing(false);
+    setDiagramPersistScope('scratch');
+    localStorage.clear();
+    vi.restoreAllMocks();
+  });
+
+  function oneTypeFiles(): DocsFile[] {
+    return [
+      file([
+        diagram({
+          nodes: [
+            mkNode({
+              id: 'order',
+              label: 'Order',
+              kind: 'aggregate-root',
+              qualifiedName: 'Ordering.Order',
+              stereotype: 'aggregate root',
+              members: [{ text: 'id: OrderId', kind: 'field' }],
+              sourceSpan: { file: 'file:///o.koi', line: 5, column: 3, endLine: 9, endColumn: 4, offset: 40, length: 60 },
+            }),
+          ],
+          edges: [],
+        }),
+      ]),
+    ];
+  }
+
+  test('the "Add a type" button shows only when editing and dispatches an add-type event', async () => {
+    setDiagramEditing(false);
+    const ro = ROOT();
+    await createSvgRenderer().render(ro, oneTypeFiles(), 'light', () => true);
+    expect(ro.querySelector('.koi-canvas-btn[aria-label="Add a type"]')).toBeNull();
+
+    setDiagramEditing(true);
+    const container = ROOT();
+    let added = 0;
+    container.addEventListener(DIAGRAM_ADD_TYPE_EVENT, () => (added += 1));
+    await createSvgRenderer().render(container, oneTypeFiles(), 'light', () => true);
+
+    const btn = container.querySelector<HTMLButtonElement>('.koi-canvas-btn[aria-label="Add a type"]')!;
+    expect(btn).not.toBeNull();
+    btn.click();
+    expect(added).toBe(1);
+  });
+
+  test('double-clicking a node carries the name span so ide.ts can do a cross-file rename', async () => {
+    setDiagramEditing(true);
+    window.prompt = vi.fn(() => 'PurchaseOrder') as typeof window.prompt;
+
+    const container = ROOT();
+    await createSvgRenderer().render(container, oneTypeFiles(), 'light', () => true);
+
+    const edits: DiagramNodeEditDetail[] = [];
+    container.addEventListener(NODE_EDIT_EVENT, (e) => edits.push((e as CustomEvent<DiagramNodeEditDetail>).detail));
+
+    const node = container.querySelector<SVGGElement>('.koi-svg-node[data-qname="Ordering.Order"]')!;
+    node.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
+
+    expect(edits).toHaveLength(1);
+    expect(edits[0]).toMatchObject({
+      qualifiedName: 'Ordering.Order',
+      action: 'rename',
+      newName: 'PurchaseOrder',
+      line: 5,
+      column: 3,
+    });
+  });
+
+  test('right-clicking a node dispatches a delete edit (ide.ts maps it to removeType)', async () => {
+    setDiagramEditing(true);
+    window.confirm = vi.fn(() => true) as typeof window.confirm;
+
+    const container = ROOT();
+    await createSvgRenderer().render(container, oneTypeFiles(), 'light', () => true);
+
+    const edits: DiagramNodeEditDetail[] = [];
+    container.addEventListener(NODE_EDIT_EVENT, (e) => edits.push((e as CustomEvent<DiagramNodeEditDetail>).detail));
+
+    const node = container.querySelector<SVGGElement>('.koi-svg-node[data-qname="Ordering.Order"]')!;
+    node.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+
+    expect(edits).toHaveLength(1);
+    expect(edits[0].action).toBe('delete');
+    expect(edits[0].qualifiedName).toBe('Ordering.Order');
   });
 });

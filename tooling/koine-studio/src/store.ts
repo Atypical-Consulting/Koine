@@ -454,6 +454,57 @@ export function saveDiagramZoom(key: string, percent: number): void {
   writeRaw(DIAGRAM_ZOOM_KEY_PREFIX + key, String(Math.round(z)));
 }
 
+// --- diagram node positions (authoring canvas) -------------------------------
+// The authoring canvas lets the user drag nodes anywhere (n8n-style) and remembers where they left each
+// one, keyed PER WORKSPACE + diagram so positions never bleed across projects. Positions are a VIEW
+// concern only — they never round-trip into `.koi` (the compiler is the source of truth for the model;
+// localStorage is the right home, exactly like zoom). Keyed by a node's stable qualified name so a layout
+// survives a re-render (and most model edits). Every read is guarded so a hand-edited key can't break the
+// canvas, and malformed entries are dropped individually.
+const DIAGRAM_POSITIONS_KEY_PREFIX = 'koine.studio.diagramPositions.';
+
+/** A persisted node position in diagram content coordinates. */
+export interface DiagramPosition {
+  x: number;
+  y: number;
+}
+
+/** The persisted node positions for a diagram key, keyed by qualified name; {} when absent/malformed. */
+export function loadDiagramPositions(key: string): Record<string, DiagramPosition> {
+  const raw = readRaw(DIAGRAM_POSITIONS_KEY_PREFIX + key);
+  if (raw === null) return {};
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+    const out: Record<string, DiagramPosition> = {};
+    for (const [name, value] of Object.entries(parsed as Record<string, unknown>)) {
+      if (value && typeof value === 'object') {
+        const p = value as Record<string, unknown>;
+        if (typeof p.x === 'number' && Number.isFinite(p.x) && typeof p.y === 'number' && Number.isFinite(p.y)) {
+          out[name] = { x: p.x, y: p.y };
+        }
+      }
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
+
+/** Persist a diagram's node positions (best-effort). */
+export function saveDiagramPositions(key: string, positions: Record<string, DiagramPosition>): void {
+  writeRaw(DIAGRAM_POSITIONS_KEY_PREFIX + key, JSON.stringify(positions));
+}
+
+/** Forget a diagram's saved positions (the "Auto-arrange / reset layout" action). */
+export function clearDiagramPositions(key: string): void {
+  try {
+    localStorage.removeItem(DIAGRAM_POSITIONS_KEY_PREFIX + key);
+  } catch {
+    // storage unavailable — nothing to clear
+  }
+}
+
 // --- active bounded context (#146) -------------------------------------------
 // The active context scope (a context name, or the literal 'all') is persisted PER workspace — a
 // context like "Sales" only means anything within its own model — so each folder restores its own

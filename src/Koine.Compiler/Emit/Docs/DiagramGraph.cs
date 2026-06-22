@@ -48,12 +48,28 @@ public sealed record DiagramMember(string Text, string Kind);
 /// <param name="To">The target node id.</param>
 /// <param name="Label">An optional edge label (transition guard, relation kind, publish/subscribe verb).</param>
 /// <param name="Cardinality">
-/// The target-end multiplicity of a composition, derived from the Koine field type that references the
+/// The TARGET-end multiplicity of a composition, derived from the Koine field type that references the
 /// target: a collection (<c>List&lt;X&gt;</c>, <c>Set&lt;X&gt;</c>, <c>Map&lt;K,X&gt;</c>) → <c>"*"</c>,
 /// an optional (<c>X?</c>) → <c>"0..1"</c>, a plain reference → <c>"1"</c>; <c>null</c> when the edge is
 /// not a field-backed composition (state-machine transitions, context-map / integration-event edges).
 /// </param>
-public sealed record DiagramEdge(string From, string To, string? Label, string? Cardinality = null);
+/// <param name="SourceCardinality">
+/// The SOURCE-end (owner) multiplicity of a composition — conventionally <c>"1"</c> (a part has exactly
+/// one owner); <c>null</c> for non-composition edges. Lets the renderer label both ends of an edge.
+/// </param>
+/// <param name="ArrowKind">
+/// The relationship style the renderer maps to a marker pair: <c>"composition"</c> (filled diamond at
+/// the owner end + arrow at the part end), <c>"association"</c>, <c>"transition"</c> (state machine),
+/// <c>"flow"</c> (integration publish/consume); <c>null</c> falls back to a plain target arrow.
+/// </param>
+/// <param name="BackingMember">
+/// For a field-backed composition, the qualified name of the field that backs the edge
+/// (e.g. <c>"Ordering.Order.lines"</c>), so an editor can disconnect the edge by removing that field;
+/// <c>null</c> when the edge is not field-backed.
+/// </param>
+public sealed record DiagramEdge(
+    string From, string To, string? Label, string? Cardinality = null,
+    string? SourceCardinality = null, string? ArrowKind = null, string? BackingMember = null);
 
 /// <summary>
 /// The structured graph behind one diagram: its nodes and edges, in stable declaration order. The

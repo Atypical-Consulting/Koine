@@ -48,6 +48,17 @@ public static class StructuredEditKind
 
     /// <summary>Add a state-machine transition: <c>Target</c> = states qname, <c>Name</c> = from, <c>Type</c> = to.</summary>
     public const string AddTransition = "addTransition";
+
+    /// <summary>
+    /// Add a new type to a context: <c>Target</c> = the context name, <c>Name</c> = the new type's name.
+    /// Inserts a minimal, valid <c>value</c>-object skeleton (one <c>String</c> field) the author then
+    /// refines; an illegal name (duplicate / not an identifier) is rejected by re-validation.
+    /// </summary>
+    public const string AddType = "addType";
+
+    /// <summary>Remove a whole type declaration: <c>Target</c> = the type's qname. Rejected (with a
+    /// <c>KOIxxxx</c>) when the type is still referenced, so a dangling model can never be produced.</summary>
+    public const string RemoveType = "removeType";
 }
 
 /// <summary>

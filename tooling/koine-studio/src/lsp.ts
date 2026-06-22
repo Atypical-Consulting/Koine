@@ -319,7 +319,10 @@ export interface DiagramEdge {
   from: string; // source node id
   to: string; // target node id
   label: string | null; // optional edge label (transition guard, relation kind, publish/subscribe verb)
-  cardinality?: string | null; // composition target-end multiplicity, derived from the Koine field type ("1" | "0..1" | "*")
+  cardinality?: string | null; // composition TARGET-end multiplicity, derived from the Koine field type ("1" | "0..1" | "*")
+  sourceCardinality?: string | null; // composition SOURCE-end (owner) multiplicity, conventionally "1"; null for non-composition edges
+  arrowKind?: string | null; // relationship style the renderer maps to a marker pair: 'composition' | 'association' | 'transition' | 'flow'
+  backingMember?: string | null; // for a field-backed composition: the qualified name of the field that backs it (so the canvas can disconnect it)
 }
 
 /** The structured graph behind one diagram. */

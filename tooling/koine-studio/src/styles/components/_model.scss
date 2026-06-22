@@ -368,6 +368,76 @@
   font-style: italic;
 }
 
+/* --- property editing (authoring): inline inputs, a delete button, and an add-property row --- */
+.koi-inspector-prop-input {
+  width: 100%;
+  box-sizing: border-box;
+  font-family: var(--koi-font-mono);
+  font-size: var(--koi-text-base-plus);
+  color: inherit;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--koi-radius-sm);
+  padding: 0.05rem 0.25rem;
+}
+.koi-inspector-prop-input:hover {
+  border-color: var(--koi-line);
+}
+.koi-inspector-prop-input:focus {
+  outline: none;
+  border-color: var(--koi-accent);
+  background: var(--koi-paper);
+}
+.koi-inspector-prop-actions {
+  width: 1%;
+  text-align: right;
+}
+.koi-inspector-prop-delete {
+  font-size: var(--koi-text-base-plus);
+  line-height: 1;
+  color: var(--koi-muted);
+  background: transparent;
+  border: none;
+  border-radius: var(--koi-radius-sm);
+  padding: 0 0.3rem;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+.koi-inspector-row-editable:hover .koi-inspector-prop-delete,
+.koi-inspector-prop-delete:focus-visible {
+  opacity: 1;
+}
+.koi-inspector-prop-delete:hover {
+  color: var(--koi-danger, #e5484d);
+}
+.koi-inspector-add-prop {
+  display: flex;
+  gap: var(--koi-space-1);
+  align-items: center;
+  margin-top: var(--koi-space-1-5);
+}
+.koi-inspector-add-name {
+  flex: 0 1 7rem;
+}
+.koi-inspector-add-type {
+  flex: 1 1 auto;
+}
+.koi-inspector-add-btn {
+  flex: 0 0 auto;
+  font-size: var(--koi-text-xs);
+  color: var(--koi-accent);
+  background: transparent;
+  border: 1px solid var(--koi-line);
+  border-radius: var(--koi-radius-sm);
+  padding: 0.15rem 0.5rem;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.koi-inspector-add-btn:hover {
+  background: var(--koi-paper-2);
+}
+
 /* Cross-highlight the diagram node matching the current selection (#142, Task 4). */
 .koi-svg-node.is-selected .koi-svg-node-box {
   stroke: var(--koi-accent);
