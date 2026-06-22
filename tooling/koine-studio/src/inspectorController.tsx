@@ -22,6 +22,7 @@
 // does not own — rename / structured-edit / save-description / span navigation / the assistant
 // lifecycle). ide.ts wires those and calls the `select*` / `invalidate*` / `load*` methods + `init()`
 // from the palette, the toolbar buttons, and the boot ladder.
+import { render } from 'preact';
 import { renderMarkdown } from './editor';
 import type { KoineEditor, OutputView } from './editor';
 import type {
@@ -64,8 +65,10 @@ import {
 } from './activeContext';
 import { createSelectionBus, type SelectionBus } from './selection';
 import { renderModelOutline, renderOverviewCounts, type ModelOutlineHandlers } from './modelOutline';
-import { buildInspectorElement, renderInspector, type InspectorElement, type InspectorHandlers } from './inspector';
+import { type InspectorElement, type InspectorHandlers } from './inspector';
 import { buildModelIndex, lookupElement, type ModelIndex } from './modelIndex';
+import { PropertiesPanel } from './panels/PropertiesPanel';
+import { appStore } from './store/index';
 import type { DomainIndex } from './aiPanel';
 import { DEFAULT_MODE_ID, MODES, isValidModeId } from './modes';
 import { currentTheme } from './theme';
@@ -635,15 +638,17 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     }
   }
 
-  // Project the current selection through the index into an inspector element and (re)render it into
-  // the right-rail Properties host. No index / no selection → the inspector's own empty state.
+  // Mount (and re-render) the Properties inspector as a Preact panel into the right-rail host (#193,
+  // the first migrated panel). The panel subscribes to the `selection` slice of the app store and
+  // resolves it through the current model index, so it tracks selection on its own; the explicit
+  // render(...) here repaints it synchronously when the index resolves (loadModel) or a selection lands
+  // (the bus subscriber below mirrors the bus into the store, then calls this). Preact's top-level
+  // render() reconciles into the same host node, so the host keeps its identity across repaints.
   function renderSelectedInspector(): void {
-    const sel = selection.get();
-    const hit = sel && modelIndex ? lookupElement(modelIndex, sel.qualifiedName) : null;
-    const element: InspectorElement | null = hit
-      ? buildInspectorElement(hit.element.entry, hit.element.node)
-      : null;
-    inspectorHost.replaceChildren(renderInspector(element, inspectorHandlers));
+    render(
+      <PropertiesPanel store={appStore} index={modelIndex} handlers={inspectorHandlers} />,
+      inspectorHost,
+    );
   }
 
   // Repaint the always-visible left rail: the Explorer construct tree + the Overview counts, both
@@ -691,6 +696,10 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     if (sel && !isAllContexts(activeContext.get()) && sel.context !== activeContext.get()) {
       applyScope(sel.context, false);
     }
+    // Mirror the bus selection into the app store so the Preact Properties panel (which subscribes to
+    // the store's `selection` slice) renders the new element; the explicit repaint keeps the right-rail
+    // update synchronous for callers that read it immediately after a set.
+    appStore.getState().setSelection(sel);
     renderSelectedInspector();
     applySelectionHighlight();
   });

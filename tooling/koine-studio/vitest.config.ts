@@ -9,8 +9,22 @@ export default defineConfig({
   // oxc (not esbuild) as the default transformer, so the JSX runtime is configured under `oxc.jsx`
   // (the plan's `esbuild: { jsx, jsxImportSource }` snippet would be ignored here).
   oxc: { jsx: { runtime: 'automatic', importSource: 'preact' } },
+  // Alias React's runtime to Preact's compat layer — the SAME alias vite.config.ts declares — so the
+  // `zustand` React hook (`useStore`, imported from bare `react`) resolves under vitest's happy-dom
+  // run. Vitest does not share vite.config.ts's resolve.alias, so the panel tests need it here too.
+  resolve: {
+    alias: {
+      react: 'preact/compat',
+      'react-dom': 'preact/compat',
+      'react/jsx-runtime': 'preact/jsx-runtime',
+    },
+  },
   test: {
     environment: 'happy-dom',
+    // Inline zustand so its React entry (`import React from 'react'`) is transformed through the alias
+    // above instead of being externalized and resolved by Node (which has no `react` package). Without
+    // this the panel tests fail with "Cannot find package 'react'".
+    server: { deps: { inline: ['zustand'] } },
     include: ['src/**/*.test.ts', 'src/**/*.test.tsx', 'scripts/**/*.test.mjs'],
     environmentMatchGlobs: [
       // scripts tests run in Node — no DOM needed
