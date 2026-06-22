@@ -21,7 +21,10 @@ const fullElement: InspectorElement = {
   kind: 'aggregate',
   stereotype: 'aggregate root',
   description: 'A customer order.',
-  properties: ['id: OrderId', 'total: Money'],
+  properties: [
+    { text: 'id: OrderId', computed: false },
+    { text: 'total: Money', computed: false },
+  ],
   behaviors: ['submit(): void', 'cancel(): void'],
   values: [],
   invariants: ['total >= 0'],
@@ -110,7 +113,16 @@ describe('renderInspector', () => {
   });
 
   test('renders properties as row-scoped table headers and keeps a colon-less name in the name column', () => {
-    const el = renderInspector({ ...fullElement, properties: ['id: OrderId', 'archived'] }, noop);
+    const el = renderInspector(
+      {
+        ...fullElement,
+        properties: [
+          { text: 'id: OrderId', computed: false },
+          { text: 'archived', computed: false },
+        ],
+      },
+      noop,
+    );
     const rows = Array.from(el.querySelectorAll<HTMLTableRowElement>('.koi-inspector-table tr'));
     expect(rows.map((tr) => tr.querySelector('th')?.textContent)).toEqual(['id', 'archived']);
     expect(rows.map((tr) => tr.querySelector('th')?.getAttribute('scope'))).toEqual(['row', 'row']);
@@ -171,7 +183,10 @@ describe('buildInspectorElement', () => {
     const built = buildInspectorElement(entry, node);
     expect(built.stereotype).toBe('aggregate root');
     expect(built.description).toBe('A customer order.');
-    expect(built.properties).toEqual(['id: OrderId', 'total: Money']);
+    expect(built.properties).toEqual([
+      { text: 'id: OrderId', computed: false },
+      { text: 'total: Money', computed: false },
+    ]);
     expect(built.behaviors).toEqual(['submit(): void']);
   });
 
@@ -197,5 +212,29 @@ describe('buildInspectorElement', () => {
     };
     const built = buildInspectorElement(enumEntry, enumNode);
     expect(built.values).toEqual(['Draft', 'Placed']);
+  });
+
+  test('includes computed members in properties, flagged and rendered italic', () => {
+    const computedNode: DiagramNode = {
+      ...node,
+      members: [
+        { text: 'quantity: Int', kind: 'field' },
+        { text: 'subtotal: Int', kind: 'computed' },
+      ],
+    };
+    const built = buildInspectorElement(entry, computedNode);
+    expect(built.properties).toEqual([
+      { text: 'quantity: Int', computed: false },
+      { text: 'subtotal: Int', computed: true },
+    ]);
+
+    const el = renderInspector(built, { onGoto: () => {} });
+    const rows = Array.from(el.querySelectorAll<HTMLTableRowElement>('.koi-inspector-table tr'));
+    const computedRows = rows.filter((tr) => tr.classList.contains('koi-inspector-row-computed'));
+    expect(computedRows.map((tr) => tr.querySelector('th')?.textContent)).toEqual(['subtotal']);
+    expect(computedRows[0].querySelector('td')?.textContent).toBe('Int');
+    // The plain field row is NOT marked computed.
+    const fieldRow = rows.find((tr) => tr.querySelector('th')?.textContent === 'quantity');
+    expect(fieldRow?.classList.contains('koi-inspector-row-computed')).toBe(false);
   });
 });

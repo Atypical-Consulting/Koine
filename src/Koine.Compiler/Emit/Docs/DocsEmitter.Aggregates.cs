@@ -7,7 +7,7 @@ namespace Koine.Compiler.Emit.Docs;
 /// Aggregate slice of <see cref="DocsEmitter"/>: a Mermaid <c>classDiagram</c> showing the root entity
 /// (stereotyped <c>&lt;&lt;aggregate root&gt;&gt;</c>) with its concrete fields and command/factory methods,
 /// each nested type as a composition, and the repository finders/operations as a reference list beneath.
-/// Derived (computed) members are omitted for clarity; declaration order is preserved.
+/// Derived (computed) members are shown with UML derived-attribute notation (<c>/name</c>); declaration order is preserved.
 /// </summary>
 public sealed partial class DocsEmitter
 {
@@ -102,6 +102,10 @@ public sealed partial class DocsEmitter
                     sb.Append("        +").Append(MermaidRowType(row)).Append(' ').Append(row.Name).Append('\n');
                     break;
 
+                case ClassRowKind.Computed:
+                    sb.Append("        +").Append(MermaidRowType(row)).Append(" /").Append(row.Name).Append('\n');
+                    break;
+
                 case ClassRowKind.Method:
                     sb.Append("        +").Append(row.Name).Append('(')
                       .Append(MermaidParams(row.Parameters ?? [])).Append(')');
@@ -127,7 +131,7 @@ public sealed partial class DocsEmitter
     // ---- shared class-body model (Mermaid + structured graph consume the same rows) ----
 
     /// <summary>
-    /// The compartment a <see cref="ClassRow"/> belongs to: an attribute (<c>field</c>, incl. the
+    /// The compartment a <see cref="ClassRow"/> belongs to: an attribute (<c>field</c>/<c>computed</c>, incl. the
     /// synthetic version/id rows), an operation (<c>method</c>, a factory or command), or an enum
     /// value (<c>value</c>). Mirrors the <see cref="DiagramMember"/> kinds so the graph builder maps
     /// 1:1; the renderer draws attributes/values above the divider and methods below it.
@@ -135,6 +139,7 @@ public sealed partial class DocsEmitter
     internal enum ClassRowKind
     {
         Field,
+        Computed,
         Method,
         Value
     }
@@ -165,8 +170,8 @@ public sealed partial class DocsEmitter
     /// structured-graph builder both walk, so they never drift. The order mirrors
     /// <see cref="EmitRootClass"/>/<see cref="EmitNestedClass"/>: for a root, version (when versioned),
     /// id, concrete fields, factories, then commands; for a value object/event, its concrete fields; for
-    /// an enum, its member values; for an entity, id then concrete fields. Derived members are skipped
-    /// via the same <see cref="MemberAnalysis.IsDerived"/> rule. Returns an empty sequence for a type the
+    /// an enum, its member values; for an entity, id then concrete fields. Derived members are surfaced as
+    /// <c>Computed</c> rows (same <see cref="MemberAnalysis.IsDerived"/> rule), not skipped. Returns an empty sequence for a type the
     /// structure diagram does not draw (integration events, nested aggregates).
     /// </summary>
     internal static IEnumerable<ClassRow> ClassRows(TypeDecl type, AggregateDecl? owningAggregate = null)
@@ -238,16 +243,18 @@ public sealed partial class DocsEmitter
         }
     }
 
-    /// <summary>The concrete (non-derived) field rows of a member list, in declaration order.</summary>
+    /// <summary>The field rows of a member list, in declaration order: a derived/computed member
+    /// (its initializer references a sibling) becomes a <see cref="ClassRowKind.Computed"/> row,
+    /// every other member a <see cref="ClassRowKind.Field"/> row.</summary>
     private static IEnumerable<ClassRow> FieldRows(IReadOnlyList<Member> members)
     {
         var names = new HashSet<string>(members.Select(m => m.Name), StringComparer.Ordinal);
         foreach (Member m in members)
         {
-            if (!MemberAnalysis.IsDerived(m, names))
-            {
-                yield return new ClassRow(m.Name, ClassRowKind.Field, Type: m.Type);
-            }
+            ClassRowKind kind = MemberAnalysis.IsDerived(m, names)
+                ? ClassRowKind.Computed
+                : ClassRowKind.Field;
+            yield return new ClassRow(m.Name, kind, Type: m.Type);
         }
     }
 

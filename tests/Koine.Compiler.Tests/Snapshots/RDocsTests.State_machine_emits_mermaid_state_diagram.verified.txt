@@ -20,6 +20,10 @@ classDiagram
         +OrderStatus status
         +RefundStatus refund
         +Instant submittedAt
+        +Money /total
+        +Int /lineCount
+        +Bool /isPlaced
+        +Bool /isCancelled
         +open(CustomerId customer, List~OrderLine~ lines) Order
         +submit()
         +cancel()
@@ -43,6 +47,8 @@ classDiagram
         +ProductId product
         +Int quantity
         +Money unitPrice
+        +Money /lineTotal
+        +Money /payable
     }
 ```
 
