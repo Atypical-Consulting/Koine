@@ -145,6 +145,7 @@ function makeLsp() {
   return {
     glossaryModel: vi.fn(async (): Promise<GlossaryModel> => glossaryFixture()),
     livingDocs: vi.fn(async (): Promise<DocsResult> => ({ files: [] })),
+    model: vi.fn(async () => ({ kind: 'model', qualifiedName: '', title: '', members: [], children: [] })),
     contextMap: vi.fn(async (): Promise<ContextMapResult> => ({ contexts: ['Billing'], relations: [] })),
     emitPreview: vi.fn(
       async (target: string): Promise<EmitPreviewResult> => ({

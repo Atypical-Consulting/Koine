@@ -32,6 +32,7 @@ import type {
   EmitPreviewResult,
   GlossaryEntry,
   GlossaryModel,
+  ModelNode,
   DocumentSymbol,
   SetDocResult,
   SourceSpan,
@@ -91,6 +92,7 @@ type BottomTab = 'problems' | 'events' | 'relationships' | 'contextmap';
 export interface InspectorControllerLsp {
   glossaryModel(): Promise<GlossaryModel>;
   livingDocs(): Promise<DocsResult>;
+  model(qualifiedName?: string): Promise<ModelNode>;
   contextMap(): Promise<ContextMapResult>;
   emitPreview(target: PreviewTarget): Promise<EmitPreviewResult>;
   check(baseline: string, baselineSources?: { uri: string; text: string }[]): Promise<CheckResult>;
@@ -714,14 +716,19 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   let modelIndex: ModelIndex | null = null;
   let indexPromise: Promise<ModelIndex> | null = null;
 
-  /** Build (or reuse) the joined model index. `livingDocs` is best-effort — a glossary-only index still works. */
+  /**
+   * Build (or reuse) the joined model index. `livingDocs` (diagram nodes) and the structured `model`
+   * (the #91 field source for elements with no class node) are both best-effort — a glossary-only
+   * index still works, just without members for undrawn elements.
+   */
   function ensureModelIndex(): Promise<ModelIndex> {
     if (modelIndex) return Promise.resolve(modelIndex);
     indexPromise ??= Promise.all([
       lsp.glossaryModel(),
       lsp.livingDocs().catch(() => ({ files: [] }) as DocsResult),
+      lsp.model().catch(() => undefined),
     ])
-      .then(([glossary, docs]) => (modelIndex = buildModelIndex(glossary, docs)))
+      .then(([glossary, docs, model]) => (modelIndex = buildModelIndex(glossary, docs, model)))
       .finally(() => {
         indexPromise = null;
       });
@@ -1215,8 +1222,13 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     t.addEventListener('click', () => selectBottomTab(t.dataset.panel as BottomTab));
   }
 
-  // Row click → jump to the construct's `.koi` declaration, via the same span navigation the diagram uses.
-  const bottomTableHandlers = { goto: (span: SourceSpan) => deps.gotoSourceSpan(span) };
+  // Row click → jump to the construct's `.koi` declaration (the same span navigation the diagram uses)
+  // AND select it, so the Properties inspector loads the event — clicking an Events-table row inspects
+  // it just like clicking its diagram node. The inspector resolves the diagram qualified name itself.
+  const bottomTableHandlers = {
+    goto: (span: SourceSpan) => deps.gotoSourceSpan(span),
+    onSelect: (qualifiedName: string, context: string) => selection.set({ qualifiedName, context }),
+  };
 
   // The merged DiagramGraph projection behind both tables: every per-diagram graph from livingDocs fused
   // into one (node ids disambiguated) so the extractors see all aggregates + the integration-event flow

@@ -10,7 +10,7 @@
 // Invariants / published events / repository are NOT on the wire today (they are not `DiagramNode`
 // members), so the element fields are optional and the panel renders those compartments only when a
 // future minimal emitter change populates them — the layout is forward-compatible.
-import type { DiagramNode, GlossaryEntry, Range } from './lsp';
+import type { DiagramNode, GlossaryEntry, ModelMember, Range } from './lsp';
 
 /** The flat, render-ready projection of a selected element (decoupled from the wire DTOs). */
 export interface InspectorElement {
@@ -63,10 +63,28 @@ export interface InspectorHandlers {
  * Join a glossary entry (identity + description + source range) with its optional diagram node
  * (stereotype + member rows) into a render-ready {@link InspectorElement}. The diagram node is
  * absent for elements that have no class diagram (e.g. a standalone value object) — those still
- * inspect, just without members/stereotype.
+ * inspect, and their properties come from the optional structured-model members ({@link ModelMember},
+ * the #91 round-trip seam), which carry every element's fields regardless of diagramming. The diagram
+ * node wins when present (it also distinguishes computed members and carries behaviors); the model is
+ * the fallback so a value object whose fields aren't drawn anywhere still lists them.
  */
-export function buildInspectorElement(entry: GlossaryEntry, node: DiagramNode | undefined): InspectorElement {
+export function buildInspectorElement(
+  entry: GlossaryEntry,
+  node: DiagramNode | undefined,
+  modelMembers?: ModelMember[],
+): InspectorElement {
   const members = node?.members ?? [];
+  const nodeProperties = members
+    .filter((m) => m.kind === 'field' || m.kind === 'computed')
+    .map((m) => ({ text: m.text, computed: m.kind === 'computed' }));
+  // Fallback: when the element has no class-node members (a value object not drawn as a class box),
+  // derive its properties from the structured model's `field` members — `name: type`, with an
+  // initializer (`value`) marking a derived/computed property (matching the diagram's italic rows).
+  const properties = nodeProperties.length
+    ? nodeProperties
+    : (modelMembers ?? [])
+        .filter((m) => m.kind === 'field')
+        .map((m) => ({ text: m.type ? `${m.name}: ${m.type}` : m.name, computed: m.value != null }));
   return {
     id: entry.id,
     name: entry.name,
@@ -75,9 +93,7 @@ export function buildInspectorElement(entry: GlossaryEntry, node: DiagramNode | 
     kind: entry.kind,
     stereotype: node?.stereotype ?? null,
     description: entry.doc,
-    properties: members
-      .filter((m) => m.kind === 'field' || m.kind === 'computed')
-      .map((m) => ({ text: m.text, computed: m.kind === 'computed' })),
+    properties,
     behaviors: members.filter((m) => m.kind === 'method').map((m) => m.text),
     values: members.filter((m) => m.kind === 'value').map((m) => m.text),
     nameRange: entry.nameRange,
@@ -99,6 +115,9 @@ export function renderInspector(element: InspectorElement | null, handlers: Insp
   }
 
   root.dataset.qname = element.qualifiedName;
+  // Tag the panel with its DDD construct so the header echoes the diagram/Explorer colour language
+  // (the shared --koi-ddd-* palette): the same element reads the same across canvas, tree, and panel.
+  root.dataset.kind = constructKey(element.kind);
   root.appendChild(renderHeader(element, handlers));
   root.appendChild(renderGeneral(element, handlers));
 
@@ -110,6 +129,27 @@ export function renderInspector(element: InspectorElement | null, handlers: Insp
   if (element.repository) appendList(root, 'Repository', [element.repository]);
 
   return root;
+}
+
+/**
+ * Normalize a glossary construct kind to the key the shared DDD palette (`--koi-ddd-*`) and the
+ * Explorer icons use, so the inspector's accent matches them. Unknown kinds fall back to `type`.
+ */
+function constructKey(kind: string): string {
+  switch (kind) {
+    case 'aggregate':
+    case 'entity':
+    case 'enum':
+    case 'event':
+      return kind;
+    case 'value':
+    case 'quantity':
+      return 'value';
+    case 'integration event':
+      return 'integration-event';
+    default:
+      return 'type';
+  }
 }
 
 function renderHeader(element: InspectorElement, handlers: InspectorHandlers): HTMLElement {
@@ -184,7 +224,7 @@ function renderGeneral(element: InspectorElement, handlers: InspectorHandlers): 
   const desc = document.createElement('textarea');
   desc.className = 'koi-inspector-textarea koi-inspector-desc';
   desc.value = element.description ?? '';
-  desc.rows = 3;
+  desc.rows = 2;
   desc.placeholder = 'Add a description…';
   desc.addEventListener('blur', () => {
     const next = desc.value.trim();
