@@ -242,6 +242,20 @@ export async function workspaceRootName(): Promise<string | null> {
   return root ? root.name || null : null;
 }
 
+/** Always prompt for a new workspace root, persist it, and return its name (null if dismissed). */
+export async function pickWorkspaceRoot(): Promise<string | null> {
+  if (!fsWin.showDirectoryPicker) return null;
+  let dir: FsDirHandle;
+  try {
+    dir = await fsWin.showDirectoryPicker({ mode: 'readwrite' });
+  } catch {
+    return null;
+  }
+  workspaceRoot = dir;
+  await idbPut(WORKSPACE_ROOT_KEY, dir);
+  return dir.name || null;
+}
+
 /**
  * Create `<root>/<name>/`, write `files` into it, and register it exactly like a folder opened via
  * the picker (token minted, handle persisted to IndexedDB) so it reopens through the normal

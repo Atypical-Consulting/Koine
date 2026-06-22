@@ -15,6 +15,7 @@ import {
   writeTextFile,
   saveProjectToRoot,
   workspaceRootName,
+  pickWorkspaceRoot,
 } from './fs';
 
 // --- in-memory mock of the File System Access handle surface -----------------
@@ -483,5 +484,19 @@ describe('saveProjectToRoot / workspace root', () => {
     (window as unknown as { showDirectoryPicker: unknown }).showDirectoryPicker = async () => root as unknown;
     await saveProjectToRoot('p', [{ relPath: 'a.koi', contents: '' }]);
     expect(await workspaceRootName()).toBe('koine');
+  });
+
+  it('pickWorkspaceRoot re-prompts and updates the remembered root', async () => {
+    const first = new MockDir('koine');
+    const second = new MockDir('work');
+    let pick = 0;
+    (window as unknown as { showDirectoryPicker: unknown }).showDirectoryPicker = async () => {
+      pick++;
+      return (pick === 1 ? first : second) as unknown;
+    };
+    await saveProjectToRoot('p', [{ relPath: 'a.koi', contents: '' }]); // picks `first`
+    const name = await pickWorkspaceRoot(); // forces a re-pick → `second`
+    expect(name).toBe('work');
+    expect(await workspaceRootName()).toBe('work');
   });
 });

@@ -151,6 +151,7 @@ class FakePlatform implements Platform {
     return name;
   });
   workspaceRootName = vi.fn(async (): Promise<string | null> => null);
+  pickWorkspaceRoot = vi.fn(async (): Promise<string | null> => null);
   materializeWorkspace(
     name: string,
     files: { relPath: string; contents: string }[],

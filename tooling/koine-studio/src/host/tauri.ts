@@ -135,6 +135,10 @@ export class TauriPlatform implements Platform {
     return Promise.resolve(null);
   }
 
+  pickWorkspaceRoot(): Promise<string | null> {
+    return Promise.resolve(null);
+  }
+
   // Materialize a synthetic workspace under the app-data dir, fresh each open (mirrors the browser's
   // OPFS example semantics). Used by multi-file examples and shared-workspace links on the desktop.
   async materializeWorkspace(

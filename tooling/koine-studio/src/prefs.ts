@@ -46,6 +46,19 @@ export interface PrefsCallbacks {
    * endpoint/test rows stay hidden (the copy-paste recipes still render, pointing at the CLI).
    */
   mcpHostable?: boolean;
+
+  /**
+   * Whether this host can save projects to a workspace root directory. True in the browser when the
+   * File System Access API is present; false on the Tauri desktop. When false, the workspace root row
+   * is hidden from Settings.
+   */
+  canSaveProjects?: boolean;
+
+  /** Return the remembered workspace root's display name (for Settings), or null if not yet set. */
+  workspaceRootName?(): Promise<string | null>;
+
+  /** Re-pick the workspace root directory; returns its name, or null if dismissed. */
+  pickWorkspaceRoot?(): Promise<string | null>;
 }
 
 export interface PrefsHandle {
@@ -648,6 +661,38 @@ export function createPreferences(cb: PrefsCallbacks): PrefsHandle {
 
   const mcpPanel = panel('mcp', mcpEnableRow, mcpWebHint, mcpEndpointRow, mcpClientRow, mcpRecipe, mcpTestRow);
 
+  // --- Workspace root (shown only when the host can save projects) ----------
+
+  const wsRootValue = document.createElement('span');
+  wsRootValue.className = 'koi-set-label';
+  wsRootValue.textContent = 'Not set yet';
+
+  const wsRootBtn = document.createElement('button');
+  wsRootBtn.type = 'button';
+  wsRootBtn.className = 'koi-set-action';
+  wsRootBtn.textContent = 'Change…';
+  wsRootBtn.addEventListener('click', () => {
+    void cb.pickWorkspaceRoot?.().then((name) => {
+      if (name !== null) wsRootValue.textContent = name;
+    });
+  });
+
+  const wsRootControl = document.createElement('div');
+  wsRootControl.className = 'koi-mcp-control';
+  wsRootControl.append(wsRootValue, wsRootBtn);
+  const wsRootRow = row(
+    'Workspace root',
+    'The directory under which "Save to disk" writes named projects.',
+    wsRootControl,
+  );
+  wsRootRow.hidden = !cb.canSaveProjects;
+
+  async function refreshWsRootValue(): Promise<void> {
+    if (!cb.canSaveProjects || !cb.workspaceRootName) return;
+    const name = await cb.workspaceRootName();
+    wsRootValue.textContent = name ?? 'Not set yet';
+  }
+
   // --- Advanced -------------------------------------------------------------
 
   const traceSelect = select([
@@ -696,6 +741,7 @@ export function createPreferences(cb: PrefsCallbacks): PrefsHandle {
 
   const advancedPanel = panel(
     'advanced',
+    wsRootRow,
     row('Language server trace', 'Verbosity of LSP logging in the console.', traceSelect),
     row('Reset', 'Restore every setting — including the assistant — to its default.', resetBtn),
   );
@@ -795,6 +841,7 @@ export function createPreferences(cb: PrefsCallbacks): PrefsHandle {
     disarmReset();
     const s = loadSettings();
     populate(s);
+    void refreshWsRootValue();
     // On a very fast first open the secret may still be decrypting; back-fill the key once it lands,
     // but never clobber a value the user has already started typing.
     void whenSecretsReady().then(() => {

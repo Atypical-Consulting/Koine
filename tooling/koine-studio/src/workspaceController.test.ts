@@ -69,6 +69,9 @@ class FakePlatform implements Platform {
   workspaceRootName(): Promise<string | null> {
     return Promise.resolve(null);
   }
+  pickWorkspaceRoot(): Promise<string | null> {
+    return Promise.resolve(null);
+  }
   materializeWorkspace(_name: string, files: { relPath: string; contents: string }[]): Promise<string | null> {
     this.files.clear();
     for (const f of files) this.files.set(f.relPath, f.contents);

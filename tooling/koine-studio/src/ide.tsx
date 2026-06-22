@@ -1027,6 +1027,10 @@ export function init(): void {
     mcpStop: () => platform.mcpStop(),
     // Only the desktop shell can host the sidecar; the web build shows recipes but disables the toggle.
     mcpHostable: platform.kind === 'tauri',
+    // Workspace root: only the browser (File System Access API) can save projects to a root dir.
+    canSaveProjects: platform.canSaveProjects,
+    workspaceRootName: () => platform.workspaceRootName(),
+    pickWorkspaceRoot: () => platform.pickWorkspaceRoot(),
   });
   const help = createHelpOverlay(helpRows());
   const about = createAboutDialog();

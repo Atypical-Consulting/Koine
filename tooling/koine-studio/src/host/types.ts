@@ -125,6 +125,9 @@ export interface Platform {
   /** The remembered workspace root's display name (for Settings), or null before one is picked. */
   workspaceRootName(): Promise<string | null>;
 
+  /** Re-pick the workspace root (Settings → Change…); returns its name, or null if dismissed/unsupported. */
+  pickWorkspaceRoot(): Promise<string | null>;
+
   /**
    * Materialize a set of in-memory files into a real, openable workspace folder and return its
    * token (then opened via the normal folder-mode path, so the explorer + file mutations all

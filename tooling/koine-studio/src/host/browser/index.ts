@@ -57,6 +57,10 @@ export class BrowserPlatform implements Platform {
     return fs.workspaceRootName();
   }
 
+  pickWorkspaceRoot(): Promise<string | null> {
+    return fs.pickWorkspaceRoot();
+  }
+
   materializeWorkspace(name: string, files: { relPath: string; contents: string }[]): Promise<string | null> {
     return fs.materializeWorkspace(name, files);
   }
