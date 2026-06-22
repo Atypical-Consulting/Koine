@@ -51,6 +51,7 @@ import {
   DIAGRAM_CONNECT_EVENT,
   DIAGRAM_DISCONNECT_EVENT,
   DIAGRAM_RELAYOUT_EVENT,
+  EMPTY_STATE_PICK_EVENT,
   NODE_EDIT_EVENT,
   NODE_NAVIGATE_EVENT,
   setDiagramEditing,
@@ -58,6 +59,8 @@ import {
   type DiagramDisconnectDetail,
   type DiagramNodeEditDetail,
   type DiagramNodeNavigateDetail,
+  type EmptyConceptKind,
+  type EmptyStatePickDetail,
 } from './diagrams-svg';
 import { isAllContexts } from './activeContext';
 import { appStore } from './store/index';
@@ -134,6 +137,75 @@ const BLANK = `context NewModel {
 
 }
 `;
+
+// Starter shapes the empty-canvas doorways seed (diagrams-svg EMPTY_STATE_PICK_EVENT). Each is a strict
+// subset of a validated template (templates/starters/{ordering,contextmap}) so it always compiles green;
+// seeding one into a fresh model lights up the canvas immediately. A trailing comment points at the next
+// edit so the modeller knows the starter is theirs to grow.
+const CONCEPT_STARTER: Record<EmptyConceptKind, string> = {
+  aggregate: `context Ordering {
+
+  aggregate Sales root Order {
+
+    value OrderLine {
+      product:   ProductId
+      quantity:  Int
+      unitPrice: Decimal
+      subtotal:  Decimal = unitPrice * quantity
+    }
+
+    entity Order identified by OrderId {
+      lines: List<OrderLine>
+      // Add the fields, invariants, and behaviours your Order needs.
+    }
+  }
+}
+`,
+  stateMachine: `context Ordering {
+
+  aggregate Sales root Order {
+
+    enum OrderStatus { Draft, Placed, Shipped, Cancelled }
+
+    entity Order identified by OrderId {
+      status: OrderStatus = Draft
+
+      states status {
+        Draft  -> Placed
+        Placed -> Shipped
+        Placed -> Cancelled
+        // Add the transitions your lifecycle allows.
+      }
+    }
+  }
+}
+`,
+  contextMap: `context Catalog {
+  entity Product identified by ProductId {
+    sku:  String
+    name: String
+  }
+}
+
+context Sales {
+  value OrderRef {
+    value: String
+  }
+}
+
+contextmap {
+  Catalog -> Sales : conformist
+  // Map each upstream context onto the downstream ones that depend on it.
+}
+`,
+};
+
+/** Status-bar confirmation shown after a doorway seeds its starter. */
+const CONCEPT_SEEDED_MSG: Record<EmptyConceptKind, string> = {
+  aggregate: 'Added a starter aggregate — edit it in Code or on the canvas',
+  stateMachine: 'Added a starter state machine — edit it in Code or on the canvas',
+  contextMap: 'Added a starter context map — edit it in Code or on the canvas',
+};
 
 function el<T extends HTMLElement>(id: string): T {
   const node = document.getElementById(id);
@@ -530,6 +602,22 @@ export function init(): void {
     if (detail) void applyDiagramDisconnect(detail);
   });
   diagramsView.addEventListener(DIAGRAM_ADD_TYPE_EVENT, () => void applyDiagramAddType());
+
+  // Empty-canvas doorway: seed a validated starter for the picked concept. Non-destructive — an untouched
+  // BLANK seed is replaced outright (the common first-run case), otherwise the starter is appended so no
+  // existing work is lost. The buffer edit fires onDocEdited → the canvas re-renders with real nodes.
+  diagramsView.addEventListener(EMPTY_STATE_PICK_EVENT, (e) => {
+    const detail = (e as CustomEvent<EmptyStatePickDetail>).detail;
+    if (detail) seedConcept(detail.kind);
+  });
+
+  function seedConcept(kind: EmptyConceptKind): void {
+    const starter = CONCEPT_STARTER[kind];
+    const current = editor.getDoc();
+    const pristine = current.trim() === '' || current.trim() === BLANK.trim();
+    editor.setDoc(pristine ? starter : `${current.replace(/\s+$/, '')}\n\n${starter}`);
+    setStatus(CONCEPT_SEEDED_MSG[kind], 'green');
+  }
 
   // Map a node gesture to a StructuredEdit, apply it through #91's round-trip, and patch the buffer.
   // An edit that would break the model comes back as a KOIxxxx diagnostic (and no edits): surface it
