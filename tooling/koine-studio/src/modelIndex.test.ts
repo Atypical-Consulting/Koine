@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { buildModelIndex, lookupElement } from './modelIndex';
+import { buildModelIndex, lookupElement, resolveInspectableQn } from './modelIndex';
 import type { DiagramNode, DocsFile, DocsResult, GlossaryEntry, GlossaryModel, Range } from './lsp';
 
 const range: Range = { start: { line: 0, character: 0 }, end: { line: 0, character: 4 } };
@@ -86,5 +86,32 @@ describe('lookupElement', () => {
 
   test('returns null for an unknown key', () => {
     expect(lookupElement(index, 'Sales.Nope')).toBeNull();
+  });
+});
+
+describe('resolveInspectableQn', () => {
+  const index = buildModelIndex(glossary, docs(node('Sales.Order', 'aggregate root', [{ text: 'id: OrderId', kind: 'field' }])));
+
+  test('resolves a directly-inspectable node to its canonical qn', () => {
+    expect(resolveInspectableQn(index, 'Sales.Order')).toBe('Sales.Order');
+  });
+
+  test('walks a state node (Context.Aggregate.State) up to its owning aggregate', () => {
+    // A diagram state box is named Sales.Order.Draft — not a glossary entry. The nearest inspectable
+    // ancestor is the owning aggregate, Sales.Order.
+    expect(resolveInspectableQn(index, 'Sales.Order.Draft')).toBe('Sales.Order');
+  });
+
+  test('returns null for a context node (no inspectable element)', () => {
+    // Contexts are omitted from the index; a bare single segment has no inspectable ancestor.
+    expect(resolveInspectableQn(index, 'Sales')).toBeNull();
+  });
+
+  test('returns null when no ancestor segment is inspectable', () => {
+    expect(resolveInspectableQn(index, 'Nope.Whatever.Deep')).toBeNull();
+  });
+
+  test('accepts a diagram context.simpleName form and returns the canonical qn', () => {
+    expect(resolveInspectableQn(index, 'Sales.Money')).toBe('Sales.Order.Money');
   });
 });

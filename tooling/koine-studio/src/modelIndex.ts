@@ -71,3 +71,23 @@ export function lookupElement(
   }
   return null;
 }
+
+/**
+ * Resolve a clicked diagram node to the canonical qualified name of the nearest INSPECTABLE element,
+ * or null when there is none. Aggregate / value-object / event nodes resolve directly (they are
+ * glossary entries); a state box is named `Context.Aggregate.State` and is NOT an entry, so we walk
+ * the dotted segments up to its owning aggregate (`Context.Aggregate`); a bare context node
+ * (`Context`) has no inspectable ancestor and yields null. This is the seam between a diagram node's
+ * identity and the selection/inspector's element identity (#193 follow-up): without it, selecting a
+ * state or context node sets a selection the inspector can't resolve, leaving the panel blank.
+ */
+export function resolveInspectableQn(index: ModelIndex, key: string): string | null {
+  let candidate = key;
+  for (;;) {
+    const hit = lookupElement(index, candidate);
+    if (hit) return hit.canonicalQn;
+    const dot = candidate.lastIndexOf('.');
+    if (dot < 0) return null;
+    candidate = candidate.slice(0, dot);
+  }
+}

@@ -62,6 +62,7 @@ import {
 import { isAllContexts } from './activeContext';
 import { appStore } from './store/index';
 import { type SelectedElement } from './selection';
+import { resolveInspectableQn } from './modelIndex';
 import { type InspectorElement } from './inspector';
 import { createAssistantPanel, type AssistantPanel, type AssistantContext } from './aiPanel';
 import { clearModelHash, readModelFromHash, workspaceShareUrlOrNull } from './share';
@@ -586,8 +587,13 @@ export function init(): void {
   // to the canonical glossary qualified name (the selection key) through the index when it's reachable.
   async function selectFromDiagram(detail: DiagramNodeNavigateDetail): Promise<void> {
     const index = await controller.ensureModelIndex().catch(() => null);
-    const qualifiedName = index?.qnByCtxName.get(detail.qualifiedName) ?? detail.qualifiedName;
-    selection.set({ qualifiedName, context: qualifiedName.split('.')[0] });
+    // Resolve the clicked node to the nearest INSPECTABLE element so the Properties panel actually
+    // populates: aggregate/value-object/event nodes resolve directly; a state box (Context.Aggregate.State)
+    // walks up to its owning aggregate; a bare context node resolves to nothing. Previously this set the
+    // selection to the node's raw qualified name, which the inspector couldn't resolve for state/context
+    // nodes — so clicking them left the panel blank. Without an index yet, fall back to the raw qn.
+    const qualifiedName = index ? resolveInspectableQn(index, detail.qualifiedName) : detail.qualifiedName;
+    if (qualifiedName) selection.set({ qualifiedName, context: qualifiedName.split('.')[0] });
     await navigateToDiagramNode(detail);
   }
 
