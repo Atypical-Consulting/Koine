@@ -69,9 +69,10 @@ import { type InspectorElement, type InspectorHandlers } from './inspector';
 import { buildModelIndex, lookupElement, type ModelIndex } from './modelIndex';
 import { PropertiesPanel } from './panels/PropertiesPanel';
 import { ModelOutlinePanel } from './panels/ModelOutlinePanel';
+import { ChromeTabs } from './panels/ChromeTabs';
 import { appStore } from './store/index';
 import type { DomainIndex } from './aiPanel';
-import { DEFAULT_MODE_ID, MODES, isValidModeId } from './modes';
+import { DEFAULT_MODE_ID, isValidModeId } from './modes';
 import { currentTheme } from './theme';
 import { renderCheckMarkdown, renderContextMapHtml } from './ideUtils';
 
@@ -80,11 +81,19 @@ import { renderCheckMarkdown, renderContextMapHtml } from './ideUtils';
 const SYMBOL_KIND_NAMESPACE = 3;
 
 // The center column's three views and their sub-tabs (kept local — they're a C# emitter / UI concern,
-// not part of the target-agnostic model).
+// not part of the target-agnostic model). The first three mirror the uiChrome slice's CenterView /
+// TechView / DocsView literals, which the chrome now drives through.
 type CenterView = 'visual' | 'technical' | 'docs';
 type TechView = 'editor' | 'preview' | 'check' | 'assistant';
 type DocsView = 'glossary' | 'adr';
 type BottomTab = 'problems' | 'events' | 'relationships' | 'contextmap';
+
+// Maps a workspace mode id to the center pane it lands on (Domain → visual, Code → technical, Docs →
+// docs). A hoisted function (not the slice's private copy) so the controller can pick the boot center
+// before the slice setters run; it matches the slice's own centerForMode exactly.
+function centerForMode(mode: string): CenterView {
+  return mode === 'code' ? 'technical' : mode === 'docs' ? 'docs' : 'visual';
+}
 
 /**
  * The slice of {@link import('./lsp').KoineLsp} the loaders call (content requests only). A
@@ -271,21 +280,33 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   // --- mode switcher (#143) --------------------------------------------------
   // Restore the persisted mode, defaulting to Domain when absent/invalid.
   const restoredMode = deps.loadWorkspaceMode();
-  let activeMode: string = restoredMode && isValidModeId(restoredMode) ? restoredMode : DEFAULT_MODE_ID;
-  // The switcher buttons (Domain / Code / Docs) are built from the MODES data — a new mode is one
-  // array entry, not new markup — and carry data-mode for the click handler.
-  const modeButtons = MODES.map((mode) => {
-    const btn = document.createElement('button');
-    btn.type = 'button';
-    btn.className = 'mode-btn';
-    btn.dataset.mode = mode.id;
-    btn.setAttribute('role', 'tab');
-    btn.setAttribute('aria-selected', String(mode.id === activeMode));
-    btn.textContent = mode.label;
-    btn.addEventListener('click', () => selectMode(mode.id));
-    return btn;
+  const initialMode: string = restoredMode && isValidModeId(restoredMode) ? restoredMode : DEFAULT_MODE_ID;
+  // The chrome (mode + center / tech / docs tab states) is now owned by the uiChrome slice — the ONE
+  // source of truth for both the highlighted button AND the shown view, so they can never diverge
+  // (#193). Reset it to this controller's defaults: the restored mode drives `center` (Domain → visual,
+  // Code → technical, Docs → docs), with the tech/docs sub-views back at their landing tabs. setState is
+  // used (not setMode) so the reset lands atomically in one notification, before any subscriber runs.
+  appStore.setState({ mode: initialMode, center: centerForMode(initialMode), tech: 'editor', docs: 'glossary' });
+
+  // The switcher buttons (Domain / Code / Docs) are a Preact panel mounted into the existing
+  // #mode-switcher host: each button's aria-selected derives from the slice `mode` and its click calls
+  // setMode, so the active button and the shown center come from the one value.
+  const modeSwitcherHost = el('mode-switcher');
+  render(<ChromeTabs store={appStore} />, modeSwitcherHost);
+  // On a real mode change: (1) repaint ChromeTabs synchronously — Preact's hook-driven re-render is
+  // batched/async, but the controller's contract (and callers asserting straight after selectMode) need
+  // the button highlight to land in the same tick the center does, so re-render() reconciles it now;
+  // (2) persist the choice, with a no-churn guard so re-selecting the same mode doesn't write storage
+  // (the old applyModeChrome contract).
+  let persistedMode = initialMode;
+  appStore.subscribe((s, prev) => {
+    if (s.mode === prev.mode) return;
+    render(<ChromeTabs store={appStore} />, modeSwitcherHost);
+    if (s.mode !== persistedMode) {
+      persistedMode = s.mode;
+      deps.saveWorkspaceMode(s.mode);
+    }
   });
-  el('mode-switcher').append(...modeButtons);
 
   // --- bounded-context switcher (#146) ---------------------------------------
   const activeContext = createActiveContextBus();
@@ -424,7 +445,7 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     // The left-rail Explorer + Overview are always visible, so re-scope them immediately.
     void loadModel();
     // The diagram only re-scopes when the visual center is showing it.
-    if (activeCenter === 'visual') void loadDiagrams();
+    if (activeCenter() === 'visual') void loadDiagrams();
     invalidateBottomPanels(); // the Events/Relationships/Context Map tables are graph-derived too
   }
 
@@ -754,16 +775,17 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   // immediately when the visual center is showing.
   function onThemeChanged(): void {
     docViewsLoaded.diagrams = false;
-    if (activeCenter === 'visual') void loadDiagrams();
+    if (activeCenter() === 'visual') void loadDiagrams();
   }
 
   // --- center (Visual / Code / Documentation) + right rail + region focus ----
-  // The restored mode picks the initial center so the highlighted Domain/Code/Docs button and the shown
-  // center tab agree on boot (Domain → Visual, Code → Code, Docs → Documentation).
-  const centerForMode = (mode: string): CenterView => (mode === 'code' ? 'technical' : mode === 'docs' ? 'docs' : 'visual');
-  let activeCenter: CenterView = centerForMode(activeMode);
-  let activeTech: TechView = 'editor';
-  let activeDocs: DocsView = 'glossary';
+  // The active center / tech / docs view now lives in the uiChrome slice (#193) — there are no
+  // module-local activeCenter / activeTech / activeDocs vars, so the highlighted tab (derived from the
+  // slice) and the shown view (also derived from the slice in applyCenterChrome) can never drift apart.
+  // These accessors read the slice at paint time.
+  const activeCenter = (): CenterView => appStore.getState().center as CenterView;
+  const activeTech = (): TechView => appStore.getState().tech as TechView;
+  const activeDocs = (): DocsView => appStore.getState().docs as DocsView;
 
   const centerVisualEl = el('center-visual');
   const centerTechnicalEl = el('center-technical');
@@ -774,34 +796,39 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   const techTabs = Array.from(document.querySelectorAll<HTMLButtonElement>('.tech-tab'));
   const docsTabs = Array.from(document.querySelectorAll<HTMLButtonElement>('.docs-tab'));
 
-  // Pure chrome: surface the active center panel + its technical sub-view and mark the tabs. No data
-  // fetch, so the boot frame can land before the workspace document is open.
+  // Pure chrome: surface the active center panel + its technical sub-view and mark the tabs, all read
+  // from the uiChrome slice (#193) — the single source of truth the mode buttons and tab clicks write,
+  // so the highlighted tab and the shown view can never diverge. No data fetch, so the boot frame can
+  // land before the workspace document is open.
   function applyCenterChrome(): void {
-    centerVisualEl.hidden = activeCenter !== 'visual';
-    centerTechnicalEl.hidden = activeCenter !== 'technical';
-    centerDocsEl.hidden = activeCenter !== 'docs';
+    const center = activeCenter();
+    const tech = activeTech();
+    const docs = activeDocs();
+    centerVisualEl.hidden = center !== 'visual';
+    centerTechnicalEl.hidden = center !== 'technical';
+    centerDocsEl.hidden = center !== 'docs';
     // The bottom strip (Problems/Events/Relationships/Context Map) sits under the canvas/editor — it
     // serves both Visual and Code, but not Documentation.
-    diagEl.hidden = activeCenter === 'docs';
-    for (const t of centerTabs) t.setAttribute('aria-selected', String(t.dataset.center === activeCenter));
-    const techVisible = activeCenter === 'technical';
-    editorPaneEl.hidden = !(techVisible && activeTech === 'editor');
-    previewEl.hidden = !(techVisible && activeTech === 'preview');
-    checkView.hidden = !(techVisible && activeTech === 'check');
-    assistantView.hidden = !(techVisible && activeTech === 'assistant');
-    for (const t of techTabs) t.setAttribute('aria-selected', String(t.dataset.tech === activeTech));
+    diagEl.hidden = center === 'docs';
+    for (const t of centerTabs) t.setAttribute('aria-selected', String(t.dataset.center === center));
+    const techVisible = center === 'technical';
+    editorPaneEl.hidden = !(techVisible && tech === 'editor');
+    previewEl.hidden = !(techVisible && tech === 'preview');
+    checkView.hidden = !(techVisible && tech === 'check');
+    assistantView.hidden = !(techVisible && tech === 'assistant');
+    for (const t of techTabs) t.setAttribute('aria-selected', String(t.dataset.tech === tech));
     // Documentation sub-views: Glossary (the ubiquitous language) vs the ADR/Notes Docs panel.
-    const docsVisible = activeCenter === 'docs';
-    glossaryView.hidden = !(docsVisible && activeDocs === 'glossary');
-    docsView.hidden = !(docsVisible && activeDocs === 'adr');
-    for (const t of docsTabs) t.setAttribute('aria-selected', String(t.dataset.docs === activeDocs));
+    const docsVisible = center === 'docs';
+    glossaryView.hidden = !(docsVisible && docs === 'glossary');
+    docsView.hidden = !(docsVisible && docs === 'adr');
+    for (const t of docsTabs) t.setAttribute('aria-selected', String(t.dataset.docs === docs));
     // CodeMirror measures lazily; revealing it from display:none leaves stale geometry until the next
     // layout tick, so force a re-measure whenever the editor becomes visible.
     if (!editorPaneEl.hidden) editor.view.requestMeasure();
   }
 
   function selectCenter(view: CenterView): void {
-    activeCenter = view;
+    appStore.getState().setCenter(view);
     applyCenterChrome();
     if (view === 'visual' && !docViewsLoaded.diagrams) void loadDiagrams();
     else if (view === 'technical') ensureTechLoaded();
@@ -811,21 +838,22 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   // Lazy-load the active Documentation sub-view: the glossary is model-derived, the Docs (ADR/Notes)
   // panel is folder-derived.
   function ensureDocsLoaded(): void {
-    if (activeCenter !== 'docs') return;
-    if (activeDocs === 'glossary' && !docViewsLoaded.glossary) void loadGlossary();
-    else if (activeDocs === 'adr' && !docsLoaded) void loadDocs();
+    if (activeCenter() !== 'docs') return;
+    if (activeDocs() === 'glossary' && !docViewsLoaded.glossary) void loadGlossary();
+    else if (activeDocs() === 'adr' && !docsLoaded) void loadDocs();
   }
 
   function selectDocsTab(view: DocsView): void {
-    activeDocs = view;
-    activeCenter = 'docs';
+    // setDocs sets docs AND forces center='docs' in one transition, so the docs tab + the center pane
+    // never disagree.
+    appStore.getState().setDocs(view);
     applyCenterChrome();
     ensureDocsLoaded();
   }
 
   function selectTech(view: TechView): void {
-    activeTech = view;
-    activeCenter = 'technical';
+    // setTech sets tech AND forces center='technical' in one transition.
+    appStore.getState().setTech(view);
     applyCenterChrome();
     ensureTechLoaded();
   }
@@ -834,9 +862,9 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   // editor is live, the check is on-demand, and the assistant is interactive (it re-points to the
   // current folder's conversation before focus, the single choke point for that swap).
   function ensureTechLoaded(): void {
-    if (activeCenter !== 'technical') return;
-    if (activeTech === 'preview' && !docViewsLoaded.preview) void loadPreview();
-    else if (activeTech === 'assistant') {
+    if (activeCenter() !== 'technical') return;
+    if (activeTech() === 'preview' && !docViewsLoaded.preview) void loadPreview();
+    else if (activeTech() === 'assistant') {
       const a = deps.ensureAssistant();
       a.syncWorkspace();
       a.focusInput();
@@ -853,11 +881,11 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   // whatever the center is currently showing.
   function refreshActiveSurfaces(): void {
     void loadModel();
-    if (activeCenter === 'visual') void loadDiagrams();
+    if (activeCenter() === 'visual') void loadDiagrams();
     // The glossary is model-derived (refresh on edit); the ADR/Notes Docs panel is folder-derived, so an
     // edit never invalidates it — it reloads on folder change / its own create/save.
-    else if (activeCenter === 'docs' && activeDocs === 'glossary') void loadGlossary();
-    else if (activeCenter === 'technical') ensureTechLoaded();
+    else if (activeCenter() === 'docs' && activeDocs() === 'glossary') void loadGlossary();
+    else if (activeCenter() === 'technical') ensureTechLoaded();
   }
 
   // Mark the cached, model-derived surfaces stale (e.g. after an edit or a file switch).
@@ -889,19 +917,14 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     }, 350);
   }
 
-  // The toolbar's Domain/Code/Docs buttons (#143) are kept as region-focus shortcuts now that every view
-  // has a fixed home. Highlight the active button + persist the choice (only on a real change, so
-  // re-selecting the same mode doesn't churn localStorage).
-  function applyModeChrome(id: string): void {
-    if (id !== activeMode) deps.saveWorkspaceMode(id);
-    activeMode = id;
-    for (const btn of modeButtons) btn.setAttribute('aria-selected', String(btn.dataset.mode === id));
-  }
-
   // Enter a mode from the header switcher: focus its region. Domain → the visual canvas, Code → the
-  // technical code view, Docs → the Documentation rail (the center is left as-is for Docs).
+  // technical code view, Docs → the Documentation rail. Writing the mode through the slice's setMode is
+  // the single transition that highlights the button (ChromeTabs derives its aria from the slice) AND
+  // drives the center (setMode re-derives `center`); the persistence of a real change is handled by the
+  // slice subscriber wired at construction (a no-churn guard there means re-selecting the same mode
+  // doesn't write storage). The select* routing below fills in the sub-view + fires the lazy loaders.
   function selectMode(id: string): void {
-    applyModeChrome(id);
+    appStore.getState().setMode(id);
     if (id === 'code') selectCenter('technical');
     else if (id === 'docs') focusDocs();
     else selectCenter('visual');
@@ -1026,7 +1049,7 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     if (target === currentTarget) return;
     setTarget(target);
     docViewsLoaded.preview = false;
-    if (activeCenter === 'technical' && activeTech === 'preview') void loadPreview();
+    if (activeCenter() === 'technical' && activeTech() === 'preview') void loadPreview();
   }
 
   // --- bottom panel (Problems / Events / Relationships / Context Map, #144) --
@@ -1178,9 +1201,10 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   // --- boot ------------------------------------------------------------------
   // Boot the center chrome into the restored mode (no fetch — ide.ts's boot ladder's
   // refreshActiveSurfaces loads everything once the workspace document is open) + label the Generated
-  // sub-tab with the persisted target.
+  // sub-tab with the persisted target. The mode + center are already seeded in the slice at construction
+  // (setState above) and the mode buttons derive their highlight from it via ChromeTabs, so boot only
+  // paints the center chrome from that slice state.
   function init(): void {
-    applyModeChrome(activeMode);
     applyCenterChrome();
     setTarget(currentTarget);
   }
