@@ -18,6 +18,7 @@ import { render } from 'preact';
 import { createKoineEditor, setEditorDiagnostics, type KoineEditor } from './editor';
 import { diagnosticsInRange } from './ideUtils';
 import { appStore } from './store/index';
+import { diagnosticsSummary } from './diagnosticsSummary';
 import { DiagnosticsStripPanel } from './panels/DiagnosticsStripPanel';
 import type {
   CodeAction,
@@ -189,8 +190,7 @@ export function createEditorSession(deps: EditorSessionDeps): EditorSession {
   // mirror (#sb-validity). Both summarise the active file's diagnostics with the exact strings used
   // before the migration.
   function renderStrip(diags: LspDiagnostic[]): void {
-    const errors = diags.filter((d) => d.severity === 1 || d.severity == null).length;
-    const warnings = diags.filter((d) => d.severity === 2).length;
+    const { errors, kind, parts } = diagnosticsSummary(diags);
     // Status-bar validity: a plain-language read of the same error count that feeds #diag-count.
     if (errors) {
       deps.sbValidity.textContent = errors === 1 ? '1 error' : `${errors} errors`;
@@ -199,15 +199,12 @@ export function createEditorSession(deps: EditorSessionDeps): EditorSession {
       deps.sbValidity.textContent = 'No errors';
       deps.sbValidity.dataset.kind = 'ok';
     }
-    if (!errors && !warnings) {
+    if (kind === 'clean') {
       deps.diagCount.textContent = 'clean';
       deps.diagCount.dataset.kind = 'clean';
     } else {
-      const parts: string[] = [];
-      if (errors) parts.push(`${errors} error${errors === 1 ? '' : 's'}`);
-      if (warnings) parts.push(`${warnings} warning${warnings === 1 ? '' : 's'}`);
       deps.diagCount.textContent = parts.join(' · ');
-      deps.diagCount.dataset.kind = errors ? 'error' : 'warn';
+      deps.diagCount.dataset.kind = kind;
     }
   }
 
@@ -231,14 +228,11 @@ export function createEditorSession(deps: EditorSessionDeps): EditorSession {
   }
 
   function updateStatus(diags: LspDiagnostic[]): void {
-    const errors = diags.filter((d) => d.severity === 1 || d.severity == null).length;
-    const warnings = diags.filter((d) => d.severity === 2).length;
-    if (errors === 0 && warnings === 0) {
+    const { kind, parts } = diagnosticsSummary(diags);
+    if (kind === 'clean') {
       setStatus('green ✓', 'green');
     } else {
-      const parts: string[] = [];
-      if (errors) parts.push(`${errors} error${errors === 1 ? '' : 's'}`);
-      if (warnings) parts.push(`${warnings} warning${warnings === 1 ? '' : 's'}`);
+      // The status pill joins the SAME parts with ' / ' (not the strip's ' · ').
       setStatus(parts.join(' / '), 'error');
     }
   }

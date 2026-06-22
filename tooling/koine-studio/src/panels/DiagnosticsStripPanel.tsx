@@ -1,6 +1,7 @@
 import type { StoreApi } from 'zustand/vanilla';
 import type { AppState } from '../store/index';
 import { useAppStore } from '../store/hooks';
+import { diagnosticsSummary } from '../diagnosticsSummary';
 import type { LspDiagnostic } from '../lsp';
 
 // The editor's diagnostics strip (#diag-count + #diag-body) as a Preact panel (#193). It subscribes to
@@ -16,13 +17,9 @@ const EMPTY_DIAGS: LspDiagnostic[] = [];
 
 /** The strip count summary + its data-kind, matching editorSession.renderStrip's #diag-count writes. */
 function countText(diags: LspDiagnostic[]): { count: string; kind: string } {
-  const errors = diags.filter((d) => d.severity === 1 || d.severity == null).length;
-  const warnings = diags.filter((d) => d.severity === 2).length;
-  if (!errors && !warnings) return { count: 'clean', kind: 'clean' };
-  const parts: string[] = [];
-  if (errors) parts.push(`${errors} error${errors === 1 ? '' : 's'}`);
-  if (warnings) parts.push(`${warnings} warning${warnings === 1 ? '' : 's'}`);
-  return { count: parts.join(' · '), kind: errors ? 'error' : 'warn' };
+  const { kind, parts } = diagnosticsSummary(diags);
+  // Clean ⇒ the literal 'clean' sentinel; otherwise join the shared parts with ' · ' (the strip's join).
+  return { count: kind === 'clean' ? 'clean' : parts.join(' · '), kind };
 }
 
 export function DiagnosticsStripPanel(props: {
