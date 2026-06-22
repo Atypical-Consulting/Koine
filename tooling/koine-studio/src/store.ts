@@ -87,7 +87,7 @@ export const DEFAULT_SETTINGS: Settings = {
 const SETTINGS_KEY = 'koine.studio.settings';
 const RECENT_KEY = 'koine.studio.recentFolders';
 const SCRATCH_KEY = 'koine.studio.scratch';
-const WORKSPACE_MODE_KEY = 'koine.studio.workspaceMode';
+const WORKSPACE_CENTER_KEY = 'koine.studio.workspaceCenter';
 // Per-workspace active context scope (#146): the folder's storage key is appended (see loadActiveContext).
 const ACTIVE_CONTEXT_KEY_PREFIX = 'koine.studio.activeContext.';
 const RECENT_CAP = 25;
@@ -414,19 +414,19 @@ export function clearLegacyScratch(): void {
   }
 }
 
-// --- workspace mode (#143) ---------------------------------------------------
-// The active top-level mode (Domain / Code / Docs) persists across reloads. It is stored as the bare
-// mode id under its own key; validation and the default live with the mode model (modes.ts), so this
-// layer just round-trips the raw string and stays free of any mode knowledge.
+// --- workspace center pane ---------------------------------------------------
+// The active center pane (Visual / Code / Documentation) persists across reloads. It is stored as the
+// bare center id under its own key; validation and the default live with the uiChrome slice, so this
+// layer just round-trips the raw string and stays free of any view knowledge.
 
-/** The persisted workspace-mode id, or null when none is stored (or storage is unavailable). */
-export function loadWorkspaceMode(): string | null {
-  return readRaw(WORKSPACE_MODE_KEY);
+/** The persisted center-pane id, or null when none is stored (or storage is unavailable). */
+export function loadWorkspaceCenter(): string | null {
+  return readRaw(WORKSPACE_CENTER_KEY);
 }
 
-/** Persist the active workspace-mode id (best-effort). */
-export function saveWorkspaceMode(id: string): void {
-  writeRaw(WORKSPACE_MODE_KEY, id);
+/** Persist the active center-pane id (best-effort). */
+export function saveWorkspaceCenter(id: string): void {
+  writeRaw(WORKSPACE_CENTER_KEY, id);
 }
 
 // --- diagram canvas zoom (#145) ----------------------------------------------
