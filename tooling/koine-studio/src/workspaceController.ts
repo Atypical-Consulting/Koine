@@ -176,6 +176,8 @@ export interface WorkspaceController {
   onActiveChanged(cb: (uri: string) => void): void;
   /** Register the buffer-set-changed callback (ide.ts re-renders the tree etc.). */
   onBuffersChanged(cb: () => void): void;
+  /** Fired after the explorer entry tree is re-read (a folder open or any structural file op). */
+  onEntriesRefreshed(cb: () => void): void;
 }
 
 export function createWorkspaceController(deps: WorkspaceControllerDeps): WorkspaceController {
@@ -190,6 +192,7 @@ export function createWorkspaceController(deps: WorkspaceControllerDeps): Worksp
   // --- outward seams --------------------------------------------------------
   let activeChanged: ((uri: string) => void) | null = null;
   let buffersChanged: (() => void) | null = null;
+  let entriesRefreshed: (() => void) | null = null;
 
   // --- token <-> path helpers (unchanged from ide.ts) -----------------------
 
@@ -254,6 +257,7 @@ export function createWorkspaceController(deps: WorkspaceControllerDeps): Worksp
       console.error('listEntries failed:', e);
     }
     renderTree();
+    entriesRefreshed?.();
   }
 
   // --- open paths -----------------------------------------------------------
@@ -774,6 +778,9 @@ export function createWorkspaceController(deps: WorkspaceControllerDeps): Worksp
     },
     onBuffersChanged(cb) {
       buffersChanged = cb;
+    },
+    onEntriesRefreshed(cb) {
+      entriesRefreshed = cb;
     },
   };
 }
