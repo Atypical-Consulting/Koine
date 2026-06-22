@@ -1222,8 +1222,13 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     t.addEventListener('click', () => selectBottomTab(t.dataset.panel as BottomTab));
   }
 
-  // Row click → jump to the construct's `.koi` declaration, via the same span navigation the diagram uses.
-  const bottomTableHandlers = { goto: (span: SourceSpan) => deps.gotoSourceSpan(span) };
+  // Row click → jump to the construct's `.koi` declaration (the same span navigation the diagram uses)
+  // AND select it, so the Properties inspector loads the event — clicking an Events-table row inspects
+  // it just like clicking its diagram node. The inspector resolves the diagram qualified name itself.
+  const bottomTableHandlers = {
+    goto: (span: SourceSpan) => deps.gotoSourceSpan(span),
+    onSelect: (qualifiedName: string, context: string) => selection.set({ qualifiedName, context }),
+  };
 
   // The merged DiagramGraph projection behind both tables: every per-diagram graph from livingDocs fused
   // into one (node ids disambiguated) so the extractors see all aggregates + the integration-event flow

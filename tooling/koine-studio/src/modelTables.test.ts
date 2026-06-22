@@ -71,6 +71,7 @@ describe('extractEvents', () => {
     expect(placed.type).toBe('domain');
     expect(placed.publishedBy).toBe('Order'); // the owning aggregate root (composition edge)
     expect(placed.context).toBe('Sales');
+    expect(placed.qualifiedName).toBe('Sales.OrderPlaced'); // carried for select-to-inspect
 
     const shipped = byName('OrderShipped');
     expect(shipped.type).toBe('integration');
@@ -253,8 +254,8 @@ describe('mergeDiagramGraphs extractor pipeline', () => {
 
 describe('renderEventsTable', () => {
   const rows: EventRow[] = [
-    { name: 'OrderPlaced', type: 'domain', publishedBy: 'Order', context: 'Sales', when: '', span: span(12) },
-    { name: 'OrderShipped', type: 'integration', publishedBy: 'Sales', context: 'Sales', when: '', span: span(20) },
+    { name: 'OrderPlaced', qualifiedName: 'Sales.OrderPlaced', type: 'domain', publishedBy: 'Order', context: 'Sales', when: '', span: span(12) },
+    { name: 'OrderShipped', qualifiedName: 'Sales.OrderShipped', type: 'integration', publishedBy: 'Sales', context: 'Sales', when: '', span: span(20) },
   ];
 
   test('renders a header row and one body row per event, with the spec’s columns', () => {
@@ -292,6 +293,14 @@ describe('renderEventsTable', () => {
     expect(row.getAttribute('aria-label')).toBe('Jump to source: OrderPlaced');
   });
 
+  test('a row click also invokes onSelect with the event’s qualifiedName + context (loads the inspector)', () => {
+    const onSelect = vi.fn();
+    const el = renderEventsTable(rows, { goto: () => {}, onSelect });
+    document.body.appendChild(el);
+    (el.querySelectorAll('tbody tr')[0] as HTMLElement).click();
+    expect(onSelect).toHaveBeenCalledWith('Sales.OrderPlaced', 'Sales');
+  });
+
   test('empty input renders an empty-state element (no table rows)', () => {
     const el = renderEventsTable([], { goto: () => {} });
     expect(el.querySelector('tbody tr')).toBeNull();
@@ -300,8 +309,8 @@ describe('renderEventsTable', () => {
 
   test('clicking a column header sorts rows by that column, toggling direction', () => {
     const unsorted: EventRow[] = [
-      { name: 'Shipped', type: 'integration', publishedBy: 'Sales', context: 'Sales', when: '', span: span(20) },
-      { name: 'Placed', type: 'domain', publishedBy: 'Order', context: 'Sales', when: '', span: span(12) },
+      { name: 'Shipped', qualifiedName: 'Sales.Shipped', type: 'integration', publishedBy: 'Sales', context: 'Sales', when: '', span: span(20) },
+      { name: 'Placed', qualifiedName: 'Sales.Placed', type: 'domain', publishedBy: 'Order', context: 'Sales', when: '', span: span(12) },
     ];
     const el = renderEventsTable(unsorted, { goto: () => {} });
     document.body.appendChild(el);
