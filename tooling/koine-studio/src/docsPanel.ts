@@ -278,8 +278,10 @@ function noteRow(file: NoteFile, handlers: DocsPanelHandlers, canWrite: boolean,
   return row;
 }
 
-/** A `<section>` with a heading, an optional "New…" trigger, and either rows or an empty state. */
+/** A `<section>` with a heading, an optional "New…" trigger, and either rows or an empty state. The
+ * `id` is the scroll anchor the rail's Documentation links (ADR / Notes) target. */
 function docsSection(
+  id: string,
   title: string,
   newLabel: string,
   canWrite: boolean,
@@ -290,6 +292,7 @@ function docsSection(
 ): HTMLElement {
   const section = document.createElement('section');
   section.className = 'koi-docs-group';
+  section.id = id;
 
   const header = document.createElement('div');
   header.className = 'koi-docs-group-head';
@@ -330,20 +333,26 @@ function docsSection(
   return section;
 }
 
-/** Build the Docs panel: an ADR list and a notes list, with create/edit gated by `canWrite`. */
-export function renderDocsPanel(data: DocsPanelData, handlers: DocsPanelHandlers): HTMLElement {
+/** The shared `.koi-docs` shell + an optional read-only banner — the common frame for both pages. */
+function docsRoot(canWrite: boolean, readonlyText: string): HTMLElement {
   const root = document.createElement('div');
   root.className = 'koi-docs';
-
-  if (!data.canWrite) {
+  if (!canWrite) {
     const banner = document.createElement('p');
     banner.className = 'koi-docs-readonly';
-    banner.textContent = 'Open a workspace folder to create and edit ADRs and notes — docs are stored as Markdown under docs/.';
+    banner.textContent = readonlyText;
     root.append(banner);
   }
+  return root;
+}
 
+/** The Decisions page: the ADR list, with create/edit gated by `canWrite`. (Split from the former
+ *  combined Docs panel, #174 — Notes are now their own page; see {@link renderNotesPanel}.) */
+export function renderAdrPanel(data: DocsPanelData, handlers: DocsPanelHandlers): HTMLElement {
+  const root = docsRoot(data.canWrite, 'Open a workspace folder to create and edit ADRs — stored as Markdown under docs/.');
   root.append(
     docsSection(
+      'koi-docs-adr',
       'Architecture decisions',
       'New ADR',
       data.canWrite,
@@ -352,7 +361,16 @@ export function renderDocsPanel(data: DocsPanelData, handlers: DocsPanelHandlers
       handlers.onCreateAdr,
       'ADR title (e.g. Use Markdown ADRs)',
     ),
+  );
+  return root;
+}
+
+/** The Notes page: the free-form notes list, with create/edit gated by `canWrite`. */
+export function renderNotesPanel(data: DocsPanelData, handlers: DocsPanelHandlers): HTMLElement {
+  const root = docsRoot(data.canWrite, 'Open a workspace folder to create and edit notes — stored as Markdown under docs/.');
+  root.append(
     docsSection(
+      'koi-docs-notes',
       'Notes',
       'New note',
       data.canWrite,
@@ -362,6 +380,5 @@ export function renderDocsPanel(data: DocsPanelData, handlers: DocsPanelHandlers
       'Note title',
     ),
   );
-
   return root;
 }

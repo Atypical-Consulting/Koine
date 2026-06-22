@@ -45,7 +45,7 @@ import { setDiagramPersistScope } from './diagrams-svg';
 import { mergeDiagramGraphs } from './modelTables';
 import { type GlossaryHandlers } from './glossary';
 import { createDocsStore } from './docsStore';
-import { renderDocsPanel, type DocsPanelHandlers } from './docsPanel';
+import { renderAdrPanel, renderNotesPanel, type DocsPanelHandlers } from './docsPanel';
 import {
   ALL_CONTEXTS,
   fileContextFollow,
@@ -81,7 +81,7 @@ const SYMBOL_KIND_NAMESPACE = 3;
 // TechView / DocsView literals, which the chrome now drives through.
 type CenterView = 'visual' | 'technical' | 'docs';
 type TechView = 'editor' | 'preview' | 'check' | 'assistant';
-type DocsView = 'glossary' | 'adr';
+type DocsView = 'glossary' | 'adr' | 'notes';
 type BottomTab = 'problems' | 'events' | 'relationships' | 'contextmap';
 
 /**
@@ -260,9 +260,11 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   // tree and the Overview per-context counts.
   const explorerBody = el('rail-explorer-body');
   const overviewBody = el('rail-overview-body');
-  // The Documentation center tab's two sub-views: Glossary (the ubiquitous language) and Docs (ADR & Notes).
+  // The Documentation center tab's three sub-views: Glossary (the ubiquitous language), Decisions (the
+  // ADR list) and Notes — the latter two split from the former combined "Decisions & Notes" surface.
   const glossaryView = el('view-glossary');
-  const docsView = el('view-docs');
+  const adrView = el('view-docs');
+  const notesView = el('view-notes');
   // Center hosts: the diagram canvas (Visual) and the code editor's companion sub-views.
   const diagramsView = el('center-visual');
   const assistantView = el('view-assistant');
@@ -620,57 +622,90 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
         .catch((e) => docMessage(glossaryView, 'Saving description failed: ' + String(e), 'error')),
   };
 
-  // --- ADR & Notes documentation surface (#174, #193) -----------------------
-  // Folder-derived (NOT invalidated by `.koi` edits). The <DocsPanelHost> Preact host (mounted into
-  // view-docs at init) subscribes to the workspace slice's folderRootToken and re-runs `loadDocs(host)`
-  // ONLY when the folder changes — so a folder switch reloads the panel while edits leave it put. The
-  // mount node is captured here so the lazy first-load (ensureDocsLoaded on the ADR tab) and the in-panel
-  // create/save reloads can paint into the same node without re-fetching on unrelated edits.
-  let docsMount: HTMLElement | null = null;
-  let docsLoaded = false;
-  async function loadDocs(host?: HTMLElement): Promise<void> {
-    const target = host ?? docsMount;
+  // --- Decisions (ADR) & Notes documentation surfaces (#174, #193) ----------
+  // Two independent folder-derived pages (split from the former combined "Decisions & Notes" panel):
+  // each is NOT invalidated by `.koi` edits, lazily loads on its first tab open, and reloads only on a
+  // workspace folder change (the <DocsPanelHost> contract). The mount nodes are captured here so the
+  // lazy first-load and in-panel create/save reloads paint into the same node without re-fetching.
+  let adrMount: HTMLElement | null = null;
+  let notesMount: HTMLElement | null = null;
+  let adrLoaded = false;
+  let notesLoaded = false;
+  const docsFail = (verb: string) => (e: unknown) => deps.setStatus(`Could not ${verb}: ${String(e)}`, 'error');
+
+  // One handlers object the two pages share: each create resets only its OWN page's loaded flag and
+  // repaints just that page (saves are in-place and need no reload). renderAdrPanel uses only the ADR
+  // handlers and renderNotesPanel only the note ones, so the unused half is never invoked.
+  function docsHandlers(store: ReturnType<typeof createDocsStore>): DocsPanelHandlers {
+    return {
+      onCreateAdr: (title) =>
+        void store.createAdr(title).then(() => { adrLoaded = false; void loadAdr(); }).catch(docsFail('create the ADR')),
+      onSaveAdr: (file, adr) => void store.saveAdr(file.token, adr).catch(docsFail('save the ADR')),
+      onCreateNote: (title) =>
+        void store.createNote(title).then(() => { notesLoaded = false; void loadNotes(); }).catch(docsFail('create the note')),
+      onReadNote: (file) => store.readNote(file.token),
+      onSaveNote: (file, md) => void store.saveNote(file.token, md).catch(docsFail('save the note')),
+    };
+  }
+
+  async function loadAdr(host?: HTMLElement): Promise<void> {
+    const target = host ?? adrMount;
     if (!target) return; // the host hasn't mounted yet
     const store = createDocsStore(platform, deps.folderRootToken());
-    const reload = (): void => {
-      docsLoaded = false;
-      void loadDocs();
-    };
-    const fail = (verb: string) => (e: unknown) => deps.setStatus(`Could not ${verb}: ${String(e)}`, 'error');
-    const handlers: DocsPanelHandlers = {
-      onCreateAdr: (title) => void store.createAdr(title).then(reload).catch(fail('create the ADR')),
-      onSaveAdr: (file, adr) => void store.saveAdr(file.token, adr).catch(fail('save the ADR')),
-      onCreateNote: (title) => void store.createNote(title).then(reload).catch(fail('create the note')),
-      onReadNote: (file) => store.readNote(file.token),
-      onSaveNote: (file, md) => void store.saveNote(file.token, md).catch(fail('save the note')),
-    };
-    docMessage(target, 'Loading docs…');
+    docMessage(target, 'Loading decisions…');
     try {
-      const [adrs, notes] = await Promise.all([store.listAdrs(), store.listNotes()]);
-      target.replaceChildren(renderDocsPanel({ canWrite: store.canWrite, adrs, notes, renderMarkdown }, handlers));
-      docsLoaded = true;
+      const adrs = await store.listAdrs();
+      target.replaceChildren(renderAdrPanel({ canWrite: store.canWrite, adrs, notes: [], renderMarkdown }, docsHandlers(store)));
+      adrLoaded = true;
     } catch (e) {
-      docMessage(target, 'Docs request failed: ' + String(e), 'error');
+      docMessage(target, 'Decisions request failed: ' + String(e), 'error');
     }
   }
 
-  // Mount the folder-derived Docs host into view-docs. On mount it hands us the node (captured for the
-  // lazy first-load + in-panel reloads) WITHOUT fetching — the lazy ADR-tab path owns that first paint,
-  // matching the original behaviour and keeping the fetch off the construction frame (workspace isn't
-  // wired yet). A real folder-token change re-runs the fetch into the same node.
+  async function loadNotes(host?: HTMLElement): Promise<void> {
+    const target = host ?? notesMount;
+    if (!target) return; // the host hasn't mounted yet
+    const store = createDocsStore(platform, deps.folderRootToken());
+    docMessage(target, 'Loading notes…');
+    try {
+      const notes = await store.listNotes();
+      target.replaceChildren(renderNotesPanel({ canWrite: store.canWrite, adrs: [], notes, renderMarkdown }, docsHandlers(store)));
+      notesLoaded = true;
+    } catch (e) {
+      docMessage(target, 'Notes request failed: ' + String(e), 'error');
+    }
+  }
+
+  // Mount each folder-derived page into its view. On mount the host hands us the node (captured for the
+  // lazy first-load + in-panel reloads) WITHOUT fetching — the lazy tab-open path owns that first paint,
+  // keeping the fetch off the construction frame. A real folder-token change re-runs the fetch in place.
   render(
     <DocsPanelHost
       store={appStore}
       onMount={(host) => {
-        docsMount = host;
+        adrMount = host;
       }}
       load={(host) => {
-        docsMount = host;
-        docsLoaded = false;
-        void loadDocs(host);
+        adrMount = host;
+        adrLoaded = false;
+        void loadAdr(host);
       }}
     />,
-    docsView,
+    adrView,
+  );
+  render(
+    <DocsPanelHost
+      store={appStore}
+      onMount={(host) => {
+        notesMount = host;
+      }}
+      load={(host) => {
+        notesMount = host;
+        notesLoaded = false;
+        void loadNotes(host);
+      }}
+    />,
+    notesView,
   );
 
   // --- the DDD workspace (#142): outline / inspector / cross-highlight -------
@@ -870,10 +905,11 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     }
   }
 
-  // Mark the folder-derived ADR/Notes Docs panel stale on a workspace folder switch (the model-derived
-  // views are dropped by invalidateDocViews; this one only changes with the folder).
+  // Mark the folder-derived Decisions + Notes pages stale on a workspace folder switch (the model-derived
+  // views are dropped by invalidateDocViews; these two only change with the folder).
   function invalidateDocsPanel(): void {
-    docsLoaded = false;
+    adrLoaded = false;
+    notesLoaded = false;
   }
 
   // Diagrams are rendered with a theme-matched Mermaid palette; re-render on a theme flip. Mark the
@@ -925,10 +961,11 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     checkView.hidden = !(techVisible && tech === 'check');
     assistantView.hidden = !(techVisible && tech === 'assistant');
     for (const t of techTabs) t.setAttribute('aria-selected', String(t.dataset.tech === tech));
-    // Documentation sub-views: Glossary (the ubiquitous language) vs the ADR/Notes Docs panel.
+    // Documentation sub-views: Glossary (the ubiquitous language), Decisions (the ADR list) and Notes.
     const docsVisible = center === 'docs';
     glossaryView.hidden = !(docsVisible && docs === 'glossary');
-    docsView.hidden = !(docsVisible && docs === 'adr');
+    adrView.hidden = !(docsVisible && docs === 'adr');
+    notesView.hidden = !(docsVisible && docs === 'notes');
     for (const t of docsTabs) t.setAttribute('aria-selected', String(t.dataset.docs === docs));
     // CodeMirror measures lazily; revealing it from display:none leaves stale geometry until the next
     // layout tick, so force a re-measure whenever the editor becomes visible.
@@ -943,12 +980,14 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     else if (view === 'docs') ensureDocsLoaded();
   }
 
-  // Lazy-load the active Documentation sub-view: the glossary is model-derived, the Docs (ADR/Notes)
-  // panel is folder-derived.
+  // Lazy-load the active Documentation sub-view: the glossary is model-derived; the Decisions and Notes
+  // pages are folder-derived and load independently on their first open.
   function ensureDocsLoaded(): void {
     if (activeCenter() !== 'docs') return;
-    if (activeDocs() === 'glossary' && appStore.getState().isStale('glossary')) void loadGlossary();
-    else if (activeDocs() === 'adr' && !docsLoaded) void loadDocs();
+    const docs = activeDocs();
+    if (docs === 'glossary' && appStore.getState().isStale('glossary')) void loadGlossary();
+    else if (docs === 'adr' && !adrLoaded) void loadAdr();
+    else if (docs === 'notes' && !notesLoaded) void loadNotes();
   }
 
   function selectDocsTab(view: DocsView): void {
@@ -979,10 +1018,19 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     }
   }
 
-  // Surface the Documentation center tab (the "Docs" mode focus and the Explorer's "Ubiquitous
-  // Language" shortcut both route here).
+  // Surface the Documentation center tab (the "Docs" mode focus and the rail's "Ubiquitous Language"
+  // shortcut both route here).
   function focusDocs(): void {
     selectDocsTab('glossary');
+  }
+
+  // The Context Map lives in the bottom strip, which applyCenterChrome HIDES while Documentation is the
+  // active center. So the rail's Context Map link must first leave Documentation for a center that shows
+  // the strip (Visual — the map's natural home) before opening its Context Map tab; otherwise the click
+  // would set the bottom tab on a strip that stays hidden, and nothing would appear.
+  function focusContextMap(): void {
+    if (activeCenter() === 'docs') selectCenter('visual');
+    selectBottomTab('contextmap');
   }
 
   // Repaint the always-visible left rail (Explorer + Overview + the right-rail Properties inspector) +
@@ -1033,6 +1081,21 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   }
   for (const t of docsTabs) {
     t.addEventListener('click', () => selectDocsTab(t.dataset.docs as DocsView));
+  }
+
+  // The left rail's "Documentation" section: four shortcuts into the model's prose surfaces. Context
+  // Map opens the bottom strip's map; the other three each open their own Documentation page (Glossary,
+  // Decisions, Notes). querySelectorAll keeps this resilient to fixtures that omit the rail, and
+  // selectBottomTab (declared below) is hoisted, so referencing it here is fine.
+  const docLinkActions: Record<string, () => void> = {
+    contextmap: () => focusContextMap(),
+    glossary: () => focusDocs(),
+    adr: () => selectDocsTab('adr'),
+    notes: () => selectDocsTab('notes'),
+  };
+  for (const link of Array.from(document.querySelectorAll<HTMLButtonElement>('.koi-doclink'))) {
+    const action = docLinkActions[link.dataset.doclink ?? ''];
+    if (action) link.addEventListener('click', action);
   }
 
   // Right rail: Properties (the inspector) / Rules / Notes. Rules/Notes are placeholder panels for now —

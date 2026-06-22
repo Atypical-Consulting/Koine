@@ -272,6 +272,17 @@ const APP_HTML = `
             <button type="button" class="rail-sect-head" aria-expanded="true" aria-controls="rail-overview-body">Overview</button>
             <div class="rail-sect-body" id="rail-overview-body"></div>
           </section>
+          <section class="rail-sect" id="rail-docs" data-open="true">
+            <button type="button" class="rail-sect-head" aria-expanded="true" aria-controls="rail-docs-body">Documentation</button>
+            <nav class="rail-sect-body" id="rail-docs-body" aria-label="Documentation">
+              <ul class="koi-doclinks">
+                <li><button type="button" class="koi-doclink" data-doclink="contextmap"><span class="koi-doclink-label">Context Map</span></button></li>
+                <li><button type="button" class="koi-doclink" data-doclink="glossary"><span class="koi-doclink-label">Ubiquitous Language</span></button></li>
+                <li><button type="button" class="koi-doclink" data-doclink="adr"><span class="koi-doclink-label">ADR</span></button></li>
+                <li><button type="button" class="koi-doclink" data-doclink="notes"><span class="koi-doclink-label">Notes</span></button></li>
+              </ul>
+            </nav>
+          </section>
         </aside>
         <div class="koi-resizer" id="leftrail-resizer"></div>
         <section id="center" class="pane">
@@ -299,11 +310,13 @@ const APP_HTML = `
             <section id="center-docs" class="center-host" role="tabpanel" hidden>
               <div id="docs-tabs" role="tablist">
                 <button type="button" class="docs-tab" id="docs-tab-glossary" role="tab" data-docs="glossary" aria-selected="true">Glossary</button>
-                <button type="button" class="docs-tab" id="docs-tab-adr" role="tab" data-docs="adr" aria-selected="false">Decisions &amp; Notes</button>
+                <button type="button" class="docs-tab" id="docs-tab-adr" role="tab" data-docs="adr" aria-selected="false">Decisions</button>
+                <button type="button" class="docs-tab" id="docs-tab-notes" role="tab" data-docs="notes" aria-selected="false">Notes</button>
               </div>
               <div id="docs-body">
                 <div id="view-glossary" class="tech-view doc-view" role="tabpanel"></div>
                 <div id="view-docs" class="tech-view doc-view" role="tabpanel" hidden></div>
+                <div id="view-notes" class="tech-view doc-view" role="tabpanel" hidden></div>
               </div>
             </section>
           </div>
