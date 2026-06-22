@@ -21,6 +21,12 @@ export type AccentName = 'blue' | 'teal' | 'violet' | 'amber';
 /** MCP client a setup recipe targets in Settings → MCP. */
 export type McpClientId = 'claude-desktop' | 'lm-studio' | 'cursor' | 'vscode' | 'generic';
 
+/** A code-generation target the emitted-code ("Generated") preview can render. */
+export type PreviewTarget = 'csharp' | 'typescript' | 'python' | 'php';
+
+/** The supported preview targets, in display order. The single source of truth for the set. */
+export const PREVIEW_TARGETS: readonly PreviewTarget[] = ['csharp', 'typescript', 'python', 'php'];
+
 export interface Settings {
   theme: ThemeName;
   /** Accent hue applied over the active theme. */
@@ -52,6 +58,8 @@ export interface Settings {
   mcpEnabled: boolean;
   /** Which client the Settings → MCP setup recipe is shown for. */
   mcpClient: McpClientId;
+  /** The language the emitted-code ("Generated") preview renders. */
+  previewTarget: PreviewTarget;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -71,6 +79,7 @@ export const DEFAULT_SETTINGS: Settings = {
   aiAgenticTools: false,
   mcpEnabled: false,
   mcpClient: 'lm-studio',
+  previewTarget: 'csharp',
 };
 
 // --- storage keys ------------------------------------------------------------
@@ -174,6 +183,11 @@ function coerceMcpClient(v: unknown): McpClientId {
   return MCP_CLIENT_IDS.includes(v as McpClientId) ? (v as McpClientId) : DEFAULT_SETTINGS.mcpClient;
 }
 
+/** A supported preview target, else the default. */
+function coercePreviewTarget(v: unknown): PreviewTarget {
+  return PREVIEW_TARGETS.includes(v as PreviewTarget) ? (v as PreviewTarget) : DEFAULT_SETTINGS.previewTarget;
+}
+
 /**
  * Load settings, merging any stored partial onto DEFAULT_SETTINGS and validating each
  * field. Unknown shapes, bad JSON, and absent storage all fall back to the defaults.
@@ -205,6 +219,7 @@ export function loadSettings(): Settings {
         typeof parsed.aiAgenticTools === 'boolean' ? parsed.aiAgenticTools : DEFAULT_SETTINGS.aiAgenticTools,
       mcpEnabled: typeof parsed.mcpEnabled === 'boolean' ? parsed.mcpEnabled : DEFAULT_SETTINGS.mcpEnabled,
       mcpClient: coerceMcpClient(parsed.mcpClient),
+      previewTarget: coercePreviewTarget(parsed.previewTarget),
     };
   } catch {
     return { ...DEFAULT_SETTINGS, aiApiKey: secretCache };

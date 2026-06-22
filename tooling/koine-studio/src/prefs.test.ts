@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { createPreferences, type PrefsCallbacks } from './prefs';
-import { DEFAULT_SETTINGS, saveSettings } from './store';
+import { DEFAULT_SETTINGS, loadSettings, saveSettings } from './store';
 
 // Flush queued microtasks + timers so the panel's async steps (mcpEndpoint, mcpStop, probe) settle.
 const flush = () => new Promise((r) => setTimeout(r, 0));
@@ -127,5 +127,41 @@ describe('Settings → MCP panel', () => {
     await settle();
     expect(endpointUrl().value).toBe('');
     expect(status().dataset.state).toBe('fail');
+  });
+});
+
+describe('Settings → Output panel', () => {
+  beforeEach(() => {
+    document.body.innerHTML = '';
+    localStorage.clear();
+    saveSettings({ ...DEFAULT_SETTINGS });
+  });
+
+  const langOpts = () =>
+    [...document.querySelectorAll<HTMLButtonElement>('#koi-settings-panel-output .koi-lang-opt')];
+
+  it('renders the four language options with C# selected by default', () => {
+    openPrefs();
+    const opts = langOpts();
+    expect(opts.map((b) => b.dataset.value)).toEqual(['csharp', 'typescript', 'python', 'php']);
+    const checked = opts.find((b) => b.getAttribute('aria-checked') === 'true');
+    expect(checked?.dataset.value).toBe('csharp');
+  });
+
+  it('selecting a language commits previewTarget and reports it via onChange', () => {
+    const onChange = vi.fn();
+    openPrefs({ onChange });
+    langOpts().find((b) => b.dataset.value === 'python')!.click();
+    expect(onChange).toHaveBeenCalled();
+    const last = onChange.mock.calls[onChange.mock.calls.length - 1]![0];
+    expect(last.previewTarget).toBe('python');
+    expect(loadSettings().previewTarget).toBe('python');
+  });
+
+  it('reflects the persisted target when reopened', () => {
+    saveSettings({ ...DEFAULT_SETTINGS, previewTarget: 'php' });
+    openPrefs();
+    const checked = langOpts().find((b) => b.getAttribute('aria-checked') === 'true');
+    expect(checked?.dataset.value).toBe('php');
   });
 });
