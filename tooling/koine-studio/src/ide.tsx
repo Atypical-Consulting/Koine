@@ -72,6 +72,8 @@ import { createAssistantPanel, type AssistantPanel, type AssistantContext } from
 import { clearModelHash, readModelFromHash, workspaceShareUrlOrNull } from './share';
 import { handleBeforeUnload } from './dirty';
 import { render } from 'preact';
+import { createHistoryController } from './historyController';
+import { HistoryControls } from './panels/HistoryControls';
 import { UnsavedIndicator } from './panels/UnsavedIndicator';
 import { WorkspaceProblemsBadge } from './panels/WorkspaceProblemsBadge';
 import { ContextBreadcrumb } from './panels/ContextBreadcrumb';
@@ -375,6 +377,7 @@ export function init(): void {
     if (welcome.visible) welcome.hide();
     const becameDirty = workspace.syncActiveBuffer(doc);
     controller.onDocEdited();
+    if (!history.isRestoring) history.noteEdit();
     // Re-render the tree only when the active file's dirty dot just appeared (cheap path).
     if (becameDirty) workspace.renderTree();
   });
@@ -802,6 +805,35 @@ export function init(): void {
     showFileTreeChrome,
     hideWelcome: () => welcome.hide(),
   });
+  // The workspace-level undo/redo timeline (code = the single source of truth). It snapshots the open
+  // buffers' text; restore writes code back and onRestored re-derives every view. canUndo/canRedo are
+  // published into the store for the <HistoryControls> buttons.
+  const history = createHistoryController({
+    buffers: () => workspace.buffers,
+    activeUri: () => workspace.activeUri(),
+    editor: { getDoc: () => editor.getDoc(), setDoc: (d) => editor.setDoc(d) },
+    lsp: { syncDoc: (uri, text) => lsp.syncDoc(uri, text) },
+    activateFile: (uri) => workspace.activateFile(uri),
+    onRestored: () => {
+      controller.onDocEdited();
+      workspace.renderTree();
+    },
+    publish: (s) => appStore.getState().setHistoryState(s),
+  });
+  // Reset history whenever the explorer tree is re-read: a folder open (fresh baseline) or any
+  // structural file op (rename/move/delete/create) whose snapshots would reference stale uris.
+  workspace.onEntriesRefreshed(() => history.reset());
+  // The top-bar Undo/Redo buttons (reactive enable/disable via the store).
+  render(
+    <HistoryControls
+      store={appStore}
+      onUndo={() => history.undo()}
+      onRedo={() => history.redo()}
+      undoTitle={`Undo (${formatChord('mod+Z')})`}
+      redoTitle={`Redo (${formatChord('mod+Shift+Z')})`}
+    />,
+    el('history-controls-host'),
+  );
   // Switching files: repaint the active file's diagnostics, invalidate the doc views so they re-fetch,
   // and follow the new file's bounded context. Preserves the exact effect order of the old activateFile.
   workspace.onActiveChanged((uri) => {
@@ -816,6 +848,7 @@ export function init(): void {
   // file's own edit path also reaches onDocEdited via the editor onChange).
   workspace.onBuffersChanged(() => {
     controller.onDocEdited();
+    history.noteEdit({ immediate: true });
   });
 
   // Boot/empty-state: open the host's persistent default workspace, then surface the welcome overlay
@@ -858,6 +891,22 @@ export function init(): void {
       // Mod+S → save / format the active buffer (unchanged single-file behaviour).
       e.preventDefault();
       void workspace.saveActive();
+    }
+  });
+
+  // Undo/redo drive the single workspace history (CodeMirror's own history was removed). Match on
+  // e.code (physical Z/Y) so macOS Option-composed glyphs don't slip past.
+  window.addEventListener('keydown', (e) => {
+    const mod = e.metaKey || e.ctrlKey;
+    if (!mod) return;
+    if (overlayOpen()) return;
+    if (e.code === 'KeyZ') {
+      e.preventDefault();
+      if (e.shiftKey) history.redo();
+      else history.undo();
+    } else if (e.code === 'KeyY' && !e.shiftKey) {
+      e.preventDefault();
+      history.redo();
     }
   });
 
@@ -1196,6 +1245,8 @@ export function init(): void {
   // palette, help overlay, and toolbar hint all show the same key.
   function getCommands(): Command[] {
     const cmds: Command[] = [
+      { id: 'undo', title: 'Undo', hint: 'mod+Z', group: 'Edit', run: () => history.undo() },
+      { id: 'redo', title: 'Redo', hint: 'mod+Shift+Z', group: 'Edit', run: () => history.redo() },
       { id: 'format', title: 'Format document', hint: 'mod+S', group: 'Edit', run: () => void formatActive() },
       { id: 'home', title: 'Go to start screen', group: 'File', run: () => goHome() },
       { id: 'open-folder', title: 'Open folder…', hint: 'mod+Shift+O', group: 'File', run: () => void openFolder() },

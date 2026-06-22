@@ -14,7 +14,7 @@ import {
   hoverTooltip,
   type Tooltip,
 } from '@codemirror/view';
-import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands';
+import { defaultKeymap, indentWithTab } from '@codemirror/commands';
 import {
   StreamLanguage,
   HighlightStyle,
@@ -749,7 +749,6 @@ export function createKoineEditor(opts: KoineEditorOptions): KoineEditor {
         lineNumbers(),
         highlightActiveLineGutter(),
         highlightActiveLine(),
-        history(),
         drawSelection(),
         indentOnInput(),
         bracketMatching(),
@@ -766,7 +765,6 @@ export function createKoineEditor(opts: KoineEditorOptions): KoineEditor {
           ...completionKeymap,
           ...searchKeymap,
           ...defaultKeymap,
-          ...historyKeymap,
           indentWithTab,
         ]),
         ...definitionClick,
