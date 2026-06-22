@@ -11,7 +11,7 @@
 // mirroring the in-memory fakes ide.test.ts / editorSession.test.ts use. The diagnostics accessors
 // (showDiagnostics / dropDiagnostics / renameDiagnostics / clearDiagnostics) are spies — the
 // controller calls them but does not own the cache (it lives in editorSession).
-import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, test, vi } from 'vitest';
 import { createWorkspaceController, type WorkspaceControllerDeps } from './workspaceController';
 import { pathToFileUri } from './ideUtils';
 import type { FsEntry, KoiFile, Platform, SourceDoc } from './host/types';
@@ -234,6 +234,35 @@ describe('createWorkspaceController — opening a folder', () => {
     expect(lsp.setActive).toHaveBeenCalledWith(uriOf('a.koi'));
     // The folder-opened hook fired so ide.ts can restore context / refresh surfaces.
     expect(onFolderOpened).toHaveBeenCalledTimes(1);
+  });
+
+  it('returns ok and hides the welcome only after a successful open', async () => {
+    const hideWelcome = vi.fn();
+    const platform = new FakePlatform();
+    platform.files.set('a.koi', 'context A {}\n');
+    const trace: string[] = [];
+    const lsp = makeLsp(trace);
+    const editor = makeEditor(trace);
+    const ws = createWorkspaceController(makeDeps(platform, lsp, editor, { hideWelcome }));
+    const result = await ws.openFolderPath(ROOT, { recent: false });
+    expect(result).toEqual({ ok: true });
+    expect(hideWelcome).toHaveBeenCalledTimes(1);
+  });
+
+  it('reports an unreadable folder and does NOT hide the welcome', async () => {
+    const hideWelcome = vi.fn();
+    const platform = new FakePlatform();
+    platform.files.set('a.koi', 'context A {}\n');
+    const trace: string[] = [];
+    const lsp = makeLsp(trace);
+    const editor = makeEditor(trace);
+    platform.listKoiFiles = vi.fn(async () => {
+      throw new Error('this folder is no longer available — open it again');
+    });
+    const ws = createWorkspaceController(makeDeps(platform, lsp, editor, { hideWelcome }));
+    const result = await ws.openFolderPath(ROOT);
+    expect(result).toEqual({ ok: false, reason: 'unreadable' });
+    expect(hideWelcome).not.toHaveBeenCalled();
   });
 
   test('openWorkspaceWith1File materializes a 1-file workspace and opens it', async () => {

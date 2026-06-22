@@ -982,7 +982,7 @@ export function init(): void {
   const welcome = createWelcome({
     onNewModel: () => void requestNewModel(),
     onOpenFolder: () => void leaveHomeFor('Open a folder?', () => openFolder()),
-    onOpenRecent: (path) => void leaveHomeFor('Open this folder?', () => workspace.openFolderPath(path)),
+    onOpenRecent: (path) => void leaveHomeFor('Open this folder?', () => void workspace.openFolderPath(path)),
     onOpenExample: (template) => void leaveHomeFor('Open this template?', () => openExample(template)),
   });
 
