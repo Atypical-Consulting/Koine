@@ -4,11 +4,11 @@
 // filter, never a mutation — every helper here derives a narrowed projection from existing data
 // (`DiagramGraph` / `GlossaryModel` / `contextMap()`) and the compiler/LSP/`Ast/` stay untouched.
 //
-// Deliberately tiny and DOM-free so it unit-tests under happy-dom; the bus mirrors the selection bus
-// (selection.ts) so the switcher (ide.ts) and the surfaces subscribe to one source of truth.
-import { createStore } from 'zustand/vanilla';
+// Deliberately tiny and DOM-free so it unit-tests under happy-dom. The active scope itself lives in the
+// app store's `activeContext` slice (src/store/slices/activeContext.ts) — the single source of truth the
+// switcher (inspectorController) writes and every scoped surface reads; this file is now just the pure
+// scoping helpers + the ALL_CONTEXTS / ContextScope vocabulary they share.
 import type { ContextMapResult, DiagramGraph, DocsFile, GlossaryModel } from './lsp';
-import { createActiveContextSlice, type ActiveContextSlice } from './store/slices/activeContext';
 
 /** The sentinel scope meaning "don't narrow — show every context". A real context name never collides
  *  (Koine contexts are PascalCase identifiers), so this lowercase literal is safe as the unscoped marker. */
@@ -112,32 +112,4 @@ export function fileContextFollow(fileContexts: readonly string[], scope: Contex
   const context = fileContexts[0];
   if (!context || context === scope) return undefined;
   return context;
-}
-
-/** A minimal observable holding the active scope; the switcher writes it, the surfaces subscribe. */
-export interface ActiveContextBus {
-  /** The current scope (a context name, or {@link ALL_CONTEXTS}). */
-  get(): ContextScope;
-  /** Set the scope; notifies subscribers only on a real change (same value in = no churn). */
-  set(scope: ContextScope): void;
-  /** Subscribe to scope changes; returns an unsubscribe handle. */
-  subscribe(fn: (scope: ContextScope) => void): () => void;
-}
-
-/**
- * Creates an independent active-context bus, defaulting to {@link ALL_CONTEXTS}, backed by a private
- * Zustand store (transition adapter). The "same value in = no churn" contract lives in the slice's
- * setActiveContext, so re-selecting the active scope never notifies the surfaces.
- */
-export function createActiveContextBus(initial: ContextScope = ALL_CONTEXTS): ActiveContextBus {
-  const store = createStore<ActiveContextSlice>((set, get) => createActiveContextSlice(set, get));
-  if (initial !== ALL_CONTEXTS) store.getState().setActiveContext(initial);
-  return {
-    get: () => store.getState().activeContext,
-    set: (scope) => store.getState().setActiveContext(scope),
-    subscribe: (fn) =>
-      store.subscribe((s, prev) => {
-        if (s.activeContext !== prev.activeContext) fn(s.activeContext);
-      }),
-  };
 }

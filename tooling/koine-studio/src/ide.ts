@@ -60,6 +60,8 @@ import {
   type DiagramNodeNavigateDetail,
 } from './diagrams-svg';
 import { isAllContexts } from './activeContext';
+import { appStore } from './store/index';
+import { type SelectedElement } from './selection';
 import { type InspectorElement } from './inspector';
 import { createAssistantPanel, type AssistantPanel, type AssistantContext } from './aiPanel';
 import { clearModelHash, readModelFromHash, workspaceShareUrlOrNull } from './share';
@@ -342,8 +344,8 @@ export function init(): void {
   // lazy loaders, the bounded-context scope (#146), and the selection-driven Properties inspector
   // (#142) all live in the controller now. ide.ts keeps only the editor↔LSP/buffer/workspace wiring
   // and the diagram-authoring + inspector WRITE path (below), which the controller triggers through
-  // the injected callbacks. The controller creates + owns the `selection` and `activeContext` buses;
-  // ide.ts reads them through these aliases for the diagram write-path and the active-file follow.
+  // the injected callbacks. The `selection` and `activeContext` state lives in the app store (the single
+  // source of truth); ide.ts reaches it through these thin shims for the diagram write-path + add-type scope.
   const controller = createInspectorController({
     lsp,
     editor: { view: editor.view, goto: editor.goto, gotoRange: editor.gotoRange },
@@ -365,7 +367,14 @@ export function init(): void {
     ensureAssistant: () => ensureAssistant(),
     initEdgeResizer,
   });
-  const { selection, activeContext } = controller;
+  // Thin shims over the app store (the single source of truth) for the two state reads ide.ts needs:
+  // the diagram write-path sets the selection, and the add-type path reads the active scope.
+  const selection = {
+    set: (element: SelectedElement | null) => appStore.getState().setSelection(element),
+  };
+  const activeContext = {
+    get: () => appStore.getState().activeContext,
+  };
   // The diagram canvas host — the controller renders into it, but ide.ts owns the authoring gesture
   // listeners (the diagram write-path stays here), which are bound to this node below.
   const diagramsView = el('center-visual');

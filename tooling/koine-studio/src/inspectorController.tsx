@@ -53,17 +53,15 @@ import { createDocsStore } from './docsStore';
 import { renderDocsPanel, type DocsPanelHandlers } from './docsPanel';
 import {
   ALL_CONTEXTS,
-  createActiveContextBus,
   fileContextFollow,
   isAllContexts,
   listContexts,
   scopeDocsFiles,
   scopeGlossaryModel,
   scopeGraph,
-  type ActiveContextBus,
   type ContextScope,
 } from './activeContext';
-import { createSelectionBus, type SelectionBus } from './selection';
+import type { SelectedElement } from './selection';
 import { renderOverviewCounts, type ModelOutlineHandlers } from './modelOutline';
 import { type InspectorElement, type InspectorHandlers } from './inspector';
 import { buildModelIndex, lookupElement, type ModelIndex } from './modelIndex';
@@ -172,11 +170,25 @@ export interface InspectorControllerDeps {
   }): void;
 }
 
+/** A thin read/write shim over the app store's `selection` slice (#142) — ide.ts's diagram write-path
+ *  uses it to set the selection. The store is the single source of truth; this is just a typed handle. */
+export interface SelectionHandle {
+  get(): SelectedElement | null;
+  set(element: SelectedElement | null): void;
+}
+
+/** A thin read/write shim over the app store's `activeContext` slice (#146) — ide.ts reads the active
+ *  scope through it for the diagram add-type path. The store is the single source of truth. */
+export interface ActiveContextHandle {
+  get(): ContextScope;
+  set(scope: ContextScope): void;
+}
+
 export interface InspectorController {
-  /** The shared "selected element" bus (#142) — ide.ts's diagram write-path sets it; the inspector reads it. */
-  readonly selection: SelectionBus;
-  /** The active bounded-context bus (#146) — read at paint time by every scoped surface. */
-  readonly activeContext: ActiveContextBus;
+  /** The shared "selected element" handle (#142) — ide.ts's diagram write-path sets it; the inspector reads it. */
+  readonly selection: SelectionHandle;
+  /** The active bounded-context handle (#146) — read at paint time by every scoped surface. */
+  readonly activeContext: ActiveContextHandle;
 
   // Mode / view selection (palette commands + toolbar/tab clicks route here).
   selectMode(id: string): void;
@@ -309,7 +321,13 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   });
 
   // --- bounded-context switcher (#146) ---------------------------------------
-  const activeContext = createActiveContextBus();
+  // A thin handle over the app store's `activeContext` slice — the store is the single source of truth,
+  // so the switcher writes it here and every scoped surface (and the ModelOutlinePanel, which subscribes
+  // to the slice) reads the same value.
+  const activeContext: ActiveContextHandle = {
+    get: () => appStore.getState().activeContext,
+    set: (scope) => appStore.getState().setActiveContext(scope),
+  };
   const contextSwitcher = el('context-switcher');
   const contextLabel = document.createElement('span');
   contextLabel.className = 'context-switcher-label';
@@ -349,11 +367,9 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   // selection, or falling back off a vanished context) are view-only so they never overwrite the
   // user's last explicit choice in storage.
   function applyScope(scope: ContextScope, persist: boolean): void {
+    // Write the app store's `activeContext` slice (the single source of truth): the ModelOutlinePanel
+    // subscribes to it and re-renders the scoped tree, and every other scoped render path reads it back.
     activeContext.set(scope);
-    // Mirror the scope into the app store so the Preact ModelOutlinePanel (which subscribes to the
-    // store's `activeContext` slice) re-renders the scoped tree; the controller's bus stays the
-    // authority every other render path reads.
-    appStore.getState().setActiveContext(scope);
     if (persist) deps.saveActiveContext(contextWorkspaceKey(), scope);
     syncContextSwitcherUi();
     rerenderScopedSurfaces();
@@ -408,9 +424,8 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   function restoreActiveContext(): void {
     const stored = deps.loadActiveContext(contextWorkspaceKey());
     const scope = stored && stored.length > 0 ? stored : ALL_CONTEXTS;
+    // Set the store's scope so the ModelOutlinePanel's first paint is already scoped.
     activeContext.set(scope);
-    // Keep the app store's scope in sync with the bus so the ModelOutlinePanel's first paint is scoped.
-    appStore.getState().setActiveContext(scope);
     syncContextSwitcherUi();
   }
 
@@ -592,7 +607,12 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   }
 
   // --- the DDD workspace (#142): outline / inspector / cross-highlight -------
-  const selection = createSelectionBus();
+  // A thin handle over the app store's `selection` slice (the single source of truth): the outline,
+  // the diagram (via ide.ts's write-path), and the Properties panel all read/write the same selection.
+  const selection: SelectionHandle = {
+    get: () => appStore.getState().selection,
+    set: (element) => appStore.getState().setSelection(element),
+  };
 
   const modelOutlineHandlers: ModelOutlineHandlers = {
     onSelect: (entry) => selection.set({ qualifiedName: entry.qualifiedName, context: entry.context }),
@@ -720,9 +740,13 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     }
   }
 
-  // The inspector + cross-highlight track the selection bus for the app's lifetime (a diagram click can
-  // select an element while the Model tab is closed; opening it then shows the right inspector).
-  selection.subscribe((sel) => {
+  // The inspector + cross-highlight track the app store's `selection` slice for the app's lifetime (a
+  // diagram click can select an element while the Model tab is closed; opening it then shows the right
+  // inspector). Subscribe to the whole store but act only when the `selection` field actually changes,
+  // matching the old bus's reference-change notify contract.
+  appStore.subscribe((state, prev) => {
+    if (state.selection === prev.selection) return;
+    const sel = state.selection;
     // Jump-to-source works across scope, but a selection landing OUTSIDE the active context would
     // otherwise leave the scoped surfaces showing a different context than the inspector. Follow it:
     // switch the scope to the selected element's context (#146). View-only (persist=false) — a
@@ -733,10 +757,9 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     if (sel && !isAllContexts(activeContext.get()) && sel.context !== activeContext.get()) {
       applyScope(sel.context, false);
     }
-    // Mirror the bus selection into the app store so the Preact Properties panel (which subscribes to
-    // the store's `selection` slice) renders the new element; the explicit repaint keeps the right-rail
-    // update synchronous for callers that read it immediately after a set.
-    appStore.getState().setSelection(sel);
+    // The Properties panel subscribes to the store's `selection` slice and re-renders on its own; the
+    // explicit repaint keeps the right-rail update synchronous for callers that read it immediately
+    // after a set.
     renderSelectedInspector();
     applySelectionHighlight();
   });
