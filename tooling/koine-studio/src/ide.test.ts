@@ -10,7 +10,7 @@
 import { afterEach, beforeEach, describe, expect, vi, test } from 'vitest';
 import { EditorView } from '@codemirror/view';
 import type { FsEntry, KoiFile, LspTransport, Platform } from './host/types';
-import { buildShareUrl } from './share';
+import { buildShareUrl, buildWorkspaceShareUrl } from './share';
 
 // The studio reads `__APP_VERSION__` (a vite build-time define) once at boot for the status bar.
 // vitest does not define it, so stub it as a global before any init() runs — test scaffolding only,
@@ -30,6 +30,32 @@ vi.mock('./host', async () => {
     isTauri: () => false,
   };
 });
+
+// Make the legacy-scratch migration seam observable. ide.ts reads peekLegacyScratch() once at boot
+// and calls clearLegacyScratch() ONLY inside openDefaultWorkspaceFlow AFTER the workspace is
+// confirmed open (so a one-time migration of the pre-workspace scratch buffer can't lose content if
+// OPFS is unavailable or the open fails). We wrap exactly those two exports in vi.fn() that DELEGATE
+// to the real store implementation by default, so every other test (and every other store consumer
+// at boot) behaves identically to production; a test can drive a specific scenario per-call via
+// mockReturnValueOnce / mockImplementationOnce and assert on the spies. Everything else in ./store is
+// passed through untouched. (vi.hoisted so the spies exist before the hoisted vi.mock factory runs.)
+const storeSeam = vi.hoisted(() => ({
+  peekLegacyScratch: vi.fn<() => string | null>(),
+  clearLegacyScratch: vi.fn<() => void>(),
+}));
+vi.mock('./store', async () => {
+  const actual = await vi.importActual<typeof import('./store')>('./store');
+  // Default: delegate to the real implementation (so boot behaves exactly as in production unless a
+  // test overrides a single call).
+  storeSeam.peekLegacyScratch.mockImplementation(() => actual.peekLegacyScratch());
+  storeSeam.clearLegacyScratch.mockImplementation(() => actual.clearLegacyScratch());
+  return {
+    ...actual,
+    peekLegacyScratch: storeSeam.peekLegacyScratch,
+    clearLegacyScratch: storeSeam.clearLegacyScratch,
+  };
+});
+const { peekLegacyScratch, clearLegacyScratch } = storeSeam;
 
 // --- in-memory LspTransport --------------------------------------------------
 // Records every framed message the client sends and lets the test drive server→client messages. The
@@ -403,10 +429,20 @@ function setSingleShareHash(source: string): void {
   window.location.hash = url.slice(url.indexOf('#'));
 }
 
+/** Put a multi-file workspace share payload in the URL hash (a shared folder link). */
+function setWorkspaceShareHash(files: { relPath: string; text: string }[], active?: string): void {
+  const url = buildWorkspaceShareUrl(files, active);
+  window.location.hash = url.slice(url.indexOf('#'));
+}
+
 beforeEach(() => {
   document.body.innerHTML = '';
   fakePlatform.current = null as unknown as Platform;
   window.location.hash = '';
+  // Clear the legacy-scratch seam's call history + any queued *Once overrides so each test starts
+  // from the delegating default (re-established by the vi.mock factory on the module reset below).
+  peekLegacyScratch.mockReset();
+  clearLegacyScratch.mockReset();
   vi.resetModules();
 });
 
@@ -463,6 +499,99 @@ describe('ide init() — #-hash single shared model', () => {
     expect(shared.files[0].contents).toBe(SHARED);
     // The #model= fragment is cleared after import so a reload returns home (clearModelHash).
     expect(window.location.hash).toBe('');
+  });
+});
+
+describe('ide init() — #-hash multi-file shared workspace', () => {
+  test('materializes the shared files, opens the `active` one, and clears the hash after boot', async () => {
+    // A workspace-share link carrying two files; the recipient should land on the named `active` file.
+    // `active` is the relPath-SECOND file (orders.koi) on purpose: openFolderPath would otherwise
+    // activate the relPath-first billing.koi, so landing on orders.koi proves `active` was honoured.
+    const FILES = [
+      { relPath: 'orders.koi', text: 'context Orders {\n  value Sku { raw: String }\n}\n' },
+      { relPath: 'billing.koi', text: 'context Billing {\n  value Money { amount: Decimal }\n}\n' },
+    ];
+    setWorkspaceShareHash(FILES, 'orders.koi');
+
+    const { platform } = await boot();
+
+    // Boot took the `workspace` ladder branch → importSharedWorkspace materialized a real workspace
+    // (name 'shared-workspace') from the shared files, not the default one.
+    expect(platform.materialized.map((m) => m.name)).toContain('shared-workspace');
+    const shared = platform.materialized.find((m) => m.name === 'shared-workspace')!;
+    expect(shared.files.map((f) => f.relPath).sort()).toEqual(['billing.koi', 'orders.koi']);
+    expect(shared.files.find((f) => f.relPath === 'orders.koi')!.contents).toBe(FILES[0].text);
+    // The materialized files became openable: both are present in the host fs after the import.
+    expect(platform.files.has('orders.koi')).toBe(true);
+    expect(platform.files.has('billing.koi')).toBe(true);
+    // importSharedWorkspace honours the share's `active`, so the editor opens orders.koi (not the
+    // relPath-first billing.koi that openFolderPath would otherwise activate).
+    expect(editorDoc()).toContain('context Orders');
+    expect(editorDoc()).not.toContain('context Billing');
+    // It did NOT fall through to the default SEED workspace (which would have seeded model.koi).
+    expect(platform.defaultWorkspaceSeed).toBeNull();
+    expect(platform.files.has('model.koi')).toBe(false);
+    // The #model= fragment is cleared after import so a reload returns home (clearModelHash).
+    expect(window.location.hash).toBe('');
+  });
+});
+
+describe('ide init() — boot ladder clears the model hash via try/finally', () => {
+  test('the workspace branch clears the hash even when the import throws', async () => {
+    setWorkspaceShareHash([{ relPath: 'a.koi', text: 'context A {}\n' }], 'a.koi');
+    const platform = installPlatform();
+    // Make the share import fail inside the try block.
+    platform.materializeWorkspace = () => Promise.reject(new Error('disk full'));
+
+    // Boot must not crash the page despite the rejected import…
+    await boot({ platform });
+
+    // …and the finally still cleared the #model= fragment, so a reload won't re-trigger the failing
+    // import (the pinned guarantee of the workspace branch's try/finally).
+    expect(window.location.hash).toBe('');
+  });
+
+  test('the single branch clears the hash even when the open throws', async () => {
+    setSingleShareHash('context Shared { value Tag { raw: String } }\n');
+    const platform = installPlatform();
+    // Make the 1-file share open fail inside the try block.
+    platform.materializeWorkspace = () => Promise.reject(new Error('disk full'));
+
+    await boot({ platform });
+
+    // The single branch's finally cleared the hash too, despite the throw.
+    expect(window.location.hash).toBe('');
+  });
+});
+
+describe('ide init() — legacy-scratch migration is crash-safe', () => {
+  test('keeps the legacy scratch when the default workspace fails to open', async () => {
+    // A pre-workspace user has a legacy scratch buffer waiting to migrate.
+    peekLegacyScratch.mockReturnValue('context Legacy { value Note { raw: String } }\n');
+    const platform = installPlatform();
+    // The host can't back a default workspace (e.g. OPFS unavailable) → openDefaultWorkspaceFlow
+    // returns { opened: false } and must bail BEFORE clearing the scratch.
+    platform.defaultWorkspace = () => Promise.resolve(null);
+
+    await boot({ platform });
+
+    // peekLegacyScratch was consulted at boot…
+    expect(peekLegacyScratch).toHaveBeenCalled();
+    // …but because the workspace never opened, the scratch is NOT cleared — content is never lost.
+    expect(clearLegacyScratch).not.toHaveBeenCalled();
+  });
+
+  test('clears the legacy scratch once the default workspace is confirmed open', async () => {
+    // Same migration, but now the default workspace opens successfully.
+    peekLegacyScratch.mockReturnValue('context Legacy { value Note { raw: String } }\n');
+
+    const { platform } = await boot();
+
+    // The default branch ran (no share hash) and the workspace opened, so the one-time migration
+    // clear fired exactly once — and the legacy scratch text seeded the default workspace.
+    expect(clearLegacyScratch).toHaveBeenCalledTimes(1);
+    expect(platform.defaultWorkspaceSeed).toContain('context Legacy');
+    expect(editorDoc()).toContain('context Legacy');
   });
 });
 
