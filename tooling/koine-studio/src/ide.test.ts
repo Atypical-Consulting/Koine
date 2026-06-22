@@ -229,6 +229,7 @@ const APP_HTML = `
             <button type="button" id="btn-new">New</button>
             <button type="button" id="btn-open-folder">Open</button>
           </div>
+          <div id="history-controls-host"></div>
           <div class="tb-group">
             <button type="button" id="btn-generate-project">Generate</button>
           </div>

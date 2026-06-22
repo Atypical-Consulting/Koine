@@ -217,6 +217,12 @@
   &[hidden] {
     display: none;
   }
+
+  &:disabled {
+    opacity: 0.4;
+    cursor: default;
+    pointer-events: none;
+  }
 }
 
 /* The About control wears the brand blue so the info mark reads as the identity entry point. */
