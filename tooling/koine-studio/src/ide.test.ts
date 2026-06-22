@@ -23,7 +23,7 @@ vi.stubGlobal('__APP_VERSION__', '0.0.0-test');
 // (FsEntry, KoiFile, …) still resolve.
 const fakePlatform = { current: null as unknown as Platform };
 vi.mock('@/host', async () => {
-  const types = await vi.importActual<typeof import('@/host/types')>('./host/types');
+  const types = await vi.importActual<typeof import('@/host/types')>('@/host/types');
   return {
     ...types,
     getPlatform: () => fakePlatform.current,
@@ -44,7 +44,7 @@ const storeSeam = vi.hoisted(() => ({
   clearLegacyScratch: vi.fn<() => void>(),
 }));
 vi.mock('@/settings/persistence', async () => {
-  const actual = await vi.importActual<typeof import('@/settings/persistence')>('./settings/persistence');
+  const actual = await vi.importActual<typeof import('@/settings/persistence')>('@/settings/persistence');
   // Default: delegate to the real implementation (so boot behaves exactly as in production unless a
   // test overrides a single call).
   storeSeam.peekLegacyScratch.mockImplementation(() => actual.peekLegacyScratch());
