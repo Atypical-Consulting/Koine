@@ -726,8 +726,11 @@ export function init(): void {
       console.error('resetting the default workspace failed:', e);
       setStatus('could not reset the workspace', 'error');
     }
-    // openFolderPath closes the previously open docs, clears the buffers + diagnostics cache, then
-    // activates model.koi (= BLANK) and renders the tree — so no manual teardown is needed here.
+    // Tear down the old buffers + diagnostics unconditionally BEFORE re-opening: openFolderPath only
+    // clears once it's past its empty/unreadable-folder guards, so if the reset above deleted every
+    // file but failed to re-create model.koi, the open would early-return and leave stale state.
+    workspace.reset();
+    // openFolderPath then activates model.koi (= BLANK) and renders the tree.
     await workspace.openFolderPath(token, { recent: false });
     welcome.hide();
   }

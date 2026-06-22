@@ -244,6 +244,32 @@ describe('createWorkspaceController — opening a folder', () => {
   });
 });
 
+describe('createWorkspaceController — reset', () => {
+  test('closes every open doc, clears buffers + the diagnostics cache, and does NOT re-open', async () => {
+    const platform = new FakePlatform();
+    platform.files.set('a.koi', 'context A {}\n');
+    platform.files.set('b.koi', 'context B {}\n');
+    const trace: string[] = [];
+    const lsp = makeLsp(trace);
+    const editor = makeEditor(trace);
+    const deps = makeDeps(platform, lsp, editor);
+    const ws = createWorkspaceController(deps);
+    await ws.openFolderPath(ROOT, { recent: false });
+    expect(ws.buffers.size).toBe(2);
+    const openedUris = Array.from(ws.buffers.keys());
+    lsp.closeDoc.mockClear();
+
+    ws.reset();
+
+    // Buffers + diagnostics are torn down unconditionally — even though no new workspace was opened.
+    // This is the New-model invariant the old ide.ts enforced inline before openFolderPath: stale
+    // buffers/diagnostics cannot survive a subsequent open that early-returns on an empty folder.
+    expect(ws.buffers.size).toBe(0);
+    for (const uri of openedUris) expect(lsp.closeDoc).toHaveBeenCalledWith(uri);
+    expect(deps.clearDiagnostics).toHaveBeenCalled();
+  });
+});
+
 describe('createWorkspaceController — activateFile', () => {
   test('flushes the leaving file BEFORE swapping the doc, then fires onActiveChanged', async () => {
     const platform = new FakePlatform();

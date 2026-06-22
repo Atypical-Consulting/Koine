@@ -132,6 +132,14 @@ export interface WorkspaceController {
   openFileToken(token: string): Promise<void>;
   /** Switch the editor + LSP to a different open buffer (flush-then-swap; fires onActiveChanged). */
   activateFile(uri: string): void;
+  /**
+   * Tear down all open state — close every LSP doc, clear the buffer set and the diagnostics cache —
+   * WITHOUT opening anything. The caller is expected to open a fresh workspace next (e.g. New model
+   * resets the default workspace then re-opens it); this guarantees the old buffers/diagnostics are
+   * gone even if that re-open then fails (an empty/unreadable folder makes openFolderPath early-return
+   * before its own teardown runs).
+   */
+  reset(): void;
 
   // --- save / dirty ---
   /** Format-then-write the active buffer to disk and clear its dirty flag. Re-entrancy guarded. */
@@ -334,6 +342,17 @@ export function createWorkspaceController(deps: WorkspaceControllerDeps): Worksp
     }
     // Empty workspace: reset to a fresh blank model (ide.ts owns the BLANK reset).
     deps.onWorkspaceEmptied();
+  }
+
+  // Close every open LSP doc, drop the buffer set, and clear the diagnostics cache — no re-open.
+  // Used by the New-model reset so stale buffers/diagnostics can't survive a subsequent open that
+  // early-returns (e.g. the reset deleted everything but re-creating model.koi failed).
+  function reset(): void {
+    for (const uri of Array.from(buffers.keys())) {
+      lsp.closeDoc(uri);
+    }
+    buffers.clear();
+    deps.clearDiagnostics();
   }
 
   // Load + open every .koi file under `folder` as one workspace. Shared by the toolbar
@@ -736,6 +755,7 @@ export function createWorkspaceController(deps: WorkspaceControllerDeps): Worksp
     ensureBuffer,
     openFileToken,
     activateFile,
+    reset,
     saveActive,
     saveAllDirty,
     anyDirty,
