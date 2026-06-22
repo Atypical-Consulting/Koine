@@ -44,7 +44,14 @@
 .toolbar-right {
   animation: koi-rise 0.4s ease 0.1s both;
 }
-#editor-pane {
+/* Every switchable view fades in when shown. Views toggle via the `hidden` attribute
+   (display:none ↔ shown), and CSS animations restart on a display change — so this
+   replays the editor pane's fade for every center- and right-rail view switch:
+   top-level (Visual / Code / Documentation), the Code sub-tabs, the Documentation
+   sub-tabs, and the right-rail Properties / Rules / Notes. */
+.center-host,
+.tech-view,
+.rview {
   animation: koi-fade 0.5s ease var(--koi-dur-fast) both;
 }
 #right {
@@ -58,8 +65,10 @@
   *::before,
   *::after {
     animation-duration: 0.001ms !important;
+    animation-delay: 0.001ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.001ms !important;
+    transition-delay: 0.001ms !important;
   }
 }
 
@@ -68,7 +77,9 @@ html[data-reduce-motion='true'] {
   *::before,
   *::after {
     animation-duration: 0.001ms !important;
+    animation-delay: 0.001ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.001ms !important;
+    transition-delay: 0.001ms !important;
   }
 }
