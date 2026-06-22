@@ -30,6 +30,7 @@ classDiagram
         +ProductId product
         +Int quantity
         +Money unitPrice
+        +Money /subtotal
     }
 ```
 

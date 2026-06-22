@@ -230,6 +230,9 @@
   font-size: 12px;
   pointer-events: none; /* clicks fall through to the group so the whole class box stays navigable */
 }
+.koi-svg-class-row-computed {
+  font-style: italic;
+}
 
 /* per-DDD-concept accents — colour comes from the shared palette (--koi-ddd-*, defined in
    abstracts/_ddd.scss) so the diagram nodes and the Explorer icons always agree. A compartmented class

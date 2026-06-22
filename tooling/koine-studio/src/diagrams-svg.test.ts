@@ -561,6 +561,41 @@ describe('UML class boxes (issue #93 enrichment)', () => {
     expect(node.querySelector('.koi-svg-node-label')!.textContent).toBe('Draft');
   });
 
+  test('renders a computed member as an italic attribute row', async () => {
+    const files: DocsFile[] = [
+      file([
+        diagram({
+          nodes: [
+            mkNode({
+              id: 'line',
+              label: 'Line',
+              kind: 'value-object',
+              qualifiedName: 'Sales.Line',
+              stereotype: 'value object',
+              members: [
+                { text: 'quantity: Int', kind: 'field' },
+                { text: 'subtotal: Int', kind: 'computed' },
+              ],
+            }),
+          ],
+          edges: [],
+        }),
+      ]),
+    ];
+
+    const container = ROOT();
+    await createSvgRenderer().render(container, files, 'light', () => true);
+
+    const node = container.querySelector('.koi-svg-node')!;
+    // Computed members live in the attribute compartment (above the divider), so a value object
+    // with only fields + computed members has NO method divider — exactly one divider.
+    expect(node.querySelectorAll('.koi-svg-class-divider').length).toBe(1);
+
+    const computed = node.querySelector('.koi-svg-class-row-computed');
+    expect(computed).not.toBeNull();
+    expect(computed!.textContent).toBe('subtotal: Int');
+  });
+
   test('a spanned class node still navigates on click (the whole box stays clickable)', async () => {
     const files: DocsFile[] = [
       file([

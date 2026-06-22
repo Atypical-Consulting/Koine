@@ -25,8 +25,8 @@ export interface InspectorElement {
   stereotype: string | null;
   /** The `///` doc description, or null when undocumented. */
   description: string | null;
-  /** Attribute rows, pre-formatted as `name: Type`. */
-  properties: string[];
+  /** Attribute rows (`name: Type`); `computed` marks a derived, get-only property. */
+  properties: { text: string; computed: boolean }[];
   /** Method rows, pre-formatted as `name(params): Ret`. */
   behaviors: string[];
   /** Enum value rows (the member names). */
@@ -66,7 +66,9 @@ export function buildInspectorElement(entry: GlossaryEntry, node: DiagramNode | 
     kind: entry.kind,
     stereotype: node?.stereotype ?? null,
     description: entry.doc,
-    properties: members.filter((m) => m.kind === 'field').map((m) => m.text),
+    properties: members
+      .filter((m) => m.kind === 'field' || m.kind === 'computed')
+      .map((m) => ({ text: m.text, computed: m.kind === 'computed' })),
     behaviors: members.filter((m) => m.kind === 'method').map((m) => m.text),
     values: members.filter((m) => m.kind === 'value').map((m) => m.text),
     nameRange: entry.nameRange,
@@ -228,10 +230,15 @@ function appendList(root: HTMLElement, title: string, items: string[]): void {
 /**
  * Append the Properties compartment as a two-column table (property name | type) so the type column
  * aligns to a single left edge regardless of name length — easier to scan than colon-separated rows.
- * Each item arrives pre-formatted as `name: Type`; the first colon splits the two columns (a
- * colon-less item lands wholly in the name column). A no-op when `items` is empty.
+ * Each item's `text` is pre-formatted as `name: Type`; the first colon splits the two columns (a
+ * colon-less item lands wholly in the name column). Computed (derived) properties render italic.
+ * A no-op when `items` is empty.
  */
-function appendPropertyTable(root: HTMLElement, title: string, items: string[]): void {
+function appendPropertyTable(
+  root: HTMLElement,
+  title: string,
+  items: { text: string; computed: boolean }[],
+): void {
   if (!items.length) return;
   const section = document.createElement('section');
   section.className = 'koi-inspector-section';
@@ -245,12 +252,12 @@ function appendPropertyTable(root: HTMLElement, title: string, items: string[]):
   table.className = 'koi-inspector-table';
   const tbody = document.createElement('tbody');
   for (const item of items) {
-    const idx = item.indexOf(':');
-    const name = idx === -1 ? item.trim() : item.slice(0, idx).trim();
-    const type = idx === -1 ? '' : item.slice(idx + 1).trim();
+    const idx = item.text.indexOf(':');
+    const name = idx === -1 ? item.text.trim() : item.text.slice(0, idx).trim();
+    const type = idx === -1 ? '' : item.text.slice(idx + 1).trim();
 
     const row = document.createElement('tr');
-    row.className = 'koi-inspector-row';
+    row.className = item.computed ? 'koi-inspector-row koi-inspector-row-computed' : 'koi-inspector-row';
 
     // The property name labels its row, so it is a row-scoped header (accessible + DevTools-clean).
     const nameCell = document.createElement('th');
