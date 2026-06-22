@@ -67,10 +67,10 @@ function koiFilesIn(dir) {
  * requires entryFile to exist, so a mismatch is a build-time error worth surfacing loudly).
  *
  * @param {string} templatesDir absolute path to a templates/ directory
- * @returns {import('../src/templates').Template[]}
+ * @returns {import('../src/welcome/templates').Template[]}
  */
 export function collectTemplates(templatesDir) {
-  /** @type {import('../src/templates').Template[]} */
+  /** @type {import('../src/welcome/templates').Template[]} */
   const templates = [];
 
   const visit = (dir) => {
