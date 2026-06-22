@@ -20,7 +20,7 @@ export function PropertiesPanel(props: {
   const selection = useAppStore(props.store, (s) => s.selection);
   const hit = selection && props.index ? lookupElement(props.index, selection.qualifiedName) : null;
   const element: InspectorElement | null = hit
-    ? buildInspectorElement(hit.element.entry, hit.element.node)
+    ? buildInspectorElement(hit.element.entry, hit.element.node, hit.element.modelMembers)
     : null;
   // Reuse the imperative renderInspector by mounting its output through a callback ref. The ref runs on
   // every render with the freshly-projected element, so the inspector tracks the selection.
