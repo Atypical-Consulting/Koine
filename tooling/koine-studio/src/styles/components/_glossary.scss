@@ -86,7 +86,10 @@
   font-size: var(--koi-text-2xs);
   text-transform: uppercase;
   letter-spacing: 0.05em;
-  color: var(--koi-muted);
+  // --koi-ink-soft (not --koi-muted): at this tiny 2xs size, --koi-muted on the pill background
+  // only reaches ~3.8:1 in dark theme — below WCAG AA's 4.5:1 for body text. --koi-ink-soft is the
+  // de-emphasized-but-readable ink token and clears the bar in both themes.
+  color: var(--koi-ink-soft);
   padding: 0.05rem 0.4rem;
   border-radius: var(--koi-radius-pill);
   background: color-mix(in srgb, var(--koi-fg) 9%, transparent);

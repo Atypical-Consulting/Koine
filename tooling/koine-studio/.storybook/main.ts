@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 // project's `@/` → src alias here so a story's `@/model/...` import resolves the same as in the app build.
 const config: StorybookConfig = {
   stories: ['../src/**/*.stories.@(ts|tsx)'],
-  addons: ['@storybook/addon-a11y'],
+  addons: ['@storybook/addon-a11y', '@storybook/addon-vitest'],
   framework: { name: '@storybook/preact-vite', options: {} },
   core: { disableTelemetry: true },
   async viteFinal(cfg) {
