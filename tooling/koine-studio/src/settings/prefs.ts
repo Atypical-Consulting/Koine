@@ -483,8 +483,9 @@ export function createPreferences(cb: PrefsCallbacks): PrefsHandle {
   function syncProviderFields(): void {
     const isOpenai = aiProviderSelect.value === 'openai';
     baseUrlRow.hidden = !isOpenai;
-    // The Anthropic path doesn't use the compiler tools, so the toggle only applies to OpenAI-compatible.
-    agenticToolsRow.hidden = !isOpenai;
+    // Compiler tool-use is supported on BOTH providers now (the Anthropic adapter advertises the
+    // koine tools too — see runAnthropic in ai.ts), so the opt-in applies regardless of provider.
+    agenticToolsRow.hidden = false;
     aiModelInput.placeholder = isOpenai ? 'gpt-4o  ·  qwen2.5-coder  ·  …' : 'claude-opus-4-8';
   }
 

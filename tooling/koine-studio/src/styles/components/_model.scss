@@ -120,6 +120,10 @@
   align-items: center;
   gap: var(--koi-space-1-5);
   width: 100%;
+  /* WCAG 2.5.8 target size: keep each construct row at least 24px tall so it's a comfortable click
+     and pointer target (was ~23.5px). box-sizing keeps the padding inside that minimum. */
+  box-sizing: border-box;
+  min-height: 26px;
   text-align: left;
   background: transparent;
   border: none;

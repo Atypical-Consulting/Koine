@@ -99,12 +99,15 @@ function makeAction(opts: {
   label: string;
   desc: string;
   primary?: boolean;
+  disabled?: boolean;
   onClick: () => void;
 }): HTMLButtonElement {
   const btn = document.createElement('button');
   btn.type = 'button';
   btn.className = opts.primary ? 'koi-welcome-action primary' : 'koi-welcome-action';
-  btn.setAttribute('aria-label', opts.label);
+  // No explicit aria-label: the accessible name is computed from the visible label + description
+  // (the icon is aria-hidden), so it always contains the on-screen text — WCAG 2.5.3 (Label in Name).
+  if (opts.disabled) btn.disabled = true;
 
   const icon = document.createElement('span');
   icon.className = 'koi-welcome-action-icon';
@@ -130,7 +133,11 @@ function makeAction(opts: {
  * Build the welcome console (once) and return show/hide controls. On show() the recent list is rebuilt
  * from getRecentFolders(); any action invokes its callback then hides.
  */
-export function createWelcome(cb: WelcomeCallbacks, templates: readonly Template[] = TEMPLATES): WelcomeHandle {
+export function createWelcome(
+  cb: WelcomeCallbacks,
+  templates: readonly Template[] = TEMPLATES,
+  canOpenFolders = true,
+): WelcomeHandle {
   let shown = false;
   // Live recent-folders filter query — closure-scoped so it survives renderRecent() re-renders but
   // resets per welcome instance (two welcome handles never share a query).
@@ -272,7 +279,10 @@ export function createWelcome(cb: WelcomeCallbacks, templates: readonly Template
     makeAction({
       icon: ICON_OPEN,
       label: 'Open folder…',
-      desc: 'Work on an existing workspace',
+      // Opening a folder needs the File System Access API (Chromium-only). Where it's missing, show the
+      // action as disabled with an honest reason rather than a button that errors on click.
+      desc: canOpenFolders ? 'Work on an existing workspace' : 'Needs a Chromium-based browser (Chrome / Edge)',
+      disabled: !canOpenFolders,
       onClick: () => {
         hide();
         cb.onOpenFolder();

@@ -742,7 +742,15 @@ export function init(): void {
 
   // --- open folder (directory-mode workspace) -------------------------------
 
-  el<HTMLButtonElement>('btn-open-folder').addEventListener('click', () => void openFolder());
+  const openFolderBtn = el<HTMLButtonElement>('btn-open-folder');
+  openFolderBtn.addEventListener('click', () => void openFolder());
+  // Opening a folder relies on the File System Access API (Chromium-only). On browsers without it, the
+  // button would look active but only ever raise an error toast — so disable it with an explanatory
+  // tooltip rather than leaving a dead control. (Examples + share links + in-memory editing still work.)
+  if (!platform.canOpenFolders) {
+    openFolderBtn.disabled = true;
+    openFolderBtn.title = 'Opening a folder needs a Chromium-based browser (try Chrome or Edge)';
+  }
 
   async function openFolder(): Promise<void> {
     if (!platform.canOpenFolders) {
@@ -1058,12 +1066,16 @@ export function init(): void {
     }
   }
 
-  const welcome = createWelcome({
-    onNewModel: () => void requestNewModel(),
-    onOpenFolder: () => void leaveHomeFor('Open a folder?', () => openFolder()),
-    onOpenRecent: (path) => void leaveHomeFor('Open this folder?', () => openRecentFolder(path)),
-    onOpenExample: (template) => void leaveHomeFor('Open this template?', () => openExample(template)),
-  });
+  const welcome = createWelcome(
+    {
+      onNewModel: () => void requestNewModel(),
+      onOpenFolder: () => void leaveHomeFor('Open a folder?', () => openFolder()),
+      onOpenRecent: (path) => void leaveHomeFor('Open this folder?', () => openRecentFolder(path)),
+      onOpenExample: (template) => void leaveHomeFor('Open this template?', () => openExample(template)),
+    },
+    undefined, // templates default to the bundled set
+    platform.canOpenFolders,
+  );
 
   const palette = createCommandPalette(() => getCommands());
   const prefs = createPreferences({
@@ -1286,7 +1298,14 @@ export function init(): void {
   // Toolbar buttons unique to this phase.
   const hintEl = document.querySelector('.palette-hint');
   if (hintEl) {
-    hintEl.textContent = formatChord('mod+K'); // ⌘+K / Ctrl+K per platform
+    // Render the chord into an aria-hidden span: the visible "⌘+K" is decorative chrome, while the
+    // button's accessible name stays "Open command palette" (aria-label). Setting textContent directly
+    // would make the chord the visible label and break WCAG 2.5.3 (Label in Name).
+    hintEl.replaceChildren();
+    const chord = document.createElement('span');
+    chord.setAttribute('aria-hidden', 'true');
+    chord.textContent = formatChord('mod+K'); // ⌘+K / Ctrl+K per platform
+    hintEl.appendChild(chord);
     hintEl.addEventListener('click', () => palette.toggle());
   }
   el<HTMLButtonElement>('btn-home').addEventListener('click', () => goHome());

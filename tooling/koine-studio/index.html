@@ -4,6 +4,10 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/src/assets/koine-mark.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="description"
+      content="Koine Studio — write a bounded context's ubiquitous language once and generate idiomatic, self-contained code (C#, TypeScript, Python, PHP) with live diagnostics, a domain diagram and an AI domain copilot."
+    />
     <title>Koine Studio</title>
     <script type="module" src="/src/main.ts" defer></script>
   </head>
@@ -15,7 +19,10 @@
           <!-- Monogram injected from the shared koineMark() template at startup (see ide.ts) so the
                app's marks have a single source; only the favicon SVG is a separate literal-colour copy. -->
           <span class="brand-logo" aria-hidden="true"></span>
-          <span class="brand-text">
+          <!-- The wordmark is decorative chrome; the button's accessible name comes from aria-label
+               ("Back to the start screen"), so hide the visible brand text from the a11y tree to
+               satisfy WCAG 2.5.3 (Label in Name). -->
+          <span class="brand-text" aria-hidden="true">
             <span class="brand-name">Koine</span>
             <span class="brand-eyebrow">Studio</span>
           </span>
@@ -61,7 +68,7 @@
         <div id="breadcrumb-host" class="topbar-breadcrumb" hidden></div>
 
         <div class="toolbar-right">
-          <button type="button" id="palette-hint" class="palette-hint" title="Command palette (⌘K)" aria-label="Open command palette">⌘K</button>
+          <button type="button" id="palette-hint" class="palette-hint" title="Command palette (⌘K)" aria-label="Open command palette"><span aria-hidden="true">⌘K</span></button>
           <span class="tb-divider" aria-hidden="true"></span>
           <button type="button" id="btn-theme" class="icon-btn" title="Toggle theme" aria-label="Toggle theme">
             <svg class="tb-ico" viewBox="0 0 16 16" aria-hidden="true">
@@ -216,8 +223,10 @@
         </section>
         <div class="koi-resizer" id="split-resizer" aria-hidden="true"></div>
 
-        <!-- Right rail: the element inspector, dedicated to Properties. Rules/Notes are placeholder
-             tabs matching the mockup chrome — read-only until a follow-up builds them. -->
+        <!-- Right rail: the element inspector. Properties is the live editor; Rules and Notes are
+             read-only informational views until the invariants-on-the-wire follow-up lets them edit
+             per-element rules/notes (tracked separately). Their panels carry an honest empty state
+             pointing at where each capability lives today, rather than a bare "Coming soon". -->
         <aside id="right" class="pane" aria-label="Properties">
           <div id="right-tabs" role="tablist" aria-label="Properties">
             <button type="button" class="rtab" id="rtab-props" role="tab" data-rview="props" aria-selected="true">Properties</button>
@@ -226,8 +235,26 @@
           </div>
           <div id="right-body">
             <div id="inspector-host" class="rview" role="tabpanel"></div>
-            <div id="rview-rules" class="rview doc-view" role="tabpanel" hidden><p class="muted">Coming soon.</p></div>
-            <div id="rview-notes" class="rview doc-view" role="tabpanel" hidden><p class="muted">Coming soon.</p></div>
+            <div id="rview-rules" class="rview doc-view" role="tabpanel" hidden>
+              <div class="koi-rview-empty">
+                <h3 class="koi-rview-empty-title">Business rules</h3>
+                <p class="muted">
+                  Invariants and state-transition guards are enforced in the generated code and flagged
+                  live in the <strong>Problems</strong> panel. Editing rules per element from here is
+                  planned for a future update.
+                </p>
+              </div>
+            </div>
+            <div id="rview-notes" class="rview doc-view" role="tabpanel" hidden>
+              <div class="koi-rview-empty">
+                <h3 class="koi-rview-empty-title">Notes</h3>
+                <p class="muted">
+                  Document this element with its <strong>Description</strong> in the Properties tab, or
+                  keep model-wide notes in <strong>Documentation → Notes</strong>. Per-element notes are
+                  planned for a future update.
+                </p>
+              </div>
+            </div>
           </div>
         </aside>
       </main>

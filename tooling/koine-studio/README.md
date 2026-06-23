@@ -65,10 +65,11 @@ hosts (browser/WASM and the Tauri desktop build).
 - **Domain-grounded answers.** The system prompt carries a compact **domain index** built from the
   compiled model (bounded contexts, aggregates → roots, context-map relations, and glossary
   documentation coverage), so reviews and questions see the *real* structure of the workspace, not
-  just the current file. Built best-effort from the LSP; absent for an empty/scratch model.
+  just the current file. Built best-effort from the LSP; absent for an empty model.
 - **Persisted conversations, per workspace.** Each opened folder keeps its own transcript
-  (`koine.studio.chat.<folder>`; scratch mode uses `scratch`), so a reload restores the conversation
-  and switching folders swaps to that folder's history. A **Clear conversation** button forgets it.
+  (`koine.studio.chat.<folder>`; the no-folder/default workspace falls back to the `scratch` key), so a
+  reload restores the conversation and switching folders swaps to that folder's history. A **Clear
+  conversation** button forgets it.
 - **Explain this construct.** A quick action (and the *Explain this construct* command-palette entry)
   asks for a plain-language explanation of the current selection — or the whole model when nothing is
   selected — aimed at a domain expert who doesn't code. It is explanatory, not generative: the reply
