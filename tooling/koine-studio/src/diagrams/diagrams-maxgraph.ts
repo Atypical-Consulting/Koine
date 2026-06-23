@@ -9,7 +9,7 @@
 // containers, layout, edges, interaction, and persistence land in later tasks.
 import type { DiagramRenderer } from '@/diagrams/diagrams';
 import type { Graph as MxGraph, Cell as MxCell } from '@maxgraph/core';
-import type { DiagramGraph, DiagramNode, DocsFile } from '@/lsp/lsp';
+import type { DiagramGraph, DiagramMember, DiagramNode, DocsFile } from '@/lsp/lsp';
 import { mergeGraphsForView } from '@/model/modelTables';
 import { buildEmptyState } from '@/diagrams/emptyState';
 
@@ -32,6 +32,72 @@ function getMaxGraph(): Promise<Mx> {
 /** A node draws as a UML class box (compartments) iff it has a stereotype or any members; else a simple box. */
 export function isClassNode(node: DiagramNode): boolean {
   return node.stereotype != null || (node.members?.length ?? 0) > 0;
+}
+
+// --- node label HTML + sizing -------------------------------------------------
+// Nodes render as HTML labels (the maxGraph cell shape is transparent), so the box — border, fill,
+// compartments — is drawn by CSS keyed on `data-kind` (see _diagrams-maxgraph.scss). This keeps theming
+// pure CSS (no reliance on var() resolving inside SVG fill attributes) and matches the DDD palette the
+// SVG renderer used. Sizing mirrors the SVG renderer's geometry so the layout spacing reads the same and
+// stays deterministic for headless tests (happy-dom can't measure HTML).
+const CHAR_W = 8.2; // px per char at the 13px label font
+const MEMBER_CHAR_W = 7; // px per char at the 12px member-row font
+const NODE_PAD_X = 28;
+const ROW_H = 18;
+const HEADER_H = 44;
+const COMPARTMENT_PAD = 6;
+const CLASS_PAD_X = 16;
+const MIN_W = 72;
+const MIN_CLASS_W = 120;
+const MAX_W = 280;
+const SIMPLE_H = 40;
+
+/** Split a class node's members into the attribute compartment (field/value/computed) and methods. */
+function partitionMembers(node: DiagramNode): { fields: DiagramMember[]; methods: DiagramMember[] } {
+  const fields = node.members.filter((m) => m.kind === 'field' || m.kind === 'value' || m.kind === 'computed');
+  const methods = node.members.filter((m) => m.kind === 'method');
+  return { fields, methods };
+}
+
+/** The pre-layout box size for a node, clamped to a sane width range (mirrors the SVG renderer). */
+export function nodeSize(node: DiagramNode): [number, number] {
+  if (!isClassNode(node)) {
+    const w = Math.max(MIN_W, Math.min(MAX_W, Math.round(node.label.length * CHAR_W) + NODE_PAD_X));
+    return [w, SIMPLE_H];
+  }
+  const { fields, methods } = partitionMembers(node);
+  const stereoW = node.stereotype ? `«${node.stereotype}»`.length * MEMBER_CHAR_W : 0;
+  const titleW = node.label.length * CHAR_W;
+  const rowW = node.members.reduce((m, r) => Math.max(m, r.text.length * MEMBER_CHAR_W), 0);
+  const w = Math.max(MIN_CLASS_W, Math.min(MAX_W, Math.ceil(Math.max(titleW, stereoW, rowW) + CLASS_PAD_X * 2)));
+  let h = HEADER_H + (fields.length > 0 ? fields.length * ROW_H + COMPARTMENT_PAD * 2 : COMPARTMENT_PAD);
+  if (methods.length > 0) h += methods.length * ROW_H + COMPARTMENT_PAD * 2;
+  return [w, Math.ceil(h)];
+}
+
+function memberRow(text: string, computed = false): string {
+  return `<div class="koi-node__row${computed ? ' koi-node__row--computed' : ''}">${escapeHtml(text)}</div>`;
+}
+
+/** The HTML label for a node: a compartmented UML class box, or a single-line box, tagged with data-kind. */
+export function nodeLabelHtml(node: DiagramNode): string {
+  const kind = escapeHtml(node.kind);
+  if (!isClassNode(node)) {
+    return `<div class="koi-node koi-node--simple" data-kind="${kind}">${escapeHtml(node.label)}</div>`;
+  }
+  const { fields, methods } = partitionMembers(node);
+  const head =
+    `<div class="koi-node__head">` +
+    (node.stereotype ? `<div class="koi-node__stereo">«${escapeHtml(node.stereotype)}»</div>` : '') +
+    `<div class="koi-node__title">${escapeHtml(node.label)}</div>` +
+    `</div>`;
+  const fieldComp = fields.length
+    ? `<div class="koi-node__compartment">${fields.map((m) => memberRow(m.text, m.kind === 'computed')).join('')}</div>`
+    : '';
+  const methodComp = methods.length
+    ? `<div class="koi-node__compartment">${methods.map((m) => memberRow(m.text)).join('')}</div>`
+    : '';
+  return `<div class="koi-node koi-node--class" data-kind="${kind}">${head}${fieldComp}${methodComp}</div>`;
 }
 
 /**
@@ -66,10 +132,10 @@ export function buildCanvas(mx: Mx, container: HTMLElement, merged: DiagramGraph
   graph.getView().allowEval = false;
   graph.setHtmlLabels(true); // labels render as HTML so class nodes can use compartment markup (later task).
   graph.setCellsEditable(false); // read-only skeleton; in-canvas editing is wired in a later task.
-  // Render each cell's stored DiagramNode by its display label (real compartment HTML lands with styling).
+  // Render each cell's stored DiagramNode as its UML/simple HTML label (a `.koi-node` div, themed by CSS).
   graph.convertValueToString = (cell): string => {
     const v = cell.value as DiagramNode | string | null;
-    if (v && typeof v === 'object' && 'label' in v) return String(v.label);
+    if (v && typeof v === 'object' && 'qualifiedName' in v) return nodeLabelHtml(v as DiagramNode);
     return String(v ?? '');
   };
 
@@ -77,12 +143,16 @@ export function buildCanvas(mx: Mx, container: HTMLElement, merged: DiagramGraph
   const parent = graph.getDefaultParent();
   graph.batchUpdate(() => {
     for (const node of merged.nodes) {
+      const [w, h] = nodeSize(node);
       const cell = graph.insertVertex({
         parent,
         id: node.id,
         value: node,
         position: [0, 0],
-        size: isClassNode(node) ? [180, 90] : [140, 40],
+        size: [w, h],
+        // Transparent cell — the HTML label (.koi-node) draws the whole box; overflow:'fill' stretches the
+        // label to the cell bounds so CSS (keyed on data-kind) owns the appearance and theming.
+        style: { fillColor: 'none', strokeColor: 'none', overflow: 'fill', verticalAlign: 'top', align: 'left' },
       });
       cells.set(node.id, cell);
     }

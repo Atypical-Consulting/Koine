@@ -1,0 +1,123 @@
+/* --- maxGraph domain-diagram canvas ----------------------------------------------------------------
+   The maxGraph renderer (diagrams-maxgraph.ts) draws each node as an HTML label: the maxGraph cell shape
+   is transparent and the `.koi-node` markup draws the whole box. So fills/borders/compartments are pure
+   CSS keyed on `data-kind`, sharing the same `--koi-ddd-*` palette as the Explorer icons and the old SVG
+   renderer — a light/dark flip restyles live with no re-render. (No reliance on var() resolving inside
+   SVG fill attributes, which a stricter WebView might not do.) */
+.koi-canvas {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  font-family: var(--koi-font-body);
+}
+
+/* The maxGraph SVG fills the surface; the HTML labels are positioned over it by the cell renderer. */
+.koi-canvas svg {
+  width: 100%;
+  height: 100%;
+}
+
+/* nodes — the HTML label fills its (transparent) cell via overflow:fill, so the box is 100% of the cell. */
+.koi-node {
+  box-sizing: border-box;
+  width: 100%;
+  height: 100%;
+  border: 1.5px solid var(--koi-line);
+  border-radius: 7px;
+  background: var(--koi-surface);
+  color: var(--koi-fg);
+  overflow: hidden;
+  font-size: var(--koi-text-sm);
+}
+
+.koi-node--simple {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 var(--koi-space-2);
+  font-weight: 600;
+  text-align: center;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.koi-node--class {
+  display: flex;
+  flex-direction: column;
+  background: var(--koi-paper-2); /* neutral body so member rows stay legible */
+}
+
+.koi-node__head {
+  padding: 4px var(--koi-space-2);
+}
+.koi-node__stereo {
+  color: var(--koi-muted);
+  font-size: 10px;
+  font-style: italic;
+  line-height: 1.2;
+}
+.koi-node__title {
+  font-weight: 700;
+  font-size: 13px;
+  line-height: 1.3;
+}
+
+.koi-node__compartment {
+  border-top: 1px solid var(--koi-line);
+  padding: 3px var(--koi-space-2);
+}
+.koi-node__row {
+  font-family: var(--koi-font-mono);
+  font-size: 12px;
+  line-height: 18px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.koi-node__row--computed {
+  font-style: italic;
+}
+
+/* per-DDD-concept accents — colour from the shared --koi-ddd-* palette (abstracts/_ddd.scss). A class box
+   keeps a neutral body and is distinguished by a coloured border + title; a simple box is tinted in the
+   same colour. Mirrors the SVG renderer's $ddd-kinds map. */
+$ddd-kinds: (
+  'aggregate-root': var(--koi-ddd-aggregate),
+  'aggregate': var(--koi-ddd-aggregate),
+  'entity': var(--koi-ddd-entity),
+  'value': var(--koi-ddd-value),
+  'value-object': var(--koi-ddd-value),
+  'enum': var(--koi-ddd-enum),
+  'event': var(--koi-ddd-event),
+  'integration-event': var(--koi-ddd-integration-event),
+  'service': var(--koi-ddd-service),
+  'repository': var(--koi-ddd-repository),
+);
+
+@each $kind, $color in $ddd-kinds {
+  .koi-node--class[data-kind='#{$kind}'] {
+    border-color: #{$color};
+    border-width: 2px;
+  }
+  .koi-node--class[data-kind='#{$kind}'] .koi-node__title {
+    color: #{$color};
+  }
+  .koi-node--simple[data-kind='#{$kind}'] {
+    background: color-mix(in srgb, #{$color} 20%, var(--koi-surface));
+    border-color: #{$color};
+  }
+}
+
+/* state-machine pseudo-states stay neutral; context boxes keep the brand accent. */
+.koi-node--simple[data-kind='state'],
+.koi-node--simple[data-kind='initial'],
+.koi-node--simple[data-kind='final'] {
+  background: var(--koi-paper-2);
+  border-color: var(--koi-muted);
+}
+.koi-node--simple[data-kind='context'] {
+  background: var(--koi-accent);
+  border-color: var(--koi-accent);
+  color: var(--koi-on-accent);
+}

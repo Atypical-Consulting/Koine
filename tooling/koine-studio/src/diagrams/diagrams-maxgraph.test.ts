@@ -1,6 +1,6 @@
 import { describe, expect, test, beforeAll, afterEach } from 'vitest';
 import * as mx from '@maxgraph/core';
-import { selectDomainGraphs, buildCanvas, isClassNode, createMaxGraphRenderer } from '@/diagrams/diagrams-maxgraph';
+import { selectDomainGraphs, buildCanvas, isClassNode, nodeLabelHtml, nodeSize, createMaxGraphRenderer } from '@/diagrams/diagrams-maxgraph';
 import type { Diagram, DiagramGraph, DiagramNode, DocsFile } from '@/lsp/lsp';
 
 // happy-dom returns 0 from getBoundingClientRect; maxGraph reads the container rect on construction.
@@ -60,6 +60,57 @@ describe('isClassNode', () => {
     expect(isClassNode(node({ id: 'a', qualifiedName: 'C.A', stereotype: 'aggregate root' }))).toBe(true);
     expect(isClassNode(node({ id: 'b', qualifiedName: 'C.B', members: [{ text: 'id: Id', kind: 'field' }] }))).toBe(true);
     expect(isClassNode(node({ id: 's', qualifiedName: 'Draft', kind: 'state' }))).toBe(false);
+  });
+});
+
+describe('nodeLabelHtml', () => {
+  test('a class node renders a compartmented box: stereotype, title, field + method rows', () => {
+    const html = nodeLabelHtml(
+      node({
+        id: 'Ordering.Order',
+        qualifiedName: 'Ordering.Order',
+        label: 'Order',
+        kind: 'aggregate-root',
+        stereotype: 'aggregate root',
+        members: [
+          { text: 'id: OrderId', kind: 'field' },
+          { text: 'total(): Money', kind: 'method' },
+        ],
+      }),
+    );
+    expect(html).toContain('koi-node--class');
+    expect(html).toContain("data-kind=\"aggregate-root\"");
+    expect(html).toContain('«aggregate root»');
+    expect(html).toContain('>Order<');
+    expect(html).toContain('id: OrderId');
+    expect(html).toContain('total(): Money');
+    // two compartments (fields + methods)
+    expect(html.match(/koi-node__compartment/g)).toHaveLength(2);
+  });
+
+  test('a simple node renders a single labelled box, not a class box', () => {
+    const html = nodeLabelHtml(node({ id: 'g0:Draft', qualifiedName: 'Draft', label: 'Draft', kind: 'state' }));
+    expect(html).toContain('koi-node--simple');
+    expect(html).toContain("data-kind=\"state\"");
+    expect(html).not.toContain('koi-node--class');
+    expect(html).not.toContain('koi-node__compartment');
+  });
+
+  test('escapes domain text so a stray < or & cannot break the markup', () => {
+    const html = nodeLabelHtml(node({ id: 'C.X', qualifiedName: 'C.X', label: 'A<b>&c', members: [{ text: 'x: List<Y>', kind: 'field' }] }));
+    expect(html).toContain('A&lt;b&gt;&amp;c');
+    expect(html).toContain('x: List&lt;Y&gt;');
+    expect(html).not.toContain('<b>');
+  });
+
+  test('nodeSize clamps width to [72, 280] and a class box is taller than a simple box', () => {
+    const [simpleW, simpleH] = nodeSize(node({ id: 's', qualifiedName: 'S', label: 'S' }));
+    expect(simpleW).toBeGreaterThanOrEqual(72);
+    expect(simpleW).toBeLessThanOrEqual(280);
+    const [, classH] = nodeSize(
+      node({ id: 'c', qualifiedName: 'C.C', stereotype: 'entity', members: [{ text: 'a: Int', kind: 'field' }] }),
+    );
+    expect(classH).toBeGreaterThan(simpleH);
   });
 });
 
