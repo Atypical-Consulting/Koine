@@ -137,23 +137,39 @@ export function contextOf(qualifiedName: string): string {
  */
 function runTwoLevelLayout(mx: Mx, graph: MxGraph): void {
   const { HierarchicalLayout } = mx;
+  const model = graph.getDataModel();
   const root = graph.getDefaultParent();
   try {
     graph.batchUpdate(() => {
-      const inner = new HierarchicalLayout(graph, 'east');
-      inner.resizeParent = true;
-      inner.parentBorder = 24;
-      inner.intraCellSpacing = 30;
-      inner.interRankCellSpacing = 70;
       const count = root.getChildCount();
+      // Inner: arrange each context container's members left→right and resize the box to wrap them.
       for (let i = 0; i < count; i++) {
         const child = root.getChildAt(i);
-        if (child?.isVertex() && child.getChildCount() > 0) inner.execute(child);
+        if (child?.isVertex() && child.getChildCount() > 0) {
+          const inner = new HierarchicalLayout(graph, 'east');
+          inner.resizeParent = true;
+          inner.parentBorder = 30; // clears the swimlane header (startSize 28) so members don't overlap it
+          inner.intraCellSpacing = 30;
+          inner.interRankCellSpacing = 60;
+          inner.execute(child);
+        }
       }
-      const outer = new HierarchicalLayout(graph, 'east');
-      outer.intraCellSpacing = 80;
-      outer.interRankCellSpacing = 160;
-      outer.execute(root);
+      // Outer: lay the containers (and any context-less root nodes) out left→right in a row. Done MANUALLY
+      // rather than with a HierarchicalLayout: there are no inter-container edges to rank on, and an
+      // edgeless layout scatters the boxes and desyncs them from their (relative-positioned) children.
+      let x = 0;
+      const GAP = 64;
+      for (let i = 0; i < count; i++) {
+        const child = root.getChildAt(i);
+        if (!child?.isVertex()) continue;
+        const g = child.getGeometry();
+        if (!g) continue;
+        const next = g.clone();
+        next.x = x;
+        next.y = 0;
+        model.setGeometry(child, next);
+        x += next.width + GAP;
+      }
     });
   } catch {
     // A layout failure (e.g. no measurable DOM under happy-dom) must not break the render; the nodes are
@@ -307,7 +323,7 @@ const ZOOM_PERSIST_KEY = 'koi-domain-diagram';
  * Ctrl/⌘+wheel zoom, and the Outline minimap. Returns a teardown that detaches them. Kept out of
  * buildCanvas so the model stays unit-testable; the visual chrome is verified in the running studio.
  */
-function mountChrome(mx: Mx, handle: CanvasHandle, host: HTMLElement): () => void {
+function mountChrome(mx: Mx, handle: CanvasHandle, host: HTMLElement): { dispose: () => void; fit: () => void } {
   const { Outline } = mx;
   const graph = handle.graph;
 
@@ -327,8 +343,19 @@ function mountChrome(mx: Mx, handle: CanvasHandle, host: HTMLElement): () => voi
     | { fit?: (o?: unknown) => void; fitCenter?: (o?: unknown) => void }
     | undefined;
   const fit = (): void => {
-    if (fitPlugin?.fitCenter) fitPlugin.fitCenter({ margin: 24 });
-    else if (fitPlugin?.fit) fitPlugin.fit({ border: 24 });
+    // The layout can place content at negative/large coordinates; frame it into the viewport. Needs a
+    // measured container, so it's a no-op until the surface is attached to the live DOM (see render()).
+    try {
+      if (fitPlugin?.fitCenter) fitPlugin.fitCenter({ margin: 24 });
+      else if (fitPlugin?.fit) fitPlugin.fit({ border: 24 });
+      else {
+        const g = graph as unknown as { fit?: (b?: number) => void; center?: (h?: boolean, v?: boolean) => void };
+        g.fit?.(24);
+        g.center?.(true, true);
+      }
+    } catch {
+      /* container not measurable yet — ignore */
+    }
   };
 
   // Restore the saved zoom level (best-effort).
@@ -402,9 +429,12 @@ function mountChrome(mx: Mx, handle: CanvasHandle, host: HTMLElement): () => voi
     outlineDiv.remove();
   }
 
-  return () => {
-    host.removeEventListener('wheel', onWheel);
-    outline?.destroy();
+  return {
+    dispose: () => {
+      host.removeEventListener('wheel', onWheel);
+      outline?.destroy();
+    },
+    fit,
   };
 }
 
@@ -453,9 +483,9 @@ export function createMaxGraphRenderer(): DiagramRenderer {
       root.appendChild(surface);
 
       const handle = buildCanvas(mx, surface, merged);
-      const chromeDispose = mountChrome(mx, handle, surface);
+      const chrome = mountChrome(mx, handle, surface);
       const dispose = (): void => {
-        chromeDispose();
+        chrome.dispose();
         handle.dispose();
       };
 
@@ -464,6 +494,7 @@ export function createMaxGraphRenderer(): DiagramRenderer {
         activeDispose = dispose;
         container.replaceChildren(root);
         handle.graph.getView().revalidate(); // re-render now that the surface is in the live DOM
+        chrome.fit(); // frame the laid-out content (it can sit at negative coords) into the viewport
       } else {
         // Superseded: never reached the page — dispose so its listeners/observers don't leak.
         dispose();
