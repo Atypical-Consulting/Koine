@@ -100,15 +100,66 @@ Workloads: **small = `billing` starter**, **medium = `pizzeria` template** (both
 test suite). Latency is **N=5** runs, reported as **median / max** (ms). Cold-load = navigation start →
 editor interactive (first `loadWasmApi()` resolved). Survival ∈ {survived | reloaded | crashed}.
 
-| ID | Transfer (raw / brotli) | Cold-load (s) | Peak JS heap (MB) | Small compile (med/max ms) | Medium compile (med/max ms) | Survival |
-|----|------------------------|---------------|-------------------|----------------------------|-----------------------------|----------|
-| D1 (iPhone/Safari)     | 5.81 / 1.70 MB · _host-dependent_ | _pending — D1/D2 runbook_ | _pending_ | _pending_ | _pending_ | _pending_ |
-| D2 (Android/Chrome)    | 5.81 / 1.70 MB · _host-dependent_ | _pending — D1/D2 runbook_ | _pending_ | _pending_ | _pending_ | _pending_ |
-| D3 (Chrome Slow4G+4×)  | _filled in Task 3_ | _Task 3_ | _Task 3_ | _Task 3_ | _Task 3_ | _Task 3_ |
-| D4 (Chrome no-throttle)| _filled in Task 3_ | _Task 3_ | _Task 3_ | _Task 3_ | _Task 3_ | _Task 3_ |
+Peak memory is reported as **WASM linear memory** (the .NET runtime heap, read via
+`getDotnetRuntime(0).Module.HEAPU8.length`), **not** `performance.memory.usedJSHeapSize` — the latter
+reported only ~11 MB and **excludes** the WASM heap, which is the dominant footprint and the actual
+iOS-ceiling risk.
 
-(Transfer is bundle-fixed — see the payload table; the served bytes depend on whether the host applies
-gzip/brotli. Cold-load/heap/latency/survival are device-dependent and filled per row.)
+| ID | Transfer (raw / brotli) | Cold-load | Peak WASM heap (MB) | Small compile (med/max ms) | Medium compile (med/max ms) | Survival |
+|----|------------------------|-----------|---------------------|----------------------------|-----------------------------|----------|
+| **D1 (iPhone/Safari)**  | 5.81 / 1.70 MB · _host-dep._ | **— runbook** | **— runbook** | **— runbook** | **— runbook** | **— runbook** |
+| **D2 (Android/Chrome)** | 5.81 / 1.70 MB · _host-dep._ | **— runbook** | **— runbook** | **— runbook** | **— runbook** | **— runbook** |
+| D3 (Chrome 4×CPU / 4G)  | 5.68 MB transferred (server **uncompressed**) | 7.3 s¹ (Fast 4G) | **66.5** | 17.1 / 17.8 | 229.8 / 284.9 | survived² |
+| D4 (Chrome no-throttle) | 5.68 MB transferred (localhost) | ~0.2 s (localhost)³ | **55.4** | 3.9 / 7.1 | 58.6 / 63.5 | survived² |
+
+¹ Fresh isolated context (empty cache), Fast 4G + 4× CPU, **uncompressed** preview server: all 25
+`_framework` files (5.68 MB) arrive by **7.3 s**, all resources by 9.2 s, then WASM boots + first
+compile. On **Slow 4G** (measured ~300 Kbps effective) the same uncompressed payload is **~150 s** —
+impractical; this is the cost of shipping uncompressed (see below).
+² Desktop has no memory pressure, so "survived" here is **not diagnostic** — only D1/D2 exercise the
+memory-kill path.
+³ Localhost transfer time is not representative of a network; the D4 cold-load figure isolates
+parse/boot/compute, not download.
+
+### Emulated baseline results (D3/D4 — captured here)
+
+- **Compile latency is a non-issue.** Even at 4× CPU slowdown, the 6-context **pizzeria** (7 files,
+  → 91 emitted C# files) compiles in **~230 ms median**; the **billing** starter (→ 15 files) in
+  **~17 ms**. Unthrottled: 59 ms / 4 ms. Repeat compiles (N=5) were stable.
+- **Peak WASM heap is modest: ~55–67 MB** after warm-up and five compiles of each workload (idle after
+  cold boot is **38.4 MB**). Whether that survives **iOS**'s per-tab ceiling on a real/older device is
+  exactly what D1 must confirm — but ~67 MB is well within what modern iPhones allow, so the signal is
+  cautiously favourable (not a verdict).
+- **The cold-load problem is compression, not the app.** The bundle is **uncompressed** as served here
+  (no `.br`/`.gz`; `content-encoding` absent), so a phone downloads the full **5.68 MB**. Brotli
+  (1.70 MB, 3.4×) would cut Fast-4G cold-load from ~9 s toward ~3 s and make Slow-4G go from ~150 s to
+  ~45 s. **Enabling brotli/gzip on the deploy host is mandatory** and independent of the (a)/(b)/(c)
+  call.
+
+> Measured via the Chrome DevTools MCP against `vite preview --mode web` on localhost. Compiles called
+> the real `exports.Koine.Wasm.CompilerInterop.EmitPreview(filesJson, 'csharp')` export (the same entry
+> the app uses), and each result was validated to contain emitted files (15 / 91) — not an error
+> envelope. Fixtures: `billing.koi`; the seven `pizzeria/*.koi`.
+
+### D1 / D2 runbook (real devices — to be filled by a maintainer)
+
+These rows decide the verdict and require physical hardware; an automated environment cannot produce
+them. To fill them:
+
+1. **Deploy** `dist/` to a phone-reachable host (`KOINE_STUDIO_BASE=/subpath/ npm run build:web`, then
+   push `dist/` to GitHub Pages / Netlify / a static bucket). **Enable brotli/gzip** on the host, and
+   verify `content-encoding: br|gzip` on `_framework/*` in the Network tab — otherwise you are timing
+   the 5.8 MB raw path.
+2. **D1 — iPhone/Safari:** cable the iPhone to a Mac, Safari → Develop → _device_ → Web Inspector.
+   - *Cold-load:* Network/Timelines from navigation to editor-interactive.
+   - *Peak heap:* Timelines → Allocations during a `pizzeria` compile. (No `getDotnetRuntime` console
+     access needed; or paste `getDotnetRuntime(0).Module.HEAPU8.length/1048576` to read WASM heap MB.)
+   - *Latency:* the same `EmitPreview` call, or just time the **Code** tab switch.
+   - *Survival:* load → compile → background the tab ~60 s → foreground → compile again. **Blank tab or
+     forced reload = a WebKit memory kill** (the (c)-triggering signal).
+3. **D2 — Android/Chrome:** `chrome://inspect` remote debug; repeat cold-load + compile + peak heap +
+   the same background/foreground survival test.
+4. Drop the numbers into the matrix above; the decision criteria below then resolve the verdict.
 
 ## Capture procedure
 
