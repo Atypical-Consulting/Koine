@@ -252,6 +252,11 @@ $ddd-kinds: (
     opacity: 0.45;
     cursor: not-allowed;
   }
+
+  &:focus-visible {
+    outline: 2px solid var(--koi-accent);
+    outline-offset: 1px;
+  }
 }
 
 .koi-palette-swatch {

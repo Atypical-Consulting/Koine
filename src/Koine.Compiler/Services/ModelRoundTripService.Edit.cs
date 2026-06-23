@@ -427,6 +427,7 @@ public static partial class ModelRoundTripService
             "event" => $"event {edit.Name} {{{nl}{body}occurredAt: Instant{nl}{typeIndent}}}",
             "enum" => $"enum {edit.Name} {{{nl}{body}First{nl}{body}Second{nl}{typeIndent}}}",
             "aggregate" => $"aggregate {edit.Name} root {edit.Name}Root {{{nl}{body}entity {edit.Name}Root identified by {edit.Name}RootId {{{nl}{body}  name: String{nl}{body}}}{nl}{typeIndent}}}",
+            // null (the old bare button) and any unrecognized kind intentionally fall back to a value object.
             _ => $"value {edit.Name} {{{nl}{body}name: String{nl}{typeIndent}}}",
         };
 
