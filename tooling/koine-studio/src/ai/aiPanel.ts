@@ -485,10 +485,30 @@ export function createAssistantPanel(opts: AssistantPanelOptions): AssistantPane
         userBubble.remove();
         for (const n of toolNodes) n.remove();
         input.value = prompt;
-        replyBubble.classList.add('koi-msg-error');
-        replyBubble.textContent = aborted
-          ? 'Stopped.'
-          : 'Request failed: ' + (e instanceof Error ? e.message : String(e));
+        if (aborted) {
+          replyBubble.classList.add('koi-msg-error');
+          replyBubble.textContent = 'Stopped.';
+        } else {
+          const raw = e instanceof Error ? e.message : String(e);
+          // A rejected/invalid key (the pre-flight check only catches a BLANK key) surfaces a raw
+          // "401 {json}" otherwise — turn it into actionable guidance. Other errors get their human
+          // "message" extracted from any JSON body rather than dumping the whole blob.
+          const isAuth = /\b401\b|authentication|invalid[\s_-]*(x-)?api[\s_-]*key|unauthor/i.test(raw);
+          const jsonMsg = raw.match(/"message"\s*:\s*"([^"]+)"/)?.[1];
+          if (isAuth) {
+            replyBubble.classList.add('koi-msg-note');
+            replyBubble.textContent = 'The provider rejected your API key. Check it in Settings → Assistant. ';
+            const open = document.createElement('button');
+            open.type = 'button';
+            open.className = 'koi-link-btn';
+            open.textContent = 'Open Settings';
+            open.addEventListener('click', () => opts.onOpenPrefs());
+            replyBubble.appendChild(open);
+          } else {
+            replyBubble.classList.add('koi-msg-error');
+            replyBubble.textContent = 'Request failed: ' + (jsonMsg ?? raw);
+          }
+        }
       }
     } finally {
       aborter = null;

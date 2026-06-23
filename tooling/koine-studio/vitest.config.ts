@@ -38,6 +38,12 @@ export default defineConfig({
       extends: true,
       test: {
         environment: 'happy-dom',
+        // The IDE boot tests do a cold `await import('@/shell/ide')` (a large module graph) + a full
+        // init(); on slow CI runners (notably windows-latest) that first transform+import alone can
+        // exceed the 5s default and time the test out. Give a generous ceiling that still catches a
+        // genuine hang. Applies to both tests and hooks.
+        testTimeout: 20000,
+        hookTimeout: 20000,
         // Inline zustand so its React entry (`import React from 'react'`) is transformed through the alias
         // above instead of being externalized and resolved by Node (which has no `react` package). Without
         // this the panel tests fail with "Cannot find package 'react'".

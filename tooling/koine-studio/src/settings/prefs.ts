@@ -115,9 +115,21 @@ export function createPreferences(cb: PrefsCallbacks): PrefsHandle {
     r.className = 'koi-set-row';
     const text = document.createElement('div');
     text.className = 'koi-set-text';
-    const label = document.createElement('span');
+    // Associate the label with a labelable form control (input/select/textarea): give it a stable id
+    // derived from the title and emit a real <label for>, so the field has an accessible name + id
+    // (fixes the "form field should have an id/name" + "no label associated" DevTools notices). Non-form
+    // controls (the role=switch toggle, segmented groups, accent swatches) carry their own aria-label,
+    // so they keep a plain <span>.
+    const labelable =
+      control instanceof HTMLInputElement || control instanceof HTMLSelectElement || control instanceof HTMLTextAreaElement;
+    const label = document.createElement(labelable ? 'label' : 'span');
     label.className = 'koi-set-label';
     label.textContent = title;
+    if (labelable) {
+      if (!control.id) control.id = `koi-set-${title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '')}`;
+      if (!control.getAttribute('name')) control.setAttribute('name', control.id);
+      (label as HTMLLabelElement).htmlFor = control.id;
+    }
     text.appendChild(label);
     if (description) {
       const desc = document.createElement('span');

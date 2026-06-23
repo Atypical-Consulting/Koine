@@ -111,6 +111,7 @@ class FakePlatform implements Platform {
   readonly kind = 'browser' as const;
   readonly canOpenFolders = true;
   readonly canSaveProjects = true;
+  persistsWorkspace = true;
   readonly transport = new FakeLspTransport();
 
   /** relPath (forward-slashed) -> UTF-8 contents. Tokens are `${ROOT}/${relPath}`. */
@@ -504,6 +505,23 @@ describe('ide init() — default-workspace boot', () => {
     // the seed. CodeMirror strips trailing blank lines in textContent, so compare on a stable token.
     expect(editorDoc()).toContain('context Billing');
     expect(editorDoc()).toContain('value Money');
+  });
+
+  test('on a non-persistent (memory-only) host, the editor still opens AND a memory-only banner is shown', async () => {
+    const platform = installPlatform(); // installs it as the active host
+    platform.persistsWorkspace = false; // simulate a no-OPFS browser (Safari / Firefox Private)
+    await boot({ platform });
+    // The workspace still opens (no dead-end): the editor shows the seed.
+    expect(editorDoc()).toContain('context Billing');
+    // …and the user is warned that work won't survive a reload.
+    const banner = document.getElementById('koi-memory-banner');
+    expect(banner).not.toBeNull();
+    expect(banner!.textContent).toMatch(/can.t save to disk/i);
+  });
+
+  test('a persistent host shows NO memory-only banner', async () => {
+    await boot(); // default FakePlatform persists
+    expect(document.getElementById('koi-memory-banner')).toBeNull();
   });
 });
 

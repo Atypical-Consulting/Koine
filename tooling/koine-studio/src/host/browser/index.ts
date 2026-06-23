@@ -13,6 +13,7 @@ export class BrowserPlatform implements Platform {
   readonly kind = 'browser' as const;
   readonly canOpenFolders = fs.supported();
   readonly canSaveProjects = fs.supported();
+  readonly persistsWorkspace = fs.persistsWorkspace();
 
   createLspTransport(): LspTransport {
     return new WasmLspTransport();
