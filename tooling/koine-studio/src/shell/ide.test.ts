@@ -250,7 +250,6 @@ const APP_HTML = `
           <button type="button" id="palette-hint" class="palette-hint">K</button>
           <button type="button" id="btn-theme" class="icon-btn">theme</button>
           <button type="button" id="btn-prefs" class="icon-btn">prefs</button>
-          <button type="button" id="btn-about" class="icon-btn">about</button>
           <div id="status" data-kind="connecting" role="status" aria-live="polite">connecting…</div>
           <button type="button" id="unsaved-indicator" class="unsaved-indicator" hidden></button>
         </div>

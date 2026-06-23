@@ -41,7 +41,6 @@ import { createPreferences } from '@/settings/prefs';
 import { applyAppearance } from '@/settings/appearance';
 import { initSplitResizer, initEdgeResizer } from '@/shell/resize';
 import { createHelpOverlay } from '@/shared/help';
-import { createAboutDialog } from '@/welcome/about';
 import { createGenerateProject } from '@/export/generateProjectWizard';
 import { sanitizeProjectName } from '@/export/generateProject';
 import { buildSourceZip } from '@/export/sourceZip';
@@ -1089,7 +1088,6 @@ export function init(): void {
     pickWorkspaceRoot: () => platform.pickWorkspaceRoot(),
   });
   const help = createHelpOverlay(helpRows());
-  const about = createAboutDialog();
   // Guards the user-initiated New command against silently discarding unsaved work.
   const confirmDialog = createConfirmDialog();
 
@@ -1297,7 +1295,6 @@ export function init(): void {
   if (!platform.canSaveProjects) saveProjectBtn.hidden = true;
   el<HTMLButtonElement>('btn-theme').addEventListener('click', () => toggleTheme());
   el<HTMLButtonElement>('btn-prefs').addEventListener('click', () => prefs.open());
-  el<HTMLButtonElement>('btn-about').addEventListener('click', () => about.open());
 
   // Format the active document via the LSP and apply the edits (shared by the palette command
   // and format-on-save). Degrades silently if the request fails.
@@ -1332,7 +1329,7 @@ export function init(): void {
       { id: 'toggle-theme', title: 'Toggle theme', group: 'View', run: () => toggleTheme() },
       { id: 'prefs', title: 'Settings…', hint: 'mod+,', group: 'View', run: () => prefs.open() },
       { id: 'help', title: 'Keyboard shortcuts', hint: 'F1', group: 'Help', run: () => help.open() },
-      { id: 'about', title: 'About Koine Studio', group: 'Help', run: () => about.open() },
+      { id: 'about', title: 'About Koine Studio', group: 'Help', run: () => prefs.open('about') },
       { id: 'toggle-store-inspector', title: 'Toggle store inspector (debug)', group: 'Help', run: () => toggleStoreInspector() },
       { id: 'view-preview', title: 'Show Emitted Preview', group: 'Workspace', run: () => controller.selectTech('preview') },
       { id: 'view-glossary', title: 'Show Glossary', group: 'Workspace', run: () => controller.selectDocsTab('glossary') },

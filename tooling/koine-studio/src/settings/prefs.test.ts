@@ -165,3 +165,42 @@ describe('Settings → Output panel', () => {
     expect(checked?.dataset.value).toBe('php');
   });
 });
+
+describe('Settings → About panel', () => {
+  beforeEach(() => {
+    document.body.innerHTML = '';
+    localStorage.clear();
+    saveSettings({ ...DEFAULT_SETTINGS });
+  });
+
+  it('renders About as the last category tab with the wordmark and four links', () => {
+    openPrefs();
+    const tabs = [...document.querySelectorAll<HTMLButtonElement>('.koi-settings-tab')];
+    expect(tabs[tabs.length - 1]?.id).toBe('koi-settings-tab-about');
+    const panel = document.querySelector('#koi-settings-panel-about')!;
+    expect(panel.querySelector('.koi-about-wordmark')?.textContent).toContain('Koine');
+    const labels = [...panel.querySelectorAll('.koi-about-link-label')].map((n) => n.textContent);
+    expect(labels).toEqual(['GitHub', 'Home', 'Docs', 'Blog']);
+  });
+
+  it('open("about") opens directly on the About tab', () => {
+    const prefs = createPreferences({
+      onChange: () => {},
+      mcpEndpoint: async () => URL,
+      mcpStop: async () => {},
+      mcpHostable: true,
+    });
+    prefs.open('about');
+    const tab = document.querySelector<HTMLButtonElement>('#koi-settings-tab-about')!;
+    expect(tab.getAttribute('aria-selected')).toBe('true');
+    expect(document.querySelector<HTMLElement>('#koi-settings-panel-about')!.hidden).toBe(false);
+  });
+
+  it('fills the build chip on open', async () => {
+    openPrefs();
+    await settle();
+    const chip = document.querySelector<HTMLElement>('#koi-settings-panel-about .koi-about-chip')!;
+    expect(chip.hidden).toBe(false);
+    expect(chip.textContent).toMatch(/^v/);
+  });
+});

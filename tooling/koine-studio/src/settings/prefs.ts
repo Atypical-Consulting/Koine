@@ -20,6 +20,7 @@ import {
 } from '@/settings/persistence';
 import { setTheme } from '@/settings/theme';
 import { ACCENTS, ACCENT_ORDER } from '@/settings/appearance';
+import { createAboutPanel } from '@/settings/about';
 import { createModal } from '@/shared/overlay';
 import { mcpJsonSnippet, MCP_CLIENTS, probeMcp } from '@/mcp/mcp';
 
@@ -62,7 +63,8 @@ export interface PrefsCallbacks {
 }
 
 export interface PrefsHandle {
-  open(): void;
+  /** Open the dialog; pass a category id (e.g. 'about') to land on that tab. */
+  open(categoryId?: string): void;
   close(): void;
 }
 
@@ -88,6 +90,8 @@ const ICON = {
     '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.6 4.6h10.8M2.6 8h10.8M2.6 11.4h10.8"/><circle cx="6" cy="4.6" r="1.7" fill="var(--koi-paper-2)"/><circle cx="10.4" cy="8" r="1.7" fill="var(--koi-paper-2)"/><circle cx="5" cy="11.4" r="1.7" fill="var(--koi-paper-2)"/></svg>',
   output:
     '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6.4 2.6c-1.2 0-1.7.6-1.7 1.8v1.6c0 .9-.3 1.3-1.1 1.4v1.2c.8.1 1.1.5 1.1 1.4v1.6c0 1.2.5 1.8 1.7 1.8M9.6 2.6c1.2 0 1.7.6 1.7 1.8v1.6c0 .9.3 1.3 1.1 1.4v1.2c-.8.1-1.1.5-1.1 1.4v1.6c0 1.2-.5 1.8-1.7 1.8"/></svg>',
+  about:
+    '<svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="5.8"/><path d="M8 7.3v3.4"/><circle cx="8" cy="4.9" r="0.9" fill="currentColor" stroke="none"/></svg>',
 } as const;
 
 /**
@@ -814,6 +818,11 @@ export function createPreferences(cb: PrefsCallbacks): PrefsHandle {
     row('Reset', 'Restore every setting — including the assistant — to its default.', resetBtn),
   );
 
+  // --- About ----------------------------------------------------------------
+
+  const about = createAboutPanel();
+  const aboutPanel = panel('about', about.el);
+
   // --- assemble the two-pane layout -----------------------------------------
 
   const categories = [
@@ -823,6 +832,7 @@ export function createPreferences(cb: PrefsCallbacks): PrefsHandle {
     { id: 'assistant', label: 'Assistant', icon: ICON.assistant, panel: assistantPanel },
     { id: 'mcp', label: 'MCP', icon: ICON.mcp, panel: mcpPanel },
     { id: 'advanced', label: 'Advanced', icon: ICON.advanced, panel: advancedPanel },
+    { id: 'about', label: 'About', icon: ICON.about, panel: aboutPanel },
   ] as const;
 
   const nav = document.createElement('nav');
@@ -911,6 +921,7 @@ export function createPreferences(cb: PrefsCallbacks): PrefsHandle {
     disarmReset();
     const s = loadSettings();
     populate(s);
+    about.refresh();
     void refreshWsRootValue();
     // On a very fast first open the secret may still be decrypting; back-fill the key once it lands,
     // but never clobber a value the user has already started typing.
@@ -933,5 +944,15 @@ export function createPreferences(cb: PrefsCallbacks): PrefsHandle {
     tabs[activeIndex].focus();
   });
 
-  return { open: modal.open, close: modal.close };
+  // Open on a specific category when asked (e.g. the palette's "About" → 'about'); onOpen's trailing
+  // selectCategory(activeIndex) then lands on it. A no-arg open keeps the last-active tab.
+  function open(categoryId?: string): void {
+    if (categoryId) {
+      const i = categories.findIndex((c) => c.id === categoryId);
+      if (i >= 0) activeIndex = i;
+    }
+    modal.open();
+  }
+
+  return { open, close: modal.close };
 }
