@@ -22,8 +22,11 @@ function makeStorage(): Storage {
 }
 
 const g = globalThis as unknown as { localStorage?: Storage; sessionStorage?: Storage; crypto?: Crypto };
-if (!g.localStorage) g.localStorage = makeStorage();
-if (!g.sessionStorage) g.sessionStorage = makeStorage();
+// happy-dom 20.x now exposes a `localStorage` on the global that lacks the full Web Storage surface
+// (notably `clear`), which would shadow our shim if we only checked for its absence. Install the
+// in-memory shim whenever Storage is missing OR incomplete, so every test sees a real Storage.
+if (typeof g.localStorage?.clear !== 'function') g.localStorage = makeStorage();
+if (typeof g.sessionStorage?.clear !== 'function') g.sessionStorage = makeStorage();
 
 // secrets.ts needs Web Crypto (crypto.subtle). happy-dom may not expose it; back it with Node's
 // WebCrypto so AES-GCM encrypt/decrypt behaves as it does in the browser.

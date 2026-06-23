@@ -41,7 +41,8 @@ import type {
 import type { Platform } from '@/host';
 import type { PreviewTarget } from '@/settings/persistence';
 import { renderDiagrams } from '@/diagrams/diagrams';
-import { setDiagramPersistScope } from '@/diagrams/diagrams-svg';
+import { setDiagramLayoutStore, setDiagramPersistScope } from '@/diagrams/diagramContract';
+import { createLayoutStore } from '@/diagrams/layoutStore';
 import { mergeDiagramGraphs } from '@/model/modelTables';
 import { type GlossaryHandlers } from '@/model/glossary';
 import { createDocsStore } from '@/docs/docsStore';
@@ -896,8 +897,11 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
       // Scope the diagrams to the active bounded context (#146): each diagram's graph is narrowed and
       // emptied diagrams/files drop out, so a context shows only its own diagrams. "All" is the identity.
       const files = scopeDocsFiles(res.files, activeContext.get());
-      // Scope persisted node positions to this workspace so a folder restores its own manual layout.
+      // Scope persisted node positions to this workspace so a folder restores its own manual layout, and
+      // inject the matching layout store: a committable koine.layout.json at the folder root when one is
+      // open, else browser storage (web/scratch mode).
       setDiagramPersistScope(contextWorkspaceKey());
+      setDiagramLayoutStore(createLayoutStore(platform, deps.folderRootToken()));
       await renderDiagrams(diagramsView, files, currentTheme(), () => seq === diagramsSeq);
       if (seq === diagramsSeq) appStore.getState().markLoaded('diagrams', token);
     } catch (e) {
