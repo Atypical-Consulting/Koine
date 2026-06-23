@@ -123,6 +123,39 @@ Remaining Lighthouse fails are non-blocking: `cumulative-layout-shift` (0.93, fr
 | F9/F10 | **No-OPFS browsers now boot into a usable in-memory workspace** (Safari/Firefox-Private). Added an in-memory `MemDir`/`MemFile` backend in `fs.ts`; `materializeWorkspace`/`openDefaultWorkspace` route through `backingRoot()` (OPFS when present, else memory) so they never dead-end; new `persistsWorkspace` platform capability drives a dismissible **memory-only banner** ("can't save to disk… use Copy shareable link / Chrome") so work is never lost silently. Examples + shared-link import work in memory too. Verified: 3 vitest (incl. no-OPFS fallback) + a real-app check (OPFS neutered → IDE boots, banner shows, editing works; OPFS present → no banner). 714 vitest + tsc + prod build green. | ✅ fixed |
 | Rules | **Rules tab now shows real business rules.** Wired invariants onto the diagram-node payload cross-stack: `DiagramNode.Invariants` (compiler) → both serializers (`LspServer.cs`, `CompilerInterop` WASM) → `DiagramNode.invariants` (TS) → `buildInspectorElement` → a new `renderRules` view driven by selection (`inspectorController.renderSelectedRules`). The Properties tab's existing Invariants compartment lights up too. Additive (new optional field) — Mermaid/snapshots untouched. Tests: +1 C# (`DiagramGraphTests`), +4 vitest; **1553 dotnet + 639 vitest pass**, public API updated, WASM rebuilt. State-transition **guards** + **per-element Notes** persistence remain (separate graph / new persistence) — tracked as a follow-up. | ✅ fixed (invariants) |
 
+## 🔬 Comprehensive feature exercise (2nd pass — every feature driven end-to-end)
+
+Each feature was actually *operated* via the browser (not just rendered), on `http://localhost:1430/` (SPA — internal views/tabs, no per-feature URLs). Audit tools used: chrome-devtools browser MCP (navigate / snapshot / click / type / evaluate / console / dialogs), Lighthouse (navigation audit + perf trace). context7 not needed (no external library docs in scope for internal debugging).
+
+| Area | Exercised | Result |
+|------|-----------|--------|
+| Welcome / template gallery | New model, Start-from-example (Starter/Intermediate/Advanced tabs, search), open Billing/Order examples | ✅ works (note: gallery card opens on click; keyboard focus lands in the search box first) |
+| Editor (CodeMirror) | Typed an invalid construct → **live push diagnostics** (`KOI0001`) updated in Problems + status + sb-validity; accessible name "Koine model source editor" | ✅ works |
+| History | Undo reverts the edit (clean), Redo re-enables; toolbar buttons gate correctly | ✅ works |
+| Generated preview | C# render; **switched target language** (Settings→Output→TypeScript) → tab relabels "Generated · TypeScript" + emits TS `runtime.ts`; restored C# | ✅ works |
+| Properties inspector | Selected Money; **added a property** ("memo: String") → round-tripped into the `.koi` source; undo reverts. **Invariants compartment now populated** (from the new wire). | ✅ works |
+| Rules tab | Money → "a monetary amount cannot be negative" (this PR) | ✅ works |
+| Visual diagram (maxGraph) | Renders all nodes/edges/minimap; zoom (3 controls)/fit; **Add a type** guards on scope then prompts; auto-arrange present | ✅ works (see F21) |
+| Context scope | Switching scope updates status bar / sb-context | ✅ works (custom combobox) |
+| Documentation | Glossary (0/9 progress + Add description), Decisions (New ADR + empty state), Notes (New note + empty state) | ✅ renders |
+| Bottom panel | Problems (live), Events (empty state), Relationships (table), Context Map | ✅ works |
+| Command palette (⌘K) | Full command list, all map to real handlers (per static scan) | ✅ works |
+| AI Assistant | Provider/key/model settings; quick actions; **invalid-key error path** | ✅ works; **F20 fixed** |
+| Settings | All 7 tabs (Appearance/Editor/Output/Assistant/MCP/Advanced/About); theme toggle; **agentic-tools toggle now shows for Anthropic** | ✅ works |
+| MCP panel | Degraded web mode (disabled toggle + CLI hint + copyable recipes) | ✅ by design |
+| Generate wizard | 4-step flow (Language/Artifacts/Name/Generate) | ✅ works |
+| Compatibility | Idle "Model compatibility" state + Check action (this PR) | ✅ works |
+| No-OPFS fallback | OPFS neutered → IDE boots in-memory + banner (this PR) | ✅ works |
+| Status bar | "Local" connection even with warnings (F19 fix); context/validity/version | ✅ works |
+| Performance | Perf trace: **LCP 501 ms, CLS 0.01** (dev build) | ✅ healthy |
+| Accessibility | Lighthouse navigation: **A11y 100 / Best-Practices 100 / SEO 100**; no JS console errors anywhere | ✅ |
+
+### New findings from the 2nd pass
+| ID | Severity | Surface | Issue | Status |
+|----|----------|---------|-------|--------|
+| F20 | medium (AI UX) | AI Assistant | A present-but-invalid API key dumped a raw `Request failed: 401 {json}` blob into the transcript (the pre-flight check only caught a *blank* key). Now: auth errors show "The provider rejected your API key → Open Settings"; other errors surface the JSON `"message"` not the whole blob. +2 vitest. | ✅ fixed |
+| F21 | medium (design/UX) | Diagram editing + project flows | Native `window.prompt`/`confirm`/`alert` used at **7 sites** (add type, add field, rename node, save-as, delete node, remove relationship, name-collision) — jarring/unstyled in an IDE that already has custom modals; `window.prompt` is also blocked in some embeddings. Replacing 7 sync-dialog call sites with the existing async modal system is a sizable refactor → **chipped** as a follow-up. | ⏭ chipped |
+
 ## 📝 Deferred / known limitations (reported, not fixed — with rationale)
 
 - **F18 — not a bug.** The Generate-wizard "Back" button is already disabled on step 1 (`generateProjectWizard.ts:458`).
