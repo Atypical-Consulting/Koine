@@ -64,6 +64,7 @@ import {
 import { isAllContexts } from '@/model/activeContext';
 import { appStore } from '@/store/index';
 import { badgeCounts, createDiagCountGate } from '@/diagnostics/diagCountGate';
+import { severityErrorOrWarning } from '@/lsp/severity';
 import { type SelectedElement } from '@/model/selection';
 import { resolveInspectableQn } from '@/model/modelIndex';
 import { type InspectorElement } from '@/model/inspector';
@@ -1132,7 +1133,7 @@ export function init(): void {
         const diagnostics = editorSession.diagnosticsFor(workspace.activeUri()).map((d) => ({
           line: d.range.start.line + 1,
           col: d.range.start.character + 1,
-          severity: (d.severity === 2 ? 'warning' : 'error') as 'warning' | 'error',
+          severity: severityErrorOrWarning(d.severity),
           message: d.message,
         }));
         const base: AssistantContext = {

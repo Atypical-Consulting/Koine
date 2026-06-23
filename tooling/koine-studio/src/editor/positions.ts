@@ -6,6 +6,7 @@
 import type { Text } from '@codemirror/state';
 import type { Diagnostic as CmDiagnostic } from '@codemirror/lint';
 import type { LspDiagnostic, TextEdit } from '@/lsp/lsp';
+import { severityErrorOrWarning } from '@/lsp/severity';
 
 /** Convert a 0-based LSP {line,character} to a CodeMirror document offset (clamped to doc/line bounds). */
 export function lspPosToOffset(doc: Text, line: number, character: number): number {
@@ -25,7 +26,7 @@ export function lspToCm(doc: Text, d: LspDiagnostic): CmDiagnostic {
   return {
     from,
     to,
-    severity: d.severity === 2 ? 'warning' : 'error',
+    severity: severityErrorOrWarning(d.severity),
     message: (d.code != null ? d.code + ': ' : '') + d.message,
   };
 }
