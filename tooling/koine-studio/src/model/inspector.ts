@@ -106,6 +106,9 @@ export function buildInspectorElement(
     properties,
     behaviors: members.filter((m) => m.kind === 'method').map((m) => m.text),
     values: members.filter((m) => m.kind === 'value').map((m) => m.text),
+    // Business rules now ride on the diagram node (the invariants-on-the-wire change): each is the
+    // invariant's message or its described condition. Undefined when the node carries none.
+    invariants: node?.invariants && node.invariants.length > 0 ? node.invariants : undefined,
     nameRange: entry.nameRange,
   };
 }
@@ -146,6 +149,53 @@ export function renderInspector(
   appendList(root, 'Published Events', element.publishedEvents ?? []);
   if (element.repository) appendList(root, 'Repository', [element.repository]);
 
+  return root;
+}
+
+/**
+ * The right-rail "Rules" tab: the selected element's business rules (its invariants), or an empty
+ * state. Read-only — invariants are authored in the `.koi` source and flagged live in the Problems
+ * panel; this view just surfaces them per element. Reuses the same flat {@link InspectorElement}
+ * projection as the Properties inspector so it tracks selection identically.
+ */
+export function renderRules(element: InspectorElement | null): HTMLElement {
+  const root = document.createElement('div');
+  root.className = 'koi-rview-empty';
+
+  const title = document.createElement('h3');
+  title.className = 'koi-rview-empty-title';
+
+  if (!element) {
+    title.textContent = 'Business rules';
+    const hint = document.createElement('p');
+    hint.className = 'muted';
+    hint.textContent =
+      'Select an element in the model outline or a diagram to see its invariants. Rules are authored in the .koi source and flagged live in the Problems panel.';
+    root.append(title, hint);
+    return root;
+  }
+
+  title.textContent = `${element.name} — business rules`;
+  root.appendChild(title);
+
+  const rules = element.invariants ?? [];
+  if (rules.length === 0) {
+    const none = document.createElement('p');
+    none.className = 'muted';
+    none.textContent = 'No invariants declared on this element.';
+    root.appendChild(none);
+    return root;
+  }
+
+  const ul = document.createElement('ul');
+  ul.className = 'koi-inspector-list';
+  for (const rule of rules) {
+    const li = document.createElement('li');
+    li.className = 'koi-inspector-item';
+    li.textContent = rule;
+    ul.appendChild(li);
+  }
+  root.appendChild(ul);
   return root;
 }
 

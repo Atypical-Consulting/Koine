@@ -58,7 +58,7 @@ import {
 } from '@/model/activeContext';
 import type { SelectedElement } from '@/model/selection';
 import { renderOverviewCounts, type ModelOutlineHandlers } from '@/model/modelOutline';
-import { type InspectorElement, type InspectorHandlers } from '@/model/inspector';
+import { buildInspectorElement, renderRules, type InspectorElement, type InspectorHandlers } from '@/model/inspector';
 import { buildModelIndex, lookupElement, type ModelIndex } from '@/model/modelIndex';
 import { PropertiesPanel } from '@/model/PropertiesPanel';
 import { ContextBreadcrumb } from '@/model/ContextBreadcrumb';
@@ -814,6 +814,19 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
       <PropertiesPanel store={appStore} index={modelIndex} handlers={inspectorHandlers} />,
       inspectorHost,
     );
+    renderSelectedRules();
+  }
+
+  // The right-rail "Rules" tab: the selected element's invariants (business rules), resolved through the
+  // same selection → model-index → InspectorElement path as the Properties inspector, so the two tabs
+  // track selection in lockstep. Rendered imperatively into its host (it's a read-only projection).
+  function renderSelectedRules(): void {
+    const sel = appStore.getState().selection;
+    const hit = sel && modelIndex ? lookupElement(modelIndex, sel.qualifiedName) : null;
+    const element: InspectorElement | null = hit
+      ? buildInspectorElement(hit.element.entry, hit.element.node, hit.element.modelMembers)
+      : null;
+    el('rview-rules').replaceChildren(renderRules(element));
   }
 
   // Repaint the always-visible left rail: the Explorer construct tree + the Overview counts, both

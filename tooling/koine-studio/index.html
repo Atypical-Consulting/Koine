@@ -235,14 +235,12 @@
           </div>
           <div id="right-body">
             <div id="inspector-host" class="rview" role="tabpanel"></div>
+            <!-- Filled by inspectorController.renderSelectedRules() with the selected element's
+                 invariants (or an empty state). The static content below is a pre-hydration fallback. -->
             <div id="rview-rules" class="rview doc-view" role="tabpanel" hidden>
               <div class="koi-rview-empty">
                 <h3 class="koi-rview-empty-title">Business rules</h3>
-                <p class="muted">
-                  Invariants and state-transition guards are enforced in the generated code and flagged
-                  live in the <strong>Problems</strong> panel. Editing rules per element from here is
-                  planned for a future update.
-                </p>
+                <p class="muted">Select an element to see its invariants.</p>
               </div>
             </div>
             <div id="rview-notes" class="rview doc-view" role="tabpanel" hidden>
