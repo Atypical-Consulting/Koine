@@ -1,3 +1,5 @@
+@use '../abstracts' as a;
+
 /* --- split body --- */
 /* Five tracks (3-column shell): one left sidebar (--koi-leftrail-w, holds Files + Explorer + Overview
    + Documentation), its 6px resizer, the center (1fr), the center/inspector 6px resizer, and the right
@@ -76,4 +78,51 @@ body.resizing-x {
 }
 body.resizing-y {
   cursor: row-resize;
+}
+
+/* --- narrow-viewport (mobile) single-zone shell -------------------------------
+   Below $bp-narrow the five-track grid collapses to one column; exactly one zone
+   shows, chosen by #split[data-mobile-zone] (mirrored from the store). Code and
+   Diagram both live in #center (the center tab decides which). Desktop is untouched —
+   every rule here is inside the media query. */
+@media (max-width: a.$bp-narrow) {
+  #split {
+    grid-template-columns: 1fr;
+  }
+
+  #leftrail-resizer,
+  #split-resizer {
+    display: none;
+  }
+
+  #leftrail,
+  #center,
+  #right {
+    grid-column: 1;
+  }
+
+  /* Hide all zones, then reveal the active one. */
+  #split[data-mobile-zone] #leftrail,
+  #split[data-mobile-zone] #right {
+    display: none;
+  }
+  #split[data-mobile-zone]:not([data-mobile-zone='code']):not([data-mobile-zone='diagram']) #center {
+    display: none;
+  }
+
+  #split[data-mobile-zone='files'] #leftrail {
+    display: flex;
+  }
+  #split[data-mobile-zone='code'] #center,
+  #split[data-mobile-zone='diagram'] #center {
+    display: flex;
+  }
+  #split[data-mobile-zone='props'] #right {
+    display: flex;
+  }
+
+  /* Reserve room for the fixed bottom bar so the active zone isn't covered. */
+  #app {
+    padding-bottom: var(--koi-mzb-h, 3rem);
+  }
 }
