@@ -122,3 +122,9 @@ cd tooling/koine-studio && npm install && npm run build
 - `src/editor/editor.ts` — CodeMirror `.koi` editor + read-only output viewer; push-based diagnostics.
 - `src/shell/ide.tsx` — app composition (editor, status line, diagnostics strip, preview buttons).
 - `index.html` / `src/styles.css` — toolbar + split editor/output panes + diagnostics strip.
+
+## Research notes
+
+- [`docs/mobile-wasm-spike.md`](docs/mobile-wasm-spike.md) — measurement spike ([#219](https://github.com/Atypical-Consulting/Koine/issues/219)):
+  can the in-browser WASM compiler run on a phone? Payload sizes, emulated D3/D4 baselines, a D1/D2
+  real-device runbook, and a provisional verdict.

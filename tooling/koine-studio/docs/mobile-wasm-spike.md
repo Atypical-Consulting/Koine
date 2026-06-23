@@ -248,3 +248,24 @@ verdict-independent: **enable brotli/gzip on the deploy host** — it is the che
 > _Deferred (scope):_ a CI **payload size-budget check** (sum `_framework` transferred bytes, assert a
 > ceiling) is worth adding **once the verdict lands** — it is gated on confirming (b)/(c) per the plan,
 > so it is intentionally not added here on a provisional lean.
+
+## What this means for the siblings
+
+- **[#220](https://github.com/Atypical-Consulting/Koine/issues/220) (responsive "reviewable" shell):**
+  the provisional **(b)** lean confirms the design assumption — **the compiler must stay lazy on mobile.**
+  The mobile shell should be fully usable *without* booting WASM: browse files, read code, view the
+  diagram/glossary/diagnostics. Booting a ~5.8 MB (uncompressed) / ~2.4 MB (brotli) runtime on a phone
+  for a *review* session is the wrong default; compile/emit-preview should be an **explicit opt-in**
+  affordance, not eager on load.
+- **[#221](https://github.com/Atypical-Consulting/Koine/issues/221) (touch "editable"):** the
+  edit→validate loop's target depends on the final verdict. On the current provisional **(b)**, the loop
+  can stay **client-side / in-WASM** — compile latency is comfortably interactive (≤ ~230 ms even at 4×
+  CPU), so a lazily-loaded `EmitPreview`/`DiagnoseWorkspace` is fine once the user opts in. **If D1
+  downgrades the verdict to (c)** (iOS memory kill), #221's validate loop must instead target a
+  server-side compile endpoint, and the in-WASM path is off the table for mobile.
+
+## Status / next step
+
+Fill the **D1/D2 runbook** rows on real devices, then revisit the "Analysis & provisional verdict"
+section to lock the final **(a)/(b)/(c)** call. Regardless of that call, **enable brotli/gzip on the
+mobile deploy host** (verdict-independent, highest-leverage fix).
