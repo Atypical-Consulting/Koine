@@ -39,7 +39,7 @@ import { typescript } from '@codemirror/legacy-modes/mode/javascript';
 import { python } from '@codemirror/legacy-modes/mode/python';
 import { php } from '@codemirror/lang-php';
 import { tags as t } from '@lezer/highlight';
-import { lintGutter, setDiagnostics, type Diagnostic as CmDiagnostic } from '@codemirror/lint';
+import { lintGutter, setDiagnostics } from '@codemirror/lint';
 import type {
   CodeAction,
   CompletionItem,
@@ -54,6 +54,12 @@ import type {
   WorkspaceEdit,
 } from '@/lsp/lsp';
 import { dismissFloating, showActionMenu, showRenameInput } from '@/editor/actions';
+// The markdown renderer lives in ./markdown (extracted so it can be unit-tested without a CodeMirror
+// view). Re-exported below so existing importers keep resolving it from `@/editor/editor`.
+import { renderMarkdown } from '@/editor/markdown';
+// LSP↔offset converters live in ./positions (pure, tested over a CodeMirror `Text`); call them with
+// `view.state.doc`.
+import { editsToChanges, lspPosToOffset, lspToCm } from '@/editor/positions';
 
 // --- .koi token highlighter -------------------------------------------------
 
@@ -268,135 +274,9 @@ const sharedTheme = EditorView.theme({
   },
 });
 
-// --- tiny markdown renderer -------------------------------------------------
-// Shared by the hover tooltip here and the Glossary pane in ide.ts. We render only
-// the small subset of markdown the language server produces (headings, lists,
-// fenced/inline code, bold/italic, paragraphs) rather than pulling in a dependency.
-// Source is trusted (the LSP server) but still HTML-escaped before assembly.
-
-function escapeHtml(s: string): string {
-  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-}
-
-function inlineMd(text: string): string {
-  let out = text;
-  out = out.replace(/`([^`]+)`/g, (_m, c) => `<code>${c}</code>`);
-  out = out.replace(/\*\*([^*]+)\*\*/g, (_m, c) => `<strong>${c}</strong>`);
-  out = out.replace(/(^|[^*])\*([^*\n]+)\*/g, (_m, p, c) => `${p}<em>${c}</em>`);
-  out = out.replace(/(^|[^_])_([^_\n]+)_/g, (_m, p, c) => `${p}<em>${c}</em>`);
-  return out;
-}
-
-// GFM tables. The glossary emitter produces `| Field | Type | Description |` blocks, so split a row
-// into trimmed cells (honoring an escaped `\|` inside a cell) and recognise the `|---|:--:|`
-// separator row that promotes the preceding row to a header.
-function splitTableRow(line: string): string[] {
-  let s = line.trim();
-  if (s.startsWith('|')) s = s.slice(1);
-  if (s.endsWith('|')) s = s.slice(0, -1);
-  return s.split(/(?<!\\)\|/).map((c) => c.trim().replace(/\\\|/g, '|'));
-}
-
-function isTableSeparator(line: string): boolean {
-  if (!line.includes('-')) return false;
-  const cells = splitTableRow(line);
-  return cells.length > 0 && cells.every((c) => /^:?-+:?$/.test(c));
-}
-
-/** Render a small subset of markdown to an HTML string. */
-export function renderMarkdown(md: string): string {
-  const lines = escapeHtml(md.replace(/\r\n/g, '\n')).split('\n');
-  const html: string[] = [];
-  let i = 0;
-  let listOpen = false;
-  let paragraph: string[] = [];
-
-  const flushParagraph = () => {
-    if (paragraph.length) {
-      html.push(`<p>${inlineMd(paragraph.join(' '))}</p>`);
-      paragraph = [];
-    }
-  };
-  const closeList = () => {
-    if (listOpen) {
-      html.push('</ul>');
-      listOpen = false;
-    }
-  };
-
-  while (i < lines.length) {
-    const line = lines[i];
-
-    const fence = line.match(/^\s*```(.*)$/);
-    if (fence) {
-      flushParagraph();
-      closeList();
-      const body: string[] = [];
-      i++;
-      while (i < lines.length && !/^\s*```\s*$/.test(lines[i])) {
-        body.push(lines[i]);
-        i++;
-      }
-      i++; // skip closing fence
-      html.push(`<pre><code>${body.join('\n')}</code></pre>`);
-      continue;
-    }
-
-    const heading = line.match(/^(#{1,6})\s+(.*)$/);
-    if (heading) {
-      flushParagraph();
-      closeList();
-      const level = heading[1].length;
-      html.push(`<h${level}>${inlineMd(heading[2].trim())}</h${level}>`);
-      i++;
-      continue;
-    }
-
-    // GFM table: a row immediately followed by a `|---|---|` separator row.
-    if (line.includes('|') && i + 1 < lines.length && isTableSeparator(lines[i + 1])) {
-      flushParagraph();
-      closeList();
-      const headerCells = splitTableRow(line);
-      i += 2; // consume the header row + the separator row
-      const bodyRows: string[] = [];
-      while (i < lines.length && lines[i].includes('|') && lines[i].trim() !== '') {
-        const cells = splitTableRow(lines[i]);
-        bodyRows.push('<tr>' + cells.map((c) => `<td>${inlineMd(c)}</td>`).join('') + '</tr>');
-        i++;
-      }
-      const head = '<thead><tr>' + headerCells.map((c) => `<th>${inlineMd(c)}</th>`).join('') + '</tr></thead>';
-      html.push(`<table>${head}<tbody>${bodyRows.join('')}</tbody></table>`);
-      continue;
-    }
-
-    const item = line.match(/^\s*[-*+]\s+(.*)$/);
-    if (item) {
-      flushParagraph();
-      if (!listOpen) {
-        html.push('<ul>');
-        listOpen = true;
-      }
-      html.push(`<li>${inlineMd(item[1])}</li>`);
-      i++;
-      continue;
-    }
-
-    if (line.trim() === '') {
-      flushParagraph();
-      closeList();
-      i++;
-      continue;
-    }
-
-    closeList();
-    paragraph.push(line.trim());
-    i++;
-  }
-
-  flushParagraph();
-  closeList();
-  return html.join('\n');
-}
+// renderMarkdown was extracted to ./markdown (imported at the top of this file) so it can be unit-tested
+// without a CodeMirror view; re-export it so `@/editor/editor` consumers keep resolving it here.
+export { renderMarkdown };
 
 // --- hover tooltips ---------------------------------------------------------
 
@@ -530,40 +410,15 @@ export interface KoineEditor {
   destroy(): void;
 }
 
-/** Map a 0-based LSP diagnostic to a CodeMirror diagnostic (offset-based). */
-function lspToCm(view: EditorView, d: LspDiagnostic): CmDiagnostic {
-  const doc = view.state.doc;
-  const clampLine0 = (l: number) => Math.min(Math.max(l, 0), doc.lines - 1); // LSP line is 0-based
-  const startLine = doc.line(clampLine0(d.range.start.line) + 1); // doc.line() is 1-based
-  const endLine = doc.line(clampLine0(d.range.end.line) + 1);
-  const from = Math.min(startLine.from + d.range.start.character, startLine.to);
-  let to = Math.min(endLine.from + d.range.end.character, endLine.to);
-  if (to <= from) to = Math.min(from + 1, doc.length);
-  return {
-    from,
-    to,
-    severity: d.severity === 2 ? 'warning' : 'error',
-    message: (d.code != null ? d.code + ': ' : '') + d.message,
-  };
-}
-
 /** Apply PUSH-based diagnostics from a publishDiagnostics notification. */
 export function setEditorDiagnostics(view: EditorView, diags: LspDiagnostic[]): void {
-  view.dispatch(setDiagnostics(view.state, diags.map((d) => lspToCm(view, d))));
-}
-
-/** Convert a 0-based LSP {line,character} to a CodeMirror document offset (clamped). */
-function lspPosToOffset(view: EditorView, line: number, character: number): number {
-  const doc = view.state.doc;
-  const ln = Math.min(Math.max(line, 0), doc.lines - 1) + 1; // doc.line() is 1-based
-  const lineInfo = doc.line(ln);
-  return Math.min(lineInfo.from + Math.max(character, 0), lineInfo.to);
+  view.dispatch(setDiagnostics(view.state, diags.map((d) => lspToCm(view.state.doc, d))));
 }
 
 /** Jump the editor to a 0-based {line,character}, selecting through to an end position. */
 function jumpToRange(view: EditorView, start: { line: number; character: number }, end: { line: number; character: number }): void {
-  const anchor = lspPosToOffset(view, start.line, start.character);
-  const head = lspPosToOffset(view, end.line, end.character);
+  const anchor = lspPosToOffset(view.state.doc, start.line, start.character);
+  const head = lspPosToOffset(view.state.doc, end.line, end.character);
   view.dispatch({ selection: { anchor, head }, scrollIntoView: true });
   view.focus();
 }
@@ -607,8 +462,8 @@ export function createKoineEditor(opts: KoineEditorOptions): KoineEditor {
       return;
     }
     if (!prep) return;
-    const anchor = lspPosToOffset(view, prep.range.start.line, prep.range.start.character);
-    const end = lspPosToOffset(view, prep.range.end.line, prep.range.end.character);
+    const anchor = lspPosToOffset(view.state.doc, prep.range.start.line, prep.range.start.character);
+    const end = lspPosToOffset(view.state.doc, prep.range.end.line, prep.range.end.character);
     const placeholder = prep.placeholder ?? view.state.sliceDoc(anchor, end);
     const renameAt = prep.range.start;
     showRenameInput(view, anchor, placeholder, (newName) => {
@@ -800,16 +655,9 @@ export function createKoineEditor(opts: KoineEditorOptions): KoineEditor {
     gotoDefinition,
     applyEdits(edits: TextEdit[]) {
       if (!edits.length) return;
-      // Convert each LSP range to offsets, then apply sorted by `from` descending so
-      // earlier edits don't shift the offsets of later ones.
-      const changes = edits
-        .map((e) => ({
-          from: lspPosToOffset(view, e.range.start.line, e.range.start.character),
-          to: lspPosToOffset(view, e.range.end.line, e.range.end.character),
-          insert: e.newText,
-        }))
-        .sort((a, b) => b.from - a.from);
-      view.dispatch({ changes });
+      // Offset conversion + the descending `from` sort (so earlier edits don't shift later offsets)
+      // live in editsToChanges — applied here as a single transaction.
+      view.dispatch({ changes: editsToChanges(view.state.doc, edits) });
     },
     setLineWrap(on: boolean) {
       view.dispatch({ effects: lineWrap.reconfigure(on ? EditorView.lineWrapping : []) });
