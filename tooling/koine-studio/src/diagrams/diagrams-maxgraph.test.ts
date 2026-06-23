@@ -203,7 +203,7 @@ describe('edges', () => {
     try {
       const edge = handle.cells.get('Ordering.Order')!.getEdgeAt(0);
       expect(edge).toBeTruthy();
-      expect(edge!.getStyle().startArrow).toBe('diamondThin');
+      expect(edge!.getStyle().startArrow).toBe('diamond');
       expect(edge!.getStyle().startFill).toBe(true);
       expect(edge!.getStyle().endArrow).not.toBe('none');
       // the DiagramEdge stays on the cell so a disconnect gesture can read its backing field

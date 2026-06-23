@@ -280,23 +280,24 @@ function runTwoLevelLayout(mx: Mx, graph: MxGraph): void {
 }
 
 /**
- * Place a small multiplicity label near one end of an edge, ON the connector (not on the node box).
- * The relative x runs -1 (source end) → +1 (target end); using ±0.82 puts the label ~9% in from the end,
- * clearly on the edge line but close to the node it describes (x=±1 sat right on the node border, so a
- * fixed pixel offset pushed it INTO the box). A small upward offset lifts it just off the line.
+ * Place a small multiplicity label near one end of an edge — ON the connector, but clear of the
+ * arrowhead/diamond AND clear of the node box. The relative x runs -1 (source) → +1 (target); ±0.78
+ * sits ~11% in from the end (past the marker, which lives at the very tip), and an upward perpendicular
+ * lift floats it just above the line (most edges enter a node horizontally). A pill-style background
+ * keeps it legible where it crosses the line.
  */
 function addEndLabel(mx: Mx, graph: MxGraph, edge: MxCell, text: string, at: -1 | 1): void {
   const lbl = graph.insertVertex({
     parent: edge,
     value: text,
-    position: [at * 0.82, 0],
+    position: [at * 0.78, 0],
     size: [0, 0],
     relative: true,
-    style: { fontColor: 'var(--koi-muted)', labelBackgroundColor: 'var(--koi-surface)', fontSize: 11, resizable: false },
+    style: { fontColor: 'var(--koi-fg)', labelBackgroundColor: 'var(--koi-paper)', fontSize: 11, fontStyle: 1, resizable: false },
   });
   const geo = lbl.getGeometry();
   if (geo) {
-    geo.offset = new mx.Point(0, -9); // lift off the line for readability (background keeps it legible)
+    geo.offset = new mx.Point(0, -12); // lift clear of the line + the arrowhead at the tip
     graph.getDataModel().setGeometry(lbl, geo);
   }
 }
@@ -543,13 +544,14 @@ export function buildCanvas(
         style: {
           edgeStyle: 'orthogonalEdgeStyle', // registered name → CSP-safe (no eval)
           rounded: true,
-          strokeColor: 'var(--koi-diagram-edge)', // a touch brighter than the node borders so relationships trace
-          fontColor: 'var(--koi-muted)',
-          startArrow: composition ? 'diamondThin' : 'none',
+          strokeColor: 'var(--koi-diagram-edge)', // assertive enough to trace across the canvas
+          strokeWidth: 1.4,
+          fontColor: 'var(--koi-fg)',
+          startArrow: composition ? 'diamond' : 'none',
           startFill: composition,
-          startSize: 12,
+          startSize: 13,
           endArrow: 'open',
-          endSize: 10,
+          endSize: 11,
         },
       });
       if (composition) {

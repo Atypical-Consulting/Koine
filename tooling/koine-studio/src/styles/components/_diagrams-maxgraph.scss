@@ -68,17 +68,20 @@
 }
 
 .koi-node__head {
-  padding: 4px var(--koi-space-2) 5px;
+  padding: 5px var(--koi-space-2);
 }
+// Header sits on a SOLID kind-colour bar (set per-kind below) — text is a constant near-black for strong
+// contrast on every (mid-light) DDD colour, in both themes (the palette is theme-independent).
 .koi-node__stereo {
-  color: var(--koi-muted);
+  color: rgba(9, 14, 22, 0.62);
   font-size: 9.5px;
   font-style: italic;
   letter-spacing: 0.02em;
   line-height: 1.2;
 }
 .koi-node__title {
-  font-weight: 700;
+  color: #0b0f17;
+  font-weight: 800;
   font-size: 13px;
   letter-spacing: -0.01em;
   line-height: 1.3;
@@ -117,23 +120,20 @@ $ddd-kinds: (
 );
 
 @each $kind, $color in $ddd-kinds {
-  // A thin kind-tinted outline + a subtle wash behind the header read the construct's KIND at a glance,
-  // while the body stays neutral so member rows stay maximally legible (the data is the point).
+  // A solid kind-colour header bar + a full kind-colour outline state the construct's KIND boldly; the
+  // body stays neutral so member rows stay maximally legible (the data is the point).
   .koi-node--class[data-kind='#{$kind}'] {
-    border-color: color-mix(in srgb, #{$color} 62%, var(--koi-line));
+    border-color: #{$color};
   }
   .koi-node--class[data-kind='#{$kind}'] .koi-node__head {
-    background: color-mix(in srgb, #{$color} 17%, transparent);
+    background: #{$color};
   }
   .koi-node--class[data-kind='#{$kind}'] .koi-node__compartment {
-    border-top-color: color-mix(in srgb, #{$color} 24%, var(--koi-line));
-  }
-  .koi-node--class[data-kind='#{$kind}'] .koi-node__title {
-    color: #{$color};
+    border-top-color: color-mix(in srgb, #{$color} 38%, var(--koi-line));
   }
   .koi-node--simple[data-kind='#{$kind}'] {
-    background: color-mix(in srgb, #{$color} 18%, var(--koi-surface));
-    border-color: color-mix(in srgb, #{$color} 62%, var(--koi-line));
+    background: color-mix(in srgb, #{$color} 26%, var(--koi-surface));
+    border-color: #{$color};
   }
 }
 
