@@ -1,4 +1,5 @@
 import type { LspDiagnostic } from '@/lsp/lsp';
+import { severityCategory } from '@/lsp/severity';
 
 // The single home for classifying a diagnostics set and building its count strings (issue #193). Three
 // call sites used to duplicate this: DiagnosticsStripPanel's count text, editorSession.renderStrip's
@@ -25,8 +26,10 @@ export interface DiagnosticsSummary {
  * join `parts` with their own separator and apply their own clean/sentinel wording.
  */
 export function diagnosticsSummary(diags: LspDiagnostic[]): DiagnosticsSummary {
-  const errors = diags.filter((d) => d.severity === 1 || d.severity == null).length;
-  const warnings = diags.filter((d) => d.severity === 2).length;
+  // Errors = severity 1 / unset (the `error` category); warnings = severity 2. The `info`/`hint`
+  // categories (severity 3/4) are intentionally counted as neither — see lsp/severity.ts.
+  const errors = diags.filter((d) => severityCategory(d.severity) === 'error').length;
+  const warnings = diags.filter((d) => severityCategory(d.severity) === 'warning').length;
   const parts: string[] = [];
   if (errors) parts.push(`${errors} error${errors === 1 ? '' : 's'}`);
   if (warnings) parts.push(`${warnings} warning${warnings === 1 ? '' : 's'}`);

@@ -13,6 +13,7 @@ import {
   type InspectorControllerDeps,
   type InspectorControllerLsp,
 } from '@/shell/inspectorController';
+import { createAppStore } from '@/store/index';
 import type {
   CheckResult,
   ContextMapResult,
@@ -211,6 +212,9 @@ function makeDeps(lsp: Lsp, over: Partial<InspectorControllerDeps> = {}): Inspec
     editor: fakeEditor(),
     output: fakeOutput(),
     platform: fakePlatform(),
+    // A fresh store per controller — the injection's payoff: tests no longer share (and leak through) the
+    // app-wide singleton, so the per-instance boot reset is exercised on isolated state.
+    store: createAppStore(),
     activeUri: () => 'file:///work/model.koi',
     folderRootToken: () => '',
     initialTarget: 'csharp',

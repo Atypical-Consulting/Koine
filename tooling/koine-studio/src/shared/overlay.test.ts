@@ -13,6 +13,36 @@ function tab(target: Element, shiftKey = false): void {
   );
 }
 
+describe("createModal chrome", () => {
+  test("builds the dialog structure with role/aria, header, body and footer", () => {
+    const { backdrop, body } = createModal({ title: "Preferences", variant: "koi-modal-wide" });
+
+    expect(backdrop.className).toBe("koi-modal-backdrop");
+    expect(backdrop.hidden).toBe(true);
+
+    const modal = backdrop.querySelector(".koi-modal")!;
+    expect(modal.classList.contains("koi-modal-wide")).toBe(true);
+    expect(modal.getAttribute("role")).toBe("dialog");
+    expect(modal.getAttribute("aria-modal")).toBe("true");
+    expect(modal.getAttribute("aria-label")).toBe("Preferences"); // defaults to the title
+
+    expect(modal.querySelector(".koi-modal-title")!.textContent).toBe("Preferences");
+    expect(body.className).toBe("koi-modal-body");
+    expect(backdrop.querySelector(".koi-modal-footer")).not.toBeNull();
+
+    const closeBtn = backdrop.querySelector<HTMLButtonElement>(".koi-modal-close")!;
+    expect(closeBtn.type).toBe("button");
+    expect(closeBtn.getAttribute("aria-label")).toBe("Close");
+    expect(closeBtn.textContent).toBe("✕");
+  });
+
+  test("aria-label can be overridden independently of the visible title", () => {
+    const { backdrop } = createModal({ title: "About", ariaLabel: "About Koine Studio" });
+    expect(backdrop.querySelector(".koi-modal")!.getAttribute("aria-label")).toBe("About Koine Studio");
+    expect(backdrop.querySelector(".koi-modal-title")!.textContent).toBe("About");
+  });
+});
+
 describe("createModal focus trap", () => {
   test("Tab from the last focusable element wraps to the first", () => {
     const modalHandle = createModal({ title: "Trap me" });
