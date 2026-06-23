@@ -1,6 +1,14 @@
 import { describe, expect, test } from 'vitest';
 import { createStore } from 'zustand/vanilla';
-import { createUiChromeSlice, DEFAULT_CENTER, isValidCenter, type UiChromeSlice } from '@/store/slices/uiChrome';
+import { createAppStore } from '@/store/index';
+import {
+  createUiChromeSlice,
+  DEFAULT_CENTER,
+  DEFAULT_MOBILE_ZONE,
+  isValidCenter,
+  isValidMobileZone,
+  type UiChromeSlice,
+} from '@/store/slices/uiChrome';
 
 const make = () => createStore<UiChromeSlice>((set, get) => createUiChromeSlice(set, get));
 
@@ -36,5 +44,22 @@ describe('uiChrome slice', () => {
     expect(s.getState().outlineFilter).toBe('Order');
     s.getState().setOutlineFilter('');
     expect(s.getState().outlineFilter).toBe('');
+  });
+});
+
+describe('uiChrome mobileZone', () => {
+  test('defaults to code', () => {
+    const store = createAppStore();
+    expect(store.getState().mobileZone).toBe('code');
+    expect(DEFAULT_MOBILE_ZONE).toBe('code');
+  });
+  test('setMobileZone updates the field', () => {
+    const store = createAppStore();
+    store.getState().setMobileZone('diagram');
+    expect(store.getState().mobileZone).toBe('diagram');
+  });
+  test('isValidMobileZone guards bad values', () => {
+    expect(isValidMobileZone('files')).toBe(true);
+    expect(isValidMobileZone('nope')).toBe(false);
   });
 });
