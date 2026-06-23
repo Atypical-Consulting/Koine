@@ -55,7 +55,7 @@ jobs:
       # No central package management / lock files, so cache the global NuGet
       # package folder keyed on the project files that pin versions.
       - name: Cache NuGet
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: ~/.nuget/packages
           key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj', 'Directory.Build.props') }}
@@ -104,7 +104,7 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Cache Cargo build
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: |
             ~/.cargo/registry
@@ -165,7 +165,7 @@ jobs:
           dotnet-quality: preview
 
       - name: Cache NuGet
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: ~/.nuget/packages
           key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj', 'Directory.Build.props') }}
@@ -173,7 +173,7 @@ jobs:
 
       # The browser compiler is a .NET WebAssembly module; building it needs the wasm workloads.
       - name: Cache wasm workloads
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: |
             ~/.dotnet/sdk-manifests
