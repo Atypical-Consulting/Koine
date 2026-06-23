@@ -160,8 +160,9 @@ public sealed partial class DocsEmitter
     /// <summary>
     /// The bounded context's class diagram: a node for every drawable type the context declares — its
     /// standalone value objects/enums/entities/events PLUS the types nested in its aggregates (the
-    /// aggregate root carries <c>&lt;&lt;aggregate root&gt;&gt;</c>) — and a composition edge for every
-    /// field referencing another in-context type. Built from the same <see cref="ContextClassModel"/> the
+    /// aggregate root carries <c>&lt;&lt;aggregate root&gt;&gt;</c>) — and an edge for every field
+    /// referencing another in-context type (a composition for an owned part, an association for a by-id
+    /// entity reference). Built from the same <see cref="ContextClassModel"/> the
     /// Markdown <see cref="EmitContextClassDiagram"/> walks, so the structured graph and the rendered
     /// diagram never drift. Returns <c>null</c> when the context declares no drawable type.
     /// </summary>
@@ -185,8 +186,10 @@ public sealed partial class DocsEmitter
             .Select(e => new DiagramEdge(
                 e.From, e.To, null,
                 e.Cardinality,
-                SourceCardinality: "1",
-                ArrowKind: "composition",
+                // The owner-end "1" is the composition diamond's multiplicity; a by-id association has no
+                // owner end (it is a reference, not ownership), so it carries only the target multiplicity.
+                SourceCardinality: e.ArrowKind == "composition" ? "1" : null,
+                ArrowKind: e.ArrowKind,
                 BackingMember: e.BackingMember))
             .ToList();
 
