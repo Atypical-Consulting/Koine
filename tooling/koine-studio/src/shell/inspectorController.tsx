@@ -69,6 +69,7 @@ import { GlossaryPanel } from '@/model/GlossaryPanel';
 import { DocsPanelHost } from '@/docs/DocsPanelHost';
 import type { StoreApi } from 'zustand/vanilla';
 import type { AppState } from '@/store/index';
+import { guardedLoad } from '@/shell/guardedLoad';
 import { DEFAULT_CENTER, isValidCenter, type RightView } from '@/store/slices/uiChrome';
 import type { DomainIndex } from '@/ai/aiPanel';
 import { currentTheme } from '@/settings/theme';
@@ -602,21 +603,20 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   // imperatively via docMessage, which unmounts any prior Preact tree first — so the reconciler and the
   // imperative write never fight over the same node (the prior-tasks hazard).
   async function loadGlossary(): Promise<void> {
-    const token = appStore.getState().currentToken('glossary');
-    docMessage(glossaryView, 'Loading glossary…');
-    try {
-      const model = await lsp.glossaryModel();
-      if (token !== appStore.getState().currentToken('glossary')) return; // superseded by an edit — discard
-      if (!model.entries.length) {
-        docMessage(glossaryView, 'No concepts yet — declare some types, or fix syntax errors to populate the glossary.');
-      } else {
-        renderPanel(glossaryView, <GlossaryPanel store={appStore} model={model} handlers={glossaryHandlers} />);
-      }
-      appStore.getState().markLoaded('glossary', token);
-    } catch (e) {
-      if (token !== appStore.getState().currentToken('glossary')) return;
-      docMessage(glossaryView, 'Glossary request failed: ' + String(e), 'error');
-    }
+    await guardedLoad({
+      store: appStore,
+      key: 'glossary',
+      loading: () => docMessage(glossaryView, 'Loading glossary…'),
+      fetch: () => lsp.glossaryModel(),
+      render: (model) => {
+        if (!model.entries.length) {
+          docMessage(glossaryView, 'No concepts yet — declare some types, or fix syntax errors to populate the glossary.');
+        } else {
+          renderPanel(glossaryView, <GlossaryPanel store={appStore} model={model} handlers={glossaryHandlers} />);
+        }
+      },
+      onError: (e) => docMessage(glossaryView, 'Glossary request failed: ' + String(e), 'error'),
+    });
   }
 
   // Wires the pure (testable) glossary view to the editor + LSP: jump-to-source (here) and
@@ -1325,18 +1325,16 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   // fetch — a token captured before the await is compared after, so a superseded fetch (an edit bumped
   // the token) can't clobber a newer render; markLoaded only takes for the token it fetched.
   async function loadContextMapPanel(): Promise<void> {
-    const token = appStore.getState().currentToken('contextmap');
-    docMessage(contextMapView, 'Loading context map…');
-    try {
-      const res = await lsp.contextMap();
-      if (token !== appStore.getState().currentToken('contextmap')) return;
-      contextMapView.innerHTML = `<div class="koi-md">${renderContextMapHtml(res)}</div>`;
-      appStore.getState().markLoaded('contextmap', token);
-    } catch (e) {
-      if (token === appStore.getState().currentToken('contextmap')) {
-        docMessage(contextMapView, 'Context map request failed: ' + String(e), 'error');
-      }
-    }
+    await guardedLoad({
+      store: appStore,
+      key: 'contextmap',
+      loading: () => docMessage(contextMapView, 'Loading context map…'),
+      fetch: () => lsp.contextMap(),
+      render: (res) => {
+        contextMapView.innerHTML = `<div class="koi-md">${renderContextMapHtml(res)}</div>`;
+      },
+      onError: (e) => docMessage(contextMapView, 'Context map request failed: ' + String(e), 'error'),
+    });
   }
 
   // Events + Relationships are Preact panels mounted into their hosts; each subscribes to the store's
@@ -1347,37 +1345,34 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   // fetched. The loading/error states write the host imperatively via docMessage, which unmounts the
   // prior Preact tree first — so the reconciler and the imperative write never fight over the node.
   async function loadEventsPanel(): Promise<void> {
-    const token = appStore.getState().currentToken('events');
-    docMessage(eventsPanel, 'Loading events…');
-    try {
-      const graph = await bottomGraph();
-      if (token !== appStore.getState().currentToken('events')) return;
-      renderPanel(eventsPanel, <EventsPanel store={appStore} graph={graph} handlers={bottomTableHandlers} />);
-      appStore.getState().markLoaded('events', token);
-    } catch (e) {
-      if (token !== appStore.getState().currentToken('events')) return;
-      docMessage(eventsPanel, 'Events request failed: ' + String(e), 'error');
-    }
+    await guardedLoad({
+      store: appStore,
+      key: 'events',
+      loading: () => docMessage(eventsPanel, 'Loading events…'),
+      fetch: () => bottomGraph(),
+      render: (graph) =>
+        renderPanel(eventsPanel, <EventsPanel store={appStore} graph={graph} handlers={bottomTableHandlers} />),
+      onError: (e) => docMessage(eventsPanel, 'Events request failed: ' + String(e), 'error'),
+    });
   }
 
   async function loadRelationshipsPanel(): Promise<void> {
-    const token = appStore.getState().currentToken('relationships');
-    docMessage(relationshipsPanel, 'Loading relationships…');
-    try {
-      const [graph, ctxMap] = await Promise.all([
-        bottomGraph(),
-        lsp.contextMap().catch(() => ({ contexts: [], relations: [] }) as ContextMapResult),
-      ]);
-      if (token !== appStore.getState().currentToken('relationships')) return;
-      renderPanel(
-        relationshipsPanel,
-        <RelationshipsPanel store={appStore} graph={graph} contextMap={ctxMap} handlers={bottomTableHandlers} />,
-      );
-      appStore.getState().markLoaded('relationships', token);
-    } catch (e) {
-      if (token !== appStore.getState().currentToken('relationships')) return;
-      docMessage(relationshipsPanel, 'Relationships request failed: ' + String(e), 'error');
-    }
+    await guardedLoad({
+      store: appStore,
+      key: 'relationships',
+      loading: () => docMessage(relationshipsPanel, 'Loading relationships…'),
+      fetch: () =>
+        Promise.all([
+          bottomGraph(),
+          lsp.contextMap().catch(() => ({ contexts: [], relations: [] }) as ContextMapResult),
+        ]),
+      render: ([graph, ctxMap]) =>
+        renderPanel(
+          relationshipsPanel,
+          <RelationshipsPanel store={appStore} graph={graph} contextMap={ctxMap} handlers={bottomTableHandlers} />,
+        ),
+      onError: (e) => docMessage(relationshipsPanel, 'Relationships request failed: ' + String(e), 'error'),
+    });
   }
 
   // Mark the Events/Relationships/Context Map tables stale (called from invalidateDocViews on any model
