@@ -2,7 +2,7 @@
 // role=tree, the settings rows, the modal chrome, …), and the `createElement` + `className =` +
 // `setAttribute` + `addEventListener` quartet was repeated hundreds of times. `el()` collapses that
 // into one expression while staying framework-free. Scope is HTML elements only — SVG needs
-// createElementNS and stays in its own builder (diagrams-svg.ts).
+// createElementNS and is out of scope here.
 
 export type ElChild = Node | string | null | undefined | false;
 
