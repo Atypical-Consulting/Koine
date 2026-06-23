@@ -46,7 +46,6 @@ import { sanitizeProjectName } from '@/export/generateProject';
 import { buildSourceZip } from '@/export/sourceZip';
 import { formatChord } from '@/shared/platform';
 import {
-  DIAGRAM_ADD_TYPE_EVENT,
   DIAGRAM_CONNECT_EVENT,
   DIAGRAM_DISCONNECT_EVENT,
   DIAGRAM_RELAYOUT_EVENT,
@@ -615,8 +614,6 @@ export function init(): void {
     const detail = (e as CustomEvent<DiagramDisconnectDetail>).detail;
     if (detail) void applyDiagramDisconnect(detail);
   });
-  diagramsView.addEventListener(DIAGRAM_ADD_TYPE_EVENT, () => void applyDiagramAddType());
-
   // Empty-canvas doorway: seed a validated starter for the picked concept. Non-destructive — an untouched
   // BLANK seed is replaced outright (the common first-run case), otherwise the starter is appended so no
   // existing work is lost. The buffer edit fires onDocEdited → the canvas re-renders with real nodes.
