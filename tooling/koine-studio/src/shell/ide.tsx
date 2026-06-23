@@ -76,6 +76,7 @@ import { createHistoryController } from '@/shell/historyController';
 import { HistoryControls } from '@/shell/HistoryControls';
 import { MobileZoneBar } from '@/shell/MobileZoneBar';
 import { type MobileZone } from '@/store/slices/uiChrome';
+import { BP_NARROW } from '@/shared/breakpoint';
 import { UnsavedIndicator } from '@/shell/UnsavedIndicator';
 import { WorkspaceProblemsBadge } from '@/diagnostics/WorkspaceProblemsBadge';
 import { StoreInspector } from '@/shell/StoreInspector';
@@ -866,9 +867,16 @@ export function init(): void {
   }
   render(<MobileZoneBar store={appStore} onSelect={selectMobileZone} />, el('mobile-zone-bar-host'));
   splitEl.dataset.mobileZone = appStore.getState().mobileZone;
-  appStore.subscribe((s) => {
-    splitEl.dataset.mobileZone = s.mobileZone;
+  // Mirror only when mobileZone actually changes — the listener fires on every store write, so guard
+  // on prevState (the inspectorController idiom) to avoid rewriting the attribute on unrelated updates.
+  appStore.subscribe((s, prev) => {
+    if (s.mobileZone !== prev.mobileZone) splitEl.dataset.mobileZone = s.mobileZone;
   });
+  // On a narrow (phone) first paint, land on the default mobile zone's surface so the bottom bar's
+  // active tab and the visible #center surface agree from the start — otherwise the bar highlights the
+  // default 'code' zone while #center still shows the desktop-restored Visual surface until the first
+  // tap. Gated on BP_NARROW (the JS mirror of $bp-narrow) so the desktop shell keeps its restored center.
+  if (window.innerWidth <= BP_NARROW) selectMobileZone(appStore.getState().mobileZone);
   // Switching files: repaint the active file's diagnostics, invalidate the doc views so they re-fetch,
   // and follow the new file's bounded context. Preserves the exact effect order of the old activateFile.
   workspace.onActiveChanged((uri) => {

@@ -101,12 +101,11 @@ body.resizing-y {
     grid-column: 1;
   }
 
-  /* Hide all zones, then reveal the active one. */
+  /* Hide all three zones, then reveal the active one (the show rules below come later at equal
+     specificity, so they win for the active zone; #center is revealed for both code and diagram). */
   #split[data-mobile-zone] #leftrail,
+  #split[data-mobile-zone] #center,
   #split[data-mobile-zone] #right {
-    display: none;
-  }
-  #split[data-mobile-zone]:not([data-mobile-zone='code']):not([data-mobile-zone='diagram']) #center {
     display: none;
   }
 
