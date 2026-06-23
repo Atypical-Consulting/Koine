@@ -479,7 +479,10 @@ export function buildCanvas(
       const container = graph.insertVertex({
         parent: root,
         id: `ctx:${ctx}`,
-        value: ctx,
+        // A bounded context is a CONCEPTUAL boundary, so its name reads as a territory label (uppercase,
+        // matching the Explorer's context headings) and the box is drawn DASHED — a region of the model,
+        // not another node. Fill stays transparent so the shared drafting-grid reads straight through it.
+        value: ctx.toUpperCase(),
         position: [0, 0],
         size: [240, 160],
         style: {
@@ -488,12 +491,15 @@ export function buildCanvas(
           fillColor: 'none',
           swimlaneFillColor: 'none',
           strokeColor: 'var(--koi-line)',
+          strokeWidth: 1.5,
+          dashed: true,
+          dashPattern: '6 5',
           fontColor: 'var(--koi-muted)',
           fontStyle: 1, // bold header
-          fontSize: 12,
+          fontSize: 11,
           verticalAlign: 'top',
           align: 'left',
-          spacingLeft: 10,
+          spacingLeft: 12,
           rounded: true,
         },
       });
