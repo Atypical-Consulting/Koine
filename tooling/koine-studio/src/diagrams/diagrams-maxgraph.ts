@@ -279,20 +279,24 @@ function runTwoLevelLayout(mx: Mx, graph: MxGraph): void {
   }
 }
 
-/** Place a small multiplicity label at one end of an edge (x=-1 source end, x=+1 target end). */
+/**
+ * Place a small multiplicity label near one end of an edge, ON the connector (not on the node box).
+ * The relative x runs -1 (source end) → +1 (target end); using ±0.82 puts the label ~9% in from the end,
+ * clearly on the edge line but close to the node it describes (x=±1 sat right on the node border, so a
+ * fixed pixel offset pushed it INTO the box). A small upward offset lifts it just off the line.
+ */
 function addEndLabel(mx: Mx, graph: MxGraph, edge: MxCell, text: string, at: -1 | 1): void {
   const lbl = graph.insertVertex({
     parent: edge,
     value: text,
-    position: [at, 0],
+    position: [at * 0.82, 0],
     size: [0, 0],
     relative: true,
     style: { fontColor: 'var(--koi-muted)', labelBackgroundColor: 'var(--koi-surface)', fontSize: 11, resizable: false },
   });
-  // Nudge the multiplicity inward along the edge and up off the line so it doesn't sit on the node border.
   const geo = lbl.getGeometry();
   if (geo) {
-    geo.offset = new mx.Point(at < 0 ? 18 : -18, -10);
+    geo.offset = new mx.Point(0, -9); // lift off the line for readability (background keeps it legible)
     graph.getDataModel().setGeometry(lbl, geo);
   }
 }
@@ -757,7 +761,11 @@ export function createMaxGraphRenderer(): DiagramRenderer {
       root.appendChild(surface);
 
       const handle = buildCanvas(mx, surface, merged, savedPositions);
-      const chrome = mountChrome(mx, handle, surface);
+      // Chrome (zoom bar + minimap) mounts on `root`, NOT the maxGraph container (`surface`): maxGraph's
+      // panGraph reparents every non-SVG child of its container into a shifted preview div while panning
+      // (e.g. dragging the minimap), which would yank the controls/minimap to the top-left. Keeping them on
+      // the outer wrapper makes them immune. `root` is position:relative (scss) so they still anchor to it.
+      const chrome = mountChrome(mx, handle, root);
       const dispose = (): void => {
         chrome.dispose();
         handle.dispose();

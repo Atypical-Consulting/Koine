@@ -10,6 +10,9 @@
 .koi-diagrams-single {
   height: 100%;
   min-height: 0;
+  // Positioning context for the zoom bar + minimap (which mount on this wrapper, not the maxGraph
+  // container — see diagrams-maxgraph.ts: panGraph would otherwise shift them while panning).
+  position: relative;
 }
 
 .koi-canvas {
