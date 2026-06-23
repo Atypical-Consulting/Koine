@@ -1,0 +1,40 @@
+// Top notice strip. Currently used for the memory-only warning shown when the browser has no OPFS
+// (Safari / Firefox Private): the editor works, but work is session-only, so we tell the user before
+// they lose it. A single, dismissible full-width strip above the toolbar.
+.koi-memory-banner {
+  display: flex;
+  align-items: center;
+  gap: var(--koi-space-2, 0.6rem);
+  padding: var(--koi-space-1-5, 0.5rem) var(--koi-space-3, 0.85rem);
+  background: color-mix(in srgb, var(--koi-warn, #d8a200) 18%, var(--koi-surface));
+  border-bottom: 1px solid color-mix(in srgb, var(--koi-warn, #d8a200) 45%, transparent);
+  color: var(--koi-fg);
+  font-size: var(--koi-text-base, 0.85rem);
+  line-height: 1.4;
+}
+
+.koi-memory-banner-msg {
+  flex: 1 1 auto;
+}
+
+.koi-memory-banner-dismiss {
+  flex: 0 0 auto;
+  background: transparent;
+  border: none;
+  color: var(--koi-muted);
+  cursor: pointer;
+  font-size: 1rem;
+  line-height: 1;
+  padding: 0.15rem 0.35rem;
+  border-radius: var(--koi-radius-xs, 4px);
+
+  &:hover {
+    color: var(--koi-fg);
+    background: color-mix(in srgb, var(--koi-fg) 10%, transparent);
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--koi-accent);
+    outline-offset: 1px;
+  }
+}

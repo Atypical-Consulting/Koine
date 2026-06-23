@@ -115,6 +115,14 @@ export interface Platform {
   readonly canSaveProjects: boolean;
 
   /**
+   * Whether an opened workspace PERSISTS across reloads. True with real storage (OPFS in the browser,
+   * the desktop filesystem on Tauri); false on the browser's in-memory fallback used when OPFS is
+   * unavailable (Safari / Firefox Private) — there the editor still works, but work is session-only,
+   * so the shell warns the user.
+   */
+  readonly persistsWorkspace: boolean;
+
+  /**
    * Write the given files as a named project under the host's workspace root (picked once and
    * remembered), registering the new folder so it reopens like any opened folder. Returns the new
    * folder token, null when the user dismisses the root picker, and throws `already exists` on a

@@ -12,6 +12,7 @@ import {
   moveEntry,
   openDefaultWorkspace,
   materializeWorkspace,
+  persistsWorkspace,
   readTextFile,
   writeTextFile,
   saveProjectToRoot,
@@ -425,10 +426,16 @@ describe('default workspace (OPFS)', () => {
     expect(await readTextFile(`${token2 as string}/model.koi`)).toBe('context Edited {}');
   });
 
-  it('returns null when OPFS is unavailable', async () => {
+  it('falls back to an in-memory workspace when OPFS is unavailable', async () => {
     __resetFsForTest();
     delete (navigator as unknown as { storage?: unknown }).storage;
-    expect(await openDefaultWorkspace('x')).toBeNull();
+    // No OPFS (Safari/Firefox Private): the IDE must still open a usable workspace, just not a
+    // persistent one — so the editor + compiler work in memory instead of dead-ending.
+    const token = await openDefaultWorkspace('context Seed {}');
+    expect(token).not.toBeNull();
+    await listEntries(token as string);
+    expect(await readTextFile(`${token as string}/model.koi`)).toBe('context Seed {}');
+    expect(persistsWorkspace()).toBe(false); // memory-only — work does not survive a reload
   });
 });
 
@@ -481,10 +488,15 @@ describe('materializeWorkspace (examples vs shared imports)', () => {
     expect(await readTextFile(`${token2 as string}/b.koi`)).toBe('context B {}');
   });
 
-  it('returns null when OPFS is unavailable', async () => {
+  it('falls back to an in-memory workspace when OPFS is unavailable', async () => {
     __resetFsForTest();
     delete (navigator as unknown as { storage?: unknown }).storage;
-    expect(await materializeWorkspace('x', [{ relPath: 'a.koi', contents: '' }], true)).toBeNull();
+    // Examples must open on non-OPFS browsers too — backed in memory (session-only).
+    const token = await materializeWorkspace('x', [{ relPath: 'a.koi', contents: 'context A {}' }], true);
+    expect(token).not.toBeNull();
+    await listEntries(token as string);
+    expect(await readTextFile(`${token as string}/a.koi`)).toBe('context A {}');
+    expect(persistsWorkspace()).toBe(false);
   });
 });
 

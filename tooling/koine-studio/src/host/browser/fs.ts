@@ -46,6 +46,83 @@ export function supported(): boolean {
   return typeof fsWin.showDirectoryPicker === 'function';
 }
 
+// --- in-memory workspace backend (no-OPFS fallback) --------------------------
+// Browsers without OPFS (Safari / Firefox in Private mode, very old engines) can't persist a workspace
+// to disk, but the editor + WASM compiler + diagnostics already run entirely in memory — only the
+// persistence layer is missing. Rather than dead-end the IDE, the default workspace, the starter
+// examples and shared-link imports fall back to this tiny in-memory directory tree: a faithful subset
+// of the File System Access handle surface fs.ts drives. Every downstream op (listEntries,
+// create/rename/move/delete, read/write) works against any handle that implements FsDirHandle, so none
+// needs special-casing. The trade-off — work lives only for the session — is surfaced via
+// persistsWorkspace() so the shell can warn the user.
+class MemFile implements FsFileHandle {
+  readonly kind = 'file' as const;
+  constructor(
+    public name: string,
+    private contents = '',
+  ) {}
+  async getFile(): Promise<File> {
+    const text = this.contents;
+    return { text: async () => text } as unknown as File;
+  }
+  async createWritable(): Promise<FsWritable> {
+    return {
+      write: async (data: string | Blob) => {
+        this.contents = typeof data === 'string' ? data : await (data as unknown as { text(): Promise<string> }).text();
+      },
+      close: async () => {},
+    };
+  }
+}
+
+class MemDir implements FsDirHandle {
+  readonly kind = 'directory' as const;
+  private entries = new Map<string, MemFile | MemDir>();
+  constructor(public name: string) {}
+  async *values(): AsyncIterableIterator<FsFileHandle | FsDirHandle> {
+    for (const entry of this.entries.values()) yield entry;
+  }
+  async getFileHandle(name: string, opts?: { create?: boolean }): Promise<FsFileHandle> {
+    const existing = this.entries.get(name);
+    if (existing) {
+      if (existing.kind !== 'file') throw new Error('not a file: ' + name);
+      return existing;
+    }
+    if (!opts?.create) throw new Error('NotFoundError: ' + name);
+    const file = new MemFile(name);
+    this.entries.set(name, file);
+    return file;
+  }
+  async getDirectoryHandle(name: string, opts?: { create?: boolean }): Promise<FsDirHandle> {
+    const existing = this.entries.get(name);
+    if (existing) {
+      if (existing.kind !== 'directory') throw new Error('not a directory: ' + name);
+      return existing;
+    }
+    if (!opts?.create) throw new Error('NotFoundError: ' + name);
+    const dir = new MemDir(name);
+    this.entries.set(name, dir);
+    return dir;
+  }
+  async removeEntry(name: string, _opts?: { recursive?: boolean }): Promise<void> {
+    if (!this.entries.has(name)) throw new Error('NotFoundError: ' + name);
+    this.entries.delete(name);
+  }
+}
+
+// The session's in-memory root, created lazily the first time OPFS is found to be unavailable.
+let memRoot: MemDir | null = null;
+
+/** The workspace backing store: real OPFS when available, else the in-memory fallback (always present). */
+function backingRoot(): Promise<FsDirHandle> {
+  return opfsRoot() ?? Promise.resolve((memRoot ??= new MemDir('memory-root')));
+}
+
+/** Whether an opened workspace PERSISTS across reloads (real OPFS). False on the in-memory fallback. */
+export function persistsWorkspace(): boolean {
+  return opfsRoot() !== null;
+}
+
 // --- in-memory registries ----------------------------------------------------
 const folders = new Map<string, FsDirHandle>();
 const folderNames = new Map<string, string>();
@@ -158,9 +235,13 @@ function opfsRoot(): Promise<FsDirHandle> | null {
   return typeof storage?.getDirectory === 'function' ? storage.getDirectory() : null;
 }
 
-/** Whether a synthetic example workspace can be materialized in this browser (OPFS available). */
+/**
+ * Whether a synthetic example workspace can be materialized in this browser. Always true now: it uses
+ * real OPFS when present and the in-memory fallback otherwise — so examples open everywhere (they just
+ * don't survive a reload without OPFS; see {@link persistsWorkspace}).
+ */
 export function canMaterializeWorkspace(): boolean {
-  return opfsRoot() !== null;
+  return true;
 }
 
 async function writeFilesInto(dir: FsDirHandle, files: { relPath: string; contents: string }[]): Promise<void> {
@@ -181,9 +262,7 @@ export async function materializeWorkspace(
   files: { relPath: string; contents: string }[],
   persist = false,
 ): Promise<string | null> {
-  const rootPromise = opfsRoot();
-  if (!rootPromise) return null;
-  const root = await rootPromise;
+  const root = await backingRoot(); // OPFS when available, else the in-memory fallback
   const dirName = `example-${name}`;
 
   if (persist) {
@@ -197,7 +276,9 @@ export async function materializeWorkspace(
     folders.set(token, dir);
     folderNames.set(token, name);
     dirHandles.set(token, dir);
-    await idbPut(token, dir);
+    // Only persist the handle when storage actually survives a reload — an in-memory MemDir isn't
+    // structured-cloneable, and a memory workspace is session-only anyway.
+    if (persistsWorkspace()) await idbPut(token, dir);
     return token;
   }
 
@@ -312,14 +393,14 @@ async function hasAnyKoi(dir: FsDirHandle): Promise<boolean> {
 }
 
 /**
- * Open the persistent default OPFS workspace, creating + seeding `model.koi` with `seed` the first
- * time (i.e. when it holds no `.koi` yet). Registers it like any opened folder so the explorer + file
- * mutations reuse the folder-mode path. Returns its token, or null when OPFS is unavailable.
+ * Open the persistent default workspace, creating + seeding `model.koi` with `seed` the first time
+ * (i.e. when it holds no `.koi` yet). Registers it like any opened folder so the explorer + file
+ * mutations reuse the folder-mode path. Backed by OPFS when available, else the in-memory fallback —
+ * so it always returns a token in the browser ({@link persistsWorkspace} reports which backing is in
+ * use). The `string | null` return is kept for the desktop host, which can still report no workspace.
  */
 export async function openDefaultWorkspace(seed: string): Promise<string | null> {
-  const rootPromise = opfsRoot();
-  if (!rootPromise) return null;
-  const root = await rootPromise;
+  const root = await backingRoot(); // OPFS when available, else the in-memory fallback (never dead-ends)
   const dir = await root.getDirectoryHandle(DEFAULT_WS_DIR, { create: true });
   if (!(await hasAnyKoi(dir))) {
     const handle = await dir.getFileHandle('model.koi', { create: true });
@@ -821,6 +902,7 @@ export function __resetFsForTest(): void {
   fileHandles.clear();
   dirHandles.clear();
   workspaceRoot = null;
+  memRoot = null;
 }
 
 /** TEST ONLY: clear the IndexedDB store so persisted handles don't leak between tests. */
