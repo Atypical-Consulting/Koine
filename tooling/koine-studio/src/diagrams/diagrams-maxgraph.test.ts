@@ -1,6 +1,6 @@
 import { describe, expect, test, beforeAll, afterEach } from 'vitest';
 import * as mx from '@maxgraph/core';
-import { selectDomainGraphs, buildCanvas, isClassNode, nodeLabelHtml, nodeSize, createMaxGraphRenderer } from '@/diagrams/diagrams-maxgraph';
+import { selectDomainGraphs, buildCanvas, isClassNode, nodeLabelHtml, nodeSize, contextOf, createMaxGraphRenderer } from '@/diagrams/diagrams-maxgraph';
 import type { Diagram, DiagramGraph, DiagramNode, DocsFile } from '@/lsp/lsp';
 
 // happy-dom returns 0 from getBoundingClientRect; maxGraph reads the container rect on construction.
@@ -114,12 +114,20 @@ describe('nodeLabelHtml', () => {
   });
 });
 
+describe('contextOf', () => {
+  test('takes the prefix before the first dot, or empty for an undotted name', () => {
+    expect(contextOf('Ordering.Order')).toBe('Ordering');
+    expect(contextOf('Draft')).toBe('');
+  });
+});
+
 describe('buildCanvas', () => {
-  test('inserts one vertex per merged node and indexes them by id', () => {
+  test('indexes one cell per node and groups dotted nodes into bounded-context containers', () => {
     const merged: DiagramGraph = {
       nodes: [
         node({ id: 'Ordering.Order', qualifiedName: 'Ordering.Order', stereotype: 'aggregate root' }),
         node({ id: 'Ordering.Money', qualifiedName: 'Ordering.Money', members: [{ text: 'amount: Decimal', kind: 'field' }] }),
+        node({ id: 'Billing.Invoice', qualifiedName: 'Billing.Invoice', stereotype: 'aggregate root' }),
         node({ id: 'g0:Draft', qualifiedName: 'Draft', kind: 'state' }),
       ],
       edges: [],
@@ -129,9 +137,30 @@ describe('buildCanvas', () => {
     const handle = buildCanvas(mx, container, merged);
 
     try {
-      expect(handle.graph.getDefaultParent().getChildCount()).toBe(3);
-      expect(handle.cells.size).toBe(3);
+      // every node is indexed by id
+      expect(handle.cells.size).toBe(4);
       expect(handle.cells.get('Ordering.Order')?.value).toMatchObject({ qualifiedName: 'Ordering.Order' });
+      // one container per distinct dotted context, each holding its members
+      expect(handle.containers.size).toBe(2);
+      expect(handle.containers.get('Ordering')?.getChildCount()).toBe(2);
+      expect(handle.containers.get('Billing')?.getChildCount()).toBe(1);
+      // root holds the two containers + the one context-less node
+      expect(handle.graph.getDefaultParent().getChildCount()).toBe(3);
+      expect(handle.cells.get('g0:Draft')?.getParent()).toBe(handle.graph.getDefaultParent());
+    } finally {
+      handle.dispose();
+    }
+  });
+
+  test('a node inside a context is parented to that context container', () => {
+    const merged: DiagramGraph = {
+      nodes: [node({ id: 'Ordering.Order', qualifiedName: 'Ordering.Order', stereotype: 'aggregate root' })],
+      edges: [],
+    };
+    const container = makeContainer();
+    const handle = buildCanvas(mx, container, merged);
+    try {
+      expect(handle.cells.get('Ordering.Order')?.getParent()).toBe(handle.containers.get('Ordering'));
     } finally {
       handle.dispose();
     }

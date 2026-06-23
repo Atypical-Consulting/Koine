@@ -112,11 +112,52 @@ export function selectDomainGraphs(files: DocsFile[]): DiagramGraph[] {
     .filter((g): g is DiagramGraph => !!g && g.nodes.length > 0);
 }
 
-/** A live canvas: the graph, a node-id→cell index (for edges + selection), and a teardown closure. */
+/** A live canvas: the graph, a node-id→cell index (for edges + selection), the per-context container
+ *  cells, and a teardown closure. */
 export interface CanvasHandle {
   graph: MxGraph;
   cells: Map<string, MxCell>;
+  containers: Map<string, MxCell>;
   dispose(): void;
+}
+
+/** The bounded context of a `Context.Name` qualified name (everything before the first dot); '' if none. */
+export function contextOf(qualifiedName: string): string {
+  const dot = qualifiedName.indexOf('.');
+  return dot < 0 ? '' : qualifiedName.slice(0, dot);
+}
+
+/**
+ * Lay out the domain canvas in two levels — REPLACING elkjs. Each bounded-context container's members are
+ * arranged left→right by an inner {@link HierarchicalLayout} that resizes the container to fit; then the
+ * containers (and any context-less root nodes) are arranged by an outer layout. Runs inside one batch.
+ * Wrapped so a headless/measure-less environment (vitest) can't blank the canvas on a layout hiccup —
+ * the model (nodes, parenting) is the tested contract; pixel placement is verified in the running studio.
+ */
+function runTwoLevelLayout(mx: Mx, graph: MxGraph): void {
+  const { HierarchicalLayout } = mx;
+  const root = graph.getDefaultParent();
+  try {
+    graph.batchUpdate(() => {
+      const inner = new HierarchicalLayout(graph, 'east');
+      inner.resizeParent = true;
+      inner.parentBorder = 24;
+      inner.intraCellSpacing = 30;
+      inner.interRankCellSpacing = 70;
+      const count = root.getChildCount();
+      for (let i = 0; i < count; i++) {
+        const child = root.getChildAt(i);
+        if (child?.isVertex() && child.getChildCount() > 0) inner.execute(child);
+      }
+      const outer = new HierarchicalLayout(graph, 'east');
+      outer.intraCellSpacing = 80;
+      outer.interRankCellSpacing = 160;
+      outer.execute(root);
+    });
+  } catch {
+    // A layout failure (e.g. no measurable DOM under happy-dom) must not break the render; the nodes are
+    // still present and addressable, just unarranged until the next relayout.
+  }
 }
 
 /**
@@ -140,9 +181,51 @@ export function buildCanvas(mx: Mx, container: HTMLElement, merged: DiagramGraph
   };
 
   const cells = new Map<string, MxCell>();
-  const parent = graph.getDefaultParent();
+  const containers = new Map<string, MxCell>();
+  const root = graph.getDefaultParent();
+
+  // Group nodes by bounded context (the qualified-name prefix). Context-less nodes (states, bare context
+  // nodes) have no dot and live at the root level.
+  const byContext = new Map<string, DiagramNode[]>();
+  for (const node of merged.nodes) {
+    const ctx = contextOf(node.qualifiedName);
+    const bucket = byContext.get(ctx);
+    if (bucket) bucket.push(node);
+    else byContext.set(ctx, [node]);
+  }
+
   graph.batchUpdate(() => {
+    // A swimlane container per non-empty NAMED context: a subtle bounding box with the context name as its
+    // header bar. Nodes are parented INTO their context; the inner layout grows the box to fit them.
+    for (const [ctx, nodes] of byContext) {
+      if (ctx === '' || nodes.length === 0) continue;
+      const container = graph.insertVertex({
+        parent: root,
+        id: `ctx:${ctx}`,
+        value: ctx,
+        position: [0, 0],
+        size: [240, 160],
+        style: {
+          shape: 'swimlane',
+          startSize: 28,
+          fillColor: 'none',
+          swimlaneFillColor: 'none',
+          strokeColor: 'var(--koi-line)',
+          fontColor: 'var(--koi-muted)',
+          fontStyle: 1, // bold header
+          fontSize: 12,
+          verticalAlign: 'top',
+          align: 'left',
+          spacingLeft: 10,
+          rounded: true,
+        },
+      });
+      containers.set(ctx, container);
+    }
+
     for (const node of merged.nodes) {
+      const ctx = contextOf(node.qualifiedName);
+      const parent = (ctx && containers.get(ctx)) || root;
       const [w, h] = nodeSize(node);
       const cell = graph.insertVertex({
         parent,
@@ -158,9 +241,12 @@ export function buildCanvas(mx: Mx, container: HTMLElement, merged: DiagramGraph
     }
   });
 
+  runTwoLevelLayout(mx, graph);
+
   return {
     graph,
     cells,
+    containers,
     dispose: () => graph.destroy(),
   };
 }
