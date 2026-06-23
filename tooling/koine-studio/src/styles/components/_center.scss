@@ -100,6 +100,17 @@
 
 #center-visual {
   overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+/* The canvas fills the space under the construct palette; position:relative anchors the maxGraph
+   overlay controls (zoom / fit / auto-arrange), which are absolutely positioned within the host. */
+#diagram-host {
+  flex: 1 1 auto;
+  min-height: 0;
+  position: relative;
+  overflow: hidden;
 }
 
 #tech-body,

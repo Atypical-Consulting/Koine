@@ -291,7 +291,10 @@ const APP_HTML = `
             <button type="button" class="center-tab" id="center-tab-docs" role="tab" data-center="docs" aria-selected="false">Documentation</button>
           </div>
           <div id="center-body">
-            <section id="center-visual" class="center-host" role="tabpanel"></section>
+            <section id="center-visual" class="center-host" role="tabpanel">
+              <div id="canvas-palette-host"></div>
+              <div id="diagram-host"></div>
+            </section>
             <section id="center-technical" class="center-host" role="tabpanel" hidden>
               <div id="tech-tabs" role="tablist">
                 <button type="button" class="tech-tab" id="tech-tab-editor" role="tab" data-tech="editor" aria-selected="true">Editor</button>

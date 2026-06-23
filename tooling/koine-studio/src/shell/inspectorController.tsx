@@ -42,6 +42,7 @@ import type { Platform } from '@/host';
 import type { PreviewTarget } from '@/settings/persistence';
 import { renderDiagrams } from '@/diagrams/diagrams';
 import { setDiagramLayoutStore, setDiagramPersistScope } from '@/diagrams/diagramContract';
+import type { AddNodeKind } from '@/diagrams/diagramContract';
 import { createLayoutStore } from '@/diagrams/layoutStore';
 import { mergeDiagramGraphs } from '@/model/modelTables';
 import { type GlossaryHandlers } from '@/model/glossary';
@@ -67,6 +68,7 @@ import { EventsPanel } from '@/model/EventsPanel';
 import { RelationshipsPanel } from '@/model/RelationshipsPanel';
 import { GlossaryPanel } from '@/model/GlossaryPanel';
 import { DocsPanelHost } from '@/docs/DocsPanelHost';
+import { CanvasPalette } from '@/diagrams/CanvasPalette';
 import type { StoreApi } from 'zustand/vanilla';
 import type { AppState } from '@/store/index';
 import { guardedLoad } from '@/shell/guardedLoad';
@@ -152,6 +154,8 @@ export interface InspectorControllerDeps {
   onSaveGlossaryDescription(entry: GlossaryEntry, text: string): Promise<void>;
   /** Apply a structured model edit (the #91 round-trip) for a Properties-panel field change. */
   onApplyStructuredEdit(edit: StructuredEdit, successMsg: string): void;
+  /** Insert a new DDD construct of the given kind into the active context (the palette's add path). */
+  onAddConstruct(kind: AddNodeKind): void;
   /** Jump to a RAW 1-based source span (opens the owning file if needed) — the bottom tables' row click. */
   gotoSourceSpan(span: Pick<SourceSpan, 'file' | 'line' | 'column' | 'endLine' | 'endColumn'>): void;
 
@@ -275,7 +279,7 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   const adrView = el('view-docs');
   const notesView = el('view-notes');
   // Center hosts: the diagram canvas (Visual) and the code editor's companion sub-views.
-  const diagramsView = el('center-visual');
+  const diagramsView = el('diagram-host');
   const assistantView = el('view-assistant');
   const checkView = el('view-check');
   // Right-rail host: the element inspector (Properties). Fixed — never torn down on a model reload.
@@ -959,6 +963,11 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   const activeDocs = (): DocsView => appStore.getState().docs as DocsView;
 
   const centerVisualEl = el('center-visual');
+
+  // The construct palette is store-driven (active-context gating) and model-independent, so it mounts
+  // once here rather than per diagram reload. Clicks route through the injected onAddConstruct callback.
+  render(<CanvasPalette store={appStore} onAdd={(kind) => deps.onAddConstruct(kind)} />, el('canvas-palette-host'));
+
   const centerTechnicalEl = el('center-technical');
   const centerDocsEl = el('center-docs');
   const editorPaneEl = el('editor-pane');
