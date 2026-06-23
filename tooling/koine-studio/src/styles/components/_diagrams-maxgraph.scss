@@ -218,3 +218,65 @@ $ddd-kinds: (
   border-radius: var(--koi-radius-sm);
   box-shadow: var(--koi-shadow);
 }
+
+/* The construct palette above the domain canvas (CanvasPalette.tsx). A horizontal toolbar; each
+   construct button carries a swatch coloured by its DDD token (matching the node it creates). */
+.koi-canvas-palette {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  flex-wrap: wrap;
+  padding: 0.375rem 0.5rem;
+  border-bottom: 1px solid var(--koi-line);
+  background: var(--koi-surface);
+}
+
+.koi-palette-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.25rem 0.5rem;
+  border: 1px solid transparent;
+  border-radius: 0.375rem;
+  background: transparent;
+  color: var(--koi-fg);
+  font-size: 0.8125rem;
+  cursor: pointer;
+
+  &:hover:not(:disabled) {
+    background: var(--koi-paper-2);
+    border-color: var(--koi-line);
+  }
+
+  &:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--koi-accent);
+    outline-offset: 1px;
+  }
+}
+
+.koi-palette-swatch {
+  width: 0.625rem;
+  height: 0.625rem;
+  border-radius: 2px;
+  background: var(--koi-ddd-repository); /* neutral default (coming-soon buttons) */
+  flex: 0 0 auto;
+}
+
+/* Tie each construct button's swatch to its DDD concept colour. */
+.koi-palette-btn[data-kind='entity'] .koi-palette-swatch { background: var(--koi-ddd-entity); }
+.koi-palette-btn[data-kind='value'] .koi-palette-swatch { background: var(--koi-ddd-value); }
+.koi-palette-btn[data-kind='aggregate'] .koi-palette-swatch { background: var(--koi-ddd-aggregate); }
+.koi-palette-btn[data-kind='event'] .koi-palette-swatch { background: var(--koi-ddd-event); }
+.koi-palette-btn[data-kind='enum'] .koi-palette-swatch { background: var(--koi-ddd-enum); }
+
+.koi-palette-sep {
+  width: 1px;
+  align-self: stretch;
+  margin: 0.125rem 0.25rem;
+  background: var(--koi-line);
+}
