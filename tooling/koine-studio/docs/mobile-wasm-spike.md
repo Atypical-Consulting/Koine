@@ -205,3 +205,46 @@ that matches on a **primary** device (D1 or D2) wins.
 
 > These thresholds are deliberately conservative defaults; if a real measurement sits on a boundary,
 > record the number and the call made, don't silently round toward a nicer verdict.
+
+## Analysis & provisional verdict (PENDING D1/D2)
+
+Evaluating the criteria first-match-wins against the data in hand. Two of the four metric families are
+settled by the emulated runs (latency, approximate memory); the decisive memory-kill family is not.
+
+- **(c) — server-side endpoint?** Requires, on a primary device: a memory kill (survival fails), a
+  reliably-crashing 2nd compile, or unusable medium latency.
+  - *Latency:* **cleared.** Medium (`pizzeria`) compile is 230 ms median at 4× CPU — two orders of
+    magnitude under the ~10 s "unusable" bar; repeats were stable (no degradation across N=5).
+  - *Memory kill / 2nd-compile crash:* **unknown — needs D1/D2.** Emulated peak WASM heap (~55–67 MB)
+    sits well under typical iPhone per-tab budgets (commonly a few hundred MB), so a kill is *unlikely*
+    — but desktop cannot exercise WebKit's ceiling, so this is not cleared, only un-flagged.
+  - → **(c) is not indicated** by available data, but **cannot be ruled out** until the D1 survival test
+    runs.
+- **(b) — lazy / explicit opt-in compile?** Triggers if it loads and compiles but cold-load is heavy or
+  heap is high-but-survivable.
+  - *Cold-load:* **triggers the "heavy" clause.** Served transfer is **5.68 MB uncompressed** (well over
+    the ~3 MB bar); even brotli (1.70 MB) plus the ~0.65 MB JS shell is a multi-MB first load, and
+    Slow-4G uncompressed measured ~150 s.
+  - → **(b) is positively indicated by the cold-load weight**, independent of the memory outcome.
+- **(a) — client-side viable as-is?** Needs comfortable heap *and* interactive latency on both primary
+  devices *and* acceptable cold-load. Latency ✓; memory ✓-pending; **cold-load ✗** while the bundle
+  ships uncompressed. → **(a) is not cleared** as things stand.
+
+### Provisional lean: **(b)** — keep the compiler lazy / compile as an explicit opt-in on mobile
+
+The cold-load weight alone makes eager WASM boot a poor mobile default, regardless of the memory result.
+This is a **provisional** call, not the final verdict:
+
+- It **upgrades to (a)** (client-side fine, eager boot acceptable) **iff** D1 shows the survival test
+  passing with peak heap comfortably under the device ceiling **and** the deploy host serves
+  brotli/gzip.
+- It **downgrades to (c)** (server-side compile endpoint) **iff** D1's survival test fails (tab killed)
+  or a 2nd consecutive compile reliably crashes on a primary device.
+
+**The final (a)/(b)/(c) verdict is held until D1/D2 are measured.** One conclusion is already firm and
+verdict-independent: **enable brotli/gzip on the deploy host** — it is the cheapest, largest single win
+(3.4× smaller transfer) and a prerequisite for any mobile deployment.
+
+> _Deferred (scope):_ a CI **payload size-budget check** (sum `_framework` transferred bytes, assert a
+> ceiling) is worth adding **once the verdict lands** — it is gated on confirming (b)/(c) per the plan,
+> so it is intentionally not added here on a provisional lean.
