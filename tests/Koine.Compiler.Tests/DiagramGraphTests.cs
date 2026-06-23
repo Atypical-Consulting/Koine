@@ -319,6 +319,40 @@ public class DiagramGraphTests
         CardinalityTo("Address").ShouldBe("0..1"); // shipTo: Address? — an optional reference
     }
 
+    [Fact]
+    public void Identity_reference_to_an_in_context_entity_draws_an_association_edge()
+    {
+        // An aggregate that references another entity by its identity type (the DDD "reference other
+        // aggregates by id" rule — `customer: CustomerId` → the Customer entity) must still be connected
+        // on the diagram. It is an association, not a composition: holding another aggregate's id is a
+        // reference, not ownership, so it draws as an arrow (no owner diamond).
+        const string source = """
+            context Billing {
+              entity Customer identified by CustomerId {
+                name: String
+              }
+
+              aggregate Sales root Order {
+                entity Order identified by OrderId {
+                  customer: CustomerId
+                }
+              }
+            }
+            """;
+
+        var (model, diagnostics) = new KoineCompiler().Parse(new[] { new SourceFile("billing.koi", source) });
+        diagnostics.ShouldBeEmpty();
+        DiagramGraph context = new DocsEmitter().EmitDiagrams(model!)["docs/Billing.md"]
+            .First(d => d.Kind == "context").Graph;
+
+        DiagramEdge? edge = context.Edges.FirstOrDefault(e => e.From == "Order" && e.To == "Customer");
+        edge.ShouldNotBeNull(); // the missing connector this regression test guards
+        edge.ArrowKind.ShouldBe("association"); // a by-id reference, not an owning composition
+        edge.Cardinality.ShouldBe("1"); // `customer: CustomerId` — a required single reference
+        edge.SourceCardinality.ShouldBeNull(); // an association has no owner-end diamond/multiplicity
+        edge.BackingMember.ShouldBe("Billing.Order.customer"); // the field a visual editor would remove
+    }
+
     /// <summary>The Ordering context's class-diagram graph from the fixture.</summary>
     private static DiagramGraph ContextGraph() =>
         Descriptors()["docs/Ordering.md"].First(d => d.Kind == "context").Graph;
