@@ -1,5 +1,5 @@
 import { describe, expect, test, vi } from 'vitest';
-import { guardWasmSurface } from './wasm';
+import { guardWasmSurface } from '@/host/browser/wasm';
 
 describe('guardWasmSurface', () => {
   test('passes through exports the bundle does provide', () => {

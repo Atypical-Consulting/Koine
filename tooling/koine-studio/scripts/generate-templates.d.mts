@@ -1,7 +1,7 @@
 // Type declarations for the template-manifest generator (a plain .mjs so it can run under bare
 // `node` with no build step). Lets the Vite config and the vitest suite import its pure core with
 // full typing. Keep in sync with scripts/generate-templates.mjs.
-import type { Template } from '../src/templates';
+import type { Template } from '../src/welcome/templates';
 
 /** Resolve the repo's top-level `templates/` directory (robust to a git worktree layout). */
 export function resolveTemplatesDir(): string;

@@ -1,7 +1,7 @@
 import { describe, expect, test, vi } from 'vitest';
 import { createStore } from 'zustand/vanilla';
-import { ALL_CONTEXTS } from '../../activeContext';
-import { createActiveContextSlice, type ActiveContextSlice } from './activeContext';
+import { ALL_CONTEXTS } from '@/model/activeContext';
+import { createActiveContextSlice, type ActiveContextSlice } from '@/store/slices/activeContext';
 
 const make = () => createStore<ActiveContextSlice>((set, get) => createActiveContextSlice(set, get));
 

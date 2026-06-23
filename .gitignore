@@ -13,3 +13,6 @@ BenchmarkDotNet.Artifacts/
 # live under tooling/ and website/ with their own ignores). Anchored so subproject lockfiles are kept.
 /node_modules/
 /package-lock.json
+
+# Skill eval scratch — workspace logs/JSON dropped by create-issue skill evals; never source.
+.claude/skills/create-issue-workspace/

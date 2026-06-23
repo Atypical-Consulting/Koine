@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest';
 import { createStore } from 'zustand/vanilla';
-import { createUiChromeSlice, DEFAULT_CENTER, isValidCenter, type UiChromeSlice } from './uiChrome';
+import { createUiChromeSlice, DEFAULT_CENTER, isValidCenter, type UiChromeSlice } from '@/store/slices/uiChrome';
 
 const make = () => createStore<UiChromeSlice>((set, get) => createUiChromeSlice(set, get));
 

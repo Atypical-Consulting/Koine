@@ -1,5 +1,5 @@
 import type { StoreApi } from 'zustand/vanilla';
-import { ALL_CONTEXTS, type ContextScope } from '../../activeContext';
+import { ALL_CONTEXTS, type ContextScope } from '@/model/activeContext';
 
 export interface ActiveContextSlice {
   /** The active bounded-context scope (a context name, or ALL_CONTEXTS). */

@@ -7,9 +7,9 @@ const api = vi.hoisted(() => ({
   EmitPreview: vi.fn<(f: string, t: string) => string>(),
   Format: vi.fn<(s: string) => string>(),
 }));
-vi.mock('./wasm', () => ({ loadWasmApi: () => Promise.resolve(api) }));
+vi.mock('@/host/browser/wasm', () => ({ loadWasmApi: () => Promise.resolve(api) }));
 
-import { runWasmTool } from './tools';
+import { runWasmTool } from '@/host/browser/tools';
 
 describe('runWasmTool', () => {
   test('koine_validate wraps source into the workspace envelope and summarizes diagnostics', async () => {

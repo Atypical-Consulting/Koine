@@ -9,9 +9,9 @@ import { getCurrentWindow } from '@tauri-apps/api/window';
 import { appDataDir, join } from '@tauri-apps/api/path';
 import { open as openDialog, save as saveDialog } from '@tauri-apps/plugin-dialog';
 import { openUrl } from '@tauri-apps/plugin-opener';
-import type { FsEntry, KoiFile, LspTransport, Platform, SourceDoc } from './types';
-import { normalizeCompileTarget } from '../assistantTools';
-import { mcpCall } from '../mcp';
+import type { FsEntry, KoiFile, LspTransport, Platform, SourceDoc } from '@/host/types';
+import { normalizeCompileTarget } from '@/ai/assistantTools';
+import { mcpCall } from '@/mcp/mcp';
 
 /** LSP transport over Tauri IPC. Mirrors the wiring previously inlined in lsp.ts. */
 class TauriLspTransport implements LspTransport {

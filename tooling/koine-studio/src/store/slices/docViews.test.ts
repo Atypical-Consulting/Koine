@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { createStore } from 'zustand/vanilla';
-import { createDocViewsSlice, type DocViewsSlice } from './docViews';
+import { createDocViewsSlice, type DocViewsSlice } from '@/store/slices/docViews';
 
 const make = () => createStore<DocViewsSlice>((set, get) => createDocViewsSlice(set, get));
 

@@ -1,6 +1,6 @@
 import { describe, expect, test, vi } from 'vitest';
 import { createStore } from 'zustand/vanilla';
-import { createSelectionSlice, type SelectionSlice } from './selection';
+import { createSelectionSlice, type SelectionSlice } from '@/store/slices/selection';
 
 const make = () => createStore<SelectionSlice>((set, get) => createSelectionSlice(set, get));
 
