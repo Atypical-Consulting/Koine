@@ -11,7 +11,7 @@ brokered over stdio by the Rust host.
   command, owns its stdin behind a `Mutex`, and runs a reader thread that parses
   `Content-Length`-framed JSON-RPC off stdout. Each message body is re-emitted as the Tauri
   event `lsp://message`; child exit is signalled via `lsp://exit`.
-- The frontend (`src/`) is a tiny LSP client over Tauri IPC (`src/lsp.ts`): it attaches the
+- The frontend (`src/`) is a tiny LSP client over Tauri IPC (`src/lsp/lsp.ts`): it attaches the
   `lsp://message` listener **before** invoking `lsp_start` (no startup race), then runs the
   standard `initialize` → `initialized` → `didOpen` / `didChange` handshake, routes
   `textDocument/publishDiagnostics` into CodeMirror's lint state, and issues the custom
@@ -32,7 +32,7 @@ The **MCP HTTP sidecar** is independent of the LSP one: `mcp_endpoint` spawns `k
 --port 0`, scrapes the `[koine-mcp] http://127.0.0.1:PORT/mcp` line off its stderr, and hands the
 URL to the **Settings → MCP** panel.
 
-That panel (`src/prefs.ts`, data-driven off `src/mcp.ts`) is where the user wires an LLM to Koine:
+That panel (`src/settings/prefs.ts`, data-driven off `src/mcp/mcp.ts`) is where the user wires an LLM to Koine:
 
 - **Enable MCP server** — a persisted, opt-in toggle (`mcpEnabled`). Enabling calls `mcp_endpoint`
   (start + reveal the URL); disabling calls `mcp_stop`. Nothing runs until the user opts in.
@@ -48,7 +48,7 @@ endpoint/test rows hide, but the recipes still render (pointing at the `koine mc
 
 ## AI assistant
 
-The **Assistant** inspector tab (`src/aiPanel.ts`, client in `src/ai.ts`) is a domain copilot: it
+The **Assistant** inspector tab (`src/ai/aiPanel.ts`, client in `src/ai/ai.ts`) is a domain copilot: it
 streams replies from the configured provider — **Anthropic** (Claude, the default) or any
 **OpenAI-compatible** endpoint (OpenAI / Ollama / LM Studio / Groq / …, selected by base URL) — each
 with the user's *own* key, or no key for a local server. Both SDKs are dynamically imported, so they
@@ -58,7 +58,7 @@ hosts (browser/WASM and the Tauri desktop build).
 - **Compiler tool-use on both providers.** When enabled (Settings → Assistant → *agentic tools*), the
   model can call the koine tools — `koine_validate` / `koine_compile` / `koine_format` — inside a
   bounded agentic loop, so it drafts a model, validates it, and fixes it before answering. The tool
-  definitions are provider-neutral (`src/assistantTools.ts`) and adapted to each API; the tools run
+  definitions are provider-neutral (`src/ai/assistantTools.ts`) and adapted to each API; the tools run
   in-process (in-WASM in the browser, via the `koine mcp --http` sidecar on desktop). Tool-use is now
   available on the **default Anthropic** path too, not just the OpenAI-compatible one. (It is opt-in
   because many local servers buffer the whole reply instead of streaming when tools are advertised.)
@@ -118,7 +118,7 @@ cd tooling/koine-studio && npm install && npm run build
 
 - `src-tauri/src/lib.rs` — LSP-sidecar broker (`lsp_start` / `lsp_send`, framing + tests) and the
   MCP HTTP-sidecar broker (`mcp_endpoint` / `mcp_stop`, endpoint-scrape + tests).
-- `src/lsp.ts` — Tauri-IPC LSP client (JSON-RPC, debounced `didChange`, `emitPreview`).
-- `src/editor.ts` — CodeMirror `.koi` editor + read-only output viewer; push-based diagnostics.
-- `src/ide.ts` — app composition (editor, status line, diagnostics strip, preview buttons).
+- `src/lsp/lsp.ts` — Tauri-IPC LSP client (JSON-RPC, debounced `didChange`, `emitPreview`).
+- `src/editor/editor.ts` — CodeMirror `.koi` editor + read-only output viewer; push-based diagnostics.
+- `src/shell/ide.tsx` — app composition (editor, status line, diagnostics strip, preview buttons).
 - `index.html` / `src/styles.css` — toolbar + split editor/output panes + diagnostics strip.

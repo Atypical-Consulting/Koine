@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest';
 import { createStore } from 'zustand/vanilla';
-import { createHistorySlice, type HistorySlice } from './history';
+import { createHistorySlice, type HistorySlice } from '@/store/slices/history';
 
 const make = () => createStore<HistorySlice>((set, get) => createHistorySlice(set, get));
 

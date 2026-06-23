@@ -1,4 +1,5 @@
 import { defineConfig } from 'vitest/config';
+import { fileURLToPath } from 'node:url';
 
 // Unit/integration tests run under happy-dom: the overlay/modal chrome (focus, keydown, document.body
 // mounting) and the file explorer's role=tree (focus, keyboard nav, DOM rebuild) behave as they do in
@@ -14,6 +15,7 @@ export default defineConfig({
   // run. Vitest does not share vite.config.ts's resolve.alias, so the panel tests need it here too.
   resolve: {
     alias: {
+      "@": fileURLToPath(new URL("./src", import.meta.url)),
       react: 'preact/compat',
       'react-dom': 'preact/compat',
       'react/jsx-runtime': 'preact/jsx-runtime',

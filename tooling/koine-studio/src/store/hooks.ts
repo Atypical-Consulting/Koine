@@ -1,6 +1,6 @@
 import { useStore } from 'zustand';
 import type { StoreApi } from 'zustand/vanilla';
-import { appStore, type AppState } from './index';
+import { appStore, type AppState } from '@/store/index';
 
 // Preact-facing binding for the vanilla app store. `useStore` (from `zustand`, resolved to its React
 // entry under the preact/compat alias) subscribes a component to exactly the slice the selector

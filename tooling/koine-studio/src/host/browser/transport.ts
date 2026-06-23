@@ -3,8 +3,8 @@
 // open-document set, dispatches each request to the Koine.Wasm compiler module, and emits
 // responses + per-file `textDocument/publishDiagnostics` notifications back through onMessage.
 // Mirrors the request handlers in src/Koine.Cli/LspServer.cs for the nine methods Studio uses.
-import type { LspTransport } from '../types';
-import { loadWasmApi, type KoineWasmApi } from './wasm';
+import type { LspTransport } from '@/host/types';
+import { loadWasmApi, type KoineWasmApi } from '@/host/browser/wasm';
 
 interface JsonRpc {
   id?: number | string | null;

@@ -6,7 +6,7 @@
 // Tokens: a folder token is its directory name, suffixed `~n` only when needed to stay unique
 // against both in-memory and PERSISTED tokens (so it survives reloads without colliding); a file
 // token under a folder is `<folderToken>/<relPath>`; a saved scratch file's token is its file name.
-import type { FsEntry, KoiFile, SourceDoc } from '../types';
+import type { FsEntry, KoiFile, SourceDoc } from '@/host/types';
 
 // --- minimal File System Access typings (not in the TS DOM lib) --------------
 interface FsWritable {
