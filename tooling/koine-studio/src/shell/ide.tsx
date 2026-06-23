@@ -993,7 +993,9 @@ export function init(): void {
     const files = template.files?.length
       ? template.files
       : [{ relPath: 'model.koi', contents: template.source }];
-    const token = await platform.materializeWorkspace(template.id, files);
+    // persist:true — keep the example's OPFS workspace across reloads so edits aren't silently lost;
+    // re-opening the same example reuses it (seeded only on first open).
+    const token = await platform.materializeWorkspace(template.id, files, true);
     if (!token) {
       setStatus('could not open template', 'error');
       return;

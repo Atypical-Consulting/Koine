@@ -113,11 +113,19 @@ All changes are frontend (TS/SCSS/HTML) — no `.koi`/compiler changes. Verified
 
 Remaining Lighthouse fails are non-blocking: `cumulative-layout-shift` (0.93, from the WASM-boot first paint) and the experimental `llms-txt` heuristic (a valid `llms.txt` is now served).
 
+## 🔁 Follow-up pass (after PR #224) — scoped via a parallel workflow, implemented incrementally
+
+| ID | Item | Status |
+|----|------|--------|
+| F1 | `generate-templates.mjs` now writes `templates.generated.ts` only when content changed → no spurious Vite full-reload during `dev:web`. | ✅ fixed |
+| F2a | **Data-loss fix:** opening a starter example is now **persistent + non-destructive** (`materializeWorkspace(…, persist=true)`: stable `example-<id>` OPFS token, seeded only first time, registered in IndexedDB). Edits survive a re-open and a reload instead of being wiped. Shared-link imports keep the fresh-each-time behavior via the default `persist=false`. Verified: 3 new vitest cases + browser (OPFS `example-ordering` dir created, friendly title). | ✅ fixed |
+| F2b | Auto-restore last workspace on boot + examples in RECENT (so a reload lands back in the example without a click). Touches the boot ladder + recents display (token leaks `example-` prefix); deferred to avoid destabilizing the boot path pre-release. Plan ready. | ⏭ deferred |
+| F9/F10 | No-OPFS in-memory workspace backend (Safari/Firefox-Private usable) — scoped (high feasibility, in-memory fallback recommended). Larger core FS-layer change, unverifiable in the Chromium audit env beyond vitest; F8 already removed the most visible dead button. Plan ready. | ⏭ deferred |
+| Rules | Wire compiler invariants/guards onto `DiagramNode` → inspector **Rules** tab (cross-stack). Implementing next. | 🔧 in progress |
+
 ## 📝 Deferred / known limitations (reported, not fixed — with rationale)
 
 - **F18 — not a bug.** The Generate-wizard "Back" button is already disabled on step 1 (`generateProjectWizard.ts:458`).
-- **F1 (dev-only).** `generate-templates.mjs` rewrites `templates.generated.ts`, which Vite watches → a spurious full reload during `dev:web`. No production impact; optional: only write when content changed.
-- **F2 — ephemeral example/default workspaces.** Opening a template doesn't enter RECENT and is lost on reload (reverts to Welcome + default Billing). Pre-existing save/load gap; larger work (a "Save as named project" + recents-for-examples flow). Recommend before/at v1.x.
 - **F3/F4 — 14 form fields lack `id`/`name`; the API-key password input isn't in a `<form>`.** Console best-practice notices only; **Lighthouse Best Practices is already 100**. Quick win for a follow-up: add `name`/`id` to the Settings inputs + wrap them in a `<form>`.
 - **F9/F10 — no-OPFS browsers (Safari/Firefox Private).** The IDE boots to a single caption and examples/shared-link import fail. The F8 fix removes the most visible dead button; a proper "unsupported browser" screen + graceful fallback is recommended as a follow-up (cross-browser, unverifiable in the Chromium audit env).
 - **Rules/Notes full editors** — the informative placeholders are intentional for v1; a tracked follow-up task was spawned to wire invariants/guards onto the LSP payload (Rules) and persist per-element Notes.
