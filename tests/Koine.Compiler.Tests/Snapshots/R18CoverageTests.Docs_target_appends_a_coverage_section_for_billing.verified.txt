@@ -50,6 +50,7 @@ classDiagram
     Money *-- Currency
     Customer *-- Email
     OrderLine *-- Money
+    Order --> Customer
     Order *-- OrderLine
     Order *-- OrderStatus
 ```

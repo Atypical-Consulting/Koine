@@ -69,6 +69,8 @@ classDiagram
         +cancel()
     }
     Money *-- Currency
+    OrderOpened --> Order
+    OrderSubmitted --> Order
     OrderLine *-- Money
     Order *-- OrderLine
     Order *-- OrderStatus
