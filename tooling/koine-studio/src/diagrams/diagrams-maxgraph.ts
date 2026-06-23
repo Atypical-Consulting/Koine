@@ -13,6 +13,33 @@ import type { DiagramEdge, DiagramGraph, DiagramMember, DiagramNode, DocsFile } 
 import { mergeGraphsForView } from '@/model/modelTables';
 import { buildEmptyState } from '@/diagrams/emptyState';
 import { loadDiagramZoom, saveDiagramZoom } from '@/settings/persistence';
+import { NODE_NAVIGATE_EVENT, type DiagramNodeNavigateDetail } from '@/diagrams/diagramContract';
+
+// The DDD palette as literal hex (theme-independent — abstracts/_ddd.scss never redefines it per theme),
+// used for the maxGraph cell SHAPE fill/stroke. The shape is what the Outline minimap draws and what
+// receives pointer events; the HTML label (.koi-node, pointer-events:none) sits opaque on top in the main
+// view. Keeping these literal avoids relying on var() resolving inside SVG fill attributes.
+const DDD_HEX: Record<string, string> = {
+  'aggregate-root': '#8b87f5',
+  aggregate: '#8b87f5',
+  entity: '#34d399',
+  'value-object': '#5aa9f0',
+  value: '#5aa9f0',
+  enum: '#fbbf24',
+  event: '#f472b6',
+  'integration-event': '#2dd4bf',
+  service: '#fb923c',
+  repository: '#94a3b8',
+  state: '#94a3b8',
+  initial: '#94a3b8',
+  final: '#94a3b8',
+  context: '#5aa9f0',
+};
+
+/** The shape colour for a node kind (drives the minimap + hit-testing). Falls back to slate. */
+function kindColor(kind: string): string {
+  return DDD_HEX[kind] ?? '#94a3b8';
+}
 
 /** The @maxgraph/core module shape, loaded lazily (code-split out of the main bundle). */
 type Mx = typeof import('@maxgraph/core');
@@ -178,8 +205,8 @@ function runTwoLevelLayout(mx: Mx, graph: MxGraph): void {
 }
 
 /** Place a small multiplicity label at one end of an edge (x=-1 source end, x=+1 target end). */
-function addEndLabel(graph: MxGraph, edge: MxCell, text: string, at: -1 | 1): void {
-  graph.insertVertex({
+function addEndLabel(mx: Mx, graph: MxGraph, edge: MxCell, text: string, at: -1 | 1): void {
+  const lbl = graph.insertVertex({
     parent: edge,
     value: text,
     position: [at, 0],
@@ -187,6 +214,12 @@ function addEndLabel(graph: MxGraph, edge: MxCell, text: string, at: -1 | 1): vo
     relative: true,
     style: { fontColor: 'var(--koi-muted)', labelBackgroundColor: 'var(--koi-surface)', fontSize: 11, resizable: false },
   });
+  // Nudge the multiplicity inward along the edge and up off the line so it doesn't sit on the node border.
+  const geo = lbl.getGeometry();
+  if (geo) {
+    geo.offset = new mx.Point(at < 0 ? 18 : -18, -10);
+    graph.getDataModel().setGeometry(lbl, geo);
+  }
 }
 
 /**
@@ -201,7 +234,9 @@ export function buildCanvas(mx: Mx, container: HTMLElement, merged: DiagramGraph
   // CSP-safe: never fall through to the single `eval` path for unregistered style names (Tauri strict CSP).
   graph.getView().allowEval = false;
   graph.setHtmlLabels(true); // labels render as HTML so class nodes can use compartment markup (later task).
-  graph.setCellsEditable(false); // read-only skeleton; in-canvas editing is wired in a later task.
+  graph.setCellsEditable(false); // no in-place label editing (renames go through the model round-trip).
+  graph.setCellsResizable(false); // node size is derived from content, not hand-resized.
+  graph.setCellsMovable(true); // allow drag-to-reposition (persistence wired in a later task).
   // Render each cell's stored value: a DiagramNode → its UML/simple HTML label (a `.koi-node` div themed
   // by CSS); a DiagramEdge → its mid label text; anything else (container name, cardinality) → the string.
   graph.convertValueToString = (cell): string => {
@@ -212,6 +247,29 @@ export function buildCanvas(mx: Mx, container: HTMLElement, merged: DiagramGraph
     }
     return String(v ?? '');
   };
+
+  // Click a node → bubble NODE_NAVIGATE_EVENT; ide.tsx selects it (Properties panel) and jumps to source.
+  // Not gated by editing — navigation works in read-only too. Span-less nodes are inert.
+  graph.addListener(mx.InternalEvent.CLICK, (_sender: unknown, evt: { getProperty(name: string): unknown }) => {
+    const cell = evt.getProperty('cell') as MxCell | null;
+    const v = cell?.value as DiagramNode | undefined;
+    if (v && typeof v === 'object' && 'qualifiedName' in v && v.sourceSpan) {
+      const s = v.sourceSpan;
+      container.dispatchEvent(
+        new CustomEvent<DiagramNodeNavigateDetail>(NODE_NAVIGATE_EVENT, {
+          bubbles: true,
+          detail: {
+            qualifiedName: v.qualifiedName,
+            file: s.file,
+            line: s.line,
+            column: s.column,
+            endLine: s.endLine,
+            endColumn: s.endColumn,
+          },
+        }),
+      );
+    }
+  });
 
   const cells = new Map<string, MxCell>();
   const containers = new Map<string, MxCell>();
@@ -260,15 +318,18 @@ export function buildCanvas(mx: Mx, container: HTMLElement, merged: DiagramGraph
       const ctx = contextOf(node.qualifiedName);
       const parent = (ctx && containers.get(ctx)) || root;
       const [w, h] = nodeSize(node);
+      const color = kindColor(node.kind);
       const cell = graph.insertVertex({
         parent,
         id: node.id,
         value: node,
         position: [0, 0],
         size: [w, h],
-        // Transparent cell — the HTML label (.koi-node) draws the whole box; overflow:'fill' stretches the
-        // label to the cell bounds so CSS (keyed on data-kind) owns the appearance and theming.
-        style: { fillColor: 'none', strokeColor: 'none', overflow: 'fill', verticalAlign: 'top', align: 'left' },
+        // The cell SHAPE carries a kind-coloured fill so the Outline minimap shows recognisable boxes and
+        // the shape receives pointer events (click/drag). overflow:'fill' stretches the opaque HTML label
+        // (.koi-node, pointer-events:none) over it, so the main view shows the themed compartments while the
+        // events fall through to this shape.
+        style: { fillColor: color, strokeColor: color, rounded: true, overflow: 'fill', verticalAlign: 'top', align: 'left' },
       });
       cells.set(node.id, cell);
     }
@@ -299,8 +360,8 @@ export function buildCanvas(mx: Mx, container: HTMLElement, merged: DiagramGraph
         },
       });
       if (composition) {
-        if (edge.sourceCardinality) addEndLabel(graph, e, edge.sourceCardinality, -1);
-        if (edge.cardinality) addEndLabel(graph, e, edge.cardinality, 1);
+        if (edge.sourceCardinality) addEndLabel(mx, graph, e, edge.sourceCardinality, -1);
+        if (edge.cardinality) addEndLabel(mx, graph, e, edge.cardinality, 1);
       }
     }
   });
@@ -343,16 +404,13 @@ function mountChrome(mx: Mx, handle: CanvasHandle, host: HTMLElement): { dispose
     | { fit?: (o?: unknown) => void; fitCenter?: (o?: unknown) => void }
     | undefined;
   const fit = (): void => {
-    // The layout can place content at negative/large coordinates; frame it into the viewport. Needs a
-    // measured container, so it's a no-op until the surface is attached to the live DOM (see render()).
+    // The layout can place content at negative/large coordinates; scale it to fit then center BOTH axes
+    // (fitCenter alone left it hugging the top). No-op until the surface is measurable in the live DOM.
     try {
-      if (fitPlugin?.fitCenter) fitPlugin.fitCenter({ margin: 24 });
-      else if (fitPlugin?.fit) fitPlugin.fit({ border: 24 });
-      else {
-        const g = graph as unknown as { fit?: (b?: number) => void; center?: (h?: boolean, v?: boolean) => void };
-        g.fit?.(24);
-        g.center?.(true, true);
-      }
+      const g = graph as unknown as { fit?: (b?: number) => void; center?: (h?: boolean, v?: boolean) => void };
+      if (fitPlugin?.fit) fitPlugin.fit({ border: 24 });
+      else if (typeof g.fit === 'function') g.fit(24);
+      g.center?.(true, true);
     } catch {
       /* container not measurable yet — ignore */
     }

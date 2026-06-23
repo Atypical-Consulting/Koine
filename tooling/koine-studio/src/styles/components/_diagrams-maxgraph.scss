@@ -4,11 +4,20 @@
    CSS keyed on `data-kind`, sharing the same `--koi-ddd-*` palette as the Explorer icons and the old SVG
    renderer — a light/dark flip restyles live with no re-render. (No reliance on var() resolving inside
    SVG fill attributes, which a stricter WebView might not do.) */
+// The unified domain canvas fills its pane (no fixed-height card). These wrapper rules are self-contained
+// here so the canvas keeps its full height once the legacy _diagrams.scss is removed.
+.koi-diagrams,
+.koi-diagrams-single {
+  height: 100%;
+  min-height: 0;
+}
+
 .koi-canvas {
   position: relative;
   width: 100%;
   height: 100%;
   overflow: hidden;
+  background: var(--koi-paper);
   font-family: var(--koi-font-body);
 }
 
@@ -29,6 +38,9 @@
   color: var(--koi-fg);
   overflow: hidden;
   font-size: var(--koi-text-sm);
+  // The opaque label sits over the maxGraph cell shape; let clicks/drags fall THROUGH to the shape so
+  // node selection + dragging work (and the shape, not the label, owns hit-testing).
+  pointer-events: none;
 }
 
 .koi-node--simple {

@@ -220,6 +220,41 @@ describe('edges', () => {
   });
 });
 
+describe('click → navigate', () => {
+  const span = (over = {}) => ({ file: 'file:///m.koi', line: 3, column: 5, endLine: 3, endColumn: 12, offset: 0, length: 7, ...over });
+
+  test('clicking a node bubbles NODE_NAVIGATE_EVENT carrying its raw 1-based span', () => {
+    const merged: DiagramGraph = {
+      nodes: [node({ id: 'Ordering.Order', qualifiedName: 'Ordering.Order', stereotype: 'aggregate root', sourceSpan: span() })],
+      edges: [],
+    };
+    const container = makeContainer();
+    const handle = buildCanvas(mx, container, merged);
+    try {
+      let detail: any = null;
+      container.addEventListener('koi-diagram-node-click', (e) => { detail = (e as CustomEvent).detail; });
+      handle.graph.fireEvent(new mx.EventObject(mx.InternalEvent.CLICK, 'cell', handle.cells.get('Ordering.Order')));
+      expect(detail).toMatchObject({ qualifiedName: 'Ordering.Order', file: 'file:///m.koi', line: 3, column: 5, endLine: 3, endColumn: 12 });
+    } finally {
+      handle.dispose();
+    }
+  });
+
+  test('a span-less node click is inert (no navigation)', () => {
+    const merged: DiagramGraph = { nodes: [node({ id: 'g0:Draft', qualifiedName: 'Draft', kind: 'state', sourceSpan: null })], edges: [] };
+    const container = makeContainer();
+    const handle = buildCanvas(mx, container, merged);
+    try {
+      let fired = false;
+      container.addEventListener('koi-diagram-node-click', () => { fired = true; });
+      handle.graph.fireEvent(new mx.EventObject(mx.InternalEvent.CLICK, 'cell', handle.cells.get('g0:Draft')));
+      expect(fired).toBe(false);
+    } finally {
+      handle.dispose();
+    }
+  });
+});
+
 describe('createMaxGraphRenderer.render', () => {
   test('shows the empty state (three concept doorways) when there is nothing to draw', async () => {
     const container = makeContainer();
