@@ -250,7 +250,7 @@ function runTwoLevelLayout(mx: Mx, graph: MxGraph): void {
         if (child?.isVertex() && child.getChildCount() > 0) {
           const inner = new HierarchicalLayout(graph, 'east');
           inner.resizeParent = true;
-          inner.parentBorder = 30; // clears the swimlane header (startSize 28) so members don't overlap it
+          inner.parentBorder = 40; // clears the swimlane header (startSize 30) with breathing room
           inner.intraCellSpacing = 30;
           inner.interRankCellSpacing = 60;
           inner.execute(child);
@@ -487,7 +487,7 @@ export function buildCanvas(
         size: [240, 160],
         style: {
           shape: 'swimlane',
-          startSize: 28,
+          startSize: 30,
           fillColor: 'none',
           swimlaneFillColor: 'none',
           strokeColor: 'var(--koi-line)',
@@ -496,10 +496,11 @@ export function buildCanvas(
           dashPattern: '6 5',
           fontColor: 'var(--koi-muted)',
           fontStyle: 1, // bold header
-          fontSize: 11,
-          verticalAlign: 'top',
-          align: 'left',
-          spacingLeft: 12,
+          fontSize: 12,
+          // The context name sits centred in its header band — both axes (the title is the territory's
+          // banner, not a tab pinned to a corner).
+          verticalAlign: 'middle',
+          align: 'center',
           rounded: true,
         },
       });
@@ -542,7 +543,7 @@ export function buildCanvas(
         style: {
           edgeStyle: 'orthogonalEdgeStyle', // registered name → CSP-safe (no eval)
           rounded: true,
-          strokeColor: 'var(--koi-line)',
+          strokeColor: 'var(--koi-diagram-edge)', // a touch brighter than the node borders so relationships trace
           fontColor: 'var(--koi-muted)',
           startArrow: composition ? 'diamondThin' : 'none',
           startFill: composition,

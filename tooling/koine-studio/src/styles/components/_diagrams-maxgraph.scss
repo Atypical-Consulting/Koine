@@ -123,7 +123,7 @@ $ddd-kinds: (
     border-color: color-mix(in srgb, #{$color} 62%, var(--koi-line));
   }
   .koi-node--class[data-kind='#{$kind}'] .koi-node__head {
-    background: color-mix(in srgb, #{$color} 14%, transparent);
+    background: color-mix(in srgb, #{$color} 17%, transparent);
   }
   .koi-node--class[data-kind='#{$kind}'] .koi-node__compartment {
     border-top-color: color-mix(in srgb, #{$color} 24%, var(--koi-line));
