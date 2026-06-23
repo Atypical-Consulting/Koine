@@ -140,7 +140,18 @@ jobs:
           npm ci
           npm run build
 
-      # Unit + DOM tests for the frontend's pure logic (project-name/zip helpers, the wizard flow).
+      # `npm test` (vitest) now runs two projects: the happy-dom unit/DOM suite AND the
+      # `storybook` project, which executes every story as a real-browser test via
+      # @storybook/addon-vitest (Playwright/Chromium). The browser binary must exist before
+      # `npm test`. Only Chromium is needed; --with-deps installs the system libs Chromium
+      # needs on Linux and is a no-op for those deps on macOS/Windows.
+      - name: Install Playwright Chromium (Storybook story tests)
+        working-directory: tooling/koine-studio
+        shell: bash
+        run: npx playwright install --with-deps chromium
+
+      # Frontend tests: happy-dom unit/DOM logic (project-name/zip helpers, the wizard flow)
+      # plus the Storybook story + a11y checks running headless in Chromium.
       - name: Test frontend (npm)
         working-directory: tooling/koine-studio
         run: npm test
