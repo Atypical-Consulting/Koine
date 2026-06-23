@@ -417,8 +417,17 @@ public static partial class ModelRoundTripService
 
         var nl = NewlineOf(source);
         var typeIndent = new string(' ', Math.Max(0, ctx.Span.Column - 1) + 2);
-        // A value object with a single String field is the minimal valid type; the author refines it.
-        var skeleton = $"value {edit.Name} {{{nl}{typeIndent}  name: String{nl}{typeIndent}}}";
+        var body = typeIndent + "  "; // members sit one level inside the type's braces
+        // A minimal, re-validating skeleton per construct; null kind ⇒ value (the old bare "+" button).
+        // The aggregate nests its own root entity so it is self-contained and always validates.
+        var skeleton = edit.Type switch
+        {
+            "entity" => $"entity {edit.Name} identified by {edit.Name}Id {{{nl}{body}name: String{nl}{typeIndent}}}",
+            "event" => $"event {edit.Name} {{{nl}{body}occurredAt: Instant{nl}{typeIndent}}}",
+            "enum" => $"enum {edit.Name} {{{nl}{body}First{nl}{body}Second{nl}{typeIndent}}}",
+            "aggregate" => $"aggregate {edit.Name} root {edit.Name}Root {{{nl}{body}entity {edit.Name}Root identified by {edit.Name}RootId {{{nl}{body}  name: String{nl}{body}}}{nl}{typeIndent}}}",
+            _ => $"value {edit.Name} {{{nl}{body}name: String{nl}{typeIndent}}}",
+        };
 
         if (ctx.Types.Count > 0 && ctx.Types[^1].Span is { IsNone: false } last)
         {
