@@ -86,7 +86,7 @@ export default defineConfig(({ mode }) => {
     // optimized-deps hash, and the in-flight dynamic import 404s with "Failed to fetch dynamically
     // imported module". Pre-including them keeps the hash stable so the tab loads first try.
     optimizeDeps: {
-      include: ["elkjs/lib/elk.bundled.js", "mermaid"],
+      include: ["elkjs/lib/elk.bundled.js", "mermaid", "@maxgraph/core"],
     },
 
     // 1. prevent Vite from obscuring rust errors
