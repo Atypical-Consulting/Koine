@@ -269,6 +269,11 @@
         <span class="sb-item" id="sb-connection">Connecting…</span>
         <span class="sb-item" id="sb-version"></span>
       </footer>
+
+      <!-- Narrow-viewport (mobile) zone switcher: hidden on desktop, a fixed bottom ARIA-tablist bar
+           below $bp-narrow. The <MobileZoneBar> Preact panel renders here (see ide.tsx); selecting a tab
+           writes the uiChrome slice's mobileZone, which is mirrored onto #split[data-mobile-zone]. -->
+      <nav id="mobile-zone-bar-host" aria-label="Studio zone switcher"></nav>
     </div>
   </body>
 </html>

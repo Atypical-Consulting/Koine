@@ -74,6 +74,9 @@ import { handleBeforeUnload } from '@/shell/dirty';
 import { render } from 'preact';
 import { createHistoryController } from '@/shell/historyController';
 import { HistoryControls } from '@/shell/HistoryControls';
+import { MobileZoneBar } from '@/shell/MobileZoneBar';
+import { type MobileZone } from '@/store/slices/uiChrome';
+import { BP_NARROW } from '@/shared/breakpoint';
 import { UnsavedIndicator } from '@/shell/UnsavedIndicator';
 import { WorkspaceProblemsBadge } from '@/diagnostics/WorkspaceProblemsBadge';
 import { StoreInspector } from '@/shell/StoreInspector';
@@ -851,6 +854,29 @@ export function init(): void {
     />,
     el('history-controls-host'),
   );
+
+  // The bottom mobile zone switcher (#220): a tablist shown only below $bp-narrow that picks which of
+  // the four zones (Files / Code / Diagram / Props) fills the single-column phone shell. Selecting a
+  // zone writes the store; Code/Diagram additionally flip the center tab (both live in #center, so the
+  // center tab decides which surface shows). The active zone is mirrored onto #split[data-mobile-zone]
+  // so the @media rules can show/hide zones without remounting any DOM.
+  function selectMobileZone(zone: MobileZone): void {
+    appStore.getState().setMobileZone(zone);
+    if (zone === 'diagram') controller.selectCenter('visual');
+    else if (zone === 'code') controller.selectCenter('technical');
+  }
+  render(<MobileZoneBar store={appStore} onSelect={selectMobileZone} />, el('mobile-zone-bar-host'));
+  splitEl.dataset.mobileZone = appStore.getState().mobileZone;
+  // Mirror only when mobileZone actually changes — the listener fires on every store write, so guard
+  // on prevState (the inspectorController idiom) to avoid rewriting the attribute on unrelated updates.
+  appStore.subscribe((s, prev) => {
+    if (s.mobileZone !== prev.mobileZone) splitEl.dataset.mobileZone = s.mobileZone;
+  });
+  // On a narrow (phone) first paint, land on the default mobile zone's surface so the bottom bar's
+  // active tab and the visible #center surface agree from the start — otherwise the bar highlights the
+  // default 'code' zone while #center still shows the desktop-restored Visual surface until the first
+  // tap. Gated on BP_NARROW (the JS mirror of $bp-narrow) so the desktop shell keeps its restored center.
+  if (window.innerWidth <= BP_NARROW) selectMobileZone(appStore.getState().mobileZone);
   // Switching files: repaint the active file's diagnostics, invalidate the doc views so they re-fetch,
   // and follow the new file's bounded context. Preserves the exact effect order of the old activateFile.
   workspace.onActiveChanged((uri) => {
@@ -1270,6 +1296,10 @@ export function init(): void {
     }
   }
 
+  // The drag handles are a desktop (mouse) idiom; on mobile they're display:none (see _split.scss),
+  // so these listeners are inert below $bp-narrow (BP_NARROW). No JS gate needed — CSS owns visibility.
+  // A persisted --koi-inspector-w / --koi-leftrail-w on #split is also harmless under the mobile
+  // grid-template-columns: 1fr: those custom props aren't referenced inside the @media block.
   initSplitResizer({ split: el('split'), handle: el('split-resizer') });
 
   // Left sidebar width — the single rail (Files / Explorer / Overview / Documentation).
