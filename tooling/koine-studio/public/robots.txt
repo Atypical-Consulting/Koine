@@ -1,0 +1,3 @@
+# Koine Studio — single-page app. Allow crawling of the shell; nothing sensitive is served.
+User-agent: *
+Allow: /

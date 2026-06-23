@@ -829,7 +829,7 @@ public static partial class CompilerInterop
 
     private static WDiagramNode MapNode(DiagramNode n) =>
         new(n.Id, n.Label, n.Kind, n.QualifiedName, MapSourceSpan(n.Span),
-            n.Stereotype, (n.Members ?? []).Select(MapMember).ToArray());
+            n.Stereotype, (n.Members ?? []).Select(MapMember).ToArray(), (n.Invariants ?? []).ToArray());
 
     private static WDiagramMember MapMember(DiagramMember m) =>
         new(m.Text, m.Kind);
@@ -1184,7 +1184,7 @@ public sealed record WDiagramGraph(WDiagramNode[] Nodes, WDiagramEdge[] Edges);
 /// </summary>
 public sealed record WDiagramNode(
     string Id, string Label, string Kind, string QualifiedName, WSourceSpan? SourceSpan,
-    string? Stereotype, WDiagramMember[] Members);
+    string? Stereotype, WDiagramMember[] Members, string[] Invariants);
 
 /// <summary>One UML class-body row: a pre-formatted <see cref="Text"/> and its <see cref="Kind"/> (<c>field</c>/<c>method</c>/<c>value</c>).</summary>
 public sealed record WDiagramMember(string Text, string Kind);

@@ -600,6 +600,9 @@ export function createKoineEditor(opts: KoineEditorOptions): KoineEditor {
     state: EditorState.create({
       doc: opts.doc,
       extensions: [
+        // CodeMirror's editable surface is an ARIA textbox; give it an accessible name so screen
+        // readers (and Lighthouse's aria-input-field-name audit) announce it as the model editor.
+        EditorView.contentAttributes.of({ 'aria-label': 'Koine model source editor' }),
         lineWrap.of(opts.lineWrap ? EditorView.lineWrapping : []),
         lineNumbers(),
         highlightActiveLineGutter(),
@@ -754,6 +757,7 @@ export function createOutputView(parent: HTMLElement, lineWrap = false): OutputV
     state: EditorState.create({
       doc: '',
       extensions: [
+        EditorView.contentAttributes.of({ 'aria-label': 'Generated code preview (read-only)' }),
         wrap.of(lineWrap ? EditorView.lineWrapping : []),
         lineNumbers(),
         EditorState.readOnly.of(true),

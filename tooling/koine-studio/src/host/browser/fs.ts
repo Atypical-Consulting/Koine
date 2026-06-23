@@ -163,18 +163,7 @@ export function canMaterializeWorkspace(): boolean {
   return opfsRoot() !== null;
 }
 
-export async function materializeWorkspace(
-  name: string,
-  files: { relPath: string; contents: string }[],
-): Promise<string | null> {
-  const rootPromise = opfsRoot();
-  if (!rootPromise) return null;
-  const root = await rootPromise;
-  // One OPFS directory per example, recreated fresh on every open so re-opening starts from a clean
-  // copy (edits/renames/deletes from a previous session are discarded).
-  const dirName = `example-${name}`;
-  await root.removeEntry(dirName, { recursive: true }).catch(() => {});
-  const dir = await root.getDirectoryHandle(dirName, { create: true });
+async function writeFilesInto(dir: FsDirHandle, files: { relPath: string; contents: string }[]): Promise<void> {
   for (const file of files) {
     const segments = file.relPath.split('/');
     const leaf = segments.pop()!;
@@ -185,8 +174,38 @@ export async function materializeWorkspace(
     await writable.write(file.contents);
     await writable.close();
   }
-  // Register under a fresh in-memory token (display the example name, not the OPFS prefix). Not
-  // persisted to IndexedDB — a synthetic workspace lives only for the session.
+}
+
+export async function materializeWorkspace(
+  name: string,
+  files: { relPath: string; contents: string }[],
+  persist = false,
+): Promise<string | null> {
+  const rootPromise = opfsRoot();
+  if (!rootPromise) return null;
+  const root = await rootPromise;
+  const dirName = `example-${name}`;
+
+  if (persist) {
+    // Persistent workspace (the starter examples): addressed by a STABLE token (the dir name) so
+    // re-opening the same example reuses one persisted handle, seeded only the FIRST time (when it
+    // holds no `.koi`) like the default workspace, and registered in IndexedDB. So a user's edits to
+    // an opened example survive a re-open AND a page reload instead of being silently wiped.
+    const token = dirName;
+    const dir = await root.getDirectoryHandle(dirName, { create: true });
+    if (!(await hasAnyKoi(dir))) await writeFilesInto(dir, files);
+    folders.set(token, dir);
+    folderNames.set(token, name);
+    dirHandles.set(token, dir);
+    await idbPut(token, dir);
+    return token;
+  }
+
+  // Ephemeral workspace (e.g. a shared-link import): recreated fresh on every open so each import
+  // reflects exactly its own payload, under a session-only token (not persisted to IndexedDB).
+  await root.removeEntry(dirName, { recursive: true }).catch(() => {});
+  const dir = await root.getDirectoryHandle(dirName, { create: true });
+  await writeFilesInto(dir, files);
   const token = await uniqueToken(name);
   folders.set(token, dir);
   folderNames.set(token, name);

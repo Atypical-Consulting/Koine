@@ -11,6 +11,7 @@ import {
   renameEntry,
   moveEntry,
   openDefaultWorkspace,
+  materializeWorkspace,
   readTextFile,
   writeTextFile,
   saveProjectToRoot,
@@ -428,6 +429,62 @@ describe('default workspace (OPFS)', () => {
     __resetFsForTest();
     delete (navigator as unknown as { storage?: unknown }).storage;
     expect(await openDefaultWorkspace('x')).toBeNull();
+  });
+});
+
+describe('materializeWorkspace (examples vs shared imports)', () => {
+  function mockOpfs(root: MockDir): void {
+    (navigator as unknown as { storage: { getDirectory(): Promise<unknown> } }).storage = {
+      getDirectory: async () => root as never,
+    };
+  }
+  const originalStorage = (navigator as unknown as { storage?: unknown }).storage;
+  afterEach(async () => {
+    (navigator as unknown as { storage?: unknown }).storage = originalStorage;
+    __resetFsForTest();
+    await __clearDbForTest();
+  });
+
+  it('persist=true: stable token, seeds once, and preserves edits on reopen', async () => {
+    __resetFsForTest();
+    await __clearDbForTest();
+    mockOpfs(new MockDir('opfs-root'));
+
+    const files = [{ relPath: 'model.koi', contents: 'context Billing {}' }];
+    const token = await materializeWorkspace('billing', files, true);
+    expect(token).toBe('example-billing'); // stable token, not a session-unique one
+    await listEntries(token as string); // registers the file handles (the open path does this)
+    expect(await readTextFile(`${token as string}/model.koi`)).toBe('context Billing {}');
+
+    // Edit, then reopen the SAME example with different seed files: edits must win (no wipe).
+    await writeTextFile(`${token as string}/model.koi`, 'context Edited {}');
+    const token2 = await materializeWorkspace('billing', [{ relPath: 'model.koi', contents: 'context Fresh {}' }], true);
+    expect(token2).toBe('example-billing');
+    await listEntries(token2 as string);
+    expect(await readTextFile(`${token2 as string}/model.koi`)).toBe('context Edited {}');
+  });
+
+  it('persist=false (default): recreated fresh on every call (shared-import semantics)', async () => {
+    __resetFsForTest();
+    await __clearDbForTest();
+    mockOpfs(new MockDir('opfs-root'));
+
+    const token = await materializeWorkspace('shared-workspace', [{ relPath: 'a.koi', contents: 'context A {}' }]);
+    const first = await listEntries(token as string);
+    expect(first.map((e) => e.name)).toEqual(['a.koi']);
+    expect(await readTextFile(`${token as string}/a.koi`)).toBe('context A {}');
+
+    // A second import with different files reflects ITS OWN payload, not the prior one (fresh wipe).
+    const token2 = await materializeWorkspace('shared-workspace', [{ relPath: 'b.koi', contents: 'context B {}' }]);
+    const entries = await listEntries(token2 as string);
+    expect(entries.map((e) => e.name).sort()).toEqual(['b.koi']);
+    expect(await readTextFile(`${token2 as string}/b.koi`)).toBe('context B {}');
+  });
+
+  it('returns null when OPFS is unavailable', async () => {
+    __resetFsForTest();
+    delete (navigator as unknown as { storage?: unknown }).storage;
+    expect(await materializeWorkspace('x', [{ relPath: 'a.koi', contents: '' }], true)).toBeNull();
   });
 });
 

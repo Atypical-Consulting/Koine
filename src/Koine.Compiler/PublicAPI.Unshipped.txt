@@ -73,9 +73,11 @@ Koine.Compiler.Emit.Docs.DiagramMember.Kind.init -> void
 Koine.Compiler.Emit.Docs.DiagramMember.Text.get -> string!
 Koine.Compiler.Emit.Docs.DiagramMember.Text.init -> void
 Koine.Compiler.Emit.Docs.DiagramNode
-Koine.Compiler.Emit.Docs.DiagramNode.DiagramNode(string! Id, string! Label, string! Kind, string! QualifiedName, Koine.Compiler.Ast.SourceSpan? Span, string? Stereotype = null, System.Collections.Generic.IReadOnlyList<Koine.Compiler.Emit.Docs.DiagramMember!>? Members = null) -> void
+Koine.Compiler.Emit.Docs.DiagramNode.DiagramNode(string! Id, string! Label, string! Kind, string! QualifiedName, Koine.Compiler.Ast.SourceSpan? Span, string? Stereotype = null, System.Collections.Generic.IReadOnlyList<Koine.Compiler.Emit.Docs.DiagramMember!>? Members = null, System.Collections.Generic.IReadOnlyList<string!>? Invariants = null) -> void
 Koine.Compiler.Emit.Docs.DiagramNode.Id.get -> string!
 Koine.Compiler.Emit.Docs.DiagramNode.Id.init -> void
+Koine.Compiler.Emit.Docs.DiagramNode.Invariants.get -> System.Collections.Generic.IReadOnlyList<string!>?
+Koine.Compiler.Emit.Docs.DiagramNode.Invariants.init -> void
 Koine.Compiler.Emit.Docs.DiagramNode.Kind.get -> string!
 Koine.Compiler.Emit.Docs.DiagramNode.Kind.init -> void
 Koine.Compiler.Emit.Docs.DiagramNode.Label.get -> string!

@@ -236,18 +236,27 @@ describe('createEditorSession — onChange split', () => {
 });
 
 describe('createEditorSession — status + server exit', () => {
-  test('setStatus writes the pill and mirrors the connection state into the status bar', () => {
+  test('setStatus writes the pill but does NOT drive the connection mirror (it tracks the LSP lifecycle)', () => {
     const lsp = makeLsp();
     const session = createEditorSession(makeDeps(lsp));
 
     session.setStatus('connecting…', 'connecting');
     expect(el('status').textContent).toBe('connecting…');
-    expect(el('sb-connection').textContent).toBe('Connecting…');
+    // The connection indicator is independent of transient pill toasts — an error toast (e.g. "Rename
+    // rejected") or a model with a warning must not read "Offline".
+    session.setStatus('down', 'error');
+    expect(el('sb-connection').textContent).toBe('');
+  });
 
-    session.setStatus('all good', 'green');
+  test('the connection mirror tracks the LSP lifecycle: a server push reads Local, an exit reads Offline', () => {
+    const lsp = makeLsp();
+    createEditorSession(makeDeps(lsp));
+
+    // A diagnostics push WITH a warning still proves the service is live → "Local" (not "Offline").
+    act(() => lsp.firePublish(ACTIVE, [warn(0, 'meh')]));
     expect(el('sb-connection').textContent).toBe('Local');
 
-    session.setStatus('down', 'error');
+    act(() => lsp.fireExit(1));
     expect(el('sb-connection').textContent).toBe('Offline');
   });
 

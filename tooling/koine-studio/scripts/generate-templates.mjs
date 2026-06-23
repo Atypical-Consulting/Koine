@@ -141,7 +141,17 @@ export function generate() {
   const outDir = join(studioDir, 'src');
   mkdirSync(outDir, { recursive: true });
   const outFile = join(outDir, 'templates.generated.ts');
-  writeFileSync(outFile, renderManifest(templates), 'utf8');
+  const next = renderManifest(templates);
+  // Only write when the rendered content actually changed. Re-running the generator (predev runs it,
+  // and a build/test may run it again) would otherwise bump the file's mtime even with identical
+  // content, and Vite watches this file — so an unconditional write triggers a spurious full-page
+  // reload during `dev:web` that wipes in-progress editor state. Skipping the no-op write avoids it.
+  const prev = existsSync(outFile) ? readFileSync(outFile, 'utf8') : null;
+  if (prev === next) {
+    console.log(`templates.generated.ts already up to date with ${templates.length} template(s) from ${templatesDir}`);
+    return outFile;
+  }
+  writeFileSync(outFile, next, 'utf8');
   console.log(`Generated ${relative(studioDir, outFile)} with ${templates.length} template(s) from ${templatesDir}`);
   return outFile;
 }

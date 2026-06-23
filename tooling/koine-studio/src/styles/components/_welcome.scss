@@ -323,6 +323,17 @@
       background: color-mix(in srgb, var(--koi-accent) 88%, #fff);
     }
   }
+
+  /* Unavailable action (e.g. Open folder on a non-Chromium browser): muted, no hover lift. */
+  &:disabled {
+    cursor: not-allowed;
+    opacity: 0.5;
+
+    &:hover {
+      border-color: var(--koi-line);
+      transform: none;
+    }
+  }
 }
 
 .koi-welcome-action-icon {
