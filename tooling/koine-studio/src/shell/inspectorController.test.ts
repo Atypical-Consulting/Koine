@@ -395,6 +395,21 @@ describe('createInspectorController — invalidation forces a refetch', () => {
     await vi.advanceTimersByTimeAsync(350);
     expect(lsp.glossaryModel.mock.calls.length).toBe(settled); // no further timer fired
   });
+
+  test('dispose() cancels the pending edit-debounce so the refresh never fires', async () => {
+    vi.useFakeTimers();
+    const lsp = makeLsp();
+    const ctl = createInspectorController(makeDeps(lsp));
+    ctl.init();
+    ctl.selectCenter('technical');
+    lsp.glossaryModel.mockClear();
+
+    ctl.onDocEdited(); // schedules the 350ms refresh debounce
+    ctl.dispose(); // must cancel it — otherwise the timer fires after the test's DOM is gone
+    await vi.advanceTimersByTimeAsync(350);
+    // The debounced refresh never ran: disposing cleared the timer (no post-teardown "document is not defined").
+    expect(lsp.glossaryModel).not.toHaveBeenCalled();
+  });
 });
 
 describe('createInspectorController — bottom strip lazy loading', () => {

@@ -408,7 +408,10 @@ async function boot(opts: { dom?: boolean; platform?: FakePlatform } = {}): Prom
     return realAdd(type as never, listener as never, options as never);
   });
   try {
-    init();
+    // init() returns a teardown that disposes the controller's pending debounce timers. Capture it so
+    // afterEach can release them — otherwise boot's onDocEdited debounce (a real 350ms timer) fires
+    // after this file's happy-dom env is gone, throwing "document is not defined" as an unhandled error.
+    disposeIde = init();
   } finally {
     spy.mockRestore();
   }
@@ -461,6 +464,10 @@ function setWorkspaceShareHash(files: { relPath: string; text: string }[], activ
   window.location.hash = url.slice(url.indexOf('#'));
 }
 
+// The teardown returned by the most recent init() (boot() captures it). afterEach calls it to dispose
+// the controller's pending debounce timers before this file's happy-dom environment is torn down.
+let disposeIde: (() => void) | undefined;
+
 beforeEach(() => {
   document.body.innerHTML = '';
   fakePlatform.current = null as unknown as Platform;
@@ -473,6 +480,10 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  // Dispose the booted IDE first so its pending debounce timers are cleared while the DOM still exists;
+  // otherwise a leaked 350ms refresh fires post-teardown and throws "document is not defined".
+  disposeIde?.();
+  disposeIde = undefined;
   vi.useRealTimers();
   vi.restoreAllMocks();
   window.location.hash = '';

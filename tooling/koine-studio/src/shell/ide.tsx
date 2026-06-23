@@ -214,7 +214,7 @@ function el<T extends HTMLElement>(id: string): T {
   return node as T;
 }
 
-export function init(): void {
+export function init(): () => void {
   // The host backend: the Tauri desktop shell, or a plain browser (compiler via WASM, files via
   // the File System Access API). Everything host-specific — the LSP transport, folder/file I/O,
   // dialogs, the app version — goes through this.
@@ -1458,4 +1458,9 @@ export function init(): void {
       setStatus('connection failed', 'error');
       output.setContent('// failed to start language server\n' + String(e), 'plain');
     });
+
+  // A teardown the host can call to release the IDE's deferred work. Production (main.ts) runs for the
+  // page lifetime and ignores it; the test suite calls it between boots so the controller's pending
+  // debounce timers can't fire into a torn-down happy-dom (where `render` throws "document is not defined").
+  return () => controller.dispose();
 }

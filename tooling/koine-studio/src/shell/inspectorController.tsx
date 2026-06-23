@@ -234,6 +234,8 @@ export interface InspectorController {
 
   /** Boot the chrome into the restored mode (no fetch) + label the Generated tab. Called from ide.ts's boot. */
   init(): void;
+  /** Cancel pending debounce/reset timers so a deferred repaint can't fire after the host is torn down. */
+  dispose(): void;
 }
 
 function el<T extends HTMLElement>(id: string): T {
@@ -1466,6 +1468,16 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     renderBreadcrumb();
   }
 
+  // Cancel any pending debounce/reset timers. The IDE runs for the page lifetime in production (so this
+  // is a no-op there), but the test suite boots many controllers into one shared happy-dom; disposing
+  // between boots stops a deferred refresh (onDocEdited's 350ms debounce) from firing into a torn-down
+  // environment, where `render` would throw "document is not defined".
+  function dispose(): void {
+    clearTimeout(copyResetTimer);
+    clearTimeout(editDebounce);
+    clearTimeout(bottomPanelDebounce);
+  }
+
   return {
     selection,
     activeContext,
@@ -1489,5 +1501,6 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     ensureModelIndex,
     getCachedDomainIndex,
     init,
+    dispose,
   };
 }
