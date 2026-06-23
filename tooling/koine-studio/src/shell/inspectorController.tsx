@@ -58,7 +58,7 @@ import {
 } from '@/model/activeContext';
 import type { SelectedElement } from '@/model/selection';
 import { renderOverviewCounts, type ModelOutlineHandlers } from '@/model/modelOutline';
-import { type InspectorElement, type InspectorHandlers } from '@/model/inspector';
+import { buildInspectorElement, renderRules, type InspectorElement, type InspectorHandlers } from '@/model/inspector';
 import { buildModelIndex, lookupElement, type ModelIndex } from '@/model/modelIndex';
 import { PropertiesPanel } from '@/model/PropertiesPanel';
 import { ContextBreadcrumb } from '@/model/ContextBreadcrumb';
@@ -433,7 +433,9 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     try {
       const model = await lsp.glossaryModel();
       setContextOptions(listContexts(model));
-    } catch {
+    } catch (e) {
+      // Best-effort: empty the picker, but log so a failing glossary model isn't a silent dead end.
+      console.warn('Context list refresh failed; clearing the context picker.', e);
       setContextOptions([]);
     }
   }
@@ -812,6 +814,19 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
       <PropertiesPanel store={appStore} index={modelIndex} handlers={inspectorHandlers} />,
       inspectorHost,
     );
+    renderSelectedRules();
+  }
+
+  // The right-rail "Rules" tab: the selected element's invariants (business rules), resolved through the
+  // same selection → model-index → InspectorElement path as the Properties inspector, so the two tabs
+  // track selection in lockstep. Rendered imperatively into its host (it's a read-only projection).
+  function renderSelectedRules(): void {
+    const sel = appStore.getState().selection;
+    const hit = sel && modelIndex ? lookupElement(modelIndex, sel.qualifiedName) : null;
+    const element: InspectorElement | null = hit
+      ? buildInspectorElement(hit.element.entry, hit.element.node, hit.element.modelMembers)
+      : null;
+    el('rview-rules').replaceChildren(renderRules(element));
   }
 
   // Repaint the always-visible left rail: the Explorer construct tree + the Overview counts, both
@@ -1027,7 +1042,7 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
       const a = deps.ensureAssistant();
       a.syncWorkspace();
       a.focusInput();
-    }
+    } else if (activeTech() === 'check') renderCheckIdleIfEmpty();
   }
 
   // Surface the Documentation center tab (the "Docs" mode focus and the rail's "Ubiquitous Language"
@@ -1130,6 +1145,42 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   }
 
   // --- compatibility check (on-demand) ---------------------------------------
+  // The check only runs when the user picks a baseline, so the panel would otherwise be an empty void
+  // when its tab is first opened. Paint an explanatory idle state (with the trigger) so the surface
+  // always reads as a feature, never a blank pane. Skipped once a check has produced output.
+  function renderCheckIdleIfEmpty(): void {
+    if (checkView.childElementCount > 0) return; // a prior result / loading / error line already shows
+    render(null, checkView);
+    checkView.innerHTML = '';
+    const wrap = document.createElement('div');
+    wrap.className = 'koi-check-idle';
+
+    const title = document.createElement('h3');
+    title.className = 'koi-check-idle-title';
+    title.textContent = 'Model compatibility';
+
+    const body = document.createElement('p');
+    body.className = 'koi-docs-empty';
+    body.textContent =
+      'Compare this model against an earlier baseline to catch breaking changes before you ship — renamed or removed types, changed fields, or tightened invariants.';
+    wrap.append(title, body);
+
+    if (platform.canOpenFolders) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'koi-docs-new-btn koi-check-idle-action';
+      btn.textContent = 'Check against baseline…';
+      btn.addEventListener('click', () => void runCheck());
+      wrap.appendChild(btn);
+    } else {
+      const note = document.createElement('p');
+      note.className = 'koi-docs-empty';
+      note.textContent = 'Selecting a baseline folder needs a Chromium-based browser.';
+      wrap.appendChild(note);
+    }
+    checkView.appendChild(wrap);
+  }
+
   async function runCheck(): Promise<void> {
     if (!platform.canOpenFolders) {
       docMessage(checkView, 'Selecting a baseline folder needs a Chromium-based browser.', 'error');

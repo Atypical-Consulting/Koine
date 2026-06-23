@@ -200,6 +200,23 @@ public class DiagramGraphTests
     }
 
     [Fact]
+    public void Value_object_node_carries_its_invariants_as_business_rules()
+    {
+        DiagramGraph context = ContextGraph();
+
+        DiagramNode money = context.Nodes.First(n => n.Kind == "value-object" && n.Label == "Money");
+
+        // Invariants ride on a dedicated DiagramNode field (NOT the member rows) so the inspector's
+        // Rules tab can surface them; the declared message is carried verbatim (matching the docs).
+        money.Invariants.ShouldNotBeNull();
+        money.Invariants!.ShouldContain("an amount cannot be negative");
+
+        // A node with no invariants leaves the field null (compact wire) — the enum proves it.
+        DiagramNode status = context.Nodes.First(n => n.Kind == "enum");
+        status.Invariants.ShouldBeNull();
+    }
+
+    [Fact]
     public void Enum_node_carries_its_values_as_value_members()
     {
         // A nested enum (declared inside the aggregate) is drawn in the aggregate class diagram; the

@@ -179,7 +179,8 @@ public sealed partial class DocsEmitter
                 n.Type.Name, n.Type.Name, n.Kind, $"{ctx.Name}.{n.Type.Name}",
                 PreferName(n.Type, (KoineNode?)n.OwningAggregate ?? ctx),
                 Stereotype: n.Stereotype,
-                Members: ClassMembers(n.Type, n.OwningAggregate)))
+                Members: ClassMembers(n.Type, n.OwningAggregate),
+                Invariants: NodeInvariants(n.Type)))
             .ToList();
 
         var edges = modelEdges
@@ -227,6 +228,28 @@ public sealed partial class DocsEmitter
     /// </summary>
     private static IReadOnlyList<DiagramMember> ClassMembers(TypeDecl type, AggregateDecl? owningAggregate = null) =>
         ClassRows(type, owningAggregate).Select(FormatMember).ToArray();
+
+    /// <summary>
+    /// The construct's business rules (invariants) as readable strings — each invariant's declared
+    /// message, else its described condition — matching the narrative docs' "Business rules" list
+    /// (see <c>MarkdownDoc.WriteRules</c>). Only value objects and entities carry invariants; returns
+    /// <c>null</c> when there are none so the wire payload stays compact.
+    /// </summary>
+    private static IReadOnlyList<string>? NodeInvariants(TypeDecl type)
+    {
+        IReadOnlyList<Invariant>? invariants = type switch
+        {
+            ValueObjectDecl v => v.Invariants,
+            EntityDecl e => e.Invariants,
+            _ => null,
+        };
+        if (invariants is null || invariants.Count == 0)
+        {
+            return null;
+        }
+
+        return invariants.Select(inv => inv.Message ?? Describe(inv.Condition)).ToArray();
+    }
 
     /// <summary>Formats one shared <see cref="ClassRow"/> into its <see cref="DiagramMember"/> wire row.</summary>
     private static DiagramMember FormatMember(ClassRow row) => row.Kind switch

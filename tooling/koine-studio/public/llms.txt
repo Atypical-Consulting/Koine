@@ -1,0 +1,16 @@
+# Koine Studio
+
+> Koine Studio is the browser IDE for Koine, a domain-specific language for Domain-Driven Design. You write a bounded context's ubiquitous language once in `.koi` files and Koine generates idiomatic, self-contained code (C#, TypeScript, Python, PHP) — value objects, entities, aggregates, invariants, commands, events, state machines, repositories and the CQRS/application layer.
+
+## What you can do here
+
+- Edit `.koi` models in a live editor with push-based diagnostics.
+- See the emitted code preview (C#/TypeScript/Python/PHP) update as you type.
+- Explore the domain as an editable diagram, a construct outline, a relationships table and a ubiquitous-language glossary.
+- Check model-version compatibility against a baseline.
+- Ask the built-in AI domain copilot to draft, review or explain a model (bring your own Anthropic or OpenAI-compatible key).
+
+## Links
+
+- Docs & language reference: https://atypical-consulting.github.io/Koine/
+- Source & issues: https://github.com/Atypical-Consulting/Koine

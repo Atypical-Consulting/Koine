@@ -31,7 +31,9 @@ import type {
   WorkspaceEdit,
 } from '@/lsp/lsp';
 
-/** The status pill kinds — connecting (boot), green (model valid), error (diagnostics/connection). */
+/** The status pill kinds — connecting (boot), green (model valid / success toast), error (diagnostics
+ *  or a failed action toast). NOTE: the pill is transient UI only; the persistent connection indicator
+ *  (#sb-connection) is driven separately by the LSP lifecycle, not by this kind. */
 export type StatusKind = 'connecting' | 'green' | 'error';
 
 /**
@@ -179,9 +181,16 @@ export function createEditorSession(deps: EditorSessionDeps): EditorSession {
   function setStatus(text: string, kind: StatusKind): void {
     deps.status.textContent = text;
     deps.status.dataset.kind = kind;
-    // Mirror the connection state into the status bar as a stable label (the toolbar pill keeps the
-    // live text). "Local" reflects that the model is compiled in-process, not against a remote server.
-    deps.sbConnection.textContent = kind === 'connecting' ? 'Connecting…' : kind === 'error' ? 'Offline' : 'Local';
+  }
+
+  // The status-bar connection indicator (#sb-connection) tracks the language service's LIVENESS, not
+  // diagnostics: it stays "Connecting…" until the first server push proves the (in-process / WASM)
+  // service is live ("Local"), and flips to "Offline" only if the server exits. Diagnostics and
+  // transient action toasts must NOT drive it — a model with a warning is still a live, local session
+  // (the old code mirrored the pill's `kind` here, so any warning or error toast falsely read "Offline").
+  function setConnection(state: 'connecting' | 'online' | 'offline'): void {
+    deps.sbConnection.textContent =
+      state === 'connecting' ? 'Connecting…' : state === 'offline' ? 'Offline' : 'Local';
   }
 
   // The strip ROWS + their count text now live in the DiagnosticsStripPanel (mounted into #diag-body
@@ -282,11 +291,15 @@ export function createEditorSession(deps: EditorSessionDeps): EditorSession {
   // file's diagnostics drive the editor gutter, the strip, and the status pill. ide.ts re-renders
   // the tree (via onDiagnostics) so non-active files can badge their error/warning counts.
   lsp.onPublishDiagnostics((uri, diags) => {
+    // A server→client push (even an empty one) proves the language service is live — mark the
+    // connection "Local" regardless of whether the diagnostics carry warnings or errors.
+    setConnection('online');
     renderDiagnostics(uri, diags);
     deps.onDiagnostics(uri, diags);
   });
   lsp.onServerExit((code) => {
     setStatus(`server exited (${code})`, 'error');
+    setConnection('offline');
   });
 
   return {

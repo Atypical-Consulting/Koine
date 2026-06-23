@@ -2,6 +2,7 @@ import { afterEach, describe, expect, test, vi } from 'vitest';
 import {
   buildInspectorElement,
   renderInspector,
+  renderRules,
   type InspectorElement,
   type InspectorHandlers,
 } from '@/model/inspector';
@@ -196,6 +197,14 @@ describe('buildInspectorElement', () => {
     expect(built.stereotype).toBeNull();
     expect(built.properties).toEqual([]);
     expect(built.behaviors).toEqual([]);
+    expect(built.invariants).toBeUndefined();
+  });
+
+  test('carries the diagram node’s invariants as business rules (undefined when none)', () => {
+    const withRules = buildInspectorElement(entry, { ...node, invariants: ['total >= 0', 'lines not empty'] });
+    expect(withRules.invariants).toEqual(['total >= 0', 'lines not empty']);
+    // An empty invariants array collapses to undefined (so the Properties Invariants compartment hides).
+    expect(buildInspectorElement(entry, { ...node, invariants: [] }).invariants).toBeUndefined();
   });
 
   test('falls back to the structured-model fields for a value object with no diagram node', () => {
@@ -356,5 +365,26 @@ describe('property editing (authoring)', () => {
     expect(el.querySelector('.koi-inspector-row-editable')).toBeNull();
     expect(el.querySelector('.koi-inspector-prop-input')).toBeNull();
     expect(el.querySelector('.koi-inspector-add-prop')).toBeNull();
+  });
+});
+
+describe('renderRules', () => {
+  test('prompts to select when nothing is selected', () => {
+    const el = renderRules(null);
+    expect(el.querySelector('.koi-rview-empty-title')?.textContent).toBe('Business rules');
+    expect(el.textContent).toContain('Select an element');
+  });
+
+  test('lists the selected element’s invariants as business rules', () => {
+    const el = renderRules({ ...fullElement, invariants: ['total >= 0', 'lines not empty'] });
+    expect(el.querySelector('.koi-rview-empty-title')?.textContent).toBe('Order — business rules');
+    const items = Array.from(el.querySelectorAll('.koi-inspector-item')).map((n) => n.textContent);
+    expect(items).toEqual(['total >= 0', 'lines not empty']);
+  });
+
+  test('shows a no-invariants state for an element without rules', () => {
+    const el = renderRules({ ...fullElement, invariants: undefined });
+    expect(el.textContent).toContain('No invariants declared');
+    expect(el.querySelector('.koi-inspector-item')).toBeNull();
   });
 });

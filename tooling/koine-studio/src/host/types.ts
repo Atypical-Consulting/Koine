@@ -133,8 +133,18 @@ export interface Platform {
    * token (then opened via the normal folder-mode path, so the explorer + file mutations all
    * work). Used by the multi-file starter examples. `name` is a stable per-example slug; `files`
    * carry forward-slashed relPaths.
+   *
+   * `persist` (default false) controls the lifecycle: when true the workspace is addressed by a
+   * stable token, seeded only on first creation, and remembered across reloads — so a user's edits
+   * to an opened example survive (the examples pass true). When false it is recreated fresh on every
+   * call under a session-only token, so each call reflects exactly its own files (shared-link imports
+   * pass false / omit it).
    */
-  materializeWorkspace(name: string, files: { relPath: string; contents: string }[]): Promise<string | null>;
+  materializeWorkspace(
+    name: string,
+    files: { relPath: string; contents: string }[],
+    persist?: boolean,
+  ): Promise<string | null>;
 
   /**
    * Open (or first-time create + seed) the host's persistent default workspace — the single-model

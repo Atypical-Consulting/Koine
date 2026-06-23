@@ -310,6 +310,7 @@ export interface DiagramNode {
   sourceSpan: SourceSpan | null; // null only when the node truly has no position
   stereotype: string | null; // UML stereotype w/o guillemets (class nodes only), e.g. 'aggregate root'
   members: DiagramMember[]; // UML class-body rows (class nodes only); [] for simple boxes
+  invariants?: string[]; // business rules (value objects / entities): each invariant's message or described condition; [] / absent when none
 }
 
 /** A directed edge between two node ids in the same graph. */
