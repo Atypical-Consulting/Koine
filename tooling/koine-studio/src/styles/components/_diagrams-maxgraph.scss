@@ -227,8 +227,8 @@ $ddd-kinds: (
   gap: 0.25rem;
   flex-wrap: wrap;
   padding: 0.375rem 0.5rem;
-  border-bottom: 1px solid var(--koi-border, #2a2f3a);
-  background: var(--koi-surface, #1b1f27);
+  border-bottom: 1px solid var(--koi-line);
+  background: var(--koi-surface);
 }
 
 .koi-palette-btn {
@@ -239,13 +239,13 @@ $ddd-kinds: (
   border: 1px solid transparent;
   border-radius: 0.375rem;
   background: transparent;
-  color: var(--koi-text, #d7dce4);
+  color: var(--koi-fg);
   font-size: 0.8125rem;
   cursor: pointer;
 
   &:hover:not(:disabled) {
-    background: var(--koi-surface-hover, rgba(255, 255, 255, 0.06));
-    border-color: var(--koi-border, #2a2f3a);
+    background: var(--koi-paper-2);
+    border-color: var(--koi-line);
   }
 
   &:disabled {
@@ -273,5 +273,5 @@ $ddd-kinds: (
   width: 1px;
   align-self: stretch;
   margin: 0.125rem 0.25rem;
-  background: var(--koi-border, #2a2f3a);
+  background: var(--koi-line);
 }
