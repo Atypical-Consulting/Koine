@@ -466,6 +466,7 @@ export function init(): void {
     editor: { view: editor.view, goto: editor.goto, gotoRange: editor.gotoRange },
     output,
     platform,
+    store: appStore,
     activeUri: () => workspace.activeUri(),
     folderRootToken: () => workspace.folderRootToken(),
     initialTarget: settings.previewTarget,

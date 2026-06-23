@@ -67,7 +67,8 @@ import { EventsPanel } from '@/model/EventsPanel';
 import { RelationshipsPanel } from '@/model/RelationshipsPanel';
 import { GlossaryPanel } from '@/model/GlossaryPanel';
 import { DocsPanelHost } from '@/docs/DocsPanelHost';
-import { appStore } from '@/store/index';
+import type { StoreApi } from 'zustand/vanilla';
+import type { AppState } from '@/store/index';
 import { DEFAULT_CENTER, isValidCenter, type RightView } from '@/store/slices/uiChrome';
 import type { DomainIndex } from '@/ai/aiPanel';
 import { currentTheme } from '@/settings/theme';
@@ -115,6 +116,12 @@ export interface InspectorControllerDeps {
   output: OutputView;
   /** The host platform (baseline picker for the check, the docs store fs, browser/desktop kind). */
   platform: Platform;
+  /**
+   * The app state store, injected rather than reached as a module singleton — so the controller owns no
+   * global state, can be driven against a fresh store per instance (the test suite does exactly this),
+   * and two controllers with separate stores can coexist. Production passes the app-wide `appStore`.
+   */
+  store: StoreApi<AppState>;
 
   /** The uri the editor currently shows (read live from ide.ts). */
   activeUri(): string;
@@ -231,7 +238,7 @@ function el<T extends HTMLElement>(id: string): T {
 }
 
 export function createInspectorController(deps: InspectorControllerDeps): InspectorController {
-  const { lsp, editor, output, platform } = deps;
+  const { lsp, editor, output, platform, store: appStore } = deps;
 
   // --- DOM hosts (looked up once; the same id surface init() builds, so a drift throws via el()) ---
   // A copy affordance overlaid on the emitted-preview pane (auto-hidden with the pane). Tracks the
@@ -294,11 +301,12 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   // truth for both the highlighted tab AND the shown view, so they can never diverge (#193). Reset it to
   // this controller's defaults: the restored center, with the tech/docs sub-views back at their landing
   // tabs. setState lands the reset atomically in one notification, before any subscriber runs.
-  // `bottom`/`right` are reset to their landing tabs alongside the others: `appStore` is a module
-  // SINGLETON reused across controller instances (notably the test suite), so without this reset a prior
-  // instance that left `bottom`/`right` on a non-default tab would leak into this one — the same reason
-  // the docViews invalidate() below resets surface-staleness. This restores the per-instance defaults the
-  // old module-local `activeBottomTab = 'problems'` / right-rail `'props'` start gave for free.
+  // `bottom`/`right` are reset to their landing tabs alongside the others: the store is INJECTED (deps.store)
+  // and, in production, is the app-wide singleton reused across workspace reopens — so without this reset a
+  // prior session that left `bottom`/`right` on a non-default tab would leak into a freshly-booted controller
+  // (the same reason the docViews invalidate() below resets surface-staleness). Tests pass a fresh store per
+  // controller, for which this is a harmless no-op. This restores the per-instance defaults the old
+  // module-local `activeBottomTab = 'problems'` / right-rail `'props'` start gave for free.
   appStore.setState({
     center: initialCenter,
     tech: 'editor',
@@ -311,10 +319,10 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   // Events/Relationships/Context Map tables — are loaded vs stale; there are no longer any controller-
   // local `loaded` flags duplicating it. Reset it to fully-stale for this fresh workspace session so the
   // first show of each fetches: invalidate() flips every view to not-loaded and bumps its token.
-  // This reset is load-bearing because `appStore` is a module SINGLETON reused across controller
-  // instances (notably the test suite, which builds many controllers against the one store): without it,
-  // a prior instance that left a view `loaded` would make this instance skip its first fetch. It resets
-  // the singleton's surface-staleness between controller instances.
+  // This reset is load-bearing because the injected store is, in production, the app-wide singleton reused
+  // across workspace reopens (and the test suite builds many controllers): without it, a prior session that
+  // left a view `loaded` would make a freshly-booted controller skip its first fetch. It resets the store's
+  // surface-staleness for this controller's session.
   appStore.getState().invalidate();
 
   // Persist the active center pane across reloads: on a real center change, write it through, with a
