@@ -67,6 +67,7 @@ export class TauriPlatform implements Platform {
   readonly kind = 'tauri' as const;
   readonly canOpenFolders = true;
   readonly canSaveProjects = false;
+  readonly persistsWorkspace = true;
 
   createLspTransport(): LspTransport {
     return new TauriLspTransport();

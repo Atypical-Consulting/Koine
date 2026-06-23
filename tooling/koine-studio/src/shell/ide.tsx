@@ -900,13 +900,40 @@ export function init(): void {
   async function openDefaultWorkspaceFlow(seed: string): Promise<void> {
     const { opened, pristineSeed } = await workspace.openDefaultWorkspaceFlow(seed);
     if (!opened) {
-      output.setContent('// Koine Studio needs OPFS (a modern browser) to store your model.', 'plain');
+      // The browser now falls back to an in-memory workspace, so this only fires if even that failed
+      // (or a host that genuinely can't back one). An honest message beats a blank editor.
+      output.setContent('// Koine Studio could not open a workspace in this browser.', 'plain');
       return;
     }
     // Token confirmed — the workspace is open. Clear the legacy scratch key now so the migration is
     // non-destructive: content was never lost even if OPFS was unavailable on a prior load.
     clearLegacyScratch();
+    // No-OPFS browsers (Safari / Firefox Private) run on the in-memory fallback: the editor + compiler
+    // work, but a reload loses everything. Warn once so the user exports their work rather than losing it.
+    if (!platform.persistsWorkspace) showMemoryOnlyBanner();
     if (pristineSeed && pristineSeed.text === SEED) welcome.show();
+  }
+
+  // A one-time, dismissible top banner shown when the workspace is memory-only (no OPFS) — so work
+  // that won't survive a reload is never lost silently. Points at the durable escape hatches.
+  function showMemoryOnlyBanner(): void {
+    if (document.getElementById('koi-memory-banner')) return;
+    const bar = document.createElement('div');
+    bar.id = 'koi-memory-banner';
+    bar.className = 'koi-memory-banner';
+    bar.setAttribute('role', 'status');
+    const msg = document.createElement('span');
+    msg.className = 'koi-memory-banner-msg';
+    msg.textContent =
+      'This browser can’t save to disk — your work lives only in this tab and is lost on reload. Use “Copy shareable link”, or open Studio in Chrome/Edge to keep it.';
+    const dismiss = document.createElement('button');
+    dismiss.type = 'button';
+    dismiss.className = 'koi-memory-banner-dismiss';
+    dismiss.setAttribute('aria-label', 'Dismiss');
+    dismiss.textContent = '✕';
+    dismiss.addEventListener('click', () => bar.remove());
+    bar.append(msg, dismiss);
+    document.getElementById('app')?.prepend(bar);
   }
 
   // True when the command palette or a modal dialog (prefs/help/about) is open, so global

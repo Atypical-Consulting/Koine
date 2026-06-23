@@ -33,6 +33,7 @@ class FakePlatform implements Platform {
   readonly kind = 'browser' as const;
   readonly canOpenFolders = true;
   readonly canSaveProjects = true;
+  readonly persistsWorkspace = true;
 
   /** relPath (forward-slashed) -> UTF-8 contents. */
   files = new Map<string, string>();
