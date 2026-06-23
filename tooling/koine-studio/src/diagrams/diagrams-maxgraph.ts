@@ -9,7 +9,7 @@
 // containers, layout, edges, interaction, and persistence land in later tasks.
 import type { DiagramRenderer } from '@/diagrams/diagrams';
 import type { Graph as MxGraph, Cell as MxCell } from '@maxgraph/core';
-import type { DiagramGraph, DiagramMember, DiagramNode, DocsFile } from '@/lsp/lsp';
+import type { DiagramEdge, DiagramGraph, DiagramMember, DiagramNode, DocsFile } from '@/lsp/lsp';
 import { mergeGraphsForView } from '@/model/modelTables';
 import { buildEmptyState } from '@/diagrams/emptyState';
 
@@ -160,6 +160,18 @@ function runTwoLevelLayout(mx: Mx, graph: MxGraph): void {
   }
 }
 
+/** Place a small multiplicity label at one end of an edge (x=-1 source end, x=+1 target end). */
+function addEndLabel(graph: MxGraph, edge: MxCell, text: string, at: -1 | 1): void {
+  graph.insertVertex({
+    parent: edge,
+    value: text,
+    position: [at, 0],
+    size: [0, 0],
+    relative: true,
+    style: { fontColor: 'var(--koi-muted)', labelBackgroundColor: 'var(--koi-surface)', fontSize: 11, resizable: false },
+  });
+}
+
 /**
  * Build the maxGraph canvas for one merged domain graph into `container`. Kept free of the render
  * lifecycle so tests can drive it directly and assert on the model (`graph.getDataModel()`), per the
@@ -173,10 +185,14 @@ export function buildCanvas(mx: Mx, container: HTMLElement, merged: DiagramGraph
   graph.getView().allowEval = false;
   graph.setHtmlLabels(true); // labels render as HTML so class nodes can use compartment markup (later task).
   graph.setCellsEditable(false); // read-only skeleton; in-canvas editing is wired in a later task.
-  // Render each cell's stored DiagramNode as its UML/simple HTML label (a `.koi-node` div, themed by CSS).
+  // Render each cell's stored value: a DiagramNode → its UML/simple HTML label (a `.koi-node` div themed
+  // by CSS); a DiagramEdge → its mid label text; anything else (container name, cardinality) → the string.
   graph.convertValueToString = (cell): string => {
-    const v = cell.value as DiagramNode | string | null;
-    if (v && typeof v === 'object' && 'qualifiedName' in v) return nodeLabelHtml(v as DiagramNode);
+    const v = cell.value as DiagramNode | DiagramEdge | string | null;
+    if (v && typeof v === 'object') {
+      if ('qualifiedName' in v) return nodeLabelHtml(v);
+      if ('from' in v && 'to' in v) return v.label ?? '';
+    }
     return String(v ?? '');
   };
 
@@ -238,6 +254,37 @@ export function buildCanvas(mx: Mx, container: HTMLElement, merged: DiagramGraph
         style: { fillColor: 'none', strokeColor: 'none', overflow: 'fill', verticalAlign: 'top', align: 'left' },
       });
       cells.set(node.id, cell);
+    }
+
+    // Edges between the merged endpoints. Composition gets a filled diamond at the owner (source) end + a
+    // target arrow + per-end multiplicity labels; every other relationship is a single target arrow. The
+    // DiagramEdge is kept as the cell value so a later disconnect gesture can read its backingMember.
+    for (const edge of merged.edges) {
+      const source = cells.get(edge.from);
+      const target = cells.get(edge.to);
+      if (!source || !target) continue;
+      const composition = edge.arrowKind === 'composition';
+      const e = graph.insertEdge({
+        parent: root,
+        source,
+        target,
+        value: edge,
+        style: {
+          edgeStyle: 'orthogonalEdgeStyle', // registered name → CSP-safe (no eval)
+          rounded: true,
+          strokeColor: 'var(--koi-line)',
+          fontColor: 'var(--koi-muted)',
+          startArrow: composition ? 'diamondThin' : 'none',
+          startFill: composition,
+          startSize: 12,
+          endArrow: 'open',
+          endSize: 10,
+        },
+      });
+      if (composition) {
+        if (edge.sourceCardinality) addEndLabel(graph, e, edge.sourceCardinality, -1);
+        if (edge.cardinality) addEndLabel(graph, e, edge.cardinality, 1);
+      }
     }
   });
 

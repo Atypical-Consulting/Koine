@@ -167,6 +167,59 @@ describe('buildCanvas', () => {
   });
 });
 
+describe('edges', () => {
+  const cls = (id: string) => node({ id, qualifiedName: id, stereotype: 'aggregate root' });
+
+  test('a composition edge: diamond at the owner end, arrow at the part end, both multiplicities', () => {
+    const merged: DiagramGraph = {
+      nodes: [cls('Ordering.Order'), cls('Ordering.Line')],
+      edges: [
+        {
+          from: 'Ordering.Order',
+          to: 'Ordering.Line',
+          label: 'contains',
+          arrowKind: 'composition',
+          sourceCardinality: '1',
+          cardinality: '*',
+          backingMember: 'Ordering.Order.lines',
+        },
+      ],
+    };
+    const container = makeContainer();
+    const handle = buildCanvas(mx, container, merged);
+    try {
+      const edge = handle.cells.get('Ordering.Order')!.getEdgeAt(0);
+      expect(edge).toBeTruthy();
+      expect(edge!.getStyle().startArrow).toBe('diamondThin');
+      expect(edge!.getStyle().startFill).toBe(true);
+      expect(edge!.getStyle().endArrow).not.toBe('none');
+      // the DiagramEdge stays on the cell so a disconnect gesture can read its backing field
+      expect(edge!.value).toMatchObject({ backingMember: 'Ordering.Order.lines' });
+      // the two multiplicity labels are child cells of the edge
+      expect(edge!.getChildCount()).toBe(2);
+    } finally {
+      handle.dispose();
+    }
+  });
+
+  test('a plain (association) edge: only a target arrow, no diamond, no multiplicity labels', () => {
+    const merged: DiagramGraph = {
+      nodes: [cls('Sales.Customer'), cls('Sales.Order')],
+      edges: [{ from: 'Sales.Customer', to: 'Sales.Order', label: 'places', arrowKind: 'association' }],
+    };
+    const container = makeContainer();
+    const handle = buildCanvas(mx, container, merged);
+    try {
+      const edge = handle.cells.get('Sales.Customer')!.getEdgeAt(0);
+      expect(edge!.getStyle().startArrow).toBe('none');
+      expect(edge!.getStyle().endArrow).not.toBe('none');
+      expect(edge!.getChildCount()).toBe(0);
+    } finally {
+      handle.dispose();
+    }
+  });
+});
+
 describe('createMaxGraphRenderer.render', () => {
   test('shows the empty state (three concept doorways) when there is nothing to draw', async () => {
     const container = makeContainer();
