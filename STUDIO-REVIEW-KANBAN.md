@@ -49,7 +49,7 @@
 |----|----------|---------|-------|--------|
 | F1 | low (dev-only) | dev tooling | `scripts/generate-templates.mjs` rewrites `src/templates.generated.ts`, which Vite watches → spurious full page reload that wipes in-progress state during `dev:web`. Not a prod bug; consider writing only when content changed. | 🔍 open |
 | F2 | medium | Welcome / workspace persistence | Opening a **template example** is ephemeral: it does not appear under RECENT, and a page reload reverts to Welcome + default Billing model, losing the opened example. (Matches known save/load gap.) | 🔍 open |
-| F3 | low (a11y) | forms (likely Settings/AI inputs) | Console: "A form field element should have an id or name attribute (count: 14)". 14 inputs lack `id`/`name`. | 🔍 open |
+| F3 | low (a11y) | forms (Settings/AI inputs) | Console: "form field should have an id or name" + "no label associated". Fixed in the Settings `row()` helper — labelable controls now get a stable `id`/`name` + a real `<label for>` (incl. the API-key field). Count dropped **14→5**; the remaining 5 are aria-labeled search/filter boxes (Filter files/constructs, command palette) + a select that don't need id/name. | ✅ fixed |
 | F4 | low (a11y/sec) | API-key input | Console: "Password field is not contained in a form" — password-type input outside a `<form>`. | 🔍 open |
 
 | F5 | **HIGH** | Code → Compatibility tab | `view-check` panel renders **completely empty** (0 children, no text, no empty state). Tab is reachable but shows a black void. Must wire it up or show a meaningful empty/explanatory state. | 🔍 open |
@@ -159,7 +159,7 @@ Each feature was actually *operated* via the browser (not just rendered), on `ht
 ## 📝 Deferred / known limitations (reported, not fixed — with rationale)
 
 - **F18 — not a bug.** The Generate-wizard "Back" button is already disabled on step 1 (`generateProjectWizard.ts:458`).
-- **F3/F4 — 14 form fields lack `id`/`name`; the API-key password input isn't in a `<form>`.** Console best-practice notices only; **Lighthouse Best Practices is already 100**. Quick win for a follow-up: add `name`/`id` to the Settings inputs + wrap them in a `<form>`.
+- ~~**F3/F4 — form fields lack `id`/`name`.**~~ ✅ Fixed for the Settings inputs (incl. the API-key field) via the `row()` helper — proper `<label for>` + id/name; count 14→5. Remaining 5 are aria-labeled search boxes/select that don't need id/name (Lighthouse Best-Practices was already 100).
 - ~~**F9/F10 — no-OPFS browsers.**~~ ✅ Fixed: in-memory workspace fallback + memory-only banner (see the follow-up table above). Verified by neutering OPFS in the live app.
 - **Rules/Notes full editors** — the informative placeholders are intentional for v1; a tracked follow-up task was spawned to wire invariants/guards onto the LSP payload (Rules) and persist per-element Notes.
 
