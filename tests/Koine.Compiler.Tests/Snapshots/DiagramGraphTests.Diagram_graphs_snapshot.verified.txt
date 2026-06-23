@@ -1,21 +1,30 @@
 ﻿==== docs/Ordering.md ====
--- diagram: Order [aggregate]
+-- diagram: Ordering [context]
   nodes:
-    Order | aggregate-root | Ordering.Order | "Order" | «aggregate root» @ 25:12-25:17
-      • [field] id: OrderId
-      • [field] customer: CustomerId
-      • [field] lines: List<OrderLine>
-      • [field] status: OrderStatus
-      • [method] submit()
+    OrderStatus | enum | Ordering.OrderStatus | "OrderStatus" | «enumeration» @ 2:8-2:19
+      • [value] Draft
+      • [value] Submitted
+      • [value] Paid
+      • [value] Shipped
+      • [value] Cancelled
+    Money | value-object | Ordering.Money | "Money" | «value object» @ 4:9-4:14
+      • [field] amount: Decimal
     OrderSubmitted | event | Ordering.OrderSubmitted | "OrderSubmitted" | «event» @ 17:11-17:25
       • [field] orderId: OrderId
     OrderLine | value-object | Ordering.OrderLine | "OrderLine" | «value object» @ 19:11-19:20
       • [field] product: ProductId
       • [field] quantity: Int
       • [field] unitPrice: Money
+    Order | aggregate-root | Ordering.Order | "Order" | «aggregate root» @ 25:12-25:17
+      • [field] id: OrderId
+      • [field] customer: CustomerId
+      • [field] lines: List<OrderLine>
+      • [field] status: OrderStatus
+      • [method] submit()
   edges:
-    Order -> OrderSubmitted
+    OrderLine -> Money
     Order -> OrderLine
+    Order -> OrderStatus
 -- diagram: Order [statemachine]
   nodes:
     Draft | state | Ordering.Order.Draft | "Draft" @ 30:14-30:20
@@ -30,6 +39,12 @@
     Submitted -> Cancelled
     Paid -> Shipped
     Paid -> Cancelled
+==== docs/Shipping.md ====
+-- diagram: Shipping [context]
+  nodes:
+    Parcel | value-object | Shipping.Parcel | "Parcel" | «value object» @ 49:9-49:15
+      • [field] ref: String
+  edges:
 ==== docs/context-map.md ====
 -- diagram: Context Map [contextmap]
   nodes:

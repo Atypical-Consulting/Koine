@@ -3,14 +3,54 @@
 
 Ordering bounded context — placing and pricing customer orders.
 
-## Aggregates
-
-### Order _(versioned)_
-
-**Root entity:** `Order` (identified by `OrderId`)
+## Domain Model
 
 ```mermaid
 classDiagram
+    class Currency {
+        <<enumeration>>
+        EUR
+        USD
+        GBP
+    }
+    class RefundStatus {
+        <<enumeration>>
+        None
+        Pending
+        Cancelled
+    }
+    class OrderStatus {
+        <<enumeration>>
+        Draft
+        Submitted
+        Paid
+        Shipped
+        Cancelled
+    }
+    class Money {
+        <<value object>>
+        +Decimal amount
+        +Currency currency
+    }
+    class OrderOpened {
+        <<event>>
+        +OrderId orderId
+        +CustomerId customer
+        +Int lineCount
+    }
+    class OrderSubmitted {
+        <<event>>
+        +OrderId orderId
+        +Int lineCount
+    }
+    class OrderLine {
+        <<value object>>
+        +ProductId product
+        +Int quantity
+        +Money unitPrice
+        +Money /lineTotal
+        +Money /payable
+    }
     class Order {
         <<aggregate root>>
         +int version
@@ -28,29 +68,19 @@ classDiagram
         +submit()
         +cancel()
     }
-    Order *-- OrderOpened
-    class OrderOpened {
-        <<event>>
-        +OrderId orderId
-        +CustomerId customer
-        +Int lineCount
-    }
-    Order *-- OrderSubmitted
-    class OrderSubmitted {
-        <<event>>
-        +OrderId orderId
-        +Int lineCount
-    }
+    Money *-- Currency
+    OrderLine *-- Money
     Order *-- OrderLine
-    class OrderLine {
-        <<value object>>
-        +ProductId product
-        +Int quantity
-        +Money unitPrice
-        +Money /lineTotal
-        +Money /payable
-    }
+    Order *-- OrderStatus
+    Order *-- RefundStatus
+    Order *-- Money
 ```
+
+## Aggregates
+
+### Order _(versioned)_
+
+**Root entity:** `Order` (identified by `OrderId`)
 
 **Repository finders:**
 - `byCustomer(customer: CustomerId): List<Order>`

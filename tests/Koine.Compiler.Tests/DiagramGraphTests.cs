@@ -139,11 +139,11 @@ public class DiagramGraphTests
     {
         var byFile = Descriptors();
 
-        // The Ordering context doc carries a state-machine diagram and an aggregate diagram.
+        // The Ordering context doc carries a state-machine diagram and the context class diagram.
         byFile.ShouldContainKey("docs/Ordering.md");
         var orderingKinds = byFile["docs/Ordering.md"].Select(d => d.Kind).ToList();
         orderingKinds.ShouldContain("statemachine");
-        orderingKinds.ShouldContain("aggregate");
+        orderingKinds.ShouldContain("context");
 
         // The strategic views each have their own file.
         byFile.ShouldContainKey("docs/context-map.md");
@@ -177,9 +177,9 @@ public class DiagramGraphTests
     [Fact]
     public void Aggregate_root_node_carries_stereotype_and_member_rows_for_id_and_fields()
     {
-        DiagramGraph aggregate = AggregateGraph();
+        DiagramGraph context = ContextGraph();
 
-        DiagramNode rootNode = aggregate.Nodes
+        DiagramNode rootNode = context.Nodes
             .Where(n => n.Kind == "aggregate-root")
             .ToList()
             .ShouldHaveSingleItem();
@@ -219,10 +219,10 @@ public class DiagramGraphTests
         var (model, diagnostics) = new KoineCompiler().Parse(new[] { new SourceFile("catalog.koi", source) });
         diagnostics.ShouldBeEmpty();
 
-        DiagramGraph aggregate = new DocsEmitter().EmitDiagrams(model!)["docs/Catalog.md"]
-            .First(d => d.Kind == "aggregate").Graph;
+        DiagramGraph context = new DocsEmitter().EmitDiagrams(model!)["docs/Catalog.md"]
+            .First(d => d.Kind == "context").Graph;
 
-        DiagramNode enumNode = aggregate.Nodes.First(n => n.Kind == "enum");
+        DiagramNode enumNode = context.Nodes.First(n => n.Kind == "enum");
         enumNode.Stereotype.ShouldBe("enumeration");
         enumNode.Members.ShouldNotBeNull();
 
@@ -251,10 +251,10 @@ public class DiagramGraphTests
         var (model, diagnostics) = new KoineCompiler().Parse(new[] { new SourceFile("sales.koi", source) });
         diagnostics.ShouldBeEmpty();
 
-        DiagramDescriptor aggregate = new DocsEmitter().EmitDiagrams(model!)["docs/Sales.md"]
-            .First(d => d.Kind == "aggregate");
+        DiagramDescriptor context = new DocsEmitter().EmitDiagrams(model!)["docs/Sales.md"]
+            .First(d => d.Kind == "context");
 
-        DiagramNode line = aggregate.Graph.Nodes.First(n => n.Kind == "value-object" && n.Label == "Line");
+        DiagramNode line = context.Graph.Nodes.First(n => n.Kind == "value-object" && n.Label == "Line");
 
         // The derived field is present, classified "computed", with source-like text — and it is
         // NOT also reported as a plain field.
@@ -262,15 +262,18 @@ public class DiagramGraphTests
         line.Members!.ShouldNotContain(m => m.Kind == "field" && m.Text.StartsWith("subtotal"));
 
         // Mermaid uses UML derived-attribute notation: a leading '/' on the name.
-        aggregate.Mermaid.ShouldContain("/subtotal");
+        context.Mermaid.ShouldContain("/subtotal");
     }
 
     [Fact]
     public void State_and_context_nodes_stay_simple_boxes_without_members()
     {
+        // Only the class diagram (kind "context") carries stereotypes + member rows; the lifecycle,
+        // context-map and integration-event diagrams stay simple boxes.
         foreach (var (_, descriptors) in Descriptors())
         {
-            foreach (DiagramDescriptor descriptor in descriptors.Where(d => d.Kind != "aggregate"))
+            foreach (DiagramDescriptor descriptor in descriptors
+                .Where(d => d.Kind is "statemachine" or "contextmap" or "integration-events"))
             {
                 foreach (DiagramNode node in descriptor.Graph.Nodes)
                 {
@@ -304,11 +307,11 @@ public class DiagramGraphTests
 
         var (model, diagnostics) = new KoineCompiler().Parse(new[] { new SourceFile("sales.koi", source) });
         diagnostics.ShouldBeEmpty();
-        DiagramGraph aggregate = new DocsEmitter().EmitDiagrams(model!)["docs/Sales.md"]
-            .First(d => d.Kind == "aggregate").Graph;
+        DiagramGraph context = new DocsEmitter().EmitDiagrams(model!)["docs/Sales.md"]
+            .First(d => d.Kind == "context").Graph;
 
         string? CardinalityTo(string nodeId) =>
-            aggregate.Edges.First(e => e.From == "Order" && e.To == nodeId).Cardinality;
+            context.Edges.First(e => e.From == "Order" && e.To == nodeId).Cardinality;
 
         // The cardinality comes from the Koine field type, not a string heuristic on the diagram.
         CardinalityTo("OrderLine").ShouldBe("*"); // lines: List<OrderLine> — a collection
@@ -316,9 +319,9 @@ public class DiagramGraphTests
         CardinalityTo("Address").ShouldBe("0..1"); // shipTo: Address? — an optional reference
     }
 
-    /// <summary>The single aggregate diagram's graph from the fixture.</summary>
-    private static DiagramGraph AggregateGraph() =>
-        Descriptors()["docs/Ordering.md"].First(d => d.Kind == "aggregate").Graph;
+    /// <summary>The Ordering context's class-diagram graph from the fixture.</summary>
+    private static DiagramGraph ContextGraph() =>
+        Descriptors()["docs/Ordering.md"].First(d => d.Kind == "context").Graph;
 
     [Fact]
     public Task Diagram_graphs_snapshot()
