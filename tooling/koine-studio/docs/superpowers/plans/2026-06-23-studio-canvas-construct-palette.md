@@ -15,7 +15,7 @@
 - **Back-compatible:** an `addType` edit with `Type == null` must still emit the value-object skeleton (the old behaviour).
 - **No `TreatWarningsAsErrors`** is set — do not add it.
 - **Commit identity:** `git -c user.email=phmatray@gmail.com -c user.name="Philippe Matray" commit -m "…"`.
-- **CI format gate:** `dotnet format --verify-no-changes` must pass; Studio code must pass `npm run lint` / `npm test`.
+- **CI format gate:** `dotnet format --verify-no-changes` must pass; Studio code must pass `npx tsc --noEmit` / `npm test`.
 - **Labels are English**, matching the current app shell.
 - All `.koi` skeletons must **re-validate** — the round-trip rejects anything that doesn't, so a green test proves the construct compiles.
 
@@ -429,7 +429,7 @@ export const ContextActive: Story = {
 
 - [ ] **Step 7: Run the full Studio test + lint**
 
-Run: `npm test -- src/diagrams/CanvasPalette.test.tsx && npm run lint`
+Run: `npm test -- src/diagrams/CanvasPalette.test.tsx && npx tsc --noEmit`
 Expected: PASS, no lint errors.
 
 - [ ] **Step 8: Commit**
@@ -654,7 +654,7 @@ Expected: PASS once Steps 3a-7 are in place (the test fails first — `el('canva
 
 - [ ] **Step 10: Run the full Studio suite + lint**
 
-Run: `npm test && npm run lint`
+Run: `npm test && npx tsc --noEmit`
 Expected: PASS. (Existing diagram render tests still pass — they render into a bare container, unaffected by the `#diagram-host` rename in the IDE shell.)
 
 - [ ] **Step 11: Commit**
@@ -741,7 +741,7 @@ Expected: PASS — the renderer emits 4 buttons; no reference to `DIAGRAM_ADD_TY
 
 - [ ] **Step 7: Typecheck + lint (catch any dangling reference)**
 
-Run (from `tooling/koine-studio`): `npm run lint`
+Run (from `tooling/koine-studio`): `npx tsc --noEmit`
 Expected: no unused-import or undefined-symbol errors.
 
 - [ ] **Step 8: Commit**
@@ -757,7 +757,7 @@ git -c user.email=phmatray@gmail.com -c user.name="Philippe Matray" commit -m "r
 
 - [ ] From repo root: `dotnet test --filter "FullyQualifiedName~ModelRoundTripTests"` — green.
 - [ ] From repo root: `dotnet format --verify-no-changes` — no diff (CI format gate).
-- [ ] From `tooling/koine-studio`: `npm test && npm run lint` — green.
+- [ ] From `tooling/koine-studio`: `npm test && npx tsc --noEmit` — green.
 - [ ] Manual smoke (optional, via run-studio-web): open the Visual tab, select a context, click **Entity** → name it → a green entity node appears and the `.koi` gains an `entity … identified by …Id` block; under "All contexts" the construct buttons are disabled.
 
 ## Self-review notes (coverage map)
