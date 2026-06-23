@@ -1,11 +1,13 @@
 # Mobile WASM compiler spike (#219)
 
-> **Status: IN PROGRESS — verdict PENDING real-device data.**
-> This is a measurement spike, not a shipped feature. The decisive question — does iOS WebKit's
-> per-tab memory ceiling terminate the page during a compile? — can only be answered on physical
-> devices (rows **D1**/**D2** below). Those rows are a **runbook** for a maintainer with the
-> hardware; an automated environment cannot fill them. The final **(a)/(b)/(c)** recommendation is
-> deliberately left open until they are filled in — no fabricated verdict.
+> **Status: PARTIAL — emulated baselines landed; final verdict PENDING real-device data.**
+> This is a measurement spike, not a shipped feature. The automatable half (payload sizes, emulated
+> D3/D4 baselines, experiment design, decision criteria) is recorded below and merged. The decisive
+> question — does iOS WebKit's per-tab memory ceiling terminate the page during a compile? — can only
+> be answered on physical devices (rows **D1**/**D2**), which an automated environment cannot fill, so
+> they are left as a **runbook**. The final **(a)/(b)/(c)** recommendation is deliberately left open
+> until those rows are filled — no fabricated verdict. **The remaining D1/D2 work is tracked in
+> [#219](https://github.com/Atypical-Consulting/Koine/issues/219).**
 
 **Issue:** [#219](https://github.com/Atypical-Consulting/Koine/issues/219) ·
 **Siblings gated by this:** [#220](https://github.com/Atypical-Consulting/Koine/issues/220) (responsive shell),
