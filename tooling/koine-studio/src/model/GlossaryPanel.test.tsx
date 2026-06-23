@@ -4,6 +4,7 @@ import { createAppStore } from '@/store/index';
 import { GlossaryPanel } from '@/model/GlossaryPanel';
 import type { GlossaryEntry, GlossaryModel, Range } from '@/lsp/lsp';
 import type { GlossaryHandlers } from '@/model/glossary';
+import { axe } from 'vitest-axe';
 
 const range: Range = { start: { line: 0, character: 0 }, end: { line: 0, character: 0 } };
 
@@ -35,5 +36,11 @@ describe('GlossaryPanel', () => {
     act(() => store.getState().setActiveContext('Sales'));
     expect(container.textContent).toContain('Order');
     expect(container.textContent).not.toContain('Stock');
+  });
+
+  test('has no accessibility violations', async () => {
+    const store = createAppStore();
+    const { container } = render(<GlossaryPanel store={store} model={model} handlers={handlers} />);
+    expect(await axe(container)).toHaveNoViolations();
   });
 });
