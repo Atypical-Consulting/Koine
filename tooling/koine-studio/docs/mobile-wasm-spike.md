@@ -109,11 +109,11 @@ iOS-ceiling risk.
 |----|------------------------|-----------|---------------------|----------------------------|-----------------------------|----------|
 | **D1 (iPhone/Safari)**  | 5.81 / 1.70 MB · _host-dep._ | **— runbook** | **— runbook** | **— runbook** | **— runbook** | **— runbook** |
 | **D2 (Android/Chrome)** | 5.81 / 1.70 MB · _host-dep._ | **— runbook** | **— runbook** | **— runbook** | **— runbook** | **— runbook** |
-| D3 (Chrome 4×CPU / 4G)  | 5.68 MB transferred (server **uncompressed**) | 7.3 s¹ (Fast 4G) | **66.5** | 17.1 / 17.8 | 229.8 / 284.9 | survived² |
-| D4 (Chrome no-throttle) | 5.68 MB transferred (localhost) | ~0.2 s (localhost)³ | **55.4** | 3.9 / 7.1 | 58.6 / 63.5 | survived² |
+| D3 (Chrome 4×CPU / 4G)  | ~5.8 MB transferred (server **uncompressed**) | 7.3 s¹ (Fast 4G) | **66.5** | 17.1 / 17.8 | 229.8 / 284.9 | survived² |
+| D4 (Chrome no-throttle) | ~5.8 MB transferred (localhost) | ~0.2 s (localhost)³ | **55.4** | 3.9 / 7.1 | 58.6 / 63.5 | survived² |
 
 ¹ Fresh isolated context (empty cache), Fast 4G + 4× CPU, **uncompressed** preview server: all 25
-`_framework` files (5.68 MB) arrive by **7.3 s**, all resources by 9.2 s, then WASM boots + first
+`_framework` files (5,677 KiB ≈ 5.8 MB) arrive by **7.3 s**, all resources by 9.2 s, then WASM boots + first
 compile. On **Slow 4G** (measured ~300 Kbps effective) the same uncompressed payload is **~150 s** —
 impractical; this is the cost of shipping uncompressed (see below).
 ² Desktop has no memory pressure, so "survived" here is **not diagnostic** — only D1/D2 exercise the
@@ -131,7 +131,7 @@ parse/boot/compute, not download.
   exactly what D1 must confirm — but ~67 MB is well within what modern iPhones allow, so the signal is
   cautiously favourable (not a verdict).
 - **The cold-load problem is compression, not the app.** The bundle is **uncompressed** as served here
-  (no `.br`/`.gz`; `content-encoding` absent), so a phone downloads the full **5.68 MB**. Brotli
+  (no `.br`/`.gz`; `content-encoding` absent), so a phone downloads the full **~5.8 MB**. Brotli
   (1.70 MB, 3.4×) would cut Fast-4G cold-load from ~9 s toward ~3 s and make Slow-4G go from ~150 s to
   ~45 s. **Enabling brotli/gzip on the deploy host is mandatory** and independent of the (a)/(b)/(c)
   call.
@@ -222,7 +222,7 @@ settled by the emulated runs (latency, approximate memory); the decisive memory-
     runs.
 - **(b) — lazy / explicit opt-in compile?** Triggers if it loads and compiles but cold-load is heavy or
   heap is high-but-survivable.
-  - *Cold-load:* **triggers the "heavy" clause.** Served transfer is **5.68 MB uncompressed** (well over
+  - *Cold-load:* **triggers the "heavy" clause.** Served transfer is **~5.8 MB uncompressed** (well over
     the ~3 MB bar); even brotli (1.70 MB) plus the ~0.65 MB JS shell is a multi-MB first load, and
     Slow-4G uncompressed measured ~150 s.
   - → **(b) is positively indicated by the cold-load weight**, independent of the memory outcome.
