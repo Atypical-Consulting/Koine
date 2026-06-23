@@ -80,13 +80,14 @@ export default defineConfig(({ mode }) => {
     // from the Tauri `app_version` command instead).
     define: { __APP_VERSION__: JSON.stringify(pkg.version) },
 
-    // Pre-bundle the diagram tab's heavy, lazily-imported engines at server startup. Both are only
-    // `import()`-ed the first time the Diagram tab renders (see src/diagrams.ts / diagrams-svg.ts);
-    // without this, Vite discovers them lazily, re-runs its dep optimizer mid-session, bumps the
-    // optimized-deps hash, and the in-flight dynamic import 404s with "Failed to fetch dynamically
-    // imported module". Pre-including them keeps the hash stable so the tab loads first try.
+    // Pre-bundle the diagram tab's heavy, lazily-imported engines at server startup. They are only
+    // `import()`-ed the first time a diagram renders (maxGraph for the domain canvas — see
+    // src/diagrams/diagrams-maxgraph.ts; mermaid for the context-map). Without this, Vite discovers
+    // them lazily, re-runs its dep optimizer mid-session, bumps the optimized-deps hash, and the
+    // in-flight dynamic import 404s with "Failed to fetch dynamically imported module". Pre-including
+    // them keeps the hash stable so the tab loads first try.
     optimizeDeps: {
-      include: ["elkjs/lib/elk.bundled.js", "mermaid", "@maxgraph/core"],
+      include: ["mermaid", "@maxgraph/core"],
     },
 
     // 1. prevent Vite from obscuring rust errors

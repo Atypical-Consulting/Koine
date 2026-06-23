@@ -1,6 +1,13 @@
-import { describe, expect, test, beforeAll, afterEach } from 'vitest';
+import { describe, expect, test, beforeAll, afterEach, vi } from 'vitest';
 import * as mx from '@maxgraph/core';
 import { selectDomainGraphs, buildCanvas, isClassNode, nodeLabelHtml, nodeSize, contextOf, createMaxGraphRenderer } from '@/diagrams/diagrams-maxgraph';
+import {
+  setDiagramEditing,
+  setDiagramLayoutStore,
+  setDiagramPersistScope,
+  positionKey,
+} from '@/diagrams/diagramContract';
+import { loadDiagramPositions, saveDiagramPositions } from '@/settings/persistence';
 import type { Diagram, DiagramGraph, DiagramNode, DocsFile } from '@/lsp/lsp';
 
 // happy-dom returns 0 from getBoundingClientRect; maxGraph reads the container rect on construction.
@@ -12,6 +19,12 @@ beforeAll(() => {
 
 afterEach(() => {
   document.body.innerHTML = '';
+  // Reset the module-level renderer state so an editing/persistence test can't leak into the next.
+  setDiagramEditing(false);
+  setDiagramPersistScope('scratch');
+  setDiagramLayoutStore(null);
+  localStorage.clear();
+  vi.restoreAllMocks();
 });
 
 function makeContainer(): HTMLElement {
@@ -280,5 +293,216 @@ describe('createMaxGraphRenderer.render', () => {
     await createMaxGraphRenderer().render(container, [file([diagram('aggregate', g)])], 'dark', () => false);
     expect(container.textContent).toContain('sentinel');
     expect(container.querySelector('.koi-canvas')).toBeNull();
+  });
+});
+
+describe('node navigation: null-file span', () => {
+  test('a node whose span has no file still navigates by qualified name (file: null)', () => {
+    const merged: DiagramGraph = {
+      nodes: [
+        node({
+          id: 'Ordering.Order',
+          qualifiedName: 'Ordering.Order',
+          stereotype: 'aggregate root',
+          sourceSpan: { file: null, line: 2, column: 1, endLine: 2, endColumn: 6, offset: 0, length: 5 },
+        }),
+      ],
+      edges: [],
+    };
+    const container = makeContainer();
+    const handle = buildCanvas(mx, container, merged);
+    try {
+      let detail: any = null;
+      container.addEventListener('koi-diagram-node-click', (e) => { detail = (e as CustomEvent).detail; });
+      handle.graph.fireEvent(new mx.EventObject(mx.InternalEvent.CLICK, 'cell', handle.cells.get('Ordering.Order')));
+      expect(detail).toMatchObject({ qualifiedName: 'Ordering.Order', file: null, line: 2, column: 1 });
+    } finally {
+      handle.dispose();
+    }
+  });
+});
+
+describe('editing gestures: rename (double-click) + delete (right-click)', () => {
+  const spanned = (over = {}) =>
+    node({ id: 'Ordering.Order', qualifiedName: 'Ordering.Order', label: 'Order', kind: 'aggregate-root', stereotype: 'aggregate root',
+      sourceSpan: { file: 'file:///m.koi', line: 5, column: 3, endLine: 5, endColumn: 8, offset: 0, length: 5 }, ...over });
+
+  test('double-clicking an editable node prompts and bubbles NODE_EDIT rename with the name position', () => {
+    setDiagramEditing(true);
+    window.prompt = vi.fn(() => 'PurchaseOrder') as typeof window.prompt;
+    const merged: DiagramGraph = { nodes: [spanned()], edges: [] };
+    const container = makeContainer();
+    const handle = buildCanvas(mx, container, merged);
+    try {
+      let detail: any = null;
+      container.addEventListener('koi-diagram-node-edit', (e) => { detail = (e as CustomEvent).detail; });
+      handle.graph.fireEvent(new mx.EventObject(mx.InternalEvent.DOUBLE_CLICK, 'cell', handle.cells.get('Ordering.Order')));
+      expect(detail).toMatchObject({ qualifiedName: 'Ordering.Order', action: 'rename', newName: 'PurchaseOrder', label: 'Order', line: 5, column: 3 });
+    } finally {
+      handle.dispose();
+    }
+  });
+
+  test('double-click is inert when editing is off', () => {
+    setDiagramEditing(false);
+    window.prompt = vi.fn(() => 'X') as typeof window.prompt;
+    const container = makeContainer();
+    const handle = buildCanvas(mx, container, { nodes: [spanned()], edges: [] });
+    try {
+      let fired = false;
+      container.addEventListener('koi-diagram-node-edit', () => { fired = true; });
+      handle.graph.fireEvent(new mx.EventObject(mx.InternalEvent.DOUBLE_CLICK, 'cell', handle.cells.get('Ordering.Order')));
+      expect(fired).toBe(false);
+    } finally {
+      handle.dispose();
+    }
+  });
+
+  test('right-clicking a node confirms and bubbles NODE_EDIT delete', () => {
+    setDiagramEditing(true);
+    window.confirm = vi.fn(() => true) as typeof window.confirm;
+    const container = makeContainer();
+    const handle = buildCanvas(mx, container, { nodes: [spanned()], edges: [] });
+    try {
+      // getCellAt needs laid-out geometry (absent headlessly), so stub it to return the node cell.
+      handle.graph.getCellAt = (() => handle.cells.get('Ordering.Order')) as typeof handle.graph.getCellAt;
+      let detail: any = null;
+      container.addEventListener('koi-diagram-node-edit', (e) => { detail = (e as CustomEvent).detail; });
+      container.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 10, clientY: 10, button: 2 }));
+      expect(detail).toMatchObject({ qualifiedName: 'Ordering.Order', action: 'delete', label: 'Order' });
+    } finally {
+      handle.dispose();
+    }
+  });
+});
+
+describe('canvas authoring: connect + disconnect', () => {
+  const cls = (id: string, label: string) => node({ id, qualifiedName: id, label, stereotype: 'aggregate root' });
+
+  test('a connect gesture bubbles DIAGRAM_CONNECT with both endpoints', () => {
+    setDiagramEditing(true);
+    const container = makeContainer();
+    const handle = buildCanvas(mx, container, { nodes: [cls('Ordering.Order', 'Order'), cls('Ordering.Line', 'OrderLine')], edges: [] });
+    try {
+      let detail: any = null;
+      container.addEventListener('koi-diagram-connect', (e) => { detail = (e as CustomEvent).detail; });
+      // Simulate the ConnectionHandler completing a drag: a fresh edge between the two cells.
+      const src = handle.cells.get('Ordering.Order')!;
+      const tgt = handle.cells.get('Ordering.Line')!;
+      const edge = handle.graph.insertEdge({ parent: handle.graph.getDefaultParent(), source: src, target: tgt, value: {} });
+      const conn = handle.graph.getPlugin('ConnectionHandler') as unknown as { fireEvent(e: unknown): void };
+      conn.fireEvent(new mx.EventObject(mx.InternalEvent.CONNECT, 'cell', edge, 'terminal', tgt));
+      expect(detail).toMatchObject({
+        sourceQualifiedName: 'Ordering.Order',
+        targetQualifiedName: 'Ordering.Line',
+        sourceLabel: 'Order',
+        targetLabel: 'OrderLine',
+      });
+    } finally {
+      handle.dispose();
+    }
+  });
+
+  test('right-clicking a field-backed edge bubbles DIAGRAM_DISCONNECT with the backing member', () => {
+    setDiagramEditing(true);
+    const merged: DiagramGraph = {
+      nodes: [cls('Ordering.Order', 'Order'), cls('Ordering.Line', 'OrderLine')],
+      edges: [{ from: 'Ordering.Order', to: 'Ordering.Line', label: 'lines', arrowKind: 'composition', backingMember: 'Ordering.Order.lines' }],
+    };
+    const container = makeContainer();
+    const handle = buildCanvas(mx, container, merged);
+    try {
+      const edgeCell = handle.cells.get('Ordering.Order')!.getEdgeAt(0);
+      handle.graph.getCellAt = (() => edgeCell) as typeof handle.graph.getCellAt;
+      let detail: any = null;
+      container.addEventListener('koi-diagram-disconnect', (e) => { detail = (e as CustomEvent).detail; });
+      container.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 10, clientY: 10, button: 2 }));
+      expect(detail).toMatchObject({ backingMember: 'Ordering.Order.lines', label: 'lines' });
+    } finally {
+      handle.dispose();
+    }
+  });
+});
+
+describe('authoring chrome (editing only)', () => {
+  const g: DiagramGraph = { nodes: [node({ id: 'Ordering.Order', qualifiedName: 'Ordering.Order', stereotype: 'aggregate root' })], edges: [] };
+
+  test('the read-only canvas shows only the three zoom controls', async () => {
+    setDiagramEditing(false);
+    const container = makeContainer();
+    await createMaxGraphRenderer().render(container, [file([diagram('aggregate', g)])], 'dark', () => true);
+    expect(container.querySelectorAll('.koi-canvas-btn')).toHaveLength(3);
+    expect(container.querySelector('.koi-canvas--editing')).toBeNull();
+  });
+
+  test('editing adds the Add-a-type + Auto-arrange controls and the editing marker class', async () => {
+    setDiagramEditing(true);
+    const container = makeContainer();
+    await createMaxGraphRenderer().render(container, [file([diagram('aggregate', g)])], 'dark', () => true);
+    expect(container.querySelectorAll('.koi-canvas-btn')).toHaveLength(5);
+    expect(container.querySelector('.koi-canvas--editing')).not.toBeNull();
+    expect(container.querySelector('[aria-label="Add a type"]')).not.toBeNull();
+    expect(container.querySelector('[aria-label="Auto-arrange layout"]')).not.toBeNull();
+  });
+
+  test('the Add-a-type button bubbles DIAGRAM_ADD_TYPE (bare, no detail)', async () => {
+    setDiagramEditing(true);
+    const container = makeContainer();
+    await createMaxGraphRenderer().render(container, [file([diagram('aggregate', g)])], 'dark', () => true);
+    let fired = 0;
+    let detail: unknown = 'unset';
+    container.addEventListener('koi-diagram-add-type', (e) => { fired++; detail = (e as CustomEvent).detail; });
+    container.querySelector<HTMLButtonElement>('[aria-label="Add a type"]')!.click();
+    expect(fired).toBe(1);
+    expect(detail).toBeNull();
+  });
+
+  test('the Auto-arrange button clears saved positions and bubbles DIAGRAM_RELAYOUT', async () => {
+    setDiagramEditing(true);
+    setDiagramPersistScope('ws-test');
+    saveDiagramPositions(positionKey(), { 'Ordering.Order': { x: 9, y: 9 } });
+    const container = makeContainer();
+    await createMaxGraphRenderer().render(container, [file([diagram('aggregate', g)])], 'dark', () => true);
+    let relayouts = 0;
+    container.addEventListener('koi-diagram-relayout', () => { relayouts++; });
+    container.querySelector<HTMLButtonElement>('[aria-label="Auto-arrange layout"]')!.click();
+    expect(relayouts).toBe(1);
+    expect(loadDiagramPositions(positionKey())).toEqual({});
+  });
+});
+
+describe('position persistence', () => {
+  const cls = (id: string) => node({ id, qualifiedName: id, stereotype: 'aggregate root' });
+
+  test('saved positions override the auto-layout (a hand-placed node does not snap back)', () => {
+    const container = makeContainer();
+    const handle = buildCanvas(mx, container, { nodes: [cls('Ordering.Order')], edges: [] }, { 'Ordering.Order': { x: 500, y: 120 } });
+    try {
+      const geo = handle.cells.get('Ordering.Order')!.getGeometry()!;
+      expect(geo.x).toBe(500);
+      expect(geo.y).toBe(120);
+    } finally {
+      handle.dispose();
+    }
+  });
+
+  test('moving a node persists every node position to the browser store under positionKey()', () => {
+    setDiagramPersistScope('ws-test'); // no layout store injected ⇒ the browser-storage fallback is used
+    const container = makeContainer();
+    const handle = buildCanvas(mx, container, { nodes: [cls('Ordering.Order'), cls('Ordering.Line')], edges: [] });
+    try {
+      const model = handle.graph.getDataModel();
+      const cell = handle.cells.get('Ordering.Order')!;
+      const geo = cell.getGeometry()!.clone();
+      geo.x = 333;
+      geo.y = 222;
+      model.setGeometry(cell, geo);
+      handle.graph.fireEvent(new mx.EventObject(mx.InternalEvent.CELLS_MOVED, 'cells', [cell], 'dx', 0, 'dy', 0));
+      const saved = loadDiagramPositions(positionKey());
+      expect(saved['Ordering.Order']).toEqual({ x: 333, y: 222 });
+      expect(saved['Ordering.Line']).toBeDefined(); // a drag snapshots the WHOLE layout, not just the moved node
+    } finally {
+      handle.dispose();
+    }
   });
 });

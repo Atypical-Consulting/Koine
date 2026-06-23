@@ -162,3 +162,47 @@ export function diagramPersistScope(): string {
 export function positionKey(): string {
   return `${persistScope}:koi-domain-diagram`;
 }
+
+/**
+ * Whether a node kind can be renamed via the diagram: a real construct (never the empty/unknown kind),
+ * never a bounded context, and never a state-machine pseudo-state. The canonical editability rule shared
+ * by the renderer's rename gesture and (historically) the SVG renderer. Delete is broader — see the
+ * renderer's `canDelete` (anything owned and non-context).
+ */
+export function isEditableKind(kind: string): boolean {
+  return kind !== '' && kind !== 'context' && kind !== 'state';
+}
+
+/** A persisted node position on the authoring canvas (relative to the node's parent container). */
+export interface DiagramPosition {
+  x: number;
+  y: number;
+}
+
+/**
+ * The persistence backend for the authoring canvas's node positions. The IDE injects the concrete store
+ * (a committable `koine.layout.json` at the models-folder root when a folder is open, else browser
+ * storage) via {@link setDiagramLayoutStore} before each render; the renderer reads it to restore a saved
+ * layout, to persist a drag, and to reset on "Auto-arrange". Positions are keyed by qualified name.
+ */
+export interface DiagramLayoutStore {
+  /** Load the saved positions (empty when none / unreadable). */
+  load(): Promise<Record<string, DiagramPosition>>;
+  /** Persist the full position set (the backend decides immediate vs debounced). */
+  save(positions: Record<string, DiagramPosition>): void;
+  /** Forget all saved positions (the "Auto-arrange" reset). */
+  clear(): void;
+}
+
+let layoutStore: DiagramLayoutStore | null = null;
+
+/** Inject the layout-persistence backend for the active workspace (null ⇒ the renderer falls back to
+ *  browser storage keyed by {@link positionKey}). Set by `inspectorController` before each render. */
+export function setDiagramLayoutStore(store: DiagramLayoutStore | null): void {
+  layoutStore = store;
+}
+
+/** The injected layout store, or null when none is set (the renderer then uses a browser-storage fallback). */
+export function diagramLayoutStore(): DiagramLayoutStore | null {
+  return layoutStore;
+}

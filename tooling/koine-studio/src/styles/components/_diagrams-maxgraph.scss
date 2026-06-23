@@ -134,6 +134,13 @@ $ddd-kinds: (
   color: var(--koi-on-accent);
 }
 
+/* Cross-highlight the node matching the current selection (#142, Task 4). The class is toggled by
+   inspectorController.applySelectionHighlight via the `.koi-svg-node[data-qname]` hook on the label. */
+.koi-node.is-selected {
+  border-color: var(--koi-accent);
+  box-shadow: 0 0 0 2px var(--koi-accent);
+}
+
 /* zoom control bar + minimap. Self-contained here (mirrors the legacy renderer's chrome) so they survive
    the old _diagrams.scss being removed. */
 .koi-canvas-controls {

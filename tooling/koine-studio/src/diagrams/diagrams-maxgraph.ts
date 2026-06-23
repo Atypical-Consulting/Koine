@@ -13,7 +13,24 @@ import type { DiagramEdge, DiagramGraph, DiagramMember, DiagramNode, DocsFile } 
 import { mergeGraphsForView } from '@/model/modelTables';
 import { buildEmptyState } from '@/diagrams/emptyState';
 import { loadDiagramZoom, saveDiagramZoom } from '@/settings/persistence';
-import { NODE_NAVIGATE_EVENT, type DiagramNodeNavigateDetail } from '@/diagrams/diagramContract';
+import {
+  DIAGRAM_ADD_TYPE_EVENT,
+  DIAGRAM_CONNECT_EVENT,
+  DIAGRAM_DISCONNECT_EVENT,
+  DIAGRAM_RELAYOUT_EVENT,
+  NODE_EDIT_EVENT,
+  NODE_NAVIGATE_EVENT,
+  diagramLayoutStore,
+  isDiagramEditing,
+  isEditableKind,
+  type DiagramConnectDetail,
+  type DiagramDisconnectDetail,
+  type DiagramLayoutStore,
+  type DiagramNodeEditDetail,
+  type DiagramNodeNavigateDetail,
+  type DiagramPosition,
+} from '@/diagrams/diagramContract';
+import { createBrowserLayoutStore } from '@/diagrams/layoutStore';
 
 // The DDD palette as literal hex (theme-independent — abstracts/_ddd.scss never redefines it per theme),
 // used for the maxGraph cell SHAPE fill/stroke. The shape is what the Outline minimap draws and what
@@ -107,11 +124,15 @@ function memberRow(text: string, computed = false): string {
   return `<div class="koi-node__row${computed ? ' koi-node__row--computed' : ''}">${escapeHtml(text)}</div>`;
 }
 
-/** The HTML label for a node: a compartmented UML class box, or a single-line box, tagged with data-kind. */
+/** The HTML label for a node: a compartmented UML class box, or a single-line box, tagged with data-kind.
+ *  Also carries `koi-svg-node` + `data-qname` so the inspector's selection cross-highlight
+ *  (`inspectorController.applySelectionHighlight`, scoped to `.koi-svg-diagram .koi-svg-node[data-qname]`)
+ *  keeps working unchanged after the SVG→maxGraph swap. */
 export function nodeLabelHtml(node: DiagramNode): string {
   const kind = escapeHtml(node.kind);
+  const qname = escapeHtml(node.qualifiedName);
   if (!isClassNode(node)) {
-    return `<div class="koi-node koi-node--simple" data-kind="${kind}">${escapeHtml(node.label)}</div>`;
+    return `<div class="koi-node koi-svg-node koi-node--simple" data-kind="${kind}" data-qname="${qname}">${escapeHtml(node.label)}</div>`;
   }
   const { fields, methods } = partitionMembers(node);
   const head =
@@ -125,7 +146,7 @@ export function nodeLabelHtml(node: DiagramNode): string {
   const methodComp = methods.length
     ? `<div class="koi-node__compartment">${methods.map((m) => memberRow(m.text)).join('')}</div>`
     : '';
-  return `<div class="koi-node koi-node--class" data-kind="${kind}">${head}${fieldComp}${methodComp}</div>`;
+  return `<div class="koi-node koi-svg-node koi-node--class" data-kind="${kind}" data-qname="${qname}">${head}${fieldComp}${methodComp}</div>`;
 }
 
 /**
@@ -153,6 +174,60 @@ export interface CanvasHandle {
 export function contextOf(qualifiedName: string): string {
   const dot = qualifiedName.indexOf('.');
   return dot < 0 ? '' : qualifiedName.slice(0, dot);
+}
+
+// --- editing + position persistence helpers -----------------------------------
+// The IDE injects a DiagramLayoutStore (a committable koine.layout.json, or browser storage) before each
+// render; when none is set (tests, first boot) we fall back to a browser store so a drag still persists.
+let fallbackLayoutStore: DiagramLayoutStore | null = null;
+function activeLayoutStore(): DiagramLayoutStore {
+  return diagramLayoutStore() ?? (fallbackLayoutStore ??= createBrowserLayoutStore());
+}
+
+/** A class-type, context-owned node carrying a source span can be renamed via the diagram (dbl-click). */
+function canRename(node: DiagramNode): boolean {
+  return node.qualifiedName.includes('.') && isEditableKind(node.kind) && node.sourceSpan != null;
+}
+
+/** Any context-owned, non-context node can be deleted via the diagram (right-click). */
+function canDelete(node: DiagramNode): boolean {
+  return node.qualifiedName.includes('.') && node.kind !== 'context';
+}
+
+/** A cell carries a DiagramNode (vs a DiagramEdge / a container string) iff its value has a qualifiedName. */
+function nodeValue(cell: MxCell | null | undefined): DiagramNode | null {
+  const v = cell?.value as DiagramNode | undefined;
+  return v && typeof v === 'object' && 'qualifiedName' in v ? v : null;
+}
+
+/** Snapshot every node cell's geometry, keyed by qualified name — the shape the layout store persists. */
+function snapshotPositions(cells: Map<string, MxCell>): Record<string, DiagramPosition> {
+  const out: Record<string, DiagramPosition> = {};
+  for (const cell of cells.values()) {
+    const v = nodeValue(cell);
+    const g = cell.getGeometry();
+    if (v && g) out[v.qualifiedName] = { x: g.x, y: g.y };
+  }
+  return out;
+}
+
+/** Override laid-out node geometries with the saved positions (by qualified name), keeping each box's size. */
+function applySavedPositions(graph: MxGraph, cells: Map<string, MxCell>, saved: Record<string, DiagramPosition>): void {
+  if (!Object.keys(saved).length) return;
+  const model = graph.getDataModel();
+  graph.batchUpdate(() => {
+    for (const cell of cells.values()) {
+      const v = nodeValue(cell);
+      const g = cell.getGeometry();
+      if (!v || !g) continue;
+      const pos = saved[v.qualifiedName];
+      if (!pos) continue;
+      const next = g.clone();
+      next.x = pos.x;
+      next.y = pos.y;
+      model.setGeometry(cell, next);
+    }
+  });
 }
 
 /**
@@ -228,15 +303,29 @@ function addEndLabel(mx: Mx, graph: MxGraph, edge: MxCell, text: string, at: -1 
  * headless-testing discipline (happy-dom can't measure pixels). The maxGraph module is injected so this
  * stays synchronous and the dynamic import lives only in `render()`.
  */
-export function buildCanvas(mx: Mx, container: HTMLElement, merged: DiagramGraph): CanvasHandle {
+export function buildCanvas(
+  mx: Mx,
+  container: HTMLElement,
+  merged: DiagramGraph,
+  savedPositions?: Record<string, DiagramPosition>,
+): CanvasHandle {
   const { Graph } = mx;
+  const editing = isDiagramEditing();
   const graph = new Graph(container);
   // CSP-safe: never fall through to the single `eval` path for unregistered style names (Tauri strict CSP).
   graph.getView().allowEval = false;
-  graph.setHtmlLabels(true); // labels render as HTML so class nodes can use compartment markup (later task).
+  graph.setHtmlLabels(true); // labels render as HTML so class nodes can use compartment markup.
   graph.setCellsEditable(false); // no in-place label editing (renames go through the model round-trip).
   graph.setCellsResizable(false); // node size is derived from content, not hand-resized.
-  graph.setCellsMovable(true); // allow drag-to-reposition (persistence wired in a later task).
+  // Drag-to-reposition + drag-to-connect are authoring gestures, gated on editing so the read-only tab is
+  // inert. ide.tsx flips editing on at boot (the model→.koi round-trip seam is reachable).
+  graph.setCellsMovable(editing);
+  if (editing) {
+    graph.setConnectable(true); // hover a node → drag to another to draw a relationship (→ addField)
+    graph.setAllowDanglingEdges(false); // a connection must land on a node; no edges to empty space
+    const conn = graph.getPlugin('ConnectionHandler') as unknown as { setCreateTarget?: (v: boolean) => void } | undefined;
+    conn?.setCreateTarget?.(false); // never auto-create a target node; only connect existing nodes
+  }
   // Render each cell's stored value: a DiagramNode → its UML/simple HTML label (a `.koi-node` div themed
   // by CSS); a DiagramEdge → its mid label text; anything else (container name, cardinality) → the string.
   graph.convertValueToString = (cell): string => {
@@ -251,9 +340,8 @@ export function buildCanvas(mx: Mx, container: HTMLElement, merged: DiagramGraph
   // Click a node → bubble NODE_NAVIGATE_EVENT; ide.tsx selects it (Properties panel) and jumps to source.
   // Not gated by editing — navigation works in read-only too. Span-less nodes are inert.
   graph.addListener(mx.InternalEvent.CLICK, (_sender: unknown, evt: { getProperty(name: string): unknown }) => {
-    const cell = evt.getProperty('cell') as MxCell | null;
-    const v = cell?.value as DiagramNode | undefined;
-    if (v && typeof v === 'object' && 'qualifiedName' in v && v.sourceSpan) {
+    const v = nodeValue(evt.getProperty('cell') as MxCell | null);
+    if (v && v.sourceSpan) {
       const s = v.sourceSpan;
       container.dispatchEvent(
         new CustomEvent<DiagramNodeNavigateDetail>(NODE_NAVIGATE_EVENT, {
@@ -269,6 +357,89 @@ export function buildCanvas(mx: Mx, container: HTMLElement, merged: DiagramGraph
         }),
       );
     }
+  });
+
+  // Double-click an editable node → rename it (prompt), round-tripped through the model→.koi rename (#91).
+  // Gated on editing; only class-type, context-owned, spanned nodes (never a context / state) rename.
+  graph.addListener(mx.InternalEvent.DOUBLE_CLICK, (_sender: unknown, evt: { getProperty(name: string): unknown }) => {
+    if (!isDiagramEditing()) return;
+    const v = nodeValue(evt.getProperty('cell') as MxCell | null);
+    if (!v || !canRename(v)) return;
+    const current = v.label;
+    const next = window.prompt(`Rename ${current} to:`, current)?.trim();
+    if (!next || next === current) return;
+    const s = v.sourceSpan!; // canRename guarantees a span; line/column is the name position for LSP rename
+    container.dispatchEvent(
+      new CustomEvent<DiagramNodeEditDetail>(NODE_EDIT_EVENT, {
+        bubbles: true,
+        detail: { qualifiedName: v.qualifiedName, action: 'rename', newName: next, label: current, line: s.line, column: s.column },
+      }),
+    );
+  });
+
+  // Right-click a node → delete it; right-click a field-backed edge → remove that field. Gated on editing.
+  // A DOM contextmenu listener (capture phase, so it beats maxGraph's own handlers) hit-tests the cell.
+  const onContextMenu = (evt: MouseEvent): void => {
+    if (!isDiagramEditing()) return;
+    const rect = container.getBoundingClientRect();
+    const cell = graph.getCellAt(evt.clientX - rect.left, evt.clientY - rect.top);
+    if (!cell) return;
+    const node = nodeValue(cell);
+    if (node) {
+      if (!canDelete(node)) return;
+      evt.preventDefault();
+      if (!window.confirm(`Delete ${node.label}? This rewrites the .koi source.`)) return;
+      container.dispatchEvent(
+        new CustomEvent<DiagramNodeEditDetail>(NODE_EDIT_EVENT, {
+          bubbles: true,
+          detail: { qualifiedName: node.qualifiedName, action: 'delete', label: node.label },
+        }),
+      );
+      return;
+    }
+    const edge = cell.value as DiagramEdge | undefined;
+    if (edge && typeof edge === 'object' && 'from' in edge && 'to' in edge && edge.backingMember) {
+      const backing = edge.backingMember;
+      evt.preventDefault();
+      container.dispatchEvent(
+        new CustomEvent<DiagramDisconnectDetail>(DIAGRAM_DISCONNECT_EVENT, {
+          bubbles: true,
+          detail: { backingMember: backing, label: backing.slice(backing.lastIndexOf('.') + 1) },
+        }),
+      );
+    }
+  };
+  container.addEventListener('contextmenu', onContextMenu, { capture: true });
+
+  // Drag from one node to another → bubble DIAGRAM_CONNECT_EVENT (ide.tsx turns it into an addField on the
+  // source whose type is the target). The temporary edge maxGraph inserts is removed — the real edge comes
+  // back via the .koi round-trip + re-render. Only meaningful while connectable (editing).
+  const connHandler = graph.getPlugin('ConnectionHandler') as unknown as
+    | { addListener?: (name: string, fn: (s: unknown, e: { getProperty(n: string): unknown }) => void) => void }
+    | undefined;
+  connHandler?.addListener?.(mx.InternalEvent.CONNECT, (_sender, evt) => {
+    const edge = evt.getProperty('cell') as MxCell | null;
+    const source = nodeValue(edge?.getTerminal(true));
+    const target = nodeValue(edge?.getTerminal(false)) ?? nodeValue(evt.getProperty('terminal') as MxCell | null);
+    if (edge) {
+      try {
+        graph.getDataModel().remove(edge);
+      } catch {
+        /* the temp edge is best-effort to remove; a stray one is corrected by the next re-render */
+      }
+    }
+    if (!isDiagramEditing() || !source || !target || source === target) return;
+    container.dispatchEvent(
+      new CustomEvent<DiagramConnectDetail>(DIAGRAM_CONNECT_EVENT, {
+        bubbles: true,
+        detail: {
+          sourceQualifiedName: source.qualifiedName,
+          targetQualifiedName: target.qualifiedName,
+          sourceLabel: source.label,
+          targetLabel: target.label,
+        },
+      }),
+    );
   });
 
   const cells = new Map<string, MxCell>();
@@ -367,6 +538,15 @@ export function buildCanvas(mx: Mx, container: HTMLElement, merged: DiagramGraph
   });
 
   runTwoLevelLayout(mx, graph);
+  // A saved manual layout overrides the auto-arrange (so a hand-positioned diagram doesn't snap back).
+  if (savedPositions) applySavedPositions(graph, cells, savedPositions);
+
+  // Persist a drag: snapshot ALL node positions on move (one drag freezes the layout to manual, matching
+  // the SVG renderer) and hand them to the active layout store. Attached AFTER layout/apply so neither
+  // triggers a spurious save (both use setGeometry, not moveCells — but order keeps the intent clear).
+  graph.addListener(mx.InternalEvent.CELLS_MOVED, () => {
+    activeLayoutStore().save(snapshotPositions(cells));
+  });
 
   return {
     graph,
@@ -388,14 +568,17 @@ function mountChrome(mx: Mx, handle: CanvasHandle, host: HTMLElement): { dispose
   const { Outline } = mx;
   const graph = handle.graph;
 
-  // Pan with a left-drag on empty canvas (never over a cell, so node clicks still register).
+  // Left-drag pans. When editing, panning must NOT claim drags that start on a cell (ignoreCell=false) —
+  // otherwise the pan handler eats the drag and a node can never be moved (it just pans the viewport). So:
+  // editing ⇒ drag empty = pan, drag node = move/connect; read-only ⇒ nothing is movable, so drag anywhere
+  // pans (ignoreCell=true). A plain click still registers in both modes (panning needs an actual drag).
   graph.setPanning(true);
   const panning = graph.getPlugin('PanningHandler') as unknown as
     | { useLeftButtonForPanning?: boolean; ignoreCell?: boolean }
     | undefined;
   if (panning) {
     panning.useLeftButtonForPanning = true;
-    panning.ignoreCell = true;
+    panning.ignoreCell = !isDiagramEditing();
   }
   graph.centerZoom = false;
   graph.zoomFactor = 1.2;
@@ -461,6 +644,23 @@ function mountChrome(mx: Mx, handle: CanvasHandle, host: HTMLElement): { dispose
       syncPct();
     }),
   );
+
+  // Authoring controls (editing only): add a type, and reset the manual layout. Mirrors the SVG renderer's
+  // ＋/⟲ buttons + aria-labels; the read-only canvas shows only the zoom controls.
+  if (isDiagramEditing()) {
+    host.classList.add('koi-canvas--editing');
+    controls.append(
+      button('＋', 'Add a type', () => {
+        host.dispatchEvent(new CustomEvent(DIAGRAM_ADD_TYPE_EVENT, { bubbles: true }));
+      }),
+      button('⟲', 'Auto-arrange layout', () => {
+        // Clear the saved positions, then ask ide.tsx to re-render — it lays out fresh from an empty store.
+        activeLayoutStore().clear();
+        host.dispatchEvent(new CustomEvent(DIAGRAM_RELAYOUT_EVENT, { bubbles: true }));
+      }),
+    );
+  }
+
   host.appendChild(controls);
   syncPct();
 
@@ -532,6 +732,11 @@ export function createMaxGraphRenderer(): DiagramRenderer {
 
       const merged = mergeGraphsForView(graphs);
 
+      // Restore any saved manual layout for this workspace (committable koine.layout.json, or browser
+      // storage). Async — re-check isCurrent() after it so a superseded render bails before touching DOM.
+      const savedPositions = await activeLayoutStore().load();
+      if (!isCurrent()) return;
+
       // Build into a detached host so a superseded render never half-paints the live canvas.
       const root = document.createElement('div');
       // `koi-svg-diagram` is kept so the inspector's selection cross-highlight selector still scopes here.
@@ -540,7 +745,7 @@ export function createMaxGraphRenderer(): DiagramRenderer {
       surface.className = 'koi-canvas';
       root.appendChild(surface);
 
-      const handle = buildCanvas(mx, surface, merged);
+      const handle = buildCanvas(mx, surface, merged, savedPositions);
       const chrome = mountChrome(mx, handle, surface);
       const dispose = (): void => {
         chrome.dispose();
