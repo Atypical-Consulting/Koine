@@ -325,6 +325,17 @@ export function buildCanvas(
     graph.setAllowDanglingEdges(false); // a connection must land on a node; no edges to empty space
     const conn = graph.getPlugin('ConnectionHandler') as unknown as { setCreateTarget?: (v: boolean) => void } | undefined;
     conn?.setCreateTarget?.(false); // never auto-create a target node; only connect existing nodes
+    // Drag feedback: maxGraph's default move preview is a dashed rectangle drawn in `previewColor`
+    // (default 'black') and only kicks in past `maxLivePreview` (default 0) — so on the dark canvas a
+    // drag showed NOTHING. Raise maxLivePreview so the REAL node (themed HTML label and all) moves live
+    // under the cursor, and give the fallback dashed outline a visible accent stroke just in case.
+    const selection = graph.getPlugin('SelectionHandler') as unknown as
+      | { maxLivePreview?: number; previewColor?: string }
+      | undefined;
+    if (selection) {
+      selection.maxLivePreview = 1024; // live-move the actual cell(s); our graphs are far smaller than this
+      selection.previewColor = '#5aa9f0'; // visible accent (matches --koi-accent) for the dashed fallback
+    }
   }
   // Render each cell's stored value: a DiagramNode → its UML/simple HTML label (a `.koi-node` div themed
   // by CSS); a DiagramEdge → its mid label text; anything else (container name, cardinality) → the string.
