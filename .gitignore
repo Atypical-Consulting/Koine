@@ -16,3 +16,4 @@ BenchmarkDotNet.Artifacts/
 
 # Skill eval scratch — workspace logs/JSON dropped by create-issue skill evals; never source.
 .claude/skills/create-issue-workspace/
+.superpowers/
