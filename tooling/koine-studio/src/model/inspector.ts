@@ -12,6 +12,16 @@
 // future minimal emitter change populates them — the layout is forward-compatible.
 import type { DiagramNode, GlossaryEntry, ModelMember, Range } from '@/lsp/lsp';
 
+/**
+ * The language's built-in scalar/collection types — the always-available options for a property's
+ * type autocomplete, merged with the model's own declared types (passed as `knownTypes`). Mirrors the
+ * editor's `TYPES` list (editor.ts) so the panel and the code editor offer the same vocabulary.
+ */
+export const KOINE_BUILTIN_TYPES = ['String', 'Int', 'Decimal', 'Bool', 'Instant', 'List', 'Set', 'Map', 'Range'];
+
+/** The id of the shared <datalist> the property type inputs autocomplete against (one per panel). */
+const TYPE_OPTIONS_ID = 'koi-inspector-type-options';
+
 /** The flat, render-ready projection of a selected element (decoupled from the wire DTOs). */
 export interface InspectorElement {
   /** The glossary entry id — the key for persisting a description via `setDoc`. */
@@ -100,8 +110,16 @@ export function buildInspectorElement(
   };
 }
 
-/** Build the inspector panel for the selected element, or an empty state when nothing is selected. */
-export function renderInspector(element: InspectorElement | null, handlers: InspectorHandlers): HTMLElement {
+/**
+ * Build the inspector panel for the selected element, or an empty state when nothing is selected.
+ * `knownTypes` seeds the property type autocomplete (the model's declared types + the language's
+ * built-ins); empty when no model index is available yet (the inputs still accept free text).
+ */
+export function renderInspector(
+  element: InspectorElement | null,
+  handlers: InspectorHandlers,
+  knownTypes: string[] = [],
+): HTMLElement {
   const root = document.createElement('div');
   root.className = 'koi-inspector';
 
@@ -121,7 +139,7 @@ export function renderInspector(element: InspectorElement | null, handlers: Insp
   root.appendChild(renderHeader(element, handlers));
   root.appendChild(renderGeneral(element, handlers));
 
-  appendPropertyTable(root, 'Properties', element.properties, element, handlers);
+  appendPropertyTable(root, 'Properties', element.properties, element, handlers, knownTypes);
   appendList(root, 'Behaviors', element.behaviors);
   appendList(root, 'Values', element.values);
   appendList(root, 'Invariants', element.invariants ?? []);
@@ -224,7 +242,7 @@ function renderGeneral(element: InspectorElement, handlers: InspectorHandlers): 
   const desc = document.createElement('textarea');
   desc.className = 'koi-inspector-textarea koi-inspector-desc';
   desc.value = element.description ?? '';
-  desc.rows = 2;
+  desc.rows = 5;
   desc.placeholder = 'Add a description…';
   desc.addEventListener('blur', () => {
     const next = desc.value.trim();
@@ -293,6 +311,7 @@ function appendPropertyTable(
   items: { text: string; computed: boolean }[],
   element: InspectorElement,
   handlers: InspectorHandlers,
+  knownTypes: string[] = [],
 ): void {
   const editable = !!(
     handlers.onRenameProperty ||
@@ -310,8 +329,14 @@ function appendPropertyTable(
   h.textContent = title;
   section.appendChild(h);
 
+  // A shared <datalist> the type inputs autocomplete against (the model's declared types + built-ins).
+  // Only built when editable (the read-only panel has no inputs to wire it to).
+  if (editable && knownTypes.length) section.appendChild(typeOptionsList(knownTypes));
+
   const table = document.createElement('table');
-  table.className = 'koi-inspector-table';
+  // An editable table mixes input rows with read-only computed rows; the `-editable` modifier aligns
+  // both kinds to one set of column edges (see _model.scss) so computed properties line up.
+  table.className = editable ? 'koi-inspector-table koi-inspector-table-editable' : 'koi-inspector-table';
   const tbody = document.createElement('tbody');
   for (const item of items) {
     const idx = item.text.indexOf(':');
@@ -320,7 +345,7 @@ function appendPropertyTable(
     tbody.appendChild(
       editable && !item.computed
         ? editablePropertyRow(element, handlers, name, type)
-        : readonlyPropertyRow(name, type, item.computed),
+        : readonlyPropertyRow(name, type, item.computed, editable),
     );
   }
   table.appendChild(tbody);
@@ -330,20 +355,52 @@ function appendPropertyTable(
   root.appendChild(section);
 }
 
-/** A read-only property row: a `name` header cell + a `type` cell (computed rows render italic). */
-function readonlyPropertyRow(name: string, type: string, computed: boolean): HTMLTableRowElement {
+/** The shared autocomplete option list for property type inputs (deduped, declaration order kept). */
+function typeOptionsList(knownTypes: string[]): HTMLDataListElement {
+  const list = document.createElement('datalist');
+  list.id = TYPE_OPTIONS_ID;
+  for (const t of knownTypes) {
+    const opt = document.createElement('option');
+    opt.value = t;
+    list.appendChild(opt);
+  }
+  return list;
+}
+
+/**
+ * A read-only property row: a `name` header cell + a `type` cell (computed rows render italic). Inside
+ * an editable table the name/type are wrapped in input-mimicking static spans (and an empty actions
+ * cell is added) so a computed row lines up to the same column edges as the editable input rows.
+ */
+function readonlyPropertyRow(name: string, type: string, computed: boolean, aligned = false): HTMLTableRowElement {
   const row = document.createElement('tr');
   row.className = computed ? 'koi-inspector-row koi-inspector-row-computed' : 'koi-inspector-row';
   // The property name labels its row, so it is a row-scoped header (accessible + DevTools-clean).
   const nameCell = document.createElement('th');
   nameCell.scope = 'row';
   nameCell.className = 'koi-inspector-prop-name';
-  nameCell.textContent = name;
   const typeCell = document.createElement('td');
   typeCell.className = 'koi-inspector-prop-type';
-  typeCell.textContent = type;
-  row.append(nameCell, typeCell);
+  if (aligned) {
+    nameCell.appendChild(staticPropValue(name));
+    typeCell.appendChild(staticPropValue(type));
+    const actions = document.createElement('td');
+    actions.className = 'koi-inspector-prop-actions';
+    row.append(nameCell, typeCell, actions);
+  } else {
+    nameCell.textContent = name;
+    typeCell.textContent = type;
+    row.append(nameCell, typeCell);
+  }
   return row;
+}
+
+/** A read-only value styled like the editable inputs so it shares their box model (exact alignment). */
+function staticPropValue(text: string): HTMLSpanElement {
+  const span = document.createElement('span');
+  span.className = 'koi-inspector-prop-input koi-inspector-prop-static';
+  span.textContent = text;
+  return span;
 }
 
 /** An editable property row: name + type inputs (commit a rename / change-type) and a delete button. */
@@ -370,6 +427,7 @@ function editablePropertyRow(
   const typeCell = document.createElement('td');
   typeCell.className = 'koi-inspector-prop-type';
   const typeInput = propInput(type, `Type of property ${name}`);
+  typeInput.setAttribute('list', TYPE_OPTIONS_ID); // autocomplete against the known-types datalist
   typeInput.addEventListener('commit', () => {
     const next = typeInput.value.trim();
     if (next && next !== type) handlers.onChangeType?.(element, name, next);
@@ -394,10 +452,17 @@ function editablePropertyRow(
   return row;
 }
 
-/** The "add a property" row: a name + type field and an Add button that commits when both are filled. */
+/**
+ * The "add a property" row: a name + type field on one line, with the Add button BELOW them (it
+ * commits when both fields are filled). The two-row layout (`koi-inspector-add-prop` column, fields in
+ * their own `koi-inspector-add-fields` line) keeps the button from crowding the inputs.
+ */
 function addPropertyRow(element: InspectorElement, handlers: InspectorHandlers): HTMLElement {
   const wrap = document.createElement('div');
   wrap.className = 'koi-inspector-add-prop';
+
+  const fields = document.createElement('div');
+  fields.className = 'koi-inspector-add-fields';
 
   const nameInput = propInput('', 'New property name');
   nameInput.classList.add('koi-inspector-add-name');
@@ -405,6 +470,8 @@ function addPropertyRow(element: InspectorElement, handlers: InspectorHandlers):
   const typeInput = propInput('', 'New property type');
   typeInput.classList.add('koi-inspector-add-type');
   typeInput.placeholder = 'Type';
+  typeInput.setAttribute('list', TYPE_OPTIONS_ID); // autocomplete against the known-types datalist
+  fields.append(nameInput, typeInput);
 
   const add = document.createElement('button');
   add.type = 'button';
@@ -417,9 +484,10 @@ function addPropertyRow(element: InspectorElement, handlers: InspectorHandlers):
     handlers.onAddProperty?.(element, name, type);
     nameInput.value = '';
     typeInput.value = '';
+    nameInput.focus(); // keep the keyboard flow going for adding several in a row
   });
 
-  wrap.append(nameInput, typeInput, add);
+  wrap.append(fields, add);
   return wrap;
 }
 

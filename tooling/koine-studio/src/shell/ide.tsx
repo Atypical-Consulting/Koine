@@ -515,10 +515,20 @@ export function init(): void {
 
   // Rename the selected element from the Properties panel, reusing the LSP rename refactor (the same
   // seam the editor's F2 uses): resolve the workspace edit at the element's name position, then apply it.
+  // The position is aimed one char INTO the name, not at its start: the language service's token locator
+  // treats a cursor on a token's start offset as belonging to the preceding token (its match window is
+  // `(start, end]`), so passing nameRange.start verbatim resolved nothing and the rename was a silent
+  // no-op. A rename that resolves to no edits is surfaced (not swallowed), so the user gets feedback.
   async function renameElement(element: InspectorElement, newName: string): Promise<void> {
+    const start = element.nameRange.start;
     try {
-      const edit = await lsp.rename(element.nameRange.start.line, element.nameRange.start.character, newName);
-      if (edit) workspace.applyWorkspaceEdit(edit);
+      const edit = await lsp.rename(start.line, start.character + 1, newName);
+      if (!edit?.changes || Object.keys(edit.changes).length === 0) {
+        setStatus('Rename rejected', 'error');
+        return;
+      }
+      workspace.applyWorkspaceEdit(edit);
+      setStatus(`Renamed ${element.name} → ${newName}`, 'green');
     } catch (e) {
       setStatus('Rename failed: ' + String(e), 'error');
     }

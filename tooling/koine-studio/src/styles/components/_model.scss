@@ -401,14 +401,16 @@ $koi-inspector-constructs: (
   border-top: 1px solid var(--koi-line);
 }
 
-/* Quiet eyebrow labels — the content, not the title, draws the eye. */
+/* Section eyebrows — typeset to match the left rail's section headers (.rail-sect-head): same
+   size, weight, tracking and uppercase casing, so a Properties heading reads as the same kind of
+   label as "FILES" / "EXPLORER" across the workspace. */
 .koi-inspector-section-title {
   margin: 0 0 var(--koi-space-2);
   font-family: var(--koi-font-body);
-  font-size: var(--koi-text-2xs);
+  font-size: var(--koi-text-xs);
   font-weight: 600;
   text-transform: uppercase;
-  letter-spacing: 0.07em;
+  letter-spacing: 0.04em;
   color: var(--koi-muted);
 }
 
@@ -453,9 +455,11 @@ $koi-inspector-constructs: (
   color: var(--koi-hl-type); /* the editor's "type" hue, so a field reads like the code it generates */
 }
 
-/* Read-only rows shrink the name to its text so every type aligns to one left edge; editable rows hold
-   a name INPUT, which `width: 1%` would collapse to nothing — give that column a real width instead. */
-.koi-inspector-row-editable .koi-inspector-prop-name {
+/* Read-only-only tables shrink the name to its text so every type aligns to one left edge. In an
+   EDITABLE table the name column instead holds an input (which `width: 1%` would collapse), so give the
+   column a fixed width at the TABLE level — this way both editable rows AND read-only computed rows in
+   that table share the same column edges, keeping computed properties aligned with the rest. */
+.koi-inspector-table-editable .koi-inspector-prop-name {
   width: 38%;
   white-space: normal;
 }
@@ -467,6 +471,20 @@ $koi-inspector-constructs: (
 /* Computed (derived) properties render italic (font-style inherits into the row's cells). */
 .koi-inspector-row-computed {
   font-style: italic;
+}
+
+/* A computed row's name/type are static spans that borrow the input box model (.koi-inspector-prop-input)
+   so they sit on the exact same baseline and left edge as the editable inputs above them — but with no
+   border, no hover affordance and a default cursor, so they read as read-only, not editable. */
+.koi-inspector-prop-static {
+  display: block;
+  border-color: transparent;
+  background: transparent;
+  cursor: default; /* colour is inherited from the cell, exactly like the editable inputs */
+}
+.koi-inspector-prop-static:hover {
+  border-color: transparent;
+  background: transparent;
 }
 
 /* --- property editing (authoring): inline inputs, a delete button, and an add-property row --- */
@@ -514,11 +532,18 @@ $koi-inspector-constructs: (
 .koi-inspector-prop-delete:hover {
   color: var(--koi-error);
 }
+/* The add-property affordance stacks: the name + type inputs on one line, the Add button BELOW them
+   (its own row) rather than crowding the end of the input line. */
 .koi-inspector-add-prop {
+  display: flex;
+  flex-direction: column;
+  gap: var(--koi-space-1-5);
+  margin-top: var(--koi-space-2-5);
+}
+.koi-inspector-add-fields {
   display: flex;
   gap: var(--koi-space-1-5);
   align-items: center;
-  margin-top: var(--koi-space-2-5);
 }
 .koi-inspector-add-name {
   flex: 0 1 7rem;
@@ -527,7 +552,7 @@ $koi-inspector-constructs: (
   flex: 1 1 auto;
 }
 .koi-inspector-add-btn {
-  flex: 0 0 auto;
+  align-self: flex-start; /* sit under the inputs, sized to its label rather than full width */
   font-size: var(--koi-text-xs);
   font-weight: 600;
   color: var(--koi-construct);
