@@ -26,6 +26,7 @@ public sealed partial class DocsEmitter
             sb.Append('\n').Append(Prose(ctx.Doc)).Append('\n');
         }
 
+        WriteDomainModelDiagram(sb, ctx);
         WriteAggregateNarratives(sb, ctx);
         WriteStandaloneTypes(sb, ctx);
         WriteBehavioralNarrative(sb, ctx);
@@ -47,6 +48,20 @@ public sealed partial class DocsEmitter
     /// <summary>True when the context declares anything the narrative renders below its heading.</summary>
     private static bool HasRenderableContent(ContextNode ctx) =>
         ctx.Types.Count > 0 || ctx.Specs.Count > 0 || ctx.Services.Count > 0 || ctx.Policies.Count > 0;
+
+    /// <summary>Writes the context's domain-model class diagram — every drawable type and its relationships,
+    /// the strategic single view of the bounded context. A no-op when the context has no drawable type.</summary>
+    private static void WriteDomainModelDiagram(StringBuilder sb, ContextNode ctx)
+    {
+        var (nodes, _) = ContextClassModel(ctx);
+        if (nodes.Count == 0)
+        {
+            return;
+        }
+
+        sb.Append("\n## Domain Model\n");
+        EmitContextClassDiagram(sb, ctx);
+    }
 
     /// <summary>Writes one section per aggregate: structure diagram, nested-type glossary, lifecycle.</summary>
     private static void WriteAggregateNarratives(StringBuilder sb, ContextNode ctx)
@@ -81,8 +96,9 @@ public sealed partial class DocsEmitter
                   .Append("` (identified by `").Append(root.IdentityName).Append("`)\n");
             }
 
-            // Structure: a Mermaid class diagram of the root + nested types + repository surface.
-            EmitAggregateClassDiagram(sb, agg);
+            // The aggregate's structure now lives in the context-level Domain Model diagram above; here we
+            // keep the repository surface (finders/operations) for this aggregate.
+            EmitRepositorySurface(sb, agg);
 
             // Glossary of the nested value objects, enums, and domain events.
             WriteAggregateTypesGlossary(sb, agg);

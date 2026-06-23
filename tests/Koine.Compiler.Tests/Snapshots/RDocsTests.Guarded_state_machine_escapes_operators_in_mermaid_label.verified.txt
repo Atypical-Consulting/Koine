@@ -1,14 +1,16 @@
 ﻿// ==== docs/Ordering.md ====
 # Ordering
 
-## Aggregates
-
-### Order
-
-**Root entity:** `Order` (identified by `OrderId`)
+## Domain Model
 
 ```mermaid
 classDiagram
+    class OrderStatus {
+        <<enumeration>>
+        Draft
+        Submitted
+        Done
+    }
     class Order {
         <<aggregate root>>
         +OrderId id
@@ -16,7 +18,14 @@ classDiagram
         +OrderStatus status
         +submit()
     }
+    Order *-- OrderStatus
 ```
+
+## Aggregates
+
+### Order
+
+**Root entity:** `Order` (identified by `OrderId`)
 
 #### Lifecycle
 
