@@ -3,6 +3,7 @@ import { act, render } from '@testing-library/preact';
 import { createAppStore } from '@/store/index';
 import { StoreInspector } from '@/shell/StoreInspector';
 import type { LspDiagnostic } from '@/lsp/lsp';
+import { axe } from 'vitest-axe';
 
 const field = (c: Element, name: string) =>
   c.querySelector(`[data-field="${name}"]`)!.textContent;
@@ -36,5 +37,11 @@ describe('StoreInspector', () => {
     expect(field(container, 'activeContext')).toBe('Ordering');
     expect(field(container, 'selection')).toBe('Ordering.Order');
     expect(field(container, 'problems')).toContain('1 error');
+  });
+
+  test('has no accessibility violations', async () => {
+    const store = createAppStore();
+    const { container } = render(<StoreInspector store={store} />);
+    expect(await axe(container)).toHaveNoViolations();
   });
 });

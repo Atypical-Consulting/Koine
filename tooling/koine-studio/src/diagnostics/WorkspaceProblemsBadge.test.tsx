@@ -3,6 +3,7 @@ import { act, render } from '@testing-library/preact';
 import { createAppStore } from '@/store/index';
 import { WorkspaceProblemsBadge } from '@/diagnostics/WorkspaceProblemsBadge';
 import type { LspDiagnostic } from '@/lsp/lsp';
+import { axe } from 'vitest-axe';
 
 const err = (msg: string): LspDiagnostic => ({
   range: { start: { line: 0, character: 0 }, end: { line: 0, character: 1 } },
@@ -53,5 +54,12 @@ describe('WorkspaceProblemsBadge', () => {
     // Clearing the file's diagnostics removes the badge entirely.
     act(() => store.getState().setDiagnostics('file:///a.koi', []));
     expect(badge(container)).toBeNull();
+  });
+
+  test('has no accessibility violations', async () => {
+    const store = createAppStore();
+    const { container } = render(<WorkspaceProblemsBadge store={store} />);
+    act(() => store.getState().setDiagnostics('file:///a.koi', [err('boom'), warn('careful')]));
+    expect(await axe(container)).toHaveNoViolations();
   });
 });
