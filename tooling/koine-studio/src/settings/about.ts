@@ -1,16 +1,18 @@
-// About dialog for Koine Studio: the app's colophon. Uses the shared createModal() chrome to show
-// the brand monogram, the wordmark + a mono build chip (version from the platform — the `app_version`
-// Tauri command on desktop, a build-time constant in the browser), a tagline, a grid of links out to
-// the project (GitHub, home, docs, blog), and a creator credit. The version is (re)fetched each time
-// the dialog opens; a failed fetch simply hides the chip. Project links are routed through
-// `platform.openExternal` so they open in the system browser on both the desktop and web hosts.
+// About panel for Koine Studio: the app's colophon, shown as the last tab of the Settings dialog.
+// Builds the brand monogram, the wordmark + a mono build chip (version from the platform — the
+// `app_version` Tauri command on desktop, a build-time constant in the browser), a tagline, a grid of
+// links out to the project (GitHub, home, docs, blog), and a creator credit. `refresh()` (re)fetches
+// the version each time Settings opens; a failed fetch simply hides the chip. Project links are routed
+// through `platform.openExternal` so they open in the system browser on both the desktop and web hosts.
 import { getPlatform } from '@/host';
-import { createModal } from '@/shared/overlay';
 import { koineMark } from '@/shared/logo';
 
-export interface AboutHandle {
-  open(): void;
-  close(): void;
+/** A built About panel: the content element plus a hook to refresh the version chip. */
+export interface AboutPanel {
+  /** The panel content, to drop into a Settings tab panel. */
+  readonly el: HTMLElement;
+  /** Re-fetch the app version and (re)fill or hide the build chip. Safe to call on every open. */
+  refresh(): void;
 }
 
 const TAGLINE = 'Write a bounded context once. Generate the code.';
@@ -52,10 +54,12 @@ const LINKS: ProjectLink[] = [
 
 const CREATOR_URL = 'https://github.com/phmatray';
 
-/** Build the About modal (once) and return an `{ open, close }` handle. */
-export function createAboutDialog(): AboutHandle {
+/** Build the About panel content (once) and return it with a version-refresh hook. */
+export function createAboutPanel(): AboutPanel {
   const platform = getPlatform();
-  const modal = createModal({ title: 'About', ariaLabel: 'About Koine Studio' });
+
+  const root = document.createElement('div');
+  root.className = 'koi-about';
 
   const logo = document.createElement('div');
   logo.className = 'koi-welcome-logo koi-about-logo'; // shared logo container
@@ -71,7 +75,7 @@ export function createAboutDialog(): AboutHandle {
   studio.textContent = 'Studio';
   wordmark.append(studio);
 
-  // Mono build chip — filled in with the version on open(), hidden until then (and if a fetch fails).
+  // Mono build chip — filled in by refresh(), hidden until then (and if a fetch fails).
   const chip = document.createElement('span');
   chip.className = 'koi-about-chip';
   chip.hidden = true;
@@ -116,7 +120,7 @@ export function createAboutDialog(): AboutHandle {
     links.append(a);
   }
 
-  // Creator credit — the one human fact this dialog exists to carry.
+  // Creator credit — the one human fact this panel exists to carry.
   const credit = document.createElement('p');
   credit.className = 'koi-about-credit';
   credit.append('The Koine language and this studio are designed & built by ');
@@ -129,11 +133,11 @@ export function createAboutDialog(): AboutHandle {
   author.addEventListener('click', (e) => openLink(e, CREATOR_URL));
   credit.append(author, '.');
 
-  modal.body.append(logo, wordmark, chip, tagline, links, credit);
+  root.append(logo, wordmark, chip, tagline, links, credit);
 
   // Fetch the version lazily on each open so a slow/absent command never blocks construction.
   // A failed invoke just leaves the chip hidden rather than surfacing an error.
-  modal.onOpen(() => {
+  function refresh(): void {
     void platform
       .appVersion()
       .then((v) => {
@@ -143,7 +147,7 @@ export function createAboutDialog(): AboutHandle {
       .catch(() => {
         chip.hidden = true;
       });
-  });
+  }
 
-  return { open: modal.open, close: modal.close };
+  return { el: root, refresh };
 }
