@@ -1288,6 +1288,10 @@ export function init(): void {
     }
   }
 
+  // The drag handles are a desktop (mouse) idiom; on mobile they're display:none (see _split.scss),
+  // so these listeners are inert below $bp-narrow (BP_NARROW). No JS gate needed — CSS owns visibility.
+  // A persisted --koi-inspector-w / --koi-leftrail-w on #split is also harmless under the mobile
+  // grid-template-columns: 1fr: those custom props aren't referenced inside the @media block.
   initSplitResizer({ split: el('split'), handle: el('split-resizer') });
 
   // Left sidebar width — the single rail (Files / Explorer / Overview / Documentation).
