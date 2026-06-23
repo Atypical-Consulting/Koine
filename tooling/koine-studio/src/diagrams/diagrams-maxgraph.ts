@@ -14,7 +14,6 @@ import { mergeGraphsForView } from '@/model/modelTables';
 import { buildEmptyState } from '@/diagrams/emptyState';
 import { loadDiagramZoom, saveDiagramZoom } from '@/settings/persistence';
 import {
-  DIAGRAM_ADD_TYPE_EVENT,
   DIAGRAM_CONNECT_EVENT,
   DIAGRAM_DISCONNECT_EVENT,
   DIAGRAM_RELAYOUT_EVENT,
@@ -669,14 +668,10 @@ function mountChrome(mx: Mx, handle: CanvasHandle, host: HTMLElement): { dispose
     }),
   );
 
-  // Authoring controls (editing only): add a type, and reset the manual layout. Mirrors the SVG renderer's
-  // ＋/⟲ buttons + aria-labels; the read-only canvas shows only the zoom controls.
+  // Authoring controls (editing only): reset the manual layout. The read-only canvas shows only the zoom controls.
   if (isDiagramEditing()) {
     host.classList.add('koi-canvas--editing');
     controls.append(
-      button('＋', 'Add a type', () => {
-        host.dispatchEvent(new CustomEvent(DIAGRAM_ADD_TYPE_EVENT, { bubbles: true }));
-      }),
       button('⟲', 'Auto-arrange layout', () => {
         // Clear the saved positions, then ask ide.tsx to re-render — it lays out fresh from an empty store.
         activeLayoutStore().clear();

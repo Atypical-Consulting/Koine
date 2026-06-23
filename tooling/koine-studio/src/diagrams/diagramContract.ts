@@ -84,28 +84,9 @@ export interface DiagramDisconnectDetail {
   label: string;
 }
 
-/**
- * Bubbling event the canvas dispatches from its "add type" button (authoring). `ide.ts` resolves the
- * target context (the active scope, or the dropped-on container) + a name and turns it into an `addType`
- * (or richer add-construct) edit. {@link DiagramAddNodeDetail} carries the picked construct kind and the
- * target context when the gesture supplies them (a palette drop); a bare button click leaves them unset
- * and `ide.ts` falls back to the active scope + a value-object skeleton.
- */
-export const DIAGRAM_ADD_TYPE_EVENT = 'koi-diagram-add-type';
-
-/** The DDD constructs the canvas can author. Mirrors the compiler's add-construct `StructuredEditKind`s. */
+/** The DDD constructs the canvas palette can author. Mirrors the construct keyword the compiler's
+ *  `addType` edit carries in `StructuredEdit.Type`. */
 export type AddNodeKind = 'aggregate' | 'entity' | 'value' | 'enum' | 'event';
-
-/**
- * The optional `detail` of a {@link DIAGRAM_ADD_TYPE_EVENT}. Absent for the bare "add a type" button
- * (ide.ts then prompts + defaults to a value object in the active scope); present when a palette drop
- * supplies the picked construct `kind` and the `context` the node was dropped into.
- */
-export interface DiagramAddNodeDetail {
-  kind: AddNodeKind;
-  /** The bounded context to add into; omitted ⇒ ide.ts uses the active scope. */
-  context?: string;
-}
 
 /**
  * The three doorways the empty-canvas state offers. Each maps to a starting `.koi` shape (ide.tsx seeds

@@ -46,7 +46,6 @@ import { sanitizeProjectName } from '@/export/generateProject';
 import { buildSourceZip } from '@/export/sourceZip';
 import { formatChord } from '@/shared/platform';
 import {
-  DIAGRAM_ADD_TYPE_EVENT,
   DIAGRAM_CONNECT_EVENT,
   DIAGRAM_DISCONNECT_EVENT,
   DIAGRAM_RELAYOUT_EVENT,
@@ -54,6 +53,7 @@ import {
   NODE_EDIT_EVENT,
   NODE_NAVIGATE_EVENT,
   setDiagramEditing,
+  type AddNodeKind,
   type DiagramConnectDetail,
   type DiagramDisconnectDetail,
   type DiagramNodeEditDetail,
@@ -217,7 +217,7 @@ function el<T extends HTMLElement>(id: string): T {
   return node as T;
 }
 
-export function init(): void {
+export function init(): () => void {
   // The host backend: the Tauri desktop shell, or a plain browser (compiler via WASM, files via
   // the File System Access API). Everything host-specific — the LSP transport, folder/file I/O,
   // dialogs, the app version — goes through this.
@@ -482,6 +482,7 @@ export function init(): void {
     onSaveElementDescription: (element, text) => void saveInspectorDescription(element, text),
     onSaveGlossaryDescription: (entry, text) => saveDescription(entry, text),
     onApplyStructuredEdit: (edit, successMsg) => void applyStructuredEdit(edit, successMsg),
+    onAddConstruct: (kind) => void applyDiagramAddType({ kind }),
     gotoSourceSpan: (span) => void gotoSourceSpan(span),
     ensureAssistant: () => ensureAssistant(),
     initEdgeResizer,
@@ -616,8 +617,6 @@ export function init(): void {
     const detail = (e as CustomEvent<DiagramDisconnectDetail>).detail;
     if (detail) void applyDiagramDisconnect(detail);
   });
-  diagramsView.addEventListener(DIAGRAM_ADD_TYPE_EVENT, () => void applyDiagramAddType());
-
   // Empty-canvas doorway: seed a validated starter for the picked concept. Non-destructive — an untouched
   // BLANK seed is replaced outright (the common first-run case), otherwise the starter is appended so no
   // existing work is lost. The buffer edit fires onDocEdited → the canvas re-renders with real nodes.
@@ -707,17 +706,28 @@ export function init(): void {
     await applyStructuredEdit({ kind: 'removeMember', target: detail.backingMember }, `Removed ${detail.label}`);
   }
 
-  // Adding a node = inserting a new value-object skeleton into the active context (addType). The canvas
-  // doesn't know the contexts, so the target is the active scope; the user names the type.
-  async function applyDiagramAddType(): Promise<void> {
+  // Adding a node = inserting a new construct skeleton into the active context (addType). The canvas
+  // doesn't know the contexts, so the target is the active scope; the kind comes from the palette button
+  // (defaulting to value) and the user names the type.
+  const ADD_DEFAULT_NAME: Record<AddNodeKind, string> = {
+    value: 'NewValue',
+    entity: 'NewEntity',
+    aggregate: 'NewAggregate',
+    event: 'NewEvent',
+    enum: 'NewEnum',
+  };
+
+  async function applyDiagramAddType(detail?: { kind: AddNodeKind }): Promise<void> {
     const scope = activeContext.get();
     if (isAllContexts(scope)) {
       setStatus('Pick a bounded context (top-left) before adding a type', 'error');
       return;
     }
-    const name = window.prompt(`New value type in ${scope}:`, 'NewType')?.trim();
+    const kind = detail?.kind ?? 'value';
+    const name = window.prompt(`New ${kind} in ${scope}:`, ADD_DEFAULT_NAME[kind])?.trim();
     if (!name) return;
-    await applyStructuredEdit({ kind: 'addType', target: scope, name }, `Added ${name} to ${scope}`);
+    // The AddNodeKind string IS the construct keyword the server's TryAddType switches on (StructuredEdit.Type).
+    await applyStructuredEdit({ kind: 'addType', target: scope, name, type: kind }, `Added ${name} to ${scope}`);
   }
 
   // Clicking a diagram node both jumps to its declaration AND selects it, so the element inspector
@@ -1505,4 +1515,9 @@ export function init(): void {
       setStatus('connection failed', 'error');
       output.setContent('// failed to start language server\n' + String(e), 'plain');
     });
+
+  // A teardown the host can call to release the IDE's deferred work. Production (main.ts) runs for the
+  // page lifetime and ignores it; the test suite calls it between boots so the controller's pending
+  // debounce timers can't fire into a torn-down happy-dom (where `render` throws "document is not defined").
+  return () => controller.dispose();
 }

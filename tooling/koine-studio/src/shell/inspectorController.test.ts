@@ -51,7 +51,10 @@ const APP_HTML = `
           <button type="button" class="center-tab" id="center-tab-docs" role="tab" data-center="docs" aria-selected="false">Documentation</button>
         </div>
         <div id="center-body">
-          <section id="center-visual" class="center-host" role="tabpanel"></section>
+          <section id="center-visual" class="center-host" role="tabpanel">
+            <div id="canvas-palette-host"></div>
+            <div id="diagram-host"></div>
+          </section>
           <section id="center-technical" class="center-host" role="tabpanel" hidden>
             <div id="tech-tabs" role="tablist">
               <button type="button" class="tech-tab" id="tech-tab-editor" role="tab" data-tech="editor" aria-selected="true">Editor</button>
@@ -227,6 +230,7 @@ function makeDeps(lsp: Lsp, over: Partial<InspectorControllerDeps> = {}): Inspec
     onSaveElementDescription: vi.fn(),
     onSaveGlossaryDescription: vi.fn(),
     onApplyStructuredEdit: vi.fn(),
+    onAddConstruct: vi.fn(),
     gotoSourceSpan: vi.fn(),
     ensureAssistant: vi.fn(() => makeAssistant()),
     initEdgeResizer: vi.fn(),
@@ -390,6 +394,21 @@ describe('createInspectorController — invalidation forces a refetch', () => {
     const settled = lsp.glossaryModel.mock.calls.length;
     await vi.advanceTimersByTimeAsync(350);
     expect(lsp.glossaryModel.mock.calls.length).toBe(settled); // no further timer fired
+  });
+
+  test('dispose() cancels the pending edit-debounce so the refresh never fires', async () => {
+    vi.useFakeTimers();
+    const lsp = makeLsp();
+    const ctl = createInspectorController(makeDeps(lsp));
+    ctl.init();
+    ctl.selectCenter('technical');
+    lsp.glossaryModel.mockClear();
+
+    ctl.onDocEdited(); // schedules the 350ms refresh debounce
+    ctl.dispose(); // must cancel it — otherwise the timer fires after the test's DOM is gone
+    await vi.advanceTimersByTimeAsync(350);
+    // The debounced refresh never ran: disposing cleared the timer (no post-teardown "document is not defined").
+    expect(lsp.glossaryModel).not.toHaveBeenCalled();
   });
 });
 
@@ -563,5 +582,27 @@ describe('createInspectorController — bounded-context scope', () => {
     ctl.invalidateDocViews();
     await ctl.getCachedDomainIndex();
     expect(lsp.contextMap.mock.calls.length).toBeGreaterThan(callsAfterBuild);
+  });
+});
+
+describe('createInspectorController — construct palette', () => {
+  test('clicking an enabled palette button calls onAddConstruct with its kind', () => {
+    const onAddConstruct = vi.fn();
+    const deps = makeDeps(makeLsp(), { onAddConstruct });
+    // Set a single active context BEFORE mounting so the palette's first render is already enabled
+    // (no async re-render to await — the initial useStore read sees 'Ordering').
+    deps.store.getState().setActiveContext('Ordering');
+    createInspectorController(deps);
+    const btn = el('canvas-palette-host').querySelector<HTMLButtonElement>('[data-kind="entity"]')!;
+    expect(btn.disabled).toBe(false);
+    btn.click();
+    expect(onAddConstruct).toHaveBeenCalledWith('entity');
+  });
+
+  test('palette construct buttons are disabled under "All contexts"', () => {
+    const deps = makeDeps(makeLsp()); // createAppStore() defaults to ALL_CONTEXTS
+    createInspectorController(deps);
+    const btn = el('canvas-palette-host').querySelector<HTMLButtonElement>('[data-kind="entity"]')!;
+    expect(btn.disabled).toBe(true);
   });
 });

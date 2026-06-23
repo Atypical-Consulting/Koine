@@ -435,26 +435,13 @@ describe('authoring chrome (editing only)', () => {
     expect(container.querySelector('.koi-canvas--editing')).toBeNull();
   });
 
-  test('editing adds the Add-a-type + Auto-arrange controls and the editing marker class', async () => {
+  test('editing adds the Auto-arrange control and the editing marker class', async () => {
     setDiagramEditing(true);
     const container = makeContainer();
     await createMaxGraphRenderer().render(container, [file([diagram('aggregate', g)])], 'dark', () => true);
-    expect(container.querySelectorAll('.koi-canvas-btn')).toHaveLength(5);
+    expect(container.querySelectorAll('.koi-canvas-btn')).toHaveLength(4);
     expect(container.querySelector('.koi-canvas--editing')).not.toBeNull();
-    expect(container.querySelector('[aria-label="Add a type"]')).not.toBeNull();
     expect(container.querySelector('[aria-label="Auto-arrange layout"]')).not.toBeNull();
-  });
-
-  test('the Add-a-type button bubbles DIAGRAM_ADD_TYPE (bare, no detail)', async () => {
-    setDiagramEditing(true);
-    const container = makeContainer();
-    await createMaxGraphRenderer().render(container, [file([diagram('aggregate', g)])], 'dark', () => true);
-    let fired = 0;
-    let detail: unknown = 'unset';
-    container.addEventListener('koi-diagram-add-type', (e) => { fired++; detail = (e as CustomEvent).detail; });
-    container.querySelector<HTMLButtonElement>('[aria-label="Add a type"]')!.click();
-    expect(fired).toBe(1);
-    expect(detail).toBeNull();
   });
 
   test('the Auto-arrange button clears saved positions and bubbles DIAGRAM_RELAYOUT', async () => {

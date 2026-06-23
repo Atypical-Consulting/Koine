@@ -326,6 +326,86 @@ public class ModelRoundTripTests
     }
 
     [Fact]
+    public void EmitKoine_add_entity_emits_an_identified_entity_skeleton()
+    {
+        var edit = new StructuredEdit(StructuredEditKind.AddType, "Ordering", Name: "Customer", Type: "entity");
+        EmitResult result = ModelRoundTripService.EmitKoine(Files(Sample), edit);
+
+        result.Diagnostics.ShouldBeEmpty();
+        result.Koine.ShouldNotBeNull();
+        result.Koine!.ShouldContain("entity Customer identified by CustomerId");
+    }
+
+    [Fact]
+    public void EmitKoine_add_event_emits_an_event_skeleton()
+    {
+        var edit = new StructuredEdit(StructuredEditKind.AddType, "Ordering", Name: "OrderShipped", Type: "event");
+        EmitResult result = ModelRoundTripService.EmitKoine(Files(Sample), edit);
+
+        result.Diagnostics.ShouldBeEmpty();
+        result.Koine!.ShouldContain("event OrderShipped");
+    }
+
+    [Fact]
+    public void EmitKoine_add_enum_emits_an_enum_skeleton()
+    {
+        var edit = new StructuredEdit(StructuredEditKind.AddType, "Ordering", Name: "Priority", Type: "enum");
+        EmitResult result = ModelRoundTripService.EmitKoine(Files(Sample), edit);
+
+        result.Diagnostics.ShouldBeEmpty();
+        result.Koine!.ShouldContain("enum Priority");
+    }
+
+    [Fact]
+    public void EmitKoine_add_aggregate_emits_a_self_contained_aggregate_with_a_root_entity()
+    {
+        var edit = new StructuredEdit(StructuredEditKind.AddType, "Ordering", Name: "Shipment", Type: "aggregate");
+        EmitResult result = ModelRoundTripService.EmitKoine(Files(Sample), edit);
+
+        result.Diagnostics.ShouldBeEmpty();
+        result.Koine!.ShouldContain("aggregate Shipment root ShipmentRoot");
+        result.Koine!.ShouldContain("entity ShipmentRoot identified by ShipmentRootId");
+    }
+
+    [Fact]
+    public void EmitKoine_add_type_with_null_kind_still_emits_a_value_skeleton()
+    {
+        // Back-compat: the old bare "+" button sends no Type.
+        var edit = new StructuredEdit(StructuredEditKind.AddType, "Ordering", Name: "Discount");
+        EmitResult result = ModelRoundTripService.EmitKoine(Files(Sample), edit);
+
+        result.Koine!.ShouldContain("value Discount");
+    }
+
+    [Fact]
+    public void ApplyEdit_add_entity_yields_a_compiling_model()
+    {
+        var edit = new StructuredEdit(StructuredEditKind.AddType, "Ordering", Name: "Customer", Type: "entity");
+        ModelEditResult result = ModelRoundTripService.ApplyEdit(Files(Sample), edit);
+
+        result.Edits.Count.ShouldBe(1);
+        result.Diagnostics.ShouldBeEmpty();
+        var edited = Splice(Sample, result.Edits[0].Range, result.Edits[0].NewText);
+        var (model, diags) = new KoineCompiler().Parse(new[] { new SourceFile("t.koi", edited) });
+        diags.Where(d => d.Severity == DiagnosticSeverity.Error).ShouldBeEmpty();
+        model.ShouldNotBeNull();
+    }
+
+    [Fact]
+    public void ApplyEdit_add_aggregate_yields_a_compiling_model()
+    {
+        var edit = new StructuredEdit(StructuredEditKind.AddType, "Ordering", Name: "Shipment", Type: "aggregate");
+        ModelEditResult result = ModelRoundTripService.ApplyEdit(Files(Sample), edit);
+
+        result.Diagnostics.ShouldBeEmpty();
+        result.Edits.Count.ShouldBe(1);
+        var edited = Splice(Sample, result.Edits[0].Range, result.Edits[0].NewText);
+        var (model, diags) = new KoineCompiler().Parse(new[] { new SourceFile("t.koi", edited) });
+        diags.Where(d => d.Severity == DiagnosticSeverity.Error).ShouldBeEmpty();
+        model.ShouldNotBeNull();
+    }
+
+    [Fact]
     public void EmitKoine_remove_type_drops_an_unreferenced_type()
     {
         var edit = new StructuredEdit(StructuredEditKind.RemoveType, "Ordering.Money");
