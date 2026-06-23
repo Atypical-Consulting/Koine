@@ -398,6 +398,7 @@ public class ModelRoundTripTests
         ModelEditResult result = ModelRoundTripService.ApplyEdit(Files(Sample), edit);
 
         result.Diagnostics.ShouldBeEmpty();
+        result.Edits.Count.ShouldBe(1);
         var edited = Splice(Sample, result.Edits[0].Range, result.Edits[0].NewText);
         var (model, diags) = new KoineCompiler().Parse(new[] { new SourceFile("t.koi", edited) });
         diags.Where(d => d.Severity == DiagnosticSeverity.Error).ShouldBeEmpty();
