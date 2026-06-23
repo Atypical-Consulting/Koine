@@ -568,12 +568,6 @@ $koi-inspector-constructs: (
   background: color-mix(in srgb, var(--koi-construct) 12%, transparent);
 }
 
-/* Cross-highlight the diagram node matching the current selection (#142, Task 4). */
-.koi-svg-node.is-selected .koi-svg-node-box {
-  stroke: var(--koi-accent);
-  stroke-width: 2.5;
-}
-
 /* --- dev store inspector overlay (#193 follow-up) ---------------------------------------------
    A read-only live dump of the app store, toggled from the command palette. Pinned bottom-right so it
    floats over the workspace without stealing layout; monospace, compact, label/value grid. */

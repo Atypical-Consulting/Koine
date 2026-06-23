@@ -60,7 +60,7 @@ import {
   type DiagramNodeNavigateDetail,
   type EmptyConceptKind,
   type EmptyStatePickDetail,
-} from '@/diagrams/diagrams-svg';
+} from '@/diagrams/diagramContract';
 import { isAllContexts } from '@/model/activeContext';
 import { appStore } from '@/store/index';
 import { badgeCounts, createDiagCountGate } from '@/diagnostics/diagCountGate';
@@ -138,7 +138,7 @@ const BLANK = `context NewModel {
 }
 `;
 
-// Starter shapes the empty-canvas doorways seed (diagrams-svg EMPTY_STATE_PICK_EVENT). Each is a strict
+// Starter shapes the empty-canvas doorways seed (the EMPTY_STATE_PICK_EVENT contract). Each is a strict
 // subset of a validated template (templates/starters/{ordering,contextmap}) so it always compiles green;
 // seeding one into a fresh model lights up the canvas immediately. A trailing comment points at the next
 // edit so the modeller knows the starter is theirs to grow.
