@@ -228,11 +228,14 @@ describe('createMaxGraphRenderer.render', () => {
     expect(container.textContent).toContain('No diagrams yet');
   });
 
-  test('mounts a canvas surface when there are nodes to draw', async () => {
+  test('mounts a canvas surface and the zoom control bar when there are nodes to draw', async () => {
     const g: DiagramGraph = { nodes: [node({ id: 'Ordering.Order', qualifiedName: 'Ordering.Order', stereotype: 'aggregate root' })], edges: [] };
     const container = makeContainer();
     await createMaxGraphRenderer().render(container, [file([diagram('aggregate', g)])], 'dark', () => true);
     expect(container.querySelector('.koi-svg-diagram .koi-canvas')).not.toBeNull();
+    expect(container.querySelector('.koi-canvas-controls')).not.toBeNull();
+    // − / + / fit (the % readout is a span, not a button)
+    expect(container.querySelectorAll('.koi-canvas-btn')).toHaveLength(3);
   });
 
   test('a superseded render does not clobber the container', async () => {

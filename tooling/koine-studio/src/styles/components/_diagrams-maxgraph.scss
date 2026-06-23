@@ -121,3 +121,65 @@ $ddd-kinds: (
   border-color: var(--koi-accent);
   color: var(--koi-on-accent);
 }
+
+/* zoom control bar + minimap. Self-contained here (mirrors the legacy renderer's chrome) so they survive
+   the old _diagrams.scss being removed. */
+.koi-canvas-controls {
+  position: absolute;
+  top: var(--koi-space-1-5);
+  right: var(--koi-space-1-5);
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: var(--koi-space-0-5);
+  padding: var(--koi-space-0-5);
+  background: var(--koi-surface);
+  border: 1px solid var(--koi-line);
+  border-radius: var(--koi-radius-pill);
+  box-shadow: var(--koi-shadow);
+}
+.koi-canvas-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  font-size: var(--koi-text-sm);
+  line-height: 1;
+  color: var(--koi-fg);
+  background: transparent;
+  border: none;
+  border-radius: var(--koi-radius-pill);
+  cursor: pointer;
+}
+.koi-canvas-btn:hover {
+  background: var(--koi-paper-2);
+  color: var(--koi-accent);
+}
+.koi-canvas-btn:focus-visible {
+  outline: 2px solid var(--koi-accent);
+  outline-offset: 1px;
+}
+.koi-canvas-zoom-pct {
+  min-width: 3.2em;
+  text-align: center;
+  font-family: var(--koi-font-mono);
+  font-size: var(--koi-text-xs);
+  font-variant-numeric: tabular-nums;
+  color: var(--koi-muted);
+  user-select: none;
+}
+.koi-canvas-outline {
+  position: absolute;
+  bottom: var(--koi-space-1-5);
+  right: var(--koi-space-1-5);
+  z-index: 2;
+  width: 180px;
+  height: 140px;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--koi-surface) 88%, transparent);
+  border: 1px solid var(--koi-line);
+  border-radius: var(--koi-radius-sm);
+  box-shadow: var(--koi-shadow);
+}

@@ -12,6 +12,7 @@ import type { Graph as MxGraph, Cell as MxCell } from '@maxgraph/core';
 import type { DiagramEdge, DiagramGraph, DiagramMember, DiagramNode, DocsFile } from '@/lsp/lsp';
 import { mergeGraphsForView } from '@/model/modelTables';
 import { buildEmptyState } from '@/diagrams/emptyState';
+import { loadDiagramZoom, saveDiagramZoom } from '@/settings/persistence';
 
 /** The @maxgraph/core module shape, loaded lazily (code-split out of the main bundle). */
 type Mx = typeof import('@maxgraph/core');
@@ -298,14 +299,123 @@ export function buildCanvas(mx: Mx, container: HTMLElement, merged: DiagramGraph
   };
 }
 
+/** The localStorage key for the domain canvas zoom level (not workspace-scoped — matches the old renderer). */
+const ZOOM_PERSIST_KEY = 'koi-domain-diagram';
+
+/**
+ * Mount the interactive chrome around a built canvas: left-drag panning, a zoom control bar (−/%/+/fit),
+ * Ctrl/⌘+wheel zoom, and the Outline minimap. Returns a teardown that detaches them. Kept out of
+ * buildCanvas so the model stays unit-testable; the visual chrome is verified in the running studio.
+ */
+function mountChrome(mx: Mx, handle: CanvasHandle, host: HTMLElement): () => void {
+  const { Outline } = mx;
+  const graph = handle.graph;
+
+  // Pan with a left-drag on empty canvas (never over a cell, so node clicks still register).
+  graph.setPanning(true);
+  const panning = graph.getPlugin('PanningHandler') as unknown as
+    | { useLeftButtonForPanning?: boolean; ignoreCell?: boolean }
+    | undefined;
+  if (panning) {
+    panning.useLeftButtonForPanning = true;
+    panning.ignoreCell = true;
+  }
+  graph.centerZoom = false;
+  graph.zoomFactor = 1.2;
+
+  const fitPlugin = graph.getPlugin('fit') as unknown as
+    | { fit?: (o?: unknown) => void; fitCenter?: (o?: unknown) => void }
+    | undefined;
+  const fit = (): void => {
+    if (fitPlugin?.fitCenter) fitPlugin.fitCenter({ margin: 24 });
+    else if (fitPlugin?.fit) fitPlugin.fit({ border: 24 });
+  };
+
+  // Restore the saved zoom level (best-effort).
+  const saved = loadDiagramZoom(ZOOM_PERSIST_KEY);
+  if (saved != null) graph.zoomTo(saved / 100, false);
+
+  // --- control bar -----------------------------------------------------------
+  const controls = document.createElement('div');
+  controls.className = 'koi-canvas-controls';
+  controls.setAttribute('role', 'group');
+  controls.setAttribute('aria-label', 'Diagram zoom controls');
+
+  const pct = document.createElement('span');
+  pct.className = 'koi-canvas-zoom-pct';
+  pct.setAttribute('aria-live', 'polite');
+  const syncPct = (): void => {
+    const p = Math.round(graph.getView().scale * 100);
+    pct.textContent = `${p}%`;
+    saveDiagramZoom(ZOOM_PERSIST_KEY, p);
+  };
+
+  const button = (glyph: string, label: string, onClick: () => void): HTMLButtonElement => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'koi-canvas-btn';
+    b.textContent = glyph;
+    b.title = label;
+    b.setAttribute('aria-label', label);
+    b.addEventListener('click', onClick);
+    return b;
+  };
+
+  controls.append(
+    button('−', 'Zoom out', () => {
+      graph.zoomOut();
+      syncPct();
+    }),
+    pct,
+    button('+', 'Zoom in', () => {
+      graph.zoomIn();
+      syncPct();
+    }),
+    button('⤢', 'Fit to screen', () => {
+      fit();
+      syncPct();
+    }),
+  );
+  host.appendChild(controls);
+  syncPct();
+
+  // Ctrl/⌘ + wheel zooms the canvas; a plain wheel is left to scroll the page.
+  const onWheel = (evt: WheelEvent): void => {
+    if (!evt.ctrlKey && !evt.metaKey) return;
+    evt.preventDefault();
+    if (evt.deltaY < 0) graph.zoomIn();
+    else graph.zoomOut();
+    syncPct();
+  };
+  host.addEventListener('wheel', onWheel, { passive: false });
+
+  // --- minimap (Outline) -----------------------------------------------------
+  const outlineDiv = document.createElement('div');
+  outlineDiv.className = 'koi-canvas-outline';
+  outlineDiv.setAttribute('aria-hidden', 'true');
+  host.appendChild(outlineDiv);
+  let outline: { destroy(): void } | null = null;
+  try {
+    outline = new Outline(graph, outlineDiv);
+  } catch {
+    // Outline reads laid-out geometry; under a measure-less headless DOM it may fail — skip it there.
+    outlineDiv.remove();
+  }
+
+  return () => {
+    host.removeEventListener('wheel', onWheel);
+    outline?.destroy();
+  };
+}
+
 /**
  * The maxGraph renderer behind the {@link DiagramRenderer} seam. Fuses the (already context-scoped) files
  * into one domain canvas; an empty model shows the inviting empty state; a superseded render (isCurrent()
  * false) disposes itself rather than clobbering a newer one.
  */
 export function createMaxGraphRenderer(): DiagramRenderer {
-  // The canvas currently committed to the DOM (the renderer is cached across renders by diagrams.ts).
-  let active: CanvasHandle | null = null;
+  // Teardown for the canvas + chrome currently committed (the renderer is cached across renders).
+  let activeDispose: (() => void) | null = null;
 
   return {
     // `theme` is part of the seam but unused — cells are themed via CSS custom properties, so a theme
@@ -315,8 +425,8 @@ export function createMaxGraphRenderer(): DiagramRenderer {
 
       if (!graphs.length) {
         if (isCurrent()) {
-          active?.dispose();
-          active = null;
+          activeDispose?.();
+          activeDispose = null;
           container.replaceChildren(buildEmptyState());
         }
         return;
@@ -343,15 +453,20 @@ export function createMaxGraphRenderer(): DiagramRenderer {
       root.appendChild(surface);
 
       const handle = buildCanvas(mx, surface, merged);
+      const chromeDispose = mountChrome(mx, handle, surface);
+      const dispose = (): void => {
+        chromeDispose();
+        handle.dispose();
+      };
 
       if (isCurrent()) {
-        active?.dispose();
-        active = handle;
+        activeDispose?.();
+        activeDispose = dispose;
         container.replaceChildren(root);
         handle.graph.getView().revalidate(); // re-render now that the surface is in the live DOM
       } else {
         // Superseded: never reached the page — dispose so its listeners/observers don't leak.
-        handle.dispose();
+        dispose();
       }
     },
   };
