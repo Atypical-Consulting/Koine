@@ -1,4 +1,5 @@
 import type { LspDiagnostic } from '@/lsp/lsp';
+import { severityErrorOrWarning } from '@/lsp/severity';
 
 // A per-uri error/warning-count gate for the file-tree badges. The LSP republishes diagnostics for a
 // file on every keystroke, and ide.ts used to `renderTree()` on EVERY push — rebuilding the whole
@@ -27,7 +28,7 @@ export function badgeCounts(diags: LspDiagnostic[]): Counts {
   let errors = 0;
   let warnings = 0;
   for (const d of diags) {
-    if (d.severity === 2) warnings++;
+    if (severityErrorOrWarning(d.severity) === 'warning') warnings++;
     else errors++; // severity 1, info/hint (3/4), or unset ⇒ error
   }
   return { errors, warnings };

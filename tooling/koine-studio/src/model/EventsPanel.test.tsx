@@ -3,6 +3,7 @@ import { act, render } from '@testing-library/preact';
 import { createAppStore } from '@/store/index';
 import { EventsPanel } from '@/model/EventsPanel';
 import type { DiagramEdge, DiagramGraph, DiagramNode, SourceSpan } from '@/lsp/lsp';
+import { axe } from 'vitest-axe';
 
 const span = (line: number): SourceSpan => ({
   file: 'file:///m.koi',
@@ -49,5 +50,11 @@ describe('EventsPanel', () => {
     act(() => store.getState().setActiveContext('Sales'));
     expect(container.textContent).toContain('OrderPlaced');
     expect(container.textContent).not.toContain('ShipDispatched');
+  });
+
+  test('has no accessibility violations', async () => {
+    const store = createAppStore();
+    const { container } = render(<EventsPanel store={store} graph={graph} handlers={{ goto: () => {} }} />);
+    expect(await axe(container)).toHaveNoViolations();
   });
 });

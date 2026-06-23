@@ -10,6 +10,8 @@
 //     footer) plus backdrop-click-to-close, focus capture/restore, and stack registration —
 //     shared by Preferences, About, and the keyboard-shortcuts Help dialog.
 
+import { el } from '@/shared/el';
+
 type CloseFn = () => void;
 
 // Open overlays, bottom-to-top. The last entry is the one Esc closes.
@@ -74,37 +76,31 @@ export interface ModalHandle {
  * header close button also close. Focus is captured on open and restored on close.
  */
 export function createModal(opts: ModalOptions): ModalHandle {
-  const backdrop = document.createElement('div');
-  backdrop.className = 'koi-modal-backdrop';
-  backdrop.hidden = true;
-
-  const modal = document.createElement('div');
-  modal.className = 'koi-modal';
+  const closeBtn = el('button', {
+    class: 'koi-modal-close',
+    text: '✕',
+    attrs: { type: 'button', 'aria-label': 'Close' },
+  });
+  const body = el('div', { class: 'koi-modal-body' });
+  const modal = el(
+    'div',
+    {
+      class: 'koi-modal',
+      attrs: { role: 'dialog', 'aria-modal': 'true', 'aria-label': opts.ariaLabel ?? opts.title },
+    },
+    [
+      el('div', { class: 'koi-modal-header' }, [
+        el('h2', { class: 'koi-modal-title', text: opts.title }),
+        closeBtn,
+      ]),
+      body,
+      el('div', { class: 'koi-modal-footer' }),
+    ],
+  );
   if (opts.variant) modal.classList.add(opts.variant);
-  modal.setAttribute('role', 'dialog');
-  modal.setAttribute('aria-modal', 'true');
-  modal.setAttribute('aria-label', opts.ariaLabel ?? opts.title);
 
-  const header = document.createElement('div');
-  header.className = 'koi-modal-header';
-  const title = document.createElement('h2');
-  title.className = 'koi-modal-title';
-  title.textContent = opts.title;
-  const closeBtn = document.createElement('button');
-  closeBtn.type = 'button';
-  closeBtn.className = 'koi-modal-close';
-  closeBtn.setAttribute('aria-label', 'Close');
-  closeBtn.textContent = '✕';
-  header.append(title, closeBtn);
-
-  const body = document.createElement('div');
-  body.className = 'koi-modal-body';
-
-  const footer = document.createElement('div');
-  footer.className = 'koi-modal-footer';
-
-  modal.append(header, body, footer);
-  backdrop.appendChild(modal);
+  const backdrop = el('div', { class: 'koi-modal-backdrop' }, modal);
+  backdrop.hidden = true;
   document.body.appendChild(backdrop);
 
   let isOpen = false;

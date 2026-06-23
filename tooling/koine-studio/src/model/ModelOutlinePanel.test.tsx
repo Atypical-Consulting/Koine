@@ -4,6 +4,7 @@ import { createAppStore } from '@/store/index';
 import { ModelOutlinePanel } from '@/model/ModelOutlinePanel';
 import type { GlossaryEntry, GlossaryModel, Range } from '@/lsp/lsp';
 import type { ModelOutlineHandlers } from '@/model/modelOutline';
+import { axe } from 'vitest-axe';
 
 const range: Range = { start: { line: 0, character: 0 }, end: { line: 0, character: 0 } };
 
@@ -107,5 +108,11 @@ describe('ModelOutlinePanel', () => {
     expect(
       container.querySelector<HTMLElement>('.koi-model-leaf[data-qname="Inv.Stock"]')!.classList.contains('is-selected'),
     ).toBe(true);
+  });
+
+  test('has no accessibility violations', async () => {
+    const store = createAppStore();
+    const { container } = render(<ModelOutlinePanel store={store} model={model} handlers={handlers} />);
+    expect(await axe(container)).toHaveNoViolations();
   });
 });

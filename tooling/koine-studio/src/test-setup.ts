@@ -6,6 +6,21 @@
 // installs an in-memory IndexedDB on the global. A fresh environment per test file isolates it.
 import 'fake-indexeddb/auto';
 import { webcrypto } from 'node:crypto';
+import { afterEach, expect } from 'vitest';
+import { cleanup } from '@testing-library/preact';
+import * as axeMatchers from 'vitest-axe/matchers';
+
+// Accessibility matcher. Registering it here (a setupFile) makes `expect(await axe(el)).toHaveNoViolations()`
+// available to every test file. axe-core runs under happy-dom for the static-DOM rules the panels
+// exercise (label, button-name, list/listitem, ARIA roles, color-independent checks) — verified before
+// rollout. The WCAG 2.1 AA mandate (CLAUDE.md) is otherwise unenforced; these assertions close that gap.
+expect.extend(axeMatchers);
+
+// Unmount rendered Preact trees after every test. @testing-library/preact only auto-registers this when
+// Vitest `globals` is on (it isn't here), so without it each render() leaks into document.body and the
+// next test — harmless for scoped `container` queries, but an axe audit then trips over duplicated DOM
+// (e.g. landmark-no-duplicate-banner). One global hook keeps the body clean for the whole suite.
+afterEach(() => cleanup());
 
 function makeStorage(): Storage {
   const m = new Map<string, string>();
