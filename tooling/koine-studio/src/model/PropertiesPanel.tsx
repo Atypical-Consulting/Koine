@@ -1,8 +1,26 @@
 import type { StoreApi } from 'zustand/vanilla';
 import type { AppState } from '@/store/index';
 import { useAppStore } from '@/store/hooks';
-import { renderInspector, buildInspectorElement, type InspectorElement, type InspectorHandlers } from '@/model/inspector';
+import {
+  renderInspector,
+  buildInspectorElement,
+  KOINE_BUILTIN_TYPES,
+  type InspectorElement,
+  type InspectorHandlers,
+} from '@/model/inspector';
 import { lookupElement, type ModelIndex } from '@/model/modelIndex';
+
+/**
+ * The type names the Properties panel offers as autocomplete for a property's type: the model's own
+ * declared types (every glossary entry except bounded contexts) followed by the language built-ins,
+ * deduped with declaration order preserved. Empty until the model index has resolved.
+ */
+function knownTypesFrom(index: ModelIndex | null): string[] {
+  const declared = (index?.glossary.entries ?? [])
+    .filter((e) => e.kind !== 'context')
+    .map((e) => e.name);
+  return Array.from(new Set([...declared, ...KOINE_BUILTIN_TYPES]));
+}
 
 // The right-rail Properties inspector as a Preact panel (issue #142, the first migrated panel of #193).
 // It subscribes to the `selection` slice ONLY, so an unrelated slice change (e.g. a bottom-tab switch)
@@ -22,13 +40,14 @@ export function PropertiesPanel(props: {
   const element: InspectorElement | null = hit
     ? buildInspectorElement(hit.element.entry, hit.element.node, hit.element.modelMembers)
     : null;
+  const knownTypes = knownTypesFrom(props.index);
   // Reuse the imperative renderInspector by mounting its output through a callback ref. The ref runs on
   // every render with the freshly-projected element, so the inspector tracks the selection.
   return (
     <div
       class="koi-inspector-mount"
       ref={(host: HTMLElement | null) => {
-        if (host) host.replaceChildren(renderInspector(element, props.handlers));
+        if (host) host.replaceChildren(renderInspector(element, props.handlers, knownTypes));
       }}
     />
   );

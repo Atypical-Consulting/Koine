@@ -1,22 +1,31 @@
 ﻿// ==== docs/Billing.md ====
 # Billing
 
-## Aggregates
-
-### Sales
-
-**Root entity:** `Order` (identified by `OrderId`)
+## Domain Model
 
 ```mermaid
 classDiagram
-    class Order {
-        <<aggregate root>>
-        +OrderId id
-        +CustomerId customer
-        +List~OrderLine~ lines
-        +OrderStatus status
+    class Money {
+        <<value object>>
+        +Decimal amount
+        +Currency currency
     }
-    Order *-- OrderStatus
+    class Currency {
+        <<enumeration>>
+        EUR
+        USD
+        GBP
+    }
+    class Email {
+        <<value object>>
+        +String raw
+    }
+    class Customer {
+        <<entity>>
+        +CustomerId id
+        +String name
+        +Email email
+    }
     class OrderStatus {
         <<enumeration>>
         Draft
@@ -24,7 +33,6 @@ classDiagram
         Shipped
         Cancelled
     }
-    Order *-- OrderLine
     class OrderLine {
         <<value object>>
         +ProductId product
@@ -32,7 +40,25 @@ classDiagram
         +Money unitPrice
         +Money /subtotal
     }
+    class Order {
+        <<aggregate root>>
+        +OrderId id
+        +CustomerId customer
+        +List~OrderLine~ lines
+        +OrderStatus status
+    }
+    Money *-- Currency
+    Customer *-- Email
+    OrderLine *-- Money
+    Order *-- OrderLine
+    Order *-- OrderStatus
 ```
+
+## Aggregates
+
+### Sales
+
+**Root entity:** `Order` (identified by `OrderId`)
 
 #### Value Objects
 

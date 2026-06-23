@@ -45,19 +45,20 @@ public sealed partial class DocsEmitter
             list.Add(descriptor);
         }
 
-        // Per-context docs: aggregate class diagrams + entity state machines, in declaration order so
-        // the descriptors line up with the diagrams embedded in the narrative document.
+        // Per-context docs: ONE context class diagram (the whole domain model) + each entity's state
+        // machine, in declaration order so the descriptors line up with the diagrams embedded in the
+        // narrative document.
         foreach (ContextNode ctx in model.Contexts)
         {
             var path = $"docs/{ctx.Name}.md";
 
+            if (BuildContextDescriptor(ctx) is { } contextDescriptor)
+            {
+                Add(path, contextDescriptor);
+            }
+
             foreach (AggregateDecl agg in ctx.Types.OfType<AggregateDecl>())
             {
-                if (BuildAggregateDescriptor(ctx, agg) is { } aggregateDescriptor)
-                {
-                    Add(path, aggregateDescriptor);
-                }
-
                 if (agg.RootEntity() is { } root)
                 {
                     foreach (DiagramDescriptor sm in BuildStateMachineDescriptors(ctx, root))
@@ -154,110 +155,48 @@ public sealed partial class DocsEmitter
         return result;
     }
 
-    // ---- aggregate class diagrams -------------------------------------------
+    // ---- context class diagram ----------------------------------------------
 
     /// <summary>
-    /// The aggregate class diagram: the root entity (<c>&lt;&lt;aggregate root&gt;&gt;</c>) plus each
-    /// nested type, with a composition edge root *-- nested for every type the diagram draws. Mirrors
-    /// <see cref="EmitAggregateClassDiagram"/>. Returns <c>null</c> when the root cannot be resolved
-    /// (a validation error) — the Markdown path renders nothing in that case either.
+    /// The bounded context's class diagram: a node for every drawable type the context declares — its
+    /// standalone value objects/enums/entities/events PLUS the types nested in its aggregates (the
+    /// aggregate root carries <c>&lt;&lt;aggregate root&gt;&gt;</c>) — and a composition edge for every
+    /// field referencing another in-context type. Built from the same <see cref="ContextClassModel"/> the
+    /// Markdown <see cref="EmitContextClassDiagram"/> walks, so the structured graph and the rendered
+    /// diagram never drift. Returns <c>null</c> when the context declares no drawable type.
     /// </summary>
-    private static DiagramDescriptor? BuildAggregateDescriptor(ContextNode ctx, AggregateDecl agg)
+    private static DiagramDescriptor? BuildContextDescriptor(ContextNode ctx)
     {
-        EntityDecl? root = agg.RootEntity();
-        if (root is null)
+        var (modelNodes, modelEdges) = ContextClassModel(ctx);
+        if (modelNodes.Count == 0)
         {
             return null;
         }
 
-        var nodes = new List<DiagramNode>
-        {
-            new(root.Name, root.Name, "aggregate-root", $"{ctx.Name}.{root.Name}", PreferName(root, agg),
-                Stereotype: "aggregate root",
-                Members: ClassMembers(root, agg))
-        };
-        var edges = new List<DiagramEdge>();
+        var nodes = modelNodes
+            .Select(n => new DiagramNode(
+                n.Type.Name, n.Type.Name, n.Kind, $"{ctx.Name}.{n.Type.Name}",
+                PreferName(n.Type, (KoineNode?)n.OwningAggregate ?? ctx),
+                Stereotype: n.Stereotype,
+                Members: ClassMembers(n.Type, n.OwningAggregate)))
+            .ToList();
 
-        foreach (TypeDecl nested in agg.Types)
-        {
-            if (nested.Name == agg.RootName)
-            {
-                continue;
-            }
-
-            var kind = NestedKind(nested);
-            if (kind is null)
-            {
-                // Integration events / nested aggregates are not part of the structure diagram.
-                continue;
-            }
-
-            nodes.Add(new DiagramNode(
-                nested.Name, nested.Name, kind,
-                $"{ctx.Name}.{nested.Name}", PreferName(nested, agg),
-                Stereotype: NestedStereotype(nested),
-                Members: ClassMembers(nested)));
-            var backingField = CompositionBackingField(root, nested.Name);
-            edges.Add(new DiagramEdge(
-                root.Name, nested.Name, null,
-                CompositionCardinality(root, nested.Name),
+        var edges = modelEdges
+            .Select(e => new DiagramEdge(
+                e.From, e.To, null,
+                e.Cardinality,
                 SourceCardinality: "1",
                 ArrowKind: "composition",
-                BackingMember: backingField is null ? null : $"{ctx.Name}.{root.Name}.{backingField}"));
-        }
+                BackingMember: e.BackingMember))
+            .ToList();
 
         var mermaid = new StringBuilder();
-        EmitAggregateClassDiagram(mermaid, agg);
+        EmitContextClassDiagram(mermaid, ctx);
         return new DiagramDescriptor(
-            Caption: agg.Name,
-            Kind: "aggregate",
+            Caption: ctx.Name,
+            Kind: "context",
             Mermaid: ExtractMermaidBlock(mermaid.ToString()),
             Graph: new DiagramGraph(nodes, edges));
-    }
-
-    /// <summary>
-    /// The target-end multiplicity of the composition from <paramref name="root"/> to the nested type
-    /// named <paramref name="nestedName"/>, derived from the Koine field that references it: a collection
-    /// field (<c>List&lt;X&gt;</c>, <c>Set&lt;X&gt;</c>, <c>Map&lt;K,X&gt;</c>) → <c>"*"</c>, an optional
-    /// field (<c>X?</c>) → <c>"0..1"</c>, a plain field → <c>"1"</c>; <c>null</c> when no field references it.
-    /// </summary>
-    private static string? CompositionCardinality(EntityDecl root, string nestedName)
-    {
-        foreach (Member m in root.Members)
-        {
-            if (string.Equals(m.Type.Name, nestedName, StringComparison.Ordinal))
-            {
-                return m.Type.IsOptional ? "0..1" : "1";
-            }
-
-            if (ReferencesAsTypeArgument(m.Type, nestedName))
-            {
-                return "*";
-            }
-        }
-
-        return null;
-    }
-
-    /// <summary>
-    /// The name of the field on <paramref name="root"/> that references the nested type
-    /// <paramref name="nestedName"/> — directly (<c>total: Money</c>) or as a collection/map element
-    /// (<c>lines: List&lt;OrderLine&gt;</c>) — or <c>null</c> when none does. Lets a composition edge
-    /// carry the field that backs it, so a visual editor can disconnect the edge by removing that field.
-    /// Mirrors the scan order of <see cref="CompositionCardinality"/> (first matching field wins).
-    /// </summary>
-    private static string? CompositionBackingField(EntityDecl root, string nestedName)
-    {
-        foreach (Member m in root.Members)
-        {
-            if (string.Equals(m.Type.Name, nestedName, StringComparison.Ordinal)
-                || ReferencesAsTypeArgument(m.Type, nestedName))
-            {
-                return m.Name;
-            }
-        }
-
-        return null;
     }
 
     /// <summary>True when <paramref name="name"/> appears as a type argument (element/value) anywhere in

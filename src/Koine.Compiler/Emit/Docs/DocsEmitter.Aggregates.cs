@@ -4,40 +4,18 @@ using Koine.Compiler.Ast;
 namespace Koine.Compiler.Emit.Docs;
 
 /// <summary>
-/// Aggregate slice of <see cref="DocsEmitter"/>: a Mermaid <c>classDiagram</c> showing the root entity
-/// (stereotyped <c>&lt;&lt;aggregate root&gt;&gt;</c>) with its concrete fields and command/factory methods,
-/// each nested type as a composition, and the repository finders/operations as a reference list beneath.
-/// Derived (computed) members are shown with UML derived-attribute notation (<c>/name</c>); declaration order is preserved.
+/// Aggregate slice of <see cref="DocsEmitter"/>: the class-node renderers (the root entity stereotyped
+/// <c>&lt;&lt;aggregate root&gt;&gt;</c> with its concrete fields and command/factory methods, and each
+/// other type) plus the repository finders/operations reference block. The class nodes are assembled
+/// into a single per-context class diagram by <see cref="EmitContextClassDiagram"/>; this file owns how
+/// one class draws. Derived (computed) members use UML derived-attribute notation (<c>/name</c>);
+/// declaration order is preserved.
 /// </summary>
 public sealed partial class DocsEmitter
 {
-    /// <summary>Writes the aggregate structure diagram plus the repository reference block.</summary>
-    private static void EmitAggregateClassDiagram(StringBuilder sb, AggregateDecl agg)
+    /// <summary>Writes the aggregate's repository reference block (finders + operations), if any.</summary>
+    private static void EmitRepositorySurface(StringBuilder sb, AggregateDecl agg)
     {
-        EntityDecl? root = agg.RootEntity();
-        if (root is null)
-        {
-            return;
-        }
-
-        sb.Append("\n```mermaid\nclassDiagram\n");
-
-        EmitRootClass(sb, agg, root);
-
-        // Each nested type: a composition edge plus its own class declaration (in declaration order).
-        foreach (TypeDecl nested in agg.Types)
-        {
-            if (nested.Name == agg.RootName)
-            {
-                continue;
-            }
-
-            sb.Append("    ").Append(root.Name).Append(" *-- ").Append(nested.Name).Append('\n');
-            EmitNestedClass(sb, nested);
-        }
-
-        sb.Append("```\n");
-
         if (agg.Repository?.Finders is { Count: > 0 } finders)
         {
             sb.Append("\n**Repository finders:**\n");

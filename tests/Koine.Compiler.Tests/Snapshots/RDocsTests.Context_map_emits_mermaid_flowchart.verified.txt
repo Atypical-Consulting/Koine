@@ -1,6 +1,21 @@
 ﻿// ==== docs/Catalog.md ====
 # Catalog
 
+## Domain Model
+
+```mermaid
+classDiagram
+    class Currency {
+        <<enumeration>>
+        EUR
+        USD
+    }
+    class Sku {
+        <<value object>>
+        +String code
+    }
+```
+
 ## Domain Types
 
 ### Sku — value object
@@ -25,6 +40,16 @@ _All declared constructs are documented._ ✅
 // ==== docs/Customers.md ====
 # Customers
 
+## Domain Model
+
+```mermaid
+classDiagram
+    class Account {
+        <<value object>>
+        +String ref
+    }
+```
+
 ## Domain Types
 
 ### Account — value object
@@ -44,6 +69,16 @@ _All declared constructs are documented._ ✅
 // ==== docs/Legacy.md ====
 # Legacy
 
+## Domain Model
+
+```mermaid
+classDiagram
+    class GatewayResult {
+        <<value object>>
+        +String code
+    }
+```
+
 ## Domain Types
 
 ### GatewayResult — value object
@@ -62,6 +97,21 @@ _All declared constructs are documented._ ✅
 
 // ==== docs/Ordering.md ====
 # Ordering
+
+## Domain Model
+
+```mermaid
+classDiagram
+    class Currency {
+        <<enumeration>>
+        EUR
+        USD
+    }
+    class Order {
+        <<value object>>
+        +Sku sku
+    }
+```
 
 ## Domain Types
 
@@ -87,6 +137,16 @@ _All declared constructs are documented._ ✅
 // ==== docs/Payments.md ====
 # Payments
 
+## Domain Model
+
+```mermaid
+classDiagram
+    class Receipt {
+        <<value object>>
+        +Int n
+    }
+```
+
 ## Domain Types
 
 ### Receipt — value object
@@ -105,6 +165,16 @@ _All declared constructs are documented._ ✅
 
 // ==== docs/Shipping.md ====
 # Shipping
+
+## Domain Model
+
+```mermaid
+classDiagram
+    class Parcel {
+        <<value object>>
+        +Int n
+    }
+```
 
 ## Domain Types
 
