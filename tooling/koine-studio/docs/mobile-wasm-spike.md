@@ -80,3 +80,77 @@ chunks.
 
 > Transfer size is necessary but **not sufficient**: the open risk is **peak memory during a compile**
 > on iOS, which the size says nothing about. That is what D1/D2 measure.
+
+## Device matrix
+
+| ID | Device / browser | Role | Why |
+|----|------------------|------|-----|
+| **D1** | iPhone, Safari (recent iOS) | **Primary** | The decisive case — iOS WebKit enforces a per-tab memory ceiling that can terminate the page. |
+| **D2** | Mid-range Android, Chrome | **Primary** | More headroom than iOS but representative of real low/mid devices; remote-debuggable. |
+| **D3** | Desktop Chrome, **Slow 4G + 4× CPU** throttling | Reproducible baseline | Repeatable, environment-independent proxy for a constrained device. **Captured here.** |
+| **D4** | Desktop Chrome, no throttling | Reference baseline | Upper bound; isolates pure compute/transfer from device constraints. **Captured here.** |
+
+> D3/D4 emulation does **not** reproduce iOS's memory-kill behaviour — DevTools CPU/network throttling
+> does not cap heap the way WebKit does. D3/D4 bound latency and transfer; only **D1/D2 settle the
+> memory question**, and hence the verdict.
+
+## Metrics
+
+Workloads: **small = `billing` starter**, **medium = `pizzeria` template** (both already green in the
+test suite). Latency is **N=5** runs, reported as **median / max** (ms). Cold-load = navigation start →
+editor interactive (first `loadWasmApi()` resolved). Survival ∈ {survived | reloaded | crashed}.
+
+| ID | Transfer (raw / brotli) | Cold-load (s) | Peak JS heap (MB) | Small compile (med/max ms) | Medium compile (med/max ms) | Survival |
+|----|------------------------|---------------|-------------------|----------------------------|-----------------------------|----------|
+| D1 (iPhone/Safari)     | 5.81 / 1.70 MB · _host-dependent_ | _pending — D1/D2 runbook_ | _pending_ | _pending_ | _pending_ | _pending_ |
+| D2 (Android/Chrome)    | 5.81 / 1.70 MB · _host-dependent_ | _pending — D1/D2 runbook_ | _pending_ | _pending_ | _pending_ | _pending_ |
+| D3 (Chrome Slow4G+4×)  | _filled in Task 3_ | _Task 3_ | _Task 3_ | _Task 3_ | _Task 3_ | _Task 3_ |
+| D4 (Chrome no-throttle)| _filled in Task 3_ | _Task 3_ | _Task 3_ | _Task 3_ | _Task 3_ | _Task 3_ |
+
+(Transfer is bundle-fixed — see the payload table; the served bytes depend on whether the host applies
+gzip/brotli. Cold-load/heap/latency/survival are device-dependent and filled per row.)
+
+## Capture procedure
+
+**Instrumentation (both wrap points are in the browser host, `src/host/browser/wasm.ts`):**
+
+- Cold-load / runtime boot: wrap `loadWasmApi()` (wasm.ts:186) — `const t0 = performance.now()` before
+  the call, log `performance.now() - t0` when its promise resolves.
+- Compile latency: wrap the `EmitPreview(filesJson, 'csharp')` call (the guarded API surface,
+  wasm.ts:12) — time each of N=5 invocations on the same workspace; report median + max.
+- A throwaway way to inject both without shipping code: paste a timing snippet into the DevTools
+  console via `performance.mark`/`measure`, or temporarily wrap the two calls locally (do **not** commit
+  the instrumentation — it's a spike, not a feature).
+
+**Per metric:**
+
+- **Transfer size** — Chrome DevTools **Network** tab (disable cache, reload): read "transferred" vs
+  "size" for `_framework/*`. Confirm the host is serving compressed (`content-encoding: br|gzip`); if
+  not, you're measuring the 5.8 MB raw path.
+- **Cold-load** — Network/Performance trace from navigation start to editor interactive.
+- **Peak JS heap** — Chrome **Memory**/Performance heap timeline (Android via `chrome://inspect`);
+  Safari **Web Inspector → Timelines → Allocations** (iPhone cabled to a Mac, Develop → _device_).
+- **Compile latency** — the `EmitPreview` wrap above, N=5.
+- **Survival** — load → compile → background the tab ~60 s → foreground → compile again. A blank tab or
+  forced reload on return = a WebKit memory kill.
+
+**Throttling profiles (D3 primary):** Network **Slow 4G**, CPU **4× slowdown**. Secondary sensitivity
+run: **Fast 4G**.
+
+## Decision criteria (pre-committed — evaluate first-match-wins, *before* looking at the numbers)
+
+Locked in now so the analysis can't rationalise after the fact. Evaluated top-to-bottom; the first rule
+that matches on a **primary** device (D1 or D2) wins.
+
+1. **→ (c) server-side compile endpoint** if **any** of: the tab is **terminated/reloaded** during or
+   after a compile (the survival test fails on iOS); **or** a 2nd consecutive compile reliably crashes;
+   **or** medium-model (`pizzeria`) compile latency is **unusable** (median ≳ 10 s) on a primary device.
+2. **→ (b) lazy / explicit-opt-in compile** if it loads and compiles **but**: cold-load is heavy
+   (served transfer ≳ 3 MB or cold-load ≳ 10 s on Slow-4G-class), **or** peak heap is **high but
+   survivable** (no crash, yet close enough to limits that eager compile is risky).
+3. **→ (a) client-side viable as-is** if, on **both** primary devices: the survival test passes, peak
+   heap sits comfortably below the device ceiling, and small/medium compile latency is interactive
+   (≲ ~2 s / ≲ ~5 s) with acceptable cold-load.
+
+> These thresholds are deliberately conservative defaults; if a real measurement sits on a boundary,
+> record the number and the call made, don't silently round toward a nicer verdict.
