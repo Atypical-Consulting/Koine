@@ -915,6 +915,132 @@ public static class TestSupport
 
     // -------------------------------------------------------------------------
 
+    // -------------------------------------------------------------------------
+    // OpenAPI conformance harness (issue #126; mirrors the external-toolchain harnesses above)
+    // -------------------------------------------------------------------------
+
+    /// <summary>
+    /// Result of an OpenAPI document-validation run. <see cref="ToolchainAvailable"/> is false when
+    /// validation is not opted into (the <c>KOINE_OPENAPI_VALIDATE</c> env var is unset) OR no validator
+    /// could be located — callers SKIP (not fail) in that case so <c>dotnet test</c> stays green without
+    /// a validator. When the toolchain IS usable, <see cref="Ok"/> reflects whether the validator
+    /// accepted every emitted <c>openapi.yaml</c>.
+    /// </summary>
+    public readonly record struct OpenApiCheck(bool ToolchainAvailable, bool Ok, IReadOnlyList<string> Errors)
+    {
+        /// <summary>A skipped result: validation not enabled / no validator present, so nothing was verified.</summary>
+        public static OpenApiCheck Skipped { get; } =
+            new(ToolchainAvailable: false, Ok: false, Errors: Array.Empty<string>());
+    }
+
+    /// <summary>
+    /// Validates every emitted <c>openapi.yaml</c> with a real OpenAPI validator — the document-spec
+    /// analogue of the Roslyn <see cref="Compile"/> harness. Validation is OPT-IN: it only runs when
+    /// <c>KOINE_OPENAPI_VALIDATE</c> is set, because most dev/CI machines carry no OpenAPI validator and
+    /// the emitted YAML is otherwise snapshot-tested. When enabled, the validator is resolved from
+    /// <c>KOINE_OPENAPI_VALIDATOR</c> (an explicit command, optionally with leading args) or a known tool
+    /// on PATH (<c>openapi-spec-validator</c>, <c>swagger-cli validate</c>, <c>redocly lint</c>). Absent
+    /// any of that, the result is <see cref="OpenApiCheck.Skipped"/> so the suite stays green — it NEVER
+    /// silently passes a real validation error and NEVER fails merely because no validator is present.
+    /// </summary>
+    public static OpenApiCheck ValidateOpenApi(IEnumerable<EmittedFile> files)
+    {
+        if (Environment.GetEnvironmentVariable("KOINE_OPENAPI_VALIDATE") is not { Length: > 0 })
+        {
+            return OpenApiCheck.Skipped;
+        }
+
+        if (ResolveOpenApiValidator() is not { } validator)
+        {
+            return OpenApiCheck.Skipped;
+        }
+
+        var fileList = files.ToList();
+        string root = Path.Combine(Path.GetTempPath(), "koine-openapi-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            var specs = new List<string>();
+            foreach (EmittedFile f in fileList)
+            {
+                string path = Path.Combine(root, f.RelativePath);
+                Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+                File.WriteAllText(path, f.Contents);
+                if (f.RelativePath.EndsWith("openapi.yaml", StringComparison.OrdinalIgnoreCase))
+                {
+                    specs.Add(path);
+                }
+            }
+
+            if (specs.Count == 0)
+            {
+                // Nothing to validate — vacuously OK (a validator was found).
+                return new OpenApiCheck(ToolchainAvailable: true, Ok: true, Array.Empty<string>());
+            }
+
+            var errors = new List<string>();
+            foreach (string spec in specs)
+            {
+                var args = new List<string>(validator.Arguments) { spec };
+                if (RunProcess(validator.FileName, args, root) is not { } run)
+                {
+                    // The validator refused to launch; treat as no toolchain.
+                    return OpenApiCheck.Skipped;
+                }
+
+                if (run.ExitCode != 0)
+                {
+                    errors.AddRange((run.StdOut + run.StdErr)
+                        .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
+                }
+            }
+
+            return errors.Count == 0
+                ? new OpenApiCheck(ToolchainAvailable: true, Ok: true, Array.Empty<string>())
+                : new OpenApiCheck(ToolchainAvailable: true, Ok: false, errors);
+        }
+        finally
+        {
+            try { Directory.Delete(root, recursive: true); } catch { /* best-effort cleanup */ }
+        }
+    }
+
+    /// <summary>
+    /// Locates a usable OpenAPI validator. Order: <c>KOINE_OPENAPI_VALIDATOR</c> override (a command,
+    /// optionally with leading args) → <c>openapi-spec-validator</c> → <c>swagger-cli validate</c> →
+    /// <c>redocly lint</c>. Returns <c>null</c> when none works so the caller can skip.
+    /// </summary>
+    private static ToolInvocation? ResolveOpenApiValidator()
+    {
+        if (Environment.GetEnvironmentVariable("KOINE_OPENAPI_VALIDATOR") is { Length: > 0 } overrideValidator)
+        {
+            string[] parts = overrideValidator.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            // A whitespace-only override splits to nothing; fall through to PATH discovery rather than
+            // indexing into an empty array (the harness must skip, never crash).
+            if (parts.Length > 0)
+            {
+                return new ToolInvocation(parts[0], parts.Skip(1).ToArray());
+            }
+        }
+
+        if (OnPath("openapi-spec-validator") is { } ospec && CanRun(ospec, ["--help"]))
+        {
+            return new ToolInvocation(ospec, Array.Empty<string>());
+        }
+
+        if (OnPath("swagger-cli") is { } swagger && CanRun(swagger, ["--version"]))
+        {
+            return new ToolInvocation(swagger, ["validate"]);
+        }
+
+        if (OnPath("redocly") is { } redocly && CanRun(redocly, ["--version"]))
+        {
+            return new ToolInvocation(redocly, ["lint"]);
+        }
+
+        return null;
+    }
+
     /// <summary>How to invoke <c>tsc</c>: a program plus leading arguments (e.g. <c>npx tsc</c>).</summary>
     private readonly record struct TscInvocation(string FileName, IReadOnlyList<string> Arguments);
 
