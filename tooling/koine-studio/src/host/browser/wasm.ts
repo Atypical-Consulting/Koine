@@ -93,42 +93,53 @@ export interface KoineWasmApi {
 }
 
 /**
- * The names of every [JSExport] method the compiler bundle is expected to provide (keep in sync with
- * `KoineWasmApi` above). The guard only flags a *known* export name that failed to resolve as a stale
- * bundle; any other property access (`then`, `toString`, `catch`, …) must pass through untouched — see
- * `guardWasmSurface`.
+ * Every [JSExport] method the compiler bundle is expected to provide. This set is the single source of
+ * truth and it must be COMPLETE: `buildWorkerProxy` forwards a call only when the method name is in
+ * this set (a name not here resolves to `undefined`, i.e. an unforwarded method), and `guardWasmSurface`
+ * flags a known export name that failed to resolve as a stale bundle. Any other property access (`then`,
+ * `toString`, `catch`, …) passes through untouched.
+ *
+ * Completeness is **compiler-enforced**: the source map is typed `Record<keyof KoineWasmApi, true>`, so
+ * adding a method to `KoineWasmApi` without listing it here is a `tsc` error (and vice-versa). This
+ * prevents the silent drift where a real export is omitted and its feature stops being forwarded.
  */
-const KOINE_WASM_EXPORTS: ReadonlySet<string> = new Set<keyof KoineWasmApi>([
-  'DiagnoseWorkspace',
-  'EmitPreview',
-  'ListEmitTargets',
-  'Glossary',
-  'GlossaryModel',
-  'ContextMap',
-  'SetDoc',
-  'Hover',
-  'Completions',
-  'Definition',
-  'SignatureHelp',
-  'WorkspaceSymbols',
-  'DocumentSymbols',
-  'FoldingRanges',
-  'SelectionRanges',
-  'CodeLenses',
-  'Format',
-  'Check',
-  'References',
-  'PrepareRename',
-  'Rename',
-  'CodeActions',
-  'Docs',
-  'RunScenario',
-  'ScenarioCatalog',
-  'InlayHints',
-  'PrepareCallHierarchy',
-  'IncomingCalls',
-  'OutgoingCalls',
-]);
+const KOINE_WASM_EXPORT_MAP: Record<keyof KoineWasmApi, true> = {
+  DiagnoseWorkspace: true,
+  EmitPreview: true,
+  ListEmitTargets: true,
+  Glossary: true,
+  GlossaryModel: true,
+  Model: true,
+  ModelMembers: true,
+  EmitKoine: true,
+  ApplyModelEdit: true,
+  ContextMap: true,
+  SetDoc: true,
+  Hover: true,
+  Completions: true,
+  Definition: true,
+  SignatureHelp: true,
+  WorkspaceSymbols: true,
+  DocumentSymbols: true,
+  FoldingRanges: true,
+  SelectionRanges: true,
+  CodeLenses: true,
+  Format: true,
+  Check: true,
+  References: true,
+  PrepareRename: true,
+  Rename: true,
+  CodeActions: true,
+  Docs: true,
+  RunScenario: true,
+  ScenarioCatalog: true,
+  InlayHints: true,
+  PrepareCallHierarchy: true,
+  IncomingCalls: true,
+  OutgoingCalls: true,
+};
+
+const KOINE_WASM_EXPORTS: ReadonlySet<string> = new Set(Object.keys(KOINE_WASM_EXPORT_MAP));
 
 let apiPromise: Promise<KoineWasmApi> | null = null;
 

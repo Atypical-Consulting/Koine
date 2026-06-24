@@ -120,4 +120,30 @@ describe('loadWasmApi — worker proxy', () => {
     const resolved = await Promise.resolve(api);
     expect(resolved).toBe(api);
   });
+
+  // Regression: the worker proxy forwards a method ONLY when its name is in KOINE_WASM_EXPORTS, so a
+  // KoineWasmApi method missing from that set silently resolves to `undefined` and breaks at runtime.
+  // Model / ModelMembers / EmitKoine / ApplyModelEdit (the #91 structured-editor LSP backend) were
+  // absent from the set; assert each now forwards to the worker client like any other export.
+  test.each(['Model', 'ModelMembers', 'EmitKoine', 'ApplyModelEdit'] as const)(
+    'forwards %s through the worker client (was previously dropped by the proxy)',
+    async (method) => {
+      const mockCall = vi.fn<(method: string, args: unknown[]) => Promise<string>>();
+      mockCall.mockResolvedValue('{"ok":true}');
+
+      const { createKoineWorkerClient } = await import('@/host/browser/workerClient');
+      (createKoineWorkerClient as ReturnType<typeof vi.fn>).mockReturnValue({
+        call: mockCall,
+        whenReady: vi.fn<() => Promise<void>>().mockResolvedValue(undefined),
+        dispose: vi.fn(),
+      });
+
+      const { loadWasmApi } = await import('@/host/browser/wasm');
+      const api = (await loadWasmApi()) as unknown as Record<string, (...a: unknown[]) => Promise<string>>;
+
+      const result = await api[method]('[]', 'X');
+      expect(mockCall).toHaveBeenCalledWith(method, ['[]', 'X']);
+      expect(result).toBe('{"ok":true}');
+    },
+  );
 });
