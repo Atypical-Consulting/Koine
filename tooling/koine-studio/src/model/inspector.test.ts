@@ -39,7 +39,10 @@ const noop: InspectorHandlers = { onGoto: () => {} };
 describe('renderInspector', () => {
   test('renders an empty state when nothing is selected', () => {
     const el = renderInspector(null, noop);
-    expect(el.classList.contains('koi-rview-empty')).toBe(true);
+    // The padded .koi-inspector root wraps the shared .koi-rview-empty block (same nesting as the
+    // Rules/Notes tabs inside .doc-view), so the empty text keeps its outer margin.
+    expect(el.classList.contains('koi-inspector')).toBe(true);
+    expect(el.querySelector('.koi-rview-empty')).not.toBeNull();
     expect(el.querySelector('.koi-rview-empty-title')!.textContent).toBe('Properties');
     expect(el.textContent).toMatch(/select an element/i);
   });
