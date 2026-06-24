@@ -91,7 +91,7 @@ public class EmitterRegistryTests
             new EmitTargetInfo("php", "PHP", ".php"),
             new EmitTargetInfo("rust", "Rust", ".rs"),
             new EmitTargetInfo("asyncapi", "AsyncAPI", ".yaml"),
-            new EmitTargetInfo("openapi", "openapi", ".txt"),
+            new EmitTargetInfo("openapi", "OpenAPI", ".yaml"),
         });
 
         var ids = new EmitterRegistry().SupportedTargetInfos.Select(i => i.Id).ToArray();

@@ -88,6 +88,7 @@ public class LspServerTests
         targets.ShouldContain(t => t.id == "csharp" && t.displayName == "C#" && t.fileExtension == ".cs");
         targets.ShouldContain(t => t.id == "rust" && t.displayName == "Rust" && t.fileExtension == ".rs");
         targets.ShouldContain(t => t.id == "asyncapi" && t.displayName == "AsyncAPI" && t.fileExtension == ".yaml");
+        targets.ShouldContain(t => t.id == "openapi" && t.displayName == "OpenAPI" && t.fileExtension == ".yaml");
         // glossary/docs are documentation generators, not emit targets the IDE offers.
         targets.ShouldNotContain(t => t.id == "glossary" || t.id == "docs");
     }
