@@ -79,6 +79,12 @@ export function isClassNode(node: DiagramNode): boolean {
   return node.stereotype != null || (node.members?.length ?? 0) > 0;
 }
 
+/** The node kind for a bounded context (the strategic context-map graph). Styled as a prominent territory
+ *  tile, distinct from the class/aggregate and value-object boxes. Mirrors {@link CONTEXT_NODE_KIND}. */
+export function isContextNode(node: DiagramNode): boolean {
+  return node.kind === 'context';
+}
+
 // --- node label HTML + sizing -------------------------------------------------
 // Nodes render as HTML labels (the maxGraph cell shape is transparent), so the box — border, fill,
 // compartments — is drawn by CSS keyed on `data-kind` (see _diagrams-maxgraph.scss). This keeps theming
@@ -96,6 +102,10 @@ const MIN_W = 72;
 const MIN_CLASS_W = 120;
 const MAX_W = 280;
 const SIMPLE_H = 40;
+// A bounded context reads as a prominent territory tile — wider minimum and a taller box than a plain
+// value/state chip — so the strategic context-map graph's nodes stand out as the headline boxes.
+const CONTEXT_MIN_W = 120;
+const CONTEXT_H = 56;
 
 /** Split a class node's members into the attribute compartment (field/value/computed) and methods. */
 function partitionMembers(node: DiagramNode): { fields: DiagramMember[]; methods: DiagramMember[] } {
@@ -106,6 +116,10 @@ function partitionMembers(node: DiagramNode): { fields: DiagramMember[]; methods
 
 /** The pre-layout box size for a node, clamped to a sane width range (mirrors the SVG renderer). */
 export function nodeSize(node: DiagramNode): [number, number] {
+  if (isContextNode(node)) {
+    const w = Math.max(CONTEXT_MIN_W, Math.min(MAX_W, Math.round(node.label.length * CHAR_W) + NODE_PAD_X));
+    return [w, CONTEXT_H];
+  }
   if (!isClassNode(node)) {
     const w = Math.max(MIN_W, Math.min(MAX_W, Math.round(node.label.length * CHAR_W) + NODE_PAD_X));
     return [w, SIMPLE_H];
@@ -552,6 +566,9 @@ export function buildCanvas(
       const target = cells.get(edge.to);
       if (!source || !target) continue;
       const composition = edge.arrowKind === 'composition';
+      // A symmetric context-map relation (Partnership / Shared Kernel) reads as undirected — an open
+      // arrowhead at BOTH ends — vs. a directional relation's single head at the (downstream) target.
+      const bidirectional = edge.arrowKind === 'bidirectional';
       const e = graph.insertEdge({
         parent: root,
         source,
@@ -563,7 +580,7 @@ export function buildCanvas(
           strokeColor: 'var(--koi-diagram-edge)', // assertive enough to trace across the canvas
           strokeWidth: 1.4,
           fontColor: 'var(--koi-fg)',
-          startArrow: composition ? 'diamond' : 'none',
+          startArrow: composition ? 'diamond' : bidirectional ? 'open' : 'none',
           startFill: composition,
           startSize: 13,
           endArrow: 'open',

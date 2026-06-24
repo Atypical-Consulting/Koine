@@ -144,10 +144,16 @@ $ddd-kinds: (
   background: var(--koi-paper-2);
   border-color: var(--koi-muted);
 }
+/* A bounded context is the headline box of the strategic context-map graph: a solid accent tile that
+   reads as a territory, distinct from the small value/state chips and the compartmented class boxes. */
 .koi-node--simple[data-kind='context'] {
   background: var(--koi-accent);
   border-color: var(--koi-accent);
   color: var(--koi-on-accent);
+  font-size: var(--koi-text-md);
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  padding: 0 var(--koi-space-3);
 }
 
 /* Cross-highlight the node matching the current selection (#142, Task 4). The class is toggled by

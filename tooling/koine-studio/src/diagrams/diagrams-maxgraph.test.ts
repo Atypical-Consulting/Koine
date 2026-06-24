@@ -1,6 +1,6 @@
 import { describe, expect, test, beforeAll, afterEach, vi, type Mock } from 'vitest';
 import * as mx from '@maxgraph/core';
-import { selectDomainGraphs, buildCanvas, isClassNode, nodeLabelHtml, nodeSize, contextOf, createMaxGraphRenderer } from '@/diagrams/diagrams-maxgraph';
+import { selectDomainGraphs, buildCanvas, isClassNode, isContextNode, nodeLabelHtml, nodeSize, contextOf, createMaxGraphRenderer } from '@/diagrams/diagrams-maxgraph';
 
 // The diagram's rename/delete gestures now route through Koine's own modal (koiPrompt/koiConfirm),
 // not window.prompt/confirm. Stub them so the tests drive the async dialog deterministically.
@@ -133,6 +133,31 @@ describe('nodeLabelHtml', () => {
   });
 });
 
+describe('context nodes', () => {
+  const ctx = (name: string) => node({ id: name, qualifiedName: name, label: name, kind: 'context' });
+
+  test('a context node is recognised and is NOT a class/aggregate compartment box', () => {
+    expect(isContextNode(ctx('Ordering'))).toBe(true);
+    expect(isClassNode(ctx('Ordering'))).toBe(false);
+    // a real class node is neither a context nor a simple box
+    expect(isContextNode(node({ id: 'C.A', qualifiedName: 'C.A', stereotype: 'aggregate root' }))).toBe(false);
+  });
+
+  test('a context node sizes as a distinct, prominent tile (wider minimum + taller than a plain box)', () => {
+    const [ctxW, ctxH] = nodeSize(ctx('A')); // short label hits the minimums
+    const [, simpleH] = nodeSize(node({ id: 's', qualifiedName: 'Draft', label: 'Draft', kind: 'state' }));
+    expect(ctxW).toBeGreaterThanOrEqual(120);
+    expect(ctxH).toBeGreaterThan(simpleH);
+  });
+
+  test('a context node renders a simple labelled box tagged data-kind="context" for the distinct CSS', () => {
+    const html = nodeLabelHtml(ctx('Ordering'));
+    expect(html).toContain('koi-node--simple');
+    expect(html).toContain('data-kind="context"');
+    expect(html).not.toContain('koi-node--class');
+  });
+});
+
 describe('contextOf', () => {
   test('takes the prefix before the first dot, or empty for an undotted name', () => {
     expect(contextOf('Ordering.Order')).toBe('Ordering');
@@ -216,6 +241,23 @@ describe('edges', () => {
       expect(edge!.value).toMatchObject({ backingMember: 'Ordering.Order.lines' });
       // the two multiplicity labels are child cells of the edge
       expect(edge!.getChildCount()).toBe(2);
+    } finally {
+      handle.dispose();
+    }
+  });
+
+  test('a bidirectional edge (context-map Partnership / Shared Kernel) draws an arrowhead at BOTH ends', () => {
+    const merged: DiagramGraph = {
+      nodes: [node({ id: 'Sales', qualifiedName: 'Sales', kind: 'context' }), node({ id: 'Support', qualifiedName: 'Support', kind: 'context' })],
+      edges: [{ from: 'Sales', to: 'Support', label: 'Partnership', arrowKind: 'bidirectional' }],
+    };
+    const container = makeContainer();
+    const handle = buildCanvas(mx, container, merged);
+    try {
+      const edge = handle.cells.get('Sales')!.getEdgeAt(0);
+      expect(edge!.getStyle().startArrow).not.toBe('none'); // two-headed → arrow at the source end too
+      expect(edge!.getStyle().endArrow).not.toBe('none');
+      expect(edge!.getStyle().startArrow).not.toBe('diamond'); // not a composition diamond
     } finally {
       handle.dispose();
     }
