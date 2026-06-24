@@ -5,7 +5,7 @@
 // dynamic import (no DOM needed), then posts a `ready` signal. The main thread talks to it over a
 // typed id-correlated request/response protocol implemented in workerClient.ts.
 
-import { createKoineWorkerClient } from '@/host/browser/workerClient';
+import { createKoineWorkerClient, type WorkerClient } from '@/host/browser/workerClient';
 
 /** The JS-callable language-service surface (matches src/Koine.Wasm/CompilerInterop.LanguageService.cs). */
 export interface KoineWasmApi {
@@ -142,6 +142,7 @@ const KOINE_WASM_EXPORT_MAP: Record<keyof KoineWasmApi, true> = {
 const KOINE_WASM_EXPORTS: ReadonlySet<string> = new Set(Object.keys(KOINE_WASM_EXPORT_MAP));
 
 let apiPromise: Promise<KoineWasmApi> | null = null;
+let workerClientInstance: WorkerClient | null = null;
 
 /** Pattern that the worker emits for an export that isn't a function on the interop surface. */
 const WORKER_MISSING_EXPORT_RE = /^Koine WASM export "([^"]+)" is not a function$/;
@@ -221,9 +222,20 @@ export function loadWasmApi(): Promise<KoineWasmApi> {
   if (apiPromise) return apiPromise;
   apiPromise = (async () => {
     const client = createKoineWorkerClient();
+    workerClientInstance = client;
     // Await the worker's `ready` signal (or reject on boot-failure / 30 s timeout).
     await client.whenReady();
     return buildWorkerProxy(client.call.bind(client));
   })();
   return apiPromise;
+}
+
+/**
+ * Returns the underlying `WorkerClient` once the WASM API has been loaded, or `null` before
+ * `loadWasmApi()` has been called. Exposes cancellation primitives (`cancel`, `terminateAndRespawn`)
+ * to callers (e.g. a transport-level superseder) without changing `KoineWasmApi` method signatures.
+ * Additive — existing callers of `loadWasmApi()` are unaffected.
+ */
+export function getWasmWorkerClient(): WorkerClient | null {
+  return workerClientInstance;
 }

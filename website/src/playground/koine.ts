@@ -9,7 +9,7 @@
 //   diagnose(source)    — returns diagnostics for editor squiggles
 //   compile(source, target) — returns the full compile result
 
-import { createKoineWorkerClient, type WorkerClient } from './workerClient';
+import { createKoineWorkerClient, type WorkerClient, type CallOptions } from './workerClient';
 
 export type Severity = 'error' | 'warning';
 
@@ -73,13 +73,13 @@ export async function whenReady(): Promise<void> {
 }
 
 /** Parse + validate; returns diagnostics for editor squiggles. */
-export async function diagnose(source: string): Promise<KoineDiagnostic[]> {
+export async function diagnose(source: string, opts?: CallOptions): Promise<KoineDiagnostic[]> {
   const client = await loadApi();
-  return JSON.parse(await client.call('Diagnose', [source])) as KoineDiagnostic[];
+  return JSON.parse(await client.call('Diagnose', [source], opts)) as KoineDiagnostic[];
 }
 
 /** Full compile through the chosen emitter. */
-export async function compile(source: string, target: Target): Promise<CompileResult> {
+export async function compile(source: string, target: Target, opts?: CallOptions): Promise<CompileResult> {
   const client = await loadApi();
-  return JSON.parse(await client.call('Compile', [source, target])) as CompileResult;
+  return JSON.parse(await client.call('Compile', [source, target], opts)) as CompileResult;
 }

@@ -36,7 +36,7 @@ describe('playground koine.ts — worker proxy', () => {
     const { diagnose } = await import('./koine');
     const result = await diagnose('value Foo = { }');
 
-    expect(mockCall).toHaveBeenCalledWith('Diagnose', ['value Foo = { }']);
+    expect(mockCall).toHaveBeenCalledWith('Diagnose', ['value Foo = { }'], undefined);
     expect(result).toEqual(diagnostics);
   });
 
@@ -55,7 +55,7 @@ describe('playground koine.ts — worker proxy', () => {
     const { compile } = await import('./koine');
     const result = await compile('value Foo = { }', 'csharp');
 
-    expect(mockCall).toHaveBeenCalledWith('Compile', ['value Foo = { }', 'csharp']);
+    expect(mockCall).toHaveBeenCalledWith('Compile', ['value Foo = { }', 'csharp'], undefined);
     expect(result).toEqual(compileResult);
   });
 
