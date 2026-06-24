@@ -355,4 +355,86 @@ public class RefactorServiceTests
         var actions = RefactorsAt(src, 2, 4, 4, 6);
         actions.ShouldNotContain(a => a.Title.StartsWith("Extract aggregate", StringComparison.Ordinal));
     }
+
+    /// <summary>The "Inline value object" refactor at this selection (a plain <c>refactor</c> Kind, the
+    /// inverse of extract).</summary>
+    private static CodeActionEdit InlineValueObjectAt(string src, int sl, int sc, int el, int ec) =>
+        RefactorsAt(src, sl, sc, el, ec)
+            .Where(a => a.Kind == "refactor" && a.Title.StartsWith("Inline value object", StringComparison.Ordinal))
+            .ShouldHaveSingleItem();
+
+    [Fact]
+    public void Inlining_a_single_use_value_object_inlines_its_members_and_removes_the_declaration()
+    {
+        var src =
+            "context C {\n" +
+            "  value Address {\n" +
+            "    street: String\n" +
+            "    city: String\n" +
+            "  }\n" +
+            "  value Customer {\n" +
+            "    addr: Address\n" +
+            "  }\n" +
+            "}\n";
+        // Line 6 (0-based) = "    addr: Address"; the "Address" reference begins at col 10.
+        var inline = InlineValueObjectAt(src, 6, 10, 6, 17);
+
+        var applied = Apply(src, inline);
+        var model = Parse(applied); // re-parses cleanly
+
+        var types = model.Contexts[0].Types;
+        // The single-use Address declaration is gone.
+        types.ShouldNotContain(t => t.Name == "Address");
+
+        // Customer now carries Address's members inlined in place of the `addr: Address` field.
+        var customer = types.Single(t => t.Name == "Customer").ShouldBeOfType<ValueObjectDecl>();
+        customer.Members.ShouldContain(m => m.Name == "street");
+        customer.Members.ShouldContain(m => m.Name == "city");
+        customer.Members.ShouldNotContain(m => m.Name == "addr");
+    }
+
+    [Fact]
+    public void No_inline_action_when_the_value_object_is_referenced_more_than_once()
+    {
+        var src =
+            "context C {\n" +
+            "  value Address {\n" +
+            "    street: String\n" +
+            "  }\n" +
+            "  value Customer {\n" +
+            "    home: Address\n" +
+            "    work: Address\n" +
+            "  }\n" +
+            "}\n";
+        // Line 5 (0-based) = "    home: Address"; the "Address" reference begins at col 10.
+        var actions = RefactorsAt(src, 5, 10, 5, 17);
+        actions.ShouldNotContain(a => a.Kind == "refactor" && a.Title.StartsWith("Inline value object", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void No_inline_action_when_the_value_object_carries_invariants()
+    {
+        var src =
+            "context C {\n" +
+            "  value Money {\n" +
+            "    amount: Decimal\n" +
+            "    invariant amount > 0\n" +
+            "  }\n" +
+            "  value Price {\n" +
+            "    value: Money\n" +
+            "  }\n" +
+            "}\n";
+        // Line 6 (0-based) = "    value: Money"; the "Money" reference begins at col 11.
+        var actions = RefactorsAt(src, 6, 11, 6, 16);
+        actions.ShouldNotContain(a => a.Kind == "refactor" && a.Title.StartsWith("Inline value object", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void No_inline_action_when_the_selection_is_on_a_primitive_typed_field()
+    {
+        var src = "context C {\n  value Address { street: String }\n}\n";
+        // Select "street" (a primitive-typed field, not a VO reference) on line 1 (cols 18..24).
+        var actions = RefactorsAt(src, 1, 18, 1, 24);
+        actions.ShouldNotContain(a => a.Kind == "refactor" && a.Title.StartsWith("Inline value object", StringComparison.Ordinal));
+    }
 }

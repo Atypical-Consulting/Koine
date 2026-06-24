@@ -52,6 +52,11 @@ internal sealed class RefactorService
             actions.Add(extractAggregate);
         }
 
+        if (service.TryInlineValueObject(startOffset, endOffset) is { } inline)
+        {
+            actions.Add(inline);
+        }
+
         return actions;
     }
 
@@ -399,6 +404,205 @@ internal sealed class RefactorService
             // A one-off, position-specific refactor: not part of a fix-all batch.
             EquivalenceKey: null,
             [replace]);
+    }
+
+    /// <summary>
+    /// Builds the "Inline value object" refactor — the inverse of <see cref="TryExtractValueObject"/> —
+    /// when the selection lands on a reference to a <b>single-use</b> value object (the VO type name in a
+    /// field declaration like <c>addr: Address</c>). The result is two edits in the active file:
+    /// (1) the referencing field is replaced by the VO's member fields inlined in place (re-indented to
+    /// the field's indentation), and (2) the now-dead <c>value Address { … }</c> declaration is removed
+    /// (its whole span including leading trivia). Returns <c>null</c> unless every inlinability guard
+    /// holds: the referenced type is a value object, it is referenced exactly once across the whole
+    /// model (deleting it would otherwise dangle the other refs), and — for v1's self-contained shape —
+    /// it carries no invariants and no members with initializers (those would be silently dropped).
+    /// </summary>
+    private CodeFix? TryInlineValueObject(int startOffset, int endOffset)
+    {
+        // Locate the member field whose type-name reference contains the selection, and the VO it names.
+        foreach (TypeDecl host in EnumerateTypes(_model))
+        {
+            if (MembersOf(host) is not { } members)
+            {
+                continue;
+            }
+
+            foreach (Member member in members)
+            {
+                if (!ReferenceContainsSelection(member, startOffset, endOffset))
+                {
+                    continue;
+                }
+
+                ValueObjectDecl? target = ResolveValueObject(member.Type.Name);
+                if (target is null)
+                {
+                    return null;
+                }
+
+                // Inlinability guards (the no-noise contract): single-use, self-contained.
+                if (target.Invariants.Count > 0 || target.Members.Any(m => m.Initializer is not null))
+                {
+                    return null;
+                }
+
+                if (CountTypeReferences(target.Name) != 1)
+                {
+                    return null;
+                }
+
+                return BuildInline(member, target);
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// True when the selection <c>[startOffset, endOffset)</c> lands on <paramref name="member"/>'s type
+    /// reference — i.e. on the VO type name in a field declaration. Uses the parser-populated
+    /// <see cref="TypeRef.Span"/> when present; otherwise locates the type name inside the member's span.
+    /// </summary>
+    private bool ReferenceContainsSelection(Member member, int startOffset, int endOffset)
+    {
+        SourceSpan refSpan = member.Type.Span;
+        if (refSpan.IsNone || refSpan.Length <= 0)
+        {
+            // No type-ref span (recovered parse): fall back to locating the name within the member span.
+            if (member.Span.IsNone || string.IsNullOrEmpty(member.Type.Name))
+            {
+                return false;
+            }
+
+            var idx = _source.IndexOf(member.Type.Name, member.Span.Offset, StringComparison.Ordinal);
+            if (idx < 0 || idx >= member.Span.Offset + member.Span.Length)
+            {
+                return false;
+            }
+
+            refSpan = new SourceSpan(0, 0, 0, 0, idx, member.Type.Name.Length);
+        }
+
+        var refStart = refSpan.Offset;
+        var refEnd = refSpan.Offset + refSpan.Length;
+
+        // Containment for a bare cursor (start == end); overlap for a range selection.
+        return startOffset == endOffset
+            ? startOffset >= refStart && startOffset <= refEnd
+            : startOffset < refEnd && endOffset > refStart;
+    }
+
+    /// <summary>The <see cref="ValueObjectDecl"/> named <paramref name="name"/>, or <c>null</c> when no
+    /// such value object exists (the reference is a primitive, an entity, or unresolved).</summary>
+    private ValueObjectDecl? ResolveValueObject(string name)
+    {
+        foreach (TypeDecl t in EnumerateTypes(_model))
+        {
+            if (t is ValueObjectDecl vo && string.Equals(vo.Name, name, StringComparison.Ordinal))
+            {
+                return vo;
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// How many member fields across the whole model reference the type named <paramref name="name"/> —
+    /// directly (<c>x: Name</c>) or as a generic argument (<c>List&lt;Name&gt;</c>, <c>Map&lt;_, Name&gt;</c>).
+    /// Used to gate inline on single use: deleting the declaration would dangle any further reference.
+    /// </summary>
+    private int CountTypeReferences(string name)
+    {
+        var count = 0;
+        foreach (TypeDecl t in EnumerateTypes(_model))
+        {
+            if (MembersOf(t) is not { } members)
+            {
+                continue;
+            }
+
+            foreach (Member m in members)
+            {
+                if (TypeRefMentions(m.Type, name))
+                {
+                    count++;
+                }
+            }
+        }
+
+        return count;
+    }
+
+    /// <summary>True when <paramref name="type"/> (or one of its generic arguments) names <paramref name="name"/>.</summary>
+    private static bool TypeRefMentions(TypeRef type, string name) =>
+        string.Equals(type.Name, name, StringComparison.Ordinal)
+        || (type.Element is not null && TypeRefMentions(type.Element, name))
+        || (type.Value is not null && TypeRefMentions(type.Value, name));
+
+    private CodeFix BuildInline(Member member, ValueObjectDecl target)
+    {
+        // (1) Replace the referencing field with the VO's members inlined, re-indented to the field's
+        // own indentation. The member body is the verbatim slice from the first member's leading
+        // comment/doc trivia through the end of the last member, so per-field docs travel along.
+        var fieldIndent = new string(' ', Math.Max(0, member.Span.Column - 1));
+        IReadOnlyList<Member> inlined = target.Members;
+        var bodyStart = LeadingContentStart(inlined[0]);
+        var bodyEnd = ExtendOverTrailingComment(inlined[^1].Span.Offset + inlined[^1].Span.Length);
+        var movedSlice = SliceRange(bodyStart, bodyEnd);
+        var replacement = Reindent(movedSlice, inlined[0].Span.Column - 1, fieldIndent).TrimStart();
+        var replace = new CodeFixEdit(member.Span, replacement);
+
+        // (2) Remove the now-dead value object declaration, including its leading-trivia/doc block, the
+        // declaration's own leading indentation, and the trailing newline — so no blank/indent-only line
+        // is orphaned in its place.
+        var declStart = BackUpOverLineIndent(LeadingTriviaStart(target));
+        var declEnd = ExtendOverTrailingNewline(target.Span.Offset + target.Span.Length);
+        SourceSpan removal = RangeSpan(declStart, declEnd);
+        var remove = new CodeFixEdit(removal, string.Empty);
+
+        return new CodeFix(
+            $"Inline value object '{target.Name}'",
+            "refactor",
+            // A one-off, position-specific refactor: not part of a fix-all batch.
+            EquivalenceKey: null,
+            [replace, remove]);
+    }
+
+    /// <summary>
+    /// Backs <paramref name="start"/> up over the inline whitespace (spaces/tabs) that precedes it on
+    /// its line, so a whole-line removal also drops the declaration's own leading indentation rather
+    /// than leaving an indent-only line behind. Stops at the line start (a newline) or buffer start.
+    /// </summary>
+    private int BackUpOverLineIndent(int start)
+    {
+        var i = start;
+        while (i > 0 && (_source[i - 1] == ' ' || _source[i - 1] == '\t'))
+        {
+            i--;
+        }
+
+        return i;
+    }
+
+    /// <summary>
+    /// Extends <paramref name="end"/> over a same-line trailing comment (if any) and the line's
+    /// terminator, so removing a whole declaration does not leave an orphaned blank line behind.
+    /// </summary>
+    private int ExtendOverTrailingNewline(int end)
+    {
+        var i = ExtendOverTrailingComment(end);
+        if (i < _source.Length && _source[i] == '\r')
+        {
+            i++;
+        }
+
+        if (i < _source.Length && _source[i] == '\n')
+        {
+            i++;
+        }
+
+        return i;
     }
 
     /// <summary>
