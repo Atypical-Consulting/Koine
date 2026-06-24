@@ -418,6 +418,7 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   // empty — an empty/scratch model).
   function setContextOptions(list: string[]): void {
     contexts = list;
+    appStore.getState().setContexts(list); // mirror into the store so the construct palette can react
     renderBreadcrumb();
     // Fall back to "All contexts" ONLY when we positively know the model's contexts (a non-empty list)
     // and the active scope isn't among them — a genuine rename/removal. An EMPTY list is a transient or

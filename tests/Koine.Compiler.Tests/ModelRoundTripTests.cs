@@ -175,6 +175,16 @@ public class ModelRoundTripTests
     }
 
     [Fact]
+    public void EmitKoine_change_field_type_emits_the_new_type()
+    {
+        var edit = new StructuredEdit(StructuredEditKind.ChangeFieldType, "Ordering.Money.amount", Type: "Int");
+        EmitResult result = ModelRoundTripService.EmitKoine(Files(Sample), edit);
+
+        result.Diagnostics.ShouldBeEmpty();
+        result.Koine!.ShouldContain("amount: Int");
+    }
+
+    [Fact]
     public void EmitKoine_illegal_type_change_returns_diagnostics_not_koine()
     {
         var edit = new StructuredEdit(StructuredEditKind.ChangeFieldType, "Ordering.Money.amount", Type: "Nope");
@@ -182,6 +192,114 @@ public class ModelRoundTripTests
 
         result.Koine.ShouldBeNull();
         result.Diagnostics.ShouldContain(d => d.Code == DiagnosticCodes.UnknownType);
+    }
+
+    // ---- Changing an entity's identity via its synthetic `id` row (the Properties panel) -------------
+
+    [Fact]
+    public void EmitKoine_change_entity_id_to_a_primitive_adds_a_natural_strategy()
+    {
+        const string src = "context C {\n  entity Product identified by ProductId { sku: String }\n}\n";
+        var edit = new StructuredEdit(StructuredEditKind.ChangeFieldType, "C.Product.id", Type: "Int");
+        EmitResult result = ModelRoundTripService.EmitKoine(Files(src), edit);
+
+        result.Diagnostics.ShouldBeEmpty();
+        result.Koine!.ShouldContain("identified by ProductId as natural(Int)");
+    }
+
+    [Fact]
+    public void EmitKoine_change_entity_id_replaces_an_existing_strategy()
+    {
+        const string src = "context C {\n  entity Product identified by ProductId as natural(Int) { sku: String }\n}\n";
+        var edit = new StructuredEdit(StructuredEditKind.ChangeFieldType, "C.Product.id", Type: "String");
+        EmitResult result = ModelRoundTripService.EmitKoine(Files(src), edit);
+
+        result.Diagnostics.ShouldBeEmpty();
+        result.Koine!.ShouldContain("identified by ProductId as natural(String)");
+        result.Koine!.ShouldNotContain("natural(Int)");
+    }
+
+    [Fact]
+    public void EmitKoine_change_entity_id_to_a_non_primitive_renames_the_id_type()
+    {
+        const string src = "context C {\n  entity Product identified by ProductId { sku: String }\n}\n";
+        var edit = new StructuredEdit(StructuredEditKind.ChangeFieldType, "C.Product.id", Type: "CatalogId");
+        EmitResult result = ModelRoundTripService.EmitKoine(Files(src), edit);
+
+        result.Diagnostics.ShouldBeEmpty();
+        result.Koine!.ShouldContain("identified by CatalogId");
+        result.Koine!.ShouldNotContain("as natural");
+    }
+
+    [Fact]
+    public void EmitKoine_change_entity_id_to_an_unsupported_primitive_is_rejected_with_a_diagnostic()
+    {
+        const string src = "context C {\n  entity Product identified by ProductId { sku: String }\n}\n";
+        var edit = new StructuredEdit(StructuredEditKind.ChangeFieldType, "C.Product.id", Type: "Decimal");
+        EmitResult result = ModelRoundTripService.EmitKoine(Files(src), edit);
+
+        result.Koine.ShouldBeNull();
+        result.Diagnostics.ShouldContain(d => d.Code == DiagnosticCodes.NaturalIdBackingType);
+    }
+
+    [Fact]
+    public void EmitKoine_change_aggregate_root_id_targets_the_root_entitys_identity()
+    {
+        // The diagram addresses an aggregate root by the aggregate qname; the id row resolves to the root.
+        var edit = new StructuredEdit(StructuredEditKind.ChangeFieldType, "Ordering.Order.id", Type: "Int");
+        EmitResult result = ModelRoundTripService.EmitKoine(Files(Sample), edit);
+
+        result.Diagnostics.ShouldBeEmpty();
+        result.Koine!.ShouldContain("identified by OrderId as natural(Int)");
+    }
+
+    [Fact]
+    public void EmitKoine_change_entity_id_in_the_studio_default_billing_model()
+    {
+        // Reproduces the exact Studio default workspace after "Add Entity" appends NewEntity, then the
+        // Properties panel changes the id type to Int (the user-reported "Edit rejected" scenario).
+        const string src = """
+            context Billing {
+              value Money {
+                amount: Decimal
+                currency: Currency
+                invariant amount >= 0        "a monetary amount cannot be negative"
+              }
+              enum Currency { EUR, USD, GBP }
+              value Email {
+                raw: String
+                invariant raw matches /^[^@]+@[^@]+$/   "invalid email address"
+              }
+              entity Customer identified by CustomerId {
+                name: String
+                email: Email
+              }
+              aggregate Order root Order {
+                enum OrderStatus { Draft, Placed, Shipped, Cancelled }
+                value OrderLine {
+                  product:   ProductId
+                  quantity:  Int
+                  unitPrice: Money
+                  subtotal:  Money = unitPrice * quantity
+                }
+                entity Order identified by OrderId {
+                  customer: CustomerId
+                  lines:    List<OrderLine>
+                  status:   OrderStatus = Draft
+                  invariant status == Draft when lines.isEmpty
+                }
+              }
+
+              entity NewEntity identified by NewEntityId {
+                name: String
+              }
+            }
+            """;
+        var edit = new StructuredEdit(StructuredEditKind.ChangeFieldType, "Billing.NewEntity.id", Type: "Int");
+        EmitResult result = ModelRoundTripService.EmitKoine(Files(src), edit);
+
+        result.Diagnostics.ShouldBeEmpty();
+        result.Koine!.ShouldContain("identified by NewEntityId as natural(Int)");
     }
 
     [Fact]
