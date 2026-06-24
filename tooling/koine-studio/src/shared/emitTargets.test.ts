@@ -7,7 +7,7 @@ import {
   setEmitTargets,
   type EmitTarget,
 } from '@/shared/emitTargets';
-import { COMPILE_TARGETS } from '@/ai/assistantTools';
+import { compileTargets } from '@/ai/assistantTools';
 import { wizardTargets } from '@/export/generateProjectWizard';
 import { langExt } from '@/editor/editor';
 
@@ -30,8 +30,8 @@ describe('EMIT_TARGETS', () => {
 
   const ids = BUILTIN_EMIT_TARGETS.map((t) => t.id);
 
-  test('the assistant COMPILE_TARGETS enum derives from EMIT_TARGETS (same ids, same order)', () => {
-    expect([...COMPILE_TARGETS]).toEqual(ids);
+  test('the assistant compile-target enum derives from EMIT_TARGETS (same ids, same order)', () => {
+    expect(compileTargets()).toEqual(ids);
   });
 
   test('the generate-project wizard targets derive from EMIT_TARGETS (same ids, same order)', () => {

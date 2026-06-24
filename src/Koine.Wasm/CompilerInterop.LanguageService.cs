@@ -5,13 +5,8 @@ using System.Text.Json.Serialization;
 using Koine.Compiler.Ast;
 using Koine.Compiler.Diagnostics;
 using Koine.Compiler.Emit;
-using Koine.Compiler.Emit.CSharp;
 using Koine.Compiler.Emit.Docs;
 using Koine.Compiler.Emit.Glossary;
-using Koine.Compiler.Emit.Php;
-using Koine.Compiler.Emit.Python;
-using Koine.Compiler.Emit.Rust;
-using Koine.Compiler.Emit.TypeScript;
 using Koine.Compiler.Formatting;
 using Koine.Compiler.Services;
 
@@ -95,26 +90,23 @@ public static partial class CompilerInterop
         target = string.IsNullOrWhiteSpace(target) ? "csharp" : target;
         try
         {
-            if (!string.Equals(target, "csharp", StringComparison.OrdinalIgnoreCase)
-                && !string.Equals(target, "typescript", StringComparison.OrdinalIgnoreCase)
-                && !string.Equals(target, "python", StringComparison.OrdinalIgnoreCase)
-                && !string.Equals(target, "php", StringComparison.OrdinalIgnoreCase)
-                && !string.Equals(target, "rust", StringComparison.OrdinalIgnoreCase))
+            // Gate AND create through the registry's code-emit targets (issue #282) — the SAME list
+            // ListEmitTargets / koine/emitTargets serves, so a target the picker offers previews here
+            // too, and a new registry target emits its own code instead of silently falling back to C#.
+            // SupportedTargetInfos excludes glossary/docs (they have dedicated exports). No koine.config
+            // options in the browser, so EmitterOptions.Empty → byte-identical to a parameterless emitter.
+            var registry = new EmitterRegistry();
+            if (!registry.SupportedTargetInfos.Any(i => string.Equals(i.Id, target, StringComparison.OrdinalIgnoreCase))
+                || !registry.TryCreate(target, EmitterOptions.Empty, out var emitter))
             {
+                var expected = string.Join(", ", registry.SupportedTargetInfos.Select(i => $"'{i.Id}'"));
                 return SerializeEmit(new WEmitPreviewResult(
-                    target, [], [], $"unknown target '{target}'; expected 'csharp', 'typescript', 'python', 'php', or 'rust'"));
+                    target, [], [], $"unknown target '{target}'; expected one of {expected}"));
             }
 
             var files = DeserializeFiles(filesJson);
             var byUri = files.ToDictionary(f => f.Uri, f => f.Text, StringComparer.Ordinal);
             var sources = files.Select(f => new SourceFile(f.Uri, f.Text)).ToList();
-
-            IEmitter emitter =
-                string.Equals(target, "typescript", StringComparison.OrdinalIgnoreCase) ? new TypeScriptEmitter()
-                : string.Equals(target, "python", StringComparison.OrdinalIgnoreCase) ? new PythonEmitter()
-                : string.Equals(target, "php", StringComparison.OrdinalIgnoreCase) ? new PhpEmitter()
-                : string.Equals(target, "rust", StringComparison.OrdinalIgnoreCase) ? new RustEmitter()
-                : new CSharpEmitter();
 
             var result = Compiler.Compile(sources, emitter);
             var emittedFiles = result.Files

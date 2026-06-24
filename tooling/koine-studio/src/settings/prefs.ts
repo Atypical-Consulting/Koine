@@ -240,44 +240,51 @@ export function createPreferences(cb: PrefsCallbacks): PrefsHandle {
 
   // The output-language picker: a card per target (identity dot + name + the file extension it
    // emits), laid out as a single-selection radio group.
-  function langPicker(onSelect: (value: PreviewTarget) => void): { el: HTMLElement; set(value: PreviewTarget): void } {
+  function langPicker(
+    onSelect: (value: PreviewTarget) => void,
+  ): { el: HTMLElement; set(value: PreviewTarget): void; refresh(): void } {
     const group = document.createElement('div');
     group.className = 'koi-lang-picker';
     group.setAttribute('role', 'radiogroup');
     group.setAttribute('aria-label', 'Output language');
-    // A card per target (identity dot + display name + emitted extension), built from the LIVE
-    // EMIT_TARGETS (seeded from the backend at boot, issue #282) so a registry target appears here
-    // with no edit. Read at render time, not snapshotted, so the boot fetch is reflected.
-    const buttons = EMIT_TARGETS.map((t) => {
-      const id = t.id;
-      const b = document.createElement('button');
-      b.type = 'button';
-      b.className = 'koi-lang-opt';
-      b.setAttribute('role', 'radio');
-      b.setAttribute('aria-checked', 'false');
-      b.dataset.value = id;
-      const dot = document.createElement('span');
-      dot.className = 'lang-dot';
-      dot.dataset.lang = id;
-      dot.setAttribute('aria-hidden', 'true');
-      const label = document.createElement('span');
-      label.className = 'koi-lang-name';
-      label.textContent = t.displayName;
-      const ext = document.createElement('span');
-      ext.className = 'koi-lang-ext';
-      ext.textContent = t.fileExtension;
-      b.append(dot, label, ext);
-      b.addEventListener('click', () => {
-        set(id);
-        onSelect(id);
-      });
-      group.appendChild(b);
-      return b;
-    });
+    // A card per target (identity dot + display name + emitted extension). The picker DOM is built
+    // once at construction (during init(), before the backend seed resolves), so `refresh()` REBUILDS
+    // the cards from the LIVE EMIT_TARGETS — called from the settings-panel open path (issue #282) so
+    // a backend-seeded target appears here without a front-end edit, even though construction predates
+    // the seed. `set` only toggles the selection, so it must read the current buttons each call.
+    function refresh(): void {
+      group.replaceChildren();
+      for (const t of EMIT_TARGETS) {
+        const id = t.id;
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'koi-lang-opt';
+        b.setAttribute('role', 'radio');
+        b.setAttribute('aria-checked', 'false');
+        b.dataset.value = id;
+        const dot = document.createElement('span');
+        dot.className = 'lang-dot';
+        dot.dataset.lang = id;
+        dot.setAttribute('aria-hidden', 'true');
+        const label = document.createElement('span');
+        label.className = 'koi-lang-name';
+        label.textContent = t.displayName;
+        const ext = document.createElement('span');
+        ext.className = 'koi-lang-ext';
+        ext.textContent = t.fileExtension;
+        b.append(dot, label, ext);
+        b.addEventListener('click', () => {
+          set(id);
+          onSelect(id);
+        });
+        group.appendChild(b);
+      }
+    }
     const set = (value: PreviewTarget) => {
-      for (const b of buttons) b.setAttribute('aria-checked', String(b.dataset.value === value));
+      for (const b of group.children) b.setAttribute('aria-checked', String((b as HTMLElement).dataset.value === value));
     };
-    return { el: group, set };
+    refresh();
+    return { el: group, set, refresh };
   }
 
   // A clamped numeric setting input. On commit it parses, restores the prior value for empty/blank
@@ -921,6 +928,10 @@ export function createPreferences(cb: PrefsCallbacks): PrefsHandle {
     minimap.set(s.enableMinimap);
     specimenCode.classList.toggle('is-wrapped', s.wordWrap);
     refreshSpecimen();
+    // Rebuild the language cards from the live EMIT_TARGETS first: the picker was constructed during
+    // init() (before the backend seed), so a backend-seeded target only appears once this re-renders
+    // on open (issue #282). Then re-apply the current selection.
+    outputLang.refresh();
     outputLang.set(s.previewTarget);
     aiProviderSelect.value = s.aiProvider;
     aiBaseUrlInput.value = s.aiBaseUrl;

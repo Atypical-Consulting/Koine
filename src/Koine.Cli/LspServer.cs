@@ -1273,20 +1273,19 @@ internal sealed class LspServer
             target = requested;
         }
 
-        // 2. Gate to the code-emitter preview targets BEFORE the registry (which also accepts
-        //    glossary/docs — those have dedicated koine/glossary requests).
-        if (!string.Equals(target, "csharp", StringComparison.OrdinalIgnoreCase)
-            && !string.Equals(target, "typescript", StringComparison.OrdinalIgnoreCase)
-            && !string.Equals(target, "python", StringComparison.OrdinalIgnoreCase)
-            && !string.Equals(target, "php", StringComparison.OrdinalIgnoreCase)
-            && !string.Equals(target, "rust", StringComparison.OrdinalIgnoreCase))
+        // 2. Gate to the registry's code-emit targets (issue #282) — the SAME list koine/emitTargets
+        //    serves, so a target the picker offers is previewable here too (no offered-then-rejected
+        //    drift). SupportedTargetInfos excludes glossary/docs (they have dedicated requests).
+        var emitTargets = Infrastructure.EmitterRegistry.SupportedTargetInfos;
+        if (!emitTargets.Any(i => string.Equals(i.Id, target, StringComparison.OrdinalIgnoreCase)))
         {
+            var expected = string.Join(", ", emitTargets.Select(i => $"'{i.Id}'"));
             return new Dictionary<string, object?>
             {
                 ["target"] = target,
                 ["files"] = Array.Empty<object>(),
                 ["diagnostics"] = Array.Empty<object>(),
-                ["error"] = $"unknown target '{target}'; expected 'csharp', 'typescript', 'python', 'php', or 'rust'",
+                ["error"] = $"unknown target '{target}'; expected one of {expected}",
             };
         }
 
