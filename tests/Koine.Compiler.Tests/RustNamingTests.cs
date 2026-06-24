@@ -91,4 +91,47 @@ public class RustNamingTests
         // accessor, so `events` must be skipped even though the bare field name is itself free.
         RustNaming.SyntheticEventsField(["id", "drain_events"]).ShouldBe("domain_events");
     }
+
+    // Smart-enum match-arm binding de-duplication (issue #315).
+
+    [Fact]
+    public void UniqueBindings_leaves_non_colliding_members_unchanged()
+    {
+        RustNaming.UniqueBindings(["Draft", "Submitted", "Paid"])
+            .ShouldBe(["draft", "submitted", "paid"]);
+    }
+
+    [Fact]
+    public void UniqueBindings_suffixes_members_that_snake_case_collapse()
+    {
+        // `userID` and `userId` both snake_case to `user_id`; the second is disambiguated (#315).
+        RustNaming.UniqueBindings(["userID", "userId", "System"])
+            .ShouldBe(["user_id", "user_id_2", "system"]);
+    }
+
+    [Fact]
+    public void UniqueBindings_suffixes_three_plus_collapsing_members_in_order()
+    {
+        RustNaming.UniqueBindings(["userID", "userId", "UserId"])
+            .ShouldBe(["user_id", "user_id_2", "user_id_3"]);
+    }
+
+    [Fact]
+    public void UniqueBindings_keeps_incrementing_past_a_natural_collision_with_a_suffix()
+    {
+        // A member literally named `userId2` snake_cases to `user_id2`, which does not collide; but a
+        // member named `user_id_2` would naturally take the name the disambiguator wants, so the loop
+        // must keep incrementing until genuinely unique.
+        RustNaming.UniqueBindings(["userID", "userId", "user_id_2"])
+            .ShouldBe(["user_id", "user_id_2", "user_id_2_2"]);
+    }
+
+    [Fact]
+    public void UniqueBindings_stays_keyword_safe_after_suffixing()
+    {
+        // `match` and `Match` both snake_case to the keyword `match`: the first escapes to `r#match`,
+        // the disambiguated second (`match_2`) is no longer a keyword and needs no raw-identifier escape.
+        RustNaming.UniqueBindings(["match", "Match"])
+            .ShouldBe(["r#match", "match_2"]);
+    }
 }
