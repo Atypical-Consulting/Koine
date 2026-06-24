@@ -11,6 +11,8 @@ import {
   highlightActiveLine,
   highlightActiveLineGutter,
   drawSelection,
+  rectangularSelection,
+  crosshairCursor,
   hoverTooltip,
   type Tooltip,
 } from '@codemirror/view';
@@ -604,6 +606,16 @@ export function createKoineEditor(opts: KoineEditorOptions): KoineEditor {
         // readers (and Lighthouse's aria-input-field-name audit) announce it as the model editor.
         EditorView.contentAttributes.of({ 'aria-label': 'Koine model source editor' }),
         lineWrap.of(opts.lineWrap ? EditorView.lineWrapping : []),
+        // Multi-cursor (VS Code parity). allowMultipleSelections is the enabling switch: without it
+        // CodeMirror reduces every multi-range selection to its main range (.asSingle()), so the
+        // add-cursor commands silently collapse to one caret. The familiar bindings are ALREADY wired
+        // by the keymaps loaded below — Mod-D → selectNextOccurrence (searchKeymap), Mod-Alt-↑/↓ →
+        // addCursorAbove/Below and Escape → simplifySelection (defaultKeymap) — so enabling the facet
+        // is what makes them functional. rectangularSelection + crosshairCursor add Alt-drag column
+        // selection; drawSelection() (below) renders the extra carets.
+        EditorState.allowMultipleSelections.of(true),
+        rectangularSelection(),
+        crosshairCursor(),
         lineNumbers(),
         highlightActiveLineGutter(),
         highlightActiveLine(),
