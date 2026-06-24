@@ -163,6 +163,42 @@ internal static class RustNaming
     public static string Field(string name) => EscapeMember(ToSnakeCase(name));
 
     /// <summary>
+    /// Chooses the name of the Rust emitter's synthetic domain-event collector field, guaranteed not to
+    /// collide with any of <paramref name="usedNames"/> (the entity's user field/accessor/command/factory
+    /// names). Prefers the idiomatic <c>events</c>; when a user member occupies it, falls back to
+    /// <c>domain_events</c>, then numbered suffixes. The drain accessor (<c>drain_&lt;name&gt;</c>) is kept
+    /// collision-free too, so both the field and its accessors stay unique. Routing every synthetic-field
+    /// reference through this keeps the C#-safe model (<c>events</c> never collides with C#'s
+    /// <c>_domainEvents</c>) compiling for Rust as well, without leaking the concern out of the emitter.
+    /// </summary>
+    public static string SyntheticEventsField(IEnumerable<string> usedNames)
+    {
+        var used = new HashSet<string>(usedNames, StringComparer.Ordinal);
+        if (IsFree("events", used))
+        {
+            return "events";
+        }
+
+        if (IsFree("domain_events", used))
+        {
+            return "domain_events";
+        }
+
+        for (var i = 2; ; i++)
+        {
+            var candidate = "domain_events_" + i;
+            if (IsFree(candidate, used))
+            {
+                return candidate;
+            }
+        }
+    }
+
+    /// <summary>A synthetic field name is free when neither it nor its <c>drain_</c> accessor collides.</summary>
+    private static bool IsFree(string name, HashSet<string> used) =>
+        !used.Contains(name) && !used.Contains("drain_" + name);
+
+    /// <summary>
     /// Maps an enum's members (in declaration order) to DISTINCT Rust binding names for the
     /// smart-enum <c>match_</c>/<c>switch</c> closure parameters. Each binding is the member's
     /// <see cref="Field"/> form; when two members collapse to the same snake_case identifier —

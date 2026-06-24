@@ -64,6 +64,36 @@ public class RustNamingTests
         RustNaming.Field("Type").ShouldBe("r#type");
     }
 
+    // The synthetic domain-event collector field name resolution (issue #314).
+
+    [Fact]
+    public void SyntheticEventsField_prefers_events_when_free()
+    {
+        RustNaming.SyntheticEventsField(["id", "amount", "status"]).ShouldBe("events");
+    }
+
+    [Fact]
+    public void SyntheticEventsField_falls_back_to_domain_events_when_events_is_taken()
+    {
+        RustNaming.SyntheticEventsField(["id", "events"]).ShouldBe("domain_events");
+    }
+
+    [Fact]
+    public void SyntheticEventsField_numbers_the_suffix_when_both_events_and_domain_events_are_taken()
+    {
+        RustNaming.SyntheticEventsField(["id", "events", "domain_events"]).ShouldBe("domain_events_2");
+    }
+
+    [Fact]
+    public void SyntheticEventsField_keeps_the_drain_accessor_collision_free()
+    {
+        // A user member `drain_events` would collide with the `events` collector's `drain_events()`
+        // accessor, so `events` must be skipped even though the bare field name is itself free.
+        RustNaming.SyntheticEventsField(["id", "drain_events"]).ShouldBe("domain_events");
+    }
+
+    // Smart-enum match-arm binding de-duplication (issue #315).
+
     [Fact]
     public void UniqueBindings_leaves_non_colliding_members_unchanged()
     {
