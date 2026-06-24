@@ -464,6 +464,40 @@ From that one map, the compiler emits `Catalog__Ordering/Kernel/Currency.cs` (th
 kernel), `Payments/ILegacyToPaymentsTranslator.cs` (the ACL translator), and an
 `IHandleOrderPlaced.cs` handler seam in both `Shipping` and `Payments`.
 
+## 17.9 Emitting AsyncAPI 3.0
+
+The same integration-event + context-map graph also drives a non-C# target: `--target asyncapi`
+emits a **single AsyncAPI 3.0 document** (`asyncapi.yaml`) describing the domain's cross-boundary
+event API. It reads only the target-agnostic model, so it works on any model that declares
+integration events.
+
+```bash
+koine build ./Models --target asyncapi --out ./events
+```
+
+The mapping is mechanical and deterministic (channels, operations, and schemas are emitted in a
+stable order, so re-running is byte-identical):
+
+| Koine construct                              | AsyncAPI 3.0 output |
+| -------------------------------------------- | ------------------- |
+| Each `integration event`                     | a `channels/<Event>` entry (addressed by the event name) and a `components/messages/<Event>` |
+| Event doc comment (`///`)                    | the message `summary` |
+| Event fields                                 | a `components/schemas/<Event>Payload` JSON-Schema; non-optional fields are `required` |
+| Primitive field (`String`/`Int`/`Bool`/`Decimal`/`Instant`) | `type: string`/`integer`/`boolean`/`string`/`string` + `format: date-time` (`Decimal` stays a string to preserve precision) |
+| `enum` field                                 | an inline `type: string` with the `enum:` member list |
+| ID value object (`*Id`) field               | a shared `components/schemas/<Name>` (`type: string`), referenced by `$ref` |
+| A context that `publishes` the event         | an `operations/<Context>_send_<Event>` with `action: send` |
+| A context whose `subscribes` the map authorizes | an `operations/<Context>_receive_<Event>` with `action: receive` |
+| The bounded context owning an operation      | a `tags` entry on that operation |
+
+A model with no integration events still emits a minimal valid document (the `info` block with
+empty `channels`/`operations`). The emitter is target-agnostic — nothing AsyncAPI-specific lives in
+the semantic model — so it sits alongside the C#, TypeScript, Python, PHP, Rust, and docs back-ends.
+
+> An optional conformance check runs the [AsyncAPI CLI](https://www.asyncapi.com/tools/cli) over the
+> emitted document when `KOINE_ASYNCAPI_VALIDATE` is set; it is skipped (INCONCLUSIVE) otherwise, so
+> the build stays hermetic.
+
 ## See also
 
 - [Commands, events & state (§11)](/Koine/reference/commands-events-state/) — domain events, the in-context counterpart to integration events.

@@ -1029,4 +1029,52 @@ public static class TestSupport
             return false;
         }
     }
+
+    /// <summary>Result of validating an AsyncAPI document with the external CLI.</summary>
+    public readonly record struct AsyncApiCheck(bool ToolchainAvailable, bool Ok, IReadOnlyList<string> Errors);
+
+    /// <summary>
+    /// Validates <paramref name="yaml"/> with the AsyncAPI CLI (<c>asyncapi validate</c>), resolved
+    /// from a <c>KOINE_ASYNCAPI_CLI</c> override or an <c>asyncapi</c> on PATH. The document is written
+    /// to a temp file the CLI reads. Returns <c>ToolchainAvailable: false</c> when no CLI is found, so
+    /// the caller can mark the conformance INCONCLUSIVE rather than fail.
+    /// </summary>
+    public static AsyncApiCheck ValidateAsyncApi(string yaml)
+    {
+        string? cli = Environment.GetEnvironmentVariable("KOINE_ASYNCAPI_CLI") is { Length: > 0 } overrideCli
+            ? overrideCli
+            : OnPath("asyncapi");
+        if (cli is null || !CanRun(cli, ["--version"]))
+        {
+            return new AsyncApiCheck(ToolchainAvailable: false, Ok: false, Array.Empty<string>());
+        }
+
+        string root = Path.Combine(Path.GetTempPath(), "koine-asyncapi-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            string file = Path.Combine(root, "asyncapi.yaml");
+            File.WriteAllText(file, yaml);
+
+            ProcessRun? run = RunProcess(cli, ["validate", file], workingDirectory: root);
+            if (run is not { } result)
+            {
+                return new AsyncApiCheck(ToolchainAvailable: false, Ok: false, Array.Empty<string>());
+            }
+
+            if (result.ExitCode == 0)
+            {
+                return new AsyncApiCheck(ToolchainAvailable: true, Ok: true, Array.Empty<string>());
+            }
+
+            var errors = (result.StdErr + "\n" + result.StdOut)
+                .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .ToList();
+            return new AsyncApiCheck(ToolchainAvailable: true, Ok: false, errors);
+        }
+        finally
+        {
+            try { Directory.Delete(root, recursive: true); } catch { /* best-effort cleanup */ }
+        }
+    }
 }
