@@ -14,7 +14,7 @@ namespace Koine.Compiler.Tests;
 public class EmitterRegistryTests
 {
     private static readonly string[] UnifiedTargets =
-        { "csharp", "typescript", "python", "php", "rust", "glossary", "docs" };
+        { "csharp", "typescript", "python", "php", "rust", "glossary", "docs", "openapi" };
 
     [Fact]
     public void Unified_registry_exposes_the_full_target_list_in_display_order()

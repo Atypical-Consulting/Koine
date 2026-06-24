@@ -1,6 +1,7 @@
 using Koine.Compiler.Emit.CSharp;
 using Koine.Compiler.Emit.Docs;
 using Koine.Compiler.Emit.Glossary;
+using Koine.Compiler.Emit.OpenApi;
 using Koine.Compiler.Emit.Php;
 using Koine.Compiler.Emit.Python;
 using Koine.Compiler.Emit.Rust;
@@ -26,6 +27,7 @@ internal static class BuiltInEmitterProviders
         new RustEmitterProvider(),
         new GlossaryEmitterProvider(),
         new DocsEmitterProvider(),
+        new OpenApiEmitterProvider(),
     };
 }
 
@@ -229,4 +231,12 @@ internal sealed class DocsEmitterProvider : IEmitterProvider
     public string Target => "docs";
 
     public IEmitter Create(EmitterOptions options) => new DocsEmitter();
+}
+
+/// <summary>Provider for the OpenAPI 3.1 spec emitter (issue #126; no per-emit options).</summary>
+internal sealed class OpenApiEmitterProvider : IEmitterProvider
+{
+    public string Target => "openapi";
+
+    public IEmitter Create(EmitterOptions options) => new OpenApiEmitter();
 }
