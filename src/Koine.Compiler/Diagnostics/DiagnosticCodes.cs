@@ -142,6 +142,7 @@ public static class DiagnosticCodes
     public const string SpecCycle = "KOI1003";
     public const string SpecNotBoolean = "KOI1004";
     public const string DuplicateSpec = "KOI1005";
+    public const string SpecCallTargetMismatch = "KOI1006";
 
     // ---- Domain services (KOI1020–1029) -----------------------------------
     public const string ServiceReturnMismatch = "KOI1020";
@@ -320,6 +321,7 @@ public static class DiagnosticCodes
             [SpecCycle] = D(SpecCycle, "Specs form a reference cycle (or a spec references itself).", DiagnosticCategory.Specs, DiagnosticSeverity.Error),
             [SpecNotBoolean] = D(SpecNotBoolean, "A spec's condition is not a boolean expression.", DiagnosticCategory.Specs, DiagnosticSeverity.Error),
             [DuplicateSpec] = D(DuplicateSpec, "A spec name duplicates another spec or a member of its target type.", DiagnosticCategory.Specs, DiagnosticSeverity.Error),
+            [SpecCallTargetMismatch] = D(SpecCallTargetMismatch, "A spec is invoked as a call on a receiver whose type is not the spec's declared target.", DiagnosticCategory.Specs, DiagnosticSeverity.Error),
 
             // ---- Domain services ---------------------------------------------
             [ServiceReturnMismatch] = D(ServiceReturnMismatch, "An operation's body type is not assignable to its declared return type.", DiagnosticCategory.Services, DiagnosticSeverity.Error),
