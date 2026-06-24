@@ -9,12 +9,13 @@ namespace Koine.Compiler.Tests.Conformance;
 
 /// <summary>
 /// Regression guard for issue #317: a <c>create</c> factory mints the new aggregate's identity with
-/// <c>&lt;Id&gt;.New()</c> (C#) / <c>&lt;Id&gt;::generate()</c> (Rust), but that generator is only emitted for a
-/// Guid-backed id. The fix rejects a factory on a non-generatable (<c>natural</c>/<c>sequence</c>) key at
-/// the semantic layer, so the bad shape never reaches an emitter. This suite proves the invariant two
-/// ways: (1) across the real template corpus and a Guid-factory model, every emitted <c>generate()</c> /
-/// <c>New()</c> *call* has a matching *definition* — no dangling reference survives; and (2) the issue's
-/// exact repro model is rejected before emission with <c>KOI0808</c>.
+/// <c>&lt;Id&gt;.New()</c> (C#) / <c>&lt;Id&gt;::generate()</c> (Rust), but only a Guid-backed id has a meaningful
+/// generator — C# emits <c>New()</c> for Guid only, and Rust emits a UUID <c>generate()</c> only for a
+/// String-backed id. The fix rejects a factory on any non-Guid key at the semantic layer, so the bad
+/// shape never reaches an emitter. This suite proves the invariant two ways: (1) across the real template
+/// corpus and a Guid-factory model, every emitted <c>generate()</c> / <c>New()</c> *call* has a matching
+/// *definition* — no dangling reference survives; and (2) the issue's exact repro model is rejected
+/// before emission with <c>KOI0808</c>.
 /// </summary>
 public class FactoryGeneratorConformanceTests
 {

@@ -17,9 +17,9 @@ A factory is declared **inside an `entity` block** — after the entity's member
 and `command` declarations. It belongs to the entity, not to `aggregate`: a factory is an entity member,
 never a direct child of `aggregate`. The host entity needs a **generatable identity** — a Guid-backed id
 (the default) — because the factory mints that identity for you with `IdType.New()` (C#) /
-`IdType::generate()` (Rust). A `natural(String)`, `natural(Int)`, or `sequence` key has no client-side
-generator, so a `create` factory on such an entity is rejected at compile time (see
-[§12.3.5](#1235-diagnostics-and-restrictions)).
+`IdType::generate()` (Rust). A `natural(String)`, `natural(Int)`, or `sequence` key has no *meaningful*
+client-side generator (a natural key is caller-supplied; a sequence key is store-assigned), so a `create`
+factory on such an entity is rejected at compile time (see [§12.3.5](#1235-diagnostics-and-restrictions)).
 
 Most factories sit on an aggregate **root** (as below), but a standalone, context-level entity may host
 one too. The one wrinkle is `emit`: a creation event can only be raised from a standalone entity or an
@@ -159,8 +159,8 @@ exists, you can be sure every `Order` in the system was born through a path that
 - **`id` is reserved.** A factory parameter named `id` is rejected — it collides with the synthetic
   `var id = OrderId.New();`. Never name a create-param `id`.
 - **The identity must be generatable (Guid).** A factory auto-generates the new aggregate's identity,
-  but that generator (`IdType.New()` / `IdType::generate()`) is only emitted for the default Guid-backed
-  id. A `create` factory on an entity whose identity is `as natural(String)`, `as natural(Int)`, or
+  but only the default Guid-backed id has a meaningful generator (`IdType.New()` / `IdType::generate()`).
+  A `create` factory on an entity whose identity is `as natural(String)`, `as natural(Int)`, or
   `as sequence` is a hard error (`KOI0808`) — these keys are supplied by the caller or assigned by the
   store, not minted client-side. Either give the entity a Guid identity or drop the factory and construct
   with an explicit id. (Explicit-id factories for natural/sequence keys are a planned future enhancement.)

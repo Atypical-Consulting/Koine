@@ -297,7 +297,7 @@ leak into the target-agnostic model.
 | Construct | Emits |
 |-----------|-------|
 | `value X { … }` | `sealed record` with get-only properties, a validating constructor, value equality |
-| `entity X identified by XId { … }` | `sealed class` with **identity-only** equality + a generated `XId` value object (Guid by default; `as natural(String\|Int)` or `as sequence` selects the strategy). A `create` factory needs the **Guid** strategy — it mints the id (`XId.New()` / `XId::generate()`), which only the Guid backing provides; a factory on a `natural`/`sequence` id is rejected (`KOI0808`). |
+| `entity X identified by XId { … }` | `sealed class` with **identity-only** equality + a generated `XId` value object (Guid by default; `as natural(String\|Int)` or `as sequence` selects the strategy). A `create` factory needs the **Guid** strategy — it mints the id (`XId.New()` / `XId::generate()`), which only a Guid identity provides meaningfully; a factory on a `natural`/`sequence` id is rejected (`KOI0808`). |
 | `aggregate A root R { … }` | nested types in the `<Context>` namespace; the root `R` implements `IAggregateRoot`, and an `I<R>Repository` contract is emitted for it |
 | `aggregate A root R versioned { … }` | the root additionally gains a get-only `Version` token; `ConcurrencyConflictException` is emitted into `Koine.Runtime` |
 | `repository { operations: … ; find name(p): List<R>\|R }` | tunes the root's repository — its mutating method set plus intention-revealing async finders |

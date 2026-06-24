@@ -5,10 +5,11 @@ namespace Koine.Compiler.Tests;
 
 /// <summary>
 /// Epic R8 — a <c>create</c> factory auto-generates the aggregate's identity, so it requires a
-/// client-side generatable (Guid) identity. On a <c>natural</c>/<c>sequence</c> key the factory
-/// would emit a call to a generator that is never produced (<c>&lt;Id&gt;::generate()</c> in Rust,
-/// <c>&lt;Id&gt;.New()</c> in C#), yielding a crate/assembly that does not compile. A target-agnostic
-/// validator rejects that shape before any emitter runs (issue #317).
+/// generatable (Guid) identity. On a non-Guid key the C# emitter dangles an undefined <c>&lt;Id&gt;.New()</c>
+/// (the assembly won't compile), and the Rust emitter either dangles <c>&lt;Id&gt;::generate()</c>
+/// (<c>natural(Int)</c>/<c>sequence</c>) or mints a random UUID for a <c>natural(String)</c> key the user
+/// declared natural (semantically wrong). A target-agnostic validator rejects every non-Guid factory
+/// before any emitter runs (issue #317).
 /// </summary>
 public class R8FactoryIdentityTests
 {

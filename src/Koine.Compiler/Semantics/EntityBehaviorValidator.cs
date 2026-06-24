@@ -207,15 +207,18 @@ internal static class EntityBehaviorValidator
                     $"factory '{factory.Name}' collides with a property or command of '{entity.Name}'", factory.Span));
             }
 
-            // A `create` factory auto-generates the new aggregate's identity (`<Id>.New()` in C#,
-            // `<Id>::generate()` in Rust), but that generator is only emitted for a Guid-backed
-            // identity. On a `natural`/`sequence` key the emitted code would call a function that was
-            // never produced and fail to compile (rustc/csc) — reject the combination here, before any
-            // emitter runs, with a source-located diagnostic (issue #317). One diagnostic per factory.
+            // A `create` factory auto-generates the new aggregate's identity, but only a Guid-backed id
+            // has a meaningful client-side generator. A `natural` key is caller-supplied and a `sequence`
+            // key is store-assigned, so neither does — and the emitters reflect that: C# emits `<Id>.New()`
+            // only for Guid (any non-Guid factory dangles an undefined `.New()` and the assembly won't
+            // compile), while Rust either dangles `<Id>::generate()` (natural(Int)/sequence) or mints a
+            // *random* v4 UUID for a key the user declared natural (natural(String)) — semantically wrong.
+            // Reject every non-Guid case here, before any emitter runs, with a source-located diagnostic
+            // (issue #317). One diagnostic per factory.
             if (entity.IdStrategy != IdentityStrategy.Guid)
             {
                 diagnostics.Add(Diagnostic.Error(DiagnosticCodes.FactoryNeedsGeneratableIdentity,
-                    $"factory '{factory.Name}' on '{entity.Name}' auto-generates the identity, but '{entity.IdentityName}' is a {DescribeIdentity(entity)} key with no generator; pass the identity explicitly or use a Guid identity",
+                    $"factory '{factory.Name}' on '{entity.Name}' auto-generates the identity, but '{entity.IdentityName}' is a {DescribeIdentity(entity)} key with no meaningful client-side generator; pass the identity explicitly or use a Guid identity",
                     factory.Span));
             }
 
