@@ -244,7 +244,9 @@ public sealed class Order : IAggregateRoot
     public IReadOnlyList<OrderLine> Lines => _lines;
     public OrderStatus Status { get; }
 
+#pragma warning disable CS8618 // EF Core populates members from the store after construction.
     private Order() { }
+#pragma warning restore CS8618
 
     public Order(OrderId id, CustomerId customer, IReadOnlyList<OrderLine> lines, OrderStatus? status = null)
     {

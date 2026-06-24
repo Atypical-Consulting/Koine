@@ -812,7 +812,7 @@ public sealed partial class CSharpEmitter : IEmitter
 
         if (backedListFields.Count > 0)
         {
-            sb.Append(Indent).Append("private ").Append(typeName).Append("() { }\n\n");
+            WritePersistenceConstructor(sb, typeName);
         }
 
         sb.Append(Indent).Append("public ").Append(typeName).Append('(');
@@ -870,7 +870,7 @@ public sealed partial class CSharpEmitter : IEmitter
         // navigation and can never bind), then populates the owned collection via field access.
         if (backedListMembers.Count > 0)
         {
-            sb.Append(Indent).Append("private ").Append(entity.Name).Append("() { }\n\n");
+            WritePersistenceConstructor(sb, entity.Name);
         }
 
         // When the entity declares a factory, construction is funneled through it:
@@ -1229,6 +1229,19 @@ public sealed partial class CSharpEmitter : IEmitter
 
     /// <summary>The mutable backing field name for a value-object collection member (e.g. <c>_lines</c>).</summary>
     private static string BackingFieldName(string memberName) => "_" + CSharpNaming.ToCamelCase(memberName);
+
+    /// <summary>
+    /// Emits the parameterless constructor EF Core materializes an owner of a value-object collection
+    /// through (issue #171): its collection parameter is a navigation and can never bind, so EF uses this
+    /// ctor and then populates members from the store via their backing fields. CS8618 is suppressed for
+    /// it — the "uninitialized non-nullable member" warning is a false positive under that flow.
+    /// </summary>
+    private void WritePersistenceConstructor(StringBuilder sb, string typeName)
+    {
+        sb.Append("#pragma warning disable CS8618 // EF Core populates members from the store after construction.\n");
+        sb.Append(Indent).Append("private ").Append(typeName).Append("() { }\n");
+        sb.Append("#pragma warning restore CS8618\n\n");
+    }
 
     /// <summary>
     /// The members of an entity backed by a mutable list (issue #171): value-object collections that are
