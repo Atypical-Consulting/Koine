@@ -106,6 +106,14 @@ is `EntityReferencesForeignAggregate` (KOI1602); use the other aggregate's `*Id`
 *within* the same aggregate (the root reaching its child entities and value objects) are fine.
 :::
 
+:::caution
+An entity (or root) holds **domain state** — value objects, enums, ids, and its own child entities.
+A field typed as a **domain or integration event**, a **read model**, or a **query** is
+`EntityFieldReferencesMessageType` (KOI1605): an event is an immutable record of what happened and a
+read model / query is a CQRS read-side projection — none of them are state an entity should own. The
+fix isn't "reference it by id" (as with KOI1602), it's to not hold it at all.
+:::
+
 ### 7.3.2 Root entity requirement
 
 The identifier after `root` must match the name of exactly one `entity` declared directly inside the

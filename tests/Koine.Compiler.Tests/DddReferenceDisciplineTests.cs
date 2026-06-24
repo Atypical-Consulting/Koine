@@ -8,7 +8,8 @@ namespace Koine.Compiler.Tests;
 /// building block holds a reference it shouldn't: a value object embedding an entity/aggregate
 /// (KOI1601), an entity/aggregate referencing another aggregate directly instead of by Id (KOI1602),
 /// a command/factory parameter typed as an entity/aggregate (KOI1603), or a domain-event field typed
-/// as an entity/aggregate (KOI1604).
+/// as an entity/aggregate (KOI1604). Issue #300 closes the remaining gap: an entity/aggregate-root
+/// member typed as a domain/integration event, read model, or query (KOI1605).
 /// </summary>
 public class DddReferenceDisciplineTests
 {
@@ -309,5 +310,114 @@ public class DddReferenceDisciplineTests
             """;
 
         Diagnose(src).ShouldContain(d => d.Code == DiagnosticCodes.EntityReferencesForeignAggregate);
+    }
+
+    // ---- KOI1605: entities hold state, not events/read-models/queries ------
+
+    [Fact]
+    public void An_entity_field_typed_as_a_domain_event_is_reported()
+    {
+        const string src = """
+            context Sales {
+              event OrderShipped {
+                orderId: OrderId
+              }
+              aggregate Orders root Order {
+                entity Order identified by OrderId {
+                  total:     Decimal
+                  lastEvent: OrderShipped
+                }
+              }
+            }
+            """;
+
+        Diagnose(src).ShouldContain(d => d.Code == DiagnosticCodes.EntityFieldReferencesMessageType);
+    }
+
+    [Fact]
+    public void An_entity_field_typed_as_a_read_model_is_reported()
+    {
+        const string src = """
+            context Sales {
+              entity Order identified by OrderId {
+                total: Decimal
+              }
+              readmodel OrderRow from Order {
+                id
+                total
+              }
+              entity Desk identified by DeskId {
+                row: OrderRow
+              }
+            }
+            """;
+
+        Diagnose(src).ShouldContain(d => d.Code == DiagnosticCodes.EntityFieldReferencesMessageType);
+    }
+
+    [Fact]
+    public void An_entity_field_typed_as_a_query_is_reported()
+    {
+        const string src = """
+            context Sales {
+              entity Order identified by OrderId {
+                total: Decimal
+              }
+              readmodel OrderRow from Order {
+                id
+                total
+              }
+              query OrdersByStatus(status: String): List<OrderRow>
+              entity Desk identified by DeskId {
+                lastQuery: OrdersByStatus
+              }
+            }
+            """;
+
+        Diagnose(src).ShouldContain(d => d.Code == DiagnosticCodes.EntityFieldReferencesMessageType);
+    }
+
+    [Fact]
+    public void An_entity_collection_of_domain_events_is_reported()
+    {
+        // Exercises the element recursion: a List<Event> is flagged at the element span.
+        const string src = """
+            context Sales {
+              event OrderShipped {
+                orderId: OrderId
+              }
+              entity Order identified by OrderId {
+                history: List<OrderShipped>
+              }
+            }
+            """;
+
+        Diagnose(src).ShouldContain(d => d.Code == DiagnosticCodes.EntityFieldReferencesMessageType);
+    }
+
+    [Fact]
+    public void An_entity_of_values_enums_ids_and_child_entities_is_clean()
+    {
+        const string src = """
+            context Sales {
+              enum Status { Open, Closed }
+              value Money {
+                amount: Decimal
+              }
+              aggregate Orders root Order {
+                entity Order identified by OrderId {
+                  total:      Money
+                  status:     Status
+                  customerId: CustomerId
+                  lines:      List<LineItem>
+                }
+                entity LineItem identified by LineItemId {
+                  quantity: Int
+                }
+              }
+            }
+            """;
+
+        Diagnose(src).ShouldNotContain(d => d.Code == DiagnosticCodes.EntityFieldReferencesMessageType);
     }
 }
