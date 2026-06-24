@@ -113,6 +113,46 @@ public class PythonInfrastructureSnapshotTests
         uow.ShouldContain("async def save_changes(self) -> None:");
     }
 
+    /// <summary>The per-context outbox dispatcher + publishing unit of work must match the snapshot.</summary>
+    [Fact]
+    public Task Python_infrastructure_outbox_dispatcher_emits_expected_python()
+    {
+        var result = new KoineCompiler().Compile(PublishingFixture, new PythonEmitter(InfraOptions));
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var infraFiles = result.Files
+            .Where(f => f.RelativePath.Contains("/infrastructure/", StringComparison.Ordinal)
+                && (f.RelativePath.EndsWith("integration_event_dispatcher.py", StringComparison.Ordinal)
+                    || f.RelativePath.EndsWith("unit_of_work.py", StringComparison.Ordinal)))
+            .ToList();
+
+        return Verify(TestSupport.Render(infraFiles))
+            .UseDirectory("Snapshots");
+    }
+
+    /// <summary>A publishing context emits the dispatcher and a unit of work that enqueues to the outbox.</summary>
+    [Fact]
+    public void Publishing_context_emits_outbox_dispatcher_and_enqueue()
+    {
+        var files = Emit(PublishingFixture);
+
+        var dispatcher = files.Single(f => f.RelativePath == "ordering/infrastructure/integration_event_dispatcher.py").Contents;
+        dispatcher.ShouldContain("class IntegrationEventDispatcher:");
+        dispatcher.ShouldContain("for message in await self._outbox.unprocessed():");
+        dispatcher.ShouldContain("await self._handler.handle(message)");
+
+        var uow = files.Single(f => f.RelativePath == "ordering/infrastructure/unit_of_work.py").Contents;
+        uow.ShouldContain("def enqueue(self, integration_event: object) -> None:");
+        uow.ShouldContain("await self._outbox.add(OutboxMessage.of(integration_event))");
+    }
+
+    /// <summary>A subscribe-only / event-free context emits no outbox dispatcher.</summary>
+    [Fact]
+    public void Non_publishing_context_emits_no_dispatcher()
+    {
+        Emit(Fixture).ShouldNotContain(f => f.RelativePath.EndsWith("integration_event_dispatcher.py", StringComparison.Ordinal));
+    }
+
     /// <summary>The shared infrastructure-runtime module is emitted once at the output root.</summary>
     [Fact]
     public void Shared_infrastructure_runtime_is_emitted_once()
