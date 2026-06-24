@@ -159,7 +159,16 @@ public sealed partial class PythonEmitter : IEmitter
             }
         }
 
-        // 4. An `__init__.py` for every package directory implied by the emitted module paths, so the
+        // 4. Infrastructure layer (gated, issue #241): concrete repository implementations over an
+        //    in-memory store, a unit of work, a transactional outbox + dispatcher, validation/transaction
+        //    behaviors and a provider/composition helper — the dependency-free Python analogue of the C#
+        //    `--layers infrastructure` output. Off by default, so the domain output above is byte-identical.
+        if (_options.EmitsInfrastructure)
+        {
+            EmitInfrastructure(emit, model, files, typeMapper);
+        }
+
+        // 5. An `__init__.py` for every package directory implied by the emitted module paths, so the
         //    tree imports cleanly and mypy treats each directory as a package.
         EmitPackageInits(files);
 
