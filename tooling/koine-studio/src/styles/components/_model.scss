@@ -200,6 +200,14 @@
   border-radius: 2px;
   background: var(--koi-ddd-repository);
 }
+.koi-model-icon[data-construct='repository'] {
+  border-radius: 5px;
+  background: var(--koi-ddd-repository);
+}
+.koi-model-icon[data-construct='rule'] {
+  border-radius: 3px;
+  background: var(--koi-ddd-spec);
+}
 
 .koi-model-navs {
   display: flex;

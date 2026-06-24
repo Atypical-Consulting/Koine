@@ -17,7 +17,9 @@ For each entry in the template's `body:` array:
 | `checkboxes`| `## <attributes.label>` heading + a `- [x]` / `- [ ]` list |
 
 Honor `validations.required: true` — every required field needs real, specific content. Apply the
-template's top-level `labels:` via `--label`.
+template's top-level `labels:` via `--label` — but that's only the *type* label (e.g. `enhancement`).
+The triage labels (`priority: *`, `effort: *`, `studio`) are not in the template; pick them from the
+repo's live taxonomy per SKILL.md Step 4 (and the `effort:` one in Step 6).
 
 ## Worked example — `feature_request.yml`
 
@@ -56,10 +58,11 @@ expression translator parallel to the C# ones.
 New emitter target
 ```
 
-Create it with:
+Create it with the type + priority labels (effort is added after the plan in SKILL.md Step 6):
 
 ```bash
-gh issue create --title "Add Python emitter target" --label enhancement \
+gh issue create --title "Add Python emitter target" \
+  --label enhancement --label "priority: medium" \
   --body-file /tmp/koine-issue-python.md
 ```
 
