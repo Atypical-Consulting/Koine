@@ -98,4 +98,57 @@ public class R18OpenApiEmitterTests
 
         return Verify(TestSupport.Render(result.Files)).UseDirectory("Snapshots");
     }
+
+    /// <summary>The §ordering fixture pairs an entity command with a query so both path shapes appear.</summary>
+    private const string OrderingFixture = """
+        context Ordering {
+          enum OrderStatus { Draft, Submitted, Cancelled }
+
+          value Money { amount: Decimal }
+
+          aggregate Order root Order {
+            entity Order identified by OrderId {
+              total: Money
+              status: OrderStatus = Draft
+
+              /// Submit a draft order for fulfilment.
+              command submit(note: String) {
+                requires status == Draft "only a draft order can be submitted"
+                status -> Submitted
+              }
+            }
+          }
+
+          readmodel OrderRow from Order {
+            status
+          }
+
+          /// All orders in a given lifecycle state.
+          query OrdersByStatus(status: OrderStatus): List<OrderRow>
+        }
+        """;
+
+    [Fact]
+    public Task Paths_map_commands_to_post_and_queries_to_get()
+    {
+        var result = new KoineCompiler().Compile(
+            new[] { new SourceFile("ordering.koi", OrderingFixture) }, new OpenApiEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var yaml = result.Files.ShouldHaveSingleItem().Contents;
+        yaml.ShouldContain("paths:");
+
+        // A command becomes a POST with a JSON request body built from its parameters.
+        yaml.ShouldContain("/order/submit:");
+        yaml.ShouldContain("post:");
+        yaml.ShouldContain("requestBody:");
+
+        // A query becomes a GET with its criteria as query parameters.
+        yaml.ShouldContain("/orders-by-status:");
+        yaml.ShouldContain("get:");
+        yaml.ShouldContain("parameters:");
+        yaml.ShouldContain("in: query");
+
+        return Verify(TestSupport.Render(result.Files)).UseDirectory("Snapshots");
+    }
 }
