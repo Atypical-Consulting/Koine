@@ -3,6 +3,7 @@ using System.Reflection;
 using System.Text.RegularExpressions;
 using Koine.Cli;
 using Koine.Cli.Commands;
+using Koine.Compiler.Ast;
 using Koine.Compiler.Emit;
 using Koine.Compiler.Emit.CSharp;
 using Koine.Compiler.Services;
@@ -1038,5 +1039,92 @@ public class R18CSharpInfrastructureTests
         File(files, "Sales/Infrastructure/TicketConfiguration.cs").Contents
             .ShouldContain("SalesValueConverters.StatusConverter");
         TestSupport.Compile(files).Assembly.ShouldNotBeNull();
+    }
+
+    // ----------------------------------------------------------------------
+    // ClassifyMember — the single source of truth shared by the domain
+    // persistence-ctor gate and the infra EF mapping (issue #344).
+    // ----------------------------------------------------------------------
+
+    [Fact]
+    public void ClassifyMember_assigns_each_member_shape_its_owned_kind()
+    {
+        // Both the persistence-ctor gate and the EF infra mapping switch consume ClassifyMember, so
+        // each shape must land on the OwnedKind that drives its mapping — that is what stops the two
+        // classification sites from drifting (issue #344).
+        var index = new SemanticModel(new KoineCompiler().Compile("""
+            context C {
+              enum Status { Active, Inactive }
+              value Money { amount: Decimal  currency: String }
+              aggregate Order root Order {
+                entity Order identified by OrderId {
+                  total: Money
+                  status: Status
+                }
+              }
+            }
+            """, new CSharpEmitter()).Model!).Index;
+
+        // Scalars.
+        CSharpEmitter.ClassifyMember(new TypeRef("String"), index).ShouldBe(OwnedKind.Primitive);
+        CSharpEmitter.ClassifyMember(new TypeRef("OrderId"), index).ShouldBe(OwnedKind.ForeignId);
+        CSharpEmitter.ClassifyMember(new TypeRef("Status"), index).ShouldBe(OwnedKind.SmartEnum);
+        CSharpEmitter.ClassifyMember(new TypeRef("Money"), index).ShouldBe(OwnedKind.ScalarValueObject);
+
+        // Collections: only a List of value objects is an owned collection (OwnsMany).
+        CSharpEmitter.ClassifyMember(new TypeRef(ModelIndex.ListTypeName, Element: new TypeRef("Money")), index)
+            .ShouldBe(OwnedKind.ValueObjectCollection);
+        CSharpEmitter.ClassifyMember(new TypeRef(ModelIndex.ListTypeName, Element: new TypeRef("String")), index)
+            .ShouldBe(OwnedKind.OtherCollection);
+        CSharpEmitter.ClassifyMember(new TypeRef(ModelIndex.SetTypeName, Element: new TypeRef("String")), index)
+            .ShouldBe(OwnedKind.OtherCollection);
+        CSharpEmitter.ClassifyMember(new TypeRef(ModelIndex.MapTypeName, Element: new TypeRef("String"), Value: new TypeRef("Int")), index)
+            .ShouldBe(OwnedKind.OtherCollection);
+
+        // Optionality is irrelevant to ownership: Money? is still an owned scalar value object.
+        CSharpEmitter.ClassifyMember(new TypeRef("Money", IsOptional: true), index).ShouldBe(OwnedKind.ScalarValueObject);
+    }
+
+    [Fact]
+    public void Entity_configuration_maps_every_member_shape_to_its_expected_ef_call()
+    {
+        // Characterization (issue #344): pin the exact EF mapping line each member shape emits — foreign
+        // id, smart enum, scalar value object, value-object collection, primitive collection, and plain
+        // scalar — before WriteMemberMapping/WriteOwnedMemberMapping are rewritten to switch on
+        // ClassifyMember. The switch rewrite must leave every one of these byte-identical.
+        var cfg = File(EmitInfra("""
+            context Sales {
+              enum Status { Open, Closed }
+              value Money { amount: Decimal  currency: String }
+              value Line { sku: String  qty: Int }
+              aggregate Customer root Customer {
+                entity Customer identified by CustomerId { name: String }
+              }
+              aggregate Order root Order {
+                entity Order identified by OrderId {
+                  label: String
+                  customer: CustomerId
+                  status: Status
+                  total: Money
+                  lines: List<Line>
+                  tags: List<String>
+                }
+              }
+            }
+            """), "Sales/Infrastructure/OrderConfiguration.cs").Contents;
+
+        // Plain primitive → explicit Property (issue #276, so the get-only auto-property round-trips).
+        cfg.ShouldContain("builder.Property(x => x.Label);");
+        // Foreign strongly-typed id → value HasConversion.
+        cfg.ShouldContain("builder.Property(x => x.Customer).HasConversion(v => v.Value, v => new CustomerId(v));");
+        // Smart enum → shared value converter.
+        cfg.ShouldContain("builder.Property(x => x.Status).HasConversion(SalesValueConverters.StatusConverter);");
+        // Scalar value object → OwnsOne.
+        cfg.ShouldContain("builder.OwnsOne(x => x.Total,");
+        // Value-object collection → OwnsMany + field-access navigation (issue #171).
+        cfg.ShouldContain("builder.OwnsMany(x => x.Lines,");
+        cfg.ShouldContain("builder.Navigation(x => x.Lines).UsePropertyAccessMode(PropertyAccessMode.Field);");
+        // Primitive collection → convention comment.
+        cfg.ShouldContain("// Tags is a primitive collection, mapped by EF Core convention.");
     }
 }

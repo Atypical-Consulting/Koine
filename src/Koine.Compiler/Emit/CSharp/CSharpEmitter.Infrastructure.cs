@@ -266,55 +266,41 @@ public sealed partial class CSharpEmitter
         var prop = CSharpNaming.ToPascalCase(m.Name);
         TypeRef type = m.Type;
 
-        if (CSharpTypeMapper.IsList(type))
+        // One classification drives the mapping, shared with the domain persistence-ctor gate so the two
+        // cannot drift (issue #344). The cases below produce exactly the same output as the previous
+        // IsList / IsValueObjectList / Classify / IdTypeNames branching.
+        switch (ClassifyMember(type, index))
         {
-            if (IsValueObjectList(type, index))
-            {
+            case OwnedKind.ValueObjectCollection:
                 WriteOwned(sb, context, builderVar, "OwnsMany", prop, type.Element!.Name, index, indentLevel, depth: 1);
-            }
-            else
-            {
-                AppendIndent(sb, indentLevel).Append("// ").Append(prop)
-                  .Append(" is a primitive collection, mapped by EF Core convention.\n");
-            }
-
-            return;
-        }
-
-        if (CSharpTypeMapper.IsSet(type) || CSharpTypeMapper.IsMap(type))
-        {
-            AppendIndent(sb, indentLevel).Append("// ").Append(prop)
-              .Append(" is a collection, mapped by EF Core convention.\n");
-            return;
-        }
-
-        switch (index.Classify(type.Name))
-        {
-            case TypeKind.Value:
+                break;
+            case OwnedKind.ScalarValueObject:
                 WriteOwned(sb, context, builderVar, "OwnsOne", prop, type.Name, index, indentLevel, depth: 1);
                 break;
-            case TypeKind.Enum:
+            case OwnedKind.SmartEnum:
                 AppendIndent(sb, indentLevel).Append(builderVar).Append(".Property(x => x.").Append(prop)
                   .Append(").HasConversion(").Append(ValueConvertersClass(context)).Append('.')
                   .Append(type.Name).Append("Converter);\n");
                 break;
+            case OwnedKind.ForeignId:
+                // A foreign strongly-typed ID (e.g. customer: CustomerId): convert to its backing value.
+                AppendIndent(sb, indentLevel).Append(builderVar).Append(".Property(x => x.").Append(prop)
+                  .Append(").HasConversion(v => v.Value, v => new ").Append(type.Name).Append("(v));\n");
+                break;
+            case OwnedKind.OtherCollection:
+                // Mapped by EF Core convention; a primitive list keeps the more specific wording.
+                AppendIndent(sb, indentLevel).Append("// ").Append(prop)
+                  .Append(CSharpTypeMapper.IsList(type)
+                      ? " is a primitive collection, mapped by EF Core convention.\n"
+                      : " is a collection, mapped by EF Core convention.\n");
+                break;
             default:
-                if (index.IdTypeNames.Contains(type.Name))
-                {
-                    // A foreign strongly-typed ID (e.g. customer: CustomerId): convert to its backing value.
-                    AppendIndent(sb, indentLevel).Append(builderVar).Append(".Property(x => x.").Append(prop)
-                      .Append(").HasConversion(v => v.Value, v => new ").Append(type.Name).Append("(v));\n");
-                }
-                else
-                {
-                    // A plain primitive: an explicit Property call so EF maps the get-only auto-property
-                    // and materializes it via its backing field (issue #276). Left to convention, EF does
-                    // not discover a read-only auto-property on a principal entity — the column is silently
-                    // dropped and the value never round-trips. (Owned types already do this; this brings the
-                    // root-entity mapping in line.)
-                    AppendIndent(sb, indentLevel).Append(builderVar).Append(".Property(x => x.").Append(prop).Append(");\n");
-                }
-
+                // A plain primitive: an explicit Property call so EF maps the get-only auto-property
+                // and materializes it via its backing field (issue #276). Left to convention, EF does
+                // not discover a read-only auto-property on a principal entity — the column is silently
+                // dropped and the value never round-trips. (Owned types already do this; this brings the
+                // root-entity mapping in line.)
+                AppendIndent(sb, indentLevel).Append(builderVar).Append(".Property(x => x.").Append(prop).Append(");\n");
                 break;
         }
     }
@@ -374,42 +360,31 @@ public sealed partial class CSharpEmitter
         var prop = CSharpNaming.ToPascalCase(m.Name);
         TypeRef type = m.Type;
 
-        if (CSharpTypeMapper.IsList(type) || CSharpTypeMapper.IsSet(type) || CSharpTypeMapper.IsMap(type))
+        // Same shared classification as the root mapping (issue #344). An owned member's non-value-object
+        // collection always reads "is a collection" (the "primitive collection" wording is root-only).
+        switch (ClassifyMember(type, index))
         {
-            if (IsValueObjectList(type, index))
-            {
+            case OwnedKind.ValueObjectCollection:
                 WriteOwned(sb, context, ownedVar, "OwnsMany", prop, type.Element!.Name, index, indentLevel, depth + 1);
-            }
-            else
-            {
-                AppendIndent(sb, indentLevel).Append("// ").Append(prop)
-                  .Append(" is a collection, mapped by EF Core convention.\n");
-            }
-
-            return;
-        }
-
-        switch (index.Classify(type.Name))
-        {
-            case TypeKind.Value:
+                break;
+            case OwnedKind.ScalarValueObject:
                 WriteOwned(sb, context, ownedVar, "OwnsOne", prop, type.Name, index, indentLevel, depth + 1);
                 break;
-            case TypeKind.Enum:
+            case OwnedKind.SmartEnum:
                 AppendIndent(sb, indentLevel).Append(ownedVar).Append(".Property(x => x.").Append(prop)
                   .Append(").HasConversion(").Append(ValueConvertersClass(context)).Append('.')
                   .Append(type.Name).Append("Converter);\n");
                 break;
+            case OwnedKind.ForeignId:
+                AppendIndent(sb, indentLevel).Append(ownedVar).Append(".Property(x => x.").Append(prop)
+                  .Append(").HasConversion(v => v.Value, v => new ").Append(type.Name).Append("(v));\n");
+                break;
+            case OwnedKind.OtherCollection:
+                AppendIndent(sb, indentLevel).Append("// ").Append(prop)
+                  .Append(" is a collection, mapped by EF Core convention.\n");
+                break;
             default:
-                if (index.IdTypeNames.Contains(type.Name))
-                {
-                    AppendIndent(sb, indentLevel).Append(ownedVar).Append(".Property(x => x.").Append(prop)
-                      .Append(").HasConversion(v => v.Value, v => new ").Append(type.Name).Append("(v));\n");
-                }
-                else
-                {
-                    AppendIndent(sb, indentLevel).Append(ownedVar).Append(".Property(x => x.").Append(prop).Append(");\n");
-                }
-
+                AppendIndent(sb, indentLevel).Append(ownedVar).Append(".Property(x => x.").Append(prop).Append(");\n");
                 break;
         }
     }
