@@ -18,6 +18,7 @@
 // render respectively. The accessors are only invoked at runtime, so ide.ts can pass
 // `() => workspace.activeUri()` thunks that resolve after this is constructed.
 import { dirtyCount, saveAllDirtyBuffers } from '@/shell/dirty';
+import { matchesInclude } from '@/shell/workspaceSearch';
 import { pathToFileUri } from '@/shell/ideUtils';
 import type { FsEntry, KoiFile, Platform } from '@/host';
 import type { TextEdit, WorkspaceEdit } from '@/lsp/lsp';
@@ -129,6 +130,13 @@ export interface WorkspaceController {
   openDefaultWorkspaceFlow(seed: string): Promise<{ opened: boolean; pristineSeed: Buffer | null }>;
   /** Open one shared model as a transient 1-file workspace (non-destructive). */
   openWorkspaceWith1File(text: string): Promise<void>;
+  /**
+   * Every `.koi` file uri under the open folder (the host walk's skip-list already applied), in
+   * relPath order; `[]` when no folder is open. An optional comma-separated include glob narrows the
+   * result the same way workspace search's `include` does. Used by the workspace search panel to know
+   * which files to scan (it reads each one's text from the open buffer, or the host fs when closed).
+   */
+  listWorkspaceFiles(glob?: string): Promise<string[]>;
   /** Open a .koi file token as a buffer if needed; returns its uri (or null on failure). */
   ensureBuffer(token: string): Promise<string | null>;
   /** Open a file token (if needed) and make it the active editor buffer. */
@@ -272,6 +280,23 @@ export function createWorkspaceController(deps: WorkspaceControllerDeps): Worksp
   }
 
   // --- open paths -----------------------------------------------------------
+
+  // Every .koi uri under the open folder, reusing the host walk (which already skips bin/obj/.git/
+  // node_modules — see fs.ts SKIP_DIRS). The optional glob narrows the set through the same engine
+  // workspace search's `include` uses. Returns [] (not an error) when no folder is open or the walk
+  // fails, so the search panel degrades to "no results" rather than throwing.
+  async function listWorkspaceFiles(glob?: string): Promise<string[]> {
+    if (folderRoot === '') return [];
+    let files: KoiFile[];
+    try {
+      files = await platform.listKoiFiles(folderRoot);
+    } catch (e) {
+      console.error('listKoiFiles failed:', e);
+      return [];
+    }
+    const uris = files.map((f) => pathToFileUri(f.path));
+    return glob && glob.trim() !== '' ? uris.filter((uri) => matchesInclude(uri, glob)) : uris;
+  }
 
   /** Open a .koi file token as a buffer if it isn't open yet; returns its uri (or null on failure). */
   async function ensureBuffer(token: string): Promise<string | null> {
@@ -809,6 +834,7 @@ export function createWorkspaceController(deps: WorkspaceControllerDeps): Worksp
     openFolderPath,
     openDefaultWorkspaceFlow,
     openWorkspaceWith1File,
+    listWorkspaceFiles,
     ensureBuffer,
     openFileToken,
     activateFile,

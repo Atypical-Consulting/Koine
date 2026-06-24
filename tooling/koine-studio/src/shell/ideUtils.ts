@@ -157,6 +157,7 @@ export function helpRows(): ShortcutRow[] {
     { keys: 'mod+S', description: 'Save / format the active model' },
     { keys: 'mod+Alt+S', description: 'Save all unsaved files' },
     { keys: 'mod+Shift+O', description: 'Open a folder of models' },
+    { keys: 'mod+Shift+F', description: 'Search across files' },
     { keys: 'mod+N', description: 'New model' },
     { keys: 'F2', description: 'Rename symbol' },
     { keys: 'Shift+F12', description: 'Find all references' },

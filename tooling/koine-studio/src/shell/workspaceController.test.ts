@@ -573,6 +573,54 @@ describe('createWorkspaceController — anyDirty', () => {
   });
 });
 
+describe('createWorkspaceController — listWorkspaceFiles', () => {
+  // Make the host walk apply fs.ts's SKIP_DIRS, so the test proves listWorkspaceFiles surfaces a
+  // skip-list-filtered walk (the controller delegates the skip-list to the host, like listKoiFiles).
+  function withSkipList(platform: FakePlatform): void {
+    const SKIP = ['bin', 'obj', '.git', 'node_modules'];
+    platform.listKoiFiles = vi.fn(async () => {
+      const out: KoiFile[] = [];
+      for (const rel of platform.files.keys()) {
+        if (!rel.toLowerCase().endsWith('.koi')) continue;
+        if (rel.split('/').some((seg) => SKIP.includes(seg))) continue;
+        out.push({ path: `${ROOT}/${rel}`, name: rel.split('/').pop()!, relPath: rel });
+      }
+      out.sort((a, b) => a.relPath.localeCompare(b.relPath));
+      return out;
+    });
+  }
+
+  test('returns the .koi uris under the open folder, excluding skip-list dirs', async () => {
+    const platform = new FakePlatform();
+    platform.files.set('a.koi', 'context A {}\n');
+    platform.files.set('sub/b.koi', 'context B {}\n');
+    platform.files.set('.git/c.koi', 'context C {}\n'); // VCS dir — skipped
+    platform.files.set('bin/d.koi', 'context D {}\n'); // build dir — skipped
+    withSkipList(platform);
+    const ws = createWorkspaceController(makeDeps(platform, makeLsp([]), makeEditor([])));
+    await ws.openFolderPath(ROOT, { recent: false });
+
+    expect(await ws.listWorkspaceFiles()).toEqual([uriOf('a.koi'), uriOf('sub/b.koi')]);
+  });
+
+  test('returns [] when no folder is open', async () => {
+    const platform = new FakePlatform();
+    const ws = createWorkspaceController(makeDeps(platform, makeLsp([]), makeEditor([])));
+    expect(await ws.listWorkspaceFiles()).toEqual([]);
+  });
+
+  test('an include glob narrows the result to matching paths', async () => {
+    const platform = new FakePlatform();
+    platform.files.set('src/order.koi', 'x');
+    platform.files.set('docs/notes.koi', 'x');
+    withSkipList(platform);
+    const ws = createWorkspaceController(makeDeps(platform, makeLsp([]), makeEditor([])));
+    await ws.openFolderPath(ROOT, { recent: false });
+
+    expect(await ws.listWorkspaceFiles('src/*.koi')).toEqual([uriOf('src/order.koi')]);
+  });
+});
+
 // Idle auto-save (#268): when enabled, an edit arms a ~1000ms debounce; on fire it reuses the exact
 // saveAllDirty path (format-on-save → write every dirty buffer → didSave → tree refresh). Driven with
 // fake timers + the FakePlatform write spy, mirroring historyController.test.ts's debounce style.

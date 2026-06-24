@@ -8,6 +8,7 @@ import {
   type Location,
   type SourceSpan,
   type StructuredEdit,
+  type TextEdit,
 } from '@/lsp/lsp';
 import {
   fileUriToPath,
@@ -86,6 +87,8 @@ import { UnsavedIndicator } from '@/shell/UnsavedIndicator';
 import { WorkspaceProblemsBadge } from '@/diagnostics/WorkspaceProblemsBadge';
 import { StoreInspector } from '@/shell/StoreInspector';
 import { createWorkspaceController, type WorkspaceController } from '@/shell/workspaceController';
+import { createSearchPanel } from '@/shell/searchController';
+import { type Match } from '@/shell/workspaceSearch';
 import { createConfirmDialog, createPromptDialog } from '@/shared/overlay';
 
 // --- workspace fs contract ---------------------------------------------------
@@ -1223,6 +1226,89 @@ export function init(): () => void {
   );
 
   const palette = createCommandPalette(() => getCommands());
+
+  // Workspace search (Mod-Shift-F): a non-modal panel that scans every .koi file in the open folder
+  // via the pure search core. The shell supplies the four seams the panel can't own — list the files,
+  // read a closed file, reveal a match in the editor, snapshot the open buffers — plus a label fn.
+  function searchLabelForUri(uri: string): string {
+    const buf = workspace.buffers.get(uri);
+    if (buf) return buf.relPath;
+    const token = fileUriToPath(uri) ?? uri;
+    const root = workspace.folderRootToken();
+    if (root && (token.startsWith(root + '/') || token.startsWith(root + '\\'))) {
+      return token.slice(root.length + 1).replace(/\\/g, '/');
+    }
+    return token.split(/[\\/]/).pop() ?? uri;
+  }
+  async function revealSearchMatch(uri: string, match: Match): Promise<void> {
+    // Make the matched file the active buffer (opening it from disk if it isn't open yet), then select
+    // the match's range. gotoRange wants 0-based LSP positions; Match is 1-based line / 0-based column.
+    if (uri !== workspace.activeUri()) {
+      if (workspace.buffers.has(uri)) {
+        workspace.activateFile(uri);
+      } else {
+        const token = fileUriToPath(uri);
+        if (token) await workspace.openFileToken(token);
+      }
+    }
+    // Derive the END position from the active document so a match that spans lines (a regex with
+    // `\n` / `[\s\S]`) selects the whole span rather than clamping to the start line. CodeMirror's
+    // doc lines are 1-based; offsets are clamped against the doc in case a stale match runs long.
+    const doc = editor.view.state.doc;
+    const startLine = Math.min(Math.max(match.line, 1), doc.lines);
+    const startOffset = Math.min(doc.line(startLine).from + match.column, doc.length);
+    const endOffset = Math.min(startOffset + match.length, doc.length);
+    const startInfo = doc.lineAt(startOffset);
+    const endInfo = doc.lineAt(endOffset);
+    editor.gotoRange(
+      { line: startInfo.number - 1, character: startOffset - startInfo.from },
+      { line: endInfo.number - 1, character: endOffset - endInfo.from },
+    );
+  }
+  const search = createSearchPanel({
+    listFiles: (glob) => workspace.listWorkspaceFiles(glob),
+    readFile: async (uri) => {
+      const token = fileUriToPath(uri);
+      if (!token) return null;
+      try {
+        return await platform.readTextFile(token);
+      } catch {
+        return null;
+      }
+    },
+    openAndReveal: (uri, match) => void revealSearchMatch(uri, match),
+    getActiveBuffers: () => {
+      const m = new Map<string, string>();
+      for (const buf of workspace.buffers.values()) m.set(buf.uri, buf.text);
+      return m;
+    },
+    labelOf: searchLabelForUri,
+    replaceInBuffer: (uri, newText) => {
+      // Route the new text through the cross-buffer WorkspaceEdit path: the active buffer goes through
+      // the editor (one undoable transaction), other open buffers are patched + marked dirty + synced,
+      // so the unsaved indicator updates. A single whole-document edit over the buffer's current text.
+      const current = workspace.buffers.get(uri)?.text ?? '';
+      const lines = current.split('\n');
+      const edit: TextEdit = {
+        range: { start: { line: 0, character: 0 }, end: { line: lines.length - 1, character: lines[lines.length - 1].length } },
+        newText,
+      };
+      workspace.applyWorkspaceEdit({ changes: { [uri]: [edit] } });
+    },
+    writeFile: async (uri, newText) => {
+      const token = fileUriToPath(uri);
+      if (!token) return;
+      // Surface a failed replace-to-disk on the status line, mirroring the other write paths — a
+      // silent failure would let the user believe every match was replaced when some were not.
+      try {
+        await platform.writeTextFile(token, newText);
+      } catch (e) {
+        setStatus('could not write replaced file', 'error');
+        console.error('replace writeTextFile failed for', token, e);
+      }
+    },
+  });
+
   const prefs = createPreferences({
     onChange: (s) => {
       settings = s;
@@ -1516,6 +1602,7 @@ export function init(): () => void {
       { id: 'format', title: 'Format document', hint: 'mod+S', group: 'Edit', run: () => void formatActive() },
       { id: 'home', title: 'Go to start screen', group: 'File', run: () => goHome() },
       { id: 'open-folder', title: 'Open folder…', hint: 'mod+Shift+O', group: 'File', run: () => void openFolder() },
+      { id: 'search', title: 'Search across files…', hint: 'mod+Shift+F', group: 'Edit', run: () => search.focus() },
       { id: 'new-model', title: 'New model', hint: 'mod+N', group: 'File', run: () => void requestNewModel() },
       { id: 'save-all', title: 'Save all', hint: 'mod+Alt+S', group: 'File', run: () => void workspace.saveAllDirty() },
       { id: 'share', title: 'Copy shareable link', group: 'File', run: () => void copyShareLink() },
@@ -1567,7 +1654,11 @@ export function init(): () => void {
     }
     if (overlayOpen()) return;
 
-    if (mod && e.shiftKey && (e.key === 'o' || e.key === 'O')) {
+    if (mod && e.shiftKey && (e.key === 'f' || e.key === 'F')) {
+      // Mod+Shift+F → open/focus the workspace search panel (toggle closes it).
+      e.preventDefault();
+      search.toggle();
+    } else if (mod && e.shiftKey && (e.key === 'o' || e.key === 'O')) {
       e.preventDefault();
       void openFolder();
     } else if (mod && !e.shiftKey && (e.key === 'n' || e.key === 'N')) {
