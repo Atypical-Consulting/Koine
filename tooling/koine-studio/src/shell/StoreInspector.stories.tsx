@@ -6,7 +6,8 @@ import { createAppStore } from '@/store/index';
 
 // A read-only live view of the app store — the single source of truth made visible (debug overlay). It
 // owns no setters; stories just seed a store and pass it in. The `Populated` story seeds selection, scope,
-// chrome views, an active file, dirty buffers and diagnostics so every field reads non-default.
+// chrome views, an active file, dirty buffers and diagnostics so every field reads non-default. Below the
+// curated rows, a collapsible "Raw state" section dumps the whole store (getState() minus its setters).
 
 const err: LspDiagnostic = {
   range: { start: { line: 0, character: 0 }, end: { line: 0, character: 1 } },
