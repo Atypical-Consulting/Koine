@@ -102,6 +102,13 @@
   overflow: hidden;
   display: flex;
   flex-direction: column;
+
+  // The `display: flex` above (an #id selector) outranks `.center-host[hidden]`, so the [hidden]
+  // attribute alone would not hide the visual pane — redeclare it here, like the technical/docs panes,
+  // or the canvas stays painted over the code view when switching tabs.
+  &[hidden] {
+    display: none;
+  }
 }
 
 /* The canvas fills the space under the construct palette; position:relative anchors the maxGraph

@@ -286,7 +286,17 @@ public sealed record EntityDecl(
     IReadOnlyList<StatesDecl> States,
     IReadOnlyList<FactoryDecl> Factories,
     IdentityStrategy IdStrategy = IdentityStrategy.Guid,
-    string? IdBackingType = null) : TypeDecl(Name);
+    string? IdBackingType = null) : TypeDecl(Name)
+{
+    /// <summary>The source span of the identity type name (the <c>Identifier</c> after <c>identified by</c>),
+    /// so an editor can rename it in place. <see cref="SourceSpan.None"/> on a recovered parse.</summary>
+    public SourceSpan IdentityNameSpan { get; init; } = SourceSpan.None;
+
+    /// <summary>The source span of the optional <c>as guid|sequence|natural(T)</c> strategy clause, or
+    /// <see cref="SourceSpan.None"/> when the entity uses the default (no clause) — the insertion point
+    /// for one is then just past <see cref="IdentityNameSpan"/>.</summary>
+    public SourceSpan IdentityStrategySpan { get; init; } = SourceSpan.None;
+}
 
 /// <summary>
 /// A state machine bound to an enum-typed lifecycle field, defining the legal
