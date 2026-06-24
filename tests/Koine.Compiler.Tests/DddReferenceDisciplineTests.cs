@@ -251,4 +251,63 @@ public class DddReferenceDisciplineTests
 
         Diagnose(src).ShouldContain(d => d.Code == DiagnosticCodes.EntityReferencesForeignAggregate);
     }
+
+    // ---- recursion into Map value types and optionality --------------------
+
+    [Fact]
+    public void A_value_object_map_value_typed_as_an_entity_is_reported()
+    {
+        // Exercises the `tr.Value` recursion branch (the map's value type), not just `tr.Element`.
+        const string src = """
+            context Sales {
+              entity Order identified by OrderId {
+                total: Decimal
+              }
+              value OrdersByRef {
+                byRef: Map<String, Order>
+              }
+            }
+            """;
+
+        Diagnose(src).ShouldContain(d => d.Code == DiagnosticCodes.ValueObjectReferencesEntity);
+    }
+
+    [Fact]
+    public void An_optional_value_object_field_typed_as_an_entity_is_reported()
+    {
+        const string src = """
+            context Sales {
+              entity Order identified by OrderId {
+                total: Decimal
+              }
+              value OrderSummary {
+                order: Order?
+              }
+            }
+            """;
+
+        Diagnose(src).ShouldContain(d => d.Code == DiagnosticCodes.ValueObjectReferencesEntity);
+    }
+
+    [Fact]
+    public void An_entity_map_value_referencing_another_aggregate_is_reported()
+    {
+        // Exercises the `tr.Value` recursion branch of the cross-aggregate check.
+        const string src = """
+            context Sales {
+              aggregate Orders root Order {
+                entity Order identified by OrderId {
+                  byCustomer: Map<String, Customer>
+                }
+              }
+              aggregate Customers root Customer {
+                entity Customer identified by CustomerId {
+                  name: String
+                }
+              }
+            }
+            """;
+
+        Diagnose(src).ShouldContain(d => d.Code == DiagnosticCodes.EntityReferencesForeignAggregate);
+    }
 }
