@@ -68,9 +68,7 @@ public sealed partial class OpenApiEmitter : IEmitter
     private static string OneLine(string text) =>
         string.Join(' ', text.Split('\n', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries));
 
-    // Orchestrators for the path and schema layers. Skeleton bodies render `paths: {}` /
-    // `components: {}`; the .Paths.cs and .Schemas.cs partials grow them in later tasks.
+    // Orchestrator for the path layer. The skeleton body renders `paths: {}`; the .Paths.cs partial
+    // grows it. `BuildComponents` lives in the .Schemas.cs partial.
     private static YamlObject BuildPaths(ContextNode ctx, ModelIndex index) => new();
-
-    private static YamlObject BuildComponents(ContextNode ctx, ModelIndex index) => new();
 }

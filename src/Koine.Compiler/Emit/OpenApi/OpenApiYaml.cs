@@ -192,14 +192,16 @@ internal static class OpenApiYamlWriter
 
         foreach (char c in text)
         {
-            if (!(char.IsAsciiLetterOrDigit(c) || c is '_' or '-' or '.' or '/'))
+            // '$' is a safe plain-scalar character (it is not a YAML indicator), so OpenAPI keys such
+            // as `$ref` stay unquoted; '#', ':', quotes, and whitespace fall outside and force quoting.
+            if (!(char.IsAsciiLetterOrDigit(c) || c is '_' or '-' or '.' or '/' or '$'))
             {
                 return true;
             }
         }
 
         char first = text[0];
-        if (!(char.IsAsciiLetter(first) || first == '_' || first == '/'))
+        if (!(char.IsAsciiLetter(first) || first is '_' or '/' or '$'))
         {
             // Leads with a digit, '-', or '.': could be read as a number/date/sequence marker.
             return true;
