@@ -107,6 +107,14 @@ The convention is load-bearing for tooling, too. In the editor, hovering or go-t
 that entity lives in another file or context. See [editor tooling](/Koine/guides/editor-tooling/).
 :::
 
+:::caution
+An entity's fields hold **domain state**: value objects, enums, ids, and child entities of its own
+aggregate. A field typed as a **domain or integration event**, a **read model**, or a **query** is
+`EntityFieldReferencesMessageType` (KOI1605) — an event records what *happened* and a read model /
+query is a read-side projection, neither of which an entity should own. Reference other aggregates by
+their `*Id` (KOI1602); don't hold a message or read-model at all.
+:::
+
 ### 6.3.3 File naming
 
 Each generated ID value object lands in its **own** file, named after the ID type, not the entity:
