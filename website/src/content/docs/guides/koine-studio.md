@@ -4,7 +4,7 @@ description: "The Koine IDE for .koi files — run it in your browser at /Koine/
 ---
 
 **Koine Studio** is the full IDE for `.koi` files: a live editor with push-based diagnostics, an
-emitted-code preview (C# / TypeScript), the ubiquitous-language glossary, a context map, hover docs,
+emitted-code preview (C# / TypeScript / Python / PHP / Rust), the ubiquitous-language glossary, a context map, hover docs,
 and go-to-definition. It runs **two ways from one codebase** (`tooling/koine-studio/`):
 
 :::tip[Try it now — nothing to install]
@@ -65,9 +65,9 @@ Koine Studio surfaces the **enriched** language server, the same one the VS Code
 
 - **Live diagnostics** — syntax and semantic errors as you type, pushed via
   `textDocument/publishDiagnostics`.
-- **Emitted-code preview** — request the generated **C#** or **TypeScript** for the current model in a
-  read-only pane (`koine/emitPreview`); if the model has errors, nothing is emitted and the
-  diagnostics are shown instead.
+- **Emitted-code preview** — request the generated **C#**, **TypeScript**, **Python**, **PHP**, or
+  **Rust** for the current model in a read-only pane (`koine/emitPreview`); if the model has errors,
+  nothing is emitted and the diagnostics are shown instead.
 - **Glossary** — the ubiquitous-language glossary the `glossary` emitter produces.
 - **Context map** — the bounded contexts and their relationships, in the **Context Map** bottom tab.
   A **Graph | Table** toggle switches between two views of the same data:

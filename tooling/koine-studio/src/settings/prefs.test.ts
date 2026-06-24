@@ -140,10 +140,10 @@ describe('Settings → Output panel', () => {
   const langOpts = () =>
     [...document.querySelectorAll<HTMLButtonElement>('#koi-settings-panel-output .koi-lang-opt')];
 
-  it('renders the four language options with C# selected by default', () => {
+  it('renders the five language options with C# selected by default', () => {
     openPrefs();
     const opts = langOpts();
-    expect(opts.map((b) => b.dataset.value)).toEqual(['csharp', 'typescript', 'python', 'php']);
+    expect(opts.map((b) => b.dataset.value)).toEqual(['csharp', 'typescript', 'python', 'php', 'rust']);
     const checked = opts.find((b) => b.getAttribute('aria-checked') === 'true');
     expect(checked?.dataset.value).toBe('csharp');
   });

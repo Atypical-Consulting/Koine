@@ -24,7 +24,7 @@
 // from the palette, the toolbar buttons, and the boot ladder.
 import { render, type VNode } from 'preact';
 import { renderMarkdown } from '@/editor/editor';
-import type { KoineEditor, OutputView } from '@/editor/editor';
+import type { KoineEditor, OutputLang, OutputView } from '@/editor/editor';
 import type {
   CheckResult,
   ContextMapResult,
@@ -1274,6 +1274,7 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     { id: 'typescript', name: 'TypeScript' },
     { id: 'python', name: 'Python' },
     { id: 'php', name: 'PHP' },
+    { id: 'rust', name: 'Rust' },
   ];
   let currentTarget: PreviewTarget = deps.initialTarget;
   const previewTabEl = el<HTMLButtonElement>('tech-tab-preview');
@@ -1300,7 +1301,7 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
       const res = await lsp.emitPreview(currentTarget);
       if (seq !== previewSeq) return;
       let content: string;
-      let lang: 'csharp' | 'typescript' | 'python' | 'php' | 'plain';
+      let lang: OutputLang;
       let copyable = false;
       if (res.error) {
         content = '// emit error\n' + res.error;
