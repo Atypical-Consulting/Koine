@@ -207,6 +207,21 @@ internal static class EntityBehaviorValidator
                     $"factory '{factory.Name}' collides with a property or command of '{entity.Name}'", factory.Span));
             }
 
+            // A `create` factory auto-generates the new aggregate's identity, but only a Guid-backed id
+            // has a meaningful client-side generator. A `natural` key is caller-supplied and a `sequence`
+            // key is store-assigned, so neither does — and the emitters reflect that: C# emits `<Id>.New()`
+            // only for Guid (any non-Guid factory dangles an undefined `.New()` and the assembly won't
+            // compile), while Rust either dangles `<Id>::generate()` (natural(Int)/sequence) or mints a
+            // *random* v4 UUID for a key the user declared natural (natural(String)) — semantically wrong.
+            // Reject every non-Guid case here, before any emitter runs, with a source-located diagnostic
+            // (issue #317). One diagnostic per factory.
+            if (entity.IdStrategy != IdentityStrategy.Guid)
+            {
+                diagnostics.Add(Diagnostic.Error(DiagnosticCodes.FactoryNeedsGeneratableIdentity,
+                    $"factory '{factory.Name}' on '{entity.Name}' auto-generates the identity, but '{entity.IdentityName}' is a {DescribeIdentity(entity)} key with no meaningful client-side generator; pass the identity explicitly or use a Guid identity",
+                    factory.Span));
+            }
+
             // Scope: the factory's parameters plus the synthetic `id` (its identity).
             var scopePairs = IdScopePair(entity)
                 .Concat(factory.Parameters.Select(p => new KeyValuePair<string, TypeRef>(p.Name, p.Type)));
@@ -298,6 +313,14 @@ internal static class EntityBehaviorValidator
     /// <summary>The synthetic <c>id</c> binding (an entity's identity) for factory scope.</summary>
     private static IEnumerable<KeyValuePair<string, TypeRef>> IdScopePair(EntityDecl entity) =>
         new[] { new KeyValuePair<string, TypeRef>("id", new TypeRef(entity.IdentityName)) };
+
+    /// <summary>The identity strategy rendered as it reads in <c>.koi</c> source — for diagnostics.</summary>
+    private static string DescribeIdentity(EntityDecl entity) => entity.IdStrategy switch
+    {
+        IdentityStrategy.Sequence => "sequence",
+        IdentityStrategy.Natural => $"natural({entity.IdBackingType ?? "String"})",
+        _ => "guid",
+    };
 
     /// <summary>
     /// Validates an entity's identity strategy (R11.1): a <c>natural(T)</c> key must
