@@ -487,12 +487,18 @@ export function createPreferences(cb: PrefsCallbacks): PrefsHandle {
   aiModelInput.placeholder = 'claude-opus-4-8';
 
   const aiAgenticTools = toggle('Compiler tools', (on) => commit({ aiAgenticTools: on }));
+  const aiInlineCompletions = toggle('AI inline completions', (on) => commit({ aiInlineCompletions: on }));
 
   const baseUrlRow = row('Base URL', 'Endpoint for the OpenAI-compatible provider.', aiBaseUrlInput);
   const agenticToolsRow = row(
     'Compiler tools',
     'Let the model validate, compile and format your model mid-chat. Off keeps replies streaming — some local servers (LM Studio) stop streaming when tools are offered.',
     aiAgenticTools.el,
+  );
+  const inlineCompletionsRow = row(
+    'AI inline completions',
+    'Predict the next line as ghost text while you type; Tab accepts, Esc dismisses. Off by default — it sends the surrounding buffer to the provider above on each idle pause, so it spends tokens and no-ops without a configured provider.',
+    aiInlineCompletions.el,
   );
   function syncProviderFields(): void {
     const isOpenai = aiProviderSelect.value === 'openai';
@@ -532,6 +538,7 @@ export function createPreferences(cb: PrefsCallbacks): PrefsHandle {
     row('API key', 'Encrypted in this browser and never leaves this device — sent only to the provider you choose.', aiKeyInput),
     row('Model', 'The model id the assistant requests.', aiModelInput),
     agenticToolsRow,
+    inlineCompletionsRow,
     presets,
   );
 
@@ -925,6 +932,7 @@ export function createPreferences(cb: PrefsCallbacks): PrefsHandle {
     aiKeyInput.value = s.aiApiKey;
     aiModelInput.value = s.aiProvider === 'openai' ? s.aiModelOpenai : s.aiModel;
     aiAgenticTools.set(s.aiAgenticTools);
+    aiInlineCompletions.set(s.aiInlineCompletions);
     traceSelect.value = s.lspTrace;
     mcpEnableToggle.set(s.mcpEnabled);
     mcpClientSelect.value = s.mcpClient;
