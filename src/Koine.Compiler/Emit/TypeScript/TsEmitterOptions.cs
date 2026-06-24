@@ -1,6 +1,24 @@
 namespace Koine.Compiler.Emit.TypeScript;
 
 /// <summary>
+/// A composable layer of the TypeScript target, selected via <c>--layers</c> /
+/// <c>targets.typescript.layers</c> — the TS analogue of <see cref="Koine.Compiler.Emit.CSharp.CSharpLayer"/>.
+/// <see cref="Domain"/> (the domain model + application contracts) is always emitted and is the default;
+/// <see cref="Infrastructure"/> additionally emits a runnable, dependency-light realization of those
+/// contracts (issue #241: concrete repositories over an in-memory store, a unit of work, a transactional
+/// outbox + dispatcher, validation/transaction pipeline behaviors, and a composition-root factory). The
+/// opt-in layer implies <see cref="Domain"/>.
+/// </summary>
+internal enum TsLayer
+{
+    /// <summary>The domain model + application contracts — the historical, always-on output.</summary>
+    Domain,
+
+    /// <summary>The opt-in, dependency-light infrastructure realization of the domain contracts (issue #241).</summary>
+    Infrastructure,
+}
+
+/// <summary>
 /// Per-emit configuration for the TypeScript backend (production-grade emit). Mirrors the C#
 /// <see cref="Koine.Compiler.Emit.CSharp.CSharpEmitterOptions"/> surface for cross-emitter parity.
 /// Every member defaults so the unconfigured emitter (and every existing call site) produces
@@ -37,6 +55,21 @@ internal sealed record TsEmitterOptions
     /// the historical full emit.
     /// </summary>
     public bool ReferenceOnly { get; init; }
+
+    /// <summary>
+    /// The selected composable layers, parsed from the neutral <c>--layers</c> selector (the TS analogue
+    /// of <see cref="Koine.Compiler.Emit.CSharp.CSharpEmitterOptions.Layers"/>). <c>null</c> (the default)
+    /// means Domain-only — output byte-identical to the historical emitter. The opt-in
+    /// <see cref="TsLayer.Infrastructure"/> always implies <see cref="TsLayer.Domain"/>.
+    /// </summary>
+    public IReadOnlySet<TsLayer>? Layers { get; init; }
+
+    /// <summary>
+    /// True when the opt-in Infrastructure layer (issue #241) is requested. The Domain layer is always
+    /// emitted, so a null/empty <see cref="Layers"/> set means Domain-only — output byte-identical to the
+    /// historical emitter.
+    /// </summary>
+    public bool EmitsInfrastructure => Layers is not null && Layers.Contains(TsLayer.Infrastructure);
 
     /// <summary>The canonical no-op options: no source maps, no remapping, full emit — byte-identical output.</summary>
     public static readonly TsEmitterOptions Empty = new();

@@ -53,7 +53,7 @@ Parses and validates the model, then — if you ask for output — emits files.
 |------|---------|--------------|
 | *(positional)* | — | The `.koi` file or directory to compile. Required. |
 | `--target` | `csharp` | The emitter: `csharp`, `typescript`, `python`, `php`, `rust`, `glossary`, `docs`, or `openapi`. |
-| `--layers <list>` | `domain` | (C# only) Comma-separated layers to emit: `domain` (the model + application contracts) and/or `infrastructure` (a runnable EF Core realization — `DbContext`, repositories, unit of work, outbox, DI). `infrastructure` implies `domain`. See [C# infrastructure layer](#c-infrastructure-layer---layers). |
+| `--layers <list>` | `domain` | Comma-separated layers to emit: `domain` (the model + application contracts) and/or `infrastructure` (a runnable realization — EF Core for C#; a dependency-light in-memory realization for TypeScript & Python). `infrastructure` implies `domain`. See [C# infrastructure layer](#c-infrastructure-layer---layers) and [TypeScript & Python infrastructure](#typescript--python-infrastructure---layers). |
 | `--out <dir>` | *(none)* | Write the emitted files under this directory. Omit to only validate. |
 | `--layers <list>` | `domain` | Comma-separated output layers (`domain`, `application`). `application` implies `domain`. C# only. See [the Application layer](#the-c-application-layer). |
 | `--app-mediatr` | *(off)* | Application layer: emit the MediatR request/handler shape + validation/transaction pipeline behaviors instead of plain handlers. |
@@ -136,6 +136,25 @@ Per bounded context, the infrastructure layer adds (under an `Infrastructure/` f
 - an `Add<Context>Infrastructure(this IServiceCollection, Action<DbContextOptionsBuilder>)` DI extension — you supply the database provider, so the emitter stays provider-agnostic.
 
 `--layers domain` (or omitting the flag) keeps the output **byte-identical** to before. EF Core is the only backend in v1.
+
+### TypeScript & Python infrastructure (`--layers`)
+
+The same `--layers infrastructure` selector applies to the **TypeScript** and **Python** targets (issue #241). Instead of a bundled ORM, each emits a **dependency-light** realization of the domain contracts — runnable in tests out of the box, productionized by swapping in a persistent store:
+
+```bash
+koine build templates/pizzeria --target typescript --out Generated --layers domain,infrastructure
+koine build templates/pizzeria --target python     --out GeneratedPy --layers domain,infrastructure
+```
+
+Per bounded context with at least one entity-rooted aggregate, the infrastructure layer adds (under an `infrastructure/` folder):
+
+- a concrete repository over an **injectable `AggregateStore`** with a zero-dependency **in-memory default**; declarative finders compile to concrete lookups;
+- a concrete **unit of work** realizing the per-context contract;
+- a **transactional outbox** (`OutboxMessage` + a drainable `IntegrationEventDispatcher`) — only when the context publishes an integration event;
+- **validation + transaction pipeline behaviors** (the idiomatic analogue of the C# MediatR decorators);
+- a **composition-root factory** (TypeScript `create<Context>Infrastructure`) / **provider helper** (Python `create_<context>_infrastructure`) — the analogue of C#'s `Add<Context>Infrastructure`.
+
+The shared primitives live once in an emitted `infrastructure-runtime.ts` / `koine_infrastructure.py`. The layer is **off by default**, so an unconfigured emit stays **byte-identical**; the generated TypeScript is `tsc --strict`-clean and the Python is `mypy --strict`-clean.
 
 ### Emit a glossary
 
