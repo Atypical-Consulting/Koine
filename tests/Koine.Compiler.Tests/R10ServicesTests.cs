@@ -148,6 +148,26 @@ public class R10ServicesTests
     }
 
     [Fact]
+    public void Spec_call_in_operation_body_emits_a_real_call()
+    {
+        // A service operation may invoke a declared spec on a parameter of the spec's
+        // target type; it must translate to the generated extension-method call, not the
+        // `/* unsupported call */` fallback.
+        const string src = """
+            context Sales {
+              value Order { lineCount: Int  total: Decimal }
+              spec IsLarge on Order = lineCount > 10 || total > 1000
+              service OrderRouting {
+                operation isPriority(o: Order): Bool = o.IsLarge()
+              }
+            }
+            """;
+        var (_, files) = Compile(src);
+        files.ShouldContain("o.IsLarge()");
+        files.ShouldNotContain("/* unsupported call");
+    }
+
+    [Fact]
     public void Seam_operation_emits_an_abstract_class()
     {
         const string src = "context C { service Calc { operation run(a: Int): Int } }";
