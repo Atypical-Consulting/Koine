@@ -47,10 +47,12 @@ per idea.
 1. **Preconditions** — confirm `gh` works and you're in the repo.
 2. **Capture the idea(s)** — from the user's message; don't interrogate.
 3. **Build a template-compliant body** — read the live issue template and fill it.
-4. **Create the issue** — `gh issue create`, capture the number/URL.
+4. **Create the issue** — choose labels from the repo's taxonomy (type + priority + `studio` when
+   it fits), `gh issue create`, capture the number/URL.
 5. **Comment 1 — Brainstorm**, then **Comment 2 — Spec** (both via `superpowers:brainstorming`).
 6. **Comment 3 — Implementation plan** (via `superpowers:writing-plans`) — keep its `- [ ]`
-   checkbox task-list format so the plan is trackable on the issue.
+   checkbox task-list format so the plan is trackable on the issue, then set the `effort:` label now
+   that the plan reveals the real scope.
 7. **Report** — list each issue with its URL.
 
 ---
@@ -102,18 +104,49 @@ Write the body to a temp file and create with `--body-file` (clean multi-line ha
 `references/issue-template.md` for a worked feature_request example and the exact field→heading
 mapping.
 
-## Step 4 — Create the issue
+## Step 4 — Choose labels, then create the issue
+
+This repo carries a small, deliberate label taxonomy that the maintainer actually uses for triage —
+applying it is the difference between an issue that lands sorted and one that sits unlabelled. Read
+the **live** set first (labels drift; never apply one that isn't there):
+
+```bash
+gh label list --limit 100
+```
+
+Pick across four axes. Most issues get **type + priority + effort**, plus **`studio`** when it fits —
+and none of these are guesses, they're the labels your own analysis already implies:
+
+- **Type** — `enhancement` for an idea/feature (the common case, and what the feature_request
+  template declares) or `bug` for a defect. Match whichever template you built the body from.
+- **Priority** — exactly one tier, read from how essential the idea is (the same judgment your
+  brainstorm's Recommendation makes):
+  - `priority: high` — Tier 1: below a universal bar / a core deliverable the product needs.
+  - `priority: medium` — Tier 2: an expected capability that's partial or absent. The safe default
+    when an idea is clearly worth doing but not load-bearing.
+  - `priority: low` — Tier 3: a differentiator or polish.
+- **Effort** — exactly one size estimate, but you can only judge it honestly once the implementation
+  plan exists, so **apply it in Step 6, not here.** (`effort: S` ≈ hours–1 day · `effort: M` ≈ a few
+  days · `effort: L` ≈ ~1-2 weeks / cross-layer · `effort: XL` ≈ multi-week / phased.)
+- **Scope** — add `studio` when the idea concerns the Koine Studio IDE (`tooling/koine-studio`).
+  It's the one area label that's earned its keep; don't invent new area labels — the feature_request
+  *Area* dropdown already captures finer scope inside the body.
+
+Per the Autonomy contract, just **decide** — pick the labels your framing implies and note the call
+in the final report; don't open a Q&A about triage. Create with type + priority (+ `studio`); effort
+follows in Step 6:
 
 ```bash
 gh issue create \
   --title "Add Python emitter target" \
   --label enhancement \
+  --label "priority: medium" \
   --body-file /tmp/koine-issue-<slug>.md
 ```
 
-Capture the printed URL and issue number — you need the number for the comments. If a label in the
-template doesn't exist on the remote, create the issue without it rather than failing, and mention
-it in the final report.
+Capture the printed URL and issue number — you need it for the comments and the effort label. If a
+chosen label isn't in the live list, create the issue without it rather than failing, and flag the
+gap in the final report.
 
 ## Step 5 — Comments 1 & 2: Brainstorm, then Spec
 
@@ -198,10 +231,22 @@ the format most reliably — the plan comes back as one clean artifact instead o
 skill's own framing mid-stream (issue #21, which kept the checkboxes, was generated that way).
 Inline generation is fine too, as long as the `grep` check above passes before you post.
 
+**Now set the effort label** (deferred from Step 4). The plan is the honest scope signal — its task
+count and the layers it crosses map straight onto the size buckets, so estimate from what you just
+wrote: a one-task tweak is `effort: S`, a few tasks within one layer `effort: M`, a cross-layer
+feature (grammar → … → emitter → tests, the usual new-construct shape) `effort: L`, a phased
+multi-week effort `effort: XL`. Apply it to the live issue:
+
+```bash
+gh issue edit <number> --add-label "effort: M"
+```
+
 ## Step 7 — Report
 
-List every issue created with its title and URL, and flag anything you assumed or skipped (e.g. a
-missing label). Keep it short — the issues themselves carry the detail.
+List every issue created with its title, URL, and the labels you applied (type / priority / effort /
+`studio`), and flag anything you assumed or skipped (e.g. a chosen label that wasn't in the live
+list). Surfacing the labels lets the maintainer re-triage with one glance if your call was off. Keep
+it short — the issues themselves carry the detail.
 
 ---
 
