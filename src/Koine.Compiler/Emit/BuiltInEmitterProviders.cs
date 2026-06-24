@@ -34,6 +34,10 @@ internal sealed class CSharpEmitterProvider : IEmitterProvider
 {
     public string Target => "csharp";
 
+    public string DisplayName => "C#";
+
+    public string FileExtension => ".cs";
+
     public IEmitter Create(EmitterOptions options) => new CSharpEmitter(ToCSharpOptions(options));
 
     /// <summary>
@@ -98,6 +102,10 @@ internal sealed class TypeScriptEmitterProvider : IEmitterProvider
 {
     public string Target => "typescript";
 
+    public string DisplayName => "TypeScript";
+
+    public string FileExtension => ".ts";
+
     public IEmitter Create(EmitterOptions options) => new TypeScriptEmitter(ToTsOptions(options));
 
     /// <summary>
@@ -128,6 +136,10 @@ internal sealed class TypeScriptEmitterProvider : IEmitterProvider
 internal sealed class PythonEmitterProvider : IEmitterProvider
 {
     public string Target => "python";
+
+    public string DisplayName => "Python";
+
+    public string FileExtension => ".py";
 
     public IEmitter Create(EmitterOptions options) => new PythonEmitter(ToPythonOptions(options));
 
@@ -166,6 +178,10 @@ internal sealed class PhpEmitterProvider : IEmitterProvider
 {
     public string Target => "php";
 
+    public string DisplayName => "PHP";
+
+    public string FileExtension => ".php";
+
     public IEmitter Create(EmitterOptions options) => new PhpEmitter(ToPhpOptions(options));
 
     /// <summary>
@@ -189,6 +205,10 @@ internal sealed class PhpEmitterProvider : IEmitterProvider
 internal sealed class RustEmitterProvider : IEmitterProvider
 {
     public string Target => "rust";
+
+    public string DisplayName => "Rust";
+
+    public string FileExtension => ".rs";
 
     public IEmitter Create(EmitterOptions options) => new RustEmitter(ToRustOptions(options));
 
@@ -220,6 +240,9 @@ internal sealed class GlossaryEmitterProvider : IEmitterProvider
 {
     public string Target => "glossary";
 
+    /// <summary>The glossary is documentation, not a code-emit target the IDE offers (issue #282).</summary>
+    public bool IsEmitTarget => false;
+
     public IEmitter Create(EmitterOptions options) => new GlossaryEmitter();
 }
 
@@ -227,6 +250,9 @@ internal sealed class GlossaryEmitterProvider : IEmitterProvider
 internal sealed class DocsEmitterProvider : IEmitterProvider
 {
     public string Target => "docs";
+
+    /// <summary>Living docs is documentation, not a code-emit target the IDE offers (issue #282).</summary>
+    public bool IsEmitTarget => false;
 
     public IEmitter Create(EmitterOptions options) => new DocsEmitter();
 }
