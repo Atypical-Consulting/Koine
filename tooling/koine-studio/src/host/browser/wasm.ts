@@ -1,61 +1,64 @@
-// Loads the Koine.Wasm compiler module in the browser and exposes its [JSExport] language-service
-// surface. The bundle (_framework/dotnet.js + assemblies) is published by scripts/build-wasm.mjs
-// into public/koine-wasm/, so it is served as a static asset at `${BASE_URL}koine-wasm/`. Mirrors
-// the docs-site Playground loader (website/src/playground/koine.ts): boot the runtime once, cache
-// the promise, and resolve the exports lazily.
+// Loads the Koine.Wasm compiler module in a Web Worker (off the UI thread) and exposes its
+// [JSExport] language-service surface as an async proxy. The bundle (_framework/dotnet.js +
+// assemblies) is published by scripts/build-wasm.mjs into public/koine-wasm/, so it is served as
+// a static asset at `${BASE_URL}koine-wasm/`. The worker boots the .NET runtime via a worker-side
+// dynamic import (no DOM needed), then posts a `ready` signal. The main thread talks to it over a
+// typed id-correlated request/response protocol implemented in workerClient.ts.
+
+import { createKoineWorkerClient, type WorkerClient } from '@/host/browser/workerClient';
 
 /** The JS-callable language-service surface (matches src/Koine.Wasm/CompilerInterop.LanguageService.cs). */
 export interface KoineWasmApi {
   /** Diagnose the merged workspace → JSON `[{uri, diagnostics:[lsp]}]`. */
-  DiagnoseWorkspace(filesJson: string): string;
+  DiagnoseWorkspace(filesJson: string): Promise<string>;
   /** Emit-preview the merged workspace for a target → JSON EmitPreviewResult. */
-  EmitPreview(filesJson: string, target: string): string;
+  EmitPreview(filesJson: string, target: string): Promise<string>;
   /** The registry's emit-target capability list → JSON `{ targets:[{id,displayName,fileExtension}] }` (#282). */
-  ListEmitTargets(): string;
+  ListEmitTargets(): Promise<string>;
   /** Glossary markdown for the merged workspace → JSON `{markdown}`. */
-  Glossary(filesJson: string): string;
+  Glossary(filesJson: string): Promise<string>;
   /** Structured glossary for the merged workspace → JSON `{entries}`. */
-  GlossaryModel(filesJson: string): string;
+  GlossaryModel(filesJson: string): Promise<string>;
   /** Structured model graph (whole tree, or the subtree at `qname`) → JSON ModelNode (#91). */
-  Model(filesJson: string, qname: string | null): string;
+  Model(filesJson: string, qname: string | null): Promise<string>;
   /** Editable children of the node at `qname` → JSON `{members}` (#91). */
-  ModelMembers(filesJson: string, qname: string): string;
+  ModelMembers(filesJson: string, qname: string): Promise<string>;
   /** Apply a structured edit → JSON `{koine, diagnostics}` (#91). */
-  EmitKoine(filesJson: string, editJson: string): string;
+  EmitKoine(filesJson: string, editJson: string): Promise<string>;
   /** Apply a structured edit → JSON `{uri, edits, diagnostics}` (#91). */
-  ApplyModelEdit(filesJson: string, editJson: string): string;
+  ApplyModelEdit(filesJson: string, editJson: string): Promise<string>;
   /** Strategic context map → JSON `{contexts, relations}`. */
-  ContextMap(filesJson: string): string;
+  ContextMap(filesJson: string): Promise<string>;
   /** Set a declaration's doc comment by id → JSON `{uri, edits:[TextEdit]}`. */
-  SetDoc(filesJson: string, id: string, text: string): string;
+  SetDoc(filesJson: string, id: string, text: string): Promise<string>;
   /** Hover at a 0-based position → JSON Hover or `null`. */
-  Hover(filesJson: string, activeUri: string, line: number, character: number): string;
+  Hover(filesJson: string, activeUri: string, line: number, character: number): Promise<string>;
   /** IntelliSense completions at a 0-based position → JSON CompletionList. */
-  Completions(filesJson: string, activeUri: string, line: number, character: number): string;
+  Completions(filesJson: string, activeUri: string, line: number, character: number): Promise<string>;
   /** Go-to-definition at a 0-based position → JSON Location or `null`. */
-  Definition(filesJson: string, activeUri: string, line: number, character: number): string;
+  Definition(filesJson: string, activeUri: string, line: number, character: number): Promise<string>;
   /** Signature help at a 0-based position → JSON SignatureHelp or `null`. */
-  SignatureHelp(filesJson: string, activeUri: string, line: number, character: number): string;
+  SignatureHelp(filesJson: string, activeUri: string, line: number, character: number): Promise<string>;
   /** Workspace-wide symbol search → JSON SymbolInformation[] (subsequence-matches `query`). */
-  WorkspaceSymbols(filesJson: string, query: string): string;
+  WorkspaceSymbols(filesJson: string, query: string): Promise<string>;
   /** Single-file document outline → JSON DocumentSymbol[]. */
-  DocumentSymbols(source: string): string;
+  DocumentSymbols(source: string): Promise<string>;
   /** Collapsible regions of a single file → JSON FoldingRange[] (`{startLine,endLine}`). */
-  FoldingRanges(source: string): string;
+  FoldingRanges(source: string): Promise<string>;
   /** Selection-range chains for a set of 0-based positions → JSON SelectionRange[] (parallel). */
-  SelectionRanges(source: string, positionsJson: string): string;
+  SelectionRanges(source: string, positionsJson: string): Promise<string>;
   /** Code lenses of the active document → JSON CodeLens[] (`{range, title}`, reference counts). */
-  CodeLenses(filesJson: string, activeUri: string): string;
+  CodeLenses(filesJson: string, activeUri: string): Promise<string>;
   /** Canonical formatting edits → JSON TextEdit[]. */
-  Format(source: string): string;
+  Format(source: string): Promise<string>;
   /** Compatibility of current vs baseline workspace → JSON CheckResult. */
-  Check(currentFilesJson: string, baselineFilesJson: string): string;
+  Check(currentFilesJson: string, baselineFilesJson: string): Promise<string>;
   /** Every reference to the name at a 0-based position → JSON Location[]. */
-  References(filesJson: string, activeUri: string, line: number, character: number): string;
+  References(filesJson: string, activeUri: string, line: number, character: number): Promise<string>;
   /** Editable identifier range under the cursor → JSON `{range, placeholder}` or `null`. */
-  PrepareRename(filesJson: string, activeUri: string, line: number, character: number): string;
+  PrepareRename(filesJson: string, activeUri: string, line: number, character: number): Promise<string>;
   /** Workspace edit renaming the symbol under the cursor → JSON WorkspaceEdit or `null`. */
-  Rename(filesJson: string, activeUri: string, line: number, character: number, newName: string): string;
+  Rename(filesJson: string, activeUri: string, line: number, character: number, newName: string): Promise<string>;
   /** Quickfixes + refactors for a 0-based range → JSON CodeAction[]. */
   CodeActions(
     filesJson: string,
@@ -65,13 +68,13 @@ export interface KoineWasmApi {
     endLine: number,
     endChar: number,
     diagnosticsJson: string,
-  ): string;
+  ): Promise<string>;
   /** Living-documentation files (Mermaid-in-Markdown) for the merged workspace → JSON `{files}`. */
-  Docs(filesJson: string): string;
+  Docs(filesJson: string): Promise<string>;
   /** Run a scenario (#149) → JSON ScenarioResult (command → events → invariant-checks). */
-  RunScenario(filesJson: string, target: string, operation: string, givenJson: string, argsJson: string): string;
+  RunScenario(filesJson: string, target: string, operation: string, givenJson: string, argsJson: string): Promise<string>;
   /** Runnable surface of the workspace (#149) → JSON ScenarioCatalog (`{targets}`). */
-  ScenarioCatalog(filesJson: string): string;
+  ScenarioCatalog(filesJson: string): Promise<string>;
   /** Inlay hints (type/parameter annotations) for a 0-based range → JSON InlayHint[]. */
   InlayHints(
     filesJson: string,
@@ -80,113 +83,80 @@ export interface KoineWasmApi {
     startChar: number,
     endLine: number,
     endChar: number,
-  ): string;
+  ): Promise<string>;
   /** Prepare call hierarchy at a 0-based position → JSON CallHierarchyItem[]. */
-  PrepareCallHierarchy(filesJson: string, activeUri: string, line: number, character: number): string;
+  PrepareCallHierarchy(filesJson: string, activeUri: string, line: number, character: number): Promise<string>;
   /** Incoming calls into a CallHierarchyItem (passed as JSON) → JSON CallHierarchyIncomingCall[]. */
-  IncomingCalls(filesJson: string, itemJson: string): string;
+  IncomingCalls(filesJson: string, itemJson: string): Promise<string>;
   /** Outgoing calls from a CallHierarchyItem (passed as JSON) → JSON CallHierarchyOutgoingCall[]. */
-  OutgoingCalls(filesJson: string, itemJson: string): string;
+  OutgoingCalls(filesJson: string, itemJson: string): Promise<string>;
 }
 
 /**
- * The names of every [JSExport] method the compiler bundle is expected to provide (keep in sync with
- * `KoineWasmApi` above). The guard only flags a *known* export name that failed to resolve as a stale
- * bundle; any other property access (`then`, `toString`, `catch`, …) must pass through untouched — see
- * `guardWasmSurface`.
+ * Every [JSExport] method the compiler bundle is expected to provide. This set is the single source of
+ * truth and it must be COMPLETE: `buildWorkerProxy` forwards a call only when the method name is in
+ * this set (a name not here resolves to `undefined`, i.e. an unforwarded method), and `guardWasmSurface`
+ * flags a known export name that failed to resolve as a stale bundle. Any other property access (`then`,
+ * `toString`, `catch`, …) passes through untouched.
+ *
+ * Completeness is **compiler-enforced**: the source map is typed `Record<keyof KoineWasmApi, true>`, so
+ * adding a method to `KoineWasmApi` without listing it here is a `tsc` error (and vice-versa). This
+ * prevents the silent drift where a real export is omitted and its feature stops being forwarded.
  */
-const KOINE_WASM_EXPORTS: ReadonlySet<string> = new Set<keyof KoineWasmApi>([
-  'DiagnoseWorkspace',
-  'EmitPreview',
-  'ListEmitTargets',
-  'Glossary',
-  'GlossaryModel',
-  'ContextMap',
-  'SetDoc',
-  'Hover',
-  'Completions',
-  'Definition',
-  'SignatureHelp',
-  'WorkspaceSymbols',
-  'DocumentSymbols',
-  'FoldingRanges',
-  'SelectionRanges',
-  'CodeLenses',
-  'Format',
-  'Check',
-  'References',
-  'PrepareRename',
-  'Rename',
-  'CodeActions',
-  'Docs',
-  'RunScenario',
-  'ScenarioCatalog',
-  'InlayHints',
-  'PrepareCallHierarchy',
-  'IncomingCalls',
-  'OutgoingCalls',
-]);
+const KOINE_WASM_EXPORT_MAP: Record<keyof KoineWasmApi, true> = {
+  DiagnoseWorkspace: true,
+  EmitPreview: true,
+  ListEmitTargets: true,
+  Glossary: true,
+  GlossaryModel: true,
+  Model: true,
+  ModelMembers: true,
+  EmitKoine: true,
+  ApplyModelEdit: true,
+  ContextMap: true,
+  SetDoc: true,
+  Hover: true,
+  Completions: true,
+  Definition: true,
+  SignatureHelp: true,
+  WorkspaceSymbols: true,
+  DocumentSymbols: true,
+  FoldingRanges: true,
+  SelectionRanges: true,
+  CodeLenses: true,
+  Format: true,
+  Check: true,
+  References: true,
+  PrepareRename: true,
+  Rename: true,
+  CodeActions: true,
+  Docs: true,
+  RunScenario: true,
+  ScenarioCatalog: true,
+  InlayHints: true,
+  PrepareCallHierarchy: true,
+  IncomingCalls: true,
+  OutgoingCalls: true,
+};
+
+const KOINE_WASM_EXPORTS: ReadonlySet<string> = new Set(Object.keys(KOINE_WASM_EXPORT_MAP));
 
 let apiPromise: Promise<KoineWasmApi> | null = null;
-let loaderSeq = 0;
+let workerClientInstance: WorkerClient | null = null;
 
-/** Base-aware URL of the published dotnet.js loader (respects Vite's `base`, e.g. `/Koine/studio/`). */
-function dotnetEntryUrl(): string {
-  const base = (import.meta.env.BASE_URL ?? '/').replace(/\/$/, '');
-  return `${base}/koine-wasm/_framework/dotnet.js`;
-}
+/** Pattern that the worker emits for an export that isn't a function on the interop surface. */
+const WORKER_MISSING_EXPORT_RE = /^Koine WASM export "([^"]+)" is not a function$/;
 
 /**
- * Import the dotnet.js ES module by URL via an injected inline module script. We deliberately do NOT
- * call `import(url)` from app code: under Vite's dev server a dynamic import of a `public/` asset is
- * routed through the module-transform pipeline (the `?import` suffix) and fails on the
- * machine-generated loader (Vite forbids importing public JS as a module). An inline
- * `<script type="module">` is invisible to Vite, so the browser fetches dotnet.js — and its relative
- * dependencies — as raw static files. Works identically for the built / deployed bundle.
- */
-function importEsModule(url: string): Promise<Record<string, unknown>> {
-  return new Promise((resolve, reject) => {
-    const id = `__koineDotnet_${++loaderSeq}`;
-    const w = window as unknown as Record<string, unknown>;
-    const cleanup = () => {
-      delete w[id];
-      delete w[`${id}_err`];
-    };
-    w[id] = (mod: Record<string, unknown>) => {
-      cleanup();
-      resolve(mod);
-    };
-    w[`${id}_err`] = (message: string) => {
-      cleanup();
-      reject(new Error(message));
-    };
-    const script = document.createElement('script');
-    script.type = 'module';
-    // The inline module is never seen by Vite; its own `import()` is a plain browser fetch.
-    script.textContent =
-      `import(${JSON.stringify(url)}).then(` +
-      `m => window.${id}(m), e => window.${id}_err(String((e && e.message) || e)));`;
-    script.addEventListener('error', () => {
-      cleanup();
-      reject(new Error(`failed to load ${url}`));
-    });
-    document.head.appendChild(script);
-    // Safety net so a silent failure can't hang the LSP handshake forever.
-    setTimeout(() => {
-      if (w[id]) {
-        cleanup();
-        reject(new Error(`timed out loading ${url}`));
-      }
-    }, 30000);
-  });
-}
-
-/**
- * Wrap the resolved [JSExport] surface so calling a method the bundle doesn't export fails with an
- * actionable message instead of a bare `TypeError: api.X is not a function`. The bundle in
+ * Wrap the worker client so calling a method the bundle doesn't export fails with an actionable
+ * message instead of a bare `Error: Koine WASM export "X" is not a function`. The bundle in
  * `public/koine-wasm/` is generated by `npm run build:wasm` (auto-run by the `predev:web` /
  * `prebuild:web` hooks) and goes stale whenever CompilerInterop.LanguageService.cs gains a new
  * [JSExport] — so a missing method means "rebuild the bundle", which is what we say.
+ *
+ * Property access for non-exports (`then`, `toString`, …) must still pass through untouched —
+ * the Promise resolution machinery probes `value.then` to decide if the resolved value is a
+ * thenable, so returning a throwing function there would make the language-server boot reject.
  */
 export function guardWasmSurface(raw: Record<string, unknown>): KoineWasmApi {
   return new Proxy(raw, {
@@ -210,16 +180,62 @@ export function guardWasmSurface(raw: Record<string, unknown>): KoineWasmApi {
   }) as unknown as KoineWasmApi;
 }
 
-/** Boot the .NET runtime once and resolve the compiler's [JSExport] surface. */
+/**
+ * Build a `KoineWasmApi` proxy whose every known method forwards to `client.call(name, args)`.
+ * A call to a known export that the worker rejects as missing (the worker throws
+ * `Koine WASM export "<method>" is not a function`) is re-raised as the stale-bundle message so
+ * callers see the same actionable error they would from `guardWasmSurface`.
+ *
+ * Property access for non-exports (`then`, `toString`, …) must pass through untouched — see the
+ * thenable-probe comment in `guardWasmSurface`.
+ */
+function buildWorkerProxy(call: (method: string, args: unknown[]) => Promise<string>): KoineWasmApi {
+  const handler: ProxyHandler<object> = {
+    get(_target, prop, _receiver) {
+      // Pass through symbols and non-export strings (then, toString, catch, …) without wrapping.
+      // This is critical: the Promise machinery probes `.then` on the resolved value to decide
+      // if it's a thenable — intercepting it would cause the boot to reject spuriously.
+      if (typeof prop !== 'string' || !KOINE_WASM_EXPORTS.has(prop)) {
+        return undefined;
+      }
+      // Return an async function that forwards the call to the worker client.
+      return (...args: unknown[]): Promise<string> =>
+        call(prop, args).catch((err: unknown) => {
+          // If the worker reports the export as missing, surface the stale-bundle message.
+          const message = err instanceof Error ? err.message : String(err);
+          const match = WORKER_MISSING_EXPORT_RE.exec(message);
+          if (match) {
+            throw new Error(
+              `Koine WASM export "${match[1]}" is missing — the compiler bundle in public/koine-wasm/ is ` +
+                `stale. Rebuild it with: npm run build:wasm`,
+            );
+          }
+          throw err;
+        });
+    },
+  };
+  return new Proxy({}, handler) as unknown as KoineWasmApi;
+}
+
+/** Boot the worker once and resolve the compiler's [JSExport] surface as an async proxy. */
 export function loadWasmApi(): Promise<KoineWasmApi> {
   if (apiPromise) return apiPromise;
   apiPromise = (async () => {
-    const mod = await importEsModule(dotnetEntryUrl());
-    const dotnet = mod.dotnet as { create(): Promise<any> };
-    const runtime = await dotnet.create();
-    const config = runtime.getConfig();
-    const exports = await runtime.getAssemblyExports(config.mainAssemblyName);
-    return guardWasmSurface(exports.Koine.Wasm.CompilerInterop as Record<string, unknown>);
+    const client = createKoineWorkerClient();
+    workerClientInstance = client;
+    // Await the worker's `ready` signal (or reject on boot-failure / 30 s timeout).
+    await client.whenReady();
+    return buildWorkerProxy(client.call.bind(client));
   })();
   return apiPromise;
+}
+
+/**
+ * Returns the underlying `WorkerClient` once the WASM API has been loaded, or `null` before
+ * `loadWasmApi()` has been called. Exposes cancellation primitives (`cancel`, `terminateAndRespawn`)
+ * to callers (e.g. a transport-level superseder) without changing `KoineWasmApi` method signatures.
+ * Additive — existing callers of `loadWasmApi()` are unaffected.
+ */
+export function getWasmWorkerClient(): WorkerClient | null {
+  return workerClientInstance;
 }
