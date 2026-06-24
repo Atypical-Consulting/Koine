@@ -40,6 +40,12 @@ internal sealed class ReferenceDisciplineAnalyzer : IModelAnalyzer
                     case ValueObjectDecl vo:
                         CheckValueObject(vo, index, diagnostics);
                         break;
+                    case EventDecl ev:
+                        CheckDomainEvent(ev, index, diagnostics);
+                        break;
+                    case EntityDecl entity:
+                        CheckEntityBehaviors(entity, index, diagnostics);
+                        break;
                 }
             }
         }
@@ -55,14 +61,67 @@ internal sealed class ReferenceDisciplineAnalyzer : IModelAnalyzer
         foreach (Member m in vo.Members)
         {
             CheckMemberType(
-                m.Name, m.Type, index, IsAllowedInValueObject,
+                m.Name, m.Type, index, IsAllowedAsData,
                 DiagnosticCodes.ValueObjectReferencesEntity,
                 (name, t) => $"value-object field '{name}' references '{t}'; a value object has no identity and must be composed only of primitives, enums, ID value objects, and other value objects",
                 diagnostics);
         }
     }
 
-    private static bool IsAllowedInValueObject(TypeKind kind) => kind switch
+    /// <summary>
+    /// A domain event is an immutable record of what happened: its fields carry data and identities,
+    /// not live entity/aggregate references (those would not serialize and would couple the event to a
+    /// mutable object) — KOI1604.
+    /// </summary>
+    private static void CheckDomainEvent(EventDecl ev, ModelIndex index, List<Diagnostic> diagnostics)
+    {
+        foreach (Member m in ev.Members)
+        {
+            CheckMemberType(
+                m.Name, m.Type, index, IsAllowedAsData,
+                DiagnosticCodes.DomainEventReferencesEntity,
+                (name, t) => $"domain-event field '{name}' references '{t}'; a domain event carries data and identities (e.g. an Id), not entity or aggregate references",
+                diagnostics);
+        }
+    }
+
+    /// <summary>
+    /// A command or factory is a message/use-case: its parameters carry data and identities, not live
+    /// entity/aggregate references — the caller passes an Id and the handler loads the aggregate (KOI1603).
+    /// </summary>
+    private static void CheckEntityBehaviors(EntityDecl entity, ModelIndex index, List<Diagnostic> diagnostics)
+    {
+        foreach (CommandDecl cmd in entity.Commands)
+        {
+            CheckParameters("command", cmd.Parameters, index, diagnostics);
+        }
+
+        foreach (FactoryDecl factory in entity.Factories)
+        {
+            CheckParameters("factory", factory.Parameters, index, diagnostics);
+        }
+    }
+
+    private static void CheckParameters(
+        string kind, IReadOnlyList<Param> parameters, ModelIndex index, List<Diagnostic> diagnostics)
+    {
+        foreach (Param p in parameters)
+        {
+            CheckMemberType(
+                p.Name, p.Type, index, IsAllowedAsData,
+                DiagnosticCodes.CommandParameterReferencesEntity,
+                (name, t) => $"{kind} parameter '{name}' references '{t}'; a {kind} carries data and identities (e.g. an Id), not entity or aggregate references",
+                diagnostics);
+        }
+    }
+
+    /// <summary>
+    /// The kinds allowed wherever a building block holds <em>data</em> (a value-object member, a
+    /// domain-event field, or a command/factory parameter): primitives, enums, ID value objects, and
+    /// other value objects, plus collections of those. Reference types (entity, aggregate, domain/
+    /// integration event, read model, query) are not data and are rejected by the caller's rule.
+    /// </summary>
+    private static bool IsAllowedAsData(TypeKind kind) => kind switch
     {
         TypeKind.Primitive or TypeKind.List or TypeKind.Set or TypeKind.Map or TypeKind.Range => true,
         TypeKind.Enum or TypeKind.Value or TypeKind.IdValueObject => true,

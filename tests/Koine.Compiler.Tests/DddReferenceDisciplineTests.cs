@@ -70,4 +70,101 @@ public class DddReferenceDisciplineTests
 
         Diagnose(src).ShouldContain(d => d.Code == DiagnosticCodes.ValueObjectReferencesEntity);
     }
+
+    // ---- KOI1604: domain events carry data and identities, not entities ----
+
+    [Fact]
+    public void A_domain_event_field_referencing_an_entity_is_reported()
+    {
+        const string src = """
+            context Sales {
+              entity Order identified by OrderId {
+                total: Decimal
+              }
+              event OrderShipped {
+                order: Order
+              }
+            }
+            """;
+
+        Diagnose(src).ShouldContain(d => d.Code == DiagnosticCodes.DomainEventReferencesEntity);
+    }
+
+    [Fact]
+    public void A_domain_event_referencing_by_id_is_clean()
+    {
+        const string src = """
+            context Sales {
+              entity Order identified by OrderId {
+                total: Decimal
+              }
+              event OrderShipped {
+                order: OrderId
+              }
+            }
+            """;
+
+        Diagnose(src).ShouldNotContain(d => d.Code == DiagnosticCodes.DomainEventReferencesEntity);
+    }
+
+    // ---- KOI1603: command/factory parameters carry data and identities -----
+
+    [Fact]
+    public void A_command_parameter_typed_as_an_entity_is_reported()
+    {
+        const string src = """
+            context Sales {
+              entity Customer identified by CustomerId {
+                name: String
+              }
+              entity Order identified by OrderId {
+                total: Decimal
+                command assign(customer: Customer) {
+                  requires total > 0   "must have a total"
+                }
+              }
+            }
+            """;
+
+        Diagnose(src).ShouldContain(d => d.Code == DiagnosticCodes.CommandParameterReferencesEntity);
+    }
+
+    [Fact]
+    public void A_command_parameter_typed_as_an_id_is_clean()
+    {
+        const string src = """
+            context Sales {
+              entity Customer identified by CustomerId {
+                name: String
+              }
+              entity Order identified by OrderId {
+                total: Decimal
+                command assign(customer: CustomerId) {
+                  requires total > 0   "must have a total"
+                }
+              }
+            }
+            """;
+
+        Diagnose(src).ShouldNotContain(d => d.Code == DiagnosticCodes.CommandParameterReferencesEntity);
+    }
+
+    [Fact]
+    public void A_factory_parameter_typed_as_an_entity_is_reported()
+    {
+        const string src = """
+            context Sales {
+              entity Customer identified by CustomerId {
+                name: String
+              }
+              entity Order identified by OrderId {
+                total: Decimal
+                create newOrder(customer: Customer) {
+                }
+              }
+            }
+            """;
+
+        Diagnose(src).ShouldContain(d => d.Code == DiagnosticCodes.CommandParameterReferencesEntity);
+    }
 }
