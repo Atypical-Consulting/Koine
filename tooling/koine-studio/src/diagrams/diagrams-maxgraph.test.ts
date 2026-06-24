@@ -491,7 +491,7 @@ describe('position persistence', () => {
 
   test('saved positions override the auto-layout (a hand-placed node does not snap back)', () => {
     const container = makeContainer();
-    const handle = buildCanvas(mx, container, { nodes: [cls('Ordering.Order')], edges: [] }, { 'Ordering.Order': { x: 500, y: 120 } });
+    const handle = buildCanvas(mx, container, { nodes: [cls('Ordering.Order')], edges: [] }, { positions: { 'Ordering.Order': { x: 500, y: 120 } }, notes: [], groups: [] });
     try {
       const geo = handle.cells.get('Ordering.Order')!.getGeometry()!;
       expect(geo.x).toBe(500);

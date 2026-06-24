@@ -24,6 +24,7 @@ import {
   isEditableKind,
   type DiagramConnectDetail,
   type DiagramDisconnectDetail,
+  type DiagramLayout,
   type DiagramLayoutStore,
   type DiagramNodeEditDetail,
   type DiagramNodeNavigateDetail,
@@ -312,7 +313,7 @@ export function buildCanvas(
   mx: Mx,
   container: HTMLElement,
   merged: DiagramGraph,
-  savedPositions?: Record<string, DiagramPosition>,
+  savedLayout?: DiagramLayout,
 ): CanvasHandle {
   const { Graph } = mx;
   const editing = isDiagramEditing();
@@ -579,13 +580,18 @@ export function buildCanvas(
 
   runTwoLevelLayout(mx, graph);
   // A saved manual layout overrides the auto-arrange (so a hand-positioned diagram doesn't snap back).
-  if (savedPositions) applySavedPositions(graph, cells, savedPositions);
+  if (savedLayout?.positions) applySavedPositions(graph, cells, savedLayout.positions);
+
+  // The canvas-only annotations (notes, groups) ride along with the saved layout; the renderer preserves
+  // them through every position save so a drag never drops them (rendering + editing land in #255 Task 2/3).
+  const notes = savedLayout?.notes ?? [];
+  const groups = savedLayout?.groups ?? [];
 
   // Persist a drag: snapshot ALL node positions on move (one drag freezes the layout to manual, matching
   // the SVG renderer) and hand them to the active layout store. Attached AFTER layout/apply so neither
   // triggers a spurious save (both use setGeometry, not moveCells — but order keeps the intent clear).
   graph.addListener(mx.InternalEvent.CELLS_MOVED, () => {
-    activeLayoutStore().save(snapshotPositions(cells));
+    activeLayoutStore().save({ positions: snapshotPositions(cells), notes, groups });
   });
 
   return {
@@ -769,8 +775,9 @@ export function createMaxGraphRenderer(): DiagramRenderer {
       const merged = mergeGraphsForView(graphs);
 
       // Restore any saved manual layout for this workspace (committable koine.layout.json, or browser
-      // storage). Async — re-check isCurrent() after it so a superseded render bails before touching DOM.
-      const savedPositions = await activeLayoutStore().load();
+      // storage) — node positions plus canvas-only annotations. Async — re-check isCurrent() after it so
+      // a superseded render bails before touching DOM.
+      const savedLayout = await activeLayoutStore().load();
       if (!isCurrent()) return;
 
       // Build into a detached host so a superseded render never half-paints the live canvas.
@@ -781,7 +788,7 @@ export function createMaxGraphRenderer(): DiagramRenderer {
       surface.className = 'koi-canvas';
       root.appendChild(surface);
 
-      const handle = buildCanvas(mx, surface, merged, savedPositions);
+      const handle = buildCanvas(mx, surface, merged, savedLayout);
       // Chrome (zoom bar + minimap) mounts on `root`, NOT the maxGraph container (`surface`): maxGraph's
       // panGraph reparents every non-SVG child of its container into a shifted preview div while panning
       // (e.g. dragging the minimap), which would yank the controls/minimap to the top-left. Keeping them on
