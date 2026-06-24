@@ -1,7 +1,6 @@
-using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
-using Koine.Cli;
+using static Koine.Wasm.Tests.WireParityHarness;
 
 namespace Koine.Wasm.Tests;
 
@@ -119,110 +118,7 @@ public class CallHierarchyWireParityTests
     private static JsonNode LspPrepare(int line, int character) =>
         LspArrayResult("textDocument/prepareCallHierarchy", new { position = new { line, character } });
 
-    /// <summary>Drives the LSP server for an array-returning request and returns the result array node.</summary>
-    private static JsonNode LspArrayResult(string method, object extraParams)
-    {
-        var paramsObj = JsonSerializer.SerializeToNode(extraParams)!.AsObject();
-        paramsObj["textDocument"] = new JsonObject { ["uri"] = Uri };
-        var request = Frame(JsonSerializer.Serialize(new { jsonrpc = "2.0", id = 99, method, @params = paramsObj }));
-        var output = RunSession(Initialize(), DidOpen(Uri, Fixture), request);
-        return ResultForId(output, 99)!;
-    }
-
-    private static string Canonical(JsonNode? node) => Sort(node)?.ToJsonString() ?? "null";
-
-    private static JsonNode? Sort(JsonNode? node)
-    {
-        switch (node)
-        {
-            case JsonObject obj:
-                var sorted = new JsonObject();
-                foreach (var kv in obj.OrderBy(k => k.Key, StringComparer.Ordinal))
-                {
-                    sorted[kv.Key] = Sort(kv.Value?.DeepClone());
-                }
-
-                return sorted;
-            case JsonArray arr:
-                var copy = new JsonArray();
-                foreach (var item in arr)
-                {
-                    copy.Add(Sort(item?.DeepClone()));
-                }
-
-                return copy;
-            default:
-                return node?.DeepClone();
-        }
-    }
-
-    // ---- Minimal LSP session harness (mirrors ModelRoundTripWireParityTests) ----
-
-    private static byte[] RunSession(params byte[][] messages)
-    {
-        using var input = new MemoryStream();
-        foreach (var m in messages)
-        {
-            input.Write(m, 0, m.Length);
-        }
-
-        input.Position = 0;
-        using var output = new MemoryStream();
-        new LspServer(input, output).Loop();
-        return output.ToArray();
-    }
-
-    private static byte[] Frame(string json)
-    {
-        var body = Encoding.UTF8.GetBytes(json);
-        var header = Encoding.ASCII.GetBytes($"Content-Length: {body.Length}\r\n\r\n");
-        return header.Concat(body).ToArray();
-    }
-
-    private static byte[] Initialize() =>
-        Frame("{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{}}");
-
-    private static byte[] DidOpen(string uri, string text) =>
-        Frame(JsonSerializer.Serialize(new
-        {
-            jsonrpc = "2.0",
-            method = "textDocument/didOpen",
-            @params = new { textDocument = new { uri, languageId = "koine", version = 1, text } },
-        }));
-
-    /// <summary>The <c>result</c> node (array or object) of the framed response correlated to <paramref name="id"/>.</summary>
-    private static JsonNode? ResultForId(byte[] output, int id)
-    {
-        foreach (var body in Frames(output))
-        {
-            var node = JsonNode.Parse(body);
-            if (node?["id"]?.GetValue<int>() == id && node["result"] is { } result)
-            {
-                return result;
-            }
-        }
-
-        return null;
-    }
-
-    private static IEnumerable<string> Frames(byte[] output)
-    {
-        var text = Encoding.UTF8.GetString(output);
-        var i = 0;
-        while (true)
-        {
-            var marker = text.IndexOf("Content-Length: ", i, StringComparison.Ordinal);
-            if (marker < 0)
-            {
-                yield break;
-            }
-
-            var numStart = marker + "Content-Length: ".Length;
-            var numEnd = text.IndexOf("\r\n", numStart, StringComparison.Ordinal);
-            var len = int.Parse(text.Substring(numStart, numEnd - numStart));
-            var bodyStart = text.IndexOf("\r\n\r\n", numEnd, StringComparison.Ordinal) + 4;
-            yield return text.Substring(bodyStart, len);
-            i = bodyStart + len;
-        }
-    }
+    /// <summary>Drives the LSP server for an array-returning request and returns the result node.</summary>
+    private static JsonNode LspArrayResult(string method, object extraParams) =>
+        WireParityHarness.LspResult(Uri, Fixture, method, extraParams)!;
 }

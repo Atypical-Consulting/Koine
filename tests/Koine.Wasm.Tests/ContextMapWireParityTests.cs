@@ -1,7 +1,6 @@
-using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
-using Koine.Cli;
+using static Koine.Wasm.Tests.WireParityHarness;
 
 namespace Koine.Wasm.Tests;
 
@@ -84,11 +83,8 @@ public class ContextMapWireParityTests
     // ---- backend drivers ------------------------------------------------------
 
     /// <summary>Drives the real stdio LSP wire (<c>koine/contextMap</c>) and returns its <c>result</c>.</summary>
-    private static JsonObject LspContextMap()
-    {
-        var output = RunSession(Initialize(), DidOpen(Uri, Fixture), ContextMapRequest(Uri));
-        return ResultForId(output, ContextMapRequestId)!;
-    }
+    private static JsonObject LspContextMap() =>
+        LspResult(Uri, Fixture, "koine/contextMap", new { })!.AsObject();
 
     /// <summary>
     /// Drives the WASM JSExport <c>ContextMap</c> surface (the in-browser backend) and returns its result.
@@ -105,135 +101,4 @@ public class ContextMapWireParityTests
     }
 #pragma warning restore CA1416
 
-    // ---- shared helpers -------------------------------------------------------
-
-    private static string Canonical(JsonNode? node) => Sort(node)?.ToJsonString() ?? "null";
-
-    private static JsonNode? Sort(JsonNode? node)
-    {
-        switch (node)
-        {
-            case JsonObject obj:
-                var sorted = new JsonObject();
-                foreach (var (key, value) in obj.OrderBy(kvp => kvp.Key, StringComparer.Ordinal))
-                {
-                    sorted[key] = Sort(value);
-                }
-
-                return sorted;
-            case JsonArray array:
-                var copy = new JsonArray();
-                foreach (var item in array)
-                {
-                    copy.Add(Sort(item));
-                }
-
-                return copy;
-            default:
-                return node?.DeepClone();
-        }
-    }
-
-    // ---- LSP wire harness (mirrors DiagramWireParityTests) --------------------
-
-    private const int ContextMapRequestId = 41;
-
-    private static byte[] RunSession(params byte[][] messages)
-    {
-        var input = new MemoryStream(messages.SelectMany(m => m).ToArray());
-        var output = new MemoryStream();
-        new LspServer(input, output).Loop();
-        return output.ToArray();
-    }
-
-    private static byte[] Frame(string json)
-    {
-        var body = Encoding.UTF8.GetBytes(json);
-        var header = Encoding.ASCII.GetBytes($"Content-Length: {body.Length}\r\n\r\n");
-        return header.Concat(body).ToArray();
-    }
-
-    private static byte[] Initialize() =>
-        Frame("{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{}}");
-
-    private static byte[] DidOpen(string uri, string text) =>
-        Frame(JsonSerializer.Serialize(new
-        {
-            jsonrpc = "2.0",
-            method = "textDocument/didOpen",
-            @params = new { textDocument = new { uri, languageId = "koine", version = 1, text } },
-        }));
-
-    private static byte[] ContextMapRequest(string uri) =>
-        Frame(JsonSerializer.Serialize(new
-        {
-            jsonrpc = "2.0",
-            id = ContextMapRequestId,
-            method = "koine/contextMap",
-            @params = new { textDocument = new { uri } },
-        }));
-
-    private static JsonObject? ResultForId(byte[] output, int id)
-    {
-        foreach (var body in Frames(output))
-        {
-            var node = JsonNode.Parse(body);
-            if (node is JsonObject obj
-                && obj.TryGetPropertyValue("id", out var idNode)
-                && idNode is not null
-                && idNode.GetValue<int>() == id
-                && obj.TryGetPropertyValue("result", out var result))
-            {
-                return result as JsonObject;
-            }
-        }
-
-        return null;
-    }
-
-    private static IEnumerable<string> Frames(byte[] output)
-    {
-        var separator = "\r\n\r\n"u8.ToArray();
-        var index = 0;
-        while (index < output.Length)
-        {
-            var headerEnd = IndexOf(output, separator, index);
-            if (headerEnd < 0)
-            {
-                yield break;
-            }
-
-            var header = Encoding.ASCII.GetString(output, index, headerEnd - index);
-            var marker = header.IndexOf("Content-Length:", StringComparison.OrdinalIgnoreCase);
-            var lengthText = header[(marker + "Content-Length:".Length)..].Trim();
-            var length = int.Parse(lengthText);
-
-            var bodyStart = headerEnd + separator.Length;
-            yield return Encoding.UTF8.GetString(output, bodyStart, length);
-            index = bodyStart + length;
-        }
-    }
-
-    private static int IndexOf(byte[] haystack, byte[] needle, int start)
-    {
-        for (var i = start; i <= haystack.Length - needle.Length; i++)
-        {
-            var match = true;
-            for (var j = 0; j < needle.Length; j++)
-            {
-                if (haystack[i + j] != needle[j])
-                {
-                    match = false;
-                    break;
-                }
-            }
-
-            if (match)
-            {
-                return i;
-            }
-        }
-
-        return -1;
-    }
 }
