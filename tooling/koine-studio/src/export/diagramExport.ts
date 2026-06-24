@@ -189,14 +189,16 @@ function mermaidText(text: string): string {
   return text.replace(/\r?\n/g, ' ').replace(/"/g, "'").replace(/[[\]{}`]/g, '');
 }
 
-/** Sanitize a class-member row for a Mermaid `classDiagram` (issue #340). A member is emitted as
- *  `alias : <text>`, and Mermaid's grammar reads that FIRST colon as the member separator — so any colon
- *  INSIDE the member text (a typed field `street: String`, a method signature `op(a: T): R`) is a second
- *  separator that aborts the parse. On top of {@link mermaidText}'s structural strip, neutralize every such
- *  colon to a space — Mermaid's own colon-free `attribute Type` / `op(a T) R` shape — collapsing the doubled
- *  spaces a `name: Type` leaves behind. The structural `alias :` separator and the edge-label `: label`
- *  colon live OUTSIDE this helper, so they're unaffected. */
-function mermaidMember(text: string): string {
+/** Sanitize a Mermaid `classDiagram` text that sits AFTER a structural `:` separator — a class-member row
+ *  `alias : <text>` (issue #340) or an edge label `A --> B : <text>` (issue #343). In both shapes Mermaid's
+ *  grammar reads that FIRST colon as the separator, so any colon INSIDE the text (a typed field
+ *  `street: String`, a method signature `op(a: T): R`, a guard label `tagged: urgent`) is a second separator
+ *  that aborts the parse. On top of {@link mermaidText}'s structural strip, neutralize every such colon to a
+ *  space — Mermaid's own colon-free `attribute Type` / `op(a T) R` shape — collapsing the doubled spaces a
+ *  `name: Type` leaves behind. The structural `alias :` / edge ` : ` separators themselves live OUTSIDE this
+ *  helper (they're emitted by the callers), so they're unaffected; sharing one helper keeps the member and
+ *  edge paths from drifting apart again. */
+function mermaidColonSafe(text: string): string {
   return mermaidText(text)
     .replace(/:/g, ' ')
     .replace(/\s+/g, ' ')
@@ -212,7 +214,10 @@ function mermaidEdge(edge: DiagramEdge, from: string, to: string): string {
   line += ` ${arrow}`;
   if (edge.arrowKind === 'composition' && edge.cardinality) line += ` "${mermaidText(edge.cardinality)}"`;
   line += ` ${to}`;
-  if (edge.label) line += ` : ${mermaidText(edge.label)}`;
+  // The label sits after the structural ` : ` separator, so route it through the colon-safe sanitizer
+  // (shared with member rows, issue #340/#343) — a colon inside the label is a second separator Mermaid
+  // rejects. The cardinality quotes above are colon-free, so they keep the plain structural strip.
+  if (edge.label) line += ` : ${mermaidColonSafe(edge.label)}`;
   return line;
 }
 
@@ -233,7 +238,7 @@ export function diagramToMermaid(graph: DiagramGraph): string {
     const alias = aliases.get(node.id)!;
     lines.push(`  class ${alias}["${mermaidText(node.label)}"]`);
     for (const m of node.members) {
-      lines.push(`  ${alias} : ${mermaidMember(m.text)}`);
+      lines.push(`  ${alias} : ${mermaidColonSafe(m.text)}`);
     }
   }
   for (const edge of graph.edges) {
