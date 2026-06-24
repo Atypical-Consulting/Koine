@@ -13,12 +13,14 @@ set -u
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT" || exit 2
 
+# Dated blog posts under website/src/content/docs/blog are point-in-time records of
+# what was true when published, so they are excluded (--exclude-dir=blog below).
 FILES=(README.md USER-STORIES.md website/src)
 fail=0
 
 check() {
   local desc="$1" pat="$2" hits
-  hits="$(grep -rnE "$pat" "${FILES[@]}" 2>/dev/null)" || true
+  hits="$(grep -rnE --exclude-dir=blog "$pat" "${FILES[@]}" 2>/dev/null)" || true
   if [ -n "$hits" ]; then
     echo "STALE — $desc:"
     printf '%s\n' "$hits" | sed 's/^/    /'
@@ -31,7 +33,7 @@ check "R16 marked deferred" \
 check "R1–R17 used as the project ceiling (should be R1–R18)" \
   'R1(–|-)R17'
 check "Rust framed as unshipped (next up / on the roadmap / · soon)" \
-  'Next up:\*\* a \*\*Rust|Rust is on the$|Rust · soon|tgt--soon'
+  'Next up:\*\* a \*\*Rust|Rust .*on the roadmap|Rust is on the$|Rust · soon|tgt--soon'
 check "R16 multi-target emitters undercounting the shipped targets" \
   'multi-target emitters\*\* \(TypeScript and Python'
 check "R16 labelled partial" \

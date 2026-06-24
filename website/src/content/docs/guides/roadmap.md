@@ -92,8 +92,8 @@ the demo produces from them.
 
 ## Shipped: R16 — Multi-target emitters
 
-R16 is the capstone that proves the `IEmitter` seam is genuinely target-agnostic. All four emitter
-stories — C#, TypeScript, Python, PHP, and Rust — are delivered.
+R16 is the capstone that proves the `IEmitter` seam is genuinely target-agnostic. All five emitter
+targets — C#, TypeScript, Python, PHP, and Rust — are delivered.
 
 - **R16.1 — C# emitter configuration.** ✅ **Delivered** — a `koine.config` options object to remap
   contexts to concrete namespaces, choose the `Instant` mapping (`DateTimeOffset` default or NodaTime),
