@@ -1221,9 +1221,9 @@ export function init(): () => void {
     saveZip: (name, data) => platform.saveZip(name, data),
   });
 
-  // The AI assistant panel is created lazily the first time its tab is shown (the Anthropic SDK
+  // The AI assistant panel is created lazily the first time its center pane is shown (the Anthropic SDK
   // is dynamically imported inside ai.ts, so creating the panel does not load it — only sending).
-  // ide.ts owns the assistant's lifecycle; the controller only nudges its tab (syncWorkspace/focus)
+  // ide.ts owns the assistant's lifecycle; the controller only nudges it (syncWorkspace/focus)
   // via the injected ensureAssistant callback, so the #view-assistant host is looked up here.
   const assistantView = el('view-assistant');
   let assistant: AssistantPanel | null = null;
@@ -1485,8 +1485,8 @@ export function init(): () => void {
       { id: 'view-contextmap', title: 'Show Context Map', group: 'Workspace', run: () => controller.selectBottomTab('contextmap') },
       { id: 'view-check', title: 'Show Compatibility Check', group: 'Workspace', run: () => controller.selectTech('check') },
       { id: 'view-scenarios', title: 'Show Scenario Runner', group: 'Workspace', run: () => controller.selectTech('scenarios') },
-      { id: 'view-assistant', title: 'Show Assistant', group: 'Workspace', run: () => controller.selectTech('assistant') },
-      { id: 'assistant-explain', title: 'Explain this construct', group: 'Workspace', run: () => { controller.selectTech('assistant'); ensureAssistant().explainSelection(); } },
+      { id: 'view-assistant', title: 'Show Assistant', group: 'Workspace', run: () => controller.selectCenter('assistant') },
+      { id: 'assistant-explain', title: 'Explain this construct', group: 'Workspace', run: () => { controller.selectCenter('assistant'); ensureAssistant().explainSelection(); } },
     ];
 
     // Surface every open file as a "Go to File" entry so the palette doubles as a

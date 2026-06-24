@@ -81,11 +81,11 @@ import { renderCheckMarkdown, renderContextMapHtml } from '@/shell/ideUtils';
 // document symbol with. Used by followActiveFileContext to read a file's bounded context(s).
 const SYMBOL_KIND_NAMESPACE = 3;
 
-// The center column's three views and their sub-tabs (kept local — they're a C# emitter / UI concern,
-// not part of the target-agnostic model). The first three mirror the uiChrome slice's CenterView /
+// The center column's top-level views and the Code/Documentation sub-tabs (kept local — they're a UI
+// concern, not part of the target-agnostic model). They mirror the uiChrome slice's CenterView /
 // TechView / DocsView literals, which the chrome now drives through.
-type CenterView = 'visual' | 'technical' | 'docs';
-type TechView = 'editor' | 'preview' | 'check' | 'assistant' | 'scenarios';
+type CenterView = 'visual' | 'technical' | 'docs' | 'assistant';
+type TechView = 'editor' | 'preview' | 'check' | 'scenarios';
 type DocsView = 'glossary' | 'adr' | 'notes';
 type BottomTab = 'problems' | 'events' | 'relationships' | 'contextmap';
 
@@ -994,15 +994,18 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     centerVisualEl.hidden = center !== 'visual';
     centerTechnicalEl.hidden = center !== 'technical';
     centerDocsEl.hidden = center !== 'docs';
+    // The assistant is its own top-level center pane now (#235) — a peer of Visual/Code/Documentation,
+    // reachable in one click from any view, not a Code sub-tab. Its host (#view-assistant) is the
+    // center-host itself, so it's shown/hidden purely by the active center.
+    assistantView.hidden = center !== 'assistant';
     // The bottom strip (Problems/Events/Relationships/Context Map) sits under the canvas/editor — it
-    // serves both Visual and Code, but not Documentation.
-    diagEl.hidden = center === 'docs';
+    // serves Visual and Code, but not Documentation or the full-height Assistant conversation.
+    diagEl.hidden = center === 'docs' || center === 'assistant';
     for (const t of centerTabs) t.setAttribute('aria-selected', String(t.dataset.center === center));
     const techVisible = center === 'technical';
     editorPaneEl.hidden = !(techVisible && tech === 'editor');
     previewEl.hidden = !(techVisible && tech === 'preview');
     checkView.hidden = !(techVisible && tech === 'check');
-    assistantView.hidden = !(techVisible && tech === 'assistant');
     scenariosView.hidden = !(techVisible && tech === 'scenarios');
     for (const t of techTabs) t.setAttribute('aria-selected', String(t.dataset.tech === tech));
     // Documentation sub-views: Glossary (the ubiquitous language), Decisions (the ADR list) and Notes.
@@ -1022,6 +1025,17 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     if (view === 'visual' && appStore.getState().isStale('diagrams')) void loadDiagrams();
     else if (view === 'technical') ensureTechLoaded();
     else if (view === 'docs') ensureDocsLoaded();
+    else if (view === 'assistant') ensureAssistantShown();
+  }
+
+  // The assistant is interactive (not a cached, model-derived surface): every show re-points it at the
+  // current folder's conversation and focuses the input — the single choke point for that swap. Created
+  // lazily by ide.ts the first time this runs (the Anthropic SDK only loads on send).
+  function ensureAssistantShown(): void {
+    if (activeCenter() !== 'assistant') return;
+    const a = deps.ensureAssistant();
+    a.syncWorkspace();
+    a.focusInput();
   }
 
   // Lazy-load the active Documentation sub-view: the glossary is model-derived; the Decisions and Notes
@@ -1050,16 +1064,12 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   }
 
   // Lazy-load the active technical sub-view: the emitted preview is the only model-derived one; the
-  // editor is live, the check is on-demand, and the assistant is interactive (it re-points to the
-  // current folder's conversation before focus, the single choke point for that swap).
+  // editor is live and the check is on-demand. (The assistant is its own center pane now — see
+  // ensureAssistantShown.)
   function ensureTechLoaded(): void {
     if (activeCenter() !== 'technical') return;
     if (activeTech() === 'preview' && appStore.getState().isStale('preview')) void loadPreview();
-    else if (activeTech() === 'assistant') {
-      const a = deps.ensureAssistant();
-      a.syncWorkspace();
-      a.focusInput();
-    } else if (activeTech() === 'scenarios') deps.ensureScenarios?.().refresh();
+    else if (activeTech() === 'scenarios') deps.ensureScenarios?.().refresh();
     else if (activeTech() === 'check') renderCheckIdleIfEmpty();
   }
 
