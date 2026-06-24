@@ -1273,16 +1273,16 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   }
 
   // --- emitted-code preview --------------------------------------------------
-  // The Generated-tab language labels, derived from the shared EMIT_TARGETS so a new target needs no
-  // edit here (the picker, wizard and assistant enum derive from the same list — issue #282).
-  const LANGS: { id: PreviewTarget; name: string }[] = EMIT_TARGETS.map((t) => ({ id: t.id, name: t.displayName }));
   let currentTarget: PreviewTarget = deps.initialTarget;
   const previewTabEl = el<HTMLButtonElement>('tech-tab-preview');
 
   function setTarget(target: PreviewTarget): void {
     currentTarget = target;
-    const meta = LANGS.find((l) => l.id === target)!;
-    previewTabEl.textContent = `Generated · ${meta.name}`;
+    // Label the Generated tab from the LIVE EMIT_TARGETS (seeded from the backend at boot, issue
+    // #282) so a registry target labels correctly with no edit here; fall back to the raw id for a
+    // target with no display name.
+    const displayName = EMIT_TARGETS.find((t) => t.id === target)?.displayName ?? target;
+    previewTabEl.textContent = `Generated · ${displayName}`;
   }
 
   // Emit the current target into the preview pane. Folded into the doc-view lifecycle (like the

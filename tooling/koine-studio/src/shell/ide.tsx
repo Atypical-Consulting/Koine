@@ -21,6 +21,7 @@ import { createInspectorController } from '@/shell/inspectorController';
 import { getPlatform } from '@/host';
 import { createExplorer } from '@/shell/explorer';
 import { koineMark } from '@/shared/logo';
+import { setEmitTargets } from '@/shared/emitTargets';
 import { initTheme, onThemeChange, toggleTheme } from '@/settings/theme';
 import {
   peekLegacyScratch,
@@ -1687,6 +1688,16 @@ export function init(): () => void {
   lsp
     .start()
     .then(async () => {
+      // Seed the emit-target list from the backend capability query once the server is up (issue
+      // #282). Fire-and-forget: a slow or unresponsive query must NOT block the rest of boot, so we
+      // don't await it. The built-in list (the default) keeps every target surface rendering until it
+      // resolves, and the picker / wizard / Generated-tab / preview read the list LIVE, so they pick
+      // up the seeded set on their next render. A failed query falls back to the built-ins.
+      void lsp.emitTargets().then(setEmitTargets, (e) => {
+        console.error('fetching emit targets failed; using the built-in list:', e);
+        setEmitTargets(null);
+      });
+
       // The workspace opens once the server is up so each file's didOpen resolves cross-file refs.
       // Isolated try/finally per branch: an open failure must not masquerade as a connection failure,
       // and any model hash is cleared so a reload doesn't re-trigger a failing import.

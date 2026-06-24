@@ -13,7 +13,6 @@ import {
   clearApiKey,
   whenSecretsReady,
   DEFAULT_SETTINGS,
-  PREVIEW_TARGETS,
   type Settings,
   type AccentName,
   type PreviewTarget,
@@ -242,15 +241,15 @@ export function createPreferences(cb: PrefsCallbacks): PrefsHandle {
   // The output-language picker: a card per target (identity dot + name + the file extension it
    // emits), laid out as a single-selection radio group.
   function langPicker(onSelect: (value: PreviewTarget) => void): { el: HTMLElement; set(value: PreviewTarget): void } {
-    // Label + file extension per target, both derived from the shared EMIT_TARGETS so a new target
-    // needs no edit here (the extension is a concrete, recognizable cue on every card).
-    const LABELS: Record<string, string> = Object.fromEntries(EMIT_TARGETS.map((t) => [t.id, t.displayName]));
-    const EXTENSIONS: Record<string, string> = Object.fromEntries(EMIT_TARGETS.map((t) => [t.id, t.fileExtension]));
     const group = document.createElement('div');
     group.className = 'koi-lang-picker';
     group.setAttribute('role', 'radiogroup');
     group.setAttribute('aria-label', 'Output language');
-    const buttons = PREVIEW_TARGETS.map((id) => {
+    // A card per target (identity dot + display name + emitted extension), built from the LIVE
+    // EMIT_TARGETS (seeded from the backend at boot, issue #282) so a registry target appears here
+    // with no edit. Read at render time, not snapshotted, so the boot fetch is reflected.
+    const buttons = EMIT_TARGETS.map((t) => {
+      const id = t.id;
       const b = document.createElement('button');
       b.type = 'button';
       b.className = 'koi-lang-opt';
@@ -263,10 +262,10 @@ export function createPreferences(cb: PrefsCallbacks): PrefsHandle {
       dot.setAttribute('aria-hidden', 'true');
       const label = document.createElement('span');
       label.className = 'koi-lang-name';
-      label.textContent = LABELS[id];
+      label.textContent = t.displayName;
       const ext = document.createElement('span');
       ext.className = 'koi-lang-ext';
-      ext.textContent = EXTENSIONS[id];
+      ext.textContent = t.fileExtension;
       b.append(dot, label, ext);
       b.addEventListener('click', () => {
         set(id);

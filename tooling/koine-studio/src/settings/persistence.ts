@@ -11,7 +11,7 @@
 import { loadSecret, saveSecret } from '@/ai/secrets';
 import type { ChatMessage } from '@/ai/ai';
 import { sanitizeGroups, sanitizeNotes, type DiagramGroup, type DiagramNote } from '@/diagrams/diagramContract';
-import { EMIT_TARGETS } from '@/shared/emitTargets';
+import { EMIT_TARGETS, isEmitTarget } from '@/shared/emitTargets';
 
 // --- settings model ----------------------------------------------------------
 
@@ -199,9 +199,13 @@ function coerceMcpClient(v: unknown): McpClientId {
   return MCP_CLIENT_IDS.includes(v as McpClientId) ? (v as McpClientId) : DEFAULT_SETTINGS.mcpClient;
 }
 
-/** A supported preview target, else the default. */
+/**
+ * A supported preview target, else the default. Validated against the LIVE {@link EMIT_TARGETS}
+ * (seeded from the backend at boot, issue #282) — not the build-time snapshot — so a persisted
+ * target the backend still reports survives a reload, and one it no longer offers falls back to csharp.
+ */
 function coercePreviewTarget(v: unknown): PreviewTarget {
-  return PREVIEW_TARGETS.includes(v as PreviewTarget) ? (v as PreviewTarget) : DEFAULT_SETTINGS.previewTarget;
+  return isEmitTarget(v) ? (v as PreviewTarget) : DEFAULT_SETTINGS.previewTarget;
 }
 
 /**
