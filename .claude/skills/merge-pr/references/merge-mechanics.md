@@ -209,7 +209,12 @@ the `create-issue` skill, noting the source PR for traceability.
 
 ## 7. Teardown — remove the worktree and local branch
 
-You can't remove a worktree or delete a branch you're standing in, so move to the main checkout first:
+You can't remove a worktree or delete a branch you're standing in, so the move depends on **where** the
+PR's branch is checked out. Decide the case from §2's worktree listing.
+
+### Case A — the PR's branch is in a *different* worktree (the usual case)
+
+Move to the main checkout, remove the PR's worktree, then delete its local branch:
 
 ```bash
 MAIN=$(git worktree list --porcelain | awk '/^worktree /{print $2; exit}')   # first entry = primary working tree
@@ -224,12 +229,31 @@ git worktree prune
 git branch -D "$HEAD_BRANCH" 2>/dev/null || true
 ```
 
-Guards matter here — this step runs after the irreversible merge, so it must never *fail the run* just
-because something was already cleaned up. "Already gone" is success.
+### Case B — the PR's branch is checked out in *this session's own* worktree
 
-**Native worktree tools:** if the PR's worktree happens to be the one *this session* is running in, a
-native `ExitWorktree`/equivalent is the right tool (it knows the harness state). For any *other*
-worktree, use `git worktree remove` — a native "exit" tool only manages the current one.
+This happens when `/merge-pr` is invoked from inside the very worktree that holds the PR branch.
+**Don't remove this worktree** — it's the session's live workspace, not a throwaway, and git won't let
+you delete a directory you're standing in anyway. The disposable thing is the *branch*. So switch this
+worktree off it (back to its prior branch, or detach), then delete the merged branch:
+
+```bash
+# A native ExitWorktree/equivalent is the harness-aware way to leave the current worktree — prefer it.
+# Manual fallback: switch off the merged branch, then delete it.
+git -C "$THIS_WORKTREE" switch "$PRIOR_BRANCH" 2>/dev/null || git -C "$THIS_WORKTREE" switch --detach
+git -C "$THIS_WORKTREE" branch -D "$HEAD_BRANCH" 2>/dev/null || true
+```
+
+Tip: if the branch was *created* in this worktree this session (no meaningful prior branch), detaching
+is cleanest. Re-fetching `origin/main` and switching to a fresh branch off it is also fine if you need
+the post-merge tree (e.g. to keep working).
+
+### Both cases
+
+Guards matter — this step runs after the irreversible merge, so it must never *fail the run* just
+because something was already cleaned up. "Already gone" is success. The **remote** branch is already
+gone via Step 5's `--delete-branch`; gh leaves the **local** side untouched when the branch is checked
+out in a worktree (you'll see `failed to delete local branch … used by worktree` or `'main' is already
+used by worktree`), which is exactly why this step exists.
 
 **Safety:** never remove `$MAIN` or a worktree whose branch isn't the PR's head. Match the path to the
 branch (via §2's listing) before removing — a wrong `git worktree remove --force` throws away someone

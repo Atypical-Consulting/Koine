@@ -263,8 +263,13 @@ are several. If there are no follow-ups from either source, skip this step and s
 
 ## Step 7 — Delete the local branch & worktree
 
-Clean up the throwaway workspace. The catch: you can't remove a worktree (or delete a branch) while
-you're standing in it, so **first move to the main checkout**, then remove:
+Clean up the throwaway workspace — but the right cleanup depends on **where** the PR's branch is
+checked out, because you can't remove a worktree (or delete a branch) from inside it. Figure out which
+case you're in first:
+
+**Case A — the PR's branch lives in a *different* worktree** (the usual case: you ran `/merge-pr` from
+the main checkout or another worktree). Move to the main checkout, remove the PR's worktree, then delete
+its local branch:
 
 ```bash
 MAIN=$(git worktree list --porcelain | awk '/^worktree /{print $2; exit}')   # the primary working tree
@@ -275,11 +280,24 @@ git worktree prune                           # clear any stale administrative en
 git branch -D "<headRefName>"                # -D (force): a squashed branch isn't "merged" by git's reckoning, so -d refuses
 ```
 
-Make each step tolerant of "already gone" — if `--delete-branch` in Step 5 already removed the local
-branch, or no worktree existed, that's success, not an error (guard with `|| true` or check first; see
-reference §7). Prefer a native worktree tool (`ExitWorktree`/equivalent) **only** if the PR's worktree
-is the one this very session is running in; for a *different* worktree, `git worktree remove` is the
-right tool. Never delete the main checkout or an unrelated worktree — match the path to the PR's branch
+**Case B — the PR's branch is checked out in *this very session's* worktree.** Do **not** remove the
+worktree you're running in: you'd pull the rug out from under the session, and it's the user's active
+workspace, not a throwaway. Here the *branch* is what's disposable, not the directory — so switch this
+worktree back to whatever branch it held before (or detach), *then* delete the merged feature branch:
+
+```bash
+git -C "<this-worktree>" switch "<prior-branch>"   # or: git -C "<this-worktree>" switch --detach
+git -C "<this-worktree>" branch -D "<headRefName>"
+```
+
+A native `ExitWorktree`/equivalent is the harness-aware way to leave the current worktree if you have
+one — use it in place of the manual `switch`.
+
+Either way, make each step tolerant of "already gone" — if `--delete-branch` in Step 5 already removed
+the local branch, or no worktree existed, that's success, not an error (guard with `|| true` or check
+first; see reference §7). The remote branch is already gone via Step 5's `--delete-branch`; gh leaves
+the local side untouched when the branch is checked out in a worktree, which is exactly why this step
+exists. Never delete the main checkout or an unrelated worktree — match the path to the PR's branch
 exactly before removing.
 
 ## Step 8 — Report
