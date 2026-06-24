@@ -3,8 +3,8 @@ name: implement-issue
 description: >-
   Do the actual coding for an existing GitHub issue and turn it into a finished pull request — the
   "go build it" counterpart to `create-issue` for the Koine project. Use this whenever an issue
-  already carries an implementation plan (a `**🛠️ Implementation plan**` comment with a `### Task N`
-  / `- [ ]` checklist) and the user wants it BUILT: it spins up a git worktree, opens a DRAFT pull
+  already carries an implementation plan (a `**🛠️ Implementation plan**` section in its description,
+  or a comment on older issues, with a `### Task N` / `- [ ]` checklist) and the user wants it BUILT: it spins up a git worktree, opens a DRAFT pull
   request, then loops task-by-task — implement → commit → tick that task's checkbox on the live issue
   — until every box is checked, then runs the `code-review` skill, applies the fixes, merges the latest
   `main` into the branch and resolves any conflicts so the PR stays mergeable, runs the formatter, and
@@ -18,14 +18,15 @@ description: >-
   or to ad-hoc coding with no issue plan to drive it.
 ---
 
-# Implement a Koine issue from its plan comment
+# Implement a Koine issue from its plan
 
 ## What this does and why
 
-`create-issue` ends every issue with a `**🛠️ Implementation plan**` comment: a checklist of
-`### Task N` blocks whose every step is a Markdown checkbox (`- [ ]`), with the **last step of each
-task being its commit message**. That comment is a contract an executor can run cold. This skill is
-that executor.
+`create-issue` builds every issue around a `**🛠️ Implementation plan**` section in its description: a
+checklist of `### Task N` blocks whose every step is a Markdown checkbox (`- [ ]`), with the **last
+step of each task being its commit message**. (Issues filed by older versions of `create-issue` carry
+the same plan as a comment — this skill handles both.) That plan is a contract an executor can run
+cold. This skill is that executor.
 
 It turns the plan into a real pull request the way a careful engineer would: isolated worktree,
 draft PR opened up front so progress is visible, one commit per task, and — the part that makes the
@@ -45,7 +46,7 @@ sub-skill (worktree, executing-plans, code review) would pause for a question or
 blocker you cannot reasonably work past:
 
 - `gh` is not authenticated, or you lack push access to the repo.
-- No `🛠️ Implementation plan` comment exists on the issue (nothing to execute).
+- No `🛠️ Implementation plan` exists on the issue — not in its body, not in a comment (nothing to execute).
 - A task's tests cannot be made green after a real, honest effort — don't fake green, don't
   `git commit` over a red bar, and don't tick a checkbox for work that doesn't pass. Stop and report
   the wall you hit with the failing output.
@@ -65,7 +66,7 @@ Create a task (todo) for each item and work them in order. Steps 6 is the loop �
 in the plan.
 
 1. **Preconditions** — `gh` works, you're in the Koine repo, resolve the issue number.
-2. **Read the plan** — fetch the `🛠️ Implementation plan` comment; save its body and **comment id**.
+2. **Read the plan** — fetch the `🛠️ Implementation plan` from the issue body (or a comment, on older issues); save it and note where it lives.
 3. **Pick the execution mode** — assess complexity → *Inline (Extra)* or *Subagent-per-task (Ultracode)*.
 4. **Create the worktree** — via `superpowers:using-git-worktrees`; branch off `main`.
 5. **Open the draft PR** — empty scaffold commit, push, `gh pr create --draft` linking the issue.
@@ -100,24 +101,36 @@ snippets in `references/github-mechanics.md` handle all three.
 
 ## Step 2 — Read the plan
 
-Fetch the implementation-plan comment via the **REST** API (its numeric `id` is what you later PATCH
-to tick boxes — the GraphQL node id from `gh issue view --json comments` will NOT work):
+`create-issue` now writes the plan into the **issue body**, so read that first; only older issues
+carry it as a comment. Pull the body — if the plan marker is there, that's your source and you'll
+tick boxes by PATCHing the body. Otherwise fall back to the comment trail:
 
 ```bash
 ISSUE=21
-gh api "repos/{owner}/{repo}/issues/$ISSUE/comments" --paginate \
-  --jq 'map(select(.body | contains("🛠️ Implementation plan"))) | last | .id'   # → PLAN_COMMENT_ID
-gh api "repos/{owner}/{repo}/issues/comments/$PLAN_COMMENT_ID" --jq .body > /tmp/koine-plan-$ISSUE.md
+gh api "repos/{owner}/{repo}/issues/$ISSUE" --jq .body > /tmp/koine-plan-$ISSUE.md
+if grep -q '🛠️ Implementation plan' /tmp/koine-plan-$ISSUE.md; then
+  PLAN_SRC=body                       # Step 6 ticks boxes by PATCHing the issue body
+else
+  PLAN_SRC=comment                    # legacy issue: the plan is a comment — locate and pull it instead
+  PLAN_COMMENT_ID=$(gh api "repos/{owner}/{repo}/issues/$ISSUE/comments" --paginate \
+    --jq 'map(select(.body | contains("🛠️ Implementation plan"))) | last | .id')
+  gh api "repos/{owner}/{repo}/issues/comments/$PLAN_COMMENT_ID" --jq .body > /tmp/koine-plan-$ISSUE.md
+fi
 ```
 
-If several plan comments exist (the issue was re-planned), take the **latest** one — that's `last`
-above. If none match the marker, fall back to the latest comment that contains `- [ ]` checkbox
-lines; if there are still none, stop (Autonomy contract — nothing to execute).
+Carry `PLAN_SRC` forward (and `PLAN_COMMENT_ID` when it's a comment) — Step 6 PATCHes whichever source
+to tick boxes. For the comment path the numeric REST `id` is what the PATCH endpoint edits; the
+GraphQL node id from `gh issue view --json comments` will NOT work. If several plan comments exist
+(the issue was re-planned), `last` takes the latest. If neither the body nor a comment carries the
+marker, fall back to the latest comment with `- [ ]` lines; still nothing → stop (Autonomy contract —
+nothing to execute). `references/github-mechanics.md` §2 has the full locator.
 
 Read `/tmp/koine-plan-$ISSUE.md` and parse it into tasks: each `### Task N: <name>` heading owns the
-`- [ ]`/`- [x]` lines beneath it up to the next `### Task` (or end). Note the **Global Constraints**
-preamble — version floors, the `Ast/`-stays-target-agnostic invariant, the commit identity, "no
-`TreatWarningsAsErrors`" — these bind every task.
+`- [ ]`/`- [x]` lines beneath it up to the next `### Task` (or end). When the plan came from the body,
+the file also holds the template fields and the collapsed brainstorm/spec sitting above the plan —
+harmless, because you only ever flip checkbox lines under a `### Task` heading. Note the **Global
+Constraints** preamble — version floors, the `Ast/`-stays-target-agnostic invariant, the commit
+identity, "no `TreatWarningsAsErrors`" — these bind every task.
 
 ## Step 3 — Pick the execution mode
 
@@ -162,7 +175,7 @@ gh pr create --draft --base main --head <branch> \
 
 Closes #$ISSUE.
 
-Executing the implementation-plan comment task-by-task; checkboxes are ticked on the issue as each
+Executing the implementation plan task-by-task; checkboxes are ticked on the issue as each
 task lands. Opened as a draft — will be marked ready after the final task and a code-review pass."
 ```
 
@@ -192,18 +205,24 @@ For each task in plan order whose checkboxes aren't all `- [x]` yet:
    ```
 
 4. **Tick the task's checkboxes on the issue.** Flip every `- [ ]` line of *this task* (only this
-   task) to `- [x]` in `/tmp/koine-plan-$ISSUE.md`, then PATCH the comment body back. Tick at task
-   granularity — the task is committed and verified, so the whole block is genuinely done:
+   task) to `- [x]` in `/tmp/koine-plan-$ISSUE.md`, then PATCH the source back. Tick at task
+   granularity — the task is committed and verified, so the whole block is genuinely done. PATCH the
+   issue **body** when the plan lives there, or the **comment** on legacy issues:
    ```bash
-   jq -Rs '{body: .}' /tmp/koine-plan-$ISSUE.md \
-     | gh api "repos/{owner}/{repo}/issues/comments/$PLAN_COMMENT_ID" -X PATCH --input -
+   if [ "$PLAN_SRC" = body ]; then
+     jq -Rs '{body: .}' /tmp/koine-plan-$ISSUE.md \
+       | gh api "repos/{owner}/{repo}/issues/$ISSUE" -X PATCH --input -
+   else
+     jq -Rs '{body: .}' /tmp/koine-plan-$ISSUE.md \
+       | gh api "repos/{owner}/{repo}/issues/comments/$PLAN_COMMENT_ID" -X PATCH --input -
+   fi
    ```
    See `references/github-mechanics.md` for a robust flip (Edit-tool per line; never a blunt
    `sed s/\[ \]/[x]/g` that would tick *other* tasks too).
 
 5. **Push** so the PR reflects the new commit: `git push`.
 
-Continue until no task has an unchecked box. The issue's plan comment now reads all-`- [x]`.
+Continue until no task has an unchecked box. The issue's plan now reads all-`- [x]`.
 
 ## Step 7 — Code review
 
