@@ -5,6 +5,7 @@ import type { FsEntry, KoiFile, LspTransport, Platform, SourceDoc } from '@/host
 import { WasmLspTransport } from '@/host/browser/transport';
 import { runWasmTool } from '@/host/browser/tools';
 import * as fs from '@/host/browser/fs';
+import { saveMetaFor } from '@/host/saveMeta';
 
 // Injected by Vite's `define` (see vite.config.ts) from package.json's version.
 declare const __APP_VERSION__: string;
@@ -91,8 +92,9 @@ export class BrowserPlatform implements Platform {
   }
 
   async saveZip(defaultName: string, data: Uint8Array): Promise<boolean> {
-    // A browser download is fire-and-forget — there is no cancel signal, so it always "succeeds".
-    fs.downloadBytes(defaultName, data, 'application/zip');
+    // A browser download is fire-and-forget — there is no cancel signal, so it always "succeeds". The Blob
+    // MIME is derived from the extension (#271) so a `.svg`/`.png`/`.puml` export isn't tagged `application/zip`.
+    fs.downloadBytes(defaultName, data, saveMetaFor(defaultName).mime);
     return true;
   }
 
