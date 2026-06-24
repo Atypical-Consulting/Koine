@@ -39,7 +39,8 @@ const noop: InspectorHandlers = { onGoto: () => {} };
 describe('renderInspector', () => {
   test('renders an empty state when nothing is selected', () => {
     const el = renderInspector(null, noop);
-    expect(el.classList.contains('koi-inspector-empty')).toBe(true);
+    expect(el.classList.contains('koi-rview-empty')).toBe(true);
+    expect(el.querySelector('.koi-rview-empty-title')!.textContent).toBe('Properties');
     expect(el.textContent).toMatch(/select an element/i);
   });
 
