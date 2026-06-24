@@ -187,6 +187,10 @@
   border-radius: 50%;
   background: var(--koi-ddd-event);
 }
+.koi-model-icon[data-construct='service'] {
+  border-radius: 3px;
+  background: var(--koi-ddd-service);
+}
 .koi-model-icon[data-construct='integration-event'] {
   border-radius: 50%;
   background: transparent;
