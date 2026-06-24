@@ -819,10 +819,10 @@ context Sales version 3 {
 
 _BRIEF §9 and the README position TypeScript and Rust as the proof that the Ast/ + IEmitter seam is genuinely target-agnostic; today only CSharpEmitter exists and the CLI hard-rejects any non-csharp target (Program.cs). Rust in particular forces error handling to map to `Result<T,E>` instead of the exception-based DomainInvariantViolationException — the strongest test of the seam. Real projects also need to configure the existing C# emitter (namespace mapping, NodaTime mode — still a literal 'TODO: NodaTime' in CSharpTypeMapper, output layout). This is the capstone of the long-term vision, sequenced last because it benefits from a mature, stable AST._
 
-> **⏸ Deferred.** R16 is intentionally held until the compiler core is stronger and the AST has stabilized (it is the capstone, and a multi-target seam is only worth proving on a mature model). `koine init` already emits a forward-compatible `koine.config` whose structured `targets.*` block (R16.1) is reserved but ignored by today's build, so adopting R16 later needs no migration.
+> **✅ Delivered.** R16 shipped: C# emitter configuration (R16.1), a full TypeScript emitter (R16.2), a Rust emitter (R16.3 — **Phase 1: tactical core**; remaining breadth tracked in [#173](https://github.com/Atypical-Consulting/Koine/issues/173)), and the cross-emitter conformance harness with an `Ast/`-purity guard (R16.4). The seam held: every target-specific decision lives in its `Emit/<Target>/` emitter and `Ast/` gained no error-handling or target concept — Python and PHP emitters followed the same seam. `koine init` still emits a forward-compatible `koine.config` whose `targets.*` block configures the C# emitter.
 
 ### R16.1 C# emitter configuration (namespaces, NodaTime, layout)  ·  🟡 Medium
-*As an Architect, I want a structured emitter options object to map contexts to concrete namespaces, choose the Instant mapping, and control output layout, so that generated code drops into our existing project conventions.*
+✅ **Delivered** — *As an Architect, I want a structured emitter options object to map contexts to concrete namespaces, choose the Instant mapping, and control output layout, so that generated code drops into our existing project conventions.*
 
 **Acceptance criteria**
 - An options object carries a context-name -> namespace map (plus optional root prefix), an `instantMode` (dateTimeOffset default | nodaTime), and a `layout` (filePerType default | filePerContext | filePerAggregate), supplied via a `koine.config` and/or CLI flags
@@ -835,7 +835,7 @@ _BRIEF §9 and the README position TypeScript and Rust as the proof that the Ast
 ```
 
 ### R16.2 TypeScript emitter  ·  🔴 High
-*As a Domain Developer, I want `koine build model.koi --target typescript --out ./ts`, so that the same domain model produces idiomatic TypeScript value objects, entities, and enums for my frontend.*
+✅ **Delivered** — *As a Domain Developer, I want `koine build model.koi --target typescript --out ./ts`, so that the same domain model produces idiomatic TypeScript value objects, entities, and enums for my frontend.*
 
 **Acceptance criteria**
 - A `TypeScriptEmitter : IEmitter` (TargetName 'typescript') is added under Emit/TypeScript without touching Ast/ or Semantics/
@@ -844,7 +844,7 @@ _BRIEF §9 and the README position TypeScript and Rust as the proof that the Ast
 - The full billing.koi fixture emits TypeScript that passes `tsc --noEmit`; snapshot tests cover the output
 
 ### R16.3 Rust emitter with Result-based error handling  ·  🔴 High
-*As a Domain Developer, I want `koine build model.koi --target rust`, so that invariants surface as `Result<T, DomainError>` constructors rather than panics, matching idiomatic Rust.*
+✅ **Delivered** (Phase 1: tactical core; remaining breadth tracked in [#173](https://github.com/Atypical-Consulting/Koine/issues/173)) — *As a Domain Developer, I want `koine build model.koi --target rust`, so that invariants surface as `Result<T, DomainError>` constructors rather than panics, matching idiomatic Rust.*
 
 **Acceptance criteria**
 - A `RustEmitter : IEmitter` (TargetName 'rust') emits structs with private fields and `pub fn new(...) -> Result<Self, DomainError>` constructors that return `Err` on invariant violation instead of throwing
@@ -858,7 +858,7 @@ _BRIEF §9 and the README position TypeScript and Rust as the proof that the Ast
 ```
 
 ### R16.4 Emitter conformance test harness  ·  🟡 Medium
-*As a Compiler Maintainer, I want a shared conformance suite that runs every fixture through every emitter and compiles the output, so that adding a target can't silently regress and the AST stays truly target-agnostic.*
+✅ **Delivered** — *As a Compiler Maintainer, I want a shared conformance suite that runs every fixture through every emitter and compiles the output, so that adding a target can't silently regress and the AST stays truly target-agnostic.*
 
 **Acceptance criteria**
 - A parameterized test runs each .koi fixture through each registered IEmitter
@@ -923,5 +923,5 @@ _With the MCP server (`src/Koine.Mcp`) an AI agent can now author a complete `.k
 - **R17.1 (TextMate grammar)** is already implemented — see [`tooling/koine-textmate`](tooling/) and the Rider/VS Code import steps in [`tooling/README.md`](tooling/README.md).
 - Example domains live in [`templates/`](templates/) — the single, CI-validated source of truth (issue #101). Each template is a folder of `.koi` files plus a `template.json` manifest (validated against [`templates/template.schema.json`](templates/template.schema.json)); `TemplatesValidationTests` compiles every template green, and the set powers the demo, Koine Studio's gallery, and the website playground.
 - The [`demo/`](demo/) project (`Pizzeria.Domain`) compiles the [`templates/pizzeria`](templates/pizzeria) template in place — six bounded contexts plus an external Gateway — exercising the full shipped surface, and is the natural place to validate new stories end-to-end.
-- Sequencing rationale: **R1–R4** sharpen the existing surface (expressions, optionality, diagnostics, docs) at low risk; **R5–R10** add the missing tactical behaviour (commands, events, lifecycle, factories, richer value objects, specifications/services/policies); **R11–R12** add the persistence & application abstractions; **R13–R15** unlock multi-file and strategic design; **R16–R17** prove target-agnosticism (TypeScript/Rust) and round out developer experience.
+- Sequencing rationale: **R1–R4** sharpen the existing surface (expressions, optionality, diagnostics, docs) at low risk; **R5–R10** add the missing tactical behaviour (commands, events, lifecycle, factories, richer value objects, specifications/services/policies); **R11–R12** add the persistence & application abstractions; **R13–R15** unlock multi-file and strategic design; and **R16–R18** are delivered — multi-target emitters (TypeScript, Python, PHP, and Rust Phase 1) proved the `Ast/`+`IEmitter` seam is target-agnostic, the editor tooling rounded out developer experience, and the model-as-spec coverage analyzer (`koine coverage`) closed the declared-equals-emitted loop.
 
