@@ -200,7 +200,8 @@ public sealed partial class CSharpEmitter
     /// strongly-typed-ID value converter, the concurrency token as <c>IsConcurrencyToken()</c>
     /// (versioned roots only), value-object members as owned types (<c>OwnsOne</c> / <c>OwnsMany</c>, nested →
     /// nested <c>OwnsOne</c>), smart-enum members via the shared <c>ValueConverter</c>, and foreign
-    /// strongly-typed IDs as scalar converters. Plain primitives map by EF convention (no config).
+    /// strongly-typed IDs as scalar converters. Plain primitives get an explicit <c>Property</c> call so EF
+    /// maps the get-only auto-property and materializes it via its backing field (issue #276).
     /// </summary>
     private EmittedFile EmitEntityConfiguration(EmitContext emit, string context, AggregateDecl agg, ModelIndex index)
     {
