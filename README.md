@@ -250,8 +250,13 @@ The shared primitives live once in an emitted `infrastructure-runtime.ts` / `koi
 The layer is **off by default**, so an unconfigured emit is byte-identical to the historical output; the
 generated TypeScript is `tsc --strict`-clean and the Python is `mypy --strict`-clean.
 
-A value-object **collection** (`list of <ValueObject>`) round-trips: it is mapped with EF Core
-`OwnsMany` and backed by a mutable private `List<T>` (exposed read-only as `IReadOnlyList<T>`), with
+**Every** persisted aggregate round-trips — not just collection owners. A scalar-only root, a root that
+owns a scalar value object (`OwnsOne`), a versioned aggregate, and nested value objects all insert and
+re-query correctly: each persisted root (and any value object that owns a value object) gets a private
+parameterless persistence constructor EF Core materializes through, and plain scalar properties are
+mapped explicitly so EF persists the read-only auto-property via its backing field. A value-object
+**collection** (`list of <ValueObject>`) round-trips too: it is mapped with EF Core `OwnsMany` and
+backed by a mutable private `List<T>` (exposed read-only as `IReadOnlyList<T>`), with
 `PropertyAccessMode.Field` so EF can materialize owned children into it and a single-column surrogate key
 so the rows persist on every provider. Scalar (`String`/`Int`/…) collections are left to EF Core's
 primitive-collection convention.

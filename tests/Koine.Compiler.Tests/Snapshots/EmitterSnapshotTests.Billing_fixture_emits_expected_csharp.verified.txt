@@ -452,6 +452,10 @@ public sealed class OrderLine : ValueObject
     public int Quantity { get; }
     public Money UnitPrice { get; }
 
+#pragma warning disable CS8618 // EF Core populates members from the store after construction.
+    private OrderLine() { }
+#pragma warning restore CS8618
+
     public OrderLine(ProductId product, int quantity, Money unitPrice)
     {
         Product = product;

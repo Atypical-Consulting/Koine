@@ -803,14 +803,17 @@ public sealed partial class CSharpEmitter : IEmitter
         IReadOnlyList<BoundInvariant> invariants = bound.Invariants;
 
         // A value object that itself owns a value-object collection (a nested OwnsMany, issue #171) backs
-        // it with a mutable list and gains a parameterless constructor so EF can materialize it (its
-        // collection parameter is a navigation and can never bind).
+        // it with a mutable list; the backing field drives the property declarations and assignments.
         var backedListFields = storedFields
             .Where(f => IsValueObjectList(((Member)f.Syntax).Type, index))
             .Select(f => f.Name)
             .ToHashSet(StringComparer.Ordinal);
 
-        if (backedListFields.Count > 0)
+        // A value object that owns any value object — a nested scalar value object (OwnsOne) or a
+        // value-object collection (OwnsMany) — gains a parameterless constructor so EF can materialize it:
+        // its owned navigation parameter can never bind, so EF constructs through this ctor and populates
+        // members via field access (issue #276, generalizing #171's collection-only rule).
+        if (storedFields.Any(f => OwnsValueObject(((Member)f.Syntax).Type, index)))
         {
             WritePersistenceConstructor(sb, typeName);
         }
