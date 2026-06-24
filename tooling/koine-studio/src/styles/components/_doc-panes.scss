@@ -111,6 +111,123 @@
   }
 }
 
+/* --- interactive context map (#262): a Graph | Table toggle over the strategic context map ----------
+   The graph reuses the maxGraph canvas (filling the panel edge-to-edge); the table stays one click away
+   for the dense per-relation detail. A details strip surfaces a selected relation's shared types / ACL. */
+#panel-contextmap {
+  /* Override .diag-panel's padding + auto-scroll so the canvas reaches the panel edges (the stage scrolls
+     in table mode instead). */
+  padding: 0;
+  overflow: hidden;
+}
+
+.ctxmap {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.ctxmap-toolbar {
+  flex: 0 0 auto;
+  display: flex;
+  gap: var(--koi-space-1);
+  padding: var(--koi-space-1-5) var(--koi-space-3);
+  border-bottom: 1px solid var(--koi-line);
+}
+
+.ctxmap-tab {
+  font: inherit;
+  font-size: var(--koi-text-xs-plus);
+  padding: var(--koi-space-1) var(--koi-space-2-75);
+  border: 1px solid var(--koi-line);
+  border-radius: var(--koi-radius-sm);
+  background: transparent;
+  color: var(--koi-muted);
+  cursor: pointer;
+}
+.ctxmap-tab:hover {
+  color: var(--koi-fg);
+  border-color: var(--koi-muted);
+}
+.ctxmap-tab[aria-pressed='true'] {
+  background: var(--koi-accent);
+  border-color: var(--koi-accent);
+  color: var(--koi-on-accent);
+}
+.ctxmap-tab:focus-visible {
+  outline: 2px solid var(--koi-accent);
+  outline-offset: 1px;
+}
+
+.ctxmap-stage {
+  flex: 1 1 auto;
+  min-height: 0;
+  position: relative;
+  overflow: auto; /* the table scrolls; the graph canvas (height:100%) fills without scrolling */
+}
+.ctxmap-stage .koi-ctxmap-graph {
+  height: 100%;
+}
+.ctxmap-stage > .ctxmap-table {
+  padding: var(--koi-space-2) var(--koi-space-3) var(--koi-space-3);
+}
+.ctxmap-stage > .muted {
+  padding: var(--koi-space-3);
+}
+
+.ctxmap-details {
+  flex: 0 0 auto;
+  border-top: 1px solid var(--koi-line);
+  padding: var(--koi-space-1-5) var(--koi-space-3);
+  max-height: 38%;
+  overflow: auto;
+  font-size: var(--koi-text-xs-plus);
+}
+.ctxmap-details-head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--koi-space-2);
+  margin-bottom: var(--koi-space-1);
+}
+.ctxmap-details-kind {
+  font-weight: 700;
+  color: var(--koi-fg);
+}
+.ctxmap-details-dir {
+  color: var(--koi-muted);
+  font-family: var(--koi-font-mono);
+}
+.ctxmap-details-grid {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: var(--koi-space-0-5) var(--koi-space-3);
+  margin: 0;
+}
+.ctxmap-details-grid dt {
+  color: var(--koi-muted);
+}
+.ctxmap-details-grid dd {
+  margin: 0;
+  color: var(--koi-fg);
+}
+
+/* maxGraph's hover tooltip (enabled only on the context-map graph) — themed to match the studio. */
+.mxTooltip {
+  position: absolute;
+  z-index: var(--koi-z-popover, 120);
+  background: var(--koi-paper-2);
+  color: var(--koi-fg);
+  border: 1px solid var(--koi-line);
+  border-radius: var(--koi-radius-sm);
+  padding: var(--koi-space-1) var(--koi-space-2);
+  font-family: var(--koi-font-body);
+  font-size: var(--koi-text-xs-plus);
+  box-shadow: var(--koi-shadow);
+  pointer-events: none;
+  max-width: 320px;
+}
+
 /* Copy-generated-code button, floated over the emitted-preview pane. Fades out when there is
    nothing to copy (disabled), and is clipped to the preview pane (hidden with it off-tab). */
 .koi-copy {

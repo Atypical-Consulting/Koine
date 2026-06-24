@@ -1,12 +1,24 @@
 import { describe, expect, test, beforeAll, afterEach, vi, type Mock } from 'vitest';
 import * as mx from '@maxgraph/core';
-import { selectDomainGraphs, buildCanvas, isClassNode, isContextNode, nodeLabelHtml, nodeSize, contextOf, createMaxGraphRenderer } from '@/diagrams/diagrams-maxgraph';
+import {
+  selectDomainGraphs,
+  buildCanvas,
+  isClassNode,
+  isContextNode,
+  nodeLabelHtml,
+  nodeSize,
+  contextOf,
+  createMaxGraphRenderer,
+  renderContextMapGraph,
+  routeContextMapClick,
+} from '@/diagrams/diagrams-maxgraph';
 
 // The diagram's rename/delete gestures now route through Koine's own modal (koiPrompt/koiConfirm),
 // not window.prompt/confirm. Stub them so the tests drive the async dialog deterministically.
 vi.mock('@/shared/overlay', () => ({ koiPrompt: vi.fn(), koiConfirm: vi.fn() }));
 import { koiPrompt, koiConfirm } from '@/shared/overlay';
 import {
+  isDiagramEditing,
   setDiagramEditing,
   setDiagramLayoutStore,
   setDiagramPersistScope,
@@ -341,6 +353,79 @@ describe('createMaxGraphRenderer.render', () => {
     await createMaxGraphRenderer().render(container, [file([diagram('aggregate', g)])], 'dark', () => false);
     expect(container.textContent).toContain('sentinel');
     expect(container.querySelector('.koi-canvas')).toBeNull();
+  });
+});
+
+describe('routeContextMapClick', () => {
+  const ctxNode = node({ id: 'Sales', qualifiedName: 'Sales', kind: 'context' });
+  const relEdge = { from: 'Sales', to: 'Shipping', label: 'Customer/Supplier', arrowKind: 'association' };
+
+  test('a context node routes to onContextClick (filter), not onRelationSelect', () => {
+    let ctx: any = 'unset';
+    let rel: any = 'unset';
+    routeContextMapClick(ctxNode, { onContextClick: (n) => (ctx = n), onRelationSelect: (e) => (rel = e) });
+    expect(ctx).toMatchObject({ qualifiedName: 'Sales' });
+    expect(rel).toBe('unset');
+  });
+
+  test('a relation edge routes to onRelationSelect', () => {
+    let rel: any = 'unset';
+    routeContextMapClick(relEdge, { onRelationSelect: (e) => (rel = e) });
+    expect(rel).toMatchObject({ from: 'Sales', to: 'Shipping' });
+  });
+
+  test('an empty / unknown click clears the selection (onRelationSelect(null))', () => {
+    let rel: any = 'unset';
+    routeContextMapClick(null, { onRelationSelect: (e) => (rel = e) });
+    expect(rel).toBeNull();
+  });
+});
+
+describe('renderContextMapGraph', () => {
+  const ctx = (name: string) => node({ id: name, qualifiedName: name, label: name, kind: 'context' });
+
+  test('mounts a read-only context-map canvas (its own root class) and returns a disposable handle', async () => {
+    const graph: DiagramGraph = {
+      nodes: [ctx('Sales'), ctx('Shipping')],
+      edges: [{ from: 'Sales', to: 'Shipping', label: 'Customer/Supplier', arrowKind: 'association' }],
+    };
+    const container = makeContainer();
+    const handle = await renderContextMapGraph(container, graph, () => true);
+    try {
+      expect(handle).not.toBeNull();
+      expect(container.querySelector('.koi-ctxmap-graph .koi-canvas')).not.toBeNull();
+      // its own root class — NOT the domain canvas's cross-highlight hook (`koi-svg-diagram`)
+      expect(container.querySelector('.koi-svg-diagram')).toBeNull();
+      // the build forced editing off and restored the global afterwards (vitest's default is off)
+      expect(isDiagramEditing()).toBe(false);
+    } finally {
+      handle?.dispose();
+    }
+  });
+
+  test('forces editing off for the build, then RESTORES the global editing flag (domain canvas keeps authoring)', async () => {
+    setDiagramEditing(true);
+    const graph: DiagramGraph = {
+      nodes: [ctx('A'), ctx('B')],
+      edges: [{ from: 'A', to: 'B', label: 'Partnership', arrowKind: 'bidirectional' }],
+    };
+    const container = makeContainer();
+    const handle = await renderContextMapGraph(container, graph, () => true);
+    try {
+      expect(isDiagramEditing()).toBe(true); // restored — the read-only build must not disable authoring globally
+    } finally {
+      handle?.dispose();
+    }
+  });
+
+  test('a superseded render (isCurrent() false) commits nothing and returns null', async () => {
+    const graph: DiagramGraph = { nodes: [ctx('A')], edges: [] };
+    const container = makeContainer();
+    container.append('sentinel');
+    const handle = await renderContextMapGraph(container, graph, () => false);
+    expect(handle).toBeNull();
+    expect(container.querySelector('.koi-ctxmap-graph')).toBeNull();
+    expect(container.textContent).toContain('sentinel');
   });
 });
 

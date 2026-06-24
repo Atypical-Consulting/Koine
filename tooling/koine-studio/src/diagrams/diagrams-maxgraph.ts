@@ -22,6 +22,7 @@ import {
   diagramLayoutStore,
   isDiagramEditing,
   isEditableKind,
+  setDiagramEditing,
   type DiagramConnectDetail,
   type DiagramDisconnectDetail,
   type DiagramLayoutStore,
@@ -821,6 +822,129 @@ export function createMaxGraphRenderer(): DiagramRenderer {
       }
     },
   };
+}
+
+// --- standalone strategic context-map graph -----------------------------------
+// The context map renders on the SAME maxGraph engine as the domain canvas (buildCanvas + the pan/zoom/
+// minimap chrome) — there is deliberately no second diagram engine. It differs from the domain canvas in
+// three ways: it is read-only (contexts aren't authored here), it lays out by relations (a dependency
+// rank, not bounded-context swimlanes), and a click filters/inspects rather than navigates to source.
+
+/** Interaction hooks for the context-map graph: a context-node click (filter to that context), a
+ *  relation-edge selection (`null` clears it), and a per-cell hover tooltip builder. */
+export interface ContextMapGraphHooks {
+  /** A bounded-context node was clicked — the inspector filters the workspace to that context. */
+  onContextClick?(node: DiagramNode): void;
+  /** A relation edge was selected, or selection cleared (`null`) — the inspector shows its shared types / ACL. */
+  onRelationSelect?(edge: DiagramEdge | null): void;
+  /** Hover-tooltip text (plain string) for a cell value (a context node or a relation edge), or null for none. */
+  tooltip?(value: DiagramNode | DiagramEdge): string | null;
+}
+
+/** A teardown handle for a mounted context-map graph. */
+export interface ContextMapGraphHandle {
+  dispose(): void;
+}
+
+/** Route a clicked cell value to the right hook: a context node (has a `qualifiedName`) filters to that
+ *  context; a relation edge (has `from`/`to`) is selected; anything else clears the selection. Extracted
+ *  pure so the routing is unit-tested without driving maxGraph. */
+export function routeContextMapClick(value: unknown, hooks: ContextMapGraphHooks): void {
+  if (value && typeof value === 'object' && 'qualifiedName' in value) hooks.onContextClick?.(value as DiagramNode);
+  else if (value && typeof value === 'object' && 'from' in value && 'to' in value) hooks.onRelationSelect?.(value as DiagramEdge);
+  else hooks.onRelationSelect?.(null);
+}
+
+/** Arrange the context-map graph by its relations: a dependency-ranked {@link HierarchicalLayout} so an
+ *  upstream → downstream edge reads left→right. Wrapped so a measure-less headless DOM can't blank it. */
+function runContextMapLayout(mx: Mx, graph: MxGraph): void {
+  try {
+    const layout = new mx.HierarchicalLayout(graph, 'west');
+    layout.intraCellSpacing = 40;
+    layout.interRankCellSpacing = 90;
+    graph.batchUpdate(() => layout.execute(graph.getDefaultParent()));
+  } catch {
+    // Unmeasurable DOM (vitest/happy-dom) — the nodes are still present and addressable, just unarranged.
+  }
+}
+
+/**
+ * Render a standalone strategic context-map graph into `container`, reusing {@link buildCanvas} and the
+ * pan/zoom/minimap chrome. The map is a READ-ONLY topology view, so editing is forced off for the
+ * (synchronous) build and restored after — contexts must not be movable / connectable / renamable. A
+ * superseded render (`isCurrent()` false) tears itself down rather than clobbering a newer one. Returns a
+ * teardown handle (or null when nothing was committed) so the inspector can dispose the canvas on toggle.
+ */
+export async function renderContextMapGraph(
+  container: HTMLElement,
+  graph: DiagramGraph,
+  isCurrent: () => boolean,
+  hooks: ContextMapGraphHooks = {},
+): Promise<ContextMapGraphHandle | null> {
+  let mx: Mx;
+  try {
+    mx = await getMaxGraph();
+  } catch (e) {
+    if (isCurrent()) container.innerHTML = `<p class="doc-error">Could not load the diagram renderer: ${escapeHtml(String(e))}</p>`;
+    return null;
+  }
+  if (!isCurrent()) return null;
+
+  const root = document.createElement('div');
+  // Deliberately WITHOUT `koi-svg-diagram`: the inspector's selection cross-highlight scopes to that class
+  // on the domain canvas, and a context node's bare name shouldn't be cross-highlighted here.
+  root.className = 'koi-diagrams-single koi-ctxmap-graph';
+  const surface = document.createElement('div');
+  surface.className = 'koi-canvas';
+  root.appendChild(surface);
+
+  // Force editing off for the synchronous build (no awaits between set and restore, so no render can
+  // interleave), then restore the global flag for the authoring domain canvas.
+  const prevEditing = isDiagramEditing();
+  setDiagramEditing(false);
+  let handle: CanvasHandle;
+  let chrome: { dispose(): void; fit(): void };
+  try {
+    handle = buildCanvas(mx, surface, graph);
+    if (graph.edges.length > 0) runContextMapLayout(mx, handle.graph); // override buildCanvas's row with a topology rank
+    chrome = mountChrome(mx, handle, root);
+  } finally {
+    setDiagramEditing(prevEditing);
+  }
+
+  // Hover tooltips (kind + shared types / ACL) — best-effort chrome; a measure-less headless DOM may skip it.
+  if (hooks.tooltip) {
+    try {
+      handle.graph.setTooltips(true);
+      (handle.graph as unknown as { getTooltipForCell: (cell: MxCell) => string }).getTooltipForCell = (cell) => {
+        const v = cell?.value as DiagramNode | DiagramEdge | undefined;
+        return (v && typeof v === 'object' && hooks.tooltip!(v)) || '';
+      };
+    } catch {
+      // tooltips are non-essential — selection still surfaces the same detail in the inspector
+    }
+  }
+
+  // Click routing: a context node → filter to that context; a relation edge → show its details; an empty
+  // click → clear the selection. (buildCanvas's own span-navigate listener is inert here — context nodes
+  // carry no source span.)
+  handle.graph.addListener(mx.InternalEvent.CLICK, (_sender: unknown, evt: { getProperty(name: string): unknown }) => {
+    routeContextMapClick((evt.getProperty('cell') as MxCell | null)?.value, hooks);
+  });
+
+  const dispose = (): void => {
+    chrome.dispose();
+    handle.dispose();
+  };
+
+  if (isCurrent()) {
+    container.replaceChildren(root);
+    handle.graph.getView().revalidate(); // re-render now that the surface is in the live DOM
+    chrome.fit(); // frame the laid-out content into the viewport
+    return { dispose };
+  }
+  dispose();
+  return null;
 }
 
 function escapeHtml(s: string): string {
