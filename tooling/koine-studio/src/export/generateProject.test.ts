@@ -56,6 +56,18 @@ describe('defaultProjectName', () => {
     expect(defaultProjectName([{ path: 'runtime.ts', contents: '' }])).toBe('KoineProject');
     expect(defaultProjectName([])).toBe('KoineProject');
   });
+  it('does not mistake a Rust crate src/ dir for a context folder', () => {
+    // The Rust emitter lays every module flat under `src/` next to a top-level `Cargo.toml`, so the
+    // crate has no context folder to name from — `src` must NOT become the project name.
+    expect(
+      defaultProjectName([
+        { path: 'Cargo.toml', contents: '' },
+        { path: 'src/lib.rs', contents: '' },
+        { path: 'src/koine_runtime.rs', contents: '' },
+        { path: 'src/billing.rs', contents: '' },
+      ]),
+    ).toBe('KoineProject');
+  });
 });
 
 describe('synthesizeCsproj', () => {
@@ -99,6 +111,18 @@ describe('buildProjectZip', () => {
   it('omits glossary.md for an empty/whitespace glossary', async () => {
     const zip = await JSZip.loadAsync(await buildProjectZip(files, { projectName: 'Shop', includeCsproj: false, glossary: '   ' }));
     expect(zip.file('Shop/glossary.md')).toBeNull();
+  });
+
+  it('lays a Rust crate out with Cargo.toml and src/ at the project root', async () => {
+    const rustFiles = [
+      { path: 'Cargo.toml', contents: '# cargo' },
+      { path: 'src/lib.rs', contents: '// lib' },
+      { path: 'src/billing.rs', contents: '// billing' },
+    ];
+    const zip = await JSZip.loadAsync(await buildProjectZip(rustFiles, { projectName: 'Shop', includeCsproj: false }));
+    expect(zip.file('Shop/Cargo.toml')).not.toBeNull(); // top-level manifest at the project root
+    expect(zip.file('Shop/src/lib.rs')).not.toBeNull(); // crate source under the project's own src/
+    expect(await zip.file('Shop/src/billing.rs')!.async('string')).toBe('// billing');
   });
 
   it('rejects path-traversal entries', async () => {

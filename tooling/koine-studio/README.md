@@ -1,7 +1,7 @@
 # Koine Studio
 
 A minimal desktop IDE for `.koi` files, built on Tauri v2 + CodeMirror 6. It gives you a
-live editor with push-based diagnostics and an emitted-code (C# / TypeScript) preview pane,
+live editor with push-based diagnostics and an emitted-code (C# / TypeScript / Python / PHP / Rust) preview pane,
 all driven by the existing Koine language server (`koine lsp`) spawned as a child process and
 brokered over stdio by the Rust host. **`Mod`+`Shift`+`F`** opens a workspace-wide search &
 replace panel (case / whole-word / regex / include-glob) across every `.koi` file in the open
