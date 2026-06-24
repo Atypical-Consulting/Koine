@@ -27,6 +27,10 @@ public sealed class Customer
     public string Name { get; }
     public Email Email { get; }
 
+#pragma warning disable CS8618 // EF Core populates members from the store after construction.
+    private Customer() { }
+#pragma warning restore CS8618
+
     public Customer(CustomerId id, string name, Email email)
     {
         Id = id;
@@ -447,6 +451,10 @@ public sealed class OrderLine : ValueObject
     public ProductId Product { get; }
     public int Quantity { get; }
     public Money UnitPrice { get; }
+
+#pragma warning disable CS8618 // EF Core populates members from the store after construction.
+    private OrderLine() { }
+#pragma warning restore CS8618
 
     public OrderLine(ProductId product, int quantity, Money unitPrice)
     {

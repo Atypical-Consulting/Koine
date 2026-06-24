@@ -135,6 +135,8 @@ Per bounded context, the infrastructure layer adds (under an `Infrastructure/` f
 - a transactional `OutboxMessage` table + an `IntegrationEventDispatcher` (only when the context publishes an integration event);
 - an `Add<Context>Infrastructure(this IServiceCollection, Action<DbContextOptionsBuilder>)` DI extension — you supply the database provider, so the emitter stays provider-agnostic.
 
+**Every** persisted aggregate materializes (insert → query round-trips), not only collection owners: scalar-only roots, roots that own a scalar value object (`OwnsOne`), versioned aggregates, and nested value objects all round-trip. Each persisted root — and any value object that owns a value object — gets a private parameterless persistence constructor EF Core builds through (an owned navigation can never bind as a constructor parameter), and plain scalar root properties are mapped explicitly so EF persists the read-only auto-property via its backing field.
+
 `--layers domain` (or omitting the flag) keeps the output **byte-identical** to before. EF Core is the only backend in v1.
 
 ### TypeScript & Python infrastructure (`--layers`)

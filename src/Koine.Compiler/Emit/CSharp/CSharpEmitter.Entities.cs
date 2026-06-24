@@ -120,7 +120,7 @@ public sealed partial class CSharpEmitter
 
         // Constructor: identity param first, then members.
         sb.Append('\n');
-        WriteEntityConstructor(sb, entity, ctorMembers, backedListMembers, translator, typeMapper, index);
+        WriteEntityConstructor(sb, entity, isRoot, ctorMembers, backedListMembers, translator, typeMapper, index);
 
         // Shared invariant-checking method (DRY: called by the constructor and each command).
         if (entity.Invariants.Count > 0)
