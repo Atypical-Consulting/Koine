@@ -220,6 +220,7 @@ public static class DiagnosticCodes
     public const string EntityReferencesForeignAggregate = "KOI1602";
     public const string CommandParameterReferencesEntity = "KOI1603";
     public const string DomainEventReferencesEntity = "KOI1604";
+    public const string EntityFieldReferencesMessageType = "KOI1605";
 
     // Helper: build a descriptor that carries the existing one-line description into both Title and
     // MessageFormat, so no information is lost while the richer shape is adopted incrementally.
@@ -406,5 +407,6 @@ public static class DiagnosticCodes
             [EntityReferencesForeignAggregate] = D(EntityReferencesForeignAggregate, "An entity or aggregate field references another aggregate (or an entity in another aggregate) directly instead of by its identity.", DiagnosticCategory.References, DiagnosticSeverity.Error),
             [CommandParameterReferencesEntity] = D(CommandParameterReferencesEntity, "A command or factory parameter is an entity or aggregate; commands carry data and identities, not entity references.", DiagnosticCategory.References, DiagnosticSeverity.Error),
             [DomainEventReferencesEntity] = D(DomainEventReferencesEntity, "A domain-event field references an entity or aggregate; events carry data and identities, not entity references.", DiagnosticCategory.References, DiagnosticSeverity.Error),
+            [EntityFieldReferencesMessageType] = D(EntityFieldReferencesMessageType, "An entity or aggregate-root field is typed as a domain/integration event, read model, or query; an entity holds domain state (value objects, enums, ids, child entities), not events, read models, or queries.", DiagnosticCategory.References, DiagnosticSeverity.Error),
         };
 }

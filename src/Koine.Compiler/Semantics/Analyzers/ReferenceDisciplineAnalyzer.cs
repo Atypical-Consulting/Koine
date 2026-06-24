@@ -16,7 +16,9 @@ namespace Koine.Compiler.Semantics;
 ///   <item>a command or factory parameter carries data and identities, not entity/aggregate references
 ///   (<see cref="DiagnosticCodes.CommandParameterReferencesEntity"/>);</item>
 ///   <item>a domain-event field carries data and identities, not entity/aggregate references
-///   (<see cref="DiagnosticCodes.DomainEventReferencesEntity"/>).</item>
+///   (<see cref="DiagnosticCodes.DomainEventReferencesEntity"/>);</item>
+///   <item>an entity/aggregate-root member holds domain state, never a domain/integration event,
+///   read model, or query (<see cref="DiagnosticCodes.EntityFieldReferencesMessageType"/>).</item>
 /// </list>
 /// Classification is by <see cref="ModelIndex.Classify(string)"/> (genuinely-unknown names are left to
 /// <see cref="DiagnosticCodes.UnknownType"/>); collection element/value types are checked recursively.
@@ -120,6 +122,20 @@ internal sealed class ReferenceDisciplineAnalyzer : IModelAnalyzer
         List<Diagnostic> diagnostics)
     {
         TypeKind kind = index.Classify(tr.Name);
+
+        // An entity holds domain state — value objects, enums, ids, and its own child entities. A
+        // domain/integration event is an immutable record of what happened; a read model / query is a
+        // CQRS read-side projection. None of those are state an entity should own as a field (KOI1605).
+        // This is a different mistake from a cross-aggregate reference (KOI1602) — the fix isn't "use
+        // its id", it's "don't hold it at all" — so it gets its own code and message.
+        if (IsMessageOrReadModel(kind))
+        {
+            diagnostics.Add(Diagnostic.Error(
+                DiagnosticCodes.EntityFieldReferencesMessageType,
+                $"entity field '{memberName}' references {DescribeMessageKind(kind)} '{tr.Name}'; an entity holds domain state (value objects, enums, ids, child entities), not events, read models, or queries",
+                tr.Span));
+        }
+
         bool offends = kind == TypeKind.Aggregate
             || (kind == TypeKind.Entity
                 && declaringOwner is not null
@@ -221,6 +237,24 @@ internal sealed class ReferenceDisciplineAnalyzer : IModelAnalyzer
         TypeKind.Enum or TypeKind.Value or TypeKind.IdValueObject => true,
         TypeKind.Unknown => true,   // genuinely-unknown names are reported as KOI0101 elsewhere
         _ => false                  // Entity, Aggregate, Event, IntegrationEvent, ReadModel, Query
+    };
+
+    /// <summary>
+    /// The message / read-side kinds an entity or aggregate-root member must never be typed as: a
+    /// domain or integration event (a record of what happened) and a read model or query (a CQRS
+    /// read-side projection). Reported on an entity member as KOI1605.
+    /// </summary>
+    private static bool IsMessageOrReadModel(TypeKind kind) =>
+        kind is TypeKind.Event or TypeKind.IntegrationEvent or TypeKind.ReadModel or TypeKind.Query;
+
+    /// <summary>Names a message/read kind for the KOI1605 diagnostic message.</summary>
+    private static string DescribeMessageKind(TypeKind kind) => kind switch
+    {
+        TypeKind.Event => "event",
+        TypeKind.IntegrationEvent => "integration event",
+        TypeKind.ReadModel => "read model",
+        TypeKind.Query => "query",
+        _ => "type"
     };
 
     /// <summary>
