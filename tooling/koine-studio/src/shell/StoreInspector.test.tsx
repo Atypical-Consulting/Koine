@@ -39,6 +39,32 @@ describe('StoreInspector', () => {
     expect(field(container, 'problems')).toContain('1 error');
   });
 
+  test('exposes the full store as a collapsible raw-state snapshot', () => {
+    const store = createAppStore();
+    const { container } = render(<StoreInspector store={store} />);
+
+    const raw = container.querySelector('[data-field="rawState"]');
+    expect(raw).not.toBeNull();
+    // The whole store, not just the curated rows: a known data key shows up, and the
+    // function-valued setters are filtered out so only state is dumped.
+    expect(raw!.textContent).toContain('activeContext');
+    expect(raw!.textContent).not.toContain('setActiveContext');
+  });
+
+  test('raw snapshot tracks slices the curated rows do not subscribe to', () => {
+    const store = createAppStore();
+    const { container } = render(<StoreInspector store={store} />);
+
+    // canUndo/canRedo (History slice) feed no curated row; the dump must still repaint when they
+    // change — otherwise the "whole store" snapshot silently goes stale.
+    act(() => {
+      store.getState().setHistoryState({ canUndo: true, canRedo: false });
+    });
+
+    const raw = container.querySelector('[data-field="rawState"]')!.textContent!;
+    expect(raw).toContain('"canUndo": true');
+  });
+
   test('has no accessibility violations', async () => {
     const store = createAppStore();
     const { container } = render(<StoreInspector store={store} />);
