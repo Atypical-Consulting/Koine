@@ -534,11 +534,18 @@ internal sealed class ExpressionChecker
                 CheckCallArgumentType(op, target, call.Args[0], collectionContains, scope, call);
             }
         }
-        else if (call.Args.Count == 0 && target is not null && _index.SpecsFor(target.Name).ContainsKey(op))
+        else if (call.Args.Count == 0 && _index.IsAnySpec(op))
         {
             // A spec call: `o.IsLarge()` invokes a declared spec on a parameter of the spec's
-            // target type. Valid when the receiver's static type declares a spec by this name;
-            // it translates to the spec's generated extension method.
+            // target type, translated to the spec's generated extension method. Valid only when
+            // the receiver's static type is the spec's declared target; otherwise the predicate
+            // would not apply. (An unresolved receiver is left to its own earlier diagnostic.)
+            if (target is not null && !_index.SpecsFor(target.Name).ContainsKey(op))
+            {
+                var declaredOn = string.Join("/", _index.AllSpecs().Where(s => s.Name == op).Select(s => s.TargetType).Distinct());
+                Report(DiagnosticCodes.SpecCallTargetMismatch,
+                    $"spec '{op}' applies to '{declaredOn}', not '{target.Name}'", call);
+            }
         }
         else
         {

@@ -190,6 +190,24 @@ public class R10ServicesTests
     }
 
     [Fact]
+    public void Spec_call_on_wrong_receiver_type_is_reported()
+    {
+        // `IsLarge` is a spec on Order; calling it on a Customer parameter must be flagged,
+        // not silently accepted or reported as a generic unknown operation.
+        const string src = """
+            context Sales {
+              value Order { lineCount: Int }
+              value Customer { name: String }
+              spec IsLarge on Order = lineCount > 10
+              service OrderRouting {
+                operation isPriority(c: Customer): Bool = c.IsLarge()
+              }
+            }
+            """;
+        Diagnose(src).ShouldContain(d => d.Code == DiagnosticCodes.SpecCallTargetMismatch);
+    }
+
+    [Fact]
     public void Seam_operation_emits_an_abstract_class()
     {
         const string src = "context C { service Calc { operation run(a: Int): Int } }";
