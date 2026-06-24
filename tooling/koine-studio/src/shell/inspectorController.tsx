@@ -79,7 +79,7 @@ import { guardedLoad } from '@/shell/guardedLoad';
 import { DEFAULT_CENTER, isValidCenter, type RightView } from '@/store/slices/uiChrome';
 import type { DomainIndex } from '@/ai/aiPanel';
 import { currentTheme } from '@/settings/theme';
-import { renderCheckMarkdown, renderContextMapHtml } from '@/shell/ideUtils';
+import { escapeHtml, formatAclMapping, renderCheckMarkdown, renderContextMapHtml } from '@/shell/ideUtils';
 
 // LSP SymbolKind for a namespace — the kind the language service tags each top-level `context`
 // document symbol with. Used by followActiveFileContext to read a file's bounded context(s).
@@ -1449,8 +1449,6 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     contextMapGraphHandle = null;
   }
 
-  const escTip = (s: string): string => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-
   // The hover tooltip for a relation edge (a context node's name is already on its box, so → null there).
   // maxGraph renders the string as innerHTML with `\n`→`<br>`, so every fragment is escaped first.
   function contextMapTooltip(value: DiagramNode | DiagramEdge): string | null {
@@ -1459,8 +1457,8 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     const arrow = e.bidirectional ? '↔' : '→';
     const lines = [`${e.label ?? 'relation'}: ${e.from} ${arrow} ${e.to}`];
     if (e.sharedTypes.length) lines.push(`Shared: ${e.sharedTypes.join(', ')}`);
-    for (const a of e.acl) lines.push(`ACL: ${a.upstreamContext}.${a.upstreamType} → ${a.localContext}.${a.localType}`);
-    return lines.map(escTip).join('\n');
+    for (const a of e.acl) lines.push(`ACL: ${formatAclMapping(a)}`);
+    return lines.map(escapeHtml).join('\n');
   }
 
   // Fill the details strip with a selected relation's kind, direction, shared types and ACL — so nothing
@@ -1471,15 +1469,12 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
       host.innerHTML = '';
       return;
     }
-    const dir = edge.bidirectional ? `${escTip(edge.from)} ↔ ${escTip(edge.to)}` : `${escTip(edge.from)} → ${escTip(edge.to)}`;
-    const shared = edge.sharedTypes.length ? edge.sharedTypes.map(escTip).join(', ') : '—';
-    const acl = edge.acl.length
-      ? edge.acl
-          .map((a) => `${escTip(a.upstreamContext)}.${escTip(a.upstreamType)} → ${escTip(a.localContext)}.${escTip(a.localType)}`)
-          .join('<br>')
-      : '—';
+    const arrow = edge.bidirectional ? '↔' : '→';
+    const dir = `${escapeHtml(edge.from)} ${arrow} ${escapeHtml(edge.to)}`;
+    const shared = edge.sharedTypes.length ? edge.sharedTypes.map(escapeHtml).join(', ') : '—';
+    const acl = edge.acl.length ? edge.acl.map((a) => escapeHtml(formatAclMapping(a))).join('<br>') : '—';
     host.innerHTML =
-      `<div class="ctxmap-details-head"><span class="ctxmap-details-kind">${escTip(edge.label ?? 'Relation')}</span>` +
+      `<div class="ctxmap-details-head"><span class="ctxmap-details-kind">${escapeHtml(edge.label ?? 'Relation')}</span>` +
       `<span class="ctxmap-details-dir">${dir}</span></div>` +
       `<dl class="ctxmap-details-grid"><dt>Shared types</dt><dd>${shared}</dd><dt>ACL</dt><dd>${acl}</dd></dl>`;
     host.hidden = false;

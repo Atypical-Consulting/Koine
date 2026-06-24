@@ -1,8 +1,21 @@
 // Pure helper functions extracted from ide.ts. These are module-scope stateless utilities with
 // no side-effects, no DOM access, and no host-platform dependency — safe to import anywhere and
 // to test in a plain Node/vitest environment.
-import { type CheckResult, type ContextMapResult, type LspDiagnostic, type Range } from '@/lsp/lsp';
+import { type AclMapping, type CheckResult, type ContextMapResult, type LspDiagnostic, type Range } from '@/lsp/lsp';
 import { type ShortcutRow } from '@/shared/help';
+
+/** Escape the HTML-significant characters in a string so domain text can't break the markup it's
+ *  interpolated into. The single shared escaper for the context-map surfaces (the table here, plus the
+ *  graph's tooltip + details strip in inspectorController). */
+export function escapeHtml(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+/** Format one ACL mapping as `Upstream.Type → Local.Type` (RAW — escape it for an HTML context). Shared
+ *  by the context-map table, the graph's hover tooltip, and its details strip so the three never drift. */
+export function formatAclMapping(a: AclMapping): string {
+  return `${a.upstreamContext}.${a.upstreamType} → ${a.localContext}.${a.localType}`;
+}
 
 /**
  * Build a file:// uri from an absolute path. Each non-empty segment is percent-encoded.
@@ -64,8 +77,7 @@ export function isSafeShareRelPath(relPath: string): boolean {
 // --- context-map rendering (mirrors koine-textmate's renderContextMap) -------
 
 export function renderContextMapHtml(res: ContextMapResult): string {
-  const esc = (s: string) =>
-    s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const esc = escapeHtml;
   const parts: string[] = ['<h2>Contexts</h2>'];
 
   if (!res.contexts.length) {
@@ -83,12 +95,7 @@ export function renderContextMapHtml(res: ContextMapResult): string {
         const direction = r.bidirectional ? '&lt;-&gt;' : '-&gt;';
         const shared = r.sharedTypes.length ? esc(r.sharedTypes.join(', ')) : '—';
         const acl = r.acl.length
-          ? r.acl
-              .map(
-                (a) =>
-                  `${esc(a.upstreamContext)}.${esc(a.upstreamType)} → ${esc(a.localContext)}.${esc(a.localType)}`,
-              )
-              .join('<br>')
+          ? r.acl.map((a) => esc(formatAclMapping(a))).join('<br>')
           : '—';
         return (
           '<tr>' +

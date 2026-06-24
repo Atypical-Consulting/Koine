@@ -22,7 +22,6 @@ import {
   diagramLayoutStore,
   isDiagramEditing,
   isEditableKind,
-  setDiagramEditing,
   type DiagramConnectDetail,
   type DiagramDisconnectDetail,
   type DiagramLayoutStore,
@@ -328,9 +327,14 @@ export function buildCanvas(
   container: HTMLElement,
   merged: DiagramGraph,
   savedPositions?: Record<string, DiagramPosition>,
+  options?: { readOnly?: boolean },
 ): CanvasHandle {
   const { Graph } = mx;
-  const editing = isDiagramEditing();
+  // `readOnly` forces a non-authoring canvas regardless of the global editing flag (the strategic
+  // context map renders read-only while the domain canvas stays editable) — so the read-only contract is
+  // a local parameter, not a coincidence of global-flag timing. Every authoring gesture below honours it.
+  const readOnly = options?.readOnly ?? false;
+  const editing = !readOnly && isDiagramEditing();
   const graph = new Graph(container);
   // CSP-safe: never fall through to the single `eval` path for unregistered style names (Tauri strict CSP).
   graph.getView().allowEval = false;
@@ -393,7 +397,7 @@ export function buildCanvas(
   // Double-click an editable node → rename it (prompt), round-tripped through the model→.koi rename (#91).
   // Gated on editing; only class-type, context-owned, spanned nodes (never a context / state) rename.
   graph.addListener(mx.InternalEvent.DOUBLE_CLICK, (_sender: unknown, evt: { getProperty(name: string): unknown }) => {
-    if (!isDiagramEditing()) return;
+    if (readOnly || !isDiagramEditing()) return;
     const v = nodeValue(evt.getProperty('cell') as MxCell | null);
     if (!v || !canRename(v)) return;
     const current = v.label;
@@ -420,7 +424,7 @@ export function buildCanvas(
   // Right-click a node → delete it; right-click a field-backed edge → remove that field. Gated on editing.
   // A DOM contextmenu listener (capture phase, so it beats maxGraph's own handlers) hit-tests the cell.
   const onContextMenu = (evt: MouseEvent): void => {
-    if (!isDiagramEditing()) return;
+    if (readOnly || !isDiagramEditing()) return;
     const rect = container.getBoundingClientRect();
     const cell = graph.getCellAt(evt.clientX - rect.left, evt.clientY - rect.top);
     if (!cell) return;
@@ -475,7 +479,7 @@ export function buildCanvas(
         /* the temp edge is best-effort to remove; a stray one is corrected by the next re-render */
       }
     }
-    if (!isDiagramEditing() || !source || !target || source === target) return;
+    if (readOnly || !isDiagramEditing() || !source || !target || source === target) return;
     container.dispatchEvent(
       new CustomEvent<DiagramConnectDetail>(DIAGRAM_CONNECT_EVENT, {
         bubbles: true,
@@ -622,9 +626,12 @@ const ZOOM_PERSIST_KEY = 'koi-domain-diagram';
  * Ctrl/⌘+wheel zoom, and the Outline minimap. Returns a teardown that detaches them. Kept out of
  * buildCanvas so the model stays unit-testable; the visual chrome is verified in the running studio.
  */
-function mountChrome(mx: Mx, handle: CanvasHandle, host: HTMLElement): { dispose: () => void; fit: () => void } {
+function mountChrome(mx: Mx, handle: CanvasHandle, host: HTMLElement, readOnly = false): { dispose: () => void; fit: () => void } {
   const { Outline } = mx;
   const graph = handle.graph;
+  // `readOnly` (the context-map canvas) is never an authoring surface regardless of the global editing
+  // flag — so panning claims drags anywhere and the authoring controls are omitted.
+  const editing = !readOnly && isDiagramEditing();
 
   // Left-drag pans. When editing, panning must NOT claim drags that start on a cell (ignoreCell=false) —
   // otherwise the pan handler eats the drag and a node can never be moved (it just pans the viewport). So:
@@ -636,7 +643,7 @@ function mountChrome(mx: Mx, handle: CanvasHandle, host: HTMLElement): { dispose
     | undefined;
   if (panning) {
     panning.useLeftButtonForPanning = true;
-    panning.ignoreCell = !isDiagramEditing();
+    panning.ignoreCell = !editing;
   }
   graph.centerZoom = false;
   graph.zoomFactor = 1.2;
@@ -704,7 +711,7 @@ function mountChrome(mx: Mx, handle: CanvasHandle, host: HTMLElement): { dispose
   );
 
   // Authoring controls (editing only): reset the manual layout. The read-only canvas shows only the zoom controls.
-  if (isDiagramEditing()) {
+  if (editing) {
     host.classList.add('koi-canvas--editing');
     controls.append(
       button('⟲', 'Auto-arrange layout', () => {
@@ -856,10 +863,11 @@ export function routeContextMapClick(value: unknown, hooks: ContextMapGraphHooks
 }
 
 /** Arrange the context-map graph by its relations: a dependency-ranked {@link HierarchicalLayout} so an
- *  upstream → downstream edge reads left→right. Wrapped so a measure-less headless DOM can't blank it. */
+ *  upstream → downstream edge reads left→right (orientation `'east'`, matching the domain canvas's inner
+ *  layout). Wrapped so a measure-less headless DOM can't blank it. */
 function runContextMapLayout(mx: Mx, graph: MxGraph): void {
   try {
-    const layout = new mx.HierarchicalLayout(graph, 'west');
+    const layout = new mx.HierarchicalLayout(graph, 'east');
     layout.intraCellSpacing = 40;
     layout.interRankCellSpacing = 90;
     graph.batchUpdate(() => layout.execute(graph.getDefaultParent()));
@@ -870,10 +878,11 @@ function runContextMapLayout(mx: Mx, graph: MxGraph): void {
 
 /**
  * Render a standalone strategic context-map graph into `container`, reusing {@link buildCanvas} and the
- * pan/zoom/minimap chrome. The map is a READ-ONLY topology view, so editing is forced off for the
- * (synchronous) build and restored after — contexts must not be movable / connectable / renamable. A
- * superseded render (`isCurrent()` false) tears itself down rather than clobbering a newer one. Returns a
- * teardown handle (or null when nothing was committed) so the inspector can dispose the canvas on toggle.
+ * pan/zoom/minimap chrome. The map is a READ-ONLY topology view — `buildCanvas`/`mountChrome` are passed
+ * `readOnly`, so contexts are never movable / connectable / renamable regardless of the global editing
+ * flag (the domain canvas stays editable). A superseded render (`isCurrent()` false) tears itself down
+ * rather than clobbering a newer one. Returns a teardown handle (or null when nothing was committed) so
+ * the inspector can dispose the canvas on toggle.
  */
 export async function renderContextMapGraph(
   container: HTMLElement,
@@ -898,19 +907,9 @@ export async function renderContextMapGraph(
   surface.className = 'koi-canvas';
   root.appendChild(surface);
 
-  // Force editing off for the synchronous build (no awaits between set and restore, so no render can
-  // interleave), then restore the global flag for the authoring domain canvas.
-  const prevEditing = isDiagramEditing();
-  setDiagramEditing(false);
-  let handle: CanvasHandle;
-  let chrome: { dispose(): void; fit(): void };
-  try {
-    handle = buildCanvas(mx, surface, graph);
-    if (graph.edges.length > 0) runContextMapLayout(mx, handle.graph); // override buildCanvas's row with a topology rank
-    chrome = mountChrome(mx, handle, root);
-  } finally {
-    setDiagramEditing(prevEditing);
-  }
+  const handle = buildCanvas(mx, surface, graph, undefined, { readOnly: true });
+  if (graph.edges.length > 0) runContextMapLayout(mx, handle.graph); // override buildCanvas's row with a topology rank
+  const chrome = mountChrome(mx, handle, root, true);
 
   // Hover tooltips (kind + shared types / ACL) — best-effort chrome; a measure-less headless DOM may skip it.
   if (hooks.tooltip) {

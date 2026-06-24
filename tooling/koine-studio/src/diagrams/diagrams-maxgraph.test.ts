@@ -396,14 +396,12 @@ describe('renderContextMapGraph', () => {
       expect(container.querySelector('.koi-ctxmap-graph .koi-canvas')).not.toBeNull();
       // its own root class — NOT the domain canvas's cross-highlight hook (`koi-svg-diagram`)
       expect(container.querySelector('.koi-svg-diagram')).toBeNull();
-      // the build forced editing off and restored the global afterwards (vitest's default is off)
-      expect(isDiagramEditing()).toBe(false);
     } finally {
       handle?.dispose();
     }
   });
 
-  test('forces editing off for the build, then RESTORES the global editing flag (domain canvas keeps authoring)', async () => {
+  test('renders READ-ONLY even when global editing is ON, without mutating the editing flag', async () => {
     setDiagramEditing(true);
     const graph: DiagramGraph = {
       nodes: [ctx('A'), ctx('B')],
@@ -412,7 +410,9 @@ describe('renderContextMapGraph', () => {
     const container = makeContainer();
     const handle = await renderContextMapGraph(container, graph, () => true);
     try {
-      expect(isDiagramEditing()).toBe(true); // restored — the read-only build must not disable authoring globally
+      expect(isDiagramEditing()).toBe(true); // the context map never touches the global editing flag
+      // no authoring chrome on the context-map canvas even though editing is globally on (readOnly localizes it)
+      expect(container.querySelector('.koi-ctxmap-graph.koi-canvas--editing')).toBeNull();
     } finally {
       handle?.dispose();
     }
