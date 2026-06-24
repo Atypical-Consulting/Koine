@@ -100,5 +100,4 @@ public class ContextMapWireParityTests
         return JsonNode.Parse(json)!.AsObject();
     }
 #pragma warning restore CA1416
-
 }
