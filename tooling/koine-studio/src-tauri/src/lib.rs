@@ -368,6 +368,29 @@ fn write_text_file(path: String, contents: String) -> Result<(), String> {
     std::fs::write(&path, contents).map_err(|e| format!("failed to write {path}: {e}"))
 }
 
+/// Run `git -C <dir> <args...>` and return its stdout, for the inspector's per-element change
+/// history (issue #150). The frontend builds the full `log -L <start>,<end>:<file>` argument vector
+/// (see `gitHistory.ts`), so this command is a thin, read-only exec wrapper — it refuses anything but
+/// `git log`. Failures (git not installed, `dir` is not a repository, the file is untracked) surface
+/// as `Err(String)`; the caller turns any error into a hidden "Change history" section.
+#[tauri::command]
+fn git_log_for_range(dir: String, args: Vec<String>) -> Result<String, String> {
+    // Defence in depth: only the read-only `git log` invocation the UI builds is ever permitted.
+    if args.first().map(String::as_str) != Some("log") {
+        return Err("unsupported git operation".to_string());
+    }
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(&dir)
+        .args(&args)
+        .output()
+        .map_err(|e| format!("git-unavailable: {e}"))?;
+    if !output.status.success() {
+        return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+}
+
 // --- workspace explorer tree + mutations ------------------------------------
 
 /// One node in the workspace explorer tree under an opened folder — every
@@ -1000,6 +1023,7 @@ pub fn run() {
             list_koi_files,
             read_text_file,
             write_text_file,
+            git_log_for_range,
             write_bytes,
             list_entries,
             list_dir,

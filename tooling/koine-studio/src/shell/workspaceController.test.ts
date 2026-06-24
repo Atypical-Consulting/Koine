@@ -99,6 +99,9 @@ class FakePlatform implements Platform {
     if (!this.files.has(rel)) return Promise.reject(new Error(`no such file: ${path}`));
     return Promise.resolve(this.files.get(rel)!);
   }
+  gitLogForRange(): Promise<null> {
+    return Promise.resolve(null);
+  }
   writeTextFile(path: string, contents: string): Promise<void> {
     if (this.failWrites.has(this.relOf(path))) return Promise.reject(new Error(`write failed: ${path}`));
     this.files.set(this.relOf(path), contents);

@@ -79,7 +79,7 @@ import { guardedLoad } from '@/shell/guardedLoad';
 import { DEFAULT_CENTER, isValidCenter, type RightView } from '@/store/slices/uiChrome';
 import type { DomainIndex } from '@/ai/aiPanel';
 import { currentTheme } from '@/settings/theme';
-import { escapeHtml, formatAclMapping, renderCheckMarkdown, renderContextMapHtml } from '@/shell/ideUtils';
+import { escapeHtml, fileUriToPath, formatAclMapping, renderCheckMarkdown, renderContextMapHtml } from '@/shell/ideUtils';
 import { EMIT_TARGETS } from '@/shared/emitTargets';
 
 // LSP SymbolKind for a namespace — the kind the language service tags each top-level `context`
@@ -783,6 +783,23 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
         { kind: 'changeFieldType', target: `${element.qualifiedName}.${propName}`, type: newType },
         `Changed ${propName} to ${newType}`,
       ),
+    // Per-element git change history (#150): the commits that touched the element's declaration. The
+    // desktop host shells out to `git log -L`; the browser host returns null (section hidden).
+    loadHistory: (element) => {
+      // Prefer the element's own source span — its correct file AND full line range — so history is
+      // scoped to the right declaration even when it lives in a file other than the active editor (a
+      // multi-file workspace). Fall back to the active file + name range for elements with no diagram
+      // node / span (e.g. an undrawn value object).
+      const span = element.sourceSpan;
+      const useSpan = span != null && span.file != null;
+      const path = fileUriToPath(useSpan ? span.file! : deps.activeUri());
+      if (!path) return Promise.resolve(null);
+      // git `-L` is 1-based inclusive. A SourceSpan is 1-based with an end-EXCLUSIVE endLine (so the last
+      // content line is endLine - 1); the name range is 0-based LSP positions, so shift those by one.
+      const startLine = useSpan ? span.line : element.nameRange.start.line + 1;
+      const endLine = useSpan ? Math.max(span.line, span.endLine - 1) : element.nameRange.end.line + 1;
+      return deps.platform.gitLogForRange(path, startLine, endLine);
+    },
   };
 
   // The joined model index (#142): the workspace-merged glossary joined with the richest matching

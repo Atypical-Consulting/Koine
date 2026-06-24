@@ -3,9 +3,11 @@ import {
   buildInspectorElement,
   renderInspector,
   renderRules,
+  renderChangeHistory,
   type InspectorElement,
   type InspectorHandlers,
 } from '@/model/inspector';
+import type { ChangeEntry } from '@/host/gitHistory';
 import type { DiagramNode, GlossaryEntry, ModelMember, Range } from '@/lsp/lsp';
 
 afterEach(() => {
@@ -390,5 +392,36 @@ describe('renderRules', () => {
     const el = renderRules({ ...fullElement, invariants: undefined });
     expect(el.textContent).toContain('No invariants declared');
     expect(el.querySelector('.koi-inspector-item')).toBeNull();
+  });
+});
+
+describe('renderChangeHistory', () => {
+  const entries: ChangeEntry[] = [
+    { sha: 'a1b2c3d', author: 'Alice Dupont', date: '2026-06-20T10:30:00+02:00', message: 'Add the Rule invariant' },
+    { sha: 'e4f5g6h', author: 'Bob', date: '2026-05-01T09:00:00Z', message: 'Introduce Order aggregate' },
+  ];
+
+  test('is hidden (null) when history is unavailable or empty', () => {
+    expect(renderChangeHistory(null)).toBeNull();
+    expect(renderChangeHistory([])).toBeNull();
+  });
+
+  test('renders one row per commit, newest first, as author · date over the message', () => {
+    const el = renderChangeHistory(entries)!;
+    expect(el).not.toBeNull();
+    expect(el.querySelector('.koi-inspector-section-title')!.textContent).toBe('Change history');
+
+    const rows = Array.from(el.querySelectorAll('.koi-inspector-history-item'));
+    expect(rows.length).toBe(2);
+    // The author date is shown as its YYYY-MM-DD calendar day (locale-free), with author and message.
+    expect(rows[0].querySelector('.koi-inspector-history-meta')!.textContent).toBe('Alice Dupont · 2026-06-20');
+    expect(rows[0].querySelector('.koi-inspector-history-message')!.textContent).toBe('Add the Rule invariant');
+    expect(rows[1].querySelector('.koi-inspector-history-meta')!.textContent).toBe('Bob · 2026-05-01');
+  });
+
+  test('carries each commit SHA on the row for a later jump-to-commit', () => {
+    const el = renderChangeHistory(entries)!;
+    const shas = Array.from(el.querySelectorAll('.koi-inspector-history-item')).map((n) => (n as HTMLElement).dataset.sha);
+    expect(shas).toEqual(['a1b2c3d', 'e4f5g6h']);
   });
 });

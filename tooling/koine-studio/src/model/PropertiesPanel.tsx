@@ -3,6 +3,7 @@ import type { AppState } from '@/store/index';
 import { useAppStore } from '@/store/hooks';
 import {
   renderInspector,
+  renderChangeHistory,
   buildInspectorElement,
   KOINE_BUILTIN_TYPES,
   type InspectorElement,
@@ -47,7 +48,29 @@ export function PropertiesPanel(props: {
     <div
       class="koi-inspector-mount"
       ref={(host: HTMLElement | null) => {
-        if (host) host.replaceChildren(renderInspector(element, props.handlers, knownTypes));
+        if (!host) return;
+        const root = renderInspector(element, props.handlers, knownTypes);
+        host.replaceChildren(root);
+        // Per-element git change history (#150): fetched asynchronously (the desktop host shells out to
+        // git) and appended once it resolves, so the synchronous inspector paint isn't blocked. A null /
+        // empty result appends nothing — the section stays hidden on the browser host or outside a git
+        // repo. Guard against a stale resolve: if the selection moved on, `root` is no longer mounted (the
+        // next render replaced it) or carries a different qname, so we drop the late result.
+        if (element && props.handlers.loadHistory) {
+          const loadHistory = props.handlers.loadHistory;
+          // Wrap in Promise.resolve().then so even a synchronous throw inside loadHistory becomes a
+          // rejection the .catch swallows, never escaping the ref callback into Preact's commit.
+          void Promise.resolve()
+            .then(() => loadHistory(element))
+            .then((entries) => {
+              if (!root.isConnected || root.dataset.qname !== element.qualifiedName) return;
+              const section = renderChangeHistory(entries);
+              if (section) root.appendChild(section);
+            })
+            .catch(() => {
+              /* history is best-effort — a failure just leaves the section hidden */
+            });
+        }
       }}
     />
   );
