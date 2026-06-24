@@ -34,6 +34,24 @@
     <PublishTrimmed>true</PublishTrimmed>
     <TrimMode>full</TrimMode>
 
+    <!--
+      AOT-to-wasm toggle (issue #327). Opt-in via `-p:KoineWasmAot=true`; default OFF so a bare
+      `dotnet build`/`dotnet publish` and the dev inner loop stay on the fast interpreter path
+      (AOT makes the publish much slower). Only the deployed Release bundle opts in, via the
+      build-wasm.mjs scripts when KOINE_WASM_AOT=true (set by the docs-deploy and studio-web CI).
+
+      Measured trade-off (pizzeria compile via the smoke-test bench mode, Apple-silicon):
+        interpreter : best ~30 ms, _framework ~6.6 MB, publish ~10 s
+        AOT         : <filled in by Task 3/4 — see the README build notes>
+
+      WasmStripILAfterAOT drops the managed IL once methods are AOT-compiled, clawing back some of
+      the bundle-size cost; it's gated on the same property but can be measured independently with
+      `-p:WasmStripILAfterAOT=false` (a command-line value wins over the assignment below).
+    -->
+    <KoineWasmAot Condition="'$(KoineWasmAot)' == ''">false</KoineWasmAot>
+    <RunAOTCompilation>$(KoineWasmAot)</RunAOTCompilation>
+    <WasmStripILAfterAOT Condition="'$(KoineWasmAot)' == 'true'">true</WasmStripILAfterAOT>
+
     <!-- Not a NuGet package; clear the inherited packaging metadata from Directory.Build.props. -->
     <IsPackable>false</IsPackable>
 
