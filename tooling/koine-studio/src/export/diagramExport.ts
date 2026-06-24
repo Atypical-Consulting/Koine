@@ -4,7 +4,7 @@
 //
 // This is a PURE function of (graph, kind, caption): the same input always yields the same string, which keeps
 // it trivially unit-testable (string assertions over fixture graphs) with no DOM, no maxGraph, no LSP.
-import type { DiagramEdge, DiagramGraph, DiagramNode } from '@/lsp/protocol';
+import type { Diagram, DiagramEdge, DiagramGraph, DiagramNode } from '@/lsp/protocol';
 import type { CanvasHandle } from '@/diagrams/diagrams-maxgraph';
 
 /** A node draws as a UML class box (compartments) iff it has a stereotype or any members; else a simple box.
@@ -317,4 +317,127 @@ export function canvasToSvg(handle: CanvasHandle): string {
   resolveVarAttributes(clone);
 
   return new XMLSerializer().serializeToString(clone);
+}
+
+// --- PNG rasterization + export orchestrator (issue #271 Task 3) --------------
+// `svgToPng` rasterizes a standalone SVG string offscreen via the browser's Image → <canvas> pipeline; it
+// is the only piece of the export path that needs a real raster engine, so it's written to be cleanly
+// stubbable (the test swaps in a fake `Image` + canvas in happy-dom, which has no rasterizer). `exportDiagram`
+// is the format dispatcher: it derives a safe download filename from the diagram caption, turns the diagram
+// into bytes for the chosen format, and hands them to the host's `save` callback — returning whatever `save`
+// resolves to, so a user cancellation propagates as `false`.
+
+/** Best-effort `width`/`height` from a raw SVG string's root attributes (numeric leading digits), used as a
+ *  fallback when the loaded `Image` reports a 0 intrinsic size (e.g. percentage sizing or a headless engine). */
+function parseSvgSize(svg: string): { width: number; height: number } | null {
+  const wMatch = /<svg[^>]*\swidth="([\d.]+)/i.exec(svg);
+  const hMatch = /<svg[^>]*\sheight="([\d.]+)/i.exec(svg);
+  const w = wMatch ? parseFloat(wMatch[1]) : NaN;
+  const h = hMatch ? parseFloat(hMatch[1]) : NaN;
+  if (Number.isFinite(w) && w > 0 && Number.isFinite(h) && h > 0) return { width: w, height: h };
+  return null;
+}
+
+/** Decode a `data:image/png;base64,…` data URL to its raw PNG bytes. */
+function dataUrlToBytes(dataUrl: string): Uint8Array {
+  const comma = dataUrl.indexOf(',');
+  const base64 = comma >= 0 ? dataUrl.slice(comma + 1) : dataUrl;
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return bytes;
+}
+
+/**
+ * Rasterize a standalone SVG string to PNG bytes (issue #271). The SVG is loaded as an `Image` from a
+ * `data:image/svg+xml` URL, drawn onto an offscreen `<canvas>` scaled by `scale` (so the PNG is crisp at 2×
+ * by default), and read back as PNG bytes via `canvas.toDataURL('image/png')`. The canvas is sized from the
+ * image's intrinsic dimensions, falling back to the SVG's declared size, then to 800×600 — so a headless
+ * engine that reports a 0 size still produces a sensibly-sized bitmap. Rejects if the image fails to load or
+ * the 2D context is unavailable.
+ *
+ * Written to be stubbable: the test replaces `Image`, `canvas.getContext` and `canvas.toDataURL` in happy-dom
+ * (which has no real rasterizer) and asserts that bytes come out — no pixel-exact assertion is possible there.
+ */
+export function svgToPng(svg: string, scale = 2): Promise<Uint8Array> {
+  return new Promise<Uint8Array>((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      try {
+        const declared = parseSvgSize(svg);
+        const baseW = img.width > 0 ? img.width : (declared?.width ?? 800);
+        const baseH = img.height > 0 ? img.height : (declared?.height ?? 600);
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.max(1, Math.round(baseW * scale));
+        canvas.height = Math.max(1, Math.round(baseH * scale));
+        const ctx = canvas.getContext('2d');
+        if (!ctx) {
+          reject(new Error('svgToPng: 2D canvas context is unavailable'));
+          return;
+        }
+        ctx.scale(scale, scale);
+        ctx.drawImage(img as unknown as CanvasImageSource, 0, 0);
+        resolve(dataUrlToBytes(canvas.toDataURL('image/png')));
+      } catch (err) {
+        reject(err instanceof Error ? err : new Error(String(err)));
+      }
+    };
+    img.onerror = () => reject(new Error('svgToPng: failed to rasterize SVG image'));
+    img.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+  });
+}
+
+/** Derive a filesystem-safe base name from a diagram caption: strip leading/trailing whitespace, replace any
+ *  path-hostile character (`/ \ : * ? " < > |` and control chars) and collapsed whitespace with a single `_`,
+ *  trim stray separators, and fall back to `'diagram'` when nothing usable remains. No extension is added. */
+function safeBaseName(caption: string): string {
+  const base = caption
+    .trim()
+    // eslint-disable-next-line no-control-regex
+    .replace(/[/\\:*?"<>| -]+/g, '_')
+    .replace(/\s+/g, '_')
+    .replace(/_+/g, '_')
+    .replace(/^[._]+|[._]+$/g, '');
+  return base.length > 0 ? base : 'diagram';
+}
+
+const EXTENSIONS: Record<'svg' | 'png' | 'plantuml', string> = {
+  svg: '.svg',
+  png: '.png',
+  plantuml: '.puml',
+};
+
+/**
+ * Export a Studio diagram in the chosen format and hand it to the host's `save` callback (issue #271).
+ *
+ * The download filename is derived from `diagram.caption` (sanitized to a safe base name, `'diagram'` when
+ * blank) plus the format extension (`.svg` / `.png` / `.puml`). The diagram is encoded to bytes per format:
+ *   - `'plantuml'` → {@link diagramToPlantUml} text, UTF-8 encoded
+ *   - `'svg'`      → {@link canvasToSvg} of the live canvas, UTF-8 encoded
+ *   - `'png'`      → {@link svgToPng} of that SVG (rasterized to PNG)
+ *
+ * Returns whatever `save` resolves to, so a user-cancelled save (`false`) propagates straight through.
+ */
+export async function exportDiagram(
+  format: 'svg' | 'png' | 'plantuml',
+  diagram: Diagram,
+  handle: CanvasHandle,
+  save: (name: string, bytes: Uint8Array) => Promise<boolean>,
+): Promise<boolean> {
+  const name = `${safeBaseName(diagram.caption)}${EXTENSIONS[format]}`;
+
+  let bytes: Uint8Array;
+  switch (format) {
+    case 'plantuml':
+      bytes = new TextEncoder().encode(diagramToPlantUml(diagram.graph, diagram.kind, diagram.caption));
+      break;
+    case 'svg':
+      bytes = new TextEncoder().encode(canvasToSvg(handle));
+      break;
+    case 'png':
+      bytes = await svgToPng(canvasToSvg(handle));
+      break;
+  }
+
+  return save(name, bytes);
 }

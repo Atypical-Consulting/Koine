@@ -1,8 +1,8 @@
-import { describe, expect, it, beforeAll, vi } from 'vitest';
+import { describe, expect, it, beforeAll, afterEach, vi } from 'vitest';
 import * as mx from '@maxgraph/core';
-import { canvasToSvg, diagramToPlantUml } from '@/export/diagramExport';
+import { canvasToSvg, diagramToPlantUml, exportDiagram, svgToPng } from '@/export/diagramExport';
 import { buildCanvas } from '@/diagrams/diagrams-maxgraph';
-import type { DiagramEdge, DiagramGraph, DiagramMember, DiagramNode } from '@/lsp/protocol';
+import type { Diagram, DiagramEdge, DiagramGraph, DiagramMember, DiagramNode } from '@/lsp/protocol';
 
 // The diagram renderer routes its rename/delete gestures through Koine's modal overlay; stub it so importing
 // buildCanvas (and constructing a canvas) stays side-effect-free in this DOM-driven test.
@@ -313,5 +313,145 @@ describe('canvasToSvg', () => {
       graph: { getView: () => ({ getCanvas: () => null }), container: document.createElement('div') },
     } as unknown as Parameters<typeof canvasToSvg>[0];
     expect(() => canvasToSvg(fake)).toThrow(/no <svg>/);
+  });
+});
+
+// --- svgToPng + exportDiagram (issue #271 Task 3) --------------------------------------------------------
+
+function diagramFixture(over: Partial<Diagram> = {}): Diagram {
+  return {
+    caption: over.caption ?? 'Order aggregate',
+    kind: over.kind ?? 'aggregate',
+    mermaid: over.mermaid ?? '',
+    graph:
+      over.graph ??
+      graph(
+        [
+          node({
+            id: 'Ordering.Order',
+            label: 'Order',
+            kind: 'aggregate-root',
+            qualifiedName: 'Ordering.Order',
+            stereotype: 'aggregate root',
+            members: [member('id: OrderId', 'field')],
+          }),
+        ],
+        [],
+      ),
+  };
+}
+
+describe('svgToPng', () => {
+  // happy-dom has no real 2D raster — stub the browser primitives so the code path runs and yields bytes.
+  class StubImage {
+    onload: (() => void) | null = null;
+    onerror: ((e?: unknown) => void) | null = null;
+    width = 100;
+    height = 80;
+    set src(_v: string) {
+      queueMicrotask(() => this.onload?.());
+    }
+  }
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+  });
+
+  it('rasterizes an SVG string to a non-empty PNG byte array (stubbed raster)', async () => {
+    vi.stubGlobal('Image', StubImage as unknown as typeof Image);
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue({
+      scale() {},
+      drawImage() {},
+    } as unknown as CanvasRenderingContext2D);
+    vi.spyOn(HTMLCanvasElement.prototype, 'toDataURL').mockReturnValue(
+      'data:image/png;base64,' + btoa('PNGDATA'),
+    );
+
+    const bytes = await svgToPng('<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"/>');
+    expect(bytes).toBeInstanceOf(Uint8Array);
+    expect(bytes.length).toBeGreaterThan(0);
+  });
+
+  it('rejects when the image fails to load', async () => {
+    class FailImage {
+      onload: (() => void) | null = null;
+      onerror: ((e?: unknown) => void) | null = null;
+      width = 0;
+      height = 0;
+      set src(_v: string) {
+        queueMicrotask(() => this.onerror?.(new Error('boom')));
+      }
+    }
+    vi.stubGlobal('Image', FailImage as unknown as typeof Image);
+    await expect(svgToPng('<svg/>')).rejects.toThrow();
+  });
+});
+
+describe('exportDiagram', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+  });
+
+  it('exports PlantUML: saves a .puml name with the UTF-8 PlantUML bytes', async () => {
+    const diagram = diagramFixture({ caption: 'Order aggregate' });
+    const save = vi.fn().mockResolvedValue(true);
+
+    const ok = await exportDiagram('plantuml', diagram, {} as Parameters<typeof exportDiagram>[2], save);
+
+    expect(ok).toBe(true);
+    expect(save).toHaveBeenCalledTimes(1);
+    const [name, bytes] = save.mock.calls[0] as [string, Uint8Array];
+    expect(name.endsWith('.puml')).toBe(true);
+    const decoded = new TextDecoder().decode(bytes);
+    expect(decoded).toContain('@startuml');
+    expect(decoded).toBe(diagramToPlantUml(diagram.graph, diagram.kind, diagram.caption));
+  });
+
+  it('exports SVG: saves a .svg name with the canvas SVG bytes', async () => {
+    const diagram = diagramFixture();
+    const container = makeContainer();
+    const handle = buildCanvas(mx, container, diagram.graph);
+    const save = vi.fn().mockResolvedValue(true);
+    try {
+      handle.graph.getView().revalidate();
+      const ok = await exportDiagram('svg', diagram, handle, save);
+      expect(ok).toBe(true);
+      const [name, bytes] = save.mock.calls[0] as [string, Uint8Array];
+      expect(name.endsWith('.svg')).toBe(true);
+      const decoded = new TextDecoder().decode(bytes);
+      expect(decoded.startsWith('<svg')).toBe(true);
+    } finally {
+      handle.dispose();
+      container.remove();
+    }
+  });
+
+  it('propagates a cancelled save as false and a successful save as true', async () => {
+    const diagram = diagramFixture();
+    const cancelled = vi.fn().mockResolvedValue(false);
+    const succeeded = vi.fn().mockResolvedValue(true);
+
+    const handle = {} as Parameters<typeof exportDiagram>[2];
+    expect(await exportDiagram('plantuml', diagram, handle, cancelled)).toBe(false);
+    expect(await exportDiagram('plantuml', diagram, handle, succeeded)).toBe(true);
+  });
+
+  it('derives a safe base name from a blank caption (fallback to diagram)', async () => {
+    const diagram = diagramFixture({ caption: '   ' });
+    const save = vi.fn().mockResolvedValue(true);
+    await exportDiagram('plantuml', diagram, {} as Parameters<typeof exportDiagram>[2], save);
+    const [name] = save.mock.calls[0] as [string, Uint8Array];
+    expect(name).toBe('diagram.puml');
+  });
+
+  it('sanitizes path-hostile characters in the caption', async () => {
+    const diagram = diagramFixture({ caption: 'Ordering/Order: v1?' });
+    const save = vi.fn().mockResolvedValue(true);
+    await exportDiagram('plantuml', diagram, {} as Parameters<typeof exportDiagram>[2], save);
+    const [name] = save.mock.calls[0] as [string, Uint8Array];
+    expect(name.endsWith('.puml')).toBe(true);
+    expect(name).not.toMatch(/[/\\:?*"<>|]/);
   });
 });
