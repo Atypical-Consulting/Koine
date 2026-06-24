@@ -54,7 +54,7 @@ jobs:
       # The wasm workloads (emscripten + browser-wasm runtime pack) are slow to
       # download; cache the SDK workload folders keyed on the SDK version.
       - name: Cache wasm workloads
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: |
             ~/.dotnet/sdk-manifests
@@ -70,7 +70,7 @@ jobs:
       # No central package management / lock files, so cache the global NuGet
       # package folder keyed on the project files that pin versions.
       - name: Cache NuGet
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: ~/.nuget/packages
           key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj', 'Directory.Build.props') }}
