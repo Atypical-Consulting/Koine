@@ -418,6 +418,14 @@ internal sealed class LspServer
 
                             break;
 
+                        case "koine/emitTargets":
+                            if (root.TryGetProperty("id", out _))
+                            {
+                                Respond(root, EmitTargetsResultJson());
+                            }
+
+                            break;
+
                         case "koine/glossary":
                             if (root.TryGetProperty("id", out _))
                             {
@@ -1332,6 +1340,27 @@ internal sealed class LspServer
             ["diagnostics"] = items,
             ["error"] = null,
         };
+    }
+
+    /// <summary>
+    /// The emit-target capability query (issue #282): the registry's code-emit targets, each with
+    /// <c>{ id, displayName, fileExtension }</c>, in display order. Backed entirely by
+    /// <see cref="Infrastructure.EmitterRegistry.SupportedTargetInfos"/>, so adding a target to the
+    /// registry surfaces it in Koine Studio's picker/wizard/Generated-tab/assistant with no front-end
+    /// edit. Excludes the non-emit <c>glossary</c>/<c>docs</c> generators.
+    /// </summary>
+    private static object EmitTargetsResultJson()
+    {
+        var targets = Infrastructure.EmitterRegistry.SupportedTargetInfos
+            .Select(i => (object)new Dictionary<string, object?>
+            {
+                ["id"] = i.Id,
+                ["displayName"] = i.DisplayName,
+                ["fileExtension"] = i.FileExtension,
+            })
+            .ToArray();
+
+        return new Dictionary<string, object?> { ["targets"] = targets };
     }
 
     /// <summary>

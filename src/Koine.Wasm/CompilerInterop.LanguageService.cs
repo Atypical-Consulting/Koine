@@ -135,6 +135,22 @@ public static partial class CompilerInterop
     }
 
     /// <summary>
+    /// The emit-target capability query (issue #282): the compiler registry's code-emit targets, each
+    /// carrying <c>{ id, displayName, fileExtension }</c>, in display order — the browser counterpart of
+    /// the stdio LSP's <c>koine/emitTargets</c>. Backed by <see cref="EmitterRegistry.SupportedTargetInfos"/>,
+    /// so a registry target surfaces in Koine Studio with no front-end edit; the non-emit
+    /// <c>glossary</c>/<c>docs</c> generators are excluded. Takes no input. Returns <c>{ targets: [...] }</c>.
+    /// </summary>
+    [JSExport]
+    public static string ListEmitTargets()
+    {
+        var targets = new EmitterRegistry().SupportedTargetInfos
+            .Select(i => new WEmitTarget(i.Id, i.DisplayName, i.FileExtension))
+            .ToArray();
+        return JsonSerializer.Serialize(new WEmitTargetsResult(targets), LangJson.Default.WEmitTargetsResult);
+    }
+
+    /// <summary>
     /// Emits the ubiquitous-language glossary (markdown) for the whole merged workspace. A model that
     /// fails to parse degrades to an empty string rather than throwing.
     /// </summary>
@@ -1106,6 +1122,12 @@ public sealed record WEmitFile(string Path, string Contents);
 /// <summary>Emit-preview result for the merged workspace.</summary>
 public sealed record WEmitPreviewResult(string Target, WEmitFile[] Files, WDiagnostic[] Diagnostics, string? Error);
 
+/// <summary>One emit target's display metadata (issue #282): id, human label, emitted file extension.</summary>
+public sealed record WEmitTarget(string Id, string DisplayName, string FileExtension);
+
+/// <summary>The emit-target capability list (issue #282): the registry's code targets, in display order.</summary>
+public sealed record WEmitTargetsResult(WEmitTarget[] Targets);
+
 /// <summary>Ubiquitous-language glossary as markdown.</summary>
 public sealed record WGlossaryResult(string Markdown);
 
@@ -1287,6 +1309,7 @@ public sealed record WSourceFileDto(string Uri, string Text);
 [JsonSerializable(typeof(WSourceFileDto[]))]
 [JsonSerializable(typeof(WFileDiagnostics[]))]
 [JsonSerializable(typeof(WEmitPreviewResult))]
+[JsonSerializable(typeof(WEmitTargetsResult))]
 [JsonSerializable(typeof(WGlossaryResult))]
 [JsonSerializable(typeof(WGlossaryModel))]
 [JsonSerializable(typeof(WModelNode))]
