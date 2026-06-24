@@ -27,6 +27,11 @@ import {
   removeRecentFolder,
   pinRecentFolder,
   clearRecentFolders,
+  workspaceKeyOf,
+  loadWorkspaceOverrides,
+  saveWorkspaceOverride,
+  effectiveSettings,
+  WORKSPACE_SCOPED_KEYS,
 } from '@/settings/persistence';
 import { BUILTIN_EMIT_TARGETS, setEmitTargets } from '@/shared/emitTargets';
 import type { ChatMessage } from '@/ai/ai';
@@ -465,5 +470,178 @@ describe('diagram node positions (authoring canvas)', () => {
     saveDiagramPositions('ws:koi-domain-diagram', { 'A.B': { x: 1, y: 1 } });
     clearDiagramPositions('ws:koi-domain-diagram');
     expect(loadDiagramPositions('ws:koi-domain-diagram')).toEqual({});
+  });
+});
+
+describe('workspace-scoped settings overrides', () => {
+  beforeEach(() => localStorage.clear());
+
+  // --- workspaceKeyOf ---
+
+  test('workspaceKeyOf is stable under root reordering (sorts before hashing)', () => {
+    const key1 = workspaceKeyOf(['/a/project', '/b/lib']);
+    const key2 = workspaceKeyOf(['/b/lib', '/a/project']);
+    expect(key1).toBe(key2);
+    expect(typeof key1).toBe('string');
+    expect(key1.length).toBeGreaterThan(0);
+  });
+
+  test('workspaceKeyOf returns distinct keys for distinct root sets', () => {
+    const keyA = workspaceKeyOf(['/a/project']);
+    const keyB = workspaceKeyOf(['/b/project']);
+    expect(keyA).not.toBe(keyB);
+  });
+
+  test('workspaceKeyOf returns a stable value for an empty roots array', () => {
+    const k1 = workspaceKeyOf([]);
+    const k2 = workspaceKeyOf([]);
+    expect(k1).toBe(k2);
+  });
+
+  // --- WORKSPACE_SCOPED_KEYS ---
+
+  test('WORKSPACE_SCOPED_KEYS contains exactly the four scoped fields', () => {
+    expect(WORKSPACE_SCOPED_KEYS).toContain('previewTarget');
+    expect(WORKSPACE_SCOPED_KEYS).toContain('formatOnSave');
+    expect(WORKSPACE_SCOPED_KEYS).toContain('wordWrap');
+    expect(WORKSPACE_SCOPED_KEYS).toContain('lspTrace');
+    expect(WORKSPACE_SCOPED_KEYS.length).toBe(4);
+  });
+
+  // --- saveWorkspaceOverride + loadWorkspaceOverrides round-trip ---
+
+  test('saveWorkspaceOverride then loadWorkspaceOverrides round-trips only the scoped fields', () => {
+    const key = workspaceKeyOf(['/work/billing']);
+    saveWorkspaceOverride(key, 'previewTarget', 'typescript');
+    saveWorkspaceOverride(key, 'formatOnSave', false);
+    saveWorkspaceOverride(key, 'wordWrap', true);
+    saveWorkspaceOverride(key, 'lspTrace', 'messages');
+    const overrides = loadWorkspaceOverrides(key);
+    expect(overrides.previewTarget).toBe('typescript');
+    expect(overrides.formatOnSave).toBe(false);
+    expect(overrides.wordWrap).toBe(true);
+    expect(overrides.lspTrace).toBe('messages');
+  });
+
+  test('a second saveWorkspaceOverride for the same field overwrites the prior value', () => {
+    const key = workspaceKeyOf(['/work/billing']);
+    saveWorkspaceOverride(key, 'lspTrace', 'messages');
+    saveWorkspaceOverride(key, 'lspTrace', 'verbose');
+    expect(loadWorkspaceOverrides(key).lspTrace).toBe('verbose');
+  });
+
+  test('overrides are isolated per workspace key', () => {
+    const keyA = workspaceKeyOf(['/work/billing']);
+    const keyB = workspaceKeyOf(['/work/ordering']);
+    saveWorkspaceOverride(keyA, 'wordWrap', true);
+    saveWorkspaceOverride(keyB, 'wordWrap', false);
+    expect(loadWorkspaceOverrides(keyA).wordWrap).toBe(true);
+    expect(loadWorkspaceOverrides(keyB).wordWrap).toBe(false);
+  });
+
+  // --- clearing an override (value null) ---
+
+  test('passing null removes the field from the override blob', () => {
+    const key = workspaceKeyOf(['/work/billing']);
+    saveWorkspaceOverride(key, 'wordWrap', true);
+    expect(loadWorkspaceOverrides(key).wordWrap).toBe(true);
+    saveWorkspaceOverride(key, 'wordWrap', null);
+    expect(loadWorkspaceOverrides(key).wordWrap).toBeUndefined();
+  });
+
+  test('removing the only override leaves an empty (but valid) object', () => {
+    const key = workspaceKeyOf(['/work/billing']);
+    saveWorkspaceOverride(key, 'formatOnSave', false);
+    saveWorkspaceOverride(key, 'formatOnSave', null);
+    expect(loadWorkspaceOverrides(key)).toEqual({});
+  });
+
+  // --- guard discipline: corrupt / absent blob ---
+
+  test('a corrupt override blob loads as {} without throwing', () => {
+    const key = workspaceKeyOf(['/work/billing']);
+    localStorage.setItem(`koine.studio.wsOverrides.${key}`, '{not valid json');
+    expect(loadWorkspaceOverrides(key)).toEqual({});
+  });
+
+  test('a non-object override blob (array) loads as {}', () => {
+    const key = workspaceKeyOf(['/work/billing']);
+    localStorage.setItem(`koine.studio.wsOverrides.${key}`, '[1,2,3]');
+    expect(loadWorkspaceOverrides(key)).toEqual({});
+  });
+
+  test('an absent override key loads as {}', () => {
+    const key = workspaceKeyOf(['/work/new-project']);
+    expect(loadWorkspaceOverrides(key)).toEqual({});
+  });
+
+  test('unknown keys in the override blob are not echoed back', () => {
+    const key = workspaceKeyOf(['/work/billing']);
+    localStorage.setItem(`koine.studio.wsOverrides.${key}`, JSON.stringify({ previewTarget: 'csharp', unknownKey: 'bad', theme: 'light' }));
+    const overrides = loadWorkspaceOverrides(key);
+    expect(overrides.previewTarget).toBe('csharp');
+    expect((overrides as Record<string, unknown>).unknownKey).toBeUndefined();
+    expect((overrides as Record<string, unknown>).theme).toBeUndefined();
+  });
+
+  test('coerces a bogus stored lspTrace back to the default', () => {
+    const key = workspaceKeyOf(['/work/billing']);
+    localStorage.setItem(`koine.studio.wsOverrides.${key}`, JSON.stringify({ lspTrace: 'turbo' }));
+    expect(loadWorkspaceOverrides(key).lspTrace).toBe(DEFAULT_SETTINGS.lspTrace);
+  });
+
+  test('coerces a bogus stored previewTarget back to the default', () => {
+    const key = workspaceKeyOf(['/work/billing']);
+    localStorage.setItem(`koine.studio.wsOverrides.${key}`, JSON.stringify({ previewTarget: 'cobol' }));
+    expect(loadWorkspaceOverrides(key).previewTarget).toBe(DEFAULT_SETTINGS.previewTarget);
+  });
+
+  test('coerces a non-boolean stored formatOnSave back to the default', () => {
+    const key = workspaceKeyOf(['/work/billing']);
+    localStorage.setItem(`koine.studio.wsOverrides.${key}`, JSON.stringify({ formatOnSave: 'yes' }));
+    expect(loadWorkspaceOverrides(key).formatOnSave).toBe(DEFAULT_SETTINGS.formatOnSave);
+  });
+
+  test('coerces a non-boolean stored wordWrap back to the default', () => {
+    const key = workspaceKeyOf(['/work/billing']);
+    localStorage.setItem(`koine.studio.wsOverrides.${key}`, JSON.stringify({ wordWrap: 1 }));
+    expect(loadWorkspaceOverrides(key).wordWrap).toBe(DEFAULT_SETTINGS.wordWrap);
+  });
+
+  // --- effectiveSettings ---
+
+  test('effectiveSettings is identity when workspaceKey is null', () => {
+    const user: typeof DEFAULT_SETTINGS = { ...DEFAULT_SETTINGS, wordWrap: true };
+    const result = effectiveSettings(user, null);
+    expect(result).toEqual(user);
+  });
+
+  test('effectiveSettings is identity when no override exists for the workspace', () => {
+    const key = workspaceKeyOf(['/work/empty']);
+    const user: typeof DEFAULT_SETTINGS = { ...DEFAULT_SETTINGS, lspTrace: 'verbose' };
+    const result = effectiveSettings(user, key);
+    expect(result).toEqual(user);
+  });
+
+  test('effectiveSettings merges workspace overrides over user settings', () => {
+    const key = workspaceKeyOf(['/work/billing']);
+    saveWorkspaceOverride(key, 'previewTarget', 'typescript');
+    saveWorkspaceOverride(key, 'wordWrap', true);
+    const user: typeof DEFAULT_SETTINGS = { ...DEFAULT_SETTINGS, wordWrap: false, previewTarget: 'csharp' };
+    const result = effectiveSettings(user, key);
+    // Workspace overrides win for scoped fields:
+    expect(result.wordWrap).toBe(true);
+    expect(result.previewTarget).toBe('typescript');
+    // Non-scoped fields come from user settings:
+    expect(result.theme).toBe(user.theme);
+    expect(result.fontSize).toBe(user.fontSize);
+  });
+
+  test('effectiveSettings does not mutate the original user settings object', () => {
+    const key = workspaceKeyOf(['/work/billing']);
+    saveWorkspaceOverride(key, 'wordWrap', true);
+    const user: typeof DEFAULT_SETTINGS = { ...DEFAULT_SETTINGS, wordWrap: false };
+    effectiveSettings(user, key);
+    expect(user.wordWrap).toBe(false);
   });
 });

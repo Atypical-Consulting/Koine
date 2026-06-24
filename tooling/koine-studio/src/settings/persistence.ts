@@ -119,6 +119,19 @@ const CHAT_KEY_PREFIX = 'koine.studio.chat.';
 /** Max assistant messages kept per workspace; older turns are dropped so a long chat can't grow unbounded. */
 export const CHAT_HISTORY_CAP = 100;
 
+// Per-workspace settings overrides: a small Partial<Settings> blob keyed by a stable workspace hash.
+// Only the four scoped fields (previewTarget, formatOnSave, wordWrap, lspTrace) can be stored here;
+// all other settings are global and ignored in this store.
+const WORKSPACE_OVERRIDE_KEY_PREFIX = 'koine.studio.wsOverrides.';
+
+/** The settings fields that can be overridden per workspace. */
+export const WORKSPACE_SCOPED_KEYS: readonly (keyof Settings)[] = [
+  'previewTarget',
+  'formatOnSave',
+  'wordWrap',
+  'lspTrace',
+];
+
 /** The secret kept out of the plaintext blob and in the encrypted store; also its key name there. */
 const API_KEY_SECRET = 'aiApiKey';
 
@@ -622,4 +635,93 @@ export function clearChat(key: string): void {
   } catch {
     // storage unavailable — nothing to clear
   }
+}
+
+// --- workspace-scoped settings overrides (#task-1) ---------------------------
+// A small Partial<Settings> (only the four scoped fields) is persisted PER workspace under
+// WORKSPACE_OVERRIDE_KEY_PREFIX + workspaceKey. The workspace key is a stable hash of the sorted
+// root paths so workspace identity survives root reordering. effectiveSettings() merges the
+// workspace overrides on top of the user-level settings, so workspace wins for scoped fields.
+
+/**
+ * A compact, stable, synchronous string hash of a list of root paths.
+ * Roots are sorted first so the order the caller passes them does not matter.
+ * Uses djb2 to keep the implementation small and dependency-free.
+ */
+export function workspaceKeyOf(roots: string[]): string {
+  const joined = [...roots].sort().join('\0');
+  // djb2 hash — deterministic, non-crypto, collision-resistant enough for namespacing localStorage.
+  let h = 5381;
+  for (let i = 0; i < joined.length; i++) {
+    h = ((h << 5) + h + joined.charCodeAt(i)) >>> 0; // keep 32-bit unsigned
+  }
+  return h.toString(36);
+}
+
+/**
+ * Load the workspace-level override blob for the given key.
+ * Returns only the four recognized scoped fields, each run through its coercer.
+ * A missing key, non-object blob, or unparseable JSON returns {}.
+ */
+export function loadWorkspaceOverrides(key: string): Partial<Settings> {
+  const raw = readRaw(WORKSPACE_OVERRIDE_KEY_PREFIX + key);
+  if (raw === null) return {};
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+    const blob = parsed as Record<string, unknown>;
+    const out: Partial<Settings> = {};
+    if ('previewTarget' in blob) out.previewTarget = coercePreviewTarget(blob.previewTarget);
+    if ('formatOnSave' in blob)
+      out.formatOnSave =
+        typeof blob.formatOnSave === 'boolean' ? blob.formatOnSave : DEFAULT_SETTINGS.formatOnSave;
+    if ('wordWrap' in blob)
+      out.wordWrap = typeof blob.wordWrap === 'boolean' ? blob.wordWrap : DEFAULT_SETTINGS.wordWrap;
+    if ('lspTrace' in blob) out.lspTrace = coerceTrace(blob.lspTrace);
+    return out;
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * Set (or clear) a single scoped field in the workspace override blob.
+ * Passing `null` as the value REMOVES the field from the blob.
+ * Reads the current blob, applies the change, and writes it back via writeRaw.
+ */
+export function saveWorkspaceOverride<K extends keyof Settings>(
+  key: string,
+  field: K,
+  value: Settings[K] | null,
+): void {
+  const raw = readRaw(WORKSPACE_OVERRIDE_KEY_PREFIX + key);
+  let blob: Record<string, unknown> = {};
+  if (raw !== null) {
+    try {
+      const parsed = JSON.parse(raw) as unknown;
+      if (parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        blob = parsed as Record<string, unknown>;
+      }
+    } catch {
+      // corrupt blob — start fresh
+    }
+  }
+  if (value === null) {
+    delete blob[field as string];
+  } else {
+    blob[field as string] = value;
+  }
+  writeRaw(WORKSPACE_OVERRIDE_KEY_PREFIX + key, JSON.stringify(blob));
+}
+
+/**
+ * Return the effective settings for a workspace: user settings merged with any workspace-level
+ * overrides. When `workspaceKey` is null, or when no override blob exists for it, the result
+ * is the user settings object unchanged (identity semantics — no extra allocation).
+ */
+export function effectiveSettings(user: Settings, workspaceKey: string | null): Settings {
+  if (workspaceKey === null) return user;
+  const overrides = loadWorkspaceOverrides(workspaceKey);
+  if (Object.keys(overrides).length === 0) return user;
+  return { ...user, ...overrides };
 }
