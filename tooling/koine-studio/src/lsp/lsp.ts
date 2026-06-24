@@ -30,6 +30,8 @@ import type {
   Position,
   PrepareRenameResult,
   Range,
+  ScenarioCatalog,
+  ScenarioResult,
   SelectionRange,
   SetDocResult,
   SignatureHelp,
@@ -353,6 +355,33 @@ export class KoineLsp {
     return this.request<ModelEditResult>('koine/applyModelEdit', {
       textDocument: { uri: this.activeUri },
       edit,
+    });
+  }
+
+  /** The runnable surface of the workspace (#149): entities with commands/factories, for the panel's dropdowns. */
+  scenarioCatalog(): Promise<ScenarioCatalog> {
+    return this.request<ScenarioCatalog>('koine/scenarioCatalog', {
+      textDocument: { uri: this.activeUri },
+    });
+  }
+
+  /**
+   * Run a scenario (#149): exercise one aggregate command/factory (`target`/`operation`) against a
+   * `given` starting state and `args`, returning the command → events → invariant-checks timeline.
+   * Backend-agnostic — routed to the CLI `koine lsp` child or the in-browser WASM export identically.
+   */
+  runScenario(
+    target: string,
+    operation: string,
+    given: Record<string, unknown>,
+    args: Record<string, unknown>,
+  ): Promise<ScenarioResult> {
+    return this.request<ScenarioResult>('koine/runScenario', {
+      textDocument: { uri: this.activeUri },
+      target,
+      operation,
+      given,
+      args,
     });
   }
 
