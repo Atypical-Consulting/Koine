@@ -84,6 +84,19 @@ export interface DiagramDisconnectDetail {
   label: string;
 }
 
+/**
+ * Global event the palette → IDE raises to ask the canvas to create a canvas-only annotation (#255). The
+ * renderer — the only holder of the live graph + current selection — prompts for the note text / group
+ * label, places the cell behind the nodes, and persists it. Dispatched on `document` so it reaches the
+ * active canvas wherever it mounted. No `.koi` round-trip: annotations are a pure view concern.
+ */
+export const DIAGRAM_ANNOTATION_CREATE_EVENT = 'koi-canvas-annotation-create';
+
+/** The `detail` of a {@link DIAGRAM_ANNOTATION_CREATE_EVENT}: which annotation kind to author. */
+export interface DiagramAnnotationCreateDetail {
+  kind: CanvasAnnotationKind;
+}
+
 /** The DDD constructs the canvas palette can author. Mirrors the construct keyword the compiler's
  *  `addType` edit carries in `StructuredEdit.Type`. */
 export type AddNodeKind = 'aggregate' | 'entity' | 'value' | 'enum' | 'event' | 'service';
@@ -169,17 +182,106 @@ export interface DiagramPosition {
 }
 
 /**
- * The persistence backend for the authoring canvas's node positions. The IDE injects the concrete store
- * (a committable `koine.layout.json` at the models-folder root when a folder is open, else browser
- * storage) via {@link setDiagramLayoutStore} before each render; the renderer reads it to restore a saved
- * layout, to persist a drag, and to reset on "Auto-arrange". Positions are keyed by qualified name.
+ * A free-text canvas annotation: text plus a position/size in diagram content coordinates. Canvas-only —
+ * it has NO `.koi` backing and is never written to source; it persists alongside node positions in
+ * `koine.layout.json` (folder mode) or localStorage (browser mode). See issue #255 / the #148 go/no-go.
+ */
+export interface DiagramNote {
+  id: string;
+  text: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+/**
+ * A labelled grouping of nodes drawn as a region behind them. Canvas-only (no `.koi` backing). Only the
+ * membership + styling persist; the rendered rectangle is DERIVED from the bounding box of the member
+ * nodes' positions, so a group follows its members as they move.
+ */
+export interface DiagramGroup {
+  id: string;
+  label: string;
+  /** Qualified names of the member nodes the group encloses. */
+  members: string[];
+  /** Optional accent-colour key for the group's fill/border (a CSS custom-property suffix). */
+  color?: string;
+}
+
+/**
+ * The canvas-only annotation kinds the palette can author. Deliberately DISTINCT from {@link AddNodeKind}
+ * (which round-trips a construct into `.koi`): notes and groups live only in the layout file.
+ */
+export type CanvasAnnotationKind = 'note' | 'group';
+
+/** The full persisted authoring-canvas layout: node positions plus the canvas-only annotations. */
+export interface DiagramLayout {
+  positions: Record<string, DiagramPosition>;
+  notes: DiagramNote[];
+  groups: DiagramGroup[];
+}
+
+/** A fresh, empty layout (the "nothing saved" value every backend returns on a miss). */
+export function emptyDiagramLayout(): DiagramLayout {
+  return { positions: {}, notes: [], groups: [] };
+}
+
+/** True for a finite number (the coordinate guard shared by the annotation sanitizers). */
+function isFiniteNumber(v: unknown): v is number {
+  return typeof v === 'number' && Number.isFinite(v);
+}
+
+/**
+ * Coerce an unknown into a valid {@link DiagramNote}[], dropping malformed entries — the defensive parse
+ * for both the committable `koine.layout.json` and the browser-storage blob (either may be hand-edited).
+ */
+export function sanitizeNotes(value: unknown): DiagramNote[] {
+  if (!Array.isArray(value)) return [];
+  const out: DiagramNote[] = [];
+  for (const item of value) {
+    if (!item || typeof item !== 'object') continue;
+    const n = item as Record<string, unknown>;
+    if (typeof n.id !== 'string' || n.id.length === 0) continue;
+    if (typeof n.text !== 'string') continue;
+    if (!isFiniteNumber(n.x) || !isFiniteNumber(n.y) || !isFiniteNumber(n.width) || !isFiniteNumber(n.height)) continue;
+    out.push({ id: n.id, text: n.text, x: n.x, y: n.y, width: n.width, height: n.height });
+  }
+  return out;
+}
+
+/** Coerce an unknown into a valid {@link DiagramGroup}[], dropping malformed entries (see {@link sanitizeNotes}). */
+export function sanitizeGroups(value: unknown): DiagramGroup[] {
+  if (!Array.isArray(value)) return [];
+  const out: DiagramGroup[] = [];
+  for (const item of value) {
+    if (!item || typeof item !== 'object') continue;
+    const g = item as Record<string, unknown>;
+    if (typeof g.id !== 'string' || g.id.length === 0) continue;
+    if (typeof g.label !== 'string') continue;
+    if (!Array.isArray(g.members)) continue;
+    const members = g.members.filter((m): m is string => typeof m === 'string' && m.length > 0);
+    const group: DiagramGroup = { id: g.id, label: g.label, members };
+    if (typeof g.color === 'string' && g.color.length > 0) group.color = g.color;
+    out.push(group);
+  }
+  return out;
+}
+
+/**
+ * The persistence backend for the authoring canvas's layout — node positions PLUS the canvas-only
+ * annotations (notes, groups). The IDE injects the concrete store (a committable `koine.layout.json` at
+ * the models-folder root when a folder is open, else browser storage) via {@link setDiagramLayoutStore}
+ * before each render; the renderer reads it to restore a saved layout, to persist a drag or an
+ * annotation edit, and to reset on "Auto-arrange". Positions are keyed by qualified name; annotations
+ * carry their own ids. Everything here is a VIEW concern — it never round-trips into `.koi`.
  */
 export interface DiagramLayoutStore {
-  /** Load the saved positions (empty when none / unreadable). */
-  load(): Promise<Record<string, DiagramPosition>>;
-  /** Persist the full position set (the backend decides immediate vs debounced). */
-  save(positions: Record<string, DiagramPosition>): void;
-  /** Forget all saved positions (the "Auto-arrange" reset). */
+  /** Load the saved layout (empty positions/notes/groups when none / unreadable). */
+  load(): Promise<DiagramLayout>;
+  /** Persist the full layout (the backend decides immediate vs debounced). */
+  save(layout: DiagramLayout): void;
+  /** Reset the saved node positions (the "Auto-arrange" re-layout); canvas annotations are PRESERVED. */
   clear(): void;
 }
 

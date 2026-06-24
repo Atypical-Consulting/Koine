@@ -70,6 +70,11 @@ Koine Studio surfaces the **enriched** language server, the same one the VS Code
   nothing is emitted and the diagnostics are shown instead.
 - **Glossary** — the ubiquitous-language glossary the `glossary` emitter produces.
 - **Context map** — the bounded contexts and their relationships.
+- **Canvas notes & groups** — free-text **Notes** and node **Groups** you can drop on the diagram
+  canvas from the palette. These are *annotations only*: they never touch your `.koi` source. They
+  persist per workspace in a committable `koine.layout.json` (alongside hand-dragged node positions), so
+  they travel with the repo and diff cleanly. Double-click to edit, right-click to delete; a group draws
+  a labelled region behind its member nodes and follows them as they move.
 - **Hover & navigation** — type/member hover cards and go-to-definition, served by the same LSP that
   powers the editors.
 - **Shareable links** — _Copy shareable link_ encodes your work into the URL fragment (it never leaves

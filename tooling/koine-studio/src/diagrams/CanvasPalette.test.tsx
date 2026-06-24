@@ -8,6 +8,7 @@ import type { GlossaryModel, Range } from '@/lsp/lsp';
 import { axe } from 'vitest-axe';
 
 const btn = (c: Element, kind: string) => c.querySelector(`[data-kind="${kind}"]`) as HTMLButtonElement;
+const annBtn = (c: Element, kind: string) => c.querySelector(`[data-annotation="${kind}"]`) as HTMLButtonElement;
 
 const range: Range = { start: { line: 0, character: 0 }, end: { line: 0, character: 1 } };
 
@@ -25,7 +26,12 @@ function aggregateIndex(): ModelIndex {
 
 function renderPalette(
   store: StoreApi<AppState>,
-  opts: { index?: ModelIndex | null; onAdd?: (kind: string) => void; onAddAggregateMember?: (kind: string, qn: string) => void } = {},
+  opts: {
+    index?: ModelIndex | null;
+    onAdd?: (kind: string) => void;
+    onAddAggregateMember?: (kind: string, qn: string) => void;
+    onAddAnnotation?: (kind: string) => void;
+  } = {},
 ) {
   return render(
     <CanvasPalette
@@ -33,6 +39,7 @@ function renderPalette(
       index={opts.index ?? null}
       onAdd={opts.onAdd ?? (() => {})}
       onAddAggregateMember={opts.onAddAggregateMember ?? (() => {})}
+      onAddAnnotation={opts.onAddAnnotation ?? (() => {})}
     />,
   );
 }
@@ -43,9 +50,10 @@ describe('CanvasPalette', () => {
     for (const kind of ['entity', 'value', 'aggregate', 'event', 'enum', 'service', 'rule', 'repository']) {
       expect(btn(container, kind)).not.toBeNull();
     }
-    // Coming-soon buttons are present and disabled (Service round-trips; Rule/Repository graduated to #254).
+    // Coming-soon buttons are present and disabled. Service round-trips; Rule/Repository graduated to #254
+    // and Note/Group to canvas-only annotations (#255), so only Relation remains muted.
     const soon = container.querySelectorAll('.koi-palette-btn--soon');
-    expect(soon.length).toBe(3);
+    expect(soon.length).toBe(1);
     soon.forEach((b) => expect((b as HTMLButtonElement).disabled).toBe(true));
   });
 
@@ -83,6 +91,22 @@ describe('CanvasPalette', () => {
     const { container } = renderPalette(store, { onAdd });
     fireEvent.click(btn(container, 'aggregate'));
     expect(onAdd).toHaveBeenCalledWith('aggregate');
+  });
+
+  test('the Note and Group annotation buttons are active (not context-gated) and fire onAddAnnotation', () => {
+    const store = createAppStore(); // ALL_CONTEXTS, no contexts → round-trip constructs are disabled…
+    const onAddAnnotation = vi.fn();
+    const { container } = renderPalette(store, { onAddAnnotation });
+    // …but the canvas-only annotations are enabled regardless (they have no `.koi` home context).
+    expect(btn(container, 'entity').disabled).toBe(true);
+    expect(annBtn(container, 'note')).not.toBeNull();
+    expect(annBtn(container, 'note').disabled).toBe(false);
+    expect(annBtn(container, 'group').disabled).toBe(false);
+
+    fireEvent.click(annBtn(container, 'note'));
+    expect(onAddAnnotation).toHaveBeenCalledWith('note');
+    fireEvent.click(annBtn(container, 'group'));
+    expect(onAddAnnotation).toHaveBeenCalledWith('group');
   });
 
   test('aggregate-scoped buttons (rule/repository) are disabled until an aggregate is selected', () => {

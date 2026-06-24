@@ -46,6 +46,7 @@ import { sanitizeProjectName } from '@/export/generateProject';
 import { buildSourceZip } from '@/export/sourceZip';
 import { formatChord } from '@/shared/platform';
 import {
+  DIAGRAM_ANNOTATION_CREATE_EVENT,
   DIAGRAM_CONNECT_EVENT,
   DIAGRAM_DISCONNECT_EVENT,
   DIAGRAM_RELAYOUT_EVENT,
@@ -55,6 +56,8 @@ import {
   setDiagramEditing,
   type AddNodeKind,
   type AggregateMemberKind,
+  type CanvasAnnotationKind,
+  type DiagramAnnotationCreateDetail,
   type DiagramConnectDetail,
   type DiagramDisconnectDetail,
   type DiagramNodeEditDetail,
@@ -485,6 +488,7 @@ export function init(): () => void {
     onSaveGlossaryDescription: (entry, text) => saveDescription(entry, text),
     onApplyStructuredEdit: (edit, successMsg) => void applyStructuredEdit(edit, successMsg),
     onAddConstruct: (kind) => void applyDiagramAddType({ kind }),
+    onAddAnnotation: (kind) => createCanvasAnnotation(kind),
     onAddAggregateMember: (kind, aggregateQn) => void applyDiagramAddAggregateMember(kind, aggregateQn),
     gotoSourceSpan: (span) => void gotoSourceSpan(span),
     ensureAssistant: () => ensureAssistant(),
@@ -734,6 +738,16 @@ export function init(): () => void {
     enum: 'NewEnum',
     service: 'NewService',
   };
+
+  // Canvas-only annotations (#255): a note/group is a VIEW concern (persisted in koine.layout.json, never
+  // `.koi`), so creation is delegated to the renderer — the holder of the live graph + current selection —
+  // via a document event. The renderer prompts for the text/label, places the cell behind the nodes, and
+  // persists it. No model edit and no LSP round-trip, unlike applyDiagramAddType below.
+  function createCanvasAnnotation(kind: CanvasAnnotationKind): void {
+    document.dispatchEvent(
+      new CustomEvent<DiagramAnnotationCreateDetail>(DIAGRAM_ANNOTATION_CREATE_EVENT, { detail: { kind } }),
+    );
+  }
 
   async function applyDiagramAddType(detail?: { kind: AddNodeKind }): Promise<void> {
     let scope = activeContext.get();
