@@ -301,6 +301,49 @@ public class R18AsyncApiEmitterTests
     }
 
     [Fact]
+    public void Same_named_events_in_two_contexts_are_context_qualified()
+    {
+        // Two contexts each declare a *different-shaped* integration event of the same name and both
+        // publish it — a valid model the validator does not reject. The emitter must keep BOTH
+        // contracts (no silent data loss): context-qualify the colliding name so each context gets its
+        // own channel, message, and payload schema carrying its own fields.
+        const string source = """
+            context Sales {
+              integration event OrderPlaced {
+                orderId:   String
+                customerId: String
+              }
+              publishes OrderPlaced
+            }
+
+            context Logistics {
+              integration event OrderPlaced {
+                shipmentId: String
+                warehouse:  String
+              }
+              publishes OrderPlaced
+            }
+            """;
+
+        var result = new KoineCompiler().Compile(source, new AsyncApiEmitter());
+
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+        var yaml = result.Files.ShouldHaveSingleItem().Contents;
+
+        // Two distinct, context-qualified channels — neither bare `OrderPlaced` survives on its own.
+        yaml.ShouldContain("  Sales_OrderPlaced:");
+        yaml.ShouldContain("  Logistics_OrderPlaced:");
+        // Each context's payload schema survives with its own fields (no shape was dropped).
+        yaml.ShouldContain("  Sales_OrderPlacedPayload:");
+        yaml.ShouldContain("  Logistics_OrderPlacedPayload:");
+        yaml.ShouldContain("customerId:");
+        yaml.ShouldContain("shipmentId:");
+        // Each publisher's send operation binds to its own context-qualified channel.
+        yaml.ShouldContain("$ref: '#/channels/Sales_OrderPlaced'");
+        yaml.ShouldContain("$ref: '#/channels/Logistics_OrderPlaced'");
+    }
+
+    [Fact]
     public void Emitted_yaml_is_valid_per_the_asyncapi_cli_when_enabled()
     {
         // External conformance: gated behind KOINE_ASYNCAPI_VALIDATE so the suite stays hermetic.

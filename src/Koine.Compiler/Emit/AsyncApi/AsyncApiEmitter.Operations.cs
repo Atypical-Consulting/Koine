@@ -19,32 +19,51 @@ public sealed partial class AsyncApiEmitter
     /// document stays valid even when no context publishes or subscribes.
     /// </summary>
     private static void EmitOperations(
-        StringBuilder sb, KoineModel model, IReadOnlyList<IntegrationEventDecl> events, ModelIndex index)
+        StringBuilder sb, KoineModel model, IReadOnlyList<CollectedEvent> events, ModelIndex index)
     {
-        var channels = new HashSet<string>(events.Select(e => e.Name), StringComparer.Ordinal);
+        // The channel keys that actually exist (the bare name, or a context-qualified one under a
+        // cross-context name collision), used to resolve each operation's channel $ref.
+        var channelKeys = new HashSet<string>(events.Select(e => e.Key), StringComparer.Ordinal);
         var operations = new SortedDictionary<string, Operation>(StringComparer.Ordinal);
 
         foreach (ContextNode ctx in model.Contexts)
         {
-            // Sends — this context publishes the event (its channel must exist).
-            foreach (IntegrationEventDecl ev in events)
+            // Sends — this context publishes its own declared event onto that event's channel. The
+            // operation key keeps the bare event name (already context-disambiguated by ctx); the
+            // channel $ref uses the event's possibly-qualified key. For a colliding name only the
+            // declaring context (Key != Name => qualified) sends onto its own channel; for a unique
+            // name there is a single entry, so the owner guard is a no-op and output is unchanged.
+            foreach (CollectedEvent ev in events)
             {
-                if (index.PublishesEvent(ctx.Name, ev.Name))
+                if (!index.PublishesEvent(ctx.Name, ev.Name))
                 {
-                    operations[$"{ctx.Name}_send_{ev.Name}"] = new Operation("send", ev.Name, ctx.Name);
+                    continue;
                 }
+
+                if (ev.Key != ev.Name && ev.Context != ctx.Name)
+                {
+                    continue;
+                }
+
+                operations[$"{ctx.Name}_send_{ev.Name}"] = new Operation("send", ev.Key, ctx.Name);
             }
 
-            // Receives — this context subscribes to a published event. Subscriptions are validated
-            // before emit (an unauthorized subscribe is a compile error that blocks emission, and a
-            // map-less subscribe is permitted), so every surviving subscribe gets a receive op as long
-            // as the event actually has a channel. Gating on MaySubscribe here would wrongly drop the
-            // valid map-less case, where no relation exists to authorize against.
+            // Receives — this context subscribes to a published event (named "Publisher.Event").
+            // Subscriptions are validated before emit (an unauthorized subscribe is a compile error that
+            // blocks emission, and a map-less subscribe is permitted), so every surviving subscribe gets
+            // a receive op as long as the event actually has a channel. Gating on MaySubscribe here
+            // would wrongly drop the valid map-less case, where no relation exists to authorize against.
+            // The channel $ref resolves to the bare name when unique, else the publisher's qualified key.
             foreach (SubscribeDecl sub in ctx.Subscribes)
             {
-                if (channels.Contains(sub.EventName))
+                string? channel =
+                    channelKeys.Contains(sub.EventName) ? sub.EventName
+                    : channelKeys.Contains($"{sub.Context}_{sub.EventName}") ? $"{sub.Context}_{sub.EventName}"
+                    : null;
+
+                if (channel is not null)
                 {
-                    operations[$"{ctx.Name}_receive_{sub.EventName}"] = new Operation("receive", sub.EventName, ctx.Name);
+                    operations[$"{ctx.Name}_receive_{sub.EventName}"] = new Operation("receive", channel, ctx.Name);
                 }
             }
         }

@@ -15,7 +15,7 @@ public sealed partial class AsyncApiEmitter
     /// Emits the <c>components/schemas</c> map: a payload schema per event (in the events' stable
     /// order), followed by the shared ID value-object schemas the payloads referenced (sorted).
     /// </summary>
-    private static void EmitSchemas(StringBuilder sb, IReadOnlyList<IntegrationEventDecl> events, ModelIndex index)
+    private static void EmitSchemas(StringBuilder sb, IReadOnlyList<CollectedEvent> events, ModelIndex index)
     {
         sb.Append("  schemas:\n");
 
@@ -23,9 +23,10 @@ public sealed partial class AsyncApiEmitter
         // referenced by $ref; collected here as the payloads are rendered.
         var sharedIds = new SortedSet<string>(StringComparer.Ordinal);
 
-        foreach (IntegrationEventDecl ie in events)
+        foreach (CollectedEvent ev in events)
         {
-            sb.Append("    ").Append(ie.Name).Append("Payload:\n");
+            IntegrationEventDecl ie = ev.Event;
+            sb.Append("    ").Append(ev.Key).Append("Payload:\n");
             sb.Append("      type: object\n");
 
             if (ie.Members.Count == 0)

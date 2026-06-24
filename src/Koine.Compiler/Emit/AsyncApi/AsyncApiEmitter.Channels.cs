@@ -15,7 +15,7 @@ public sealed partial class AsyncApiEmitter
     /// name and referencing the message of the same name. An empty event set emits <c>{}</c> so
     /// the document stays valid.
     /// </summary>
-    private static void EmitChannels(StringBuilder sb, IReadOnlyList<IntegrationEventDecl> events)
+    private static void EmitChannels(StringBuilder sb, IReadOnlyList<CollectedEvent> events)
     {
         if (events.Count == 0)
         {
@@ -24,13 +24,13 @@ public sealed partial class AsyncApiEmitter
         }
 
         sb.Append("channels:\n");
-        foreach (IntegrationEventDecl ie in events)
+        foreach (CollectedEvent ev in events)
         {
-            sb.Append("  ").Append(ie.Name).Append(":\n");
-            sb.Append("    address: ").Append(YamlValue(ie.Name)).Append('\n');
+            sb.Append("  ").Append(ev.Key).Append(":\n");
+            sb.Append("    address: ").Append(YamlValue(ev.Key)).Append('\n');
             sb.Append("    messages:\n");
-            sb.Append("      ").Append(ie.Name).Append(":\n");
-            sb.Append("        $ref: '#/components/messages/").Append(ie.Name).Append("'\n");
+            sb.Append("      ").Append(ev.Key).Append(":\n");
+            sb.Append("        $ref: '#/components/messages/").Append(ev.Key).Append("'\n");
         }
     }
 
@@ -39,20 +39,21 @@ public sealed partial class AsyncApiEmitter
     /// name, (when present) the declaration doc as a summary, and a reference to its payload schema
     /// (rendered by the schemas slice).
     /// </summary>
-    private static void EmitMessages(StringBuilder sb, IReadOnlyList<IntegrationEventDecl> events)
+    private static void EmitMessages(StringBuilder sb, IReadOnlyList<CollectedEvent> events)
     {
         sb.Append("  messages:\n");
-        foreach (IntegrationEventDecl ie in events)
+        foreach (CollectedEvent ev in events)
         {
-            sb.Append("    ").Append(ie.Name).Append(":\n");
-            sb.Append("      name: ").Append(ie.Name).Append('\n');
+            IntegrationEventDecl ie = ev.Event;
+            sb.Append("    ").Append(ev.Key).Append(":\n");
+            sb.Append("      name: ").Append(ev.Key).Append('\n');
             if (!string.IsNullOrEmpty(ie.Doc))
             {
                 sb.Append("      summary: ").Append(YamlScalar(ie.Doc!)).Append('\n');
             }
 
             sb.Append("      payload:\n");
-            sb.Append("        $ref: '#/components/schemas/").Append(ie.Name).Append("Payload'\n");
+            sb.Append("        $ref: '#/components/schemas/").Append(ev.Key).Append("Payload'\n");
         }
     }
 }
