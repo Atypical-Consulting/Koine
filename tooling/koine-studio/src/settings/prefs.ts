@@ -418,6 +418,7 @@ export function createPreferences(cb: PrefsCallbacks): PrefsHandle {
     specimenCode.classList.toggle('is-wrapped', on); // the preview wraps / scrolls just like the editor
   });
   const formatOnSave = toggle('Format on save', (on) => commit({ formatOnSave: on }));
+  const minimap = toggle('Minimap', (on) => commit({ enableMinimap: on }));
 
   const editorPanel = panel(
     'editor',
@@ -426,6 +427,7 @@ export function createPreferences(cb: PrefsCallbacks): PrefsHandle {
     row('Line height', 'Vertical spacing between lines.', lineHeightInput),
     row('Word wrap', 'Wrap long lines instead of scrolling sideways.', wordWrap.el),
     row('Format on save', 'Run the Koine formatter when you press save.', formatOnSave.el),
+    row('Minimap', 'Show a document overview rail on the editor’s right edge.', minimap.el),
   );
 
   // --- Output ---------------------------------------------------------------
@@ -915,6 +917,7 @@ export function createPreferences(cb: PrefsCallbacks): PrefsHandle {
     lineHeightInput.value = String(s.lineHeight);
     wordWrap.set(s.wordWrap);
     formatOnSave.set(s.formatOnSave);
+    minimap.set(s.enableMinimap);
     specimenCode.classList.toggle('is-wrapped', s.wordWrap);
     refreshSpecimen();
     outputLang.set(s.previewTarget);

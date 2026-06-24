@@ -36,6 +36,7 @@ import {
   type CompletionResult,
 } from '@codemirror/autocomplete';
 import { search, searchKeymap, highlightSelectionMatches } from '@codemirror/search';
+import { showMinimap } from '@replit/codemirror-minimap';
 import { csharp } from '@codemirror/legacy-modes/mode/clike';
 import { typescript } from '@codemirror/legacy-modes/mode/javascript';
 import { python } from '@codemirror/legacy-modes/mode/python';
@@ -364,12 +365,26 @@ export type NavigateLocationFn = (location: Location) => void;
 /** Maps a file:// uri to a short label for the references picker (e.g. its relPath). */
 export type UriLabelFn = (uri: string) => string;
 
+// The @replit/codemirror-minimap extension, driven by its `showMinimap` facet. `create` hands the
+// plugin the container element it mounts the overview rail into; `displayText: 'blocks'` keeps the
+// thumbnail cheap (coloured blocks rather than rendered glyphs). Built fresh each time the compartment
+// is (re)configured so toggling the minimap on installs a live extension and off installs `[]`.
+function minimapExtension(): Extension {
+  return showMinimap.of({
+    create: () => ({ dom: document.createElement('div') }),
+    displayText: 'blocks',
+    showOverlay: 'always',
+  });
+}
+
 export interface KoineEditorOptions {
   parent: HTMLElement;
   doc: string;
   onChange?: (doc: string) => void;
   /** Soft-wrap long lines on first paint (later toggled via KoineEditor.setLineWrap). */
   lineWrap?: boolean;
+  /** Show the document-overview minimap on first paint (later toggled via KoineEditor.setMinimap). */
+  minimap?: boolean;
   /** Optional LSP hover provider; when given, hover tooltips are enabled. */
   onHover?: HoverFn;
   /** Optional LSP completion provider; when given, Ctrl-Space / typing yields context-aware completions. */
@@ -409,6 +424,8 @@ export interface KoineEditor {
   applyEdits(edits: TextEdit[]): void;
   /** Turn editor soft-wrap on/off (reconfigures a compartment; no state loss). */
   setLineWrap(on: boolean): void;
+  /** Show/hide the document-overview minimap (reconfigures a compartment; no state loss). */
+  setMinimap(on: boolean): void;
   destroy(): void;
 }
 
@@ -596,6 +613,9 @@ export function createKoineEditor(opts: KoineEditorOptions): KoineEditor {
 
   // Soft-wrap lives in its own compartment so Settings can flip it without rebuilding the editor.
   const lineWrap = new Compartment();
+  // The minimap lives in its own compartment too (same pattern as lineWrap), so Settings can show/hide
+  // the overview rail live without losing editor state.
+  const minimap = new Compartment();
 
   const view = new EditorView({
     parent: opts.parent,
@@ -606,6 +626,7 @@ export function createKoineEditor(opts: KoineEditorOptions): KoineEditor {
         // readers (and Lighthouse's aria-input-field-name audit) announce it as the model editor.
         EditorView.contentAttributes.of({ 'aria-label': 'Koine model source editor' }),
         lineWrap.of(opts.lineWrap ? EditorView.lineWrapping : []),
+        minimap.of(opts.minimap ? minimapExtension() : []),
         // Multi-cursor (VS Code parity). allowMultipleSelections is the enabling switch: without it
         // CodeMirror reduces every multi-range selection to its main range (.asSingle()), so the
         // add-cursor commands silently collapse to one caret. The familiar bindings are ALREADY wired
@@ -676,6 +697,9 @@ export function createKoineEditor(opts: KoineEditorOptions): KoineEditor {
     },
     setLineWrap(on: boolean) {
       view.dispatch({ effects: lineWrap.reconfigure(on ? EditorView.lineWrapping : []) });
+    },
+    setMinimap(on: boolean) {
+      view.dispatch({ effects: minimap.reconfigure(on ? minimapExtension() : []) });
     },
     destroy() {
       dismissFloating();

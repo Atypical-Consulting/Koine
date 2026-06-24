@@ -350,6 +350,7 @@ export function init(): () => void {
     parent: el('editor-pane'),
     doc: initialDoc,
     lineWrap: settings.wordWrap,
+    minimap: settings.enableMinimap,
     lsp,
     status: statusEl,
     diagCount: diagCountEl,
@@ -1211,6 +1212,7 @@ export function init(): () => void {
       applyAppearance(s);
       editor.setLineWrap(s.wordWrap);
       output.setLineWrap(s.wordWrap);
+      editor.setMinimap(s.enableMinimap);
       // Destination language now lives in Settings → Output. The controller relabels the Generated
       // tab, marks the preview stale, and re-emits it when that sub-view is the one showing.
       controller.onPreviewTargetChanged(s.previewTarget);
