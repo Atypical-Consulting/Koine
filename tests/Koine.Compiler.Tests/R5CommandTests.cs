@@ -113,7 +113,9 @@ public class R5CommandTests
         var result = new KoineCompiler().Compile(Fixture, new CSharpEmitter());
         var order = result.Files.Single(f => f.RelativePath == "Sales/Order.cs").Contents;
         order.ShouldContain("public OrderStatus Status { get; private set; }");
-        order.ShouldContain("public IReadOnlyList<OrderLine> Lines { get; }"); // not mutated
+        // Not mutated: no private setter. A value-object collection is exposed read-only over a
+        // mutable backing list so EF Core can materialize it (issue #171).
+        order.ShouldContain("public IReadOnlyList<OrderLine> Lines => _lines;");
     }
 
     // ---- diagnostics -------------------------------------------------------

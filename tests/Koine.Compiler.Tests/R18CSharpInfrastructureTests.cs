@@ -1,3 +1,5 @@
+using System.Collections;
+using System.Reflection;
 using System.Text.RegularExpressions;
 using Koine.Cli;
 using Koine.Cli.Commands;
@@ -450,6 +452,320 @@ public class R18CSharpInfrastructureTests
         files.ShouldNotContain(f => f.RelativePath == "Docs/Infrastructure/DocsValueConverters.cs");
         File(files, "Docs/Infrastructure/DocConfiguration.cs").Contents
             .ShouldNotContain("Converter");
+    }
+
+    // ----------------------------------------------------------------------
+    // EF Core round-trip: owned value-object collections must MATERIALIZE (issue #171)
+    // ----------------------------------------------------------------------
+
+    // The exact shape issue #171 is about: an aggregate that owns a value-object collection. Today the
+    // domain emitter exposes it as a read-only IReadOnlyList<T> over a ReadOnlyCollection, which EF Core
+    // cannot populate when materializing an OwnsMany — so this round-trips only once the collection is
+    // backed by a mutable list with field access configured.
+    private const string VoCollectionFixture = """
+        context Sales {
+          value OrderLine { sku: String  quantity: Int }
+          aggregate Order root Order {
+            entity Order identified by OrderId { lines: List<OrderLine> }
+          }
+        }
+        """;
+
+    [Fact]
+    public void Round_trip_harness_persists_and_reloads_a_simple_aggregate()
+    {
+        // Proves the SQLite round-trip plumbing itself works against generated EF code with no owned
+        // *collection* — so a RED on the value-object-collection model below is the bug, not the harness.
+        // A smart-enum member is explicitly mapped (HasConversion), so EF binds it in the aggregate's
+        // constructor and the aggregate materializes without any of issue #171's machinery.
+        var files = EmitInfra("""
+            context Catalog {
+              enum Color { Red, Green }
+              aggregate Product root Product {
+                entity Product identified by ProductId { color: Color }
+              }
+            }
+            """);
+        using var harness = TestSupport.EfRoundTripHarness.Create(files, "CatalogDbContext");
+
+        var productType = harness.Type("Product");
+        var productIdType = harness.Type("ProductId");
+        var colorType = harness.Type("Color");
+
+        var productId = productIdType.GetMethod("New", BindingFlags.Public | BindingFlags.Static)!.Invoke(null, null)!;
+        var product = Activator.CreateInstance(productType, productId, TestSupport.EnumValue(colorType, "Red"))!;
+
+        using (var write = harness.NewContext())
+        {
+            write.Add(product);
+            write.SaveChanges();
+        }
+
+        using var read = harness.NewContext();
+        var loaded = TestSupport.EfRoundTripHarness.Query(read, productType).ShouldHaveSingleItem();
+        var loadedColor = productType.GetProperty("Color")!.GetValue(loaded);
+        colorType.GetProperty("Name")!.GetValue(loadedColor).ShouldBe("Red");
+    }
+
+    [Fact]
+    public void Owns_many_configures_field_access_so_ef_binds_the_backing_list()
+    {
+        var cfg = File(EmitInfra(VoCollectionFixture), "Sales/Infrastructure/OrderConfiguration.cs").Contents;
+
+        cfg.ShouldContain("builder.OwnsMany(x => x.Lines,");
+        // Field access so EF reads/writes the mutable _lines backing field, not the read-only property.
+        cfg.ShouldContain("builder.Navigation(x => x.Lines).UsePropertyAccessMode(PropertyAccessMode.Field);");
+        // A single-column surrogate key so the owned rows persist on every provider (the default
+        // composite synthesized key is not auto-generated on SQLite).
+        cfg.ShouldContain("lines.Property<int>(\"Id\").ValueGeneratedOnAdd();");
+        cfg.ShouldContain("lines.HasKey(\"Id\");");
+    }
+
+    [Fact]
+    public void Owned_value_object_collection_round_trips_through_ef_core()
+    {
+        var files = EmitInfra(VoCollectionFixture);
+        using var harness = TestSupport.EfRoundTripHarness.Create(files, "SalesDbContext");
+
+        var orderType = harness.Type("Order");
+        var orderIdType = harness.Type("OrderId");
+        var lineType = harness.Type("OrderLine");
+
+        // new Order(OrderId.New(), new List<OrderLine> { new OrderLine("SKU-1", 2) })
+        var line = Activator.CreateInstance(lineType, "SKU-1", 2)!;
+        var lines = (IList)Activator.CreateInstance(typeof(List<>).MakeGenericType(lineType))!;
+        lines.Add(line);
+        var orderId = orderIdType.GetMethod("New", BindingFlags.Public | BindingFlags.Static)!.Invoke(null, null)!;
+        var order = Activator.CreateInstance(orderType, orderId, lines)!;
+
+        using (var write = harness.NewContext())
+        {
+            write.Add(order);
+            write.SaveChanges();
+        }
+
+        using var read = harness.NewContext();
+        var loaded = TestSupport.EfRoundTripHarness.Query(read, orderType).ShouldHaveSingleItem();
+        var loadedLines = ((IEnumerable)orderType.GetProperty("Lines")!.GetValue(loaded)!).Cast<object>().ToList();
+        var loadedLine = loadedLines.ShouldHaveSingleItem();
+        lineType.GetProperty("Sku")!.GetValue(loadedLine).ShouldBe("SKU-1");
+        lineType.GetProperty("Quantity")!.GetValue(loadedLine).ShouldBe(2);
+    }
+
+    private static IReadOnlyList<object> AsList(object collection) =>
+        ((IEnumerable)collection).Cast<object>().ToList();
+
+    [Fact]
+    public void Owned_value_object_collection_round_trips_when_empty()
+    {
+        var files = EmitInfra(VoCollectionFixture);
+        using var harness = TestSupport.EfRoundTripHarness.Create(files, "SalesDbContext");
+
+        var orderType = harness.Type("Order");
+        var orderIdType = harness.Type("OrderId");
+        var lineType = harness.Type("OrderLine");
+
+        // An order with no lines (an empty list) must persist and reload as an empty — not throwing — collection.
+        var emptyLines = Activator.CreateInstance(typeof(List<>).MakeGenericType(lineType))!;
+        var orderId = orderIdType.GetMethod("New", BindingFlags.Public | BindingFlags.Static)!.Invoke(null, null)!;
+        var order = Activator.CreateInstance(orderType, orderId, emptyLines)!;
+
+        using (var write = harness.NewContext())
+        {
+            write.Add(order);
+            write.SaveChanges();
+        }
+
+        using var read = harness.NewContext();
+        var loaded = TestSupport.EfRoundTripHarness.Query(read, orderType).ShouldHaveSingleItem();
+        AsList(orderType.GetProperty("Lines")!.GetValue(loaded)!).ShouldBeEmpty();
+    }
+
+    [Fact]
+    public void Optional_owned_value_object_collection_round_trips()
+    {
+        // An optional (nullable) value-object collection backs a nullable List<T> and still materializes
+        // its rows when present.
+        var files = EmitInfra("""
+            context Sales {
+              value OrderLine { sku: String  quantity: Int }
+              aggregate Order root Order {
+                entity Order identified by OrderId { lines: List<OrderLine>? }
+              }
+            }
+            """);
+        using var harness = TestSupport.EfRoundTripHarness.Create(files, "SalesDbContext");
+
+        var orderType = harness.Type("Order");
+        var orderIdType = harness.Type("OrderId");
+        var lineType = harness.Type("OrderLine");
+
+        var lines = (IList)Activator.CreateInstance(typeof(List<>).MakeGenericType(lineType))!;
+        lines.Add(Activator.CreateInstance(lineType, "SKU-9", 5)!);
+        var orderId = orderIdType.GetMethod("New", BindingFlags.Public | BindingFlags.Static)!.Invoke(null, null)!;
+        var order = Activator.CreateInstance(orderType, orderId, lines)!;
+
+        using (var write = harness.NewContext())
+        {
+            write.Add(order);
+            write.SaveChanges();
+        }
+
+        using var read = harness.NewContext();
+        var loaded = TestSupport.EfRoundTripHarness.Query(read, orderType).ShouldHaveSingleItem();
+        var loadedLine = AsList(orderType.GetProperty("Lines")!.GetValue(loaded)!).ShouldHaveSingleItem();
+        lineType.GetProperty("Sku")!.GetValue(loadedLine).ShouldBe("SKU-9");
+    }
+
+    [Fact]
+    public void Nested_owned_value_object_collections_round_trip()
+    {
+        // A value-object collection nested inside another (depth-2 OwnsMany) must materialize end to end:
+        // the inner value object is itself backed by a mutable list with field access.
+        var files = EmitInfra("""
+            context Sales {
+              value Topping { name: String }
+              value Line { sku: String  toppings: List<Topping> }
+              aggregate Order root Order {
+                entity Order identified by OrderId { lines: List<Line> }
+              }
+            }
+            """);
+        using var harness = TestSupport.EfRoundTripHarness.Create(files, "SalesDbContext");
+
+        var orderType = harness.Type("Order");
+        var orderIdType = harness.Type("OrderId");
+        var lineType = harness.Type("Line");
+        var toppingType = harness.Type("Topping");
+
+        var toppings = (IList)Activator.CreateInstance(typeof(List<>).MakeGenericType(toppingType))!;
+        toppings.Add(Activator.CreateInstance(toppingType, "Cheese")!);
+        var lines = (IList)Activator.CreateInstance(typeof(List<>).MakeGenericType(lineType))!;
+        lines.Add(Activator.CreateInstance(lineType, "PIZZA-1", toppings)!);
+        var orderId = orderIdType.GetMethod("New", BindingFlags.Public | BindingFlags.Static)!.Invoke(null, null)!;
+        var order = Activator.CreateInstance(orderType, orderId, lines)!;
+
+        using (var write = harness.NewContext())
+        {
+            write.Add(order);
+            write.SaveChanges();
+        }
+
+        using var read = harness.NewContext();
+        var loaded = TestSupport.EfRoundTripHarness.Query(read, orderType).ShouldHaveSingleItem();
+        var loadedLine = AsList(orderType.GetProperty("Lines")!.GetValue(loaded)!).ShouldHaveSingleItem();
+        lineType.GetProperty("Sku")!.GetValue(loadedLine).ShouldBe("PIZZA-1");
+        var loadedTopping = AsList(lineType.GetProperty("Toppings")!.GetValue(loadedLine)!).ShouldHaveSingleItem();
+        toppingType.GetProperty("Name")!.GetValue(loadedTopping).ShouldBe("Cheese");
+    }
+
+    [Fact]
+    public void Owned_collection_surrogate_key_avoids_colliding_with_a_value_object_member_named_id()
+    {
+        // A value object that already maps an `id` member must not clash with the synthesized surrogate
+        // key: the key is disambiguated to `OwnedId` so EF does not see two `Id` properties of different
+        // CLR types, and the rows still round-trip.
+        var fixture = """
+            context Sales {
+              value OrderLine { id: String  quantity: Int }
+              aggregate Order root Order {
+                entity Order identified by OrderId { lines: List<OrderLine> }
+              }
+            }
+            """;
+        var cfg = File(EmitInfra(fixture), "Sales/Infrastructure/OrderConfiguration.cs").Contents;
+        cfg.ShouldContain("lines.Property<int>(\"OwnedId\").ValueGeneratedOnAdd();");
+        cfg.ShouldContain("lines.HasKey(\"OwnedId\");");
+        cfg.ShouldNotContain("lines.HasKey(\"Id\");");
+
+        using var harness = TestSupport.EfRoundTripHarness.Create(EmitInfra(fixture), "SalesDbContext");
+        var orderType = harness.Type("Order");
+        var lineType = harness.Type("OrderLine");
+        var lines = (IList)Activator.CreateInstance(typeof(List<>).MakeGenericType(lineType))!;
+        lines.Add(Activator.CreateInstance(lineType, "L-1", 3)!);
+        var orderId = harness.Type("OrderId").GetMethod("New", BindingFlags.Public | BindingFlags.Static)!.Invoke(null, null)!;
+        var order = Activator.CreateInstance(orderType, orderId, lines)!;
+
+        using (var write = harness.NewContext())
+        {
+            write.Add(order);
+            write.SaveChanges();
+        }
+
+        using var read = harness.NewContext();
+        var loaded = TestSupport.EfRoundTripHarness.Query(read, orderType).ShouldHaveSingleItem();
+        var loadedLine = AsList(orderType.GetProperty("Lines")!.GetValue(loaded)!).ShouldHaveSingleItem();
+        lineType.GetProperty("Id")!.GetValue(loadedLine).ShouldBe("L-1");
+        lineType.GetProperty("Quantity")!.GetValue(loadedLine).ShouldBe(3);
+    }
+
+    [Fact]
+    public void Scalar_string_collection_is_left_to_the_primitive_collection_convention()
+    {
+        // A scalar List<String> is NOT an OwnsMany: no owned mapping, no surrogate key, no field access,
+        // and the domain keeps the read-only-copy shape (regression guard for issue #171's scope).
+        var files = EmitInfra("""
+            context Docs {
+              aggregate Doc root Doc { entity Doc identified by DocId { tags: List<String> } }
+            }
+            """);
+        var cfg = File(files, "Docs/Infrastructure/DocConfiguration.cs").Contents;
+
+        cfg.ShouldContain("Tags is a primitive collection, mapped by EF Core convention.");
+        cfg.ShouldNotContain("OwnsMany");
+        cfg.ShouldNotContain("UsePropertyAccessMode");
+        cfg.ShouldNotContain("HasKey(\"Id\")");
+    }
+
+    // ----------------------------------------------------------------------
+    // Domain shape: value-object collections are backed by a mutable list (issue #171)
+    // ----------------------------------------------------------------------
+
+    private static string DomainEntity(string fixture, string entityFile)
+    {
+        var result = new KoineCompiler().Compile(fixture, new CSharpEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+        return result.Files.Single(f => f.RelativePath.EndsWith(entityFile, StringComparison.Ordinal)).Contents;
+    }
+
+    [Fact]
+    public void Value_object_collection_entity_is_backed_by_a_mutable_list_with_readonly_surface()
+    {
+        var order = DomainEntity("""
+            context Sales {
+              value OrderLine { sku: String  quantity: Int }
+              aggregate Order root Order {
+                entity Order identified by OrderId { lines: List<OrderLine> }
+              }
+            }
+            """, "Order.cs");
+
+        // Mutable private backing list EF can materialize into, exposed read-only.
+        order.ShouldContain("private readonly List<OrderLine> _lines = new();");
+        order.ShouldContain("public IReadOnlyList<OrderLine> Lines => _lines;");
+        // Defensive copy preserved (constructor copies the caller's list into the backing field).
+        order.ShouldContain("_lines.AddRange(lines);");
+        order.ShouldNotContain("new List<OrderLine>(lines).AsReadOnly()");
+        // A parameterless constructor so EF can materialize the aggregate (its collection
+        // constructor parameter can never bind to a navigation).
+        order.ShouldContain("private Order()");
+    }
+
+    [Fact]
+    public void Scalar_collection_entity_keeps_the_read_only_collection_shape_byte_for_byte()
+    {
+        var doc = DomainEntity("""
+            context Docs {
+              aggregate Doc root Doc { entity Doc identified by DocId { tags: List<String> } }
+            }
+            """, "Doc.cs");
+
+        // A scalar (String) collection is intentionally left to EF's primitive-collection convention:
+        // unchanged read-only property + defensive AsReadOnly copy, no backing field, no EF ctor.
+        doc.ShouldContain("public IReadOnlyList<string> Tags { get; }");
+        doc.ShouldContain("Tags = new List<string>(tags).AsReadOnly();");
+        doc.ShouldNotContain("_tags");
+        doc.ShouldNotContain("private Doc()");
     }
 
     [Fact]
