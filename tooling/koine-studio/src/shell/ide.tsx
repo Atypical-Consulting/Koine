@@ -83,6 +83,8 @@ import { UnsavedIndicator } from '@/shell/UnsavedIndicator';
 import { WorkspaceProblemsBadge } from '@/diagnostics/WorkspaceProblemsBadge';
 import { StoreInspector } from '@/shell/StoreInspector';
 import { createWorkspaceController, type WorkspaceController } from '@/shell/workspaceController';
+import { createSearchPanel } from '@/shell/searchController';
+import { type Match } from '@/shell/workspaceSearch';
 import { createConfirmDialog, createPromptDialog } from '@/shared/overlay';
 
 // --- workspace fs contract ---------------------------------------------------
@@ -1203,6 +1205,54 @@ export function init(): () => void {
   );
 
   const palette = createCommandPalette(() => getCommands());
+
+  // Workspace search (Mod-Shift-F): a non-modal panel that scans every .koi file in the open folder
+  // via the pure search core. The shell supplies the four seams the panel can't own — list the files,
+  // read a closed file, reveal a match in the editor, snapshot the open buffers — plus a label fn.
+  function searchLabelForUri(uri: string): string {
+    const buf = workspace.buffers.get(uri);
+    if (buf) return buf.relPath;
+    const token = fileUriToPath(uri) ?? uri;
+    const root = workspace.folderRootToken();
+    if (root && (token.startsWith(root + '/') || token.startsWith(root + '\\'))) {
+      return token.slice(root.length + 1).replace(/\\/g, '/');
+    }
+    return token.split(/[\\/]/).pop() ?? uri;
+  }
+  async function revealSearchMatch(uri: string, match: Match): Promise<void> {
+    // Make the matched file the active buffer (opening it from disk if it isn't open yet), then select
+    // the match's range. gotoRange wants 0-based LSP positions; Match is 1-based line / 0-based column.
+    if (uri !== workspace.activeUri()) {
+      if (workspace.buffers.has(uri)) {
+        workspace.activateFile(uri);
+      } else {
+        const token = fileUriToPath(uri);
+        if (token) await workspace.openFileToken(token);
+      }
+    }
+    const line = match.line - 1;
+    editor.gotoRange({ line, character: match.column }, { line, character: match.column + match.length });
+  }
+  const search = createSearchPanel({
+    listFiles: (glob) => workspace.listWorkspaceFiles(glob),
+    readFile: async (uri) => {
+      const token = fileUriToPath(uri);
+      if (!token) return null;
+      try {
+        return await platform.readTextFile(token);
+      } catch {
+        return null;
+      }
+    },
+    openAndReveal: (uri, match) => void revealSearchMatch(uri, match),
+    getActiveBuffers: () => {
+      const m = new Map<string, string>();
+      for (const buf of workspace.buffers.values()) m.set(buf.uri, buf.text);
+      return m;
+    },
+    labelOf: searchLabelForUri,
+  });
+
   const prefs = createPreferences({
     onChange: (s) => {
       settings = s;
@@ -1494,6 +1544,7 @@ export function init(): () => void {
       { id: 'format', title: 'Format document', hint: 'mod+S', group: 'Edit', run: () => void formatActive() },
       { id: 'home', title: 'Go to start screen', group: 'File', run: () => goHome() },
       { id: 'open-folder', title: 'Open folder…', hint: 'mod+Shift+O', group: 'File', run: () => void openFolder() },
+      { id: 'search', title: 'Search across files…', hint: 'mod+Shift+F', group: 'Edit', run: () => search.focus() },
       { id: 'new-model', title: 'New model', hint: 'mod+N', group: 'File', run: () => void requestNewModel() },
       { id: 'save-all', title: 'Save all', hint: 'mod+Alt+S', group: 'File', run: () => void workspace.saveAllDirty() },
       { id: 'share', title: 'Copy shareable link', group: 'File', run: () => void copyShareLink() },
@@ -1545,7 +1596,11 @@ export function init(): () => void {
     }
     if (overlayOpen()) return;
 
-    if (mod && e.shiftKey && (e.key === 'o' || e.key === 'O')) {
+    if (mod && e.shiftKey && (e.key === 'f' || e.key === 'F')) {
+      // Mod+Shift+F → open/focus the workspace search panel (toggle closes it).
+      e.preventDefault();
+      search.toggle();
+    } else if (mod && e.shiftKey && (e.key === 'o' || e.key === 'O')) {
       e.preventDefault();
       void openFolder();
     } else if (mod && !e.shiftKey && (e.key === 'n' || e.key === 'N')) {
