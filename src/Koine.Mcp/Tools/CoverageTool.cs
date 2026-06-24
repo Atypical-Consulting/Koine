@@ -19,7 +19,7 @@ public static class CoverageTool
         Report which of a Koine model's declared types a chosen `target` actually emits. Compiles the
         .koi files (same path as koine_compile) and matches every declared value/entity/aggregate/enum/
         event/integrationEvent/readModel/query against the generated output. `target` is one of: csharp
-        (default), typescript, python, php, rust, glossary, or docs. Returns { Target, Total, Covered, IsComplete,
+        (default), typescript, python, php, rust, glossary, docs, or asyncapi. Returns { Target, Total, Covered, IsComplete,
         Items[] } where each item has { Kind, Name, Context, State } and State is "Covered" or "Missing".
         IsComplete is true when nothing is Missing. If the model has semantic errors no files are
         produced (run koine_validate to see why) and every type reports as Missing.
@@ -27,7 +27,7 @@ public static class CoverageTool
     public static CoverageReport Coverage(
         [Description("The .koi files to analyze. Provide a single entry for a one-file model.")]
         KoineFile[] files,
-        [Description("Output target: csharp (default), typescript, python, php, rust, glossary, or docs.")]
+        [Description("Output target: csharp (default), typescript, python, php, rust, glossary, docs, or asyncapi.")]
         string target = "csharp")
     {
         // Same transport-level input guard as koine_validate/koine_compile: reject empty/duplicate/
