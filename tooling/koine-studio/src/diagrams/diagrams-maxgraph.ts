@@ -14,6 +14,7 @@ import { mergeGraphsForView } from '@/model/modelTables';
 import { buildEmptyState } from '@/diagrams/emptyState';
 import { loadDiagramZoom, saveDiagramZoom } from '@/settings/persistence';
 import {
+  DIAGRAM_ANNOTATION_CREATE_EVENT,
   DIAGRAM_CONNECT_EVENT,
   DIAGRAM_DISCONNECT_EVENT,
   DIAGRAM_RELAYOUT_EVENT,
@@ -22,11 +23,16 @@ import {
   diagramLayoutStore,
   isDiagramEditing,
   isEditableKind,
+  type CanvasAnnotationKind,
+  type DiagramAnnotationCreateDetail,
   type DiagramConnectDetail,
   type DiagramDisconnectDetail,
+  type DiagramGroup,
+  type DiagramLayout,
   type DiagramLayoutStore,
   type DiagramNodeEditDetail,
   type DiagramNodeNavigateDetail,
+  type DiagramNote,
   type DiagramPosition,
 } from '@/diagrams/diagramContract';
 import { createBrowserLayoutStore } from '@/diagrams/layoutStore';
@@ -57,6 +63,19 @@ const DDD_HEX: Record<string, string> = {
 function kindColor(kind: string): string {
   return DDD_HEX[kind] ?? '#94a3b8';
 }
+
+// Canvas-only annotation styling (#255). Literal hex like DDD_HEX — var() doesn't resolve inside SVG
+// fill/stroke attrs; the HTML labels are themed via CSS classes (.koi-annotation*). A note is a soft
+// sticky; a group is a faint dashed region drawn behind its member nodes.
+const NOTE_FILL = '#fde68a'; // amber sticky
+const NOTE_STROKE = '#f59e0b';
+const GROUP_FILL = '#8b87f5'; // tinted via fillOpacity so the grid reads through
+const GROUP_STROKE = '#8b87f5';
+/** Breathing room between a group's border and the bounding box of its member nodes. */
+const GROUP_PAD = 28;
+/** Default size of a freshly-created note (#255 Task 3); also the fallback when a saved note lacks size. */
+export const NOTE_DEFAULT_W = 180;
+export const NOTE_DEFAULT_H = 96;
 
 /** The @maxgraph/core module shape, loaded lazily (code-split out of the main bundle). */
 type Mx = typeof import('@maxgraph/core');
@@ -162,11 +181,15 @@ export function selectDomainGraphs(files: DocsFile[]): DiagramGraph[] {
 }
 
 /** A live canvas: the graph, a node-id→cell index (for edges + selection), the per-context container
- *  cells, and a teardown closure. */
+ *  cells, the canvas-only annotation cells (note-id / group-id → cell), and a teardown closure. */
 export interface CanvasHandle {
   graph: MxGraph;
   cells: Map<string, MxCell>;
   containers: Map<string, MxCell>;
+  /** Note-id → note cell (#255). */
+  noteCells: Map<string, MxCell>;
+  /** Group-id → group cell (#255). */
+  groupCells: Map<string, MxCell>;
   dispose(): void;
 }
 
@@ -207,6 +230,74 @@ function snapshotPositions(cells: Map<string, MxCell>): Record<string, DiagramPo
     const v = nodeValue(cell);
     const g = cell.getGeometry();
     if (v && g) out[v.qualifiedName] = { x: g.x, y: g.y };
+  }
+  return out;
+}
+
+// --- canvas-only annotations (notes, groups; #255) ---------------------------
+// Notes and groups are a VIEW concern persisted in koine.layout.json alongside positions — never `.koi`.
+// Each rides a maxGraph cell tagged with an AnnotationCellValue so it is excluded from node layout and
+// node gestures (nodeValue() returns null for them) yet still paints, snapshots, and (notes) drags.
+
+/** The tagged value an annotation cell carries — distinguishing it from a node (DiagramNode) or edge. */
+interface AnnotationCellValue {
+  annotationKind: CanvasAnnotationKind;
+  id: string;
+  /** A note's text, or a group's label. */
+  text: string;
+  /** The grouped node qualified names (groups only). */
+  members?: string[];
+  /** An optional accent-colour key (groups only). */
+  color?: string;
+}
+
+/** The annotation value a cell carries, or null when the cell is a node / edge / container. */
+function annotationValue(cell: MxCell | null | undefined): AnnotationCellValue | null {
+  const v = cell?.value as AnnotationCellValue | undefined;
+  return v && typeof v === 'object' && 'annotationKind' in v ? v : null;
+}
+
+/** True for a note or group cell (kept out of node layout + node gestures). */
+function isAnnotationCell(cell: MxCell | null | undefined): boolean {
+  return annotationValue(cell) != null;
+}
+
+/** A monotonic fallback so authored annotations get a stable, unique id even where crypto.randomUUID is absent. */
+let annotationIdSeq = 0;
+
+/** A unique id for a freshly-authored annotation, e.g. `note-1a2b…` / `group-3` (#255). */
+function newAnnotationId(kind: CanvasAnnotationKind): string {
+  const uuid = globalThis.crypto?.randomUUID?.();
+  return `${kind}-${uuid ?? `${++annotationIdSeq}`}`;
+}
+
+/** The HTML label for an annotation cell: a sticky note's text, or a group's corner label. */
+function annotationLabelHtml(v: AnnotationCellValue): string {
+  const cls = v.annotationKind === 'note' ? 'koi-annotation--note' : 'koi-annotation--group';
+  return `<div class="koi-annotation ${cls}">${escapeHtml(v.text)}</div>`;
+}
+
+/** Snapshot every note cell to a DiagramNote — geometry is authoritative (the user may have moved/resized it). */
+function snapshotNotes(noteCells: Map<string, MxCell>): DiagramNote[] {
+  const out: DiagramNote[] = [];
+  for (const [id, cell] of noteCells) {
+    const v = annotationValue(cell);
+    const g = cell.getGeometry();
+    if (!v || !g) continue;
+    out.push({ id, text: v.text, x: g.x, y: g.y, width: g.width, height: g.height });
+  }
+  return out;
+}
+
+/** Snapshot every group cell to a DiagramGroup — membership + styling only; the rect is DERIVED, not stored. */
+function snapshotGroups(groupCells: Map<string, MxCell>): DiagramGroup[] {
+  const out: DiagramGroup[] = [];
+  for (const [id, cell] of groupCells) {
+    const v = annotationValue(cell);
+    if (!v) continue;
+    const group: DiagramGroup = { id, label: v.text, members: v.members ?? [] };
+    if (v.color) group.color = v.color;
+    out.push(group);
   }
   return out;
 }
@@ -264,6 +355,7 @@ function runTwoLevelLayout(mx: Mx, graph: MxGraph): void {
       for (let i = 0; i < count; i++) {
         const child = root.getChildAt(i);
         if (!child?.isVertex()) continue;
+        if (isAnnotationCell(child)) continue; // annotations keep their own (note) / derived (group) geometry
         const g = child.getGeometry();
         if (!g) continue;
         const next = g.clone();
@@ -312,7 +404,7 @@ export function buildCanvas(
   mx: Mx,
   container: HTMLElement,
   merged: DiagramGraph,
-  savedPositions?: Record<string, DiagramPosition>,
+  savedLayout?: DiagramLayout,
 ): CanvasHandle {
   const { Graph } = mx;
   const editing = isDiagramEditing();
@@ -342,11 +434,33 @@ export function buildCanvas(
       selection.previewColor = '#5aa9f0'; // visible accent (matches --koi-accent) for the dashed fallback
     }
   }
-  // Render each cell's stored value: a DiagramNode → its UML/simple HTML label (a `.koi-node` div themed
-  // by CSS); a DiagramEdge → its mid label text; anything else (container name, cardinality) → the string.
+  // Canvas-only annotations (#255): a GROUP is an inert region — never movable/selectable/resizable, since
+  // its rect is DERIVED from its members; a NOTE is movable + resizable when editing (even though nodes are
+  // neither — node size is content-derived). Layer these rules over the node rules via the per-cell predicates.
+  const baseIsCellMovable = graph.isCellMovable.bind(graph);
+  graph.isCellMovable = (cell) => {
+    const av = annotationValue(cell);
+    if (av) return editing && av.annotationKind === 'note';
+    return baseIsCellMovable(cell);
+  };
+  const baseIsCellSelectable = graph.isCellSelectable.bind(graph);
+  graph.isCellSelectable = (cell) => {
+    const av = annotationValue(cell);
+    if (av) return editing && av.annotationKind === 'note'; // notes select (for the resize handles) only when editing
+    return baseIsCellSelectable(cell);
+  };
+  const baseIsCellResizable = graph.isCellResizable.bind(graph);
+  graph.isCellResizable = (cell) => {
+    const av = annotationValue(cell);
+    if (av) return editing && av.annotationKind === 'note';
+    return baseIsCellResizable(cell);
+  };
+  // Render each cell's stored value: an annotation → its sticky/region HTML label; a DiagramNode → its
+  // UML/simple HTML label (a `.koi-node` div themed by CSS); a DiagramEdge → its mid label; else the string.
   graph.convertValueToString = (cell): string => {
-    const v = cell.value as DiagramNode | DiagramEdge | string | null;
+    const v = cell.value as DiagramNode | DiagramEdge | AnnotationCellValue | string | null;
     if (v && typeof v === 'object') {
+      if ('annotationKind' in v) return annotationLabelHtml(v);
       if ('qualifiedName' in v) return nodeLabelHtml(v);
       if ('from' in v && 'to' in v) return v.label ?? '';
     }
@@ -376,10 +490,16 @@ export function buildCanvas(
   });
 
   // Double-click an editable node → rename it (prompt), round-tripped through the model→.koi rename (#91).
+  // A double-click on a canvas annotation edits its note text / group label instead (#255, no `.koi` edit).
   // Gated on editing; only class-type, context-owned, spanned nodes (never a context / state) rename.
   graph.addListener(mx.InternalEvent.DOUBLE_CLICK, (_sender: unknown, evt: { getProperty(name: string): unknown }) => {
     if (!isDiagramEditing()) return;
-    const v = nodeValue(evt.getProperty('cell') as MxCell | null);
+    const cell = evt.getProperty('cell') as MxCell | null;
+    if (annotationValue(cell)) {
+      void editAnnotation(cell!);
+      return;
+    }
+    const v = nodeValue(cell);
     if (!v || !canRename(v)) return;
     const current = v.label;
     const s = v.sourceSpan!; // canRename guarantees a span; line/column is the name position for LSP rename
@@ -409,6 +529,19 @@ export function buildCanvas(
     const rect = container.getBoundingClientRect();
     const cell = graph.getCellAt(evt.clientX - rect.left, evt.clientY - rect.top);
     if (!cell) return;
+    const annotation = annotationValue(cell);
+    if (annotation) {
+      evt.preventDefault(); // suppress the native menu regardless of the async confirm's outcome
+      void koiConfirm({
+        title: `Delete this ${annotation.annotationKind}?`,
+        message: 'Removes the canvas annotation. Your .koi source is untouched.',
+        confirmLabel: 'Delete',
+        danger: true,
+      }).then((ok) => {
+        if (ok) deleteAnnotation(cell);
+      });
+      return;
+    }
     const node = nodeValue(cell);
     if (node) {
       if (!canDelete(node)) return;
@@ -476,7 +609,14 @@ export function buildCanvas(
 
   const cells = new Map<string, MxCell>();
   const containers = new Map<string, MxCell>();
+  const noteCells = new Map<string, MxCell>();
+  const groupCells = new Map<string, MxCell>();
   const root = graph.getDefaultParent();
+
+  // The canvas-only annotations restored from the saved layout (#255). Notes carry their own geometry;
+  // group rects are derived from member positions after layout (see layoutGroups below).
+  const savedNotes = savedLayout?.notes ?? [];
+  const savedGroups = savedLayout?.groups ?? [];
 
   // Group nodes by bounded context (the qualified-name prefix). Context-less nodes (states, bare context
   // nodes) have no dot and live at the root level.
@@ -488,7 +628,65 @@ export function buildCanvas(
     else byContext.set(ctx, [node]);
   }
 
+  // Insert one annotation cell. Used both to restore the saved layout (in the build batch, before the
+  // nodes so it paints behind) and to author a new annotation later (sendAnnotationsToBack keeps it behind).
+  function insertGroupCell(group: DiagramGroup): MxCell {
+    const cell = graph.insertVertex({
+      parent: root,
+      id: `group:${group.id}`,
+      value: { annotationKind: 'group', id: group.id, text: group.label, members: [...group.members], color: group.color },
+      position: [0, 0],
+      size: [1, 1], // placeholder; layoutGroups() derives the real rect from the members before first paint
+      style: {
+        shape: 'rectangle',
+        rounded: true,
+        fillColor: GROUP_FILL,
+        fillOpacity: 8,
+        strokeColor: GROUP_STROKE,
+        strokeWidth: 1.5,
+        dashed: true,
+        dashPattern: '4 4',
+        verticalAlign: 'top',
+        align: 'left',
+        spacingLeft: 8,
+        spacingTop: 6,
+      },
+    });
+    groupCells.set(group.id, cell);
+    return cell;
+  }
+  function insertNoteCell(note: DiagramNote): MxCell {
+    const cell = graph.insertVertex({
+      parent: root,
+      id: `note:${note.id}`,
+      value: { annotationKind: 'note', id: note.id, text: note.text },
+      position: [note.x, note.y],
+      size: [note.width || NOTE_DEFAULT_W, note.height || NOTE_DEFAULT_H],
+      // The shape carries the sticky fill + receives pointer events; the HTML label (.koi-annotation,
+      // pointer-events:none) overlays it with the wrapped text — mirroring the node label pattern.
+      style: {
+        shape: 'rectangle',
+        rounded: true,
+        fillColor: NOTE_FILL,
+        strokeColor: NOTE_STROKE,
+        strokeWidth: 1,
+        overflow: 'fill',
+        whiteSpace: 'wrap',
+        verticalAlign: 'top',
+        align: 'left',
+      },
+    });
+    noteCells.set(note.id, cell);
+    return cell;
+  }
+
   graph.batchUpdate(() => {
+    // Annotations are inserted FIRST so they paint BEHIND every container/node/edge (root child order ==
+    // SVG paint order). Groups (regions) go in before notes, so a note over a group reads on top — both
+    // still sit behind the nodes.
+    for (const group of savedGroups) insertGroupCell(group);
+    for (const note of savedNotes) insertNoteCell(note);
+
     // A swimlane container per non-empty NAMED context: a subtle bounding box with the context name as its
     // header bar. Nodes are parented INTO their context; the inner layout grows the box to fit them.
     for (const [ctx, nodes] of byContext) {
@@ -579,20 +777,164 @@ export function buildCanvas(
 
   runTwoLevelLayout(mx, graph);
   // A saved manual layout overrides the auto-arrange (so a hand-positioned diagram doesn't snap back).
-  if (savedPositions) applySavedPositions(graph, cells, savedPositions);
+  if (savedLayout?.positions) applySavedPositions(graph, cells, savedLayout.positions);
 
-  // Persist a drag: snapshot ALL node positions on move (one drag freezes the layout to manual, matching
-  // the SVG renderer) and hand them to the active layout store. Attached AFTER layout/apply so neither
-  // triggers a spurious save (both use setGeometry, not moveCells — but order keeps the intent clear).
-  graph.addListener(mx.InternalEvent.CELLS_MOVED, () => {
-    activeLayoutStore().save(snapshotPositions(cells));
-  });
+  // A qualified-name → node-cell index, for deriving each group's bounding box from its members (#255).
+  const nodesByQname = new Map<string, MxCell>();
+  for (const cell of cells.values()) {
+    const v = nodeValue(cell);
+    if (v) nodesByQname.set(v.qualifiedName, cell);
+  }
+
+  /** Absolute (root-space) geometry of a node cell: its container offset plus its own geometry. Nesting is
+   *  at most root → container → node, so a single parent offset suffices. */
+  function absoluteRect(cell: MxCell): { x: number; y: number; w: number; h: number } | null {
+    const g = cell.getGeometry();
+    if (!g) return null;
+    let ox = 0;
+    let oy = 0;
+    const parent = cell.getParent();
+    if (parent && parent !== root) {
+      const pg = parent.getGeometry();
+      if (pg) {
+        ox = pg.x;
+        oy = pg.y;
+      }
+    }
+    return { x: g.x + ox, y: g.y + oy, w: g.width, h: g.height };
+  }
+
+  /** Re-derive each group's rectangle as the padded bounding box of its resolved members; a group with no
+   *  resolvable members is hidden (there is nothing to enclose). Called after layout and on every move. */
+  function layoutGroups(): void {
+    if (!groupCells.size) return;
+    const model = graph.getDataModel();
+    graph.batchUpdate(() => {
+      for (const cell of groupCells.values()) {
+        const members = annotationValue(cell)?.members ?? [];
+        let minX = Infinity;
+        let minY = Infinity;
+        let maxX = -Infinity;
+        let maxY = -Infinity;
+        let found = 0;
+        for (const qn of members) {
+          const member = nodesByQname.get(qn);
+          const r = member && absoluteRect(member);
+          if (!r) continue;
+          found++;
+          minX = Math.min(minX, r.x);
+          minY = Math.min(minY, r.y);
+          maxX = Math.max(maxX, r.x + r.w);
+          maxY = Math.max(maxY, r.y + r.h);
+        }
+        model.setVisible(cell, found > 0);
+        const geo = cell.getGeometry();
+        if (found === 0 || !geo) continue;
+        const next = geo.clone();
+        next.x = minX - GROUP_PAD;
+        next.y = minY - GROUP_PAD;
+        next.width = maxX - minX + GROUP_PAD * 2;
+        next.height = maxY - minY + GROUP_PAD * 2;
+        model.setGeometry(cell, next);
+      }
+    });
+  }
+
+  layoutGroups();
+
+  // Persist a drag/resize: snapshot ALL node positions + note geometries (one gesture freezes the layout to
+  // manual, matching the SVG renderer) and re-derive group rects so a group follows its moved members. Then
+  // hand the whole layout to the active store. Attached AFTER layout/apply so neither fires a spurious save
+  // (both use setGeometry, not moveCells — but order keeps the intent clear).
+  const persist = (): void => {
+    layoutGroups();
+    activeLayoutStore().save({
+      positions: snapshotPositions(cells),
+      notes: snapshotNotes(noteCells),
+      groups: snapshotGroups(groupCells),
+    });
+  };
+  graph.addListener(mx.InternalEvent.CELLS_MOVED, persist);
+  graph.addListener(mx.InternalEvent.CELLS_RESIZED, persist);
+
+  // --- annotation authoring (create / edit / delete; #255 Task 3) ------------
+  // Annotations are a view concern, so the renderer owns their whole lifecycle (no `.koi` round-trip): it
+  // mutates the live graph and persists via the store. Create is driven by a document event the palette →
+  // IDE raises; edit/delete reuse the node double-click / right-click gestures (branches added above).
+
+  /** Keep every annotation behind the nodes after an author action (groups before notes, both at the back). */
+  function sendAnnotationsToBack(): void {
+    const ordered = [...groupCells.values(), ...noteCells.values()];
+    if (ordered.length) graph.orderCells(true, ordered);
+  }
+
+  async function createNote(): Promise<void> {
+    const text = await koiPrompt({ title: 'New note', label: 'Note text', initialValue: '', confirmLabel: 'Add note' });
+    if (!text) return; // cancelled or empty
+    const offset = 32 + noteCells.size * 24; // cascade so successive notes don't stack exactly
+    insertNoteCell({ id: newAnnotationId('note'), text, x: offset, y: offset, width: NOTE_DEFAULT_W, height: NOTE_DEFAULT_H });
+    sendAnnotationsToBack();
+    persist();
+  }
+
+  async function createGroup(): Promise<void> {
+    // Group the current node selection; if nothing is selected, group every node on the canvas (so the
+    // button always produces a visible region the user can then edit/delete).
+    const selected = graph.getSelectionCells().map(nodeValue).filter((v): v is DiagramNode => v != null);
+    const source = selected.length ? selected : [...cells.values()].map(nodeValue).filter((v): v is DiagramNode => v != null);
+    const members = source.map((v) => v.qualifiedName);
+    if (!members.length) return; // nothing to enclose
+    const label = await koiPrompt({ title: 'New group', label: 'Group label', initialValue: 'Group', confirmLabel: 'Add group' });
+    if (!label) return;
+    insertGroupCell({ id: newAnnotationId('group'), label, members });
+    sendAnnotationsToBack();
+    persist(); // persist() re-derives every group's rect (layoutGroups) before saving
+  }
+
+  /** Edit a note's text / a group's label via the modal prompt (double-click gesture). */
+  async function editAnnotation(cell: MxCell): Promise<void> {
+    const av = annotationValue(cell);
+    if (!av) return;
+    const isNote = av.annotationKind === 'note';
+    const next = await koiPrompt({
+      title: isNote ? 'Edit note' : 'Rename group',
+      label: isNote ? 'Note text' : 'Group label',
+      initialValue: av.text,
+      confirmLabel: 'Save',
+    });
+    if (!next || next === av.text) return; // cancelled, blank, or unchanged → no-op (note text / group label required)
+    graph.getDataModel().setValue(cell, { ...av, text: next });
+    persist();
+  }
+
+  /** Remove a note/group from the canvas and the saved layout (right-click gesture). */
+  function deleteAnnotation(cell: MxCell): void {
+    const av = annotationValue(cell);
+    if (!av) return;
+    graph.getDataModel().remove(cell);
+    if (av.annotationKind === 'note') noteCells.delete(av.id);
+    else groupCells.delete(av.id);
+    persist();
+  }
+
+  const onCreateAnnotation = (e: Event): void => {
+    if (!isDiagramEditing()) return;
+    const detail = (e as CustomEvent<DiagramAnnotationCreateDetail>).detail;
+    if (detail?.kind === 'note') void createNote();
+    else if (detail?.kind === 'group') void createGroup();
+  };
+  document.addEventListener(DIAGRAM_ANNOTATION_CREATE_EVENT, onCreateAnnotation);
 
   return {
     graph,
     cells,
     containers,
-    dispose: () => graph.destroy(),
+    noteCells,
+    groupCells,
+    dispose: () => {
+      document.removeEventListener(DIAGRAM_ANNOTATION_CREATE_EVENT, onCreateAnnotation);
+      graph.destroy();
+    },
   };
 }
 
@@ -769,8 +1111,9 @@ export function createMaxGraphRenderer(): DiagramRenderer {
       const merged = mergeGraphsForView(graphs);
 
       // Restore any saved manual layout for this workspace (committable koine.layout.json, or browser
-      // storage). Async — re-check isCurrent() after it so a superseded render bails before touching DOM.
-      const savedPositions = await activeLayoutStore().load();
+      // storage) — node positions plus canvas-only annotations. Async — re-check isCurrent() after it so
+      // a superseded render bails before touching DOM.
+      const savedLayout = await activeLayoutStore().load();
       if (!isCurrent()) return;
 
       // Build into a detached host so a superseded render never half-paints the live canvas.
@@ -781,7 +1124,7 @@ export function createMaxGraphRenderer(): DiagramRenderer {
       surface.className = 'koi-canvas';
       root.appendChild(surface);
 
-      const handle = buildCanvas(mx, surface, merged, savedPositions);
+      const handle = buildCanvas(mx, surface, merged, savedLayout);
       // Chrome (zoom bar + minimap) mounts on `root`, NOT the maxGraph container (`surface`): maxGraph's
       // panGraph reparents every non-SVG child of its container into a shifted preview div while panning
       // (e.g. dragging the minimap), which would yank the controls/minimap to the top-left. Keeping them on
