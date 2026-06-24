@@ -446,7 +446,7 @@ export function buildCanvas(
   const baseIsCellSelectable = graph.isCellSelectable.bind(graph);
   graph.isCellSelectable = (cell) => {
     const av = annotationValue(cell);
-    if (av) return av.annotationKind === 'note';
+    if (av) return editing && av.annotationKind === 'note'; // notes select (for the resize handles) only when editing
     return baseIsCellSelectable(cell);
   };
   const baseIsCellResizable = graph.isCellResizable.bind(graph);
@@ -636,7 +636,7 @@ export function buildCanvas(
       id: `group:${group.id}`,
       value: { annotationKind: 'group', id: group.id, text: group.label, members: [...group.members], color: group.color },
       position: [0, 0],
-      size: [GROUP_PAD * 4, GROUP_PAD * 4], // placeholder; layoutGroups() derives the rect from the members
+      size: [1, 1], // placeholder; layoutGroups() derives the real rect from the members before first paint
       style: {
         shape: 'rectangle',
         rounded: true,
@@ -888,8 +888,7 @@ export function buildCanvas(
     if (!label) return;
     insertGroupCell({ id: newAnnotationId('group'), label, members });
     sendAnnotationsToBack();
-    layoutGroups();
-    persist();
+    persist(); // persist() re-derives every group's rect (layoutGroups) before saving
   }
 
   /** Edit a note's text / a group's label via the modal prompt (double-click gesture). */
@@ -903,8 +902,7 @@ export function buildCanvas(
       initialValue: av.text,
       confirmLabel: 'Save',
     });
-    if (next == null || next === av.text) return;
-    if (isNote && !next) return; // a note must keep some text
+    if (!next || next === av.text) return; // cancelled, blank, or unchanged → no-op (note text / group label required)
     graph.getDataModel().setValue(cell, { ...av, text: next });
     persist();
   }

@@ -542,15 +542,6 @@ export function saveDiagramAnnotations(key: string, annotations: DiagramAnnotati
   );
 }
 
-/** Forget a diagram's saved annotations. */
-export function clearDiagramAnnotations(key: string): void {
-  try {
-    localStorage.removeItem(DIAGRAM_ANNOTATIONS_KEY_PREFIX + key);
-  } catch {
-    // storage unavailable — nothing to clear
-  }
-}
-
 // --- active bounded context (#146) -------------------------------------------
 // The active context scope (a context name, or the literal 'all') is persisted PER workspace — a
 // context like "Sales" only means anything within its own model — so each folder restores its own
