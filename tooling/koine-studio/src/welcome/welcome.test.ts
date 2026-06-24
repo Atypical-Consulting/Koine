@@ -230,17 +230,29 @@ describe('welcome start actions ↔ gallery', () => {
     )!;
   }
 
-  const consoleCard = (root: HTMLElement) => root.querySelector<HTMLElement>('.koi-welcome-card:not(.koi-gallery-card)')!;
-  const galleryCard = (root: HTMLElement) => root.querySelector<HTMLElement>('.koi-gallery-card')!;
+  const consoleView = (root: HTMLElement) => root.querySelector<HTMLElement>('.koi-welcome-view:not(.koi-gallery-view)')!;
+  const galleryView = (root: HTMLElement) => root.querySelector<HTMLElement>('.koi-gallery-view')!;
 
   test('opens on the console with the gallery hidden behind a "Start from an example" action', () => {
     const cb = makeCallbacks();
     createWelcome(cb, SAMPLE).show();
     const root = document.querySelector<HTMLElement>('.koi-welcome')!;
 
-    expect(consoleCard(root).hidden).toBe(false);
-    expect(galleryCard(root).hidden).toBe(true);
+    expect(consoleView(root).hidden).toBe(false);
+    expect(galleryView(root).hidden).toBe(true);
     expect(action(root, 'Start from an example')).toBeTruthy();
+  });
+
+  test('both views live inside the one card, swapped in place (no second card)', () => {
+    const cb = makeCallbacks();
+    createWelcome(cb, SAMPLE).show();
+    const root = document.querySelector<HTMLElement>('.koi-welcome')!;
+
+    // A single persistent card frame holds both views — the modal never tears down on a view switch.
+    expect(root.querySelectorAll('.koi-welcome-card').length).toBe(1);
+    const card = root.querySelector<HTMLElement>('.koi-welcome-card')!;
+    expect(card.contains(consoleView(root))).toBe(true);
+    expect(card.contains(galleryView(root))).toBe(true);
   });
 
   test('the action swaps in the gallery; "Back to start" swaps back', () => {
@@ -249,12 +261,12 @@ describe('welcome start actions ↔ gallery', () => {
     const root = document.querySelector<HTMLElement>('.koi-welcome')!;
 
     action(root, 'Start from an example').click();
-    expect(consoleCard(root).hidden).toBe(true);
-    expect(galleryCard(root).hidden).toBe(false);
+    expect(consoleView(root).hidden).toBe(true);
+    expect(galleryView(root).hidden).toBe(false);
 
     root.querySelector<HTMLButtonElement>('.koi-welcome-back')!.click();
-    expect(consoleCard(root).hidden).toBe(false);
-    expect(galleryCard(root).hidden).toBe(true);
+    expect(consoleView(root).hidden).toBe(false);
+    expect(galleryView(root).hidden).toBe(true);
   });
 
   test('opening the gallery does not leave the welcome screen (no callback, still visible)', () => {
@@ -279,8 +291,8 @@ describe('welcome start actions ↔ gallery', () => {
     handle.hide();
     handle.show();
 
-    expect(consoleCard(root).hidden).toBe(false);
-    expect(galleryCard(root).hidden).toBe(true);
+    expect(consoleView(root).hidden).toBe(false);
+    expect(galleryView(root).hidden).toBe(true);
   });
 });
 

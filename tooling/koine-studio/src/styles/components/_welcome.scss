@@ -17,7 +17,9 @@
 }
 
 /* margin:auto centers the card; a FIXED height keeps the modal the same size across both views (console
-   ↔ gallery) and across tab switches — the inner regions scroll instead of the box resizing. */
+   ↔ gallery) and across tab switches — the inner regions scroll instead of the box resizing. The card is
+   one persistent frame: the console and gallery views swap *inside* it, so it animates in once (koi-rise)
+   and never re-enters on a view switch. */
 .koi-welcome-card {
   position: relative;
   margin: auto;
@@ -34,12 +36,6 @@
   overflow: hidden; /* clips the gradient cap to the rounded corners; inner regions own the scroll */
   animation: koi-rise 0.45s cubic-bezier(0.2, 0.7, 0.2, 1) both;
 
-  /* display:flex (above) would otherwise beat the UA [hidden] rule, leaving the inactive card visible —
-     restore it so console/gallery still swap one-at-a-time. */
-  &[hidden] {
-    display: none;
-  }
-
   /* A 3px brand-gradient cap ties the console to the monogram — the one piece of chrome decoration,
      replacing the old blueprint-grid + glow. */
   &::before {
@@ -48,6 +44,22 @@
     inset: 0 0 auto 0;
     height: 3px;
     background: var(--koi-accent-grad);
+  }
+}
+
+/* The two swappable views inside the card (console ↔ gallery). Each fills the fixed card and owns its
+   inner scroll; only one is in flow at a time (the other is [hidden]). Switching from one to the other
+   replays a quiet fade so the content changes in place — the card frame itself never moves. This mirrors
+   the editor's own view-switch fade (see base/_animations.scss). */
+.koi-welcome-view {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  animation: koi-fade 0.28s ease both;
+
+  &[hidden] {
+    display: none;
   }
 }
 
@@ -756,10 +768,10 @@
   font-style: italic;
 }
 
-/* --- gallery view: the catalogue as its own swapped-in card --------------- */
-/* Reached from the console's "Start from an example" action. In standalone mode the gallery is the top
-   of its own card, so it sheds the divider + top inset it wore when it sat below the hero. */
-.koi-gallery-card .koi-welcome-gallery {
+/* --- gallery view: the catalogue as a swapped-in view --------------------- */
+/* Reached from the console's "Start from an example" action. As its own view it is the top of the card,
+   so it sheds the divider + top inset it wore when it sat below the hero. */
+.koi-gallery-view .koi-welcome-gallery {
   margin-top: 0;
   padding-top: 0;
   border-top: none;
@@ -823,7 +835,7 @@
 
 /* The gallery head's titled lede echoes the hero rhythm (eyebrow → statement → subline) so the two
    views read as one product. Bottom-align the search so it sits on the subline. */
-.koi-gallery-card .koi-welcome-gallery-head {
+.koi-gallery-view .koi-welcome-gallery-head {
   align-items: flex-end;
 }
 
@@ -835,7 +847,7 @@
   margin-bottom: var(--koi-space-1-5);
 }
 
-.koi-gallery-card .koi-welcome-section-title {
+.koi-gallery-view .koi-welcome-section-title {
   font-size: clamp(1.4rem, 1rem + 1vw, 1.7rem);
   font-weight: 800;
   letter-spacing: -0.02em;
@@ -861,7 +873,7 @@
   }
 
   /* Stack the gallery lede over the search again. */
-  .koi-gallery-card .koi-welcome-gallery-head {
+  .koi-gallery-view .koi-welcome-gallery-head {
     align-items: stretch;
   }
 
