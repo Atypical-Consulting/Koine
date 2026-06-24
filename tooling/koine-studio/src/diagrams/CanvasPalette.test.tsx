@@ -7,20 +7,20 @@ import { axe } from 'vitest-axe';
 const btn = (c: Element, kind: string) => c.querySelector(`[data-kind="${kind}"]`) as HTMLButtonElement;
 
 describe('CanvasPalette', () => {
-  test('renders the five round-trip constructs plus the coming-soon buttons', () => {
+  test('renders the six round-trip constructs plus the coming-soon buttons', () => {
     const { container } = render(<CanvasPalette store={createAppStore()} onAdd={() => {}} />);
-    for (const kind of ['entity', 'value', 'aggregate', 'event', 'enum']) {
+    for (const kind of ['entity', 'value', 'aggregate', 'event', 'enum', 'service']) {
       expect(btn(container, kind)).not.toBeNull();
     }
-    // Coming-soon buttons are present and disabled.
+    // Coming-soon buttons are present and disabled (Service graduated to a round-trip construct).
     const soon = container.querySelectorAll('.koi-palette-btn--soon');
-    expect(soon.length).toBe(6);
+    expect(soon.length).toBe(5);
     soon.forEach((b) => expect((b as HTMLButtonElement).disabled).toBe(true));
   });
 
   test('each construct button wears its shape-coded type icon (same glyph as the diagram nodes)', () => {
     const { container } = render(<CanvasPalette store={createAppStore()} onAdd={() => {}} />);
-    for (const kind of ['entity', 'value', 'aggregate', 'event', 'enum']) {
+    for (const kind of ['entity', 'value', 'aggregate', 'event', 'enum', 'service']) {
       const icon = btn(container, kind).querySelector('.koi-model-icon');
       expect(icon).not.toBeNull();
       expect((icon as HTMLElement).dataset.construct).toBe(kind);

@@ -11,14 +11,15 @@ const CONSTRUCTS: { kind: AddNodeKind; label: string }[] = [
   { kind: 'entity', label: 'Entity' },
   { kind: 'value', label: 'Value Object' },
   { kind: 'aggregate', label: 'Aggregate' },
+  { kind: 'service', label: 'Service' },
   { kind: 'event', label: 'Event' },
   { kind: 'enum', label: 'Enum' },
 ];
 
 // Not yet wired to a model edit — shown disabled so the toolbar matches the agreed mockup and each can be
-// enabled later without moving the others. Relation points the modeller at the existing connect gesture.
+// enabled later without moving the others. Relation points the modeller at the existing connect gesture;
+// Rule/Repository live inside an aggregate and Note/Group are canvas-only annotations (deferred by design).
 const COMING_SOON: { label: string; tooltip: string }[] = [
-  { label: 'Service', tooltip: 'Coming soon' },
   { label: 'Rule', tooltip: 'Coming soon' },
   { label: 'Repository', tooltip: 'Coming soon' },
   { label: 'Relation', tooltip: 'Drag from one node to another to connect' },
