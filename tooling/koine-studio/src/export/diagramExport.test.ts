@@ -1,6 +1,19 @@
-import { describe, expect, it } from 'vitest';
-import { diagramToPlantUml } from '@/export/diagramExport';
+import { describe, expect, it, beforeAll, vi } from 'vitest';
+import * as mx from '@maxgraph/core';
+import { canvasToSvg, diagramToPlantUml } from '@/export/diagramExport';
+import { buildCanvas } from '@/diagrams/diagrams-maxgraph';
 import type { DiagramEdge, DiagramGraph, DiagramMember, DiagramNode } from '@/lsp/protocol';
+
+// The diagram renderer routes its rename/delete gestures through Koine's modal overlay; stub it so importing
+// buildCanvas (and constructing a canvas) stays side-effect-free in this DOM-driven test.
+vi.mock('@/shared/overlay', () => ({ koiPrompt: vi.fn(), koiConfirm: vi.fn() }));
+
+// happy-dom returns 0 from getBoundingClientRect; maxGraph reads the container rect on construction. Shim it
+// so the graph constructs with a sane size (mirrors diagrams-maxgraph.test.ts) and assert on the STRING.
+beforeAll(() => {
+  Element.prototype.getBoundingClientRect = () =>
+    ({ x: 0, y: 0, top: 0, left: 0, right: 800, bottom: 600, width: 800, height: 600, toJSON() {} }) as DOMRect;
+});
 
 // --- fixture builders --------------------------------------------------------
 
@@ -216,5 +229,89 @@ describe('diagramToPlantUml', () => {
       const out = diagramToPlantUml(graph([], []), 'aggregate', '');
       expect(out).not.toContain('title ');
     });
+  });
+});
+
+// --- canvasToSvg: standalone SVG from the live maxGraph canvas (issue #271 Task 2) -------------------------
+
+function makeContainer(): HTMLElement {
+  const c = document.createElement('div');
+  Object.assign(c.style, { width: '800px', height: '600px' });
+  document.body.appendChild(c);
+  return c;
+}
+
+describe('canvasToSvg', () => {
+  // A single dotted node so buildCanvas draws a class box with a `.koi-node[data-qname]` HTML label, plus a
+  // bounded-context swimlane (whose stroke uses var(--koi-line)) — exercising both the node markup and a
+  // var() that must be resolved in the export.
+  const merged: DiagramGraph = {
+    nodes: [
+      node({
+        id: 'Ordering.Order',
+        label: 'Order',
+        kind: 'aggregate-root',
+        qualifiedName: 'Ordering.Order',
+        stereotype: 'aggregate root',
+        members: [member('id: OrderId', 'field'), member('total: Money', 'field')],
+      }),
+    ],
+    edges: [],
+  };
+
+  it('returns a standalone <svg> document carrying the SVG namespace and a concrete viewBox', () => {
+    const container = makeContainer();
+    const handle = buildCanvas(mx, container, merged);
+    try {
+      handle.graph.getView().revalidate();
+      const out = canvasToSvg(handle);
+      expect(out.startsWith('<svg')).toBe(true);
+      expect(out).toContain('xmlns="http://www.w3.org/2000/svg"');
+      expect(out).toMatch(/viewBox="[-\d]+ [-\d]+ \d+ \d+"/);
+      expect(out).toMatch(/width="\d+"/);
+      expect(out).toMatch(/height="\d+"/);
+    } finally {
+      handle.dispose();
+      container.remove();
+    }
+  });
+
+  it('carries the rendered node markup (label text + data-qname)', () => {
+    const container = makeContainer();
+    const handle = buildCanvas(mx, container, merged);
+    try {
+      handle.graph.getView().revalidate();
+      const out = canvasToSvg(handle);
+      expect(out).toContain('data-qname="Ordering.Order"');
+      expect(out).toContain('Order');
+    } finally {
+      handle.dispose();
+      container.remove();
+    }
+  });
+
+  it('inlines the DDD palette so nothing renders as an unresolved var(), with concrete styling present', () => {
+    const container = makeContainer();
+    const handle = buildCanvas(mx, container, merged);
+    try {
+      handle.graph.getView().revalidate();
+      const out = canvasToSvg(handle);
+      // No unresolved custom-property reference survives into the standalone SVG.
+      expect(out).not.toContain('var(');
+      // The palette is inlined as a <style> block AND concrete colour attributes are present.
+      expect(out).toContain('<style');
+      expect(out).toContain('--koi-line: #2a3242');
+      expect(out).toMatch(/(fill|stroke)="#[0-9a-fA-F]{3,6}"/);
+    } finally {
+      handle.dispose();
+      container.remove();
+    }
+  });
+
+  it('throws a clear error when the handle exposes no <svg> surface', () => {
+    const fake = {
+      graph: { getView: () => ({ getCanvas: () => null }), container: document.createElement('div') },
+    } as unknown as Parameters<typeof canvasToSvg>[0];
+    expect(() => canvasToSvg(fake)).toThrow(/no <svg>/);
   });
 });

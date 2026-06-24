@@ -5,6 +5,7 @@
 // This is a PURE function of (graph, kind, caption): the same input always yields the same string, which keeps
 // it trivially unit-testable (string assertions over fixture graphs) with no DOM, no maxGraph, no LSP.
 import type { DiagramEdge, DiagramGraph, DiagramNode } from '@/lsp/protocol';
+import type { CanvasHandle } from '@/diagrams/diagrams-maxgraph';
 
 /** A node draws as a UML class box (compartments) iff it has a stereotype or any members; else a simple box.
  *  Inlined from {@link import('@/diagrams/diagrams-maxgraph').isClassNode} so this pure module stays free of
@@ -189,4 +190,131 @@ export function diagramToPlantUml(graph: DiagramGraph, kind: string, caption: st
   lines.push(...body);
   lines.push('@enduml');
   return `${lines.join('\n')}\n`;
+}
+
+// --- SVG export from the live maxGraph canvas (issue #271 Task 2) -------------
+// The domain canvas is already an SVG drawing (the maxGraph cell SHAPES) overlaid with HTML-label
+// `<foreignObject>` boxes (the themed `.koi-node` compartments). `canvasToSvg` clones that live tree into a
+// STANDALONE, self-contained SVG string: it carries the `xmlns`, a concrete `width`/`height`/`viewBox`, the
+// HTML node labels (so the `.koi-node[data-qname]` markup travels with the export), and — crucially — the
+// DDD palette resolved to literal hex, so nothing renders as an unresolved `var(--koi-…)` once the SVG
+// leaves Studio (where those custom properties are defined on the theme root, not on the SVG).
+
+/** The Koine DDD palette custom properties the diagram's SVG styling depends on, resolved to concrete
+ *  values so a standalone export renders identically outside Studio (these mirror the `_dark.scss` theme,
+ *  the canvas's default). They cover the swimlane stroke (`--koi-line`), the context header text
+ *  (`--koi-muted`), edge connectors (`--koi-diagram-edge`), node/edge label text (`--koi-fg`), the label
+ *  pill background (`--koi-paper`) and the accent (`--koi-accent`). */
+const SVG_PALETTE: Record<string, string> = {
+  '--koi-line': '#2a3242',
+  '--koi-muted': '#7d8694',
+  '--koi-diagram-edge': '#5d6b8e',
+  '--koi-fg': '#d6dde8',
+  '--koi-paper': '#0e1117',
+  '--koi-paper-2': '#161b22',
+  '--koi-accent': '#5aa9ff',
+};
+
+/** Build a `<style>` element that defines every palette token on `:root`/`svg` so any `var(--koi-…)` left
+ *  in the cloned tree resolves to the concrete DDD value when the SVG is rendered standalone. */
+function buildPaletteStyle(doc: Document): SVGStyleElement {
+  const style = doc.createElementNS('http://www.w3.org/2000/svg', 'style');
+  const decls = Object.entries(SVG_PALETTE)
+    .map(([name, value]) => `${name}: ${value};`)
+    .join(' ');
+  style.textContent = `:root, svg { ${decls} }`;
+  return style;
+}
+
+/** Replace every remaining `var(--token[, fallback])` reference in a presentation attribute with the
+ *  resolved palette value (or the inline fallback) so the serialized SVG carries NO `var(` — it must paint
+ *  with concrete colours outside Studio even in a renderer that ignores the `<style>` custom-property defs. */
+function resolveVarAttributes(svg: SVGSVGElement): void {
+  const colorAttrs = ['fill', 'stroke', 'color', 'stop-color', 'flood-color'];
+  const all = [svg, ...Array.from(svg.querySelectorAll('*'))];
+  for (const el of all) {
+    for (const attr of colorAttrs) {
+      const v = el.getAttribute(attr);
+      if (v && v.includes('var(')) el.setAttribute(attr, resolveVarExpression(v));
+    }
+    const styleAttr = el.getAttribute('style');
+    if (styleAttr && styleAttr.includes('var(')) el.setAttribute('style', resolveVarExpression(styleAttr));
+  }
+}
+
+/** Resolve a CSS value that may contain `var(--token)` / `var(--token, fallback)` to a concrete string:
+ *  a known palette token → its hex; an inline fallback → that; otherwise a neutral slate so nothing paints
+ *  as a literal `var(…)`. */
+function resolveVarExpression(value: string): string {
+  return value.replace(/var\(\s*(--[\w-]+)\s*(?:,\s*([^)]*))?\)/g, (_m, token: string, fallback?: string) => {
+    return SVG_PALETTE[token] ?? (fallback != null ? fallback.trim() : '#94a3b8');
+  });
+}
+
+/** The live `<svg>` drawing surface for a built canvas. maxGraph's draw pane (`getView().getCanvas()`) is a
+ *  `<g>` whose `ownerSVGElement` is the surface; fall back to the container's first `<svg>`. */
+function findCanvasSvg(handle: CanvasHandle): SVGSVGElement {
+  const view = handle.graph.getView();
+  const pane = view.getCanvas?.() as Element | undefined;
+  const owner = (pane as SVGElement | undefined)?.ownerSVGElement ?? null;
+  if (owner) return owner as SVGSVGElement;
+  const container = handle.graph.container as HTMLElement | undefined;
+  const found = container?.querySelector('svg');
+  if (found) return found as SVGSVGElement;
+  throw new Error('canvasToSvg: no <svg> drawing surface found on the canvas handle');
+}
+
+/** A safe, positive integer from a (possibly NaN/zero/negative) bounds dimension. */
+function dim(n: number, fallback: number): number {
+  return Number.isFinite(n) && n > 0 ? Math.ceil(n) : fallback;
+}
+
+/**
+ * Serialize a built canvas ({@link CanvasHandle}) to a STANDALONE SVG string suitable for download
+ * (issue #271). The live drawing surface is deep-cloned (never mutated), made self-contained — `xmlns`, a
+ * concrete `width`/`height`/`viewBox` derived from the graph bounds, the HTML node labels folded in, and
+ * the DDD palette inlined (both a `<style>` block defining the custom properties and a literal rewrite of
+ * any `var(--koi-…)` attribute to its hex) — then serialized with `XMLSerializer`. The result renders
+ * identically outside Studio, with no unresolved `var(` left in the output.
+ *
+ * @throws if the handle exposes no `<svg>` surface (it always does for a built canvas).
+ */
+export function canvasToSvg(handle: CanvasHandle): string {
+  const svg = findCanvasSvg(handle);
+  const doc = svg.ownerDocument ?? document;
+  const clone = svg.cloneNode(true) as SVGSVGElement;
+
+  // maxGraph renders HTML cell labels (the `.koi-node` compartments carrying `data-qname`) as
+  // `<foreignObject>` groups. In a real browser those live INSIDE the SVG; under happy-dom they end up as
+  // `<g>` siblings of the `<svg>` in the container. Fold any such sibling label groups into the clone so the
+  // exported SVG carries the node markup standalone in either environment.
+  if (!clone.querySelector('[data-qname]')) {
+    let sib = svg.nextElementSibling;
+    while (sib) {
+      if (sib.tagName.toLowerCase() === 'g' && sib.querySelector('foreignObject, [data-qname]')) {
+        clone.appendChild(sib.cloneNode(true));
+      }
+      sib = sib.nextElementSibling;
+    }
+  }
+
+  // Make it a standalone document: the SVG namespace, the foreignObject XHTML namespace, and a concrete
+  // geometry derived from the laid-out graph bounds (guarded against a zero/empty/headless box).
+  clone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
+  clone.setAttribute('xmlns:xlink', 'http://www.w3.org/1999/xlink');
+  const bounds = handle.graph.getGraphBounds?.();
+  const w = dim(bounds?.width ?? 0, 800);
+  const h = dim(bounds?.height ?? 0, 600);
+  clone.setAttribute('width', String(w));
+  clone.setAttribute('height', String(h));
+  const bx = Number.isFinite(bounds?.x) ? Math.floor(bounds!.x) : 0;
+  const by = Number.isFinite(bounds?.y) ? Math.floor(bounds!.y) : 0;
+  clone.setAttribute('viewBox', `${bx} ${by} ${w} ${h}`);
+
+  // Inline the DDD palette: define the custom properties (so var() resolves where supported) AND rewrite any
+  // remaining var(--koi-…) presentation attribute to its concrete hex (so nothing paints as a literal var()).
+  clone.insertBefore(buildPaletteStyle(doc), clone.firstChild);
+  resolveVarAttributes(clone);
+
+  return new XMLSerializer().serializeToString(clone);
 }
