@@ -95,6 +95,10 @@ public sealed class Invoice
     public InvoiceId Id { get; }
     public Money Total { get; }
 
+#pragma warning disable CS8618 // EF Core populates members from the store after construction.
+    private Invoice() { }
+#pragma warning restore CS8618
+
     public Invoice(InvoiceId id, Money total)
     {
         Id = id;
@@ -295,6 +299,10 @@ public sealed class Quote
     public QuoteId Id { get; }
     public Money Price { get; }
     public Billing.Pricing.Money Freight { get; }
+
+#pragma warning disable CS8618 // EF Core populates members from the store after construction.
+    private Quote() { }
+#pragma warning restore CS8618
 
     public Quote(QuoteId id, Money price, Billing.Pricing.Money freight)
     {
