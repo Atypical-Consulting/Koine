@@ -233,6 +233,7 @@ function makeDeps(lsp: Lsp, over: Partial<InspectorControllerDeps> = {}): Inspec
     onSaveGlossaryDescription: vi.fn(),
     onApplyStructuredEdit: vi.fn(),
     onAddConstruct: vi.fn(),
+    onAddAggregateMember: vi.fn(),
     gotoSourceSpan: vi.fn(),
     ensureAssistant: vi.fn(() => makeAssistant()),
     initEdgeResizer: vi.fn(),

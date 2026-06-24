@@ -42,7 +42,7 @@ import type { Platform } from '@/host';
 import type { PreviewTarget } from '@/settings/persistence';
 import { renderDiagrams } from '@/diagrams/diagrams';
 import { setDiagramLayoutStore, setDiagramPersistScope } from '@/diagrams/diagramContract';
-import type { AddNodeKind } from '@/diagrams/diagramContract';
+import type { AddNodeKind, AggregateMemberKind } from '@/diagrams/diagramContract';
 import { createLayoutStore } from '@/diagrams/layoutStore';
 import { mergeDiagramGraphs } from '@/model/modelTables';
 import { type GlossaryHandlers } from '@/model/glossary';
@@ -156,6 +156,8 @@ export interface InspectorControllerDeps {
   onApplyStructuredEdit(edit: StructuredEdit, successMsg: string): void;
   /** Insert a new DDD construct of the given kind into the active context (the palette's add path). */
   onAddConstruct(kind: AddNodeKind): void;
+  /** Insert an aggregate-scoped construct (repository / rule, #254) into the selected aggregate. */
+  onAddAggregateMember(kind: AggregateMemberKind, aggregateQualifiedName: string): void;
   /** Jump to a RAW 1-based source span (opens the owning file if needed) — the bottom tables' row click. */
   gotoSourceSpan(span: Pick<SourceSpan, 'file' | 'line' | 'column' | 'endLine' | 'endColumn'>): void;
 
@@ -854,8 +856,10 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     try {
       const index = await ensureModelIndex();
       // The model index just (re)built — re-pass it to the breadcrumb so the selected element's type icon
-      // resolves (the panel tracks selection itself, but reads the construct off the index prop).
+      // resolves (the panel tracks selection itself, but reads the construct off the index prop). The
+      // palette likewise reads the index to gate its aggregate-scoped buttons (#254), so re-pass it too.
       renderBreadcrumb();
+      renderCanvasPalette();
       const scopedGlossary = scopeGlossaryModel(index.glossary, activeContext.get());
       if (!scopedGlossary.entries.length) {
         docMessage(
@@ -911,6 +915,10 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     // explicit repaint keeps the right-rail update synchronous for callers that read it immediately
     // after a set.
     renderSelectedInspector();
+    // Re-pass the current model index to the palette so its aggregate-scoped buttons (#254) re-gate against
+    // the freshly-selected element — a diagram click rebuilds the index before setting the selection, so
+    // resolving the selection's kind here uses the up-to-date index rather than a stale captured prop.
+    renderCanvasPalette();
     applySelectionHighlight();
   });
 
@@ -971,9 +979,24 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
 
   const centerVisualEl = el('center-visual');
 
-  // The construct palette is store-driven (active-context gating) and model-independent, so it mounts
-  // once here rather than per diagram reload. Clicks route through the injected onAddConstruct callback.
-  render(<CanvasPalette store={appStore} onAdd={(kind) => deps.onAddConstruct(kind)} />, el('canvas-palette-host'));
+  // The construct palette mounts once here; it re-renders itself on the store slices it subscribes to
+  // (active context, selection). It also reads the model `index` to resolve whether the selection is an
+  // aggregate (gating the rule/repository buttons, #254), so renderCanvasPalette re-passes a fresh index
+  // whenever the model rebuilds OR the selection changes — mirroring how the Properties panel is
+  // re-rendered. Context-scoped clicks route through onAddConstruct; aggregate-scoped clicks through
+  // onAddAggregateMember with the target qname.
+  function renderCanvasPalette(): void {
+    render(
+      <CanvasPalette
+        store={appStore}
+        index={modelIndex}
+        onAdd={(kind) => deps.onAddConstruct(kind)}
+        onAddAggregateMember={(kind, aggregateQn) => deps.onAddAggregateMember(kind, aggregateQn)}
+      />,
+      el('canvas-palette-host'),
+    );
+  }
+  renderCanvasPalette();
 
   const centerTechnicalEl = el('center-technical');
   const centerDocsEl = el('center-docs');
