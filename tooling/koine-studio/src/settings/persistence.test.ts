@@ -27,8 +27,8 @@ import {
   removeRecentFolder,
   pinRecentFolder,
   clearRecentFolders,
-  PREVIEW_TARGETS,
 } from '@/settings/persistence';
+import { BUILTIN_EMIT_TARGETS, setEmitTargets } from '@/shared/emitTargets';
 import type { ChatMessage } from '@/ai/ai';
 
 describe('MCP settings', () => {
@@ -410,8 +410,19 @@ describe('Output / previewTarget setting', () => {
     expect(loadSettings().previewTarget).toBe('rust');
   });
 
-  test('PREVIEW_TARGETS lists the five supported languages in order', () => {
-    expect(PREVIEW_TARGETS).toEqual(['csharp', 'typescript', 'python', 'php', 'rust']);
+  test('a stored target is validated against the backend-seeded list, not just the built-ins (#282)', () => {
+    // A target the backend reports (seeded at boot) must survive a reload even though it is not a
+    // build-time built-in; one the backend no longer offers falls back to the default.
+    try {
+      setEmitTargets([...BUILTIN_EMIT_TARGETS, { id: 'go', displayName: 'Go', fileExtension: '.go' }]);
+      saveSettings({ ...DEFAULT_SETTINGS, previewTarget: 'go' });
+      expect(loadSettings().previewTarget).toBe('go');
+
+      setEmitTargets(null); // backend no longer offers 'go' (offline / dropped) → fall back.
+      expect(loadSettings().previewTarget).toBe('csharp');
+    } finally {
+      setEmitTargets(null);
+    }
   });
 });
 

@@ -80,6 +80,7 @@ import { DEFAULT_CENTER, isValidCenter, type RightView } from '@/store/slices/ui
 import type { DomainIndex } from '@/ai/aiPanel';
 import { currentTheme } from '@/settings/theme';
 import { escapeHtml, formatAclMapping, renderCheckMarkdown, renderContextMapHtml } from '@/shell/ideUtils';
+import { EMIT_TARGETS } from '@/shared/emitTargets';
 
 // LSP SymbolKind for a namespace — the kind the language service tags each top-level `context`
 // document symbol with. Used by followActiveFileContext to read a file's bounded context(s).
@@ -1278,20 +1279,16 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   }
 
   // --- emitted-code preview --------------------------------------------------
-  const LANGS: { id: PreviewTarget; name: string }[] = [
-    { id: 'csharp', name: 'C#' },
-    { id: 'typescript', name: 'TypeScript' },
-    { id: 'python', name: 'Python' },
-    { id: 'php', name: 'PHP' },
-    { id: 'rust', name: 'Rust' },
-  ];
   let currentTarget: PreviewTarget = deps.initialTarget;
   const previewTabEl = el<HTMLButtonElement>('tech-tab-preview');
 
   function setTarget(target: PreviewTarget): void {
     currentTarget = target;
-    const meta = LANGS.find((l) => l.id === target)!;
-    previewTabEl.textContent = `Generated · ${meta.name}`;
+    // Label the Generated tab from the LIVE EMIT_TARGETS (seeded from the backend at boot, issue
+    // #282) so a registry target labels correctly with no edit here; fall back to the raw id for a
+    // target with no display name.
+    const displayName = EMIT_TARGETS.find((t) => t.id === target)?.displayName ?? target;
+    previewTabEl.textContent = `Generated · ${displayName}`;
   }
 
   // Emit the current target into the preview pane. Folded into the doc-view lifecycle (like the

@@ -32,6 +32,7 @@ public sealed class EmitterRegistry
 
         var byTarget = new Dictionary<string, IEmitterProvider>(StringComparer.OrdinalIgnoreCase);
         var targets = new List<string>(providers.Count);
+        var targetInfos = new List<EmitTargetInfo>(providers.Count);
         foreach (var provider in providers)
         {
             // First registration wins: built-ins are added before externals, so a plugin cannot
@@ -39,15 +40,29 @@ public sealed class EmitterRegistry
             if (byTarget.TryAdd(provider.Target, provider))
             {
                 targets.Add(provider.Target);
+                // The infos list is the IDE-facing emit-target list (issue #282): code targets only,
+                // so glossary/docs (IsEmitTarget == false) stay resolvable but are excluded here.
+                if (provider.IsEmitTarget)
+                {
+                    targetInfos.Add(new EmitTargetInfo(provider.Target, provider.DisplayName, provider.FileExtension));
+                }
             }
         }
 
         _byTarget = byTarget;
         SupportedTargets = targets;
+        SupportedTargetInfos = targetInfos;
     }
 
     /// <summary>The supported target names, built-ins first then externals, in display order.</summary>
     public IReadOnlyList<string> SupportedTargets { get; }
+
+    /// <summary>
+    /// The display metadata (<see cref="EmitTargetInfo"/>) for every code-emit target, in display
+    /// order — the IDE-facing capability list (issue #282). Excludes non-emit providers such as the
+    /// built-in <c>glossary</c>/<c>docs</c> generators (those stay in <see cref="SupportedTargets"/>).
+    /// </summary>
+    public IReadOnlyList<EmitTargetInfo> SupportedTargetInfos { get; }
 
     /// <summary>A comma-separated list of <see cref="SupportedTargets"/>, for help and error messages.</summary>
     public string SupportedList => string.Join(", ", SupportedTargets);

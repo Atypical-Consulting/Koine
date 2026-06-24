@@ -201,6 +201,18 @@ static Koine.Compiler.Services.ScenarioService.Error(string! target, string! ope
 static Koine.Compiler.Services.ScenarioService.Catalog(Koine.Compiler.Ast.SemanticModel! semantic) -> System.Collections.Generic.IReadOnlyDictionary<string!, object?>!
 static Koine.Compiler.Services.ScenarioService.Run(Koine.Compiler.Ast.SemanticModel! semantic, string! target, string! operation, System.Text.Json.JsonElement given, System.Text.Json.JsonElement args) -> System.Collections.Generic.IReadOnlyDictionary<string!, object?>!
 static Koine.Compiler.Services.ScenarioService.WriteJson(System.Collections.Generic.IReadOnlyDictionary<string!, object?>! tree) -> string!
+Koine.Compiler.Emit.EmitTargetInfo
+Koine.Compiler.Emit.EmitTargetInfo.EmitTargetInfo(string! Id, string! DisplayName, string! FileExtension) -> void
+Koine.Compiler.Emit.EmitTargetInfo.Id.get -> string!
+Koine.Compiler.Emit.EmitTargetInfo.Id.init -> void
+Koine.Compiler.Emit.EmitTargetInfo.DisplayName.get -> string!
+Koine.Compiler.Emit.EmitTargetInfo.DisplayName.init -> void
+Koine.Compiler.Emit.EmitTargetInfo.FileExtension.get -> string!
+Koine.Compiler.Emit.EmitTargetInfo.FileExtension.init -> void
+Koine.Compiler.Emit.IEmitterProvider.DisplayName.get -> string!
+Koine.Compiler.Emit.IEmitterProvider.FileExtension.get -> string!
+Koine.Compiler.Emit.IEmitterProvider.IsEmitTarget.get -> bool
+Koine.Compiler.Emit.EmitterRegistry.SupportedTargetInfos.get -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Emit.EmitTargetInfo!>!
 Koine.Compiler.Emit.AsyncApi.AsyncApiEmitter
 Koine.Compiler.Emit.AsyncApi.AsyncApiEmitter.AsyncApiEmitter() -> void
 Koine.Compiler.Emit.AsyncApi.AsyncApiEmitter.Emit(Koine.Compiler.Ast.KoineModel! model) -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Emit.EmittedFile!>!
