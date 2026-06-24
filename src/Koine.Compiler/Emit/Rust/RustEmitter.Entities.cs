@@ -27,6 +27,7 @@ public sealed partial class RustEmitter
         var derived = entity.Members.Where(m => MemberAnalysis.IsDerived(m, memberNames)).ToList();
         var required = stored.Where(m => m.Initializer is null).ToList();
         var defaulted = stored.Where(m => m.Initializer is not null).ToList();
+        var hasEmits = EmitsEvents(entity);
 
         // A synthetic `id` member (of the identity type) so an `id` reference in a command body —
         // `result id`, or an `emit` argument — resolves to the entity's identity field (`self.id`),
@@ -47,6 +48,14 @@ public sealed partial class RustEmitter
             WriteDoc(body, m.Doc, Indent);
             body.Append(Indent).Append(RustNaming.Field(m.Name)).Append(": ").Append(typeMapper.Map(m.Type)).Append(",\n");
         }
+
+        // Domain events recorded by this aggregate's commands/factories. Excluded from identity
+        // equality (which is hand-written over the id) and drained by the application layer.
+        if (hasEmits)
+        {
+            body.Append(Indent).Append("events: Vec<DomainEvent>,\n");
+        }
+
         body.Append("}\n\n");
 
         // Identity-based equality and hashing (an entity is its identity).
@@ -85,6 +94,12 @@ public sealed partial class RustEmitter
         {
             body.Append(Indent).Append(Indent).Append(Indent).Append(RustNaming.Field(m.Name)).Append(",\n");
         }
+
+        if (hasEmits)
+        {
+            body.Append(Indent).Append(Indent).Append(Indent).Append("events: Vec::new(),\n");
+        }
+
         body.Append(Indent).Append(Indent).Append("})\n");
         body.Append(Indent).Append("}\n");
 
@@ -100,6 +115,17 @@ public sealed partial class RustEmitter
         {
             body.Append('\n');
             WriteDerived(body, m, translator, typeMapper);
+        }
+
+        // Domain-event accessor + drain (when the entity records events).
+        if (hasEmits)
+        {
+            body.Append('\n');
+            body.Append(Indent).Append("/// The domain events recorded since the last drain.\n");
+            body.Append(Indent).Append("pub fn events(&self) -> &[DomainEvent] { &self.events }\n");
+            body.Append('\n');
+            body.Append(Indent).Append("/// Drains the recorded domain events, leaving the collection empty.\n");
+            body.Append(Indent).Append("pub fn drain_events(&mut self) -> Vec<DomainEvent> { std::mem::take(&mut self.events) }\n");
         }
 
         // Commands: mutating behaviors.
@@ -162,6 +188,12 @@ public sealed partial class RustEmitter
             WriteInvariantGuard(body, typeName, inv, translator, Indent + Indent, RustExpressionTranslator.NameMode.Property);
         }
 
+        // 3b. Record the domain events the command raises (over the valid post-transition state).
+        foreach (EmitClause emitClause in cmd.Body.OfType<EmitClause>())
+        {
+            WriteEmitStatement(body, emit, emitClause, translator, typeMapper);
+        }
+
         // 4. Result (or unit).
         if (cmd.Body.OfType<ResultClause>().FirstOrDefault() is { } result)
         {
@@ -189,6 +221,51 @@ public sealed partial class RustEmitter
             .Append("return Err(DomainError::InvariantViolation { type_name: \"").Append(typeName)
             .Append("\", rule: ").Append(RuleLiteral(req.Message ?? "precondition failed")).Append(" });\n");
         body.Append(Indent).Append(Indent).Append("}\n");
+    }
+
+    /// <summary>True when any command or factory of the entity raises a domain event (so it records events).</summary>
+    private static bool EmitsEvents(EntityDecl entity) =>
+        entity.Commands.SelectMany(c => c.Body).OfType<EmitClause>().Any()
+        || entity.Factories.SelectMany(f => f.Body).OfType<EmitClause>().Any();
+
+    /// <summary>
+    /// Lowers an <c>emit Ev(field: value, …)</c> clause to
+    /// <c>self.events.push(DomainEvent::Ev(Ev::new(args…)));</c>. Arguments bind by field name in the
+    /// event constructor's declaration order; each is rendered as an owned value (the <c>id</c> and any
+    /// non-Copy place cloned), with a bare enum member qualified against the field's enum type.
+    /// </summary>
+    private void WriteEmitStatement(
+        StringBuilder body, RustEmitContext emit, EmitClause emitClause,
+        RustExpressionTranslator translator, RustTypeMapper typeMapper)
+    {
+        if (!emit.Index.TryGetDecl(emitClause.EventName, out TypeDecl decl))
+        {
+            return; // unknown event — the validator guarantees presence; defensive no-op.
+        }
+
+        IReadOnlyList<Member> members = decl switch
+        {
+            EventDecl e => e.Members,
+            IntegrationEventDecl ie => ie.Members,
+            _ => Array.Empty<Member>(),
+        };
+
+        var argByField = emitClause.Args.ToDictionary(a => a.Field, a => a.Value, StringComparer.Ordinal);
+        var args = members.Select(m =>
+        {
+            if (!argByField.TryGetValue(m.Name, out Expr? value))
+            {
+                return "Default::default()"; // validator guarantees presence; defensive
+            }
+
+            var expectedEnum = emit.Index.Classify(m.Type.Name) == TypeKind.Enum ? m.Type.Name : null;
+            return translator.TranslateOwned(value, expectedEnum);
+        });
+
+        body.Append(Indent).Append(Indent)
+            .Append("self.events.push(DomainEvent::").Append(RustNaming.ToPascalCase(emitClause.EventName))
+            .Append('(').Append(typeMapper.QualifyTypeName(emitClause.EventName)).Append("::new(")
+            .Append(string.Join(", ", args)).Append(")));\n");
     }
 
     /// <summary>The enum type expected on the RHS of a transition (so a bare enum member qualifies).</summary>

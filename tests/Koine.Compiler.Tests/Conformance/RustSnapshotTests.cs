@@ -492,6 +492,63 @@ public class RustSnapshotTests
         check.Ok.ShouldBeTrue(string.Join("\n", check.Errors));
     }
 
+    // ------------------------------------------------------------------
+    // Event raising (issue #173, Task 3). An `emit` clause records a domain event: the
+    // entity gains an `events: Vec<DomainEvent>` collection (empty in `new`, excluded
+    // from identity equality), a slice accessor + drain, and the command pushes
+    // `DomainEvent::Ev(Ev::new(...))` with `id`/param refs resolved.
+    // ------------------------------------------------------------------
+
+    /// <summary>An entity whose <c>place</c> command raises an <c>OrderPlaced</c> domain event.</summary>
+    private const string EmitFixture = """
+        context Sales {
+          enum OrderStatus { Draft, Placed, Cancelled }
+          event OrderPlaced { orderId: OrderId  status: OrderStatus }
+          entity Order identified by OrderId {
+            status: OrderStatus = Draft
+
+            command place() {
+              requires status == Draft "must be draft"
+              status -> Placed
+              emit OrderPlaced(orderId: id, status: status)
+            }
+          }
+        }
+        """;
+
+    [Fact]
+    public Task Rust_event_emit_raises_into_events_vec()
+    {
+        var result = new KoineCompiler().Compile(EmitFixture, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var sales = result.Files.Single(f => f.RelativePath.EndsWith("sales.rs", StringComparison.Ordinal)).Contents;
+        sales.ShouldContain("events: Vec<DomainEvent>,");                                  // collection field
+        sales.ShouldContain("events: Vec::new(),");                                        // empty in `new`
+        sales.ShouldContain("pub fn events(&self) -> &[DomainEvent]");                      // accessor
+        sales.ShouldContain("pub fn drain_events(&mut self) -> Vec<DomainEvent>");          // drain
+        // `id`/param refs resolve; the event's `new` is wrapped in the context DomainEvent enum.
+        sales.ShouldContain("self.events.push(DomainEvent::OrderPlaced(OrderPlaced::new(self.id.clone(), self.status)));");
+
+        return Verify(TestSupport.Render(result.Files)).UseDirectory("Snapshots");
+    }
+
+    [Fact]
+    public void Rust_event_emit_compiles()
+    {
+        var result = new KoineCompiler().Compile(EmitFixture, new RustEmitter());
+        result.Success.ShouldBeTrue();
+
+        var check = TestSupport.CompileRust(result.Files);
+        if (!check.ToolchainAvailable)
+        {
+            _output.WriteLine(NoToolchainNotice);
+            return;
+        }
+
+        check.Ok.ShouldBeTrue(string.Join("\n", check.Errors));
+    }
+
     /// <summary>Reads a template under <c>templates/</c> by walking up to the repo root (the <c>.git</c> dir).</summary>
     private static string? FindTemplate(string relativePath)
     {

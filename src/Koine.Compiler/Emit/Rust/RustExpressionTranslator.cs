@@ -581,9 +581,9 @@ internal sealed class RustExpressionTranslator
     /// place (a field/local such as the entity <c>id</c>, or a <c>.field()</c> accessor result) is cloned
     /// so the value is moved out by value rather than borrowed from <c>&amp;self</c>.
     /// </summary>
-    public string TranslateOwned(Expr expr)
+    public string TranslateOwned(Expr expr, string? expectedEnum = null)
     {
-        var rendered = Translate(expr);
+        var rendered = Translate(expr, expectedEnum);
         TypeRef? type = _resolver.Infer(expr, EffectiveScope());
         var clone = IsNonCopyPlace(expr, type)
             || (expr is MemberAccessExpr && type is { } t && !_typeMapper.IsCopy(t));
