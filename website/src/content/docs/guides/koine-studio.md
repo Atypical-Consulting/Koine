@@ -35,9 +35,15 @@ and previewed — the same way the build does it, because it *is* the same compi
 ## How it works
 
 The **web edition** loads the WebAssembly compiler bundle once, then calls its language-service
-exports (`DiagnoseWorkspace`, `EmitPreview`, `Glossary`, `Hover`, …) directly from the page — there
-is no server and no `koine lsp` process. The **desktop edition** reaches the same language service
-over a `koine lsp` child process instead:
+exports (`DiagnoseWorkspace`, `EmitPreview`, `Glossary`, `Hover`, …) from a **dedicated Web
+Worker** — there is no server and no `koine lsp` process. The worker runs off the UI thread; a
+main-thread client routes each call over `postMessage` and resolves its response as a `Promise`.
+Cancellation works in two modes: **supersede** (drop a stale call) and **terminate-and-respawn**
+(abort a runaway compile by terminating the worker and booting a fresh one). `WasmEnableThreads`
+stays `false`, so the worker uses plain structured-clone `postMessage` — **no COOP/COEP
+cross-origin-isolation headers are needed**.
+
+The **desktop edition** reaches the same language service over a `koine lsp` child process instead:
 
 ```
 Koine Studio (Tauri v2)
