@@ -9,6 +9,10 @@ namespace Koine.Compiler.Tests;
 /// </summary>
 public class R18AsyncApiEmitterTests
 {
+    private readonly ITestOutputHelper _output;
+
+    public R18AsyncApiEmitterTests(ITestOutputHelper output) => _output = output;
+
     [Fact]
     public void Target_name_is_asyncapi()
     {
@@ -141,5 +145,100 @@ public class R18AsyncApiEmitterTests
         yaml.ShouldContain("$ref: '#/channels/OrderPlaced'");
 
         return Verify(yaml).UseDirectory("Snapshots");
+    }
+
+    [Fact]
+    public void No_integration_events_emits_a_minimal_valid_document()
+    {
+        // A model without any integration event still emits a valid AsyncAPI 3.0 document:
+        // the info block and empty channels/operations maps, with no components section.
+        const string source = """
+            context Catalog {
+              value Sku { code: String }
+            }
+            """;
+
+        var result = new KoineCompiler().Compile(source, new AsyncApiEmitter());
+
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+        var yaml = result.Files.ShouldHaveSingleItem().Contents;
+
+        yaml.ShouldContain("asyncapi: 3.0.0");
+        yaml.ShouldContain("info:");
+        yaml.ShouldContain("channels: {}");
+        yaml.ShouldContain("operations: {}");
+        yaml.ShouldNotContain("components:");
+    }
+
+    [Fact]
+    public void Published_but_unsubscribed_event_emits_a_send_op_and_no_receive()
+    {
+        // No context map and no subscriber: the channel and the publisher's send operation are
+        // emitted, but there is no receive operation.
+        const string source = """
+            context Sales {
+              integration event OrderPlaced {
+                orderId: String
+              }
+              publishes OrderPlaced
+            }
+            """;
+
+        var result = new KoineCompiler().Compile(source, new AsyncApiEmitter());
+
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+        var yaml = result.Files.ShouldHaveSingleItem().Contents;
+
+        yaml.ShouldContain("  OrderPlaced:");
+        yaml.ShouldContain("  Sales_send_OrderPlaced:");
+        yaml.ShouldContain("action: send");
+        yaml.ShouldNotContain("action: receive");
+    }
+
+    [Fact]
+    public void Emitted_yaml_is_valid_per_the_asyncapi_cli_when_enabled()
+    {
+        // External conformance: gated behind KOINE_ASYNCAPI_VALIDATE so the suite stays hermetic.
+        // When the flag is unset (CI default) the conformance is INCONCLUSIVE and skipped; when set,
+        // the emitted document must pass `asyncapi validate`.
+        if (Environment.GetEnvironmentVariable("KOINE_ASYNCAPI_VALIDATE") is not { Length: > 0 })
+        {
+            _output.WriteLine("KOINE_ASYNCAPI_VALIDATE not set — AsyncAPI CLI conformance is INCONCLUSIVE (skipped).");
+            return;
+        }
+
+        const string source = """
+            context Sales {
+              enum OrderStatus { Draft, Placed }
+              integration event OrderPlaced {
+                orderId:  OrderId
+                status:   OrderStatus
+                total:    Decimal
+                placedAt: Instant
+              }
+              publishes OrderPlaced
+            }
+
+            context Shipping {
+              subscribes Sales.OrderPlaced
+            }
+
+            contextmap {
+              Sales -> Shipping : customer-supplier
+            }
+            """;
+
+        var result = new KoineCompiler().Compile(source, new AsyncApiEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+        var yaml = result.Files.ShouldHaveSingleItem().Contents;
+
+        var check = TestSupport.ValidateAsyncApi(yaml);
+        if (!check.ToolchainAvailable)
+        {
+            _output.WriteLine("AsyncAPI CLI not found on PATH; conformance INCONCLUSIVE (skipped).");
+            return;
+        }
+
+        check.Ok.ShouldBeTrue("AsyncAPI CLI rejected the emitted document:\n" + string.Join("\n", check.Errors));
     }
 }
