@@ -874,6 +874,67 @@ public class LspServerTests
         output.ShouldContain("KOI0101");   // unknown type
     }
 
+    // ---- koine/runScenario (scenario runner, #149) ----
+
+    private const string ScenarioDoc = """
+        context Ordering {
+          enum OrderStatus { Draft, Placed, Shipped }
+          aggregate Sales root Order {
+            event OrderPlaced { orderId: OrderId  lineCount: Int }
+            value OrderLine { product: ProductId  quantity: Int }
+            entity Order identified by OrderId {
+              lines:  List<OrderLine>
+              status: OrderStatus = Draft
+              invariant status == Draft when lines.isEmpty
+              states status { Draft -> Placed  Placed -> Shipped }
+              command place {
+                requires status == Draft   "only a draft order can be placed"
+                requires !lines.isEmpty    "cannot place an empty order"
+                status -> Placed
+                emit OrderPlaced(orderId: id, lineCount: lines.count)
+              }
+            }
+          }
+        }
+        """;
+
+    private static byte[] RunScenario(string uri, string target, string operation, object given, object args) =>
+        Frame(JsonSerializer.Serialize(new
+        {
+            jsonrpc = "2.0",
+            id = 36,
+            method = "koine/runScenario",
+            @params = new { textDocument = new { uri }, target, operation, given, args },
+        }));
+
+    [Fact]
+    public void RunScenario_places_a_draft_order_and_emits_the_event()
+    {
+        var given = new { status = "Draft", lines = new[] { new { product = "P1", quantity = 2 }, new { product = "P2", quantity = 1 } } };
+        var output = RunSession(
+            Initialize(), DidOpen("file:///t.koi", ScenarioDoc),
+            RunScenario("file:///t.koi", "Order", "place", given, new { }));
+
+        output.ShouldContain("\"ok\":true");
+        output.ShouldContain("\"to\":\"Placed\"");
+        output.ShouldContain("\"event\":\"OrderPlaced\"");
+        output.ShouldContain("\"lineCount\":\"2\"");
+        output.ShouldContain("\"id\":36");
+    }
+
+    [Fact]
+    public void RunScenario_rejects_a_non_draft_order_with_a_failed_precondition()
+    {
+        var given = new { status = "Placed", lines = new[] { new { product = "P1", quantity = 1 } } };
+        var output = RunSession(
+            Initialize(), DidOpen("file:///t.koi", ScenarioDoc),
+            RunScenario("file:///t.koi", "Order", "place", given, new { }));
+
+        output.ShouldContain("\"ok\":false");
+        output.ShouldContain("\"outcome\":\"failed\"");
+        output.ShouldContain("only a draft order can be placed");
+    }
+
     [Fact]
     public void ApplyModelEdit_returns_a_scoped_text_edit()
     {

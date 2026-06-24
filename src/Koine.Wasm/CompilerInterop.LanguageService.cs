@@ -815,6 +815,80 @@ public static partial class CompilerInterop
         }
     }
 
+    /// <summary>
+    /// Runs a scenario (#149) against the merged workspace: exercises one aggregate command/factory
+    /// (<paramref name="target"/>/<paramref name="operation"/>) over the <paramref name="givenJson"/>
+    /// state and <paramref name="argsJson"/> arguments, returning the <c>command → events →
+    /// invariant-checks</c> timeline. Mirrors <c>koine/runScenario</c>; shares the exact response shape
+    /// with the LSP backend via <see cref="ScenarioService"/>. A null/broken model yields a not-ok
+    /// result carrying an explanatory note.
+    /// </summary>
+    [JSExport]
+    public static string RunScenario(string filesJson, string target, string operation, string givenJson, string argsJson)
+    {
+        try
+        {
+            var sources = DeserializeFiles(filesJson).Select(f => new SourceFile(f.Uri, f.Text)).ToList();
+            var (model, diags) = Compiler.Parse(sources);
+            if (model is null || diags.Any(d => d.Severity == DiagnosticSeverity.Error))
+            {
+                return ScenarioService.WriteJson(
+                    ScenarioErrorTree(target, operation, "The model has errors; fix them before running a scenario."));
+            }
+
+            using JsonDocument givenDoc = JsonDocument.Parse(string.IsNullOrWhiteSpace(givenJson) ? "{}" : givenJson);
+            using JsonDocument argsDoc = JsonDocument.Parse(string.IsNullOrWhiteSpace(argsJson) ? "{}" : argsJson);
+            var semantic = new SemanticModel(model);
+            return ScenarioService.WriteJson(
+                ScenarioService.Run(semantic, target, operation, givenDoc.RootElement, argsDoc.RootElement));
+        }
+        catch
+        {
+            return ScenarioService.WriteJson(
+                ScenarioErrorTree(target, operation, "The scenario could not be run against this model."));
+        }
+    }
+
+    /// <summary>
+    /// The runnable surface of the merged workspace (#149): the entities exposing commands/factories,
+    /// their operations + parameters, and their fields. Mirrors <c>koine/scenarioCatalog</c>; shares the
+    /// shape with the LSP backend via <see cref="ScenarioService"/>. A null/broken model yields
+    /// <c>{ targets: [] }</c>.
+    /// </summary>
+    [JSExport]
+    public static string ScenarioCatalog(string filesJson)
+    {
+        try
+        {
+            var sources = DeserializeFiles(filesJson).Select(f => new SourceFile(f.Uri, f.Text)).ToList();
+            var (model, diags) = Compiler.Parse(sources);
+            if (model is null || diags.Any(d => d.Severity == DiagnosticSeverity.Error))
+            {
+                return ScenarioService.WriteJson(new Dictionary<string, object?> { ["targets"] = Array.Empty<object>() });
+            }
+
+            return ScenarioService.WriteJson(ScenarioService.Catalog(new SemanticModel(model)));
+        }
+        catch
+        {
+            return ScenarioService.WriteJson(new Dictionary<string, object?> { ["targets"] = Array.Empty<object>() });
+        }
+    }
+
+    /// <summary>The not-ok scenario result shape (matching <see cref="ScenarioService"/>) for the failure paths.</summary>
+    private static IReadOnlyDictionary<string, object?> ScenarioErrorTree(string target, string operation, string note) =>
+        new Dictionary<string, object?>
+        {
+            ["ok"] = false,
+            ["target"] = target,
+            ["operation"] = operation,
+            ["steps"] = Array.Empty<object>(),
+            ["resultingState"] = new Dictionary<string, object?>(),
+            ["invariants"] = Array.Empty<object>(),
+            ["result"] = null,
+            ["notes"] = new[] { note },
+        };
+
     // ---- diagram-graph mapping (issue #93) -----------------------------------
     // Mirrors LspServer.MapDiagram et al.: the W* DTOs serialize (source-gen CamelCase) to a wire
     // shape field-for-field identical to the LSP backend's hand-written dict keys. The parity test
