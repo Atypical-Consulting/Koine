@@ -16,6 +16,13 @@ public class RefactorServiceTests
     private static IReadOnlyList<CodeActionEdit> RefactorsAt(string src, int sl, int sc, int el, int ec) =>
         Svc.RefactorsAt(new Dictionary<string, string> { [U] = src }, U, sl, sc, el, ec);
 
+    /// <summary>The "Extract value object" refactor at this selection (distinguished by Title from the
+    /// sibling "Extract entity" refactor, which shares the <c>refactor.extract</c> Kind).</summary>
+    private static CodeActionEdit ExtractValueObjectAt(string src, int sl, int sc, int el, int ec) =>
+        RefactorsAt(src, sl, sc, el, ec)
+            .Where(a => a.Kind == "refactor.extract" && a.Title.StartsWith("Extract value object", StringComparison.Ordinal))
+            .ShouldHaveSingleItem();
+
     /// <summary>Applies a refactor's edits to the original source (offset-based, last-edit-first).</summary>
     private static string Apply(string src, CodeActionEdit action)
     {
@@ -42,9 +49,7 @@ public class RefactorServiceTests
     {
         // Line 1 (0-based): "  value Address { street: String }". "street" spans cols 18..24.
         var src = "context C {\n  value Address { street: String }\n}\n";
-        var actions = RefactorsAt(src, 1, 18, 1, 24);
-
-        var extract = actions.Where(a => a.Kind == "refactor.extract").ShouldHaveSingleItem();
+        var extract = ExtractValueObjectAt(src, 1, 18, 1, 24);
         extract.Edits.Count.ShouldBe(2);
 
         var applied = Apply(src, extract);
@@ -74,7 +79,7 @@ public class RefactorServiceTests
             "  city: String }\n" +
             "}\n";
         // Select "street" on line 1 (cols 18..24).
-        var extract = RefactorsAt(src, 1, 18, 1, 24).Where(a => a.Kind == "refactor.extract").ShouldHaveSingleItem();
+        var extract = ExtractValueObjectAt(src, 1, 18, 1, 24);
 
         var applied = Apply(src, extract);
         Parse(applied); // re-parses cleanly
@@ -101,9 +106,7 @@ public class RefactorServiceTests
             "  }\n" +
             "}\n";
         // Select from the start of "street" (line 2, col 4) through the end of "city" (line 3, col 16).
-        var actions = RefactorsAt(src, 2, 4, 3, 16);
-
-        var extract = actions.Where(a => a.Kind == "refactor.extract").ShouldHaveSingleItem();
+        var extract = ExtractValueObjectAt(src, 2, 4, 3, 16);
         var model = Parse(Apply(src, extract));
 
         var types = model.Contexts[0].Types;
@@ -152,8 +155,7 @@ public class RefactorServiceTests
             "  }\n" +
             "}\n";
         // Line 2 = "    note: String"; "note" begins at col 4.
-        var actions = RefactorsAt(src, 2, 4, 2, 8);
-        var extract = actions.Where(a => a.Kind == "refactor.extract").ShouldHaveSingleItem();
+        var extract = ExtractValueObjectAt(src, 2, 4, 2, 8);
 
         var model = Parse(Apply(src, extract));
         var types = model.Contexts[0].Types;
@@ -175,8 +177,7 @@ public class RefactorServiceTests
             "  }\n" +
             "}\n";
         // Line 4 (0-based) = "    street: String"; "street" begins at col 4.
-        var actions = RefactorsAt(src, 4, 4, 4, 10);
-        var extract = actions.Where(a => a.Kind == "refactor.extract").ShouldHaveSingleItem();
+        var extract = ExtractValueObjectAt(src, 4, 4, 4, 10);
 
         var applied = Apply(src, extract);
         var model = Parse(applied);
@@ -206,8 +207,7 @@ public class RefactorServiceTests
             "  }\n" +
             "}\n";
         // Select from the start of "street" (line 2, col 4) through the end of "city" (line 4, col 16).
-        var actions = RefactorsAt(src, 2, 4, 4, 16);
-        var extract = actions.Where(a => a.Kind == "refactor.extract").ShouldHaveSingleItem();
+        var extract = ExtractValueObjectAt(src, 2, 4, 4, 16);
 
         var applied = Apply(src, extract);
         var model = Parse(applied);
@@ -241,6 +241,36 @@ public class RefactorServiceTests
     }
 
     [Fact]
+    public void Extracting_an_entity_produces_a_parseable_entity_with_an_identity_and_rewires_the_origin()
+    {
+        // Line 1 (0-based): "  value Address { street: String }". "street" spans cols 18..24.
+        var src = "context C {\n  value Address { street: String }\n}\n";
+        var actions = RefactorsAt(src, 1, 18, 1, 24);
+
+        // The "Extract entity" action is distinguished from "Extract value object" by its Title.
+        var extract = actions
+            .Where(a => a.Kind == "refactor.extract" && a.Title.StartsWith("Extract entity", StringComparison.Ordinal))
+            .ShouldHaveSingleItem();
+        extract.Edits.Count.ShouldBe(2);
+
+        var applied = Apply(src, extract);
+        var model = Parse(applied); // re-parses cleanly
+
+        var types = model.Contexts[0].Types;
+        // A new entity (with a non-empty identity) now exists, carrying the moved field.
+        var extracted = types.Single(t => t.Name == "ExtractedEntity").ShouldBeOfType<EntityDecl>();
+        extracted.IdentityName.ShouldNotBeNullOrEmpty();
+        extracted.Members.ShouldContain(m => m.Name == "street");
+
+        // The original Address now references the extracted entity via the placeholder field.
+        var address = types.Single(t => t.Name == "Address").ShouldBeOfType<ValueObjectDecl>();
+        var field = address.Members.ShouldHaveSingleItem();
+        field.Name.ShouldBe("extracted");
+        field.Type.Name.ShouldBe("ExtractedEntity");
+        address.Members.ShouldNotContain(m => m.Name == "street");
+    }
+
+    [Fact]
     public void Extracting_when_a_type_named_ExtractedValue_already_exists_produces_a_unique_name()
     {
         var src =
@@ -251,8 +281,7 @@ public class RefactorServiceTests
             "  }\n" +
             "}\n";
         // Line 3 (0-based) = "    street: String"; "street" begins at col 4.
-        var actions = RefactorsAt(src, 3, 4, 3, 10);
-        var extract = actions.Where(a => a.Kind == "refactor.extract").ShouldHaveSingleItem();
+        var extract = ExtractValueObjectAt(src, 3, 4, 3, 10);
 
         var model = Parse(Apply(src, extract));
         var types = model.Contexts[0].Types;

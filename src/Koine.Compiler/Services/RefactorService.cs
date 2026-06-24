@@ -42,6 +42,11 @@ internal sealed class RefactorService
             actions.Add(extract);
         }
 
+        if (service.TryExtractEntity(startOffset, endOffset) is { } extractEntity)
+        {
+            actions.Add(extractEntity);
+        }
+
         return actions;
     }
 
@@ -176,6 +181,98 @@ internal sealed class RefactorService
 
         return new CodeFix(
             $"Extract value object (rename '{voName}' / '{fieldName}' afterwards)",
+            "refactor.extract",
+            // A one-off, position-specific refactor: not part of a fix-all batch.
+            EquivalenceKey: null,
+            [insert, replace]);
+    }
+
+    /// <summary>
+    /// Builds the "Extract entity" refactor when the selection lands on one or more contiguous member
+    /// fields of a value/entity/event type. The sibling to <see cref="TryExtractValueObject"/>: instead
+    /// of a <c>value</c>, it emits a new <c>entity ExtractedEntity identified by ExtractedEntityId { … }</c>
+    /// inserted immediately before the enclosing type, carrying the selected fields verbatim, and
+    /// replaces those fields with a single <c>extracted: ExtractedEntity</c> line. <c>ExtractedEntity</c>
+    /// / <c>ExtractedEntityId</c> / <c>extracted</c> are deliberate placeholder names the user renames
+    /// afterward. Returns <c>null</c> when the selection does not land on extractable fields.
+    /// </summary>
+    private CodeFix? TryExtractEntity(int startOffset, int endOffset)
+    {
+        foreach (TypeDecl type in EnumerateTypes(_model))
+        {
+            IReadOnlyList<Member>? members = MembersOf(type);
+            if (members is null || members.Count == 0 || type.Span.IsNone)
+            {
+                continue;
+            }
+
+            // The selection must fall within this type's body.
+            if (!ContainsSelection(type.Span, startOffset, endOffset))
+            {
+                continue;
+            }
+
+            List<Member> selected = SelectedContiguousMembers(members, startOffset, endOffset);
+            if (selected.Count == 0)
+            {
+                continue;
+            }
+
+            // Same guard as extract-VO: a derived/initialized field would carry an RHS referencing
+            // fields left behind in the origin type (dangling refs), so refuse the whole selection.
+            if (selected.Any(m => m.Initializer is not null))
+            {
+                return null;
+            }
+
+            return BuildExtractEntity(type, selected);
+        }
+
+        return null;
+    }
+
+    private CodeFix BuildExtractEntity(TypeDecl type, IReadOnlyList<Member> selected)
+    {
+        // Indentation of the enclosing type declaration (its 1-based start column minus one).
+        var typeIndent = new string(' ', Math.Max(0, type.Span.Column - 1));
+        var fieldIndent = typeIndent + "  ";
+
+        // Disambiguate the placeholder names against what already exists, so the refactor never
+        // silently shadows an existing type or member by reusing a taken name. The identity type name
+        // is derived from the (already-disambiguated) entity name, then itself disambiguated.
+        ISet<string> existingTypes = ExistingTypeNames();
+        var entityName = UniqueName("ExtractedEntity", existingTypes);
+        var idName = UniqueName(entityName + "Id", existingTypes);
+        var fieldName = UniqueName("extracted", MemberNamesOf(type));
+
+        // Build the moved body from the VERBATIM combined source slice, spanning from the start of the
+        // FIRST selected field's leading comment/doc trivia to the END of the last selected field (plus
+        // any same-line trailing comment), so per-field docs and inter-field comments travel along.
+        var moveStart = LeadingContentStart(selected[0]);
+        var moveEnd = ExtendOverTrailingComment(selected[^1].Span.Offset + selected[^1].Span.Length);
+        var movedSlice = SliceRange(moveStart, moveEnd);
+
+        // (1) The extracted entity. The moved slice is re-indented from the origin field indentation to
+        // this entity's body indentation so the layout reads correctly at its new home.
+        var sb = new StringBuilder();
+        sb.Append("entity ").Append(entityName).Append(" identified by ").Append(idName).Append(" {\n");
+        sb.Append(Reindent(movedSlice, selected[0].Span.Column - 1, fieldIndent)).Append('\n');
+        sb.Append(typeIndent).Append("}\n\n").Append(typeIndent);
+
+        // Insert BEFORE the enclosing type's leading-trivia/doc block (not at the type keyword, which
+        // sits AFTER the type's own `///` doc), so the original type keeps its doc.
+        var insertOffset = LeadingTriviaStart(type);
+        var (insertLine, insertCol) = LineColumnOf(insertOffset);
+        SourceSpan insertAt = PointSpan(insertLine, insertCol, insertOffset);
+        var insert = new CodeFixEdit(insertAt, sb.ToString());
+
+        // (2) Replace the SAME combined range (leading trivia included) with one placeholder field,
+        // so nothing in the moved range is left behind or duplicated.
+        SourceSpan combined = RangeSpan(moveStart, moveEnd);
+        var replace = new CodeFixEdit(combined, $"{fieldName}: {entityName}");
+
+        return new CodeFix(
+            $"Extract entity (rename '{entityName}' / '{fieldName}' afterwards)",
             "refactor.extract",
             // A one-off, position-specific refactor: not part of a fix-all batch.
             EquivalenceKey: null,
