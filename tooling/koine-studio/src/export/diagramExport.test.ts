@@ -257,7 +257,9 @@ describe('diagramToMermaid', () => {
   it('declares each node as a labelled class with sanitized id and member rows', () => {
     const out = diagramToMermaid(aggregate);
     expect(out).toContain('class Ordering_Order["Order"]');
-    expect(out).toContain('Ordering_Order : id: OrderId');
+    // The typed member `id: OrderId` emits colon-free (issue #340): Mermaid reads the colon after the
+    // class id as the member separator, so a second colon in the member text aborts the parse.
+    expect(out).toContain('Ordering_Order : id OrderId');
     expect(out).toContain('Ordering_Order : submit()');
   });
 
@@ -282,6 +284,34 @@ describe('diagramToMermaid', () => {
 
   it('emits a bare classDiagram for an empty graph', () => {
     expect(diagramToMermaid(graph([], [])).trim()).toBe('classDiagram');
+  });
+
+  // issue #340: Mermaid's classDiagram grammar reads the FIRST colon after a class id as the member
+  // separator, so any colon INSIDE the member text — a typed field `street: String`, a method signature
+  // `schedule(order: OrderId): Delivery` — is a second separator that aborts the parse. Every member row
+  // must therefore carry no colon past the leading `alias :` separator.
+  it('emits no colon after the leading "alias :" member separator (issue #340)', () => {
+    const typed = graph(
+      [
+        node({ id: 'Delivery.Address', label: 'Address', members: [member('street: String', 'field')] }),
+        node({
+          id: 'Delivery.Scheduler',
+          label: 'Scheduler',
+          members: [member('schedule(order: OrderId, destination: Address): Delivery', 'method')],
+        }),
+      ],
+      [],
+    );
+    const out = diagramToMermaid(typed);
+    // Member rows are `  alias : text`; exclude the `class …` declarations and the `-->`/`*--` edge rows.
+    const memberRows = out
+      .split('\n')
+      .filter((l) => / : /.test(l) && !/^\s*class /.test(l) && !/-->|\*--/.test(l));
+    expect(memberRows.length).toBeGreaterThan(0); // the fixture really produced member rows
+    for (const row of memberRows) {
+      const afterSeparator = row.slice(row.indexOf(' : ') + 3);
+      expect(afterSeparator).not.toContain(':');
+    }
   });
 });
 
