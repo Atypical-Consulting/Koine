@@ -1,6 +1,25 @@
 namespace Koine.Compiler.Emit.Python;
 
 /// <summary>
+/// A composable layer of the Python target, selected via <c>--layers</c> /
+/// <c>targets.python.layers</c> — the Python analogue of
+/// <see cref="Koine.Compiler.Emit.CSharp.CSharpLayer"/>. <see cref="Domain"/> (the domain model +
+/// application contracts) is always emitted and is the default; <see cref="Infrastructure"/>
+/// additionally emits a runnable, dependency-free realization of those contracts (issue #241: concrete
+/// repositories over an in-memory store, a unit of work, a transactional outbox + dispatcher,
+/// validation/transaction pipeline behaviors, and a provider/composition helper). The opt-in layer
+/// implies <see cref="Domain"/>.
+/// </summary>
+internal enum PythonLayer
+{
+    /// <summary>The domain model + application contracts — the historical, always-on output.</summary>
+    Domain,
+
+    /// <summary>The opt-in, dependency-free infrastructure realization of the domain contracts (issue #241).</summary>
+    Infrastructure,
+}
+
+/// <summary>
 /// Per-emit configuration for the Python backend, mapped from the CLI's
 /// <c>targets.python.*</c> block. <see cref="PackageMap"/> remaps a bounded context's emitted
 /// Python package name (e.g. <c>catalog → acme.catalog</c>): the mapped value replaces the
@@ -18,11 +37,19 @@ namespace Koine.Compiler.Emit.Python;
 /// </summary>
 internal sealed record PythonEmitterOptions(
     IReadOnlyDictionary<string, string> PackageMap,
-    bool EmitDictHelpers = false)
+    bool EmitDictHelpers = false,
+    IReadOnlySet<PythonLayer>? Layers = null)
 {
     /// <summary>An options bag that applies no remapping and uses all defaults.</summary>
     public static readonly PythonEmitterOptions Empty =
         new(new Dictionary<string, string>(StringComparer.Ordinal));
+
+    /// <summary>
+    /// True when the opt-in Infrastructure layer (issue #241) is requested. The Domain layer is always
+    /// emitted, so a null/empty <see cref="Layers"/> set means Domain-only — output byte-identical to the
+    /// historical emitter.
+    /// </summary>
+    public bool EmitsInfrastructure => Layers is not null && Layers.Contains(PythonLayer.Infrastructure);
 
     /// <summary>
     /// Remaps a logical package path (whose first segment is a bounded-context name) to its

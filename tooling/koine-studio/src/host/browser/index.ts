@@ -83,6 +83,12 @@ export class BrowserPlatform implements Platform {
     return fs.listKoiFiles(token);
   }
 
+  // A browser tab has no git, so per-element change history (#150) is unavailable: null hides the
+  // inspector's "Change history" section gracefully (no console errors).
+  gitLogForRange(): Promise<null> {
+    return Promise.resolve(null);
+  }
+
   readTextFile(path: string): Promise<string> {
     return fs.readTextFile(path);
   }

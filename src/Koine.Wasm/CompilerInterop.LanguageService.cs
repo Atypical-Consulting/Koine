@@ -175,18 +175,20 @@ public static partial class CompilerInterop
             var (model, _) = Compiler.Parse(sources);
             if (model is null)
             {
-                return SerializeContextMap(new WContextMapResult([], []));
+                return SerializeContextMap(new WContextMapResult([], [], new()));
             }
 
             var contexts = model.Contexts.Select(c => c.Name).ToArray();
             var relations = model.ContextMap is null
                 ? []
                 : model.ContextMap.Relations.Select(MapRelation).ToArray();
-            return SerializeContextMap(new WContextMapResult(contexts, relations));
+            // Additive (#290): each declared context's declaration NameSpan (raw 1-based span over the
+            // `context` name token), keyed by name; None → null. Lets the Studio graph jump to source.
+            return SerializeContextMap(new WContextMapResult(contexts, relations, ContextSpans(model.Contexts)));
         }
         catch
         {
-            return SerializeContextMap(new WContextMapResult([], []));
+            return SerializeContextMap(new WContextMapResult([], [], new()));
         }
     }
 
@@ -991,6 +993,25 @@ public static partial class CompilerInterop
         _ => 1,
     };
 
+    /// <summary>
+    /// Projects each declared context's declaration <c>NameSpan</c> into a name → raw-1-based-span map
+    /// (the additive <c>contextSpans</c> field, #290). A recovered context with no span maps to
+    /// <c>null</c>; a duplicate name keeps the first declaration's span.
+    /// </summary>
+    private static Dictionary<string, WSourceSpan?> ContextSpans(IEnumerable<ContextNode> contexts)
+    {
+        var spans = new Dictionary<string, WSourceSpan?>(StringComparer.Ordinal);
+        foreach (var c in contexts)
+        {
+            if (!spans.ContainsKey(c.Name))
+            {
+                spans[c.Name] = MapSourceSpan(c.NameSpan.IsNone ? null : c.NameSpan);
+            }
+        }
+
+        return spans;
+    }
+
     private static WContextRelation MapRelation(ContextRelation r) => new(
         r.Upstream,
         r.Downstream,
@@ -1130,8 +1151,11 @@ public sealed record WAclMapping(string UpstreamContext, string UpstreamType, st
 public sealed record WContextRelation(
     string Upstream, string Downstream, string Kind, bool Bidirectional, string[] SharedTypes, WAclMapping[] Acl);
 
-/// <summary>Strategic context map: contexts + relations.</summary>
-public sealed record WContextMapResult(string[] Contexts, WContextRelation[] Relations);
+/// <summary>Strategic context map: contexts + relations. <c>ContextSpans</c> is additive (#290): a
+/// name → declaration source span map (the raw 1-based span over the <c>context</c> name token, null on
+/// a recovered parse) so the Studio graph can jump to the <c>.koi</c> declaration on a context click.</summary>
+public sealed record WContextMapResult(
+    string[] Contexts, WContextRelation[] Relations, Dictionary<string, WSourceSpan?> ContextSpans);
 
 /// <summary>One structured glossary entry (shape mirrors lsp.ts <c>GlossaryEntry</c>).</summary>
 public sealed record WGlossaryEntry(

@@ -167,8 +167,16 @@ dotnet run --project src/Koine.Cli -- build templates/starters/billing/billing.k
 # Emit to TypeScript instead
 dotnet run --project src/Koine.Cli -- build templates/starters/billing/billing.koi --target typescript --out ./generated
 
+# Add the runnable, dependency-light TypeScript infrastructure layer (in-memory repositories, unit of
+# work, transactional outbox, validation/transaction behaviors, a composition-root factory)
+dotnet run --project src/Koine.Cli -- build templates/starters/billing/billing.koi --target typescript --out ./generated --layers domain,infrastructure
+
 # Or to Python (tactical core + strategic/CQRS: read models, queries, policies, state machines, ACL)
 dotnet run --project src/Koine.Cli -- build templates/starters/billing/billing.koi --target python --out ./generated_py
+
+# Add the runnable, dependency-free Python infrastructure layer (in-memory repositories, unit of work,
+# transactional outbox, validation/transaction behaviors, a provider/composition helper)
+dotnet run --project src/Koine.Cli -- build templates/starters/billing/billing.koi --target python --out ./generated_py --layers domain,infrastructure
 
 # Or to PHP 8.1 (Phase 1: tactical core — value objects, smart enums, entities, events, repositories)
 dotnet run --project src/Koine.Cli -- build templates/starters/billing/billing.koi --target php --out ./generated_php
@@ -220,6 +228,27 @@ koine build ./Models --target csharp --out ./generated --layers domain,infrastru
 The infrastructure is **regenerated from the model on every build**, so it can never silently drift
 from the ubiquitous language. The provider (SQL Server, Postgres, …) is supplied by the caller through
 the `Action<DbContextOptionsBuilder>`, so the emitter stays provider-agnostic. EF Core only in v1.
+
+#### TypeScript & Python infrastructure (`--layers infrastructure`)
+
+The same `--layers infrastructure` selector now applies to the **TypeScript** and **Python** targets
+(issue #241), keeping the "write the ubiquitous language once, get a runnable stack" promise across all
+three primary targets. Rather than a bundled ORM, each emits a **dependency-light** realization of the
+domain contracts, per bounded context with at least one entity-rooted aggregate:
+
+- a concrete repository over an **injectable `AggregateStore`** with a zero-dependency **in-memory
+  default** (runnable in tests out of the box; swap in a persistent store to productionize) — declarative
+  finders compile to concrete lookups;
+- a concrete **unit of work** realizing the per-context contract;
+- a **transactional outbox** (`OutboxMessage` + a drainable `IntegrationEventDispatcher`) for a publishing
+  context, so the publisher stays decoupled from its subscribers;
+- **validation + transaction pipeline behaviors** (the idiomatic analogue of the C# MediatR decorators); and
+- a **composition-root factory** (TypeScript) / **provider helper** (Python) — the analogue of C#'s
+  `Add<Context>Infrastructure`.
+
+The shared primitives live once in an emitted `infrastructure-runtime.ts` / `koine_infrastructure.py`.
+The layer is **off by default**, so an unconfigured emit is byte-identical to the historical output; the
+generated TypeScript is `tsc --strict`-clean and the Python is `mypy --strict`-clean.
 
 A value-object **collection** (`list of <ValueObject>`) round-trips: it is mapped with EF Core
 `OwnsMany` and backed by a mutable private `List<T>` (exposed read-only as `IReadOnlyList<T>`), with

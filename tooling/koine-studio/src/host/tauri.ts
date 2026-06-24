@@ -10,6 +10,7 @@ import { appDataDir, join } from '@tauri-apps/api/path';
 import { open as openDialog, save as saveDialog } from '@tauri-apps/plugin-dialog';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import type { FsEntry, KoiFile, LspTransport, Platform, SourceDoc } from '@/host/types';
+import { buildLogLArgs, parseLogL, type ChangeEntry } from '@/host/gitHistory';
 import { saveMetaFor } from '@/host/saveMeta';
 import { normalizeCompileTarget } from '@/ai/assistantTools';
 import { mcpCall } from '@/mcp/mcp';
@@ -172,6 +173,34 @@ export class TauriPlatform implements Platform {
 
   listKoiFiles(token: string): Promise<KoiFile[]> {
     return invoke<KoiFile[]>('list_koi_files', { dir: token });
+  }
+
+  // Dirs already shown to be outside a git work tree (or where git can't run) — cached so a non-git
+  // workspace doesn't spawn a `git` process on every selection. A per-file failure (e.g. an untracked
+  // file) does NOT poison the dir, since sibling tracked files there still have history.
+  private readonly nonGitDirs = new Set<string>();
+
+  // Per-element change history (#150): shell out to `git log -L start,end:file` in the file's directory
+  // and parse the result. The arg vector is built in tested TS (gitHistory.ts); the Rust `git_log_for_range`
+  // command is a thin exec wrapper. Any failure resolves null so the inspector hides the section.
+  async gitLogForRange(path: string, startLine: number, endLine: number): Promise<ChangeEntry[] | null> {
+    // Split into directory + basename on the normalized (forward-slashed) form so both halves use one
+    // separator — git -C accepts forward slashes on every platform, so a Windows path stays consistent.
+    const norm = path.replace(/\\/g, '/');
+    const slash = norm.lastIndexOf('/');
+    const dir = slash >= 0 ? norm.slice(0, slash) : '.';
+    const base = slash >= 0 ? norm.slice(slash + 1) : norm;
+    if (this.nonGitDirs.has(dir)) return null;
+    try {
+      const out = await invoke<string>('git_log_for_range', { dir, args: buildLogLArgs(base, startLine, endLine) });
+      return parseLogL(out);
+    } catch (e) {
+      // Remember dirs that aren't a git repo / where git is missing so we stop probing them; leave
+      // per-file failures (an untracked file) uncached so other tracked files in the dir still resolve.
+      const msg = e instanceof Error ? e.message : String(e);
+      if (/not a git repository|git-unavailable|not found|no such file|enoent/i.test(msg)) this.nonGitDirs.add(dir);
+      return null;
+    }
   }
 
   readTextFile(path: string): Promise<string> {

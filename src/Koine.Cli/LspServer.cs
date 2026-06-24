@@ -1433,7 +1433,30 @@ internal sealed class LspServer
         {
             ["contexts"] = contexts,
             ["relations"] = relations,
+            // Additive (#290): each declared context's declaration NameSpan (raw 1-based span over the
+            // `context` name token), keyed by name, serialized exactly like a diagram node's sourceSpan
+            // (MapSourceSpan; SourceSpan.None → null). Lets the Studio graph jump to the .koi on click.
+            ["contextSpans"] = ContextSpans(model.Contexts),
         };
+    }
+
+    /// <summary>
+    /// Projects each declared context's declaration <c>NameSpan</c> into a name → raw-1-based-span map
+    /// (the additive <c>contextSpans</c> field of the context-map result, #290). A recovered context
+    /// with no span maps to <c>null</c>; a duplicate name keeps the first declaration's span.
+    /// </summary>
+    private static Dictionary<string, object?> ContextSpans(IEnumerable<Compiler.Ast.ContextNode> contexts)
+    {
+        var spans = new Dictionary<string, object?>(StringComparer.Ordinal);
+        foreach (var c in contexts)
+        {
+            if (!spans.ContainsKey(c.Name))
+            {
+                spans[c.Name] = MapSourceSpan(c.NameSpan.IsNone ? null : c.NameSpan);
+            }
+        }
+
+        return spans;
     }
 
     /// <summary>
@@ -1720,6 +1743,7 @@ internal sealed class LspServer
     {
         ["contexts"] = Array.Empty<object>(),
         ["relations"] = Array.Empty<object>(),
+        ["contextSpans"] = new Dictionary<string, object?>(StringComparer.Ordinal),
     };
 
     private static object MapRelation(Compiler.Ast.ContextRelation r) => new Dictionary<string, object?>
