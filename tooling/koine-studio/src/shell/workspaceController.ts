@@ -149,6 +149,14 @@ export interface WorkspaceController {
   saveActive(): Promise<void>;
   /** Save every dirty buffer; a failed write stays dirty and is reported. Re-entrancy guarded. */
   saveAllDirty(): Promise<void>;
+  /** Enable/disable idle auto-save; disabling cancels any pending debounce. */
+  setAutoSave(on: boolean): void;
+  /**
+   * Arm (or re-arm) the idle auto-save debounce. Called from the editor's onChange on every edit; a
+   * no-op when auto-save is off. On fire it runs the same persist as Save all (format-on-save → write
+   * dirty buffers → didSave → tree refresh).
+   */
+  scheduleAutoSave(): void;
   /** True when any open buffer has unsaved changes (the unload / window-close guard). */
   anyDirty(): boolean;
   /**
@@ -752,6 +760,36 @@ export function createWorkspaceController(deps: WorkspaceControllerDeps): Worksp
     }
   }
 
+  // --- idle auto-save (#268) ------------------------------------------------
+  // Opt-in: when enabled, every edit (re)arms a ~1000ms timer; on fire it persists through the exact
+  // saveAllDirty path (format-on-save, didSave, tree refresh, the saveAllQueued guard against an
+  // in-flight manual save). Disabling cancels any pending timer so a stale edit can't write after the
+  // user turns it off.
+  const AUTO_SAVE_DEBOUNCE_MS = 1000;
+  let autoSaveOn = false;
+  let autoSaveTimer: ReturnType<typeof setTimeout> | undefined;
+
+  function clearAutoSaveTimer(): void {
+    if (autoSaveTimer !== undefined) {
+      clearTimeout(autoSaveTimer);
+      autoSaveTimer = undefined;
+    }
+  }
+
+  function setAutoSave(on: boolean): void {
+    autoSaveOn = on;
+    if (!on) clearAutoSaveTimer();
+  }
+
+  function scheduleAutoSave(): void {
+    if (!autoSaveOn) return;
+    clearAutoSaveTimer();
+    autoSaveTimer = setTimeout(() => {
+      autoSaveTimer = undefined;
+      void saveAllDirty();
+    }, AUTO_SAVE_DEBOUNCE_MS);
+  }
+
   return {
     buffers,
     activeUri: () => activeUriValue,
@@ -766,6 +804,8 @@ export function createWorkspaceController(deps: WorkspaceControllerDeps): Worksp
     reset,
     saveActive,
     saveAllDirty,
+    setAutoSave,
+    scheduleAutoSave,
     anyDirty,
     syncActiveBuffer,
     handleNewFile,

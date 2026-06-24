@@ -384,6 +384,8 @@ export function init(): () => void {
     if (!history.isRestoring) history.noteEdit();
     // Re-render the tree only when the active file's dirty dot just appeared (cheap path).
     if (becameDirty) workspace.renderTree();
+    // Arm the idle auto-save debounce (a no-op unless Settings → Editor → Auto-save is on).
+    workspace.scheduleAutoSave();
   });
 
   const treeBodyEl = el<HTMLElement>('filetree-body');
@@ -896,6 +898,9 @@ export function init(): () => void {
     showFileTreeChrome,
     hideWelcome: () => welcome.hide(),
   });
+  // Arm idle auto-save from the persisted setting so it's live at boot (the prefs onChange re-applies
+  // it on every toggle); a no-op until an edit calls scheduleAutoSave above.
+  workspace.setAutoSave(settings.autoSave);
   // The workspace-level undo/redo timeline (code = the single source of truth). It snapshots the open
   // buffers' text; restore writes code back and onRestored re-derives every view. canUndo/canRedo are
   // published into the store for the <HistoryControls> buttons.
@@ -1213,6 +1218,7 @@ export function init(): () => void {
       editor.setLineWrap(s.wordWrap);
       output.setLineWrap(s.wordWrap);
       editor.setMinimap(s.enableMinimap);
+      workspace.setAutoSave(s.autoSave);
       // Destination language now lives in Settings → Output. The controller relabels the Generated
       // tab, marks the preview stale, and re-emits it when that sub-view is the one showing.
       controller.onPreviewTargetChanged(s.previewTarget);
