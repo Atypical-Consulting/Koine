@@ -130,7 +130,7 @@ koine build templates/pizzeria --out Generated --layers domain,infrastructure
 Per bounded context, the infrastructure layer adds (under an `Infrastructure/` folder):
 
 - a `<Context>DbContext : DbContext` with one `DbSet` per aggregate root;
-- an `IEntityTypeConfiguration<Root>` per aggregate — value objects → owned types (`OwnsOne`/`OwnsMany`), the `versioned` token → `IsRowVersion()`, smart enums → `HasConversion` value converters, strongly-typed IDs → key converters;
+- an `IEntityTypeConfiguration<Root>` per aggregate — value objects → owned types (a scalar value object → `OwnsOne`; a value-object **collection** → `OwnsMany`, backed by a mutable `List<T>` with `PropertyAccessMode.Field` and a surrogate key so it round-trips), the `versioned` token → `IsRowVersion()`, smart enums → `HasConversion` value converters, strongly-typed IDs → key converters;
 - a concrete `<Root>Repository : I<Root>Repository` and a `UnitOfWork : IUnitOfWork`;
 - a transactional `OutboxMessage` table + an `IntegrationEventDispatcher` (only when the context publishes an integration event);
 - an `Add<Context>Infrastructure(this IServiceCollection, Action<DbContextOptionsBuilder>)` DI extension — you supply the database provider, so the emitter stays provider-agnostic.
