@@ -36,6 +36,34 @@
   overflow: hidden;
 }
 
+/* --- side-rail on the left (issue #265) ---
+   By default the element inspector (#right) is the right rail and the file rail (#leftrail) the left.
+   data-siderail-side='left' swaps them: the inspector + its resizer take the two leftmost tracks and
+   the file rail + its resizer take the two rightmost. The center stays the 1fr middle track. The
+   inspector keeps its --koi-inspector-w track and the file rail its --koi-leftrail-w track; only the
+   track ORDER flips. (The resizer drag anchors re-derive from the persisted layout on the next load —
+   see ide.tsx; the grid itself reflows immediately.) */
+#split[data-siderail-side='left'] {
+  grid-template-columns:
+    var(--koi-inspector-w, 320px) 6px
+    1fr 6px var(--koi-leftrail-w, 280px);
+}
+#split[data-siderail-side='left'] #right {
+  grid-column: 1;
+  border-right: 1px solid var(--koi-line);
+}
+#split[data-siderail-side='left'] #split-resizer {
+  grid-column: 2;
+}
+#split[data-siderail-side='left'] #leftrail-resizer {
+  grid-column: 4;
+}
+#split[data-siderail-side='left'] #leftrail {
+  grid-column: 5;
+  /* The file rail is now the rightmost pane — drop its right border, the center keeps the divider. */
+  border-right: none;
+}
+
 #leftrail {
   border-right: 1px solid var(--koi-line);
 }

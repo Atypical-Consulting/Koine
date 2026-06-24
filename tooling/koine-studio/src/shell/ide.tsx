@@ -39,10 +39,12 @@ import {
 import { createWelcome } from '@/welcome/welcome';
 import { type Template } from '@/welcome/templates';
 import { createCommandPalette, type Command } from '@/shared/palette';
+import { layoutCommands, type LayoutActions } from '@/shell/layoutCommands';
+import { loadLayout, saveLayout, type LayoutState } from '@/shell/layoutStore';
 import { devCommands } from '@/shell/devCommands';
 import { createPreferences } from '@/settings/prefs';
 import { applyAppearance } from '@/settings/appearance';
-import { initSplitResizer, initEdgeResizer } from '@/shell/resize';
+import { initEdgeResizer, initGroupResizer } from '@/shell/resize';
 import { createHelpOverlay } from '@/shared/help';
 import { createGenerateProject } from '@/export/generateProjectWizard';
 import { sanitizeProjectName } from '@/export/generateProject';
@@ -371,6 +373,11 @@ export function init(): () => void {
 
   const editorSession = createEditorSession({
     parent: el('editor-pane'),
+    // The second editor group (group B) mounts here when the user splits the editor; docFor reads a
+    // uri's live text from the shared buffer set so opening a file in B shows the same content group A
+    // would. Both are wired through the layout commands + boot below (Task 4 / issue #265).
+    groupBParent: el('editor-pane-b'),
+    docFor: (uri) => workspace.buffers.get(uri)?.text ?? '',
     doc: initialDoc,
     lineWrap: settings.wordWrap,
     minimap: settings.enableMinimap,
@@ -1590,22 +1597,100 @@ export function init(): () => void {
     }
   }
 
+  // --- view layout: editor split + repositionable panels (issue #265) -------
+  // View-only state (orientation / panel side / side-rail side / whether the split is open and on
+  // which uri), persisted in localStorage via layoutStore — it NEVER round-trips into the .koi model.
+  // On boot we read it, paint #split's data-* attributes (CSS reflows the grid), open group B if it
+  // was split, and anchor the inspector / left-rail resizers on the side each pane currently sits.
+  const layout = loadLayout();
+
+  // Mirror the layout enums onto #split as data-* attributes; _split.scss keys the grid off them
+  // (data-orientation lays the two editor groups side-by-side or stacked; data-panel-side docks the
+  // bottom panel bottom/right; data-siderail-side moves the inspector rail left/right).
+  function applyLayoutAttrs(l: LayoutState): void {
+    splitEl.dataset.split = l.splitOpen ? 'true' : 'false';
+    splitEl.dataset.orientation = l.orientation;
+    splitEl.dataset.panelSide = l.panelSide;
+    splitEl.dataset.siderailSide = l.sideRail;
+  }
+  applyLayoutAttrs(layout);
+
   // The drag handles are a desktop (mouse) idiom; on mobile they're display:none (see _split.scss),
   // so these listeners are inert below $bp-narrow (BP_NARROW). No JS gate needed — CSS owns visibility.
   // A persisted --koi-inspector-w / --koi-leftrail-w on #split is also harmless under the mobile
   // grid-template-columns: 1fr: those custom props aren't referenced inside the @media block.
-  initSplitResizer({ split: el('split'), handle: el('split-resizer') });
+  //
+  // The inspector + left-rail resizers anchor to the side each pane sits on. With the default layout
+  // the inspector is the right rail and the file-rail is the left, so this matches the historical
+  // wiring; when sideRail==='left' the two swap (the inspector becomes the left rail, the file-rail
+  // the right). The handles are wired once here from the persisted layout — a live side-rail toggle
+  // repaints the grid immediately via CSS and re-anchors its drag on the next load.
+  const inspectorOnRight = layout.sideRail === 'right';
+  initEdgeResizer({
+    target: splitEl,
+    handle: el('split-resizer'),
+    cssVar: '--koi-inspector-w',
+    anchor: inspectorOnRight ? 'right' : 'left',
+    storageKey: 'koine.studio.splitWidth',
+    min: 220,
+  });
 
   // Left sidebar width — the single rail (Files / Explorer / Overview / Documentation).
   initEdgeResizer({
     target: splitEl,
     handle: el('leftrail-resizer'),
     cssVar: '--koi-leftrail-w',
-    anchor: 'left',
+    anchor: inspectorOnRight ? 'left' : 'right',
     storageKey: 'koine.studio.leftrailWidth',
     min: 200,
     max: (w) => w * 0.5,
   });
+
+  // The editor-group divider (between group A and group B). Anchored right/bottom per orientation
+  // (initGroupResizer maps that to --koi-group-w / --koi-group-h). Wired once; on an orientation flip
+  // the divider stays draggable along its original axis until the next load, but the data-orientation
+  // swap re-lays the grid immediately. Restore the split if it was open.
+  initGroupResizer({ split: splitEl, handle: el('group-resizer'), orientation: layout.orientation });
+  if (layout.splitOpen) {
+    editorSession.openGroupB(layout.groupActiveUris[1] || workspace.activeUri());
+    editorSession.focusGroup('a');
+  }
+
+  // The five palette commands' effects: each persists the change via saveLayout, then re-applies the
+  // #split data-* attributes (CSS does the reflow) and drives group B. closeGroup tears B down; split
+  // opens/focuses it; the toggles flip the corresponding enum. The persisted state is what boot reads,
+  // so the arrangement survives a reload (the resizer anchors re-derive from it then).
+  const layoutActions: LayoutActions = {
+    split() {
+      // Open group B (or focus it if already open) and remember it in the persisted layout. Group B
+      // mirrors group A's active uri so the user immediately sees a second view to retarget.
+      editorSession.openGroupB(workspace.activeUri());
+      layout.splitOpen = true;
+      applyLayoutAttrs(
+        saveLayout({ splitOpen: true, groupActiveUris: [workspace.activeUri(), workspace.activeUri()] }),
+      );
+    },
+    toggleOrientation() {
+      const next = layout.orientation === 'horizontal' ? 'vertical' : 'horizontal';
+      layout.orientation = next;
+      applyLayoutAttrs(saveLayout({ orientation: next }));
+    },
+    closeGroup() {
+      editorSession.closeGroupB();
+      layout.splitOpen = false;
+      applyLayoutAttrs(saveLayout({ splitOpen: false }));
+    },
+    togglePanelSide() {
+      const next = layout.panelSide === 'bottom' ? 'right' : 'bottom';
+      layout.panelSide = next;
+      applyLayoutAttrs(saveLayout({ panelSide: next }));
+    },
+    toggleSideRail() {
+      const next = layout.sideRail === 'right' ? 'left' : 'right';
+      layout.sideRail = next;
+      applyLayoutAttrs(saveLayout({ sideRail: next }));
+    },
+  };
 
   // Left-sidebar section disclosure: clicking a header collapses/expands its body (routed through
   // setRailSectionOpen, the single source of truth for section state).
@@ -1679,6 +1764,9 @@ export function init(): () => void {
         ? [{ id: 'save-project-to-disk', title: 'Save to disk…', group: 'File', run: () => void saveProjectToDisk() } as Command]
         : []),
       { id: 'toggle-theme', title: 'Toggle theme', group: 'View', run: () => toggleTheme() },
+      // The editor-split + panel-reposition commands (issue #265). Built from the pure layoutCommands
+      // module so the list is unit-tested; each run() drives the layoutActions wired at boot above.
+      ...layoutCommands(layoutActions),
       { id: 'prefs', title: 'Settings…', hint: 'mod+,', group: 'View', run: () => prefs.open() },
       { id: 'help', title: 'Keyboard shortcuts', hint: 'F1', group: 'Help', run: () => help.open() },
       { id: 'about', title: 'About Koine Studio', group: 'Help', run: () => prefs.open('about') },

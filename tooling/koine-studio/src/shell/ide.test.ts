@@ -308,7 +308,10 @@ const APP_HTML = `
                 <button type="button" class="tech-tab" id="tech-tab-scenarios" role="tab" data-tech="scenarios" aria-selected="false">Scenarios</button>
               </div>
               <div id="tech-body">
-                <section id="editor-pane" class="tech-view"></section>
+                <section id="editor-pane" class="tech-view">
+                  <div class="koi-resizer" id="group-resizer" aria-hidden="true"></div>
+                  <section id="editor-pane-b" aria-label="Editor (second group)"></section>
+                </section>
                 <div id="view-preview" class="tech-view" role="tabpanel" hidden></div>
                 <div id="view-check" class="tech-view doc-view" role="tabpanel" hidden></div>
                 <div id="view-scenarios" class="tech-view" role="tabpanel" hidden></div>
