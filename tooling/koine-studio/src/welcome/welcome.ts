@@ -158,10 +158,17 @@ export function createWelcome(
   card.className = 'koi-welcome-card';
   root.appendChild(card);
 
+  // The console and the example gallery are two views inside this one persistent card, not two separate
+  // cards: switching between them swaps only the inner content (with a quiet fade) so the modal frame
+  // stays put instead of tearing down and re-entering.
+  const consoleView = document.createElement('div');
+  consoleView.className = 'koi-welcome-view';
+  card.appendChild(consoleView);
+
   // --- top bar: wordmark (left) + dismiss (right) ---------------------------
   const bar = document.createElement('div');
   bar.className = 'koi-welcome-bar';
-  card.appendChild(bar);
+  consoleView.appendChild(bar);
 
   const brand = document.createElement('div');
   brand.className = 'koi-welcome-brand';
@@ -195,7 +202,7 @@ export function createWelcome(
   // --- hero: the thesis (left) + get-to-work rail (right) -------------------
   const hero = document.createElement('section');
   hero.className = 'koi-welcome-hero';
-  card.appendChild(hero);
+  consoleView.appendChild(hero);
 
   // Left: eyebrow + editorial statement + the live snippet (the signature).
   const lede = document.createElement('div');
@@ -668,15 +675,16 @@ export function createWelcome(
 
   renderGallery();
 
-  // --- gallery view: the example catalogue as its own card, swapped in over the console ----------
+  // --- gallery view: the example catalogue, swapped in over the console -------------------------
   // Lifting the gallery off the start screen lets the hero snippet own the first frame; the catalogue
   // then gets a full, scrollable canvas of its own, reached on demand via the "Start from an example"
-  // action. Its own bar carries a back affordance (to the console) and the same dismiss (to the editor).
-  const galleryCard = document.createElement('div');
-  galleryCard.className = 'koi-welcome-card koi-gallery-card';
-  galleryCard.hidden = true;
-  galleryCard.setAttribute('role', 'region');
-  galleryCard.setAttribute('aria-labelledby', `${uid}-title`);
+  // action. It lives inside the same card as the console (only one view shows at a time), and carries
+  // its own bar: a back affordance (to the console) and the same dismiss (to the editor).
+  const galleryView = document.createElement('div');
+  galleryView.className = 'koi-welcome-view koi-gallery-view';
+  galleryView.hidden = true;
+  galleryView.setAttribute('role', 'region');
+  galleryView.setAttribute('aria-labelledby', `${uid}-title`);
 
   const galleryBar = document.createElement('div');
   galleryBar.className = 'koi-welcome-bar koi-gallery-bar';
@@ -703,8 +711,8 @@ export function createWelcome(
   galleryClose.addEventListener('click', () => hide());
 
   galleryBar.append(backBtn, galleryClose);
-  galleryCard.append(galleryBar, gallery);
-  root.appendChild(galleryCard); // sits beside `card`; only one of the two is visible at a time
+  galleryView.append(galleryBar, gallery);
+  card.appendChild(galleryView); // sits beside the console view in the same card; only one shows at a time
 
   // Registered with the shared overlay stack while shown, so Esc dismisses the welcome screen
   // (revealing the seeded editor behind it) and layered overlays close top-first.
@@ -718,8 +726,8 @@ export function createWelcome(
 
   function showGallery(): void {
     if (galleryOpen) return;
-    card.hidden = true;
-    galleryCard.hidden = false;
+    consoleView.hidden = true;
+    galleryView.hidden = false;
     galleryOpen = true;
     galleryUnregister = registerOverlay(closeGallery);
     searchInput.focus(); // land in search so a newcomer can start narrowing immediately
@@ -727,8 +735,8 @@ export function createWelcome(
 
   function closeGallery(): void {
     if (!galleryOpen) return;
-    galleryCard.hidden = true;
-    card.hidden = false;
+    galleryView.hidden = true;
+    consoleView.hidden = false;
     galleryOpen = false;
     galleryUnregister?.();
     galleryUnregister = null;
@@ -740,8 +748,8 @@ export function createWelcome(
     galleryUnregister?.();
     galleryUnregister = null;
     galleryOpen = false;
-    galleryCard.hidden = true;
-    card.hidden = false;
+    galleryView.hidden = true;
+    consoleView.hidden = false;
   }
 
   function show(): void {
