@@ -69,7 +69,17 @@ Koine Studio surfaces the **enriched** language server, the same one the VS Code
   read-only pane (`koine/emitPreview`); if the model has errors, nothing is emitted and the
   diagnostics are shown instead.
 - **Glossary** — the ubiquitous-language glossary the `glossary` emitter produces.
-- **Context map** — the bounded contexts and their relationships.
+- **Context map** — the bounded contexts and their relationships, in the **Context Map** bottom tab.
+  A **Graph | Table** toggle switches between two views of the same data:
+  - **Graph** (the default) draws the strategic context map as an **interactive diagram** on the same
+    pan/zoom canvas as the domain diagrams. Each bounded context is a distinct accent **tile**; each
+    relation is an edge whose direction reads **upstream → downstream**, with the relationship **kind**
+    (Partnership, Shared Kernel, Customer/Supplier, Conformist, ACL, …) as its label — a bidirectional
+    relation (Partnership / Shared Kernel) renders two-headed. Hover an edge for its kind and shared
+    types / ACL; click a context to **filter the workspace** to it, or click a relation to show its
+    shared types and ACL in the details strip — so no detail from the table is lost.
+  - **Table** keeps the dense, per-relation grid (Upstream · Direction · Downstream · Kind · Shared
+    Types · ACL) for when you want every field at a glance.
 - **Hover & navigation** — type/member hover cards and go-to-definition, served by the same LSP that
   powers the editors.
 - **Shareable links** — _Copy shareable link_ encodes your work into the URL fragment (it never leaves
