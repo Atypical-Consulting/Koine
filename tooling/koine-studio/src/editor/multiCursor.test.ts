@@ -8,7 +8,7 @@
 // addCursorAbove/Below). They also confirm the custom Mod-S binding still fires — i.e. enabling
 // multi-cursor did not shadow the editor's own keymap.
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { EditorSelection } from '@codemirror/state';
+import { EditorSelection, type StateCommand } from '@codemirror/state';
 import { selectNextOccurrence } from '@codemirror/search';
 import { simplifySelection } from '@codemirror/commands';
 import { createKoineEditor, type KoineEditor, type KoineEditorOptions } from '@/editor/editor';
@@ -24,8 +24,8 @@ function makeEditor(doc: string, opts: Partial<KoineEditorOptions> = {}): KoineE
 }
 
 // Run a StateCommand against the editor's live state, dispatching the resulting transaction.
-function run(ed: KoineEditor, cmd: (cfg: { state: typeof ed.view.state; dispatch: (tr: never) => void }) => boolean): void {
-  cmd({ state: ed.view.state, dispatch: (tr) => ed.view.dispatch(tr) } as never);
+function run(ed: KoineEditor, cmd: StateCommand): void {
+  cmd({ state: ed.view.state, dispatch: (tr) => ed.view.dispatch(tr) });
 }
 
 afterEach(() => {
