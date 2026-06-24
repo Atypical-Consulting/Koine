@@ -45,6 +45,24 @@ public class TypeScriptInfrastructureSnapshotTests
         }
         """;
 
+    /// <summary>A publishing context with an aggregate — so the outbox dispatcher + enqueue are emitted.</summary>
+    internal const string PublishingFixture = """
+        context Ordering {
+          integration event OrderPlaced {
+            orderId: String
+            total:   Decimal
+          }
+
+          publishes OrderPlaced
+
+          aggregate Order root Order {
+            entity Order identified by OrderId {
+              total: Int
+            }
+          }
+        }
+        """;
+
     internal static readonly TsEmitterOptions InfraOptions = new()
     {
         Layers = new HashSet<TsLayer> { TsLayer.Domain, TsLayer.Infrastructure },
@@ -92,6 +110,44 @@ public class TypeScriptInfrastructureSnapshotTests
         uow.ShouldContain("readonly orders: IOrderRepository = new OrderRepository()");
         uow.ShouldContain("readonly customers: ICustomerRepository = new CustomerRepository()");
         uow.ShouldContain("saveChangesAsync(): Promise<void>");
+    }
+
+    /// <summary>The per-context outbox dispatcher (publishing context only) must match the snapshot.</summary>
+    [Fact]
+    public Task TypeScript_infrastructure_outbox_dispatcher_emits_expected_typescript()
+    {
+        var result = new KoineCompiler().Compile(PublishingFixture, new TypeScriptEmitter(InfraOptions));
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var infraFiles = result.Files
+            .Where(f => f.RelativePath.Contains("/infrastructure/", StringComparison.Ordinal))
+            .ToList();
+
+        return Verify(TestSupport.Render(infraFiles))
+            .UseDirectory("Snapshots");
+    }
+
+    /// <summary>A publishing context emits the dispatcher and a unit of work that enqueues to the outbox.</summary>
+    [Fact]
+    public void Publishing_context_emits_outbox_dispatcher_and_enqueue()
+    {
+        var files = Emit(PublishingFixture);
+
+        var dispatcher = files.Single(f => f.RelativePath == "Ordering/infrastructure/IntegrationEventDispatcher.ts").Contents;
+        dispatcher.ShouldContain("export class IntegrationEventDispatcher");
+        dispatcher.ShouldContain("const pending = await this.outbox.unprocessed();");
+        dispatcher.ShouldContain("await this.handler.handle(message);");
+
+        var uow = files.Single(f => f.RelativePath == "Ordering/infrastructure/UnitOfWork.ts").Contents;
+        uow.ShouldContain("enqueue(integrationEvent: object): void");
+        uow.ShouldContain("await this.outbox.add(OutboxMessage.from(integrationEvent));");
+    }
+
+    /// <summary>A subscribe-only / event-free context emits no outbox dispatcher.</summary>
+    [Fact]
+    public void Non_publishing_context_emits_no_dispatcher()
+    {
+        Emit(Fixture).ShouldNotContain(f => f.RelativePath.EndsWith("IntegrationEventDispatcher.ts", StringComparison.Ordinal));
     }
 
     /// <summary>The shared infrastructure-runtime module is emitted once at the output root.</summary>

@@ -50,6 +50,11 @@ public sealed partial class TypeScriptEmitter
             }
 
             files.Add(EmitUnitOfWorkImpl(ctx.Name, aggregates, publishesEvents));
+
+            if (publishesEvents)
+            {
+                files.Add(EmitIntegrationEventDispatcher(ctx.Name));
+            }
         }
 
         if (anyEmitted)
