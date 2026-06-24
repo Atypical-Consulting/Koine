@@ -13,9 +13,14 @@
     "withGlobalTauri": true,
     "windows": [
       {
-        "title": "koine-studio",
-        "width": 800,
-        "height": 600
+        "title": "Koine Studio",
+        "width": 1440,
+        "height": 900,
+        "minWidth": 1024,
+        "minHeight": 680,
+        "center": true,
+        "maximized": true,
+        "resizable": true
       }
     ],
     "security": {
