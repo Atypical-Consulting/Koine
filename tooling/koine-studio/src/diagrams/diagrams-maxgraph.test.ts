@@ -14,6 +14,7 @@ import {
   positionKey,
 } from '@/diagrams/diagramContract';
 import { loadDiagramAnnotations, loadDiagramPositions, saveDiagramPositions } from '@/settings/persistence';
+import { createBrowserLayoutStore } from '@/diagrams/layoutStore';
 import type { Diagram, DiagramGraph, DiagramNode, DocsFile } from '@/lsp/lsp';
 
 // happy-dom returns 0 from getBoundingClientRect; maxGraph reads the container rect on construction.
@@ -700,6 +701,32 @@ describe('canvas annotations (#255)', () => {
 
       expect(handle.noteCells.size).toBe(0);
       expect(loadDiagramAnnotations(positionKey()).notes).toHaveLength(0);
+    } finally {
+      handle.dispose();
+    }
+  });
+
+  test('end-to-end: notes & groups survive a save → fresh reload and render behind the nodes', async () => {
+    setDiagramPersistScope('ws-e2e');
+    const e2eNote = { id: 'n-e2e', text: 'survives reload', x: 500, y: 40, width: 180, height: 96 };
+    const e2eGroup = { id: 'g-e2e', label: 'Core', members: ['Ordering.Order', 'Ordering.Line'] };
+
+    // Persist a layout through one store…
+    createBrowserLayoutStore().save({ positions, notes: [e2eNote], groups: [e2eGroup] });
+
+    // …then a FRESH store over the same workspace reads it back intact.
+    const restored = await createBrowserLayoutStore().load();
+    expect(restored.notes).toEqual([e2eNote]);
+    expect(restored.groups).toEqual([e2eGroup]);
+
+    // Rendering the restored layout puts the annotation cells on the canvas, behind the nodes.
+    const container = makeContainer();
+    const handle = buildCanvas(mx, container, twoNodes, restored);
+    try {
+      expect(handle.noteCells.get('n-e2e')).toBeDefined();
+      expect(handle.groupCells.get('g-e2e')).toBeDefined();
+      const root = handle.graph.getDefaultParent();
+      expect(root.getIndex(handle.noteCells.get('n-e2e')!)).toBeLessThan(root.getIndex(handle.containers.get('Ordering')!));
     } finally {
       handle.dispose();
     }
