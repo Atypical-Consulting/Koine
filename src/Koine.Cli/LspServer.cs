@@ -183,6 +183,7 @@ internal sealed class LspServer
                                     {
                                         ["prepareProvider"] = true,
                                     },
+                                    ["linkedEditingRangeProvider"] = true,
                                     ["codeActionProvider"] = new Dictionary<string, object?>
                                     {
                                         ["codeActionKinds"] = new[] { "quickfix", "refactor", "refactor.extract" },
@@ -423,6 +424,14 @@ internal sealed class LspServer
                             if (root.TryGetProperty("id", out _))
                             {
                                 Respond(root, RenameResultJson(root));
+                            }
+
+                            break;
+
+                        case "textDocument/linkedEditingRange":
+                            if (root.TryGetProperty("id", out _))
+                            {
+                                Respond(root, LinkedEditingRangeResultJson(root));
                             }
 
                             break;
@@ -1146,26 +1155,47 @@ internal sealed class LspServer
         }
 
         var newName = nn.GetString()!;
-        var edits = _ls.RenameAt(_compilation, uri, line, ch, newName);
-        if (edits is null)
+        // Route through the preview-shaped service method (the single source of truth): it already
+        // groups the cross-file edits per file with the collision guard applied.
+        var preview = _ls.RenamePreviewAt(_compilation, uri, line, ch, newName);
+        if (preview is null)
         {
             return null;
         }
 
-        // Group reference edits by file into a WorkspaceEdit.changes map (uri -> TextEdit[]).
+        // Build the WorkspaceEdit.changes map (uri -> TextEdit[]) from the per-file preview groups.
         var changes = new Dictionary<string, object?>(StringComparer.Ordinal);
-        foreach (var group in edits.GroupBy(r => r.Uri, StringComparer.Ordinal))
+        foreach (var file in preview.Files)
         {
-            changes[group.Key] = group
+            changes[file.Uri] = file.Occurrences
                 .Select(r => (object)new Dictionary<string, object?>
                 {
                     ["range"] = RangeOf(r),
-                    ["newText"] = newName,
+                    ["newText"] = preview.NewName,
                 })
                 .ToArray();
         }
 
         return new Dictionary<string, object?> { ["changes"] = changes };
+    }
+
+    private object? LinkedEditingRangeResultJson(JsonElement root)
+    {
+        if (!TryGetUri(root, out var uri) || !TryGetPosition(root, out var line, out var ch))
+        {
+            return null;
+        }
+
+        var ranges = _ls.LinkedEditingRangeAt(_compilation, uri, line, ch);
+        if (ranges is null)
+        {
+            return null;
+        }
+
+        return new Dictionary<string, object?>
+        {
+            ["ranges"] = ranges.Select(r => (object)RangeOf(r)).ToArray(),
+        };
     }
 
     private static object ToLocation(Reference r) => new Dictionary<string, object?>

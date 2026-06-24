@@ -16,6 +16,16 @@ public sealed record DeclLocation(string Uri, SourceSpan Span);
 public sealed record Reference(string Uri, int Line, int StartColumn, int EndColumn);
 
 /// <summary>
+/// A preview of a rename: the proposed <paramref name="NewName"/> and the per-file groups of
+/// occurrences it would rewrite. Files keep first-seen order, and occurrences keep their order
+/// within a file, so an editor can render a stable, file-by-file diff before applying it.
+/// </summary>
+public sealed record RenamePreview(string NewName, IReadOnlyList<RenameFileChanges> Files);
+
+/// <summary>The occurrences of a renamed name within a single file <paramref name="Uri"/>.</summary>
+public sealed record RenameFileChanges(string Uri, IReadOnlyList<Reference> Occurrences);
+
+/// <summary>
 /// A workspace-wide declaration index built from a <c>uri → source</c> map. Each
 /// document is parsed once; resolution is local-file-first, then a unique match
 /// across the other files (ambiguity yields no result). Editor-agnostic — no LSP.

@@ -277,3 +277,19 @@ Koine.Compiler.CodeFixes.Providers.RenameDuplicateCodeFixProvider
 Koine.Compiler.CodeFixes.Providers.RenameDuplicateCodeFixProvider.RenameDuplicateCodeFixProvider() -> void
 Koine.Compiler.CodeFixes.Providers.RenameDuplicateCodeFixProvider.FixableDiagnosticCodes.get -> System.Collections.Generic.IReadOnlyCollection<string!>!
 Koine.Compiler.CodeFixes.Providers.RenameDuplicateCodeFixProvider.GetFixes(Koine.Compiler.CodeFixes.CodeFixContext! context) -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.CodeFixes.CodeFix!>!
+Koine.Compiler.Services.RenamePreview
+Koine.Compiler.Services.RenamePreview.RenamePreview(string! NewName, System.Collections.Generic.IReadOnlyList<Koine.Compiler.Services.RenameFileChanges!>! Files) -> void
+Koine.Compiler.Services.RenamePreview.NewName.get -> string!
+Koine.Compiler.Services.RenamePreview.NewName.init -> void
+Koine.Compiler.Services.RenamePreview.Files.get -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Services.RenameFileChanges!>!
+Koine.Compiler.Services.RenamePreview.Files.init -> void
+Koine.Compiler.Services.RenameFileChanges
+Koine.Compiler.Services.RenameFileChanges.RenameFileChanges(string! Uri, System.Collections.Generic.IReadOnlyList<Koine.Compiler.Services.Reference!>! Occurrences) -> void
+Koine.Compiler.Services.RenameFileChanges.Uri.get -> string!
+Koine.Compiler.Services.RenameFileChanges.Uri.init -> void
+Koine.Compiler.Services.RenameFileChanges.Occurrences.get -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Services.Reference!>!
+Koine.Compiler.Services.RenameFileChanges.Occurrences.init -> void
+Koine.Compiler.Services.KoineLanguageService.RenamePreviewAt(Koine.Compiler.Services.KoineCompilation! compilation, string! activeUri, int line, int character, string! newName) -> Koine.Compiler.Services.RenamePreview?
+Koine.Compiler.Services.KoineLanguageService.RenamePreviewAt(System.Collections.Generic.IReadOnlyDictionary<string!, string!>! documents, string! activeUri, int line, int character, string! newName) -> Koine.Compiler.Services.RenamePreview?
+Koine.Compiler.Services.KoineLanguageService.LinkedEditingRangeAt(Koine.Compiler.Services.KoineCompilation! compilation, string! activeUri, int line, int character) -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Services.Reference!>?
+Koine.Compiler.Services.KoineLanguageService.LinkedEditingRangeAt(System.Collections.Generic.IReadOnlyDictionary<string!, string!>! documents, string! activeUri, int line, int character) -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Services.Reference!>?
