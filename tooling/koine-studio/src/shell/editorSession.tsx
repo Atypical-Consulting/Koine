@@ -21,9 +21,13 @@ import { appStore } from '@/store/index';
 import { diagnosticsSummary } from '@/diagnostics/diagnosticsSummary';
 import { DiagnosticsStripPanel } from '@/diagnostics/DiagnosticsStripPanel';
 import type {
+  CallHierarchyIncomingCall,
+  CallHierarchyItem,
+  CallHierarchyOutgoingCall,
   CodeAction,
   CompletionItem,
   HoverResult,
+  InlayHint,
   Location,
   LspDiagnostic,
   PrepareRenameResult,
@@ -48,6 +52,10 @@ export interface EditorSessionLsp {
   rename(line: number, character: number, newName: string): Promise<WorkspaceEdit | null>;
   references(line: number, character: number): Promise<Location[]>;
   codeActions(range: Range, diagnostics: LspDiagnostic[]): Promise<CodeAction[]>;
+  inlayHints(startLine: number, startChar: number, endLine: number, endChar: number): Promise<InlayHint[]>;
+  prepareCallHierarchy(line: number, character: number): Promise<CallHierarchyItem[]>;
+  incomingCalls(item: CallHierarchyItem): Promise<CallHierarchyIncomingCall[]>;
+  outgoingCalls(item: CallHierarchyItem): Promise<CallHierarchyOutgoingCall[]>;
   changeDoc(uri: string, text: string): void;
   onPublishDiagnostics(cb: (uri: string, diags: LspDiagnostic[]) => void): void;
   onServerExit(cb: (code: number) => void): void;
@@ -174,6 +182,12 @@ export function createEditorSession(deps: EditorSessionDeps): EditorSession {
     uriLabel: (uri) => deps.uriLabel(uri),
     onCodeActions: (range) => codeActions(range),
     onApplyWorkspaceEdit: (edit) => deps.onApplyWorkspaceEdit(edit),
+    // Inlay hints (inferred type / parameter-name annotations) and call hierarchy (Mod-Alt-h). The
+    // editor owns the in-editor widgets/menu; the LSP client resolves the data over the active uri.
+    onInlayHints: (sl, sc, el, ec) => lsp.inlayHints(sl, sc, el, ec),
+    onPrepareCallHierarchy: (line, character) => lsp.prepareCallHierarchy(line, character),
+    onIncomingCalls: (item) => lsp.incomingCalls(item),
+    onOutgoingCalls: (item) => lsp.outgoingCalls(item),
     // Save (Cmd/Ctrl-S) is owned by ide.ts's window keydown handler: it formats AND writes the
     // active buffer to disk. We deliberately do NOT pass onFormat here so the editor's Mod-s keymap
     // stays inert and there's exactly one save path.
