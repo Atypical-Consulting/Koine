@@ -11,6 +11,7 @@ import type { DiagramRenderer } from '@/diagrams/diagrams';
 import type { Graph as MxGraph, Cell as MxCell } from '@maxgraph/core';
 import type { Diagram, DiagramEdge, DiagramGraph, DiagramMember, DiagramNode, DocsFile } from '@/lsp/lsp';
 import { mergeGraphsForView } from '@/model/modelTables';
+import { diagramToMermaid } from '@/export/diagramExport';
 import { buildEmptyState } from '@/diagrams/emptyState';
 import { loadDiagramZoom, saveDiagramZoom } from '@/settings/persistence';
 import {
@@ -203,18 +204,16 @@ export function selectDomainDiagrams(files: DocsFile[]): Diagram[] {
 
 /**
  * Synthesize the single {@link Diagram} that represents the fused domain canvas for export (#271). The
- * canvas merges several source diagrams into one class-shaped view, so: `kind` is `'aggregate'` (the
- * PlantUML class family); `caption` is the lone source caption when there's exactly one, else a generic
- * `'Domain model'` (it only seeds the download filename); `mermaid` joins every source snippet so "Copy
- * Mermaid" yields all of them; and `graph` is the already-merged graph that's actually drawn.
+ * canvas merges several source diagrams into one CLASS-SHAPED view (nodes with members, composition edges),
+ * so all four exports describe that one view: `kind` is `'aggregate'` (the PlantUML/Mermaid class family);
+ * `graph` is the already-merged graph that's actually drawn; `mermaid` is generated from that merged graph
+ * as ONE valid Mermaid document (concatenating the per-source snippets would stack multiple `classDiagram`
+ * headers, which Mermaid rejects). `caption` is the lone source caption when there's exactly one, else a
+ * generic `'Domain model'` — it seeds the download filename AND the PlantUML `title`.
  */
 function synthDomainExportDiagram(sources: Diagram[], merged: DiagramGraph): Diagram {
   const caption = sources.length === 1 ? sources[0].caption : 'Domain model';
-  const mermaid = sources
-    .map((d) => d.mermaid?.trim())
-    .filter((m): m is string => !!m)
-    .join('\n\n');
-  return { caption, kind: 'aggregate', mermaid, graph: merged };
+  return { caption, kind: 'aggregate', mermaid: diagramToMermaid(merged), graph: merged };
 }
 
 /** The currently-committed domain canvas exposed for export (#271): the live {@link CanvasHandle} (for SVG/
@@ -1192,6 +1191,10 @@ export function createMaxGraphRenderer(): DiagramRenderer {
       const dispose = (): void => {
         chrome.dispose();
         handle.dispose();
+        // Don't leave the export pointer dangling at a torn-down canvas (#271): once this handle is disposed
+        // — superseded by a newer render, or the view switched away — Export/Copy-Mermaid must no-op rather
+        // than serialize a detached/empty SVG and report a false success.
+        if (activeDomainExport?.handle === handle) activeDomainExport = null;
       };
 
       if (isCurrent()) {

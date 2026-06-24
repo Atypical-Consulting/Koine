@@ -1488,6 +1488,13 @@ export function init(): () => void {
     }
   }
 
+  // Flash a transient confirmation in the status pill, then re-derive it from the CURRENT diagnostics (so a
+  // fresh push isn't clobbered) — the shared idiom behind the diagram export/copy handlers (#271).
+  function flashStatus(message: string, kind: Parameters<typeof setStatus>[1]): void {
+    setStatus(message, kind);
+    setTimeout(() => editorSession.updateStatus(editorSession.diagnosticsFor(workspace.activeUri())), 1500);
+  }
+
   // Export the live Visual canvas in the chosen format (#271): SVG/PNG serialize the actual drawing, PlantUML
   // is mapped from the structured graph client-side. Routes the bytes through the host's saveZip seam (Blob
   // download in the browser, native save dialog on desktop) with a caption-derived filename. A no-op with a
@@ -1495,16 +1502,12 @@ export function init(): () => void {
   async function exportActiveDiagram(format: 'svg' | 'png' | 'plantuml'): Promise<void> {
     const active = getActiveDomainExport();
     if (!active) {
-      setStatus('open the Visual diagram to export', 'error');
-      setTimeout(() => editorSession.updateStatus(editorSession.diagnosticsFor(workspace.activeUri())), 1500);
+      flashStatus('open the Visual diagram to export', 'error');
       return;
     }
     try {
       const saved = await exportDiagram(format, active.diagram, active.handle, (name, bytes) => platform.saveZip(name, bytes));
-      if (saved === true) {
-        setStatus('diagram exported ✓', 'green');
-        setTimeout(() => editorSession.updateStatus(editorSession.diagnosticsFor(workspace.activeUri())), 1500);
-      }
+      if (saved === true) flashStatus('diagram exported ✓', 'green');
     } catch (e) {
       setStatus('export failed', 'error');
       console.error('export diagram failed:', e);
@@ -1512,18 +1515,16 @@ export function init(): () => void {
   }
 
   // Copy the current diagram's Mermaid to the clipboard (#271), mirroring copyShareLink's flash. The fused
-  // canvas joins every source diagram's snippet; an empty model has nothing to copy.
+  // canvas is emitted as one Mermaid document; an empty model has nothing to copy.
   async function copyActiveDiagramMermaid(): Promise<void> {
     const mermaid = getActiveDomainExport()?.diagram.mermaid?.trim();
     if (!mermaid) {
-      setStatus('no diagram to copy', 'error');
-      setTimeout(() => editorSession.updateStatus(editorSession.diagnosticsFor(workspace.activeUri())), 1500);
+      flashStatus('no diagram to copy', 'error');
       return;
     }
     try {
       await navigator.clipboard.writeText(mermaid);
-      setStatus('Mermaid copied ✓', 'green');
-      setTimeout(() => editorSession.updateStatus(editorSession.diagnosticsFor(workspace.activeUri())), 1500);
+      flashStatus('Mermaid copied ✓', 'green');
     } catch (e) {
       setStatus('copy failed', 'error');
       console.error('copy mermaid failed:', e);

@@ -1,6 +1,6 @@
 import { describe, expect, it, beforeAll, afterEach, vi } from 'vitest';
 import * as mx from '@maxgraph/core';
-import { canvasToSvg, diagramToPlantUml, exportDiagram, svgToPng } from '@/export/diagramExport';
+import { canvasToSvg, diagramToMermaid, diagramToPlantUml, exportDiagram, svgToPng } from '@/export/diagramExport';
 import { buildCanvas } from '@/diagrams/diagrams-maxgraph';
 import type { Diagram, DiagramEdge, DiagramGraph, DiagramMember, DiagramNode } from '@/lsp/protocol';
 
@@ -229,6 +229,59 @@ describe('diagramToPlantUml', () => {
       const out = diagramToPlantUml(graph([], []), 'aggregate', '');
       expect(out).not.toContain('title ');
     });
+  });
+});
+
+// --- diagramToMermaid: one valid Mermaid classDiagram from the merged graph (issue #271 review) -----------
+
+describe('diagramToMermaid', () => {
+  const aggregate = graph(
+    [
+      node({
+        id: 'Ordering.Order',
+        label: 'Order',
+        stereotype: 'aggregate root',
+        members: [member('id: OrderId', 'field'), member('submit()', 'method')],
+      }),
+      node({ id: 'Ordering.OrderLine', label: 'OrderLine' }),
+    ],
+    [edge({ from: 'Ordering.Order', to: 'Ordering.OrderLine', label: 'lines', arrowKind: 'composition', sourceCardinality: '1', cardinality: '*' })],
+  );
+
+  it('starts with a single classDiagram header (a valid one-document snippet)', () => {
+    const out = diagramToMermaid(aggregate);
+    expect(out.startsWith('classDiagram')).toBe(true);
+    expect(out.match(/classDiagram/g)?.length).toBe(1);
+  });
+
+  it('declares each node as a labelled class with sanitized id and member rows', () => {
+    const out = diagramToMermaid(aggregate);
+    expect(out).toContain('class Ordering_Order["Order"]');
+    expect(out).toContain('Ordering_Order : id: OrderId');
+    expect(out).toContain('Ordering_Order : submit()');
+  });
+
+  it('renders a composition edge with cardinalities resolving to the sanitized ids', () => {
+    const out = diagramToMermaid(aggregate);
+    expect(out).toContain('Ordering_Order "1" *-- "*" Ordering_OrderLine : lines');
+  });
+
+  it('strips Mermaid-structural characters from labels/members so they cannot break the document', () => {
+    const g = graph([node({ id: 'A', label: 'Lab"el [x] {y}', members: [member('m`{}`', 'field')] })], []);
+    const out = diagramToMermaid(g);
+    expect(out).not.toContain('"Lab"el'); // the inner quote was neutralised
+    expect(out).not.toMatch(/\[x\]|\{y\}/); // brackets/braces stripped from the label
+    expect(out).toContain('classDiagram');
+  });
+
+  it('skips a dangling edge whose endpoint has no declared node', () => {
+    const g = graph([node({ id: 'A' })], [edge({ from: 'A', to: 'ghost' })]);
+    const out = diagramToMermaid(g);
+    expect(out).not.toContain('ghost');
+  });
+
+  it('emits a bare classDiagram for an empty graph', () => {
+    expect(diagramToMermaid(graph([], [])).trim()).toBe('classDiagram');
   });
 });
 

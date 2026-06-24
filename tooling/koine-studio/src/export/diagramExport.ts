@@ -37,6 +37,18 @@ function escapeInline(text: string): string {
   return text.replace(/\r?\n/g, ' ');
 }
 
+/** Escape a UML stereotype rendered inside `<<…>>`: the guillemets are structural, so strip any inner angle
+ *  bracket that would close the group early (e.g. a stereotype like `reads>writes`). */
+function escapeStereotype(text: string): string {
+  return escapeInline(text).replace(/[<>]/g, '');
+}
+
+/** Escape a class-body member row rendered inside `{ … }`: strip braces so a `}` in the member text can't
+ *  terminate the class body early. (Members come from a controlled formatter today, so this is a safety net.) */
+function escapeMember(text: string): string {
+  return escapeInline(text).replace(/[{}]/g, '');
+}
+
 /** A stable map from each node's raw id to a sanitized, collision-free PlantUML alias. Two raw ids that
  *  sanitize to the same string get disambiguated with a numeric suffix so edges still resolve uniquely. */
 function buildAliasMap(graph: DiagramGraph): Map<string, string> {
@@ -98,11 +110,11 @@ function emitEdge(edge: DiagramEdge, aliases: Map<string, string>): string | nul
  *  with an optional `<<stereotype>>` and one body row per member. Non-class nodes degrade to a bare `class`. */
 function emitClassNode(node: DiagramNode, alias: string): string[] {
   const lines: string[] = [];
-  const stereotype = node.stereotype ? ` <<${escapeInline(node.stereotype)}>>` : '';
+  const stereotype = node.stereotype ? ` <<${escapeStereotype(node.stereotype)}>>` : '';
   if (isClassNode(node) && node.members.length > 0) {
     lines.push(`class "${escapeLabel(node.label)}" as ${alias}${stereotype} {`);
     for (const m of node.members) {
-      lines.push(`  ${escapeInline(m.text)}`);
+      lines.push(`  ${escapeMember(m.text)}`);
     }
     lines.push('}');
   } else {
@@ -111,38 +123,16 @@ function emitClassNode(node: DiagramNode, alias: string): string[] {
   return lines;
 }
 
-/** Build a class diagram body (used for `aggregate` and as the default for unknown class-shaped kinds). */
-function emitClassDiagram(graph: DiagramGraph, aliases: Map<string, string>): string[] {
+/** Build a diagram body: one block per node via `renderNode` (resolving its alias), then every edge as a
+ *  relation line. The three PlantUML families differ ONLY in how a node renders, so they share this loop. */
+function emitDiagram(
+  graph: DiagramGraph,
+  aliases: Map<string, string>,
+  renderNode: (node: DiagramNode, alias: string) => string[],
+): string[] {
   const lines: string[] = [];
   for (const node of graph.nodes) {
-    lines.push(...emitClassNode(node, aliases.get(node.id)!));
-  }
-  for (const edge of graph.edges) {
-    const line = emitEdge(edge, aliases);
-    if (line) lines.push(line);
-  }
-  return lines;
-}
-
-/** Build a state diagram body (`statemachine`): `state "Label" as alias` plus transition arrows. */
-function emitStateDiagram(graph: DiagramGraph, aliases: Map<string, string>): string[] {
-  const lines: string[] = [];
-  for (const node of graph.nodes) {
-    lines.push(`state "${escapeLabel(node.label)}" as ${aliases.get(node.id)!}`);
-  }
-  for (const edge of graph.edges) {
-    const line = emitEdge(edge, aliases);
-    if (line) lines.push(line);
-  }
-  return lines;
-}
-
-/** Build a component diagram body (`contextmap`, `integration-events`): `component "Label" as alias` plus
- *  relation arrows. */
-function emitComponentDiagram(graph: DiagramGraph, aliases: Map<string, string>): string[] {
-  const lines: string[] = [];
-  for (const node of graph.nodes) {
-    lines.push(`component "${escapeLabel(node.label)}" as ${aliases.get(node.id)!}`);
+    lines.push(...renderNode(node, aliases.get(node.id)!));
   }
   for (const edge of graph.edges) {
     const line = emitEdge(edge, aliases);
@@ -171,15 +161,15 @@ export function diagramToPlantUml(graph: DiagramGraph, kind: string, caption: st
   let body: string[];
   switch (kind) {
     case 'statemachine':
-      body = emitStateDiagram(graph, aliases);
+      body = emitDiagram(graph, aliases, (node, alias) => [`state "${escapeLabel(node.label)}" as ${alias}`]);
       break;
     case 'contextmap':
     case 'integration-events':
-      body = emitComponentDiagram(graph, aliases);
+      body = emitDiagram(graph, aliases, (node, alias) => [`component "${escapeLabel(node.label)}" as ${alias}`]);
       break;
     case 'aggregate':
     default:
-      body = emitClassDiagram(graph, aliases);
+      body = emitDiagram(graph, aliases, emitClassNode);
       break;
   }
 
@@ -192,6 +182,54 @@ export function diagramToPlantUml(graph: DiagramGraph, kind: string, caption: st
   return `${lines.join('\n')}\n`;
 }
 
+/** Sanitize text for a Mermaid `classDiagram`: flatten newlines and drop the characters that are structural
+ *  in Mermaid (`"` quotes, `[]` label brackets, `{}` body braces, backticks) so a label/member/edge string
+ *  can't break the document. */
+function mermaidText(text: string): string {
+  return text.replace(/\r?\n/g, ' ').replace(/"/g, "'").replace(/[[\]{}`]/g, '');
+}
+
+/** Render one edge as a Mermaid `classDiagram` relation. Composition is `*--` (carrying its cardinalities);
+ *  everything else degrades to a plain `-->` (Mermaid classDiagram has no bidirectional arrow). */
+function mermaidEdge(edge: DiagramEdge, from: string, to: string): string {
+  const arrow = edge.arrowKind === 'composition' ? '*--' : '-->';
+  let line = `  ${from}`;
+  if (edge.arrowKind === 'composition' && edge.sourceCardinality) line += ` "${mermaidText(edge.sourceCardinality)}"`;
+  line += ` ${arrow}`;
+  if (edge.arrowKind === 'composition' && edge.cardinality) line += ` "${mermaidText(edge.cardinality)}"`;
+  line += ` ${to}`;
+  if (edge.label) line += ` : ${mermaidText(edge.label)}`;
+  return line;
+}
+
+/**
+ * Translate a structured diagram graph to a Mermaid `classDiagram` string (issue #271).
+ *
+ * The Studio domain canvas fuses several source diagrams into one class-shaped view, so "Copy Mermaid" emits
+ * ONE valid Mermaid document for the merged graph — concatenating the per-source Mermaid snippets would
+ * produce multiple `classDiagram` headers, which Mermaid rejects. Node ids are sanitized to legal Mermaid
+ * class names (via {@link buildAliasMap}); labels/members/edge text are stripped of Mermaid-structural
+ * characters; composition edges keep their cardinalities; dangling edges (an endpoint with no declared node)
+ * are skipped. An empty graph yields a bare `classDiagram` (valid and empty).
+ */
+export function diagramToMermaid(graph: DiagramGraph): string {
+  const aliases = buildAliasMap(graph);
+  const lines: string[] = ['classDiagram'];
+  for (const node of graph.nodes) {
+    const alias = aliases.get(node.id)!;
+    lines.push(`  class ${alias}["${mermaidText(node.label)}"]`);
+    for (const m of node.members) {
+      lines.push(`  ${alias} : ${mermaidText(m.text)}`);
+    }
+  }
+  for (const edge of graph.edges) {
+    const from = aliases.get(edge.from);
+    const to = aliases.get(edge.to);
+    if (from && to) lines.push(mermaidEdge(edge, from, to)); // Mermaid needs both classes declared
+  }
+  return `${lines.join('\n')}\n`;
+}
+
 // --- SVG export from the live maxGraph canvas (issue #271 Task 2) -------------
 // The domain canvas is already an SVG drawing (the maxGraph cell SHAPES) overlaid with HTML-label
 // `<foreignObject>` boxes (the themed `.koi-node` compartments). `canvasToSvg` clones that live tree into a
@@ -200,12 +238,13 @@ export function diagramToPlantUml(graph: DiagramGraph, kind: string, caption: st
 // DDD palette resolved to literal hex, so nothing renders as an unresolved `var(--koi-…)` once the SVG
 // leaves Studio (where those custom properties are defined on the theme root, not on the SVG).
 
-/** The Koine DDD palette custom properties the diagram's SVG styling depends on, resolved to concrete
- *  values so a standalone export renders identically outside Studio (these mirror the `_dark.scss` theme,
- *  the canvas's default). They cover the swimlane stroke (`--koi-line`), the context header text
- *  (`--koi-muted`), edge connectors (`--koi-diagram-edge`), node/edge label text (`--koi-fg`), the label
- *  pill background (`--koi-paper`) and the accent (`--koi-accent`). */
-const SVG_PALETTE: Record<string, string> = {
+/** The DDD palette custom properties the diagram's SVG styling depends on, with their `_dark.scss` values as
+ *  a FALLBACK only. The dark theme is the canvas default, but Studio also ships a light theme, so the actual
+ *  values are read from the live theme root at export time ({@link resolvePalette}) — these constants just
+ *  cover a headless/unstyled DOM (tests) or a token the theme leaves unset. They cover the swimlane stroke
+ *  (`--koi-line`), context-header text (`--koi-muted`), edge connectors (`--koi-diagram-edge`), node/edge
+ *  label text (`--koi-fg`), the label-pill background (`--koi-paper`/`--koi-paper-2`) and the accent. */
+const SVG_PALETTE_DARK: Record<string, string> = {
   '--koi-line': '#2a3242',
   '--koi-muted': '#7d8694',
   '--koi-diagram-edge': '#5d6b8e',
@@ -215,11 +254,29 @@ const SVG_PALETTE: Record<string, string> = {
   '--koi-accent': '#5aa9ff',
 };
 
+/** The palette resolved for the current export — set by {@link canvasToSvg} from the live theme. canvasToSvg
+ *  is synchronous, so a per-export module field is safe and avoids threading the map through every helper. */
+let activePalette: Record<string, string> = SVG_PALETTE_DARK;
+
+/** Resolve each palette token from the live theme root (`getComputedStyle(:root)`), so a light-theme export
+ *  bakes in light-theme colours rather than the frozen dark defaults. Any token the computed style leaves
+ *  blank (e.g. an unstyled/headless DOM under tests) falls back to its {@link SVG_PALETTE_DARK} value. */
+function resolvePalette(): Record<string, string> {
+  const root = typeof document !== 'undefined' ? document.documentElement : null;
+  const computed = root ? getComputedStyle(root) : null;
+  const out: Record<string, string> = {};
+  for (const token of Object.keys(SVG_PALETTE_DARK)) {
+    const live = computed?.getPropertyValue(token)?.trim();
+    out[token] = live ? live : SVG_PALETTE_DARK[token];
+  }
+  return out;
+}
+
 /** Build a `<style>` element that defines every palette token on `:root`/`svg` so any `var(--koi-…)` left
  *  in the cloned tree resolves to the concrete DDD value when the SVG is rendered standalone. */
 function buildPaletteStyle(doc: Document): SVGStyleElement {
   const style = doc.createElementNS('http://www.w3.org/2000/svg', 'style');
-  const decls = Object.entries(SVG_PALETTE)
+  const decls = Object.entries(activePalette)
     .map(([name, value]) => `${name}: ${value};`)
     .join(' ');
   style.textContent = `:root, svg { ${decls} }`;
@@ -243,11 +300,11 @@ function resolveVarAttributes(svg: SVGSVGElement): void {
 }
 
 /** Resolve a CSS value that may contain `var(--token)` / `var(--token, fallback)` to a concrete string:
- *  a known palette token → its hex; an inline fallback → that; otherwise a neutral slate so nothing paints
- *  as a literal `var(…)`. */
+ *  a known palette token → its resolved value; an inline fallback → that; otherwise a neutral slate so
+ *  nothing paints as a literal `var(…)`. */
 function resolveVarExpression(value: string): string {
   return value.replace(/var\(\s*(--[\w-]+)\s*(?:,\s*([^)]*))?\)/g, (_m, token: string, fallback?: string) => {
-    return SVG_PALETTE[token] ?? (fallback != null ? fallback.trim() : '#94a3b8');
+    return activePalette[token] ?? (fallback != null ? fallback.trim() : '#94a3b8');
   });
 }
 
@@ -280,6 +337,7 @@ function dim(n: number, fallback: number): number {
  * @throws if the handle exposes no `<svg>` surface (it always does for a built canvas).
  */
 export function canvasToSvg(handle: CanvasHandle): string {
+  activePalette = resolvePalette(); // snapshot the live theme so the export matches what's on screen
   const svg = findCanvasSvg(handle);
   const doc = svg.ownerDocument ?? document;
   const clone = svg.cloneNode(true) as SVGSVGElement;
@@ -388,16 +446,16 @@ export function svgToPng(svg: string, scale = 2): Promise<Uint8Array> {
 }
 
 /** Derive a filesystem-safe base name from a diagram caption: strip leading/trailing whitespace, replace any
- *  path-hostile character (`/ \ : * ? " < > |` and control chars) and collapsed whitespace with a single `_`,
- *  trim stray separators, and fall back to `'diagram'` when nothing usable remains. No extension is added. */
+ *  path-hostile character (`/ \ : * ? " < > |`) and whitespace runs with a single `_`, trim stray separators,
+ *  and fall back to `'diagram'` when nothing usable remains. Hyphens are KEPT (legal in filenames) so
+ *  `Order-Management` and `Order Management` don't collapse to the same name. No extension is added. */
 function safeBaseName(caption: string): string {
   const base = caption
     .trim()
-    // eslint-disable-next-line no-control-regex
-    .replace(/[/\\:*?"<>| -]+/g, '_')
+    .replace(/[/\\:*?"<>|]+/g, '_')
     .replace(/\s+/g, '_')
     .replace(/_+/g, '_')
-    .replace(/^[._]+|[._]+$/g, '');
+    .replace(/^[._-]+|[._-]+$/g, '');
   return base.length > 0 ? base : 'diagram';
 }
 
@@ -406,6 +464,10 @@ const EXTENSIONS: Record<'svg' | 'png' | 'plantuml', string> = {
   png: '.png',
   plantuml: '.puml',
 };
+
+/** One shared UTF-8 encoder for the text formats (PlantUML / SVG) — stateless, so a single module-level
+ *  instance is reused across exports rather than re-allocated per call. */
+const TEXT_ENCODER = new TextEncoder();
 
 /**
  * Export a Studio diagram in the chosen format and hand it to the host's `save` callback (issue #271).
@@ -429,10 +491,10 @@ export async function exportDiagram(
   let bytes: Uint8Array;
   switch (format) {
     case 'plantuml':
-      bytes = new TextEncoder().encode(diagramToPlantUml(diagram.graph, diagram.kind, diagram.caption));
+      bytes = TEXT_ENCODER.encode(diagramToPlantUml(diagram.graph, diagram.kind, diagram.caption));
       break;
     case 'svg':
-      bytes = new TextEncoder().encode(canvasToSvg(handle));
+      bytes = TEXT_ENCODER.encode(canvasToSvg(handle));
       break;
     case 'png':
       bytes = await svgToPng(canvasToSvg(handle));
