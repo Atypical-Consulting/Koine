@@ -5,7 +5,8 @@
 //
 // Needs a user-supplied Anthropic API key (set in Preferences, stored locally). With no key it
 // shows a prompt to add one rather than calling the API.
-import { runAssistant, type AiProvider, type ChatMessage } from '@/ai/ai';
+import { isLocalProviderUrl, runAssistant, type AiProvider, type ChatMessage } from '@/ai/ai';
+import { KOINE_PRIMER } from '@/ai/assistantTools';
 import { renderMarkdown } from '@/editor/editor';
 import { loadChat, saveChat, clearChat } from '@/settings/persistence';
 
@@ -81,28 +82,6 @@ export interface AssistantPanel {
    */
   explainSelection(): void;
 }
-
-// A concise Koine primer so the model emits valid `.koi`. Mirrors README's construct table.
-const KOINE_PRIMER = `You are an expert assistant embedded in Koine Studio, the IDE for **Koine** — a
-domain-specific language for Domain-Driven Design. A Koine model compiles to idiomatic C#/TypeScript.
-
-Koine essentials:
-- A model is one or more \`context Name { ... }\` bounded contexts.
-- \`value Name { field: Type  invariant <expr> "message" }\` — immutable value objects with invariants.
-- \`enum Name { A, B, C }\` — closed sets.
-- \`entity Name identified by NameId { field: Type ... }\` — entities with identity.
-- \`aggregate Name root RootEntity { ...nested value/enum/entity... }\` — consistency boundaries.
-- Inside an entity: \`command Verb(...) requires <guard>\`, \`create ...\`, \`emit Event(...)\`,
-  and \`states EnumType { A -> B  B -> C }\` state machines.
-- \`event Name { field: Type }\` and \`integration event Name { ... }\` (cross-context).
-- \`spec Name on Type = <bool expr>\`, \`service Name { operation ...  usecase ... }\`, \`policy ...\`.
-- \`repository\`, \`readmodel\`, \`query\` for the application/CQRS layer.
-- \`contextmap { Upstream -> Downstream : conformist | shared-kernel { T } | anti-corruption-layer ... }\`.
-- Primitive types: String, Int, Decimal, Bool, Instant. Collections: List<T>, Set<T>, Map<K,V>, Range.
-- Defaults: \`status: OrderStatus = Draft\`. Computed: \`subtotal: Money = unitPrice * quantity\`.
-
-When you write or revise a model, output the COMPLETE model in a single \`\`\`koine fenced code block so the
-user can apply it in one click. Keep prose tight and DDD-focused.`;
 
 /**
  * A compact, terse summary of the compiled domain structure for the system prompt. Omits any line
@@ -385,8 +364,7 @@ export function createAssistantPanel(opts: AssistantPanelOptions): AssistantPane
     const apiKey = opts.getApiKey();
     // A key is required for Anthropic and for any remote OpenAI-compatible endpoint; local servers
     // (Ollama / LM Studio on localhost) need no auth, so a blank key is fine there.
-    const isLocal = /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:|\/|$)/i.test(baseUrl);
-    const needsKey = provider === 'anthropic' || !isLocal;
+    const needsKey = provider === 'anthropic' || !isLocalProviderUrl(baseUrl);
     if (needsKey && !apiKey) {
       const note = addBubble('assistant');
       note.classList.add('koi-msg-note');
