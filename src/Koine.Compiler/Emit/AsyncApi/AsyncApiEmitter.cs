@@ -59,28 +59,70 @@ public sealed partial class AsyncApiEmitter : IEmitter
     }
 
     /// <summary>
-    /// The distinct integration events in the model, keyed and ordered by name (Ordinal) for
-    /// deterministic output. An integration event is a published-language contract, so its name is
-    /// the contract identity — a re-declaration of the same name in another context names the same
-    /// channel/message, hence the de-duplication.
+    /// An integration event paired with its owning context and the disambiguated <see cref="Key"/>
+    /// used for its channel, message, payload schema, and operations. The key is the bare event name
+    /// when that name is unique across the model, or a context-qualified <c>{Context}_{Event}</c> when
+    /// two contexts declare the same name — so every emit site agrees and no context's contract is
+    /// silently dropped. <see cref="Key"/> equalling <see cref="Name"/> therefore signals "no collision".
     /// </summary>
-    private static IReadOnlyList<IntegrationEventDecl> CollectEvents(KoineModel model)
+    private readonly record struct CollectedEvent(IntegrationEventDecl Event, string Context, string Key)
     {
-        var byName = new SortedDictionary<string, IntegrationEventDecl>(StringComparer.Ordinal);
+        /// <summary>The event's simple (unqualified) name.</summary>
+        public string Name => Event.Name;
+    }
 
-        // Iterate contexts in a stable (name) order, not declaration order, so that when two contexts
-        // declare an integration event of the same name the winner is deterministic regardless of how
-        // the sources were enumerated (directory mode merges many files into one model).
+    /// <summary>
+    /// The integration events to render, each carrying its owning context and a disambiguated channel
+    /// key, ordered by that key (Ordinal) for deterministic output. An integration event is a
+    /// published-language contract, so its name is normally the contract identity and the output stays
+    /// unqualified. But the validator does not guarantee name uniqueness across contexts: when two
+    /// contexts declare the same integration-event name (with possibly different fields), keying by the
+    /// bare name would drop one context's payload shape. Such colliding names — and only those — are
+    /// context-qualified, so the common single-declaration case keeps its clean, byte-identical output.
+    /// </summary>
+    private static IReadOnlyList<CollectedEvent> CollectEvents(KoineModel model)
+    {
+        // Every integration-event declaration with its owning context, gathered in a stable
+        // (context-name) order so the result is declaration-independent (directory mode merges many
+        // files into one model).
+        var declared = new List<(string Context, IntegrationEventDecl Event)>();
         foreach (ContextNode ctx in model.Contexts.OrderBy(c => c.Name, StringComparer.Ordinal))
         {
             foreach (IntegrationEventDecl ie in ctx.AllTypeDecls().OfType<IntegrationEventDecl>())
             {
-                byName.TryAdd(ie.Name, ie);
+                declared.Add((ctx.Name, ie));
             }
         }
 
-        return byName.Values.ToList();
+        // A simple name declared in more than one context can no longer identify a single contract by
+        // its bare form: those names (and only those) are context-qualified below.
+        var colliding = declared
+            .GroupBy(d => d.Event.Name, StringComparer.Ordinal)
+            .Where(g => g.Select(d => d.Context).Distinct(StringComparer.Ordinal).Count() > 1)
+            .Select(g => g.Key)
+            .ToHashSet(StringComparer.Ordinal);
+
+        // Key each event: a non-colliding name keeps its bare form; a colliding one is qualified per
+        // context, yielding one distinct entry per declaring context. Ordering by the final key keeps
+        // output deterministic.
+        var byKey = new SortedDictionary<string, CollectedEvent>(StringComparer.Ordinal);
+        foreach (var (context, ie) in declared)
+        {
+            var key = ChannelKey(context, ie.Name, colliding);
+            byKey.TryAdd(key, new CollectedEvent(ie, context, key));
+        }
+
+        return byKey.Values.ToList();
     }
+
+    /// <summary>
+    /// The disambiguated key for an integration event: the bare <paramref name="eventName"/> when it is
+    /// unique across the model, else a context-qualified <c>{Context}_{Event}</c> when the name collides
+    /// across contexts. A single helper used by every emit site so the channel, message, payload schema,
+    /// and operation <c>$ref</c>s always agree.
+    /// </summary>
+    private static string ChannelKey(string context, string eventName, IReadOnlySet<string> colliding) =>
+        colliding.Contains(eventName) ? $"{context}_{eventName}" : eventName;
 
     /// <summary>YAML 1.1 plain scalars that a permissive parser would coerce to a bool/null.</summary>
     private static readonly HashSet<string> YamlReservedScalars = new(StringComparer.OrdinalIgnoreCase)
