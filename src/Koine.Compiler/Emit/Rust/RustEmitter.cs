@@ -123,7 +123,7 @@ public sealed partial class RustEmitter : IEmitter
                 {
                     EmitType(emit, body, nested, context);
                 }
-                EmitAggregateExtras(emit, body, agg);
+                EmitAggregateExtras(emit, body, agg, context);
                 break;
             case EntityDecl entity:
                 body.Append('\n');
@@ -131,11 +131,11 @@ public sealed partial class RustEmitter : IEmitter
                 break;
             case EventDecl ev:
                 body.Append('\n');
-                EmitEvent(body, emit, ev.Name, ev.Doc, ev.Members);
+                EmitEvent(body, emit, context, ev.Name, ev.Doc, ev.Members);
                 break;
             case IntegrationEventDecl iev:
                 body.Append('\n');
-                EmitEvent(body, emit, iev.Name, iev.Doc, iev.Members);
+                EmitEvent(body, emit, context, iev.Name, iev.Doc, iev.Members);
                 break;
         }
     }

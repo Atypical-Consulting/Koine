@@ -335,6 +335,102 @@ public class RustSnapshotTests
         check.Ok.ShouldBeTrue(string.Join("\n", check.Errors));
     }
 
+    // ------------------------------------------------------------------
+    // Cross-context type references (issue #173, Task 1). A type owned by one
+    // bounded context but referenced from another must be qualified as
+    // `crate::<owner_module>::<Type>` so the flat multi-context crate resolves.
+    // ------------------------------------------------------------------
+
+    /// <summary>Two contexts: Sales (a conformist downstream) references Catalog's value object + enum.</summary>
+    private const string CrossContextFixture = """
+        context Catalog {
+          enum Grade(label: String) {
+            Premium("P")
+            Standard("S")
+          }
+
+          value Sku {
+            code: String
+            invariant code.trim.length > 0   "a sku needs a code"
+          }
+        }
+
+        context Sales {
+          value LineItem {
+            sku:      Sku
+            grade:    Grade
+            quantity: Int
+            invariant quantity >= 1   "an order line needs at least one unit"
+          }
+        }
+
+        contextmap {
+          Catalog -> Sales : conformist
+        }
+        """;
+
+    [Fact]
+    public Task Rust_cross_context_type_references_qualify()
+    {
+        var result = new KoineCompiler().Compile(CrossContextFixture, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var sales = result.Files.Single(f => f.RelativePath.EndsWith("sales.rs", StringComparison.Ordinal)).Contents;
+        // The foreign value object and enum are qualified to their owning context's module.
+        sales.ShouldContain("sku: crate::catalog::Sku");
+        sales.ShouldContain("grade: crate::catalog::Grade");
+
+        // The owning module declares them bare (it never self-qualifies).
+        var catalog = result.Files.Single(f => f.RelativePath.EndsWith("catalog.rs", StringComparison.Ordinal)).Contents;
+        catalog.ShouldContain("pub struct Sku");
+        catalog.ShouldContain("pub enum Grade");
+
+        return Verify(TestSupport.Render(result.Files)).UseDirectory("Snapshots");
+    }
+
+    [Fact]
+    public void Rust_cross_context_type_references_compile()
+    {
+        var result = new KoineCompiler().Compile(CrossContextFixture, new RustEmitter());
+        result.Success.ShouldBeTrue();
+
+        var check = TestSupport.CompileRust(result.Files);
+        if (!check.ToolchainAvailable)
+        {
+            _output.WriteLine(NoToolchainNotice);
+            return;
+        }
+
+        check.Ok.ShouldBeTrue(string.Join("\n", check.Errors));
+    }
+
+    /// <summary>
+    /// The six-context pizzeria template (the C# demo's end-to-end domain) emits a Rust crate that
+    /// compiles — the real multi-context proof: Menu's <c>Topping</c> referenced from Kitchen and the
+    /// shared-kernel <c>Currency</c> referenced from Ordering resolve to their owning modules.
+    /// </summary>
+    [Fact]
+    public void Rust_pizzeria_template_compiles()
+    {
+        if (FindTemplateDir("pizzeria") is not { } sources)
+        {
+            _output.WriteLine("INCONCLUSIVE: pizzeria template not found from the test assembly.");
+            return;
+        }
+
+        var result = new KoineCompiler().Compile(sources, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var check = TestSupport.CompileRust(result.Files);
+        if (!check.ToolchainAvailable)
+        {
+            _output.WriteLine(NoToolchainNotice);
+            return;
+        }
+
+        check.Ok.ShouldBeTrue(string.Join("\n", check.Errors));
+    }
+
     /// <summary>Reads a template under <c>templates/</c> by walking up to the repo root (the <c>.git</c> dir).</summary>
     private static string? FindTemplate(string relativePath)
     {
@@ -347,6 +443,29 @@ public class RustSnapshotTests
 
             var candidate = Path.Combine(dir.FullName, "templates", relativePath.Replace('/', Path.DirectorySeparatorChar));
             return File.Exists(candidate) ? File.ReadAllText(candidate) : null;
+        }
+
+        return null;
+    }
+
+    /// <summary>Loads every <c>.koi</c> file under a <c>templates/&lt;folder&gt;</c> directory as one model's sources.</summary>
+    private static IReadOnlyList<SourceFile>? FindTemplateDir(string folder)
+    {
+        for (DirectoryInfo? dir = new(AppContext.BaseDirectory); dir is not null; dir = dir.Parent)
+        {
+            if (!Directory.Exists(Path.Combine(dir.FullName, ".git")) && !File.Exists(Path.Combine(dir.FullName, ".git")))
+            {
+                continue;
+            }
+
+            var templateDir = Path.Combine(dir.FullName, "templates", folder);
+            return Directory.Exists(templateDir)
+                ? Directory
+                    .EnumerateFiles(templateDir, "*.koi", SearchOption.AllDirectories)
+                    .OrderBy(p => p, StringComparer.Ordinal)
+                    .Select(p => new SourceFile(p, File.ReadAllText(p)))
+                    .ToList()
+                : null;
         }
 
         return null;

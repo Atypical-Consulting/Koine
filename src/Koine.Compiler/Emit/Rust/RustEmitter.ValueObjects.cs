@@ -24,7 +24,7 @@ public sealed partial class RustEmitter
         var derived = vo.Members.Where(m => MemberAnalysis.IsDerived(m, memberNames)).ToList();
         var required = stored.Where(m => !HasConstantDefault(m)).ToList();
 
-        var typeMapper = new RustTypeMapper(emit.Index);
+        var typeMapper = new RustTypeMapper(emit.Index, context, _options);
         var translator = new RustExpressionTranslator(emit.Index, vo.Members, emit.EnumMemberToType, typeMapper, context);
 
         // The struct.

@@ -26,8 +26,21 @@ namespace Koine.Compiler.Emit.Rust;
 internal sealed class RustTypeMapper
 {
     private readonly ModelIndex _index;
+    private readonly string? _context;
+    private readonly RustEmitterOptions _options;
 
-    public RustTypeMapper(ModelIndex index) => _index = index;
+    /// <summary>
+    /// Creates a type mapper. When <paramref name="context"/> is supplied the mapper is
+    /// <em>context-aware</em>: a declared type owned by a different bounded context is qualified as
+    /// <c>crate::&lt;owner_module&gt;::&lt;Type&gt;</c> so a flat multi-context crate's cross-context
+    /// references resolve. A null context keeps the legacy single-context behaviour (bare names).
+    /// </summary>
+    public RustTypeMapper(ModelIndex index, string? context = null, RustEmitterOptions? options = null)
+    {
+        _index = index;
+        _context = context;
+        _options = options ?? RustEmitterOptions.Empty;
+    }
 
     /// <summary>The Rust type string for a member's declared type (wrapping optionals in <c>Option</c>).</summary>
     public string Map(TypeRef type)
@@ -59,10 +72,58 @@ internal sealed class RustTypeMapper
             case ModelIndex.RangeTypeName:
                 return $"Range<{MapArg(type.Element)}>";
             default:
-                // value / entity / aggregate / enum / ID / unknown types map to their Rust type name.
-                return RustNaming.ToPascalCase(type.Name);
+                // value / entity / aggregate / enum / ID / unknown types map to their Rust type name,
+                // qualified to their owning context's module when referenced from a different context.
+                return QualifyTypeName(type.Name);
         }
     }
+
+    /// <summary>
+    /// The Rust type name for a declared Koine type, qualified as
+    /// <c>crate::&lt;owner_module&gt;::&lt;Type&gt;</c> when the type is owned by a <em>different</em>
+    /// bounded context than the one being emitted (so cross-context references resolve in the flat
+    /// per-context module layout). Bare PascalCase otherwise — including in the legacy context-agnostic
+    /// mode and for branded ID newtypes, which are re-materialized locally rather than qualified.
+    /// </summary>
+    public string QualifyTypeName(string koineName)
+    {
+        var pascal = RustNaming.ToPascalCase(koineName);
+        if (_context is null || !IsQualifiable(koineName) || OwnerContextOf(koineName) is not { } owner)
+        {
+            return pascal;
+        }
+
+        var ownerModule = ModuleNameOf(owner);
+        return string.Equals(ownerModule, ModuleNameOf(_context), StringComparison.Ordinal)
+            ? pascal
+            : $"crate::{ownerModule}::{pascal}";
+    }
+
+    /// <summary>The single bounded context whose module emits a type, or null when unknown/ambiguous.</summary>
+    private string? OwnerContextOf(string koineName)
+    {
+        // A shared-kernel type is physically emitted into one canonical owner's module (e.g. the
+        // pizzeria's `Currency`, jointly owned by Menu and Ordering, lands in Menu's module).
+        if (_index.IsSharedKernelType(koineName) && _index.KernelOwnerOfType(koineName) is { } kernelOwner)
+        {
+            return kernelOwner;
+        }
+
+        IReadOnlyList<string> declaring = _index.DeclaringContextsOf(koineName);
+        return declaring.Count == 1 ? declaring[0] : null;
+    }
+
+    /// <summary>
+    /// True for the named declared kinds that emit a Rust type into a context module (so a foreign one
+    /// is worth qualifying). Branded ID newtypes are excluded: a foreign id is re-materialized locally
+    /// by <c>OrderedUnownedIds</c>, never module-qualified.
+    /// </summary>
+    private bool IsQualifiable(string koineName) => _index.Classify(koineName) is
+        TypeKind.Value or TypeKind.Entity or TypeKind.Aggregate or TypeKind.Enum
+        or TypeKind.Event or TypeKind.IntegrationEvent or TypeKind.ReadModel or TypeKind.Query;
+
+    /// <summary>The Rust module name a context's types emit into (snake_case, with any configured remap).</summary>
+    private string ModuleNameOf(string context) => _options.RemapModule(RustNaming.ToSnakeCase(context));
 
     /// <summary>Maps a type argument, defaulting to <c>String</c> for a missing/null arg.</summary>
     private string MapArg(TypeRef? arg) => arg is not null ? Map(arg) : "String";

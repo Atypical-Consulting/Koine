@@ -15,7 +15,7 @@ public sealed partial class RustEmitter
 {
     private void EmitEntity(StringBuilder body, RustEmitContext emit, EntityDecl entity, string context)
     {
-        var typeMapper = new RustTypeMapper(emit.Index);
+        var typeMapper = new RustTypeMapper(emit.Index, context, _options);
 
         // The branded identity newtype.
         EmitIdType(body, entity.IdentityName, IdBacking(entity));
@@ -137,6 +137,15 @@ public sealed partial class RustEmitter
         {
             var value = RustExpressionTranslator.StripOuterParens(
                 translator.Translate(t.Value, RustExpressionTranslator.NameMode.Property, TransitionEnum(entity, t, emit.Index)));
+
+            // Assigning a non-optional value into an `Option<T>` field (e.g. `started_at <- now`) wraps
+            // it in `Some(...)`; an already-optional RHS flows through unchanged.
+            Member? field = entity.Members.FirstOrDefault(m => m.Name == t.Field);
+            if (field is { Type.IsOptional: true } && !translator.IsOptional(t.Value))
+            {
+                value = $"Some({value})";
+            }
+
             body.Append(Indent).Append(Indent).Append("self.").Append(RustNaming.Field(t.Field)).Append(" = ")
                 .Append(value).Append(";\n");
         }

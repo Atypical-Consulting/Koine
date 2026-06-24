@@ -203,6 +203,23 @@ internal sealed class RustExpressionTranslator
         TypeScope scope = EffectiveScope();
         TypeRef? leftType = _resolver.Infer(bin.Left, scope);
         TypeRef? rightType = _resolver.Infer(bin.Right, scope);
+
+        // String concatenation lowers to `String + &str` — Rust's `+` on strings consumes an owned
+        // left and borrows the right. Cloning both sides (the default for non-Copy arithmetic operands)
+        // would emit the invalid `String + String`, so route string `+` through a dedicated writer.
+        if (bin.Op == BinaryOp.Add && (leftType?.Name == "String" || rightType?.Name == "String"))
+        {
+            WriteStringOwned(bin.Left, sb);
+            sb.Append(" + ");
+            WriteStrRef(bin.Right, sb);
+            if (parenthesize)
+            {
+                sb.Append(')');
+            }
+
+            return;
+        }
+
         var isArithmetic = bin.Op is BinaryOp.Add or BinaryOp.Sub or BinaryOp.Mul or BinaryOp.Div;
 
         // Decimal coercion: an Int operand on the side opposite a Decimal becomes a Decimal.
@@ -315,7 +332,7 @@ internal sealed class RustExpressionTranslator
                     : owners.Count == 1
                         ? owners[0]
                         : _enumMemberToType.TryGetValue(name, out var fallback) ? fallback : owners[0];
-                sb.Append(RustNaming.ToPascalCase(enumType)).Append("::").Append(RustNaming.Variant(name));
+                sb.Append(_typeMapper.QualifyTypeName(enumType)).Append("::").Append(RustNaming.Variant(name));
                 return;
             }
         }
@@ -343,10 +360,11 @@ internal sealed class RustExpressionTranslator
             return;
         }
 
-        // (5) An enum *type* reference (qualifier of `OrderStatus.Draft`): the PascalCase type.
+        // (5) An enum *type* reference (qualifier of `OrderStatus.Draft`): the PascalCase type,
+        // module-qualified when the enum is owned by another bounded context.
         if (_index.Classify(name) == TypeKind.Enum)
         {
-            sb.Append(RustNaming.ToPascalCase(name));
+            sb.Append(_typeMapper.QualifyTypeName(name));
             return;
         }
 
@@ -375,7 +393,7 @@ internal sealed class RustExpressionTranslator
         if (ma.Target is IdentifierExpr qualifier && !_memberNames.Contains(qualifier.Name)
             && !_locals.Contains(qualifier.Name) && _index.Classify(qualifier.Name) == TypeKind.Enum)
         {
-            sb.Append(RustNaming.ToPascalCase(qualifier.Name)).Append("::").Append(RustNaming.Variant(ma.MemberName));
+            sb.Append(_typeMapper.QualifyTypeName(qualifier.Name)).Append("::").Append(RustNaming.Variant(ma.MemberName));
             return;
         }
 
@@ -527,6 +545,36 @@ internal sealed class RustExpressionTranslator
         var owned = bodyType is { } bt && !_typeMapper.IsCopy(bt) ? ".clone()" : string.Empty;
         return $"{target}.iter().map(|{RustNaming.Field(lambda.Parameter)}| {body}{owned})";
     }
+
+    /// <summary>
+    /// Writes a String-typed expression as an owned <c>String</c> — the left side of a <c>+</c> concat.
+    /// A nested concatenation already evaluates to an owned String; a string literal is promoted with
+    /// <c>.to_string()</c>; a place (field/local) is cloned.
+    /// </summary>
+    private void WriteStringOwned(Expr expr, StringBuilder sb)
+    {
+        switch (expr)
+        {
+            case BinaryExpr { Op: BinaryOp.Add } nested:
+                WriteBinary(nested, sb, parenthesize: true);
+                return;
+            case LiteralExpr { Kind: LiteralKind.String } lit:
+                WriteLiteral(lit, sb, null);
+                sb.Append(".to_string()");
+                return;
+            default:
+                Write(expr, sb, null);
+                if (IsNonCopyPlace(expr, _resolver.Infer(expr, EffectiveScope())))
+                {
+                    sb.Append(".clone()");
+                }
+
+                return;
+        }
+    }
+
+    /// <summary>True when an expression's inferred type is optional — used to decide <c>Some(...)</c> wrapping.</summary>
+    public bool IsOptional(Expr expr) => _resolver.Infer(expr, EffectiveScope())?.IsOptional == true;
 
     /// <summary>Writes a string-typed argument as a <c>&amp;str</c> reference for std string methods.</summary>
     private void WriteStrRef(Expr expr, StringBuilder sb)
