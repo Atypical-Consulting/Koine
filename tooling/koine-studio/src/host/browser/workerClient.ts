@@ -166,7 +166,7 @@ export function createWorkerClient(workerFactory: () => WorkerLike): WorkerClien
 
   // ---- Internal helpers ----
 
-  /** Reject and remove one pending entry, then optionally call the post-clear hook. */
+  /** Reject and remove one pending entry. */
   function rejectPending(id: number, err: Error): void {
     const entry = pending.get(id);
     if (!entry) return;
