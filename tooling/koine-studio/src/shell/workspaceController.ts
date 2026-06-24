@@ -59,7 +59,8 @@ export interface WorkspaceEditor {
 
 /** The slice of the {@link import('@/shell/explorer').Explorer} the tree render calls. */
 export interface WorkspaceExplorer {
-  render(entries: FsEntry[], rootToken: string): void;
+  /** Render one GROUP per workspace root (a single group renders headerless, like the legacy single-root render). */
+  renderRoots(groups: { root: string; entries: FsEntry[] }[]): void;
 }
 
 export interface WorkspaceControllerDeps {
@@ -304,10 +305,10 @@ export function createWorkspaceController(deps: WorkspaceControllerDeps): Worksp
     // dirty transition (edit, save, save-all, cross-file rename, workspace swap).
     deps.refreshDirtyIndicator();
     if (roots.length === 0) return;
-    // Task 3 generalizes the explorer to render one group PER root (entriesByRoot). For now this still
-    // renders only the PRIMARY root through the unchanged single-root explorer.render(entries, root).
-    const primary = roots[0];
-    explorer.render(entriesByRoot.get(primary) ?? [], primary);
+    // Feed the explorer EVERY root's entries (one render group per root, in add order). The explorer
+    // renders a single group headerless (byte-identical to the old single-root path) and 2+ groups with
+    // per-root headers + a Remove affordance.
+    explorer.renderRoots(roots.map((r) => ({ root: r, entries: entriesByRoot.get(r) ?? [] })));
   }
 
   /** Re-read EVERY root's entry tree from the host (into entriesByRoot) and re-render the explorer. */

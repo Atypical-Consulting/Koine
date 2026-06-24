@@ -734,4 +734,113 @@ describe('explorer', () => {
     ex.render(sampleTree(), 'ROOT');
     expect(ex.el.querySelector('li[data-kind="dir"]')!.getAttribute('aria-expanded')).toBe('false');
   });
+
+  // --- multi-root groups (Task 3) -------------------------------------------
+
+  // A second workspace root, structurally like sampleTree() but under a different folder token.
+  function secondTree(): FsEntry[] {
+    return [
+      {
+        token: 'OTHER/catalog',
+        name: 'catalog',
+        relPath: 'catalog',
+        kind: 'dir',
+        children: [
+          { token: 'OTHER/catalog/item.koi', name: 'item.koi', relPath: 'catalog/item.koi', kind: 'file' },
+        ],
+      },
+      { token: 'OTHER/billing.koi', name: 'billing.koi', relPath: 'billing.koi', kind: 'file' },
+    ];
+  }
+
+  it('single-root render produces NO group header (entries stay direct tree children)', () => {
+    const cb = makeCallbacks();
+    const ex = createExplorer(cb);
+    document.body.appendChild(ex.el);
+    ex.renderRoots([{ root: 'ROOT', entries: sampleTree() }]);
+
+    // No group-header chrome for a single root.
+    expect(ex.el.querySelector('.explorer-group-header')).toBeNull();
+    // The top-level rows are STILL direct <li role=treeitem> children of <ul role=tree>.
+    const tree = ex.el.querySelector('ul[role="tree"]')!;
+    const topItems = Array.from(tree.children).filter((c) => c.getAttribute('role') === 'treeitem');
+    expect(topItems.length).toBe(2);
+    expect(tree.querySelector(':scope > li[role="treeitem"][data-kind="dir"]')).not.toBeNull();
+  });
+
+  it('renders one group header per root, labeled by the folder name, for 2+ roots', () => {
+    const cb = makeCallbacks();
+    const ex = createExplorer(cb);
+    document.body.appendChild(ex.el);
+    ex.renderRoots([
+      { root: '/home/me/sales', entries: sampleTree() },
+      { root: '/home/me/billing', entries: secondTree() },
+    ]);
+
+    const headers = Array.from(ex.el.querySelectorAll<HTMLElement>('.explorer-group-header'));
+    expect(headers.length).toBe(2);
+    const names = headers.map((h) => h.querySelector('.explorer-group-name')?.textContent);
+    expect(names).toEqual(['sales', 'billing']);
+
+    // Each group still shows its own file rows.
+    const allNames = Array.from(ex.el.querySelectorAll<HTMLElement>('.explorer-name')).map((n) => n.textContent);
+    expect(allNames).toContain('order.koi');
+    expect(allNames).toContain('item.koi');
+  });
+
+  it('clicking the "Add folder" affordance invokes onAddRoot', () => {
+    const cb = makeCallbacks();
+    const onAddRoot = vi.fn();
+    const ex = createExplorer({ ...cb, onAddRoot });
+    document.body.appendChild(ex.el);
+    ex.render(sampleTree(), 'ROOT');
+
+    const addBtn = ex.el.querySelector<HTMLElement>('.explorer-add-root');
+    expect(addBtn).not.toBeNull();
+    addBtn!.click();
+    expect(onAddRoot).toHaveBeenCalledTimes(1);
+  });
+
+  it("clicking a group's Remove affordance invokes onRemoveRoot with that group's root", () => {
+    const cb = makeCallbacks();
+    const onRemoveRoot = vi.fn();
+    const ex = createExplorer({ ...cb, onRemoveRoot });
+    document.body.appendChild(ex.el);
+    ex.renderRoots([
+      { root: '/home/me/sales', entries: sampleTree() },
+      { root: '/home/me/billing', entries: secondTree() },
+    ]);
+
+    const removeBtns = Array.from(ex.el.querySelectorAll<HTMLElement>('.explorer-group-remove'));
+    expect(removeBtns.length).toBe(2);
+    // The second group's Remove targets the second root.
+    removeBtns[1].click();
+    expect(onRemoveRoot).toHaveBeenCalledTimes(1);
+    expect(onRemoveRoot).toHaveBeenCalledWith('/home/me/billing');
+  });
+
+  it("a group's New File targets THAT group's root (multi-root create routing)", () => {
+    const cb = makeCallbacks();
+    const ex = createExplorer(cb);
+    document.body.appendChild(ex.el);
+    ex.renderRoots([
+      { root: '/home/me/sales', entries: sampleTree() },
+      { root: '/home/me/billing', entries: secondTree() },
+    ]);
+
+    // Right-click a top-level FILE in the SECOND group → New File falls back to that group's root.
+    const billingRow = Array.from(ex.el.querySelectorAll<HTMLElement>('li[data-kind="file"] > .explorer-row')).find(
+      (r) => r.querySelector('.explorer-name')?.textContent === 'billing.koi',
+    )!;
+    billingRow.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 5, clientY: 5 }));
+    const item = Array.from(document.querySelectorAll<HTMLElement>('.explorer-menu-item')).find(
+      (b) => b.textContent === 'New File',
+    )!;
+    item.click();
+    const input = ex.el.querySelector<HTMLInputElement>('.explorer-create .explorer-rename')!;
+    input.value = 'extra.koi';
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+
+    expect(cb.onNewFile).toHaveBeenCalledWith('/home/me/billing', 'extra.koi');
+  });
 });

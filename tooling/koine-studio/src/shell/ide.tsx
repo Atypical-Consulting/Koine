@@ -456,6 +456,10 @@ export function init(): () => void {
     isActive: (token) => pathToFileUri(token) === workspace.activeUri(),
     isDirty: (token) => workspace.buffers.get(pathToFileUri(token))?.dirty ?? false,
     diagCounts: (token) => diagCounts(pathToFileUri(token)),
+    // Multi-root workspace: the head "Add folder" affordance unions a second folder in as a new root;
+    // each group's "Remove" affordance drops just that root's files.
+    onAddRoot: () => void addRootViaPicker(),
+    onRemoveRoot: (root) => workspace.removeRoot(root),
   });
   treeBodyEl.appendChild(explorer.el);
 
@@ -879,6 +883,26 @@ export function init(): () => void {
     }
     if (!folder) return; // cancelled
     await workspace.openFolderPath(folder);
+  }
+
+  // ADDITIVE multi-root open (the explorer's "Add folder" affordance): pick a folder and union its
+  // .koi files into the current workspace as a new root WITHOUT closing the open buffers — mirrors
+  // openFolder's guard/picker/try-catch, but calls addRoot instead of openFolderPath.
+  async function addRootViaPicker(): Promise<void> {
+    if (!platform.canOpenFolders) {
+      setStatus('opening a folder needs a Chromium-based browser', 'error');
+      return;
+    }
+    let folder: string | null;
+    try {
+      folder = await platform.pickFolder('Add a folder to the workspace');
+    } catch (e) {
+      setStatus('could not open folder picker', 'error');
+      console.error('Add folder dialog failed:', e);
+      return;
+    }
+    if (!folder) return; // cancelled
+    await workspace.addRoot(folder);
   }
 
   // The workspace lifecycle (buffers + open/save/dirty + file mutations, src/workspaceController.ts,

@@ -244,7 +244,7 @@ function makeDeps(
     platform: platform as unknown as Platform,
     lsp: lsp as unknown as WorkspaceControllerDeps['lsp'],
     editor: editor as unknown as WorkspaceControllerDeps['editor'],
-    explorer: { render: vi.fn() },
+    explorer: { renderRoots: vi.fn() },
     setStatus: vi.fn(),
     refreshDirtyIndicator: vi.fn(),
     showDiagnostics: vi.fn(),

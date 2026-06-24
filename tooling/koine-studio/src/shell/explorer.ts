@@ -30,13 +30,35 @@ export interface ExplorerCallbacks {
   isActive(fileToken: string): boolean;
   isDirty(fileToken: string): boolean;
   diagCounts(fileToken: string): { errors: number; warnings: number };
+  /** Add a new folder (root) to the workspace (the head "Add folder" affordance). Optional. */
+  onAddRoot?(): void;
+  /** Remove the workspace root `root` (a per-group "Remove" affordance). Optional. */
+  onRemoveRoot?(root: string): void;
+}
+
+/** One workspace root and the entry tree fetched for it — a render group. */
+export interface ExplorerRootGroup {
+  /** The opened-folder token used as the New File/Folder parent at this group's top level. */
+  root: string;
+  /** The pre-sorted FsEntry hierarchy under `root`. */
+  entries: FsEntry[];
 }
 
 export interface Explorer {
   /** The root <div class="explorer"> (head + <ul role="tree">) to mount into #filetree-body. */
   el: HTMLElement;
-  /** (Re)render the whole tree. `rootToken` is the opened-folder token used as the New File/Folder parent at the top level. */
+  /**
+   * (Re)render the whole tree as one group. `rootToken` is the opened-folder token used as the New
+   * File/Folder parent at the top level. Equivalent to `renderRoots([{ root: rootToken, entries }])`.
+   */
   render(entries: FsEntry[], rootToken: string): void;
+  /**
+   * (Re)render the tree, one GROUP per workspace root. A single group renders with NO header (its
+   * entries are direct <li role="treeitem"> children of the <ul role="tree">, identical to a
+   * single-root `render`); 2+ groups each get a header (folder name + a "Remove" affordance) and a
+   * per-group item list whose top-level New File/Folder + drag-to-root target that group's root.
+   */
+  renderRoots(groups: ExplorerRootGroup[]): void;
 }
 
 /** One context-menu action, shown in the right-click / "…" / empty-space menu. */
@@ -70,6 +92,9 @@ const TOOL_ICON = {
     '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 8.2 8 4.8l3.5 3.4"/><path d="M4.5 11.6 8 8.2l3.5 3.4"/></svg>',
   expandAll:
     '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 4.4 8 7.8l3.5-3.4"/><path d="M4.5 7.8 8 11.2l3.5-3.4"/></svg>',
+  // Add-folder: a folder outline with a "+", distinct from new-folder by sitting alone in the toolbar.
+  addRoot:
+    '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"><path d="M1.9 4.4c0-.6.4-1 1-1h2.7c.3 0 .6.1.8.4l.7.9h6c.5 0 1 .4 1 1v5.5c0 .6-.5 1-1 1H2.9c-.6 0-1-.4-1-1z"/><path d="M8 7.6v3.3M6.4 9.2h3.3"/></svg>',
 };
 
 export function createExplorer(cb: ExplorerCallbacks): Explorer {
@@ -103,10 +128,18 @@ export function createExplorer(cb: ExplorerCallbacks): Explorer {
   const newFolderBtn = toolbarButton('New folder', TOOL_ICON.newFolder, () => beginCreate(rootToken, 'dir'));
   const collapseBtn = toolbarButton('Collapse all', TOOL_ICON.collapseAll, () => setAllCollapsed(true));
   const expandBtn = toolbarButton('Expand all', TOOL_ICON.expandAll, () => setAllCollapsed(false));
+  // Add a second workspace root. Always available (single- or multi-root), so it sits in the head
+  // toolbar rather than inside any one group. Stable `.explorer-add-root` class for wiring/tests.
+  const addRootBtn = toolbarButton(
+    'Add folder to workspace',
+    TOOL_ICON.addRoot,
+    () => cb.onAddRoot?.(),
+    'explorer-add-root',
+  );
   const spacer = document.createElement('span');
   spacer.className = 'explorer-toolbar-spacer';
   spacer.setAttribute('aria-hidden', 'true');
-  toolbar.append(newFileBtn, newFolderBtn, spacer, collapseBtn, expandBtn);
+  toolbar.append(newFileBtn, newFolderBtn, addRootBtn, spacer, collapseBtn, expandBtn);
 
   head.append(filterRow, toolbar);
 
@@ -117,11 +150,16 @@ export function createExplorer(cb: ExplorerCallbacks): Explorer {
 
   root.append(head, tree);
 
+  // The PRIMARY root token (the first group's root): the toolbar New File/Folder target and the
+  // tree-background drag-to-root / empty-state / root-menu destination. Per-group top-level creates and
+  // drags target their OWN group's root (carried through `parentDir` / the group container), not this.
   let rootToken = '';
-  // The latest data the tree was rendered from, so the filter field, Collapse-all and reveal-active
-  // can re-render without the host re-supplying it.
-  let lastEntries: FsEntry[] = [];
-  let lastToken = '';
+  // Every group's root token, so beginCreate can find the right group container for a top-level create
+  // (a non-primary root isn't itself a rendered treeitem, so it's matched against this set instead).
+  const rootTokens = new Set<string>();
+  // The latest groups the tree was rendered from, so the filter field, Collapse-all and reveal-active
+  // can re-render without the host re-supplying them.
+  let lastGroups: ExplorerRootGroup[] = [];
   // The single floating context menu, lazily mounted to document.body and reused.
   let menuEl: HTMLElement | null = null;
   // The element to return focus to when the context menu closes (the row/li or '⋯').
@@ -143,7 +181,7 @@ export function createExplorer(cb: ExplorerCallbacks): Explorer {
   let renaming = false;
   let creating = false;
   let rendering = false;
-  let pendingRender: { entries: FsEntry[]; token: string } | null = null;
+  let pendingRender: { groups: ExplorerRootGroup[] } | null = null;
   // Drag-and-drop move state: the entry/li currently being dragged (null when not dragging).
   let dragEntry: FsEntry | null = null;
   let dragLi: HTMLLIElement | null = null;
@@ -410,18 +448,27 @@ export function createExplorer(cb: ExplorerCallbacks): Explorer {
       else collapsed.delete(e.token);
       for (const c of e.children ?? []) walk(c);
     };
-    for (const e of lastEntries) walk(e);
-    render(lastEntries, lastToken);
+    for (const g of lastGroups) for (const e of g.entries) walk(e);
+    renderRoots(lastGroups);
   }
 
   // --- keyboard navigation (WAI-ARIA tree pattern) ----------------------------
 
-  // Every visible (not inside a collapsed ancestor) treeitem <li>, in DOM/visual order.
+  // Every visible (not inside a collapsed ancestor) treeitem <li>, in DOM/visual order. In multi-root
+  // mode the treeitems live one level down (inside each group's <ul.explorer-group-items>); descend
+  // through those wrappers so keyboard nav crosses group boundaries in visual order.
   function visibleItems(): HTMLLIElement[] {
     const out: HTMLLIElement[] = [];
     const walk = (list: HTMLElement): void => {
-      for (const li of Array.from(list.children) as HTMLLIElement[]) {
-        if (li.getAttribute('role') !== 'treeitem') continue;
+      for (const child of Array.from(list.children) as HTMLElement[]) {
+        // A group wrapper (multi-root) holds its own items list — recurse into it, not past it.
+        if (child.classList.contains('explorer-group')) {
+          const items = child.querySelector<HTMLElement>(':scope > .explorer-group-items');
+          if (items) walk(items);
+          continue;
+        }
+        if (child.getAttribute('role') !== 'treeitem') continue;
+        const li = child as HTMLLIElement;
         out.push(li);
         if (li.dataset.kind === 'dir' && li.getAttribute('aria-expanded') === 'true') {
           const group = li.querySelector<HTMLElement>(':scope > .explorer-children');
@@ -620,8 +667,17 @@ export function createExplorer(cb: ExplorerCallbacks): Explorer {
 
     let container: HTMLElement;
     let depth = 0;
-    if (parentDirToken === rootToken) {
-      container = tree;
+    if (rootTokens.has(parentDirToken)) {
+      // A top-level create for a workspace root: in single-root mode this is the tree itself; in
+      // multi-root mode it's that group's own item list (matched by its data-root), so the inline row
+      // appears under the right group. Falls back to the tree if the group container isn't found.
+      const groupItems =
+        parentDirToken === rootToken
+          ? null
+          : tree.querySelector<HTMLElement>(
+              `.explorer-group[data-root="${cssEscape(parentDirToken)}"] > .explorer-group-items`,
+            );
+      container = groupItems ?? tree;
     } else {
       const dirLi = tree.querySelector<HTMLLIElement>(
         `li[role="treeitem"][data-kind="dir"][data-token="${cssEscape(parentDirToken)}"]`,
@@ -979,7 +1035,7 @@ export function createExplorer(cb: ExplorerCallbacks): Explorer {
   let filterTimer: ReturnType<typeof setTimeout> | undefined;
   const applyFilter = (): void => {
     filterText = filterInput.value.trim().toLowerCase();
-    render(lastEntries, lastToken);
+    renderRoots(lastGroups);
   };
   filterInput.addEventListener('input', () => {
     clearTimeout(filterTimer);
@@ -997,22 +1053,75 @@ export function createExplorer(cb: ExplorerCallbacks): Explorer {
 
   // --- render -----------------------------------------------------------------
 
+  // Single-root render: the byte-identical legacy entry point. One group with NO header — the entries
+  // are direct <li role="treeitem"> children of <ul role="tree">, exactly as before multi-root.
   function render(entries: FsEntry[], token: string): void {
-    rootToken = token;
-    lastEntries = entries;
-    lastToken = token;
+    renderRoots([{ root: token, entries }]);
+  }
+
+  // Build one root GROUP wrapper (multi-root only): a labeled section with a header (folder name +
+  // Remove) and its own <ul role="group"> of treeitems. The header carries the group's accessible name
+  // so AT announces which workspace folder these rows belong to.
+  function buildGroup(group: ExplorerRootGroup): HTMLLIElement {
+    const wrap = document.createElement('li');
+    wrap.className = 'explorer-group';
+    wrap.setAttribute('role', 'none'); // not a treeitem itself — a presentational section wrapper
+    wrap.dataset.root = group.root;
+
+    const header = document.createElement('div');
+    header.className = 'explorer-group-header';
+
+    const name = document.createElement('span');
+    name.className = 'explorer-group-name';
+    name.textContent = folderNameOf(group.root);
+    header.appendChild(name);
+
+    const remove = document.createElement('button');
+    remove.type = 'button';
+    remove.className = 'explorer-group-remove';
+    remove.setAttribute('aria-label', `Remove folder ${name.textContent}`);
+    remove.title = `Remove folder ${name.textContent}`;
+    remove.textContent = '✕';
+    remove.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      cb.onRemoveRoot?.(group.root);
+    });
+    header.appendChild(remove);
+
+    const items = document.createElement('ul');
+    items.className = 'explorer-group-items';
+    items.setAttribute('role', 'group');
+    items.setAttribute('aria-label', `Files in ${name.textContent}`);
+    for (const entry of group.entries) {
+      const li = buildItem(entry, 1, group.root);
+      if (li) items.appendChild(li);
+    }
+
+    wrap.append(header, items);
+    return wrap;
+  }
+
+  // Multi-root render: one GROUP per workspace root. Routes the single-root call through here too (as a
+  // one-group list with no header), so there is a single render code path.
+  function renderRoots(groups: ExplorerRootGroup[]): void {
+    lastGroups = groups;
+    rootToken = groups[0]?.root ?? '';
+    rootTokens.clear();
+    for (const g of groups) rootTokens.add(g.root);
     // Defer a re-render that lands during an inline rename/create, an open menu/confirm, or an active
     // drag — replaying it when the interaction ends — so we never detach a focused input (which would
     // commit a half-typed name on blur), dismiss a surface mid-aim, or invalidate a drag's drop checks.
     if (interactionOpen()) {
-      pendingRender = { entries, token };
+      pendingRender = { groups };
       return;
     }
     rendering = true;
     closeMenu();
 
-    // One pass: filter visibility, live dir tokens, match count, and the active file + ancestors.
-    currentAnalysis = analyze(entries);
+    // The union of every group's entries, so one analyze() pass covers filter visibility, live dirs,
+    // the match count and the active file across ALL roots.
+    const allEntries = groups.flatMap((g) => g.entries);
+    currentAnalysis = analyze(allEntries);
 
     // Drop stale tokens from `collapsed` (folders deleted/renamed/moved away since last render) so the
     // set can't grow unbounded or wrongly collapse a brand-new folder that reuses an old token.
@@ -1047,9 +1156,16 @@ export function createExplorer(cb: ExplorerCallbacks): Explorer {
     const refocusToken = focusedItem?.dataset.token;
 
     tree.innerHTML = '';
-    for (const entry of entries) {
-      const li = buildItem(entry, 1, token);
-      if (li) tree.appendChild(li);
+    if (groups.length <= 1) {
+      // Single root: NO group header — entries are direct treeitem children (byte-identical to the old
+      // single-root render). Use the primary root token as the top-level New File/Folder parent.
+      for (const entry of groups[0]?.entries ?? []) {
+        const li = buildItem(entry, 1, rootToken);
+        if (li) tree.appendChild(li);
+      }
+    } else {
+      // Multiple roots: one labeled group section per root.
+      for (const group of groups) tree.appendChild(buildGroup(group));
     }
 
     // Empty / no-match state.
@@ -1106,11 +1222,17 @@ export function createExplorer(cb: ExplorerCallbacks): Explorer {
     if (pendingRender && !interactionOpen() && !rendering) {
       const p = pendingRender;
       pendingRender = null;
-      render(p.entries, p.token);
+      renderRoots(p.groups);
     }
   }
 
-  return { el: root, render };
+  return { el: root, render, renderRoots };
+}
+
+/** The folder name shown in a group header: the root token's last non-empty path segment. */
+function folderNameOf(root: string): string {
+  const segs = root.split(/[\\/]/).filter(Boolean);
+  return segs.length ? segs[segs.length - 1] : root;
 }
 
 /** Escape a token for use inside a CSS attribute selector (CSS.escape when available). */
@@ -1125,10 +1247,10 @@ interface RowEl extends HTMLElement {
   _li?: HTMLLIElement;
 }
 
-function toolbarButton(label: string, svg: string, onClick: () => void): HTMLButtonElement {
+function toolbarButton(label: string, svg: string, onClick: () => void, extraClass?: string): HTMLButtonElement {
   const btn = document.createElement('button');
   btn.type = 'button';
-  btn.className = 'explorer-tool';
+  btn.className = extraClass ? `explorer-tool ${extraClass}` : 'explorer-tool';
   btn.setAttribute('aria-label', label);
   btn.title = label;
   // The icon is decorative — aria-hidden so screen readers announce only the aria-label, not the

@@ -98,10 +98,66 @@
 }
 
 .explorer-tree,
-.explorer-children {
+.explorer-children,
+.explorer-group,
+.explorer-group-items {
   list-style: none;
   margin: 0;
   padding: 0;
+}
+
+/* --- multi-root groups (one section per workspace root) --- */
+/* A labeled section wrapping one root's file rows; only present when 2+ roots are open. */
+.explorer-group + .explorer-group {
+  border-top: 1px solid var(--koi-line);
+}
+
+.explorer-group-header {
+  display: flex;
+  align-items: center;
+  gap: var(--koi-space-1);
+  padding: var(--koi-space-1) var(--koi-space-2) var(--koi-space-1) var(--koi-space-3);
+}
+
+.explorer-group-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: var(--koi-font-mono);
+  font-size: var(--koi-text-xs-plus);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--koi-muted);
+}
+
+.explorer-group-remove {
+  flex: 0 0 auto;
+  background: transparent;
+  border: none;
+  color: var(--koi-muted);
+  cursor: pointer;
+  font-size: var(--koi-text-sm);
+  line-height: 1;
+  padding: 0 var(--koi-space-0-5);
+  opacity: 0;
+}
+
+.explorer-group-header:hover .explorer-group-remove,
+.explorer-group-remove:focus-visible {
+  opacity: 1;
+}
+
+.explorer-group-remove:hover {
+  color: var(--koi-error);
+}
+
+.explorer-group-remove:focus-visible {
+  outline: 2px solid var(--koi-accent);
+  outline-offset: 1px;
+  border-radius: var(--koi-radius-2xs);
 }
 
 .explorer-tree {
