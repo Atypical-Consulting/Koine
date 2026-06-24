@@ -19,7 +19,7 @@ Want to try the compiler without installing anything? The <a class="koi-try" hre
 
 ```bash
 koine --version
-koine build <file.koi|dir> [--target csharp|typescript|python|php|rust|glossary|docs] [--out <dir>] [--glossary <file.md>] [--config <file>]
+koine build <file.koi|dir> [--target csharp|typescript|python|php|rust|glossary|docs|openapi] [--out <dir>] [--glossary <file.md>] [--config <file>]
 koine watch <file.koi|dir> [--target …] [--out …] [--config <file>]   # rebuild on every change
 koine fmt   <file.koi|dir> [--check]            # canonically format .koi (--check: verify only)
 koine init  [dir] [--force]                    # scaffold a starter project
@@ -52,7 +52,7 @@ Parses and validates the model, then — if you ask for output — emits files.
 | Flag | Default | What it does |
 |------|---------|--------------|
 | *(positional)* | — | The `.koi` file or directory to compile. Required. |
-| `--target` | `csharp` | The emitter: `csharp`, `typescript`, `python`, `php`, `rust`, `glossary`, or `docs`. |
+| `--target` | `csharp` | The emitter: `csharp`, `typescript`, `python`, `php`, `rust`, `glossary`, `docs`, or `openapi`. |
 | `--layers <list>` | `domain` | (C# only) Comma-separated layers to emit: `domain` (the model + application contracts) and/or `infrastructure` (a runnable EF Core realization — `DbContext`, repositories, unit of work, outbox, DI). `infrastructure` implies `domain`. See [C# infrastructure layer](#c-infrastructure-layer---layers). |
 | `--out <dir>` | *(none)* | Write the emitted files under this directory. Omit to only validate. |
 | `--layers <list>` | `domain` | Comma-separated output layers (`domain`, `application`). `application` implies `domain`. C# only. See [the Application layer](#the-c-application-layer). |
@@ -149,6 +149,23 @@ koine build templates/pizzeria --out Generated --glossary pizzeria.glossary.md
 
 Alternatively, `--target glossary` makes the glossary the primary output (paired with `--out`). Either way the glossary is grouped by context (each heading shows its `version`), then by type, listing fields, derived fields, and business rules.
 
+### Emit an OpenAPI spec
+
+`--target openapi` projects the model's API surface as an [OpenAPI 3.1](https://spec.openapis.org/oas/v3.1.0) document — one `<Context>/openapi.yaml` per bounded context, so a multi-context model never collides on a single file:
+
+```bash
+koine build templates/starters/billing/billing.koi --target openapi --out ./api
+# wrote 1 files to ./api
+```
+
+The output is deterministic (stable ordering, no timestamps) and self-contained. The mapping rules:
+
+- **Schemas.** Value objects, read models, and enums become `components/schemas`. Primitives map to their JSON types (`Int` → `integer`/`int32`, `Decimal` → `number`, `Instant` → `string`/`date-time`, …); nested value objects / enums / read models become `$ref`s; `List`/`Set` become `array`s (a `Set` adds `uniqueItems`); `Map` becomes an object with `additionalProperties`; an optional member becomes an OpenAPI-3.1 `["…", "null"]` type union (a `$ref` is wrapped in `anyOf`). A smart enum lowers to a string `enum` of its member names. ID value objects inline as `string`/`uuid`.
+- **Paths.** An entity **command** becomes a `POST` whose JSON request body is built from its parameters; a **query** becomes a `GET` whose criteria become query `parameters` and whose `200` response references the result schema. Operation paths are kebab-cased.
+- **Invariants.** Static value-object invariants lower, best-effort, to JSON-Schema validation keywords — `code.length <= 12` → `maxLength`, `amount >= 1` → `minimum`, `matches /…/` → `pattern`. Anything non-static (a guarded or transformed invariant) is silently dropped: the schema is an approximation of the model, never the reverse.
+
+Set `KOINE_OPENAPI_VALIDATE` (with an OpenAPI validator such as `openapi-spec-validator`, `swagger-cli`, or `redocly` on `PATH`) to have the test suite validate the emitted documents against the spec; absent the tool the conformance check is skipped.
+
 ### `koine.config`
 
 A `koine.config` file supplies defaults for the `build`/`watch` flags so you don't repeat `--target`/`--out` on every invocation. It is a tiny `key = value` format — one pair per line, `#` starts a comment:
@@ -166,7 +183,7 @@ out = generated
 
 The first one found wins; if none is found, no defaults are applied. A flag on the command line always overrides the config.
 
-**Keys read today.** The flat keys `target` (`csharp`, `typescript`, `python`, `php`, `rust`, `glossary`, or `docs`) and `out` (the output directory) are honoured, plus the per-target key `targets.csharp.layers` (e.g. `domain,infrastructure`) — the config equivalent of [`--layers`](#c-infrastructure-layer---layers), overridden by an explicit `--layers` flag. Every other key is **silently ignored**, which keeps the file forward-compatible — older tooling tolerates a newer config.
+**Keys read today.** The flat keys `target` (`csharp`, `typescript`, `python`, `php`, `rust`, `glossary`, `docs`, or `openapi`) and `out` (the output directory) are honoured, plus the per-target key `targets.csharp.layers` (e.g. `domain,infrastructure`) — the config equivalent of [`--layers`](#c-infrastructure-layer---layers), overridden by an explicit `--layers` flag. Every other key is **silently ignored**, which keeps the file forward-compatible — older tooling tolerates a newer config.
 
 :::note[`targets.*` is reserved for R16]
 A structured `targets.<name> = { … }` block (per-target namespace maps, `instantMode`, output layout) is sketched in the scaffolded config but **not yet implemented** — it is reserved for [R16](/Koine/guides/roadmap/#r16--multi-target-emitters) and ignored today. `koine init` writes a commented example of it for forward reference.

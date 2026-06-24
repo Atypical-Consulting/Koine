@@ -8,7 +8,7 @@
 [![Documentation](https://img.shields.io/badge/docs-koine-3245b8)](https://atypical-consulting.github.io/Koine/)
 [![.NET](https://img.shields.io/badge/.NET-10-512BD4)](https://dotnet.microsoft.com/)
 [![Tests](https://img.shields.io/badge/tests-950%2B%20passing-2ea44f)](tests/)
-![Target](https://img.shields.io/badge/emits-C%23%20%C2%B7%20TypeScript%20%C2%B7%20Python%20%C2%B7%20PHP%20%C2%B7%20Rust%20%C2%B7%20docs-178600)
+![Target](https://img.shields.io/badge/emits-C%23%20%C2%B7%20TypeScript%20%C2%B7%20Python%20%C2%B7%20PHP%20%C2%B7%20Rust%20%C2%B7%20docs%20%C2%B7%20AsyncAPI-178600)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 
 ## The problem
@@ -41,8 +41,14 @@ a `Vec`-friendly `DomainEvent` collection, query DTOs and read-model projections
 `trait`s; **multi-context** models compile end-to-end via `crate::<module>` qualification; depends only
 on `rust_decimal` for money and `regex` for `matches`, plus `uuid` when a model uses a factory), a
 **docs** target emits living
-documentation (`--target docs` → Markdown + Mermaid diagrams) straight from the model, and the parser
-and semantic model are kept strictly target-agnostic so further emitters can be added without touching them.
+documentation (`--target docs` → Markdown + Mermaid diagrams) straight from the model, an
+**AsyncAPI 3.0** target emits a single event-API document (`--target asyncapi` → channels, messages,
+JSON-Schema payloads, and send/receive operations derived from the integration-event + context-map
+graph), an **OpenAPI** target emits an API contract (`--target openapi` → a deterministic OpenAPI 3.1
+YAML document per bounded context: value objects / read models / enums become `components/schemas`,
+commands become `POST` operations and queries become `GET` operations, and static value-object
+invariants lower to JSON-Schema validation keywords), and the parser and semantic model are kept
+strictly target-agnostic so further emitters can be added without touching them.
 
 ## See it run — in your browser
 
@@ -136,6 +142,10 @@ needed for `subtotal` — nothing for you to write, and nothing external to refe
   invariants, commands, domain events, state machines, factories, specifications, services,
   policies, repositories, optimistic concurrency, the application layer (UoW, read models, CQRS),
   multi-file modules, context maps, integration events, and model versioning — all shipped.
+- **Enforced DDD reference discipline.** The compiler keeps your building blocks honest: a value
+  object can't embed an entity or aggregate, commands and domain events carry data and identities
+  rather than live references, and one aggregate references another only by its id — violations are
+  hard errors (`KOI1601`–`KOI1604`), not lint.
 - **A green build proves the domain.** Every construct is snapshot-tested *and* compiled and executed
   through an in-memory Roslyn meta-test, so a passing build means the generated C# is correct and
   usable — not just that it parses.
@@ -171,6 +181,12 @@ dotnet run --project src/Koine.Cli -- build templates/starters/billing/billing.k
 
 # Generate living documentation (Markdown + Mermaid state/class/context-map diagrams)
 dotnet run --project src/Koine.Cli -- build templates/starters/billing/billing.koi --target docs --out ./docs
+
+# Emit an AsyncAPI 3.0 document from the integration-event + context-map graph
+dotnet run --project src/Koine.Cli -- build templates/pizzeria --target asyncapi --out ./events
+
+# Emit an OpenAPI 3.1 spec (one <Context>/openapi.yaml per bounded context: schemas, paths, parameters)
+dotnet run --project src/Koine.Cli -- build templates/starters/billing/billing.koi --target openapi --out ./api
 
 # Just check a model parses & validates (no output)
 dotnet run --project src/Koine.Cli -- build templates/starters/billing/billing.koi
@@ -327,7 +343,8 @@ Koine.slnx
 │   │   │   ├── Php/        # PhpEmitter (Phase 1: tactical core, PHP 8.1)
 │   │   │   ├── Rust/       # RustEmitter (multi-context + CQRS read side)
 │   │   │   ├── Glossary/   # ubiquitous-language glossary
-│   │   │   └── Docs/       # living documentation (Markdown + Mermaid diagrams)
+│   │   │   ├── Docs/       # living documentation (Markdown + Mermaid diagrams)
+│   │   │   └── OpenApi/    # OpenApiEmitter (OpenAPI 3.1 spec per bounded context)
 │   │   ├── Diagnostics/    # Diagnostic
 │   │   └── Services/       # KoineCompiler (orchestrator) + LSP/tooling backend
 │   ├── Koine.Cli/          # `koine` command-line tool

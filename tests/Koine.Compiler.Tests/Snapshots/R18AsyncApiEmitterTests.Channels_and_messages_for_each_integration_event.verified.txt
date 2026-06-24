@@ -1,0 +1,54 @@
+﻿asyncapi: 3.0.0
+info:
+  title: Integration Events
+  version: 1.0.0
+channels:
+  OrderCancelled:
+    address: OrderCancelled
+    messages:
+      OrderCancelled:
+        $ref: '#/components/messages/OrderCancelled'
+  OrderPlaced:
+    address: OrderPlaced
+    messages:
+      OrderPlaced:
+        $ref: '#/components/messages/OrderPlaced'
+operations:
+  Sales_send_OrderCancelled:
+    action: send
+    channel:
+      $ref: '#/channels/OrderCancelled'
+    tags:
+      - name: Sales
+  Sales_send_OrderPlaced:
+    action: send
+    channel:
+      $ref: '#/channels/OrderPlaced'
+    tags:
+      - name: Sales
+components:
+  messages:
+    OrderCancelled:
+      name: OrderCancelled
+      payload:
+        $ref: '#/components/schemas/OrderCancelledPayload'
+    OrderPlaced:
+      name: OrderPlaced
+      summary: "Announced when a customer places an order."
+      payload:
+        $ref: '#/components/schemas/OrderPlacedPayload'
+  schemas:
+    OrderCancelledPayload:
+      type: object
+      properties:
+        orderId:
+          type: string
+      required:
+        - orderId
+    OrderPlacedPayload:
+      type: object
+      properties:
+        orderId:
+          type: string
+      required:
+        - orderId

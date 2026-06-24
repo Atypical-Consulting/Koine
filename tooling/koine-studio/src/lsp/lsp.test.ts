@@ -121,6 +121,18 @@ describe('KoineLsp document sync', () => {
   });
 });
 
+describe('KoineLsp capability queries', () => {
+  test('emitTargets() sends a document-independent koine/emitTargets request (#282)', () => {
+    vi.useFakeTimers(); // the request stays pending (no server here); keep its 15s timeout off the real clock.
+    const { lsp, sent } = harness();
+    void lsp.emitTargets().catch(() => {}); // resolves on a server response; swallow the eventual timeout.
+    const reqs = byMethod(sent, 'koine/emitTargets');
+    expect(reqs).toHaveLength(1);
+    expect(typeof reqs[0].id).toBe('number');
+    expect(reqs[0].params).toEqual({}); // no textDocument — the capability query is document-independent.
+  });
+});
+
 afterEach(() => {
   vi.useRealTimers();
 });

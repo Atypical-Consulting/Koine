@@ -10,6 +10,10 @@ Koine.Compiler.Emit.Rust.RustEmitter.Emit(Koine.Compiler.Ast.KoineModel! model, 
 Koine.Compiler.Emit.Rust.RustEmitter.RustEmitter() -> void
 Koine.Compiler.Emit.Rust.RustEmitter.TargetName.get -> string!
 Koine.Compiler.Emit.TypeScript.TypeScriptEmitter.CacheDiscriminator.get -> string!
+Koine.Compiler.Emit.OpenApi.OpenApiEmitter
+Koine.Compiler.Emit.OpenApi.OpenApiEmitter.Emit(Koine.Compiler.Ast.KoineModel! model) -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Emit.EmittedFile!>!
+Koine.Compiler.Emit.OpenApi.OpenApiEmitter.OpenApiEmitter() -> void
+Koine.Compiler.Emit.OpenApi.OpenApiEmitter.TargetName.get -> string!
 Koine.Compiler.Emit.EmitterOptions.EmitSourceMaps.get -> bool
 Koine.Compiler.Emit.EmitterOptions.EmitSourceMaps.init -> void
 Koine.Compiler.Emit.EmitterOptions.ReferenceOnly.get -> bool
@@ -197,3 +201,26 @@ static Koine.Compiler.Services.ScenarioService.Error(string! target, string! ope
 static Koine.Compiler.Services.ScenarioService.Catalog(Koine.Compiler.Ast.SemanticModel! semantic) -> System.Collections.Generic.IReadOnlyDictionary<string!, object?>!
 static Koine.Compiler.Services.ScenarioService.Run(Koine.Compiler.Ast.SemanticModel! semantic, string! target, string! operation, System.Text.Json.JsonElement given, System.Text.Json.JsonElement args) -> System.Collections.Generic.IReadOnlyDictionary<string!, object?>!
 static Koine.Compiler.Services.ScenarioService.WriteJson(System.Collections.Generic.IReadOnlyDictionary<string!, object?>! tree) -> string!
+Koine.Compiler.Emit.EmitTargetInfo
+Koine.Compiler.Emit.EmitTargetInfo.EmitTargetInfo(string! Id, string! DisplayName, string! FileExtension) -> void
+Koine.Compiler.Emit.EmitTargetInfo.Id.get -> string!
+Koine.Compiler.Emit.EmitTargetInfo.Id.init -> void
+Koine.Compiler.Emit.EmitTargetInfo.DisplayName.get -> string!
+Koine.Compiler.Emit.EmitTargetInfo.DisplayName.init -> void
+Koine.Compiler.Emit.EmitTargetInfo.FileExtension.get -> string!
+Koine.Compiler.Emit.EmitTargetInfo.FileExtension.init -> void
+Koine.Compiler.Emit.IEmitterProvider.DisplayName.get -> string!
+Koine.Compiler.Emit.IEmitterProvider.FileExtension.get -> string!
+Koine.Compiler.Emit.IEmitterProvider.IsEmitTarget.get -> bool
+Koine.Compiler.Emit.EmitterRegistry.SupportedTargetInfos.get -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Emit.EmitTargetInfo!>!
+Koine.Compiler.Emit.AsyncApi.AsyncApiEmitter
+Koine.Compiler.Emit.AsyncApi.AsyncApiEmitter.AsyncApiEmitter() -> void
+Koine.Compiler.Emit.AsyncApi.AsyncApiEmitter.Emit(Koine.Compiler.Ast.KoineModel! model) -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Emit.EmittedFile!>!
+Koine.Compiler.Emit.AsyncApi.AsyncApiEmitter.Emit(Koine.Compiler.Ast.KoineModel! model, Koine.Compiler.Ast.SemanticModel? semantic) -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Emit.EmittedFile!>!
+Koine.Compiler.Emit.AsyncApi.AsyncApiEmitter.TargetName.get -> string!
+const Koine.Compiler.Emit.AsyncApi.AsyncApiEmitter.FileName = "asyncapi.yaml" -> string!
+Koine.Compiler.Diagnostics.DiagnosticCategory.References = 19 -> Koine.Compiler.Diagnostics.DiagnosticCategory
+const Koine.Compiler.Diagnostics.DiagnosticCodes.ValueObjectReferencesEntity = "KOI1601" -> string!
+const Koine.Compiler.Diagnostics.DiagnosticCodes.EntityReferencesForeignAggregate = "KOI1602" -> string!
+const Koine.Compiler.Diagnostics.DiagnosticCodes.CommandParameterReferencesEntity = "KOI1603" -> string!
+const Koine.Compiler.Diagnostics.DiagnosticCodes.DomainEventReferencesEntity = "KOI1604" -> string!
