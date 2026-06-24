@@ -39,6 +39,7 @@ import {
 import { createWelcome } from '@/welcome/welcome';
 import { type Template } from '@/welcome/templates';
 import { createCommandPalette, type Command } from '@/shared/palette';
+import { devCommands } from '@/shell/devCommands';
 import { createPreferences } from '@/settings/prefs';
 import { applyAppearance } from '@/settings/appearance';
 import { initSplitResizer, initEdgeResizer } from '@/shell/resize';
@@ -88,7 +89,6 @@ import { type MobileZone } from '@/store/slices/uiChrome';
 import { BP_NARROW } from '@/shared/breakpoint';
 import { UnsavedIndicator } from '@/shell/UnsavedIndicator';
 import { WorkspaceProblemsBadge } from '@/diagnostics/WorkspaceProblemsBadge';
-import { StoreInspector } from '@/shell/StoreInspector';
 import { createWorkspaceController, type WorkspaceController } from '@/shell/workspaceController';
 import { createSearchPanel } from '@/shell/searchController';
 import { type Match } from '@/shell/workspaceSearch';
@@ -318,17 +318,26 @@ export function init(): () => void {
   // a scope pick through its persist-and-repaint choke point. It renders into #breadcrumb-host from init().
 
   // Dev-facing live store inspector (#193 follow-up): a read-only overlay of what the app store thinks
-  // right now, toggled from the command palette. Its host is created lazily on first toggle and the
-  // panel rendered once (it tracks the store thereafter); toggling just flips the host's hidden flag.
+  // right now, toggled from the command palette. Registered only in dev builds (see devCommands), and
+  // the panel is dynamic-import()ed here so its chunk never ships in production — the dev-only command
+  // is its sole caller, so in a vite build the import is unreachable and drops out of the bundle.
+  // The host is created lazily on first toggle and the panel rendered once (it tracks the store
+  // thereafter); toggling just flips the host's hidden flag.
   let storeInspectorHost: HTMLElement | null = null;
-  function toggleStoreInspector(): void {
+  let storeInspectorMounting = false;
+  async function toggleStoreInspector(): Promise<void> {
     if (!storeInspectorHost) {
-      // First invocation: create the host (visible by default) and render the panel once. Return here
-      // so we don't immediately flip it back to hidden — the first toggle SHOWS it.
+      // First invocation: load the panel chunk, create the host (visible by default) and render once.
+      // Guard against a double-click racing two mounts while the dynamic import is in flight. Return
+      // here so we don't immediately flip it back to hidden — the first toggle SHOWS it.
+      if (storeInspectorMounting) return;
+      storeInspectorMounting = true;
+      const { StoreInspector } = await import('@/shell/StoreInspector');
       storeInspectorHost = document.createElement('div');
       storeInspectorHost.className = 'koi-store-inspector-overlay';
       document.body.appendChild(storeInspectorHost);
       render(<StoreInspector store={appStore} />, storeInspectorHost);
+      storeInspectorMounting = false;
       return;
     }
     storeInspectorHost.hidden = !storeInspectorHost.hidden;
@@ -1668,7 +1677,7 @@ export function init(): () => void {
       { id: 'prefs', title: 'Settings…', hint: 'mod+,', group: 'View', run: () => prefs.open() },
       { id: 'help', title: 'Keyboard shortcuts', hint: 'F1', group: 'Help', run: () => help.open() },
       { id: 'about', title: 'About Koine Studio', group: 'Help', run: () => prefs.open('about') },
-      { id: 'toggle-store-inspector', title: 'Toggle store inspector (debug)', group: 'Help', run: () => toggleStoreInspector() },
+      ...devCommands(() => void toggleStoreInspector()),
       { id: 'view-preview', title: 'Show Emitted Preview', group: 'Workspace', run: () => controller.selectTech('preview') },
       { id: 'view-glossary', title: 'Show Glossary', group: 'Workspace', run: () => controller.selectDocsTab('glossary') },
       { id: 'view-decisions', title: 'Show Decisions (ADRs)', group: 'Workspace', run: () => controller.selectDocsTab('adr') },
