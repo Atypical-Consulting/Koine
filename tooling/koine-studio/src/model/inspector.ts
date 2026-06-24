@@ -11,6 +11,7 @@
 // members), so the element fields are optional and the panel renders those compartments only when a
 // future minimal emitter change populates them — the layout is forward-compatible.
 import type { DiagramNode, GlossaryEntry, ModelMember, Range } from '@/lsp/lsp';
+import { railHint, renderRailEmpty } from '@/model/railEmpty';
 
 /**
  * The language's built-in scalar/collection types — the always-available options for a property's
@@ -127,16 +128,11 @@ export function renderInspector(
   root.className = 'koi-inspector';
 
   if (!element) {
-    // Match the right-rail Rules/Notes empty state: a titled, left-aligned informational block
-    // (`.koi-rview-empty`) rather than a centred hint, so the three tabs read consistently.
-    root.classList.add('koi-rview-empty');
-    const title = document.createElement('h3');
-    title.className = 'koi-rview-empty-title';
-    title.textContent = 'Properties';
-    const hint = document.createElement('p');
-    hint.className = 'muted';
-    hint.textContent = 'Select an element in the model outline or a diagram to inspect it.';
-    root.append(title, hint);
+    // The shared rail empty state (same builder the Rules/Notes tabs use), nested inside the padded
+    // `.koi-inspector` root so it picks up the same panel margin as the other two tabs.
+    root.appendChild(
+      renderRailEmpty('Properties', railHint('Select an element in the model outline or a diagram to inspect it.')),
+    );
     return root;
   }
 
@@ -164,32 +160,19 @@ export function renderInspector(
  * projection as the Properties inspector so it tracks selection identically.
  */
 export function renderRules(element: InspectorElement | null): HTMLElement {
-  const root = document.createElement('div');
-  root.className = 'koi-rview-empty';
-
-  const title = document.createElement('h3');
-  title.className = 'koi-rview-empty-title';
-
   if (!element) {
-    title.textContent = 'Business rules';
-    const hint = document.createElement('p');
-    hint.className = 'muted';
-    hint.textContent =
-      'Select an element in the model outline or a diagram to see its invariants. Rules are authored in the .koi source and flagged live in the Problems panel.';
-    root.append(title, hint);
-    return root;
+    return renderRailEmpty(
+      'Business rules',
+      railHint(
+        'Select an element in the model outline or a diagram to see its invariants. Rules are authored in the .koi source and flagged live in the Problems panel.',
+      ),
+    );
   }
 
-  title.textContent = `${element.name} — business rules`;
-  root.appendChild(title);
-
   const rules = element.invariants ?? [];
+  const title = `${element.name} — business rules`;
   if (rules.length === 0) {
-    const none = document.createElement('p');
-    none.className = 'muted';
-    none.textContent = 'No invariants declared on this element.';
-    root.appendChild(none);
-    return root;
+    return renderRailEmpty(title, railHint('No invariants declared on this element.'));
   }
 
   const ul = document.createElement('ul');
@@ -200,8 +183,7 @@ export function renderRules(element: InspectorElement | null): HTMLElement {
     li.textContent = rule;
     ul.appendChild(li);
   }
-  root.appendChild(ul);
-  return root;
+  return renderRailEmpty(title, ul);
 }
 
 /**

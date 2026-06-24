@@ -39,7 +39,10 @@ const noop: InspectorHandlers = { onGoto: () => {} };
 describe('renderInspector', () => {
   test('renders an empty state when nothing is selected', () => {
     const el = renderInspector(null, noop);
-    expect(el.classList.contains('koi-rview-empty')).toBe(true);
+    // The padded .koi-inspector root wraps the shared rail empty state (renderRailEmpty — the same
+    // builder the Rules/Notes tabs use), so the three tabs share one margin and one markup.
+    expect(el.classList.contains('koi-inspector')).toBe(true);
+    expect(el.querySelector('.koi-rview-empty')).not.toBeNull();
     expect(el.querySelector('.koi-rview-empty-title')!.textContent).toBe('Properties');
     expect(el.textContent).toMatch(/select an element/i);
   });
