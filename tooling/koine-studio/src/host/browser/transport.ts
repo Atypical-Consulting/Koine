@@ -191,6 +191,24 @@ export class WasmLspTransport implements LspTransport {
       case 'koine/docs':
         return [result(JSON.parse(api.Docs(this.filesJson())))];
 
+      case 'koine/runScenario':
+        return [
+          result(
+            JSON.parse(
+              api.RunScenario(
+                this.filesJson(),
+                msg.params?.target ?? '',
+                msg.params?.operation ?? '',
+                JSON.stringify(msg.params?.given ?? {}),
+                JSON.stringify(msg.params?.args ?? {}),
+              ),
+            ),
+          ),
+        ];
+
+      case 'koine/scenarioCatalog':
+        return [result(JSON.parse(api.ScenarioCatalog(this.filesJson())))];
+
       case 'textDocument/references':
         return [result(JSON.parse(api.References(this.filesJson(), uri ?? '', pos?.line ?? 0, pos?.character ?? 0)))];
 

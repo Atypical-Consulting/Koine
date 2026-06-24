@@ -69,6 +69,7 @@ import { type SelectedElement } from '@/model/selection';
 import { resolveInspectableQn } from '@/model/modelIndex';
 import { type InspectorElement } from '@/model/inspector';
 import { createAssistantPanel, type AssistantPanel, type AssistantContext } from '@/ai/aiPanel';
+import { createScenarioPanel, type ScenarioPanel } from '@/scenarios/scenarioPanel';
 import { clearModelHash, readModelFromHash, workspaceShareUrlOrNull } from '@/export/share';
 import { handleBeforeUnload } from '@/shell/dirty';
 import { render } from 'preact';
@@ -485,6 +486,7 @@ export function init(): () => void {
     onAddConstruct: (kind) => void applyDiagramAddType({ kind }),
     gotoSourceSpan: (span) => void gotoSourceSpan(span),
     ensureAssistant: () => ensureAssistant(),
+    ensureScenarios: () => ensureScenarios(),
     initEdgeResizer,
   });
   // Thin shims over the app store (the single source of truth) for the two state reads ide.ts needs:
@@ -1257,6 +1259,21 @@ export function init(): () => void {
     return assistant;
   }
 
+  // The scenario-runner panel (#149) is created lazily the first time its tab is shown; the controller
+  // calls refresh() on every open so the catalog tracks the latest model. ide.ts owns the #view-scenarios
+  // host lookup; the panel itself is backend-agnostic (it only talks to the lsp client).
+  const scenariosView = el('view-scenarios');
+  let scenarios: ScenarioPanel | null = null;
+  function ensureScenarios(): ScenarioPanel {
+    if (scenarios) return scenarios;
+    scenarios = createScenarioPanel({
+      container: scenariosView,
+      lsp,
+      setStatus: (message) => setStatus(message, 'green'),
+    });
+    return scenarios;
+  }
+
   // Diagrams are rendered with a theme-matched Mermaid palette; re-render on a theme flip (covers
   // the toolbar toggle, the command palette, and Preferences — all route through setTheme). The
   // controller owns the diagram cache + center state, so it decides whether to re-render now.
@@ -1435,6 +1452,7 @@ export function init(): () => void {
       { id: 'view-diagrams', title: 'Show Visual Editor', group: 'Workspace', run: () => controller.selectCenter('visual') },
       { id: 'view-contextmap', title: 'Show Context Map', group: 'Workspace', run: () => controller.selectBottomTab('contextmap') },
       { id: 'view-check', title: 'Show Compatibility Check', group: 'Workspace', run: () => controller.selectTech('check') },
+      { id: 'view-scenarios', title: 'Show Scenario Runner', group: 'Workspace', run: () => controller.selectTech('scenarios') },
       { id: 'view-assistant', title: 'Show Assistant', group: 'Workspace', run: () => controller.selectTech('assistant') },
       { id: 'assistant-explain', title: 'Explain this construct', group: 'Workspace', run: () => { controller.selectTech('assistant'); ensureAssistant().explainSelection(); } },
     ];
