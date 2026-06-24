@@ -15,7 +15,7 @@ internal class BuildSettings : CommandSettings
     public string Path { get; init; } = "";
 
     [CommandOption("--target <TARGET>")]
-    [Description("Output target: csharp (default), typescript, python, php, rust, glossary, or docs.")]
+    [Description("Output target: csharp (default), typescript, python, php, rust, glossary, docs, or asyncapi.")]
     public string? Target { get; init; }
 
     [CommandOption("--out <DIR>")]
