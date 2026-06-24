@@ -69,7 +69,8 @@ in the plan.
 2. **Read the plan** — fetch the `🛠️ Implementation plan` from the issue body (or a comment, on older issues); save it and note where it lives.
 3. **Pick the execution mode** — assess complexity → *Inline (Extra)* or *Subagent-per-task (Ultracode)*.
 4. **Create the worktree** — via `superpowers:using-git-worktrees`; branch off `main`.
-5. **Open the draft PR** — empty scaffold commit, push, `gh pr create --draft` linking the issue.
+5. **Open the draft PR** — empty scaffold commit, push, `gh pr create --draft` linking the issue; the
+   PR title ends with `(#<issue>)`.
 6. **Loop until every task is checked** — implement the next unchecked task → verify green → commit
    → tick that task's checkboxes on the issue → push.
 7. **Code review** — run the `code-review` skill, apply + commit the fixes, push.
@@ -165,12 +166,19 @@ that worktree. If a worktree/branch for this issue already exists (resume case),
 The user wants the PR visible as a **draft before** the implementation loop, so create it up front.
 A PR needs the branch to be ahead of `main`, so land an empty scaffold commit, push, then open it:
 
+**The PR title must end with `(#<issue>)`** — the issue title followed by the issue number in
+parentheses, e.g. `Surface the Rust emitter target in Koine Studio (IDE) (#172)`. The repo
+**squash-merges** PRs, and GitHub appends the *PR* number to the squash commit's title — so titling the
+PR with the *issue* number makes the final `main` commit carry **both**, matching the repo's history
+(`… (#254) (#274)`, `… (#171) (#252)` — issue first, PR second). Drop it and the merged commit records
+only the PR number, losing the link back to the issue at a glance.
+
 ```bash
 git -c user.email=phmatray@gmail.com -c user.name="Philippe Matray" \
   commit --allow-empty -m "chore(#$ISSUE): scaffold draft PR for <title>"
 git push -u origin <branch>
 gh pr create --draft --base main --head <branch> \
-  --title "<title>" \
+  --title "<title> (#$ISSUE)" \
   --body "Implements #$ISSUE.
 
 Closes #$ISSUE.
