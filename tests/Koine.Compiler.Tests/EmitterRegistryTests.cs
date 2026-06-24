@@ -14,7 +14,7 @@ namespace Koine.Compiler.Tests;
 public class EmitterRegistryTests
 {
     private static readonly string[] UnifiedTargets =
-        { "csharp", "typescript", "python", "php", "rust", "glossary", "docs" };
+        { "csharp", "typescript", "python", "php", "rust", "glossary", "docs", "asyncapi" };
 
     [Fact]
     public void Unified_registry_exposes_the_full_target_list_in_display_order()
@@ -90,6 +90,7 @@ public class EmitterRegistryTests
             new EmitTargetInfo("python", "Python", ".py"),
             new EmitTargetInfo("php", "PHP", ".php"),
             new EmitTargetInfo("rust", "Rust", ".rs"),
+            new EmitTargetInfo("asyncapi", "AsyncAPI", ".yaml"),
         });
 
         var ids = new EmitterRegistry().SupportedTargetInfos.Select(i => i.Id).ToArray();

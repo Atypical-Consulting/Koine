@@ -36,7 +36,7 @@ public class EmitTargetsWireParityTests
         var targets = JsonNode.Parse(WasmListEmitTargets())!["targets"]!.AsArray();
 
         targets.Select(t => t!["id"]!.GetValue<string>())
-            .ShouldBe(["csharp", "typescript", "python", "php", "rust"]);
+            .ShouldBe(["csharp", "typescript", "python", "php", "rust", "asyncapi"]);
 
         var csharp = targets.First(t => t!["id"]!.GetValue<string>() == "csharp")!;
         csharp["displayName"]!.GetValue<string>().ShouldBe("C#");

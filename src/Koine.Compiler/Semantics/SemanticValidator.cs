@@ -23,6 +23,7 @@ public sealed class SemanticValidator
         new UniqueTypeNamesAnalyzer(),
         new ContextMapAnalyzer(),
         new PerContextAnalyzer(),
+        new ReferenceDisciplineAnalyzer(),
         new SatisfiabilityAnalyzer(),
     };
 

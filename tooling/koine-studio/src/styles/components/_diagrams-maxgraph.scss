@@ -317,3 +317,59 @@ $ddd-kinds: (
   margin: 0.125rem 0.25rem;
   background: var(--koi-line);
 }
+
+/* Export disclosure (#271): a compact <details> dropdown holding the SVG / PNG / PlantUML / Copy-Mermaid
+   actions, anchored under the toolbar's Export summary. */
+.koi-export {
+  position: relative;
+
+  > summary {
+    list-style: none; /* hide the native triangle — the label carries its own ▾ */
+
+    &::-webkit-details-marker {
+      display: none;
+    }
+  }
+
+  &[open] > summary {
+    background: var(--koi-paper-2);
+    border-color: var(--koi-line);
+  }
+}
+
+.koi-export-menu {
+  position: absolute;
+  z-index: 5;
+  top: calc(100% + 0.25rem);
+  right: 0;
+  display: flex;
+  flex-direction: column;
+  min-width: 9rem;
+  padding: 0.25rem;
+  border: 1px solid var(--koi-line);
+  border-radius: 0.375rem;
+  background: var(--koi-surface);
+  box-shadow: 0 6px 20px rgb(0 0 0 / 35%);
+}
+
+.koi-export-item {
+  display: block;
+  width: 100%;
+  padding: 0.3125rem 0.5rem;
+  border: 0;
+  border-radius: 0.25rem;
+  background: transparent;
+  color: var(--koi-fg);
+  font-size: 0.8125rem;
+  text-align: left;
+  cursor: pointer;
+
+  &:hover {
+    background: var(--koi-paper-2);
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--koi-accent);
+    outline-offset: -1px;
+  }
+}

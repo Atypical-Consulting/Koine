@@ -31,6 +31,8 @@ function renderPalette(
     onAdd?: (kind: string) => void;
     onAddAggregateMember?: (kind: string, qn: string) => void;
     onAddAnnotation?: (kind: string) => void;
+    onExport?: (format: 'svg' | 'png' | 'plantuml') => void;
+    onCopyMermaid?: () => void;
   } = {},
 ) {
   return render(
@@ -40,9 +42,14 @@ function renderPalette(
       onAdd={opts.onAdd ?? (() => {})}
       onAddAggregateMember={opts.onAddAggregateMember ?? (() => {})}
       onAddAnnotation={opts.onAddAnnotation ?? (() => {})}
+      onExport={opts.onExport ?? (() => {})}
+      onCopyMermaid={opts.onCopyMermaid ?? (() => {})}
     />,
   );
 }
+
+const exportBtn = (c: Element, format: string) =>
+  c.querySelector(`[data-export="${format}"]`) as HTMLButtonElement;
 
 describe('CanvasPalette', () => {
   test('renders the six round-trip constructs, the two aggregate-scoped ones, plus the coming-soon buttons', () => {
@@ -137,6 +144,36 @@ describe('CanvasPalette', () => {
     const { container } = renderPalette(store, { index: aggregateIndex() });
     expect(btn(container, 'rule').disabled).toBe(true);
     expect(btn(container, 'repository').disabled).toBe(true);
+  });
+
+  test('clicking an export format fires onExport with that format (#271)', () => {
+    const onExport = vi.fn();
+    const { container } = renderPalette(createAppStore(), { onExport });
+    for (const format of ['svg', 'png', 'plantuml'] as const) {
+      const b = exportBtn(container, format);
+      expect(b).not.toBeNull();
+      fireEvent.click(b);
+      expect(onExport).toHaveBeenCalledWith(format);
+    }
+  });
+
+  test('the export menu and Copy Mermaid stay enabled regardless of context scope (#271)', () => {
+    // The active diagram is the Visual canvas itself, not a `.koi` construct, so export never depends on
+    // a home context — it's available even under "All contexts" with the round-trip constructs disabled.
+    const store = createAppStore();
+    const { container } = renderPalette(store);
+    expect(btn(container, 'entity').disabled).toBe(true);
+    expect(exportBtn(container, 'svg').disabled).toBe(false);
+    expect(exportBtn(container, 'mermaid').disabled).toBe(false);
+  });
+
+  test('clicking Copy Mermaid fires onCopyMermaid (#271)', () => {
+    const onCopyMermaid = vi.fn();
+    const { container } = renderPalette(createAppStore(), { onCopyMermaid });
+    const b = exportBtn(container, 'mermaid');
+    expect(b).not.toBeNull();
+    fireEvent.click(b);
+    expect(onCopyMermaid).toHaveBeenCalledTimes(1);
   });
 
   test('has no accessibility violations', async () => {

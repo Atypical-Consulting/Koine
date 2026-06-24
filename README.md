@@ -8,7 +8,7 @@
 [![Documentation](https://img.shields.io/badge/docs-koine-3245b8)](https://atypical-consulting.github.io/Koine/)
 [![.NET](https://img.shields.io/badge/.NET-10-512BD4)](https://dotnet.microsoft.com/)
 [![Tests](https://img.shields.io/badge/tests-950%2B%20passing-2ea44f)](tests/)
-![Target](https://img.shields.io/badge/emits-C%23%20%C2%B7%20TypeScript%20%C2%B7%20Python%20%C2%B7%20PHP%20%C2%B7%20Rust%20%C2%B7%20docs-178600)
+![Target](https://img.shields.io/badge/emits-C%23%20%C2%B7%20TypeScript%20%C2%B7%20Python%20%C2%B7%20PHP%20%C2%B7%20Rust%20%C2%B7%20docs%20%C2%B7%20AsyncAPI-178600)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 
 ## The problem
@@ -38,8 +38,11 @@ objects as structs with smart constructors returning `Result<_, DomainError>`, s
 `enum`s matched exhaustively, entities/aggregates with invariant-checked behaviors, events as a
 `Vec`-friendly `DomainEvent` enum, and repositories as `trait`s; depends only on `rust_decimal` for
 money and `regex` for `matches`; Phase 1 covers the tactical core), a **docs** target emits living
-documentation (`--target docs` → Markdown + Mermaid diagrams) straight from the model, and the parser
-and semantic model are kept strictly target-agnostic so further emitters can be added without touching them.
+documentation (`--target docs` → Markdown + Mermaid diagrams) straight from the model, an
+**AsyncAPI 3.0** target emits a single event-API document (`--target asyncapi` → channels, messages,
+JSON-Schema payloads, and send/receive operations derived from the integration-event + context-map
+graph), and the parser and semantic model are kept strictly target-agnostic so further emitters can
+be added without touching them.
 
 ## See it run — in your browser
 
@@ -133,6 +136,10 @@ needed for `subtotal` — nothing for you to write, and nothing external to refe
   invariants, commands, domain events, state machines, factories, specifications, services,
   policies, repositories, optimistic concurrency, the application layer (UoW, read models, CQRS),
   multi-file modules, context maps, integration events, and model versioning — all shipped.
+- **Enforced DDD reference discipline.** The compiler keeps your building blocks honest: a value
+  object can't embed an entity or aggregate, commands and domain events carry data and identities
+  rather than live references, and one aggregate references another only by its id — violations are
+  hard errors (`KOI1601`–`KOI1604`), not lint.
 - **A green build proves the domain.** Every construct is snapshot-tested *and* compiled and executed
   through an in-memory Roslyn meta-test, so a passing build means the generated C# is correct and
   usable — not just that it parses.
@@ -168,6 +175,9 @@ dotnet run --project src/Koine.Cli -- build templates/starters/billing/billing.k
 
 # Generate living documentation (Markdown + Mermaid state/class/context-map diagrams)
 dotnet run --project src/Koine.Cli -- build templates/starters/billing/billing.koi --target docs --out ./docs
+
+# Emit an AsyncAPI 3.0 document from the integration-event + context-map graph
+dotnet run --project src/Koine.Cli -- build templates/pizzeria --target asyncapi --out ./events
 
 # Just check a model parses & validates (no output)
 dotnet run --project src/Koine.Cli -- build templates/starters/billing/billing.koi

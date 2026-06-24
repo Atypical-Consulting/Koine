@@ -41,6 +41,15 @@ const COMING_SOON: { label: string; tooltip: string }[] = [
   { label: 'Relation', tooltip: 'Drag from one node to another to connect' },
 ];
 
+// Export the current Visual canvas (#271). SVG/PNG serialize the live drawing; PlantUML is mapped from the
+// structured graph client-side. These target the diagram itself (not a `.koi` construct), so unlike the
+// round-trip buttons they are never context-gated — they stay enabled regardless of the active scope.
+const EXPORTS: { format: 'svg' | 'png' | 'plantuml'; label: string; tooltip: string }[] = [
+  { format: 'svg', label: 'SVG', tooltip: 'Download the diagram as a standalone SVG' },
+  { format: 'png', label: 'PNG', tooltip: 'Download the diagram as a 2× PNG image' },
+  { format: 'plantuml', label: 'PlantUML', tooltip: 'Download the diagram as PlantUML (.puml) source' },
+];
+
 // The construct palette above the domain canvas. Context-scoped constructs (addType) enable when there's
 // an unambiguous home context: a single bounded context is active, OR "All contexts" is selected but the
 // model has exactly one context. Aggregate-scoped constructs (rule/repository, #254) enable when the
@@ -54,6 +63,10 @@ export function CanvasPalette(props: {
   onAdd: (kind: AddNodeKind) => void;
   onAddAggregateMember: (kind: AggregateMemberKind, aggregateQualifiedName: string) => void;
   onAddAnnotation: (kind: CanvasAnnotationKind) => void;
+  /** Export the current Visual canvas as SVG / PNG / PlantUML (#271). */
+  onExport: (format: 'svg' | 'png' | 'plantuml') => void;
+  /** Copy the current diagram's Mermaid source to the clipboard (#271). */
+  onCopyMermaid: () => void;
 }) {
   const scope = useStore(props.store, (s) => s.activeContext);
   const contexts = useStore(props.store, (s) => s.contexts);
@@ -126,6 +139,37 @@ export function CanvasPalette(props: {
           <span class="koi-palette-label">{c.label}</span>
         </button>
       ))}
+      <span class="koi-palette-sep" aria-hidden="true" />
+      {/* Export the live canvas (#271). A native <details> disclosure keeps the toolbar compact and stays
+          accessible without an ARIA menu pattern; the format/Copy-Mermaid buttons are plain <button>s. */}
+      <details class="koi-export">
+        <summary class="koi-palette-btn koi-export-summary" title="Export this diagram" aria-label="Export diagram">
+          <span class="koi-palette-label">Export ▾</span>
+        </summary>
+        <div class="koi-export-menu">
+          {EXPORTS.map((e) => (
+            <button
+              type="button"
+              class="koi-export-item"
+              data-export={e.format}
+              key={e.format}
+              title={e.tooltip}
+              onClick={() => props.onExport(e.format)}
+            >
+              {e.label}
+            </button>
+          ))}
+          <button
+            type="button"
+            class="koi-export-item"
+            data-export="mermaid"
+            title="Copy the diagram's Mermaid source to the clipboard"
+            onClick={() => props.onCopyMermaid()}
+          >
+            Copy Mermaid
+          </button>
+        </div>
+      </details>
     </div>
   );
 }

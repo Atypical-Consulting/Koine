@@ -10,6 +10,7 @@ import { appDataDir, join } from '@tauri-apps/api/path';
 import { open as openDialog, save as saveDialog } from '@tauri-apps/plugin-dialog';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import type { FsEntry, KoiFile, LspTransport, Platform, SourceDoc } from '@/host/types';
+import { saveMetaFor } from '@/host/saveMeta';
 import { normalizeCompileTarget } from '@/ai/assistantTools';
 import { mcpCall } from '@/mcp/mcp';
 
@@ -186,10 +187,13 @@ export class TauriPlatform implements Platform {
   // IPC boundary as a JSON number array — fine for the small archives Koine emits. Returns false
   // when the user dismisses the save dialog so the caller doesn't claim a save happened.
   async saveZip(defaultName: string, data: Uint8Array): Promise<boolean> {
+    // The dialog title + type filter are derived from the filename extension (#271) so a diagram export
+    // (`.svg`/`.png`/`.puml`) doesn't reuse the zip-only filter; `.zip` callers keep their original dialog.
+    const meta = saveMetaFor(defaultName);
     const path = await saveDialog({
-      title: 'Save generated project',
+      title: meta.title,
       defaultPath: defaultName,
-      filters: [{ name: 'Zip archive', extensions: ['zip'] }],
+      filters: meta.ext ? [{ name: meta.filterName, extensions: [meta.ext] }] : [],
     });
     if (!path) return false; // cancelled
     await invoke('write_bytes', { path, contents: Array.from(data) });
