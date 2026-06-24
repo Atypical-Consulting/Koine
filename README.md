@@ -296,8 +296,6 @@ identifiers, and literals.
   a negative operand needs a space (`x < -1`, not `x<-1`).
 - **Reserved type names.** `List`, `Set`, `Map`, and `Range` are built-in generics; a user type may not
   take one of these names.
-- **Specs in service operations.** A `spec` referenced from inside a `service` operation body is not yet
-  supported.
 
 ## Architecture
 
