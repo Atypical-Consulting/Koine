@@ -29,6 +29,7 @@ import {
   closeBracketsKeymap,
   completeFromList,
   completionKeymap,
+  completionStatus,
   type Completion,
   type CompletionContext,
   type CompletionResult,
@@ -55,6 +56,10 @@ import type {
   WorkspaceEdit,
 } from '@/lsp/lsp';
 import { dismissFloating, showActionMenu, showRenameInput } from '@/editor/actions';
+import { createInlineState } from '@/editor/inlineCompletionState';
+import { inlineCompletionExtension, type EditorInlineContext } from '@/editor/inlineCompletion';
+import { requestInline } from '@/ai/inlineCompletionClient';
+import { loadSettings } from '@/settings/persistence';
 // The markdown renderer lives in ./markdown (extracted so it can be unit-tested without a CodeMirror
 // view). Re-exported below so existing importers keep resolving it from `@/editor/editor`.
 import { renderMarkdown } from '@/editor/markdown';
@@ -596,6 +601,17 @@ export function createKoineEditor(opts: KoineEditorOptions): KoineEditor {
   // Soft-wrap lives in its own compartment so Settings can flip it without rebuilding the editor.
   const lineWrap = new Compartment();
 
+  // Inline (ghost-text) AI completions (#263). The pure state machine debounces keystrokes and owns
+  // abort/staleness; the AI client (requestInline) talks to the configured provider. Both the master
+  // gate and `canSuggest` re-read live settings so the prefs toggle (default off) takes effect at once
+  // and the feature simply no-ops when off or when no provider is configured.
+  const inlineState = createInlineState<EditorInlineContext>({
+    debounceMs: 300,
+    isEnabled: () => loadSettings().aiInlineCompletions,
+    canSuggest: (ctx) => ctx.atBoundary && !ctx.hasSelection,
+    fetch: (ctx, signal) => requestInline(ctx, signal),
+  });
+
   const view = new EditorView({
     parent: opts.parent,
     state: EditorState.create({
@@ -617,6 +633,12 @@ export function createKoineEditor(opts: KoineEditorOptions): KoineEditor {
         autocompletion({
           override: [opts.onCompletion ? lspCompletionSource(opts.onCompletion) : koineCompletions],
           icons: false,
+        }),
+        // Inline AI ghost-text, suppressed while the deterministic LSP popup above is open.
+        inlineCompletionExtension({
+          state: inlineState,
+          isEnabled: () => loadSettings().aiInlineCompletions,
+          lspPopupOpen: (v) => completionStatus(v.state) === 'active',
         }),
         extraKeys,
         keymap.of([
