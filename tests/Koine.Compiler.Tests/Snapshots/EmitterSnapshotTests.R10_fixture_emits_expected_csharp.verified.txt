@@ -173,6 +173,10 @@ public sealed class Inventory : IAggregateRoot
     public InventoryId Id { get; }
     public int Reserved { get; private set; }
 
+#pragma warning disable CS8618 // EF Core populates members from the store after construction.
+    private Inventory() { }
+#pragma warning restore CS8618
+
     public Inventory(InventoryId id, int reserved)
     {
         Id = id;

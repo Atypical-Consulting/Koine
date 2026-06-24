@@ -837,11 +837,56 @@ public class R18CSharpInfrastructureTests
             """, "Doc.cs");
 
         // A scalar (String) collection is intentionally left to EF's primitive-collection convention:
-        // unchanged read-only property + defensive AsReadOnly copy, no backing field, no EF ctor.
+        // unchanged read-only property + defensive AsReadOnly copy, no backing field.
         doc.ShouldContain("public IReadOnlyList<string> Tags { get; }");
         doc.ShouldContain("Tags = new List<string>(tags).AsReadOnly();");
         doc.ShouldNotContain("_tags");
-        doc.ShouldNotContain("private Doc()");
+        // Doc is an aggregate root, so it now carries the parameterless EF persistence constructor
+        // (issue #276) — the scalar-collection *shape* is byte-identical, only the root ctor is added.
+        doc.ShouldContain("private Doc() { }");
+    }
+
+    [Fact]
+    public void Owns_one_and_scalar_aggregate_roots_emit_the_ef_persistence_constructor()
+    {
+        // issue #276: every persisted aggregate root gains the parameterless EF persistence constructor
+        // (wrapped in the CS8618 pragma), generalizing #171 beyond value-object collections.
+
+        // A root that owns a scalar value object (OwnsOne).
+        var order = DomainEntity("""
+            context Sales {
+              value Money { amount: Decimal  currency: String }
+              aggregate Order root Order {
+                entity Order identified by OrderId { total: Money }
+              }
+            }
+            """, "Order.cs");
+        order.ShouldContain("#pragma warning disable CS8618");
+        order.ShouldContain("private Order() { }");
+        order.ShouldContain("#pragma warning restore CS8618");
+
+        // A scalar-only root (no value objects at all) still gets the ctor — it is an aggregate root.
+        var product = DomainEntity("""
+            context Catalog {
+              aggregate Product root Product {
+                entity Product identified by ProductId { name: String }
+              }
+            }
+            """, "Product.cs");
+        product.ShouldContain("private Product() { }");
+    }
+
+    [Fact]
+    public void Non_root_entity_that_owns_no_value_object_gets_no_persistence_constructor()
+    {
+        // The predicate is bounded: an entity that is neither an aggregate root nor owns a value object
+        // is byte-identical to today — no inserted persistence constructor.
+        var note = DomainEntity("""
+            context Foo {
+              entity Note identified by NoteId { text: String }
+            }
+            """, "Note.cs");
+        note.ShouldNotContain("private Note()");
     }
 
     [Fact]

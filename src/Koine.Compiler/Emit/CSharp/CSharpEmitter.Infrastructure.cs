@@ -304,8 +304,16 @@ public sealed partial class CSharpEmitter
                     AppendIndent(sb, indentLevel).Append(builderVar).Append(".Property(x => x.").Append(prop)
                       .Append(").HasConversion(v => v.Value, v => new ").Append(type.Name).Append("(v));\n");
                 }
+                else
+                {
+                    // A plain primitive: an explicit Property call so EF maps the get-only auto-property
+                    // and materializes it via its backing field (issue #276). Left to convention, EF does
+                    // not discover a read-only auto-property on a principal entity — the column is silently
+                    // dropped and the value never round-trips. (Owned types already do this; this brings the
+                    // root-entity mapping in line.)
+                    AppendIndent(sb, indentLevel).Append(builderVar).Append(".Property(x => x.").Append(prop).Append(");\n");
+                }
 
-                // A plain primitive maps by EF Core convention — no explicit configuration.
                 break;
         }
     }
