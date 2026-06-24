@@ -246,6 +246,7 @@ export function createPreferences(cb: PrefsCallbacks): PrefsHandle {
       typescript: 'TypeScript',
       python: 'Python',
       php: 'PHP',
+      rust: 'Rust',
     };
     // The file extension each target emits — a concrete, recognizable cue on every card.
     const EXTENSIONS: Record<PreviewTarget, string> = {
@@ -253,6 +254,7 @@ export function createPreferences(cb: PrefsCallbacks): PrefsHandle {
       typescript: '.ts',
       python: '.py',
       php: '.php',
+      rust: '.rs',
     };
     const group = document.createElement('div');
     group.className = 'koi-lang-picker';

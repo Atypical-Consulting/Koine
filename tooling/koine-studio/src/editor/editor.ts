@@ -40,6 +40,7 @@ import { showMinimap } from '@replit/codemirror-minimap';
 import { csharp } from '@codemirror/legacy-modes/mode/clike';
 import { typescript } from '@codemirror/legacy-modes/mode/javascript';
 import { python } from '@codemirror/legacy-modes/mode/python';
+import { rust } from '@codemirror/legacy-modes/mode/rust';
 import { php } from '@codemirror/lang-php';
 import { tags as t } from '@lezer/highlight';
 import { lintGutter, setDiagnostics } from '@codemirror/lint';
@@ -765,12 +766,13 @@ export function renderSymbolTree(
 
 // --- read-only output viewer ------------------------------------------------
 
-export type OutputLang = 'csharp' | 'typescript' | 'python' | 'php' | 'plain';
+export type OutputLang = 'csharp' | 'typescript' | 'python' | 'php' | 'rust' | 'plain';
 
-const langExt = (lang: OutputLang): Extension => {
+export const langExt = (lang: OutputLang): Extension => {
   if (lang === 'csharp') return StreamLanguage.define(csharp);
   if (lang === 'typescript') return StreamLanguage.define(typescript);
   if (lang === 'python') return StreamLanguage.define(python);
+  if (lang === 'rust') return StreamLanguage.define(rust);
   // PHP uses the Lezer-based grammar (lang-php); emitted files open with `<?php`, so the
   // default mixed-mode config highlights them correctly.
   if (lang === 'php') return php();

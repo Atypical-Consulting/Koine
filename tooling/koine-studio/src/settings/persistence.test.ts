@@ -382,12 +382,17 @@ describe('Output / previewTarget setting', () => {
   });
 
   test('coerces a bogus stored target back to the default', () => {
-    saveSettings({ ...DEFAULT_SETTINGS, previewTarget: 'rust' as never });
+    saveSettings({ ...DEFAULT_SETTINGS, previewTarget: 'cobol' as never });
     expect(loadSettings().previewTarget).toBe('csharp');
   });
 
-  test('PREVIEW_TARGETS lists the four supported languages in order', () => {
-    expect(PREVIEW_TARGETS).toEqual(['csharp', 'typescript', 'python', 'php']);
+  test('round-trips the Rust target', () => {
+    saveSettings({ ...DEFAULT_SETTINGS, previewTarget: 'rust' });
+    expect(loadSettings().previewTarget).toBe('rust');
+  });
+
+  test('PREVIEW_TARGETS lists the five supported languages in order', () => {
+    expect(PREVIEW_TARGETS).toEqual(['csharp', 'typescript', 'python', 'php', 'rust']);
   });
 });
 
