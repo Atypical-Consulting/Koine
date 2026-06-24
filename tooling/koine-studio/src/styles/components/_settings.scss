@@ -230,6 +230,28 @@
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.22);
 }
 
+/* A scope segmented disabled because no workspace is open: dimmed and non-interactive, but kept in
+   place so the row layout doesn't shift between "folder open" and "no folder". */
+.koi-segmented.is-disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.koi-segmented.is-disabled .koi-seg {
+  cursor: not-allowed;
+}
+
+/* A workspace-scopable row pairs its value control with a smaller User/Workspace scope toggle. */
+.koi-set-scoped {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--koi-space-2-5);
+}
+
+.koi-set-scoped .koi-segmented {
+  font-size: var(--koi-text-sm);
+}
+
 /* Output: the language chooser lays out full-width (not as a narrow label/control row) so the four
    targets read as cards with room for each language's file extension. */
 .koi-output-block {
@@ -237,6 +259,14 @@
   flex-direction: column;
   gap: var(--koi-space-3-5);
   padding-top: var(--koi-space-2-5);
+}
+
+/* The Output heading row: caption on the left, the User/Workspace scope toggle pinned to the right. */
+.koi-output-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--koi-space-3-5);
 }
 
 /* output-language picker — a 2×2 grid of selectable cards, each carrying its identity dot, name,

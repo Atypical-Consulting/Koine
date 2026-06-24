@@ -26,6 +26,7 @@ import { initTheme, onThemeChange, toggleTheme } from '@/settings/theme';
 import {
   peekLegacyScratch,
   clearLegacyScratch,
+  effectiveSettings,
   initSecrets,
   loadActiveContext,
   loadSettings,
@@ -34,6 +35,7 @@ import {
   removeRecentFolder,
   saveActiveContext,
   saveWorkspaceCenter,
+  workspaceKeyOf,
   type Settings,
 } from '@/settings/persistence';
 import { createWelcome } from '@/welcome/welcome';
@@ -358,6 +360,15 @@ export function init(): () => void {
   // workspace's effects through its onActiveChanged/onBuffersChanged seams — so neither module imports
   // the other and there's no circular import. `workspace` is forward-declared here for those thunks.
   let workspace: WorkspaceController;
+
+  // The current workspace's stable override key (a hash of its sorted roots), or null when no folder
+  // is open — the workspace-scoped settings (previewTarget/formatOnSave/wordWrap/lspTrace) merge over
+  // the user settings under this key. A `function` declaration so it can reference `workspace` (assigned
+  // below): every call happens at runtime, long after construction, so the hoisted binding is safe.
+  function wsKey(): string | null {
+    const rs = workspace.rootsList();
+    return rs.length ? workspaceKeyOf(rs) : null;
+  }
 
   // The editor ↔ LSP + diagnostics wiring (issue #180, Task 3): owns the CodeMirror editor and its
   // callback wall (hover/completion/definition/rename/references/code-actions → lsp.*), the per-uri
@@ -934,7 +945,7 @@ export function init(): () => void {
       editorSession.clearDiagnostics();
       diagCountGate.reset();
     },
-    getFormatOnSave: () => settings.formatOnSave,
+    getFormatOnSave: () => effectiveSettings(settings, wsKey()).formatOnSave,
     // A folder finished opening: restore this workspace's bounded-context scope (#146) BEFORE the
     // first scoped render and refresh the switcher's options from the new model. The bus value drives
     // the render paths, so the initial ensureLoaded is already scoped even before the dropdown
@@ -948,6 +959,14 @@ export function init(): () => void {
       controller.invalidateDocsPanel();
       void controller.refreshContextList();
       controller.refreshActiveSurfaces();
+      // Switching folders changes wsKey(), so re-apply the now-effective workspace-scoped behaviors:
+      // this folder's overrides for word-wrap and preview target take effect immediately. (format-on-
+      // save reads through the live getFormatOnSave thunk, so it auto-picks up; lspTrace has no live
+      // re-application site here — its override surfaces on next read.)
+      const eff = effectiveSettings(settings, wsKey());
+      editor.setLineWrap(eff.wordWrap);
+      output.setLineWrap(eff.wordWrap);
+      controller.onPreviewTargetChanged(eff.previewTarget);
     },
     // The active buffer was deleted and the workspace is now empty: reset to a fresh blank model.
     onWorkspaceEmptied: () => void newModel(),
@@ -1354,17 +1373,22 @@ export function init(): () => void {
 
   const prefs = createPreferences({
     onChange: (s) => {
+      // `s` is the USER/global settings (prefs keeps the global value untouched when a row is scoped to
+      // Workspace), so it stays the user-level source of truth here.
       settings = s;
+      // The workspace-scoped fields (wordWrap, previewTarget) must apply from the EFFECTIVE view so a
+      // Workspace override drives the live behavior even though `settings` stays user-level.
+      const eff = effectiveSettings(s, wsKey());
       // onChange is the single re-skin path: apply the document-level appearance, then sync the
       // pieces prefs can't reach — soft-wrap on both the source editor and the output preview.
       applyAppearance(s);
-      editor.setLineWrap(s.wordWrap);
-      output.setLineWrap(s.wordWrap);
+      editor.setLineWrap(eff.wordWrap);
+      output.setLineWrap(eff.wordWrap);
       editor.setMinimap(s.enableMinimap);
       workspace.setAutoSave(s.autoSave);
       // Destination language now lives in Settings → Output. The controller relabels the Generated
       // tab, marks the preview stale, and re-emits it when that sub-view is the one showing.
-      controller.onPreviewTargetChanged(s.previewTarget);
+      controller.onPreviewTargetChanged(eff.previewTarget);
     },
     // Desktop hosts launch a `koine mcp --http` sidecar and return its loopback URL; the browser
     // returns null, so Settings hides the MCP affordance there.
@@ -1376,6 +1400,9 @@ export function init(): () => void {
     canSaveProjects: platform.canSaveProjects,
     workspaceRootName: () => platform.workspaceRootName(),
     pickWorkspaceRoot: () => platform.pickWorkspaceRoot(),
+    // The current workspace's override key (null when no folder is open) — drives the per-row
+    // User/Workspace scope toggle and routes scoped commits to the workspace override store.
+    workspaceKey: () => wsKey(),
   });
   const help = createHelpOverlay(helpRows());
   // Guards the user-initiated New command against silently discarding unsaved work.
