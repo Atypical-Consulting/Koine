@@ -38,8 +38,12 @@ objects as structs with smart constructors returning `Result<_, DomainError>`, s
 `enum`s matched exhaustively, entities/aggregates with invariant-checked behaviors, events as a
 `Vec`-friendly `DomainEvent` enum, and repositories as `trait`s; depends only on `rust_decimal` for
 money and `regex` for `matches`; Phase 1 covers the tactical core), a **docs** target emits living
-documentation (`--target docs` → Markdown + Mermaid diagrams) straight from the model, and the parser
-and semantic model are kept strictly target-agnostic so further emitters can be added without touching them.
+documentation (`--target docs` → Markdown + Mermaid diagrams) straight from the model, an **OpenAPI**
+target emits an API contract (`--target openapi` → a deterministic OpenAPI 3.1 YAML document per bounded
+context: value objects / read models / enums become `components/schemas`, commands become `POST`
+operations and queries become `GET` operations, and static value-object invariants lower to JSON-Schema
+validation keywords), and the parser and semantic model are kept strictly target-agnostic so further
+emitters can be added without touching them.
 
 ## See it run — in your browser
 
@@ -168,6 +172,9 @@ dotnet run --project src/Koine.Cli -- build templates/starters/billing/billing.k
 
 # Generate living documentation (Markdown + Mermaid state/class/context-map diagrams)
 dotnet run --project src/Koine.Cli -- build templates/starters/billing/billing.koi --target docs --out ./docs
+
+# Emit an OpenAPI 3.1 spec (one <Context>/openapi.yaml per bounded context: schemas, paths, parameters)
+dotnet run --project src/Koine.Cli -- build templates/starters/billing/billing.koi --target openapi --out ./api
 
 # Just check a model parses & validates (no output)
 dotnet run --project src/Koine.Cli -- build templates/starters/billing/billing.koi
@@ -324,7 +331,8 @@ Koine.slnx
 │   │   │   ├── Php/        # PhpEmitter (Phase 1: tactical core, PHP 8.1)
 │   │   │   ├── Rust/       # RustEmitter (Phase 1: tactical core)
 │   │   │   ├── Glossary/   # ubiquitous-language glossary
-│   │   │   └── Docs/       # living documentation (Markdown + Mermaid diagrams)
+│   │   │   ├── Docs/       # living documentation (Markdown + Mermaid diagrams)
+│   │   │   └── OpenApi/    # OpenApiEmitter (OpenAPI 3.1 spec per bounded context)
 │   │   ├── Diagnostics/    # Diagnostic
 │   │   └── Services/       # KoineCompiler (orchestrator) + LSP/tooling backend
 │   ├── Koine.Cli/          # `koine` command-line tool
