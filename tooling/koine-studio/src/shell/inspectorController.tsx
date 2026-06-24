@@ -164,6 +164,10 @@ export interface InspectorControllerDeps {
   onAddAnnotation(kind: CanvasAnnotationKind): void;
   /** Insert an aggregate-scoped construct (repository / rule, #254) into the selected aggregate. */
   onAddAggregateMember(kind: AggregateMemberKind, aggregateQualifiedName: string): void;
+  /** Export the current Visual canvas as SVG / PNG / PlantUML (#271). */
+  onExportDiagram(format: 'svg' | 'png' | 'plantuml'): void;
+  /** Copy the current diagram's Mermaid source to the clipboard (#271). */
+  onCopyDiagramMermaid(): void;
   /** Jump to a RAW 1-based source span (opens the owning file if needed) — the bottom tables' row click. */
   gotoSourceSpan(span: Pick<SourceSpan, 'file' | 'line' | 'column' | 'endLine' | 'endColumn'>): void;
 
@@ -999,6 +1003,8 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
         onAdd={(kind) => deps.onAddConstruct(kind)}
         onAddAggregateMember={(kind, aggregateQn) => deps.onAddAggregateMember(kind, aggregateQn)}
         onAddAnnotation={(kind) => deps.onAddAnnotation(kind)}
+        onExport={(format) => deps.onExportDiagram(format)}
+        onCopyMermaid={() => deps.onCopyDiagramMermaid()}
       />,
       el('canvas-palette-host'),
     );

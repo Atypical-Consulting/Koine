@@ -7,6 +7,10 @@
 import type { DocsFile } from '@/lsp/lsp';
 import { createMaxGraphRenderer } from '@/diagrams/diagrams-maxgraph';
 
+// Re-exported through the renderer seam so the IDE shell reaches the active canvas for export (#271)
+// without importing the concrete maxGraph module.
+export { getActiveDomainExport } from '@/diagrams/diagrams-maxgraph';
+
 /** The renderer seam: `ide.ts` renders diagrams through this stable signature. */
 export interface DiagramRenderer {
   render(
