@@ -50,6 +50,48 @@ impl Grade {
             Grade::Standard => "S",
         }
     }
+
+    /// Looks up a variant by its declared name (a non-throwing `TryFromName`).
+    pub fn from_name(name: &str) -> Option<Self> {
+        match name {
+            "Premium" => Some(Grade::Premium),
+            "Standard" => Some(Grade::Standard),
+            _ => None,
+        }
+    }
+
+    /// Looks up a variant by its ordinal value (a non-throwing `TryFromValue`).
+    pub fn from_value(value: i64) -> Option<Self> {
+        match value {
+            0 => Some(Grade::Premium),
+            1 => Some(Grade::Standard),
+            _ => None,
+        }
+    }
+
+    /// Exhaustively maps the variant to a value — one arm per member, no catch-all.
+    pub fn match_<R>(
+        &self,
+        premium: impl FnOnce() -> R,
+        standard: impl FnOnce() -> R,
+    ) -> R {
+        match self {
+            Grade::Premium => premium(),
+            Grade::Standard => standard(),
+        }
+    }
+
+    /// Exhaustively dispatches a side effect — one arm per member, no catch-all.
+    pub fn switch(
+        &self,
+        premium: impl FnOnce(),
+        standard: impl FnOnce(),
+    ) {
+        match self {
+            Grade::Premium => premium(),
+            Grade::Standard => standard(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

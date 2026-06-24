@@ -218,9 +218,11 @@ public class RustSnapshotTests
         var sales = result.Files.Single(f => f.RelativePath.EndsWith("sales.rs", StringComparison.Ordinal)).Contents;
         sales.ShouldContain("pub enum DomainEvent {");
         sales.ShouldContain("OrderPlaced(OrderPlaced)");
-        // Smart-enum accessors are exhaustive matches with no `_` catch-all.
+        // Associated-data accessors and the Match/Switch folds dispatch each variant exhaustively
+        // (Rust rejects a non-exhaustive match, so the compile test proves it); only the open-domain
+        // from_name/from_value lookups end in a `_ => None` arm.
         sales.ShouldContain("Currency::Eur => \"€\"");
-        sales.ShouldNotContain("_ =>");
+        sales.ShouldContain("_ => None,");
 
         return Verify(TestSupport.Render(result.Files)).UseDirectory("Snapshots");
     }
@@ -622,6 +624,56 @@ public class RustSnapshotTests
         cargo.ShouldContain("rust_decimal = \"1\"");
         cargo.ShouldContain("regex = \"1\"");
         cargo.ShouldNotContain("uuid");
+    }
+
+    // ------------------------------------------------------------------
+    // Smart-enum API (issue #173, Task 5). Every Koine enum gains the Rust analogue of the
+    // C# TryFromName/TryFromValue + Match/Switch: non-throwing `from_name`/`from_value`
+    // lookups returning `Option`, and exhaustive `match_`/`switch` folds dispatched by a
+    // wildcard-free `match` (adding a variant becomes a compile error at every call site).
+    // ------------------------------------------------------------------
+
+    /// <summary>A plain smart enum whose generated API exercises the Match/Switch/Try* forms.</summary>
+    private const string SmartEnumFixture = """
+        context Shop {
+          enum OrderStatus { Draft, Submitted, Paid, Shipped, Cancelled }
+        }
+        """;
+
+    [Fact]
+    public Task Rust_smart_enum_api_emits_match_switch_and_lookups()
+    {
+        var result = new KoineCompiler().Compile(SmartEnumFixture, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var shop = result.Files.Single(f => f.RelativePath.EndsWith("shop.rs", StringComparison.Ordinal)).Contents;
+        // Try* lowered to Option-returning lookups.
+        shop.ShouldContain("pub fn from_name(name: &str) -> Option<Self>");
+        shop.ShouldContain("\"Paid\" => Some(OrderStatus::Paid)");
+        shop.ShouldContain("pub fn from_value(value: i64) -> Option<Self>");
+        shop.ShouldContain("2 => Some(OrderStatus::Paid)");
+        // Match/Switch lowered to exhaustive, wildcard-free dispatch.
+        shop.ShouldContain("pub fn match_<R>(");
+        shop.ShouldContain("pub fn switch(");
+        shop.ShouldContain("OrderStatus::Cancelled => cancelled(),");
+
+        return Verify(TestSupport.Render(result.Files)).UseDirectory("Snapshots");
+    }
+
+    [Fact]
+    public void Rust_smart_enum_api_compiles()
+    {
+        var result = new KoineCompiler().Compile(SmartEnumFixture, new RustEmitter());
+        result.Success.ShouldBeTrue();
+
+        var check = TestSupport.CompileRust(result.Files);
+        if (!check.ToolchainAvailable)
+        {
+            _output.WriteLine(NoToolchainNotice);
+            return;
+        }
+
+        check.Ok.ShouldBeTrue(string.Join("\n", check.Errors));
     }
 
     /// <summary>Reads a template under <c>templates/</c> by walking up to the repo root (the <c>.git</c> dir).</summary>

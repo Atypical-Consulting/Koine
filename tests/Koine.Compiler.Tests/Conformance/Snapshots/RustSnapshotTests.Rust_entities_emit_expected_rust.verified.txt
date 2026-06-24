@@ -139,6 +139,50 @@ pub enum Status {
     Suspended,
 }
 
+impl Status {
+    /// Looks up a variant by its declared name (a non-throwing `TryFromName`).
+    pub fn from_name(name: &str) -> Option<Self> {
+        match name {
+            "Active" => Some(Status::Active),
+            "Suspended" => Some(Status::Suspended),
+            _ => None,
+        }
+    }
+
+    /// Looks up a variant by its ordinal value (a non-throwing `TryFromValue`).
+    pub fn from_value(value: i64) -> Option<Self> {
+        match value {
+            0 => Some(Status::Active),
+            1 => Some(Status::Suspended),
+            _ => None,
+        }
+    }
+
+    /// Exhaustively maps the variant to a value — one arm per member, no catch-all.
+    pub fn match_<R>(
+        &self,
+        active: impl FnOnce() -> R,
+        suspended: impl FnOnce() -> R,
+    ) -> R {
+        match self {
+            Status::Active => active(),
+            Status::Suspended => suspended(),
+        }
+    }
+
+    /// Exhaustively dispatches a side effect — one arm per member, no catch-all.
+    pub fn switch(
+        &self,
+        active: impl FnOnce(),
+        suspended: impl FnOnce(),
+    ) {
+        match self {
+            Status::Active => active(),
+            Status::Suspended => suspended(),
+        }
+    }
+}
+
 
 /// A branded identity value.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]

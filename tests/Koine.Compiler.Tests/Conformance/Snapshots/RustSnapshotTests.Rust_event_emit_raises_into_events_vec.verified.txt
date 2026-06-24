@@ -140,6 +140,56 @@ pub enum OrderStatus {
     Cancelled,
 }
 
+impl OrderStatus {
+    /// Looks up a variant by its declared name (a non-throwing `TryFromName`).
+    pub fn from_name(name: &str) -> Option<Self> {
+        match name {
+            "Draft" => Some(OrderStatus::Draft),
+            "Placed" => Some(OrderStatus::Placed),
+            "Cancelled" => Some(OrderStatus::Cancelled),
+            _ => None,
+        }
+    }
+
+    /// Looks up a variant by its ordinal value (a non-throwing `TryFromValue`).
+    pub fn from_value(value: i64) -> Option<Self> {
+        match value {
+            0 => Some(OrderStatus::Draft),
+            1 => Some(OrderStatus::Placed),
+            2 => Some(OrderStatus::Cancelled),
+            _ => None,
+        }
+    }
+
+    /// Exhaustively maps the variant to a value — one arm per member, no catch-all.
+    pub fn match_<R>(
+        &self,
+        draft: impl FnOnce() -> R,
+        placed: impl FnOnce() -> R,
+        cancelled: impl FnOnce() -> R,
+    ) -> R {
+        match self {
+            OrderStatus::Draft => draft(),
+            OrderStatus::Placed => placed(),
+            OrderStatus::Cancelled => cancelled(),
+        }
+    }
+
+    /// Exhaustively dispatches a side effect — one arm per member, no catch-all.
+    pub fn switch(
+        &self,
+        draft: impl FnOnce(),
+        placed: impl FnOnce(),
+        cancelled: impl FnOnce(),
+    ) {
+        match self {
+            OrderStatus::Draft => draft(),
+            OrderStatus::Placed => placed(),
+            OrderStatus::Cancelled => cancelled(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct OrderPlaced {
     pub order_id: OrderId,
