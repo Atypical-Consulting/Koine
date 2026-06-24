@@ -262,21 +262,8 @@ $koi-inspector-constructs: (
   }
 }
 
-.koi-inspector-empty {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 8rem;
-  color: var(--koi-muted);
-  text-align: center;
-}
-
-.koi-inspector-hint {
-  margin: 0;
-  max-width: 26ch;
-  font-size: var(--koi-text-sm);
-  line-height: 1.5;
-}
+/* The empty Properties tab reuses the shared right-rail empty state (`.koi-rview-empty` /
+   `.koi-rview-empty-title` in _docs.scss) so it reads identically to the Rules and Notes tabs. */
 
 /* Header: a construct-coloured accent bar + the element name (display face — the hero) + a tinted
    stereotype chip, with the qualified name beneath in mono. */

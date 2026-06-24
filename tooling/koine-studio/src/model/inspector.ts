@@ -127,11 +127,16 @@ export function renderInspector(
   root.className = 'koi-inspector';
 
   if (!element) {
-    root.classList.add('koi-inspector-empty');
+    // Match the right-rail Rules/Notes empty state: a titled, left-aligned informational block
+    // (`.koi-rview-empty`) rather than a centred hint, so the three tabs read consistently.
+    root.classList.add('koi-rview-empty');
+    const title = document.createElement('h3');
+    title.className = 'koi-rview-empty-title';
+    title.textContent = 'Properties';
     const hint = document.createElement('p');
-    hint.className = 'koi-inspector-hint muted';
+    hint.className = 'muted';
     hint.textContent = 'Select an element in the model outline or a diagram to inspect it.';
-    root.appendChild(hint);
+    root.append(title, hint);
     return root;
   }
 
