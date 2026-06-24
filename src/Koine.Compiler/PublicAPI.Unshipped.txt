@@ -269,3 +269,11 @@ const Koine.Compiler.Diagnostics.DiagnosticCodes.CommandParameterReferencesEntit
 const Koine.Compiler.Diagnostics.DiagnosticCodes.DomainEventReferencesEntity = "KOI1604" -> string!
 const Koine.Compiler.Diagnostics.DiagnosticCodes.EntityFieldReferencesMessageType = "KOI1605" -> string!
 const Koine.Compiler.Diagnostics.DiagnosticCodes.FactoryNeedsGeneratableIdentity = "KOI0808" -> string!
+Koine.Compiler.CodeFixes.Providers.AddOptionalMarkerCodeFixProvider
+Koine.Compiler.CodeFixes.Providers.AddOptionalMarkerCodeFixProvider.AddOptionalMarkerCodeFixProvider() -> void
+Koine.Compiler.CodeFixes.Providers.AddOptionalMarkerCodeFixProvider.FixableDiagnosticCodes.get -> System.Collections.Generic.IReadOnlyCollection<string!>!
+Koine.Compiler.CodeFixes.Providers.AddOptionalMarkerCodeFixProvider.GetFixes(Koine.Compiler.CodeFixes.CodeFixContext! context) -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.CodeFixes.CodeFix!>!
+Koine.Compiler.CodeFixes.Providers.RenameDuplicateCodeFixProvider
+Koine.Compiler.CodeFixes.Providers.RenameDuplicateCodeFixProvider.RenameDuplicateCodeFixProvider() -> void
+Koine.Compiler.CodeFixes.Providers.RenameDuplicateCodeFixProvider.FixableDiagnosticCodes.get -> System.Collections.Generic.IReadOnlyCollection<string!>!
+Koine.Compiler.CodeFixes.Providers.RenameDuplicateCodeFixProvider.GetFixes(Koine.Compiler.CodeFixes.CodeFixContext! context) -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.CodeFixes.CodeFix!>!
