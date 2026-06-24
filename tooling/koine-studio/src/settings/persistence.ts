@@ -40,6 +40,10 @@ export interface Settings {
   /** Soft-wrap long editor lines instead of scrolling horizontally. */
   wordWrap: boolean;
   formatOnSave: boolean;
+  /** Persist dirty buffers automatically after a short idle, instead of only on explicit save. */
+  autoSave: boolean;
+  /** Show the CodeMirror minimap (document overview rail) on the editor's right edge. */
+  enableMinimap: boolean;
   lspTrace: 'off' | 'messages' | 'verbose';
   /** Which AI backend the assistant uses. */
   aiProvider: 'anthropic' | 'openai';
@@ -71,6 +75,8 @@ export const DEFAULT_SETTINGS: Settings = {
   lineHeight: 1.6,
   wordWrap: false,
   formatOnSave: true,
+  autoSave: false,
+  enableMinimap: false,
   lspTrace: 'off',
   aiProvider: 'anthropic',
   aiBaseUrl: 'https://api.openai.com/v1',
@@ -208,6 +214,9 @@ export function loadSettings(): Settings {
       lineHeight: coerceLineHeight(parsed.lineHeight),
       wordWrap: typeof parsed.wordWrap === 'boolean' ? parsed.wordWrap : DEFAULT_SETTINGS.wordWrap,
       formatOnSave: typeof parsed.formatOnSave === 'boolean' ? parsed.formatOnSave : DEFAULT_SETTINGS.formatOnSave,
+      autoSave: typeof parsed.autoSave === 'boolean' ? parsed.autoSave : DEFAULT_SETTINGS.autoSave,
+      enableMinimap:
+        typeof parsed.enableMinimap === 'boolean' ? parsed.enableMinimap : DEFAULT_SETTINGS.enableMinimap,
       lspTrace: coerceTrace(parsed.lspTrace),
       aiProvider: parsed.aiProvider === 'openai' ? 'openai' : DEFAULT_SETTINGS.aiProvider,
       aiBaseUrl:

@@ -73,6 +73,7 @@ function makeDeps(lsp: Lsp, overrides: Partial<EditorSessionDeps> = {}): EditorS
     parent: el('editor-pane'),
     doc: 'context Demo {}\n',
     lineWrap: false,
+    minimap: false,
     lsp: lsp as unknown as EditorSessionDeps['lsp'],
     status: el('status'),
     diagCount: el('diag-count'),
