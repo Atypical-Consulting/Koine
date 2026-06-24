@@ -134,3 +134,46 @@ B first because it is the cheapest path to a real, in-editor feedback loop and i
 target-agnostic `Semantics/` layer the whole project is organised around. A is a fidelity upgrade
 whose cost (toolchain-in-the-loop) only pays off once B's interpreted fidelity is measured against the
 emitted behaviour — which is precisely what Task 4 sets up.
+
+## Task 4 — Approach A (emit & execute) evaluation
+
+**Verdict: defer A as an opt-in "high-fidelity" mode (CLI/Roslyn first), not the default.** B's
+interpreted fidelity covers the north-star's core loop on the modelled subset; A is worth pursuing
+only to close the specific gaps below, and its cost (a compile-and-run toolchain in an interactive
+loop, plus an arbitrary-code-execution surface) does not justify making it the default. A follow-up
+issue tracks it.
+
+### Where B diverges from A (the fidelity gap that A would close)
+
+These are the concrete points where interpreting the model differs from running the emitted code. Each
+is a *documented* gap — the interpreter surfaces it as `Indeterminate` + a note, never a wrong answer:
+
+| # | Construct | B (interpreter) | A (emit & execute) |
+|---|---|---|---|
+| 1 | Derived members / value-object arithmetic — e.g. `total = lines.sum(l => l.payable)`, `subtotal = unitPrice * quantity` | `Indeterminate` (no value-object value model; `EvalSum` returns `Unknown` for a VO selector) | the generated `operator+` / derived getters compute a real `Money` |
+| 2 | Value-object construction & its invariants — e.g. a `Money { amount < 0 }` supplied in given-state | accepted as data (B never constructs the VO, so its `invariant amount >= 0` does not run) | the emitted VO constructor throws `DomainInvariantViolationException` |
+| 3 | State-machine legality — a `status -> X` not allowed by the `states` block | applied and shown (legality is not enforced) | the emitted transition guard throws |
+| 4 | Exact failure semantics / messages | a precondition `Failed` halts; messages mirror the source | the real exceptions, ordering and short-circuit behaviour of the shipped code |
+| 5 | Cross-aggregate / integration-event fan-out | out of scope (one aggregate in isolation) | could run the real downstream handlers |
+
+The existing **Roslyn meta-test** (`tests/Koine.Compiler.Tests`, which compiles *and executes* the
+emitted C#) is effectively Approach A already, in a test harness — proof that A is feasible and the
+natural place its machinery would be reused.
+
+### Cost of A (why it is deferred)
+
+- **CLI / Tauri:** emit C# → compile with Roslyn → load the assembly → reflectively construct the
+  aggregate and invoke the command → read back events/state. Seconds per run, a non-trivial reflective
+  driver for *arbitrary* aggregates, and — critically — it **executes generated code from a
+  user-authored model**, an arbitrary-code-execution surface that needs sandboxing.
+- **Browser / WASM:** Studio already ships the Blazor/.NET compiler in-browser, but *executing* the
+  emitted C# there means a second Roslyn-in-WASM compile-and-load (or an emit-to-WASM) step — heavy,
+  and gated by the very per-tab memory ceilings the mobile spike flags
+  ([#219](https://github.com/Atypical-Consulting/Koine/issues/219), `mobile-wasm-spike.md`).
+
+### Recommendation
+
+Keep **B as the default** runner. Pursue **A as an opt-in mode** ("execute generated code"),
+**CLI/Tauri-first** behind a flag, reusing the Roslyn meta-test harness; treat the browser path as a
+later, separately-gated step. Prioritise A only if users hit gaps **#1/#2** (derived values and
+value-object validation) in practice — those are the gaps most visible in the timeline today.
