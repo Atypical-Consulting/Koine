@@ -242,6 +242,33 @@ export class WasmLspTransport implements LspTransport {
         ];
       }
 
+      case 'textDocument/inlayHint': {
+        const range = msg.params?.range;
+        return [
+          result(
+            JSON.parse(
+              api.InlayHints(
+                this.filesJson(),
+                uri ?? '',
+                range?.start?.line ?? 0,
+                range?.start?.character ?? 0,
+                range?.end?.line ?? 0,
+                range?.end?.character ?? 0,
+              ),
+            ),
+          ),
+        ];
+      }
+
+      case 'textDocument/prepareCallHierarchy':
+        return [result(JSON.parse(api.PrepareCallHierarchy(this.filesJson(), uri ?? '', pos?.line ?? 0, pos?.character ?? 0)))];
+
+      case 'callHierarchy/incomingCalls':
+        return [result(JSON.parse(api.IncomingCalls(this.filesJson(), JSON.stringify(msg.params?.item ?? {}))))];
+
+      case 'callHierarchy/outgoingCalls':
+        return [result(JSON.parse(api.OutgoingCalls(this.filesJson(), JSON.stringify(msg.params?.item ?? {}))))];
+
       case 'koine/check': {
         const baseline = JSON.stringify(msg.params?.baselineSources ?? []);
         return [result(JSON.parse(api.Check(this.filesJson(), baseline)))];

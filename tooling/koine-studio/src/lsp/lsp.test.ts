@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, test, vi } from 'vitest';
 import { KoineLsp } from '@/lsp/lsp';
+import type { CallHierarchyItem } from '@/lsp/lsp';
 import type { LspTransport } from '@/host/types';
 
 // Document-sync protocol coverage for KoineLsp, driven through a fake LspTransport that records every
@@ -118,6 +119,116 @@ describe('KoineLsp document sync', () => {
     lsp.changeDoc(URI, 'after-close');
     lsp.flush();
     expect(byMethod(sent, 'textDocument/didChange')).toHaveLength(0);
+  });
+});
+
+// A harness that, unlike the document-sync one above, can ANSWER requests: the fake transport echoes
+// each outgoing request id back through its onMessage handler with a canned `result`, so the request
+// promise resolves. `setActive(URI)` is called so every request method's `textDocument.uri` is filled.
+function responder(reply: (method: string, params: any) => unknown) {
+  const sent: Sent[] = [];
+  let onMessage: ((json: string) => void) | undefined;
+  const transport: LspTransport = {
+    start: () => Promise.resolve(),
+    send: (m: string) => {
+      const msg = JSON.parse(m) as Sent;
+      sent.push(msg);
+      // Only requests (those with an id) get a reply; notifications are recorded only.
+      if (msg.id != null) {
+        const result = reply(msg.method, msg.params);
+        // Resolve on the next microtask so the client has finished registering the pending entry.
+        queueMicrotask(() => onMessage?.(JSON.stringify({ jsonrpc: '2.0', id: msg.id, result })));
+      }
+      return Promise.resolve();
+    },
+    onMessage: (cb) => {
+      onMessage = cb;
+    },
+    onExit: () => {},
+    onRestart: () => {},
+    stop: () => Promise.resolve(),
+  };
+  // start() attaches the onMessage handler; do it directly here (no handshake needed).
+  transport.onMessage((json) => lsp['handle'](JSON.parse(json)));
+  const lsp = new KoineLsp(transport);
+  lsp.setActive(URI);
+  return { lsp, sent };
+}
+
+const lastReq = (sent: Sent[], method: string) => {
+  const all = byMethod(sent, method);
+  return all[all.length - 1];
+};
+
+const ITEM: CallHierarchyItem = {
+  name: 'place',
+  kind: 6,
+  uri: URI,
+  range: { start: { line: 3, character: 2 }, end: { line: 3, character: 7 } },
+  selectionRange: { start: { line: 3, character: 2 }, end: { line: 3, character: 7 } },
+  data: { chKind: 'Command', owningType: 'Order' },
+};
+
+describe('KoineLsp inlay hints', () => {
+  test('sends textDocument/inlayHint with the active uri + 0-based range and maps the result', async () => {
+    const hints = [{ position: { line: 1, character: 4 }, label: ': OrderId', kind: 1 }];
+    const { lsp, sent } = responder(() => hints);
+    const res = await lsp.inlayHints(1, 0, 9, 0);
+    const req = lastReq(sent, 'textDocument/inlayHint');
+    expect(req.params.textDocument).toEqual({ uri: URI });
+    expect(req.params.range).toEqual({ start: { line: 1, character: 0 }, end: { line: 9, character: 0 } });
+    expect(res).toEqual(hints);
+  });
+
+  test('maps a null result to []', async () => {
+    const { lsp } = responder(() => null);
+    expect(await lsp.inlayHints(0, 0, 1, 0)).toEqual([]);
+  });
+});
+
+describe('KoineLsp call hierarchy', () => {
+  test('prepareCallHierarchy sends the active uri + position and maps the items', async () => {
+    const { lsp, sent } = responder(() => [ITEM]);
+    const res = await lsp.prepareCallHierarchy(3, 4);
+    const req = lastReq(sent, 'textDocument/prepareCallHierarchy');
+    expect(req.params.textDocument).toEqual({ uri: URI });
+    expect(req.params.position).toEqual({ line: 3, character: 4 });
+    expect(res).toEqual([ITEM]);
+  });
+
+  test('prepareCallHierarchy maps a null result to []', async () => {
+    const { lsp } = responder(() => null);
+    expect(await lsp.prepareCallHierarchy(0, 0)).toEqual([]);
+  });
+
+  test('incomingCalls forwards the item verbatim (data included) and maps the calls', async () => {
+    const calls = [{ from: ITEM, fromRanges: [ITEM.range] }];
+    const { lsp, sent } = responder(() => calls);
+    const res = await lsp.incomingCalls(ITEM);
+    const req = lastReq(sent, 'callHierarchy/incomingCalls');
+    expect(req.params).toEqual({ item: ITEM }); // whole item, including its opaque `data`
+    expect(req.params.item.data).toEqual({ chKind: 'Command', owningType: 'Order' });
+    expect(res).toEqual(calls);
+  });
+
+  test('incomingCalls maps a null result to []', async () => {
+    const { lsp } = responder(() => null);
+    expect(await lsp.incomingCalls(ITEM)).toEqual([]);
+  });
+
+  test('outgoingCalls forwards the item verbatim (data included) and maps the calls', async () => {
+    const calls = [{ to: ITEM, fromRanges: [ITEM.range] }];
+    const { lsp, sent } = responder(() => calls);
+    const res = await lsp.outgoingCalls(ITEM);
+    const req = lastReq(sent, 'callHierarchy/outgoingCalls');
+    expect(req.params).toEqual({ item: ITEM });
+    expect(req.params.item.data).toEqual({ chKind: 'Command', owningType: 'Order' });
+    expect(res).toEqual(calls);
+  });
+
+  test('outgoingCalls maps a null result to []', async () => {
+    const { lsp } = responder(() => null);
+    expect(await lsp.outgoingCalls(ITEM)).toEqual([]);
   });
 });
 

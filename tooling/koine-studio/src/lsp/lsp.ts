@@ -8,6 +8,9 @@ import type { LspTransport } from '@/host/types';
 // client's request methods reference.
 export * from '@/lsp/protocol';
 import type {
+  CallHierarchyIncomingCall,
+  CallHierarchyItem,
+  CallHierarchyOutgoingCall,
   CheckResult,
   CodeAction,
   CodeLens,
@@ -22,6 +25,7 @@ import type {
   GlossaryModel,
   GlossaryResult,
   HoverResult,
+  InlayHint,
   Location,
   LspDiagnostic,
   ModelEditResult,
@@ -474,6 +478,54 @@ export class KoineLsp {
       textDocument: { uri: this.activeUri },
       position: { line, character },
     });
+  }
+
+  /**
+   * Inlay hints (inferred type / parameter-name annotations) for a 0-based range. Resolves to []
+   * when the server returns null. The editor renders each as a dimmed inline widget.
+   */
+  async inlayHints(
+    startLine: number,
+    startChar: number,
+    endLine: number,
+    endChar: number,
+  ): Promise<InlayHint[]> {
+    const res = await this.request<InlayHint[] | null>('textDocument/inlayHint', {
+      textDocument: { uri: this.activeUri },
+      range: { start: { line: startLine, character: startChar }, end: { line: endLine, character: endChar } },
+    });
+    return res ?? [];
+  }
+
+  /**
+   * Prepare call hierarchy at a 0-based position: the CallHierarchyItem(s) the cursor resolves to.
+   * Each item carries an opaque `data` blob that must be echoed back verbatim on incoming/outgoing.
+   * Resolves to [] when the cursor is not on a command/event.
+   */
+  async prepareCallHierarchy(line: number, character: number): Promise<CallHierarchyItem[]> {
+    const res = await this.request<CallHierarchyItem[] | null>('textDocument/prepareCallHierarchy', {
+      textDocument: { uri: this.activeUri },
+      position: { line, character },
+    });
+    return res ?? [];
+  }
+
+  /**
+   * Incoming calls into a prepared CallHierarchyItem. The item (including its opaque `data`) is sent
+   * back verbatim so the server can reconstruct it. Resolves to [] when the server returns null.
+   */
+  async incomingCalls(item: CallHierarchyItem): Promise<CallHierarchyIncomingCall[]> {
+    const res = await this.request<CallHierarchyIncomingCall[] | null>('callHierarchy/incomingCalls', { item });
+    return res ?? [];
+  }
+
+  /**
+   * Outgoing calls from a prepared CallHierarchyItem. The item (including its opaque `data`) is sent
+   * back verbatim so the server can reconstruct it. Resolves to [] when the server returns null.
+   */
+  async outgoingCalls(item: CallHierarchyItem): Promise<CallHierarchyOutgoingCall[]> {
+    const res = await this.request<CallHierarchyOutgoingCall[] | null>('callHierarchy/outgoingCalls', { item });
+    return res ?? [];
   }
 
   /** Signature help for the call enclosing a 0-based position. Resolves to null when there is none. */

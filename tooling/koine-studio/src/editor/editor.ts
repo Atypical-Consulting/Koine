@@ -3,8 +3,10 @@
 // viewer for the generated C#/TypeScript output. Adapted from the website playground;
 // the key difference is that diagnostics are PUSH-based (publishDiagnostics → setDiagnostics)
 // rather than pull-based (linter()).
-import { EditorState, Compartment, type Extension } from '@codemirror/state';
+import { EditorState, Compartment, StateEffect, type Extension, type Text } from '@codemirror/state';
 import {
+  Decoration,
+  type DecorationSet,
   EditorView,
   keymap,
   lineNumbers,
@@ -14,6 +16,9 @@ import {
   rectangularSelection,
   crosshairCursor,
   hoverTooltip,
+  ViewPlugin,
+  type ViewUpdate,
+  WidgetType,
   type Tooltip,
 } from '@codemirror/view';
 import { defaultKeymap, indentWithTab } from '@codemirror/commands';
@@ -46,10 +51,14 @@ import { php } from '@codemirror/lang-php';
 import { tags as t } from '@lezer/highlight';
 import { lintGutter, setDiagnostics } from '@codemirror/lint';
 import type {
+  CallHierarchyIncomingCall,
+  CallHierarchyItem,
+  CallHierarchyOutgoingCall,
   CodeAction,
   CompletionItem,
   DocumentSymbol,
   HoverResult,
+  InlayHint,
   Location,
   LspDiagnostic,
   MarkedString,
@@ -341,6 +350,125 @@ function koineHoverTooltip(hover: HoverFn) {
   });
 }
 
+// --- inlay hints ------------------------------------------------------------
+
+/** Inlay-hint provider; resolves the type/parameter annotations for a 0-based range. */
+export type InlayHintsFn = (
+  startLine: number,
+  startChar: number,
+  endLine: number,
+  endChar: number,
+) => Promise<InlayHint[]>;
+
+// InlayHintKind: 1 = Type (rendered AFTER the position, like `: T`), 2 = Parameter (rendered BEFORE
+// the position, like `name:`). Anything else defaults to the Type side.
+const INLAY_KIND_PARAMETER = 2;
+
+/** Convert a CodeMirror document offset to a 0-based LSP {line, character} (pure; no view needed). */
+function posToLspPos(doc: Text, pos: number): { line: number; character: number } {
+  const lineInfo = doc.lineAt(pos);
+  return { line: lineInfo.number - 1, character: pos - lineInfo.from };
+}
+
+// Dispatched purely to make the inlay ViewPlugin re-evaluate its decorations once an async fetch
+// resolves — that resolution happens outside any transaction (mirrors inlineCompletion's redrawEffect).
+const inlayRedrawEffect = StateEffect.define<null>();
+
+/** The dimmed inline widget that paints one inlay hint. */
+class InlayWidget extends WidgetType {
+  constructor(
+    readonly label: string,
+    readonly kind: number,
+  ) {
+    super();
+  }
+  eq(other: InlayWidget): boolean {
+    return other.label === this.label && other.kind === this.kind;
+  }
+  toDOM(): HTMLElement {
+    const span = document.createElement('span');
+    span.className = 'cm-inlay-hint';
+    span.textContent = this.label;
+    return span;
+  }
+}
+
+const inlayTheme = EditorView.baseTheme({
+  '.cm-inlay-hint': {
+    color: 'var(--koi-muted)',
+    fontStyle: 'normal',
+    // A hair smaller so the annotation reads as metadata, not source.
+    fontSize: '0.92em',
+    padding: '0 1px',
+  },
+});
+
+/**
+ * Build the inlay-hint extension: a ViewPlugin that, for the visible viewport, asks the language
+ * service for type/parameter hints and renders each as a dimmed inline widget. It refetches whenever
+ * the viewport or document changes, and guards against stale async results with a per-request token
+ * (mirrors inlineCompletion's race handling).
+ */
+export function inlayHintsExtension(provider: InlayHintsFn): Extension {
+  const plugin = ViewPlugin.fromClass(
+    class {
+      decorations: DecorationSet = Decoration.none;
+      private hints: InlayHint[] = [];
+      private seq = 0;
+
+      constructor(view: EditorView) {
+        this.fetch(view);
+      }
+
+      update(u: ViewUpdate): void {
+        // Re-fetch when the visible range or the document changes (new lines may need new hints).
+        if (u.viewportChanged || u.docChanged) this.fetch(u.view);
+        // Rebuild decorations when the doc changed (cached offsets are stale) or when an async fetch
+        // resolved and dispatched the redraw effect (the resolution happens outside any transaction).
+        const redrawn = u.transactions.some((tr) => tr.effects.some((e) => e.is(inlayRedrawEffect)));
+        if (u.docChanged || redrawn) this.decorations = this.build(u.view);
+      }
+
+      /** Ask the provider for hints over the visible range; redraw when the freshest answer lands. */
+      private fetch(view: EditorView): void {
+        const token = ++this.seq;
+        const { from, to } = view.viewport;
+        const start = posToLspPos(view.state.doc, from);
+        const end = posToLspPos(view.state.doc, to);
+        void provider(start.line, start.character, end.line, end.character)
+          .then((hints) => {
+            // Ignore a stale answer (a newer fetch superseded it) or one for a destroyed plugin.
+            if (token !== this.seq) return;
+            this.hints = hints;
+            view.dispatch({ effects: inlayRedrawEffect.of(null) });
+          })
+          .catch(() => {
+            // Request failed/timed out — leave the previous hints in place rather than flashing.
+          });
+      }
+
+      private build(view: EditorView): DecorationSet {
+        const doc = view.state.doc;
+        const decos = this.hints.map((h) => {
+          const at = lspPosToOffset(doc, h.position.line, h.position.character);
+          // Parameter hints sit BEFORE the value (side -1); type hints AFTER it (side 1).
+          const side = h.kind === INLAY_KIND_PARAMETER ? -1 : 1;
+          return Decoration.widget({ widget: new InlayWidget(h.label, h.kind), side }).range(at);
+        });
+        // CodeMirror requires the decoration set sorted by `from` (then side) — `true` sorts it.
+        return Decoration.set(decos, true);
+      }
+
+      destroy(): void {
+        // Bump the token so any in-flight fetch's resolution is ignored after teardown.
+        this.seq++;
+      }
+    },
+    { decorations: (v) => v.decorations },
+  );
+  return [plugin, inlayTheme];
+}
+
 // --- editable editor --------------------------------------------------------
 
 /** Go-to-definition provider; resolves a 0-based position to a Location (or array/null). */
@@ -364,6 +492,12 @@ export type RenameFn = (line: number, character: number, newName: string) => Pro
 export type ReferencesFn = (line: number, character: number) => Promise<Location[]>;
 /** code-action provider; resolves the quickfixes + refactors for a 0-based selection range. */
 export type CodeActionsFn = (range: LspRange) => Promise<CodeAction[]>;
+/** prepareCallHierarchy provider; resolves the call-hierarchy item(s) at a 0-based position. */
+export type PrepareCallHierarchyFn = (line: number, character: number) => Promise<CallHierarchyItem[]>;
+/** incomingCalls provider; resolves the callers of a prepared item (item echoed back verbatim). */
+export type IncomingCallsFn = (item: CallHierarchyItem) => Promise<CallHierarchyIncomingCall[]>;
+/** outgoingCalls provider; resolves the callees of a prepared item (item echoed back verbatim). */
+export type OutgoingCallsFn = (item: CallHierarchyItem) => Promise<CallHierarchyOutgoingCall[]>;
 /** Applies a resolved WorkspaceEdit; ide.ts spreads the edits across its open buffers. */
 export type ApplyWorkspaceEditFn = (edit: WorkspaceEdit) => void;
 /** Navigates to a picked reference Location; ide.ts switches files if needed and jumps. */
@@ -415,6 +549,14 @@ export interface KoineEditorOptions {
   onCodeActions?: CodeActionsFn;
   /** Applies a WorkspaceEdit from a rename/code-action (ide.ts spreads it across buffers). */
   onApplyWorkspaceEdit?: ApplyWorkspaceEditFn;
+  /** Optional inlay-hint provider; when given, type/parameter hints render inline. */
+  onInlayHints?: InlayHintsFn;
+  /** Optional prepareCallHierarchy provider; with onIncomingCalls/onOutgoingCalls, enables Mod-Alt-h. */
+  onPrepareCallHierarchy?: PrepareCallHierarchyFn;
+  /** Optional incoming-calls provider (callers of the item under the cursor). */
+  onIncomingCalls?: IncomingCallsFn;
+  /** Optional outgoing-calls provider (callees of the item under the cursor). */
+  onOutgoingCalls?: OutgoingCallsFn;
 }
 
 export interface KoineEditor {
@@ -553,6 +695,60 @@ export function createKoineEditor(opts: KoineEditorOptions): KoineEditor {
     );
   }
 
+  // Mod-Alt-h call hierarchy: prepare the item under the cursor, then resolve its incoming + outgoing
+  // calls and present a navigable menu. Incoming rows read `← caller (owner)`; outgoing rows `→ callee`.
+  // Picking a row navigates to that item's range via onNavigateLocation (ide.ts switches files).
+  async function showCallHierarchy(pos: number): Promise<void> {
+    if (!opts.onPrepareCallHierarchy || !opts.onNavigateLocation) return;
+    if (!opts.onIncomingCalls && !opts.onOutgoingCalls) return;
+    const at = posToLsp(pos);
+    let items: CallHierarchyItem[];
+    try {
+      items = await opts.onPrepareCallHierarchy(at.line, at.character);
+    } catch {
+      return;
+    }
+    const item = items[0];
+    if (!item) {
+      showActionMenu(view, pos, [], { emptyText: 'No call hierarchy here.' });
+      return;
+    }
+
+    let incoming: CallHierarchyIncomingCall[] = [];
+    let outgoing: CallHierarchyOutgoingCall[] = [];
+    try {
+      [incoming, outgoing] = await Promise.all([
+        opts.onIncomingCalls ? opts.onIncomingCalls(item) : Promise.resolve([]),
+        opts.onOutgoingCalls ? opts.onOutgoingCalls(item) : Promise.resolve([]),
+      ]);
+    } catch {
+      return;
+    }
+
+    // One row per caller/callee. The `data` of `from`/`to` is irrelevant for navigation — we jump to
+    // the item's own uri+range — so picking a row just forwards a plain Location to onNavigateLocation.
+    const owner = (ci: CallHierarchyItem): string => {
+      const d = ci.data as { owningType?: string | null } | undefined;
+      return d?.owningType ? ` (${d.owningType})` : '';
+    };
+    const navTo = (ci: CallHierarchyItem) =>
+      opts.onNavigateLocation!({ uri: ci.uri, range: ci.range });
+
+    const rows = [
+      ...incoming.map((c) => ({
+        label: `← ${c.from.name}${owner(c.from)}`,
+        detail: `${c.from.range.start.line + 1}:${c.from.range.start.character + 1}`,
+        run: () => navTo(c.from),
+      })),
+      ...outgoing.map((c) => ({
+        label: `→ ${c.to.name}${owner(c.to)}`,
+        detail: `${c.to.range.start.line + 1}:${c.to.range.start.character + 1}`,
+        run: () => navTo(c.to),
+      })),
+    ];
+    showActionMenu(view, pos, rows, { emptyText: `No callers or callees for ${item.name}.` });
+  }
+
   // Cmd/Ctrl-click jumps to definition (only when a provider is wired).
   const definitionClick = opts.onDefinition
     ? [
@@ -615,6 +811,16 @@ export function createKoineEditor(opts: KoineEditorOptions): KoineEditor {
         return true;
       },
     },
+    {
+      key: 'Mod-Alt-h',
+      preventDefault: true,
+      run: () => {
+        if (!opts.onPrepareCallHierarchy || !opts.onNavigateLocation) return false;
+        if (!opts.onIncomingCalls && !opts.onOutgoingCalls) return false;
+        void showCallHierarchy(view.state.selection.main.head);
+        return true;
+      },
+    },
   ]);
 
   // Soft-wrap lives in its own compartment so Settings can flip it without rebuilding the editor.
@@ -673,6 +879,8 @@ export function createKoineEditor(opts: KoineEditorOptions): KoineEditor {
           isEnabled: () => loadSettings().aiInlineCompletions,
           lspPopupOpen: (v) => completionStatus(v.state) === 'active',
         }),
+        // LSP inlay hints (inferred type / parameter-name annotations) over the visible viewport.
+        ...(opts.onInlayHints ? [inlayHintsExtension(opts.onInlayHints)] : []),
         extraKeys,
         keymap.of([
           ...closeBracketsKeymap,
