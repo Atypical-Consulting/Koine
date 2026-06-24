@@ -88,6 +88,13 @@ public sealed class ModelIndex
     // Integration events a context publishes (R14.3), for subscribe validation.
     private readonly Dictionary<string, HashSet<string>> _publishedByContext = new(StringComparer.Ordinal);
 
+    // Call graph (derived lazily on first access, then cached). The keys are target-agnostic
+    // semantic names — entity type names, command names, event names — so the graph stays usable
+    // by any consumer (LSP, emitters, docs) without leaking a target concept.
+    //   _emitsByCommand:        (entityType, commandName) -> the events that command emits.
+    //   _commandsByEvent:       eventName -> the (entityType, commandName) commands that emit it.
+    //   _policyReactionsByEvent: eventName -> the (targetType, commandName) reactions it triggers.
+
     // Relation roles that PERMIT a downstream to reference an upstream type without an import (R14.1).
     private static readonly HashSet<ContextRelationKind> PermitKinds = new()
     {
@@ -827,6 +834,113 @@ public sealed class ModelIndex
             }
         }
         return false;
+    }
+
+    // ---- Call graph (derived: command emits & policy reactions) ------------
+
+    /// <summary>
+    /// The domain events the command named <paramref name="commandName"/> on entity type
+    /// <paramref name="targetType"/> emits (its <c>emit E(…)</c> statements). Empty for an
+    /// unknown entity/command. Factory emits are out of scope (these keys are command names).
+    /// </summary>
+    public IReadOnlyList<string> EventsEmittedBy(string targetType, string commandName) =>
+        EmitsByCommand.TryGetValue((targetType, commandName), out List<string>? events) ? events : Array.Empty<string>();
+
+    /// <summary>
+    /// The reverse edge: every <c>(entityType, commandName)</c> whose command body emits
+    /// <paramref name="eventName"/>. Empty for an event no command emits.
+    /// </summary>
+    public IReadOnlyList<(string targetType, string commandName)> CommandsEmitting(string eventName) =>
+        CommandsByEvent.TryGetValue(eventName, out List<(string, string)>? commands) ? commands : Array.Empty<(string, string)>();
+
+    /// <summary>
+    /// The reaction targets of every policy that reacts to <paramref name="eventName"/>:
+    /// the <c>(TargetType, CommandName)</c> each such <c>PolicyDecl</c> invokes. Empty for an
+    /// event no policy reacts to.
+    /// </summary>
+    public IReadOnlyList<(string targetType, string commandName)> PoliciesTriggeredByEvent(string eventName) =>
+        PolicyReactionsByEvent.TryGetValue(eventName, out List<(string, string)>? reactions) ? reactions : Array.Empty<(string, string)>();
+
+    private Dictionary<(string, string), List<string>> EmitsByCommand { get => field ??= BuildEmitGraph().forward; set; }
+
+    private Dictionary<string, List<(string, string)>> CommandsByEvent { get => field ??= BuildEmitGraph().reverse; set; }
+
+    private Dictionary<string, List<(string, string)>> PolicyReactionsByEvent => field ??= BuildPolicyGraph();
+
+    /// <summary>
+    /// Builds both directions of the command-emit graph in one pass and caches them together (the
+    /// reverse map is just the forward map transposed, so they share the walk). Edges are deduped.
+    /// </summary>
+    private (Dictionary<(string, string), List<string>> forward, Dictionary<string, List<(string, string)>> reverse) BuildEmitGraph()
+    {
+        var forward = new Dictionary<(string, string), List<string>>();
+        var reverse = new Dictionary<string, List<(string, string)>>(StringComparer.Ordinal);
+
+        foreach (ContextNode ctx in Model.Contexts)
+        {
+            foreach (EntityDecl entity in ctx.AllTypeDecls().OfType<EntityDecl>())
+            {
+                foreach (CommandDecl command in entity.Commands)
+                {
+                    var key = (entity.Name, command.Name);
+                    foreach (CommandStmt stmt in command.Body)
+                    {
+                        if (stmt is not EmitClause emit)
+                        {
+                            continue;
+                        }
+
+                        if (!forward.TryGetValue(key, out List<string>? events))
+                        {
+                            forward[key] = events = new List<string>();
+                        }
+
+                        if (!events.Contains(emit.EventName))
+                        {
+                            events.Add(emit.EventName);
+                        }
+
+                        if (!reverse.TryGetValue(emit.EventName, out List<(string, string)>? commands))
+                        {
+                            reverse[emit.EventName] = commands = new List<(string, string)>();
+                        }
+
+                        if (!commands.Contains(key))
+                        {
+                            commands.Add(key);
+                        }
+                    }
+                }
+            }
+        }
+
+        EmitsByCommand = forward;
+        CommandsByEvent = reverse;
+        return (forward, reverse);
+    }
+
+    /// <summary>Builds the event -&gt; policy-reaction graph (deduped edges).</summary>
+    private Dictionary<string, List<(string, string)>> BuildPolicyGraph()
+    {
+        var byEvent = new Dictionary<string, List<(string, string)>>(StringComparer.Ordinal);
+        foreach (ContextNode ctx in Model.Contexts)
+        {
+            foreach (PolicyDecl policy in ctx.Policies)
+            {
+                var edge = (policy.Reaction.TargetType, policy.Reaction.CommandName);
+                if (!byEvent.TryGetValue(policy.EventName, out List<(string, string)>? reactions))
+                {
+                    byEvent[policy.EventName] = reactions = new List<(string, string)>();
+                }
+
+                if (!reactions.Contains(edge))
+                {
+                    reactions.Add(edge);
+                }
+            }
+        }
+
+        return byEvent;
     }
 
     /// <summary>The C# namespace a context+module-path emits into (e.g. <c>Billing.Pricing</c>).</summary>

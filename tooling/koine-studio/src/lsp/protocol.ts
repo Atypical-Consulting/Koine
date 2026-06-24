@@ -310,6 +310,38 @@ export interface CodeLens {
   command?: { title: string; command: string };
 }
 
+// Standard LSP InlayHint: an inline annotation pinned at `position`. `kind` is the numeric
+// InlayHintKind (1=Type, 2=Parameter); the editor styles/places the widget per kind.
+export interface InlayHint {
+  position: Position;
+  label: string;
+  kind: number;
+}
+
+// Standard LSP CallHierarchyItem: one node in the call graph (a Command/Method or an Event). `kind`
+// is the SymbolKind number (6=Method/Command, 24=Event). `data` is an opaque round-trip blob the
+// server fills on prepare and reads back on incoming/outgoing — it MUST be echoed back unchanged.
+export interface CallHierarchyItem {
+  name: string;
+  kind: number;
+  uri: string;
+  range: Range;
+  selectionRange: Range;
+  data?: unknown;
+}
+
+// Standard LSP CallHierarchyIncomingCall: a caller (`from`) and the ranges within it that call.
+export interface CallHierarchyIncomingCall {
+  from: CallHierarchyItem;
+  fromRanges: Range[];
+}
+
+// Standard LSP CallHierarchyOutgoingCall: a callee (`to`) and the call-site ranges within the item.
+export interface CallHierarchyOutgoingCall {
+  to: CallHierarchyItem;
+  fromRanges: Range[];
+}
+
 // Standard LSP TextEdit: replace `range` with `newText`.
 export interface TextEdit {
   range: Range;

@@ -127,6 +127,39 @@ public sealed record CodeLens(
     SourceSpan Range,
     string? Title);
 
+/// <summary>The kind of an inlay hint; the LSP shell maps these to LSP InlayHintKind numbers (1 = Type, 2 = Parameter).</summary>
+public enum InlayHintKind { Type, Parameter }
+
+/// <summary>
+/// One editor inlay hint: a short label rendered inline at the 0-based LSP <see cref="Line"/>/
+/// <see cref="Character"/> position. A <see cref="InlayHintKind.Type"/> hint shows an inferred
+/// type (e.g. <c>": Money"</c>) just after a direct read-model field name; a
+/// <see cref="InlayHintKind.Parameter"/> hint shows a callee's parameter name (e.g. <c>"qty:"</c>)
+/// just before a positional call argument. Editor-agnostic; the LSP/WASM shells map it to an LSP
+/// <c>InlayHint</c>.
+/// </summary>
+public sealed record InlayHint(int Line, int Character, string Label, InlayHintKind Kind);
+
+/// <summary>The kind of a call-hierarchy item: a command on an entity, or a domain event.</summary>
+public enum CallHierarchyItemKind { Command, Event }
+
+/// <summary>
+/// One node of the call hierarchy over the domain call graph (<c>command --emit--> event
+/// --policy--> command</c>). A <see cref="CallHierarchyItemKind.Command"/> item is identified by
+/// <c>(<see cref="OwningType"/>, <see cref="Name"/>)</c>; a <see cref="CallHierarchyItemKind.Event"/>
+/// item by <see cref="Name"/> alone (its <see cref="OwningType"/> is <c>null</c>). The
+/// <see cref="Uri"/> + 1-based <see cref="Span"/> point an editor at the declaration (the
+/// <c>NameSpan</c>). Editor-agnostic; the LSP/WASM shells map it to an LSP
+/// <c>CallHierarchyItem</c>.
+/// </summary>
+public sealed record CallHierarchyItem(string Name, CallHierarchyItemKind Kind, string? OwningType, string Uri, SourceSpan Span);
+
+/// <summary>One incoming edge: the <see cref="From"/> item that calls into the prepared item.</summary>
+public sealed record CallHierarchyIncomingCall(CallHierarchyItem From);
+
+/// <summary>One outgoing edge: the <see cref="To"/> item the prepared item calls.</summary>
+public sealed record CallHierarchyOutgoingCall(CallHierarchyItem To);
+
 /// <summary>
 /// Editor-agnostic language services for <c>.koi</c>. <see cref="CompleteAt"/> is
 /// single-file and lexer-only (works on broken documents). <see cref="HoverAt(IReadOnlyDictionary{string,string},string,int,int)"/> and
@@ -1208,6 +1241,510 @@ public sealed class KoineLanguageService
     }
 
     /// <summary>
+    /// The inlay hints for the active document within the 0-based LSP range
+    /// <c>[startLine:startChar, endLine:endChar]</c>. Two grammar-grounded sites:
+    /// <list type="bullet">
+    /// <item>a <see cref="InlayHintKind.Type"/> hint after each <em>direct</em> read-model field
+    /// (a bare <c>softName</c> whose type is inferred from the source type's member of the same
+    /// name), anchored at the end of the field-name token;</item>
+    /// <item>a <see cref="InlayHintKind.Parameter"/> hint before each positional argument of a
+    /// call (<c>receiver.op(a, b)</c>) whose callee resolves to a parameterized entity
+    /// command/factory or service operation/use-case, anchored at the argument's start.</item>
+    /// </list>
+    /// Resolution is best-effort: a field/call that does not resolve produces no hint (never a
+    /// wrong one). Declarations are scoped to <paramref name="activeUri"/> by their source-span
+    /// file, so hints are file-local even though resolution uses the whole-workspace model.
+    /// Returns an empty list when the active document is absent.
+    /// </summary>
+    public IReadOnlyList<InlayHint> InlayHintsAt(
+        KoineCompilation compilation, string activeUri,
+        int startLine, int startChar, int endLine, int endChar)
+    {
+        if (!compilation.Documents.ContainsKey(activeUri))
+        {
+            return [];
+        }
+
+        // Resolve against the whole-workspace model so a read model can infer a field type from a
+        // source type declared in another file; emit only for declarations in the active document.
+        var semantic = compilation.SemanticModel;
+        var index = semantic.Index;
+        var hints = new List<InlayHint>();
+
+        foreach (var context in semantic.Model.Contexts)
+        {
+            CollectTypeHints(context, index, activeUri, hints);
+            CollectParameterHints(context, index, activeUri, hints);
+        }
+
+        // Keep only hints whose 0-based position falls within the requested range (inclusive).
+        return hints
+            .Where(h => InRange(h.Line, h.Character, startLine, startChar, endLine, endChar))
+            .ToList();
+    }
+
+    /// <summary>
+    /// Adds a <see cref="InlayHintKind.Type"/> hint for each direct read-model field in
+    /// <paramref name="context"/> declared in <paramref name="activeUri"/>: a field with no written
+    /// type and no projection, whose inferred type is the source type's member of the same name.
+    /// </summary>
+    private static void CollectTypeHints(ContextNode context, ModelIndex index, string activeUri, List<InlayHint> hints)
+    {
+        foreach (var rm in context.Types.OfType<ReadModelDecl>())
+        {
+            foreach (var field in rm.Fields)
+            {
+                // Direct field only: a written type or a projection means the type is not inferred.
+                if (field.Type is not null || field.Projection is not null)
+                {
+                    continue;
+                }
+
+                // The name span must live in the active document and have a real position.
+                if (field.NameSpan.IsNone || !IsInActiveDocument(field.NameSpan, activeUri))
+                {
+                    continue;
+                }
+
+                // Infer the field's type from the source member of the same name (R12.3). Skip when
+                // it can't be resolved (e.g. the synthetic `id`, or an unknown source) — no wrong hint.
+                if (!index.TryGetMemberType(context.Name, rm.SourceType, field.Name, out var type))
+                {
+                    continue;
+                }
+
+                // Anchor at the end of the field-name token (the type follows the name).
+                var (line, character) = ZeroBasedEnd(field.NameSpan);
+                hints.Add(new InlayHint(line, character, ": " + RenderType(type), InlayHintKind.Type));
+            }
+        }
+    }
+
+    /// <summary>
+    /// Adds a <see cref="InlayHintKind.Parameter"/> hint before each positional argument of every
+    /// resolvable call in <paramref name="context"/>'s expressions: walks every expression of every
+    /// declaration, and for each <see cref="CallExpr"/> whose method resolves to a parameterized
+    /// command/factory/operation/use-case, emits one hint per positional argument (skipping a
+    /// trailing lambda selector). Anchors each hint at the argument's start; only the active
+    /// document's expressions contribute.
+    /// </summary>
+    private static void CollectParameterHints(ContextNode context, ModelIndex index, string activeUri, List<InlayHint> hints)
+    {
+        foreach (var expr in context.Services.SelectMany(ServiceExpressions))
+        {
+            foreach (var call in CallsIn(expr))
+            {
+                // Koine expression calls resolve by RECEIVER TYPE, which this pass doesn't model — it
+                // matches the callee by bare name. If more than one command/factory/operation shares
+                // that name we can't know which is the real callee, so emit nothing rather than a
+                // possibly-wrong parameter label (the inlay pass never renders a guessed hint).
+                if (!IsUniqueCalleeName(index, call.Method))
+                {
+                    continue;
+                }
+
+                var parameters = ResolveCalleeParameters(index, call.Method);
+                if (parameters is null)
+                {
+                    continue;
+                }
+
+                for (var i = 0; i < call.Args.Count && i < parameters.Count; i++)
+                {
+                    var arg = call.Args[i];
+                    // A lambda selector (e.g. `l => …`) is not a positional value argument.
+                    if (arg is LambdaExpr || arg.Span.IsNone || !IsInActiveDocument(arg.Span, activeUri))
+                    {
+                        continue;
+                    }
+
+                    var (line, character) = ZeroBasedStart(arg.Span);
+                    hints.Add(new InlayHint(line, character, parameters[i].Name + ":", InlayHintKind.Parameter));
+                }
+            }
+        }
+    }
+
+    /// <summary>The body expressions of a service: each operation's result body (use cases are abstract).</summary>
+    private static IEnumerable<Expr> ServiceExpressions(ServiceDecl svc)
+    {
+        foreach (var op in svc.Operations)
+        {
+            if (op.Body is not null)
+            {
+                yield return op.Body;
+            }
+        }
+    }
+
+    /// <summary>Every <see cref="CallExpr"/> in an expression tree, outermost-first.</summary>
+    private static IEnumerable<CallExpr> CallsIn(Expr expr)
+    {
+        switch (expr)
+        {
+            case CallExpr call:
+                yield return call;
+                foreach (var c in CallsIn(call.Target))
+                {
+                    yield return c;
+                }
+
+                foreach (var arg in call.Args)
+                {
+                    foreach (var c in CallsIn(arg))
+                    {
+                        yield return c;
+                    }
+                }
+
+                break;
+            case BinaryExpr b:
+                foreach (var c in CallsIn(b.Left))
+                {
+                    yield return c;
+                }
+
+                foreach (var c in CallsIn(b.Right))
+                {
+                    yield return c;
+                }
+
+                break;
+            case UnaryExpr u:
+                foreach (var c in CallsIn(u.Operand))
+                {
+                    yield return c;
+                }
+
+                break;
+            case ConditionalExpr cond:
+                foreach (var c in CallsIn(cond.Condition))
+                {
+                    yield return c;
+                }
+
+                foreach (var c in CallsIn(cond.Then))
+                {
+                    yield return c;
+                }
+
+                foreach (var c in CallsIn(cond.Else))
+                {
+                    yield return c;
+                }
+
+                break;
+            case CoalesceExpr co:
+                foreach (var c in CallsIn(co.Left))
+                {
+                    yield return c;
+                }
+
+                foreach (var c in CallsIn(co.Right))
+                {
+                    yield return c;
+                }
+
+                break;
+            case GuardExpr g:
+                foreach (var c in CallsIn(g.Body))
+                {
+                    yield return c;
+                }
+
+                foreach (var c in CallsIn(g.Condition))
+                {
+                    yield return c;
+                }
+
+                break;
+            case MemberAccessExpr ma:
+                foreach (var c in CallsIn(ma.Target))
+                {
+                    yield return c;
+                }
+
+                break;
+            case MatchExpr m:
+                foreach (var c in CallsIn(m.Target))
+                {
+                    yield return c;
+                }
+
+                break;
+            case LambdaExpr l:
+                foreach (var c in CallsIn(l.Body))
+                {
+                    yield return c;
+                }
+
+                break;
+            case LetExpr let:
+                foreach (var binding in let.Bindings)
+                {
+                    foreach (var c in CallsIn(binding.Value))
+                    {
+                        yield return c;
+                    }
+                }
+
+                foreach (var c in CallsIn(let.Body))
+                {
+                    yield return c;
+                }
+
+                break;
+        }
+    }
+
+    /// <summary>True when <paramref name="span"/> belongs to the file identified by <paramref name="activeUri"/>.</summary>
+    private static bool IsInActiveDocument(SourceSpan span, string activeUri) =>
+        string.Equals(span.File, activeUri, StringComparison.Ordinal);
+
+    /// <summary>The 0-based LSP start position of a 1-based span.</summary>
+    private static (int Line, int Character) ZeroBasedStart(SourceSpan span) =>
+        (Math.Max(0, span.Line - 1), Math.Max(0, span.Column - 1));
+
+    /// <summary>The 0-based LSP end position of a 1-based, end-EXCLUSIVE span.</summary>
+    private static (int Line, int Character) ZeroBasedEnd(SourceSpan span) =>
+        (Math.Max(0, span.EndLine - 1), Math.Max(0, span.EndColumn - 1));
+
+    /// <summary>True when the 0-based point falls within the inclusive 0-based range.</summary>
+    private static bool InRange(int line, int character, int startLine, int startChar, int endLine, int endChar)
+    {
+        // LSP ranges are start-INCLUSIVE, end-EXCLUSIVE: a hint anchored exactly at the range end
+        // belongs to the next request, so it must not leak into this one (otherwise a hint on a
+        // viewport boundary is returned by two adjacent inlayHint requests).
+        var afterStart = line > startLine || (line == startLine && character >= startChar);
+        var beforeEnd = line < endLine || (line == endLine && character < endChar);
+        return afterStart && beforeEnd;
+    }
+
+    // ------------------------------------------------------------------------
+    // Call hierarchy (#260, Task 3) — over the domain call graph
+    // command --emit--> event --policy--> command. ONE level of edges per request
+    // (so a self-emitting cycle terminates naturally — see the cycle test). The graph
+    // walk is the Task 1 ModelIndex; this layer only resolves the cursor symbol and the
+    // declaration span of each edge target.
+    // ------------------------------------------------------------------------
+
+    /// <summary>
+    /// Resolves the call-hierarchy symbol under the 0-based LSP <paramref name="line"/>/
+    /// <paramref name="character"/> in <paramref name="activeUri"/> (same opening as
+    /// <see cref="DefinitionAt(KoineCompilation,string,int,int)"/>): an empty / string-or-regex token
+    /// yields nothing. A token naming a declared <c>event</c> resolves to a single
+    /// <see cref="CallHierarchyItemKind.Event"/> item; a token naming an entity <c>command</c>
+    /// resolves to a single <see cref="CallHierarchyItemKind.Command"/> item (its owning entity is the
+    /// qualifier of a <c>Target.command(…)</c> policy reaction when present, else the unique entity
+    /// declaring the command, else the enclosing entity). Returns an empty list when the cursor is on
+    /// neither (a list lets prepare yield more than one candidate, though one is the normal case).
+    /// </summary>
+    public IReadOnlyList<CallHierarchyItem> PrepareCallHierarchy(KoineCompilation compilation, string activeUri, int line, int character)
+    {
+        if (!compilation.Documents.TryGetValue(activeUri, out var source))
+        {
+            return [];
+        }
+
+        var ctx = TokenLocator.Locate(source, line, character);
+        var name = ctx.CurrentToken?.Text;
+        if (string.IsNullOrEmpty(name) || ctx.InsideStringOrRegex)
+        {
+            return [];
+        }
+
+        var model = compilation.SemanticModel.Model;
+        var index = compilation.SemanticModel.Index;
+
+        // An event under the cursor -> a single Event item at its declaration.
+        if (index.Classify(name) == TypeKind.Event && FindEvent(index, name) is { } ev)
+        {
+            return [EventItem(ev.Name, ev)];
+        }
+
+        // Otherwise, a command on an entity. Prefer the policy-reaction qualifier (Target.command),
+        // then the unique declaring entity, then the enclosing entity.
+        var owner = ResolveCommandOwner(model, name, ctx.TokenBeforePreceding?.Text, ctx.EnclosingTypeName);
+        if (owner is { } e && FindCommand(model, e.Name, name) is { } command)
+        {
+            return [CommandItem(e.Name, command.Name, command)];
+        }
+
+        // Off any command/event (a field/primitive/whitespace): nothing to anchor.
+        return [];
+    }
+
+    /// <summary>
+    /// One level of incoming edges (who calls <paramref name="item"/>):
+    /// <list type="bullet">
+    /// <item>for an <c>Event</c>, the commands that <c>emit</c> it
+    /// (<see cref="ModelIndex.CommandsEmitting"/>);</item>
+    /// <item>for a <c>Command</c> on type <c>T</c>, every event whose policy re-triggers
+    /// <c>(T, command)</c> — collected from <c>ctx.Policies</c> and deduped.</item>
+    /// </list>
+    /// An edge whose target is not declared in the model (e.g. an external command/event) is skipped
+    /// silently rather than surfaced with no location.
+    /// </summary>
+    public IReadOnlyList<CallHierarchyIncomingCall> IncomingCalls(KoineCompilation compilation, CallHierarchyItem item)
+    {
+        var model = compilation.SemanticModel.Model;
+        var index = compilation.SemanticModel.Index;
+        var calls = new List<CallHierarchyIncomingCall>();
+
+        if (item.Kind == CallHierarchyItemKind.Event)
+        {
+            // Who raises E = the commands that emit it.
+            foreach (var (targetType, commandName) in index.CommandsEmitting(item.Name))
+            {
+                if (CommandItemFor(model, targetType, commandName) is { } from)
+                {
+                    calls.Add(new CallHierarchyIncomingCall(from));
+                }
+            }
+
+            return calls;
+        }
+
+        // A command C on type T is triggered by every event whose policy reacts with (T, C).
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var policyCtx in model.Contexts)
+        {
+            foreach (var policy in policyCtx.Policies)
+            {
+                if (!string.Equals(policy.Reaction.TargetType, item.OwningType, StringComparison.Ordinal)
+                    || !string.Equals(policy.Reaction.CommandName, item.Name, StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                if (seen.Add(policy.EventName) && FindEvent(index, policy.EventName) is { } ev)
+                {
+                    calls.Add(new CallHierarchyIncomingCall(EventItem(ev.Name, ev)));
+                }
+            }
+        }
+
+        return calls;
+    }
+
+    /// <summary>
+    /// One level of outgoing edges (what <paramref name="item"/> calls):
+    /// <list type="bullet">
+    /// <item>for an <c>Event</c>, the commands its policies trigger
+    /// (<see cref="ModelIndex.PoliciesTriggeredByEvent"/>);</item>
+    /// <item>for a <c>Command</c> on type <c>T</c>, the events it <c>emit</c>s
+    /// (<see cref="ModelIndex.EventsEmittedBy"/>).</item>
+    /// </list>
+    /// An edge whose target is not declared in the model is skipped silently (no location to point at).
+    /// </summary>
+    public IReadOnlyList<CallHierarchyOutgoingCall> OutgoingCalls(KoineCompilation compilation, CallHierarchyItem item)
+    {
+        var model = compilation.SemanticModel.Model;
+        var index = compilation.SemanticModel.Index;
+        var calls = new List<CallHierarchyOutgoingCall>();
+
+        if (item.Kind == CallHierarchyItemKind.Event)
+        {
+            // What E triggers = the (target, command) reactions of its policies.
+            foreach (var (targetType, commandName) in index.PoliciesTriggeredByEvent(item.Name))
+            {
+                if (CommandItemFor(model, targetType, commandName) is { } to)
+                {
+                    calls.Add(new CallHierarchyOutgoingCall(to));
+                }
+            }
+
+            return calls;
+        }
+
+        // The events command C on type T emits.
+        foreach (var eventName in index.EventsEmittedBy(item.OwningType!, item.Name))
+        {
+            if (FindEvent(index, eventName) is { } ev)
+            {
+                calls.Add(new CallHierarchyOutgoingCall(EventItem(ev.Name, ev)));
+            }
+        }
+
+        return calls;
+    }
+
+    /// <summary>
+    /// Picks the entity that owns the command named <paramref name="commandName"/>. Priority:
+    /// (1) the <paramref name="enclosingType"/> when the cursor sits inside an entity that declares
+    /// the command (a declaration or in-body reference site — this is the owner, full stop);
+    /// (2) the <paramref name="reactionQualifier"/> (the <c>Target</c> of a <c>Target.command(…)</c>
+    /// policy reaction, where the cursor is NOT inside an entity body so enclosingType is null);
+    /// (3) the unique declaring entity; (4) first-wins. Returns <c>null</c> when no entity declares a
+    /// command of that name. Enclosing-type wins over the qualifier so a field-type token sitting just
+    /// before a <c>command</c> keyword (which becomes <paramref name="reactionQualifier"/> at a
+    /// declaration site) can't steer the owner to the wrong same-named entity.
+    /// </summary>
+    private static EntityDecl? ResolveCommandOwner(KoineModel model, string commandName, string? reactionQualifier, string? enclosingType)
+    {
+        var declaring = model.Contexts
+            .SelectMany(c => c.AllTypeDecls().OfType<EntityDecl>())
+            .Where(e => e.Commands.Any(cmd => string.Equals(cmd.Name, commandName, StringComparison.Ordinal)))
+            .ToList();
+
+        if (declaring.Count == 0)
+        {
+            return null;
+        }
+
+        // 1. The enclosing entity that declares the command — a declaration/in-body site. This binds
+        //    the command to the entity whose body the cursor is actually in, regardless of any token
+        //    sitting before the `command` keyword.
+        if (enclosingType is not null
+            && declaring.FirstOrDefault(e => string.Equals(e.Name, enclosingType, StringComparison.Ordinal)) is { } enclosing)
+        {
+            return enclosing;
+        }
+
+        // 2. A `Target.command(…)` policy reaction: the qualifier names the owning entity. (Policies
+        //    are top-level, so the cursor is not inside an entity body and enclosingType is null here.)
+        if (reactionQualifier is not null
+            && declaring.FirstOrDefault(e => string.Equals(e.Name, reactionQualifier, StringComparison.Ordinal)) is { } qualified)
+        {
+            return qualified;
+        }
+
+        // 3. The unique declaring entity (the common case), else first-wins.
+        return declaring[0];
+    }
+
+    /// <summary>A command edge item resolved to its declaration, or <c>null</c> when the target is not declared (silently skipped).</summary>
+    private static CallHierarchyItem? CommandItemFor(KoineModel model, string targetType, string commandName) =>
+        FindCommand(model, targetType, commandName) is { } command ? CommandItem(targetType, commandName, command) : null;
+
+    /// <summary>Builds a Command item pointing at the command's <c>NameSpan</c> (its <c>File</c> is the declaring document's URI).</summary>
+    private static CallHierarchyItem CommandItem(string owningType, string name, CommandDecl command)
+    {
+        var span = command.NameSpan.IsNone ? command.Span : command.NameSpan;
+        return new CallHierarchyItem(name, CallHierarchyItemKind.Command, owningType, span.File ?? "", span);
+    }
+
+    /// <summary>Builds an Event item pointing at the event's <c>NameSpan</c> (its <c>File</c> is the declaring document's URI).</summary>
+    private static CallHierarchyItem EventItem(string name, EventDecl ev)
+    {
+        var span = ev.NameSpan.IsNone ? ev.Span : ev.NameSpan;
+        return new CallHierarchyItem(name, CallHierarchyItemKind.Event, null, span.File ?? "", span);
+    }
+
+    /// <summary>The entity command declaration named <paramref name="name"/> on <paramref name="type"/>, or <c>null</c>.</summary>
+    private static CommandDecl? FindCommand(KoineModel model, string type, string name) =>
+        model.Contexts
+            .SelectMany(c => c.AllTypeDecls().OfType<EntityDecl>())
+            .Where(e => string.Equals(e.Name, type, StringComparison.Ordinal))
+            .SelectMany(e => e.Commands)
+            .FirstOrDefault(cmd => string.Equals(cmd.Name, name, StringComparison.Ordinal));
+
+    /// <summary>The event declaration named <paramref name="name"/>, or <c>null</c>. Resolved via the
+    /// index's O(1) name map (events are types) rather than re-walking the model per call.</summary>
+    private static EventDecl? FindEvent(ModelIndex index, string name) =>
+        index.TryGetDecl(name, out var decl) && decl is EventDecl ev ? ev : null;
+
+    /// <summary>
     /// Computes the edits for renaming the name under the cursor to <paramref name="newName"/>:
     /// every reference across the workspace. Returns null when the cursor is not on a
     /// renameable name, the new name is not a valid identifier, or it is unchanged.
@@ -1493,6 +2030,42 @@ public sealed class KoineLanguageService
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// True when EXACTLY ONE command, factory, operation, or use-case across the model is named
+    /// <paramref name="callee"/> — so a parameter-name inlay hint for a call to it is unambiguous.
+    /// Used to gate <see cref="CollectParameterHints"/>: a name shared by two declarations can't be
+    /// resolved to the right callee without the receiver type (not modeled here), so it gets no hint.
+    /// </summary>
+    private static bool IsUniqueCalleeName(ModelIndex index, string callee)
+    {
+        var count = 0;
+        foreach (var t in index.AllTypes())
+        {
+            if (t is EntityDecl e)
+            {
+                count += e.Commands.Count(c => c.Name == callee) + e.Factories.Count(f => f.Name == callee);
+                if (count > 1)
+                {
+                    return false;
+                }
+            }
+        }
+
+        foreach (var ctx in index.Model.Contexts)
+        {
+            foreach (var svc in ctx.Services)
+            {
+                count += svc.Operations.Count(o => o.Name == callee) + svc.UseCases.Count(u => u.Name == callee);
+                if (count > 1)
+                {
+                    return false;
+                }
+            }
+        }
+
+        return count == 1;
     }
 
     /// <summary>

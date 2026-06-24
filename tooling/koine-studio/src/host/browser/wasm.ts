@@ -72,6 +72,21 @@ export interface KoineWasmApi {
   RunScenario(filesJson: string, target: string, operation: string, givenJson: string, argsJson: string): string;
   /** Runnable surface of the workspace (#149) → JSON ScenarioCatalog (`{targets}`). */
   ScenarioCatalog(filesJson: string): string;
+  /** Inlay hints (type/parameter annotations) for a 0-based range → JSON InlayHint[]. */
+  InlayHints(
+    filesJson: string,
+    activeUri: string,
+    startLine: number,
+    startChar: number,
+    endLine: number,
+    endChar: number,
+  ): string;
+  /** Prepare call hierarchy at a 0-based position → JSON CallHierarchyItem[]. */
+  PrepareCallHierarchy(filesJson: string, activeUri: string, line: number, character: number): string;
+  /** Incoming calls into a CallHierarchyItem (passed as JSON) → JSON CallHierarchyIncomingCall[]. */
+  IncomingCalls(filesJson: string, itemJson: string): string;
+  /** Outgoing calls from a CallHierarchyItem (passed as JSON) → JSON CallHierarchyOutgoingCall[]. */
+  OutgoingCalls(filesJson: string, itemJson: string): string;
 }
 
 /**
@@ -106,6 +121,10 @@ const KOINE_WASM_EXPORTS: ReadonlySet<string> = new Set<keyof KoineWasmApi>([
   'Docs',
   'RunScenario',
   'ScenarioCatalog',
+  'InlayHints',
+  'PrepareCallHierarchy',
+  'IncomingCalls',
+  'OutgoingCalls',
 ]);
 
 let apiPromise: Promise<KoineWasmApi> | null = null;
