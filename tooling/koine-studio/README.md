@@ -7,6 +7,21 @@ brokered over stdio by the Rust host. **`Mod`+`Shift`+`F`** opens a workspace-wi
 replace panel (case / whole-word / regex / include-glob) across every `.koi` file in the open
 folder, unsaved buffers included.
 
+## Web Worker runtime (browser host)
+
+The WASM compiler (`src/Koine.Wasm`) runs inside a **dedicated Web Worker** (`src/host/browser/koine.worker.ts`)
+in both browser hosts — Koine Studio and the docs-site playground. A main-thread id-correlated
+client (`workerClient.ts`) routes calls to the worker over `postMessage` and resolves each
+response as a `Promise`. Cancellation is supported in two modes:
+
+- **Supersede** — a stale in-flight call is dropped when a newer one arrives (debounced diagnostics).
+- **Terminate-and-respawn** — a runaway compile is abandoned by terminating the worker and booting a
+  fresh one.
+
+`WasmEnableThreads` stays **`false`** in `src/Koine.Wasm/Koine.Wasm.csproj`. The worker uses
+plain structured-clone `postMessage`, so **no `SharedArrayBuffer` and no COOP/COEP
+cross-origin-isolation headers are required**.
+
 ## How it works
 
 - The Rust host (`src-tauri/src/lib.rs`) spawns the Koine LSP lazily on the `lsp_start`
