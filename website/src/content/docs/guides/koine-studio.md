@@ -81,7 +81,8 @@ Koine Studio surfaces the **enriched** language server, the same one the VS Code
     relation is an edge whose direction reads **upstream → downstream**, with the relationship **kind**
     (Partnership, Shared Kernel, Customer/Supplier, Conformist, ACL, …) as its label — a bidirectional
     relation (Partnership / Shared Kernel) renders two-headed. Hover an edge for its kind and shared
-    types / ACL; click a context to **filter the workspace** to it, or click a relation to show its
+    types / ACL; click a context to **filter the workspace** to it **and jump the editor to its `.koi`
+    declaration** (the same jump-to-source a domain-diagram node gives), or click a relation to show its
     shared types and ACL in the details strip — so no detail from the table is lost.
   - **Table** keeps the dense, per-relation grid (Upstream · Direction · Downstream · Kind · Shared
     Types · ACL) for when you want every field at a glance.
