@@ -200,5 +200,6 @@ static Koine.Compiler.Services.ScenarioService.WriteJson(System.Collections.Gene
 Koine.Compiler.Emit.AsyncApi.AsyncApiEmitter
 Koine.Compiler.Emit.AsyncApi.AsyncApiEmitter.AsyncApiEmitter() -> void
 Koine.Compiler.Emit.AsyncApi.AsyncApiEmitter.Emit(Koine.Compiler.Ast.KoineModel! model) -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Emit.EmittedFile!>!
+Koine.Compiler.Emit.AsyncApi.AsyncApiEmitter.Emit(Koine.Compiler.Ast.KoineModel! model, Koine.Compiler.Ast.SemanticModel? semantic) -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Emit.EmittedFile!>!
 Koine.Compiler.Emit.AsyncApi.AsyncApiEmitter.TargetName.get -> string!
 const Koine.Compiler.Emit.AsyncApi.AsyncApiEmitter.FileName = "asyncapi.yaml" -> string!
