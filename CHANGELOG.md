@@ -9,6 +9,13 @@ may include breaking changes.
 ## [Unreleased]
 
 ### Added
+- **Koine Studio — aggregate-scoped palette constructs (Repository & Rule).** The visual editor's
+  structured-edit seam now targets a *selected aggregate* (not only a context): a new
+  `addAggregateMember` edit inserts a re-validating `aggregateMember` and re-emits the whole aggregate.
+  The two muted palette buttons are activated, gated on an aggregate being selected — **Repository**
+  inserts `repository { operations: add, getById }`, and **Rule** maps to an aggregate-scoped
+  `spec <Name> on <Root> = true` (a named, reusable boolean rule over the root; no new grammar). A
+  second repository on the same aggregate is refused; a duplicate rule name is rejected by re-validation.
 - **MCP server (`koine-mcp`).** A Model Context Protocol server (`src/Koine.Mcp`) that lets an AI agent
   author a complete domain in `.koi` over stdio: `koine_validate`, `koine_compile`
   (csharp/typescript/glossary/docs), and `koine_format` tools, plus `koine_reference` and
