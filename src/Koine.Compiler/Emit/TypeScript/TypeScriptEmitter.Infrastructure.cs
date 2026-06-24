@@ -55,12 +55,120 @@ public sealed partial class TypeScriptEmitter
             {
                 files.Add(EmitIntegrationEventDispatcher(ctx.Name));
             }
+
+            files.Add(EmitBehaviors(ctx.Name));
+            files.Add(EmitCompositionRoot(ctx.Name, aggregates, publishesEvents));
         }
 
         if (anyEmitted)
         {
             files.Add(new EmittedFile(TsRuntime.InfrastructureFileName, TsRuntime.InfrastructureSource + "\n"));
         }
+    }
+
+    /// <summary>
+    /// Emits the context's composition root: a <c>&lt;Context&gt;Infrastructure</c> shape and a
+    /// <c>create&lt;Context&gt;Infrastructure</c> factory that assembles the concrete repositories, the
+    /// unit of work, the command-pipeline behaviors and — for a publishing context — the outbox
+    /// dispatcher, wiring the in-memory defaults. The idiomatic TS analogue of the C# emitter's
+    /// <c>Add&lt;Context&gt;Infrastructure(this IServiceCollection, …)</c> DI extension.
+    /// </summary>
+    private EmittedFile EmitCompositionRoot(string contextName, IReadOnlyList<AggregateDecl> aggregates, bool publishesEvents)
+    {
+        var folder = InfraFolder(contextName);
+        var ctxPascal = TypeScriptNaming.ToPascalCase(contextName);
+        var ifaceName = ctxPascal + "Infrastructure";
+        var fnName = "create" + ctxPascal + "Infrastructure";
+
+        var props = aggregates
+            .Select(a => TypeScriptNaming.ToPascalCase(a.RootEntity()!.Name))
+            .Select(root => (Root: root, Prop: TypeScriptNaming.ToCamelCase(Pluralize(root))))
+            .ToList();
+
+        var sb = new StringBuilder();
+        WriteDoc(sb, $"The assembled {contextName} infrastructure: repositories, the unit of work, the "
+            + "command-pipeline behaviors" + (publishesEvents ? ", and the outbox dispatcher." : "."), "");
+        sb.Append("export interface ").Append(ifaceName).Append(" {\n");
+        foreach (var (root, prop) in props)
+        {
+            sb.Append(Indent).Append("readonly ").Append(prop).Append(": I").Append(root).Append("Repository;\n");
+        }
+
+        sb.Append(Indent).Append("readonly unitOfWork: IUnitOfWork;\n");
+        sb.Append(Indent).Append("readonly behaviors: readonly PipelineBehavior<unknown, unknown>[];\n");
+        if (publishesEvents)
+        {
+            sb.Append(Indent).Append("readonly dispatcher: IntegrationEventDispatcher;\n");
+        }
+
+        sb.Append("}\n\n");
+
+        WriteDoc(sb, $"Composition root for the {contextName} context's infrastructure — the idiomatic analogue of "
+            + $"C#'s Add{ctxPascal}Infrastructure. Wires the in-memory defaults; inject persistent stores to productionize.", "");
+        sb.Append("export function ").Append(fnName).Append('(');
+        if (publishesEvents)
+        {
+            sb.Append("handler: IntegrationEventHandler");
+        }
+
+        sb.Append("): ").Append(ifaceName).Append(" {\n");
+        foreach (var (root, prop) in props)
+        {
+            sb.Append(Indent).Append("const ").Append(prop).Append(" = new ").Append(root).Append("Repository();\n");
+        }
+
+        if (publishesEvents)
+        {
+            sb.Append(Indent).Append("const outbox: OutboxStore = new InMemoryOutboxStore();\n");
+        }
+
+        sb.Append(Indent).Append("const unitOfWork = new UnitOfWork(");
+        sb.Append(string.Join(", ", props.Select(p => p.Prop).Concat(publishesEvents ? new[] { "outbox" } : Array.Empty<string>())));
+        sb.Append(");\n");
+        if (publishesEvents)
+        {
+            sb.Append(Indent).Append("const dispatcher = new IntegrationEventDispatcher(outbox, handler);\n");
+        }
+
+        sb.Append(Indent).Append("const behaviors: readonly PipelineBehavior<unknown, unknown>[] = [\n");
+        sb.Append(Indent).Append(Indent).Append("validationBehavior(),\n");
+        sb.Append(Indent).Append(Indent).Append("transactionBehavior(unitOfWork),\n");
+        sb.Append(Indent).Append("];\n");
+
+        var returnFields = props.Select(p => p.Prop).Append("unitOfWork").Append("behaviors");
+        if (publishesEvents)
+        {
+            returnFields = returnFields.Append("dispatcher");
+        }
+
+        sb.Append(Indent).Append("return { ").Append(string.Join(", ", returnFields)).Append(" };\n");
+        sb.Append("}\n");
+
+        var imports = new List<(string, string)>
+        {
+            ("IUnitOfWork", ImportSpecifier(folder, ModulePathFor(contextName, KindFolder.Abstractions, "IUnitOfWork"))),
+            ("UnitOfWork", ImportSpecifier(folder, ModulePathFor(contextName, KindFolder.Infrastructure, "UnitOfWork"))),
+            ("validationBehavior", ImportSpecifier(folder, ModulePathFor(contextName, KindFolder.Infrastructure, "Behaviors"))),
+            ("transactionBehavior", ImportSpecifier(folder, ModulePathFor(contextName, KindFolder.Infrastructure, "Behaviors"))),
+        };
+        imports.AddRange(InfraRuntimeImports(contextName, "PipelineBehavior"));
+        foreach (AggregateDecl agg in aggregates)
+        {
+            var root = TypeScriptNaming.ToPascalCase(agg.RootEntity()!.Name);
+            var aggNs = ModelIndex.NamespaceOf(contextName, agg.ModulePath);
+            imports.Add(($"I{root}Repository", ImportSpecifier(folder, ModulePathFor(aggNs, KindFolder.Repositories, $"I{root}Repository"))));
+            imports.Add(($"{root}Repository", ImportSpecifier(folder, ModulePathFor(contextName, KindFolder.Infrastructure, $"{root}Repository"))));
+        }
+
+        if (publishesEvents)
+        {
+            imports.AddRange(InfraRuntimeImports(contextName, "IntegrationEventHandler", "InMemoryOutboxStore", "OutboxStore"));
+            imports.Add(("IntegrationEventDispatcher", ImportSpecifier(folder, ModulePathFor(contextName, KindFolder.Infrastructure, "IntegrationEventDispatcher"))));
+        }
+
+        return new EmittedFile(
+            PathFor(contextName, KindFolder.Infrastructure, ifaceName),
+            RenderInfraFile(folder, sb.ToString(), imports));
     }
 
     /// <summary>The output folder (namespace path + <c>infrastructure/</c> subfolder) every infra file lives in.</summary>

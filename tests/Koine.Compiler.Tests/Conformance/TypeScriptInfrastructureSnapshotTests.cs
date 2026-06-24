@@ -79,7 +79,9 @@ public class TypeScriptInfrastructureSnapshotTests
         result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
 
         var infraFiles = result.Files
-            .Where(f => f.RelativePath.Contains("/infrastructure/", StringComparison.Ordinal))
+            .Where(f => f.RelativePath.Contains("/infrastructure/", StringComparison.Ordinal)
+                && (f.RelativePath.EndsWith("Repository.ts", StringComparison.Ordinal)
+                    || f.RelativePath.EndsWith("UnitOfWork.ts", StringComparison.Ordinal)))
             .ToList();
 
         return Verify(TestSupport.Render(infraFiles))
@@ -120,7 +122,9 @@ public class TypeScriptInfrastructureSnapshotTests
         result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
 
         var infraFiles = result.Files
-            .Where(f => f.RelativePath.Contains("/infrastructure/", StringComparison.Ordinal))
+            .Where(f => f.RelativePath.Contains("/infrastructure/", StringComparison.Ordinal)
+                && (f.RelativePath.EndsWith("IntegrationEventDispatcher.ts", StringComparison.Ordinal)
+                    || f.RelativePath.EndsWith("UnitOfWork.ts", StringComparison.Ordinal)))
             .ToList();
 
         return Verify(TestSupport.Render(infraFiles))
@@ -148,6 +152,58 @@ public class TypeScriptInfrastructureSnapshotTests
     public void Non_publishing_context_emits_no_dispatcher()
     {
         Emit(Fixture).ShouldNotContain(f => f.RelativePath.EndsWith("IntegrationEventDispatcher.ts", StringComparison.Ordinal));
+    }
+
+    /// <summary>The pipeline behaviors + composition-root factory must match the snapshot.</summary>
+    [Fact]
+    public Task TypeScript_infrastructure_behaviors_and_composition_root_emit_expected_typescript()
+    {
+        var result = new KoineCompiler().Compile(Fixture, new TypeScriptEmitter(InfraOptions));
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var infraFiles = result.Files
+            .Where(f => f.RelativePath.Contains("/infrastructure/", StringComparison.Ordinal)
+                && (f.RelativePath.EndsWith("Behaviors.ts", StringComparison.Ordinal)
+                    || f.RelativePath.EndsWith("Infrastructure.ts", StringComparison.Ordinal)))
+            .ToList();
+
+        return Verify(TestSupport.Render(infraFiles))
+            .UseDirectory("Snapshots");
+    }
+
+    /// <summary>The behaviors are emitted as validation + transaction pipeline-behavior factories.</summary>
+    [Fact]
+    public void Behaviors_are_emitted_as_validation_and_transaction_factories()
+    {
+        var behaviors = Emit(Fixture).Single(f => f.RelativePath == "Sales/infrastructure/Behaviors.ts").Contents;
+
+        behaviors.ShouldContain("export function validationBehavior<TRequest, TResponse>(");
+        behaviors.ShouldContain("return Promise.reject(new ValidationError(errors));");
+        behaviors.ShouldContain("export function transactionBehavior<TRequest, TResponse>(");
+        behaviors.ShouldContain("next().then((response) => unitOfWork.saveChangesAsync().then(() => response));");
+    }
+
+    /// <summary>The composition root assembles repositories, the unit of work and the behaviors.</summary>
+    [Fact]
+    public void Composition_root_assembles_the_infrastructure()
+    {
+        var root = Emit(Fixture).Single(f => f.RelativePath == "Sales/infrastructure/SalesInfrastructure.ts").Contents;
+
+        root.ShouldContain("export function createSalesInfrastructure(): SalesInfrastructure");
+        root.ShouldContain("const unitOfWork = new UnitOfWork(orders, customers);");
+        root.ShouldContain("validationBehavior(),");
+        root.ShouldContain("transactionBehavior(unitOfWork),");
+    }
+
+    /// <summary>A publishing context's composition root wires the outbox dispatcher and takes a handler.</summary>
+    [Fact]
+    public void Publishing_composition_root_wires_the_dispatcher()
+    {
+        var root = Emit(PublishingFixture).Single(f => f.RelativePath == "Ordering/infrastructure/OrderingInfrastructure.ts").Contents;
+
+        root.ShouldContain("export function createOrderingInfrastructure(handler: IntegrationEventHandler): OrderingInfrastructure");
+        root.ShouldContain("const dispatcher = new IntegrationEventDispatcher(outbox, handler);");
+        root.ShouldContain("readonly dispatcher: IntegrationEventDispatcher;");
     }
 
     /// <summary>The shared infrastructure-runtime module is emitted once at the output root.</summary>
