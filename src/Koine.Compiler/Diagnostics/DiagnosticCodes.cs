@@ -25,6 +25,7 @@ public enum DiagnosticCategory
     MultiFile,
     ContextMaps,
     Versioning,
+    References,
 }
 
 /// <summary>
@@ -213,6 +214,12 @@ public static class DiagnosticCodes
     public const string PublishedEnumMemberRemoved = "KOI1516";
     public const string PublishedEventShapeChanged = "KOI1517";
 
+    // ---- DDD reference discipline (KOI1600–1699) --------------------------
+    public const string ValueObjectReferencesEntity = "KOI1601";
+    public const string EntityReferencesForeignAggregate = "KOI1602";
+    public const string CommandParameterReferencesEntity = "KOI1603";
+    public const string DomainEventReferencesEntity = "KOI1604";
+
     // Helper: build a descriptor that carries the existing one-line description into both Title and
     // MessageFormat, so no information is lost while the richer shape is adopted incrementally.
     private static DiagnosticDescriptor D(
@@ -391,5 +398,11 @@ public static class DiagnosticCodes
             [PublishedMemberRenamed] = D(PublishedMemberRenamed, "A published field was renamed (a same-shape field removed and re-added under a new name).", DiagnosticCategory.Versioning, DiagnosticSeverity.Error),
             [PublishedEnumMemberRemoved] = D(PublishedEnumMemberRemoved, "A value was removed from a published enum.", DiagnosticCategory.Versioning, DiagnosticSeverity.Error),
             [PublishedEventShapeChanged] = D(PublishedEventShapeChanged, "A published integration event's payload shape changed (a field added, removed, or retyped).", DiagnosticCategory.Versioning, DiagnosticSeverity.Error),
+
+            // ---- DDD reference discipline ------------------------------------
+            [ValueObjectReferencesEntity] = D(ValueObjectReferencesEntity, "A value-object field references an entity, aggregate, or other reference type; a value object has no identity and must be composed only of primitives, enums, ID value objects, and other value objects.", DiagnosticCategory.References, DiagnosticSeverity.Error),
+            [EntityReferencesForeignAggregate] = D(EntityReferencesForeignAggregate, "An entity or aggregate field references another aggregate (or an entity in another aggregate) directly instead of by its identity.", DiagnosticCategory.References, DiagnosticSeverity.Error),
+            [CommandParameterReferencesEntity] = D(CommandParameterReferencesEntity, "A command or factory parameter is an entity or aggregate; commands carry data and identities, not entity references.", DiagnosticCategory.References, DiagnosticSeverity.Error),
+            [DomainEventReferencesEntity] = D(DomainEventReferencesEntity, "A domain-event field references an entity or aggregate; events carry data and identities, not entity references.", DiagnosticCategory.References, DiagnosticSeverity.Error),
         };
 }
