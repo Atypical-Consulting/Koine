@@ -332,12 +332,17 @@ export function init(): () => void {
       // here so we don't immediately flip it back to hidden — the first toggle SHOWS it.
       if (storeInspectorMounting) return;
       storeInspectorMounting = true;
-      const { StoreInspector } = await import('@/shell/StoreInspector');
-      storeInspectorHost = document.createElement('div');
-      storeInspectorHost.className = 'koi-store-inspector-overlay';
-      document.body.appendChild(storeInspectorHost);
-      render(<StoreInspector store={appStore} />, storeInspectorHost);
-      storeInspectorMounting = false;
+      try {
+        const { StoreInspector } = await import('@/shell/StoreInspector');
+        storeInspectorHost = document.createElement('div');
+        storeInspectorHost.className = 'koi-store-inspector-overlay';
+        document.body.appendChild(storeInspectorHost);
+        render(<StoreInspector store={appStore} />, storeInspectorHost);
+      } finally {
+        // Always clear the flag — even if the dynamic import rejects — so a failed first attempt
+        // doesn't wedge the toggle permanently.
+        storeInspectorMounting = false;
+      }
       return;
     }
     storeInspectorHost.hidden = !storeInspectorHost.hidden;

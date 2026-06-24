@@ -27,6 +27,11 @@ export function StoreInspector(props: { store: StoreApi<AppState> }) {
   const buffers = useStore(s, (st) => st.buffers);
   const byUri = useStore(s, (st) => st.diagnosticsByUri);
   const docViews = useStore(s, (st) => st.docViews);
+  // Subscribe to the whole state for the raw dump below: the curated scalars above don't cover every
+  // slice (e.g. History's canUndo/canRedo), so relying on them alone would leave the snapshot stale on
+  // a change to an unsubscribed field. Zustand replaces the top-level state object on every set(), so
+  // this identity selector repaints on ANY change — making the dump track the full store.
+  const fullState = useStore(s, (st) => st);
 
   const dirty = Object.values(buffers).filter((b) => b.dirty).length;
   const { errors, warnings } = diagnosticsSummary(Object.values(byUri).flat());
@@ -34,12 +39,11 @@ export function StoreInspector(props: { store: StoreApi<AppState> }) {
     .map(([k, v]) => `${k}:${v.loaded ? 'ok' : 'stale'}#${v.token}`)
     .join('  ');
 
-  // The curated rows above are a summary; this dumps the WHOLE store so nothing is hidden. We read
-  // getState() on render (the summary selectors already subscribe us to every slice, so any change
-  // repaints and re-reads) and drop the function-valued setters so only data shows. Subscribing to
-  // each scalar above is what makes this snapshot track the live store.
+  // The curated rows above are a summary; this dumps the WHOLE store so nothing is hidden. fullState
+  // (the identity-selected snapshot) keeps it tracking every change; drop the function-valued setters
+  // so only data shows.
   const rawState = JSON.stringify(
-    s.getState(),
+    fullState,
     (_key, value) => (typeof value === 'function' ? undefined : value),
     2,
   );
