@@ -388,6 +388,28 @@ this lets a regex literal be read as a single token without colliding with the `
 The single most important invariant: **no C#-specific concept lives in `Ast/`** — that is what keeps
 multiple emitters possible.
 
+### The browser bundle (AOT)
+
+`Koine.Wasm` compiles the whole compiler to WebAssembly for the
+[Playground](https://atypical-consulting.github.io/Koine/playground/) and
+[Studio](https://atypical-consulting.github.io/Koine/studio/). The **deployed** bundle is
+**AOT-compiled** (opt-in `KoineWasmAot` MSBuild property, switched on by the docs-deploy job); a bare
+`dotnet build`/`publish` and the dev inner loop stay on the fast interpreter build, so only the
+deployed/CI path pays the slower AOT publish. Measured trade-off (pizzeria template via
+`node src/Koine.Wasm/smoke-test.mjs --bench`, best/median of 10 warm runs):
+
+| Bundle | pizzeria compile (best / median) | `_framework` raw / gzip | publish (warm) |
+|---|---|---|---|
+| Interpreter (dev default) | 30 / 39 ms | 6.6 MB / 2.3 MB | ~4–10 s |
+| **AOT (deployed)** | **7 / 8 ms** | 20.3 MB / ~5.9 MB | ~24–32 s |
+
+≈5× faster per-keystroke compile for a ~3× larger (browser-cached, +3.6 MB gzipped) one-time
+download — worth it for the in-browser compiler, and the AOT-vs-interpreter lever
+[#219](https://github.com/Atypical-Consulting/Koine/issues/219) needs to pick a mobile fallback.
+`WasmStripILAfterAOT` is a no-op here (the compiler + ANTLR are rooted whole and reflect, so their IL
+metadata is retained either way). Full rationale: the comment block in `src/Koine.Wasm/Koine.Wasm.csproj`
+(issue [#327](https://github.com/Atypical-Consulting/Koine/issues/327)).
+
 ## Koine as a platform
 
 `Koine.Compiler` ships as a NuGet library with a **frozen, contract-gated public API** (guarded by
