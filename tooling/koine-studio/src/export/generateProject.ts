@@ -28,15 +28,28 @@ export function sanitizeProjectName(raw: string): string {
   return s;
 }
 
+// Directories that belong to a target's crate/project scaffolding rather than a model namespace —
+// their leading path segment must not be mistaken for a context folder when naming the project. The
+// Rust emitter lays every emitted module flat under `src/` (next to a top-level `Cargo.toml`), so
+// `src` is scaffolding, not a context. Gated on a Rust-crate signal (see below) so a non-Rust target
+// is never affected.
+const SCAFFOLD_DIRS = new Set(['src']);
+
 /**
  * Derive a default project name from the emitted files: the first segment of the first path that
  * actually has a directory (the emitter groups model output under a context/namespace folder, e.g.
  * `Billing/Orders/Order.cs`), sanitized. Top-level files such as the TypeScript emitter's
  * `runtime.ts` / `tsconfig.json` are skipped — using one would yield a nonsense name like
- * `runtime.ts`. Falls back to `KoineProject` when nothing is namespaced.
+ * `runtime.ts`. A Rust crate has no context folder at all (every module sits under `src/`), so that
+ * scaffolding directory is skipped too and the name falls back. Falls back to `KoineProject` when
+ * nothing is namespaced.
  */
 export function defaultProjectName(files: readonly EmitFile[]): string {
-  const seg = files.map((f) => f.path).find((p) => p.includes('/'))?.split('/')[0];
+  const isRustCrate = files.some((f) => f.path === 'Cargo.toml');
+  const seg = files
+    .map((f) => f.path)
+    .find((p) => p.includes('/') && !(isRustCrate && SCAFFOLD_DIRS.has(p.split('/')[0])))
+    ?.split('/')[0];
   return seg ? sanitizeProjectName(seg) : 'KoineProject';
 }
 

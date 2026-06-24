@@ -23,9 +23,9 @@ describe('runWasmTool', () => {
 
   test('koine_compile defaults an invalid target to csharp and returns files', async () => {
     api.EmitPreview.mockReturnValue(JSON.stringify({ target: 'csharp', files: [{ path: 'X.cs', contents: 'class X{}' }], diagnostics: [], error: null }));
-    const out = await runWasmTool('koine_compile', JSON.stringify({ source: 'context X {}', target: 'rust' }));
+    const out = await runWasmTool('koine_compile', JSON.stringify({ source: 'context X {}', target: 'cobol' }));
 
-    expect(api.EmitPreview.mock.calls[0][1]).toBe('csharp'); // 'rust' is not WASM-backed → csharp
+    expect(api.EmitPreview.mock.calls[0][1]).toBe('csharp'); // 'cobol' is not a supported target → csharp
     expect(out).toContain('X.cs');
   });
 

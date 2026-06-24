@@ -9,7 +9,7 @@
 import type { ChatCompletionFunctionTool } from 'openai/resources/chat/completions';
 
 /** The compile targets the in-WASM EmitPreview accepts (glossary/docs go through other exports). */
-export const COMPILE_TARGETS = ['csharp', 'typescript', 'python', 'php'] as const;
+export const COMPILE_TARGETS = ['csharp', 'typescript', 'python', 'php', 'rust'] as const;
 export type CompileTarget = (typeof COMPILE_TARGETS)[number];
 
 /** Coerce an arbitrary `target` arg to a supported compile target, defaulting to csharp. */
