@@ -9,7 +9,7 @@
 // containers, layout, edges, interaction, and persistence land in later tasks.
 import type { DiagramRenderer } from '@/diagrams/diagrams';
 import type { Graph as MxGraph, Cell as MxCell } from '@maxgraph/core';
-import type { DiagramEdge, DiagramGraph, DiagramMember, DiagramNode, DocsFile } from '@/lsp/lsp';
+import type { Diagram, DiagramEdge, DiagramGraph, DiagramMember, DiagramNode, DocsFile } from '@/lsp/lsp';
 import { mergeGraphsForView } from '@/model/modelTables';
 import { buildEmptyState } from '@/diagrams/emptyState';
 import { loadDiagramZoom, saveDiagramZoom } from '@/settings/persistence';
@@ -187,11 +187,44 @@ export function nodeLabelHtml(node: DiagramNode): string {
  * map (it has its own bottom tab), keeping only those that actually carry nodes.
  */
 export function selectDomainGraphs(files: DocsFile[]): DiagramGraph[] {
+  return selectDomainDiagrams(files).map((d) => d.graph);
+}
+
+/**
+ * The full {@link Diagram}s (caption / kind / mermaid / graph) behind {@link selectDomainGraphs} — every
+ * non-contextmap diagram that carries nodes. Kept alongside the graph selector so export (#271) can recover
+ * the source captions and Mermaid that {@link mergeGraphsForView} discards when it fuses the graphs.
+ */
+export function selectDomainDiagrams(files: DocsFile[]): Diagram[] {
   return files
     .flatMap((f) => f.diagrams ?? [])
-    .filter((d) => d.kind !== 'contextmap')
-    .map((d) => d.graph)
-    .filter((g): g is DiagramGraph => !!g && g.nodes.length > 0);
+    .filter((d) => d.kind !== 'contextmap' && !!d.graph && d.graph.nodes.length > 0);
+}
+
+/**
+ * Synthesize the single {@link Diagram} that represents the fused domain canvas for export (#271). The
+ * canvas merges several source diagrams into one class-shaped view, so: `kind` is `'aggregate'` (the
+ * PlantUML class family); `caption` is the lone source caption when there's exactly one, else a generic
+ * `'Domain model'` (it only seeds the download filename); `mermaid` joins every source snippet so "Copy
+ * Mermaid" yields all of them; and `graph` is the already-merged graph that's actually drawn.
+ */
+function synthDomainExportDiagram(sources: Diagram[], merged: DiagramGraph): Diagram {
+  const caption = sources.length === 1 ? sources[0].caption : 'Domain model';
+  const mermaid = sources
+    .map((d) => d.mermaid?.trim())
+    .filter((m): m is string => !!m)
+    .join('\n\n');
+  return { caption, kind: 'aggregate', mermaid, graph: merged };
+}
+
+/** The currently-committed domain canvas exposed for export (#271): the live {@link CanvasHandle} (for SVG/
+ *  PNG of the actual drawing) plus a synthesized {@link Diagram} (for PlantUML + Mermaid + the filename), or
+ *  null when no domain canvas is shown (empty model / context map). */
+let activeDomainExport: { diagram: Diagram; handle: CanvasHandle } | null = null;
+
+/** The active domain canvas for export, or null when none is shown. Read at export time by the IDE shell. */
+export function getActiveDomainExport(): { diagram: Diagram; handle: CanvasHandle } | null {
+  return activeDomainExport;
 }
 
 /** A live canvas: the graph, a node-id→cell index (for edges + selection), the per-context container
@@ -1118,6 +1151,7 @@ export function createMaxGraphRenderer(): DiagramRenderer {
         if (isCurrent()) {
           activeDispose?.();
           activeDispose = null;
+          activeDomainExport = null; // nothing drawn → nothing to export (#271)
           container.replaceChildren(buildEmptyState());
         }
         return;
@@ -1163,6 +1197,9 @@ export function createMaxGraphRenderer(): DiagramRenderer {
       if (isCurrent()) {
         activeDispose?.();
         activeDispose = dispose;
+        // Expose this committed canvas for export (#271): the live handle + a synthesized Diagram carrying
+        // the source captions/Mermaid that the merge dropped.
+        activeDomainExport = { diagram: synthDomainExportDiagram(selectDomainDiagrams(files), merged), handle };
         container.replaceChildren(root);
         handle.graph.getView().revalidate(); // re-render now that the surface is in the live DOM
         chrome.fit(); // frame the laid-out content (it can sit at negative coords) into the viewport

@@ -45,6 +45,8 @@ import { createHelpOverlay } from '@/shared/help';
 import { createGenerateProject } from '@/export/generateProjectWizard';
 import { sanitizeProjectName } from '@/export/generateProject';
 import { buildSourceZip } from '@/export/sourceZip';
+import { exportDiagram } from '@/export/diagramExport';
+import { getActiveDomainExport } from '@/diagrams/diagrams';
 import { formatChord } from '@/shared/platform';
 import {
   DIAGRAM_ANNOTATION_CREATE_EVENT,
@@ -496,6 +498,8 @@ export function init(): () => void {
     onAddConstruct: (kind) => void applyDiagramAddType({ kind }),
     onAddAnnotation: (kind) => createCanvasAnnotation(kind),
     onAddAggregateMember: (kind, aggregateQn) => void applyDiagramAddAggregateMember(kind, aggregateQn),
+    onExportDiagram: (format) => void exportActiveDiagram(format),
+    onCopyDiagramMermaid: () => void copyActiveDiagramMermaid(),
     gotoSourceSpan: (span) => void gotoSourceSpan(span),
     ensureAssistant: () => ensureAssistant(),
     ensureScenarios: () => ensureScenarios(),
@@ -1484,6 +1488,48 @@ export function init(): () => void {
     }
   }
 
+  // Export the live Visual canvas in the chosen format (#271): SVG/PNG serialize the actual drawing, PlantUML
+  // is mapped from the structured graph client-side. Routes the bytes through the host's saveZip seam (Blob
+  // download in the browser, native save dialog on desktop) with a caption-derived filename. A no-op with a
+  // hint when no diagram is on screen; a user-cancelled save is silent (saveZip resolves false).
+  async function exportActiveDiagram(format: 'svg' | 'png' | 'plantuml'): Promise<void> {
+    const active = getActiveDomainExport();
+    if (!active) {
+      setStatus('open the Visual diagram to export', 'error');
+      setTimeout(() => editorSession.updateStatus(editorSession.diagnosticsFor(workspace.activeUri())), 1500);
+      return;
+    }
+    try {
+      const saved = await exportDiagram(format, active.diagram, active.handle, (name, bytes) => platform.saveZip(name, bytes));
+      if (saved === true) {
+        setStatus('diagram exported ✓', 'green');
+        setTimeout(() => editorSession.updateStatus(editorSession.diagnosticsFor(workspace.activeUri())), 1500);
+      }
+    } catch (e) {
+      setStatus('export failed', 'error');
+      console.error('export diagram failed:', e);
+    }
+  }
+
+  // Copy the current diagram's Mermaid to the clipboard (#271), mirroring copyShareLink's flash. The fused
+  // canvas joins every source diagram's snippet; an empty model has nothing to copy.
+  async function copyActiveDiagramMermaid(): Promise<void> {
+    const mermaid = getActiveDomainExport()?.diagram.mermaid?.trim();
+    if (!mermaid) {
+      setStatus('no diagram to copy', 'error');
+      setTimeout(() => editorSession.updateStatus(editorSession.diagnosticsFor(workspace.activeUri())), 1500);
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(mermaid);
+      setStatus('Mermaid copied ✓', 'green');
+      setTimeout(() => editorSession.updateStatus(editorSession.diagnosticsFor(workspace.activeUri())), 1500);
+    } catch (e) {
+      setStatus('copy failed', 'error');
+      console.error('copy mermaid failed:', e);
+    }
+  }
+
   // Save the current workspace as a real, reopenable on-disk project (browser host only). Promotes an
   // ephemeral example/Untitled workspace into <root>/<name>/, registers it in Recent, and reopens it
   // from disk so the workspace now IS that folder (further ⌘S writes there).
@@ -1609,6 +1655,10 @@ export function init(): () => void {
       { id: 'check', title: 'Check against baseline…', group: 'File', run: () => void controller.runCheck() },
       { id: 'generate-project', title: 'Generate project…', group: 'File', run: () => generateProject.open() },
       { id: 'export-source-zip', title: 'Export .koi source (.zip)', group: 'File', run: () => void exportSourceZip() },
+      { id: 'export-diagram-svg', title: 'Export diagram as SVG', group: 'File', run: () => void exportActiveDiagram('svg') },
+      { id: 'export-diagram-png', title: 'Export diagram as PNG', group: 'File', run: () => void exportActiveDiagram('png') },
+      { id: 'export-diagram-plantuml', title: 'Export diagram as PlantUML', group: 'File', run: () => void exportActiveDiagram('plantuml') },
+      { id: 'copy-diagram-mermaid', title: 'Copy diagram as Mermaid', group: 'File', run: () => void copyActiveDiagramMermaid() },
       ...(platform.canSaveProjects
         ? [{ id: 'save-project-to-disk', title: 'Save to disk…', group: 'File', run: () => void saveProjectToDisk() } as Command]
         : []),

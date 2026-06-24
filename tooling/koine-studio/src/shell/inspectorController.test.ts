@@ -235,6 +235,8 @@ function makeDeps(lsp: Lsp, over: Partial<InspectorControllerDeps> = {}): Inspec
     onAddConstruct: vi.fn(),
     onAddAnnotation: vi.fn(),
     onAddAggregateMember: vi.fn(),
+    onExportDiagram: vi.fn(),
+    onCopyDiagramMermaid: vi.fn(),
     gotoSourceSpan: vi.fn(),
     ensureAssistant: vi.fn(() => makeAssistant()),
     initEdgeResizer: vi.fn(),
