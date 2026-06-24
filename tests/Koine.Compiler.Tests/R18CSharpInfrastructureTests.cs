@@ -1,3 +1,5 @@
+using System.Collections;
+using System.Reflection;
 using System.Text.RegularExpressions;
 using Koine.Cli;
 using Koine.Cli.Commands;
@@ -450,6 +452,90 @@ public class R18CSharpInfrastructureTests
         files.ShouldNotContain(f => f.RelativePath == "Docs/Infrastructure/DocsValueConverters.cs");
         File(files, "Docs/Infrastructure/DocConfiguration.cs").Contents
             .ShouldNotContain("Converter");
+    }
+
+    // ----------------------------------------------------------------------
+    // EF Core round-trip: owned value-object collections must MATERIALIZE (issue #171)
+    // ----------------------------------------------------------------------
+
+    // The exact shape issue #171 is about: an aggregate that owns a value-object collection. Today the
+    // domain emitter exposes it as a read-only IReadOnlyList<T> over a ReadOnlyCollection, which EF Core
+    // cannot populate when materializing an OwnsMany — so this round-trips only once the collection is
+    // backed by a mutable list with field access configured.
+    private const string VoCollectionFixture = """
+        context Sales {
+          value OrderLine { sku: String  quantity: Int }
+          aggregate Order root Order {
+            entity Order identified by OrderId { lines: List<OrderLine> }
+          }
+        }
+        """;
+
+    [Fact]
+    public void Round_trip_harness_persists_and_reloads_a_simple_aggregate()
+    {
+        // Proves the SQLite round-trip plumbing itself works against generated EF code with no owned
+        // *collection* — so a RED on the value-object-collection model below is the bug, not the harness.
+        // A smart-enum member is explicitly mapped (HasConversion), so EF binds it in the aggregate's
+        // constructor and the aggregate materializes without any of issue #171's machinery.
+        var files = EmitInfra("""
+            context Catalog {
+              enum Color { Red, Green }
+              aggregate Product root Product {
+                entity Product identified by ProductId { color: Color }
+              }
+            }
+            """);
+        using var harness = TestSupport.EfRoundTripHarness.Create(files, "CatalogDbContext");
+
+        var productType = harness.Type("Product");
+        var productIdType = harness.Type("ProductId");
+        var colorType = harness.Type("Color");
+
+        var productId = productIdType.GetMethod("New", BindingFlags.Public | BindingFlags.Static)!.Invoke(null, null)!;
+        var product = Activator.CreateInstance(productType, productId, TestSupport.EnumValue(colorType, "Red"))!;
+
+        using (var write = harness.NewContext())
+        {
+            write.Add(product);
+            write.SaveChanges();
+        }
+
+        using var read = harness.NewContext();
+        var loaded = TestSupport.EfRoundTripHarness.Query(read, productType).ShouldHaveSingleItem();
+        var loadedColor = productType.GetProperty("Color")!.GetValue(loaded);
+        colorType.GetProperty("Name")!.GetValue(loadedColor).ShouldBe("Red");
+    }
+
+    [Fact]
+    public void Owned_value_object_collection_round_trips_through_ef_core()
+    {
+        var files = EmitInfra(VoCollectionFixture);
+        using var harness = TestSupport.EfRoundTripHarness.Create(files, "SalesDbContext");
+
+        var orderType = harness.Type("Order");
+        var orderIdType = harness.Type("OrderId");
+        var lineType = harness.Type("OrderLine");
+
+        // new Order(OrderId.New(), new List<OrderLine> { new OrderLine("SKU-1", 2) })
+        var line = Activator.CreateInstance(lineType, "SKU-1", 2)!;
+        var lines = (IList)Activator.CreateInstance(typeof(List<>).MakeGenericType(lineType))!;
+        lines.Add(line);
+        var orderId = orderIdType.GetMethod("New", BindingFlags.Public | BindingFlags.Static)!.Invoke(null, null)!;
+        var order = Activator.CreateInstance(orderType, orderId, lines)!;
+
+        using (var write = harness.NewContext())
+        {
+            write.Add(order);
+            write.SaveChanges();
+        }
+
+        using var read = harness.NewContext();
+        var loaded = TestSupport.EfRoundTripHarness.Query(read, orderType).ShouldHaveSingleItem();
+        var loadedLines = ((IEnumerable)orderType.GetProperty("Lines")!.GetValue(loaded)!).Cast<object>().ToList();
+        var loadedLine = loadedLines.ShouldHaveSingleItem();
+        lineType.GetProperty("Sku")!.GetValue(loadedLine).ShouldBe("SKU-1");
+        lineType.GetProperty("Quantity")!.GetValue(loadedLine).ShouldBe(2);
     }
 
     [Fact]
