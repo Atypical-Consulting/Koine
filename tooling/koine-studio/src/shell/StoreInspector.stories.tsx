@@ -22,6 +22,7 @@ const buf = (uri: string, dirty: boolean): Buffer => ({
   name: uri,
   text: '',
   dirty,
+  rootToken: '',
 });
 
 const meta = {

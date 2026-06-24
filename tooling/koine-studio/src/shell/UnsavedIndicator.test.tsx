@@ -5,7 +5,7 @@ import { UnsavedIndicator } from '@/shell/UnsavedIndicator';
 import type { Buffer } from '@/shell/workspaceController';
 import { axe } from 'vitest-axe';
 
-// Build the real 6-field Buffer (uri, path, relPath, name, text, dirty).
+// Build the real Buffer (uri, path, relPath, name, text, dirty, rootToken).
 const buf = (uri: string, dirty: boolean): Buffer => ({
   uri,
   path: uri,
@@ -13,6 +13,7 @@ const buf = (uri: string, dirty: boolean): Buffer => ({
   name: uri,
   text: '',
   dirty,
+  rootToken: '',
 });
 
 // The static index.html host the indicator drives: a <button id="unsaved-indicator" hidden>.
