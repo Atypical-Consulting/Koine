@@ -208,6 +208,118 @@ public class R10ServicesTests
     }
 
     [Fact]
+    public void Spec_call_on_a_lambda_parameter_emits_a_real_call()
+    {
+        // The receiver of a spec call may be a lambda parameter (os.any(o => o.IsLarge())); the
+        // emitter must resolve its type the same way the validator does and emit the real call —
+        // not the `/* unsupported call */` fallback (which would be invalid inside the lambda).
+        const string src = """
+            context Sales {
+              value Order { lineCount: Int  total: Decimal }
+              spec IsLarge on Order = lineCount > 10 || total > 1000
+              service OrderRouting {
+                operation anyPriority(os: List<Order>): Bool = os.any(o => o.IsLarge())
+              }
+            }
+            """;
+        Diagnose(src).ShouldBeEmpty();
+        var (asm, files) = Compile(src);
+        files.ShouldContain("o.IsLarge()");
+        files.ShouldNotContain("/* unsupported call");
+
+        var svcType = asm.GetType("Sales.OrderRouting")!;
+        var order = asm.GetType("Sales.Order")!;
+        var anyPriority = svcType.GetMethod("AnyPriority")!;
+        var listType = typeof(List<>).MakeGenericType(order);
+
+        var withBig = (System.Collections.IList)Activator.CreateInstance(listType)!;
+        withBig.Add(Activator.CreateInstance(order, 5, 2000m));
+        var allSmall = (System.Collections.IList)Activator.CreateInstance(listType)!;
+        allSmall.Add(Activator.CreateInstance(order, 1, 1m));
+
+        ((bool)anyPriority.Invoke(Activator.CreateInstance(svcType), new object?[] { withBig })!).ShouldBeTrue();
+        ((bool)anyPriority.Invoke(Activator.CreateInstance(svcType), new object?[] { allSmall })!).ShouldBeFalse();
+    }
+
+    [Fact]
+    public void Spec_call_as_a_let_body_compiles_and_runs()
+    {
+        // A spec call carries its Bool type, so a position that consumes the call's own type —
+        // here a `let` body, emitted as an IIFE — generates compiling C# (not `Func<object>`).
+        const string src = """
+            context Sales {
+              value Order { lineCount: Int  total: Decimal }
+              spec IsLarge on Order = lineCount > 10 || total > 1000
+              service OrderRouting {
+                operation prio(o: Order): Bool = let x = o in x.IsLarge()
+              }
+            }
+            """;
+        Diagnose(src).ShouldBeEmpty();
+        var (asm, files) = Compile(src); // Compile asserts the generated C# compiles
+        files.ShouldNotContain("/* unsupported call");
+        files.ShouldNotContain("Func<object>");
+
+        var svcType = asm.GetType("Sales.OrderRouting")!;
+        var order = asm.GetType("Sales.Order")!;
+        var prio = svcType.GetMethod("Prio")!;
+        ((bool)prio.Invoke(Activator.CreateInstance(svcType), new[] { Activator.CreateInstance(order, 20, 1m) })!).ShouldBeTrue();
+        ((bool)prio.Invoke(Activator.CreateInstance(svcType), new[] { Activator.CreateInstance(order, 1, 1m) })!).ShouldBeFalse();
+    }
+
+    [Fact]
+    public void Spec_call_with_a_wrong_return_type_is_reported()
+    {
+        // A spec call is Bool; declaring a non-Bool return type must be a return-type mismatch,
+        // not silently accepted (which would have emitted non-compiling C#).
+        const string src = """
+            context Sales {
+              value Order { lineCount: Int  total: Decimal }
+              spec IsLarge on Order = lineCount > 10 || total > 1000
+              service OrderRouting {
+                operation isPriority(o: Order): Int = o.IsLarge()
+              }
+            }
+            """;
+        Diagnose(src).ShouldContain(d => d.Code == DiagnosticCodes.ServiceReturnMismatch);
+    }
+
+    [Fact]
+    public void Spec_call_on_an_entity_receiver_emits_a_real_call()
+    {
+        // Specs apply to entities too, not just value objects.
+        const string src = """
+            context Sales {
+              entity Order identified by OrderId { lineCount: Int }
+              spec IsLarge on Order = lineCount > 10
+              service OrderRouting {
+                operation isPriority(o: Order): Bool = o.IsLarge()
+              }
+            }
+            """;
+        Diagnose(src).ShouldBeEmpty();
+        var (_, files) = Compile(src);
+        files.ShouldContain("o.IsLarge()");
+        files.ShouldNotContain("/* unsupported call");
+    }
+
+    [Fact]
+    public void Spec_call_with_arguments_is_reported()
+    {
+        // A spec takes no arguments; calling one with args is an unknown operation, not a spec call.
+        const string src = """
+            context Sales {
+              value Order { lineCount: Int }
+              spec IsLarge on Order = lineCount > 10
+              service OrderRouting {
+                operation isPriority(o: Order): Bool = o.IsLarge(5)
+              }
+            }
+            """;
+        Diagnose(src).ShouldContain(d => d.Code == DiagnosticCodes.UnknownOperation);
+    }
+
+    [Fact]
     public void Seam_operation_emits_an_abstract_class()
     {
         const string src = "context C { service Calc { operation run(a: Int): Int } }";

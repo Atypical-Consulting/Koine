@@ -540,7 +540,7 @@ internal sealed class ExpressionChecker
             // target type, translated to the spec's generated extension method. Valid only when
             // the receiver's static type is the spec's declared target; otherwise the predicate
             // would not apply. (An unresolved receiver is left to its own earlier diagnostic.)
-            if (target is not null && !_index.SpecsFor(target.Name).ContainsKey(op))
+            if (target is not null && !_index.TryGetSpec(target.Name, op, out _))
             {
                 var declaredOn = string.Join("/", _index.AllSpecs().Where(s => s.Name == op).Select(s => s.TargetType).Distinct());
                 Report(DiagnosticCodes.SpecCallTargetMismatch,
