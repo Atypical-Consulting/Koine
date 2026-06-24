@@ -552,6 +552,141 @@ public class RustSnapshotTests
     }
 
     // ------------------------------------------------------------------
+    // Member/synthetic-field collision (issue #314). A user member literally named `events`
+    // must not collide with the synthetic `Vec<DomainEvent>` collector: the user's field is
+    // emitted faithfully and the synthetic collector takes a distinct, non-colliding name
+    // (`domain_events`), applied consistently across the struct, ctor, accessors, and `push`.
+    // ------------------------------------------------------------------
+
+    /// <summary>An aggregate whose entity has a user member named <c>events</c> and also raises an event.</summary>
+    private const string EventsMemberCollisionFixture = """
+        context Reservations {
+          event TableReserved { bookingId: BookingId }
+          aggregate Bookings root Booking {
+            entity Booking identified by BookingId {
+              events: List<String>
+              command reserve {
+                emit TableReserved(bookingId: id)
+              }
+            }
+          }
+        }
+        """;
+
+    [Fact]
+    public Task Rust_member_named_events_does_not_collide_with_synthetic_collector()
+    {
+        var result = new KoineCompiler().Compile(EventsMemberCollisionFixture, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var reservations = result.Files.Single(f => f.RelativePath.EndsWith("reservations.rs", StringComparison.Ordinal)).Contents;
+        // The user's `events` member is emitted faithfully...
+        reservations.ShouldContain("events: Vec<String>,");
+        reservations.ShouldContain("pub fn events(&self) -> &Vec<String>");
+        // ...and the synthetic collector yields the colliding name, becoming `domain_events` —
+        // consistently in the struct, the smart constructor, the accessor/drain, and the `push`.
+        reservations.ShouldContain("domain_events: Vec<DomainEvent>,");
+        reservations.ShouldContain("domain_events: Vec::new(),");
+        reservations.ShouldContain("pub fn domain_events(&self) -> &[DomainEvent]");
+        reservations.ShouldContain("pub fn drain_domain_events(&mut self) -> Vec<DomainEvent>");
+        reservations.ShouldContain("self.domain_events.push(DomainEvent::TableReserved(");
+        // The bug: a second struct field literally named `events` holding the collector (E0124). Anchor
+        // on the field indentation so this doesn't false-match the renamed `domain_events` field.
+        reservations.ShouldNotContain("\n    events: Vec<DomainEvent>");
+
+        return Verify(TestSupport.Render(result.Files)).UseDirectory("Snapshots");
+    }
+
+    [Fact]
+    public void Rust_member_named_events_compiles()
+    {
+        var result = new KoineCompiler().Compile(EventsMemberCollisionFixture, new RustEmitter());
+        result.Success.ShouldBeTrue();
+
+        var check = TestSupport.CompileRust(result.Files);
+        if (!check.ToolchainAvailable)
+        {
+            _output.WriteLine(NoToolchainNotice);
+            return;
+        }
+
+        check.Ok.ShouldBeTrue(string.Join("\n", check.Errors));
+    }
+
+    /// <summary>
+    /// Edge case (#314): a model with members named *both* <c>events</c> and (snake-cased) <c>domain_events</c>
+    /// takes the first fallback too, so the synthetic collector must keep searching — landing on a
+    /// numbered, unique, compiling name. The two user members are emitted untouched.
+    /// </summary>
+    [Fact]
+    public void Rust_members_named_events_and_domain_events_resolve_to_a_numbered_collector()
+    {
+        const string model = """
+            context Reservations {
+              event TableReserved { bookingId: BookingId }
+              aggregate Bookings root Booking {
+                entity Booking identified by BookingId {
+                  events:       List<String>
+                  domainEvents: List<String>
+                  command reserve {
+                    emit TableReserved(bookingId: id)
+                  }
+                }
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(model, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var reservations = result.Files.Single(f => f.RelativePath.EndsWith("reservations.rs", StringComparison.Ordinal)).Contents;
+        // Both user members survive...
+        reservations.ShouldContain("\n    events: Vec<String>,");
+        reservations.ShouldContain("\n    domain_events: Vec<String>,");
+        // ...and the synthetic collector falls through to a numbered, unique name.
+        reservations.ShouldContain("\n    domain_events_2: Vec<DomainEvent>,");
+        reservations.ShouldContain("self.domain_events_2.push(DomainEvent::TableReserved(");
+
+        var check = TestSupport.CompileRust(result.Files);
+        if (!check.ToolchainAvailable)
+        {
+            _output.WriteLine(NoToolchainNotice);
+            return;
+        }
+        check.Ok.ShouldBeTrue(string.Join("\n", check.Errors));
+    }
+
+    /// <summary>
+    /// Edge case (#314): an entity with a member named <c>events</c> that raises *no* event emits the
+    /// member untouched and grows no synthetic collector at all (the existing common shape is unchanged).
+    /// </summary>
+    [Fact]
+    public void Rust_member_named_events_without_emits_stays_untouched()
+    {
+        const string model = """
+            context Audit {
+              entity Log identified by LogId {
+                events: List<String>
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(model, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var audit = result.Files.Single(f => f.RelativePath.EndsWith("audit.rs", StringComparison.Ordinal)).Contents;
+        audit.ShouldContain("\n    events: Vec<String>,");   // user member, faithful
+        audit.ShouldNotContain("Vec<DomainEvent>");           // no events declared → no collector
+        audit.ShouldNotContain("domain_events");
+
+        var check = TestSupport.CompileRust(result.Files);
+        if (!check.ToolchainAvailable)
+        {
+            _output.WriteLine(NoToolchainNotice);
+            return;
+        }
+        check.Ok.ShouldBeTrue(string.Join("\n", check.Errors));
+    }
+
+    // ------------------------------------------------------------------
     // Factories (issue #173, Task 4). A `create` factory emits an associated constructor
     // that mints a v4-UUID identity, checks preconditions, builds via the smart constructor,
     // and records creation events. The `uuid` crate is added to Cargo.toml only when a model
