@@ -219,13 +219,18 @@ public sealed class Order : IAggregateRoot
     /// <summary>Optimistic-concurrency token, assigned by the persistence layer.</summary>
     public int Version { get; init; }
     public CustomerId Customer { get; }
-    public IReadOnlyList<OrderLine> Lines { get; }
+    private readonly List<OrderLine> _lines = new();
+    public IReadOnlyList<OrderLine> Lines => _lines;
+
+#pragma warning disable CS8618 // EF Core populates members from the store after construction.
+    private Order() { }
+#pragma warning restore CS8618
 
     public Order(OrderId id, CustomerId customer, IReadOnlyList<OrderLine> lines)
     {
         Id = id;
         Customer = customer;
-        Lines = new List<OrderLine>(lines).AsReadOnly();
+        _lines.AddRange(lines);
     }
 
     public bool Equals(Order? other)

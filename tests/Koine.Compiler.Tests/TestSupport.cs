@@ -1,3 +1,4 @@
+using System.Collections;
 using System.Diagnostics;
 using System.Reflection;
 using System.Runtime.Loader;
@@ -5,6 +6,8 @@ using System.Text;
 using Koine.Compiler.Emit;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
+using Microsoft.Data.Sqlite;
+using Microsoft.EntityFrameworkCore;
 
 namespace Koine.Compiler.Tests;
 
@@ -93,6 +96,96 @@ public static class TestSupport
         ms.Seek(0, SeekOrigin.Begin);
         var asm = AssemblyLoadContext.Default.LoadFromStream(ms);
         return (asm, Array.Empty<string>());
+    }
+
+    /// <summary>
+    /// A compiled-and-loaded generated model wired to a fresh SQLite in-memory database, so an emitter
+    /// meta-test can prove the EF Core Infrastructure layer (issue #128) actually MATERIALIZES — insert
+    /// a row then query it back — not merely that it compiles (which the Roslyn <see cref="Compile"/>
+    /// harness already proves). The in-memory database lives only as long as the single shared
+    /// connection stays open, so every <see cref="NewContext"/> sees the same store; the harness owns
+    /// that connection and closes it on <see cref="Dispose"/>.
+    /// </summary>
+    public sealed class EfRoundTripHarness : IDisposable
+    {
+        private readonly SqliteConnection _connection;
+        private bool _schemaCreated;
+
+        /// <summary>The loaded assembly the emitted infrastructure compiled into.</summary>
+        public Assembly Assembly { get; }
+
+        /// <summary>The generated <c>DbContext</c> type this harness builds contexts for.</summary>
+        public Type ContextType { get; }
+
+        private EfRoundTripHarness(Assembly assembly, Type contextType, SqliteConnection connection)
+        {
+            Assembly = assembly;
+            ContextType = contextType;
+            _connection = connection;
+        }
+
+        /// <summary>
+        /// Compiles the emitted files, loads the assembly, and opens a SQLite in-memory connection bound
+        /// to the generated <c>DbContext</c> named <paramref name="dbContextTypeName"/>. Throws with the
+        /// compiler errors when emission does not compile, so a broken emit fails loudly here rather than
+        /// surfacing as a confusing reflection error later.
+        /// </summary>
+        public static EfRoundTripHarness Create(IEnumerable<EmittedFile> files, string dbContextTypeName)
+        {
+            var (assembly, errors) = Compile(files);
+            if (assembly is null)
+            {
+                throw new InvalidOperationException(
+                    "the generated infrastructure did not compile:\n" + string.Join("\n", errors));
+            }
+
+            var contextType = assembly.GetTypes().Single(t => t.Name == dbContextTypeName);
+            var connection = new SqliteConnection("DataSource=:memory:");
+            connection.Open();
+            return new EfRoundTripHarness(assembly, contextType, connection);
+        }
+
+        /// <summary>The single generated type with the given simple name (namespace-agnostic).</summary>
+        public Type Type(string simpleName) => Assembly.GetTypes().Single(t => t.Name == simpleName);
+
+        /// <summary>
+        /// A fresh <see cref="DbContext"/> over the shared in-memory connection. The first call creates
+        /// the schema (<c>EnsureCreated</c>); later calls reuse it, so a write context and a read context
+        /// see the same database — exactly the insert-then-query shape a round-trip test needs.
+        /// </summary>
+        public DbContext NewContext()
+        {
+            var builderType = typeof(DbContextOptionsBuilder<>).MakeGenericType(ContextType);
+            var builder = (DbContextOptionsBuilder)Activator.CreateInstance(builderType)!;
+            builder.UseSqlite(_connection);
+            // DbContextOptionsBuilder<TContext> shadows the base Options with `new` (it returns the
+            // strongly-typed DbContextOptions<TContext> the generated ctor needs), so resolve the
+            // DECLARED property to avoid an ambiguous match against the base's Options.
+            var options = builderType
+                .GetProperty("Options", BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly)!
+                .GetValue(builder)!;
+            var context = (DbContext)Activator.CreateInstance(ContextType, options)!;
+            if (!_schemaCreated)
+            {
+                context.Database.EnsureCreated();
+                _schemaCreated = true;
+            }
+
+            return context;
+        }
+
+        /// <summary>Every persisted entity of <paramref name="entityType"/>, materialized from the store.</summary>
+        public static IReadOnlyList<object> Query(DbContext context, Type entityType)
+        {
+            var set = typeof(DbContext)
+                .GetMethods()
+                .Single(m => m.Name == nameof(DbContext.Set) && m.IsGenericMethodDefinition && m.GetParameters().Length == 0)
+                .MakeGenericMethod(entityType)
+                .Invoke(context, null)!;
+            return ((IEnumerable)set).Cast<object>().ToList();
+        }
+
+        public void Dispose() => _connection.Dispose();
     }
 
     /// <summary>
