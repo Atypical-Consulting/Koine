@@ -62,7 +62,10 @@ public sealed partial class RustEmitter
     private void EmitEnumApi(StringBuilder sb, string name, EnumDecl @enum)
     {
         IReadOnlyList<EnumMember> members = @enum.Members;
-        var arms = members.Select(m => RustNaming.Field(m.Name)).ToList(); // closure parameter names
+        // Closure parameter names, one per member and shared by both the match_ and switch folds.
+        // De-duplicated per enum so members that snake_case-collapse (e.g. `userID`/`userId` → both
+        // `user_id`) still bind distinct, compiling Rust identifiers (#315).
+        IReadOnlyList<string> arms = RustNaming.UniqueBindings(members.Select(m => m.Name));
 
         // from_name — the non-throwing name lookup (`TryFromName` -> Option). The `_ => None` arm
         // covers the open &str input domain; it is NOT a wildcard over the (closed) variant set.

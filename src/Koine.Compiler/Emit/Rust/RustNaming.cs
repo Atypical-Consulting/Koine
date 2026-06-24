@@ -162,6 +162,37 @@ internal static class RustNaming
     /// <summary>The escaped snake_case rendering of a Koine member/parameter name.</summary>
     public static string Field(string name) => EscapeMember(ToSnakeCase(name));
 
+    /// <summary>
+    /// Maps an enum's members (in declaration order) to DISTINCT Rust binding names for the
+    /// smart-enum <c>match_</c>/<c>switch</c> closure parameters. Each binding is the member's
+    /// <see cref="Field"/> form; when two members collapse to the same snake_case identifier —
+    /// e.g. <c>userID</c> and <c>userId</c> both snake_case to <c>user_id</c> — the later ones get a
+    /// deterministic <c>_2</c>, <c>_3</c>, … suffix so every binding is a distinct, compiling Rust
+    /// identifier (a bare <c>match</c> over them would otherwise bind the same name twice — invalid
+    /// Rust). The first occurrence keeps the idiomatic un-suffixed name, so non-colliding enums are
+    /// byte-for-byte unchanged, and the suffix loop keeps incrementing past any member whose natural
+    /// snake_case already equals a disambiguated name. Suffixing happens on the pre-escape snake form
+    /// so the result stays keyword-safe (it is re-escaped via <see cref="EscapeMember"/>).
+    /// </summary>
+    public static IReadOnlyList<string> UniqueBindings(IEnumerable<string> memberNames)
+    {
+        var used = new HashSet<string>(StringComparer.Ordinal);
+        var bindings = new List<string>();
+        foreach (var name in memberNames)
+        {
+            var snake = ToSnakeCase(name);
+            var candidate = EscapeMember(snake);
+            for (var n = 2; !used.Add(candidate); n++)
+            {
+                candidate = EscapeMember(snake + "_" + n);
+            }
+
+            bindings.Add(candidate);
+        }
+
+        return bindings;
+    }
+
     private static bool IsAlreadySnakeCase(string name)
     {
         foreach (var c in name)
