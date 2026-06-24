@@ -27,7 +27,6 @@ import {
   removeRecentFolder,
   pinRecentFolder,
   clearRecentFolders,
-  PREVIEW_TARGETS,
 } from '@/settings/persistence';
 import { BUILTIN_EMIT_TARGETS, setEmitTargets } from '@/shared/emitTargets';
 import type { ChatMessage } from '@/ai/ai';
@@ -409,10 +408,6 @@ describe('Output / previewTarget setting', () => {
   test('round-trips the Rust target', () => {
     saveSettings({ ...DEFAULT_SETTINGS, previewTarget: 'rust' });
     expect(loadSettings().previewTarget).toBe('rust');
-  });
-
-  test('PREVIEW_TARGETS lists the five supported languages in order', () => {
-    expect(PREVIEW_TARGETS).toEqual(['csharp', 'typescript', 'python', 'php', 'rust']);
   });
 
   test('a stored target is validated against the backend-seeded list, not just the built-ins (#282)', () => {

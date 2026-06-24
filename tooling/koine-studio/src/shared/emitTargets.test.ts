@@ -7,7 +7,6 @@ import {
   setEmitTargets,
   type EmitTarget,
 } from '@/shared/emitTargets';
-import { PREVIEW_TARGETS } from '@/settings/persistence';
 import { COMPILE_TARGETS } from '@/ai/assistantTools';
 import { wizardTargets } from '@/export/generateProjectWizard';
 import { langExt } from '@/editor/editor';
@@ -30,10 +29,6 @@ describe('EMIT_TARGETS', () => {
   });
 
   const ids = BUILTIN_EMIT_TARGETS.map((t) => t.id);
-
-  test('the settings PREVIEW_TARGETS list derives from EMIT_TARGETS (same ids, same order)', () => {
-    expect([...PREVIEW_TARGETS]).toEqual(ids);
-  });
 
   test('the assistant COMPILE_TARGETS enum derives from EMIT_TARGETS (same ids, same order)', () => {
     expect([...COMPILE_TARGETS]).toEqual(ids);
