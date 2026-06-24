@@ -46,7 +46,7 @@ import { renderDiagrams } from '@/diagrams/diagrams';
 import { renderContextMapGraph, type ContextMapGraphHandle } from '@/diagrams/diagrams-maxgraph';
 import { buildContextMapGraph, type ContextMapEdge } from '@/diagrams/contextMapGraph';
 import { setDiagramLayoutStore, setDiagramPersistScope } from '@/diagrams/diagramContract';
-import type { AddNodeKind, AggregateMemberKind } from '@/diagrams/diagramContract';
+import type { AddNodeKind, CanvasAnnotationKind, AggregateMemberKind } from '@/diagrams/diagramContract';
 import { createLayoutStore } from '@/diagrams/layoutStore';
 import { mergeDiagramGraphs } from '@/model/modelTables';
 import { type GlossaryHandlers } from '@/model/glossary';
@@ -160,6 +160,8 @@ export interface InspectorControllerDeps {
   onApplyStructuredEdit(edit: StructuredEdit, successMsg: string): void;
   /** Insert a new DDD construct of the given kind into the active context (the palette's add path). */
   onAddConstruct(kind: AddNodeKind): void;
+  /** Create a canvas-only annotation (note/group) — a view concern persisted in koine.layout.json (#255). */
+  onAddAnnotation(kind: CanvasAnnotationKind): void;
   /** Insert an aggregate-scoped construct (repository / rule, #254) into the selected aggregate. */
   onAddAggregateMember(kind: AggregateMemberKind, aggregateQualifiedName: string): void;
   /** Jump to a RAW 1-based source span (opens the owning file if needed) — the bottom tables' row click. */
@@ -987,8 +989,8 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   // (active context, selection). It also reads the model `index` to resolve whether the selection is an
   // aggregate (gating the rule/repository buttons, #254), so renderCanvasPalette re-passes a fresh index
   // whenever the model rebuilds OR the selection changes — mirroring how the Properties panel is
-  // re-rendered. Context-scoped clicks route through onAddConstruct; aggregate-scoped clicks through
-  // onAddAggregateMember with the target qname.
+  // re-rendered. Context-scoped clicks route through onAddConstruct; aggregate-scoped through
+  // onAddAggregateMember with the target qname; canvas-only annotations (#255) through onAddAnnotation.
   function renderCanvasPalette(): void {
     render(
       <CanvasPalette
@@ -996,6 +998,7 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
         index={modelIndex}
         onAdd={(kind) => deps.onAddConstruct(kind)}
         onAddAggregateMember={(kind, aggregateQn) => deps.onAddAggregateMember(kind, aggregateQn)}
+        onAddAnnotation={(kind) => deps.onAddAnnotation(kind)}
       />,
       el('canvas-palette-host'),
     );

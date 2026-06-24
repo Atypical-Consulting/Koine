@@ -16,10 +16,11 @@ For each entry in the template's `body:` array:
 | `dropdown`  | `## <attributes.label>` heading + the single best `options` value, verbatim |
 | `checkboxes`| `## <attributes.label>` heading + a `- [x]` / `- [ ]` list |
 
-Honor `validations.required: true` — every required field needs real, specific content. Apply the
-template's top-level `labels:` via `--label` — but that's only the *type* label (e.g. `enhancement`).
-The triage labels (`priority: *`, `effort: *`, `studio`) are not in the template; pick them from the
-repo's live taxonomy per SKILL.md Step 4 (and the `effort:` one in Step 6).
+Honor `validations.required: true` — every required field needs real, specific content. The
+template's top-level `labels:` (e.g. `enhancement`) and the triage labels (`priority: *`, `effort: *`,
+`studio`) are **not** written into the body — they're applied via `--label` when the issue is created
+in SKILL.md Step 7, picked from the repo's live taxonomy. The body is just the form fields below,
+which become the visible top of the description (the brainstorm/spec/plan sections follow).
 
 ## Worked example — `feature_request.yml`
 
@@ -58,11 +59,13 @@ expression translator parallel to the C# ones.
 New emitter target
 ```
 
-Create it with the type + priority labels (effort is added after the plan in SKILL.md Step 6):
+This body is only the form fields. In the real run the brainstorm/spec/plan get appended below it
+(SKILL.md Steps 5-6) before the issue is created. Create it with type + priority + effort labels —
+all known by SKILL.md Step 7, since the plan already exists:
 
 ```bash
 gh issue create --title "Add Python emitter target" \
-  --label enhancement --label "priority: medium" \
+  --label enhancement --label "priority: medium" --label "effort: L" \
   --body-file /tmp/koine-issue-python.md
 ```
 

@@ -60,6 +60,8 @@ export interface EditorSessionDeps {
   doc: string;
   /** Soft-wrap long lines on first paint. */
   lineWrap: boolean;
+  /** Show the document-overview minimap on first paint. */
+  minimap: boolean;
   /** The LSP client (request methods + diagnostics/exit subscriptions). */
   lsp: EditorSessionLsp;
 
@@ -151,6 +153,7 @@ export function createEditorSession(deps: EditorSessionDeps): EditorSession {
     parent: deps.parent,
     doc: deps.doc,
     lineWrap: deps.lineWrap,
+    minimap: deps.minimap,
     onChange: (doc) => {
       // The editor↔LSP half of the old init() onChange: keep the server's document snapshot current
       // (debounced inside the client), then hand the new full text to ide.ts for the buffer/dirty/

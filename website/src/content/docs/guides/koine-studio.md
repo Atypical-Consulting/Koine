@@ -80,6 +80,11 @@ Koine Studio surfaces the **enriched** language server, the same one the VS Code
     shared types and ACL in the details strip — so no detail from the table is lost.
   - **Table** keeps the dense, per-relation grid (Upstream · Direction · Downstream · Kind · Shared
     Types · ACL) for when you want every field at a glance.
+- **Canvas notes & groups** — free-text **Notes** and node **Groups** you can drop on the diagram
+  canvas from the palette. These are *annotations only*: they never touch your `.koi` source. They
+  persist per workspace in a committable `koine.layout.json` (alongside hand-dragged node positions), so
+  they travel with the repo and diff cleanly. Double-click to edit, right-click to delete; a group draws
+  a labelled region behind its member nodes and follows them as they move.
 - **Hover & navigation** — type/member hover cards and go-to-definition, served by the same LSP that
   powers the editors.
 - **Shareable links** — _Copy shareable link_ encodes your work into the URL fragment (it never leaves
