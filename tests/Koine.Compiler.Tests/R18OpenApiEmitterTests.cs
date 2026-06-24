@@ -1,5 +1,6 @@
 using Koine.Compiler.Emit.OpenApi;
 using Koine.Compiler.Services;
+using Xunit;
 
 namespace Koine.Compiler.Tests;
 
@@ -9,8 +10,10 @@ namespace Koine.Compiler.Tests;
 /// Verify; structural facts are asserted directly. Changes to emitter output must be reviewed through
 /// the <c>.verified.txt</c> diff.
 /// </summary>
-public class R18OpenApiEmitterTests
+public class R18OpenApiEmitterTests(ITestOutputHelper output)
 {
+    private readonly ITestOutputHelper _output = output;
+
     [Fact]
     public void Target_name_is_openapi() =>
         new OpenApiEmitter().TargetName.ShouldBe("openapi");
@@ -189,5 +192,63 @@ public class R18OpenApiEmitterTests
         yaml.ShouldContain("in: query");
 
         return Verify(TestSupport.Render(result.Files)).UseDirectory("Snapshots");
+    }
+
+    [Fact]
+    public void Model_with_no_commands_or_queries_emits_an_empty_paths_object()
+    {
+        const string src = """
+            context Reference {
+              enum Color { Red, Green, Blue }
+              value Point { x: Int  y: Int }
+            }
+            """;
+
+        var result = new KoineCompiler().Compile(
+            new[] { new SourceFile("reference.koi", src) }, new OpenApiEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var yaml = result.Files.ShouldHaveSingleItem().Contents;
+        yaml.ShouldContain("openapi: 3.1.0");
+        // No behavioral surface → an empty (but present, as the spec requires) paths object …
+        yaml.ShouldContain("paths: {}");
+        // … while the schemas are still declared.
+        yaml.ShouldContain("components:");
+        yaml.ShouldContain("Point:");
+        yaml.ShouldContain("Color:");
+    }
+
+    [Fact]
+    public void Truly_empty_context_omits_the_components_block()
+    {
+        var result = new KoineCompiler().Compile(
+            new[] { new SourceFile("empty.koi", "context Empty { }\n") }, new OpenApiEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var yaml = result.Files.ShouldHaveSingleItem().Contents;
+        yaml.ShouldContain("openapi: 3.1.0");
+        yaml.ShouldContain("paths: {}");
+        // Nothing to declare → no dangling, empty `components: {}`.
+        yaml.ShouldNotContain("components:");
+    }
+
+    [Fact]
+    public void Emitted_document_passes_external_openapi_validation_when_available()
+    {
+        // A rich model exercising schemas, refs, paths, parameters, and lowered keywords in one doc.
+        var result = new KoineCompiler().Compile(
+            new[] { new SourceFile("ordering.koi", OrderingFixture) }, new OpenApiEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var check = TestSupport.ValidateOpenApi(result.Files);
+        if (!check.ToolchainAvailable)
+        {
+            // INCONCLUSIVE: validation is opt-in (set KOINE_OPENAPI_VALIDATE) and needs a validator on
+            // PATH. Mirrors the TS/Python/Rust external-toolchain conformance pattern — skip, never fail.
+            _output.WriteLine("OpenAPI validation not enabled or no validator found; skipping conformance check.");
+            return;
+        }
+
+        check.Ok.ShouldBeTrue("expected the emitted OpenAPI document to validate:\n" + string.Join("\n", check.Errors));
     }
 }

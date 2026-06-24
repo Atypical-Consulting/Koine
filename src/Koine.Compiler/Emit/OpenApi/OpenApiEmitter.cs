@@ -43,8 +43,15 @@ public sealed partial class OpenApiEmitter : IEmitter
         var document = new YamlObject();
         document.Add("openapi", Yaml.Raw("3.1.0"));
         document.Add("info", BuildInfo(ctx));
+        // `paths` is required by the spec even when empty; `components` is optional, so it is omitted
+        // entirely when the context declares nothing schema-worthy rather than left as a bare `{}`.
         document.Add("paths", BuildPaths(ctx, index));
-        document.Add("components", BuildComponents(ctx, index));
+        YamlObject components = BuildComponents(ctx, index);
+        if (!components.IsEmpty)
+        {
+            document.Add("components", components);
+        }
+
         return document;
     }
 
