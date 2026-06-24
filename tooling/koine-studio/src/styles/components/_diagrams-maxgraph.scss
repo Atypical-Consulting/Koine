@@ -157,6 +157,34 @@ $ddd-kinds: (
   box-shadow: 0 0 0 2px var(--koi-accent);
 }
 
+/* Canvas-only annotations (#255): the HTML LABEL over each annotation cell shape (the shape carries the
+   sticky/region fill + owns hit-testing). Like .koi-node, the label is click-through so the shape gets the
+   drag. A note shows wrapped text on its sticky; a group shows a small corner label for its region. */
+.koi-annotation {
+  box-sizing: border-box;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  color: #0b0f17; /* constant near-black: legible on the (theme-independent) amber/violet fills */
+  font-size: var(--koi-text-sm);
+}
+.koi-annotation--note {
+  padding: var(--koi-space-1) var(--koi-space-1-5);
+  white-space: pre-wrap;
+  overflow: hidden;
+  line-height: 1.35;
+}
+.koi-annotation--group {
+  display: inline-block;
+  width: auto;
+  height: auto;
+  padding: 2px 6px;
+  font-weight: 700;
+  font-size: var(--koi-text-xs);
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
 /* zoom control bar + minimap. Self-contained here (mirrors the legacy renderer's chrome) so they survive
    the old _diagrams.scss being removed. */
 .koi-canvas-controls {

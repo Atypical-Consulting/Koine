@@ -12,7 +12,7 @@ import {
   setDiagramPersistScope,
   positionKey,
 } from '@/diagrams/diagramContract';
-import { loadDiagramPositions, saveDiagramPositions } from '@/settings/persistence';
+import { loadDiagramAnnotations, loadDiagramPositions, saveDiagramPositions } from '@/settings/persistence';
 import type { Diagram, DiagramGraph, DiagramNode, DocsFile } from '@/lsp/lsp';
 
 // happy-dom returns 0 from getBoundingClientRect; maxGraph reads the container rect on construction.
@@ -516,6 +516,110 @@ describe('position persistence', () => {
       const saved = loadDiagramPositions(positionKey());
       expect(saved['Ordering.Order']).toEqual({ x: 333, y: 222 });
       expect(saved['Ordering.Line']).toBeDefined(); // a drag snapshots the WHOLE layout, not just the moved node
+    } finally {
+      handle.dispose();
+    }
+  });
+});
+
+describe('canvas annotations (#255)', () => {
+  const cls = (id: string) => node({ id, qualifiedName: id, stereotype: 'aggregate root' });
+  const twoNodes = { nodes: [cls('Ordering.Order'), cls('Ordering.Line')], edges: [] };
+  const positions = { 'Ordering.Order': { x: 40, y: 40 }, 'Ordering.Line': { x: 360, y: 200 } };
+  const note = { id: 'note-1', text: 'Remember to model returns', x: 600, y: 30, width: 180, height: 96 };
+  const group = { id: 'group-1', label: 'Checkout', members: ['Ordering.Order', 'Ordering.Line'] };
+
+  test('renders a note cell and a group cell, both painted BEHIND the nodes', () => {
+    const container = makeContainer();
+    const handle = buildCanvas(mx, container, twoNodes, { positions, notes: [note], groups: [group] });
+    try {
+      const noteCell = handle.noteCells.get('note-1');
+      const groupCell = handle.groupCells.get('group-1');
+      expect(noteCell).toBeDefined();
+      expect(groupCell).toBeDefined();
+
+      // Paint order == root child order: the annotations come before the context container (so they sit
+      // behind the nodes parented into it), and the group (a region) comes before the note.
+      const root = handle.graph.getDefaultParent();
+      const containerCell = handle.containers.get('Ordering')!;
+      const groupIdx = root.getIndex(groupCell!);
+      const noteIdx = root.getIndex(noteCell!);
+      const containerIdx = root.getIndex(containerCell);
+      expect(groupIdx).toBeLessThan(noteIdx);
+      expect(noteIdx).toBeLessThan(containerIdx);
+    } finally {
+      handle.dispose();
+    }
+  });
+
+  test("a note's text and geometry round-trip from the saved layout onto its cell", () => {
+    const container = makeContainer();
+    const handle = buildCanvas(mx, container, twoNodes, { positions, notes: [note], groups: [] });
+    try {
+      const cell = handle.noteCells.get('note-1')!;
+      const geo = cell.getGeometry()!;
+      expect(geo.x).toBe(600);
+      expect(geo.y).toBe(30);
+      expect(geo.width).toBe(180);
+      expect(geo.height).toBe(96);
+      expect(handle.graph.convertValueToString(cell)).toContain('Remember to model returns');
+    } finally {
+      handle.dispose();
+    }
+  });
+
+  test("a group's rectangle wraps the absolute bounding box of its members", () => {
+    const container = makeContainer();
+    const handle = buildCanvas(mx, container, twoNodes, { positions, notes: [], groups: [group] });
+    try {
+      const ctxGeo = handle.containers.get('Ordering')!.getGeometry()!; // members are relative to this
+      const m1 = handle.cells.get('Ordering.Order')!.getGeometry()!;
+      const m2 = handle.cells.get('Ordering.Line')!.getGeometry()!;
+      const minX = Math.min(m1.x, m2.x) + ctxGeo.x;
+      const minY = Math.min(m1.y, m2.y) + ctxGeo.y;
+      const maxX = Math.max(m1.x + m1.width, m2.x + m2.width) + ctxGeo.x;
+      const maxY = Math.max(m1.y + m1.height, m2.y + m2.height) + ctxGeo.y;
+
+      const gg = handle.groupCells.get('group-1')!.getGeometry()!;
+      expect(handle.groupCells.get('group-1')!.isVisible()).toBe(true);
+      expect(gg.x).toBeLessThanOrEqual(minX);
+      expect(gg.y).toBeLessThanOrEqual(minY);
+      expect(gg.x + gg.width).toBeGreaterThanOrEqual(maxX);
+      expect(gg.y + gg.height).toBeGreaterThanOrEqual(maxY);
+    } finally {
+      handle.dispose();
+    }
+  });
+
+  test('a group with no resolvable members is hidden (nothing to enclose)', () => {
+    const container = makeContainer();
+    const orphan = { id: 'group-x', label: 'Orphan', members: ['Nope.Missing'] };
+    const handle = buildCanvas(mx, container, twoNodes, { positions, notes: [], groups: [orphan] });
+    try {
+      expect(handle.groupCells.get('group-x')!.isVisible()).toBe(false);
+    } finally {
+      handle.dispose();
+    }
+  });
+
+  test('moving a note persists its new geometry to the layout store (notes ride the save)', () => {
+    setDiagramPersistScope('ws-test'); // browser-storage fallback (no injected store)
+    const container = makeContainer();
+    const handle = buildCanvas(mx, container, twoNodes, { positions, notes: [note], groups: [group] });
+    try {
+      const model = handle.graph.getDataModel();
+      const cell = handle.noteCells.get('note-1')!;
+      const geo = cell.getGeometry()!.clone();
+      geo.x = 720;
+      geo.y = 510;
+      model.setGeometry(cell, geo);
+      handle.graph.fireEvent(new mx.EventObject(mx.InternalEvent.CELLS_MOVED, 'cells', [cell], 'dx', 0, 'dy', 0));
+
+      const saved = loadDiagramAnnotations(positionKey());
+      expect(saved.notes).toHaveLength(1);
+      expect(saved.notes[0]).toMatchObject({ id: 'note-1', x: 720, y: 510 });
+      // The group rides the same save (membership preserved; rect is re-derived, not stored).
+      expect(saved.groups).toEqual([{ id: 'group-1', label: 'Checkout', members: ['Ordering.Order', 'Ordering.Line'] }]);
     } finally {
       handle.dispose();
     }
