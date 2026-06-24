@@ -1,12 +1,24 @@
 import { describe, expect, test, beforeAll, afterEach, vi, type Mock } from 'vitest';
 import * as mx from '@maxgraph/core';
-import { selectDomainGraphs, buildCanvas, isClassNode, nodeLabelHtml, nodeSize, contextOf, createMaxGraphRenderer } from '@/diagrams/diagrams-maxgraph';
+import {
+  selectDomainGraphs,
+  buildCanvas,
+  isClassNode,
+  isContextNode,
+  nodeLabelHtml,
+  nodeSize,
+  contextOf,
+  createMaxGraphRenderer,
+  renderContextMapGraph,
+  routeContextMapClick,
+} from '@/diagrams/diagrams-maxgraph';
 
 // The diagram's rename/delete gestures now route through Koine's own modal (koiPrompt/koiConfirm),
 // not window.prompt/confirm. Stub them so the tests drive the async dialog deterministically.
 vi.mock('@/shared/overlay', () => ({ koiPrompt: vi.fn(), koiConfirm: vi.fn() }));
 import { koiPrompt, koiConfirm } from '@/shared/overlay';
 import {
+  isDiagramEditing,
   DIAGRAM_ANNOTATION_CREATE_EVENT,
   setDiagramEditing,
   setDiagramLayoutStore,
@@ -135,6 +147,31 @@ describe('nodeLabelHtml', () => {
   });
 });
 
+describe('context nodes', () => {
+  const ctx = (name: string) => node({ id: name, qualifiedName: name, label: name, kind: 'context' });
+
+  test('a context node is recognised and is NOT a class/aggregate compartment box', () => {
+    expect(isContextNode(ctx('Ordering'))).toBe(true);
+    expect(isClassNode(ctx('Ordering'))).toBe(false);
+    // a real class node is neither a context nor a simple box
+    expect(isContextNode(node({ id: 'C.A', qualifiedName: 'C.A', stereotype: 'aggregate root' }))).toBe(false);
+  });
+
+  test('a context node sizes as a distinct, prominent tile (wider minimum + taller than a plain box)', () => {
+    const [ctxW, ctxH] = nodeSize(ctx('A')); // short label hits the minimums
+    const [, simpleH] = nodeSize(node({ id: 's', qualifiedName: 'Draft', label: 'Draft', kind: 'state' }));
+    expect(ctxW).toBeGreaterThanOrEqual(120);
+    expect(ctxH).toBeGreaterThan(simpleH);
+  });
+
+  test('a context node renders a simple labelled box tagged data-kind="context" for the distinct CSS', () => {
+    const html = nodeLabelHtml(ctx('Ordering'));
+    expect(html).toContain('koi-node--simple');
+    expect(html).toContain('data-kind="context"');
+    expect(html).not.toContain('koi-node--class');
+  });
+});
+
 describe('contextOf', () => {
   test('takes the prefix before the first dot, or empty for an undotted name', () => {
     expect(contextOf('Ordering.Order')).toBe('Ordering');
@@ -223,6 +260,23 @@ describe('edges', () => {
     }
   });
 
+  test('a bidirectional edge (context-map Partnership / Shared Kernel) draws an arrowhead at BOTH ends', () => {
+    const merged: DiagramGraph = {
+      nodes: [node({ id: 'Sales', qualifiedName: 'Sales', kind: 'context' }), node({ id: 'Support', qualifiedName: 'Support', kind: 'context' })],
+      edges: [{ from: 'Sales', to: 'Support', label: 'Partnership', arrowKind: 'bidirectional' }],
+    };
+    const container = makeContainer();
+    const handle = buildCanvas(mx, container, merged);
+    try {
+      const edge = handle.cells.get('Sales')!.getEdgeAt(0);
+      expect(edge!.getStyle().startArrow).not.toBe('none'); // two-headed → arrow at the source end too
+      expect(edge!.getStyle().endArrow).not.toBe('none');
+      expect(edge!.getStyle().startArrow).not.toBe('diamond'); // not a composition diamond
+    } finally {
+      handle.dispose();
+    }
+  });
+
   test('a plain (association) edge: only a target arrow, no diamond, no multiplicity labels', () => {
     const merged: DiagramGraph = {
       nodes: [cls('Sales.Customer'), cls('Sales.Order')],
@@ -301,6 +355,79 @@ describe('createMaxGraphRenderer.render', () => {
     await createMaxGraphRenderer().render(container, [file([diagram('aggregate', g)])], 'dark', () => false);
     expect(container.textContent).toContain('sentinel');
     expect(container.querySelector('.koi-canvas')).toBeNull();
+  });
+});
+
+describe('routeContextMapClick', () => {
+  const ctxNode = node({ id: 'Sales', qualifiedName: 'Sales', kind: 'context' });
+  const relEdge = { from: 'Sales', to: 'Shipping', label: 'Customer/Supplier', arrowKind: 'association' };
+
+  test('a context node routes to onContextClick (filter), not onRelationSelect', () => {
+    let ctx: any = 'unset';
+    let rel: any = 'unset';
+    routeContextMapClick(ctxNode, { onContextClick: (n) => (ctx = n), onRelationSelect: (e) => (rel = e) });
+    expect(ctx).toMatchObject({ qualifiedName: 'Sales' });
+    expect(rel).toBe('unset');
+  });
+
+  test('a relation edge routes to onRelationSelect', () => {
+    let rel: any = 'unset';
+    routeContextMapClick(relEdge, { onRelationSelect: (e) => (rel = e) });
+    expect(rel).toMatchObject({ from: 'Sales', to: 'Shipping' });
+  });
+
+  test('an empty / unknown click clears the selection (onRelationSelect(null))', () => {
+    let rel: any = 'unset';
+    routeContextMapClick(null, { onRelationSelect: (e) => (rel = e) });
+    expect(rel).toBeNull();
+  });
+});
+
+describe('renderContextMapGraph', () => {
+  const ctx = (name: string) => node({ id: name, qualifiedName: name, label: name, kind: 'context' });
+
+  test('mounts a read-only context-map canvas (its own root class) and returns a disposable handle', async () => {
+    const graph: DiagramGraph = {
+      nodes: [ctx('Sales'), ctx('Shipping')],
+      edges: [{ from: 'Sales', to: 'Shipping', label: 'Customer/Supplier', arrowKind: 'association' }],
+    };
+    const container = makeContainer();
+    const handle = await renderContextMapGraph(container, graph, () => true);
+    try {
+      expect(handle).not.toBeNull();
+      expect(container.querySelector('.koi-ctxmap-graph .koi-canvas')).not.toBeNull();
+      // its own root class — NOT the domain canvas's cross-highlight hook (`koi-svg-diagram`)
+      expect(container.querySelector('.koi-svg-diagram')).toBeNull();
+    } finally {
+      handle?.dispose();
+    }
+  });
+
+  test('renders READ-ONLY even when global editing is ON, without mutating the editing flag', async () => {
+    setDiagramEditing(true);
+    const graph: DiagramGraph = {
+      nodes: [ctx('A'), ctx('B')],
+      edges: [{ from: 'A', to: 'B', label: 'Partnership', arrowKind: 'bidirectional' }],
+    };
+    const container = makeContainer();
+    const handle = await renderContextMapGraph(container, graph, () => true);
+    try {
+      expect(isDiagramEditing()).toBe(true); // the context map never touches the global editing flag
+      // no authoring chrome on the context-map canvas even though editing is globally on (readOnly localizes it)
+      expect(container.querySelector('.koi-ctxmap-graph.koi-canvas--editing')).toBeNull();
+    } finally {
+      handle?.dispose();
+    }
+  });
+
+  test('a superseded render (isCurrent() false) commits nothing and returns null', async () => {
+    const graph: DiagramGraph = { nodes: [ctx('A')], edges: [] };
+    const container = makeContainer();
+    container.append('sentinel');
+    const handle = await renderContextMapGraph(container, graph, () => false);
+    expect(handle).toBeNull();
+    expect(container.querySelector('.koi-ctxmap-graph')).toBeNull();
+    expect(container.textContent).toContain('sentinel');
   });
 });
 

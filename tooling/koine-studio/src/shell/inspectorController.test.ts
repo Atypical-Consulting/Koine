@@ -440,7 +440,8 @@ describe('createInspectorController — bottom strip lazy loading', () => {
     expect(lsp.livingDocs.mock.calls.length).toBe(afterEvents);
   });
 
-  test('the Context Map tab lazy-loads the context map once and renders it', async () => {
+  test('the Context Map tab lazy-loads the context map once and renders it with a Graph | Table toggle (graph default)', async () => {
+    localStorage.removeItem('koine.studio.contextMapView'); // the default view is Graph regardless of prior runs
     const lsp = makeLsp();
     const ctl = createInspectorController(makeDeps(lsp));
     ctl.init();
@@ -449,8 +450,36 @@ describe('createInspectorController — bottom strip lazy loading', () => {
     await flush();
 
     expect(lsp.contextMap).toHaveBeenCalledTimes(1);
-    expect(el('panel-contextmap').hidden).toBe(false);
-    expect(el('panel-contextmap').innerHTML).toContain('koi-md');
+    const panel = el('panel-contextmap');
+    expect(panel.hidden).toBe(false);
+    // the interactive view: a Graph | Table toggle, with Graph the default selected view
+    const tabs = panel.querySelectorAll<HTMLButtonElement>('.ctxmap-tab');
+    expect(tabs).toHaveLength(2);
+    expect(panel.querySelector('[data-ctxmap-view="graph"]')?.getAttribute('aria-pressed')).toBe('true');
+    expect(panel.querySelector('[data-ctxmap-view="table"]')?.getAttribute('aria-pressed')).toBe('false');
+  });
+
+  test('toggling the Context Map to Table renders the dense table (and back to Graph) without refetching', async () => {
+    localStorage.removeItem('koine.studio.contextMapView');
+    const lsp = makeLsp();
+    const ctl = createInspectorController(makeDeps(lsp));
+    ctl.init();
+
+    ctl.selectBottomTab('contextmap');
+    await flush();
+    const panel = el('panel-contextmap');
+
+    // Switch to the Table view — synchronous, renders renderContextMapHtml's `koi-md` markup.
+    panel.querySelector<HTMLButtonElement>('[data-ctxmap-view="table"]')!.click();
+    await flush();
+    expect(panel.innerHTML).toContain('koi-md');
+    expect(panel.querySelector('[data-ctxmap-view="table"]')?.getAttribute('aria-pressed')).toBe('true');
+
+    // Back to Graph — the toggle never refetches the context map (one fetch total).
+    panel.querySelector<HTMLButtonElement>('[data-ctxmap-view="graph"]')!.click();
+    await flush();
+    expect(panel.querySelector('[data-ctxmap-view="graph"]')?.getAttribute('aria-pressed')).toBe('true');
+    expect(lsp.contextMap).toHaveBeenCalledTimes(1);
   });
 
   test('the rail Context Map link leaves Documentation so the otherwise-hidden strip shows the map', async () => {

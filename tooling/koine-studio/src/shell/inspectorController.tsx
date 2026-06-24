@@ -28,6 +28,8 @@ import type { KoineEditor, OutputLang, OutputView } from '@/editor/editor';
 import type {
   CheckResult,
   ContextMapResult,
+  DiagramEdge,
+  DiagramNode,
   DocsResult,
   EmitPreviewResult,
   GlossaryEntry,
@@ -41,6 +43,8 @@ import type {
 import type { Platform } from '@/host';
 import type { PreviewTarget } from '@/settings/persistence';
 import { renderDiagrams } from '@/diagrams/diagrams';
+import { renderContextMapGraph, type ContextMapGraphHandle } from '@/diagrams/diagrams-maxgraph';
+import { buildContextMapGraph, type ContextMapEdge } from '@/diagrams/contextMapGraph';
 import { setDiagramLayoutStore, setDiagramPersistScope } from '@/diagrams/diagramContract';
 import type { AddNodeKind, CanvasAnnotationKind, AggregateMemberKind } from '@/diagrams/diagramContract';
 import { createLayoutStore } from '@/diagrams/layoutStore';
@@ -75,7 +79,7 @@ import { guardedLoad } from '@/shell/guardedLoad';
 import { DEFAULT_CENTER, isValidCenter, type RightView } from '@/store/slices/uiChrome';
 import type { DomainIndex } from '@/ai/aiPanel';
 import { currentTheme } from '@/settings/theme';
-import { renderCheckMarkdown, renderContextMapHtml } from '@/shell/ideUtils';
+import { escapeHtml, formatAclMapping, renderCheckMarkdown, renderContextMapHtml } from '@/shell/ideUtils';
 
 // LSP SymbolKind for a namespace — the kind the language service tags each top-level `context`
 // document symbol with. Used by followActiveFileContext to read a file's bounded context(s).
@@ -1427,19 +1431,169 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     if (tab === 'contextmap' && appStore.getState().isStale('contextmap')) void loadContextMapPanel();
   }
 
-  // The "Context Map" tab: the strategic context map. The docViews slice's 'contextmap' token guards the
-  // fetch — a token captured before the await is compared after, so a superseded fetch (an edit bumped
-  // the token) can't clobber a newer render; markLoaded only takes for the token it fetched.
+  // --- the "Context Map" tab: the strategic context map, as an interactive GRAPH or the dense TABLE ----
+  // The graph reuses the maxGraph engine (buildContextMapGraph → renderContextMapGraph) and is the default;
+  // the table (renderContextMapHtml) stays one click away for the full per-relation detail. Both read the
+  // SAME ContextMapResult, so the toggle never refetches — it repaints the stored result.
+  const CONTEXT_MAP_VIEW_KEY = 'koine.studio.contextMapView';
+  type ContextMapMode = 'graph' | 'table';
+  let contextMapMode: ContextMapMode = ((): ContextMapMode => {
+    try {
+      return localStorage.getItem(CONTEXT_MAP_VIEW_KEY) === 'table' ? 'table' : 'graph';
+    } catch {
+      return 'graph';
+    }
+  })();
+  let lastContextMap: ContextMapResult | null = null;
+  let contextMapGraphHandle: ContextMapGraphHandle | null = null;
+  let contextMapRenderSeq = 0;
+
+  function disposeContextMapGraph(): void {
+    contextMapGraphHandle?.dispose();
+    contextMapGraphHandle = null;
+  }
+
+  // The hover tooltip for a relation edge (a context node's name is already on its box, so → null there).
+  // maxGraph renders the string as innerHTML with `\n`→`<br>`, so every fragment is escaped first.
+  function contextMapTooltip(value: DiagramNode | DiagramEdge): string | null {
+    if (!('from' in value && 'to' in value)) return null;
+    const e = value as ContextMapEdge;
+    const arrow = e.bidirectional ? '↔' : '→';
+    const lines = [`${e.label ?? 'relation'}: ${e.from} ${arrow} ${e.to}`];
+    if (e.sharedTypes.length) lines.push(`Shared: ${e.sharedTypes.join(', ')}`);
+    for (const a of e.acl) lines.push(`ACL: ${formatAclMapping(a)}`);
+    return lines.map(escapeHtml).join('\n');
+  }
+
+  // Fill the details strip with a selected relation's kind, direction, shared types and ACL — so nothing
+  // from the table view is lost on the graph. `null` hides it (empty-canvas click / fresh render).
+  function showRelationDetails(host: HTMLElement, edge: ContextMapEdge | null): void {
+    if (!edge) {
+      host.hidden = true;
+      host.innerHTML = '';
+      return;
+    }
+    const arrow = edge.bidirectional ? '↔' : '→';
+    const dir = `${escapeHtml(edge.from)} ${arrow} ${escapeHtml(edge.to)}`;
+    const shared = edge.sharedTypes.length ? edge.sharedTypes.map(escapeHtml).join(', ') : '—';
+    const acl = edge.acl.length ? edge.acl.map((a) => escapeHtml(formatAclMapping(a))).join('<br>') : '—';
+    host.innerHTML =
+      `<div class="ctxmap-details-head"><span class="ctxmap-details-kind">${escapeHtml(edge.label ?? 'Relation')}</span>` +
+      `<span class="ctxmap-details-dir">${dir}</span></div>` +
+      `<dl class="ctxmap-details-grid"><dt>Shared types</dt><dd>${shared}</dd><dt>ACL</dt><dd>${acl}</dd></dl>`;
+    host.hidden = false;
+  }
+
+  // Build the panel skeleton (Graph|Table toggle + stage + details strip) once into #panel-contextmap; a
+  // prior `docMessage` (the 'Loading…' line) wiped it, so this rebuilds when absent and returns its parts.
+  function ensureContextMapSkeleton(): { stage: HTMLElement; details: HTMLElement } {
+    const existing = contextMapView.querySelector<HTMLElement>('.ctxmap');
+    if (existing) {
+      return {
+        stage: existing.querySelector<HTMLElement>('.ctxmap-stage')!,
+        details: existing.querySelector<HTMLElement>('.ctxmap-details')!,
+      };
+    }
+    contextMapView.innerHTML = '';
+    const shell = document.createElement('div');
+    shell.className = 'ctxmap';
+
+    const toolbar = document.createElement('div');
+    toolbar.className = 'ctxmap-toolbar';
+    toolbar.setAttribute('role', 'group');
+    toolbar.setAttribute('aria-label', 'Context map view');
+    const makeTab = (mode: ContextMapMode, label: string): HTMLButtonElement => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'ctxmap-tab';
+      b.dataset.ctxmapView = mode;
+      b.textContent = label;
+      b.setAttribute('aria-pressed', String(contextMapMode === mode));
+      b.addEventListener('click', () => setContextMapMode(mode));
+      return b;
+    };
+    toolbar.append(makeTab('graph', 'Graph'), makeTab('table', 'Table'));
+
+    const stage = document.createElement('div');
+    stage.className = 'ctxmap-stage';
+    const details = document.createElement('div');
+    details.className = 'ctxmap-details';
+    details.hidden = true;
+
+    shell.append(toolbar, stage, details);
+    contextMapView.appendChild(shell);
+    return { stage, details };
+  }
+
+  function setContextMapMode(mode: ContextMapMode): void {
+    if (mode === contextMapMode) return;
+    contextMapMode = mode;
+    try {
+      localStorage.setItem(CONTEXT_MAP_VIEW_KEY, mode);
+    } catch {
+      // no persistence available — the in-session choice still applies
+    }
+    void paintContextMap();
+  }
+
+  // Paint the active view from the stored ContextMapResult. A monotonic seq makes a superseded async graph
+  // render (a later toggle/refresh) bail before it touches the DOM; the prior graph handle is disposed first.
+  async function paintContextMap(): Promise<void> {
+    const seq = ++contextMapRenderSeq;
+    disposeContextMapGraph();
+    const { stage, details } = ensureContextMapSkeleton();
+    for (const b of contextMapView.querySelectorAll<HTMLButtonElement>('.ctxmap-tab')) {
+      b.setAttribute('aria-pressed', String(b.dataset.ctxmapView === contextMapMode));
+    }
+    showRelationDetails(details, null);
+
+    const res = lastContextMap;
+    if (!res || (res.contexts.length === 0 && res.relations.length === 0)) {
+      stage.innerHTML = '<p class="muted">No context map declared.</p>';
+      return;
+    }
+
+    if (contextMapMode === 'table') {
+      stage.innerHTML = `<div class="koi-md ctxmap-table">${renderContextMapHtml(res)}</div>`;
+      return;
+    }
+
+    try {
+      const graph = buildContextMapGraph(res);
+      contextMapGraphHandle = await renderContextMapGraph(stage, graph, () => seq === contextMapRenderSeq, {
+        // A context-node click filters the workspace to that bounded context (only when it's a real,
+        // known context — a synthetic dangling endpoint isn't a valid scope).
+        onContextClick: (n) => {
+          if (contexts.includes(n.qualifiedName)) setActiveContext(n.qualifiedName);
+        },
+        onRelationSelect: (edge) => showRelationDetails(details, edge as ContextMapEdge | null),
+        tooltip: (value) => contextMapTooltip(value),
+      });
+    } catch (e) {
+      if (seq === contextMapRenderSeq) docMessage(stage, 'Could not render the context-map graph: ' + String(e), 'error');
+    }
+  }
+
+  // The docViews slice's 'contextmap' token guards the fetch — a token captured before the await is
+  // compared after, so a superseded fetch (an edit bumped the token) can't clobber a newer render;
+  // markLoaded only takes for the token it fetched. The view (graph/table) is repainted from the result.
   async function loadContextMapPanel(): Promise<void> {
     await guardedLoad({
       store: appStore,
       key: 'contextmap',
-      loading: () => docMessage(contextMapView, 'Loading context map…'),
+      loading: () => {
+        disposeContextMapGraph();
+        docMessage(contextMapView, 'Loading context map…');
+      },
       fetch: () => lsp.contextMap(),
       render: (res) => {
-        contextMapView.innerHTML = `<div class="koi-md">${renderContextMapHtml(res)}</div>`;
+        lastContextMap = res;
+        void paintContextMap();
       },
-      onError: (e) => docMessage(contextMapView, 'Context map request failed: ' + String(e), 'error'),
+      onError: (e) => {
+        disposeContextMapGraph();
+        docMessage(contextMapView, 'Context map request failed: ' + String(e), 'error');
+      },
     });
   }
 
