@@ -67,7 +67,12 @@ Koine Studio surfaces the **enriched** language server, the same one the VS Code
   `textDocument/publishDiagnostics`.
 - **Emitted-code preview** — request the generated **C#**, **TypeScript**, **Python**, **PHP**, or
   **Rust** for the current model in a read-only pane (`koine/emitPreview`); if the model has errors,
-  nothing is emitted and the diagnostics are shown instead.
+  nothing is emitted and the diagnostics are shown instead. The list of targets the picker offers is
+  **derived from the backend** — Studio asks the language server which targets the compiler's emitter
+  registry supports (`koine/emitTargets`) and renders the picker, the Generate-project wizard and the
+  assistant's compile tool from that one list, so a new emitter target appears automatically with no
+  front-end change. Syntax highlighting for a target without a bundled editor mode degrades gracefully
+  to plain (unhighlighted) text rather than hiding the target.
 - **Glossary** — the ubiquitous-language glossary the `glossary` emitter produces.
 - **Context map** — the bounded contexts and their relationships, in the **Context Map** bottom tab.
   A **Graph | Table** toggle switches between two views of the same data:
@@ -76,7 +81,8 @@ Koine Studio surfaces the **enriched** language server, the same one the VS Code
     relation is an edge whose direction reads **upstream → downstream**, with the relationship **kind**
     (Partnership, Shared Kernel, Customer/Supplier, Conformist, ACL, …) as its label — a bidirectional
     relation (Partnership / Shared Kernel) renders two-headed. Hover an edge for its kind and shared
-    types / ACL; click a context to **filter the workspace** to it, or click a relation to show its
+    types / ACL; click a context to **filter the workspace** to it **and jump the editor to its `.koi`
+    declaration** (the same jump-to-source a domain-diagram node gives), or click a relation to show its
     shared types and ACL in the details strip — so no detail from the table is lost.
   - **Table** keeps the dense, per-relation grid (Upstream · Direction · Downstream · Kind · Shared
     Types · ACL) for when you want every field at a glance.
@@ -149,6 +155,20 @@ cd tooling/koine-studio && npm install && npm run build
 You need a .NET SDK, Node/npm, and a Rust toolchain on `PATH`. On Linux, Tauri v2 also needs the
 WebKitGTK / libsoup system packages — see the `Koine Studio` CI workflow for the exact `apt` list.
 :::
+
+### Store inspector (dev only)
+
+While developing the IDE, a read-only **store inspector** overlay shows exactly what the app's
+Zustand store holds right now — selection, active context, the panel/view fields, the active file,
+the dirty-files and diagnostics rollups, and a collapsible "Raw state" dump of the whole store. It's
+the tool for diagnosing cross-panel-sync bugs. Open it from the command palette (<kbd>Cmd/Ctrl</kbd>
++<kbd>K</kbd>) → **Toggle store inspector (debug)**.
+
+The command is registered **only in dev builds**. Both `run-ide` and `run-ide-web` launch Vite's
+*serve* command, where `import.meta.env.DEV === true`, so the inspector is available there. Published
+builds go through `vite build` (`import.meta.env.DEV === false`), where the command isn't registered
+and the panel's code is excluded from the bundle — so it never appears in the shipped desktop app or
+the deployed web playground.
 
 ## See also
 

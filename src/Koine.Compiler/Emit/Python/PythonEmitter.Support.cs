@@ -40,6 +40,7 @@ public sealed partial class PythonEmitter
         public const string Enums = "enums";
         public const string Events = "events";
         public const string Repositories = "repositories";
+        public const string Infrastructure = "infrastructure";
         public const string ReadModels = "read_models";
         public const string Queries = "queries";
         public const string Policies = "policies";

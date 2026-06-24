@@ -164,6 +164,9 @@ export class WasmLspTransport implements LspTransport {
       case 'koine/emitPreview':
         return [result(JSON.parse(api.EmitPreview(this.filesJson(), msg.params?.target ?? 'csharp')))];
 
+      case 'koine/emitTargets':
+        return [result(JSON.parse(api.ListEmitTargets()))];
+
       case 'koine/glossary':
         return [result(JSON.parse(api.Glossary(this.filesJson())))];
 

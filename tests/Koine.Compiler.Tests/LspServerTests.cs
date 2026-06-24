@@ -75,6 +75,69 @@ public class LspServerTests
     }
 
     [Fact]
+    public void EmitTargets_returns_the_registry_code_targets_with_display_name_and_extension()
+    {
+        // The capability query the Studio front-end reads at boot (issue #282): the registry's
+        // code-emit targets, each carrying { id, displayName, fileExtension } — straight from
+        // EmitterRegistry.SupportedTargetInfos, so adding a target needs no front-end edit.
+        var request = Frame("{\"jsonrpc\":\"2.0\",\"id\":42,\"method\":\"koine/emitTargets\",\"params\":{}}");
+        var output = RunSession(Initialize(), request);
+
+        var targets = ResultTargets(output, 42);
+        targets.Select(t => t.id).ShouldBe(["csharp", "typescript", "python", "php", "rust", "asyncapi", "openapi"]);
+        targets.ShouldContain(t => t.id == "csharp" && t.displayName == "C#" && t.fileExtension == ".cs");
+        targets.ShouldContain(t => t.id == "rust" && t.displayName == "Rust" && t.fileExtension == ".rs");
+        targets.ShouldContain(t => t.id == "asyncapi" && t.displayName == "AsyncAPI" && t.fileExtension == ".yaml");
+        targets.ShouldContain(t => t.id == "openapi" && t.displayName == "OpenAPI" && t.fileExtension == ".yaml");
+        // glossary/docs are documentation generators, not emit targets the IDE offers.
+        targets.ShouldNotContain(t => t.id == "glossary" || t.id == "docs");
+    }
+
+    /// <summary>Parses the <c>koine/emitTargets</c> response for <paramref name="id"/> into its target list.</summary>
+    private static List<(string id, string displayName, string fileExtension)> ResultTargets(string output, int id)
+    {
+        foreach (var body in Frames(output))
+        {
+            using var doc = JsonDocument.Parse(body);
+            var root = doc.RootElement;
+            if (root.TryGetProperty("id", out var idEl) && idEl.ValueKind == JsonValueKind.Number && idEl.GetInt32() == id
+                && root.TryGetProperty("result", out var result)
+                && result.TryGetProperty("targets", out var arr))
+            {
+                return arr.EnumerateArray()
+                    .Select(t => (
+                        t.GetProperty("id").GetString()!,
+                        t.GetProperty("displayName").GetString()!,
+                        t.GetProperty("fileExtension").GetString()!))
+                    .ToList();
+            }
+        }
+
+        return [];
+    }
+
+    /// <summary>Yields each framed JSON-RPC message body from a raw LSP session transcript.</summary>
+    private static IEnumerable<string> Frames(string output)
+    {
+        var i = 0;
+        while (true)
+        {
+            var marker = output.IndexOf("Content-Length: ", i, StringComparison.Ordinal);
+            if (marker < 0)
+            {
+                yield break;
+            }
+
+            var numStart = marker + "Content-Length: ".Length;
+            var numEnd = output.IndexOf("\r\n", numStart, StringComparison.Ordinal);
+            var len = int.Parse(output.Substring(numStart, numEnd - numStart));
+            var bodyStart = output.IndexOf("\r\n\r\n", numEnd, StringComparison.Ordinal) + 4;
+            yield return output.Substring(bodyStart, len);
+            i = bodyStart + len;
+        }
+    }
+
+    [Fact]
     public void ToRange_underlines_the_offending_token()
     {
         var lines = LspServer.SplitLines("context C {\n  value V { x: Nope }\n}\n");

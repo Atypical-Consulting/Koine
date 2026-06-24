@@ -7,14 +7,24 @@
 // MCP server exposes, but executed by the IDE itself. `reference`/`examples` are intentionally NOT
 // here: their content is already injected into the system prompt (KOINE_PRIMER + live source).
 import type { ChatCompletionFunctionTool } from 'openai/resources/chat/completions';
+import { EMIT_TARGETS, isEmitTarget } from '@/shared/emitTargets';
 
-/** The compile targets the in-WASM EmitPreview accepts (glossary/docs go through other exports). */
-export const COMPILE_TARGETS = ['csharp', 'typescript', 'python', 'php', 'rust'] as const;
-export type CompileTarget = (typeof COMPILE_TARGETS)[number];
+export type CompileTarget = string;
+
+/**
+ * The compile targets the assistant's `koine_compile` tool accepts (glossary/docs go through other
+ * exports), read LIVE from the shared EMIT_TARGETS so the tool enum tracks the backend registry —
+ * seeded at boot (issue #282). A FUNCTION, not a module-load snapshot: `emitTargets.ts` is replaced
+ * in place at boot, so a captured-at-import constant would freeze the built-ins and never offer a
+ * backend-seeded target.
+ */
+export function compileTargets(): string[] {
+  return EMIT_TARGETS.map((t) => t.id);
+}
 
 /** Coerce an arbitrary `target` arg to a supported compile target, defaulting to csharp. */
 export function normalizeCompileTarget(target: unknown): CompileTarget {
-  return COMPILE_TARGETS.includes(target as CompileTarget) ? (target as CompileTarget) : 'csharp';
+  return isEmitTarget(target) ? (target as CompileTarget) : 'csharp';
 }
 
 /** The tool names advertised to the model — identical to the MCP server's, so a future desktop
@@ -36,8 +46,12 @@ export interface NeutralTool {
 }
 
 /** The koine tools, target- and provider-agnostic. Single-file `source` arg (the host wraps it into
- *  the compiler's multi-file envelope). Descriptions mirror the MCP tool `[Description]` strings. */
-export const KOINE_TOOL_DEFS: NeutralTool[] = [
+ *  the compiler's multi-file envelope). Descriptions mirror the MCP tool `[Description]` strings.
+ *  A FUNCTION (not a const) so the `koine_compile` enum is built from the LIVE {@link compileTargets}
+ *  each time the tool list is assembled — a const would freeze the enum at import, before the backend
+ *  seed (issue #282), and never offer a backend-seeded target to the model. */
+export function koineToolDefs(): NeutralTool[] {
+  return [
   {
     name: 'koine_validate',
     description:
@@ -62,7 +76,7 @@ export const KOINE_TOOL_DEFS: NeutralTool[] = [
         source: SOURCE_PROP,
         target: {
           type: 'string',
-          enum: [...COMPILE_TARGETS],
+          enum: compileTargets(),
           description: 'The target language to emit. Defaults to csharp.',
         },
       },
@@ -79,7 +93,8 @@ export const KOINE_TOOL_DEFS: NeutralTool[] = [
       required: ['source'],
     },
   },
-];
+  ];
+}
 
 /** Adapt a neutral def to an OpenAI function tool (`parameters` carries the JSON Schema). The cast
  *  bridges the neutral `object` schema to OpenAI's `FunctionParameters` (an indexed record). */
@@ -100,8 +115,11 @@ export function toAnthropicTool(t: NeutralTool): { name: string; description: st
   return { name: t.name, description: t.description, input_schema: t.inputSchema };
 }
 
-/** The OpenAI `tools` array, derived from the neutral defs. */
-export const KOINE_TOOLS: ChatCompletionFunctionTool[] = KOINE_TOOL_DEFS.map(toOpenAiTool);
+/** The OpenAI `tools` array, derived from the neutral defs. A function (not a const) so the
+ *  `koine_compile` enum reflects the live target list each call (issue #282). */
+export function koineTools(): ChatCompletionFunctionTool[] {
+  return koineToolDefs().map(toOpenAiTool);
+}
 
 // --- Koine.Wasm JSON shapes (camelCase, see src/Koine.Wasm/CompilerInterop.LanguageService.cs) -----
 

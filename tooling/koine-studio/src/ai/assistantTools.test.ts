@@ -1,9 +1,9 @@
 import { describe, expect, test } from 'vitest';
 import {
-  KOINE_TOOLS,
-  KOINE_TOOL_DEFS,
+  koineTools,
+  koineToolDefs,
   KOINE_TOOL_NAMES,
-  COMPILE_TARGETS,
+  compileTargets,
   toOpenAiTool,
   toAnthropicTool,
   formatValidate,
@@ -11,15 +11,15 @@ import {
   summarizeForChip,
 } from '@/ai/assistantTools';
 
-describe('KOINE_TOOLS definitions', () => {
+describe('koineTools() definitions', () => {
   test('advertises exactly validate/compile/format as OpenAI function tools', () => {
-    const names = KOINE_TOOLS.map((t) => t.function.name).sort();
+    const names = koineTools().map((t) => t.function.name).sort();
     expect(names).toEqual(['koine_compile', 'koine_format', 'koine_validate']);
     expect([...KOINE_TOOL_NAMES].sort()).toEqual(names);
   });
 
   test('every tool requires a source string and has a non-empty description', () => {
-    for (const t of KOINE_TOOLS) {
+    for (const t of koineTools()) {
       expect(t.type).toBe('function');
       expect(t.function.description && t.function.description.length).toBeGreaterThan(0);
       const params = t.function.parameters as { required?: string[]; properties: Record<string, unknown> };
@@ -29,9 +29,9 @@ describe('KOINE_TOOLS definitions', () => {
   });
 
   test('compile restricts target to the WASM-backed targets only', () => {
-    const compile = KOINE_TOOLS.find((t) => t.function.name === 'koine_compile')!;
+    const compile = koineTools().find((t) => t.function.name === 'koine_compile')!;
     const params = compile.function.parameters as { properties: { target: { enum: string[] } } };
-    expect(params.properties.target.enum).toEqual([...COMPILE_TARGETS]);
+    expect(params.properties.target.enum).toEqual(compileTargets());
     // glossary/docs are NOT valid EmitPreview targets — they must not be advertised.
     expect(params.properties.target.enum).not.toContain('glossary');
     expect(params.properties.target.enum).not.toContain('docs');
@@ -39,10 +39,10 @@ describe('KOINE_TOOLS definitions', () => {
 });
 
 describe('neutral tool defs + adapters', () => {
-  test('KOINE_TOOL_DEFS has exactly validate/compile/format, each source-required', () => {
-    const names = KOINE_TOOL_DEFS.map((d) => d.name).sort();
+  test('koineToolDefs() has exactly validate/compile/format, each source-required', () => {
+    const names = koineToolDefs().map((d) => d.name).sort();
     expect(names).toEqual(['koine_compile', 'koine_format', 'koine_validate']);
-    for (const def of KOINE_TOOL_DEFS) {
+    for (const def of koineToolDefs()) {
       expect(def.description.length).toBeGreaterThan(0);
       const schema = def.inputSchema as { required?: string[]; properties: Record<string, unknown> };
       expect(typeof def.inputSchema).toBe('object');
@@ -51,18 +51,18 @@ describe('neutral tool defs + adapters', () => {
     }
   });
 
-  test('toOpenAiTool wraps a def as an OpenAI function tool; KOINE_TOOLS is the derived view', () => {
-    const def = KOINE_TOOL_DEFS[0];
+  test('toOpenAiTool wraps a def as an OpenAI function tool; koineTools() is the derived view', () => {
+    const def = koineToolDefs()[0];
     const tool = toOpenAiTool(def);
     expect(tool).toEqual({
       type: 'function',
       function: { name: def.name, description: def.description, parameters: def.inputSchema },
     });
-    expect(KOINE_TOOLS).toEqual(KOINE_TOOL_DEFS.map(toOpenAiTool));
+    expect(koineTools()).toEqual(koineToolDefs().map(toOpenAiTool));
   });
 
   test('toAnthropicTool maps a def 1:1, sharing the neutral inputSchema reference', () => {
-    const def = KOINE_TOOL_DEFS[0];
+    const def = koineToolDefs()[0];
     const tool = toAnthropicTool(def);
     expect(tool).toEqual({ name: def.name, description: def.description, input_schema: def.inputSchema });
     expect(tool.input_schema).toBe(def.inputSchema); // referential, no schema rewrite

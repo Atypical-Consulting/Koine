@@ -1013,18 +1013,25 @@ export function renderSymbolTree(
 
 // --- read-only output viewer ------------------------------------------------
 
-export type OutputLang = 'csharp' | 'typescript' | 'python' | 'php' | 'rust' | 'plain';
+// An emit-target id (e.g. 'csharp') or 'plain' for unhighlighted text. A plain `string`, not a closed
+// union: a backend-only target the registry reports but Studio has no CodeMirror mode for still previews
+// — `langExt` degrades it to plain text rather than treating this list as a second source of truth (#282).
+export type OutputLang = string;
 
-export const langExt = (lang: OutputLang): Extension => {
-  if (lang === 'csharp') return StreamLanguage.define(csharp);
-  if (lang === 'typescript') return StreamLanguage.define(typescript);
-  if (lang === 'python') return StreamLanguage.define(python);
-  if (lang === 'rust') return StreamLanguage.define(rust);
+// The bundled CodeMirror modes, keyed by target id. This map is intentionally static (a mode must be
+// bundled per language) and is a graceful FALLBACK, not a target list: an id with no entry — including
+// 'plain' and any backend-only target — highlights as plain text.
+const LANG_MODES: Record<string, () => Extension> = {
+  csharp: () => StreamLanguage.define(csharp),
+  typescript: () => StreamLanguage.define(typescript),
+  python: () => StreamLanguage.define(python),
+  rust: () => StreamLanguage.define(rust),
   // PHP uses the Lezer-based grammar (lang-php); emitted files open with `<?php`, so the
   // default mixed-mode config highlights them correctly.
-  if (lang === 'php') return php();
-  return [];
+  php: () => php(),
 };
+
+export const langExt = (lang: OutputLang): Extension => LANG_MODES[lang]?.() ?? [];
 
 export interface OutputView {
   setContent(text: string, lang: OutputLang): void;

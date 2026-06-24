@@ -50,6 +50,10 @@ export interface ContextRelation {
 export interface ContextMapResult {
   contexts: string[];
   relations: ContextRelation[];
+  // Additive (#290): each declared context's declaration source span (the raw 1-based span over the
+  // `context` name token), keyed by context name; null on a recovered parse. Lets the context-map graph
+  // jump to the `.koi` declaration on a context-node click. Optional so older payloads still parse.
+  contextSpans?: Record<string, SourceSpan | null>;
 }
 
 // `koine/glossaryModel`: one entry per context/type, with doc presence (for coverage) and the

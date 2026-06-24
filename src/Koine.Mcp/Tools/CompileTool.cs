@@ -11,7 +11,7 @@ public static class CompileTool
     [McpServerTool(Name = "koine_compile")]
     [Description("""
         Compile Koine (.koi) source and return the generated output files. `target` is one of:
-        csharp (default), typescript, python, php, rust, glossary, docs, or asyncapi. Multi-file models compile together.
+        csharp (default), typescript, python, php, rust, glossary, docs, asyncapi, or openapi. Multi-file models compile together.
         If the model has semantic errors, no files are produced and `diagnostics` explains why — fix
         them (koine_validate shows the same diagnostics) and retry. Returns { success, errorCount,
         warningCount, diagnostics[], files[] } where each file has a relative path and its contents.
@@ -19,7 +19,7 @@ public static class CompileTool
     public static CompilationResult Compile(
         [Description("The .koi files to compile. Provide a single entry for a one-file model.")]
         KoineFile[] files,
-        [Description("Output target: csharp (default), typescript, python, php, rust, glossary, docs, or asyncapi.")]
+        [Description("Output target: csharp (default), typescript, python, php, rust, glossary, docs, asyncapi, or openapi.")]
         string target = "csharp")
     {
         if (!ToolGuards.TryValidateFiles(files, out var guardErrors))

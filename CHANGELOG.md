@@ -9,6 +9,16 @@ may include breaking changes.
 ## [Unreleased]
 
 ### Added
+- **TypeScript & Python infrastructure layer (`--layers infrastructure`).** The opt-in
+  `--layers infrastructure` selector — previously C#-only (EF Core) — now also applies to the
+  **TypeScript** and **Python** targets (issue #241), closing the largest cross-emitter parity gap.
+  Per bounded context with an entity-rooted aggregate, each emits a **dependency-light**, runnable
+  realization of the domain contracts: a concrete repository over an injectable `AggregateStore` with a
+  zero-dependency **in-memory default** (declarative finders → concrete lookups), a concrete unit of
+  work, a transactional **outbox** + dispatcher (publishing contexts only), validation/transaction
+  **pipeline behaviors**, and a composition-root factory (TS) / provider helper (Python). Shared
+  primitives live once in an emitted `infrastructure-runtime.ts` / `koine_infrastructure.py`. Off by
+  default — an unconfigured emit is byte-identical; the output is `tsc --strict` / `mypy --strict`-clean.
 - **Koine Studio — aggregate-scoped palette constructs (Repository & Rule).** The visual editor's
   structured-edit seam now targets a *selected aggregate* (not only a context): a new
   `addAggregateMember` edit inserts a re-validating `aggregateMember` and re-emits the whole aggregate.

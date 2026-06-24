@@ -10,6 +10,8 @@ export interface KoineWasmApi {
   DiagnoseWorkspace(filesJson: string): string;
   /** Emit-preview the merged workspace for a target → JSON EmitPreviewResult. */
   EmitPreview(filesJson: string, target: string): string;
+  /** The registry's emit-target capability list → JSON `{ targets:[{id,displayName,fileExtension}] }` (#282). */
+  ListEmitTargets(): string;
   /** Glossary markdown for the merged workspace → JSON `{markdown}`. */
   Glossary(filesJson: string): string;
   /** Structured glossary for the merged workspace → JSON `{entries}`. */
@@ -96,6 +98,7 @@ export interface KoineWasmApi {
 const KOINE_WASM_EXPORTS: ReadonlySet<string> = new Set<keyof KoineWasmApi>([
   'DiagnoseWorkspace',
   'EmitPreview',
+  'ListEmitTargets',
   'Glossary',
   'GlossaryModel',
   'ContextMap',

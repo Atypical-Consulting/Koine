@@ -452,6 +452,14 @@ internal sealed class LspServer
 
                             break;
 
+                        case "koine/emitTargets":
+                            if (root.TryGetProperty("id", out _))
+                            {
+                                Respond(root, EmitTargetsResultJson());
+                            }
+
+                            break;
+
                         case "koine/glossary":
                             if (root.TryGetProperty("id", out _))
                             {
@@ -1448,20 +1456,19 @@ internal sealed class LspServer
             target = requested;
         }
 
-        // 2. Gate to the code-emitter preview targets BEFORE the registry (which also accepts
-        //    glossary/docs — those have dedicated koine/glossary requests).
-        if (!string.Equals(target, "csharp", StringComparison.OrdinalIgnoreCase)
-            && !string.Equals(target, "typescript", StringComparison.OrdinalIgnoreCase)
-            && !string.Equals(target, "python", StringComparison.OrdinalIgnoreCase)
-            && !string.Equals(target, "php", StringComparison.OrdinalIgnoreCase)
-            && !string.Equals(target, "rust", StringComparison.OrdinalIgnoreCase))
+        // 2. Gate to the registry's code-emit targets (issue #282) — the SAME list koine/emitTargets
+        //    serves, so a target the picker offers is previewable here too (no offered-then-rejected
+        //    drift). SupportedTargetInfos excludes glossary/docs (they have dedicated requests).
+        var emitTargets = Infrastructure.EmitterRegistry.SupportedTargetInfos;
+        if (!emitTargets.Any(i => string.Equals(i.Id, target, StringComparison.OrdinalIgnoreCase)))
         {
+            var expected = string.Join(", ", emitTargets.Select(i => $"'{i.Id}'"));
             return new Dictionary<string, object?>
             {
                 ["target"] = target,
                 ["files"] = Array.Empty<object>(),
                 ["diagnostics"] = Array.Empty<object>(),
-                ["error"] = $"unknown target '{target}'; expected 'csharp', 'typescript', 'python', 'php', or 'rust'",
+                ["error"] = $"unknown target '{target}'; expected one of {expected}",
             };
         }
 
@@ -1515,6 +1522,27 @@ internal sealed class LspServer
             ["diagnostics"] = items,
             ["error"] = null,
         };
+    }
+
+    /// <summary>
+    /// The emit-target capability query (issue #282): the registry's code-emit targets, each with
+    /// <c>{ id, displayName, fileExtension }</c>, in display order. Backed entirely by
+    /// <see cref="Infrastructure.EmitterRegistry.SupportedTargetInfos"/>, so adding a target to the
+    /// registry surfaces it in Koine Studio's picker/wizard/Generated-tab/assistant with no front-end
+    /// edit. Excludes the non-emit <c>glossary</c>/<c>docs</c> generators.
+    /// </summary>
+    private static object EmitTargetsResultJson()
+    {
+        var targets = Infrastructure.EmitterRegistry.SupportedTargetInfos
+            .Select(i => (object)new Dictionary<string, object?>
+            {
+                ["id"] = i.Id,
+                ["displayName"] = i.DisplayName,
+                ["fileExtension"] = i.FileExtension,
+            })
+            .ToArray();
+
+        return new Dictionary<string, object?> { ["targets"] = targets };
     }
 
     /// <summary>
@@ -1588,7 +1616,30 @@ internal sealed class LspServer
         {
             ["contexts"] = contexts,
             ["relations"] = relations,
+            // Additive (#290): each declared context's declaration NameSpan (raw 1-based span over the
+            // `context` name token), keyed by name, serialized exactly like a diagram node's sourceSpan
+            // (MapSourceSpan; SourceSpan.None → null). Lets the Studio graph jump to the .koi on click.
+            ["contextSpans"] = ContextSpans(model.Contexts),
         };
+    }
+
+    /// <summary>
+    /// Projects each declared context's declaration <c>NameSpan</c> into a name → raw-1-based-span map
+    /// (the additive <c>contextSpans</c> field of the context-map result, #290). A recovered context
+    /// with no span maps to <c>null</c>; a duplicate name keeps the first declaration's span.
+    /// </summary>
+    private static Dictionary<string, object?> ContextSpans(IEnumerable<Compiler.Ast.ContextNode> contexts)
+    {
+        var spans = new Dictionary<string, object?>(StringComparer.Ordinal);
+        foreach (var c in contexts)
+        {
+            if (!spans.ContainsKey(c.Name))
+            {
+                spans[c.Name] = MapSourceSpan(c.NameSpan.IsNone ? null : c.NameSpan);
+            }
+        }
+
+        return spans;
     }
 
     /// <summary>
@@ -1875,6 +1926,7 @@ internal sealed class LspServer
     {
         ["contexts"] = Array.Empty<object>(),
         ["relations"] = Array.Empty<object>(),
+        ["contextSpans"] = new Dictionary<string, object?>(StringComparer.Ordinal),
     };
 
     private static object MapRelation(Compiler.Ast.ContextRelation r) => new Dictionary<string, object?>

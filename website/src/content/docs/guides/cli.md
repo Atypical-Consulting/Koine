@@ -19,7 +19,7 @@ Want to try the compiler without installing anything? The <a class="koi-try" hre
 
 ```bash
 koine --version
-koine build <file.koi|dir> [--target csharp|typescript|python|php|rust|glossary|docs] [--out <dir>] [--glossary <file.md>] [--config <file>]
+koine build <file.koi|dir> [--target csharp|typescript|python|php|rust|glossary|docs|openapi] [--out <dir>] [--glossary <file.md>] [--config <file>]
 koine watch <file.koi|dir> [--target …] [--out …] [--config <file>]   # rebuild on every change
 koine fmt   <file.koi|dir> [--check]            # canonically format .koi (--check: verify only)
 koine init  [dir] [--force]                    # scaffold a starter project
@@ -52,8 +52,8 @@ Parses and validates the model, then — if you ask for output — emits files.
 | Flag | Default | What it does |
 |------|---------|--------------|
 | *(positional)* | — | The `.koi` file or directory to compile. Required. |
-| `--target` | `csharp` | The emitter: `csharp`, `typescript`, `python`, `php`, `rust`, `glossary`, or `docs`. |
-| `--layers <list>` | `domain` | (C# only) Comma-separated layers to emit: `domain` (the model + application contracts) and/or `infrastructure` (a runnable EF Core realization — `DbContext`, repositories, unit of work, outbox, DI). `infrastructure` implies `domain`. See [C# infrastructure layer](#c-infrastructure-layer---layers). |
+| `--target` | `csharp` | The emitter: `csharp`, `typescript`, `python`, `php`, `rust`, `glossary`, `docs`, or `openapi`. |
+| `--layers <list>` | `domain` | Comma-separated layers to emit: `domain` (the model + application contracts) and/or `infrastructure` (a runnable realization — EF Core for C#; a dependency-light in-memory realization for TypeScript & Python). `infrastructure` implies `domain`. See [C# infrastructure layer](#c-infrastructure-layer---layers) and [TypeScript & Python infrastructure](#typescript--python-infrastructure---layers). |
 | `--out <dir>` | *(none)* | Write the emitted files under this directory. Omit to only validate. |
 | `--layers <list>` | `domain` | Comma-separated output layers (`domain`, `application`). `application` implies `domain`. C# only. See [the Application layer](#the-c-application-layer). |
 | `--app-mediatr` | *(off)* | Application layer: emit the MediatR request/handler shape + validation/transaction pipeline behaviors instead of plain handlers. |
@@ -137,6 +137,25 @@ Per bounded context, the infrastructure layer adds (under an `Infrastructure/` f
 
 `--layers domain` (or omitting the flag) keeps the output **byte-identical** to before. EF Core is the only backend in v1.
 
+### TypeScript & Python infrastructure (`--layers`)
+
+The same `--layers infrastructure` selector applies to the **TypeScript** and **Python** targets (issue #241). Instead of a bundled ORM, each emits a **dependency-light** realization of the domain contracts — runnable in tests out of the box, productionized by swapping in a persistent store:
+
+```bash
+koine build templates/pizzeria --target typescript --out Generated --layers domain,infrastructure
+koine build templates/pizzeria --target python     --out GeneratedPy --layers domain,infrastructure
+```
+
+Per bounded context with at least one entity-rooted aggregate, the infrastructure layer adds (under an `infrastructure/` folder):
+
+- a concrete repository over an **injectable `AggregateStore`** with a zero-dependency **in-memory default**; declarative finders compile to concrete lookups;
+- a concrete **unit of work** realizing the per-context contract;
+- a **transactional outbox** (`OutboxMessage` + a drainable `IntegrationEventDispatcher`) — only when the context publishes an integration event;
+- **validation + transaction pipeline behaviors** (the idiomatic analogue of the C# MediatR decorators);
+- a **composition-root factory** (TypeScript `create<Context>Infrastructure`) / **provider helper** (Python `create_<context>_infrastructure`) — the analogue of C#'s `Add<Context>Infrastructure`.
+
+The shared primitives live once in an emitted `infrastructure-runtime.ts` / `koine_infrastructure.py`. The layer is **off by default**, so an unconfigured emit stays **byte-identical**; the generated TypeScript is `tsc --strict`-clean and the Python is `mypy --strict`-clean.
+
 ### Emit a glossary
 
 There are two ways to get a Markdown glossary. The `--glossary` flag writes one to a named file **independently** of `--target`/`--out`, so you can emit C# *and* a glossary in a single run:
@@ -148,6 +167,23 @@ koine build templates/pizzeria --out Generated --glossary pizzeria.glossary.md
 ```
 
 Alternatively, `--target glossary` makes the glossary the primary output (paired with `--out`). Either way the glossary is grouped by context (each heading shows its `version`), then by type, listing fields, derived fields, and business rules.
+
+### Emit an OpenAPI spec
+
+`--target openapi` projects the model's API surface as an [OpenAPI 3.1](https://spec.openapis.org/oas/v3.1.0) document — one `<Context>/openapi.yaml` per bounded context, so a multi-context model never collides on a single file:
+
+```bash
+koine build templates/starters/billing/billing.koi --target openapi --out ./api
+# wrote 1 files to ./api
+```
+
+The output is deterministic (stable ordering, no timestamps) and self-contained. The mapping rules:
+
+- **Schemas.** Value objects, read models, and enums become `components/schemas`. Primitives map to their JSON types (`Int` → `integer`/`int32`, `Decimal` → `number`, `Instant` → `string`/`date-time`, …); nested value objects / enums / read models become `$ref`s; `List`/`Set` become `array`s (a `Set` adds `uniqueItems`); `Map` becomes an object with `additionalProperties`; an optional member becomes an OpenAPI-3.1 `["…", "null"]` type union (a `$ref` is wrapped in `anyOf`). A smart enum lowers to a string `enum` of its member names. ID value objects inline as `string`/`uuid`.
+- **Paths.** An entity **command** becomes a `POST` whose JSON request body is built from its parameters; a **query** becomes a `GET` whose criteria become query `parameters` and whose `200` response references the result schema. Operation paths are kebab-cased.
+- **Invariants.** Static value-object invariants lower, best-effort, to JSON-Schema validation keywords — `code.length <= 12` → `maxLength`, `amount >= 1` → `minimum`, `matches /…/` → `pattern`. Anything non-static (a guarded or transformed invariant) is silently dropped: the schema is an approximation of the model, never the reverse.
+
+Set `KOINE_OPENAPI_VALIDATE` (with an OpenAPI validator such as `openapi-spec-validator`, `swagger-cli`, or `redocly` on `PATH`) to have the test suite validate the emitted documents against the spec; absent the tool the conformance check is skipped.
 
 ### `koine.config`
 
@@ -166,7 +202,7 @@ out = generated
 
 The first one found wins; if none is found, no defaults are applied. A flag on the command line always overrides the config.
 
-**Keys read today.** The flat keys `target` (`csharp`, `typescript`, `python`, `php`, `rust`, `glossary`, or `docs`) and `out` (the output directory) are honoured, plus the per-target key `targets.csharp.layers` (e.g. `domain,infrastructure`) — the config equivalent of [`--layers`](#c-infrastructure-layer---layers), overridden by an explicit `--layers` flag. Every other key is **silently ignored**, which keeps the file forward-compatible — older tooling tolerates a newer config.
+**Keys read today.** The flat keys `target` (`csharp`, `typescript`, `python`, `php`, `rust`, `glossary`, `docs`, or `openapi`) and `out` (the output directory) are honoured, plus the per-target key `targets.csharp.layers` (e.g. `domain,infrastructure`) — the config equivalent of [`--layers`](#c-infrastructure-layer---layers), overridden by an explicit `--layers` flag. Every other key is **silently ignored**, which keeps the file forward-compatible — older tooling tolerates a newer config.
 
 :::note[`targets.*` is reserved for R16]
 A structured `targets.<name> = { … }` block (per-target namespace maps, `instantMode`, output layout) is sketched in the scaffolded config but **not yet implemented** — it is reserved for [R16](/Koine/guides/roadmap/#r16--multi-target-emitters) and ignored today. `koine init` writes a commented example of it for forward reference.

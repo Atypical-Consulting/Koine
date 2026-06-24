@@ -5,13 +5,8 @@ using System.Text.Json.Serialization;
 using Koine.Compiler.Ast;
 using Koine.Compiler.Diagnostics;
 using Koine.Compiler.Emit;
-using Koine.Compiler.Emit.CSharp;
 using Koine.Compiler.Emit.Docs;
 using Koine.Compiler.Emit.Glossary;
-using Koine.Compiler.Emit.Php;
-using Koine.Compiler.Emit.Python;
-using Koine.Compiler.Emit.Rust;
-using Koine.Compiler.Emit.TypeScript;
 using Koine.Compiler.Formatting;
 using Koine.Compiler.Services;
 
@@ -95,26 +90,23 @@ public static partial class CompilerInterop
         target = string.IsNullOrWhiteSpace(target) ? "csharp" : target;
         try
         {
-            if (!string.Equals(target, "csharp", StringComparison.OrdinalIgnoreCase)
-                && !string.Equals(target, "typescript", StringComparison.OrdinalIgnoreCase)
-                && !string.Equals(target, "python", StringComparison.OrdinalIgnoreCase)
-                && !string.Equals(target, "php", StringComparison.OrdinalIgnoreCase)
-                && !string.Equals(target, "rust", StringComparison.OrdinalIgnoreCase))
+            // Gate AND create through the registry's code-emit targets (issue #282) — the SAME list
+            // ListEmitTargets / koine/emitTargets serves, so a target the picker offers previews here
+            // too, and a new registry target emits its own code instead of silently falling back to C#.
+            // SupportedTargetInfos excludes glossary/docs (they have dedicated exports). No koine.config
+            // options in the browser, so EmitterOptions.Empty → byte-identical to a parameterless emitter.
+            var registry = new EmitterRegistry();
+            if (!registry.SupportedTargetInfos.Any(i => string.Equals(i.Id, target, StringComparison.OrdinalIgnoreCase))
+                || !registry.TryCreate(target, EmitterOptions.Empty, out var emitter))
             {
+                var expected = string.Join(", ", registry.SupportedTargetInfos.Select(i => $"'{i.Id}'"));
                 return SerializeEmit(new WEmitPreviewResult(
-                    target, [], [], $"unknown target '{target}'; expected 'csharp', 'typescript', 'python', 'php', or 'rust'"));
+                    target, [], [], $"unknown target '{target}'; expected one of {expected}"));
             }
 
             var files = DeserializeFiles(filesJson);
             var byUri = files.ToDictionary(f => f.Uri, f => f.Text, StringComparer.Ordinal);
             var sources = files.Select(f => new SourceFile(f.Uri, f.Text)).ToList();
-
-            IEmitter emitter =
-                string.Equals(target, "typescript", StringComparison.OrdinalIgnoreCase) ? new TypeScriptEmitter()
-                : string.Equals(target, "python", StringComparison.OrdinalIgnoreCase) ? new PythonEmitter()
-                : string.Equals(target, "php", StringComparison.OrdinalIgnoreCase) ? new PhpEmitter()
-                : string.Equals(target, "rust", StringComparison.OrdinalIgnoreCase) ? new RustEmitter()
-                : new CSharpEmitter();
 
             var result = Compiler.Compile(sources, emitter);
             var emittedFiles = result.Files
@@ -132,6 +124,22 @@ public static partial class CompilerInterop
             return SerializeEmit(new WEmitPreviewResult(
                 target, [], [CrashLspDiagnostic(ex)], "internal compiler error: " + ex.Message));
         }
+    }
+
+    /// <summary>
+    /// The emit-target capability query (issue #282): the compiler registry's code-emit targets, each
+    /// carrying <c>{ id, displayName, fileExtension }</c>, in display order — the browser counterpart of
+    /// the stdio LSP's <c>koine/emitTargets</c>. Backed by <see cref="EmitterRegistry.SupportedTargetInfos"/>,
+    /// so a registry target surfaces in Koine Studio with no front-end edit; the non-emit
+    /// <c>glossary</c>/<c>docs</c> generators are excluded. Takes no input. Returns <c>{ targets: [...] }</c>.
+    /// </summary>
+    [JSExport]
+    public static string ListEmitTargets()
+    {
+        var targets = new EmitterRegistry().SupportedTargetInfos
+            .Select(i => new WEmitTarget(i.Id, i.DisplayName, i.FileExtension))
+            .ToArray();
+        return JsonSerializer.Serialize(new WEmitTargetsResult(targets), LangJson.Default.WEmitTargetsResult);
     }
 
     /// <summary>
@@ -167,18 +175,20 @@ public static partial class CompilerInterop
             var (model, _) = Compiler.Parse(sources);
             if (model is null)
             {
-                return SerializeContextMap(new WContextMapResult([], []));
+                return SerializeContextMap(new WContextMapResult([], [], new()));
             }
 
             var contexts = model.Contexts.Select(c => c.Name).ToArray();
             var relations = model.ContextMap is null
                 ? []
                 : model.ContextMap.Relations.Select(MapRelation).ToArray();
-            return SerializeContextMap(new WContextMapResult(contexts, relations));
+            // Additive (#290): each declared context's declaration NameSpan (raw 1-based span over the
+            // `context` name token), keyed by name; None → null. Lets the Studio graph jump to source.
+            return SerializeContextMap(new WContextMapResult(contexts, relations, ContextSpans(model.Contexts)));
         }
         catch
         {
-            return SerializeContextMap(new WContextMapResult([], []));
+            return SerializeContextMap(new WContextMapResult([], [], new()));
         }
     }
 
@@ -1130,6 +1140,25 @@ public static partial class CompilerInterop
         _ => 1,
     };
 
+    /// <summary>
+    /// Projects each declared context's declaration <c>NameSpan</c> into a name → raw-1-based-span map
+    /// (the additive <c>contextSpans</c> field, #290). A recovered context with no span maps to
+    /// <c>null</c>; a duplicate name keeps the first declaration's span.
+    /// </summary>
+    private static Dictionary<string, WSourceSpan?> ContextSpans(IEnumerable<ContextNode> contexts)
+    {
+        var spans = new Dictionary<string, WSourceSpan?>(StringComparer.Ordinal);
+        foreach (var c in contexts)
+        {
+            if (!spans.ContainsKey(c.Name))
+            {
+                spans[c.Name] = MapSourceSpan(c.NameSpan.IsNone ? null : c.NameSpan);
+            }
+        }
+
+        return spans;
+    }
+
     private static WContextRelation MapRelation(ContextRelation r) => new(
         r.Upstream,
         r.Downstream,
@@ -1253,6 +1282,12 @@ public sealed record WEmitFile(string Path, string Contents);
 /// <summary>Emit-preview result for the merged workspace.</summary>
 public sealed record WEmitPreviewResult(string Target, WEmitFile[] Files, WDiagnostic[] Diagnostics, string? Error);
 
+/// <summary>One emit target's display metadata (issue #282): id, human label, emitted file extension.</summary>
+public sealed record WEmitTarget(string Id, string DisplayName, string FileExtension);
+
+/// <summary>The emit-target capability list (issue #282): the registry's code targets, in display order.</summary>
+public sealed record WEmitTargetsResult(WEmitTarget[] Targets);
+
 /// <summary>Ubiquitous-language glossary as markdown.</summary>
 public sealed record WGlossaryResult(string Markdown);
 
@@ -1263,8 +1298,11 @@ public sealed record WAclMapping(string UpstreamContext, string UpstreamType, st
 public sealed record WContextRelation(
     string Upstream, string Downstream, string Kind, bool Bidirectional, string[] SharedTypes, WAclMapping[] Acl);
 
-/// <summary>Strategic context map: contexts + relations.</summary>
-public sealed record WContextMapResult(string[] Contexts, WContextRelation[] Relations);
+/// <summary>Strategic context map: contexts + relations. <c>ContextSpans</c> is additive (#290): a
+/// name → declaration source span map (the raw 1-based span over the <c>context</c> name token, null on
+/// a recovered parse) so the Studio graph can jump to the <c>.koi</c> declaration on a context click.</summary>
+public sealed record WContextMapResult(
+    string[] Contexts, WContextRelation[] Relations, Dictionary<string, WSourceSpan?> ContextSpans);
 
 /// <summary>One structured glossary entry (shape mirrors lsp.ts <c>GlossaryEntry</c>).</summary>
 public sealed record WGlossaryEntry(
@@ -1459,6 +1497,7 @@ public sealed record WSourceFileDto(string Uri, string Text);
 [JsonSerializable(typeof(WSourceFileDto[]))]
 [JsonSerializable(typeof(WFileDiagnostics[]))]
 [JsonSerializable(typeof(WEmitPreviewResult))]
+[JsonSerializable(typeof(WEmitTargetsResult))]
 [JsonSerializable(typeof(WGlossaryResult))]
 [JsonSerializable(typeof(WGlossaryModel))]
 [JsonSerializable(typeof(WModelNode))]

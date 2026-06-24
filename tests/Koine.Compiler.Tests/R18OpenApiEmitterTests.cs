@@ -1,0 +1,254 @@
+using Koine.Compiler.Emit.OpenApi;
+using Koine.Compiler.Services;
+using Xunit;
+
+namespace Koine.Compiler.Tests;
+
+/// <summary>
+/// OpenAPI 3.1 spec emitter (issue #126): proves <c>--target openapi</c> turns a validated model into
+/// a deterministic OpenAPI YAML document per bounded context. Schema/path output is snapshot-tested via
+/// Verify; structural facts are asserted directly. Changes to emitter output must be reviewed through
+/// the <c>.verified.txt</c> diff.
+/// </summary>
+public class R18OpenApiEmitterTests(ITestOutputHelper output)
+{
+    private readonly ITestOutputHelper _output = output;
+
+    [Fact]
+    public void Target_name_is_openapi() =>
+        new OpenApiEmitter().TargetName.ShouldBe("openapi");
+
+    [Fact]
+    public void Emits_an_openapi_3_1_document_per_context()
+    {
+        const string src = """
+            context Billing {
+              value Money { amount: Decimal }
+            }
+            """;
+
+        var result = new KoineCompiler().Compile(
+            new[] { new SourceFile("billing.koi", src) }, new OpenApiEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var file = result.Files.ShouldHaveSingleItem();
+        file.RelativePath.ShouldEndWith("openapi.yaml");
+        file.Contents.ShouldContain("openapi: 3.1.0");
+        file.Contents.ShouldContain("info:");
+    }
+
+    /// <summary>The §catalog fixture exercises every Task 2 schema kind in one document.</summary>
+    private const string CatalogFixture = """
+        context Catalog {
+          /// A supported settlement currency.
+          enum Currency(symbol: String, decimals: Int) {
+            EUR("€", 2)
+            USD("$", 2)
+          }
+
+          value Money {
+            amount: Decimal
+            currency: Currency
+          }
+
+          value Product {
+            sku: String
+            name: String
+            price: Money
+            tags: List<String>
+            discount: Decimal?
+          }
+
+          aggregate Catalog root Item {
+            entity Item identified by ItemId {
+              sku: String
+              price: Money
+            }
+          }
+
+          readmodel ItemRow from Item {
+            sku
+            price
+          }
+        }
+        """;
+
+    [Fact]
+    public Task Schemas_from_value_objects_read_models_and_enums()
+    {
+        var result = new KoineCompiler().Compile(
+            new[] { new SourceFile("catalog.koi", CatalogFixture) }, new OpenApiEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var yaml = result.Files.ShouldHaveSingleItem().Contents;
+        yaml.ShouldContain("components:");
+        yaml.ShouldContain("schemas:");
+
+        // One named schema per value object, read model, and enum.
+        yaml.ShouldContain("Currency:");
+        yaml.ShouldContain("Money:");
+        yaml.ShouldContain("Product:");
+        yaml.ShouldContain("ItemRow:");
+
+        // The smart enum lowers to a string enum of its member names.
+        yaml.ShouldContain("enum:");
+        yaml.ShouldContain("- EUR");
+        yaml.ShouldContain("- USD");
+
+        // Nested value objects / enums are referenced, collections become arrays, optional is nullable.
+        yaml.ShouldContain("$ref: \"#/components/schemas/Money\"");
+        yaml.ShouldContain("type: array");
+
+        return Verify(TestSupport.Render(result.Files)).UseDirectory("Snapshots");
+    }
+
+    /// <summary>The §constraints fixture carries static length, regex, and numeric value-object invariants.</summary>
+    private const string ConstraintsFixture = """
+        context Catalog {
+          value Sku {
+            code: String
+            invariant code.length >= 3 "a SKU has at least three characters"
+            invariant code.length <= 12 "a SKU has at most twelve characters"
+            invariant code matches /[A-Z]{3}-[0-9]+/ "three letters, a dash, then digits"
+          }
+
+          value Quantity {
+            amount: Int
+            invariant amount >= 1 "at least one unit"
+            invariant amount <= 999 "at most 999 units"
+          }
+        }
+        """;
+
+    [Fact]
+    public Task Static_value_object_invariants_lower_to_schema_keywords()
+    {
+        var result = new KoineCompiler().Compile(
+            new[] { new SourceFile("constraints.koi", ConstraintsFixture) }, new OpenApiEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var yaml = result.Files.ShouldHaveSingleItem().Contents;
+
+        // The string length bound and the regex lower onto the `code` property's schema.
+        yaml.ShouldContain("minLength: 3");
+        yaml.ShouldContain("maxLength: 12");
+        yaml.ShouldContain("pattern: \"[A-Z]{3}-[0-9]+\"");
+
+        // The numeric bounds lower onto the `amount` property's schema.
+        yaml.ShouldContain("minimum: 1");
+        yaml.ShouldContain("maximum: 999");
+
+        return Verify(TestSupport.Render(result.Files)).UseDirectory("Snapshots");
+    }
+
+    /// <summary>The §ordering fixture pairs an entity command with a query so both path shapes appear.</summary>
+    private const string OrderingFixture = """
+        context Ordering {
+          enum OrderStatus { Draft, Submitted, Cancelled }
+
+          value Money { amount: Decimal }
+
+          aggregate Order root Order {
+            entity Order identified by OrderId {
+              total: Money
+              status: OrderStatus = Draft
+
+              /// Submit a draft order for fulfilment.
+              command submit(note: String) {
+                requires status == Draft "only a draft order can be submitted"
+                status -> Submitted
+              }
+            }
+          }
+
+          readmodel OrderRow from Order {
+            status
+          }
+
+          /// All orders in a given lifecycle state.
+          query OrdersByStatus(status: OrderStatus): List<OrderRow>
+        }
+        """;
+
+    [Fact]
+    public Task Paths_map_commands_to_post_and_queries_to_get()
+    {
+        var result = new KoineCompiler().Compile(
+            new[] { new SourceFile("ordering.koi", OrderingFixture) }, new OpenApiEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var yaml = result.Files.ShouldHaveSingleItem().Contents;
+        yaml.ShouldContain("paths:");
+
+        // A command becomes a POST with a JSON request body built from its parameters.
+        yaml.ShouldContain("/order/submit:");
+        yaml.ShouldContain("post:");
+        yaml.ShouldContain("requestBody:");
+
+        // A query becomes a GET with its criteria as query parameters.
+        yaml.ShouldContain("/orders-by-status:");
+        yaml.ShouldContain("get:");
+        yaml.ShouldContain("parameters:");
+        yaml.ShouldContain("in: query");
+
+        return Verify(TestSupport.Render(result.Files)).UseDirectory("Snapshots");
+    }
+
+    [Fact]
+    public void Model_with_no_commands_or_queries_emits_an_empty_paths_object()
+    {
+        const string src = """
+            context Reference {
+              enum Color { Red, Green, Blue }
+              value Point { x: Int  y: Int }
+            }
+            """;
+
+        var result = new KoineCompiler().Compile(
+            new[] { new SourceFile("reference.koi", src) }, new OpenApiEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var yaml = result.Files.ShouldHaveSingleItem().Contents;
+        yaml.ShouldContain("openapi: 3.1.0");
+        // No behavioral surface → an empty (but present, as the spec requires) paths object …
+        yaml.ShouldContain("paths: {}");
+        // … while the schemas are still declared.
+        yaml.ShouldContain("components:");
+        yaml.ShouldContain("Point:");
+        yaml.ShouldContain("Color:");
+    }
+
+    [Fact]
+    public void Truly_empty_context_omits_the_components_block()
+    {
+        var result = new KoineCompiler().Compile(
+            new[] { new SourceFile("empty.koi", "context Empty { }\n") }, new OpenApiEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var yaml = result.Files.ShouldHaveSingleItem().Contents;
+        yaml.ShouldContain("openapi: 3.1.0");
+        yaml.ShouldContain("paths: {}");
+        // Nothing to declare → no dangling, empty `components: {}`.
+        yaml.ShouldNotContain("components:");
+    }
+
+    [Fact]
+    public void Emitted_document_passes_external_openapi_validation_when_available()
+    {
+        // A rich model exercising schemas, refs, paths, parameters, and lowered keywords in one doc.
+        var result = new KoineCompiler().Compile(
+            new[] { new SourceFile("ordering.koi", OrderingFixture) }, new OpenApiEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var check = TestSupport.ValidateOpenApi(result.Files);
+        if (!check.ToolchainAvailable)
+        {
+            // INCONCLUSIVE: validation is opt-in (set KOINE_OPENAPI_VALIDATE) and needs a validator on
+            // PATH. Mirrors the TS/Python/Rust external-toolchain conformance pattern — skip, never fail.
+            _output.WriteLine("OpenAPI validation not enabled or no validator found; skipping conformance check.");
+            return;
+        }
+
+        check.Ok.ShouldBeTrue("expected the emitted OpenAPI document to validate:\n" + string.Join("\n", check.Errors));
+    }
+}

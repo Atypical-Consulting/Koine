@@ -1,9 +1,10 @@
 // A pure mapper from the strategic context map (the LSP `koine/contextMap` result) to the same
 // structured `{ nodes, edges }` graph the maxGraph canvas already renders (DiagramGraph). It carries NO
 // DOM and no maxGraph dependency, so it's plain-logic unit-tested; the inspector feeds its output into
-// `buildCanvas()` / the renderer behind the `DiagramRenderer` seam (no second diagram engine, no new
-// backend data — the ContextMapResult already arrives via `lsp.contextMap()`).
-import type { AclMapping, ContextMapResult, DiagramEdge, DiagramGraph, DiagramNode } from '@/lsp/lsp';
+// `buildCanvas()` / the renderer behind the `DiagramRenderer` seam (no second diagram engine). Each
+// context node carries its declaration span from the result's `contextSpans` map (#290), so the canvas's
+// existing jump-to-source listener navigates to the `.koi` on a context-node click.
+import type { AclMapping, ContextMapResult, DiagramEdge, DiagramGraph, DiagramNode, SourceSpan } from '@/lsp/lsp';
 
 /** The node kind for a bounded context — styled distinctly from class/aggregate nodes on the canvas. */
 export const CONTEXT_NODE_KIND = 'context';
@@ -32,14 +33,16 @@ export interface ContextMapGraph extends DiagramGraph {
 }
 
 /** One bounded-context box. The qualified name is the bare context name (undotted) so `contextOf()`
- *  reports no owning context and the renderer places it at the root, not inside a swimlane. */
-function contextNode(name: string): DiagramNode {
+ *  reports no owning context and the renderer places it at the root, not inside a swimlane. The span is
+ *  the context's declaration position (#290) — null for a dangling endpoint or a recovered parse, which
+ *  keeps the node inert to jump-to-source. */
+function contextNode(name: string, sourceSpan: SourceSpan | null): DiagramNode {
   return {
     id: name,
     label: name,
     kind: CONTEXT_NODE_KIND,
     qualifiedName: name,
-    sourceSpan: null, // the ContextMapResult carries no source positions
+    sourceSpan,
     stereotype: null,
     members: [],
   };
@@ -55,10 +58,12 @@ function contextNode(name: string): DiagramNode {
 export function buildContextMapGraph(res: ContextMapResult): ContextMapGraph {
   const seen = new Set<string>();
   const nodes: DiagramNode[] = [];
+  // A declared context carries its declaration span (#290); a relation endpoint never declared as a
+  // context has no entry in `contextSpans`, so it falls back to null and stays inert to navigation.
   const add = (name: string): void => {
     if (seen.has(name)) return;
     seen.add(name);
-    nodes.push(contextNode(name));
+    nodes.push(contextNode(name, res.contextSpans?.[name] ?? null));
   };
   for (const c of res.contexts) add(c);
   // Endpoints that were never declared as a context still get a box (the graph never dangles).

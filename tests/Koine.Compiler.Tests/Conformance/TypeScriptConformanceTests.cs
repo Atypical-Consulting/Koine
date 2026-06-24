@@ -134,6 +134,53 @@ public class TypeScriptConformanceTests
         check.Ok.ShouldBeTrue("min/max over Decimal should type-check under --strict:\n" + string.Join("\n", check.Errors));
     }
 
+    /// <summary>
+    /// Issue #241 acceptance: the full emitted set for a multi-aggregate context with a declarative finder
+    /// — domain + the opt-in Infrastructure layer (concrete repositories over the in-memory store, the unit
+    /// of work, the pipeline behaviors and the composition root) — must type-check under
+    /// <c>tsc --noEmit --strict</c>. Inconclusive (logged, not failed) only when no toolchain is present.
+    /// </summary>
+    [Fact]
+    public void Emitted_infrastructure_typechecks_under_strict()
+    {
+        var result = new KoineCompiler().Compile(
+            TypeScriptInfrastructureSnapshotTests.Fixture,
+            new TypeScriptEmitter(TypeScriptInfrastructureSnapshotTests.InfraOptions));
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        TestSupport.TypeScriptCheck check = TestSupport.TypeCheckTypeScript(result.Files);
+        if (!check.ToolchainAvailable)
+        {
+            _output.WriteLine(NoToolchainNotice);
+            return;
+        }
+
+        check.Ok.ShouldBeTrue("emitted infrastructure should type-check under --strict:\n" + string.Join("\n", check.Errors));
+    }
+
+    /// <summary>
+    /// Issue #241: a publishing context's infrastructure (the transactional outbox + dispatcher and the
+    /// composition root that wires them, plus the enqueue-on-save unit of work) must also type-check under
+    /// <c>tsc --noEmit --strict</c>. Inconclusive (logged, not failed) when no toolchain is present.
+    /// </summary>
+    [Fact]
+    public void Emitted_publishing_infrastructure_typechecks_under_strict()
+    {
+        var result = new KoineCompiler().Compile(
+            TypeScriptInfrastructureSnapshotTests.PublishingFixture,
+            new TypeScriptEmitter(TypeScriptInfrastructureSnapshotTests.InfraOptions));
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        TestSupport.TypeScriptCheck check = TestSupport.TypeCheckTypeScript(result.Files);
+        if (!check.ToolchainAvailable)
+        {
+            _output.WriteLine(NoToolchainNotice);
+            return;
+        }
+
+        check.Ok.ShouldBeTrue("emitted publishing infrastructure should type-check under --strict:\n" + string.Join("\n", check.Errors));
+    }
+
     /// <summary>A missing toolchain yields an inconclusive-shaped result rather than a false pass.</summary>
     [Fact]
     public void Skipped_result_does_not_claim_success()

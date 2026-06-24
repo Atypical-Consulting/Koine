@@ -3,6 +3,7 @@
 // Tauri IPC, the browser transport drives an in-process WASM-backed server. This class is
 // transport-agnostic — it only frames messages and tracks pending requests + open documents.
 import type { LspTransport } from '@/host/types';
+import type { EmitTarget } from '@/shared/emitTargets';
 // The protocol DTOs (the server contract) live in ./protocol; re-export them so the ~23 type-only
 // importers keep resolving `import type { … } from '@/lsp/lsp'` unchanged, and import the subset this
 // client's request methods reference.
@@ -299,11 +300,20 @@ export class KoineLsp {
     this.activeUri = uri;
   }
 
-  emitPreview(target: 'csharp' | 'typescript' | 'python' | 'php' | 'rust'): Promise<EmitPreviewResult> {
+  emitPreview(target: string): Promise<EmitPreviewResult> {
     return this.request<EmitPreviewResult>('koine/emitPreview', {
       textDocument: { uri: this.activeUri },
       target,
     });
+  }
+
+  /**
+   * The backend's emit-target capability list (issue #282): the registry's code targets, each with
+   * `{ id, displayName, fileExtension }`. Document-independent, so it sends no `textDocument`. The
+   * caller seeds {@link EMIT_TARGETS} from this at boot, falling back to the built-ins if it rejects.
+   */
+  emitTargets(): Promise<EmitTarget[]> {
+    return this.request<{ targets: EmitTarget[] }>('koine/emitTargets', {}).then((r) => r?.targets ?? []);
   }
 
   /** Ubiquitous-language glossary as markdown for the active document. */
