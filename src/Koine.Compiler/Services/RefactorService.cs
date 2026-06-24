@@ -47,6 +47,11 @@ internal sealed class RefactorService
             actions.Add(extractEntity);
         }
 
+        if (service.TryExtractAggregate(startOffset, endOffset) is { } extractAggregate)
+        {
+            actions.Add(extractAggregate);
+        }
+
         return actions;
     }
 
@@ -277,6 +282,123 @@ internal sealed class RefactorService
             // A one-off, position-specific refactor: not part of a fix-all batch.
             EquivalenceKey: null,
             [insert, replace]);
+    }
+
+    /// <summary>
+    /// Builds the "Extract aggregate" refactor when the selection covers one or more contiguous
+    /// <b>whole top-level type declarations</b> (not member fields), the first of which is an
+    /// <see cref="EntityDecl"/> usable as the aggregate root. Unlike <see cref="TryExtractValueObject"/>
+    /// / <see cref="TryExtractEntity"/> (which lift a run of member fields out of a type body), this
+    /// wraps the selected sibling type(s) in a new
+    /// <c>aggregate ExtractedAggregate root &lt;rootEntity&gt; { … }</c> inserted in place, re-indenting
+    /// the wrapped types one level deeper. <c>ExtractedAggregate</c> is a deliberate placeholder name
+    /// the user renames afterward. Returns <c>null</c> when the selection does not land on a whole
+    /// top-level entity (e.g. on member fields, on a non-entity, or on a type already nested in an
+    /// aggregate).
+    /// </summary>
+    private CodeFix? TryExtractAggregate(int startOffset, int endOffset)
+    {
+        foreach (ContextNode ctx in _model.Contexts)
+        {
+            // Only context top-level types are root candidates: a type already nested in an aggregate
+            // is in that aggregate's `.Types`, never in `ctx.Types`, so it is never offered here.
+            IReadOnlyList<TypeDecl> topLevel = ctx.Types;
+            List<TypeDecl> selected = SelectedContiguousTypes(topLevel, startOffset, endOffset);
+            if (selected.Count == 0)
+            {
+                continue;
+            }
+
+            // The first selected type must be a valid aggregate root (an entity); aggregate name must
+            // differ from the root name, which `UniqueName` guarantees against the existing type set.
+            if (selected[0] is not EntityDecl root)
+            {
+                continue;
+            }
+
+            return BuildExtractAggregate(selected, root.Name);
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// The whole top-level type declarations fully covered by the selection, validated to be
+    /// contiguous in declaration order. A type counts as covered when the selection contains its
+    /// entire span (from its leading-trivia/doc block through the end of its body); a narrow
+    /// field-level selection inside a type body therefore covers nothing. Returns an empty list when
+    /// nothing is fully covered or the covered types are not contiguous.
+    /// </summary>
+    private List<TypeDecl> SelectedContiguousTypes(IReadOnlyList<TypeDecl> types, int startOffset, int endOffset)
+    {
+        var hit = new List<TypeDecl>();
+        var indices = new List<int>();
+        for (var i = 0; i < types.Count; i++)
+        {
+            TypeDecl type = types[i];
+            if (type.Span.IsNone || type.Span.Length <= 0)
+            {
+                continue;
+            }
+
+            var typeStart = LeadingTriviaStart(type);
+            var typeEnd = type.Span.Offset + type.Span.Length;
+
+            // Whole-declaration containment: the selection must span the entire type (trivia included).
+            if (startOffset <= typeStart && endOffset >= typeEnd)
+            {
+                hit.Add(type);
+                indices.Add(i);
+            }
+        }
+
+        // Reject a non-contiguous hit (a selection straddling a gap): wrap a single contiguous run.
+        for (var i = 1; i < indices.Count; i++)
+        {
+            if (indices[i] != indices[i - 1] + 1)
+            {
+                return [];
+            }
+        }
+
+        return hit;
+    }
+
+    private CodeFix BuildExtractAggregate(IReadOnlyList<TypeDecl> selected, string rootName)
+    {
+        // Indentation of the first selected type's declaration (its 1-based start column minus one);
+        // the wrapped types sit one level (two spaces) deeper inside the new aggregate body.
+        var typeIndent = new string(' ', Math.Max(0, selected[0].Span.Column - 1));
+        var innerIndent = typeIndent + "  ";
+
+        // Disambiguate the placeholder aggregate name against every existing type, so the new name
+        // never collides with an existing type and never equals the root name.
+        var aggName = UniqueName("ExtractedAggregate", ExistingTypeNames());
+
+        // The verbatim slice spanning the whole selected run: from the start of the FIRST type's
+        // leading-trivia/doc block through the end of the LAST type's body (plus any same-line trailing
+        // comment), so per-type docs and inter-type comments travel into the aggregate body intact.
+        var moveStart = LeadingTriviaStart(selected[0]);
+        var moveEnd = ExtendOverTrailingComment(selected[^1].Span.Offset + selected[^1].Span.Length);
+        var movedSlice = SliceRange(moveStart, moveEnd);
+
+        // The wrapped types are re-indented from their origin top-level indentation to the aggregate's
+        // inner body indentation so the layout reads correctly one level deeper.
+        var sb = new StringBuilder();
+        sb.Append("aggregate ").Append(aggName).Append(" root ").Append(rootName).Append(" {\n");
+        sb.Append(Reindent(movedSlice, selected[0].Span.Column - 1, innerIndent)).Append('\n');
+        sb.Append(typeIndent).Append('}');
+
+        // Replace the whole moved range with the aggregate that wraps it, so nothing is duplicated.
+        SourceSpan combined = RangeSpan(moveStart, moveEnd);
+        var replace = new CodeFixEdit(combined, sb.ToString());
+
+        return new CodeFix(
+            $"Extract aggregate (rename '{aggName}' afterwards)",
+            "refactor.extract",
+            // A one-off, position-specific refactor: not part of a fix-all batch.
+            EquivalenceKey: null,
+            [replace]);
     }
 
     /// <summary>

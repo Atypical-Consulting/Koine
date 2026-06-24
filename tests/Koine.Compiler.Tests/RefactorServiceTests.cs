@@ -294,4 +294,65 @@ public class RefactorServiceTests
         var address = types.Single(t => t.Name == "Address").ShouldBeOfType<ValueObjectDecl>();
         address.Members.ShouldContain(m => m.Type.Name == "ExtractedValue2");
     }
+
+    /// <summary>The "Extract aggregate" refactor at this selection (distinguished by Title from the
+    /// sibling extract refactors, which share the <c>refactor.extract</c> Kind).</summary>
+    private static CodeActionEdit ExtractAggregateAt(string src, int sl, int sc, int el, int ec) =>
+        RefactorsAt(src, sl, sc, el, ec)
+            .Where(a => a.Kind == "refactor.extract" && a.Title.StartsWith("Extract aggregate", StringComparison.Ordinal))
+            .ShouldHaveSingleItem();
+
+    [Fact]
+    public void Extracting_an_aggregate_wraps_a_top_level_entity_as_the_root()
+    {
+        var src =
+            "context C {\n" +
+            "  entity Order identified by OrderId {\n" +
+            "    note: String\n" +
+            "  }\n" +
+            "}\n";
+        // Select the whole top-level entity: from the start of "entity" (line 1, col 2) through just
+        // past its closing brace (line 3, col 3).
+        var extract = ExtractAggregateAt(src, 1, 2, 3, 3);
+
+        var applied = Apply(src, extract);
+        var model = Parse(applied); // re-parses cleanly
+
+        var types = model.Contexts[0].Types;
+        // A new aggregate now wraps the entity, naming it as the root.
+        var aggregate = types.OfType<AggregateDecl>().ShouldHaveSingleItem();
+        aggregate.RootName.ShouldBe("Order");
+        aggregate.Name.ShouldNotBe("Order");
+        aggregate.Types.OfType<EntityDecl>().ShouldContain(e => e.Name == "Order");
+    }
+
+    [Fact]
+    public void No_aggregate_action_when_the_selection_is_only_on_member_fields()
+    {
+        var src =
+            "context C {\n" +
+            "  entity Order identified by OrderId {\n" +
+            "    note: String\n" +
+            "  }\n" +
+            "}\n";
+        // Select just the "note" field on line 2 (cols 4..8) — not the whole entity.
+        var actions = RefactorsAt(src, 2, 4, 2, 8);
+        actions.ShouldNotContain(a => a.Title.StartsWith("Extract aggregate", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void No_aggregate_action_when_the_root_candidate_is_already_nested_in_an_aggregate()
+    {
+        var src =
+            "context C {\n" +
+            "  aggregate Sales root Order {\n" +
+            "    entity Order identified by OrderId {\n" +
+            "      note: String\n" +
+            "    }\n" +
+            "  }\n" +
+            "}\n";
+        // Select the whole nested entity (line 2, col 4 .. line 4, col 6); it is NOT a top-level type.
+        var actions = RefactorsAt(src, 2, 4, 4, 6);
+        actions.ShouldNotContain(a => a.Title.StartsWith("Extract aggregate", StringComparison.Ordinal));
+    }
 }
