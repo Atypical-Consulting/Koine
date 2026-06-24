@@ -21,8 +21,13 @@ function run(cmd, args) {
   execFileSync(cmd, args, { stdio: 'inherit', cwd: repoRoot });
 }
 
-// 1. Publish the wasm browser app.
-run('dotnet', ['publish', project, '-c', 'Release', '--nologo']);
+// 1. Publish the wasm browser app. AOT-compile the bundle (issue #327) only when KOINE_WASM_AOT
+//    is truthy — the deployed studio-web build (koine-studio.yml) sets it so users get the faster
+//    compiler, while a local `npm run dev:web`/`build:web` (which runs this via predev/prebuild)
+//    stays on the fast interpreter publish unless you opt in. AOT relies on the wasm-tools workload.
+const aot = /^(1|true|yes)$/i.test(process.env.KOINE_WASM_AOT ?? '');
+console.log(`Koine wasm: AOT ${aot ? 'ON (KOINE_WASM_AOT)' : 'off (interpreter)'}`);
+run('dotnet', ['publish', project, '-c', 'Release', '--nologo', `-p:KoineWasmAot=${aot}`]);
 
 // 2. Locate the published AppBundle — the directory that contains `_framework`. The wasm SDK
 //    writes it to bin/Release/net10.0/browser-wasm/AppBundle; search broadly and prefer that.

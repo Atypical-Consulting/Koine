@@ -803,14 +803,17 @@ public sealed partial class CSharpEmitter : IEmitter
         IReadOnlyList<BoundInvariant> invariants = bound.Invariants;
 
         // A value object that itself owns a value-object collection (a nested OwnsMany, issue #171) backs
-        // it with a mutable list and gains a parameterless constructor so EF can materialize it (its
-        // collection parameter is a navigation and can never bind).
+        // it with a mutable list; the backing field drives the property declarations and assignments.
         var backedListFields = storedFields
             .Where(f => IsValueObjectList(((Member)f.Syntax).Type, index))
             .Select(f => f.Name)
             .ToHashSet(StringComparer.Ordinal);
 
-        if (backedListFields.Count > 0)
+        // A value object that owns any value object — a nested scalar value object (OwnsOne) or a
+        // value-object collection (OwnsMany) — gains a parameterless constructor so EF can materialize it:
+        // its owned navigation parameter can never bind, so EF constructs through this ctor and populates
+        // members via field access (issue #276, generalizing #171's collection-only rule).
+        if (storedFields.Any(f => OwnsValueObject(((Member)f.Syntax).Type, index)))
         {
             WritePersistenceConstructor(sb, typeName);
         }
@@ -855,6 +858,7 @@ public sealed partial class CSharpEmitter : IEmitter
     private void WriteEntityConstructor(
         StringBuilder sb,
         EntityDecl entity,
+        bool isRoot,
         IReadOnlyList<Member> ctorMembers,
         IReadOnlySet<string> backedListMembers,
         CSharpExpressionTranslator translator,
@@ -865,10 +869,12 @@ public sealed partial class CSharpEmitter : IEmitter
         // constructor populates them via the backing field rather than the read-only property. The
         // backed-member set is classified once in EmitEntity and threaded in.
 
-        // An aggregate that owns a value-object collection gets a parameterless constructor for the
-        // persistence layer: EF Core materializes it through this ctor (the collection parameter is a
-        // navigation and can never bind), then populates the owned collection via field access.
-        if (backedListMembers.Count > 0)
+        // Every persisted aggregate root, and any entity that owns a value object (scalar OwnsOne or a
+        // value-object collection), gets a parameterless constructor for the persistence layer: EF Core
+        // materializes it through this ctor — an owned navigation can never bind as a constructor
+        // parameter — then populates members from the store via field access (issue #276, generalizing
+        // #171's value-object-collection rule).
+        if (NeedsPersistenceConstructor(entity, isRoot, index))
         {
             WritePersistenceConstructor(sb, entity.Name);
         }
@@ -1226,6 +1232,35 @@ public sealed partial class CSharpEmitter : IEmitter
         CSharpTypeMapper.IsList(type)
         && type.Element is { } element
         && index.Classify(element.Name) == TypeKind.Value;
+
+    /// <summary>
+    /// True when a member's type is an owned value object — a scalar value object the EF Core
+    /// Infrastructure layer maps with <c>OwnsOne</c>, or a <c>List&lt;T&gt;</c> of value objects it maps
+    /// with <c>OwnsMany</c> (issue #171). Scalars and set/map collections are deliberately excluded.
+    /// </summary>
+    private static bool OwnsValueObject(TypeRef type, ModelIndex index) =>
+        IsValueObjectList(type, index)
+        || (!CSharpTypeMapper.IsList(type) && index.Classify(type.Name) == TypeKind.Value);
+
+    /// <summary>
+    /// True when an entity needs the parameterless EF persistence constructor (issue #276, generalizing
+    /// #171): it is a persisted aggregate root, or it owns any value object — a scalar value object
+    /// (<c>OwnsOne</c>) or a value-object collection (<c>OwnsMany</c>). EF Core cannot bind an owned
+    /// navigation as a constructor parameter, and a root's get-only members cannot be set after
+    /// construction, so EF materializes through this ctor and then populates members via field access. An
+    /// entity that is neither a root nor owns a value object keeps its all-args constructor alone,
+    /// byte-identical to before; the #171 value-object-collection rule is now a subset of this predicate.
+    /// </summary>
+    private static bool NeedsPersistenceConstructor(EntityDecl entity, bool isRoot, ModelIndex index)
+    {
+        if (isRoot)
+        {
+            return true;
+        }
+
+        var memberNames = new HashSet<string>(entity.Members.Select(m => m.Name), StringComparer.Ordinal);
+        return entity.Members.Any(m => !MemberAnalysis.IsDerived(m, memberNames) && OwnsValueObject(m.Type, index));
+    }
 
     /// <summary>The mutable backing field name for a value-object collection member (e.g. <c>_lines</c>).</summary>
     private static string BackingFieldName(string memberName) => "_" + CSharpNaming.ToCamelCase(memberName);

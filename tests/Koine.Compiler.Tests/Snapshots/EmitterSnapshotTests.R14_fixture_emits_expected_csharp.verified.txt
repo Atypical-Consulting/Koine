@@ -51,6 +51,10 @@ public sealed class Invoice : ValueObject
 {
     public Money Amount { get; }
 
+#pragma warning disable CS8618 // EF Core populates members from the store after construction.
+    private Invoice() { }
+#pragma warning restore CS8618
+
     public Invoice(Money amount)
     {
         Amount = amount;

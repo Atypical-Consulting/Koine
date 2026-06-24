@@ -189,6 +189,20 @@ function mermaidText(text: string): string {
   return text.replace(/\r?\n/g, ' ').replace(/"/g, "'").replace(/[[\]{}`]/g, '');
 }
 
+/** Sanitize a class-member row for a Mermaid `classDiagram` (issue #340). A member is emitted as
+ *  `alias : <text>`, and Mermaid's grammar reads that FIRST colon as the member separator — so any colon
+ *  INSIDE the member text (a typed field `street: String`, a method signature `op(a: T): R`) is a second
+ *  separator that aborts the parse. On top of {@link mermaidText}'s structural strip, neutralize every such
+ *  colon to a space — Mermaid's own colon-free `attribute Type` / `op(a T) R` shape — collapsing the doubled
+ *  spaces a `name: Type` leaves behind. The structural `alias :` separator and the edge-label `: label`
+ *  colon live OUTSIDE this helper, so they're unaffected. */
+function mermaidMember(text: string): string {
+  return mermaidText(text)
+    .replace(/:/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 /** Render one edge as a Mermaid `classDiagram` relation. Composition is `*--` (carrying its cardinalities);
  *  everything else degrades to a plain `-->` (Mermaid classDiagram has no bidirectional arrow). */
 function mermaidEdge(edge: DiagramEdge, from: string, to: string): string {
@@ -219,7 +233,7 @@ export function diagramToMermaid(graph: DiagramGraph): string {
     const alias = aliases.get(node.id)!;
     lines.push(`  class ${alias}["${mermaidText(node.label)}"]`);
     for (const m of node.members) {
-      lines.push(`  ${alias} : ${mermaidText(m.text)}`);
+      lines.push(`  ${alias} : ${mermaidMember(m.text)}`);
     }
   }
   for (const edge of graph.edges) {

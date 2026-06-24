@@ -144,8 +144,9 @@ needed for `subtotal` — nothing for you to write, and nothing external to refe
   multi-file modules, context maps, integration events, and model versioning — all shipped.
 - **Enforced DDD reference discipline.** The compiler keeps your building blocks honest: a value
   object can't embed an entity or aggregate, commands and domain events carry data and identities
-  rather than live references, and one aggregate references another only by its id — violations are
-  hard errors (`KOI1601`–`KOI1604`), not lint.
+  rather than live references, one aggregate references another only by its id, and an entity holds
+  domain state — never an event, read model, or query — violations are hard errors
+  (`KOI1601`–`KOI1605`), not lint.
 - **A green build proves the domain.** Every construct is snapshot-tested *and* compiled and executed
   through an in-memory Roslyn meta-test, so a passing build means the generated C# is correct and
   usable — not just that it parses.
@@ -250,8 +251,13 @@ The shared primitives live once in an emitted `infrastructure-runtime.ts` / `koi
 The layer is **off by default**, so an unconfigured emit is byte-identical to the historical output; the
 generated TypeScript is `tsc --strict`-clean and the Python is `mypy --strict`-clean.
 
-A value-object **collection** (`list of <ValueObject>`) round-trips: it is mapped with EF Core
-`OwnsMany` and backed by a mutable private `List<T>` (exposed read-only as `IReadOnlyList<T>`), with
+**Every** persisted aggregate round-trips — not just collection owners. A scalar-only root, a root that
+owns a scalar value object (`OwnsOne`), a versioned aggregate, and nested value objects all insert and
+re-query correctly: each persisted root (and any value object that owns a value object) gets a private
+parameterless persistence constructor EF Core materializes through, and plain scalar properties are
+mapped explicitly so EF persists the read-only auto-property via its backing field. A value-object
+**collection** (`list of <ValueObject>`) round-trips too: it is mapped with EF Core `OwnsMany` and
+backed by a mutable private `List<T>` (exposed read-only as `IReadOnlyList<T>`), with
 `PropertyAccessMode.Field` so EF can materialize owned children into it and a single-column surrogate key
 so the rows persist on every provider. Scalar (`String`/`Int`/…) collections are left to EF Core's
 primitive-collection convention.
@@ -387,6 +393,28 @@ The grammar is split into a separate **lexer grammar** so that `matches /regex/`
 this lets a regex literal be read as a single token without colliding with the `/` division operator.
 The single most important invariant: **no C#-specific concept lives in `Ast/`** — that is what keeps
 multiple emitters possible.
+
+### The browser bundle (AOT)
+
+`Koine.Wasm` compiles the whole compiler to WebAssembly for the
+[Playground](https://atypical-consulting.github.io/Koine/playground/) and
+[Studio](https://atypical-consulting.github.io/Koine/studio/). The **deployed** bundle is
+**AOT-compiled** (opt-in `KoineWasmAot` MSBuild property, switched on by the docs-deploy job); a bare
+`dotnet build`/`publish` and the dev inner loop stay on the fast interpreter build, so only the
+deployed/CI path pays the slower AOT publish. Measured trade-off (pizzeria template via
+`node src/Koine.Wasm/smoke-test.mjs --bench`, best/median of 10 warm runs):
+
+| Bundle | pizzeria compile (best / median) | `_framework` raw / gzip | publish (warm) |
+|---|---|---|---|
+| Interpreter (dev default) | 30 / 39 ms | 6.6 MB / 2.3 MB | ~4–10 s |
+| **AOT (deployed)** | **7 / 8 ms** | 20.3 MB / ~5.9 MB | ~24–32 s |
+
+≈5× faster per-keystroke compile for a ~3× larger (browser-cached, +3.6 MB gzipped) one-time
+download — worth it for the in-browser compiler, and the AOT-vs-interpreter lever
+[#219](https://github.com/Atypical-Consulting/Koine/issues/219) needs to pick a mobile fallback.
+`WasmStripILAfterAOT` is a no-op here (the compiler + ANTLR are rooted whole and reflect, so their IL
+metadata is retained either way). Full rationale: the comment block in `src/Koine.Wasm/Koine.Wasm.csproj`
+(issue [#327](https://github.com/Atypical-Consulting/Koine/issues/327)).
 
 ## Koine as a platform
 
