@@ -549,6 +549,81 @@ public class RustSnapshotTests
         check.Ok.ShouldBeTrue(string.Join("\n", check.Errors));
     }
 
+    // ------------------------------------------------------------------
+    // Factories (issue #173, Task 4). A `create` factory emits an associated constructor
+    // that mints a v4-UUID identity, checks preconditions, builds via the smart constructor,
+    // and records creation events. The `uuid` crate is added to Cargo.toml only when a model
+    // actually uses a factory.
+    // ------------------------------------------------------------------
+
+    /// <summary>An aggregate whose <c>open</c> factory mints an id, checks a precondition, and emits.</summary>
+    private const string FactoryFixture = """
+        context Sales {
+          enum OrderStatus { Draft, Placed, Cancelled }
+          event OrderOpened { orderId: OrderId  lineCount: Int }
+          aggregate Sales root Order {
+            entity Order identified by OrderId {
+              lines:  Int
+              status: OrderStatus = Draft
+
+              create open(lines: Int) {
+                requires lines >= 1   "an order needs at least one line"
+                emit OrderOpened(orderId: id, lineCount: lines)
+              }
+            }
+          }
+        }
+        """;
+
+    [Fact]
+    public Task Rust_factory_emits_identity_generating_constructor()
+    {
+        var result = new KoineCompiler().Compile(FactoryFixture, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var sales = result.Files.Single(f => f.RelativePath.EndsWith("sales.rs", StringComparison.Ordinal)).Contents;
+        sales.ShouldContain("pub fn generate() -> Self { OrderId(uuid::Uuid::new_v4().to_string()) }");
+        sales.ShouldContain("pub fn open(lines: i64) -> Result<Self, DomainError>");
+        sales.ShouldContain("let id = OrderId::generate();");
+        sales.ShouldContain("DomainEvent::OrderOpened(OrderOpened::new(id.clone(), lines))");
+        sales.ShouldContain("let mut instance = Self::new(id, lines)?;");
+
+        // The uuid crate is pulled in only because the model uses a factory.
+        var cargo = result.Files.Single(f => f.RelativePath == "Cargo.toml").Contents;
+        cargo.ShouldContain("uuid = { version = \"1\", features = [\"v4\"] }");
+
+        return Verify(TestSupport.Render(result.Files)).UseDirectory("Snapshots");
+    }
+
+    [Fact]
+    public void Rust_factory_model_compiles()
+    {
+        var result = new KoineCompiler().Compile(FactoryFixture, new RustEmitter());
+        result.Success.ShouldBeTrue();
+
+        var check = TestSupport.CompileRust(result.Files);
+        if (!check.ToolchainAvailable)
+        {
+            _output.WriteLine(NoToolchainNotice);
+            return;
+        }
+
+        check.Ok.ShouldBeTrue(string.Join("\n", check.Errors));
+    }
+
+    [Fact]
+    public void Rust_factory_free_model_omits_uuid_dependency()
+    {
+        // A model with no factory keeps the dependency-light two-crate manifest.
+        var result = new KoineCompiler().Compile(CommandReturnFixture, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var cargo = result.Files.Single(f => f.RelativePath == "Cargo.toml").Contents;
+        cargo.ShouldContain("rust_decimal = \"1\"");
+        cargo.ShouldContain("regex = \"1\"");
+        cargo.ShouldNotContain("uuid");
+    }
+
     /// <summary>Reads a template under <c>templates/</c> by walking up to the repo root (the <c>.git</c> dir).</summary>
     private static string? FindTemplate(string relativePath)
     {

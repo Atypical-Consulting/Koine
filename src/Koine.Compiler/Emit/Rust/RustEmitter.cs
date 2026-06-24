@@ -67,7 +67,7 @@ public sealed partial class RustEmitter : IEmitter
 
         var files = new List<EmittedFile>
         {
-            new("Cargo.toml", RustRuntime.CargoToml + "\n"),
+            new("Cargo.toml", RustRuntime.CargoToml(ModelUsesGuidFactories(model)) + "\n"),
             new(RustRuntime.FileName, RustRuntime.Source + "\n"),
             new("src/lib.rs", EmitLibRs(model)),
         };
@@ -104,6 +104,16 @@ public sealed partial class RustEmitter : IEmitter
         var moduleDoc = $"//! The `{ctx.Name}` bounded context.";
         return new EmittedFile($"src/{ModuleNameFor(ctx.Name)}.rs", Assemble(body.ToString(), moduleDoc));
     }
+
+    /// <summary>
+    /// True when any entity in the model has a factory on a String-backed (Guid) identity — the case
+    /// that calls <c>&lt;Id&gt;::generate()</c> and so pulls in the <c>uuid</c> crate. A factory-free
+    /// model (or one whose factory ids are numeric) keeps the dependency-light manifest.
+    /// </summary>
+    private static bool ModelUsesGuidFactories(KoineModel model) =>
+        model.Contexts
+            .SelectMany(c => c.AllEntities())
+            .Any(e => e.Factories.Count > 0 && IdBacking(e).IsString);
 
     /// <summary>Dispatches a single declaration to its construct emitter.</summary>
     private void EmitType(RustEmitContext emit, StringBuilder body, TypeDecl type, string context)

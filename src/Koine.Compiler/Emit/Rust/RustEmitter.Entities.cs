@@ -17,8 +17,9 @@ public sealed partial class RustEmitter
     {
         var typeMapper = new RustTypeMapper(emit.Index, context, _options);
 
-        // The branded identity newtype.
-        EmitIdType(body, entity.IdentityName, IdBacking(entity));
+        // The branded identity newtype — with a UUID `generate()` when a factory needs to mint ids.
+        var backing = IdBacking(entity);
+        EmitIdType(body, entity.IdentityName, backing, withGenerator: entity.Factories.Count > 0 && backing.IsString);
 
         var name = RustNaming.ToPascalCase(entity.Name);
         var idType = RustNaming.ToPascalCase(entity.IdentityName);
@@ -135,6 +136,13 @@ public sealed partial class RustEmitter
             WriteCommand(body, emit, name, entity, cmd, translator, typeMapper);
         }
 
+        // Factories: associated constructors that mint identity, check preconditions, build, and emit.
+        foreach (FactoryDecl factory in entity.Factories)
+        {
+            body.Append('\n');
+            WriteFactory(body, emit, name, entity, factory, translator, typeMapper, required);
+        }
+
         body.Append("}\n");
     }
 
@@ -228,19 +236,30 @@ public sealed partial class RustEmitter
         entity.Commands.SelectMany(c => c.Body).OfType<EmitClause>().Any()
         || entity.Factories.SelectMany(f => f.Body).OfType<EmitClause>().Any();
 
-    /// <summary>
-    /// Lowers an <c>emit Ev(field: value, …)</c> clause to
-    /// <c>self.events.push(DomainEvent::Ev(Ev::new(args…)));</c>. Arguments bind by field name in the
-    /// event constructor's declaration order; each is rendered as an owned value (the <c>id</c> and any
-    /// non-Copy place cloned), with a bare enum member qualified against the field's enum type.
-    /// </summary>
+    /// <summary>Lowers an <c>emit</c> clause in a command to <c>self.events.push(&lt;event&gt;);</c>.</summary>
     private void WriteEmitStatement(
         StringBuilder body, RustEmitContext emit, EmitClause emitClause,
         RustExpressionTranslator translator, RustTypeMapper typeMapper)
     {
+        if (BuildEmitExpression(emit, emitClause, translator, typeMapper) is { } expr)
+        {
+            body.Append(Indent).Append(Indent).Append("self.events.push(").Append(expr).Append(");\n");
+        }
+    }
+
+    /// <summary>
+    /// Builds the <c>DomainEvent::Ev(Ev::new(args…))</c> expression for an <c>emit Ev(field: value, …)</c>
+    /// clause (null for an unknown event — the validator guarantees presence). Arguments bind by field
+    /// name in the event constructor's declaration order; each is rendered as an owned value (the
+    /// <c>id</c>/params and any non-Copy place cloned), with a bare enum member qualified.
+    /// </summary>
+    private static string? BuildEmitExpression(
+        RustEmitContext emit, EmitClause emitClause,
+        RustExpressionTranslator translator, RustTypeMapper typeMapper)
+    {
         if (!emit.Index.TryGetDecl(emitClause.EventName, out TypeDecl decl))
         {
-            return; // unknown event — the validator guarantees presence; defensive no-op.
+            return null;
         }
 
         IReadOnlyList<Member> members = decl switch
@@ -262,10 +281,124 @@ public sealed partial class RustEmitter
             return translator.TranslateOwned(value, expectedEnum);
         });
 
-        body.Append(Indent).Append(Indent)
-            .Append("self.events.push(DomainEvent::").Append(RustNaming.ToPascalCase(emitClause.EventName))
-            .Append('(').Append(typeMapper.QualifyTypeName(emitClause.EventName)).Append("::new(")
-            .Append(string.Join(", ", args)).Append(")));\n");
+        return $"DomainEvent::{RustNaming.ToPascalCase(emitClause.EventName)}"
+            + $"({typeMapper.QualifyTypeName(emitClause.EventName)}::new({string.Join(", ", args)}))";
+    }
+
+    /// <summary>
+    /// Emits a factory as an associated <c>fn name(params…) -&gt; Result&lt;Self, DomainError&gt;</c> that
+    /// mints a fresh identity, checks the factory preconditions, constructs via the smart constructor
+    /// (which runs the entity invariants), and records creation events. Because Rust <em>moves</em> the
+    /// parameters into the constructor, any <c>emit</c> payloads — which reference the same id/params —
+    /// are built first (cloning the non-Copy ones) and assigned after construction.
+    /// </summary>
+    private void WriteFactory(
+        StringBuilder body, RustEmitContext emit, string typeName, EntityDecl entity, FactoryDecl factory,
+        RustExpressionTranslator translator, RustTypeMapper typeMapper, IReadOnlyList<Member> required)
+    {
+        var method = RustNaming.Field(factory.Name);
+        var idType = RustNaming.ToPascalCase(entity.IdentityName);
+        var paramList = string.Join(", ", factory.Parameters.Select(p => RustNaming.Field(p.Name) + ": " + typeMapper.Map(p.Type)));
+
+        // Factory scope: the generated `id` and the factory parameters are locals (they shadow any
+        // same-named entity members); the aggregate itself does not exist until construction.
+        translator.PushLocal("id", new TypeRef(entity.IdentityName));
+        foreach (Param p in factory.Parameters)
+        {
+            translator.PushLocal(p.Name, p.Type);
+        }
+
+        WriteDoc(body, factory.Doc, Indent);
+        body.Append(Indent).Append("pub fn ").Append(method).Append('(').Append(paramList)
+            .Append(") -> Result<Self, DomainError> {\n");
+
+        // 1. Mint identity (a fresh v4 UUID), in scope for the preconditions and event payloads.
+        body.Append(Indent).Append(Indent).Append("let id = ").Append(idType).Append("::generate();\n");
+
+        // 2. Preconditions — checked before any state is constructed.
+        foreach (RequiresClause req in factory.Body.OfType<RequiresClause>())
+        {
+            WriteRequires(body, typeName, req, translator);
+        }
+
+        // 3. Creation events, built from the id + params *before* they are moved into the constructor.
+        var emits = factory.Body.OfType<EmitClause>().ToList();
+        if (emits.Count > 0)
+        {
+            body.Append(Indent).Append(Indent).Append("let events: Vec<DomainEvent> = vec![\n");
+            foreach (EmitClause emitClause in emits)
+            {
+                if (BuildEmitExpression(emit, emitClause, translator, typeMapper) is { } expr)
+                {
+                    body.Append(Indent).Append(Indent).Append(Indent).Append(expr).Append(",\n");
+                }
+            }
+
+            body.Append(Indent).Append(Indent).Append("];\n");
+        }
+
+        // 4. Construct through the smart constructor and attach the recorded events.
+        var ctorArgs = string.Join(", ", BuildFactoryCtorArgs(factory, required, translator, emit.Index));
+        if (emits.Count > 0)
+        {
+            body.Append(Indent).Append(Indent).Append("let mut instance = Self::new(").Append(ctorArgs).Append(")?;\n");
+            body.Append(Indent).Append(Indent).Append("instance.events = events;\n");
+            body.Append(Indent).Append(Indent).Append("Ok(instance)\n");
+        }
+        else
+        {
+            body.Append(Indent).Append(Indent).Append("Self::new(").Append(ctorArgs).Append(")\n");
+        }
+
+        body.Append(Indent).Append("}\n");
+
+        foreach (Param p in factory.Parameters)
+        {
+            translator.PopLocal(p.Name);
+        }
+
+        translator.PopLocal("id");
+    }
+
+    /// <summary>
+    /// The positional arguments for a factory's <c>Self::new(id, …)</c> call. Each required ctor member
+    /// draws its value, in priority order, from an explicit <c>field &lt;- expr</c> initialization, a
+    /// same-named auto-bound parameter, <c>None</c> for an unset optional, or a defensive
+    /// <c>Default::default()</c> (a required+unset member is a validator-rejected case).
+    /// </summary>
+    private static List<string> BuildFactoryCtorArgs(
+        FactoryDecl factory, IReadOnlyList<Member> required,
+        RustExpressionTranslator translator, ModelIndex index)
+    {
+        var initByField = new Dictionary<string, Expr>(StringComparer.Ordinal);
+        foreach (Initialization init in factory.Body.OfType<Initialization>())
+        {
+            initByField.TryAdd(init.Field, init.Value);
+        }
+
+        var args = new List<string> { "id" };
+        foreach (Member m in required)
+        {
+            if (initByField.TryGetValue(m.Name, out Expr? value))
+            {
+                var expectedEnum = index.Classify(m.Type.Name) == TypeKind.Enum ? m.Type.Name : null;
+                args.Add(translator.TranslateOwned(value, expectedEnum));
+            }
+            else if (factory.Parameters.Any(p => MemberAnalysis.AutoBinds(p, m)))
+            {
+                args.Add(RustNaming.Field(m.Name)); // auto-bound same-named parameter
+            }
+            else if (m.Type.IsOptional)
+            {
+                args.Add("None"); // an unset optional member defaults to None
+            }
+            else
+            {
+                args.Add("Default::default()"); // required + unset — validator-rejected; defensive
+            }
+        }
+
+        return args;
     }
 
     /// <summary>The enum type expected on the RHS of a transition (so a bare enum member qualifies).</summary>
@@ -279,8 +412,12 @@ public sealed partial class RustEmitter
     // Identity newtype
     // ----------------------------------------------------------------------
 
-    /// <summary>Emits a branded identity newtype (e.g. <c>OrderId(String)</c>) with a constructor and accessor.</summary>
-    private void EmitIdType(StringBuilder body, string idName, (string RustType, bool IsString) backing)
+    /// <summary>
+    /// Emits a branded identity newtype (e.g. <c>OrderId(String)</c>) with a constructor and accessor.
+    /// When <paramref name="withGenerator"/> (a String-backed id whose entity has a factory) it also
+    /// gains a <c>generate()</c> associated fn that mints a fresh v4 UUID — the factory's identity source.
+    /// </summary>
+    private void EmitIdType(StringBuilder body, string idName, (string RustType, bool IsString) backing, bool withGenerator = false)
     {
         var name = RustNaming.ToPascalCase(idName);
         body.Append('\n');
@@ -298,6 +435,13 @@ public sealed partial class RustEmitter
             body.Append(Indent).Append("pub fn new(value: ").Append(backing.RustType).Append(") -> Self { ").Append(name).Append("(value) }\n");
             body.Append(Indent).Append("pub fn value(&self) -> ").Append(backing.RustType).Append(" { self.0 }\n");
         }
+
+        if (withGenerator && backing.IsString)
+        {
+            body.Append(Indent).Append("/// Mints a fresh, random identity (a v4 UUID) — the source of factory-created ids.\n");
+            body.Append(Indent).Append("pub fn generate() -> Self { ").Append(name).Append("(uuid::Uuid::new_v4().to_string()) }\n");
+        }
+
         body.Append("}\n");
     }
 
