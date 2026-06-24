@@ -1427,6 +1427,31 @@ public class LspServerTests
     }
 
     [Fact]
+    public void Docs_diagram_event_nodes_carry_their_doc_for_the_when_column()
+    {
+        // Issue #170: the structured diagram nodes carry each event's `///` description on the wire
+        // (verbatim camelCase key "doc"), so Studio's Events table can fill its "When" column.
+        var doc = "context C {\n"
+                + "  /// Published once an order is accepted.\n"
+                + "  integration event OrderPlaced { orderId: OrderId }\n"
+                + "  publishes OrderPlaced\n"
+                + "  aggregate Order root Order {\n"
+                + "    /// Recorded when an order is submitted.\n"
+                + "    event OrderSubmitted { orderId: OrderId }\n"
+                + "    entity Order identified by OrderId { customer: CustomerId }\n"
+                + "  }\n"
+                + "}\n";
+        var output = RunSession(
+            Initialize(),
+            DidOpen("file:///t.koi", doc),
+            Docs("file:///t.koi"));
+
+        // Both the domain event (context class diagram) and the integration event (event flow) carry it.
+        output.ShouldContain("\"doc\":\"Recorded when an order is submitted.\"");
+        output.ShouldContain("\"doc\":\"Published once an order is accepted.\"");
+    }
+
+    [Fact]
     public void Docs_null_model_returns_empty_files()
     {
         var badDoc = "context C {\n  value {\n  }\n}\n"; // unnamed value: does not parse
