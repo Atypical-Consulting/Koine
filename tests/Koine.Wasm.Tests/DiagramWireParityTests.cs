@@ -26,6 +26,7 @@ public class DiagramWireParityTests
             invariant amount >= 0 "an amount cannot be negative"
           }
 
+          /// Published once an order is accepted.
           integration event OrderPlaced {
             orderId: OrderId
             total: Decimal
@@ -34,6 +35,7 @@ public class DiagramWireParityTests
           publishes OrderPlaced
 
           aggregate Order root Order {
+            /// Recorded when an order is submitted.
             event OrderSubmitted { orderId: OrderId }
 
             value OrderLine {
@@ -158,6 +160,25 @@ public class DiagramWireParityTests
 
             // The identity row is always present and reads source-like.
             members.Select(m => (string?)m!["text"]).ShouldContain("id: OrderId");
+        }
+    }
+
+    [Fact]
+    public void Both_backends_carry_the_event_doc_for_the_when_column()
+    {
+        // Issue #170: the Events table's "When" column is sourced from node.doc — a documented event
+        // carries its `///` text identically on BOTH wires (camelCase key "doc"); the canonical-equality
+        // test guards they match, this pins the value and that it reaches the event nodes specifically.
+        foreach (var files in new[] { LspDocsFiles(), WasmDocsFiles() })
+        {
+            var domainEvent = AllNodes(files).First(n => (string?)n["kind"] == "event");
+            ((string?)domainEvent["doc"]).ShouldBe("Recorded when an order is submitted.");
+
+            var integrationEvent = AllNodes(files).First(n => (string?)n["kind"] == "integration-event");
+            ((string?)integrationEvent["doc"]).ShouldBe("Published once an order is accepted.");
+
+            // The "When" field is event-only: a non-event class node (the aggregate root) carries no doc.
+            AllNodes(files).First(n => (string?)n["kind"] == "aggregate-root")["doc"].ShouldBeNull();
         }
     }
 

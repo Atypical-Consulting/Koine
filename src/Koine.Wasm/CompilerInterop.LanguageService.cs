@@ -894,7 +894,7 @@ public static partial class CompilerInterop
 
     private static WDiagramNode MapNode(DiagramNode n) =>
         new(n.Id, n.Label, n.Kind, n.QualifiedName, MapSourceSpan(n.Span),
-            n.Stereotype, (n.Members ?? []).Select(MapMember).ToArray(), (n.Invariants ?? []).ToArray());
+            n.Stereotype, (n.Members ?? []).Select(MapMember).ToArray(), (n.Invariants ?? []).ToArray(), n.Doc);
 
     private static WDiagramMember MapMember(DiagramMember m) =>
         new(m.Text, m.Kind);
@@ -1246,10 +1246,12 @@ public sealed record WDiagramGraph(WDiagramNode[] Nodes, WDiagramEdge[] Edges);
 /// the raw 1-based source coordinate (Task 4 converts to 0-based when navigating); null only when the
 /// node truly has none. Class nodes carry a <see cref="Stereotype"/> (without guillemets) and UML
 /// <see cref="Members"/>; non-class nodes (state/context/integration) carry <c>null</c>/<c>[]</c>.
+/// <see cref="Doc"/> is the event's "when this happens" description (issue #170): the wire key
+/// <c>"doc"</c>, set for event nodes only, <c>null</c> otherwise.
 /// </summary>
 public sealed record WDiagramNode(
     string Id, string Label, string Kind, string QualifiedName, WSourceSpan? SourceSpan,
-    string? Stereotype, WDiagramMember[] Members, string[] Invariants);
+    string? Stereotype, WDiagramMember[] Members, string[] Invariants, string? Doc);
 
 /// <summary>One UML class-body row: a pre-formatted <see cref="Text"/> and its <see cref="Kind"/> (<c>field</c>/<c>method</c>/<c>value</c>).</summary>
 public sealed record WDiagramMember(string Text, string Kind);
