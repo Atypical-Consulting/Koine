@@ -1,9 +1,10 @@
-/* --- center: Éditeur visuel (diagram canvas) / Vue technique (code) ---
-   A two-tab center column. "Éditeur visuel" hosts the domain diagram (#center-visual); "Vue
-   technique" hosts the code editor plus the emitted preview, the compatibility check and the
-   assistant as sub-tabs (#tech-tabs). Mutually exclusive panels are toggled via the `hidden`
-   attribute — and because the flex/positioning rules below outrank the UA `[hidden]` rule, each
-   toggleable container restores `display: none` for its own `[hidden]` state. */
+/* --- center: Visual (diagram canvas) / Code / Documentation / Assistant ---
+   The center column's top-level tabs (#center-tabs). "Visual" hosts the domain diagram
+   (#center-visual); "Code" hosts the editor plus the emitted preview and the compatibility check as
+   sub-tabs (#tech-tabs); "Documentation" hosts the glossary/ADR/notes; "Assistant" hosts the AI
+   copilot (#view-assistant) — a first-class pane, one click from any view (#235). Mutually exclusive
+   panels are toggled via the `hidden` attribute — and because the flex/positioning rules below
+   outrank the UA `[hidden]` rule, each toggleable container restores `display: none` for `[hidden]`. */
 #center {
   display: flex;
   flex-direction: column;
@@ -69,6 +70,40 @@
 .docs-tab {
   font-size: var(--koi-text-sm);
   padding: var(--koi-space-2) var(--koi-space-2-5) var(--koi-space-2-25);
+}
+
+/* The Assistant is the one "intelligent" tab among the structural three, so it alone carries a mark:
+   a spark glyph. The label still follows the muted→fg tab states, but the spark stays in the brand
+   accent at all times — the same hue that signals "this generates" (Generate / Send / active underline)
+   — a quiet, persistent cue that the AI lives here. */
+.center-tab-ai {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--koi-space-1-5);
+}
+.center-tab-spark {
+  width: 13px;
+  height: 13px;
+  flex: 0 0 auto;
+  fill: var(--koi-accent);
+  stroke: none;
+  /* Settle in on first paint rather than appearing inert — a one-shot shimmer, reduced-motion safe. */
+  animation: koi-spark-in var(--koi-dur-slow) ease both;
+}
+@keyframes koi-spark-in {
+  from {
+    opacity: 0;
+    transform: scale(0.6) rotate(-12deg);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .center-tab-spark {
+    animation: none;
+  }
 }
 
 #center-body {
