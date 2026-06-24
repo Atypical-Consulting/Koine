@@ -41,6 +41,8 @@ internal sealed class RustExpressionTranslator
     private readonly HashSet<string> _locals = new(StringComparer.Ordinal);
     private readonly Dictionary<string, TypeRef> _localTypes = new(StringComparer.Ordinal);
     private readonly ISet<string> _derivedMembers;
+    private readonly string _memberReceiver;
+    private readonly bool _membersAsAccessors;
 
     private string? _expectedEnum;
 
@@ -49,11 +51,17 @@ internal sealed class RustExpressionTranslator
         IReadOnlyList<Member> members,
         IReadOnlyDictionary<string, string> enumMemberToType,
         RustTypeMapper typeMapper,
-        string? context = null)
+        string? context = null,
+        string memberReceiver = "self",
+        bool membersAsAccessors = false)
     {
         _index = index;
         _resolver = new TypeResolver(index, context);
         _typeMapper = typeMapper;
+        _memberReceiver = memberReceiver;
+        // Read-model projection bodies read from a borrowed source (`src`), whose fields are private —
+        // so every member must go through its accessor, even the stored ones.
+        _membersAsAccessors = membersAsAccessors;
         _scope = TypeScope.FromMembers(members, index);
         _memberNames = new HashSet<string>(members.Select(m => m.Name), StringComparer.Ordinal);
         _enumMemberToType = enumMemberToType;
@@ -345,9 +353,10 @@ internal sealed class RustExpressionTranslator
             {
                 if (_mode == NameMode.Property)
                 {
-                    // A stored field reads directly; a derived member reads through its accessor method.
-                    sb.Append("self.").Append(RustNaming.Field(name));
-                    if (_derivedMembers.Contains(name))
+                    // A stored field reads directly; a derived member (or any member in projection
+                    // mode, reading from a borrowed source) reads through its accessor method.
+                    sb.Append(_memberReceiver).Append('.').Append(RustNaming.Field(name));
+                    if (_membersAsAccessors || _derivedMembers.Contains(name))
                     {
                         sb.Append("()");
                     }

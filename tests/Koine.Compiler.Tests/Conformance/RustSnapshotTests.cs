@@ -676,6 +676,74 @@ public class RustSnapshotTests
         check.Ok.ShouldBeTrue(string.Join("\n", check.Errors));
     }
 
+    // ------------------------------------------------------------------
+    // Queries & read models (issue #173, Task 6 — the CQRS read side). A `readmodel`
+    // emits a flat projection struct + a `from_<source>` projection fn (direct fields
+    // copy the like-named source member through its accessor, owned; derived fields
+    // project an expression). A `query` emits a criteria DTO struct + `new`.
+    // ------------------------------------------------------------------
+
+    /// <summary>An aggregate with a read model (direct + derived fields) and a query over it.</summary>
+    private const string CqrsFixture = """
+        context Sales {
+          enum OrderStatus { Draft, Placed, Cancelled }
+          aggregate Sales root Order {
+            entity Order identified by OrderId {
+              customer: String
+              lines:    Int
+              status:   OrderStatus = Draft
+            }
+          }
+
+          readmodel OrderRow from Order {
+            id
+            customer
+            status
+            busy: Bool = lines > 0
+          }
+
+          query OrdersByStatus(status: OrderStatus): List<OrderRow>
+        }
+        """;
+
+    [Fact]
+    public Task Rust_read_models_and_queries_emit_expected_rust()
+    {
+        var result = new KoineCompiler().Compile(CqrsFixture, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var sales = result.Files.Single(f => f.RelativePath.EndsWith("sales.rs", StringComparison.Ordinal)).Contents;
+        // The read-model projection struct + its from_<source> fn.
+        sales.ShouldContain("pub struct OrderRow {");
+        sales.ShouldContain("pub fn from_order(src: &Order) -> Self");
+        sales.ShouldContain("id: src.id().clone(),");          // a non-Copy id is cloned
+        sales.ShouldContain("customer: src.customer().to_string(),"); // a String is owned via to_string
+        sales.ShouldContain("status: src.status(),");          // a Copy enum is taken verbatim
+        sales.ShouldContain("busy: src.lines() > 0,");         // a derived field projects its expression
+        // The query criteria DTO.
+        sales.ShouldContain("pub struct OrdersByStatus {");
+        sales.ShouldContain("pub status: OrderStatus,");
+        sales.ShouldContain("pub fn new(status: OrderStatus) -> Self");
+
+        return Verify(TestSupport.Render(result.Files)).UseDirectory("Snapshots");
+    }
+
+    [Fact]
+    public void Rust_read_models_and_queries_compile()
+    {
+        var result = new KoineCompiler().Compile(CqrsFixture, new RustEmitter());
+        result.Success.ShouldBeTrue();
+
+        var check = TestSupport.CompileRust(result.Files);
+        if (!check.ToolchainAvailable)
+        {
+            _output.WriteLine(NoToolchainNotice);
+            return;
+        }
+
+        check.Ok.ShouldBeTrue(string.Join("\n", check.Errors));
+    }
+
     /// <summary>Reads a template under <c>templates/</c> by walking up to the repo root (the <c>.git</c> dir).</summary>
     private static string? FindTemplate(string relativePath)
     {

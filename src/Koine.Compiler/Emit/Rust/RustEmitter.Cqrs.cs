@@ -74,4 +74,144 @@ public sealed partial class RustEmitter
         }
         body.Append("}\n");
     }
+
+    /// <summary>
+    /// Emits a read model (R12.3) as a flat projection struct plus a <c>from_&lt;source&gt;</c> associated
+    /// function that projects a borrowed source aggregate/entity into it. A direct field copies the
+    /// like-named source member through its accessor (owned: a String via <c>to_string</c>, another value
+    /// via <c>clone</c>, a Copy scalar/enum verbatim); a derived field projects its expression over the source.
+    /// </summary>
+    private void EmitReadModel(StringBuilder body, RustEmitContext emit, ReadModelDecl rm, string context)
+    {
+        var typeMapper = new RustTypeMapper(emit.Index, context, _options);
+        var name = RustNaming.ToPascalCase(rm.Name);
+        var sourceName = RustNaming.ToPascalCase(rm.SourceType);
+        IReadOnlyList<Member> sourceMembers = ReadModelSourceMembers(context, rm.SourceType, emit.Index);
+        var byName = new Dictionary<string, Member>(StringComparer.Ordinal);
+        foreach (Member m in sourceMembers)
+        {
+            byName.TryAdd(m.Name, m);
+        }
+
+        // A derived field projects an expression over the borrowed `src`, every member through its accessor.
+        var translator = new RustExpressionTranslator(
+            emit.Index, sourceMembers, emit.EnumMemberToType, typeMapper, context,
+            memberReceiver: "src", membersAsAccessors: true);
+
+        var fields = new List<(string Field, string RustType, string Rhs)>();
+        foreach (ReadModelField f in rm.Fields)
+        {
+            string rhs;
+            TypeRef fieldType;
+            if (f.Projection is null)
+            {
+                // Direct: copy the like-named source member through its accessor, owned for storage.
+                fieldType = byName.TryGetValue(f.Name, out Member? sm) ? sm.Type : new TypeRef("String");
+                rhs = OwnAccess("src." + RustNaming.Field(f.Name) + "()", fieldType, typeMapper);
+            }
+            else
+            {
+                fieldType = f.Type!;
+                var expectedEnum = emit.Index.Classify(fieldType.Name) == TypeKind.Enum ? fieldType.Name : null;
+                var rendered = RustExpressionTranslator.StripOuterParens(translator.Translate(f.Projection, expectedEnum));
+                rhs = OwnDerived(rendered, fieldType, typeMapper);
+            }
+
+            fields.Add((RustNaming.Field(f.Name), typeMapper.Map(fieldType), rhs));
+        }
+
+        WriteDoc(body, rm.Doc, string.Empty);
+        body.Append("#[derive(Debug, Clone, PartialEq)]\n");
+        body.Append("pub struct ").Append(name).Append(" {\n");
+        foreach (var f in fields)
+        {
+            body.Append(Indent).Append("pub ").Append(f.Field).Append(": ").Append(f.RustType).Append(",\n");
+        }
+
+        body.Append("}\n\n");
+
+        body.Append("impl ").Append(name).Append(" {\n");
+        body.Append(Indent).Append("/// Projects a `").Append(sourceName).Append("` into a `").Append(name).Append("`.\n");
+        body.Append(Indent).Append("pub fn from_").Append(RustNaming.ToSnakeCase(rm.SourceType))
+            .Append("(src: &").Append(sourceName).Append(") -> Self {\n");
+        body.Append(Indent).Append(Indent).Append("Self {\n");
+        foreach (var f in fields)
+        {
+            body.Append(Indent).Append(Indent).Append(Indent).Append(f.Field).Append(": ").Append(f.Rhs).Append(",\n");
+        }
+
+        body.Append(Indent).Append(Indent).Append("}\n");
+        body.Append(Indent).Append("}\n");
+        body.Append("}\n");
+    }
+
+    /// <summary>Owns a direct accessor result: a String via <c>to_string</c>, another non-Copy value via <c>clone</c>, a Copy value verbatim.</summary>
+    private static string OwnAccess(string access, TypeRef type, RustTypeMapper typeMapper) =>
+        typeMapper.IsCopy(type) ? access
+        : type is { Name: "String", IsOptional: false } ? access + ".to_string()"
+        : access + ".clone()";
+
+    /// <summary>Owns a derived projection expression (wrapped so the suffix binds the whole expression).</summary>
+    private static string OwnDerived(string rendered, TypeRef type, RustTypeMapper typeMapper)
+    {
+        if (typeMapper.IsCopy(type))
+        {
+            return rendered;
+        }
+
+        var suffix = type is { Name: "String", IsOptional: false } ? ".to_string()" : ".clone()";
+        return "(" + rendered + ")" + suffix;
+    }
+
+    /// <summary>The members a read model projects from (an entity adds the synthetic <c>id</c> unless it declares its own).</summary>
+    private static IReadOnlyList<Member> ReadModelSourceMembers(string context, string sourceType, ModelIndex index)
+    {
+        if (!index.TryGetDeclIn(context, sourceType, out TypeDecl decl) && !index.TryGetDecl(sourceType, out decl))
+        {
+            return Array.Empty<Member>();
+        }
+
+        return decl switch
+        {
+            ValueObjectDecl v => v.Members,
+            EntityDecl e => e.Members.Any(m => string.Equals(m.Name, "id", StringComparison.OrdinalIgnoreCase))
+                ? e.Members
+                : e.Members.Append(new Member("id", new TypeRef(e.IdentityName), null)).ToList(),
+            _ => Array.Empty<Member>(),
+        };
+    }
+
+    /// <summary>
+    /// Emits a query object (R12.4) as a DTO struct carrying its typed criteria plus a <c>new</c>
+    /// constructor. The result type lives in the doc comment; dispatch is the application layer's concern.
+    /// </summary>
+    private void EmitQuery(StringBuilder body, RustEmitContext emit, QueryDecl q, string context)
+    {
+        var typeMapper = new RustTypeMapper(emit.Index, context, _options);
+        var name = RustNaming.ToPascalCase(q.Name);
+        var resultType = typeMapper.Map(q.ResultType);
+
+        WriteDoc(body, q.Doc ?? $"Query criteria returning `{resultType}`.", string.Empty);
+        body.Append("#[derive(Debug, Clone, PartialEq)]\n");
+        body.Append("pub struct ").Append(name).Append(" {\n");
+        foreach (Param p in q.Criteria)
+        {
+            body.Append(Indent).Append("pub ").Append(RustNaming.Field(p.Name)).Append(": ").Append(typeMapper.Map(p.Type)).Append(",\n");
+        }
+
+        body.Append("}\n\n");
+
+        var ctorParams = string.Join(", ", q.Criteria.Select(p => RustNaming.Field(p.Name) + ": " + typeMapper.Map(p.Type)));
+        body.Append("impl ").Append(name).Append(" {\n");
+        body.Append(Indent).Append("pub fn new(").Append(ctorParams).Append(") -> Self {\n");
+        body.Append(Indent).Append(Indent).Append("Self {\n");
+        foreach (Param p in q.Criteria)
+        {
+            body.Append(Indent).Append(Indent).Append(Indent).Append(RustNaming.Field(p.Name)).Append(",\n");
+        }
+
+        body.Append(Indent).Append(Indent).Append("}\n");
+        body.Append(Indent).Append("}\n");
+        body.Append("}\n");
+    }
 }

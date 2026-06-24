@@ -147,6 +147,14 @@ public sealed partial class RustEmitter : IEmitter
                 body.Append('\n');
                 EmitEvent(body, emit, context, iev.Name, iev.Doc, iev.Members);
                 break;
+            case ReadModelDecl rm:
+                body.Append('\n');
+                EmitReadModel(body, emit, rm, context);
+                break;
+            case QueryDecl q:
+                body.Append('\n');
+                EmitQuery(body, emit, q, context);
+                break;
         }
     }
 }
