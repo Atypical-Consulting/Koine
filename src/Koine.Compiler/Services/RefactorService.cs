@@ -57,6 +57,8 @@ internal sealed class RefactorService
             actions.Add(inline);
         }
 
+        actions.AddRange(service.TryMoveTypeBetweenContexts(startOffset, endOffset));
+
         return actions;
     }
 
@@ -567,6 +569,146 @@ internal sealed class RefactorService
             // A one-off, position-specific refactor: not part of a fix-all batch.
             EquivalenceKey: null,
             [replace, remove]);
+    }
+
+    /// <summary>
+    /// Builds the "Move to context 'Target'" refactor(s) when the selection lands inside a <b>top-level
+    /// type declaration</b> of a context and the model has at least two contexts. One action is offered
+    /// per OTHER context; applying it relocates the whole declaration (leading-trivia/doc through body,
+    /// plus its own leading indentation and trailing newline) out of the source context and re-indents it
+    /// into the target context's body, just before the target's closing brace.
+    ///
+    /// <para>The move is a pure text relocation: it does NOT rewrite references. A field elsewhere in the
+    /// source context that still names the moved type therefore becomes a cross-context reference with no
+    /// <c>import</c>, which the semantic validator surfaces as an unresolved-type diagnostic — the move is
+    /// never silently broken. Adding the required import is out of scope for v1.</para>
+    ///
+    /// <para>Types nested in an aggregate live in the aggregate's <c>.Types</c>, never in
+    /// <c>ctx.Types</c>, so they are never offered here (only top-level types move in v1).</para>
+    /// </summary>
+    private IEnumerable<CodeFix> TryMoveTypeBetweenContexts(int startOffset, int endOffset)
+    {
+        // A move needs somewhere to move TO: at least one other context must exist.
+        if (_model.Contexts.Count < 2)
+        {
+            yield break;
+        }
+
+        // Find the INNERMOST type the selection lands inside (the deepest-nested match), then require it
+        // to be a direct top-level member of its context's `.Types`. A type nested in an aggregate is in
+        // that aggregate's `.Types`, never in `ctx.Types`, so a selection on it is rejected here — only
+        // top-level types move between contexts in v1 (the aggregate keyword is its own top-level type).
+        TypeDecl? innermost = null;
+        foreach (TypeDecl type in EnumerateTypes(_model))
+        {
+            if (type.Span.IsNone || !ContainsSelection(type.Span, startOffset, endOffset))
+            {
+                continue;
+            }
+
+            // Prefer the deepest (smallest) containing span: a nested type's span is contained by its
+            // enclosing aggregate's, so the narrower one wins as the selection's true target.
+            if (innermost is null || type.Span.Length < innermost.Span.Length)
+            {
+                innermost = type;
+            }
+        }
+
+        if (innermost is null)
+        {
+            yield break;
+        }
+
+        TypeDecl moved = innermost;
+        ContextNode? sourceCtx = _model.Contexts.FirstOrDefault(c => c.Types.Any(t => ReferenceEquals(t, moved)));
+        if (sourceCtx is null)
+        {
+            yield break;
+        }
+
+        // The verbatim declaration text: from its leading-trivia/doc block, backed up over its own line
+        // indentation, through the end of its body plus any same-line trailing comment and the trailing
+        // newline — exactly as inline-VO removes a dead declaration so no indent-only/blank line lingers.
+        var declStart = BackUpOverLineIndent(LeadingTriviaStart(moved));
+        var declEnd = ExtendOverTrailingNewline(moved.Span.Offset + moved.Span.Length);
+        var declText = SliceRange(declStart, declEnd);
+
+        // The declaration's own indentation width (its 1-based start column minus one), used to re-indent
+        // the moved text to the target context's inner indentation at its new home.
+        var declIndentWidth = Math.Max(0, moved.Span.Column - 1);
+
+        foreach (ContextNode target in _model.Contexts)
+        {
+            if (ReferenceEquals(target, sourceCtx) || target.Span.IsNone)
+            {
+                continue;
+            }
+
+            if (BuildMoveToContext(moved, declStart, declEnd, declText, declIndentWidth, target) is { } fix)
+            {
+                yield return fix;
+            }
+        }
+    }
+
+    private CodeFix? BuildMoveToContext(
+        TypeDecl moved, int declStart, int declEnd, string declText, int declIndentWidth, ContextNode target)
+    {
+        // The target context's inner indentation: its declaration column + one level (two spaces). The
+        // closing brace sits at the context's own column, so members indent one level deeper than that.
+        var ctxIndentWidth = Math.Max(0, target.Span.Column - 1);
+        var innerIndent = new string(' ', ctxIndentWidth + 2);
+
+        // The insertion point is just before the target context's closing brace. The context span runs
+        // from `context` through that `}`, so scan back from the span end for the last `}`.
+        var insertOffset = ClosingBraceOffset(target);
+        if (insertOffset < 0)
+        {
+            return null;
+        }
+
+        // (1) Remove the declaration from the source context (trivia, leading indent, trailing newline).
+        SourceSpan removal = RangeSpan(declStart, declEnd);
+        var remove = new CodeFixEdit(removal, string.Empty);
+
+        // (2) Insert the verbatim declaration into the target body, re-indented to the inner indentation.
+        // `Reindent` already prefixes line 0 with `innerIndent`, so feed it the declaration with its own
+        // leading indentation trimmed and trailing newline(s) dropped; it lands on its own line before
+        // the closing brace (the trailing "\n" pushes the brace back onto a fresh line).
+        var reindented = Reindent(declText.TrimEnd('\n', '\r').TrimStart(), declIndentWidth, innerIndent);
+        var (insertLine, insertCol) = LineColumnOf(insertOffset);
+        SourceSpan insertAt = PointSpan(insertLine, insertCol, insertOffset);
+        var insert = new CodeFixEdit(insertAt, reindented + "\n");
+
+        return new CodeFix(
+            $"Move to context '{target.Name}'",
+            "refactor",
+            // A one-off, position-specific refactor: not part of a fix-all batch.
+            EquivalenceKey: null,
+            [remove, insert]);
+    }
+
+    /// <summary>
+    /// The absolute offset of the target context's closing <c>}</c> (the insertion point for a moved
+    /// type's body). The context span runs from the <c>context</c> keyword through that brace, so scan
+    /// back from the span end over trailing whitespace for the last <c>}</c>. Returns <c>-1</c> when no
+    /// closing brace is found within the span (a recovered/incomplete parse).
+    /// </summary>
+    private int ClosingBraceOffset(ContextNode ctx)
+    {
+        var i = Math.Min(ctx.Span.Offset + ctx.Span.Length, _source.Length) - 1;
+        var floor = Math.Max(0, ctx.Span.Offset);
+        while (i >= floor)
+        {
+            if (_source[i] == '}')
+            {
+                return i;
+            }
+
+            i--;
+        }
+
+        return -1;
     }
 
     /// <summary>

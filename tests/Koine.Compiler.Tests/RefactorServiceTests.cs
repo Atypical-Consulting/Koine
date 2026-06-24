@@ -1,4 +1,6 @@
 using Koine.Compiler.Ast;
+using Koine.Compiler.Diagnostics;
+using Koine.Compiler.Semantics;
 using Koine.Compiler.Services;
 
 namespace Koine.Compiler.Tests;
@@ -436,5 +438,136 @@ public class RefactorServiceTests
         // Select "street" (a primitive-typed field, not a VO reference) on line 1 (cols 18..24).
         var actions = RefactorsAt(src, 1, 18, 1, 24);
         actions.ShouldNotContain(a => a.Kind == "refactor" && a.Title.StartsWith("Inline value object", StringComparison.Ordinal));
+    }
+
+    /// <summary>The "Move to context 'Target'" refactor at this selection (a plain <c>refactor</c> Kind),
+    /// for the named target context.</summary>
+    private static CodeActionEdit MoveToContextAt(string src, string target, int sl, int sc, int el, int ec) =>
+        RefactorsAt(src, sl, sc, el, ec)
+            .Where(a => a.Kind == "refactor" && a.Title == $"Move to context '{target}'")
+            .ShouldHaveSingleItem();
+
+    private static (KoineModel Model, IReadOnlyList<Diagnostic> Diagnostics) ParseAndValidate(string src)
+    {
+        var (model, parseDiags) = new KoineCompiler().Parse(src);
+        model.ShouldNotBeNull();
+        var diags = parseDiags.Concat(new SemanticValidator().Validate(model)).ToList();
+        return (model, diags);
+    }
+
+    [Fact]
+    public void Moving_a_standalone_type_relocates_it_to_the_target_context_with_no_diagnostics()
+    {
+        var src =
+            "context A {\n" +
+            "  value Address {\n" +
+            "    street: String\n" +
+            "    city: String\n" +
+            "  }\n" +
+            "}\n" +
+            "context B {\n" +
+            "  value Tag { name: String }\n" +
+            "}\n";
+        // Line 1 (0-based) = "  value Address {"; place the cursor inside the Address declaration.
+        var move = MoveToContextAt(src, "B", 1, 8, 1, 8);
+
+        var applied = Apply(src, move);
+        var (model, diags) = ParseAndValidate(applied); // re-parses and validates cleanly
+        diags.ShouldBeEmpty();
+
+        var a = model.Contexts.Single(c => c.Name == "A").Types;
+        var b = model.Contexts.Single(c => c.Name == "B").Types;
+        // Address now lives in B and is gone from A.
+        a.ShouldNotContain(t => t.Name == "Address");
+        var moved = b.Single(t => t.Name == "Address").ShouldBeOfType<ValueObjectDecl>();
+        moved.Members.ShouldContain(m => m.Name == "street");
+        moved.Members.ShouldContain(m => m.Name == "city");
+        // B's pre-existing type is undisturbed.
+        b.ShouldContain(t => t.Name == "Tag");
+    }
+
+    [Fact]
+    public void Moving_a_type_still_referenced_by_a_sibling_surfaces_a_cross_context_diagnostic()
+    {
+        // Sibling `Customer` in A references `Address`; after the move, that reference becomes a
+        // cross-context one with no import, which the semantic validator must flag (not silent).
+        var src =
+            "context A {\n" +
+            "  value Address {\n" +
+            "    street: String\n" +
+            "  }\n" +
+            "  value Customer {\n" +
+            "    home: Address\n" +
+            "  }\n" +
+            "}\n" +
+            "context B {\n" +
+            "  value Tag { name: String }\n" +
+            "}\n";
+        // Line 1 (0-based) = "  value Address {"; place the cursor inside the Address declaration.
+        var move = MoveToContextAt(src, "B", 1, 8, 1, 8);
+
+        var applied = Apply(src, move);
+        var (model, diags) = ParseAndValidate(applied);
+
+        // Address really moved to B...
+        model.Contexts.Single(c => c.Name == "A").Types.ShouldNotContain(t => t.Name == "Address");
+        model.Contexts.Single(c => c.Name == "B").Types.ShouldContain(t => t.Name == "Address");
+        // ...and the now-dangling reference in A is surfaced, not silently broken.
+        diags.ShouldNotBeEmpty();
+    }
+
+    [Fact]
+    public void No_move_action_in_a_single_context_model()
+    {
+        var src =
+            "context A {\n" +
+            "  value Address {\n" +
+            "    street: String\n" +
+            "  }\n" +
+            "}\n";
+        // Cursor inside the Address declaration; there is no other context to move it to.
+        var actions = RefactorsAt(src, 1, 8, 1, 8);
+        actions.ShouldNotContain(a => a.Kind == "refactor" && a.Title.StartsWith("Move to context", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void No_move_action_when_the_selection_is_on_a_type_nested_in_an_aggregate()
+    {
+        var src =
+            "context A {\n" +
+            "  aggregate Sales root Order {\n" +
+            "    entity Order identified by OrderId {\n" +
+            "      note: String\n" +
+            "    }\n" +
+            "  }\n" +
+            "}\n" +
+            "context B {\n" +
+            "  value Tag { name: String }\n" +
+            "}\n";
+        // Cursor inside the nested Order entity (line 2, 0-based); it is NOT a top-level context type.
+        var actions = RefactorsAt(src, 2, 12, 2, 12);
+        actions.ShouldNotContain(a => a.Kind == "refactor" && a.Title.StartsWith("Move to context", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Moving_offers_one_action_per_other_context()
+    {
+        var src =
+            "context A {\n" +
+            "  value Address { street: String }\n" +
+            "}\n" +
+            "context B {\n" +
+            "  value Tag { name: String }\n" +
+            "}\n" +
+            "context C {\n" +
+            "  value Note { text: String }\n" +
+            "}\n";
+        // Cursor inside the Address declaration on line 1 (0-based).
+        var moves = RefactorsAt(src, 1, 8, 1, 8)
+            .Where(a => a.Kind == "refactor" && a.Title.StartsWith("Move to context", StringComparison.Ordinal))
+            .ToList();
+        moves.Count.ShouldBe(2);
+        moves.ShouldContain(a => a.Title == "Move to context 'B'");
+        moves.ShouldContain(a => a.Title == "Move to context 'C'");
     }
 }
