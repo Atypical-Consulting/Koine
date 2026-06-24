@@ -39,6 +39,18 @@ describe('StoreInspector', () => {
     expect(field(container, 'problems')).toContain('1 error');
   });
 
+  test('exposes the full store as a collapsible raw-state snapshot', () => {
+    const store = createAppStore();
+    const { container } = render(<StoreInspector store={store} />);
+
+    const raw = container.querySelector('[data-field="rawState"]');
+    expect(raw).not.toBeNull();
+    // The whole store, not just the curated rows: a known data key shows up, and the
+    // function-valued setters are filtered out so only state is dumped.
+    expect(raw!.textContent).toContain('activeContext');
+    expect(raw!.textContent).not.toContain('setActiveContext');
+  });
+
   test('has no accessibility violations', async () => {
     const store = createAppStore();
     const { container } = render(<StoreInspector store={store} />);

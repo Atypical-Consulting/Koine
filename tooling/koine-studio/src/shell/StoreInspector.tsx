@@ -34,6 +34,16 @@ export function StoreInspector(props: { store: StoreApi<AppState> }) {
     .map(([k, v]) => `${k}:${v.loaded ? 'ok' : 'stale'}#${v.token}`)
     .join('  ');
 
+  // The curated rows above are a summary; this dumps the WHOLE store so nothing is hidden. We read
+  // getState() on render (the summary selectors already subscribe us to every slice, so any change
+  // repaints and re-reads) and drop the function-valued setters so only data shows. Subscribing to
+  // each scalar above is what makes this snapshot track the live store.
+  const rawState = JSON.stringify(
+    s.getState(),
+    (_key, value) => (typeof value === 'function' ? undefined : value),
+    2,
+  );
+
   const row = (label: string, fieldName: string, value: ComponentChildren) => (
     <>
       <dt>{label}</dt>
@@ -57,6 +67,10 @@ export function StoreInspector(props: { store: StoreApi<AppState> }) {
         {row('Problems', 'problems', `${errors} error${errors === 1 ? '' : 's'}, ${warnings} warning${warnings === 1 ? '' : 's'}`)}
         {row('Doc views', 'docViews', docViewSummary)}
       </dl>
+      <details class="koi-store-inspector-raw">
+        <summary>Raw state</summary>
+        <pre data-field="rawState">{rawState}</pre>
+      </details>
     </div>
   );
 }
