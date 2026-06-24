@@ -41,6 +41,30 @@ public static class TestSupport
     public static object EnumValue(Type enumType, string name) =>
         enumType.GetField(name, BindingFlags.Public | BindingFlags.Static)!.GetValue(null)!;
 
+    /// <summary>
+    /// Yields each framed JSON-RPC message body from a raw <c>Content-Length</c>-framed LSP session
+    /// transcript. Shared by the LSP wire tests so the framing logic lives in one place (issue #304).
+    /// </summary>
+    public static IEnumerable<string> JsonRpcFrames(string transcript)
+    {
+        var i = 0;
+        while (true)
+        {
+            var marker = transcript.IndexOf("Content-Length: ", i, StringComparison.Ordinal);
+            if (marker < 0)
+            {
+                yield break;
+            }
+
+            var numStart = marker + "Content-Length: ".Length;
+            var numEnd = transcript.IndexOf("\r\n", numStart, StringComparison.Ordinal);
+            var len = int.Parse(transcript.Substring(numStart, numEnd - numStart));
+            var bodyStart = transcript.IndexOf("\r\n\r\n", numEnd, StringComparison.Ordinal) + 4;
+            yield return transcript.Substring(bodyStart, len);
+            i = bodyStart + len;
+        }
+    }
+
     /// <summary>Concatenates emitted files (path + contents), ordered by path, for snapshots.</summary>
     public static string Render(IEnumerable<EmittedFile> files)
     {
