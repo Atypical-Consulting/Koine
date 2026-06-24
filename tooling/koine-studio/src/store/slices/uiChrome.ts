@@ -1,7 +1,7 @@
 import type { StoreApi } from 'zustand/vanilla';
 
-export type CenterView = 'visual' | 'technical' | 'docs';
-export type TechView = 'editor' | 'preview' | 'check' | 'assistant';
+export type CenterView = 'visual' | 'technical' | 'docs' | 'assistant';
+export type TechView = 'editor' | 'preview' | 'check';
 export type DocsView = 'glossary' | 'adr' | 'notes';
 export type BottomTab = 'problems' | 'events' | 'relationships' | 'contextmap';
 export type RightView = 'props' | 'rules' | 'notes';
@@ -19,7 +19,7 @@ export const DEFAULT_MOBILE_ZONE: MobileZone = 'code';
 
 /** True when `v` names a real center pane — validates a restored value before trusting it. */
 export function isValidCenter(v: string): v is CenterView {
-  return v === 'visual' || v === 'technical' || v === 'docs';
+  return v === 'visual' || v === 'technical' || v === 'docs' || v === 'assistant';
 }
 
 /** True when `v` names a real mobile zone — validates a restored/external value before trusting it. */

@@ -290,6 +290,7 @@ const APP_HTML = `
             <button type="button" class="center-tab" id="center-tab-visual" role="tab" data-center="visual" aria-selected="true">Visual</button>
             <button type="button" class="center-tab" id="center-tab-technical" role="tab" data-center="technical" aria-selected="false">Code</button>
             <button type="button" class="center-tab" id="center-tab-docs" role="tab" data-center="docs" aria-selected="false">Documentation</button>
+            <button type="button" class="center-tab center-tab-ai" id="center-tab-assistant" role="tab" data-center="assistant" aria-selected="false">Assistant</button>
           </div>
           <div id="center-body">
             <section id="center-visual" class="center-host" role="tabpanel">
@@ -301,13 +302,11 @@ const APP_HTML = `
                 <button type="button" class="tech-tab" id="tech-tab-editor" role="tab" data-tech="editor" aria-selected="true">Editor</button>
                 <button type="button" class="tech-tab" id="tech-tab-preview" role="tab" data-tech="preview" aria-selected="false">Generated</button>
                 <button type="button" class="tech-tab" id="tech-tab-check" role="tab" data-tech="check" aria-selected="false">Compatibility</button>
-                <button type="button" class="tech-tab" id="tech-tab-assistant" role="tab" data-tech="assistant" aria-selected="false">Assistant</button>
               </div>
               <div id="tech-body">
                 <section id="editor-pane" class="tech-view"></section>
                 <div id="view-preview" class="tech-view" role="tabpanel" hidden></div>
                 <div id="view-check" class="tech-view doc-view" role="tabpanel" hidden></div>
-                <div id="view-assistant" class="tech-view" role="tabpanel" hidden></div>
               </div>
             </section>
             <section id="center-docs" class="center-host" role="tabpanel" hidden>
@@ -322,6 +321,7 @@ const APP_HTML = `
                 <div id="view-notes" class="tech-view doc-view" role="tabpanel" hidden></div>
               </div>
             </section>
+            <section id="view-assistant" class="center-host" role="tabpanel" hidden></section>
           </div>
           <footer id="diagnostics">
             <div class="koi-resizer koi-resizer-y" id="diag-resizer"></div>
