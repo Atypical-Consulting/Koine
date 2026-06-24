@@ -80,6 +80,7 @@ import { DEFAULT_CENTER, isValidCenter, type RightView } from '@/store/slices/ui
 import type { DomainIndex } from '@/ai/aiPanel';
 import { currentTheme } from '@/settings/theme';
 import { escapeHtml, formatAclMapping, renderCheckMarkdown, renderContextMapHtml } from '@/shell/ideUtils';
+import { EMIT_TARGETS } from '@/shared/emitTargets';
 
 // LSP SymbolKind for a namespace — the kind the language service tags each top-level `context`
 // document symbol with. Used by followActiveFileContext to read a file's bounded context(s).
@@ -1272,13 +1273,9 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   }
 
   // --- emitted-code preview --------------------------------------------------
-  const LANGS: { id: PreviewTarget; name: string }[] = [
-    { id: 'csharp', name: 'C#' },
-    { id: 'typescript', name: 'TypeScript' },
-    { id: 'python', name: 'Python' },
-    { id: 'php', name: 'PHP' },
-    { id: 'rust', name: 'Rust' },
-  ];
+  // The Generated-tab language labels, derived from the shared EMIT_TARGETS so a new target needs no
+  // edit here (the picker, wizard and assistant enum derive from the same list — issue #282).
+  const LANGS: { id: PreviewTarget; name: string }[] = EMIT_TARGETS.map((t) => ({ id: t.id, name: t.displayName }));
   let currentTarget: PreviewTarget = deps.initialTarget;
   const previewTabEl = el<HTMLButtonElement>('tech-tab-preview');
 

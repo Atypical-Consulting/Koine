@@ -295,7 +295,7 @@ export class KoineLsp {
     this.activeUri = uri;
   }
 
-  emitPreview(target: 'csharp' | 'typescript' | 'python' | 'php' | 'rust'): Promise<EmitPreviewResult> {
+  emitPreview(target: string): Promise<EmitPreviewResult> {
     return this.request<EmitPreviewResult>('koine/emitPreview', {
       textDocument: { uri: this.activeUri },
       target,

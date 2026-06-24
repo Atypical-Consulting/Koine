@@ -7,10 +7,16 @@
 // MCP server exposes, but executed by the IDE itself. `reference`/`examples` are intentionally NOT
 // here: their content is already injected into the system prompt (KOINE_PRIMER + live source).
 import type { ChatCompletionFunctionTool } from 'openai/resources/chat/completions';
+import { EMIT_TARGETS } from '@/shared/emitTargets';
 
-/** The compile targets the in-WASM EmitPreview accepts (glossary/docs go through other exports). */
-export const COMPILE_TARGETS = ['csharp', 'typescript', 'python', 'php', 'rust'] as const;
-export type CompileTarget = (typeof COMPILE_TARGETS)[number];
+/**
+ * The compile targets the in-WASM EmitPreview accepts (glossary/docs go through other exports),
+ * derived from the shared EMIT_TARGETS so the assistant's `koine_compile` tool enum tracks the
+ * registry. Kept as `string[]`/`string` (not a closed tuple/union) so a backend-only target is
+ * offered without a front-end type edit.
+ */
+export const COMPILE_TARGETS: readonly string[] = EMIT_TARGETS.map((t) => t.id);
+export type CompileTarget = string;
 
 /** Coerce an arbitrary `target` arg to a supported compile target, defaulting to csharp. */
 export function normalizeCompileTarget(target: unknown): CompileTarget {

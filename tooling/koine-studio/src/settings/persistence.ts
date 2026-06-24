@@ -11,6 +11,7 @@
 import { loadSecret, saveSecret } from '@/ai/secrets';
 import type { ChatMessage } from '@/ai/ai';
 import { sanitizeGroups, sanitizeNotes, type DiagramGroup, type DiagramNote } from '@/diagrams/diagramContract';
+import { EMIT_TARGETS } from '@/shared/emitTargets';
 
 // --- settings model ----------------------------------------------------------
 
@@ -22,11 +23,15 @@ export type AccentName = 'blue' | 'teal' | 'violet' | 'amber';
 /** MCP client a setup recipe targets in Settings → MCP. */
 export type McpClientId = 'claude-desktop' | 'lm-studio' | 'cursor' | 'vscode' | 'generic';
 
-/** A code-generation target the emitted-code ("Generated") preview can render. */
-export type PreviewTarget = 'csharp' | 'typescript' | 'python' | 'php' | 'rust';
+/**
+ * A code-generation target id the emitted-code ("Generated") preview can render. Kept as a plain
+ * `string` (not a closed union) so a backend-only target surfaces without a front-end type edit;
+ * the set is validated at runtime against {@link PREVIEW_TARGETS} (see `coercePreviewTarget`).
+ */
+export type PreviewTarget = string;
 
-/** The supported preview targets, in display order. The single source of truth for the set. */
-export const PREVIEW_TARGETS: readonly PreviewTarget[] = ['csharp', 'typescript', 'python', 'php', 'rust'];
+/** The supported preview targets, in display order — derived from the shared {@link EMIT_TARGETS}. */
+export const PREVIEW_TARGETS: readonly PreviewTarget[] = EMIT_TARGETS.map((t) => t.id);
 
 export interface Settings {
   theme: ThemeName;

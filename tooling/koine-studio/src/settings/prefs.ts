@@ -23,6 +23,7 @@ import { ACCENTS, ACCENT_ORDER } from '@/settings/appearance';
 import { createAboutPanel } from '@/settings/about';
 import { createModal } from '@/shared/overlay';
 import { mcpJsonSnippet, MCP_CLIENTS, probeMcp } from '@/mcp/mcp';
+import { EMIT_TARGETS } from '@/shared/emitTargets';
 
 export interface PrefsCallbacks {
   /** Fired after every committed change with the merged, persisted Settings. */
@@ -241,21 +242,10 @@ export function createPreferences(cb: PrefsCallbacks): PrefsHandle {
   // The output-language picker: a card per target (identity dot + name + the file extension it
    // emits), laid out as a single-selection radio group.
   function langPicker(onSelect: (value: PreviewTarget) => void): { el: HTMLElement; set(value: PreviewTarget): void } {
-    const LABELS: Record<PreviewTarget, string> = {
-      csharp: 'C#',
-      typescript: 'TypeScript',
-      python: 'Python',
-      php: 'PHP',
-      rust: 'Rust',
-    };
-    // The file extension each target emits — a concrete, recognizable cue on every card.
-    const EXTENSIONS: Record<PreviewTarget, string> = {
-      csharp: '.cs',
-      typescript: '.ts',
-      python: '.py',
-      php: '.php',
-      rust: '.rs',
-    };
+    // Label + file extension per target, both derived from the shared EMIT_TARGETS so a new target
+    // needs no edit here (the extension is a concrete, recognizable cue on every card).
+    const LABELS: Record<string, string> = Object.fromEntries(EMIT_TARGETS.map((t) => [t.id, t.displayName]));
+    const EXTENSIONS: Record<string, string> = Object.fromEntries(EMIT_TARGETS.map((t) => [t.id, t.fileExtension]));
     const group = document.createElement('div');
     group.className = 'koi-lang-picker';
     group.setAttribute('role', 'radiogroup');
