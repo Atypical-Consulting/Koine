@@ -201,3 +201,8 @@ static Koine.Compiler.Services.ScenarioService.Error(string! target, string! ope
 static Koine.Compiler.Services.ScenarioService.Catalog(Koine.Compiler.Ast.SemanticModel! semantic) -> System.Collections.Generic.IReadOnlyDictionary<string!, object?>!
 static Koine.Compiler.Services.ScenarioService.Run(Koine.Compiler.Ast.SemanticModel! semantic, string! target, string! operation, System.Text.Json.JsonElement given, System.Text.Json.JsonElement args) -> System.Collections.Generic.IReadOnlyDictionary<string!, object?>!
 static Koine.Compiler.Services.ScenarioService.WriteJson(System.Collections.Generic.IReadOnlyDictionary<string!, object?>! tree) -> string!
+Koine.Compiler.Diagnostics.DiagnosticCategory.References = 19 -> Koine.Compiler.Diagnostics.DiagnosticCategory
+const Koine.Compiler.Diagnostics.DiagnosticCodes.ValueObjectReferencesEntity = "KOI1601" -> string!
+const Koine.Compiler.Diagnostics.DiagnosticCodes.EntityReferencesForeignAggregate = "KOI1602" -> string!
+const Koine.Compiler.Diagnostics.DiagnosticCodes.CommandParameterReferencesEntity = "KOI1603" -> string!
+const Koine.Compiler.Diagnostics.DiagnosticCodes.DomainEventReferencesEntity = "KOI1604" -> string!
