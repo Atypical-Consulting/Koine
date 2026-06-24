@@ -157,6 +157,14 @@ export interface WorkspaceController {
   saveActive(): Promise<void>;
   /** Save every dirty buffer; a failed write stays dirty and is reported. Re-entrancy guarded. */
   saveAllDirty(): Promise<void>;
+  /** Enable/disable idle auto-save; disabling cancels any pending debounce. */
+  setAutoSave(on: boolean): void;
+  /**
+   * Arm (or re-arm) the idle auto-save debounce. Called from the editor's onChange on every edit; a
+   * no-op when auto-save is off. On fire it runs the same persist as Save all (format-on-save → write
+   * dirty buffers → didSave → tree refresh).
+   */
+  scheduleAutoSave(): void;
   /** True when any open buffer has unsaved changes (the unload / window-close guard). */
   anyDirty(): boolean;
   /**
@@ -380,6 +388,7 @@ export function createWorkspaceController(deps: WorkspaceControllerDeps): Worksp
   // Used by the New-model reset so stale buffers/diagnostics can't survive a subsequent open that
   // early-returns (e.g. the reset deleted everything but re-creating model.koi failed).
   function reset(): void {
+    clearAutoSaveTimer(); // tearing the workspace down — cancel any armed auto-save first
     for (const uri of Array.from(buffers.keys())) {
       lsp.closeDoc(uri);
     }
@@ -405,6 +414,7 @@ export function createWorkspaceController(deps: WorkspaceControllerDeps): Worksp
     }
 
     // Re-opening a folder: close every previously open file first.
+    clearAutoSaveTimer(); // a pending auto-save belongs to the workspace we're leaving — drop it
     for (const uri of Array.from(buffers.keys())) {
       lsp.closeDoc(uri);
     }
@@ -698,6 +708,7 @@ export function createWorkspaceController(deps: WorkspaceControllerDeps): Worksp
   async function saveActive(): Promise<void> {
     if (saveQueued) return;
     saveQueued = true;
+    clearAutoSaveTimer(); // an explicit save subsumes any pending idle auto-save
     try {
       // Format first (mirrors the editor's Mod-S) when format-on-save is enabled, then persist.
       if (deps.getFormatOnSave()) {
@@ -736,6 +747,7 @@ export function createWorkspaceController(deps: WorkspaceControllerDeps): Worksp
   async function saveAllDirty(): Promise<void> {
     if (saveAllQueued) return;
     saveAllQueued = true;
+    clearAutoSaveTimer(); // a manual Save all subsumes any pending idle auto-save (no-op when auto-save fired this)
     try {
       if (deps.getFormatOnSave()) {
         try {
@@ -777,6 +789,43 @@ export function createWorkspaceController(deps: WorkspaceControllerDeps): Worksp
     }
   }
 
+  // --- idle auto-save (#268) ------------------------------------------------
+  // Opt-in: when enabled, every edit (re)arms a ~1000ms timer; on fire it persists through the exact
+  // saveAllDirty path (format-on-save, didSave, tree refresh, the saveAllQueued guard against an
+  // in-flight manual save). Disabling cancels any pending timer so a stale edit can't write after the
+  // user turns it off.
+  const AUTO_SAVE_DEBOUNCE_MS = 1000;
+  let autoSaveOn = false;
+  let autoSaveTimer: ReturnType<typeof setTimeout> | undefined;
+
+  function clearAutoSaveTimer(): void {
+    if (autoSaveTimer !== undefined) {
+      clearTimeout(autoSaveTimer);
+      autoSaveTimer = undefined;
+    }
+  }
+
+  function setAutoSave(on: boolean): void {
+    autoSaveOn = on;
+    if (!on) clearAutoSaveTimer();
+  }
+
+  function scheduleAutoSave(): void {
+    // Arm only when auto-save is on AND there is actually unsaved work. The editor's onChange fires on
+    // every programmatic setDoc too (a file switch, a history restore, the first folder open), which
+    // dirties nothing — without this guard each such swap would arm a timer that 1s later runs a no-op
+    // saveAllDirty and clobbers the status line with "No unsaved changes".
+    if (!autoSaveOn || dirtyCount(buffers) === 0) return;
+    clearAutoSaveTimer();
+    autoSaveTimer = setTimeout(() => {
+      autoSaveTimer = undefined;
+      // Yield to an in-flight manual save (Mod-S saveActive / Save all) rather than racing format +
+      // write on the same buffer; the next edit re-arms the debounce.
+      if (saveQueued || saveAllQueued) return;
+      void saveAllDirty();
+    }, AUTO_SAVE_DEBOUNCE_MS);
+  }
+
   return {
     buffers,
     activeUri: () => activeUriValue,
@@ -792,6 +841,8 @@ export function createWorkspaceController(deps: WorkspaceControllerDeps): Worksp
     reset,
     saveActive,
     saveAllDirty,
+    setAutoSave,
+    scheduleAutoSave,
     anyDirty,
     syncActiveBuffer,
     handleNewFile,

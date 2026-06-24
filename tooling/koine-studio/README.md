@@ -128,6 +128,23 @@ cd tooling/koine-studio && npm install && npm run build
   `planReplacements`); `src/shell/searchController.tsx` — the `Mod`+`Shift`+`F` search panel.
 - `index.html` / `src/styles.css` — toolbar + split editor/output panes + diagnostics strip.
 
+## Canvas layout & annotations (`koine.layout.json`)
+
+The authoring canvas persists its layout per workspace in a committable **`koine.layout.json`** at the
+models-folder root (or browser storage in web/scratch mode) — see `src/diagrams/layoutStore.ts`. It is a
+**view concern only**: nothing here round-trips into `.koi` (the compiler stays the single source of truth
+for the model). The file is a versioned, minimal-diff envelope (`version: 2`):
+
+- `positions` — hand-dragged node positions, keyed by qualified name.
+- `notes` — **canvas-only annotations**: free text + position/size. Add via the palette's **Note** button;
+  double-click to edit, right-click to delete.
+- `groups` — **canvas-only annotations**: a labelled region drawn *behind* a set of nodes (by qualified
+  name). Add via the palette's **Group** button (groups the current selection, or all nodes if none is
+  selected); the rectangle is derived from the members' bounding box, so a group follows them as they move.
+
+Notes and Group are *not* `.koi` constructs (per the #148 go/no-go) — they never create a second source of
+truth. "Auto-arrange" resets node positions only; annotations are preserved.
+
 ## Research notes
 
 - [`docs/mobile-wasm-spike.md`](docs/mobile-wasm-spike.md) — measurement spike ([#219](https://github.com/Atypical-Consulting/Koine/issues/219)):
