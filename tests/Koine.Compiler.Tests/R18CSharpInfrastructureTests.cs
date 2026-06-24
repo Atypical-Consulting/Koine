@@ -718,6 +718,82 @@ public class R18CSharpInfrastructureTests
     }
 
     // ----------------------------------------------------------------------
+    // EF Core round-trip: scalar-only and OwnsOne aggregates must MATERIALIZE (issue #276)
+    // ----------------------------------------------------------------------
+    // The same root cause as #171, broadened: an aggregate root with no value-object *collection*
+    // — a scalar-only root, or a root that owns a *scalar* value object (OwnsOne) — also fails to
+    // materialize, because its all-args constructor's owned parameter is a navigation EF cannot bind
+    // and the get-only property cannot be set after construction. EF needs the parameterless
+    // persistence constructor + field access for *every* persisted root, not only collection owners.
+
+    [Fact]
+    public void Scalar_only_aggregate_round_trips_through_ef_core()
+    {
+        // entity Product identified by ProductId { name: String } — a root with only a primitive
+        // field. Construct, save, re-query, assert Name survived.
+        var files = EmitInfra("""
+            context Catalog {
+              aggregate Product root Product {
+                entity Product identified by ProductId { name: String }
+              }
+            }
+            """);
+        using var harness = TestSupport.EfRoundTripHarness.Create(files, "CatalogDbContext");
+
+        var productType = harness.Type("Product");
+        var productIdType = harness.Type("ProductId");
+
+        var productId = productIdType.GetMethod("New", BindingFlags.Public | BindingFlags.Static)!.Invoke(null, null)!;
+        var product = Activator.CreateInstance(productType, productId, "Widget")!;
+
+        using (var write = harness.NewContext())
+        {
+            write.Add(product);
+            write.SaveChanges();
+        }
+
+        using var read = harness.NewContext();
+        var loaded = TestSupport.EfRoundTripHarness.Query(read, productType).ShouldHaveSingleItem();
+        productType.GetProperty("Name")!.GetValue(loaded).ShouldBe("Widget");
+    }
+
+    [Fact]
+    public void Owns_one_value_object_aggregate_round_trips_through_ef_core()
+    {
+        // value Money { amount: Decimal  currency: String }, entity Order { total: Money } — a root
+        // that owns a *scalar* value object (OwnsOne). Assert Total.Amount / Total.Currency survived.
+        var files = EmitInfra("""
+            context Sales {
+              value Money { amount: Decimal  currency: String }
+              aggregate Order root Order {
+                entity Order identified by OrderId { total: Money }
+              }
+            }
+            """);
+        using var harness = TestSupport.EfRoundTripHarness.Create(files, "SalesDbContext");
+
+        var orderType = harness.Type("Order");
+        var orderIdType = harness.Type("OrderId");
+        var moneyType = harness.Type("Money");
+
+        var money = Activator.CreateInstance(moneyType, 9.99m, "USD")!;
+        var orderId = orderIdType.GetMethod("New", BindingFlags.Public | BindingFlags.Static)!.Invoke(null, null)!;
+        var order = Activator.CreateInstance(orderType, orderId, money)!;
+
+        using (var write = harness.NewContext())
+        {
+            write.Add(order);
+            write.SaveChanges();
+        }
+
+        using var read = harness.NewContext();
+        var loaded = TestSupport.EfRoundTripHarness.Query(read, orderType).ShouldHaveSingleItem();
+        var loadedTotal = orderType.GetProperty("Total")!.GetValue(loaded)!;
+        moneyType.GetProperty("Amount")!.GetValue(loadedTotal).ShouldBe(9.99m);
+        moneyType.GetProperty("Currency")!.GetValue(loadedTotal).ShouldBe("USD");
+    }
+
+    // ----------------------------------------------------------------------
     // Domain shape: value-object collections are backed by a mutable list (issue #171)
     // ----------------------------------------------------------------------
 
