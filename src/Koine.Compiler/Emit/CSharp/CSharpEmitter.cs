@@ -802,6 +802,19 @@ public sealed partial class CSharpEmitter : IEmitter
         var storedFields = bound.StoredFields.ToList();
         IReadOnlyList<BoundInvariant> invariants = bound.Invariants;
 
+        // A value object that itself owns a value-object collection (a nested OwnsMany, issue #171) backs
+        // it with a mutable list and gains a parameterless constructor so EF can materialize it (its
+        // collection parameter is a navigation and can never bind).
+        var backedListFields = storedFields
+            .Where(f => IsValueObjectList(((Member)f.Syntax).Type, index))
+            .Select(f => f.Name)
+            .ToHashSet(StringComparer.Ordinal);
+
+        if (backedListFields.Count > 0)
+        {
+            sb.Append(Indent).Append("private ").Append(typeName).Append("() { }\n\n");
+        }
+
         sb.Append(Indent).Append("public ").Append(typeName).Append('(');
         var firstParam = true;
         foreach (BoundField f in bound.CtorParams)
@@ -833,7 +846,7 @@ public sealed partial class CSharpEmitter : IEmitter
 
         foreach (BoundField f in storedFields)
         {
-            WriteAssignment(sb, f, typeMapper);
+            WriteAssignment(sb, f, typeMapper, backed: backedListFields.Contains(f.Name));
         }
 
         sb.Append(Indent).Append("}\n");
@@ -847,6 +860,22 @@ public sealed partial class CSharpEmitter : IEmitter
         CSharpTypeMapper typeMapper,
         ModelIndex index)
     {
+        // Value-object collections are backed by a mutable private list (issue #171); the all-args
+        // constructor populates them via the backing field rather than the read-only property.
+        var mutated = MutatedFields(entity);
+        var backedListMembers = ctorMembers
+            .Where(m => IsValueObjectList(m.Type, index) && !mutated.Contains(m.Name))
+            .Select(m => m.Name)
+            .ToHashSet(StringComparer.Ordinal);
+
+        // An aggregate that owns a value-object collection gets a parameterless constructor for the
+        // persistence layer: EF Core materializes it through this ctor (the collection parameter is a
+        // navigation and can never bind), then populates the owned collection via field access.
+        if (backedListMembers.Count > 0)
+        {
+            sb.Append(Indent).Append("private ").Append(entity.Name).Append("() { }\n\n");
+        }
+
         // When the entity declares a factory, construction is funneled through it:
         // the all-args constructor becomes private (callable only by the static
         // factory on the same class). Without a factory, it stays public (R8.2).
@@ -873,7 +902,7 @@ public sealed partial class CSharpEmitter : IEmitter
         sb.Append(Indent).Append(Indent).Append("Id = id;\n");
         foreach (Member m in ctorMembers)
         {
-            WriteAssignment(sb, m, typeMapper);
+            WriteAssignment(sb, m, typeMapper, backed: backedListMembers.Contains(m.Name));
         }
 
         // Invariants are validated once, through the shared CheckInvariants() method
@@ -977,13 +1006,43 @@ public sealed partial class CSharpEmitter : IEmitter
     private static StringBuilder AppendNullable(StringBuilder sb, string csType) =>
         csType.EndsWith('?') ? sb.Append(csType) : sb.Append(csType).Append('?');
 
-    private void WriteAssignment(StringBuilder sb, Member m, CSharpTypeMapper typeMapper)
+    private void WriteAssignment(StringBuilder sb, Member m, CSharpTypeMapper typeMapper, bool backed = false)
     {
-        var prop = CSharpNaming.ToPascalCase(m.Name);
         var param = CSharpNaming.ToCamelCase(m.Name);
+        if (backed)
+        {
+            // A value-object collection backed by a mutable list (issue #171): copy the caller's
+            // elements into the backing field (defensive copy preserved). An optional collection is
+            // copied only when supplied, mirroring the read-only-copy shape's null guard.
+            AppendBackingFieldPopulation(sb, m, param, typeMapper);
+            return;
+        }
+
+        var prop = CSharpNaming.ToPascalCase(m.Name);
         sb.Append(Indent).Append(Indent).Append(prop).Append(" = ");
         AppendCopyExpression(sb, m.Type, param, typeMapper);
         sb.Append(";\n");
+    }
+
+    /// <summary>
+    /// Populates a value-object collection's mutable backing field from its constructor parameter,
+    /// preserving the defensive-copy semantics of the former read-only-copy assignment (issue #171).
+    /// A required collection appends into the field-initialized list; an optional one assigns a fresh
+    /// copy (or null) since its backing field is nullable and uninitialized.
+    /// </summary>
+    private static void AppendBackingFieldPopulation(StringBuilder sb, Member m, string param, CSharpTypeMapper typeMapper)
+    {
+        var field = BackingFieldName(m.Name);
+        if (m.Type.IsOptional)
+        {
+            var elem = typeMapper.Map(m.Type.Element ?? ObjectType);
+            sb.Append(Indent).Append(Indent).Append(field).Append(" = ").Append(param)
+              .Append(" is null ? null : new List<").Append(elem).Append(">(").Append(param).Append(");\n");
+        }
+        else
+        {
+            sb.Append(Indent).Append(Indent).Append(field).Append(".AddRange(").Append(param).Append(");\n");
+        }
     }
 
     /// <summary>
@@ -991,10 +1050,18 @@ public sealed partial class CSharpEmitter : IEmitter
     /// by the field's lowered <see cref="BoundField.CollectionShape"/> rather than re-classifying the type.
     /// Byte-identical to the <see cref="Member"/> overload.
     /// </summary>
-    private void WriteAssignment(StringBuilder sb, BoundField f, CSharpTypeMapper typeMapper)
+    private void WriteAssignment(StringBuilder sb, BoundField f, CSharpTypeMapper typeMapper, bool backed = false)
     {
-        var prop = CSharpNaming.ToPascalCase(f.Name);
         var param = CSharpNaming.ToCamelCase(f.Name);
+        if (backed)
+        {
+            // A nested value-object collection backed by a mutable list (issue #171): same defensive-copy
+            // population as the entity overload, driven off the lowered field's syntactic member type.
+            AppendBackingFieldPopulation(sb, (Member)f.Syntax, param, typeMapper);
+            return;
+        }
+
+        var prop = CSharpNaming.ToPascalCase(f.Name);
         sb.Append(Indent).Append(Indent).Append(prop).Append(" = ");
         AppendCopyExpression(sb, f, param, typeMapper);
         sb.Append(";\n");
@@ -1150,6 +1217,21 @@ public sealed partial class CSharpEmitter : IEmitter
     }
 
     private static readonly TypeRef ObjectType = new("object");
+
+    /// <summary>
+    /// True when a member is a <c>List&lt;T&gt;</c> whose element is a value object — the shape the EF
+    /// Core Infrastructure layer maps with <c>OwnsMany</c> (issue #171). Such a collection is backed by
+    /// a mutable private <c>List&lt;T&gt;</c> so EF can materialize owned children into it, while the
+    /// public surface stays a read-only <c>IReadOnlyList&lt;T&gt;</c>. Scalar (<c>String</c>/<c>Int</c>/…)
+    /// and set/map collections are deliberately excluded — they keep the read-only-copy shape.
+    /// </summary>
+    internal static bool IsValueObjectList(TypeRef type, ModelIndex index) =>
+        CSharpTypeMapper.IsList(type)
+        && type.Element is { } element
+        && index.Classify(element.Name) == TypeKind.Value;
+
+    /// <summary>The mutable backing field name for a value-object collection member (e.g. <c>_lines</c>).</summary>
+    private static string BackingFieldName(string memberName) => "_" + CSharpNaming.ToCamelCase(memberName);
 
     /// <summary>
     /// Orders constructor parameters so those with a C# default value (constant

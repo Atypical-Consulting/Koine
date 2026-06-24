@@ -538,6 +538,57 @@ public class R18CSharpInfrastructureTests
         lineType.GetProperty("Quantity")!.GetValue(loadedLine).ShouldBe(2);
     }
 
+    // ----------------------------------------------------------------------
+    // Domain shape: value-object collections are backed by a mutable list (issue #171)
+    // ----------------------------------------------------------------------
+
+    private static string DomainEntity(string fixture, string entityFile)
+    {
+        var result = new KoineCompiler().Compile(fixture, new CSharpEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+        return result.Files.Single(f => f.RelativePath.EndsWith(entityFile, StringComparison.Ordinal)).Contents;
+    }
+
+    [Fact]
+    public void Value_object_collection_entity_is_backed_by_a_mutable_list_with_readonly_surface()
+    {
+        var order = DomainEntity("""
+            context Sales {
+              value OrderLine { sku: String  quantity: Int }
+              aggregate Order root Order {
+                entity Order identified by OrderId { lines: List<OrderLine> }
+              }
+            }
+            """, "Order.cs");
+
+        // Mutable private backing list EF can materialize into, exposed read-only.
+        order.ShouldContain("private readonly List<OrderLine> _lines = new();");
+        order.ShouldContain("public IReadOnlyList<OrderLine> Lines => _lines;");
+        // Defensive copy preserved (constructor copies the caller's list into the backing field).
+        order.ShouldContain("_lines.AddRange(lines);");
+        order.ShouldNotContain("new List<OrderLine>(lines).AsReadOnly()");
+        // A parameterless constructor so EF can materialize the aggregate (its collection
+        // constructor parameter can never bind to a navigation).
+        order.ShouldContain("private Order()");
+    }
+
+    [Fact]
+    public void Scalar_collection_entity_keeps_the_read_only_collection_shape_byte_for_byte()
+    {
+        var doc = DomainEntity("""
+            context Docs {
+              aggregate Doc root Doc { entity Doc identified by DocId { tags: List<String> } }
+            }
+            """, "Doc.cs");
+
+        // A scalar (String) collection is intentionally left to EF's primitive-collection convention:
+        // unchanged read-only property + defensive AsReadOnly copy, no backing field, no EF ctor.
+        doc.ShouldContain("public IReadOnlyList<string> Tags { get; }");
+        doc.ShouldContain("Tags = new List<string>(tags).AsReadOnly();");
+        doc.ShouldNotContain("_tags");
+        doc.ShouldNotContain("private Doc()");
+    }
+
     [Fact]
     public void Smart_enum_used_by_multiple_aggregates_shares_one_converter()
     {

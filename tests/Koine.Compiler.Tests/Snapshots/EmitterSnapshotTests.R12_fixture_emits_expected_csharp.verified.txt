@@ -242,8 +242,11 @@ public sealed class Order : IAggregateRoot
 {
     public OrderId Id { get; }
     public CustomerId Customer { get; }
-    public IReadOnlyList<OrderLine> Lines { get; }
+    private readonly List<OrderLine> _lines = new();
+    public IReadOnlyList<OrderLine> Lines => _lines;
     public OrderStatus Status { get; }
+
+    private Order() { }
 
     public Order(OrderId id, CustomerId customer, IReadOnlyList<OrderLine> lines, OrderStatus? status = null)
     {
@@ -251,7 +254,7 @@ public sealed class Order : IAggregateRoot
 
         Id = id;
         Customer = customer;
-        Lines = new List<OrderLine>(lines).AsReadOnly();
+        _lines.AddRange(lines);
         Status = status;
     }
 
