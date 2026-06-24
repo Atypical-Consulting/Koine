@@ -51,6 +51,9 @@ public sealed partial class PythonEmitter
             {
                 files.Add(EmitIntegrationEventDispatcher(ctx.Name));
             }
+
+            files.Add(EmitBehaviors(ctx.Name));
+            files.Add(EmitProvider(ctx.Name, aggregates, publishesEvents));
         }
 
         if (anyEmitted)

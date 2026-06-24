@@ -153,6 +153,58 @@ public class PythonInfrastructureSnapshotTests
         Emit(Fixture).ShouldNotContain(f => f.RelativePath.EndsWith("integration_event_dispatcher.py", StringComparison.Ordinal));
     }
 
+    /// <summary>The pipeline behaviors + provider factory must match the snapshot.</summary>
+    [Fact]
+    public Task Python_infrastructure_behaviors_and_provider_emit_expected_python()
+    {
+        var result = new KoineCompiler().Compile(Fixture, new PythonEmitter(InfraOptions));
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var infraFiles = result.Files
+            .Where(f => f.RelativePath.Contains("/infrastructure/", StringComparison.Ordinal)
+                && (f.RelativePath.EndsWith("behaviors.py", StringComparison.Ordinal)
+                    || f.RelativePath.EndsWith("_infrastructure.py", StringComparison.Ordinal)))
+            .ToList();
+
+        return Verify(TestSupport.Render(infraFiles))
+            .UseDirectory("Snapshots");
+    }
+
+    /// <summary>The behaviors are emitted as validation + transaction pipeline-behavior factories.</summary>
+    [Fact]
+    public void Behaviors_are_emitted_as_validation_and_transaction_factories()
+    {
+        var behaviors = Emit(Fixture).Single(f => f.RelativePath == "sales/infrastructure/behaviors.py").Contents;
+
+        behaviors.ShouldContain("def validation_behavior(");
+        behaviors.ShouldContain("raise ValidationError(errors)");
+        behaviors.ShouldContain("def transaction_behavior(");
+        behaviors.ShouldContain("await unit_of_work.save_changes()");
+    }
+
+    /// <summary>The provider assembles repositories, the unit of work and the behaviors.</summary>
+    [Fact]
+    public void Provider_assembles_the_infrastructure()
+    {
+        var provider = Emit(Fixture).Single(f => f.RelativePath == "sales/infrastructure/sales_infrastructure.py").Contents;
+
+        provider.ShouldContain("def create_sales_infrastructure() -> SalesInfrastructure:");
+        provider.ShouldContain("unit_of_work = UnitOfWork(orders, customers)");
+        provider.ShouldContain("validation_behavior(),");
+        provider.ShouldContain("transaction_behavior(unit_of_work),");
+    }
+
+    /// <summary>A publishing context's provider wires the outbox dispatcher and takes a handler.</summary>
+    [Fact]
+    public void Publishing_provider_wires_the_dispatcher()
+    {
+        var provider = Emit(PublishingFixture).Single(f => f.RelativePath == "ordering/infrastructure/ordering_infrastructure.py").Contents;
+
+        provider.ShouldContain("def create_ordering_infrastructure(handler: IntegrationEventHandler) -> OrderingInfrastructure:");
+        provider.ShouldContain("dispatcher = IntegrationEventDispatcher(outbox, handler)");
+        provider.ShouldContain("dispatcher: IntegrationEventDispatcher");
+    }
+
     /// <summary>The shared infrastructure-runtime module is emitted once at the output root.</summary>
     [Fact]
     public void Shared_infrastructure_runtime_is_emitted_once()
