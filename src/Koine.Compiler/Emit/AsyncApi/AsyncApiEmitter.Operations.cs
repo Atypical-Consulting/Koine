@@ -35,11 +35,14 @@ public sealed partial class AsyncApiEmitter
                 }
             }
 
-            // Receives — this context subscribes to a published event the context map authorizes.
-            // Subscriptions are validated at compile time, so MaySubscribe is a belt-and-braces guard.
+            // Receives — this context subscribes to a published event. Subscriptions are validated
+            // before emit (an unauthorized subscribe is a compile error that blocks emission, and a
+            // map-less subscribe is permitted), so every surviving subscribe gets a receive op as long
+            // as the event actually has a channel. Gating on MaySubscribe here would wrongly drop the
+            // valid map-less case, where no relation exists to authorize against.
             foreach (SubscribeDecl sub in ctx.Subscribes)
             {
-                if (channels.Contains(sub.EventName) && index.MaySubscribe(sub.Context, ctx.Name))
+                if (channels.Contains(sub.EventName))
                 {
                     operations[$"{ctx.Name}_receive_{sub.EventName}"] = new Operation("receive", sub.EventName, ctx.Name);
                 }
@@ -60,7 +63,7 @@ public sealed partial class AsyncApiEmitter
             sb.Append("    channel:\n");
             sb.Append("      $ref: '#/channels/").Append(op.Channel).Append("'\n");
             sb.Append("    tags:\n");
-            sb.Append("      - name: ").Append(op.Context).Append('\n');
+            sb.Append("      - name: ").Append(YamlValue(op.Context)).Append('\n');
         }
     }
 }

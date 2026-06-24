@@ -27,7 +27,7 @@ public sealed partial class AsyncApiEmitter
         foreach (IntegrationEventDecl ie in events)
         {
             sb.Append("  ").Append(ie.Name).Append(":\n");
-            sb.Append("    address: ").Append(ie.Name).Append('\n');
+            sb.Append("    address: ").Append(YamlValue(ie.Name)).Append('\n');
             sb.Append("    messages:\n");
             sb.Append("      ").Append(ie.Name).Append(":\n");
             sb.Append("        $ref: '#/components/messages/").Append(ie.Name).Append("'\n");

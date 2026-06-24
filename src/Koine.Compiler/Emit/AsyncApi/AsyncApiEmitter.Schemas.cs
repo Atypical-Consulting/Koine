@@ -61,20 +61,45 @@ public sealed partial class AsyncApiEmitter
     /// <summary>
     /// Renders the JSON-Schema body for one field type at <paramref name="indent"/>: a primitive's
     /// type/format, an inline string enum, a <c>$ref</c> to a shared ID schema or a nested event's
-    /// payload, or a defensive array wrapper for the (atypical) collection field.
+    /// payload, or the structural shape of a collection field (list/set → array, map → object,
+    /// range → a min/max object). Recurses into element/value types so nested IDs still register.
     /// </summary>
     private static void EmitTypeRef(StringBuilder sb, TypeRef type, ModelIndex index, SortedSet<string> sharedIds, string indent)
     {
-        if (type.Element is not null)
-        {
-            sb.Append(indent).Append("type: array\n");
-            sb.Append(indent).Append("items:\n");
-            EmitTypeRef(sb, type.Element, index, sharedIds, indent + "  ");
-            return;
-        }
-
         switch (index.Classify(type.Name))
         {
+            case TypeKind.List:
+                sb.Append(indent).Append("type: array\n");
+                sb.Append(indent).Append("items:\n");
+                EmitTypeRef(sb, type.Element!, index, sharedIds, indent + "  ");
+                break;
+
+            case TypeKind.Set:
+                // A set is an array whose items are unique.
+                sb.Append(indent).Append("type: array\n");
+                sb.Append(indent).Append("uniqueItems: true\n");
+                sb.Append(indent).Append("items:\n");
+                EmitTypeRef(sb, type.Element!, index, sharedIds, indent + "  ");
+                break;
+
+            case TypeKind.Map:
+                // JSON-Schema object keys are always strings, so a map is an object whose values
+                // (the map's value type) are described by additionalProperties.
+                sb.Append(indent).Append("type: object\n");
+                sb.Append(indent).Append("additionalProperties:\n");
+                EmitTypeRef(sb, type.Value!, index, sharedIds, indent + "  ");
+                break;
+
+            case TypeKind.Range:
+                // A range is a { min, max } pair of its element type.
+                sb.Append(indent).Append("type: object\n");
+                sb.Append(indent).Append("properties:\n");
+                sb.Append(indent).Append("  min:\n");
+                EmitTypeRef(sb, type.Element!, index, sharedIds, indent + "    ");
+                sb.Append(indent).Append("  max:\n");
+                EmitTypeRef(sb, type.Element!, index, sharedIds, indent + "    ");
+                break;
+
             case TypeKind.Enum:
                 sb.Append(indent).Append("type: string\n");
                 if (index.TryGetDecl(type.Name, out TypeDecl decl) && decl is EnumDecl en)
@@ -82,7 +107,7 @@ public sealed partial class AsyncApiEmitter
                     sb.Append(indent).Append("enum:\n");
                     foreach (var member in en.MemberNames)
                     {
-                        sb.Append(indent).Append("  - ").Append(member).Append('\n');
+                        sb.Append(indent).Append("  - ").Append(YamlValue(member)).Append('\n');
                     }
                 }
 

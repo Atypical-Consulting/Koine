@@ -196,6 +196,111 @@ public class R18AsyncApiEmitterTests
     }
 
     [Fact]
+    public Task Collection_and_map_fields_emit_correct_schemas()
+    {
+        const string source = """
+            context Sales {
+              integration event OrderPlaced {
+                lineItems: List<OrderId>
+                labels:    Set<String>
+                metadata:  Map<String, Int>
+                note:      String?
+              }
+              publishes OrderPlaced
+            }
+            """;
+
+        var result = new KoineCompiler().Compile(source, new AsyncApiEmitter());
+
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+        var yaml = result.Files.ShouldHaveSingleItem().Contents;
+
+        // A list is an array; a set is an array of unique items; a map is an object keyed by its values.
+        yaml.ShouldContain("type: array");
+        yaml.ShouldContain("uniqueItems: true");
+        yaml.ShouldContain("additionalProperties:");
+        // The optional field is not required.
+        yaml.ShouldNotContain("- note");
+
+        return Verify(yaml).UseDirectory("Snapshots");
+    }
+
+    [Fact]
+    public void Enum_members_that_collide_with_yaml_booleans_are_quoted()
+    {
+        // `On`/`Off` are YAML 1.1 booleans, so they must be quoted to round-trip as strings; a plain
+        // member like `Draft` stays unquoted.
+        const string source = """
+            context Sales {
+              enum Switch { On, Off, Draft }
+              integration event Toggled {
+                state: Switch
+              }
+              publishes Toggled
+            }
+            """;
+
+        var result = new KoineCompiler().Compile(source, new AsyncApiEmitter());
+
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+        var yaml = result.Files.ShouldHaveSingleItem().Contents;
+
+        yaml.ShouldContain("- \"On\"");
+        yaml.ShouldContain("- \"Off\"");
+        yaml.ShouldContain("- Draft");
+    }
+
+    [Fact]
+    public void Subscribes_without_a_context_map_still_emits_a_receive_op()
+    {
+        // A subscription is valid without a context map (the map only gates authorization when present),
+        // so a receive operation must still be emitted for it.
+        const string source = """
+            context Sales {
+              integration event OrderPlaced {
+                orderId: String
+              }
+              publishes OrderPlaced
+            }
+
+            context Shipping {
+              subscribes Sales.OrderPlaced
+            }
+            """;
+
+        var result = new KoineCompiler().Compile(source, new AsyncApiEmitter());
+
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+        var yaml = result.Files.ShouldHaveSingleItem().Contents;
+
+        yaml.ShouldContain("  Shipping_receive_OrderPlaced:");
+        yaml.ShouldContain("action: receive");
+    }
+
+    [Fact]
+    public void Doc_summary_with_yaml_metacharacters_is_escaped()
+    {
+        // A doc comment carrying `:`, `"`, and `#` must be quoted/escaped so the summary stays valid YAML.
+        const string source = """
+            context Sales {
+              /// Fires when "status: placed" — see #orders.
+              integration event OrderPlaced {
+                orderId: String
+              }
+              publishes OrderPlaced
+            }
+            """;
+
+        var result = new KoineCompiler().Compile(source, new AsyncApiEmitter());
+
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+        var yaml = result.Files.ShouldHaveSingleItem().Contents;
+
+        // Double-quoted with the embedded quotes escaped; the colon/hash ride safely inside the quotes.
+        yaml.ShouldContain("summary: \"Fires when \\\"status: placed\\\" — see #orders.\"");
+    }
+
+    [Fact]
     public void Emitted_yaml_is_valid_per_the_asyncapi_cli_when_enabled()
     {
         // External conformance: gated behind KOINE_ASYNCAPI_VALIDATE so the suite stays hermetic.

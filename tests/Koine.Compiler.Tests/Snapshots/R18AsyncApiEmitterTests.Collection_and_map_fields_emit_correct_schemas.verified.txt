@@ -1,0 +1,48 @@
+﻿asyncapi: 3.0.0
+info:
+  title: Integration Events
+  version: 1.0.0
+channels:
+  OrderPlaced:
+    address: OrderPlaced
+    messages:
+      OrderPlaced:
+        $ref: '#/components/messages/OrderPlaced'
+operations:
+  Sales_send_OrderPlaced:
+    action: send
+    channel:
+      $ref: '#/channels/OrderPlaced'
+    tags:
+      - name: Sales
+components:
+  messages:
+    OrderPlaced:
+      name: OrderPlaced
+      payload:
+        $ref: '#/components/schemas/OrderPlacedPayload'
+  schemas:
+    OrderPlacedPayload:
+      type: object
+      properties:
+        lineItems:
+          type: array
+          items:
+            $ref: '#/components/schemas/OrderId'
+        labels:
+          type: array
+          uniqueItems: true
+          items:
+            type: string
+        metadata:
+          type: object
+          additionalProperties:
+            type: integer
+        note:
+          type: string
+      required:
+        - lineItems
+        - labels
+        - metadata
+    OrderId:
+      type: string

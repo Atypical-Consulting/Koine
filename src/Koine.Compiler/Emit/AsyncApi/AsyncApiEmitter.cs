@@ -67,7 +67,11 @@ public sealed partial class AsyncApiEmitter : IEmitter
     private static IReadOnlyList<IntegrationEventDecl> CollectEvents(KoineModel model)
     {
         var byName = new SortedDictionary<string, IntegrationEventDecl>(StringComparer.Ordinal);
-        foreach (ContextNode ctx in model.Contexts)
+
+        // Iterate contexts in a stable (name) order, not declaration order, so that when two contexts
+        // declare an integration event of the same name the winner is deterministic regardless of how
+        // the sources were enumerated (directory mode merges many files into one model).
+        foreach (ContextNode ctx in model.Contexts.OrderBy(c => c.Name, StringComparer.Ordinal))
         {
             foreach (IntegrationEventDecl ie in ctx.AllTypeDecls().OfType<IntegrationEventDecl>())
             {
@@ -78,15 +82,68 @@ public sealed partial class AsyncApiEmitter : IEmitter
         return byName.Values.ToList();
     }
 
+    /// <summary>YAML 1.1 plain scalars that a permissive parser would coerce to a bool/null.</summary>
+    private static readonly HashSet<string> YamlReservedScalars = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "true", "false", "yes", "no", "on", "off", "null", "y", "n", "~",
+    };
+
     /// <summary>
-    /// Renders <paramref name="text"/> as a safe single-line YAML scalar: folded to one line and
-    /// double-quoted with the minimal escapes, so doc/summary text carrying YAML metacharacters
-    /// (<c>:</c>, <c>#</c>, …) stays valid.
+    /// Renders an identifier-derived scalar (enum member, channel address, tag name) for a value
+    /// position: plain when unambiguous, double-quoted when it would otherwise be misread — empty, a
+    /// YAML 1.1 bool/null token (e.g. <c>Off</c>, <c>Yes</c>), or carrying a non-identifier character.
+    /// </summary>
+    private static string YamlValue(string value) => NeedsQuoting(value) ? YamlScalar(value) : value;
+
+    private static bool NeedsQuoting(string value)
+    {
+        if (value.Length == 0 || YamlReservedScalars.Contains(value))
+        {
+            return true;
+        }
+
+        foreach (char c in value)
+        {
+            if (!char.IsLetterOrDigit(c) && c != '_')
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Renders <paramref name="text"/> as a safe single-line double-quoted YAML scalar: whitespace
+    /// (incl. tabs/newlines) folded to single spaces and trimmed, backslash and quote escaped, and any
+    /// remaining C0 control characters dropped — so free-form doc/summary text always stays valid YAML.
     /// </summary>
     private static string YamlScalar(string text)
     {
-        var folded = text.Replace('\r', ' ').Replace('\n', ' ').Trim();
-        var escaped = folded.Replace("\\", "\\\\").Replace("\"", "\\\"");
-        return "\"" + escaped + "\"";
+        var folded = text.Replace('\r', ' ').Replace('\n', ' ').Replace('\t', ' ').Trim();
+        var sb = new StringBuilder(folded.Length + 2);
+        sb.Append('"');
+        foreach (char c in folded)
+        {
+            switch (c)
+            {
+                case '\\':
+                    sb.Append("\\\\");
+                    break;
+                case '"':
+                    sb.Append("\\\"");
+                    break;
+                default:
+                    if (c >= 0x20)
+                    {
+                        sb.Append(c);
+                    }
+
+                    break;
+            }
+        }
+
+        sb.Append('"');
+        return sb.ToString();
     }
 }
