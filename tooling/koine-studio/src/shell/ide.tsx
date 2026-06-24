@@ -55,6 +55,7 @@ import {
   NODE_NAVIGATE_EVENT,
   setDiagramEditing,
   type AddNodeKind,
+  type AggregateMemberKind,
   type CanvasAnnotationKind,
   type DiagramAnnotationCreateDetail,
   type DiagramConnectDetail,
@@ -488,6 +489,7 @@ export function init(): () => void {
     onApplyStructuredEdit: (edit, successMsg) => void applyStructuredEdit(edit, successMsg),
     onAddConstruct: (kind) => void applyDiagramAddType({ kind }),
     onAddAnnotation: (kind) => createCanvasAnnotation(kind),
+    onAddAggregateMember: (kind, aggregateQn) => void applyDiagramAddAggregateMember(kind, aggregateQn),
     gotoSourceSpan: (span) => void gotoSourceSpan(span),
     ensureAssistant: () => ensureAssistant(),
     ensureScenarios: () => ensureScenarios(),
@@ -772,6 +774,34 @@ export function init(): () => void {
     if (!name) return;
     // The AddNodeKind string IS the construct keyword the server's TryAddType switches on (StructuredEdit.Type).
     await applyStructuredEdit({ kind: 'addType', target: scope, name, type: kind }, `Added ${name} to ${scope}`);
+  }
+
+  // Insert a construct that lives INSIDE an aggregate (#254). Unlike applyDiagramAddType, the target is the
+  // SELECTED aggregate's qualified name (the palette gates these buttons on an aggregate selection), and the
+  // edit is `addAggregateMember`. A rule (an aggregate-scoped `spec`) is named; a repository is anonymous,
+  // so it inserts directly. The Type string IS the member keyword the server's TryAddAggregateMember switches on.
+  async function applyDiagramAddAggregateMember(kind: AggregateMemberKind, aggregateQn: string): Promise<void> {
+    const aggregateName = aggregateQn.split('.').pop() ?? aggregateQn;
+    if (kind === 'rule') {
+      const name = await promptDialog.ask({
+        title: 'New rule',
+        message: `An aggregate-scoped specification over ${aggregateName}.`,
+        label: 'Name',
+        initialValue: 'NewRule',
+        mono: true,
+        confirmLabel: 'Create',
+      });
+      if (!name) return;
+      await applyStructuredEdit(
+        { kind: 'addAggregateMember', target: aggregateQn, name, type: 'rule' },
+        `Added rule ${name} to ${aggregateName}`,
+      );
+      return;
+    }
+    await applyStructuredEdit(
+      { kind: 'addAggregateMember', target: aggregateQn, type: 'repository' },
+      `Added a repository to ${aggregateName}`,
+    );
   }
 
   // Clicking a diagram node both jumps to its declaration AND selects it, so the element inspector

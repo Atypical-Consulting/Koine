@@ -102,6 +102,14 @@ export interface DiagramAnnotationCreateDetail {
 export type AddNodeKind = 'aggregate' | 'entity' | 'value' | 'enum' | 'event' | 'service';
 
 /**
+ * Constructs that live INSIDE an aggregate (#254): the palette inserts them into the SELECTED aggregate
+ * via the compiler's `addAggregateMember` edit (carried in `StructuredEdit.Type`), not the context-scoped
+ * `addType`. `repository` adds the root's repository block; `rule` adds an aggregate-scoped `spec` — a
+ * named, reusable boolean rule over the root.
+ */
+export type AggregateMemberKind = 'repository' | 'rule';
+
+/**
  * The three doorways the empty-canvas state offers. Each maps to a starting `.koi` shape (ide.tsx seeds
  * a guaranteed-valid starter for the picked kind), so a brand-new model can fill its canvas in one click.
  */

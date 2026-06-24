@@ -168,6 +168,7 @@ const Koine.Compiler.Services.StructuredEditKind.RemoveMember = "removeMember" -
 const Koine.Compiler.Services.StructuredEditKind.ChangeFieldType = "changeFieldType" -> string!
 const Koine.Compiler.Services.StructuredEditKind.AddTransition = "addTransition" -> string!
 const Koine.Compiler.Services.StructuredEditKind.AddType = "addType" -> string!
+const Koine.Compiler.Services.StructuredEditKind.AddAggregateMember = "addAggregateMember" -> string!
 const Koine.Compiler.Services.StructuredEditKind.RemoveType = "removeType" -> string!
 Koine.Compiler.Services.EmitResult
 Koine.Compiler.Services.EmitResult.EmitResult(string? Koine, System.Collections.Generic.IReadOnlyList<Koine.Compiler.Diagnostics.Diagnostic!>! Diagnostics) -> void

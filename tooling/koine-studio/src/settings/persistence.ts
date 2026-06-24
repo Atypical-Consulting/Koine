@@ -23,10 +23,10 @@ export type AccentName = 'blue' | 'teal' | 'violet' | 'amber';
 export type McpClientId = 'claude-desktop' | 'lm-studio' | 'cursor' | 'vscode' | 'generic';
 
 /** A code-generation target the emitted-code ("Generated") preview can render. */
-export type PreviewTarget = 'csharp' | 'typescript' | 'python' | 'php';
+export type PreviewTarget = 'csharp' | 'typescript' | 'python' | 'php' | 'rust';
 
 /** The supported preview targets, in display order. The single source of truth for the set. */
-export const PREVIEW_TARGETS: readonly PreviewTarget[] = ['csharp', 'typescript', 'python', 'php'];
+export const PREVIEW_TARGETS: readonly PreviewTarget[] = ['csharp', 'typescript', 'python', 'php', 'rust'];
 
 export interface Settings {
   theme: ThemeName;

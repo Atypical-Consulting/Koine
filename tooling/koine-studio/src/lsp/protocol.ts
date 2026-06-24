@@ -90,8 +90,9 @@ export interface ModelMembersResult {
 }
 
 // A scoped structural edit against the model. `kind` is one of: 'renameMember' | 'addField' |
-// 'removeMember' | 'changeFieldType' | 'addTransition'. `target` is the qualified name the edit
-// applies to; `name`/`type` carry the new name / field type / transition states per kind.
+// 'removeMember' | 'changeFieldType' | 'addTransition' | 'addType' | 'addAggregateMember' |
+// 'removeType'. `target` is the qualified name the edit applies to (a context for addType, an aggregate
+// for addAggregateMember); `name`/`type` carry the new name / field type / construct kind per kind.
 export interface StructuredEdit {
   kind: string;
   target: string;

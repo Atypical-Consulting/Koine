@@ -189,3 +189,18 @@ the back-compat path (`Type == null` ⇒ value) and rejection (duplicate name st
 - **Dual-backend parity.** The change is server-side skeleton logic + an extra field already on the
   wire (`Type`); the WASM host and desktop LSP share the same `ModelRoundTripService`, so parity holds.
 ```
+
+## Follow-up status
+
+- **Service** shipped in #253 (the one remaining *context-scoped* round-trip construct).
+- **Repository & Rule** shipped in **#254** — the two muted buttons that author constructs *inside an
+  aggregate*. This needed a new edit kind, `addAggregateMember`, whose `Target` is the **selected
+  aggregate's** qualified name (the palette gates these buttons on an aggregate selection) and whose
+  re-sliced declaration is the aggregate itself. Skeletons: `repository { operations: add, getById }`,
+  and for **Rule** an aggregate-scoped `spec <Name> on <Root> = true`.
+  - **Rule → `spec` decision (#254).** Of the three candidates the issue floated (invariant / spec /
+    policy), `spec` is the only one that is *itself* an `aggregateMember`, so it round-trips through the
+    same aggregate-targeting seam as Repository with **no grammar change**. `invariant` lives inside the
+    root entity's body (not a direct aggregate member); `policy` is context-scoped and event-reactive
+    (wrong scope). So "Rule" authors a named, reusable boolean specification over the aggregate root.
+- **Note / Group** (canvas-only annotations) remain deferred to #255.
