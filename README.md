@@ -144,8 +144,9 @@ needed for `subtotal` — nothing for you to write, and nothing external to refe
   multi-file modules, context maps, integration events, and model versioning — all shipped.
 - **Enforced DDD reference discipline.** The compiler keeps your building blocks honest: a value
   object can't embed an entity or aggregate, commands and domain events carry data and identities
-  rather than live references, and one aggregate references another only by its id — violations are
-  hard errors (`KOI1601`–`KOI1604`), not lint.
+  rather than live references, one aggregate references another only by its id, and an entity holds
+  domain state — never an event, read model, or query — violations are hard errors
+  (`KOI1601`–`KOI1605`), not lint.
 - **A green build proves the domain.** Every construct is snapshot-tested *and* compiled and executed
   through an in-memory Roslyn meta-test, so a passing build means the generated C# is correct and
   usable — not just that it parses.
