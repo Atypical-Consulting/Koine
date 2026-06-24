@@ -95,6 +95,29 @@ OpenAI-compatible endpoints (OpenAI, Groq, Together, OpenRouter) work the same w
 **API key**. The Anthropic provider stays plain chat for now.
 :::
 
+## Inline completions (ghost text)
+
+The Assistant is a *chat* surface. Studio also has an **inline** one: as you type in a `.koi` buffer it
+can predict the next line and show it as **dimmed ghost text** after the caret — the keystroke-level
+completion you expect from a modern editor.
+
+Turn it on under **Settings → Assistant → AI inline completions** (it ships **off**). Then, after a
+short pause in typing:
+
+- **Tab** accepts the suggestion — a normal, undoable edit. **Esc**, or simply continuing to type,
+  dismisses it.
+- It **reuses the same provider, key, and model** as the chat Assistant above — so the **Local LLM
+  setup** on this page covers it too: point it at LM Studio / Ollama and nothing leaves your machine.
+- It stays clear of the deterministic, grammar-true **LSP completion popup**: while that popup is open,
+  no ghost text appears. Every edit aborts an in-flight request, so a suggestion never lands a beat late.
+
+:::caution[What is sent, and why it is off by default]
+Each suggestion sends the **text around your caret** to the provider you configured, and predicting on
+every idle pause spends API tokens — so the toggle defaults to **off** (no surprise spend) and simply
+does nothing when no provider is configured. With a **local** model (the setup above) the buffer context
+never leaves your machine.
+:::
+
 ## Troubleshooting
 
 - **`Request failed: Connection error`** — CORS is off (web build). Start LM Studio with `--cors`.

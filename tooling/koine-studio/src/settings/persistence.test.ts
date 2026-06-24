@@ -71,6 +71,25 @@ describe('Assistant agentic-tools setting', () => {
   });
 });
 
+describe('Assistant inline-completions setting', () => {
+  beforeEach(() => localStorage.clear());
+
+  test('defaults off so there is no surprise API spend while typing', () => {
+    expect(DEFAULT_SETTINGS.aiInlineCompletions).toBe(false);
+    expect(loadSettings().aiInlineCompletions).toBe(false);
+  });
+
+  test('round-trips an opted-in state', () => {
+    saveSettings({ ...DEFAULT_SETTINGS, aiInlineCompletions: true });
+    expect(loadSettings().aiInlineCompletions).toBe(true);
+  });
+
+  test('falls back to the default when the stored value is not a boolean', () => {
+    saveSettings({ ...DEFAULT_SETTINGS, aiInlineCompletions: 'on' as never });
+    expect(loadSettings().aiInlineCompletions).toBe(false);
+  });
+});
+
 describe('Editor autoSave + enableMinimap settings', () => {
   beforeEach(() => localStorage.clear());
 

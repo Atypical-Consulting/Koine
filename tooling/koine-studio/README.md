@@ -76,6 +76,14 @@ hosts (browser/WASM and the Tauri desktop build).
   asks for a plain-language explanation of the current selection — or the whole model when nothing is
   selected — aimed at a domain expert who doesn't code. It is explanatory, not generative: the reply
   deliberately omits the *Apply to editor* affordance.
+- **Inline completions (ghost text).** With **Settings → Assistant → AI inline completions** on (off by
+  default), Studio predicts the next line as you type and shows it as dimmed ghost text after the caret —
+  **Tab** accepts, **Esc** (or more typing) dismisses. It reuses the same provider/key/model as the chat
+  and aborts the in-flight request on every edit; it no-ops when no provider is configured and never
+  merges with the deterministic LSP completion popup. The debounce/accept/abort state machine and the
+  provider client are pure-logic (`src/editor/inlineCompletionState.ts`, `src/ai/inlineCompletionClient.ts`);
+  the CodeMirror ghost-text extension is `src/editor/inlineCompletion.ts`. See
+  [Local LLM in the Assistant → Inline completions](https://atypical-consulting.github.io/Koine/guides/assistant-local-llm/#inline-completions-ghost-text).
 
 ## Run
 

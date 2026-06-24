@@ -59,6 +59,9 @@ export interface Settings {
    *  Off by default: many local servers (LM Studio / Ollama) buffer the whole reply instead of
    *  streaming when tools are present, so opting in trades live streaming for the agentic loop. */
   aiAgenticTools: boolean;
+  /** LLM ghost-text completions in the editor (#263). Off by default — predicting while you type spends
+   *  API tokens on every idle pause, so it stays opt-in and no-ops when no provider is configured. */
+  aiInlineCompletions: boolean;
   /** Whether the local MCP server (desktop sidecar) is enabled. Opt-in: no background server unless on. */
   mcpEnabled: boolean;
   /** Which client the Settings → MCP setup recipe is shown for. */
@@ -84,6 +87,7 @@ export const DEFAULT_SETTINGS: Settings = {
   aiModel: 'claude-opus-4-8',
   aiModelOpenai: '',
   aiAgenticTools: false,
+  aiInlineCompletions: false,
   mcpEnabled: false,
   mcpClient: 'lm-studio',
   previewTarget: 'csharp',
@@ -227,6 +231,10 @@ export function loadSettings(): Settings {
       aiModelOpenai: typeof parsed.aiModelOpenai === 'string' ? parsed.aiModelOpenai : DEFAULT_SETTINGS.aiModelOpenai,
       aiAgenticTools:
         typeof parsed.aiAgenticTools === 'boolean' ? parsed.aiAgenticTools : DEFAULT_SETTINGS.aiAgenticTools,
+      aiInlineCompletions:
+        typeof parsed.aiInlineCompletions === 'boolean'
+          ? parsed.aiInlineCompletions
+          : DEFAULT_SETTINGS.aiInlineCompletions,
       mcpEnabled: typeof parsed.mcpEnabled === 'boolean' ? parsed.mcpEnabled : DEFAULT_SETTINGS.mcpEnabled,
       mcpClient: coerceMcpClient(parsed.mcpClient),
       previewTarget: coercePreviewTarget(parsed.previewTarget),

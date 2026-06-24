@@ -40,6 +40,15 @@ export const DEFAULT_OPENAI_MODEL = 'gpt-4o';
 /** Default base URL for the OpenAI-compatible provider. */
 export const DEFAULT_OPENAI_BASE_URL = 'https://api.openai.com/v1';
 
+/**
+ * Whether a base URL points at a keyless local server (Ollama / LM Studio on loopback). This gates
+ * whether an API key is required, so it lives in one place — both the chat panel and the inline
+ * completion client share it rather than each keeping a copy of the regex that could drift apart.
+ */
+export function isLocalProviderUrl(baseUrl: string): boolean {
+  return /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:|\/|$)/i.test(baseUrl);
+}
+
 let anthropicPromise: Promise<typeof AnthropicSdk> | null = null;
 let openaiPromise: Promise<typeof OpenAiSdk> | null = null;
 
