@@ -203,6 +203,7 @@ function fakePlatform(over: Partial<Record<string, unknown>> = {}): InspectorCon
     listKoiFiles: vi.fn(async () => []),
     listEntries: vi.fn(async () => []),
     readTextFile: vi.fn(async () => ''),
+    gitLogForRange: vi.fn(async () => null),
     ...over,
   } as unknown as InspectorControllerDeps['platform'];
 }
