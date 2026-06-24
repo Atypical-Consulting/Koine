@@ -30,6 +30,14 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
+    # AOT-compile the DEPLOYED wasm bundle (issue #327). KOINE_WASM_AOT makes every build-wasm.mjs
+    # invocation in this deploy publish with `-p:KoineWasmAot=true`, so the docs-site playground —
+    # and the embedded Koine Studio at /Koine/studio/ (built via build-studio.mjs, which inherits
+    # this env) — ship the faster AOT-compiled in-browser compiler. Scoped to this deploy job only:
+    # the CI test build (ci.yml) and the per-PR studio-web validation (koine-studio.yml) stay on the
+    # fast interpreter publish. Relies on the wasm-tools workload already installed below.
+    env:
+      KOINE_WASM_AOT: 'true'
     steps:
       - name: Checkout
         uses: actions/checkout@v7
