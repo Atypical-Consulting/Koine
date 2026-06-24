@@ -431,6 +431,67 @@ public class RustSnapshotTests
         check.Ok.ShouldBeTrue(string.Join("\n", check.Errors));
     }
 
+    // ------------------------------------------------------------------
+    // Command returns (issue #173, Task 2). A command with a declared return type and
+    // a terminal `result` clause returns a value; `result id` hands back the entity's
+    // own identity — cloned, since the branded newtype is `Clone` but not `Copy`.
+    // ------------------------------------------------------------------
+
+    /// <summary>An entity whose <c>cancel</c> returns its id and <c>bump</c> returns a computed Int.</summary>
+    private const string CommandReturnFixture = """
+        context Sales {
+          enum OrderStatus { Draft, Placed, Cancelled }
+          entity Order identified by OrderId {
+            status: OrderStatus = Draft
+            total:  Int = 0
+
+            command cancel(): OrderId {
+              requires status != Cancelled "already cancelled"
+              status -> Cancelled
+              result id
+            }
+
+            command bump(by: Int): Int {
+              total -> total + by
+              result total
+            }
+          }
+        }
+        """;
+
+    [Fact]
+    public Task Rust_command_returns_emit_expected_rust()
+    {
+        var result = new KoineCompiler().Compile(CommandReturnFixture, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var sales = result.Files.Single(f => f.RelativePath.EndsWith("sales.rs", StringComparison.Ordinal)).Contents;
+        // `result id` returns the entity's own identity, cloned (the branded newtype is not Copy).
+        sales.ShouldContain("pub fn cancel(&mut self) -> Result<OrderId, DomainError>");
+        sales.ShouldContain("Ok(self.id.clone())");
+        // A Copy result (Int) needs no clone and reads post-mutation state.
+        sales.ShouldContain("pub fn bump(&mut self, by: i64) -> Result<i64, DomainError>");
+        sales.ShouldContain("Ok(self.total)");
+
+        return Verify(TestSupport.Render(result.Files)).UseDirectory("Snapshots");
+    }
+
+    [Fact]
+    public void Rust_command_returns_compile()
+    {
+        var result = new KoineCompiler().Compile(CommandReturnFixture, new RustEmitter());
+        result.Success.ShouldBeTrue();
+
+        var check = TestSupport.CompileRust(result.Files);
+        if (!check.ToolchainAvailable)
+        {
+            _output.WriteLine(NoToolchainNotice);
+            return;
+        }
+
+        check.Ok.ShouldBeTrue(string.Join("\n", check.Errors));
+    }
+
     /// <summary>Reads a template under <c>templates/</c> by walking up to the repo root (the <c>.git</c> dir).</summary>
     private static string? FindTemplate(string relativePath)
     {

@@ -576,6 +576,20 @@ internal sealed class RustExpressionTranslator
     /// <summary>True when an expression's inferred type is optional — used to decide <c>Some(...)</c> wrapping.</summary>
     public bool IsOptional(Expr expr) => _resolver.Infer(expr, EffectiveScope())?.IsOptional == true;
 
+    /// <summary>
+    /// Translates an expression to an owned value for a <c>return</c>/<c>Ok(...)</c> position: a non-Copy
+    /// place (a field/local such as the entity <c>id</c>, or a <c>.field()</c> accessor result) is cloned
+    /// so the value is moved out by value rather than borrowed from <c>&amp;self</c>.
+    /// </summary>
+    public string TranslateOwned(Expr expr)
+    {
+        var rendered = Translate(expr);
+        TypeRef? type = _resolver.Infer(expr, EffectiveScope());
+        var clone = IsNonCopyPlace(expr, type)
+            || (expr is MemberAccessExpr && type is { } t && !_typeMapper.IsCopy(t));
+        return clone ? rendered + ".clone()" : rendered;
+    }
+
     /// <summary>Writes a string-typed argument as a <c>&amp;str</c> reference for std string methods.</summary>
     private void WriteStrRef(Expr expr, StringBuilder sb)
     {

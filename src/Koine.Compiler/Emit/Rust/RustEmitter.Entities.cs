@@ -28,7 +28,13 @@ public sealed partial class RustEmitter
         var required = stored.Where(m => m.Initializer is null).ToList();
         var defaulted = stored.Where(m => m.Initializer is not null).ToList();
 
-        var translator = new RustExpressionTranslator(emit.Index, entity.Members, emit.EnumMemberToType, typeMapper, context);
+        // A synthetic `id` member (of the identity type) so an `id` reference in a command body —
+        // `result id`, or an `emit` argument — resolves to the entity's identity field (`self.id`),
+        // mirroring how the C#/TypeScript emitters surface the id to behavior bodies.
+        var bodyMembers = entity.Members
+            .Append(new Member("id", new TypeRef(entity.IdentityName), null))
+            .ToList();
+        var translator = new RustExpressionTranslator(emit.Index, bodyMembers, emit.EnumMemberToType, typeMapper, context);
 
         // The struct (identity equality, so only Debug/Clone are derived).
         body.Append('\n');
@@ -159,7 +165,7 @@ public sealed partial class RustEmitter
         // 4. Result (or unit).
         if (cmd.Body.OfType<ResultClause>().FirstOrDefault() is { } result)
         {
-            body.Append(Indent).Append(Indent).Append("Ok(").Append(translator.Translate(result.Value)).Append(")\n");
+            body.Append(Indent).Append(Indent).Append("Ok(").Append(translator.TranslateOwned(result.Value)).Append(")\n");
         }
         else
         {
