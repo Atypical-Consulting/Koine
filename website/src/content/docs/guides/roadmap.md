@@ -1,12 +1,13 @@
 ---
 title: "Roadmap"
-description: "What Koine ships today (R1–R18: full DDD toolkit; C#, TypeScript, Python, PHP, and Rust (Phase 1) emitters; editor tooling; and model-as-spec coverage) and what comes next."
+description: "What Koine ships today (R1–R18: full DDD toolkit; C#, TypeScript, Python, PHP (Phase 1), and Rust (multi-context + CQRS) emitters; editor tooling; and model-as-spec coverage) and what comes next."
 ---
 
 Koine is built as a sequence of **epics** (R1–R18), each a cohesive slice of Domain-Driven Design
 capability. The compiler ships the **full tactical and strategic toolkit (R1–R15)**, the
-**R16 multi-target emitters** (C#, TypeScript, Python, PHP, and Rust — the last three Phase 1:
-tactical core, with Python now covering the full tactical-and-strategic construct set), the
+**R16 multi-target emitters** (C#, TypeScript, Python, PHP, and Rust — PHP at Phase 1 (tactical
+core), Rust now covering multi-context references and the CQRS read side, with Python covering the
+full tactical-and-strategic construct set), the
 **R17 editor tooling** — the TextMate grammar, the `koine lsp` language server, and the
 `fmt`/`init`/`watch` commands — and **R18 model-as-spec coverage** (`koine coverage` proves
 declared == emitted). Every construct described in the reference is implemented, tested,
@@ -113,12 +114,15 @@ targets — C#, TypeScript, Python, PHP, and Rust — are delivered.
     `Protocol`), state-machine reachability guards inside command methods, and context-map/ACL
     translator `Protocol`s with qualified cross-context imports.
   - Output is `mypy --strict`-clean and passes `ast.parse` syntax checking.
-- **R16.4 — Rust emitter.** ✅ **Delivered** (Phase 1: tactical core) — `--target rust` emits an
+- **R16.4 — Rust emitter.** ✅ **Delivered** (Phase 2: multi-context + CQRS) — `--target rust` emits an
   idiomatic crate: value objects as structs with smart constructors returning `Result<_, DomainError>`
-  (never panics), smart enums as exhaustively-matched Rust `enum`s, entities/aggregates with
-  invariant-checked behaviors, events as a `Vec`-friendly `DomainEvent` enum, and repositories as
-  `trait`s. Depends only on `rust_decimal` (money) and `regex` (`matches`); a `cargo check` meta-test
-  proves the emitted crate compiles.
+  (never panics), smart enums as exhaustively-matched Rust `enum`s (with `Match`/`Switch`/`from_name`/
+  `from_value` lookups), entities and aggregates with invariant-checked behaviors and command returns,
+  factories that mint identities, domain events raised into a `Vec`-friendly `DomainEvent` collection,
+  query DTOs and read-model projections, and repositories as `trait`s. **Multi-context** models compile
+  end-to-end via `crate::<module>` qualification (the six-context `pizzeria` template included). Depends
+  only on `rust_decimal` (money) and `regex` (`matches`), plus `uuid` when a model uses a factory; a
+  `cargo check` meta-test proves the emitted crate compiles.
 - **R16.5 — Conformance harness.** ✅ **Delivered** — a suite that runs every fixture through each
   registered emitter and compiles the output (Roslyn for C#, `tsc` for TS, `mypy` for Python), plus an
   `AstPurityTests` guard that fails the build if anything under `Ast/` references a target-specific concept.
