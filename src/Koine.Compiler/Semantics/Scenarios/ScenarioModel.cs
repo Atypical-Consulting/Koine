@@ -76,8 +76,10 @@ internal abstract record ScenarioValue
     /// <summary>A short, human-readable rendering for the timeline / resulting-state display.</summary>
     public string Display() => this switch
     {
+        // Integral values render without a decimal point; format the decimal directly (no `(long)` cast,
+        // which would overflow for values outside Int64 range).
         Num n => n.IsInteger && n.Value == decimal.Truncate(n.Value)
-            ? ((long)n.Value).ToString(CultureInfo.InvariantCulture)
+            ? n.Value.ToString("0", CultureInfo.InvariantCulture)
             : n.Value.ToString(CultureInfo.InvariantCulture),
         Bool b => b.Value ? "true" : "false",
         Text t => t.Value,

@@ -99,27 +99,40 @@ export function createScenarioPanel(opts: ScenarioPanelOptions): ScenarioPanel {
     for (const t of catalog.targets) {
       targetSelect.append(option(t.name, t.name));
     }
-    if (catalog.targets.some((t) => t.name === previous)) targetSelect.value = previous;
-    populateOperations();
+    // Keep the prior selection if it survived the refresh; otherwise select the first target explicitly
+    // (don't rely on the implicit first-option default, which not every DOM honours).
+    targetSelect.value = catalog.targets.some((t) => t.name === previous)
+      ? previous
+      : (catalog.targets[0]?.name ?? '');
+    populateOperations(true);
   }
 
-  function populateOperations(): void {
+  // Rebuild the operation dropdown for the current target. `rescaffoldGiven` is true only when the
+  // target itself changed (new fields ⇒ new given-state shape); switching the operation alone keeps the
+  // given-state the user entered and only re-scaffolds the args.
+  function populateOperations(rescaffoldGiven: boolean): void {
     const previous = opSelect.value;
     opSelect.replaceChildren();
     const target = currentTarget();
-    for (const o of target?.operations ?? []) {
+    const ops = target?.operations ?? [];
+    for (const o of ops) {
       opSelect.append(option(o.name, `${o.name} (${o.kind})`));
     }
-    if (target?.operations.some((o) => o.name === previous)) opSelect.value = previous;
-    scaffold();
+    opSelect.value = ops.some((o) => o.name === previous) ? previous : (ops[0]?.name ?? '');
+    if (rescaffoldGiven) scaffoldGiven();
+    scaffoldArgs();
   }
 
-  // Prefill the JSON editors with the selected target's fields / operation params, so the user edits
-  // a shape rather than typing one from scratch. Existing edits aren't clobbered if they still parse.
-  function scaffold(): void {
+  // Prefill the given-state editor with the selected target's fields, so the user edits a shape rather
+  // than typing one from scratch. Called on a target change (and the initial load).
+  function scaffoldGiven(): void {
     const target = currentTarget();
-    const op = currentOperation();
     if (target) givenArea.value = JSON.stringify(scaffoldFields(target.fields), null, 2);
+  }
+
+  // Prefill the args editor with the selected operation's parameters. Called on a target or operation change.
+  function scaffoldArgs(): void {
+    const op = currentOperation();
     argsArea.value = op && op.params.length > 0 ? JSON.stringify(scaffoldParams(op.params), null, 2) : '{}';
   }
 
@@ -137,19 +150,19 @@ export function createScenarioPanel(opts: ScenarioPanelOptions): ScenarioPanel {
   }
 
   async function refresh(): Promise<void> {
+    let loadError: string | null = null;
     try {
       catalog = await lsp.scenarioCatalog();
     } catch (e) {
       catalog = { targets: [] };
-      renderMessage(`Could not load the scenario catalog: ${errorText(e)}`, 'error');
+      loadError = errorText(e);
     }
     populateTargets();
     syncEnabled();
-    if (disabled()) {
-      renderMessage(
-        'No runnable commands found. Add a command or factory to an aggregate, then refresh.',
-        'muted',
-      );
+    if (loadError) {
+      renderMessage(`Could not load the scenario catalog: ${loadError}`, 'error');
+    } else if (disabled()) {
+      renderMessage('No runnable commands found. Add a command or factory to an aggregate, then refresh.', 'muted');
     } else {
       results.replaceChildren();
     }
@@ -186,8 +199,8 @@ export function createScenarioPanel(opts: ScenarioPanelOptions): ScenarioPanel {
     }
   }
 
-  targetSelect.addEventListener('change', populateOperations);
-  opSelect.addEventListener('change', scaffold);
+  targetSelect.addEventListener('change', () => populateOperations(true));
+  opSelect.addEventListener('change', scaffoldArgs);
   refreshBtn.addEventListener('click', () => void refresh());
   runBtn.addEventListener('click', () => void run());
 
@@ -307,9 +320,9 @@ export function createScenarioPanel(opts: ScenarioPanelOptions): ScenarioPanel {
     results.append(p);
   }
 
-  // Kick off the first load; callers also drive refresh() on tab open.
-  void refresh();
-
+  // The first catalog load is driven by the caller via refresh() when the tab is first shown (the
+  // controller's ensureTechLoaded), so the panel does not self-fetch on construction — that would
+  // double-fetch and race the caller's refresh.
   return { refresh };
 }
 

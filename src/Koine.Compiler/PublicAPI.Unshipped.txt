@@ -189,6 +189,7 @@ Koine.Compiler.Ast.EntityDecl.IdentityStrategySpan.init -> void
 *REMOVED*override Koine.Compiler.Ast.PrimitiveType.Name.get -> string?
 override Koine.Compiler.Ast.PrimitiveType.Name.get -> string!
 Koine.Compiler.Services.ScenarioService
+static Koine.Compiler.Services.ScenarioService.Error(string! target, string! operation, string! note) -> System.Collections.Generic.IReadOnlyDictionary<string!, object?>!
 static Koine.Compiler.Services.ScenarioService.Catalog(Koine.Compiler.Ast.SemanticModel! semantic) -> System.Collections.Generic.IReadOnlyDictionary<string!, object?>!
 static Koine.Compiler.Services.ScenarioService.Run(Koine.Compiler.Ast.SemanticModel! semantic, string! target, string! operation, System.Text.Json.JsonElement given, System.Text.Json.JsonElement args) -> System.Collections.Generic.IReadOnlyDictionary<string!, object?>!
 static Koine.Compiler.Services.ScenarioService.WriteJson(System.Collections.Generic.IReadOnlyDictionary<string!, object?>! tree) -> string!

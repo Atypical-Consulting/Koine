@@ -28,6 +28,11 @@ internal sealed class ScenarioInterpreter
     private EntityDecl _entity = null!;
     private HashSet<string> _memberNames = new(StringComparer.Ordinal);
 
+    // Derived members are evaluated lazily from their initializer; this tracks the ones currently being
+    // computed so a self- or mutually-referential initializer degrades to Unknown instead of recursing
+    // forever (a StackOverflowException would break the never-throw contract).
+    private readonly HashSet<string> _evaluatingDerived = new(StringComparer.Ordinal);
+
     private ScenarioInterpreter(SemanticModel sema)
     {
         _sema = sema;
@@ -149,10 +154,14 @@ internal sealed class ScenarioInterpreter
             }
         }
 
-        // The entity identity, referenced in bodies as `id`.
-        env["id"] = s.Given.TryGetValue("id", out ScenarioValue? id)
-            ? id
-            : new ScenarioValue.Text($"<{entity.IdentityName}>");
+        // The entity identity, referenced in bodies as `id` — unless the entity declares a real member
+        // named `id`, in which case that member's bound value (above) wins and is not overwritten.
+        if (!_memberNames.Contains("id"))
+        {
+            env["id"] = s.Given.TryGetValue("id", out ScenarioValue? id)
+                ? id
+                : new ScenarioValue.Text($"<{entity.IdentityName}>");
+        }
 
         // Operation arguments.
         foreach (Param p in parameters)
@@ -366,11 +375,24 @@ internal sealed class ScenarioInterpreter
             return bound;
         }
 
-        // A derived member referenced before it is in the environment: compute its initializer.
+        // A derived member referenced before it is in the environment: compute its initializer, guarding
+        // against a self-/mutually-referential initializer that would otherwise recurse forever.
         Member? derived = _entity.Members.FirstOrDefault(m => m.Name == id.Name && m.Initializer is not null);
         if (derived is not null)
         {
-            return Eval(derived.Initializer!, env);
+            if (!_evaluatingDerived.Add(id.Name))
+            {
+                return new ScenarioValue.Unknown($"cyclic derived member '{id.Name}'");
+            }
+
+            try
+            {
+                return Eval(derived.Initializer!, env);
+            }
+            finally
+            {
+                _evaluatingDerived.Remove(id.Name);
+            }
         }
 
         if (_index.EnumsDeclaring(id.Name).Count > 0)
@@ -761,6 +783,10 @@ internal sealed class ScenarioInterpreter
         (ScenarioValue.Bool x, ScenarioValue.Bool y) => x.Value == y.Value,
         (ScenarioValue.Text x, ScenarioValue.Text y) => string.Equals(x.Value, y.Value, StringComparison.Ordinal),
         (ScenarioValue.EnumMember x, ScenarioValue.EnumMember y) => string.Equals(x.Member, y.Member, StringComparison.Ordinal),
+        // An enum value supplied as a plain string (one that escaped enum-coercion) still compares by name,
+        // so `status == Active` holds whether `status` resolved to an EnumMember or stayed Text.
+        (ScenarioValue.EnumMember x, ScenarioValue.Text y) => string.Equals(x.Member, y.Value, StringComparison.Ordinal),
+        (ScenarioValue.Text x, ScenarioValue.EnumMember y) => string.Equals(x.Value, y.Member, StringComparison.Ordinal),
         (ScenarioValue.Absent, ScenarioValue.Absent) => true,
         (ScenarioValue.Instant, ScenarioValue.Instant) => true,
         _ => false

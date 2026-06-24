@@ -875,19 +875,10 @@ public static partial class CompilerInterop
         }
     }
 
-    /// <summary>The not-ok scenario result shape (matching <see cref="ScenarioService"/>) for the failure paths.</summary>
+    /// <summary>The not-ok scenario result for the failure paths — delegates to <see cref="ScenarioService"/>
+    /// so the wire shape lives in exactly one place (shared with the LSP backend).</summary>
     private static IReadOnlyDictionary<string, object?> ScenarioErrorTree(string target, string operation, string note) =>
-        new Dictionary<string, object?>
-        {
-            ["ok"] = false,
-            ["target"] = target,
-            ["operation"] = operation,
-            ["steps"] = Array.Empty<object>(),
-            ["resultingState"] = new Dictionary<string, object?>(),
-            ["invariants"] = Array.Empty<object>(),
-            ["result"] = null,
-            ["notes"] = new[] { note },
-        };
+        ScenarioService.Error(target, operation, note);
 
     // ---- diagram-graph mapping (issue #93) -----------------------------------
     // Mirrors LspServer.MapDiagram et al.: the W* DTOs serialize (source-gen CamelCase) to a wire

@@ -1,6 +1,7 @@
 using System.Buffers;
 using System.Globalization;
 using System.Text;
+using System.Text.Encodings.Web;
 using System.Text.Json;
 using Koine.Compiler.Ast;
 using Koine.Compiler.Semantics.Scenarios;
@@ -33,6 +34,24 @@ public static class ScenarioService
         ScenarioResult result = ScenarioInterpreter.Run(semantic, scenario);
         return Shape(result);
     }
+
+    /// <summary>
+    /// A not-ok scenario result carrying an explanatory <paramref name="note"/> — the single shape both
+    /// hosts return for the failure paths (model has errors, request could not be run), so the wire
+    /// shape stays defined in exactly one place.
+    /// </summary>
+    public static IReadOnlyDictionary<string, object?> Error(string target, string operation, string note) =>
+        new Dictionary<string, object?>
+        {
+            ["ok"] = false,
+            ["target"] = target,
+            ["operation"] = operation,
+            ["steps"] = Array.Empty<object>(),
+            ["resultingState"] = new Dictionary<string, object?>(),
+            ["invariants"] = Array.Empty<object>(),
+            ["result"] = null,
+            ["notes"] = new[] { note },
+        };
 
     /// <summary>
     /// The runnable surface of <paramref name="semantic"/>: every entity (aggregate root or standalone)
@@ -84,11 +103,12 @@ public static class ScenarioService
         return new Dictionary<string, object?> { ["targets"] = targets };
     }
 
-    /// <summary>Serializes a <see cref="Run"/> result tree to a JSON string (reflection-free; trim-safe).</summary>
+    /// <summary>Serializes a <see cref="Run"/> result tree to a JSON string (reflection-free; trim-safe).
+    /// Uses the same relaxed escaping as the CLI's serializer so both backends emit identical bytes.</summary>
     public static string WriteJson(IReadOnlyDictionary<string, object?> tree)
     {
         var buffer = new ArrayBufferWriter<byte>();
-        using (var writer = new Utf8JsonWriter(buffer))
+        using (var writer = new Utf8JsonWriter(buffer, new JsonWriterOptions { Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping }))
         {
             WriteValue(writer, tree);
         }
@@ -107,14 +127,16 @@ public static class ScenarioService
             ["returns"] = returns is null ? null : RenderType(returns),
         };
 
-    /// <summary>Renders a <see cref="TypeRef"/> to a readable string (e.g. <c>List&lt;OrderLine&gt;</c>, <c>String?</c>).</summary>
+    /// <summary>Renders a <see cref="TypeRef"/> to a readable string (e.g. <c>List&lt;OrderLine&gt;</c>,
+    /// <c>String?</c>, <c>Context.Type</c>) — matching the renderer the other Studio panels use.</summary>
     private static string RenderType(TypeRef type)
     {
+        string head = type.Qualifier is { } q ? $"{q}.{type.Name}" : type.Name;
         string name = type.Element is null
-            ? type.Name
+            ? head
             : type.Value is null
-                ? $"{type.Name}<{RenderType(type.Element)}>"
-                : $"{type.Name}<{RenderType(type.Element)}, {RenderType(type.Value)}>";
+                ? $"{head}<{RenderType(type.Element)}>"
+                : $"{head}<{RenderType(type.Element)}, {RenderType(type.Value)}>";
         return type.IsOptional ? name + "?" : name;
     }
 
@@ -144,7 +166,11 @@ public static class ScenarioService
         JsonValueKind.String => new ScenarioValue.Text(element.GetString() ?? ""),
         JsonValueKind.Number => element.TryGetInt64(out long i)
             ? new ScenarioValue.Num(i, IsInteger: true)
-            : new ScenarioValue.Num(element.GetDecimal(), IsInteger: false),
+            // A number outside decimal range (e.g. 1e309) is not representable; surface it as text
+            // rather than throwing, keeping the never-throw contract.
+            : element.TryGetDecimal(out decimal d)
+                ? new ScenarioValue.Num(d, IsInteger: false)
+                : new ScenarioValue.Text(element.GetRawText()),
         JsonValueKind.True => new ScenarioValue.Bool(true),
         JsonValueKind.False => new ScenarioValue.Bool(false),
         _ => new ScenarioValue.Absent()

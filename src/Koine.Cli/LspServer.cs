@@ -1541,28 +1541,27 @@ internal sealed class LspServer
     {
         var target = TryGetStringParam(root, "target") ?? "";
         var operation = TryGetStringParam(root, "operation") ?? "";
-        JsonElement given = TryGetObjectParam(root, "given");
-        JsonElement args = TryGetObjectParam(root, "args");
-
-        var sources = Workspace().Select(kv => new SourceFile(kv.Key, kv.Value)).ToList();
-        var (model, _) = ParseUsable(sources);
-        if (model is null)
+        try
         {
-            return new Dictionary<string, object?>
-            {
-                ["ok"] = false,
-                ["target"] = target,
-                ["operation"] = operation,
-                ["steps"] = Array.Empty<object>(),
-                ["resultingState"] = new Dictionary<string, object?>(),
-                ["invariants"] = Array.Empty<object>(),
-                ["result"] = null,
-                ["notes"] = new[] { "The model has errors; fix them before running a scenario." },
-            };
-        }
+            JsonElement given = TryGetObjectParam(root, "given");
+            JsonElement args = TryGetObjectParam(root, "args");
 
-        var semantic = new Compiler.Ast.SemanticModel(model);
-        return ScenarioService.Run(semantic, target, operation, given, args);
+            var sources = Workspace().Select(kv => new SourceFile(kv.Key, kv.Value)).ToList();
+            var (model, _) = ParseUsable(sources);
+            if (model is null)
+            {
+                return ScenarioService.Error(target, operation, "The model has errors; fix them before running a scenario.");
+            }
+
+            var semantic = new Compiler.Ast.SemanticModel(model);
+            return ScenarioService.Run(semantic, target, operation, given, args);
+        }
+        catch (Exception ex)
+        {
+            // Mirror the WASM backend: a malformed request or interpreter fault returns a not-ok result
+            // (so the id-bearing request always gets a reply) rather than throwing and leaving the client hanging.
+            return ScenarioService.Error(target, operation, $"The scenario could not be run: {ex.Message}");
+        }
     }
 
     /// <summary>
@@ -1573,14 +1572,21 @@ internal sealed class LspServer
     /// </summary>
     private object ScenarioCatalogResultJson()
     {
-        var sources = Workspace().Select(kv => new SourceFile(kv.Key, kv.Value)).ToList();
-        var (model, _) = ParseUsable(sources);
-        if (model is null)
+        try
+        {
+            var sources = Workspace().Select(kv => new SourceFile(kv.Key, kv.Value)).ToList();
+            var (model, _) = ParseUsable(sources);
+            if (model is null)
+            {
+                return new Dictionary<string, object?> { ["targets"] = Array.Empty<object>() };
+            }
+
+            return ScenarioService.Catalog(new Compiler.Ast.SemanticModel(model));
+        }
+        catch
         {
             return new Dictionary<string, object?> { ["targets"] = Array.Empty<object>() };
         }
-
-        return ScenarioService.Catalog(new Compiler.Ast.SemanticModel(model));
     }
 
     /// <summary>Serialises a <see cref="ModelNode"/> subtree to the wire shape (recursive, additive).</summary>
