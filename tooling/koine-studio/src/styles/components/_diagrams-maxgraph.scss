@@ -296,6 +296,15 @@ $ddd-kinds: (
   flex: 0 0 auto;
 }
 
+/* Canvas-only annotation buttons (#255): tint the swatch so Note/Group read as active, distinct from the
+   muted coming-soon swatches — amber sticky for a note, violet region for a group. */
+.koi-palette-swatch--note {
+  background: #f59e0b;
+}
+.koi-palette-swatch--group {
+  background: #8b87f5;
+}
+
 .koi-palette-sep {
   width: 1px;
   align-self: stretch;

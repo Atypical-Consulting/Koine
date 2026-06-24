@@ -7,6 +7,7 @@ import { selectDomainGraphs, buildCanvas, isClassNode, nodeLabelHtml, nodeSize, 
 vi.mock('@/shared/overlay', () => ({ koiPrompt: vi.fn(), koiConfirm: vi.fn() }));
 import { koiPrompt, koiConfirm } from '@/shared/overlay';
 import {
+  DIAGRAM_ANNOTATION_CREATE_EVENT,
   setDiagramEditing,
   setDiagramLayoutStore,
   setDiagramPersistScope,
@@ -620,6 +621,85 @@ describe('canvas annotations (#255)', () => {
       expect(saved.notes[0]).toMatchObject({ id: 'note-1', x: 720, y: 510 });
       // The group rides the same save (membership preserved; rect is re-derived, not stored).
       expect(saved.groups).toEqual([{ id: 'group-1', label: 'Checkout', members: ['Ordering.Order', 'Ordering.Line'] }]);
+    } finally {
+      handle.dispose();
+    }
+  });
+
+  // create / edit / delete (Task 3): the renderer owns the annotation lifecycle (no `.koi` round-trip).
+  const tick = () => new Promise((r) => setTimeout(r, 0)); // let the koiPrompt/koiConfirm promise chains settle
+
+  test('the create-annotation event adds a note (prompted text) and persists it', async () => {
+    setDiagramEditing(true);
+    setDiagramPersistScope('ws-test');
+    vi.mocked(koiPrompt).mockResolvedValue('Returns flow TBD');
+    const container = makeContainer();
+    const handle = buildCanvas(mx, container, twoNodes, { positions, notes: [], groups: [] });
+    try {
+      document.dispatchEvent(new CustomEvent(DIAGRAM_ANNOTATION_CREATE_EVENT, { detail: { kind: 'note' } }));
+      await tick();
+
+      expect(handle.noteCells.size).toBe(1);
+      const saved = loadDiagramAnnotations(positionKey());
+      expect(saved.notes).toHaveLength(1);
+      expect(saved.notes[0].text).toBe('Returns flow TBD');
+    } finally {
+      handle.dispose();
+    }
+  });
+
+  test('the create-annotation event groups the selected nodes (prompted label) and persists it', async () => {
+    setDiagramEditing(true);
+    setDiagramPersistScope('ws-test');
+    vi.mocked(koiPrompt).mockResolvedValue('Checkout');
+    const container = makeContainer();
+    const handle = buildCanvas(mx, container, twoNodes, { positions, notes: [], groups: [] });
+    try {
+      handle.graph.setSelectionCell(handle.cells.get('Ordering.Order')!); // group around the selection
+      document.dispatchEvent(new CustomEvent(DIAGRAM_ANNOTATION_CREATE_EVENT, { detail: { kind: 'group' } }));
+      await tick();
+
+      expect(handle.groupCells.size).toBe(1);
+      const saved = loadDiagramAnnotations(positionKey());
+      expect(saved.groups).toHaveLength(1);
+      expect(saved.groups[0]).toMatchObject({ label: 'Checkout', members: ['Ordering.Order'] });
+    } finally {
+      handle.dispose();
+    }
+  });
+
+  test('double-clicking a note edits its text and persists', async () => {
+    setDiagramEditing(true);
+    setDiagramPersistScope('ws-test');
+    vi.mocked(koiPrompt).mockResolvedValue('Edited text');
+    const container = makeContainer();
+    const handle = buildCanvas(mx, container, twoNodes, { positions, notes: [note], groups: [] });
+    try {
+      const cell = handle.noteCells.get('note-1')!;
+      handle.graph.fireEvent(new mx.EventObject(mx.InternalEvent.DOUBLE_CLICK, 'cell', cell));
+      await tick();
+
+      expect(handle.graph.convertValueToString(cell)).toContain('Edited text');
+      expect(loadDiagramAnnotations(positionKey()).notes[0].text).toBe('Edited text');
+    } finally {
+      handle.dispose();
+    }
+  });
+
+  test('right-clicking an annotation deletes it (confirmed) and persists the removal', async () => {
+    setDiagramEditing(true);
+    setDiagramPersistScope('ws-test');
+    vi.mocked(koiConfirm).mockResolvedValue(true);
+    const container = makeContainer();
+    const handle = buildCanvas(mx, container, twoNodes, { positions, notes: [note], groups: [] });
+    try {
+      const cell = handle.noteCells.get('note-1')!;
+      handle.graph.getCellAt = (() => cell) as typeof handle.graph.getCellAt; // happy-dom can't hit-test by pixel
+      container.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 10, clientY: 10 }));
+      await tick();
+
+      expect(handle.noteCells.size).toBe(0);
+      expect(loadDiagramAnnotations(positionKey()).notes).toHaveLength(0);
     } finally {
       handle.dispose();
     }

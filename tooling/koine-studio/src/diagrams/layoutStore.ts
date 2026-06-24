@@ -23,7 +23,6 @@ import {
   type DiagramPosition,
 } from '@/diagrams/diagramContract';
 import {
-  clearDiagramAnnotations,
   clearDiagramPositions,
   loadDiagramAnnotations,
   loadDiagramPositions,
@@ -113,9 +112,8 @@ export function createBrowserLayoutStore(): DiagramLayoutStore {
       saveDiagramAnnotations(key, { notes: layout.notes, groups: layout.groups });
     },
     clear: () => {
-      const key = positionKey();
-      clearDiagramPositions(key);
-      clearDiagramAnnotations(key);
+      // Auto-arrange resets node POSITIONS only; canvas annotations are preserved (they aren't layout).
+      clearDiagramPositions(positionKey());
     },
   };
 }
@@ -130,6 +128,10 @@ export function createFolderLayoutStore(platform: Platform, folderRootToken: str
   let fileToken: string | null = null; // cached once discovered or created
   let pending: DiagramLayout | null = null;
   let timer: ReturnType<typeof setTimeout> | null = null;
+  // The most recently seen annotations (from a load or save), so clear() (auto-arrange) can reset positions
+  // while preserving notes/groups without an extra disk read — and without losing a not-yet-flushed edit.
+  let lastNotes: DiagramNote[] = [];
+  let lastGroups: DiagramGroup[] = [];
 
   /** Find (and register, so writeTextFile resolves) the root-level layout file's token, if it exists. */
   async function locate(): Promise<string | null> {
@@ -177,24 +179,31 @@ export function createFolderLayoutStore(platform: Platform, folderRootToken: str
       const t = await locate();
       if (!t) return emptyDiagramLayout();
       try {
-        return parse(await platform.readTextFile(t));
+        const layout = parse(await platform.readTextFile(t));
+        lastNotes = layout.notes;
+        lastGroups = layout.groups;
+        return layout;
       } catch {
         return emptyDiagramLayout();
       }
     },
     save(layout) {
+      lastNotes = layout.notes;
+      lastGroups = layout.groups;
       pending = layout;
       if (timer) clearTimeout(timer);
       timer = setTimeout(flush, SAVE_DEBOUNCE_MS);
     },
     clear() {
+      // Auto-arrange resets node POSITIONS only — canvas annotations are preserved. Reuse the last-seen
+      // annotations (from the most recent load/save, so a not-yet-flushed edit isn't lost) and write
+      // {positions:{}, …annotations} immediately (not debounced, matching the old reset).
       if (timer) {
         clearTimeout(timer);
         timer = null;
       }
       pending = null;
-      // Write an empty envelope so the committed file reflects the reset (rather than leaving stale state).
-      void write(emptyDiagramLayout());
+      void write({ positions: {}, notes: lastNotes, groups: lastGroups });
     },
   };
 }

@@ -2,7 +2,7 @@ import type { StoreApi } from 'zustand/vanilla';
 import { useStore } from 'zustand';
 import type { AppState } from '@/store/index';
 import { isAllContexts } from '@/model/activeContext';
-import type { AddNodeKind } from '@/diagrams/diagramContract';
+import type { AddNodeKind, CanvasAnnotationKind } from '@/diagrams/diagramContract';
 
 // The DDD constructs that round-trip to `.koi` via the addType seam (server Task 1). Each `kind` doubles
 // as the `koi-model-icon` `data-construct` slug, so a button wears the SAME shape-coded glyph the diagram
@@ -16,22 +16,33 @@ const CONSTRUCTS: { kind: AddNodeKind; label: string }[] = [
   { kind: 'enum', label: 'Enum' },
 ];
 
+// Canvas-only annotations (#255): NOT model constructs — they persist in koine.layout.json, never `.koi`,
+// so they're context-free and stay enabled regardless of the active-context scope. A swatch (note amber /
+// group violet) marks them apart from the round-trip constructs above and the muted coming-soon buttons.
+const ANNOTATIONS: { kind: CanvasAnnotationKind; label: string; tooltip: string }[] = [
+  { kind: 'note', label: 'Note', tooltip: 'Add a free-text note (canvas-only annotation)' },
+  { kind: 'group', label: 'Group', tooltip: 'Group the selected nodes (canvas-only annotation)' },
+];
+
 // Not yet wired to a model edit — shown disabled so the toolbar matches the agreed mockup and each can be
 // enabled later without moving the others. Relation points the modeller at the existing connect gesture;
-// Rule/Repository live inside an aggregate and Note/Group are canvas-only annotations (deferred by design).
+// Rule/Repository live inside an aggregate (a separate follow-up).
 const COMING_SOON: { label: string; tooltip: string }[] = [
   { label: 'Rule', tooltip: 'Coming soon' },
   { label: 'Repository', tooltip: 'Coming soon' },
   { label: 'Relation', tooltip: 'Drag from one node to another to connect' },
-  { label: 'Note', tooltip: 'Coming soon' },
-  { label: 'Group', tooltip: 'Coming soon' },
 ];
 
 // The construct palette above the domain canvas. Subscribes to the active-context slice so the
 // round-trip buttons enable only when there's an unambiguous home context: a single bounded context is
 // active, OR "All contexts" is selected but the model has exactly one context (then it's the only target,
-// and the add path resolves to it). Controller-free: clicks call the injected onAdd callback.
-export function CanvasPalette(props: { store: StoreApi<AppState>; onAdd: (kind: AddNodeKind) => void }) {
+// and the add path resolves to it). Annotations are context-free (always enabled). Controller-free:
+// clicks call the injected onAdd / onAddAnnotation callbacks.
+export function CanvasPalette(props: {
+  store: StoreApi<AppState>;
+  onAdd: (kind: AddNodeKind) => void;
+  onAddAnnotation: (kind: CanvasAnnotationKind) => void;
+}) {
   const scope = useStore(props.store, (s) => s.activeContext);
   const contexts = useStore(props.store, (s) => s.contexts);
   const enabled = !isAllContexts(scope) || contexts.length === 1;
@@ -50,6 +61,21 @@ export function CanvasPalette(props: { store: StoreApi<AppState>; onAdd: (kind: 
         >
           <span class="koi-model-icon" data-construct={c.kind} aria-hidden="true" />
           <span class="koi-palette-label">{c.label}</span>
+        </button>
+      ))}
+      <span class="koi-palette-sep" aria-hidden="true" />
+      {ANNOTATIONS.map((a) => (
+        <button
+          type="button"
+          class="koi-palette-btn"
+          data-annotation={a.kind}
+          key={a.kind}
+          title={a.tooltip}
+          aria-label={`Add ${a.label}`}
+          onClick={() => props.onAddAnnotation(a.kind)}
+        >
+          <span class={`koi-palette-swatch koi-palette-swatch--${a.kind}`} aria-hidden="true" />
+          <span class="koi-palette-label">{a.label}</span>
         </button>
       ))}
       <span class="koi-palette-sep" aria-hidden="true" />

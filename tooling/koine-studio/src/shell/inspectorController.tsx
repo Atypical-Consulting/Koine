@@ -42,7 +42,7 @@ import type { Platform } from '@/host';
 import type { PreviewTarget } from '@/settings/persistence';
 import { renderDiagrams } from '@/diagrams/diagrams';
 import { setDiagramLayoutStore, setDiagramPersistScope } from '@/diagrams/diagramContract';
-import type { AddNodeKind } from '@/diagrams/diagramContract';
+import type { AddNodeKind, CanvasAnnotationKind } from '@/diagrams/diagramContract';
 import { createLayoutStore } from '@/diagrams/layoutStore';
 import { mergeDiagramGraphs } from '@/model/modelTables';
 import { type GlossaryHandlers } from '@/model/glossary';
@@ -156,6 +156,8 @@ export interface InspectorControllerDeps {
   onApplyStructuredEdit(edit: StructuredEdit, successMsg: string): void;
   /** Insert a new DDD construct of the given kind into the active context (the palette's add path). */
   onAddConstruct(kind: AddNodeKind): void;
+  /** Create a canvas-only annotation (note/group) — a view concern persisted in koine.layout.json (#255). */
+  onAddAnnotation(kind: CanvasAnnotationKind): void;
   /** Jump to a RAW 1-based source span (opens the owning file if needed) — the bottom tables' row click. */
   gotoSourceSpan(span: Pick<SourceSpan, 'file' | 'line' | 'column' | 'endLine' | 'endColumn'>): void;
 
@@ -973,7 +975,14 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
 
   // The construct palette is store-driven (active-context gating) and model-independent, so it mounts
   // once here rather than per diagram reload. Clicks route through the injected onAddConstruct callback.
-  render(<CanvasPalette store={appStore} onAdd={(kind) => deps.onAddConstruct(kind)} />, el('canvas-palette-host'));
+  render(
+    <CanvasPalette
+      store={appStore}
+      onAdd={(kind) => deps.onAddConstruct(kind)}
+      onAddAnnotation={(kind) => deps.onAddAnnotation(kind)}
+    />,
+    el('canvas-palette-host'),
+  );
 
   const centerTechnicalEl = el('center-technical');
   const centerDocsEl = el('center-docs');

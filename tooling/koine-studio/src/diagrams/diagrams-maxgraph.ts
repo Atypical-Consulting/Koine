@@ -14,6 +14,7 @@ import { mergeGraphsForView } from '@/model/modelTables';
 import { buildEmptyState } from '@/diagrams/emptyState';
 import { loadDiagramZoom, saveDiagramZoom } from '@/settings/persistence';
 import {
+  DIAGRAM_ANNOTATION_CREATE_EVENT,
   DIAGRAM_CONNECT_EVENT,
   DIAGRAM_DISCONNECT_EVENT,
   DIAGRAM_RELAYOUT_EVENT,
@@ -23,6 +24,7 @@ import {
   isDiagramEditing,
   isEditableKind,
   type CanvasAnnotationKind,
+  type DiagramAnnotationCreateDetail,
   type DiagramConnectDetail,
   type DiagramDisconnectDetail,
   type DiagramGroup,
@@ -260,6 +262,15 @@ function isAnnotationCell(cell: MxCell | null | undefined): boolean {
   return annotationValue(cell) != null;
 }
 
+/** A monotonic fallback so authored annotations get a stable, unique id even where crypto.randomUUID is absent. */
+let annotationIdSeq = 0;
+
+/** A unique id for a freshly-authored annotation, e.g. `note-1a2b…` / `group-3` (#255). */
+function newAnnotationId(kind: CanvasAnnotationKind): string {
+  const uuid = globalThis.crypto?.randomUUID?.();
+  return `${kind}-${uuid ?? `${++annotationIdSeq}`}`;
+}
+
 /** The HTML label for an annotation cell: a sticky note's text, or a group's corner label. */
 function annotationLabelHtml(v: AnnotationCellValue): string {
   const cls = v.annotationKind === 'note' ? 'koi-annotation--note' : 'koi-annotation--group';
@@ -479,10 +490,16 @@ export function buildCanvas(
   });
 
   // Double-click an editable node → rename it (prompt), round-tripped through the model→.koi rename (#91).
+  // A double-click on a canvas annotation edits its note text / group label instead (#255, no `.koi` edit).
   // Gated on editing; only class-type, context-owned, spanned nodes (never a context / state) rename.
   graph.addListener(mx.InternalEvent.DOUBLE_CLICK, (_sender: unknown, evt: { getProperty(name: string): unknown }) => {
     if (!isDiagramEditing()) return;
-    const v = nodeValue(evt.getProperty('cell') as MxCell | null);
+    const cell = evt.getProperty('cell') as MxCell | null;
+    if (annotationValue(cell)) {
+      void editAnnotation(cell!);
+      return;
+    }
+    const v = nodeValue(cell);
     if (!v || !canRename(v)) return;
     const current = v.label;
     const s = v.sourceSpan!; // canRename guarantees a span; line/column is the name position for LSP rename
@@ -512,6 +529,19 @@ export function buildCanvas(
     const rect = container.getBoundingClientRect();
     const cell = graph.getCellAt(evt.clientX - rect.left, evt.clientY - rect.top);
     if (!cell) return;
+    const annotation = annotationValue(cell);
+    if (annotation) {
+      evt.preventDefault(); // suppress the native menu regardless of the async confirm's outcome
+      void koiConfirm({
+        title: `Delete this ${annotation.annotationKind}?`,
+        message: 'Removes the canvas annotation. Your .koi source is untouched.',
+        confirmLabel: 'Delete',
+        danger: true,
+      }).then((ok) => {
+        if (ok) deleteAnnotation(cell);
+      });
+      return;
+    }
     const node = nodeValue(cell);
     if (node) {
       if (!canDelete(node)) return;
@@ -598,58 +628,64 @@ export function buildCanvas(
     else byContext.set(ctx, [node]);
   }
 
+  // Insert one annotation cell. Used both to restore the saved layout (in the build batch, before the
+  // nodes so it paints behind) and to author a new annotation later (sendAnnotationsToBack keeps it behind).
+  function insertGroupCell(group: DiagramGroup): MxCell {
+    const cell = graph.insertVertex({
+      parent: root,
+      id: `group:${group.id}`,
+      value: { annotationKind: 'group', id: group.id, text: group.label, members: [...group.members], color: group.color },
+      position: [0, 0],
+      size: [GROUP_PAD * 4, GROUP_PAD * 4], // placeholder; layoutGroups() derives the rect from the members
+      style: {
+        shape: 'rectangle',
+        rounded: true,
+        fillColor: GROUP_FILL,
+        fillOpacity: 8,
+        strokeColor: GROUP_STROKE,
+        strokeWidth: 1.5,
+        dashed: true,
+        dashPattern: '4 4',
+        verticalAlign: 'top',
+        align: 'left',
+        spacingLeft: 8,
+        spacingTop: 6,
+      },
+    });
+    groupCells.set(group.id, cell);
+    return cell;
+  }
+  function insertNoteCell(note: DiagramNote): MxCell {
+    const cell = graph.insertVertex({
+      parent: root,
+      id: `note:${note.id}`,
+      value: { annotationKind: 'note', id: note.id, text: note.text },
+      position: [note.x, note.y],
+      size: [note.width || NOTE_DEFAULT_W, note.height || NOTE_DEFAULT_H],
+      // The shape carries the sticky fill + receives pointer events; the HTML label (.koi-annotation,
+      // pointer-events:none) overlays it with the wrapped text — mirroring the node label pattern.
+      style: {
+        shape: 'rectangle',
+        rounded: true,
+        fillColor: NOTE_FILL,
+        strokeColor: NOTE_STROKE,
+        strokeWidth: 1,
+        overflow: 'fill',
+        whiteSpace: 'wrap',
+        verticalAlign: 'top',
+        align: 'left',
+      },
+    });
+    noteCells.set(note.id, cell);
+    return cell;
+  }
+
   graph.batchUpdate(() => {
     // Annotations are inserted FIRST so they paint BEHIND every container/node/edge (root child order ==
     // SVG paint order). Groups (regions) go in before notes, so a note over a group reads on top — both
-    // still sit behind the nodes. A group's geometry is a placeholder here; layoutGroups() derives the real
-    // rect from its members once positions are settled.
-    for (const group of savedGroups) {
-      const cell = graph.insertVertex({
-        parent: root,
-        id: `group:${group.id}`,
-        value: { annotationKind: 'group', id: group.id, text: group.label, members: [...group.members], color: group.color },
-        position: [0, 0],
-        size: [GROUP_PAD * 4, GROUP_PAD * 4],
-        style: {
-          shape: 'rectangle',
-          rounded: true,
-          fillColor: GROUP_FILL,
-          fillOpacity: 8,
-          strokeColor: GROUP_STROKE,
-          strokeWidth: 1.5,
-          dashed: true,
-          dashPattern: '4 4',
-          verticalAlign: 'top',
-          align: 'left',
-          spacingLeft: 8,
-          spacingTop: 6,
-        },
-      });
-      groupCells.set(group.id, cell);
-    }
-    for (const note of savedNotes) {
-      const cell = graph.insertVertex({
-        parent: root,
-        id: `note:${note.id}`,
-        value: { annotationKind: 'note', id: note.id, text: note.text },
-        position: [note.x, note.y],
-        size: [note.width || NOTE_DEFAULT_W, note.height || NOTE_DEFAULT_H],
-        // The shape carries the sticky fill + receives pointer events; the HTML label (.koi-annotation,
-        // pointer-events:none) overlays it with the wrapped text — mirroring the node label pattern.
-        style: {
-          shape: 'rectangle',
-          rounded: true,
-          fillColor: NOTE_FILL,
-          strokeColor: NOTE_STROKE,
-          strokeWidth: 1,
-          overflow: 'fill',
-          whiteSpace: 'wrap',
-          verticalAlign: 'top',
-          align: 'left',
-        },
-      });
-      noteCells.set(note.id, cell);
-    }
+    // still sit behind the nodes.
+    for (const group of savedGroups) insertGroupCell(group);
+    for (const note of savedNotes) insertNoteCell(note);
 
     // A swimlane container per non-empty NAMED context: a subtle bounding box with the context name as its
     // header bar. Nodes are parented INTO their context; the inner layout grows the box to fit them.
@@ -821,13 +857,86 @@ export function buildCanvas(
   graph.addListener(mx.InternalEvent.CELLS_MOVED, persist);
   graph.addListener(mx.InternalEvent.CELLS_RESIZED, persist);
 
+  // --- annotation authoring (create / edit / delete; #255 Task 3) ------------
+  // Annotations are a view concern, so the renderer owns their whole lifecycle (no `.koi` round-trip): it
+  // mutates the live graph and persists via the store. Create is driven by a document event the palette →
+  // IDE raises; edit/delete reuse the node double-click / right-click gestures (branches added above).
+
+  /** Keep every annotation behind the nodes after an author action (groups before notes, both at the back). */
+  function sendAnnotationsToBack(): void {
+    const ordered = [...groupCells.values(), ...noteCells.values()];
+    if (ordered.length) graph.orderCells(true, ordered);
+  }
+
+  async function createNote(): Promise<void> {
+    const text = await koiPrompt({ title: 'New note', label: 'Note text', initialValue: '', confirmLabel: 'Add note' });
+    if (!text) return; // cancelled or empty
+    const offset = 32 + noteCells.size * 24; // cascade so successive notes don't stack exactly
+    insertNoteCell({ id: newAnnotationId('note'), text, x: offset, y: offset, width: NOTE_DEFAULT_W, height: NOTE_DEFAULT_H });
+    sendAnnotationsToBack();
+    persist();
+  }
+
+  async function createGroup(): Promise<void> {
+    // Group the current node selection; if nothing is selected, group every node on the canvas (so the
+    // button always produces a visible region the user can then edit/delete).
+    const selected = graph.getSelectionCells().map(nodeValue).filter((v): v is DiagramNode => v != null);
+    const source = selected.length ? selected : [...cells.values()].map(nodeValue).filter((v): v is DiagramNode => v != null);
+    const members = source.map((v) => v.qualifiedName);
+    if (!members.length) return; // nothing to enclose
+    const label = await koiPrompt({ title: 'New group', label: 'Group label', initialValue: 'Group', confirmLabel: 'Add group' });
+    if (!label) return;
+    insertGroupCell({ id: newAnnotationId('group'), label, members });
+    sendAnnotationsToBack();
+    layoutGroups();
+    persist();
+  }
+
+  /** Edit a note's text / a group's label via the modal prompt (double-click gesture). */
+  async function editAnnotation(cell: MxCell): Promise<void> {
+    const av = annotationValue(cell);
+    if (!av) return;
+    const isNote = av.annotationKind === 'note';
+    const next = await koiPrompt({
+      title: isNote ? 'Edit note' : 'Rename group',
+      label: isNote ? 'Note text' : 'Group label',
+      initialValue: av.text,
+      confirmLabel: 'Save',
+    });
+    if (next == null || next === av.text) return;
+    if (isNote && !next) return; // a note must keep some text
+    graph.getDataModel().setValue(cell, { ...av, text: next });
+    persist();
+  }
+
+  /** Remove a note/group from the canvas and the saved layout (right-click gesture). */
+  function deleteAnnotation(cell: MxCell): void {
+    const av = annotationValue(cell);
+    if (!av) return;
+    graph.getDataModel().remove(cell);
+    if (av.annotationKind === 'note') noteCells.delete(av.id);
+    else groupCells.delete(av.id);
+    persist();
+  }
+
+  const onCreateAnnotation = (e: Event): void => {
+    if (!isDiagramEditing()) return;
+    const detail = (e as CustomEvent<DiagramAnnotationCreateDetail>).detail;
+    if (detail?.kind === 'note') void createNote();
+    else if (detail?.kind === 'group') void createGroup();
+  };
+  document.addEventListener(DIAGRAM_ANNOTATION_CREATE_EVENT, onCreateAnnotation);
+
   return {
     graph,
     cells,
     containers,
     noteCells,
     groupCells,
-    dispose: () => graph.destroy(),
+    dispose: () => {
+      document.removeEventListener(DIAGRAM_ANNOTATION_CREATE_EVENT, onCreateAnnotation);
+      graph.destroy();
+    },
   };
 }
 

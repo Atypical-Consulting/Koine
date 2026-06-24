@@ -84,6 +84,19 @@ export interface DiagramDisconnectDetail {
   label: string;
 }
 
+/**
+ * Global event the palette → IDE raises to ask the canvas to create a canvas-only annotation (#255). The
+ * renderer — the only holder of the live graph + current selection — prompts for the note text / group
+ * label, places the cell behind the nodes, and persists it. Dispatched on `document` so it reaches the
+ * active canvas wherever it mounted. No `.koi` round-trip: annotations are a pure view concern.
+ */
+export const DIAGRAM_ANNOTATION_CREATE_EVENT = 'koi-canvas-annotation-create';
+
+/** The `detail` of a {@link DIAGRAM_ANNOTATION_CREATE_EVENT}: which annotation kind to author. */
+export interface DiagramAnnotationCreateDetail {
+  kind: CanvasAnnotationKind;
+}
+
 /** The DDD constructs the canvas palette can author. Mirrors the construct keyword the compiler's
  *  `addType` edit carries in `StructuredEdit.Type`. */
 export type AddNodeKind = 'aggregate' | 'entity' | 'value' | 'enum' | 'event' | 'service';
@@ -260,7 +273,7 @@ export interface DiagramLayoutStore {
   load(): Promise<DiagramLayout>;
   /** Persist the full layout (the backend decides immediate vs debounced). */
   save(layout: DiagramLayout): void;
-  /** Forget all saved layout (the "Auto-arrange" reset). */
+  /** Reset the saved node positions (the "Auto-arrange" re-layout); canvas annotations are PRESERVED. */
   clear(): void;
 }
 

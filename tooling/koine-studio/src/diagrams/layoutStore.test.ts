@@ -314,17 +314,17 @@ describe('createBrowserLayoutStore', () => {
     expect(loadDiagramAnnotations(positionKey())).toEqual({ notes, groups });
   });
 
-  it('clear() forgets the saved positions AND annotations', async () => {
+  it('clear() forgets positions but PRESERVES annotations (auto-arrange re-lays-out nodes only)', async () => {
     setDiagramPersistScope('ws-clear');
     const store = createBrowserLayoutStore();
-    store.save(lay({ A: { x: 1, y: 2 } }, [{ id: 'n', text: 't', x: 0, y: 0, width: 1, height: 1 }]));
-    expect(await store.load()).not.toEqual(emptyDiagramLayout());
+    const notes: DiagramNote[] = [{ id: 'n', text: 't', x: 0, y: 0, width: 1, height: 1 }];
+    store.save(lay({ A: { x: 1, y: 2 } }, notes));
 
     store.clear();
 
-    expect(await store.load()).toEqual(emptyDiagramLayout());
+    expect(await store.load()).toEqual(lay({}, notes));
     expect(loadDiagramPositions(positionKey())).toEqual({});
-    expect(loadDiagramAnnotations(positionKey())).toEqual({ notes: [], groups: [] });
+    expect(loadDiagramAnnotations(positionKey())).toEqual({ notes, groups: [] });
   });
 
   it('scopes the layout per workspace — one workspace cannot read another', async () => {
@@ -482,6 +482,23 @@ describe('createFolderLayoutStore — clear', () => {
     await vi.runAllTimersAsync();
 
     expect(await store.load()).toEqual(emptyDiagramLayout());
+  });
+
+  it('clear() resets positions but PRESERVES the notes/groups from the last save (auto-arrange)', async () => {
+    const fs = fakeFs();
+    vi.useFakeTimers();
+    const store = createFolderLayoutStore(fs.platform, FOLDER);
+    const notes: DiagramNote[] = [{ id: 'n1', text: 'keep me', x: 5, y: 6, width: 120, height: 60 }];
+    const groups: DiagramGroup[] = [{ id: 'g1', label: 'Keep', members: ['A'] }];
+
+    store.save(lay({ A: { x: 1, y: 1 } }, notes, groups));
+    await vi.runAllTimersAsync();
+
+    store.clear();
+    await vi.runAllTimersAsync();
+
+    // Positions wiped, annotations intact.
+    expect(await store.load()).toEqual(lay({}, notes, groups));
   });
 });
 
