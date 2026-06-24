@@ -223,46 +223,69 @@ export function planReplacements(targets: ReplaceTarget[], q: SearchQuery, repla
   for (const target of targets) {
     const open = target.bufferText !== undefined;
     const source = (open ? target.bufferText : target.diskText) ?? '';
-    const text = applyReplace(source, q, replacement);
-    if (text === source) continue; // no match / invalid regex / empty query — nothing to route
-    const count = runSearch([{ uri: target.uri, text: source }], q).files[0]?.matches.length ?? 0;
+    const { text, count } = replaceWithCount(source, q, replacement);
+    if (count === 0 || text === source) continue; // no match / invalid regex / no-op replacement
     out.push({ uri: target.uri, open, text, count });
   }
   return out;
 }
 
-/** Expand `$&` / `$1`…`$99` / `$$` against a match — only in regex mode; literal mode inserts verbatim. */
+/**
+ * Expand `$&` / `$$` / `$n` against a match — only in regex mode; literal mode inserts verbatim.
+ * Mirrors JavaScript `String.replace` semantics: a two-digit `$nn` is used only when that group
+ * exists, otherwise it falls back to the single-digit group plus the trailing digit as a literal; a
+ * reference to a non-existent group (and `$0`) is left literal rather than swallowed to an empty string.
+ */
 function expandReplacement(replacement: string, m: RegExpExecArray, q: SearchQuery): string {
   if (!q.regex) return replacement;
+  const groups = m.length - 1; // number of capture groups in the pattern
   return replacement.replace(/\$(\$|&|\d{1,2})/g, (_, token: string) => {
     if (token === '$') return '$';
     if (token === '&') return m[0];
-    const group = m[Number(token)];
-    return group ?? '';
+    if (token.length === 2) {
+      const two = Number(token);
+      if (two >= 1 && two <= groups) return m[two] ?? '';
+      // The two-digit group doesn't exist: fall back to the single-digit group + a literal digit.
+      const one = Number(token[0]);
+      if (one >= 1 && one <= groups) return (m[one] ?? '') + token[1];
+      return '$' + token; // neither group exists — leave the whole token literal
+    }
+    const one = Number(token);
+    if (one >= 1 && one <= groups) return m[one] ?? '';
+    return '$' + token; // $0 / non-existent group — literal, matching String.replace
   });
 }
 
 /**
- * Replace every match of the query in `text` with `replacement`. Edits are spliced in right-to-left
- * so each splice leaves earlier offsets valid. A literal replacement is inserted verbatim ($1 stays
- * `$1`); in regex mode `$&`/`$1`… are expanded. An invalid regex or empty query returns `text` as-is.
- * Line endings are preserved because only the matched spans are touched.
+ * Replace every match of the query in `source`, returning the new text and the number of matches
+ * replaced. Edits are spliced in right-to-left so each splice leaves earlier offsets valid; only the
+ * matched spans are touched, so line endings are preserved. An invalid regex or empty query is a no-op
+ * (the original text, count 0).
  */
-export function applyReplace(text: string, q: SearchQuery, replacement: string): string {
-  if (q.text === '') return text;
+function replaceWithCount(source: string, q: SearchQuery, replacement: string): { text: string; count: number } {
+  if (q.text === '') return { text: source, count: 0 };
   const compiled = compile(q);
-  if (compiled.error !== null) return text;
+  if (compiled.error !== null) return { text: source, count: 0 };
   const regex = compiled.regex;
   regex.lastIndex = 0;
   const edits: { from: number; to: number; insert: string }[] = [];
   let m: RegExpExecArray | null;
-  while ((m = regex.exec(text)) !== null) {
+  while ((m = regex.exec(source)) !== null) {
     edits.push({ from: m.index, to: m.index + m[0].length, insert: expandReplacement(replacement, m, q) });
     if (m[0].length === 0) regex.lastIndex++;
   }
-  let out = text;
+  let text = source;
   for (let i = edits.length - 1; i >= 0; i--) {
-    out = out.slice(0, edits[i].from) + edits[i].insert + out.slice(edits[i].to);
+    text = text.slice(0, edits[i].from) + edits[i].insert + text.slice(edits[i].to);
   }
-  return out;
+  return { text, count: edits.length };
+}
+
+/**
+ * Replace every match of the query in `text` with `replacement`. A literal replacement is inserted
+ * verbatim ($1 stays `$1`); in regex mode `$&`/`$1`… are expanded. An invalid regex or empty query
+ * returns `text` as-is. Line endings are preserved because only the matched spans are touched.
+ */
+export function applyReplace(text: string, q: SearchQuery, replacement: string): string {
+  return replaceWithCount(text, q, replacement).text;
 }

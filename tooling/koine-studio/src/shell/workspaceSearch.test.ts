@@ -122,6 +122,15 @@ describe('applyReplace', () => {
     expect(applyReplace('keep amount', q({ text: 'amount' }), '$1')).toBe('keep $1');
   });
 
+  test('a $10 with one group expands $1 then a literal 0 (matching String.replace)', () => {
+    expect(applyReplace('Money amount', q({ text: '(\\w+) amount', regex: true }), '$10')).toBe('Money0');
+  });
+
+  test('leaves $0 and non-existent group refs literal (matching String.replace)', () => {
+    expect(applyReplace('amount', q({ text: '(amount)', regex: true }), '$0')).toBe('$0');
+    expect(applyReplace('amount', q({ text: '(amount)', regex: true }), '$2')).toBe('$2');
+  });
+
   test('preserves CRLF / LF line endings around replacements', () => {
     expect(applyReplace('Money\r\nMoney\n', q({ text: 'Money' }), 'Cash')).toBe('Cash\r\nCash\n');
   });

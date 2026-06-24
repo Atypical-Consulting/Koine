@@ -9,7 +9,7 @@
 // Replace (the "Replace with" field + per-file / across-files apply) is layered on in a later task;
 // this file is search + go-to-match only.
 import { render } from 'preact';
-import { useEffect, useState } from 'preact/hooks';
+import { useEffect, useRef, useState } from 'preact/hooks';
 import { el } from '@/shared/el';
 import {
   planReplacements,
@@ -59,16 +59,31 @@ interface SearchPanelProps extends SearchPanelOptions {
 /**
  * Build the searchable corpus: prefer a file's live buffer text (unsaved edits included), fall back
  * to its on-disk text, and include any open buffers that aren't under the listed folder set (e.g. a
- * transient single-file workspace).
+ * transient single-file workspace). Closed files' on-disk text is memoised in `diskCache` so repeated
+ * searches (every keystroke) don't re-read unchanged files; the caller clears the cache when the panel
+ * (re)opens and after a replace, so a fresh read happens exactly when content may have changed.
  */
-async function buildCorpus(opts: SearchPanelOptions): Promise<{ uri: string; text: string }[]> {
+async function buildCorpus(
+  opts: SearchPanelOptions,
+  diskCache: Map<string, string>,
+): Promise<{ uri: string; text: string }[]> {
   const uris = await opts.listFiles();
   const live = opts.getActiveBuffers();
   const corpus: { uri: string; text: string }[] = [];
   const seen = new Set<string>();
   for (const uri of uris) {
     seen.add(uri);
-    const text = live.get(uri) ?? (await opts.readFile(uri));
+    let text = live.get(uri); // open buffer wins (always current, cheap, may be unsaved)
+    if (text === undefined) {
+      text = diskCache.get(uri);
+      if (text === undefined) {
+        const disk = await opts.readFile(uri);
+        if (disk != null) {
+          diskCache.set(uri, disk);
+          text = disk;
+        }
+      }
+    }
     if (text != null) corpus.push({ uri, text });
   }
   for (const [uri, text] of live) if (!seen.has(uri)) corpus.push({ uri, text });
@@ -87,8 +102,16 @@ export function SearchPanel(props: SearchPanelProps) {
   const [error, setError] = useState<string | null>(null);
   // Bumped after a replace so the search effect re-runs against the now-edited buffers/files.
   const [reloadToken, setReloadToken] = useState(0);
+  // On-disk text of closed files, memoised across keystrokes within one open/replace cycle.
+  const diskCache = useRef<Map<string, string>>(new Map());
 
   const buildQuery = (): SearchQuery => ({ text: query, caseSensitive, wholeWord, regex, include });
+
+  // Drop the cached on-disk text when the panel (re)opens or a replace lands — the only moments a
+  // closed file's content may have changed under us — so the next search re-reads it fresh.
+  useEffect(() => {
+    diskCache.current.clear();
+  }, [props.visible, reloadToken]);
 
   // Re-run the search (debounced) whenever the query / toggles / include change, whenever the panel
   // is (re)opened, and after a replace — so results reflect the current buffers and on-disk files.
@@ -101,7 +124,7 @@ export function SearchPanel(props: SearchPanelProps) {
     }
     let cancelled = false;
     const id = setTimeout(() => {
-      void buildCorpus(props).then((corpus) => {
+      void buildCorpus(props, diskCache.current).then((corpus) => {
         if (cancelled) return;
         const outcome = runSearch(corpus, buildQuery());
         setFiles(outcome.files);
@@ -134,8 +157,14 @@ export function SearchPanel(props: SearchPanelProps) {
       }
     }
     for (const planned of planReplacements(targets, q, replacement)) {
-      if (planned.open) props.replaceInBuffer(planned.uri, planned.text);
-      else await props.writeFile(planned.uri, planned.text);
+      // One file failing (e.g. a disk write rejects) must not abort the rest or skip the re-search;
+      // the shell's writeFile reports the error to the status line.
+      try {
+        if (planned.open) props.replaceInBuffer(planned.uri, planned.text);
+        else await props.writeFile(planned.uri, planned.text);
+      } catch (e) {
+        console.error('replace failed for', planned.uri, e);
+      }
     }
     setReloadToken((t) => t + 1);
   }

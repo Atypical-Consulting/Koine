@@ -1231,8 +1231,19 @@ export function init(): () => void {
         if (token) await workspace.openFileToken(token);
       }
     }
-    const line = match.line - 1;
-    editor.gotoRange({ line, character: match.column }, { line, character: match.column + match.length });
+    // Derive the END position from the active document so a match that spans lines (a regex with
+    // `\n` / `[\s\S]`) selects the whole span rather than clamping to the start line. CodeMirror's
+    // doc lines are 1-based; offsets are clamped against the doc in case a stale match runs long.
+    const doc = editor.view.state.doc;
+    const startLine = Math.min(Math.max(match.line, 1), doc.lines);
+    const startOffset = Math.min(doc.line(startLine).from + match.column, doc.length);
+    const endOffset = Math.min(startOffset + match.length, doc.length);
+    const startInfo = doc.lineAt(startOffset);
+    const endInfo = doc.lineAt(endOffset);
+    editor.gotoRange(
+      { line: startInfo.number - 1, character: startOffset - startInfo.from },
+      { line: endInfo.number - 1, character: endOffset - endInfo.from },
+    );
   }
   const search = createSearchPanel({
     listFiles: (glob) => workspace.listWorkspaceFiles(glob),
@@ -1266,7 +1277,15 @@ export function init(): () => void {
     },
     writeFile: async (uri, newText) => {
       const token = fileUriToPath(uri);
-      if (token) await platform.writeTextFile(token, newText);
+      if (!token) return;
+      // Surface a failed replace-to-disk on the status line, mirroring the other write paths — a
+      // silent failure would let the user believe every match was replaced when some were not.
+      try {
+        await platform.writeTextFile(token, newText);
+      } catch (e) {
+        setStatus('could not write replaced file', 'error');
+        console.error('replace writeTextFile failed for', token, e);
+      }
     },
   });
 

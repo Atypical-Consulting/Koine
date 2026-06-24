@@ -122,4 +122,21 @@ describe('SearchPanel', () => {
     await waitFor(() => expect(opts.writeFile).toHaveBeenCalledWith('file:///a.koi', 'aggregate Order\n  total: Cash\n'));
     expect(opts.writeFile).not.toHaveBeenCalledWith('file:///b.koi', expect.anything());
   });
+
+  test('a failing file write does not abort the rest of a replace-all', async () => {
+    const opts = makeOpts({
+      writeFile: vi.fn(async (uri: string) => {
+        if (uri === 'file:///a.koi') throw new Error('disk full');
+      }),
+    });
+    const view = mount(opts);
+    fireEvent.input(view.getByLabelText('Search text'), { target: { value: 'Money' } });
+    fireEvent.input(view.getByLabelText('Replace with'), { target: { value: 'Cash' } });
+    await view.findByText('2 results in 2 files');
+
+    fireEvent.click(view.getByLabelText('Replace all'));
+
+    // a.koi's write throws, but b.koi is still written — one failure must not abort the batch.
+    await waitFor(() => expect(opts.writeFile).toHaveBeenCalledWith('file:///b.koi', 'value Cash\n'));
+  });
 });
