@@ -13,7 +13,19 @@ channels:
     messages:
       OrderPlaced:
         $ref: '#/components/messages/OrderPlaced'
-operations: {}
+operations:
+  Sales_send_OrderCancelled:
+    action: send
+    channel:
+      $ref: '#/channels/OrderCancelled'
+    tags:
+      - name: Sales
+  Sales_send_OrderPlaced:
+    action: send
+    channel:
+      $ref: '#/channels/OrderPlaced'
+    tags:
+      - name: Sales
 components:
   messages:
     OrderCancelled:

@@ -46,7 +46,7 @@ public sealed partial class AsyncApiEmitter : IEmitter
         // Channels and operations describe the event graph; an empty graph still emits a minimal,
         // valid document (just the two empty maps). Components hold the reusable messages and schemas.
         EmitChannels(sb, events);
-        sb.Append("operations: {}\n");
+        EmitOperations(sb, model, events, index);
 
         if (events.Count > 0)
         {

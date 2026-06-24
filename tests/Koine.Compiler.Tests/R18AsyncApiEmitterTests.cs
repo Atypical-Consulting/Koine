@@ -106,4 +106,40 @@ public class R18AsyncApiEmitterTests
 
         return Verify(yaml).UseDirectory("Snapshots");
     }
+
+    [Fact]
+    public Task Send_and_receive_operations_from_the_context_map()
+    {
+        const string source = """
+            context Sales {
+              integration event OrderPlaced {
+                orderId: String
+              }
+              publishes OrderPlaced
+            }
+
+            context Shipping {
+              subscribes Sales.OrderPlaced
+            }
+
+            contextmap {
+              Sales -> Shipping : customer-supplier
+            }
+            """;
+
+        var result = new KoineCompiler().Compile(source, new AsyncApiEmitter());
+
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+        var yaml = result.Files.ShouldHaveSingleItem().Contents;
+
+        yaml.ShouldContain("operations:");
+        // The publisher sends; the subscriber receives — both bound to the same channel.
+        yaml.ShouldContain("  Sales_send_OrderPlaced:");
+        yaml.ShouldContain("action: send");
+        yaml.ShouldContain("  Shipping_receive_OrderPlaced:");
+        yaml.ShouldContain("action: receive");
+        yaml.ShouldContain("$ref: '#/channels/OrderPlaced'");
+
+        return Verify(yaml).UseDirectory("Snapshots");
+    }
 }

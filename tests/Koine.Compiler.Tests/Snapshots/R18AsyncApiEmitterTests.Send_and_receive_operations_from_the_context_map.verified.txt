@@ -15,6 +15,12 @@ operations:
       $ref: '#/channels/OrderPlaced'
     tags:
       - name: Sales
+  Shipping_receive_OrderPlaced:
+    action: receive
+    channel:
+      $ref: '#/channels/OrderPlaced'
+    tags:
+      - name: Shipping
 components:
   messages:
     OrderPlaced:
@@ -26,17 +32,6 @@ components:
       type: object
       properties:
         orderId:
-          $ref: '#/components/schemas/OrderId'
-        status:
           type: string
-          enum:
-            - Draft
-            - Placed
-        quantity:
-          type: integer
       required:
         - orderId
-        - status
-        - quantity
-    OrderId:
-      type: string
