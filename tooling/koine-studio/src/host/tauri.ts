@@ -184,9 +184,11 @@ export class TauriPlatform implements Platform {
   // and parse the result. The arg vector is built in tested TS (gitHistory.ts); the Rust `git_log_for_range`
   // command is a thin exec wrapper. Any failure resolves null so the inspector hides the section.
   async gitLogForRange(path: string, startLine: number, endLine: number): Promise<ChangeEntry[] | null> {
+    // Split into directory + basename on the normalized (forward-slashed) form so both halves use one
+    // separator — git -C accepts forward slashes on every platform, so a Windows path stays consistent.
     const norm = path.replace(/\\/g, '/');
     const slash = norm.lastIndexOf('/');
-    const dir = slash >= 0 ? path.slice(0, slash) : '.';
+    const dir = slash >= 0 ? norm.slice(0, slash) : '.';
     const base = slash >= 0 ? norm.slice(slash + 1) : norm;
     if (this.nonGitDirs.has(dir)) return null;
     try {

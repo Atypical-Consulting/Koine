@@ -10,7 +10,7 @@
 // Invariants / published events / repository are NOT on the wire today (they are not `DiagramNode`
 // members), so the element fields are optional and the panel renders those compartments only when a
 // future minimal emitter change populates them — the layout is forward-compatible.
-import type { DiagramNode, GlossaryEntry, ModelMember, Range } from '@/lsp/lsp';
+import type { DiagramNode, GlossaryEntry, ModelMember, Range, SourceSpan } from '@/lsp/lsp';
 import type { ChangeEntry } from '@/host/gitHistory';
 import { railHint, renderRailEmpty } from '@/model/railEmpty';
 
@@ -51,6 +51,14 @@ export interface InspectorElement {
   repository?: string | null;
   /** The declaration's name range, for jump-to-source from the header. */
   nameRange: Range;
+  /**
+   * The declaration's full source span — its file uri + line range — when the element has a diagram
+   * node (issue #150). Carries the *correct* file even in a multi-file workspace, so the change-history
+   * lookup scopes git to the element's own declaration rather than whatever file the editor shows.
+   * Absent for elements with no diagram node (e.g. an undrawn value object); the lookup then falls back
+   * to the active file + {@link nameRange}.
+   */
+  sourceSpan?: SourceSpan | null;
 }
 
 export interface InspectorHandlers {
@@ -118,6 +126,9 @@ export function buildInspectorElement(
     // invariant's message or its described condition. Undefined when the node carries none.
     invariants: node?.invariants && node.invariants.length > 0 ? node.invariants : undefined,
     nameRange: entry.nameRange,
+    // The diagram node carries the declaration's file + line range; null for undrawn elements (the
+    // change-history lookup then falls back to the active file + name range).
+    sourceSpan: node?.sourceSpan ?? null,
   };
 }
 
