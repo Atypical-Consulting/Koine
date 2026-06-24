@@ -23,6 +23,11 @@ public sealed partial class AsyncApiEmitter
         // referenced by $ref; collected here as the payloads are rendered.
         var sharedIds = new SortedSet<string>(StringComparer.Ordinal);
 
+        // (declaring context, event name) -> disambiguated key, so a nested integration-event field
+        // resolves to the SAME key the referenced event's payload schema is emitted under — otherwise a
+        // nested reference to a colliding event would point at a bare, non-existent schema name.
+        var payloadKeyByOwner = events.ToDictionary(e => (e.Context, e.Name), e => e.Key);
+
         foreach (CollectedEvent ev in events)
         {
             IntegrationEventDecl ie = ev.Event;
@@ -38,7 +43,7 @@ public sealed partial class AsyncApiEmitter
             foreach (Member m in ie.Members)
             {
                 sb.Append("        ").Append(m.Name).Append(":\n");
-                EmitTypeRef(sb, m.Type, index, sharedIds, indent: "          ");
+                EmitTypeRef(sb, m.Type, index, sharedIds, payloadKeyByOwner, ev.Context, indent: "          ");
             }
 
             var required = ie.Members.Where(m => !m.Type.IsOptional).Select(m => m.Name).ToList();
@@ -64,15 +69,26 @@ public sealed partial class AsyncApiEmitter
     /// type/format, an inline string enum, a <c>$ref</c> to a shared ID schema or a nested event's
     /// payload, or the structural shape of a collection field (list/set → array, map → object,
     /// range → a min/max object). Recurses into element/value types so nested IDs still register.
+    /// <paramref name="payloadKeyByOwner"/> and <paramref name="ownerContext"/> let a nested
+    /// integration-event reference resolve to the referenced event's disambiguated payload key (it is
+    /// declared in the same context as the enclosing event), so a collision-qualified payload is still
+    /// referenced correctly.
     /// </summary>
-    private static void EmitTypeRef(StringBuilder sb, TypeRef type, ModelIndex index, SortedSet<string> sharedIds, string indent)
+    private static void EmitTypeRef(
+        StringBuilder sb,
+        TypeRef type,
+        ModelIndex index,
+        SortedSet<string> sharedIds,
+        IReadOnlyDictionary<(string Context, string Name), string> payloadKeyByOwner,
+        string ownerContext,
+        string indent)
     {
         switch (index.Classify(type.Name))
         {
             case TypeKind.List:
                 sb.Append(indent).Append("type: array\n");
                 sb.Append(indent).Append("items:\n");
-                EmitTypeRef(sb, type.Element!, index, sharedIds, indent + "  ");
+                EmitTypeRef(sb, type.Element!, index, sharedIds, payloadKeyByOwner, ownerContext, indent + "  ");
                 break;
 
             case TypeKind.Set:
@@ -80,7 +96,7 @@ public sealed partial class AsyncApiEmitter
                 sb.Append(indent).Append("type: array\n");
                 sb.Append(indent).Append("uniqueItems: true\n");
                 sb.Append(indent).Append("items:\n");
-                EmitTypeRef(sb, type.Element!, index, sharedIds, indent + "  ");
+                EmitTypeRef(sb, type.Element!, index, sharedIds, payloadKeyByOwner, ownerContext, indent + "  ");
                 break;
 
             case TypeKind.Map:
@@ -88,7 +104,7 @@ public sealed partial class AsyncApiEmitter
                 // (the map's value type) are described by additionalProperties.
                 sb.Append(indent).Append("type: object\n");
                 sb.Append(indent).Append("additionalProperties:\n");
-                EmitTypeRef(sb, type.Value!, index, sharedIds, indent + "  ");
+                EmitTypeRef(sb, type.Value!, index, sharedIds, payloadKeyByOwner, ownerContext, indent + "  ");
                 break;
 
             case TypeKind.Range:
@@ -96,9 +112,9 @@ public sealed partial class AsyncApiEmitter
                 sb.Append(indent).Append("type: object\n");
                 sb.Append(indent).Append("properties:\n");
                 sb.Append(indent).Append("  min:\n");
-                EmitTypeRef(sb, type.Element!, index, sharedIds, indent + "    ");
+                EmitTypeRef(sb, type.Element!, index, sharedIds, payloadKeyByOwner, ownerContext, indent + "    ");
                 sb.Append(indent).Append("  max:\n");
-                EmitTypeRef(sb, type.Element!, index, sharedIds, indent + "    ");
+                EmitTypeRef(sb, type.Element!, index, sharedIds, payloadKeyByOwner, ownerContext, indent + "    ");
                 break;
 
             case TypeKind.Enum:
@@ -120,7 +136,11 @@ public sealed partial class AsyncApiEmitter
                 break;
 
             case TypeKind.IntegrationEvent:
-                sb.Append(indent).Append("$ref: '#/components/schemas/").Append(type.Name).Append("Payload'\n");
+                // A nested integration event is declared in the same context as the enclosing event, so
+                // resolve to its disambiguated payload key; falling back to the bare name covers the
+                // unique (non-colliding) case where key == name.
+                var payloadKey = payloadKeyByOwner.TryGetValue((ownerContext, type.Name), out var k) ? k : type.Name;
+                sb.Append(indent).Append("$ref: '#/components/schemas/").Append(payloadKey).Append("Payload'\n");
                 break;
 
             default:

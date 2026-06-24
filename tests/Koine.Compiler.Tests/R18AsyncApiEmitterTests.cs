@@ -344,6 +344,44 @@ public class R18AsyncApiEmitterTests
     }
 
     [Fact]
+    public void Nested_event_field_resolves_to_the_qualified_payload_under_collision()
+    {
+        // `Detail` collides across Sales and Logistics. Sales.OrderPlaced has a field whose type is the
+        // (Sales-local) `Detail` integration event — the nested $ref must point at Sales's qualified
+        // payload schema (`Sales_DetailPayload`), not a bare `DetailPayload` that no longer exists.
+        const string source = """
+            context Sales {
+              integration event Detail {
+                code: String
+              }
+              integration event OrderPlaced {
+                detail: Detail
+              }
+              publishes Detail
+              publishes OrderPlaced
+            }
+
+            context Logistics {
+              integration event Detail {
+                ref: String
+              }
+              publishes Detail
+            }
+            """;
+
+        var result = new KoineCompiler().Compile(source, new AsyncApiEmitter());
+
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+        var yaml = result.Files.ShouldHaveSingleItem().Contents;
+
+        // Both contexts' Detail payloads survive, context-qualified.
+        yaml.ShouldContain("  Sales_DetailPayload:");
+        yaml.ShouldContain("  Logistics_DetailPayload:");
+        // The nested field reference resolves to Sales's qualified payload, not a dangling bare ref.
+        yaml.ShouldContain("$ref: '#/components/schemas/Sales_DetailPayload'");
+    }
+
+    [Fact]
     public void Emitted_yaml_is_valid_per_the_asyncapi_cli_when_enabled()
     {
         // External conformance: gated behind KOINE_ASYNCAPI_VALIDATE so the suite stays hermetic.
