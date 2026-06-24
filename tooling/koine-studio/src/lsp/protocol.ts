@@ -387,6 +387,7 @@ export interface DiagramNode {
   stereotype: string | null; // UML stereotype w/o guillemets (class nodes only), e.g. 'aggregate root'
   members: DiagramMember[]; // UML class-body rows (class nodes only); [] for simple boxes
   invariants?: string[]; // business rules (value objects / entities): each invariant's message or described condition; [] / absent when none
+  doc?: string | null; // the event's '///' "when this happens" description (event nodes only, issue #170); null/absent otherwise
 }
 
 /** A directed edge between two node ids in the same graph. */
