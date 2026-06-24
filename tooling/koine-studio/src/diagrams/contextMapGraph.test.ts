@@ -3,7 +3,7 @@ import { buildContextMapGraph } from '@/diagrams/contextMapGraph';
 import type { ContextMapResult } from '@/lsp/lsp';
 
 function ctxMap(over: Partial<ContextMapResult> = {}): ContextMapResult {
-  return { contexts: over.contexts ?? [], relations: over.relations ?? [] };
+  return { contexts: over.contexts ?? [], relations: over.relations ?? [], contextSpans: over.contextSpans };
 }
 
 describe('buildContextMapGraph', () => {
@@ -18,10 +18,36 @@ describe('buildContextMapGraph', () => {
       expect(n.id).toBe(n.qualifiedName);
       // undotted qualified name ⇒ contextOf() === '' ⇒ a root-level node (no swimlane container)
       expect(n.qualifiedName).not.toContain('.');
-      // the ContextMapResult carries no spans, so a context node has none and stays inert to jump-to-source
+      // without contextSpans a context node has no span and stays inert to jump-to-source
       expect(n.sourceSpan).toBeNull();
       expect(n.members).toEqual([]);
     }
+  });
+
+  test("a declared context's node carries its declaration span from contextSpans (#290)", () => {
+    const orderingSpan = { file: 'file:///ord.koi', line: 1, column: 9, endLine: 1, endColumn: 17, offset: 8, length: 8 };
+    const g = buildContextMapGraph(
+      ctxMap({ contexts: ['Ordering', 'Billing'], contextSpans: { Ordering: orderingSpan, Billing: null } }),
+    );
+
+    // The context with a span gets it verbatim (so buildCanvas's navigate listener can fire on click);
+    // a context whose span is null (recovered parse) stays inert.
+    expect(g.nodes.find((n) => n.qualifiedName === 'Ordering')!.sourceSpan).toEqual(orderingSpan);
+    expect(g.nodes.find((n) => n.qualifiedName === 'Billing')!.sourceSpan).toBeNull();
+  });
+
+  test('a dangling relation endpoint (absent from contextSpans) keeps sourceSpan null (#290)', () => {
+    const g = buildContextMapGraph(
+      ctxMap({
+        contexts: ['A'],
+        contextSpans: { A: { file: 'file:///a.koi', line: 1, column: 9, endLine: 1, endColumn: 10, offset: 8, length: 1 } },
+        relations: [{ upstream: 'A', downstream: 'B', kind: 'Conformist', bidirectional: false, sharedTypes: [], acl: [] }],
+      }),
+    );
+
+    // 'B' is only a relation endpoint, never declared, so it has no span and stays inert to navigation.
+    expect(g.nodes.find((n) => n.qualifiedName === 'A')!.sourceSpan).not.toBeNull();
+    expect(g.nodes.find((n) => n.qualifiedName === 'B')!.sourceSpan).toBeNull();
   });
 
   test('one edge per relation: source = upstream, target = downstream (upstream → downstream)', () => {
