@@ -147,24 +147,46 @@ public class R10ServicesTests
         money.GetProperty("Amount")!.GetValue(result).ShouldBe(6.0m);
     }
 
+    private const string SpecInOperationSrc = """
+        context Sales {
+          value Order { lineCount: Int  total: Decimal }
+          spec IsLarge on Order = lineCount > 10 || total > 1000
+          service OrderRouting {
+            operation isPriority(o: Order): Bool = o.IsLarge()
+          }
+        }
+        """;
+
     [Fact]
     public void Spec_call_in_operation_body_emits_a_real_call()
     {
         // A service operation may invoke a declared spec on a parameter of the spec's
         // target type; it must translate to the generated extension-method call, not the
-        // `/* unsupported call */` fallback.
-        const string src = """
-            context Sales {
-              value Order { lineCount: Int  total: Decimal }
-              spec IsLarge on Order = lineCount > 10 || total > 1000
-              service OrderRouting {
-                operation isPriority(o: Order): Bool = o.IsLarge()
-              }
-            }
-            """;
-        var (_, files) = Compile(src);
+        // `/* unsupported call */` fallback — and the predicate must actually run.
+        Diagnose(SpecInOperationSrc).ShouldBeEmpty();
+        var (asm, files) = Compile(SpecInOperationSrc);
         files.ShouldContain("o.IsLarge()");
         files.ShouldNotContain("/* unsupported call");
+
+        var svcType = asm.GetType("Sales.OrderRouting")!;
+        var order = asm.GetType("Sales.Order")!;
+        var svc = Activator.CreateInstance(svcType);
+        var isPriority = svcType.GetMethod("IsPriority")!;
+
+        var big = Activator.CreateInstance(order, 5, 2000m);   // total > 1000 -> IsLarge
+        var small = Activator.CreateInstance(order, 1, 1m);
+        ((bool)isPriority.Invoke(svc, new[] { big })!).ShouldBeTrue();
+        ((bool)isPriority.Invoke(svc, new[] { small })!).ShouldBeFalse();
+    }
+
+    [Fact]
+    public Task Spec_call_in_operation_body_emits_expected_csharp()
+    {
+        var result = new KoineCompiler().Compile(SpecInOperationSrc, new CSharpEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        return Verify(TestSupport.Render(result.Files))
+            .UseDirectory("Snapshots");
     }
 
     [Fact]

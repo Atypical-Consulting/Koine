@@ -779,6 +779,18 @@ internal sealed class CSharpExpressionTranslator
                 return;
 
             default:
+                // A spec call: `o.IsLarge()` invokes a declared spec (a boolean predicate) on a
+                // parameter of the spec's target type. Specs emit as boolean extension methods on
+                // that type, so the call translates to the same extension-method invocation —
+                // keeping the named, single-source-of-truth predicate at the call site.
+                if (call.Args.Count == 0
+                    && _resolver.Infer(call.Target, EffectiveScope()) is { } receiverType
+                    && _index.SpecsFor(receiverType.Name).TryGetValue(op, out SpecDecl? spec))
+                {
+                    sb.Append(t).Append('.').Append(CSharpNaming.ToPascalCase(spec.Name)).Append("()");
+                    return;
+                }
+
                 sb.Append("/* unsupported call '").Append(op).Append("' */");
                 return;
         }

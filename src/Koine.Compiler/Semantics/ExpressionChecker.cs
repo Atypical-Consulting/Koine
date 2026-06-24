@@ -534,6 +534,12 @@ internal sealed class ExpressionChecker
                 CheckCallArgumentType(op, target, call.Args[0], collectionContains, scope, call);
             }
         }
+        else if (call.Args.Count == 0 && target is not null && _index.SpecsFor(target.Name).ContainsKey(op))
+        {
+            // A spec call: `o.IsLarge()` invokes a declared spec on a parameter of the spec's
+            // target type. Valid when the receiver's static type declares a spec by this name;
+            // it translates to the spec's generated extension method.
+        }
         else
         {
             Report(DiagnosticCodes.UnknownOperation, $"unknown operation '{op}'", call);
