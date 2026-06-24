@@ -72,6 +72,13 @@ Koine Studio surfaces the **enriched** language server, the same one the VS Code
 - **Context map** — the bounded contexts and their relationships.
 - **Hover & navigation** — type/member hover cards and go-to-definition, served by the same LSP that
   powers the editors.
+- **Workspace search & replace** — press **`Mod`+`Shift`+`F`** (⌘/Ctrl) to open the search panel and
+  find a term across **every `.koi` file** in the open folder, including unsaved buffers. Toggle
+  **match case**, **whole word**, and **regular expression** (with `$1` capture groups in the
+  replacement), and narrow the scan with an **include glob** (e.g. `*.koi`, `src/*.koi`). Results are
+  grouped by file with per-file and total counts; click a hit to jump to it. **Replace** rewrites a
+  single file or every match across the workspace — edits to open files flow through the normal
+  dirty/save pipeline, so they stay **undoable** and the unsaved indicator updates.
 - **Shareable links** — _Copy shareable link_ encodes your work into the URL fragment (it never leaves
   the browser) so a teammate who opens the link lands on the same model. The link carries the **whole
   workspace** — every open file, with the active file flagged. Old single-file links still open (as a
