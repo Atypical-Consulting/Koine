@@ -1615,5 +1615,9 @@ export function init(): () => void {
   // A teardown the host can call to release the IDE's deferred work. Production (main.ts) runs for the
   // page lifetime and ignores it; the test suite calls it between boots so the controller's pending
   // debounce timers can't fire into a torn-down happy-dom (where `render` throws "document is not defined").
-  return () => controller.dispose();
+  // setAutoSave(false) cancels the workspace's idle auto-save timer for the same reason.
+  return () => {
+    controller.dispose();
+    workspace.setAutoSave(false);
+  };
 }

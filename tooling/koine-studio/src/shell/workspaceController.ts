@@ -363,6 +363,7 @@ export function createWorkspaceController(deps: WorkspaceControllerDeps): Worksp
   // Used by the New-model reset so stale buffers/diagnostics can't survive a subsequent open that
   // early-returns (e.g. the reset deleted everything but re-creating model.koi failed).
   function reset(): void {
+    clearAutoSaveTimer(); // tearing the workspace down — cancel any armed auto-save first
     for (const uri of Array.from(buffers.keys())) {
       lsp.closeDoc(uri);
     }
@@ -388,6 +389,7 @@ export function createWorkspaceController(deps: WorkspaceControllerDeps): Worksp
     }
 
     // Re-opening a folder: close every previously open file first.
+    clearAutoSaveTimer(); // a pending auto-save belongs to the workspace we're leaving — drop it
     for (const uri of Array.from(buffers.keys())) {
       lsp.closeDoc(uri);
     }
@@ -681,6 +683,7 @@ export function createWorkspaceController(deps: WorkspaceControllerDeps): Worksp
   async function saveActive(): Promise<void> {
     if (saveQueued) return;
     saveQueued = true;
+    clearAutoSaveTimer(); // an explicit save subsumes any pending idle auto-save
     try {
       // Format first (mirrors the editor's Mod-S) when format-on-save is enabled, then persist.
       if (deps.getFormatOnSave()) {
@@ -719,6 +722,7 @@ export function createWorkspaceController(deps: WorkspaceControllerDeps): Worksp
   async function saveAllDirty(): Promise<void> {
     if (saveAllQueued) return;
     saveAllQueued = true;
+    clearAutoSaveTimer(); // a manual Save all subsumes any pending idle auto-save (no-op when auto-save fired this)
     try {
       if (deps.getFormatOnSave()) {
         try {
@@ -782,10 +786,17 @@ export function createWorkspaceController(deps: WorkspaceControllerDeps): Worksp
   }
 
   function scheduleAutoSave(): void {
-    if (!autoSaveOn) return;
+    // Arm only when auto-save is on AND there is actually unsaved work. The editor's onChange fires on
+    // every programmatic setDoc too (a file switch, a history restore, the first folder open), which
+    // dirties nothing — without this guard each such swap would arm a timer that 1s later runs a no-op
+    // saveAllDirty and clobbers the status line with "No unsaved changes".
+    if (!autoSaveOn || dirtyCount(buffers) === 0) return;
     clearAutoSaveTimer();
     autoSaveTimer = setTimeout(() => {
       autoSaveTimer = undefined;
+      // Yield to an in-flight manual save (Mod-S saveActive / Save all) rather than racing format +
+      // write on the same buffer; the next edit re-arms the debounce.
+      if (saveQueued || saveAllQueued) return;
       void saveAllDirty();
     }, AUTO_SAVE_DEBOUNCE_MS);
   }

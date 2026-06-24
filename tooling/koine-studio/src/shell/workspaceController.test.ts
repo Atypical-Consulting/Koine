@@ -706,4 +706,78 @@ describe('createWorkspaceController — idle auto-save', () => {
       vi.useRealTimers();
     }
   });
+
+  test('does not arm when nothing is dirty (a clean doc swap fires onChange but dirties nothing)', async () => {
+    vi.useFakeTimers();
+    try {
+      const platform = new FakePlatform();
+      platform.files.set('a.koi', 'context A {}\n');
+      const trace: string[] = [];
+      const lsp = makeLsp(trace);
+      const editor = makeEditor(trace);
+      const setStatus = vi.fn();
+      const ws = createWorkspaceController(makeDeps(platform, lsp, editor, { setStatus }));
+      await ws.openFolderPath(ROOT, { recent: false });
+      // a.koi is active and clean (a file switch / restore fires onChange without dirtying anything).
+      ws.setAutoSave(true);
+      ws.scheduleAutoSave();
+      await vi.advanceTimersByTimeAsync(2000);
+
+      expect(platform.writes).toHaveLength(0);
+      expect(lsp.didSave).not.toHaveBeenCalled();
+      // No timer ever fired, so the status line is never clobbered with "No unsaved changes".
+      expect(setStatus).not.toHaveBeenCalledWith('No unsaved changes', 'green');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  test('reopening a folder cancels a pending auto-save (no stale fire against the new workspace)', async () => {
+    vi.useFakeTimers();
+    try {
+      const platform = new FakePlatform();
+      platform.files.set('a.koi', 'context A {}\n');
+      const trace: string[] = [];
+      const lsp = makeLsp(trace);
+      const editor = makeEditor(trace);
+      // format-on-save on so a stale fire would run lsp.format() against the new active buffer.
+      const ws = createWorkspaceController(makeDeps(platform, lsp, editor, { getFormatOnSave: () => true }));
+      await ws.openFolderPath(ROOT, { recent: false });
+      ws.buffers.get(ws.activeUri())!.dirty = true;
+      ws.setAutoSave(true);
+      ws.scheduleAutoSave(); // armed against this workspace
+
+      await ws.openFolderPath(ROOT, { recent: false }); // swap workspaces before the idle delay elapses
+      await vi.advanceTimersByTimeAsync(2000);
+
+      expect(lsp.format).not.toHaveBeenCalled(); // the stale timer never fired into the reopened workspace
+      expect(platform.writes).toHaveLength(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  test('a manual save cancels a pending auto-save (no second write / status churn after)', async () => {
+    vi.useFakeTimers();
+    try {
+      const platform = new FakePlatform();
+      platform.files.set('a.koi', 'context A {}\n');
+      const trace: string[] = [];
+      const lsp = makeLsp(trace);
+      const editor = makeEditor(trace);
+      const ws = createWorkspaceController(makeDeps(platform, lsp, editor));
+      await ws.openFolderPath(ROOT, { recent: false });
+      ws.buffers.get(ws.activeUri())!.dirty = true;
+      ws.setAutoSave(true);
+      ws.scheduleAutoSave(); // armed
+
+      await ws.saveActive(); // explicit save subsumes the pending auto-save
+      const writesAfterManual = platform.writes.length;
+      await vi.advanceTimersByTimeAsync(2000);
+
+      expect(platform.writes.length).toBe(writesAfterManual); // the armed timer was cancelled — no extra write
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
