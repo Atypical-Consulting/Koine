@@ -167,4 +167,88 @@ public class DddReferenceDisciplineTests
 
         Diagnose(src).ShouldContain(d => d.Code == DiagnosticCodes.CommandParameterReferencesEntity);
     }
+
+    // ---- KOI1602: reference other aggregates by Id, not directly -----------
+
+    [Fact]
+    public void An_entity_referencing_an_entity_in_another_aggregate_is_reported()
+    {
+        const string src = """
+            context Sales {
+              aggregate Orders root Order {
+                entity Order identified by OrderId {
+                  customer: Customer
+                }
+              }
+              aggregate Customers root Customer {
+                entity Customer identified by CustomerId {
+                  name: String
+                }
+              }
+            }
+            """;
+
+        Diagnose(src).ShouldContain(d => d.Code == DiagnosticCodes.EntityReferencesForeignAggregate);
+    }
+
+    [Fact]
+    public void An_entity_referencing_another_aggregate_by_id_is_clean()
+    {
+        const string src = """
+            context Sales {
+              aggregate Orders root Order {
+                entity Order identified by OrderId {
+                  customer: CustomerId
+                }
+              }
+              aggregate Customers root Customer {
+                entity Customer identified by CustomerId {
+                  name: String
+                }
+              }
+            }
+            """;
+
+        Diagnose(src).ShouldNotContain(d => d.Code == DiagnosticCodes.EntityReferencesForeignAggregate);
+    }
+
+    [Fact]
+    public void A_child_entity_within_the_same_aggregate_is_clean()
+    {
+        const string src = """
+            context Sales {
+              aggregate Orders root Order {
+                entity Order identified by OrderId {
+                  lines: List<LineItem>
+                }
+                entity LineItem identified by LineItemId {
+                  quantity: Int
+                }
+              }
+            }
+            """;
+
+        Diagnose(src).ShouldNotContain(d => d.Code == DiagnosticCodes.EntityReferencesForeignAggregate);
+    }
+
+    [Fact]
+    public void An_entity_field_typed_as_an_aggregate_is_reported()
+    {
+        const string src = """
+            context Sales {
+              aggregate Orders root Order {
+                entity Order identified by OrderId {
+                  related: Customers
+                }
+              }
+              aggregate Customers root Customer {
+                entity Customer identified by CustomerId {
+                  name: String
+                }
+              }
+            }
+            """;
+
+        Diagnose(src).ShouldContain(d => d.Code == DiagnosticCodes.EntityReferencesForeignAggregate);
+    }
 }

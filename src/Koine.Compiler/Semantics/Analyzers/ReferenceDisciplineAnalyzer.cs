@@ -33,6 +33,10 @@ internal sealed class ReferenceDisciplineAnalyzer : IModelAnalyzer
 
         foreach (ContextNode ctx in context.Model.Contexts)
         {
+            // Which aggregate (if any) owns each type in THIS context — drives the cross-aggregate
+            // rule. Type names can repeat across contexts (R13.2), so the map is per-context.
+            IReadOnlyDictionary<string, string> owningAggregate = BuildOwningAggregateMap(ctx);
+
             foreach (TypeDecl type in ctx.AllTypeDecls())
             {
                 switch (type)
@@ -44,10 +48,100 @@ internal sealed class ReferenceDisciplineAnalyzer : IModelAnalyzer
                         CheckDomainEvent(ev, index, diagnostics);
                         break;
                     case EntityDecl entity:
+                        CheckEntityReferences(entity, owningAggregate, index, diagnostics);
                         CheckEntityBehaviors(entity, index, diagnostics);
                         break;
                 }
             }
+        }
+    }
+
+    /// <summary>
+    /// Maps each type declared inside an aggregate (its root and children, recursively) to that
+    /// aggregate's name, within a single context. A type absent from the map is un-aggregated.
+    /// </summary>
+    private static IReadOnlyDictionary<string, string> BuildOwningAggregateMap(ContextNode ctx)
+    {
+        var map = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (TypeDecl t in ctx.Types)
+        {
+            if (t is AggregateDecl agg)
+            {
+                MapAggregateTypes(agg, map);
+            }
+        }
+
+        return map;
+    }
+
+    private static void MapAggregateTypes(AggregateDecl agg, Dictionary<string, string> map)
+    {
+        foreach (TypeDecl t in agg.Types)
+        {
+            // A nested aggregate's inner types belong to the inner aggregate (its immediate owner).
+            if (t is AggregateDecl nested)
+            {
+                map[nested.Name] = agg.Name;
+                MapAggregateTypes(nested, map);
+            }
+            else
+            {
+                map[t.Name] = agg.Name;
+            }
+        }
+    }
+
+    /// <summary>
+    /// An entity (or aggregate root) may own value objects, enums, primitives, and child entities of
+    /// its <em>own</em> aggregate. It must reference any other aggregate — or an entity belonging to a
+    /// different aggregate — by identity, not by a direct object reference (KOI1602). The check is
+    /// conservative: it fires only when both endpoints resolve to two different, known aggregates (so
+    /// same-aggregate children and un-aggregated entities never produce a false positive).
+    /// </summary>
+    private static void CheckEntityReferences(
+        EntityDecl entity,
+        IReadOnlyDictionary<string, string> owningAggregate,
+        ModelIndex index,
+        List<Diagnostic> diagnostics)
+    {
+        owningAggregate.TryGetValue(entity.Name, out string? declaringOwner);
+        foreach (Member m in entity.Members)
+        {
+            CheckCrossAggregate(m.Name, m.Type, declaringOwner, owningAggregate, index, diagnostics);
+        }
+    }
+
+    private static void CheckCrossAggregate(
+        string memberName,
+        TypeRef tr,
+        string? declaringOwner,
+        IReadOnlyDictionary<string, string> owningAggregate,
+        ModelIndex index,
+        List<Diagnostic> diagnostics)
+    {
+        TypeKind kind = index.Classify(tr.Name);
+        bool offends = kind == TypeKind.Aggregate
+            || (kind == TypeKind.Entity
+                && declaringOwner is not null
+                && owningAggregate.TryGetValue(tr.Name, out string? targetOwner)
+                && !string.Equals(targetOwner, declaringOwner, StringComparison.Ordinal));
+
+        if (offends)
+        {
+            diagnostics.Add(Diagnostic.Error(
+                DiagnosticCodes.EntityReferencesForeignAggregate,
+                $"field '{memberName}' references '{tr.Name}', which belongs to another aggregate; reference other aggregates by their identity (e.g. an Id), not directly",
+                tr.Span));
+        }
+
+        if (tr.Element is not null)
+        {
+            CheckCrossAggregate(memberName, tr.Element, declaringOwner, owningAggregate, index, diagnostics);
+        }
+
+        if (tr.Value is not null)
+        {
+            CheckCrossAggregate(memberName, tr.Value, declaringOwner, owningAggregate, index, diagnostics);
         }
     }
 
