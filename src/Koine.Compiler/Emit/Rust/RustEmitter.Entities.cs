@@ -29,6 +29,11 @@ public sealed partial class RustEmitter
         var defaulted = stored.Where(m => m.Initializer is not null).ToList();
         var hasEmits = EmitsEvents(entity);
 
+        // The synthetic domain-event collector's field name, chosen to dodge a user member literally
+        // named `events` (or a same-named command/factory) — a collision that would otherwise emit two
+        // `events` fields and fail to compile (issue #314). Every reference below routes through it.
+        var eventsField = SyntheticEventsFieldName(entity);
+
         // A synthetic `id` member (of the identity type) so an `id` reference in a command body —
         // `result id`, or an `emit` argument — resolves to the entity's identity field (`self.id`),
         // mirroring how the C#/TypeScript emitters surface the id to behavior bodies.
@@ -53,7 +58,7 @@ public sealed partial class RustEmitter
         // equality (which is hand-written over the id) and drained by the application layer.
         if (hasEmits)
         {
-            body.Append(Indent).Append("events: Vec<DomainEvent>,\n");
+            body.Append(Indent).Append(eventsField).Append(": Vec<DomainEvent>,\n");
         }
 
         body.Append("}\n\n");
@@ -97,7 +102,7 @@ public sealed partial class RustEmitter
 
         if (hasEmits)
         {
-            body.Append(Indent).Append(Indent).Append(Indent).Append("events: Vec::new(),\n");
+            body.Append(Indent).Append(Indent).Append(Indent).Append(eventsField).Append(": Vec::new(),\n");
         }
 
         body.Append(Indent).Append(Indent).Append("})\n");
@@ -122,24 +127,26 @@ public sealed partial class RustEmitter
         {
             body.Append('\n');
             body.Append(Indent).Append("/// The domain events recorded since the last drain.\n");
-            body.Append(Indent).Append("pub fn events(&self) -> &[DomainEvent] { &self.events }\n");
+            body.Append(Indent).Append("pub fn ").Append(eventsField).Append("(&self) -> &[DomainEvent] { &self.")
+                .Append(eventsField).Append(" }\n");
             body.Append('\n');
             body.Append(Indent).Append("/// Drains the recorded domain events, leaving the collection empty.\n");
-            body.Append(Indent).Append("pub fn drain_events(&mut self) -> Vec<DomainEvent> { std::mem::take(&mut self.events) }\n");
+            body.Append(Indent).Append("pub fn drain_").Append(eventsField).Append("(&mut self) -> Vec<DomainEvent> { std::mem::take(&mut self.")
+                .Append(eventsField).Append(") }\n");
         }
 
         // Commands: mutating behaviors.
         foreach (CommandDecl cmd in entity.Commands)
         {
             body.Append('\n');
-            WriteCommand(body, emit, name, entity, cmd, translator, typeMapper);
+            WriteCommand(body, emit, name, entity, cmd, translator, typeMapper, eventsField);
         }
 
         // Factories: associated constructors that mint identity, check preconditions, build, and emit.
         foreach (FactoryDecl factory in entity.Factories)
         {
             body.Append('\n');
-            WriteFactory(body, emit, name, entity, factory, translator, typeMapper, required);
+            WriteFactory(body, emit, name, entity, factory, translator, typeMapper, required, eventsField);
         }
 
         body.Append("}\n");
@@ -148,7 +155,7 @@ public sealed partial class RustEmitter
     /// <summary>Emits one command as a <c>&amp;mut self</c> method returning <c>Result</c>.</summary>
     private void WriteCommand(
         StringBuilder body, RustEmitContext emit, string typeName, EntityDecl entity, CommandDecl cmd,
-        RustExpressionTranslator translator, RustTypeMapper typeMapper)
+        RustExpressionTranslator translator, RustTypeMapper typeMapper, string eventsField)
     {
         var method = RustNaming.Field(cmd.Name);
         var paramList = string.Join(", ", cmd.Parameters.Select(p => RustNaming.Field(p.Name) + ": " + typeMapper.Map(p.Type)));
@@ -200,7 +207,7 @@ public sealed partial class RustEmitter
         // 3b. Record the domain events the command raises (over the valid post-transition state).
         foreach (EmitClause emitClause in cmd.Body.OfType<EmitClause>())
         {
-            WriteEmitStatement(body, emit, emitClause, translator, typeMapper);
+            WriteEmitStatement(body, emit, emitClause, translator, typeMapper, eventsField);
         }
 
         // 4. Result (or unit).
@@ -232,19 +239,45 @@ public sealed partial class RustEmitter
         body.Append(Indent).Append(Indent).Append("}\n");
     }
 
+    /// <summary>
+    /// The collision-free name for the entity's synthetic <c>Vec&lt;DomainEvent&gt;</c> collector. Built from
+    /// every emitted member/command/factory field-or-method name (plus the fixed <c>id</c>), so the
+    /// collector never duplicates a user member literally named <c>events</c> (issue #314).
+    /// </summary>
+    private static string SyntheticEventsFieldName(EntityDecl entity)
+    {
+        var used = new HashSet<string>(StringComparer.Ordinal) { "id" };
+        foreach (Member m in entity.Members)
+        {
+            used.Add(RustNaming.Field(m.Name));
+        }
+
+        foreach (CommandDecl c in entity.Commands)
+        {
+            used.Add(RustNaming.Field(c.Name));
+        }
+
+        foreach (FactoryDecl f in entity.Factories)
+        {
+            used.Add(RustNaming.Field(f.Name));
+        }
+
+        return RustNaming.SyntheticEventsField(used);
+    }
+
     /// <summary>True when any command or factory of the entity raises a domain event (so it records events).</summary>
     private static bool EmitsEvents(EntityDecl entity) =>
         entity.Commands.SelectMany(c => c.Body).OfType<EmitClause>().Any()
         || entity.Factories.SelectMany(f => f.Body).OfType<EmitClause>().Any();
 
-    /// <summary>Lowers an <c>emit</c> clause in a command to <c>self.events.push(&lt;event&gt;);</c>.</summary>
+    /// <summary>Lowers an <c>emit</c> clause in a command to <c>self.&lt;events&gt;.push(&lt;event&gt;);</c>.</summary>
     private void WriteEmitStatement(
         StringBuilder body, RustEmitContext emit, EmitClause emitClause,
-        RustExpressionTranslator translator, RustTypeMapper typeMapper)
+        RustExpressionTranslator translator, RustTypeMapper typeMapper, string eventsField)
     {
         if (BuildEmitExpression(emit, emitClause, translator, typeMapper) is { } expr)
         {
-            body.Append(Indent).Append(Indent).Append("self.events.push(").Append(expr).Append(");\n");
+            body.Append(Indent).Append(Indent).Append("self.").Append(eventsField).Append(".push(").Append(expr).Append(");\n");
         }
     }
 
@@ -295,7 +328,7 @@ public sealed partial class RustEmitter
     /// </summary>
     private void WriteFactory(
         StringBuilder body, RustEmitContext emit, string typeName, EntityDecl entity, FactoryDecl factory,
-        RustExpressionTranslator translator, RustTypeMapper typeMapper, IReadOnlyList<Member> required)
+        RustExpressionTranslator translator, RustTypeMapper typeMapper, IReadOnlyList<Member> required, string eventsField)
     {
         var method = RustNaming.Field(factory.Name);
         var idType = RustNaming.ToPascalCase(entity.IdentityName);
@@ -326,7 +359,7 @@ public sealed partial class RustEmitter
         var emits = factory.Body.OfType<EmitClause>().ToList();
         if (emits.Count > 0)
         {
-            body.Append(Indent).Append(Indent).Append("let events: Vec<DomainEvent> = vec![\n");
+            body.Append(Indent).Append(Indent).Append("let ").Append(eventsField).Append(": Vec<DomainEvent> = vec![\n");
             foreach (EmitClause emitClause in emits)
             {
                 if (BuildEmitExpression(emit, emitClause, translator, typeMapper) is { } expr)
@@ -343,7 +376,7 @@ public sealed partial class RustEmitter
         if (emits.Count > 0)
         {
             body.Append(Indent).Append(Indent).Append("let mut instance = Self::new(").Append(ctorArgs).Append(")?;\n");
-            body.Append(Indent).Append(Indent).Append("instance.events = events;\n");
+            body.Append(Indent).Append(Indent).Append("instance.").Append(eventsField).Append(" = ").Append(eventsField).Append(";\n");
             body.Append(Indent).Append(Indent).Append("Ok(instance)\n");
         }
         else
