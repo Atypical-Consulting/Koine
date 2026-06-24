@@ -494,6 +494,12 @@ A model with no integration events still emits a minimal valid document (the `in
 empty `channels`/`operations`). The emitter is target-agnostic — nothing AsyncAPI-specific lives in
 the semantic model — so it sits alongside the C#, TypeScript, Python, PHP, Rust, and docs back-ends.
 
+Names are normally unqualified, but the compiler does not force integration-event names to be unique
+across contexts. When two contexts declare the same integration-event name, the channel, message,
+payload schema, and operation `$ref`s for that name are **context-qualified** (`<Context>_<Event>`,
+e.g. `Sales_OrderPlaced`) so neither context's contract is dropped; names declared in a single
+context keep their bare form.
+
 > An optional conformance check runs the [AsyncAPI CLI](https://www.asyncapi.com/tools/cli) over the
 > emitted document when `KOINE_ASYNCAPI_VALIDATE` is set; it is skipped (INCONCLUSIVE) otherwise, so
 > the build stays hermetic.
