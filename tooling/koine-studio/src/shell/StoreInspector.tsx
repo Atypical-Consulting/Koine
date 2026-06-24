@@ -27,12 +27,26 @@ export function StoreInspector(props: { store: StoreApi<AppState> }) {
   const buffers = useStore(s, (st) => st.buffers);
   const byUri = useStore(s, (st) => st.diagnosticsByUri);
   const docViews = useStore(s, (st) => st.docViews);
+  // Subscribe to the whole state for the raw dump below: the curated scalars above don't cover every
+  // slice (e.g. History's canUndo/canRedo), so relying on them alone would leave the snapshot stale on
+  // a change to an unsubscribed field. Zustand replaces the top-level state object on every set(), so
+  // this identity selector repaints on ANY change — making the dump track the full store.
+  const fullState = useStore(s, (st) => st);
 
   const dirty = Object.values(buffers).filter((b) => b.dirty).length;
   const { errors, warnings } = diagnosticsSummary(Object.values(byUri).flat());
   const docViewSummary = Object.entries(docViews)
     .map(([k, v]) => `${k}:${v.loaded ? 'ok' : 'stale'}#${v.token}`)
     .join('  ');
+
+  // The curated rows above are a summary; this dumps the WHOLE store so nothing is hidden. fullState
+  // (the identity-selected snapshot) keeps it tracking every change; drop the function-valued setters
+  // so only data shows.
+  const rawState = JSON.stringify(
+    fullState,
+    (_key, value) => (typeof value === 'function' ? undefined : value),
+    2,
+  );
 
   const row = (label: string, fieldName: string, value: ComponentChildren) => (
     <>
@@ -57,6 +71,10 @@ export function StoreInspector(props: { store: StoreApi<AppState> }) {
         {row('Problems', 'problems', `${errors} error${errors === 1 ? '' : 's'}, ${warnings} warning${warnings === 1 ? '' : 's'}`)}
         {row('Doc views', 'docViews', docViewSummary)}
       </dl>
+      <details class="koi-store-inspector-raw">
+        <summary>Raw state</summary>
+        <pre data-field="rawState">{rawState}</pre>
+      </details>
     </div>
   );
 }
