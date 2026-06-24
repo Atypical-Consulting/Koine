@@ -445,10 +445,37 @@ function editorDoc(): string {
 
 /** The live EditorView init() created in #editor-pane (reached from its DOM, no private handle). */
 function editorView(): EditorView {
-  const dom = document.querySelector<HTMLElement>('#editor-pane .cm-editor')!;
+  // The group-B editor is nested INSIDE #editor-pane (#editor-pane-b is its child), so scope group A's
+  // lookup to the .cm-editor that is NOT inside #editor-pane-b.
+  const dom = Array.from(document.querySelectorAll<HTMLElement>('#editor-pane .cm-editor')).find(
+    (cm) => !document.getElementById('editor-pane-b')!.contains(cm),
+  );
+  if (!dom) throw new Error('no EditorView mounted in #editor-pane');
   const view = EditorView.findFromDOM(dom);
   if (!view) throw new Error('no EditorView mounted in #editor-pane');
   return view;
+}
+
+/** Group A's doc text (the primary editor's, scoped past the nested group-B pane). */
+function groupADoc(): string {
+  return editorView().state.doc.toString();
+}
+
+/** Group B's doc text, or null when the split is closed (no editor mounted in #editor-pane-b). */
+function groupBDoc(): string | null {
+  const dom = document.querySelector<HTMLElement>('#editor-pane-b .cm-editor');
+  if (!dom) return null;
+  return EditorView.findFromDOM(dom)?.state.doc.toString() ?? null;
+}
+
+/** Open the command palette and click the (first) command row whose title matches `title` exactly. */
+function runPaletteCommand(title: string): void {
+  const hint = document.querySelector<HTMLElement>('.palette-hint');
+  hint!.click(); // ide.ts wires the toolbar hint to palette.toggle()
+  const rows = Array.from(document.querySelectorAll<HTMLElement>('.koi-palette-item'));
+  const row = rows.find((r) => r.querySelector('.koi-palette-item-title')?.textContent === title);
+  if (!row) throw new Error(`no palette command titled "${title}" (have: ${rows.length} rows)`);
+  row.click(); // click runs the command and closes the palette
 }
 
 /**
@@ -597,6 +624,70 @@ describe('ide init() — #-hash multi-file shared workspace', () => {
     expect(platform.files.has('model.koi')).toBe(false);
     // The #model= fragment is cleared after import so a reload returns home (clearModelHash).
     expect(window.location.hash).toBe('');
+  });
+});
+
+describe('ide init() — editor split routes file-open to the focused group (#265)', () => {
+  // The headline use case: split the editor, then open a DIFFERENT file in group B. The open must land
+  // in B and leave group A's file AND the workspace active uri untouched (group A is primary; B is a
+  // secondary view). This exercises the focus-routing branch ide.tsx wires into the user-initiated
+  // open affordances (the Go-to-File palette here) on top of the editorSession openFocusedGroup seam.
+  const FILES = [
+    { relPath: 'orders.koi', text: 'context Orders {\n  value Sku { raw: String }\n}\n' },
+    { relPath: 'billing.koi', text: 'context Billing {\n  value Money { amount: Decimal }\n}\n' },
+  ];
+
+  test('split then Go-to-File a different file shows it in group B; group A + active uri stay put', async () => {
+    // Layout state persists in localStorage; clear it so this test starts from a fresh (unsplit) shell
+    // and doesn't bleed splitOpen into later boots.
+    localStorage.clear();
+    try {
+      setWorkspaceShareHash(FILES, 'orders.koi');
+      await boot();
+
+      // Boot lands on orders.koi in the single (group-A) editor; no split yet.
+      expect(groupADoc()).toContain('context Orders');
+      expect(groupBDoc()).toBeNull();
+
+      // Split the editor. The fresh split focuses the NEW group B (so the next open lands there) and
+      // seeds B with group A's current file.
+      runPaletteCommand('Split editor');
+      expect(groupBDoc()).toContain('context Orders'); // B mirrors A on the initial split
+
+      // With B focused, Go-to-File billing.koi → it loads into group B…
+      runPaletteCommand('billing.koi');
+      expect(groupBDoc()).toContain('context Billing');
+      // …while group A still shows orders.koi (the secondary view never touched the primary)…
+      expect(groupADoc()).toContain('context Orders');
+      expect(groupADoc()).not.toContain('context Billing');
+      // …and the workspace active uri is unchanged: the status-bar context / tree still follow orders.
+      // (A read-through proxy: the group-A editor doc is the active buffer's text, asserted above.)
+    } finally {
+      localStorage.clear();
+    }
+  });
+
+  test('after the split, clicking the group-A pane returns focus so the next open lands in A', async () => {
+    localStorage.clear();
+    try {
+      setWorkspaceShareHash(FILES, 'orders.koi');
+      await boot();
+      runPaletteCommand('Split editor'); // focuses B
+
+      // A pointerdown on the group-A pane retargets routing to A (the focus-switch listener ide.tsx
+      // mounts on #editor-pane). #editor-pane-b is nested inside #editor-pane, so dispatch on the
+      // group-A editor surface itself, which is not inside #editor-pane-b.
+      editorView().dom.dispatchEvent(
+        new PointerEvent('pointerdown', { bubbles: true, cancelable: true, pointerId: 1 }),
+      );
+
+      // Now a Go-to-File lands in group A (the primary), changing the active file, and B is untouched.
+      runPaletteCommand('billing.koi');
+      expect(groupADoc()).toContain('context Billing');
+      expect(groupBDoc()).toContain('context Orders'); // B still shows what the split seeded
+    } finally {
+      localStorage.clear();
+    }
   });
 });
 

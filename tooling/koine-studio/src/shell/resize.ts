@@ -29,8 +29,15 @@ export interface EdgeResizerOptions {
   max?: number | ((extent: number) => number);
 }
 
-/** Wire pointer-drag resizing on `handle`, updating `cssVar` on `target` and persisting it. */
-export function initEdgeResizer(opts: EdgeResizerOptions): void {
+/**
+ * Wire pointer-drag resizing on `handle`, updating `cssVar` on `target` and persisting it.
+ *
+ * Returns a disposer that removes the listeners this call added. Callers that re-anchor a handle
+ * after a layout toggle (the inspector / left-rail / group divider in ide.tsx) dispose the old
+ * wiring and re-init with the new anchor/orientation, so the handle stays live without a reload.
+ * The anchor/cssVar are captured at wire time, so re-init is the supported way to repoint them.
+ */
+export function initEdgeResizer(opts: EdgeResizerOptions): () => void {
   const { target, handle, cssVar, anchor, storageKey } = opts;
   const container = opts.container ?? target;
   const min = opts.min ?? 160;
@@ -69,7 +76,7 @@ export function initEdgeResizer(opts: EdgeResizerOptions): void {
   let refEdge = 0;
   let extent = 0;
 
-  handle.addEventListener('pointerdown', (e: PointerEvent) => {
+  const onPointerDown = (e: PointerEvent): void => {
     dragging = true;
     const rect = container.getBoundingClientRect();
     refEdge = rect[anchor];
@@ -77,15 +84,15 @@ export function initEdgeResizer(opts: EdgeResizerOptions): void {
     handle.setPointerCapture(e.pointerId);
     document.body.classList.add('resizing', horizontal ? 'resizing-x' : 'resizing-y');
     e.preventDefault();
-  });
+  };
 
-  handle.addEventListener('pointermove', (e: PointerEvent) => {
+  const onPointerMove = (e: PointerEvent): void => {
     if (!dragging) return;
     const pos = horizontal ? e.clientX : e.clientY;
     // Size = distance from the pointer to the anchored (fixed) edge.
     const size = anchor === 'right' || anchor === 'bottom' ? refEdge - pos : pos - refEdge;
     setSize(clamp(size, extent));
-  });
+  };
 
   const end = (e: PointerEvent): void => {
     if (!dragging) return;
@@ -101,8 +108,20 @@ export function initEdgeResizer(opts: EdgeResizerOptions): void {
     }
   };
 
+  handle.addEventListener('pointerdown', onPointerDown);
+  handle.addEventListener('pointermove', onPointerMove);
   handle.addEventListener('pointerup', end);
   handle.addEventListener('pointercancel', end);
+
+  // Remove every listener this call added. Idempotent (a second call is a harmless no-op) and safe to
+  // hold past the element's lifetime. Does NOT undo any size already written to the CSS var — only the
+  // drag wiring is torn down, so the grid keeps its current size when the handle is re-anchored.
+  return (): void => {
+    handle.removeEventListener('pointerdown', onPointerDown);
+    handle.removeEventListener('pointermove', onPointerMove);
+    handle.removeEventListener('pointerup', end);
+    handle.removeEventListener('pointercancel', end);
+  };
 }
 
 export interface SplitResizerOptions {
@@ -116,10 +135,10 @@ export interface SplitResizerOptions {
 /**
  * Wire pointer-drag resizing for the editor/inspector split: the inspector is anchored to the
  * right edge of `split` and its width is driven by `--koi-inspector-w`. Thin wrapper over
- * {@link initEdgeResizer} kept for the existing call site.
+ * {@link initEdgeResizer} kept for the existing call site. Returns its disposer.
  */
-export function initSplitResizer(opts: SplitResizerOptions): void {
-  initEdgeResizer({
+export function initSplitResizer(opts: SplitResizerOptions): () => void {
+  return initEdgeResizer({
     target: opts.split,
     handle: opts.handle,
     cssVar: '--koi-inspector-w',
@@ -147,11 +166,12 @@ export interface GroupResizerOptions {
 
 /**
  * Wire pointer-drag resizing for an editor-group divider. Maps `orientation` to the appropriate
- * anchor and CSS custom property, then delegates to {@link initEdgeResizer}.
+ * anchor and CSS custom property, then delegates to {@link initEdgeResizer}. Returns its disposer
+ * so ide.tsx can tear the divider down and re-init it on the new axis when the orientation flips.
  */
-export function initGroupResizer(opts: GroupResizerOptions): void {
+export function initGroupResizer(opts: GroupResizerOptions): () => void {
   const horizontal = opts.orientation === 'horizontal';
-  initEdgeResizer({
+  return initEdgeResizer({
     target: opts.split,
     handle: opts.handle,
     cssVar: horizontal ? '--koi-group-w' : '--koi-group-h',
