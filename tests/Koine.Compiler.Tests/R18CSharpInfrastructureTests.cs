@@ -508,6 +508,20 @@ public class R18CSharpInfrastructureTests
     }
 
     [Fact]
+    public void Owns_many_configures_field_access_so_ef_binds_the_backing_list()
+    {
+        var cfg = File(EmitInfra(VoCollectionFixture), "Sales/Infrastructure/OrderConfiguration.cs").Contents;
+
+        cfg.ShouldContain("builder.OwnsMany(x => x.Lines,");
+        // Field access so EF reads/writes the mutable _lines backing field, not the read-only property.
+        cfg.ShouldContain("builder.Navigation(x => x.Lines).UsePropertyAccessMode(PropertyAccessMode.Field);");
+        // A single-column surrogate key so the owned rows persist on every provider (the default
+        // composite synthesized key is not auto-generated on SQLite).
+        cfg.ShouldContain("lines.Property<int>(\"Id\").ValueGeneratedOnAdd();");
+        cfg.ShouldContain("lines.HasKey(\"Id\");");
+    }
+
+    [Fact]
     public void Owned_value_object_collection_round_trips_through_ef_core()
     {
         var files = EmitInfra(VoCollectionFixture);

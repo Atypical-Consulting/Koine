@@ -320,9 +320,19 @@ public sealed partial class CSharpEmitter
     private void WriteOwned(StringBuilder sb, string context, string builderVar, string ownsMethod, string prop, string voTypeName, ModelIndex index, int indentLevel, int depth)
     {
         var owned = OwnedBuilderName(prop, depth);
+        var ownsMany = ownsMethod == "OwnsMany";
         AppendIndent(sb, indentLevel).Append(builderVar).Append('.').Append(ownsMethod)
           .Append("(x => x.").Append(prop).Append(", ").Append(owned).Append(" =>\n");
         AppendIndent(sb, indentLevel).Append("{\n");
+
+        // A value-object collection (OwnsMany) gets an explicit single-column surrogate key so its rows
+        // persist on every provider (issue #171): EF's default composite synthesized key relies on a
+        // store-generated shadow ordinal, which SQLite — a common dev/test provider — cannot supply.
+        if (ownsMany)
+        {
+            AppendIndent(sb, indentLevel + 1).Append(owned).Append(".Property<int>(\"Id\").ValueGeneratedOnAdd();\n");
+            AppendIndent(sb, indentLevel + 1).Append(owned).Append(".HasKey(\"Id\");\n");
+        }
 
         if (index.TryGetDeclIn(context, voTypeName, out TypeDecl decl) && decl is ValueObjectDecl vo)
         {
@@ -334,6 +344,14 @@ public sealed partial class CSharpEmitter
         }
 
         AppendIndent(sb, indentLevel).Append("});\n");
+
+        // Field access so EF reads/writes the mutable backing list (issue #171); the domain exposes the
+        // collection read-only (=> _coll), which EF cannot materialize owned children into otherwise.
+        if (ownsMany)
+        {
+            AppendIndent(sb, indentLevel).Append(builderVar).Append(".Navigation(x => x.").Append(prop)
+              .Append(").UsePropertyAccessMode(PropertyAccessMode.Field);\n");
+        }
     }
 
     /// <summary>
