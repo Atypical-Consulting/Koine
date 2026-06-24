@@ -1780,6 +1780,7 @@ internal sealed class LspServer
         ["stereotype"] = n.Stereotype,
         ["members"] = (n.Members ?? []).Select(MapMember).ToArray(),
         ["invariants"] = (n.Invariants ?? []).ToArray(),
+        ["doc"] = n.Doc,
     };
 
     /// <summary>Maps a <see cref="Koine.Compiler.Emit.Docs.DiagramMember"/> to its <c>{ text, kind }</c> wire dict.</summary>

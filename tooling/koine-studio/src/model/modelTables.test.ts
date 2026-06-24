@@ -31,7 +31,8 @@ const node = (
   kind: string,
   qualifiedName: string,
   sourceSpan: SourceSpan | null = null,
-): DiagramNode => ({ id, label, kind, qualifiedName, sourceSpan, stereotype: null, members: [] });
+  doc: string | null = null,
+): DiagramNode => ({ id, label, kind, qualifiedName, sourceSpan, stereotype: null, members: [], doc });
 
 const edge = (from: string, to: string, label: string | null = null): DiagramEdge => ({ from, to, label });
 
@@ -110,6 +111,19 @@ describe('extractEvents', () => {
       edges: [],
     };
     expect(extractEvents(noEvents)).toEqual([]);
+  });
+
+  test('fills the When column from the event node doc, empty when undocumented (issue #170)', () => {
+    const docs: DiagramGraph = {
+      nodes: [
+        node('Placed', 'Placed', 'event', 'Sales.Placed', span(12), 'Raised when an order is placed.'),
+        node('Lost', 'Lost', 'event', 'Sales.Lost', span(15)), // undocumented → doc null
+      ],
+      edges: [],
+    };
+    const rows = extractEvents(docs);
+    expect(rows.find((r) => r.name === 'Placed')!.when).toBe('Raised when an order is placed.');
+    expect(rows.find((r) => r.name === 'Lost')!.when).toBe('');
   });
 });
 

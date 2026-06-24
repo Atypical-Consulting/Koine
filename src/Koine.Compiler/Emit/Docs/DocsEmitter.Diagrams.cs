@@ -180,7 +180,9 @@ public sealed partial class DocsEmitter
                 PreferName(n.Type, (KoineNode?)n.OwningAggregate ?? ctx),
                 Stereotype: n.Stereotype,
                 Members: ClassMembers(n.Type, n.OwningAggregate),
-                Invariants: NodeInvariants(n.Type)))
+                Invariants: NodeInvariants(n.Type),
+                // The "When" description rides on event nodes only (issue #170); other kinds stay null.
+                Doc: n.Kind == "event" ? NormalizeDoc(n.Type.Doc) : null))
             .ToList();
 
         var edges = modelEdges
@@ -250,6 +252,10 @@ public sealed partial class DocsEmitter
 
         return invariants.Select(inv => inv.Message ?? Describe(inv.Condition)).ToArray();
     }
+
+    /// <summary>Normalizes a decl's <c>///</c> doc for the wire: empty/whitespace becomes <c>null</c> so an
+    /// undocumented event stays compact (the renderer shows <c>—</c>).</summary>
+    private static string? NormalizeDoc(string? doc) => string.IsNullOrWhiteSpace(doc) ? null : doc;
 
     /// <summary>Formats one shared <see cref="ClassRow"/> into its <see cref="DiagramMember"/> wire row.</summary>
     private static DiagramMember FormatMember(ClassRow row) => row.Kind switch
@@ -393,7 +399,9 @@ public sealed partial class DocsEmitter
         {
             var eventId = NodeId(key);
             nodes.Add(new DiagramNode(
-                eventId, key, "integration-event", key, PreferName(value.Event, value.Ctx)));
+                eventId, key, "integration-event", key, PreferName(value.Event, value.Ctx),
+                // Surface the integration event's "when this happens" doc for the Events table (issue #170).
+                Doc: NormalizeDoc(value.Event.Doc)));
 
             if (value.Ctx.Publishes.Any(p => p.EventName == value.Event.Name))
             {

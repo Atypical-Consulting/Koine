@@ -370,6 +370,60 @@ public class DiagramGraphTests
         edge.BackingMember.ShouldBe("Billing.Order.customer"); // the field a visual editor would remove
     }
 
+    [Fact]
+    public void Event_nodes_carry_their_doc_description_only_when_documented()
+    {
+        // The Events table's "When" column is sourced from this field (issue #170): a documented event
+        // carries its `///` text on the node; an undocumented one leaves it null (the renderer shows `—`).
+        const string source = """
+            context Ordering {
+              /// Published to other contexts once an order is accepted.
+              integration event OrderPlaced {
+                orderId: OrderId
+              }
+
+              integration event OrderArchived {
+                orderId: OrderId
+              }
+
+              publishes OrderPlaced
+              publishes OrderArchived
+
+              aggregate Order root Order {
+                /// Recorded when an order is submitted for fulfilment.
+                event OrderSubmitted { orderId: OrderId }
+
+                event OrderCancelled { orderId: OrderId }
+
+                entity Order identified by OrderId {
+                  customer: CustomerId
+                }
+              }
+            }
+            """;
+
+        var (model, diagnostics) = new KoineCompiler().Parse(new[] { new SourceFile("ordering.koi", source) });
+        diagnostics.ShouldBeEmpty();
+        var byFile = new DocsEmitter().EmitDiagrams(model!);
+
+        // Domain events draw as class nodes (kind "event") in the context class diagram.
+        DiagramGraph context = byFile["docs/Ordering.md"].First(d => d.Kind == "context").Graph;
+        DiagramNode submitted = context.Nodes.First(n => n.Kind == "event" && n.Label == "OrderSubmitted");
+        submitted.Doc.ShouldBe("Recorded when an order is submitted for fulfilment.");
+        DiagramNode cancelled = context.Nodes.First(n => n.Kind == "event" && n.Label == "OrderCancelled");
+        cancelled.Doc.ShouldBeNull();
+
+        // Integration events are nodes (kind "integration-event") in the integration-event flow.
+        DiagramGraph flow = byFile["docs/integration-events.md"].First(d => d.Kind == "integration-events").Graph;
+        DiagramNode placed = flow.Nodes.First(n => n.Kind == "integration-event" && n.Label.EndsWith("OrderPlaced"));
+        placed.Doc.ShouldBe("Published to other contexts once an order is accepted.");
+        DiagramNode archived = flow.Nodes.First(n => n.Kind == "integration-event" && n.Label.EndsWith("OrderArchived"));
+        archived.Doc.ShouldBeNull();
+
+        // Non-event nodes never carry a doc on the wire (the field is event-only).
+        context.Nodes.Where(n => n.Kind is not "event").ShouldAllBe(n => n.Doc == null);
+    }
+
     /// <summary>The Ordering context's class-diagram graph from the fixture.</summary>
     private static DiagramGraph ContextGraph() =>
         Descriptors()["docs/Ordering.md"].First(d => d.Kind == "context").Graph;
