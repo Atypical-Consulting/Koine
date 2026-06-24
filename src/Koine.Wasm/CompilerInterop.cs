@@ -4,8 +4,11 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using Koine.Compiler.Diagnostics;
 using Koine.Compiler.Emit;
+using Koine.Compiler.Emit.AsyncApi;
 using Koine.Compiler.Emit.CSharp;
+using Koine.Compiler.Emit.Docs;
 using Koine.Compiler.Emit.Glossary;
+using Koine.Compiler.Emit.OpenApi;
 using Koine.Compiler.Emit.Php;
 using Koine.Compiler.Emit.Python;
 using Koine.Compiler.Emit.Rust;
@@ -49,7 +52,8 @@ public static partial class CompilerInterop
 
     /// <summary>
     /// Compiles <paramref name="source"/> with the emitter named by <paramref name="target"/>
-    /// (<c>csharp</c> | <c>typescript</c> | <c>python</c> | <c>php</c> | <c>rust</c> | <c>glossary</c>) and returns
+    /// (<c>csharp</c> | <c>typescript</c> | <c>python</c> | <c>php</c> | <c>rust</c> | <c>glossary</c> |
+    /// <c>docs</c> | <c>asyncapi</c> | <c>openapi</c>) and returns
     /// <c>{ ok, target, diagnostics, files:[{path, contents}] }</c> as JSON.
     /// </summary>
     [JSExport]
@@ -59,6 +63,9 @@ public static partial class CompilerInterop
         {
             // `target` is non-null per the annotation, but it is marshalled across the JS-interop
             // boundary where a JS `null`/`undefined` can still arrive at runtime, so the fallback stays.
+            // Every built-in target (BuiltInEmitterProviders.All) is routed explicitly; an unknown
+            // target falls through to C#. Keep this in the registry's display order so a new target is
+            // added here too rather than silently emitting C# (issue #301).
             IEmitter emitter = (string.IsNullOrEmpty(target) ? "csharp" : target).ToLowerInvariant() switch
             {
                 "typescript" or "ts" => new TypeScriptEmitter(),
@@ -66,6 +73,9 @@ public static partial class CompilerInterop
                 "php" => new PhpEmitter(),
                 "rust" or "rs" => new RustEmitter(),
                 "glossary" or "md" => new GlossaryEmitter(),
+                "docs" => new DocsEmitter(),
+                "asyncapi" => new AsyncApiEmitter(),
+                "openapi" => new OpenApiEmitter(),
                 _ => new CSharpEmitter(),
             };
 
