@@ -660,6 +660,50 @@ public class ModelRoundTripTests
         model.ShouldNotBeNull();
     }
 
+    // A compact aggregate whose closing brace shares a line with the last member's end (`} }`). The member
+    // must still land INSIDE the aggregate: anchoring on end-of-line would push it past the aggregate's
+    // brace, where a `spec` would re-home to context scope, re-validate, and leave the re-sliced aggregate
+    // unchanged — a silent success that drops the rule.
+    private const string CompactAggregate =
+        "context S { aggregate Orders root Order { entity Order identified by OrderId { total: Int } } }";
+
+    [Fact]
+    public void EmitKoine_add_rule_into_a_compact_aggregate_lands_inside_it_not_dropped()
+    {
+        var edit = new StructuredEdit(StructuredEditKind.AddAggregateMember, "S.Orders", Name: "IsBig", Type: "rule");
+        EmitResult result = ModelRoundTripService.EmitKoine(Files(CompactAggregate), edit);
+
+        result.Diagnostics.ShouldBeEmpty();
+        result.Koine.ShouldNotBeNull();
+        // The re-emitted text is the AGGREGATE declaration; the spec appearing in it proves it nested inside.
+        result.Koine!.ShouldContain("spec IsBig on Order = true");
+    }
+
+    [Fact]
+    public void EmitKoine_add_repository_into_a_compact_aggregate_lands_inside_it()
+    {
+        var edit = new StructuredEdit(StructuredEditKind.AddAggregateMember, "S.Orders", Type: "repository");
+        EmitResult result = ModelRoundTripService.EmitKoine(Files(CompactAggregate), edit);
+
+        result.Diagnostics.ShouldBeEmpty();
+        result.Koine.ShouldNotBeNull();
+        result.Koine!.ShouldContain("repository {");
+    }
+
+    [Fact]
+    public void ApplyEdit_add_rule_into_a_compact_aggregate_yields_a_compiling_model()
+    {
+        var edit = new StructuredEdit(StructuredEditKind.AddAggregateMember, "S.Orders", Name: "IsBig", Type: "rule");
+        ModelEditResult result = ModelRoundTripService.ApplyEdit(Files(CompactAggregate), edit);
+
+        result.Diagnostics.ShouldBeEmpty();
+        result.Edits.Count.ShouldBe(1);
+        var edited = Splice(CompactAggregate, result.Edits[0].Range, result.Edits[0].NewText);
+        var (model, diags) = new KoineCompiler().Parse(new[] { new SourceFile("t.koi", edited) });
+        diags.Where(d => d.Severity == DiagnosticSeverity.Error).ShouldBeEmpty();
+        model.ShouldNotBeNull();
+    }
+
     [Fact]
     public void EmitKoine_remove_type_drops_an_unreferenced_type()
     {

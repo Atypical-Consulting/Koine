@@ -531,8 +531,26 @@ public static partial class ModelRoundTripService
             return false;
         }
 
+        // Anchor on the aggregate's CLOSING brace (the last '}' within its span) and insert just before
+        // it. Anchoring on the last member's end-of-line instead would cross the aggregate's '}' whenever
+        // that brace shares a line with the last member's end (a single-line or `} }` aggregate) — which
+        // for a rule would silently re-home the `spec` to context scope and drop it. The brace anchor is
+        // robust for a multi-line, single-line, or empty body alike.
+        var searchFrom = Math.Min(agg.Span.Offset + agg.Span.Length - 1, source.Length - 1);
+        var closeBrace = searchFrom < agg.Span.Offset ? -1 : source.LastIndexOf('}', searchFrom);
+        if (closeBrace < agg.Span.Offset)
+        {
+            return false;
+        }
+
         var nl = NewlineOf(source);
-        var memberIndent = new string(' ', Math.Max(0, agg.Span.Column - 1) + 2);
+        var closeLineStart = StartOfLine(source, closeBrace);
+        // The brace sits on its own line when only whitespace precedes it; then its leading whitespace IS
+        // the aggregate's indent. Otherwise (it shares the line with the last member / an empty `{}`),
+        // derive the indent from the aggregate keyword's column. Members sit one level (two spaces) in.
+        var braceAlone = source[closeLineStart..closeBrace].Trim().Length == 0;
+        var aggIndent = braceAlone ? source[closeLineStart..closeBrace] : new string(' ', Math.Max(0, agg.Span.Column - 1));
+        var memberIndent = aggIndent + "  ";
         var skeleton = edit.Type switch
         {
             // An aggregate holds at most one repository, so refuse a second rather than emit a confusing
@@ -551,44 +569,20 @@ public static partial class ModelRoundTripService
             return false;
         }
 
-        // Insert as the aggregate's last member: after the last existing member's whole physical line
-        // (with a blank line between), reusing the same idiom as the context-level type insert.
-        SourceSpan lastMember = LastAggregateMemberSpan(agg);
-        if (lastMember is { IsNone: false })
+        var hasMembers = agg.Types.Count > 0 || agg.Specs.Count > 0 || agg.Repository is not null;
+        if (braceAlone)
         {
-            op = new TextOp(agg.Span.File, EndOfLine(source, lastMember.Offset + lastMember.Length), 0, nl + nl + memberIndent + skeleton);
+            // The brace is on its own line: insert the member as its own line just above it — with a blank
+            // line separating it from the previous member (skipped for an empty body).
+            var lead = hasMembers ? nl : string.Empty;
+            op = new TextOp(agg.Span.File, closeLineStart, 0, lead + memberIndent + skeleton + nl);
             return true;
         }
 
-        // Empty aggregate body: open it after the aggregate's '{'.
-        var brace = source.IndexOf('{', agg.Span.Offset);
-        if (brace < 0)
-        {
-            return false;
-        }
-
-        var closeIndent = new string(' ', Math.Max(0, agg.Span.Column - 1));
-        op = new TextOp(agg.Span.File, brace + 1, 0, nl + memberIndent + skeleton + nl + closeIndent);
+        // The brace shares its line with content: insert the member before it and push the brace onto its
+        // own line at the aggregate's indent.
+        op = new TextOp(agg.Span.File, closeBrace, 0, nl + memberIndent + skeleton + nl + aggIndent);
         return true;
-    }
-
-    /// <summary>The physically-last nested member span of an aggregate (a nested type, a spec, or the
-    /// repository), or <see cref="SourceSpan.None"/> for an empty body — the anchor a new member is
-    /// inserted after.</summary>
-    private static SourceSpan LastAggregateMemberSpan(AggregateDecl agg)
-    {
-        SourceSpan last = SourceSpan.None;
-        foreach (SourceSpan span in agg.Types.Select(t => t.Span)
-            .Concat(agg.Specs.Select(s => s.Span))
-            .Append(agg.Repository?.Span ?? SourceSpan.None))
-        {
-            if (!span.IsNone && (last.IsNone || span.Offset > last.Offset))
-            {
-                last = span;
-            }
-        }
-
-        return last;
     }
 
     /// <summary>

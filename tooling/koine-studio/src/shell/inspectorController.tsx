@@ -915,6 +915,10 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     // explicit repaint keeps the right-rail update synchronous for callers that read it immediately
     // after a set.
     renderSelectedInspector();
+    // Re-pass the current model index to the palette so its aggregate-scoped buttons (#254) re-gate against
+    // the freshly-selected element — a diagram click rebuilds the index before setting the selection, so
+    // resolving the selection's kind here uses the up-to-date index rather than a stale captured prop.
+    renderCanvasPalette();
     applySelectionHighlight();
   });
 
@@ -978,8 +982,9 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   // The construct palette mounts once here; it re-renders itself on the store slices it subscribes to
   // (active context, selection). It also reads the model `index` to resolve whether the selection is an
   // aggregate (gating the rule/repository buttons, #254), so renderCanvasPalette re-passes a fresh index
-  // whenever the model rebuilds — mirroring how the Properties panel is re-rendered. Context-scoped clicks
-  // route through onAddConstruct; aggregate-scoped clicks through onAddAggregateMember with the target qname.
+  // whenever the model rebuilds OR the selection changes — mirroring how the Properties panel is
+  // re-rendered. Context-scoped clicks route through onAddConstruct; aggregate-scoped clicks through
+  // onAddAggregateMember with the target qname.
   function renderCanvasPalette(): void {
     render(
       <CanvasPalette
