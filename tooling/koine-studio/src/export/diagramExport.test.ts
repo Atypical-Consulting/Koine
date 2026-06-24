@@ -324,8 +324,10 @@ describe('diagramToMermaid', () => {
 
 describe('diagramToMermaid → renders in Mermaid (issue #340)', () => {
   // One graph exercising every shape that touches the member/edge emit path: a typed field, an optional `?`
-  // field, a method signature with inner colons + parens, an enum-member row (already colon-free), a
-  // composition edge with cardinalities, and a cross-context edge label.
+  // field, a method signature with inner colons + parens, generic/collection fields with angle brackets and
+  // a comma (`List<OrderLine>`, `Map<String, Int>` — the real shapes the compiler emits, see
+  // DocsEmitter.Diagrams / MarkdownDoc.KoineType), an enum-member row (already colon-free), a composition
+  // edge with cardinalities, and a cross-context edge label.
   const rich = graph(
     [
       node({
@@ -346,7 +348,11 @@ describe('diagramToMermaid → renders in Mermaid (issue #340)', () => {
         stereotype: 'enum',
         members: [member('Pending', 'enum-member'), member('Delivered', 'enum-member')],
       }),
-      node({ id: 'Ordering.Order', label: 'Order' }),
+      node({
+        id: 'Ordering.Order',
+        label: 'Order',
+        members: [member('lines: List<OrderLine>', 'field'), member('totals: Map<String, Int>', 'field')],
+      }),
     ],
     [
       edge({
