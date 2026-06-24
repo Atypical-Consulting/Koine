@@ -5,7 +5,7 @@
 //
 // Needs a user-supplied Anthropic API key (set in Preferences, stored locally). With no key it
 // shows a prompt to add one rather than calling the API.
-import { runAssistant, type AiProvider, type ChatMessage } from '@/ai/ai';
+import { isLocalProviderUrl, runAssistant, type AiProvider, type ChatMessage } from '@/ai/ai';
 import { KOINE_PRIMER } from '@/ai/assistantTools';
 import { renderMarkdown } from '@/editor/editor';
 import { loadChat, saveChat, clearChat } from '@/settings/persistence';
@@ -364,8 +364,7 @@ export function createAssistantPanel(opts: AssistantPanelOptions): AssistantPane
     const apiKey = opts.getApiKey();
     // A key is required for Anthropic and for any remote OpenAI-compatible endpoint; local servers
     // (Ollama / LM Studio on localhost) need no auth, so a blank key is fine there.
-    const isLocal = /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:|\/|$)/i.test(baseUrl);
-    const needsKey = provider === 'anthropic' || !isLocal;
+    const needsKey = provider === 'anthropic' || !isLocalProviderUrl(baseUrl);
     if (needsKey && !apiKey) {
       const note = addBubble('assistant');
       note.classList.add('koi-msg-note');

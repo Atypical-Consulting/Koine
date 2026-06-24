@@ -12,7 +12,10 @@ const h = vi.hoisted(() => ({
   settings: null as Settings | null,
 }));
 
-vi.mock('@/ai/ai', () => ({
+// Keep the real module (notably the pure isLocalProviderUrl helper, so the keyless-local-server case
+// is exercised for real) and override only the network call.
+vi.mock('@/ai/ai', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/ai/ai')>()),
   runAssistant: (req: Record<string, unknown>) => {
     h.lastReq = req;
     return h.runImpl!(req as never);

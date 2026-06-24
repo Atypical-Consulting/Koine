@@ -4,7 +4,7 @@
 // `KOINE_PRIMER` — so inline suggestions stay in valid Koine shape and there is one place to configure
 // AI in Studio. It is best-effort by contract: it NEVER throws and returns null on no-provider / abort /
 // error, so a hiccup can never disrupt typing.
-import { runAssistant } from '@/ai/ai';
+import { isLocalProviderUrl, runAssistant } from '@/ai/ai';
 import { KOINE_PRIMER } from '@/ai/assistantTools';
 import { loadSettings } from '@/settings/persistence';
 
@@ -29,11 +29,6 @@ continuation AT the caret — typically the rest of the current line or the next
 the raw text to insert at the caret: no markdown, no code fences, no commentary, and do not repeat the
 text that is already before the caret. If there is no useful continuation, output nothing.`;
 
-/** A keyless local server (Ollama / LM Studio) needs no API key; a remote endpoint or Anthropic does. */
-function isLocalBaseUrl(baseUrl: string): boolean {
-  return /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:|\/|$)/i.test(baseUrl);
-}
-
 /** Unwrap a single ```fence``` the model may add despite instructions, then drop trailing whitespace
  *  (a dangling newline reads badly as ghost text). Leading whitespace is meaningful indentation, so
  *  it is preserved. */
@@ -51,7 +46,7 @@ export async function requestInline(ctx: InlineRequestContext, signal: AbortSign
   const s = loadSettings();
   // A key is required for Anthropic and for any remote OpenAI-compatible endpoint; keyless local
   // servers are fine. No key where one is needed ⇒ no provider configured ⇒ no-op (no surprise spend).
-  if ((s.aiProvider === 'anthropic' || !isLocalBaseUrl(s.aiBaseUrl)) && !s.aiApiKey) return null;
+  if ((s.aiProvider === 'anthropic' || !isLocalProviderUrl(s.aiBaseUrl)) && !s.aiApiKey) return null;
 
   const user = `${ctx.before}${CURSOR_MARKER}${ctx.after}`;
   try {
