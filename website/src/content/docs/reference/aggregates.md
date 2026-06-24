@@ -99,6 +99,13 @@ outside the aggregate — they are reached *through* the root. That is why only 
 repository and why the root's constructor enforces every nested invariant before the aggregate can
 exist.
 
+:::caution
+One aggregate references **another** aggregate only by its **id**, never by embedding it. A field on an
+entity (or root) whose type is another aggregate — or an entity belonging to a *different* aggregate —
+is `EntityReferencesForeignAggregate` (KOI1602); use the other aggregate's `*Id` instead. References
+*within* the same aggregate (the root reaching its child entities and value objects) are fine.
+:::
+
 ### 7.3.2 Root entity requirement
 
 The identifier after `root` must match the name of exactly one `entity` declared directly inside the

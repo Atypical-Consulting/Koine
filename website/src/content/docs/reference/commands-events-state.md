@@ -146,6 +146,13 @@ command record(amount: Decimal) {
 
 `record` (lowercase) is fine as a command name — Koine PascalCases it to the C# method `Record`.
 
+:::caution
+A command (and a [factory (§12)](/Koine/reference/factories/)) carries **data and identities**, not
+live references: a parameter typed as an entity or aggregate is `CommandParameterReferencesEntity`
+(KOI1603). Pass the other aggregate's `*Id` and let the handler load it. Primitives, enums, value
+objects, `*Id` ids, and collections of those are all fine.
+:::
+
 ### 11.3.3 Returning a value
 
 A command is normally `void` — it mutates and emits. But the mainstream DDD case *"a command returns the
@@ -266,6 +273,15 @@ public sealed record OrderSubmitted : IDomainEvent
     }
 }
 ```
+
+:::caution
+A domain event is an immutable record of what happened, so its fields carry **data and identities**,
+not live references: a field typed as an entity or aggregate is `DomainEventReferencesEntity`
+(KOI1604). Carry the `*Id` (as `OrderSubmitted` does above), not the `Order` itself. The same
+data-only rule governs [value objects (§5)](/Koine/reference/value-objects/) (KOI1601); the
+cross-boundary [integration event (§17)](/Koine/reference/context-maps-integration/) is stricter still
+(KOI1409).
+:::
 
 ### 11.5.1 Emitting and collecting events
 
