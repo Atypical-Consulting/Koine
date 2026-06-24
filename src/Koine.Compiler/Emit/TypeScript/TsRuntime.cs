@@ -380,7 +380,7 @@ internal static class TsRuntime
           }
 
           all(): Promise<readonly TEntity[]> {
-            return Promise.resolve([...this.entities.values()]);
+            return Promise.resolve<readonly TEntity[]>([...this.entities.values()]);
           }
 
           add(entity: TEntity): Promise<void> {
@@ -449,7 +449,7 @@ internal static class TsRuntime
           }
 
           unprocessed(): Promise<readonly OutboxMessage[]> {
-            return Promise.resolve(this.messages.filter((m) => m.processedOn === undefined));
+            return Promise.resolve<readonly OutboxMessage[]>(this.messages.filter((m) => m.processedOn === undefined));
           }
 
           markProcessed(message: OutboxMessage): Promise<void> {
