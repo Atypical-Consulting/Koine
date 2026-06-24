@@ -27,8 +27,13 @@ public sealed partial class AsyncApiEmitter : IEmitter
     /// <summary>The AsyncAPI specification version this backend targets.</summary>
     private const string SpecVersion = "3.0.0";
 
-    public IReadOnlyList<EmittedFile> Emit(KoineModel model)
+    public IReadOnlyList<EmittedFile> Emit(KoineModel model) => Emit(model, semantic: null);
+
+    public IReadOnlyList<EmittedFile> Emit(KoineModel model, SemanticModel? semantic)
     {
+        // Reuse the shared resolution when the compiler hands one over; otherwise build our own
+        // index (the type classification drives the payload schemas).
+        ModelIndex index = semantic?.Index ?? new ModelIndex(model);
         var events = CollectEvents(model);
 
         var sb = new StringBuilder();
@@ -39,7 +44,7 @@ public sealed partial class AsyncApiEmitter : IEmitter
         sb.Append("  version: 1.0.0\n");
 
         // Channels and operations describe the event graph; an empty graph still emits a minimal,
-        // valid document (just the two empty maps). Components hold the reusable messages.
+        // valid document (just the two empty maps). Components hold the reusable messages and schemas.
         EmitChannels(sb, events);
         sb.Append("operations: {}\n");
 
@@ -47,6 +52,7 @@ public sealed partial class AsyncApiEmitter : IEmitter
         {
             sb.Append("components:\n");
             EmitMessages(sb, events);
+            EmitSchemas(sb, events, index);
         }
 
         return new[] { new EmittedFile(FileName, sb.ToString()) };

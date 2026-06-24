@@ -68,4 +68,42 @@ public class R18AsyncApiEmitterTests
 
         return Verify(yaml).UseDirectory("Snapshots");
     }
+
+    [Fact]
+    public Task Payload_schemas_from_event_fields()
+    {
+        const string source = """
+            context Sales {
+              enum OrderStatus { Draft, Placed }
+              integration event OrderPlaced {
+                orderId:  OrderId
+                status:   OrderStatus
+                quantity: Int
+              }
+              publishes OrderPlaced
+            }
+            """;
+
+        var result = new KoineCompiler().Compile(source, new AsyncApiEmitter());
+
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+        var yaml = result.Files.ShouldHaveSingleItem().Contents;
+
+        // The message references a payload schema.
+        yaml.ShouldContain("$ref: '#/components/schemas/OrderPlacedPayload'");
+        // The payload lists each property with the right JSON-Schema type.
+        yaml.ShouldContain("  OrderPlacedPayload:");
+        yaml.ShouldContain("      type: object");
+        yaml.ShouldContain("quantity:");
+        yaml.ShouldContain("type: integer");
+        // The enum field carries an enum: list.
+        yaml.ShouldContain("enum:");
+        yaml.ShouldContain("- Draft");
+        yaml.ShouldContain("- Placed");
+        // The ID value object is a shared schema, referenced by $ref.
+        yaml.ShouldContain("$ref: '#/components/schemas/OrderId'");
+        yaml.ShouldContain("  OrderId:");
+
+        return Verify(yaml).UseDirectory("Snapshots");
+    }
 }

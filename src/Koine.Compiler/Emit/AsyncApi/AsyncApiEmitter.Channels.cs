@@ -36,8 +36,8 @@ public sealed partial class AsyncApiEmitter
 
     /// <summary>
     /// Emits the <c>components/messages</c> map — one message per integration event, carrying its
-    /// name and (when present) the declaration doc as a summary. The payload reference is added by
-    /// the schemas slice.
+    /// name, (when present) the declaration doc as a summary, and a reference to its payload schema
+    /// (rendered by the schemas slice).
     /// </summary>
     private static void EmitMessages(StringBuilder sb, IReadOnlyList<IntegrationEventDecl> events)
     {
@@ -50,6 +50,9 @@ public sealed partial class AsyncApiEmitter
             {
                 sb.Append("      summary: ").Append(YamlScalar(ie.Doc!)).Append('\n');
             }
+
+            sb.Append("      payload:\n");
+            sb.Append("        $ref: '#/components/schemas/").Append(ie.Name).Append("Payload'\n");
         }
     }
 }
