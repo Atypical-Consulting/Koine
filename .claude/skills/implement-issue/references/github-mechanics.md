@@ -1,8 +1,9 @@
 # GitHub mechanics for `implement-issue`
 
 The fiddly, easy-to-get-wrong `gh`/`jq`/`git` snippets the main workflow leans on. Read this when
-you hit any of: resolving the issue from a weird input, locating the right plan comment, ticking a
-single task's checkboxes without touching the others, or resuming onto an existing branch/PR.
+you hit any of: resolving the issue from a weird input, locating the plan (in the issue body or, on
+older issues, a comment), ticking a single task's checkboxes without touching the others, or resuming
+onto an existing branch/PR.
 
 Throughout, `{owner}/{repo}` is a literal `gh` placeholder it resolves from the repo's `origin`
 (here `Atypical-Consulting/Koine`) — you can paste it as-is.
@@ -34,31 +35,50 @@ gh issue view "$ISSUE" --json number,title,state --jq '"\(.number) [\(.state)] \
 
 ---
 
-## 2. Locate the implementation-plan comment (and its REST id)
+## 2. Locate the plan (issue body first, comment fallback)
 
-You need the comment's **numeric REST id** (the database id) — that's what the PATCH endpoint in §4
-edits. `gh issue view --json comments` returns GraphQL **node ids** (`IC_kw…`), which the REST PATCH
-will reject. Always go through the REST comments endpoint:
+`create-issue` writes the plan into the **issue body**, so look there first — and when the plan lives
+in the body, you tick boxes by PATCHing the issue itself (§4), no comment id needed. Only fall back to
+the comment trail for issues filed by older versions.
 
 ```bash
-# All comments, newest-relevant plan comment wins. The marker is the bold header create-issue posts.
-PLAN_COMMENT_ID=$(gh api "repos/{owner}/{repo}/issues/$ISSUE/comments" --paginate \
-  --jq 'map(select(.body | contains("🛠️ Implementation plan"))) | last | .id')
-
-# Fallback if no marker (older/hand-written plan): latest comment that has checkbox lines.
-if [ -z "$PLAN_COMMENT_ID" ]; then
-  PLAN_COMMENT_ID=$(gh api "repos/{owner}/{repo}/issues/$ISSUE/comments" --paginate \
-    --jq 'map(select(.body | (contains("- [ ]") or contains("- [x]")))) | last | .id')
+# Preferred: the plan is in the description.
+gh api "repos/{owner}/{repo}/issues/$ISSUE" --jq .body > /tmp/koine-plan-$ISSUE.md
+if grep -q '🛠️ Implementation plan' /tmp/koine-plan-$ISSUE.md; then
+  PLAN_SRC=body
+else
+  PLAN_SRC=comment
 fi
-
-# Nothing? Stop — there is no plan to execute (Autonomy contract).
-[ -z "$PLAN_COMMENT_ID" ] && { echo "No implementation-plan comment on #$ISSUE"; exit 1; }
-
-# Pull the body to a working file.
-gh api "repos/{owner}/{repo}/issues/comments/$PLAN_COMMENT_ID" --jq .body > /tmp/koine-plan-$ISSUE.md
 ```
 
-`--paginate` matters: a busy issue can have >30 comments and the plan may not be on page one.
+When `PLAN_SRC=comment`, you need the comment's **numeric REST id** (the database id) — that's what
+the PATCH endpoint in §4 edits. `gh issue view --json comments` returns GraphQL **node ids** (`IC_kw…`),
+which the REST PATCH rejects. Always go through the REST comments endpoint:
+
+```bash
+if [ "$PLAN_SRC" = comment ]; then
+  # All comments, newest-relevant plan comment wins. The marker is the bold header create-issue posted.
+  PLAN_COMMENT_ID=$(gh api "repos/{owner}/{repo}/issues/$ISSUE/comments" --paginate \
+    --jq 'map(select(.body | contains("🛠️ Implementation plan"))) | last | .id')
+
+  # Fallback if no marker (older/hand-written plan): latest comment that has checkbox lines.
+  if [ -z "$PLAN_COMMENT_ID" ]; then
+    PLAN_COMMENT_ID=$(gh api "repos/{owner}/{repo}/issues/$ISSUE/comments" --paginate \
+      --jq 'map(select(.body | (contains("- [ ]") or contains("- [x]")))) | last | .id')
+  fi
+
+  # Nothing in the body AND nothing in comments? Stop — there is no plan to execute (Autonomy contract).
+  [ -z "$PLAN_COMMENT_ID" ] && { echo "No implementation plan on #$ISSUE"; exit 1; }
+
+  # Pull the comment body to the same working file.
+  gh api "repos/{owner}/{repo}/issues/comments/$PLAN_COMMENT_ID" --jq .body > /tmp/koine-plan-$ISSUE.md
+fi
+```
+
+`--paginate` matters: a busy issue can have >30 comments and the plan may not be on page one. Either
+way `/tmp/koine-plan-$ISSUE.md` now holds the plan text; a body-sourced file also carries the template
+fields and collapsed brainstorm/spec above it, which is fine — §3/§4 only ever touch `### Task`
+checkbox lines.
 
 ---
 
@@ -87,19 +107,28 @@ Preferred: edit `/tmp/koine-plan-$ISSUE.md` line by line with the **Edit tool**,
 that task's `- [ ] **Step k:** …` lines to `- [x] **Step k:** …`. The step text is unique, so each
 Edit targets exactly one line and fails loudly if something drifted — which is the safety you want.
 
-Then PATCH the whole body back. Use `jq -Rs` to wrap the file as a JSON string so backticks,
-quotes, and newlines survive intact:
+Then PATCH the whole body back — the **issue** when the plan lives in its description, or the
+**comment** on a legacy issue. Use `jq -Rs` to wrap the file as a JSON string so backticks, quotes,
+and newlines survive intact:
 
 ```bash
-jq -Rs '{body: .}' /tmp/koine-plan-$ISSUE.md \
-  | gh api "repos/{owner}/{repo}/issues/comments/$PLAN_COMMENT_ID" -X PATCH --input -
+if [ "$PLAN_SRC" = body ]; then
+  jq -Rs '{body: .}' /tmp/koine-plan-$ISSUE.md \
+    | gh api "repos/{owner}/{repo}/issues/$ISSUE" -X PATCH --input -
+else
+  jq -Rs '{body: .}' /tmp/koine-plan-$ISSUE.md \
+    | gh api "repos/{owner}/{repo}/issues/comments/$PLAN_COMMENT_ID" -X PATCH --input -
+fi
 ```
 
 `--input -` reads the JSON body from stdin; this is far more robust than `-f body=...` for large,
-Markdown-heavy bodies. After the PATCH, the issue re-renders with this task's boxes ticked.
+Markdown-heavy bodies. The body-sourced file holds the *whole* description, so flipping only this
+task's checkbox lines and PATCHing it back leaves the template fields and brainstorm/spec untouched.
+After the PATCH, the issue re-renders with this task's boxes ticked — and because the plan is in the
+body, the progress meter advances too.
 
-Re-fetch isn't needed within a single run — you own the comment and hold the canonical copy in the
-temp file. (If you ever suspect a concurrent edit, re-fetch the body, re-apply your flips, re-PATCH.)
+Re-fetch isn't needed within a single run — you own the source and hold the canonical copy in the
+temp file. (If you ever suspect a concurrent edit, re-fetch, re-apply your flips, re-PATCH.)
 
 ---
 
@@ -202,11 +231,18 @@ Then continue to Step 9 (full build/tests + format gate) — never push a merge 
 
 ## Gotchas, collected
 
-- **Node id vs REST id.** `gh issue view --json comments` → GraphQL `IC_kw…` ids; the PATCH endpoint
-  needs the **numeric** id from `gh api .../comments`. Mixing them up is the #1 way the tick fails.
-- **Pagination.** Always `--paginate` the comments call; the plan comment may be past comment 30.
-- **The emoji marker is the anchor.** `create-issue` posts `**🛠️ Implementation plan**`. Match on
-  the `🛠️ Implementation plan` substring; keep the §2 checkbox fallback for older issues.
+- **Body first, comment fallback.** `create-issue` writes the plan into the issue **body** now, so
+  `PLAN_SRC=body` is the normal path and you PATCH the issue (`.../issues/$ISSUE`). The comment path
+  is only for issues filed by older versions. Ticking a body plan also advances the progress meter,
+  which a comment plan never did.
+- **Node id vs REST id (comment path only).** `gh issue view --json comments` → GraphQL `IC_kw…` ids;
+  the PATCH endpoint needs the **numeric** id from `gh api .../comments`. Mixing them up is the #1 way
+  the comment tick fails. Irrelevant when the plan is in the body.
+- **Pagination (comment path only).** Always `--paginate` the comments call; the plan comment may be
+  past comment 30.
+- **The emoji marker is the anchor.** `create-issue` writes `## 🛠️ Implementation plan` (older issues:
+  a `**🛠️ Implementation plan**` comment). Match on the `🛠️ Implementation plan` substring; keep the
+  §2 checkbox fallback for hand-written plans.
 - **`jq -Rs` for the body.** Hand-building the JSON (or `-f body=`) mangles plans full of backticks,
   code fences, and `<` `>`. `jq -Rs '{body:.}'` is lossless.
 - **Whole-file sed is forbidden.** Tick per task, not per repo — see §4.
