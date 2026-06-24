@@ -61,11 +61,13 @@ const APP_HTML = `
               <button type="button" class="tech-tab" id="tech-tab-editor" role="tab" data-tech="editor" aria-selected="true">Editor</button>
               <button type="button" class="tech-tab" id="tech-tab-preview" role="tab" data-tech="preview" aria-selected="false">Generated</button>
               <button type="button" class="tech-tab" id="tech-tab-check" role="tab" data-tech="check" aria-selected="false">Compatibility</button>
+              <button type="button" class="tech-tab" id="tech-tab-scenarios" role="tab" data-tech="scenarios" aria-selected="false">Scenarios</button>
             </div>
             <div id="tech-body">
               <section id="editor-pane" class="tech-view"></section>
               <div id="view-preview" class="tech-view" role="tabpanel" hidden></div>
               <div id="view-check" class="tech-view doc-view" role="tabpanel" hidden></div>
+              <div id="view-scenarios" class="tech-view" role="tabpanel" hidden></div>
             </div>
           </section>
           <section id="center-docs" class="center-host" role="tabpanel" hidden>

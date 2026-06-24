@@ -208,6 +208,8 @@ internal sealed class LspServer
                                         ["koineSetDoc"] = true,
                                         ["koineDocs"] = true,
                                         ["koineCheck"] = true,
+                                        ["koineRunScenario"] = true,
+                                        ["koineScenarioCatalog"] = true,
                                     },
                                 },
                                 ["serverInfo"] = new Dictionary<string, object?>
@@ -492,6 +494,22 @@ internal sealed class LspServer
                             if (root.TryGetProperty("id", out _))
                             {
                                 Respond(root, CheckResultJson(root));
+                            }
+
+                            break;
+
+                        case "koine/runScenario":
+                            if (root.TryGetProperty("id", out _))
+                            {
+                                Respond(root, RunScenarioResultJson(root));
+                            }
+
+                            break;
+
+                        case "koine/scenarioCatalog":
+                            if (root.TryGetProperty("id", out _))
+                            {
+                                Respond(root, ScenarioCatalogResultJson());
                             }
 
                             break;
@@ -1514,6 +1532,63 @@ internal sealed class LspServer
         };
     }
 
+    /// <summary>
+    /// Runs a scenario (#149, <c>koine/runScenario</c>): exercises one aggregate command/factory against
+    /// a given state + args and returns the <c>command → events → invariant-checks</c> timeline. A model
+    /// with errors yields a not-ok result carrying an explanatory note rather than throwing.
+    /// </summary>
+    private object RunScenarioResultJson(JsonElement root)
+    {
+        var target = TryGetStringParam(root, "target") ?? "";
+        var operation = TryGetStringParam(root, "operation") ?? "";
+        try
+        {
+            JsonElement given = TryGetObjectParam(root, "given");
+            JsonElement args = TryGetObjectParam(root, "args");
+
+            var sources = Workspace().Select(kv => new SourceFile(kv.Key, kv.Value)).ToList();
+            var (model, _) = ParseUsable(sources);
+            if (model is null)
+            {
+                return ScenarioService.Error(target, operation, "The model has errors; fix them before running a scenario.");
+            }
+
+            var semantic = new Compiler.Ast.SemanticModel(model);
+            return ScenarioService.Run(semantic, target, operation, given, args);
+        }
+        catch (Exception ex)
+        {
+            // Mirror the WASM backend: a malformed request or interpreter fault returns a not-ok result
+            // (so the id-bearing request always gets a reply) rather than throwing and leaving the client hanging.
+            return ScenarioService.Error(target, operation, $"The scenario could not be run: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// The runnable surface of the merged workspace (#149, <c>koine/scenarioCatalog</c>): the entities
+    /// exposing commands/factories, their operations + parameters, and their fields — what the Studio
+    /// panel builds its target/operation dropdowns and given/args scaffold from. A model with errors
+    /// yields <c>{ targets: [] }</c>.
+    /// </summary>
+    private object ScenarioCatalogResultJson()
+    {
+        try
+        {
+            var sources = Workspace().Select(kv => new SourceFile(kv.Key, kv.Value)).ToList();
+            var (model, _) = ParseUsable(sources);
+            if (model is null)
+            {
+                return new Dictionary<string, object?> { ["targets"] = Array.Empty<object>() };
+            }
+
+            return ScenarioService.Catalog(new Compiler.Ast.SemanticModel(model));
+        }
+        catch
+        {
+            return new Dictionary<string, object?> { ["targets"] = Array.Empty<object>() };
+        }
+    }
+
     /// <summary>Serialises a <see cref="ModelNode"/> subtree to the wire shape (recursive, additive).</summary>
     private static Dictionary<string, object?> ModelNodeJson(ModelNode n) => new()
     {
@@ -1546,6 +1621,13 @@ internal sealed class LspServer
         root.TryGetProperty("params", out var p) && p.TryGetProperty(name, out var el) && el.ValueKind == JsonValueKind.String
             ? el.GetString()
             : null;
+
+    /// <summary>The <c>params.&lt;name&gt;</c> element (e.g. a <c>given</c>/<c>args</c> object), or an
+    /// <c>Undefined</c> element when absent — which the scenario bridge treats as empty.</summary>
+    private static JsonElement TryGetObjectParam(JsonElement root, string name) =>
+        root.TryGetProperty("params", out var p) && p.TryGetProperty(name, out var el)
+            ? el
+            : default;
 
     /// <summary>Parses <c>params.edit</c> into a <see cref="StructuredEdit"/>; false when malformed.</summary>
     private static bool TryGetEdit(JsonElement root, out StructuredEdit edit)

@@ -1,0 +1,199 @@
+/* --- Interactive scenario runner panel (#149) --- */
+.koi-scenario {
+  display: flex;
+  flex-direction: column;
+  gap: var(--koi-space-3);
+  height: 100%;
+  overflow-y: auto;
+  padding: var(--koi-space-4) var(--koi-space-4-5);
+}
+/* `display: flex` would otherwise beat the UA `[hidden] { display: none }`, leaking the panel
+   onto another tech view after a tab switch. */
+.koi-scenario[hidden] {
+  display: none;
+}
+.koi-scenario-intro {
+  margin: 0;
+  color: var(--koi-muted);
+  font-family: var(--koi-font-body);
+  font-size: var(--koi-text-base);
+  line-height: 1.55;
+}
+.koi-scenario-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--koi-space-2-5);
+}
+.koi-scenario-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--koi-space-0-75);
+  flex: 1 1 12rem;
+}
+.koi-scenario-field-label {
+  font-size: var(--koi-text-sm);
+  color: var(--koi-muted);
+}
+.koi-scenario-target,
+.koi-scenario-op {
+  font-family: var(--koi-font-body);
+  font-size: var(--koi-text-base);
+  padding: var(--koi-space-1) var(--koi-space-1-5);
+  background: var(--koi-paper);
+  color: var(--koi-fg);
+  border: 1px solid var(--koi-line);
+  border-radius: var(--koi-radius-sm);
+}
+.koi-scenario-json {
+  font-family: var(--koi-font-mono);
+  font-size: var(--koi-text-sm);
+  width: 100%;
+  resize: vertical;
+  padding: var(--koi-space-1-5);
+  background: var(--koi-paper);
+  color: var(--koi-fg);
+  border: 1px solid var(--koi-line);
+  border-radius: var(--koi-radius-sm);
+}
+.koi-scenario-refresh,
+.koi-scenario-run {
+  font-family: var(--koi-font-body);
+  font-size: var(--koi-text-base);
+  padding: var(--koi-space-1) var(--koi-space-2-5);
+  background: var(--koi-paper-2);
+  color: var(--koi-fg);
+  border: 1px solid var(--koi-line);
+  border-radius: var(--koi-radius-sm);
+  cursor: pointer;
+}
+.koi-scenario-run-primary {
+  align-self: flex-start;
+  background: var(--koi-accent);
+  color: var(--koi-on-accent);
+  border-color: transparent;
+}
+.koi-scenario-run:disabled,
+.koi-scenario-refresh:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* results */
+.koi-scenario-results {
+  display: flex;
+  flex-direction: column;
+  gap: var(--koi-space-2);
+}
+.koi-scenario-section {
+  margin: var(--koi-space-2) 0 0;
+  font-size: var(--koi-text-sm);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--koi-muted);
+}
+.koi-scenario-badge {
+  align-self: flex-start;
+  padding: var(--koi-space-0-75) var(--koi-space-2);
+  border-radius: var(--koi-radius);
+  font-size: var(--koi-text-sm);
+  font-weight: 600;
+}
+.koi-scenario-badge.is-ok {
+  background: color-mix(in srgb, var(--koi-ok) 18%, transparent);
+  color: var(--koi-ok);
+}
+.koi-scenario-badge.is-rejected {
+  background: color-mix(in srgb, var(--koi-error) 18%, transparent);
+  color: var(--koi-error);
+}
+.koi-scenario-timeline,
+.koi-scenario-invariants,
+.koi-scenario-notes {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--koi-space-1);
+}
+.koi-scenario-step,
+.koi-scenario-invariant {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--koi-space-1-25);
+  font-family: var(--koi-font-body);
+  font-size: var(--koi-text-base);
+}
+.koi-scenario-icon {
+  font-weight: 700;
+  width: 1.1em;
+  text-align: center;
+}
+.is-passed > .koi-scenario-icon {
+  color: var(--koi-ok);
+}
+.is-failed > .koi-scenario-icon {
+  color: var(--koi-error);
+}
+.is-indeterminate > .koi-scenario-icon {
+  color: var(--koi-warn);
+}
+.koi-scenario-tag {
+  font-size: var(--koi-text-sm);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  padding: 0 var(--koi-space-0-75);
+  border-radius: var(--koi-radius-sm);
+  background: var(--koi-paper-2);
+  color: var(--koi-muted);
+  border: 1px solid var(--koi-line);
+}
+.koi-scenario-tag-event {
+  color: var(--koi-accent);
+  border-color: color-mix(in srgb, var(--koi-accent) 40%, transparent);
+}
+.koi-scenario-args {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: var(--koi-space-0-75);
+}
+.koi-scenario-chip {
+  font-family: var(--koi-font-mono);
+  font-size: var(--koi-text-sm);
+  padding: 0 var(--koi-space-0-75);
+  border-radius: var(--koi-radius-sm);
+  background: var(--koi-paper-2);
+  color: var(--koi-muted);
+}
+.koi-scenario-state {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: var(--koi-space-0-5) var(--koi-space-2);
+  margin: 0;
+  font-family: var(--koi-font-mono);
+  font-size: var(--koi-text-sm);
+}
+.koi-scenario-state dt {
+  color: var(--koi-muted);
+}
+.koi-scenario-state dd {
+  margin: 0;
+  color: var(--koi-fg);
+}
+.koi-scenario-return {
+  margin: 0;
+  font-family: var(--koi-font-mono);
+  font-size: var(--koi-text-sm);
+}
+.koi-scenario-notes {
+  color: var(--koi-muted);
+  font-size: var(--koi-text-sm);
+}
+.koi-scenario-message.is-error {
+  color: var(--koi-error);
+}
+.koi-scenario-message.is-muted {
+  color: var(--koi-muted);
+}

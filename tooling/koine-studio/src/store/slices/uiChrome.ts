@@ -1,7 +1,7 @@
 import type { StoreApi } from 'zustand/vanilla';
 
 export type CenterView = 'visual' | 'technical' | 'docs' | 'assistant';
-export type TechView = 'editor' | 'preview' | 'check';
+export type TechView = 'editor' | 'preview' | 'check' | 'scenarios';
 export type DocsView = 'glossary' | 'adr' | 'notes';
 export type BottomTab = 'problems' | 'events' | 'relationships' | 'contextmap';
 export type RightView = 'props' | 'rules' | 'notes';

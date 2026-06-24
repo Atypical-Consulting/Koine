@@ -85,7 +85,7 @@ const SYMBOL_KIND_NAMESPACE = 3;
 // concern, not part of the target-agnostic model). They mirror the uiChrome slice's CenterView /
 // TechView / DocsView literals, which the chrome now drives through.
 type CenterView = 'visual' | 'technical' | 'docs' | 'assistant';
-type TechView = 'editor' | 'preview' | 'check';
+type TechView = 'editor' | 'preview' | 'check' | 'scenarios';
 type DocsView = 'glossary' | 'adr' | 'notes';
 type BottomTab = 'problems' | 'events' | 'relationships' | 'contextmap';
 
@@ -161,6 +161,9 @@ export interface InspectorControllerDeps {
 
   /** The assistant panel, created lazily by ide.ts the first time its tab is shown. */
   ensureAssistant(): InspectorAssistant;
+
+  /** The scenario-runner panel (#149), created lazily by ide.ts the first time its tab is shown. */
+  ensureScenarios?(): { refresh(): void };
 
   /** Bind a fixed-height resizer to a panel (ide.ts's resize.ts, injected to keep this DOM-infra-free). */
   initEdgeResizer(opts: {
@@ -284,6 +287,7 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   const diagramsView = el('diagram-host');
   const assistantView = el('view-assistant');
   const checkView = el('view-check');
+  const scenariosView = el('view-scenarios');
   // Right-rail host: the element inspector (Properties). Fixed — never torn down on a model reload.
   const inspectorHost = el('inspector-host');
   // Top-bar "scope path" host (the ContextBreadcrumb Preact panel — the scope selector + selected
@@ -1002,6 +1006,7 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     editorPaneEl.hidden = !(techVisible && tech === 'editor');
     previewEl.hidden = !(techVisible && tech === 'preview');
     checkView.hidden = !(techVisible && tech === 'check');
+    scenariosView.hidden = !(techVisible && tech === 'scenarios');
     for (const t of techTabs) t.setAttribute('aria-selected', String(t.dataset.tech === tech));
     // Documentation sub-views: Glossary (the ubiquitous language), Decisions (the ADR list) and Notes.
     const docsVisible = center === 'docs';
@@ -1064,6 +1069,7 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   function ensureTechLoaded(): void {
     if (activeCenter() !== 'technical') return;
     if (activeTech() === 'preview' && appStore.getState().isStale('preview')) void loadPreview();
+    else if (activeTech() === 'scenarios') deps.ensureScenarios?.().refresh();
     else if (activeTech() === 'check') renderCheckIdleIfEmpty();
   }
 

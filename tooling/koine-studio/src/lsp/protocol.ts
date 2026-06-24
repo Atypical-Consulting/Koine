@@ -129,6 +129,82 @@ export interface SetDocResult {
   edits: TextEdit[];
 }
 
+// `koine/runScenario` result (#149): the command → events → invariant-checks timeline produced by
+// the model-level interpreter (Approach B). `ok` is false when the command was rejected (a failed
+// precondition), the target/operation was unknown, or the model has errors (see `notes`). Each
+// `outcome` is 'passed' | 'failed' | 'indeterminate' (the last when an expression couldn't be
+// evaluated — surfaced, never hidden).
+export type ScenarioOutcome = 'passed' | 'failed' | 'indeterminate';
+export interface ScenarioPreconditionStep {
+  kind: 'requires';
+  message: string | null;
+  condition: string;
+  outcome: ScenarioOutcome;
+}
+export interface ScenarioTransitionStep {
+  kind: 'transition';
+  field: string;
+  from: string | null;
+  to: string;
+  isInitialization: boolean;
+}
+export interface ScenarioEmitStep {
+  kind: 'emit';
+  event: string;
+  args: Record<string, string>;
+}
+export interface ScenarioResultStep {
+  kind: 'result';
+  value: string;
+}
+export type ScenarioStep =
+  | ScenarioPreconditionStep
+  | ScenarioTransitionStep
+  | ScenarioEmitStep
+  | ScenarioResultStep;
+export interface ScenarioInvariantCheck {
+  message: string | null;
+  condition: string;
+  outcome: ScenarioOutcome;
+}
+export interface ScenarioResult {
+  ok: boolean;
+  target: string;
+  operation: string;
+  steps: ScenarioStep[];
+  resultingState: Record<string, string>;
+  invariants: ScenarioInvariantCheck[];
+  result: string | null;
+  notes: string[];
+}
+
+// `koine/scenarioCatalog` result (#149): the runnable surface of the workspace — the entities that
+// expose at least one command/factory, with their operations (and parameters) and their stored fields.
+// The panel turns this into target/operation dropdowns and a given-state / args scaffold.
+export interface ScenarioParam {
+  name: string;
+  type: string;
+}
+export interface ScenarioOperation {
+  name: string;
+  kind: 'command' | 'factory';
+  params: ScenarioParam[];
+  returns: string | null;
+}
+export interface ScenarioField {
+  name: string;
+  type: string;
+  optional: boolean;
+}
+export interface ScenarioTarget {
+  name: string;
+  operations: ScenarioOperation[];
+  fields: ScenarioField[];
+}
+export interface ScenarioCatalog {
+  targets: ScenarioTarget[];
+}
+
 // Standard LSP Hover. `contents` is a MarkupContent ({kind,value}), a MarkedString
 // (string | {language,value}), or an array of those. `range` is optional.
 export interface MarkupContent {
