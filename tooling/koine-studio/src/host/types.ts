@@ -13,6 +13,8 @@
 // desktop, a registry id on the browser. The UI persists tokens (e.g. recent folders) and passes
 // them back to the platform — it never interprets them.
 
+import type { ChangeEntry } from '@/host/gitHistory';
+
 /** A `.koi` file discovered under an opened folder. `path` is an opaque read/write token. */
 export interface KoiFile {
   path: string; // opaque file token (absolute path on desktop; synthetic on browser)
@@ -167,6 +169,15 @@ export interface Platform {
 
   /** Every `.koi` file under an opened folder, sorted by relPath. */
   listKoiFiles(token: string): Promise<KoiFile[]>;
+
+  /**
+   * The git change history of lines `startLine..endLine` (1-based, inclusive) of the file addressed by
+   * `path` — the per-element "Change history" the inspector renders (issue #150). The desktop host
+   * shells out to `git log -L start,end:file` in the file's directory; the browser host (no git) returns
+   * `null`. Resolves `null` — never rejects — whenever history is unavailable (not a git repo, git
+   * missing, the file untracked), so the caller simply hides the section. Newest commit first.
+   */
+  gitLogForRange(path: string, startLine: number, endLine: number): Promise<ChangeEntry[] | null>;
 
   /** Read a file's UTF-8 text by its token. */
   readTextFile(path: string): Promise<string>;

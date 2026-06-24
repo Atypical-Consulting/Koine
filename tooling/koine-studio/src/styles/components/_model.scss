@@ -432,6 +432,27 @@ $koi-inspector-constructs: (
   padding: var(--koi-space-0-75) 0;
 }
 
+/* Change history compartment (#150): a compact "author · date" meta line over the commit message. */
+.koi-inspector-history-item {
+  font-family: var(--koi-font-body);
+  display: flex;
+  flex-direction: column;
+  gap: var(--koi-space-0-5);
+  border-top: 1px solid var(--koi-border);
+
+  &:first-child {
+    border-top: 0;
+  }
+}
+
+.koi-inspector-history-meta {
+  font-size: var(--koi-text-xs);
+}
+
+.koi-inspector-history-message {
+  color: var(--koi-fg);
+}
+
 /* Properties compartment rendered as an aligned two-column table (name | type). */
 .koi-inspector-table {
   width: 100%;
