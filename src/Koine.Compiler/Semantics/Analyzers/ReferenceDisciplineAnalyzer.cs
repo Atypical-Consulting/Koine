@@ -28,6 +28,76 @@ internal sealed class ReferenceDisciplineAnalyzer : IModelAnalyzer
 
     public void Analyze(AnalyzerContext context)
     {
-        // Reference rules (KOI1601–KOI1604) are added in the following tasks.
+        ModelIndex index = context.Index;
+        var diagnostics = context.Diagnostics;
+
+        foreach (ContextNode ctx in context.Model.Contexts)
+        {
+            foreach (TypeDecl type in ctx.AllTypeDecls())
+            {
+                switch (type)
+                {
+                    case ValueObjectDecl vo:
+                        CheckValueObject(vo, index, diagnostics);
+                        break;
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// A value object is identity-less and immutable: it may be composed only of primitives, enums,
+    /// ID value objects, and other value objects (and collections of those). An entity, aggregate, or
+    /// any other reference type smuggles identity and mutability into a value — KOI1601.
+    /// </summary>
+    private static void CheckValueObject(ValueObjectDecl vo, ModelIndex index, List<Diagnostic> diagnostics)
+    {
+        foreach (Member m in vo.Members)
+        {
+            CheckMemberType(
+                m.Name, m.Type, index, IsAllowedInValueObject,
+                DiagnosticCodes.ValueObjectReferencesEntity,
+                (name, t) => $"value-object field '{name}' references '{t}'; a value object has no identity and must be composed only of primitives, enums, ID value objects, and other value objects",
+                diagnostics);
+        }
+    }
+
+    private static bool IsAllowedInValueObject(TypeKind kind) => kind switch
+    {
+        TypeKind.Primitive or TypeKind.List or TypeKind.Set or TypeKind.Map or TypeKind.Range => true,
+        TypeKind.Enum or TypeKind.Value or TypeKind.IdValueObject => true,
+        TypeKind.Unknown => true,   // genuinely-unknown names are reported as KOI0101 elsewhere
+        _ => false                  // Entity, Aggregate, Event, IntegrationEvent, ReadModel, Query
+    };
+
+    /// <summary>
+    /// Classifies <paramref name="tr"/> and reports <paramref name="code"/> when its kind is not
+    /// allowed; recurses into a generic's element and value type arguments so a collection of a
+    /// disallowed type (e.g. <c>List&lt;Order&gt;</c>) is caught at the offending argument's span.
+    /// Modelled on <c>IntegrationEventValidator.CheckIntegrationEventFieldType</c>.
+    /// </summary>
+    private static void CheckMemberType(
+        string memberName,
+        TypeRef tr,
+        ModelIndex index,
+        Func<TypeKind, bool> allowed,
+        string code,
+        Func<string, string, string> describe,
+        List<Diagnostic> diagnostics)
+    {
+        if (!allowed(index.Classify(tr.Name)))
+        {
+            diagnostics.Add(Diagnostic.Error(code, describe(memberName, tr.Name), tr.Span));
+        }
+
+        if (tr.Element is not null)
+        {
+            CheckMemberType(memberName, tr.Element, index, allowed, code, describe, diagnostics);
+        }
+
+        if (tr.Value is not null)
+        {
+            CheckMemberType(memberName, tr.Value, index, allowed, code, describe, diagnostics);
+        }
     }
 }
