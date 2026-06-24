@@ -8,6 +8,7 @@ import {
   type Location,
   type SourceSpan,
   type StructuredEdit,
+  type TextEdit,
 } from '@/lsp/lsp';
 import {
   fileUriToPath,
@@ -1251,6 +1252,22 @@ export function init(): () => void {
       return m;
     },
     labelOf: searchLabelForUri,
+    replaceInBuffer: (uri, newText) => {
+      // Route the new text through the cross-buffer WorkspaceEdit path: the active buffer goes through
+      // the editor (one undoable transaction), other open buffers are patched + marked dirty + synced,
+      // so the unsaved indicator updates. A single whole-document edit over the buffer's current text.
+      const current = workspace.buffers.get(uri)?.text ?? '';
+      const lines = current.split('\n');
+      const edit: TextEdit = {
+        range: { start: { line: 0, character: 0 }, end: { line: lines.length - 1, character: lines[lines.length - 1].length } },
+        newText,
+      };
+      workspace.applyWorkspaceEdit({ changes: { [uri]: [edit] } });
+    },
+    writeFile: async (uri, newText) => {
+      const token = fileUriToPath(uri);
+      if (token) await platform.writeTextFile(token, newText);
+    },
   });
 
   const prefs = createPreferences({

@@ -190,6 +190,47 @@ export function runSearch(files: { uri: string; text: string }[], q: SearchQuery
   return { files: result, error: null };
 }
 
+/** One file to consider for replacement. Its live `bufferText` (if open) wins over `diskText`. */
+export interface ReplaceTarget {
+  uri: string;
+  /** The file's live buffer text when it is OPEN (unsaved edits included). */
+  bufferText?: string;
+  /** The file's on-disk text, used only when the file is closed (`bufferText` undefined). */
+  diskText?: string;
+}
+
+/** A planned replacement for one file. `open` tells the caller how to route the new text. */
+export interface PlannedReplace {
+  uri: string;
+  /** True when the source was the live buffer (route through the buffer/dirty pipeline, undoable);
+   *  false when it was on-disk text (write back through the host fs). */
+  open: boolean;
+  /** The file's text after the replacement. */
+  text: string;
+  /** How many matches were replaced (always > 0 — unchanged files are omitted). */
+  count: number;
+}
+
+/**
+ * Plan the replacements for a set of files without performing any I/O. For each target it picks the
+ * current source (live buffer text when open, on-disk text when closed), applies the query's
+ * replacement, and reports the resulting text, the match count, and whether it routes through the
+ * buffer pipeline (`open`) or a disk write. Files whose text is unchanged are dropped, so the caller
+ * never marks a buffer dirty or writes a file for a no-op. Pure — the caller does the actual edits.
+ */
+export function planReplacements(targets: ReplaceTarget[], q: SearchQuery, replacement: string): PlannedReplace[] {
+  const out: PlannedReplace[] = [];
+  for (const target of targets) {
+    const open = target.bufferText !== undefined;
+    const source = (open ? target.bufferText : target.diskText) ?? '';
+    const text = applyReplace(source, q, replacement);
+    if (text === source) continue; // no match / invalid regex / empty query — nothing to route
+    const count = runSearch([{ uri: target.uri, text: source }], q).files[0]?.matches.length ?? 0;
+    out.push({ uri: target.uri, open, text, count });
+  }
+  return out;
+}
+
 /** Expand `$&` / `$1`…`$99` / `$$` against a match — only in regex mode; literal mode inserts verbatim. */
 function expandReplacement(replacement: string, m: RegExpExecArray, q: SearchQuery): string {
   if (!q.regex) return replacement;

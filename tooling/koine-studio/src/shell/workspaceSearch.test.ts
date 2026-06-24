@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { applyReplace, runSearch, type SearchQuery } from '@/shell/workspaceSearch';
+import { applyReplace, planReplacements, runSearch, type SearchQuery } from '@/shell/workspaceSearch';
 
 /** A SearchQuery with the inert defaults, overridden field-by-field per case. */
 function q(over: Partial<SearchQuery>): SearchQuery {
@@ -132,5 +132,40 @@ describe('applyReplace', () => {
 
   test('an empty query leaves the text untouched', () => {
     expect(applyReplace('text', q({ text: '' }), 'y')).toBe('text');
+  });
+});
+
+describe('planReplacements', () => {
+  test('replaces an open buffer against its live (dirty) text, flagged open', () => {
+    const plan = planReplacements(
+      [{ uri: 'file:///a', bufferText: 'Cash here', diskText: 'Money here' }],
+      q({ text: 'Cash' }),
+      'Coin',
+    );
+    expect(plan).toEqual([{ uri: 'file:///a', open: true, text: 'Coin here', count: 1 }]);
+  });
+
+  test('replaces a closed file against its on-disk text, flagged closed', () => {
+    const plan = planReplacements([{ uri: 'file:///b', diskText: 'Money and Money' }], q({ text: 'Money' }), 'Cash');
+    expect(plan).toEqual([{ uri: 'file:///b', open: false, text: 'Cash and Cash', count: 2 }]);
+  });
+
+  test('preserves CRLF / LF line endings through the replacement', () => {
+    const plan = planReplacements([{ uri: 'file:///c', diskText: 'Money\r\nMoney\n' }], q({ text: 'Money' }), 'Cash');
+    expect(plan[0].text).toBe('Cash\r\nCash\n');
+  });
+
+  test('omits files whose text does not change', () => {
+    const plan = planReplacements([{ uri: 'file:///a', bufferText: 'nothing here' }], q({ text: 'Money' }), 'Cash');
+    expect(plan).toEqual([]);
+  });
+
+  test('expands $1 capture groups in regex replacements', () => {
+    const plan = planReplacements(
+      [{ uri: 'file:///a', diskText: 'Money amount' }],
+      q({ text: '(\\w+) amount', regex: true }),
+      '$1 total',
+    );
+    expect(plan[0].text).toBe('Money total');
   });
 });

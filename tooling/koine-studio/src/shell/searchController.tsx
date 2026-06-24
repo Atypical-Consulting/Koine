@@ -11,7 +11,14 @@
 import { render } from 'preact';
 import { useEffect, useState } from 'preact/hooks';
 import { el } from '@/shared/el';
-import { runSearch, type FileMatches, type Match, type SearchQuery } from '@/shell/workspaceSearch';
+import {
+  planReplacements,
+  runSearch,
+  type FileMatches,
+  type Match,
+  type ReplaceTarget,
+  type SearchQuery,
+} from '@/shell/workspaceSearch';
 
 /** The shell-provided seams the panel drives — everything it can't (and shouldn't) own itself. */
 export interface SearchPanelOptions {
@@ -25,6 +32,13 @@ export interface SearchPanelOptions {
   getActiveBuffers(): Map<string, string>;
   /** A short display label for a uri (the workspace-relative path), for the results tree. */
   labelOf(uri: string): string;
+  /**
+   * Apply replaced text to an OPEN buffer through the dirty/save pipeline: the active buffer goes
+   * through the editor (so it is undoable), other open buffers are patched + marked dirty + synced.
+   */
+  replaceInBuffer(uri: string, newText: string): void;
+  /** Write replaced text for a CLOSED file straight to disk through the host fs. */
+  writeFile(uri: string, newText: string): Promise<void>;
 }
 
 /** Imperative handle the shell wires to the Mod-Shift-F shortcut / command palette. */
@@ -64,15 +78,20 @@ async function buildCorpus(opts: SearchPanelOptions): Promise<{ uri: string; tex
 /** The panel body. Exported for unit tests; the shell uses {@link createSearchPanel}. */
 export function SearchPanel(props: SearchPanelProps) {
   const [query, setQuery] = useState('');
+  const [replacement, setReplacement] = useState('');
   const [caseSensitive, setCaseSensitive] = useState(false);
   const [wholeWord, setWholeWord] = useState(false);
   const [regex, setRegex] = useState(false);
   const [include, setInclude] = useState('');
   const [files, setFiles] = useState<FileMatches[]>([]);
   const [error, setError] = useState<string | null>(null);
+  // Bumped after a replace so the search effect re-runs against the now-edited buffers/files.
+  const [reloadToken, setReloadToken] = useState(0);
 
-  // Re-run the search (debounced) whenever the query / toggles / include change, and whenever the
-  // panel is (re)opened — so results reflect the current buffers and on-disk files each time.
+  const buildQuery = (): SearchQuery => ({ text: query, caseSensitive, wholeWord, regex, include });
+
+  // Re-run the search (debounced) whenever the query / toggles / include change, whenever the panel
+  // is (re)opened, and after a replace — so results reflect the current buffers and on-disk files.
   useEffect(() => {
     if (!props.visible) return;
     if (query === '') {
@@ -82,10 +101,9 @@ export function SearchPanel(props: SearchPanelProps) {
     }
     let cancelled = false;
     const id = setTimeout(() => {
-      const q: SearchQuery = { text: query, caseSensitive, wholeWord, regex, include };
       void buildCorpus(props).then((corpus) => {
         if (cancelled) return;
-        const outcome = runSearch(corpus, q);
+        const outcome = runSearch(corpus, buildQuery());
         setFiles(outcome.files);
         setError(outcome.error);
       });
@@ -96,7 +114,35 @@ export function SearchPanel(props: SearchPanelProps) {
     };
     // props seams are stable references from the factory; the listed inputs are what change a search.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [query, caseSensitive, wholeWord, regex, include, props.visible]);
+  }, [query, caseSensitive, wholeWord, regex, include, props.visible, reloadToken]);
+
+  // Resolve each uri's current source (live buffer text when open, else on-disk text) into a replace
+  // target, then plan + route the replacements: open buffers through the dirty pipeline (undoable),
+  // closed files through a disk write. Re-runs the search so the replaced matches drop out of the tree.
+  async function performReplace(uris: string[]): Promise<void> {
+    const q = buildQuery();
+    if (q.text === '' || error) return;
+    const live = props.getActiveBuffers();
+    const targets: ReplaceTarget[] = [];
+    for (const uri of uris) {
+      const bufferText = live.get(uri);
+      if (bufferText !== undefined) {
+        targets.push({ uri, bufferText });
+      } else {
+        const diskText = await props.readFile(uri);
+        if (diskText != null) targets.push({ uri, diskText });
+      }
+    }
+    for (const planned of planReplacements(targets, q, replacement)) {
+      if (planned.open) props.replaceInBuffer(planned.uri, planned.text);
+      else await props.writeFile(planned.uri, planned.text);
+    }
+    setReloadToken((t) => t + 1);
+  }
+
+  const canReplace = !error && query !== '' && files.length > 0;
+  const replaceAll = () => void performReplace(files.map((f) => f.uri));
+  const replaceInFile = (uri: string) => void performReplace([uri]);
 
   const total = files.reduce((n, f) => n + f.matches.length, 0);
   const summary = error
@@ -160,6 +206,28 @@ export function SearchPanel(props: SearchPanelProps) {
           ✕
         </button>
       </div>
+      <div class="koi-search-replace-row">
+        <input
+          class="koi-search-replace"
+          type="text"
+          placeholder="Replace"
+          aria-label="Replace with"
+          autocomplete="off"
+          spellcheck={false}
+          value={replacement}
+          onInput={(e) => setReplacement((e.target as HTMLInputElement).value)}
+        />
+        <button
+          type="button"
+          class="koi-search-replace-all"
+          aria-label="Replace all"
+          title="Replace all"
+          disabled={!canReplace}
+          onClick={replaceAll}
+        >
+          ⇄
+        </button>
+      </div>
       <input
         class="koi-search-include"
         type="text"
@@ -186,6 +254,16 @@ export function SearchPanel(props: SearchPanelProps) {
                 {props.labelOf(file.uri)}
               </span>
               <span class="koi-search-file-count">{file.matches.length}</span>
+              <button
+                type="button"
+                class="koi-search-file-replace"
+                aria-label={`Replace all in ${props.labelOf(file.uri)}`}
+                title="Replace all in file"
+                disabled={!canReplace}
+                onClick={() => replaceInFile(file.uri)}
+              >
+                ⇄
+              </button>
             </div>
             <div role="group">
               {file.matches.map((m, i) => (

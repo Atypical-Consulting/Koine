@@ -20,6 +20,8 @@ function makeOpts(over: Partial<SearchPanelOptions> = {}): SearchPanelOptions {
     getActiveBuffers: vi.fn(() => new Map<string, string>()),
     openAndReveal: vi.fn(),
     labelOf: (uri: string) => uri.replace('file:///', ''),
+    replaceInBuffer: vi.fn(),
+    writeFile: vi.fn(async () => {}),
     ...over,
   };
 }
@@ -86,5 +88,38 @@ describe('SearchPanel', () => {
 
     fireEvent.input(view.getByLabelText('Files to include'), { target: { value: 'a.koi' } });
     await view.findByText('1 result in 1 file');
+  });
+
+  test('Replace all routes an open buffer through the dirty pipeline and a closed file to disk', async () => {
+    // a.koi is OPEN (live buffer); b.koi is CLOSED (read from disk).
+    const opts = makeOpts({
+      getActiveBuffers: () => new Map([['file:///a.koi', 'aggregate Order\n  total: Money\n']]),
+    });
+    const view = mount(opts);
+    fireEvent.input(view.getByLabelText('Search text'), { target: { value: 'Money' } });
+    fireEvent.input(view.getByLabelText('Replace with'), { target: { value: 'Cash' } });
+    await view.findByText('2 results in 2 files');
+
+    fireEvent.click(view.getByLabelText('Replace all'));
+
+    await waitFor(() => {
+      // Open buffer → through the buffer/dirty pipeline with its replaced text.
+      expect(opts.replaceInBuffer).toHaveBeenCalledWith('file:///a.koi', 'aggregate Order\n  total: Cash\n');
+      // Closed file → written to disk with its replaced text.
+      expect(opts.writeFile).toHaveBeenCalledWith('file:///b.koi', 'value Cash\n');
+    });
+  });
+
+  test('per-file Replace touches only that file', async () => {
+    const opts = makeOpts();
+    const view = mount(opts);
+    fireEvent.input(view.getByLabelText('Search text'), { target: { value: 'Money' } });
+    fireEvent.input(view.getByLabelText('Replace with'), { target: { value: 'Cash' } });
+    await view.findByText('2 results in 2 files');
+
+    fireEvent.click(view.getByLabelText('Replace all in a.koi'));
+
+    await waitFor(() => expect(opts.writeFile).toHaveBeenCalledWith('file:///a.koi', 'aggregate Order\n  total: Cash\n'));
+    expect(opts.writeFile).not.toHaveBeenCalledWith('file:///b.koi', expect.anything());
   });
 });
