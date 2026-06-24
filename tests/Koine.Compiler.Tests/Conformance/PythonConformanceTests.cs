@@ -430,6 +430,39 @@ public class PythonConformanceTests
         AssertStrictlyTypeChecks(result.Files);
     }
 
+    /// <summary>
+    /// Issue #241 acceptance: the full emitted set for a multi-aggregate context with a declarative finder
+    /// — domain + the opt-in Infrastructure layer (concrete repository impls over the in-memory store, the
+    /// unit of work, the pipeline behaviors and the provider) — must parse and type-check under
+    /// <c>mypy --strict</c>. Inconclusive (logged, not failed) only when no toolchain is present.
+    /// </summary>
+    [Fact]
+    public void Emitted_infrastructure_typechecks_under_strict()
+    {
+        var result = new KoineCompiler().Compile(
+            PythonInfrastructureSnapshotTests.Fixture,
+            new PythonEmitter(PythonInfrastructureSnapshotTests.InfraOptions));
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        AssertStrictlyTypeChecks(result.Files);
+    }
+
+    /// <summary>
+    /// Issue #241: a publishing context's infrastructure (the transactional outbox + dispatcher and the
+    /// provider that wires them, plus the enqueue-on-save unit of work) must also parse and type-check
+    /// under <c>mypy --strict</c>. Inconclusive (logged, not failed) when no toolchain is present.
+    /// </summary>
+    [Fact]
+    public void Emitted_publishing_infrastructure_typechecks_under_strict()
+    {
+        var result = new KoineCompiler().Compile(
+            PythonInfrastructureSnapshotTests.PublishingFixture,
+            new PythonEmitter(PythonInfrastructureSnapshotTests.InfraOptions));
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        AssertStrictlyTypeChecks(result.Files);
+    }
+
     /// <summary>The full text of an emitted file, by relative path (fails the test if absent).</summary>
     private static string FileText(IReadOnlyList<EmittedFile> files, string relativePath)
     {

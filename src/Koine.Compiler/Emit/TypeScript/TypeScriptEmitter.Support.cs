@@ -49,6 +49,7 @@ public sealed partial class TypeScriptEmitter
         public const string Events = "events";
         public const string IntegrationEvents = "integration-events";
         public const string Repositories = "repositories";
+        public const string Infrastructure = "infrastructure";
         public const string Services = "services";
         public const string Specifications = "specifications";
         public const string Policies = "policies";
