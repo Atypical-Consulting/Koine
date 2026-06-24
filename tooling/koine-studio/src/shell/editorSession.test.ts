@@ -16,6 +16,7 @@ import type { CodeAction, CompletionItem, HoverResult, Location, LspDiagnostic, 
 // parent for the CodeMirror editor the session constructs.
 const SESSION_HTML = `
   <div id="editor-pane"></div>
+  <div id="editor-pane-b"></div>
   <div id="status" data-kind="connecting">connecting…</div>
   <span id="diag-count"></span>
   <div id="diag-body"></div>
@@ -68,10 +69,17 @@ type Lsp = ReturnType<typeof makeLsp>;
 const ACTIVE = 'file:///work/order.koi';
 const OTHER = 'file:///work/customer.koi';
 
+// The shared buffer set (workspaceController owns it in ide.tsx); the session reads a uri's text
+// through deps.docFor. Distinct texts per uri so a test can assert which buffer a group shows.
+const DOCS: Record<string, string> = {
+  [ACTIVE]: 'context Order {}\n',
+  [OTHER]: 'context Customer {}\n',
+};
+
 function makeDeps(lsp: Lsp, overrides: Partial<EditorSessionDeps> = {}): EditorSessionDeps {
   return {
     parent: el('editor-pane'),
-    doc: 'context Demo {}\n',
+    doc: DOCS[ACTIVE],
     lineWrap: false,
     minimap: false,
     lsp: lsp as unknown as EditorSessionDeps['lsp'],
@@ -85,6 +93,9 @@ function makeDeps(lsp: Lsp, overrides: Partial<EditorSessionDeps> = {}): EditorS
     onNavigate: vi.fn(),
     onApplyWorkspaceEdit: vi.fn(),
     onDiagnostics: vi.fn(),
+    // Group B (Task 3): its mount point + a reader over the shared buffer set.
+    groupBParent: el('editor-pane-b'),
+    docFor: (uri) => DOCS[uri] ?? '',
     ...overrides,
   };
 }
@@ -269,5 +280,112 @@ describe('createEditorSession — status + server exit', () => {
 
     expect(el('status').dataset.kind).toBe('error');
     expect(el('status').textContent).toContain('137');
+  });
+});
+
+describe('createEditorSession — second editor group (group B)', () => {
+  test('focus starts on group A; there is no group-B editor until opened', () => {
+    const lsp = makeLsp();
+    const session = createEditorSession(makeDeps(lsp));
+
+    expect(session.focusedGroup()).toBe('a');
+    expect(session.groupBEditor()).toBeNull();
+    // Group B's pane stays empty until it is opened (no CodeMirror surface mounted yet).
+    expect(el('editor-pane-b').childElementCount).toBe(0);
+  });
+
+  test('opening group B mounts a second editor showing the chosen buffer; A is untouched', () => {
+    const lsp = makeLsp();
+    const session = createEditorSession(makeDeps(lsp));
+
+    session.openGroupB(OTHER);
+
+    // A second CodeMirror editor exists, mounted into #editor-pane-b.
+    const groupB = session.groupBEditor();
+    expect(groupB).not.toBeNull();
+    expect(el('editor-pane-b').childElementCount).toBeGreaterThan(0);
+    // Group B shows OTHER's buffer text (read from the shared set via docFor)…
+    expect(groupB!.getDoc()).toBe(DOCS[OTHER]);
+    // …while group A still shows its own (ACTIVE) buffer — the two groups show different uris.
+    expect(session.editor.getDoc()).toBe(DOCS[ACTIVE]);
+    // Opening B focuses B.
+    expect(session.focusedGroup()).toBe('b');
+  });
+
+  test('openGroupB with no uri defaults to group A’s active uri', () => {
+    const lsp = makeLsp();
+    const session = createEditorSession(makeDeps(lsp));
+
+    session.openGroupB();
+
+    expect(session.groupBEditor()!.getDoc()).toBe(DOCS[ACTIVE]);
+  });
+
+  test('opening group B twice reuses the same editor instance (lazy, once)', () => {
+    const lsp = makeLsp();
+    const session = createEditorSession(makeDeps(lsp));
+
+    session.openGroupB(OTHER);
+    const first = session.groupBEditor();
+    session.openGroupB(ACTIVE);
+    const second = session.groupBEditor();
+
+    expect(second).toBe(first);
+    // The reused editor now shows the newly requested buffer.
+    expect(second!.getDoc()).toBe(DOCS[ACTIVE]);
+  });
+
+  test('openFocusedGroup routes a buffer load to whichever group is focused', () => {
+    const lsp = makeLsp();
+    const session = createEditorSession(makeDeps(lsp));
+
+    // Focus A by default: a routed load lands in A, not B.
+    session.openFocusedGroup(OTHER);
+    expect(session.editor.getDoc()).toBe(DOCS[OTHER]);
+
+    // Open (and focus) B, then a routed load lands in B and leaves A alone.
+    session.openGroupB(ACTIVE);
+    expect(session.focusedGroup()).toBe('b');
+    session.openFocusedGroup(OTHER);
+    expect(session.groupBEditor()!.getDoc()).toBe(DOCS[OTHER]);
+    expect(session.editor.getDoc()).toBe(DOCS[OTHER]); // A unchanged from the earlier routed load
+  });
+
+  test('focusGroup switches the routing target', () => {
+    const lsp = makeLsp();
+    const session = createEditorSession(makeDeps(lsp));
+    session.openGroupB(ACTIVE); // focuses B
+
+    session.focusGroup('a');
+    expect(session.focusedGroup()).toBe('a');
+    session.openFocusedGroup(OTHER);
+    expect(session.editor.getDoc()).toBe(DOCS[OTHER]);
+  });
+
+  test('closing group B tears it down, returns focus to A, and leaves A intact', () => {
+    const lsp = makeLsp();
+    const session = createEditorSession(makeDeps(lsp));
+    session.openGroupB(OTHER);
+    const aDocBefore = session.editor.getDoc();
+
+    session.closeGroupB();
+
+    // B's editor is gone and its pane is empty again.
+    expect(session.groupBEditor()).toBeNull();
+    expect(el('editor-pane-b').childElementCount).toBe(0);
+    // Focus is back on A, whose document is untouched.
+    expect(session.focusedGroup()).toBe('a');
+    expect(session.editor.getDoc()).toBe(aDocBefore);
+  });
+
+  test('openGroupB is a graceful no-op when no groupBParent is provided', () => {
+    const lsp = makeLsp();
+    const session = createEditorSession(makeDeps(lsp, { groupBParent: undefined }));
+
+    session.openGroupB(OTHER);
+
+    // Nothing mounted, focus stays on A.
+    expect(session.groupBEditor()).toBeNull();
+    expect(session.focusedGroup()).toBe('a');
   });
 });
