@@ -177,6 +177,8 @@ internal sealed class LspServer
                                         ["resolveProvider"] = true,
                                     },
                                     ["referencesProvider"] = true,
+                                    ["inlayHintProvider"] = true,
+                                    ["callHierarchyProvider"] = true,
                                     ["renameProvider"] = new Dictionary<string, object?>
                                     {
                                         ["prepareProvider"] = true,
@@ -373,6 +375,38 @@ internal sealed class LspServer
                             if (root.TryGetProperty("id", out _))
                             {
                                 Respond(root, ReferencesResultJson(root));
+                            }
+
+                            break;
+
+                        case "textDocument/inlayHint":
+                            if (root.TryGetProperty("id", out _))
+                            {
+                                Respond(root, InlayHintResultJson(root));
+                            }
+
+                            break;
+
+                        case "textDocument/prepareCallHierarchy":
+                            if (root.TryGetProperty("id", out _))
+                            {
+                                Respond(root, CallHierarchyPrepareJson(root));
+                            }
+
+                            break;
+
+                        case "callHierarchy/incomingCalls":
+                            if (root.TryGetProperty("id", out _))
+                            {
+                                Respond(root, CallHierarchyIncomingJson(root));
+                            }
+
+                            break;
+
+                        case "callHierarchy/outgoingCalls":
+                            if (root.TryGetProperty("id", out _))
+                            {
+                                Respond(root, CallHierarchyOutgoingJson(root));
                             }
 
                             break;
@@ -921,6 +955,155 @@ internal sealed class LspServer
 
         var refs = _ls.ReferencesAt(_compilation, uri, line, ch);
         return refs.Select(ToLocation).ToArray();
+    }
+
+    // ---- Inlay hints & call hierarchy (#260, Task 4) ----------------------
+
+    /// <summary>
+    /// Inlay hints (<c>textDocument/inlayHint</c>) over the request's 0-based <c>params.range</c>:
+    /// a JSON array of <c>{ position, label, kind }</c>. The LSP InlayHintKind number is 1 for a Type
+    /// hint and 2 for a Parameter hint (the language-service enum order is Type=0/Parameter=1, so the
+    /// shell maps it). Positions are 0-based — the service already returns them 0-based, so they pass
+    /// straight through.
+    /// </summary>
+    private object? InlayHintResultJson(JsonElement root)
+    {
+        if (!TryGetUri(root, out var uri)
+            || !root.TryGetProperty("params", out var p)
+            || !TryGetRange(p, out var sl, out var sc, out var el, out var ec))
+        {
+            return null;
+        }
+
+        return _ls.InlayHintsAt(_compilation, uri, sl, sc, el, ec)
+            .Select(h => (object)new Dictionary<string, object?>
+            {
+                ["position"] = new Dictionary<string, object?> { ["line"] = h.Line, ["character"] = h.Character },
+                ["label"] = h.Label,
+                ["kind"] = h.Kind == InlayHintKind.Type ? 1 : 2, // LSP InlayHintKind: Type=1, Parameter=2
+            })
+            .ToArray();
+    }
+
+    /// <summary>
+    /// Prepare call hierarchy (<c>textDocument/prepareCallHierarchy</c>) at a 0-based position:
+    /// the command/event under the cursor, as a JSON array of LSP CallHierarchyItem
+    /// (<c>{ name, kind, uri, range, selectionRange, data }</c>). The <c>kind</c> is an LSP SymbolKind
+    /// number (Method=6 for a Command, Event=24 for an Event); the <c>data</c> blob carries
+    /// <c>{ chKind, owningType }</c> so the incoming/outgoing requests can reconstruct the item.
+    /// </summary>
+    private object? CallHierarchyPrepareJson(JsonElement root)
+    {
+        if (!TryGetUri(root, out var uri) || !TryGetPosition(root, out var line, out var ch))
+        {
+            return null;
+        }
+
+        return _ls.PrepareCallHierarchy(_compilation, uri, line, ch)
+            .Select(CallHierarchyItemJson)
+            .ToArray();
+    }
+
+    /// <summary>
+    /// Incoming calls (<c>callHierarchy/incomingCalls</c>): reads <c>params.item</c> (an LSP
+    /// CallHierarchyItem), reconstructs the in-process item from its <c>name</c> + <c>data</c>, and
+    /// returns a JSON array of <c>{ from, fromRanges }</c>. <c>fromRanges</c> is empty (valid per spec;
+    /// kept identical across both backends).
+    /// </summary>
+    private object? CallHierarchyIncomingJson(JsonElement root)
+    {
+        if (!root.TryGetProperty("params", out var p)
+            || !p.TryGetProperty("item", out var itemEl)
+            || ReadCallHierarchyItem(itemEl) is not { } item)
+        {
+            return null;
+        }
+
+        return _ls.IncomingCalls(_compilation, item)
+            .Select(c => (object)new Dictionary<string, object?>
+            {
+                ["from"] = CallHierarchyItemJson(c.From),
+                ["fromRanges"] = Array.Empty<object>(),
+            })
+            .ToArray();
+    }
+
+    /// <summary>
+    /// Outgoing calls (<c>callHierarchy/outgoingCalls</c>): reads <c>params.item</c>, reconstructs the
+    /// in-process item, and returns a JSON array of <c>{ to, fromRanges }</c>. <c>fromRanges</c> is empty.
+    /// </summary>
+    private object? CallHierarchyOutgoingJson(JsonElement root)
+    {
+        if (!root.TryGetProperty("params", out var p)
+            || !p.TryGetProperty("item", out var itemEl)
+            || ReadCallHierarchyItem(itemEl) is not { } item)
+        {
+            return null;
+        }
+
+        return _ls.OutgoingCalls(_compilation, item)
+            .Select(c => (object)new Dictionary<string, object?>
+            {
+                ["to"] = CallHierarchyItemJson(c.To),
+                ["fromRanges"] = Array.Empty<object>(),
+            })
+            .ToArray();
+    }
+
+    /// <summary>
+    /// Serializes a <see cref="CallHierarchyItem"/> to an LSP CallHierarchyItem dict. The <c>kind</c>
+    /// is an LSP SymbolKind number — Method=6 for a Command, Event=24 for an Event. <c>range</c> and
+    /// <c>selectionRange</c> are both the item's (1-based, end-exclusive) name span converted to a
+    /// 0-based LSP range via <see cref="SpanRange"/>. The opaque <c>data</c> blob carries the
+    /// language-service <c>chKind</c> ("Command"/"Event") + <c>owningType</c> so the client can echo it
+    /// back on an incoming/outgoing request and the shell can reconstruct the item.
+    /// </summary>
+    private static Dictionary<string, object?> CallHierarchyItemJson(CallHierarchyItem item)
+    {
+        var range = SpanRange(item.Span);
+        return new Dictionary<string, object?>
+        {
+            ["name"] = item.Name,
+            ["kind"] = item.Kind == CallHierarchyItemKind.Command ? 6 : 24, // LSP SymbolKind: Method=6, Event=24
+            ["uri"] = item.Uri,
+            ["range"] = range,
+            ["selectionRange"] = range,
+            ["data"] = new Dictionary<string, object?>
+            {
+                ["chKind"] = item.Kind == CallHierarchyItemKind.Command ? "Command" : "Event",
+                ["owningType"] = item.OwningType,
+            },
+        };
+    }
+
+    /// <summary>
+    /// Reconstructs a <see cref="CallHierarchyItem"/> from an LSP CallHierarchyItem element: only the
+    /// <c>name</c> and <c>data.chKind</c>/<c>data.owningType</c> are read — the incoming/outgoing
+    /// language-service calls use those three fields and ignore the (placeholder) span/uri. Returns
+    /// <c>null</c> when the element lacks a name or a valid chKind.
+    /// </summary>
+    private static CallHierarchyItem? ReadCallHierarchyItem(JsonElement itemElement)
+    {
+        if (itemElement.ValueKind != JsonValueKind.Object
+            || !itemElement.TryGetProperty("name", out var nameEl)
+            || nameEl.ValueKind != JsonValueKind.String
+            || nameEl.GetString() is not { Length: > 0 } name
+            || !itemElement.TryGetProperty("data", out var data)
+            || data.ValueKind != JsonValueKind.Object
+            || !data.TryGetProperty("chKind", out var chKindEl)
+            || chKindEl.ValueKind != JsonValueKind.String)
+        {
+            return null;
+        }
+
+        var kind = string.Equals(chKindEl.GetString(), "Event", StringComparison.Ordinal)
+            ? CallHierarchyItemKind.Event
+            : CallHierarchyItemKind.Command;
+        var owningType = data.TryGetProperty("owningType", out var ot) && ot.ValueKind == JsonValueKind.String
+            ? ot.GetString()
+            : null;
+
+        return new CallHierarchyItem(name, kind, owningType, "", SourceSpan.None);
     }
 
     private object? PrepareRenameResultJson(JsonElement root)

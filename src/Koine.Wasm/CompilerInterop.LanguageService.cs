@@ -669,6 +669,150 @@ public static partial class CompilerInterop
     }
 
     /// <summary>
+    /// Inlay hints over the 0-based range in <paramref name="activeUri"/> (LSP <c>textDocument/inlayHint</c>):
+    /// a JSON array of <c>{ position, label, kind }</c>, kind 1=Type/2=Parameter, positions 0-based.
+    /// Parity with the stdio LSP's <c>InlayHintResultJson</c>.
+    /// </summary>
+    [JSExport]
+    public static string InlayHints(
+        string filesJson, string activeUri, int startLine, int startChar, int endLine, int endChar)
+    {
+        try
+        {
+            var comp = KoineCompilation.Create(
+                DeserializeFiles(filesJson).Select(f => new SourceFile(f.Uri, f.Text)).ToList());
+            var hints = LanguageService.InlayHintsAt(comp, activeUri, startLine, startChar, endLine, endChar)
+                .Select(h => new WInlayHint(
+                    new WPosition(h.Line, h.Character),
+                    h.Label,
+                    h.Kind == InlayHintKind.Type ? 1 : 2)) // LSP InlayHintKind: Type=1, Parameter=2
+                .ToArray();
+            return JsonSerializer.Serialize(hints, LangJson.Default.WInlayHintArray);
+        }
+        catch
+        {
+            return "[]";
+        }
+    }
+
+    /// <summary>
+    /// Prepare call hierarchy at a 0-based position in <paramref name="activeUri"/> (LSP
+    /// <c>textDocument/prepareCallHierarchy</c>): the command/event under the cursor, as a JSON array of
+    /// LSP CallHierarchyItem. Parity with the stdio LSP's <c>CallHierarchyPrepareJson</c>.
+    /// </summary>
+    [JSExport]
+    public static string PrepareCallHierarchy(string filesJson, string activeUri, int line, int character)
+    {
+        try
+        {
+            var comp = KoineCompilation.Create(
+                DeserializeFiles(filesJson).Select(f => new SourceFile(f.Uri, f.Text)).ToList());
+            var items = LanguageService.PrepareCallHierarchy(comp, activeUri, line, character)
+                .Select(MapCallHierarchyItem)
+                .ToArray();
+            return JsonSerializer.Serialize(items, LangJson.Default.WCallHierarchyItemArray);
+        }
+        catch
+        {
+            return "[]";
+        }
+    }
+
+    /// <summary>
+    /// Incoming calls (LSP <c>callHierarchy/incomingCalls</c>): <paramref name="itemJson"/> is the LSP
+    /// CallHierarchyItem; its <c>name</c> + <c>data</c> reconstruct the in-process item. Returns a JSON
+    /// array of <c>{ from, fromRanges }</c> (fromRanges empty). Parity with the stdio LSP.
+    /// </summary>
+    [JSExport]
+    public static string IncomingCalls(string filesJson, string itemJson)
+    {
+        try
+        {
+            if (DeserializeCallHierarchyItem(itemJson) is not { } item)
+            {
+                return "[]";
+            }
+
+            var comp = KoineCompilation.Create(
+                DeserializeFiles(filesJson).Select(f => new SourceFile(f.Uri, f.Text)).ToList());
+            var calls = LanguageService.IncomingCalls(comp, item)
+                .Select(c => new WCallHierarchyIncomingCall(MapCallHierarchyItem(c.From), []))
+                .ToArray();
+            return JsonSerializer.Serialize(calls, LangJson.Default.WCallHierarchyIncomingCallArray);
+        }
+        catch
+        {
+            return "[]";
+        }
+    }
+
+    /// <summary>
+    /// Outgoing calls (LSP <c>callHierarchy/outgoingCalls</c>): <paramref name="itemJson"/> is the LSP
+    /// CallHierarchyItem. Returns a JSON array of <c>{ to, fromRanges }</c> (fromRanges empty). Parity
+    /// with the stdio LSP.
+    /// </summary>
+    [JSExport]
+    public static string OutgoingCalls(string filesJson, string itemJson)
+    {
+        try
+        {
+            if (DeserializeCallHierarchyItem(itemJson) is not { } item)
+            {
+                return "[]";
+            }
+
+            var comp = KoineCompilation.Create(
+                DeserializeFiles(filesJson).Select(f => new SourceFile(f.Uri, f.Text)).ToList());
+            var calls = LanguageService.OutgoingCalls(comp, item)
+                .Select(c => new WCallHierarchyOutgoingCall(MapCallHierarchyItem(c.To), []))
+                .ToArray();
+            return JsonSerializer.Serialize(calls, LangJson.Default.WCallHierarchyOutgoingCallArray);
+        }
+        catch
+        {
+            return "[]";
+        }
+    }
+
+    /// <summary>
+    /// Maps a <see cref="CallHierarchyItem"/> to the wire <see cref="WCallHierarchyItem"/>: kind is an
+    /// LSP SymbolKind number (Method=6 Command / Event=24); range + selectionRange are both the item's
+    /// 0-based name span; the <c>data</c> blob carries chKind + owningType (mirrors LspServer).
+    /// </summary>
+    private static WCallHierarchyItem MapCallHierarchyItem(CallHierarchyItem item)
+    {
+        var range = SpanRange(item.Span);
+        return new WCallHierarchyItem(
+            item.Name,
+            item.Kind == CallHierarchyItemKind.Command ? 6 : 24, // LSP SymbolKind: Method=6, Event=24
+            item.Uri,
+            range,
+            range,
+            new WCallHierarchyData(
+                item.Kind == CallHierarchyItemKind.Command ? "Command" : "Event",
+                item.OwningType));
+    }
+
+    /// <summary>
+    /// Reconstructs a <see cref="CallHierarchyItem"/> from an LSP CallHierarchyItem JSON: only
+    /// <c>name</c> + <c>data.chKind</c>/<c>data.owningType</c> are read (the incoming/outgoing calls use
+    /// just those three fields; the span/uri are placeholders). Returns <c>null</c> when malformed.
+    /// </summary>
+    private static CallHierarchyItem? DeserializeCallHierarchyItem(string itemJson)
+    {
+        WCallHierarchyItem? dto = JsonSerializer.Deserialize(itemJson, LangJson.Default.WCallHierarchyItem);
+        if (dto is null || string.IsNullOrEmpty(dto.Name) || dto.Data is null)
+        {
+            return null;
+        }
+
+        var kind = string.Equals(dto.Data.ChKind, "Event", StringComparison.Ordinal)
+            ? CallHierarchyItemKind.Event
+            : CallHierarchyItemKind.Command;
+        return new CallHierarchyItem(dto.Name, kind, dto.Data.OwningType, "", SourceSpan.None);
+    }
+
+    /// <summary>
     /// The editable identifier range under the cursor (LSP <c>prepareRename</c>): <c>{ range, placeholder }</c>
     /// or the JSON literal <c>null</c> when a rename is not valid there. Parity with the stdio LSP.
     /// </summary>
@@ -1204,6 +1348,31 @@ public sealed record WSelectionRange(WRange Range, WSelectionRange? Parent);
 /// <summary>LSP CodeLens: a range plus its resolved reference-count title (computed eagerly here).</summary>
 public sealed record WCodeLens(WRange Range, string? Title);
 
+/// <summary>LSP InlayHint: a 0-based <see cref="Position"/>, a <see cref="Label"/>, and the
+/// LSP <c>InlayHintKind</c> number (1=Type, 2=Parameter). Mirrors the LspServer wire shape.</summary>
+public sealed record WInlayHint(WPosition Position, string Label, int Kind);
+
+/// <summary>
+/// LSP CallHierarchyItem: <see cref="Name"/>, the LSP SymbolKind number <see cref="Kind"/> (Method=6
+/// Command / Event=24), the declaring <see cref="Uri"/>, the name <see cref="Range"/> and
+/// <see cref="SelectionRange"/> (both the same 0-based span), and the opaque <see cref="Data"/> blob
+/// the client echoes back so incoming/outgoing requests can reconstruct the item. Mirrors LspServer.
+/// </summary>
+public sealed record WCallHierarchyItem(
+    string Name, int Kind, string Uri, WRange Range, WRange SelectionRange, WCallHierarchyData Data);
+
+/// <summary>The opaque <c>data</c> blob on a CallHierarchyItem: the language-service kind
+/// (<c>"Command"</c>/<c>"Event"</c>) and the owning entity (null for an event).</summary>
+public sealed record WCallHierarchyData(string ChKind, string? OwningType);
+
+/// <summary>LSP CallHierarchyIncomingCall: the <see cref="From"/> item plus its <see cref="FromRanges"/>
+/// (kept empty for parity with the stdio LSP).</summary>
+public sealed record WCallHierarchyIncomingCall(WCallHierarchyItem From, WRange[] FromRanges);
+
+/// <summary>LSP CallHierarchyOutgoingCall: the <see cref="To"/> item plus its <see cref="FromRanges"/>
+/// (kept empty for parity with the stdio LSP).</summary>
+public sealed record WCallHierarchyOutgoingCall(WCallHierarchyItem To, WRange[] FromRanges);
+
 /// <summary>Input shape: one requested position for selection ranges (0-based LSP coordinates).</summary>
 public sealed record WInPosition(int Line, int Character);
 
@@ -1306,6 +1475,11 @@ public sealed record WSourceFileDto(string Uri, string Text);
 [JsonSerializable(typeof(WFoldingRange[]))]
 [JsonSerializable(typeof(WSelectionRange[]))]
 [JsonSerializable(typeof(WCodeLens[]))]
+[JsonSerializable(typeof(WInlayHint[]))]
+[JsonSerializable(typeof(WCallHierarchyItem))]
+[JsonSerializable(typeof(WCallHierarchyItem[]))]
+[JsonSerializable(typeof(WCallHierarchyIncomingCall[]))]
+[JsonSerializable(typeof(WCallHierarchyOutgoingCall[]))]
 [JsonSerializable(typeof(WInPosition[]))]
 [JsonSerializable(typeof(WTextEdit[]))]
 [JsonSerializable(typeof(WPrepareRename))]

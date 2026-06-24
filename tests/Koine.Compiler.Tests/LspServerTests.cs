@@ -220,6 +220,32 @@ public class LspServerTests
             @params = new { textDocument = new { uri }, position = new { line, character }, context = new { includeDeclaration = true } },
         }));
 
+    private static byte[] InlayHint(string uri, int startLine, int startChar, int endLine, int endChar) =>
+        Frame(JsonSerializer.Serialize(new
+        {
+            jsonrpc = "2.0",
+            id = 40,
+            method = "textDocument/inlayHint",
+            @params = new
+            {
+                textDocument = new { uri },
+                range = new
+                {
+                    start = new { line = startLine, character = startChar },
+                    end = new { line = endLine, character = endChar },
+                },
+            },
+        }));
+
+    private static byte[] CallHierarchyPrepare(string uri, int line, int character) =>
+        Frame(JsonSerializer.Serialize(new
+        {
+            jsonrpc = "2.0",
+            id = 41,
+            method = "textDocument/prepareCallHierarchy",
+            @params = new { textDocument = new { uri }, position = new { line, character } },
+        }));
+
     private static byte[] Rename(string uri, int line, int character, string newName) =>
         Frame(JsonSerializer.Serialize(new
         {
@@ -483,6 +509,78 @@ public class LspServerTests
         // codeActionProvider is now an object advertising the supported code-action kinds (so
         // editors surface the refactors), not a bare boolean.
         output.ShouldContain("\"codeActionProvider\":{\"codeActionKinds\":[\"quickfix\",\"refactor\",\"refactor.extract\"]}");
+    }
+
+    [Fact]
+    public void Initialize_advertises_inlay_hint_and_call_hierarchy()
+    {
+        var output = RunSession(Initialize());
+        output.ShouldContain("\"inlayHintProvider\":true");
+        output.ShouldContain("\"callHierarchyProvider\":true");
+    }
+
+    // A read model whose direct field `total` infers its type (`Money`) from the source entity `Order`.
+    private const string InlayReadModelDoc =
+        "context Sales {\n" +
+        "  value Money { amount: Decimal currency: String }\n" +
+        "  entity Order identified by OrderId { total: Money status: String }\n" +
+        "  readmodel OrderRow from Order {\n" +
+        "    total\n" +
+        "    status\n" +
+        "  }\n" +
+        "}\n";
+
+    [Fact]
+    public void InlayHint_returns_type_hints_with_zero_based_positions()
+    {
+        var output = RunSession(
+            Initialize(),
+            DidOpen("file:///t.koi", InlayReadModelDoc),
+            InlayHint("file:///t.koi", 0, 0, 100, 0));
+
+        // Camel-cased keys, the inferred type label, the LSP Type kind (1), 0-based position.
+        output.ShouldContain("\"kind\":1");          // LSP InlayHintKind.Type
+        output.ShouldContain("\": Money\"");         // inferred from Order.total
+        output.ShouldContain("\"position\"");
+        output.ShouldContain("\"label\"");
+        output.ShouldContain("\"line\":4");          // `total` field sits on 0-based line 4
+        output.ShouldContain("\"id\":40");
+    }
+
+    // An Ordering entity command `place` emits `OrderPlaced` (mirrors CallHierarchyTests' syntax).
+    private const string CallHierarchyDoc =
+        """
+        context Ordering {
+          event OrderPlaced {
+            order: OrderId
+          }
+
+          entity Order identified by OrderId {
+            total: Int
+
+            command place {
+              emit OrderPlaced(order: id)
+            }
+          }
+        }
+        """;
+
+    [Fact]
+    public void CallHierarchyPrepare_on_a_command_returns_a_method_item_with_data()
+    {
+        // `command place` is on 0-based line 8; `place` starts at column 12, so the cursor sits one
+        // column into the token (char 13) — TokenLocator.Contains is (start, end], so col 12 misses.
+        var output = RunSession(
+            Initialize(),
+            DidOpen("file:///ordering.koi", CallHierarchyDoc),
+            CallHierarchyPrepare("file:///ordering.koi", 8, 13));
+
+        output.ShouldContain("\"name\":\"place\"");
+        output.ShouldContain("\"kind\":6");          // LSP SymbolKind.Method
+        output.ShouldContain("\"selectionRange\"");
+        output.ShouldContain("\"chKind\":\"Command\"");
+        output.ShouldContain("\"owningType\":\"Order\"");
+        output.ShouldContain("\"id\":41");
     }
 
     [Fact]
