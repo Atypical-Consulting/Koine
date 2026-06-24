@@ -253,9 +253,9 @@ internal static class PyRuntime
 
         from koine_runtime import Instant
 
-        TId = TypeVar("TId", bound=Hashable)
+        TId = TypeVar("TId", bound=Hashable, contravariant=True)
         TEntity = TypeVar("TEntity")
-        TRequest = TypeVar("TRequest")
+        TRequest = TypeVar("TRequest", contravariant=True)
         TResponse = TypeVar("TResponse")
 
 
