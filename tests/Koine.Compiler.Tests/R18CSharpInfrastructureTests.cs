@@ -552,6 +552,131 @@ public class R18CSharpInfrastructureTests
         lineType.GetProperty("Quantity")!.GetValue(loadedLine).ShouldBe(2);
     }
 
+    private static IReadOnlyList<object> AsList(object collection) =>
+        ((IEnumerable)collection).Cast<object>().ToList();
+
+    [Fact]
+    public void Owned_value_object_collection_round_trips_when_empty()
+    {
+        var files = EmitInfra(VoCollectionFixture);
+        using var harness = TestSupport.EfRoundTripHarness.Create(files, "SalesDbContext");
+
+        var orderType = harness.Type("Order");
+        var orderIdType = harness.Type("OrderId");
+        var lineType = harness.Type("OrderLine");
+
+        // An order with no lines (an empty list) must persist and reload as an empty — not throwing — collection.
+        var emptyLines = Activator.CreateInstance(typeof(List<>).MakeGenericType(lineType))!;
+        var orderId = orderIdType.GetMethod("New", BindingFlags.Public | BindingFlags.Static)!.Invoke(null, null)!;
+        var order = Activator.CreateInstance(orderType, orderId, emptyLines)!;
+
+        using (var write = harness.NewContext())
+        {
+            write.Add(order);
+            write.SaveChanges();
+        }
+
+        using var read = harness.NewContext();
+        var loaded = TestSupport.EfRoundTripHarness.Query(read, orderType).ShouldHaveSingleItem();
+        AsList(orderType.GetProperty("Lines")!.GetValue(loaded)!).ShouldBeEmpty();
+    }
+
+    [Fact]
+    public void Optional_owned_value_object_collection_round_trips()
+    {
+        // An optional (nullable) value-object collection backs a nullable List<T> and still materializes
+        // its rows when present.
+        var files = EmitInfra("""
+            context Sales {
+              value OrderLine { sku: String  quantity: Int }
+              aggregate Order root Order {
+                entity Order identified by OrderId { lines: List<OrderLine>? }
+              }
+            }
+            """);
+        using var harness = TestSupport.EfRoundTripHarness.Create(files, "SalesDbContext");
+
+        var orderType = harness.Type("Order");
+        var orderIdType = harness.Type("OrderId");
+        var lineType = harness.Type("OrderLine");
+
+        var lines = (IList)Activator.CreateInstance(typeof(List<>).MakeGenericType(lineType))!;
+        lines.Add(Activator.CreateInstance(lineType, "SKU-9", 5)!);
+        var orderId = orderIdType.GetMethod("New", BindingFlags.Public | BindingFlags.Static)!.Invoke(null, null)!;
+        var order = Activator.CreateInstance(orderType, orderId, lines)!;
+
+        using (var write = harness.NewContext())
+        {
+            write.Add(order);
+            write.SaveChanges();
+        }
+
+        using var read = harness.NewContext();
+        var loaded = TestSupport.EfRoundTripHarness.Query(read, orderType).ShouldHaveSingleItem();
+        var loadedLine = AsList(orderType.GetProperty("Lines")!.GetValue(loaded)!).ShouldHaveSingleItem();
+        lineType.GetProperty("Sku")!.GetValue(loadedLine).ShouldBe("SKU-9");
+    }
+
+    [Fact]
+    public void Nested_owned_value_object_collections_round_trip()
+    {
+        // A value-object collection nested inside another (depth-2 OwnsMany) must materialize end to end:
+        // the inner value object is itself backed by a mutable list with field access.
+        var files = EmitInfra("""
+            context Sales {
+              value Topping { name: String }
+              value Line { sku: String  toppings: List<Topping> }
+              aggregate Order root Order {
+                entity Order identified by OrderId { lines: List<Line> }
+              }
+            }
+            """);
+        using var harness = TestSupport.EfRoundTripHarness.Create(files, "SalesDbContext");
+
+        var orderType = harness.Type("Order");
+        var orderIdType = harness.Type("OrderId");
+        var lineType = harness.Type("Line");
+        var toppingType = harness.Type("Topping");
+
+        var toppings = (IList)Activator.CreateInstance(typeof(List<>).MakeGenericType(toppingType))!;
+        toppings.Add(Activator.CreateInstance(toppingType, "Cheese")!);
+        var lines = (IList)Activator.CreateInstance(typeof(List<>).MakeGenericType(lineType))!;
+        lines.Add(Activator.CreateInstance(lineType, "PIZZA-1", toppings)!);
+        var orderId = orderIdType.GetMethod("New", BindingFlags.Public | BindingFlags.Static)!.Invoke(null, null)!;
+        var order = Activator.CreateInstance(orderType, orderId, lines)!;
+
+        using (var write = harness.NewContext())
+        {
+            write.Add(order);
+            write.SaveChanges();
+        }
+
+        using var read = harness.NewContext();
+        var loaded = TestSupport.EfRoundTripHarness.Query(read, orderType).ShouldHaveSingleItem();
+        var loadedLine = AsList(orderType.GetProperty("Lines")!.GetValue(loaded)!).ShouldHaveSingleItem();
+        lineType.GetProperty("Sku")!.GetValue(loadedLine).ShouldBe("PIZZA-1");
+        var loadedTopping = AsList(lineType.GetProperty("Toppings")!.GetValue(loadedLine)!).ShouldHaveSingleItem();
+        toppingType.GetProperty("Name")!.GetValue(loadedTopping).ShouldBe("Cheese");
+    }
+
+    [Fact]
+    public void Scalar_string_collection_is_left_to_the_primitive_collection_convention()
+    {
+        // A scalar List<String> is NOT an OwnsMany: no owned mapping, no surrogate key, no field access,
+        // and the domain keeps the read-only-copy shape (regression guard for issue #171's scope).
+        var files = EmitInfra("""
+            context Docs {
+              aggregate Doc root Doc { entity Doc identified by DocId { tags: List<String> } }
+            }
+            """);
+        var cfg = File(files, "Docs/Infrastructure/DocConfiguration.cs").Contents;
+
+        cfg.ShouldContain("Tags is a primitive collection, mapped by EF Core convention.");
+        cfg.ShouldNotContain("OwnsMany");
+        cfg.ShouldNotContain("UsePropertyAccessMode");
+        cfg.ShouldNotContain("HasKey(\"Id\")");
+    }
+
     // ----------------------------------------------------------------------
     // Domain shape: value-object collections are backed by a mutable list (issue #171)
     // ----------------------------------------------------------------------
