@@ -127,6 +127,19 @@ public sealed record CodeLens(
     SourceSpan Range,
     string? Title);
 
+/// <summary>The kind of an inlay hint; the LSP shell maps these to LSP InlayHintKind numbers (1 = Type, 2 = Parameter).</summary>
+public enum InlayHintKind { Type, Parameter }
+
+/// <summary>
+/// One editor inlay hint: a short label rendered inline at the 0-based LSP <see cref="Line"/>/
+/// <see cref="Character"/> position. A <see cref="InlayHintKind.Type"/> hint shows an inferred
+/// type (e.g. <c>": Money"</c>) just after a direct read-model field name; a
+/// <see cref="InlayHintKind.Parameter"/> hint shows a callee's parameter name (e.g. <c>"qty:"</c>)
+/// just before a positional call argument. Editor-agnostic; the LSP/WASM shells map it to an LSP
+/// <c>InlayHint</c>.
+/// </summary>
+public sealed record InlayHint(int Line, int Character, string Label, InlayHintKind Kind);
+
 /// <summary>
 /// Editor-agnostic language services for <c>.koi</c>. <see cref="CompleteAt"/> is
 /// single-file and lexer-only (works on broken documents). <see cref="HoverAt(IReadOnlyDictionary{string,string},string,int,int)"/> and
@@ -1205,6 +1218,274 @@ public sealed class KoineLanguageService
         }
 
         return lenses;
+    }
+
+    /// <summary>
+    /// The inlay hints for the active document within the 0-based LSP range
+    /// <c>[startLine:startChar, endLine:endChar]</c>. Two grammar-grounded sites:
+    /// <list type="bullet">
+    /// <item>a <see cref="InlayHintKind.Type"/> hint after each <em>direct</em> read-model field
+    /// (a bare <c>softName</c> whose type is inferred from the source type's member of the same
+    /// name), anchored at the end of the field-name token;</item>
+    /// <item>a <see cref="InlayHintKind.Parameter"/> hint before each positional argument of a
+    /// call (<c>receiver.op(a, b)</c>) whose callee resolves to a parameterized entity
+    /// command/factory or service operation/use-case, anchored at the argument's start.</item>
+    /// </list>
+    /// Resolution is best-effort: a field/call that does not resolve produces no hint (never a
+    /// wrong one). Declarations are scoped to <paramref name="activeUri"/> by their source-span
+    /// file, so hints are file-local even though resolution uses the whole-workspace model.
+    /// Returns an empty list when the active document is absent.
+    /// </summary>
+    public IReadOnlyList<InlayHint> InlayHintsAt(
+        KoineCompilation compilation, string activeUri,
+        int startLine, int startChar, int endLine, int endChar)
+    {
+        if (!compilation.Documents.ContainsKey(activeUri))
+        {
+            return [];
+        }
+
+        // Resolve against the whole-workspace model so a read model can infer a field type from a
+        // source type declared in another file; emit only for declarations in the active document.
+        var semantic = compilation.SemanticModel;
+        var index = semantic.Index;
+        var hints = new List<InlayHint>();
+
+        foreach (var context in semantic.Model.Contexts)
+        {
+            CollectTypeHints(context, index, activeUri, hints);
+            CollectParameterHints(context, index, activeUri, hints);
+        }
+
+        // Keep only hints whose 0-based position falls within the requested range (inclusive).
+        return hints
+            .Where(h => InRange(h.Line, h.Character, startLine, startChar, endLine, endChar))
+            .ToList();
+    }
+
+    /// <summary>
+    /// Adds a <see cref="InlayHintKind.Type"/> hint for each direct read-model field in
+    /// <paramref name="context"/> declared in <paramref name="activeUri"/>: a field with no written
+    /// type and no projection, whose inferred type is the source type's member of the same name.
+    /// </summary>
+    private static void CollectTypeHints(ContextNode context, ModelIndex index, string activeUri, List<InlayHint> hints)
+    {
+        foreach (var rm in context.Types.OfType<ReadModelDecl>())
+        {
+            foreach (var field in rm.Fields)
+            {
+                // Direct field only: a written type or a projection means the type is not inferred.
+                if (field.Type is not null || field.Projection is not null)
+                {
+                    continue;
+                }
+
+                // The name span must live in the active document and have a real position.
+                if (field.NameSpan.IsNone || !IsInActiveDocument(field.NameSpan, activeUri))
+                {
+                    continue;
+                }
+
+                // Infer the field's type from the source member of the same name (R12.3). Skip when
+                // it can't be resolved (e.g. the synthetic `id`, or an unknown source) — no wrong hint.
+                if (!index.TryGetMemberType(context.Name, rm.SourceType, field.Name, out var type))
+                {
+                    continue;
+                }
+
+                // Anchor at the end of the field-name token (the type follows the name).
+                var (line, character) = ZeroBasedEnd(field.NameSpan);
+                hints.Add(new InlayHint(line, character, ": " + RenderType(type), InlayHintKind.Type));
+            }
+        }
+    }
+
+    /// <summary>
+    /// Adds a <see cref="InlayHintKind.Parameter"/> hint before each positional argument of every
+    /// resolvable call in <paramref name="context"/>'s expressions: walks every expression of every
+    /// declaration, and for each <see cref="CallExpr"/> whose method resolves to a parameterized
+    /// command/factory/operation/use-case, emits one hint per positional argument (skipping a
+    /// trailing lambda selector). Anchors each hint at the argument's start; only the active
+    /// document's expressions contribute.
+    /// </summary>
+    private static void CollectParameterHints(ContextNode context, ModelIndex index, string activeUri, List<InlayHint> hints)
+    {
+        foreach (var expr in context.Services.SelectMany(ServiceExpressions))
+        {
+            foreach (var call in CallsIn(expr))
+            {
+                var parameters = ResolveCalleeParameters(index, call.Method);
+                if (parameters is null)
+                {
+                    continue;
+                }
+
+                for (var i = 0; i < call.Args.Count && i < parameters.Count; i++)
+                {
+                    var arg = call.Args[i];
+                    // A lambda selector (e.g. `l => …`) is not a positional value argument.
+                    if (arg is LambdaExpr || arg.Span.IsNone || !IsInActiveDocument(arg.Span, activeUri))
+                    {
+                        continue;
+                    }
+
+                    var (line, character) = ZeroBasedStart(arg.Span);
+                    hints.Add(new InlayHint(line, character, parameters[i].Name + ":", InlayHintKind.Parameter));
+                }
+            }
+        }
+    }
+
+    /// <summary>The body expressions of a service: each operation's result body (use cases are abstract).</summary>
+    private static IEnumerable<Expr> ServiceExpressions(ServiceDecl svc)
+    {
+        foreach (var op in svc.Operations)
+        {
+            if (op.Body is not null)
+            {
+                yield return op.Body;
+            }
+        }
+    }
+
+    /// <summary>Every <see cref="CallExpr"/> in an expression tree, outermost-first.</summary>
+    private static IEnumerable<CallExpr> CallsIn(Expr expr)
+    {
+        switch (expr)
+        {
+            case CallExpr call:
+                yield return call;
+                foreach (var c in CallsIn(call.Target))
+                {
+                    yield return c;
+                }
+
+                foreach (var arg in call.Args)
+                {
+                    foreach (var c in CallsIn(arg))
+                    {
+                        yield return c;
+                    }
+                }
+
+                break;
+            case BinaryExpr b:
+                foreach (var c in CallsIn(b.Left))
+                {
+                    yield return c;
+                }
+
+                foreach (var c in CallsIn(b.Right))
+                {
+                    yield return c;
+                }
+
+                break;
+            case UnaryExpr u:
+                foreach (var c in CallsIn(u.Operand))
+                {
+                    yield return c;
+                }
+
+                break;
+            case ConditionalExpr cond:
+                foreach (var c in CallsIn(cond.Condition))
+                {
+                    yield return c;
+                }
+
+                foreach (var c in CallsIn(cond.Then))
+                {
+                    yield return c;
+                }
+
+                foreach (var c in CallsIn(cond.Else))
+                {
+                    yield return c;
+                }
+
+                break;
+            case CoalesceExpr co:
+                foreach (var c in CallsIn(co.Left))
+                {
+                    yield return c;
+                }
+
+                foreach (var c in CallsIn(co.Right))
+                {
+                    yield return c;
+                }
+
+                break;
+            case GuardExpr g:
+                foreach (var c in CallsIn(g.Body))
+                {
+                    yield return c;
+                }
+
+                foreach (var c in CallsIn(g.Condition))
+                {
+                    yield return c;
+                }
+
+                break;
+            case MemberAccessExpr ma:
+                foreach (var c in CallsIn(ma.Target))
+                {
+                    yield return c;
+                }
+
+                break;
+            case MatchExpr m:
+                foreach (var c in CallsIn(m.Target))
+                {
+                    yield return c;
+                }
+
+                break;
+            case LambdaExpr l:
+                foreach (var c in CallsIn(l.Body))
+                {
+                    yield return c;
+                }
+
+                break;
+            case LetExpr let:
+                foreach (var binding in let.Bindings)
+                {
+                    foreach (var c in CallsIn(binding.Value))
+                    {
+                        yield return c;
+                    }
+                }
+
+                foreach (var c in CallsIn(let.Body))
+                {
+                    yield return c;
+                }
+
+                break;
+        }
+    }
+
+    /// <summary>True when <paramref name="span"/> belongs to the file identified by <paramref name="activeUri"/>.</summary>
+    private static bool IsInActiveDocument(SourceSpan span, string activeUri) =>
+        string.Equals(span.File, activeUri, StringComparison.Ordinal);
+
+    /// <summary>The 0-based LSP start position of a 1-based span.</summary>
+    private static (int Line, int Character) ZeroBasedStart(SourceSpan span) =>
+        (Math.Max(0, span.Line - 1), Math.Max(0, span.Column - 1));
+
+    /// <summary>The 0-based LSP end position of a 1-based, end-EXCLUSIVE span.</summary>
+    private static (int Line, int Character) ZeroBasedEnd(SourceSpan span) =>
+        (Math.Max(0, span.EndLine - 1), Math.Max(0, span.EndColumn - 1));
+
+    /// <summary>True when the 0-based point falls within the inclusive 0-based range.</summary>
+    private static bool InRange(int line, int character, int startLine, int startChar, int endLine, int endChar)
+    {
+        var afterStart = line > startLine || (line == startLine && character >= startChar);
+        var beforeEnd = line < endLine || (line == endLine && character <= endChar);
+        return afterStart && beforeEnd;
     }
 
     /// <summary>

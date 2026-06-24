@@ -200,3 +200,17 @@ static Koine.Compiler.Services.ScenarioService.WriteJson(System.Collections.Gene
 Koine.Compiler.Ast.ModelIndex.EventsEmittedBy(string! targetType, string! commandName) -> System.Collections.Generic.IReadOnlyList<string!>!
 Koine.Compiler.Ast.ModelIndex.CommandsEmitting(string! eventName) -> System.Collections.Generic.IReadOnlyList<(string! targetType, string! commandName)>!
 Koine.Compiler.Ast.ModelIndex.PoliciesTriggeredByEvent(string! eventName) -> System.Collections.Generic.IReadOnlyList<(string! targetType, string! commandName)>!
+Koine.Compiler.Services.InlayHintKind
+Koine.Compiler.Services.InlayHintKind.Parameter = 1 -> Koine.Compiler.Services.InlayHintKind
+Koine.Compiler.Services.InlayHintKind.Type = 0 -> Koine.Compiler.Services.InlayHintKind
+Koine.Compiler.Services.InlayHint
+Koine.Compiler.Services.InlayHint.InlayHint(int Line, int Character, string! Label, Koine.Compiler.Services.InlayHintKind Kind) -> void
+Koine.Compiler.Services.InlayHint.Line.get -> int
+Koine.Compiler.Services.InlayHint.Line.init -> void
+Koine.Compiler.Services.InlayHint.Character.get -> int
+Koine.Compiler.Services.InlayHint.Character.init -> void
+Koine.Compiler.Services.InlayHint.Label.get -> string!
+Koine.Compiler.Services.InlayHint.Label.init -> void
+Koine.Compiler.Services.InlayHint.Kind.get -> Koine.Compiler.Services.InlayHintKind
+Koine.Compiler.Services.InlayHint.Kind.init -> void
+Koine.Compiler.Services.KoineLanguageService.InlayHintsAt(Koine.Compiler.Services.KoineCompilation! compilation, string! activeUri, int startLine, int startChar, int endLine, int endChar) -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Services.InlayHint!>!
