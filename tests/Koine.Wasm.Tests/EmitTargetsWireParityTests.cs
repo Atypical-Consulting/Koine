@@ -31,12 +31,12 @@ public class EmitTargetsWireParityTests
     }
 
     [Fact]
-    public void Wasm_list_carries_the_five_code_targets_with_metadata_and_excludes_glossary_and_docs()
+    public void Wasm_list_carries_the_code_targets_with_metadata_and_excludes_glossary_and_docs()
     {
         var targets = JsonNode.Parse(WasmListEmitTargets())!["targets"]!.AsArray();
 
         targets.Select(t => t!["id"]!.GetValue<string>())
-            .ShouldBe(["csharp", "typescript", "python", "php", "rust", "asyncapi"]);
+            .ShouldBe(["csharp", "typescript", "python", "php", "rust", "asyncapi", "openapi"]);
 
         var csharp = targets.First(t => t!["id"]!.GetValue<string>() == "csharp")!;
         csharp["displayName"]!.GetValue<string>().ShouldBe("C#");

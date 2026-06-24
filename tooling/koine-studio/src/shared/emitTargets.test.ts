@@ -18,7 +18,7 @@ import { langExt } from '@/editor/editor';
 // (the old drift) fails the build. (The inspector's Generated-tab label derives from EMIT_TARGETS
 // inline too; it isn't asserted here only to avoid importing the heavy `inspectorController` tree.)
 describe('EMIT_TARGETS', () => {
-  test('the built-ins list the five targets with display name + file extension, in display order', () => {
+  test('the built-ins list the targets with display name + file extension, in display order', () => {
     expect(BUILTIN_EMIT_TARGETS).toEqual([
       { id: 'csharp', displayName: 'C#', fileExtension: '.cs' },
       { id: 'typescript', displayName: 'TypeScript', fileExtension: '.ts' },
@@ -26,6 +26,7 @@ describe('EMIT_TARGETS', () => {
       { id: 'php', displayName: 'PHP', fileExtension: '.php' },
       { id: 'rust', displayName: 'Rust', fileExtension: '.rs' },
       { id: 'asyncapi', displayName: 'AsyncAPI', fileExtension: '.yaml' },
+      { id: 'openapi', displayName: 'OpenAPI', fileExtension: '.yaml' },
     ]);
   });
 
