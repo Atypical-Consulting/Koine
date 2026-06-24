@@ -660,6 +660,46 @@ public class R18CSharpInfrastructureTests
     }
 
     [Fact]
+    public void Owned_collection_surrogate_key_avoids_colliding_with_a_value_object_member_named_id()
+    {
+        // A value object that already maps an `id` member must not clash with the synthesized surrogate
+        // key: the key is disambiguated to `OwnedId` so EF does not see two `Id` properties of different
+        // CLR types, and the rows still round-trip.
+        var fixture = """
+            context Sales {
+              value OrderLine { id: String  quantity: Int }
+              aggregate Order root Order {
+                entity Order identified by OrderId { lines: List<OrderLine> }
+              }
+            }
+            """;
+        var cfg = File(EmitInfra(fixture), "Sales/Infrastructure/OrderConfiguration.cs").Contents;
+        cfg.ShouldContain("lines.Property<int>(\"OwnedId\").ValueGeneratedOnAdd();");
+        cfg.ShouldContain("lines.HasKey(\"OwnedId\");");
+        cfg.ShouldNotContain("lines.HasKey(\"Id\");");
+
+        using var harness = TestSupport.EfRoundTripHarness.Create(EmitInfra(fixture), "SalesDbContext");
+        var orderType = harness.Type("Order");
+        var lineType = harness.Type("OrderLine");
+        var lines = (IList)Activator.CreateInstance(typeof(List<>).MakeGenericType(lineType))!;
+        lines.Add(Activator.CreateInstance(lineType, "L-1", 3)!);
+        var orderId = harness.Type("OrderId").GetMethod("New", BindingFlags.Public | BindingFlags.Static)!.Invoke(null, null)!;
+        var order = Activator.CreateInstance(orderType, orderId, lines)!;
+
+        using (var write = harness.NewContext())
+        {
+            write.Add(order);
+            write.SaveChanges();
+        }
+
+        using var read = harness.NewContext();
+        var loaded = TestSupport.EfRoundTripHarness.Query(read, orderType).ShouldHaveSingleItem();
+        var loadedLine = AsList(orderType.GetProperty("Lines")!.GetValue(loaded)!).ShouldHaveSingleItem();
+        lineType.GetProperty("Id")!.GetValue(loadedLine).ShouldBe("L-1");
+        lineType.GetProperty("Quantity")!.GetValue(loadedLine).ShouldBe(3);
+    }
+
+    [Fact]
     public void Scalar_string_collection_is_left_to_the_primitive_collection_convention()
     {
         // A scalar List<String> is NOT an OwnsMany: no owned mapping, no surrogate key, no field access,

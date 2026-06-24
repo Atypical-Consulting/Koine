@@ -856,17 +856,14 @@ public sealed partial class CSharpEmitter : IEmitter
         StringBuilder sb,
         EntityDecl entity,
         IReadOnlyList<Member> ctorMembers,
+        IReadOnlySet<string> backedListMembers,
         CSharpExpressionTranslator translator,
         CSharpTypeMapper typeMapper,
         ModelIndex index)
     {
         // Value-object collections are backed by a mutable private list (issue #171); the all-args
-        // constructor populates them via the backing field rather than the read-only property.
-        var mutated = MutatedFields(entity);
-        var backedListMembers = ctorMembers
-            .Where(m => IsValueObjectList(m.Type, index) && !mutated.Contains(m.Name))
-            .Select(m => m.Name)
-            .ToHashSet(StringComparer.Ordinal);
+        // constructor populates them via the backing field rather than the read-only property. The
+        // backed-member set is classified once in EmitEntity and threaded in.
 
         // An aggregate that owns a value-object collection gets a parameterless constructor for the
         // persistence layer: EF Core materializes it through this ctor (the collection parameter is a
@@ -1232,6 +1229,18 @@ public sealed partial class CSharpEmitter : IEmitter
 
     /// <summary>The mutable backing field name for a value-object collection member (e.g. <c>_lines</c>).</summary>
     private static string BackingFieldName(string memberName) => "_" + CSharpNaming.ToCamelCase(memberName);
+
+    /// <summary>
+    /// The members of an entity backed by a mutable list (issue #171): value-object collections that are
+    /// not reassigned by a command (a reassigned field keeps the auto-property + read-only-copy shape, as
+    /// the backing field has no replace path). Classified once and shared by the property declarations,
+    /// the constructor assignments, and the parameterless-ctor gate so the three never drift.
+    /// </summary>
+    private static IReadOnlySet<string> BackedListMembers(IEnumerable<Member> ctorMembers, ModelIndex index, ISet<string> mutated) =>
+        ctorMembers
+            .Where(m => IsValueObjectList(m.Type, index) && !mutated.Contains(m.Name))
+            .Select(m => m.Name)
+            .ToHashSet(StringComparer.Ordinal);
 
     /// <summary>
     /// Orders constructor parameters so those with a C# default value (constant

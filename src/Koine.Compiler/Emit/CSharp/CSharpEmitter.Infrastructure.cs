@@ -267,10 +267,9 @@ public sealed partial class CSharpEmitter
 
         if (CSharpTypeMapper.IsList(type))
         {
-            var elem = type.Element?.Name;
-            if (elem is not null && index.Classify(elem) == TypeKind.Value)
+            if (IsValueObjectList(type, index))
             {
-                WriteOwned(sb, context, builderVar, "OwnsMany", prop, elem, index, indentLevel, depth: 1);
+                WriteOwned(sb, context, builderVar, "OwnsMany", prop, type.Element!.Name, index, indentLevel, depth: 1);
             }
             else
             {
@@ -321,6 +320,7 @@ public sealed partial class CSharpEmitter
     {
         var owned = OwnedBuilderName(prop, depth);
         var ownsMany = ownsMethod == "OwnsMany";
+        var vo = index.TryGetDeclIn(context, voTypeName, out TypeDecl decl) ? decl as ValueObjectDecl : null;
         AppendIndent(sb, indentLevel).Append(builderVar).Append('.').Append(ownsMethod)
           .Append("(x => x.").Append(prop).Append(", ").Append(owned).Append(" =>\n");
         AppendIndent(sb, indentLevel).Append("{\n");
@@ -330,11 +330,12 @@ public sealed partial class CSharpEmitter
         // store-generated shadow ordinal, which SQLite — a common dev/test provider — cannot supply.
         if (ownsMany)
         {
-            AppendIndent(sb, indentLevel + 1).Append(owned).Append(".Property<int>(\"Id\").ValueGeneratedOnAdd();\n");
-            AppendIndent(sb, indentLevel + 1).Append(owned).Append(".HasKey(\"Id\");\n");
+            var key = OwnedSurrogateKeyName(vo);
+            AppendIndent(sb, indentLevel + 1).Append(owned).Append(".Property<int>(\"").Append(key).Append("\").ValueGeneratedOnAdd();\n");
+            AppendIndent(sb, indentLevel + 1).Append(owned).Append(".HasKey(\"").Append(key).Append("\");\n");
         }
 
-        if (index.TryGetDeclIn(context, voTypeName, out TypeDecl decl) && decl is ValueObjectDecl vo)
+        if (vo is not null)
         {
             var voMemberNames = new HashSet<string>(vo.Members.Select(mm => mm.Name), StringComparer.Ordinal);
             foreach (Member vm in vo.Members.Where(mm => !MemberAnalysis.IsDerived(mm, voMemberNames)))
@@ -366,10 +367,9 @@ public sealed partial class CSharpEmitter
 
         if (CSharpTypeMapper.IsList(type) || CSharpTypeMapper.IsSet(type) || CSharpTypeMapper.IsMap(type))
         {
-            var elem = type.Element?.Name;
-            if (CSharpTypeMapper.IsList(type) && elem is not null && index.Classify(elem) == TypeKind.Value)
+            if (IsValueObjectList(type, index))
             {
-                WriteOwned(sb, context, ownedVar, "OwnsMany", prop, elem, index, indentLevel, depth + 1);
+                WriteOwned(sb, context, ownedVar, "OwnsMany", prop, type.Element!.Name, index, indentLevel, depth + 1);
             }
             else
             {
@@ -518,6 +518,29 @@ public sealed partial class CSharpEmitter
         }
 
         return depth <= 1 ? name : name + depth;
+    }
+
+    /// <summary>
+    /// The shadow primary-key name for an owned value-object collection's surrogate key (issue #171),
+    /// defaulting to <c>Id</c> but disambiguated (<c>OwnedId</c>, …) when the value object already maps a
+    /// member of that name — otherwise EF would reject two properties named <c>Id</c> with different CLR
+    /// types. A null decl (unresolved type) keeps the plain <c>Id</c>; it has no mapped members to clash.
+    /// </summary>
+    private static string OwnedSurrogateKeyName(ValueObjectDecl? vo)
+    {
+        if (vo is null)
+        {
+            return "Id";
+        }
+
+        var taken = new HashSet<string>(vo.Members.Select(m => CSharpNaming.ToPascalCase(m.Name)), StringComparer.Ordinal);
+        var name = "Id";
+        while (taken.Contains(name))
+        {
+            name = "Owned" + name;
+        }
+
+        return name;
     }
 
     /// <summary>Appends <paramref name="indentLevel"/> indents to the builder and returns it for chaining.</summary>
