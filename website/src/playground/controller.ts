@@ -1,6 +1,6 @@
 // Client controller for the Playground IDE. Wires the CodeMirror editor to the wasm compiler
 // and drives the landing-page taste: live diagnostics, compile-on-change + ⌘⏎ run, target
-// switching (C#/TS/Python/glossary) with syntax-highlighted output, a grouped file tree, copy +
+// switching (C#/TS/Python/PHP/glossary/AsyncAPI/OpenAPI) with syntax-highlighted output, a grouped file tree, copy +
 // download-as-zip, a mobile editor/output toggle, and the "Open in Studio" handoff.
 import { createKoineEditor, createOutputView, type KoineEditor, type OutputView, type OutputLang } from './editor';
 import { compile, preloadCompiler, type CompileResult, type Target } from './koine';
@@ -14,6 +14,8 @@ const TARGET_LANG: Record<Target, OutputLang> = {
   python: 'python',
   php: 'plain',
   glossary: 'plain',
+  asyncapi: 'plain',
+  openapi: 'plain',
 };
 /** Pick the most interesting file to show first: skip runtime + config boilerplate. */
 function defaultFileIndex(result: CompileResult): number {
