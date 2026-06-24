@@ -96,7 +96,7 @@ public class LspServerTests
     /// <summary>Parses the <c>koine/emitTargets</c> response for <paramref name="id"/> into its target list.</summary>
     private static List<(string id, string displayName, string fileExtension)> ResultTargets(string output, int id)
     {
-        foreach (var body in Frames(output))
+        foreach (var body in TestSupport.JsonRpcFrames(output))
         {
             using var doc = JsonDocument.Parse(body);
             var root = doc.RootElement;
@@ -114,27 +114,6 @@ public class LspServerTests
         }
 
         return [];
-    }
-
-    /// <summary>Yields each framed JSON-RPC message body from a raw LSP session transcript.</summary>
-    private static IEnumerable<string> Frames(string output)
-    {
-        var i = 0;
-        while (true)
-        {
-            var marker = output.IndexOf("Content-Length: ", i, StringComparison.Ordinal);
-            if (marker < 0)
-            {
-                yield break;
-            }
-
-            var numStart = marker + "Content-Length: ".Length;
-            var numEnd = output.IndexOf("\r\n", numStart, StringComparison.Ordinal);
-            var len = int.Parse(output.Substring(numStart, numEnd - numStart));
-            var bodyStart = output.IndexOf("\r\n\r\n", numEnd, StringComparison.Ordinal) + 4;
-            yield return output.Substring(bodyStart, len);
-            i = bodyStart + len;
-        }
     }
 
     [Fact]
