@@ -18,6 +18,14 @@ folder, unsaved buffers included.
   standard `initialize` → `initialized` → `didOpen` / `didChange` handshake, routes
   `textDocument/publishDiagnostics` into CodeMirror's lint state, and issues the custom
   `koine/emitPreview` request for the preview pane.
+- The list of **emit targets** the IDE offers (the output-language picker, the Generate-project
+  wizard, the Generated-tab labels and the assistant's compile tool) is **derived from the backend**:
+  at boot the client issues `koine/emitTargets`, which returns the compiler emitter registry's
+  targets as `{ id, displayName, fileExtension }`, and the front-end renders every target surface
+  from that one list (`src/shared/emitTargets.ts`). Adding an emitter target to the registry therefore
+  surfaces it in Studio with no front-end change; the built-in list is the offline fallback if the
+  query is unavailable, and syntax highlighting degrades to plain text for a target with no bundled
+  CodeMirror mode.
 
 ### Commands & events (the Rust ↔ JS contract)
 

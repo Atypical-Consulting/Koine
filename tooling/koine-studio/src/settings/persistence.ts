@@ -11,6 +11,7 @@
 import { loadSecret, saveSecret } from '@/ai/secrets';
 import type { ChatMessage } from '@/ai/ai';
 import { sanitizeGroups, sanitizeNotes, type DiagramGroup, type DiagramNote } from '@/diagrams/diagramContract';
+import { isEmitTarget } from '@/shared/emitTargets';
 
 // --- settings model ----------------------------------------------------------
 
@@ -22,11 +23,13 @@ export type AccentName = 'blue' | 'teal' | 'violet' | 'amber';
 /** MCP client a setup recipe targets in Settings → MCP. */
 export type McpClientId = 'claude-desktop' | 'lm-studio' | 'cursor' | 'vscode' | 'generic';
 
-/** A code-generation target the emitted-code ("Generated") preview can render. */
-export type PreviewTarget = 'csharp' | 'typescript' | 'python' | 'php' | 'rust';
-
-/** The supported preview targets, in display order. The single source of truth for the set. */
-export const PREVIEW_TARGETS: readonly PreviewTarget[] = ['csharp', 'typescript', 'python', 'php', 'rust'];
+/**
+ * A code-generation target id the emitted-code ("Generated") preview can render. Kept as a plain
+ * `string` (not a closed union) so a backend-only target surfaces without a front-end type edit; the
+ * set is validated at runtime against the live {@link EMIT_TARGETS} (see `coercePreviewTarget`),
+ * which is seeded from the backend capability query at boot (issue #282).
+ */
+export type PreviewTarget = string;
 
 export interface Settings {
   theme: ThemeName;
@@ -194,9 +197,13 @@ function coerceMcpClient(v: unknown): McpClientId {
   return MCP_CLIENT_IDS.includes(v as McpClientId) ? (v as McpClientId) : DEFAULT_SETTINGS.mcpClient;
 }
 
-/** A supported preview target, else the default. */
+/**
+ * A supported preview target, else the default. Validated against the LIVE {@link EMIT_TARGETS}
+ * (seeded from the backend at boot, issue #282) — not the build-time snapshot — so a persisted
+ * target the backend still reports survives a reload, and one it no longer offers falls back to csharp.
+ */
 function coercePreviewTarget(v: unknown): PreviewTarget {
-  return PREVIEW_TARGETS.includes(v as PreviewTarget) ? (v as PreviewTarget) : DEFAULT_SETTINGS.previewTarget;
+  return isEmitTarget(v) ? (v as PreviewTarget) : DEFAULT_SETTINGS.previewTarget;
 }
 
 /**

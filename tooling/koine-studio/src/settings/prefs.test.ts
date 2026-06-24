@@ -2,6 +2,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { createPreferences, type PrefsCallbacks } from '@/settings/prefs';
 import { DEFAULT_SETTINGS, loadSettings, saveSettings } from '@/settings/persistence';
+import { BUILTIN_EMIT_TARGETS } from '@/shared/emitTargets';
 
 // Flush queued microtasks + timers so the panel's async steps (mcpEndpoint, mcpStop, probe) settle.
 const flush = () => new Promise((r) => setTimeout(r, 0));
@@ -140,10 +141,12 @@ describe('Settings → Output panel', () => {
   const langOpts = () =>
     [...document.querySelectorAll<HTMLButtonElement>('#koi-settings-panel-output .koi-lang-opt')];
 
-  it('renders the five language options with C# selected by default', () => {
+  it('renders one option per built-in emit target with C# selected by default', () => {
     openPrefs();
     const opts = langOpts();
-    expect(opts.map((b) => b.dataset.value)).toEqual(['csharp', 'typescript', 'python', 'php', 'rust']);
+    // Derived from the shared emit-target list (issue #282), not a hardcoded set, so it tracks the
+    // registry — the picker offers exactly the backend's targets (built-ins when offline).
+    expect(opts.map((b) => b.dataset.value)).toEqual(BUILTIN_EMIT_TARGETS.map((t) => t.id));
     const checked = opts.find((b) => b.getAttribute('aria-checked') === 'true');
     expect(checked?.dataset.value).toBe('csharp');
   });

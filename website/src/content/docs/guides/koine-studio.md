@@ -67,7 +67,12 @@ Koine Studio surfaces the **enriched** language server, the same one the VS Code
   `textDocument/publishDiagnostics`.
 - **Emitted-code preview** — request the generated **C#**, **TypeScript**, **Python**, **PHP**, or
   **Rust** for the current model in a read-only pane (`koine/emitPreview`); if the model has errors,
-  nothing is emitted and the diagnostics are shown instead.
+  nothing is emitted and the diagnostics are shown instead. The list of targets the picker offers is
+  **derived from the backend** — Studio asks the language server which targets the compiler's emitter
+  registry supports (`koine/emitTargets`) and renders the picker, the Generate-project wizard and the
+  assistant's compile tool from that one list, so a new emitter target appears automatically with no
+  front-end change. Syntax highlighting for a target without a bundled editor mode degrades gracefully
+  to plain (unhighlighted) text rather than hiding the target.
 - **Glossary** — the ubiquitous-language glossary the `glossary` emitter produces.
 - **Context map** — the bounded contexts and their relationships, in the **Context Map** bottom tab.
   A **Graph | Table** toggle switches between two views of the same data:
