@@ -485,16 +485,20 @@ as a CI gate). See the
 
 ## Status & roadmap
 
-Koine is at **v0.17.x** and has shipped through **R1–R17** of the roadmap: the full tactical *and*
-strategic DDD toolkit, three more emitter targets (**TypeScript**, **Python**, and **PHP 8.1** — the
-latter two Phase 1: tactical core) alongside C#, a **docs** target that emits living documentation
-(Markdown + Mermaid diagrams), and the editor tooling (TextMate grammar,
-`koine lsp` language server, and the `fmt` / `init` / `watch` commands). The
+Koine is at **v0.17.x** and has shipped through **R1–R18** of the roadmap: the full tactical *and*
+strategic DDD toolkit, four more emitter targets (**TypeScript**, **Python**, **PHP 8.1**, and
+**Rust** — the latter three Phase 1: tactical core) alongside C#, a **docs** target that emits living
+documentation (Markdown + Mermaid diagrams), the editor tooling (TextMate grammar,
+`koine lsp` language server, and the `fmt` / `init` / `watch` commands), and **model-as-spec
+coverage** (`koine coverage` proves declared == emitted and doubles as a CI gate, also exposed as the
+`koine_coverage` MCP tool). The
 [feature catalogue](https://atypical-consulting.github.io/Koine/guides/feature-catalogue/) maps every
 construct to the C# it emits.
 
-**Next up:** a **Rust** emitter (errors as `Result<T,E>` rather than exceptions) to further prove the
-semantic model is truly target-agnostic. The full roadmap lives in [`USER-STORIES.md`](USER-STORIES.md).
+**Next up:** rounding out the newer targets — **Rust Phase 2**
+([#173](https://github.com/Atypical-Consulting/Koine/issues/173)) takes the Rust emitter beyond the
+tactical core to cross-context references and the remaining constructs. The full roadmap lives in
+[`USER-STORIES.md`](USER-STORIES.md).
 
 ## Templates
 

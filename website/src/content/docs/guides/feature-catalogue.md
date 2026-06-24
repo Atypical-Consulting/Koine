@@ -1,5 +1,5 @@
 ---
-title: "Feature catalogue (R1–R17)"
+title: "Feature catalogue (R1–R18)"
 description: "Every shipped Koine construct mapped to its .koi syntax, what it emits, and where the demo uses it."
 ---
 

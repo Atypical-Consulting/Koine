@@ -1,14 +1,15 @@
 ---
 title: "Roadmap"
-description: "What Koine ships today (R1–R17: full DDD toolkit, TypeScript, Python, and editor tooling) and what comes next."
+description: "What Koine ships today (R1–R18: full DDD toolkit; C#, TypeScript, Python, PHP, and Rust (Phase 1) emitters; editor tooling; and model-as-spec coverage) and what comes next."
 ---
 
-Koine is built as a sequence of **epics** (R1–R17), each a cohesive slice of Domain-Driven Design
+Koine is built as a sequence of **epics** (R1–R18), each a cohesive slice of Domain-Driven Design
 capability. The compiler ships the **full tactical and strategic toolkit (R1–R15)**, the
-**R16 multi-target emitters** (TypeScript and Python — the latter now covering the full
-tactical-and-strategic construct set), and the
+**R16 multi-target emitters** (C#, TypeScript, Python, PHP, and Rust — the last three Phase 1:
+tactical core, with Python now covering the full tactical-and-strategic construct set), the
 **R17 editor tooling** — the TextMate grammar, the `koine lsp` language server, and the
-`fmt`/`init`/`watch` commands. Every construct described in the reference is implemented, tested,
+`fmt`/`init`/`watch` commands — and **R18 model-as-spec coverage** (`koine coverage` proves
+declared == emitted). Every construct described in the reference is implemented, tested,
 and demonstrated in the [pizzeria demo](https://github.com/Atypical-Consulting/Koine/tree/main/demo).
 
 This page is the honest status report — what you can rely on now, and what is still ahead.
@@ -89,10 +90,10 @@ For the complete, copy-pasteable showcase, browse the
 and the [emitted C#](https://github.com/Atypical-Consulting/Koine/tree/main/demo/Pizzeria.Domain/Generated)
 the demo produces from them.
 
-## Shipped: R16 — Multi-target emitters (partial)
+## Shipped: R16 — Multi-target emitters
 
-R16 is the capstone that proves the `IEmitter` seam is genuinely target-agnostic. All four emitter
-stories — C#, TypeScript, Python, PHP, and Rust — are delivered.
+R16 is the capstone that proves the `IEmitter` seam is genuinely target-agnostic. All five emitter
+targets — C#, TypeScript, Python, PHP, and Rust — are delivered.
 
 - **R16.1 — C# emitter configuration.** ✅ **Delivered** — a `koine.config` options object to remap
   contexts to concrete namespaces, choose the `Instant` mapping (`DateTimeOffset` default or NodaTime),
@@ -143,8 +144,8 @@ Every epic above is written up as actionable user stories — with personas, *As
 statements, testable acceptance criteria, and priorities — in
 [`USER-STORIES.md`](https://github.com/Atypical-Consulting/Koine/blob/main/USER-STORIES.md). It also
 documents the sequencing rationale: R1–R4 sharpen the existing surface, R5–R10 add tactical behaviour,
-R11–R12 add the persistence and application layers, R13–R15 unlock strategic design, and R16–R17 prove
-target-agnosticism and round out the developer experience.
+R11–R12 add the persistence and application layers, R13–R15 unlock strategic design, R16–R17 deliver
+the multi-target emitters and editor tooling, and R18 adds model-as-spec coverage.
 
 ## Where to go next
 
