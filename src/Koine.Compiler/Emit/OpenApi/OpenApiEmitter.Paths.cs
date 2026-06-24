@@ -19,7 +19,7 @@ public sealed partial class OpenApiEmitter
         var operations = new List<(string Path, YamlObject Operation)>();
 
         // Commands: state-changing operations on entities (top-level and aggregate-nested) → POST.
-        foreach (EntityDecl entity in AllTypes(ctx.Types).OfType<EntityDecl>())
+        foreach (EntityDecl entity in ctx.AllEntities())
         {
             foreach (CommandDecl command in entity.Commands)
             {
@@ -30,7 +30,7 @@ public sealed partial class OpenApiEmitter
         }
 
         // Queries: read operations over a read model → GET.
-        foreach (QueryDecl query in AllTypes(ctx.Types).OfType<QueryDecl>())
+        foreach (QueryDecl query in ctx.AllTypeDecls().OfType<QueryDecl>())
         {
             operations.Add((
                 $"/{Kebab(query.Name)}",
@@ -134,7 +134,13 @@ public sealed partial class OpenApiEmitter
         return response;
     }
 
-    /// <summary>Converts a Pascal/camel-cased identifier to a kebab-cased path segment (<c>OrdersByStatus → orders-by-status</c>).</summary>
+    /// <summary>
+    /// Converts a Pascal/camel-cased identifier to a kebab-cased path segment
+    /// (<c>OrdersByStatus → orders-by-status</c>). A boundary is inserted before an uppercase letter that
+    /// either follows a lowercase/digit or ends an acronym run (an uppercase followed by a lowercase), so
+    /// acronyms split as expected (<c>XMLImport → xml-import</c>) — matching the word-boundary convention
+    /// the per-language <c>ToSnakeCase</c> naming helpers use.
+    /// </summary>
     private static string Kebab(string name)
     {
         var sb = new System.Text.StringBuilder(name.Length + 4);
@@ -143,7 +149,10 @@ public sealed partial class OpenApiEmitter
             char c = name[i];
             if (char.IsAsciiLetterUpper(c))
             {
-                if (i > 0 && (char.IsAsciiLetterLower(name[i - 1]) || char.IsAsciiDigit(name[i - 1])))
+                bool afterWord = i > 0 && (char.IsAsciiLetterLower(name[i - 1]) || char.IsAsciiDigit(name[i - 1]));
+                bool acronymEnd = i > 0 && char.IsAsciiLetterUpper(name[i - 1])
+                    && i + 1 < name.Length && char.IsAsciiLetterLower(name[i + 1]);
+                if (afterWord || acronymEnd)
                 {
                     sb.Append('-');
                 }

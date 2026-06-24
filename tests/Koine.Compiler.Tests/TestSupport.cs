@@ -1015,7 +1015,12 @@ public static class TestSupport
         if (Environment.GetEnvironmentVariable("KOINE_OPENAPI_VALIDATOR") is { Length: > 0 } overrideValidator)
         {
             string[] parts = overrideValidator.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-            return new ToolInvocation(parts[0], parts.Skip(1).ToArray());
+            // A whitespace-only override splits to nothing; fall through to PATH discovery rather than
+            // indexing into an empty array (the harness must skip, never crash).
+            if (parts.Length > 0)
+            {
+                return new ToolInvocation(parts[0], parts.Skip(1).ToArray());
+            }
         }
 
         if (OnPath("openapi-spec-validator") is { } ospec && CanRun(ospec, ["--help"]))

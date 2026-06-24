@@ -58,27 +58,11 @@ public sealed partial class OpenApiEmitter
 
     /// <summary>The value-object / read-model / enum declarations of a context (flattened through aggregates).</summary>
     private static IEnumerable<TypeDecl> SchemaTypes(ContextNode ctx) =>
-        AllTypes(ctx.Types).Where(t => t is ValueObjectDecl or ReadModelDecl or EnumDecl);
+        ctx.AllTypeDecls().Where(t => t is ValueObjectDecl or ReadModelDecl or EnumDecl);
 
     /// <summary>The set of type names this context emits as a named schema — the legal <c>$ref</c> targets.</summary>
     private static HashSet<string> SchemaTypeNames(ContextNode ctx) =>
         SchemaTypes(ctx).Select(t => t.Name).ToHashSet(StringComparer.Ordinal);
-
-    /// <summary>Every type declaration in a context, descending into aggregate-nested types.</summary>
-    private static IEnumerable<TypeDecl> AllTypes(IEnumerable<TypeDecl> types)
-    {
-        foreach (TypeDecl type in types)
-        {
-            yield return type;
-            if (type is AggregateDecl agg)
-            {
-                foreach (TypeDecl nested in AllTypes(agg.Types))
-                {
-                    yield return nested;
-                }
-            }
-        }
-    }
 
     /// <summary>A smart/plain enum → a string schema whose <c>enum</c> lists the member names in declaration order.</summary>
     private static YamlObject EnumSchema(EnumDecl en)
