@@ -557,29 +557,21 @@ internal sealed class RustExpressionTranslator
 
     /// <summary>
     /// Writes a String-typed expression as an owned <c>String</c> — the left side of a <c>+</c> concat.
-    /// A nested concatenation already evaluates to an owned String; a string literal is promoted with
-    /// <c>.to_string()</c>; a place (field/local) is cloned.
+    /// A nested concatenation already evaluates to an owned String; everything else is owned with
+    /// <c>.to_string()</c>, which yields a <c>String</c> whether the operand is a <c>String</c> place
+    /// (a field/local) or a <c>&amp;str</c> (a <c>.trim</c> accessor, a nested value's String field, a
+    /// literal) — <c>.clone()</c> would leave a <c>&amp;str</c> a <c>&amp;str</c> and break <c>+</c>.
     /// </summary>
     private void WriteStringOwned(Expr expr, StringBuilder sb)
     {
-        switch (expr)
+        if (expr is BinaryExpr { Op: BinaryOp.Add } nested)
         {
-            case BinaryExpr { Op: BinaryOp.Add } nested:
-                WriteBinary(nested, sb, parenthesize: true);
-                return;
-            case LiteralExpr { Kind: LiteralKind.String } lit:
-                WriteLiteral(lit, sb, null);
-                sb.Append(".to_string()");
-                return;
-            default:
-                Write(expr, sb, null);
-                if (IsNonCopyPlace(expr, _resolver.Infer(expr, EffectiveScope())))
-                {
-                    sb.Append(".clone()");
-                }
-
-                return;
+            WriteBinary(nested, sb, parenthesize: true);
+            return;
         }
+
+        Write(expr, sb, null);
+        sb.Append(".to_string()");
     }
 
     /// <summary>True when an expression's inferred type is optional — used to decide <c>Some(...)</c> wrapping.</summary>
@@ -594,6 +586,15 @@ internal sealed class RustExpressionTranslator
     {
         var rendered = Translate(expr, expectedEnum);
         TypeRef? type = _resolver.Infer(expr, EffectiveScope());
+
+        // A String result may be `&str` (a `.trim` accessor, a nested value's String field, a literal)
+        // or an owned `String`; `to_string()` owns either into the `String` the position expects, where
+        // `.clone()` would leave a `&str` a `&str`.
+        if (type is { Name: "String", IsOptional: false })
+        {
+            return rendered + ".to_string()";
+        }
+
         var clone = IsNonCopyPlace(expr, type)
             || (expr is MemberAccessExpr && type is { } t && !_typeMapper.IsCopy(t));
         return clone ? rendered + ".clone()" : rendered;

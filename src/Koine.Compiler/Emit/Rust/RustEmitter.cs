@@ -111,9 +111,7 @@ public sealed partial class RustEmitter : IEmitter
     /// model (or one whose factory ids are numeric) keeps the dependency-light manifest.
     /// </summary>
     private static bool ModelUsesGuidFactories(KoineModel model) =>
-        model.Contexts
-            .SelectMany(c => c.AllEntities())
-            .Any(e => e.Factories.Count > 0 && IdBacking(e).IsString);
+        model.Contexts.SelectMany(c => c.AllEntities()).Any(MintsUuidIdentity);
 
     /// <summary>Dispatches a single declaration to its construct emitter.</summary>
     private void EmitType(RustEmitContext emit, StringBuilder body, TypeDecl type, string context)

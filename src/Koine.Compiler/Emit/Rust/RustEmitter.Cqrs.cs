@@ -85,7 +85,9 @@ public sealed partial class RustEmitter
     {
         var typeMapper = new RustTypeMapper(emit.Index, context, _options);
         var name = RustNaming.ToPascalCase(rm.Name);
-        var sourceName = RustNaming.ToPascalCase(rm.SourceType);
+        // The source may be owned by another bounded context (the validator resolves it locally then
+        // globally), so qualify it as `crate::<module>::<Source>` when foreign.
+        var sourceName = typeMapper.QualifyTypeName(rm.SourceType);
         IReadOnlyList<Member> sourceMembers = ReadModelSourceMembers(context, rm.SourceType, emit.Index);
         var byName = new Dictionary<string, Member>(StringComparer.Ordinal);
         foreach (Member m in sourceMembers)

@@ -18,8 +18,7 @@ public sealed partial class RustEmitter
         var typeMapper = new RustTypeMapper(emit.Index, context, _options);
 
         // The branded identity newtype — with a UUID `generate()` when a factory needs to mint ids.
-        var backing = IdBacking(entity);
-        EmitIdType(body, entity.IdentityName, backing, withGenerator: entity.Factories.Count > 0 && backing.IsString);
+        EmitIdType(body, entity.IdentityName, IdBacking(entity), withGenerator: MintsUuidIdentity(entity));
 
         var name = RustNaming.ToPascalCase(entity.Name);
         var idType = RustNaming.ToPascalCase(entity.IdentityName);
@@ -175,8 +174,10 @@ public sealed partial class RustEmitter
         // 2. State transitions.
         foreach (Transition t in cmd.Body.OfType<Transition>())
         {
+            // Own the RHS so a non-Copy place (another field) or a String accessor/literal is moved
+            // by value into the field rather than borrowed from `&mut self`.
             var value = RustExpressionTranslator.StripOuterParens(
-                translator.Translate(t.Value, RustExpressionTranslator.NameMode.Property, TransitionEnum(entity, t, emit.Index)));
+                translator.TranslateOwned(t.Value, TransitionEnum(entity, t, emit.Index)));
 
             // Assigning a non-optional value into an `Option<T>` field (e.g. `started_at <- now`) wraps
             // it in `Some(...)`; an already-optional RHS flows through unchanged.
@@ -394,7 +395,10 @@ public sealed partial class RustEmitter
             }
             else
             {
-                args.Add("Default::default()"); // required + unset — validator-rejected; defensive
+                // Required + unset (the model only warns, KOI0806). There is no universal Rust default
+                // (a value object has no `Default`), so emit a `todo!()` that compiles and panics if the
+                // under-specified factory is ever called — the Rust analogue of C#'s `default!`.
+                args.Add($"todo!(\"factory must supply the required field `{RustNaming.Field(m.Name)}`\")");
             }
         }
 
@@ -444,6 +448,15 @@ public sealed partial class RustEmitter
 
         body.Append("}\n");
     }
+
+    /// <summary>
+    /// True when an entity has a factory and a String-backed (Guid) identity — the case where the
+    /// factory mints ids via <c>&lt;Id&gt;::generate()</c> (a v4 UUID), which both the <c>generate()</c>
+    /// emission and the <c>uuid</c> Cargo dependency gate on. Keeping the two sites on one predicate
+    /// stops them drifting (a generator without its dependency would not compile).
+    /// </summary>
+    private static bool MintsUuidIdentity(EntityDecl entity) =>
+        entity.Factories.Count > 0 && IdBacking(entity).IsString;
 
     /// <summary>The Rust backing type of an entity's identity, plus whether it is String-backed.</summary>
     private static (string RustType, bool IsString) IdBacking(EntityDecl entity) => entity.IdStrategy switch
