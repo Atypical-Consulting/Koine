@@ -188,7 +188,7 @@ public static partial class CompilerInterop
         }
         catch
         {
-            return SerializeContextMap(new WContextMapResult([], []));
+            return SerializeContextMap(new WContextMapResult([], [], new()));
         }
     }
 
