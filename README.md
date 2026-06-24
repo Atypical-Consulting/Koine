@@ -8,7 +8,7 @@
 [![Documentation](https://img.shields.io/badge/docs-koine-3245b8)](https://atypical-consulting.github.io/Koine/)
 [![.NET](https://img.shields.io/badge/.NET-10-512BD4)](https://dotnet.microsoft.com/)
 [![Tests](https://img.shields.io/badge/tests-950%2B%20passing-2ea44f)](tests/)
-![Target](https://img.shields.io/badge/emits-C%23%20%C2%B7%20TypeScript%20%C2%B7%20Python%20%C2%B7%20PHP%20%C2%B7%20Rust%20%C2%B7%20docs-178600)
+![Target](https://img.shields.io/badge/emits-C%23%20%C2%B7%20TypeScript%20%C2%B7%20Python%20%C2%B7%20PHP%20%C2%B7%20Rust%20%C2%B7%20docs%20%C2%B7%20AsyncAPI-178600)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 
 ## The problem
@@ -38,12 +38,14 @@ objects as structs with smart constructors returning `Result<_, DomainError>`, s
 `enum`s matched exhaustively, entities/aggregates with invariant-checked behaviors, events as a
 `Vec`-friendly `DomainEvent` enum, and repositories as `trait`s; depends only on `rust_decimal` for
 money and `regex` for `matches`; Phase 1 covers the tactical core), a **docs** target emits living
-documentation (`--target docs` → Markdown + Mermaid diagrams) straight from the model, an **OpenAPI**
-target emits an API contract (`--target openapi` → a deterministic OpenAPI 3.1 YAML document per bounded
-context: value objects / read models / enums become `components/schemas`, commands become `POST`
-operations and queries become `GET` operations, and static value-object invariants lower to JSON-Schema
-validation keywords), and the parser and semantic model are kept strictly target-agnostic so further
-emitters can be added without touching them.
+documentation (`--target docs` → Markdown + Mermaid diagrams) straight from the model, an
+**AsyncAPI 3.0** target emits a single event-API document (`--target asyncapi` → channels, messages,
+JSON-Schema payloads, and send/receive operations derived from the integration-event + context-map
+graph), an **OpenAPI** target emits an API contract (`--target openapi` → a deterministic OpenAPI 3.1
+YAML document per bounded context: value objects / read models / enums become `components/schemas`,
+commands become `POST` operations and queries become `GET` operations, and static value-object
+invariants lower to JSON-Schema validation keywords), and the parser and semantic model are kept
+strictly target-agnostic so further emitters can be added without touching them.
 
 ## See it run — in your browser
 
@@ -176,6 +178,9 @@ dotnet run --project src/Koine.Cli -- build templates/starters/billing/billing.k
 
 # Generate living documentation (Markdown + Mermaid state/class/context-map diagrams)
 dotnet run --project src/Koine.Cli -- build templates/starters/billing/billing.koi --target docs --out ./docs
+
+# Emit an AsyncAPI 3.0 document from the integration-event + context-map graph
+dotnet run --project src/Koine.Cli -- build templates/pizzeria --target asyncapi --out ./events
 
 # Emit an OpenAPI 3.1 spec (one <Context>/openapi.yaml per bounded context: schemas, paths, parameters)
 dotnet run --project src/Koine.Cli -- build templates/starters/billing/billing.koi --target openapi --out ./api

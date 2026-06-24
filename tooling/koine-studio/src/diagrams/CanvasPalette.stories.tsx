@@ -25,7 +25,7 @@ const meta = {
   title: 'Panels/CanvasPalette',
   component: CanvasPalette,
   parameters: { layout: 'fullscreen' },
-  args: { store: createAppStore(), index: null, onAdd: () => {}, onAddAggregateMember: () => {}, onAddAnnotation: () => {} },
+  args: { store: createAppStore(), index: null, onAdd: () => {}, onAddAggregateMember: () => {}, onAddAnnotation: () => {}, onExport: () => {}, onCopyMermaid: () => {} },
 } satisfies Meta<typeof CanvasPalette>;
 
 export default meta;
