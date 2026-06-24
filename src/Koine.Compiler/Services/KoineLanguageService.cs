@@ -140,6 +140,26 @@ public enum InlayHintKind { Type, Parameter }
 /// </summary>
 public sealed record InlayHint(int Line, int Character, string Label, InlayHintKind Kind);
 
+/// <summary>The kind of a call-hierarchy item: a command on an entity, or a domain event.</summary>
+public enum CallHierarchyItemKind { Command, Event }
+
+/// <summary>
+/// One node of the call hierarchy over the domain call graph (<c>command --emit--> event
+/// --policy--> command</c>). A <see cref="CallHierarchyItemKind.Command"/> item is identified by
+/// <c>(<see cref="OwningType"/>, <see cref="Name"/>)</c>; a <see cref="CallHierarchyItemKind.Event"/>
+/// item by <see cref="Name"/> alone (its <see cref="OwningType"/> is <c>null</c>). The
+/// <see cref="Uri"/> + 1-based <see cref="Span"/> point an editor at the declaration (the
+/// <c>NameSpan</c>). Editor-agnostic; the LSP/WASM shells map it to an LSP
+/// <c>CallHierarchyItem</c>.
+/// </summary>
+public sealed record CallHierarchyItem(string Name, CallHierarchyItemKind Kind, string? OwningType, string Uri, SourceSpan Span);
+
+/// <summary>One incoming edge: the <see cref="From"/> item that calls into the prepared item.</summary>
+public sealed record CallHierarchyIncomingCall(CallHierarchyItem From);
+
+/// <summary>One outgoing edge: the <see cref="To"/> item the prepared item calls.</summary>
+public sealed record CallHierarchyOutgoingCall(CallHierarchyItem To);
+
 /// <summary>
 /// Editor-agnostic language services for <c>.koi</c>. <see cref="CompleteAt"/> is
 /// single-file and lexer-only (works on broken documents). <see cref="HoverAt(IReadOnlyDictionary{string,string},string,int,int)"/> and
@@ -1487,6 +1507,223 @@ public sealed class KoineLanguageService
         var beforeEnd = line < endLine || (line == endLine && character <= endChar);
         return afterStart && beforeEnd;
     }
+
+    // ------------------------------------------------------------------------
+    // Call hierarchy (#260, Task 3) — over the domain call graph
+    // command --emit--> event --policy--> command. ONE level of edges per request
+    // (so a self-emitting cycle terminates naturally — see the cycle test). The graph
+    // walk is the Task 1 ModelIndex; this layer only resolves the cursor symbol and the
+    // declaration span of each edge target.
+    // ------------------------------------------------------------------------
+
+    /// <summary>
+    /// Resolves the call-hierarchy symbol under the 0-based LSP <paramref name="line"/>/
+    /// <paramref name="character"/> in <paramref name="activeUri"/> (same opening as
+    /// <see cref="DefinitionAt(KoineCompilation,string,int,int)"/>): an empty / string-or-regex token
+    /// yields nothing. A token naming a declared <c>event</c> resolves to a single
+    /// <see cref="CallHierarchyItemKind.Event"/> item; a token naming an entity <c>command</c>
+    /// resolves to a single <see cref="CallHierarchyItemKind.Command"/> item (its owning entity is the
+    /// qualifier of a <c>Target.command(…)</c> policy reaction when present, else the unique entity
+    /// declaring the command, else the enclosing entity). Returns an empty list when the cursor is on
+    /// neither (a list lets prepare yield more than one candidate, though one is the normal case).
+    /// </summary>
+    public IReadOnlyList<CallHierarchyItem> PrepareCallHierarchy(KoineCompilation compilation, string activeUri, int line, int character)
+    {
+        if (!compilation.Documents.TryGetValue(activeUri, out var source))
+        {
+            return [];
+        }
+
+        var ctx = TokenLocator.Locate(source, line, character);
+        var name = ctx.CurrentToken?.Text;
+        if (string.IsNullOrEmpty(name) || ctx.InsideStringOrRegex)
+        {
+            return [];
+        }
+
+        var model = compilation.SemanticModel.Model;
+        var index = compilation.SemanticModel.Index;
+
+        // An event under the cursor -> a single Event item at its declaration.
+        if (index.Classify(name) == TypeKind.Event && FindEvent(model, name) is { } ev)
+        {
+            return [EventItem(ev.Name, ev)];
+        }
+
+        // Otherwise, a command on an entity. Prefer the policy-reaction qualifier (Target.command),
+        // then the unique declaring entity, then the enclosing entity.
+        var owner = ResolveCommandOwner(model, name, ctx.TokenBeforePreceding?.Text, ctx.EnclosingTypeName);
+        if (owner is { } e && FindCommand(model, e.Name, name) is { } command)
+        {
+            return [CommandItem(e.Name, command.Name, command)];
+        }
+
+        // Off any command/event (a field/primitive/whitespace): nothing to anchor.
+        return [];
+    }
+
+    /// <summary>
+    /// One level of incoming edges (who calls <paramref name="item"/>):
+    /// <list type="bullet">
+    /// <item>for an <c>Event</c>, the commands that <c>emit</c> it
+    /// (<see cref="ModelIndex.CommandsEmitting"/>);</item>
+    /// <item>for a <c>Command</c> on type <c>T</c>, every event whose policy re-triggers
+    /// <c>(T, command)</c> — collected from <c>ctx.Policies</c> and deduped.</item>
+    /// </list>
+    /// An edge whose target is not declared in the model (e.g. an external command/event) is skipped
+    /// silently rather than surfaced with no location.
+    /// </summary>
+    public IReadOnlyList<CallHierarchyIncomingCall> IncomingCalls(KoineCompilation compilation, CallHierarchyItem item)
+    {
+        var model = compilation.SemanticModel.Model;
+        var index = compilation.SemanticModel.Index;
+        var calls = new List<CallHierarchyIncomingCall>();
+
+        if (item.Kind == CallHierarchyItemKind.Event)
+        {
+            // Who raises E = the commands that emit it.
+            foreach (var (targetType, commandName) in index.CommandsEmitting(item.Name))
+            {
+                if (CommandItemFor(model, targetType, commandName) is { } from)
+                {
+                    calls.Add(new CallHierarchyIncomingCall(from));
+                }
+            }
+
+            return calls;
+        }
+
+        // A command C on type T is triggered by every event whose policy reacts with (T, C).
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var policyCtx in model.Contexts)
+        {
+            foreach (var policy in policyCtx.Policies)
+            {
+                if (!string.Equals(policy.Reaction.TargetType, item.OwningType, StringComparison.Ordinal)
+                    || !string.Equals(policy.Reaction.CommandName, item.Name, StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                if (seen.Add(policy.EventName) && FindEvent(model, policy.EventName) is { } ev)
+                {
+                    calls.Add(new CallHierarchyIncomingCall(EventItem(ev.Name, ev)));
+                }
+            }
+        }
+
+        return calls;
+    }
+
+    /// <summary>
+    /// One level of outgoing edges (what <paramref name="item"/> calls):
+    /// <list type="bullet">
+    /// <item>for an <c>Event</c>, the commands its policies trigger
+    /// (<see cref="ModelIndex.PoliciesTriggeredByEvent"/>);</item>
+    /// <item>for a <c>Command</c> on type <c>T</c>, the events it <c>emit</c>s
+    /// (<see cref="ModelIndex.EventsEmittedBy"/>).</item>
+    /// </list>
+    /// An edge whose target is not declared in the model is skipped silently (no location to point at).
+    /// </summary>
+    public IReadOnlyList<CallHierarchyOutgoingCall> OutgoingCalls(KoineCompilation compilation, CallHierarchyItem item)
+    {
+        var model = compilation.SemanticModel.Model;
+        var index = compilation.SemanticModel.Index;
+        var calls = new List<CallHierarchyOutgoingCall>();
+
+        if (item.Kind == CallHierarchyItemKind.Event)
+        {
+            // What E triggers = the (target, command) reactions of its policies.
+            foreach (var (targetType, commandName) in index.PoliciesTriggeredByEvent(item.Name))
+            {
+                if (CommandItemFor(model, targetType, commandName) is { } to)
+                {
+                    calls.Add(new CallHierarchyOutgoingCall(to));
+                }
+            }
+
+            return calls;
+        }
+
+        // The events command C on type T emits.
+        foreach (var eventName in index.EventsEmittedBy(item.OwningType!, item.Name))
+        {
+            if (FindEvent(model, eventName) is { } ev)
+            {
+                calls.Add(new CallHierarchyOutgoingCall(EventItem(ev.Name, ev)));
+            }
+        }
+
+        return calls;
+    }
+
+    /// <summary>
+    /// Picks the entity that owns the command named <paramref name="commandName"/>: prefer the
+    /// <paramref name="reactionQualifier"/> (the <c>Target</c> of a <c>Target.command(…)</c> policy
+    /// reaction under the cursor) when it declares the command; else the unique entity that declares
+    /// it; else the <paramref name="enclosingType"/> (the entity whose body the cursor sits in).
+    /// Returns <c>null</c> when no entity declares a command of that name.
+    /// </summary>
+    private static EntityDecl? ResolveCommandOwner(KoineModel model, string commandName, string? reactionQualifier, string? enclosingType)
+    {
+        var declaring = model.Contexts
+            .SelectMany(c => c.AllTypeDecls().OfType<EntityDecl>())
+            .Where(e => e.Commands.Any(cmd => string.Equals(cmd.Name, commandName, StringComparison.Ordinal)))
+            .ToList();
+
+        if (declaring.Count == 0)
+        {
+            return null;
+        }
+
+        // 1. A `Target.command(…)` policy reaction: the qualifier names the owning entity.
+        if (reactionQualifier is not null
+            && declaring.FirstOrDefault(e => string.Equals(e.Name, reactionQualifier, StringComparison.Ordinal)) is { } qualified)
+        {
+            return qualified;
+        }
+
+        // 2. The unique declaring entity (the common case).
+        if (declaring.Count == 1)
+        {
+            return declaring[0];
+        }
+
+        // 3. Disambiguate by the enclosing entity, else first-wins.
+        return declaring.FirstOrDefault(e => string.Equals(e.Name, enclosingType, StringComparison.Ordinal)) ?? declaring[0];
+    }
+
+    /// <summary>A command edge item resolved to its declaration, or <c>null</c> when the target is not declared (silently skipped).</summary>
+    private static CallHierarchyItem? CommandItemFor(KoineModel model, string targetType, string commandName) =>
+        FindCommand(model, targetType, commandName) is { } command ? CommandItem(targetType, commandName, command) : null;
+
+    /// <summary>Builds a Command item pointing at the command's <c>NameSpan</c> (its <c>File</c> is the declaring document's URI).</summary>
+    private static CallHierarchyItem CommandItem(string owningType, string name, CommandDecl command)
+    {
+        var span = command.NameSpan.IsNone ? command.Span : command.NameSpan;
+        return new CallHierarchyItem(name, CallHierarchyItemKind.Command, owningType, span.File ?? "", span);
+    }
+
+    /// <summary>Builds an Event item pointing at the event's <c>NameSpan</c> (its <c>File</c> is the declaring document's URI).</summary>
+    private static CallHierarchyItem EventItem(string name, EventDecl ev)
+    {
+        var span = ev.NameSpan.IsNone ? ev.Span : ev.NameSpan;
+        return new CallHierarchyItem(name, CallHierarchyItemKind.Event, null, span.File ?? "", span);
+    }
+
+    /// <summary>The entity command declaration named <paramref name="name"/> on <paramref name="type"/>, or <c>null</c>.</summary>
+    private static CommandDecl? FindCommand(KoineModel model, string type, string name) =>
+        model.Contexts
+            .SelectMany(c => c.AllTypeDecls().OfType<EntityDecl>())
+            .Where(e => string.Equals(e.Name, type, StringComparison.Ordinal))
+            .SelectMany(e => e.Commands)
+            .FirstOrDefault(cmd => string.Equals(cmd.Name, name, StringComparison.Ordinal));
+
+    /// <summary>The event declaration named <paramref name="name"/>, or <c>null</c>.</summary>
+    private static EventDecl? FindEvent(KoineModel model, string name) =>
+        model.Contexts
+            .SelectMany(c => c.AllTypeDecls().OfType<EventDecl>())
+            .FirstOrDefault(ev => string.Equals(ev.Name, name, StringComparison.Ordinal));
 
     /// <summary>
     /// Computes the edits for renaming the name under the cursor to <paramref name="newName"/>:

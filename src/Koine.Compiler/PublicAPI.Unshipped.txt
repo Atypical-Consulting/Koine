@@ -214,3 +214,29 @@ Koine.Compiler.Services.InlayHint.Label.init -> void
 Koine.Compiler.Services.InlayHint.Kind.get -> Koine.Compiler.Services.InlayHintKind
 Koine.Compiler.Services.InlayHint.Kind.init -> void
 Koine.Compiler.Services.KoineLanguageService.InlayHintsAt(Koine.Compiler.Services.KoineCompilation! compilation, string! activeUri, int startLine, int startChar, int endLine, int endChar) -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Services.InlayHint!>!
+Koine.Compiler.Services.CallHierarchyItemKind
+Koine.Compiler.Services.CallHierarchyItemKind.Command = 0 -> Koine.Compiler.Services.CallHierarchyItemKind
+Koine.Compiler.Services.CallHierarchyItemKind.Event = 1 -> Koine.Compiler.Services.CallHierarchyItemKind
+Koine.Compiler.Services.CallHierarchyItem
+Koine.Compiler.Services.CallHierarchyItem.CallHierarchyItem(string! Name, Koine.Compiler.Services.CallHierarchyItemKind Kind, string? OwningType, string! Uri, Koine.Compiler.Ast.SourceSpan Span) -> void
+Koine.Compiler.Services.CallHierarchyItem.Name.get -> string!
+Koine.Compiler.Services.CallHierarchyItem.Name.init -> void
+Koine.Compiler.Services.CallHierarchyItem.Kind.get -> Koine.Compiler.Services.CallHierarchyItemKind
+Koine.Compiler.Services.CallHierarchyItem.Kind.init -> void
+Koine.Compiler.Services.CallHierarchyItem.OwningType.get -> string?
+Koine.Compiler.Services.CallHierarchyItem.OwningType.init -> void
+Koine.Compiler.Services.CallHierarchyItem.Uri.get -> string!
+Koine.Compiler.Services.CallHierarchyItem.Uri.init -> void
+Koine.Compiler.Services.CallHierarchyItem.Span.get -> Koine.Compiler.Ast.SourceSpan
+Koine.Compiler.Services.CallHierarchyItem.Span.init -> void
+Koine.Compiler.Services.CallHierarchyIncomingCall
+Koine.Compiler.Services.CallHierarchyIncomingCall.CallHierarchyIncomingCall(Koine.Compiler.Services.CallHierarchyItem! From) -> void
+Koine.Compiler.Services.CallHierarchyIncomingCall.From.get -> Koine.Compiler.Services.CallHierarchyItem!
+Koine.Compiler.Services.CallHierarchyIncomingCall.From.init -> void
+Koine.Compiler.Services.CallHierarchyOutgoingCall
+Koine.Compiler.Services.CallHierarchyOutgoingCall.CallHierarchyOutgoingCall(Koine.Compiler.Services.CallHierarchyItem! To) -> void
+Koine.Compiler.Services.CallHierarchyOutgoingCall.To.get -> Koine.Compiler.Services.CallHierarchyItem!
+Koine.Compiler.Services.CallHierarchyOutgoingCall.To.init -> void
+Koine.Compiler.Services.KoineLanguageService.PrepareCallHierarchy(Koine.Compiler.Services.KoineCompilation! compilation, string! activeUri, int line, int character) -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Services.CallHierarchyItem!>!
+Koine.Compiler.Services.KoineLanguageService.IncomingCalls(Koine.Compiler.Services.KoineCompilation! compilation, Koine.Compiler.Services.CallHierarchyItem! item) -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Services.CallHierarchyIncomingCall!>!
+Koine.Compiler.Services.KoineLanguageService.OutgoingCalls(Koine.Compiler.Services.KoineCompilation! compilation, Koine.Compiler.Services.CallHierarchyItem! item) -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Services.CallHierarchyOutgoingCall!>!
