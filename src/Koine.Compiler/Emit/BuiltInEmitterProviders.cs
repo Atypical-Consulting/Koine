@@ -1,3 +1,4 @@
+using Koine.Compiler.Emit.AsyncApi;
 using Koine.Compiler.Emit.CSharp;
 using Koine.Compiler.Emit.Docs;
 using Koine.Compiler.Emit.Glossary;
@@ -26,6 +27,7 @@ internal static class BuiltInEmitterProviders
         new RustEmitterProvider(),
         new GlossaryEmitterProvider(),
         new DocsEmitterProvider(),
+        new AsyncApiEmitterProvider(),
     };
 }
 
@@ -229,4 +231,12 @@ internal sealed class DocsEmitterProvider : IEmitterProvider
     public string Target => "docs";
 
     public IEmitter Create(EmitterOptions options) => new DocsEmitter();
+}
+
+/// <summary>Provider for the AsyncAPI 3.0 emitter (no per-emit options).</summary>
+internal sealed class AsyncApiEmitterProvider : IEmitterProvider
+{
+    public string Target => "asyncapi";
+
+    public IEmitter Create(EmitterOptions options) => new AsyncApiEmitter();
 }

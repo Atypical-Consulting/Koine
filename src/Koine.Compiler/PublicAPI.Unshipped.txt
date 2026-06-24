@@ -197,3 +197,8 @@ static Koine.Compiler.Services.ScenarioService.Error(string! target, string! ope
 static Koine.Compiler.Services.ScenarioService.Catalog(Koine.Compiler.Ast.SemanticModel! semantic) -> System.Collections.Generic.IReadOnlyDictionary<string!, object?>!
 static Koine.Compiler.Services.ScenarioService.Run(Koine.Compiler.Ast.SemanticModel! semantic, string! target, string! operation, System.Text.Json.JsonElement given, System.Text.Json.JsonElement args) -> System.Collections.Generic.IReadOnlyDictionary<string!, object?>!
 static Koine.Compiler.Services.ScenarioService.WriteJson(System.Collections.Generic.IReadOnlyDictionary<string!, object?>! tree) -> string!
+Koine.Compiler.Emit.AsyncApi.AsyncApiEmitter
+Koine.Compiler.Emit.AsyncApi.AsyncApiEmitter.AsyncApiEmitter() -> void
+Koine.Compiler.Emit.AsyncApi.AsyncApiEmitter.Emit(Koine.Compiler.Ast.KoineModel! model) -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Emit.EmittedFile!>!
+Koine.Compiler.Emit.AsyncApi.AsyncApiEmitter.TargetName.get -> string!
+const Koine.Compiler.Emit.AsyncApi.AsyncApiEmitter.FileName = "asyncapi.yaml" -> string!
