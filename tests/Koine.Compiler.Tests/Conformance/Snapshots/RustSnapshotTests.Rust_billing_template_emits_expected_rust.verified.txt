@@ -79,6 +79,56 @@ pub enum Currency {
     Gbp,
 }
 
+impl Currency {
+    /// Looks up a variant by its declared name (a non-throwing `TryFromName`).
+    pub fn from_name(name: &str) -> Option<Self> {
+        match name {
+            "EUR" => Some(Currency::Eur),
+            "USD" => Some(Currency::Usd),
+            "GBP" => Some(Currency::Gbp),
+            _ => None,
+        }
+    }
+
+    /// Looks up a variant by its ordinal value (a non-throwing `TryFromValue`).
+    pub fn from_value(value: i64) -> Option<Self> {
+        match value {
+            0 => Some(Currency::Eur),
+            1 => Some(Currency::Usd),
+            2 => Some(Currency::Gbp),
+            _ => None,
+        }
+    }
+
+    /// Exhaustively maps the variant to a value — one arm per member, no catch-all.
+    pub fn match_<R>(
+        &self,
+        eur: impl FnOnce() -> R,
+        usd: impl FnOnce() -> R,
+        gbp: impl FnOnce() -> R,
+    ) -> R {
+        match self {
+            Currency::Eur => eur(),
+            Currency::Usd => usd(),
+            Currency::Gbp => gbp(),
+        }
+    }
+
+    /// Exhaustively dispatches a side effect — one arm per member, no catch-all.
+    pub fn switch(
+        &self,
+        eur: impl FnOnce(),
+        usd: impl FnOnce(),
+        gbp: impl FnOnce(),
+    ) {
+        match self {
+            Currency::Eur => eur(),
+            Currency::Usd => usd(),
+            Currency::Gbp => gbp(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Email {
     raw: String,
@@ -146,6 +196,62 @@ pub enum OrderStatus {
     Placed,
     Shipped,
     Cancelled,
+}
+
+impl OrderStatus {
+    /// Looks up a variant by its declared name (a non-throwing `TryFromName`).
+    pub fn from_name(name: &str) -> Option<Self> {
+        match name {
+            "Draft" => Some(OrderStatus::Draft),
+            "Placed" => Some(OrderStatus::Placed),
+            "Shipped" => Some(OrderStatus::Shipped),
+            "Cancelled" => Some(OrderStatus::Cancelled),
+            _ => None,
+        }
+    }
+
+    /// Looks up a variant by its ordinal value (a non-throwing `TryFromValue`).
+    pub fn from_value(value: i64) -> Option<Self> {
+        match value {
+            0 => Some(OrderStatus::Draft),
+            1 => Some(OrderStatus::Placed),
+            2 => Some(OrderStatus::Shipped),
+            3 => Some(OrderStatus::Cancelled),
+            _ => None,
+        }
+    }
+
+    /// Exhaustively maps the variant to a value — one arm per member, no catch-all.
+    pub fn match_<R>(
+        &self,
+        draft: impl FnOnce() -> R,
+        placed: impl FnOnce() -> R,
+        shipped: impl FnOnce() -> R,
+        cancelled: impl FnOnce() -> R,
+    ) -> R {
+        match self {
+            OrderStatus::Draft => draft(),
+            OrderStatus::Placed => placed(),
+            OrderStatus::Shipped => shipped(),
+            OrderStatus::Cancelled => cancelled(),
+        }
+    }
+
+    /// Exhaustively dispatches a side effect — one arm per member, no catch-all.
+    pub fn switch(
+        &self,
+        draft: impl FnOnce(),
+        placed: impl FnOnce(),
+        shipped: impl FnOnce(),
+        cancelled: impl FnOnce(),
+    ) {
+        match self {
+            OrderStatus::Draft => draft(),
+            OrderStatus::Placed => placed(),
+            OrderStatus::Shipped => shipped(),
+            OrderStatus::Cancelled => cancelled(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

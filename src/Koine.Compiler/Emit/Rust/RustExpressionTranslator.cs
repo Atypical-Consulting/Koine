@@ -41,6 +41,8 @@ internal sealed class RustExpressionTranslator
     private readonly HashSet<string> _locals = new(StringComparer.Ordinal);
     private readonly Dictionary<string, TypeRef> _localTypes = new(StringComparer.Ordinal);
     private readonly ISet<string> _derivedMembers;
+    private readonly string _memberReceiver;
+    private readonly bool _membersAsAccessors;
 
     private string? _expectedEnum;
 
@@ -49,11 +51,17 @@ internal sealed class RustExpressionTranslator
         IReadOnlyList<Member> members,
         IReadOnlyDictionary<string, string> enumMemberToType,
         RustTypeMapper typeMapper,
-        string? context = null)
+        string? context = null,
+        string memberReceiver = "self",
+        bool membersAsAccessors = false)
     {
         _index = index;
         _resolver = new TypeResolver(index, context);
         _typeMapper = typeMapper;
+        _memberReceiver = memberReceiver;
+        // Read-model projection bodies read from a borrowed source (`src`), whose fields are private —
+        // so every member must go through its accessor, even the stored ones.
+        _membersAsAccessors = membersAsAccessors;
         _scope = TypeScope.FromMembers(members, index);
         _memberNames = new HashSet<string>(members.Select(m => m.Name), StringComparer.Ordinal);
         _enumMemberToType = enumMemberToType;
@@ -203,6 +211,23 @@ internal sealed class RustExpressionTranslator
         TypeScope scope = EffectiveScope();
         TypeRef? leftType = _resolver.Infer(bin.Left, scope);
         TypeRef? rightType = _resolver.Infer(bin.Right, scope);
+
+        // String concatenation lowers to `String + &str` — Rust's `+` on strings consumes an owned
+        // left and borrows the right. Cloning both sides (the default for non-Copy arithmetic operands)
+        // would emit the invalid `String + String`, so route string `+` through a dedicated writer.
+        if (bin.Op == BinaryOp.Add && (leftType?.Name == "String" || rightType?.Name == "String"))
+        {
+            WriteStringOwned(bin.Left, sb);
+            sb.Append(" + ");
+            WriteStrRef(bin.Right, sb);
+            if (parenthesize)
+            {
+                sb.Append(')');
+            }
+
+            return;
+        }
+
         var isArithmetic = bin.Op is BinaryOp.Add or BinaryOp.Sub or BinaryOp.Mul or BinaryOp.Div;
 
         // Decimal coercion: an Int operand on the side opposite a Decimal becomes a Decimal.
@@ -315,7 +340,7 @@ internal sealed class RustExpressionTranslator
                     : owners.Count == 1
                         ? owners[0]
                         : _enumMemberToType.TryGetValue(name, out var fallback) ? fallback : owners[0];
-                sb.Append(RustNaming.ToPascalCase(enumType)).Append("::").Append(RustNaming.Variant(name));
+                sb.Append(_typeMapper.QualifyTypeName(enumType)).Append("::").Append(RustNaming.Variant(name));
                 return;
             }
         }
@@ -328,9 +353,10 @@ internal sealed class RustExpressionTranslator
             {
                 if (_mode == NameMode.Property)
                 {
-                    // A stored field reads directly; a derived member reads through its accessor method.
-                    sb.Append("self.").Append(RustNaming.Field(name));
-                    if (_derivedMembers.Contains(name))
+                    // A stored field reads directly; a derived member (or any member in projection
+                    // mode, reading from a borrowed source) reads through its accessor method.
+                    sb.Append(_memberReceiver).Append('.').Append(RustNaming.Field(name));
+                    if (_membersAsAccessors || _derivedMembers.Contains(name))
                     {
                         sb.Append("()");
                     }
@@ -343,10 +369,11 @@ internal sealed class RustExpressionTranslator
             return;
         }
 
-        // (5) An enum *type* reference (qualifier of `OrderStatus.Draft`): the PascalCase type.
+        // (5) An enum *type* reference (qualifier of `OrderStatus.Draft`): the PascalCase type,
+        // module-qualified when the enum is owned by another bounded context.
         if (_index.Classify(name) == TypeKind.Enum)
         {
-            sb.Append(RustNaming.ToPascalCase(name));
+            sb.Append(_typeMapper.QualifyTypeName(name));
             return;
         }
 
@@ -375,7 +402,7 @@ internal sealed class RustExpressionTranslator
         if (ma.Target is IdentifierExpr qualifier && !_memberNames.Contains(qualifier.Name)
             && !_locals.Contains(qualifier.Name) && _index.Classify(qualifier.Name) == TypeKind.Enum)
         {
-            sb.Append(RustNaming.ToPascalCase(qualifier.Name)).Append("::").Append(RustNaming.Variant(ma.MemberName));
+            sb.Append(_typeMapper.QualifyTypeName(qualifier.Name)).Append("::").Append(RustNaming.Variant(ma.MemberName));
             return;
         }
 
@@ -526,6 +553,51 @@ internal sealed class RustExpressionTranslator
         // stored-field reference owned (and is a harmless no-op shape on an already-owned temporary).
         var owned = bodyType is { } bt && !_typeMapper.IsCopy(bt) ? ".clone()" : string.Empty;
         return $"{target}.iter().map(|{RustNaming.Field(lambda.Parameter)}| {body}{owned})";
+    }
+
+    /// <summary>
+    /// Writes a String-typed expression as an owned <c>String</c> — the left side of a <c>+</c> concat.
+    /// A nested concatenation already evaluates to an owned String; everything else is owned with
+    /// <c>.to_string()</c>, which yields a <c>String</c> whether the operand is a <c>String</c> place
+    /// (a field/local) or a <c>&amp;str</c> (a <c>.trim</c> accessor, a nested value's String field, a
+    /// literal) — <c>.clone()</c> would leave a <c>&amp;str</c> a <c>&amp;str</c> and break <c>+</c>.
+    /// </summary>
+    private void WriteStringOwned(Expr expr, StringBuilder sb)
+    {
+        if (expr is BinaryExpr { Op: BinaryOp.Add } nested)
+        {
+            WriteBinary(nested, sb, parenthesize: true);
+            return;
+        }
+
+        Write(expr, sb, null);
+        sb.Append(".to_string()");
+    }
+
+    /// <summary>True when an expression's inferred type is optional — used to decide <c>Some(...)</c> wrapping.</summary>
+    public bool IsOptional(Expr expr) => _resolver.Infer(expr, EffectiveScope())?.IsOptional == true;
+
+    /// <summary>
+    /// Translates an expression to an owned value for a <c>return</c>/<c>Ok(...)</c> position: a non-Copy
+    /// place (a field/local such as the entity <c>id</c>, or a <c>.field()</c> accessor result) is cloned
+    /// so the value is moved out by value rather than borrowed from <c>&amp;self</c>.
+    /// </summary>
+    public string TranslateOwned(Expr expr, string? expectedEnum = null)
+    {
+        var rendered = Translate(expr, expectedEnum);
+        TypeRef? type = _resolver.Infer(expr, EffectiveScope());
+
+        // A String result may be `&str` (a `.trim` accessor, a nested value's String field, a literal)
+        // or an owned `String`; `to_string()` owns either into the `String` the position expects, where
+        // `.clone()` would leave a `&str` a `&str`.
+        if (type is { Name: "String", IsOptional: false })
+        {
+            return rendered + ".to_string()";
+        }
+
+        var clone = IsNonCopyPlace(expr, type)
+            || (expr is MemberAccessExpr && type is { } t && !_typeMapper.IsCopy(t));
+        return clone ? rendered + ".clone()" : rendered;
     }
 
     /// <summary>Writes a string-typed argument as a <c>&amp;str</c> reference for std string methods.</summary>

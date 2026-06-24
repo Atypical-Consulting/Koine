@@ -35,9 +35,12 @@ dependency-free Python 3.11+, `mypy --strict`-clean; the tactical core *and* the
 emitter ships (`--target php` → dependency-free PHP 8.1, typed properties, readonly promoted properties; Phase 1
 covers the tactical core), a **Rust** emitter ships (`--target rust` → an idiomatic crate: value
 objects as structs with smart constructors returning `Result<_, DomainError>`, smart enums as Rust
-`enum`s matched exhaustively, entities/aggregates with invariant-checked behaviors, events as a
-`Vec`-friendly `DomainEvent` enum, and repositories as `trait`s; depends only on `rust_decimal` for
-money and `regex` for `matches`; Phase 1 covers the tactical core), a **docs** target emits living
+`enum`s matched exhaustively (with `Match`/`Switch`/`from_name`/`from_value` lookups), entities and
+aggregates with invariant-checked behaviors, factories that mint identities, domain events raised into
+a `Vec`-friendly `DomainEvent` collection, query DTOs and read-model projections, and repositories as
+`trait`s; **multi-context** models compile end-to-end via `crate::<module>` qualification; depends only
+on `rust_decimal` for money and `regex` for `matches`, plus `uuid` when a model uses a factory), a
+**docs** target emits living
 documentation (`--target docs` → Markdown + Mermaid diagrams) straight from the model, an
 **AsyncAPI 3.0** target emits a single event-API document (`--target asyncapi` → channels, messages,
 JSON-Schema payloads, and send/receive operations derived from the integration-event + context-map
@@ -178,7 +181,7 @@ dotnet run --project src/Koine.Cli -- build templates/starters/billing/billing.k
 # Or to PHP 8.1 (Phase 1: tactical core — value objects, smart enums, entities, events, repositories)
 dotnet run --project src/Koine.Cli -- build templates/starters/billing/billing.koi --target php --out ./generated_php
 
-# Or to Rust (Phase 1: tactical core — an idiomatic crate; `cargo build` proves it compiles)
+# Or to Rust (multi-context + CQRS — an idiomatic crate; `cargo build` proves it compiles)
 dotnet run --project src/Koine.Cli -- build templates/starters/billing/billing.koi --target rust --out ./generated_rs
 
 # Emit the opt-in C# Application layer alongside the domain (handlers, validators, query handlers, DI)
@@ -367,7 +370,7 @@ Koine.slnx
 │   │   │   ├── TypeScript/ # TypeScriptEmitter
 │   │   │   ├── Python/     # PythonEmitter (tactical core + strategic/CQRS layer)
 │   │   │   ├── Php/        # PhpEmitter (Phase 1: tactical core, PHP 8.1)
-│   │   │   ├── Rust/       # RustEmitter (Phase 1: tactical core)
+│   │   │   ├── Rust/       # RustEmitter (multi-context + CQRS read side)
 │   │   │   ├── Glossary/   # ubiquitous-language glossary
 │   │   │   ├── Docs/       # living documentation (Markdown + Mermaid diagrams)
 │   │   │   └── OpenApi/    # OpenApiEmitter (OpenAPI 3.1 spec per bounded context)
@@ -531,7 +534,8 @@ as a CI gate). See the
 
 Koine is at **v0.17.x** and has shipped through **R1–R18** of the roadmap: the full tactical *and*
 strategic DDD toolkit, four more emitter targets (**TypeScript**, **Python**, **PHP 8.1**, and
-**Rust** — the latter three Phase 1: tactical core) alongside C#, a **docs** target that emits living
+**Rust**) alongside C# — **PHP** at Phase 1 (tactical core), **Rust** now covering multi-context
+references and the CQRS read side — a **docs** target that emits living
 documentation (Markdown + Mermaid diagrams), the editor tooling (TextMate grammar,
 `koine lsp` language server, and the `fmt` / `init` / `watch` commands), and **model-as-spec
 coverage** (`koine coverage` proves declared == emitted and doubles as a CI gate, also exposed as the
@@ -539,9 +543,12 @@ coverage** (`koine coverage` proves declared == emitted and doubles as a CI gate
 [feature catalogue](https://atypical-consulting.github.io/Koine/guides/feature-catalogue/) maps every
 construct to the C# it emits.
 
-**Next up:** rounding out the newer targets — **Rust Phase 2**
+**Recently landed:** **Rust Phase 2**
 ([#173](https://github.com/Atypical-Consulting/Koine/issues/173)) takes the Rust emitter beyond the
-tactical core to cross-context references and the remaining constructs. The full roadmap lives in
+tactical core to cross-context references (`crate::<module>` qualification), command returns, raised
+domain events, aggregate factories with identity generation, the `Match`/`Switch`/`Try*` smart-enum
+forms, and the CQRS read side (query DTOs + read-model projections) — so the six-context `pizzeria`
+template now compiles to Rust end-to-end. The full roadmap lives in
 [`USER-STORIES.md`](USER-STORIES.md).
 
 ## Templates

@@ -43,6 +43,50 @@ pub enum Status {
     Closed,
 }
 
+impl Status {
+    /// Looks up a variant by its declared name (a non-throwing `TryFromName`).
+    pub fn from_name(name: &str) -> Option<Self> {
+        match name {
+            "Open" => Some(Status::Open),
+            "Closed" => Some(Status::Closed),
+            _ => None,
+        }
+    }
+
+    /// Looks up a variant by its ordinal value (a non-throwing `TryFromValue`).
+    pub fn from_value(value: i64) -> Option<Self> {
+        match value {
+            0 => Some(Status::Open),
+            1 => Some(Status::Closed),
+            _ => None,
+        }
+    }
+
+    /// Exhaustively maps the variant to a value — one arm per member, no catch-all.
+    pub fn match_<R>(
+        &self,
+        open: impl FnOnce() -> R,
+        closed: impl FnOnce() -> R,
+    ) -> R {
+        match self {
+            Status::Open => open(),
+            Status::Closed => closed(),
+        }
+    }
+
+    /// Exhaustively dispatches a side effect — one arm per member, no catch-all.
+    pub fn switch(
+        &self,
+        open: impl FnOnce(),
+        closed: impl FnOnce(),
+    ) {
+        match self {
+            Status::Open => open(),
+            Status::Closed => closed(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Doc {
     title: String,
