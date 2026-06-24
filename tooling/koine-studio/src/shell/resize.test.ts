@@ -5,7 +5,7 @@
 // (both restore-on-init and save-on-drag-end). happy-dom supplies PointerEvent, setPointerCapture,
 // and getBoundingClientRect; test-setup.ts installs the in-memory localStorage shim.
 import { afterEach, beforeEach, describe, expect, test } from 'vitest';
-import { initEdgeResizer, initSplitResizer, type EdgeResizerOptions } from '@/shell/resize';
+import { initEdgeResizer, initGroupResizer, initSplitResizer, type EdgeResizerOptions } from '@/shell/resize';
 
 // ---------------------------------------------------------------------------
 // Test scaffolding
@@ -686,5 +686,103 @@ describe('initSplitResizer', () => {
 
     initSplitResizer({ split, handle });
     expect(sizeOf(split, '--koi-inspector-w')).toBe(450);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// initGroupResizer — the thin wrapper for the editor-group divider
+// ---------------------------------------------------------------------------
+
+describe('initGroupResizer — horizontal orientation (side-by-side, vertical divider)', () => {
+  test('drives --koi-group-w anchored to the right of split and persists under the default key', () => {
+    const split = document.createElement('div');
+    const handle = document.createElement('div');
+    document.body.appendChild(split);
+    document.body.appendChild(handle);
+    stubRect(split, { left: 0, right: 1000, width: 1000 });
+
+    initGroupResizer({ split, handle, orientation: 'horizontal' });
+
+    pointerdown(handle, 1000, 0);
+    pointermove(handle, 600, 0); // 400px in from the right edge
+    expect(sizeOf(split, '--koi-group-w')).toBe(400);
+
+    pointerup(handle, 600, 0);
+    // Default storageKey is 'koine.studio.groupSize'.
+    expect(localStorage.getItem('koine.studio.groupSize')).toBe('400');
+  });
+
+  test('honours an explicit storageKey', () => {
+    const split = document.createElement('div');
+    const handle = document.createElement('div');
+    document.body.appendChild(split);
+    document.body.appendChild(handle);
+    stubRect(split, { left: 0, right: 1000, width: 1000 });
+
+    initGroupResizer({ split, handle, orientation: 'horizontal', storageKey: 'custom.group.key' });
+
+    pointerdown(handle, 1000, 0);
+    pointermove(handle, 500, 0); // 500px
+    pointerup(handle, 500, 0);
+    expect(localStorage.getItem('custom.group.key')).toBe('500');
+  });
+
+  test('restores a persisted group width under the default key on init', () => {
+    const split = document.createElement('div');
+    const handle = document.createElement('div');
+    document.body.appendChild(split);
+    document.body.appendChild(handle);
+    stubRect(split, { left: 0, right: 1000, width: 1000 });
+    localStorage.setItem('koine.studio.groupSize', '350');
+
+    initGroupResizer({ split, handle, orientation: 'horizontal' });
+    expect(sizeOf(split, '--koi-group-w')).toBe(350);
+  });
+});
+
+describe('initGroupResizer — vertical orientation (stacked, horizontal divider)', () => {
+  test('drives --koi-group-h anchored to the bottom of split and persists under the default key', () => {
+    const split = document.createElement('div');
+    const handle = document.createElement('div');
+    document.body.appendChild(split);
+    document.body.appendChild(handle);
+    stubRect(split, { top: 0, bottom: 800, height: 800 });
+
+    initGroupResizer({ split, handle, orientation: 'vertical' });
+
+    pointerdown(handle, 0, 800);
+    pointermove(handle, 0, 500); // 300px up from the bottom edge
+    expect(sizeOf(split, '--koi-group-h')).toBe(300);
+
+    pointerup(handle, 0, 500);
+    // Default storageKey is 'koine.studio.groupSize'.
+    expect(localStorage.getItem('koine.studio.groupSize')).toBe('300');
+  });
+
+  test('honours an explicit storageKey', () => {
+    const split = document.createElement('div');
+    const handle = document.createElement('div');
+    document.body.appendChild(split);
+    document.body.appendChild(handle);
+    stubRect(split, { top: 0, bottom: 800, height: 800 });
+
+    initGroupResizer({ split, handle, orientation: 'vertical', storageKey: 'custom.group.h.key' });
+
+    pointerdown(handle, 0, 800);
+    pointermove(handle, 0, 600); // 200px
+    pointerup(handle, 0, 600);
+    expect(localStorage.getItem('custom.group.h.key')).toBe('200');
+  });
+
+  test('restores a persisted group height under the default key on init', () => {
+    const split = document.createElement('div');
+    const handle = document.createElement('div');
+    document.body.appendChild(split);
+    document.body.appendChild(handle);
+    stubRect(split, { top: 0, bottom: 800, height: 800 });
+    localStorage.setItem('koine.studio.groupSize', '250');
+
+    initGroupResizer({ split, handle, orientation: 'vertical' });
+    expect(sizeOf(split, '--koi-group-h')).toBe(250);
   });
 });

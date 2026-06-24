@@ -129,3 +129,33 @@ export function initSplitResizer(opts: SplitResizerOptions): void {
     max: opts.max,
   });
 }
+
+export interface GroupResizerOptions {
+  /** The split container element; the size CSS var is written to this element. */
+  split: HTMLElement;
+  /** The draggable divider handle. */
+  handle: HTMLElement;
+  /**
+   * `'horizontal'` — side-by-side split with a vertical divider (anchored right, drives
+   * `--koi-group-w`). `'vertical'` — stacked split with a horizontal divider (anchored bottom,
+   * drives `--koi-group-h`).
+   */
+  orientation: 'horizontal' | 'vertical';
+  /** localStorage key for the persisted px size. Defaults to `'koine.studio.groupSize'`. */
+  storageKey?: string;
+}
+
+/**
+ * Wire pointer-drag resizing for an editor-group divider. Maps `orientation` to the appropriate
+ * anchor and CSS custom property, then delegates to {@link initEdgeResizer}.
+ */
+export function initGroupResizer(opts: GroupResizerOptions): void {
+  const horizontal = opts.orientation === 'horizontal';
+  initEdgeResizer({
+    target: opts.split,
+    handle: opts.handle,
+    cssVar: horizontal ? '--koi-group-w' : '--koi-group-h',
+    anchor: horizontal ? 'right' : 'bottom',
+    storageKey: opts.storageKey ?? 'koine.studio.groupSize',
+  });
+}
