@@ -149,6 +149,15 @@ function included(uri: string, globs: RegExp[]): boolean {
   return globs.length === 0 || globs.some((g) => g.test(uri));
 }
 
+/**
+ * Whether `uri` passes a comma-separated include glob (`*.koi`, `src/*.koi`, …); an empty/whitespace
+ * filter matches every file. The single-uri convenience over the same glob engine `runSearch` uses,
+ * exported so the workspace file enumerator can filter without re-implementing glob matching.
+ */
+export function matchesInclude(uri: string, include: string): boolean {
+  return included(uri, parseIncludes(include));
+}
+
 /** All matches of `regex` in `text`, with their line/column/preview resolved. */
 function findMatches(text: string, regex: RegExp): Match[] {
   const starts = lineStartOffsets(text);
