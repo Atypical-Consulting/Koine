@@ -14,15 +14,19 @@ import {
   type InspectorControllerLsp,
 } from '@/shell/inspectorController';
 import { createAppStore } from '@/store/index';
+import * as maxgraphRenderer from '@/diagrams/diagrams-maxgraph';
+import type { ContextMapGraphHooks } from '@/diagrams/diagrams-maxgraph';
 import type {
   CheckResult,
   ContextMapResult,
+  DiagramNode,
   DocsResult,
   DocumentSymbol,
   EmitPreviewResult,
   GlossaryEntry,
   GlossaryModel,
   SetDocResult,
+  SourceSpan,
 } from '@/lsp/lsp';
 
 // --- DOM seed ----------------------------------------------------------------
@@ -482,6 +486,44 @@ describe('createInspectorController — bottom strip lazy loading', () => {
     await flush();
     expect(panel.querySelector('[data-ctxmap-view="graph"]')?.getAttribute('aria-pressed')).toBe('true');
     expect(lsp.contextMap).toHaveBeenCalledTimes(1);
+  });
+
+  test('clicking a context node filters AND jumps to its .koi declaration when the node has a span (#290)', async () => {
+    localStorage.removeItem('koine.studio.contextMapView'); // Graph is the default view
+    const lsp = makeLsp();
+    const deps = makeDeps(lsp);
+    const ctl = createInspectorController(deps);
+    ctl.init();
+    await ctl.refreshContextList(); // populate the known-context list (Billing) from the glossary model
+    await flush();
+
+    // Capture the hooks the inspector wires into the context-map graph (so we exercise onContextClick
+    // directly, without driving the maxGraph engine). The real renderer is restored by afterEach.
+    let hooks: ContextMapGraphHooks | undefined;
+    vi.spyOn(maxgraphRenderer, 'renderContextMapGraph').mockImplementation(async (_stage, _graph, _isCurrent, h) => {
+      hooks = h;
+      return { dispose: () => {} };
+    });
+
+    ctl.selectBottomTab('contextmap');
+    await flush();
+    expect(hooks).toBeDefined();
+
+    const span: SourceSpan = { file: 'file:///billing.koi', line: 1, column: 9, endLine: 1, endColumn: 16, offset: 8, length: 7 };
+    const spanned: DiagramNode = {
+      id: 'Billing', label: 'Billing', kind: 'context', qualifiedName: 'Billing', sourceSpan: span, stereotype: null, members: [],
+    };
+
+    hooks!.onContextClick!(spanned);
+    // filters to the clicked context...
+    expect(deps.store.getState().activeContext).toBe('Billing');
+    // ...AND jumps to its declaration via the shared jump-to-source path.
+    expect(deps.gotoSourceSpan).toHaveBeenCalledWith(span);
+
+    // A span-less context node (a dangling endpoint / recovered parse) still filters but never navigates.
+    vi.mocked(deps.gotoSourceSpan).mockClear();
+    hooks!.onContextClick!({ ...spanned, sourceSpan: null });
+    expect(deps.gotoSourceSpan).not.toHaveBeenCalled();
   });
 
   test('the rail Context Map link leaves Documentation so the otherwise-hidden strip shows the map', async () => {

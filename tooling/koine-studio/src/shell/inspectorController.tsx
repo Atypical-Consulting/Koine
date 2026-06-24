@@ -1564,10 +1564,16 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     try {
       const graph = buildContextMapGraph(res);
       contextMapGraphHandle = await renderContextMapGraph(stage, graph, () => seq === contextMapRenderSeq, {
-        // A context-node click filters the workspace to that bounded context (only when it's a real,
-        // known context — a synthetic dangling endpoint isn't a valid scope).
+        // A context-node click both FILTERS the workspace to that bounded context (only when it's a
+        // real, known context — a synthetic dangling endpoint isn't a valid scope) AND JUMPS to its
+        // `.koi` declaration (#290). The graph node carries the declaration span, so we reuse the same
+        // jump-to-source path the bottom tables use (deps.gotoSourceSpan); a span-less node (a dangling
+        // endpoint or a recovered parse) stays inert to navigation but still filters. This is the
+        // reachable navigate channel for the map: the canvas's own NODE_NAVIGATE_EVENT bubbles within
+        // the bottom strip, which is not under the diagrams container ide.tsx listens on.
         onContextClick: (n) => {
           if (contexts.includes(n.qualifiedName)) setActiveContext(n.qualifiedName);
+          if (n.sourceSpan) deps.gotoSourceSpan(n.sourceSpan);
         },
         onRelationSelect: (edge) => showRelationDetails(details, edge as ContextMapEdge | null),
         tooltip: (value) => contextMapTooltip(value),
