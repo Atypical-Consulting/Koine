@@ -1,0 +1,29 @@
+﻿// ==== Catalog/openapi.yaml ====
+openapi: 3.1.0
+info:
+  title: "Catalog API"
+  version: 1.0.0
+paths: {}
+components:
+  schemas:
+    Quantity:
+      type: object
+      properties:
+        amount:
+          type: integer
+          format: int32
+          minimum: 1
+          maximum: 999
+      required:
+        - amount
+    Sku:
+      type: object
+      properties:
+        code:
+          type: string
+          minLength: 3
+          maxLength: 12
+          pattern: "[A-Z]{3}-[0-9]+"
+      required:
+        - code
+

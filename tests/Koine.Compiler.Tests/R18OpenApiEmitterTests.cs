@@ -99,6 +99,45 @@ public class R18OpenApiEmitterTests
         return Verify(TestSupport.Render(result.Files)).UseDirectory("Snapshots");
     }
 
+    /// <summary>The §constraints fixture carries static length, regex, and numeric value-object invariants.</summary>
+    private const string ConstraintsFixture = """
+        context Catalog {
+          value Sku {
+            code: String
+            invariant code.length >= 3 "a SKU has at least three characters"
+            invariant code.length <= 12 "a SKU has at most twelve characters"
+            invariant code matches /[A-Z]{3}-[0-9]+/ "three letters, a dash, then digits"
+          }
+
+          value Quantity {
+            amount: Int
+            invariant amount >= 1 "at least one unit"
+            invariant amount <= 999 "at most 999 units"
+          }
+        }
+        """;
+
+    [Fact]
+    public Task Static_value_object_invariants_lower_to_schema_keywords()
+    {
+        var result = new KoineCompiler().Compile(
+            new[] { new SourceFile("constraints.koi", ConstraintsFixture) }, new OpenApiEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var yaml = result.Files.ShouldHaveSingleItem().Contents;
+
+        // The string length bound and the regex lower onto the `code` property's schema.
+        yaml.ShouldContain("minLength: 3");
+        yaml.ShouldContain("maxLength: 12");
+        yaml.ShouldContain("pattern: \"[A-Z]{3}-[0-9]+\"");
+
+        // The numeric bounds lower onto the `amount` property's schema.
+        yaml.ShouldContain("minimum: 1");
+        yaml.ShouldContain("maximum: 999");
+
+        return Verify(TestSupport.Render(result.Files)).UseDirectory("Snapshots");
+    }
+
     /// <summary>The §ordering fixture pairs an entity command with a query so both path shapes appear.</summary>
     private const string OrderingFixture = """
         context Ordering {
