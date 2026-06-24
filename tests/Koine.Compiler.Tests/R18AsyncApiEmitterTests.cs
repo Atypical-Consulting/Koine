@@ -35,4 +35,37 @@ public class R18AsyncApiEmitterTests
         file.RelativePath.ShouldEndWith("asyncapi.yaml");
         file.Contents.ShouldContain("asyncapi: 3.0.0");
     }
+
+    [Fact]
+    public Task Channels_and_messages_for_each_integration_event()
+    {
+        const string source = """
+            context Sales {
+              /// Announced when a customer places an order.
+              integration event OrderPlaced {
+                orderId: String
+              }
+              integration event OrderCancelled {
+                orderId: String
+              }
+              publishes OrderPlaced
+              publishes OrderCancelled
+            }
+            """;
+
+        var result = new KoineCompiler().Compile(source, new AsyncApiEmitter());
+
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+        var yaml = result.Files.ShouldHaveSingleItem().Contents;
+
+        // One channel per event, plus a matching message under components.
+        yaml.ShouldContain("channels:");
+        yaml.ShouldContain("  OrderCancelled:");
+        yaml.ShouldContain("  OrderPlaced:");
+        yaml.ShouldContain("components:");
+        yaml.ShouldContain("  messages:");
+        yaml.ShouldContain("$ref: '#/components/messages/OrderPlaced'");
+
+        return Verify(yaml).UseDirectory("Snapshots");
+    }
 }

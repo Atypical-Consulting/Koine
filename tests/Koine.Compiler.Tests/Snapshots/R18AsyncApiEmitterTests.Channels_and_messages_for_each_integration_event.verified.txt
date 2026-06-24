@@ -1,0 +1,23 @@
+﻿asyncapi: 3.0.0
+info:
+  title: Integration Events
+  version: 1.0.0
+channels:
+  OrderCancelled:
+    address: OrderCancelled
+    messages:
+      OrderCancelled:
+        $ref: '#/components/messages/OrderCancelled'
+  OrderPlaced:
+    address: OrderPlaced
+    messages:
+      OrderPlaced:
+        $ref: '#/components/messages/OrderPlaced'
+operations: {}
+components:
+  messages:
+    OrderCancelled:
+      name: OrderCancelled
+    OrderPlaced:
+      name: OrderPlaced
+      summary: "Announced when a customer places an order."

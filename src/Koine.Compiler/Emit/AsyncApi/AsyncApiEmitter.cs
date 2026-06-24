@@ -29,6 +29,8 @@ public sealed partial class AsyncApiEmitter : IEmitter
 
     public IReadOnlyList<EmittedFile> Emit(KoineModel model)
     {
+        var events = CollectEvents(model);
+
         var sb = new StringBuilder();
 
         sb.Append("asyncapi: ").Append(SpecVersion).Append('\n');
@@ -36,11 +38,49 @@ public sealed partial class AsyncApiEmitter : IEmitter
         sb.Append("  title: Integration Events\n");
         sb.Append("  version: 1.0.0\n");
 
-        // Channels, operations and components are filled by the partial slices once a model
-        // carries integration events; an empty graph still emits a minimal, valid document.
-        sb.Append("channels: {}\n");
+        // Channels and operations describe the event graph; an empty graph still emits a minimal,
+        // valid document (just the two empty maps). Components hold the reusable messages.
+        EmitChannels(sb, events);
         sb.Append("operations: {}\n");
 
+        if (events.Count > 0)
+        {
+            sb.Append("components:\n");
+            EmitMessages(sb, events);
+        }
+
         return new[] { new EmittedFile(FileName, sb.ToString()) };
+    }
+
+    /// <summary>
+    /// The distinct integration events in the model, keyed and ordered by name (Ordinal) for
+    /// deterministic output. An integration event is a published-language contract, so its name is
+    /// the contract identity — a re-declaration of the same name in another context names the same
+    /// channel/message, hence the de-duplication.
+    /// </summary>
+    private static IReadOnlyList<IntegrationEventDecl> CollectEvents(KoineModel model)
+    {
+        var byName = new SortedDictionary<string, IntegrationEventDecl>(StringComparer.Ordinal);
+        foreach (ContextNode ctx in model.Contexts)
+        {
+            foreach (IntegrationEventDecl ie in ctx.AllTypeDecls().OfType<IntegrationEventDecl>())
+            {
+                byName.TryAdd(ie.Name, ie);
+            }
+        }
+
+        return byName.Values.ToList();
+    }
+
+    /// <summary>
+    /// Renders <paramref name="text"/> as a safe single-line YAML scalar: folded to one line and
+    /// double-quoted with the minimal escapes, so doc/summary text carrying YAML metacharacters
+    /// (<c>:</c>, <c>#</c>, …) stays valid.
+    /// </summary>
+    private static string YamlScalar(string text)
+    {
+        var folded = text.Replace('\r', ' ').Replace('\n', ' ').Trim();
+        var escaped = folded.Replace("\\", "\\\\").Replace("\"", "\\\"");
+        return "\"" + escaped + "\"";
     }
 }
