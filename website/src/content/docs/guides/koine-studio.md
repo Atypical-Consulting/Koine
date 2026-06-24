@@ -156,6 +156,20 @@ You need a .NET SDK, Node/npm, and a Rust toolchain on `PATH`. On Linux, Tauri v
 WebKitGTK / libsoup system packages — see the `Koine Studio` CI workflow for the exact `apt` list.
 :::
 
+### Store inspector (dev only)
+
+While developing the IDE, a read-only **store inspector** overlay shows exactly what the app's
+Zustand store holds right now — selection, active context, the panel/view fields, the active file,
+the dirty-files and diagnostics rollups, and a collapsible "Raw state" dump of the whole store. It's
+the tool for diagnosing cross-panel-sync bugs. Open it from the command palette (<kbd>Cmd/Ctrl</kbd>
++<kbd>K</kbd>) → **Toggle store inspector (debug)**.
+
+The command is registered **only in dev builds**. Both `run-ide` and `run-ide-web` launch Vite's
+*serve* command, where `import.meta.env.DEV === true`, so the inspector is available there. Published
+builds go through `vite build` (`import.meta.env.DEV === false`), where the command isn't registered
+and the panel's code is excluded from the bundle — so it never appears in the shipped desktop app or
+the deployed web playground.
+
 ## See also
 
 - [Editor tooling](/Koine/guides/editor-tooling/) — the TextMate grammar, `koine lsp`, and the VS Code extension.
