@@ -329,7 +329,6 @@ describe('welcome recent management', () => {
   beforeEach(() => {
     localStorage.clear();
     document.body.innerHTML = '';
-    vi.stubGlobal('confirm', () => true);
   });
 
   afterEach(() => {
@@ -347,10 +346,19 @@ describe('welcome recent management', () => {
     expect(document.querySelectorAll('.koi-welcome-recent-item').length).toBe(1);
   });
 
-  test('clear-all empties the list', () => {
+  test('clear-all empties the list', async () => {
     localStorage.setItem(KEY, JSON.stringify(['/a', '/b']));
     createWelcome(makeCallbacks()).show();
     (document.querySelector('.koi-welcome-recent-clear') as HTMLElement).click();
+
+    // Clearing now routes through Koine's confirm modal (not window.confirm); approve it.
+    const confirmBtn = [...document.querySelectorAll<HTMLButtonElement>('.koi-confirm-btn')].find(
+      (b) => b.textContent === 'Clear',
+    );
+    expect(confirmBtn).toBeDefined();
+    confirmBtn!.click();
+    await new Promise((r) => setTimeout(r, 0)); // let koiConfirm's promise resolve + re-render
+
     expect(document.querySelector('.koi-welcome-empty')).not.toBeNull();
   });
 });

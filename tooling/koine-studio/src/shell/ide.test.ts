@@ -696,9 +696,16 @@ describe('ide init() — Save to disk', () => {
   test('Save to disk writes the open buffers as a named project', async () => {
     await boot();
     const saveSpy = (fakePlatform.current as FakePlatform).saveProjectToRoot;
-    vi.stubGlobal('prompt', vi.fn(() => 'my-pizzeria'));
 
     (document.getElementById('btn-save-project') as HTMLButtonElement).click();
+    await settleBoot(); // Koine's prompt modal opens (no window.prompt)
+
+    // Name the project in the modal field and confirm with the primary action.
+    const input = document.querySelector('.koi-prompt-input') as HTMLInputElement;
+    expect(input).not.toBeNull();
+    input.value = 'my-pizzeria';
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    (document.querySelector('.koi-confirm-btn-primary') as HTMLButtonElement).click();
     await settleBoot();
 
     expect(saveSpy).toHaveBeenCalledTimes(1);
@@ -710,9 +717,14 @@ describe('ide init() — Save to disk', () => {
   test('Save to disk does nothing when the name prompt is cancelled', async () => {
     await boot();
     const saveSpy = (fakePlatform.current as FakePlatform).saveProjectToRoot;
-    vi.stubGlobal('prompt', vi.fn(() => null));
 
     (document.getElementById('btn-save-project') as HTMLButtonElement).click();
+    await settleBoot();
+
+    // Dismiss the prompt with Cancel → ask() resolves null → nothing is written. The primary button
+    // is unique to the prompt dialog, so reach its modal through it to find that dialog's Cancel.
+    const promptModal = (document.querySelector('.koi-confirm-btn-primary') as HTMLElement).closest('.koi-modal')!;
+    (promptModal.querySelector('.koi-confirm-btn:not(.koi-confirm-btn-primary)') as HTMLButtonElement).click();
     await settleBoot();
 
     expect(saveSpy).not.toHaveBeenCalled();

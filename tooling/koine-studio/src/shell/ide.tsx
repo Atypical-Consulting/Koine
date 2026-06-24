@@ -81,7 +81,7 @@ import { UnsavedIndicator } from '@/shell/UnsavedIndicator';
 import { WorkspaceProblemsBadge } from '@/diagnostics/WorkspaceProblemsBadge';
 import { StoreInspector } from '@/shell/StoreInspector';
 import { createWorkspaceController, type WorkspaceController } from '@/shell/workspaceController';
-import { createConfirmDialog } from '@/shared/overlay';
+import { createConfirmDialog, createPromptDialog } from '@/shared/overlay';
 
 // --- workspace fs contract ---------------------------------------------------
 // `KoiFile` (path / name / relPath) is provided by the host platform layer (src/host), whose
@@ -692,7 +692,14 @@ export function init(): () => void {
   async function applyDiagramConnect(detail: DiagramConnectDetail): Promise<void> {
     const targetSimple = detail.targetQualifiedName.slice(detail.targetQualifiedName.lastIndexOf('.') + 1);
     const suggested = targetSimple.charAt(0).toLowerCase() + targetSimple.slice(1);
-    const fieldName = window.prompt(`Add a field on ${detail.sourceLabel} referencing ${detail.targetLabel}:`, suggested)?.trim();
+    const fieldName = await promptDialog.ask({
+      title: 'Add field',
+      message: `On ${detail.sourceLabel}, referencing ${detail.targetLabel}.`,
+      label: 'Field name',
+      initialValue: suggested,
+      mono: true,
+      confirmLabel: 'Add field',
+    });
     if (!fieldName) return;
     await applyStructuredEdit(
       { kind: 'addField', target: detail.sourceQualifiedName, name: fieldName, type: targetSimple },
@@ -702,7 +709,13 @@ export function init(): () => void {
 
   // Removing a relationship = removing the field that backs it.
   async function applyDiagramDisconnect(detail: DiagramDisconnectDetail): Promise<void> {
-    if (!window.confirm(`Remove ${detail.label}? This rewrites the .koi source.`)) return;
+    const ok = await confirmDialog.ask({
+      title: `Remove ${detail.label}?`,
+      message: 'This rewrites the .koi source.',
+      confirmLabel: 'Remove',
+      danger: true,
+    });
+    if (!ok) return;
     await applyStructuredEdit({ kind: 'removeMember', target: detail.backingMember }, `Removed ${detail.label}`);
   }
 
@@ -731,7 +744,14 @@ export function init(): () => void {
       scope = all[0];
     }
     const kind = detail?.kind ?? 'value';
-    const name = window.prompt(`New ${kind} in ${scope}:`, ADD_DEFAULT_NAME[kind])?.trim();
+    const name = await promptDialog.ask({
+      title: `New ${kind}`,
+      message: `In ${scope}.`,
+      label: 'Name',
+      initialValue: ADD_DEFAULT_NAME[kind],
+      mono: true,
+      confirmLabel: 'Create',
+    });
     if (!name) return;
     // The AddNodeKind string IS the construct keyword the server's TryAddType switches on (StructuredEdit.Type).
     await applyStructuredEdit({ kind: 'addType', target: scope, name, type: kind }, `Added ${name} to ${scope}`);
@@ -1176,6 +1196,8 @@ export function init(): () => void {
   const help = createHelpOverlay(helpRows());
   // Guards the user-initiated New command against silently discarding unsaved work.
   const confirmDialog = createConfirmDialog();
+  // Single-field text prompts (name a new construct, a field, a project) — Koine's own modal, not the browser's.
+  const promptDialog = createPromptDialog();
 
   // Desktop window-close guard (Tauri only): mirror the web beforeunload — confirm before closing
   // the window when any buffer is dirty. The browser host omits onCloseRequested (its beforeunload
@@ -1318,9 +1340,17 @@ export function init(): () => void {
       setStatus('nothing to save', 'error');
       return;
     }
-    const suggested = workspace.folderRootToken() ? platform.folderName(workspace.folderRootToken()) : 'my-project';
+    let seedValue = workspace.folderRootToken() ? platform.folderName(workspace.folderRootToken()) : 'my-project';
+    let seedError = ''; // a name clash from a prior attempt, shown inline on the re-prompt
     for (;;) {
-      const name = window.prompt('Save project as:', suggested)?.trim();
+      const name = await promptDialog.ask({
+        title: 'Save project',
+        message: 'Saved to your projects folder and added to Recent.',
+        label: 'Project name',
+        initialValue: seedValue,
+        confirmLabel: 'Save',
+        error: seedError,
+      });
       if (!name) return; // cancelled / empty
       try {
         const token = await platform.saveProjectToRoot(name, files);
@@ -1330,8 +1360,10 @@ export function init(): () => void {
         return;
       } catch (e) {
         if (String(e instanceof Error ? e.message : e).includes('already exists')) {
-          window.alert(`A project named "${name}" already exists — choose another name.`);
-          continue; // re-prompt
+          // Re-ask with the clash surfaced inline (no second alert) and the rejected name pre-filled.
+          seedError = `A project named "${name}" already exists — choose another name.`;
+          seedValue = name;
+          continue;
         }
         setStatus('save to disk failed', 'error');
         console.error('saveProjectToDisk failed:', e);
