@@ -43,3 +43,21 @@
 .koi-confirm-btn-danger:hover {
   background: color-mix(in srgb, var(--koi-error) 26%, transparent);
 }
+
+/* Filled accent button for a dialog's constructive default action (the prompt's Save/Create/Add).
+   Confirms stay ghost yes/no; a prompt has one clear thing to do, so it earns a solid Enter target. */
+.koi-confirm-btn-primary {
+  border-color: color-mix(in srgb, var(--koi-accent) 60%, var(--koi-line));
+  background: var(--koi-accent);
+  color: var(--koi-paper);
+  font-weight: 600;
+}
+
+.koi-confirm-btn-primary:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--koi-accent) 88%, #fff);
+}
+
+.koi-confirm-btn-primary:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}

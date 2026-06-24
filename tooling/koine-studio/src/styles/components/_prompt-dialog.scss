@@ -1,0 +1,71 @@
+/* --- prompt dialog: Koine's native replacement for window.prompt, on the shared createModal chrome.
+   The signature is here — the field is the editor in miniature (identifiers wear the mono face) and
+   validation surfaces INLINE, in the compiler's own error colour, instead of a second browser alert. --- */
+.koi-prompt {
+  display: flex;
+  flex-direction: column;
+  gap: var(--koi-space-2);
+}
+
+.koi-prompt-msg {
+  margin: 0;
+  font-family: var(--koi-font-body);
+  font-size: var(--koi-text-base);
+  color: var(--koi-muted);
+  line-height: 1.45;
+}
+
+.koi-prompt-msg[hidden] {
+  display: none;
+}
+
+.koi-prompt-label {
+  font-family: var(--koi-font-body);
+  font-size: var(--koi-text-sm);
+  font-weight: 500;
+  color: var(--koi-ink-soft);
+}
+
+.koi-prompt-input {
+  width: 100%;
+  box-sizing: border-box;
+  background: var(--koi-surface);
+  color: var(--koi-fg);
+  border: 1px solid var(--koi-line);
+  border-radius: var(--koi-radius-sm);
+  padding: var(--koi-space-2) var(--koi-space-2-75);
+  font-family: var(--koi-font-body);
+  font-size: var(--koi-text-base-plus);
+}
+
+.koi-prompt-input.is-mono {
+  font-family: var(--koi-font-mono);
+}
+
+.koi-prompt-input:hover {
+  border-color: color-mix(in srgb, var(--koi-accent) 50%, var(--koi-line));
+}
+
+.koi-prompt-input:focus-visible {
+  outline: none;
+  border-color: var(--koi-accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--koi-accent) 22%, transparent);
+}
+
+.koi-prompt-input.is-invalid {
+  border-color: var(--koi-error);
+}
+
+.koi-prompt-input.is-invalid:focus-visible {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--koi-error) 22%, transparent);
+}
+
+/* Always present (min-height reserved) so the panel doesn't jump the moment an error appears. */
+.koi-prompt-error {
+  margin: 0;
+  min-height: 1.15em;
+  font-family: var(--koi-font-body);
+  font-size: var(--koi-text-sm);
+  line-height: 1.15;
+  color: var(--koi-error);
+}

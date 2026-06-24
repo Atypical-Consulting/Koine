@@ -8,7 +8,7 @@
 // forgets everything, and the list scrolls within its own container so a long history never grows the card.
 import { getRecentFolders, removeRecentFolder, pinRecentFolder, clearRecentFolders } from '@/settings/persistence';
 import { LOGO_SVG } from '@/shared/logo';
-import { registerOverlay } from '@/shared/overlay';
+import { registerOverlay, koiConfirm } from '@/shared/overlay';
 import { TEMPLATES, type Template } from '@/welcome/templates';
 
 /** What the welcome actions delegate to; the host (ide.ts) performs the real work. */
@@ -414,10 +414,16 @@ export function createWelcome(
     clear.className = 'koi-welcome-recent-clear';
     clear.textContent = 'Clear recent folders';
     clear.addEventListener('click', () => {
-      if (!confirm('Clear all recent folders?')) return;
-      clearRecentFolders();
-      recentQuery = '';
-      renderRecent();
+      void koiConfirm({
+        title: 'Clear recent folders?',
+        message: 'This removes every folder from the Recent list. Your projects on disk are untouched.',
+        confirmLabel: 'Clear',
+      }).then((ok) => {
+        if (!ok) return;
+        clearRecentFolders();
+        recentQuery = '';
+        renderRecent();
+      });
     });
     recent.appendChild(clear);
   }

@@ -30,6 +30,7 @@ import {
   type DiagramPosition,
 } from '@/diagrams/diagramContract';
 import { createBrowserLayoutStore } from '@/diagrams/layoutStore';
+import { koiConfirm, koiPrompt } from '@/shared/overlay';
 
 // The DDD palette as literal hex (theme-independent — abstracts/_ddd.scss never redefines it per theme),
 // used for the maxGraph cell SHAPE fill/stroke. The shape is what the Outline minimap draws and what
@@ -381,15 +382,24 @@ export function buildCanvas(
     const v = nodeValue(evt.getProperty('cell') as MxCell | null);
     if (!v || !canRename(v)) return;
     const current = v.label;
-    const next = window.prompt(`Rename ${current} to:`, current)?.trim();
-    if (!next || next === current) return;
     const s = v.sourceSpan!; // canRename guarantees a span; line/column is the name position for LSP rename
-    container.dispatchEvent(
-      new CustomEvent<DiagramNodeEditDetail>(NODE_EDIT_EVENT, {
-        bubbles: true,
-        detail: { qualifiedName: v.qualifiedName, action: 'rename', newName: next, label: current, line: s.line, column: s.column },
-      }),
-    );
+    // Koine's own prompt (not window.prompt): the field carries the identifier, so it wears the mono face.
+    void koiPrompt({
+      title: 'Rename',
+      message: 'Updates every reference in the .koi source.',
+      label: 'New name',
+      initialValue: current,
+      mono: true,
+      confirmLabel: 'Rename',
+    }).then((next) => {
+      if (!next || next === current) return;
+      container.dispatchEvent(
+        new CustomEvent<DiagramNodeEditDetail>(NODE_EDIT_EVENT, {
+          bubbles: true,
+          detail: { qualifiedName: v.qualifiedName, action: 'rename', newName: next, label: current, line: s.line, column: s.column },
+        }),
+      );
+    });
   });
 
   // Right-click a node → delete it; right-click a field-backed edge → remove that field. Gated on editing.
@@ -402,14 +412,21 @@ export function buildCanvas(
     const node = nodeValue(cell);
     if (node) {
       if (!canDelete(node)) return;
-      evt.preventDefault();
-      if (!window.confirm(`Delete ${node.label}? This rewrites the .koi source.`)) return;
-      container.dispatchEvent(
-        new CustomEvent<DiagramNodeEditDetail>(NODE_EDIT_EVENT, {
-          bubbles: true,
-          detail: { qualifiedName: node.qualifiedName, action: 'delete', label: node.label },
-        }),
-      );
+      evt.preventDefault(); // suppress the native menu now, regardless of the async confirm's outcome
+      void koiConfirm({
+        title: `Delete ${node.label}?`,
+        message: 'This rewrites the .koi source.',
+        confirmLabel: 'Delete',
+        danger: true,
+      }).then((ok) => {
+        if (!ok) return;
+        container.dispatchEvent(
+          new CustomEvent<DiagramNodeEditDetail>(NODE_EDIT_EVENT, {
+            bubbles: true,
+            detail: { qualifiedName: node.qualifiedName, action: 'delete', label: node.label },
+          }),
+        );
+      });
       return;
     }
     const edge = cell.value as DiagramEdge | undefined;

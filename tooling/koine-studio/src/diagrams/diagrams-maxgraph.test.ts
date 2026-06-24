@@ -1,6 +1,11 @@
-import { describe, expect, test, beforeAll, afterEach, vi } from 'vitest';
+import { describe, expect, test, beforeAll, afterEach, vi, type Mock } from 'vitest';
 import * as mx from '@maxgraph/core';
 import { selectDomainGraphs, buildCanvas, isClassNode, nodeLabelHtml, nodeSize, contextOf, createMaxGraphRenderer } from '@/diagrams/diagrams-maxgraph';
+
+// The diagram's rename/delete gestures now route through Koine's own modal (koiPrompt/koiConfirm),
+// not window.prompt/confirm. Stub them so the tests drive the async dialog deterministically.
+vi.mock('@/shared/overlay', () => ({ koiPrompt: vi.fn(), koiConfirm: vi.fn() }));
+import { koiPrompt, koiConfirm } from '@/shared/overlay';
 import {
   setDiagramEditing,
   setDiagramLayoutStore,
@@ -25,6 +30,7 @@ afterEach(() => {
   setDiagramLayoutStore(null);
   localStorage.clear();
   vi.restoreAllMocks();
+  vi.clearAllMocks(); // also clear the koiPrompt/koiConfirm call history between editing-gesture tests
 });
 
 function makeContainer(): HTMLElement {
@@ -327,9 +333,9 @@ describe('editing gestures: rename (double-click) + delete (right-click)', () =>
     node({ id: 'Ordering.Order', qualifiedName: 'Ordering.Order', label: 'Order', kind: 'aggregate-root', stereotype: 'aggregate root',
       sourceSpan: { file: 'file:///m.koi', line: 5, column: 3, endLine: 5, endColumn: 8, offset: 0, length: 5 }, ...over });
 
-  test('double-clicking an editable node prompts and bubbles NODE_EDIT rename with the name position', () => {
+  test('double-clicking an editable node prompts and bubbles NODE_EDIT rename with the name position', async () => {
     setDiagramEditing(true);
-    window.prompt = vi.fn(() => 'PurchaseOrder') as typeof window.prompt;
+    (koiPrompt as Mock).mockResolvedValue('PurchaseOrder');
     const merged: DiagramGraph = { nodes: [spanned()], edges: [] };
     const container = makeContainer();
     const handle = buildCanvas(mx, container, merged);
@@ -337,7 +343,9 @@ describe('editing gestures: rename (double-click) + delete (right-click)', () =>
       let detail: any = null;
       container.addEventListener('koi-diagram-node-edit', (e) => { detail = (e as CustomEvent).detail; });
       handle.graph.fireEvent(new mx.EventObject(mx.InternalEvent.DOUBLE_CLICK, 'cell', handle.cells.get('Ordering.Order')));
-      expect(detail).toMatchObject({ qualifiedName: 'Ordering.Order', action: 'rename', newName: 'PurchaseOrder', label: 'Order', line: 5, column: 3 });
+      await vi.waitFor(() =>
+        expect(detail).toMatchObject({ qualifiedName: 'Ordering.Order', action: 'rename', newName: 'PurchaseOrder', label: 'Order', line: 5, column: 3 }),
+      );
     } finally {
       handle.dispose();
     }
@@ -345,7 +353,6 @@ describe('editing gestures: rename (double-click) + delete (right-click)', () =>
 
   test('double-click is inert when editing is off', () => {
     setDiagramEditing(false);
-    window.prompt = vi.fn(() => 'X') as typeof window.prompt;
     const container = makeContainer();
     const handle = buildCanvas(mx, container, { nodes: [spanned()], edges: [] });
     try {
@@ -353,14 +360,15 @@ describe('editing gestures: rename (double-click) + delete (right-click)', () =>
       container.addEventListener('koi-diagram-node-edit', () => { fired = true; });
       handle.graph.fireEvent(new mx.EventObject(mx.InternalEvent.DOUBLE_CLICK, 'cell', handle.cells.get('Ordering.Order')));
       expect(fired).toBe(false);
+      expect(koiPrompt).not.toHaveBeenCalled(); // never even reaches the dialog
     } finally {
       handle.dispose();
     }
   });
 
-  test('right-clicking a node confirms and bubbles NODE_EDIT delete', () => {
+  test('right-clicking a node confirms and bubbles NODE_EDIT delete', async () => {
     setDiagramEditing(true);
-    window.confirm = vi.fn(() => true) as typeof window.confirm;
+    (koiConfirm as Mock).mockResolvedValue(true);
     const container = makeContainer();
     const handle = buildCanvas(mx, container, { nodes: [spanned()], edges: [] });
     try {
@@ -369,7 +377,27 @@ describe('editing gestures: rename (double-click) + delete (right-click)', () =>
       let detail: any = null;
       container.addEventListener('koi-diagram-node-edit', (e) => { detail = (e as CustomEvent).detail; });
       container.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 10, clientY: 10, button: 2 }));
-      expect(detail).toMatchObject({ qualifiedName: 'Ordering.Order', action: 'delete', label: 'Order' });
+      await vi.waitFor(() =>
+        expect(detail).toMatchObject({ qualifiedName: 'Ordering.Order', action: 'delete', label: 'Order' }),
+      );
+    } finally {
+      handle.dispose();
+    }
+  });
+
+  test('declining the delete confirm bubbles nothing', async () => {
+    setDiagramEditing(true);
+    (koiConfirm as Mock).mockResolvedValue(false);
+    const container = makeContainer();
+    const handle = buildCanvas(mx, container, { nodes: [spanned()], edges: [] });
+    try {
+      handle.graph.getCellAt = (() => handle.cells.get('Ordering.Order')) as typeof handle.graph.getCellAt;
+      let fired = false;
+      container.addEventListener('koi-diagram-node-edit', () => { fired = true; });
+      container.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 10, clientY: 10, button: 2 }));
+      await vi.waitFor(() => expect(koiConfirm).toHaveBeenCalled());
+      await new Promise((r) => setTimeout(r, 0)); // let the (resolved-false) .then run
+      expect(fired).toBe(false);
     } finally {
       handle.dispose();
     }
