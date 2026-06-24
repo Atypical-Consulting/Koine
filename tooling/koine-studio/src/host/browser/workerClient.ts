@@ -124,5 +124,8 @@ export function createWorkerClient(worker: WorkerLike): WorkerClient {
  */
 export function createKoineWorkerClient(): WorkerClient {
   const worker = new Worker(new URL('./koine.worker.ts', import.meta.url), { type: 'module' });
-  return createWorkerClient(worker);
+  // A real Worker satisfies WorkerLike at runtime (postMessage / onmessage receiving `{data}` /
+  // terminate); the cast bridges the DOM lib's over-specified `MessageEvent`-typed `onmessage`, which
+  // structural variance otherwise rejects against our minimal `{ data: unknown }` shape.
+  return createWorkerClient(worker as unknown as WorkerLike);
 }
