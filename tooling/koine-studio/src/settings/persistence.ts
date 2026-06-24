@@ -10,6 +10,7 @@
 
 import { loadSecret, saveSecret } from '@/ai/secrets';
 import type { ChatMessage } from '@/ai/ai';
+import { sanitizeGroups, sanitizeNotes, type DiagramGroup, type DiagramNote } from '@/diagrams/diagramContract';
 
 // --- settings model ----------------------------------------------------------
 
@@ -39,6 +40,10 @@ export interface Settings {
   /** Soft-wrap long editor lines instead of scrolling horizontally. */
   wordWrap: boolean;
   formatOnSave: boolean;
+  /** Persist dirty buffers automatically after a short idle, instead of only on explicit save. */
+  autoSave: boolean;
+  /** Show the CodeMirror minimap (document overview rail) on the editor's right edge. */
+  enableMinimap: boolean;
   lspTrace: 'off' | 'messages' | 'verbose';
   /** Which AI backend the assistant uses. */
   aiProvider: 'anthropic' | 'openai';
@@ -73,6 +78,8 @@ export const DEFAULT_SETTINGS: Settings = {
   lineHeight: 1.6,
   wordWrap: false,
   formatOnSave: true,
+  autoSave: false,
+  enableMinimap: false,
   lspTrace: 'off',
   aiProvider: 'anthropic',
   aiBaseUrl: 'https://api.openai.com/v1',
@@ -211,6 +218,9 @@ export function loadSettings(): Settings {
       lineHeight: coerceLineHeight(parsed.lineHeight),
       wordWrap: typeof parsed.wordWrap === 'boolean' ? parsed.wordWrap : DEFAULT_SETTINGS.wordWrap,
       formatOnSave: typeof parsed.formatOnSave === 'boolean' ? parsed.formatOnSave : DEFAULT_SETTINGS.formatOnSave,
+      autoSave: typeof parsed.autoSave === 'boolean' ? parsed.autoSave : DEFAULT_SETTINGS.autoSave,
+      enableMinimap:
+        typeof parsed.enableMinimap === 'boolean' ? parsed.enableMinimap : DEFAULT_SETTINGS.enableMinimap,
       lspTrace: coerceTrace(parsed.lspTrace),
       aiProvider: parsed.aiProvider === 'openai' ? 'openai' : DEFAULT_SETTINGS.aiProvider,
       aiBaseUrl:
@@ -511,6 +521,42 @@ export function clearDiagramPositions(key: string): void {
   } catch {
     // storage unavailable — nothing to clear
   }
+}
+
+// --- diagram canvas annotations (notes + groups, #255) -----------------------
+// Canvas-only annotations (free-text notes and node groupings) are a VIEW concern exactly like positions
+// above — they never round-trip into `.koi`. In browser/scratch mode they live in localStorage under a
+// sibling key (positions keep their own key, so the position storage stays backward-compatible); in folder
+// mode the committable koine.layout.json holds both (see layoutStore.ts). Every read is guarded and
+// malformed entries are dropped individually (shared sanitizers), so a hand-edited key can't break the canvas.
+const DIAGRAM_ANNOTATIONS_KEY_PREFIX = 'koine.studio.diagramAnnotations.';
+
+/** The canvas-only annotations for a diagram: free-text notes plus node groupings. */
+export interface DiagramAnnotations {
+  notes: DiagramNote[];
+  groups: DiagramGroup[];
+}
+
+/** The persisted annotations for a diagram key; empty notes/groups when absent or malformed. */
+export function loadDiagramAnnotations(key: string): DiagramAnnotations {
+  const raw = readRaw(DIAGRAM_ANNOTATIONS_KEY_PREFIX + key);
+  if (raw === null) return { notes: [], groups: [] };
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (parsed === null || typeof parsed !== 'object') return { notes: [], groups: [] };
+    const p = parsed as Record<string, unknown>;
+    return { notes: sanitizeNotes(p.notes), groups: sanitizeGroups(p.groups) };
+  } catch {
+    return { notes: [], groups: [] };
+  }
+}
+
+/** Persist a diagram's canvas annotations (best-effort). */
+export function saveDiagramAnnotations(key: string, annotations: DiagramAnnotations): void {
+  writeRaw(
+    DIAGRAM_ANNOTATIONS_KEY_PREFIX + key,
+    JSON.stringify({ notes: annotations.notes, groups: annotations.groups }),
+  );
 }
 
 // --- active bounded context (#146) -------------------------------------------

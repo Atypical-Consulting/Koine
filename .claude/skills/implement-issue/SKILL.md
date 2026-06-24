@@ -69,9 +69,10 @@ in the plan.
 2. **Read the plan** — fetch the `🛠️ Implementation plan` from the issue body (or a comment, on older issues); save it and note where it lives.
 3. **Pick the execution mode** — assess complexity → *Inline (Extra)* or *Subagent-per-task (Ultracode)*.
 4. **Create the worktree** — via `superpowers:using-git-worktrees`; branch off `main`.
-5. **Open the draft PR** — empty scaffold commit, push, `gh pr create --draft` linking the issue.
+5. **Open the draft PR** — empty scaffold commit, push, `gh pr create --draft` linking the issue; the
+   PR title ends with `(#<issue>)`.
 6. **Loop until every task is checked** — implement the next unchecked task → verify green → commit
-   → tick that task's checkboxes on the issue → push.
+   → tick that task on the issue plan *and* the PR description → push.
 7. **Code review** — run the `code-review` skill, apply + commit the fixes, push.
 8. **Sync with `main`** — merge the latest `origin/main` into the branch and resolve any conflicts so
    the PR merges clean (Koine hot-spots: version, `CHANGELOG`, snapshots, lockfiles — see reference).
@@ -165,21 +166,39 @@ that worktree. If a worktree/branch for this issue already exists (resume case),
 The user wants the PR visible as a **draft before** the implementation loop, so create it up front.
 A PR needs the branch to be ahead of `main`, so land an empty scaffold commit, push, then open it:
 
+**The PR title must end with `(#<issue>)`** — the issue title followed by the issue number in
+parentheses, e.g. `Surface the Rust emitter target in Koine Studio (IDE) (#172)`. The repo
+**squash-merges** PRs, and GitHub appends the *PR* number to the squash commit's title — so titling the
+PR with the *issue* number makes the final `main` commit carry **both**, matching the repo's history
+(`… (#254) (#274)`, `… (#171) (#252)` — issue first, PR second). Drop it and the merged commit records
+only the PR number, losing the link back to the issue at a glance.
+
 ```bash
 git -c user.email=phmatray@gmail.com -c user.name="Philippe Matray" \
   commit --allow-empty -m "chore(#$ISSUE): scaffold draft PR for <title>"
 git push -u origin <branch>
 gh pr create --draft --base main --head <branch> \
-  --title "<title>" \
+  --title "<title> (#$ISSUE)" \
   --body "Implements #$ISSUE.
 
 Closes #$ISSUE.
 
-Executing the implementation plan task-by-task; checkboxes are ticked on the issue as each
-task lands. Opened as a draft — will be marked ready after the final task and a code-review pass."
+Executing the implementation plan task-by-task; the checklist below — and the plan on the issue — are
+ticked as each task lands. Opened as a draft — will be marked ready after the final task and a
+code-review pass.
+
+### Plan
+- [ ] Task 1: <name>
+- [ ] Task 2: <name>
+<one \`- [ ] Task N: <name>\` line per \`### Task N\` heading in the plan>"
 ```
 
 Capture the PR URL/number. (If a PR for this branch already exists, skip creation and reuse it.)
+
+Mirror the plan's `### Task N` headings into the body as one `- [ ] Task N: <name>` line each — a
+task-level checklist (coarser than the issue's per-step boxes) that gives a reviewer at-a-glance
+progress on the PR. Step 6 keeps it in lock-step with the issue. The issue plan stays the **canonical**
+source of truth — it's what a resumed run reads — and the PR list is its synced mirror.
 
 ## Step 6 — The implementation loop
 
@@ -204,21 +223,30 @@ For each task in plan order whose checkboxes aren't all `- [x]` yet:
      commit -am "<message from the task's last - [ ] step>"
    ```
 
-4. **Tick the task's checkboxes on the issue.** Flip every `- [ ]` line of *this task* (only this
-   task) to `- [x]` in `/tmp/koine-plan-$ISSUE.md`, then PATCH the source back. Tick at task
-   granularity — the task is committed and verified, so the whole block is genuinely done. PATCH the
-   issue **body** when the plan lives there, or the **comment** on legacy issues:
-   ```bash
-   if [ "$PLAN_SRC" = body ]; then
-     jq -Rs '{body: .}' /tmp/koine-plan-$ISSUE.md \
-       | gh api "repos/{owner}/{repo}/issues/$ISSUE" -X PATCH --input -
-   else
-     jq -Rs '{body: .}' /tmp/koine-plan-$ISSUE.md \
-       | gh api "repos/{owner}/{repo}/issues/comments/$PLAN_COMMENT_ID" -X PATCH --input -
-   fi
-   ```
-   See `references/github-mechanics.md` for a robust flip (Edit-tool per line; never a blunt
-   `sed s/\[ \]/[x]/g` that would tick *other* tasks too).
+4. **Tick the task — on the issue plan AND the PR description.** The task is committed and verified, so
+   the whole block is genuinely done; flip it in **both** places so neither view goes stale (the issue
+   stays canonical, the PR list is its mirror — keep them in lock-step).
+   - **Issue plan** — flip every `- [ ]` line of *this task* (only this task) to `- [x]` in
+     `/tmp/koine-plan-$ISSUE.md`, then PATCH the source back: the issue **body** when the plan lives
+     there, or the **comment** on legacy issues:
+     ```bash
+     if [ "$PLAN_SRC" = body ]; then
+       jq -Rs '{body: .}' /tmp/koine-plan-$ISSUE.md \
+         | gh api "repos/{owner}/{repo}/issues/$ISSUE" -X PATCH --input -
+     else
+       jq -Rs '{body: .}' /tmp/koine-plan-$ISSUE.md \
+         | gh api "repos/{owner}/{repo}/issues/comments/$PLAN_COMMENT_ID" -X PATCH --input -
+     fi
+     ```
+   - **PR description** — flip *this task's* `- [ ] Task N: …` line in the PR's own `### Plan` list to
+     `- [x]`, then write the body back:
+     ```bash
+     gh pr view $PR_NUMBER --json body --jq .body > /tmp/koine-pr-$ISSUE.md
+     # Edit-tool per line: flip only this task's "- [ ] Task N:" line to "- [x] Task N:".
+     gh pr edit $PR_NUMBER --body-file /tmp/koine-pr-$ISSUE.md
+     ```
+   In both files flip with the **Edit tool per line** — never a blunt `sed s/\[ \]/[x]/g`, which would
+   tick *other* tasks too. See `references/github-mechanics.md`.
 
 5. **Push** so the PR reflects the new commit: `git push`.
 

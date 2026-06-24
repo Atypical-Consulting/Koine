@@ -46,6 +46,7 @@ import { sanitizeProjectName } from '@/export/generateProject';
 import { buildSourceZip } from '@/export/sourceZip';
 import { formatChord } from '@/shared/platform';
 import {
+  DIAGRAM_ANNOTATION_CREATE_EVENT,
   DIAGRAM_CONNECT_EVENT,
   DIAGRAM_DISCONNECT_EVENT,
   DIAGRAM_RELAYOUT_EVENT,
@@ -55,6 +56,8 @@ import {
   setDiagramEditing,
   type AddNodeKind,
   type AggregateMemberKind,
+  type CanvasAnnotationKind,
+  type DiagramAnnotationCreateDetail,
   type DiagramConnectDetail,
   type DiagramDisconnectDetail,
   type DiagramNodeEditDetail,
@@ -350,6 +353,7 @@ export function init(): () => void {
     parent: el('editor-pane'),
     doc: initialDoc,
     lineWrap: settings.wordWrap,
+    minimap: settings.enableMinimap,
     lsp,
     status: statusEl,
     diagCount: diagCountEl,
@@ -383,6 +387,8 @@ export function init(): () => void {
     if (!history.isRestoring) history.noteEdit();
     // Re-render the tree only when the active file's dirty dot just appeared (cheap path).
     if (becameDirty) workspace.renderTree();
+    // Arm the idle auto-save debounce (a no-op unless Settings → Editor → Auto-save is on).
+    workspace.scheduleAutoSave();
   });
 
   const treeBodyEl = el<HTMLElement>('filetree-body');
@@ -485,6 +491,7 @@ export function init(): () => void {
     onSaveGlossaryDescription: (entry, text) => saveDescription(entry, text),
     onApplyStructuredEdit: (edit, successMsg) => void applyStructuredEdit(edit, successMsg),
     onAddConstruct: (kind) => void applyDiagramAddType({ kind }),
+    onAddAnnotation: (kind) => createCanvasAnnotation(kind),
     onAddAggregateMember: (kind, aggregateQn) => void applyDiagramAddAggregateMember(kind, aggregateQn),
     gotoSourceSpan: (span) => void gotoSourceSpan(span),
     ensureAssistant: () => ensureAssistant(),
@@ -735,6 +742,16 @@ export function init(): () => void {
     service: 'NewService',
   };
 
+  // Canvas-only annotations (#255): a note/group is a VIEW concern (persisted in koine.layout.json, never
+  // `.koi`), so creation is delegated to the renderer — the holder of the live graph + current selection —
+  // via a document event. The renderer prompts for the text/label, places the cell behind the nodes, and
+  // persists it. No model edit and no LSP round-trip, unlike applyDiagramAddType below.
+  function createCanvasAnnotation(kind: CanvasAnnotationKind): void {
+    document.dispatchEvent(
+      new CustomEvent<DiagramAnnotationCreateDetail>(DIAGRAM_ANNOTATION_CREATE_EVENT, { detail: { kind } }),
+    );
+  }
+
   async function applyDiagramAddType(detail?: { kind: AddNodeKind }): Promise<void> {
     let scope = activeContext.get();
     if (isAllContexts(scope)) {
@@ -895,6 +912,9 @@ export function init(): () => void {
     showFileTreeChrome,
     hideWelcome: () => welcome.hide(),
   });
+  // Arm idle auto-save from the persisted setting so it's live at boot (the prefs onChange re-applies
+  // it on every toggle); a no-op until an edit calls scheduleAutoSave above.
+  workspace.setAutoSave(settings.autoSave);
   // The workspace-level undo/redo timeline (code = the single source of truth). It snapshots the open
   // buffers' text; restore writes code back and onRestored re-derives every view. canUndo/canRedo are
   // published into the store for the <HistoryControls> buttons.
@@ -1211,6 +1231,8 @@ export function init(): () => void {
       applyAppearance(s);
       editor.setLineWrap(s.wordWrap);
       output.setLineWrap(s.wordWrap);
+      editor.setMinimap(s.enableMinimap);
+      workspace.setAutoSave(s.autoSave);
       // Destination language now lives in Settings → Output. The controller relabels the Generated
       // tab, marks the preview stale, and re-emits it when that sub-view is the one showing.
       controller.onPreviewTargetChanged(s.previewTarget);
@@ -1607,5 +1629,9 @@ export function init(): () => void {
   // A teardown the host can call to release the IDE's deferred work. Production (main.ts) runs for the
   // page lifetime and ignores it; the test suite calls it between boots so the controller's pending
   // debounce timers can't fire into a torn-down happy-dom (where `render` throws "document is not defined").
-  return () => controller.dispose();
+  // setAutoSave(false) cancels the workspace's idle auto-save timer for the same reason.
+  return () => {
+    controller.dispose();
+    workspace.setAutoSave(false);
+  };
 }

@@ -90,6 +90,35 @@ describe('Assistant inline-completions setting', () => {
   });
 });
 
+describe('Editor autoSave + enableMinimap settings', () => {
+  beforeEach(() => localStorage.clear());
+
+  test('both default off (opt-in)', () => {
+    expect(DEFAULT_SETTINGS.autoSave).toBe(false);
+    expect(DEFAULT_SETTINGS.enableMinimap).toBe(false);
+    expect(loadSettings().autoSave).toBe(false);
+    expect(loadSettings().enableMinimap).toBe(false);
+  });
+
+  test('round-trips opted-in states', () => {
+    saveSettings({ ...DEFAULT_SETTINGS, autoSave: true, enableMinimap: true });
+    expect(loadSettings().autoSave).toBe(true);
+    expect(loadSettings().enableMinimap).toBe(true);
+  });
+
+  test('falls back to the default when a stored value is not a boolean', () => {
+    saveSettings({ ...DEFAULT_SETTINGS, autoSave: 'yes' as never, enableMinimap: 1 as never });
+    expect(loadSettings().autoSave).toBe(false);
+    expect(loadSettings().enableMinimap).toBe(false);
+  });
+
+  test('falls back to the default when the fields are absent from the stored blob', () => {
+    localStorage.setItem('koine.studio.settings', JSON.stringify({ theme: 'light' }));
+    expect(loadSettings().autoSave).toBe(false);
+    expect(loadSettings().enableMinimap).toBe(false);
+  });
+});
+
 describe('API key secret', () => {
   beforeEach(async () => {
     localStorage.clear();

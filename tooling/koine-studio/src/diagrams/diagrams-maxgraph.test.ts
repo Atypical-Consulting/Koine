@@ -7,12 +7,14 @@ import { selectDomainGraphs, buildCanvas, isClassNode, nodeLabelHtml, nodeSize, 
 vi.mock('@/shared/overlay', () => ({ koiPrompt: vi.fn(), koiConfirm: vi.fn() }));
 import { koiPrompt, koiConfirm } from '@/shared/overlay';
 import {
+  DIAGRAM_ANNOTATION_CREATE_EVENT,
   setDiagramEditing,
   setDiagramLayoutStore,
   setDiagramPersistScope,
   positionKey,
 } from '@/diagrams/diagramContract';
-import { loadDiagramPositions, saveDiagramPositions } from '@/settings/persistence';
+import { loadDiagramAnnotations, loadDiagramPositions, saveDiagramPositions } from '@/settings/persistence';
+import { createBrowserLayoutStore } from '@/diagrams/layoutStore';
 import type { Diagram, DiagramGraph, DiagramNode, DocsFile } from '@/lsp/lsp';
 
 // happy-dom returns 0 from getBoundingClientRect; maxGraph reads the container rect on construction.
@@ -491,7 +493,7 @@ describe('position persistence', () => {
 
   test('saved positions override the auto-layout (a hand-placed node does not snap back)', () => {
     const container = makeContainer();
-    const handle = buildCanvas(mx, container, { nodes: [cls('Ordering.Order')], edges: [] }, { 'Ordering.Order': { x: 500, y: 120 } });
+    const handle = buildCanvas(mx, container, { nodes: [cls('Ordering.Order')], edges: [] }, { positions: { 'Ordering.Order': { x: 500, y: 120 } }, notes: [], groups: [] });
     try {
       const geo = handle.cells.get('Ordering.Order')!.getGeometry()!;
       expect(geo.x).toBe(500);
@@ -516,6 +518,215 @@ describe('position persistence', () => {
       const saved = loadDiagramPositions(positionKey());
       expect(saved['Ordering.Order']).toEqual({ x: 333, y: 222 });
       expect(saved['Ordering.Line']).toBeDefined(); // a drag snapshots the WHOLE layout, not just the moved node
+    } finally {
+      handle.dispose();
+    }
+  });
+});
+
+describe('canvas annotations (#255)', () => {
+  const cls = (id: string) => node({ id, qualifiedName: id, stereotype: 'aggregate root' });
+  const twoNodes = { nodes: [cls('Ordering.Order'), cls('Ordering.Line')], edges: [] };
+  const positions = { 'Ordering.Order': { x: 40, y: 40 }, 'Ordering.Line': { x: 360, y: 200 } };
+  const note = { id: 'note-1', text: 'Remember to model returns', x: 600, y: 30, width: 180, height: 96 };
+  const group = { id: 'group-1', label: 'Checkout', members: ['Ordering.Order', 'Ordering.Line'] };
+
+  test('renders a note cell and a group cell, both painted BEHIND the nodes', () => {
+    const container = makeContainer();
+    const handle = buildCanvas(mx, container, twoNodes, { positions, notes: [note], groups: [group] });
+    try {
+      const noteCell = handle.noteCells.get('note-1');
+      const groupCell = handle.groupCells.get('group-1');
+      expect(noteCell).toBeDefined();
+      expect(groupCell).toBeDefined();
+
+      // Paint order == root child order: the annotations come before the context container (so they sit
+      // behind the nodes parented into it), and the group (a region) comes before the note.
+      const root = handle.graph.getDefaultParent();
+      const containerCell = handle.containers.get('Ordering')!;
+      const groupIdx = root.getIndex(groupCell!);
+      const noteIdx = root.getIndex(noteCell!);
+      const containerIdx = root.getIndex(containerCell);
+      expect(groupIdx).toBeLessThan(noteIdx);
+      expect(noteIdx).toBeLessThan(containerIdx);
+    } finally {
+      handle.dispose();
+    }
+  });
+
+  test("a note's text and geometry round-trip from the saved layout onto its cell", () => {
+    const container = makeContainer();
+    const handle = buildCanvas(mx, container, twoNodes, { positions, notes: [note], groups: [] });
+    try {
+      const cell = handle.noteCells.get('note-1')!;
+      const geo = cell.getGeometry()!;
+      expect(geo.x).toBe(600);
+      expect(geo.y).toBe(30);
+      expect(geo.width).toBe(180);
+      expect(geo.height).toBe(96);
+      expect(handle.graph.convertValueToString(cell)).toContain('Remember to model returns');
+    } finally {
+      handle.dispose();
+    }
+  });
+
+  test("a group's rectangle wraps the absolute bounding box of its members", () => {
+    const container = makeContainer();
+    const handle = buildCanvas(mx, container, twoNodes, { positions, notes: [], groups: [group] });
+    try {
+      const ctxGeo = handle.containers.get('Ordering')!.getGeometry()!; // members are relative to this
+      const m1 = handle.cells.get('Ordering.Order')!.getGeometry()!;
+      const m2 = handle.cells.get('Ordering.Line')!.getGeometry()!;
+      const minX = Math.min(m1.x, m2.x) + ctxGeo.x;
+      const minY = Math.min(m1.y, m2.y) + ctxGeo.y;
+      const maxX = Math.max(m1.x + m1.width, m2.x + m2.width) + ctxGeo.x;
+      const maxY = Math.max(m1.y + m1.height, m2.y + m2.height) + ctxGeo.y;
+
+      const gg = handle.groupCells.get('group-1')!.getGeometry()!;
+      expect(handle.groupCells.get('group-1')!.isVisible()).toBe(true);
+      expect(gg.x).toBeLessThanOrEqual(minX);
+      expect(gg.y).toBeLessThanOrEqual(minY);
+      expect(gg.x + gg.width).toBeGreaterThanOrEqual(maxX);
+      expect(gg.y + gg.height).toBeGreaterThanOrEqual(maxY);
+    } finally {
+      handle.dispose();
+    }
+  });
+
+  test('a group with no resolvable members is hidden (nothing to enclose)', () => {
+    const container = makeContainer();
+    const orphan = { id: 'group-x', label: 'Orphan', members: ['Nope.Missing'] };
+    const handle = buildCanvas(mx, container, twoNodes, { positions, notes: [], groups: [orphan] });
+    try {
+      expect(handle.groupCells.get('group-x')!.isVisible()).toBe(false);
+    } finally {
+      handle.dispose();
+    }
+  });
+
+  test('moving a note persists its new geometry to the layout store (notes ride the save)', () => {
+    setDiagramPersistScope('ws-test'); // browser-storage fallback (no injected store)
+    const container = makeContainer();
+    const handle = buildCanvas(mx, container, twoNodes, { positions, notes: [note], groups: [group] });
+    try {
+      const model = handle.graph.getDataModel();
+      const cell = handle.noteCells.get('note-1')!;
+      const geo = cell.getGeometry()!.clone();
+      geo.x = 720;
+      geo.y = 510;
+      model.setGeometry(cell, geo);
+      handle.graph.fireEvent(new mx.EventObject(mx.InternalEvent.CELLS_MOVED, 'cells', [cell], 'dx', 0, 'dy', 0));
+
+      const saved = loadDiagramAnnotations(positionKey());
+      expect(saved.notes).toHaveLength(1);
+      expect(saved.notes[0]).toMatchObject({ id: 'note-1', x: 720, y: 510 });
+      // The group rides the same save (membership preserved; rect is re-derived, not stored).
+      expect(saved.groups).toEqual([{ id: 'group-1', label: 'Checkout', members: ['Ordering.Order', 'Ordering.Line'] }]);
+    } finally {
+      handle.dispose();
+    }
+  });
+
+  // create / edit / delete (Task 3): the renderer owns the annotation lifecycle (no `.koi` round-trip).
+  const tick = () => new Promise((r) => setTimeout(r, 0)); // let the koiPrompt/koiConfirm promise chains settle
+
+  test('the create-annotation event adds a note (prompted text) and persists it', async () => {
+    setDiagramEditing(true);
+    setDiagramPersistScope('ws-test');
+    vi.mocked(koiPrompt).mockResolvedValue('Returns flow TBD');
+    const container = makeContainer();
+    const handle = buildCanvas(mx, container, twoNodes, { positions, notes: [], groups: [] });
+    try {
+      document.dispatchEvent(new CustomEvent(DIAGRAM_ANNOTATION_CREATE_EVENT, { detail: { kind: 'note' } }));
+      await tick();
+
+      expect(handle.noteCells.size).toBe(1);
+      const saved = loadDiagramAnnotations(positionKey());
+      expect(saved.notes).toHaveLength(1);
+      expect(saved.notes[0].text).toBe('Returns flow TBD');
+    } finally {
+      handle.dispose();
+    }
+  });
+
+  test('the create-annotation event groups the selected nodes (prompted label) and persists it', async () => {
+    setDiagramEditing(true);
+    setDiagramPersistScope('ws-test');
+    vi.mocked(koiPrompt).mockResolvedValue('Checkout');
+    const container = makeContainer();
+    const handle = buildCanvas(mx, container, twoNodes, { positions, notes: [], groups: [] });
+    try {
+      handle.graph.setSelectionCell(handle.cells.get('Ordering.Order')!); // group around the selection
+      document.dispatchEvent(new CustomEvent(DIAGRAM_ANNOTATION_CREATE_EVENT, { detail: { kind: 'group' } }));
+      await tick();
+
+      expect(handle.groupCells.size).toBe(1);
+      const saved = loadDiagramAnnotations(positionKey());
+      expect(saved.groups).toHaveLength(1);
+      expect(saved.groups[0]).toMatchObject({ label: 'Checkout', members: ['Ordering.Order'] });
+    } finally {
+      handle.dispose();
+    }
+  });
+
+  test('double-clicking a note edits its text and persists', async () => {
+    setDiagramEditing(true);
+    setDiagramPersistScope('ws-test');
+    vi.mocked(koiPrompt).mockResolvedValue('Edited text');
+    const container = makeContainer();
+    const handle = buildCanvas(mx, container, twoNodes, { positions, notes: [note], groups: [] });
+    try {
+      const cell = handle.noteCells.get('note-1')!;
+      handle.graph.fireEvent(new mx.EventObject(mx.InternalEvent.DOUBLE_CLICK, 'cell', cell));
+      await tick();
+
+      expect(handle.graph.convertValueToString(cell)).toContain('Edited text');
+      expect(loadDiagramAnnotations(positionKey()).notes[0].text).toBe('Edited text');
+    } finally {
+      handle.dispose();
+    }
+  });
+
+  test('right-clicking an annotation deletes it (confirmed) and persists the removal', async () => {
+    setDiagramEditing(true);
+    setDiagramPersistScope('ws-test');
+    vi.mocked(koiConfirm).mockResolvedValue(true);
+    const container = makeContainer();
+    const handle = buildCanvas(mx, container, twoNodes, { positions, notes: [note], groups: [] });
+    try {
+      const cell = handle.noteCells.get('note-1')!;
+      handle.graph.getCellAt = (() => cell) as typeof handle.graph.getCellAt; // happy-dom can't hit-test by pixel
+      container.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 10, clientY: 10 }));
+      await tick();
+
+      expect(handle.noteCells.size).toBe(0);
+      expect(loadDiagramAnnotations(positionKey()).notes).toHaveLength(0);
+    } finally {
+      handle.dispose();
+    }
+  });
+
+  test('end-to-end: notes & groups survive a save → fresh reload and render behind the nodes', async () => {
+    setDiagramPersistScope('ws-e2e');
+    const e2eNote = { id: 'n-e2e', text: 'survives reload', x: 500, y: 40, width: 180, height: 96 };
+    const e2eGroup = { id: 'g-e2e', label: 'Core', members: ['Ordering.Order', 'Ordering.Line'] };
+
+    // Persist a layout through one store…
+    createBrowserLayoutStore().save({ positions, notes: [e2eNote], groups: [e2eGroup] });
+
+    // …then a FRESH store over the same workspace reads it back intact.
+    const restored = await createBrowserLayoutStore().load();
+    expect(restored.notes).toEqual([e2eNote]);
+    expect(restored.groups).toEqual([e2eGroup]);
+
+    // Rendering the restored layout puts the annotation cells on the canvas, behind the nodes.
+    const container = makeContainer();
+    const handle = buildCanvas(mx, container, twoNodes, restored);
+    try {
+      expect(handle.noteCells.get('n-e2e')).toBeDefined();
+      expect(handle.groupCells.get('g-e2e')).toBeDefined();
+      const root = handle.graph.getDefaultParent();
+      expect(root.getIndex(handle.noteCells.get('n-e2e')!)).toBeLessThan(root.getIndex(handle.containers.get('Ordering')!));
     } finally {
       handle.dispose();
     }
