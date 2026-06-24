@@ -52,9 +52,9 @@ public static class StructuredEditKind
     /// <summary>
     /// Add a new type to a context: <c>Target</c> = the context name, <c>Name</c> = the new type's name,
     /// <c>Type</c> = the construct kind (<c>value</c> | <c>entity</c> | <c>aggregate</c> | <c>event</c> |
-    /// <c>enum</c>; <c>null</c> ⇒ <c>value</c>). Inserts a minimal, valid skeleton the author then refines
-    /// (an aggregate nests its own root entity so it is self-contained); an illegal name (duplicate / not an
-    /// identifier) is rejected by re-validation.
+    /// <c>enum</c> | <c>service</c>; <c>null</c> ⇒ <c>value</c>). Inserts a minimal, valid skeleton the author
+    /// then refines (an aggregate nests its own root entity, a service a placeholder use-case, so each is
+    /// self-contained); an illegal name (duplicate / not an identifier) is rejected by re-validation.
     /// </summary>
     public const string AddType = "addType";
 

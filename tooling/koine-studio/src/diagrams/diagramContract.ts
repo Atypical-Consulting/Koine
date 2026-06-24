@@ -86,7 +86,7 @@ export interface DiagramDisconnectDetail {
 
 /** The DDD constructs the canvas palette can author. Mirrors the construct keyword the compiler's
  *  `addType` edit carries in `StructuredEdit.Type`. */
-export type AddNodeKind = 'aggregate' | 'entity' | 'value' | 'enum' | 'event';
+export type AddNodeKind = 'aggregate' | 'entity' | 'value' | 'enum' | 'event' | 'service';
 
 /**
  * The three doorways the empty-canvas state offers. Each maps to a starting `.koi` shape (ide.tsx seeds

@@ -440,8 +440,8 @@ public static partial class ModelRoundTripService
 
     /// <summary>
     /// Insert a minimal, re-validating skeleton for the construct kind given by <paramref name="edit"/>.Type
-    /// (<c>value</c> | <c>entity</c> | <c>aggregate</c> | <c>event</c> | <c>enum</c>; <c>null</c> ⇒ value) into
-    /// the <paramref name="edit"/>.Target context — after its last top-level type, or into an empty body.
+    /// (<c>value</c> | <c>entity</c> | <c>aggregate</c> | <c>event</c> | <c>enum</c> | <c>service</c>; <c>null</c> ⇒
+    /// value) into the <paramref name="edit"/>.Target context — after its last top-level type, or into an empty body.
     /// Re-validation rejects a duplicate / invalid name, so a broken model is never produced.
     /// </summary>
     private static bool TryAddType(KoineModel model, IReadOnlyList<SourceFile> files, StructuredEdit edit, out TextOp op)
@@ -469,6 +469,9 @@ public static partial class ModelRoundTripService
             "event" => $"event {edit.Name} {{{nl}{body}occurredAt: Instant{nl}{typeIndent}}}",
             "enum" => $"enum {edit.Name} {{{nl}{body}First{nl}{body}Second{nl}{typeIndent}}}",
             "aggregate" => $"aggregate {edit.Name} root {edit.Name}Root {{{nl}{body}entity {edit.Name}Root identified by {edit.Name}RootId {{{nl}{body}  name: String{nl}{body}}}{nl}{typeIndent}}}",
+            // A single placeholder use-case keeps the service non-empty (so it re-validates) without
+            // referencing any domain type — `usecase` (not `operation`) needs no return clause.
+            "service" => $"service {edit.Name} {{{nl}{body}usecase DoSomething(){nl}{typeIndent}}}",
             // null (the old bare button) and any unrecognized kind intentionally fall back to a value object.
             _ => $"value {edit.Name} {{{nl}{body}name: String{nl}{typeIndent}}}",
         };
