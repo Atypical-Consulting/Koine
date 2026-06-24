@@ -730,6 +730,7 @@ export function init(): () => void {
     aggregate: 'NewAggregate',
     event: 'NewEvent',
     enum: 'NewEnum',
+    service: 'NewService',
   };
 
   async function applyDiagramAddType(detail?: { kind: AddNodeKind }): Promise<void> {

@@ -486,6 +486,19 @@ public class ModelRoundTripTests
     }
 
     [Fact]
+    public void EmitKoine_add_service_emits_a_service_skeleton()
+    {
+        var edit = new StructuredEdit(StructuredEditKind.AddType, "Ordering", Name: "Checkout", Type: "service");
+        EmitResult result = ModelRoundTripService.EmitKoine(Files(Sample), edit);
+
+        result.Diagnostics.ShouldBeEmpty();
+        result.Koine.ShouldNotBeNull();
+        result.Koine!.ShouldContain("service Checkout");
+        // A minimal usecase keeps the service non-empty and self-contained so the round-trip re-validates.
+        result.Koine!.ShouldContain("usecase");
+    }
+
+    [Fact]
     public void EmitKoine_add_type_with_null_kind_still_emits_a_value_skeleton()
     {
         // Back-compat: the old bare "+" button sends no Type.
@@ -513,6 +526,20 @@ public class ModelRoundTripTests
     public void ApplyEdit_add_aggregate_yields_a_compiling_model()
     {
         var edit = new StructuredEdit(StructuredEditKind.AddType, "Ordering", Name: "Shipment", Type: "aggregate");
+        ModelEditResult result = ModelRoundTripService.ApplyEdit(Files(Sample), edit);
+
+        result.Diagnostics.ShouldBeEmpty();
+        result.Edits.Count.ShouldBe(1);
+        var edited = Splice(Sample, result.Edits[0].Range, result.Edits[0].NewText);
+        var (model, diags) = new KoineCompiler().Parse(new[] { new SourceFile("t.koi", edited) });
+        diags.Where(d => d.Severity == DiagnosticSeverity.Error).ShouldBeEmpty();
+        model.ShouldNotBeNull();
+    }
+
+    [Fact]
+    public void ApplyEdit_add_service_yields_a_compiling_model()
+    {
+        var edit = new StructuredEdit(StructuredEditKind.AddType, "Ordering", Name: "Checkout", Type: "service");
         ModelEditResult result = ModelRoundTripService.ApplyEdit(Files(Sample), edit);
 
         result.Diagnostics.ShouldBeEmpty();

@@ -779,6 +779,18 @@ internal sealed class CSharpExpressionTranslator
                 return;
 
             default:
+                // A spec call: `o.IsLarge()` invokes a declared spec (a boolean predicate) on a
+                // parameter of the spec's target type. Specs emit as boolean extension methods on
+                // that type, so the call translates to the same extension-method invocation —
+                // keeping the named, single-source-of-truth predicate at the call site.
+                if (call.Args.Count == 0
+                    && _resolver.Infer(call.Target, EffectiveScope()) is { } receiverType
+                    && _index.TryGetSpec(receiverType.Name, op, out SpecDecl spec))
+                {
+                    sb.Append(t).Append('.').Append(CSharpNaming.ToPascalCase(spec.Name)).Append("()");
+                    return;
+                }
+
                 sb.Append("/* unsupported call '").Append(op).Append("' */");
                 return;
         }
@@ -847,11 +859,31 @@ internal sealed class CSharpExpressionTranslator
         // Save/restore: a lambda parameter that shadows an outer local (e.g. a
         // command parameter of the same name) must not delete the outer binding.
         var wasPresent = _locals.Contains(lambda.Parameter);
+        var hadType = _localTypes.TryGetValue(lambda.Parameter, out TypeRef? priorType);
         _locals.Add(lambda.Parameter);
+
+        // Register the lambda parameter's element type so a spec call on it
+        // (`os.any(o => o.IsLarge())`) resolves its receiver the same way the validator does.
+        TypeRef? element = TypeResolver.ElementOf(_resolver.Infer(call.Target, EffectiveScope()));
+        if (element is not null)
+        {
+            _localTypes[lambda.Parameter] = element;
+        }
+
         var body = Render(lambda.Body, mode);
+
         if (!wasPresent)
         {
             _locals.Remove(lambda.Parameter);
+        }
+
+        if (hadType)
+        {
+            _localTypes[lambda.Parameter] = priorType!;
+        }
+        else
+        {
+            _localTypes.Remove(lambda.Parameter);
         }
 
         return $"{CSharpNaming.ToCamelCase(lambda.Parameter)} => {body}";

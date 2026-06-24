@@ -73,7 +73,9 @@ Koine.Compiler.Emit.Docs.DiagramMember.Kind.init -> void
 Koine.Compiler.Emit.Docs.DiagramMember.Text.get -> string!
 Koine.Compiler.Emit.Docs.DiagramMember.Text.init -> void
 Koine.Compiler.Emit.Docs.DiagramNode
-Koine.Compiler.Emit.Docs.DiagramNode.DiagramNode(string! Id, string! Label, string! Kind, string! QualifiedName, Koine.Compiler.Ast.SourceSpan? Span, string? Stereotype = null, System.Collections.Generic.IReadOnlyList<Koine.Compiler.Emit.Docs.DiagramMember!>? Members = null, System.Collections.Generic.IReadOnlyList<string!>? Invariants = null) -> void
+Koine.Compiler.Emit.Docs.DiagramNode.DiagramNode(string! Id, string! Label, string! Kind, string! QualifiedName, Koine.Compiler.Ast.SourceSpan? Span, string? Stereotype = null, System.Collections.Generic.IReadOnlyList<Koine.Compiler.Emit.Docs.DiagramMember!>? Members = null, System.Collections.Generic.IReadOnlyList<string!>? Invariants = null, string? Doc = null) -> void
+Koine.Compiler.Emit.Docs.DiagramNode.Doc.get -> string?
+Koine.Compiler.Emit.Docs.DiagramNode.Doc.init -> void
 Koine.Compiler.Emit.Docs.DiagramNode.Id.get -> string!
 Koine.Compiler.Emit.Docs.DiagramNode.Id.init -> void
 Koine.Compiler.Emit.Docs.DiagramNode.Invariants.get -> System.Collections.Generic.IReadOnlyList<string!>?
@@ -182,6 +184,7 @@ Koine.Compiler.Services.ModelEditResult.Edits.init -> void
 Koine.Compiler.Services.ModelEditResult.Diagnostics.get -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Diagnostics.Diagnostic!>!
 Koine.Compiler.Services.ModelEditResult.Diagnostics.init -> void
 const Koine.Compiler.Diagnostics.DiagnosticCodes.AggregateNameMatchesRoot = "KOI0109" -> string!
+const Koine.Compiler.Diagnostics.DiagnosticCodes.SpecCallTargetMismatch = "KOI1006" -> string!
 Koine.Compiler.Ast.EntityDecl.IdentityNameSpan.get -> Koine.Compiler.Ast.SourceSpan
 Koine.Compiler.Ast.EntityDecl.IdentityNameSpan.init -> void
 Koine.Compiler.Ast.EntityDecl.IdentityStrategySpan.get -> Koine.Compiler.Ast.SourceSpan

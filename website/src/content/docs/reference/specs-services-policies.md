@@ -129,8 +129,22 @@ compile-time diagnostic. Spec composition is **cycle-checked**: a spec that refe
 :::
 
 :::note
-A spec referenced from inside a `service operation` body is not yet supported (v0). Specs compose
-with each other and into invariants/preconditions today.
+A spec may also be invoked from inside a `service operation` body, as a call on a parameter of the
+spec's target type — it translates to the spec's generated extension method, so the call site keeps
+the named predicate instead of duplicating its logic:
+
+```koine
+context Sales {
+  value Order { lineCount: Int  total: Decimal }
+  spec IsLarge on Order = lineCount > 10 || total > 1000
+  service OrderRouting {
+    operation isPriority(o: Order): Bool = o.IsLarge()
+  }
+}
+```
+
+Calling a spec on a receiver whose type is not the spec's declared target is a compile-time
+diagnostic (`KOI1006`).
 :::
 
 ### 13.3.2 Service semantics
