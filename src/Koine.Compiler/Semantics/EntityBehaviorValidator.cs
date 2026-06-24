@@ -207,6 +207,18 @@ internal static class EntityBehaviorValidator
                     $"factory '{factory.Name}' collides with a property or command of '{entity.Name}'", factory.Span));
             }
 
+            // A `create` factory auto-generates the new aggregate's identity (`<Id>.New()` in C#,
+            // `<Id>::generate()` in Rust), but that generator is only emitted for a Guid-backed
+            // identity. On a `natural`/`sequence` key the emitted code would call a function that was
+            // never produced and fail to compile (rustc/csc) — reject the combination here, before any
+            // emitter runs, with a source-located diagnostic (issue #317). One diagnostic per factory.
+            if (entity.IdStrategy != IdentityStrategy.Guid)
+            {
+                diagnostics.Add(Diagnostic.Error(DiagnosticCodes.FactoryNeedsGeneratableIdentity,
+                    $"factory '{factory.Name}' on '{entity.Name}' auto-generates the identity, but '{entity.IdentityName}' is a {DescribeIdentity(entity)} key with no generator; pass the identity explicitly or use a Guid identity",
+                    factory.Span));
+            }
+
             // Scope: the factory's parameters plus the synthetic `id` (its identity).
             var scopePairs = IdScopePair(entity)
                 .Concat(factory.Parameters.Select(p => new KeyValuePair<string, TypeRef>(p.Name, p.Type)));
@@ -298,6 +310,14 @@ internal static class EntityBehaviorValidator
     /// <summary>The synthetic <c>id</c> binding (an entity's identity) for factory scope.</summary>
     private static IEnumerable<KeyValuePair<string, TypeRef>> IdScopePair(EntityDecl entity) =>
         new[] { new KeyValuePair<string, TypeRef>("id", new TypeRef(entity.IdentityName)) };
+
+    /// <summary>The identity strategy rendered as it reads in <c>.koi</c> source — for diagnostics.</summary>
+    private static string DescribeIdentity(EntityDecl entity) => entity.IdStrategy switch
+    {
+        IdentityStrategy.Sequence => "sequence",
+        IdentityStrategy.Natural => $"natural({entity.IdBackingType ?? "String"})",
+        _ => "guid",
+    };
 
     /// <summary>
     /// Validates an entity's identity strategy (R11.1): a <c>natural(T)</c> key must

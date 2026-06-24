@@ -267,3 +267,4 @@ const Koine.Compiler.Diagnostics.DiagnosticCodes.ValueObjectReferencesEntity = "
 const Koine.Compiler.Diagnostics.DiagnosticCodes.EntityReferencesForeignAggregate = "KOI1602" -> string!
 const Koine.Compiler.Diagnostics.DiagnosticCodes.CommandParameterReferencesEntity = "KOI1603" -> string!
 const Koine.Compiler.Diagnostics.DiagnosticCodes.DomainEventReferencesEntity = "KOI1604" -> string!
+const Koine.Compiler.Diagnostics.DiagnosticCodes.FactoryNeedsGeneratableIdentity = "KOI0808" -> string!
