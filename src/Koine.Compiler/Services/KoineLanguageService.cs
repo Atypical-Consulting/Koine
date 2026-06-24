@@ -1334,6 +1334,15 @@ public sealed class KoineLanguageService
         {
             foreach (var call in CallsIn(expr))
             {
+                // Koine expression calls resolve by RECEIVER TYPE, which this pass doesn't model — it
+                // matches the callee by bare name. If more than one command/factory/operation shares
+                // that name we can't know which is the real callee, so emit nothing rather than a
+                // possibly-wrong parameter label (the inlay pass never renders a guessed hint).
+                if (!IsUniqueCalleeName(index, call.Method))
+                {
+                    continue;
+                }
+
                 var parameters = ResolveCalleeParameters(index, call.Method);
                 if (parameters is null)
                 {
@@ -1503,8 +1512,11 @@ public sealed class KoineLanguageService
     /// <summary>True when the 0-based point falls within the inclusive 0-based range.</summary>
     private static bool InRange(int line, int character, int startLine, int startChar, int endLine, int endChar)
     {
+        // LSP ranges are start-INCLUSIVE, end-EXCLUSIVE: a hint anchored exactly at the range end
+        // belongs to the next request, so it must not leak into this one (otherwise a hint on a
+        // viewport boundary is returned by two adjacent inlayHint requests).
         var afterStart = line > startLine || (line == startLine && character >= startChar);
-        var beforeEnd = line < endLine || (line == endLine && character <= endChar);
+        var beforeEnd = line < endLine || (line == endLine && character < endChar);
         return afterStart && beforeEnd;
     }
 
@@ -1545,7 +1557,7 @@ public sealed class KoineLanguageService
         var index = compilation.SemanticModel.Index;
 
         // An event under the cursor -> a single Event item at its declaration.
-        if (index.Classify(name) == TypeKind.Event && FindEvent(model, name) is { } ev)
+        if (index.Classify(name) == TypeKind.Event && FindEvent(index, name) is { } ev)
         {
             return [EventItem(ev.Name, ev)];
         }
@@ -1605,7 +1617,7 @@ public sealed class KoineLanguageService
                     continue;
                 }
 
-                if (seen.Add(policy.EventName) && FindEvent(model, policy.EventName) is { } ev)
+                if (seen.Add(policy.EventName) && FindEvent(index, policy.EventName) is { } ev)
                 {
                     calls.Add(new CallHierarchyIncomingCall(EventItem(ev.Name, ev)));
                 }
@@ -1648,7 +1660,7 @@ public sealed class KoineLanguageService
         // The events command C on type T emits.
         foreach (var eventName in index.EventsEmittedBy(item.OwningType!, item.Name))
         {
-            if (FindEvent(model, eventName) is { } ev)
+            if (FindEvent(index, eventName) is { } ev)
             {
                 calls.Add(new CallHierarchyOutgoingCall(EventItem(ev.Name, ev)));
             }
@@ -1658,11 +1670,15 @@ public sealed class KoineLanguageService
     }
 
     /// <summary>
-    /// Picks the entity that owns the command named <paramref name="commandName"/>: prefer the
-    /// <paramref name="reactionQualifier"/> (the <c>Target</c> of a <c>Target.command(…)</c> policy
-    /// reaction under the cursor) when it declares the command; else the unique entity that declares
-    /// it; else the <paramref name="enclosingType"/> (the entity whose body the cursor sits in).
-    /// Returns <c>null</c> when no entity declares a command of that name.
+    /// Picks the entity that owns the command named <paramref name="commandName"/>. Priority:
+    /// (1) the <paramref name="enclosingType"/> when the cursor sits inside an entity that declares
+    /// the command (a declaration or in-body reference site — this is the owner, full stop);
+    /// (2) the <paramref name="reactionQualifier"/> (the <c>Target</c> of a <c>Target.command(…)</c>
+    /// policy reaction, where the cursor is NOT inside an entity body so enclosingType is null);
+    /// (3) the unique declaring entity; (4) first-wins. Returns <c>null</c> when no entity declares a
+    /// command of that name. Enclosing-type wins over the qualifier so a field-type token sitting just
+    /// before a <c>command</c> keyword (which becomes <paramref name="reactionQualifier"/> at a
+    /// declaration site) can't steer the owner to the wrong same-named entity.
     /// </summary>
     private static EntityDecl? ResolveCommandOwner(KoineModel model, string commandName, string? reactionQualifier, string? enclosingType)
     {
@@ -1676,21 +1692,25 @@ public sealed class KoineLanguageService
             return null;
         }
 
-        // 1. A `Target.command(…)` policy reaction: the qualifier names the owning entity.
+        // 1. The enclosing entity that declares the command — a declaration/in-body site. This binds
+        //    the command to the entity whose body the cursor is actually in, regardless of any token
+        //    sitting before the `command` keyword.
+        if (enclosingType is not null
+            && declaring.FirstOrDefault(e => string.Equals(e.Name, enclosingType, StringComparison.Ordinal)) is { } enclosing)
+        {
+            return enclosing;
+        }
+
+        // 2. A `Target.command(…)` policy reaction: the qualifier names the owning entity. (Policies
+        //    are top-level, so the cursor is not inside an entity body and enclosingType is null here.)
         if (reactionQualifier is not null
             && declaring.FirstOrDefault(e => string.Equals(e.Name, reactionQualifier, StringComparison.Ordinal)) is { } qualified)
         {
             return qualified;
         }
 
-        // 2. The unique declaring entity (the common case).
-        if (declaring.Count == 1)
-        {
-            return declaring[0];
-        }
-
-        // 3. Disambiguate by the enclosing entity, else first-wins.
-        return declaring.FirstOrDefault(e => string.Equals(e.Name, enclosingType, StringComparison.Ordinal)) ?? declaring[0];
+        // 3. The unique declaring entity (the common case), else first-wins.
+        return declaring[0];
     }
 
     /// <summary>A command edge item resolved to its declaration, or <c>null</c> when the target is not declared (silently skipped).</summary>
@@ -1719,11 +1739,10 @@ public sealed class KoineLanguageService
             .SelectMany(e => e.Commands)
             .FirstOrDefault(cmd => string.Equals(cmd.Name, name, StringComparison.Ordinal));
 
-    /// <summary>The event declaration named <paramref name="name"/>, or <c>null</c>.</summary>
-    private static EventDecl? FindEvent(KoineModel model, string name) =>
-        model.Contexts
-            .SelectMany(c => c.AllTypeDecls().OfType<EventDecl>())
-            .FirstOrDefault(ev => string.Equals(ev.Name, name, StringComparison.Ordinal));
+    /// <summary>The event declaration named <paramref name="name"/>, or <c>null</c>. Resolved via the
+    /// index's O(1) name map (events are types) rather than re-walking the model per call.</summary>
+    private static EventDecl? FindEvent(ModelIndex index, string name) =>
+        index.TryGetDecl(name, out var decl) && decl is EventDecl ev ? ev : null;
 
     /// <summary>
     /// Computes the edits for renaming the name under the cursor to <paramref name="newName"/>:
@@ -2011,6 +2030,42 @@ public sealed class KoineLanguageService
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// True when EXACTLY ONE command, factory, operation, or use-case across the model is named
+    /// <paramref name="callee"/> — so a parameter-name inlay hint for a call to it is unambiguous.
+    /// Used to gate <see cref="CollectParameterHints"/>: a name shared by two declarations can't be
+    /// resolved to the right callee without the receiver type (not modeled here), so it gets no hint.
+    /// </summary>
+    private static bool IsUniqueCalleeName(ModelIndex index, string callee)
+    {
+        var count = 0;
+        foreach (var t in index.AllTypes())
+        {
+            if (t is EntityDecl e)
+            {
+                count += e.Commands.Count(c => c.Name == callee) + e.Factories.Count(f => f.Name == callee);
+                if (count > 1)
+                {
+                    return false;
+                }
+            }
+        }
+
+        foreach (var ctx in index.Model.Contexts)
+        {
+            foreach (var svc in ctx.Services)
+            {
+                count += svc.Operations.Count(o => o.Name == callee) + svc.UseCases.Count(u => u.Name == callee);
+                if (count > 1)
+                {
+                    return false;
+                }
+            }
+        }
+
+        return count == 1;
     }
 
     /// <summary>

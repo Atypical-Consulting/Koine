@@ -801,7 +801,10 @@ public static partial class CompilerInterop
     private static CallHierarchyItem? DeserializeCallHierarchyItem(string itemJson)
     {
         WCallHierarchyItem? dto = JsonSerializer.Deserialize(itemJson, LangJson.Default.WCallHierarchyItem);
-        if (dto is null || string.IsNullOrEmpty(dto.Name) || dto.Data is null)
+        // Require a non-empty chKind, exactly like the stdio server's ReadCallHierarchyItem — so a
+        // malformed item (missing data/chKind) yields the SAME empty result on both backends rather
+        // than the WASM side silently defaulting to Command and diverging from the stdio LSP.
+        if (dto is null || string.IsNullOrEmpty(dto.Name) || dto.Data is null || string.IsNullOrEmpty(dto.Data.ChKind))
         {
             return null;
         }

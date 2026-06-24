@@ -182,6 +182,45 @@ public class CallHierarchyTests
         }
         """;
 
+    // Two entities both declare `settle`; Invoice has a `Receipt`-typed field immediately before its
+    // own `command settle`, so the token two before the cursor is `Receipt` — which ALSO declares
+    // `settle`. The owner must be the enclosing entity (Invoice), not the preceding type token.
+    private const string AmbiguousUri = "file:///billing.koi";
+    private const string AmbiguousSrc =
+        """
+        context Billing {
+          entity Receipt identified by ReceiptId {
+            total: Int
+
+            command settle {
+              total -> total
+            }
+          }
+
+          entity Invoice identified by InvoiceId {
+            receipt: Receipt
+
+            command settle {
+              receipt -> receipt
+            }
+          }
+        }
+        """;
+
+    [Fact]
+    public void Prepare_binds_a_command_to_its_enclosing_entity_not_a_preceding_type_token()
+    {
+        var comp = KoineCompilation.Create(new[] { new SourceFile(AmbiguousUri, AmbiguousSrc) });
+        // Cursor on Invoice's `settle` (anchored after its `Receipt`-typed field, which is unique to it).
+        var (line, character) = PositionOf(AmbiguousSrc, "settle", "receipt: Receipt");
+
+        var item = Svc.PrepareCallHierarchy(comp, AmbiguousUri, line, character).ShouldHaveSingleItem();
+
+        item.Kind.ShouldBe(CallHierarchyItemKind.Command);
+        item.Name.ShouldBe("settle");
+        item.OwningType.ShouldBe("Invoice"); // the enclosing entity wins over the `Receipt` token before `command`
+    }
+
     [Fact]
     public void A_self_emitting_cycle_terminates()
     {

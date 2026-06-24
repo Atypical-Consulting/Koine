@@ -405,28 +405,43 @@ const inlayTheme = EditorView.baseTheme({
 
 /**
  * Build the inlay-hint extension: a ViewPlugin that, for the visible viewport, asks the language
- * service for type/parameter hints and renders each as a dimmed inline widget. It refetches whenever
- * the viewport or document changes, and guards against stale async results with a per-request token
- * (mirrors inlineCompletion's race handling).
+ * service for type/parameter hints and renders each as a dimmed inline widget. The first paint
+ * fetches immediately; subsequent scroll/edit-driven refetches are DEBOUNCED (each fetch recompiles
+ * the whole workspace, so one-per-scroll-tick / keystroke would jank the UI thread). Between an edit
+ * and the next fetch resolving, existing widgets are mapped through the change so they track their
+ * text instead of jumping to a clamped offset. Stale async results are dropped via a per-request
+ * token (mirrors inlineCompletion's race handling).
  */
-export function inlayHintsExtension(provider: InlayHintsFn): Extension {
+export function inlayHintsExtension(provider: InlayHintsFn, debounceMs = 200): Extension {
   const plugin = ViewPlugin.fromClass(
     class {
       decorations: DecorationSet = Decoration.none;
       private hints: InlayHint[] = [];
       private seq = 0;
+      private timer: ReturnType<typeof setTimeout> | null = null;
 
       constructor(view: EditorView) {
-        this.fetch(view);
+        this.fetch(view); // first paint is immediate — the debounce only throttles refetches
       }
 
       update(u: ViewUpdate): void {
-        // Re-fetch when the visible range or the document changes (new lines may need new hints).
-        if (u.viewportChanged || u.docChanged) this.fetch(u.view);
-        // Rebuild decorations when the doc changed (cached offsets are stale) or when an async fetch
-        // resolved and dispatched the redraw effect (the resolution happens outside any transaction).
+        // Keep existing widgets attached to their text through an edit so they don't flash at a
+        // clamped offset during the debounce window before the fresh fetch lands.
+        if (u.docChanged) this.decorations = this.decorations.map(u.changes);
+        // Coalesce rapid viewport/doc changes into one debounced fetch.
+        if (u.viewportChanged || u.docChanged) this.scheduleFetch(u.view);
+        // Rebuild from the freshest hints once an async fetch resolved (it dispatched the redraw
+        // effect outside any transaction).
         const redrawn = u.transactions.some((tr) => tr.effects.some((e) => e.is(inlayRedrawEffect)));
-        if (u.docChanged || redrawn) this.decorations = this.build(u.view);
+        if (redrawn) this.decorations = this.build(u.view);
+      }
+
+      private scheduleFetch(view: EditorView): void {
+        if (this.timer !== null) clearTimeout(this.timer);
+        this.timer = setTimeout(() => {
+          this.timer = null;
+          this.fetch(view);
+        }, debounceMs);
       }
 
       /** Ask the provider for hints over the visible range; redraw when the freshest answer lands. */
@@ -460,8 +475,10 @@ export function inlayHintsExtension(provider: InlayHintsFn): Extension {
       }
 
       destroy(): void {
-        // Bump the token so any in-flight fetch's resolution is ignored after teardown.
+        // Bump the token so any in-flight fetch's resolution is ignored after teardown; cancel any
+        // pending debounced fetch.
         this.seq++;
+        if (this.timer !== null) clearTimeout(this.timer);
       }
     },
     { decorations: (v) => v.decorations },

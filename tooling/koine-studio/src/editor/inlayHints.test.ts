@@ -10,14 +10,16 @@ import type { InlayHint } from '@/lsp/lsp';
 // await a microtask flush then assert the widget(s) rendered.
 const flush = () => new Promise((r) => setTimeout(r, 0));
 
-function makeView(provider: InlayHintsFn): EditorView {
+// debounceMs=0 makes refetches fire on the next macrotask so the tests stay deterministic; the first
+// paint fetches immediately regardless of the debounce.
+function makeView(provider: InlayHintsFn, debounceMs = 0): EditorView {
   const parent = document.createElement('div');
   document.body.appendChild(parent);
   return new EditorView({
     parent,
     state: EditorState.create({
       doc: 'value Money\n  amount\n',
-      extensions: [inlayHintsExtension(provider)],
+      extensions: [inlayHintsExtension(provider, debounceMs)],
     }),
   });
 }
@@ -53,6 +55,22 @@ describe('inlay-hints editor extension', () => {
     const view = makeView(() => Promise.reject(new Error('boom')));
     await flush();
     expect(widgets(view)).toHaveLength(0);
+    view.destroy();
+  });
+
+  it('debounces refetches so a burst of edits triggers far fewer provider calls', async () => {
+    // One immediate first-paint fetch, then a debounced refetch that coalesces the burst — NOT one
+    // fetch per edit (each fetch recompiles the whole workspace, so per-keystroke would jank).
+    let calls = 0;
+    const provider: InlayHintsFn = () => {
+      calls++;
+      return Promise.resolve([]);
+    };
+    const view = makeView(provider, 20); // 20ms debounce window
+    expect(calls).toBe(1); // immediate first paint
+    for (let i = 0; i < 5; i++) view.dispatch({ changes: { from: view.state.doc.length, insert: 'x' } });
+    await new Promise((r) => setTimeout(r, 40)); // let the single debounced refetch fire
+    expect(calls).toBe(2); // 5 edits coalesced into ONE refetch, not 5
     view.destroy();
   });
 

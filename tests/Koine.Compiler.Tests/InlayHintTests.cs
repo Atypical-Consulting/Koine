@@ -69,6 +69,31 @@ public class InlayHintTests
             .ShouldAllBe(h => h.Line == 5);
     }
 
+    // Two services each declare `cap`, so the callee name is ambiguous — without the receiver type
+    // (not modeled by the hint pass) we can't tell which `cap` a positional call targets.
+    private const string AmbiguousCallSrc =
+        "context Sales {\n" +
+        "  service PriceA {\n" +
+        "    operation cap(orderTotal: Decimal): Decimal = orderTotal\n" +
+        "    operation apply(base: Decimal): Decimal =\n" +
+        "      PriceA.cap(base)\n" +
+        "  }\n" +
+        "  service PriceB {\n" +
+        "    operation cap(limit: Decimal): Decimal = limit\n" +
+        "  }\n" +
+        "}\n";
+
+    [Fact]
+    public void No_parameter_hint_when_the_callee_name_is_ambiguous()
+    {
+        var comp = Compile(AmbiguousCallSrc);
+        var hints = Svc.InlayHintsAt(comp, U, 0, 0, 100, 0);
+
+        // `cap` is declared by two services; emitting `orderTotal:` or `limit:` would be a guess, so
+        // no Parameter hint is rendered at all.
+        hints.ShouldNotContain(h => h.Kind == InlayHintKind.Parameter);
+    }
+
     [Fact]
     public void Hints_outside_the_requested_range_are_excluded()
     {
