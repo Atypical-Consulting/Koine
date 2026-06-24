@@ -238,18 +238,60 @@ public static partial class ModelRoundTripService
     private static bool TryChangeFieldType(KoineModel model, StructuredEdit edit, out TextOp op)
     {
         op = default;
-        if (string.IsNullOrEmpty(edit.Type) || FindMember(model, edit.Target) is not { } hit)
+        if (string.IsNullOrEmpty(edit.Type))
         {
             return false;
         }
 
-        SourceSpan typeSpan = hit.Member.Type.Span;
-        if (typeSpan.IsNone || typeSpan.Length <= 0)
+        // A declared field: replace its type span in place.
+        if (FindMember(model, edit.Target) is { } hit)
+        {
+            SourceSpan typeSpan = hit.Member.Type.Span;
+            if (typeSpan.IsNone || typeSpan.Length <= 0)
+            {
+                return false;
+            }
+
+            op = new TextOp(typeSpan.File, typeSpan.Offset, typeSpan.Length, edit.Type!);
+            return true;
+        }
+
+        // Not a declared field — the diagram surfaces an entity's identity as a synthetic `id` row whose
+        // "type" is its generated ID type name, so a type edit there changes the entity's identity.
+        return TryChangeIdentityType(model, edit, out op);
+    }
+
+    /// <summary>
+    /// Apply a type edit to an entity's synthetic <c>id</c> row. A primitive (re-validation restricts the
+    /// natural backing to <c>String</c>/<c>Int</c>) switches the identity strategy to <c>as natural(T)</c>,
+    /// replacing any existing strategy clause or inserting one after the identity name. Any other name
+    /// renames the generated ID type in place. Re-validation rejects an illegal result (bad backing,
+    /// duplicate/invalid name) with a precise diagnostic, so a broken model is never produced.
+    /// </summary>
+    private static bool TryChangeIdentityType(KoineModel model, StructuredEdit edit, out TextOp op)
+    {
+        op = default;
+        if (!string.Equals(LastSegment(edit.Target), "id", StringComparison.Ordinal)
+            || FindEditType(model, StripLastSegment(edit.Target)) is not { } resolved
+            || FieldOwner(resolved) is not EntityDecl entity
+            || entity.IdentityNameSpan.IsNone)
         {
             return false;
         }
 
-        op = new TextOp(typeSpan.File, typeSpan.Offset, typeSpan.Length, edit.Type!);
+        if (ModelIndex.Primitives.Contains(edit.Type!))
+        {
+            var clause = $"as natural({edit.Type})";
+            op = entity.IdentityStrategySpan.IsNone
+                ? new TextOp(entity.IdentityNameSpan.File,
+                    entity.IdentityNameSpan.Offset + entity.IdentityNameSpan.Length, 0, " " + clause)
+                : new TextOp(entity.IdentityStrategySpan.File,
+                    entity.IdentityStrategySpan.Offset, entity.IdentityStrategySpan.Length, clause);
+            return true;
+        }
+
+        op = new TextOp(entity.IdentityNameSpan.File,
+            entity.IdentityNameSpan.Offset, entity.IdentityNameSpan.Length, edit.Type!);
         return true;
     }
 

@@ -718,10 +718,17 @@ export function init(): () => void {
   };
 
   async function applyDiagramAddType(detail?: { kind: AddNodeKind }): Promise<void> {
-    const scope = activeContext.get();
+    let scope = activeContext.get();
     if (isAllContexts(scope)) {
-      setStatus('Pick a bounded context (top-left) before adding a type', 'error');
-      return;
+      // "All contexts" has no unambiguous home — except when the model has exactly one context, which is
+      // then the only possible target (the palette enables its buttons to match). 2+ contexts still need
+      // a deliberate pick.
+      const all = appStore.getState().contexts;
+      if (all.length !== 1) {
+        setStatus('Pick a bounded context (top-left) before adding a type', 'error');
+        return;
+      }
+      scope = all[0];
     }
     const kind = detail?.kind ?? 'value';
     const name = window.prompt(`New ${kind} in ${scope}:`, ADD_DEFAULT_NAME[kind])?.trim();
