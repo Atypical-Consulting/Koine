@@ -550,6 +550,116 @@ public class ModelRoundTripTests
         model.ShouldNotBeNull();
     }
 
+    // ---- #254: aggregate-scoped members (repository / rule) ----------------
+
+    [Fact]
+    public void EmitKoine_add_repository_emits_a_repository_block_in_the_aggregate()
+    {
+        var edit = new StructuredEdit(StructuredEditKind.AddAggregateMember, "Ordering.Order", Type: "repository");
+        EmitResult result = ModelRoundTripService.EmitKoine(Files(Sample), edit);
+
+        result.Diagnostics.ShouldBeEmpty();
+        result.Koine.ShouldNotBeNull();
+        result.Koine!.ShouldContain("repository {");
+        result.Koine!.ShouldContain("operations: add, getById");
+        // The whole aggregate is re-emitted, so its root entity survives alongside the new repository.
+        result.Koine!.ShouldContain("aggregate Order root Order");
+        result.Koine!.ShouldContain("entity Order identified by OrderId");
+    }
+
+    [Fact]
+    public void EmitKoine_add_rule_emits_an_aggregate_scoped_spec_over_the_root()
+    {
+        var edit = new StructuredEdit(StructuredEditKind.AddAggregateMember, "Ordering.Order", Name: "IsLarge", Type: "rule");
+        EmitResult result = ModelRoundTripService.EmitKoine(Files(Sample), edit);
+
+        result.Diagnostics.ShouldBeEmpty();
+        result.Koine.ShouldNotBeNull();
+        result.Koine!.ShouldContain("spec IsLarge on Order = true");
+    }
+
+    [Fact]
+    public void EmitKoine_add_a_second_repository_is_refused()
+    {
+        // An aggregate holds at most one repository; a second insert is a no-op, not a double block.
+        var src = """
+            context Sales {
+              aggregate Orders root Order {
+                entity Order identified by OrderId {
+                  total: Decimal
+                }
+
+                repository {
+                  operations: getById, add
+                }
+              }
+            }
+            """;
+        var edit = new StructuredEdit(StructuredEditKind.AddAggregateMember, "Sales.Orders", Type: "repository");
+        EmitResult result = ModelRoundTripService.EmitKoine(Files(src), edit);
+
+        result.Koine.ShouldBeNull();
+    }
+
+    [Fact]
+    public void EmitKoine_add_rule_with_a_duplicate_name_is_rejected()
+    {
+        var src = """
+            context Sales {
+              aggregate Orders root Order {
+                entity Order identified by OrderId {
+                  total: Decimal
+                }
+
+                spec IsLarge on Order = true
+              }
+            }
+            """;
+        var edit = new StructuredEdit(StructuredEditKind.AddAggregateMember, "Sales.Orders", Name: "IsLarge", Type: "rule");
+        EmitResult result = ModelRoundTripService.EmitKoine(Files(src), edit);
+
+        result.Koine.ShouldBeNull();
+        result.Diagnostics.ShouldNotBeEmpty();
+    }
+
+    [Fact]
+    public void EmitKoine_add_aggregate_member_to_a_non_aggregate_target_is_a_no_op()
+    {
+        // Ordering.Money is a value object, not an aggregate — the edit resolves nothing.
+        var edit = new StructuredEdit(StructuredEditKind.AddAggregateMember, "Ordering.Money", Type: "repository");
+        EmitResult result = ModelRoundTripService.EmitKoine(Files(Sample), edit);
+
+        result.Koine.ShouldBeNull();
+    }
+
+    [Fact]
+    public void ApplyEdit_add_repository_yields_a_compiling_model()
+    {
+        var edit = new StructuredEdit(StructuredEditKind.AddAggregateMember, "Ordering.Order", Type: "repository");
+        ModelEditResult result = ModelRoundTripService.ApplyEdit(Files(Sample), edit);
+
+        result.Diagnostics.ShouldBeEmpty();
+        result.Edits.Count.ShouldBe(1);
+        var edited = Splice(Sample, result.Edits[0].Range, result.Edits[0].NewText);
+        var (model, diags) = new KoineCompiler().Parse(new[] { new SourceFile("t.koi", edited) });
+        diags.Where(d => d.Severity == DiagnosticSeverity.Error).ShouldBeEmpty();
+        model.ShouldNotBeNull();
+    }
+
+    [Fact]
+    public void ApplyEdit_add_rule_yields_a_compiling_model()
+    {
+        var edit = new StructuredEdit(StructuredEditKind.AddAggregateMember, "Ordering.Order", Name: "IsLarge", Type: "rule");
+        ModelEditResult result = ModelRoundTripService.ApplyEdit(Files(Sample), edit);
+
+        result.Diagnostics.ShouldBeEmpty();
+        result.Edits.Count.ShouldBe(1);
+        var edited = Splice(Sample, result.Edits[0].Range, result.Edits[0].NewText);
+        var (model, diags) = new KoineCompiler().Parse(new[] { new SourceFile("t.koi", edited) });
+        diags.Where(d => d.Severity == DiagnosticSeverity.Error).ShouldBeEmpty();
+        model.ShouldNotBeNull();
+    }
+
     [Fact]
     public void EmitKoine_remove_type_drops_an_unreferenced_type()
     {

@@ -146,6 +146,19 @@ public static partial class ModelRoundTripService
             return true;
         }
 
+        // Add a nested member (repository / rule) to an aggregate: the affected declaration is the
+        // AGGREGATE itself (Target IS its qname), whose re-sliced text carries the inserted member.
+        if (edit.Kind == StructuredEditKind.AddAggregateMember)
+        {
+            if (FindEditType(model, edit.Target) is not AggregateDecl agg || agg.Span.IsNone)
+            {
+                return false;
+            }
+
+            decl = new DeclTarget(false, false, edit.Target, agg.Span.File, agg.Span);
+            return true;
+        }
+
         // Add/remove a whole type: the affected declaration is the owning CONTEXT, which survives the
         // edit and whose re-sliced text carries the change (for add, Target IS the context name).
         if (edit.Kind is StructuredEditKind.AddType or StructuredEditKind.RemoveType)
@@ -208,6 +221,8 @@ public static partial class ModelRoundTripService
                 return TryAddTransition(model, files, edit, out op);
             case StructuredEditKind.AddType:
                 return TryAddType(model, files, edit, out op);
+            case StructuredEditKind.AddAggregateMember:
+                return TryAddAggregateMember(model, files, edit, out op);
             case StructuredEditKind.RemoveType:
                 return TryRemoveType(model, files, edit, out op);
             default:
@@ -493,6 +508,87 @@ public static partial class ModelRoundTripService
         var closeIndent = new string(' ', Math.Max(0, ctx.Span.Column - 1));
         op = new TextOp(ctx.Span.File, brace + 1, 0, nl + typeIndent + skeleton + nl + closeIndent);
         return true;
+    }
+
+    /// <summary>
+    /// Insert a minimal, re-validating <b>aggregate member</b> for the kind given by
+    /// <paramref name="edit"/>.Type — a <c>repository</c> block, or a <c>rule</c> as an aggregate-scoped
+    /// <c>spec &lt;Name&gt; on &lt;Root&gt; = true</c> — as the last member of the <paramref name="edit"/>.Target
+    /// aggregate. A second repository is refused (an aggregate holds at most one — the builder keeps the
+    /// last, so a double block would silently mislead); a duplicate rule name is rejected by re-validation.
+    /// </summary>
+    private static bool TryAddAggregateMember(KoineModel model, IReadOnlyList<SourceFile> files, StructuredEdit edit, out TextOp op)
+    {
+        op = default;
+        if (FindEditType(model, edit.Target) is not AggregateDecl agg || agg.Span.IsNone)
+        {
+            return false;
+        }
+
+        var source = SourceOf(files, agg.Span.File);
+        if (source is null)
+        {
+            return false;
+        }
+
+        var nl = NewlineOf(source);
+        var memberIndent = new string(' ', Math.Max(0, agg.Span.Column - 1) + 2);
+        var skeleton = edit.Type switch
+        {
+            // An aggregate holds at most one repository, so refuse a second rather than emit a confusing
+            // double block (the builder would silently keep only the last).
+            "repository" => agg.Repository is null
+                ? $"repository {{{nl}{memberIndent}  operations: add, getById{nl}{memberIndent}}}"
+                : null,
+            // "Rule" maps to an aggregate-scoped, reusable boolean specification over the root (#254); a
+            // bare `true` re-validates and a duplicate spec name is rejected by re-validation.
+            "rule" => string.IsNullOrEmpty(edit.Name) ? null : $"spec {edit.Name} on {agg.RootName} = true",
+            _ => null,
+        };
+
+        if (skeleton is null)
+        {
+            return false;
+        }
+
+        // Insert as the aggregate's last member: after the last existing member's whole physical line
+        // (with a blank line between), reusing the same idiom as the context-level type insert.
+        SourceSpan lastMember = LastAggregateMemberSpan(agg);
+        if (lastMember is { IsNone: false })
+        {
+            op = new TextOp(agg.Span.File, EndOfLine(source, lastMember.Offset + lastMember.Length), 0, nl + nl + memberIndent + skeleton);
+            return true;
+        }
+
+        // Empty aggregate body: open it after the aggregate's '{'.
+        var brace = source.IndexOf('{', agg.Span.Offset);
+        if (brace < 0)
+        {
+            return false;
+        }
+
+        var closeIndent = new string(' ', Math.Max(0, agg.Span.Column - 1));
+        op = new TextOp(agg.Span.File, brace + 1, 0, nl + memberIndent + skeleton + nl + closeIndent);
+        return true;
+    }
+
+    /// <summary>The physically-last nested member span of an aggregate (a nested type, a spec, or the
+    /// repository), or <see cref="SourceSpan.None"/> for an empty body — the anchor a new member is
+    /// inserted after.</summary>
+    private static SourceSpan LastAggregateMemberSpan(AggregateDecl agg)
+    {
+        SourceSpan last = SourceSpan.None;
+        foreach (SourceSpan span in agg.Types.Select(t => t.Span)
+            .Concat(agg.Specs.Select(s => s.Span))
+            .Append(agg.Repository?.Span ?? SourceSpan.None))
+        {
+            if (!span.IsNone && (last.IsNone || span.Offset > last.Offset))
+            {
+                last = span;
+            }
+        }
+
+        return last;
     }
 
     /// <summary>
