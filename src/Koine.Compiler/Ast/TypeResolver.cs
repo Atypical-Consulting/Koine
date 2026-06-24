@@ -263,6 +263,18 @@ public sealed class TypeResolver
                 }
             }
 
+            // A 0-arg call whose receiver type declares a spec by this name is a spec invocation
+            // (R10.1): a spec is a boolean predicate, so the call's type is Bool. This stays
+            // target-agnostic — a spec is a Koine construct, not a C# extension method.
+            if (n.Args.Count == 0)
+            {
+                KoineType receiver = Visit(n.Target);
+                if (!receiver.IsError && Index.TryGetSpec(receiver.Name!, op, out _))
+                {
+                    return Bool;
+                }
+            }
+
             return ErrorType.Instance;
         }
 
