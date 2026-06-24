@@ -190,7 +190,7 @@ internal sealed class PythonEmitterProvider : IEmitterProvider
     /// </summary>
     private static PythonEmitterOptions ToPythonOptions(EmitterOptions options)
     {
-        if (options.NamespaceMap.Count == 0)
+        if (options.NamespaceMap.Count == 0 && options.Layers is null)
         {
             return PythonEmitterOptions.Empty;
         }
@@ -201,7 +201,33 @@ internal sealed class PythonEmitterProvider : IEmitterProvider
             packageMap[PythonNaming.ToSnakeCase(context)] = package;
         }
 
-        return new PythonEmitterOptions(packageMap);
+        return new PythonEmitterOptions(packageMap, EmitDictHelpers: false, ParseLayers(options.Layers));
+    }
+
+    /// <summary>
+    /// Parses the comma-separated <c>layers</c> selector into a <see cref="PythonLayer"/> set, mirroring
+    /// <see cref="CSharpEmitterProvider"/>'s parser. <c>null</c> (the default) maps to <c>null</c> ⇒
+    /// Domain-only; the opt-in <c>infrastructure</c> (issue #241) always implies <c>domain</c>. Names are
+    /// case-insensitive; unknown names are dropped here (the CLI rejects them up front). The Python target
+    /// has no Application layer, so <c>application</c> is accepted and ignored (it still implies <c>domain</c>).
+    /// </summary>
+    private static IReadOnlySet<PythonLayer>? ParseLayers(string? layers)
+    {
+        if (layers is null)
+        {
+            return null;
+        }
+
+        var set = new HashSet<PythonLayer> { PythonLayer.Domain };
+        foreach (var name in layers.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            if (string.Equals(name, "infrastructure", StringComparison.OrdinalIgnoreCase))
+            {
+                set.Add(PythonLayer.Infrastructure);
+            }
+        }
+
+        return set;
     }
 }
 

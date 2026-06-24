@@ -47,10 +47,14 @@ public sealed partial class PythonEmitter : IEmitter
                 _options.PackageMap
                     .OrderBy(kv => kv.Key, StringComparer.Ordinal)
                     .Select(kv => kv.Key + "=" + kv.Value));
+            var layers = _options.Layers is null
+                ? ""
+                : string.Join(",", _options.Layers.Select(l => l.ToString()).OrderBy(s => s, StringComparer.Ordinal));
             return string.Join(
                 "|",
                 GetType().FullName,
                 "dictHelpers=" + _options.EmitDictHelpers,
+                "layers=" + layers,
                 "packages=" + map);
         }
     }
