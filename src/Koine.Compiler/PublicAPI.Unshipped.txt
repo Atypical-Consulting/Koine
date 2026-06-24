@@ -197,3 +197,6 @@ static Koine.Compiler.Services.ScenarioService.Error(string! target, string! ope
 static Koine.Compiler.Services.ScenarioService.Catalog(Koine.Compiler.Ast.SemanticModel! semantic) -> System.Collections.Generic.IReadOnlyDictionary<string!, object?>!
 static Koine.Compiler.Services.ScenarioService.Run(Koine.Compiler.Ast.SemanticModel! semantic, string! target, string! operation, System.Text.Json.JsonElement given, System.Text.Json.JsonElement args) -> System.Collections.Generic.IReadOnlyDictionary<string!, object?>!
 static Koine.Compiler.Services.ScenarioService.WriteJson(System.Collections.Generic.IReadOnlyDictionary<string!, object?>! tree) -> string!
+Koine.Compiler.Ast.ModelIndex.EventsEmittedBy(string! targetType, string! commandName) -> System.Collections.Generic.IReadOnlyList<string!>!
+Koine.Compiler.Ast.ModelIndex.CommandsEmitting(string! eventName) -> System.Collections.Generic.IReadOnlyList<(string! targetType, string! commandName)>!
+Koine.Compiler.Ast.ModelIndex.PoliciesTriggeredByEvent(string! eventName) -> System.Collections.Generic.IReadOnlyList<(string! targetType, string! commandName)>!
