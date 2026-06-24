@@ -1,4 +1,5 @@
 import { describe, expect, it, beforeAll, afterEach, vi } from 'vitest';
+import mermaid from 'mermaid';
 import * as mx from '@maxgraph/core';
 import { canvasToSvg, diagramToMermaid, diagramToPlantUml, exportDiagram, svgToPng } from '@/export/diagramExport';
 import { buildCanvas } from '@/diagrams/diagrams-maxgraph';
@@ -312,6 +313,67 @@ describe('diagramToMermaid', () => {
       const afterSeparator = row.slice(row.indexOf(' : ') + 3);
       expect(afterSeparator).not.toContain(':');
     }
+  });
+});
+
+// --- diagramToMermaid renders in Mermaid: a real parse guard (issue #340) --------------------------------
+// The #271 string-shape tests above never fed their output to Mermaid, so the double-colon parse bug stayed
+// green. This guard parses the emitted document with the actual `mermaid` library, so the same class of bug
+// can't slip through CI again. (mermaid.parse rejects invalid input; suppressErrors:true returns false
+// instead of throwing — a stable boolean to assert under happy-dom.)
+
+describe('diagramToMermaid → renders in Mermaid (issue #340)', () => {
+  // One graph exercising every shape that touches the member/edge emit path: a typed field, an optional `?`
+  // field, a method signature with inner colons + parens, an enum-member row (already colon-free), a
+  // composition edge with cardinalities, and a cross-context edge label.
+  const rich = graph(
+    [
+      node({
+        id: 'Delivery.Address',
+        label: 'Address',
+        stereotype: 'value object',
+        members: [member('street: String', 'field'), member('zip?: String', 'field')],
+      }),
+      node({
+        id: 'Delivery.Scheduler',
+        label: 'Scheduler',
+        stereotype: 'domain service',
+        members: [member('schedule(order: OrderId, destination: Address): Delivery', 'method')],
+      }),
+      node({
+        id: 'Delivery.Status',
+        label: 'Status',
+        stereotype: 'enum',
+        members: [member('Pending', 'enum-member'), member('Delivered', 'enum-member')],
+      }),
+      node({ id: 'Ordering.Order', label: 'Order' }),
+    ],
+    [
+      edge({
+        from: 'Delivery.Scheduler',
+        to: 'Delivery.Address',
+        arrowKind: 'composition',
+        sourceCardinality: '1',
+        cardinality: '0..1',
+        label: 'destination',
+      }),
+      edge({ from: 'Ordering.Order', to: 'Delivery.Scheduler', arrowKind: 'association', label: 'publishes' }),
+    ],
+  );
+
+  it('parses the emitted document as one valid classDiagram (no parse error)', async () => {
+    const out = diagramToMermaid(rich);
+    const result = await mermaid.parse(out, { suppressErrors: true });
+    // `false` => Mermaid rejected the document; a truthy diagram descriptor => it parsed.
+    expect(result).not.toBe(false);
+  });
+
+  it('would reject the pre-fix double-colon member shape (the guard has teeth)', async () => {
+    // The bug emitted `Alias : street: String`; confirm Mermaid actually rejects that, so the test above is
+    // a real regression guard and not vacuously green.
+    const broken = 'classDiagram\n  class A["A"]\n  A : street: String\n';
+    const result = await mermaid.parse(broken, { suppressErrors: true });
+    expect(result).toBe(false);
   });
 });
 
