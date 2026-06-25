@@ -300,5 +300,10 @@
            writes the uiChrome slice's mobileZone, which is mirrored onto #split[data-mobile-zone]. -->
       <nav id="mobile-zone-bar-host" aria-label="Studio zone switcher"></nav>
     </div>
+
+    <!-- The routed Home view mounts here (mountHome). The boot switch (main.ts) shows exactly one of
+         #app / #home-root per route, so Home and the editor never paint at once (issue #368). Starts
+         hidden; the boot reveals whichever the resolved route needs before first paint. -->
+    <div id="home-root" hidden></div>
   </body>
 </html>

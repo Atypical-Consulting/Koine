@@ -1125,11 +1125,14 @@ export function init(): () => void {
     history.noteEdit({ immediate: true });
   });
 
-  // Boot/empty-state: open the host's persistent default workspace, then surface the welcome overlay
-  // only when it is pristine (a single untouched SEED model). The clearLegacyScratch + the OPFS-error
-  // output line are ide-specific, so they wrap workspace.openDefaultWorkspaceFlow here.
+  // Boot/empty-state: open the host's persistent default workspace. The clearLegacyScratch + the
+  // OPFS-error output line are ide-specific, so they wrap workspace.openDefaultWorkspaceFlow here.
+  // NOTE: this no longer surfaces the welcome screen. Home is now a distinct route (#368) mounted by
+  // the boot switch (main.ts) — the IDE only runs on the editor route, so a pristine boot lands on the
+  // Home route and never paints the editor first. Showing the welcome overlay here is exactly the
+  // async-gated, post-paint reveal that caused the IDE→Home flash, so it's gone.
   async function openDefaultWorkspaceFlow(seed: string): Promise<void> {
-    const { opened, pristineSeed } = await workspace.openDefaultWorkspaceFlow(seed);
+    const { opened } = await workspace.openDefaultWorkspaceFlow(seed);
     if (!opened) {
       // The browser now falls back to an in-memory workspace, so this only fires if even that failed
       // (or a host that genuinely can't back one). An honest message beats a blank editor.
@@ -1142,7 +1145,6 @@ export function init(): () => void {
     // No-OPFS browsers (Safari / Firefox Private) run on the in-memory fallback: the editor + compiler
     // work, but a reload loses everything. Warn once so the user exports their work rather than losing it.
     if (!platform.persistsWorkspace) showMemoryOnlyBanner();
-    if (pristineSeed && pristineSeed.text === SEED) welcome.show();
   }
 
   // A one-time, dismissible top banner shown when the workspace is memory-only (no OPFS) — so work

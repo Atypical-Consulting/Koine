@@ -6,5 +6,105 @@ import '@fontsource-variable/jetbrains-mono';
 import '@maxgraph/core/css/common.css';
 import '@/styles/main.scss';
 import { init } from '@/shell/ide';
+import { mountHome, type WelcomeCallbacks } from '@/welcome/welcome';
+import { appStore } from '@/store';
+import { type Route, routeFromHash, hashFromRoute, resolveInitialRoute } from '@/store/slices/route';
+import { hasPersistedWorkspace } from '@/shell/workspaceFlag';
+import { readModelFromHash } from '@/export/share';
 
-window.addEventListener('DOMContentLoaded', () => init());
+// Home actions, Task-4 placeholder: any start action simply lands the user in the editor (which opens
+// the default workspace). Task 5 replaces this with the real per-action behaviour — open a folder /
+// open the chosen template, and persist the "workspace opened" flag — instead of a blanket navigate.
+function homeCallbacks(): WelcomeCallbacks {
+  const toEditor = (): void => appStore.getState().navigate('editor');
+  return {
+    onNewModel: toEditor,
+    onOpenFolder: toEditor,
+    onOpenRecent: toEditor,
+    onOpenExample: toEditor,
+  };
+}
+
+/**
+ * The Studio boot switch. Resolves the initial route **synchronously** (no async workspace probe) and
+ * mounts exactly one view — Home *or* the editor — then swaps on route changes. Mounting only one view
+ * is what removes the historic IDE→Home flash (#368): the home overlay used to fade in over an
+ * already-painted editor because its visibility was gated on an async flow that resolved a frame late.
+ *
+ * The IDE shell (`init()`) is started lazily, the first time the editor route is active, and is never
+ * torn down on a later Home↔Editor swap (the shell's LSP/workspace stay alive; only visibility toggles).
+ */
+export function bootStudio(homeRoot: HTMLElement | null = document.getElementById('home-root')): () => void {
+  const appEl = document.getElementById('app');
+
+  // A shared playground link (`#model=…`) always opens the editor; otherwise the hash and the
+  // synchronous "a workspace was open" flag decide. Resolved before any paint.
+  const isShareLink = readModelFromHash() !== null;
+  const initial: Route = isShareLink
+    ? 'editor'
+    : resolveInitialRoute({ hash: location.hash, hasPersistedWorkspace: hasPersistedWorkspace() });
+  appStore.setState({ route: initial });
+
+  // Canonicalise the URL hash to the resolved route so a refresh / bookmark lands on the same view —
+  // but never clobber a share link; the IDE consumes and clears `#model=…` itself.
+  if (!isShareLink) {
+    const wantHash = hashFromRoute(initial);
+    if (location.hash !== wantHash) {
+      try {
+        history.replaceState(null, '', wantHash);
+      } catch {
+        // history unavailable — harmless; routing still works off the in-memory slice.
+      }
+    }
+  }
+
+  let ideStarted = false;
+  let ideDispose: (() => void) | null = null;
+  let home: { destroy(): void } | null = null;
+
+  function showEditor(): void {
+    home?.destroy();
+    home = null;
+    if (homeRoot) homeRoot.hidden = true;
+    if (appEl) appEl.hidden = false;
+    if (!ideStarted) {
+      ideStarted = true;
+      ideDispose = init();
+    }
+  }
+
+  function showHome(): void {
+    if (appEl) appEl.hidden = true;
+    if (homeRoot) {
+      homeRoot.hidden = false;
+      if (!home) home = mountHome(homeRoot, homeCallbacks());
+    }
+  }
+
+  function apply(route: Route): void {
+    if (route === 'editor') showEditor();
+    else showHome();
+  }
+
+  apply(initial);
+
+  // Swap the mounted view whenever the route changes — via navigate() or a manual hash edit / browser
+  // back-forward (the hashchange listener feeds the slice).
+  let current = initial;
+  const unsub = appStore.subscribe((s) => {
+    if (s.route === current) return;
+    current = s.route;
+    apply(current);
+  });
+  const onHash = (): void => appStore.setState({ route: routeFromHash(location.hash) });
+  window.addEventListener('hashchange', onHash);
+
+  return () => {
+    unsub();
+    window.removeEventListener('hashchange', onHash);
+    ideDispose?.();
+    home?.destroy();
+  };
+}
+
+window.addEventListener('DOMContentLoaded', () => bootStudio());

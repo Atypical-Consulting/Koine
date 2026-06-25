@@ -929,7 +929,7 @@ describe('ide init() — Recent open recovery', () => {
     const p = installPlatform();
     // Make listKoiFiles throw only for the dead recent path ('ghost'); the default workspace
     // uses ROOT = 'mem://workspace' and must succeed as normal so the boot ladder completes and
-    // welcome.show() fires (pristine-seed check).
+    // the start screen can be opened with its recent list.
     const realListKoiFiles = p.listKoiFiles.bind(p);
     // Cast is required: FakePlatform omits the token arg but the real Platform interface has it.
     (p as unknown as { listKoiFiles: (token: string) => Promise<KoiFile[]> }).listKoiFiles = vi.fn(
@@ -940,7 +940,9 @@ describe('ide init() — Recent open recovery', () => {
     );
 
     await boot({ platform: p });
-    // After a pristine-seed boot the welcome is shown; the recent list now has the 'ghost' row.
+    // The welcome no longer auto-shows on boot — Home is a distinct route now (#368). Open the start
+    // screen via the brand button (goHome → welcome.show()); its recent list renders the 'ghost' row.
+    document.getElementById('btn-home')!.click();
     expect(document.querySelector('.koi-welcome-recent-open')).not.toBeNull();
 
     // Click the dead recent row — welcome.ts's click handler calls hide() then onOpenRecent('ghost').
