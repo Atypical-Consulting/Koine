@@ -65,6 +65,7 @@ import {
   NODE_EDIT_EVENT,
   NODE_NAVIGATE_EVENT,
   setDiagramEditing,
+  setDiagramTouchMode,
   type AddNodeKind,
   type AggregateMemberKind,
   type CanvasAnnotationKind,
@@ -624,6 +625,9 @@ export function init(): () => void {
   // The diagram canvas host — the controller renders into it, but ide.ts owns the authoring gesture
   // listeners (the diagram write-path stays here), which are bound to this node below.
   const diagramsView = el('center-visual');
+  // True on a phone-width viewport (the JS mirror of $bp-narrow). Drives the diagram canvas's touch mode
+  // and whether a node tap raises the Properties bottom sheet (#221).
+  const isNarrowViewport = (): boolean => window.innerWidth <= BP_NARROW;
 
   // --- diagram-authoring + inspector write path (the #91 round-trip) --------
   // These perform the actual `.koi` mutations (rename / structured edit / set-description) and span
@@ -717,13 +721,33 @@ export function init(): () => void {
 
   diagramsView.addEventListener(NODE_NAVIGATE_EVENT, (e) => {
     const detail = (e as CustomEvent<DiagramNodeNavigateDetail>).detail;
-    if (detail) void selectFromDiagram(detail);
+    if (!detail) return;
+    void selectFromDiagram(detail);
+    // On a phone the Properties rail is a bottom sheet (#221, Task 2): a node TAP raises it to half, so
+    // tapping a node doubles as "open this node's editor". Gated on $bp-narrow — desktop keeps its fixed
+    // rail (and openInspectorSheet would otherwise pop the hidden sheet over the page).
+    if (isNarrowViewport()) openInspectorSheet('half');
   });
 
   // Drag-to-edit (issue #93, Task 5): a diagram node gesture (double-click = rename, right-click =
   // delete) round-trips through the model→.koi seam (#91). Enabled now that the seam exists; the
   // renderer keeps the gestures inert until this flips the switch, so the read-only tab is unchanged.
   setDiagramEditing(true);
+  // Touch (tap-to-edit) presentation for the canvas (#221, Task 3): below $bp-narrow, freehand gestures
+  // (drag-move/connect, double-click-rename, right-click-delete) are swapped for tap-to-navigate + drag-to-
+  // pan so a phone drives the canvas by tapping. INDEPENDENT of the editing flag above — the mobile shell
+  // stays editing-capable (the palette + auto-arrange still author). Set from the initial viewport, then
+  // re-evaluated only when the breakpoint is actually crossed, re-rendering the canvas so the renderer
+  // re-wires its gestures for the new mode.
+  setDiagramTouchMode(isNarrowViewport());
+  let diagramWasNarrow = isNarrowViewport();
+  window.addEventListener('resize', () => {
+    const narrow = isNarrowViewport();
+    if (narrow === diagramWasNarrow) return; // act on a CROSS only — not on every resize tick
+    diagramWasNarrow = narrow;
+    setDiagramTouchMode(narrow);
+    void controller.loadDiagrams(); // rebuild the canvas with the now-correct gesture wiring
+  });
   diagramsView.addEventListener(NODE_EDIT_EVENT, (e) => {
     const detail = (e as CustomEvent<DiagramNodeEditDetail>).detail;
     if (detail) void applyDiagramEdit(detail);

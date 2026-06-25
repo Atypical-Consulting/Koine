@@ -21,6 +21,7 @@ import {
   isDiagramEditing,
   DIAGRAM_ANNOTATION_CREATE_EVENT,
   setDiagramEditing,
+  setDiagramTouchMode,
   setDiagramLayoutStore,
   setDiagramPersistScope,
   positionKey,
@@ -40,6 +41,7 @@ afterEach(() => {
   document.body.innerHTML = '';
   // Reset the module-level renderer state so an editing/persistence test can't leak into the next.
   setDiagramEditing(false);
+  setDiagramTouchMode(false);
   setDiagramPersistScope('scratch');
   setDiagramLayoutStore(null);
   localStorage.clear();
@@ -575,6 +577,80 @@ describe('canvas authoring: connect + disconnect', () => {
       container.addEventListener('koi-diagram-disconnect', (e) => { detail = (e as CustomEvent).detail; });
       container.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 10, clientY: 10, button: 2 }));
       expect(detail).toMatchObject({ backingMember: 'Ordering.Order.lines', label: 'lines' });
+    } finally {
+      handle.dispose();
+    }
+  });
+});
+
+describe('touch mode: freehand off, tap-to-navigate kept (#221 Task 3)', () => {
+  const spanned = (over = {}) =>
+    node({
+      id: 'Ordering.Order',
+      qualifiedName: 'Ordering.Order',
+      label: 'Order',
+      kind: 'aggregate-root',
+      stereotype: 'aggregate root',
+      sourceSpan: { file: 'file:///m.koi', line: 5, column: 3, endLine: 5, endColumn: 8, offset: 0, length: 5 },
+      ...over,
+    });
+
+  test('with touch mode on, the canvas is neither movable nor connectable even when editing is on', () => {
+    setDiagramEditing(true);
+    setDiagramTouchMode(true); // freehand off is INDEPENDENT of editing
+    const container = makeContainer();
+    const handle = buildCanvas(mx, container, { nodes: [spanned()], edges: [] });
+    try {
+      expect(handle.graph.isCellsMovable()).toBe(false); // drag-to-reposition off
+      expect(handle.graph.isConnectable()).toBe(false); // drag-to-connect off
+    } finally {
+      handle.dispose();
+    }
+  });
+
+  test('double-click rename is inert in touch mode (no NODE_EDIT, no prompt)', () => {
+    setDiagramEditing(true);
+    setDiagramTouchMode(true);
+    const container = makeContainer();
+    const handle = buildCanvas(mx, container, { nodes: [spanned()], edges: [] });
+    try {
+      let fired = false;
+      container.addEventListener('koi-diagram-node-edit', () => { fired = true; });
+      handle.graph.fireEvent(new mx.EventObject(mx.InternalEvent.DOUBLE_CLICK, 'cell', handle.cells.get('Ordering.Order')));
+      expect(fired).toBe(false);
+      expect(koiPrompt).not.toHaveBeenCalled(); // never reaches the rename dialog
+    } finally {
+      handle.dispose();
+    }
+  });
+
+  test('right-click delete is inert in touch mode (no NODE_EDIT, no confirm)', () => {
+    setDiagramEditing(true);
+    setDiagramTouchMode(true);
+    const container = makeContainer();
+    const handle = buildCanvas(mx, container, { nodes: [spanned()], edges: [] });
+    try {
+      handle.graph.getCellAt = (() => handle.cells.get('Ordering.Order')) as typeof handle.graph.getCellAt;
+      let fired = false;
+      container.addEventListener('koi-diagram-node-edit', () => { fired = true; });
+      container.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 10, clientY: 10, button: 2 }));
+      expect(fired).toBe(false);
+      expect(koiConfirm).not.toHaveBeenCalled(); // never reaches the delete confirm
+    } finally {
+      handle.dispose();
+    }
+  });
+
+  test('a node tap still bubbles NODE_NAVIGATE_EVENT in touch mode (tap-to-inspect)', () => {
+    setDiagramEditing(true);
+    setDiagramTouchMode(true);
+    const container = makeContainer();
+    const handle = buildCanvas(mx, container, { nodes: [spanned()], edges: [] });
+    try {
+      let detail: any = null;
+      container.addEventListener('koi-diagram-node-click', (e) => { detail = (e as CustomEvent).detail; });
+      handle.graph.fireEvent(new mx.EventObject(mx.InternalEvent.CLICK, 'cell', handle.cells.get('Ordering.Order')));
+      expect(detail).toMatchObject({ qualifiedName: 'Ordering.Order', file: 'file:///m.koi', line: 5, column: 3 });
     } finally {
       handle.dispose();
     }

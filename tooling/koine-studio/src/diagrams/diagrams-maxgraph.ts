@@ -23,6 +23,7 @@ import {
   NODE_NAVIGATE_EVENT,
   diagramLayoutStore,
   isDiagramEditing,
+  isDiagramTouchMode,
   isEditableKind,
   type CanvasAnnotationKind,
   type DiagramAnnotationCreateDetail,
@@ -459,16 +460,24 @@ export function buildCanvas(
   // a local parameter, not a coincidence of global-flag timing. Every authoring gesture below honours it.
   const readOnly = options?.readOnly ?? false;
   const editing = !readOnly && isDiagramEditing();
+  // Touch mode (#221 Task 3) is the mobile presentation: editing stays on (the palette + auto-arrange still
+  // author), but FREEHAND manipulation — drag-to-move/connect, double-click-rename, right-click-delete — is
+  // off, so a tap selects/navigates and a drag pans. `freehand` is the authoring-gesture predicate every
+  // such gesture honours; it requires editing AND not-touch. The context map (readOnly) ignores touch — it
+  // is already a non-authoring, pan-anywhere surface. Independent of `editing` per the contract.
+  const touch = !readOnly && isDiagramTouchMode();
+  const freehand = editing && !touch;
   const graph = new Graph(container);
   // CSP-safe: never fall through to the single `eval` path for unregistered style names (Tauri strict CSP).
   graph.getView().allowEval = false;
   graph.setHtmlLabels(true); // labels render as HTML so class nodes can use compartment markup.
   graph.setCellsEditable(false); // no in-place label editing (renames go through the model round-trip).
   graph.setCellsResizable(false); // node size is derived from content, not hand-resized.
-  // Drag-to-reposition + drag-to-connect are authoring gestures, gated on editing so the read-only tab is
-  // inert. ide.tsx flips editing on at boot (the model→.koi round-trip seam is reachable).
-  graph.setCellsMovable(editing);
-  if (editing) {
+  // Drag-to-reposition + drag-to-connect are FREEHAND authoring gestures, gated so the read-only tab is
+  // inert AND so touch mode (mobile) swaps them for tap-to-edit. ide.tsx flips editing on at boot (the
+  // model→.koi round-trip seam is reachable) and touch on below $bp-narrow.
+  graph.setCellsMovable(freehand);
+  if (freehand) {
     graph.setConnectable(true); // hover a node → drag to another to draw a relationship (→ addField)
     graph.setAllowDanglingEdges(false); // a connection must land on a node; no edges to empty space
     const conn = graph.getPlugin('ConnectionHandler') as unknown as { setCreateTarget?: (v: boolean) => void } | undefined;
@@ -491,19 +500,19 @@ export function buildCanvas(
   const baseIsCellMovable = graph.isCellMovable.bind(graph);
   graph.isCellMovable = (cell) => {
     const av = annotationValue(cell);
-    if (av) return editing && av.annotationKind === 'note';
+    if (av) return freehand && av.annotationKind === 'note';
     return baseIsCellMovable(cell);
   };
   const baseIsCellSelectable = graph.isCellSelectable.bind(graph);
   graph.isCellSelectable = (cell) => {
     const av = annotationValue(cell);
-    if (av) return editing && av.annotationKind === 'note'; // notes select (for the resize handles) only when editing
+    if (av) return freehand && av.annotationKind === 'note'; // notes select (for the resize handles) only when freehand-editing
     return baseIsCellSelectable(cell);
   };
   const baseIsCellResizable = graph.isCellResizable.bind(graph);
   graph.isCellResizable = (cell) => {
     const av = annotationValue(cell);
-    if (av) return editing && av.annotationKind === 'note';
+    if (av) return freehand && av.annotationKind === 'note';
     return baseIsCellResizable(cell);
   };
   // Render each cell's stored value: an annotation → its sticky/region HTML label; a DiagramNode → its
@@ -544,7 +553,7 @@ export function buildCanvas(
   // A double-click on a canvas annotation edits its note text / group label instead (#255, no `.koi` edit).
   // Gated on editing; only class-type, context-owned, spanned nodes (never a context / state) rename.
   graph.addListener(mx.InternalEvent.DOUBLE_CLICK, (_sender: unknown, evt: { getProperty(name: string): unknown }) => {
-    if (readOnly || !isDiagramEditing()) return;
+    if (readOnly || !isDiagramEditing() || isDiagramTouchMode()) return; // touch mode: a tap navigates, no freehand rename
     const cell = evt.getProperty('cell') as MxCell | null;
     if (annotationValue(cell)) {
       void editAnnotation(cell!);
@@ -576,7 +585,7 @@ export function buildCanvas(
   // Right-click a node → delete it; right-click a field-backed edge → remove that field. Gated on editing.
   // A DOM contextmenu listener (capture phase, so it beats maxGraph's own handlers) hit-tests the cell.
   const onContextMenu = (evt: MouseEvent): void => {
-    if (readOnly || !isDiagramEditing()) return;
+    if (readOnly || !isDiagramEditing() || isDiagramTouchMode()) return; // touch mode: no freehand delete/disconnect
     const rect = container.getBoundingClientRect();
     const cell = graph.getCellAt(evt.clientX - rect.left, evt.clientY - rect.top);
     if (!cell) return;
@@ -644,7 +653,7 @@ export function buildCanvas(
         /* the temp edge is best-effort to remove; a stray one is corrected by the next re-render */
       }
     }
-    if (readOnly || !isDiagramEditing() || !source || !target || source === target) return;
+    if (readOnly || !isDiagramEditing() || isDiagramTouchMode() || !source || !target || source === target) return;
     container.dispatchEvent(
       new CustomEvent<DiagramConnectDetail>(DIAGRAM_CONNECT_EVENT, {
         bubbles: true,
@@ -1006,18 +1015,23 @@ function mountChrome(mx: Mx, handle: CanvasHandle, host: HTMLElement, readOnly =
   // `readOnly` (the context-map canvas) is never an authoring surface regardless of the global editing
   // flag — so panning claims drags anywhere and the authoring controls are omitted.
   const editing = !readOnly && isDiagramEditing();
+  // Touch mode (#221 Task 3): freehand manipulation is off, so — like the read-only canvas — a drag
+  // anywhere pans (there is no node to drag/connect). `freehand` mirrors buildCanvas: editing AND not-touch.
+  const touch = !readOnly && isDiagramTouchMode();
+  const freehand = editing && !touch;
 
-  // Left-drag pans. When editing, panning must NOT claim drags that start on a cell (ignoreCell=false) —
-  // otherwise the pan handler eats the drag and a node can never be moved (it just pans the viewport). So:
-  // editing ⇒ drag empty = pan, drag node = move/connect; read-only ⇒ nothing is movable, so drag anywhere
-  // pans (ignoreCell=true). A plain click still registers in both modes (panning needs an actual drag).
+  // Left-drag pans. When freehand authoring, panning must NOT claim drags that start on a cell
+  // (ignoreCell=false) — otherwise the pan handler eats the drag and a node can never be moved (it just
+  // pans the viewport). So: freehand ⇒ drag empty = pan, drag node = move/connect; read-only OR touch ⇒
+  // nothing is freehand-movable, so drag anywhere pans (ignoreCell=true). A plain click/tap still registers
+  // in every mode (panning needs an actual drag).
   graph.setPanning(true);
   const panning = graph.getPlugin('PanningHandler') as unknown as
     | { useLeftButtonForPanning?: boolean; ignoreCell?: boolean }
     | undefined;
   if (panning) {
     panning.useLeftButtonForPanning = true;
-    panning.ignoreCell = !editing;
+    panning.ignoreCell = !freehand;
   }
   graph.centerZoom = false;
   graph.zoomFactor = 1.2;

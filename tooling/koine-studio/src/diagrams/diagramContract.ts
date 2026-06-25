@@ -145,6 +145,26 @@ export function isDiagramEditing(): boolean {
 }
 
 /**
+ * Whether the canvas is in TOUCH mode (issue #221, Task 3): the mobile presentation where freehand
+ * gestures are disabled (no drag-to-move, drag-to-connect, double-click-rename or right-click-delete) so a
+ * single tap selects/navigates a node instead and a drag pans the viewport. Off by default — `ide.ts`
+ * flips it on below `$bp-narrow` and off above it. Deliberately INDEPENDENT of {@link isDiagramEditing}:
+ * the mobile shell stays editing-capable (the palette + auto-arrange still author), it just swaps freehand
+ * manipulation for tap-to-edit. The renderer reads this alongside the editing flag when wiring gestures.
+ */
+let touchMode = false;
+
+/** Enable/disable touch (tap-to-edit) presentation on the diagram canvas. */
+export function setDiagramTouchMode(on: boolean): void {
+  touchMode = on;
+}
+
+/** Whether the canvas is currently in touch mode (read by the active renderer). */
+export function isDiagramTouchMode(): boolean {
+  return touchMode;
+}
+
+/**
  * The per-workspace scope for persisted node positions (the authoring canvas). `ide.ts` sets it to the
  * folder identity (or 'scratch') before each render so positions never bleed across projects.
  */
