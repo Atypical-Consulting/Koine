@@ -220,7 +220,7 @@ public sealed partial class PhpEmitter
             first = false;
             WriteDoc(sb, spec.Doc, Indent);
 
-            var fn = PhpNaming.MethodName("is" + PhpNaming.ToPascalCase(spec.Name));
+            var fn = PhpNaming.MethodName("is" + SpecPredicateSubject(PhpNaming.ToPascalCase(spec.Name)));
             var targetClass = PhpNaming.ClassName(spec.TargetType);
 
             // Gather target-type members so the translator can resolve member references.
@@ -247,6 +247,18 @@ public sealed partial class PhpEmitter
             PathFor(ctxName, KindFolder.Specifications, name),
             Assemble(ctxName, KindFolder.Specifications, sb.ToString(), name));
     }
+
+    /// <summary>
+    /// The PascalCase spec subject with a redundant leading <c>Is</c> word stripped, so the emitted
+    /// <c>is</c>-predicate name doesn't double: <c>IsFreeOrder</c> → <c>FreeOrder</c> (→ <c>isFreeOrder</c>),
+    /// not <c>isIsFreeOrder</c>. A non-predicate name that merely starts with "Is" (e.g. <c>Island</c>)
+    /// is left intact — the character after "Is" must be uppercase for it to count as a word prefix.
+    /// Mirrors the identical de-doubling in the TypeScript emitter (#396).
+    /// </summary>
+    internal static string SpecPredicateSubject(string pascalName) =>
+        pascalName.Length > 2 && pascalName[0] == 'I' && pascalName[1] == 's' && char.IsUpper(pascalName[2])
+            ? pascalName[2..]
+            : pascalName;
 
     /// <summary>
     /// Members in scope for a spec on <paramref name="targetType"/>: entities get a synthetic
