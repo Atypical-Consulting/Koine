@@ -9,6 +9,7 @@ import {
   loadWorkspaceOverrides,
 } from '@/settings/persistence';
 import { BUILTIN_EMIT_TARGETS } from '@/shared/emitTargets';
+import { MCP_CLIENTS } from '@/mcp/mcp';
 
 // Flush queued microtasks + timers so the panel's async steps (mcpEndpoint, mcpStop, probe) settle.
 const flush = () => new Promise((r) => setTimeout(r, 0));
@@ -17,6 +18,8 @@ async function settle(): Promise<void> {
 }
 
 const URL = 'http://127.0.0.1:51000/mcp';
+// Mirrors the placeholder used by createPreferences when no live endpoint has resolved (prefs.ts).
+const MCP_URL_PLACEHOLDER = 'http://127.0.0.1:PORT/mcp';
 
 function openPrefs(over: Partial<PrefsCallbacks> = {}): void {
   const prefs = createPreferences({
@@ -33,7 +36,7 @@ const mcpToggle = () =>
   document.querySelector<HTMLButtonElement>('.koi-switch[aria-label="Enable MCP server"]')!;
 const mcpClientSelect = () =>
   document.querySelector<HTMLSelectElement>('#koi-settings-panel-mcp .koi-select')!;
-const snippet = () => document.querySelector<HTMLPreElement>('.koi-mcp-snippet')!;
+const snippet = () => document.querySelector<HTMLDivElement>('.koi-mcp-snippet')!;
 const status = () => document.querySelector<HTMLElement>('.koi-mcp-status')!;
 const endpointUrl = () => document.querySelector<HTMLInputElement>('.koi-mcp-control .koi-text')!;
 const testBtn = () =>
@@ -134,6 +137,31 @@ describe('Settings → MCP panel', () => {
     await settle();
     expect(endpointUrl().value).toBe('');
     expect(status().dataset.state).toBe('fail');
+  });
+
+  it('renders the recipe as a highlighted CodeMirror view and Copy writes the exact snippet', async () => {
+    // The recipe is now a read-only CodeMirror view (.koi-mcp-snippet .cm-editor), not a bare <pre>.
+    // Copy must round-trip the exact snippet JSON through the view, preserving JSON.parse for clients.
+    const writeText = vi.fn(() => Promise.resolve());
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
+
+    openPrefs();
+    await settle();
+    const sel = mcpClientSelect();
+    sel.value = 'lm-studio';
+    sel.dispatchEvent(new Event('change'));
+    await settle();
+
+    expect(document.querySelector('.koi-mcp-snippet .cm-editor')).not.toBeNull();
+
+    const expected = MCP_CLIENTS.find((c) => c.id === 'lm-studio')!.snippet(MCP_URL_PLACEHOLDER);
+    const copyBtn = [
+      ...document.querySelectorAll<HTMLButtonElement>('#koi-settings-panel-mcp .koi-set-action'),
+    ].find((b) => b.textContent === 'Copy')!;
+    copyBtn.click();
+    await settle();
+
+    expect(writeText).toHaveBeenCalledWith(expected);
   });
 });
 
