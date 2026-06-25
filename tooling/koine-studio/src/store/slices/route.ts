@@ -57,15 +57,3 @@ export function createRouteSlice(
     },
   };
 }
-
-/**
- * Seed the store's route from the current `location.hash` and keep it in sync with manual hash edits
- * and browser back/forward. Call once at boot, after the slice is registered. Returns nothing — the
- * `hashchange` listener lives for the page lifetime (Studio is a single long-lived page).
- */
-export function initRouteSync(store: StoreApi<RouteSlice>): void {
-  store.setState({ route: routeFromHash(location.hash) });
-  window.addEventListener('hashchange', () => {
-    store.setState({ route: routeFromHash(location.hash) });
-  });
-}

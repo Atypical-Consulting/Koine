@@ -975,3 +975,27 @@ describe('ide init() — Recent open recovery', () => {
     expect(document.querySelector('.koi-welcome-empty')).not.toBeNull();
   });
 });
+
+describe('ide init() — return-visit start-intent (#368)', () => {
+  test('a start-intent queued after boot is consumed on the next transition into the editor route', async () => {
+    // The IDE boots once and survives Home↔Editor swaps, so init()'s boot ladder only consumes a
+    // start-intent the first time. A start action taken on a RETURN visit to Home navigates back to a
+    // still-initialised editor — init() does NOT re-run — so without the route-change subscriber the
+    // intent would be silently dropped. This pins that the subscriber consumes it.
+    const { setStartIntent, takeStartIntent } = await import('@/shell/bootIntent');
+    const { appStore } = await import('@/store');
+
+    await boot(); // first boot: route is the default 'home', init() runs once, no intent queued
+    await settleBoot();
+
+    // Simulate a Home action on a return visit: queue an intent, then the route flips home → editor.
+    setStartIntent({ kind: 'new' });
+    appStore.setState({ route: 'editor' });
+
+    // The subscriber consumed it synchronously on the transition — nothing is left queued.
+    expect(takeStartIntent()).toBeNull();
+
+    // Drain the fire-and-forget action the intent triggered (newModel) before the env tears down.
+    await settleBoot();
+  });
+});

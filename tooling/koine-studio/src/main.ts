@@ -95,12 +95,10 @@ export function bootStudio(homeRoot: HTMLElement | null = document.getElementByI
   apply(initial);
 
   // Swap the mounted view whenever the route changes — via navigate() or a manual hash edit / browser
-  // back-forward (the hashchange listener feeds the slice).
-  let current = initial;
-  const unsub = appStore.subscribe((s) => {
-    if (s.route === current) return;
-    current = s.route;
-    apply(current);
+  // back-forward (the hashchange listener feeds the slice). The slice change fires on every setState,
+  // so gate on the route actually differing (prev is the store's own previous state — no local mirror).
+  const unsub = appStore.subscribe((s, prev) => {
+    if (s.route !== prev.route) apply(s.route);
   });
   const onHash = (): void => appStore.setState({ route: routeFromHash(location.hash) });
   window.addEventListener('hashchange', onHash);

@@ -2086,6 +2086,19 @@ export function init(): () => void {
       output.setContent('// failed to start language server\n' + String(e), 'plain');
     });
 
+  // The IDE shell boots once and stays alive across Home↔Editor route swaps (main.ts toggles
+  // visibility, it doesn't re-init). The boot ladder above consumes a start-intent only on that first
+  // boot — so a start action taken on a *return* visit to Home (which navigates back here without
+  // re-initing) would otherwise be dropped. Consume any queued intent on every later transition INTO
+  // the editor route. The first transition already happened before this listener exists (init() runs
+  // synchronously from the navigate that flipped the route), so it never double-fires with the ladder.
+  const unsubRouteIntent = appStore.subscribe((s, prev) => {
+    if (s.route === 'editor' && prev.route !== 'editor') {
+      const intent = takeStartIntent();
+      if (intent) void runStartIntent(intent);
+    }
+  });
+
   // A teardown the host can call to release the IDE's deferred work. Production (main.ts) runs for the
   // page lifetime and ignores it; the test suite calls it between boots so the controller's pending
   // debounce timers can't fire into a torn-down happy-dom (where `render` throws "document is not defined").
@@ -2093,5 +2106,6 @@ export function init(): () => void {
   return () => {
     controller.dispose();
     workspace.setAutoSave(false);
+    unsubRouteIntent();
   };
 }
