@@ -1,0 +1,21 @@
+[
+  {"query": "set up the repo profile for this repository", "should_trigger": true, "note": "'set up the repo profile'"},
+  {"query": "make the issue/PR lifecycle skills work in my other repo", "should_trigger": true, "note": "port to another repo"},
+  {"query": "configure this repo for the issue skills", "should_trigger": true, "note": "'configure this repo for the issue skills'"},
+  {"query": "generate the repo profile", "should_trigger": true, "note": "'generate the repo profile'"},
+  {"query": "refresh the repo profile after we changed the CI gates", "should_trigger": true, "note": "refresh after CI change"},
+  {"query": "port create-issue and merge-pr to this new repo", "should_trigger": true, "note": "'port create-issue/merge-pr'"},
+  {"query": "make these skills generic so they work in any repository", "should_trigger": true, "note": "'make these skills generic'"},
+  {"query": "regenerate the repo profile — the labels changed", "should_trigger": true, "note": "regenerate after label change"},
+  {"query": "load the repo profile config for the lifecycle skills", "should_trigger": true, "note": "'load the repo profile'"},
+  {"query": "detect this repo's build/test/format commands for the issue skills", "should_trigger": true, "note": "detect build/test commands"},
+
+  {"query": "file an issue for a new emitter feature", "should_trigger": false, "note": "→ create-issue"},
+  {"query": "implement issue 47 and open a PR", "should_trigger": false, "note": "→ implement-issue"},
+  {"query": "merge PR 281", "should_trigger": false, "note": "→ merge-pr"},
+  {"query": "review PR 281 without merging", "should_trigger": false, "note": "→ review/code-review"},
+  {"query": "what build system and test framework does Koine use?", "should_trigger": false, "note": "doc question — answerable, no profile generation"},
+  {"query": "update CLAUDE.md with what we learned this session", "should_trigger": false, "note": "→ revise-claude-md, not get-repo-profile"},
+  {"query": "what's the difference between value objects and entities in DDD?", "should_trigger": false, "note": "doc question — no lifecycle skill"},
+  {"query": "run the test suite and tell me what fails", "should_trigger": false, "note": "no lifecycle skill"}
+]

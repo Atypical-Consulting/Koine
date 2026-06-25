@@ -13,6 +13,8 @@
 // desktop, a registry id on the browser. The UI persists tokens (e.g. recent folders) and passes
 // them back to the platform — it never interprets them.
 
+import type { ChangeEntry } from '@/host/gitHistory';
+
 /** A `.koi` file discovered under an opened folder. `path` is an opaque read/write token. */
 export interface KoiFile {
   path: string; // opaque file token (absolute path on desktop; synthetic on browser)
@@ -115,6 +117,14 @@ export interface Platform {
   readonly canSaveProjects: boolean;
 
   /**
+   * Whether an opened workspace PERSISTS across reloads. True with real storage (OPFS in the browser,
+   * the desktop filesystem on Tauri); false on the browser's in-memory fallback used when OPFS is
+   * unavailable (Safari / Firefox Private) — there the editor still works, but work is session-only,
+   * so the shell warns the user.
+   */
+  readonly persistsWorkspace: boolean;
+
+  /**
    * Write the given files as a named project under the host's workspace root (picked once and
    * remembered), registering the new folder so it reopens like any opened folder. Returns the new
    * folder token, null when the user dismisses the root picker, and throws `already exists` on a
@@ -133,8 +143,18 @@ export interface Platform {
    * token (then opened via the normal folder-mode path, so the explorer + file mutations all
    * work). Used by the multi-file starter examples. `name` is a stable per-example slug; `files`
    * carry forward-slashed relPaths.
+   *
+   * `persist` (default false) controls the lifecycle: when true the workspace is addressed by a
+   * stable token, seeded only on first creation, and remembered across reloads — so a user's edits
+   * to an opened example survive (the examples pass true). When false it is recreated fresh on every
+   * call under a session-only token, so each call reflects exactly its own files (shared-link imports
+   * pass false / omit it).
    */
-  materializeWorkspace(name: string, files: { relPath: string; contents: string }[]): Promise<string | null>;
+  materializeWorkspace(
+    name: string,
+    files: { relPath: string; contents: string }[],
+    persist?: boolean,
+  ): Promise<string | null>;
 
   /**
    * Open (or first-time create + seed) the host's persistent default workspace — the single-model
@@ -149,6 +169,15 @@ export interface Platform {
 
   /** Every `.koi` file under an opened folder, sorted by relPath. */
   listKoiFiles(token: string): Promise<KoiFile[]>;
+
+  /**
+   * The git change history of lines `startLine..endLine` (1-based, inclusive) of the file addressed by
+   * `path` — the per-element "Change history" the inspector renders (issue #150). The desktop host
+   * shells out to `git log -L start,end:file` in the file's directory; the browser host (no git) returns
+   * `null`. Resolves `null` — never rejects — whenever history is unavailable (not a git repo, git
+   * missing, the file untracked), so the caller simply hides the section. Newest commit first.
+   */
+  gitLogForRange(path: string, startLine: number, endLine: number): Promise<ChangeEntry[] | null>;
 
   /** Read a file's UTF-8 text by its token. */
   readTextFile(path: string): Promise<string>;

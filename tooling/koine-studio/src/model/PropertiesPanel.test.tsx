@@ -6,6 +6,7 @@ import { PropertiesPanel } from '@/model/PropertiesPanel';
 import { buildModelIndex } from '@/model/modelIndex';
 import type { DiagramNode, DocsFile, DocsResult, GlossaryEntry, GlossaryModel, Range } from '@/lsp/lsp';
 import type { InspectorHandlers } from '@/model/inspector';
+import { axe } from 'vitest-axe';
 
 const range: Range = { start: { line: 0, character: 0 }, end: { line: 0, character: 4 } };
 
@@ -76,5 +77,13 @@ describe('PropertiesPanel', () => {
     // Sanity: a relevant change DOES re-render, proving the probe is actually wired.
     act(() => store.getState().setSelection({ qualifiedName: 'Sales.Order', context: 'Sales' }));
     expect(renders.mock.calls.length).toBeGreaterThan(before);
+  });
+
+  test('has no accessibility violations', async () => {
+    const store = createAppStore();
+    const index = makeIndex();
+    const { container } = render(<PropertiesPanel store={store} index={index} handlers={handlers} />);
+    act(() => store.getState().setSelection({ qualifiedName: 'Sales.Order', context: 'Sales' }));
+    expect(await axe(container)).toHaveNoViolations();
   });
 });

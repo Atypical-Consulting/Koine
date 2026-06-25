@@ -9,6 +9,7 @@ html[data-theme='light'] {
   --koi-paper-2: #f4f6fa;
   --koi-surface: #e9edf3;
   --koi-line: #d2d9e3;
+  --koi-diagram-edge: #7a8698; /* relationship connectors — clearly darker than --koi-line so edges read assertively */
 
   /* text */
   --koi-fg: #1c2230;
@@ -34,6 +35,13 @@ html[data-theme='light'] {
   --koi-hl-comment: #6a7484;
   --koi-hl-meta: #bf3989;
   --koi-hl-punct: #57606a;
+
+  /* semantic-token highlighting (LSP-driven, issue #329), contrast-safe on white: value/type reuses
+     --koi-hl-type; enum / enumMember / property / parameter get their own distinct hues. */
+  --koi-hl-sem-enum: #8a5a00;
+  --koi-hl-sem-enum-member: #a64d00;
+  --koi-hl-sem-property: #0f7a5f;
+  --koi-hl-sem-parameter: #a83232;
 }
 
 /* The dark theme is the :root default; data-theme='dark' needs no override block. */

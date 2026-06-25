@@ -1,0 +1,68 @@
+﻿// ==== Ordering/openapi.yaml ====
+openapi: 3.1.0
+info:
+  title: "Ordering API"
+  version: 1.0.0
+paths:
+  /order/submit:
+    post:
+      operationId: Order_submit
+      summary: "Submit a draft order for fulfilment."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                note:
+                  type: string
+              required:
+                - note
+      responses:
+        "204":
+          description: "The command succeeded."
+        "400":
+          description: "A precondition or invariant was violated."
+  /orders-by-status:
+    get:
+      operationId: OrdersByStatus
+      summary: "All orders in a given lifecycle state."
+      parameters:
+        - name: status
+          in: query
+          required: true
+          schema:
+            $ref: "#/components/schemas/OrderStatus"
+      responses:
+        "200":
+          description: "The matching results."
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/OrderRow"
+components:
+  schemas:
+    Money:
+      type: object
+      properties:
+        amount:
+          type: number
+      required:
+        - amount
+    OrderRow:
+      type: object
+      properties:
+        status:
+          $ref: "#/components/schemas/OrderStatus"
+      required:
+        - status
+    OrderStatus:
+      type: string
+      enum:
+        - Draft
+        - Submitted
+        - Cancelled
+

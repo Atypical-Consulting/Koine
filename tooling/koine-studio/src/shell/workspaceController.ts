@@ -18,6 +18,7 @@
 // render respectively. The accessors are only invoked at runtime, so ide.ts can pass
 // `() => workspace.activeUri()` thunks that resolve after this is constructed.
 import { dirtyCount, saveAllDirtyBuffers } from '@/shell/dirty';
+import { matchesInclude } from '@/shell/workspaceSearch';
 import { pathToFileUri } from '@/shell/ideUtils';
 import type { FsEntry, KoiFile, Platform } from '@/host';
 import type { TextEdit, WorkspaceEdit } from '@/lsp/lsp';
@@ -33,6 +34,8 @@ export interface Buffer {
   name: string;
   text: string;
   dirty: boolean;
+  /** The workspace root (from {@link WorkspaceController.rootsList}) this buffer's file lives under. */
+  rootToken: string;
 }
 
 /** The slice of {@link import('@/lsp/lsp').KoineLsp} the workspace lifecycle drives (a spy in tests). */
@@ -56,7 +59,8 @@ export interface WorkspaceEditor {
 
 /** The slice of the {@link import('@/shell/explorer').Explorer} the tree render calls. */
 export interface WorkspaceExplorer {
-  render(entries: FsEntry[], rootToken: string): void;
+  /** Render one GROUP per workspace root (a single group renders headerless, like the legacy single-root render). */
+  renderRoots(groups: { root: string; entries: FsEntry[] }[]): void;
 }
 
 export interface WorkspaceControllerDeps {
@@ -113,14 +117,33 @@ export interface WorkspaceController {
   readonly buffers: Map<string, Buffer>;
   /** The uri the editor currently shows / all LSP requests target. */
   activeUri(): string;
-  /** The opened-folder token ('' before a folder opens). */
+  /**
+   * The PRIMARY (first) workspace root token ('' before any folder opens). Back-compat shim over the
+   * ordered {@link rootsList}: for the single-root case it is byte-identical to the opened folder, which
+   * is what ide.ts / the inspector / the store slice still depend on.
+   */
   folderRootToken(): string;
-  /** The last explorer entry tree fetched for the opened folder. */
+  /** Every workspace root, in add order (a copy); the first is the primary ({@link folderRootToken}). */
+  rootsList(): string[];
+  /** The last explorer entry tree fetched for the primary root. */
   entriesCache(): FsEntry[];
 
   // --- open paths ---
   /** Load + open every .koi under `folder` as one workspace; activate the first by relPath. */
   openFolderPath(folder: string, opts?: { recent?: boolean }): Promise<OpenResult>;
+  /**
+   * ADDITIVE: union a second folder's .koi files into the current workspace as a new root (appended to
+   * {@link rootsList}), WITHOUT closing existing buffers or changing the active one. An already-present
+   * root is a no-op `{ ok: true }`; an unreadable/empty folder reports the reason and is not appended.
+   */
+  addRoot(folder: string): Promise<OpenResult>;
+  /**
+   * Remove exactly `folder` from the workspace: close every buffer it owns (LSP closeDoc + drop their
+   * diagnostics), drop its cached entries, splice it out of {@link rootsList}. If the active buffer was
+   * one of the removed ones, re-point the active buffer via the fallback (or empty the workspace when no
+   * buffers remain). A folder not in {@link rootsList} is a harmless no-op.
+   */
+  removeRoot(folder: string): void;
   /**
    * Boot/empty-state: open (or seed) the host default workspace. Returns `opened` (false when the host
    * can't back one — ide.ts shows the OPFS-needed message) and `pristineSeed` (the single buffer when
@@ -129,6 +152,13 @@ export interface WorkspaceController {
   openDefaultWorkspaceFlow(seed: string): Promise<{ opened: boolean; pristineSeed: Buffer | null }>;
   /** Open one shared model as a transient 1-file workspace (non-destructive). */
   openWorkspaceWith1File(text: string): Promise<void>;
+  /**
+   * Every `.koi` file uri under the open folder (the host walk's skip-list already applied), in
+   * relPath order; `[]` when no folder is open. An optional comma-separated include glob narrows the
+   * result the same way workspace search's `include` does. Used by the workspace search panel to know
+   * which files to scan (it reads each one's text from the open buffer, or the host fs when closed).
+   */
+  listWorkspaceFiles(glob?: string): Promise<string[]>;
   /** Open a .koi file token as a buffer if needed; returns its uri (or null on failure). */
   ensureBuffer(token: string): Promise<string | null>;
   /** Open a file token (if needed) and make it the active editor buffer. */
@@ -149,6 +179,14 @@ export interface WorkspaceController {
   saveActive(): Promise<void>;
   /** Save every dirty buffer; a failed write stays dirty and is reported. Re-entrancy guarded. */
   saveAllDirty(): Promise<void>;
+  /** Enable/disable idle auto-save; disabling cancels any pending debounce. */
+  setAutoSave(on: boolean): void;
+  /**
+   * Arm (or re-arm) the idle auto-save debounce. Called from the editor's onChange on every edit; a
+   * no-op when auto-save is off. On fire it runs the same persist as Save all (format-on-save → write
+   * dirty buffers → didSave → tree refresh).
+   */
+  scheduleAutoSave(): void;
   /** True when any open buffer has unsaved changes (the unload / window-close guard). */
   anyDirty(): boolean;
   /**
@@ -157,6 +195,14 @@ export interface WorkspaceController {
    * re-renders the tree only on that cheap transition). The editor↔LSP sync runs in editorSession.
    */
   syncActiveBuffer(doc: string): boolean;
+  /**
+   * The uri-keyed buffer/dirty sync: write `doc` into `uri`'s buffer and flip it dirty on first
+   * change, returning whether that buffer's dirty dot just appeared. {@link syncActiveBuffer}
+   * delegates here with the active uri; the second editor group (group B) routes its edits here with
+   * B's CURRENT uri so a B edit never corrupts group A's (active) buffer (#265). A no-op (returns
+   * false) when `uri` is not an open buffer.
+   */
+  syncBuffer(uri: string, doc: string): boolean;
 
   // --- mutations (explorer-driven) ---
   handleNewFile(parentDirToken: string, name: string): Promise<void>;
@@ -189,8 +235,12 @@ export function createWorkspaceController(deps: WorkspaceControllerDeps): Worksp
   // --- owned state ----------------------------------------------------------
   const buffers = new Map<string, Buffer>();
   let activeUriValue = '';
-  let folderRoot = '';
-  let entries: FsEntry[] = [];
+  // The workspace's roots in add order — the first is the PRIMARY root (the legacy single `folderRoot`).
+  // Every emptiness guard that used `folderRoot === ''` is now `roots.length === 0`.
+  let roots: string[] = [];
+  // The explorer entry tree per root (Task 3 renders one group per root; this task still renders only
+  // the primary root's slice through the unchanged single-root explorer.render signature).
+  const entriesByRoot = new Map<string, FsEntry[]>();
 
   // --- outward seams --------------------------------------------------------
   let activeChanged: ((uri: string) => void) | null = null;
@@ -199,13 +249,28 @@ export function createWorkspaceController(deps: WorkspaceControllerDeps): Worksp
 
   // --- token <-> path helpers (unchanged from ide.ts) -----------------------
 
-  /** The folder-relative, forward-slashed path of a token under the opened folder ('' for the root). */
-  function relOfToken(token: string): string {
-    if (folderRoot === '' || token === folderRoot) return '';
-    if (token.startsWith(folderRoot + '/') || token.startsWith(folderRoot + '\\')) {
-      return token.slice(folderRoot.length + 1).replace(/\\/g, '/');
+  /**
+   * The root in `roots` that `token` IS, or lives under (separator-aware). When several roots match
+   * (a nested root), the LONGEST wins so a token under the inner root resolves to it. Returns undefined
+   * when no root owns the token (e.g. before any folder opens, or a foreign path).
+   */
+  function rootOfToken(token: string): string | undefined {
+    let best: string | undefined;
+    for (const root of roots) {
+      if (token === root || token.startsWith(root + '/') || token.startsWith(root + '\\')) {
+        if (best === undefined || root.length > best.length) best = root;
+      }
     }
-    return token;
+    return best;
+  }
+
+  /** The root-relative, forward-slashed path of a token under its OWNING root ('' for the root itself).
+   *  Falls back to the token unchanged when no root owns it (preserving the single-root behavior). */
+  function relOfToken(token: string): string {
+    const root = rootOfToken(token);
+    if (root === undefined) return token;
+    if (token === root) return '';
+    return token.slice(root.length + 1).replace(/\\/g, '/');
   }
 
   /** True if `path` is the token itself or lives under the `ancestor` directory token (any separator). */
@@ -247,23 +312,48 @@ export function createWorkspaceController(deps: WorkspaceControllerDeps): Worksp
     // Sync the global unsaved indicator on every tree render — this is the common path for every
     // dirty transition (edit, save, save-all, cross-file rename, workspace swap).
     deps.refreshDirtyIndicator();
-    if (folderRoot === '') return;
-    explorer.render(entries, folderRoot);
+    if (roots.length === 0) return;
+    // Feed the explorer EVERY root's entries (one render group per root, in add order). The explorer
+    // renders a single group headerless (byte-identical to the old single-root path) and 2+ groups with
+    // per-root headers + a Remove affordance.
+    explorer.renderRoots(roots.map((r) => ({ root: r, entries: entriesByRoot.get(r) ?? [] })));
   }
 
-  /** Re-read the folder's entry tree from the host and re-render the explorer. */
+  /** Re-read EVERY root's entry tree from the host (into entriesByRoot) and re-render the explorer. */
   async function refreshEntries(): Promise<void> {
-    if (folderRoot === '') return;
-    try {
-      entries = await platform.listEntries(folderRoot);
-    } catch (e) {
-      console.error('listEntries failed:', e);
+    if (roots.length === 0) return;
+    for (const root of roots) {
+      try {
+        entriesByRoot.set(root, await platform.listEntries(root));
+      } catch (e) {
+        console.error('listEntries failed:', e);
+      }
     }
     renderTree();
     entriesRefreshed?.();
   }
 
   // --- open paths -----------------------------------------------------------
+
+  // Every .koi uri under the open folder, reusing the host walk (which already skips bin/obj/.git/
+  // node_modules — see fs.ts SKIP_DIRS). The optional glob narrows the set through the same engine
+  // workspace search's `include` uses. Returns [] (not an error) when no folder is open or the walk
+  // fails, so the search panel degrades to "no results" rather than throwing.
+  async function listWorkspaceFiles(glob?: string): Promise<string[]> {
+    if (roots.length === 0) return [];
+    const uris: string[] = [];
+    for (const root of roots) {
+      let files: KoiFile[];
+      try {
+        files = await platform.listKoiFiles(root);
+      } catch (e) {
+        console.error('listKoiFiles failed:', e);
+        continue; // one unreadable root shouldn't blank the whole workspace's search set
+      }
+      for (const f of files) uris.push(pathToFileUri(f.path));
+    }
+    return glob && glob.trim() !== '' ? uris.filter((uri) => matchesInclude(uri, glob)) : uris;
+  }
 
   /** Open a .koi file token as a buffer if it isn't open yet; returns its uri (or null on failure). */
   async function ensureBuffer(token: string): Promise<string | null> {
@@ -276,7 +366,18 @@ export function createWorkspaceController(deps: WorkspaceControllerDeps): Worksp
       console.error('readTextFile failed for', token, e);
       return null;
     }
-    buffers.set(uri, { uri, path: token, relPath: relOfToken(token), name: nameOf(token), text, dirty: false });
+    // ensureBuffer runs OUTSIDE the open flow (roots is already populated), so the owning root is
+    // derivable; fall back to the primary root for a token that no root owns (matches relOfToken).
+    const rootToken = rootOfToken(token) ?? roots[0] ?? '';
+    buffers.set(uri, {
+      uri,
+      path: token,
+      relPath: relOfToken(token),
+      name: nameOf(token),
+      text,
+      dirty: false,
+      rootToken,
+    });
     lsp.openDoc(uri, text);
     return uri;
   }
@@ -290,26 +391,40 @@ export function createWorkspaceController(deps: WorkspaceControllerDeps): Worksp
   // Open any .koi file present in the folder but not yet buffered (used after creating/duplicating
   // folders that may introduce new .koi files), so the compiled workspace stays complete.
   async function syncOpenKoi(): Promise<void> {
-    if (folderRoot === '') return;
-    let files: KoiFile[];
-    try {
-      files = await platform.listKoiFiles(folderRoot);
-    } catch {
-      return;
-    }
-    for (const f of files) {
-      if (!buffers.has(pathToFileUri(f.path))) await ensureBuffer(f.path);
+    if (roots.length === 0) return;
+    for (const root of roots) {
+      let files: KoiFile[];
+      try {
+        files = await platform.listKoiFiles(root);
+      } catch {
+        continue;
+      }
+      for (const f of files) {
+        if (!buffers.has(pathToFileUri(f.path))) await ensureBuffer(f.path);
+      }
     }
   }
 
-  // Open a set of file records as workspace buffers in one pass. Each record becomes an open
-  // buffer keyed by its file:// uri and a corresponding LSP didOpen, so cross-file refs resolve.
-  // The single seam shared by folder-open and shared-import — neither sets dirty,
-  // neither activates (callers pick the active buffer).
-  function populateBuffers(records: { path: string; relPath: string; name: string; text: string }[]): void {
+  // Open a set of file records as workspace buffers in one pass, all owned by `rootToken`. Each record
+  // becomes an open buffer keyed by its file:// uri and a corresponding LSP didOpen, so cross-file (and
+  // cross-root) refs resolve. The single seam shared by folder-open and addRoot — neither sets dirty,
+  // neither activates (callers pick the active buffer). The owning root is passed in explicitly because
+  // openFolderPath calls this BEFORE it assigns `roots` (so rootOfToken can't yet resolve it).
+  function populateBuffers(
+    rootToken: string,
+    records: { path: string; relPath: string; name: string; text: string }[],
+  ): void {
     for (const rec of records) {
       const uri = pathToFileUri(rec.path);
-      buffers.set(uri, { uri, path: rec.path, relPath: rec.relPath, name: rec.name, text: rec.text, dirty: false });
+      buffers.set(uri, {
+        uri,
+        path: rec.path,
+        relPath: rec.relPath,
+        name: rec.name,
+        text: rec.text,
+        dirty: false,
+        rootToken,
+      });
       lsp.openDoc(uri, rec.text);
     }
   }
@@ -355,6 +470,7 @@ export function createWorkspaceController(deps: WorkspaceControllerDeps): Worksp
   // Used by the New-model reset so stale buffers/diagnostics can't survive a subsequent open that
   // early-returns (e.g. the reset deleted everything but re-creating model.koi failed).
   function reset(): void {
+    clearAutoSaveTimer(); // tearing the workspace down — cancel any armed auto-save first
     for (const uri of Array.from(buffers.keys())) {
       lsp.closeDoc(uri);
     }
@@ -379,16 +495,21 @@ export function createWorkspaceController(deps: WorkspaceControllerDeps): Worksp
       return { ok: false, reason: 'empty' };
     }
 
-    // Re-opening a folder: close every previously open file first.
+    // Re-opening a folder is a RESET to a single root: close every previously open file first and drop
+    // the multi-root state (every prior root's buffers + cached entries).
+    clearAutoSaveTimer(); // a pending auto-save belongs to the workspace we're leaving — drop it
     for (const uri of Array.from(buffers.keys())) {
       lsp.closeDoc(uri);
     }
     buffers.clear();
+    entriesByRoot.clear();
+    roots = [];
     deps.clearDiagnostics();
 
     // Read + open every file as one workspace (cross-file refs resolve via didOpen). Read text
     // from disk first (skipping unreadable files), then hand the successful records to the shared
-    // populateBuffers seam so folder-open and shared-import open files through one path.
+    // populateBuffers seam so folder-open and addRoot open files through one path. The owning root is
+    // passed explicitly because `roots` is assigned only AFTER this (the construction-order gotcha).
     const records: { path: string; relPath: string; name: string; text: string }[] = [];
     for (const f of files) {
       let text: string;
@@ -400,7 +521,7 @@ export function createWorkspaceController(deps: WorkspaceControllerDeps): Worksp
       }
       records.push({ path: f.path, relPath: f.relPath, name: f.name, text });
     }
-    populateBuffers(records);
+    populateBuffers(folder, records);
 
     // Every read failed after a non-empty listing (files deleted / permissions revoked
     // between list and read).
@@ -409,7 +530,7 @@ export function createWorkspaceController(deps: WorkspaceControllerDeps): Worksp
       return { ok: false, reason: 'unreadable' };
     }
 
-    folderRoot = folder;
+    roots = [folder];
     // Activate the first file (sorted by relPath) and show the tree.
     const first = Array.from(buffers.values()).sort((a, b) => a.relPath.localeCompare(b.relPath))[0];
     activeUriValue = first.uri;
@@ -454,13 +575,86 @@ export function createWorkspaceController(deps: WorkspaceControllerDeps): Worksp
     await openFolderPath(token, { recent: false });
   }
 
+  // ADDITIVE multi-root open: union `folder`'s .koi files into the workspace as a new root. Unlike
+  // openFolderPath this closes NOTHING and does NOT change the active buffer — it appends `folder` to
+  // `roots` and opens its files through the shared populateBuffers seam (each gets an lsp.openDoc so
+  // cross-root refs resolve), then refreshes the per-root entries.
+  async function addRoot(folder: string): Promise<OpenResult> {
+    // Already a root → no-op success (don't re-read or re-open anything).
+    if (roots.includes(folder)) return { ok: true };
+
+    let files: KoiFile[];
+    try {
+      files = await platform.listKoiFiles(folder);
+    } catch (e) {
+      deps.setStatus('could not read folder', 'error');
+      console.error('listKoiFiles failed:', e);
+      return { ok: false, reason: 'unreadable' };
+    }
+    if (!files.length) {
+      deps.setStatus('no .koi files in folder', 'error');
+      return { ok: false, reason: 'empty' };
+    }
+
+    // Read each file's text (skip unreadable ones, like openFolderPath) and open them stamped with this
+    // root. The owning root is passed explicitly because the buffers are opened BEFORE `folder` is in
+    // `roots` (so rootOfToken couldn't resolve it yet).
+    const records: { path: string; relPath: string; name: string; text: string }[] = [];
+    for (const f of files) {
+      let text: string;
+      try {
+        text = await platform.readTextFile(f.path);
+      } catch (e) {
+        console.error('readTextFile failed for', f.path, e);
+        continue;
+      }
+      records.push({ path: f.path, relPath: f.relPath, name: f.name, text });
+    }
+    populateBuffers(folder, records);
+
+    roots.push(folder);
+    await refreshEntries();
+    return { ok: true };
+  }
+
+  // Remove exactly `folder` from the workspace: close every buffer it owns (LSP closeDoc + drop its
+  // diagnostics), drop its cached entries, splice it out of `roots`. If the active buffer was one of the
+  // removed ones, re-point active via the existing activateFallback (which falls back to another open
+  // buffer, or calls onWorkspaceEmptied when none remain — so removing the LAST root empties the
+  // workspace). A folder not in `roots` is a harmless no-op.
+  function removeRoot(folder: string): void {
+    const idx = roots.indexOf(folder);
+    if (idx < 0) return; // not a root — nothing to do
+
+    let activeRemoved = false;
+    for (const buf of [...buffers.values()]) {
+      if (buf.rootToken !== folder) continue;
+      if (buf.uri === activeUriValue) activeRemoved = true;
+      lsp.closeDoc(buf.uri);
+      buffers.delete(buf.uri);
+      deps.dropDiagnostics(buf.uri);
+    }
+    entriesByRoot.delete(folder);
+    roots.splice(idx, 1);
+    if (activeRemoved) activateFallback();
+    // Re-render the explorer (and re-sync the dirty indicator via renderTree → refreshDirtyIndicator)
+    // so the removed root's group + rows disappear immediately. Unlike handleDelete, removeRoot has no
+    // trailing refreshEntries; without this the removed group would linger (clickable, but its buffers
+    // are gone) until some unrelated render fires. A now-empty workspace renders nothing (roots.length
+    // === 0), and onWorkspaceEmptied's fresh-model open will render once it seeds a new root.
+    renderTree();
+  }
+
   // --- workspace mutations (create / rename / delete / move) -----------------
   // The explorer surfaces user intent as opaque tokens; these handlers do the host fs op, then keep
-  // `buffers` / `activeUri` / the LSP workspace coherent and refresh the tree. relPaths handed to
-  // the host are always relative to the opened folder (folderRoot).
+  // `buffers` / `activeUri` / the LSP workspace coherent and refresh the tree. relPaths handed to the
+  // host are relative to the OWNING root of the operated token (rootOfToken), so multi-root ops target
+  // the right folder; for the single-root case the owning root is always the primary root, identical
+  // to the old `folderRoot`.
 
   async function handleNewFile(parentDirToken: string, name: string): Promise<void> {
-    if (folderRoot == null) return;
+    if (roots.length === 0) return;
+    const owningRoot = rootOfToken(parentDirToken) ?? roots[0];
     const parentRel = relOfToken(parentDirToken);
     // The explorer only surfaces directories and .koi files, so default an extensionless name to
     // `.koi` — otherwise the created file would be invisible (listEntries filters it out) and the
@@ -468,7 +662,7 @@ export function createWorkspaceController(deps: WorkspaceControllerDeps): Worksp
     const fileName = name.includes('.') ? name : `${name}.koi`;
     const relPath = parentRel ? `${parentRel}/${fileName}` : fileName;
     try {
-      const token = await platform.createFile(folderRoot, relPath, '');
+      const token = await platform.createFile(owningRoot, relPath, '');
       await refreshEntries();
       if (token.toLowerCase().endsWith('.koi')) await openFileToken(token);
     } catch (e) {
@@ -478,11 +672,12 @@ export function createWorkspaceController(deps: WorkspaceControllerDeps): Worksp
   }
 
   async function handleNewFolder(parentDirToken: string, name: string): Promise<void> {
-    if (folderRoot == null) return;
+    if (roots.length === 0) return;
+    const owningRoot = rootOfToken(parentDirToken) ?? roots[0];
     const parentRel = relOfToken(parentDirToken);
     const relPath = parentRel ? `${parentRel}/${name}` : name;
     try {
-      await platform.createFolder(folderRoot, relPath);
+      await platform.createFolder(owningRoot, relPath);
       await refreshEntries();
     } catch (e) {
       deps.setStatus('could not create folder', 'error');
@@ -526,14 +721,15 @@ export function createWorkspaceController(deps: WorkspaceControllerDeps): Worksp
   }
 
   async function handleDuplicate(entry: FsEntry): Promise<void> {
-    if (folderRoot == null) return;
-    const parentRel = relOfToken(parentTokenOf(entry.token) ?? folderRoot);
+    if (roots.length === 0) return;
+    const owningRoot = rootOfToken(entry.token) ?? roots[0];
+    const parentRel = relOfToken(parentTokenOf(entry.token) ?? owningRoot);
     // Try "<base> copy", then "<base> copy 2", … until the host accepts a non-colliding name.
     for (let i = 1; i <= 50; i++) {
       const dupName = copyName(entry.name, i, entry.kind === 'file');
       const relPath = parentRel ? `${parentRel}/${dupName}` : dupName;
       try {
-        const token = await platform.moveEntry(entry.token, folderRoot, relPath, true);
+        const token = await platform.moveEntry(entry.token, owningRoot, relPath, true);
         await refreshEntries();
         if (entry.kind === 'file' && token.toLowerCase().endsWith('.koi')) await openFileToken(token);
         else await syncOpenKoi(); // a duplicated folder may contain new .koi files
@@ -554,12 +750,14 @@ export function createWorkspaceController(deps: WorkspaceControllerDeps): Worksp
   // name. The explorer already rejects no-op and into-own-subtree drops, so this just performs the host
   // move and re-keys the open buffers / LSP workspace, mirroring rename.
   async function handleMove(entry: FsEntry, destDirToken: string): Promise<void> {
-    if (folderRoot == null) return;
+    if (roots.length === 0) return;
+    // The move targets the destination's owning root (a cross-root drag reparents into that root).
+    const owningRoot = rootOfToken(destDirToken) ?? roots[0];
     const destRel = relOfToken(destDirToken);
     const newRelPath = destRel ? `${destRel}/${entry.name}` : entry.name;
     let newToken: string;
     try {
-      newToken = await platform.moveEntry(entry.token, folderRoot, newRelPath, false);
+      newToken = await platform.moveEntry(entry.token, owningRoot, newRelPath, false);
     } catch (e) {
       // A name clash at the destination is the common, recoverable case — surface it, don't overwrite.
       if (isAlreadyExists(e)) {
@@ -592,6 +790,9 @@ export function createWorkspaceController(deps: WorkspaceControllerDeps): Worksp
       buf.path = newPath;
       buf.relPath = relOfToken(newPath);
       buf.name = nameOf(newPath);
+      // Re-derive the owning root: a cross-root move changes it; an in-root rename keeps it. Fall back
+      // to the existing rootToken when no root owns the new path (mirrors ensureBuffer's resolution).
+      buf.rootToken = rootOfToken(newPath) ?? buf.rootToken;
       buffers.set(newUri, buf);
       lsp.openDoc(newUri, buf.text);
       if (wasActive) {
@@ -652,8 +853,10 @@ export function createWorkspaceController(deps: WorkspaceControllerDeps): Worksp
 
   // The buffer/dirty half of the editor's onChange. ide.ts keeps welcome.hide + controller.onDocEdited
   // around this and re-renders the tree on the returned becameDirty (preserving the original order).
-  function syncActiveBuffer(doc: string): boolean {
-    const buf = buffers.get(activeUriValue);
+  // Uri-keyed so the second editor group (group B) can sync its OWN file's buffer without touching the
+  // active (group-A) buffer (#265): a no-op when `uri` is not an open buffer.
+  function syncBuffer(uri: string, doc: string): boolean {
+    const buf = buffers.get(uri);
     let becameDirty = false;
     if (buf) {
       if (!buf.dirty && buf.text !== doc) becameDirty = true;
@@ -661,6 +864,12 @@ export function createWorkspaceController(deps: WorkspaceControllerDeps): Worksp
       if (becameDirty) buf.dirty = true;
     }
     return becameDirty;
+  }
+
+  // The active-buffer convenience wrapper used by group A's onChange: identical behavior to the
+  // pre-#265 syncActiveBuffer, now expressed as syncBuffer(activeUri, doc).
+  function syncActiveBuffer(doc: string): boolean {
+    return syncBuffer(activeUriValue, doc);
   }
 
   // --- save (format + write to disk) ----------------------------------------
@@ -673,6 +882,7 @@ export function createWorkspaceController(deps: WorkspaceControllerDeps): Worksp
   async function saveActive(): Promise<void> {
     if (saveQueued) return;
     saveQueued = true;
+    clearAutoSaveTimer(); // an explicit save subsumes any pending idle auto-save
     try {
       // Format first (mirrors the editor's Mod-S) when format-on-save is enabled, then persist.
       if (deps.getFormatOnSave()) {
@@ -711,6 +921,7 @@ export function createWorkspaceController(deps: WorkspaceControllerDeps): Worksp
   async function saveAllDirty(): Promise<void> {
     if (saveAllQueued) return;
     saveAllQueued = true;
+    clearAutoSaveTimer(); // a manual Save all subsumes any pending idle auto-save (no-op when auto-save fired this)
     try {
       if (deps.getFormatOnSave()) {
         try {
@@ -752,22 +963,68 @@ export function createWorkspaceController(deps: WorkspaceControllerDeps): Worksp
     }
   }
 
+  // --- idle auto-save (#268) ------------------------------------------------
+  // Opt-in: when enabled, every edit (re)arms a ~1000ms timer; on fire it persists through the exact
+  // saveAllDirty path (format-on-save, didSave, tree refresh, the saveAllQueued guard against an
+  // in-flight manual save). Disabling cancels any pending timer so a stale edit can't write after the
+  // user turns it off.
+  const AUTO_SAVE_DEBOUNCE_MS = 1000;
+  let autoSaveOn = false;
+  let autoSaveTimer: ReturnType<typeof setTimeout> | undefined;
+
+  function clearAutoSaveTimer(): void {
+    if (autoSaveTimer !== undefined) {
+      clearTimeout(autoSaveTimer);
+      autoSaveTimer = undefined;
+    }
+  }
+
+  function setAutoSave(on: boolean): void {
+    autoSaveOn = on;
+    if (!on) clearAutoSaveTimer();
+  }
+
+  function scheduleAutoSave(): void {
+    // Arm only when auto-save is on AND there is actually unsaved work. The editor's onChange fires on
+    // every programmatic setDoc too (a file switch, a history restore, the first folder open), which
+    // dirties nothing — without this guard each such swap would arm a timer that 1s later runs a no-op
+    // saveAllDirty and clobbers the status line with "No unsaved changes".
+    if (!autoSaveOn || dirtyCount(buffers) === 0) return;
+    clearAutoSaveTimer();
+    autoSaveTimer = setTimeout(() => {
+      autoSaveTimer = undefined;
+      // Yield to an in-flight manual save (Mod-S saveActive / Save all) rather than racing format +
+      // write on the same buffer; the next edit re-arms the debounce.
+      if (saveQueued || saveAllQueued) return;
+      void saveAllDirty();
+    }, AUTO_SAVE_DEBOUNCE_MS);
+  }
+
   return {
     buffers,
     activeUri: () => activeUriValue,
-    folderRootToken: () => folderRoot,
-    entriesCache: () => entries,
+    // Back-compat: the PRIMARY root (the legacy single opened folder); '' before any folder opens.
+    folderRootToken: () => roots[0] ?? '',
+    rootsList: () => [...roots],
+    // Back-compat: the PRIMARY root's entry tree (Task 3 surfaces the per-root map to the explorer).
+    entriesCache: () => entriesByRoot.get(roots[0] ?? '') ?? [],
     openFolderPath,
     openDefaultWorkspaceFlow,
     openWorkspaceWith1File,
+    addRoot,
+    removeRoot,
+    listWorkspaceFiles,
     ensureBuffer,
     openFileToken,
     activateFile,
     reset,
     saveActive,
     saveAllDirty,
+    setAutoSave,
+    scheduleAutoSave,
     anyDirty,
     syncActiveBuffer,
+    syncBuffer,
     handleNewFile,
     handleNewFolder,
     handleDelete,

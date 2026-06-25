@@ -4,6 +4,7 @@ import { createAppStore } from '@/store/index';
 import { ContextBreadcrumb } from '@/model/ContextBreadcrumb';
 import { buildModelIndex } from '@/model/modelIndex';
 import type { DiagramNode, DocsFile, DocsResult, GlossaryEntry, GlossaryModel, Range } from '@/lsp/lsp';
+import { axe } from 'vitest-axe';
 
 const range: Range = { start: { line: 0, character: 0 }, end: { line: 0, character: 4 } };
 
@@ -116,5 +117,15 @@ describe('ContextBreadcrumb', () => {
     const leaf = elementCrumb(container)!;
     expect(leaf.textContent).toBe('Order');
     expect(leaf.querySelector('.koi-model-icon')).toBeNull();
+  });
+
+  test('has no accessibility violations', async () => {
+    const store = createAppStore();
+    const index = makeIndex();
+    const { container } = render(
+      <ContextBreadcrumb store={store} contexts={['Ordering', 'Billing']} index={index} onScopeChange={noop} />,
+    );
+    act(() => store.getState().setSelection({ qualifiedName: 'Ordering.Order', context: 'Ordering' }));
+    expect(await axe(container)).toHaveNoViolations();
   });
 });

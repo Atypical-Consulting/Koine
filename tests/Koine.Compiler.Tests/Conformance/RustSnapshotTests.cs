@@ -218,9 +218,11 @@ public class RustSnapshotTests
         var sales = result.Files.Single(f => f.RelativePath.EndsWith("sales.rs", StringComparison.Ordinal)).Contents;
         sales.ShouldContain("pub enum DomainEvent {");
         sales.ShouldContain("OrderPlaced(OrderPlaced)");
-        // Smart-enum accessors are exhaustive matches with no `_` catch-all.
+        // Associated-data accessors and the Match/Switch folds dispatch each variant exhaustively
+        // (Rust rejects a non-exhaustive match, so the compile test proves it); only the open-domain
+        // from_name/from_value lookups end in a `_ => None` arm.
         sales.ShouldContain("Currency::Eur => \"€\"");
-        sales.ShouldNotContain("_ =>");
+        sales.ShouldContain("_ => None,");
 
         return Verify(TestSupport.Render(result.Files)).UseDirectory("Snapshots");
     }
@@ -335,6 +337,548 @@ public class RustSnapshotTests
         check.Ok.ShouldBeTrue(string.Join("\n", check.Errors));
     }
 
+    // ------------------------------------------------------------------
+    // Cross-context type references (issue #173, Task 1). A type owned by one
+    // bounded context but referenced from another must be qualified as
+    // `crate::<owner_module>::<Type>` so the flat multi-context crate resolves.
+    // ------------------------------------------------------------------
+
+    /// <summary>Two contexts: Sales (a conformist downstream) references Catalog's value object + enum.</summary>
+    private const string CrossContextFixture = """
+        context Catalog {
+          enum Grade(label: String) {
+            Premium("P")
+            Standard("S")
+          }
+
+          value Sku {
+            code: String
+            invariant code.trim.length > 0   "a sku needs a code"
+          }
+        }
+
+        context Sales {
+          value LineItem {
+            sku:      Sku
+            grade:    Grade
+            quantity: Int
+            invariant quantity >= 1   "an order line needs at least one unit"
+          }
+        }
+
+        contextmap {
+          Catalog -> Sales : conformist
+        }
+        """;
+
+    [Fact]
+    public Task Rust_cross_context_type_references_qualify()
+    {
+        var result = new KoineCompiler().Compile(CrossContextFixture, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var sales = result.Files.Single(f => f.RelativePath.EndsWith("sales.rs", StringComparison.Ordinal)).Contents;
+        // The foreign value object and enum are qualified to their owning context's module.
+        sales.ShouldContain("sku: crate::catalog::Sku");
+        sales.ShouldContain("grade: crate::catalog::Grade");
+
+        // The owning module declares them bare (it never self-qualifies).
+        var catalog = result.Files.Single(f => f.RelativePath.EndsWith("catalog.rs", StringComparison.Ordinal)).Contents;
+        catalog.ShouldContain("pub struct Sku");
+        catalog.ShouldContain("pub enum Grade");
+
+        return Verify(TestSupport.Render(result.Files)).UseDirectory("Snapshots");
+    }
+
+    [Fact]
+    public void Rust_cross_context_type_references_compile()
+    {
+        var result = new KoineCompiler().Compile(CrossContextFixture, new RustEmitter());
+        result.Success.ShouldBeTrue();
+
+        var check = TestSupport.CompileRust(result.Files);
+        if (!check.ToolchainAvailable)
+        {
+            _output.WriteLine(NoToolchainNotice);
+            return;
+        }
+
+        check.Ok.ShouldBeTrue(string.Join("\n", check.Errors));
+    }
+
+    /// <summary>
+    /// The six-context pizzeria template (the C# demo's end-to-end domain) emits a Rust crate that
+    /// compiles — the real multi-context proof: Menu's <c>Topping</c> referenced from Kitchen and the
+    /// shared-kernel <c>Currency</c> referenced from Ordering resolve to their owning modules.
+    /// </summary>
+    [Fact]
+    public void Rust_pizzeria_template_compiles()
+    {
+        if (FindTemplateDir("pizzeria") is not { } sources)
+        {
+            _output.WriteLine("INCONCLUSIVE: pizzeria template not found from the test assembly.");
+            return;
+        }
+
+        var result = new KoineCompiler().Compile(sources, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var check = TestSupport.CompileRust(result.Files);
+        if (!check.ToolchainAvailable)
+        {
+            _output.WriteLine(NoToolchainNotice);
+            return;
+        }
+
+        check.Ok.ShouldBeTrue(string.Join("\n", check.Errors));
+    }
+
+    // ------------------------------------------------------------------
+    // Command returns (issue #173, Task 2). A command with a declared return type and
+    // a terminal `result` clause returns a value; `result id` hands back the entity's
+    // own identity — cloned, since the branded newtype is `Clone` but not `Copy`.
+    // ------------------------------------------------------------------
+
+    /// <summary>An entity whose <c>cancel</c> returns its id and <c>bump</c> returns a computed Int.</summary>
+    private const string CommandReturnFixture = """
+        context Sales {
+          enum OrderStatus { Draft, Placed, Cancelled }
+          entity Order identified by OrderId {
+            status: OrderStatus = Draft
+            total:  Int = 0
+
+            command cancel(): OrderId {
+              requires status != Cancelled "already cancelled"
+              status -> Cancelled
+              result id
+            }
+
+            command bump(by: Int): Int {
+              total -> total + by
+              result total
+            }
+          }
+        }
+        """;
+
+    [Fact]
+    public Task Rust_command_returns_emit_expected_rust()
+    {
+        var result = new KoineCompiler().Compile(CommandReturnFixture, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var sales = result.Files.Single(f => f.RelativePath.EndsWith("sales.rs", StringComparison.Ordinal)).Contents;
+        // `result id` returns the entity's own identity, cloned (the branded newtype is not Copy).
+        sales.ShouldContain("pub fn cancel(&mut self) -> Result<OrderId, DomainError>");
+        sales.ShouldContain("Ok(self.id.clone())");
+        // A Copy result (Int) needs no clone and reads post-mutation state.
+        sales.ShouldContain("pub fn bump(&mut self, by: i64) -> Result<i64, DomainError>");
+        sales.ShouldContain("Ok(self.total)");
+
+        return Verify(TestSupport.Render(result.Files)).UseDirectory("Snapshots");
+    }
+
+    [Fact]
+    public void Rust_command_returns_compile()
+    {
+        var result = new KoineCompiler().Compile(CommandReturnFixture, new RustEmitter());
+        result.Success.ShouldBeTrue();
+
+        var check = TestSupport.CompileRust(result.Files);
+        if (!check.ToolchainAvailable)
+        {
+            _output.WriteLine(NoToolchainNotice);
+            return;
+        }
+
+        check.Ok.ShouldBeTrue(string.Join("\n", check.Errors));
+    }
+
+    // ------------------------------------------------------------------
+    // Event raising (issue #173, Task 3). An `emit` clause records a domain event: the
+    // entity gains an `events: Vec<DomainEvent>` collection (empty in `new`, excluded
+    // from identity equality), a slice accessor + drain, and the command pushes
+    // `DomainEvent::Ev(Ev::new(...))` with `id`/param refs resolved.
+    // ------------------------------------------------------------------
+
+    /// <summary>An entity whose <c>place</c> command raises an <c>OrderPlaced</c> domain event.</summary>
+    private const string EmitFixture = """
+        context Sales {
+          enum OrderStatus { Draft, Placed, Cancelled }
+          event OrderPlaced { orderId: OrderId  status: OrderStatus }
+          entity Order identified by OrderId {
+            status: OrderStatus = Draft
+
+            command place() {
+              requires status == Draft "must be draft"
+              status -> Placed
+              emit OrderPlaced(orderId: id, status: status)
+            }
+          }
+        }
+        """;
+
+    [Fact]
+    public Task Rust_event_emit_raises_into_events_vec()
+    {
+        var result = new KoineCompiler().Compile(EmitFixture, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var sales = result.Files.Single(f => f.RelativePath.EndsWith("sales.rs", StringComparison.Ordinal)).Contents;
+        sales.ShouldContain("events: Vec<DomainEvent>,");                                  // collection field
+        sales.ShouldContain("events: Vec::new(),");                                        // empty in `new`
+        sales.ShouldContain("pub fn events(&self) -> &[DomainEvent]");                      // accessor
+        sales.ShouldContain("pub fn drain_events(&mut self) -> Vec<DomainEvent>");          // drain
+        // `id`/param refs resolve; the event's `new` is wrapped in the context DomainEvent enum.
+        sales.ShouldContain("self.events.push(DomainEvent::OrderPlaced(OrderPlaced::new(self.id.clone(), self.status)));");
+
+        return Verify(TestSupport.Render(result.Files)).UseDirectory("Snapshots");
+    }
+
+    [Fact]
+    public void Rust_event_emit_compiles()
+    {
+        var result = new KoineCompiler().Compile(EmitFixture, new RustEmitter());
+        result.Success.ShouldBeTrue();
+
+        var check = TestSupport.CompileRust(result.Files);
+        if (!check.ToolchainAvailable)
+        {
+            _output.WriteLine(NoToolchainNotice);
+            return;
+        }
+
+        check.Ok.ShouldBeTrue(string.Join("\n", check.Errors));
+    }
+
+    // ------------------------------------------------------------------
+    // Member/synthetic-field collision (issue #314). A user member literally named `events`
+    // must not collide with the synthetic `Vec<DomainEvent>` collector: the user's field is
+    // emitted faithfully and the synthetic collector takes a distinct, non-colliding name
+    // (`domain_events`), applied consistently across the struct, ctor, accessors, and `push`.
+    // ------------------------------------------------------------------
+
+    /// <summary>An aggregate whose entity has a user member named <c>events</c> and also raises an event.</summary>
+    private const string EventsMemberCollisionFixture = """
+        context Reservations {
+          event TableReserved { bookingId: BookingId }
+          aggregate Bookings root Booking {
+            entity Booking identified by BookingId {
+              events: List<String>
+              command reserve {
+                emit TableReserved(bookingId: id)
+              }
+            }
+          }
+        }
+        """;
+
+    [Fact]
+    public Task Rust_member_named_events_does_not_collide_with_synthetic_collector()
+    {
+        var result = new KoineCompiler().Compile(EventsMemberCollisionFixture, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var reservations = result.Files.Single(f => f.RelativePath.EndsWith("reservations.rs", StringComparison.Ordinal)).Contents;
+        // The user's `events` member is emitted faithfully...
+        reservations.ShouldContain("events: Vec<String>,");
+        reservations.ShouldContain("pub fn events(&self) -> &Vec<String>");
+        // ...and the synthetic collector yields the colliding name, becoming `domain_events` —
+        // consistently in the struct, the smart constructor, the accessor/drain, and the `push`.
+        reservations.ShouldContain("domain_events: Vec<DomainEvent>,");
+        reservations.ShouldContain("domain_events: Vec::new(),");
+        reservations.ShouldContain("pub fn domain_events(&self) -> &[DomainEvent]");
+        reservations.ShouldContain("pub fn drain_domain_events(&mut self) -> Vec<DomainEvent>");
+        reservations.ShouldContain("self.domain_events.push(DomainEvent::TableReserved(");
+        // The bug: a second struct field literally named `events` holding the collector (E0124). Anchor
+        // on the field indentation so this doesn't false-match the renamed `domain_events` field.
+        reservations.ShouldNotContain("\n    events: Vec<DomainEvent>");
+
+        return Verify(TestSupport.Render(result.Files)).UseDirectory("Snapshots");
+    }
+
+    [Fact]
+    public void Rust_member_named_events_compiles()
+    {
+        var result = new KoineCompiler().Compile(EventsMemberCollisionFixture, new RustEmitter());
+        result.Success.ShouldBeTrue();
+
+        var check = TestSupport.CompileRust(result.Files);
+        if (!check.ToolchainAvailable)
+        {
+            _output.WriteLine(NoToolchainNotice);
+            return;
+        }
+
+        check.Ok.ShouldBeTrue(string.Join("\n", check.Errors));
+    }
+
+    /// <summary>
+    /// Edge case (#314): a model with members named *both* <c>events</c> and (snake-cased) <c>domain_events</c>
+    /// takes the first fallback too, so the synthetic collector must keep searching — landing on a
+    /// numbered, unique, compiling name. The two user members are emitted untouched.
+    /// </summary>
+    [Fact]
+    public void Rust_members_named_events_and_domain_events_resolve_to_a_numbered_collector()
+    {
+        const string model = """
+            context Reservations {
+              event TableReserved { bookingId: BookingId }
+              aggregate Bookings root Booking {
+                entity Booking identified by BookingId {
+                  events:       List<String>
+                  domainEvents: List<String>
+                  command reserve {
+                    emit TableReserved(bookingId: id)
+                  }
+                }
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(model, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var reservations = result.Files.Single(f => f.RelativePath.EndsWith("reservations.rs", StringComparison.Ordinal)).Contents;
+        // Both user members survive...
+        reservations.ShouldContain("\n    events: Vec<String>,");
+        reservations.ShouldContain("\n    domain_events: Vec<String>,");
+        // ...and the synthetic collector falls through to a numbered, unique name.
+        reservations.ShouldContain("\n    domain_events_2: Vec<DomainEvent>,");
+        reservations.ShouldContain("self.domain_events_2.push(DomainEvent::TableReserved(");
+
+        var check = TestSupport.CompileRust(result.Files);
+        if (!check.ToolchainAvailable)
+        {
+            _output.WriteLine(NoToolchainNotice);
+            return;
+        }
+        check.Ok.ShouldBeTrue(string.Join("\n", check.Errors));
+    }
+
+    /// <summary>
+    /// Edge case (#314): an entity with a member named <c>events</c> that raises *no* event emits the
+    /// member untouched and grows no synthetic collector at all (the existing common shape is unchanged).
+    /// </summary>
+    [Fact]
+    public void Rust_member_named_events_without_emits_stays_untouched()
+    {
+        const string model = """
+            context Audit {
+              entity Log identified by LogId {
+                events: List<String>
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(model, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var audit = result.Files.Single(f => f.RelativePath.EndsWith("audit.rs", StringComparison.Ordinal)).Contents;
+        audit.ShouldContain("\n    events: Vec<String>,");   // user member, faithful
+        audit.ShouldNotContain("Vec<DomainEvent>");           // no events declared → no collector
+        audit.ShouldNotContain("domain_events");
+
+        var check = TestSupport.CompileRust(result.Files);
+        if (!check.ToolchainAvailable)
+        {
+            _output.WriteLine(NoToolchainNotice);
+            return;
+        }
+        check.Ok.ShouldBeTrue(string.Join("\n", check.Errors));
+    }
+
+    // ------------------------------------------------------------------
+    // Factories (issue #173, Task 4). A `create` factory emits an associated constructor
+    // that mints a v4-UUID identity, checks preconditions, builds via the smart constructor,
+    // and records creation events. The `uuid` crate is added to Cargo.toml only when a model
+    // actually uses a factory.
+    // ------------------------------------------------------------------
+
+    /// <summary>An aggregate whose <c>open</c> factory mints an id, checks a precondition, and emits.</summary>
+    private const string FactoryFixture = """
+        context Sales {
+          enum OrderStatus { Draft, Placed, Cancelled }
+          event OrderOpened { orderId: OrderId  lineCount: Int }
+          aggregate Sales root Order {
+            entity Order identified by OrderId {
+              lines:  Int
+              status: OrderStatus = Draft
+
+              create open(lines: Int) {
+                requires lines >= 1   "an order needs at least one line"
+                emit OrderOpened(orderId: id, lineCount: lines)
+              }
+            }
+          }
+        }
+        """;
+
+    [Fact]
+    public Task Rust_factory_emits_identity_generating_constructor()
+    {
+        var result = new KoineCompiler().Compile(FactoryFixture, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var sales = result.Files.Single(f => f.RelativePath.EndsWith("sales.rs", StringComparison.Ordinal)).Contents;
+        sales.ShouldContain("pub fn generate() -> Self { OrderId(uuid::Uuid::new_v4().to_string()) }");
+        sales.ShouldContain("pub fn open(lines: i64) -> Result<Self, DomainError>");
+        sales.ShouldContain("let id = OrderId::generate();");
+        sales.ShouldContain("DomainEvent::OrderOpened(OrderOpened::new(id.clone(), lines))");
+        sales.ShouldContain("let mut instance = Self::new(id, lines)?;");
+
+        // The uuid crate is pulled in only because the model uses a factory.
+        var cargo = result.Files.Single(f => f.RelativePath == "Cargo.toml").Contents;
+        cargo.ShouldContain("uuid = { version = \"1\", features = [\"v4\"] }");
+
+        return Verify(TestSupport.Render(result.Files)).UseDirectory("Snapshots");
+    }
+
+    [Fact]
+    public void Rust_factory_model_compiles()
+    {
+        var result = new KoineCompiler().Compile(FactoryFixture, new RustEmitter());
+        result.Success.ShouldBeTrue();
+
+        var check = TestSupport.CompileRust(result.Files);
+        if (!check.ToolchainAvailable)
+        {
+            _output.WriteLine(NoToolchainNotice);
+            return;
+        }
+
+        check.Ok.ShouldBeTrue(string.Join("\n", check.Errors));
+    }
+
+    [Fact]
+    public void Rust_factory_free_model_omits_uuid_dependency()
+    {
+        // A model with no factory keeps the dependency-light two-crate manifest.
+        var result = new KoineCompiler().Compile(CommandReturnFixture, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var cargo = result.Files.Single(f => f.RelativePath == "Cargo.toml").Contents;
+        cargo.ShouldContain("rust_decimal = \"1\"");
+        cargo.ShouldContain("regex = \"1\"");
+        cargo.ShouldNotContain("uuid");
+    }
+
+    // ------------------------------------------------------------------
+    // Smart-enum API (issue #173, Task 5). Every Koine enum gains the Rust analogue of the
+    // C# TryFromName/TryFromValue + Match/Switch: non-throwing `from_name`/`from_value`
+    // lookups returning `Option`, and exhaustive `match_`/`switch` folds dispatched by a
+    // wildcard-free `match` (adding a variant becomes a compile error at every call site).
+    // ------------------------------------------------------------------
+
+    /// <summary>A plain smart enum whose generated API exercises the Match/Switch/Try* forms.</summary>
+    private const string SmartEnumFixture = """
+        context Shop {
+          enum OrderStatus { Draft, Submitted, Paid, Shipped, Cancelled }
+        }
+        """;
+
+    [Fact]
+    public Task Rust_smart_enum_api_emits_match_switch_and_lookups()
+    {
+        var result = new KoineCompiler().Compile(SmartEnumFixture, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var shop = result.Files.Single(f => f.RelativePath.EndsWith("shop.rs", StringComparison.Ordinal)).Contents;
+        // Try* lowered to Option-returning lookups.
+        shop.ShouldContain("pub fn from_name(name: &str) -> Option<Self>");
+        shop.ShouldContain("\"Paid\" => Some(OrderStatus::Paid)");
+        shop.ShouldContain("pub fn from_value(value: i64) -> Option<Self>");
+        shop.ShouldContain("2 => Some(OrderStatus::Paid)");
+        // Match/Switch lowered to exhaustive, wildcard-free dispatch.
+        shop.ShouldContain("pub fn match_<R>(");
+        shop.ShouldContain("pub fn switch(");
+        shop.ShouldContain("OrderStatus::Cancelled => cancelled(),");
+
+        return Verify(TestSupport.Render(result.Files)).UseDirectory("Snapshots");
+    }
+
+    [Fact]
+    public void Rust_smart_enum_api_compiles()
+    {
+        var result = new KoineCompiler().Compile(SmartEnumFixture, new RustEmitter());
+        result.Success.ShouldBeTrue();
+
+        var check = TestSupport.CompileRust(result.Files);
+        if (!check.ToolchainAvailable)
+        {
+            _output.WriteLine(NoToolchainNotice);
+            return;
+        }
+
+        check.Ok.ShouldBeTrue(string.Join("\n", check.Errors));
+    }
+
+    // ------------------------------------------------------------------
+    // Queries & read models (issue #173, Task 6 — the CQRS read side). A `readmodel`
+    // emits a flat projection struct + a `from_<source>` projection fn (direct fields
+    // copy the like-named source member through its accessor, owned; derived fields
+    // project an expression). A `query` emits a criteria DTO struct + `new`.
+    // ------------------------------------------------------------------
+
+    /// <summary>An aggregate with a read model (direct + derived fields) and a query over it.</summary>
+    private const string CqrsFixture = """
+        context Sales {
+          enum OrderStatus { Draft, Placed, Cancelled }
+          aggregate Sales root Order {
+            entity Order identified by OrderId {
+              customer: String
+              lines:    Int
+              status:   OrderStatus = Draft
+            }
+          }
+
+          readmodel OrderRow from Order {
+            id
+            customer
+            status
+            busy: Bool = lines > 0
+          }
+
+          query OrdersByStatus(status: OrderStatus): List<OrderRow>
+        }
+        """;
+
+    [Fact]
+    public Task Rust_read_models_and_queries_emit_expected_rust()
+    {
+        var result = new KoineCompiler().Compile(CqrsFixture, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var sales = result.Files.Single(f => f.RelativePath.EndsWith("sales.rs", StringComparison.Ordinal)).Contents;
+        // The read-model projection struct + its from_<source> fn.
+        sales.ShouldContain("pub struct OrderRow {");
+        sales.ShouldContain("pub fn from_order(src: &Order) -> Self");
+        sales.ShouldContain("id: src.id().clone(),");          // a non-Copy id is cloned
+        sales.ShouldContain("customer: src.customer().to_string(),"); // a String is owned via to_string
+        sales.ShouldContain("status: src.status(),");          // a Copy enum is taken verbatim
+        sales.ShouldContain("busy: src.lines() > 0,");         // a derived field projects its expression
+        // The query criteria DTO.
+        sales.ShouldContain("pub struct OrdersByStatus {");
+        sales.ShouldContain("pub status: OrderStatus,");
+        sales.ShouldContain("pub fn new(status: OrderStatus) -> Self");
+
+        return Verify(TestSupport.Render(result.Files)).UseDirectory("Snapshots");
+    }
+
+    [Fact]
+    public void Rust_read_models_and_queries_compile()
+    {
+        var result = new KoineCompiler().Compile(CqrsFixture, new RustEmitter());
+        result.Success.ShouldBeTrue();
+
+        var check = TestSupport.CompileRust(result.Files);
+        if (!check.ToolchainAvailable)
+        {
+            _output.WriteLine(NoToolchainNotice);
+            return;
+        }
+
+        check.Ok.ShouldBeTrue(string.Join("\n", check.Errors));
+    }
+
     /// <summary>Reads a template under <c>templates/</c> by walking up to the repo root (the <c>.git</c> dir).</summary>
     private static string? FindTemplate(string relativePath)
     {
@@ -347,6 +891,29 @@ public class RustSnapshotTests
 
             var candidate = Path.Combine(dir.FullName, "templates", relativePath.Replace('/', Path.DirectorySeparatorChar));
             return File.Exists(candidate) ? File.ReadAllText(candidate) : null;
+        }
+
+        return null;
+    }
+
+    /// <summary>Loads every <c>.koi</c> file under a <c>templates/&lt;folder&gt;</c> directory as one model's sources.</summary>
+    private static IReadOnlyList<SourceFile>? FindTemplateDir(string folder)
+    {
+        for (DirectoryInfo? dir = new(AppContext.BaseDirectory); dir is not null; dir = dir.Parent)
+        {
+            if (!Directory.Exists(Path.Combine(dir.FullName, ".git")) && !File.Exists(Path.Combine(dir.FullName, ".git")))
+            {
+                continue;
+            }
+
+            var templateDir = Path.Combine(dir.FullName, "templates", folder);
+            return Directory.Exists(templateDir)
+                ? Directory
+                    .EnumerateFiles(templateDir, "*.koi", SearchOption.AllDirectories)
+                    .OrderBy(p => p, StringComparer.Ordinal)
+                    .Select(p => new SourceFile(p, File.ReadAllText(p)))
+                    .ToList()
+                : null;
         }
 
         return null;

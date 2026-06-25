@@ -2,6 +2,7 @@ import { describe, expect, test, vi } from 'vitest';
 import { act, fireEvent, render } from '@testing-library/preact';
 import { createAppStore } from '@/store/index';
 import { HistoryControls } from '@/shell/HistoryControls';
+import { axe } from 'vitest-axe';
 
 const undoBtn = (c: Element) => c.querySelector('[data-role="undo"]') as HTMLButtonElement;
 const redoBtn = (c: Element) => c.querySelector('[data-role="redo"]') as HTMLButtonElement;
@@ -41,5 +42,14 @@ describe('HistoryControls', () => {
     fireEvent.click(redoBtn(container));
     expect(onUndo).toHaveBeenCalledOnce();
     expect(onRedo).toHaveBeenCalledOnce();
+  });
+
+  test('has no accessibility violations', async () => {
+    const store = createAppStore();
+    act(() => store.getState().setHistoryState({ canUndo: true, canRedo: true }));
+    const { container } = render(
+      <HistoryControls store={store} onUndo={() => {}} onRedo={() => {}} undoTitle="Undo" redoTitle="Redo" />,
+    );
+    expect(await axe(container)).toHaveNoViolations();
   });
 });

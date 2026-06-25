@@ -99,6 +99,21 @@ outside the aggregate — they are reached *through* the root. That is why only 
 repository and why the root's constructor enforces every nested invariant before the aggregate can
 exist.
 
+:::caution
+One aggregate references **another** aggregate only by its **id**, never by embedding it. A field on an
+entity (or root) whose type is another aggregate — or an entity belonging to a *different* aggregate —
+is `EntityReferencesForeignAggregate` (KOI1602); use the other aggregate's `*Id` instead. References
+*within* the same aggregate (the root reaching its child entities and value objects) are fine.
+:::
+
+:::caution
+An entity (or root) holds **domain state** — value objects, enums, ids, and its own child entities.
+A field typed as a **domain or integration event**, a **read model**, or a **query** is
+`EntityFieldReferencesMessageType` (KOI1605): an event is an immutable record of what happened and a
+read model / query is a CQRS read-side projection — none of them are state an entity should own. The
+fix isn't "reference it by id" (as with KOI1602), it's to not hold it at all.
+:::
+
 ### 7.3.2 Root entity requirement
 
 The identifier after `root` must match the name of exactly one `entity` declared directly inside the

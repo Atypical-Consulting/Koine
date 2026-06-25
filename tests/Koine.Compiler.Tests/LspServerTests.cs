@@ -75,6 +75,95 @@ public class LspServerTests
     }
 
     [Fact]
+    public void EmitTargets_returns_the_registry_code_targets_with_display_name_and_extension()
+    {
+        // The capability query the Studio front-end reads at boot (issue #282): the registry's
+        // code-emit targets, each carrying { id, displayName, fileExtension } — straight from
+        // EmitterRegistry.SupportedTargetInfos, so adding a target needs no front-end edit.
+        var request = Frame("{\"jsonrpc\":\"2.0\",\"id\":42,\"method\":\"koine/emitTargets\",\"params\":{}}");
+        var output = RunSession(Initialize(), request);
+
+        var targets = ResultTargets(output, 42);
+        targets.Select(t => t.id).ShouldBe(["csharp", "typescript", "python", "php", "rust", "asyncapi", "openapi"]);
+        targets.ShouldContain(t => t.id == "csharp" && t.displayName == "C#" && t.fileExtension == ".cs");
+        targets.ShouldContain(t => t.id == "rust" && t.displayName == "Rust" && t.fileExtension == ".rs");
+        targets.ShouldContain(t => t.id == "asyncapi" && t.displayName == "AsyncAPI" && t.fileExtension == ".yaml");
+        targets.ShouldContain(t => t.id == "openapi" && t.displayName == "OpenAPI" && t.fileExtension == ".yaml");
+        // glossary/docs are documentation generators, not emit targets the IDE offers.
+        targets.ShouldNotContain(t => t.id == "glossary" || t.id == "docs");
+    }
+
+    /// <summary>
+    /// The <c>result</c> element of the JSON-RPC response correlated to <paramref name="id"/>, or
+    /// <c>false</c> when no such response carries a result. The element is <see cref="JsonElement.Clone"/>d
+    /// so it outlives the per-frame <see cref="JsonDocument"/> — callers project their own fields off it.
+    /// </summary>
+    private static bool TryResultForId(string output, int id, out JsonElement result)
+    {
+        foreach (var body in TestSupport.JsonRpcFrames(output))
+        {
+            using var doc = JsonDocument.Parse(body);
+            var root = doc.RootElement;
+            if (root.TryGetProperty("id", out var idEl) && idEl.ValueKind == JsonValueKind.Number && idEl.GetInt32() == id
+                && root.TryGetProperty("result", out var r))
+            {
+                result = r.Clone();
+                return true;
+            }
+        }
+
+        result = default;
+        return false;
+    }
+
+    /// <summary>Parses the <c>koine/emitTargets</c> response for <paramref name="id"/> into its target list.</summary>
+    private static List<(string id, string displayName, string fileExtension)> ResultTargets(string output, int id)
+    {
+        if (TryResultForId(output, id, out var result) && result.TryGetProperty("targets", out var arr))
+        {
+            return arr.EnumerateArray()
+                .Select(t => (
+                    t.GetProperty("id").GetString()!,
+                    t.GetProperty("displayName").GetString()!,
+                    t.GetProperty("fileExtension").GetString()!))
+                .ToList();
+        }
+
+        return [];
+    }
+
+    /// <summary>
+    /// Parses the <c>initialize</c> response for <paramref name="id"/> and returns the advertised
+    /// semantic-tokens legend (token-type names, modifier names) and the <c>full</c> flag, so a test
+    /// can assert the wire legend equals <see cref="SemanticTokenProvider"/>'s own constants.
+    /// </summary>
+    private static (string[] TokenTypes, string[] TokenModifiers, bool Full) SemanticTokensLegend(string output, int id)
+    {
+        if (TryResultForId(output, id, out var result)
+            && result.TryGetProperty("capabilities", out var caps)
+            && caps.TryGetProperty("semanticTokensProvider", out var stp))
+        {
+            var legend = stp.GetProperty("legend");
+            var types = legend.GetProperty("tokenTypes").EnumerateArray().Select(e => e.GetString()!).ToArray();
+            var mods = legend.GetProperty("tokenModifiers").EnumerateArray().Select(e => e.GetString()!).ToArray();
+            return (types, mods, stp.GetProperty("full").GetBoolean());
+        }
+
+        return ([], [], false);
+    }
+
+    /// <summary>Parses the <c>textDocument/semanticTokens/full</c> response for <paramref name="id"/> into its <c>data</c> int stream.</summary>
+    private static int[] SemanticTokensData(string output, int id)
+    {
+        if (TryResultForId(output, id, out var result) && result.TryGetProperty("data", out var data))
+        {
+            return data.EnumerateArray().Select(e => e.GetInt32()).ToArray();
+        }
+
+        return [];
+    }
+
+    [Fact]
     public void ToRange_underlines_the_offending_token()
     {
         var lines = LspServer.SplitLines("context C {\n  value V { x: Nope }\n}\n");
@@ -218,6 +307,32 @@ public class LspServerTests
             id = 22,
             method = "textDocument/references",
             @params = new { textDocument = new { uri }, position = new { line, character }, context = new { includeDeclaration = true } },
+        }));
+
+    private static byte[] InlayHint(string uri, int startLine, int startChar, int endLine, int endChar) =>
+        Frame(JsonSerializer.Serialize(new
+        {
+            jsonrpc = "2.0",
+            id = 40,
+            method = "textDocument/inlayHint",
+            @params = new
+            {
+                textDocument = new { uri },
+                range = new
+                {
+                    start = new { line = startLine, character = startChar },
+                    end = new { line = endLine, character = endChar },
+                },
+            },
+        }));
+
+    private static byte[] CallHierarchyPrepare(string uri, int line, int character) =>
+        Frame(JsonSerializer.Serialize(new
+        {
+            jsonrpc = "2.0",
+            id = 41,
+            method = "textDocument/prepareCallHierarchy",
+            @params = new { textDocument = new { uri }, position = new { line, character } },
         }));
 
     private static byte[] Rename(string uri, int line, int character, string newName) =>
@@ -477,12 +592,87 @@ public class LspServerTests
     {
         var output = RunSession(Initialize());
         output.ShouldContain("\"documentFormattingProvider\":true");
+        output.ShouldContain("\"documentRangeFormattingProvider\":true");
         output.ShouldContain("\"documentSymbolProvider\":true");
         output.ShouldContain("\"referencesProvider\":true");
+        output.ShouldContain("\"documentHighlightProvider\":true");
         output.ShouldContain("\"renameProvider\":{\"prepareProvider\":true}");
         // codeActionProvider is now an object advertising the supported code-action kinds (so
         // editors surface the refactors), not a bare boolean.
         output.ShouldContain("\"codeActionProvider\":{\"codeActionKinds\":[\"quickfix\",\"refactor\",\"refactor.extract\"]}");
+    }
+
+    [Fact]
+    public void Initialize_advertises_inlay_hint_and_call_hierarchy()
+    {
+        var output = RunSession(Initialize());
+        output.ShouldContain("\"inlayHintProvider\":true");
+        output.ShouldContain("\"callHierarchyProvider\":true");
+        output.ShouldContain("\"typeHierarchyProvider\":true");
+    }
+
+    // A read model whose direct field `total` infers its type (`Money`) from the source entity `Order`.
+    private const string InlayReadModelDoc =
+        "context Sales {\n" +
+        "  value Money { amount: Decimal currency: String }\n" +
+        "  entity Order identified by OrderId { total: Money status: String }\n" +
+        "  readmodel OrderRow from Order {\n" +
+        "    total\n" +
+        "    status\n" +
+        "  }\n" +
+        "}\n";
+
+    [Fact]
+    public void InlayHint_returns_type_hints_with_zero_based_positions()
+    {
+        var output = RunSession(
+            Initialize(),
+            DidOpen("file:///t.koi", InlayReadModelDoc),
+            InlayHint("file:///t.koi", 0, 0, 100, 0));
+
+        // Camel-cased keys, the inferred type label, the LSP Type kind (1), 0-based position.
+        output.ShouldContain("\"kind\":1");          // LSP InlayHintKind.Type
+        output.ShouldContain("\": Money\"");         // inferred from Order.total
+        output.ShouldContain("\"position\"");
+        output.ShouldContain("\"label\"");
+        output.ShouldContain("\"line\":4");          // `total` field sits on 0-based line 4
+        output.ShouldContain("\"id\":40");
+    }
+
+    // An Ordering entity command `place` emits `OrderPlaced` (mirrors CallHierarchyTests' syntax).
+    private const string CallHierarchyDoc =
+        """
+        context Ordering {
+          event OrderPlaced {
+            order: OrderId
+          }
+
+          entity Order identified by OrderId {
+            total: Int
+
+            command place {
+              emit OrderPlaced(order: id)
+            }
+          }
+        }
+        """;
+
+    [Fact]
+    public void CallHierarchyPrepare_on_a_command_returns_a_method_item_with_data()
+    {
+        // `command place` is on 0-based line 8; `place` starts at column 12, so the cursor sits one
+        // column into the token (char 13) — TokenLocator.Contains is (start, end], so col 12 misses.
+        var output = RunSession(
+            Initialize(),
+            DidOpen("file:///ordering.koi", CallHierarchyDoc),
+            CallHierarchyPrepare("file:///ordering.koi", 8, 13));
+
+        output.ShouldContain("\"name\":\"place\"");
+        output.ShouldContain("\"kind\":6");          // LSP SymbolKind.Method
+        output.ShouldContain("\"selectionRange\"");
+        output.ShouldContain("\"chKind\":\"Command\"");
+        output.ShouldContain("\"owningType\":\"Order\"");
+        output.ShouldContain("\"id\":41");
     }
 
     [Fact]
@@ -646,10 +836,14 @@ public class LspServerTests
     {
         var output = RunSession(Initialize());
         output.ShouldContain("\"semanticTokensProvider\"");
-        output.ShouldContain("\"legend\"");
-        output.ShouldContain("\"tokenTypes\":[\"type\",\"enum\",\"enumMember\",\"property\",\"keyword\",\"parameter\"]");
-        output.ShouldContain("\"tokenModifiers\":[\"declaration\"]");
-        output.ShouldContain("\"full\":true");
+
+        // The advertised legend must BE the provider's own legend constants (not a hand-copied
+        // literal), and `full` must be true — so the stdio LSP and the wasm interop (#329) decode
+        // the same tokenType/modifier ints. Asserting against the constants pins that contract.
+        var (tokenTypes, tokenModifiers, full) = SemanticTokensLegend(output, 1);
+        tokenTypes.ShouldBe(SemanticTokenProvider.TokenTypeNames);
+        tokenModifiers.ShouldBe(SemanticTokenProvider.TokenModifierNames);
+        full.ShouldBeTrue();
     }
 
     [Fact]
@@ -657,8 +851,12 @@ public class LspServerTests
     {
         var doc = "context C {\n  value Money { amount: Decimal }\n}\n";
         var output = RunSession(Initialize(), DidOpen("file:///t.koi", doc), SemanticTokensFull("file:///t.koi"));
-        output.ShouldContain("\"data\":[");
-        output.ShouldNotContain("\"data\":[]"); // a parsing model produces tokens
+
+        // The wire `data` must be EXACTLY the provider's encoded stream — the contract the wasm
+        // interop will mirror byte-for-byte (#329), not merely "some non-empty array".
+        var expected = SemanticTokenProvider.Encode(new SemanticTokenProvider().Tokenize(doc));
+        SemanticTokensData(output, 25).ShouldBe(expected);
+        expected.ShouldNotBeEmpty(); // a parsing model produces tokens
     }
 
     [Fact]
@@ -872,6 +1070,67 @@ public class LspServerTests
 
         output.ShouldContain("\"koine\":null");
         output.ShouldContain("KOI0101");   // unknown type
+    }
+
+    // ---- koine/runScenario (scenario runner, #149) ----
+
+    private const string ScenarioDoc = """
+        context Ordering {
+          enum OrderStatus { Draft, Placed, Shipped }
+          aggregate Sales root Order {
+            event OrderPlaced { orderId: OrderId  lineCount: Int }
+            value OrderLine { product: ProductId  quantity: Int }
+            entity Order identified by OrderId {
+              lines:  List<OrderLine>
+              status: OrderStatus = Draft
+              invariant status == Draft when lines.isEmpty
+              states status { Draft -> Placed  Placed -> Shipped }
+              command place {
+                requires status == Draft   "only a draft order can be placed"
+                requires !lines.isEmpty    "cannot place an empty order"
+                status -> Placed
+                emit OrderPlaced(orderId: id, lineCount: lines.count)
+              }
+            }
+          }
+        }
+        """;
+
+    private static byte[] RunScenario(string uri, string target, string operation, object given, object args) =>
+        Frame(JsonSerializer.Serialize(new
+        {
+            jsonrpc = "2.0",
+            id = 36,
+            method = "koine/runScenario",
+            @params = new { textDocument = new { uri }, target, operation, given, args },
+        }));
+
+    [Fact]
+    public void RunScenario_places_a_draft_order_and_emits_the_event()
+    {
+        var given = new { status = "Draft", lines = new[] { new { product = "P1", quantity = 2 }, new { product = "P2", quantity = 1 } } };
+        var output = RunSession(
+            Initialize(), DidOpen("file:///t.koi", ScenarioDoc),
+            RunScenario("file:///t.koi", "Order", "place", given, new { }));
+
+        output.ShouldContain("\"ok\":true");
+        output.ShouldContain("\"to\":\"Placed\"");
+        output.ShouldContain("\"event\":\"OrderPlaced\"");
+        output.ShouldContain("\"lineCount\":\"2\"");
+        output.ShouldContain("\"id\":36");
+    }
+
+    [Fact]
+    public void RunScenario_rejects_a_non_draft_order_with_a_failed_precondition()
+    {
+        var given = new { status = "Placed", lines = new[] { new { product = "P1", quantity = 1 } } };
+        var output = RunSession(
+            Initialize(), DidOpen("file:///t.koi", ScenarioDoc),
+            RunScenario("file:///t.koi", "Order", "place", given, new { }));
+
+        output.ShouldContain("\"ok\":false");
+        output.ShouldContain("\"outcome\":\"failed\"");
+        output.ShouldContain("only a draft order can be placed");
     }
 
     [Fact]
@@ -1363,6 +1622,31 @@ public class LspServerTests
         output.ShouldContain("docs/index.md");
         output.ShouldContain("mermaid");      // inline Mermaid diagram fences
         output.ShouldContain("\"id\":31");
+    }
+
+    [Fact]
+    public void Docs_diagram_event_nodes_carry_their_doc_for_the_when_column()
+    {
+        // Issue #170: the structured diagram nodes carry each event's `///` description on the wire
+        // (verbatim camelCase key "doc"), so Studio's Events table can fill its "When" column.
+        var doc = "context C {\n"
+                + "  /// Published once an order is accepted.\n"
+                + "  integration event OrderPlaced { orderId: OrderId }\n"
+                + "  publishes OrderPlaced\n"
+                + "  aggregate Order root Order {\n"
+                + "    /// Recorded when an order is submitted.\n"
+                + "    event OrderSubmitted { orderId: OrderId }\n"
+                + "    entity Order identified by OrderId { customer: CustomerId }\n"
+                + "  }\n"
+                + "}\n";
+        var output = RunSession(
+            Initialize(),
+            DidOpen("file:///t.koi", doc),
+            Docs("file:///t.koi"));
+
+        // Both the domain event (context class diagram) and the integration event (event flow) carry it.
+        output.ShouldContain("\"doc\":\"Recorded when an order is submitted.\"");
+        output.ShouldContain("\"doc\":\"Published once an order is accepted.\"");
     }
 
     [Fact]

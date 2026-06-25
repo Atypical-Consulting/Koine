@@ -181,6 +181,20 @@ internal static class PhpRuntime
         "    {\n" +
         "        return $this->value;\n" +
         "    }\n" +
+        "}\n" +
+        "\n" +
+        "/**\n" +
+        " * Generic query-handler contract: handles a typed query and returns a typed result.\n" +
+        " *\n" +
+        " * Implement this interface for each query handler in the application layer.\n" +
+        " *\n" +
+        " * @template TQuery\n" +
+        " * @template TResult\n" +
+        " */\n" +
+        "interface QueryHandler\n" +
+        "{\n" +
+        "    /** @param TQuery $query @return TResult */\n" +
+        "    public function handle(mixed $query): mixed;\n" +
         "}\n";
 
     /// <summary>

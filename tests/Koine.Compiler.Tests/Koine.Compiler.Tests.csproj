@@ -18,10 +18,14 @@
          layer's handlers/validators/DI/MediatR code (issue #129) and the EF Core Infrastructure layer
          (issue #128). The package DLLs are copied to the test output and thus appear in TPA. -->
     <PackageReference Include="FluentValidation" Version="12.1.1" />
-    <PackageReference Include="MediatR" Version="12.5.0" />
+    <PackageReference Include="MediatR" Version="14.1.0" />
     <PackageReference Include="Microsoft.EntityFrameworkCore" Version="10.0.9" />
+    <!-- The SQLite in-memory provider backs the EF Core round-trip meta-test (issue #171): it
+         materializes a generated aggregate that owns a value-object collection (OwnsMany) to prove
+         the mapping round-trips at runtime, not merely that it compiles. -->
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="10.0.9" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.9" />
-    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.6.0" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.7.0" />
     <PackageReference Include="Shouldly" Version="4.3.0" />
     <PackageReference Include="Verify.XunitV3" Version="31.20.0" />
     <PackageReference Include="xunit.v3" Version="3.2.2" />

@@ -175,6 +175,16 @@ public class ModelRoundTripTests
     }
 
     [Fact]
+    public void EmitKoine_change_field_type_emits_the_new_type()
+    {
+        var edit = new StructuredEdit(StructuredEditKind.ChangeFieldType, "Ordering.Money.amount", Type: "Int");
+        EmitResult result = ModelRoundTripService.EmitKoine(Files(Sample), edit);
+
+        result.Diagnostics.ShouldBeEmpty();
+        result.Koine!.ShouldContain("amount: Int");
+    }
+
+    [Fact]
     public void EmitKoine_illegal_type_change_returns_diagnostics_not_koine()
     {
         var edit = new StructuredEdit(StructuredEditKind.ChangeFieldType, "Ordering.Money.amount", Type: "Nope");
@@ -182,6 +192,114 @@ public class ModelRoundTripTests
 
         result.Koine.ShouldBeNull();
         result.Diagnostics.ShouldContain(d => d.Code == DiagnosticCodes.UnknownType);
+    }
+
+    // ---- Changing an entity's identity via its synthetic `id` row (the Properties panel) -------------
+
+    [Fact]
+    public void EmitKoine_change_entity_id_to_a_primitive_adds_a_natural_strategy()
+    {
+        const string src = "context C {\n  entity Product identified by ProductId { sku: String }\n}\n";
+        var edit = new StructuredEdit(StructuredEditKind.ChangeFieldType, "C.Product.id", Type: "Int");
+        EmitResult result = ModelRoundTripService.EmitKoine(Files(src), edit);
+
+        result.Diagnostics.ShouldBeEmpty();
+        result.Koine!.ShouldContain("identified by ProductId as natural(Int)");
+    }
+
+    [Fact]
+    public void EmitKoine_change_entity_id_replaces_an_existing_strategy()
+    {
+        const string src = "context C {\n  entity Product identified by ProductId as natural(Int) { sku: String }\n}\n";
+        var edit = new StructuredEdit(StructuredEditKind.ChangeFieldType, "C.Product.id", Type: "String");
+        EmitResult result = ModelRoundTripService.EmitKoine(Files(src), edit);
+
+        result.Diagnostics.ShouldBeEmpty();
+        result.Koine!.ShouldContain("identified by ProductId as natural(String)");
+        result.Koine!.ShouldNotContain("natural(Int)");
+    }
+
+    [Fact]
+    public void EmitKoine_change_entity_id_to_a_non_primitive_renames_the_id_type()
+    {
+        const string src = "context C {\n  entity Product identified by ProductId { sku: String }\n}\n";
+        var edit = new StructuredEdit(StructuredEditKind.ChangeFieldType, "C.Product.id", Type: "CatalogId");
+        EmitResult result = ModelRoundTripService.EmitKoine(Files(src), edit);
+
+        result.Diagnostics.ShouldBeEmpty();
+        result.Koine!.ShouldContain("identified by CatalogId");
+        result.Koine!.ShouldNotContain("as natural");
+    }
+
+    [Fact]
+    public void EmitKoine_change_entity_id_to_an_unsupported_primitive_is_rejected_with_a_diagnostic()
+    {
+        const string src = "context C {\n  entity Product identified by ProductId { sku: String }\n}\n";
+        var edit = new StructuredEdit(StructuredEditKind.ChangeFieldType, "C.Product.id", Type: "Decimal");
+        EmitResult result = ModelRoundTripService.EmitKoine(Files(src), edit);
+
+        result.Koine.ShouldBeNull();
+        result.Diagnostics.ShouldContain(d => d.Code == DiagnosticCodes.NaturalIdBackingType);
+    }
+
+    [Fact]
+    public void EmitKoine_change_aggregate_root_id_targets_the_root_entitys_identity()
+    {
+        // The diagram addresses an aggregate root by the aggregate qname; the id row resolves to the root.
+        var edit = new StructuredEdit(StructuredEditKind.ChangeFieldType, "Ordering.Order.id", Type: "Int");
+        EmitResult result = ModelRoundTripService.EmitKoine(Files(Sample), edit);
+
+        result.Diagnostics.ShouldBeEmpty();
+        result.Koine!.ShouldContain("identified by OrderId as natural(Int)");
+    }
+
+    [Fact]
+    public void EmitKoine_change_entity_id_in_the_studio_default_billing_model()
+    {
+        // Reproduces the exact Studio default workspace after "Add Entity" appends NewEntity, then the
+        // Properties panel changes the id type to Int (the user-reported "Edit rejected" scenario).
+        const string src = """
+            context Billing {
+              value Money {
+                amount: Decimal
+                currency: Currency
+                invariant amount >= 0        "a monetary amount cannot be negative"
+              }
+              enum Currency { EUR, USD, GBP }
+              value Email {
+                raw: String
+                invariant raw matches /^[^@]+@[^@]+$/   "invalid email address"
+              }
+              entity Customer identified by CustomerId {
+                name: String
+                email: Email
+              }
+              aggregate Order root Order {
+                enum OrderStatus { Draft, Placed, Shipped, Cancelled }
+                value OrderLine {
+                  product:   ProductId
+                  quantity:  Int
+                  unitPrice: Money
+                  subtotal:  Money = unitPrice * quantity
+                }
+                entity Order identified by OrderId {
+                  customer: CustomerId
+                  lines:    List<OrderLine>
+                  status:   OrderStatus = Draft
+                  invariant status == Draft when lines.isEmpty
+                }
+              }
+
+              entity NewEntity identified by NewEntityId {
+                name: String
+              }
+            }
+            """;
+        var edit = new StructuredEdit(StructuredEditKind.ChangeFieldType, "Billing.NewEntity.id", Type: "Int");
+        EmitResult result = ModelRoundTripService.EmitKoine(Files(src), edit);
+
+        result.Diagnostics.ShouldBeEmpty();
+        result.Koine!.ShouldContain("identified by NewEntityId as natural(Int)");
     }
 
     [Fact]
@@ -323,6 +441,267 @@ public class ModelRoundTripTests
         EmitResult result = ModelRoundTripService.EmitKoine(Files(Sample), edit);
 
         result.Koine.ShouldBeNull();
+    }
+
+    [Fact]
+    public void EmitKoine_add_entity_emits_an_identified_entity_skeleton()
+    {
+        var edit = new StructuredEdit(StructuredEditKind.AddType, "Ordering", Name: "Customer", Type: "entity");
+        EmitResult result = ModelRoundTripService.EmitKoine(Files(Sample), edit);
+
+        result.Diagnostics.ShouldBeEmpty();
+        result.Koine.ShouldNotBeNull();
+        result.Koine!.ShouldContain("entity Customer identified by CustomerId");
+    }
+
+    [Fact]
+    public void EmitKoine_add_event_emits_an_event_skeleton()
+    {
+        var edit = new StructuredEdit(StructuredEditKind.AddType, "Ordering", Name: "OrderShipped", Type: "event");
+        EmitResult result = ModelRoundTripService.EmitKoine(Files(Sample), edit);
+
+        result.Diagnostics.ShouldBeEmpty();
+        result.Koine!.ShouldContain("event OrderShipped");
+    }
+
+    [Fact]
+    public void EmitKoine_add_enum_emits_an_enum_skeleton()
+    {
+        var edit = new StructuredEdit(StructuredEditKind.AddType, "Ordering", Name: "Priority", Type: "enum");
+        EmitResult result = ModelRoundTripService.EmitKoine(Files(Sample), edit);
+
+        result.Diagnostics.ShouldBeEmpty();
+        result.Koine!.ShouldContain("enum Priority");
+    }
+
+    [Fact]
+    public void EmitKoine_add_aggregate_emits_a_self_contained_aggregate_with_a_root_entity()
+    {
+        var edit = new StructuredEdit(StructuredEditKind.AddType, "Ordering", Name: "Shipment", Type: "aggregate");
+        EmitResult result = ModelRoundTripService.EmitKoine(Files(Sample), edit);
+
+        result.Diagnostics.ShouldBeEmpty();
+        result.Koine!.ShouldContain("aggregate Shipment root ShipmentRoot");
+        result.Koine!.ShouldContain("entity ShipmentRoot identified by ShipmentRootId");
+    }
+
+    [Fact]
+    public void EmitKoine_add_service_emits_a_service_skeleton()
+    {
+        var edit = new StructuredEdit(StructuredEditKind.AddType, "Ordering", Name: "Checkout", Type: "service");
+        EmitResult result = ModelRoundTripService.EmitKoine(Files(Sample), edit);
+
+        result.Diagnostics.ShouldBeEmpty();
+        result.Koine.ShouldNotBeNull();
+        result.Koine!.ShouldContain("service Checkout");
+        // A minimal usecase keeps the service non-empty and self-contained so the round-trip re-validates.
+        result.Koine!.ShouldContain("usecase");
+    }
+
+    [Fact]
+    public void EmitKoine_add_type_with_null_kind_still_emits_a_value_skeleton()
+    {
+        // Back-compat: the old bare "+" button sends no Type.
+        var edit = new StructuredEdit(StructuredEditKind.AddType, "Ordering", Name: "Discount");
+        EmitResult result = ModelRoundTripService.EmitKoine(Files(Sample), edit);
+
+        result.Koine!.ShouldContain("value Discount");
+    }
+
+    [Fact]
+    public void ApplyEdit_add_entity_yields_a_compiling_model()
+    {
+        var edit = new StructuredEdit(StructuredEditKind.AddType, "Ordering", Name: "Customer", Type: "entity");
+        ModelEditResult result = ModelRoundTripService.ApplyEdit(Files(Sample), edit);
+
+        result.Edits.Count.ShouldBe(1);
+        result.Diagnostics.ShouldBeEmpty();
+        var edited = Splice(Sample, result.Edits[0].Range, result.Edits[0].NewText);
+        var (model, diags) = new KoineCompiler().Parse(new[] { new SourceFile("t.koi", edited) });
+        diags.Where(d => d.Severity == DiagnosticSeverity.Error).ShouldBeEmpty();
+        model.ShouldNotBeNull();
+    }
+
+    [Fact]
+    public void ApplyEdit_add_aggregate_yields_a_compiling_model()
+    {
+        var edit = new StructuredEdit(StructuredEditKind.AddType, "Ordering", Name: "Shipment", Type: "aggregate");
+        ModelEditResult result = ModelRoundTripService.ApplyEdit(Files(Sample), edit);
+
+        result.Diagnostics.ShouldBeEmpty();
+        result.Edits.Count.ShouldBe(1);
+        var edited = Splice(Sample, result.Edits[0].Range, result.Edits[0].NewText);
+        var (model, diags) = new KoineCompiler().Parse(new[] { new SourceFile("t.koi", edited) });
+        diags.Where(d => d.Severity == DiagnosticSeverity.Error).ShouldBeEmpty();
+        model.ShouldNotBeNull();
+    }
+
+    [Fact]
+    public void ApplyEdit_add_service_yields_a_compiling_model()
+    {
+        var edit = new StructuredEdit(StructuredEditKind.AddType, "Ordering", Name: "Checkout", Type: "service");
+        ModelEditResult result = ModelRoundTripService.ApplyEdit(Files(Sample), edit);
+
+        result.Diagnostics.ShouldBeEmpty();
+        result.Edits.Count.ShouldBe(1);
+        var edited = Splice(Sample, result.Edits[0].Range, result.Edits[0].NewText);
+        var (model, diags) = new KoineCompiler().Parse(new[] { new SourceFile("t.koi", edited) });
+        diags.Where(d => d.Severity == DiagnosticSeverity.Error).ShouldBeEmpty();
+        model.ShouldNotBeNull();
+    }
+
+    // ---- #254: aggregate-scoped members (repository / rule) ----------------
+
+    [Fact]
+    public void EmitKoine_add_repository_emits_a_repository_block_in_the_aggregate()
+    {
+        var edit = new StructuredEdit(StructuredEditKind.AddAggregateMember, "Ordering.Order", Type: "repository");
+        EmitResult result = ModelRoundTripService.EmitKoine(Files(Sample), edit);
+
+        result.Diagnostics.ShouldBeEmpty();
+        result.Koine.ShouldNotBeNull();
+        result.Koine!.ShouldContain("repository {");
+        result.Koine!.ShouldContain("operations: add, getById");
+        // The whole aggregate is re-emitted, so its root entity survives alongside the new repository.
+        result.Koine!.ShouldContain("aggregate Order root Order");
+        result.Koine!.ShouldContain("entity Order identified by OrderId");
+    }
+
+    [Fact]
+    public void EmitKoine_add_rule_emits_an_aggregate_scoped_spec_over_the_root()
+    {
+        var edit = new StructuredEdit(StructuredEditKind.AddAggregateMember, "Ordering.Order", Name: "IsLarge", Type: "rule");
+        EmitResult result = ModelRoundTripService.EmitKoine(Files(Sample), edit);
+
+        result.Diagnostics.ShouldBeEmpty();
+        result.Koine.ShouldNotBeNull();
+        result.Koine!.ShouldContain("spec IsLarge on Order = true");
+    }
+
+    [Fact]
+    public void EmitKoine_add_a_second_repository_is_refused()
+    {
+        // An aggregate holds at most one repository; a second insert is a no-op, not a double block.
+        var src = """
+            context Sales {
+              aggregate Orders root Order {
+                entity Order identified by OrderId {
+                  total: Decimal
+                }
+
+                repository {
+                  operations: getById, add
+                }
+              }
+            }
+            """;
+        var edit = new StructuredEdit(StructuredEditKind.AddAggregateMember, "Sales.Orders", Type: "repository");
+        EmitResult result = ModelRoundTripService.EmitKoine(Files(src), edit);
+
+        result.Koine.ShouldBeNull();
+    }
+
+    [Fact]
+    public void EmitKoine_add_rule_with_a_duplicate_name_is_rejected()
+    {
+        var src = """
+            context Sales {
+              aggregate Orders root Order {
+                entity Order identified by OrderId {
+                  total: Decimal
+                }
+
+                spec IsLarge on Order = true
+              }
+            }
+            """;
+        var edit = new StructuredEdit(StructuredEditKind.AddAggregateMember, "Sales.Orders", Name: "IsLarge", Type: "rule");
+        EmitResult result = ModelRoundTripService.EmitKoine(Files(src), edit);
+
+        result.Koine.ShouldBeNull();
+        result.Diagnostics.ShouldNotBeEmpty();
+    }
+
+    [Fact]
+    public void EmitKoine_add_aggregate_member_to_a_non_aggregate_target_is_a_no_op()
+    {
+        // Ordering.Money is a value object, not an aggregate — the edit resolves nothing.
+        var edit = new StructuredEdit(StructuredEditKind.AddAggregateMember, "Ordering.Money", Type: "repository");
+        EmitResult result = ModelRoundTripService.EmitKoine(Files(Sample), edit);
+
+        result.Koine.ShouldBeNull();
+    }
+
+    [Fact]
+    public void ApplyEdit_add_repository_yields_a_compiling_model()
+    {
+        var edit = new StructuredEdit(StructuredEditKind.AddAggregateMember, "Ordering.Order", Type: "repository");
+        ModelEditResult result = ModelRoundTripService.ApplyEdit(Files(Sample), edit);
+
+        result.Diagnostics.ShouldBeEmpty();
+        result.Edits.Count.ShouldBe(1);
+        var edited = Splice(Sample, result.Edits[0].Range, result.Edits[0].NewText);
+        var (model, diags) = new KoineCompiler().Parse(new[] { new SourceFile("t.koi", edited) });
+        diags.Where(d => d.Severity == DiagnosticSeverity.Error).ShouldBeEmpty();
+        model.ShouldNotBeNull();
+    }
+
+    [Fact]
+    public void ApplyEdit_add_rule_yields_a_compiling_model()
+    {
+        var edit = new StructuredEdit(StructuredEditKind.AddAggregateMember, "Ordering.Order", Name: "IsLarge", Type: "rule");
+        ModelEditResult result = ModelRoundTripService.ApplyEdit(Files(Sample), edit);
+
+        result.Diagnostics.ShouldBeEmpty();
+        result.Edits.Count.ShouldBe(1);
+        var edited = Splice(Sample, result.Edits[0].Range, result.Edits[0].NewText);
+        var (model, diags) = new KoineCompiler().Parse(new[] { new SourceFile("t.koi", edited) });
+        diags.Where(d => d.Severity == DiagnosticSeverity.Error).ShouldBeEmpty();
+        model.ShouldNotBeNull();
+    }
+
+    // A compact aggregate whose closing brace shares a line with the last member's end (`} }`). The member
+    // must still land INSIDE the aggregate: anchoring on end-of-line would push it past the aggregate's
+    // brace, where a `spec` would re-home to context scope, re-validate, and leave the re-sliced aggregate
+    // unchanged — a silent success that drops the rule.
+    private const string CompactAggregate =
+        "context S { aggregate Orders root Order { entity Order identified by OrderId { total: Int } } }";
+
+    [Fact]
+    public void EmitKoine_add_rule_into_a_compact_aggregate_lands_inside_it_not_dropped()
+    {
+        var edit = new StructuredEdit(StructuredEditKind.AddAggregateMember, "S.Orders", Name: "IsBig", Type: "rule");
+        EmitResult result = ModelRoundTripService.EmitKoine(Files(CompactAggregate), edit);
+
+        result.Diagnostics.ShouldBeEmpty();
+        result.Koine.ShouldNotBeNull();
+        // The re-emitted text is the AGGREGATE declaration; the spec appearing in it proves it nested inside.
+        result.Koine!.ShouldContain("spec IsBig on Order = true");
+    }
+
+    [Fact]
+    public void EmitKoine_add_repository_into_a_compact_aggregate_lands_inside_it()
+    {
+        var edit = new StructuredEdit(StructuredEditKind.AddAggregateMember, "S.Orders", Type: "repository");
+        EmitResult result = ModelRoundTripService.EmitKoine(Files(CompactAggregate), edit);
+
+        result.Diagnostics.ShouldBeEmpty();
+        result.Koine.ShouldNotBeNull();
+        result.Koine!.ShouldContain("repository {");
+    }
+
+    [Fact]
+    public void ApplyEdit_add_rule_into_a_compact_aggregate_yields_a_compiling_model()
+    {
+        var edit = new StructuredEdit(StructuredEditKind.AddAggregateMember, "S.Orders", Name: "IsBig", Type: "rule");
+        ModelEditResult result = ModelRoundTripService.ApplyEdit(Files(CompactAggregate), edit);
+
+        result.Diagnostics.ShouldBeEmpty();
+        result.Edits.Count.ShouldBe(1);
+        var edited = Splice(CompactAggregate, result.Edits[0].Range, result.Edits[0].NewText);
+        var (model, diags) = new KoineCompiler().Parse(new[] { new SourceFile("t.koi", edited) });
+        diags.Where(d => d.Severity == DiagnosticSeverity.Error).ShouldBeEmpty();
+        model.ShouldNotBeNull();
     }
 
     [Fact]

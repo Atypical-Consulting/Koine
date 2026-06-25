@@ -46,4 +46,22 @@ describe('activeContext slice', () => {
     s.getState().setActiveContext('Sales');
     expect(fn).toHaveBeenCalledTimes(1);
   });
+
+  test('contexts default to empty and setContexts replaces the list', () => {
+    const s = make();
+    expect(s.getState().contexts).toEqual([]);
+    s.getState().setContexts(['Sales', 'Billing']);
+    expect(s.getState().contexts).toEqual(['Sales', 'Billing']);
+  });
+
+  test('setContexts with an equal list does not notify (no churn)', () => {
+    const s = make();
+    const fn = vi.fn();
+    s.getState().setContexts(['Sales']);
+    s.subscribe(fn);
+    s.getState().setContexts(['Sales']); // same contents = no-op
+    expect(fn).not.toHaveBeenCalled();
+    s.getState().setContexts(['Sales', 'Billing']); // a real change notifies
+    expect(fn).toHaveBeenCalledTimes(1);
+  });
 });

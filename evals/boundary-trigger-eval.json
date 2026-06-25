@@ -1,0 +1,8 @@
+[
+  {"query": "my draft PR conflicts with main and I'm still building it — sync the branch and fix the conflicts so it stays mergeable", "expect": {"implement-issue": true, "merge-pr": false}, "note": "IN-FLIGHT sync → implement-issue"},
+  {"query": "rebase my in-flight feature branch on main and resolve the conflicts while I keep adding tasks", "expect": {"implement-issue": true, "merge-pr": false}, "note": "IN-FLIGHT rebase → implement-issue"},
+  {"query": "keep PR 376 mergeable as I build it: merge the latest main in and fix the conflicts", "expect": {"implement-issue": true, "merge-pr": false}, "note": "IN-FLIGHT keep-mergeable → implement-issue"},
+  {"query": "merge PR 281 now — resolve its conflicts with main as part of landing it", "expect": {"implement-issue": false, "merge-pr": true}, "note": "LAND-NOW → merge-pr"},
+  {"query": "land #281: fix the conflicts with main and squash-merge it", "expect": {"implement-issue": false, "merge-pr": true}, "note": "LAND-NOW → merge-pr"},
+  {"query": "ship PR 281, fixing whatever conflicts with main are blocking the merge", "expect": {"implement-issue": false, "merge-pr": true}, "note": "LAND-NOW → merge-pr"}
+]

@@ -14,7 +14,7 @@ import type AnthropicSdk from '@anthropic-ai/sdk';
 import type { ContentBlock, MessageParam, Tool, ToolResultBlockParam, ToolUseBlock } from '@anthropic-ai/sdk/resources/messages';
 import type OpenAiSdk from 'openai';
 import type { ChatCompletionMessageParam } from 'openai/resources/chat/completions';
-import { KOINE_TOOL_DEFS, KOINE_TOOLS, summarizeForChip, toAnthropicTool } from '@/ai/assistantTools';
+import { koineToolDefs, koineTools, summarizeForChip, toAnthropicTool } from '@/ai/assistantTools';
 
 /** A turn in the assistant transcript. */
 export interface ChatMessage {
@@ -39,6 +39,15 @@ export const DEFAULT_AI_MODEL = 'claude-opus-4-8';
 export const DEFAULT_OPENAI_MODEL = 'gpt-4o';
 /** Default base URL for the OpenAI-compatible provider. */
 export const DEFAULT_OPENAI_BASE_URL = 'https://api.openai.com/v1';
+
+/**
+ * Whether a base URL points at a keyless local server (Ollama / LM Studio on loopback). This gates
+ * whether an API key is required, so it lives in one place — both the chat panel and the inline
+ * completion client share it rather than each keeping a copy of the regex that could drift apart.
+ */
+export function isLocalProviderUrl(baseUrl: string): boolean {
+  return /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:|\/|$)/i.test(baseUrl);
+}
 
 let anthropicPromise: Promise<typeof AnthropicSdk> | null = null;
 let openaiPromise: Promise<typeof OpenAiSdk> | null = null;
@@ -188,7 +197,7 @@ async function runAnthropic(req: AssistantRequest): Promise<string> {
           system: req.system,
           messages,
           // The cast bridges the neutral `object` schema to the SDK's `Tool.InputSchema`.
-          ...(offerTools ? { tools: KOINE_TOOL_DEFS.map(toAnthropicTool) as Tool[] } : {}),
+          ...(offerTools ? { tools: koineToolDefs().map(toAnthropicTool) as Tool[] } : {}),
         },
         { signal: req.signal },
       );
@@ -245,7 +254,7 @@ async function runOpenAiCompatible(req: AssistantRequest): Promise<string> {
           model: req.model || DEFAULT_OPENAI_MODEL,
           stream: true,
           messages,
-          ...(offerTools ? { tools: KOINE_TOOLS, tool_choice: 'auto' as const } : {}),
+          ...(offerTools ? { tools: koineTools(), tool_choice: 'auto' as const } : {}),
         },
         { signal: req.signal },
       );

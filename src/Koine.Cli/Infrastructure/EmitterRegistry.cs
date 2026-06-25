@@ -20,6 +20,13 @@ internal static class EmitterRegistry
     /// <summary>The supported target names, in display order for help and error messages.</summary>
     public static IReadOnlyList<string> SupportedTargets => BuiltIn.SupportedTargets;
 
+    /// <summary>
+    /// The display metadata for every code-emit target (issue #282), in display order — the
+    /// IDE-facing capability list the <c>koine/emitTargets</c> LSP request serves. Excludes the
+    /// non-emit <c>glossary</c>/<c>docs</c> generators (which remain in <see cref="SupportedTargets"/>).
+    /// </summary>
+    public static IReadOnlyList<Compiler.Emit.EmitTargetInfo> SupportedTargetInfos => BuiltIn.SupportedTargetInfos;
+
     /// <summary>A comma-separated list of <see cref="SupportedTargets"/>, for messages.</summary>
     public static string SupportedList => BuiltIn.SupportedList;
 

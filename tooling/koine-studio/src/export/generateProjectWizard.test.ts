@@ -194,6 +194,37 @@ describe('generate-project wizard', () => {
     expect(zip.file('Billing/Billing/Orders/Order.ts')).not.toBeNull();
   });
 
+  it('switches to Rust, recompiles, and bundles the .rs files (no csproj)', async () => {
+    const deps = makeDeps({
+      emitPreview: vi.fn(async (t: 'csharp' | 'rust') => previewOk(t, t === 'csharp' ? 'cs' : 'rs')),
+    });
+    openWizard(deps);
+    await clickNext(); // compile C# → Artifacts
+    expect(deps.emitPreview).toHaveBeenCalledWith('csharp');
+
+    backButton().click(); // → Language
+    await settle();
+    const rs = document.querySelector<HTMLInputElement>('input[name="koi-gen-target"][value="rust"]')!;
+    rs.checked = true;
+    rs.dispatchEvent(new Event('change'));
+
+    await clickNext(); // recompile Rust → Artifacts
+    expect(deps.emitPreview).toHaveBeenCalledWith('rust');
+    expect(deps.emitPreview).toHaveBeenCalledTimes(2);
+    // The csproj artifact is C#-only and must not appear for Rust.
+    const csprojRow = Array.from(document.querySelectorAll('.koi-wizard-check')).some((r) => /\.csproj/.test(r.textContent ?? ''));
+    expect(csprojRow).toBe(false);
+
+    await clickNext(); // → Name
+    await clickNext(); // → Generate
+    await clickGenerate(deps); // generate
+
+    const [, bytes] = saveZipCalls(deps)[0];
+    const zip = await JSZip.loadAsync(bytes as Uint8Array);
+    expect(zip.file('Billing/Billing.csproj')).toBeNull(); // no csproj for Rust
+    expect(zip.file('Billing/Billing/Orders/Order.rs')).not.toBeNull();
+  });
+
   it('Back returns to the previous step and is disabled on the first step', async () => {
     const deps = makeDeps();
     openWizard(deps);

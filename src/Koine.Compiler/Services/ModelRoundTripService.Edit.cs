@@ -146,6 +146,19 @@ public static partial class ModelRoundTripService
             return true;
         }
 
+        // Add a nested member (repository / rule) to an aggregate: the affected declaration is the
+        // AGGREGATE itself (Target IS its qname), whose re-sliced text carries the inserted member.
+        if (edit.Kind == StructuredEditKind.AddAggregateMember)
+        {
+            if (FindEditType(model, edit.Target) is not AggregateDecl agg || agg.Span.IsNone)
+            {
+                return false;
+            }
+
+            decl = new DeclTarget(false, false, edit.Target, agg.Span.File, agg.Span);
+            return true;
+        }
+
         // Add/remove a whole type: the affected declaration is the owning CONTEXT, which survives the
         // edit and whose re-sliced text carries the change (for add, Target IS the context name).
         if (edit.Kind is StructuredEditKind.AddType or StructuredEditKind.RemoveType)
@@ -208,6 +221,8 @@ public static partial class ModelRoundTripService
                 return TryAddTransition(model, files, edit, out op);
             case StructuredEditKind.AddType:
                 return TryAddType(model, files, edit, out op);
+            case StructuredEditKind.AddAggregateMember:
+                return TryAddAggregateMember(model, files, edit, out op);
             case StructuredEditKind.RemoveType:
                 return TryRemoveType(model, files, edit, out op);
             default:
@@ -238,18 +253,60 @@ public static partial class ModelRoundTripService
     private static bool TryChangeFieldType(KoineModel model, StructuredEdit edit, out TextOp op)
     {
         op = default;
-        if (string.IsNullOrEmpty(edit.Type) || FindMember(model, edit.Target) is not { } hit)
+        if (string.IsNullOrEmpty(edit.Type))
         {
             return false;
         }
 
-        SourceSpan typeSpan = hit.Member.Type.Span;
-        if (typeSpan.IsNone || typeSpan.Length <= 0)
+        // A declared field: replace its type span in place.
+        if (FindMember(model, edit.Target) is { } hit)
+        {
+            SourceSpan typeSpan = hit.Member.Type.Span;
+            if (typeSpan.IsNone || typeSpan.Length <= 0)
+            {
+                return false;
+            }
+
+            op = new TextOp(typeSpan.File, typeSpan.Offset, typeSpan.Length, edit.Type!);
+            return true;
+        }
+
+        // Not a declared field — the diagram surfaces an entity's identity as a synthetic `id` row whose
+        // "type" is its generated ID type name, so a type edit there changes the entity's identity.
+        return TryChangeIdentityType(model, edit, out op);
+    }
+
+    /// <summary>
+    /// Apply a type edit to an entity's synthetic <c>id</c> row. A primitive (re-validation restricts the
+    /// natural backing to <c>String</c>/<c>Int</c>) switches the identity strategy to <c>as natural(T)</c>,
+    /// replacing any existing strategy clause or inserting one after the identity name. Any other name
+    /// renames the generated ID type in place. Re-validation rejects an illegal result (bad backing,
+    /// duplicate/invalid name) with a precise diagnostic, so a broken model is never produced.
+    /// </summary>
+    private static bool TryChangeIdentityType(KoineModel model, StructuredEdit edit, out TextOp op)
+    {
+        op = default;
+        if (!string.Equals(LastSegment(edit.Target), "id", StringComparison.Ordinal)
+            || FindEditType(model, StripLastSegment(edit.Target)) is not { } resolved
+            || FieldOwner(resolved) is not EntityDecl entity
+            || entity.IdentityNameSpan.IsNone)
         {
             return false;
         }
 
-        op = new TextOp(typeSpan.File, typeSpan.Offset, typeSpan.Length, edit.Type!);
+        if (ModelIndex.Primitives.Contains(edit.Type!))
+        {
+            var clause = $"as natural({edit.Type})";
+            op = entity.IdentityStrategySpan.IsNone
+                ? new TextOp(entity.IdentityNameSpan.File,
+                    entity.IdentityNameSpan.Offset + entity.IdentityNameSpan.Length, 0, " " + clause)
+                : new TextOp(entity.IdentityStrategySpan.File,
+                    entity.IdentityStrategySpan.Offset, entity.IdentityStrategySpan.Length, clause);
+            return true;
+        }
+
+        op = new TextOp(entity.IdentityNameSpan.File,
+            entity.IdentityNameSpan.Offset, entity.IdentityNameSpan.Length, edit.Type!);
         return true;
     }
 
@@ -397,8 +454,9 @@ public static partial class ModelRoundTripService
     }
 
     /// <summary>
-    /// Insert a minimal, valid <c>value</c>-object skeleton (one <c>String</c> field) into the
-    /// <paramref name="edit"/>.Target context — after its last top-level type, or into an empty body.
+    /// Insert a minimal, re-validating skeleton for the construct kind given by <paramref name="edit"/>.Type
+    /// (<c>value</c> | <c>entity</c> | <c>aggregate</c> | <c>event</c> | <c>enum</c> | <c>service</c>; <c>null</c> ⇒
+    /// value) into the <paramref name="edit"/>.Target context — after its last top-level type, or into an empty body.
     /// Re-validation rejects a duplicate / invalid name, so a broken model is never produced.
     /// </summary>
     private static bool TryAddType(KoineModel model, IReadOnlyList<SourceFile> files, StructuredEdit edit, out TextOp op)
@@ -417,8 +475,21 @@ public static partial class ModelRoundTripService
 
         var nl = NewlineOf(source);
         var typeIndent = new string(' ', Math.Max(0, ctx.Span.Column - 1) + 2);
-        // A value object with a single String field is the minimal valid type; the author refines it.
-        var skeleton = $"value {edit.Name} {{{nl}{typeIndent}  name: String{nl}{typeIndent}}}";
+        var body = typeIndent + "  "; // members sit one level inside the type's braces
+        // A minimal, re-validating skeleton per construct; null kind ⇒ value (the old bare "+" button).
+        // The aggregate nests its own root entity so it is self-contained and always validates.
+        var skeleton = edit.Type switch
+        {
+            "entity" => $"entity {edit.Name} identified by {edit.Name}Id {{{nl}{body}name: String{nl}{typeIndent}}}",
+            "event" => $"event {edit.Name} {{{nl}{body}occurredAt: Instant{nl}{typeIndent}}}",
+            "enum" => $"enum {edit.Name} {{{nl}{body}First{nl}{body}Second{nl}{typeIndent}}}",
+            "aggregate" => $"aggregate {edit.Name} root {edit.Name}Root {{{nl}{body}entity {edit.Name}Root identified by {edit.Name}RootId {{{nl}{body}  name: String{nl}{body}}}{nl}{typeIndent}}}",
+            // A single placeholder use-case keeps the service non-empty (so it re-validates) without
+            // referencing any domain type — `usecase` (not `operation`) needs no return clause.
+            "service" => $"service {edit.Name} {{{nl}{body}usecase DoSomething(){nl}{typeIndent}}}",
+            // null (the old bare button) and any unrecognized kind intentionally fall back to a value object.
+            _ => $"value {edit.Name} {{{nl}{body}name: String{nl}{typeIndent}}}",
+        };
 
         if (ctx.Types.Count > 0 && ctx.Types[^1].Span is { IsNone: false } last)
         {
@@ -436,6 +507,81 @@ public static partial class ModelRoundTripService
 
         var closeIndent = new string(' ', Math.Max(0, ctx.Span.Column - 1));
         op = new TextOp(ctx.Span.File, brace + 1, 0, nl + typeIndent + skeleton + nl + closeIndent);
+        return true;
+    }
+
+    /// <summary>
+    /// Insert a minimal, re-validating <b>aggregate member</b> for the kind given by
+    /// <paramref name="edit"/>.Type — a <c>repository</c> block, or a <c>rule</c> as an aggregate-scoped
+    /// <c>spec &lt;Name&gt; on &lt;Root&gt; = true</c> — as the last member of the <paramref name="edit"/>.Target
+    /// aggregate. A second repository is refused (an aggregate holds at most one — the builder keeps the
+    /// last, so a double block would silently mislead); a duplicate rule name is rejected by re-validation.
+    /// </summary>
+    private static bool TryAddAggregateMember(KoineModel model, IReadOnlyList<SourceFile> files, StructuredEdit edit, out TextOp op)
+    {
+        op = default;
+        if (FindEditType(model, edit.Target) is not AggregateDecl agg || agg.Span.IsNone)
+        {
+            return false;
+        }
+
+        var source = SourceOf(files, agg.Span.File);
+        if (source is null)
+        {
+            return false;
+        }
+
+        // Anchor on the aggregate's CLOSING brace (the last '}' within its span) and insert just before
+        // it. Anchoring on the last member's end-of-line instead would cross the aggregate's '}' whenever
+        // that brace shares a line with the last member's end (a single-line or `} }` aggregate) — which
+        // for a rule would silently re-home the `spec` to context scope and drop it. The brace anchor is
+        // robust for a multi-line, single-line, or empty body alike.
+        var searchFrom = Math.Min(agg.Span.Offset + agg.Span.Length - 1, source.Length - 1);
+        var closeBrace = searchFrom < agg.Span.Offset ? -1 : source.LastIndexOf('}', searchFrom);
+        if (closeBrace < agg.Span.Offset)
+        {
+            return false;
+        }
+
+        var nl = NewlineOf(source);
+        var closeLineStart = StartOfLine(source, closeBrace);
+        // The brace sits on its own line when only whitespace precedes it; then its leading whitespace IS
+        // the aggregate's indent. Otherwise (it shares the line with the last member / an empty `{}`),
+        // derive the indent from the aggregate keyword's column. Members sit one level (two spaces) in.
+        var braceAlone = source[closeLineStart..closeBrace].Trim().Length == 0;
+        var aggIndent = braceAlone ? source[closeLineStart..closeBrace] : new string(' ', Math.Max(0, agg.Span.Column - 1));
+        var memberIndent = aggIndent + "  ";
+        var skeleton = edit.Type switch
+        {
+            // An aggregate holds at most one repository, so refuse a second rather than emit a confusing
+            // double block (the builder would silently keep only the last).
+            "repository" => agg.Repository is null
+                ? $"repository {{{nl}{memberIndent}  operations: add, getById{nl}{memberIndent}}}"
+                : null,
+            // "Rule" maps to an aggregate-scoped, reusable boolean specification over the root (#254); a
+            // bare `true` re-validates and a duplicate spec name is rejected by re-validation.
+            "rule" => string.IsNullOrEmpty(edit.Name) ? null : $"spec {edit.Name} on {agg.RootName} = true",
+            _ => null,
+        };
+
+        if (skeleton is null)
+        {
+            return false;
+        }
+
+        var hasMembers = agg.Types.Count > 0 || agg.Specs.Count > 0 || agg.Repository is not null;
+        if (braceAlone)
+        {
+            // The brace is on its own line: insert the member as its own line just above it — with a blank
+            // line separating it from the previous member (skipped for an empty body).
+            var lead = hasMembers ? nl : string.Empty;
+            op = new TextOp(agg.Span.File, closeLineStart, 0, lead + memberIndent + skeleton + nl);
+            return true;
+        }
+
+        // The brace shares its line with content: insert the member before it and push the brace onto its
+        // own line at the aggregate's indent.
+        op = new TextOp(agg.Span.File, closeBrace, 0, nl + memberIndent + skeleton + nl + aggIndent);
         return true;
     }
 

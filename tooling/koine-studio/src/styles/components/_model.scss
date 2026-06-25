@@ -1,3 +1,5 @@
+@use '../abstracts' as a;
+
 /* --- DDD-aware model workspace (#142): construct-grouped navigator + counts + inspector --------- */
 .koi-model {
   padding: 0.5rem 0.75rem 1rem;
@@ -120,6 +122,10 @@
   align-items: center;
   gap: var(--koi-space-1-5);
   width: 100%;
+  /* WCAG 2.5.8 target size: keep each construct row at least 24px tall so it's a comfortable click
+     and pointer target (was ~23.5px). box-sizing keeps the padding inside that minimum. */
+  box-sizing: border-box;
+  min-height: 26px;
   text-align: left;
   background: transparent;
   border: none;
@@ -181,6 +187,10 @@
   border-radius: 50%;
   background: var(--koi-ddd-event);
 }
+.koi-model-icon[data-construct='service'] {
+  border-radius: 3px;
+  background: var(--koi-ddd-service);
+}
 .koi-model-icon[data-construct='integration-event'] {
   border-radius: 50%;
   background: transparent;
@@ -189,6 +199,14 @@
 .koi-model-icon[data-construct='type'] {
   border-radius: 2px;
   background: var(--koi-ddd-repository);
+}
+.koi-model-icon[data-construct='repository'] {
+  border-radius: 5px;
+  background: var(--koi-ddd-repository);
+}
+.koi-model-icon[data-construct='rule'] {
+  border-radius: 3px;
+  background: var(--koi-ddd-spec);
 }
 
 .koi-model-navs {
@@ -248,7 +266,10 @@ $koi-inspector-constructs: (
 
 .koi-inspector {
   --koi-construct: var(--koi-accent); /* the element's DDD hue; set per data-kind below */
-  padding: var(--koi-space-3-5);
+  // Same panel inset as the Rules/Notes tabs (`.doc-view`) so all three right-rail tabs — populated
+  // or empty — align to one margin. #inspector-host is a bare `.rview` (no `.doc-view`), so the
+  // padding rides on the content root here rather than the container.
+  @include a.rail-panel-pad;
   font-family: var(--koi-font-body);
 }
 
@@ -256,22 +277,6 @@ $koi-inspector-constructs: (
   .koi-inspector[data-kind='#{$kind}'] {
     --koi-construct: #{$hue};
   }
-}
-
-.koi-inspector-empty {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 8rem;
-  color: var(--koi-muted);
-  text-align: center;
-}
-
-.koi-inspector-hint {
-  margin: 0;
-  max-width: 26ch;
-  font-size: var(--koi-text-sm);
-  line-height: 1.5;
 }
 
 /* Header: a construct-coloured accent bar + the element name (display face — the hero) + a tinted
@@ -427,6 +432,27 @@ $koi-inspector-constructs: (
   padding: var(--koi-space-0-75) 0;
 }
 
+/* Change history compartment (#150): a compact "author · date" meta line over the commit message. */
+.koi-inspector-history-item {
+  font-family: var(--koi-font-body);
+  display: flex;
+  flex-direction: column;
+  gap: var(--koi-space-0-5);
+  border-top: 1px solid var(--koi-border);
+
+  &:first-child {
+    border-top: 0;
+  }
+}
+
+.koi-inspector-history-meta {
+  font-size: var(--koi-text-xs);
+}
+
+.koi-inspector-history-message {
+  color: var(--koi-fg);
+}
+
 /* Properties compartment rendered as an aligned two-column table (name | type). */
 .koi-inspector-table {
   width: 100%;
@@ -566,12 +592,6 @@ $koi-inspector-constructs: (
 }
 .koi-inspector-add-btn:hover {
   background: color-mix(in srgb, var(--koi-construct) 12%, transparent);
-}
-
-/* Cross-highlight the diagram node matching the current selection (#142, Task 4). */
-.koi-svg-node.is-selected .koi-svg-node-box {
-  stroke: var(--koi-accent);
-  stroke-width: 2.5;
 }
 
 /* --- dev store inspector overlay (#193 follow-up) ---------------------------------------------

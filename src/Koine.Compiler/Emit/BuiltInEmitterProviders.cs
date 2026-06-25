@@ -1,6 +1,8 @@
+using Koine.Compiler.Emit.AsyncApi;
 using Koine.Compiler.Emit.CSharp;
 using Koine.Compiler.Emit.Docs;
 using Koine.Compiler.Emit.Glossary;
+using Koine.Compiler.Emit.OpenApi;
 using Koine.Compiler.Emit.Php;
 using Koine.Compiler.Emit.Python;
 using Koine.Compiler.Emit.Rust;
@@ -26,6 +28,8 @@ internal static class BuiltInEmitterProviders
         new RustEmitterProvider(),
         new GlossaryEmitterProvider(),
         new DocsEmitterProvider(),
+        new AsyncApiEmitterProvider(),
+        new OpenApiEmitterProvider(),
     };
 }
 
@@ -33,6 +37,10 @@ internal static class BuiltInEmitterProviders
 internal sealed class CSharpEmitterProvider : IEmitterProvider
 {
     public string Target => "csharp";
+
+    public string DisplayName => "C#";
+
+    public string FileExtension => ".cs";
 
     public IEmitter Create(EmitterOptions options) => new CSharpEmitter(ToCSharpOptions(options));
 
@@ -98,6 +106,10 @@ internal sealed class TypeScriptEmitterProvider : IEmitterProvider
 {
     public string Target => "typescript";
 
+    public string DisplayName => "TypeScript";
+
+    public string FileExtension => ".ts";
+
     public IEmitter Create(EmitterOptions options) => new TypeScriptEmitter(ToTsOptions(options));
 
     /// <summary>
@@ -110,7 +122,8 @@ internal sealed class TypeScriptEmitterProvider : IEmitterProvider
     /// </summary>
     private static TsEmitterOptions ToTsOptions(EmitterOptions options)
     {
-        if (options.NamespaceMap.Count == 0 && !options.EmitSourceMaps && !options.ReferenceOnly)
+        if (options.NamespaceMap.Count == 0 && !options.EmitSourceMaps && !options.ReferenceOnly
+            && options.Layers is null)
         {
             return TsEmitterOptions.Empty;
         }
@@ -120,7 +133,34 @@ internal sealed class TypeScriptEmitterProvider : IEmitterProvider
             EmitSourceMaps = options.EmitSourceMaps,
             ModuleMap = options.NamespaceMap,
             ReferenceOnly = options.ReferenceOnly,
+            Layers = ParseLayers(options.Layers),
         };
+    }
+
+    /// <summary>
+    /// Parses the comma-separated <c>layers</c> selector into a <see cref="TsLayer"/> set, mirroring
+    /// <see cref="CSharpEmitterProvider"/>'s parser. <c>null</c> (the default) maps to <c>null</c> ⇒
+    /// Domain-only; the opt-in <c>infrastructure</c> (issue #241) always implies <c>domain</c>. Names are
+    /// case-insensitive; unknown names are dropped here (the CLI rejects them up front). The TS target has
+    /// no Application layer, so <c>application</c> is accepted and ignored (it still implies <c>domain</c>).
+    /// </summary>
+    private static IReadOnlySet<TsLayer>? ParseLayers(string? layers)
+    {
+        if (layers is null)
+        {
+            return null;
+        }
+
+        var set = new HashSet<TsLayer> { TsLayer.Domain };
+        foreach (var name in layers.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            if (string.Equals(name, "infrastructure", StringComparison.OrdinalIgnoreCase))
+            {
+                set.Add(TsLayer.Infrastructure);
+            }
+        }
+
+        return set;
     }
 }
 
@@ -128,6 +168,10 @@ internal sealed class TypeScriptEmitterProvider : IEmitterProvider
 internal sealed class PythonEmitterProvider : IEmitterProvider
 {
     public string Target => "python";
+
+    public string DisplayName => "Python";
+
+    public string FileExtension => ".py";
 
     public IEmitter Create(EmitterOptions options) => new PythonEmitter(ToPythonOptions(options));
 
@@ -146,7 +190,7 @@ internal sealed class PythonEmitterProvider : IEmitterProvider
     /// </summary>
     private static PythonEmitterOptions ToPythonOptions(EmitterOptions options)
     {
-        if (options.NamespaceMap.Count == 0)
+        if (options.NamespaceMap.Count == 0 && options.Layers is null)
         {
             return PythonEmitterOptions.Empty;
         }
@@ -157,7 +201,33 @@ internal sealed class PythonEmitterProvider : IEmitterProvider
             packageMap[PythonNaming.ToSnakeCase(context)] = package;
         }
 
-        return new PythonEmitterOptions(packageMap);
+        return new PythonEmitterOptions(packageMap, EmitDictHelpers: false, ParseLayers(options.Layers));
+    }
+
+    /// <summary>
+    /// Parses the comma-separated <c>layers</c> selector into a <see cref="PythonLayer"/> set, mirroring
+    /// <see cref="CSharpEmitterProvider"/>'s parser. <c>null</c> (the default) maps to <c>null</c> ⇒
+    /// Domain-only; the opt-in <c>infrastructure</c> (issue #241) always implies <c>domain</c>. Names are
+    /// case-insensitive; unknown names are dropped here (the CLI rejects them up front). The Python target
+    /// has no Application layer, so <c>application</c> is accepted and ignored (it still implies <c>domain</c>).
+    /// </summary>
+    private static IReadOnlySet<PythonLayer>? ParseLayers(string? layers)
+    {
+        if (layers is null)
+        {
+            return null;
+        }
+
+        var set = new HashSet<PythonLayer> { PythonLayer.Domain };
+        foreach (var name in layers.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            if (string.Equals(name, "infrastructure", StringComparison.OrdinalIgnoreCase))
+            {
+                set.Add(PythonLayer.Infrastructure);
+            }
+        }
+
+        return set;
     }
 }
 
@@ -165,6 +235,10 @@ internal sealed class PythonEmitterProvider : IEmitterProvider
 internal sealed class PhpEmitterProvider : IEmitterProvider
 {
     public string Target => "php";
+
+    public string DisplayName => "PHP";
+
+    public string FileExtension => ".php";
 
     public IEmitter Create(EmitterOptions options) => new PhpEmitter(ToPhpOptions(options));
 
@@ -189,6 +263,10 @@ internal sealed class PhpEmitterProvider : IEmitterProvider
 internal sealed class RustEmitterProvider : IEmitterProvider
 {
     public string Target => "rust";
+
+    public string DisplayName => "Rust";
+
+    public string FileExtension => ".rs";
 
     public IEmitter Create(EmitterOptions options) => new RustEmitter(ToRustOptions(options));
 
@@ -220,6 +298,9 @@ internal sealed class GlossaryEmitterProvider : IEmitterProvider
 {
     public string Target => "glossary";
 
+    /// <summary>The glossary is documentation, not a code-emit target the IDE offers (issue #282).</summary>
+    public bool IsEmitTarget => false;
+
     public IEmitter Create(EmitterOptions options) => new GlossaryEmitter();
 }
 
@@ -228,5 +309,32 @@ internal sealed class DocsEmitterProvider : IEmitterProvider
 {
     public string Target => "docs";
 
+    /// <summary>Living docs is documentation, not a code-emit target the IDE offers (issue #282).</summary>
+    public bool IsEmitTarget => false;
+
     public IEmitter Create(EmitterOptions options) => new DocsEmitter();
+}
+
+/// <summary>Provider for the AsyncAPI 3.0 emitter (no per-emit options).</summary>
+internal sealed class AsyncApiEmitterProvider : IEmitterProvider
+{
+    public string Target => "asyncapi";
+
+    public string DisplayName => "AsyncAPI";
+
+    public string FileExtension => ".yaml";
+
+    public IEmitter Create(EmitterOptions options) => new AsyncApiEmitter();
+}
+
+/// <summary>Provider for the OpenAPI 3.1 spec emitter (issue #126; no per-emit options).</summary>
+internal sealed class OpenApiEmitterProvider : IEmitterProvider
+{
+    public string Target => "openapi";
+
+    public string DisplayName => "OpenAPI";
+
+    public string FileExtension => ".yaml";
+
+    public IEmitter Create(EmitterOptions options) => new OpenApiEmitter();
 }

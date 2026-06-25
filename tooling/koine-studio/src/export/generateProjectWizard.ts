@@ -10,8 +10,10 @@ import {
   defaultProjectName,
   isValidProjectName,
 } from '@/export/generateProject';
+import { EMIT_TARGETS } from '@/shared/emitTargets';
 
-type Target = 'csharp' | 'typescript' | 'python' | 'php';
+/** An emit-target id. A plain `string` so a backend-only target needs no front-end type edit. */
+type Target = string;
 type StatusKind = 'info' | 'error' | 'success';
 
 /** Everything the wizard needs from the rest of the app, injected so it can be wired to any host. */
@@ -39,12 +41,29 @@ const STEP_LABELS = ['Language', 'Artifacts', 'Name', 'Generate'] as const;
 const LAST_STEP = STEP.Generate;
 const NAME_ERR_ID = 'koi-gen-name-err';
 
-const TARGETS: { value: Target; title: string; blurb: string }[] = [
-  { value: 'csharp', title: 'C#', blurb: 'Idiomatic, self-contained .NET source (value objects, aggregates, CQRS, …).' },
-  { value: 'typescript', title: 'TypeScript', blurb: 'The TypeScript emitter output for the same model.' },
-  { value: 'python', title: 'Python', blurb: 'Python dataclasses and protocols for the same model.' },
-  { value: 'php', title: 'PHP', blurb: 'Typed PHP classes for the same model.' },
-];
+// Per-target marketing blurb shown on each language card. This prose genuinely lives in the front-end
+// (it isn't backend metadata), so it's keyed by target id and looked up; a backend-only target with no
+// blurb still appears, just without a description.
+const TARGET_BLURBS: Record<string, string> = {
+  csharp: 'Idiomatic, self-contained .NET source (value objects, aggregates, CQRS, …).',
+  typescript: 'The TypeScript emitter output for the same model.',
+  python: 'Python dataclasses and protocols for the same model.',
+  php: 'Typed PHP classes for the same model.',
+  rust: 'An idiomatic Rust crate (structs, Result-returning constructors, traits) for the same model.',
+};
+
+/**
+ * The wizard's language cards, built from the LIVE EMIT_TARGETS (seeded from the backend at boot,
+ * issue #282) so a registry target appears here with no edit; id/title come from the shared list and
+ * the blurb is looked up by id. Read at wizard-render time (a function, not a module-load snapshot).
+ */
+export function wizardTargets(): { value: Target; title: string; blurb: string }[] {
+  return EMIT_TARGETS.map((t) => ({
+    value: t.id,
+    title: t.displayName,
+    blurb: TARGET_BLURBS[t.id] ?? '',
+  }));
+}
 
 interface WizardState {
   step: number;
@@ -253,7 +272,7 @@ export function createGenerateProject(deps: GenerateProjectDeps): GenerateProjec
     group.className = 'koi-wizard-options';
     group.setAttribute('role', 'radiogroup');
     group.setAttribute('aria-label', 'Target language');
-    for (const t of TARGETS) {
+    for (const t of wizardTargets()) {
       const option = document.createElement('label');
       option.className = 'koi-wizard-option' + (state.target === t.value ? ' selected' : '');
       const input = document.createElement('input');
@@ -428,7 +447,7 @@ export function createGenerateProject(deps: GenerateProjectDeps): GenerateProjec
     if (state.target === 'csharp' && state.includeCsproj) artifacts.push('.csproj');
     if (state.includeGlossary) artifacts.push('glossary.md');
 
-    const targetLabel = TARGETS.find((t) => t.value === state.target)?.title ?? state.target;
+    const targetLabel = wizardTargets().find((t) => t.value === state.target)?.title ?? state.target;
     wrap.appendChild(summaryRow('Language', targetLabel));
     wrap.appendChild(summaryRow('Project name', state.projectName));
     wrap.appendChild(summaryRow('Artifacts', artifacts.join(', ')));

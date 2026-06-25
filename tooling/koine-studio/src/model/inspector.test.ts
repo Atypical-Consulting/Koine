@@ -2,9 +2,12 @@ import { afterEach, describe, expect, test, vi } from 'vitest';
 import {
   buildInspectorElement,
   renderInspector,
+  renderRules,
+  renderChangeHistory,
   type InspectorElement,
   type InspectorHandlers,
 } from '@/model/inspector';
+import type { ChangeEntry } from '@/host/gitHistory';
 import type { DiagramNode, GlossaryEntry, ModelMember, Range } from '@/lsp/lsp';
 
 afterEach(() => {
@@ -38,7 +41,11 @@ const noop: InspectorHandlers = { onGoto: () => {} };
 describe('renderInspector', () => {
   test('renders an empty state when nothing is selected', () => {
     const el = renderInspector(null, noop);
-    expect(el.classList.contains('koi-inspector-empty')).toBe(true);
+    // The padded .koi-inspector root wraps the shared rail empty state (renderRailEmpty — the same
+    // builder the Rules/Notes tabs use), so the three tabs share one margin and one markup.
+    expect(el.classList.contains('koi-inspector')).toBe(true);
+    expect(el.querySelector('.koi-rview-empty')).not.toBeNull();
+    expect(el.querySelector('.koi-rview-empty-title')!.textContent).toBe('Properties');
     expect(el.textContent).toMatch(/select an element/i);
   });
 
@@ -196,6 +203,14 @@ describe('buildInspectorElement', () => {
     expect(built.stereotype).toBeNull();
     expect(built.properties).toEqual([]);
     expect(built.behaviors).toEqual([]);
+    expect(built.invariants).toBeUndefined();
+  });
+
+  test('carries the diagram node’s invariants as business rules (undefined when none)', () => {
+    const withRules = buildInspectorElement(entry, { ...node, invariants: ['total >= 0', 'lines not empty'] });
+    expect(withRules.invariants).toEqual(['total >= 0', 'lines not empty']);
+    // An empty invariants array collapses to undefined (so the Properties Invariants compartment hides).
+    expect(buildInspectorElement(entry, { ...node, invariants: [] }).invariants).toBeUndefined();
   });
 
   test('falls back to the structured-model fields for a value object with no diagram node', () => {
@@ -356,5 +371,57 @@ describe('property editing (authoring)', () => {
     expect(el.querySelector('.koi-inspector-row-editable')).toBeNull();
     expect(el.querySelector('.koi-inspector-prop-input')).toBeNull();
     expect(el.querySelector('.koi-inspector-add-prop')).toBeNull();
+  });
+});
+
+describe('renderRules', () => {
+  test('prompts to select when nothing is selected', () => {
+    const el = renderRules(null);
+    expect(el.querySelector('.koi-rview-empty-title')?.textContent).toBe('Business rules');
+    expect(el.textContent).toContain('Select an element');
+  });
+
+  test('lists the selected element’s invariants as business rules', () => {
+    const el = renderRules({ ...fullElement, invariants: ['total >= 0', 'lines not empty'] });
+    expect(el.querySelector('.koi-rview-empty-title')?.textContent).toBe('Order — business rules');
+    const items = Array.from(el.querySelectorAll('.koi-inspector-item')).map((n) => n.textContent);
+    expect(items).toEqual(['total >= 0', 'lines not empty']);
+  });
+
+  test('shows a no-invariants state for an element without rules', () => {
+    const el = renderRules({ ...fullElement, invariants: undefined });
+    expect(el.textContent).toContain('No invariants declared');
+    expect(el.querySelector('.koi-inspector-item')).toBeNull();
+  });
+});
+
+describe('renderChangeHistory', () => {
+  const entries: ChangeEntry[] = [
+    { sha: 'a1b2c3d', author: 'Alice Dupont', date: '2026-06-20T10:30:00+02:00', message: 'Add the Rule invariant' },
+    { sha: 'e4f5g6h', author: 'Bob', date: '2026-05-01T09:00:00Z', message: 'Introduce Order aggregate' },
+  ];
+
+  test('is hidden (null) when history is unavailable or empty', () => {
+    expect(renderChangeHistory(null)).toBeNull();
+    expect(renderChangeHistory([])).toBeNull();
+  });
+
+  test('renders one row per commit, newest first, as author · date over the message', () => {
+    const el = renderChangeHistory(entries)!;
+    expect(el).not.toBeNull();
+    expect(el.querySelector('.koi-inspector-section-title')!.textContent).toBe('Change history');
+
+    const rows = Array.from(el.querySelectorAll('.koi-inspector-history-item'));
+    expect(rows.length).toBe(2);
+    // The author date is shown as its YYYY-MM-DD calendar day (locale-free), with author and message.
+    expect(rows[0].querySelector('.koi-inspector-history-meta')!.textContent).toBe('Alice Dupont · 2026-06-20');
+    expect(rows[0].querySelector('.koi-inspector-history-message')!.textContent).toBe('Add the Rule invariant');
+    expect(rows[1].querySelector('.koi-inspector-history-meta')!.textContent).toBe('Bob · 2026-05-01');
+  });
+
+  test('carries each commit SHA on the row for a later jump-to-commit', () => {
+    const el = renderChangeHistory(entries)!;
+    const shas = Array.from(el.querySelectorAll('.koi-inspector-history-item')).map((n) => (n as HTMLElement).dataset.sha);
+    expect(shas).toEqual(['a1b2c3d', 'e4f5g6h']);
   });
 });

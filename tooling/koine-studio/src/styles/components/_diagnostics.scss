@@ -206,6 +206,41 @@ body.resizing #diag-resizer {
   display: none;
 }
 
+/* --- panel docked right (issue #265) ---
+   By default the bottom panel sits under the editor/canvas (the #center flex column: tabs / body /
+   #diagnostics). data-panel-side='right' re-lays #center as a grid so the panel becomes a right column
+   spanning the body's height instead of a bottom strip: the tab strip spans both columns on row 1, the
+   body takes the 1fr left cell, and the panel takes a fixed-width right cell. */
+#split[data-panel-side='right'] #center {
+  display: grid;
+  grid-template-columns: 1fr var(--koi-panel-w, 340px);
+  grid-template-rows: auto 1fr;
+}
+#split[data-panel-side='right'] #center-tabs {
+  grid-column: 1 / -1;
+  grid-row: 1;
+}
+#split[data-panel-side='right'] #center-body {
+  grid-column: 1;
+  grid-row: 2;
+}
+#split[data-panel-side='right'] #diagnostics {
+  grid-column: 2;
+  grid-row: 2;
+  min-height: 0;
+  border-top: none;
+  border-left: 1px solid var(--koi-line);
+}
+/* Docked right, the panel body fills the column height rather than the draggable strip height; the
+   top-edge (row-resize) handle is meaningless here, so hide it. */
+#split[data-panel-side='right'] #diagnostics .diag-panel {
+  height: auto;
+  max-height: none;
+}
+#split[data-panel-side='right'] #diag-resizer {
+  display: none;
+}
+
 /* --- model tables (Events / Relationships) ---
    A dense, scannable table consistent with the diagnostics list: muted sticky header, subtle row
    separators, navigable rows that highlight on hover/focus. */

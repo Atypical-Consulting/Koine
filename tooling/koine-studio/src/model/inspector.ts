@@ -10,7 +10,9 @@
 // Invariants / published events / repository are NOT on the wire today (they are not `DiagramNode`
 // members), so the element fields are optional and the panel renders those compartments only when a
 // future minimal emitter change populates them — the layout is forward-compatible.
-import type { DiagramNode, GlossaryEntry, ModelMember, Range } from '@/lsp/lsp';
+import type { DiagramNode, GlossaryEntry, ModelMember, Range, SourceSpan } from '@/lsp/lsp';
+import type { ChangeEntry } from '@/host/gitHistory';
+import { railHint, renderRailEmpty } from '@/model/railEmpty';
 
 /**
  * The language's built-in scalar/collection types — the always-available options for a property's
@@ -49,6 +51,14 @@ export interface InspectorElement {
   repository?: string | null;
   /** The declaration's name range, for jump-to-source from the header. */
   nameRange: Range;
+  /**
+   * The declaration's full source span — its file uri + line range — when the element has a diagram
+   * node (issue #150). Carries the *correct* file even in a multi-file workspace, so the change-history
+   * lookup scopes git to the element's own declaration rather than whatever file the editor shows.
+   * Absent for elements with no diagram node (e.g. an undrawn value object); the lookup then falls back
+   * to the active file + {@link nameRange}.
+   */
+  sourceSpan?: SourceSpan | null;
 }
 
 export interface InspectorHandlers {
@@ -67,6 +77,12 @@ export interface InspectorHandlers {
   onRenameProperty?(element: InspectorElement, oldName: string, newName: string): void;
   /** Change the type of the element's field `propName` to `newType`. */
   onChangeType?(element: InspectorElement, propName: string, newType: string): void;
+  /**
+   * Fetch the git change history for the element's source span (issue #150) — the commits that touched
+   * its declaration, newest first. Resolves `null` when history is unavailable (browser host, not a git
+   * repo), so the "Change history" section stays hidden. Optional — absent ⇒ no history section.
+   */
+  loadHistory?(element: InspectorElement): Promise<ChangeEntry[] | null>;
 }
 
 /**
@@ -106,7 +122,13 @@ export function buildInspectorElement(
     properties,
     behaviors: members.filter((m) => m.kind === 'method').map((m) => m.text),
     values: members.filter((m) => m.kind === 'value').map((m) => m.text),
+    // Business rules now ride on the diagram node (the invariants-on-the-wire change): each is the
+    // invariant's message or its described condition. Undefined when the node carries none.
+    invariants: node?.invariants && node.invariants.length > 0 ? node.invariants : undefined,
     nameRange: entry.nameRange,
+    // The diagram node carries the declaration's file + line range; null for undrawn elements (the
+    // change-history lookup then falls back to the active file + name range).
+    sourceSpan: node?.sourceSpan ?? null,
   };
 }
 
@@ -124,11 +146,11 @@ export function renderInspector(
   root.className = 'koi-inspector';
 
   if (!element) {
-    root.classList.add('koi-inspector-empty');
-    const hint = document.createElement('p');
-    hint.className = 'koi-inspector-hint muted';
-    hint.textContent = 'Select an element in the model outline or a diagram to inspect it.';
-    root.appendChild(hint);
+    // The shared rail empty state (same builder the Rules/Notes tabs use), nested inside the padded
+    // `.koi-inspector` root so it picks up the same panel margin as the other two tabs.
+    root.appendChild(
+      renderRailEmpty('Properties', railHint('Select an element in the model outline or a diagram to inspect it.')),
+    );
     return root;
   }
 
@@ -147,6 +169,89 @@ export function renderInspector(
   if (element.repository) appendList(root, 'Repository', [element.repository]);
 
   return root;
+}
+
+/**
+ * The right-rail "Rules" tab: the selected element's business rules (its invariants), or an empty
+ * state. Read-only — invariants are authored in the `.koi` source and flagged live in the Problems
+ * panel; this view just surfaces them per element. Reuses the same flat {@link InspectorElement}
+ * projection as the Properties inspector so it tracks selection identically.
+ */
+export function renderRules(element: InspectorElement | null): HTMLElement {
+  if (!element) {
+    return renderRailEmpty(
+      'Business rules',
+      railHint(
+        'Select an element in the model outline or a diagram to see its invariants. Rules are authored in the .koi source and flagged live in the Problems panel.',
+      ),
+    );
+  }
+
+  const rules = element.invariants ?? [];
+  const title = `${element.name} — business rules`;
+  if (rules.length === 0) {
+    return renderRailEmpty(title, railHint('No invariants declared on this element.'));
+  }
+
+  const ul = document.createElement('ul');
+  ul.className = 'koi-inspector-list';
+  for (const rule of rules) {
+    const li = document.createElement('li');
+    li.className = 'koi-inspector-item';
+    li.textContent = rule;
+    ul.appendChild(li);
+  }
+  return renderRailEmpty(title, ul);
+}
+
+/**
+ * The inspector's "Change history" compartment (issue #150): the git commits that touched the selected
+ * element's source span, newest first, each rendered as `author · date` over the commit message. Returns
+ * `null` — so the caller appends nothing and the section stays hidden — when history is unavailable
+ * (`entries` is `null`, e.g. the browser host or a non-git workspace) or empty. The commit SHA rides on
+ * each row's `data-sha` so a future enhancement can open the commit/diff without re-deriving it.
+ */
+export function renderChangeHistory(entries: ChangeEntry[] | null): HTMLElement | null {
+  if (!entries || entries.length === 0) return null;
+
+  const section = document.createElement('section');
+  section.className = 'koi-inspector-section koi-inspector-history';
+
+  const h = document.createElement('h5');
+  h.className = 'koi-inspector-section-title';
+  h.textContent = 'Change history';
+  section.appendChild(h);
+
+  const ul = document.createElement('ul');
+  ul.className = 'koi-inspector-list';
+  for (const entry of entries) {
+    const li = document.createElement('li');
+    li.className = 'koi-inspector-item koi-inspector-history-item';
+    li.dataset.sha = entry.sha;
+
+    const meta = document.createElement('div');
+    meta.className = 'koi-inspector-history-meta muted';
+    meta.textContent = `${entry.author} · ${formatHistoryDate(entry.date)}`;
+
+    const message = document.createElement('div');
+    message.className = 'koi-inspector-history-message';
+    message.textContent = entry.message;
+
+    li.append(meta, message);
+    ul.appendChild(li);
+  }
+  section.appendChild(ul);
+  return section;
+}
+
+/**
+ * Format a commit's author date for a change-history row: the `YYYY-MM-DD` calendar day of an ISO-8601
+ * string (timezone-stable and locale-free, so snapshots/tests stay deterministic), or the raw value
+ * when it isn't ISO-shaped.
+ */
+function formatHistoryDate(date: string): string {
+  const m = /^(\d{4}-\d{2}-\d{2})/.exec(date);
+  return m ? m[1] : date;
 }
 
 /**

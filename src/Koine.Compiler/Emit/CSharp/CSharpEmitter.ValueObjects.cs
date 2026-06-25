@@ -44,6 +44,26 @@ public sealed partial class CSharpEmitter
         {
             var m = (Member)f.Syntax;
             var csType = typeMapper.Map(m.Type, out var comment);
+
+            // A nested value-object collection is backed by a mutable private List<T> so the EF Core
+            // infrastructure layer can materialize the owned children of a nested OwnsMany (issue #171);
+            // the public surface stays a read-only IReadOnlyList<T>.
+            if (IsValueObjectList(m.Type, index))
+            {
+                var elem = typeMapper.Map(m.Type.Element ?? ObjectType);
+                var field = BackingFieldName(f.Name);
+                sb.Append(Indent).Append("private readonly List<").Append(elem)
+                  .Append(m.Type.IsOptional ? ">? " : "> ").Append(field)
+                  .Append(m.Type.IsOptional ? ";\n" : " = new();\n");
+                WriteXmlDoc(sb, m.Doc, Indent);
+                WriteObsolete(sb, m.Deprecated, Indent);
+                sb.Append(Indent).Append("public ").Append(csType).Append(' ')
+                  .Append(CSharpNaming.ToPascalCase(f.Name)).Append(" => ").Append(field).Append(';');
+                AppendComment(sb, comment);
+                sb.Append('\n');
+                continue;
+            }
+
             WriteXmlDoc(sb, m.Doc, Indent);
             WriteObsolete(sb, m.Deprecated, Indent);
             sb.Append(Indent).Append("public ").Append(csType).Append(' ')

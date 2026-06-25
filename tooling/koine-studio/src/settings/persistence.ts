@@ -10,6 +10,8 @@
 
 import { loadSecret, saveSecret } from '@/ai/secrets';
 import type { ChatMessage } from '@/ai/ai';
+import { sanitizeGroups, sanitizeNotes, type DiagramGroup, type DiagramNote } from '@/diagrams/diagramContract';
+import { isEmitTarget } from '@/shared/emitTargets';
 
 // --- settings model ----------------------------------------------------------
 
@@ -21,11 +23,13 @@ export type AccentName = 'blue' | 'teal' | 'violet' | 'amber';
 /** MCP client a setup recipe targets in Settings → MCP. */
 export type McpClientId = 'claude-desktop' | 'lm-studio' | 'cursor' | 'vscode' | 'generic';
 
-/** A code-generation target the emitted-code ("Generated") preview can render. */
-export type PreviewTarget = 'csharp' | 'typescript' | 'python' | 'php';
-
-/** The supported preview targets, in display order. The single source of truth for the set. */
-export const PREVIEW_TARGETS: readonly PreviewTarget[] = ['csharp', 'typescript', 'python', 'php'];
+/**
+ * A code-generation target id the emitted-code ("Generated") preview can render. Kept as a plain
+ * `string` (not a closed union) so a backend-only target surfaces without a front-end type edit; the
+ * set is validated at runtime against the live {@link EMIT_TARGETS} (see `coercePreviewTarget`),
+ * which is seeded from the backend capability query at boot (issue #282).
+ */
+export type PreviewTarget = string;
 
 export interface Settings {
   theme: ThemeName;
@@ -39,6 +43,10 @@ export interface Settings {
   /** Soft-wrap long editor lines instead of scrolling horizontally. */
   wordWrap: boolean;
   formatOnSave: boolean;
+  /** Persist dirty buffers automatically after a short idle, instead of only on explicit save. */
+  autoSave: boolean;
+  /** Show the CodeMirror minimap (document overview rail) on the editor's right edge. */
+  enableMinimap: boolean;
   lspTrace: 'off' | 'messages' | 'verbose';
   /** Which AI backend the assistant uses. */
   aiProvider: 'anthropic' | 'openai';
@@ -54,6 +62,9 @@ export interface Settings {
    *  Off by default: many local servers (LM Studio / Ollama) buffer the whole reply instead of
    *  streaming when tools are present, so opting in trades live streaming for the agentic loop. */
   aiAgenticTools: boolean;
+  /** LLM ghost-text completions in the editor (#263). Off by default — predicting while you type spends
+   *  API tokens on every idle pause, so it stays opt-in and no-ops when no provider is configured. */
+  aiInlineCompletions: boolean;
   /** Whether the local MCP server (desktop sidecar) is enabled. Opt-in: no background server unless on. */
   mcpEnabled: boolean;
   /** Which client the Settings → MCP setup recipe is shown for. */
@@ -70,6 +81,8 @@ export const DEFAULT_SETTINGS: Settings = {
   lineHeight: 1.6,
   wordWrap: false,
   formatOnSave: true,
+  autoSave: false,
+  enableMinimap: false,
   lspTrace: 'off',
   aiProvider: 'anthropic',
   aiBaseUrl: 'https://api.openai.com/v1',
@@ -77,6 +90,7 @@ export const DEFAULT_SETTINGS: Settings = {
   aiModel: 'claude-opus-4-8',
   aiModelOpenai: '',
   aiAgenticTools: false,
+  aiInlineCompletions: false,
   mcpEnabled: false,
   mcpClient: 'lm-studio',
   previewTarget: 'csharp',
@@ -104,6 +118,19 @@ const DIAGRAM_ZOOM_MAX = 800;
 const CHAT_KEY_PREFIX = 'koine.studio.chat.';
 /** Max assistant messages kept per workspace; older turns are dropped so a long chat can't grow unbounded. */
 export const CHAT_HISTORY_CAP = 100;
+
+// Per-workspace settings overrides: a small Partial<Settings> blob keyed by a stable workspace hash.
+// Only the four scoped fields (previewTarget, formatOnSave, wordWrap, lspTrace) can be stored here;
+// all other settings are global and ignored in this store.
+const WORKSPACE_OVERRIDE_KEY_PREFIX = 'koine.studio.wsOverrides.';
+
+/** The settings fields that can be overridden per workspace. */
+export const WORKSPACE_SCOPED_KEYS: readonly (keyof Settings)[] = [
+  'previewTarget',
+  'formatOnSave',
+  'wordWrap',
+  'lspTrace',
+];
 
 /** The secret kept out of the plaintext blob and in the encrypted store; also its key name there. */
 const API_KEY_SECRET = 'aiApiKey';
@@ -183,9 +210,13 @@ function coerceMcpClient(v: unknown): McpClientId {
   return MCP_CLIENT_IDS.includes(v as McpClientId) ? (v as McpClientId) : DEFAULT_SETTINGS.mcpClient;
 }
 
-/** A supported preview target, else the default. */
+/**
+ * A supported preview target, else the default. Validated against the LIVE {@link EMIT_TARGETS}
+ * (seeded from the backend at boot, issue #282) — not the build-time snapshot — so a persisted
+ * target the backend still reports survives a reload, and one it no longer offers falls back to csharp.
+ */
 function coercePreviewTarget(v: unknown): PreviewTarget {
-  return PREVIEW_TARGETS.includes(v as PreviewTarget) ? (v as PreviewTarget) : DEFAULT_SETTINGS.previewTarget;
+  return isEmitTarget(v) ? (v as PreviewTarget) : DEFAULT_SETTINGS.previewTarget;
 }
 
 /**
@@ -207,6 +238,9 @@ export function loadSettings(): Settings {
       lineHeight: coerceLineHeight(parsed.lineHeight),
       wordWrap: typeof parsed.wordWrap === 'boolean' ? parsed.wordWrap : DEFAULT_SETTINGS.wordWrap,
       formatOnSave: typeof parsed.formatOnSave === 'boolean' ? parsed.formatOnSave : DEFAULT_SETTINGS.formatOnSave,
+      autoSave: typeof parsed.autoSave === 'boolean' ? parsed.autoSave : DEFAULT_SETTINGS.autoSave,
+      enableMinimap:
+        typeof parsed.enableMinimap === 'boolean' ? parsed.enableMinimap : DEFAULT_SETTINGS.enableMinimap,
       lspTrace: coerceTrace(parsed.lspTrace),
       aiProvider: parsed.aiProvider === 'openai' ? 'openai' : DEFAULT_SETTINGS.aiProvider,
       aiBaseUrl:
@@ -217,6 +251,10 @@ export function loadSettings(): Settings {
       aiModelOpenai: typeof parsed.aiModelOpenai === 'string' ? parsed.aiModelOpenai : DEFAULT_SETTINGS.aiModelOpenai,
       aiAgenticTools:
         typeof parsed.aiAgenticTools === 'boolean' ? parsed.aiAgenticTools : DEFAULT_SETTINGS.aiAgenticTools,
+      aiInlineCompletions:
+        typeof parsed.aiInlineCompletions === 'boolean'
+          ? parsed.aiInlineCompletions
+          : DEFAULT_SETTINGS.aiInlineCompletions,
       mcpEnabled: typeof parsed.mcpEnabled === 'boolean' ? parsed.mcpEnabled : DEFAULT_SETTINGS.mcpEnabled,
       mcpClient: coerceMcpClient(parsed.mcpClient),
       previewTarget: coercePreviewTarget(parsed.previewTarget),
@@ -505,6 +543,42 @@ export function clearDiagramPositions(key: string): void {
   }
 }
 
+// --- diagram canvas annotations (notes + groups, #255) -----------------------
+// Canvas-only annotations (free-text notes and node groupings) are a VIEW concern exactly like positions
+// above — they never round-trip into `.koi`. In browser/scratch mode they live in localStorage under a
+// sibling key (positions keep their own key, so the position storage stays backward-compatible); in folder
+// mode the committable koine.layout.json holds both (see layoutStore.ts). Every read is guarded and
+// malformed entries are dropped individually (shared sanitizers), so a hand-edited key can't break the canvas.
+const DIAGRAM_ANNOTATIONS_KEY_PREFIX = 'koine.studio.diagramAnnotations.';
+
+/** The canvas-only annotations for a diagram: free-text notes plus node groupings. */
+export interface DiagramAnnotations {
+  notes: DiagramNote[];
+  groups: DiagramGroup[];
+}
+
+/** The persisted annotations for a diagram key; empty notes/groups when absent or malformed. */
+export function loadDiagramAnnotations(key: string): DiagramAnnotations {
+  const raw = readRaw(DIAGRAM_ANNOTATIONS_KEY_PREFIX + key);
+  if (raw === null) return { notes: [], groups: [] };
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (parsed === null || typeof parsed !== 'object') return { notes: [], groups: [] };
+    const p = parsed as Record<string, unknown>;
+    return { notes: sanitizeNotes(p.notes), groups: sanitizeGroups(p.groups) };
+  } catch {
+    return { notes: [], groups: [] };
+  }
+}
+
+/** Persist a diagram's canvas annotations (best-effort). */
+export function saveDiagramAnnotations(key: string, annotations: DiagramAnnotations): void {
+  writeRaw(
+    DIAGRAM_ANNOTATIONS_KEY_PREFIX + key,
+    JSON.stringify({ notes: annotations.notes, groups: annotations.groups }),
+  );
+}
+
 // --- active bounded context (#146) -------------------------------------------
 // The active context scope (a context name, or the literal 'all') is persisted PER workspace — a
 // context like "Sales" only means anything within its own model — so each folder restores its own
@@ -561,4 +635,93 @@ export function clearChat(key: string): void {
   } catch {
     // storage unavailable — nothing to clear
   }
+}
+
+// --- workspace-scoped settings overrides (#task-1) ---------------------------
+// A small Partial<Settings> (only the four scoped fields) is persisted PER workspace under
+// WORKSPACE_OVERRIDE_KEY_PREFIX + workspaceKey. The workspace key is a stable hash of the sorted
+// root paths so workspace identity survives root reordering. effectiveSettings() merges the
+// workspace overrides on top of the user-level settings, so workspace wins for scoped fields.
+
+/**
+ * A compact, stable, synchronous string hash of a list of root paths.
+ * Roots are sorted first so the order the caller passes them does not matter.
+ * Uses djb2 to keep the implementation small and dependency-free.
+ */
+export function workspaceKeyOf(roots: string[]): string {
+  const joined = [...roots].sort().join('\0');
+  // djb2 hash — deterministic, non-crypto, collision-resistant enough for namespacing localStorage.
+  let h = 5381;
+  for (let i = 0; i < joined.length; i++) {
+    h = ((h << 5) + h + joined.charCodeAt(i)) >>> 0; // keep 32-bit unsigned
+  }
+  return h.toString(36);
+}
+
+/**
+ * Load the workspace-level override blob for the given key.
+ * Returns only the four recognized scoped fields, each run through its coercer.
+ * A missing key, non-object blob, or unparseable JSON returns {}.
+ */
+export function loadWorkspaceOverrides(key: string): Partial<Settings> {
+  const raw = readRaw(WORKSPACE_OVERRIDE_KEY_PREFIX + key);
+  if (raw === null) return {};
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+    const blob = parsed as Record<string, unknown>;
+    const out: Partial<Settings> = {};
+    if ('previewTarget' in blob) out.previewTarget = coercePreviewTarget(blob.previewTarget);
+    if ('formatOnSave' in blob)
+      out.formatOnSave =
+        typeof blob.formatOnSave === 'boolean' ? blob.formatOnSave : DEFAULT_SETTINGS.formatOnSave;
+    if ('wordWrap' in blob)
+      out.wordWrap = typeof blob.wordWrap === 'boolean' ? blob.wordWrap : DEFAULT_SETTINGS.wordWrap;
+    if ('lspTrace' in blob) out.lspTrace = coerceTrace(blob.lspTrace);
+    return out;
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * Set (or clear) a single scoped field in the workspace override blob.
+ * Passing `null` as the value REMOVES the field from the blob.
+ * Reads the current blob, applies the change, and writes it back via writeRaw.
+ */
+export function saveWorkspaceOverride<K extends keyof Settings>(
+  key: string,
+  field: K,
+  value: Settings[K] | null,
+): void {
+  const raw = readRaw(WORKSPACE_OVERRIDE_KEY_PREFIX + key);
+  let blob: Record<string, unknown> = {};
+  if (raw !== null) {
+    try {
+      const parsed = JSON.parse(raw) as unknown;
+      if (parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        blob = parsed as Record<string, unknown>;
+      }
+    } catch {
+      // corrupt blob — start fresh
+    }
+  }
+  if (value === null) {
+    delete blob[field as string];
+  } else {
+    blob[field as string] = value;
+  }
+  writeRaw(WORKSPACE_OVERRIDE_KEY_PREFIX + key, JSON.stringify(blob));
+}
+
+/**
+ * Return the effective settings for a workspace: user settings merged with any workspace-level
+ * overrides. When `workspaceKey` is null, or when no override blob exists for it, the result
+ * is the user settings object unchanged (identity semantics — no extra allocation).
+ */
+export function effectiveSettings(user: Settings, workspaceKey: string | null): Settings {
+  if (workspaceKey === null) return user;
+  const overrides = loadWorkspaceOverrides(workspaceKey);
+  if (Object.keys(overrides).length === 0) return user;
+  return { ...user, ...overrides };
 }

@@ -67,7 +67,7 @@ public sealed partial class RustEmitter : IEmitter
 
         var files = new List<EmittedFile>
         {
-            new("Cargo.toml", RustRuntime.CargoToml + "\n"),
+            new("Cargo.toml", RustRuntime.CargoToml(ModelUsesGuidFactories(model)) + "\n"),
             new(RustRuntime.FileName, RustRuntime.Source + "\n"),
             new("src/lib.rs", EmitLibRs(model)),
         };
@@ -105,6 +105,14 @@ public sealed partial class RustEmitter : IEmitter
         return new EmittedFile($"src/{ModuleNameFor(ctx.Name)}.rs", Assemble(body.ToString(), moduleDoc));
     }
 
+    /// <summary>
+    /// True when any entity in the model has a factory on a String-backed (Guid) identity — the case
+    /// that calls <c>&lt;Id&gt;::generate()</c> and so pulls in the <c>uuid</c> crate. A factory-free
+    /// model (or one whose factory ids are numeric) keeps the dependency-light manifest.
+    /// </summary>
+    private static bool ModelUsesGuidFactories(KoineModel model) =>
+        model.Contexts.SelectMany(c => c.AllEntities()).Any(MintsUuidIdentity);
+
     /// <summary>Dispatches a single declaration to its construct emitter.</summary>
     private void EmitType(RustEmitContext emit, StringBuilder body, TypeDecl type, string context)
     {
@@ -123,7 +131,7 @@ public sealed partial class RustEmitter : IEmitter
                 {
                     EmitType(emit, body, nested, context);
                 }
-                EmitAggregateExtras(emit, body, agg);
+                EmitAggregateExtras(emit, body, agg, context);
                 break;
             case EntityDecl entity:
                 body.Append('\n');
@@ -131,11 +139,19 @@ public sealed partial class RustEmitter : IEmitter
                 break;
             case EventDecl ev:
                 body.Append('\n');
-                EmitEvent(body, emit, ev.Name, ev.Doc, ev.Members);
+                EmitEvent(body, emit, context, ev.Name, ev.Doc, ev.Members);
                 break;
             case IntegrationEventDecl iev:
                 body.Append('\n');
-                EmitEvent(body, emit, iev.Name, iev.Doc, iev.Members);
+                EmitEvent(body, emit, context, iev.Name, iev.Doc, iev.Members);
+                break;
+            case ReadModelDecl rm:
+                body.Append('\n');
+                EmitReadModel(body, emit, rm, context);
+                break;
+            case QueryDecl q:
+                body.Append('\n');
+                EmitQuery(body, emit, q, context);
                 break;
         }
     }

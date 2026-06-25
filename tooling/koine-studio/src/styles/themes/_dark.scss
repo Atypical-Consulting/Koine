@@ -35,6 +35,7 @@
   --lang-typescript: #3178c6;
   --lang-python: #ffd43b;
   --lang-php: #777bb4;
+  --lang-rust: #dea584;
 
   /* scrollbars — thumb/track derived from theme tokens so light/dark adapt for free */
   --koi-scrollbar-size: 10px;
@@ -47,6 +48,7 @@
   --koi-paper-2: #161b22;
   --koi-surface: #1c2230;
   --koi-line: #2a3242;
+  --koi-diagram-edge: #5d6b8e; /* relationship connectors — clearly brighter than --koi-line so edges read assertively */
 
   /* text */
   --koi-fg: #d6dde8;
@@ -110,4 +112,12 @@
   --koi-hl-comment: #6a7484;
   --koi-hl-meta: #ff9bce;
   --koi-hl-punct: #9aa6b6;
+
+  /* semantic-token highlighting (LSP-driven, issue #329): distinct hues for the token types the
+     server resolves — value/type reuses --koi-hl-type; enum / enumMember / property / parameter get
+     their own colours so they read distinctly from each other and from the static grammar. */
+  --koi-hl-sem-enum: #ffd866;
+  --koi-hl-sem-enum-member: #fc9867;
+  --koi-hl-sem-property: #83e8c4;
+  --koi-hl-sem-parameter: #ff9d8a;
 }

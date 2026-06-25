@@ -562,6 +562,8 @@ public sealed class KoineModelBuilderVisitor : KoineParserBaseVisitor<object?>
         {
             Span = SpanOf(ctx),
             NameSpan = SpanOf(ctx.Identifier(0)),
+            IdentityNameSpan = SpanOf(ctx.Identifier(1)),
+            IdentityStrategySpan = ctx.identityStrategy() is { } strat ? SpanOf(strat) : SourceSpan.None,
             Doc = DocFor(ctx),
             LeadingTrivia = LeadingTriviaFor(ctx),
             TrailingTrivia = TrailingTriviaFor(ctx),

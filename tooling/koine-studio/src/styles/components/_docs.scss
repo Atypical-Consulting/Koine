@@ -42,6 +42,36 @@
   font-size: var(--koi-text-base-plus);
 }
 
+/* Idle state for the on-demand Compatibility (Check against baseline) tab, so it never reads as a
+   blank pane before a check is run. */
+.koi-check-idle {
+  max-width: 42rem;
+  padding: 0.5rem 0;
+}
+.koi-check-idle-title {
+  margin: 0 0 0.35rem;
+  font-size: var(--koi-text-lg, 1.05rem);
+  font-weight: 600;
+  color: var(--koi-fg);
+}
+.koi-check-idle-action {
+  margin-top: 0.85rem;
+}
+
+/* Right-rail Rules / Notes informational empty states (read-only until the per-element editors ship). */
+.koi-rview-empty {
+  padding: 0.75rem 0.1rem;
+}
+.koi-rview-empty-title {
+  margin: 0 0 0.35rem;
+  font-size: var(--koi-text-lg, 1.05rem);
+  font-weight: 600;
+  color: var(--koi-fg);
+}
+.koi-rview-empty .muted {
+  line-height: 1.5;
+}
+
 .koi-docs-item {
   padding: 0.5rem 0.6rem;
   border-radius: var(--koi-radius);

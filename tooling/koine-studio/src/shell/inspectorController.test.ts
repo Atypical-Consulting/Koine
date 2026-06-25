@@ -13,15 +13,20 @@ import {
   type InspectorControllerDeps,
   type InspectorControllerLsp,
 } from '@/shell/inspectorController';
+import { createAppStore } from '@/store/index';
+import * as maxgraphRenderer from '@/diagrams/diagrams-maxgraph';
+import type { ContextMapGraphHooks } from '@/diagrams/diagrams-maxgraph';
 import type {
   CheckResult,
   ContextMapResult,
+  DiagramNode,
   DocsResult,
   DocumentSymbol,
   EmitPreviewResult,
   GlossaryEntry,
   GlossaryModel,
   SetDocResult,
+  SourceSpan,
 } from '@/lsp/lsp';
 
 // --- DOM seed ----------------------------------------------------------------
@@ -48,21 +53,25 @@ const APP_HTML = `
           <button type="button" class="center-tab" id="center-tab-visual" role="tab" data-center="visual" aria-selected="true">Visual</button>
           <button type="button" class="center-tab" id="center-tab-technical" role="tab" data-center="technical" aria-selected="false">Code</button>
           <button type="button" class="center-tab" id="center-tab-docs" role="tab" data-center="docs" aria-selected="false">Documentation</button>
+          <button type="button" class="center-tab center-tab-ai" id="center-tab-assistant" role="tab" data-center="assistant" aria-selected="false">Assistant</button>
         </div>
         <div id="center-body">
-          <section id="center-visual" class="center-host" role="tabpanel"></section>
+          <section id="center-visual" class="center-host" role="tabpanel">
+            <div id="canvas-palette-host"></div>
+            <div id="diagram-host"></div>
+          </section>
           <section id="center-technical" class="center-host" role="tabpanel" hidden>
             <div id="tech-tabs" role="tablist">
               <button type="button" class="tech-tab" id="tech-tab-editor" role="tab" data-tech="editor" aria-selected="true">Editor</button>
               <button type="button" class="tech-tab" id="tech-tab-preview" role="tab" data-tech="preview" aria-selected="false">Generated</button>
               <button type="button" class="tech-tab" id="tech-tab-check" role="tab" data-tech="check" aria-selected="false">Compatibility</button>
-              <button type="button" class="tech-tab" id="tech-tab-assistant" role="tab" data-tech="assistant" aria-selected="false">Assistant</button>
+              <button type="button" class="tech-tab" id="tech-tab-scenarios" role="tab" data-tech="scenarios" aria-selected="false">Scenarios</button>
             </div>
             <div id="tech-body">
               <section id="editor-pane" class="tech-view"></section>
               <div id="view-preview" class="tech-view" role="tabpanel" hidden></div>
               <div id="view-check" class="tech-view doc-view" role="tabpanel" hidden></div>
-              <div id="view-assistant" class="tech-view" role="tabpanel" hidden></div>
+              <div id="view-scenarios" class="tech-view" role="tabpanel" hidden></div>
             </div>
           </section>
           <section id="center-docs" class="center-host" role="tabpanel" hidden>
@@ -77,6 +86,7 @@ const APP_HTML = `
               <div id="view-notes" class="tech-view doc-view" role="tabpanel" hidden></div>
             </div>
           </section>
+          <section id="view-assistant" class="center-host" role="tabpanel" hidden></section>
         </div>
         <footer id="diagnostics">
           <div class="koi-resizer koi-resizer-y" id="diag-resizer"></div>
@@ -197,6 +207,7 @@ function fakePlatform(over: Partial<Record<string, unknown>> = {}): InspectorCon
     listKoiFiles: vi.fn(async () => []),
     listEntries: vi.fn(async () => []),
     readTextFile: vi.fn(async () => ''),
+    gitLogForRange: vi.fn(async () => null),
     ...over,
   } as unknown as InspectorControllerDeps['platform'];
 }
@@ -211,6 +222,9 @@ function makeDeps(lsp: Lsp, over: Partial<InspectorControllerDeps> = {}): Inspec
     editor: fakeEditor(),
     output: fakeOutput(),
     platform: fakePlatform(),
+    // A fresh store per controller — the injection's payoff: tests no longer share (and leak through) the
+    // app-wide singleton, so the per-instance boot reset is exercised on isolated state.
+    store: createAppStore(),
     activeUri: () => 'file:///work/model.koi',
     folderRootToken: () => '',
     initialTarget: 'csharp',
@@ -223,6 +237,11 @@ function makeDeps(lsp: Lsp, over: Partial<InspectorControllerDeps> = {}): Inspec
     onSaveElementDescription: vi.fn(),
     onSaveGlossaryDescription: vi.fn(),
     onApplyStructuredEdit: vi.fn(),
+    onAddConstruct: vi.fn(),
+    onAddAnnotation: vi.fn(),
+    onAddAggregateMember: vi.fn(),
+    onExportDiagram: vi.fn(),
+    onCopyDiagramMermaid: vi.fn(),
     gotoSourceSpan: vi.fn(),
     ensureAssistant: vi.fn(() => makeAssistant()),
     initEdgeResizer: vi.fn(),
@@ -334,13 +353,13 @@ describe('createInspectorController — lazy view loading (load exactly once)', 
     expect(lsp.glossaryModel.mock.calls.length).toBe(afterFirst);
   });
 
-  test('the assistant tab nudges ensureAssistant().syncWorkspace + focusInput, every show', () => {
+  test('the Assistant center tab nudges ensureAssistant().syncWorkspace + focusInput, every show', () => {
     const assistant = makeAssistant();
     const ensureAssistant = vi.fn(() => assistant);
     const ctl = createInspectorController(makeDeps(makeLsp(), { ensureAssistant }));
     ctl.init();
 
-    ctl.selectTech('assistant');
+    ctl.selectCenter('assistant');
     expect(assistant.syncWorkspace).toHaveBeenCalledTimes(1);
     expect(assistant.focusInput).toHaveBeenCalledTimes(1);
   });
@@ -387,6 +406,21 @@ describe('createInspectorController — invalidation forces a refetch', () => {
     await vi.advanceTimersByTimeAsync(350);
     expect(lsp.glossaryModel.mock.calls.length).toBe(settled); // no further timer fired
   });
+
+  test('dispose() cancels the pending edit-debounce so the refresh never fires', async () => {
+    vi.useFakeTimers();
+    const lsp = makeLsp();
+    const ctl = createInspectorController(makeDeps(lsp));
+    ctl.init();
+    ctl.selectCenter('technical');
+    lsp.glossaryModel.mockClear();
+
+    ctl.onDocEdited(); // schedules the 350ms refresh debounce
+    ctl.dispose(); // must cancel it — otherwise the timer fires after the test's DOM is gone
+    await vi.advanceTimersByTimeAsync(350);
+    // The debounced refresh never ran: disposing cleared the timer (no post-teardown "document is not defined").
+    expect(lsp.glossaryModel).not.toHaveBeenCalled();
+  });
 });
 
 describe('createInspectorController — bottom strip lazy loading', () => {
@@ -413,7 +447,8 @@ describe('createInspectorController — bottom strip lazy loading', () => {
     expect(lsp.livingDocs.mock.calls.length).toBe(afterEvents);
   });
 
-  test('the Context Map tab lazy-loads the context map once and renders it', async () => {
+  test('the Context Map tab lazy-loads the context map once and renders it with a Graph | Table toggle (graph default)', async () => {
+    localStorage.removeItem('koine.studio.contextMapView'); // the default view is Graph regardless of prior runs
     const lsp = makeLsp();
     const ctl = createInspectorController(makeDeps(lsp));
     ctl.init();
@@ -422,8 +457,74 @@ describe('createInspectorController — bottom strip lazy loading', () => {
     await flush();
 
     expect(lsp.contextMap).toHaveBeenCalledTimes(1);
-    expect(el('panel-contextmap').hidden).toBe(false);
-    expect(el('panel-contextmap').innerHTML).toContain('koi-md');
+    const panel = el('panel-contextmap');
+    expect(panel.hidden).toBe(false);
+    // the interactive view: a Graph | Table toggle, with Graph the default selected view
+    const tabs = panel.querySelectorAll<HTMLButtonElement>('.ctxmap-tab');
+    expect(tabs).toHaveLength(2);
+    expect(panel.querySelector('[data-ctxmap-view="graph"]')?.getAttribute('aria-pressed')).toBe('true');
+    expect(panel.querySelector('[data-ctxmap-view="table"]')?.getAttribute('aria-pressed')).toBe('false');
+  });
+
+  test('toggling the Context Map to Table renders the dense table (and back to Graph) without refetching', async () => {
+    localStorage.removeItem('koine.studio.contextMapView');
+    const lsp = makeLsp();
+    const ctl = createInspectorController(makeDeps(lsp));
+    ctl.init();
+
+    ctl.selectBottomTab('contextmap');
+    await flush();
+    const panel = el('panel-contextmap');
+
+    // Switch to the Table view — synchronous, renders renderContextMapHtml's `koi-md` markup.
+    panel.querySelector<HTMLButtonElement>('[data-ctxmap-view="table"]')!.click();
+    await flush();
+    expect(panel.innerHTML).toContain('koi-md');
+    expect(panel.querySelector('[data-ctxmap-view="table"]')?.getAttribute('aria-pressed')).toBe('true');
+
+    // Back to Graph — the toggle never refetches the context map (one fetch total).
+    panel.querySelector<HTMLButtonElement>('[data-ctxmap-view="graph"]')!.click();
+    await flush();
+    expect(panel.querySelector('[data-ctxmap-view="graph"]')?.getAttribute('aria-pressed')).toBe('true');
+    expect(lsp.contextMap).toHaveBeenCalledTimes(1);
+  });
+
+  test('clicking a context node filters AND jumps to its .koi declaration when the node has a span (#290)', async () => {
+    localStorage.removeItem('koine.studio.contextMapView'); // Graph is the default view
+    const lsp = makeLsp();
+    const deps = makeDeps(lsp);
+    const ctl = createInspectorController(deps);
+    ctl.init();
+    await ctl.refreshContextList(); // populate the known-context list (Billing) from the glossary model
+    await flush();
+
+    // Capture the hooks the inspector wires into the context-map graph (so we exercise onContextClick
+    // directly, without driving the maxGraph engine). The real renderer is restored by afterEach.
+    let hooks: ContextMapGraphHooks | undefined;
+    vi.spyOn(maxgraphRenderer, 'renderContextMapGraph').mockImplementation(async (_stage, _graph, _isCurrent, h) => {
+      hooks = h;
+      return { dispose: () => {} };
+    });
+
+    ctl.selectBottomTab('contextmap');
+    await flush();
+    expect(hooks).toBeDefined();
+
+    const span: SourceSpan = { file: 'file:///billing.koi', line: 1, column: 9, endLine: 1, endColumn: 16, offset: 8, length: 7 };
+    const spanned: DiagramNode = {
+      id: 'Billing', label: 'Billing', kind: 'context', qualifiedName: 'Billing', sourceSpan: span, stereotype: null, members: [],
+    };
+
+    hooks!.onContextClick!(spanned);
+    // filters to the clicked context...
+    expect(deps.store.getState().activeContext).toBe('Billing');
+    // ...AND jumps to its declaration via the shared jump-to-source path.
+    expect(deps.gotoSourceSpan).toHaveBeenCalledWith(span);
+
+    // A span-less context node (a dangling endpoint / recovered parse) still filters but never navigates.
+    vi.mocked(deps.gotoSourceSpan).mockClear();
+    hooks!.onContextClick!({ ...spanned, sourceSpan: null });
+    expect(deps.gotoSourceSpan).not.toHaveBeenCalled();
   });
 
   test('the rail Context Map link leaves Documentation so the otherwise-hidden strip shows the map', async () => {
@@ -559,5 +660,27 @@ describe('createInspectorController — bounded-context scope', () => {
     ctl.invalidateDocViews();
     await ctl.getCachedDomainIndex();
     expect(lsp.contextMap.mock.calls.length).toBeGreaterThan(callsAfterBuild);
+  });
+});
+
+describe('createInspectorController — construct palette', () => {
+  test('clicking an enabled palette button calls onAddConstruct with its kind', () => {
+    const onAddConstruct = vi.fn();
+    const deps = makeDeps(makeLsp(), { onAddConstruct });
+    // Set a single active context BEFORE mounting so the palette's first render is already enabled
+    // (no async re-render to await — the initial useStore read sees 'Ordering').
+    deps.store.getState().setActiveContext('Ordering');
+    createInspectorController(deps);
+    const btn = el('canvas-palette-host').querySelector<HTMLButtonElement>('[data-kind="entity"]')!;
+    expect(btn.disabled).toBe(false);
+    btn.click();
+    expect(onAddConstruct).toHaveBeenCalledWith('entity');
+  });
+
+  test('palette construct buttons are disabled under "All contexts"', () => {
+    const deps = makeDeps(makeLsp()); // createAppStore() defaults to ALL_CONTEXTS
+    createInspectorController(deps);
+    const btn = el('canvas-palette-host').querySelector<HTMLButtonElement>('[data-kind="entity"]')!;
+    expect(btn.disabled).toBe(true);
   });
 });

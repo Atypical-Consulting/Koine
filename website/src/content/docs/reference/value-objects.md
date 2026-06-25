@@ -297,6 +297,14 @@ identified by an id and two entities with identical fields are still different t
 with identical fields *are the same value*. Use a value object for a measurement, a money amount, an
 address, a code — anything you'd happily replace wholesale rather than mutate.
 
+:::caution
+Because a value object has no identity, its fields must stay **data**: primitives, enums, `*Id` ids,
+other value objects, and `List`/`Set`/`Map`/`Range` of those. A field whose type is an entity or an
+aggregate is `ValueObjectReferencesEntity` (KOI1601) — reference it by its `*Id` instead. The same
+data-only rule governs [command/factory parameters and domain-event fields](/Koine/reference/commands-events-state/)
+(KOI1603 / KOI1604).
+:::
+
 Identity types themselves (`ProductId`, `OrderId`, …) are generated value objects too — small records
 wrapping a `Guid` (or a natural key). See [Entities & identity (§6)](/Koine/reference/entities-and-identity/) for the strategies.
 

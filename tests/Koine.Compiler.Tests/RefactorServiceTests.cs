@@ -1,4 +1,6 @@
 using Koine.Compiler.Ast;
+using Koine.Compiler.Diagnostics;
+using Koine.Compiler.Semantics;
 using Koine.Compiler.Services;
 
 namespace Koine.Compiler.Tests;
@@ -15,6 +17,13 @@ public class RefactorServiceTests
 
     private static IReadOnlyList<CodeActionEdit> RefactorsAt(string src, int sl, int sc, int el, int ec) =>
         Svc.RefactorsAt(new Dictionary<string, string> { [U] = src }, U, sl, sc, el, ec);
+
+    /// <summary>The "Extract value object" refactor at this selection (distinguished by Title from the
+    /// sibling "Extract entity" refactor, which shares the <c>refactor.extract</c> Kind).</summary>
+    private static CodeActionEdit ExtractValueObjectAt(string src, int sl, int sc, int el, int ec) =>
+        RefactorsAt(src, sl, sc, el, ec)
+            .Where(a => a.Kind == "refactor.extract" && a.Title.StartsWith("Extract value object", StringComparison.Ordinal))
+            .ShouldHaveSingleItem();
 
     /// <summary>Applies a refactor's edits to the original source (offset-based, last-edit-first).</summary>
     private static string Apply(string src, CodeActionEdit action)
@@ -42,9 +51,7 @@ public class RefactorServiceTests
     {
         // Line 1 (0-based): "  value Address { street: String }". "street" spans cols 18..24.
         var src = "context C {\n  value Address { street: String }\n}\n";
-        var actions = RefactorsAt(src, 1, 18, 1, 24);
-
-        var extract = actions.Where(a => a.Kind == "refactor.extract").ShouldHaveSingleItem();
+        var extract = ExtractValueObjectAt(src, 1, 18, 1, 24);
         extract.Edits.Count.ShouldBe(2);
 
         var applied = Apply(src, extract);
@@ -74,7 +81,7 @@ public class RefactorServiceTests
             "  city: String }\n" +
             "}\n";
         // Select "street" on line 1 (cols 18..24).
-        var extract = RefactorsAt(src, 1, 18, 1, 24).Where(a => a.Kind == "refactor.extract").ShouldHaveSingleItem();
+        var extract = ExtractValueObjectAt(src, 1, 18, 1, 24);
 
         var applied = Apply(src, extract);
         Parse(applied); // re-parses cleanly
@@ -101,9 +108,7 @@ public class RefactorServiceTests
             "  }\n" +
             "}\n";
         // Select from the start of "street" (line 2, col 4) through the end of "city" (line 3, col 16).
-        var actions = RefactorsAt(src, 2, 4, 3, 16);
-
-        var extract = actions.Where(a => a.Kind == "refactor.extract").ShouldHaveSingleItem();
+        var extract = ExtractValueObjectAt(src, 2, 4, 3, 16);
         var model = Parse(Apply(src, extract));
 
         var types = model.Contexts[0].Types;
@@ -152,8 +157,7 @@ public class RefactorServiceTests
             "  }\n" +
             "}\n";
         // Line 2 = "    note: String"; "note" begins at col 4.
-        var actions = RefactorsAt(src, 2, 4, 2, 8);
-        var extract = actions.Where(a => a.Kind == "refactor.extract").ShouldHaveSingleItem();
+        var extract = ExtractValueObjectAt(src, 2, 4, 2, 8);
 
         var model = Parse(Apply(src, extract));
         var types = model.Contexts[0].Types;
@@ -175,8 +179,7 @@ public class RefactorServiceTests
             "  }\n" +
             "}\n";
         // Line 4 (0-based) = "    street: String"; "street" begins at col 4.
-        var actions = RefactorsAt(src, 4, 4, 4, 10);
-        var extract = actions.Where(a => a.Kind == "refactor.extract").ShouldHaveSingleItem();
+        var extract = ExtractValueObjectAt(src, 4, 4, 4, 10);
 
         var applied = Apply(src, extract);
         var model = Parse(applied);
@@ -206,8 +209,7 @@ public class RefactorServiceTests
             "  }\n" +
             "}\n";
         // Select from the start of "street" (line 2, col 4) through the end of "city" (line 4, col 16).
-        var actions = RefactorsAt(src, 2, 4, 4, 16);
-        var extract = actions.Where(a => a.Kind == "refactor.extract").ShouldHaveSingleItem();
+        var extract = ExtractValueObjectAt(src, 2, 4, 4, 16);
 
         var applied = Apply(src, extract);
         var model = Parse(applied);
@@ -241,6 +243,36 @@ public class RefactorServiceTests
     }
 
     [Fact]
+    public void Extracting_an_entity_produces_a_parseable_entity_with_an_identity_and_rewires_the_origin()
+    {
+        // Line 1 (0-based): "  value Address { street: String }". "street" spans cols 18..24.
+        var src = "context C {\n  value Address { street: String }\n}\n";
+        var actions = RefactorsAt(src, 1, 18, 1, 24);
+
+        // The "Extract entity" action is distinguished from "Extract value object" by its Title.
+        var extract = actions
+            .Where(a => a.Kind == "refactor.extract" && a.Title.StartsWith("Extract entity", StringComparison.Ordinal))
+            .ShouldHaveSingleItem();
+        extract.Edits.Count.ShouldBe(2);
+
+        var applied = Apply(src, extract);
+        var model = Parse(applied); // re-parses cleanly
+
+        var types = model.Contexts[0].Types;
+        // A new entity (with a non-empty identity) now exists, carrying the moved field.
+        var extracted = types.Single(t => t.Name == "ExtractedEntity").ShouldBeOfType<EntityDecl>();
+        extracted.IdentityName.ShouldNotBeNullOrEmpty();
+        extracted.Members.ShouldContain(m => m.Name == "street");
+
+        // The original Address now references the extracted entity via the placeholder field.
+        var address = types.Single(t => t.Name == "Address").ShouldBeOfType<ValueObjectDecl>();
+        var field = address.Members.ShouldHaveSingleItem();
+        field.Name.ShouldBe("extracted");
+        field.Type.Name.ShouldBe("ExtractedEntity");
+        address.Members.ShouldNotContain(m => m.Name == "street");
+    }
+
+    [Fact]
     public void Extracting_when_a_type_named_ExtractedValue_already_exists_produces_a_unique_name()
     {
         var src =
@@ -251,8 +283,7 @@ public class RefactorServiceTests
             "  }\n" +
             "}\n";
         // Line 3 (0-based) = "    street: String"; "street" begins at col 4.
-        var actions = RefactorsAt(src, 3, 4, 3, 10);
-        var extract = actions.Where(a => a.Kind == "refactor.extract").ShouldHaveSingleItem();
+        var extract = ExtractValueObjectAt(src, 3, 4, 3, 10);
 
         var model = Parse(Apply(src, extract));
         var types = model.Contexts[0].Types;
@@ -264,5 +295,279 @@ public class RefactorServiceTests
 
         var address = types.Single(t => t.Name == "Address").ShouldBeOfType<ValueObjectDecl>();
         address.Members.ShouldContain(m => m.Type.Name == "ExtractedValue2");
+    }
+
+    /// <summary>The "Extract aggregate" refactor at this selection (distinguished by Title from the
+    /// sibling extract refactors, which share the <c>refactor.extract</c> Kind).</summary>
+    private static CodeActionEdit ExtractAggregateAt(string src, int sl, int sc, int el, int ec) =>
+        RefactorsAt(src, sl, sc, el, ec)
+            .Where(a => a.Kind == "refactor.extract" && a.Title.StartsWith("Extract aggregate", StringComparison.Ordinal))
+            .ShouldHaveSingleItem();
+
+    [Fact]
+    public void Extracting_an_aggregate_wraps_a_top_level_entity_as_the_root()
+    {
+        var src =
+            "context C {\n" +
+            "  entity Order identified by OrderId {\n" +
+            "    note: String\n" +
+            "  }\n" +
+            "}\n";
+        // Select the whole top-level entity: from the start of "entity" (line 1, col 2) through just
+        // past its closing brace (line 3, col 3).
+        var extract = ExtractAggregateAt(src, 1, 2, 3, 3);
+
+        var applied = Apply(src, extract);
+        var model = Parse(applied); // re-parses cleanly
+
+        var types = model.Contexts[0].Types;
+        // A new aggregate now wraps the entity, naming it as the root.
+        var aggregate = types.OfType<AggregateDecl>().ShouldHaveSingleItem();
+        aggregate.RootName.ShouldBe("Order");
+        aggregate.Name.ShouldNotBe("Order");
+        aggregate.Types.OfType<EntityDecl>().ShouldContain(e => e.Name == "Order");
+    }
+
+    [Fact]
+    public void No_aggregate_action_when_the_selection_is_only_on_member_fields()
+    {
+        var src =
+            "context C {\n" +
+            "  entity Order identified by OrderId {\n" +
+            "    note: String\n" +
+            "  }\n" +
+            "}\n";
+        // Select just the "note" field on line 2 (cols 4..8) — not the whole entity.
+        var actions = RefactorsAt(src, 2, 4, 2, 8);
+        actions.ShouldNotContain(a => a.Title.StartsWith("Extract aggregate", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void No_aggregate_action_when_the_root_candidate_is_already_nested_in_an_aggregate()
+    {
+        var src =
+            "context C {\n" +
+            "  aggregate Sales root Order {\n" +
+            "    entity Order identified by OrderId {\n" +
+            "      note: String\n" +
+            "    }\n" +
+            "  }\n" +
+            "}\n";
+        // Select the whole nested entity (line 2, col 4 .. line 4, col 6); it is NOT a top-level type.
+        var actions = RefactorsAt(src, 2, 4, 4, 6);
+        actions.ShouldNotContain(a => a.Title.StartsWith("Extract aggregate", StringComparison.Ordinal));
+    }
+
+    /// <summary>The "Inline value object" refactor at this selection (a plain <c>refactor</c> Kind, the
+    /// inverse of extract).</summary>
+    private static CodeActionEdit InlineValueObjectAt(string src, int sl, int sc, int el, int ec) =>
+        RefactorsAt(src, sl, sc, el, ec)
+            .Where(a => a.Kind == "refactor" && a.Title.StartsWith("Inline value object", StringComparison.Ordinal))
+            .ShouldHaveSingleItem();
+
+    [Fact]
+    public void Inlining_a_single_use_value_object_inlines_its_members_and_removes_the_declaration()
+    {
+        var src =
+            "context C {\n" +
+            "  value Address {\n" +
+            "    street: String\n" +
+            "    city: String\n" +
+            "  }\n" +
+            "  value Customer {\n" +
+            "    addr: Address\n" +
+            "  }\n" +
+            "}\n";
+        // Line 6 (0-based) = "    addr: Address"; the "Address" reference begins at col 10.
+        var inline = InlineValueObjectAt(src, 6, 10, 6, 17);
+
+        var applied = Apply(src, inline);
+        var model = Parse(applied); // re-parses cleanly
+
+        var types = model.Contexts[0].Types;
+        // The single-use Address declaration is gone.
+        types.ShouldNotContain(t => t.Name == "Address");
+
+        // Customer now carries Address's members inlined in place of the `addr: Address` field.
+        var customer = types.Single(t => t.Name == "Customer").ShouldBeOfType<ValueObjectDecl>();
+        customer.Members.ShouldContain(m => m.Name == "street");
+        customer.Members.ShouldContain(m => m.Name == "city");
+        customer.Members.ShouldNotContain(m => m.Name == "addr");
+    }
+
+    [Fact]
+    public void No_inline_action_when_the_value_object_is_referenced_more_than_once()
+    {
+        var src =
+            "context C {\n" +
+            "  value Address {\n" +
+            "    street: String\n" +
+            "  }\n" +
+            "  value Customer {\n" +
+            "    home: Address\n" +
+            "    work: Address\n" +
+            "  }\n" +
+            "}\n";
+        // Line 5 (0-based) = "    home: Address"; the "Address" reference begins at col 10.
+        var actions = RefactorsAt(src, 5, 10, 5, 17);
+        actions.ShouldNotContain(a => a.Kind == "refactor" && a.Title.StartsWith("Inline value object", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void No_inline_action_when_the_value_object_carries_invariants()
+    {
+        var src =
+            "context C {\n" +
+            "  value Money {\n" +
+            "    amount: Decimal\n" +
+            "    invariant amount > 0\n" +
+            "  }\n" +
+            "  value Price {\n" +
+            "    value: Money\n" +
+            "  }\n" +
+            "}\n";
+        // Line 6 (0-based) = "    value: Money"; the "Money" reference begins at col 11.
+        var actions = RefactorsAt(src, 6, 11, 6, 16);
+        actions.ShouldNotContain(a => a.Kind == "refactor" && a.Title.StartsWith("Inline value object", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void No_inline_action_when_the_selection_is_on_a_primitive_typed_field()
+    {
+        var src = "context C {\n  value Address { street: String }\n}\n";
+        // Select "street" (a primitive-typed field, not a VO reference) on line 1 (cols 18..24).
+        var actions = RefactorsAt(src, 1, 18, 1, 24);
+        actions.ShouldNotContain(a => a.Kind == "refactor" && a.Title.StartsWith("Inline value object", StringComparison.Ordinal));
+    }
+
+    /// <summary>The "Move to context 'Target'" refactor at this selection (a plain <c>refactor</c> Kind),
+    /// for the named target context.</summary>
+    private static CodeActionEdit MoveToContextAt(string src, string target, int sl, int sc, int el, int ec) =>
+        RefactorsAt(src, sl, sc, el, ec)
+            .Where(a => a.Kind == "refactor" && a.Title == $"Move to context '{target}'")
+            .ShouldHaveSingleItem();
+
+    private static (KoineModel Model, IReadOnlyList<Diagnostic> Diagnostics) ParseAndValidate(string src)
+    {
+        var (model, parseDiags) = new KoineCompiler().Parse(src);
+        model.ShouldNotBeNull();
+        var diags = parseDiags.Concat(new SemanticValidator().Validate(model)).ToList();
+        return (model, diags);
+    }
+
+    [Fact]
+    public void Moving_a_standalone_type_relocates_it_to_the_target_context_with_no_diagnostics()
+    {
+        var src =
+            "context A {\n" +
+            "  value Address {\n" +
+            "    street: String\n" +
+            "    city: String\n" +
+            "  }\n" +
+            "}\n" +
+            "context B {\n" +
+            "  value Tag { name: String }\n" +
+            "}\n";
+        // Line 1 (0-based) = "  value Address {"; place the cursor inside the Address declaration.
+        var move = MoveToContextAt(src, "B", 1, 8, 1, 8);
+
+        var applied = Apply(src, move);
+        var (model, diags) = ParseAndValidate(applied); // re-parses and validates cleanly
+        diags.ShouldBeEmpty();
+
+        var a = model.Contexts.Single(c => c.Name == "A").Types;
+        var b = model.Contexts.Single(c => c.Name == "B").Types;
+        // Address now lives in B and is gone from A.
+        a.ShouldNotContain(t => t.Name == "Address");
+        var moved = b.Single(t => t.Name == "Address").ShouldBeOfType<ValueObjectDecl>();
+        moved.Members.ShouldContain(m => m.Name == "street");
+        moved.Members.ShouldContain(m => m.Name == "city");
+        // B's pre-existing type is undisturbed.
+        b.ShouldContain(t => t.Name == "Tag");
+    }
+
+    [Fact]
+    public void Moving_a_type_still_referenced_by_a_sibling_surfaces_a_cross_context_diagnostic()
+    {
+        // Sibling `Customer` in A references `Address`; after the move, that reference becomes a
+        // cross-context one with no import, which the semantic validator must flag (not silent).
+        var src =
+            "context A {\n" +
+            "  value Address {\n" +
+            "    street: String\n" +
+            "  }\n" +
+            "  value Customer {\n" +
+            "    home: Address\n" +
+            "  }\n" +
+            "}\n" +
+            "context B {\n" +
+            "  value Tag { name: String }\n" +
+            "}\n";
+        // Line 1 (0-based) = "  value Address {"; place the cursor inside the Address declaration.
+        var move = MoveToContextAt(src, "B", 1, 8, 1, 8);
+
+        var applied = Apply(src, move);
+        var (model, diags) = ParseAndValidate(applied);
+
+        // Address really moved to B...
+        model.Contexts.Single(c => c.Name == "A").Types.ShouldNotContain(t => t.Name == "Address");
+        model.Contexts.Single(c => c.Name == "B").Types.ShouldContain(t => t.Name == "Address");
+        // ...and the now-dangling reference in A is surfaced, not silently broken.
+        diags.ShouldNotBeEmpty();
+    }
+
+    [Fact]
+    public void No_move_action_in_a_single_context_model()
+    {
+        var src =
+            "context A {\n" +
+            "  value Address {\n" +
+            "    street: String\n" +
+            "  }\n" +
+            "}\n";
+        // Cursor inside the Address declaration; there is no other context to move it to.
+        var actions = RefactorsAt(src, 1, 8, 1, 8);
+        actions.ShouldNotContain(a => a.Kind == "refactor" && a.Title.StartsWith("Move to context", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void No_move_action_when_the_selection_is_on_a_type_nested_in_an_aggregate()
+    {
+        var src =
+            "context A {\n" +
+            "  aggregate Sales root Order {\n" +
+            "    entity Order identified by OrderId {\n" +
+            "      note: String\n" +
+            "    }\n" +
+            "  }\n" +
+            "}\n" +
+            "context B {\n" +
+            "  value Tag { name: String }\n" +
+            "}\n";
+        // Cursor inside the nested Order entity (line 2, 0-based); it is NOT a top-level context type.
+        var actions = RefactorsAt(src, 2, 12, 2, 12);
+        actions.ShouldNotContain(a => a.Kind == "refactor" && a.Title.StartsWith("Move to context", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Moving_offers_one_action_per_other_context()
+    {
+        var src =
+            "context A {\n" +
+            "  value Address { street: String }\n" +
+            "}\n" +
+            "context B {\n" +
+            "  value Tag { name: String }\n" +
+            "}\n" +
+            "context C {\n" +
+            "  value Note { text: String }\n" +
+            "}\n";
+        // Cursor inside the Address declaration on line 1 (0-based).
+        var moves = RefactorsAt(src, 1, 8, 1, 8)
+            .Where(a => a.Kind == "refactor" && a.Title.StartsWith("Move to context", StringComparison.Ordinal))
+            .ToList();
+        moves.Count.ShouldBe(2);
+        moves.ShouldContain(a => a.Title == "Move to context 'B'");
+        moves.ShouldContain(a => a.Title == "Move to context 'C'");
     }
 }

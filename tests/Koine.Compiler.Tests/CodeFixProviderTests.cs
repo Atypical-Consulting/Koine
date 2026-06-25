@@ -100,4 +100,180 @@ public class CodeFixProviderTests
 
         applied.ShouldBe("context C {\n  value V { a: String, b: String }\n}\n");
     }
+
+    [Fact]
+    public void Add_optional_marker_makes_the_field_optional_and_clears_the_KOI0401()
+    {
+        // 'b' is a non-optional Int whose initializer reads the optional sibling 'a' (Int?) with no
+        // '??' fallback — the validator raises KOI0401 at 'b's member span.
+        var src = "context C {\n  value V {\n    a: Int?\n    b: Int = a\n  }\n}\n";
+        var (model, diags) = Validate(src);
+
+        var optional = diags.Single(d => d.Code == DiagnosticCodes.OptionalAssignedToNonOptional);
+
+        // Blank the message to prove the fix derives only from the structured span + model.
+        var fix = Service.FixesForDiagnostic(src, model, optional with { Message = string.Empty })
+            .ShouldHaveSingleItem();
+        fix.Title.ShouldBe("Make 'b' optional");
+        fix.Kind.ShouldBe("quickfix");
+
+        var edit = fix.Edits.ShouldHaveSingleItem();
+        edit.NewText.ShouldBe("?");
+        var applied = src[..edit.Range.Offset] + edit.NewText + src[(edit.Range.Offset + edit.Range.Length)..];
+        applied.ShouldBe("context C {\n  value V {\n    a: Int?\n    b: Int? = a\n  }\n}\n");
+
+        // Re-validate: the KOI0401 is gone after applying the fix.
+        var (_, afterDiags) = Validate(applied);
+        afterDiags.ShouldNotContain(d => d.Code == DiagnosticCodes.OptionalAssignedToNonOptional);
+    }
+
+    [Fact]
+    public void Rename_duplicate_member_renames_to_a_unique_name_and_clears_the_KOI0103()
+    {
+        // Two fields named 'x' on one value object: the second is a duplicate member (KOI0103).
+        var src = "context C {\n  value V {\n    x: Int\n    x: String\n  }\n}\n";
+        var (model, diags) = Validate(src);
+
+        var dup = diags.Single(d => d.Code == DiagnosticCodes.DuplicateMember);
+
+        var fix = Service.FixesForDiagnostic(src, model, dup with { Message = string.Empty })
+            .ShouldHaveSingleItem();
+        fix.Title.ShouldBe("Rename to 'x2'");
+        fix.Kind.ShouldBe("quickfix");
+
+        var edit = fix.Edits.ShouldHaveSingleItem();
+        edit.NewText.ShouldBe("x2");
+        var applied = src[..edit.Range.Offset] + edit.NewText + src[(edit.Range.Offset + edit.Range.Length)..];
+        applied.ShouldBe("context C {\n  value V {\n    x: Int\n    x2: String\n  }\n}\n");
+
+        var (_, afterDiags) = Validate(applied);
+        afterDiags.ShouldNotContain(d => d.Code == DiagnosticCodes.DuplicateMember);
+    }
+
+    [Fact]
+    public void Rename_duplicate_type_renames_to_a_unique_name_and_clears_the_KOI0102()
+    {
+        // Two value objects named 'V': the second is a duplicate type (KOI0102).
+        var src = "context C {\n  value V { a: Int }\n  value V { b: Int }\n}\n";
+        var (model, diags) = Validate(src);
+
+        var dup = diags.Single(d => d.Code == DiagnosticCodes.DuplicateType);
+
+        var fix = Service.FixesForDiagnostic(src, model, dup with { Message = string.Empty })
+            .ShouldHaveSingleItem();
+        fix.Title.ShouldBe("Rename to 'V2'");
+
+        var edit = fix.Edits.ShouldHaveSingleItem();
+        edit.NewText.ShouldBe("V2");
+        var applied = src[..edit.Range.Offset] + edit.NewText + src[(edit.Range.Offset + edit.Range.Length)..];
+        applied.ShouldBe("context C {\n  value V { a: Int }\n  value V2 { b: Int }\n}\n");
+
+        var (_, afterDiags) = Validate(applied);
+        afterDiags.ShouldNotContain(d => d.Code == DiagnosticCodes.DuplicateType);
+    }
+
+    [Fact]
+    public void Rename_duplicate_enum_member_renames_the_last_occurrence_and_clears_the_KOI0104()
+    {
+        // An enum declaring 'Red' twice: KOI0104, whose span is the WHOLE enum (coarse). The fix
+        // must rename the LAST occurrence of the duplicate name inside that span.
+        var src = "context C {\n  enum Color { Red, Green, Red }\n}\n";
+        var (model, diags) = Validate(src);
+
+        var dup = diags.Single(d => d.Code == DiagnosticCodes.DuplicateEnumMember);
+
+        var fix = Service.FixesForDiagnostic(src, model, dup with { Message = string.Empty })
+            .ShouldHaveSingleItem();
+        fix.Title.ShouldBe("Rename to 'Red2'");
+
+        var edit = fix.Edits.ShouldHaveSingleItem();
+        edit.NewText.ShouldBe("Red2");
+        var applied = src[..edit.Range.Offset] + edit.NewText + src[(edit.Range.Offset + edit.Range.Length)..];
+        applied.ShouldBe("context C {\n  enum Color { Red, Green, Red2 }\n}\n");
+
+        var (_, afterDiags) = Validate(applied);
+        afterDiags.ShouldNotContain(d => d.Code == DiagnosticCodes.DuplicateEnumMember);
+    }
+
+    [Fact]
+    public void Rename_duplicate_enum_member_targets_the_declaration_not_a_string_literal_in_associated_data()
+    {
+        // 'Alpha' is declared twice (KOI0104). A LATER member's associated-data STRING also contains
+        // "Alpha"; because the KOI0104 span is the WHOLE enum, a naive last-occurrence text scan would
+        // rename that string. The fix must target the duplicate MEMBER declaration, not the literal.
+        var src =
+            "context C {\n" +
+            "  enum Sym(label: String) {\n" +
+            "    Alpha(\"x\")\n" +
+            "    Alpha(\"y\")\n" +
+            "    Beta(\"Alpha\")\n" +
+            "  }\n" +
+            "}\n";
+        var (model, diags) = Validate(src);
+        var dup = diags.Single(d => d.Code == DiagnosticCodes.DuplicateEnumMember);
+
+        var fix = Service.FixesForDiagnostic(src, model, dup with { Message = string.Empty })
+            .ShouldHaveSingleItem();
+        var edit = fix.Edits.ShouldHaveSingleItem();
+        var applied = src[..edit.Range.Offset] + edit.NewText + src[(edit.Range.Offset + edit.Range.Length)..];
+
+        // The unrelated member's associated-data string is untouched...
+        applied.ShouldContain("Beta(\"Alpha\")");
+        // ...and the duplicate member is actually resolved.
+        var (_, afterDiags) = Validate(applied);
+        afterDiags.ShouldNotContain(d => d.Code == DiagnosticCodes.DuplicateEnumMember);
+    }
+
+    [Fact]
+    public void Rename_duplicate_type_targets_the_name_not_a_string_in_a_leading_annotation()
+    {
+        // The duplicate type carries a @deprecated("Money") annotation whose STRING contains the type
+        // name. The diagnostic span starts at the '@', so a naive first-occurrence text scan would
+        // rewrite the annotation string. The fix must target the type NAME.
+        var src =
+            "context C {\n" +
+            "  value Money { a: Int }\n" +
+            "  @deprecated(\"Money\") value Money { b: Int }\n" +
+            "}\n";
+        var (model, diags) = Validate(src);
+        var dup = diags.Single(d => d.Code == DiagnosticCodes.DuplicateType);
+
+        var fix = Service.FixesForDiagnostic(src, model, dup with { Message = string.Empty })
+            .ShouldHaveSingleItem();
+        var edit = fix.Edits.ShouldHaveSingleItem();
+        var applied = src[..edit.Range.Offset] + edit.NewText + src[(edit.Range.Offset + edit.Range.Length)..];
+
+        // The annotation's string argument is untouched...
+        applied.ShouldContain("@deprecated(\"Money\")");
+        // ...and the duplicate type is actually resolved.
+        var (_, afterDiags) = Validate(applied);
+        afterDiags.ShouldNotContain(d => d.Code == DiagnosticCodes.DuplicateType);
+    }
+
+    [Fact]
+    public void Rename_duplicate_offers_a_fix_for_a_service_name_colliding_with_a_type()
+    {
+        // A service whose name collides with a value object raises KOI0102 at the service's span.
+        var src =
+            "context C {\n" +
+            "  value Foo { a: Int }\n" +
+            "  service Foo {\n" +
+            "    operation noop(): Int = 0\n" +
+            "  }\n" +
+            "}\n";
+        var (model, diags) = Validate(src);
+        var dup = diags.Single(d => d.Code == DiagnosticCodes.DuplicateType);
+
+        var fix = Service.FixesForDiagnostic(src, model, dup with { Message = string.Empty })
+            .ShouldHaveSingleItem();
+        fix.Title.ShouldBe("Rename to 'Foo2'");
+
+        var edit = fix.Edits.ShouldHaveSingleItem();
+        edit.NewText.ShouldBe("Foo2");
+        var applied = src[..edit.Range.Offset] + edit.NewText + src[(edit.Range.Offset + edit.Range.Length)..];
+        applied.ShouldContain("service Foo2");
+
+        var (_, afterDiags) = Validate(applied);
+        afterDiags.ShouldNotContain(d => d.Code == DiagnosticCodes.DuplicateType);
+    }
 }

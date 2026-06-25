@@ -111,6 +111,7 @@ class FakePlatform implements Platform {
   readonly kind = 'browser' as const;
   readonly canOpenFolders = true;
   readonly canSaveProjects = true;
+  persistsWorkspace = true;
   readonly transport = new FakeLspTransport();
 
   /** relPath (forward-slashed) -> UTF-8 contents. Tokens are `${ROOT}/${relPath}`. */
@@ -184,6 +185,9 @@ class FakePlatform implements Platform {
     if (!this.files.has(rel)) return Promise.reject(new Error(`no such file: ${path}`));
     return Promise.resolve(this.files.get(rel)!);
   }
+  gitLogForRange(): Promise<null> {
+    return Promise.resolve(null);
+  }
   writeTextFile(path: string, contents: string): Promise<void> {
     this.files.set(this.relOf(path), contents);
     return Promise.resolve();
@@ -250,7 +254,6 @@ const APP_HTML = `
           <button type="button" id="palette-hint" class="palette-hint">K</button>
           <button type="button" id="btn-theme" class="icon-btn">theme</button>
           <button type="button" id="btn-prefs" class="icon-btn">prefs</button>
-          <button type="button" id="btn-about" class="icon-btn">about</button>
           <div id="status" data-kind="connecting" role="status" aria-live="polite">connecting…</div>
           <button type="button" id="unsaved-indicator" class="unsaved-indicator" hidden></button>
         </div>
@@ -290,21 +293,28 @@ const APP_HTML = `
             <button type="button" class="center-tab" id="center-tab-visual" role="tab" data-center="visual" aria-selected="true">Visual</button>
             <button type="button" class="center-tab" id="center-tab-technical" role="tab" data-center="technical" aria-selected="false">Code</button>
             <button type="button" class="center-tab" id="center-tab-docs" role="tab" data-center="docs" aria-selected="false">Documentation</button>
+            <button type="button" class="center-tab center-tab-ai" id="center-tab-assistant" role="tab" data-center="assistant" aria-selected="false">Assistant</button>
           </div>
           <div id="center-body">
-            <section id="center-visual" class="center-host" role="tabpanel"></section>
+            <section id="center-visual" class="center-host" role="tabpanel">
+              <div id="canvas-palette-host"></div>
+              <div id="diagram-host"></div>
+            </section>
             <section id="center-technical" class="center-host" role="tabpanel" hidden>
               <div id="tech-tabs" role="tablist">
                 <button type="button" class="tech-tab" id="tech-tab-editor" role="tab" data-tech="editor" aria-selected="true">Editor</button>
                 <button type="button" class="tech-tab" id="tech-tab-preview" role="tab" data-tech="preview" aria-selected="false">Generated</button>
                 <button type="button" class="tech-tab" id="tech-tab-check" role="tab" data-tech="check" aria-selected="false">Compatibility</button>
-                <button type="button" class="tech-tab" id="tech-tab-assistant" role="tab" data-tech="assistant" aria-selected="false">Assistant</button>
+                <button type="button" class="tech-tab" id="tech-tab-scenarios" role="tab" data-tech="scenarios" aria-selected="false">Scenarios</button>
               </div>
               <div id="tech-body">
-                <section id="editor-pane" class="tech-view"></section>
+                <section id="editor-pane" class="tech-view">
+                  <div class="koi-resizer" id="group-resizer" aria-hidden="true"></div>
+                  <section id="editor-pane-b" aria-label="Editor (second group)"></section>
+                </section>
                 <div id="view-preview" class="tech-view" role="tabpanel" hidden></div>
                 <div id="view-check" class="tech-view doc-view" role="tabpanel" hidden></div>
-                <div id="view-assistant" class="tech-view" role="tabpanel" hidden></div>
+                <div id="view-scenarios" class="tech-view" role="tabpanel" hidden></div>
               </div>
             </section>
             <section id="center-docs" class="center-host" role="tabpanel" hidden>
@@ -319,6 +329,7 @@ const APP_HTML = `
                 <div id="view-notes" class="tech-view doc-view" role="tabpanel" hidden></div>
               </div>
             </section>
+            <section id="view-assistant" class="center-host" role="tabpanel" hidden></section>
           </div>
           <footer id="diagnostics">
             <div class="koi-resizer koi-resizer-y" id="diag-resizer"></div>
@@ -360,6 +371,7 @@ const APP_HTML = `
         <span class="sb-item" id="sb-connection">Connecting…</span>
         <span class="sb-item" id="sb-version"></span>
       </footer>
+      <nav id="mobile-zone-bar-host" aria-label="Studio zone switcher"></nav>
     </div>`;
 
 /** Seed document.body with the full app markup (mirrors index.html) so init()'s el() lookups resolve. */
@@ -406,7 +418,10 @@ async function boot(opts: { dom?: boolean; platform?: FakePlatform } = {}): Prom
     return realAdd(type as never, listener as never, options as never);
   });
   try {
-    init();
+    // init() returns a teardown that disposes the controller's pending debounce timers. Capture it so
+    // afterEach can release them — otherwise boot's onDocEdited debounce (a real 350ms timer) fires
+    // after this file's happy-dom env is gone, throwing "document is not defined" as an unhandled error.
+    disposeIde = init();
   } finally {
     spy.mockRestore();
   }
@@ -430,10 +445,51 @@ function editorDoc(): string {
 
 /** The live EditorView init() created in #editor-pane (reached from its DOM, no private handle). */
 function editorView(): EditorView {
-  const dom = document.querySelector<HTMLElement>('#editor-pane .cm-editor')!;
+  // The group-B editor is nested INSIDE #editor-pane (#editor-pane-b is its child), so scope group A's
+  // lookup to the .cm-editor that is NOT inside #editor-pane-b.
+  const dom = Array.from(document.querySelectorAll<HTMLElement>('#editor-pane .cm-editor')).find(
+    (cm) => !document.getElementById('editor-pane-b')!.contains(cm),
+  );
+  if (!dom) throw new Error('no EditorView mounted in #editor-pane');
   const view = EditorView.findFromDOM(dom);
   if (!view) throw new Error('no EditorView mounted in #editor-pane');
   return view;
+}
+
+/** Group A's doc text (the primary editor's, scoped past the nested group-B pane). */
+function groupADoc(): string {
+  return editorView().state.doc.toString();
+}
+
+/** Group B's doc text, or null when the split is closed (no editor mounted in #editor-pane-b). */
+function groupBDoc(): string | null {
+  const dom = document.querySelector<HTMLElement>('#editor-pane-b .cm-editor');
+  if (!dom) return null;
+  return EditorView.findFromDOM(dom)?.state.doc.toString() ?? null;
+}
+
+/** The live group-B EditorView, reached from its DOM. Throws when the split is closed. */
+function groupBView(): EditorView {
+  const dom = document.querySelector<HTMLElement>('#editor-pane-b .cm-editor');
+  const view = dom ? EditorView.findFromDOM(dom) : null;
+  if (!view) throw new Error('no EditorView mounted in #editor-pane-b');
+  return view;
+}
+
+/** Simulate a user edit IN GROUP B — the same docChanged → onChange path a keystroke drives, but on B. */
+function typeIntoGroupB(text: string): void {
+  const view = groupBView();
+  view.dispatch({ changes: { from: view.state.doc.length, insert: text } });
+}
+
+/** Open the command palette and click the (first) command row whose title matches `title` exactly. */
+function runPaletteCommand(title: string): void {
+  const hint = document.querySelector<HTMLElement>('.palette-hint');
+  hint!.click(); // ide.ts wires the toolbar hint to palette.toggle()
+  const rows = Array.from(document.querySelectorAll<HTMLElement>('.koi-palette-item'));
+  const row = rows.find((r) => r.querySelector('.koi-palette-item-title')?.textContent === title);
+  if (!row) throw new Error(`no palette command titled "${title}" (have: ${rows.length} rows)`);
+  row.click(); // click runs the command and closes the palette
 }
 
 /**
@@ -459,6 +515,10 @@ function setWorkspaceShareHash(files: { relPath: string; text: string }[], activ
   window.location.hash = url.slice(url.indexOf('#'));
 }
 
+// The teardown returned by the most recent init() (boot() captures it). afterEach calls it to dispose
+// the controller's pending debounce timers before this file's happy-dom environment is torn down.
+let disposeIde: (() => void) | undefined;
+
 beforeEach(() => {
   document.body.innerHTML = '';
   fakePlatform.current = null as unknown as Platform;
@@ -471,6 +531,10 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  // Dispose the booted IDE first so its pending debounce timers are cleared while the DOM still exists;
+  // otherwise a leaked 350ms refresh fires post-teardown and throws "document is not defined".
+  disposeIde?.();
+  disposeIde = undefined;
   vi.useRealTimers();
   vi.restoreAllMocks();
   window.location.hash = '';
@@ -504,6 +568,23 @@ describe('ide init() — default-workspace boot', () => {
     // the seed. CodeMirror strips trailing blank lines in textContent, so compare on a stable token.
     expect(editorDoc()).toContain('context Billing');
     expect(editorDoc()).toContain('value Money');
+  });
+
+  test('on a non-persistent (memory-only) host, the editor still opens AND a memory-only banner is shown', async () => {
+    const platform = installPlatform(); // installs it as the active host
+    platform.persistsWorkspace = false; // simulate a no-OPFS browser (Safari / Firefox Private)
+    await boot({ platform });
+    // The workspace still opens (no dead-end): the editor shows the seed.
+    expect(editorDoc()).toContain('context Billing');
+    // …and the user is warned that work won't survive a reload.
+    const banner = document.getElementById('koi-memory-banner');
+    expect(banner).not.toBeNull();
+    expect(banner!.textContent).toMatch(/can.t save to disk/i);
+  });
+
+  test('a persistent host shows NO memory-only banner', async () => {
+    await boot(); // default FakePlatform persists
+    expect(document.getElementById('koi-memory-banner')).toBeNull();
   });
 });
 
@@ -557,6 +638,139 @@ describe('ide init() — #-hash multi-file shared workspace', () => {
     expect(platform.files.has('model.koi')).toBe(false);
     // The #model= fragment is cleared after import so a reload returns home (clearModelHash).
     expect(window.location.hash).toBe('');
+  });
+});
+
+describe('ide init() — editor split routes file-open to the focused group (#265)', () => {
+  // The headline use case: split the editor, then open a DIFFERENT file in group B. The open must land
+  // in B and leave group A's file AND the workspace active uri untouched (group A is primary; B is a
+  // secondary view). This exercises the focus-routing branch ide.tsx wires into the user-initiated
+  // open affordances (the Go-to-File palette here) on top of the editorSession openFocusedGroup seam.
+  const FILES = [
+    { relPath: 'orders.koi', text: 'context Orders {\n  value Sku { raw: String }\n}\n' },
+    { relPath: 'billing.koi', text: 'context Billing {\n  value Money { amount: Decimal }\n}\n' },
+  ];
+
+  test('split then Go-to-File a different file shows it in group B; group A + active uri stay put', async () => {
+    // Layout state persists in localStorage; clear it so this test starts from a fresh (unsplit) shell
+    // and doesn't bleed splitOpen into later boots.
+    localStorage.clear();
+    try {
+      setWorkspaceShareHash(FILES, 'orders.koi');
+      await boot();
+
+      // Boot lands on orders.koi in the single (group-A) editor; no split yet.
+      expect(groupADoc()).toContain('context Orders');
+      expect(groupBDoc()).toBeNull();
+
+      // Split the editor. The fresh split focuses the NEW group B (so the next open lands there) and
+      // seeds B with group A's current file.
+      runPaletteCommand('Split editor');
+      expect(groupBDoc()).toContain('context Orders'); // B mirrors A on the initial split
+
+      // With B focused, Go-to-File billing.koi → it loads into group B…
+      runPaletteCommand('billing.koi');
+      expect(groupBDoc()).toContain('context Billing');
+      // …while group A still shows orders.koi (the secondary view never touched the primary)…
+      expect(groupADoc()).toContain('context Orders');
+      expect(groupADoc()).not.toContain('context Billing');
+      // …and the workspace active uri is unchanged: the status-bar context / tree still follow orders.
+      // (A read-through proxy: the group-A editor doc is the active buffer's text, asserted above.)
+    } finally {
+      localStorage.clear();
+    }
+  });
+
+  test('after the split, clicking the group-A pane returns focus so the next open lands in A', async () => {
+    localStorage.clear();
+    try {
+      setWorkspaceShareHash(FILES, 'orders.koi');
+      await boot();
+      runPaletteCommand('Split editor'); // focuses B
+
+      // A pointerdown on the group-A pane retargets routing to A (the focus-switch listener ide.tsx
+      // mounts on #editor-pane). #editor-pane-b is nested inside #editor-pane, so dispatch on the
+      // group-A editor surface itself, which is not inside #editor-pane-b.
+      editorView().dom.dispatchEvent(
+        new PointerEvent('pointerdown', { bubbles: true, cancelable: true, pointerId: 1 }),
+      );
+
+      // Now a Go-to-File lands in group A (the primary), changing the active file, and B is untouched.
+      runPaletteCommand('billing.koi');
+      expect(groupADoc()).toContain('context Billing');
+      expect(groupBDoc()).toContain('context Orders'); // B still shows what the split seeded
+    } finally {
+      localStorage.clear();
+    }
+  });
+
+  test('typing in group B (showing a DIFFERENT file) edits B’s buffer, NOT group A’s — #265 data-loss guard', async () => {
+    localStorage.clear();
+    try {
+      setWorkspaceShareHash(FILES, 'orders.koi');
+      const { platform } = await boot();
+
+      // Split, then open billing.koi into the focused group B (group A stays on orders.koi).
+      runPaletteCommand('Split editor');
+      runPaletteCommand('billing.koi');
+      expect(groupBDoc()).toContain('context Billing');
+      expect(groupADoc()).toContain('context Orders');
+
+      // Type a unique marker into group B. The OLD bug routed this through syncActiveBuffer → it wrote
+      // B's text into group A's (active) buffer + marked A dirty + autosaved A → orders.koi got billing's
+      // content. With the fix, the edit syncs into B's OWN buffer.
+      typeIntoGroupB('\n// EDIT_IN_B_MARKER\n');
+
+      // Group A's editor doc is untouched — it never received B's keystrokes.
+      expect(groupADoc()).not.toContain('EDIT_IN_B_MARKER');
+      expect(groupADoc()).toContain('context Orders');
+
+      // Persist all open buffers to disk (Save to disk maps each buffer's text by relPath); this is the
+      // observable proof the right BUFFER was edited. orders.koi (group A) must NOT carry B's marker;
+      // billing.koi (group B) must.
+      (document.getElementById('btn-save-project') as HTMLButtonElement).click();
+      await settleBoot();
+      const input = document.querySelector('.koi-prompt-input') as HTMLInputElement;
+      input.value = 'split-save';
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      (document.querySelector('.koi-confirm-btn-primary') as HTMLButtonElement).click();
+      await settleBoot();
+
+      const saveSpy = platform.saveProjectToRoot;
+      expect(saveSpy).toHaveBeenCalledTimes(1);
+      const [, files] = saveSpy.mock.calls[0] as [string, { relPath: string; contents: string }[]];
+      const orders = files.find((f) => f.relPath === 'orders.koi')!;
+      const billing = files.find((f) => f.relPath === 'billing.koi')!;
+      // The data-loss assertion: group A's file is uncorrupted, group B's file holds B's edit.
+      expect(orders.contents).not.toContain('EDIT_IN_B_MARKER');
+      expect(orders.contents).toContain('context Orders');
+      expect(billing.contents).toContain('EDIT_IN_B_MARKER');
+    } finally {
+      localStorage.clear();
+    }
+  });
+
+  test('routing a file into group B persists B’s uri so reload restores the right file — #265', async () => {
+    localStorage.clear();
+    try {
+      setWorkspaceShareHash(FILES, 'orders.koi');
+      await boot();
+
+      runPaletteCommand('Split editor'); // splitOpen + B seeded with A's orders.koi
+      runPaletteCommand('billing.koi'); // re-point B at billing.koi (the focused group)
+
+      // The persisted layout's group-B slot now tracks billing.koi (not the stale split-open orders.koi),
+      // so a reload would restore B to billing.koi. A's slot stays on the active orders.koi.
+      const persisted = JSON.parse(localStorage.getItem('koine.studio.layout')!) as {
+        splitOpen: boolean;
+        groupActiveUris: [string, string?];
+      };
+      expect(persisted.splitOpen).toBe(true);
+      expect(persisted.groupActiveUris[0]).toMatch(/orders\.koi$/);
+      expect(persisted.groupActiveUris[1]).toMatch(/billing\.koi$/);
+    } finally {
+      localStorage.clear();
+    }
   });
 });
 
@@ -664,9 +878,16 @@ describe('ide init() — Save to disk', () => {
   test('Save to disk writes the open buffers as a named project', async () => {
     await boot();
     const saveSpy = (fakePlatform.current as FakePlatform).saveProjectToRoot;
-    vi.stubGlobal('prompt', vi.fn(() => 'my-pizzeria'));
 
     (document.getElementById('btn-save-project') as HTMLButtonElement).click();
+    await settleBoot(); // Koine's prompt modal opens (no window.prompt)
+
+    // Name the project in the modal field and confirm with the primary action.
+    const input = document.querySelector('.koi-prompt-input') as HTMLInputElement;
+    expect(input).not.toBeNull();
+    input.value = 'my-pizzeria';
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    (document.querySelector('.koi-confirm-btn-primary') as HTMLButtonElement).click();
     await settleBoot();
 
     expect(saveSpy).toHaveBeenCalledTimes(1);
@@ -678,9 +899,14 @@ describe('ide init() — Save to disk', () => {
   test('Save to disk does nothing when the name prompt is cancelled', async () => {
     await boot();
     const saveSpy = (fakePlatform.current as FakePlatform).saveProjectToRoot;
-    vi.stubGlobal('prompt', vi.fn(() => null));
 
     (document.getElementById('btn-save-project') as HTMLButtonElement).click();
+    await settleBoot();
+
+    // Dismiss the prompt with Cancel → ask() resolves null → nothing is written. The primary button
+    // is unique to the prompt dialog, so reach its modal through it to find that dialog's Cancel.
+    const promptModal = (document.querySelector('.koi-confirm-btn-primary') as HTMLElement).closest('.koi-modal')!;
+    (promptModal.querySelector('.koi-confirm-btn:not(.koi-confirm-btn-primary)') as HTMLButtonElement).click();
     await settleBoot();
 
     expect(saveSpy).not.toHaveBeenCalled();
@@ -696,14 +922,12 @@ describe('ide init() — Save to disk', () => {
 });
 
 describe('ide init() — Recent open recovery', () => {
-  test('clicking a Recent whose folder is gone keeps the start screen up and offers removal', async () => {
-    // Seed one recent BEFORE boot so the welcome renders a row for it.
+  test('opening a dead Recent (via the Home start-intent) keeps the start screen up and offers removal', async () => {
+    // Seed one recent so the recovered start screen renders a row for it.
     localStorage.setItem('koine.studio.recentFolders', JSON.stringify(['ghost']));
 
     const p = installPlatform();
-    // Make listKoiFiles throw only for the dead recent path ('ghost'); the default workspace
-    // uses ROOT = 'mem://workspace' and must succeed as normal so the boot ladder completes and
-    // welcome.show() fires (pristine-seed check).
+    // Make listKoiFiles throw only for the dead recent path ('ghost').
     const realListKoiFiles = p.listKoiFiles.bind(p);
     // Cast is required: FakePlatform omits the token arg but the real Platform interface has it.
     (p as unknown as { listKoiFiles: (token: string) => Promise<KoiFile[]> }).listKoiFiles = vi.fn(
@@ -713,18 +937,20 @@ describe('ide init() — Recent open recovery', () => {
       },
     );
 
+    // Home opens a recent by queuing a start-intent then navigating to the editor (#368); the IDE
+    // consumes it once at boot. listKoiFiles throws → openRecentFolder shows the start screen and a
+    // "Remove from Recent?" confirm rather than stranding the user.
+    window.location.hash = '';
+    // Import setStartIntent AFTER beforeEach's vi.resetModules() so it shares the SAME bootIntent module
+    // instance that boot()'s dynamic import('@/shell/ide') will load — a static top-of-file import binds
+    // the pre-reset instance, whose `pending` the freshly-loaded IDE would never see.
+    const { setStartIntent } = await import('@/shell/bootIntent');
+    setStartIntent({ kind: 'open-recent', path: 'ghost' });
     await boot({ platform: p });
-    // After a pristine-seed boot the welcome is shown; the recent list now has the 'ghost' row.
-    expect(document.querySelector('.koi-welcome-recent-open')).not.toBeNull();
-
-    // Click the dead recent row — welcome.ts's click handler calls hide() then onOpenRecent('ghost').
-    (document.querySelector('.koi-welcome-recent-open') as HTMLButtonElement).click();
-    // Drain: leaveHomeFor → confirmReplaceWork (no unsaved work → resolves immediately) →
-    // openRecentFolder → workspace.openFolderPath → listKoiFiles throws → { ok: false, reason: 'unreadable' }
-    // → welcome.show() re-shown → confirmDialog.ask() opens modal.
     await settleBoot();
 
-    // The confirm modal must now be visible (asking "Remove from Recent?").
+    // The start screen is up with the 'ghost' row, and the confirm modal must now be visible.
+    expect(document.querySelector('.koi-welcome-recent')).not.toBeNull();
     const okBtn = document.querySelector<HTMLButtonElement>('.koi-confirm-btn-danger');
     expect(okBtn).not.toBeNull();
 
@@ -747,5 +973,29 @@ describe('ide init() — Recent open recovery', () => {
     expect(remainingRows).not.toContain('ghost');
     // It was the only recent, so the empty-state copy is now shown in its place.
     expect(document.querySelector('.koi-welcome-empty')).not.toBeNull();
+  });
+});
+
+describe('ide init() — return-visit start-intent (#368)', () => {
+  test('a start-intent queued after boot is consumed on the next transition into the editor route', async () => {
+    // The IDE boots once and survives Home↔Editor swaps, so init()'s boot ladder only consumes a
+    // start-intent the first time. A start action taken on a RETURN visit to Home navigates back to a
+    // still-initialised editor — init() does NOT re-run — so without the route-change subscriber the
+    // intent would be silently dropped. This pins that the subscriber consumes it.
+    const { setStartIntent, takeStartIntent } = await import('@/shell/bootIntent');
+    const { appStore } = await import('@/store');
+
+    await boot(); // first boot: route is the default 'home', init() runs once, no intent queued
+    await settleBoot();
+
+    // Simulate a Home action on a return visit: queue an intent, then the route flips home → editor.
+    setStartIntent({ kind: 'new' });
+    appStore.setState({ route: 'editor' });
+
+    // The subscriber consumed it synchronously on the transition — nothing is left queued.
+    expect(takeStartIntent()).toBeNull();
+
+    // Drain the fire-and-forget action the intent triggered (newModel) before the env tears down.
+    await settleBoot();
   });
 });

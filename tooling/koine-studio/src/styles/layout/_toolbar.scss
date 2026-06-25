@@ -225,17 +225,6 @@
   }
 }
 
-/* The About control wears the brand blue so the info mark reads as the identity entry point. */
-#btn-about {
-  color: var(--koi-accent);
-
-  &:hover {
-    background: color-mix(in srgb, var(--koi-accent) 14%, transparent);
-    color: var(--koi-accent);
-    border-color: color-mix(in srgb, var(--koi-accent) 40%, transparent);
-  }
-}
-
 /* --- top-bar scope path (#146 / merged breadcrumb) ----------------------------------------------
    One breadcrumb that doubles as the scope control. The FIRST segment is a <select> dressed as a crumb
    (pick the active bounded context — scopes the outline, counts, diagram, inspector and bottom tables);

@@ -1,0 +1,88 @@
+{
+  "skill_name": "implement-issue",
+  "runs_per_query": 3,
+  "threshold": 0.5,
+  "results": [
+    {
+      "query": "keep PR 376 mergeable as I build it: merge the latest main in and fix the conflicts",
+      "note": "IN-FLIGHT keep-mergeable \u2192 implement-issue",
+      "should_trigger": true,
+      "trigger_rate": 1.0,
+      "triggers": 3,
+      "runs": 3,
+      "fired": {
+        "implement-issue": 3
+      },
+      "pass": true
+    },
+    {
+      "query": "my draft PR conflicts with main and I'm still building it \u2014 sync the branch and fix the conflicts so it stays mergeable",
+      "note": "IN-FLIGHT sync \u2192 implement-issue",
+      "should_trigger": true,
+      "trigger_rate": 1.0,
+      "triggers": 3,
+      "runs": 3,
+      "fired": {
+        "implement-issue": 3
+      },
+      "pass": true
+    },
+    {
+      "query": "rebase my in-flight feature branch on main and resolve the conflicts while I keep adding tasks",
+      "note": "IN-FLIGHT rebase \u2192 implement-issue",
+      "should_trigger": true,
+      "trigger_rate": 1.0,
+      "triggers": 3,
+      "runs": 3,
+      "fired": {
+        "implement-issue": 3
+      },
+      "pass": true
+    },
+    {
+      "query": "land #281: fix the conflicts with main and squash-merge it",
+      "note": "LAND-NOW \u2192 merge-pr",
+      "should_trigger": false,
+      "trigger_rate": 0.0,
+      "triggers": 0,
+      "runs": 3,
+      "fired": {
+        "merge-pr": 3
+      },
+      "pass": true
+    },
+    {
+      "query": "merge PR 281 now \u2014 resolve its conflicts with main as part of landing it",
+      "note": "LAND-NOW \u2192 merge-pr",
+      "should_trigger": false,
+      "trigger_rate": 0.0,
+      "triggers": 0,
+      "runs": 3,
+      "fired": {
+        "merge-pr": 3
+      },
+      "pass": true
+    },
+    {
+      "query": "ship PR 281, fixing whatever conflicts with main are blocking the merge",
+      "note": "LAND-NOW \u2192 merge-pr",
+      "should_trigger": false,
+      "trigger_rate": 0.0,
+      "triggers": 0,
+      "runs": 3,
+      "fired": {
+        "merge-pr": 3
+      },
+      "pass": true
+    }
+  ],
+  "summary": {
+    "total": 6,
+    "passed": 6,
+    "failed": 0,
+    "should_trigger": 3,
+    "should_not": 3,
+    "recall": 1.0,
+    "specificity": 1.0
+  }
+}

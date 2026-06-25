@@ -1,11 +1,15 @@
+using System.Reflection;
 using System.Runtime.InteropServices.JavaScript;
 using System.Runtime.Versioning;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Koine.Compiler.Diagnostics;
 using Koine.Compiler.Emit;
+using Koine.Compiler.Emit.AsyncApi;
 using Koine.Compiler.Emit.CSharp;
+using Koine.Compiler.Emit.Docs;
 using Koine.Compiler.Emit.Glossary;
+using Koine.Compiler.Emit.OpenApi;
 using Koine.Compiler.Emit.Php;
 using Koine.Compiler.Emit.Python;
 using Koine.Compiler.Emit.Rust;
@@ -49,7 +53,8 @@ public static partial class CompilerInterop
 
     /// <summary>
     /// Compiles <paramref name="source"/> with the emitter named by <paramref name="target"/>
-    /// (<c>csharp</c> | <c>typescript</c> | <c>python</c> | <c>php</c> | <c>rust</c> | <c>glossary</c>) and returns
+    /// (<c>csharp</c> | <c>typescript</c> | <c>python</c> | <c>php</c> | <c>rust</c> | <c>glossary</c> |
+    /// <c>docs</c> | <c>asyncapi</c> | <c>openapi</c>) and returns
     /// <c>{ ok, target, diagnostics, files:[{path, contents}] }</c> as JSON.
     /// </summary>
     [JSExport]
@@ -59,6 +64,9 @@ public static partial class CompilerInterop
         {
             // `target` is non-null per the annotation, but it is marshalled across the JS-interop
             // boundary where a JS `null`/`undefined` can still arrive at runtime, so the fallback stays.
+            // Every built-in target (BuiltInEmitterProviders.All) is routed explicitly; an unknown
+            // target falls through to C#. Keep this in the registry's display order so a new target is
+            // added here too rather than silently emitting C# (issue #301).
             IEmitter emitter = (string.IsNullOrEmpty(target) ? "csharp" : target).ToLowerInvariant() switch
             {
                 "typescript" or "ts" => new TypeScriptEmitter(),
@@ -66,6 +74,9 @@ public static partial class CompilerInterop
                 "php" => new PhpEmitter(),
                 "rust" or "rs" => new RustEmitter(),
                 "glossary" or "md" => new GlossaryEmitter(),
+                "docs" => new DocsEmitter(),
+                "asyncapi" => new AsyncApiEmitter(),
+                "openapi" => new OpenApiEmitter(),
                 _ => new CSharpEmitter(),
             };
 
@@ -89,6 +100,66 @@ public static partial class CompilerInterop
             return JsonSerializer.Serialize(dto, InteropJson.Default.CompileResultDto);
         }
     }
+
+    /// <summary>
+    /// The module's self-description (issue #330): its <c>version</c>, the <c>exports</c> names of every
+    /// <c>[JSExport]</c> it ships, and the <c>targets</c> it can emit — one call that answers "what is this
+    /// bundle?". Returns <c>{ version, exports:[string], targets:[{id, displayName, fileExtension}] }</c> as
+    /// JSON. The single source of truth Koine Studio verifies its surface against at boot (so the browser
+    /// host drops its hand-maintained export list) and the docs-site reads its version line from.
+    /// </summary>
+    [JSExport]
+    public static string Capabilities()
+    {
+        // targets: the SAME mapping ListEmitTargets (#282) serves — shared via SupportedEmitTargets() so
+        // there is no second target list.
+        var dto = new WCapabilities(CompilerVersion(), JsExportNames, SupportedEmitTargets());
+        return JsonSerializer.Serialize(dto, LangJson.Default.WCapabilities);
+    }
+
+    /// <summary>
+    /// The compiler version from <see cref="AssemblyInformationalVersionAttribute"/> (set from
+    /// <c>Directory.Build.props</c>'s <c>&lt;Version&gt;</c>), trimming any SDK-appended
+    /// <c>+&lt;commit&gt;</c> build-metadata suffix — the same logic as <c>Koine.Cli.Program.GetVersion()</c>,
+    /// so the wasm bundle and <c>koine --version</c> stay in lock-step. Falls back to the four-part assembly
+    /// version (then <c>0.0.0</c>) only if the attribute is absent.
+    /// </summary>
+    private static string CompilerVersion()
+    {
+        var asm = typeof(CompilerInterop).Assembly;
+        var info = asm.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion;
+        if (string.IsNullOrEmpty(info))
+        {
+            return asm.GetName().Version?.ToString() ?? "0.0.0";
+        }
+
+        var plus = info.IndexOf('+');
+        return plus < 0 ? info : info[..plus];
+    }
+
+    /// <summary>
+    /// The names of every <c>[JSExport]</c> this module ships — the staleness signal Koine Studio builds
+    /// its boot-time guard set from (issue #330), letting the browser host drop its hand-maintained copy.
+    /// Curated rather than reflected on purpose: under <c>TrimMode=full</c>, reflecting <c>[JSExport]</c>
+    /// attributes off the trimmed wasm assembly is fragile — so this is the ONE authoritative list, built
+    /// with <c>nameof</c> so a rename can't leave a dangling string, and <c>CapabilitiesTests</c> reflects
+    /// the real (un-trimmed) surface to assert it never drifts. Must include <c>Capabilities</c> itself.
+    /// </summary>
+    private static readonly string[] JsExportNames =
+    [
+        nameof(Diagnose), nameof(Compile), nameof(Capabilities),
+        nameof(DiagnoseWorkspace), nameof(EmitPreview), nameof(ListEmitTargets), nameof(SemanticTokens),
+        nameof(Glossary), nameof(ContextMap), nameof(GlossaryModel), nameof(SetDoc),
+        nameof(Model), nameof(ModelMembers), nameof(EmitKoine), nameof(ApplyModelEdit),
+        nameof(Hover), nameof(Completions), nameof(SignatureHelp), nameof(Definition),
+        nameof(DocumentSymbols), nameof(WorkspaceSymbols), nameof(FoldingRanges), nameof(SelectionRanges),
+        nameof(DocumentHighlightsAt), nameof(CodeLenses), nameof(Format), nameof(FormatRange),
+        nameof(Check), nameof(References), nameof(InlayHints),
+        nameof(PrepareCallHierarchy), nameof(IncomingCalls), nameof(OutgoingCalls),
+        nameof(PrepareTypeHierarchy), nameof(Supertypes), nameof(Subtypes),
+        nameof(PrepareRename), nameof(Rename), nameof(CodeActions), nameof(Docs),
+        nameof(RunScenario), nameof(ScenarioCatalog),
+    ];
 
     private static DiagnosticDto ToDto(Diagnostic d) => new(
         Severity: d.Severity == DiagnosticSeverity.Error ? "error" : "warning",

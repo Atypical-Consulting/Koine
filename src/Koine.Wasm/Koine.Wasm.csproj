@@ -34,6 +34,35 @@
     <PublishTrimmed>true</PublishTrimmed>
     <TrimMode>full</TrimMode>
 
+    <!--
+      AOT-to-wasm toggle (issue #327). Opt-in via `-p:KoineWasmAot=true`; default OFF so a bare
+      `dotnet build`/`dotnet publish` and the dev inner loop stay on the fast interpreter path
+      (AOT makes the publish much slower). Only the deployed Release bundle opts in, via the
+      build-wasm.mjs scripts when KOINE_WASM_AOT=true (set on the deploy-docs.yml deploy job).
+
+      VERDICT: ship AOT ON for the deployed bundle. Measured trade-off (pizzeria template compiled
+      via the smoke-test bench mode, best/median over 10 warm runs, Apple-silicon):
+
+                       pizzeria compile   _framework (raw / gzip)   publish (warm)
+        interpreter    best 30 / med 39 ms    6.6 MB / 2.3 MB           ~4-10 s
+        AOT (shipped)  best  7 / med  8 ms   20.3 MB / ~5.9 MB          ~24-32 s
+
+      ~5x faster per-keystroke compile (the playground + Studio workload) for a ~3.1x raw / +3.6 MB
+      gzipped one-time, browser-cached download — a good trade for a dev-tooling site, and the
+      AOT-vs-interpreter lever #219 needs for a mobile fallback. The dev loop is unaffected (off by
+      default); the slow publish hits only deploy/CI. See the README build notes for the full table.
+
+      WasmStripILAfterAOT drops managed IL once methods are AOT-compiled. It has NO measurable effect
+      here (strip and no-strip publishes are byte-identical): Koine.Compiler + Antlr4.Runtime.Standard
+      are rooted whole and reflection-heavy (NodeWalker reflects over node types), so the SDK keeps
+      their metadata regardless. Kept on (the SDK default, proven safe by smoke-test, future-proof if
+      the reflection rooting ever narrows); measure it independently with `-p:WasmStripILAfterAOT=false`
+      (a command-line value wins over the assignment below).
+    -->
+    <KoineWasmAot Condition="'$(KoineWasmAot)' == ''">false</KoineWasmAot>
+    <RunAOTCompilation>$(KoineWasmAot)</RunAOTCompilation>
+    <WasmStripILAfterAOT Condition="'$(KoineWasmAot)' == 'true'">true</WasmStripILAfterAOT>
+
     <!-- Not a NuGet package; clear the inherited packaging metadata from Directory.Build.props. -->
     <IsPackable>false</IsPackable>
 

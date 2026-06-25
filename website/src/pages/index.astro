@@ -21,7 +21,7 @@ const features = [
   { r: 'R12', title: 'Application & CQRS', body: 'Unit of work, application services, read models, query handlers.' },
   { r: 'R13–R14', title: 'Strategic design', body: 'Multi-file modules, imports, context maps, integration events, ACL.' },
   { r: 'R15', title: 'Evolution', body: 'Versioning, deprecation, and breaking-change detection.' },
-  { r: 'R16–R17', title: 'Targets & tooling', body: 'C# + TypeScript emitters, LSP, formatter, scaffolding, watch.' },
+  { r: 'R16–R18', title: 'Targets, tooling & coverage', body: 'C#/TypeScript/Python/PHP/Rust emitters, LSP, formatter, scaffolding, watch, model-as-spec coverage.' },
 ];
 
 const pillars = [
@@ -126,7 +126,7 @@ const pillars = [
   <!-- Feature map -->
   <section class="band">
     <div class="band__head">
-      <h2>The complete toolkit, R1–R17</h2>
+      <h2>The complete toolkit, R1–R18</h2>
       <p>
         Fifteen releases of tactical and strategic DDD, shipped — see the
         <a href={`${base}/guides/feature-catalogue/`}>full feature catalogue</a>.
@@ -152,9 +152,10 @@ const pillars = [
         <h2>One model, many targets</h2>
         <p>
           The parser and semantic model are strictly target-agnostic. Koine emits idiomatic
-          <strong>C#</strong>, <strong>TypeScript</strong>, and <strong>Python</strong> today — flip
-          the target in Studio and watch the same model recompile. Rust is on the
-          <a href={`${base}/guides/roadmap/`}>roadmap</a>.
+          <strong>C#</strong>, <strong>TypeScript</strong>, <strong>Python</strong>,
+          <strong>PHP</strong>, and <strong>Rust</strong> today — flip the target in Studio and watch
+          the same model recompile. Rust ships its tactical core (Phase 1); the
+          <a href={`${base}/guides/roadmap/`}>roadmap</a> tracks Phase 2.
         </p>
         <a class="btn btn--primary" href={orderingStudioHref}>Explore the Ordering model in Studio ▸</a>
       </div>
@@ -164,7 +165,8 @@ const pillars = [
         <span class="tgt">C#</span>
         <span class="tgt">TypeScript</span>
         <span class="tgt">Python</span>
-        <span class="tgt tgt--soon">Rust · soon</span>
+        <span class="tgt">PHP</span>
+        <span class="tgt">Rust</span>
       </div>
     </div>
   </section>
@@ -385,7 +387,6 @@ const pillars = [
       background: var(--koi-paper-2);
     }
     .tgt--on { background: var(--koi-accent); color: var(--koi-on-accent); border-color: var(--koi-accent); }
-    .tgt--soon { color: var(--koi-muted); border-style: dashed; }
     .tgt__arrow { color: var(--koi-accent-2); font-weight: 700; }
   </style>
 </BlueprintLayout>

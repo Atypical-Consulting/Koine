@@ -55,7 +55,7 @@ jobs:
       # No central package management / lock files, so cache the global NuGet
       # package folder keyed on the project files that pin versions.
       - name: Cache NuGet
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: ~/.nuget/packages
           key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj', 'Directory.Build.props') }}
@@ -104,7 +104,7 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Cache Cargo build
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: |
             ~/.cargo/registry
@@ -140,7 +140,18 @@ jobs:
           npm ci
           npm run build
 
-      # Unit + DOM tests for the frontend's pure logic (project-name/zip helpers, the wizard flow).
+      # `npm test` (vitest) now runs two projects: the happy-dom unit/DOM suite AND the
+      # `storybook` project, which executes every story as a real-browser test via
+      # @storybook/addon-vitest (Playwright/Chromium). The browser binary must exist before
+      # `npm test`. Only Chromium is needed; --with-deps installs the system libs Chromium
+      # needs on Linux and is a no-op for those deps on macOS/Windows.
+      - name: Install Playwright Chromium (Storybook story tests)
+        working-directory: tooling/koine-studio
+        shell: bash
+        run: npx playwright install --with-deps chromium
+
+      # Frontend tests: happy-dom unit/DOM logic (project-name/zip helpers, the wizard flow)
+      # plus the Storybook story + a11y checks running headless in Chromium.
       - name: Test frontend (npm)
         working-directory: tooling/koine-studio
         run: npm test
@@ -165,7 +176,7 @@ jobs:
           dotnet-quality: preview
 
       - name: Cache NuGet
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: ~/.nuget/packages
           key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj', 'Directory.Build.props') }}
@@ -173,7 +184,7 @@ jobs:
 
       # The browser compiler is a .NET WebAssembly module; building it needs the wasm workloads.
       - name: Cache wasm workloads
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: |
             ~/.dotnet/sdk-manifests
@@ -194,9 +205,27 @@ jobs:
           cache-dependency-path: tooling/koine-studio/package-lock.json
 
       # (a) Publish + bundle the in-browser compiler, then (b) typecheck and bundle the web frontend.
+      # Built at the DEPLOY's sub-path base (/Koine/studio/) so the boot smoke-test below exercises the
+      # exact base/worker-URL resolution users hit — without forcing AOT (the PR validation stays on the
+      # fast interpreter; the #357 worker-boot bug is in the worker JS, independent of the wasm runtime).
       - name: Build studio (web)
         working-directory: tooling/koine-studio
+        env:
+          KOINE_STUDIO_BASE: /Koine/studio/
         run: |
           npm ci
           npm run build:wasm
           npm run build:web
+
+      # The compiler worker must actually boot in a real browser. The vitest/storybook suites MOCK the
+      # worker, so without this a worker-boot regression (issue #357 — the studio showed "connection
+      # failed") ships green. Only Chromium is needed; --with-deps installs its Linux system libs.
+      - name: Install Playwright Chromium (boot smoke-test)
+        working-directory: tooling/koine-studio
+        run: npx playwright install --with-deps chromium
+
+      - name: Boot smoke-test — the real compiler boots in a browser (#357)
+        working-directory: tooling/koine-studio
+        env:
+          KOINE_STUDIO_BASE: /Koine/studio/
+        run: npm run test:browser

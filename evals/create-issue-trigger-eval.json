@@ -1,0 +1,21 @@
+[
+  {"query": "file an issue for adding a Rust code formatter to the CLI", "should_trigger": true, "note": "plain 'file an issue'"},
+  {"query": "open a GitHub issue to track the flaky snapshot meta-test", "should_trigger": true, "note": "'open ... issue to track'"},
+  {"query": "track this idea: a --watch flag that re-emits on file save", "should_trigger": true, "note": "'track this idea'"},
+  {"query": "log a feature request for TypeScript enum emission", "should_trigger": true, "note": "'log a feature request'"},
+  {"query": "raise an issue about hover docs missing in the LSP", "should_trigger": true, "note": "'raise an issue'"},
+  {"query": "make a ticket for the missing PHP value-object equality", "should_trigger": true, "note": "'make a ticket'"},
+  {"query": "capture this for later: cache the wasm bundle per fingerprint", "should_trigger": true, "note": "'capture this for later'"},
+  {"query": "add an issue for cross-file context-map imports", "should_trigger": true, "note": "'add an issue'"},
+  {"query": "create a backlog item to document the glossary emitter", "should_trigger": true, "note": "'create a backlog item'"},
+  {"query": "I have three ideas, please open issues for each with a plan", "should_trigger": true, "note": "batch of ideas"},
+  {"query": "we should file a feature request for incremental compilation", "should_trigger": true, "note": "loose 'we should file'"},
+
+  {"query": "implement issue 47 and open a PR", "should_trigger": false, "note": "→ implement-issue"},
+  {"query": "merge PR 281 now that CI is green", "should_trigger": false, "note": "→ merge-pr"},
+  {"query": "review the diff on PR 281 without merging it", "should_trigger": false, "note": "→ review/code-review"},
+  {"query": "what value objects does the C# emitter generate?", "should_trigger": false, "note": "doc question — no lifecycle skill"},
+  {"query": "set up the repo profile for this repository", "should_trigger": false, "note": "→ get-repo-profile"},
+  {"query": "explain how the ANTLR grammar splits lexer and parser", "should_trigger": false, "note": "doc question — no lifecycle skill"},
+  {"query": "resume the implementation plan on issue 71", "should_trigger": false, "note": "→ implement-issue"}
+]

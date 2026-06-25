@@ -24,10 +24,12 @@
 // from the palette, the toolbar buttons, and the boot ladder.
 import { render, type VNode } from 'preact';
 import { renderMarkdown } from '@/editor/editor';
-import type { KoineEditor, OutputView } from '@/editor/editor';
+import type { KoineEditor, OutputLang, OutputView } from '@/editor/editor';
 import type {
   CheckResult,
   ContextMapResult,
+  DiagramEdge,
+  DiagramNode,
   DocsResult,
   EmitPreviewResult,
   GlossaryEntry,
@@ -41,7 +43,11 @@ import type {
 import type { Platform } from '@/host';
 import type { PreviewTarget } from '@/settings/persistence';
 import { renderDiagrams } from '@/diagrams/diagrams';
-import { setDiagramPersistScope } from '@/diagrams/diagrams-svg';
+import { renderContextMapGraph, type ContextMapGraphHandle } from '@/diagrams/diagrams-maxgraph';
+import { buildContextMapGraph, type ContextMapEdge } from '@/diagrams/contextMapGraph';
+import { setDiagramLayoutStore, setDiagramPersistScope } from '@/diagrams/diagramContract';
+import type { AddNodeKind, CanvasAnnotationKind, AggregateMemberKind } from '@/diagrams/diagramContract';
+import { createLayoutStore } from '@/diagrams/layoutStore';
 import { mergeDiagramGraphs } from '@/model/modelTables';
 import { type GlossaryHandlers } from '@/model/glossary';
 import { createDocsStore } from '@/docs/docsStore';
@@ -57,7 +63,7 @@ import {
 } from '@/model/activeContext';
 import type { SelectedElement } from '@/model/selection';
 import { renderOverviewCounts, type ModelOutlineHandlers } from '@/model/modelOutline';
-import { type InspectorElement, type InspectorHandlers } from '@/model/inspector';
+import { buildInspectorElement, renderRules, type InspectorElement, type InspectorHandlers } from '@/model/inspector';
 import { buildModelIndex, lookupElement, type ModelIndex } from '@/model/modelIndex';
 import { PropertiesPanel } from '@/model/PropertiesPanel';
 import { ContextBreadcrumb } from '@/model/ContextBreadcrumb';
@@ -66,21 +72,25 @@ import { EventsPanel } from '@/model/EventsPanel';
 import { RelationshipsPanel } from '@/model/RelationshipsPanel';
 import { GlossaryPanel } from '@/model/GlossaryPanel';
 import { DocsPanelHost } from '@/docs/DocsPanelHost';
-import { appStore } from '@/store/index';
+import { CanvasPalette } from '@/diagrams/CanvasPalette';
+import type { StoreApi } from 'zustand/vanilla';
+import type { AppState } from '@/store/index';
+import { guardedLoad } from '@/shell/guardedLoad';
 import { DEFAULT_CENTER, isValidCenter, type RightView } from '@/store/slices/uiChrome';
 import type { DomainIndex } from '@/ai/aiPanel';
 import { currentTheme } from '@/settings/theme';
-import { renderCheckMarkdown, renderContextMapHtml } from '@/shell/ideUtils';
+import { escapeHtml, fileUriToPath, formatAclMapping, renderCheckMarkdown, renderContextMapHtml } from '@/shell/ideUtils';
+import { EMIT_TARGETS } from '@/shared/emitTargets';
 
 // LSP SymbolKind for a namespace — the kind the language service tags each top-level `context`
 // document symbol with. Used by followActiveFileContext to read a file's bounded context(s).
 const SYMBOL_KIND_NAMESPACE = 3;
 
-// The center column's three views and their sub-tabs (kept local — they're a C# emitter / UI concern,
-// not part of the target-agnostic model). The first three mirror the uiChrome slice's CenterView /
+// The center column's top-level views and the Code/Documentation sub-tabs (kept local — they're a UI
+// concern, not part of the target-agnostic model). They mirror the uiChrome slice's CenterView /
 // TechView / DocsView literals, which the chrome now drives through.
-type CenterView = 'visual' | 'technical' | 'docs';
-type TechView = 'editor' | 'preview' | 'check' | 'assistant';
+type CenterView = 'visual' | 'technical' | 'docs' | 'assistant';
+type TechView = 'editor' | 'preview' | 'check' | 'scenarios';
 type DocsView = 'glossary' | 'adr' | 'notes';
 type BottomTab = 'problems' | 'events' | 'relationships' | 'contextmap';
 
@@ -114,6 +124,12 @@ export interface InspectorControllerDeps {
   output: OutputView;
   /** The host platform (baseline picker for the check, the docs store fs, browser/desktop kind). */
   platform: Platform;
+  /**
+   * The app state store, injected rather than reached as a module singleton — so the controller owns no
+   * global state, can be driven against a fresh store per instance (the test suite does exactly this),
+   * and two controllers with separate stores can coexist. Production passes the app-wide `appStore`.
+   */
+  store: StoreApi<AppState>;
 
   /** The uri the editor currently shows (read live from ide.ts). */
   activeUri(): string;
@@ -143,11 +159,24 @@ export interface InspectorControllerDeps {
   onSaveGlossaryDescription(entry: GlossaryEntry, text: string): Promise<void>;
   /** Apply a structured model edit (the #91 round-trip) for a Properties-panel field change. */
   onApplyStructuredEdit(edit: StructuredEdit, successMsg: string): void;
+  /** Insert a new DDD construct of the given kind into the active context (the palette's add path). */
+  onAddConstruct(kind: AddNodeKind): void;
+  /** Create a canvas-only annotation (note/group) — a view concern persisted in koine.layout.json (#255). */
+  onAddAnnotation(kind: CanvasAnnotationKind): void;
+  /** Insert an aggregate-scoped construct (repository / rule, #254) into the selected aggregate. */
+  onAddAggregateMember(kind: AggregateMemberKind, aggregateQualifiedName: string): void;
+  /** Export the current Visual canvas as SVG / PNG / PlantUML (#271). */
+  onExportDiagram(format: 'svg' | 'png' | 'plantuml'): void;
+  /** Copy the current diagram's Mermaid source to the clipboard (#271). */
+  onCopyDiagramMermaid(): void;
   /** Jump to a RAW 1-based source span (opens the owning file if needed) — the bottom tables' row click. */
   gotoSourceSpan(span: Pick<SourceSpan, 'file' | 'line' | 'column' | 'endLine' | 'endColumn'>): void;
 
   /** The assistant panel, created lazily by ide.ts the first time its tab is shown. */
   ensureAssistant(): InspectorAssistant;
+
+  /** The scenario-runner panel (#149), created lazily by ide.ts the first time its tab is shown. */
+  ensureScenarios?(): { refresh(): void };
 
   /** Bind a fixed-height resizer to a panel (ide.ts's resize.ts, injected to keep this DOM-infra-free). */
   initEdgeResizer(opts: {
@@ -221,6 +250,8 @@ export interface InspectorController {
 
   /** Boot the chrome into the restored mode (no fetch) + label the Generated tab. Called from ide.ts's boot. */
   init(): void;
+  /** Cancel pending debounce/reset timers so a deferred repaint can't fire after the host is torn down. */
+  dispose(): void;
 }
 
 function el<T extends HTMLElement>(id: string): T {
@@ -230,7 +261,7 @@ function el<T extends HTMLElement>(id: string): T {
 }
 
 export function createInspectorController(deps: InspectorControllerDeps): InspectorController {
-  const { lsp, editor, output, platform } = deps;
+  const { lsp, editor, output, platform, store: appStore } = deps;
 
   // --- DOM hosts (looked up once; the same id surface init() builds, so a drift throws via el()) ---
   // A copy affordance overlaid on the emitted-preview pane (auto-hidden with the pane). Tracks the
@@ -266,9 +297,10 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   const adrView = el('view-docs');
   const notesView = el('view-notes');
   // Center hosts: the diagram canvas (Visual) and the code editor's companion sub-views.
-  const diagramsView = el('center-visual');
+  const diagramsView = el('diagram-host');
   const assistantView = el('view-assistant');
   const checkView = el('view-check');
+  const scenariosView = el('view-scenarios');
   // Right-rail host: the element inspector (Properties). Fixed — never torn down on a model reload.
   const inspectorHost = el('inspector-host');
   // Top-bar "scope path" host (the ContextBreadcrumb Preact panel — the scope selector + selected
@@ -293,11 +325,12 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   // truth for both the highlighted tab AND the shown view, so they can never diverge (#193). Reset it to
   // this controller's defaults: the restored center, with the tech/docs sub-views back at their landing
   // tabs. setState lands the reset atomically in one notification, before any subscriber runs.
-  // `bottom`/`right` are reset to their landing tabs alongside the others: `appStore` is a module
-  // SINGLETON reused across controller instances (notably the test suite), so without this reset a prior
-  // instance that left `bottom`/`right` on a non-default tab would leak into this one — the same reason
-  // the docViews invalidate() below resets surface-staleness. This restores the per-instance defaults the
-  // old module-local `activeBottomTab = 'problems'` / right-rail `'props'` start gave for free.
+  // `bottom`/`right` are reset to their landing tabs alongside the others: the store is INJECTED (deps.store)
+  // and, in production, is the app-wide singleton reused across workspace reopens — so without this reset a
+  // prior session that left `bottom`/`right` on a non-default tab would leak into a freshly-booted controller
+  // (the same reason the docViews invalidate() below resets surface-staleness). Tests pass a fresh store per
+  // controller, for which this is a harmless no-op. This restores the per-instance defaults the old
+  // module-local `activeBottomTab = 'problems'` / right-rail `'props'` start gave for free.
   appStore.setState({
     center: initialCenter,
     tech: 'editor',
@@ -310,10 +343,10 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   // Events/Relationships/Context Map tables — are loaded vs stale; there are no longer any controller-
   // local `loaded` flags duplicating it. Reset it to fully-stale for this fresh workspace session so the
   // first show of each fetches: invalidate() flips every view to not-loaded and bumps its token.
-  // This reset is load-bearing because `appStore` is a module SINGLETON reused across controller
-  // instances (notably the test suite, which builds many controllers against the one store): without it,
-  // a prior instance that left a view `loaded` would make this instance skip its first fetch. It resets
-  // the singleton's surface-staleness between controller instances.
+  // This reset is load-bearing because the injected store is, in production, the app-wide singleton reused
+  // across workspace reopens (and the test suite builds many controllers): without it, a prior session that
+  // left a view `loaded` would make a freshly-booted controller skip its first fetch. It resets the store's
+  // surface-staleness for this controller's session.
   appStore.getState().invalidate();
 
   // Persist the active center pane across reloads: on a real center change, write it through, with a
@@ -402,6 +435,7 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   // empty — an empty/scratch model).
   function setContextOptions(list: string[]): void {
     contexts = list;
+    appStore.getState().setContexts(list); // mirror into the store so the construct palette can react
     renderBreadcrumb();
     // Fall back to "All contexts" ONLY when we positively know the model's contexts (a non-empty list)
     // and the active scope isn't among them — a genuine rename/removal. An EMPTY list is a transient or
@@ -423,7 +457,9 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     try {
       const model = await lsp.glossaryModel();
       setContextOptions(listContexts(model));
-    } catch {
+    } catch (e) {
+      // Best-effort: empty the picker, but log so a failing glossary model isn't a silent dead end.
+      console.warn('Context list refresh failed; clearing the context picker.', e);
       setContextOptions([]);
     }
   }
@@ -593,21 +629,20 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   // imperatively via docMessage, which unmounts any prior Preact tree first — so the reconciler and the
   // imperative write never fight over the same node (the prior-tasks hazard).
   async function loadGlossary(): Promise<void> {
-    const token = appStore.getState().currentToken('glossary');
-    docMessage(glossaryView, 'Loading glossary…');
-    try {
-      const model = await lsp.glossaryModel();
-      if (token !== appStore.getState().currentToken('glossary')) return; // superseded by an edit — discard
-      if (!model.entries.length) {
-        docMessage(glossaryView, 'No concepts yet — declare some types, or fix syntax errors to populate the glossary.');
-      } else {
-        renderPanel(glossaryView, <GlossaryPanel store={appStore} model={model} handlers={glossaryHandlers} />);
-      }
-      appStore.getState().markLoaded('glossary', token);
-    } catch (e) {
-      if (token !== appStore.getState().currentToken('glossary')) return;
-      docMessage(glossaryView, 'Glossary request failed: ' + String(e), 'error');
-    }
+    await guardedLoad({
+      store: appStore,
+      key: 'glossary',
+      loading: () => docMessage(glossaryView, 'Loading glossary…'),
+      fetch: () => lsp.glossaryModel(),
+      render: (model) => {
+        if (!model.entries.length) {
+          docMessage(glossaryView, 'No concepts yet — declare some types, or fix syntax errors to populate the glossary.');
+        } else {
+          renderPanel(glossaryView, <GlossaryPanel store={appStore} model={model} handlers={glossaryHandlers} />);
+        }
+      },
+      onError: (e) => docMessage(glossaryView, 'Glossary request failed: ' + String(e), 'error'),
+    });
   }
 
   // Wires the pure (testable) glossary view to the editor + LSP: jump-to-source (here) and
@@ -748,6 +783,23 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
         { kind: 'changeFieldType', target: `${element.qualifiedName}.${propName}`, type: newType },
         `Changed ${propName} to ${newType}`,
       ),
+    // Per-element git change history (#150): the commits that touched the element's declaration. The
+    // desktop host shells out to `git log -L`; the browser host returns null (section hidden).
+    loadHistory: (element) => {
+      // Prefer the element's own source span — its correct file AND full line range — so history is
+      // scoped to the right declaration even when it lives in a file other than the active editor (a
+      // multi-file workspace). Fall back to the active file + name range for elements with no diagram
+      // node / span (e.g. an undrawn value object).
+      const span = element.sourceSpan;
+      const useSpan = span != null && span.file != null;
+      const path = fileUriToPath(useSpan ? span.file! : deps.activeUri());
+      if (!path) return Promise.resolve(null);
+      // git `-L` is 1-based inclusive. A SourceSpan is 1-based with an end-EXCLUSIVE endLine (so the last
+      // content line is endLine - 1); the name range is 0-based LSP positions, so shift those by one.
+      const startLine = useSpan ? span.line : element.nameRange.start.line + 1;
+      const endLine = useSpan ? Math.max(span.line, span.endLine - 1) : element.nameRange.end.line + 1;
+      return deps.platform.gitLogForRange(path, startLine, endLine);
+    },
   };
 
   // The joined model index (#142): the workspace-merged glossary joined with the richest matching
@@ -803,6 +855,19 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
       <PropertiesPanel store={appStore} index={modelIndex} handlers={inspectorHandlers} />,
       inspectorHost,
     );
+    renderSelectedRules();
+  }
+
+  // The right-rail "Rules" tab: the selected element's invariants (business rules), resolved through the
+  // same selection → model-index → InspectorElement path as the Properties inspector, so the two tabs
+  // track selection in lockstep. Rendered imperatively into its host (it's a read-only projection).
+  function renderSelectedRules(): void {
+    const sel = appStore.getState().selection;
+    const hit = sel && modelIndex ? lookupElement(modelIndex, sel.qualifiedName) : null;
+    const element: InspectorElement | null = hit
+      ? buildInspectorElement(hit.element.entry, hit.element.node, hit.element.modelMembers)
+      : null;
+    el('rview-rules').replaceChildren(renderRules(element));
   }
 
   // Repaint the always-visible left rail: the Explorer construct tree + the Overview counts, both
@@ -819,8 +884,10 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     try {
       const index = await ensureModelIndex();
       // The model index just (re)built — re-pass it to the breadcrumb so the selected element's type icon
-      // resolves (the panel tracks selection itself, but reads the construct off the index prop).
+      // resolves (the panel tracks selection itself, but reads the construct off the index prop). The
+      // palette likewise reads the index to gate its aggregate-scoped buttons (#254), so re-pass it too.
       renderBreadcrumb();
+      renderCanvasPalette();
       const scopedGlossary = scopeGlossaryModel(index.glossary, activeContext.get());
       if (!scopedGlossary.entries.length) {
         docMessage(
@@ -876,6 +943,10 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     // explicit repaint keeps the right-rail update synchronous for callers that read it immediately
     // after a set.
     renderSelectedInspector();
+    // Re-pass the current model index to the palette so its aggregate-scoped buttons (#254) re-gate against
+    // the freshly-selected element — a diagram click rebuilds the index before setting the selection, so
+    // resolving the selection's kind here uses the up-to-date index rather than a stale captured prop.
+    renderCanvasPalette();
     applySelectionHighlight();
   });
 
@@ -896,8 +967,11 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
       // Scope the diagrams to the active bounded context (#146): each diagram's graph is narrowed and
       // emptied diagrams/files drop out, so a context shows only its own diagrams. "All" is the identity.
       const files = scopeDocsFiles(res.files, activeContext.get());
-      // Scope persisted node positions to this workspace so a folder restores its own manual layout.
+      // Scope persisted node positions to this workspace so a folder restores its own manual layout, and
+      // inject the matching layout store: a committable koine.layout.json at the folder root when one is
+      // open, else browser storage (web/scratch mode).
       setDiagramPersistScope(contextWorkspaceKey());
+      setDiagramLayoutStore(createLayoutStore(platform, deps.folderRootToken()));
       await renderDiagrams(diagramsView, files, currentTheme(), () => seq === diagramsSeq);
       if (seq === diagramsSeq) appStore.getState().markLoaded('diagrams', token);
     } catch (e) {
@@ -932,6 +1006,29 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   const activeDocs = (): DocsView => appStore.getState().docs as DocsView;
 
   const centerVisualEl = el('center-visual');
+
+  // The construct palette mounts once here; it re-renders itself on the store slices it subscribes to
+  // (active context, selection). It also reads the model `index` to resolve whether the selection is an
+  // aggregate (gating the rule/repository buttons, #254), so renderCanvasPalette re-passes a fresh index
+  // whenever the model rebuilds OR the selection changes — mirroring how the Properties panel is
+  // re-rendered. Context-scoped clicks route through onAddConstruct; aggregate-scoped through
+  // onAddAggregateMember with the target qname; canvas-only annotations (#255) through onAddAnnotation.
+  function renderCanvasPalette(): void {
+    render(
+      <CanvasPalette
+        store={appStore}
+        index={modelIndex}
+        onAdd={(kind) => deps.onAddConstruct(kind)}
+        onAddAggregateMember={(kind, aggregateQn) => deps.onAddAggregateMember(kind, aggregateQn)}
+        onAddAnnotation={(kind) => deps.onAddAnnotation(kind)}
+        onExport={(format) => deps.onExportDiagram(format)}
+        onCopyMermaid={() => deps.onCopyDiagramMermaid()}
+      />,
+      el('canvas-palette-host'),
+    );
+  }
+  renderCanvasPalette();
+
   const centerTechnicalEl = el('center-technical');
   const centerDocsEl = el('center-docs');
   const editorPaneEl = el('editor-pane');
@@ -951,15 +1048,19 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     centerVisualEl.hidden = center !== 'visual';
     centerTechnicalEl.hidden = center !== 'technical';
     centerDocsEl.hidden = center !== 'docs';
+    // The assistant is its own top-level center pane now (#235) — a peer of Visual/Code/Documentation,
+    // reachable in one click from any view, not a Code sub-tab. Its host (#view-assistant) is the
+    // center-host itself, so it's shown/hidden purely by the active center.
+    assistantView.hidden = center !== 'assistant';
     // The bottom strip (Problems/Events/Relationships/Context Map) sits under the canvas/editor — it
-    // serves both Visual and Code, but not Documentation.
-    diagEl.hidden = center === 'docs';
+    // serves Visual and Code, but not Documentation or the full-height Assistant conversation.
+    diagEl.hidden = center === 'docs' || center === 'assistant';
     for (const t of centerTabs) t.setAttribute('aria-selected', String(t.dataset.center === center));
     const techVisible = center === 'technical';
     editorPaneEl.hidden = !(techVisible && tech === 'editor');
     previewEl.hidden = !(techVisible && tech === 'preview');
     checkView.hidden = !(techVisible && tech === 'check');
-    assistantView.hidden = !(techVisible && tech === 'assistant');
+    scenariosView.hidden = !(techVisible && tech === 'scenarios');
     for (const t of techTabs) t.setAttribute('aria-selected', String(t.dataset.tech === tech));
     // Documentation sub-views: Glossary (the ubiquitous language), Decisions (the ADR list) and Notes.
     const docsVisible = center === 'docs';
@@ -978,6 +1079,17 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     if (view === 'visual' && appStore.getState().isStale('diagrams')) void loadDiagrams();
     else if (view === 'technical') ensureTechLoaded();
     else if (view === 'docs') ensureDocsLoaded();
+    else if (view === 'assistant') ensureAssistantShown();
+  }
+
+  // The assistant is interactive (not a cached, model-derived surface): every show re-points it at the
+  // current folder's conversation and focuses the input — the single choke point for that swap. Created
+  // lazily by ide.ts the first time this runs (the Anthropic SDK only loads on send).
+  function ensureAssistantShown(): void {
+    if (activeCenter() !== 'assistant') return;
+    const a = deps.ensureAssistant();
+    a.syncWorkspace();
+    a.focusInput();
   }
 
   // Lazy-load the active Documentation sub-view: the glossary is model-derived; the Decisions and Notes
@@ -1006,16 +1118,13 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   }
 
   // Lazy-load the active technical sub-view: the emitted preview is the only model-derived one; the
-  // editor is live, the check is on-demand, and the assistant is interactive (it re-points to the
-  // current folder's conversation before focus, the single choke point for that swap).
+  // editor is live and the check is on-demand. (The assistant is its own center pane now — see
+  // ensureAssistantShown.)
   function ensureTechLoaded(): void {
     if (activeCenter() !== 'technical') return;
     if (activeTech() === 'preview' && appStore.getState().isStale('preview')) void loadPreview();
-    else if (activeTech() === 'assistant') {
-      const a = deps.ensureAssistant();
-      a.syncWorkspace();
-      a.focusInput();
-    }
+    else if (activeTech() === 'scenarios') deps.ensureScenarios?.().refresh();
+    else if (activeTech() === 'check') renderCheckIdleIfEmpty();
   }
 
   // Surface the Documentation center tab (the "Docs" mode focus and the rail's "Ubiquitous Language"
@@ -1118,6 +1227,42 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   }
 
   // --- compatibility check (on-demand) ---------------------------------------
+  // The check only runs when the user picks a baseline, so the panel would otherwise be an empty void
+  // when its tab is first opened. Paint an explanatory idle state (with the trigger) so the surface
+  // always reads as a feature, never a blank pane. Skipped once a check has produced output.
+  function renderCheckIdleIfEmpty(): void {
+    if (checkView.childElementCount > 0) return; // a prior result / loading / error line already shows
+    render(null, checkView);
+    checkView.innerHTML = '';
+    const wrap = document.createElement('div');
+    wrap.className = 'koi-check-idle';
+
+    const title = document.createElement('h3');
+    title.className = 'koi-check-idle-title';
+    title.textContent = 'Model compatibility';
+
+    const body = document.createElement('p');
+    body.className = 'koi-docs-empty';
+    body.textContent =
+      'Compare this model against an earlier baseline to catch breaking changes before you ship — renamed or removed types, changed fields, or tightened invariants.';
+    wrap.append(title, body);
+
+    if (platform.canOpenFolders) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'koi-docs-new-btn koi-check-idle-action';
+      btn.textContent = 'Check against baseline…';
+      btn.addEventListener('click', () => void runCheck());
+      wrap.appendChild(btn);
+    } else {
+      const note = document.createElement('p');
+      note.className = 'koi-docs-empty';
+      note.textContent = 'Selecting a baseline folder needs a Chromium-based browser.';
+      wrap.appendChild(note);
+    }
+    checkView.appendChild(wrap);
+  }
+
   async function runCheck(): Promise<void> {
     if (!platform.canOpenFolders) {
       docMessage(checkView, 'Selecting a baseline folder needs a Chromium-based browser.', 'error');
@@ -1151,19 +1296,16 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   }
 
   // --- emitted-code preview --------------------------------------------------
-  const LANGS: { id: PreviewTarget; name: string }[] = [
-    { id: 'csharp', name: 'C#' },
-    { id: 'typescript', name: 'TypeScript' },
-    { id: 'python', name: 'Python' },
-    { id: 'php', name: 'PHP' },
-  ];
   let currentTarget: PreviewTarget = deps.initialTarget;
   const previewTabEl = el<HTMLButtonElement>('tech-tab-preview');
 
   function setTarget(target: PreviewTarget): void {
     currentTarget = target;
-    const meta = LANGS.find((l) => l.id === target)!;
-    previewTabEl.textContent = `Generated · ${meta.name}`;
+    // Label the Generated tab from the LIVE EMIT_TARGETS (seeded from the backend at boot, issue
+    // #282) so a registry target labels correctly with no edit here; fall back to the raw id for a
+    // target with no display name.
+    const displayName = EMIT_TARGETS.find((t) => t.id === target)?.displayName ?? target;
+    previewTabEl.textContent = `Generated · ${displayName}`;
   }
 
   // Emit the current target into the preview pane. Folded into the doc-view lifecycle (like the
@@ -1182,7 +1324,7 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
       const res = await lsp.emitPreview(currentTarget);
       if (seq !== previewSeq) return;
       let content: string;
-      let lang: 'csharp' | 'typescript' | 'python' | 'php' | 'plain';
+      let lang: OutputLang;
       let copyable = false;
       if (res.error) {
         content = '// emit error\n' + res.error;
@@ -1309,22 +1451,176 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     if (tab === 'contextmap' && appStore.getState().isStale('contextmap')) void loadContextMapPanel();
   }
 
-  // The "Context Map" tab: the strategic context map. The docViews slice's 'contextmap' token guards the
-  // fetch — a token captured before the await is compared after, so a superseded fetch (an edit bumped
-  // the token) can't clobber a newer render; markLoaded only takes for the token it fetched.
-  async function loadContextMapPanel(): Promise<void> {
-    const token = appStore.getState().currentToken('contextmap');
-    docMessage(contextMapView, 'Loading context map…');
+  // --- the "Context Map" tab: the strategic context map, as an interactive GRAPH or the dense TABLE ----
+  // The graph reuses the maxGraph engine (buildContextMapGraph → renderContextMapGraph) and is the default;
+  // the table (renderContextMapHtml) stays one click away for the full per-relation detail. Both read the
+  // SAME ContextMapResult, so the toggle never refetches — it repaints the stored result.
+  const CONTEXT_MAP_VIEW_KEY = 'koine.studio.contextMapView';
+  type ContextMapMode = 'graph' | 'table';
+  let contextMapMode: ContextMapMode = ((): ContextMapMode => {
     try {
-      const res = await lsp.contextMap();
-      if (token !== appStore.getState().currentToken('contextmap')) return;
-      contextMapView.innerHTML = `<div class="koi-md">${renderContextMapHtml(res)}</div>`;
-      appStore.getState().markLoaded('contextmap', token);
-    } catch (e) {
-      if (token === appStore.getState().currentToken('contextmap')) {
-        docMessage(contextMapView, 'Context map request failed: ' + String(e), 'error');
-      }
+      return localStorage.getItem(CONTEXT_MAP_VIEW_KEY) === 'table' ? 'table' : 'graph';
+    } catch {
+      return 'graph';
     }
+  })();
+  let lastContextMap: ContextMapResult | null = null;
+  let contextMapGraphHandle: ContextMapGraphHandle | null = null;
+  let contextMapRenderSeq = 0;
+
+  function disposeContextMapGraph(): void {
+    contextMapGraphHandle?.dispose();
+    contextMapGraphHandle = null;
+  }
+
+  // The hover tooltip for a relation edge (a context node's name is already on its box, so → null there).
+  // maxGraph renders the string as innerHTML with `\n`→`<br>`, so every fragment is escaped first.
+  function contextMapTooltip(value: DiagramNode | DiagramEdge): string | null {
+    if (!('from' in value && 'to' in value)) return null;
+    const e = value as ContextMapEdge;
+    const arrow = e.bidirectional ? '↔' : '→';
+    const lines = [`${e.label ?? 'relation'}: ${e.from} ${arrow} ${e.to}`];
+    if (e.sharedTypes.length) lines.push(`Shared: ${e.sharedTypes.join(', ')}`);
+    for (const a of e.acl) lines.push(`ACL: ${formatAclMapping(a)}`);
+    return lines.map(escapeHtml).join('\n');
+  }
+
+  // Fill the details strip with a selected relation's kind, direction, shared types and ACL — so nothing
+  // from the table view is lost on the graph. `null` hides it (empty-canvas click / fresh render).
+  function showRelationDetails(host: HTMLElement, edge: ContextMapEdge | null): void {
+    if (!edge) {
+      host.hidden = true;
+      host.innerHTML = '';
+      return;
+    }
+    const arrow = edge.bidirectional ? '↔' : '→';
+    const dir = `${escapeHtml(edge.from)} ${arrow} ${escapeHtml(edge.to)}`;
+    const shared = edge.sharedTypes.length ? edge.sharedTypes.map(escapeHtml).join(', ') : '—';
+    const acl = edge.acl.length ? edge.acl.map((a) => escapeHtml(formatAclMapping(a))).join('<br>') : '—';
+    host.innerHTML =
+      `<div class="ctxmap-details-head"><span class="ctxmap-details-kind">${escapeHtml(edge.label ?? 'Relation')}</span>` +
+      `<span class="ctxmap-details-dir">${dir}</span></div>` +
+      `<dl class="ctxmap-details-grid"><dt>Shared types</dt><dd>${shared}</dd><dt>ACL</dt><dd>${acl}</dd></dl>`;
+    host.hidden = false;
+  }
+
+  // Build the panel skeleton (Graph|Table toggle + stage + details strip) once into #panel-contextmap; a
+  // prior `docMessage` (the 'Loading…' line) wiped it, so this rebuilds when absent and returns its parts.
+  function ensureContextMapSkeleton(): { stage: HTMLElement; details: HTMLElement } {
+    const existing = contextMapView.querySelector<HTMLElement>('.ctxmap');
+    if (existing) {
+      return {
+        stage: existing.querySelector<HTMLElement>('.ctxmap-stage')!,
+        details: existing.querySelector<HTMLElement>('.ctxmap-details')!,
+      };
+    }
+    contextMapView.innerHTML = '';
+    const shell = document.createElement('div');
+    shell.className = 'ctxmap';
+
+    const toolbar = document.createElement('div');
+    toolbar.className = 'ctxmap-toolbar';
+    toolbar.setAttribute('role', 'group');
+    toolbar.setAttribute('aria-label', 'Context map view');
+    const makeTab = (mode: ContextMapMode, label: string): HTMLButtonElement => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'ctxmap-tab';
+      b.dataset.ctxmapView = mode;
+      b.textContent = label;
+      b.setAttribute('aria-pressed', String(contextMapMode === mode));
+      b.addEventListener('click', () => setContextMapMode(mode));
+      return b;
+    };
+    toolbar.append(makeTab('graph', 'Graph'), makeTab('table', 'Table'));
+
+    const stage = document.createElement('div');
+    stage.className = 'ctxmap-stage';
+    const details = document.createElement('div');
+    details.className = 'ctxmap-details';
+    details.hidden = true;
+
+    shell.append(toolbar, stage, details);
+    contextMapView.appendChild(shell);
+    return { stage, details };
+  }
+
+  function setContextMapMode(mode: ContextMapMode): void {
+    if (mode === contextMapMode) return;
+    contextMapMode = mode;
+    try {
+      localStorage.setItem(CONTEXT_MAP_VIEW_KEY, mode);
+    } catch {
+      // no persistence available — the in-session choice still applies
+    }
+    void paintContextMap();
+  }
+
+  // Paint the active view from the stored ContextMapResult. A monotonic seq makes a superseded async graph
+  // render (a later toggle/refresh) bail before it touches the DOM; the prior graph handle is disposed first.
+  async function paintContextMap(): Promise<void> {
+    const seq = ++contextMapRenderSeq;
+    disposeContextMapGraph();
+    const { stage, details } = ensureContextMapSkeleton();
+    for (const b of contextMapView.querySelectorAll<HTMLButtonElement>('.ctxmap-tab')) {
+      b.setAttribute('aria-pressed', String(b.dataset.ctxmapView === contextMapMode));
+    }
+    showRelationDetails(details, null);
+
+    const res = lastContextMap;
+    if (!res || (res.contexts.length === 0 && res.relations.length === 0)) {
+      stage.innerHTML = '<p class="muted">No context map declared.</p>';
+      return;
+    }
+
+    if (contextMapMode === 'table') {
+      stage.innerHTML = `<div class="koi-md ctxmap-table">${renderContextMapHtml(res)}</div>`;
+      return;
+    }
+
+    try {
+      const graph = buildContextMapGraph(res);
+      contextMapGraphHandle = await renderContextMapGraph(stage, graph, () => seq === contextMapRenderSeq, {
+        // A context-node click both FILTERS the workspace to that bounded context (only when it's a
+        // real, known context — a synthetic dangling endpoint isn't a valid scope) AND JUMPS to its
+        // `.koi` declaration (#290). The graph node carries the declaration span, so we reuse the same
+        // jump-to-source path the bottom tables use (deps.gotoSourceSpan); a span-less node (a dangling
+        // endpoint or a recovered parse) stays inert to navigation but still filters. This is the
+        // reachable navigate channel for the map: the canvas's own NODE_NAVIGATE_EVENT bubbles within
+        // the bottom strip, which is not under the diagrams container ide.tsx listens on.
+        onContextClick: (n) => {
+          if (contexts.includes(n.qualifiedName)) setActiveContext(n.qualifiedName);
+          if (n.sourceSpan) deps.gotoSourceSpan(n.sourceSpan);
+        },
+        onRelationSelect: (edge) => showRelationDetails(details, edge as ContextMapEdge | null),
+        tooltip: (value) => contextMapTooltip(value),
+      });
+    } catch (e) {
+      if (seq === contextMapRenderSeq) docMessage(stage, 'Could not render the context-map graph: ' + String(e), 'error');
+    }
+  }
+
+  // The docViews slice's 'contextmap' token guards the fetch — a token captured before the await is
+  // compared after, so a superseded fetch (an edit bumped the token) can't clobber a newer render;
+  // markLoaded only takes for the token it fetched. The view (graph/table) is repainted from the result.
+  async function loadContextMapPanel(): Promise<void> {
+    await guardedLoad({
+      store: appStore,
+      key: 'contextmap',
+      loading: () => {
+        disposeContextMapGraph();
+        docMessage(contextMapView, 'Loading context map…');
+      },
+      fetch: () => lsp.contextMap(),
+      render: (res) => {
+        lastContextMap = res;
+        void paintContextMap();
+      },
+      onError: (e) => {
+        disposeContextMapGraph();
+        docMessage(contextMapView, 'Context map request failed: ' + String(e), 'error');
+      },
+    });
   }
 
   // Events + Relationships are Preact panels mounted into their hosts; each subscribes to the store's
@@ -1335,37 +1631,34 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   // fetched. The loading/error states write the host imperatively via docMessage, which unmounts the
   // prior Preact tree first — so the reconciler and the imperative write never fight over the node.
   async function loadEventsPanel(): Promise<void> {
-    const token = appStore.getState().currentToken('events');
-    docMessage(eventsPanel, 'Loading events…');
-    try {
-      const graph = await bottomGraph();
-      if (token !== appStore.getState().currentToken('events')) return;
-      renderPanel(eventsPanel, <EventsPanel store={appStore} graph={graph} handlers={bottomTableHandlers} />);
-      appStore.getState().markLoaded('events', token);
-    } catch (e) {
-      if (token !== appStore.getState().currentToken('events')) return;
-      docMessage(eventsPanel, 'Events request failed: ' + String(e), 'error');
-    }
+    await guardedLoad({
+      store: appStore,
+      key: 'events',
+      loading: () => docMessage(eventsPanel, 'Loading events…'),
+      fetch: () => bottomGraph(),
+      render: (graph) =>
+        renderPanel(eventsPanel, <EventsPanel store={appStore} graph={graph} handlers={bottomTableHandlers} />),
+      onError: (e) => docMessage(eventsPanel, 'Events request failed: ' + String(e), 'error'),
+    });
   }
 
   async function loadRelationshipsPanel(): Promise<void> {
-    const token = appStore.getState().currentToken('relationships');
-    docMessage(relationshipsPanel, 'Loading relationships…');
-    try {
-      const [graph, ctxMap] = await Promise.all([
-        bottomGraph(),
-        lsp.contextMap().catch(() => ({ contexts: [], relations: [] }) as ContextMapResult),
-      ]);
-      if (token !== appStore.getState().currentToken('relationships')) return;
-      renderPanel(
-        relationshipsPanel,
-        <RelationshipsPanel store={appStore} graph={graph} contextMap={ctxMap} handlers={bottomTableHandlers} />,
-      );
-      appStore.getState().markLoaded('relationships', token);
-    } catch (e) {
-      if (token !== appStore.getState().currentToken('relationships')) return;
-      docMessage(relationshipsPanel, 'Relationships request failed: ' + String(e), 'error');
-    }
+    await guardedLoad({
+      store: appStore,
+      key: 'relationships',
+      loading: () => docMessage(relationshipsPanel, 'Loading relationships…'),
+      fetch: () =>
+        Promise.all([
+          bottomGraph(),
+          lsp.contextMap().catch(() => ({ contexts: [], relations: [] }) as ContextMapResult),
+        ]),
+      render: ([graph, ctxMap]) =>
+        renderPanel(
+          relationshipsPanel,
+          <RelationshipsPanel store={appStore} graph={graph} contextMap={ctxMap} handlers={bottomTableHandlers} />,
+        ),
+      onError: (e) => docMessage(relationshipsPanel, 'Relationships request failed: ' + String(e), 'error'),
+    });
   }
 
   // Mark the Events/Relationships/Context Map tables stale (called from invalidateDocViews on any model
@@ -1399,6 +1692,16 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     renderBreadcrumb();
   }
 
+  // Cancel any pending debounce/reset timers. The IDE runs for the page lifetime in production (so this
+  // is a no-op there), but the test suite boots many controllers into one shared happy-dom; disposing
+  // between boots stops a deferred refresh (onDocEdited's 350ms debounce) from firing into a torn-down
+  // environment, where `render` would throw "document is not defined".
+  function dispose(): void {
+    clearTimeout(copyResetTimer);
+    clearTimeout(editDebounce);
+    clearTimeout(bottomPanelDebounce);
+  }
+
   return {
     selection,
     activeContext,
@@ -1422,5 +1725,6 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     ensureModelIndex,
     getCachedDomainIndex,
     init,
+    dispose,
   };
 }

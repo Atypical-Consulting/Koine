@@ -55,11 +55,15 @@ public sealed partial class TypeScriptEmitter : IEmitter
                 _options.ModuleMap
                     .OrderBy(kv => kv.Key, StringComparer.Ordinal)
                     .Select(kv => kv.Key + "=" + kv.Value));
+            var layers = _options.Layers is null
+                ? ""
+                : string.Join(",", _options.Layers.Select(l => l.ToString()).OrderBy(s => s, StringComparer.Ordinal));
             return string.Join(
                 "|",
                 GetType().FullName,
                 "sourceMaps=" + _options.EmitSourceMaps,
                 "refOnly=" + _options.ReferenceOnly,
+                "layers=" + layers,
                 "modules=" + map);
         }
     }
@@ -224,7 +228,16 @@ public sealed partial class TypeScriptEmitter : IEmitter
             }
         }
 
-        // 4. Source maps (gated): attach the per-module declaration segments to the module's
+        // 4. Infrastructure layer (gated, issue #241): concrete repositories over an in-memory store, a
+        //    unit of work, a transactional outbox + dispatcher, validation/transaction behaviors and a
+        //    composition-root factory — the dependency-light TS analogue of the C# `--layers
+        //    infrastructure` output. Off by default, so the domain output above is byte-identical.
+        if (_options.EmitsInfrastructure)
+        {
+            EmitInfrastructure(emit, model, files, typeMapper);
+        }
+
+        // 5. Source maps (gated): attach the per-module declaration segments to the module's
         // EmittedFile and emit a Source Map v3 sidecar alongside it. No-op when the flag is off
         // (SourceMaps stays empty), so the default path is byte-identical.
         if (emit.SourceMaps.Count > 0)

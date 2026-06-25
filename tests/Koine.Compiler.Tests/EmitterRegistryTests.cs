@@ -14,7 +14,7 @@ namespace Koine.Compiler.Tests;
 public class EmitterRegistryTests
 {
     private static readonly string[] UnifiedTargets =
-        { "csharp", "typescript", "python", "php", "rust", "glossary", "docs" };
+        { "csharp", "typescript", "python", "php", "rust", "glossary", "docs", "asyncapi", "openapi" };
 
     [Fact]
     public void Unified_registry_exposes_the_full_target_list_in_display_order()
@@ -75,6 +75,41 @@ public class EmitterRegistryTests
             out var emitter).ShouldBeTrue();
 
         emitter.Emit(EmptyModel()).Single().ShouldBe(StubEmitter.File);
+    }
+
+    [Fact]
+    public void SupportedTargetInfos_carry_display_name_and_extension_in_display_order()
+    {
+        // The registry is the single source of truth for the IDE's emit-target list (issue #282):
+        // each code target carries its display name + file extension. Glossary/docs are not emit
+        // targets and must be excluded, even though they remain in SupportedTargets.
+        new EmitterRegistry().SupportedTargetInfos.ShouldBe(new[]
+        {
+            new EmitTargetInfo("csharp", "C#", ".cs"),
+            new EmitTargetInfo("typescript", "TypeScript", ".ts"),
+            new EmitTargetInfo("python", "Python", ".py"),
+            new EmitTargetInfo("php", "PHP", ".php"),
+            new EmitTargetInfo("rust", "Rust", ".rs"),
+            new EmitTargetInfo("asyncapi", "AsyncAPI", ".yaml"),
+            new EmitTargetInfo("openapi", "OpenAPI", ".yaml"),
+        });
+
+        var ids = new EmitterRegistry().SupportedTargetInfos.Select(i => i.Id).ToArray();
+        ids.ShouldNotContain("glossary");
+        ids.ShouldNotContain("docs");
+    }
+
+    [Fact]
+    public void SupportedTargetInfos_surface_external_providers_using_the_default_metadata()
+    {
+        // A registry target gained → the IDE offers it automatically: an external provider that is an
+        // emit target appears in SupportedTargetInfos. The stub declares no metadata, so the default
+        // interface members apply — display name = target id, extension = ".txt".
+        var registry = new EmitterRegistry(new[] { new StubEmitterProvider() });
+
+        var stub = registry.SupportedTargetInfos.Single(i => i.Id == StubEmitterProvider.TargetName);
+        stub.DisplayName.ShouldBe(StubEmitterProvider.TargetName);
+        stub.FileExtension.ShouldBe(".txt");
     }
 
     [Fact]

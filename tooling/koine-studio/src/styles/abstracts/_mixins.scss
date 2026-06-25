@@ -12,6 +12,14 @@
   box-shadow: var(--koi-shadow);
 }
 
+// Canonical content padding for a side-rail / center tab panel. The Properties inspector
+// (`.koi-inspector`), the Rules/Notes tabs and the center doc surfaces (`.doc-view`) all share it,
+// so their content — and their empty states (`.koi-rview-empty`) — align to the same margin. Single
+// source of truth: change the inset here, every panel follows.
+@mixin rail-panel-pad {
+  padding: var(--koi-space-4) 20px;
+}
+
 // Ghost toolbar button — transparent surface, ink-soft text, lifts to surface/fg on hover.
 // Verbatim from the original `.toolbar-actions button, #btn-check` rules.
 @mixin ghost-button {

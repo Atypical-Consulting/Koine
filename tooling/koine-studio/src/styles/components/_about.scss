@@ -1,4 +1,13 @@
-/* --- about dialog (the app colophon) --- */
+/* --- About settings panel (the app colophon) --- */
+
+/* The colophon used to live in a narrow modal; inside the wider Settings panel, cap its width and
+   centre it so the 2-column link grid and centred text don't stretch the full panel. */
+.koi-about {
+  max-width: 30rem;
+  margin-inline: auto;
+  padding-block: var(--koi-space-4);
+}
+
 .koi-about-logo {
   margin-bottom: var(--koi-space-3-5);
 }

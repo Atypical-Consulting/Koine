@@ -1,9 +1,10 @@
 // Client controller for the Playground IDE. Wires the CodeMirror editor to the wasm compiler
 // and drives the landing-page taste: live diagnostics, compile-on-change + ⌘⏎ run, target
-// switching (C#/TS/Python/glossary) with syntax-highlighted output, a grouped file tree, copy +
+// switching (C#/TS/Python/PHP/glossary/AsyncAPI/OpenAPI) with syntax-highlighted output, a grouped file tree, copy +
 // download-as-zip, a mobile editor/output toggle, and the "Open in Studio" handoff.
 import { createKoineEditor, createOutputView, type KoineEditor, type OutputView, type OutputLang } from './editor';
-import { compile, preloadCompiler, type CompileResult, type Target } from './koine';
+import { capabilities, compile, preloadCompiler, type CompileResult, type Target } from './koine';
+import { registerPlaygroundServiceWorker } from './sw-register';
 import { DEFAULT_SAMPLE } from './samples';
 import { makeZip, downloadBlob } from './zip';
 import { encodeCode } from './encode';
@@ -14,6 +15,8 @@ const TARGET_LANG: Record<Target, OutputLang> = {
   python: 'python',
   php: 'plain',
   glossary: 'plain',
+  asyncapi: 'plain',
+  openapi: 'plain',
 };
 /** Pick the most interesting file to show first: skip runtime + config boilerplate. */
 function defaultFileIndex(result: CompileResult): number {
@@ -32,6 +35,7 @@ export function mountPlayground(root: HTMLElement): void {
   const editorHost = $('.koi-editor')!;
   const viewHost = $('.koi-view')!;
   const statusEl = $('.koi-status')!;
+  const versionEl = $('.koi-version');
   const diagEl = $('.koi-diagnostics')!;
   const filePick = $<HTMLSelectElement>('.koi-filepick');
   const copyBtn = $<HTMLButtonElement>('.koi-copy');
@@ -251,10 +255,28 @@ export function mountPlayground(root: HTMLElement): void {
     };
   }
 
+  // Cache-first the multi-MB wasm runtime so repeat visits boot instantly + offline (issue #328).
+  registerPlaygroundServiceWorker();
+
   // Kick off the runtime download and first compile (landing on a meaningful file).
   setStatus('loading compiler…', 'busy');
   preloadCompiler();
   void run(true);
+
+  // Show the compiler version from the bundle's self-description (#330) — never a hard-coded string.
+  // Persistent (its own element), so the transient compile status in `.koi-status` doesn't clobber it.
+  if (versionEl) {
+    void capabilities()
+      .then((caps) => {
+        // Only render a real version string — never "Koine undefined"/"Koine null" from a malformed payload.
+        if (typeof caps.version === 'string' && caps.version.length > 0) {
+          versionEl.textContent = `Koine ${caps.version}`;
+        }
+      })
+      .catch(() => {
+        /* leave the version label blank if the bundle can't report it */
+      });
+  }
 }
 
 function flash(btn: HTMLButtonElement, text: string) {

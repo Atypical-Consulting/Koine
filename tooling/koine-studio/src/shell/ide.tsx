@@ -8,6 +8,7 @@ import {
   type Location,
   type SourceSpan,
   type StructuredEdit,
+  type TextEdit,
 } from '@/lsp/lsp';
 import {
   fileUriToPath,
@@ -20,10 +21,12 @@ import { createInspectorController } from '@/shell/inspectorController';
 import { getPlatform } from '@/host';
 import { createExplorer } from '@/shell/explorer';
 import { koineMark } from '@/shared/logo';
+import { setEmitTargets } from '@/shared/emitTargets';
 import { initTheme, onThemeChange, toggleTheme } from '@/settings/theme';
 import {
   peekLegacyScratch,
   clearLegacyScratch,
+  effectiveSettings,
   initSecrets,
   loadActiveContext,
   loadSettings,
@@ -32,22 +35,28 @@ import {
   removeRecentFolder,
   saveActiveContext,
   saveWorkspaceCenter,
+  workspaceKeyOf,
   type Settings,
 } from '@/settings/persistence';
 import { createWelcome } from '@/welcome/welcome';
+import { takeStartIntent, type StartIntent } from '@/shell/bootIntent';
 import { type Template } from '@/welcome/templates';
 import { createCommandPalette, type Command } from '@/shared/palette';
+import { layoutCommands, type LayoutActions } from '@/shell/layoutCommands';
+import { loadLayout, saveLayout, type LayoutState } from '@/shell/layoutStore';
+import { devCommands } from '@/shell/devCommands';
 import { createPreferences } from '@/settings/prefs';
 import { applyAppearance } from '@/settings/appearance';
-import { initSplitResizer, initEdgeResizer } from '@/shell/resize';
+import { initEdgeResizer, initGroupResizer } from '@/shell/resize';
 import { createHelpOverlay } from '@/shared/help';
-import { createAboutDialog } from '@/welcome/about';
 import { createGenerateProject } from '@/export/generateProjectWizard';
 import { sanitizeProjectName } from '@/export/generateProject';
 import { buildSourceZip } from '@/export/sourceZip';
+import { exportDiagram } from '@/export/diagramExport';
+import { getActiveDomainExport } from '@/diagrams/diagrams';
 import { formatChord } from '@/shared/platform';
 import {
-  DIAGRAM_ADD_TYPE_EVENT,
+  DIAGRAM_ANNOTATION_CREATE_EVENT,
   DIAGRAM_CONNECT_EVENT,
   DIAGRAM_DISCONNECT_EVENT,
   DIAGRAM_RELAYOUT_EVENT,
@@ -55,30 +64,40 @@ import {
   NODE_EDIT_EVENT,
   NODE_NAVIGATE_EVENT,
   setDiagramEditing,
+  type AddNodeKind,
+  type AggregateMemberKind,
+  type CanvasAnnotationKind,
+  type DiagramAnnotationCreateDetail,
   type DiagramConnectDetail,
   type DiagramDisconnectDetail,
   type DiagramNodeEditDetail,
   type DiagramNodeNavigateDetail,
   type EmptyConceptKind,
   type EmptyStatePickDetail,
-} from '@/diagrams/diagrams-svg';
+} from '@/diagrams/diagramContract';
 import { isAllContexts } from '@/model/activeContext';
 import { appStore } from '@/store/index';
 import { badgeCounts, createDiagCountGate } from '@/diagnostics/diagCountGate';
+import { severityErrorOrWarning } from '@/lsp/severity';
 import { type SelectedElement } from '@/model/selection';
 import { resolveInspectableQn } from '@/model/modelIndex';
 import { type InspectorElement } from '@/model/inspector';
 import { createAssistantPanel, type AssistantPanel, type AssistantContext } from '@/ai/aiPanel';
+import { createScenarioPanel, type ScenarioPanel } from '@/scenarios/scenarioPanel';
 import { clearModelHash, readModelFromHash, workspaceShareUrlOrNull } from '@/export/share';
 import { handleBeforeUnload } from '@/shell/dirty';
 import { render } from 'preact';
 import { createHistoryController } from '@/shell/historyController';
 import { HistoryControls } from '@/shell/HistoryControls';
+import { MobileZoneBar } from '@/shell/MobileZoneBar';
+import { type MobileZone } from '@/store/slices/uiChrome';
+import { BP_NARROW } from '@/shared/breakpoint';
 import { UnsavedIndicator } from '@/shell/UnsavedIndicator';
 import { WorkspaceProblemsBadge } from '@/diagnostics/WorkspaceProblemsBadge';
-import { StoreInspector } from '@/shell/StoreInspector';
 import { createWorkspaceController, type WorkspaceController } from '@/shell/workspaceController';
-import { createConfirmDialog } from '@/shared/overlay';
+import { createSearchPanel } from '@/shell/searchController';
+import { type Match } from '@/shell/workspaceSearch';
+import { createConfirmDialog, createPromptDialog } from '@/shared/overlay';
 
 // --- workspace fs contract ---------------------------------------------------
 // `KoiFile` (path / name / relPath) is provided by the host platform layer (src/host), whose
@@ -139,7 +158,7 @@ const BLANK = `context NewModel {
 }
 `;
 
-// Starter shapes the empty-canvas doorways seed (diagrams-svg EMPTY_STATE_PICK_EVENT). Each is a strict
+// Starter shapes the empty-canvas doorways seed (the EMPTY_STATE_PICK_EVENT contract). Each is a strict
 // subset of a validated template (templates/starters/{ordering,contextmap}) so it always compiles green;
 // seeding one into a fresh model lights up the canvas immediately. A trailing comment points at the next
 // edit so the modeller knows the starter is theirs to grow.
@@ -214,7 +233,7 @@ function el<T extends HTMLElement>(id: string): T {
   return node as T;
 }
 
-export function init(): void {
+export function init(): () => void {
   // The host backend: the Tauri desktop shell, or a plain browser (compiler via WASM, files via
   // the File System Access API). Everything host-specific — the LSP transport, folder/file I/O,
   // dialogs, the app version — goes through this.
@@ -304,17 +323,31 @@ export function init(): void {
   // a scope pick through its persist-and-repaint choke point. It renders into #breadcrumb-host from init().
 
   // Dev-facing live store inspector (#193 follow-up): a read-only overlay of what the app store thinks
-  // right now, toggled from the command palette. Its host is created lazily on first toggle and the
-  // panel rendered once (it tracks the store thereafter); toggling just flips the host's hidden flag.
+  // right now, toggled from the command palette. Registered only in dev builds (see devCommands), and
+  // the panel is dynamic-import()ed here so its chunk never ships in production — the dev-only command
+  // is its sole caller, so in a vite build the import is unreachable and drops out of the bundle.
+  // The host is created lazily on first toggle and the panel rendered once (it tracks the store
+  // thereafter); toggling just flips the host's hidden flag.
   let storeInspectorHost: HTMLElement | null = null;
-  function toggleStoreInspector(): void {
+  let storeInspectorMounting = false;
+  async function toggleStoreInspector(): Promise<void> {
     if (!storeInspectorHost) {
-      // First invocation: create the host (visible by default) and render the panel once. Return here
-      // so we don't immediately flip it back to hidden — the first toggle SHOWS it.
-      storeInspectorHost = document.createElement('div');
-      storeInspectorHost.className = 'koi-store-inspector-overlay';
-      document.body.appendChild(storeInspectorHost);
-      render(<StoreInspector store={appStore} />, storeInspectorHost);
+      // First invocation: load the panel chunk, create the host (visible by default) and render once.
+      // Guard against a double-click racing two mounts while the dynamic import is in flight. Return
+      // here so we don't immediately flip it back to hidden — the first toggle SHOWS it.
+      if (storeInspectorMounting) return;
+      storeInspectorMounting = true;
+      try {
+        const { StoreInspector } = await import('@/shell/StoreInspector');
+        storeInspectorHost = document.createElement('div');
+        storeInspectorHost.className = 'koi-store-inspector-overlay';
+        document.body.appendChild(storeInspectorHost);
+        render(<StoreInspector store={appStore} />, storeInspectorHost);
+      } finally {
+        // Always clear the flag — even if the dynamic import rejects — so a failed first attempt
+        // doesn't wedge the toggle permanently.
+        storeInspectorMounting = false;
+      }
       return;
     }
     storeInspectorHost.hidden = !storeInspectorHost.hidden;
@@ -331,6 +364,40 @@ export function init(): void {
   // the other and there's no circular import. `workspace` is forward-declared here for those thunks.
   let workspace: WorkspaceController;
 
+  // The current workspace's stable override key (a hash of its sorted roots), or null when no folder
+  // is open — the workspace-scoped settings (previewTarget/formatOnSave/wordWrap/lspTrace) merge over
+  // the user settings under this key. A `function` declaration so it can reference `workspace` (assigned
+  // below): every call happens at runtime, long after construction, so the hoisted binding is safe.
+  function wsKey(): string | null {
+    const rs = workspace.rootsList();
+    return rs.length ? workspaceKeyOf(rs) : null;
+  }
+
+  // Apply the workspace-scoped fields that need a LIVE push (word-wrap on both surfaces, the preview
+  // target relabel) from an already-resolved effective Settings. Shared by the prefs onChange, a folder
+  // open, and a root-set change so the three call sites can never drift. (format-on-save reads through
+  // the live getFormatOnSave thunk; lspTrace has no live consumer — see #264.)
+  function applyEffectiveScoped(eff: Settings): void {
+    editor.setLineWrap(eff.wordWrap);
+    output.setLineWrap(eff.wordWrap);
+    controller.onPreviewTargetChanged(eff.previewTarget);
+  }
+
+  // Adding or removing a workspace root changes the workspace identity: folderRootToken() may now point
+  // at a different primary folder and wsKey() hashes a different root set, so every folder-derived view
+  // and every workspace-scoped behavior must re-sync — exactly like a folder open, minus restoreActive-
+  // Context (an additive root change keeps the user's current bounded-context scope rather than resetting
+  // it). Without this, removing the primary root strands the Docs/layout/diagram stores on the dead key
+  // (#174) and a per-workspace word-wrap/preview-target override goes stale until an unrelated event.
+  function onRootSetChanged(): void {
+    appStore.getState().setFolderRootToken(workspace.folderRootToken());
+    controller.invalidateDocViews();
+    controller.invalidateDocsPanel();
+    void controller.refreshContextList();
+    controller.refreshActiveSurfaces();
+    applyEffectiveScoped(effectiveSettings(settings, wsKey()));
+  }
+
   // The editor ↔ LSP + diagnostics wiring (issue #180, Task 3): owns the CodeMirror editor and its
   // callback wall (hover/completion/definition/rename/references/code-actions → lsp.*), the per-uri
   // diagnostics cache, the status pill + diagnostics strip, and the LSP publishDiagnostics/exit
@@ -343,8 +410,14 @@ export function init(): void {
 
   const editorSession = createEditorSession({
     parent: el('editor-pane'),
+    // The second editor group (group B) mounts here when the user splits the editor; docFor reads a
+    // uri's live text from the shared buffer set so opening a file in B shows the same content group A
+    // would. Both are wired through the layout commands + boot below (Task 4 / issue #265).
+    groupBParent: el('editor-pane-b'),
+    docFor: (uri) => workspace.buffers.get(uri)?.text ?? '',
     doc: initialDoc,
     lineWrap: settings.wordWrap,
+    minimap: settings.enableMinimap,
     lsp,
     status: statusEl,
     diagCount: diagCountEl,
@@ -367,17 +440,28 @@ export function init(): void {
   const setStatus = editorSession.setStatus;
 
   // The buffer/dirty/tree half of the editor's onChange (the editor↔LSP sync runs inside
-  // editorSession; the buffer text+dirty update lives in workspace.syncActiveBuffer). Preserves the
-  // original effect order: welcome.hide → buffer text+dirty → onDocEdited → renderTree (only when the
-  // active file's dirty dot just appeared).
-  editorSession.onChange((doc) => {
-    // First edit dismisses the welcome overlay (shown only on a pristine first-run workspace).
+  // editorSession; the buffer text+dirty update lives in workspace.syncBuffer). The callback carries
+  // the EDITING group's uri (group A's active uri, or group B's current uri) so the edit syncs into
+  // the right buffer — a group-B edit must never write group A's (active) buffer (#265). Preserves the
+  // original effect order: welcome.hide → buffer text+dirty → onDocEdited → renderTree (only when that
+  // file's dirty dot just appeared). The active-file-only side effects (recompile via onDocEdited,
+  // history.noteEdit) are gated on `uri === activeUri()`: they are group-A/active-file concerns and a
+  // background B edit must not drive the active file's recompile or undo history.
+  editorSession.onChange((doc, uri) => {
+    // First edit dismisses the welcome overlay (shown only on a pristine first-run workspace). Both
+    // groups dismiss it.
     if (welcome.visible) welcome.hide();
-    const becameDirty = workspace.syncActiveBuffer(doc);
-    controller.onDocEdited();
-    if (!history.isRestoring) history.noteEdit();
-    // Re-render the tree only when the active file's dirty dot just appeared (cheap path).
+    // Sync into the EDITING group's own buffer (active or B), flipping its dirty flag on first change.
+    const becameDirty = workspace.syncBuffer(uri, doc);
+    if (uri === workspace.activeUri()) {
+      // Active-file-only effects: recompile the active doc views + record the edit in undo history.
+      controller.onDocEdited();
+      if (!history.isRestoring) history.noteEdit();
+    }
+    // Re-render the tree only when THIS file's dirty dot just appeared — so B's dirty badge shows too.
     if (becameDirty) workspace.renderTree();
+    // Arm the idle auto-save debounce for both groups (a no-op unless Auto-save is on); B autosaves too.
+    workspace.scheduleAutoSave();
   });
 
   const treeBodyEl = el<HTMLElement>('filetree-body');
@@ -415,7 +499,7 @@ export function init(): void {
   // The workspace file explorer. It deals in opaque fs tokens; ide.ts maps token ↔ file:// uri
   // (pathToFileUri) to keep `buffers`, `activeUri` and the LSP workspace coherent on every mutation.
   const explorer = createExplorer({
-    onOpenFile: (token) => void workspace.openFileToken(token),
+    onOpenFile: (token) => void openFileInFocusedGroup(token),
     onNewFile: (parentDirToken, name) => void workspace.handleNewFile(parentDirToken, name),
     onNewFolder: (parentDirToken, name) => void workspace.handleNewFolder(parentDirToken, name),
     onRename: (entry, newName) => void workspace.handleRename(entry, newName),
@@ -425,6 +509,13 @@ export function init(): void {
     isActive: (token) => pathToFileUri(token) === workspace.activeUri(),
     isDirty: (token) => workspace.buffers.get(pathToFileUri(token))?.dirty ?? false,
     diagCounts: (token) => diagCounts(pathToFileUri(token)),
+    // Multi-root workspace: the head "Add folder" affordance unions a second folder in as a new root;
+    // each group's "Remove" affordance drops just that root's files.
+    onAddRoot: () => void addRootViaPicker(),
+    onRemoveRoot: (root) => {
+      workspace.removeRoot(root);
+      onRootSetChanged();
+    },
   });
   treeBodyEl.appendChild(explorer.el);
 
@@ -447,6 +538,38 @@ export function init(): void {
     editor.gotoRange(loc.range.start, loc.range.end);
   }
 
+  // Route a USER-INITIATED "open this file" affordance (a file-tree click, a Go-to-File palette pick)
+  // to whichever editor group has focus. Group A is primary: when it is focused this is the normal
+  // openFileToken/activateFile path that changes workspace.activeUri(). When group B is focused the
+  // file loads into B as a SECONDARY view — group A's active file AND workspace.activeUri() stay
+  // untouched. The buffer is ensured open first (#265) so editorSession.docFor and the LSP have its
+  // text before B reads it. Only these UI affordances honour focus; programmatic navigations
+  // (navigateToDefinition above, diagram/inspector jumps) deliberately bypass this and always target
+  // group A via workspace.activateFile. Takes an fs token (what the explorer hands us).
+  async function openFileInFocusedGroup(token: string): Promise<void> {
+    if (editorSession.focusedGroup() === 'b' && editorSession.groupBEditor()) {
+      const uri = await workspace.ensureBuffer(token);
+      if (uri) {
+        editorSession.openFocusedGroup(uri);
+        persistGroupBUri(uri); // remember B's new file so reload restores it (#265)
+      }
+      return;
+    }
+    await workspace.openFileToken(token);
+  }
+
+  // The uri-keyed twin of openFileInFocusedGroup for affordances that already hold an open buffer's
+  // uri (the Go-to-File palette iterates workspace.buffers, so the buffer is already loaded — no
+  // ensureBuffer needed). Same focus contract: B when focused+open, else the group-A activateFile path.
+  function openUriInFocusedGroup(uri: string): void {
+    if (editorSession.focusedGroup() === 'b' && editorSession.groupBEditor()) {
+      editorSession.openFocusedGroup(uri);
+      persistGroupBUri(uri); // remember B's new file so reload restores it (#265)
+    } else {
+      workspace.activateFile(uri);
+    }
+  }
+
   // Replace the active document's contents (used by the AI "Apply to editor" action). Setting the
   // editor doc dispatches a change, so the editor's onChange handler runs the full sync pipeline
   // (buffer text, lsp.changeDoc, doc-view refresh, tree) — don't repeat it here.
@@ -466,6 +589,7 @@ export function init(): void {
     editor: { view: editor.view, goto: editor.goto, gotoRange: editor.gotoRange },
     output,
     platform,
+    store: appStore,
     activeUri: () => workspace.activeUri(),
     folderRootToken: () => workspace.folderRootToken(),
     initialTarget: settings.previewTarget,
@@ -478,8 +602,14 @@ export function init(): void {
     onSaveElementDescription: (element, text) => void saveInspectorDescription(element, text),
     onSaveGlossaryDescription: (entry, text) => saveDescription(entry, text),
     onApplyStructuredEdit: (edit, successMsg) => void applyStructuredEdit(edit, successMsg),
+    onAddConstruct: (kind) => void applyDiagramAddType({ kind }),
+    onAddAnnotation: (kind) => createCanvasAnnotation(kind),
+    onAddAggregateMember: (kind, aggregateQn) => void applyDiagramAddAggregateMember(kind, aggregateQn),
+    onExportDiagram: (format) => void exportActiveDiagram(format),
+    onCopyDiagramMermaid: () => void copyActiveDiagramMermaid(),
     gotoSourceSpan: (span) => void gotoSourceSpan(span),
     ensureAssistant: () => ensureAssistant(),
+    ensureScenarios: () => ensureScenarios(),
     initEdgeResizer,
   });
   // Thin shims over the app store (the single source of truth) for the two state reads ide.ts needs:
@@ -612,8 +742,6 @@ export function init(): void {
     const detail = (e as CustomEvent<DiagramDisconnectDetail>).detail;
     if (detail) void applyDiagramDisconnect(detail);
   });
-  diagramsView.addEventListener(DIAGRAM_ADD_TYPE_EVENT, () => void applyDiagramAddType());
-
   // Empty-canvas doorway: seed a validated starter for the picked concept. Non-destructive — an untouched
   // BLANK seed is replaced outright (the common first-run case), otherwise the starter is appended so no
   // existing work is lost. The buffer edit fires onDocEdited → the canvas re-renders with real nodes.
@@ -689,7 +817,14 @@ export function init(): void {
   async function applyDiagramConnect(detail: DiagramConnectDetail): Promise<void> {
     const targetSimple = detail.targetQualifiedName.slice(detail.targetQualifiedName.lastIndexOf('.') + 1);
     const suggested = targetSimple.charAt(0).toLowerCase() + targetSimple.slice(1);
-    const fieldName = window.prompt(`Add a field on ${detail.sourceLabel} referencing ${detail.targetLabel}:`, suggested)?.trim();
+    const fieldName = await promptDialog.ask({
+      title: 'Add field',
+      message: `On ${detail.sourceLabel}, referencing ${detail.targetLabel}.`,
+      label: 'Field name',
+      initialValue: suggested,
+      mono: true,
+      confirmLabel: 'Add field',
+    });
     if (!fieldName) return;
     await applyStructuredEdit(
       { kind: 'addField', target: detail.sourceQualifiedName, name: fieldName, type: targetSimple },
@@ -699,21 +834,91 @@ export function init(): void {
 
   // Removing a relationship = removing the field that backs it.
   async function applyDiagramDisconnect(detail: DiagramDisconnectDetail): Promise<void> {
-    if (!window.confirm(`Remove ${detail.label}? This rewrites the .koi source.`)) return;
+    const ok = await confirmDialog.ask({
+      title: `Remove ${detail.label}?`,
+      message: 'This rewrites the .koi source.',
+      confirmLabel: 'Remove',
+      danger: true,
+    });
+    if (!ok) return;
     await applyStructuredEdit({ kind: 'removeMember', target: detail.backingMember }, `Removed ${detail.label}`);
   }
 
-  // Adding a node = inserting a new value-object skeleton into the active context (addType). The canvas
-  // doesn't know the contexts, so the target is the active scope; the user names the type.
-  async function applyDiagramAddType(): Promise<void> {
-    const scope = activeContext.get();
+  // Adding a node = inserting a new construct skeleton into the active context (addType). The canvas
+  // doesn't know the contexts, so the target is the active scope; the kind comes from the palette button
+  // (defaulting to value) and the user names the type.
+  const ADD_DEFAULT_NAME: Record<AddNodeKind, string> = {
+    value: 'NewValue',
+    entity: 'NewEntity',
+    aggregate: 'NewAggregate',
+    event: 'NewEvent',
+    enum: 'NewEnum',
+    service: 'NewService',
+  };
+
+  // Canvas-only annotations (#255): a note/group is a VIEW concern (persisted in koine.layout.json, never
+  // `.koi`), so creation is delegated to the renderer — the holder of the live graph + current selection —
+  // via a document event. The renderer prompts for the text/label, places the cell behind the nodes, and
+  // persists it. No model edit and no LSP round-trip, unlike applyDiagramAddType below.
+  function createCanvasAnnotation(kind: CanvasAnnotationKind): void {
+    document.dispatchEvent(
+      new CustomEvent<DiagramAnnotationCreateDetail>(DIAGRAM_ANNOTATION_CREATE_EVENT, { detail: { kind } }),
+    );
+  }
+
+  async function applyDiagramAddType(detail?: { kind: AddNodeKind }): Promise<void> {
+    let scope = activeContext.get();
     if (isAllContexts(scope)) {
-      setStatus('Pick a bounded context (top-left) before adding a type', 'error');
+      // "All contexts" has no unambiguous home — except when the model has exactly one context, which is
+      // then the only possible target (the palette enables its buttons to match). 2+ contexts still need
+      // a deliberate pick.
+      const all = appStore.getState().contexts;
+      if (all.length !== 1) {
+        setStatus('Pick a bounded context (top-left) before adding a type', 'error');
+        return;
+      }
+      scope = all[0];
+    }
+    const kind = detail?.kind ?? 'value';
+    const name = await promptDialog.ask({
+      title: `New ${kind}`,
+      message: `In ${scope}.`,
+      label: 'Name',
+      initialValue: ADD_DEFAULT_NAME[kind],
+      mono: true,
+      confirmLabel: 'Create',
+    });
+    if (!name) return;
+    // The AddNodeKind string IS the construct keyword the server's TryAddType switches on (StructuredEdit.Type).
+    await applyStructuredEdit({ kind: 'addType', target: scope, name, type: kind }, `Added ${name} to ${scope}`);
+  }
+
+  // Insert a construct that lives INSIDE an aggregate (#254). Unlike applyDiagramAddType, the target is the
+  // SELECTED aggregate's qualified name (the palette gates these buttons on an aggregate selection), and the
+  // edit is `addAggregateMember`. A rule (an aggregate-scoped `spec`) is named; a repository is anonymous,
+  // so it inserts directly. The Type string IS the member keyword the server's TryAddAggregateMember switches on.
+  async function applyDiagramAddAggregateMember(kind: AggregateMemberKind, aggregateQn: string): Promise<void> {
+    const aggregateName = aggregateQn.split('.').pop() ?? aggregateQn;
+    if (kind === 'rule') {
+      const name = await promptDialog.ask({
+        title: 'New rule',
+        message: `An aggregate-scoped specification over ${aggregateName}.`,
+        label: 'Name',
+        initialValue: 'NewRule',
+        mono: true,
+        confirmLabel: 'Create',
+      });
+      if (!name) return;
+      await applyStructuredEdit(
+        { kind: 'addAggregateMember', target: aggregateQn, name, type: 'rule' },
+        `Added rule ${name} to ${aggregateName}`,
+      );
       return;
     }
-    const name = window.prompt(`New value type in ${scope}:`, 'NewType')?.trim();
-    if (!name) return;
-    await applyStructuredEdit({ kind: 'addType', target: scope, name }, `Added ${name} to ${scope}`);
+    await applyStructuredEdit(
+      { kind: 'addAggregateMember', target: aggregateQn, type: 'repository' },
+      `Added a repository to ${aggregateName}`,
+    );
   }
 
   // Clicking a diagram node both jumps to its declaration AND selects it, so the element inspector
@@ -741,7 +946,15 @@ export function init(): void {
 
   // --- open folder (directory-mode workspace) -------------------------------
 
-  el<HTMLButtonElement>('btn-open-folder').addEventListener('click', () => void openFolder());
+  const openFolderBtn = el<HTMLButtonElement>('btn-open-folder');
+  openFolderBtn.addEventListener('click', () => void openFolder());
+  // Opening a folder relies on the File System Access API (Chromium-only). On browsers without it, the
+  // button would look active but only ever raise an error toast — so disable it with an explanatory
+  // tooltip rather than leaving a dead control. (Examples + share links + in-memory editing still work.)
+  if (!platform.canOpenFolders) {
+    openFolderBtn.disabled = true;
+    openFolderBtn.title = 'Opening a folder needs a Chromium-based browser (try Chrome or Edge)';
+  }
 
   async function openFolder(): Promise<void> {
     if (!platform.canOpenFolders) {
@@ -758,6 +971,29 @@ export function init(): void {
     }
     if (!folder) return; // cancelled
     await workspace.openFolderPath(folder);
+  }
+
+  // ADDITIVE multi-root open (the explorer's "Add folder" affordance): pick a folder and union its
+  // .koi files into the current workspace as a new root WITHOUT closing the open buffers — mirrors
+  // openFolder's guard/picker/try-catch, but calls addRoot instead of openFolderPath.
+  async function addRootViaPicker(): Promise<void> {
+    if (!platform.canOpenFolders) {
+      setStatus('opening a folder needs a Chromium-based browser', 'error');
+      return;
+    }
+    let folder: string | null;
+    try {
+      folder = await platform.pickFolder('Add a folder to the workspace');
+    } catch (e) {
+      setStatus('could not open folder picker', 'error');
+      console.error('Add folder dialog failed:', e);
+      return;
+    }
+    if (!folder) return; // cancelled
+    const result = await workspace.addRoot(folder);
+    // Only re-sync the folder-derived views + scoped behaviors when the root set actually changed; an
+    // unreadable/empty pick (or an already-open root) leaves the workspace untouched.
+    if (result.ok) onRootSetChanged();
   }
 
   // The workspace lifecycle (buffers + open/save/dirty + file mutations, src/workspaceController.ts,
@@ -789,7 +1025,7 @@ export function init(): void {
       editorSession.clearDiagnostics();
       diagCountGate.reset();
     },
-    getFormatOnSave: () => settings.formatOnSave,
+    getFormatOnSave: () => effectiveSettings(settings, wsKey()).formatOnSave,
     // A folder finished opening: restore this workspace's bounded-context scope (#146) BEFORE the
     // first scoped render and refresh the switcher's options from the new model. The bus value drives
     // the render paths, so the initial ensureLoaded is already scoped even before the dropdown
@@ -803,6 +1039,11 @@ export function init(): void {
       controller.invalidateDocsPanel();
       void controller.refreshContextList();
       controller.refreshActiveSurfaces();
+      // Switching folders changes wsKey(), so re-apply the now-effective workspace-scoped behaviors:
+      // this folder's overrides for word-wrap and preview target take effect immediately. (format-on-
+      // save reads through the live getFormatOnSave thunk, so it auto-picks up; lspTrace has no live
+      // re-application site here — its override surfaces on next read.)
+      applyEffectiveScoped(effectiveSettings(settings, wsKey()));
     },
     // The active buffer was deleted and the workspace is now empty: reset to a fresh blank model.
     onWorkspaceEmptied: () => void newModel(),
@@ -813,6 +1054,9 @@ export function init(): void {
     showFileTreeChrome,
     hideWelcome: () => welcome.hide(),
   });
+  // Arm idle auto-save from the persisted setting so it's live at boot (the prefs onChange re-applies
+  // it on every toggle); a no-op until an edit calls scheduleAutoSave above.
+  workspace.setAutoSave(settings.autoSave);
   // The workspace-level undo/redo timeline (code = the single source of truth). It snapshots the open
   // buffers' text; restore writes code back and onRestored re-derives every view. canUndo/canRedo are
   // published into the store for the <HistoryControls> buttons.
@@ -842,6 +1086,29 @@ export function init(): void {
     />,
     el('history-controls-host'),
   );
+
+  // The bottom mobile zone switcher (#220): a tablist shown only below $bp-narrow that picks which of
+  // the four zones (Files / Code / Diagram / Props) fills the single-column phone shell. Selecting a
+  // zone writes the store; Code/Diagram additionally flip the center tab (both live in #center, so the
+  // center tab decides which surface shows). The active zone is mirrored onto #split[data-mobile-zone]
+  // so the @media rules can show/hide zones without remounting any DOM.
+  function selectMobileZone(zone: MobileZone): void {
+    appStore.getState().setMobileZone(zone);
+    if (zone === 'diagram') controller.selectCenter('visual');
+    else if (zone === 'code') controller.selectCenter('technical');
+  }
+  render(<MobileZoneBar store={appStore} onSelect={selectMobileZone} />, el('mobile-zone-bar-host'));
+  splitEl.dataset.mobileZone = appStore.getState().mobileZone;
+  // Mirror only when mobileZone actually changes — the listener fires on every store write, so guard
+  // on prevState (the inspectorController idiom) to avoid rewriting the attribute on unrelated updates.
+  appStore.subscribe((s, prev) => {
+    if (s.mobileZone !== prev.mobileZone) splitEl.dataset.mobileZone = s.mobileZone;
+  });
+  // On a narrow (phone) first paint, land on the default mobile zone's surface so the bottom bar's
+  // active tab and the visible #center surface agree from the start — otherwise the bar highlights the
+  // default 'code' zone while #center still shows the desktop-restored Visual surface until the first
+  // tap. Gated on BP_NARROW (the JS mirror of $bp-narrow) so the desktop shell keeps its restored center.
+  if (window.innerWidth <= BP_NARROW) selectMobileZone(appStore.getState().mobileZone);
   // Switching files: repaint the active file's diagnostics, invalidate the doc views so they re-fetch,
   // and follow the new file's bounded context. Preserves the exact effect order of the old activateFile.
   workspace.onActiveChanged((uri) => {
@@ -859,19 +1126,70 @@ export function init(): void {
     history.noteEdit({ immediate: true });
   });
 
-  // Boot/empty-state: open the host's persistent default workspace, then surface the welcome overlay
-  // only when it is pristine (a single untouched SEED model). The clearLegacyScratch + the OPFS-error
-  // output line are ide-specific, so they wrap workspace.openDefaultWorkspaceFlow here.
+  // Boot/empty-state: open the host's persistent default workspace. The clearLegacyScratch + the
+  // OPFS-error output line are ide-specific, so they wrap workspace.openDefaultWorkspaceFlow here.
+  // NOTE: this no longer surfaces the welcome screen. Home is now a distinct route (#368) mounted by
+  // the boot switch (main.ts) — the IDE only runs on the editor route, so a pristine boot lands on the
+  // Home route and never paints the editor first. Showing the welcome overlay here is exactly the
+  // async-gated, post-paint reveal that caused the IDE→Home flash, so it's gone.
   async function openDefaultWorkspaceFlow(seed: string): Promise<void> {
-    const { opened, pristineSeed } = await workspace.openDefaultWorkspaceFlow(seed);
+    const { opened } = await workspace.openDefaultWorkspaceFlow(seed);
     if (!opened) {
-      output.setContent('// Koine Studio needs OPFS (a modern browser) to store your model.', 'plain');
+      // The browser now falls back to an in-memory workspace, so this only fires if even that failed
+      // (or a host that genuinely can't back one). An honest message beats a blank editor.
+      output.setContent('// Koine Studio could not open a workspace in this browser.', 'plain');
       return;
     }
     // Token confirmed — the workspace is open. Clear the legacy scratch key now so the migration is
     // non-destructive: content was never lost even if OPFS was unavailable on a prior load.
     clearLegacyScratch();
-    if (pristineSeed && pristineSeed.text === SEED) welcome.show();
+    // No-OPFS browsers (Safari / Firefox Private) run on the in-memory fallback: the editor + compiler
+    // work, but a reload loses everything. Warn once so the user exports their work rather than losing it.
+    if (!platform.persistsWorkspace) showMemoryOnlyBanner();
+  }
+
+  // Perform the action the user chose on the Home route (#368), handed across via the start-intent.
+  // These reuse the same action functions the in-editor start console wires, so a Home "Open folder"
+  // behaves exactly like the editor's own — there's no second code path to keep in sync. No unsaved
+  // work can exist at a fresh boot, so these skip the confirm-and-replace guard the in-editor versions
+  // apply (newModel directly, not requestNewModel).
+  async function runStartIntent(intent: StartIntent): Promise<void> {
+    switch (intent.kind) {
+      case 'new':
+        await newModel();
+        break;
+      case 'open-folder':
+        await openFolder();
+        break;
+      case 'open-recent':
+        await openRecentFolder(intent.path);
+        break;
+      case 'open-example':
+        await openExample(intent.template);
+        break;
+    }
+  }
+
+  // A one-time, dismissible top banner shown when the workspace is memory-only (no OPFS) — so work
+  // that won't survive a reload is never lost silently. Points at the durable escape hatches.
+  function showMemoryOnlyBanner(): void {
+    if (document.getElementById('koi-memory-banner')) return;
+    const bar = document.createElement('div');
+    bar.id = 'koi-memory-banner';
+    bar.className = 'koi-memory-banner';
+    bar.setAttribute('role', 'status');
+    const msg = document.createElement('span');
+    msg.className = 'koi-memory-banner-msg';
+    msg.textContent =
+      'This browser can’t save to disk — your work lives only in this tab and is lost on reload. Use “Copy shareable link”, or open Studio in Chrome/Edge to keep it.';
+    const dismiss = document.createElement('button');
+    dismiss.type = 'button';
+    dismiss.className = 'koi-memory-banner-dismiss';
+    dismiss.setAttribute('aria-label', 'Dismiss');
+    dismiss.textContent = '✕';
+    dismiss.addEventListener('click', () => bar.remove());
+    bar.append(msg, dismiss);
+    document.getElementById('app')?.prepend(bar);
   }
 
   // True when the command palette or a modal dialog (prefs/help/about) is open, so global
@@ -984,7 +1302,9 @@ export function init(): void {
     const files = template.files?.length
       ? template.files
       : [{ relPath: 'model.koi', contents: template.source }];
-    const token = await platform.materializeWorkspace(template.id, files);
+    // persist:true — keep the example's OPFS workspace across reloads so edits aren't silently lost;
+    // re-opening the same example reuses it (seeded only on first open).
+    const token = await platform.materializeWorkspace(template.id, files, true);
     if (!token) {
       setStatus('could not open template', 'error');
       return;
@@ -1023,10 +1343,12 @@ export function init(): void {
     }
   }
 
-  // Reopen the start screen ("home"). Non-destructive: it's an overlay over the current model, so
-  // showing it loses nothing — only its actions navigate. Wired to the brand logo and the palette.
+  // Return to the Home route (#368): Home and the editor are distinct routes now, so "back to start"
+  // navigates rather than popping an overlay over the editor. The boot switch (main.ts) swaps #app out
+  // and mounts the Home view; the editor stays initialised behind it for an instant return. Wired to
+  // the brand logo and the palette.
   function goHome(): void {
-    welcome.show();
+    appStore.getState().navigate('home');
   }
 
   // A start-screen action that swaps the workspace. Confirms unsaved work first. On cancel we do
@@ -1057,25 +1379,117 @@ export function init(): void {
     }
   }
 
-  const welcome = createWelcome({
-    onNewModel: () => void requestNewModel(),
-    onOpenFolder: () => void leaveHomeFor('Open a folder?', () => openFolder()),
-    onOpenRecent: (path) => void leaveHomeFor('Open this folder?', () => openRecentFolder(path)),
-    onOpenExample: (template) => void leaveHomeFor('Open this template?', () => openExample(template)),
-  });
+  const welcome = createWelcome(
+    {
+      onNewModel: () => void requestNewModel(),
+      onOpenFolder: () => void leaveHomeFor('Open a folder?', () => openFolder()),
+      onOpenRecent: (path) => void leaveHomeFor('Open this folder?', () => openRecentFolder(path)),
+      onOpenExample: (template) => void leaveHomeFor('Open this template?', () => openExample(template)),
+    },
+    undefined, // templates default to the bundled set
+    platform.canOpenFolders,
+  );
 
   const palette = createCommandPalette(() => getCommands());
+
+  // Workspace search (Mod-Shift-F): a non-modal panel that scans every .koi file in the open folder
+  // via the pure search core. The shell supplies the four seams the panel can't own — list the files,
+  // read a closed file, reveal a match in the editor, snapshot the open buffers — plus a label fn.
+  function searchLabelForUri(uri: string): string {
+    const buf = workspace.buffers.get(uri);
+    if (buf) return buf.relPath;
+    const token = fileUriToPath(uri) ?? uri;
+    const root = workspace.folderRootToken();
+    if (root && (token.startsWith(root + '/') || token.startsWith(root + '\\'))) {
+      return token.slice(root.length + 1).replace(/\\/g, '/');
+    }
+    return token.split(/[\\/]/).pop() ?? uri;
+  }
+  async function revealSearchMatch(uri: string, match: Match): Promise<void> {
+    // Make the matched file the active buffer (opening it from disk if it isn't open yet), then select
+    // the match's range. gotoRange wants 0-based LSP positions; Match is 1-based line / 0-based column.
+    if (uri !== workspace.activeUri()) {
+      if (workspace.buffers.has(uri)) {
+        workspace.activateFile(uri);
+      } else {
+        const token = fileUriToPath(uri);
+        if (token) await workspace.openFileToken(token);
+      }
+    }
+    // Derive the END position from the active document so a match that spans lines (a regex with
+    // `\n` / `[\s\S]`) selects the whole span rather than clamping to the start line. CodeMirror's
+    // doc lines are 1-based; offsets are clamped against the doc in case a stale match runs long.
+    const doc = editor.view.state.doc;
+    const startLine = Math.min(Math.max(match.line, 1), doc.lines);
+    const startOffset = Math.min(doc.line(startLine).from + match.column, doc.length);
+    const endOffset = Math.min(startOffset + match.length, doc.length);
+    const startInfo = doc.lineAt(startOffset);
+    const endInfo = doc.lineAt(endOffset);
+    editor.gotoRange(
+      { line: startInfo.number - 1, character: startOffset - startInfo.from },
+      { line: endInfo.number - 1, character: endOffset - endInfo.from },
+    );
+  }
+  const search = createSearchPanel({
+    listFiles: (glob) => workspace.listWorkspaceFiles(glob),
+    readFile: async (uri) => {
+      const token = fileUriToPath(uri);
+      if (!token) return null;
+      try {
+        return await platform.readTextFile(token);
+      } catch {
+        return null;
+      }
+    },
+    openAndReveal: (uri, match) => void revealSearchMatch(uri, match),
+    getActiveBuffers: () => {
+      const m = new Map<string, string>();
+      for (const buf of workspace.buffers.values()) m.set(buf.uri, buf.text);
+      return m;
+    },
+    labelOf: searchLabelForUri,
+    replaceInBuffer: (uri, newText) => {
+      // Route the new text through the cross-buffer WorkspaceEdit path: the active buffer goes through
+      // the editor (one undoable transaction), other open buffers are patched + marked dirty + synced,
+      // so the unsaved indicator updates. A single whole-document edit over the buffer's current text.
+      const current = workspace.buffers.get(uri)?.text ?? '';
+      const lines = current.split('\n');
+      const edit: TextEdit = {
+        range: { start: { line: 0, character: 0 }, end: { line: lines.length - 1, character: lines[lines.length - 1].length } },
+        newText,
+      };
+      workspace.applyWorkspaceEdit({ changes: { [uri]: [edit] } });
+    },
+    writeFile: async (uri, newText) => {
+      const token = fileUriToPath(uri);
+      if (!token) return;
+      // Surface a failed replace-to-disk on the status line, mirroring the other write paths — a
+      // silent failure would let the user believe every match was replaced when some were not.
+      try {
+        await platform.writeTextFile(token, newText);
+      } catch (e) {
+        setStatus('could not write replaced file', 'error');
+        console.error('replace writeTextFile failed for', token, e);
+      }
+    },
+  });
+
   const prefs = createPreferences({
     onChange: (s) => {
+      // `s` is the USER/global settings (prefs keeps the global value untouched when a row is scoped to
+      // Workspace), so it stays the user-level source of truth here.
       settings = s;
+      // The workspace-scoped fields (wordWrap, previewTarget) must apply from the EFFECTIVE view so a
+      // Workspace override drives the live behavior even though `settings` stays user-level.
+      const eff = effectiveSettings(s, wsKey());
       // onChange is the single re-skin path: apply the document-level appearance, then sync the
       // pieces prefs can't reach — soft-wrap on both the source editor and the output preview.
       applyAppearance(s);
-      editor.setLineWrap(s.wordWrap);
-      output.setLineWrap(s.wordWrap);
-      // Destination language now lives in Settings → Output. The controller relabels the Generated
-      // tab, marks the preview stale, and re-emits it when that sub-view is the one showing.
-      controller.onPreviewTargetChanged(s.previewTarget);
+      editor.setMinimap(s.enableMinimap);
+      workspace.setAutoSave(s.autoSave);
+      // The scoped fields (word-wrap on both surfaces + the Generated-tab relabel via the preview
+      // target) apply from the EFFECTIVE view so a Workspace override drives live behavior.
+      applyEffectiveScoped(eff);
     },
     // Desktop hosts launch a `koine mcp --http` sidecar and return its loopback URL; the browser
     // returns null, so Settings hides the MCP affordance there.
@@ -1087,11 +1501,15 @@ export function init(): void {
     canSaveProjects: platform.canSaveProjects,
     workspaceRootName: () => platform.workspaceRootName(),
     pickWorkspaceRoot: () => platform.pickWorkspaceRoot(),
+    // The current workspace's override key (null when no folder is open) — drives the per-row
+    // User/Workspace scope toggle and routes scoped commits to the workspace override store.
+    workspaceKey: () => wsKey(),
   });
   const help = createHelpOverlay(helpRows());
-  const about = createAboutDialog();
   // Guards the user-initiated New command against silently discarding unsaved work.
   const confirmDialog = createConfirmDialog();
+  // Single-field text prompts (name a new construct, a field, a project) — Koine's own modal, not the browser's.
+  const promptDialog = createPromptDialog();
 
   // Desktop window-close guard (Tauri only): mirror the web beforeunload — confirm before closing
   // the window when any buffer is dirty. The browser host omits onCloseRequested (its beforeunload
@@ -1113,9 +1531,9 @@ export function init(): void {
     saveZip: (name, data) => platform.saveZip(name, data),
   });
 
-  // The AI assistant panel is created lazily the first time its tab is shown (the Anthropic SDK
+  // The AI assistant panel is created lazily the first time its center pane is shown (the Anthropic SDK
   // is dynamically imported inside ai.ts, so creating the panel does not load it — only sending).
-  // ide.ts owns the assistant's lifecycle; the controller only nudges its tab (syncWorkspace/focus)
+  // ide.ts owns the assistant's lifecycle; the controller only nudges it (syncWorkspace/focus)
   // via the injected ensureAssistant callback, so the #view-assistant host is looked up here.
   const assistantView = el('view-assistant');
   let assistant: AssistantPanel | null = null;
@@ -1134,7 +1552,7 @@ export function init(): void {
         const diagnostics = editorSession.diagnosticsFor(workspace.activeUri()).map((d) => ({
           line: d.range.start.line + 1,
           col: d.range.start.character + 1,
-          severity: (d.severity === 2 ? 'warning' : 'error') as 'warning' | 'error',
+          severity: severityErrorOrWarning(d.severity),
           message: d.message,
         }));
         const base: AssistantContext = {
@@ -1171,6 +1589,21 @@ export function init(): void {
       getUseTools: () => loadSettings().aiAgenticTools,
     });
     return assistant;
+  }
+
+  // The scenario-runner panel (#149) is created lazily the first time its tab is shown; the controller
+  // calls refresh() on every open so the catalog tracks the latest model. ide.ts owns the #view-scenarios
+  // host lookup; the panel itself is backend-agnostic (it only talks to the lsp client).
+  const scenariosView = el('view-scenarios');
+  let scenarios: ScenarioPanel | null = null;
+  function ensureScenarios(): ScenarioPanel {
+    if (scenarios) return scenarios;
+    scenarios = createScenarioPanel({
+      container: scenariosView,
+      lsp,
+      setStatus: (message) => setStatus(message, 'green'),
+    });
+    return scenarios;
   }
 
   // Diagrams are rendered with a theme-matched Mermaid palette; re-render on a theme flip (covers
@@ -1222,6 +1655,49 @@ export function init(): void {
     }
   }
 
+  // Flash a transient confirmation in the status pill, then re-derive it from the CURRENT diagnostics (so a
+  // fresh push isn't clobbered) — the shared idiom behind the diagram export/copy handlers (#271).
+  function flashStatus(message: string, kind: Parameters<typeof setStatus>[1]): void {
+    setStatus(message, kind);
+    setTimeout(() => editorSession.updateStatus(editorSession.diagnosticsFor(workspace.activeUri())), 1500);
+  }
+
+  // Export the live Visual canvas in the chosen format (#271): SVG/PNG serialize the actual drawing, PlantUML
+  // is mapped from the structured graph client-side. Routes the bytes through the host's saveZip seam (Blob
+  // download in the browser, native save dialog on desktop) with a caption-derived filename. A no-op with a
+  // hint when no diagram is on screen; a user-cancelled save is silent (saveZip resolves false).
+  async function exportActiveDiagram(format: 'svg' | 'png' | 'plantuml'): Promise<void> {
+    const active = getActiveDomainExport();
+    if (!active) {
+      flashStatus('open the Visual diagram to export', 'error');
+      return;
+    }
+    try {
+      const saved = await exportDiagram(format, active.diagram, active.handle, (name, bytes) => platform.saveZip(name, bytes));
+      if (saved === true) flashStatus('diagram exported ✓', 'green');
+    } catch (e) {
+      setStatus('export failed', 'error');
+      console.error('export diagram failed:', e);
+    }
+  }
+
+  // Copy the current diagram's Mermaid to the clipboard (#271), mirroring copyShareLink's flash. The fused
+  // canvas is emitted as one Mermaid document; an empty model has nothing to copy.
+  async function copyActiveDiagramMermaid(): Promise<void> {
+    const mermaid = getActiveDomainExport()?.diagram.mermaid?.trim();
+    if (!mermaid) {
+      flashStatus('no diagram to copy', 'error');
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(mermaid);
+      flashStatus('Mermaid copied ✓', 'green');
+    } catch (e) {
+      setStatus('copy failed', 'error');
+      console.error('copy mermaid failed:', e);
+    }
+  }
+
   // Save the current workspace as a real, reopenable on-disk project (browser host only). Promotes an
   // ephemeral example/Untitled workspace into <root>/<name>/, registers it in Recent, and reopens it
   // from disk so the workspace now IS that folder (further ⌘S writes there).
@@ -1234,9 +1710,17 @@ export function init(): void {
       setStatus('nothing to save', 'error');
       return;
     }
-    const suggested = workspace.folderRootToken() ? platform.folderName(workspace.folderRootToken()) : 'my-project';
+    let seedValue = workspace.folderRootToken() ? platform.folderName(workspace.folderRootToken()) : 'my-project';
+    let seedError = ''; // a name clash from a prior attempt, shown inline on the re-prompt
     for (;;) {
-      const name = window.prompt('Save project as:', suggested)?.trim();
+      const name = await promptDialog.ask({
+        title: 'Save project',
+        message: 'Saved to your projects folder and added to Recent.',
+        label: 'Project name',
+        initialValue: seedValue,
+        confirmLabel: 'Save',
+        error: seedError,
+      });
       if (!name) return; // cancelled / empty
       try {
         const token = await platform.saveProjectToRoot(name, files);
@@ -1246,8 +1730,10 @@ export function init(): void {
         return;
       } catch (e) {
         if (String(e instanceof Error ? e.message : e).includes('already exists')) {
-          window.alert(`A project named "${name}" already exists — choose another name.`);
-          continue; // re-prompt
+          // Re-ask with the clash surfaced inline (no second alert) and the rejected name pre-filled.
+          seedError = `A project named "${name}" already exists — choose another name.`;
+          seedValue = name;
+          continue;
         }
         setStatus('save to disk failed', 'error');
         console.error('saveProjectToDisk failed:', e);
@@ -1256,18 +1742,155 @@ export function init(): void {
     }
   }
 
-  initSplitResizer({ split: el('split'), handle: el('split-resizer') });
+  // --- view layout: editor split + repositionable panels (issue #265) -------
+  // View-only state (orientation / panel side / side-rail side / whether the split is open and on
+  // which uri), persisted in localStorage via layoutStore — it NEVER round-trips into the .koi model.
+  // On boot we read it, paint #split's data-* attributes (CSS reflows the grid), open group B if it
+  // was split, and anchor the inspector / left-rail resizers on the side each pane currently sits.
+  // `let` (not const): each layout action below reassigns it from saveLayout's MERGED return value, so
+  // that return is the single source of truth the next action reads (no per-field manual shadow).
+  let layout = loadLayout();
 
-  // Left sidebar width — the single rail (Files / Explorer / Overview / Documentation).
-  initEdgeResizer({
-    target: splitEl,
-    handle: el('leftrail-resizer'),
-    cssVar: '--koi-leftrail-w',
-    anchor: 'left',
-    storageKey: 'koine.studio.leftrailWidth',
-    min: 200,
-    max: (w) => w * 0.5,
+  // Mirror the layout enums onto #split as data-* attributes; _split.scss keys the grid off them
+  // (data-orientation lays the two editor groups side-by-side or stacked; data-panel-side docks the
+  // bottom panel bottom/right; data-siderail-side moves the inspector rail left/right).
+  function applyLayoutAttrs(l: LayoutState): void {
+    splitEl.dataset.split = l.splitOpen ? 'true' : 'false';
+    splitEl.dataset.orientation = l.orientation;
+    splitEl.dataset.panelSide = l.panelSide;
+    splitEl.dataset.siderailSide = l.sideRail;
+  }
+  applyLayoutAttrs(layout);
+
+  // The drag handles are a desktop (mouse) idiom; on mobile they're display:none (see _split.scss),
+  // so these listeners are inert below $bp-narrow (BP_NARROW). No JS gate needed — CSS owns visibility.
+  // A persisted --koi-inspector-w / --koi-leftrail-w on #split is also harmless under the mobile
+  // grid-template-columns: 1fr: those custom props aren't referenced inside the @media block.
+  //
+  // The inspector + left-rail resizers anchor to the side each pane sits on. With the default layout
+  // the inspector is the right rail and the file-rail is the left, so this matches the historical
+  // wiring; when sideRail==='left' the two swap (the inspector becomes the left rail, the file-rail
+  // the right). Each resizer's disposer is kept so a live side-rail/panel/orientation toggle can tear
+  // the stale wiring down and re-init with the new anchor — the handle then drags correctly without a
+  // reload (the grid already reflowed via the data-* swap, but initEdgeResizer captures its anchor at
+  // wire time, so re-init is how we repoint it).
+  let disposeInspectorResizer: () => void;
+  let disposeLeftRailResizer: () => void;
+  let disposeGroupResizer: () => void;
+
+  // (Re)wire the inspector + left-rail handles from the current sideRail side. Disposes any prior
+  // wiring first so toggling never stacks listeners (and the stale anchor never lingers).
+  function wireRailResizers(sideRail: LayoutState['sideRail']): void {
+    disposeInspectorResizer?.();
+    disposeLeftRailResizer?.();
+    const inspectorOnRight = sideRail === 'right';
+    disposeInspectorResizer = initEdgeResizer({
+      target: splitEl,
+      handle: el('split-resizer'),
+      cssVar: '--koi-inspector-w',
+      anchor: inspectorOnRight ? 'right' : 'left',
+      storageKey: 'koine.studio.splitWidth',
+      min: 220,
+    });
+    // Left sidebar width — the single rail (Files / Explorer / Overview / Documentation).
+    disposeLeftRailResizer = initEdgeResizer({
+      target: splitEl,
+      handle: el('leftrail-resizer'),
+      cssVar: '--koi-leftrail-w',
+      anchor: inspectorOnRight ? 'left' : 'right',
+      storageKey: 'koine.studio.leftrailWidth',
+      min: 200,
+      max: (w) => w * 0.5,
+    });
+  }
+
+  // (Re)wire the editor-group divider for the current orientation. Disposed + re-init on a flip so the
+  // divider drags along the NEW axis (--koi-group-w ↔ --koi-group-h, anchor right ↔ bottom) live.
+  function wireGroupResizer(orientation: LayoutState['orientation']): void {
+    disposeGroupResizer?.();
+    disposeGroupResizer = initGroupResizer({ split: splitEl, handle: el('group-resizer'), orientation });
+  }
+
+  wireRailResizers(layout.sideRail);
+  wireGroupResizer(layout.orientation);
+
+  // Switch the routing target for the next file-open by which editor pane the user points at. Group B
+  // is nested inside #editor-pane, so a pointerdown in B bubbles to A's listener too — A's guard
+  // ignores events that originate inside #editor-pane-b so the inner pane wins. focusGroup only moves
+  // the ROUTING target (editorSession owns the caret/DOM focus); harmless when B is closed (focus 'b'
+  // with no group B just falls back to A inside openFocusedGroup). pointerdown (not focusin) so a plain
+  // click anywhere in a pane — gutter, padding — retargets, not only landing the caret in the editor.
+  const editorPaneEl = el('editor-pane');
+  const editorPaneBEl = el('editor-pane-b');
+  editorPaneEl.addEventListener('pointerdown', (e) => {
+    if (editorPaneBEl.contains(e.target as Node)) return; // a B-pane click is handled by B's listener
+    editorSession.focusGroup('a');
   });
+  editorPaneBEl.addEventListener('pointerdown', () => editorSession.focusGroup('b'));
+
+  // Restore the split if it was open. Boot leaves the routing target on group A (a page reload starts
+  // on the primary group — the natural place a returning user resumes); a FRESH "Split editor" (the
+  // split() action below) instead focuses the NEW group B so the very next file-open lands in it, which
+  // is the manual-check flow. openGroupB internally sets focus to 'b', so boot explicitly normalises
+  // back to 'a' — the one place the two paths intentionally differ, documented here so they don't
+  // silently diverge.
+  if (layout.splitOpen) {
+    editorSession.openGroupB(layout.groupActiveUris[1] || workspace.activeUri());
+    editorSession.focusGroup('a');
+  }
+
+  // The five palette commands' effects: each persists the change via saveLayout, then re-applies the
+  // #split data-* attributes (CSS does the reflow) and drives group B. closeGroup tears B down; split
+  // opens/focuses it; the toggles flip the corresponding enum AND re-wire the affected resizer so its
+  // drag handle is live immediately (no reload). The persisted state is what boot reads, so the
+  // arrangement survives a reload too.
+  const layoutActions: LayoutActions = {
+    split() {
+      // Open group B (or focus it if already open) and remember it in the persisted layout. A fresh
+      // split mirrors group A's active uri into B so the user immediately sees a second view to retarget;
+      // openGroupB leaves focus on B so the next file-open lands there (the manual-check flow). Persist
+      // B's CURRENT uri, not blindly A's: if B is already open on another file (re-split), keep that
+      // file so reload restores it (#265). The group resizer was disposed on the last closeGroup — wire
+      // it again so the divider drags on this open.
+      editorSession.openGroupB(workspace.activeUri());
+      const bUri = editorSession.groupBUri() || workspace.activeUri();
+      layout = saveLayout({ splitOpen: true, groupActiveUris: [workspace.activeUri(), bUri] });
+      applyLayoutAttrs(layout);
+      wireGroupResizer(layout.orientation);
+    },
+    toggleOrientation() {
+      const next = layout.orientation === 'horizontal' ? 'vertical' : 'horizontal';
+      layout = saveLayout({ orientation: next });
+      applyLayoutAttrs(layout);
+      wireGroupResizer(next); // re-point the divider to the new axis live
+    },
+    closeGroup() {
+      editorSession.closeGroupB();
+      disposeGroupResizer?.(); // tear down the group divider's listeners so a re-split doesn't stack them (#265)
+      layout = saveLayout({ splitOpen: false });
+      applyLayoutAttrs(layout);
+    },
+    togglePanelSide() {
+      const next = layout.panelSide === 'bottom' ? 'right' : 'bottom';
+      layout = saveLayout({ panelSide: next });
+      applyLayoutAttrs(layout);
+    },
+    toggleSideRail() {
+      const next = layout.sideRail === 'right' ? 'left' : 'right';
+      layout = saveLayout({ sideRail: next });
+      applyLayoutAttrs(layout);
+      wireRailResizers(next); // re-point the inspector + left-rail handles to their swapped anchors live
+    },
+  };
+
+  // Persist group B's re-pointed file so reload restores B to the file the user last opened into it,
+  // not the stale split-open file (#265). Only the B slot of groupActiveUris moves; A's slot tracks the
+  // live active uri. A no-op shape when the split isn't open (B isn't shown), but the callers only
+  // invoke this on the B-routing branch, so the split is open by construction. Declared as a hoisted
+  // function so the earlier openFileInFocusedGroup / openUriInFocusedGroup can call it.
+  function persistGroupBUri(bUri: string): void {
+    layout = saveLayout({ groupActiveUris: [workspace.activeUri(), bUri] });
+  }
 
   // Left-sidebar section disclosure: clicking a header collapses/expands its body (routed through
   // setRailSectionOpen, the single source of truth for section state).
@@ -1286,7 +1909,14 @@ export function init(): void {
   // Toolbar buttons unique to this phase.
   const hintEl = document.querySelector('.palette-hint');
   if (hintEl) {
-    hintEl.textContent = formatChord('mod+K'); // ⌘+K / Ctrl+K per platform
+    // Render the chord into an aria-hidden span: the visible "⌘+K" is decorative chrome, while the
+    // button's accessible name stays "Open command palette" (aria-label). Setting textContent directly
+    // would make the chord the visible label and break WCAG 2.5.3 (Label in Name).
+    hintEl.replaceChildren();
+    const chord = document.createElement('span');
+    chord.setAttribute('aria-hidden', 'true');
+    chord.textContent = formatChord('mod+K'); // ⌘+K / Ctrl+K per platform
+    hintEl.appendChild(chord);
     hintEl.addEventListener('click', () => palette.toggle());
   }
   el<HTMLButtonElement>('btn-home').addEventListener('click', () => goHome());
@@ -1297,7 +1927,6 @@ export function init(): void {
   if (!platform.canSaveProjects) saveProjectBtn.hidden = true;
   el<HTMLButtonElement>('btn-theme').addEventListener('click', () => toggleTheme());
   el<HTMLButtonElement>('btn-prefs').addEventListener('click', () => prefs.open());
-  el<HTMLButtonElement>('btn-about').addEventListener('click', () => about.open());
 
   // Format the active document via the LSP and apply the edits (shared by the palette command
   // and format-on-save). Degrades silently if the request fails.
@@ -1320,20 +1949,28 @@ export function init(): void {
       { id: 'format', title: 'Format document', hint: 'mod+S', group: 'Edit', run: () => void formatActive() },
       { id: 'home', title: 'Go to start screen', group: 'File', run: () => goHome() },
       { id: 'open-folder', title: 'Open folder…', hint: 'mod+Shift+O', group: 'File', run: () => void openFolder() },
+      { id: 'search', title: 'Search across files…', hint: 'mod+Shift+F', group: 'Edit', run: () => search.focus() },
       { id: 'new-model', title: 'New model', hint: 'mod+N', group: 'File', run: () => void requestNewModel() },
       { id: 'save-all', title: 'Save all', hint: 'mod+Alt+S', group: 'File', run: () => void workspace.saveAllDirty() },
       { id: 'share', title: 'Copy shareable link', group: 'File', run: () => void copyShareLink() },
       { id: 'check', title: 'Check against baseline…', group: 'File', run: () => void controller.runCheck() },
       { id: 'generate-project', title: 'Generate project…', group: 'File', run: () => generateProject.open() },
       { id: 'export-source-zip', title: 'Export .koi source (.zip)', group: 'File', run: () => void exportSourceZip() },
+      { id: 'export-diagram-svg', title: 'Export diagram as SVG', group: 'File', run: () => void exportActiveDiagram('svg') },
+      { id: 'export-diagram-png', title: 'Export diagram as PNG', group: 'File', run: () => void exportActiveDiagram('png') },
+      { id: 'export-diagram-plantuml', title: 'Export diagram as PlantUML', group: 'File', run: () => void exportActiveDiagram('plantuml') },
+      { id: 'copy-diagram-mermaid', title: 'Copy diagram as Mermaid', group: 'File', run: () => void copyActiveDiagramMermaid() },
       ...(platform.canSaveProjects
         ? [{ id: 'save-project-to-disk', title: 'Save to disk…', group: 'File', run: () => void saveProjectToDisk() } as Command]
         : []),
       { id: 'toggle-theme', title: 'Toggle theme', group: 'View', run: () => toggleTheme() },
+      // The editor-split + panel-reposition commands (issue #265). Built from the pure layoutCommands
+      // module so the list is unit-tested; each run() drives the layoutActions wired at boot above.
+      ...layoutCommands(layoutActions),
       { id: 'prefs', title: 'Settings…', hint: 'mod+,', group: 'View', run: () => prefs.open() },
       { id: 'help', title: 'Keyboard shortcuts', hint: 'F1', group: 'Help', run: () => help.open() },
-      { id: 'about', title: 'About Koine Studio', group: 'Help', run: () => about.open() },
-      { id: 'toggle-store-inspector', title: 'Toggle store inspector (debug)', group: 'Help', run: () => toggleStoreInspector() },
+      { id: 'about', title: 'About Koine Studio', group: 'Help', run: () => prefs.open('about') },
+      ...devCommands(() => void toggleStoreInspector()),
       { id: 'view-preview', title: 'Show Emitted Preview', group: 'Workspace', run: () => controller.selectTech('preview') },
       { id: 'view-glossary', title: 'Show Glossary', group: 'Workspace', run: () => controller.selectDocsTab('glossary') },
       { id: 'view-decisions', title: 'Show Decisions (ADRs)', group: 'Workspace', run: () => controller.selectDocsTab('adr') },
@@ -1341,14 +1978,15 @@ export function init(): void {
       { id: 'view-diagrams', title: 'Show Visual Editor', group: 'Workspace', run: () => controller.selectCenter('visual') },
       { id: 'view-contextmap', title: 'Show Context Map', group: 'Workspace', run: () => controller.selectBottomTab('contextmap') },
       { id: 'view-check', title: 'Show Compatibility Check', group: 'Workspace', run: () => controller.selectTech('check') },
-      { id: 'view-assistant', title: 'Show Assistant', group: 'Workspace', run: () => controller.selectTech('assistant') },
-      { id: 'assistant-explain', title: 'Explain this construct', group: 'Workspace', run: () => { controller.selectTech('assistant'); ensureAssistant().explainSelection(); } },
+      { id: 'view-scenarios', title: 'Show Scenario Runner', group: 'Workspace', run: () => controller.selectTech('scenarios') },
+      { id: 'view-assistant', title: 'Show Assistant', group: 'Workspace', run: () => controller.selectCenter('assistant') },
+      { id: 'assistant-explain', title: 'Explain this construct', group: 'Workspace', run: () => { controller.selectCenter('assistant'); ensureAssistant().explainSelection(); } },
     ];
 
     // Surface every open file as a "Go to File" entry so the palette doubles as a
     // fuzzy quick-open (type part of a path to jump). The palette re-reads this on each open.
     for (const buf of Array.from(workspace.buffers.values()).sort((a, b) => a.relPath.localeCompare(b.relPath))) {
-      cmds.push({ id: 'goto:' + buf.uri, title: buf.relPath, group: 'Go to File', run: () => workspace.activateFile(buf.uri) });
+      cmds.push({ id: 'goto:' + buf.uri, title: buf.relPath, group: 'Go to File', run: () => openUriInFocusedGroup(buf.uri) });
     }
 
     return cmds.map((c) => (c.hint ? { ...c, hint: formatChord(c.hint) } : c));
@@ -1370,7 +2008,11 @@ export function init(): void {
     }
     if (overlayOpen()) return;
 
-    if (mod && e.shiftKey && (e.key === 'o' || e.key === 'O')) {
+    if (mod && e.shiftKey && (e.key === 'f' || e.key === 'F')) {
+      // Mod+Shift+F → open/focus the workspace search panel (toggle closes it).
+      e.preventDefault();
+      search.toggle();
+    } else if (mod && e.shiftKey && (e.key === 'o' || e.key === 'O')) {
       e.preventDefault();
       void openFolder();
     } else if (mod && !e.shiftKey && (e.key === 'n' || e.key === 'N')) {
@@ -1399,6 +2041,16 @@ export function init(): void {
   lsp
     .start()
     .then(async () => {
+      // Seed the emit-target list from the backend capability query once the server is up (issue
+      // #282). Fire-and-forget: a slow or unresponsive query must NOT block the rest of boot, so we
+      // don't await it. The built-in list (the default) keeps every target surface rendering until it
+      // resolves, and the picker / wizard / Generated-tab / preview read the list LIVE, so they pick
+      // up the seeded set on their next render. A failed query falls back to the built-ins.
+      void lsp.emitTargets().then(setEmitTargets, (e) => {
+        console.error('fetching emit targets failed; using the built-in list:', e);
+        setEmitTargets(null);
+      });
+
       // The workspace opens once the server is up so each file's didOpen resolves cross-file refs.
       // Isolated try/finally per branch: an open failure must not masquerade as a connection failure,
       // and any model hash is cleared so a reload doesn't re-trigger a failing import.
@@ -1421,11 +2073,39 @@ export function init(): void {
           clearModelHash();
         }
       } else {
-        await openDefaultWorkspaceFlow(legacyScratch ?? SEED);
+        // A start action chosen on the Home route (#368) is queued as a one-shot intent and performed
+        // here, once, instead of opening the default workspace. A plain editor boot (cold `#/editor`
+        // deep link, or a returning user) has no intent and falls back to the default workspace.
+        const intent = takeStartIntent();
+        if (intent) await runStartIntent(intent);
+        else await openDefaultWorkspaceFlow(legacyScratch ?? SEED);
       }
     })
     .catch((e) => {
       setStatus('connection failed', 'error');
       output.setContent('// failed to start language server\n' + String(e), 'plain');
     });
+
+  // The IDE shell boots once and stays alive across Home↔Editor route swaps (main.ts toggles
+  // visibility, it doesn't re-init). The boot ladder above consumes a start-intent only on that first
+  // boot — so a start action taken on a *return* visit to Home (which navigates back here without
+  // re-initing) would otherwise be dropped. Consume any queued intent on every later transition INTO
+  // the editor route. The first transition already happened before this listener exists (init() runs
+  // synchronously from the navigate that flipped the route), so it never double-fires with the ladder.
+  const unsubRouteIntent = appStore.subscribe((s, prev) => {
+    if (s.route === 'editor' && prev.route !== 'editor') {
+      const intent = takeStartIntent();
+      if (intent) void runStartIntent(intent);
+    }
+  });
+
+  // A teardown the host can call to release the IDE's deferred work. Production (main.ts) runs for the
+  // page lifetime and ignores it; the test suite calls it between boots so the controller's pending
+  // debounce timers can't fire into a torn-down happy-dom (where `render` throws "document is not defined").
+  // setAutoSave(false) cancels the workspace's idle auto-save timer for the same reason.
+  return () => {
+    controller.dispose();
+    workspace.setAutoSave(false);
+    unsubRouteIntent();
+  };
 }

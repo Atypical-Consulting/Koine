@@ -28,6 +28,7 @@
 @use './components/file-tree';
 @use './components/explorer';
 @use './components/confirm-dialog';
+@use './components/prompt-dialog';
 @use './components/context-menu';
 @use './layout/inspector';
 @use './components/doc-panes';
@@ -37,6 +38,7 @@
 @use './components/diagnostics';
 @use './components/welcome';
 @use './components/command-palette';
+@use './components/search';
 @use './components/modal';
 @use './components/form-fields';
 @use './components/settings';
@@ -46,8 +48,11 @@
 @use './components/docs';
 @use './base/animations';
 @use './components/floating-menu';
-@use './components/diagrams';
+@use './components/diagrams-maxgraph';
 @use './components/canvas-empty';
 @use './components/ai-panel';
+@use './components/scenario';
 @use './base/a11y';
 @use './components/wizard';
+@use './components/mobile-zone-bar';
+@use './components/banner';

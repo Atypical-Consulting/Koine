@@ -34,20 +34,18 @@ namespace Koine.Compiler.Tests.Conformance;
 /// </list>
 /// <para>
 /// The C# half always runs (Roslyn ships with the test host). The TypeScript half needs a Node +
-/// <c>tsc</c> toolchain; when none is present locally the TS comparison is reported as INCONCLUSIVE
-/// (a logged notice, no assertion) so <c>dotnet test</c> stays green without a Node toolchain — but
-/// the C#-vs-expected assertions still run, and a real cross-emitter divergence is asserted whenever
-/// the toolchain IS present (as it is in CI). It NEVER silently passes a genuine mismatch.
+/// <c>tsc</c> toolchain; when none is present locally the TS comparison is funneled through
+/// <see cref="TestSupport.RequireOrSkip"/>, which reports the test as <c>Skipped</c> (not a false
+/// Passed) so <c>dotnet test</c> stays green without a Node toolchain — but the C#-vs-expected
+/// assertions still run first, and a real cross-emitter divergence is asserted whenever the toolchain
+/// IS present (as it is in CI, which also sets <c>KOINE_REQUIRE_CONFORMANCE</c> to make a missing
+/// toolchain a hard <c>Failed</c>). It NEVER silently passes a genuine mismatch.
 /// </para>
 /// </remarks>
 public class CrossEmitterConformanceTests
 {
-    private readonly ITestOutputHelper _output;
-
-    public CrossEmitterConformanceTests(ITestOutputHelper output) => _output = output;
-
     private const string NoToolchainNotice =
-        "INCONCLUSIVE: no Node/TypeScript toolchain (tsc + node) available locally; the TypeScript " +
+        "No Node/TypeScript toolchain (tsc + node) available locally; the TypeScript " +
         "half of the cross-emitter comparison was not run. The C#-vs-expected outcomes were still " +
         "asserted. Install Node + TypeScript (or set KOINE_TSC) — CI runs the full comparison.";
 
@@ -408,10 +406,11 @@ public class CrossEmitterConformanceTests
             }
         }
 
-        if (!ts.ToolchainAvailable)
-        {
-            _output.WriteLine(NoToolchainNotice);
-        }
+        // The C#-vs-expected assertions above always run; only the cross-emitter (TypeScript) half
+        // needs the toolchain. Funnel the absence through RequireOrSkip AFTER them, so a missing
+        // toolchain reports the test as Skipped (or, under KOINE_REQUIRE_CONFORMANCE, fails) without
+        // ever weakening the C# guarantee.
+        TestSupport.RequireOrSkip(ts.ToolchainAvailable, NoToolchainNotice);
     }
 
     private static string Verb(bool accepted) => accepted ? "ACCEPTED" : "REJECTED";
@@ -609,7 +608,7 @@ public class CrossEmitterConformanceTests
     /// Locates a Node toolchain binary (<c>tsc</c> or <c>node</c>): an explicit <c>KOINE_TSC</c> /
     /// <c>KOINE_NODE</c> override first, then PATH, then the repo-local install under
     /// <c>tooling/koine-textmate/node_modules/.bin</c>. Returns <c>null</c> when absent so the TS half
-    /// is skipped (reported inconclusive) rather than failing.
+    /// is skipped rather than failing.
     /// </summary>
     private static string? ResolveNodeTool(string tool)
     {

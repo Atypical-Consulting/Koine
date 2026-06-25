@@ -5,6 +5,7 @@ import type { FsEntry, KoiFile, LspTransport, Platform, SourceDoc } from '@/host
 import { WasmLspTransport } from '@/host/browser/transport';
 import { runWasmTool } from '@/host/browser/tools';
 import * as fs from '@/host/browser/fs';
+import { saveMetaFor } from '@/host/saveMeta';
 
 // Injected by Vite's `define` (see vite.config.ts) from package.json's version.
 declare const __APP_VERSION__: string;
@@ -13,6 +14,7 @@ export class BrowserPlatform implements Platform {
   readonly kind = 'browser' as const;
   readonly canOpenFolders = fs.supported();
   readonly canSaveProjects = fs.supported();
+  readonly persistsWorkspace = fs.persistsWorkspace();
 
   createLspTransport(): LspTransport {
     return new WasmLspTransport();
@@ -61,8 +63,12 @@ export class BrowserPlatform implements Platform {
     return fs.pickWorkspaceRoot();
   }
 
-  materializeWorkspace(name: string, files: { relPath: string; contents: string }[]): Promise<string | null> {
-    return fs.materializeWorkspace(name, files);
+  materializeWorkspace(
+    name: string,
+    files: { relPath: string; contents: string }[],
+    persist?: boolean,
+  ): Promise<string | null> {
+    return fs.materializeWorkspace(name, files, persist);
   }
 
   defaultWorkspace(seed: string): Promise<string | null> {
@@ -77,6 +83,12 @@ export class BrowserPlatform implements Platform {
     return fs.listKoiFiles(token);
   }
 
+  // A browser tab has no git, so per-element change history (#150) is unavailable: null hides the
+  // inspector's "Change history" section gracefully (no console errors).
+  gitLogForRange(): Promise<null> {
+    return Promise.resolve(null);
+  }
+
   readTextFile(path: string): Promise<string> {
     return fs.readTextFile(path);
   }
@@ -86,8 +98,9 @@ export class BrowserPlatform implements Platform {
   }
 
   async saveZip(defaultName: string, data: Uint8Array): Promise<boolean> {
-    // A browser download is fire-and-forget — there is no cancel signal, so it always "succeeds".
-    fs.downloadBytes(defaultName, data, 'application/zip');
+    // A browser download is fire-and-forget — there is no cancel signal, so it always "succeeds". The Blob
+    // MIME is derived from the extension (#271) so a `.svg`/`.png`/`.puml` export isn't tagged `application/zip`.
+    fs.downloadBytes(defaultName, data, saveMetaFor(defaultName).mime);
     return true;
   }
 

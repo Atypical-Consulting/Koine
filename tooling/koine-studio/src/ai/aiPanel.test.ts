@@ -8,6 +8,7 @@ import {
   type AssistantPanelOptions,
   type DomainIndex,
 } from '@/ai/aiPanel';
+import { runAssistant } from '@/ai/ai';
 
 // Stream a fenced ```koine block as the reply so a generative turn would normally offer "Apply"; the
 // Explain path must suppress that affordance while still rendering the reply bubble.
@@ -185,6 +186,40 @@ describe('explain action (panel integration)', () => {
     expect(container.querySelector('.koi-assistant-apply')).toBeNull();
     // The reply DID render (the run completed end-to-end).
     expect(container.querySelector('.koi-msg-assistant .koi-md')).not.toBeNull();
+  });
+
+  test('a rejected API key shows actionable guidance, not a raw 401 JSON blob', async () => {
+    const container = document.createElement('div');
+    let openedPrefs = false;
+    createAssistantPanel(makeOpts(container, { onOpenPrefs: () => (openedPrefs = true) }));
+    // The provider rejects a present-but-invalid key (the pre-flight check only catches a BLANK key).
+    vi.mocked(runAssistant).mockRejectedValueOnce(
+      new Error('401 {"type":"error","error":{"type":"authentication_error","message":"invalid x-api-key"}}'),
+    );
+    container.querySelector<HTMLButtonElement>('.koi-assistant-quick .koi-assistant-action')!.click();
+    await settle();
+
+    const reply = container.querySelector('.koi-msg-assistant:last-of-type');
+    expect(reply?.textContent).toMatch(/rejected your API key/i);
+    expect(reply?.textContent).not.toMatch(/401|\{|authentication_error/); // no raw blob
+    const openBtn = reply?.querySelector<HTMLButtonElement>('.koi-link-btn');
+    expect(openBtn).not.toBeNull();
+    openBtn!.click();
+    expect(openedPrefs).toBe(true);
+  });
+
+  test('a non-auth request failure surfaces the JSON "message", not the whole blob', async () => {
+    const container = document.createElement('div');
+    createAssistantPanel(makeOpts(container));
+    vi.mocked(runAssistant).mockRejectedValueOnce(
+      new Error('500 {"error":{"message":"upstream timeout"}}'),
+    );
+    container.querySelector<HTMLButtonElement>('.koi-assistant-quick .koi-assistant-action')!.click();
+    await settle();
+
+    const reply = container.querySelector('.koi-msg-assistant:last-of-type');
+    expect(reply?.textContent).toContain('upstream timeout');
+    expect(reply?.textContent).not.toContain('{');
   });
 
   test('a normal generative turn DOES offer Apply (contrast)', async () => {

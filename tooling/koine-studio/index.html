@@ -4,18 +4,29 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/src/assets/koine-mark.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="description"
+      content="Koine Studio — write a bounded context's ubiquitous language once and generate idiomatic, self-contained code (C#, TypeScript, Python, PHP) with live diagnostics, a domain diagram and an AI domain copilot."
+    />
     <title>Koine Studio</title>
     <script type="module" src="/src/main.ts" defer></script>
   </head>
 
   <body>
-    <div id="app">
+    <!-- Starts hidden so the editor never paints before the boot switch (main.ts) resolves the route:
+         on a pristine load the Home route shows and #app is revealed only on the editor route. This is
+         the belt-and-braces half of the IDE→Home flash fix (#368) — even if a frame slips in before
+         bootStudio runs, it can't be a frame of the wrong view. -->
+    <div id="app" hidden>
       <header id="toolbar">
         <button type="button" id="btn-home" class="brand" title="Back to the start screen" aria-label="Back to the start screen">
           <!-- Monogram injected from the shared koineMark() template at startup (see ide.ts) so the
                app's marks have a single source; only the favicon SVG is a separate literal-colour copy. -->
           <span class="brand-logo" aria-hidden="true"></span>
-          <span class="brand-text">
+          <!-- The wordmark is decorative chrome; the button's accessible name comes from aria-label
+               ("Back to the start screen"), so hide the visible brand text from the a11y tree to
+               satisfy WCAG 2.5.3 (Label in Name). -->
+          <span class="brand-text" aria-hidden="true">
             <span class="brand-name">Koine</span>
             <span class="brand-eyebrow">Studio</span>
           </span>
@@ -61,7 +72,7 @@
         <div id="breadcrumb-host" class="topbar-breadcrumb" hidden></div>
 
         <div class="toolbar-right">
-          <button type="button" id="palette-hint" class="palette-hint" title="Command palette (⌘K)" aria-label="Open command palette">⌘K</button>
+          <button type="button" id="palette-hint" class="palette-hint" title="Command palette (⌘K)" aria-label="Open command palette"><span aria-hidden="true">⌘K</span></button>
           <span class="tb-divider" aria-hidden="true"></span>
           <button type="button" id="btn-theme" class="icon-btn" title="Toggle theme" aria-label="Toggle theme">
             <svg class="tb-ico" viewBox="0 0 16 16" aria-hidden="true">
@@ -74,13 +85,6 @@
               <path d="M2.5 5.5h11M2.5 10.5h11" />
               <circle cx="6" cy="5.5" r="1.7" />
               <circle cx="10" cy="10.5" r="1.7" />
-            </svg>
-          </button>
-          <button type="button" id="btn-about" class="icon-btn" title="About Koine Studio" aria-label="About">
-            <svg class="tb-ico" viewBox="0 0 16 16" aria-hidden="true">
-              <circle cx="8" cy="8" r="5.8" />
-              <path d="M8 7.3v3.4" />
-              <circle cx="8" cy="4.9" r="0.9" fill="currentColor" stroke="none" />
             </svg>
           </button>
           <div id="status" data-kind="connecting" role="status" aria-live="polite">connecting…</div>
@@ -167,21 +171,41 @@
             <button type="button" class="center-tab" id="center-tab-visual" role="tab" data-center="visual" aria-selected="true">Visual</button>
             <button type="button" class="center-tab" id="center-tab-technical" role="tab" data-center="technical" aria-selected="false">Code</button>
             <button type="button" class="center-tab" id="center-tab-docs" role="tab" data-center="docs" aria-selected="false">Documentation</button>
+            <!-- The AI copilot is a first-class surface, always one click away from any view (not a Code
+                 sub-tab). It's the one "intelligent" tab among the structural three, so it alone wears a
+                 mark: a spark in the brand's accent, the same hue that signals "this generates". -->
+            <button type="button" class="center-tab center-tab-ai" id="center-tab-assistant" role="tab" data-center="assistant" aria-selected="false">
+              <svg class="center-tab-spark" viewBox="0 0 16 16" aria-hidden="true">
+                <path d="M7 1.6c.5 2.7 1.7 3.9 4.4 4.4-2.7.5-3.9 1.7-4.4 4.4-.5-2.7-1.7-3.9-4.4-4.4 2.7-.5 3.9-1.7 4.4-4.4Z" />
+                <path d="M12.3 9c.2 1.2.7 1.7 1.9 1.9-1.2.2-1.7.7-1.9 1.9-.2-1.2-.7-1.7-1.9-1.9 1.2-.2 1.7-.7 1.9-1.9Z" />
+              </svg>
+              Assistant
+            </button>
           </div>
           <div id="center-body">
-            <section id="center-visual" class="center-host" role="tabpanel" aria-label="Visual"></section>
+            <section id="center-visual" class="center-host" role="tabpanel" aria-label="Visual">
+              <div id="canvas-palette-host"></div>
+              <div id="diagram-host"></div>
+            </section>
             <section id="center-technical" class="center-host" role="tabpanel" aria-label="Code" hidden>
               <div id="tech-tabs" role="tablist" aria-label="Code view">
                 <button type="button" class="tech-tab" id="tech-tab-editor" role="tab" data-tech="editor" aria-selected="true">Editor</button>
                 <button type="button" class="tech-tab" id="tech-tab-preview" role="tab" data-tech="preview" aria-selected="false">Generated</button>
                 <button type="button" class="tech-tab" id="tech-tab-check" role="tab" data-tech="check" aria-selected="false">Compatibility</button>
-                <button type="button" class="tech-tab" id="tech-tab-assistant" role="tab" data-tech="assistant" aria-selected="false">Assistant</button>
+                <button type="button" class="tech-tab" id="tech-tab-scenarios" role="tab" data-tech="scenarios" aria-selected="false">Scenarios</button>
               </div>
               <div id="tech-body">
-                <section id="editor-pane" class="tech-view" aria-label="Editor"></section>
+                <!-- The editor pane is also the editor-split container: group A's CodeMirror mounts
+                     directly here, with the (hidden-until-split) group divider and group-B host as its
+                     siblings. When #split[data-split='true'], _split.scss turns #editor-pane into a
+                     grid laid out by data-orientation (side-by-side or stacked). -->
+                <section id="editor-pane" class="tech-view" aria-label="Editor">
+                  <div class="koi-resizer" id="group-resizer" aria-hidden="true"></div>
+                  <section id="editor-pane-b" aria-label="Editor (second group)"></section>
+                </section>
                 <div id="view-preview" class="tech-view" role="tabpanel" hidden></div>
                 <div id="view-check" class="tech-view doc-view" role="tabpanel" hidden></div>
-                <div id="view-assistant" class="tech-view" role="tabpanel" hidden></div>
+                <div id="view-scenarios" class="tech-view" role="tabpanel" hidden></div>
               </div>
             </section>
             <!-- Documentation = Glossary (the ubiquitous language) + Decisions (ADRs) + Notes — three
@@ -199,6 +223,11 @@
                 <div id="view-notes" class="tech-view doc-view" role="tabpanel" hidden></div>
               </div>
             </section>
+            <!-- The AI copilot — a top-level center pane (peer of Visual / Code / Documentation), so it's
+                 one click from any view. The AssistantPanel is mounted into this host lazily on first show
+                 (ide.tsx); the bottom diagnostics strip is hidden here, as on Documentation, so the
+                 conversation gets the center's full height. -->
+            <section id="view-assistant" class="center-host" role="tabpanel" aria-label="Assistant" hidden></section>
           </div>
 
           <footer id="diagnostics" aria-label="Problems, events, relationships and the context map">
@@ -223,8 +252,10 @@
         </section>
         <div class="koi-resizer" id="split-resizer" aria-hidden="true"></div>
 
-        <!-- Right rail: the element inspector, dedicated to Properties. Rules/Notes are placeholder
-             tabs matching the mockup chrome — read-only until a follow-up builds them. -->
+        <!-- Right rail: the element inspector. Properties is the live editor; Rules and Notes are
+             read-only informational views until the invariants-on-the-wire follow-up lets them edit
+             per-element rules/notes (tracked separately). Their panels carry an honest empty state
+             pointing at where each capability lives today, rather than a bare "Coming soon". -->
         <aside id="right" class="pane" aria-label="Properties">
           <div id="right-tabs" role="tablist" aria-label="Properties">
             <button type="button" class="rtab" id="rtab-props" role="tab" data-rview="props" aria-selected="true">Properties</button>
@@ -233,8 +264,24 @@
           </div>
           <div id="right-body">
             <div id="inspector-host" class="rview" role="tabpanel"></div>
-            <div id="rview-rules" class="rview doc-view" role="tabpanel" hidden><p class="muted">Coming soon.</p></div>
-            <div id="rview-notes" class="rview doc-view" role="tabpanel" hidden><p class="muted">Coming soon.</p></div>
+            <!-- Filled by inspectorController.renderSelectedRules() with the selected element's
+                 invariants (or an empty state). The static content below is a pre-hydration fallback. -->
+            <div id="rview-rules" class="rview doc-view" role="tabpanel" hidden>
+              <div class="koi-rview-empty">
+                <h3 class="koi-rview-empty-title">Business rules</h3>
+                <p class="muted">Select an element to see its invariants.</p>
+              </div>
+            </div>
+            <div id="rview-notes" class="rview doc-view" role="tabpanel" hidden>
+              <div class="koi-rview-empty">
+                <h3 class="koi-rview-empty-title">Notes</h3>
+                <p class="muted">
+                  Document this element with its <strong>Description</strong> in the Properties tab, or
+                  keep model-wide notes in <strong>Documentation → Notes</strong>. Per-element notes are
+                  planned for a future update.
+                </p>
+              </div>
+            </div>
           </div>
         </aside>
       </main>
@@ -251,6 +298,16 @@
         <span class="sb-item" id="sb-connection">Connecting…</span>
         <span class="sb-item" id="sb-version"></span>
       </footer>
+
+      <!-- Narrow-viewport (mobile) zone switcher: hidden on desktop, a fixed bottom ARIA-tablist bar
+           below $bp-narrow. The <MobileZoneBar> Preact panel renders here (see ide.tsx); selecting a tab
+           writes the uiChrome slice's mobileZone, which is mirrored onto #split[data-mobile-zone]. -->
+      <nav id="mobile-zone-bar-host" aria-label="Studio zone switcher"></nav>
     </div>
+
+    <!-- The routed Home view mounts here (mountHome). The boot switch (main.ts) shows exactly one of
+         #app / #home-root per route, so Home and the editor never paint at once (issue #368). Starts
+         hidden; the boot reveals whichever the resolved route needs before first paint. -->
+    <div id="home-root" hidden></div>
   </body>
 </html>

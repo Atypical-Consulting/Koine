@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
-import { createWelcome, filterTemplates, DIFFICULTY_ORDER, type WelcomeCallbacks } from '@/welcome/welcome';
+import { createWelcome, mountHome, filterTemplates, DIFFICULTY_ORDER, type WelcomeCallbacks } from '@/welcome/welcome';
 import type { Template } from '@/welcome/templates';
 
 // Each test mounts a fresh welcome overlay on document.body; clear it between tests so stale
@@ -230,17 +230,29 @@ describe('welcome start actions ↔ gallery', () => {
     )!;
   }
 
-  const consoleCard = (root: HTMLElement) => root.querySelector<HTMLElement>('.koi-welcome-card:not(.koi-gallery-card)')!;
-  const galleryCard = (root: HTMLElement) => root.querySelector<HTMLElement>('.koi-gallery-card')!;
+  const consoleView = (root: HTMLElement) => root.querySelector<HTMLElement>('.koi-welcome-view:not(.koi-gallery-view)')!;
+  const galleryView = (root: HTMLElement) => root.querySelector<HTMLElement>('.koi-gallery-view')!;
 
   test('opens on the console with the gallery hidden behind a "Start from an example" action', () => {
     const cb = makeCallbacks();
     createWelcome(cb, SAMPLE).show();
     const root = document.querySelector<HTMLElement>('.koi-welcome')!;
 
-    expect(consoleCard(root).hidden).toBe(false);
-    expect(galleryCard(root).hidden).toBe(true);
+    expect(consoleView(root).hidden).toBe(false);
+    expect(galleryView(root).hidden).toBe(true);
     expect(action(root, 'Start from an example')).toBeTruthy();
+  });
+
+  test('both views live inside the one card, swapped in place (no second card)', () => {
+    const cb = makeCallbacks();
+    createWelcome(cb, SAMPLE).show();
+    const root = document.querySelector<HTMLElement>('.koi-welcome')!;
+
+    // A single persistent card frame holds both views — the modal never tears down on a view switch.
+    expect(root.querySelectorAll('.koi-welcome-card').length).toBe(1);
+    const card = root.querySelector<HTMLElement>('.koi-welcome-card')!;
+    expect(card.contains(consoleView(root))).toBe(true);
+    expect(card.contains(galleryView(root))).toBe(true);
   });
 
   test('the action swaps in the gallery; "Back to start" swaps back', () => {
@@ -249,12 +261,12 @@ describe('welcome start actions ↔ gallery', () => {
     const root = document.querySelector<HTMLElement>('.koi-welcome')!;
 
     action(root, 'Start from an example').click();
-    expect(consoleCard(root).hidden).toBe(true);
-    expect(galleryCard(root).hidden).toBe(false);
+    expect(consoleView(root).hidden).toBe(true);
+    expect(galleryView(root).hidden).toBe(false);
 
     root.querySelector<HTMLButtonElement>('.koi-welcome-back')!.click();
-    expect(consoleCard(root).hidden).toBe(false);
-    expect(galleryCard(root).hidden).toBe(true);
+    expect(consoleView(root).hidden).toBe(false);
+    expect(galleryView(root).hidden).toBe(true);
   });
 
   test('opening the gallery does not leave the welcome screen (no callback, still visible)', () => {
@@ -279,8 +291,8 @@ describe('welcome start actions ↔ gallery', () => {
     handle.hide();
     handle.show();
 
-    expect(consoleCard(root).hidden).toBe(false);
-    expect(galleryCard(root).hidden).toBe(true);
+    expect(consoleView(root).hidden).toBe(false);
+    expect(galleryView(root).hidden).toBe(true);
   });
 });
 
@@ -329,7 +341,6 @@ describe('welcome recent management', () => {
   beforeEach(() => {
     localStorage.clear();
     document.body.innerHTML = '';
-    vi.stubGlobal('confirm', () => true);
   });
 
   afterEach(() => {
@@ -347,11 +358,45 @@ describe('welcome recent management', () => {
     expect(document.querySelectorAll('.koi-welcome-recent-item').length).toBe(1);
   });
 
-  test('clear-all empties the list', () => {
+  test('clear-all empties the list', async () => {
     localStorage.setItem(KEY, JSON.stringify(['/a', '/b']));
     createWelcome(makeCallbacks()).show();
     (document.querySelector('.koi-welcome-recent-clear') as HTMLElement).click();
+
+    // Clearing now routes through Koine's confirm modal (not window.confirm); approve it.
+    const confirmBtn = [...document.querySelectorAll<HTMLButtonElement>('.koi-confirm-btn')].find(
+      (b) => b.textContent === 'Clear',
+    );
+    expect(confirmBtn).toBeDefined();
+    confirmBtn!.click();
+    await new Promise((r) => setTimeout(r, 0)); // let koiConfirm's promise resolve + re-render
+
     expect(document.querySelector('.koi-welcome-empty')).not.toBeNull();
+  });
+});
+
+describe('mountHome (routed Home view)', () => {
+  test('renders the welcome card into the given container, not document.body', () => {
+    const el = document.createElement('div');
+    mountHome(el, makeCallbacks(), SAMPLE);
+    expect(el.querySelector('.koi-welcome')).not.toBeNull();
+    // Unlike the legacy overlay, the routed Home does not self-mount on the body.
+    expect(document.body.querySelector('.koi-welcome')).toBeNull();
+  });
+
+  test('wires the open-folder action through to the callback', () => {
+    const el = document.createElement('div');
+    const cb = makeCallbacks();
+    mountHome(el, cb, SAMPLE);
+    el.querySelector<HTMLButtonElement>('[data-action="open-folder"]')!.click();
+    expect(cb.onOpenFolder).toHaveBeenCalledTimes(1);
+  });
+
+  test('destroy() removes the mounted view', () => {
+    const el = document.createElement('div');
+    const home = mountHome(el, makeCallbacks(), SAMPLE);
+    home.destroy();
+    expect(el.querySelector('.koi-welcome')).toBeNull();
   });
 });
 

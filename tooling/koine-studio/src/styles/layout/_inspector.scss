@@ -1,3 +1,5 @@
+@use '../abstracts' as a;
+
 /* --- right inspector rail: Propriétés / Règles / Notes ---
    The element inspector (renderInspector) is dedicated to "Propriétés"; Règles/Notes are placeholder
    tabs that mirror the mockup chrome until a follow-up builds them. */
@@ -75,5 +77,5 @@
 
 .doc-view {
   overflow-y: auto;
-  padding: var(--koi-space-4) 20px;
+  @include a.rail-panel-pad;
 }

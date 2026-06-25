@@ -13,7 +13,10 @@
   flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
-  padding: var(--koi-space-4) var(--koi-space-4-5);
+  /* Now a full-width center pane (not a cramped sub-tab): cap the conversation to a readable measure
+     and center it, so replies don't sprawl edge-to-edge on a wide monitor. The bubbles' own left/right
+     alignment then plays out within that centered column. Falls back to the base inset when narrower. */
+  padding: var(--koi-space-4) max(var(--koi-space-4-5), calc((100% - 860px) / 2));
   display: flex;
   flex-direction: column;
   gap: var(--koi-space-3);
@@ -101,7 +104,9 @@
 .koi-assistant-controls {
   flex: 0 0 auto;
   border-top: 1px solid var(--koi-line);
-  padding: var(--koi-space-2-5) var(--koi-space-3) var(--koi-space-3);
+  /* The separator stays full-bleed (border on the box) while the controls line up with the centered
+     conversation column above. */
+  padding: var(--koi-space-2-5) max(var(--koi-space-3), calc((100% - 860px) / 2)) var(--koi-space-3);
   background: var(--koi-paper-2);
 }
 .koi-assistant-quick {

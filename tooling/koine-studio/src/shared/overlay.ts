@@ -10,6 +10,8 @@
 //     footer) plus backdrop-click-to-close, focus capture/restore, and stack registration —
 //     shared by Preferences, About, and the keyboard-shortcuts Help dialog.
 
+import { el } from '@/shared/el';
+
 type CloseFn = () => void;
 
 // Open overlays, bottom-to-top. The last entry is the one Esc closes.
@@ -74,37 +76,31 @@ export interface ModalHandle {
  * header close button also close. Focus is captured on open and restored on close.
  */
 export function createModal(opts: ModalOptions): ModalHandle {
-  const backdrop = document.createElement('div');
-  backdrop.className = 'koi-modal-backdrop';
-  backdrop.hidden = true;
-
-  const modal = document.createElement('div');
-  modal.className = 'koi-modal';
+  const closeBtn = el('button', {
+    class: 'koi-modal-close',
+    text: '✕',
+    attrs: { type: 'button', 'aria-label': 'Close' },
+  });
+  const body = el('div', { class: 'koi-modal-body' });
+  const modal = el(
+    'div',
+    {
+      class: 'koi-modal',
+      attrs: { role: 'dialog', 'aria-modal': 'true', 'aria-label': opts.ariaLabel ?? opts.title },
+    },
+    [
+      el('div', { class: 'koi-modal-header' }, [
+        el('h2', { class: 'koi-modal-title', text: opts.title }),
+        closeBtn,
+      ]),
+      body,
+      el('div', { class: 'koi-modal-footer' }),
+    ],
+  );
   if (opts.variant) modal.classList.add(opts.variant);
-  modal.setAttribute('role', 'dialog');
-  modal.setAttribute('aria-modal', 'true');
-  modal.setAttribute('aria-label', opts.ariaLabel ?? opts.title);
 
-  const header = document.createElement('div');
-  header.className = 'koi-modal-header';
-  const title = document.createElement('h2');
-  title.className = 'koi-modal-title';
-  title.textContent = opts.title;
-  const closeBtn = document.createElement('button');
-  closeBtn.type = 'button';
-  closeBtn.className = 'koi-modal-close';
-  closeBtn.setAttribute('aria-label', 'Close');
-  closeBtn.textContent = '✕';
-  header.append(title, closeBtn);
-
-  const body = document.createElement('div');
-  body.className = 'koi-modal-body';
-
-  const footer = document.createElement('div');
-  footer.className = 'koi-modal-footer';
-
-  modal.append(header, body, footer);
-  backdrop.appendChild(modal);
+  const backdrop = el('div', { class: 'koi-modal-backdrop' }, modal);
+  backdrop.hidden = true;
   document.body.appendChild(backdrop);
 
   let isOpen = false;
@@ -259,4 +255,158 @@ export function createConfirmDialog(): ConfirmDialog {
       });
     },
   };
+}
+
+export interface PromptRequest {
+  /** Heading shown in the modal header. */
+  title: string;
+  /** Optional helper copy under the heading (muted) — context for what the value is for. */
+  message?: string;
+  /** Label for the input. Defaults to 'Name'. */
+  label?: string;
+  /** Pre-filled value; selected on open so it can be typed over (mirrors window.prompt). */
+  initialValue?: string;
+  placeholder?: string;
+  /** Label for the affirmative button. Defaults to 'OK'. */
+  confirmLabel?: string;
+  /** Label for the dismiss button. Defaults to 'Cancel'. */
+  cancelLabel?: string;
+  /** Render the input in the monospace face — for identifiers (type/field/member names). */
+  mono?: boolean;
+  /** Seed an inline error under the field (e.g. a prior attempt's "already exists"). */
+  error?: string;
+  /** Live validation: return an error string to block submit, or null when the value is valid. */
+  validate?: (value: string) => string | null;
+}
+
+export interface PromptDialog {
+  /** Resolve the trimmed value on confirm, or null on cancel / Esc / backdrop / ✕ / empty. */
+  ask(req: PromptRequest): Promise<string | null>;
+}
+
+// Unique-id seed so a dialog's input/label/error wire up via for/aria-describedby even if more
+// than one prompt dialog is ever constructed.
+let promptSeq = 0;
+
+/**
+ * A reusable single-field text prompt built on createModal() — Koine's replacement for window.prompt.
+ * The field is the editor in miniature (mono face for identifiers) and validation surfaces INLINE,
+ * compiler-style, rather than stacking a second browser alert. Enter submits when valid; the OK
+ * button is disabled while the value is empty or fails validation.
+ */
+export function createPromptDialog(): PromptDialog {
+  const modal = createModal({ title: 'Prompt', ariaLabel: 'Prompt' });
+  const titleEl = modal.backdrop.querySelector<HTMLElement>('.koi-modal-title');
+  const uid = `koi-prompt-${(promptSeq += 1)}`;
+
+  const msgEl = el('p', { class: 'koi-prompt-msg', attrs: { id: `${uid}-msg` } });
+  const labelEl = el('label', { class: 'koi-prompt-label', attrs: { for: `${uid}-input` } });
+  const input = el('input', {
+    class: 'koi-prompt-input',
+    // spellcheck must be the string 'false' — el() omits any attribute whose value is the boolean false.
+    attrs: { id: `${uid}-input`, type: 'text', autocomplete: 'off', spellcheck: 'false', 'aria-describedby': `${uid}-msg ${uid}-error` },
+  });
+  const errorEl = el('p', {
+    class: 'koi-prompt-error',
+    attrs: { id: `${uid}-error`, role: 'alert', 'aria-live': 'polite' },
+  });
+  modal.body.appendChild(el('div', { class: 'koi-prompt' }, [msgEl, labelEl, input, errorEl]));
+
+  const footer = modal.backdrop.querySelector<HTMLElement>('.koi-modal-footer')!;
+  const cancelBtn = el('button', { class: 'koi-confirm-btn', attrs: { type: 'button' } });
+  const okBtn = el('button', { class: 'koi-confirm-btn koi-confirm-btn-primary', attrs: { type: 'button' } });
+  footer.append(cancelBtn, okBtn);
+
+  let resolve: ((value: string | null) => void) | null = null;
+  let validate: PromptRequest['validate'];
+  const settle = (value: string | null): void => {
+    const r = resolve;
+    resolve = null;
+    r?.(value);
+  };
+
+  // Show (or clear) the inline error and mirror it onto the input's invalid state for the ring + aria.
+  function showError(text: string): void {
+    errorEl.textContent = text;
+    input.classList.toggle('is-invalid', text !== '');
+    input.setAttribute('aria-invalid', text !== '' ? 'true' : 'false');
+  }
+
+  // The OK button is disabled while there's nothing usable to submit: empty, or a live-validation error.
+  function refresh(): void {
+    const value = input.value.trim();
+    const liveError = value !== '' && validate ? validate(value) : '';
+    okBtn.disabled = value === '' || liveError != null && liveError !== '';
+    if (liveError) showError(liveError);
+  }
+
+  function submit(): void {
+    const value = input.value.trim();
+    if (value === '') return; // nothing to commit; OK is disabled anyway
+    const err = validate?.(value);
+    if (err) {
+      showError(err);
+      input.focus();
+      return; // keep the dialog open so the user can fix it in place
+    }
+    settle(value);
+    modal.close();
+  }
+
+  cancelBtn.addEventListener('click', () => {
+    settle(null);
+    modal.close();
+  });
+  okBtn.addEventListener('click', submit);
+  input.addEventListener('input', () => {
+    showError(''); // typing clears a stale/seeded error...
+    refresh(); // ...then re-derive disabled + any live error from the new value
+  });
+  input.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter') return;
+    e.preventDefault();
+    if (!okBtn.disabled) submit();
+  });
+  // Esc / backdrop / ✕ all route through close → resolve null (if still pending).
+  modal.onClose(() => settle(null));
+
+  return {
+    ask(req) {
+      settle(null); // defensively settle any stale promise before reusing the dialog
+      if (titleEl) titleEl.textContent = req.title;
+      validate = req.validate;
+      msgEl.textContent = req.message ?? '';
+      msgEl.hidden = !req.message;
+      labelEl.textContent = req.label ?? 'Name';
+      input.value = req.initialValue ?? '';
+      input.placeholder = req.placeholder ?? '';
+      input.classList.toggle('is-mono', req.mono === true);
+      cancelBtn.textContent = req.cancelLabel ?? 'Cancel';
+      okBtn.textContent = req.confirmLabel ?? 'OK';
+      showError(req.error ?? '');
+      refresh();
+      return new Promise<string | null>((res) => {
+        resolve = res;
+        modal.open();
+        input.focus(); // createModal focuses ✕; for a prompt we want the field, with its text selected
+        input.select();
+      });
+    },
+  };
+}
+
+// --- shared lazy singletons --------------------------------------------------
+// One confirm + one prompt dialog for the whole app, so callers don't each construct (and leak) a
+// modal. Built on first use, then reused — both dialogs settle any stale promise on the next ask().
+let sharedConfirm: ConfirmDialog | null = null;
+let sharedPrompt: PromptDialog | null = null;
+
+/** Ask a yes/no question with the shared Koine confirm dialog. Replaces window.confirm(). */
+export function koiConfirm(req: ConfirmRequest): Promise<boolean> {
+  return (sharedConfirm ??= createConfirmDialog()).ask(req);
+}
+
+/** Ask for a single line of text with the shared Koine prompt dialog. Replaces window.prompt(). */
+export function koiPrompt(req: PromptRequest): Promise<string | null> {
+  return (sharedPrompt ??= createPromptDialog()).ask(req);
 }

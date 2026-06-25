@@ -664,6 +664,113 @@ public class KoineLanguageServiceTests
         Svc.PrepareRenameAt(Doc(src), U, line: 1, character: 18).ShouldBeNull(); // on "Decimal"
     }
 
+    // ---- Rename preview ---------------------------------------------------
+
+    [Fact]
+    public void RenamePreview_groups_cross_file_references_per_file()
+    {
+        var ordering = "context Ordering {\n  value Line { product: ProductId }\n}\n";
+        var catalog = "context Catalog {\n  entity Product identified by ProductId { sku: String }\n}\n";
+        var docs = new Dictionary<string, string>
+        {
+            ["file:///ordering.koi"] = ordering,
+            ["file:///catalog.koi"] = catalog,
+        };
+        // Rename the ProductId ID type from its declaration in catalog.koi.
+        var preview = Svc.RenamePreviewAt(docs, "file:///catalog.koi", line: 1, character: 32, newName: "ProdId");
+        preview.ShouldNotBeNull();
+        preview.NewName.ShouldBe("ProdId");
+        // One RenameFileChanges entry per file, each carrying that file's occurrences.
+        preview.Files.Count.ShouldBe(2);
+        preview.Files.ShouldContain(f => f.Uri == "file:///catalog.koi" && f.Occurrences.Count == 1); // decl + use? decl only here
+        preview.Files.ShouldContain(f => f.Uri == "file:///ordering.koi" && f.Occurrences.Count == 1); // the use
+        // Every occurrence's Uri matches its grouping file (stable grouping).
+        foreach (var file in preview.Files)
+        {
+            file.Occurrences.ShouldAllBe(o => o.Uri == file.Uri);
+        }
+    }
+
+    [Fact]
+    public void RenamePreview_groups_multiple_in_file_occurrences()
+    {
+        var src =
+            "context C {\n" +
+            "  value Money { amount: Decimal }\n" +
+            "  value Line { price: Money }\n" +
+            "}\n";
+        var preview = Svc.RenamePreviewAt(Doc(src), U, line: 1, character: 9, newName: "Cash"); // on "Money" decl
+        preview.ShouldNotBeNull();
+        preview.NewName.ShouldBe("Cash");
+        preview.Files.ShouldHaveSingleItem();
+        preview.Files[0].Uri.ShouldBe(U);
+        preview.Files[0].Occurrences.Count.ShouldBe(2); // declaration + one use
+    }
+
+    [Fact]
+    public void RenamePreview_rejects_an_invalid_identifier()
+    {
+        var src = "context C {\n  value Money { amount: Decimal }\n}\n";
+        Svc.RenamePreviewAt(Doc(src), U, line: 1, character: 9, newName: "1Bad").ShouldBeNull();
+        Svc.RenamePreviewAt(Doc(src), U, line: 1, character: 9, newName: "has space").ShouldBeNull();
+    }
+
+    [Fact]
+    public void RenamePreview_on_a_primitive_returns_null()
+    {
+        var src = "context C {\n  value V { x: Decimal }\n}\n";
+        Svc.RenamePreviewAt(Doc(src), U, line: 1, character: 18, newName: "Money").ShouldBeNull();
+    }
+
+    // ---- Linked editing ---------------------------------------------------
+
+    [Fact]
+    public void LinkedEditing_returns_in_file_occurrences()
+    {
+        var src =
+            "context C {\n" +
+            "  value Money { amount: Decimal }\n" +
+            "  value Line { price: Money }\n" +
+            "}\n";
+        var ranges = Svc.LinkedEditingRangeAt(Doc(src), U, line: 1, character: 9); // on "Money" decl
+        ranges.ShouldNotBeNull();
+        ranges.Count.ShouldBe(2); // declaration + one use, both in the active file
+        ranges.ShouldAllBe(r => r.Uri == U);
+    }
+
+    [Fact]
+    public void LinkedEditing_filters_to_the_active_file()
+    {
+        var ordering = "context Ordering {\n  value Line { product: ProductId }\n}\n";
+        var catalog = "context Catalog {\n  entity Product identified by ProductId { sku: String }\n}\n";
+        var docs = new Dictionary<string, string>
+        {
+            ["file:///ordering.koi"] = ordering,
+            ["file:///catalog.koi"] = catalog,
+        };
+        // The ProductId type is used in ordering.koi but declared in catalog.koi. Linked editing on the
+        // use in ordering.koi must return ONLY ordering.koi occurrences (single-file in-place editing).
+        var col = ordering.Split('\n')[1].IndexOf("ProductId", StringComparison.Ordinal) + 1;
+        var ranges = Svc.LinkedEditingRangeAt(docs, "file:///ordering.koi", line: 1, character: col);
+        ranges.ShouldNotBeNull();
+        ranges.ShouldNotBeEmpty();
+        ranges.ShouldAllBe(r => r.Uri == "file:///ordering.koi");
+    }
+
+    [Fact]
+    public void LinkedEditing_on_a_primitive_returns_null()
+    {
+        var src = "context C {\n  value V { x: Decimal }\n}\n";
+        Svc.LinkedEditingRangeAt(Doc(src), U, line: 1, character: 18).ShouldBeNull(); // on "Decimal"
+    }
+
+    [Fact]
+    public void LinkedEditing_inside_a_string_returns_null()
+    {
+        var src = "context C {\n  value V { x: String = \"Money\" }\n}\n";
+        Svc.LinkedEditingRangeAt(Doc(src), U, line: 1, character: 26).ShouldBeNull(); // inside the literal
+    }
+
     [Fact]
     public void HoverAt_resolves_across_files()
     {

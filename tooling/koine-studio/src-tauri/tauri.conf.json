@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "koine-studio",
+  "productName": "Koine Studio",
   "version": "0.1.0",
   "identifier": "com.atypical.koine-studio",
   "build": {
@@ -13,9 +13,14 @@
     "withGlobalTauri": true,
     "windows": [
       {
-        "title": "koine-studio",
-        "width": 800,
-        "height": 600
+        "title": "Koine Studio",
+        "width": 1440,
+        "height": 900,
+        "minWidth": 1024,
+        "minHeight": 680,
+        "center": true,
+        "maximized": false,
+        "resizable": true
       }
     ],
     "security": {
@@ -25,6 +30,13 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "publisher": "Atypical Consulting",
+    "homepage": "https://github.com/Atypical-Consulting/Koine",
+    "category": "DeveloperTool",
+    "license": "Apache-2.0",
+    "copyright": "Copyright © 2026 Atypical Consulting. Licensed under the Apache License 2.0.",
+    "shortDescription": "The desktop IDE for the Koine DDD language.",
+    "longDescription": "Koine Studio is the desktop IDE for Koine, a domain-specific language for Domain-Driven Design. Write a bounded context's ubiquitous language once and generate idiomatic, self-contained code (C#, TypeScript, Python, PHP) with live diagnostics, a domain diagram and an AI domain copilot.",
     "externalBin": [
       "binaries/koine"
     ],
@@ -34,6 +46,9 @@
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "macOS": {
+      "minimumSystemVersion": "10.15"
+    }
   }
 }

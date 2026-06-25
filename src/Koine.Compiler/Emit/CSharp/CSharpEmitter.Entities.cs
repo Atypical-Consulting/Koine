@@ -81,10 +81,34 @@ public sealed partial class CSharpEmitter
         var ctorMembers = entity.Members.Where(m => !MemberAnalysis.IsDerived(m, memberNames)).ToList();
         var derived = entity.Members.Where(m => MemberAnalysis.IsDerived(m, memberNames)).ToList();
         var mutated = MutatedFields(entity);
+        // Members backed by a mutable list (issue #171), classified once and shared by the property
+        // declarations, the all-args assignments, and the parameterless-ctor gate so the three stay in
+        // lockstep. A field reassigned by a command is excluded (the backing field has no replace path).
+        var backedListMembers = BackedListMembers(ctorMembers, index, mutated);
 
         foreach (var m in ctorMembers)
         {
             var csType = typeMapper.Map(m.Type, out var comment);
+
+            // A value-object collection is backed by a mutable private List<T> so the EF Core
+            // infrastructure layer can materialize owned children into it (issue #171); the public
+            // surface stays a read-only IReadOnlyList<T>.
+            if (backedListMembers.Contains(m.Name))
+            {
+                var elem = typeMapper.Map(m.Type.Element ?? ObjectType);
+                var field = BackingFieldName(m.Name);
+                sb.Append(Indent).Append("private readonly List<").Append(elem)
+                  .Append(m.Type.IsOptional ? ">? " : "> ").Append(field)
+                  .Append(m.Type.IsOptional ? ";\n" : " = new();\n");
+                WriteXmlDoc(sb, m.Doc, Indent);
+                WriteObsolete(sb, m.Deprecated, Indent);
+                sb.Append(Indent).Append("public ").Append(csType).Append(' ')
+                  .Append(CSharpNaming.ToPascalCase(m.Name)).Append(" => ").Append(field).Append(';');
+                AppendComment(sb, comment);
+                sb.Append('\n');
+                continue;
+            }
+
             WriteXmlDoc(sb, m.Doc, Indent);
             WriteObsolete(sb, m.Deprecated, Indent);
             sb.Append(Indent).Append("public ").Append(csType).Append(' ')
@@ -96,7 +120,7 @@ public sealed partial class CSharpEmitter
 
         // Constructor: identity param first, then members.
         sb.Append('\n');
-        WriteEntityConstructor(sb, entity, ctorMembers, translator, typeMapper, index);
+        WriteEntityConstructor(sb, entity, isRoot, ctorMembers, backedListMembers, translator, typeMapper, index);
 
         // Shared invariant-checking method (DRY: called by the constructor and each command).
         if (entity.Invariants.Count > 0)

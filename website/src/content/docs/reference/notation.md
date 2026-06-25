@@ -23,7 +23,7 @@ Some chapters adapt this spine to their material — the expression language ([�
 
 This deliberately separates *what you write* (Syntax) from *what it means* (Semantics) and *what it
 becomes* (Translation). Koine's semantic model is target-agnostic and drives several emitters — C#,
-TypeScript, Python, and PHP today, with Rust on the roadmap — so every "Translation" section in this
+TypeScript, Python, PHP, and Rust today (Rust covers multi-context models and the CQRS read side) — so every "Translation" section in this
 reference describes the C# emission specifically, not the language itself.
 
 ## 2.2 Grammar notation
@@ -102,5 +102,5 @@ safe to match on in tooling.
 
 "Translation to C#" sections show idiomatic C# from the current emitter (`Emit/CSharp/`). The emitted
 code is snapshot- and compile-tested in the repository, so the shapes shown are real. Because the
-language is target-agnostic, the same model drives other emitters too (TypeScript, Python, and PHP
-ship today, with Rust on the roadmap); only the Translation sections are C#-specific.
+language is target-agnostic, the same model drives other emitters too (TypeScript, Python, PHP, and
+Rust ship today — Rust covers multi-context models and the CQRS read side); only the Translation sections are C#-specific.

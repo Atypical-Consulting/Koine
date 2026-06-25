@@ -200,7 +200,8 @@ public sealed partial class CSharpEmitter
     /// strongly-typed-ID value converter, the concurrency token as <c>IsConcurrencyToken()</c>
     /// (versioned roots only), value-object members as owned types (<c>OwnsOne</c> / <c>OwnsMany</c>, nested →
     /// nested <c>OwnsOne</c>), smart-enum members via the shared <c>ValueConverter</c>, and foreign
-    /// strongly-typed IDs as scalar converters. Plain primitives map by EF convention (no config).
+    /// strongly-typed IDs as scalar converters. Plain primitives get an explicit <c>Property</c> call so EF
+    /// maps the get-only auto-property and materializes it via its backing field (issue #276).
     /// </summary>
     private EmittedFile EmitEntityConfiguration(EmitContext emit, string context, AggregateDecl agg, ModelIndex index)
     {
@@ -265,48 +266,41 @@ public sealed partial class CSharpEmitter
         var prop = CSharpNaming.ToPascalCase(m.Name);
         TypeRef type = m.Type;
 
-        if (CSharpTypeMapper.IsList(type))
+        // One classification drives the mapping, shared with the domain persistence-ctor gate so the two
+        // cannot drift (issue #344). The cases below produce exactly the same output as the previous
+        // IsList / IsValueObjectList / Classify / IdTypeNames branching.
+        switch (ClassifyMember(type, index))
         {
-            var elem = type.Element?.Name;
-            if (elem is not null && index.Classify(elem) == TypeKind.Value)
-            {
-                WriteOwned(sb, context, builderVar, "OwnsMany", prop, elem, index, indentLevel, depth: 1);
-            }
-            else
-            {
-                AppendIndent(sb, indentLevel).Append("// ").Append(prop)
-                  .Append(" is a primitive collection, mapped by EF Core convention.\n");
-            }
-
-            return;
-        }
-
-        if (CSharpTypeMapper.IsSet(type) || CSharpTypeMapper.IsMap(type))
-        {
-            AppendIndent(sb, indentLevel).Append("// ").Append(prop)
-              .Append(" is a collection, mapped by EF Core convention.\n");
-            return;
-        }
-
-        switch (index.Classify(type.Name))
-        {
-            case TypeKind.Value:
+            case OwnedKind.ValueObjectCollection:
+                WriteOwned(sb, context, builderVar, "OwnsMany", prop, type.Element!.Name, index, indentLevel, depth: 1);
+                break;
+            case OwnedKind.ScalarValueObject:
                 WriteOwned(sb, context, builderVar, "OwnsOne", prop, type.Name, index, indentLevel, depth: 1);
                 break;
-            case TypeKind.Enum:
+            case OwnedKind.SmartEnum:
                 AppendIndent(sb, indentLevel).Append(builderVar).Append(".Property(x => x.").Append(prop)
                   .Append(").HasConversion(").Append(ValueConvertersClass(context)).Append('.')
                   .Append(type.Name).Append("Converter);\n");
                 break;
+            case OwnedKind.ForeignId:
+                // A foreign strongly-typed ID (e.g. customer: CustomerId): convert to its backing value.
+                AppendIndent(sb, indentLevel).Append(builderVar).Append(".Property(x => x.").Append(prop)
+                  .Append(").HasConversion(v => v.Value, v => new ").Append(type.Name).Append("(v));\n");
+                break;
+            case OwnedKind.OtherCollection:
+                // Mapped by EF Core convention; a primitive list keeps the more specific wording.
+                AppendIndent(sb, indentLevel).Append("// ").Append(prop)
+                  .Append(CSharpTypeMapper.IsList(type)
+                      ? " is a primitive collection, mapped by EF Core convention.\n"
+                      : " is a collection, mapped by EF Core convention.\n");
+                break;
             default:
-                if (index.IdTypeNames.Contains(type.Name))
-                {
-                    // A foreign strongly-typed ID (e.g. customer: CustomerId): convert to its backing value.
-                    AppendIndent(sb, indentLevel).Append(builderVar).Append(".Property(x => x.").Append(prop)
-                      .Append(").HasConversion(v => v.Value, v => new ").Append(type.Name).Append("(v));\n");
-                }
-
-                // A plain primitive maps by EF Core convention — no explicit configuration.
+                // A plain primitive: an explicit Property call so EF maps the get-only auto-property
+                // and materializes it via its backing field (issue #276). Left to convention, EF does
+                // not discover a read-only auto-property on a principal entity — the column is silently
+                // dropped and the value never round-trips. (Owned types already do this; this brings the
+                // root-entity mapping in line.)
+                AppendIndent(sb, indentLevel).Append(builderVar).Append(".Property(x => x.").Append(prop).Append(");\n");
                 break;
         }
     }
@@ -320,11 +314,23 @@ public sealed partial class CSharpEmitter
     private void WriteOwned(StringBuilder sb, string context, string builderVar, string ownsMethod, string prop, string voTypeName, ModelIndex index, int indentLevel, int depth)
     {
         var owned = OwnedBuilderName(prop, depth);
+        var ownsMany = ownsMethod == "OwnsMany";
+        var vo = index.TryGetDeclIn(context, voTypeName, out TypeDecl decl) ? decl as ValueObjectDecl : null;
         AppendIndent(sb, indentLevel).Append(builderVar).Append('.').Append(ownsMethod)
           .Append("(x => x.").Append(prop).Append(", ").Append(owned).Append(" =>\n");
         AppendIndent(sb, indentLevel).Append("{\n");
 
-        if (index.TryGetDeclIn(context, voTypeName, out TypeDecl decl) && decl is ValueObjectDecl vo)
+        // A value-object collection (OwnsMany) gets an explicit single-column surrogate key so its rows
+        // persist on every provider (issue #171): EF's default composite synthesized key relies on a
+        // store-generated shadow ordinal, which SQLite — a common dev/test provider — cannot supply.
+        if (ownsMany)
+        {
+            var key = OwnedSurrogateKeyName(vo);
+            AppendIndent(sb, indentLevel + 1).Append(owned).Append(".Property<int>(\"").Append(key).Append("\").ValueGeneratedOnAdd();\n");
+            AppendIndent(sb, indentLevel + 1).Append(owned).Append(".HasKey(\"").Append(key).Append("\");\n");
+        }
+
+        if (vo is not null)
         {
             var voMemberNames = new HashSet<string>(vo.Members.Select(mm => mm.Name), StringComparer.Ordinal);
             foreach (Member vm in vo.Members.Where(mm => !MemberAnalysis.IsDerived(mm, voMemberNames)))
@@ -334,6 +340,14 @@ public sealed partial class CSharpEmitter
         }
 
         AppendIndent(sb, indentLevel).Append("});\n");
+
+        // Field access so EF reads/writes the mutable backing list (issue #171); the domain exposes the
+        // collection read-only (=> _coll), which EF cannot materialize owned children into otherwise.
+        if (ownsMany)
+        {
+            AppendIndent(sb, indentLevel).Append(builderVar).Append(".Navigation(x => x.").Append(prop)
+              .Append(").UsePropertyAccessMode(PropertyAccessMode.Field);\n");
+        }
     }
 
     /// <summary>
@@ -346,43 +360,31 @@ public sealed partial class CSharpEmitter
         var prop = CSharpNaming.ToPascalCase(m.Name);
         TypeRef type = m.Type;
 
-        if (CSharpTypeMapper.IsList(type) || CSharpTypeMapper.IsSet(type) || CSharpTypeMapper.IsMap(type))
+        // Same shared classification as the root mapping (issue #344). An owned member's non-value-object
+        // collection always reads "is a collection" (the "primitive collection" wording is root-only).
+        switch (ClassifyMember(type, index))
         {
-            var elem = type.Element?.Name;
-            if (CSharpTypeMapper.IsList(type) && elem is not null && index.Classify(elem) == TypeKind.Value)
-            {
-                WriteOwned(sb, context, ownedVar, "OwnsMany", prop, elem, index, indentLevel, depth + 1);
-            }
-            else
-            {
-                AppendIndent(sb, indentLevel).Append("// ").Append(prop)
-                  .Append(" is a collection, mapped by EF Core convention.\n");
-            }
-
-            return;
-        }
-
-        switch (index.Classify(type.Name))
-        {
-            case TypeKind.Value:
+            case OwnedKind.ValueObjectCollection:
+                WriteOwned(sb, context, ownedVar, "OwnsMany", prop, type.Element!.Name, index, indentLevel, depth + 1);
+                break;
+            case OwnedKind.ScalarValueObject:
                 WriteOwned(sb, context, ownedVar, "OwnsOne", prop, type.Name, index, indentLevel, depth + 1);
                 break;
-            case TypeKind.Enum:
+            case OwnedKind.SmartEnum:
                 AppendIndent(sb, indentLevel).Append(ownedVar).Append(".Property(x => x.").Append(prop)
                   .Append(").HasConversion(").Append(ValueConvertersClass(context)).Append('.')
                   .Append(type.Name).Append("Converter);\n");
                 break;
+            case OwnedKind.ForeignId:
+                AppendIndent(sb, indentLevel).Append(ownedVar).Append(".Property(x => x.").Append(prop)
+                  .Append(").HasConversion(v => v.Value, v => new ").Append(type.Name).Append("(v));\n");
+                break;
+            case OwnedKind.OtherCollection:
+                AppendIndent(sb, indentLevel).Append("// ").Append(prop)
+                  .Append(" is a collection, mapped by EF Core convention.\n");
+                break;
             default:
-                if (index.IdTypeNames.Contains(type.Name))
-                {
-                    AppendIndent(sb, indentLevel).Append(ownedVar).Append(".Property(x => x.").Append(prop)
-                      .Append(").HasConversion(v => v.Value, v => new ").Append(type.Name).Append("(v));\n");
-                }
-                else
-                {
-                    AppendIndent(sb, indentLevel).Append(ownedVar).Append(".Property(x => x.").Append(prop).Append(");\n");
-                }
-
+                AppendIndent(sb, indentLevel).Append(ownedVar).Append(".Property(x => x.").Append(prop).Append(");\n");
                 break;
         }
     }
@@ -500,6 +502,29 @@ public sealed partial class CSharpEmitter
         }
 
         return depth <= 1 ? name : name + depth;
+    }
+
+    /// <summary>
+    /// The shadow primary-key name for an owned value-object collection's surrogate key (issue #171),
+    /// defaulting to <c>Id</c> but disambiguated (<c>OwnedId</c>, …) when the value object already maps a
+    /// member of that name — otherwise EF would reject two properties named <c>Id</c> with different CLR
+    /// types. A null decl (unresolved type) keeps the plain <c>Id</c>; it has no mapped members to clash.
+    /// </summary>
+    private static string OwnedSurrogateKeyName(ValueObjectDecl? vo)
+    {
+        if (vo is null)
+        {
+            return "Id";
+        }
+
+        var taken = new HashSet<string>(vo.Members.Select(m => CSharpNaming.ToPascalCase(m.Name)), StringComparer.Ordinal);
+        var name = "Id";
+        while (taken.Contains(name))
+        {
+            name = "Owned" + name;
+        }
+
+        return name;
     }
 
     /// <summary>Appends <paramref name="indentLevel"/> indents to the builder and returns it for chaining.</summary>

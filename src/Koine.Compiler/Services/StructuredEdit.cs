@@ -50,11 +50,25 @@ public static class StructuredEditKind
     public const string AddTransition = "addTransition";
 
     /// <summary>
-    /// Add a new type to a context: <c>Target</c> = the context name, <c>Name</c> = the new type's name.
-    /// Inserts a minimal, valid <c>value</c>-object skeleton (one <c>String</c> field) the author then
-    /// refines; an illegal name (duplicate / not an identifier) is rejected by re-validation.
+    /// Add a new type to a context: <c>Target</c> = the context name, <c>Name</c> = the new type's name,
+    /// <c>Type</c> = the construct kind (<c>value</c> | <c>entity</c> | <c>aggregate</c> | <c>event</c> |
+    /// <c>enum</c> | <c>service</c>; <c>null</c> ⇒ <c>value</c>). Inserts a minimal, valid skeleton the author
+    /// then refines (an aggregate nests its own root entity, a service a placeholder use-case, so each is
+    /// self-contained); an illegal name (duplicate / not an identifier) is rejected by re-validation.
     /// </summary>
     public const string AddType = "addType";
+
+    /// <summary>
+    /// Add a nested member to an <b>aggregate</b> (not a context): <c>Target</c> = the aggregate's
+    /// qualified name, <c>Type</c> = the member kind (<c>repository</c> | <c>rule</c>), <c>Name</c> =
+    /// the member's name (the <c>spec</c> name for <c>rule</c>; ignored for the anonymous
+    /// <c>repository</c> block). Inserts a minimal, re-validating skeleton as the aggregate's last
+    /// member — a <c>repository { operations: add, getById }</c>, or a <c>rule</c> as an
+    /// aggregate-scoped <c>spec &lt;Name&gt; on &lt;Root&gt; = true</c>. A second repository is refused
+    /// (an aggregate holds at most one); a rule whose name duplicates a sibling spec/member is rejected
+    /// by re-validation. A broken model is never produced.
+    /// </summary>
+    public const string AddAggregateMember = "addAggregateMember";
 
     /// <summary>Remove a whole type declaration: <c>Target</c> = the type's qname. Rejected (with a
     /// <c>KOIxxxx</c>) when the type is still referenced, so a dangling model can never be produced.</summary>

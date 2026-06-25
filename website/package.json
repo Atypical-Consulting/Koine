@@ -14,7 +14,8 @@
     "prebuild": "node scripts/build-samples.mjs && node scripts/build-wasm.mjs && node scripts/og-image.mjs && node scripts/build-docs.mjs && node scripts/build-studio.mjs",
     "build": "astro build",
     "preview": "astro preview",
-    "astro": "astro"
+    "astro": "astro",
+    "test": "vitest run"
   },
   "dependencies": {
     "@astrojs/sitemap": "^3.7.3",
@@ -37,5 +38,8 @@
     "mermaid": "^11.15.0",
     "sharp": "^0.35.0",
     "starlight-blog": "^0.26.1"
+  },
+  "devDependencies": {
+    "vitest": "^4.0.0"
   }
 }

@@ -1,9 +1,12 @@
 [package]
 name = "koine-studio"
 version = "0.1.0"
-description = "A Tauri App"
-authors = ["you"]
+description = "Koine Studio — the desktop IDE for the Koine domain-specific language for Domain-Driven Design."
+authors = ["Philippe Matray <phmatray@gmail.com>"]
 edition = "2021"
+license = "Apache-2.0"
+homepage = "https://github.com/Atypical-Consulting/Koine"
+repository = "https://github.com/Atypical-Consulting/Koine"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -23,4 +26,14 @@ tauri-plugin-opener = "2"
 tauri-plugin-dialog = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+
+# macOS only: set the Dock icon at runtime (see `set_macos_dock_icon` in lib.rs).
+# A bundled `.app` gets its Dock icon from Info.plist/icon.icns, but `tauri dev`
+# runs the bare executable with no bundle, so the Dock would otherwise show a
+# generic icon. These crates are already in the tree (pulled in transitively by
+# Tauri), so naming them directly adds no extra compilation.
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-foundation = { version = "0.3", features = ["NSData"] }
+objc2-app-kit = { version = "0.3", features = ["NSApplication", "NSResponder", "NSImage"] }
 

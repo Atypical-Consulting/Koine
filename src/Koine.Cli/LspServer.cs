@@ -168,6 +168,7 @@ internal sealed class LspServer
                                     ["hoverProvider"] = true,
                                     ["definitionProvider"] = true,
                                     ["documentFormattingProvider"] = true,
+                                    ["documentRangeFormattingProvider"] = true,
                                     ["documentSymbolProvider"] = true,
                                     ["workspaceSymbolProvider"] = true,
                                     ["foldingRangeProvider"] = true,
@@ -177,10 +178,15 @@ internal sealed class LspServer
                                         ["resolveProvider"] = true,
                                     },
                                     ["referencesProvider"] = true,
+                                    ["documentHighlightProvider"] = true,
+                                    ["inlayHintProvider"] = true,
+                                    ["callHierarchyProvider"] = true,
+                                    ["typeHierarchyProvider"] = true,
                                     ["renameProvider"] = new Dictionary<string, object?>
                                     {
                                         ["prepareProvider"] = true,
                                     },
+                                    ["linkedEditingRangeProvider"] = true,
                                     ["codeActionProvider"] = new Dictionary<string, object?>
                                     {
                                         ["codeActionKinds"] = new[] { "quickfix", "refactor", "refactor.extract" },
@@ -208,6 +214,8 @@ internal sealed class LspServer
                                         ["koineSetDoc"] = true,
                                         ["koineDocs"] = true,
                                         ["koineCheck"] = true,
+                                        ["koineRunScenario"] = true,
+                                        ["koineScenarioCatalog"] = true,
                                     },
                                 },
                                 ["serverInfo"] = new Dictionary<string, object?>
@@ -319,6 +327,14 @@ internal sealed class LspServer
 
                             break;
 
+                        case "textDocument/rangeFormatting":
+                            if (root.TryGetProperty("id", out _))
+                            {
+                                Respond(root, RangeFormattingResultJson(root));
+                            }
+
+                            break;
+
                         case "textDocument/documentSymbol":
                             if (root.TryGetProperty("id", out _))
                             {
@@ -375,6 +391,70 @@ internal sealed class LspServer
 
                             break;
 
+                        case "textDocument/documentHighlight":
+                            if (root.TryGetProperty("id", out _))
+                            {
+                                Respond(root, DocumentHighlightResultJson(root));
+                            }
+
+                            break;
+
+                        case "textDocument/inlayHint":
+                            if (root.TryGetProperty("id", out _))
+                            {
+                                Respond(root, InlayHintResultJson(root));
+                            }
+
+                            break;
+
+                        case "textDocument/prepareCallHierarchy":
+                            if (root.TryGetProperty("id", out _))
+                            {
+                                Respond(root, CallHierarchyPrepareJson(root));
+                            }
+
+                            break;
+
+                        case "callHierarchy/incomingCalls":
+                            if (root.TryGetProperty("id", out _))
+                            {
+                                Respond(root, CallHierarchyIncomingJson(root));
+                            }
+
+                            break;
+
+                        case "callHierarchy/outgoingCalls":
+                            if (root.TryGetProperty("id", out _))
+                            {
+                                Respond(root, CallHierarchyOutgoingJson(root));
+                            }
+
+                            break;
+
+                        case "textDocument/prepareTypeHierarchy":
+                            if (root.TryGetProperty("id", out _))
+                            {
+                                Respond(root, TypeHierarchyPrepareJson(root));
+                            }
+
+                            break;
+
+                        case "typeHierarchy/supertypes":
+                            if (root.TryGetProperty("id", out _))
+                            {
+                                Respond(root, TypeHierarchySupertypesJson(root));
+                            }
+
+                            break;
+
+                        case "typeHierarchy/subtypes":
+                            if (root.TryGetProperty("id", out _))
+                            {
+                                Respond(root, TypeHierarchySubtypesJson(root));
+                            }
+
+                            break;
+
                         case "textDocument/prepareRename":
                             if (root.TryGetProperty("id", out _))
                             {
@@ -387,6 +467,14 @@ internal sealed class LspServer
                             if (root.TryGetProperty("id", out _))
                             {
                                 Respond(root, RenameResultJson(root));
+                            }
+
+                            break;
+
+                        case "textDocument/linkedEditingRange":
+                            if (root.TryGetProperty("id", out _))
+                            {
+                                Respond(root, LinkedEditingRangeResultJson(root));
                             }
 
                             break;
@@ -412,6 +500,14 @@ internal sealed class LspServer
                             if (root.TryGetProperty("id", out _))
                             {
                                 Respond(root, EmitPreviewResultJson(root));
+                            }
+
+                            break;
+
+                        case "koine/emitTargets":
+                            if (root.TryGetProperty("id", out _))
+                            {
+                                Respond(root, EmitTargetsResultJson());
                             }
 
                             break;
@@ -492,6 +588,22 @@ internal sealed class LspServer
                             if (root.TryGetProperty("id", out _))
                             {
                                 Respond(root, CheckResultJson(root));
+                            }
+
+                            break;
+
+                        case "koine/runScenario":
+                            if (root.TryGetProperty("id", out _))
+                            {
+                                Respond(root, RunScenarioResultJson(root));
+                            }
+
+                            break;
+
+                        case "koine/scenarioCatalog":
+                            if (root.TryGetProperty("id", out _))
+                            {
+                                Respond(root, ScenarioCatalogResultJson());
                             }
 
                             break;
@@ -710,6 +822,42 @@ internal sealed class LspServer
         };
     }
 
+    /// <summary>
+    /// Range formatting (<c>textDocument/rangeFormatting</c>): formats the document and returns the
+    /// minimal edit clipped to the request's 0-based <c>params.range</c> — a JSON array with a single
+    /// <c>{ range, newText }</c>, or an empty array when the selection contains nothing to reformat.
+    /// Delegates to <see cref="KoineFormatter.FormatRange"/> (the single source of truth shared with the
+    /// WASM <c>FormatRange</c> export, so the two stay in parity).
+    /// </summary>
+    private object? RangeFormattingResultJson(JsonElement root)
+    {
+        if (!TryGetUri(root, out var uri) || !_docs.TryGetValue(uri, out var text)
+            || !root.TryGetProperty("params", out var p)
+            || !TryGetRange(p, out var sl, out var sc, out var el, out var ec))
+        {
+            return null;
+        }
+
+        var edit = new KoineFormatter().FormatRange(text, sl, sc, el, ec);
+        if (edit is null)
+        {
+            return Array.Empty<object>(); // nothing to change in the selection
+        }
+
+        return new[]
+        {
+            (object)new Dictionary<string, object?>
+            {
+                ["range"] = new Dictionary<string, object?>
+                {
+                    ["start"] = new Dictionary<string, object?> { ["line"] = edit.StartLine, ["character"] = edit.StartCharacter },
+                    ["end"] = new Dictionary<string, object?> { ["line"] = edit.EndLine, ["character"] = edit.EndCharacter },
+                },
+                ["newText"] = edit.NewText,
+            },
+        };
+    }
+
     // ---- Document symbols -------------------------------------------------
 
     private object? DocumentSymbolResultJson(JsonElement root)
@@ -905,6 +1053,294 @@ internal sealed class LspServer
         return refs.Select(ToLocation).ToArray();
     }
 
+    /// <summary>
+    /// Document highlights (<c>textDocument/documentHighlight</c>) at a 0-based position: every
+    /// same-file occurrence of the name under the cursor, as a JSON array of <c>{ range, kind }</c>.
+    /// Reuses the <c>ReferencesAt</c> binder filtered to the active document; <see cref="Reference"/>
+    /// carries no read/write distinction, so each <c>kind</c> is LSP <c>DocumentHighlightKind.Text</c>
+    /// (1). Parity with the WASM <c>DocumentHighlightsAt</c> export.
+    /// </summary>
+    private object? DocumentHighlightResultJson(JsonElement root)
+    {
+        if (!TryGetUri(root, out var uri) || !TryGetPosition(root, out var line, out var ch))
+        {
+            return null;
+        }
+
+        return _ls.ReferencesAt(_compilation, uri, line, ch)
+            .Where(r => string.Equals(r.Uri, uri, StringComparison.Ordinal))
+            .Select(r => (object)new Dictionary<string, object?>
+            {
+                ["range"] = RangeOf(r),
+                ["kind"] = 1, // LSP DocumentHighlightKind.Text
+            })
+            .ToArray();
+    }
+
+    // ---- Inlay hints & call hierarchy (#260, Task 4) ----------------------
+
+    /// <summary>
+    /// Inlay hints (<c>textDocument/inlayHint</c>) over the request's 0-based <c>params.range</c>:
+    /// a JSON array of <c>{ position, label, kind }</c>. The LSP InlayHintKind number is 1 for a Type
+    /// hint and 2 for a Parameter hint (the language-service enum order is Type=0/Parameter=1, so the
+    /// shell maps it). Positions are 0-based — the service already returns them 0-based, so they pass
+    /// straight through.
+    /// </summary>
+    private object? InlayHintResultJson(JsonElement root)
+    {
+        if (!TryGetUri(root, out var uri)
+            || !root.TryGetProperty("params", out var p)
+            || !TryGetRange(p, out var sl, out var sc, out var el, out var ec))
+        {
+            return null;
+        }
+
+        return _ls.InlayHintsAt(_compilation, uri, sl, sc, el, ec)
+            .Select(h => (object)new Dictionary<string, object?>
+            {
+                ["position"] = new Dictionary<string, object?> { ["line"] = h.Line, ["character"] = h.Character },
+                ["label"] = h.Label,
+                ["kind"] = h.Kind == InlayHintKind.Type ? 1 : 2, // LSP InlayHintKind: Type=1, Parameter=2
+            })
+            .ToArray();
+    }
+
+    /// <summary>
+    /// Prepare call hierarchy (<c>textDocument/prepareCallHierarchy</c>) at a 0-based position:
+    /// the command/event under the cursor, as a JSON array of LSP CallHierarchyItem
+    /// (<c>{ name, kind, uri, range, selectionRange, data }</c>). The <c>kind</c> is an LSP SymbolKind
+    /// number (Method=6 for a Command, Event=24 for an Event); the <c>data</c> blob carries
+    /// <c>{ chKind, owningType }</c> so the incoming/outgoing requests can reconstruct the item.
+    /// </summary>
+    private object? CallHierarchyPrepareJson(JsonElement root)
+    {
+        if (!TryGetUri(root, out var uri) || !TryGetPosition(root, out var line, out var ch))
+        {
+            return null;
+        }
+
+        return _ls.PrepareCallHierarchy(_compilation, uri, line, ch)
+            .Select(CallHierarchyItemJson)
+            .ToArray();
+    }
+
+    /// <summary>
+    /// Incoming calls (<c>callHierarchy/incomingCalls</c>): reads <c>params.item</c> (an LSP
+    /// CallHierarchyItem), reconstructs the in-process item from its <c>name</c> + <c>data</c>, and
+    /// returns a JSON array of <c>{ from, fromRanges }</c>. <c>fromRanges</c> is empty (valid per spec;
+    /// kept identical across both backends).
+    /// </summary>
+    private object? CallHierarchyIncomingJson(JsonElement root)
+    {
+        if (!root.TryGetProperty("params", out var p)
+            || !p.TryGetProperty("item", out var itemEl)
+            || ReadCallHierarchyItem(itemEl) is not { } item)
+        {
+            return null;
+        }
+
+        return _ls.IncomingCalls(_compilation, item)
+            .Select(c => (object)new Dictionary<string, object?>
+            {
+                ["from"] = CallHierarchyItemJson(c.From),
+                ["fromRanges"] = Array.Empty<object>(),
+            })
+            .ToArray();
+    }
+
+    /// <summary>
+    /// Outgoing calls (<c>callHierarchy/outgoingCalls</c>): reads <c>params.item</c>, reconstructs the
+    /// in-process item, and returns a JSON array of <c>{ to, fromRanges }</c>. <c>fromRanges</c> is empty.
+    /// </summary>
+    private object? CallHierarchyOutgoingJson(JsonElement root)
+    {
+        if (!root.TryGetProperty("params", out var p)
+            || !p.TryGetProperty("item", out var itemEl)
+            || ReadCallHierarchyItem(itemEl) is not { } item)
+        {
+            return null;
+        }
+
+        return _ls.OutgoingCalls(_compilation, item)
+            .Select(c => (object)new Dictionary<string, object?>
+            {
+                ["to"] = CallHierarchyItemJson(c.To),
+                ["fromRanges"] = Array.Empty<object>(),
+            })
+            .ToArray();
+    }
+
+    /// <summary>
+    /// Serializes a <see cref="CallHierarchyItem"/> to an LSP CallHierarchyItem dict. The <c>kind</c>
+    /// is an LSP SymbolKind number — Method=6 for a Command, Event=24 for an Event. <c>range</c> and
+    /// <c>selectionRange</c> are both the item's (1-based, end-exclusive) name span converted to a
+    /// 0-based LSP range via <see cref="SpanRange"/>. The opaque <c>data</c> blob carries the
+    /// language-service <c>chKind</c> ("Command"/"Event") + <c>owningType</c> so the client can echo it
+    /// back on an incoming/outgoing request and the shell can reconstruct the item.
+    /// </summary>
+    private static Dictionary<string, object?> CallHierarchyItemJson(CallHierarchyItem item)
+    {
+        var range = SpanRange(item.Span);
+        return new Dictionary<string, object?>
+        {
+            ["name"] = item.Name,
+            ["kind"] = item.Kind == CallHierarchyItemKind.Command ? 6 : 24, // LSP SymbolKind: Method=6, Event=24
+            ["uri"] = item.Uri,
+            ["range"] = range,
+            ["selectionRange"] = range,
+            ["data"] = new Dictionary<string, object?>
+            {
+                ["chKind"] = item.Kind == CallHierarchyItemKind.Command ? "Command" : "Event",
+                ["owningType"] = item.OwningType,
+            },
+        };
+    }
+
+    /// <summary>
+    /// Reconstructs a <see cref="CallHierarchyItem"/> from an LSP CallHierarchyItem element: only the
+    /// <c>name</c> and <c>data.chKind</c>/<c>data.owningType</c> are read — the incoming/outgoing
+    /// language-service calls use those three fields and ignore the (placeholder) span/uri. Returns
+    /// <c>null</c> when the element lacks a name or a valid chKind.
+    /// </summary>
+    private static CallHierarchyItem? ReadCallHierarchyItem(JsonElement itemElement)
+    {
+        if (itemElement.ValueKind != JsonValueKind.Object
+            || !itemElement.TryGetProperty("name", out var nameEl)
+            || nameEl.ValueKind != JsonValueKind.String
+            || nameEl.GetString() is not { Length: > 0 } name
+            || !itemElement.TryGetProperty("data", out var data)
+            || data.ValueKind != JsonValueKind.Object
+            || !data.TryGetProperty("chKind", out var chKindEl)
+            || chKindEl.ValueKind != JsonValueKind.String)
+        {
+            return null;
+        }
+
+        var kind = string.Equals(chKindEl.GetString(), "Event", StringComparison.Ordinal)
+            ? CallHierarchyItemKind.Event
+            : CallHierarchyItemKind.Command;
+        var owningType = data.TryGetProperty("owningType", out var ot) && ot.ValueKind == JsonValueKind.String
+            ? ot.GetString()
+            : null;
+
+        return new CallHierarchyItem(name, kind, owningType, "", SourceSpan.None);
+    }
+
+    // ---- Type hierarchy (#331, Task 3) ------------------------------------
+
+    /// <summary>
+    /// Prepare type hierarchy (<c>textDocument/prepareTypeHierarchy</c>) at a 0-based position: the
+    /// declared type under the cursor, as a JSON array of LSP TypeHierarchyItem
+    /// (<c>{ name, kind, uri, range, selectionRange, data }</c>). The <c>kind</c> is an LSP SymbolKind
+    /// number; the <c>data</c> blob carries <c>{ thKind }</c> so the supertypes/subtypes requests can
+    /// reconstruct the item. Parity with the WASM <c>PrepareTypeHierarchy</c> export.
+    /// </summary>
+    private object? TypeHierarchyPrepareJson(JsonElement root)
+    {
+        if (!TryGetUri(root, out var uri) || !TryGetPosition(root, out var line, out var ch))
+        {
+            return null;
+        }
+
+        return _ls.PrepareTypeHierarchy(_compilation, uri, line, ch)
+            .Select(TypeHierarchyItemJson)
+            .ToArray();
+    }
+
+    /// <summary>
+    /// Supertypes (<c>typeHierarchy/supertypes</c>): reads <c>params.item</c>, reconstructs the in-process
+    /// item from its <c>name</c> + <c>data.thKind</c>, and returns a JSON array of the declared types it
+    /// points at. Parity with the WASM <c>Supertypes</c> export.
+    /// </summary>
+    private object? TypeHierarchySupertypesJson(JsonElement root)
+    {
+        if (!root.TryGetProperty("params", out var p)
+            || !p.TryGetProperty("item", out var itemEl)
+            || ReadTypeHierarchyItem(itemEl) is not { } item)
+        {
+            return null;
+        }
+
+        return _ls.Supertypes(_compilation, item).Select(TypeHierarchyItemJson).ToArray();
+    }
+
+    /// <summary>
+    /// Subtypes (<c>typeHierarchy/subtypes</c>): reads <c>params.item</c>, reconstructs the in-process
+    /// item, and returns a JSON array of the declared types that point at it (the inverse edges). Parity
+    /// with the WASM <c>Subtypes</c> export.
+    /// </summary>
+    private object? TypeHierarchySubtypesJson(JsonElement root)
+    {
+        if (!root.TryGetProperty("params", out var p)
+            || !p.TryGetProperty("item", out var itemEl)
+            || ReadTypeHierarchyItem(itemEl) is not { } item)
+        {
+            return null;
+        }
+
+        return _ls.Subtypes(_compilation, item).Select(TypeHierarchyItemJson).ToArray();
+    }
+
+    /// <summary>
+    /// Serializes a <see cref="TypeHierarchyItem"/> to an LSP TypeHierarchyItem dict. <c>kind</c> is an LSP
+    /// SymbolKind number; <c>range</c> + <c>selectionRange</c> are both the declaration's 0-based name
+    /// span; the <c>data</c> blob carries <c>thKind</c> so the client can echo it back and the shell can
+    /// reconstruct the item (mirrors the WASM <c>MapTypeHierarchyItem</c>).
+    /// </summary>
+    private static Dictionary<string, object?> TypeHierarchyItemJson(TypeHierarchyItem item)
+    {
+        var range = SpanRange(item.Span);
+        return new Dictionary<string, object?>
+        {
+            ["name"] = item.Name,
+            ["kind"] = LspTypeHierarchyKind(item.Kind),
+            ["uri"] = item.Uri,
+            ["range"] = range,
+            ["selectionRange"] = range,
+            ["data"] = new Dictionary<string, object?>
+            {
+                ["thKind"] = item.Kind.ToString(),
+            },
+        };
+    }
+
+    /// <summary>
+    /// Reconstructs a <see cref="TypeHierarchyItem"/> from an LSP TypeHierarchyItem element: only the
+    /// <c>name</c> and <c>data.thKind</c> are read (the supertypes/subtypes resolution keys off the name;
+    /// the span/uri are placeholders). Returns <c>null</c> when the element lacks a name or thKind.
+    /// </summary>
+    private static TypeHierarchyItem? ReadTypeHierarchyItem(JsonElement itemElement)
+    {
+        if (itemElement.ValueKind != JsonValueKind.Object
+            || !itemElement.TryGetProperty("name", out var nameEl)
+            || nameEl.ValueKind != JsonValueKind.String
+            || nameEl.GetString() is not { Length: > 0 } name
+            || !itemElement.TryGetProperty("data", out var data)
+            || data.ValueKind != JsonValueKind.Object
+            || !data.TryGetProperty("thKind", out var thKindEl)
+            || thKindEl.ValueKind != JsonValueKind.String)
+        {
+            return null;
+        }
+
+        var kind = Enum.TryParse<TypeHierarchyItemKind>(thKindEl.GetString(), out var k)
+            ? k
+            : TypeHierarchyItemKind.Other;
+        return new TypeHierarchyItem(name, kind, "", SourceSpan.None);
+    }
+
+    /// <summary>Maps a <see cref="TypeHierarchyItemKind"/> to the numeric LSP <c>SymbolKind</c> (mirrors the WASM backend).</summary>
+    private static int LspTypeHierarchyKind(TypeHierarchyItemKind kind) => kind switch
+    {
+        TypeHierarchyItemKind.Aggregate => 5,  // Class
+        TypeHierarchyItemKind.Entity => 5,     // Class
+        TypeHierarchyItemKind.Value => 23,     // Struct
+        TypeHierarchyItemKind.ReadModel => 11, // Interface
+        TypeHierarchyItemKind.Enum => 10,      // Enum
+        TypeHierarchyItemKind.Event => 24,     // Event
+        _ => 13,                               // Variable
+    };
+
     private object? PrepareRenameResultJson(JsonElement root)
     {
         if (!TryGetUri(root, out var uri) || !TryGetPosition(root, out var line, out var ch))
@@ -937,26 +1373,47 @@ internal sealed class LspServer
         }
 
         var newName = nn.GetString()!;
-        var edits = _ls.RenameAt(_compilation, uri, line, ch, newName);
-        if (edits is null)
+        // Route through the preview-shaped service method (the single source of truth): it already
+        // groups the cross-file edits per file with the collision guard applied.
+        var preview = _ls.RenamePreviewAt(_compilation, uri, line, ch, newName);
+        if (preview is null)
         {
             return null;
         }
 
-        // Group reference edits by file into a WorkspaceEdit.changes map (uri -> TextEdit[]).
+        // Build the WorkspaceEdit.changes map (uri -> TextEdit[]) from the per-file preview groups.
         var changes = new Dictionary<string, object?>(StringComparer.Ordinal);
-        foreach (var group in edits.GroupBy(r => r.Uri, StringComparer.Ordinal))
+        foreach (var file in preview.Files)
         {
-            changes[group.Key] = group
+            changes[file.Uri] = file.Occurrences
                 .Select(r => (object)new Dictionary<string, object?>
                 {
                     ["range"] = RangeOf(r),
-                    ["newText"] = newName,
+                    ["newText"] = preview.NewName,
                 })
                 .ToArray();
         }
 
         return new Dictionary<string, object?> { ["changes"] = changes };
+    }
+
+    private object? LinkedEditingRangeResultJson(JsonElement root)
+    {
+        if (!TryGetUri(root, out var uri) || !TryGetPosition(root, out var line, out var ch))
+        {
+            return null;
+        }
+
+        var ranges = _ls.LinkedEditingRangeAt(_compilation, uri, line, ch);
+        if (ranges is null)
+        {
+            return null;
+        }
+
+        return new Dictionary<string, object?>
+        {
+            ["ranges"] = ranges.Select(r => (object)RangeOf(r)).ToArray(),
+        };
     }
 
     private static object ToLocation(Reference r) => new Dictionary<string, object?>
@@ -1247,20 +1704,19 @@ internal sealed class LspServer
             target = requested;
         }
 
-        // 2. Gate to the code-emitter preview targets BEFORE the registry (which also accepts
-        //    glossary/docs — those have dedicated koine/glossary requests).
-        if (!string.Equals(target, "csharp", StringComparison.OrdinalIgnoreCase)
-            && !string.Equals(target, "typescript", StringComparison.OrdinalIgnoreCase)
-            && !string.Equals(target, "python", StringComparison.OrdinalIgnoreCase)
-            && !string.Equals(target, "php", StringComparison.OrdinalIgnoreCase)
-            && !string.Equals(target, "rust", StringComparison.OrdinalIgnoreCase))
+        // 2. Gate to the registry's code-emit targets (issue #282) — the SAME list koine/emitTargets
+        //    serves, so a target the picker offers is previewable here too (no offered-then-rejected
+        //    drift). SupportedTargetInfos excludes glossary/docs (they have dedicated requests).
+        var emitTargets = Infrastructure.EmitterRegistry.SupportedTargetInfos;
+        if (!emitTargets.Any(i => string.Equals(i.Id, target, StringComparison.OrdinalIgnoreCase)))
         {
+            var expected = string.Join(", ", emitTargets.Select(i => $"'{i.Id}'"));
             return new Dictionary<string, object?>
             {
                 ["target"] = target,
                 ["files"] = Array.Empty<object>(),
                 ["diagnostics"] = Array.Empty<object>(),
-                ["error"] = $"unknown target '{target}'; expected 'csharp', 'typescript', 'python', 'php', or 'rust'",
+                ["error"] = $"unknown target '{target}'; expected one of {expected}",
             };
         }
 
@@ -1314,6 +1770,27 @@ internal sealed class LspServer
             ["diagnostics"] = items,
             ["error"] = null,
         };
+    }
+
+    /// <summary>
+    /// The emit-target capability query (issue #282): the registry's code-emit targets, each with
+    /// <c>{ id, displayName, fileExtension }</c>, in display order. Backed entirely by
+    /// <see cref="Infrastructure.EmitterRegistry.SupportedTargetInfos"/>, so adding a target to the
+    /// registry surfaces it in Koine Studio's picker/wizard/Generated-tab/assistant with no front-end
+    /// edit. Excludes the non-emit <c>glossary</c>/<c>docs</c> generators.
+    /// </summary>
+    private static object EmitTargetsResultJson()
+    {
+        var targets = Infrastructure.EmitterRegistry.SupportedTargetInfos
+            .Select(i => (object)new Dictionary<string, object?>
+            {
+                ["id"] = i.Id,
+                ["displayName"] = i.DisplayName,
+                ["fileExtension"] = i.FileExtension,
+            })
+            .ToArray();
+
+        return new Dictionary<string, object?> { ["targets"] = targets };
     }
 
     /// <summary>
@@ -1387,7 +1864,30 @@ internal sealed class LspServer
         {
             ["contexts"] = contexts,
             ["relations"] = relations,
+            // Additive (#290): each declared context's declaration NameSpan (raw 1-based span over the
+            // `context` name token), keyed by name, serialized exactly like a diagram node's sourceSpan
+            // (MapSourceSpan; SourceSpan.None → null). Lets the Studio graph jump to the .koi on click.
+            ["contextSpans"] = ContextSpans(model.Contexts),
         };
+    }
+
+    /// <summary>
+    /// Projects each declared context's declaration <c>NameSpan</c> into a name → raw-1-based-span map
+    /// (the additive <c>contextSpans</c> field of the context-map result, #290). A recovered context
+    /// with no span maps to <c>null</c>; a duplicate name keeps the first declaration's span.
+    /// </summary>
+    private static Dictionary<string, object?> ContextSpans(IEnumerable<Compiler.Ast.ContextNode> contexts)
+    {
+        var spans = new Dictionary<string, object?>(StringComparer.Ordinal);
+        foreach (var c in contexts)
+        {
+            if (!spans.ContainsKey(c.Name))
+            {
+                spans[c.Name] = MapSourceSpan(c.NameSpan.IsNone ? null : c.NameSpan);
+            }
+        }
+
+        return spans;
     }
 
     /// <summary>
@@ -1514,6 +2014,63 @@ internal sealed class LspServer
         };
     }
 
+    /// <summary>
+    /// Runs a scenario (#149, <c>koine/runScenario</c>): exercises one aggregate command/factory against
+    /// a given state + args and returns the <c>command → events → invariant-checks</c> timeline. A model
+    /// with errors yields a not-ok result carrying an explanatory note rather than throwing.
+    /// </summary>
+    private object RunScenarioResultJson(JsonElement root)
+    {
+        var target = TryGetStringParam(root, "target") ?? "";
+        var operation = TryGetStringParam(root, "operation") ?? "";
+        try
+        {
+            JsonElement given = TryGetObjectParam(root, "given");
+            JsonElement args = TryGetObjectParam(root, "args");
+
+            var sources = Workspace().Select(kv => new SourceFile(kv.Key, kv.Value)).ToList();
+            var (model, _) = ParseUsable(sources);
+            if (model is null)
+            {
+                return ScenarioService.Error(target, operation, "The model has errors; fix them before running a scenario.");
+            }
+
+            var semantic = new Compiler.Ast.SemanticModel(model);
+            return ScenarioService.Run(semantic, target, operation, given, args);
+        }
+        catch (Exception ex)
+        {
+            // Mirror the WASM backend: a malformed request or interpreter fault returns a not-ok result
+            // (so the id-bearing request always gets a reply) rather than throwing and leaving the client hanging.
+            return ScenarioService.Error(target, operation, $"The scenario could not be run: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// The runnable surface of the merged workspace (#149, <c>koine/scenarioCatalog</c>): the entities
+    /// exposing commands/factories, their operations + parameters, and their fields — what the Studio
+    /// panel builds its target/operation dropdowns and given/args scaffold from. A model with errors
+    /// yields <c>{ targets: [] }</c>.
+    /// </summary>
+    private object ScenarioCatalogResultJson()
+    {
+        try
+        {
+            var sources = Workspace().Select(kv => new SourceFile(kv.Key, kv.Value)).ToList();
+            var (model, _) = ParseUsable(sources);
+            if (model is null)
+            {
+                return new Dictionary<string, object?> { ["targets"] = Array.Empty<object>() };
+            }
+
+            return ScenarioService.Catalog(new Compiler.Ast.SemanticModel(model));
+        }
+        catch
+        {
+            return new Dictionary<string, object?> { ["targets"] = Array.Empty<object>() };
+        }
+    }
+
     /// <summary>Serialises a <see cref="ModelNode"/> subtree to the wire shape (recursive, additive).</summary>
     private static Dictionary<string, object?> ModelNodeJson(ModelNode n) => new()
     {
@@ -1546,6 +2103,13 @@ internal sealed class LspServer
         root.TryGetProperty("params", out var p) && p.TryGetProperty(name, out var el) && el.ValueKind == JsonValueKind.String
             ? el.GetString()
             : null;
+
+    /// <summary>The <c>params.&lt;name&gt;</c> element (e.g. a <c>given</c>/<c>args</c> object), or an
+    /// <c>Undefined</c> element when absent — which the scenario bridge treats as empty.</summary>
+    private static JsonElement TryGetObjectParam(JsonElement root, string name) =>
+        root.TryGetProperty("params", out var p) && p.TryGetProperty(name, out var el)
+            ? el
+            : default;
 
     /// <summary>Parses <c>params.edit</c> into a <see cref="StructuredEdit"/>; false when malformed.</summary>
     private static bool TryGetEdit(JsonElement root, out StructuredEdit edit)
@@ -1610,6 +2174,7 @@ internal sealed class LspServer
     {
         ["contexts"] = Array.Empty<object>(),
         ["relations"] = Array.Empty<object>(),
+        ["contextSpans"] = new Dictionary<string, object?>(StringComparer.Ordinal),
     };
 
     private static object MapRelation(Compiler.Ast.ContextRelation r) => new Dictionary<string, object?>
@@ -1697,6 +2262,8 @@ internal sealed class LspServer
         ["sourceSpan"] = MapSourceSpan(n.Span),
         ["stereotype"] = n.Stereotype,
         ["members"] = (n.Members ?? []).Select(MapMember).ToArray(),
+        ["invariants"] = (n.Invariants ?? []).ToArray(),
+        ["doc"] = n.Doc,
     };
 
     /// <summary>Maps a <see cref="Koine.Compiler.Emit.Docs.DiagramMember"/> to its <c>{ text, kind }</c> wire dict.</summary>

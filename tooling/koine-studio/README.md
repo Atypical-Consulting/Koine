@@ -1,9 +1,38 @@
 # Koine Studio
 
 A minimal desktop IDE for `.koi` files, built on Tauri v2 + CodeMirror 6. It gives you a
-live editor with push-based diagnostics and an emitted-code (C# / TypeScript) preview pane,
+live editor with push-based diagnostics and an emitted-code (C# / TypeScript / Python / PHP / Rust) preview pane,
 all driven by the existing Koine language server (`koine lsp`) spawned as a child process and
-brokered over stdio by the Rust host.
+brokered over stdio by the Rust host. **`Mod`+`Shift`+`F`** opens a workspace-wide search &
+replace panel (case / whole-word / regex / include-glob) across every `.koi` file in the open
+folder, unsaved buffers included.
+
+## Web Worker runtime (browser host)
+
+The WASM compiler (`src/Koine.Wasm`) runs inside a **dedicated Web Worker** (`src/host/browser/koine.worker.ts`)
+in both browser hosts — Koine Studio and the docs-site playground. A main-thread id-correlated
+client (`workerClient.ts`) routes calls to the worker over `postMessage` and resolves each
+response as a `Promise`. Cancellation is supported in two modes:
+
+- **Supersede** — a stale in-flight call is dropped when a newer one arrives (debounced diagnostics).
+- **Terminate-and-respawn** — a runaway compile is abandoned by terminating the worker and booting a
+  fresh one.
+
+`WasmEnableThreads` stays **`false`** in `src/Koine.Wasm/Koine.Wasm.csproj`. The worker uses
+plain structured-clone `postMessage`, so **no `SharedArrayBuffer` and no COOP/COEP
+cross-origin-isolation headers are required**.
+
+**Boot ordering (issue #357 — do not regress).** The worker must wire its RPC loop with
+`self.addEventListener('message', …)` **after** `dotnet.create()` resolves — never as a top-level
+`self.onmessage = …`. Assigning `self.onmessage` at worker startup clobbers the `message` channel the
+.NET WebAssembly runtime needs while it boots inside the Worker, which deadlocks the boot
+(`import(dotnet.js)` resolves but `create()` never settles), bricking the studio with "connection
+failed". Two safety nets back this up: a per-boot **watchdog** (`bootWatchdog.ts`) turns a silent hang
+into an explicit `boot-failure`, and `loadWasmApi()` **falls back to a main-thread boot** (the
+pre-worker path) if the worker boot fails — so a worker-boot regression degrades the UI, it doesn't
+kill it. `getWasmBootMode()` reports which path won. The `npm run test:browser` smoke-test
+(`scripts/smoke-boot.mjs`) boots the built studio in headless Chromium and gates the deploy on the
+worker actually reaching `ready` and a compiler call round-tripping.
 
 ## How it works
 
@@ -16,6 +45,14 @@ brokered over stdio by the Rust host.
   standard `initialize` → `initialized` → `didOpen` / `didChange` handshake, routes
   `textDocument/publishDiagnostics` into CodeMirror's lint state, and issues the custom
   `koine/emitPreview` request for the preview pane.
+- The list of **emit targets** the IDE offers (the output-language picker, the Generate-project
+  wizard, the Generated-tab labels and the assistant's compile tool) is **derived from the backend**:
+  at boot the client issues `koine/emitTargets`, which returns the compiler emitter registry's
+  targets as `{ id, displayName, fileExtension }`, and the front-end renders every target surface
+  from that one list (`src/shared/emitTargets.ts`). Adding an emitter target to the registry therefore
+  surfaces it in Studio with no front-end change; the built-in list is the offline fallback if the
+  query is unavailable, and syntax highlighting degrades to plain text for a target with no bundled
+  CodeMirror mode.
 
 ### Commands & events (the Rust ↔ JS contract)
 
@@ -65,14 +102,23 @@ hosts (browser/WASM and the Tauri desktop build).
 - **Domain-grounded answers.** The system prompt carries a compact **domain index** built from the
   compiled model (bounded contexts, aggregates → roots, context-map relations, and glossary
   documentation coverage), so reviews and questions see the *real* structure of the workspace, not
-  just the current file. Built best-effort from the LSP; absent for an empty/scratch model.
+  just the current file. Built best-effort from the LSP; absent for an empty model.
 - **Persisted conversations, per workspace.** Each opened folder keeps its own transcript
-  (`koine.studio.chat.<folder>`; scratch mode uses `scratch`), so a reload restores the conversation
-  and switching folders swaps to that folder's history. A **Clear conversation** button forgets it.
+  (`koine.studio.chat.<folder>`; the no-folder/default workspace falls back to the `scratch` key), so a
+  reload restores the conversation and switching folders swaps to that folder's history. A **Clear
+  conversation** button forgets it.
 - **Explain this construct.** A quick action (and the *Explain this construct* command-palette entry)
   asks for a plain-language explanation of the current selection — or the whole model when nothing is
   selected — aimed at a domain expert who doesn't code. It is explanatory, not generative: the reply
   deliberately omits the *Apply to editor* affordance.
+- **Inline completions (ghost text).** With **Settings → Assistant → AI inline completions** on (off by
+  default), Studio predicts the next line as you type and shows it as dimmed ghost text after the caret —
+  **Tab** accepts, **Esc** (or more typing) dismisses. It reuses the same provider/key/model as the chat
+  and aborts the in-flight request on every edit; it no-ops when no provider is configured and never
+  merges with the deterministic LSP completion popup. The debounce/accept/abort state machine and the
+  provider client are pure-logic (`src/editor/inlineCompletionState.ts`, `src/ai/inlineCompletionClient.ts`);
+  the CodeMirror ghost-text extension is `src/editor/inlineCompletion.ts`. See
+  [Local LLM in the Assistant → Inline completions](https://atypical-consulting.github.io/Koine/guides/assistant-local-llm/#inline-completions-ghost-text).
 
 ## Run
 
@@ -121,4 +167,29 @@ cd tooling/koine-studio && npm install && npm run build
 - `src/lsp/lsp.ts` — Tauri-IPC LSP client (JSON-RPC, debounced `didChange`, `emitPreview`).
 - `src/editor/editor.ts` — CodeMirror `.koi` editor + read-only output viewer; push-based diagnostics.
 - `src/shell/ide.tsx` — app composition (editor, status line, diagnostics strip, preview buttons).
+- `src/shell/workspaceSearch.ts` — pure find/replace core (`runSearch` / `applyReplace` /
+  `planReplacements`); `src/shell/searchController.tsx` — the `Mod`+`Shift`+`F` search panel.
 - `index.html` / `src/styles.css` — toolbar + split editor/output panes + diagnostics strip.
+
+## Canvas layout & annotations (`koine.layout.json`)
+
+The authoring canvas persists its layout per workspace in a committable **`koine.layout.json`** at the
+models-folder root (or browser storage in web/scratch mode) — see `src/diagrams/layoutStore.ts`. It is a
+**view concern only**: nothing here round-trips into `.koi` (the compiler stays the single source of truth
+for the model). The file is a versioned, minimal-diff envelope (`version: 2`):
+
+- `positions` — hand-dragged node positions, keyed by qualified name.
+- `notes` — **canvas-only annotations**: free text + position/size. Add via the palette's **Note** button;
+  double-click to edit, right-click to delete.
+- `groups` — **canvas-only annotations**: a labelled region drawn *behind* a set of nodes (by qualified
+  name). Add via the palette's **Group** button (groups the current selection, or all nodes if none is
+  selected); the rectangle is derived from the members' bounding box, so a group follows them as they move.
+
+Notes and Group are *not* `.koi` constructs (per the #148 go/no-go) — they never create a second source of
+truth. "Auto-arrange" resets node positions only; annotations are preserved.
+
+## Research notes
+
+- [`docs/mobile-wasm-spike.md`](docs/mobile-wasm-spike.md) — measurement spike ([#219](https://github.com/Atypical-Consulting/Koine/issues/219)):
+  can the in-browser WASM compiler run on a phone? Payload sizes, emulated D3/D4 baselines, a D1/D2
+  real-device runbook, and a provisional verdict.

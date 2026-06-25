@@ -3,15 +3,22 @@
 // viewer for the generated C#/TypeScript output. Adapted from the website playground;
 // the key difference is that diagnostics are PUSH-based (publishDiagnostics → setDiagnostics)
 // rather than pull-based (linter()).
-import { EditorState, Compartment, type Extension } from '@codemirror/state';
+import { EditorState, Compartment, StateEffect, type Extension, type Text } from '@codemirror/state';
 import {
+  Decoration,
+  type DecorationSet,
   EditorView,
   keymap,
   lineNumbers,
   highlightActiveLine,
   highlightActiveLineGutter,
   drawSelection,
+  rectangularSelection,
+  crosshairCursor,
   hoverTooltip,
+  ViewPlugin,
+  type ViewUpdate,
+  WidgetType,
   type Tooltip,
 } from '@codemirror/view';
 import { defaultKeymap, indentWithTab } from '@codemirror/commands';
@@ -29,31 +36,49 @@ import {
   closeBracketsKeymap,
   completeFromList,
   completionKeymap,
+  completionStatus,
   type Completion,
   type CompletionContext,
   type CompletionResult,
 } from '@codemirror/autocomplete';
 import { search, searchKeymap, highlightSelectionMatches } from '@codemirror/search';
+import { showMinimap } from '@replit/codemirror-minimap';
 import { csharp } from '@codemirror/legacy-modes/mode/clike';
 import { typescript } from '@codemirror/legacy-modes/mode/javascript';
 import { python } from '@codemirror/legacy-modes/mode/python';
+import { rust } from '@codemirror/legacy-modes/mode/rust';
 import { php } from '@codemirror/lang-php';
 import { tags as t } from '@lezer/highlight';
-import { lintGutter, setDiagnostics, type Diagnostic as CmDiagnostic } from '@codemirror/lint';
+import { lintGutter, setDiagnostics } from '@codemirror/lint';
 import type {
+  CallHierarchyIncomingCall,
+  CallHierarchyItem,
+  CallHierarchyOutgoingCall,
   CodeAction,
   CompletionItem,
   DocumentSymbol,
   HoverResult,
+  InlayHint,
   Location,
   LspDiagnostic,
   MarkedString,
   PrepareRenameResult,
   Range as LspRange,
+  SemanticTokens,
   TextEdit,
   WorkspaceEdit,
 } from '@/lsp/lsp';
 import { dismissFloating, showActionMenu, showRenameInput } from '@/editor/actions';
+import { createInlineState } from '@/editor/inlineCompletionState';
+import { inlineCompletionExtension, type EditorInlineContext } from '@/editor/inlineCompletion';
+import { requestInline } from '@/ai/inlineCompletionClient';
+import { loadSettings } from '@/settings/persistence';
+// The markdown renderer lives in ./markdown (extracted so it can be unit-tested without a CodeMirror
+// view). Re-exported below so existing importers keep resolving it from `@/editor/editor`.
+import { renderMarkdown } from '@/editor/markdown';
+// LSP↔offset converters live in ./positions (pure, tested over a CodeMirror `Text`); call them with
+// `view.state.doc`.
+import { editsToChanges, lspPosToOffset, lspToCm } from '@/editor/positions';
 
 // --- .koi token highlighter -------------------------------------------------
 
@@ -268,135 +293,9 @@ const sharedTheme = EditorView.theme({
   },
 });
 
-// --- tiny markdown renderer -------------------------------------------------
-// Shared by the hover tooltip here and the Glossary pane in ide.ts. We render only
-// the small subset of markdown the language server produces (headings, lists,
-// fenced/inline code, bold/italic, paragraphs) rather than pulling in a dependency.
-// Source is trusted (the LSP server) but still HTML-escaped before assembly.
-
-function escapeHtml(s: string): string {
-  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-}
-
-function inlineMd(text: string): string {
-  let out = text;
-  out = out.replace(/`([^`]+)`/g, (_m, c) => `<code>${c}</code>`);
-  out = out.replace(/\*\*([^*]+)\*\*/g, (_m, c) => `<strong>${c}</strong>`);
-  out = out.replace(/(^|[^*])\*([^*\n]+)\*/g, (_m, p, c) => `${p}<em>${c}</em>`);
-  out = out.replace(/(^|[^_])_([^_\n]+)_/g, (_m, p, c) => `${p}<em>${c}</em>`);
-  return out;
-}
-
-// GFM tables. The glossary emitter produces `| Field | Type | Description |` blocks, so split a row
-// into trimmed cells (honoring an escaped `\|` inside a cell) and recognise the `|---|:--:|`
-// separator row that promotes the preceding row to a header.
-function splitTableRow(line: string): string[] {
-  let s = line.trim();
-  if (s.startsWith('|')) s = s.slice(1);
-  if (s.endsWith('|')) s = s.slice(0, -1);
-  return s.split(/(?<!\\)\|/).map((c) => c.trim().replace(/\\\|/g, '|'));
-}
-
-function isTableSeparator(line: string): boolean {
-  if (!line.includes('-')) return false;
-  const cells = splitTableRow(line);
-  return cells.length > 0 && cells.every((c) => /^:?-+:?$/.test(c));
-}
-
-/** Render a small subset of markdown to an HTML string. */
-export function renderMarkdown(md: string): string {
-  const lines = escapeHtml(md.replace(/\r\n/g, '\n')).split('\n');
-  const html: string[] = [];
-  let i = 0;
-  let listOpen = false;
-  let paragraph: string[] = [];
-
-  const flushParagraph = () => {
-    if (paragraph.length) {
-      html.push(`<p>${inlineMd(paragraph.join(' '))}</p>`);
-      paragraph = [];
-    }
-  };
-  const closeList = () => {
-    if (listOpen) {
-      html.push('</ul>');
-      listOpen = false;
-    }
-  };
-
-  while (i < lines.length) {
-    const line = lines[i];
-
-    const fence = line.match(/^\s*```(.*)$/);
-    if (fence) {
-      flushParagraph();
-      closeList();
-      const body: string[] = [];
-      i++;
-      while (i < lines.length && !/^\s*```\s*$/.test(lines[i])) {
-        body.push(lines[i]);
-        i++;
-      }
-      i++; // skip closing fence
-      html.push(`<pre><code>${body.join('\n')}</code></pre>`);
-      continue;
-    }
-
-    const heading = line.match(/^(#{1,6})\s+(.*)$/);
-    if (heading) {
-      flushParagraph();
-      closeList();
-      const level = heading[1].length;
-      html.push(`<h${level}>${inlineMd(heading[2].trim())}</h${level}>`);
-      i++;
-      continue;
-    }
-
-    // GFM table: a row immediately followed by a `|---|---|` separator row.
-    if (line.includes('|') && i + 1 < lines.length && isTableSeparator(lines[i + 1])) {
-      flushParagraph();
-      closeList();
-      const headerCells = splitTableRow(line);
-      i += 2; // consume the header row + the separator row
-      const bodyRows: string[] = [];
-      while (i < lines.length && lines[i].includes('|') && lines[i].trim() !== '') {
-        const cells = splitTableRow(lines[i]);
-        bodyRows.push('<tr>' + cells.map((c) => `<td>${inlineMd(c)}</td>`).join('') + '</tr>');
-        i++;
-      }
-      const head = '<thead><tr>' + headerCells.map((c) => `<th>${inlineMd(c)}</th>`).join('') + '</tr></thead>';
-      html.push(`<table>${head}<tbody>${bodyRows.join('')}</tbody></table>`);
-      continue;
-    }
-
-    const item = line.match(/^\s*[-*+]\s+(.*)$/);
-    if (item) {
-      flushParagraph();
-      if (!listOpen) {
-        html.push('<ul>');
-        listOpen = true;
-      }
-      html.push(`<li>${inlineMd(item[1])}</li>`);
-      i++;
-      continue;
-    }
-
-    if (line.trim() === '') {
-      flushParagraph();
-      closeList();
-      i++;
-      continue;
-    }
-
-    closeList();
-    paragraph.push(line.trim());
-    i++;
-  }
-
-  flushParagraph();
-  closeList();
-  return html.join('\n');
-}
+// renderMarkdown was extracted to ./markdown (imported at the top of this file) so it can be unit-tested
+// without a CodeMirror view; re-export it so `@/editor/editor` consumers keep resolving it here.
+export { renderMarkdown };
 
 // --- hover tooltips ---------------------------------------------------------
 
@@ -452,6 +351,324 @@ function koineHoverTooltip(hover: HoverFn) {
   });
 }
 
+// --- inlay hints ------------------------------------------------------------
+
+/** Inlay-hint provider; resolves the type/parameter annotations for a 0-based range. */
+export type InlayHintsFn = (
+  startLine: number,
+  startChar: number,
+  endLine: number,
+  endChar: number,
+) => Promise<InlayHint[]>;
+
+// InlayHintKind: 1 = Type (rendered AFTER the position, like `: T`), 2 = Parameter (rendered BEFORE
+// the position, like `name:`). Anything else defaults to the Type side.
+const INLAY_KIND_PARAMETER = 2;
+
+/** Convert a CodeMirror document offset to a 0-based LSP {line, character} (pure; no view needed). */
+function posToLspPos(doc: Text, pos: number): { line: number; character: number } {
+  const lineInfo = doc.lineAt(pos);
+  return { line: lineInfo.number - 1, character: pos - lineInfo.from };
+}
+
+// Dispatched purely to make the inlay ViewPlugin re-evaluate its decorations once an async fetch
+// resolves — that resolution happens outside any transaction (mirrors inlineCompletion's redrawEffect).
+const inlayRedrawEffect = StateEffect.define<null>();
+
+/** The dimmed inline widget that paints one inlay hint. */
+class InlayWidget extends WidgetType {
+  constructor(
+    readonly label: string,
+    readonly kind: number,
+  ) {
+    super();
+  }
+  eq(other: InlayWidget): boolean {
+    return other.label === this.label && other.kind === this.kind;
+  }
+  toDOM(): HTMLElement {
+    const span = document.createElement('span');
+    span.className = 'cm-inlay-hint';
+    span.textContent = this.label;
+    return span;
+  }
+}
+
+const inlayTheme = EditorView.baseTheme({
+  '.cm-inlay-hint': {
+    color: 'var(--koi-muted)',
+    fontStyle: 'normal',
+    // A hair smaller so the annotation reads as metadata, not source.
+    fontSize: '0.92em',
+    padding: '0 1px',
+  },
+});
+
+/**
+ * Build the inlay-hint extension: a ViewPlugin that, for the visible viewport, asks the language
+ * service for type/parameter hints and renders each as a dimmed inline widget. The first paint
+ * fetches immediately; subsequent scroll/edit-driven refetches are DEBOUNCED (each fetch recompiles
+ * the whole workspace, so one-per-scroll-tick / keystroke would jank the UI thread). Between an edit
+ * and the next fetch resolving, existing widgets are mapped through the change so they track their
+ * text instead of jumping to a clamped offset. Stale async results are dropped via a per-request
+ * token (mirrors inlineCompletion's race handling).
+ */
+export function inlayHintsExtension(provider: InlayHintsFn, debounceMs = 200): Extension {
+  const plugin = ViewPlugin.fromClass(
+    class {
+      decorations: DecorationSet = Decoration.none;
+      private hints: InlayHint[] = [];
+      private seq = 0;
+      private timer: ReturnType<typeof setTimeout> | null = null;
+
+      constructor(view: EditorView) {
+        this.fetch(view); // first paint is immediate — the debounce only throttles refetches
+      }
+
+      update(u: ViewUpdate): void {
+        // Keep existing widgets attached to their text through an edit so they don't flash at a
+        // clamped offset during the debounce window before the fresh fetch lands.
+        if (u.docChanged) this.decorations = this.decorations.map(u.changes);
+        // Coalesce rapid viewport/doc changes into one debounced fetch.
+        if (u.viewportChanged || u.docChanged) this.scheduleFetch(u.view);
+        // Rebuild from the freshest hints once an async fetch resolved (it dispatched the redraw
+        // effect outside any transaction).
+        const redrawn = u.transactions.some((tr) => tr.effects.some((e) => e.is(inlayRedrawEffect)));
+        if (redrawn) this.decorations = this.build(u.view);
+      }
+
+      private scheduleFetch(view: EditorView): void {
+        if (this.timer !== null) clearTimeout(this.timer);
+        this.timer = setTimeout(() => {
+          this.timer = null;
+          this.fetch(view);
+        }, debounceMs);
+      }
+
+      /** Ask the provider for hints over the visible range; redraw when the freshest answer lands. */
+      private fetch(view: EditorView): void {
+        const token = ++this.seq;
+        const { from, to } = view.viewport;
+        const start = posToLspPos(view.state.doc, from);
+        const end = posToLspPos(view.state.doc, to);
+        void provider(start.line, start.character, end.line, end.character)
+          .then((hints) => {
+            // Ignore a stale answer (a newer fetch superseded it) or one for a destroyed plugin.
+            if (token !== this.seq) return;
+            this.hints = hints;
+            view.dispatch({ effects: inlayRedrawEffect.of(null) });
+          })
+          .catch(() => {
+            // Request failed/timed out — leave the previous hints in place rather than flashing.
+          });
+      }
+
+      private build(view: EditorView): DecorationSet {
+        const doc = view.state.doc;
+        const decos = this.hints.map((h) => {
+          const at = lspPosToOffset(doc, h.position.line, h.position.character);
+          // Parameter hints sit BEFORE the value (side -1); type hints AFTER it (side 1).
+          const side = h.kind === INLAY_KIND_PARAMETER ? -1 : 1;
+          return Decoration.widget({ widget: new InlayWidget(h.label, h.kind), side }).range(at);
+        });
+        // CodeMirror requires the decoration set sorted by `from` (then side) — `true` sorts it.
+        return Decoration.set(decos, true);
+      }
+
+      destroy(): void {
+        // Bump the token so any in-flight fetch's resolution is ignored after teardown; cancel any
+        // pending debounced fetch.
+        this.seq++;
+        if (this.timer !== null) clearTimeout(this.timer);
+      }
+    },
+    { decorations: (v) => v.decorations },
+  );
+  return [plugin, inlayTheme];
+}
+
+// --- semantic tokens --------------------------------------------------------
+
+/** Semantic-tokens provider; resolves the LSP delta-encoded int stream for the active document. */
+export type SemanticTokensFn = () => Promise<SemanticTokens>;
+
+/**
+ * The semantic-token-type legend, indexed by `tokenType` in the LSP `data` stream. This MUST stay in
+ * lock-step with `SemanticTokenProvider.TokenTypeNames` in C# (do not reorder) — the server emits the
+ * index, the editor maps it to a class here. Each name becomes the CSS class `cm-st-<name>` (themed in
+ * `semanticTokenTheme` below). An out-of-range index maps to no class (the token is simply not painted).
+ */
+export const SEMANTIC_TOKEN_TYPES = [
+  'type', // 0
+  'enum', // 1
+  'enumMember', // 2
+  'property', // 3
+  'keyword', // 4
+  'parameter', // 5
+] as const;
+
+/** The `tokenModifiers` bitset (`SemanticTokenModifier.TokenModifierNames` in C#); bit 0 = declaration. */
+const SEMANTIC_MODIFIER_DECLARATION = 1 << 0;
+
+/** One decoded semantic token, resolved to absolute CodeMirror document offsets and a CSS class. */
+export interface DecodedSemanticToken {
+  from: number;
+  to: number;
+  /** Space-separated CSS class(es): `cm-st-<type>` plus `cm-st-declaration` when the declaration bit is set. */
+  cls: string;
+}
+
+/**
+ * Decode the LSP semantic-tokens `data` stream (groups of 5 ints, delta-encoded) into absolute,
+ * offset-resolved tokens ready to become CodeMirror mark decorations. PURE — it runs on a CodeMirror
+ * `Text` (no EditorView), so it is unit-tested directly. The wire encoding (per the LSP spec):
+ *   - `data[i..i+4]` = `[deltaLine, deltaStartChar, length, tokenType, tokenModifiers]`.
+ *   - Tokens are sorted; deltaLine is relative to the previous token's line; deltaStartChar is relative
+ *     to the previous token's start column when on the SAME line, else absolute; the first token's
+ *     deltas are absolute from (0,0).
+ *   - `tokenType` indexes {@link SEMANTIC_TOKEN_TYPES}; `tokenModifiers` is a bitset (bit 0 = declaration).
+ * Tokens with an unknown type index, zero/negative length, or a position past the document are dropped
+ * (defensive — a malformed stream must never throw or paint a bogus range).
+ */
+export function decodeSemanticTokens(data: number[], doc: Text): DecodedSemanticToken[] {
+  const out: DecodedSemanticToken[] = [];
+  let line = 0;
+  let startChar = 0;
+  for (let i = 0; i + 4 < data.length; i += 5) {
+    const deltaLine = data[i];
+    const deltaStartChar = data[i + 1];
+    const length = data[i + 2];
+    const typeIndex = data[i + 3];
+    const modifiers = data[i + 4];
+
+    // Apply the deltas: a new line resets the column to the absolute deltaStartChar; same line adds it.
+    line += deltaLine;
+    startChar = deltaLine === 0 ? startChar + deltaStartChar : deltaStartChar;
+
+    const typeName = SEMANTIC_TOKEN_TYPES[typeIndex];
+    if (typeName === undefined || length <= 0) continue;
+    if (line < 0 || line >= doc.lines) continue; // past the document — drop defensively
+
+    const lineInfo = doc.line(line + 1); // doc.line() is 1-based; LSP line is 0-based
+    const from = lineInfo.from + startChar;
+    const to = from + length;
+    if (from < 0 || from > lineInfo.to) continue; // start past the line end — drop
+    const clampedTo = Math.min(to, lineInfo.to); // never run a mark past the line end
+    if (clampedTo <= from) continue;
+
+    const cls =
+      (modifiers & SEMANTIC_MODIFIER_DECLARATION) !== 0
+        ? `cm-st-${typeName} cm-st-declaration`
+        : `cm-st-${typeName}`;
+    out.push({ from, to: clampedTo, cls });
+  }
+  return out;
+}
+
+/** Build the sorted CodeMirror mark-decoration set for a decoded token stream. */
+function semanticTokensToDecorations(tokens: DecodedSemanticToken[]): DecorationSet {
+  if (tokens.length === 0) return Decoration.none;
+  const decos = tokens.map((tok) => Decoration.mark({ class: tok.cls }).range(tok.from, tok.to));
+  // CodeMirror requires the decoration set sorted by `from` — `true` sorts it.
+  return Decoration.set(decos, true);
+}
+
+// Dispatched purely to make the semantic-tokens ViewPlugin re-evaluate its decorations once an async
+// fetch resolves outside any transaction (mirrors inlayRedrawEffect / inlineCompletion's redrawEffect).
+const semanticTokensRedrawEffect = StateEffect.define<null>();
+
+// Each token-type class reuses or extends the existing `--koi-hl-*` palette so semantic highlighting
+// reads consistently with the static grammar; the new `--koi-hl-sem-*` vars (themed in
+// _dark.scss / _light.scss) keep enum / enumMember / property / parameter visually distinct from each
+// other and from value/type. `cm-st-declaration` (the only modifier) bolds the declaring occurrence.
+const semanticTokenTheme = EditorView.baseTheme({
+  '.cm-st-type': { color: 'var(--koi-hl-type)' },
+  '.cm-st-enum': { color: 'var(--koi-hl-sem-enum)' },
+  '.cm-st-enumMember': { color: 'var(--koi-hl-sem-enum-member)' },
+  '.cm-st-property': { color: 'var(--koi-hl-sem-property)' },
+  '.cm-st-keyword': { color: 'var(--koi-hl-keyword)', fontWeight: '600' },
+  '.cm-st-parameter': { color: 'var(--koi-hl-sem-parameter)', fontStyle: 'italic' },
+  '.cm-st-declaration': { fontWeight: '600' },
+});
+
+/**
+ * Build the semantic-tokens extension: a ViewPlugin that, on each (debounced) doc change, asks the
+ * language service for the document's semantic tokens, decodes the delta stream, and paints each as a
+ * mark decoration with its token-type class. The first paint fetches immediately; edit-driven refetches
+ * are DEBOUNCED (each fetch recompiles the document). When the stream is empty the plugin returns
+ * `Decoration.none`, so the static StreamLanguage grammar stays in charge — graceful degradation, never
+ * a cleared/overridden buffer. Stale async results are dropped via a per-request token (mirrors
+ * inlayHintsExtension). The redraw on resolution rides a state effect (resolution is outside any txn).
+ */
+export function semanticTokensExtension(provider: SemanticTokensFn, debounceMs = 200): Extension {
+  const plugin = ViewPlugin.fromClass(
+    class {
+      decorations: DecorationSet = Decoration.none;
+      private tokens: SemanticTokens = { data: [] };
+      private seq = 0;
+      private timer: ReturnType<typeof setTimeout> | null = null;
+
+      constructor(view: EditorView) {
+        this.fetch(view); // first paint is immediate — the debounce only throttles refetches
+      }
+
+      update(u: ViewUpdate): void {
+        // Keep existing decorations attached to their text through an edit so highlighting tracks the
+        // buffer (no flash at a clamped offset) during the debounce window before the fresh fetch lands.
+        if (u.docChanged) {
+          this.decorations = this.decorations.map(u.changes);
+          this.scheduleFetch(u.view);
+        }
+        // Rebuild from the freshest tokens once an async fetch resolved (it dispatched the redraw effect
+        // outside any transaction).
+        const redrawn = u.transactions.some((tr) =>
+          tr.effects.some((e) => e.is(semanticTokensRedrawEffect)),
+        );
+        if (redrawn) this.decorations = this.build(u.view);
+      }
+
+      private scheduleFetch(view: EditorView): void {
+        if (this.timer !== null) clearTimeout(this.timer);
+        this.timer = setTimeout(() => {
+          this.timer = null;
+          this.fetch(view);
+        }, debounceMs);
+      }
+
+      /** Ask the provider for the document's tokens; redraw when the freshest answer lands. */
+      private fetch(view: EditorView): void {
+        const token = ++this.seq;
+        void provider()
+          .then((tokens) => {
+            // Ignore a stale answer (a newer fetch superseded it) or one for a destroyed plugin.
+            if (token !== this.seq) return;
+            this.tokens = tokens ?? { data: [] };
+            view.dispatch({ effects: semanticTokensRedrawEffect.of(null) });
+          })
+          .catch(() => {
+            // Request failed/timed out — leave the previous decorations in place rather than flashing.
+          });
+      }
+
+      private build(view: EditorView): DecorationSet {
+        // An empty/absent stream decodes to [], which semanticTokensToDecorations turns into
+        // Decoration.none — so the static grammar highlighting stays authoritative (single source of
+        // truth for the empty-stream contract; no separate early return needed).
+        return semanticTokensToDecorations(decodeSemanticTokens(this.tokens?.data ?? [], view.state.doc));
+      }
+
+      destroy(): void {
+        // Bump the token so any in-flight fetch's resolution is ignored after teardown; cancel any
+        // pending debounced fetch.
+        this.seq++;
+        if (this.timer !== null) clearTimeout(this.timer);
+      }
+    },
+    { decorations: (v) => v.decorations },
+  );
+  return [plugin, semanticTokenTheme];
+}
+
 // --- editable editor --------------------------------------------------------
 
 /** Go-to-definition provider; resolves a 0-based position to a Location (or array/null). */
@@ -475,6 +692,12 @@ export type RenameFn = (line: number, character: number, newName: string) => Pro
 export type ReferencesFn = (line: number, character: number) => Promise<Location[]>;
 /** code-action provider; resolves the quickfixes + refactors for a 0-based selection range. */
 export type CodeActionsFn = (range: LspRange) => Promise<CodeAction[]>;
+/** prepareCallHierarchy provider; resolves the call-hierarchy item(s) at a 0-based position. */
+export type PrepareCallHierarchyFn = (line: number, character: number) => Promise<CallHierarchyItem[]>;
+/** incomingCalls provider; resolves the callers of a prepared item (item echoed back verbatim). */
+export type IncomingCallsFn = (item: CallHierarchyItem) => Promise<CallHierarchyIncomingCall[]>;
+/** outgoingCalls provider; resolves the callees of a prepared item (item echoed back verbatim). */
+export type OutgoingCallsFn = (item: CallHierarchyItem) => Promise<CallHierarchyOutgoingCall[]>;
 /** Applies a resolved WorkspaceEdit; ide.ts spreads the edits across its open buffers. */
 export type ApplyWorkspaceEditFn = (edit: WorkspaceEdit) => void;
 /** Navigates to a picked reference Location; ide.ts switches files if needed and jumps. */
@@ -482,12 +705,26 @@ export type NavigateLocationFn = (location: Location) => void;
 /** Maps a file:// uri to a short label for the references picker (e.g. its relPath). */
 export type UriLabelFn = (uri: string) => string;
 
+// The @replit/codemirror-minimap extension, driven by its `showMinimap` facet. `create` hands the
+// plugin the container element it mounts the overview rail into; `displayText: 'blocks'` keeps the
+// thumbnail cheap (coloured blocks rather than rendered glyphs). Built fresh each time the compartment
+// is (re)configured so toggling the minimap on installs a live extension and off installs `[]`.
+function minimapExtension(): Extension {
+  return showMinimap.of({
+    create: () => ({ dom: document.createElement('div') }),
+    displayText: 'blocks',
+    showOverlay: 'always',
+  });
+}
+
 export interface KoineEditorOptions {
   parent: HTMLElement;
   doc: string;
   onChange?: (doc: string) => void;
   /** Soft-wrap long lines on first paint (later toggled via KoineEditor.setLineWrap). */
   lineWrap?: boolean;
+  /** Show the document-overview minimap on first paint (later toggled via KoineEditor.setMinimap). */
+  minimap?: boolean;
   /** Optional LSP hover provider; when given, hover tooltips are enabled. */
   onHover?: HoverFn;
   /** Optional LSP completion provider; when given, Ctrl-Space / typing yields context-aware completions. */
@@ -512,6 +749,16 @@ export interface KoineEditorOptions {
   onCodeActions?: CodeActionsFn;
   /** Applies a WorkspaceEdit from a rename/code-action (ide.ts spreads it across buffers). */
   onApplyWorkspaceEdit?: ApplyWorkspaceEditFn;
+  /** Optional inlay-hint provider; when given, type/parameter hints render inline. */
+  onInlayHints?: InlayHintsFn;
+  /** Optional semantic-tokens provider; when given, LSP-driven highlighting paints over the grammar. */
+  onSemanticTokens?: SemanticTokensFn;
+  /** Optional prepareCallHierarchy provider; with onIncomingCalls/onOutgoingCalls, enables Mod-Alt-h. */
+  onPrepareCallHierarchy?: PrepareCallHierarchyFn;
+  /** Optional incoming-calls provider (callers of the item under the cursor). */
+  onIncomingCalls?: IncomingCallsFn;
+  /** Optional outgoing-calls provider (callees of the item under the cursor). */
+  onOutgoingCalls?: OutgoingCallsFn;
 }
 
 export interface KoineEditor {
@@ -527,43 +774,20 @@ export interface KoineEditor {
   applyEdits(edits: TextEdit[]): void;
   /** Turn editor soft-wrap on/off (reconfigures a compartment; no state loss). */
   setLineWrap(on: boolean): void;
+  /** Show/hide the document-overview minimap (reconfigures a compartment; no state loss). */
+  setMinimap(on: boolean): void;
   destroy(): void;
-}
-
-/** Map a 0-based LSP diagnostic to a CodeMirror diagnostic (offset-based). */
-function lspToCm(view: EditorView, d: LspDiagnostic): CmDiagnostic {
-  const doc = view.state.doc;
-  const clampLine0 = (l: number) => Math.min(Math.max(l, 0), doc.lines - 1); // LSP line is 0-based
-  const startLine = doc.line(clampLine0(d.range.start.line) + 1); // doc.line() is 1-based
-  const endLine = doc.line(clampLine0(d.range.end.line) + 1);
-  const from = Math.min(startLine.from + d.range.start.character, startLine.to);
-  let to = Math.min(endLine.from + d.range.end.character, endLine.to);
-  if (to <= from) to = Math.min(from + 1, doc.length);
-  return {
-    from,
-    to,
-    severity: d.severity === 2 ? 'warning' : 'error',
-    message: (d.code != null ? d.code + ': ' : '') + d.message,
-  };
 }
 
 /** Apply PUSH-based diagnostics from a publishDiagnostics notification. */
 export function setEditorDiagnostics(view: EditorView, diags: LspDiagnostic[]): void {
-  view.dispatch(setDiagnostics(view.state, diags.map((d) => lspToCm(view, d))));
-}
-
-/** Convert a 0-based LSP {line,character} to a CodeMirror document offset (clamped). */
-function lspPosToOffset(view: EditorView, line: number, character: number): number {
-  const doc = view.state.doc;
-  const ln = Math.min(Math.max(line, 0), doc.lines - 1) + 1; // doc.line() is 1-based
-  const lineInfo = doc.line(ln);
-  return Math.min(lineInfo.from + Math.max(character, 0), lineInfo.to);
+  view.dispatch(setDiagnostics(view.state, diags.map((d) => lspToCm(view.state.doc, d))));
 }
 
 /** Jump the editor to a 0-based {line,character}, selecting through to an end position. */
 function jumpToRange(view: EditorView, start: { line: number; character: number }, end: { line: number; character: number }): void {
-  const anchor = lspPosToOffset(view, start.line, start.character);
-  const head = lspPosToOffset(view, end.line, end.character);
+  const anchor = lspPosToOffset(view.state.doc, start.line, start.character);
+  const head = lspPosToOffset(view.state.doc, end.line, end.character);
   view.dispatch({ selection: { anchor, head }, scrollIntoView: true });
   view.focus();
 }
@@ -607,8 +831,8 @@ export function createKoineEditor(opts: KoineEditorOptions): KoineEditor {
       return;
     }
     if (!prep) return;
-    const anchor = lspPosToOffset(view, prep.range.start.line, prep.range.start.character);
-    const end = lspPosToOffset(view, prep.range.end.line, prep.range.end.character);
+    const anchor = lspPosToOffset(view.state.doc, prep.range.start.line, prep.range.start.character);
+    const end = lspPosToOffset(view.state.doc, prep.range.end.line, prep.range.end.character);
     const placeholder = prep.placeholder ?? view.state.sliceDoc(anchor, end);
     const renameAt = prep.range.start;
     showRenameInput(view, anchor, placeholder, (newName) => {
@@ -673,6 +897,60 @@ export function createKoineEditor(opts: KoineEditorOptions): KoineEditor {
     );
   }
 
+  // Mod-Alt-h call hierarchy: prepare the item under the cursor, then resolve its incoming + outgoing
+  // calls and present a navigable menu. Incoming rows read `← caller (owner)`; outgoing rows `→ callee`.
+  // Picking a row navigates to that item's range via onNavigateLocation (ide.ts switches files).
+  async function showCallHierarchy(pos: number): Promise<void> {
+    if (!opts.onPrepareCallHierarchy || !opts.onNavigateLocation) return;
+    if (!opts.onIncomingCalls && !opts.onOutgoingCalls) return;
+    const at = posToLsp(pos);
+    let items: CallHierarchyItem[];
+    try {
+      items = await opts.onPrepareCallHierarchy(at.line, at.character);
+    } catch {
+      return;
+    }
+    const item = items[0];
+    if (!item) {
+      showActionMenu(view, pos, [], { emptyText: 'No call hierarchy here.' });
+      return;
+    }
+
+    let incoming: CallHierarchyIncomingCall[] = [];
+    let outgoing: CallHierarchyOutgoingCall[] = [];
+    try {
+      [incoming, outgoing] = await Promise.all([
+        opts.onIncomingCalls ? opts.onIncomingCalls(item) : Promise.resolve([]),
+        opts.onOutgoingCalls ? opts.onOutgoingCalls(item) : Promise.resolve([]),
+      ]);
+    } catch {
+      return;
+    }
+
+    // One row per caller/callee. The `data` of `from`/`to` is irrelevant for navigation — we jump to
+    // the item's own uri+range — so picking a row just forwards a plain Location to onNavigateLocation.
+    const owner = (ci: CallHierarchyItem): string => {
+      const d = ci.data as { owningType?: string | null } | undefined;
+      return d?.owningType ? ` (${d.owningType})` : '';
+    };
+    const navTo = (ci: CallHierarchyItem) =>
+      opts.onNavigateLocation!({ uri: ci.uri, range: ci.range });
+
+    const rows = [
+      ...incoming.map((c) => ({
+        label: `← ${c.from.name}${owner(c.from)}`,
+        detail: `${c.from.range.start.line + 1}:${c.from.range.start.character + 1}`,
+        run: () => navTo(c.from),
+      })),
+      ...outgoing.map((c) => ({
+        label: `→ ${c.to.name}${owner(c.to)}`,
+        detail: `${c.to.range.start.line + 1}:${c.to.range.start.character + 1}`,
+        run: () => navTo(c.to),
+      })),
+    ];
+    showActionMenu(view, pos, rows, { emptyText: `No callers or callees for ${item.name}.` });
+  }
+
   // Cmd/Ctrl-click jumps to definition (only when a provider is wired).
   const definitionClick = opts.onDefinition
     ? [
@@ -735,17 +1013,55 @@ export function createKoineEditor(opts: KoineEditorOptions): KoineEditor {
         return true;
       },
     },
+    {
+      key: 'Mod-Alt-h',
+      preventDefault: true,
+      run: () => {
+        if (!opts.onPrepareCallHierarchy || !opts.onNavigateLocation) return false;
+        if (!opts.onIncomingCalls && !opts.onOutgoingCalls) return false;
+        void showCallHierarchy(view.state.selection.main.head);
+        return true;
+      },
+    },
   ]);
 
   // Soft-wrap lives in its own compartment so Settings can flip it without rebuilding the editor.
   const lineWrap = new Compartment();
+  // The minimap lives in its own compartment too (same pattern as lineWrap), so Settings can show/hide
+  // the overview rail live without losing editor state.
+  const minimap = new Compartment();
+
+  // Inline (ghost-text) AI completions (#263). The pure state machine debounces keystrokes and owns
+  // abort/staleness; the AI client (requestInline) talks to the configured provider. Both the master
+  // gate and `canSuggest` re-read live settings so the prefs toggle (default off) takes effect at once
+  // and the feature simply no-ops when off or when no provider is configured.
+  const inlineState = createInlineState<EditorInlineContext>({
+    debounceMs: 300,
+    isEnabled: () => loadSettings().aiInlineCompletions,
+    canSuggest: (ctx) => ctx.atBoundary && !ctx.hasSelection,
+    fetch: (ctx, signal) => requestInline(ctx, signal),
+  });
 
   const view = new EditorView({
     parent: opts.parent,
     state: EditorState.create({
       doc: opts.doc,
       extensions: [
+        // CodeMirror's editable surface is an ARIA textbox; give it an accessible name so screen
+        // readers (and Lighthouse's aria-input-field-name audit) announce it as the model editor.
+        EditorView.contentAttributes.of({ 'aria-label': 'Koine model source editor' }),
         lineWrap.of(opts.lineWrap ? EditorView.lineWrapping : []),
+        minimap.of(opts.minimap ? minimapExtension() : []),
+        // Multi-cursor (VS Code parity). allowMultipleSelections is the enabling switch: without it
+        // CodeMirror reduces every multi-range selection to its main range (.asSingle()), so the
+        // add-cursor commands silently collapse to one caret. The familiar bindings are ALREADY wired
+        // by the keymaps loaded below — Mod-D → selectNextOccurrence (searchKeymap), Mod-Alt-↑/↓ →
+        // addCursorAbove/Below and Escape → simplifySelection (defaultKeymap) — so enabling the facet
+        // is what makes them functional. rectangularSelection + crosshairCursor add Alt-drag column
+        // selection; drawSelection() (below) renders the extra carets.
+        EditorState.allowMultipleSelections.of(true),
+        rectangularSelection(),
+        crosshairCursor(),
         lineNumbers(),
         highlightActiveLineGutter(),
         highlightActiveLine(),
@@ -759,6 +1075,14 @@ export function createKoineEditor(opts: KoineEditorOptions): KoineEditor {
           override: [opts.onCompletion ? lspCompletionSource(opts.onCompletion) : koineCompletions],
           icons: false,
         }),
+        // Inline AI ghost-text, suppressed while the deterministic LSP popup above is open.
+        inlineCompletionExtension({
+          state: inlineState,
+          isEnabled: () => loadSettings().aiInlineCompletions,
+          lspPopupOpen: (v) => completionStatus(v.state) === 'active',
+        }),
+        // LSP inlay hints (inferred type / parameter-name annotations) over the visible viewport.
+        ...(opts.onInlayHints ? [inlayHintsExtension(opts.onInlayHints)] : []),
         extraKeys,
         keymap.of([
           ...closeBracketsKeymap,
@@ -770,6 +1094,9 @@ export function createKoineEditor(opts: KoineEditorOptions): KoineEditor {
         ...definitionClick,
         koineLanguage,
         syntaxHighlighting(koineHighlight),
+        // LSP semantic-token highlighting (paints over the static grammar; falls back to it when the
+        // server returns no tokens). After syntaxHighlighting so the mark decorations layer on top.
+        ...(opts.onSemanticTokens ? [semanticTokensExtension(opts.onSemanticTokens)] : []),
         lintGutter(),
         ...(opts.onHover ? [koineHoverTooltip(opts.onHover)] : []),
         sharedTheme,
@@ -800,19 +1127,15 @@ export function createKoineEditor(opts: KoineEditorOptions): KoineEditor {
     gotoDefinition,
     applyEdits(edits: TextEdit[]) {
       if (!edits.length) return;
-      // Convert each LSP range to offsets, then apply sorted by `from` descending so
-      // earlier edits don't shift the offsets of later ones.
-      const changes = edits
-        .map((e) => ({
-          from: lspPosToOffset(view, e.range.start.line, e.range.start.character),
-          to: lspPosToOffset(view, e.range.end.line, e.range.end.character),
-          insert: e.newText,
-        }))
-        .sort((a, b) => b.from - a.from);
-      view.dispatch({ changes });
+      // Offset conversion + the descending `from` sort (so earlier edits don't shift later offsets)
+      // live in editsToChanges — applied here as a single transaction.
+      view.dispatch({ changes: editsToChanges(view.state.doc, edits) });
     },
     setLineWrap(on: boolean) {
       view.dispatch({ effects: lineWrap.reconfigure(on ? EditorView.lineWrapping : []) });
+    },
+    setMinimap(on: boolean) {
+      view.dispatch({ effects: minimap.reconfigure(on ? minimapExtension() : []) });
     },
     destroy() {
       dismissFloating();
@@ -878,17 +1201,25 @@ export function renderSymbolTree(
 
 // --- read-only output viewer ------------------------------------------------
 
-export type OutputLang = 'csharp' | 'typescript' | 'python' | 'php' | 'plain';
+// An emit-target id (e.g. 'csharp') or 'plain' for unhighlighted text. A plain `string`, not a closed
+// union: a backend-only target the registry reports but Studio has no CodeMirror mode for still previews
+// — `langExt` degrades it to plain text rather than treating this list as a second source of truth (#282).
+export type OutputLang = string;
 
-const langExt = (lang: OutputLang): Extension => {
-  if (lang === 'csharp') return StreamLanguage.define(csharp);
-  if (lang === 'typescript') return StreamLanguage.define(typescript);
-  if (lang === 'python') return StreamLanguage.define(python);
+// The bundled CodeMirror modes, keyed by target id. This map is intentionally static (a mode must be
+// bundled per language) and is a graceful FALLBACK, not a target list: an id with no entry — including
+// 'plain' and any backend-only target — highlights as plain text.
+const LANG_MODES: Record<string, () => Extension> = {
+  csharp: () => StreamLanguage.define(csharp),
+  typescript: () => StreamLanguage.define(typescript),
+  python: () => StreamLanguage.define(python),
+  rust: () => StreamLanguage.define(rust),
   // PHP uses the Lezer-based grammar (lang-php); emitted files open with `<?php`, so the
   // default mixed-mode config highlights them correctly.
-  if (lang === 'php') return php();
-  return [];
+  php: () => php(),
 };
+
+export const langExt = (lang: OutputLang): Extension => LANG_MODES[lang]?.() ?? [];
 
 export interface OutputView {
   setContent(text: string, lang: OutputLang): void;
@@ -906,6 +1237,7 @@ export function createOutputView(parent: HTMLElement, lineWrap = false): OutputV
     state: EditorState.create({
       doc: '',
       extensions: [
+        EditorView.contentAttributes.of({ 'aria-label': 'Generated code preview (read-only)' }),
         wrap.of(lineWrap ? EditorView.lineWrapping : []),
         lineNumbers(),
         EditorState.readOnly.of(true),

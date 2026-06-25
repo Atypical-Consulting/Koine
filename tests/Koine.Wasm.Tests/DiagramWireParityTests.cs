@@ -1,7 +1,6 @@
-using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
-using Koine.Cli;
+using static Koine.Wasm.Tests.WireParityHarness;
 
 namespace Koine.Wasm.Tests;
 
@@ -26,6 +25,7 @@ public class DiagramWireParityTests
             invariant amount >= 0 "an amount cannot be negative"
           }
 
+          /// Published once an order is accepted.
           integration event OrderPlaced {
             orderId: OrderId
             total: Decimal
@@ -34,6 +34,7 @@ public class DiagramWireParityTests
           publishes OrderPlaced
 
           aggregate Order root Order {
+            /// Recorded when an order is submitted.
             event OrderSubmitted { orderId: OrderId }
 
             value OrderLine {
@@ -162,6 +163,25 @@ public class DiagramWireParityTests
     }
 
     [Fact]
+    public void Both_backends_carry_the_event_doc_for_the_when_column()
+    {
+        // Issue #170: the Events table's "When" column is sourced from node.doc — a documented event
+        // carries its `///` text identically on BOTH wires (camelCase key "doc"); the canonical-equality
+        // test guards they match, this pins the value and that it reaches the event nodes specifically.
+        foreach (var files in new[] { LspDocsFiles(), WasmDocsFiles() })
+        {
+            var domainEvent = AllNodes(files).First(n => (string?)n["kind"] == "event");
+            ((string?)domainEvent["doc"]).ShouldBe("Recorded when an order is submitted.");
+
+            var integrationEvent = AllNodes(files).First(n => (string?)n["kind"] == "integration-event");
+            ((string?)integrationEvent["doc"]).ShouldBe("Published once an order is accepted.");
+
+            // The "When" field is event-only: a non-event class node (the aggregate root) carries no doc.
+            AllNodes(files).First(n => (string?)n["kind"] == "aggregate-root")["doc"].ShouldBeNull();
+        }
+    }
+
+    [Fact]
     public void Both_backends_keep_non_class_nodes_as_simple_boxes()
     {
         // State/context/integration nodes stay simple boxes: null stereotype + empty members, identically
@@ -177,12 +197,8 @@ public class DiagramWireParityTests
     // ---- backend drivers ------------------------------------------------------
 
     /// <summary>Drives the real stdio LSP wire (<c>koine/docs</c>) and returns the <c>result.files</c> array.</summary>
-    private static JsonArray LspDocsFiles()
-    {
-        var output = RunSession(Initialize(), DidOpen(Uri, Fixture), DocsRequest(Uri));
-        var result = ResultForId(output, DocsRequestId);
-        return result!["files"]!.AsArray();
-    }
+    private static JsonArray LspDocsFiles() =>
+        LspResult(Uri, Fixture, "koine/docs", new { })!["files"]!.AsArray();
 
     /// <summary>
     /// Drives the WASM JSExport <c>Docs</c> surface (the in-browser backend) and returns its <c>files</c>
@@ -209,146 +225,4 @@ public class DiagramWireParityTests
         from diagram in file!["diagrams"]!.AsArray()
         from node in diagram!["graph"]!["nodes"]!.AsArray()
         select node!.AsObject();
-
-    /// <summary>
-    /// Canonical JSON text for deep, <b>key-order-independent</b> equality of a subtree: object keys are
-    /// sorted recursively so the comparison asserts the same fields with the same values, regardless of
-    /// the order each serializer happens to write them (the LSP dict vs. the WASM source-gen DTO).
-    /// </summary>
-    private static string Canonical(JsonNode? node) => Sort(node)?.ToJsonString() ?? "null";
-
-    private static JsonNode? Sort(JsonNode? node)
-    {
-        switch (node)
-        {
-            case JsonObject obj:
-                var sorted = new JsonObject();
-                foreach (var (key, value) in obj.OrderBy(kvp => kvp.Key, StringComparer.Ordinal))
-                {
-                    sorted[key] = Sort(value);
-                }
-
-                return sorted;
-            case JsonArray array:
-                var copy = new JsonArray();
-                foreach (var item in array)
-                {
-                    copy.Add(Sort(item));
-                }
-
-                return copy;
-            default:
-                return node?.DeepClone();
-        }
-    }
-
-    // ---- LSP wire harness (mirrors LspServerTests) ---------------------------
-
-    private const int DocsRequestId = 31;
-
-    private static byte[] RunSession(params byte[][] messages)
-    {
-        var input = new MemoryStream(messages.SelectMany(m => m).ToArray());
-        var output = new MemoryStream();
-        new LspServer(input, output).Loop();
-        return output.ToArray();
-    }
-
-    private static byte[] Frame(string json)
-    {
-        var body = Encoding.UTF8.GetBytes(json);
-        var header = Encoding.ASCII.GetBytes($"Content-Length: {body.Length}\r\n\r\n");
-        return header.Concat(body).ToArray();
-    }
-
-    private static byte[] Initialize() =>
-        Frame("{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{}}");
-
-    private static byte[] DidOpen(string uri, string text) =>
-        Frame(JsonSerializer.Serialize(new
-        {
-            jsonrpc = "2.0",
-            method = "textDocument/didOpen",
-            @params = new { textDocument = new { uri, languageId = "koine", version = 1, text } },
-        }));
-
-    private static byte[] DocsRequest(string uri) =>
-        Frame(JsonSerializer.Serialize(new
-        {
-            jsonrpc = "2.0",
-            id = DocsRequestId,
-            method = "koine/docs",
-            @params = new { textDocument = new { uri } },
-        }));
-
-    /// <summary>Parses the concatenated <c>Content-Length</c> frames and returns the <c>result</c> for one request id.</summary>
-    private static JsonObject? ResultForId(byte[] output, int id)
-    {
-        foreach (var body in Frames(output))
-        {
-            var node = JsonNode.Parse(body);
-            if (node is JsonObject obj
-                && obj.TryGetPropertyValue("id", out var idNode)
-                && idNode is not null
-                && idNode.GetValue<int>() == id
-                && obj.TryGetPropertyValue("result", out var result))
-            {
-                return result as JsonObject;
-            }
-        }
-
-        return null;
-    }
-
-    /// <summary>
-    /// Splits a concatenated LSP stdout stream into its JSON message bodies. Works on the raw bytes
-    /// because <c>Content-Length</c> is a UTF-8 BYTE count, not a char count — the diagram payload
-    /// carries multi-byte characters (the Mermaid box-drawing), so a char-indexed split would desync.
-    /// </summary>
-    private static IEnumerable<string> Frames(byte[] output)
-    {
-        var separator = "\r\n\r\n"u8.ToArray();
-        var index = 0;
-        while (index < output.Length)
-        {
-            var headerEnd = IndexOf(output, separator, index);
-            if (headerEnd < 0)
-            {
-                yield break;
-            }
-
-            var header = Encoding.ASCII.GetString(output, index, headerEnd - index);
-            var marker = header.IndexOf("Content-Length:", StringComparison.OrdinalIgnoreCase);
-            var lengthText = header[(marker + "Content-Length:".Length)..].Trim();
-            var length = int.Parse(lengthText);
-
-            var bodyStart = headerEnd + separator.Length;
-            yield return Encoding.UTF8.GetString(output, bodyStart, length);
-            index = bodyStart + length;
-        }
-    }
-
-    /// <summary>First index of <paramref name="needle"/> in <paramref name="haystack"/> at or after <paramref name="start"/>, or -1.</summary>
-    private static int IndexOf(byte[] haystack, byte[] needle, int start)
-    {
-        for (var i = start; i <= haystack.Length - needle.Length; i++)
-        {
-            var match = true;
-            for (var j = 0; j < needle.Length; j++)
-            {
-                if (haystack[i + j] != needle[j])
-                {
-                    match = false;
-                    break;
-                }
-            }
-
-            if (match)
-            {
-                return i;
-            }
-        }
-
-        return -1;
-    }
 }

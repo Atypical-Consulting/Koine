@@ -3,8 +3,9 @@ import { act, render } from '@testing-library/preact';
 import { createAppStore } from '@/store/index';
 import { UnsavedIndicator } from '@/shell/UnsavedIndicator';
 import type { Buffer } from '@/shell/workspaceController';
+import { axe } from 'vitest-axe';
 
-// Build the real 6-field Buffer (uri, path, relPath, name, text, dirty).
+// Build the real Buffer (uri, path, relPath, name, text, dirty, rootToken).
 const buf = (uri: string, dirty: boolean): Buffer => ({
   uri,
   path: uri,
@@ -12,6 +13,7 @@ const buf = (uri: string, dirty: boolean): Buffer => ({
   name: uri,
   text: '',
   dirty,
+  rootToken: '',
 });
 
 // The static index.html host the indicator drives: a <button id="unsaved-indicator" hidden>.
@@ -76,5 +78,15 @@ describe('UnsavedIndicator', () => {
 
     button.click();
     expect(onSaveAll).toHaveBeenCalledTimes(1);
+  });
+
+  test('has no accessibility violations', async () => {
+    const button = host();
+    const store = createAppStore();
+    act(() => {
+      render(<UnsavedIndicator store={store} host={button} baseTitle="Koine Studio" onSaveAll={() => {}} />);
+      store.getState().setBuffers({ a: buf('a', true), b: buf('b', true) });
+    });
+    expect(await axe(button)).toHaveNoViolations();
   });
 });

@@ -53,8 +53,8 @@ export class WasmLspTransport implements LspTransport {
   }
 
   /** Run the merged-workspace diagnostics and turn them into publishDiagnostics notifications. */
-  private diagnostics(api: KoineWasmApi): object[] {
-    const buckets = JSON.parse(api.DiagnoseWorkspace(this.filesJson())) as {
+  private async diagnostics(api: KoineWasmApi): Promise<object[]> {
+    const buckets = JSON.parse(await api.DiagnoseWorkspace(this.filesJson())) as {
       uri: string;
       diagnostics: unknown[];
     }[];
@@ -84,19 +84,19 @@ export class WasmLspTransport implements LspTransport {
 
       case 'textDocument/didOpen':
         if (uri != null) this.docs.set(uri, td.text ?? '');
-        return this.diagnostics(api);
+        return await this.diagnostics(api);
 
       case 'textDocument/didChange': {
         const changes = msg.params?.contentChanges;
         if (uri != null && Array.isArray(changes) && changes.length > 0) {
           this.docs.set(uri, changes[changes.length - 1].text ?? '');
         }
-        return this.diagnostics(api);
+        return await this.diagnostics(api);
       }
 
       case 'textDocument/didSave':
         if (uri != null && typeof msg.params?.text === 'string') this.docs.set(uri, msg.params.text);
-        return this.diagnostics(api);
+        return await this.diagnostics(api);
 
       case 'textDocument/didClose':
         if (uri != null) {
@@ -112,35 +112,35 @@ export class WasmLspTransport implements LspTransport {
         return [];
 
       case 'textDocument/hover':
-        return [result(JSON.parse(api.Hover(this.filesJson(), uri ?? '', pos?.line ?? 0, pos?.character ?? 0)))];
+        return [result(JSON.parse(await api.Hover(this.filesJson(), uri ?? '', pos?.line ?? 0, pos?.character ?? 0)))];
 
       case 'textDocument/completion':
-        return [result(JSON.parse(api.Completions(this.filesJson(), uri ?? '', pos?.line ?? 0, pos?.character ?? 0)))];
+        return [result(JSON.parse(await api.Completions(this.filesJson(), uri ?? '', pos?.line ?? 0, pos?.character ?? 0)))];
 
       case 'textDocument/definition':
-        return [result(JSON.parse(api.Definition(this.filesJson(), uri ?? '', pos?.line ?? 0, pos?.character ?? 0)))];
+        return [result(JSON.parse(await api.Definition(this.filesJson(), uri ?? '', pos?.line ?? 0, pos?.character ?? 0)))];
 
       case 'textDocument/signatureHelp':
-        return [result(JSON.parse(api.SignatureHelp(this.filesJson(), uri ?? '', pos?.line ?? 0, pos?.character ?? 0)))];
+        return [result(JSON.parse(await api.SignatureHelp(this.filesJson(), uri ?? '', pos?.line ?? 0, pos?.character ?? 0)))];
 
       case 'workspace/symbol':
-        return [result(JSON.parse(api.WorkspaceSymbols(this.filesJson(), msg.params?.query ?? '')))];
+        return [result(JSON.parse(await api.WorkspaceSymbols(this.filesJson(), msg.params?.query ?? '')))];
 
       case 'textDocument/documentSymbol':
-        return [result(JSON.parse(api.DocumentSymbols(this.docs.get(uri ?? '') ?? '')))];
+        return [result(JSON.parse(await api.DocumentSymbols(this.docs.get(uri ?? '') ?? '')))];
 
       case 'textDocument/foldingRange':
-        return [result(JSON.parse(api.FoldingRanges(this.docs.get(uri ?? '') ?? '')))];
+        return [result(JSON.parse(await api.FoldingRanges(this.docs.get(uri ?? '') ?? '')))];
 
       case 'textDocument/selectionRange': {
         const positions = JSON.stringify(msg.params?.positions ?? []);
-        return [result(JSON.parse(api.SelectionRanges(this.docs.get(uri ?? '') ?? '', positions)))];
+        return [result(JSON.parse(await api.SelectionRanges(this.docs.get(uri ?? '') ?? '', positions)))];
       }
 
       case 'textDocument/codeLens': {
         // The WASM export returns `{range, title}`; reshape to the LSP CodeLens `{range, command}`
         // so the browser host matches the stdio LSP contract the studio client consumes.
-        const lenses = JSON.parse(api.CodeLenses(this.filesJson(), uri ?? '')) as Array<{
+        const lenses = JSON.parse(await api.CodeLenses(this.filesJson(), uri ?? '')) as Array<{
           range: unknown;
           title: string | null;
         }>;
@@ -159,48 +159,69 @@ export class WasmLspTransport implements LspTransport {
         return [result(msg.params ?? null)];
 
       case 'textDocument/formatting':
-        return [result(JSON.parse(api.Format(this.docs.get(uri ?? '') ?? '')))];
+        return [result(JSON.parse(await api.Format(this.docs.get(uri ?? '') ?? '')))];
 
       case 'koine/emitPreview':
-        return [result(JSON.parse(api.EmitPreview(this.filesJson(), msg.params?.target ?? 'csharp')))];
+        return [result(JSON.parse(await api.EmitPreview(this.filesJson(), msg.params?.target ?? 'csharp')))];
+
+      case 'koine/emitTargets':
+        return [result(JSON.parse(await api.ListEmitTargets()))];
 
       case 'koine/glossary':
-        return [result(JSON.parse(api.Glossary(this.filesJson())))];
+        return [result(JSON.parse(await api.Glossary(this.filesJson())))];
 
       case 'koine/contextMap':
-        return [result(JSON.parse(api.ContextMap(this.filesJson())))];
+        return [result(JSON.parse(await api.ContextMap(this.filesJson())))];
 
       case 'koine/glossaryModel':
-        return [result(JSON.parse(api.GlossaryModel(this.filesJson())))];
+        return [result(JSON.parse(await api.GlossaryModel(this.filesJson())))];
 
       case 'koine/model':
-        return [result(JSON.parse(api.Model(this.filesJson(), msg.params?.qualifiedName ?? null)))];
+        return [result(JSON.parse(await api.Model(this.filesJson(), msg.params?.qualifiedName ?? null)))];
 
       case 'koine/modelMembers':
-        return [result(JSON.parse(api.ModelMembers(this.filesJson(), msg.params?.qualifiedName ?? '')))];
+        return [result(JSON.parse(await api.ModelMembers(this.filesJson(), msg.params?.qualifiedName ?? '')))];
 
       case 'koine/emitKoine':
-        return [result(JSON.parse(api.EmitKoine(this.filesJson(), JSON.stringify(msg.params?.edit ?? {}))))];
+        return [result(JSON.parse(await api.EmitKoine(this.filesJson(), JSON.stringify(msg.params?.edit ?? {}))))];
 
       case 'koine/applyModelEdit':
-        return [result(JSON.parse(api.ApplyModelEdit(this.filesJson(), JSON.stringify(msg.params?.edit ?? {}))))];
+        return [result(JSON.parse(await api.ApplyModelEdit(this.filesJson(), JSON.stringify(msg.params?.edit ?? {}))))];
 
       case 'koine/setDoc':
-        return [result(JSON.parse(api.SetDoc(this.filesJson(), msg.params?.id ?? '', msg.params?.text ?? '')))];
+        return [result(JSON.parse(await api.SetDoc(this.filesJson(), msg.params?.id ?? '', msg.params?.text ?? '')))];
 
       case 'koine/docs':
-        return [result(JSON.parse(api.Docs(this.filesJson())))];
+        return [result(JSON.parse(await api.Docs(this.filesJson())))];
+
+      case 'koine/runScenario':
+        return [
+          result(
+            JSON.parse(
+              await api.RunScenario(
+                this.filesJson(),
+                msg.params?.target ?? '',
+                msg.params?.operation ?? '',
+                JSON.stringify(msg.params?.given ?? {}),
+                JSON.stringify(msg.params?.args ?? {}),
+              ),
+            ),
+          ),
+        ];
+
+      case 'koine/scenarioCatalog':
+        return [result(JSON.parse(await api.ScenarioCatalog(this.filesJson())))];
 
       case 'textDocument/references':
-        return [result(JSON.parse(api.References(this.filesJson(), uri ?? '', pos?.line ?? 0, pos?.character ?? 0)))];
+        return [result(JSON.parse(await api.References(this.filesJson(), uri ?? '', pos?.line ?? 0, pos?.character ?? 0)))];
 
       case 'textDocument/prepareRename':
-        return [result(JSON.parse(api.PrepareRename(this.filesJson(), uri ?? '', pos?.line ?? 0, pos?.character ?? 0)))];
+        return [result(JSON.parse(await api.PrepareRename(this.filesJson(), uri ?? '', pos?.line ?? 0, pos?.character ?? 0)))];
 
       case 'textDocument/rename':
         return [
           result(
-            JSON.parse(api.Rename(this.filesJson(), uri ?? '', pos?.line ?? 0, pos?.character ?? 0, msg.params?.newName ?? '')),
+            JSON.parse(await api.Rename(this.filesJson(), uri ?? '', pos?.line ?? 0, pos?.character ?? 0, msg.params?.newName ?? '')),
           ),
         ];
 
@@ -210,7 +231,7 @@ export class WasmLspTransport implements LspTransport {
         return [
           result(
             JSON.parse(
-              api.CodeActions(
+              await api.CodeActions(
                 this.filesJson(),
                 uri ?? '',
                 range?.start?.line ?? 0,
@@ -224,9 +245,42 @@ export class WasmLspTransport implements LspTransport {
         ];
       }
 
+      case 'textDocument/inlayHint': {
+        const range = msg.params?.range;
+        return [
+          result(
+            JSON.parse(
+              await api.InlayHints(
+                this.filesJson(),
+                uri ?? '',
+                range?.start?.line ?? 0,
+                range?.start?.character ?? 0,
+                range?.end?.line ?? 0,
+                range?.end?.character ?? 0,
+              ),
+            ),
+          ),
+        ];
+      }
+
+      case 'textDocument/semanticTokens/full':
+        // Unlike the other handlers, the WASM SemanticTokens export takes a SINGLE source string (not
+        // filesJson) — it returns the LSP delta-encoded int stream for one .koi document. Feed it the
+        // active document's text from the open-document set.
+        return [result(JSON.parse(await api.SemanticTokens(this.docs.get(uri ?? '') ?? '')))];
+
+      case 'textDocument/prepareCallHierarchy':
+        return [result(JSON.parse(await api.PrepareCallHierarchy(this.filesJson(), uri ?? '', pos?.line ?? 0, pos?.character ?? 0)))];
+
+      case 'callHierarchy/incomingCalls':
+        return [result(JSON.parse(await api.IncomingCalls(this.filesJson(), JSON.stringify(msg.params?.item ?? {}))))];
+
+      case 'callHierarchy/outgoingCalls':
+        return [result(JSON.parse(await api.OutgoingCalls(this.filesJson(), JSON.stringify(msg.params?.item ?? {}))))];
+
       case 'koine/check': {
         const baseline = JSON.stringify(msg.params?.baselineSources ?? []);
-        return [result(JSON.parse(api.Check(this.filesJson(), baseline)))];
+        return [result(JSON.parse(await api.Check(this.filesJson(), baseline)))];
       }
 
       case 'shutdown':

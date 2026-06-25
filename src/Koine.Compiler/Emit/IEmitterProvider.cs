@@ -17,6 +17,28 @@ public interface IEmitterProvider
     string Target { get; }
 
     /// <summary>
+    /// A human-facing label for this target, e.g. <c>"C#"</c> (issue #282). Surfaced via
+    /// <see cref="EmitterRegistry.SupportedTargetInfos"/> so editors can render a friendly name.
+    /// Defaults to <see cref="Target"/> when a provider declares nothing.
+    /// </summary>
+    string DisplayName => Target;
+
+    /// <summary>
+    /// The file extension this target emits, e.g. <c>".cs"</c> (issue #282). Surfaced via
+    /// <see cref="EmitterRegistry.SupportedTargetInfos"/>. Defaults to <c>".txt"</c>.
+    /// </summary>
+    string FileExtension => ".txt";
+
+    /// <summary>
+    /// Whether this provider is a code-emit target the IDE should offer in its target list (issue
+    /// #282). Defaults to <c>true</c>; the built-in <c>glossary</c>/<c>docs</c> providers override it
+    /// to <c>false</c> — they are documentation generators, not languages a user picks to preview, so
+    /// they stay resolvable via <see cref="EmitterRegistry.SupportedTargets"/> but are excluded from
+    /// <see cref="EmitterRegistry.SupportedTargetInfos"/>.
+    /// </summary>
+    bool IsEmitTarget => true;
+
+    /// <summary>
     /// Creates the emitter for <see cref="Target"/>, mapping the neutral <paramref name="options"/>
     /// to the emitter's own option type. <see cref="EmitterOptions.Empty"/> must yield output
     /// byte-identical to a parameterless emitter.

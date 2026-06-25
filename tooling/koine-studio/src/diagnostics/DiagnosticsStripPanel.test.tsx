@@ -3,6 +3,7 @@ import { act, render } from '@testing-library/preact';
 import { createAppStore } from '@/store/index';
 import { DiagnosticsStripPanel } from '@/diagnostics/DiagnosticsStripPanel';
 import type { LspDiagnostic } from '@/lsp/lsp';
+import { axe } from 'vitest-axe';
 
 // One error diagnostic on (0-based) line 2, column 3 → the strip renders it 1-based as "error 3:4".
 const err = (msg: string): LspDiagnostic => ({
@@ -35,5 +36,15 @@ describe('DiagnosticsStripPanel', () => {
     expect(rows.length).toBe(1);
     expect(rows[0].textContent).toContain('error 3:4');
     expect(rows[0].textContent).toContain('boom');
+  });
+
+  test('has no accessibility violations', async () => {
+    const store = createAppStore();
+    store.getState().setActiveUri('file:///a.koi');
+    const { container } = render(
+      <DiagnosticsStripPanel store={store} activeUri={() => 'file:///a.koi'} onGoto={() => {}} />,
+    );
+    act(() => store.getState().setDiagnostics('file:///a.koi', [err('boom')]));
+    expect(await axe(container)).toHaveNoViolations();
   });
 });

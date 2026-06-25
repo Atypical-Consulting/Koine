@@ -7,22 +7,20 @@ namespace Koine.Compiler.Tests.Conformance;
 /// <see cref="TestSupport.CompileRust"/> plumbing — write emitted <c>.rs</c> into a temp crate and run
 /// <c>cargo check</c> — so it is ready to validate the Rust emitter as it lands. When no usable
 /// <c>cargo</c> toolchain is present (absent, or present-but-offline so crate dependencies can't be
-/// fetched) the compile is reported as INCONCLUSIVE (a notice on the test output, no assertion) rather
-/// than failing — keeping <c>dotnet test</c> green without a networked Rust toolchain. It NEVER
-/// silently passes a real error: a real error is only assertable when <c>cargo</c> is usable, and then
-/// it IS asserted. CI is expected to provide the toolchain and therefore actually run the check.
+/// fetched) the compile is funneled through <see cref="TestSupport.RequireOrSkip"/>, which reports the
+/// test as <c>Skipped</c> (not a false Passed) — keeping <c>dotnet test</c> green without a networked
+/// Rust toolchain while surfacing the gap. It NEVER silently passes a real error: a real error is only
+/// assertable when <c>cargo</c> is usable, and then it IS asserted. CI sets
+/// <c>KOINE_REQUIRE_CONFORMANCE</c> and installs the toolchain, so a missing one there is a hard
+/// <c>Failed</c> rather than a silent skip.
 /// </summary>
 public class RustConformanceTests
 {
-    private readonly ITestOutputHelper _output;
-
-    public RustConformanceTests(ITestOutputHelper output) => _output = output;
-
     private const string NoToolchainNotice =
-        "INCONCLUSIVE: no usable Rust toolchain (cargo, networked) available; compile not run. " +
+        "No usable Rust toolchain (cargo, networked) available; compile not run. " +
         "Install Rust (or set KOINE_CARGO) — CI runs this for real.";
 
-    /// <summary>A well-formed, dependency-free crate must compile (inconclusive if no toolchain).</summary>
+    /// <summary>A well-formed, dependency-free crate must compile (skipped if no toolchain).</summary>
     [Fact]
     public void Harness_accepts_well_formed_rust()
     {
@@ -32,11 +30,7 @@ public class RustConformanceTests
         };
 
         var r = TestSupport.CompileRust(files);
-        if (!r.ToolchainAvailable)
-        {
-            _output.WriteLine(NoToolchainNotice);
-            return;
-        }
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
 
         r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
     }
@@ -55,19 +49,19 @@ public class RustConformanceTests
         };
 
         var r = TestSupport.CompileRust(files);
-        if (!r.ToolchainAvailable)
-        {
-            _output.WriteLine(NoToolchainNotice);
-            return;
-        }
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
 
         r.Ok.ShouldBeFalse();
         r.Errors.ShouldNotBeEmpty();
     }
 
-    /// <summary>A missing toolchain yields an inconclusive-shaped result rather than a false pass.</summary>
+    /// <summary>
+    /// The outcome contract <see cref="TestSupport.RequireOrSkip"/> relies on: a missing toolchain
+    /// yields a <see cref="TestSupport.RustCheck.Skipped"/> result whose <c>ToolchainAvailable</c> and
+    /// <c>Ok</c> are both <c>false</c> — so it can never be mistaken for a real pass.
+    /// </summary>
     [Fact]
-    public void Missing_toolchain_is_inconclusive_not_a_false_pass()
+    public void Skipped_result_does_not_claim_success()
     {
         TestSupport.RustCheck skipped = TestSupport.RustCheck.Skipped;
         skipped.ToolchainAvailable.ShouldBeFalse();

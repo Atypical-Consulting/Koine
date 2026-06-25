@@ -25,10 +25,25 @@ namespace Koine.Compiler.Emit.Docs;
 /// The ordered display rows for a class node (attributes, methods, enum values), or <c>null</c>/empty
 /// for non-class nodes. Mirrors the Mermaid class body content (same skip-derived rule, same order).
 /// </param>
+/// <param name="Invariants">
+/// The construct's business rules as readable strings — each invariant's declared message, else its
+/// described condition (matching the narrative docs' "Business rules" list) — for value objects and
+/// entities; <c>null</c> when the node carries none. Kept on a dedicated field (NOT in
+/// <see cref="Members"/>) so the rendered Mermaid class boxes are unaffected.
+/// </param>
+/// <param name="Doc">
+/// The declaration's <c>///</c> documentation — the "when this happens" description — surfaced for
+/// EVENT nodes only (kind <c>"event"</c> / <c>"integration-event"</c>), so Koine Studio's Events table
+/// fills its "When" column (issue #170); <c>null</c> for other node kinds and for undocumented events.
+/// Read from the existing decl <see cref="Ast.KoineNode.Doc"/> — no <c>Ast/</c> change — and rides the
+/// structured graph only, leaving the rendered Mermaid/Markdown untouched.
+/// </param>
 public sealed record DiagramNode(
     string Id, string Label, string Kind, string QualifiedName, SourceSpan? Span,
     string? Stereotype = null,
-    IReadOnlyList<DiagramMember>? Members = null);
+    IReadOnlyList<DiagramMember>? Members = null,
+    IReadOnlyList<string>? Invariants = null,
+    string? Doc = null);
 
 /// <summary>
 /// One display row inside a class node's body: a formatted <see cref="Text"/> string and its

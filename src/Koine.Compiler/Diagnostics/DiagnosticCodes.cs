@@ -25,6 +25,7 @@ public enum DiagnosticCategory
     MultiFile,
     ContextMaps,
     Versioning,
+    References,
 }
 
 /// <summary>
@@ -122,6 +123,7 @@ public static class DiagnosticCodes
     public const string DuplicateInitialization = "KOI0805";
     public const string UninitializedFactoryField = "KOI0806";
     public const string ReservedFactoryParameter = "KOI0807";
+    public const string FactoryNeedsGeneratableIdentity = "KOI0808";
 
     // ---- Richer value objects (KOI0900–0999) ------------------------------
     public const string EnumMemberArity = "KOI0901";
@@ -142,6 +144,7 @@ public static class DiagnosticCodes
     public const string SpecCycle = "KOI1003";
     public const string SpecNotBoolean = "KOI1004";
     public const string DuplicateSpec = "KOI1005";
+    public const string SpecCallTargetMismatch = "KOI1006";
 
     // ---- Domain services (KOI1020–1029) -----------------------------------
     public const string ServiceReturnMismatch = "KOI1020";
@@ -211,6 +214,13 @@ public static class DiagnosticCodes
     public const string PublishedMemberRenamed = "KOI1515";
     public const string PublishedEnumMemberRemoved = "KOI1516";
     public const string PublishedEventShapeChanged = "KOI1517";
+
+    // ---- DDD reference discipline (KOI1600–1699) --------------------------
+    public const string ValueObjectReferencesEntity = "KOI1601";
+    public const string EntityReferencesForeignAggregate = "KOI1602";
+    public const string CommandParameterReferencesEntity = "KOI1603";
+    public const string DomainEventReferencesEntity = "KOI1604";
+    public const string EntityFieldReferencesMessageType = "KOI1605";
 
     // Helper: build a descriptor that carries the existing one-line description into both Title and
     // MessageFormat, so no information is lost while the richer shape is adopted incrementally.
@@ -300,6 +310,7 @@ public static class DiagnosticCodes
             [DuplicateInitialization] = D(DuplicateInitialization, "A factory initializes the same field more than once.", DiagnosticCategory.Factories, DiagnosticSeverity.Error),
             [UninitializedFactoryField] = D(UninitializedFactoryField, "A factory leaves a required field uninitialized with no default.", DiagnosticCategory.Factories, DiagnosticSeverity.Warning),
             [ReservedFactoryParameter] = D(ReservedFactoryParameter, "A factory parameter uses the reserved name 'id' (the auto-generated identity).", DiagnosticCategory.Factories, DiagnosticSeverity.Error),
+            [FactoryNeedsGeneratableIdentity] = D(FactoryNeedsGeneratableIdentity, "A `create` factory auto-generates the identity, but the entity's identity is a non-generatable (non-Guid) key.", DiagnosticCategory.Factories, DiagnosticSeverity.Error),
 
             // ---- Richer value objects ----------------------------------------
             [EnumMemberArity] = D(EnumMemberArity, "An enum member's associated-value count does not match the enum's signature.", DiagnosticCategory.ValueObjects, DiagnosticSeverity.Error),
@@ -320,6 +331,7 @@ public static class DiagnosticCodes
             [SpecCycle] = D(SpecCycle, "Specs form a reference cycle (or a spec references itself).", DiagnosticCategory.Specs, DiagnosticSeverity.Error),
             [SpecNotBoolean] = D(SpecNotBoolean, "A spec's condition is not a boolean expression.", DiagnosticCategory.Specs, DiagnosticSeverity.Error),
             [DuplicateSpec] = D(DuplicateSpec, "A spec name duplicates another spec or a member of its target type.", DiagnosticCategory.Specs, DiagnosticSeverity.Error),
+            [SpecCallTargetMismatch] = D(SpecCallTargetMismatch, "A spec is invoked as a call on a receiver whose type is not the spec's declared target.", DiagnosticCategory.Specs, DiagnosticSeverity.Error),
 
             // ---- Domain services ---------------------------------------------
             [ServiceReturnMismatch] = D(ServiceReturnMismatch, "An operation's body type is not assignable to its declared return type.", DiagnosticCategory.Services, DiagnosticSeverity.Error),
@@ -389,5 +401,12 @@ public static class DiagnosticCodes
             [PublishedMemberRenamed] = D(PublishedMemberRenamed, "A published field was renamed (a same-shape field removed and re-added under a new name).", DiagnosticCategory.Versioning, DiagnosticSeverity.Error),
             [PublishedEnumMemberRemoved] = D(PublishedEnumMemberRemoved, "A value was removed from a published enum.", DiagnosticCategory.Versioning, DiagnosticSeverity.Error),
             [PublishedEventShapeChanged] = D(PublishedEventShapeChanged, "A published integration event's payload shape changed (a field added, removed, or retyped).", DiagnosticCategory.Versioning, DiagnosticSeverity.Error),
+
+            // ---- DDD reference discipline ------------------------------------
+            [ValueObjectReferencesEntity] = D(ValueObjectReferencesEntity, "A value-object field references an entity, aggregate, or other reference type; a value object has no identity and must be composed only of primitives, enums, ID value objects, and other value objects.", DiagnosticCategory.References, DiagnosticSeverity.Error),
+            [EntityReferencesForeignAggregate] = D(EntityReferencesForeignAggregate, "An entity or aggregate field references another aggregate (or an entity in another aggregate) directly instead of by its identity.", DiagnosticCategory.References, DiagnosticSeverity.Error),
+            [CommandParameterReferencesEntity] = D(CommandParameterReferencesEntity, "A command or factory parameter is an entity or aggregate; commands carry data and identities, not entity references.", DiagnosticCategory.References, DiagnosticSeverity.Error),
+            [DomainEventReferencesEntity] = D(DomainEventReferencesEntity, "A domain-event field references an entity or aggregate; events carry data and identities, not entity references.", DiagnosticCategory.References, DiagnosticSeverity.Error),
+            [EntityFieldReferencesMessageType] = D(EntityFieldReferencesMessageType, "An entity or aggregate-root field is typed as a domain/integration event, read model, or query; an entity holds domain state (value objects, enums, ids, child entities), not events, read models, or queries.", DiagnosticCategory.References, DiagnosticSeverity.Error),
         };
 }

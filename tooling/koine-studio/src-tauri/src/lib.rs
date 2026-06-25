@@ -368,6 +368,29 @@ fn write_text_file(path: String, contents: String) -> Result<(), String> {
     std::fs::write(&path, contents).map_err(|e| format!("failed to write {path}: {e}"))
 }
 
+/// Run `git -C <dir> <args...>` and return its stdout, for the inspector's per-element change
+/// history (issue #150). The frontend builds the full `log -L <start>,<end>:<file>` argument vector
+/// (see `gitHistory.ts`), so this command is a thin, read-only exec wrapper — it refuses anything but
+/// `git log`. Failures (git not installed, `dir` is not a repository, the file is untracked) surface
+/// as `Err(String)`; the caller turns any error into a hidden "Change history" section.
+#[tauri::command]
+fn git_log_for_range(dir: String, args: Vec<String>) -> Result<String, String> {
+    // Defence in depth: only the read-only `git log` invocation the UI builds is ever permitted.
+    if args.first().map(String::as_str) != Some("log") {
+        return Err("unsupported git operation".to_string());
+    }
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(&dir)
+        .args(&args)
+        .output()
+        .map_err(|e| format!("git-unavailable: {e}"))?;
+    if !output.status.success() {
+        return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+}
+
 // --- workspace explorer tree + mutations ------------------------------------
 
 /// One node in the workspace explorer tree under an opened folder — every
@@ -675,6 +698,151 @@ fn write_bytes(path: String, contents: Vec<u8>) -> Result<(), String> {
     std::fs::write(&path, contents).map_err(|e| format!("failed to write {path}: {e}"))
 }
 
+// --- macOS Dock icon --------------------------------------------------------
+
+/// Set the application's Dock icon at runtime from the bundled PNG (macOS only).
+///
+/// A packaged `.app` gets its Dock icon from `Info.plist` / `icon.icns`, but
+/// `tauri dev` runs the bare `target/debug` executable with no bundle, so the
+/// Dock shows a generic placeholder. Calling `NSApplication.setApplicationIconImage`
+/// makes the Koine logo appear in BOTH dev and bundled runs. Must run on the main
+/// thread (Tauri's `setup` hook does), and after AppKit is initialised (it is by
+/// then). A no-op on every other platform.
+#[cfg(target_os = "macos")]
+fn set_macos_dock_icon() {
+    use objc2::{AnyThread, MainThreadMarker};
+    use objc2_app_kit::{NSApplication, NSImage};
+    use objc2_foundation::NSData;
+    use std::ffi::c_void;
+
+    // The PNG is baked into the binary so it is available with or without a bundle.
+    const ICON_PNG: &[u8] = include_bytes!("../icons/icon.png");
+
+    // `setup` runs on the main thread; bail rather than panic if that ever changes.
+    let Some(mtm) = MainThreadMarker::new() else {
+        return;
+    };
+
+    // SAFETY: ICON_PNG is a 'static, valid byte buffer; `dataWithBytes:length:`
+    // copies it, so the NSData does not alias our slice past the call.
+    let data =
+        unsafe { NSData::dataWithBytes_length(ICON_PNG.as_ptr() as *const c_void, ICON_PNG.len()) };
+
+    if let Some(image) = NSImage::initWithData(NSImage::alloc(), &data) {
+        let app = NSApplication::sharedApplication(mtm);
+        // SAFETY: `image` is a valid NSImage; this is the standard AppKit call to
+        // replace the running app's Dock/Cmd-Tab icon.
+        unsafe { app.setApplicationIconImage(Some(&image)) };
+    }
+}
+
+// --- application menu -------------------------------------------------------
+
+/// Build and install the native macOS menu bar.
+///
+/// Beyond looking native, the **Edit** submenu is functionally important: macOS
+/// routes Cmd-X/C/V/A and Cmd-Z through the menu, so without these predefined
+/// roles the CodeMirror editor (and any web `<input>`) would not receive the
+/// clipboard/undo shortcuts. The Window and Help submenus use Tauri's reserved
+/// IDs so macOS treats them as the system Window/Help menus (window list, Help
+/// search field). The two Help items are dispatched in the `on_menu_event`
+/// handler registered on the builder. macOS-only — other platforms keep Tauri's
+/// default menu, and their web views handle clipboard shortcuts natively.
+#[cfg(target_os = "macos")]
+fn build_app_menu(app: &tauri::App) -> tauri::Result<()> {
+    use tauri::menu::{
+        AboutMetadataBuilder, Menu, MenuItem, PredefinedMenuItem, Submenu, HELP_SUBMENU_ID,
+        WINDOW_SUBMENU_ID,
+    };
+
+    const APP_NAME: &str = "Koine Studio";
+
+    let about = AboutMetadataBuilder::new()
+        .version(Some(env!("CARGO_PKG_VERSION")))
+        .authors(Some(vec!["Atypical Consulting".to_string()]))
+        .comments(Some("The desktop IDE for the Koine DDD language."))
+        .copyright(Some("Copyright © 2026 Atypical Consulting"))
+        .license(Some("Apache-2.0"))
+        .website(Some("https://github.com/Atypical-Consulting/Koine"))
+        .website_label(Some("Koine on GitHub"))
+        .build();
+
+    // App menu — becomes the bold application menu on macOS.
+    let app_menu = Submenu::with_items(
+        app,
+        APP_NAME,
+        true,
+        &[
+            &PredefinedMenuItem::about(app, Some(&format!("About {APP_NAME}")), Some(about))?,
+            &PredefinedMenuItem::separator(app)?,
+            &PredefinedMenuItem::services(app, None)?,
+            &PredefinedMenuItem::separator(app)?,
+            &PredefinedMenuItem::hide(app, Some(&format!("Hide {APP_NAME}")))?,
+            &PredefinedMenuItem::hide_others(app, None)?,
+            &PredefinedMenuItem::show_all(app, None)?,
+            &PredefinedMenuItem::separator(app)?,
+            &PredefinedMenuItem::quit(app, Some(&format!("Quit {APP_NAME}")))?,
+        ],
+    )?;
+
+    // Edit menu — predefined roles wire native clipboard/undo into the editor.
+    let edit_menu = Submenu::with_items(
+        app,
+        "Edit",
+        true,
+        &[
+            &PredefinedMenuItem::undo(app, None)?,
+            &PredefinedMenuItem::redo(app, None)?,
+            &PredefinedMenuItem::separator(app)?,
+            &PredefinedMenuItem::cut(app, None)?,
+            &PredefinedMenuItem::copy(app, None)?,
+            &PredefinedMenuItem::paste(app, None)?,
+            &PredefinedMenuItem::select_all(app, None)?,
+        ],
+    )?;
+
+    // View menu.
+    let view_menu = Submenu::with_items(
+        app,
+        "View",
+        true,
+        &[&PredefinedMenuItem::fullscreen(app, None)?],
+    )?;
+
+    // Window menu — the reserved ID lets macOS add its standard window commands.
+    let window_menu = Submenu::with_id_and_items(
+        app,
+        WINDOW_SUBMENU_ID,
+        "Window",
+        true,
+        &[
+            &PredefinedMenuItem::minimize(app, None)?,
+            &PredefinedMenuItem::maximize(app, None)?,
+            &PredefinedMenuItem::separator(app)?,
+            &PredefinedMenuItem::close_window(app, None)?,
+        ],
+    )?;
+
+    // Help menu — the reserved ID gives macOS its Help search field.
+    let help_menu = Submenu::with_id_and_items(
+        app,
+        HELP_SUBMENU_ID,
+        "Help",
+        true,
+        &[
+            &MenuItem::with_id(app, "help-docs", "Koine Documentation", true, None::<&str>)?,
+            &MenuItem::with_id(app, "help-repo", "GitHub Repository", true, None::<&str>)?,
+        ],
+    )?;
+
+    let menu = Menu::with_items(
+        app,
+        &[&app_menu, &edit_menu, &view_menu, &window_menu, &help_menu],
+    )?;
+    app.set_menu(menu)?;
+    Ok(())
+}
+
 // --- tauri commands ---------------------------------------------------------
 
 #[tauri::command]
@@ -817,6 +985,34 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .manage(LspState::default())
         .manage(McpState::default())
+        .setup(|app| {
+            // Make the Koine logo show in the macOS Dock even under `tauri dev`
+            // (an unbundled run has no Info.plist/icns to source it from).
+            #[cfg(target_os = "macos")]
+            {
+                set_macos_dock_icon();
+                build_app_menu(app)?;
+            }
+            let _ = app;
+            Ok(())
+        })
+        // Open the Help-menu links in the user's browser. Other menu items use
+        // predefined native roles and need no handling here.
+        .on_menu_event(|_app, event| match event.id().as_ref() {
+            "help-docs" => {
+                let _ = tauri_plugin_opener::open_url(
+                    "https://atypical-consulting.github.io/Koine/",
+                    None::<&str>,
+                );
+            }
+            "help-repo" => {
+                let _ = tauri_plugin_opener::open_url(
+                    "https://github.com/Atypical-Consulting/Koine",
+                    None::<&str>,
+                );
+            }
+            _ => {}
+        })
         .invoke_handler(tauri::generate_handler![
             lsp_start,
             lsp_send,
@@ -827,6 +1023,7 @@ pub fn run() {
             list_koi_files,
             read_text_file,
             write_text_file,
+            git_log_for_range,
             write_bytes,
             list_entries,
             list_dir,

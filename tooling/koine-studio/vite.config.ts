@@ -8,6 +8,10 @@ import {
   generate as generateTemplates,
   resolveTemplatesDir,
 } from "./scripts/generate-templates.mjs";
+// Dev-only plugin: serve `/koine-wasm/**` `?import` requests as raw assets so the browser WASM host's
+// dynamic import of the published dotnet.js loader (a /public asset) doesn't trip Vite's transform
+// middleware and pop the error overlay under the dev server (issue #384).
+import { koineWasmDevPlugin } from "./src/dev/koineWasmDevMiddleware";
 
 // @ts-expect-error process is a nodejs global
 const host = process.env.TAURI_DEV_HOST;
@@ -59,7 +63,7 @@ function templateManifestPlugin(): Plugin {
 export default defineConfig(({ mode }) => {
   const web = mode === "web";
   return {
-    plugins: [templateManifestPlugin()],
+    plugins: [templateManifestPlugin(), koineWasmDevPlugin()],
 
     // Alias React's runtime to Preact's compat layer so the `zustand` React hook (`useStore`) and
     // any React-shaped deps resolve to Preact. Vanilla Zustand (`zustand/vanilla`) needs none of this;
@@ -80,13 +84,14 @@ export default defineConfig(({ mode }) => {
     // from the Tauri `app_version` command instead).
     define: { __APP_VERSION__: JSON.stringify(pkg.version) },
 
-    // Pre-bundle the diagram tab's heavy, lazily-imported engines at server startup. Both are only
-    // `import()`-ed the first time the Diagram tab renders (see src/diagrams.ts / diagrams-svg.ts);
-    // without this, Vite discovers them lazily, re-runs its dep optimizer mid-session, bumps the
-    // optimized-deps hash, and the in-flight dynamic import 404s with "Failed to fetch dynamically
-    // imported module". Pre-including them keeps the hash stable so the tab loads first try.
+    // Pre-bundle the diagram tab's heavy, lazily-imported engines at server startup. They are only
+    // `import()`-ed the first time a diagram renders (maxGraph for the domain canvas — see
+    // src/diagrams/diagrams-maxgraph.ts; mermaid for the context-map). Without this, Vite discovers
+    // them lazily, re-runs its dep optimizer mid-session, bumps the optimized-deps hash, and the
+    // in-flight dynamic import 404s with "Failed to fetch dynamically imported module". Pre-including
+    // them keeps the hash stable so the tab loads first try.
     optimizeDeps: {
-      include: ["elkjs/lib/elk.bundled.js", "mermaid"],
+      include: ["mermaid", "@maxgraph/core"],
     },
 
     // 1. prevent Vite from obscuring rust errors

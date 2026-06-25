@@ -162,6 +162,73 @@ internal static class RustNaming
     /// <summary>The escaped snake_case rendering of a Koine member/parameter name.</summary>
     public static string Field(string name) => EscapeMember(ToSnakeCase(name));
 
+    /// <summary>
+    /// Chooses the name of the Rust emitter's synthetic domain-event collector field, guaranteed not to
+    /// collide with any of <paramref name="usedNames"/> (the entity's user field/accessor/command/factory
+    /// names). Prefers the idiomatic <c>events</c>; when a user member occupies it, falls back to
+    /// <c>domain_events</c>, then numbered suffixes. The drain accessor (<c>drain_&lt;name&gt;</c>) is kept
+    /// collision-free too, so both the field and its accessors stay unique. Routing every synthetic-field
+    /// reference through this keeps the C#-safe model (<c>events</c> never collides with C#'s
+    /// <c>_domainEvents</c>) compiling for Rust as well, without leaking the concern out of the emitter.
+    /// </summary>
+    public static string SyntheticEventsField(IEnumerable<string> usedNames)
+    {
+        var used = new HashSet<string>(usedNames, StringComparer.Ordinal);
+        if (IsFree("events", used))
+        {
+            return "events";
+        }
+
+        if (IsFree("domain_events", used))
+        {
+            return "domain_events";
+        }
+
+        for (var i = 2; ; i++)
+        {
+            var candidate = "domain_events_" + i;
+            if (IsFree(candidate, used))
+            {
+                return candidate;
+            }
+        }
+    }
+
+    /// <summary>A synthetic field name is free when neither it nor its <c>drain_</c> accessor collides.</summary>
+    private static bool IsFree(string name, HashSet<string> used) =>
+        !used.Contains(name) && !used.Contains("drain_" + name);
+
+    /// <summary>
+    /// Maps an enum's members (in declaration order) to DISTINCT Rust binding names for the
+    /// smart-enum <c>match_</c>/<c>switch</c> closure parameters. Each binding is the member's
+    /// <see cref="Field"/> form; when two members collapse to the same snake_case identifier —
+    /// e.g. <c>userID</c> and <c>userId</c> both snake_case to <c>user_id</c> — the later ones get a
+    /// deterministic <c>_2</c>, <c>_3</c>, … suffix so every binding is a distinct, compiling Rust
+    /// identifier (a bare <c>match</c> over them would otherwise bind the same name twice — invalid
+    /// Rust). The first occurrence keeps the idiomatic un-suffixed name, so non-colliding enums are
+    /// byte-for-byte unchanged, and the suffix loop keeps incrementing past any member whose natural
+    /// snake_case already equals a disambiguated name. Suffixing happens on the pre-escape snake form
+    /// so the result stays keyword-safe (it is re-escaped via <see cref="EscapeMember"/>).
+    /// </summary>
+    public static IReadOnlyList<string> UniqueBindings(IEnumerable<string> memberNames)
+    {
+        var used = new HashSet<string>(StringComparer.Ordinal);
+        var bindings = new List<string>();
+        foreach (var name in memberNames)
+        {
+            var snake = ToSnakeCase(name);
+            var candidate = EscapeMember(snake);
+            for (var n = 2; !used.Add(candidate); n++)
+            {
+                candidate = EscapeMember(snake + "_" + n);
+            }
+
+            bindings.Add(candidate);
+        }
+
+        return bindings;
+    }
+
     private static bool IsAlreadySnakeCase(string name)
     {
         foreach (var c in name)

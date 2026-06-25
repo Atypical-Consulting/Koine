@@ -8,7 +8,7 @@
 [![Documentation](https://img.shields.io/badge/docs-koine-3245b8)](https://atypical-consulting.github.io/Koine/)
 [![.NET](https://img.shields.io/badge/.NET-10-512BD4)](https://dotnet.microsoft.com/)
 [![Tests](https://img.shields.io/badge/tests-950%2B%20passing-2ea44f)](tests/)
-![Target](https://img.shields.io/badge/emits-C%23%20%C2%B7%20TypeScript%20%C2%B7%20Python%20%C2%B7%20PHP%20%C2%B7%20Rust%20%C2%B7%20docs-178600)
+![Target](https://img.shields.io/badge/emits-C%23%20%C2%B7%20TypeScript%20%C2%B7%20Python%20%C2%B7%20PHP%20%C2%B7%20Rust%20%C2%B7%20docs%20%C2%B7%20AsyncAPI-178600)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 
 ## The problem
@@ -32,14 +32,25 @@ compile one domain model to many targets. **C# is the primary, most complete tar
 **TypeScript** emitter ships (`--target typescript`), a **Python** emitter ships (`--target python` →
 dependency-free Python 3.11+, `mypy --strict`-clean; the tactical core *and* the strategic/CQRS layer
 — read models, queries, policies, state machines, context maps/ACL), a **PHP 8.1**
-emitter ships (`--target php` → dependency-free PHP 8.1, typed properties, readonly promoted properties; Phase 1
-covers the tactical core), a **Rust** emitter ships (`--target rust` → an idiomatic crate: value
+emitter ships (`--target php` → dependency-free PHP 8.1, typed properties, readonly promoted properties;
+the tactical core *and* the strategic/CQRS layer — read models, query handler seams, application
+services/use cases/operations, specifications, policies, context-map ACL translators and
+integration-event subscriber seams), a **Rust** emitter ships (`--target rust` → an idiomatic crate: value
 objects as structs with smart constructors returning `Result<_, DomainError>`, smart enums as Rust
-`enum`s matched exhaustively, entities/aggregates with invariant-checked behaviors, events as a
-`Vec`-friendly `DomainEvent` enum, and repositories as `trait`s; depends only on `rust_decimal` for
-money and `regex` for `matches`; Phase 1 covers the tactical core), a **docs** target emits living
-documentation (`--target docs` → Markdown + Mermaid diagrams) straight from the model, and the parser
-and semantic model are kept strictly target-agnostic so further emitters can be added without touching them.
+`enum`s matched exhaustively (with `Match`/`Switch`/`from_name`/`from_value` lookups), entities and
+aggregates with invariant-checked behaviors, factories that mint identities, domain events raised into
+a `Vec`-friendly `DomainEvent` collection, query DTOs and read-model projections, and repositories as
+`trait`s; **multi-context** models compile end-to-end via `crate::<module>` qualification; depends only
+on `rust_decimal` for money and `regex` for `matches`, plus `uuid` when a model uses a factory), a
+**docs** target emits living
+documentation (`--target docs` → Markdown + Mermaid diagrams) straight from the model, an
+**AsyncAPI 3.0** target emits a single event-API document (`--target asyncapi` → channels, messages,
+JSON-Schema payloads, and send/receive operations derived from the integration-event + context-map
+graph), an **OpenAPI** target emits an API contract (`--target openapi` → a deterministic OpenAPI 3.1
+YAML document per bounded context: value objects / read models / enums become `components/schemas`,
+commands become `POST` operations and queries become `GET` operations, and static value-object
+invariants lower to JSON-Schema validation keywords), and the parser and semantic model are kept
+strictly target-agnostic so further emitters can be added without touching them.
 
 ## See it run — in your browser
 
@@ -133,6 +144,11 @@ needed for `subtotal` — nothing for you to write, and nothing external to refe
   invariants, commands, domain events, state machines, factories, specifications, services,
   policies, repositories, optimistic concurrency, the application layer (UoW, read models, CQRS),
   multi-file modules, context maps, integration events, and model versioning — all shipped.
+- **Enforced DDD reference discipline.** The compiler keeps your building blocks honest: a value
+  object can't embed an entity or aggregate, commands and domain events carry data and identities
+  rather than live references, one aggregate references another only by its id, and an entity holds
+  domain state — never an event, read model, or query — violations are hard errors
+  (`KOI1601`–`KOI1605`), not lint.
 - **A green build proves the domain.** Every construct is snapshot-tested *and* compiled and executed
   through an in-memory Roslyn meta-test, so a passing build means the generated C# is correct and
   usable — not just that it parses.
@@ -154,13 +170,21 @@ dotnet run --project src/Koine.Cli -- build templates/starters/billing/billing.k
 # Emit to TypeScript instead
 dotnet run --project src/Koine.Cli -- build templates/starters/billing/billing.koi --target typescript --out ./generated
 
+# Add the runnable, dependency-light TypeScript infrastructure layer (in-memory repositories, unit of
+# work, transactional outbox, validation/transaction behaviors, a composition-root factory)
+dotnet run --project src/Koine.Cli -- build templates/starters/billing/billing.koi --target typescript --out ./generated --layers domain,infrastructure
+
 # Or to Python (tactical core + strategic/CQRS: read models, queries, policies, state machines, ACL)
 dotnet run --project src/Koine.Cli -- build templates/starters/billing/billing.koi --target python --out ./generated_py
 
-# Or to PHP 8.1 (Phase 1: tactical core — value objects, smart enums, entities, events, repositories)
+# Add the runnable, dependency-free Python infrastructure layer (in-memory repositories, unit of work,
+# transactional outbox, validation/transaction behaviors, a provider/composition helper)
+dotnet run --project src/Koine.Cli -- build templates/starters/billing/billing.koi --target python --out ./generated_py --layers domain,infrastructure
+
+# Or to PHP 8.1 (tactical core + strategic/CQRS: read models, queries, services, policies, ACL)
 dotnet run --project src/Koine.Cli -- build templates/starters/billing/billing.koi --target php --out ./generated_php
 
-# Or to Rust (Phase 1: tactical core — an idiomatic crate; `cargo build` proves it compiles)
+# Or to Rust (multi-context + CQRS — an idiomatic crate; `cargo build` proves it compiles)
 dotnet run --project src/Koine.Cli -- build templates/starters/billing/billing.koi --target rust --out ./generated_rs
 
 # Emit the opt-in C# Application layer alongside the domain (handlers, validators, query handlers, DI)
@@ -168,6 +192,12 @@ dotnet run --project src/Koine.Cli -- build templates/starters/billing/billing.k
 
 # Generate living documentation (Markdown + Mermaid state/class/context-map diagrams)
 dotnet run --project src/Koine.Cli -- build templates/starters/billing/billing.koi --target docs --out ./docs
+
+# Emit an AsyncAPI 3.0 document from the integration-event + context-map graph
+dotnet run --project src/Koine.Cli -- build templates/pizzeria --target asyncapi --out ./events
+
+# Emit an OpenAPI 3.1 spec (one <Context>/openapi.yaml per bounded context: schemas, paths, parameters)
+dotnet run --project src/Koine.Cli -- build templates/starters/billing/billing.koi --target openapi --out ./api
 
 # Just check a model parses & validates (no output)
 dotnet run --project src/Koine.Cli -- build templates/starters/billing/billing.koi
@@ -202,11 +232,37 @@ The infrastructure is **regenerated from the model on every build**, so it can n
 from the ubiquitous language. The provider (SQL Server, Postgres, …) is supplied by the caller through
 the `Action<DbContextOptionsBuilder>`, so the emitter stays provider-agnostic. EF Core only in v1.
 
-> **Known limitation (v1):** a value-object **collection** (`list of <ValueObject>`) is mapped with EF
-> Core `OwnsMany`, but Koine exposes such collections as a read-only `IReadOnlyList<T>`. Depending on the
-> EF Core version, materializing an owned collection into a read-only navigation may need a mutable
-> backing field — review the generated `OwnsMany` mapping for aggregates that carry value-object
-> collections. Scalar (`String`/`Int`/…) collections are left to EF Core's primitive-collection convention.
+#### TypeScript & Python infrastructure (`--layers infrastructure`)
+
+The same `--layers infrastructure` selector now applies to the **TypeScript** and **Python** targets
+(issue #241), keeping the "write the ubiquitous language once, get a runnable stack" promise across all
+three primary targets. Rather than a bundled ORM, each emits a **dependency-light** realization of the
+domain contracts, per bounded context with at least one entity-rooted aggregate:
+
+- a concrete repository over an **injectable `AggregateStore`** with a zero-dependency **in-memory
+  default** (runnable in tests out of the box; swap in a persistent store to productionize) — declarative
+  finders compile to concrete lookups;
+- a concrete **unit of work** realizing the per-context contract;
+- a **transactional outbox** (`OutboxMessage` + a drainable `IntegrationEventDispatcher`) for a publishing
+  context, so the publisher stays decoupled from its subscribers;
+- **validation + transaction pipeline behaviors** (the idiomatic analogue of the C# MediatR decorators); and
+- a **composition-root factory** (TypeScript) / **provider helper** (Python) — the analogue of C#'s
+  `Add<Context>Infrastructure`.
+
+The shared primitives live once in an emitted `infrastructure-runtime.ts` / `koine_infrastructure.py`.
+The layer is **off by default**, so an unconfigured emit is byte-identical to the historical output; the
+generated TypeScript is `tsc --strict`-clean and the Python is `mypy --strict`-clean.
+
+**Every** persisted aggregate round-trips — not just collection owners. A scalar-only root, a root that
+owns a scalar value object (`OwnsOne`), a versioned aggregate, and nested value objects all insert and
+re-query correctly: each persisted root (and any value object that owns a value object) gets a private
+parameterless persistence constructor EF Core materializes through, and plain scalar properties are
+mapped explicitly so EF persists the read-only auto-property via its backing field. A value-object
+**collection** (`list of <ValueObject>`) round-trips too: it is mapped with EF Core `OwnsMany` and
+backed by a mutable private `List<T>` (exposed read-only as `IReadOnlyList<T>`), with
+`PropertyAccessMode.Field` so EF can materialize owned children into it and a single-column surrogate key
+so the rows persist on every provider. Scalar (`String`/`Int`/…) collections are left to EF Core's
+primitive-collection convention.
 
 Other CLI commands: `check` (model-versioning compatibility against a `--baseline`), `fmt` (canonical
 formatter), `init` (scaffold a project), `watch` (rebuild on change), and `lsp` (language server over
@@ -249,7 +305,7 @@ leak into the target-agnostic model.
 | Construct | Emits |
 |-----------|-------|
 | `value X { … }` | `sealed record` with get-only properties, a validating constructor, value equality |
-| `entity X identified by XId { … }` | `sealed class` with **identity-only** equality + a generated `XId` value object (Guid by default; `as natural(String\|Int)` or `as sequence` selects the strategy) |
+| `entity X identified by XId { … }` | `sealed class` with **identity-only** equality + a generated `XId` value object (Guid by default; `as natural(String\|Int)` or `as sequence` selects the strategy). A `create` factory needs the **Guid** strategy — it mints the id (`XId.New()` / `XId::generate()`), which only a Guid identity provides meaningfully; a factory on a `natural`/`sequence` id is rejected (`KOI0808`). |
 | `aggregate A root R { … }` | nested types in the `<Context>` namespace; the root `R` implements `IAggregateRoot`, and an `I<R>Repository` contract is emitted for it |
 | `aggregate A root R versioned { … }` | the root additionally gains a get-only `Version` token; `ConcurrencyConflictException` is emitted into `Koine.Runtime` |
 | `repository { operations: … ; find name(p): List<R>\|R }` | tunes the root's repository — its mutating method set plus intention-revealing async finders |
@@ -296,8 +352,6 @@ identifiers, and literals.
   a negative operand needs a space (`x < -1`, not `x<-1`).
 - **Reserved type names.** `List`, `Set`, `Map`, and `Range` are built-in generics; a user type may not
   take one of these names.
-- **Specs in service operations.** A `spec` referenced from inside a `service` operation body is not yet
-  supported.
 
 ## Architecture
 
@@ -323,10 +377,11 @@ Koine.slnx
 │   │   │   ├── CSharp/     # CSharpEmitter (primary target)
 │   │   │   ├── TypeScript/ # TypeScriptEmitter
 │   │   │   ├── Python/     # PythonEmitter (tactical core + strategic/CQRS layer)
-│   │   │   ├── Php/        # PhpEmitter (Phase 1: tactical core, PHP 8.1)
-│   │   │   ├── Rust/       # RustEmitter (Phase 1: tactical core)
+│   │   │   ├── Php/        # PhpEmitter (tactical core + strategic/CQRS layer, PHP 8.1)
+│   │   │   ├── Rust/       # RustEmitter (multi-context + CQRS read side)
 │   │   │   ├── Glossary/   # ubiquitous-language glossary
-│   │   │   └── Docs/       # living documentation (Markdown + Mermaid diagrams)
+│   │   │   ├── Docs/       # living documentation (Markdown + Mermaid diagrams)
+│   │   │   └── OpenApi/    # OpenApiEmitter (OpenAPI 3.1 spec per bounded context)
 │   │   ├── Diagnostics/    # Diagnostic
 │   │   └── Services/       # KoineCompiler (orchestrator) + LSP/tooling backend
 │   ├── Koine.Cli/          # `koine` command-line tool
@@ -340,6 +395,28 @@ The grammar is split into a separate **lexer grammar** so that `matches /regex/`
 this lets a regex literal be read as a single token without colliding with the `/` division operator.
 The single most important invariant: **no C#-specific concept lives in `Ast/`** — that is what keeps
 multiple emitters possible.
+
+### The browser bundle (AOT)
+
+`Koine.Wasm` compiles the whole compiler to WebAssembly for the
+[Playground](https://atypical-consulting.github.io/Koine/playground/) and
+[Studio](https://atypical-consulting.github.io/Koine/studio/). The **deployed** bundle is
+**AOT-compiled** (opt-in `KoineWasmAot` MSBuild property, switched on by the docs-deploy job); a bare
+`dotnet build`/`publish` and the dev inner loop stay on the fast interpreter build, so only the
+deployed/CI path pays the slower AOT publish. Measured trade-off (pizzeria template via
+`node src/Koine.Wasm/smoke-test.mjs --bench`, best/median of 10 warm runs):
+
+| Bundle | pizzeria compile (best / median) | `_framework` raw / gzip | publish (warm) |
+|---|---|---|---|
+| Interpreter (dev default) | 30 / 39 ms | 6.6 MB / 2.3 MB | ~4–10 s |
+| **AOT (deployed)** | **7 / 8 ms** | 20.3 MB / ~5.9 MB | ~24–32 s |
+
+≈5× faster per-keystroke compile for a ~3× larger (browser-cached, +3.6 MB gzipped) one-time
+download — worth it for the in-browser compiler, and the AOT-vs-interpreter lever
+[#219](https://github.com/Atypical-Consulting/Koine/issues/219) needs to pick a mobile fallback.
+`WasmStripILAfterAOT` is a no-op here (the compiler + ANTLR are rooted whole and reflect, so their IL
+metadata is retained either way). Full rationale: the comment block in `src/Koine.Wasm/Koine.Wasm.csproj`
+(issue [#327](https://github.com/Atypical-Consulting/Koine/issues/327)).
 
 ## Koine as a platform
 
@@ -485,16 +562,24 @@ as a CI gate). See the
 
 ## Status & roadmap
 
-Koine is at **v0.17.x** and has shipped through **R1–R17** of the roadmap: the full tactical *and*
-strategic DDD toolkit, three more emitter targets (**TypeScript**, **Python**, and **PHP 8.1** — the
-latter two Phase 1: tactical core) alongside C#, a **docs** target that emits living documentation
-(Markdown + Mermaid diagrams), and the editor tooling (TextMate grammar,
-`koine lsp` language server, and the `fmt` / `init` / `watch` commands). The
+Koine is at **v0.17.x** and has shipped through **R1–R18** of the roadmap: the full tactical *and*
+strategic DDD toolkit, four more emitter targets (**TypeScript**, **Python**, **PHP 8.1**, and
+**Rust**) alongside C# — **PHP** now covering the tactical core *and* the strategic/CQRS layer,
+**Rust** now covering multi-context references and the CQRS read side — a **docs** target that emits living
+documentation (Markdown + Mermaid diagrams), the editor tooling (TextMate grammar,
+`koine lsp` language server, and the `fmt` / `init` / `watch` commands), and **model-as-spec
+coverage** (`koine coverage` proves declared == emitted and doubles as a CI gate, also exposed as the
+`koine_coverage` MCP tool). The
 [feature catalogue](https://atypical-consulting.github.io/Koine/guides/feature-catalogue/) maps every
 construct to the C# it emits.
 
-**Next up:** a **Rust** emitter (errors as `Result<T,E>` rather than exceptions) to further prove the
-semantic model is truly target-agnostic. The full roadmap lives in [`USER-STORIES.md`](USER-STORIES.md).
+**Recently landed:** **Rust Phase 2**
+([#173](https://github.com/Atypical-Consulting/Koine/issues/173)) takes the Rust emitter beyond the
+tactical core to cross-context references (`crate::<module>` qualification), command returns, raised
+domain events, aggregate factories with identity generation, the `Match`/`Switch`/`Try*` smart-enum
+forms, and the CQRS read side (query DTOs + read-model projections) — so the six-context `pizzeria`
+template now compiles to Rust end-to-end. The full roadmap lives in
+[`USER-STORIES.md`](USER-STORIES.md).
 
 ## Templates
 
